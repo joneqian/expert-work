@@ -1,0 +1,228 @@
+# 03 仓库目录结构
+
+## Monorepo 布局
+
+```
+helix/
+├── README.md
+├── pyproject.toml                  # workspace root（uv / hatch）
+├── docker-compose.yml              # → deploy/docker-compose/dev.yml 的软链
+├── .pre-commit-config.yaml
+├── .github/workflows/              # CI: lint / test / image build / vendor sync check
+│
+├── deploy/
+│   ├── docker-compose/
+│   │   ├── dev.yml
+│   │   ├── prod.yml
+│   │   └── observability.yml
+│   ├── k8s/                        # M3 阶段填充
+│   │   ├── helm/helix/
+│   │   └── operator/
+│   └── images/
+│       ├── sandbox-base.Dockerfile
+│       ├── sandbox-python.Dockerfile
+│       └── sandbox-node.Dockerfile
+│
+├── packages/                       # 可复用 Python 包（workspace members）
+│   ├── helix-sdk/             # Agent 作者用：@tool、AgentContext、AgentState
+│   │   ├── pyproject.toml
+│   │   └── src/helix/sdk/
+│   │       ├── __init__.py
+│   │       ├── tool.py             # @tool 装饰器
+│   │       ├── context.py          # AgentContext, BuildContext, HookContext
+│   │       ├── state.py            # AgentState (TypedDict)
+│   │       └── middleware/         # AgentMiddleware 基类（vendor + 自建）
+│   │
+│   ├── helix-protocol/        # 跨服务 schema：proto / Pydantic
+│   │   ├── pyproject.toml
+│   │   └── src/helix/protocol/
+│   │       ├── __init__.py
+│   │       ├── agent_spec.py       # AgentSpec、AgentManifest
+│   │       ├── session.py          # SessionEvent、RunEvent
+│   │       ├── tool.py             # ToolCall、ToolResult
+│   │       └── sandbox.py          # SandboxHandle、ExecRequest
+│   │
+│   ├── helix-runtime/         # 基础设施层（vendor 自 deer-flow harness）
+│   │   ├── pyproject.toml
+│   │   └── src/helix/runtime/
+│   │       ├── event_log/          # 🔴 P0 vendor: deer-flow runtime/events/store/
+│   │       │   ├── base.py
+│   │       │   ├── db.py
+│   │       │   └── memory.py
+│   │       ├── checkpointer/       # 🔴 P0 vendor: runtime/checkpointer/
+│   │       ├── store/              # 🔴 P0 vendor: runtime/store/
+│   │       ├── stream/             # 🔴 P0 vendor: runtime/stream_bridge/
+│   │       ├── runs/               # 🔴 P0 vendor: runtime/runs/
+│   │       └── context.py          # 🔴 P0 vendor: runtime/user_context.py（改 tenant）
+│   │
+│   ├── helix-persistence/     # ORM + 多租户权限
+│   │   ├── pyproject.toml
+│   │   └── src/helix/persistence/
+│   │       ├── base.py             # 🔴 P0 vendor: persistence/base.py
+│   │       ├── engine.py           # 🔴 P0 vendor: persistence/engine.py
+│   │       ├── models/
+│   │       │   ├── thread_meta.py  # 🔴 P0 vendor + tenant 字段
+│   │       │   ├── run.py          # 🔴 P0 vendor
+│   │       │   ├── run_event.py    # 🔴 P0 vendor
+│   │       │   └── user.py
+│   │       ├── thread_meta/        # Repository pattern
+│   │       └── migrations/         # Alembic
+│   │
+│   └── helix-common/          # logger、telemetry、错误类
+│       ├── pyproject.toml
+│       └── src/helix/common/
+│           ├── logging.py
+│           ├── telemetry.py
+│           ├── errors.py
+│           └── config_loader.py
+│
+├── services/                       # 可独立部署的服务
+│   ├── control-plane/
+│   │   ├── pyproject.toml
+│   │   ├── Dockerfile
+│   │   └── src/control_plane/
+│   │       ├── api/                # FastAPI routers
+│   │       │   ├── agents.py
+│   │       │   ├── sessions.py
+│   │       │   ├── runs.py         # SSE
+│   │       │   └── admin.py
+│   │       ├── domain/             # AgentSpec、Session 应用对象
+│   │       ├── manifest/           # YAML loader + Pydantic 校验 + 静态分析
+│   │       │   ├── loader.py       # 主入口
+│   │       │   ├── jinja.py        # Jinja2 渲染
+│   │       │   ├── analyzer.py     # 静态分析 lint
+│   │       │   └── signer.py       # cosign 集成
+│   │       ├── auth/               # JWT、RBAC、租户解析
+│   │       ├── registry/           # AgentSpec 版本注册表
+│   │       └── main.py
+│   │   └── tests/
+│   │
+│   ├── orchestrator/
+│   │   ├── pyproject.toml
+│   │   ├── Dockerfile
+│   │   └── src/orchestrator/
+│   │       ├── runtime/            # Harness loop
+│   │       ├── graph_builder/      # AgentSpec → LangGraph (隔离 LangGraph 接触)
+│   │       │   ├── builder.py
+│   │       │   ├── tool_dispatcher.py
+│   │       │   └── workflow_react.py / workflow_plan_execute.py
+│   │       ├── tools/              # 内置 tools（web_search、view_image 等）
+│   │       │   └── builtins/
+│   │       ├── llm/                # provider router + fallback
+│   │       ├── memory/             # Memory store wrapper（pgvector）
+│   │       ├── middleware/         # 🟠 P1 vendor + 自建
+│   │       │   ├── error_handling.py    # vendor: tool_error_handling_middleware.py
+│   │       │   ├── memory.py            # vendor: memory_middleware.py
+│   │       │   ├── token_usage.py       # vendor: token_usage_middleware.py
+│   │       │   ├── loop_detection.py    # vendor
+│   │       │   ├── rate_limit.py        # 自建
+│   │       │   └── credential.py        # 自建（凭证解析）
+│   │       └── checkpointer/       # 用 helix-runtime/checkpointer
+│   │   └── tests/
+│   │
+│   ├── sandbox-supervisor/
+│   │   ├── pyproject.toml
+│   │   ├── Dockerfile
+│   │   └── src/sandbox_supervisor/
+│   │       ├── pool/               # warm pool, lifecycle, quota
+│   │       ├── runtime/            # docker SDK + runsc 适配
+│   │       ├── rpc/                # gRPC server
+│   │       ├── builder/            # image_build：自动构建定制镜像
+│   │       └── agent/              # 跑在 sandbox 内的 supervisor agent
+│   │   └── images/
+│   │       └── sandbox_inner_agent.py
+│   │
+│   ├── credential-proxy/
+│   │   ├── pyproject.toml
+│   │   ├── Dockerfile
+│   │   ├── envoy.yaml              # M1+ Envoy 配置
+│   │   ├── filters/                # Lua 脚本
+│   │   └── src/credential_proxy/   # M0 自研 aiohttp 版
+│   │       ├── proxy.py
+│   │       ├── vault_client.py
+│   │       └── policy.py           # secret 引用解析 + 审计
+│   │
+│   ├── mcp-gateway/
+│   │   ├── pyproject.toml
+│   │   ├── Dockerfile
+│   │   └── src/mcp_gateway/
+│   │       ├── client.py           # 🟠 P1 vendor: mcp/client.py
+│   │       ├── pool.py             # 多 server 连接池
+│   │       └── auth.py             # OAuth/API key 注入
+│   │
+│   └── admin-ui/                   # React 19 + Vite + Antd（复用现有）
+│       ├── package.json
+│       ├── Dockerfile
+│       └── src/
+│
+├── examples/
+│   └── agents/
+│       ├── code-reviewer-agent/    # 纯 YAML 示例（业务无关）
+│       │   └── manifest.yaml
+│       ├── ticket-classifier/      # Python 插槽示例（客服工单分类）
+│       │   ├── manifest.yaml
+│       │   ├── tools.py
+│       │   ├── graph.py
+│       │   └── hooks.py
+│       └── security-auditor/       # subagent 引用示例
+│           └── manifest.yaml
+├── templates/                      # 领域模板包（可选；业务按需引用）
+│   ├── dev-tools/                  # 代码 review / 测试生成 / 文档总结
+│   ├── customer-service/           # 工单分类 / 客户回复
+│   ├── medical/                    # 启用 hipaa pack + 医疗 guardrails
+│   └── hr/                         # HR 工作流
+│
+├── docs/
+│   ├── architecture/               # 本目录（架构方案）
+│   ├── research/                   # 调研附录
+│   ├── manifest-spec.md            # YAML schema 完整规范
+│   ├── sandbox-security.md         # 安全模型
+│   ├── runbook/                    # 运维 SOP
+│   └── adr/                        # Architecture Decision Records
+│
+└── tools/
+    ├── helix-cli/             # CLI：lint manifest、本地 run、debug
+    │   ├── pyproject.toml
+    │   └── src/helix_cli/
+    │       ├── lint.py
+    │       ├── run.py              # 本地 docker run，单 agent 调试
+    │       └── debug.py
+    └── perf-bench/                 # 性能基准脚本
+```
+
+---
+
+## 关键文件路径（M0 第一批要创建）
+
+| 路径 | 作用 |
+|------|------|
+| `services/control-plane/src/control_plane/manifest/loader.py` | YAML 加载/Jinja2/Pydantic 校验入口 |
+| `services/orchestrator/src/orchestrator/graph_builder/builder.py` | AgentSpec → LangGraph StateGraph 编译核心 |
+| `services/sandbox-supervisor/src/sandbox_supervisor/pool/supervisor.py` | Sandbox 池化、Docker+gVisor 调度 |
+| `services/credential-proxy/src/credential_proxy/proxy.py` | 凭证注入代理（M0 自研版）|
+| `packages/helix-sdk/src/helix/sdk/__init__.py` | `@tool`、`AgentContext`、`AgentState` 公共 SDK |
+| `packages/helix-runtime/src/helix/runtime/event_log/db.py` | event_log 实现（vendor）|
+| `packages/helix-protocol/src/helix/protocol/agent_spec.py` | AgentSpec Pydantic schema |
+| `deploy/docker-compose/dev.yml` | 单机起步全栈编排 |
+| `examples/agents/code-reviewer-agent/manifest.yaml` | 首个 manifest（业务无关黄金参考样本）|
+
+---
+
+## Vendor 文件标记规范
+
+每个从 deer-flow vendor 来的文件，头部必须有标准注释：
+
+```python
+# ============================================================
+# Adapted from bytedance/deer-flow @ <commit_sha>
+# Source: backend/packages/harness/deerflow/runtime/events/store/db.py
+# License: MIT (see vendor/deer-flow/LICENSE)
+# Modifications:
+#   - Replaced user_id contextvar with tenant_id
+#   - Extended event_type enum
+#   - Added pipeline_id for multi-stage tracking
+# Last sync: 2026-05-09
+# ============================================================
+```
+
+定期 vendor sync（季度）：检查 deer-flow 上游有无重要 bug fix，按需手工 patch。
