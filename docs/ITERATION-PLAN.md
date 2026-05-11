@@ -119,10 +119,13 @@
 - **垂直切片优先**：先做最简单的"输入→LLM→工具→输出"端到端通路，再横向加 P0
 - **每个 Stream 自带 verification**：完成后能跑可见 demo 或测试，不留账
 
-### Stream A — Foundation Runtime（~6-8 周单人）
+> **Stream 排序遵循自下而上**：每个横切关注点（cancellation / rate limit / cache / metrics / audit / TLS / 对象存储）都被设计进**首次使用它的早期 Stream**，而不是放成晚期独立 Stream。这避免"先建上层再回头补底"的大面积返工。
+
+### Stream A — Foundation Runtime（~7-9 周；含数据层 + 可观测三件套 + 网络基础）
 
 参考：[architecture/01-SYSTEM-ARCHITECTURE](./architecture/01-SYSTEM-ARCHITECTURE.md)、[architecture/06-OPEN-SOURCE-DEPS](./architecture/06-OPEN-SOURCE-DEPS.md)
 
+**数据层基础**
 - [ ] **A.1 Postgres schema**（event_log、thread_meta、checkpoint）— 落实 ADR-0002
 - [ ] **A.2 Vendor DeerFlow P0 基础设施**（~3.4K LOC，参考文档 06）：
   - event_log 表与读写路径
@@ -131,72 +134,93 @@
   - stream_bridge（last-event-id 重连 + 心跳）
   - run_manager
 - [ ] **A.3 PgBouncer + 连接池规划**（落实 P0 #29）
-- [ ] **A.4 结构化日志规范**（落实 P0 #10）— 日志字段标准 + redaction 中间层
-- [ ] **A.5 W3C Trace Context 规范**（落实 P0 #11）+ OpenTelemetry SDK 接入
-- [ ] **A.6 Health checks**（落实 P0 #22）— liveness/readiness/startup probe + 依赖健康（DB/Redis/Vault）
-- [ ] **A.7 Graceful shutdown**（落实 P0 #23）— SIGTERM、completer-in-flight、超时强制
-- [ ] **A.8 超时分层**（落实 P0 #24）— request > session > tool > LLM 级联
+- [ ] **A.4 audit_log 表**（与 event_log 分表，落实 P0 #5）— 让后续 Stream B/C 的事件从首次上线起就有审计落地
+- [ ] **A.5 对象存储抽象**（落实 P0 #16）— S3 接口；MinIO 自托管 dev；uploads / snapshots / 归档共用基底
+- [ ] **A.6 Postgres 自动备份 + WAL**（落实 P0 #17）— RPO/RTO 文档
 
-**Stream A Verification**：起 docker-compose、insert 1 条 event、shutdown 优雅完成、trace_id 在日志中可串联
+**可观测三件套**（日志 + trace + 指标必须同步建，否则后续代码 metric emit 缺失）
+- [ ] **A.7 结构化日志规范**（落实 P0 #10）— 字段标准 + redaction 中间层
+- [ ] **A.8 W3C Trace Context 规范**（落实 P0 #11）+ OpenTelemetry SDK 接入
+- [ ] **A.9 指标体系**（落实 P0 #12）— Prometheus + 业务指标 + 技术指标 schema；让 A→F 所有新代码从第一天就 emit metric
 
-### Stream B — Control Plane（~3-4 周）
+**网络与可靠性基础**
+- [ ] **A.10 全链路 TLS**（落实 P0 #9 in-transit）— Stream B 暴露 endpoint 前必须生效；mTLS 前提
+- [ ] **A.11 Health checks**（落实 P0 #22）— liveness/readiness/startup probe + 依赖健康（DB/Redis/Vault）
+- [ ] **A.12 Graceful shutdown**（落实 P0 #23）— SIGTERM、completer-in-flight、超时强制
+- [ ] **A.13 超时分层**（落实 P0 #24）— request > session > tool > LLM 级联
+
+**Stream A Verification**：起 docker-compose + insert 1 条 event + 1 条 audit_log；shutdown 优雅完成；trace_id 在日志中可串联；`/metrics` 可抓 ≥10 个核心 metric；对象存储 putObject/getObject 可调；Postgres 备份脚本恢复成功；TLS 拦截非加密连接
+
+### Stream B — Control Plane（~3-4 周；含 API 层限流 + 取消信号链）
 
 参考：[architecture/03-MONOREPO-LAYOUT](./architecture/03-MONOREPO-LAYOUT.md)、[architecture/02-AGENT-MANIFEST](./architecture/02-AGENT-MANIFEST.md)
 
 - [ ] **B.1 FastAPI 骨架** + Pydantic v2 + SQLAlchemy 2.0
-- [ ] **B.2 Manifest 加载与 Pydantic 校验**（含 `dynamic_context` 字段）
-- [ ] **B.3 Agent CRUD API**（`services/control-plane/api/agents.py`）
-- [ ] **B.4 Session CRUD API**（`services/control-plane/api/sessions.py`)
-- [ ] **B.5 Run trigger API**（`services/control-plane/api/runs.py`，先返回 fake stream）
+- [ ] **B.2 网关层限流 middleware**（落实 P0 #27 第 1 层）— per IP / per API key；与 B.1 同步装上，避免后期回炉
+- [ ] **B.3 请求取消信号链 — API 层**（落实 P0 #25 第 1 段）— FastAPI request 断开 → 生成 cancellation token；与 B.1 同步装上
+- [ ] **B.4 Manifest 加载与 Pydantic 校验**（含 `dynamic_context` 字段）
+- [ ] **B.5 Agent CRUD API**（`services/control-plane/api/agents.py`）
+- [ ] **B.6 Session CRUD API**（`services/control-plane/api/sessions.py`）
+- [ ] **B.7 Run trigger API**（`services/control-plane/api/runs.py`，先返回 fake stream）
 
-**Stream B Verification**：可通过 HTTP 创建 agent + session + 触发 run 拿到 SSE stream
+**Stream B Verification**：可通过 HTTPS 创建 agent + session + 触发 run 拿到 SSE stream；限流压测得到 429；客户端断开连接后服务端 context 在 200ms 内收到 cancellation；所有 admin 动作有 audit_log 落地（A.4）
 
-### Stream C — Auth & 多租户基础（~3-4 周）
+### Stream C — Auth & 多租户基础（~3-4 周；含业务层限流）
 
 参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §2、§7
 
 - [ ] **C.1 OIDC + JWT** 认证（落实 P0 #1）— Keycloak 本地 dev 环境
-- [ ] **C.2 mTLS 服务间认证**（落实 P0 #2）— Control Plane ↔ Orchestrator ↔ Sandbox-Supervisor
+- [ ] **C.2 mTLS 服务间认证**（落实 P0 #2）— Control Plane ↔ Orchestrator ↔ Sandbox-Supervisor（基于 A.10 全链路 TLS）
 - [ ] **C.3 API Key 管理**（落实 P0 #3）— 创建/吊销/轮换/限流
 - [ ] **C.4 会话授权完整化**（落实 P0 #4）+ Postgres RLS
 - [ ] **C.5 租户级 quota**（落实 P0 #20）— token / sandbox 实例数 / 准入控制
-- [ ] **C.6 租户级配置隔离**（落实 P0 #21）— 每租户 model key / Vault path / MCP 白名单
+- [ ] **C.6 业务层限流**（落实 P0 #27 第 2 层）— per-tenant / per-agent / per-route，由 C.5 quota 引擎驱动
+- [ ] **C.7 租户级配置隔离**（落实 P0 #21）— 每租户 model key / Vault path / MCP 白名单
 
-**Stream C Verification**：跨租户访问被 RLS 拒绝；超 quota 返回 429；mTLS 握手失败的请求被拒
+**Stream C Verification**：跨租户访问被 RLS 拒绝；超 quota 返回 429；mTLS 握手失败的请求被拒；所有 auth 事件已写入 A.4 audit_log
 
-### Stream D — Audit、PII、加密（~3 周）
+### Stream D — 高级数据保护（~2 周；建立在 A.4 audit_log + A.10 TLS 之上）
 
 参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §3、§4
 
-- [ ] **D.1 audit_log 表**（与 event_log 分表，落实 P0 #5）
-- [ ] **D.2 审计日志不可篡改**（落实 P0 #6）— append-only + WORM 备份到 S3 Object Lock
-- [ ] **D.3 PII redactor 中间件**（落实 P0 #7）— 通用 + per-tenant `pii_fields` 配置驱动
-- [ ] **D.4 数据保留策略文档 + TTL 自动清理 job**（落实 P0 #8、#19）
-- [ ] **D.5 Postgres TDE + 全链路 TLS**（落实 P0 #9）
+> A.4 audit_log 表 + A.10 全链路 TLS 已在 Stream A 完成；本 Stream 在它们之上做产品级数据保护。
 
-**Stream D Verification**：插入含 PII 数据，audit log 写入正确并被 redactor 处理；TLS 拦截非加密连接
+- [ ] **D.1 审计日志不可篡改**（落实 P0 #6）— append-only + WORM 备份到 S3 Object Lock（基于 A.5 对象存储）
+- [ ] **D.2 PII redactor 中间件**（落实 P0 #7）— 通用 + per-tenant `pii_fields` 配置驱动；接入 E.2 锚点系统的固定 anchor 位
+- [ ] **D.3 数据保留策略文档 + TTL 自动清理 job**（落实 P0 #8、#19）
+- [ ] **D.4 Postgres TDE**（落实 P0 #9 at-rest）— 数据落盘加密
 
-### Stream E — Orchestrator + 工具体系（~6-8 周）
+**Stream D Verification**：插入含 PII 数据走 Orchestrator，audit log 写入并被 redactor 处理；WORM 桶禁止 overwrite；TDE 启用后磁盘文件加密
+
+### Stream E — Orchestrator + 工具体系（~7-9 周；中间件链先建 + provider 限流缓存 + 取消传播）
 
 参考：[architecture/01-SYSTEM-ARCHITECTURE](./architecture/01-SYSTEM-ARCHITECTURE.md) §"Orchestrator"
 
+**🔴 中间件链先建**（顺序硬性要求 — 否则 prefix cache / 断路器 / Langfuse 都覆盖不到首次 LLM 调用）：
 - [ ] **E.1 LangGraph PostgresSaver 接入**
-- [ ] **E.2 ReAct mode**（先单 agent，无 sub-agent）
-- [ ] **E.3 工具：builtin** — `web_search`
-- [ ] **E.4 工具：HTTP** — 通过 Credential Proxy
-- [ ] **E.5 工具：MCP** — 单 MCP server 接入（用 Anthropic 官方 SDK）
-- [ ] **E.6 LLM Provider Fallback Chain**（参考 [architecture/00-OVERVIEW](./architecture/00-OVERVIEW.md) §"Fallback"）
-- [ ] **E.7 SSE 流式输出 + backpressure**
+- [ ] **E.2 `@Next/@Prev` 锚点系统**（~120 LOC）— 中间件链基础设施，必须先于任何 middleware
+- [ ] **E.3 `dynamic_context_middleware`**（193 LOC，**API 成本影响 10x，绝不能省**）
+- [ ] **E.4 `llm_error_handling_middleware`**（368 LOC — 断路器 + 自动重试；防开发期被 LLM 限流爆）
+- [ ] **E.5 Langfuse middleware**（落实 P0 #15）— 按 ADR-0005 接入；从首次 LLM 调用开始就有 trace
+- [ ] **D.2 PII redactor middleware 注册**（与 D 跨流；E.2 完成后即可装入链）
 
-**🔴 关键中间件**（落实 [architecture/04-ROADMAP](./architecture/04-ROADMAP.md) 中"P0 vendor 生产必备中间件"）：
-- [ ] **E.8 `dynamic_context_middleware`**（193 LOC，**API 成本影响 10x，绝不能省**）
-- [ ] **E.9 `llm_error_handling_middleware`**（368 LOC — 断路器 + 自动重试）
-- [ ] **E.10 `sandbox_audit_middleware`**（363 LOC — LLM 命令安全网）
-- [ ] **E.11 `@Next/@Prev` 锚点系统**（~120 LOC）
+**业务流程实现**
+- [ ] **E.6 ReAct mode**（先单 agent，无 sub-agent）
+- [ ] **E.7 工具：builtin** — `web_search`
+- [ ] **E.8 工具：HTTP** — 通过 F.5 Credential Proxy
+- [ ] **E.9 工具：MCP** — 单 MCP server 接入（Anthropic 官方 SDK）
+- [ ] **E.10 `sandbox_audit_middleware`**（363 LOC — LLM 命令安全网；Sandbox 工具接入时装）
 
-**Stream E Verification**：1 个 minimal agent 跑通 builtin/http/mcp 三类工具；故意触发 LLM 限流，断路器接管；故意输入 PII，redactor 工作；prefix cache 命中率 > 80%（用 Anthropic SDK 监控验证）
+**LLM 调用与流式**
+- [ ] **E.11 LLM Provider Fallback Chain**（参考 [architecture/00-OVERVIEW](./architecture/00-OVERVIEW.md) §"Fallback"）
+- [ ] **E.12 提供商层限流**（落实 P0 #27 第 3 层）— per LLM key；与 E.11 fallback 一起实现
+- [ ] **E.13 LLM response cache**（落实 P0 #28）— LangGraph 节点链路前置 lookup（精确 cache 先做）
+- [ ] **E.14 SSE 流式输出 + backpressure**
+- [ ] **E.15 请求取消的 engine 节点传播**（落实 P0 #25 第 2 段）— cancellation token 在 graph node 间传递，能中断 in-flight LLM call
 
-### Stream F — Sandbox（~4-5 周）
+**Stream E Verification**：1 个 minimal agent 跑通 builtin/http/mcp 三类工具；故意触发 LLM 限流断路器接管；故意输入 PII redactor 工作；prefix cache 命中率 > 80%；cancellation 触达 in-flight LLM call；Langfuse 上每步可见 trace
+
+### Stream F — Sandbox（~4-5 周；含 sandbox 端取消）
 
 参考：[architecture/01-SYSTEM-ARCHITECTURE](./architecture/01-SYSTEM-ARCHITECTURE.md) §"Sandbox"、[research/02-sandbox-isolation.md](./research/02-sandbox-isolation.md)
 
@@ -206,6 +230,7 @@
 - [ ] **F.4 `exec_python` tool 接入 Orchestrator**
 - [ ] **F.5 Credential Proxy aiohttp 自研版**（落实 M0 文档清单）
 - [ ] **F.6 Vault 静态拉取**（短 TTL 缓存）
+- [ ] **F.7 请求取消的 sandbox kill 信号**（落实 P0 #25 第 3 段）— 收到 cancellation token 后 SIGKILL 沙盒、回收资源
 
 **Stream F Verification**（落实 [architecture/04-ROADMAP](./architecture/04-ROADMAP.md) §"沙盒安全验证"7 条用例）：
 - [ ] 文件系统隔离测试
@@ -215,59 +240,45 @@
 - [ ] fork bomb PID limit
 - [ ] timing 测试
 - [ ] 跑 CVE-2019-5736 PoC，验证失败
+- [ ] 取消请求触发后 sandbox 在 1s 内被 kill 干净
 
-### Stream G — 可靠性、限流、缓存（~3 周）
+### Stream G — SRE + Eval + Feedback（~4 周；消费 A 的可观测数据）
 
-参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §8、§9
+参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §5、§8、§11、§12
 
-- [ ] **G.1 请求取消传播**（落实 P0 #25）— 用户取消 → orchestrator → sandbox → in-flight LLM
-- [ ] **G.2 三层限流**（落实 P0 #27）— 网关 + 业务 + provider
-- [ ] **G.3 LLM response cache**（精确 cache，落实 P0 #28 一部分）
-- [ ] **G.4 故障预案文档**（落实 P0 #26）— Postgres / Vault / Anthropic / sandbox 各 1 份 runbook
+> A.9 指标体系 + A.4 audit_log + E.5 Langfuse 已提供数据底座；本 Stream 在它们之上做产品级 SRE/Eval/Feedback。
 
-**Stream G Verification**：限流压测；取消请求被传到底；缓存命中节省 token
+- [ ] **G.1 SLO/SLI 定义文档**（落实 P0 #13）— 可用性、TTFT P95、恢复时间
+- [ ] **G.2 告警体系**（落实 P0 #14）— 飞书/PagerDuty 通道、P0/P1/P2 分级
+- [ ] **G.3 故障预案 runbook**（落实 P0 #26）— Postgres / Vault / Anthropic / sandbox 各 1 份
+- [ ] **G.4 Eval 框架**（落实 P0 #36）— promptfoo 集成（先简版）
+- [ ] **G.5 Eval 数据集管理**（落实 P0 #38）— golden / regression set 版本化
+- [ ] **G.6 用户反馈收集**（落实 P0 #37）— 👍/👎 关联 turn + trace
+- [ ] **G.7 第一版 Grafana 大盘**
+- [ ] **G.8 event_log 冷归档 pipeline**（落实 P0 #18）— 半年后归档 S3，归档后查询路径
 
-### Stream H — 对象存储 + 备份 + 归档（~2-3 周）
+**Stream G Verification**：触发已知错误 → 告警弹出；跑 eval 集 → 拿到 score；feedback 写入并能溯源到 trace；归档脚本可恢复一条历史 event
 
-参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §6
-
-- [ ] **H.1 对象存储抽象**（落实 P0 #16）— S3 接口；MinIO 自托管 dev
-- [ ] **H.2 Postgres 自动备份 + WAL**（落实 P0 #17）— RPO/RTO 文档
-- [ ] **H.3 event_log 冷归档 pipeline**（落实 P0 #18）— 半年后归档 S3，归档后查询路径
-
-### Stream I — 可观测 + Eval + Feedback（~4 周）
-
-参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §5、§11、§12
-
-- [ ] **I.1 指标体系**（落实 P0 #12）— Prometheus + 业务指标 + 技术指标
-- [ ] **I.2 SLO/SLI 定义文档**（落实 P0 #13）— 可用性、TTFT P95、恢复时间
-- [ ] **I.3 告警体系**（落实 P0 #14）— 飞书/PagerDuty 通道、P0/P1/P2 分级
-- [ ] **I.4 Agent-specific 可观测**（落实 P0 #15）— 按 ADR-0005 接 Langfuse
-- [ ] **I.5 Eval 框架**（落实 P0 #36）— promptfoo 集成（先简版）
-- [ ] **I.6 Eval 数据集管理**（落实 P0 #38）— golden / regression set 版本化
-- [ ] **I.7 用户反馈收集**（落实 P0 #37）— 👍/👎 关联 turn + trace
-- [ ] **I.8 第一版 Grafana 大盘**
-
-**Stream I Verification**：触发已知错误 → 告警弹出；跑 eval 集 → 拿到 score；feedback 写入并能溯源到 trace
-
-### Stream J — Admin UI + Dogfood 准备（~3 周）
+### Stream H — Admin UI + Dogfood 准备（~3 周）
 
 参考：[architecture/00-OVERVIEW](./architecture/00-OVERVIEW.md)、[architecture/04-ROADMAP](./architecture/04-ROADMAP.md) §"Dogfood 计划"
 
-- [ ] **J.1 React 19 + Vite + Antd 骨架**
-- [ ] **J.2 Agent 列表 + Monaco YAML 编辑器**
-- [ ] **J.3 Session 时间线（只读）**
-- [ ] **J.4 docker-compose `dev.yml` 单机一键启**
-- [ ] **J.5 Phase 0.1 选定的 dogfood 业务 manifest 编写**
-- [ ] **J.6 平行运行测试 harness**（Dify + Helix 同流量对比脚本）
+- [ ] **H.1 React 19 + Vite + Antd 骨架**
+- [ ] **H.2 Agent 列表 + Monaco YAML 编辑器**
+- [ ] **H.3 Session 时间线（只读）**
+- [ ] **H.4 docker-compose `dev.yml` 单机一键启**
+- [ ] **H.5 Phase 0.1 选定的 dogfood 业务 manifest 编写**
+- [ ] **H.6 平行运行测试 harness**（Dify + Helix 同流量对比脚本）
 
-### Stream K — 部署与发布闭环（~2 周）
+### Stream I — 部署与发布闭环（~2 周；承接 Phase 0.3 CI/CD）
 
 参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §10
 
-- [ ] **K.1 服务发布策略**（落实 P0 #32）— 蓝绿 + 金丝雀脚本
-- [ ] **K.2 服务回滚机制**（落实 P0 #33）— 一键回滚 + DB 兼容
-- [ ] **K.3 三环境部署文档**（dev / staging / prod）
+> Phase 0.3 已建立 baseline CI/CD + 三环境配置框架；本 Stream 把它生产化。
+
+- [ ] **I.1 服务发布策略**（落实 P0 #32）— 蓝绿 + 金丝雀脚本
+- [ ] **I.2 服务回滚机制**（落实 P0 #33）— 一键回滚 + DB 兼容
+- [ ] **I.3 三环境部署文档**（dev / staging / prod）
 
 ### M0 Exit Criteria（M0 → M0→M1 Gate 验证门）
 
@@ -311,18 +322,19 @@
 
 ### 工作清单
 
-#### M1-A 多租户 + Sub-Agent + Python 插槽（~6 周）
-参考：[architecture/02-AGENT-MANIFEST](./architecture/02-AGENT-MANIFEST.md) §"Python 插槽"
-- [ ] Sub-Agent YAML 声明 + LangGraph subgraph 实现
-- [ ] Python 插槽：`code.package` + `tool/graph/hook` 入口
-- [ ] tenant_id 全链路贯通深化
-- [ ] 多租户隔离自动化测试（cross-tenant 数据泄漏检测）
+> **M1 排序遵循自下而上**：先做基础设施硬化（沙盒池化、数据生命周期、凭证代理）和可观测核心，再做依赖这些底座的高阶能力（多租户深化、Sub-Agent、Python 插槽），最后是灰度/UI/dogfood。
 
-#### M1-B Sandbox 池化 + 镜像供应链（~4 周）
+#### M1-A Sandbox 池化 + 镜像供应链（~4 周）
 - [ ] Sandbox warm pool（目标 P95 < 500ms）
 - [ ] 镜像 build cache + 内部 registry
 - [ ] Trivy/Grype 扫描 CI gate（落实 P1 镜像扫描）
 - [ ] cosign 签名 manifest + image（落实 P1 supply chain）
+
+#### M1-B 数据生命周期硬化（~3 周）
+- [ ] 跨 AZ DR 演练（落实 P1 跨 AZ）
+- [ ] IaC（Terraform）描述基础设施
+- [ ] DB zero-downtime migration 规范（Alembic + expand-contract）
+- [ ] 数据归档完整 pipeline
 
 #### M1-C Credential Proxy 升级（~3 周）
 参考：[architecture/subsystems/11-credential-proxy.md](./architecture/subsystems/11-credential-proxy.md)（如有）
@@ -338,31 +350,34 @@
 - [ ] `reflection/resolvers.py`（98 LOC）
 - [ ] subagent executor + guardrails
 
-#### M1-E 灰度 + Canary + 回滚（~3 周）
-- [ ] manifest 版本灰度面板
-- [ ] 灰度过程指标自动采集
-- [ ] A/B 流量切分
-
-#### M1-F 完整可观测 + 业务大盘（~4 周）
+#### M1-E 可观测核心生产化（~2 周；紧跟 M1-B 数据层硬化）
 - [ ] OpenTelemetry / Prometheus / Grafana / Loki 全栈生产化
 - [ ] Langfuse 业务大盘
+- [ ] 成本可视化大盘（基于 token_usage_middleware）
+
+#### M1-F 多租户 + Sub-Agent + Python 插槽（~6 周；建立在 M1-A/B/C/D 硬化基础上）
+参考：[architecture/02-AGENT-MANIFEST](./architecture/02-AGENT-MANIFEST.md) §"Python 插槽"
+- [ ] Sub-Agent YAML 声明 + LangGraph subgraph 实现（依赖 M1-A warm pool）
+- [ ] Python 插槽：`code.package` + `tool/graph/hook` 入口（依赖 M1-A cosign 供应链）
+- [ ] tenant_id 全链路贯通深化（依赖 M1-C Vault dynamic）
+- [ ] 多租户隔离自动化测试（cross-tenant 数据泄漏检测）
+
+#### M1-G 灰度 + Canary + 回滚（~3 周）
+- [ ] manifest 版本灰度面板
+- [ ] 灰度过程指标自动采集（消费 M1-E 数据）
+- [ ] A/B 流量切分
+
+#### M1-H 运维可观测扩展（~2 周）
 - [ ] Runbook 库（每个 P0 告警 1 份 SOP）
 - [ ] Sentry / GlitchTip 错误追踪
 - [ ] Falco 运行时安全监控（落实 P1 Falco）
-- [ ] 成本可视化大盘（基于 token_usage_middleware）
 
-#### M1-G CLI + Admin UI 升级（~3 周）
+#### M1-I CLI + Admin UI 升级（~3 周）
 - [ ] `helix lint` + `helix run`（本地跑 manifest）
 - [ ] Admin UI：版本对比、灰度面板、Vault secret 管理
 - [ ] JSON Schema 发布（VS Code/IntelliJ 自动补全）
 
-#### M1-H 数据生命周期完善（~3 周）
-- [ ] 跨 AZ DR 演练（落实 P1 跨 AZ）
-- [ ] IaC（Terraform）描述基础设施
-- [ ] DB zero-downtime migration 规范（Alembic + expand-contract）
-- [ ] 数据归档完整 pipeline
-
-#### M1-I 第二个 dogfood 业务（~4 周）
+#### M1-J 第二个 dogfood 业务（~4 周）
 参考：[architecture/04-ROADMAP](./architecture/04-ROADMAP.md) §"Dogfood 计划"
 - [ ] 选一个带 Python 插槽需求的 Dify 应用迁移
 - [ ] 若带合规需求，验证 `compliance_pack` 可插拔
