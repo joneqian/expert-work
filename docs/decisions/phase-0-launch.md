@@ -96,18 +96,16 @@
 
 ---
 
-## 后续 ADR 触发
+## 后续 ADR 触发 — ✅ 全部完成（2026-05-11）
 
-基于以上决策，Phase 0.4 的 5 个 ADR 输入已就绪：
-
-| ADR | 标题 | 决策输入 |
-|-----|------|---------|
-| ADR-0002 | 状态层 schema（event_log + audit_log 分表） | 无外部依赖，可直接写 |
-| ADR-0003 | 认证选型 → **OIDC + 自建 Keycloak + JWT** | 决策 3（自建 Keycloak） |
-| ADR-0004 | 对象存储 → **阿里云 OSS + S3 兼容抽象层** | 决策 3（云 OSS）|
-| ADR-0005 | 可观测栈 → **自托管 Langfuse** | 决策 3（国内不能用 LangSmith）|
-| ADR-0006 | 合规可插拔架构（`compliance_pack` 字段语义） | 无外部依赖，可直接写 |
-| **ADR-0007**（新增） | **应用 Secret 存储选型 — Vault 自托管 vs KMS Secrets Manager** | 决策 3 留待二次决策 |
+| ADR | 标题 | 状态 |
+|-----|------|------|
+| [ADR-0002](../adr/0002-state-layer-schema.md) | 状态层 schema（event_log + audit_log 分表） | ✅ |
+| [ADR-0003](../adr/0003-authentication.md) | 认证选型 — OIDC + 自建 Keycloak + JWT | ✅ |
+| [ADR-0004](../adr/0004-object-storage.md) | 对象存储 — 阿里云 OSS + S3 兼容抽象层 | ✅ |
+| [ADR-0005](../adr/0005-observability-stack.md) | 可观测栈 — 自托管 Langfuse + Prometheus + Loki + Tempo + Grafana | ✅ |
+| [ADR-0006](../adr/0006-compliance-pluggability.md) | 合规可插拔架构（`compliance_pack` 字段语义） | ✅ |
+| [ADR-0007](../adr/0007-secret-store.md) | 应用 Secret 存储 — 阿里云 KMS Secrets Manager（M0）+ M1 评估 Vault | ✅ |
 
 ---
 
@@ -116,3 +114,4 @@
 | 日期 | 变更 |
 |------|------|
 | 2026-05-11 | 初版：5 项决策落地（决策 1、5 标 TBD；决策 2-4 已定；新增 ADR-0007 待办） |
+| 2026-05-11 | ADR-0002 至 ADR-0007 全部完成并合入 docs/adr/ |

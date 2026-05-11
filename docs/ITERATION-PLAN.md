@@ -126,12 +126,12 @@
 - [ ] 加 `dependabot.yml` 的 pip ecosystem（等 `pyproject.toml` 落地后）
 
 **0.4 ADR Backlog**（在 `docs/adr/` 增补）
-- [ ] ADR-0002：状态层 schema（event_log + audit_log 分表）
-- [ ] ADR-0003：认证选型 — **OIDC + 自建 Keycloak + JWT**（决策已定，待写文档）
-- [ ] ADR-0004：对象存储选型 — **阿里云 OSS + S3 兼容抽象层**（决策已定，待写文档）
-- [ ] ADR-0005：可观测栈选型 — **自托管 Langfuse**（决策已定，待写文档）
-- [ ] ADR-0006：合规可插拔架构（`compliance_pack` 字段语义）
-- [ ] ADR-0007：应用 Secret 存储 — HashiCorp Vault 自托管 vs 阿里云 KMS Secrets Manager（M0 内决策）
+- [x] ADR-0002：状态层 schema（event_log + audit_log 分表）
+- [x] ADR-0003：认证选型 — OIDC + 自建 Keycloak + JWT
+- [x] ADR-0004：对象存储选型 — 阿里云 OSS + S3 兼容抽象层
+- [x] ADR-0005：可观测栈选型 — 自托管 Langfuse + Prometheus + Loki + Tempo + Grafana
+- [x] ADR-0006：合规可插拔架构（`compliance_pack` 字段语义）
+- [x] ADR-0007：应用 Secret 存储 — 阿里云 KMS Secrets Manager（M0）+ M1 评估 Vault
 
 **0.5 测试基础设施**（落实 P0 #34、#35）
 - [ ] pytest fixture 库（`tests/conftest.py`：tmp_postgres、mock_llm、tmp_vault）
@@ -264,8 +264,8 @@
 - [ ] **F.2 单 Python 镜像**（含 minimal Python 3.12 + 限定库）
 - [ ] **F.3 Docker + gVisor (runsc)** 启动路径
 - [ ] **F.4 `exec_python` tool 接入 Orchestrator**
-- [ ] **F.5 Credential Proxy aiohttp 自研版**（落实 M0 文档清单）
-- [ ] **F.6 Vault 静态拉取**（短 TTL 缓存）
+- [ ] **F.5 Credential Proxy aiohttp 自研版**（落实 M0 文档清单；通过 SecretStore 抽象拉取后端凭据）
+- [ ] **F.6 SecretStore 抽象 + 阿里云 KMS Secrets Manager 实现**（短 TTL 缓存；落实 ADR-0007）
 - [ ] **F.7 请求取消的 sandbox kill 信号**（落实 P0 #25 第 3 段）— 收到 cancellation token 后 SIGKILL 沙盒、回收资源
 
 **Stream F Verification**（落实 [architecture/04-ROADMAP](./architecture/04-ROADMAP.md) §"沙盒安全验证"7 条用例）：
