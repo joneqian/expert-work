@@ -47,9 +47,9 @@
 
 | DeerFlow 源码路径 | 我们存放路径 | 改造点 |
 |------|----------|--------|
-| `runtime/events/store/base.py` | `packages/helix-runtime/src/helix/runtime/event_log/base.py` | 接口原样保留 |
-| `runtime/events/store/db.py` | `.../event_log/db.py` | `user_id` contextvar → `tenant_id`；扩展 event_type enum |
-| `runtime/events/store/memory.py` | `.../event_log/memory.py` | 仅测试用 |
+| `runtime/events/store/base.py` | `packages/helix-runtime/src/helix_agent/runtime/event_log/base.py` | 🆕 **2026-05-11 修正**：原计划"接口原样保留"，但 [ADR-0002](../adr/0002-state-layer-schema.md) schema 已定（`thread_id` + `tenant_id` UUID + `payload` + `trace_id`，无 `run_id`/`category`/`content`/`event_metadata`/`user_id`）。改为**借鉴算法，自有接口**：保留 FOR UPDATE seq 分配、批量写、内容截断三大算法，接口对齐 ADR-0002。Vendor 头声明 "Algorithm-vendored, schema-our-own"。 |
+| `runtime/events/store/db.py` | `.../event_log/db.py` | 同上；保留 FOR UPDATE 串行化 + 批量分配 seq + content_truncate；接口签名按 EventRecord（helix-agent-protocol） |
+| `runtime/events/store/memory.py` | `.../event_log/memory.py` | 同上；仅测试用 |
 | `persistence/models/run_event.py` | `packages/helix-persistence/src/helix/persistence/models/run_event.py` | 加 `tenant` 字段 + 索引 |
 | `persistence/thread_meta/base.py` | `.../persistence/thread_meta/base.py` | 接口扩展 tenant |
 | `persistence/thread_meta/sql.py` | `.../persistence/thread_meta/sql.py` | `resolve_user_id` → `resolve_tenant_id` |

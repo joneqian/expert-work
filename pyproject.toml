@@ -12,6 +12,7 @@ dependencies = [
     "helix-agent-common",
     "helix-agent-persistence",
     "helix-agent-protocol",
+    "helix-agent-runtime",
 ]
 
 [tool.uv]
@@ -33,12 +34,14 @@ members = [
     "packages/helix-common",
     "packages/helix-persistence",
     "packages/helix-protocol",
+    "packages/helix-runtime",
 ]
 
 [tool.uv.sources]
 helix-agent-common = { workspace = true }
 helix-agent-persistence = { workspace = true }
 helix-agent-protocol = { workspace = true }
+helix-agent-runtime = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -85,7 +88,7 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src"
 
 [[tool.mypy.overrides]]
 module = "testcontainers.*"
