@@ -21,6 +21,10 @@ down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Alembic loads the above names by module reflection; declare them as the
+# public contract so CodeQL / mypy don't flag them as unused.
+__all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revision", "upgrade"]
+
 
 def upgrade() -> None:
     op.create_table(
