@@ -1,0 +1,51 @@
+# Helix-Agent prod environment config (Phase 0.3 placeholder).
+# Endpoints become real once 阿里云 ECS / RDS / KMS / OSS / ACR are provisioned
+# (per docs/decisions/phase-0-launch.md decision 2 & 3).
+
+environment: prod
+
+# Database — 阿里云 RDS PostgreSQL prod (HA pair)
+database:
+  host: TBD-rds-prod.aliyuncs.com
+  port: 5432
+  name: helix_agent_prod
+  user: helix_agent
+  # password injected via env var HELIX_AGENT_DB_PASSWORD
+  # TLS required (RDS in-transit encryption)
+  ssl_mode: require
+
+# Object storage — 阿里云 OSS prod bucket (ADR-0004)
+object_storage:
+  backend: aliyun-oss
+  endpoint: TBD-oss-prod
+  region: cn-hangzhou
+  bucket: helix-agent-prod
+  use_path_style: false
+  # Server-side encryption via 阿里云 KMS
+  kms_key_id: TBD
+
+# Secret store — TBD per ADR-0007 (Vault self-hosted vs 阿里云 KMS Secrets Manager)
+secrets:
+  backend: tbd
+
+# Observability — self-hosted stack on prod cluster
+observability:
+  langfuse:
+    host: TBD-langfuse-prod
+  prometheus:
+    host: TBD-prometheus-prod
+  tempo:
+    host: TBD-tempo-prod
+  grafana:
+    host: TBD-grafana-prod
+
+# Auth — self-hosted Keycloak prod (ADR-0003)
+auth:
+  oidc:
+    issuer: TBD-keycloak-prod/realms/helix-agent
+
+# Container registry — 阿里云 ACR prod
+container_registry:
+  type: aliyun-acr
+  endpoint: TBD-acr-prod.cn-hangzhou.cr.aliyuncs.com
+  namespace: helix-agent
