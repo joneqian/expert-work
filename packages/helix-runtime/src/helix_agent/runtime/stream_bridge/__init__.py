@@ -1,0 +1,37 @@
+"""SSE stream bridge — decouples orchestrator producer from API consumer.
+
+Algorithm pattern borrowed from bytedance/deer-flow runtime/stream_bridge/* @
+``813d3c94``; module-level config coupling dropped, ``run_id`` typed as ``UUID``.
+"""
+
+from helix_agent.runtime.stream_bridge.base import (
+    END_SENTINEL as END_SENTINEL,
+)
+from helix_agent.runtime.stream_bridge.base import (
+    HEARTBEAT_SENTINEL as HEARTBEAT_SENTINEL,
+)
+from helix_agent.runtime.stream_bridge.base import (
+    StreamBridge as StreamBridge,
+)
+from helix_agent.runtime.stream_bridge.base import (
+    StreamEvent as StreamEvent,
+)
+from helix_agent.runtime.stream_bridge.factory import (
+    StreamBridgeBackend as StreamBridgeBackend,
+)
+from helix_agent.runtime.stream_bridge.factory import (
+    make_stream_bridge as make_stream_bridge,
+)
+from helix_agent.runtime.stream_bridge.memory import (
+    InMemoryStreamBridge as InMemoryStreamBridge,
+)
+
+__all__ = [
+    "END_SENTINEL",
+    "HEARTBEAT_SENTINEL",
+    "InMemoryStreamBridge",
+    "StreamBridge",
+    "StreamBridgeBackend",
+    "StreamEvent",
+    "make_stream_bridge",
+]
