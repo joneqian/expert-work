@@ -1,0 +1,85 @@
+[project]
+name = "helix-agent"
+version = "0.0.0"
+description = "Helix-Agent — multi-tenant enterprise Agent execution engine (workspace root)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    { name = "joneqian", email = "qian.qing0926@gmail.com" },
+]
+dependencies = [
+    "helix-agent-common",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pre-commit>=4.0.0",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/helix-common",
+]
+
+[tool.uv.sources]
+helix-agent-common = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["packages/*/src", "services/*/src", "tools/*/src", "tests"]
+extend-exclude = [".venv", "dist", "build"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "S",   # flake8-bandit
+    "RUF", # ruff-specific
+]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]
+"**/conftest.py" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages/*/tests", "services/*/tests"]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "integration: marks integration tests (require external services)",
+    "e2e: marks end-to-end tests (full docker-compose stack)",
+]

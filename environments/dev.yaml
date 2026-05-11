@@ -1,0 +1,42 @@
+# Helix-Agent dev environment config (Phase 0.2 placeholder).
+# staging.yaml / prod.yaml will be added once 阿里云 ECS / RDS / KMS / OSS
+# infrastructure is provisioned (per docs/decisions/phase-0-launch.md decision 2 & 3).
+
+environment: dev
+
+# Database — local dev uses docker-compose Postgres
+database:
+  host: localhost
+  port: 5432
+  name: helix_agent_dev
+  user: helix_agent
+  # password injected via env var HELIX_AGENT_DB_PASSWORD
+
+# Object storage — local dev uses MinIO (S3-compatible)
+# Prod will use 阿里云 OSS (ADR-0004)
+object_storage:
+  backend: s3-compatible
+  endpoint: http://localhost:9000
+  region: us-east-1
+  bucket: helix-agent-dev
+  use_path_style: true
+
+# Secret store — TBD per ADR-0007 (Vault self-hosted vs 阿里云 KMS Secrets Manager)
+secrets:
+  backend: tbd
+
+# Observability — local stack
+observability:
+  langfuse:
+    host: http://localhost:3001
+  prometheus:
+    host: http://localhost:9090
+  tempo:
+    host: http://localhost:3200
+  grafana:
+    host: http://localhost:3000
+
+# Auth — local Keycloak (ADR-0003)
+auth:
+  oidc:
+    issuer: http://localhost:8080/realms/helix-agent
