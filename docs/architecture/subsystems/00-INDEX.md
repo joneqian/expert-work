@@ -46,6 +46,7 @@
 | 20 | [Observability](./20-observability.md) | OTel span/metric/log 命名 + 关键 dashboard | ✅ 基础 trace | 完整 SLO | 异常根因 |
 | 22 | [Disaster Recovery](./22-disaster-recovery.md) | 备份、PITR、跨区域、RPO/RTO | ⚠️ 备份 | PITR | 跨区域 |
 | 23 | [Postgres Scalability](./23-postgres-scalability.md) | event_log 分区、读写分离、pgvector 索引 | ✅ 单库 | 分区 | 读写分离 |
+| 28 | [Reliability Primitives](./28-reliability-primitives.md) | 全链路 TLS / health probes / graceful shutdown / timeout hierarchy | ✅ 必须 | cert-manager + chaos | 多 region |
 
 ### 🟣 协作 & 质量层（高级特性）
 
@@ -104,6 +105,9 @@
          持久化层（所有子系统共享）：
          23 Postgres Scalability    │   22 DR / Backup
 
+         可靠性基础（所有服务必备）：
+         28 Reliability Primitives（TLS / Probes / Shutdown / Timeout）
+
          横切定义（所有子系统引用）：
          99 Shared Types（枚举 / 状态机 / 类型别名 / Postgres 约定）
 ```
@@ -146,3 +150,4 @@
 
 - **2026-05-09**：初版，17 个子系统骨架。
 - **2026-05-09**：新增 **27 Context Compression**（长会话上下文压缩）独立成篇；新增 **99 Shared Types** 附录作为跨子系统共享枚举 / 状态机 / 类型别名权威定义点；02 manifest 同步增加 `model.fallback` 自动注入规则与 `policies.context_compression` 字段。
+- **2026-05-11**：新增 **28 Reliability Primitives**（Stream A 设计阶段产出）—— 统一规范全链路 TLS / health probes / graceful shutdown / timeout hierarchy 4 项产品级横切关注点；填补 Stream A.10-A.13 之前散落多个 doc 的 gap。

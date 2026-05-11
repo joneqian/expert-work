@@ -161,6 +161,17 @@
 
 参考：[architecture/01-SYSTEM-ARCHITECTURE](./architecture/01-SYSTEM-ARCHITECTURE.md)、[architecture/06-OPEN-SOURCE-DEPS](./architecture/06-OPEN-SOURCE-DEPS.md)
 
+**设计文档全图**（设计先行规则已完成）：
+
+| 子组 | 设计文档 |
+|------|---------|
+| A.1/A.2/A.4 数据层 schema + vendor | [ADR-0002](./adr/0002-state-layer-schema.md) + [06-OPEN-SOURCE-DEPS](./architecture/06-OPEN-SOURCE-DEPS.md) §P0 vendor 表 + [subsystems/17-audit-log](./architecture/subsystems/17-audit-log.md) |
+| A.3 连接池 | [subsystems/23-postgres-scalability](./architecture/subsystems/23-postgres-scalability.md) |
+| A.5 对象存储 | [ADR-0004](./adr/0004-object-storage.md) |
+| A.6 备份 + WAL | [subsystems/22-disaster-recovery](./architecture/subsystems/22-disaster-recovery.md) |
+| A.7/A.8/A.9 可观测三件套 | [subsystems/20-observability](./architecture/subsystems/20-observability.md) |
+| **A.10-A.13 可靠性基础** | [subsystems/28-reliability-primitives](./architecture/subsystems/28-reliability-primitives.md) **🆕** |
+
 **数据层基础**
 - [ ] **A.1 Postgres schema**（event_log、thread_meta、checkpoint）— 落实 ADR-0002
 - [ ] **A.2 Vendor DeerFlow P0 基础设施**（~3.4K LOC，参考文档 06）：
@@ -169,17 +180,17 @@
   - PostgresSaver/InMemorySaver 抽象
   - stream_bridge（last-event-id 重连 + 心跳）
   - run_manager
-- [ ] **A.3 PgBouncer + 连接池规划**（落实 P0 #29）
-- [ ] **A.4 audit_log 表**（与 event_log 分表，落实 P0 #5）— 让后续 Stream B/C 的事件从首次上线起就有审计落地
-- [ ] **A.5 对象存储抽象**（落实 P0 #16）— S3 接口；MinIO 自托管 dev；uploads / snapshots / 归档共用基底
-- [ ] **A.6 Postgres 自动备份 + WAL**（落实 P0 #17）— RPO/RTO 文档
+- [ ] **A.3 PgBouncer + 连接池规划**（落实 P0 #29；设计：23-postgres-scalability）
+- [ ] **A.4 audit_log 表**（与 event_log 分表，落实 P0 #5；设计：17-audit-log）— 让后续 Stream B/C 的事件从首次上线起就有审计落地
+- [ ] **A.5 对象存储抽象**（落实 P0 #16；设计：ADR-0004）— S3 接口；MinIO 自托管 dev；uploads / snapshots / 归档共用基底
+- [ ] **A.6 Postgres 自动备份 + WAL**（落实 P0 #17；设计：22-disaster-recovery）— RPO/RTO 文档
 
-**可观测三件套**（日志 + trace + 指标必须同步建，否则后续代码 metric emit 缺失）
+**可观测三件套**（日志 + trace + 指标必须同步建，否则后续代码 metric emit 缺失；统一设计：20-observability）
 - [ ] **A.7 结构化日志规范**（落实 P0 #10）— 字段标准 + redaction 中间层
 - [ ] **A.8 W3C Trace Context 规范**（落实 P0 #11）+ OpenTelemetry SDK 接入
 - [ ] **A.9 指标体系**（落实 P0 #12）— Prometheus + 业务指标 + 技术指标 schema；让 A→F 所有新代码从第一天就 emit metric
 
-**网络与可靠性基础**
+**网络与可靠性基础**（统一设计：28-reliability-primitives）
 - [ ] **A.10 全链路 TLS**（落实 P0 #9 in-transit）— Stream B 暴露 endpoint 前必须生效；mTLS 前提
 - [ ] **A.11 Health checks**（落实 P0 #22）— liveness/readiness/startup probe + 依赖健康（DB/Redis/Vault）
 - [ ] **A.12 Graceful shutdown**（落实 P0 #23）— SIGTERM、completer-in-flight、超时强制
