@@ -106,12 +106,12 @@
 
 ### 工作清单
 
-**0.1 启动前决策**（解决 [architecture/04-ROADMAP](./architecture/04-ROADMAP.md) §"落地准备清单"中的 5 项）
-- [ ] **决策 1：dogfood 首迁业务**（写入 `docs/decisions/dogfood-target.md`）— 选哪个 Dify 已上线应用做 M0 落地
-- [ ] **决策 2：Linux 服务器落地**（gVisor 不支持 macOS prod；本地 dev 用 OrbStack/Lima）
-- [ ] **决策 3：Vault / Postgres / 监控基础设施申请**（自托管 vs 云服务）
-- [ ] **决策 4：项目最终命名**（"Helix" 是否最终定）
-- [ ] **决策 5：Linux 训练时间窗**（LangGraph 2-3 天系统补课）
+**0.1 启动前决策**（汇总于 [docs/decisions/phase-0-launch.md](../decisions/phase-0-launch.md)）
+- [ ] **决策 1：dogfood 首迁业务** — ❓ TBD（可推迟到 Stream H 前再拍板，不阻塞 0.2-0.5 与 Stream A-G）
+- [x] **决策 2：Linux 服务器落地** — ✅ 可申请 / 报备（阿里云 ECS，本周内到位；本地 dev 用 OrbStack / Lima）
+- [x] **决策 3：基础设施部署姿态** — ✅ 混合：阿里云 ECS / RDS / KMS / OSS / ACR + 自托管 Langfuse（国内 LangSmith 不可用）；应用 Secret 存储（Vault vs KMS Secrets Manager）待 ADR-0007 决策
+- [x] **决策 4：项目最终命名** — ✅ Helix-Agent（与现 repo / package 对齐；docs 措辞 cleanup 另开 PR）
+- [ ] **决策 5：LangGraph 训练时间窗** — 软推迟，边干边读；如需集中补课再开 2-3 天
 
 **0.2 Monorepo 与工具链**（参考 [architecture/03-MONOREPO-LAYOUT](./architecture/03-MONOREPO-LAYOUT.md)）
 - [ ] 按文档 03 的目录树创建空骨架（`packages/`、`services/`、`tools/`、`tests/`、`infra/`）
@@ -127,10 +127,11 @@
 
 **0.4 ADR Backlog**（在 `docs/adr/` 增补）
 - [ ] ADR-0002：状态层 schema（event_log + audit_log 分表）
-- [ ] ADR-0003：认证选型（OIDC vs 自建 JWT）
-- [ ] ADR-0004：对象存储选型（MinIO 自建 vs 云 OSS）
-- [ ] ADR-0005：可观测栈选型（Langfuse vs LangSmith vs 自建）
+- [ ] ADR-0003：认证选型 — **OIDC + 自建 Keycloak + JWT**（决策已定，待写文档）
+- [ ] ADR-0004：对象存储选型 — **阿里云 OSS + S3 兼容抽象层**（决策已定，待写文档）
+- [ ] ADR-0005：可观测栈选型 — **自托管 Langfuse**（决策已定，待写文档）
 - [ ] ADR-0006：合规可插拔架构（`compliance_pack` 字段语义）
+- [ ] ADR-0007：应用 Secret 存储 — HashiCorp Vault 自托管 vs 阿里云 KMS Secrets Manager（M0 内决策）
 
 **0.5 测试基础设施**（落实 P0 #34、#35）
 - [ ] pytest fixture 库（`tests/conftest.py`：tmp_postgres、mock_llm、tmp_vault）
@@ -140,8 +141,8 @@
 ### Exit Criteria（Phase 0 → M0 验证门）
 - [ ] CI 跑通：lint + mypy + test + image build + 安全扫描全绿
 - [ ] `uv sync` 在干净环境一行安装
-- [ ] ADR-0002~0006 全部决策完成
-- [ ] 5 项启动前决策书面化并写入 `docs/decisions/`
+- [ ] ADR-0002~0007 全部决策完成
+- [ ] 5 项启动前决策书面化并写入 `docs/decisions/`（决策 1、5 标 TBD 也算完成）
 
 ---
 
