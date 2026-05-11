@@ -61,6 +61,41 @@
 
 ---
 
+## 迭代收尾标准（所有 Phase / Stream 共用）
+
+每个 Phase 或 Stream 视为"完成"前，必须**全部满足**下列 6 条 — 否则不进下一迭代：
+
+1. **代码干净**
+   - 无 `TODO` / `FIXME` / `XXX` / `HACK` 注释
+   - 无占位 `pass` / `raise NotImplementedError`
+   - 无被注释掉的死代码
+2. **测试达标**
+   - unit coverage ≥ 85%
+   - integration coverage ≥ 70% 关键路径
+   - 无 `skip` / `xfail`（除非引用具体 issue 编号）
+   - 连跑 3 次稳定通过（无 flaky）
+3. **文档同步**
+   - `docs/architecture/` 下相关文档与实现一致
+   - 本迭代涉及的 ADR 已合并
+   - 本 Stream 在 ITERATION-PLAN.md 的 checklist 全部勾选
+4. **可观测齐全**
+   - 本迭代新组件均 emit metric + structured log + trace span
+   - 告警阈值已定义（即使是 placeholder）
+5. **CI 全绿**
+   - lint + mypy + test + 镜像构建 + 安全扫描全绿
+   - CodeQL 无新增 high / critical
+6. **bug 不遗留**
+   - 已知 bug 要么本迭代修复
+   - 要么明确写进**下一迭代 checklist**（不能只在 issue tracker 飘着）
+
+> **"能工作但有 N 个 TODO" = 该迭代未完成。**
+>
+> 技术债复利效应在 16-20 个月单人项目上尤其致命 — 一项 M0 没解决的债，到 M1 会变成相关的 5 项。零债收尾的成本，远低于积累后再清理。
+>
+> 若发现某项确实超出迭代范围，**减小本迭代范围（保留干净）** 或 **把超出部分明确移入下一迭代 checklist 后再关本迭代**；不允许带债结束。
+
+---
+
 ## Phase 0 — Pre-flight（2-3 周）
 
 ### 目标
