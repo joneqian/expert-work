@@ -28,6 +28,12 @@
 
 ---
 
+## 实施计划
+
+- **[ITERATION-PLAN.md](./ITERATION-PLAN.md)** — 🆕 单人版完整迭代计划（Phase 0 + M0→M3 + 24 项 P0 串联 + Verification Gate）
+
+---
+
 ## 核心结论速览
 
 ### 为什么自研
