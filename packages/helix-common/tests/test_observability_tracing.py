@@ -64,9 +64,11 @@ def test_helix_span_accepts_string_component(exporter: InMemorySpanExporter) -> 
 
 
 def test_helix_span_rejects_unknown_component(exporter: InMemorySpanExporter) -> None:
+    # Validation is eager — the constructor raises, not __enter__. Callers
+    # can pytest.raises() directly on helix_span(...) without entering the
+    # context manager (also keeps CodeQL's unreachable-statement check happy).
     with pytest.raises(ValueError, match="unknown helix component"):
-        with helix_span("ufo", "anything"):
-            pass
+        helix_span("ufo", "anything")
 
 
 def test_helix_span_injects_tenant_from_contextvar(exporter: InMemorySpanExporter) -> None:
