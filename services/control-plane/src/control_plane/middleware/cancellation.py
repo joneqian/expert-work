@@ -107,7 +107,7 @@ class CancellationMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         finally:
             poll_task.cancel()
-            try:
-                await poll_task
-            except asyncio.CancelledError:
-                pass
+            # ``asyncio.wait`` swallows ``CancelledError`` from the
+            # awaited task; its return value (done/pending sets) is the
+            # cleanup signal so the line isn't an ineffectual statement.
+            await asyncio.wait((poll_task,))
