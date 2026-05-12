@@ -15,6 +15,10 @@ dependencies = [
     "opentelemetry-api>=1.27,<2",
     "opentelemetry-sdk>=1.27,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.27,<2",
+    # Stream A.9 — Prometheus metrics. Pure-Python client; the /metrics
+    # exposition handler stays HTTP-framework-agnostic so Control Plane
+    # (Stream B / FastAPI) can mount it however it likes.
+    "prometheus-client>=0.21,<1",
 ]
 
 [build-system]

@@ -40,6 +40,9 @@ jobs:
       - name: ruff format check
         run: uv run ruff format --check
 
+      - name: metric naming lint (subsystems/20 § 5.2)
+        run: uv run python tools/observability/check_metric_names.py
+
   typecheck:
     name: Typecheck (mypy)
     runs-on: ubuntu-latest
