@@ -1,0 +1,114 @@
+"""Observability middleware — Stream B.1.
+
+Per [STREAM-B-DESIGN § 2.2](../../../../docs/streams/STREAM-B-DESIGN.md):
+
+* extract incoming W3C trace context (``traceparent`` / ``tracestate``)
+* open a ``helix.control_plane.http_request`` span (subsystems/20 § 5.1
+  naming) covering ``call_next``
+* bind ``trace_id`` into :mod:`helix_agent.common.context` so structured
+  logging picks it up
+* record per-request count + duration via the Prometheus registry from
+  Stream A.9
+* echo the trace id back in ``X-Helix-Trace-Id`` so clients can
+  correlate without parsing ``traceparent``
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Awaitable, Callable
+
+from opentelemetry import context as otel_context
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.types import ASGIApp
+
+from helix_agent.common.context import reset_current_trace_id, set_current_trace_id
+from helix_agent.common.observability import (
+    HelixComponent,
+    current_trace_id_hex,
+    extract_context,
+    helix_counter,
+    helix_histogram,
+    helix_span,
+)
+
+TRACE_ID_HEADER = "X-Helix-Trace-Id"
+
+# ---------------------------------------------------------------------------
+# Metrics — registered exactly once at import time (Stream A.9 helpers handle
+# duplicate registration by raising, which is fine: each control_plane process
+# imports this module once).
+# ---------------------------------------------------------------------------
+_request_total = helix_counter(
+    "helix_control_plane_http_requests_total",
+    "Control Plane HTTP requests, partitioned by method/route/status_code.",
+    ("method", "route", "status_code"),
+)
+_request_duration = helix_histogram(
+    "helix_control_plane_http_request_duration_seconds",
+    "Control Plane HTTP request handler wall-clock duration.",
+    ("method", "route", "status_code"),
+)
+
+
+def _route_template(request: Request) -> str:
+    """Return the matched route template or ``_unmatched`` (low cardinality)."""
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if isinstance(path, str) and path:
+        return path
+    return "_unmatched"
+
+
+class ObservabilityMiddleware(BaseHTTPMiddleware):
+    """Outermost middleware (sees raw request / final response)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        super().__init__(app)
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        parent_ctx = extract_context(dict(request.headers))
+        ctx_token = otel_context.attach(parent_ctx)
+
+        start = time.perf_counter()
+        method = request.method
+        status_code = 500  # default if call_next blows up before producing a response
+
+        try:
+            with helix_span(
+                HelixComponent.CONTROL_PLANE,
+                "http_request",
+                attributes={
+                    "http.method": method,
+                    "http.target": request.url.path,
+                },
+            ) as span:
+                trace_id_hex = current_trace_id_hex()
+                trace_token = None
+                if trace_id_hex is not None:
+                    trace_token = set_current_trace_id(trace_id_hex)
+                try:
+                    response = await call_next(request)
+                finally:
+                    if trace_token is not None:
+                        reset_current_trace_id(trace_token)
+
+                status_code = response.status_code
+                span.set_attribute("http.status_code", status_code)
+                span.set_attribute("http.route", _route_template(request))
+                if trace_id_hex is not None:
+                    response.headers[TRACE_ID_HEADER] = trace_id_hex
+                return response
+        finally:
+            duration = time.perf_counter() - start
+            route = _route_template(request)
+            labels = {"method": method, "route": route, "status_code": str(status_code)}
+            _request_total.labels(**labels).inc()
+            _request_duration.labels(**labels).observe(duration)
+            otel_context.detach(ctx_token)

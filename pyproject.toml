@@ -13,6 +13,7 @@ dependencies = [
     "helix-agent-persistence",
     "helix-agent-protocol",
     "helix-agent-runtime",
+    "helix-agent-control-plane",
 ]
 
 [tool.uv]
@@ -30,6 +31,8 @@ dev = [
     # Stream A.10 — tools/tls/check_tls_config.py parses environments/*.yaml.
     "pyyaml>=6.0,<7",
     "types-pyyaml>=6.0,<7",
+    # Stream B.1 — FastAPI ASGI test client.
+    "httpx>=0.27,<1",
 ]
 
 [tool.uv.workspace]
@@ -38,6 +41,7 @@ members = [
     "packages/helix-persistence",
     "packages/helix-protocol",
     "packages/helix-runtime",
+    "services/control-plane",
 ]
 
 [tool.uv.sources]
@@ -45,6 +49,7 @@ helix-agent-common = { workspace = true }
 helix-agent-persistence = { workspace = true }
 helix-agent-protocol = { workspace = true }
 helix-agent-runtime = { workspace = true }
+helix-agent-control-plane = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -92,7 +97,7 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src"
 
 [[tool.mypy.overrides]]
 module = "testcontainers.*"
