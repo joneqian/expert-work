@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from enum import StrEnum
 from typing import Any, Final
 
@@ -64,7 +64,9 @@ class HelixComponent(StrEnum):
 
 _TRACER_NAME: Final[str] = "helix-agent"
 
-_initialized: bool = False
+# Mutable process-wide state populated by ``init_tracing``. The
+# ``helix_span`` context manager reads these to auto-inject service / env
+# attrs without each caller having to pass them.
 _service_name: str | None = None
 _env: str | None = None
 
@@ -100,7 +102,7 @@ def init_tracing(
     :returns: The active provider (so callers can ``provider.shutdown()``
         on teardown).
     """
-    global _initialized, _service_name, _env
+    global _service_name, _env
     _service_name = service_name
     _env = env
 
@@ -122,7 +124,6 @@ def init_tracing(
     if isinstance(existing, TracerProvider):
         # Re-init path: attach the new processor to the live provider.
         existing.add_span_processor(span_processor)
-        _initialized = True
         logger.info("tracing.reinit service=%s env=%s", service_name, env)
         return existing
 
@@ -137,7 +138,6 @@ def init_tracing(
     provider = TracerProvider(resource=resource)
     provider.add_span_processor(span_processor)
     trace.set_tracer_provider(provider)
-    _initialized = True
     logger.info("tracing.initialized service=%s env=%s", service_name, env)
     return provider
 
@@ -152,13 +152,12 @@ def get_tracer() -> Tracer:
     return trace.get_tracer(_TRACER_NAME)
 
 
-@contextmanager
 def helix_span(
     component: HelixComponent | str,
     action: str,
     *,
     attributes: Mapping[str, Any] | None = None,
-) -> Iterator[Span]:
+) -> AbstractContextManager[Span]:
     """Open a span named ``helix.{component}.{action}``.
 
     Auto-injects ``tenant``, ``service``, ``env`` from contextvars + init
@@ -169,10 +168,20 @@ def helix_span(
     span status carries the failure reason).
 
     :raises ValueError: if ``component`` is a string outside
-        :class:`HelixComponent` (typos surface immediately rather than
-        polluting traces with bad names).
+        :class:`HelixComponent` (typos surface **at call time**, not at
+        ``__enter__`` — so callers can ``pytest.raises(...)`` directly
+        on the constructor).
     """
     comp_value = _validate_component(component)
+    return _helix_span_cm(comp_value, action, attributes)
+
+
+@contextmanager
+def _helix_span_cm(
+    comp_value: str,
+    action: str,
+    attributes: Mapping[str, Any] | None,
+) -> Iterator[Span]:
     span_name = f"helix.{comp_value}.{action}"
 
     attrs: dict[str, Any] = {}
