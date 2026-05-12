@@ -27,6 +27,9 @@ dev = [
     "pre-commit>=4.0.0",
     "testcontainers[postgres]>=4.9.0",
     "vcrpy>=7.0.0",
+    # Stream A.10 — tools/tls/check_tls_config.py parses environments/*.yaml.
+    "pyyaml>=6.0,<7",
+    "types-pyyaml>=6.0,<7",
 ]
 
 [tool.uv.workspace]
@@ -67,6 +70,7 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101", "S105", "S106"]
 "**/tests/**/*.py" = ["S101", "S105", "S106"]
+"**/test_*.py" = ["S101", "S105", "S106"]
 "**/conftest.py" = ["S101"]
 # Audit action enum values legitimately contain words like "secret"/"token";
 # they are public identifiers, not actual credentials.
@@ -99,7 +103,7 @@ module = ["aiobotocore.*", "botocore.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/*/tests", "services/*/tests"]
+testpaths = ["tests", "packages/*/tests", "services/*/tests", "tools/*"]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
 markers = [

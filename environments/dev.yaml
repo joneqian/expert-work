@@ -40,3 +40,10 @@ observability:
 auth:
   oidc:
     issuer: http://localhost:8080/realms/helix-agent
+
+# TLS minima per subsystems/28-reliability-primitives § 5.1.
+# Dev uses self-signed certs from tools/tls/gen-mtls-bundle.sh.
+tls:
+  min_version: 1.2
+  ca_bundle: ./tls-bundle/ca.crt
+  service_cert_dir: ./tls-bundle

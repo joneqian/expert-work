@@ -45,3 +45,11 @@ container_registry:
   type: aliyun-acr
   endpoint: TBD-acr-staging.cn-hangzhou.cr.aliyuncs.com
   namespace: helix-agent
+
+# TLS minima per subsystems/28-reliability-primitives § 5.1.
+# M0 uses static 7-day mTLS bundles rotated via tools/tls/gen-mtls-bundle.sh.
+# M1 replaces this with cert-manager + SPIRE workload identity.
+tls:
+  min_version: 1.2
+  ca_bundle: /etc/helix-agent/tls/ca.crt
+  service_cert_dir: /etc/helix-agent/tls
