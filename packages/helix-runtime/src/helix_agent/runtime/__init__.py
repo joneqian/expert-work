@@ -3,6 +3,27 @@
 See ``README.md`` for the per-module vendor provenance + adaptation notes.
 """
 
+from helix_agent.runtime.audit import (
+    AuditFallbackQueue as AuditFallbackQueue,
+)
+from helix_agent.runtime.audit import (
+    AuditLogger as AuditLogger,
+)
+from helix_agent.runtime.audit import (
+    AuditRedactor as AuditRedactor,
+)
+from helix_agent.runtime.audit import (
+    DefaultSecretRedactor as DefaultSecretRedactor,
+)
+from helix_agent.runtime.audit import (
+    InMemoryAuditFallbackQueue as InMemoryAuditFallbackQueue,
+)
+from helix_agent.runtime.audit import (
+    JsonlFileAuditFallbackQueue as JsonlFileAuditFallbackQueue,
+)
+from helix_agent.runtime.audit import (
+    RedactionResult as RedactionResult,
+)
 from helix_agent.runtime.checkpointer import (
     CheckpointerBackend as CheckpointerBackend,
 )
@@ -78,12 +99,19 @@ from helix_agent.runtime.stream_bridge import (
 __all__ = [
     "END_SENTINEL",
     "HEARTBEAT_SENTINEL",
+    "AuditFallbackQueue",
+    "AuditLogger",
+    "AuditRedactor",
     "CheckpointerBackend",
     "DbEventStore",
+    "DefaultSecretRedactor",
     "DisconnectMode",
     "EventStore",
+    "InMemoryAuditFallbackQueue",
     "InMemoryEventStore",
     "InMemoryStreamBridge",
+    "JsonlFileAuditFallbackQueue",
+    "RedactionResult",
     "RunManager",
     "RunRecord",
     "RunStatus",
