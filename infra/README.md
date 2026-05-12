@@ -1,8 +1,8 @@
 # Helix-Agent Infra (local dev / dogfood)
 
-Stream A.3 establishes a minimal local stack: **Postgres 16** + **PgBouncer**
-in transaction-pooling mode. Matches the M0 deliverable in
-[subsystems/23-postgres-scalability § 9](../docs/architecture/subsystems/23-postgres-scalability.md).
+Local stack for the data + object-storage layer:
+**Postgres 16** + **PgBouncer** (Stream A.3 — subsystems/23 § 9 M0) and
+**MinIO** (Stream A.5 — [ADR-0004](../docs/adr/0004-object-storage.md)).
 
 ## Quick start
 
@@ -14,10 +14,32 @@ docker compose ps
 
 Services:
 
-| Service     | Port | Purpose                                                    |
-|-------------|------|------------------------------------------------------------|
-| `postgres`  | 5432 | Direct Postgres access — migrations, psql, pg_dump        |
-| `pgbouncer` | 6432 | Connection pool — application traffic                      |
+| Service     | Port           | Purpose                                                    |
+|-------------|----------------|------------------------------------------------------------|
+| `postgres`  | 5432           | Direct Postgres access — migrations, psql, pg_dump         |
+| `pgbouncer` | 6432           | Connection pool — application traffic                       |
+| `minio`     | 9000 / 9001    | S3 API / web console (uploads, snapshots, archive)         |
+
+## Create the dev bucket (first run only)
+
+The compose stack does not auto-create the MinIO bucket — a one-shot
+``minio-init`` service trips ``docker compose up --wait`` because it
+exits immediately. Use either path once after the stack is up:
+
+```bash
+# Path 1 — web console
+open http://localhost:9001   # log in with the dev credentials below;
+                              # click "Create Bucket" → helix-agent-dev
+
+# Path 2 — mc CLI
+docker run --rm --network infra_default \
+    minio/mc:RELEASE.2025-08-13T08-35-41Z \
+    sh -c "mc alias set local http://minio:9000 helix_agent helix_agent_dev_minio \
+           && mc mb --ignore-existing local/helix-agent-dev"
+```
+
+Integration tests create the bucket via the S3 API automatically — no
+manual step needed for ``pytest``.
 
 The application **must** point at PgBouncer (`localhost:6432`); migrations
 **must** point at Postgres directly (`localhost:5432`) because PgBouncer
@@ -36,6 +58,9 @@ Override via `.env` or your shell:
 export HELIX_DB_USER=…
 export HELIX_DB_PASSWORD=…
 export HELIX_DB_NAME=…
+export HELIX_MINIO_ROOT_USER=…
+export HELIX_MINIO_ROOT_PASSWORD=…
+export HELIX_MINIO_BUCKET=…
 ```
 
 ## Why PgBouncer transaction mode

@@ -17,6 +17,8 @@ dependencies = [
     "langgraph>=1.0.10",
     "langgraph-checkpoint>=4.0.0",
     "langgraph-checkpoint-postgres>=2.0.20",
+    # Stream A.5 — S3-compatible object storage (MinIO / Aliyun OSS / AWS S3).
+    "aiobotocore>=2.13.0",
 ]
 
 [build-system]

@@ -94,6 +94,10 @@ mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_D
 module = "testcontainers.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["aiobotocore.*", "botocore.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/*/tests", "services/*/tests"]
 asyncio_mode = "auto"
