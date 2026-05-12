@@ -161,9 +161,7 @@ def helix_histogram(
     target_registry = registry or REGISTRY
     if buckets is None:
         return Histogram(name, documentation, labels, registry=target_registry)
-    return Histogram(
-        name, documentation, labels, buckets=tuple(buckets), registry=target_registry
-    )
+    return Histogram(name, documentation, labels, buckets=tuple(buckets), registry=target_registry)
 
 
 def metrics_text(registry: CollectorRegistry | None = None) -> tuple[bytes, str]:

@@ -96,7 +96,7 @@ def test_helix_counter_records_increments(registry: CollectorRegistry) -> None:
     counter.labels(outcome="ok").inc(2)
 
     body, content_type = metrics_text(registry)
-    assert b"helix_test_events_total{outcome=\"ok\"} 3.0" in body
+    assert b'helix_test_events_total{outcome="ok"} 3.0' in body
     assert "text/plain" in content_type
 
 
@@ -105,7 +105,7 @@ def test_helix_gauge_set(registry: CollectorRegistry) -> None:
     gauge.labels(queue="default").set(42)
 
     body, _ = metrics_text(registry)
-    assert b"helix_test_inflight{queue=\"default\"} 42.0" in body
+    assert b'helix_test_inflight{queue="default"} 42.0' in body
 
 
 def test_helix_histogram_observes(registry: CollectorRegistry) -> None:
@@ -140,9 +140,7 @@ def test_helix_counter_rejects_bad_name(registry: CollectorRegistry) -> None:
 
 def test_helix_counter_rejects_banned_label(registry: CollectorRegistry) -> None:
     with pytest.raises(MetricNamingError, match="banned high-cardinality"):
-        helix_counter(
-            "helix_test_events_total", "bad", ["tenant", "session_id"], registry=registry
-        )
+        helix_counter("helix_test_events_total", "bad", ["tenant", "session_id"], registry=registry)
 
 
 def test_metrics_text_returns_prometheus_content_type(registry: CollectorRegistry) -> None:
