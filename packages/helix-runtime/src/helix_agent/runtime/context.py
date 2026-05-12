@@ -1,103 +1,40 @@
-# ============================================================
-# Adapted from bytedance/deer-flow @ 813d3c94efa7fdea6aafcb4f459304db91fcaed0
-# Source: backend/packages/harness/deerflow/runtime/user_context.py
-# License: MIT (see vendor LICENSE)
-# Modifications:
-#   - user_id contextvar -> tenant_id contextvar (ADR-0002 / ADR-0003)
-#   - Dropped the three-state AUTO sentinel + resolve_user_id helper:
-#     our repository layer takes ``tenant_id`` as an explicit required
-#     arg (decided in Stream A.2 batch 2). This module exists only to
-#     propagate tenant context for **observability** (structured log
-#     fields, OTel span attrs) — Stream A.7-A.9 are the consumers.
-#   - trace_id contextvar added alongside tenant_id for trace propagation
-# Last sync: 2026-05-11
-# ============================================================
+"""Re-export of ``helix_agent.common.context``.
 
-"""Request-scoped tenant + trace context for observability propagation.
-
-The auth middleware (Stream C.1) sets ``tenant_id`` after JWT validation;
-the OTel SDK boundary (Stream A.8) sets ``trace_id``. Structured logger
-+ metric emitters read these to auto-inject context into every record.
-
-**Asyncio semantics**: ``ContextVar`` is task-local, not thread-local.
-Each FastAPI request runs in its own task → contexts are isolated.
-``asyncio.create_task`` and ``asyncio.to_thread`` inherit the parent
-task's context (usually the intended behaviour). If a background task
-must NOT see the foreground context, wrap with ``contextvars.copy_context()``.
+The contextvar implementation lives in ``helix-common`` (Stream A.7
+promotion) so the observability primitives can read it without a
+``helix-common -> helix-runtime`` dependency reversal. This module
+preserves the original import path that existing tests / call sites
+use.
 """
 
-from __future__ import annotations
-
-from contextvars import ContextVar, Token
-from typing import Final
-from uuid import UUID
-
-_current_tenant: Final[ContextVar[UUID | None]] = ContextVar(
-    "helix_agent_current_tenant",
-    default=None,
+from helix_agent.common.context import (
+    get_current_tenant as get_current_tenant,
 )
-_current_trace_id: Final[ContextVar[str | None]] = ContextVar(
-    "helix_agent_current_trace_id",
-    default=None,
+from helix_agent.common.context import (
+    get_current_trace_id as get_current_trace_id,
+)
+from helix_agent.common.context import (
+    require_current_tenant as require_current_tenant,
+)
+from helix_agent.common.context import (
+    reset_current_tenant as reset_current_tenant,
+)
+from helix_agent.common.context import (
+    reset_current_trace_id as reset_current_trace_id,
+)
+from helix_agent.common.context import (
+    set_current_tenant as set_current_tenant,
+)
+from helix_agent.common.context import (
+    set_current_trace_id as set_current_trace_id,
 )
 
-
-# ---------------------------------------------------------------------------
-# tenant
-# ---------------------------------------------------------------------------
-
-
-def set_current_tenant(tenant_id: UUID) -> Token[UUID | None]:
-    """Bind ``tenant_id`` to the current async task; return a reset token."""
-    return _current_tenant.set(tenant_id)
-
-
-def reset_current_tenant(token: Token[UUID | None]) -> None:
-    """Restore the previous tenant context captured by ``token``."""
-    _current_tenant.reset(token)
-
-
-def get_current_tenant() -> UUID | None:
-    """Return the bound tenant id, or ``None`` when unset.
-
-    Use this in log/metric/trace emitters where unset tenant is a valid
-    state (background jobs, healthchecks).
-    """
-    return _current_tenant.get()
-
-
-def require_current_tenant() -> UUID:
-    """Return the bound tenant id; raise :class:`RuntimeError` if unset.
-
-    Use this from code paths that must not be invoked outside an
-    auth-scoped request — the message names the offender so a stack
-    trace localizes the bug.
-    """
-    tenant_id = _current_tenant.get()
-    if tenant_id is None:
-        msg = (
-            "tenant context not set; this code path must run inside an "
-            "auth-scoped request (set via set_current_tenant in auth middleware)"
-        )
-        raise RuntimeError(msg)
-    return tenant_id
-
-
-# ---------------------------------------------------------------------------
-# trace_id
-# ---------------------------------------------------------------------------
-
-
-def set_current_trace_id(trace_id: str) -> Token[str | None]:
-    """Bind ``trace_id`` (W3C ``traceparent`` ``trace-id`` portion)."""
-    return _current_trace_id.set(trace_id)
-
-
-def reset_current_trace_id(token: Token[str | None]) -> None:
-    """Restore the previous trace_id captured by ``token``."""
-    _current_trace_id.reset(token)
-
-
-def get_current_trace_id() -> str | None:
-    """Return the bound trace id, or ``None`` when unset."""
-    return _current_trace_id.get()
+__all__ = [
+    "get_current_tenant",
+    "get_current_trace_id",
+    "require_current_tenant",
+    "reset_current_tenant",
+    "reset_current_trace_id",
+    "set_current_tenant",
+    "set_current_trace_id",
+]
