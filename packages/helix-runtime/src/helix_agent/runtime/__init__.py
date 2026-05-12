@@ -51,6 +51,9 @@ from helix_agent.runtime.context import (
 from helix_agent.runtime.context import (
     set_current_trace_id as set_current_trace_id,
 )
+from helix_agent.runtime.dr import BackupError as BackupError
+from helix_agent.runtime.dr import PostgresBackupConfig as PostgresBackupConfig
+from helix_agent.runtime.dr import PostgresFullBackup as PostgresFullBackup
 from helix_agent.runtime.event_log import (
     DbEventStore as DbEventStore,
 )
@@ -126,6 +129,7 @@ __all__ = [
     "AuditFallbackQueue",
     "AuditLogger",
     "AuditRedactor",
+    "BackupError",
     "CheckpointerBackend",
     "DbEventStore",
     "DefaultSecretRedactor",
@@ -140,6 +144,8 @@ __all__ = [
     "ObjectStore",
     "ObjectStoreBackend",
     "ObjectStoreError",
+    "PostgresBackupConfig",
+    "PostgresFullBackup",
     "RedactionResult",
     "RunManager",
     "RunRecord",
