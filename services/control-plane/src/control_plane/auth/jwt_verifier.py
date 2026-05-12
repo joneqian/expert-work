@@ -218,7 +218,7 @@ def _claims_from_payload(payload: dict[str, Any]) -> JWTClaims:
     aud_tuple: tuple[str, ...]
     if isinstance(aud_raw, str):
         aud_tuple = (aud_raw,)
-    elif isinstance(aud_raw, (list, tuple)):
+    elif isinstance(aud_raw, list | tuple):
         aud_tuple = tuple(str(a) for a in aud_raw)
     else:
         raise InvalidTokenError()
@@ -249,7 +249,7 @@ def _claims_from_payload(payload: dict[str, Any]) -> JWTClaims:
 
     allowed_tenants_raw = payload.get("allowed_tenants")
     allowed_tenants: tuple[UUID, ...] = ()
-    if isinstance(allowed_tenants_raw, (list, tuple)):
+    if isinstance(allowed_tenants_raw, list | tuple):
         parsed: list[UUID] = []
         for value in allowed_tenants_raw:
             try:
@@ -259,7 +259,7 @@ def _claims_from_payload(payload: dict[str, Any]) -> JWTClaims:
         allowed_tenants = tuple(parsed)
 
     iat_raw = payload.get("iat")
-    iat = int(iat_raw) if isinstance(iat_raw, (int, float)) else None
+    iat = int(iat_raw) if isinstance(iat_raw, int | float) else None
     jti_raw = payload.get("jti")
     jti = str(jti_raw) if isinstance(jti_raw, str) else None
 
@@ -279,6 +279,6 @@ def _claims_from_payload(payload: dict[str, Any]) -> JWTClaims:
 
 
 def _coerce_str_tuple(value: Any) -> tuple[str, ...]:
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return tuple(str(v) for v in value if isinstance(v, str))
     return ()

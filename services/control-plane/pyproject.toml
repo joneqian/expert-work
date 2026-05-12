@@ -24,7 +24,8 @@ dependencies = [
     "jinja2>=3.1,<4",
     # Stream C.1 — OIDC + RS256 JWT verification.
     "pyjwt[crypto]>=2.9,<3",
-    "cryptography>=43,<46",
+    # ``>=46.0.7`` 跳过 CVE-2026-26007 / 34073 / 39892（pip-audit 已要求）。
+    "cryptography>=46.0.7,<47",
     "httpx>=0.27,<1",
 ]
 
