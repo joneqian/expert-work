@@ -3,103 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from collections.abc import Awaitable, Callable
+from typing import Any
 
 import pytest
 from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from starlette.responses import JSONResponse
+from starlette.types import Message, Receive, Scope, Send
 
 from control_plane.middleware import CancellationMiddleware
-from control_plane.middleware.cancellation import CLIENT_DISCONNECTED, _poll_disconnect
+from control_plane.middleware.cancellation import CLIENT_DISCONNECTED
 from helix_agent.common.deadline import CancelToken
 
 # ---------------------------------------------------------------------------
-# _poll_disconnect unit tests — drive the loop with plain async functions.
-#
-# CodeQL's type tracer does not recognise class instances whose only
-# callability comes from ``__call__`` as ``Callable[[], Awaitable[bool]]``;
-# stubs here are therefore plain ``async def`` closures.
-# ---------------------------------------------------------------------------
-
-
-def _disconnect_source(flag: list[bool]) -> Callable[[], Awaitable[bool]]:
-    """Return an async callable that reads from a single-element list."""
-
-    async def _check() -> bool:
-        return flag[0]
-
-    return _check
-
-
-async def _always_raising_disconnect_source() -> bool:
-    raise RuntimeError("ASGI receive blew up")
-
-
-@pytest.mark.asyncio
-async def test_poll_cancels_token_when_disconnect_observed() -> None:
-    token = CancelToken()
-    flag = [False]
-    poll_task = asyncio.create_task(
-        _poll_disconnect(_disconnect_source(flag), token, poll_interval_s=0.005)
-    )
-    await asyncio.sleep(0.02)
-    # Sanity: poll has been running without a disconnect.
-    assert not poll_task.done()
-    flag[0] = True
-    # Within ~one poll interval the poll must finish and the token must flip.
-    await asyncio.wait_for(poll_task, timeout=0.5)
-    assert token.cancelled is True
-
-
-@pytest.mark.asyncio
-async def test_poll_exits_quickly_when_token_already_cancelled() -> None:
-    token = CancelToken()
-    token.cancel()
-    flag = [False]
-    start = time.perf_counter()
-    await asyncio.wait_for(
-        _poll_disconnect(_disconnect_source(flag), token, poll_interval_s=10.0),
-        timeout=0.1,
-    )
-    elapsed = time.perf_counter() - start
-    # The loop checks the cancellation flag *before* awaiting, so it
-    # short-circuits immediately even though the sleep was 10 s.
-    assert elapsed < 0.05
-
-
-@pytest.mark.asyncio
-async def test_poll_treats_receive_exception_as_disconnect() -> None:
-    token = CancelToken()
-    await asyncio.wait_for(
-        _poll_disconnect(_always_raising_disconnect_source, token, poll_interval_s=0.001),
-        timeout=0.5,
-    )
-    assert token.cancelled
-
-
-@pytest.mark.asyncio
-async def test_poll_fires_on_cancel_callback() -> None:
-    token = CancelToken()
-    flag = [True]
-    callback_fired = False
-
-    def _cb() -> None:
-        nonlocal callback_fired
-        callback_fired = True
-
-    await asyncio.wait_for(
-        _poll_disconnect(_disconnect_source(flag), token, poll_interval_s=0.001, on_cancel=_cb),
-        timeout=0.5,
-    )
-    assert callback_fired
-
-
-# ---------------------------------------------------------------------------
-# Middleware behaviour via httpx — happy path only; disconnect is
-# exercised through the unit test above (httpx ASGI transport does not
-# emit ``http.disconnect`` cleanly for in-process tests).
+# Happy-path: a normal request leaves CancelToken intact + uncancelled.
 # ---------------------------------------------------------------------------
 
 
@@ -117,6 +34,11 @@ def _build_probe_app() -> FastAPI:
             }
         )
 
+    @app.post("/echo")
+    async def echo(request: Request) -> JSONResponse:
+        body = await request.json()
+        return JSONResponse({"received": body})
+
     return app
 
 
@@ -133,11 +55,103 @@ async def test_request_state_carries_fresh_cancel_token() -> None:
 
 
 @pytest.mark.asyncio
+async def test_post_body_passes_through() -> None:
+    """Regression test: B.5 caught the polling variant of this middleware
+    consuming the POST body via ``request.is_disconnected()``. The
+    wrapped-receive rewrite must forward every message untouched."""
+    app = _build_probe_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/echo", json={"hello": "world"})
+    assert response.status_code == 200
+    assert response.json() == {"received": {"hello": "world"}}
+
+
+# ---------------------------------------------------------------------------
+# Disconnect propagation — drive ``http.disconnect`` directly via the ASGI
+# interface (httpx's ASGITransport never emits one in-process).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_http_disconnect_message_triggers_cancel() -> None:
+    captured: dict[str, Any] = {}
+
+    async def downstream_app(scope: Scope, receive: Receive, send: Send) -> None:
+        captured["token"] = scope["state"]["cancel_token"]
+        # Consume the body messages first (an HTTP body always arrives
+        # via ``http.request`` before any ``http.disconnect``).
+        while True:
+            msg = await receive()
+            if msg["type"] != "http.request":
+                captured["last_message_type"] = msg["type"]
+                break
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    middleware = CancellationMiddleware(downstream_app)
+
+    scope: Scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/x",
+        "headers": [],
+    }
+    incoming_messages: list[Message] = [
+        {"type": "http.request", "body": b"hi", "more_body": False},
+        {"type": "http.disconnect"},
+    ]
+
+    async def receive() -> Message:
+        return incoming_messages.pop(0)
+
+    sent: list[Message] = []
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    await middleware(scope, receive, send)
+
+    token = captured["token"]
+    assert isinstance(token, CancelToken)
+    assert token.cancelled is True
+    assert scope["state"]["cancel_reason"] == CLIENT_DISCONNECTED
+    assert captured["last_message_type"] == "http.disconnect"
+
+
+@pytest.mark.asyncio
+async def test_lifespan_passes_through() -> None:
+    """Non-http scopes must pass straight through (no state side effects)."""
+    received: list[Scope] = []
+
+    async def downstream_app(scope: Scope, receive: Receive, send: Send) -> None:
+        received.append(scope)
+
+    middleware = CancellationMiddleware(downstream_app)
+    scope: Scope = {"type": "lifespan"}
+
+    async def receive() -> Message:
+        return {"type": "lifespan.startup"}
+
+    async def send(message: Message) -> None:
+        pass
+
+    await middleware(scope, receive, send)
+    # No ``state`` key was injected on a non-http scope.
+    assert received[0] is scope
+    assert "state" not in scope
+
+
+@pytest.mark.asyncio
 async def test_poll_interval_must_be_positive() -> None:
+    """Argument retained for API parity with B.3; zero / negative still rejected."""
+
+    async def _stub(_scope: Scope, _receive: Receive, _send: Send) -> None:
+        await asyncio.sleep(0)
+
     with pytest.raises(ValueError):
-        CancellationMiddleware(app=FastAPI(), poll_interval_s=0)
+        CancellationMiddleware(_stub, poll_interval_s=0)
 
 
 def test_client_disconnected_constant() -> None:
-    # Captured for downstream emitters (audit / log) to import.
     assert CLIENT_DISCONNECTED == "client_disconnected"

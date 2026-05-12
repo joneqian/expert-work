@@ -22,7 +22,10 @@ force a churn-heavy migration when each owning Stream lands.
 
 from __future__ import annotations
 
+from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -285,3 +288,33 @@ class AgentSpec(BaseModel):
 ModelSpec.model_rebuild()
 AgentSpecBody.model_rebuild()
 AgentSpec.model_rebuild()
+
+
+# ---------------------------------------------------------------------------
+# Persisted-envelope record (Stream B.5 registry rows)
+# ---------------------------------------------------------------------------
+
+
+class AgentSpecStatus(StrEnum):
+    """``agent_spec.status`` enum; ``deleted`` is the soft-delete state."""
+
+    ACTIVE = "active"
+    DEPRECATED = "deprecated"
+    DELETED = "deleted"
+
+
+class AgentSpecRecord(BaseModel):
+    """One row of the ``agent_spec`` registry table."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID
+    name: str
+    version: str
+    spec: AgentSpec
+    spec_sha256: str = Field(min_length=64, max_length=64)
+    status: AgentSpecStatus
+    created_by: str
+    created_at: datetime
+    updated_at: datetime

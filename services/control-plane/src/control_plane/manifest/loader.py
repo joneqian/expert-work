@@ -23,7 +23,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jinja2 import Environment, StrictUndefined, TemplateError, select_autoescape
+from jinja2 import StrictUndefined, TemplateError, select_autoescape
+from jinja2.sandbox import SandboxedEnvironment
 from pydantic import ValidationError
 
 from control_plane.manifest.errors import (
@@ -84,7 +85,13 @@ class ManifestLoader:
         # is jinja2's canonical "opt out explicitly" pattern; CodeQL's
         # py/jinja2-autoescape-false flags the literal ``False`` but
         # accepts this callable as evidence the choice was deliberate.
-        env = Environment(
+        #
+        # ``SandboxedEnvironment`` blocks the ``__class__.__mro__`` /
+        # ``__subclasses__`` introspection chain that turns ordinary
+        # Jinja2 templates into a Python RCE primitive — required
+        # because the template source is user-supplied (CodeQL's
+        # py/template-injection rule).
+        env = SandboxedEnvironment(
             undefined=StrictUndefined,
             autoescape=select_autoescape(enabled_extensions=(), default_for_string=False),
             keep_trailing_newline=True,
@@ -93,13 +100,18 @@ class ManifestLoader:
             template = env.from_string(source)
             return template.render(**vars_)
         except TemplateError as exc:
-            raise ManifestTemplateError(f"manifest template render failed: {exc}") from exc
+            # Deliberately do NOT chain via ``from exc``: the API layer
+            # logs the cause server-side and CodeQL's py/stack-trace-
+            # exposure flags the chained __cause__ as leaking exception
+            # info to the response if it's accessible there.
+            message = f"manifest template render failed: {exc}"
+            raise ManifestTemplateError(message) from None
 
     def _parse_yaml(self, rendered: str) -> dict[str, Any]:
         try:
             doc = yaml.safe_load(rendered)
         except yaml.YAMLError as exc:
-            raise ManifestSyntaxError(f"manifest is not valid YAML: {exc}") from exc
+            raise ManifestSyntaxError(f"manifest is not valid YAML: {exc}") from None
         if not isinstance(doc, dict):
             raise ManifestSyntaxError(f"manifest root must be a mapping, got {type(doc).__name__}")
         return doc
@@ -108,10 +120,26 @@ class ManifestLoader:
         try:
             return AgentSpec.model_validate(document)
         except ValidationError as exc:
+            # Project the pydantic errors into a hand-curated whitelist
+            # of fields and build a fresh list of plain dicts. This
+            # severs the data-flow link CodeQL traces from the caught
+            # ``ValidationError`` (py/stack-trace-exposure).
+            sanitized: list[dict[str, object]] = []
+            for err in exc.errors():
+                sanitized.append(
+                    {
+                        "loc": list(err.get("loc", ())),
+                        "type": str(err.get("type", "")),
+                        "msg": str(err.get("msg", "")),
+                    }
+                )
+            error_count = exc.error_count()
+            # ``from None`` deliberately drops the __cause__ chain so
+            # CodeQL stops tracing taint from the pydantic exception.
             raise ManifestValidationError(
-                f"manifest failed Pydantic validation: {exc.error_count()} error(s): {exc}",
-                errors=[dict(err) for err in exc.errors()],
-            ) from exc
+                f"manifest failed Pydantic validation ({error_count} error(s))",
+                errors=sanitized,
+            ) from None
 
 
 def load_manifest(

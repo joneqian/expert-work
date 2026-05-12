@@ -26,7 +26,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from control_plane.api import build_health_router, build_metrics_router
+from control_plane.api import (
+    build_agents_router,
+    build_health_router,
+    build_metrics_router,
+)
+from control_plane.audit import build_default_audit_logger
+from control_plane.manifest import ManifestLoader
 from control_plane.middleware import (
     AuditContextMiddleware,
     CancellationMiddleware,
@@ -40,6 +46,8 @@ from control_plane.settings import Settings
 from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
 from helix_agent.common.observability import init_logging, init_tracing
+from helix_agent.persistence.agent_spec import AgentSpecStore, InMemoryAgentSpecStore
+from helix_agent.runtime.audit.logger import AuditLogger
 
 __all__ = ["ProdAuthModeNotReadyError", "create_app"]
 
@@ -62,6 +70,9 @@ def create_app(
     settings: Settings | None = None,
     lifecycle: Lifecycle | None = None,
     rate_limiter: RateLimiter | None = None,
+    agent_spec_repo: AgentSpecStore | None = None,
+    audit_logger: AuditLogger | None = None,
+    manifest_loader: ManifestLoader | None = None,
 ) -> FastAPI:
     """Build a configured FastAPI app.
 
@@ -88,6 +99,9 @@ def create_app(
         capacity=resolved_settings.rate_limit_burst,
         refill_per_sec=resolved_settings.rate_limit_per_second,
     )
+    resolved_repo = agent_spec_repo or InMemoryAgentSpecStore()
+    resolved_audit = audit_logger or build_default_audit_logger()
+    resolved_loader = manifest_loader or ManifestLoader()
     health_provider = DefaultHealthProvider(
         service=resolved_settings.service_name,
         version=_VERSION,
@@ -128,6 +142,9 @@ def create_app(
     app.state.lifecycle = resolved_lifecycle
     app.state.health_provider = health_provider
     app.state.rate_limiter = resolved_limiter
+    app.state.agent_spec_repo = resolved_repo
+    app.state.audit_logger = resolved_audit
+    app.state.manifest_loader = resolved_loader
 
     # Starlette wraps middleware in *reverse* registration order: the
     # last call to ``add_middleware`` becomes the outermost layer. We
@@ -161,5 +178,6 @@ def create_app(
 
     app.include_router(build_health_router(health_provider))
     app.include_router(build_metrics_router())
+    app.include_router(build_agents_router())
 
     return app

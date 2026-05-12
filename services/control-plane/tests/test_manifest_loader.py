@@ -111,7 +111,9 @@ def test_lint_wildcard_allowlist_rejected() -> None:
     )
     with pytest.raises(ManifestValidationError) as exc_info:
         load_manifest(broken)
-    assert "allowlist" in str(exc_info.value).lower()
+    # The summary message is intentionally generic (CodeQL stack-trace
+    # exposure). Detail lives on ``.errors`` as a curated whitelist.
+    assert any("allowlist" in str(err["msg"]).lower() for err in exc_info.value.errors)
 
 
 def test_lint_fallback_cycle_rejected() -> None:
@@ -124,7 +126,7 @@ def test_lint_fallback_cycle_rejected() -> None:
     broken = _rendered_minimal().replace("name: claude-sonnet-4-5", cycle_fragment)
     with pytest.raises(ManifestValidationError) as exc_info:
         load_manifest(broken)
-    assert "cycle" in str(exc_info.value).lower()
+    assert any("cycle" in str(err["msg"]).lower() for err in exc_info.value.errors)
 
 
 def test_loader_rejects_non_positive_size_cap() -> None:
