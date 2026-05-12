@@ -13,6 +13,7 @@ the boundary.
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -32,6 +33,8 @@ from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
 from helix_agent.protocol import AgentSpecRecord, AgentSpecStatus, AuditAction, AuditResult
 from helix_agent.runtime.audit.logger import AuditLogger
+
+logger = logging.getLogger("helix.control_plane.agents")
 
 
 class ManifestPayload(BaseModel):
@@ -103,6 +106,16 @@ async def _load_manifest(
 
 
 def _manifest_error_to_response(exc: ManifestError) -> JSONResponse:
+    """Map a parse / lint error to the public envelope.
+
+    The raw exception text is logged server-side but **never** echoed to
+    the API caller (CodeQL ``py/stack-trace-exposure``). The structured
+    ``exc.errors`` list from :class:`ManifestValidationError` is field-
+    level info we have already produced ourselves, so it's safe to
+    surface.
+    """
+    logger.info("manifest.load_failed exc_type=%s", type(exc).__name__, exc_info=exc)
+
     if isinstance(exc, ManifestValidationError):
         return JSONResponse(
             status_code=422,
@@ -111,16 +124,20 @@ def _manifest_error_to_response(exc: ManifestError) -> JSONResponse:
                 "data": None,
                 "error": {
                     "code": "MANIFEST_INVALID",
-                    "message": str(exc),
+                    "message": "manifest failed validation",
                     "errors": exc.errors,
                 },
             },
         )
     if isinstance(exc, ManifestTemplateError):
-        return _envelope_error("MANIFEST_TEMPLATE", str(exc), 400)
+        return _envelope_error(
+            "MANIFEST_TEMPLATE",
+            "manifest template rendering failed",
+            400,
+        )
     if isinstance(exc, ManifestSyntaxError):
-        return _envelope_error("MANIFEST_SYNTAX", str(exc), 400)
-    return _envelope_error("MANIFEST_ERROR", str(exc), 400)
+        return _envelope_error("MANIFEST_SYNTAX", "manifest is not valid YAML", 400)
+    return _envelope_error("MANIFEST_ERROR", "manifest could not be parsed", 400)
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +171,7 @@ def build_agents_router() -> APIRouter:
                 resource_type="manifest",
                 resource_id=None,
                 result=AuditResult.ERROR,
-                reason=str(exc)[:200],
+                reason=type(exc).__name__,
                 trace_id=trace_id,
             )
             return _manifest_error_to_response(exc)
@@ -166,7 +183,12 @@ def build_agents_router() -> APIRouter:
                 spec_sha256=sha,
                 created_by=actor_id,
             )
-        except DuplicateAgentSpecError as exc:
+        except DuplicateAgentSpecError:
+            logger.info(
+                "manifest.create_duplicate name=%s version=%s",
+                spec.metadata.name,
+                spec.metadata.version,
+            )
             await emit(
                 audit,
                 tenant_id=tenant_id,
@@ -178,7 +200,11 @@ def build_agents_router() -> APIRouter:
                 reason="duplicate",
                 trace_id=trace_id,
             )
-            return _envelope_error("MANIFEST_DUPLICATE", str(exc), 409)
+            return _envelope_error(
+                "MANIFEST_DUPLICATE",
+                "an agent with this name and version already exists",
+                409,
+            )
 
         await emit(
             audit,
