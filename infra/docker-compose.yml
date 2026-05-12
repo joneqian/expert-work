@@ -99,7 +99,7 @@ services:
 
   minio-init:
     # One-shot helper: create the dev bucket once MinIO is healthy. Exits 0.
-    image: minio/mc:RELEASE.2025-09-07T13-15-25Z
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     container_name: helix-minio-init
     depends_on:
       minio:
