@@ -28,7 +28,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from control_plane.api._quota_admission import check_admission
 from control_plane.audit import emit
+from control_plane.quota.base import QuotaService
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.thread_meta import ThreadMetaStore
@@ -75,6 +77,10 @@ def _get_audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
 
 
+def _get_quota(request: Request) -> QuotaService:
+    return request.app.state.quota_service  # type: ignore[no-any-return]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -110,10 +116,26 @@ def build_sessions_router() -> APIRouter:
         threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
         agents: Annotated[AgentSpecStore, Depends(_get_agent_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        quota: Annotated[QuotaService, Depends(_get_quota)],
     ) -> JSONResponse:
         tenant_id: UUID = request.state.tenant_id
         actor_id: str = request.state.actor_id
         trace_id = current_trace_id_hex()
+
+        # Admission (Stream C.5b): consume one token from the tenant's
+        # QPS bucket before doing any other work. Denial emits a
+        # ``quota:rate_limit_denied`` audit row and returns 429 with
+        # ``Retry-After``; we never proceed to DB writes.
+        denial = await check_admission(
+            quota=quota,
+            audit=audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            agent=payload.agent_name,
+            resource_kind="session",
+        )
+        if denial is not None:
+            return denial
 
         # The agent must exist + be ACTIVE (not deprecated / soft-deleted)
         # for the tenant. Otherwise the session would point at a row a

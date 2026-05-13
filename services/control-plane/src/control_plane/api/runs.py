@@ -29,10 +29,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from control_plane.api._quota_admission import check_admission
 from control_plane.audit import emit
+from control_plane.quota.base import QuotaService
 from helix_agent.common.deadline import CancelToken
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.thread_meta import ThreadMetaStore
@@ -70,6 +72,10 @@ def _get_audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
 
 
+def _get_quota(request: Request) -> QuotaService:
+    return request.app.state.quota_service  # type: ignore[no-any-return]
+
+
 def _format_sse(event: str, data: dict[str, object]) -> bytes:
     """Render one SSE event in the spec-defined wire format."""
     payload = json.dumps(data, separators=(",", ":"))
@@ -104,14 +110,15 @@ async def _fake_stream(
 def build_runs_router() -> APIRouter:
     router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
-    @router.post("/{thread_id}/runs")
+    @router.post("/{thread_id}/runs", response_model=None)
     async def trigger_run(
         thread_id: UUID,
         payload: RunRequest,
         request: Request,
         threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
-    ) -> StreamingResponse:
+        quota: Annotated[QuotaService, Depends(_get_quota)],
+    ) -> StreamingResponse | JSONResponse:
         tenant_id: UUID = request.state.tenant_id
         actor_id: str = request.state.actor_id
         trace_id = current_trace_id_hex()
@@ -124,6 +131,20 @@ def build_runs_router() -> APIRouter:
                 status_code=409,
                 detail=f"session is {meta.status.value}; only active sessions accept runs",
             )
+
+        # Admission (Stream C.5b): bucket the run against the agent
+        # bound to this thread. Denial returns 429 with ``Retry-After``
+        # and audits — we never start the SSE stream.
+        denial = await check_admission(
+            quota=quota,
+            audit=audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            agent=meta.agent_name,
+            resource_kind="run",
+        )
+        if denial is not None:
+            return denial
 
         await emit(
             audit,
