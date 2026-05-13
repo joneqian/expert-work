@@ -100,11 +100,18 @@ def upgrade() -> None:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
         op.execute(f"DROP POLICY IF EXISTS {policy} ON {table};")
+        # ``current_setting('app.tenant_id', true)`` returns the empty
+        # string when the GUC is unset (not NULL — Postgres custom GUCs
+        # surface as text). Casting ``''::uuid`` raises
+        # ``InvalidTextRepresentationError`` which would crash the
+        # query rather than fail closed. ``NULLIF(..., '')`` converts
+        # the empty string to NULL so the ``tenant_id = NULL``
+        # comparison evaluates to NULL → policy denies the row.
         op.execute(
             f"""
             CREATE POLICY {policy} ON {table}
-                USING      (tenant_id = current_setting('app.tenant_id', true)::uuid)
-                WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+                USING      (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+                WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
             """
         )
 
