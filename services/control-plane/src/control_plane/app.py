@@ -53,6 +53,7 @@ from control_plane.middleware import (
     InFlightMiddleware,
     ObservabilityMiddleware,
     RateLimitMiddleware,
+    RLSContextMiddleware,
 )
 from control_plane.ratelimit import InProcessTokenBucketLimiter, RateLimiter
 from control_plane.settings import Settings
@@ -180,12 +181,13 @@ def create_app(
     # Effective execution order (outermost → innermost):
     #   1. ObservabilityMiddleware  — open span, record timing
     #   2. AuthMiddleware           — verify JWT → request.state.principal (C.1)
-    #   3. AuditContextMiddleware   — project principal.tenant_id → ctxvar
-    #   4. RateLimitMiddleware      — 429 short-circuit (B.2)
-    #   5. CancellationMiddleware   — mint CancelToken + disconnect poll
-    #   6. DeadlineMiddleware       — consume CancelToken + seed
+    #   3. RLSContextMiddleware     — project principal.tenant_id → RLS ctxvar (C.4)
+    #   4. AuditContextMiddleware   — project principal.tenant_id → log ctxvar
+    #   5. RateLimitMiddleware      — 429 short-circuit (B.2)
+    #   6. CancellationMiddleware   — mint CancelToken + disconnect poll
+    #   7. DeadlineMiddleware       — consume CancelToken + seed
     #                                 DeadlineContext from header
-    #   7. InFlightMiddleware       — Lifecycle.track_in_flight (drain)
+    #   8. InFlightMiddleware       — Lifecycle.track_in_flight (drain)
     app.add_middleware(InFlightMiddleware, lifecycle=resolved_lifecycle)
     app.add_middleware(DeadlineMiddleware)
     app.add_middleware(
@@ -202,6 +204,7 @@ def create_app(
         default_tenant_id=resolved_settings.default_dev_tenant_id,
         default_actor_id=resolved_settings.default_dev_actor_id,
     )
+    app.add_middleware(RLSContextMiddleware)
     app.add_middleware(
         AuthMiddleware,
         verifier=resolved_verifier,

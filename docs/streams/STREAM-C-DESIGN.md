@@ -169,6 +169,12 @@ RLSSessionMiddleware（db 依赖注入路径）：SET LOCAL app.tenant_id
 
 ### 2.4 数据模型新增（迁移 0004 - 0007）
 
+> **实施编号变更（2026-05-13）**：C.3 先于 C.4 落地，故 alembic 编号交换：
+> - `0004_authn_authz_tables.py` ← 原设计的 0005（auth 表）
+> - `0005_rls_baseline.py` ← 原设计的 0004（RLS baseline）
+>
+> 表内容、列定义、policy 文本与本节描述一致；只是迁移文件顺序换了。下文 "迁移 0004 — RLS baseline"、"迁移 0005 — Auth tables" 的文字描述保持原状以便对照设计意图，实际仓库里 0004 是 auth、0005 是 RLS。
+
 #### 迁移 0004 — RLS baseline
 
 对**所有现存 + 新增**含 `tenant_id` 列的表执行：
@@ -277,6 +283,54 @@ class Settings(BaseSettings):
 
 ### 2.6 RLS Session 注入（C.4）
 
+> **实施变更（2026-05-13）**：本节最初草拟为"业务路由通过 FastAPI dependency 获取一个已经 `SET LOCAL` 过的 `AsyncSession`"。落地时改成**中间件 + ContextVar + SQLAlchemy `after_begin` 事件**的间接形态，原因：现有 Store 抽象（`SqlThreadMetaStore` / `SqlAgentSpecStore` / `SqlServiceAccountStore` 等）已统一接受 `async_sessionmaker`，并在每个方法内部 `async with self._sf() as session`，不向上暴露 session 对象。改为 dependency 注入会推翻 Store 层契约。
+>
+> 新形态：
+>
+> ```python
+> # packages/helix-persistence/src/helix_agent/persistence/rls.py
+> current_tenant_id_var: ContextVar[UUID | None] = ContextVar("helix.rls.tenant_id", default=None)
+> bypass_rls_var: ContextVar[bool] = ContextVar("helix.rls.bypass", default=False)
+>
+> def _rls_after_begin(session, transaction, connection):
+>     if bypass_rls_var.get():
+>         return
+>     tid = current_tenant_id_var.get()
+>     if tid is None:
+>         return
+>     connection.execute(
+>         text("SELECT set_config(:name, :value, true)"),
+>         {"name": "app.tenant_id", "value": str(tid)},
+>     )
+>
+> def build_rls_sessionmaker(base):
+>     # 幂等：用 event.contains() 保证只挂一次到 Session 类
+>     ...
+>     return base
+> ```
+>
+> ```python
+> # services/control-plane/src/control_plane/tenancy/rls_context.py
+> class RLSContextMiddleware(BaseHTTPMiddleware):
+>     async def dispatch(self, request, call_next):
+>         principal = getattr(request.state, "principal", None)
+>         if principal is None:
+>             return await call_next(request)
+>         tok = current_tenant_id_var.set(principal.tenant_id)
+>         try:
+>             return await call_next(request)
+>         finally:
+>             current_tenant_id_var.reset(tok)
+> ```
+>
+> 为什么用 `set_config(name, value, true)` 而非 `SET LOCAL app.tenant_id = '<uuid>'`：前者支持 bind parameter，后者必须 SQL 字符串拼接 + 单独的 UUID 验证；语义等价（第三个参数 `true` 即 LOCAL scope）。
+>
+> 为什么把监听器挂到全局 `Session` 类而非具体的 `async_sessionmaker.sync_session_class`：SQLAlchemy 的 `async_sessionmaker` 类型未公开 `sync_session_class` 为 typed attribute（mypy strict 会报 `attr-defined`），而所有 `AsyncSession` 内部都委托给同一个 `Session` 类的实例 — 在 `Session` 上挂一次监听器即覆盖所有工厂。监听器自身只读 ContextVar，未设置时为 no-op，对不关心 RLS 的测试零影响。
+>
+> Admin 跨租户的 `get_admin_reader_session` / `SET ROLE audit_reader` 路径暂时只落到设计文档，C.4 仅交付应用 role 的 RLS 隔离与 `audit_reader` 角色定义（migration 中），admin 读取实际启用会随 audit dashboard 在 M0 末或 D 阶段一起落地。
+
+（保留原文 dependency-style 草图作历史参考）：
+
 ```python
 # control_plane/tenancy/rls_session.py
 async def get_db_session_with_rls(
@@ -306,7 +360,7 @@ async def get_admin_reader_session(request: Request, sm_admin) -> AsyncSession:
         await session.execute(text("RESET ROLE"))
 ```
 
-**关键决策**：业务路由**默认**用 `get_db_session_with_rls`；只有 audit / quota admin 路由用 `get_admin_reader_session`。Postgres BYPASSRLS attribute 使 admin role 不受 policy 约束，但应用层仍走专用 sessionmaker（不会复用业务连接），杜绝 "if-admin-skip-filter" 反模式。
+**关键决策**：业务路由**默认**用 RLS 包装过的 sessionmaker；只有 audit / quota admin 路由用 `SET ROLE audit_reader` + `bypass_rls_var=True` 路径。Postgres BYPASSRLS attribute 使 admin role 不受 policy 约束，但应用层仍走专用 sessionmaker（不会复用业务连接），杜绝 "if-admin-skip-filter" 反模式。
 
 ### 2.7 Quota 引擎（C.5/C.6）
 
