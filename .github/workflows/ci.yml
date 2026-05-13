@@ -43,6 +43,9 @@ jobs:
       - name: metric naming lint (subsystems/20 § 5.2)
         run: uv run python tools/observability/check_metric_names.py
 
+      - name: RLS naming lint (STREAM-C-DESIGN § 2.4)
+        run: uv run python tools/persistence/check_rls_naming.py
+
   typecheck:
     name: Typecheck (mypy)
     runs-on: ubuntu-latest

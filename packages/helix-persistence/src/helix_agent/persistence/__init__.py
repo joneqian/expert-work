@@ -25,6 +25,10 @@ from helix_agent.persistence.models import BackupRecordRow as BackupRecordRow
 from helix_agent.persistence.models import DrDrillRow as DrDrillRow
 from helix_agent.persistence.models import EventLogRow as EventLogRow
 from helix_agent.persistence.models import ThreadMetaRow as ThreadMetaRow
+from helix_agent.persistence.rls import RLS_GUC_NAME as RLS_GUC_NAME
+from helix_agent.persistence.rls import build_rls_sessionmaker as build_rls_sessionmaker
+from helix_agent.persistence.rls import bypass_rls_var as bypass_rls_var
+from helix_agent.persistence.rls import current_tenant_id_var as current_tenant_id_var
 from helix_agent.persistence.thread_meta import (
     InMemoryThreadMetaStore as InMemoryThreadMetaStore,
 )
@@ -34,6 +38,7 @@ from helix_agent.persistence.thread_meta import (
 from helix_agent.persistence.thread_meta import ThreadMetaStore as ThreadMetaStore
 
 __all__ = [
+    "RLS_GUC_NAME",
     "AuditLogRow",
     "AuditLogStore",
     "BackupRecordRow",
@@ -50,6 +55,9 @@ __all__ = [
     "SqlThreadMetaStore",
     "ThreadMetaRow",
     "ThreadMetaStore",
+    "build_rls_sessionmaker",
+    "bypass_rls_var",
     "create_async_engine_from_config",
     "create_async_session_factory",
+    "current_tenant_id_var",
 ]
