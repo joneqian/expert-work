@@ -53,6 +53,9 @@ class AuditAction(StrEnum):
     QUOTA_CONFIG_WRITE = "quota:config_write"
     QUOTA_CONFIG_DELETE = "quota:config_delete"
     QUOTA_RESERVATION_EXPIRED = "quota:reservation_expired"
+    # tenant_config (C.7)
+    TENANT_CONFIG_READ = "tenant_config:read"
+    TENANT_CONFIG_WRITE = "tenant_config:write"
     # sandbox
     SANDBOX_FORCE_DESTROY = "sandbox:force_destroy"
     SANDBOX_QUOTA_DENIED = "sandbox:quota_denied"
@@ -94,6 +97,7 @@ class AuditEntry(BaseModel):
         "secret",
         "audit",
         "quota",
+        "tenant_config",
         "user",
         "role_binding",
         "api_key",

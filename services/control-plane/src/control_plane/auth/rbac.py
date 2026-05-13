@@ -34,6 +34,7 @@ Resource = Literal[
     "secret",
     "audit",
     "quota",
+    "tenant_config",
     "user",
     "role_binding",
     "service_account",
@@ -66,6 +67,9 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             "secret": {"read", "write", "delete"},
             "audit": {"read"},
             "quota": {"read", "write", "delete", "check"},
+            # Admin can edit tenant_config (display name, MCP allowlist,
+            # secret refs, PII fields …) and read it.
+            "tenant_config": {"read", "write"},
             "user": {"read", "write"},
             "role_binding": {"read", "write", "delete"},
             "service_account": {"read", "write", "delete"},
@@ -81,6 +85,10 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             # Operators (mTLS service principals) consume the quota
             # engine at runtime but cannot rewrite tenant_quota config.
             "quota": {"read", "check"},
+            # Operators (mTLS services) read tenant_config on the
+            # request hot path (LLM gateway / MCP gateway, Stream E).
+            # They cannot rewrite it.
+            "tenant_config": {"read"},
         }
     # VIEWER
     return {
@@ -89,6 +97,7 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
         "sandbox": {"read"},
         "audit": {"read"},
         "quota": {"read"},
+        "tenant_config": {"read"},
     }
 
 

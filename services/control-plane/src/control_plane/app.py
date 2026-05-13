@@ -36,6 +36,7 @@ from control_plane.api import (
     build_runs_router,
     build_service_accounts_router,
     build_sessions_router,
+    build_tenant_config_router,
     build_tenant_quotas_router,
 )
 from control_plane.audit import build_default_audit_logger
@@ -70,6 +71,7 @@ from control_plane.ratelimit import (
     RedisTokenBucketLimiter,
 )
 from control_plane.settings import Settings
+from control_plane.tenancy import TenantConfigService
 from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
 from helix_agent.common.observability import init_logging, init_tracing
@@ -87,6 +89,10 @@ from helix_agent.persistence.quota import (
     InMemoryTokenReservationStore,
     TenantQuotaStore,
     TokenReservationStore,
+)
+from helix_agent.persistence.tenant_config import (
+    InMemoryTenantConfigStore,
+    TenantConfigStore,
 )
 from helix_agent.persistence.thread_meta import InMemoryThreadMetaStore, ThreadMetaStore
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -118,6 +124,8 @@ def create_app(
     quota_service: QuotaService | None = None,
     enable_reaper: bool = True,
     tenant_rate_limiter: RateLimiter | None = None,
+    tenant_config_repo: TenantConfigStore | None = None,
+    tenant_config_service: TenantConfigService | None = None,
 ) -> FastAPI:
     """Build a configured FastAPI app.
 
@@ -153,6 +161,12 @@ def create_app(
         settings=resolved_settings,
         quota_store=resolved_tenant_quotas,
         reservation_store=resolved_reservations,
+    )
+    resolved_tenant_config_repo = tenant_config_repo or InMemoryTenantConfigStore()
+    resolved_tenant_config_service = tenant_config_service or TenantConfigService(
+        store=resolved_tenant_config_repo,
+        audit_logger=resolved_audit,
+        ttl_s=float(resolved_settings.tenant_config_cache_ttl_s),
     )
     reaper: ReservationReaper | None = (
         ReservationReaper(
@@ -223,6 +237,8 @@ def create_app(
     app.state.token_reservation_repo = resolved_reservations
     app.state.quota_service = resolved_quota
     app.state.quota_reaper = reaper
+    app.state.tenant_config_repo = resolved_tenant_config_repo
+    app.state.tenant_config_service = resolved_tenant_config_service
 
     # Starlette wraps middleware in *reverse* registration order: the
     # last call to ``add_middleware`` becomes the outermost layer. We
@@ -285,6 +301,7 @@ def create_app(
     app.include_router(build_role_bindings_router())
     app.include_router(build_quota_router())
     app.include_router(build_tenant_quotas_router())
+    app.include_router(build_tenant_config_router())
 
     return app
 

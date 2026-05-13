@@ -67,6 +67,11 @@ from helix_agent.protocol.service_account import (
     RoleBinding,
     ServiceAccount,
 )
+from helix_agent.protocol.tenant_config import (
+    TenantConfigPatch,
+    TenantConfigRecord,
+    TenantPlan,
+)
 from helix_agent.protocol.thread_meta import ThreadMeta, ThreadStatus
 
 __all__ = [
@@ -122,6 +127,9 @@ __all__ = [
     "SystemPromptSpec",
     "TenantBudgetRecord",
     "TenantConfig",
+    "TenantConfigPatch",
+    "TenantConfigRecord",
+    "TenantPlan",
     "TenantQuotaPatch",
     "TenantQuotaRecord",
     "ThreadMeta",

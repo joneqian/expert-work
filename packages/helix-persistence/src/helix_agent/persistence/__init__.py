@@ -47,6 +47,15 @@ from helix_agent.persistence.rls import RLS_GUC_NAME as RLS_GUC_NAME
 from helix_agent.persistence.rls import build_rls_sessionmaker as build_rls_sessionmaker
 from helix_agent.persistence.rls import bypass_rls_var as bypass_rls_var
 from helix_agent.persistence.rls import current_tenant_id_var as current_tenant_id_var
+from helix_agent.persistence.tenant_config import (
+    InMemoryTenantConfigStore as InMemoryTenantConfigStore,
+)
+from helix_agent.persistence.tenant_config import (
+    SqlTenantConfigStore as SqlTenantConfigStore,
+)
+from helix_agent.persistence.tenant_config import (
+    TenantConfigStore as TenantConfigStore,
+)
 from helix_agent.persistence.thread_meta import (
     InMemoryThreadMetaStore as InMemoryThreadMetaStore,
 )
@@ -67,14 +76,17 @@ __all__ = [
     "EventLogRow",
     "InMemoryAuditLogStore",
     "InMemoryBackupRecordStore",
+    "InMemoryTenantConfigStore",
     "InMemoryTenantQuotaStore",
     "InMemoryThreadMetaStore",
     "InMemoryTokenReservationStore",
     "SqlAuditLogStore",
     "SqlBackupRecordStore",
+    "SqlTenantConfigStore",
     "SqlTenantQuotaStore",
     "SqlThreadMetaStore",
     "SqlTokenReservationStore",
+    "TenantConfigStore",
     "TenantQuotaStore",
     "ThreadMetaRow",
     "ThreadMetaStore",

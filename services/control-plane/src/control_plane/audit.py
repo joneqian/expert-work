@@ -38,6 +38,7 @@ ResourceType = Literal[
     "secret",
     "audit",
     "quota",
+    "tenant_config",
     "user",
     "role_binding",
     "api_key",

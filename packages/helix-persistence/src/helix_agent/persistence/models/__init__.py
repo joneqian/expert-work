@@ -8,6 +8,7 @@ from helix_agent.persistence.models.dr_drill import DrDrillRow
 from helix_agent.persistence.models.event_log import EventLogRow
 from helix_agent.persistence.models.role_binding import RoleBindingRow
 from helix_agent.persistence.models.service_account import ServiceAccountRow
+from helix_agent.persistence.models.tenant_config import TenantConfigRow
 from helix_agent.persistence.models.tenant_quota import TenantQuotaRow
 from helix_agent.persistence.models.thread_meta import ThreadMetaRow
 from helix_agent.persistence.models.token_budget_ledger import TokenBudgetLedgerRow
@@ -22,6 +23,7 @@ __all__ = [
     "EventLogRow",
     "RoleBindingRow",
     "ServiceAccountRow",
+    "TenantConfigRow",
     "TenantQuotaRow",
     "ThreadMetaRow",
     "TokenBudgetLedgerRow",

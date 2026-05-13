@@ -187,6 +187,12 @@ class Settings(BaseSettings):
     #: dev setup the in-process limiter is used so tests don't need a
     #: Redis container.
 
+    # ------------------------------------------------------------------ tenant config (C.7)
+    #: ``TenantConfigService`` in-memory cache TTL (seconds). Bounded
+    #: by STREAM-C-DESIGN § 2.8 at 60s — keeps the hot path off the
+    #: database without making admin edits invisible for too long.
+    tenant_config_cache_ttl_s: int = Field(default=60, gt=0)
+
     def resolve_jwks_uri(self) -> str:
         """Return the explicit JWKS URI or derive it from the issuer."""
         if self.oidc_jwks_uri:
