@@ -7,6 +7,7 @@ from control_plane.middleware.deadline import DeadlineMiddleware
 from control_plane.middleware.lifecycle import InFlightMiddleware
 from control_plane.middleware.observability import ObservabilityMiddleware
 from control_plane.middleware.rate_limit import RateLimitMiddleware
+from control_plane.middleware.tenant_rate_limit import TenantRateLimitMiddleware
 from control_plane.tenancy import RLSContextMiddleware
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "ObservabilityMiddleware",
     "RLSContextMiddleware",
     "RateLimitMiddleware",
+    "TenantRateLimitMiddleware",
 ]

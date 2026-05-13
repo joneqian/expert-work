@@ -56,6 +56,7 @@ from control_plane.middleware import (
     ObservabilityMiddleware,
     RateLimitMiddleware,
     RLSContextMiddleware,
+    TenantRateLimitMiddleware,
 )
 from control_plane.quota import (
     InMemoryQuotaService,
@@ -63,7 +64,11 @@ from control_plane.quota import (
     RedisQuotaService,
     ReservationReaper,
 )
-from control_plane.ratelimit import InProcessTokenBucketLimiter, RateLimiter
+from control_plane.ratelimit import (
+    InProcessTokenBucketLimiter,
+    RateLimiter,
+    RedisTokenBucketLimiter,
+)
 from control_plane.settings import Settings
 from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
@@ -112,6 +117,7 @@ def create_app(
     token_reservation_repo: TokenReservationStore | None = None,
     quota_service: QuotaService | None = None,
     enable_reaper: bool = True,
+    tenant_rate_limiter: RateLimiter | None = None,
 ) -> FastAPI:
     """Build a configured FastAPI app.
 
@@ -127,9 +133,9 @@ def create_app(
     """
     resolved_settings = settings or Settings()
     resolved_lifecycle = lifecycle or Lifecycle()
-    resolved_limiter = rate_limiter or InProcessTokenBucketLimiter(
-        capacity=resolved_settings.rate_limit_burst,
-        refill_per_sec=resolved_settings.rate_limit_per_second,
+    resolved_limiter = rate_limiter or _build_default_gateway_limiter(resolved_settings)
+    resolved_tenant_limiter = tenant_rate_limiter or _build_default_tenant_limiter(
+        resolved_settings
     )
     resolved_repo = agent_spec_repo or InMemoryAgentSpecStore()
     resolved_threads = thread_meta_repo or InMemoryThreadMetaStore()
@@ -202,6 +208,7 @@ def create_app(
     app.state.lifecycle = resolved_lifecycle
     app.state.health_provider = health_provider
     app.state.rate_limiter = resolved_limiter
+    app.state.tenant_rate_limiter = resolved_tenant_limiter
     app.state.agent_spec_repo = resolved_repo
     app.state.thread_meta_repo = resolved_threads
     app.state.audit_logger = resolved_audit
@@ -224,13 +231,14 @@ def create_app(
     # Effective execution order (outermost → innermost):
     #   1. ObservabilityMiddleware  — open span, record timing
     #   2. AuthMiddleware           — verify JWT → request.state.principal (C.1)
-    #   3. RLSContextMiddleware     — project principal.tenant_id → RLS ctxvar (C.4)
-    #   4. AuditContextMiddleware   — project principal.tenant_id → log ctxvar
-    #   5. RateLimitMiddleware      — 429 short-circuit (B.2)
-    #   6. CancellationMiddleware   — mint CancelToken + disconnect poll
-    #   7. DeadlineMiddleware       — consume CancelToken + seed
+    #   3. TenantRateLimitMiddleware — per-tenant bucket (C.6)
+    #   4. RLSContextMiddleware     — project principal.tenant_id → RLS ctxvar (C.4)
+    #   5. AuditContextMiddleware   — project principal.tenant_id → log ctxvar
+    #   6. RateLimitMiddleware      — per-IP / per-API-key bucket (B.2)
+    #   7. CancellationMiddleware   — mint CancelToken + disconnect poll
+    #   8. DeadlineMiddleware       — consume CancelToken + seed
     #                                 DeadlineContext from header
-    #   8. InFlightMiddleware       — Lifecycle.track_in_flight (drain)
+    #   9. InFlightMiddleware       — Lifecycle.track_in_flight (drain)
     app.add_middleware(InFlightMiddleware, lifecycle=resolved_lifecycle)
     app.add_middleware(DeadlineMiddleware)
     app.add_middleware(
@@ -248,6 +256,14 @@ def create_app(
         default_actor_id=resolved_settings.default_dev_actor_id,
     )
     app.add_middleware(RLSContextMiddleware)
+    app.add_middleware(
+        TenantRateLimitMiddleware,
+        limiter=resolved_tenant_limiter,
+        audit_logger=resolved_audit,
+        enabled=resolved_settings.tenant_rate_limit_enabled,
+        exempt_path_prefixes=tuple(resolved_settings.auth_exempt_path_prefixes),
+        audit_sample_every=resolved_settings.tenant_rate_limit_audit_sample_every,
+    )
     app.add_middleware(
         AuthMiddleware,
         verifier=resolved_verifier,
@@ -295,6 +311,54 @@ def _build_default_mtls_verifier(settings: Settings) -> MTLSVerifier | None:
         allowed_subjects=settings.mtls_allowed_service_subjects,
         system_tenant_id=settings.mtls_system_tenant_id,
         require_uri_san=settings.mtls_require_uri_san,
+    )
+
+
+def _build_default_gateway_limiter(settings: Settings) -> RateLimiter:
+    """Pick the gateway-tier limiter (B.2) impl based on Settings.
+
+    Single-instance dev / unit tests stay on the in-process bucket so
+    they don't need a Redis container. Multi-replica deploys
+    (``single_instance=False``) plus a configured Redis URL get the
+    Lua-backed implementation that survives horizontal scale-out.
+    """
+    if not settings.single_instance and settings.quota_redis_url:
+        import redis.asyncio as redis_async
+
+        client = redis_async.from_url(
+            settings.quota_redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+        )
+        return RedisTokenBucketLimiter(
+            redis_client=client,
+            capacity=settings.rate_limit_burst,
+            refill_per_sec=settings.rate_limit_per_second,
+        )
+    return InProcessTokenBucketLimiter(
+        capacity=settings.rate_limit_burst,
+        refill_per_sec=settings.rate_limit_per_second,
+    )
+
+
+def _build_default_tenant_limiter(settings: Settings) -> RateLimiter:
+    """Pick the tenant-tier limiter (C.6) impl based on Settings."""
+    if not settings.single_instance and settings.quota_redis_url:
+        import redis.asyncio as redis_async
+
+        client = redis_async.from_url(
+            settings.quota_redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+        )
+        return RedisTokenBucketLimiter(
+            redis_client=client,
+            capacity=settings.tenant_rate_limit_capacity,
+            refill_per_sec=settings.tenant_rate_limit_refill_per_sec,
+        )
+    return InProcessTokenBucketLimiter(
+        capacity=settings.tenant_rate_limit_capacity,
+        refill_per_sec=settings.tenant_rate_limit_refill_per_sec,
     )
 
 

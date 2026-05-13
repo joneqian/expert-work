@@ -163,6 +163,30 @@ class Settings(BaseSettings):
     #: masse.
     quota_reaper_batch_size: int = Field(default=100, gt=0)
 
+    # ------------------------------------------------------------------ tenant rate limit (C.6)
+    #: Per-tenant request bucket capacity (tokens). Drained one token
+    #: per authenticated request.
+    tenant_rate_limit_capacity: int = Field(default=200, gt=0)
+
+    #: Refill rate (tokens / second) for the per-tenant bucket.
+    tenant_rate_limit_refill_per_sec: float = Field(default=50.0, gt=0)
+
+    #: Toggle for the per-tenant rate-limit middleware. ``False`` lets
+    #: dev / single-tenant load tests run without the limit kicking in.
+    tenant_rate_limit_enabled: bool = True
+
+    #: Sample interval for ``quota:rate_limit_denied`` audit emissions.
+    #: ``1`` audits every denial; default samples 1 in 100 per
+    #: subsystems/16 § 8 (caps log volume under sustained throttle
+    #: storms).
+    tenant_rate_limit_audit_sample_every: int = Field(default=100, ge=1)
+
+    #: When the runtime has a Redis URL (``quota_redis_url``) and
+    #: ``single_instance`` is ``False``, the gateway / tenant limiter
+    #: use Redis (multi-replica safe). On the default single-instance
+    #: dev setup the in-process limiter is used so tests don't need a
+    #: Redis container.
+
     def resolve_jwks_uri(self) -> str:
         """Return the explicit JWKS URI or derive it from the issuer."""
         if self.oidc_jwks_uri:
