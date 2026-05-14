@@ -112,24 +112,6 @@ class RetentionCleanupJob:
         gate: unacked rows are skipped here and counted separately
         by ``_count_unacked_past_retention``.
         """
-        # DIAG (D.3): print current_user / session_user from the
-        # cleanup-job connection so a failing CI run leaves a trail
-        # confirming the role the connection actually authenticated as.
-        async with self._sf() as session:
-            who = (
-                await session.execute(
-                    text(
-                        "SELECT current_user, session_user, "
-                        "(SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user)"
-                    )
-                )
-            ).first()
-            if who is not None:
-                print(
-                    f"[D.3 CONN] cleanup-job connection current={who[0]} "
-                    f"session={who[1]} bypassrls={who[2]}"
-                )
-            await session.commit()
         async with self._sf() as session:
             result = await session.execute(
                 text(
