@@ -94,6 +94,10 @@ def _provision_app_role(sync_dsn: str) -> None:
             conn.execute(
                 text(f"GRANT INSERT ON TABLE event_log, jwt_blacklist, tenant_config TO {APP_ROLE}")
             )
+            # ``SqlTenantConfigStore.upsert`` uses ON CONFLICT DO UPDATE
+            # which requires UPDATE on the target table even on the
+            # first insert path.
+            conn.execute(text(f"GRANT UPDATE ON TABLE tenant_config TO {APP_ROLE}"))
             # Memberships in the three worker roles (NOINHERIT means the
             # app role doesn't inherit privileges; it must SET ROLE).
             conn.execute(text(f"GRANT audit_writer TO {APP_ROLE}"))
