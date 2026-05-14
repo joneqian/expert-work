@@ -13,6 +13,7 @@ dependencies = [
     "helix-agent-persistence",
     "helix-agent-protocol",
     "helix-agent-runtime",
+    "helix-agent-audit-backup-worker",
     "helix-agent-control-plane",
 ]
 
@@ -41,6 +42,7 @@ members = [
     "packages/helix-persistence",
     "packages/helix-protocol",
     "packages/helix-runtime",
+    "services/audit-backup-worker",
     "services/control-plane",
 ]
 
@@ -49,6 +51,7 @@ helix-agent-common = { workspace = true }
 helix-agent-persistence = { workspace = true }
 helix-agent-protocol = { workspace = true }
 helix-agent-runtime = { workspace = true }
+helix-agent-audit-backup-worker = { workspace = true }
 helix-agent-control-plane = { workspace = true }
 
 [tool.ruff]
@@ -97,7 +100,7 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/audit-backup-worker/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src"
 
 [[tool.mypy.overrides]]
 module = "testcontainers.*"

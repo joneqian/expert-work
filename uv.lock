@@ -10,6 +10,7 @@ resolution-markers = [
 [manifest]
 members = [
     "helix-agent",
+    "helix-agent-audit-backup-worker",
     "helix-agent-common",
     "helix-agent-control-plane",
     "helix-agent-persistence",
@@ -772,6 +773,7 @@ name = "helix-agent"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "helix-agent-audit-backup-worker" },
     { name = "helix-agent-common" },
     { name = "helix-agent-control-plane" },
     { name = "helix-agent-persistence" },
@@ -795,6 +797,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "helix-agent-audit-backup-worker", editable = "services/audit-backup-worker" },
     { name = "helix-agent-common", editable = "packages/helix-common" },
     { name = "helix-agent-control-plane", editable = "services/control-plane" },
     { name = "helix-agent-persistence", editable = "packages/helix-persistence" },
@@ -814,6 +817,33 @@ dev = [
     { name = "testcontainers", extras = ["postgres"], specifier = ">=4.9.0" },
     { name = "types-pyyaml", specifier = ">=6.0,<7" },
     { name = "vcrpy", specifier = ">=7.0.0" },
+]
+
+[[package]]
+name = "helix-agent-audit-backup-worker"
+version = "0.0.0"
+source = { editable = "services/audit-backup-worker" }
+dependencies = [
+    { name = "asyncpg" },
+    { name = "helix-agent-common" },
+    { name = "helix-agent-persistence" },
+    { name = "helix-agent-protocol" },
+    { name = "helix-agent-runtime" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncpg", specifier = ">=0.29,<1" },
+    { name = "helix-agent-common", editable = "packages/helix-common" },
+    { name = "helix-agent-persistence", editable = "packages/helix-persistence" },
+    { name = "helix-agent-protocol", editable = "packages/helix-protocol" },
+    { name = "helix-agent-runtime", editable = "packages/helix-runtime" },
+    { name = "pydantic", specifier = ">=2.9,<3" },
+    { name = "pydantic-settings", specifier = ">=2.5,<3" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30,<3" },
 ]
 
 [[package]]

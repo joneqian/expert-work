@@ -22,7 +22,7 @@
 |------|---------|-----------|
 | **D.1a audit 写者降权** | migration 0008：新 `audit_writer` NOLOGIN 角色；`REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM PUBLIC / app_user`；应用写路径 `SET ROLE audit_writer`。**写入仍走应用层 redactor**，但 DB 层兜底防"操作人改 audit 抹痕"。 | 17 § 8 / 9-M1 |
 | **D.1b ObjectStore Object Lock 语义** | `ObjectStore.put` 增加 `retain_until: datetime \| None` + `lock_mode: Literal["governance","compliance"] \| None` 形参；S3 实现走 `ObjectLockRetainUntilDate`/`ObjectLockMode` 头；MinIO 集成测试启用 Object Lock 桶；in-memory 实现走"软"语义（记录元信息，不真锁）。 | ADR-0004 / 17 § 9-M1 |
-| **D.1c audit WORM 备份 worker** | audit_log 加 `backup_acked` bool + `backup_acked_at` 列；新增 `services/audit-backup-worker/`：cursor-poll 未备份行 → 写 `{audit_bucket}/{tenant}/{YYYY}/{MM}/{DD}/{id}.json`（compliance 模式锁 N 天）→ `UPDATE backup_acked = true`；失败重试 + 指数退避；指标 `helix_audit_archive_lag_seconds{tenant}`。 | 17 § 5.6 / 7.1 |
+| **D.1c audit WORM 备份 worker** | migration 0009：`audit_backup_worker` 角色 + 列级 `GRANT UPDATE (backup_acked, backup_acked_at)`（保持 0008 整表 REVOKE 不变）；新增 `services/audit-backup-worker/`：cursor-poll 未备份行 → 写 `{audit_bucket}/{tenant}/{YYYY}/{MM}/{DD}/{id}.json`（compliance 模式锁 N 天）→ `UPDATE backup_acked = true`；失败重试 + 指数退避；指标 `helix_audit_archive_lag_seconds{tenant}`。 | 17 § 5.6 / 7.1 |
 | **D.2 TenantAwareRedactor** | 扩展 `helix-runtime/audit/redactor.py`：在现有全局 secret pattern 之上加 **per-tenant `pii_fields` 递归 key-name 掩码**；从 `TenantConfigService` 拉 `pii_fields`；`AuditLogger` 注入工厂；`tenant_config` 缓存命中即 0 额外开销。 | 17 § 5.2 |
 | **D.3 retention TTL + 配置** | migration 0009：`tenant_config` 加 `audit_retention_days` / `event_log_retention_days` （默认 90 / 30，HIPAA pack 调到 2555）；`services/retention-cleanup-job/`：每 tenant 一轮 `DELETE FROM audit_log WHERE tenant_id=? AND occurred_at < ? AND backup_acked=true LIMIT 10000`（事务批处理）；同样清 `event_log`、过期 `token_reservation`、过期 `jwt_blacklist`；保留 SLA 决策文档 [decisions/data-retention.md](../decisions/data-retention.md)。 | 17 § 5.3 / 9-M1；GAPS § 3 #8、§ 6 #19 |
 | **D.4 at-rest 加密 + ADR** | `infra/docker-compose` Postgres / MinIO 卷挂到 LUKS 容器（dev fixture）；`infra/minio` 切 SSE-KMS 启用；ADR-0008：**M0 走 OS/卷层 + 云厂托管 RDS encryption（生产）**，不引入 `pg_tde`；密钥管理与 ADR-0007 SecretStore 对齐（dev 走 minio 自带 KES，prod 走云 KMS）。 | GAPS § 4 #9 |
@@ -133,10 +133,31 @@ op.execute("REVOKE UPDATE, DELETE, TRUNCATE ON TABLE audit_log FROM PUBLIC;")
 # 然后由应用层 SET ROLE audit_writer 写入。
 ```
 
-**0009（D.3）—— retention 字段 + cleanup 标识**：
+**0009（D.1c）—— `audit_backup_worker` 角色 + 列级 UPDATE 权限**：
 
 ```python
-# 0009_retention_config.py
+# 0009_audit_backup_worker_role.py
+op.execute("""
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='audit_backup_worker') THEN
+            CREATE ROLE audit_backup_worker NOLOGIN BYPASSRLS;
+            -- BYPASSRLS 同 audit_writer / audit_reader 的理由：cross-tenant
+            -- 受信任 worker 代写，否则 FORCE-RLS WITH CHECK 会要求逐行
+            -- 设置 app.tenant_id。
+        END IF;
+    END $$;
+""")
+op.execute("GRANT USAGE ON SCHEMA public TO audit_backup_worker;")
+op.execute("GRANT SELECT ON TABLE audit_log TO audit_backup_worker;")
+# 列级 UPDATE：仅备份标志位；其他列保持 0008 整表 REVOKE。
+op.execute("GRANT UPDATE (backup_acked, backup_acked_at) ON TABLE audit_log TO audit_backup_worker;")
+```
+
+**0010（D.3）—— retention 字段 + cleanup 标识**：
+
+```python
+# 0010_retention_config.py
 op.add_column(
     "tenant_config",
     sa.Column("audit_retention_days", sa.Integer(), nullable=False, server_default="90"),
@@ -453,6 +474,7 @@ D.1b ObjectStore Object Lock 语义
      - tests/test_object_store_object_lock.py（unit + minio integration）
 
 D.1c audit WORM backup worker
+     - migration 0009：audit_backup_worker 角色 + 列级 UPDATE 权限
      - services/audit-backup-worker/（pyproject + src + tests）
      - infra/docker-compose 加 worker container
      - infra/minio 配 audit bucket Object Lock enabled
@@ -466,7 +488,7 @@ D.2  TenantAwareRedactor + AuditLogger 接入
      - 旧 DefaultSecretRedactor 保留为兜底（在 tenant_config 不可用时 fallback）
 
 D.3  retention TTL job + tenant_config 字段
-     - migration 0009：audit_retention_days / event_log_retention_days + check
+     - migration 0010：audit_retention_days / event_log_retention_days + check
      - services/retention-cleanup-job/
      - protocol/tenant_config.py 增字段
      - decisions/data-retention.md（保留 SLA）

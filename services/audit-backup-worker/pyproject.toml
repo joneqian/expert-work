@@ -1,0 +1,27 @@
+[project]
+name = "helix-agent-audit-backup-worker"
+version = "0.0.0"
+description = "Helix-Agent audit-log WORM backup worker (Stream D.1c)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    { name = "joneqian", email = "qian.qing0926@gmail.com" },
+]
+dependencies = [
+    "helix-agent-common",
+    "helix-agent-persistence",
+    "helix-agent-protocol",
+    "helix-agent-runtime",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.5,<3",
+    "sqlalchemy[asyncio]>=2.0.30,<3",
+    "asyncpg>=0.29,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/audit_backup_worker"]

@@ -69,7 +69,7 @@ jobs:
         run: uv sync --frozen
 
       - name: mypy strict
-        run: uv run mypy packages
+        run: uv run mypy packages services/audit-backup-worker/src
 
   test:
     name: Test (pytest)
