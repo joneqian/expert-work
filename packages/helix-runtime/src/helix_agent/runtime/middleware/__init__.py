@@ -21,6 +21,12 @@ from helix_agent.runtime.middleware.base import (
 from helix_agent.runtime.middleware.chain import (
     MiddlewareChain as MiddlewareChain,
 )
+from helix_agent.runtime.middleware.dynamic_context import (
+    DynamicContextMiddleware as DynamicContextMiddleware,
+)
+from helix_agent.runtime.middleware.dynamic_context import (
+    default_token_estimator as default_token_estimator,
+)
 from helix_agent.runtime.middleware.errors import (
     ChainCycleError as ChainCycleError,
 )
@@ -39,9 +45,11 @@ __all__ = [
     "CallNext",
     "ChainCycleError",
     "DuplicateMiddlewareError",
+    "DynamicContextMiddleware",
     "Middleware",
     "MiddlewareChain",
     "MiddlewareContext",
     "MiddlewareError",
     "UnknownAnchorError",
+    "default_token_estimator",
 ]
