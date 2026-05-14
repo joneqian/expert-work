@@ -10,9 +10,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, Literal
 
-from helix_agent.runtime.storage.base import ObjectNotFoundError, ObjectStoreError
+from helix_agent.runtime.storage.base import (
+    LockMode,
+    ObjectNotFoundError,
+    ObjectStoreError,
+    validate_lock_args,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +44,10 @@ class S3CompatibleObjectStore:
         *,
         content_type: str | None = None,
         metadata: Mapping[str, str] | None = None,
+        retain_until: datetime | None = None,
+        lock_mode: LockMode | None = None,
     ) -> None:
+        validate_lock_args(retain_until, lock_mode)
         kwargs: dict[str, Any] = {"Bucket": self._bucket, "Key": key, "Body": data}
         if content_type is not None:
             kwargs["ContentType"] = content_type
@@ -46,7 +55,24 @@ class S3CompatibleObjectStore:
             # S3 metadata keys must be ASCII; let the SDK validate. Pass
             # through verbatim — callers carry the contract.
             kwargs["Metadata"] = dict(metadata)
-        await self._client.put_object(**kwargs)
+        if retain_until is not None and lock_mode is not None:
+            # ``ObjectLockRetainUntilDate`` accepts a datetime; aiobotocore
+            # serializes to ISO 8601 with the offset. S3 / MinIO require
+            # the bucket itself to have Object Lock enabled at create-time;
+            # if it isn't, the put surfaces an InvalidRequest which we
+            # forward as ObjectStoreError (no clean way to anticipate
+            # without a HEAD trip). ``ObjectLockMode`` is upper-case.
+            kwargs["ObjectLockRetainUntilDate"] = retain_until
+            kwargs["ObjectLockMode"] = lock_mode.upper()
+        try:
+            await self._client.put_object(**kwargs)
+        except self._client.exceptions.ClientError as exc:
+            # A retention-protected re-put on the same key surfaces as
+            # ``AccessDenied``; bucket-not-Object-Lock-enabled as
+            # ``InvalidRequest``. Wrap both into a single class so call
+            # sites don't have to know about botocore exception shapes.
+            msg = f"put_object failed for key={key!r}: {exc}"
+            raise ObjectStoreError(msg) from exc
 
     async def get(self, key: str) -> bytes:
         try:

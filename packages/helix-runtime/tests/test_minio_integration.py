@@ -1,7 +1,9 @@
 """Integration tests for :class:`S3CompatibleObjectStore` against MinIO.
 
 Boots the same ``infra/docker-compose.yml`` stack used by the PgBouncer
-integration test and exercises the real aiobotocore code path.
+integration test and exercises the real aiobotocore code path. The
+``compose_stack`` fixture lives in ``conftest.py`` so it's shared across
+the storage-integration test files.
 
 The dev bucket is created **inside the fixture** rather than by a
 docker-compose one-shot helper — a separate ``minio-init`` service exits
@@ -14,7 +16,6 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
-from pathlib import Path
 
 import pytest
 from testcontainers.compose import DockerCompose
@@ -27,21 +28,6 @@ from helix_agent.runtime.storage import (
 )
 
 pytestmark = pytest.mark.integration
-
-_INFRA_DIR = Path(__file__).resolve().parents[3] / "infra"
-
-
-@pytest.fixture(scope="module")
-def compose_stack() -> DockerCompose:
-    """Bring up the dev stack for the module's lifetime."""
-    stack = DockerCompose(
-        context=str(_INFRA_DIR),
-        compose_file_name="docker-compose.yml",
-        pull=True,
-        wait=True,
-    )
-    with stack:
-        yield stack
 
 
 def _config(stack: DockerCompose) -> S3CompatibleConfig:

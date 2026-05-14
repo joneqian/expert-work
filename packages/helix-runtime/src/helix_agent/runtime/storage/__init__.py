@@ -5,6 +5,8 @@ factory ``make_object_store`` mirrors the checkpointer / store / stream
 bridge pattern for consistent lifespan management.
 """
 
+from helix_agent.runtime.storage.base import LockMode as LockMode
+from helix_agent.runtime.storage.base import ObjectLockedError as ObjectLockedError
 from helix_agent.runtime.storage.base import ObjectNotFoundError as ObjectNotFoundError
 from helix_agent.runtime.storage.base import ObjectStore as ObjectStore
 from helix_agent.runtime.storage.base import ObjectStoreError as ObjectStoreError
@@ -26,6 +28,8 @@ from helix_agent.runtime.storage.s3_compatible import (
 
 __all__ = [
     "InMemoryObjectStore",
+    "LockMode",
+    "ObjectLockedError",
     "ObjectNotFoundError",
     "ObjectStore",
     "ObjectStoreBackend",

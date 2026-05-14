@@ -173,9 +173,10 @@ class ObjectStore(Protocol):
         ...
 ```
 
-**S3 / MinIO 实现**：将 `retain_until` / `lock_mode` 翻译为 `x-amz-object-lock-retain-until-date` / `x-amz-object-lock-mode` 头。桶必须预启用 Object Lock（IaC 配置；ADR-0008 在部署文档落决策）。
-**In-memory 实现**：把元信息存进 `_records[key].metadata`；如果同 key 再 put 且现存对象 `retain_until > now()` 且 `lock_mode == "compliance"` → 抛 `ObjectLockedError`（用于测试 worm 不可覆盖路径）。
-**调用方约束**：`audit-backup-worker` 永远传 `lock_mode="compliance"`；其它调用方（uploads / snapshot）按需。
+**S3 / MinIO 实现**：将 `retain_until` / `lock_mode` 翻译为 `ObjectLockRetainUntilDate` / `ObjectLockMode` `put_object` 参数。桶必须预启用 Object Lock（IaC 配置；ADR-0008 在部署文档落决策）。
+**关键语义**：S3 Object Lock 是**版本级**保护，每次 put 创建新版本；compliance 模式拦截的是"在 retain_until 之前删除该版本"，**不**拦同 key 再 put。审计 WORM 的真正保证由"该版本不可删"提供，配合 D.1c worker 用单调递增的 `audit_log.id` 作 key 避免误写。
+**In-memory 实现**：把元信息存进 `_records[key]`；如果同 key 再 put 且现存对象 `retain_until > now()` 且 `lock_mode == "compliance"` → 抛 `ObjectLockedError`（不模拟 versioning；这是测试 + worker 重试路径的"已写过"信号）。
+**调用方约束**：`audit-backup-worker` 永远传 `lock_mode="compliance"`；幂等性由 DB 侧 `backup_acked` 列保证而非依赖 S3 put-side 拒绝。
 
 ### 2.4 audit WORM backup worker 状态机
 
@@ -208,7 +209,7 @@ loop forever:
             # 默认间隔 max(2s, 2 ** retries * 1s)，capped at 60s。
 ```
 
-**幂等性**：同 id 写两次 → S3 在 compliance 模式下第二次 put 报错；worker 把这种错认为"已写过、UPDATE acked"即可（解决"上一轮 put 成功但 UPDATE 没成功的奔溃"路径）。
+**幂等性**：同 id 写两次 → S3 创建第二个版本（compliance 拦的是 delete，不拦 put）；唯一一致性源是 DB 侧 `backup_acked` 列。worker 在写之前先 SELECT `backup_acked`；写完 UPDATE。失败重启场景：上一轮 put 成功 + UPDATE 没成功 → 这一轮发现 backup_acked=false → put 再写一遍（新版本无害）+ UPDATE。多版本本身不计入合规可疑（每个版本都受 retention 保护）。
 
 **指标**：
 - `helix_audit_backup_processed_total{tenant,result}` counter
