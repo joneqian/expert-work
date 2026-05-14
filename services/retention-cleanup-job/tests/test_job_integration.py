@@ -107,19 +107,35 @@ def _provision_app_role(sync_dsn: str) -> None:
 @pytest.fixture
 def db_fixture(
     postgres_container: PostgresContainer,
-) -> Iterator[AsyncEngine]:
+) -> Iterator[tuple[AsyncEngine, str]]:
+    sync_admin_dsn = _sync_dsn(postgres_container)
     cfg = Config(str(ALEMBIC_INI))
-    cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
+    cfg.set_main_option("sqlalchemy.url", sync_admin_dsn)
     command.upgrade(cfg, "head")
-    _provision_app_role(_sync_dsn(postgres_container))
+    _provision_app_role(sync_admin_dsn)
+
+    # The session-scoped ``postgres_container`` is shared across tests
+    # in this module, so a prior test's leftover rows would leak into
+    # later tests' ``audit_skipped_unacked`` / row counts. TRUNCATE
+    # the three tables this job touches as the bootstrap superuser
+    # before every case.
+    admin = create_engine(sync_admin_dsn, isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as conn:
+            conn.execute(text("TRUNCATE TABLE audit_log RESTART IDENTITY"))
+            conn.execute(text("TRUNCATE TABLE event_log RESTART IDENTITY"))
+            conn.execute(text("TRUNCATE TABLE jwt_blacklist"))
+            conn.execute(text("TRUNCATE TABLE tenant_config CASCADE"))
+    finally:
+        admin.dispose()
 
     app_dsn = _rewrite(_async_dsn(postgres_container), APP_ROLE, APP_PASSWORD)
     engine = create_async_engine_from_config(DatabaseConfig(dsn=app_dsn))
-    yield engine
+    yield engine, sync_admin_dsn
 
 
-async def _seed_tenant_config(
-    engine: AsyncEngine,
+def _seed_tenant_config(
+    sync_admin_dsn: str,
     *,
     tenant_id: UUID,
     audit_days: int,
@@ -133,8 +149,7 @@ async def _seed_tenant_config(
     ``TenantConfigService`` (admin endpoint middleware sets the GUC);
     this test exercises the cleanup job, not the seeding path.
     """
-    sync_admin = _sync_dsn_from_engine(engine)
-    admin = create_engine(sync_admin, isolation_level="AUTOCOMMIT")
+    admin = create_engine(sync_admin_dsn, isolation_level="AUTOCOMMIT")
     try:
         with admin.connect() as conn:
             conn.execute(
@@ -163,8 +178,8 @@ def _audit_entry(tenant_id: UUID, *, suffix: str) -> AuditEntry:
     )
 
 
-async def _set_audit_row_age(
-    engine: AsyncEngine, *, audit_id: int, days_ago: int, backup_acked: bool
+def _set_audit_row_age(
+    sync_admin_dsn: str, *, audit_id: int, days_ago: int, backup_acked: bool
 ) -> None:
     """Time-travel one audit_log row + flip its backup_acked marker.
 
@@ -174,9 +189,7 @@ async def _set_audit_row_age(
     ``audit_backup_worker``. The test fixture cheats by running the
     UPDATE as the bootstrap superuser via a direct sync connection.
     """
-    # Build a sync admin URL from the same testcontainer.
-    sync_admin = _sync_dsn_from_engine(engine)
-    admin = create_engine(sync_admin, isolation_level="AUTOCOMMIT")
+    admin = create_engine(sync_admin_dsn, isolation_level="AUTOCOMMIT")
     try:
         with admin.connect() as conn:
             conn.execute(
@@ -193,27 +206,15 @@ async def _set_audit_row_age(
         admin.dispose()
 
 
-def _sync_dsn_from_engine(engine: AsyncEngine) -> str:
-    """Helper: get a bootstrap (admin) sync DSN by swapping user + driver."""
-    async_url = engine.url
-    # The bootstrap username for the testcontainers postgres is "test"
-    # by default. Build the URL freshly from the container env rather
-    # than parsing back from the app DSN.
-    host = async_url.host or "localhost"
-    port = async_url.port or 5432
-    db = async_url.database or "test"
-    return f"postgresql+psycopg://test:test@{host}:{port}/{db}"
-
-
 @pytest.mark.asyncio
 async def test_audit_log_acked_old_rows_deleted_unacked_skipped(
-    db_fixture: AsyncEngine,
+    db_fixture: tuple[AsyncEngine, str],
 ) -> None:
     """Acked + past-retention → deleted. Unacked + past-retention → preserved + counted."""
-    engine = db_fixture
+    engine, sync_admin = db_fixture
     try:
         tenant = uuid4()
-        await _seed_tenant_config(engine, tenant_id=tenant, audit_days=30, event_days=30)
+        _seed_tenant_config(sync_admin, tenant_id=tenant, audit_days=30, event_days=30)
 
         sf = create_async_session_factory(engine)
         store = SqlAuditLogStore(sf)
@@ -224,11 +225,11 @@ async def test_audit_log_acked_old_rows_deleted_unacked_skipped(
             ids.append(written.id)
 
         # Row 0: acked + old → should be deleted
-        await _set_audit_row_age(engine, audit_id=ids[0], days_ago=60, backup_acked=True)
+        _set_audit_row_age(sync_admin, audit_id=ids[0], days_ago=60, backup_acked=True)
         # Row 1: unacked + old → must be preserved + counted
-        await _set_audit_row_age(engine, audit_id=ids[1], days_ago=60, backup_acked=False)
+        _set_audit_row_age(sync_admin, audit_id=ids[1], days_ago=60, backup_acked=False)
         # Row 2: acked + recent → not eligible
-        await _set_audit_row_age(engine, audit_id=ids[2], days_ago=1, backup_acked=True)
+        _set_audit_row_age(sync_admin, audit_id=ids[2], days_ago=1, backup_acked=True)
 
         job = RetentionCleanupJob(db_session_factory=sf, batch_size=10000)
         report = await job.run_once()
@@ -255,14 +256,16 @@ async def test_audit_log_acked_old_rows_deleted_unacked_skipped(
 
 
 @pytest.mark.asyncio
-async def test_per_tenant_retention_isolated(db_fixture: AsyncEngine) -> None:
+async def test_per_tenant_retention_isolated(
+    db_fixture: tuple[AsyncEngine, str],
+) -> None:
     """Tenant A's 7-day TTL deletes its acked-old rows; tenant B's 90-day keeps theirs."""
-    engine = db_fixture
+    engine, sync_admin = db_fixture
     try:
         tenant_a = uuid4()
         tenant_b = uuid4()
-        await _seed_tenant_config(engine, tenant_id=tenant_a, audit_days=7, event_days=30)
-        await _seed_tenant_config(engine, tenant_id=tenant_b, audit_days=90, event_days=30)
+        _seed_tenant_config(sync_admin, tenant_id=tenant_a, audit_days=7, event_days=30)
+        _seed_tenant_config(sync_admin, tenant_id=tenant_b, audit_days=90, event_days=30)
 
         sf = create_async_session_factory(engine)
         store = SqlAuditLogStore(sf)
@@ -271,8 +274,8 @@ async def test_per_tenant_retention_isolated(db_fixture: AsyncEngine) -> None:
         assert a_row.id is not None and b_row.id is not None
 
         # Both 30 days old, both acked.
-        await _set_audit_row_age(engine, audit_id=a_row.id, days_ago=30, backup_acked=True)
-        await _set_audit_row_age(engine, audit_id=b_row.id, days_ago=30, backup_acked=True)
+        _set_audit_row_age(sync_admin, audit_id=a_row.id, days_ago=30, backup_acked=True)
+        _set_audit_row_age(sync_admin, audit_id=b_row.id, days_ago=30, backup_acked=True)
 
         job = RetentionCleanupJob(db_session_factory=sf, batch_size=10000)
         report = await job.run_once()
@@ -290,29 +293,32 @@ async def test_per_tenant_retention_isolated(db_fixture: AsyncEngine) -> None:
 
 
 @pytest.mark.asyncio
-async def test_event_log_retention_deletes_old_rows(db_fixture: AsyncEngine) -> None:
+async def test_event_log_retention_deletes_old_rows(
+    db_fixture: tuple[AsyncEngine, str],
+) -> None:
     """event_log uses ``event_log_retention_days``; no backup gate."""
-    engine = db_fixture
+    engine, sync_admin = db_fixture
     try:
         tenant = uuid4()
-        await _seed_tenant_config(engine, tenant_id=tenant, audit_days=90, event_days=7)
+        _seed_tenant_config(sync_admin, tenant_id=tenant, audit_days=90, event_days=7)
 
-        sync_admin = _sync_dsn_from_engine(engine)
         admin = create_engine(sync_admin, isolation_level="AUTOCOMMIT")
         try:
             with admin.connect() as conn:
-                # Old row + recent row for the same tenant.
+                # ``event_log`` schema (migration 0001): id BigInt
+                # autoincrement; columns are ``event_type`` /
+                # ``payload`` etc. ``thread_id`` is UUID, not a
+                # generated string.
                 insert_old = text(
                     "INSERT INTO event_log "
-                    "(id, thread_id, tenant_id, seq, type, payload, created_at) "
-                    "VALUES (gen_random_uuid(), gen_random_uuid(), :t, 1, "
+                    "(thread_id, tenant_id, seq, event_type, payload, created_at) "
+                    "VALUES (gen_random_uuid(), :t, 1, "
                     "'tick', '{}'::jsonb, now() - interval '30 days')"
                 )
                 insert_recent = text(
                     "INSERT INTO event_log "
-                    "(id, thread_id, tenant_id, seq, type, payload, created_at) "
-                    "VALUES (gen_random_uuid(), gen_random_uuid(), :t, 2, "
-                    "'tick', '{}'::jsonb, now())"
+                    "(thread_id, tenant_id, seq, event_type, payload, created_at) "
+                    "VALUES (gen_random_uuid(), :t, 2, 'tick', '{}'::jsonb, now())"
                 )
                 conn.execute(insert_old, {"t": str(tenant)})
                 conn.execute(insert_recent, {"t": str(tenant)})
@@ -338,14 +344,15 @@ async def test_event_log_retention_deletes_old_rows(db_fixture: AsyncEngine) -> 
 
 
 @pytest.mark.asyncio
-async def test_jwt_blacklist_expired_rows_deleted(db_fixture: AsyncEngine) -> None:
+async def test_jwt_blacklist_expired_rows_deleted(
+    db_fixture: tuple[AsyncEngine, str],
+) -> None:
     """jwt_blacklist is global; ``expires_at < now()`` rows are pruned."""
-    engine = db_fixture
+    engine, sync_admin = db_fixture
     try:
         # Seed one expired + one future row directly.
         expired_jti = "jti-expired"
         future_jti = "jti-future"
-        sync_admin = _sync_dsn_from_engine(engine)
         admin = create_engine(sync_admin, isolation_level="AUTOCOMMIT")
         try:
             past = datetime.now(tz=UTC) - timedelta(days=1)
@@ -385,12 +392,14 @@ async def test_jwt_blacklist_expired_rows_deleted(db_fixture: AsyncEngine) -> No
 
 
 @pytest.mark.asyncio
-async def test_run_once_idempotent_on_empty_state(db_fixture: AsyncEngine) -> None:
+async def test_run_once_idempotent_on_empty_state(
+    db_fixture: tuple[AsyncEngine, str],
+) -> None:
     """No old rows → all-zero report; safe to run repeatedly."""
-    engine = db_fixture
+    engine, sync_admin = db_fixture
     try:
         tenant = uuid4()
-        await _seed_tenant_config(engine, tenant_id=tenant, audit_days=90, event_days=30)
+        _seed_tenant_config(sync_admin, tenant_id=tenant, audit_days=90, event_days=30)
 
         sf = create_async_session_factory(engine)
         job = RetentionCleanupJob(db_session_factory=sf, batch_size=10000)
