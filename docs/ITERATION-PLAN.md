@@ -232,10 +232,10 @@
 
 > A.4 audit_log 表 + A.10 全链路 TLS 已在 Stream A 完成；本 Stream 在它们之上做产品级数据保护。
 
-- [ ] **D.1 审计日志不可篡改**（落实 P0 #6）— append-only + WORM 备份到 S3 Object Lock（基于 A.5 对象存储）
-- [ ] **D.2 PII redactor 中间件**（落实 P0 #7）— 通用 + per-tenant `pii_fields` 配置驱动；接入 E.2 锚点系统的固定 anchor 位
-- [ ] **D.3 数据保留策略文档 + TTL 自动清理 job**（落实 P0 #8、#19）
-- [ ] **D.4 Postgres TDE**（落实 P0 #9 at-rest）— 数据落盘加密
+- [x] **D.1 审计日志不可篡改**（落实 P0 #6）— append-only + WORM 备份到 S3 Object Lock（基于 A.5 对象存储）
+- [x] **D.2 PII redactor 中间件**（落实 P0 #7）— 通用 + per-tenant `pii_fields` 配置驱动；接入 E.2 锚点系统的固定 anchor 位
+- [x] **D.3 数据保留策略文档 + TTL 自动清理 job**（落实 P0 #8、#19）
+- [x] **D.4 Postgres TDE**（落实 P0 #9 at-rest）— 数据落盘加密（ADR-0008：OS/卷层 + 云厂托管 RDS；不引入 pg_tde）
 
 **Stream D Verification**：插入含 PII 数据走 Orchestrator，audit log 写入并被 redactor 处理；WORM 桶禁止 overwrite；TDE 启用后磁盘文件加密
 

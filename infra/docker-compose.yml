@@ -113,6 +113,13 @@ services:
     environment:
       MINIO_ROOT_USER: ${HELIX_MINIO_ROOT_USER:-helix_agent}
       MINIO_ROOT_PASSWORD: ${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio}
+      # D.4 SSE-KMS. Set ``HELIX_MINIO_KMS_SECRET_KEY`` (format:
+      # ``key-name:base64-32-byte-key``) to activate MinIO's inline
+      # KMS provider — bucket-level SSE-KMS works without spinning
+      # up KES. Empty / unset → encryption off (default dev path).
+      # See [ADR-0008](../docs/adr/0008-data-at-rest-encryption.md)
+      # for the prod path (OSS SSE-KMS via Aliyun KMS).
+      MINIO_KMS_SECRET_KEY: ${HELIX_MINIO_KMS_SECRET_KEY:-}
     ports:
       - "9000:9000"  # S3 API
       - "9001:9001"  # Web console

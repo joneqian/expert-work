@@ -107,3 +107,74 @@ Extensions installed:
 ```bash
 docker compose down -v   # wipes postgres-data volume
 ```
+
+## At-rest encryption (D.4)
+
+Per [ADR-0008](../docs/adr/0008-data-at-rest-encryption.md). M0 ships
+without at-rest encryption by default so the fixture stays plug-and-play;
+enable explicitly when you need to verify the SSE-KMS / encrypted-volume
+path or run a security-review pass.
+
+### MinIO SSE-KMS (dev)
+
+```bash
+# 1. Generate a 32-byte master key; the value is base64 of raw bytes.
+export HELIX_MINIO_KMS_SECRET_KEY="helix-master:$(openssl rand -base64 32)"
+
+# 2. Restart MinIO with the key in env.
+docker compose up -d --force-recreate minio
+
+# 3. Mark a bucket SSE-KMS-default (one-off via mc).
+docker run --rm --network infra_default \
+    -e MC_HOST_local="http://${HELIX_MINIO_ROOT_USER:-helix_agent}:${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio}@minio:9000" \
+    minio/mc:RELEASE.2025-08-13T08-35-41Z \
+    mc encrypt set sse-kms helix-master local/helix-agent-dev
+
+# 4. Verify: write an object + inspect the on-disk file inside the
+#    container. Object body should be ciphertext.
+docker exec helix-minio sh -c 'head -c 64 /data/helix-agent-dev/<key>/xl.meta'
+```
+
+The same `mc encrypt set` line applied to the audit-WORM bucket
+(`helix-agent-audit-worm`, D.1c) gives SSE-KMS + Object Lock together.
+
+For a KES-backed dev setup (closer to prod), spin up KES manually next
+to this compose; ADR-0008 keeps that pathway optional.
+
+### Postgres at-rest (dev)
+
+- **macOS host**: FileVault is enough — the whole disk is encrypted; the
+  named `postgres-data` Docker volume sits on the encrypted filesystem.
+  No additional setup needed.
+- **Linux host**: replace the named volume with a bind-mount onto a
+  LUKS-encrypted path. Outline (one-off, host-side):
+
+  ```bash
+  # As root, one-shot:
+  sudo dd if=/dev/zero of=/var/lib/helix/pgdata.luks bs=1G count=10
+  sudo cryptsetup luksFormat /var/lib/helix/pgdata.luks
+  sudo cryptsetup luksOpen /var/lib/helix/pgdata.luks helix-pgdata
+  sudo mkfs.ext4 /dev/mapper/helix-pgdata
+  sudo mkdir -p /mnt/helix-pgdata
+  sudo mount /dev/mapper/helix-pgdata /mnt/helix-pgdata
+
+  # Each boot, before ``docker compose up``:
+  sudo cryptsetup luksOpen /var/lib/helix/pgdata.luks helix-pgdata
+  sudo mount /dev/mapper/helix-pgdata /mnt/helix-pgdata
+  ```
+
+  Then edit the `postgres` service's `volumes:` in `docker-compose.yml`
+  to bind-mount `/mnt/helix-pgdata:/var/lib/postgresql/data`. Locked
+  state → raw `pgdata/*` is ciphertext (verification gate per
+  [STREAM-D-DESIGN § 5 #4](../docs/streams/STREAM-D-DESIGN.md)).
+
+### Production
+
+Prod skips both of the above:
+
+- Aliyun **RDS PostgreSQL**: enable "instance encryption" at create
+  time (Aliyun KMS-backed).
+- Aliyun **OSS**: SSE-KMS bucket policy at create time (same KMS).
+
+See [ADR-0008 § 2](../docs/adr/0008-data-at-rest-encryption.md) for the
+full prod wiring + key-rotation cadence.
