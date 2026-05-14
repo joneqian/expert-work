@@ -160,26 +160,15 @@ class RetentionCleanupJob:
         return count
 
     async def _delete_event_log(self) -> int:
+        # Uses ``RETURNING id`` like ``_delete_audit_log`` does — without
+        # RETURNING, asyncpg/SQLAlchemy 2.0 takes a different execution
+        # path on DELETE that silently loses the ``SET LOCAL ROLE``
+        # state and yields ``permission denied`` even when
+        # ``has_table_privilege`` confirms the GRANT. RETURNING forces
+        # the prepared/portal path which preserves the role. We use
+        # ``RETURNING id`` (cheap, indexed) and count rows.
         async with self._sf() as session:
             await session.execute(_SET_RETENTION_WORKER_ROLE)
-            # DIAGNOSTIC (D.3): the CI integration test hit a
-            # "permission denied for table event_log" we can't repro
-            # locally. ``print`` (not logger) so pytest's stdout
-            # capture shows the values on failure.
-            diag_result = await session.execute(
-                text(
-                    "SELECT current_user, session_user, "
-                    "has_table_privilege(current_user, 'event_log', 'DELETE') as can_del, "
-                    "has_table_privilege(current_user, 'event_log', 'SELECT') as can_sel, "
-                    "(SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) as bypass"
-                )
-            )
-            diag = diag_result.first()
-            if diag is not None:
-                print(
-                    f"[D.3 DIAG] event_log user={diag[0]} session={diag[1]} "
-                    f"can_delete={diag[2]} can_select={diag[3]} bypassrls={diag[4]}"
-                )
             result = await session.execute(
                 text(
                     """
@@ -192,13 +181,14 @@ class RetentionCleanupJob:
                               now() - (c.event_log_retention_days || ' days')::interval
                         LIMIT :batch
                     )
+                    RETURNING id
                     """
                 ),
                 {"batch": self._batch_size},
             )
-            rowcount = int(result.rowcount or 0)  # type: ignore[attr-defined]
+            rows = result.fetchall()
             await session.commit()
-        return rowcount
+        return len(rows)
 
     async def _delete_expired_jwt_blacklist(self) -> int:
         """``jwt_blacklist`` is global — no tenant_id, expire_at-driven."""
@@ -213,10 +203,11 @@ class RetentionCleanupJob:
                         WHERE expires_at < now()
                         LIMIT :batch
                     )
+                    RETURNING jti
                     """
                 ),
                 {"batch": self._batch_size},
             )
-            rowcount = int(result.rowcount or 0)  # type: ignore[attr-defined]
+            rows = result.fetchall()
             await session.commit()
-        return rowcount
+        return len(rows)
