@@ -7,7 +7,7 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, Index, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Index, Text, false, func, text
 from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,8 +18,11 @@ from helix_agent.persistence.base import Base
 class AuditLogRow(Base):
     """Admin / compliance operation audit log.
 
-    Append-only by application contract; DB-level INSERT-only role (``audit_writer``)
-    + WORM backup to OSS Object Lock are added in Stream D.1, not in A.1.
+    Append-only at both the application contract and the DB layer
+    (D.1a: ``audit_writer`` role + REVOKE UPDATE/DELETE/TRUNCATE FROM
+    PUBLIC). WORM backup to ObjectStore with Object Lock retention is
+    added in Stream D.1c — the ``backup_acked`` / ``backup_acked_at``
+    columns are the worker's progress marker.
 
     Schema follows ADR-0002 §audit_log + subsystems/17-audit-log §3.1.
     """
@@ -46,6 +49,16 @@ class AuditLogRow(Base):
         nullable=False,
         server_default=func.now(),
     )
+    backup_acked: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=false(),
+        default=False,
+    )
+    backup_acked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     __table_args__ = (
         Index("audit_log_tenant_time_idx", "tenant_id", "occurred_at"),
@@ -53,4 +66,9 @@ class AuditLogRow(Base):
         Index("audit_log_resource_idx", "tenant_id", "resource_type", "resource_id", "occurred_at"),
         Index("audit_log_action_idx", "tenant_id", "action", "occurred_at"),
         Index("audit_log_request_idx", "request_id"),
+        Index(
+            "audit_log_backup_pending_idx",
+            "occurred_at",
+            postgresql_where=text("backup_acked = false"),
+        ),
     )

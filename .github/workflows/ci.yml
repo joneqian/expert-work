@@ -46,6 +46,9 @@ jobs:
       - name: RLS naming lint (STREAM-C-DESIGN § 2.4)
         run: uv run python tools/persistence/check_rls_naming.py
 
+      - name: audit-write path lint (STREAM-D-DESIGN § 6)
+        run: uv run python tools/persistence/check_audit_insert_path.py
+
   typecheck:
     name: Typecheck (mypy)
     runs-on: ubuntu-latest

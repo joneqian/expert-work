@@ -116,7 +116,12 @@ op.execute("""
     DO $$
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='audit_writer') THEN
-            CREATE ROLE audit_writer NOLOGIN;
+            CREATE ROLE audit_writer NOLOGIN BYPASSRLS;
+            -- BYPASSRLS mirrors audit_reader (0005). The audit write path
+            -- legitimately inserts rows for every tenant; without bypass
+            -- the FORCE-RLS WITH CHECK policy on audit_log would require
+            -- threading app.tenant_id into every write site even though
+            -- the writer is trusted single-purpose code.
         END IF;
     END $$;
 """)
