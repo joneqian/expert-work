@@ -39,7 +39,7 @@ from control_plane.api import (
     build_tenant_config_router,
     build_tenant_quotas_router,
 )
-from control_plane.audit import build_default_audit_logger
+from control_plane.audit import TenantConfigPiiResolver, build_default_audit_logger
 from control_plane.auth import (
     ApiKeyVerifier,
     HTTPJWKSProvider,
@@ -147,7 +147,12 @@ def create_app(
     )
     resolved_repo = agent_spec_repo or InMemoryAgentSpecStore()
     resolved_threads = thread_meta_repo or InMemoryThreadMetaStore()
-    resolved_audit = audit_logger or build_default_audit_logger()
+    # Late-bound PII resolver: lets the audit logger reference
+    # tenant_config without forcing it to exist yet (D.2 cycle break).
+    pii_resolver = TenantConfigPiiResolver()
+    resolved_audit = audit_logger or build_default_audit_logger(
+        pii_fields_resolver=pii_resolver,
+    )
     resolved_loader = manifest_loader or ManifestLoader()
     resolved_verifier = jwt_verifier or _build_default_jwt_verifier(resolved_settings)
     resolved_mtls = mtls_verifier or _build_default_mtls_verifier(resolved_settings)
@@ -168,6 +173,8 @@ def create_app(
         audit_logger=resolved_audit,
         ttl_s=float(resolved_settings.tenant_config_cache_ttl_s),
     )
+    # Complete the D.2 cycle: TenantAwareRedactor → resolver → service.
+    pii_resolver.bind(resolved_tenant_config_service)
     reaper: ReservationReaper | None = (
         ReservationReaper(
             reservation_store=resolved_reservations,

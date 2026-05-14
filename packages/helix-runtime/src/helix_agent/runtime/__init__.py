@@ -22,7 +22,13 @@ from helix_agent.runtime.audit import (
     JsonlFileAuditFallbackQueue as JsonlFileAuditFallbackQueue,
 )
 from helix_agent.runtime.audit import (
+    PiiFieldsResolver as PiiFieldsResolver,
+)
+from helix_agent.runtime.audit import (
     RedactionResult as RedactionResult,
+)
+from helix_agent.runtime.audit import (
+    TenantAwareRedactor as TenantAwareRedactor,
 )
 from helix_agent.runtime.checkpointer import (
     CheckpointerBackend as CheckpointerBackend,
@@ -144,6 +150,7 @@ __all__ = [
     "ObjectStore",
     "ObjectStoreBackend",
     "ObjectStoreError",
+    "PiiFieldsResolver",
     "PostgresBackupConfig",
     "PostgresFullBackup",
     "RedactionResult",
@@ -156,6 +163,7 @@ __all__ = [
     "StreamBridge",
     "StreamBridgeBackend",
     "StreamEvent",
+    "TenantAwareRedactor",
     "get_current_tenant",
     "get_current_trace_id",
     "make_checkpointer",

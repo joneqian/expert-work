@@ -13,14 +13,20 @@ from helix_agent.runtime.audit.fallback import (
 )
 from helix_agent.runtime.audit.logger import AuditLogger as AuditLogger
 from helix_agent.runtime.audit.logger import RedactionHitCallback as RedactionHitCallback
+from helix_agent.runtime.audit.redactor import PII_FIELD_HIT as PII_FIELD_HIT
 from helix_agent.runtime.audit.redactor import REPLACEMENT as REPLACEMENT
 from helix_agent.runtime.audit.redactor import AuditRedactor as AuditRedactor
 from helix_agent.runtime.audit.redactor import (
     DefaultSecretRedactor as DefaultSecretRedactor,
 )
+from helix_agent.runtime.audit.redactor import PiiFieldsResolver as PiiFieldsResolver
 from helix_agent.runtime.audit.redactor import RedactionResult as RedactionResult
+from helix_agent.runtime.audit.redactor import (
+    TenantAwareRedactor as TenantAwareRedactor,
+)
 
 __all__ = [
+    "PII_FIELD_HIT",
     "REPLACEMENT",
     "AuditFallbackQueue",
     "AuditLogger",
@@ -29,6 +35,8 @@ __all__ = [
     "FallbackRecord",
     "InMemoryAuditFallbackQueue",
     "JsonlFileAuditFallbackQueue",
+    "PiiFieldsResolver",
     "RedactionHitCallback",
     "RedactionResult",
+    "TenantAwareRedactor",
 ]

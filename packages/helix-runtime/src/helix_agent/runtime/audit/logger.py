@@ -66,8 +66,16 @@ class AuditLogger:
         Never raises on a store failure: the (already-redacted) entry is
         enqueued to the fallback queue instead and an ``error`` log is
         emitted.
+
+        D.2: the redactor Protocol is now async + tenant-aware. We pass
+        ``entry.tenant_id`` through so :class:`TenantAwareRedactor` can
+        look up ``tenant_config.pii_fields`` without callers having to
+        know about it. :class:`DefaultSecretRedactor` ignores the id.
         """
-        redacted = self._redactor.redact(entry.details)
+        redacted = await self._redactor.redact(
+            tenant_id=entry.tenant_id,
+            details=entry.details,
+        )
         if redacted.hits and self._on_redact_hit is not None:
             for name, count in redacted.hits.items():
                 self._on_redact_hit(name, count)

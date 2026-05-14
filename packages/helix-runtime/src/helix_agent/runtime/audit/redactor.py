@@ -1,23 +1,47 @@
 """PII / secret redaction for ``AuditEntry.details``.
 
-Design: subsystems/17-audit-log § 5.2.
+Design: subsystems/17-audit-log § 5.2 + STREAM-D-DESIGN § 2.5.
 
-M0 ships a fixed set of **global** secret patterns. Per-tenant
-``pii_fields`` masking depends on ``tenant_config`` (Stream C) and lands
-when that schema exists. Strict-mode rejection (refuse to write when a
-secret is detected) is deferred to a follow-up; the M0 contract is:
-**mask + emit a metric hit** so we never block the audit path on the
-redactor itself.
+The redactor Protocol is **async + tenant-aware** (D.2): every call site
+passes the entry's ``tenant_id`` so a per-tenant ``pii_fields`` lookup
+can happen without threading the id through arbitrary middleware. The
+default secret redactor still ignores ``tenant_id`` — only
+``TenantAwareRedactor`` consults it.
+
+Two redactors are shipped:
+
+* :class:`DefaultSecretRedactor` — fixed global secret patterns (OpenAI
+  keys, JWTs, bcrypt hashes, …). The fallback when no
+  ``TenantConfigService`` is wired and the implementation used by
+  :class:`TenantAwareRedactor` for the global layer.
+* :class:`TenantAwareRedactor` — composes a global redactor with a
+  per-tenant key-name mask driven by ``tenant_config.pii_fields``
+  (D.2). Mini-ADR D-4: keys are matched by **name** (case-insensitive),
+  not by content regex; tenant admins can name fields without learning
+  per-locale regex.
+
+Strict-mode rejection (refuse to write when a secret is detected) is
+still deferred to a follow-up; the M0 contract remains **mask + emit a
+metric hit** so we never block the audit path on the redactor itself.
 """
 
 from __future__ import annotations
 
+import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
+from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 REPLACEMENT = "***REDACTED***"
+
+# Hit-counter key used when ``TenantAwareRedactor`` masks a per-tenant
+# pii_field. Kept distinct from the global ``DEFAULT_PATTERNS`` keys so
+# operators can alert on PII-pattern hits separately.
+PII_FIELD_HIT = "pii_field"
 
 # Patterns are anchored loosely on purpose — secrets pasted into details can
 # appear mid-string (``"Authorization: Bearer eyJ..."``) and we still need
@@ -49,11 +73,30 @@ class RedactionResult:
 class AuditRedactor(Protocol):
     """Strategy interface — call sites depend on this, not the default impl.
 
-    Implementations must be **pure**: same input → same output, no I/O.
+    Implementations should treat the call as "fast + bounded": one
+    redactor call per audit write, on the hot path. The async signature
+    lets :class:`TenantAwareRedactor` consult ``TenantConfigService``
+    (60s cached, near-zero overhead in steady state) without forcing
+    every redactor to be async-IO-bound — :class:`DefaultSecretRedactor`
+    just ignores the ``await`` overhead.
     """
 
-    def redact(self, details: Mapping[str, Any]) -> RedactionResult:
-        """Return a redacted copy of ``details`` plus per-pattern hit counts."""
+    async def redact(
+        self,
+        *,
+        tenant_id: UUID,
+        details: Mapping[str, Any],
+    ) -> RedactionResult:
+        """Return a redacted copy of ``details`` + per-pattern hit counts."""
+
+
+# Resolver type for the per-tenant pii_fields lookup. A bare callable
+# so :class:`TenantAwareRedactor` lives in ``helix-runtime`` without
+# importing ``control_plane.tenancy.TenantConfigService`` (that would
+# be a reverse-direction dependency). The control-plane wiring at
+# ``build_default_audit_logger`` binds the resolver to its own
+# ``TenantConfigService``.
+PiiFieldsResolver = Callable[[UUID], Awaitable[Sequence[str]]]
 
 
 class DefaultSecretRedactor:
@@ -65,12 +108,21 @@ class DefaultSecretRedactor:
     The traversal is **deep**: nested dicts and lists are recursed into, so
     a secret hidden under ``details['request']['headers']['authorization']``
     is still caught.
+
+    ``tenant_id`` is accepted to satisfy the :class:`AuditRedactor`
+    Protocol but ignored — global patterns are uniform across tenants.
     """
 
     def __init__(self, patterns: Mapping[str, re.Pattern[str]] | None = None) -> None:
         self._patterns: dict[str, re.Pattern[str]] = dict(patterns or DEFAULT_PATTERNS)
 
-    def redact(self, details: Mapping[str, Any]) -> RedactionResult:
+    async def redact(
+        self,
+        *,
+        tenant_id: UUID,
+        details: Mapping[str, Any],
+    ) -> RedactionResult:
+        del tenant_id  # global patterns don't vary by tenant
         hits: dict[str, int] = {}
         cleaned = self._walk(details, hits)
         # ``_walk`` returns ``Any``; at the top level the input is a Mapping,
@@ -99,3 +151,108 @@ class DefaultSecretRedactor:
                 hits[name] = hits.get(name, 0) + count
                 out = new_out
         return out
+
+
+class TenantAwareRedactor:
+    """Global secret patterns + per-tenant ``pii_fields`` key-name mask.
+
+    Composition: every audit entry is first run through a
+    :class:`DefaultSecretRedactor` (or any :class:`AuditRedactor`) for
+    global secrets, then the tenant's ``pii_fields`` are looked up via
+    ``pii_fields_resolver`` and any matching key names (case-insensitive)
+    in the nested ``details`` tree are masked.
+
+    Per Mini-ADR D-4 the per-tenant layer uses **key-name** matching,
+    not content regex: tenant admins name fields (``patient_id_card``,
+    ``ssn``) without learning per-locale regex; the global layer is
+    where content patterns belong.
+
+    Resolver failures (tenant has no ``tenant_config`` row yet,
+    ``TenantConfigService`` down) **never block the audit path** — the
+    redactor logs and falls back to global-only. Audit writes are
+    higher priority than per-tenant PII enforcement; D.3 retention
+    cleanup will eventually reconcile.
+    """
+
+    def __init__(
+        self,
+        *,
+        global_redactor: AuditRedactor,
+        pii_fields_resolver: PiiFieldsResolver,
+    ) -> None:
+        self._global = global_redactor
+        self._resolver = pii_fields_resolver
+
+    async def redact(
+        self,
+        *,
+        tenant_id: UUID,
+        details: Mapping[str, Any],
+    ) -> RedactionResult:
+        # Step 1: global content patterns.
+        result = await self._global.redact(tenant_id=tenant_id, details=details)
+
+        # Step 2: per-tenant key-name masking. Soft-fail on resolver
+        # errors so audit writes are never blocked.
+        try:
+            raw_fields = await self._resolver(tenant_id)
+        except Exception:
+            logger.exception(
+                "tenant_aware_redactor.resolver_failed tenant_id=%s; falling back to global-only",
+                tenant_id,
+            )
+            return result
+
+        targets = frozenset(name.lower() for name in raw_fields)
+        if not targets:
+            return result
+
+        masked, pii_hits = _mask_pii_keys(result.redacted, targets)
+        if pii_hits == 0:
+            return result
+
+        combined = dict(result.hits)
+        combined[PII_FIELD_HIT] = combined.get(PII_FIELD_HIT, 0) + pii_hits
+        return RedactionResult(redacted=masked, hits=combined)
+
+
+def _mask_pii_keys(node: Any, targets: frozenset[str]) -> tuple[Any, int]:
+    """Recursively replace values under keys whose lower-cased name ∈ ``targets``.
+
+    Returns ``(new_tree, hit_count)``. The original ``node`` is never
+    mutated. Lists and tuples are walked elementwise; primitives pass
+    through.
+
+    Match semantics: only **dict keys** are inspected — list indices,
+    tuple positions, and string contents are out of scope here (those
+    belong to the global content patterns).
+    """
+    if isinstance(node, Mapping):
+        out: dict[Any, Any] = {}
+        hits = 0
+        for key, value in node.items():
+            if isinstance(key, str) and key.lower() in targets:
+                out[key] = REPLACEMENT
+                hits += 1
+            else:
+                sub, sub_hits = _mask_pii_keys(value, targets)
+                out[key] = sub
+                hits += sub_hits
+        return out, hits
+    if isinstance(node, list):
+        items: list[Any] = []
+        hits = 0
+        for item in node:
+            sub, sub_hits = _mask_pii_keys(item, targets)
+            items.append(sub)
+            hits += sub_hits
+        return items, hits
+    if isinstance(node, tuple):
+        items_t: list[Any] = []
+        hits = 0
+        for item in node:
+            sub, sub_hits = _mask_pii_keys(item, targets)
+            items_t.append(sub)
+            hits += sub_hits
+        return tuple(items_t), hits
+    return node, 0
