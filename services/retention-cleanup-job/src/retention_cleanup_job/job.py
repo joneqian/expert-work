@@ -166,20 +166,20 @@ class RetentionCleanupJob:
             # "permission denied for table event_log" we can't repro
             # locally. ``print`` (not logger) so pytest's stdout
             # capture shows the values on failure.
-            diag = (
-                await session.execute(
-                    text(
-                        "SELECT current_user, session_user, "
-                        "has_table_privilege(current_user, 'event_log', 'DELETE') as can_del, "
-                        "has_table_privilege(current_user, 'event_log', 'SELECT') as can_sel, "
-                        "(SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) as bypass"
-                    )
+            diag_result = await session.execute(
+                text(
+                    "SELECT current_user, session_user, "
+                    "has_table_privilege(current_user, 'event_log', 'DELETE') as can_del, "
+                    "has_table_privilege(current_user, 'event_log', 'SELECT') as can_sel, "
+                    "(SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) as bypass"
                 )
-            ).first()
-            print(
-                f"[D.3 DIAG] event_log user={diag[0]} session={diag[1]} "
-                f"can_delete={diag[2]} can_select={diag[3]} bypassrls={diag[4]}"
             )
+            diag = diag_result.first()
+            if diag is not None:
+                print(
+                    f"[D.3 DIAG] event_log user={diag[0]} session={diag[1]} "
+                    f"can_delete={diag[2]} can_select={diag[3]} bypassrls={diag[4]}"
+                )
             result = await session.execute(
                 text(
                     """
