@@ -254,7 +254,13 @@ async def test_backup_acked_defaults_false(
     store, engine = app_role_store
     try:
         written = await store.append(_entry(uuid4()))
-        async with engine.connect() as conn:
+        async with engine.begin() as conn:
+            # ``helix_app_audit_d1a`` is not BYPASSRLS, so a bare SELECT
+            # under FORCE-RLS with no ``app.tenant_id`` GUC would
+            # filter every row out. Read through the audit_writer role
+            # (BYPASSRLS) — that mirrors how the D.1c WORM-backup
+            # worker will read the same rows.
+            await conn.execute(text("SET LOCAL ROLE audit_writer"))
             row = (
                 await conn.execute(
                     text("SELECT backup_acked, backup_acked_at FROM audit_log WHERE id = :id"),
