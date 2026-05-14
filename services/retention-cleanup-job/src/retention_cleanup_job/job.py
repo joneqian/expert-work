@@ -162,6 +162,27 @@ class RetentionCleanupJob:
     async def _delete_event_log(self) -> int:
         async with self._sf() as session:
             await session.execute(_SET_RETENTION_WORKER_ROLE)
+            # DIAGNOSTIC (D.3): the CI integration test hit a
+            # "permission denied for table event_log" we can't repro
+            # locally. Dump the current_user + has_table_privilege
+            # so the failing run prints unambiguous evidence.
+            diag = (
+                await session.execute(
+                    text(
+                        "SELECT current_user, "
+                        "has_table_privilege(current_user, 'event_log', 'DELETE') as can_del, "
+                        "has_table_privilege(current_user, 'event_log', 'SELECT') as can_sel, "
+                        "(SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user) as bypass"
+                    )
+                )
+            ).first()
+            logger.warning(
+                "retention.event_log.diag user=%s can_delete=%s can_select=%s bypassrls=%s",
+                diag[0] if diag else None,
+                diag[1] if diag else None,
+                diag[2] if diag else None,
+                diag[3] if diag else None,
+            )
             result = await session.execute(
                 text(
                     """
