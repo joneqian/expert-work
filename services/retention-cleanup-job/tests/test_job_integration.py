@@ -102,11 +102,27 @@ def _provision_app_role(sync_dsn: str) -> None:
             conn.execute(text(f"GRANT audit_writer TO {APP_ROLE}"))
             conn.execute(text(f"GRANT retention_cleanup_worker TO {APP_ROLE}"))
             # Give retention_cleanup_worker the LOGIN attribute so the
-            # cleanup job can connect *as* that role directly (avoids
-            # the SET-LOCAL-ROLE / asyncpg quirk described in job.py).
+            # cleanup job can connect *as* that role directly. Include
+            # BYPASSRLS explicitly in case ALTER ROLE ... WITH ... reset
+            # unmentioned attributes in some PG version.
             conn.execute(
-                text(f"ALTER ROLE retention_cleanup_worker WITH LOGIN PASSWORD '{WORKER_PASSWORD}'")
+                text(
+                    f"ALTER ROLE retention_cleanup_worker "
+                    f"WITH LOGIN BYPASSRLS PASSWORD '{WORKER_PASSWORD}'"
+                )
             )
+            role_attrs = conn.execute(
+                text(
+                    "SELECT rolname, rolbypassrls, rolsuper, rolinherit, rolcanlogin "
+                    "FROM pg_roles WHERE rolname = 'retention_cleanup_worker'"
+                )
+            ).first()
+            if role_attrs is not None:
+                print(
+                    f"[D.3 ROLE] retention_cleanup_worker "
+                    f"bypassrls={role_attrs[1]} super={role_attrs[2]} "
+                    f"inherit={role_attrs[3]} login={role_attrs[4]}"
+                )
             # Defensive re-GRANT + relacl dump. We've seen permission
             # denied on event_log + jwt_blacklist despite migration
             # 0010 granting + has_table_privilege confirming True.
