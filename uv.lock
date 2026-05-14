@@ -15,6 +15,7 @@ members = [
     "helix-agent-control-plane",
     "helix-agent-persistence",
     "helix-agent-protocol",
+    "helix-agent-retention-cleanup-job",
     "helix-agent-runtime",
 ]
 
@@ -778,6 +779,7 @@ dependencies = [
     { name = "helix-agent-control-plane" },
     { name = "helix-agent-persistence" },
     { name = "helix-agent-protocol" },
+    { name = "helix-agent-retention-cleanup-job" },
     { name = "helix-agent-runtime" },
 ]
 
@@ -802,6 +804,7 @@ requires-dist = [
     { name = "helix-agent-control-plane", editable = "services/control-plane" },
     { name = "helix-agent-persistence", editable = "packages/helix-persistence" },
     { name = "helix-agent-protocol", editable = "packages/helix-protocol" },
+    { name = "helix-agent-retention-cleanup-job", editable = "services/retention-cleanup-job" },
     { name = "helix-agent-runtime", editable = "packages/helix-runtime" },
 ]
 
@@ -941,6 +944,31 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2.7,<3" }]
+
+[[package]]
+name = "helix-agent-retention-cleanup-job"
+version = "0.0.0"
+source = { editable = "services/retention-cleanup-job" }
+dependencies = [
+    { name = "asyncpg" },
+    { name = "helix-agent-common" },
+    { name = "helix-agent-persistence" },
+    { name = "helix-agent-protocol" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "asyncpg", specifier = ">=0.29,<1" },
+    { name = "helix-agent-common", editable = "packages/helix-common" },
+    { name = "helix-agent-persistence", editable = "packages/helix-persistence" },
+    { name = "helix-agent-protocol", editable = "packages/helix-protocol" },
+    { name = "pydantic", specifier = ">=2.9,<3" },
+    { name = "pydantic-settings", specifier = ">=2.5,<3" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30,<3" },
+]
 
 [[package]]
 name = "helix-agent-runtime"

@@ -46,18 +46,25 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                         f"got tenant_id={tenant_id}"
                     )
                     raise FirstUpsertRequiresDisplayNameError(msg)
-                row = TenantConfigRecord(
-                    tenant_id=tenant_id,
-                    display_name=patch.display_name,
-                    plan=patch.plan or TenantPlan.FREE,
-                    model_credentials_ref=patch.model_credentials_ref or {},
-                    mcp_allowlist=patch.mcp_allowlist or [],
-                    rate_limit_override=patch.rate_limit_override or {},
-                    pii_fields=patch.pii_fields or [],
-                    created_at=now,
-                    updated_at=now,
-                    updated_by=actor_id,
-                )
+                # Use the field defaults from TenantConfigRecord unless the
+                # patch overrides them; ``None`` means "use default".
+                row_kwargs: dict[str, object] = {
+                    "tenant_id": tenant_id,
+                    "display_name": patch.display_name,
+                    "plan": patch.plan or TenantPlan.FREE,
+                    "model_credentials_ref": patch.model_credentials_ref or {},
+                    "mcp_allowlist": patch.mcp_allowlist or [],
+                    "rate_limit_override": patch.rate_limit_override or {},
+                    "pii_fields": patch.pii_fields or [],
+                    "created_at": now,
+                    "updated_at": now,
+                    "updated_by": actor_id,
+                }
+                if patch.audit_retention_days is not None:
+                    row_kwargs["audit_retention_days"] = patch.audit_retention_days
+                if patch.event_log_retention_days is not None:
+                    row_kwargs["event_log_retention_days"] = patch.event_log_retention_days
+                row = TenantConfigRecord(**row_kwargs)  # type: ignore[arg-type]
             else:
                 row = existing.model_copy(
                     update={
@@ -69,6 +76,8 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                             "mcp_allowlist": patch.mcp_allowlist,
                             "rate_limit_override": patch.rate_limit_override,
                             "pii_fields": patch.pii_fields,
+                            "audit_retention_days": patch.audit_retention_days,
+                            "event_log_retention_days": patch.event_log_retention_days,
                         }.items()
                         if v is not None
                     }

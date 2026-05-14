@@ -27,6 +27,8 @@ def _row_to_record(row: TenantConfigRow) -> TenantConfigRecord:
         mcp_allowlist=[str(x) for x in row.mcp_allowlist],
         rate_limit_override=dict(row.rate_limit_override),
         pii_fields=[str(x) for x in row.pii_fields],
+        audit_retention_days=row.audit_retention_days,
+        event_log_retention_days=row.event_log_retention_days,
         created_at=row.created_at,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
@@ -64,20 +66,25 @@ class SqlTenantConfigStore(TenantConfigStore):
                 # writer that beat us to the first insert doesn't
                 # cause a uniqueness collision.
                 now = _utc_now()
+                values: dict[str, object] = {
+                    "tenant_id": tenant_id,
+                    "display_name": patch.display_name,
+                    "plan": (patch.plan or TenantPlan.FREE).value,
+                    "model_credentials_ref": dict(patch.model_credentials_ref or {}),
+                    "mcp_allowlist": list(patch.mcp_allowlist or []),
+                    "rate_limit_override": dict(patch.rate_limit_override or {}),
+                    "pii_fields": list(patch.pii_fields or []),
+                    "created_at": now,
+                    "updated_at": now,
+                    "updated_by": actor_id,
+                }
+                if patch.audit_retention_days is not None:
+                    values["audit_retention_days"] = patch.audit_retention_days
+                if patch.event_log_retention_days is not None:
+                    values["event_log_retention_days"] = patch.event_log_retention_days
                 stmt = (
                     pg_insert(TenantConfigRow)
-                    .values(
-                        tenant_id=tenant_id,
-                        display_name=patch.display_name,
-                        plan=(patch.plan or TenantPlan.FREE).value,
-                        model_credentials_ref=dict(patch.model_credentials_ref or {}),
-                        mcp_allowlist=list(patch.mcp_allowlist or []),
-                        rate_limit_override=dict(patch.rate_limit_override or {}),
-                        pii_fields=list(patch.pii_fields or []),
-                        created_at=now,
-                        updated_at=now,
-                        updated_by=actor_id,
-                    )
+                    .values(**values)
                     .on_conflict_do_update(
                         index_elements=["tenant_id"],
                         set_={
@@ -106,6 +113,10 @@ class SqlTenantConfigStore(TenantConfigStore):
                 existing.rate_limit_override = dict(patch.rate_limit_override)
             if patch.pii_fields is not None:
                 existing.pii_fields = list(patch.pii_fields)
+            if patch.audit_retention_days is not None:
+                existing.audit_retention_days = patch.audit_retention_days
+            if patch.event_log_retention_days is not None:
+                existing.event_log_retention_days = patch.event_log_retention_days
             existing.updated_at = _utc_now()
             existing.updated_by = actor_id
             await session.commit()

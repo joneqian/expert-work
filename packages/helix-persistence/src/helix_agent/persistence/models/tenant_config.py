@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import DateTime, Text, func, text
+from sqlalchemy import DateTime, Integer, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -33,6 +33,15 @@ class TenantConfigRow(Base):
     )
     pii_fields: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    # D.3 retention: per-tenant TTL for the two largest tables that
+    # actually need pruning. CHECK constraints in migration 0010
+    # bound both to (0, 3650] days.
+    audit_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("90"), default=90
+    )
+    event_log_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("30"), default=30
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

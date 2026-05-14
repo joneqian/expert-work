@@ -41,6 +41,10 @@ class TenantPlan(StrEnum):
     ENTERPRISE = "enterprise"
 
 
+_RETENTION_MIN_DAYS = 1
+_RETENTION_MAX_DAYS = 3650
+
+
 class TenantConfigRecord(BaseModel):
     """One row of ``tenant_config`` as exposed by the admin API."""
 
@@ -53,6 +57,13 @@ class TenantConfigRecord(BaseModel):
     mcp_allowlist: list[str] = Field(default_factory=list)
     rate_limit_override: dict[str, Any] = Field(default_factory=dict)
     pii_fields: list[str] = Field(default_factory=list)
+    # D.3: per-tenant retention. Bounded ranges mirror the DB CHECK
+    # constraints in migration 0010 so admin clients fail fast rather
+    # than tripping a 23514 at write time.
+    audit_retention_days: int = Field(default=90, ge=_RETENTION_MIN_DAYS, le=_RETENTION_MAX_DAYS)
+    event_log_retention_days: int = Field(
+        default=30, ge=_RETENTION_MIN_DAYS, le=_RETENTION_MAX_DAYS
+    )
     created_at: datetime
     updated_at: datetime
     updated_by: str
@@ -74,3 +85,9 @@ class TenantConfigPatch(BaseModel):
     mcp_allowlist: list[str] | None = None
     rate_limit_override: dict[str, Any] | None = None
     pii_fields: list[str] | None = None
+    audit_retention_days: int | None = Field(
+        default=None, ge=_RETENTION_MIN_DAYS, le=_RETENTION_MAX_DAYS
+    )
+    event_log_retention_days: int | None = Field(
+        default=None, ge=_RETENTION_MIN_DAYS, le=_RETENTION_MAX_DAYS
+    )
