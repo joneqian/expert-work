@@ -67,28 +67,20 @@ class RetentionCleanupJob:
         self._batch_size = batch_size
 
     async def run_once(self) -> CleanupReport:
-        """Run the three retention passes once and return a tally."""
+        """Run the three retention passes once and return a tally.
+
+        Each pass owns its own session + transaction so the
+        ``SET LOCAL ROLE`` is re-issued cleanly per pass. Sharing one
+        session across all three passes triggered intermittent
+        ``permission denied`` failures on later DELETEs in CI even
+        though the role had the grants — the per-pass isolation
+        avoids whatever cross-statement state interaction caused that.
+        """
         started = time.monotonic()
-        audit_deleted = 0
-        audit_skipped = 0
-        audit_by_tenant: dict[str, int] = {}
-        event_deleted = 0
-        jwt_deleted = 0
-
-        async with self._sf() as session:
-            await session.execute(_SET_RETENTION_WORKER_ROLE)
-
-            # ------------------------------------------------------------------ audit_log
-            audit_deleted, audit_by_tenant = await self._delete_audit_log(session)
-            audit_skipped = await self._count_unacked_past_retention(session)
-
-            # ------------------------------------------------------------------ event_log
-            event_deleted = await self._delete_event_log(session)
-
-            # ------------------------------------------------------------------ jwt_blacklist
-            jwt_deleted = await self._delete_expired_jwt_blacklist(session)
-
-            await session.commit()
+        audit_deleted, audit_by_tenant = await self._delete_audit_log()
+        audit_skipped = await self._count_unacked_past_retention()
+        event_deleted = await self._delete_event_log()
+        jwt_deleted = await self._delete_expired_jwt_blacklist()
 
         return CleanupReport(
             audit_deleted=audit_deleted,
@@ -100,10 +92,12 @@ class RetentionCleanupJob:
         )
 
     # ------------------------------------------------------------------
-    # Per-table helpers (private)
+    # Per-table helpers (private). Each opens its own session + txn,
+    # SETs LOCAL ROLE retention_cleanup_worker, runs one statement,
+    # commits.
     # ------------------------------------------------------------------
 
-    async def _delete_audit_log(self, session: AsyncSession) -> tuple[int, dict[str, int]]:
+    async def _delete_audit_log(self) -> tuple[int, dict[str, int]]:
         """Delete acked audit rows past their tenant's retention window.
 
         Uses ``ctid`` subquery to apply LIMIT to a DELETE (Postgres
@@ -114,81 +108,97 @@ class RetentionCleanupJob:
         gate: unacked rows are skipped here and counted separately
         by ``_count_unacked_past_retention``.
         """
-        result = await session.execute(
-            text(
-                """
-                DELETE FROM audit_log
-                WHERE ctid IN (
-                    SELECT a.ctid
-                    FROM audit_log a
-                    JOIN tenant_config c ON c.tenant_id = a.tenant_id
-                    WHERE a.backup_acked = true
-                      AND a.occurred_at < now() - (c.audit_retention_days || ' days')::interval
-                    LIMIT :batch
-                )
-                RETURNING tenant_id
-                """
-            ),
-            {"batch": self._batch_size},
-        )
-        rows = result.fetchall()
+        async with self._sf() as session:
+            await session.execute(_SET_RETENTION_WORKER_ROLE)
+            result = await session.execute(
+                text(
+                    """
+                    DELETE FROM audit_log
+                    WHERE ctid IN (
+                        SELECT a.ctid
+                        FROM audit_log a
+                        JOIN tenant_config c ON c.tenant_id = a.tenant_id
+                        WHERE a.backup_acked = true
+                          AND a.occurred_at < now() - (c.audit_retention_days || ' days')::interval
+                        LIMIT :batch
+                    )
+                    RETURNING tenant_id
+                    """
+                ),
+                {"batch": self._batch_size},
+            )
+            rows = result.fetchall()
+            await session.commit()
         per_tenant: dict[str, int] = {}
         for row in rows:
             tid = str(row[0])
             per_tenant[tid] = per_tenant.get(tid, 0) + 1
         return len(rows), per_tenant
 
-    async def _count_unacked_past_retention(self, session: AsyncSession) -> int:
+    async def _count_unacked_past_retention(self) -> int:
         """How many audit rows are *past* retention but still unacked.
 
         Steady-state value is 0. A growing number means the D.1c
         WORM backup worker is falling behind and needs investigation;
         we surface it on the report but never delete those rows.
         """
-        result = await session.execute(
-            text(
-                """
-                SELECT count(*)
-                FROM audit_log a
-                JOIN tenant_config c ON c.tenant_id = a.tenant_id
-                WHERE a.backup_acked = false
-                  AND a.occurred_at < now() - (c.audit_retention_days || ' days')::interval
-                """
+        async with self._sf() as session:
+            await session.execute(_SET_RETENTION_WORKER_ROLE)
+            result = await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM audit_log a
+                    JOIN tenant_config c ON c.tenant_id = a.tenant_id
+                    WHERE a.backup_acked = false
+                      AND a.occurred_at < now() - (c.audit_retention_days || ' days')::interval
+                    """
+                )
             )
-        )
-        return int(result.scalar() or 0)
+            count = int(result.scalar() or 0)
+            await session.commit()
+        return count
 
-    async def _delete_event_log(self, session: AsyncSession) -> int:
-        result = await session.execute(
-            text(
-                """
-                DELETE FROM event_log
-                WHERE ctid IN (
-                    SELECT e.ctid
-                    FROM event_log e
-                    JOIN tenant_config c ON c.tenant_id = e.tenant_id
-                    WHERE e.created_at < now() - (c.event_log_retention_days || ' days')::interval
-                    LIMIT :batch
-                )
-                """
-            ),
-            {"batch": self._batch_size},
-        )
-        return int(result.rowcount or 0)  # type: ignore[attr-defined]
+    async def _delete_event_log(self) -> int:
+        async with self._sf() as session:
+            await session.execute(_SET_RETENTION_WORKER_ROLE)
+            result = await session.execute(
+                text(
+                    """
+                    DELETE FROM event_log
+                    WHERE ctid IN (
+                        SELECT e.ctid
+                        FROM event_log e
+                        JOIN tenant_config c ON c.tenant_id = e.tenant_id
+                        WHERE e.created_at <
+                              now() - (c.event_log_retention_days || ' days')::interval
+                        LIMIT :batch
+                    )
+                    """
+                ),
+                {"batch": self._batch_size},
+            )
+            rowcount = int(result.rowcount or 0)  # type: ignore[attr-defined]
+            await session.commit()
+        return rowcount
 
-    async def _delete_expired_jwt_blacklist(self, session: AsyncSession) -> int:
+    async def _delete_expired_jwt_blacklist(self) -> int:
         """``jwt_blacklist`` is global — no tenant_id, expire_at-driven."""
-        result = await session.execute(
-            text(
-                """
-                DELETE FROM jwt_blacklist
-                WHERE ctid IN (
-                    SELECT ctid FROM jwt_blacklist
-                    WHERE expires_at < now()
-                    LIMIT :batch
-                )
-                """
-            ),
-            {"batch": self._batch_size},
-        )
-        return int(result.rowcount or 0)  # type: ignore[attr-defined]
+        async with self._sf() as session:
+            await session.execute(_SET_RETENTION_WORKER_ROLE)
+            result = await session.execute(
+                text(
+                    """
+                    DELETE FROM jwt_blacklist
+                    WHERE ctid IN (
+                        SELECT ctid FROM jwt_blacklist
+                        WHERE expires_at < now()
+                        LIMIT :batch
+                    )
+                    """
+                ),
+                {"batch": self._batch_size},
+            )
+            rowcount = int(result.rowcount or 0)  # type: ignore[attr-defined]
+            await session.commit()
+        return rowcount
