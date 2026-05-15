@@ -40,6 +40,7 @@
 | **E.10.5 `loop_detection_middleware`** | 注册于 anchor `after_llm_call`。维护 sliding window，记录最近 N=3 次 LLM 返回的 `(tool_name, normalized_args_hash)` 元组；若全相同 → 视为循环：清空 AIMessage 的 `tool_calls`（用 `clone_ai_message_with_tool_calls` helper 同 ID 重写，保留 LangGraph add_messages reducer 不引入新消息位）+ 注入 `<system-reminder>检测到工具循环，请给出 final answer 或换不同参数</system-reminder>` HumanMessage。**与 `max_steps=20` 互补**：前者是步数硬上限（兜底），本中间件是循环早期 abort（防 20 次同一 buggy 调用烧 token）。设计灵感：deer-flow `agents/middlewares/loop_detection_middleware.py`。 | research/04 § loop_detection；deer-flow loop_detection_middleware |
 | **E.11 LLM Provider Fallback Chain** | `LLMRouter`：声明 primary / fallback 列表（per agent manifest），按 health 状态选；5xx + 429 + circuit-open → 尝试下一个；4xx 不 fallback（请求错）；fallback 链跨 provider（Anthropic → OpenAI 等），prompt 不变（model 名映射在适配器内部）。 | 01-system § Fallback；GAPS § n/a |
 | **E.12 提供商层限流** | per-API-key token bucket（refill rate 来自 manifest `llm.rate_limit_rpm` / `rate_limit_tpm`）；超过即等待（不直接 429 给上游）；与 E.4 断路器协作（限流时不算"失败"，不开断路器）。 | GAPS § 9 #27 第 3 层 |
+| **E.12.5 middleware chain wiring** | E.6 graph_builder 注释明确："This PR deliberately does not wire the E.3/E.4/E.5 middleware chains into the agent node. That wiring happens when E.11 LLMRouter lands." — 但 E.11 PR scope 已较大（router + 2 adapter + wire-format mapping），wiring **从 E.11 推后**。本 PR 把所有已实现但未激活的中间件接入：`agent_node` 串 `before_llm_call → around_llm_call → after_llm_call` 三个 anchor；`tools_node` 串 `before_tool_dispatch`；`LLMRouter` 加 `chain: MiddlewareChain` 参数，**每次 provider 调用单独包 `around_llm_call`**（Mini-ADR E-13：per-upstream-key 隔离，让 E.4 断路器能 per-key 计数而非 per-router 累加）。落地后 6 个中间件（E.3 / E.4 / E.5 langfuse / E.5 pii_redact / E.10 sandbox_audit / E.10.5 loop_detection）全部首次"真跑"。 | 自我补全：E.11 推后造成的 wiring 缺口；对照 ITERATION-PLAN E 段未单列 |
 | **E.13 LLM response cache** | 精确匹配 cache：key = `sha256(tenant_id || model || normalize(messages) || temperature || max_tokens)`；Redis backend（基础设施已建）；`cache_ttl` 默认 3600s，per-agent 可覆盖；**per-tenant 命名空间**（无 cross-tenant 命中风险）；非 deterministic 调用（temperature > 0.1）默认绕过；命中 `cache_hit` audit + metric `helix_llm_cache_hit_total{tenant,model,result}`。 | GAPS § 10 #28 |
 | **E.14 SSE 流式输出 + backpressure** | `services/orchestrator/sse.py`：SSE event 由 LangGraph stream API 中转；client 断开 → cancellation token cancel；backpressure 用 `asyncio.Queue(maxsize=128)`；slow consumer 队满 = 触发 cancellation（drop session 比 drop oldest 安全 — 防 client 看到不一致状态）；和 A.2 vendor 的 `stream_bridge`（last-event-id 重连）配合。 | 01-system § Streaming；research/04 § stream |
 | **E.15 cancellation engine 节点传播** | `CancellationToken` 注入 `AgentState.cancellation_token`；每个 LangGraph 节点入口 `if token.cancelled(): raise CancelledError`；in-flight LLM call 用 anyio `cancel_scope` 中断；tool 调用同样支持；API 层 (B.3) cancel → orchestrator 在 ≤200ms 内 surface 到 LLM/工具调用层。**Resume sanitize**：`GraphRunner.run` 在 resume 路径上 scan checkpoint messages — 若 AIMessage 有 `tool_calls` 但下一条不是 ToolMessage（cancel 打断 [LLM 完 → tool 派遣] 的窗口造成的 orphan），为每个缺失的 `tool_call_id` 注入 placeholder `ToolMessage(content="[cancelled before dispatch]")`，保证 messages 列表对 LLM 合法、可继续执行。**不上独立 middleware**（场景太小、~20 行 guard 在 runner 内即可）。对照 deer-flow `dangling_tool_call_middleware.py`。 | GAPS § 8 #25 第 2 段；deer-flow dangling_tool_call |
@@ -177,29 +178,49 @@ class AgentState(TypedDict):
 
 **checkpoint 策略**：`cancellation_token` 标 `__skip_checkpoint__`（用 reducer 模式过滤），其他字段全 checkpoint。重启 resume 时 `cancellation_token` 重新创建（resume 默认未取消）。
 
-### 2.4 LLMRouter / Provider Fallback（E.11 + E.12）
+### 2.4 LLMRouter / Provider Fallback（E.11 + E.12 + E.12.5）
 
 ```python
 # services/orchestrator/src/orchestrator/llm/router.py
 class LLMRouter:
-    def __init__(self, providers: Sequence[ProviderHandle]) -> None: ...
+    def __init__(
+        self,
+        providers: Sequence[ProviderHandle],
+        chain: MiddlewareChain | None = None,  # E.12.5
+    ) -> None: ...
 
-    async def complete(
-        self, *, messages: list[BaseMessage], **kwargs: Any,
-        cancellation_token: CancellationToken,
-    ) -> CompletionResult:
-        for handle in self._eligible(providers):
+    async def __call__(
+        self, *, messages: Sequence[BaseMessage], tools: Sequence[ToolSpec],
+    ) -> AIMessage:
+        for handle in self.providers:
             try:
-                async with handle.acquire_rate_limit_slot():  # E.12 token bucket
-                    return await handle.complete(...)
-            except (RateLimitError, ServerError, CircuitOpenError):
-                continue
-            except ClientError:  # 4xx 不 fallback
+                # E.12.5: 每次 provider 调用单独包 around_llm_call
+                # ctx.payload["provider_key"] 让 E.4 断路器能 per-key 隔离
+                if self.chain is not None:
+                    ctx = MiddlewareContext(payload={
+                        "provider_key": handle.key,
+                        "messages": messages, "tools": tools,
+                    })
+                    await self.chain.invoke(
+                        "around_llm_call", ctx,
+                        terminal=lambda c: handle.provider.complete(
+                            messages=c.payload["messages"],
+                            tools=c.payload["tools"],
+                        ),
+                    )
+                    return ctx.payload["response"]
+                # 无 chain 时（M0 dev / unit test）直接调
+                return await handle.provider.complete(messages=messages, tools=tools)
+            except LLMClientError:                       # 4xx 不 fallback
                 raise
-        raise AllProvidersExhaustedError()
+            except LLMError:                             # 5xx / 429 / breaker → 下家
+                continue
+        raise AllProvidersExhaustedError(last_exc)
 ```
 
-**E.12 token bucket**：每 ProviderHandle 内部维护 `aiolimiter.AsyncLimiter(rate_limit_rpm, 60)`，超限 await（不直接抛 429）。
+**E.12 token bucket**（已实现）：`RateLimitedProvider` 包装 LLMProvider，包内部持有 `aiolimiter.AsyncLimiter(rate_limit_rpm, 60)`；超限 `async with limiter:` await，不抛 429。每个 ProviderHandle 用独立的 RateLimitedProvider 实例 → per-key 隔离自动落地。
+
+**E.12.5 wiring**（待实现）：见上面 router 内部 `chain.invoke("around_llm_call", ...)`。一次 ReAct step 可能触发 N 次 `around_llm_call`（fallback 链上 N 个 provider 都被试一遍），每次触发 ctx.payload["provider_key"] 都是当前 provider 的 key——这是 E.4 断路器 per-key 计数的关键。Mini-ADR E-13 解释了"per-provider 包"vs"per-router 包"的取舍。
 
 **与 E.4 断路器配合**：429 / 5xx 触发断路器计数（per provider key），但 429 本身**不**算"故障"——断路器只在持续 5xx 或调用超时连发 5 次后 OPEN。
 
@@ -391,6 +412,13 @@ class LLMResponseCache:
 - **选择**：tool 抛异常 → wrap 成 `ToolMessage(content="[tool error] ...", tool_call_id=...)` 注入 messages → 让 LLM 在下一轮 reason 出 retry / 换 args / final answer。
 - **理由**：(1) deer-flow / Anthropic SDK 推荐做法 — tool 错是 LLM 自己处理的 reasoning 信号，不是系统故障。(2) raise 会让 messages 列表卡在"AIMessage(tool_calls=[X]) 无 ToolMessage"的非法状态（同 E.15 resume sanitize 同类问题）。(3) LLM 见到 error message 通常能换种方式做（GitHub stars 工具失败 → 换 web_search）。
 - **代价**：tool 错本身被吞 → 不会立即触发告警；通过 audit log + Langfuse span error 字段定位。区分"业务 error 应让 LLM 处理"（→ ToolMessage）vs"基础设施 error 应告警"（→ Langfuse 高严重度 span）：连接超时 / 鉴权失败 / quota 耗尽 仍然 ToolMessage，但 audit `severity=high`。
+
+### E-13：`around_llm_call` 包**单个 provider 调用** 而非**整个 LLMRouter**
+
+- **替代**：`agent_node` 把整个 `LLMRouter.__call__` 包在 `chain.invoke("around_llm_call", ...)` 里——chain 只触发一次，router 内部 fallback 对 chain 透明。
+- **选择**：`LLMRouter` 内部 fallback 循环里，**每次 provider 尝试**都单独包 `chain.invoke("around_llm_call", ctx={provider_key, ...}, terminal=handle.provider.complete)`——chain 每次切换 provider 都重新触发一次（一次 ReAct 步可能触发多次 `around_llm_call`）。
+- **理由**：(1) **E.4 断路器要 per-upstream-key 计数**（Mini-ADR E-4）——anthropic primary 这把 key 五次失败 → OPEN，但 kimi fallback 那把 key 的失败计数不能受影响。包整个 router 时 chain 看不到 fallback 切换 → 断路器只能按 router 聚合维度计数，丢失 per-key 隔离。(2) **Langfuse span 要按 provider 拆**——`provider=anthropic-primary error=503 → provider=kimi-fallback success`：两个独立 span 才能让看板按 provider 拆 latency / 错误率。(3) **retry 中间件**应当让单个 provider 完成自己的重试预算后再 fallback，而不是把"router 重试 + provider fallback"两层语义糊在一起。
+- **代价**：router 多接一个 `chain: MiddlewareChain | None = None` 参数（向后兼容默认 None，单元测试不传）；chain 触发多次 = 中间件本身要能幂等被调（langfuse 每次产生独立 span 是 by-design，breaker 本身就是 per-call，retry 本身就是循环——都天然幂等）。`provider_key` payload 必须由 router 设置好再 invoke，不能由中间件回读 router 状态。
 
 ---
 
@@ -620,6 +648,9 @@ op.add_column(
 | 39 | LoopDetection args normalize | E.10.5 | unit | `{a:1, b:2}` vs `{b:2, a:1}` 判同；`{path: "/etc"}` vs `{path: "/etc "}` 判同 |
 | 40 | tool 异常转 ToolMessage | E.6 | unit + integration | mock Tavily raise `httpx.ConnectError` → tools 节点不向上抛；messages 末尾追加 `ToolMessage(content="[tool error] ConnectError: ...", tool_call_id=t1)`；step_count +1；audit `TOOL_ERROR` 行 |
 | 41 | resume sanitize dangling tool_calls | E.15 | integration | checkpoint 内 messages: `[Human, AIMessage(tool_calls=[T1, T2])]`（无 ToolMessage）→ GraphRunner.run resume → 自动注入 2 条 `ToolMessage(content="[cancelled before dispatch]", tool_call_id=T1/T2)` → LLM 下一轮正常继续 |
+| 42 | middleware chain anchor 触发顺序 | E.12.5 | integration | mock LLM + 6 个 spying 中间件全部注册 → 跑 1 个 ReAct step（agent → tools → agent）→ 观察 anchor 触发序列：`before_llm_call → around_llm_call (LLM call) → after_llm_call → before_tool_dispatch → before_llm_call → around_llm_call → after_llm_call`；每个中间件被调用次数符合预期 |
+| 43 | around_llm_call per-provider 触发 | E.12.5 | integration | LLMRouter primary + fallback；mock primary 抛 LLMServerError；chain 注册 spying 中间件 → 验证 chain.invoke("around_llm_call") **被调用 2 次**，第 1 次 `provider_key=primary`、第 2 次 `provider_key=fallback`（per-key 隔离，给 E.4 断路器 per-key 计数留口子）|
+| 44 | chain.invoke 异常透出 router | E.12.5 | unit | mock 中间件在 `around_llm_call` 抛 `LLMClientError` → router 不 fallback、直接 raise（4xx 短路语义在 chain 包裹后保持）|
 
 **覆盖目标**：单元 ≥ 90%；integration 覆盖每个 anchor / 每条 PR 至少 1 个 happy path + 1 个 failure path。
 
@@ -734,6 +765,14 @@ E.12 feat(e-12): provider 层 token bucket 限流
      - 与 LLMRouter 集成
      - integration：rate_limit_rpm=2 + 5 并发 → 总时长 ≥ 60s
 
+E.12.5 feat(e-12-5): middleware chain wiring — agent_node + tools_node + LLMRouter
+       - LLMRouter 加 chain: MiddlewareChain | None = None 参数；router 内部 fallback 循环每次 provider 调用单独包 chain.invoke("around_llm_call")，ctx.payload 含 provider_key（Mini-ADR E-13）
+       - graph_builder.agent_node 串 before_llm_call → around_llm_call (router) → after_llm_call 三个 anchor
+       - graph_builder.tools_node 串 before_tool_dispatch（per tool_call）
+       - MiddlewareContext.payload 字段约定固化：messages, tools, provider_key, response, tool_name, tool_args
+       - integration：mock LLM + 6 个 spying 中间件全部注册 → 验证 anchor 序列 + per-provider around_llm_call + LLMClientError 短路 fallback（测试矩阵 #42-#44）
+       - 验收：6 个中间件（E.3 dynamic_context / E.4 llm_error_handling / E.5 langfuse + pii_redact / E.10 sandbox_audit / E.10.5 loop_detection）首次端到端"真跑"
+
 E.13 feat(e-13): LLM response cache（Redis）
      - llm/cache.py + 注册到 anchor before/after_llm_call
      - 绕过条件（temperature, stream, tool_calls）
@@ -756,7 +795,7 @@ E.15 feat(e-15): cancellation 全链路传播 + resume sanitize
      - integration：cancel + resume → messages 合法 + LLM 继续
 ```
 
-**预期总 PR 数**：1 设计 + 15 + 1 (E.10.5) = 17 PR；累计 ~7-9 周（含 review / CI 重跑）。E.10.5 是对照 deer-flow 上下文管理分析后补的 compaction 防御（详见 § 9）。
+**预期总 PR 数**：1 设计 + 15 + 1 (E.10.5) + 1 (E.12.5) + 2 (设计补全 #62 / 本 PR) = 20 PR；累计 ~7-9 周（含 review / CI 重跑）。E.10.5 是对照 deer-flow 上下文管理分析后补的 compaction 防御（详见 § 9）；E.12.5 是 E.11 scope 控制下推后的 middleware chain wiring 自我补全（设计补全 PR 单列，实施 PR 单列）。
 
 ---
 
@@ -803,8 +842,9 @@ E.15 feat(e-15): cancellation 全链路传播 + resume sanitize
 | **E.10.5 loop_detection_middleware** | E.10.5 | 对照 deer-flow `loop_detection_middleware`；ITERATION-PLAN E 段原未列，作为 Stream E 设计细化新增；tool truncation 不另列条目（散在 E.7/E.8/E.9 PR 内执行）|
 | E.11 LLM Provider Fallback Chain | E.11 | per provider key 断路器 + 4xx 不 fallback |
 | E.12 提供商层限流 | E.12 | P0 #27 第 3 层；与 E.11 一起 |
+| **E.12.5 middleware chain wiring** | E.12.5 | E.11 PR scope 控制下推后的 wiring；ITERATION-PLAN E 段原未列，作为 Stream E 设计细化新增；落地后 6 个已实现但未激活的中间件首次端到端"真跑" |
 | E.13 LLM response cache | E.13 | P0 #28；Redis；per-tenant 命名空间 |
 | E.14 SSE 流式输出 + backpressure | E.14 | stream_bridge 配合；满即 cancel |
 | E.15 请求取消的 engine 节点传播 | E.15 | P0 #25 第 2 段；协作式 anyio scope |
 
-完成后 Stream E 16/16（含 E.10.5）+ D.2 anchor 注册完成、24 P0 中 #15 / #25 / #27 / #28 全部勾选。
+完成后 Stream E 17/17（含 E.10.5 + E.12.5）+ D.2 anchor 注册完成、24 P0 中 #15 / #25 / #27 / #28 全部勾选。
