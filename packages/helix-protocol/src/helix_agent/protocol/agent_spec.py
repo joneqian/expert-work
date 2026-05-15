@@ -102,6 +102,12 @@ class ModelSpec(BaseModel):
     #: calls **await** rather than bursting into 429s (which would
     #: poison the E.4 breaker and noise up the fallback chain).
     rate_limit_rpm: int = Field(default=60, gt=0)
+    #: Reference to the provider API key — a ``secret://`` URI resolved
+    #: at agent-build time via the SecretStore (ADR-0007 / F.6). The
+    #: manifest never embeds the key value itself. ``None`` is valid in
+    #: the schema (keeps existing manifests / tests loading) but the
+    #: agent factory rejects it: a provider with no key cannot be built.
+    api_key_ref: str | None = None
     fallback: list[ModelSpec] = Field(default_factory=list)
 
 

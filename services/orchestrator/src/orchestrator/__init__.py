@@ -5,6 +5,18 @@ LangGraph execution surface and ``orchestrator.state.AgentState`` for
 the canonical state shape consumed by all orchestrator graphs.
 """
 
+from orchestrator.agent_factory import (
+    AgentFactoryError as AgentFactoryError,
+)
+from orchestrator.agent_factory import (
+    BuiltAgent as BuiltAgent,
+)
+from orchestrator.agent_factory import (
+    build_agent as build_agent,
+)
+from orchestrator.agent_factory import (
+    build_llm_router as build_llm_router,
+)
 from orchestrator.errors import (
     MaxStepsExceededError as MaxStepsExceededError,
 )
@@ -80,9 +92,11 @@ __all__ = [
     "DEFAULT_MAX_STEPS",
     "DEFAULT_STREAM_MODE",
     "PLACEHOLDER_CONTENT",
+    "AgentFactoryError",
     "AgentState",
     "AllProvidersExhaustedError",
     "AnthropicProvider",
+    "BuiltAgent",
     "GraphRunner",
     "LLMCaller",
     "LLMProvider",
@@ -98,6 +112,8 @@ __all__ = [
     "ToolRegistry",
     "ToolResult",
     "ToolSpec",
+    "build_agent",
+    "build_llm_router",
     "build_react_graph",
     "format_sse",
     "run_agent",
