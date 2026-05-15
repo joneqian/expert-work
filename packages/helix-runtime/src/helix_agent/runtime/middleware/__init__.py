@@ -54,6 +54,12 @@ from helix_agent.runtime.middleware.langfuse import (
 from helix_agent.runtime.middleware.langfuse import (
     RecordingLangfuseClient as RecordingLangfuseClient,
 )
+from helix_agent.runtime.middleware.llm_cache import (
+    LLMCacheLookupMiddleware as LLMCacheLookupMiddleware,
+)
+from helix_agent.runtime.middleware.llm_cache import (
+    LLMCacheStoreMiddleware as LLMCacheStoreMiddleware,
+)
 from helix_agent.runtime.middleware.llm_error_handling import (
     BreakerRegistry as BreakerRegistry,
 )
@@ -127,6 +133,8 @@ __all__ = [
     "CircuitOpenError",
     "DuplicateMiddlewareError",
     "DynamicContextMiddleware",
+    "LLMCacheLookupMiddleware",
+    "LLMCacheStoreMiddleware",
     "LLMClientError",
     "LLMError",
     "LLMErrorHandlingMiddleware",
