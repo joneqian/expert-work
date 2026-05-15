@@ -42,7 +42,7 @@
 | **E.12 提供商层限流** | per-API-key token bucket（refill rate 来自 manifest `llm.rate_limit_rpm` / `rate_limit_tpm`）；超过即等待（不直接 429 给上游）；与 E.4 断路器协作（限流时不算"失败"，不开断路器）。 | GAPS § 9 #27 第 3 层 |
 | **E.12.5 middleware chain wiring** | E.6 graph_builder 注释明确："This PR deliberately does not wire the E.3/E.4/E.5 middleware chains into the agent node. That wiring happens when E.11 LLMRouter lands." — 但 E.11 PR scope 已较大（router + 2 adapter + wire-format mapping），wiring **从 E.11 推后**。本 PR 把所有已实现但未激活的中间件接入：`agent_node` 串 `before_llm_call → around_llm_call → after_llm_call` 三个 anchor；`tools_node` 串 `before_tool_dispatch`；`LLMRouter` 加 `chain: MiddlewareChain` 参数，**每次 provider 调用单独包 `around_llm_call`**（Mini-ADR E-13：per-upstream-key 隔离，让 E.4 断路器能 per-key 计数而非 per-router 累加）。落地后 6 个中间件（E.3 / E.4 / E.5 langfuse / E.5 pii_redact / E.10 sandbox_audit / E.10.5 loop_detection）全部首次"真跑"。 | 自我补全：E.11 推后造成的 wiring 缺口；对照 ITERATION-PLAN E 段未单列 |
 | **E.13 LLM response cache** | 精确匹配 cache：key = `sha256(tenant_id || model || normalize(messages) || temperature || max_tokens)`；Redis backend（基础设施已建）；`cache_ttl` 默认 3600s，per-agent 可覆盖；**per-tenant 命名空间**（无 cross-tenant 命中风险）；非 deterministic 调用（temperature > 0.1）默认绕过；命中 `cache_hit` audit + metric `helix_llm_cache_hit_total{tenant,model,result}`。 | GAPS § 10 #28 |
-| **E.14 SSE 流式输出 + backpressure** | `services/orchestrator/sse.py`：SSE event 由 LangGraph stream API 中转；client 断开 → cancellation token cancel；backpressure 用 `asyncio.Queue(maxsize=128)`；slow consumer 队满 = 触发 cancellation（drop session 比 drop oldest 安全 — 防 client 看到不一致状态）；和 A.2 vendor 的 `stream_bridge`（last-event-id 重连）配合。 | 01-system § Streaming；research/04 § stream |
+| **E.14 SSE 流式输出 + backpressure** | `services/orchestrator/sse.py`：`run_agent` worker（后台 `asyncio.Task`，`graph.astream()` 逐 chunk → `StreamBridge.publish`）+ `sse_consumer`（`bridge.subscribe` → SSE frame；client 断开 → `run_manager.cancel`）。**in-process 单体**（control-plane import orchestrator 库，非独立服务 — 见 § 2.6 架构修正）。backpressure：`StreamBridge` bounded buffer + drop-oldest（Mini-ADR E-8 修正）；和 A.2 `stream_bridge`（last-event-id 重连）+ `RunManager` 配合。control-plane `runs.py` 切掉 B.7 fake stream。worker graph 注入式；manifest→graph agent factory 是独立后续 PR。 | 01-system § Streaming；research/04 § stream；deer-flow `gateway/services.py` + `runtime/runs/worker.py` |
 | **E.15 cancellation engine 节点传播** | `CancellationToken` 注入 `AgentState.cancellation_token`；每个 LangGraph 节点入口 `if token.cancelled(): raise CancelledError`；in-flight LLM call 用 anyio `cancel_scope` 中断；tool 调用同样支持；API 层 (B.3) cancel → orchestrator 在 ≤200ms 内 surface 到 LLM/工具调用层。**Resume sanitize**：`GraphRunner.run` 在 resume 路径上 scan checkpoint messages — 若 AIMessage 有 `tool_calls` 但下一条不是 ToolMessage（cancel 打断 [LLM 完 → tool 派遣] 的窗口造成的 orphan），为每个缺失的 `tool_call_id` 注入 placeholder `ToolMessage(content="[cancelled before dispatch]")`，保证 messages 列表对 LLM 合法、可继续执行。**不上独立 middleware**（场景太小、~20 行 guard 在 runner 内即可）。对照 deer-flow `dangling_tool_call_middleware.py`。 | GAPS § 8 #25 第 2 段；deer-flow dangling_tool_call |
 
 ### 1.2 Out-of-scope（明确推迟）
@@ -76,34 +76,29 @@
 
 ### 2.1 服务边界
 
-E 阶段引入**唯一新服务** `services/orchestrator/`，与现有服务的关系：
+E 阶段引入 `services/orchestrator/` —— **M0 它是个 library，不是独立部署的服务**（架构修正，详见 § 2.6）。control-plane FastAPI app 直接 `import orchestrator`，graph 当后台 `asyncio.Task` 在 control-plane 进程内跑。原设计设想的"独立 orchestrator 服务 + HTTP/SSE/mTLS 调用"推到 M1+（水平扩展需要拆进程时再做）。
 
 ```
-┌──────────────────┐  HTTP/SSE   ┌──────────────────────┐
-│  control-plane   │ ─────────→  │  orchestrator        │
-│  (Stream B)      │  cancel ←   │  (Stream E)          │
-└──────────────────┘             │  - GraphRunner       │
-        │                        │  - MiddlewareChain   │
-        │ write audit            │  - LLMRouter         │
-        ▼                        │  - ToolRegistry      │
-┌──────────────────┐             │  - SSEStreamer       │
-│  audit_log (DB)  │ ◄───────────┤  - CancellationToken │
-└──────────────────┘             └──────┬───────────────┘
-                                        │
-            ┌───────────────────────────┼────────────────────────┐
-            ▼                           ▼                        ▼
-   ┌────────────────┐         ┌──────────────────┐    ┌──────────────────┐
-   │ PostgresSaver  │         │   LLM providers  │    │   tools          │
-   │ (event_log /   │         │   (Anthropic /   │    │   - web_search   │
-   │  checkpoints)  │         │    OpenAI / ...) │    │   - http         │
-   └────────────────┘         └──────────────────┘    │   - mcp:* (M0)   │
-                                                       │   - exec_python  │
-                                                       │     (F.4)        │
-                                                       └──────────────────┘
+┌────────────────────────────────────────────────────┐
+│  control-plane 进程（Stream B FastAPI app）         │
+│   import orchestrator（library）                    │
+│   ┌──────────────────────────────────────────────┐ │
+│   │ orchestrator（Stream E，in-process library）  │ │
+│   │  - GraphRunner / build_react_graph            │ │
+│   │  - MiddlewareChain / LLMRouter / ToolRegistry │ │
+│   │  - run_agent worker + sse_consumer（E.14）    │ │
+│   └──────────────────────────────────────────────┘ │
+│   RunManager / StreamBridge（A.2 helix-runtime 库） │
+└────────┬───────────────────────────┬───────────────┘
+         │ write audit                │
+         ▼                            ▼
+┌──────────────────┐   ┌──────────────────────────────────────┐
+│  audit_log (DB)  │   │ PostgresSaver / LLM providers / tools │
+└──────────────────┘   └──────────────────────────────────────┘
 ```
 
 **关键不变量**：
-- orchestrator **不直接** 暴露公网 endpoint；只由 control-plane 通过 mTLS（C.2）调用
+- M0 orchestrator 是 control-plane 进程内的 library；无自己的公网 / 内网 endpoint。M1+ 若为水平扩展拆独立进程，再引入 mTLS（C.2）服务间调用。
 - LangGraph state 唯一持久化路径是 PostgresSaver；middleware 不写自己的状态表
 - 中间件 / 工具 / LLMRouter 都通过 `MiddlewareChain` 触发；orchestrator main loop 不直接调 LLM
 - cancellation token 是 first-class state：在 AgentState、middleware、tool、LLM client 间显式传递
@@ -257,25 +252,36 @@ class ToolRegistry:
 
 ### 2.6 SSE 流（E.14）
 
+**架构修正（E.14 实施时定稿）**：原草图画的是"control-plane → gRPC/httpx → 独立 orchestrator 服务"。对照 deer-flow（`backend/app/gateway` + `backend/packages/harness/deerflow/runtime` 同进程）后改为 **in-process 单体**：orchestrator 是 library，control-plane FastAPI app 直接 import，graph 当**后台 `asyncio.Task`** 跑。M0 不引入独立 orchestrator 服务 / 服务间 RPC（那是 M1+ 水平扩展时的事）。
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ control-plane FastAPI route                                          │
-│   yield ev async for ev in orchestrator_client.stream(run_id):       │
-└──────────────────┬──────────────────────────────────────────────────┘
-                   │ gRPC / httpx SSE
-                   ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ orchestrator SSEStreamer.stream(run_id)                              │
-│   queue = asyncio.Queue[Event](maxsize=128)                          │
-│   async with langgraph.astream_events(...) as stream:                │
-│       async for chunk in stream:                                      │
-│           await queue.put(chunk)  # 满 → 触发 backpressure            │
-└─────────────────────────────────────────────────────────────────────┘
+│ control-plane FastAPI route  POST /v1/sessions/{thread}/runs         │
+│   record = run_manager.create(...)                                   │
+│   task   = asyncio.create_task(run_agent(bridge, record, graph, ...))│
+│   return StreamingResponse(sse_consumer(bridge, record, request))    │
+└───────────────┬──────────────────────────────┬──────────────────────┘
+                │ subscribe                     │ create_task
+                ▼                                ▼
+┌───────────────────────────┐   ┌──────────────────────────────────────┐
+│ sse_consumer               │   │ run_agent worker (background Task)   │
+│  async for ev in           │◄──│  async for chunk in graph.astream(): │
+│    bridge.subscribe(run_id)│   │    await bridge.publish(run_id, ...) │
+│  → yield SSE frame         │   │  finally: bridge.publish_end(run_id) │
+└───────────────────────────┘   └──────────────────────────────────────┘
+         StreamBridge（A.2，已存）是生产者 / 消费者解耦总线
 ```
 
-**backpressure 策略**：队列满 → `queue.put(chunk)` block；orchestrator 检测 block 超 5s → cancel 整个 run（防 OOM）。不丢 event（last-event-id 由 stream_bridge 兜底重连）。
+三个角色（全部 in-process）：
+- **`RunManager`**（A.2 `runtime/runs/`，已存）— 持 `RunRecord`（`run_id` / `status` / `task` / `abort_event`），生命周期注册表。
+- **`run_agent` worker**（E.14 新增，`orchestrator/sse.py`）— 后台 task：`graph.astream()` 逐 chunk `bridge.publish()`；结束 `bridge.publish_end()`；异常 → `bridge.publish("error", ...)`。
+- **`sse_consumer`**（E.14 新增）— SSE 生成器：`bridge.subscribe(run_id)` → yield SSE frame；`finally` 段实现 `on_disconnect`（client 断开 → `run_manager.cancel`）。
 
-**heartbeat**：每 15s 发空 `event: heartbeat\ndata: {}\n\n`；client 断开 read 直接 EOF；同时绑定 `request.is_disconnected()` 监听（FastAPI / asgi 标准）→ 触发 cancellation。
+**worker graph 注入式**：`run_agent` 接收一个已编译 graph（或 graph 工厂），不自己装配。manifest → 完整 agent graph 的装配（"agent factory"）是**独立 PR**，不在 E.14 范围 —— E.14 用 scripted graph 测 streaming 机制本身。
+
+**backpressure 策略**：见 Mini-ADR E-8 —— M0 用 `StreamBridge` 的 bounded buffer + drop-oldest（满了丢最旧，`start_offset` 前移），未消费部分由 last-event-id 重连补；cancel-on-full 推 M1。
+
+**heartbeat**：`StreamBridge.subscribe` 每 `heartbeat_interval`（默认 15s）无事件即 yield `HEARTBEAT_SENTINEL`；`sse_consumer` 转成 `: heartbeat\n\n` 注释帧。client 断开 read 直接 EOF；同时绑定 `request.is_disconnected()`（FastAPI / asgi 标准）→ 触发 cancellation。
 
 ### 2.7 Cancellation token 全链路（E.15）
 
@@ -378,12 +384,13 @@ class LLMResponseCache:
 - **理由**：(1) Credential Proxy 是 F.5 范围、依赖 SecretStore（F.6）；(2) M0 HTTP 工具的主要威胁是"访问错地址"而非"凭据泄漏"——白名单已防；(3) per-tenant `http_tool_allowlist` 缺省 `[]` = 禁用，dogfood 业务显式开通；(4) 切换是 adapter swap，业务无感。
 - **代价**：M0 阶段凭据通过 manifest secret_ref 注入 header — manifest secret_ref 由 F.6 SecretStore 解析（F.6 也是 M0 范围），所以 secret 不裸露；只是 proxy 层缺失。
 
-### E-8：SSE backpressure 满 → cancel run（而非 drop oldest）
+### E-8：SSE backpressure M0 用 drop-oldest（cancel-on-full 推 M1）
 
-- **替代**：drop oldest event；或扩大队列；或阻塞 push 无限等。
-- **选择**：满 → 触发 cancellation。
-- **理由**：(1) ReAct trace 顺序敏感（thought / action / observation 必须严格连续）——丢 event 客户端会看到不一致状态；(2) 慢消费者 = 客户端有问题，cancel 比 OOM 安全；(3) 5s + 128 队列在正常流量下永远不会触发，触发即报警信号；(4) last-event-id 由 stream_bridge 兜底，cancel 后客户端可重连恢复未消费部分。
-- **代价**：慢客户端体验差；M0 dogfood 范围内 acceptable。
+- **原决策**：满 → cancel 整个 run（而非 drop oldest）。
+- **修正（E.14 实施时）**：M0 用 **drop-oldest** —— `StreamBridge` 的 bounded buffer 满了删最旧 event、`start_offset` 前移；落后的订阅者用 last-event-id 重连时若游标已被挤出，从最早保留 event 续上（带 warning）。
+- **为何翻转**：(1) helix-agent 的 `InMemoryStreamBridge`（A.2 从 deer-flow 抄）**本来就是 drop-oldest**——原 Mini-ADR E-8 跟已落地代码自相矛盾，等于一条没人执行的 ADR；(2) deer-flow 生产环境就是 drop-oldest + last-event-id 兜底，跑得通；(3) cancel-on-full 要把 `StreamBridge` 从 bounded-drop 改成 blocking-queue + 5s 超时检测（语义大改 ~100 LOC），M0 不值当；(4) drop-oldest 真正丢 event 只在订阅者持续慢于生产者且超出 256 buffer 时——正常 dogfood 流量到不了。
+- **M1 再评估**：若 dogfood 出现"客户端看到不一致 trace"，再上 cancel-on-full（恢复原决策的理由 (1)：ReAct trace 顺序敏感）。届时 `StreamBridge` 加一个 `overflow_policy` 参数即可，不破坏现有接口。
+- **代价**：M0 极端慢客户端可能丢中段 event；可观测性靠 `stream_bridge.subscriber_fell_behind` warning 日志兜。
 
 ### E-9：cancellation 协作式而非抢占式
 
@@ -500,7 +507,22 @@ class LLMRouter:
 
 ### 4.5 SSE event schema
 
+**实现修正（E.14）**：A.2 落地的 `stream_bridge` 已经定义了 `StreamEvent`（`runtime/stream_bridge/base.py`），E.14 直接复用，**不另造**。实际形状是 frozen dataclass，比下面草图更简（event 名是开放字符串而非 Literal —— LangGraph `astream` 的 stream_mode 名直接当 SSE event 名，worker 不硬编码枚举）：
+
 ```python
+# 实际：helix_agent.runtime.stream_bridge.base.StreamEvent
+@dataclass(frozen=True)
+class StreamEvent:
+    id: str       # 单调递增（"{ts_ms}-{seq}"），SSE id: 字段 / Last-Event-ID 重连
+    event: str    # SSE event 名 — "values" / "updates" / "messages" / "error" / "end" ...
+    data: Any     # JSON-serialisable payload
+# 另有 HEARTBEAT_SENTINEL / END_SENTINEL 两个哨兵常量
+```
+
+下面的草图（`event_id: int` + `type: Literal[...]`）是 E.0 设计期的设想，**已被 A.2 的实际实现取代**，保留仅作历史对照：
+
+```python
+# 草图（已废，见上）
 class StreamEvent(BaseModel):
     event_id: int             # 单调递增，stream_bridge 用作 last-event-id
     run_id: UUID
@@ -633,9 +655,10 @@ op.add_column(
 | 24 | LLM cache 命中 | E.13 | integration | 同参数两次 complete → 第 2 次不调 LLM + `LLM_CACHE_HIT` audit + metric +1 |
 | 25 | LLM cache 跨 tenant 不命中 | E.13 | unit | tenant_A 写 → tenant_B 同参数读 → miss |
 | 26 | LLM cache 高 temperature 绕过 | E.13 | unit | `temperature=0.5` → 写 / 读都绕过 cache |
-| 27 | SSE 事件单调递增 + 顺序 | E.14 | integration | 跑 ReAct → event_id 单调；type 顺序符合 ReAct 状态机 |
-| 28 | SSE backpressure 触发 cancel | E.14 | integration | 注入 slow consumer（queue.put 阻塞 6s）→ orchestrator cancel run + `RUN_CANCELLED` audit |
-| 29 | SSE heartbeat | E.14 | integration | 静置 LLM mock 30s → 至少 1 个 heartbeat event |
+| 27 | SSE 事件单调递增 + 顺序 | E.14 | integration | scripted graph 跑 → `run_agent` publish 的 event_id 单调；`sse_consumer` yield 的 SSE frame 顺序符合 ReAct 状态机；末尾恰一个 `end` |
+| 28 | SSE backpressure drop-oldest | E.14 | unit | `StreamBridge` buffer=8，publish 20 条；慢订阅者从头 subscribe → 收到尾部保留段 + `subscriber_fell_behind` warning（Mini-ADR E-8：M0 drop-oldest 不 cancel）|
+| 29 | SSE heartbeat | E.14 | integration | `heartbeat_interval` 缩到 0.1s + 静置 worker → `sse_consumer` 至少 yield 1 个 `: heartbeat` 注释帧 |
+| 28b | SSE client 断开 → cancel run | E.14 | integration | `request.is_disconnected()` 返回 True → `sse_consumer` finally 段调 `run_manager.cancel`，worker task 收 `CancelledError` 终止 |
 | 30 | cancellation in-flight LLM | E.15 | integration | LLM mock stream 50 tokens（each 100ms）→ token.cancel() → ≤200ms 后停止 |
 | 31 | cancellation tool 中 | E.15 | integration | tool mock sleep 5s → 1s 后 cancel → tool task 取消 + audit |
 | 32 | cancellation 重启不传染 | E.15 | unit | 一次 run cancel 后开启新 run → 新 run cancellation_token 默认未取消 |
@@ -779,11 +802,20 @@ E.13 feat(e-13): LLM response cache（Redis）
      - per-tenant 命名空间
      - audit + metric
 
-E.14 feat(e-14): SSE streaming + backpressure
-     - services/orchestrator/src/orchestrator/sse.py
-     - 与 stream_bridge（A.2）配合
-     - heartbeat + cancel on slow consumer
-     - control-plane API 桥接（B.7 已存 fake stream，本 PR 切真）
+E.14 feat(e-14): SSE streaming + backpressure（in-process 单体）
+     - services/orchestrator/src/orchestrator/sse.py：run_agent worker + sse_consumer
+     - worker graph 注入式（graph.astream → StreamBridge.publish）
+     - 与 stream_bridge（A.2）+ RunManager（A.2）配合
+     - heartbeat（StreamBridge HEARTBEAT_SENTINEL）+ client 断开 → run_manager.cancel
+     - backpressure：drop-oldest（Mini-ADR E-8 修正，不 cancel-on-full）
+     - control-plane runs.py 切掉 B.7 fake stream，用 RunManager + worker + sse_consumer
+     - 测试用 scripted graph；manifest→graph agent factory 不在本 PR
+     - NOT：独立 orchestrator 服务 / gRPC（in-process，control-plane import orchestrator 库）
+
+（后续）feat: agent factory — manifest（AgentSpec）→ 编译好的 ReAct graph
+     - ModelSpec → providers → LLMRouter；tools → ToolRegistry；middleware chains 装配
+     - build_react_graph + GraphRunner.compile 串起来
+     - control-plane 启动时按 agent 注册；E.14 的 worker 消费它产出的 graph
 
 E.15 feat(e-15): cancellation 全链路传播 + resume sanitize
      - runtime/cancellation.py（CancellationToken + anyio scope）
@@ -795,7 +827,7 @@ E.15 feat(e-15): cancellation 全链路传播 + resume sanitize
      - integration：cancel + resume → messages 合法 + LLM 继续
 ```
 
-**预期总 PR 数**：1 设计 + 15 + 1 (E.10.5) + 1 (E.12.5) + 2 (设计补全 #62 / 本 PR) = 20 PR；累计 ~7-9 周（含 review / CI 重跑）。E.10.5 是对照 deer-flow 上下文管理分析后补的 compaction 防御（详见 § 9）；E.12.5 是 E.11 scope 控制下推后的 middleware chain wiring 自我补全（设计补全 PR 单列，实施 PR 单列）。
+**预期总 PR 数**：1 设计 + 15 + 1 (E.10.5) + 1 (E.12.5) + 1 (agent factory，E.14 拆出) + 3 (设计补全 #62 / E.12.5 doc / E.14 doc) = 22 PR；累计 ~8-10 周（含 review / CI 重跑）。E.10.5 是对照 deer-flow 上下文管理分析后补的 compaction 防御（详见 § 9）；E.12.5 是 E.11 scope 控制下推后的 middleware chain wiring 自我补全；E.14 实施时对照 deer-flow 把"独立 orchestrator 服务 + gRPC"改成 in-process 单体，并拆出 agent factory 为后续 PR（设计补全 PR 与实施 PR 各自单列）。
 
 ---
 
@@ -844,7 +876,8 @@ E.15 feat(e-15): cancellation 全链路传播 + resume sanitize
 | E.12 提供商层限流 | E.12 | P0 #27 第 3 层；与 E.11 一起 |
 | **E.12.5 middleware chain wiring** | E.12.5 | E.11 PR scope 控制下推后的 wiring；ITERATION-PLAN E 段原未列，作为 Stream E 设计细化新增；落地后 6 个已实现但未激活的中间件首次端到端"真跑" |
 | E.13 LLM response cache | E.13 | P0 #28；Redis；per-tenant 命名空间 |
-| E.14 SSE 流式输出 + backpressure | E.14 | stream_bridge 配合；满即 cancel |
+| E.14 SSE 流式输出 + backpressure | E.14 | in-process 单体（非独立服务）；run_agent worker + sse_consumer + RunManager；drop-oldest backpressure（Mini-ADR E-8 修正）|
+| agent factory（manifest→graph 装配）| E.14 后续独立 PR | E.14 worker graph 注入式所致；manifest→编译 graph 的装配单列；ITERATION-PLAN E 段原未列 |
 | E.15 请求取消的 engine 节点传播 | E.15 | P0 #25 第 2 段；协作式 anyio scope |
 
-完成后 Stream E 17/17（含 E.10.5 + E.12.5）+ D.2 anchor 注册完成、24 P0 中 #15 / #25 / #27 / #28 全部勾选。
+完成后 Stream E 17/17（含 E.10.5 + E.12.5）+ D.2 anchor 注册完成、24 P0 中 #15 / #25 / #27 / #28 全部勾选。agent factory 作为 E.14 拆分出的后续 PR 单独跟踪。
