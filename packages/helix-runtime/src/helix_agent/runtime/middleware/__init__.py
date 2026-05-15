@@ -39,6 +39,21 @@ from helix_agent.runtime.middleware.errors import (
 from helix_agent.runtime.middleware.errors import (
     UnknownAnchorError as UnknownAnchorError,
 )
+from helix_agent.runtime.middleware.langfuse import (
+    LangfuseClient as LangfuseClient,
+)
+from helix_agent.runtime.middleware.langfuse import (
+    LangfuseMiddleware as LangfuseMiddleware,
+)
+from helix_agent.runtime.middleware.langfuse import (
+    LangfuseSpan as LangfuseSpan,
+)
+from helix_agent.runtime.middleware.langfuse import (
+    RecordedSpan as RecordedSpan,
+)
+from helix_agent.runtime.middleware.langfuse import (
+    RecordingLangfuseClient as RecordingLangfuseClient,
+)
 from helix_agent.runtime.middleware.llm_error_handling import (
     BreakerRegistry as BreakerRegistry,
 )
@@ -66,6 +81,12 @@ from helix_agent.runtime.middleware.llm_error_handling import (
 from helix_agent.runtime.middleware.llm_error_handling import (
     LLMServerError as LLMServerError,
 )
+from helix_agent.runtime.middleware.pii_redact import (
+    PIIRedactorMiddleware as PIIRedactorMiddleware,
+)
+from helix_agent.runtime.middleware.pii_redact import (
+    RedactText as RedactText,
+)
 
 __all__ = [
     "ANCHORS",
@@ -82,10 +103,17 @@ __all__ = [
     "LLMNetworkError",
     "LLMRateLimitError",
     "LLMServerError",
+    "LangfuseClient",
+    "LangfuseMiddleware",
+    "LangfuseSpan",
     "Middleware",
     "MiddlewareChain",
     "MiddlewareContext",
     "MiddlewareError",
+    "PIIRedactorMiddleware",
+    "RecordedSpan",
+    "RecordingLangfuseClient",
+    "RedactText",
     "UnknownAnchorError",
     "default_token_estimator",
 ]
