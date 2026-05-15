@@ -87,9 +87,19 @@ from helix_agent.runtime.middleware.pii_redact import (
 from helix_agent.runtime.middleware.pii_redact import (
     RedactText as RedactText,
 )
+from helix_agent.runtime.middleware.sandbox_audit import (
+    DEFAULT_SANDBOX_TOOL_NAMES as DEFAULT_SANDBOX_TOOL_NAMES,
+)
+from helix_agent.runtime.middleware.sandbox_audit import (
+    SandboxAuditBlockedError as SandboxAuditBlockedError,
+)
+from helix_agent.runtime.middleware.sandbox_audit import (
+    SandboxAuditMiddleware as SandboxAuditMiddleware,
+)
 
 __all__ = [
     "ANCHORS",
+    "DEFAULT_SANDBOX_TOOL_NAMES",
     "BreakerRegistry",
     "CallNext",
     "ChainCycleError",
@@ -114,6 +124,8 @@ __all__ = [
     "RecordedSpan",
     "RecordingLangfuseClient",
     "RedactText",
+    "SandboxAuditBlockedError",
+    "SandboxAuditMiddleware",
     "UnknownAnchorError",
     "default_token_estimator",
 ]
