@@ -17,6 +17,8 @@ dependencies = [
     # Mirrors helix-runtime; pinned directly so pip-audit catches regression.
     "langgraph>=1.0.10",
     "langgraph-checkpoint>=4.0.0",
+    # E.7 web_search Tavily HTTP client (also reused by future E.8 HTTP tool).
+    "httpx>=0.27,<1",
 ]
 
 [build-system]
