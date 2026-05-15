@@ -249,17 +249,15 @@ def _message_text(msg: BaseMessage) -> str:
     content = msg.content
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, Mapping):
-                text = block.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "".join(parts)
-    return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, Mapping):
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "".join(parts)
 
 
 def _to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
