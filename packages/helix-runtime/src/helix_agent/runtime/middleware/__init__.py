@@ -81,6 +81,24 @@ from helix_agent.runtime.middleware.llm_error_handling import (
 from helix_agent.runtime.middleware.llm_error_handling import (
     LLMServerError as LLMServerError,
 )
+from helix_agent.runtime.middleware.loop_detection import (
+    DEFAULT_REMINDER_TEXT as DEFAULT_REMINDER_TEXT,
+)
+from helix_agent.runtime.middleware.loop_detection import (
+    DEFAULT_WINDOW_SIZE as DEFAULT_WINDOW_SIZE,
+)
+from helix_agent.runtime.middleware.loop_detection import (
+    LoopDetectionMiddleware as LoopDetectionMiddleware,
+)
+from helix_agent.runtime.middleware.loop_detection import (
+    clone_ai_message_with_tool_calls as clone_ai_message_with_tool_calls,
+)
+from helix_agent.runtime.middleware.loop_detection import (
+    fingerprint_tool_calls as fingerprint_tool_calls,
+)
+from helix_agent.runtime.middleware.loop_detection import (
+    normalize_args as normalize_args,
+)
 from helix_agent.runtime.middleware.pii_redact import (
     PIIRedactorMiddleware as PIIRedactorMiddleware,
 )
@@ -99,7 +117,9 @@ from helix_agent.runtime.middleware.sandbox_audit import (
 
 __all__ = [
     "ANCHORS",
+    "DEFAULT_REMINDER_TEXT",
     "DEFAULT_SANDBOX_TOOL_NAMES",
+    "DEFAULT_WINDOW_SIZE",
     "BreakerRegistry",
     "CallNext",
     "ChainCycleError",
@@ -116,6 +136,7 @@ __all__ = [
     "LangfuseClient",
     "LangfuseMiddleware",
     "LangfuseSpan",
+    "LoopDetectionMiddleware",
     "Middleware",
     "MiddlewareChain",
     "MiddlewareContext",
@@ -127,5 +148,8 @@ __all__ = [
     "SandboxAuditBlockedError",
     "SandboxAuditMiddleware",
     "UnknownAnchorError",
+    "clone_ai_message_with_tool_calls",
     "default_token_estimator",
+    "fingerprint_tool_calls",
+    "normalize_args",
 ]
