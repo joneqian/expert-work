@@ -204,3 +204,24 @@ def test_unknown_provider_rejected() -> None:
     even after the E.11.5 Literal extension."""
     with pytest.raises(ValidationError):
         ModelSpec.model_validate({"provider": "bedrock", "name": "claude"})
+
+
+def test_rate_limit_rpm_default_is_60() -> None:
+    """E.12 — ``ModelSpec.rate_limit_rpm`` defaults to a conservative
+    60 rpm matching the OpenAI free-tier ballpark."""
+    model = ModelSpec.model_validate({"provider": "openai", "name": "gpt-4o"})
+    assert model.rate_limit_rpm == 60
+
+
+def test_rate_limit_rpm_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        ModelSpec.model_validate({"provider": "openai", "name": "gpt-4o", "rate_limit_rpm": 0})
+    with pytest.raises(ValidationError):
+        ModelSpec.model_validate({"provider": "openai", "name": "gpt-4o", "rate_limit_rpm": -1})
+
+
+def test_rate_limit_rpm_custom_value_accepted() -> None:
+    model = ModelSpec.model_validate(
+        {"provider": "kimi", "name": "moonshot-v1-128k", "rate_limit_rpm": 3}
+    )
+    assert model.rate_limit_rpm == 3

@@ -79,6 +79,12 @@ from orchestrator.llm.providers import (
 from orchestrator.llm.providers import (
     make_qwen_client as make_qwen_client,
 )
+from orchestrator.llm.rate_limit import (
+    DEFAULT_TIME_PERIOD_S as DEFAULT_TIME_PERIOD_S,
+)
+from orchestrator.llm.rate_limit import (
+    RateLimitedProvider as RateLimitedProvider,
+)
 from orchestrator.llm.router import (
     AllProvidersExhaustedError as AllProvidersExhaustedError,
 )
@@ -96,6 +102,7 @@ __all__ = [
     "DEEPSEEK_BASE_URL",
     "DEFAULT_CHAT_COMPLETIONS_PATH",
     "DEFAULT_MAX_TOKENS",
+    "DEFAULT_TIME_PERIOD_S",
     "DOUBAO_BASE_URL",
     "DOUBAO_CHAT_COMPLETIONS_PATH",
     "GLM_BASE_URL",
@@ -113,6 +120,7 @@ __all__ = [
     "OpenAIClient",
     "OpenAIProvider",
     "ProviderHandle",
+    "RateLimitedProvider",
     "RecordingAnthropicClient",
     "RecordingOpenAIClient",
     "make_deepseek_client",

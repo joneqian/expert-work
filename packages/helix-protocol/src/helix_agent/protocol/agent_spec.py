@@ -95,6 +95,13 @@ class ModelSpec(BaseModel):
     name: str = Field(min_length=1)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, gt=0)
+    #: Requests per minute the runtime is allowed to send to this
+    #: provider key (E.12). Consumed by
+    #: ``orchestrator.llm.rate_limit.RateLimitedProvider`` which wraps
+    #: the provider's ``complete()`` in a token bucket — over-limit
+    #: calls **await** rather than bursting into 429s (which would
+    #: poison the E.4 breaker and noise up the fallback chain).
+    rate_limit_rpm: int = Field(default=60, gt=0)
     fallback: list[ModelSpec] = Field(default_factory=list)
 
 
