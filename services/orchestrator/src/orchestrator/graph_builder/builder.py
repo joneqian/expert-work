@@ -29,17 +29,21 @@ Stream E.12.5 wires the middleware chain into both nodes. Anchor calls
 (only when the corresponding chain is passed; ``None`` → no-op):
 
 - ``before_llm_call`` chain → ``agent_node`` invokes before the LLM
-  call. ``ctx.payload`` carries ``messages``; middlewares (E.3
-  dynamic_context, E.5 pii_redact, future E.13 cache_lookup) may
-  rewrite it.
+  call. ``ctx.payload`` carries ``messages`` / ``tools`` / ``tenant_id``;
+  middlewares (E.3 dynamic_context, E.5 pii_redact) may rewrite the
+  messages, and E.13 ``cache_lookup`` may set ``llm_cache_hit`` to a
+  cached :class:`AIMessage` — when present, ``agent_node`` skips the
+  LLM call entirely.
 - ``around_llm_call`` chain → handed to :class:`LLMRouter` which
   invokes the chain **per provider** (Mini-ADR E-13), so each
   fallback attempt gets its own E.4 breaker + E.5 langfuse span.
 - ``after_llm_call`` chain → ``agent_node`` invokes after the LLM
-  returns. ``ctx.payload`` carries ``response`` (mutable) +
-  ``messages`` (the running history); middlewares (E.10.5
-  loop_detection, future E.13 cache_store) may rewrite the response
-  or append reminder messages.
+  returns (or after a cache hit). ``ctx.payload`` carries ``response``
+  (mutable) + ``messages`` (running history) + ``prompt_messages``
+  (the exact prompt, for E.13 cache-key derivation) + ``tenant_id`` +
+  ``cache_hit`` (bool — E.13 ``cache_store`` skips storing a turn that
+  was itself served from cache). Middlewares (E.10.5 loop_detection)
+  may rewrite the response or append reminder messages.
 - ``before_tool_dispatch`` chain → ``tools_node`` invokes per
   ``tool_call``. ``ctx.payload`` carries ``tool_name`` + ``tool_args``;
   middlewares (E.10 sandbox_audit) may raise to block the dispatch.
@@ -101,7 +105,7 @@ def build_react_graph(
     at construction time.
     """
 
-    async def agent_node(state: AgentState) -> dict[str, Any]:
+    async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         step_count = state.get("step_count", 0)
         max_steps = state.get("max_steps", 0)
         if step_count >= max_steps:
@@ -109,18 +113,38 @@ def build_react_graph(
 
         tools = list(tool_registry.specs())
         messages = list(state["messages"])
+        configurable = config.get("configurable") or {}
+        tenant_id = _parse_uuid(configurable.get("tenant_id"))
 
+        cache_hit_response: AIMessage | None = None
         if before_llm_chain is not None:
-            ctx = MiddlewareContext(payload={"messages": messages, "tools": tools})
+            ctx = MiddlewareContext(
+                payload={"messages": messages, "tools": tools, "tenant_id": tenant_id}
+            )
             await before_llm_chain.invoke(ctx, _noop)
             messages = list(ctx.payload.get("messages", messages))
             tools = list(ctx.payload.get("tools", tools))
+            hit = ctx.payload.get("llm_cache_hit")
+            if isinstance(hit, AIMessage):
+                cache_hit_response = hit
 
-        response = await llm_caller(messages=messages, tools=tools)
+        # ``messages`` is now the exact prompt — the E.13 cache key input.
+        if cache_hit_response is not None:
+            response: AIMessage = cache_hit_response
+        else:
+            response = await llm_caller(messages=messages, tools=tools)
 
         if after_llm_chain is not None:
             after_messages: list[BaseMessage] = [*messages, response]
-            ctx = MiddlewareContext(payload={"messages": after_messages, "response": response})
+            ctx = MiddlewareContext(
+                payload={
+                    "messages": after_messages,
+                    "response": response,
+                    "tenant_id": tenant_id,
+                    "prompt_messages": messages,
+                    "cache_hit": cache_hit_response is not None,
+                }
+            )
             await after_llm_chain.invoke(ctx, _noop)
             new_messages = _extract_post_llm_messages(ctx, original=after_messages)
             return {"messages": new_messages, "step_count": step_count + 1}

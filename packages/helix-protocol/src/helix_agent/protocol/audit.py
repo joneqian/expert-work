@@ -62,9 +62,10 @@ class AuditAction(StrEnum):
     # tools (Stream E.6 + E.8 + onwards)
     TOOL_CALL = "tool:call"
     TOOL_BLOCKED = "tool:blocked"
-    # llm (Stream E.11)
+    # llm (Stream E.11 + E.13)
     LLM_CIRCUIT_OPENED = "llm:circuit_opened"
     LLM_FALLBACK_TRIGGERED = "llm:fallback_triggered"
+    LLM_CACHE_HIT = "llm:cache_hit"
     # api_key
     API_KEY_CREATE = "api_key:create"
     API_KEY_REVOKE = "api_key:revoke"
