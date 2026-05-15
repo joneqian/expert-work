@@ -1,0 +1,471 @@
+"""Tests for the SSE streaming layer — Stream E.14.
+
+Covers test matrix #27 (event order + monotonic ids), #28 (drop-oldest
+backpressure), #28b (client disconnect → cancel), #29 (heartbeat) from
+STREAM-E-DESIGN § 5.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from typing import Any
+from uuid import uuid4
+
+import pytest
+from langchain_core.messages import AIMessage
+
+from helix_agent.runtime.runs import DisconnectMode, RunManager, RunRecord, RunStatus
+from helix_agent.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
+from orchestrator.sse import (
+    format_sse,
+    run_agent,
+    sse_consumer,
+)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _ScriptedGraph:
+    """Stub compiled graph: ``astream`` yields a scripted chunk list.
+
+    ``chunk_delay_s`` spaces the chunks out so a test can interleave a
+    cancel / disconnect mid-stream. ``started`` flips on first chunk so
+    a test can await the run actually beginning.
+    """
+
+    chunks: list[Any]
+    chunk_delay_s: float = 0.0
+    started: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def astream(
+        self,
+        input: Any,
+        config: Any = None,
+        *,
+        stream_mode: Any = None,
+    ) -> AsyncIterator[Any]:
+        del input, config, stream_mode
+        self.started.set()
+        for chunk in self.chunks:
+            if self.chunk_delay_s:
+                await asyncio.sleep(self.chunk_delay_s)
+            yield chunk
+
+
+async def _new_record(
+    rm: RunManager, *, on_disconnect: DisconnectMode = DisconnectMode.CANCEL
+) -> RunRecord:
+    return await rm.create(
+        run_id=uuid4(),
+        thread_id=uuid4(),
+        tenant_id=uuid4(),
+        on_disconnect=on_disconnect,
+    )
+
+
+async def _drain(bridge: InMemoryStreamBridge, run_id: Any) -> list[Any]:
+    """Collect all retained events for a finished run, up to END."""
+    events: list[Any] = []
+    async for entry in bridge.subscribe(run_id, heartbeat_interval=5.0):
+        if entry is END_SENTINEL:
+            break
+        events.append(entry)
+    return events
+
+
+# ---------------------------------------------------------------------------
+# format_sse
+# ---------------------------------------------------------------------------
+
+
+def test_format_sse_with_id() -> None:
+    frame = format_sse("updates", {"a": 1}, event_id="123-0")
+    assert frame == b'id: 123-0\nevent: updates\ndata: {"a":1}\n\n'
+
+
+def test_format_sse_without_id() -> None:
+    frame = format_sse("end", None)
+    assert frame == b"event: end\ndata: null\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Test matrix #27 — event order + monotonic ids
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_agent_publishes_metadata_then_chunks_then_end() -> None:
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    graph = _ScriptedGraph(
+        chunks=[
+            {"agent": {"step_count": 1}},
+            {"tools": {"step_count": 1}},
+            {"agent": {"step_count": 2}},
+        ]
+    )
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={"messages": []},
+        config={},
+    )
+
+    events = await _drain(bridge, record.run_id)
+    # metadata + 3 updates.
+    assert [e.event for e in events] == ["metadata", "updates", "updates", "updates"]
+    assert events[0].data == {
+        "run_id": str(record.run_id),
+        "thread_id": str(record.thread_id),
+    }
+    # Event ids are strictly monotonic by sequence suffix.
+    seqs = [int(e.id.split("-")[1]) for e in events]
+    assert seqs == sorted(seqs)
+    assert len(set(seqs)) == len(seqs)
+    # Run finished SUCCESS.
+    assert rm.get(record.run_id).status is RunStatus.SUCCESS
+
+
+@pytest.mark.asyncio
+async def test_run_agent_serializes_base_messages() -> None:
+    """LangGraph chunks carry ``BaseMessage`` objects — they must land
+    in the bridge as JSON-safe dicts, not raw objects."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    graph = _ScriptedGraph(
+        chunks=[{"agent": {"messages": [AIMessage(content="hello", id="ai-1")]}}]
+    )
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={"messages": []},
+        config={},
+    )
+
+    events = await _drain(bridge, record.run_id)
+    update = events[1].data
+    msg = update["agent"]["messages"][0]
+    assert msg["content"] == "hello"
+    assert msg["type"] == "ai"
+    # The serialized chunk must round-trip through json.
+    json.dumps(events[1].data)
+
+
+@pytest.mark.asyncio
+async def test_run_agent_publishes_error_on_graph_exception() -> None:
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+
+    @dataclass
+    class _BoomGraph:
+        async def astream(
+            self, input: Any, config: Any = None, *, stream_mode: Any = None
+        ) -> AsyncIterator[Any]:
+            del input, config, stream_mode
+            raise RuntimeError("graph exploded")
+            yield  # pragma: no cover - unreachable, makes this an async gen
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_BoomGraph(),
+        graph_input={"messages": []},
+        config={},
+    )
+
+    events = await _drain(bridge, record.run_id)
+    error_events = [e for e in events if e.event == "error"]
+    assert len(error_events) == 1
+    assert error_events[0].data["name"] == "RuntimeError"
+    assert "graph exploded" in error_events[0].data["message"]
+    assert rm.get(record.run_id).status is RunStatus.ERROR
+
+
+@pytest.mark.asyncio
+async def test_sse_consumer_frames_in_order_end_terminates() -> None:
+    """End-to-end: worker fills the bridge, sse_consumer drains it into
+    SSE frames, last frame is ``event: end``."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    graph = _ScriptedGraph(chunks=[{"agent": {"step_count": 1}}])
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={"messages": []},
+        config={},
+    )
+
+    frames: list[bytes] = []
+    async for frame in sse_consumer(
+        bridge=bridge,
+        record=record,
+        run_manager=rm,
+        is_disconnected=_never_disconnected,
+        heartbeat_interval=5.0,
+    ):
+        frames.append(frame)
+
+    text = b"".join(frames).decode()
+    assert "event: metadata" in text
+    assert "event: updates" in text
+    assert text.rstrip().endswith("event: end\ndata: null")
+
+
+async def _never_disconnected() -> bool:
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Test matrix #28 — drop-oldest backpressure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_backpressure_drop_oldest() -> None:
+    """StreamBridge bounded buffer drops the oldest events on overflow
+    (Mini-ADR E-8, M0). A consumer subscribing after overflow resumes
+    from the earliest *retained* event — not the earliest published."""
+    bridge = InMemoryStreamBridge(queue_maxsize=8)
+    run_id = uuid4()
+
+    for seq in range(20):
+        await bridge.publish(run_id, "updates", {"seq": seq})
+    await bridge.publish_end(run_id)
+
+    events = await _drain(bridge, run_id)
+    # Only the last 8 survive; the first 12 were dropped.
+    assert len(events) == 8
+    assert [e.data["seq"] for e in events] == list(range(12, 20))
+
+
+# ---------------------------------------------------------------------------
+# Test matrix #28b — client disconnect → cancel run
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_cancels_inflight_run() -> None:
+    """sse_consumer's finally cancels a still-running run when the
+    client disconnects and on_disconnect is CANCEL."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm, on_disconnect=DisconnectMode.CANCEL)
+    await rm.set_status(record.run_id, RunStatus.RUNNING)
+
+    # Consumer sees a heartbeat (idle bridge), checks disconnect → True.
+    frames: list[bytes] = []
+    async for frame in sse_consumer(
+        bridge=bridge,
+        record=record,
+        run_manager=rm,
+        is_disconnected=_always_disconnected,
+        heartbeat_interval=0.05,
+    ):
+        frames.append(frame)
+
+    assert record.abort_event.is_set()
+    assert rm.get(record.run_id).status is RunStatus.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_continue_mode_does_not_cancel() -> None:
+    """on_disconnect=CONTINUE leaves the run alone on disconnect."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm, on_disconnect=DisconnectMode.CONTINUE)
+    await rm.set_status(record.run_id, RunStatus.RUNNING)
+
+    async for _frame in sse_consumer(
+        bridge=bridge,
+        record=record,
+        run_manager=rm,
+        is_disconnected=_always_disconnected,
+        heartbeat_interval=0.05,
+    ):
+        pass
+
+    assert not record.abort_event.is_set()
+    assert rm.get(record.run_id).status is RunStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_disconnect_after_run_finished_is_noop() -> None:
+    """A finished run is never re-cancelled even on a late disconnect."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    await rm.set_status(record.run_id, RunStatus.SUCCESS)
+    await bridge.publish_end(record.run_id)
+
+    async for _frame in sse_consumer(
+        bridge=bridge,
+        record=record,
+        run_manager=rm,
+        is_disconnected=_always_disconnected,
+        heartbeat_interval=0.05,
+    ):
+        pass
+
+    assert not record.abort_event.is_set()
+    assert rm.get(record.run_id).status is RunStatus.SUCCESS
+
+
+async def _always_disconnected() -> bool:
+    return True
+
+
+@pytest.mark.asyncio
+async def test_run_agent_stops_early_on_abort_event() -> None:
+    """The worker polls record.abort_event between chunks — a cancel
+    mid-stream stops it before the remaining chunks are published."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    graph = _ScriptedGraph(
+        chunks=[{"agent": {"n": i}} for i in range(10)],
+        chunk_delay_s=0.02,
+    )
+
+    async def _cancel_mid_stream() -> None:
+        """Wait for the run to start + a couple chunks, then abort it."""
+        await graph.started.wait()
+        await asyncio.sleep(0.03)
+        await rm.cancel(record.run_id)
+
+    # Run the worker and the canceller concurrently. ``gather`` (a call,
+    # not a bare ``await <name>``) keeps CodeQL's py/ineffectual-statement
+    # quiet while still awaiting both to completion.
+    await asyncio.gather(
+        run_agent(
+            bridge=bridge,
+            run_manager=rm,
+            record=record,
+            graph=graph,
+            graph_input={"messages": []},
+            config={},
+        ),
+        _cancel_mid_stream(),
+    )
+
+    events = await _drain(bridge, record.run_id)
+    update_events = [e for e in events if e.event == "updates"]
+    # Aborted well before all 10 chunks streamed.
+    assert len(update_events) < 10
+    assert rm.get(record.run_id).status is RunStatus.INTERRUPTED
+
+
+# ---------------------------------------------------------------------------
+# Test matrix #29 — heartbeat
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_emitted_while_idle() -> None:
+    """An idle bridge (run in flight, no events) makes sse_consumer
+    emit SSE comment heartbeats so proxies don't close the connection."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    await rm.set_status(record.run_id, RunStatus.RUNNING)
+
+    seen: list[bytes] = []
+    disconnect_after = 3
+
+    async def _disconnect_after_n() -> bool:
+        return len(seen) >= disconnect_after
+
+    async for frame in sse_consumer(
+        bridge=bridge,
+        record=record,
+        run_manager=rm,
+        is_disconnected=_disconnect_after_n,
+        heartbeat_interval=0.05,
+    ):
+        seen.append(frame)
+
+    assert any(frame == b": heartbeat\n\n" for frame in seen)
+
+
+# ---------------------------------------------------------------------------
+# Integration — run_agent over a real compiled ReAct graph
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_agent_over_real_react_graph() -> None:
+    """run_agent must work against an actual ``build_react_graph`` +
+    ``GraphRunner.compile`` graph, not just the scripted stub —
+    confirms ``.astream`` chunks serialize cleanly end to end."""
+    from collections.abc import Sequence
+
+    from langchain_core.messages import BaseMessage, HumanMessage
+
+    from helix_agent.runtime.checkpointer import make_checkpointer
+    from orchestrator import (
+        GraphRunner,
+        ToolRegistry,
+        ToolSpec,
+        build_react_graph,
+    )
+
+    @dataclass
+    class _EchoLLM:
+        async def __call__(
+            self,
+            *,
+            messages: Sequence[BaseMessage],
+            tools: Sequence[ToolSpec],
+        ) -> AIMessage:
+            del tools
+            return AIMessage(content=f"echo: {messages[-1].content}", id="ai-1")
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+
+    async with make_checkpointer("memory") as cp:
+        runner = GraphRunner(checkpointer=cp)
+        graph = runner.compile(
+            build_react_graph(llm_caller=_EchoLLM(), tool_registry=ToolRegistry())
+        )
+        await run_agent(
+            bridge=bridge,
+            run_manager=rm,
+            record=record,
+            graph=graph,
+            graph_input={
+                "messages": [HumanMessage(content="ping")],
+                "step_count": 0,
+                "max_steps": 5,
+            },
+            config={"configurable": {"thread_id": uuid4().hex}},
+        )
+
+    events = await _drain(bridge, record.run_id)
+    assert events[0].event == "metadata"
+    update_events = [e for e in events if e.event == "updates"]
+    assert update_events  # at least one node update streamed
+    # Every published chunk is JSON-serialisable.
+    for ev in events:
+        json.dumps(ev.data)
+    assert rm.get(record.run_id).status is RunStatus.SUCCESS
