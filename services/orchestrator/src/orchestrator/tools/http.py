@@ -175,7 +175,7 @@ class HTTPTool:
             return {}
         if isinstance(raw, str):
             return {"content": raw}
-        if isinstance(raw, (dict, list, int, float, bool)):
+        if isinstance(raw, dict | list | int | float | bool):
             return {"json": raw}
         msg = "'body' must be a string or JSON-serialisable value"
         raise ValueError(msg)
