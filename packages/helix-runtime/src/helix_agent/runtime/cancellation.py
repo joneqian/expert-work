@@ -32,7 +32,6 @@ Per [STREAM-E-DESIGN § 2.7](../../../../../../docs/streams/STREAM-E-DESIGN.md).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from typing import Self, TypeVar
@@ -110,14 +109,16 @@ class CancellationToken:
             await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
         finally:
             waiter.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await waiter
+            # Drain the cancelled waiter. ``gather(return_exceptions=True)``
+            # swallows its CancelledError and — being a call expression —
+            # avoids CodeQL's py/ineffectual-statement on a bare await.
+            await asyncio.gather(waiter, return_exceptions=True)
 
         if task.done():
             return task.result()
 
-        # Cancellation won the race — interrupt the in-flight coroutine.
+        # Cancellation won the race — interrupt the in-flight coroutine
+        # and drain it (capturing whatever it raises on cancel).
         task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
+        await asyncio.gather(task, return_exceptions=True)
         raise RunCancelledError("run cancelled mid-call")
