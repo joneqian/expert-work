@@ -59,12 +59,14 @@
 **用法**：
 - 应用启动时 `actiontrail-aliyun-secrets:GetSecretValue` 读取
 - TTL cache（短 TTL，比如 1 小时）避免频繁查
-- secret 命名约定：`/helix-agent/{env}/{service}/{key}`
+- secret 命名约定：`helix-agent/{env}/{service}/{key}`
+
+**引用 URI（F.6 落地时定稿）**：manifest / tenant_config 不嵌 secret 值,只嵌**引用** —— 规范 scheme 是 `secret://<name>`,`<name>` 即上面的命名约定路径,由 `SecretStore.get(name)` 解析。`secret://` 刻意**后端无关**(manifest 不该知道后端是 KMS / Vault / dev .env)。Stream C 设计文里写的 `kms://` 泄漏了后端,F.6 的 `parse_secret_ref` 把它作为**兼容别名**接受(解析到同一 name),但 `secret://` 是规范形式,`kms://` 应迁移。
 
 ### 2.2 抽象层接口
 
 ```python
-# packages/helix-runtime/src/helix_agent/runtime/secrets/base.py
+# packages/helix-runtime/src/helix_agent/runtime/secret_store/base.py
 from typing import Protocol
 
 class SecretStore(Protocol):
@@ -73,9 +75,11 @@ class SecretStore(Protocol):
     async def list_versions(self, name: str) -> list[str]: ...
 ```
 
+> **包目录修正（F.6 落地时）**：实际包名是 `runtime/secret_store/`,不是本 ADR 原写的 `runtime/secrets/` —— 后者会触发"`secrets/` 目录存放凭据值"的工具/权限启发式,而这里是抽象**代码**。
+
 实现：
-- `AliyunKmsSecretStore`（M0 主用）
-- `LocalDevSecretStore`（dev 用本地 .env 文件，无依赖）
+- `LocalDevSecretStore`（dev / test 用本地 .env 文件,无依赖）—— **F.6 已落地**
+- `AliyunKmsSecretStore`（M0 生产主用）—— **follow-up**：`make_secret_store("aliyun_kms")` 暂抛 `NotImplementedError`,待生产部署时落地(含短 TTL cache),模式同 `stream_bridge` 推迟 Redis 后端
 - `VaultSecretStore`（M1 评估后启用）
 
 ### 2.3 dev 环境降级方案
@@ -137,9 +141,9 @@ class SecretStore(Protocol):
 
 ## 5. 落地引用
 
-- **Stream A.x（新增）** SecretStore 抽象 + AliyunKmsSecretStore 实现：`packages/helix-runtime/src/helix_agent/runtime/secrets/`
+- **Stream F.6（已落地）** SecretStore 抽象 + `LocalDevSecretStore` + `parse_secret_ref` + `make_secret_store` 工厂：`packages/helix-runtime/src/helix_agent/runtime/secret_store/`。`AliyunKmsSecretStore` 为 follow-up（见 § 2.2）。
 - **Stream F.5** Credential Proxy aiohttp 版从本抽象读后端 secret，再注入到沙盒外调
-- **Stream F.6** Vault 静态拉取 → 此 ADR 后修正为 KMS Secrets Manager 拉取（更新 ITERATION-PLAN F.6 描述）
+- **agent factory（Stream E follow-up）** 从 manifest `secret://` 引用经本抽象解析出 provider API key，装配 `LLMRouter`
 - **environments/{env}.yaml** 已声明 `secrets.backend: tbd` 字段 → 实施时改为 `aliyun-kms-secrets`（prod/staging）或 `local-env`（dev）
 - **`.env.example`** 模板：Stream A 实施时落地
 
