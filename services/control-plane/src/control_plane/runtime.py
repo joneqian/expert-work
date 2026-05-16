@@ -12,8 +12,11 @@ manifest→agent build path — behind one object held on ``app.state``.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -28,7 +31,15 @@ from helix_agent.runtime.runs import RunManager
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
 from orchestrator import BuiltAgent, MiddlewareEnv, ToolEnv, build_agent
-from orchestrator.tools import AllowlistProvider, HTTPTavilyClient, TavilyClient
+from orchestrator.tools import (
+    AllowlistProvider,
+    HTTPTavilyClient,
+    MCPClient,
+    MCPServerConfig,
+    MCPServerPool,
+    StdioMCPClient,
+    TavilyClient,
+)
 
 #: Builds a runnable agent from a manifest. The production builder
 #: closes over a SecretStore + checkpointer and calls
@@ -135,21 +146,75 @@ async def resolve_web_search_client(
     return HTTPTavilyClient(api_key=api_key)
 
 
+#: Builds an :class:`MCPClient` from a server config. The default
+#: launches a real stdio subprocess; tests inject a recording client.
+McpClientFactory = Callable[[MCPServerConfig], Awaitable[MCPClient]]
+
+
+def _load_mcp_server_configs(path: str) -> list[MCPServerConfig]:
+    """Parse the platform MCP-server JSON file (Mini-ADR E-17).
+
+    Shape: ``[{"name": str, "command": [str, ...], "env": {str: str}}]``.
+    A malformed entry raises at boot — fail-fast on misconfiguration.
+    """
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        msg = f"mcp_servers_config_file must contain a JSON array: {path}"
+        raise ValueError(msg)
+    return [
+        MCPServerConfig(
+            name=entry["name"],
+            command=entry["command"],
+            env=entry.get("env", {}),
+        )
+        for entry in raw
+    ]
+
+
+async def _default_mcp_client(config: MCPServerConfig) -> MCPClient:
+    client = StdioMCPClient(config=config)
+    await client.start()
+    return client
+
+
+@asynccontextmanager
+async def build_mcp_pool(
+    config_file: str | None,
+    *,
+    client_factory: McpClientFactory = _default_mcp_client,
+) -> AsyncIterator[MCPServerPool]:
+    """Yield an :class:`MCPServerPool` of the platform's MCP servers.
+
+    The pool launches one subprocess per entry in ``config_file``
+    (Mini-ADR E-17 — operator-controlled, never tenant input). ``None``
+    yields an empty pool. The pool — and every subprocess — is torn
+    down on exit, including when a mid-startup failure aborts boot.
+    """
+    pool = MCPServerPool()
+    try:
+        if config_file:
+            for config in _load_mcp_server_configs(config_file):
+                await pool.add(config.name, await client_factory(config))
+        yield pool
+    finally:
+        await pool.close_all()
+
+
 def build_tool_env(
     tenant_config_service: TenantConfigService,
     *,
     web_search_client: TavilyClient | None = None,
+    mcp_pool: MCPServerPool | None = None,
 ) -> ToolEnv:
     """Assemble the M0 :class:`ToolEnv`.
 
-    Wires the HTTP tool's per-tenant allowlist and — when a Tavily
-    client is supplied — the ``web_search`` builtin. ``mcp`` is not
-    wired yet; declaring an ``mcp`` tool fails at build time until its
-    follow-up lands.
+    Wires the HTTP tool's per-tenant allowlist, and — when supplied —
+    the ``web_search`` Tavily client and the ``mcp`` server pool.
     """
     return ToolEnv(
         allowlist_provider=_tenant_allowlist_provider(tenant_config_service),
         web_search_client=web_search_client,
+        mcp_pool=mcp_pool,
     )
 
 

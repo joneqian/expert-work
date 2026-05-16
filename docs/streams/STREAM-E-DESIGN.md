@@ -464,6 +464,15 @@ class LLMResponseCache:
 - **理由**：(1) 独立适配器会重复 `OpenAIProvider` 的全部 message/tool 编解码 —— azure 的 wire 格式与 OpenAI 完全一致，唯一差异在 URL/header，属 HTTP client 层。(2) 鉴权头参数化是 2 个字段的小改动，不影响既有 bearer 调用方。(3) 扁平字段与 `ModelSpec` 现状一致，免去嵌套 provider-config 对象的 schema 复杂度。
 - **代价**：`ModelSpec` 多 3 个仅 azure/self-hosted 用到的可选字段（其余 provider 为 `None`）；azure deployment-URL 形态硬编码在 `make_azure_client`，Azure 若改 API 形态需改工厂。
 
+### E-17：MCP server 列表是平台配置，不取自 `tenant_config.mcp_servers`
+
+- **背景**：`build_tool_registry` 的 `mcp` 装配需要一个 `MCPServerPool`；pool 里每个 `StdioMCPClient` 按 `MCPServerConfig.command` 在控制面主机上**起一个子进程**。`tenant_config` 的 schema 含一个 per-tenant `mcp_servers: list[dict]`（`{name, command, env}`）。
+- **安全约束（决定性）**：`command` 会被当子进程执行。若 `command` 取自租户可写的 `tenant_config.mcp_servers`，任一租户即可在控制面主机上**任意命令执行（RCE）**。因此 MCP server 的 `command` **必须**来自平台/运维配置，绝不能来自租户输入。这不是偏好取舍，是硬安全要求。
+- **选择**：M0 的 MCP server 列表是**平台级配置** —— 新增设置项 `mcp_servers_config_file`（指向一个 JSON 文件，`[{name, command, env}]`，与 `secret_store_env_file` 同模式）。app lifespan 读该文件，逐个起 `StdioMCPClient` 装进进程级 `MCPServerPool`，pool 注册进 `AsyncExitStack`（关停时 `close_all`），再注入 `ToolEnv.mcp_pool`。未配置文件 → 空 pool（MCP 受支持但本部署无 server）。
+- **`tenant_config.mcp_servers` 的去向**：该 per-tenant 字段在 M0 **不用于起 server**。M1 的安全用法是 per-tenant **启用/过滤**——租户从平台已注册的 server 里选用哪些（白名单），而非自带 `command`。schema 字段保留，语义在 M1 收敛。
+- **理由**：(1) 安全——见上。(2) `MCPServerPool` 当前就是进程级单例（设计 § 2.5 / Mini-ADR 注：M0 一个进程级 pool，M1 才 per-tenant）；平台级配置与之一致。(3) JSON 配置文件与 `secret_store_env_file` 同惯例，运维心智一致。
+- **代价**：`tenant_config.mcp_servers` schema 字段 M0 处于"已声明未消费"状态（文档已注明 M1 语义）；MCP server 进程与控制面同生命周期，重配置需重启控制面（M0 可接受，M1 池化时再说）。
+
 ---
 
 ## 4. 接口

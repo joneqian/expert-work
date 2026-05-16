@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     #: agent that declares it fails at build time with a clear error.
     tavily_api_key_ref: str | None = None
 
+    #: Path to a JSON file listing the platform's MCP servers —
+    #: ``[{"name", "command": [...], "env": {...}}]`` (STREAM-E-DESIGN
+    #: Mini-ADR E-17). The orchestrator launches one subprocess per
+    #: entry, so the list is operator-controlled — never tenant input.
+    #: ``None`` → an empty MCP pool (no servers).
+    mcp_servers_config_file: str | None = None
+
     # ------------------------------------------------------------------ auth (C.1)
     # OIDC issuer used to validate the ``iss`` JWT claim and to derive
     # the JWKS endpoint when ``oidc_jwks_uri`` is not set. The default

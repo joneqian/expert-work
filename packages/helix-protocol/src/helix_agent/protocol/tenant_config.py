@@ -60,8 +60,13 @@ class TenantConfigRecord(BaseModel):
     # E.8: glob patterns the HTTP tool may call (e.g. ``"https://api.github.com/*"``).
     # Default ``[]`` ↔ deny-all so a freshly-provisioned tenant is safe.
     http_tool_allowlist: list[str] = Field(default_factory=list)
-    # E.9: MCP server launch configs.
+    # E.9: MCP server configs.
     # Shape: ``[{"name": str, "command": [str, ...], "env": {str: str}}]``.
+    # NOT used to launch servers in M0 — STREAM-E-DESIGN Mini-ADR E-17:
+    # ``command`` is operator-controlled (subprocess RCE risk), so the
+    # platform's MCP servers come from ``mcp_servers_config_file``. The
+    # M1 role of this per-tenant field is enablement / filtering over
+    # the platform pool, not command specification.
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
     # D.3: per-tenant retention. Bounded ranges mirror the DB CHECK
     # constraints in migration 0010 so admin clients fail fast rather

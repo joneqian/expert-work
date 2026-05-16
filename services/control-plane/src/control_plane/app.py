@@ -73,6 +73,7 @@ from control_plane.ratelimit import (
 )
 from control_plane.runtime import (
     AgentRuntime,
+    build_mcp_pool,
     build_middleware_env,
     build_tool_env,
     make_agent_builder,
@@ -245,12 +246,16 @@ def create_app(
                     api_key_ref=resolved_settings.tavily_api_key_ref,
                     secret_store=resolved_secret_store,
                 )
+                mcp_pool = await stack.enter_async_context(
+                    build_mcp_pool(resolved_settings.mcp_servers_config_file)
+                )
                 resolved_agent_runtime.agent_builder = make_agent_builder(
                     resolved_secret_store,
                     checkpointer,
                     tool_env=build_tool_env(
                         resolved_tenant_config_service,
                         web_search_client=web_search_client,
+                        mcp_pool=mcp_pool,
                     ),
                     middleware_env=build_middleware_env(),
                 )

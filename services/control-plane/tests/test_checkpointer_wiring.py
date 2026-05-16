@@ -8,7 +8,9 @@ seam, and the lifespan branch that swaps in the durable checkpointer.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -18,6 +20,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from control_plane.app import create_app
 from control_plane.runtime import (
     AgentRuntime,
+    _load_mcp_server_configs,
+    build_mcp_pool,
     build_middleware_env,
     build_tool_env,
     make_agent_builder,
@@ -27,7 +31,7 @@ from control_plane.runtime import (
 from control_plane.settings import Settings
 from control_plane.tenancy import TenantConfigNotConfiguredError
 from helix_agent.runtime.secret_store import LocalDevSecretStore
-from orchestrator.tools import HTTPTavilyClient
+from orchestrator.tools import HTTPTavilyClient, MCPClient, MCPServerConfig, RecordingMCPClient
 from tests.auth_fixtures import build_test_jwt_verifier
 
 
@@ -168,3 +172,62 @@ async def test_build_tool_env_carries_web_search_client() -> None:
     client = await resolve_web_search_client(api_key_ref="secret://tavily/key", secret_store=store)
     env = build_tool_env(_FakeTenantConfigService(allowlist=[]), web_search_client=client)
     assert env.web_search_client is client
+
+
+# ---------------------------------------------------------------------------
+# MCP server pool wiring (#165 / Mini-ADR E-17)
+# ---------------------------------------------------------------------------
+
+
+def test_load_mcp_server_configs_parses_entries(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "mcp.json"
+    cfg_file.write_text(
+        json.dumps(
+            [
+                {"name": "gitlab", "command": ["node", "gitlab.js"], "env": {"TOKEN": "x"}},
+                {"name": "fs", "command": ["mcp-fs"]},
+            ]
+        )
+    )
+    configs = _load_mcp_server_configs(str(cfg_file))
+    assert [c.name for c in configs] == ["gitlab", "fs"]
+    assert configs[0].command == ["node", "gitlab.js"]
+    assert configs[0].env == {"TOKEN": "x"}
+    assert configs[1].env == {}
+
+
+def test_load_mcp_server_configs_rejects_non_array(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "mcp.json"
+    cfg_file.write_text(json.dumps({"name": "not-a-list"}))
+    with pytest.raises(ValueError, match="JSON array"):
+        _load_mcp_server_configs(str(cfg_file))
+
+
+@pytest.mark.asyncio
+async def test_build_mcp_pool_none_yields_empty_pool() -> None:
+    async with build_mcp_pool(None) as pool:
+        assert pool.names() == []
+
+
+@pytest.mark.asyncio
+async def test_build_mcp_pool_loads_servers_and_tears_down(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "mcp.json"
+    cfg_file.write_text(json.dumps([{"name": "gitlab", "command": ["x"]}]))
+    created: list[RecordingMCPClient] = []
+
+    async def _factory(_config: MCPServerConfig) -> MCPClient:
+        client = RecordingMCPClient()
+        created.append(client)
+        return client
+
+    async with build_mcp_pool(str(cfg_file), client_factory=_factory) as pool:
+        assert pool.names() == ["gitlab"]
+    # Exiting the context closed every server.
+    assert created[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_build_tool_env_carries_mcp_pool() -> None:
+    async with build_mcp_pool(None) as pool:
+        env = build_tool_env(_FakeTenantConfigService(allowlist=[]), mcp_pool=pool)
+        assert env.mcp_pool is pool
