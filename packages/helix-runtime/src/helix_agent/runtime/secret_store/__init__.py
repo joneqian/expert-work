@@ -5,6 +5,15 @@ Protocol; the concrete backend (dev ``.env`` / Aliyun KMS / future
 Vault) is chosen by :func:`make_secret_store`.
 """
 
+from helix_agent.runtime.secret_store.aliyun_kms import (
+    AliyunKmsSecretStore as AliyunKmsSecretStore,
+)
+from helix_agent.runtime.secret_store.aliyun_kms import (
+    FetchedSecret as FetchedSecret,
+)
+from helix_agent.runtime.secret_store.aliyun_kms import (
+    KmsBackend as KmsBackend,
+)
 from helix_agent.runtime.secret_store.base import (
     SecretNotFoundError as SecretNotFoundError,
 )
@@ -38,7 +47,10 @@ from helix_agent.runtime.secret_store.refs import (
 
 __all__ = [
     "SECRET_SCHEME",
+    "AliyunKmsSecretStore",
+    "FetchedSecret",
     "InvalidSecretRefError",
+    "KmsBackend",
     "LocalDevSecretStore",
     "SecretNotFoundError",
     "SecretStore",
