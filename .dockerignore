@@ -1,0 +1,18 @@
+# Keep docker build contexts lean + deterministic. Applies to builds
+# rooted at the repo (e.g. the credential-proxy multi-stage build).
+.git/
+.github/
+.venv/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+**/dist/
+**/build/
+**/tests/
+docs/
+infra/
+*.log

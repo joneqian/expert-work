@@ -188,6 +188,44 @@ services:
       timeout: 4s
       retries: 30
 
+  credential-proxy:
+    # Helix Credential Proxy — Stream F.5 service, containerised in F.10.
+    # Dual-homed (Mini-ADR F-2 / F-14): on ``helix-sandbox-egress``
+    # (--internal, sandbox-facing) so sandboxes can reach it, and on the
+    # default network for outbound egress to real upstreams + Postgres.
+    #
+    # Behind the ``sandbox`` compose profile — the default ``up`` (used by
+    # data-layer integration tests) doesn't need it. Enable with
+    # ``docker compose --profile sandbox up``.
+    profiles: ["sandbox"]
+    build:
+      context: ..
+      dockerfile: services/credential-proxy/Dockerfile
+    container_name: helix-credential-proxy
+    environment:
+      HELIX_CRED_PROXY_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+      HELIX_CRED_PROXY_SECRET_STORE_BACKEND: local_dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - helix-sandbox-egress
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8080)))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
 volumes:
   postgres-data:
   minio-data:
+
+networks:
+  # Sandbox egress network — created --internal (Mini-ADR F-14): no NAT /
+  # default route, so a sandbox attached to it can reach only same-network
+  # peers (the credential-proxy). Sandboxes join it by name at docker-run
+  # time (SandboxRuntimeProvider). Explicit ``name`` keeps it un-prefixed.
+  helix-sandbox-egress:
+    name: helix-sandbox-egress
+    internal: true
