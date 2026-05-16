@@ -1,4 +1,13 @@
-"""End-to-end tests for the SSE run trigger + Stream B acceptance flow."""
+"""End-to-end tests for the real SSE run trigger (control-plane cutover).
+
+The endpoint runs a real orchestrator graph in-process. To keep the
+test off the network the injected :class:`AgentRuntime`'s builder
+returns a :class:`BuiltAgent` over a *fake* ``LLMCaller`` — the
+control-plane wiring (manifest load → run spawn → SSE drain) is what's
+under test, not a real LLM call.
+
+SSE vocabulary is ``metadata`` / ``updates`` / ``end`` (amended ADR B-4).
+"""
 
 from __future__ import annotations
 
@@ -11,9 +20,9 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.common.deadline import CancelToken
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.protocol import AuditQuery
+from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -60,8 +69,6 @@ async def runs_client(audit_store: InMemoryAuditLogStore) -> AsyncIterator[Async
         auth_mode="dev",
         rate_limit_burst=10_000,
         rate_limit_per_second=10_000.0,
-        # Deterministic, no inter-token sleep.
-        run_fake_token_delay_s=0.0,
         oidc_issuer=TEST_ISSUER,
         oidc_audience=[TEST_AUDIENCE],
     )
@@ -69,6 +76,7 @@ async def runs_client(audit_store: InMemoryAuditLogStore) -> AsyncIterator[Async
         settings=settings,
         audit_logger=build_default_audit_logger(audit_store),
         jwt_verifier=build_test_jwt_verifier(),
+        agent_runtime=stub_agent_runtime(),
     )
     transport = ASGITransport(app=app)
     headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=_DEFAULT_TENANT)}"}
@@ -81,18 +89,25 @@ async def runs_client(audit_store: InMemoryAuditLogStore) -> AsyncIterator[Async
         yield client
 
 
-async def _parse_sse(body: str) -> list[tuple[str, dict[str, object]]]:
-    events: list[tuple[str, dict[str, object]]] = []
+def _parse_sse(body: str) -> list[tuple[str, object]]:
+    """Parse an SSE body into ``(event, data)`` pairs.
+
+    Comment frames (``: heartbeat``) and any frame without a ``data:``
+    line are skipped — only real events are returned.
+    """
+    events: list[tuple[str, object]] = []
     for chunk in body.split("\n\n"):
         if not chunk.strip():
             continue
         event_type = ""
-        data_payload = ""
+        data_payload: str | None = None
         for line in chunk.splitlines():
             if line.startswith("event: "):
                 event_type = line[len("event: ") :]
             elif line.startswith("data: "):
                 data_payload = line[len("data: ") :]
+        if data_payload is None:
+            continue  # comment-only frame, e.g. ": heartbeat"
         events.append((event_type, json.loads(data_payload)))
     return events
 
@@ -112,24 +127,37 @@ async def _create_session(client: AsyncClient) -> str:
 
 
 @pytest.mark.asyncio
-async def test_run_emits_three_tokens_then_done(runs_client: AsyncClient) -> None:
+async def test_run_emits_metadata_updates_end(runs_client: AsyncClient) -> None:
     thread_id = await _create_session(runs_client)
-    response = await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={})
+    response = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs", json={"input": "review the PR"}
+    )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["x-helix-run-id"]
 
-    events = await _parse_sse(response.text)
+    events = _parse_sse(response.text)
     types = [e[0] for e in events]
-    assert types[:3] == ["token", "token", "token"]
-    assert types[-1] == "done"
+    # Stream opens with metadata, closes with end, an updates in between.
+    assert types[0] == "metadata"
+    assert types[-1] == "end"
+    assert "updates" in types
 
-    # Token payloads carry monotonic seq numbers + non-empty text.
-    for i, (kind, data) in enumerate(events[:3], start=1):
-        assert kind == "token"
-        assert data["seq"] == i
-        assert isinstance(data["text"], str) and data["text"]
-    assert events[-1][1]["reason"] == "fake_complete"
-    assert events[-1][1]["thread_id"] == thread_id
+    metadata = events[0][1]
+    assert isinstance(metadata, dict)
+    assert metadata["thread_id"] == thread_id
+    assert metadata["run_id"] == response.headers["x-helix-run-id"]
+
+
+@pytest.mark.asyncio
+async def test_run_streams_the_agent_reply(runs_client: AsyncClient) -> None:
+    """The fake LLM's reply reaches the client inside an updates event."""
+    thread_id = await _create_session(runs_client)
+    response = await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={"input": "hello"})
+    assert response.status_code == 200
+    body = response.text
+    # The fake agent's content is carried in an updates chunk.
+    assert "stub agent reply" in body
 
 
 @pytest.mark.asyncio
@@ -159,7 +187,9 @@ async def test_run_emits_session_write_audit(
 
 
 @pytest.mark.asyncio
-async def test_run_against_unknown_session_returns_404(runs_client: AsyncClient) -> None:
+async def test_run_against_unknown_session_returns_404(
+    runs_client: AsyncClient,
+) -> None:
     response = await runs_client.post(
         "/v1/sessions/00000000-0000-0000-0000-000000000099/runs",
         json={},
@@ -168,7 +198,9 @@ async def test_run_against_unknown_session_returns_404(runs_client: AsyncClient)
 
 
 @pytest.mark.asyncio
-async def test_run_against_cancelled_session_returns_409(runs_client: AsyncClient) -> None:
+async def test_run_against_cancelled_session_returns_409(
+    runs_client: AsyncClient,
+) -> None:
     thread_id = await _create_session(runs_client)
     await runs_client.post(f"/v1/sessions/{thread_id}:cancel", json={})
     response = await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={})
@@ -176,7 +208,9 @@ async def test_run_against_cancelled_session_returns_409(runs_client: AsyncClien
 
 
 @pytest.mark.asyncio
-async def test_run_against_paused_session_returns_409(runs_client: AsyncClient) -> None:
+async def test_run_against_paused_session_returns_409(
+    runs_client: AsyncClient,
+) -> None:
     thread_id = await _create_session(runs_client)
     await runs_client.post(f"/v1/sessions/{thread_id}:pause", json={})
     response = await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={})
@@ -184,46 +218,18 @@ async def test_run_against_paused_session_returns_409(runs_client: AsyncClient) 
 
 
 # ---------------------------------------------------------------------------
-# cancellation mid-stream — drive the inner generator directly so we can
-# flip the token between iterations.
+# Stream B + E acceptance: create agent → session → run → real SSE
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_fake_stream_short_circuits_on_cancel() -> None:
-    from uuid import uuid4
-
-    from control_plane.api.runs import _fake_stream
-
-    cancel_token = CancelToken()
-    cancel_token.cancel()
-    chunks: list[bytes] = [
-        chunk
-        async for chunk in _fake_stream(
-            thread_id=uuid4(),
-            cancel_token=cancel_token,
-            token_delay_s=0.0,
-        )
-    ]
-    assert len(chunks) == 1
-    assert b"event: done" in chunks[0]
-    assert b'"reason":"cancelled"' in chunks[0]
-
-
-# ---------------------------------------------------------------------------
-# Stream B acceptance: create agent → create session → run → done
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_stream_b_full_acceptance_flow(runs_client: AsyncClient) -> None:
-    """End-to-end happy path used as Stream B verification gate #1."""
-    # 1. List the seeded agent.
+async def test_full_acceptance_flow(runs_client: AsyncClient) -> None:
+    """End-to-end happy path: HTTP run trigger → background graph →
+    streamed SSE — the first M0 vertical slice."""
     agents = await runs_client.get("/v1/agents")
     assert agents.status_code == 200
     assert agents.json()["data"]["total"] == 1
 
-    # 2. Create a session bound to it.
     session_response = await runs_client.post(
         "/v1/sessions",
         json={"agent_name": "code-reviewer", "agent_version": "1.0.0"},
@@ -231,11 +237,13 @@ async def test_stream_b_full_acceptance_flow(runs_client: AsyncClient) -> None:
     assert session_response.status_code == 201
     thread_id = session_response.json()["data"]["thread_id"]
 
-    # 3. Trigger a run and read the SSE.
     run_response = await runs_client.post(
         f"/v1/sessions/{thread_id}/runs",
         json={"input": "review the PR"},
     )
     assert run_response.status_code == 200
-    events = await _parse_sse(run_response.text)
-    assert [e[0] for e in events] == ["token", "token", "token", "done"]
+    events = _parse_sse(run_response.text)
+    types = [e[0] for e in events]
+    assert types[0] == "metadata"
+    assert types[-1] == "end"
+    assert "updates" in types

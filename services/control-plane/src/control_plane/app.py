@@ -70,6 +70,7 @@ from control_plane.ratelimit import (
     RateLimiter,
     RedisTokenBucketLimiter,
 )
+from control_plane.runtime import AgentRuntime, make_agent_runtime
 from control_plane.settings import Settings
 from control_plane.tenancy import TenantConfigService
 from helix_agent.common.health import DefaultHealthProvider
@@ -96,6 +97,7 @@ from helix_agent.persistence.tenant_config import (
 )
 from helix_agent.persistence.thread_meta import InMemoryThreadMetaStore, ThreadMetaStore
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.secret_store import make_secret_store
 
 __all__ = ["create_app"]
 
@@ -126,6 +128,7 @@ def create_app(
     tenant_rate_limiter: RateLimiter | None = None,
     tenant_config_repo: TenantConfigStore | None = None,
     tenant_config_service: TenantConfigService | None = None,
+    agent_runtime: AgentRuntime | None = None,
 ) -> FastAPI:
     """Build a configured FastAPI app.
 
@@ -147,6 +150,12 @@ def create_app(
     )
     resolved_repo = agent_spec_repo or InMemoryAgentSpecStore()
     resolved_threads = thread_meta_repo or InMemoryThreadMetaStore()
+    # In-process agent runtime (RunManager + StreamBridge + manifest→agent
+    # build path). Default wires a local-dev SecretStore; tests inject a
+    # runtime whose builder returns a fake-LLM agent.
+    resolved_agent_runtime = agent_runtime or make_agent_runtime(
+        make_secret_store("local_dev", env_file=resolved_settings.secret_store_env_file)
+    )
     # Late-bound PII resolver: lets the audit logger reference
     # tenant_config without forcing it to exist yet (D.2 cycle break).
     pii_resolver = TenantConfigPiiResolver()
@@ -246,6 +255,7 @@ def create_app(
     app.state.quota_reaper = reaper
     app.state.tenant_config_repo = resolved_tenant_config_repo
     app.state.tenant_config_service = resolved_tenant_config_service
+    app.state.agent_runtime = resolved_agent_runtime
 
     # Starlette wraps middleware in *reverse* registration order: the
     # last call to ``add_middleware`` becomes the outermost layer. We

@@ -73,11 +73,11 @@ class Settings(BaseSettings):
     # deadline_check ≈ 200 ms detection budget (verification gate #3).
     cancellation_poll_interval_s: float = Field(default=0.05, gt=0)
 
-    # ------------------------------------------------------------------ run trigger (B.7)
-    # M0 fake-SSE inter-token delay. Stream E replaces the generator and
-    # this knob disappears; the field stays for now so tests can drive
-    # the loop deterministically (``0.0`` = no delay).
-    run_fake_token_delay_s: float = Field(default=0.005, ge=0)
+    # ------------------------------------------------------------------ run trigger
+    #: Path to the ``.env``-style file the local-dev SecretStore reads
+    #: (F.6 / ADR-0007). ``None`` → an empty store: agent runs fail at
+    #: provider-key resolution with a clear error until a file is set.
+    secret_store_env_file: str | None = None
 
     # ------------------------------------------------------------------ auth (C.1)
     # OIDC issuer used to validate the ``iss`` JWT claim and to derive

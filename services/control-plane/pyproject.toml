@@ -13,6 +13,10 @@ dependencies = [
     "helix-agent-persistence",
     "helix-agent-protocol",
     "helix-agent-runtime",
+    # In-process monolith (STREAM-E-DESIGN § 2.6): the control-plane runs
+    # the orchestrator as a library — agent graphs execute as background
+    # asyncio tasks in this process, not a separate service.
+    "helix-agent-orchestrator",
     # Stream B.1 — FastAPI + Pydantic v2 + uvicorn.
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",

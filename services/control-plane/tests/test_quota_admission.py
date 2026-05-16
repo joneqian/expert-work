@@ -24,6 +24,7 @@ from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.persistence.quota import InMemoryTenantQuotaStore
 from helix_agent.protocol import AuditAction, AuditQuery, QuotaDimension, TenantQuotaPatch
+from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt
 
 _TENANT = DEFAULT_DEV_TENANT_ID
@@ -79,6 +80,7 @@ async def app_factory(
         jwt_verifier=build_test_jwt_verifier(),
         tenant_quota_repo=quota_store,
         enable_reaper=False,
+        agent_runtime=stub_agent_runtime(),
     )
     yield app, quota_store
 

@@ -183,22 +183,26 @@ Session 表已在 A.7 `thread_meta` 落地，B 仅消费。
 
 ### ADR B-4 — SSE 输出协议
 
-**问题**：M0 fake stream 用什么格式？
+**问题**：SSE 流用什么 event 词汇？
 
-**决策**：固定为 [helix.session.run.event](../architecture/subsystems/20-observability.md) 命名族下的 token / heartbeat / done 三种 SSE event：
+**M0 占位决策（B.7，已废）**：fake stream 用 `token` / `heartbeat` / `done` 三种 event：
 
 ```
 event: token
 data: {"seq": 1, "text": "Hello"}
-
-event: heartbeat
-data: {"ts": 1731283200000}
-
-event: done
-data: {"reason": "fake_complete"}
 ```
 
-`event:` 字段与 Stream E LangGraph 真流的 event_type 一一对应；B.7 客户端无需重写。
+**修正决策（control-plane 切真时定稿）**：B.7 的 `token/done` 是 fake stream 占位词汇，写在真实 orchestrator 之前。真实流由 E.14 `run_agent` worker 经 LangGraph `astream(stream_mode="updates")` 产出 —— 是**节点输出**（`updates`），不是 LLM token 增量（token 增量要 `messages` stream mode）。规范词汇改为 E.14 `sse_consumer` 实际产出的一族：
+
+```
+event: metadata      data: {"run_id": "...", "thread_id": "..."}   # 流首
+event: updates       data: {"<node>": {<state writes>}}            # 每个节点完成
+: heartbeat                                                        # 空闲（SSE 注释帧）
+event: end           data: null                                   # 流尾
+event: error         data: {"message": "...", "name": "..."}       # 失败
+```
+
+`event:` 字段即 `StreamBridge.StreamEvent.event`（E.14 § 4.5）。M0 无真实外部客户端，词汇切换无破坏面；将来需要 token 级增量时，worker 的 `stream_mode` 加 `messages` 即可，新增 `messages` event 不破坏现有词汇。
 
 ### ADR B-5 — Actor / Tenant 提取（auth 推迟）
 
