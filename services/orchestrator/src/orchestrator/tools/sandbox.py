@@ -1,4 +1,4 @@
-"""``exec_python`` tool — Stream F.4.
+"""``exec_python`` tool — Stream F.4 / F.7.
 
 Runs LLM-generated Python in a gVisor sandbox via the Sandbox Supervisor
 (F.1): ``acquire`` a sandbox, ``exec`` the code, ``release`` it. The
@@ -11,10 +11,17 @@ Output is truncated to :data:`DEFAULT_OUTPUT_CHAR_CAP` for the LLM
 (Mini-ADR F-9 / E-10) — the runner already capped it at ~1 MiB for
 transport. The ``sandbox_audit`` middleware (E.10) blocks dangerous
 code *before* this tool ever dispatches.
+
+Cancellation (F.7): E.15 races the whole tool dispatch in
+``run_cancellable``, so a cancelled run surfaces here as
+:class:`asyncio.CancelledError` on the ``exec`` ``await``. The tool then
+``destroy``s the sandbox with ``reason="cancelled"`` — a forced SIGKILL
+teardown — instead of a routine ``release`` (Mini-ADR F-8).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -33,6 +40,9 @@ _TRUNCATION_MARKER = "...[truncated]"
 _DEFAULT_TIMEOUT_S = 60.0
 #: Thread label used for ``acquire`` when the run has no id (ad-hoc call).
 _FALLBACK_THREAD_ID = "exec-python"
+#: ``destroy`` reason for a cancelled run — drives the supervisor's
+#: forced-teardown audit (Mini-ADR F-8).
+_CANCELLED_REASON = "cancelled"
 
 
 @dataclass(frozen=True)
@@ -65,7 +75,10 @@ class SupervisorClient(Protocol):
         """Run ``code`` in the sandbox; return its captured outcome."""
 
     async def release(self, *, sandbox_id: UUID) -> None:
-        """Tear the sandbox down."""
+        """Routine sandbox teardown (graceful)."""
+
+    async def destroy(self, *, sandbox_id: UUID, reason: str) -> None:
+        """Forced sandbox teardown (SIGKILL); ``reason`` is audited."""
 
 
 @dataclass
@@ -100,6 +113,13 @@ class HTTPSupervisorClient:
     async def release(self, *, sandbox_id: UUID) -> None:
         await self._post(f"/v1/sandboxes/{sandbox_id}:release", json=None, expect_body=False)
 
+    async def destroy(self, *, sandbox_id: UUID, reason: str) -> None:
+        await self._post(
+            f"/v1/sandboxes/{sandbox_id}:destroy",
+            json={"reason": reason},
+            expect_body=False,
+        )
+
     async def _post(
         self,
         path: str,
@@ -129,17 +149,21 @@ class HTTPSupervisorClient:
 class RecordingSupervisorClient:
     """In-memory :class:`SupervisorClient` for dev / tests.
 
-    Records the acquire / exec / release calls and returns the pre-set
-    :attr:`outcome`. Set ``exec_error`` to drive the error path.
+    Records the acquire / exec / release / destroy calls and returns the
+    pre-set :attr:`outcome`. Set ``exec_error`` to drive the error path
+    (an :class:`asyncio.CancelledError` drives the cancellation path),
+    and ``destroy_error`` to drive a failed teardown.
     """
 
     outcome: SandboxOutcome = field(
         default_factory=lambda: SandboxOutcome(stdout="", stderr="", exit_code=0, timed_out=False)
     )
-    exec_error: Exception | None = None
+    exec_error: BaseException | None = None
+    destroy_error: Exception | None = None
     acquired: list[tuple[UUID, str]] = field(default_factory=list)
     execs: list[tuple[UUID, str]] = field(default_factory=list)
     released: list[UUID] = field(default_factory=list)
+    destroyed: list[tuple[UUID, str]] = field(default_factory=list)
     _next_id: int = 0
 
     async def acquire(self, *, tenant_id: UUID, thread_id: str) -> UUID:
@@ -156,6 +180,11 @@ class RecordingSupervisorClient:
 
     async def release(self, *, sandbox_id: UUID) -> None:
         self.released.append(sandbox_id)
+
+    async def destroy(self, *, sandbox_id: UUID, reason: str) -> None:
+        if self.destroy_error is not None:
+            raise self.destroy_error
+        self.destroyed.append((sandbox_id, reason))
 
 
 @dataclass
@@ -202,10 +231,20 @@ class ExecPythonTool:
         thread_id = str(ctx.run_id) if ctx.run_id is not None else _FALLBACK_THREAD_ID
 
         sandbox_id = await self.client.acquire(tenant_id=ctx.tenant_id, thread_id=thread_id)
+        cancelled = False
         try:
             outcome = await self.client.exec(sandbox_id=sandbox_id, code=code, timeout_s=timeout_s)
+        except asyncio.CancelledError:
+            # The run was cancelled mid-exec (E.15 races tool dispatch in
+            # ``run_cancellable``). SIGKILL the sandbox now — a graceful
+            # release would burn the gate-#8 ≤1s budget (Mini-ADR F-8).
+            cancelled = True
+            raise
         finally:
-            await self._release_quietly(sandbox_id)
+            if cancelled:
+                await self._destroy_quietly(sandbox_id, reason=_CANCELLED_REASON)
+            else:
+                await self._release_quietly(sandbox_id)
         return self._format(outcome)
 
     # ------------------------------------------------------------------
@@ -223,6 +262,14 @@ class ExecPythonTool:
             await self.client.release(sandbox_id=sandbox_id)
         except Exception:
             logger.exception("exec_python.release_failed sandbox=%s", sandbox_id)
+
+    async def _destroy_quietly(self, sandbox_id: UUID, *, reason: str) -> None:
+        # A destroy failure must not mask the cancellation — the
+        # supervisor's TTL reaper is the backstop for a leaked container.
+        try:
+            await self.client.destroy(sandbox_id=sandbox_id, reason=reason)
+        except Exception:
+            logger.exception("exec_python.destroy_failed sandbox=%s", sandbox_id)
 
     def _format(self, outcome: SandboxOutcome) -> ToolResult:
         stdout, cut_out = _truncate(outcome.stdout, self.output_char_cap)

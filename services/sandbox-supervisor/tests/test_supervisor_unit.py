@@ -526,6 +526,22 @@ def test_release_route_returns_204() -> None:
     assert resp.status_code == 204
 
 
+def test_destroy_route_returns_204() -> None:
+    # The forced-teardown route the F.7 cancellation path calls.
+    h = _harness()
+    app = create_app(SandboxSupervisorSettings(), supervisor=h.supervisor, enable_reaper=False)
+    with TestClient(app) as client:
+        acquired = client.post(
+            "/v1/sandboxes:acquire",
+            json={"tenant_id": str(uuid4()), "thread_id": "t-1"},
+        ).json()
+        resp = client.post(
+            f"/v1/sandboxes/{acquired['sandbox_id']}:destroy",
+            json={"reason": "cancelled"},
+        )
+    assert resp.status_code == 204
+
+
 def test_acquire_route_returns_429_when_at_quota() -> None:
     tenant = uuid4()
     store = InMemorySandboxStore(limit=1)

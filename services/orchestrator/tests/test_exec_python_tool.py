@@ -9,6 +9,7 @@ itself is covered by helix-runtime's ``test_sandbox_audit_middleware``.
 
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
@@ -48,10 +49,11 @@ async def test_exec_python_runs_code_and_returns_output() -> None:
     assert "42" in result.content
     assert "exit_code: 0" in result.content
     assert result.meta["exit_code"] == 0
-    # acquire → exec → release, all once.
+    # acquire → exec → release, all once; a clean run never force-destroys.
     assert len(client.acquired) == 1
     assert len(client.execs) == 1
     assert len(client.released) == 1
+    assert client.destroyed == []
 
 
 @pytest.mark.asyncio
@@ -104,8 +106,9 @@ async def test_exec_python_releases_sandbox_even_on_exec_error() -> None:
 
     with pytest.raises(RuntimeError, match="runner died"):
         await tool.call({"code": "print(1)"}, ctx=_ctx())
-    # The sandbox is still released — no leak on the error path.
+    # An ordinary error is a graceful release — not a forced destroy.
     assert len(client.released) == 1
+    assert client.destroyed == []
 
 
 @pytest.mark.asyncio
@@ -122,6 +125,41 @@ def test_exec_python_spec_advertises_code_param() -> None:
     spec = ExecPythonTool(client=RecordingSupervisorClient()).spec
     assert spec.name == "exec_python"
     assert "code" in spec.parameters["required"]
+
+
+# ---------------------------------------------------------------------------
+# cancellation — Stream F.7 (test matrix #58)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_exec_python_destroys_sandbox_on_cancellation() -> None:
+    """A cancelled run force-destroys the sandbox, never a graceful release."""
+    # E.15 cancels the dispatch task → CancelledError on the exec ``await``.
+    client = RecordingSupervisorClient(exec_error=asyncio.CancelledError())
+    tool = ExecPythonTool(client=client)
+
+    with pytest.raises(asyncio.CancelledError):
+        await tool.call({"code": "while True: pass"}, ctx=_ctx())
+
+    assert client.released == []
+    assert len(client.destroyed) == 1
+    # The supervisor sees reason="cancelled" → SIGKILL + force-destroy audit.
+    assert client.destroyed[0][1] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_exec_python_cancellation_destroy_failure_is_swallowed() -> None:
+    """A failed destroy must not mask the cancellation (TTL reaper backstops)."""
+    client = RecordingSupervisorClient(
+        exec_error=asyncio.CancelledError(),
+        destroy_error=RuntimeError("supervisor unreachable"),
+    )
+    tool = ExecPythonTool(client=client)
+
+    # The CancelledError still propagates — the destroy error is swallowed.
+    with pytest.raises(asyncio.CancelledError):
+        await tool.call({"code": "while True: pass"}, ctx=_ctx())
 
 
 # ---------------------------------------------------------------------------
