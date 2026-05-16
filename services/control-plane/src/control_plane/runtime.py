@@ -12,7 +12,7 @@ manifest→agent build path — behind one object held on ``app.state``.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -20,11 +20,15 @@ from uuid import UUID
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
+from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from helix_agent.protocol import AgentSpec
+from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
+from helix_agent.runtime.middleware import RecordingLangfuseClient
 from helix_agent.runtime.runs import RunManager
 from helix_agent.runtime.secret_store import SecretStore
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
-from orchestrator import BuiltAgent, build_agent
+from orchestrator import BuiltAgent, MiddlewareEnv, ToolEnv, build_agent
+from orchestrator.tools import AllowlistProvider
 
 #: Builds a runnable agent from a manifest. The production builder
 #: closes over a SecretStore + checkpointer and calls
@@ -75,18 +79,69 @@ class AgentRuntime:
 def make_agent_builder(
     secret_store: SecretStore,
     checkpointer: BaseCheckpointSaver[Any],
+    *,
+    tool_env: ToolEnv | None = None,
+    middleware_env: MiddlewareEnv | None = None,
 ) -> AgentBuilder:
     """Production :data:`AgentBuilder` bound to a SecretStore + checkpointer.
 
-    Kept separate from :func:`make_agent_runtime` so the app lifespan
-    can rebuild the builder once the durable Postgres checkpointer's
-    connection context is open (the in-memory default is swapped out).
+    ``tool_env`` / ``middleware_env`` inject the platform tool and
+    middleware backends. Kept separate from :func:`make_agent_runtime`
+    so the app lifespan can rebuild the builder once the durable
+    checkpointer's connection context is open and the tenant-config
+    service is ready.
     """
 
     async def _build(spec: AgentSpec) -> BuiltAgent:
-        return await build_agent(spec, secret_store=secret_store, checkpointer=checkpointer)
+        return await build_agent(
+            spec,
+            secret_store=secret_store,
+            checkpointer=checkpointer,
+            tool_env=tool_env,
+            middleware_env=middleware_env,
+        )
 
     return _build
+
+
+def _tenant_allowlist_provider(service: TenantConfigService) -> AllowlistProvider:
+    """An :data:`AllowlistProvider` reading ``http_tool_allowlist`` from
+    the per-tenant config. A header-less / un-configured tenant yields
+    an empty allowlist — the HTTP tool then blocks every URL."""
+
+    async def _provider(tenant_id: UUID | None) -> Sequence[str]:
+        if tenant_id is None:
+            return []
+        try:
+            record = await service.get(tenant_id=tenant_id)
+        except TenantConfigNotConfiguredError:
+            return []
+        return record.http_tool_allowlist
+
+    return _provider
+
+
+def build_tool_env(tenant_config_service: TenantConfigService) -> ToolEnv:
+    """Assemble the M0 :class:`ToolEnv`.
+
+    Wires the HTTP tool's per-tenant allowlist. ``web_search`` (Tavily)
+    and ``mcp`` are not wired yet — declaring those tools fails at
+    build time until their follow-ups land.
+    """
+    return ToolEnv(allowlist_provider=_tenant_allowlist_provider(tenant_config_service))
+
+
+def build_middleware_env() -> MiddlewareEnv:
+    """Assemble the M0 :class:`MiddlewareEnv`.
+
+    Single-instance defaults: an in-process response cache and the
+    span-recording Langfuse client (the SDK-backed Langfuse adapter is
+    M1). The PII redactor is not wired yet — see its follow-up.
+    """
+    return MiddlewareEnv(
+        response_cache=LLMResponseCache(redis=InMemoryRedisCache()),
+        langfuse_client=RecordingLangfuseClient(),
+    )
 
 
 def make_agent_runtime(secret_store: SecretStore) -> AgentRuntime:
