@@ -187,9 +187,7 @@ def build_runs_router() -> APIRouter:
         # name / version are user-supplied strings; they are deliberately
         # NOT logged here (CodeQL py/log-injection) — recover them from
         # the thread record if needed.
-        logger.info(
-            "control_plane.run.started run_id=%s thread=%s", run_id, thread_id
-        )
+        logger.info("control_plane.run.started run_id=%s thread=%s", run_id, thread_id)
 
         return StreamingResponse(
             sse_consumer(
