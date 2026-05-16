@@ -45,6 +45,15 @@ from orchestrator.llm import (
 from orchestrator.llm import (
     ProviderHandle as ProviderHandle,
 )
+from orchestrator.middleware_assembly import (
+    MiddlewareChains as MiddlewareChains,
+)
+from orchestrator.middleware_assembly import (
+    MiddlewareEnv as MiddlewareEnv,
+)
+from orchestrator.middleware_assembly import (
+    build_middleware_chains as build_middleware_chains,
+)
 from orchestrator.resume import (
     PLACEHOLDER_CONTENT as PLACEHOLDER_CONTENT,
 )
@@ -108,6 +117,8 @@ __all__ = [
     "LLMProvider",
     "LLMRouter",
     "MaxStepsExceededError",
+    "MiddlewareChains",
+    "MiddlewareEnv",
     "OpenAIProvider",
     "OrchestratorError",
     "ProviderHandle",
@@ -121,6 +132,7 @@ __all__ = [
     "ToolSpec",
     "build_agent",
     "build_llm_router",
+    "build_middleware_chains",
     "build_react_graph",
     "build_tool_registry",
     "format_sse",

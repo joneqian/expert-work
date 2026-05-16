@@ -442,6 +442,17 @@ class LLMResponseCache:
 - **代价**：`02-AGENT-MANIFEST.md` 的 `tools:` 段要改写成 `type:` 形状（M0 无真实 manifest 用到 tools，无破坏性）；逐 API http 工具的需求若 M1 仍要，另开设计。
 - **装配**：`build_tool_registry(tool_specs, *, tool_env)` 把每条 typed spec 映射成具体适配器；平台运行期依赖（Tavily client / allowlist provider / MCP pool）走 `ToolEnv` 注入包。声明了某工具但 `ToolEnv` 未提供对应依赖 → `AgentFactoryError`。本 PR 交付 schema + 装配器 + `build_agent` 接缝（装配器全单测覆盖）；control-plane 把真实后端（Tavily key 设置项 + secret ref / allowlist 接 `TenantConfigService` / MCP server pool 生命周期）注入 `ToolEnv` 是单列 follow-up —— 在此之前 control-plane 传空 `ToolEnv()`，纯 LLM agent 正常跑，声明工具的 agent 在 build 期得到明确 `AgentFactoryError`。
 
+### E-15：中间件链装配 = "无依赖中间件 always-on + 平台依赖中间件 env-gated"
+
+- **背景**：7 个 middleware 都已实现（E.3/E.4/E.5/E.10.5/E.13 + sandbox_audit + pii_redact），但 `build_agent` 调 `build_react_graph` 不传任何 chain —— manifest → 编译 graph 的中间件装配没人做。
+- **替代**：(1) 全部 always-on；(2) 全部 manifest 字段开关驱动。
+- **选择**：按"是否需要平台运行期依赖"二分。
+  - **always-on（无依赖）**：`DynamicContextMiddleware`（before_llm_call）、`LLMErrorHandlingMiddleware`（around_llm_call）、`LoopDetectionMiddleware`（after_llm_call）—— 每个 agent 都装。
+  - **env-gated（需平台依赖）**：`PIIRedactorMiddleware`（需 `RedactText`）、`LLMCacheLookup/StoreMiddleware`（需 `LLMResponseCache`）、`LangfuseMiddleware`（需 `LangfuseClient`）—— 仅当 `MiddlewareEnv` 提供对应依赖才装。
+  - **推迟**：`SandboxAuditMiddleware`（before_tool_dispatch）随 Stream F sandbox 工具接入时再装（设计 § 1.1 E.10 原文"Sandbox 工具接入时装"）。
+- **理由**：(1) always-on 三件是成本/稳定性底线 —— E.3 "API 成本 10x 绝不能省"、E.4 断路器"防开发期被限流爆"、E.10.5 循环 runaway guard；无依赖，无理由可关。(2) env-gated 三件依赖平台资源（Langfuse 实例 / cache 后端 / redactor），未注入即静默跳过，与 `ToolEnv`（Mini-ADR E-14）同一注入模式，保持一致。(3) manifest 字段（`PolicySpec.pii` / `context_compression` 等）M0 只用于 `DynamicContextMiddleware` 的 `max_turns/max_tokens` 调参；PII/cache 的 manifest 级开关推 M1。
+- **装配**：`build_middleware_chains(spec, *, env) -> MiddlewareChains` 产出 4 个 anchor 的 `MiddlewareChain`（某 anchor 无中间件则为 `None`，保留 graph 的 no-chain 快路径）。`build_agent` 把 3 个 graph chain 传 `build_react_graph`，`around_llm_call` chain 经 `build_llm_router` 传 `LLMRouter.around_llm_chain`（Mini-ADR E-13）。本 PR 交付装配器 + 接缝；control-plane 注入 `MiddlewareEnv` 真实后端是单列 follow-up —— 在此之前传空 `MiddlewareEnv()`，三个 always-on 中间件已生效。
+
 ---
 
 ## 4. 接口

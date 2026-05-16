@@ -18,9 +18,10 @@ M0 v1 scope:
   :class:`~orchestrator.tools.ToolEnv` — the default empty ``ToolEnv``
   still builds a pure-LLM agent; a declared tool whose dep is missing
   raises :class:`AgentFactoryError`.
-- **Middleware chains — not wired.** ``build_react_graph`` is called
-  without chains. Wiring E.3/E.4/E.5/E.10/E.10.5/E.13 from the
-  manifest's ``policies`` / ``dynamic_context`` blocks is a follow-up.
+- **Middleware chains — assembled.** :func:`build_middleware_chains`
+  (Mini-ADR E-15) wires the three always-on middlewares plus any
+  env-gated ones (PII / cache / Langfuse) into the graph's anchor
+  chains and the router's ``around_llm_call`` chain.
 
 Known M0 limitation: ``ModelSpec.temperature`` is not plumbed into the
 provider request body — the E.11 provider adapters are minimal and do
@@ -36,6 +37,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from helix_agent.protocol import AgentSpec, ModelSpec
+from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from orchestrator.errors import AgentFactoryError
 from orchestrator.graph_builder import build_react_graph
@@ -54,6 +56,7 @@ from orchestrator.llm import (
     make_kimi_client,
     make_qwen_client,
 )
+from orchestrator.middleware_assembly import MiddlewareEnv, build_middleware_chains
 from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
 
@@ -78,6 +81,7 @@ async def build_agent(
     secret_store: SecretStore,
     checkpointer: BaseCheckpointSaver[Any],
     tool_env: ToolEnv | None = None,
+    middleware_env: MiddlewareEnv | None = None,
 ) -> BuiltAgent:
     """Assemble a :class:`BuiltAgent` from a validated :class:`AgentSpec`.
 
@@ -87,14 +91,29 @@ async def build_agent(
     pure-LLM agent; an agent that declares a tool whose dep is absent
     raises :class:`AgentFactoryError`.
 
+    ``middleware_env`` injects the deps the env-gated middleware need
+    (redactor / cache / Langfuse client — Mini-ADR E-15). An empty
+    :class:`MiddlewareEnv` still wires the three always-on middlewares
+    (dynamic context / circuit breaker / loop detection).
+
     Raises :class:`AgentFactoryError` for an un-buildable manifest
     (missing ``api_key_ref``, an unsupported provider, an
     un-assemblable ``tools:`` entry, …).
     """
-    router = await build_llm_router(spec.spec.model, secret_store=secret_store)
-    # M0 v1: middleware chains not wired — see module docstring.
+    chains = build_middleware_chains(spec, env=middleware_env)
+    router = await build_llm_router(
+        spec.spec.model,
+        secret_store=secret_store,
+        around_llm_chain=chains.around_llm_call,
+    )
     registry = await build_tool_registry(spec.spec.tools, tool_env=tool_env or ToolEnv())
-    graph = build_react_graph(llm_caller=router, tool_registry=registry)
+    graph = build_react_graph(
+        llm_caller=router,
+        tool_registry=registry,
+        before_llm_chain=chains.before_llm_call,
+        after_llm_chain=chains.after_llm_call,
+        before_tool_dispatch_chain=chains.before_tool_dispatch,
+    )
     compiled = GraphRunner(checkpointer=checkpointer).compile(graph)
     return BuiltAgent(
         graph=compiled,
@@ -107,6 +126,7 @@ async def build_llm_router(
     model: ModelSpec,
     *,
     secret_store: SecretStore,
+    around_llm_chain: MiddlewareChain | None = None,
 ) -> LLMRouter:
     """Build an :class:`LLMRouter` from a ``ModelSpec`` + its fallback tree.
 
@@ -115,6 +135,9 @@ async def build_llm_router(
     ordered provider chain. Each model's ``api_key_ref`` is resolved
     through ``secret_store``; the provider adapter is wrapped in E.12's
     :class:`RateLimitedProvider` at the model's ``rate_limit_rpm``.
+
+    ``around_llm_chain`` is the ``around_llm_call`` anchor chain — the
+    router wraps each provider attempt with it (Mini-ADR E-13).
     """
     handles: list[ProviderHandle] = []
     for entry in _flatten_chain(model):
@@ -127,7 +150,7 @@ async def build_llm_router(
         provider = _build_provider(entry, api_key)
         rate_limited = RateLimitedProvider.with_rpm(provider, rate_limit_rpm=entry.rate_limit_rpm)
         handles.append(ProviderHandle(provider=rate_limited, key=f"{entry.provider}:{entry.name}"))
-    return LLMRouter(providers=handles)
+    return LLMRouter(providers=handles, around_llm_chain=around_llm_chain)
 
 
 def _flatten_chain(model: ModelSpec) -> list[ModelSpec]:

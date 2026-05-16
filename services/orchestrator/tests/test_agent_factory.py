@@ -10,12 +10,14 @@ from langgraph.graph.state import CompiledStateGraph
 
 from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.checkpointer import make_checkpointer
+from helix_agent.runtime.middleware import RecordingLangfuseClient
 from helix_agent.runtime.secret_store import LocalDevSecretStore
 from orchestrator import (
     AgentFactoryError,
     AnthropicProvider,
     BuiltAgent,
     LLMRouter,
+    MiddlewareEnv,
     OpenAIProvider,
     ToolEnv,
     build_agent,
@@ -256,4 +258,15 @@ async def test_build_agent_with_tool_env_succeeds() -> None:
     env = ToolEnv(web_search_client=RecordingTavilyClient())
     async with make_checkpointer("memory") as cp:
         built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp, tool_env=env)
+    assert isinstance(built, BuiltAgent)
+
+
+@pytest.mark.asyncio
+async def test_build_agent_with_middleware_env_succeeds() -> None:
+    """``middleware_env`` is threaded to build_middleware_chains."""
+    env = MiddlewareEnv(langfuse_client=RecordingLangfuseClient())
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(
+            _spec(), secret_store=_secret_store(), checkpointer=cp, middleware_env=env
+        )
     assert isinstance(built, BuiltAgent)
