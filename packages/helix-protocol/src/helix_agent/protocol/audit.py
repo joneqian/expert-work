@@ -41,6 +41,9 @@ class AuditAction(StrEnum):
     SESSION_READ = "session:read"
     SESSION_WRITE = "session:write"
     SESSION_CANCEL = "session:cancel"
+    # run lifecycle — emitted by the orchestrator worker at run end
+    RUN_COMPLETED = "run:completed"
+    RUN_FAILED = "run:failed"
     # secret
     SECRET_READ = "secret:read"
     SECRET_WRITE = "secret:write"

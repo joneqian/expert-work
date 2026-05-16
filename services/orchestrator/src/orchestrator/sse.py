@@ -43,6 +43,8 @@ from uuid import UUID
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
+from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
+from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.cancellation import (
     CANCELLATION_TOKEN_KEY,
     CancellationToken,
@@ -97,6 +99,7 @@ async def run_agent(
     graph: StreamableGraph,
     graph_input: Any,
     config: RunnableConfig,
+    audit_logger: AuditLogger | None = None,
     stream_mode: str = DEFAULT_STREAM_MODE,
 ) -> None:
     """Drive ``graph`` to completion, publishing events to ``bridge``.
@@ -112,6 +115,13 @@ async def run_agent(
     5. **Always** (``finally``): ``publish_end`` + schedule bridge
        cleanup. A terminal ``end`` reaches every consumer no matter how
        the run finished.
+
+    When ``audit_logger`` is supplied, one run-lifecycle row lands at
+    run end — ``run:completed`` on a normal / interrupted finish,
+    ``run:failed`` on an exception. The defensive
+    :class:`asyncio.CancelledError` path is *not* audited: awaiting the
+    logger during loop teardown is unreliable. Audit-write failures are
+    logged and swallowed — they never fail the run.
     """
     run_id = record.run_id
     # Bind a cancellation token to the run's abort_event and thread it
@@ -142,12 +152,28 @@ async def run_agent(
 
         final = RunStatus.INTERRUPTED if record.abort_event.is_set() else RunStatus.SUCCESS
         await run_manager.set_status(run_id, final)
+        await _emit_run_end_audit(
+            audit_logger,
+            record,
+            action=AuditAction.RUN_COMPLETED,
+            result=AuditResult.SUCCESS,
+            reason=None,
+            status="interrupted" if final is RunStatus.INTERRUPTED else "success",
+        )
 
     except RunCancelledError:
         # A node surfaced cooperative cancellation mid-step (E.15) — a
         # normal interrupted finish, not a failure.
         await run_manager.set_status(run_id, RunStatus.INTERRUPTED)
         logger.info("run_agent.cancelled_cooperatively run_id=%s", run_id)
+        await _emit_run_end_audit(
+            audit_logger,
+            record,
+            action=AuditAction.RUN_COMPLETED,
+            result=AuditResult.SUCCESS,
+            reason=None,
+            status="interrupted",
+        )
     except asyncio.CancelledError:
         # Task-level cancellation (event-loop shutdown / explicit
         # task.cancel()). The cooperative abort_event path above is the
@@ -163,6 +189,14 @@ async def run_agent(
             "error",
             {"message": str(exc), "name": type(exc).__name__},
         )
+        await _emit_run_end_audit(
+            audit_logger,
+            record,
+            action=AuditAction.RUN_FAILED,
+            result=AuditResult.ERROR,
+            reason=str(exc),
+            status="error",
+        )
     finally:
         await bridge.publish_end(run_id)
         # Fire-and-forget cleanup; keep a reference so the task isn't
@@ -175,6 +209,43 @@ async def run_agent(
 #: Strong refs to in-flight cleanup tasks — without this the event loop
 #: may garbage-collect a bare ``create_task`` result before it runs.
 _BACKGROUND_CLEANUP_TASKS: set[asyncio.Task[None]] = set()
+
+
+async def _emit_run_end_audit(
+    audit_logger: AuditLogger | None,
+    record: RunRecord,
+    *,
+    action: AuditAction,
+    result: AuditResult,
+    reason: str | None,
+    status: str,
+) -> None:
+    """Write one run-lifecycle audit row.
+
+    The orchestrator worker is the actor (``actor_type="system"``); the
+    row is keyed to the run's session so it sits alongside the
+    ``session:write`` row the control-plane emits at run start. An
+    audit-write failure is logged and swallowed — it must never fail
+    an otherwise-finished run.
+    """
+    if audit_logger is None:
+        return
+    try:
+        await audit_logger.write(
+            AuditEntry(
+                tenant_id=record.tenant_id,
+                actor_type="system",
+                actor_id="orchestrator",
+                action=action,
+                resource_type="session",
+                resource_id=str(record.thread_id),
+                result=result,
+                reason=reason,
+                details={"run_id": str(record.run_id), "status": status},
+            )
+        )
+    except Exception:
+        logger.exception("run_agent.audit_failed run_id=%s", record.run_id)
 
 
 # ---------------------------------------------------------------------------

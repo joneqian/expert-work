@@ -17,6 +17,7 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessage
 
+from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
 from helix_agent.runtime.runs import DisconnectMode, RunManager, RunRecord, RunStatus
 from helix_agent.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
 from orchestrator.sse import (
@@ -468,4 +469,98 @@ async def test_run_agent_over_real_react_graph() -> None:
     # Every published chunk is JSON-serialisable.
     for ev in events:
         json.dumps(ev.data)
+    assert rm.get(record.run_id).status is RunStatus.SUCCESS
+
+
+# ---------------------------------------------------------------------------
+# run-completion audit (F-3)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _RecordingAuditLogger:
+    """Captures :class:`AuditEntry` writes — structural stand-in for
+    ``AuditLogger`` (``run_agent`` only calls ``write``)."""
+
+    entries: list[AuditEntry] = field(default_factory=list)
+
+    async def write(self, entry: AuditEntry) -> None:
+        self.entries.append(entry)
+
+
+@pytest.mark.asyncio
+async def test_run_agent_audits_run_completed_on_success() -> None:
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    audit = _RecordingAuditLogger()
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_ScriptedGraph(chunks=[{"agent": {"x": 1}}]),
+        graph_input={"messages": []},
+        config={},
+        audit_logger=audit,
+    )
+
+    assert len(audit.entries) == 1
+    entry = audit.entries[0]
+    assert entry.action is AuditAction.RUN_COMPLETED
+    assert entry.result is AuditResult.SUCCESS
+    assert entry.resource_id == str(record.thread_id)
+    assert entry.details == {"run_id": str(record.run_id), "status": "success"}
+
+
+@pytest.mark.asyncio
+async def test_run_agent_audits_run_failed_on_exception() -> None:
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    audit = _RecordingAuditLogger()
+
+    @dataclass
+    class _BoomGraph:
+        async def astream(
+            self, input: Any, config: Any = None, *, stream_mode: Any = None
+        ) -> AsyncIterator[Any]:
+            del input, config, stream_mode
+            raise RuntimeError("graph exploded")
+            yield  # pragma: no cover - unreachable, makes this an async gen
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_BoomGraph(),
+        graph_input={"messages": []},
+        config={},
+        audit_logger=audit,
+    )
+
+    assert len(audit.entries) == 1
+    entry = audit.entries[0]
+    assert entry.action is AuditAction.RUN_FAILED
+    assert entry.result is AuditResult.ERROR
+    assert entry.reason is not None
+    assert "graph exploded" in entry.reason
+
+
+@pytest.mark.asyncio
+async def test_run_agent_no_audit_logger_does_not_crash() -> None:
+    """``audit_logger`` omitted — the run still finishes cleanly."""
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_ScriptedGraph(chunks=[{"agent": {"x": 1}}]),
+        graph_input={"messages": []},
+        config={},
+    )
+
     assert rm.get(record.run_id).status is RunStatus.SUCCESS

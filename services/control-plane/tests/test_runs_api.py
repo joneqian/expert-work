@@ -181,6 +181,25 @@ async def test_run_emits_session_write_audit(
     assert run_events[0].details["input_len"] == 2
 
 
+@pytest.mark.asyncio
+async def test_run_emits_run_completed_audit(
+    runs_client: AsyncClient, audit_store: InMemoryAuditLogStore
+) -> None:
+    """The run_agent worker writes a run:completed row at run end (F-3)."""
+    thread_id = await _create_session(runs_client)
+    response = await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={"input": "hi"})
+    assert response.status_code == 200
+    _ = response.text  # exhaust the stream — the worker has finished by EOF
+
+    page = await audit_store.query(AuditQuery(tenant_id=_DEFAULT_TENANT))
+    completed = [r for r in page.entries if r.action.value == "run:completed"]
+    assert len(completed) == 1
+    entry = completed[0]
+    assert entry.resource_id == thread_id
+    assert entry.details["status"] == "success"
+    assert entry.details["run_id"] == response.headers["x-helix-run-id"]
+
+
 # ---------------------------------------------------------------------------
 # error paths
 # ---------------------------------------------------------------------------

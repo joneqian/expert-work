@@ -15,8 +15,9 @@ Cancellation: ``sse_consumer`` polls ``request.is_disconnected`` and, on
 disconnect, cancels the run through the :class:`RunManager` (E.15
 cooperative cancellation surfaces it inside the graph).
 
-Audit: a single ``session:write`` row lands at run start. Run-completion
-lifecycle audit belongs with the orchestrator and is a follow-up.
+Audit: a ``session:write`` row lands at run start; the ``run_agent``
+worker writes the run-completion row (``run:completed`` / ``run:failed``)
+at run end.
 """
 
 from __future__ import annotations
@@ -180,6 +181,7 @@ def build_runs_router() -> APIRouter:
                 graph=built.graph,  # type: ignore[arg-type]
                 graph_input=graph_input,
                 config=config,
+                audit_logger=audit,
             )
         )
         await runtime.run_manager.attach_task(run_id, worker)

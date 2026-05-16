@@ -184,6 +184,7 @@ auth:login, auth:logout, auth:login_failed, auth:token_refresh
 manifest:read, manifest:write, manifest:delete, manifest:sign, manifest:publish
 session:read, session:write, session:cancel, session:debug
 session:resume, session:pause, session:force_resume                   -- 与 19 durable execution / 25 HITL 联动
+run:completed, run:failed                                              -- 编排器 run_agent worker 在 run 结束时写（F-3）
 sandbox:force_destroy, sandbox:quota_denied
 secret:read, secret:write, secret:rotate, secret:delete
 quota:read, quota:write, quota:rate_limit_denied                      -- denied 走采样
