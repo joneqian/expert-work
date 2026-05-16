@@ -136,10 +136,17 @@ class SandboxSupervisor:
         await self.destroy(sandbox_id, reason=DESTROY_REASON_RELEASE)
 
     async def destroy(self, sandbox_id: UUID, *, reason: str) -> None:
-        """Tear a sandbox down — close the link + ``docker rm -f`` + mark DESTROYED.
+        """Tear a sandbox down — ``docker rm -f`` + close the link + mark DESTROYED.
 
         Idempotent: destroying an already-terminal sandbox is a no-op.
         A non-``release`` reason emits a ``sandbox:force_destroy`` audit.
+
+        A forced teardown (cancel / TTL reaper) SIGKILLs the container
+        *before* closing the link: ``link.close()`` waits on a stdin-EOF
+        that a busy runner only sees once its current ``exec`` returns,
+        which would blow the gate-#8 ≤1s budget (Mini-ADR F-8). A routine
+        ``release`` closes the pipe gracefully first, with ``docker rm``
+        as the backstop.
         """
         record = await self._store.get(sandbox_id)
         if record is None:
@@ -148,9 +155,13 @@ class SandboxSupervisor:
             return
 
         link = self._links.pop(sandbox_id, None)
+        forced = reason != DESTROY_REASON_RELEASE
+        if forced:
+            await self._docker.remove(_container_name(sandbox_id))
         if link is not None:
             await link.close()
-        await self._docker.remove(_container_name(sandbox_id))
+        if not forced:
+            await self._docker.remove(_container_name(sandbox_id))
 
         now = datetime.now(UTC)
         released_at = now if reason == DESTROY_REASON_RELEASE else record.released_at

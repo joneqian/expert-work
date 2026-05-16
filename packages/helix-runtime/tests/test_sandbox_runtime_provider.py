@@ -42,7 +42,7 @@ def test_argv_carries_all_hardening_flags() -> None:
     assert _flag_value(argv, "--memory") == "512m"
     assert _flag_value(argv, "--cpus") == "1.0"
     assert _flag_value(argv, "--network") == DEFAULT_EGRESS_NETWORK
-    assert _flag_value(argv, "--tmpfs") == "/workspace:rw,size=64m"
+    assert _flag_value(argv, "--tmpfs") == "/workspace:rw,size=64m,mode=1777"
 
 
 def test_argv_keeps_stdin_open_for_runner_protocol() -> None:
@@ -80,7 +80,7 @@ def test_custom_limits_reflected_in_argv() -> None:
     assert _flag_value(argv, "--cpus") == "2.5"
     assert _flag_value(argv, "--memory") == "1024m"
     assert _flag_value(argv, "--pids-limit") == "64"
-    assert _flag_value(argv, "--tmpfs") == "/workspace:rw,size=128m"
+    assert _flag_value(argv, "--tmpfs") == "/workspace:rw,size=128m,mode=1777"
 
 
 def test_custom_egress_network_reflected() -> None:

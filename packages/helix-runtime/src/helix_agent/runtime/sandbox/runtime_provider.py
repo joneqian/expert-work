@@ -81,7 +81,10 @@ class SandboxRuntimeProvider:
             "--interactive",
             "--read-only",
             "--tmpfs",
-            f"/workspace:rw,size={limits.workspace_size_mb}m",
+            # mode=1777: the tmpfs root must be writable by the image's
+            # non-root ``agent`` user — without it /workspace is root-owned
+            # and the sandbox cannot create files (F.8 gate #1).
+            f"/workspace:rw,size={limits.workspace_size_mb}m,mode=1777",
             "--cap-drop",
             "ALL",
             "--security-opt",

@@ -61,7 +61,7 @@
 7. **逃逸 PoC** — 跑 CVE-2019-5736（runc）PoC → 在 runsc 下**必须失败**。
 8. **取消即杀** — 发起 long-running `exec_python`（`while True: pass`），触发 cancellation → sandbox 在 **≤1s 内**被 `docker kill` 干净、`sandbox_instance.state=DESTROYED`、资源回收。
 
-> **验证状态约定**（同 Stream E 收尾）：用例 1/2/4/5/8 在 Linux CI（runc 即可覆盖隔离语义）跑自动化集成测试；用例 3 需 sandbox netns + iptables；用例 6/7 依赖 **真实 runsc 环境**（macOS 不可用 gVisor，CI 在 Linux runner 跑），归入 **M0→M1 Gate 的沙盒渗透测试**。
+> **验证状态约定**（同 Stream E 收尾）：用例 1/2/4/5/8 由 **F.8** 集成 harness 在 CI（runc 即可覆盖隔离语义，对应测试矩阵 #45/#48/#50/#56/#57）跑自动化集成测试；用例 3（egress 隔离）依赖 sandbox netns + iptables allowlist —— 该 allowlist M0 未实现，待 **F.9** 补齐后自动化；用例 6/7 依赖 **真实 runsc 环境**（macOS 不可用 gVisor，CI 在 Linux runner 跑），归入 **M0→M1 Gate 的沙盒渗透测试**。
 
 ---
 
@@ -281,6 +281,7 @@ sandbox_instance.state = DESTROYED；≤1s（验收门 #8）
 - **选择**：取消即 `docker kill`（直接 SIGKILL 整个容器）。
 - **理由**：(1) 验收门 #8 要求 ≤1s 杀干净；graceful 宽限期会吃掉这 1s 预算。(2) sandbox 是无状态计算体（tmpfs `/workspace` 随容器销毁），没有"需要 flush 的状态"，graceful 无收益。(3) 与 E.15 整体取消语义一致 —— E.15 对 LLM call 也是竞速中断不等收尾。
 - **代价**：runner.py 进程被硬杀，不会写"我被取消了"日志 —— 取消事件由工具侧 / supervisor 侧 audit 记录，容器内不需要。
+- **补充（F.8 修正）**：supervisor 的强制 `destroy`（`reason != release`）必须**先 `docker rm --force` 再 `link.close()`**。`link.close()` 等的是 stdin EOF，而忙碌 runner 要等当前 `exec` 返回才会看到 EOF —— 先 close 会吃满 5s grace、击穿 ≤1s 预算。F.8 集成测试 #57 实测发现此序问题并修正（F.7 单测用假桩未覆盖真实 `close()`）。
 
 ### F-9：`exec_python` 输出截断 = stdout / stderr 各 20k chars，工具内自管
 
@@ -288,6 +289,27 @@ sandbox_instance.state = DESTROYED；≤1s（验收门 #8）
 - **选择**：`exec_python` 适配器内部截断 stdout / stderr 各 20k chars（尾部截 + 保 exit_code + `ToolResult.meta.truncated=true`）。
 - **理由**：对齐 Stream E Mini-ADR E-10（tool output truncation 每工具自管）—— E-10 已为 web_search / HTTP / MCP 定调，`exec_python` 遵循同 pattern，复用 `helix_agent.runtime.tools.truncation` 共享 helper。
 - **代价**：无额外代价 —— 本就是 E-10 既定 pattern 的延伸。
+
+### F-10：sandbox 验收门自动化 = runc 集成测试（F.8），gVisor-only 门留人工
+
+- **替代**：F.4–F.7 各自落地时就把 § 1.3 的 integration 验收门写成 CI 测试。
+- **选择**：F.4–F.7 只落假桩单元测试；§ 1.3 中 **runc 即可覆盖语义**的门（#1/#2/#4/#5/#8 → 测试矩阵 #45/#48/#50/#56/#57）统一由收尾 PR **F.8** 用真实 Docker 集成 harness 自动化；gVisor-only 门 #6/#7 留 M0→M1 人工渗透；egress 门 #3 待 F.9。
+- **理由**：(1) F.4–F.7 收尾时并无 sandbox-Docker 集成 harness，假桩单测先保证逻辑正确、PR 不被 Docker 慢拉卡住。(2) 集成门集中一个 PR 落地，harness（建镜像 / 建网络 / 扫容器）只写一份。(3) GitHub Actions 标准 runner 自带 Docker，runc 可跑；§ 1.3 已明确 runc 覆盖 #1/#2/#5 隔离语义，gVisor 只为 #6/#7 的 syscall 拦截 / 逃逸面服务。
+- **代价**：F.4–F.7 合并时这批门有一个未被自动化守住的窗口期；F.8 收口。F.8 实测即发现并修正了 F.7 强制 destroy 的序问题（见 Mini-ADR F-8 补充）—— 印证"假桩单测漏真实路径"的风险。
+
+### F-11：集成测试用进程内 `SandboxSupervisor` + 真实 `CliDockerClient`，不起 HTTP
+
+- **替代**：测试里 `uvicorn` 拉起完整 supervisor FastAPI app，走 HTTP。
+- **选择**：直接 `SandboxSupervisor(docker=CliDockerClient(), store=<内存>, ...)` 进程内构造，真实 Docker，跳过 HTTP 层。
+- **理由**：(1) HTTP 路由层已被 `TestClient` smoke 测覆盖（测试矩阵 #40 系列）；集成测试该验的是 Docker 真实路径。(2) 进程内构造更快、可直接断言 `SandboxRecord` 状态。(3) store 用内存假实现 —— F.8 验的是 Docker 隔离，不是 DB。
+- **代价**：HTTP ↔ supervisor 端到端串联未被集成测试覆盖；可接受 —— 该串联是窄序列化层，单测 + smoke 已够。
+
+### F-12：F.8 跑在既有非 gating 的 `Test (integration)` job，镜像在 fixture 内 build
+
+- **替代**：给 F.8 单开一个 CI job + workflow 内 `docker build` 步骤。
+- **选择**：F.8 测试标 `@pytest.mark.integration`，由既有 `Test (integration)` job（`continue-on-error: true`）自然收集；sandbox 镜像由 pytest session fixture `docker build`，缺 Docker → `pytest.skip`。
+- **理由**：(1) 该 job 已 `continue-on-error` —— 镜像 build / 拉取抖动不卡 PR（与 ci.yml 既有注释口径一致）。(2) fixture 内 build 让测试自包含，本地 `pytest -m integration` 与 CI 同路径。(3) workflow 几乎不动，零新增 job。
+- **代价**：F.8 验收门是非 gating 的 —— 失败不挡合并、需人看 CI。M0 可接受（M1 自托管 runner + 暖 Docker 缓存后再升 gating）。
 
 ---
 
@@ -399,6 +421,8 @@ POST /forward
 | 58 | 取消 finally 释放 | F.7 | unit | `exec_python` 异常 / 取消路径均走到 `supervisor.destroy`（无泄漏容器） |
 
 > 验收门 #6（timing/side-channel）、#7（CVE-2019-5736 PoC）需真实 runsc，不进 CI 自动化 —— 归 M0→M1 Gate 沙盒渗透测试，§ 1.3 已注明。
+>
+> **F.8 收口**：测试矩阵 #45 / #48 / #50 / #56 / #57 的 integration 用例由收尾 PR **F.8** 用真实 Docker（runc）集成 harness 实装 —— F.4–F.7 当时只落假桩单测，详见 Mini-ADR F-10。#49（egress 隔离）依赖的 iptables allowlist M0 未实现，待 **F.9**。
 
 ---
 
@@ -458,12 +482,19 @@ F.4  feat(f-4): exec_python 工具接入 orchestrator
         - unit：测试 #46 #47；integration：#45 #48 #56
 
 F.7  feat(f-7): cancellation → sandbox kill
-        - exec_python 用 token.run_cancellable 包；finally → destroy
+        - exec_python finally 分流：取消 → destroy(reason=cancelled)，正常/错误 → release
         - supervisor destroy = docker kill（SIGKILL）
-        - integration：测试 #57；unit：#58
+        - unit：测试 #58
+
+F.8  feat(f-8): sandbox Docker 集成测试 harness
+        - services/sandbox-supervisor/tests/test_supervisor_integration.py
+        - session fixture：docker build 镜像 + 建 egress 网络 + skip-if-no-docker
+        - integration：测试矩阵 #45 #48 #50 #56 #57（runc，验收门 #1/#2/#4/#5/#8）
+        - 修正 supervisor 强制 destroy 序（先 docker rm 再 link.close，见 Mini-ADR F-8 补充）
+        - 跑在既有非 gating Test (integration) job（Mini-ADR F-10/F-11/F-12）
 ```
 
-> **PR 顺序说明**：F.2/F.3 先于 F.1 —— supervisor `acquire` 依赖镜像 + runtime provider 存在。F.6 先于 F.5 —— proxy 取 secret 依赖 `aliyun_kms` 后端。F.4 在 F.1+F.5 之后 —— `exec_python` 同时依赖 supervisor 和（经 sandbox 出网时）proxy。F.7 收尾。
+> **PR 顺序说明**：F.2/F.3 先于 F.1 —— supervisor `acquire` 依赖镜像 + runtime provider 存在。F.6 先于 F.5 —— proxy 取 secret 依赖 `aliyun_kms` 后端。F.4 在 F.1+F.5 之后 —— `exec_python` 同时依赖 supervisor 和（经 sandbox 出网时）proxy。F.7 接 cancellation；F.8 收尾，把 § 1.3 的 runc 验收门补成自动化集成 harness。
 
 ---
 
@@ -499,3 +530,4 @@ F.7  feat(f-7): cancellation → sandbox kill
 | Stream F Verification 7+1 条 | § 1.3 验收门；§ 5 测试矩阵 #48-#50 #56-#57 |
 | `exec_python` 工具名（vs deer-flow bash/ls/read_file）| Mini-ADR F-1 新增澄清 —— ITERATION-PLAN 未单列工具面取舍 |
 | sandbox 出站网络策略 | Mini-ADR F-2 新增 —— ITERATION-PLAN 未明确 M0 sandbox 是否有网络 |
+| F.8 验收门集成 harness / F.9 egress allowlist | § 1.3；§ 5；Mini-ADR F-10 F-11 F-12 —— ITERATION-PLAN 未列，作为 Stream F 设计细化新增 |
