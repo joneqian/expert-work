@@ -299,3 +299,25 @@ async def test_gate_57_cancellation_kills_sandbox_within_1s(helix: _Harness) -> 
     # The container is really gone.
     remaining = _docker("ps", "--all", "--quiet", "--filter", f"name=helix-sb-{box.sandbox_id}")
     assert remaining.stdout.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# #59 — the image's CPython ships a complete C-extension stdlib
+# ---------------------------------------------------------------------------
+
+#: C-extension stdlib modules — the gates above only touch builtins, so this
+#: guards the base-image contract (Mini-ADR F-13: the alpine / musl CPython
+#: must expose the same stdlib as the previous Debian image).
+_STDLIB_PROBE = (
+    "import ssl, hashlib, sqlite3, ctypes, lzma, bz2, zlib, decimal, _socket\nprint('stdlib-ok')\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_gate_59_stdlib_c_extensions_importable(helix: _Harness) -> None:
+    box = await helix.supervisor.acquire(_acquire_request("t-59"))
+    result = await helix.supervisor.exec(box.sandbox_id, code=_STDLIB_PROBE)
+    await helix.supervisor.release(box.sandbox_id)
+
+    assert result.exit_code == 0, result.stderr
+    assert "stdlib-ok" in result.stdout

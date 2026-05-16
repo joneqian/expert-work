@@ -6,7 +6,11 @@
 # --cpus, --network) are applied at `docker run` time by the Stream F.3
 # SandboxRuntimeProvider — keeping them out of the image so one image works
 # under both the dev (runc) and prod (runsc / gVisor) runtimes.
-FROM python:3.12-slim
+#
+# Base = alpine, not slim (Mini-ADR F-13): the sandbox runs pure-stdlib
+# Python with no package-install path (Mini-ADR F-2), so the ~150 MB Debian
+# userland in `python:3.12-slim` is dead weight — alpine is ~50 MB.
+FROM python:3.12-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -17,8 +21,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN python -m pip uninstall -y pip setuptools wheel 2>/dev/null || true
 
 # Non-root user, uid 10000 (subsystem 14 § 5.6). `nologin` shell — the
-# container is never meant to be exec'd into interactively.
-RUN useradd --uid 10000 --create-home --shell /usr/sbin/nologin agent
+# container is never meant to be exec'd into interactively. busybox
+# `adduser -D` (alpine) also creates the matching group.
+RUN adduser -D -u 10000 -s /sbin/nologin agent
 
 # `/workspace` is where submitted code runs; at runtime a writable tmpfs is
 # mounted over it (F.3). Created here so WORKDIR resolves even before the
