@@ -311,6 +311,13 @@ sandbox_instance.state = DESTROYED；≤1s（验收门 #8）
 - **理由**：(1) 该 job 已 `continue-on-error` —— 镜像 build / 拉取抖动不卡 PR（与 ci.yml 既有注释口径一致）。(2) fixture 内 build 让测试自包含，本地 `pytest -m integration` 与 CI 同路径。(3) workflow 几乎不动，零新增 job。
 - **代价**：F.8 验收门是非 gating 的 —— 失败不挡合并、需人看 CI。M0 可接受（M1 自托管 runner + 暖 Docker 缓存后再升 gating）。
 
+### F-13：沙盒镜像基础镜像 = `python:3.12-alpine`，非 slim / 非 distroless
+
+- **替代**：`python:3.12-slim`（现状，203MB）；自建多阶段 distroless（~55MB 且无 shell）。
+- **选择**：`python:3.12-alpine`（~50MB）。
+- **理由**：(1) 调研 deer-flow / hermes-agent —— 两者都保留肥镜像 + shell，**因为要让 agent 在沙盒内 `pip/npm install` 装包**；helix Mini-ADR F-2 是无 egress、pip 已卸载、纯 stdlib 执行，那个理由对我们不成立。(2) 不装包 → musl libc 兼容性非问题（musl 差异只在第三方 C 扩展编译期显现）；alpine 官方 python 镜像自带完整 musl CPython。(3) distroless 官方镜像锁 Python 3.11（我们要 3.12），自建多阶段要手工追 CPython 的 `.so` 依赖闭包并长期自维护手搓镜像 —— 代价 > 收益。
+- **代价**：alpine 仍带 busybox（shell + applets），非 distroless 的彻底无 shell。在 gVisor + `--cap-drop ALL` + `--read-only` + non-root 之下 shell 的攻击价值很低，M0 可接受；彻底无 shell 推 M1 加固再评估。验收护栏：测试矩阵 #59（stdlib C 扩展模块在 musl CPython 上可 import）。
+
 ---
 
 ## 4. 接口
@@ -419,6 +426,7 @@ POST /forward
 | 56 | fork bomb PID limit | F.4 | integration | 验收门 #5（Linux CI） |
 | 57 | 取消即杀 | F.7 | integration | 验收门 #8 —— long-running `exec_python` → cancel → ≤1s `DESTROYED` |
 | 58 | 取消 finally 释放 | F.7 | unit | `exec_python` 异常 / 取消路径均走到 `supervisor.destroy`（无泄漏容器） |
+| 59 | stdlib C 扩展可用 | F.8 | integration | Mini-ADR F-13 —— alpine/musl CPython 可 import `ssl`/`sqlite3`/`ctypes`/`lzma` 等 C 扩展 stdlib（切基础镜像护栏） |
 
 > 验收门 #6（timing/side-channel）、#7（CVE-2019-5736 PoC）需真实 runsc，不进 CI 自动化 —— 归 M0→M1 Gate 沙盒渗透测试，§ 1.3 已注明。
 >
