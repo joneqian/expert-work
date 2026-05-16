@@ -97,7 +97,9 @@ def _make_startup(settings: CredentialProxySettings):  # type: ignore[no-untyped
             audit=DbProxyAuditStore(session_factory),
             forwarder=forwarder,
         )
-        logger.info("credential_proxy.start backend=%s", settings.secret_store_backend)
+        # The backend name is config, not a secret — but it is not logged:
+        # CodeQL's clear-text-logging query taints any `secret*`-named field.
+        logger.info("credential_proxy.start")
 
     return _startup
 
