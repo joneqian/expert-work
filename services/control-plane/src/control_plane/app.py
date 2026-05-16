@@ -25,6 +25,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
+from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.api import (
     build_agents_router,
@@ -70,7 +71,13 @@ from control_plane.ratelimit import (
     RateLimiter,
     RedisTokenBucketLimiter,
 )
-from control_plane.runtime import AgentRuntime, make_agent_builder, make_agent_runtime
+from control_plane.runtime import (
+    AgentRuntime,
+    build_middleware_env,
+    build_tool_env,
+    make_agent_builder,
+    make_agent_runtime,
+)
 from control_plane.settings import Settings
 from control_plane.tenancy import TenantConfigService
 from helix_agent.common.health import DefaultHealthProvider
@@ -217,22 +224,28 @@ def create_app(
             otlp_endpoint=resolved_settings.otlp_traces_endpoint,
         )
         async with AsyncExitStack() as stack:
-            # Durable checkpointer (E.1): when configured, open the
-            # Postgres connection context and swap the runtime's builder
-            # before serving. No run starts before lifespan completes,
-            # so the agent cache is still empty — the swap is race-free.
-            # An injected runtime (tests) is left untouched.
-            if agent_runtime is None and resolved_settings.checkpointer_backend == "postgres":
-                if not resolved_settings.checkpointer_dsn:
-                    msg = "checkpointer_backend='postgres' requires checkpointer_dsn"
-                    raise RuntimeError(msg)
-                checkpointer = await stack.enter_async_context(
-                    make_checkpointer("postgres", resolved_settings.checkpointer_dsn)
-                )
+            # Wire the agent runtime's backends before serving: the
+            # checkpointer (E.1) plus the tool / middleware env bundles
+            # (PR1.5). No run starts before lifespan completes, so the
+            # agent cache is still empty — swapping the builder is
+            # race-free. An injected runtime (tests) is left untouched.
+            if agent_runtime is None:
+                if resolved_settings.checkpointer_backend == "postgres":
+                    if not resolved_settings.checkpointer_dsn:
+                        msg = "checkpointer_backend='postgres' requires checkpointer_dsn"
+                        raise RuntimeError(msg)
+                    checkpointer = await stack.enter_async_context(
+                        make_checkpointer("postgres", resolved_settings.checkpointer_dsn)
+                    )
+                    logger.info("control_plane.checkpointer.postgres_ready")
+                else:
+                    checkpointer = InMemorySaver()
                 resolved_agent_runtime.agent_builder = make_agent_builder(
-                    resolved_secret_store, checkpointer
+                    resolved_secret_store,
+                    checkpointer,
+                    tool_env=build_tool_env(resolved_tenant_config_service),
+                    middleware_env=build_middleware_env(),
                 )
-                logger.info("control_plane.checkpointer.postgres_ready")
             if reaper is not None:
                 reaper.start()
             resolved_lifecycle.mark_ready()

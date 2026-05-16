@@ -8,12 +8,23 @@ seam, and the lifespan branch that swaps in the durable checkpointer.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from types import SimpleNamespace
+from uuid import UUID, uuid4
+
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.app import create_app
-from control_plane.runtime import AgentRuntime, make_agent_builder, make_agent_runtime
+from control_plane.runtime import (
+    AgentRuntime,
+    build_middleware_env,
+    build_tool_env,
+    make_agent_builder,
+    make_agent_runtime,
+)
 from control_plane.settings import Settings
+from control_plane.tenancy import TenantConfigNotConfiguredError
 from helix_agent.runtime.secret_store import LocalDevSecretStore
 from tests.auth_fixtures import build_test_jwt_verifier
 
@@ -58,8 +69,9 @@ async def test_lifespan_postgres_without_dsn_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_lifespan_memory_backend_leaves_builder_untouched() -> None:
-    """The memory backend takes the no-swap path through lifespan."""
+async def test_lifespan_swaps_builder_to_inject_envs() -> None:
+    """Lifespan rebuilds the agent builder with the tool / middleware
+    env bundles — the create_app-body placeholder is replaced."""
     settings = Settings(checkpointer_backend="memory")
     app = create_app(
         settings=settings,
@@ -68,4 +80,56 @@ async def test_lifespan_memory_backend_leaves_builder_untouched() -> None:
     )
     builder_before = app.state.agent_runtime.agent_builder
     async with app.router.lifespan_context(app):
-        assert app.state.agent_runtime.agent_builder is builder_before
+        assert app.state.agent_runtime.agent_builder is not builder_before
+
+
+# ---------------------------------------------------------------------------
+# ToolEnv / MiddlewareEnv backends (PR1.5)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeTenantConfigService:
+    """Minimal stand-in — ``build_tool_env``'s provider only calls ``get``."""
+
+    allowlist: list[str] | None  # None → the tenant has no config row
+
+    async def get(self, *, tenant_id: UUID, actor_id: str | None = None) -> object:
+        if self.allowlist is None:
+            raise TenantConfigNotConfiguredError(tenant_id=tenant_id)
+        return SimpleNamespace(http_tool_allowlist=self.allowlist)
+
+
+def test_build_middleware_env_wires_cache_and_langfuse() -> None:
+    env = build_middleware_env()
+    assert env.response_cache is not None
+    assert env.langfuse_client is not None
+
+
+def test_build_tool_env_wires_allowlist_provider_only() -> None:
+    env = build_tool_env(_FakeTenantConfigService(allowlist=[]))
+    assert env.allowlist_provider is not None
+    # web_search (Tavily) and mcp pool are deferred follow-ups.
+    assert env.web_search_client is None
+    assert env.mcp_pool is None
+
+
+@pytest.mark.asyncio
+async def test_allowlist_provider_returns_tenant_patterns() -> None:
+    env = build_tool_env(_FakeTenantConfigService(allowlist=["https://api.github.com/*"]))
+    assert env.allowlist_provider is not None
+    assert await env.allowlist_provider(uuid4()) == ["https://api.github.com/*"]
+
+
+@pytest.mark.asyncio
+async def test_allowlist_provider_empty_for_headerless_tenant() -> None:
+    env = build_tool_env(_FakeTenantConfigService(allowlist=["x"]))
+    assert env.allowlist_provider is not None
+    assert await env.allowlist_provider(None) == []
+
+
+@pytest.mark.asyncio
+async def test_allowlist_provider_empty_when_tenant_unconfigured() -> None:
+    env = build_tool_env(_FakeTenantConfigService(allowlist=None))
+    assert env.allowlist_provider is not None
+    assert await env.allowlist_provider(uuid4()) == []
