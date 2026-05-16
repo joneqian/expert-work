@@ -69,7 +69,8 @@ class Tool(Protocol):
     """
 
     @property
-    def spec(self) -> ToolSpec: ...
+    def spec(self) -> ToolSpec:
+        """The tool's static descriptor — handed to the LLM for selection."""
 
     async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
         """Dispatch the tool with the given args and return a
