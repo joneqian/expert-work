@@ -60,6 +60,7 @@ class AuditAction(StrEnum):
     TENANT_CONFIG_READ = "tenant_config:read"
     TENANT_CONFIG_WRITE = "tenant_config:write"
     # sandbox
+    SANDBOX_ACQUIRED = "sandbox:acquired"
     SANDBOX_FORCE_DESTROY = "sandbox:force_destroy"
     SANDBOX_QUOTA_DENIED = "sandbox:quota_denied"
     # tools (Stream E.6 + E.8 + onwards)

@@ -1,0 +1,31 @@
+[project]
+name = "helix-agent-sandbox-supervisor"
+version = "0.0.0"
+description = "Helix-Agent Sandbox Supervisor — gVisor sandbox lifecycle service (Stream F.1)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    { name = "joneqian", email = "qian.qing0926@gmail.com" },
+]
+dependencies = [
+    "helix-agent-common",
+    "helix-agent-persistence",
+    "helix-agent-protocol",
+    # SandboxRuntimeProvider (F.3) + AuditLogger live in helix-runtime.
+    "helix-agent-runtime",
+    # Internal HTTP API — FastAPI + Pydantic v2 + uvicorn, as the control-plane.
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.5,<3",
+    "sqlalchemy[asyncio]>=2.0.30,<3",
+    "asyncpg>=0.29,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sandbox_supervisor"]

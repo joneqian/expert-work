@@ -7,6 +7,7 @@ from helix_agent.persistence.models.backup_record import BackupRecordRow
 from helix_agent.persistence.models.dr_drill import DrDrillRow
 from helix_agent.persistence.models.event_log import EventLogRow
 from helix_agent.persistence.models.role_binding import RoleBindingRow
+from helix_agent.persistence.models.sandbox_instance import SandboxInstanceRow
 from helix_agent.persistence.models.service_account import ServiceAccountRow
 from helix_agent.persistence.models.tenant_config import TenantConfigRow
 from helix_agent.persistence.models.tenant_quota import TenantQuotaRow
@@ -22,6 +23,7 @@ __all__ = [
     "DrDrillRow",
     "EventLogRow",
     "RoleBindingRow",
+    "SandboxInstanceRow",
     "ServiceAccountRow",
     "TenantConfigRow",
     "TenantQuotaRow",
