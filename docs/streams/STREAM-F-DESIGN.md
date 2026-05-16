@@ -21,7 +21,9 @@
 
 ## 1. 范围 & 边界
 
-### 1.1 In-scope（F.1 – F.7）
+### 1.1 In-scope（F.1 – F.11）
+
+> F.8 – F.11 为 Stream F 推进中识别的设计细化新增（ITERATION-PLAN 原列 F.1 – F.7）：F.8 补验收门自动化 harness，F.9 – F.11 补 egress 网络隔离链路。
 
 | 子项 | 实现内容 | 关联子系统 / P0 |
 |------|---------|-----------------|
@@ -32,6 +34,10 @@
 | **F.5 Credential Proxy（aiohttp 自研版）** | 新服务 `services/credential-proxy/`：aiohttp 反向代理，`POST /forward`（`X-Helix-Upstream` + `X-Helix-Secret-Ref` header）。`secret_allowlist` 表 + manifest 加载时校验；进程内 LRU（容量 1万 / TTL 60s）；注入审计写 `credential_proxy_audit` 表（**绝不记明文 secret**）。secret 后端 = F.6 的 `SecretStore`（**不直连 Vault** —— ADR-0007 已定 M0 走阿里云 KMS）。M0 sandbox 出站唯一放行目标，见 Mini-ADR F-2。 | subsystem 11；P0 #2 |
 | **F.6 SecretStore `aliyun_kms` 后端** | `SecretStore` 抽象层 + `make_secret_store` factory + `LocalDevSecretStore` 在 Stream E 已落（`packages/helix-runtime/.../secret_store/`）。本子项实现 ADR-0007 § 2.1 缺口：`AliyunKmsSecretStore` adapter（`make_secret_store("aliyun_kms")` 当前 `raise NotImplementedError`）+ 短 TTL 缓存包装（static 60s / dynamic 取 TTL 一半）。 | adr/0007；P0 #9 |
 | **F.7 请求取消的 sandbox kill 信号** | E.15 的 `CancellationToken`（`config["configurable"]` 通道、协作式）触达 `exec_python` 工具：token 取消 → 工具 `run_cancellable` 竞速中断 → 调 Supervisor `destroy(reason="cancelled")` → `docker kill`（SIGKILL）容器并回收资源，**≤1s 内杀干净**。Supervisor 侧 TTL 兜底：`IN_USE` 且 `now - acquired_at > timeout_s + 30s` 强制 destroy。 | P0 #25 第 3 段；Stream E E.15 cross-stream |
+| **F.8 沙盒 Docker 集成测试 harness** | `services/sandbox-supervisor/tests/test_supervisor_integration.py`：进程内 `SandboxSupervisor` + 真实 `CliDockerClient`（runc），自动化验收门 #1/#2/#4/#5/#8（测试矩阵 #45/#48/#50/#56/#57/#59）。设计细化新增。 | Mini-ADR F-10 F-11 F-12 |
+| **F.9 sandbox egress 网络隔离** | `helix-sandbox-egress` 创建为 Docker `--internal` 网络 —— 沙盒结构性无对外路由（公网 / 云元数据 / 内网全不可达），唯一可达 = 同 internal 网上的 credential-proxy。关闭验收门 #3（测试矩阵 #49）。**不依赖 compose**（harness 用 stub proxy）。设计细化新增。 | subsystem 21；Mini-ADR F-14 |
+| **F.10 credential-proxy 容器化 + 入 docker-compose** | 给 credential-proxy 写正式多阶段 uv 构建 Dockerfile（确立"helix 服务容器化"pattern，credential-proxy 作 pilot，其余 3 服务复用见 ITERATION-PLAN I.1）；`infra/docker-compose.yml` 加 `credential-proxy` 服务 + `helix-sandbox-egress`（internal）/ egress 双网络，proxy 双归属。设计细化新增。 | Mini-ADR F-15 |
+| **F.11 端到端 egress 集成测试** | harness 的 stub 换真 credential-proxy 容器，验证 `exec_python` → sandbox →（仅）proxy → mock upstream 全链路（测试矩阵 #60）；顺带 control-plane 接 `ToolEnv.supervisor_client`。设计细化新增。 | Mini-ADR F-14 |
 
 ### 1.2 Out-of-scope（明确推迟）
 
@@ -61,7 +67,7 @@
 7. **逃逸 PoC** — 跑 CVE-2019-5736（runc）PoC → 在 runsc 下**必须失败**。
 8. **取消即杀** — 发起 long-running `exec_python`（`while True: pass`），触发 cancellation → sandbox 在 **≤1s 内**被 `docker kill` 干净、`sandbox_instance.state=DESTROYED`、资源回收。
 
-> **验证状态约定**（同 Stream E 收尾）：用例 1/2/4/5/8 由 **F.8** 集成 harness 在 CI（runc 即可覆盖隔离语义，对应测试矩阵 #45/#48/#50/#56/#57）跑自动化集成测试；用例 3（egress 隔离）依赖 sandbox netns + iptables allowlist —— 该 allowlist M0 未实现，待 **F.9** 补齐后自动化；用例 6/7 依赖 **真实 runsc 环境**（macOS 不可用 gVisor，CI 在 Linux runner 跑），归入 **M0→M1 Gate 的沙盒渗透测试**。
+> **验证状态约定**（同 Stream E 收尾）：用例 1/2/4/5/8 由 **F.8** 集成 harness 在 CI（runc 即可覆盖隔离语义，对应测试矩阵 #45/#48/#50/#56/#57）跑自动化集成测试；用例 3（egress 隔离）由 **F.9** 用 Docker `--internal` 网络实现并自动化（测试矩阵 #49，Mini-ADR F-14）；用例 6/7 依赖 **真实 runsc 环境**（macOS 不可用 gVisor，CI 在 Linux runner 跑），归入 **M0→M1 Gate 的沙盒渗透测试**。
 
 ---
 
@@ -239,6 +245,7 @@ sandbox_instance.state = DESTROYED；≤1s（验收门 #8）
 - **理由**：(1) 让 F.5 Credential Proxy 在 M0 有**真实消费者** —— 否则 proxy 是死代码。(2) 验收门 #3（网络隔离）才有意义：`--network=none` 下"连 169.254.169.254 失败"是 trivially-true，证明不了 M1+ warm pool / 多工具依赖的 iptables allowlist 真的生效。(3) 与 subsystem 11 § 5.2 / 14 / 21 网络策略设计一致 —— 三份文档都假设 sandbox 经 proxy 出网。(4) DROP 而非 REDIRECT：M0 显式代理，调用方必须显式 POST 到 proxy；透明 REDIRECT 是 M1 Envoy 的事。
 - **代价**：M0 比"纯计算沙盒"多一层 netns + iptables 规则。可接受 —— 这层规则本就是验收门 #3 要测的东西。
 - **与 E-7 的边界**：E-7 管 orchestrator 进程内 `http` builtin（直连）；F-2 管 sandbox 容器内出站（经 proxy）。两条链路、不冲突。
+- **补充（F.9 校正）**：本 ADR 当初写"iptables allowlist"。M0 实际强制机制改为 Docker `--internal` 网络 —— 沙盒 `--cap-drop=ALL` 下无法自管 iptables。详见 Mini-ADR F-14。
 
 ### F-3：sandbox-supervisor / credential-proxy 是独立进程服务，不并进 control-plane
 
@@ -317,6 +324,20 @@ sandbox_instance.state = DESTROYED；≤1s（验收门 #8）
 - **选择**：`python:3.12-alpine`（~50MB）。
 - **理由**：(1) 调研 deer-flow / hermes-agent —— 两者都保留肥镜像 + shell，**因为要让 agent 在沙盒内 `pip/npm install` 装包**；helix Mini-ADR F-2 是无 egress、pip 已卸载、纯 stdlib 执行，那个理由对我们不成立。(2) 不装包 → musl libc 兼容性非问题（musl 差异只在第三方 C 扩展编译期显现）；alpine 官方 python 镜像自带完整 musl CPython。(3) distroless 官方镜像锁 Python 3.11（我们要 3.12），自建多阶段要手工追 CPython 的 `.so` 依赖闭包并长期自维护手搓镜像 —— 代价 > 收益。
 - **代价**：alpine 仍带 busybox（shell + applets），非 distroless 的彻底无 shell。在 gVisor + `--cap-drop ALL` + `--read-only` + non-root 之下 shell 的攻击价值很低，M0 可接受；彻底无 shell 推 M1 加固再评估。验收护栏：测试矩阵 #59（stdlib C 扩展模块在 musl CPython 上可 import）。
+
+### F-14：M0 sandbox egress 强制 = Docker `--internal` 网络，非 sandbox-side iptables
+
+- **替代 A**：subsystem 21 § 5.1 字面方案 —— sandbox `iptables OUTPUT` chain（DROP 默认 + allowlist ACCEPT）。**替代 B**：宿主侧 `DOCKER-USER` 链 iptables allowlist。
+- **选择**：`helix-sandbox-egress` 创建为 Docker `--internal` 网络（`docker network create --internal`）；credential-proxy **双归属**（internal 网 + 一个有出网能力的网络）。
+- **理由**：(1) 替代 A **不可行** —— Mini-ADR F-5 强制 `--cap-drop=ALL`，沙盒容器无 `CAP_NET_ADMIN`，无法给自己设 iptables；要在沙盒 netns 设规则得上 OCI prestart hook（Docker 不易挂）或宿主特权进程。(2) `--internal` 网络 Docker 不装 NAT / 默认路由 —— 沙盒结构性够不到公网、`169.254.169.254` / `100.100.100.200` 等云元数据、宿主、其它 docker 网段，**验收门 #3 直接成立、零 iptables**。(3) Docker 原生、CI 可测（`docker network create --internal` 即可）、不与 Docker 自管的 iptables 链冲突。
+- **代价**：(1) 同一 internal 网上的沙盒可互通（sandbox A ↔ sandbox B）—— M0 单 agent、低并发（Mini-ADR F-4）下风险低，**M0 接受**；M1 warm pool 时一沙盒一网或加一条 `DOCKER-USER` 规则。(2) 偏离 subsystem 21 字面（iptables OUTPUT）—— 该文档 M0 段设计早于本加固清单，本 ADR 记录校正；subsystem 21 的 iptables / Envoy 透明代理归 M1。(3) subsystem 21 的受控 unbound DNS：`--internal` 下沙盒无对外路由，DNS 解析了也连不上 —— 验收门 #3 不需要 unbound，它是 DNS 渗透加固，归 **M1**。
+
+### F-15：F.10 给 credential-proxy 写正式多阶段 uv 构建 Dockerfile，确立 helix 服务容器化 pattern
+
+- **替代**：compose 服务用基础镜像 + bind-mount 源码 + `command: uv run ...`（dev-mode，不写 Dockerfile）。
+- **选择**：F.10 给 credential-proxy 写正式多阶段 uv 构建 Dockerfile（builder 阶段 `uv sync` workspace → runtime 阶段 copy `.venv`）；credential-proxy 作为 pilot 确立"helix 服务容器化"pattern，其余 3 服务复用（ITERATION-PLAN I.1）。
+- **理由**：(1) dev-mode 会返工 —— F.11 端到端测试本就需要真 proxy 容器，dev-mode 下 harness 还得重复 bind-mount + `uv run`，且 compose 的 dev-mode stanza 将来"容器化"任务原样推翻重写。(2) credential-proxy 是 4 个 helix 服务里最简单的（单 aiohttp app），是踩 uv workspace 单体打包坑的低风险 pilot。(3) 多阶段 uv 构建是 uv 官方有文档的成熟套路，非重型架构决策；F.9 harness 已证明 CI 能 build+run 镜像、可验证。
+- **代价**：F.10 PR 比 dev-mode 版略大（含一个 Dockerfile）。可接受 —— 一次做对、无返工。其余 3 个服务（control-plane / orchestrator / sandbox-supervisor）复用此 pattern 容器化 + 全栈 compose，归 ITERATION-PLAN **Stream I.1**（M0 部署与发布闭环）。
 
 ---
 
@@ -416,7 +437,7 @@ POST /forward
 | 46 | exec_python 输出截断 | F.4 | unit | `code` 打印 50k 字符 → stdout 截到 20k + `meta.truncated=true` |
 | 47 | sandbox_audit 拦截 | F.4 | unit | `code="import os; os.system('rm -rf /')"` → middleware 拒绝 + audit；`code="print(1)"` 通过 |
 | 48 | 文件 / 进程隔离 | F.4 | integration | 验收门 #1 / #2（Linux CI） |
-| 49 | 网络隔离 | F.5 | integration | 验收门 #3 —— sandbox 连 `169.254.169.254` refused；连 credential-proxy 通 |
+| 49 | 网络隔离 | F.9 | integration | 验收门 #3 —— `--internal` 网络下 sandbox 连 `169.254.169.254` 等 refused；连同 internal 网 stub proxy 通 |
 | 50 | secret 不可见 | F.5 | integration | 验收门 #4 —— sandbox `env` / `/run/secrets` 无凭证 |
 | 51 | Credential Proxy 注入 | F.5 | unit | `X-Helix-Secret-Ref` 命中 allowlist → 注入 `Authorization`；越权 ref → 403 + audit |
 | 52 | Proxy LRU 缓存 | F.5 | unit | 同 `(tenant,ref)` 二次请求 → 命中 LRU、不再调 SecretStore；TTL 过期 → 重拉 |
@@ -427,6 +448,7 @@ POST /forward
 | 57 | 取消即杀 | F.7 | integration | 验收门 #8 —— long-running `exec_python` → cancel → ≤1s `DESTROYED` |
 | 58 | 取消 finally 释放 | F.7 | unit | `exec_python` 异常 / 取消路径均走到 `supervisor.destroy`（无泄漏容器） |
 | 59 | stdlib C 扩展可用 | F.8 | integration | Mini-ADR F-13 —— alpine/musl CPython 可 import `ssl`/`sqlite3`/`ctypes`/`lzma` 等 C 扩展 stdlib（切基础镜像护栏） |
+| 60 | egress 端到端 | F.11 | integration | `exec_python` → sandbox →（仅）真 credential-proxy → mock upstream 全链路通 |
 
 > 验收门 #6（timing/side-channel）、#7（CVE-2019-5736 PoC）需真实 runsc，不进 CI 自动化 —— 归 M0→M1 Gate 沙盒渗透测试，§ 1.3 已注明。
 >
@@ -500,9 +522,23 @@ F.8  feat(f-8): sandbox Docker 集成测试 harness
         - integration：测试矩阵 #45 #48 #50 #56 #57（runc，验收门 #1/#2/#4/#5/#8）
         - 修正 supervisor 强制 destroy 序（先 docker rm 再 link.close，见 Mini-ADR F-8 补充）
         - 跑在既有非 gating Test (integration) job（Mini-ADR F-10/F-11/F-12）
+
+F.9  feat(f-9): sandbox egress 网络隔离（--internal 网络）
+        - helix-sandbox-egress 改 Docker --internal 网络（Mini-ADR F-14）
+        - harness：建 --internal 网 + stub proxy 容器；新增测试矩阵 #49
+        - 不碰 compose、不写 iptables；关闭验收门 #3
+
+F.10 feat(f-10): credential-proxy 容器化 + 入 docker-compose
+        - services/credential-proxy/Dockerfile：多阶段 uv 构建（确立 helix 服务容器化 pattern）
+        - infra/docker-compose.yml 加 helix-sandbox-egress(internal)/egress 双网络
+        - credential-proxy 服务双归属（Mini-ADR F-15）
+
+F.11 feat(f-11): 端到端 egress 集成测试
+        - harness stub 换真 credential-proxy 容器；测试矩阵 #60
+        - control-plane 接 ToolEnv.supervisor_client（HTTPSupervisorClient from settings）
 ```
 
-> **PR 顺序说明**：F.2/F.3 先于 F.1 —— supervisor `acquire` 依赖镜像 + runtime provider 存在。F.6 先于 F.5 —— proxy 取 secret 依赖 `aliyun_kms` 后端。F.4 在 F.1+F.5 之后 —— `exec_python` 同时依赖 supervisor 和（经 sandbox 出网时）proxy。F.7 接 cancellation；F.8 收尾，把 § 1.3 的 runc 验收门补成自动化集成 harness。
+> **PR 顺序说明**：F.2/F.3 先于 F.1 —— supervisor `acquire` 依赖镜像 + runtime provider 存在。F.6 先于 F.5 —— proxy 取 secret 依赖 `aliyun_kms` 后端。F.4 在 F.1+F.5 之后 —— `exec_python` 同时依赖 supervisor 和（经 sandbox 出网时）proxy。F.7 接 cancellation；F.8 把 § 1.3 的 runc 验收门补成自动化集成 harness。F.9 → F.10 → F.11 是 egress 隔离链路：F.9 独立（stub proxy），F.10 把真 proxy 接入 compose，F.11 端到端验证依赖 F.9 + F.10。
 
 ---
 
@@ -538,4 +574,5 @@ F.8  feat(f-8): sandbox Docker 集成测试 harness
 | Stream F Verification 7+1 条 | § 1.3 验收门；§ 5 测试矩阵 #48-#50 #56-#57 |
 | `exec_python` 工具名（vs deer-flow bash/ls/read_file）| Mini-ADR F-1 新增澄清 —— ITERATION-PLAN 未单列工具面取舍 |
 | sandbox 出站网络策略 | Mini-ADR F-2 新增 —— ITERATION-PLAN 未明确 M0 sandbox 是否有网络 |
-| F.8 验收门集成 harness / F.9 egress allowlist | § 1.3；§ 5；Mini-ADR F-10 F-11 F-12 —— ITERATION-PLAN 未列，作为 Stream F 设计细化新增 |
+| F.8 验收门集成 harness | § 1.1；§ 5；Mini-ADR F-10 F-11 F-12 —— ITERATION-PLAN 未列，作为 Stream F 设计细化新增 |
+| F.9 / F.10 / F.11 egress 网络隔离链路 | § 1.1；§ 5 #49 #60；Mini-ADR F-14 F-15 —— ITERATION-PLAN 未列，作为 Stream F 设计细化新增 |

@@ -274,23 +274,30 @@
 
 参考：[architecture/01-SYSTEM-ARCHITECTURE](./architecture/01-SYSTEM-ARCHITECTURE.md) §"Sandbox"、[research/02-sandbox-isolation.md](./research/02-sandbox-isolation.md)
 
-- [ ] **F.1 Sandbox Supervisor 服务**（`services/sandbox-supervisor/`）
-- [ ] **F.2 单 Python 镜像**（含 minimal Python 3.12 + 限定库）
-- [ ] **F.3 Docker + gVisor (runsc)** 启动路径
-- [ ] **F.4 `exec_python` tool 接入 Orchestrator**
-- [ ] **F.5 Credential Proxy aiohttp 自研版**（落实 M0 文档清单；通过 SecretStore 抽象拉取后端凭据）
-- [ ] **F.6 SecretStore 抽象 + 阿里云 KMS Secrets Manager 实现**（短 TTL 缓存；落实 ADR-0007）
-- [ ] **F.7 请求取消的 sandbox kill 信号**（落实 P0 #25 第 3 段）— 收到 cancellation token 后 SIGKILL 沙盒、回收资源
+- [x] **F.1 Sandbox Supervisor 服务**（`services/sandbox-supervisor/`）
+- [x] **F.2 单 Python 镜像**（含 minimal Python 3.12 + 限定库）
+- [x] **F.3 Docker + gVisor (runsc)** 启动路径
+- [x] **F.4 `exec_python` tool 接入 Orchestrator**
+- [x] **F.5 Credential Proxy aiohttp 自研版**（落实 M0 文档清单；通过 SecretStore 抽象拉取后端凭据）
+- [x] **F.6 SecretStore 抽象 + 阿里云 KMS Secrets Manager 实现**（短 TTL 缓存；落实 ADR-0007）
+- [x] **F.7 请求取消的 sandbox kill 信号**（落实 P0 #25 第 3 段）— 收到 cancellation token 后 SIGKILL 沙盒、回收资源
+
+> 以下 F.8 – F.11 为 Stream F 推进中识别的设计细化新增（详见 [streams/STREAM-F-DESIGN](./streams/STREAM-F-DESIGN.md) § 1.1）：
+
+- [x] **F.8 沙盒 Docker 集成测试 harness** — 进程内 supervisor + 真实 runc，自动化验收门 #1/#2/#4/#5/#8（Mini-ADR F-10/F-11/F-12）
+- [ ] **F.9 sandbox egress 网络隔离** — `helix-sandbox-egress` 改 Docker `--internal` 网络，关闭验收门 #3（网络隔离）；Mini-ADR F-14
+- [ ] **F.10 credential-proxy 容器化 + 入 docker-compose** — 正式多阶段 uv 构建 Dockerfile（确立 helix 服务容器化 pattern，其余 3 服务复用见 I.1）+ `helix-sandbox-egress`/egress 双网络，proxy 双归属；Mini-ADR F-15
+- [ ] **F.11 端到端 egress 集成测试** — sandbox →（仅）真 proxy → mock upstream 全链路；含 control-plane 接 `ToolEnv.supervisor_client`
 
 **Stream F Verification**（落实 [architecture/04-ROADMAP](./architecture/04-ROADMAP.md) §"沙盒安全验证"7 条用例）：
-- [ ] 文件系统隔离测试
-- [ ] 进程隔离测试
-- [ ] 网络隔离测试（连 169.254.169.254 失败）
-- [ ] secret 不可见测试
-- [ ] fork bomb PID limit
-- [ ] timing 测试
-- [ ] 跑 CVE-2019-5736 PoC，验证失败
-- [ ] 取消请求触发后 sandbox 在 1s 内被 kill 干净
+- [x] 文件系统隔离测试 — F.8 harness 自动化
+- [x] 进程隔离测试 — F.8 harness 自动化
+- [ ] 网络隔离测试（连 169.254.169.254 失败）— F.9 自动化（`--internal` 网络）
+- [x] secret 不可见测试 — F.8 harness 自动化
+- [x] fork bomb PID limit — F.8 harness 自动化
+- [ ] timing 测试 — 需真实 runsc，归 M0→M1 Gate 人工渗透
+- [ ] 跑 CVE-2019-5736 PoC，验证失败 — 需真实 runsc，归 M0→M1 Gate 人工渗透
+- [x] 取消请求触发后 sandbox 在 1s 内被 kill 干净 — F.8 harness 自动化
 
 ### Stream G — SRE + Eval + Feedback（~4 周；消费 A 的可观测数据）
 
@@ -326,9 +333,10 @@
 
 > Phase 0.3 已建立 baseline CI/CD + 三环境配置框架；本 Stream 把它生产化。
 
-- [ ] **I.1 服务发布策略**（落实 P0 #32）— 蓝绿 + 金丝雀脚本
-- [ ] **I.2 服务回滚机制**（落实 P0 #33）— 一键回滚 + DB 兼容
-- [ ] **I.3 三环境部署文档**（dev / staging / prod）
+- [ ] **I.1 服务容器化 + 全栈 compose** — 4 个 helix 服务（control-plane / orchestrator / credential-proxy / sandbox-supervisor）多阶段 uv 构建 Dockerfile + `docker compose up` 起 M0 完整栈。credential-proxy 的 Dockerfile 由 **Stream F.10** 先行落地、确立"helix 服务容器化"pattern；其余 3 个服务复用该 pattern。
+- [ ] **I.2 服务发布策略**（落实 P0 #32）— 蓝绿 + 金丝雀脚本
+- [ ] **I.3 服务回滚机制**（落实 P0 #33）— 一键回滚 + DB 兼容
+- [ ] **I.4 三环境部署文档**（dev / staging / prod）
 
 ### M0 Exit Criteria（M0 → M0→M1 Gate 验证门）
 
