@@ -15,6 +15,7 @@ dependencies = [
     "helix-agent-runtime",
     "helix-agent-audit-backup-worker",
     "helix-agent-control-plane",
+    "helix-agent-credential-proxy",
     "helix-agent-orchestrator",
     "helix-agent-retention-cleanup-job",
     "helix-agent-sandbox-supervisor",
@@ -47,6 +48,7 @@ members = [
     "packages/helix-runtime",
     "services/audit-backup-worker",
     "services/control-plane",
+    "services/credential-proxy",
     "services/orchestrator",
     "services/retention-cleanup-job",
     "services/sandbox-supervisor",
@@ -59,6 +61,7 @@ helix-agent-protocol = { workspace = true }
 helix-agent-runtime = { workspace = true }
 helix-agent-audit-backup-worker = { workspace = true }
 helix-agent-control-plane = { workspace = true }
+helix-agent-credential-proxy = { workspace = true }
 helix-agent-orchestrator = { workspace = true }
 helix-agent-retention-cleanup-job = { workspace = true }
 helix-agent-sandbox-supervisor = { workspace = true }
@@ -109,7 +112,7 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/audit-backup-worker/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src:$MYPY_CONFIG_FILE_DIR/services/orchestrator/src:$MYPY_CONFIG_FILE_DIR/services/retention-cleanup-job/src:$MYPY_CONFIG_FILE_DIR/services/sandbox-supervisor/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/audit-backup-worker/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src:$MYPY_CONFIG_FILE_DIR/services/credential-proxy/src:$MYPY_CONFIG_FILE_DIR/services/orchestrator/src:$MYPY_CONFIG_FILE_DIR/services/retention-cleanup-job/src:$MYPY_CONFIG_FILE_DIR/services/sandbox-supervisor/src"
 
 [[tool.mypy.overrides]]
 module = "testcontainers.*"
