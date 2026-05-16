@@ -3,16 +3,16 @@
 STREAM-E-DESIGN Mini-ADR E-15: middleware splits into two groups.
 
 * **always-on** — :class:`DynamicContextMiddleware`,
-  :class:`LLMErrorHandlingMiddleware`, :class:`LoopDetectionMiddleware`.
-  No platform dependency; every agent gets them (cost / stability floor).
+  :class:`LLMErrorHandlingMiddleware`, :class:`LoopDetectionMiddleware`,
+  :class:`SandboxAuditMiddleware`. No platform dependency; every agent
+  gets them (cost / stability / safety floor). ``SandboxAuditMiddleware``
+  self-filters by tool name — a no-op until an ``exec_python`` tool
+  dispatches (Stream F.4).
 * **env-gated** — :class:`PIIRedactorMiddleware`,
   :class:`LLMCacheLookupMiddleware` / :class:`LLMCacheStoreMiddleware`,
   :class:`LangfuseMiddleware`. Each needs a platform runtime dep
   (redactor / cache / Langfuse client) injected via :class:`MiddlewareEnv`;
   absent the dep, the middleware is silently skipped.
-
-``SandboxAuditMiddleware`` is deferred — it wires alongside the Stream F
-sandbox tools.
 """
 
 from __future__ import annotations
@@ -34,6 +34,7 @@ from helix_agent.runtime.middleware import (
     MiddlewareChain,
     PIIRedactorMiddleware,
     RedactText,
+    SandboxAuditMiddleware,
 )
 
 #: Mirror of :class:`DynamicContextMiddleware`'s constructor defaults —
@@ -84,6 +85,7 @@ def build_middleware_chains(
         _dynamic_context(spec),
         LLMErrorHandlingMiddleware(breaker_registry=env.breaker_registry or BreakerRegistry()),
         LoopDetectionMiddleware(),
+        SandboxAuditMiddleware(),
     ]
 
     if env.redact_text is not None:

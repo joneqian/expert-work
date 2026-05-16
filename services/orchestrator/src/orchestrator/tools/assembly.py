@@ -28,10 +28,11 @@ from orchestrator.errors import AgentFactoryError
 from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
 from orchestrator.tools.registry import ToolRegistry
+from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
 from orchestrator.tools.web_search import DEFAULT_MAX_RESULTS, TavilyClient, WebSearchTool
 
 #: Built-in tool names the platform ships in M0.
-KNOWN_BUILTINS = frozenset({"web_search"})
+KNOWN_BUILTINS = frozenset({"web_search", "exec_python"})
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,8 @@ class ToolEnv:
     web_search_client: TavilyClient | None = None
     allowlist_provider: AllowlistProvider | None = None
     mcp_pool: MCPServerPool | None = None
+    #: Sandbox Supervisor client backing the ``exec_python`` builtin (F.4).
+    supervisor_client: SupervisorClient | None = None
 
 
 async def build_tool_registry(
@@ -75,7 +78,13 @@ def _register_builtin(registry: ToolRegistry, entry: BuiltinToolSpec, env: ToolE
         raise AgentFactoryError(
             f"unknown builtin tool {entry.name!r} (known: {sorted(KNOWN_BUILTINS)})"
         )
-    # entry.name == "web_search" — the only M0 builtin.
+    if entry.name == "web_search":
+        _register_web_search(registry, entry, env)
+    elif entry.name == "exec_python":
+        _register_exec_python(registry, env)
+
+
+def _register_web_search(registry: ToolRegistry, entry: BuiltinToolSpec, env: ToolEnv) -> None:
     if env.web_search_client is None:
         raise AgentFactoryError(
             "builtin 'web_search' declared but no Tavily client is "
@@ -83,6 +92,15 @@ def _register_builtin(registry: ToolRegistry, entry: BuiltinToolSpec, env: ToolE
         )
     max_results = int(entry.config.get("max_results", DEFAULT_MAX_RESULTS))
     registry.register(WebSearchTool(client=env.web_search_client, default_max_results=max_results))
+
+
+def _register_exec_python(registry: ToolRegistry, env: ToolEnv) -> None:
+    if env.supervisor_client is None:
+        raise AgentFactoryError(
+            "builtin 'exec_python' declared but no Sandbox Supervisor client "
+            "is configured (ToolEnv.supervisor_client)"
+        )
+    registry.register(ExecPythonTool(client=env.supervisor_client))
 
 
 def _register_http(registry: ToolRegistry, env: ToolEnv) -> None:

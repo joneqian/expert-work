@@ -84,6 +84,27 @@ from orchestrator.tools.registry import (
 from orchestrator.tools.registry import (
     ToolSpec as ToolSpec,
 )
+from orchestrator.tools.sandbox import (
+    DEFAULT_OUTPUT_CHAR_CAP as DEFAULT_OUTPUT_CHAR_CAP,
+)
+from orchestrator.tools.sandbox import (
+    ExecPythonTool as ExecPythonTool,
+)
+from orchestrator.tools.sandbox import (
+    HTTPSupervisorClient as HTTPSupervisorClient,
+)
+from orchestrator.tools.sandbox import (
+    RecordingSupervisorClient as RecordingSupervisorClient,
+)
+from orchestrator.tools.sandbox import (
+    SandboxOutcome as SandboxOutcome,
+)
+from orchestrator.tools.sandbox import (
+    SandboxSupervisorError as SandboxSupervisorError,
+)
+from orchestrator.tools.sandbox import (
+    SupervisorClient as SupervisorClient,
+)
 from orchestrator.tools.web_search import (
     DEFAULT_CONTENT_CHAR_CAP as DEFAULT_CONTENT_CHAR_CAP,
 )
@@ -110,8 +131,11 @@ __all__ = [
     "DEFAULT_MAX_RESULTS",
     "DEFAULT_MAX_SERVERS",
     "DEFAULT_MCP_CHAR_CAP",
+    "DEFAULT_OUTPUT_CHAR_CAP",
     "KNOWN_BUILTINS",
     "AllowlistProvider",
+    "ExecPythonTool",
+    "HTTPSupervisorClient",
     "HTTPTavilyClient",
     "HTTPTool",
     "MCPCallResult",
@@ -122,8 +146,12 @@ __all__ = [
     "MCPTool",
     "MCPToolDef",
     "RecordingMCPClient",
+    "RecordingSupervisorClient",
     "RecordingTavilyClient",
+    "SandboxOutcome",
+    "SandboxSupervisorError",
     "StdioMCPClient",
+    "SupervisorClient",
     "TavilyClient",
     "Tool",
     "ToolBlockedError",
