@@ -194,10 +194,9 @@ services:
     # (--internal, sandbox-facing) so sandboxes can reach it, and on the
     # default network for outbound egress to real upstreams + Postgres.
     #
-    # Behind the ``sandbox`` compose profile — the default ``up`` (used by
-    # data-layer integration tests) doesn't need it. Enable with
-    # ``docker compose --profile sandbox up``.
-    profiles: ["sandbox"]
+    # In the ``sandbox`` profile (standalone) and the ``full`` profile
+    # (whole M0 app stack — Stream I.1 / Mini-ADR I-3).
+    profiles: ["sandbox", "full"]
     build:
       context: ..
       dockerfile: services/credential-proxy/Dockerfile
@@ -213,6 +212,102 @@ services:
       - default
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8080)))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # ----------------------------------------------------------------------
+  # M0 helix application stack — Stream I.1 (Mini-ADR I-1/I-2/I-3).
+  #
+  # All three services below + credential-proxy are in the ``full`` profile.
+  # ``docker compose --profile full up`` brings up the complete M0 stack
+  # (data layer is always-on, no profile). Profile cheat-sheet:
+  #   (default)        data layer only — postgres / pgbouncer / redis / minio
+  #   --profile proxy  + nginx mTLS terminator
+  #   --profile auth   + Keycloak IdP
+  #   --profile sandbox + credential-proxy (standalone)
+  #   --profile full   + migrate / control-plane / sandbox-supervisor / credential-proxy
+  #
+  # Prerequisite for ``exec_python`` to work end-to-end: the sandbox
+  # execution image must be pre-built on the host daemon (it is launched
+  # by sandbox-supervisor at runtime, not a compose service):
+  #   docker build -f infra/sandbox-image/Dockerfile -t helix-sandbox:dev infra/sandbox-image
+  # ----------------------------------------------------------------------
+
+  migrate:
+    # One-shot schema migration — runs ``alembic upgrade head`` then exits.
+    # Reuses the control-plane image (Mini-ADR I-3): it carries the Alembic
+    # config + migrations dir. control-plane / sandbox-supervisor gate on
+    # this completing so no service ever sees a half-built schema.
+    #
+    # No ``build:`` here on purpose — the ``control-plane`` service is the
+    # sole builder of the ``helix-control-plane`` tag; a second build of
+    # the same tag races on image export. ``migrate`` just consumes it.
+    profiles: ["full"]
+    image: helix-control-plane
+    container_name: helix-migrate
+    restart: "no"
+    # Direct Postgres (5432), not PgBouncer — DDL wants a direct connection.
+    entrypoint: ["alembic", "-c", "/app/alembic/alembic.ini", "upgrade", "head"]
+    environment:
+      HELIX_AGENT_DB_URL: postgresql+psycopg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  control-plane:
+    # Helix Control Plane — Stream B FastAPI surface; runs the orchestrator
+    # in-process as a library (STREAM-E-DESIGN § 2.6 / Mini-ADR I-1).
+    profiles: ["full"]
+    build:
+      context: ..
+      dockerfile: services/control-plane/Dockerfile
+    image: helix-control-plane
+    container_name: helix-control-plane
+    environment:
+      HELIX_AGENT_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@pgbouncer:6432/${HELIX_DB_NAME:-helix_agent_dev}
+      HELIX_AGENT_QUOTA_REDIS_URL: redis://redis:6379/0
+      HELIX_AGENT_SANDBOX_SUPERVISOR_URL: http://sandbox-supervisor:8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8000)))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  sandbox-supervisor:
+    # Helix Sandbox Supervisor — Stream F.1 service. Docker-out-of-docker
+    # (Mini-ADR I-2): the mounted host docker.sock lets it launch sandbox
+    # sibling containers on the host daemon. Runs as root for socket
+    # access — the socket mount is the real trust boundary.
+    profiles: ["full"]
+    build:
+      context: ..
+      dockerfile: services/sandbox-supervisor/Dockerfile
+    image: helix-sandbox-supervisor
+    container_name: helix-sandbox-supervisor
+    user: root
+    environment:
+      # Direct Postgres (5432) — the supervisor issues plain inserts /
+      # updates with no need for the PgBouncer pool.
+      HELIX_SANDBOX_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8000)))\""]
       interval: 3s
       timeout: 3s
       retries: 20

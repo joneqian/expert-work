@@ -329,12 +329,15 @@
 
 ### Stream I — 部署与发布闭环（~2 周；承接 Phase 0.3 CI/CD）
 
-参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §10
+参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §10、[streams/STREAM-I-DESIGN](./streams/STREAM-I-DESIGN.md)（设计先行；当前覆盖 I.1）
 
 > Phase 0.3 已建立 baseline CI/CD + 三环境配置框架；本 Stream 把它生产化。
 
-- [ ] **I.1 服务容器化 + 全栈 compose** — 4 个 helix 服务（control-plane / orchestrator / credential-proxy / sandbox-supervisor）多阶段 uv 构建 Dockerfile + `docker compose up` 起 M0 完整栈。credential-proxy 的 Dockerfile 由 **Stream F.10** 先行落地、确立"helix 服务容器化"pattern；其余 3 个服务复用该 pattern。
-  - **含全栈 egress 端到端测试**（测试矩阵 #60，原属 Stream F.11）：`exec_python` → sandbox →（仅）真 credential-proxy → mock upstream 全链路通。原计划在 sandbox-supervisor 集成 harness 做，但忠实验证需 proxy + postgres + 迁移 + 种 `secret_allowlist`/secret 一整套 —— 等于在 harness 里重建迷你栈；故移入 I.1，待 `docker compose --profile sandbox up` 全栈就位后顺势做。
+- [ ] **I.1 服务容器化 + 全栈 compose** — M0 在线栈 = **3 个 helix 服务镜像**（control-plane / sandbox-supervisor / credential-proxy）多阶段 uv 构建 Dockerfile + `docker compose --profile full up` 起 M0 完整栈。pattern 由 **Stream F.10** 用 credential-proxy 作 pilot 先行确立；I.1 复用它新建 **2 个镜像**（control-plane、sandbox-supervisor）。
+  - **orchestrator 不独立成镜像**（Mini-ADR I-1）：它是纯库（无 server 入口），control-plane 把它当 workspace 依赖装进自己镜像里 in-process 跑（STREAM-E-DESIGN § 2.6）；拆独立服务推 M1。
+  - **sandbox-supervisor 用 docker-out-of-docker**（Mini-ADR I-2）：容器化后挂宿主 `/var/run/docker.sock` 启沙盒兄弟容器。
+  - **I.1a**：上述 Dockerfile + compose（`migrate` 一次性服务 + 两服务 + `full` profile）。
+  - **I.1b — 全栈 egress 端到端测试**（测试矩阵 #60，原属 Stream F.11）：`exec_python` → sandbox →（仅）真 credential-proxy → mock upstream 全链路通。原计划在 sandbox-supervisor 集成 harness 做，但忠实验证需 proxy + postgres + 迁移 + 种 `secret_allowlist`/secret 一整套 —— 等于在 harness 里重建迷你栈；故移入 I.1，待全栈 compose 就位后顺势做。
 - [ ] **I.2 服务发布策略**（落实 P0 #32）— 蓝绿 + 金丝雀脚本
 - [ ] **I.3 服务回滚机制**（落实 P0 #33）— 一键回滚 + DB 兼容
 - [ ] **I.4 三环境部署文档**（dev / staging / prod）

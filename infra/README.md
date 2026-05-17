@@ -45,6 +45,34 @@ The application **must** point at PgBouncer (`localhost:6432`); migrations
 **must** point at Postgres directly (`localhost:5432`) because PgBouncer
 transaction mode does not preserve session state across statements.
 
+## Full M0 app stack (`full` profile)
+
+The default `up` brings only the data layer. The helix services are
+gated behind compose profiles (Stream I.1 — [STREAM-I-DESIGN](../docs/streams/STREAM-I-DESIGN.md)):
+
+| Profile     | Adds                                                          |
+|-------------|---------------------------------------------------------------|
+| _(default)_ | data layer — `postgres` / `pgbouncer` / `redis` / `minio`     |
+| `proxy`     | `nginx` mTLS terminator                                       |
+| `auth`      | Keycloak IdP                                                  |
+| `sandbox`   | `credential-proxy` (standalone)                               |
+| `full`      | `migrate` / `control-plane` / `sandbox-supervisor` / `credential-proxy` |
+
+```bash
+# Pre-build the sandbox execution image first (see "Sandbox image" below).
+docker build -f infra/sandbox-image/Dockerfile -t helix-sandbox:dev infra/sandbox-image
+
+cd infra
+docker compose --profile full up -d
+docker compose ps        # control-plane on localhost:8000
+```
+
+`migrate` is a one-shot service: it runs `alembic upgrade head` and
+exits — `control-plane` / `sandbox-supervisor` gate on it completing.
+`sandbox-supervisor` mounts the host `/var/run/docker.sock`
+(docker-out-of-docker, Mini-ADR I-2) so it can launch sandbox sibling
+containers.
+
 ## Credentials
 
 Defaults (placeholder, dev only):
