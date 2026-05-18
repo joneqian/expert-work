@@ -253,6 +253,47 @@ async def test_reflect_budget_caps_the_loop() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reflect_budget_is_per_run_not_per_thread() -> None:
+    """``reflections`` accumulates in the thread checkpoint, but the
+    budget must reset each run — run 2 reflects with a fresh budget."""
+    llm = _RecordingLLM(
+        responses=[
+            # run 1, budget=1 — one real reflection then a forced accept
+            AIMessage(content="r1 a1"),
+            AIMessage(content='{"verdict": "revise", "critique": "more"}'),
+            AIMessage(content="r1 a2"),
+            # run 2 — must get a fresh budget and reflect again
+            AIMessage(content="r2 a1"),
+            AIMessage(content='{"verdict": "revise", "critique": "more"}'),
+            AIMessage(content="r2 a2"),
+        ]
+    )
+    graph = build_react_graph(
+        llm_caller=llm,
+        tool_registry=ToolRegistry(),
+        reflect_node=make_reflect_node(llm, budget=1),
+    )
+    async with make_checkpointer("memory") as cp:
+        compiled = GraphRunner(checkpointer=cp).compile(graph)
+        await compiled.ainvoke(
+            {"messages": [HumanMessage(content="task one")], "step_count": 0, "max_steps": 8},
+            config={"configurable": {"thread_id": "T", "run_id": "run-1"}},
+        )
+        result2 = await compiled.ainvoke(
+            {"messages": [HumanMessage(content="task two")], "step_count": 0, "max_steps": 8},
+            config={"configurable": {"thread_id": "T", "run_id": "run-2"}},
+        )
+
+    # Run 2 actually reflected (revise → agent), not force-accepted on
+    # entry. With the per-thread bug run 2 sees run 1's reflections, the
+    # budget reads as exhausted, and only 4 LLM calls happen.
+    assert len(llm.calls) == 6
+    assert result2["messages"][-1].content == "r2 a2"
+    run2 = [r for r in result2["reflections"] if r.run_id == "run-2"]
+    assert [r.verdict for r in run2] == ["revise", "accept"]
+
+
+@pytest.mark.asyncio
 async def test_react_graph_without_reflect_has_no_reflect_node() -> None:
     llm = _RecordingLLM(responses=[AIMessage(content="done")])
     graph = build_react_graph(llm_caller=llm, tool_registry=ToolRegistry())

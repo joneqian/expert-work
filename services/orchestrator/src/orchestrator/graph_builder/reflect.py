@@ -35,7 +35,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
 from helix_agent.protocol import Plan, PlanStep, Reflection
-from orchestrator.graph_builder._config import cancellation_token
+from orchestrator.graph_builder._config import cancellation_token, current_run_id
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState
 
@@ -158,10 +158,18 @@ def make_reflect_node(llm_caller: LLMCaller, *, budget: int) -> ReflectNode:
         token = cancellation_token(config)
         token.raise_if_cancelled()
 
-        if len(state.get("reflections", [])) >= budget:
+        # ``reflections`` accumulates across every run on a checkpointed
+        # thread, so the budget counts only *this* run's reflections.
+        run_id = current_run_id(config)
+        this_run = sum(1 for r in state.get("reflections", []) if r.run_id == run_id)
+        if this_run >= budget:
             return {
                 "reflections": [
-                    Reflection(verdict="accept", critique="reflection budget exhausted")
+                    Reflection(
+                        run_id=run_id,
+                        verdict="accept",
+                        critique="reflection budget exhausted",
+                    )
                 ]
             }
 
@@ -172,7 +180,8 @@ def make_reflect_node(llm_caller: LLMCaller, *, budget: int) -> ReflectNode:
             HumanMessage(content=_build_reflect_prompt(messages, plan)),
         ]
         response = await token.run_cancellable(llm_caller(messages=reflect_messages, tools=[]))
-        reflection, revised_plan = _parse_reflection(_message_text(response), plan=plan)
+        parsed, revised_plan = _parse_reflection(_message_text(response), plan=plan)
+        reflection = parsed.model_copy(update={"run_id": run_id})
         logger.info("reflect.verdict=%s", reflection.verdict)
 
         updates: dict[str, Any] = {"reflections": [reflection]}

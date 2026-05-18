@@ -27,6 +27,11 @@ class Reflection(BaseModel):
         description="accept → finish the run; revise → route the agent back to keep working"
     )
     critique: str = Field(description="why — fed back to the agent when verdict is 'revise'")
+    run_id: str | None = Field(
+        default=None,
+        description="the run this reflection belongs to — scopes the per-run budget "
+        "(reflections accumulate across runs on a checkpointed thread)",
+    )
 
 
 class ReflectionSpec(BaseModel):

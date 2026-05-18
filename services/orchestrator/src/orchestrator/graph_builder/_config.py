@@ -11,6 +11,17 @@ from langchain_core.runnables import RunnableConfig
 from helix_agent.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
 
 
+def current_run_id(config: RunnableConfig) -> str | None:
+    """The run's id from ``config['configurable']``.
+
+    Distinguishes one graph invocation from the next on the same
+    checkpointed thread — used to scope per-run counters whose channels
+    would otherwise accumulate across runs (e.g. the reflect budget).
+    """
+    raw = (config.get("configurable") or {}).get("run_id")
+    return str(raw) if raw is not None else None
+
+
 def cancellation_token(config: RunnableConfig) -> CancellationToken:
     """Lift the run's :class:`CancellationToken` out of ``config``.
 
