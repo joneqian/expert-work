@@ -354,8 +354,8 @@
 > **目标产品形态 = per-user 持久 agent**（租户=公司、用户=公司的员工/客户；每用户一个持久 agent 实例 = 对话 + 长期记忆 + 持久工作区，空闲释放算力、来消息快速还原）。canonical 能力 agent 即此产品形态本身，**不是另起的验证 agent**；Stream J 验收锚定"端到端支撑该 agent 跑通"。详见 [architecture/08-AGENT-CAPABILITY-ASSESSMENT § 4](./architecture/08-AGENT-CAPABILITY-ASSESSMENT.md)。
 > 量级与 M0 若干 Stream 总和相当。每子项设计先行 + TDD + 一 PR 一子任务 + 零技术债。原 M1-D 的 `reflection/resolvers.py`、`uploads_middleware`、subagent executor 及 M1-F 的 Sub-Agent 项提前并入本 Stream。
 
-- [ ] **J.1 规划 / 任务分解** — planner / todo，先拆解再执行
-- [ ] **J.2 反思 / 自我修正** — 通用自我批判 / 修正中间件（非现有 loop detection）
+- [x] **J.1 规划 / 任务分解** — `planner` 图节点:`workflow.type==plan_execute` 时 `START→planner→agent⇄tools`,planner 一次 LLM 调用把任务拆成结构化 `Plan`(进 `AgentState.plan`),agent 每步把计划渲染进 system context。先拆解再执行。运行中重规划(`update_plan`)与 J.2 反思耦合,随 J.2 一并落。STREAM-J-DESIGN § 5。
+- [ ] **J.2 反思 / 自我修正** — 通用自我批判 / 修正中间件（非现有 loop detection）；含运行中重规划（reflect 节点触发 J.1 的 `Plan` 修订）
 - [ ] **J.3 长期记忆** — 跨会话记忆 store + 检索，接入上下文组装
 - [ ] **J.4 Sub-agent / 多智能体委派** — agent 派生 / 委派 / agent-as-tool，隔离 + 取消 + token 预算
 - [ ] **J.5 知识 / 检索（RAG）** — 检索增强；工具检索 vs 向量库由 STREAM-J-DESIGN 定

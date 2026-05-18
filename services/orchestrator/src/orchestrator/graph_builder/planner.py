@@ -1,0 +1,146 @@
+"""Planner node — Stream J.1 (task decomposition).
+
+When a manifest declares ``workflow.type == "plan_execute"`` the
+factory front-loads the ReAct loop with a ``planner`` node:
+
+::
+
+    START → planner → agent ⇄ tools → END
+
+The planner makes one LLM call that decomposes the user's task into an
+ordered :class:`~helix_agent.protocol.Plan`, stores it on
+``AgentState.plan``, and the agent node renders it into its system
+context every step (see :func:`render_plan` /
+``orchestrator.graph_builder.builder``).
+
+The plan is *advisory* — the ReAct loop still drives execution. Mid-run
+revision (``update_plan`` / reflection-triggered replan) is a Stream J
+follow-up and not part of this node.
+
+Plan extraction is tolerant: the LLM is asked for a bare JSON object,
+but prose / code fences around it are stripped, and any parse failure
+degrades to a single-step plan wrapping the whole task so the run
+always proceeds (Mini-ADR J-3a).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
+
+from helix_agent.protocol import Plan, PlanStep
+from orchestrator.llm import LLMCaller
+from orchestrator.state import AgentState
+
+logger = logging.getLogger(__name__)
+
+#: A planner graph node: takes state + config, returns the ``plan`` channel.
+PlannerNode = Callable[[AgentState, RunnableConfig], Awaitable[dict[str, Any]]]
+
+_PLANNER_SYSTEM = (
+    "You are a planning module. Break the given task into a short, ordered "
+    "list of concrete steps that an agent will then execute. Keep the plan "
+    "minimal — only the steps genuinely needed, no filler. Respond with "
+    "ONLY a JSON object, no prose and no code fences:\n"
+    '{"goal": "<one-sentence restatement of the task>", '
+    '"steps": ["<step 1>", "<step 2>", ...]}'
+)
+
+_PLANNER_USER = "Task:\n{task}"
+
+
+def _message_text(message: BaseMessage) -> str:
+    """Best-effort plain-text of a message — content may be a str or a
+    list of multimodal blocks."""
+    content = message.content
+    return content if isinstance(content, str) else str(content)
+
+
+def _extract_task(messages: list[BaseMessage]) -> str:
+    """The user's task — the most recent ``HumanMessage`` in the history."""
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return _message_text(message)
+    return _message_text(messages[-1]) if messages else ""
+
+
+def _extract_json_object(text: str) -> str | None:
+    """Return the outermost ``{...}`` span of ``text``, or ``None``.
+
+    Tolerates prose and ```json fences around the object — the planner
+    prompt asks for a bare object but models add wrappers anyway.
+    """
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    return text[start : end + 1]
+
+
+def parse_plan(text: str, *, fallback_goal: str) -> Plan:
+    """Parse the planner LLM's reply into a :class:`Plan`.
+
+    Any malformed reply degrades to a single-step plan wrapping
+    ``fallback_goal`` so the run always proceeds (Mini-ADR J-3a).
+    """
+    raw = _extract_json_object(text)
+    if raw is not None:
+        try:
+            data = json.loads(raw)
+            goal = str(data["goal"]).strip()
+            steps = tuple(
+                PlanStep(id=str(index), description=description)
+                for index, description in enumerate(
+                    (str(step).strip() for step in data["steps"]), start=1
+                )
+                if description
+            )
+            if goal and steps:
+                return Plan(goal=goal, steps=steps)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            logger.warning("planner.parse_failed — falling back to single-step plan")
+    else:
+        logger.warning("planner.no_json — falling back to single-step plan")
+    return Plan(
+        goal=fallback_goal,
+        steps=(PlanStep(id="1", description=fallback_goal),),
+    )
+
+
+def render_plan(plan: Plan) -> str:
+    """Render a :class:`Plan` as the system-context block the agent reads."""
+    lines = ["## Execution plan", f"Goal: {plan.goal}", ""]
+    lines.extend(f"{index}. {step.description}" for index, step in enumerate(plan.steps, start=1))
+    lines.append("")
+    lines.append(
+        "Work through this plan step by step; adapt it if you discover "
+        "something that requires a different approach."
+    )
+    return "\n".join(lines)
+
+
+def make_planner_node(llm_caller: LLMCaller) -> PlannerNode:
+    """Build the ``planner`` graph node bound to ``llm_caller``."""
+    # Imported here to avoid a circular import (builder imports planner).
+    from orchestrator.graph_builder.builder import _cancellation_token
+
+    async def planner_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
+        token = _cancellation_token(config)
+        token.raise_if_cancelled()
+
+        task = _extract_task(list(state["messages"]))
+        plan_messages: list[BaseMessage] = [
+            SystemMessage(content=_PLANNER_SYSTEM),
+            HumanMessage(content=_PLANNER_USER.format(task=task)),
+        ]
+        response = await token.run_cancellable(llm_caller(messages=plan_messages, tools=[]))
+        plan = parse_plan(_message_text(response), fallback_goal=task)
+        logger.info("planner.plan_built steps=%d", len(plan.steps))
+        return {"plan": plan}
+
+    return planner_node

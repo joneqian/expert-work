@@ -48,6 +48,7 @@ from helix_agent.protocol.dr import (
     DrillType,
 )
 from helix_agent.protocol.event import EventRecord, EventType
+from helix_agent.protocol.plan import Plan, PlanStep
 from helix_agent.protocol.quota import (
     CheckRequest,
     CheckResult,
@@ -119,6 +120,8 @@ __all__ = [
     "MountSpec",
     "NetworkSpec",
     "ObservabilitySpec",
+    "Plan",
+    "PlanStep",
     "PolicySpec",
     "Principal",
     "QuotaDimension",

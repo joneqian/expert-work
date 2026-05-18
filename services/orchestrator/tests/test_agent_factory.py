@@ -277,6 +277,26 @@ async def test_build_agent_max_steps_from_workflow() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_agent_react_has_no_planner_node() -> None:
+    """The default ``react`` workflow builds a graph without a planner."""
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert "planner" not in built.graph.nodes
+
+
+@pytest.mark.asyncio
+async def test_build_agent_plan_execute_adds_planner_node() -> None:
+    """A ``plan_execute`` manifest front-loads a ``planner`` node (J.1)."""
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["workflow"] = {"type": "plan_execute"}
+    spec = AgentSpec.model_validate(doc)
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+    assert "planner" in built.graph.nodes
+    assert "agent" in built.graph.nodes
+
+
+@pytest.mark.asyncio
 async def test_build_agent_missing_key_raises() -> None:
     doc = deepcopy(_MINIMAL_SPEC)
     del doc["spec"]["model"]["api_key_ref"]

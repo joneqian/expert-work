@@ -39,7 +39,7 @@ from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from orchestrator.errors import AgentFactoryError
-from orchestrator.graph_builder import build_react_graph
+from orchestrator.graph_builder import build_react_graph, make_planner_node
 from orchestrator.llm import (
     AnthropicProvider,
     HTTPAnthropicClient,
@@ -108,9 +108,13 @@ async def build_agent(
         around_llm_chain=chains.around_llm_call,
     )
     registry = await build_tool_registry(spec.spec.tools, tool_env=tool_env or ToolEnv())
+    # Stream J.1 — a ``plan_execute`` manifest front-loads a planner node
+    # that decomposes the task before the ReAct loop runs.
+    planner_node = make_planner_node(router) if spec.spec.workflow.type == "plan_execute" else None
     graph = build_react_graph(
         llm_caller=router,
         tool_registry=registry,
+        planner_node=planner_node,
         before_llm_chain=chains.before_llm_call,
         after_llm_chain=chains.after_llm_call,
         before_tool_dispatch_chain=chains.before_tool_dispatch,

@@ -18,10 +18,12 @@ checkpointed:
 
 from __future__ import annotations
 
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+
+from helix_agent.protocol import Plan
 
 #: Default ReAct hard limit — see Mini-ADR E-6 in the design doc + the
 #: "ReAct 无限循环" risk row. Manifest may override per-agent.
@@ -36,8 +38,14 @@ class AgentState(TypedDict):
     the conversation history. ``step_count`` and ``max_steps`` use the
     default overwrite reducer — the agent node sets the new count each
     turn, and ``max_steps`` is configured once at graph construction.
+
+    ``plan`` (Stream J.1) is set once by the ``planner`` node when the
+    manifest's ``workflow.type`` is ``plan_execute``; it is absent for
+    plain ``react`` graphs. ``NotRequired`` so the ReAct input shape is
+    unchanged — readers use ``state.get("plan")``.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
     step_count: int
     max_steps: int
+    plan: NotRequired[Plan | None]

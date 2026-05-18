@@ -55,10 +55,11 @@ import logging
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from helix_agent.protocol import Plan
 from helix_agent.runtime.cancellation import (
     CANCELLATION_TOKEN_KEY,
     CancellationToken,
@@ -68,6 +69,7 @@ from helix_agent.runtime.middleware import (
     MiddlewareContext,
 )
 from orchestrator.errors import MaxStepsExceededError
+from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState
 from orchestrator.tools.registry import Tool, ToolContext, ToolNotFoundError, ToolRegistry
@@ -89,6 +91,7 @@ def build_react_graph(
     *,
     llm_caller: LLMCaller,
     tool_registry: ToolRegistry,
+    planner_node: PlannerNode | None = None,
     before_llm_chain: MiddlewareChain | None = None,
     after_llm_chain: MiddlewareChain | None = None,
     before_tool_dispatch_chain: MiddlewareChain | None = None,
@@ -97,6 +100,12 @@ def build_react_graph(
 
     Caller (typically :class:`orchestrator.runner.GraphRunner`)
     compiles it with the shared checkpointer.
+
+    When ``planner_node`` is supplied (Stream J.1 — manifest
+    ``workflow.type == "plan_execute"``) the graph is fronted by a
+    ``planner`` node: ``START → planner → agent``. The planner writes
+    ``AgentState.plan`` and ``agent_node`` renders it into its system
+    context every step. ``None`` → plain ``START → agent`` ReAct.
 
     All chain arguments are optional — ``None`` means "no middleware at
     this anchor", and ``agent_node`` / ``tools_node`` short-circuit the
@@ -120,6 +129,11 @@ def build_react_graph(
 
         tools = list(tool_registry.specs())
         messages = list(state["messages"])
+        # Stream J.1 — render the plan into the system context so every
+        # ReAct step executes against it. No-op for plain ReAct graphs.
+        plan = state.get("plan")
+        if plan is not None:
+            messages = _inject_plan(messages, plan)
         configurable = config.get("configurable") or {}
         tenant_id = _parse_uuid(configurable.get("tenant_id"))
 
@@ -194,10 +208,35 @@ def build_react_graph(
     graph: StateGraph[AgentState, None, AgentState, AgentState] = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tools_node)
-    graph.add_edge(START, "agent")
+    if planner_node is not None:
+        # ``PlannerNode`` is structurally a ``(state, config)`` node but
+        # mypy can't match the bare Callable alias to LangGraph's
+        # internal ``_NodeWithConfig`` overloads — same gap runs.py
+        # documents for the StreamableGraph protocol.
+        graph.add_node("planner", planner_node)  # type: ignore[arg-type]
+        graph.add_edge(START, "planner")
+        graph.add_edge("planner", "agent")
+    else:
+        graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", _should_continue, {"tools": "tools", END: END})
     graph.add_edge("tools", "agent")
     return graph
+
+
+def _inject_plan(messages: list[BaseMessage], plan: Plan) -> list[BaseMessage]:
+    """Merge the rendered plan into the prompt's leading system message.
+
+    Returns a new list — the checkpointed ``state['messages']`` is left
+    untouched; the plan rides only in this per-call prompt (``plan``
+    itself is the checkpointed source of truth).
+    """
+    rendered = render_plan(plan)
+    if messages and isinstance(messages[0], SystemMessage):
+        head = messages[0]
+        head_text = head.content if isinstance(head.content, str) else str(head.content)
+        merged = SystemMessage(content=f"{head_text}\n\n{rendered}")
+        return [merged, *messages[1:]]
+    return [SystemMessage(content=rendered), *messages]
 
 
 def _should_continue(state: AgentState) -> Literal["tools", "__end__"]:

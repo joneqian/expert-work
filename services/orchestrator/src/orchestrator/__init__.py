@@ -24,6 +24,7 @@ from orchestrator.errors import (
     OrchestratorError as OrchestratorError,
 )
 from orchestrator.graph_builder import build_react_graph as build_react_graph
+from orchestrator.graph_builder import make_planner_node as make_planner_node
 from orchestrator.llm import (
     AllProvidersExhaustedError as AllProvidersExhaustedError,
 )
@@ -136,6 +137,7 @@ __all__ = [
     "build_react_graph",
     "build_tool_registry",
     "format_sse",
+    "make_planner_node",
     "run_agent",
     "sanitize_dangling_tool_calls",
     "sse_consumer",
