@@ -10,6 +10,40 @@
 #
 # Credentials are placeholders. Override via .env or your secret store.
 
+# Shared config for the blue/green control-plane pair (Stream I.2 /
+# STREAM-I-DESIGN § 6). Both colours run under the ``full`` profile;
+# tools/deploy/deploy.py recreates the idle colour with a new image tag
+# and flips the nginx upstream (infra/nginx/conf.d/control-plane-upstream.conf).
+x-control-plane-base: &control-plane-base
+  profiles: ["full"]
+  image: helix-control-plane:${HELIX_CONTROL_PLANE_TAG:-dev}
+  environment:
+    HELIX_AGENT_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@pgbouncer:6432/${HELIX_DB_NAME:-helix_agent_dev}
+    # ADR B-6: durable Postgres stores. The ``migrate`` one-shot service
+    # runs the Alembic migrations first (depends_on below).
+    HELIX_AGENT_STORE_BACKEND: sql
+    HELIX_AGENT_QUOTA_REDIS_URL: redis://redis:6379/0
+    HELIX_AGENT_SANDBOX_SUPERVISOR_URL: http://sandbox-supervisor:8000
+    # Trace export (A.8) — reached only when the observability profile
+    # is also up; the SDK buffers + drops gracefully when it is not.
+    HELIX_AGENT_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+  depends_on:
+    pgbouncer:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  healthcheck:
+    # Real HTTP liveness — a bare TCP connect passes before uvicorn
+    # finishes lifespan startup, which makes ``up --wait`` (and the
+    # nginx upstream) race the app. /healthz/live is 200 only once the
+    # app is actually serving.
+    test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/live', timeout=2)\""]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -142,16 +176,29 @@ services:
     # Behind the ``proxy`` compose profile so the default ``up`` (used
     # by data-layer integration tests) doesn't bind host port 8080.
     # Enable with ``docker compose --profile proxy up`` for full local
-    # dev / mTLS tests.
+    # dev / mTLS tests — it pulls in the control-plane stack via the
+    # ``depends_on`` below.
     profiles: ["proxy"]
     image: nginx:1.27-alpine
     container_name: helix-nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Blue/green upstream (Stream I.2) — tools/deploy/deploy.py rewrites
+      # the include file on the host; ``nginx -s reload`` re-reads it.
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./dev-certs:/etc/nginx/certs:ro
     ports:
       - "8080:8080"   # plain HTTP — healthz / metrics passthrough
       - "8443:8443"   # mTLS — service-to-service
+    # nginx resolves the ``upstream`` server names once at config load
+    # and caches the IPs. Starting it after both colours are healthy
+    # means it caches their final, correct addresses (Stream I.2);
+    # deploy.py's ``nginx -s reload`` re-resolves after a recreate.
+    depends_on:
+      control-plane-blue:
+        condition: service_healthy
+      control-plane-green:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
       interval: 3s
@@ -231,7 +278,7 @@ services:
   #   --profile proxy  + nginx mTLS terminator
   #   --profile auth   + Keycloak IdP
   #   --profile sandbox + credential-proxy (standalone)
-  #   --profile full   + migrate / control-plane / sandbox-supervisor / credential-proxy
+  #   --profile full   + migrate / control-plane-blue+green / sandbox-supervisor / credential-proxy
   #   --profile e2e    + mock-upstream (only — the #60 egress e2e names the
   #                      services it needs explicitly; see test_fullstack_egress_e2e.py)
   #   --profile observability + OTel Collector / Prometheus / Tempo / Loki /
@@ -249,11 +296,11 @@ services:
     # config + migrations dir. control-plane / sandbox-supervisor gate on
     # this completing so no service ever sees a half-built schema.
     #
-    # No ``build:`` here on purpose — the ``control-plane`` service is the
-    # sole builder of the ``helix-control-plane`` tag; a second build of
-    # the same tag races on image export. ``migrate`` just consumes it.
+    # No ``build:`` here on purpose — ``control-plane-blue`` is the sole
+    # builder of the ``helix-control-plane`` tag; a second build of the
+    # same tag races on image export. ``migrate`` just consumes it.
     profiles: ["full"]
-    image: helix-control-plane
+    image: helix-control-plane:${HELIX_CONTROL_PLANE_TAG:-dev}
     container_name: helix-migrate
     restart: "no"
     # Direct Postgres (5432), not PgBouncer — DDL wants a direct connection.
@@ -264,39 +311,29 @@ services:
       postgres:
         condition: service_healthy
 
-  control-plane:
+  control-plane-blue:
     # Helix Control Plane — Stream B FastAPI surface; runs the orchestrator
     # in-process as a library (STREAM-E-DESIGN § 2.6 / Mini-ADR I-1).
-    profiles: ["full"]
+    #
+    # Blue/green pair (Stream I.2 / Mini-ADR I-4): both colours run under
+    # the ``full`` profile; tools/deploy/deploy.py recreates the idle
+    # colour with a new image tag and flips the nginx upstream. ``build``
+    # lives only on blue — green and ``migrate`` reuse the same tag
+    # (avoids a double-build race, as Mini-ADR I-3 does for migrate).
+    <<: *control-plane-base
+    container_name: helix-control-plane-blue
     build:
       context: ..
       dockerfile: services/control-plane/Dockerfile
-    image: helix-control-plane
-    container_name: helix-control-plane
-    environment:
-      HELIX_AGENT_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@pgbouncer:6432/${HELIX_DB_NAME:-helix_agent_dev}
-      # ADR B-6: durable Postgres stores. The ``migrate`` one-shot
-      # service runs the Alembic migrations first (depends_on below).
-      HELIX_AGENT_STORE_BACKEND: sql
-      HELIX_AGENT_QUOTA_REDIS_URL: redis://redis:6379/0
-      HELIX_AGENT_SANDBOX_SUPERVISOR_URL: http://sandbox-supervisor:8000
-      # Trace export (A.8) — reached only when the observability profile
-      # is also up; the SDK buffers + drops gracefully when it is not.
-      HELIX_AGENT_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
     ports:
       - "8000:8000"
-    depends_on:
-      pgbouncer:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8000)))\""]
-      interval: 3s
-      timeout: 3s
-      retries: 20
+
+  control-plane-green:
+    # Idle/standby colour by default — see control-plane-blue above.
+    <<: *control-plane-base
+    container_name: helix-control-plane-green
+    ports:
+      - "8001:8000"
 
   sandbox-supervisor:
     # Helix Sandbox Supervisor — Stream F.1 service. Docker-out-of-docker

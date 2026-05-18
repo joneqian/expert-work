@@ -232,10 +232,10 @@ upstream 块抽到 include 文件 infra/nginx/conf.d/control-plane-upstream.conf
 deploy.py 重写该文件后 `nginx -s reload`（reload 不断连，平滑换 upstream）。
 ```
 
-- **compose**：新增 `control-plane-blue` / `control-plane-green` 两个服务 —— 同镜像、同 env，仅服务名 / `container_name` 不同，均 `profiles: ["full"]`。平时只起一个色；deploy 时另一个色被拉起。原单个 `control-plane` 服务由这两者取代（compose 注释给出说明）。
+- **compose**：新增 `control-plane-blue` / `control-plane-green` 两个服务 —— YAML anchor 共用配置，仅 `container_name` / host 端口（blue 8000、green 8001）不同；`build:` 只挂 blue 上（green / migrate 复用同 tag，避免重复构建竞争，同 Mini-ADR I-3 对 migrate 的处理）。两色都 `profiles: ["full"]`，随全栈常驻；deploy 时 `--force-recreate` **原地重建 idle 色**（带新 tag），live 色不动 —— 两色常驻消除了「冷启动该拉哪个色」的歧义。原单个 `control-plane` 服务由这两者取代。
 - **deploy.py 流程**（输入：新镜像 tag）：
-  1. 判定 idle 色（live 色的另一个）。
-  2. `docker compose up -d control-plane-<idle>`（带新 tag）。
+  1. 读 nginx upstream include 文件判定 live 色 → idle 色（另一个）。
+  2. `docker compose up -d --no-deps --force-recreate control-plane-<idle>`（idle 色已在跑，带新 tag 原地重建它）。
   3. 轮询 idle 色 `/healthz/ready` —— readiness 含 DB / Redis 依赖检查（A.11）；超时未 healthy → 中止，不切流量，idle 色留存供排查。
   4. **金丝雀**（可选 `--canary 10,50`）：依次把 nginx 权重设为 `idle=10 / live=90`、`idle=50 / live=50`，每步之间 `--canary-pause` 秒（人看 Stream G SLO 大盘判断是否继续；脚本只负责步进，不做自动分析）。
   5. 全量切换：upstream 写成只剩 idle 色 → `nginx -s reload`。

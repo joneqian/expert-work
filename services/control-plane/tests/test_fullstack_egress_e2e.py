@@ -41,9 +41,9 @@ _COMPOSE_FILE = _INFRA / "docker-compose.yml"
 #: The composed supervisor launches sandboxes from this tag (its default).
 _SANDBOX_IMAGE = "helix-sandbox:dev"
 #: Service images the sub-stack consumes — ``migrate`` reuses the
-#: control-plane image, hence it is built even though control-plane
-#: itself is not part of the #60 chain.
-_BUILD_SERVICES = ("control-plane", "sandbox-supervisor", "credential-proxy")
+#: control-plane image, hence ``control-plane-blue`` (its sole builder,
+#: Stream I.2) is built even though control-plane is not in the #60 chain.
+_BUILD_SERVICES = ("control-plane-blue", "sandbox-supervisor", "credential-proxy")
 #: Services the #60 chain needs — control-plane / redis are not in it.
 _STACK_SERVICES = (
     "postgres",
