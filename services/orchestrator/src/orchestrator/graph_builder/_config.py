@@ -6,9 +6,28 @@ module so neither node module has to import the other (no import cycle).
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from langchain_core.runnables import RunnableConfig
 
 from helix_agent.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
+
+
+def configurable_uuid(config: RunnableConfig, key: str) -> UUID | None:
+    """Parse ``config['configurable'][key]`` as a UUID, or ``None``.
+
+    Run-scoped bindings (``tenant_id`` / ``user_id`` / …) travel via
+    ``config['configurable']`` as strings; nodes lift them with this.
+    """
+    raw = (config.get("configurable") or {}).get(key)
+    if isinstance(raw, UUID):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return UUID(raw)
+        except ValueError:
+            return None
+    return None
 
 
 def current_run_id(config: RunnableConfig) -> str | None:

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 
+from helix_agent.persistence import InMemoryMemoryStore
 from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.middleware import RecordingLangfuseClient
@@ -17,6 +18,7 @@ from orchestrator import (
     AnthropicProvider,
     BuiltAgent,
     LLMRouter,
+    MemoryEnv,
     MiddlewareEnv,
     OpenAIProvider,
     ToolEnv,
@@ -24,7 +26,7 @@ from orchestrator import (
     build_llm_router,
     build_step_routers,
 )
-from orchestrator.llm import RateLimitedProvider
+from orchestrator.llm import FakeEmbedder, RateLimitedProvider
 from orchestrator.tools import RecordingTavilyClient
 
 # ---------------------------------------------------------------------------
@@ -388,6 +390,60 @@ async def test_build_agent_with_routing_block_builds() -> None:
     async with make_checkpointer("memory") as cp:
         built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "planner" in built.graph.nodes
+
+
+# ---------------------------------------------------------------------------
+# build_agent — long-term memory (Stream J.3)
+# ---------------------------------------------------------------------------
+
+
+def _memory_env() -> MemoryEnv:
+    return MemoryEnv(store=InMemoryMemoryStore(), embedder=FakeEmbedder(dim=16))
+
+
+@pytest.mark.asyncio
+async def test_build_agent_no_memory_has_no_memory_nodes() -> None:
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert "memory_recall" not in built.graph.nodes
+    assert "memory_writeback" not in built.graph.nodes
+
+
+@pytest.mark.asyncio
+async def test_build_agent_long_term_memory_adds_both_nodes() -> None:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["memory"] = {"long_term": {}}
+    spec = AgentSpec.model_validate(doc)
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(
+            spec, secret_store=_secret_store(), checkpointer=cp, memory_env=_memory_env()
+        )
+    assert "memory_recall" in built.graph.nodes
+    assert "memory_writeback" in built.graph.nodes
+
+
+@pytest.mark.asyncio
+async def test_build_agent_long_term_memory_write_back_off() -> None:
+    """``write_back: false`` → recall node only, no write-back node."""
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["memory"] = {"long_term": {"write_back": False}}
+    spec = AgentSpec.model_validate(doc)
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(
+            spec, secret_store=_secret_store(), checkpointer=cp, memory_env=_memory_env()
+        )
+    assert "memory_recall" in built.graph.nodes
+    assert "memory_writeback" not in built.graph.nodes
+
+
+@pytest.mark.asyncio
+async def test_build_agent_long_term_memory_without_env_raises() -> None:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["memory"] = {"long_term": {}}
+    spec = AgentSpec.model_validate(doc)
+    async with make_checkpointer("memory") as cp:
+        with pytest.raises(AgentFactoryError, match=r"memory\.long_term"):
+            await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
 
 
 @pytest.mark.asyncio

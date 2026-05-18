@@ -9,9 +9,17 @@ from orchestrator import DEFAULT_MAX_STEPS, AgentState
 
 def test_required_keys_present() -> None:
     """E.6 ``step_count`` / ``max_steps`` on top of E.1 ``messages``;
-    J.1 added ``plan`` and J.2 ``reflections`` (both ``NotRequired``)."""
+    J.1 ``plan``, J.2 ``reflections``, J.3 ``recalled_memories`` (all
+    ``NotRequired``)."""
     annotations = inspect.get_annotations(AgentState)
-    assert set(annotations) == {"messages", "step_count", "max_steps", "plan", "reflections"}
+    assert set(annotations) == {
+        "messages",
+        "step_count",
+        "max_steps",
+        "plan",
+        "reflections",
+        "recalled_memories",
+    }
 
 
 def test_default_max_steps_constant_is_documented() -> None:

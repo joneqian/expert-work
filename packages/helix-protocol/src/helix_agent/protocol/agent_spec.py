@@ -219,11 +219,25 @@ class SandboxSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class LongTermMemorySpec(BaseModel):
+    """Manifest ``memory.long_term`` block — Stream J.3.
+
+    Presence activates cross-session memory: a ``memory_recall`` node
+    injects relevant past memories at run start, and a
+    ``memory_writeback`` node extracts new ones at run end.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    retrieve_top_k: int = Field(default=5, gt=0, description="memories injected per run")
+    write_back: bool = Field(default=True, description="extract + persist memories at run end")
+
+
 class MemorySpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     short_term: dict[str, Any] | None = None
-    long_term: dict[str, Any] | None = None
+    long_term: LongTermMemorySpec | None = None
 
 
 class RouteRule(BaseModel):

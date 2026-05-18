@@ -9,6 +9,9 @@ from orchestrator.agent_factory import (
     BuiltAgent as BuiltAgent,
 )
 from orchestrator.agent_factory import (
+    MemoryEnv as MemoryEnv,
+)
+from orchestrator.agent_factory import (
     StepRouters as StepRouters,
 )
 from orchestrator.agent_factory import (
@@ -30,6 +33,12 @@ from orchestrator.errors import (
     OrchestratorError as OrchestratorError,
 )
 from orchestrator.graph_builder import build_react_graph as build_react_graph
+from orchestrator.graph_builder import (
+    make_memory_recall_node as make_memory_recall_node,
+)
+from orchestrator.graph_builder import (
+    make_memory_writeback_node as make_memory_writeback_node,
+)
 from orchestrator.graph_builder import make_planner_node as make_planner_node
 from orchestrator.graph_builder import make_reflect_node as make_reflect_node
 from orchestrator.llm import (
@@ -125,6 +134,7 @@ __all__ = [
     "LLMProvider",
     "LLMRouter",
     "MaxStepsExceededError",
+    "MemoryEnv",
     "MiddlewareChains",
     "MiddlewareEnv",
     "OpenAIProvider",
@@ -146,6 +156,8 @@ __all__ = [
     "build_step_routers",
     "build_tool_registry",
     "format_sse",
+    "make_memory_recall_node",
+    "make_memory_writeback_node",
     "make_planner_node",
     "make_reflect_node",
     "run_agent",

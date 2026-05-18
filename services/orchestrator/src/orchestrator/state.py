@@ -24,7 +24,7 @@ from typing import Annotated, NotRequired, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
-from helix_agent.protocol import Plan, Reflection
+from helix_agent.protocol import MemoryItem, Plan, Reflection
 
 #: Default ReAct hard limit — see Mini-ADR E-6 in the design doc + the
 #: "ReAct 无限循环" risk row. Manifest may override per-agent.
@@ -48,6 +48,10 @@ class AgentState(TypedDict):
     ``reflections`` (Stream J.2) accumulates one :class:`Reflection` per
     ``reflect`` node entry — an ``operator.add`` reducer appends. Absent
     unless the manifest carries a ``reflection:`` block.
+
+    ``recalled_memories`` (Stream J.3) is set once by the ``memory_recall``
+    node — the long-term memories ``agent_node`` renders into its system
+    context. Absent unless the manifest enables long-term memory.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -55,3 +59,4 @@ class AgentState(TypedDict):
     max_steps: int
     plan: NotRequired[Plan | None]
     reflections: NotRequired[Annotated[list[Reflection], add]]
+    recalled_memories: NotRequired[list[MemoryItem]]

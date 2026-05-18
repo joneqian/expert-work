@@ -51,6 +51,7 @@ Stream E.12.5 wires the middleware chain into both nodes. Anchor calls
 
 from __future__ import annotations
 
+import itertools
 import logging
 from typing import Any, Literal, cast
 from uuid import UUID
@@ -59,13 +60,14 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolM
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from helix_agent.protocol import Plan
+from helix_agent.protocol import MemoryItem, Plan
 from helix_agent.runtime.middleware import (
     MiddlewareChain,
     MiddlewareContext,
 )
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.graph_builder._config import cancellation_token
+from orchestrator.graph_builder.memory import MemoryNode
 from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
 from orchestrator.llm import LLMCaller
@@ -91,6 +93,8 @@ def build_react_graph(
     tool_registry: ToolRegistry,
     planner_node: PlannerNode | None = None,
     reflect_node: ReflectNode | None = None,
+    memory_recall_node: MemoryNode | None = None,
+    memory_writeback_node: MemoryNode | None = None,
     before_llm_chain: MiddlewareChain | None = None,
     after_llm_chain: MiddlewareChain | None = None,
     before_tool_dispatch_chain: MiddlewareChain | None = None,
@@ -138,6 +142,10 @@ def build_react_graph(
         plan = state.get("plan")
         if plan is not None:
             messages = _inject_plan(messages, plan)
+        # Stream J.3 — render recalled long-term memories into context.
+        memories = state.get("recalled_memories")
+        if memories:
+            messages = _inject_memories(messages, memories)
         configurable = config.get("configurable") or {}
         tenant_id = _parse_uuid(configurable.get("tenant_id"))
 
@@ -212,24 +220,37 @@ def build_react_graph(
     graph: StateGraph[AgentState, None, AgentState, AgentState] = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
     graph.add_node("tools", tools_node)
+
+    # Entry chain: START → [memory_recall] → [planner] → agent — each
+    # node optional, in this fixed order. ``# type: ignore[arg-type]``:
+    # the bare Callable node aliases don't match LangGraph's internal
+    # ``_NodeWithConfig`` overloads (same gap runs.py documents).
+    entry: list[str] = [START]
+    if memory_recall_node is not None:
+        graph.add_node("memory_recall", memory_recall_node)  # type: ignore[arg-type]
+        entry.append("memory_recall")
     if planner_node is not None:
-        # ``PlannerNode`` is structurally a ``(state, config)`` node but
-        # mypy can't match the bare Callable alias to LangGraph's
-        # internal ``_NodeWithConfig`` overloads — same gap runs.py
-        # documents for the StreamableGraph protocol.
         graph.add_node("planner", planner_node)  # type: ignore[arg-type]
-        graph.add_edge(START, "planner")
-        graph.add_edge("planner", "agent")
-    else:
-        graph.add_edge(START, "agent")
+        entry.append("planner")
+    for src, dst in itertools.pairwise(entry):
+        graph.add_edge(src, dst)
+    graph.add_edge(entry[-1], "agent")
+
+    # Exit: the run's end routes through ``memory_writeback`` when present.
+    end_target: str = END
+    if memory_writeback_node is not None:
+        graph.add_node("memory_writeback", memory_writeback_node)  # type: ignore[arg-type]
+        graph.add_edge("memory_writeback", END)
+        end_target = "memory_writeback"
+
     if reflect_node is not None:
         # When the agent stops issuing tool_calls, route to ``reflect``
         # instead of ending — it critiques and may send the agent back.
         graph.add_node("reflect", reflect_node)  # type: ignore[arg-type]
         graph.add_conditional_edges("agent", _should_continue, {"tools": "tools", END: "reflect"})
-        graph.add_conditional_edges("reflect", _after_reflect, {"agent": "agent", END: END})
+        graph.add_conditional_edges("reflect", _after_reflect, {"agent": "agent", END: end_target})
     else:
-        graph.add_conditional_edges("agent", _should_continue, {"tools": "tools", END: END})
+        graph.add_conditional_edges("agent", _should_continue, {"tools": "tools", END: end_target})
     graph.add_edge("tools", "agent")
     return graph
 
@@ -243,20 +264,30 @@ def _after_reflect(state: AgentState) -> Literal["agent", "__end__"]:
     return "__end__"
 
 
-def _inject_plan(messages: list[BaseMessage], plan: Plan) -> list[BaseMessage]:
-    """Merge the rendered plan into the prompt's leading system message.
+def _merge_into_system(messages: list[BaseMessage], block: str) -> list[BaseMessage]:
+    """Return a new message list with ``block`` appended to the leading
+    system message (or a fresh system message prepended).
 
-    Returns a new list — the checkpointed ``state['messages']`` is left
-    untouched; the plan rides only in this per-call prompt (``plan``
-    itself is the checkpointed source of truth).
+    The checkpointed ``state['messages']`` is left untouched — the
+    injected context rides only in this per-call prompt.
     """
-    rendered = render_plan(plan)
     if messages and isinstance(messages[0], SystemMessage):
         head = messages[0]
         head_text = head.content if isinstance(head.content, str) else str(head.content)
-        merged = SystemMessage(content=f"{head_text}\n\n{rendered}")
-        return [merged, *messages[1:]]
-    return [SystemMessage(content=rendered), *messages]
+        return [SystemMessage(content=f"{head_text}\n\n{block}"), *messages[1:]]
+    return [SystemMessage(content=block), *messages]
+
+
+def _inject_plan(messages: list[BaseMessage], plan: Plan) -> list[BaseMessage]:
+    """Render the plan (J.1) into the prompt's system context."""
+    return _merge_into_system(messages, render_plan(plan))
+
+
+def _inject_memories(messages: list[BaseMessage], memories: list[MemoryItem]) -> list[BaseMessage]:
+    """Render recalled long-term memories (J.3) into the system context."""
+    lines = ["## Relevant memories from past sessions"]
+    lines.extend(f"- ({item.kind}) {item.content}" for item in memories)
+    return _merge_into_system(messages, "\n".join(lines))
 
 
 def _should_continue(state: AgentState) -> Literal["tools", "__end__"]:

@@ -35,15 +35,25 @@ from typing import Any
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
+from helix_agent.persistence import MemoryStore
 from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from orchestrator.errors import AgentFactoryError
-from orchestrator.graph_builder import build_react_graph, make_planner_node, make_reflect_node
+from orchestrator.graph_builder import (
+    MemoryNode,
+    build_react_graph,
+    make_memory_recall_node,
+    make_memory_writeback_node,
+    make_planner_node,
+    make_reflect_node,
+)
 from orchestrator.llm import (
     AnthropicProvider,
+    Embedder,
     HTTPAnthropicClient,
     HTTPOpenAIClient,
+    LLMCaller,
     LLMProvider,
     LLMRouter,
     OpenAIProvider,
@@ -77,6 +87,20 @@ class BuiltAgent:
 
 
 @dataclass(frozen=True)
+class MemoryEnv:
+    """Platform deps for long-term memory — Stream J.3.
+
+    Injected into :func:`build_agent`. A manifest that declares
+    ``memory.long_term`` but gets an empty ``MemoryEnv`` raises
+    :class:`AgentFactoryError` — same contract as a tool whose
+    runtime dependency is missing.
+    """
+
+    store: MemoryStore | None = None
+    embedder: Embedder | None = None
+
+
+@dataclass(frozen=True)
 class StepRouters:
     """Per-step-class LLM routers — Stream J.11.
 
@@ -97,6 +121,7 @@ async def build_agent(
     checkpointer: BaseCheckpointSaver[Any],
     tool_env: ToolEnv | None = None,
     middleware_env: MiddlewareEnv | None = None,
+    memory_env: MemoryEnv | None = None,
 ) -> BuiltAgent:
     """Assemble a :class:`BuiltAgent` from a validated :class:`AgentSpec`.
 
@@ -138,11 +163,18 @@ async def build_agent(
         if reflection is not None
         else None
     )
+    # Stream J.3 — long-term memory recall / write-back nodes when the
+    # manifest declares ``memory.long_term``.
+    memory_recall_node, memory_writeback_node = _build_memory_nodes(
+        spec, memory_env=memory_env, llm_caller=routers.default
+    )
     graph = build_react_graph(
         llm_caller=routers.default,
         tool_registry=registry,
         planner_node=planner_node,
         reflect_node=reflect_node,
+        memory_recall_node=memory_recall_node,
+        memory_writeback_node=memory_writeback_node,
         before_llm_chain=chains.before_llm_call,
         after_llm_chain=chains.after_llm_call,
         before_tool_dispatch_chain=chains.before_tool_dispatch,
@@ -214,6 +246,41 @@ async def build_step_routers(
             elif rule.when == "reflection":
                 reflection = routed
     return StepRouters(default=default, planning=planning, reflection=reflection)
+
+
+def _build_memory_nodes(
+    spec: AgentSpec,
+    *,
+    memory_env: MemoryEnv | None,
+    llm_caller: LLMCaller,
+) -> tuple[MemoryNode | None, MemoryNode | None]:
+    """Build the ``(memory_recall, memory_writeback)`` nodes — Stream J.3.
+
+    ``(None, None)`` unless the manifest declares ``memory.long_term``.
+    A declared block with no :class:`MemoryEnv` store / embedder raises
+    :class:`AgentFactoryError`.
+    """
+    memory = spec.spec.memory
+    long_term = memory.long_term if memory is not None else None
+    if long_term is None:
+        return None, None
+    env = memory_env or MemoryEnv()
+    if env.store is None or env.embedder is None:
+        raise AgentFactoryError(
+            "manifest declares memory.long_term but build_agent received no "
+            "MemoryStore / Embedder (memory_env)"
+        )
+    recall = make_memory_recall_node(
+        memory_store=env.store, embedder=env.embedder, top_k=long_term.retrieve_top_k
+    )
+    writeback = (
+        make_memory_writeback_node(
+            memory_store=env.store, embedder=env.embedder, llm_caller=llm_caller
+        )
+        if long_term.write_back
+        else None
+    )
+    return recall, writeback
 
 
 def _flatten_chain(model: ModelSpec) -> list[ModelSpec]:
