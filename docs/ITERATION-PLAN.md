@@ -331,7 +331,7 @@
 
 ### Stream I — 部署与发布闭环（~2 周；承接 Phase 0.3 CI/CD）
 
-参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §10、[streams/STREAM-I-DESIGN](./streams/STREAM-I-DESIGN.md)（设计先行；当前覆盖 I.1）
+参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §10、[streams/STREAM-I-DESIGN](./streams/STREAM-I-DESIGN.md)（设计先行；覆盖 I.1–I.4）
 
 > Phase 0.3 已建立 baseline CI/CD + 三环境配置框架；本 Stream 把它生产化。
 
