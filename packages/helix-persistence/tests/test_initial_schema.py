@@ -69,6 +69,9 @@ async def test_migrations_create_all_tables(postgres_container: PostgresContaine
         await engine.dispose()
 
     assert {"event_log", "thread_meta", "audit_log", "alembic_version"} <= tables
+    # ``app_user`` was dropped in migration 0016 (superseded by tenant_user).
+    assert "app_user" not in tables
+    assert "tenant_user" in tables
 
 
 @pytest.mark.asyncio
