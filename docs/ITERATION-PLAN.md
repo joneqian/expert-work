@@ -340,9 +340,9 @@
   - **sandbox-supervisor 用 docker-out-of-docker**（Mini-ADR I-2）：容器化后挂宿主 `/var/run/docker.sock` 启沙盒兄弟容器。
   - **I.1a**：上述 Dockerfile + compose（`migrate` 一次性服务 + 两服务 + `full` profile）。
   - **I.1b — 全栈 egress 端到端测试**（测试矩阵 #60，原属 Stream F.11）：`exec_python` → sandbox →（仅）真 credential-proxy → mock upstream 全链路通。原计划在 sandbox-supervisor 集成 harness 做，但忠实验证需 proxy + postgres + 迁移 + 种 `secret_allowlist`/secret 一整套 —— 等于在 harness 里重建迷你栈；故移入 I.1，待全栈 compose 就位后顺势做。
-- [ ] **I.2 服务发布策略**（落实 P0 #32）— 蓝绿 + 金丝雀脚本
-- [ ] **I.3 服务回滚机制**（落实 P0 #33）— 一键回滚 + DB 兼容
-- [ ] **I.4 三环境部署文档**（dev / staging / prod）
+- [x] **I.2 服务发布策略**（落实 P0 #32）— control-plane 蓝绿（nginx upstream 切换）+ 加权金丝雀 + `tools/deploy/deploy.py`；STREAM-I-DESIGN § 6 / Mini-ADR I-4
+- [x] **I.3 服务回滚机制**（落实 P0 #33）— `tools/deploy/rollback.py`（快路径切回旧色 / `--to-tag` 兜底）+ expand-contract 迁移纪律（迁移只向前）；STREAM-I-DESIGN § 7
+- [x] **I.4 三环境部署文档**（dev / staging / prod）— `docs/runbooks/deployment.md`（三环境矩阵 / 配置来源 / 首次部署 / 发布清单）+ `environments/*.yaml` 结构补全；STREAM-I-DESIGN § 8
 
 ### M0 Exit Criteria（M0 → M0→M1 Gate 验证门）
 

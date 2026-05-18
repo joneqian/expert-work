@@ -2,10 +2,47 @@
 
 > 落实 P0 #32（服务发布策略）/ #33（服务回滚）。设计见 [STREAM-I-DESIGN § 6–8](../streams/STREAM-I-DESIGN.md)。
 >
-> 本文档当前覆盖 **I.3**：滚动发布与回滚流程、数据库迁移兼容（expand-contract）、发布检查清单。
-> **I.4** 增补三环境（dev / staging / prod）矩阵、配置来源、首次部署步骤。
+> 覆盖 Stream I 全程：三环境矩阵、配置来源、首次部署、滚动发布、回滚、迁移兼容、发布检查清单。
 
 M0 在线栈跑在单台主机的 `docker compose --profile full up` 上。control-plane 在 ADR B-6（SQL store 切换）后**无状态** —— 蓝绿两色（`control-plane-blue` / `control-plane-green`）可并行连同一套数据库，发布与回滚都靠切换 nginx upstream 完成。
+
+## 三环境矩阵
+
+| 维度 | dev | staging | prod |
+|------|-----|---------|------|
+| 载体 | 本机 docker-compose（OrbStack/Lima）| 单台阿里云 ECS + docker-compose | 阿里云 ECS + docker-compose（独立实例）|
+| Postgres | compose `postgres` 容器 | 阿里云 RDS（staging 库）| 阿里云 RDS（prod 库，独立实例）|
+| 对象存储 | compose MinIO | 阿里云 OSS（staging bucket）| 阿里云 OSS（prod bucket）|
+| Secret | `local_dev`（`infra/credential-proxy/secrets.env` 占位）| 阿里云 KMS Secrets Manager（ADR-0007）| 阿里云 KMS Secrets Manager |
+| 镜像来源 | 本地 `docker build` | 阿里云 ACR | 阿里云 ACR |
+| TLS 证书 | 自签（`tools/dev-certs/`）| 内部 CA / 真证书 | 真证书 |
+| `HELIX_AGENT_STORE_BACKEND` | `sql` | `sql` | `sql` |
+| `HELIX_AGENT_SINGLE_INSTANCE` | `true`（不蓝绿）| `false` + Redis（蓝绿需要）| `false` + Redis |
+| 发布方式 | `compose up`（无蓝绿）| `deploy.py` 蓝绿 | `deploy.py` 蓝绿 + 金丝雀 |
+
+**环境隔离（P0）**：三环境的 DB / 密钥 / bucket 完全分离，命名一律带环境后缀（`helix_agent_dev` / `_staging` / `_prod`）防误连；prod 凭据只存 KMS，不落盘、不进仓库。
+
+## 配置来源与优先级
+
+三处配置源，由结构化到敏感：
+
+1. **`environments/<env>.yaml`** —— 结构化非密配置（DB host、OSS endpoint、observability、TLS 路径、`secrets.backend` 选型）。声明式，目前由 `tools/tls/check_tls_config.py`（`tls:` 段）和 SecretStore 工厂（`secrets.backend`）消费。
+2. **`HELIX_AGENT_*` 环境变量** —— control-plane 的 pydantic `Settings` **只**读真实环境变量（不读 yaml）。compose 文件 / 部署脚本注入：`HELIX_AGENT_DB_DSN`、`HELIX_AGENT_STORE_BACKEND`、`HELIX_AGENT_SINGLE_INSTANCE`、`HELIX_AGENT_QUOTA_REDIS_URL` 等。
+3. **阿里云 KMS Secrets Manager** —— 运行期密钥（模型 key、DB 密码、上游凭据），staging / prod 经 SecretStore（ADR-0007）拉取，永不落盘。dev 用 `local_dev` 占位文件。
+
+## 首次部署
+
+**dev** —— 见 [`infra/README.md`](../../infra/README.md)。预构建沙盒镜像后 `docker compose --profile full up`；要蓝绿 / nginx 再加 `--profile proxy`。
+
+**staging / prod**：
+
+1. 备好 `environments/<env>.yaml` + 注入 `HELIX_AGENT_*` 环境变量（DSN 指向 RDS；`STORE_BACKEND=sql`；`SINGLE_INSTANCE=false` + `QUOTA_REDIS_URL`）。
+2. 从阿里云 ACR 拉 `helix-control-plane` / `helix-sandbox-supervisor` / `helix-credential-proxy` 镜像。
+3. 起数据层（staging/prod 的 Postgres 是 RDS，不起 compose 的 `postgres` / `pgbouncer`；redis 仍由 compose 起）。
+4. 跑 `migrate`（`alembic upgrade head`，纯 expand —— 见下）。
+5. 蓝绿起 control-plane：首次直接 `docker compose up -d control-plane-blue` + 起 nginx；之后的版本走 `deploy.py`。
+6. 起 sandbox-supervisor / credential-proxy。
+7. 验证：`/healthz/ready` 全绿、nginx 经 8443 mTLS 可达、Stream G SLO 大盘有数据。
 
 ## 滚动发布（蓝绿）
 
@@ -40,6 +77,14 @@ python tools/deploy/rollback.py --to-tag v1.2.2  # 兜底路径
 - **不用 `alembic downgrade`**：生产降级迁移可能丢数据、且降级脚本几乎不被测；兼容性靠「只 expand」实现，不靠回滚 schema。
 
 > 完整的零停机迁移规范（在线建索引、分批 backfill、迁移 linter / CI 自动拦 contract 迁移）属 M1-B。本阶段只立规则 + 在下方清单设强制检查点。
+
+## 环境差异与坑
+
+- **dev 的 redis 占宿主 6379** —— 若宿主已跑 redis，集成测试用 `HELIX_TEST_COMPOSE_OVERRIDE` 指向一个 `redis: {ports: !reset []}` 的 override 文件（CI 无此冲突）。
+- **staging / prod 必须 `HELIX_AGENT_SINGLE_INSTANCE=false` + `HELIX_AGENT_QUOTA_REDIS_URL`** —— 蓝绿切换窗口内两个色并存，进程内限流器会各算一份；切到 Redis 后端后多进程计数才正确（STREAM-I-DESIGN § 6.4）。
+- **staging / prod 的 Postgres 是 RDS** —— 不起 compose 的 `postgres` / `pgbouncer`；`HELIX_AGENT_DB_DSN` 直接指向 RDS endpoint，`environments/<env>.yaml` 的 `database.host` 同步。
+- **prod 密钥只走 KMS** —— `secrets.backend: aliyun_kms`；不写 `.env`、不进仓库、不落容器磁盘。
+- **沙盒镜像需预构建** —— `helix-sandbox:dev`（或对应 tag）由 sandbox-supervisor 运行期 `docker run`，compose 不替它构建，部署前先 `docker build`（见 STREAM-I-DESIGN § 2.4）。
 
 ## 发布检查清单
 

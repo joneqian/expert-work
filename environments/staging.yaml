@@ -20,9 +20,12 @@ object_storage:
   bucket: helix-agent-staging
   use_path_style: false
 
-# Secret store — TBD per ADR-0007 (Vault self-hosted vs 阿里云 KMS Secrets Manager)
+# Secret store — ADR-0007: 阿里云 KMS Secrets Manager. The
+# AliyunKmsSecretStore adapter is implemented (F.6); wiring a concrete
+# KmsBackend with the real Aliyun SDK client is a deploy-time follow-up
+# (STREAM-F-DESIGN Mini-ADR F-7).
 secrets:
-  backend: tbd
+  backend: aliyun_kms
 
 # Observability — self-hosted stack on staging cluster
 observability:

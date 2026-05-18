@@ -24,9 +24,12 @@ object_storage:
   # Server-side encryption via 阿里云 KMS
   kms_key_id: TBD
 
-# Secret store — TBD per ADR-0007 (Vault self-hosted vs 阿里云 KMS Secrets Manager)
+# Secret store — ADR-0007: 阿里云 KMS Secrets Manager. The
+# AliyunKmsSecretStore adapter is implemented (F.6); wiring a concrete
+# KmsBackend with the real Aliyun SDK client is a deploy-time follow-up
+# (STREAM-F-DESIGN Mini-ADR F-7).
 secrets:
-  backend: tbd
+  backend: aliyun_kms
 
 # Observability — self-hosted stack on prod cluster
 observability:
