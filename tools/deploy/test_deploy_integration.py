@@ -1,9 +1,13 @@
-"""Integration smoke for the blue/green deploy — Stream I.2, test matrix #69.
+"""Integration smoke for blue/green deploy + rollback — test matrix #69 / #70.
 
-Brings up the M0 stack (data layer + both control-plane colours + nginx),
-runs ``deploy.py`` to flip blue → green, and asserts the upstream was
-flipped, the new colour serves through nginx, and the old colour was
-drained + stopped (kept for rollback).
+Brings up the M0 stack (data layer + both control-plane colours + nginx)
+once, then runs two ordered smokes against it:
+
+* ``#69`` — ``deploy.py`` flips blue → green; asserts the upstream
+  switched, the new colour serves through nginx, the old colour drained.
+* ``#70`` — ``rollback.py`` fast path flips green → blue back; asserts
+  the upstream returned to blue. Runs *after* #69 (it consumes the
+  green-live state #69 leaves).
 
 Heavy (image build + full stack) — ``@pytest.mark.integration``, runs in
 the non-gating ``Test (integration)`` job; skipped when Docker is
@@ -30,6 +34,7 @@ _INFRA = _REPO_ROOT / "infra"
 _COMPOSE_FILE = _INFRA / "docker-compose.yml"
 _UPSTREAM_CONF = _INFRA / "nginx" / "conf.d" / "control-plane-upstream.conf"
 _DEPLOY_PY = _REPO_ROOT / "tools" / "deploy" / "deploy.py"
+_ROLLBACK_PY = _REPO_ROOT / "tools" / "deploy" / "rollback.py"
 _CERTGEN_PY = _REPO_ROOT / "tools" / "dev-certs" / "generate.py"
 
 #: Services the #69 smoke needs — data layer + both colours + nginx.
@@ -185,3 +190,39 @@ def test_gate_69_blue_green_deploy(deploy_stack: None) -> None:
     assert _http_status("http://localhost:8080/healthz/live") == 200
     assert _http_status("http://localhost:8001/healthz/live") == 200  # green
     assert _http_status("http://localhost:8000/healthz/live") != 200  # blue stopped
+
+
+def test_gate_70_rollback(deploy_stack: None) -> None:
+    """rollback.py fast path flips green → blue back: the kept blue
+    container is restarted, the upstream returns to blue, green drained.
+
+    Runs after test_gate_69 — it consumes the green-live state #69 left.
+    """
+    # Precondition — #69 left the stack on green.
+    assert parse_live_color(_UPSTREAM_CONF.read_text()) == "green"
+
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(_ROLLBACK_PY),
+            "--drain-timeout",
+            "10",
+            "--ready-timeout",
+            "120",
+        ],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, f"rollback.py failed:\n{result.stdout}\n{result.stderr}"
+
+    # Upstream rolled back to blue.
+    assert parse_live_color(_UPSTREAM_CONF.read_text()) == "blue"
+
+    # Blue restarted + serving, green drained + stopped.
+    assert _container_state("helix-control-plane-blue") == "running"
+    assert _container_state("helix-control-plane-green") == "exited"
+
+    assert _http_status("http://localhost:8080/healthz/live") == 200
+    assert _http_status("http://localhost:8000/healthz/live") == 200  # blue
+    assert _http_status("http://localhost:8001/healthz/live") != 200  # green stopped
