@@ -34,6 +34,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
 from helix_agent.protocol import Plan, PlanStep
+from orchestrator.graph_builder._config import cancellation_token
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState
 
@@ -126,11 +127,9 @@ def render_plan(plan: Plan) -> str:
 
 def make_planner_node(llm_caller: LLMCaller) -> PlannerNode:
     """Build the ``planner`` graph node bound to ``llm_caller``."""
-    # Imported here to avoid a circular import (builder imports planner).
-    from orchestrator.graph_builder.builder import _cancellation_token
 
     async def planner_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
-        token = _cancellation_token(config)
+        token = cancellation_token(config)
         token.raise_if_cancelled()
 
         task = _extract_task(list(state["messages"]))
