@@ -38,7 +38,7 @@
 | **G.5 Eval 数据集管理** | `tools/eval/datasets/`：golden / regression set 目录结构 + YAML 格式约定 + README；git 版本化。 | 数据集自动晋升、从反馈回流 candidate case | P0 #38；subsystem 26 |
 | **G.6 用户反馈收集** | 新 `feedback` 表（migration）+ control-plane `POST /v1/sessions/{thread_id}/feedback` API（👍/👎 + 文本，关联 thread + turn seq + trace_id）；写入有 audit。 | 反馈 → candidate case → 人工审核 → golden set 回流；反馈大盘 | P0 #37；subsystem 26 |
 | **G.7 Grafana 大盘** | `tools/observability/dashboards/`：`01-overview` / `02-orchestrator` / `03-sandbox` 三份 Grafana JSON（subsystem 20 § 9 M0）；Grafana 自动 provision。 | `04-llm-gateway` / `05-control-plane` / `06-tenant` / `07-slo` 共 6+ 份（M1） | subsystem 20 § 5.6 / § 9 |
-| **G.8 event_log 冷归档** | 新 `event-log-archive-job` 服务（复用 `retention-cleanup-job` / `audit-backup-worker` 的 job 模式）：扫超龄 `event_log` 行 → 批量写 S3（`ObjectStore` 抽象，A.5）→ 确认后删行；归档清单可查。 | 归档后透明查询路径（查询层自动回 S3 取）、分区 | P0 #18；subsystem 20 |
+| **G.8 event_log 冷归档** | 新 `event-log-archive-job` 服务（复用 `retention-cleanup-job` / `audit-backup-worker` 的 job 模式）：按 `(tenant, thread, 月)` 扫超龄 `event_log` 行 → 写 S3 JSONL（`ObjectStore` 抽象，A.5）→ 确认后删行。确定性 key + 运行摘要日志 = M0"归档清单"。 | 归档后透明查询路径（查询层自动回 S3 取）、可查 manifest 表、专用最小权限 DB 角色 | P0 #18；subsystem 20 |
 
 ### 1.2 Out-of-scope（明确推迟）
 
@@ -126,12 +126,18 @@ CREATE TABLE feedback (
 复用已确立的 job 服务模式（`services/retention-cleanup-job` D.3、`services/audit-backup-worker` D.1c）：
 新 `services/event-log-archive-job`，一次性 / cron 触发：
 
-1. 选 `event_log` 中 `created_at < now() - 归档阈值`（M0 默认 180 天，env 可配）的行，按 `thread_id` 批。
-2. 序列化为 JSONL，`ObjectStore.put(key=event-log/{year}/{month}/{thread_id}.jsonl)`（A.5 抽象，dev=MinIO / prod=OSS）。
-3. `put` 确认成功后 `DELETE` 该批行（先归档后删 —— 失败可重跑、不丢数据）。
-4. 写一条 `archive_manifest`（或 audit）记录归档键 + 行数 + 时间范围，作为"归档后可查清单"。
+1. 选 `event_log` 中 `created_at < cutoff`（`cutoff = now() - 归档阈值`，M0 默认 180 天 env 可配）的行，按 **`(tenant_id, thread_id, 月)`** 分组。
+2. 序列化为 JSONL，`ObjectStore.put(key=event-log/{tenant_id}/{YYYY}/{MM}/{thread_id}.jsonl)`（A.5 抽象，dev=MinIO / prod=OSS）。
+3. `put` 确认成功后 `DELETE` 该组行（先归档后删 —— 失败可重跑、不丢数据）。
+4. 每次 `run_once` 结束 emit 一条结构化运行摘要日志（归档对象数 / 行数 / 耗时）。
 
-> 失败模式：归档中途崩 → 已 `put` 未 `DELETE` 的批下次重跑 `put` 覆盖同 key（幂等）、再删；不会丢、最多重传一批。
+> 失败模式：归档中途崩 → 已 `put` 未 `DELETE` 的组下次重跑 `put` 覆盖同 key（确定性 key、幂等）、再删；不会丢、最多重传一组。
+
+**I.1b 落地后的实测细化**（三处偏离上面草图）：
+
+- **不写 `archive_manifest` 表 / audit**（原步骤 4）。M0 的"归档清单可查" = 确定性 key 布局（`event-log/{tenant}/{YYYY}/{MM}/{thread}.jsonl`，列 S3 前缀即可枚举）+ 每次 run 的结构化摘要日志。一张可查的 manifest 表与 M1-B"归档后透明查询路径"配套才有最大价值，一并推 M1-B。
+- **按 `(tenant, thread, 月)` 分组**（非纯 `thread_id`）：一个 thread 的旧行可能跨月；按月分组让每个归档对象 = 一个 thread 在一个月的行，key 确定、重跑幂等。
+- **不建专用 DB 角色 / 迁移**。job 用 operator 提供的 DSN 连库（dev 默认 superuser，跨租户读删 event_log、绕 RLS）；prod 最小权限 `event_log_archive_worker` 角色属 prod 加固，推后。`run_once` 取单个 `cutoff` 传给取/删两步，避免时钟漂移缺口。
 
 ---
 
@@ -195,8 +201,9 @@ CREATE TABLE feedback (
 | 63 | 反馈落表 + 关联 | G.6 | integration | `POST /feedback` 👍/👎+文本 → `feedback` 行含 trace_id/turn_seq；写 audit |
 | 64 | 反馈跨租户隔离 | G.6 | integration | 租户 A 的反馈对租户 B 不可见（RLS）|
 | 65 | 反馈输入校验 | G.6 | unit | `rating` 非 up/down → 422；空 body → 422 |
-| 66 | event_log 归档 + 删行 | G.8 | integration | 超龄行 → S3 有 JSONL 对象、表行删、清单写 |
-| 67 | 归档 job 幂等重跑 | G.8 | integration | `put` 后模拟崩溃，重跑 → 不重复、不丢、最终一致 |
+| 66 | event_log 归档 + 删行 | G.8 | integration | 超龄行 → S3 有 JSONL 对象（内容正确）、表行删、近期行留。本地 XPASS；CI `xfail`（event_log DELETE 的 M1-B permission-denied 坑）|
+| 67 | 归档 job 幂等重跑 | G.8 | integration | 重跑覆盖同 key（不重复）、空扫无副作用。本地 XPASS；CI `xfail`（同 #66）|
+| 68b | 归档纯逻辑单测 | G.8 | unit | `_object_key` / `_to_jsonl` / `_normalise_row` / `_json_default` —— 序列化与 key 逻辑，gating `Test (pytest)` job 真绿 |
 | 68 | Eval 简版可跑 | G.4 | integration | promptfoo 包装脚本跑通 1 个 eval set，产出报告 |
 
 ---

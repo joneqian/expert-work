@@ -49,6 +49,7 @@ members = [
     "services/audit-backup-worker",
     "services/control-plane",
     "services/credential-proxy",
+    "services/event-log-archive-job",
     "services/orchestrator",
     "services/retention-cleanup-job",
     "services/sandbox-supervisor",
