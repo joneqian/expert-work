@@ -1,0 +1,28 @@
+# Helix SLI recording rules — Stream G.1.
+#
+# Pre-aggregates the SLIs for the SLOs defined in docs/runbooks/slo.md.
+# Loaded by Prometheus from /etc/prometheus/rules/ (G.0 mount).
+#
+# Only the two SLIs whose metric is emitted in M0 are recorded here;
+# TTFT / sandbox-cold-start / durable-resume rules land when their
+# metrics are emitted (slo.md SLO #3-#5). Burn-rate rules are M1.
+
+groups:
+  - name: helix_sli
+    interval: 30s
+    rules:
+      # SLO 1 — control-plane API availability: 5m non-5xx success ratio.
+      # 0/0 (no traffic) records as NaN — acceptable for M0.
+      - record: helix:sli:control_plane_availability:ratio5m
+        expr: |
+          sum(rate(helix_control_plane_http_requests_total{status_code!~"5.."}[5m]))
+          /
+          sum(rate(helix_control_plane_http_requests_total[5m]))
+
+      # SLO 2 — control-plane API P99 latency (seconds; target < 0.2).
+      - record: helix:sli:control_plane_http_latency:p99_5m
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(helix_control_plane_http_request_duration_seconds_bucket[5m]))
+          )
