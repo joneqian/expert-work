@@ -350,7 +350,7 @@
 
 参考：[architecture/08-AGENT-CAPABILITY-ASSESSMENT](./architecture/08-AGENT-CAPABILITY-ASSESSMENT.md)、[streams/STREAM-J-DESIGN](./streams/STREAM-J-DESIGN.md)（设计先行）
 
-> 2026-05-18 的 21 维 agent 能力评估发现：helix M0 把企业基础设施（Stream A–I）做到生产级，但 agent 认知 / harness 层有 8 个缺口。本 Stream 把这 8 个缺口补到生产级 —— helix 才是一个 harness 能力完整的通用 agent 平台。
+> 2026-05-18 的 25 维 agent 能力评估发现：helix M0 把企业基础设施（Stream A–I）做到生产级，但 agent 认知 / harness 层有 12 个缺口。本 Stream 把这 12 个缺口补到生产级 —— helix 才是一个 harness 能力完整的通用 agent 平台。
 > **canonical 能力 agent + dogfood 必须在 Stream J 之后做** —— canonical agent 是能力评估的载体，平台能力不完整就评不出完整能力面。
 > 量级与 M0 若干 Stream 总和相当。每子项设计先行 + TDD + 一 PR 一子任务 + 零技术债。原 M1-D 的 `reflection/resolvers.py`、`uploads_middleware`、subagent executor 及 M1-F 的 Sub-Agent 项提前并入本 Stream。
 
@@ -362,14 +362,18 @@
 - [ ] **J.6 多模态输入** — 图像 / 文件输入
 - [ ] **J.7 Skill + skill 进化** — skill 概念 + 习得 / 进化机制
 - [ ] **J.8 人在回路 / 审批** — 运行中可中断 / 纠偏 / 危险操作审批
-- [ ] **J.9 eval 强化** — 评估 G.4 骨架是否需升级（canonical agent 的度量工具）
+- [ ] **J.9 产物 / Artifact 管理** — agent 产出物(文件/文档/代码)的创建 / 存储 / 版本 / 回传
+- [ ] **J.10 调度 / 触发** — 定时 / 事件 / webhook 触发的 agent,非纯请求-响应
+- [ ] **J.11 Model 路由** — 按步骤难度 / 成本 / 模态动态选模型(非单纯 provider fallback)
+- [ ] **J.12 学习 / 反馈闭环** — 从生产 feedback / trajectory 数据迭代改进 agent(区别于 skill 进化)
+- [ ] **J.13 eval 强化** — 评估 G.4 骨架是否需升级（canonical agent 的度量工具）
 
-**Stream J Verification**：每子项接入 live agent 路径、单测 + 集成测试 80% 覆盖；21 维能力矩阵无"缺失 / 骨架"遗留（eval 按 J.9 结论）。
+**Stream J Verification**：每子项接入 live agent 路径、单测 + 集成测试 80% 覆盖；25 维能力矩阵无"缺失 / 骨架"遗留（eval 按 J.13 结论）。
 
 ### M0 Exit Criteria（M0 → M0→M1 Gate 验证门）
 
 - [ ] 24 项 P0 全部勾选完成（参考 [architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §"Gap 严重性矩阵"）
-- [ ] **Stream J（Agent Harness 能力补全）9 子项完成** —— 21 维能力矩阵无缺口
+- [ ] **Stream J（Agent Harness 能力补全）13 子项完成** —— 25 维能力矩阵无缺口
 - [ ] canonical 能力 agent 跑通 + staging 冒烟（便宜模型端到端真实 run）
 - [ ] 测试金字塔达标：unit ≥ 85%、integration ≥ 70% 关键路径、E2E 5-10 场景
 - [ ] 7 条沙盒安全验证用例全部通过
