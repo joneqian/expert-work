@@ -310,7 +310,7 @@
 - [ ] **G.1 SLO/SLI 定义文档**（落实 P0 #13）— 可用性、TTFT P95、恢复时间
 - [ ] **G.2 告警体系**（落实 P0 #14）— 飞书/PagerDuty 通道、P0/P1/P2 分级
 - [ ] **G.3 故障预案 runbook**（落实 P0 #26）— Postgres / Vault / Anthropic / sandbox 各 1 份
-- [ ] **G.4 Eval 框架**（落实 P0 #36）— promptfoo 集成（先简版）
+- [ ] **G.4 Eval 框架**（落实 P0 #36）— Python-native 轻量 eval harness（`tools/eval/`，非 promptfoo —— Mini-ADR G-3，deer-flow 调研依据）
 - [ ] **G.5 Eval 数据集管理**（落实 P0 #38）— golden / regression set 版本化
 - [ ] **G.6 用户反馈收集**（落实 P0 #37）— 👍/👎 关联 turn + trace
 - [ ] **G.7 第一版 Grafana 大盘**

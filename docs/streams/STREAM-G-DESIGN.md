@@ -34,7 +34,7 @@
 | **G.1 SLO/SLI 定义** | `docs/architecture/subsystems/20` § 5.4 SLO 表落成 `docs/runbooks/slo.md`（5 条 M0 SLO + 测量 PromQL）；Prometheus recording rule（`tools/observability/rules/sli.yml`）预聚合 SLI。 | `slo_definition` 入库、burn-rate 自动算、错误预算耗尽自动冻结发布 | P0 #13；subsystem 20 § 5.4 |
 | **G.2 告警体系** | Prometheus alert rule（`tools/observability/rules/alerts.yml`）：5xx 率、Postgres 连接耗尽、`helix_network_egress_meta_attempt_total > 0` 等 M0 关键条件；Alertmanager config P0/P1/P2 分级路由骨架（webhook receiver 占位，飞书/PagerDuty URL 由 env 注入）。 | PagerDuty 实接、飞书实接、错误预算 burn-rate 告警、告警风暴抑制调优 | P0 #14；subsystem 20 § 5.7 |
 | **G.3 故障预案 runbook** | `docs/runbooks/`：control-plane / postgres / anthropic（LLM provider）/ sandbox / credential-proxy 各 1 篇（故障现象、诊断、处置、回滚）。control-plane 一篇因 G.2 的告警 `runbook_url` 均指向它而补入（原草图列 4 篇，实为 5）。 | 每个告警 1 篇 SOP 全覆盖（M1-H） | P0 #26 |
-| **G.4 Eval 框架** | promptfoo 简版：`tools/eval/promptfooconfig.yaml` + 1 个 eval set；`uv run` 包装脚本本地可跑；CI 加非 gating job。 | LLM-as-judge gate、A/B、PR 前异步触发、regression 阻断 | P0 #36；subsystem 26 |
+| **G.4 Eval 框架** | Python-native 轻量 eval harness（Mini-ADR G-3）：`tools/eval/` —— YAML eval-set 格式 + `run_eval` runner（可插拔 `complete` provider）+ 1 个示例 eval set；harness 单测在 gating `Test (pytest)` job 跑（mock provider，确定性）。 | LLM-as-judge、真 LLM provider、regression 阻断 gate、A/B | P0 #36；subsystem 26 |
 | **G.5 Eval 数据集管理** | `tools/eval/datasets/`：golden / regression set 目录结构 + YAML 格式约定 + README；git 版本化。 | 数据集自动晋升、从反馈回流 candidate case | P0 #38；subsystem 26 |
 | **G.6 用户反馈收集** | 新 `feedback` 表（migration）+ control-plane `POST /v1/sessions/{thread_id}/feedback` API（👍/👎 + 文本，关联 thread + turn seq + trace_id）；写入有 audit。 | 反馈 → candidate case → 人工审核 → golden set 回流；反馈大盘 | P0 #37；subsystem 26 |
 | **G.7 Grafana 大盘** | `tools/observability/dashboards/`：`01-overview` / `02-orchestrator` / `03-sandbox` 三份 Grafana JSON（subsystem 20 § 9 M0）；Grafana 自动 provision。 | `04-llm-gateway` / `05-control-plane` / `06-tenant` / `07-slo` 共 6+ 份（M1） | subsystem 20 § 5.6 / § 9 |
@@ -157,12 +157,14 @@ CREATE TABLE feedback (
 - **理由**：(1) 自托管符合 ADR-0005（国内 LangSmith 不可用）。(2) profile 隔离 —— 数据层集成测试默认 `up` 不受可观测栈拖慢。(3) 全部社区官方镜像，无供应链新增面。
 - **代价**：6 个新容器，本地 dev 资源占用上升 —— 故独立 profile，按需启。生产部署（K8s/HA/远端存储）推 M1。
 
-### Mini-ADR G-3：Eval 用 promptfoo，M0 只简版
+### Mini-ADR G-3：Eval 用 Python-native 轻量 harness，不用 promptfoo
 
-- **背景**：ITERATION-PLAN G.4 已点名 promptfoo；subsystem 26 设计的是完整 Eval 框架（EvalSet/EvalRun 状态机/LLM-as-judge/A-B gate）。
-- **决策**：M0 落 promptfoo **简版** —— `tools/eval/promptfooconfig.yaml` + 1 个 eval set + `uv run` 包装脚本 + CI 非 gating job。完整框架（DB 状态机、LLM-as-judge、PR 前异步触发、regression 阻断）推 M2-D。
-- **理由**：promptfoo 是成熟工具，简版即可让 dogfood 前有回归护栏；自建完整 EvalRun 状态机在 M0 是过度投入（subsystem 26 本就标 M1+）。
-- **代价**：M0 eval 不阻断合并、不入库 —— 接受；先有"能跑的回归集"比"完整但晚"更重要。
+- **背景**：ITERATION-PLAN G.4 原点名 promptfoo；subsystem 26 设计的是完整 Eval 框架（EvalSet/EvalRun 状态机/LLM-as-judge/A-B gate）。
+- **调研**：promptfoo 是 Node/npm 工具，引入它等于在纯 Python 仓库里加第二套语言工具链 + CI Node job；且真 eval 要 LLM 凭据、CI 没有。查了参考项目 deer-flow（`/Users/mac/src/github/deer-flow`）—— 它**不用 promptfoo**，自建了 Python-native eval（`evals.json` 格式 + grader 子 agent + 纯 stdlib 查看器），证明 Python-native 路线可行。
+- **决策**：M0 落 **Python-native 轻量 eval harness** —— `tools/eval/`：YAML eval-set 格式（case = `prompt` + 机器可校验 `assertions`：contains / not_contains / regex / equals）+ `run_eval` runner + 1 个示例 eval set。runner 接一个 `complete(prompt)->str` 的可插拔 provider：M0 用各 case 自带的 `mock_response`（确定性，CI 真跑全链路）；真 LLM provider 是文档化的扩展点。harness 单测跑在 gating `Test (pytest)` job（确定性、可门控）。
+- **理由**：(1) 零工具链 footprint —— 不把 Node 引进纯 Python 仓库。(2) CI 用 mock provider 即可端到端真跑 harness，不卡 LLM 凭据。(3) deer-flow 验证了该路线。(4) "M0 先简版"本就排除完整框架。
+- **out-of-scope（推后）**：LLM-as-judge、真 LLM provider 接 orchestrator LLM 栈、regression 阻断 gate、A/B → M2-D。
+- **代价**：M0 eval 不阻断合并、不入库；harness 的"真 prompt 评测价值"要 dev 实现真 provider（带凭据）才兑现 —— 接受，与 M0 其它"骨架"一致（Mini-ADR G-1）。
 
 ### Mini-ADR G-4：event_log 冷归档新建独立 job 服务，不并入 retention-cleanup-job
 
@@ -188,7 +190,7 @@ CREATE TABLE feedback (
 | G.1/G.2 规则 | `promtool check rules tools/observability/rules/*.yml` + `amtool check-config` CI 校验 |
 | G.6 反馈 API | unit（schema/校验）+ integration（落表 + RLS 跨租户隔离 + audit）|
 | G.8 归档 job | integration：种超龄 event_log 行 → 跑 job → 断言 S3 有对象、表行已删、清单已写；崩溃重跑幂等 |
-| G.4 Eval | `uv run` 包装脚本本地跑通 1 个 eval set |
+| G.4 Eval | harness 单测 + `run_eval` 跑通示例 eval set（mock provider），gating `Test (pytest)` job |
 | G.3/G.5/文档 | 评审 + 链接有效性 |
 | CI | 8/8；新增 promptfoo 非 gating job |
 
@@ -204,7 +206,7 @@ CREATE TABLE feedback (
 | 66 | event_log 归档 + 删行 | G.8 | integration | 超龄行 → S3 有 JSONL 对象（内容正确）、表行删、近期行留 |
 | 67 | 归档 job 幂等重跑 | G.8 | integration | 重跑覆盖同 key（不重复）、空扫无副作用 |
 | 68b | 归档纯逻辑单测 | G.8 | unit | `_object_key` / `_to_jsonl` / `_normalise_row` / `_json_default` —— 序列化与 key 逻辑，gating `Test (pytest)` job 真绿 |
-| 68 | Eval 简版可跑 | G.4 | integration | promptfoo 包装脚本跑通 1 个 eval set，产出报告 |
+| 68 | Eval harness 可跑 | G.4 | unit | `run_eval` 跑通示例 eval set（mock provider）→ 产出 pass/fail 报告；各 assertion 类型单测 |
 
 ---
 
@@ -219,7 +221,7 @@ CREATE TABLE feedback (
 | **G.3** | 4 篇 runbook（`docs/runbooks/`）| 评审 |
 | **G.6** | `feedback` 表 migration + control-plane capture API | #63 #64 #65 |
 | **G.8** | `event-log-archive-job` 服务 + 归档逻辑 | #66 #67 |
-| **G.4** | promptfoo 简版 config + eval set + CI job | #68 |
+| **G.4** | `tools/eval/` Python-native eval harness + 示例 eval set + harness 单测 | #68 |
 | **G.5** | eval 数据集目录结构 + 格式约定 + README | 评审 |
 
 > G.1/G.2/G.7 依赖 G.0；G.3–G.8 互不依赖，顺序可调。每个子项一个 PR、零债收尾。
