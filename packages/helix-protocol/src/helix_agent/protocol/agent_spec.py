@@ -226,6 +226,33 @@ class MemorySpec(BaseModel):
     long_term: dict[str, Any] | None = None
 
 
+class RouteRule(BaseModel):
+    """One model-routing rule — Stream J.11.
+
+    Picks a distinct :class:`ModelSpec` (with its own fallback chain)
+    for a class of LLM step. ``when`` covers the step classes that have
+    a runtime emitter today; later Streams extend it (e.g. ``vision``
+    with J.6 multimodal input).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    when: Literal["planning", "reflection"]
+    model: ModelSpec
+
+
+class RoutingSpec(BaseModel):
+    """Manifest ``routing:`` block — per-step-class model selection (J.11).
+
+    A step class with no matching rule falls back to the agent's
+    top-level ``model``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rules: list[RouteRule] = Field(default_factory=list)
+
+
 class WorkflowSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -333,6 +360,10 @@ class AgentSpecBody(BaseModel):
     reflection: ReflectionSpec | None = Field(
         default=None,
         description="Stream J.2 — presence activates the self-critique reflect node",
+    )
+    routing: RoutingSpec | None = Field(
+        default=None,
+        description="Stream J.11 — per-step-class model selection (planner / reflect)",
     )
     workflow: WorkflowSpec = Field(default_factory=WorkflowSpec)
     policies: PolicySpec = Field(default_factory=PolicySpec)

@@ -76,6 +76,20 @@ class BuiltAgent:
     max_steps: int
 
 
+@dataclass(frozen=True)
+class StepRouters:
+    """Per-step-class LLM routers — Stream J.11.
+
+    The agent loop uses ``default``; the planner / reflect nodes use
+    ``planning`` / ``reflection``. A step class with no ``routing`` rule
+    reuses ``default``.
+    """
+
+    default: LLMRouter
+    planning: LLMRouter
+    reflection: LLMRouter
+
+
 async def build_agent(
     spec: AgentSpec,
     *,
@@ -102,23 +116,30 @@ async def build_agent(
     un-assemblable ``tools:`` entry, …).
     """
     chains = build_middleware_chains(spec, env=middleware_env)
-    router = await build_llm_router(
-        spec.spec.model,
+    # Stream J.11 — resolve the LLM router for each step class; the
+    # planner / reflect nodes may route to a different model than the
+    # agent loop.
+    routers = await build_step_routers(
+        spec,
         secret_store=secret_store,
         around_llm_chain=chains.around_llm_call,
     )
     registry = await build_tool_registry(spec.spec.tools, tool_env=tool_env or ToolEnv())
     # Stream J.1 — a ``plan_execute`` manifest front-loads a planner node
     # that decomposes the task before the ReAct loop runs.
-    planner_node = make_planner_node(router) if spec.spec.workflow.type == "plan_execute" else None
+    planner_node = (
+        make_planner_node(routers.planning) if spec.spec.workflow.type == "plan_execute" else None
+    )
     # Stream J.2 — a ``reflection:`` block inserts a self-critique node
     # before the run ends.
     reflection = spec.spec.reflection
     reflect_node = (
-        make_reflect_node(router, budget=reflection.budget) if reflection is not None else None
+        make_reflect_node(routers.reflection, budget=reflection.budget)
+        if reflection is not None
+        else None
     )
     graph = build_react_graph(
-        llm_caller=router,
+        llm_caller=routers.default,
         tool_registry=registry,
         planner_node=planner_node,
         reflect_node=reflect_node,
@@ -163,6 +184,36 @@ async def build_llm_router(
         rate_limited = RateLimitedProvider.with_rpm(provider, rate_limit_rpm=entry.rate_limit_rpm)
         handles.append(ProviderHandle(provider=rate_limited, key=f"{entry.provider}:{entry.name}"))
     return LLMRouter(providers=handles, around_llm_chain=around_llm_chain)
+
+
+async def build_step_routers(
+    spec: AgentSpec,
+    *,
+    secret_store: SecretStore,
+    around_llm_chain: MiddlewareChain | None = None,
+) -> StepRouters:
+    """Resolve the LLM router for each step class (Stream J.11).
+
+    The agent's top-level ``model`` is the default router; each
+    ``routing`` rule overrides one step class with its own model +
+    fallback chain. A class with no rule reuses the default.
+    """
+    default = await build_llm_router(
+        spec.spec.model, secret_store=secret_store, around_llm_chain=around_llm_chain
+    )
+    planning = default
+    reflection = default
+    routing = spec.spec.routing
+    if routing is not None:
+        for rule in routing.rules:
+            routed = await build_llm_router(
+                rule.model, secret_store=secret_store, around_llm_chain=around_llm_chain
+            )
+            if rule.when == "planning":
+                planning = routed
+            elif rule.when == "reflection":
+                reflection = routed
+    return StepRouters(default=default, planning=planning, reflection=reflection)
 
 
 def _flatten_chain(model: ModelSpec) -> list[ModelSpec]:

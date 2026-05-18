@@ -9,10 +9,16 @@ from orchestrator.agent_factory import (
     BuiltAgent as BuiltAgent,
 )
 from orchestrator.agent_factory import (
+    StepRouters as StepRouters,
+)
+from orchestrator.agent_factory import (
     build_agent as build_agent,
 )
 from orchestrator.agent_factory import (
     build_llm_router as build_llm_router,
+)
+from orchestrator.agent_factory import (
+    build_step_routers as build_step_routers,
 )
 from orchestrator.errors import (
     AgentFactoryError as AgentFactoryError,
@@ -124,6 +130,7 @@ __all__ = [
     "OpenAIProvider",
     "OrchestratorError",
     "ProviderHandle",
+    "StepRouters",
     "StreamableGraph",
     "Tool",
     "ToolContext",
@@ -136,6 +143,7 @@ __all__ = [
     "build_llm_router",
     "build_middleware_chains",
     "build_react_graph",
+    "build_step_routers",
     "build_tool_registry",
     "format_sse",
     "make_planner_node",

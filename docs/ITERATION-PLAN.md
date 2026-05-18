@@ -364,7 +364,7 @@
 - [ ] **J.8 人在回路 / 审批** — 运行中可中断 / 纠偏 / 危险操作审批
 - [ ] **J.9 产物 / Artifact 管理** — agent 产出物(文件/文档/代码)的创建 / 存储 / 版本 / 回传
 - [ ] **J.10 调度 / 触发** — 定时 / 事件 / webhook 触发的 agent,非纯请求-响应
-- [ ] **J.11 Model 路由** — 按步骤难度 / 成本 / 模态动态选模型(非单纯 provider fallback)
+- [x] **J.11 Model 路由** — `routing:` 块按步骤类别声明式选模型(`RouteRule.when` → `ModelSpec`):planner / reflect 节点可路由到与 agent 循环不同的模型,各带自己的 fallback 链。构造期 `build_step_routers` 给每个节点绑定对应 router;无规则的步骤类别复用默认。声明式规则,非动态难度估计(Mini-ADR J-6)。`vision` 步骤类别随 J.6 多模态加入。STREAM-J-DESIGN § 7。
 - [ ] **J.12 学习 / 反馈闭环** — 从生产 feedback / trajectory 数据迭代改进 agent(区别于 skill 进化)
 - [ ] **J.13 eval 强化** — 评估 G.4 骨架是否需升级（canonical agent 的度量工具）
 - [x] **J.14 租户内 per-user 隔离** — `(tenant_id, user_id)` 复合 scope;thread / 长期记忆 / 工作区按用户隔离(多租户深化,Stream C 性质)。PR1:`tenant_user` 注册表(迁移 0015)+ `TenantUserStore` + `thread_meta.user_id`;PR2:control-plane 接入 —— 会话创建 stamp `user_id`、读 / run / 状态流转的用户所有权强制隔离(`caller_owns_thread`,admin 旁路、机器主体租户级)。STREAM-J-DESIGN § 4。

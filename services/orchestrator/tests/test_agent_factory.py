@@ -22,6 +22,7 @@ from orchestrator import (
     ToolEnv,
     build_agent,
     build_llm_router,
+    build_step_routers,
 )
 from orchestrator.llm import RateLimitedProvider
 from orchestrator.tools import RecordingTavilyClient
@@ -313,6 +314,80 @@ async def test_build_agent_reflection_block_adds_reflect_node() -> None:
     async with make_checkpointer("memory") as cp:
         built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "reflect" in built.graph.nodes
+
+
+# ---------------------------------------------------------------------------
+# build_step_routers — Stream J.11 model routing
+# ---------------------------------------------------------------------------
+
+
+def _routing_spec(when: str, *, provider: str, name: str, key_name: str) -> AgentSpec:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["routing"] = {
+        "rules": [
+            {
+                "when": when,
+                "model": {
+                    "provider": provider,
+                    "name": name,
+                    "api_key_ref": f"secret://{key_name}",
+                },
+            }
+        ]
+    }
+    return AgentSpec.model_validate(doc)
+
+
+@pytest.mark.asyncio
+async def test_build_step_routers_default_when_no_routing() -> None:
+    """Without a routing block every step class reuses the default router."""
+    routers = await build_step_routers(_spec(), secret_store=_secret_store())
+    assert routers.planning is routers.default
+    assert routers.reflection is routers.default
+
+
+@pytest.mark.asyncio
+async def test_build_step_routers_routes_planning_to_its_model() -> None:
+    spec = _routing_spec("planning", provider="openai", name="gpt-4o", key_name=_OPENAI_KEY_NAME)
+    routers = await build_step_routers(spec, secret_store=_secret_store())
+    # planning routes to its own model; default + reflection stay on the
+    # agent's top-level model.
+    assert routers.planning.providers[0].key == "openai:gpt-4o"
+    assert routers.default.providers[0].key == "anthropic:claude-sonnet-4-6"
+    assert routers.reflection is routers.default
+
+
+@pytest.mark.asyncio
+async def test_build_step_routers_routes_reflection_independently() -> None:
+    spec = _routing_spec(
+        "reflection", provider="openai", name="gpt-4o-mini", key_name=_OPENAI_KEY_NAME
+    )
+    routers = await build_step_routers(spec, secret_store=_secret_store())
+    assert routers.reflection.providers[0].key == "openai:gpt-4o-mini"
+    assert routers.planning is routers.default
+
+
+@pytest.mark.asyncio
+async def test_build_agent_with_routing_block_builds() -> None:
+    """build_agent assembles cleanly when a routing block is present."""
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["workflow"] = {"type": "plan_execute"}
+    doc["spec"]["routing"] = {
+        "rules": [
+            {
+                "when": "planning",
+                "model": {
+                    "provider": "openai",
+                    "name": "gpt-4o",
+                    "api_key_ref": f"secret://{_OPENAI_KEY_NAME}",
+                },
+            }
+        ]
+    }
+    spec = AgentSpec.model_validate(doc)
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+    assert "planner" in built.graph.nodes
 
 
 @pytest.mark.asyncio
