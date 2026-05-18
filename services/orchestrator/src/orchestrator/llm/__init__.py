@@ -13,6 +13,13 @@ Public surface:
 """
 
 from orchestrator.llm.caller import LLMCaller as LLMCaller
+from orchestrator.llm.embedder import DEFAULT_EMBEDDINGS_PATH as DEFAULT_EMBEDDINGS_PATH
+from orchestrator.llm.embedder import QWEN_EMBEDDING_BASE_URL as QWEN_EMBEDDING_BASE_URL
+from orchestrator.llm.embedder import Embedder as Embedder
+from orchestrator.llm.embedder import EmbeddingClient as EmbeddingClient
+from orchestrator.llm.embedder import FakeEmbedder as FakeEmbedder
+from orchestrator.llm.embedder import HTTPEmbeddingClient as HTTPEmbeddingClient
+from orchestrator.llm.embedder import OpenAICompatibleEmbedder as OpenAICompatibleEmbedder
 from orchestrator.llm.providers import (
     DEEPSEEK_BASE_URL as DEEPSEEK_BASE_URL,
 )
@@ -107,6 +114,7 @@ from orchestrator.llm.router import (
 __all__ = [
     "DEEPSEEK_BASE_URL",
     "DEFAULT_CHAT_COMPLETIONS_PATH",
+    "DEFAULT_EMBEDDINGS_PATH",
     "DEFAULT_MAX_TOKENS",
     "DEFAULT_TIME_PERIOD_S",
     "DOUBAO_BASE_URL",
@@ -115,15 +123,21 @@ __all__ = [
     "GLM_CHAT_COMPLETIONS_PATH",
     "KIMI_BASE_URL",
     "QWEN_BASE_URL",
+    "QWEN_EMBEDDING_BASE_URL",
     "AllProvidersExhaustedError",
     "AnthropicClient",
     "AnthropicProvider",
+    "Embedder",
+    "EmbeddingClient",
+    "FakeEmbedder",
     "HTTPAnthropicClient",
+    "HTTPEmbeddingClient",
     "HTTPOpenAIClient",
     "LLMCaller",
     "LLMProvider",
     "LLMRouter",
     "OpenAIClient",
+    "OpenAICompatibleEmbedder",
     "OpenAIProvider",
     "ProviderHandle",
     "RateLimitedProvider",
