@@ -33,6 +33,7 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
+from helix_agent.persistence.feedback_store import DbFeedbackStore, FeedbackRecord
 from helix_agent.persistence.rls import (
     build_rls_sessionmaker,
     bypass_rls_var,
@@ -221,5 +222,65 @@ async def test_bypass_var_does_not_subvert_rls_for_application_role(
         bypass_rls_var.set(True)
         listed = await store.list_by_tenant(tenant_a, limit=10, offset=0)
         assert listed == []
+    finally:
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# feedback table — Stream G.6 (#64)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def feedback_rls_store(
+    postgres_container: PostgresContainer,
+) -> Iterator[tuple[DbFeedbackStore, AsyncEngine]]:
+    """A :class:`DbFeedbackStore` on the unprivileged role — RLS enforced."""
+    cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
+    command.upgrade(cfg, "head")
+    _provision_app_role(_sync_dsn(postgres_container))
+    app_async_dsn = _rewrite_credentials(_async_dsn(postgres_container), APP_ROLE, APP_PASSWORD)
+    engine = create_async_engine_from_config(DatabaseConfig(dsn=app_async_dsn))
+    session_factory = build_rls_sessionmaker(create_async_session_factory(engine))
+    yield DbFeedbackStore(session_factory), engine
+
+
+@pytest.mark.asyncio
+async def test_feedback_tenants_cannot_see_each_other(
+    feedback_rls_store: tuple[DbFeedbackStore, AsyncEngine],
+) -> None:
+    """#64 — two tenants' feedback on the *same* thread id stays isolated.
+
+    Using one shared ``thread_id`` proves it is RLS, not the thread
+    filter, that isolates: ``list_for_thread`` carries no tenant
+    predicate, so a leak would surface both rows.
+    """
+    store, engine = feedback_rls_store
+    try:
+        tenant_a, tenant_b = uuid4(), uuid4()
+        thread_id = uuid4()
+
+        current_tenant_id_var.set(tenant_a)
+        await store.insert(
+            FeedbackRecord(tenant_id=tenant_a, thread_id=thread_id, rating="up", actor_id="user-a")
+        )
+
+        current_tenant_id_var.set(tenant_b)
+        await store.insert(
+            FeedbackRecord(
+                tenant_id=tenant_b, thread_id=thread_id, rating="down", actor_id="user-b"
+            )
+        )
+
+        current_tenant_id_var.set(tenant_a)
+        a_rows = await store.list_for_thread(thread_id=thread_id)
+        assert [r.rating for r in a_rows] == ["up"]
+        assert all(r.tenant_id == tenant_a for r in a_rows)
+
+        current_tenant_id_var.set(tenant_b)
+        b_rows = await store.list_for_thread(thread_id=thread_id)
+        assert [r.rating for r in b_rows] == ["down"]
+        assert all(r.tenant_id == tenant_b for r in b_rows)
     finally:
         await engine.dispose()

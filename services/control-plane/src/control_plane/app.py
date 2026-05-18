@@ -30,6 +30,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from control_plane.api import (
     build_agents_router,
     build_api_keys_router,
+    build_feedback_router,
     build_health_router,
     build_metrics_router,
     build_quota_router,
@@ -95,6 +96,7 @@ from helix_agent.persistence.auth import (
     RoleBindingStore,
     ServiceAccountStore,
 )
+from helix_agent.persistence.feedback_store import FeedbackStore, InMemoryFeedbackStore
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore,
     InMemoryTokenReservationStore,
@@ -124,6 +126,7 @@ def create_app(
     rate_limiter: RateLimiter | None = None,
     agent_spec_repo: AgentSpecStore | None = None,
     thread_meta_repo: ThreadMetaStore | None = None,
+    feedback_repo: FeedbackStore | None = None,
     audit_logger: AuditLogger | None = None,
     manifest_loader: ManifestLoader | None = None,
     jwt_verifier: JWTVerifier | None = None,
@@ -161,6 +164,7 @@ def create_app(
     )
     resolved_repo = agent_spec_repo or InMemoryAgentSpecStore()
     resolved_threads = thread_meta_repo or InMemoryThreadMetaStore()
+    resolved_feedback = feedback_repo or InMemoryFeedbackStore()
     # In-process agent runtime (RunManager + StreamBridge + manifest→agent
     # build path). Default wires a local-dev SecretStore; tests inject a
     # runtime whose builder returns a fake-LLM agent.
@@ -290,6 +294,7 @@ def create_app(
     app.state.tenant_rate_limiter = resolved_tenant_limiter
     app.state.agent_spec_repo = resolved_repo
     app.state.thread_meta_repo = resolved_threads
+    app.state.feedback_store = resolved_feedback
     app.state.audit_logger = resolved_audit
     app.state.manifest_loader = resolved_loader
     app.state.jwt_verifier = resolved_verifier
@@ -362,6 +367,7 @@ def create_app(
     app.include_router(build_agents_router())
     app.include_router(build_sessions_router())
     app.include_router(build_runs_router())
+    app.include_router(build_feedback_router())
     app.include_router(build_service_accounts_router())
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())

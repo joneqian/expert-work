@@ -81,6 +81,8 @@ class AuditAction(StrEnum):
     ROLE_BINDING_CREATE = "role_binding:create"
     ROLE_BINDING_DELETE = "role_binding:delete"
     ROLE_BINDING_READ = "role_binding:read"
+    # feedback (Stream G.6)
+    FEEDBACK_CREATE = "feedback:create"
     # audit (meta)
     AUDIT_READ = "audit:read"
     AUDIT_EXPORT = "audit:export"
@@ -113,6 +115,7 @@ class AuditEntry(BaseModel):
         "role_binding",
         "api_key",
         "service_account",
+        "feedback",
     ]
     resource_id: str | None = None
     result: AuditResult
