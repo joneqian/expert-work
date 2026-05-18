@@ -214,6 +214,25 @@ event: error         data: {"message": "...", "name": "..."}       # 失败
 
 prod 模式启动校验：`auth_mode == "prod"` 时 fail-fast 拒绝启动（C.1 未到位）。Stream C.1 落地时移除这个守卫。
 
+### ADR B-6 — control-plane 状态持久化：store backend 由 settings flag 选
+
+**问题**：M0 收尾前 `create_app` 的全部 store（`agent_spec` / `thread_meta` / `audit` / `api_key` / `role_binding` / `service_account` / `tenant_quota` / `token_reservation` / `tenant_config` / `feedback`）默认 `InMemory*` —— control-plane 整个跑在进程内存，重启即丢状态。`Sql*Store` / `DbFeedbackStore` 早已落地并各自集成测试（`packages/helix-persistence/tests/test_sql_*.py`）。缺口是接线：engine 接在哪、谁负责 `dispose()`？
+
+**选项**：
+- (A) 在 `main.py` 构造 engine + SQL store 传给 `create_app` —— 但 `AsyncEngine` 必须在 lifespan `finally` 里 `await engine.dispose()`，`main.py` 拿不到 lifespan，要么泄漏 engine，要么给 `create_app` 再加一个纯为 dispose 服务的 `db_engine` 参数。
+- (B) 加 `store_backend: Literal["memory", "sql"]` setting，`create_app` 在 `sql` 时内部建 engine + `build_rls_sessionmaker` 包装的 sessionmaker + 全部 `Sql*Store`，并在自己的 lifespan `finally` dispose engine。`main.py` 保持一行。 — **推荐**
+- (C) 永远连 SQL、删 `InMemory*` —— 每个单测都要起 Postgres 容器，CI 慢且重，违 [测试金字塔]。
+
+**决策**：B。与既有三个 backend-选择 setting 同构 —— `checkpointer_backend`（memory/postgres）、`quota_redis_url`（in-memory/Redis）、`single_instance`（in-process/Redis 限流）；`create_app` 本就是「按 settings 选实现」的工厂。`create_async_engine` 是惰性的（首次用才连库），放进同步的 `create_app` 不破坏其「同步 + 无副作用」契约 —— 无 I/O 发生在工厂调用期。注入参数（`agent_spec_repo=` 等）仍优先于 backend，单测照旧注 `InMemory*`。
+
+**Why**：engine 生命周期与 app 生命周期绑定，只有 `create_app` 同时持有 engine 和 lifespan；放 `main.py` 会逼 `create_app` 多开一个只为 dispose 存在的参数。ITERATION-PLAN「main.py 接线」的措辞早于此 conditional 工厂模式确立。
+
+**RLS**：全部 SQL store 共用一个 `build_rls_sessionmaker` 包装的 sessionmaker —— 每事务自动 `SET LOCAL app.tenant_id`（C.4 / ADR-0002）。租户隔离对 store 层透明。
+
+**生产开启**：`infra/docker-compose.yml` 的 `control-plane` 服务设 `HELIX_AGENT_STORE_BACKEND=sql`；`migrate` 一次性服务先跑 alembic，`depends_on: service_completed_successfully` 保证 schema 就位。
+
+**已知项（不在本次范围）**：`/v1/quota/*` 经 mTLS 调用时 principal 是 system tenant（`ffff…ffff`），而 quota 表是 `FORCE` RLS。若该端点对*目标*租户做写入，GUC 与行 `tenant_id` 不一致会被 `WITH CHECK` 拒。M0 是进程内单体，orchestrator 直接调 quota service、不 HTTP 打 `/v1/quota`，该路径暂处休眠。在它被端到端走通前（Stream C 深化 / M1 拆服务），需让该 handler 用 `bypass_rls_var` 或显式切目标租户 GUC。本 PR 仅做接线，不改 quota handler。
+
 ---
 
 ## 4. 接口（HTTP）
@@ -255,6 +274,7 @@ prod 模式启动校验：`auth_mode == "prod"` 时 fail-fast 拒绝启动（C.1
 | Agent CRUD API | ✓（mock repo） | ✓（real DB + audit_log assert） | — |
 | Session CRUD API | ✓ | ✓ | — |
 | Run SSE | ✓（assert event 顺序） | ✓ | — |
+| SQL store 接线（ADR B-6） | ✓（`store_backend` 选型 + 类型断言，engine 惰性免容器） | ✓（testcontainers Postgres + alembic，HTTP round-trip 证落库） | — |
 
 **覆盖率目标**：80% 行覆盖（common/testing.md）。
 

@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     db_pgbouncer_mode: bool = True
     db_echo: bool = False
 
+    #: Persistence backend for the control-plane stores — agent_spec /
+    #: thread_meta / audit / api_key / role_binding / service_account /
+    #: tenant_quota / token_reservation / tenant_config / feedback
+    #: (ADR B-6). ``memory`` (M0 dev / tests — state is lost on restart)
+    #: or ``sql`` (durable — Postgres via ``db_dsn``). ``sql`` requires
+    #: the schema to exist: run the Alembic migrations first (the
+    #: ``migrate`` one-shot service in ``infra/docker-compose.yml``).
+    store_backend: Literal["memory", "sql"] = "memory"
+
     # ------------------------------------------------------------------ otel
     otlp_traces_endpoint: str | None = None
 

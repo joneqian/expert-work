@@ -351,7 +351,7 @@
 - [ ] 测试金字塔达标：unit ≥ 85%、integration ≥ 70% 关键路径、E2E 5-10 场景
 - [ ] 7 条沙盒安全验证用例全部通过
 - [ ] SLO 第一个版本写入文档；P0 告警全部接入
-- [ ] **control-plane 状态持久化（SQL store 切换）** — 当前 `services/control-plane/src/control_plane/main.py` 仅 `create_app()`，`create_app` 的所有 store（`agent_spec` / `thread_meta` / `audit` / `feedback` / `api_key` / `role_binding` / `service_account` / `tenant_quota` / `token_reservation` / `tenant_config`）默认 `InMemory*` —— control-plane 整个 M0 跑在进程内存里，重启即丢状态。SQL 实现（`Sql*Store` / `DbFeedbackStore`）已全部落地并集成测试过；缺口是 `main.py` 的接线：开 async engine + `build_rls_sessionmaker` 包装 + 把 `Sql*Store` 注入 `create_app`。dogfood 平行运行前必做（否则重启丢数据）。Stream B/C/G 迭代中识别，独立于任一 Stream。
+- [x] **control-plane 状态持久化（SQL store 切换）** — `store_backend` setting（`memory` / `sql`），`create_app` 在 `sql` 时建 async engine + `build_rls_sessionmaker` 包装的 sessionmaker，把全部 10 个 `Sql*Store` / `DbFeedbackStore` 注入，lifespan `finally` dispose engine；`infra/docker-compose.yml` 的 `control-plane` 设 `HELIX_AGENT_STORE_BACKEND=sql`。设计：[STREAM-B-DESIGN](./streams/STREAM-B-DESIGN.md) Mini-ADR B-6。同 PR 补齐 `SqlAgentSpecStore` + 3 个 auth SQL store 此前缺失的集成测试。已知项：`/v1/quota/*` mTLS 跨租户路径在 RLS `FORCE` 下的写入待 Stream C 深化时处理（M0 进程内单体不走该 HTTP 路径）。
 
 ---
 

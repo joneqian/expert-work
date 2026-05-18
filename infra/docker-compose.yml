@@ -275,6 +275,9 @@ services:
     container_name: helix-control-plane
     environment:
       HELIX_AGENT_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@pgbouncer:6432/${HELIX_DB_NAME:-helix_agent_dev}
+      # ADR B-6: durable Postgres stores. The ``migrate`` one-shot
+      # service runs the Alembic migrations first (depends_on below).
+      HELIX_AGENT_STORE_BACKEND: sql
       HELIX_AGENT_QUOTA_REDIS_URL: redis://redis:6379/0
       HELIX_AGENT_SANDBOX_SUPERVISOR_URL: http://sandbox-supervisor:8000
       # Trace export (A.8) — reached only when the observability profile

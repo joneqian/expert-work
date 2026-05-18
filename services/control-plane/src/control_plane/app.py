@@ -23,9 +23,11 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 
 from fastapi import FastAPI
 from langgraph.checkpoint.memory import InMemorySaver
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from control_plane.api import (
     build_agents_router,
@@ -87,7 +89,12 @@ from control_plane.tenancy import TenantConfigService
 from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
 from helix_agent.common.observability import init_logging, init_tracing
-from helix_agent.persistence.agent_spec import AgentSpecStore, InMemoryAgentSpecStore
+from helix_agent.persistence.agent_spec import (
+    AgentSpecStore,
+    InMemoryAgentSpecStore,
+    SqlAgentSpecStore,
+)
+from helix_agent.persistence.audit_log import AuditLogStore, SqlAuditLogStore
 from helix_agent.persistence.auth import (
     ApiKeyStore,
     InMemoryApiKeyStore,
@@ -95,19 +102,39 @@ from helix_agent.persistence.auth import (
     InMemoryServiceAccountStore,
     RoleBindingStore,
     ServiceAccountStore,
+    SqlApiKeyStore,
+    SqlRoleBindingStore,
+    SqlServiceAccountStore,
 )
-from helix_agent.persistence.feedback_store import FeedbackStore, InMemoryFeedbackStore
+from helix_agent.persistence.database import (
+    DatabaseConfig,
+    create_async_engine_from_config,
+    create_async_session_factory,
+)
+from helix_agent.persistence.feedback_store import (
+    DbFeedbackStore,
+    FeedbackStore,
+    InMemoryFeedbackStore,
+)
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore,
     InMemoryTokenReservationStore,
+    SqlTenantQuotaStore,
+    SqlTokenReservationStore,
     TenantQuotaStore,
     TokenReservationStore,
 )
+from helix_agent.persistence.rls import build_rls_sessionmaker
 from helix_agent.persistence.tenant_config import (
     InMemoryTenantConfigStore,
+    SqlTenantConfigStore,
     TenantConfigStore,
 )
-from helix_agent.persistence.thread_meta import InMemoryThreadMetaStore, ThreadMetaStore
+from helix_agent.persistence.thread_meta import (
+    InMemoryThreadMetaStore,
+    SqlThreadMetaStore,
+    ThreadMetaStore,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.secret_store import make_secret_store
@@ -157,14 +184,27 @@ def create_app(
         Keycloak; production wiring builds one from ``settings`` (C.1).
     """
     resolved_settings = settings or Settings()
+    # ADR B-6: in ``sql`` mode every store is Postgres-backed off one
+    # RLS-wrapped sessionmaker; the engine is disposed in ``lifespan``.
+    # Injected repos still win, so unit tests keep their in-memory
+    # stores untouched.
+    sql_stores = (
+        _build_sql_stores(resolved_settings) if resolved_settings.store_backend == "sql" else None
+    )
     resolved_lifecycle = lifecycle or Lifecycle()
     resolved_limiter = rate_limiter or _build_default_gateway_limiter(resolved_settings)
     resolved_tenant_limiter = tenant_rate_limiter or _build_default_tenant_limiter(
         resolved_settings
     )
-    resolved_repo = agent_spec_repo or InMemoryAgentSpecStore()
-    resolved_threads = thread_meta_repo or InMemoryThreadMetaStore()
-    resolved_feedback = feedback_repo or InMemoryFeedbackStore()
+    resolved_repo = agent_spec_repo or (
+        sql_stores.agent_spec if sql_stores else InMemoryAgentSpecStore()
+    )
+    resolved_threads = thread_meta_repo or (
+        sql_stores.thread_meta if sql_stores else InMemoryThreadMetaStore()
+    )
+    resolved_feedback = feedback_repo or (
+        sql_stores.feedback if sql_stores else InMemoryFeedbackStore()
+    )
     # In-process agent runtime (RunManager + StreamBridge + manifest→agent
     # build path). Default wires a local-dev SecretStore; tests inject a
     # runtime whose builder returns a fake-LLM agent.
@@ -176,23 +216,36 @@ def create_app(
     # tenant_config without forcing it to exist yet (D.2 cycle break).
     pii_resolver = TenantConfigPiiResolver()
     resolved_audit = audit_logger or build_default_audit_logger(
+        store=sql_stores.audit_log if sql_stores else None,
         pii_fields_resolver=pii_resolver,
     )
     resolved_loader = manifest_loader or ManifestLoader()
     resolved_verifier = jwt_verifier or _build_default_jwt_verifier(resolved_settings)
     resolved_mtls = mtls_verifier or _build_default_mtls_verifier(resolved_settings)
-    resolved_service_accounts = service_account_repo or InMemoryServiceAccountStore()
-    resolved_api_keys = api_key_repo or InMemoryApiKeyStore()
-    resolved_role_bindings = role_binding_repo or InMemoryRoleBindingStore()
+    resolved_service_accounts = service_account_repo or (
+        sql_stores.service_account if sql_stores else InMemoryServiceAccountStore()
+    )
+    resolved_api_keys = api_key_repo or (
+        sql_stores.api_key if sql_stores else InMemoryApiKeyStore()
+    )
+    resolved_role_bindings = role_binding_repo or (
+        sql_stores.role_binding if sql_stores else InMemoryRoleBindingStore()
+    )
     resolved_api_key_verifier = api_key_verifier or ApiKeyVerifier.from_store(resolved_api_keys)
-    resolved_tenant_quotas = tenant_quota_repo or InMemoryTenantQuotaStore()
-    resolved_reservations = token_reservation_repo or InMemoryTokenReservationStore()
+    resolved_tenant_quotas = tenant_quota_repo or (
+        sql_stores.tenant_quota if sql_stores else InMemoryTenantQuotaStore()
+    )
+    resolved_reservations = token_reservation_repo or (
+        sql_stores.token_reservation if sql_stores else InMemoryTokenReservationStore()
+    )
     resolved_quota = quota_service or _build_default_quota_service(
         settings=resolved_settings,
         quota_store=resolved_tenant_quotas,
         reservation_store=resolved_reservations,
     )
-    resolved_tenant_config_repo = tenant_config_repo or InMemoryTenantConfigStore()
+    resolved_tenant_config_repo = tenant_config_repo or (
+        sql_stores.tenant_config if sql_stores else InMemoryTenantConfigStore()
+    )
     resolved_tenant_config_service = tenant_config_service or TenantConfigService(
         store=resolved_tenant_config_repo,
         audit_logger=resolved_audit,
@@ -280,6 +333,10 @@ def create_app(
                 if reaper is not None:
                     await reaper.stop()
                 await resolved_lifecycle.graceful_shutdown()
+                # ADR B-6: release the pool after the drain so in-flight
+                # requests keep their connections until they complete.
+                if sql_stores is not None:
+                    await sql_stores.engine.dispose()
                 logger.info("control_plane.lifespan.stopped")
 
     app = FastAPI(
@@ -289,6 +346,8 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.lifecycle = resolved_lifecycle
+    # ``AsyncEngine`` in ``sql`` mode, ``None`` in ``memory`` mode (ADR B-6).
+    app.state.db_engine = sql_stores.engine if sql_stores else None
     app.state.health_provider = health_provider
     app.state.rate_limiter = resolved_limiter
     app.state.tenant_rate_limiter = resolved_tenant_limiter
@@ -376,6 +435,57 @@ def create_app(
     app.include_router(build_tenant_config_router())
 
     return app
+
+
+@dataclass(frozen=True)
+class _SqlStores:
+    """Postgres-backed store bundle built when ``store_backend == "sql"``.
+
+    Every store shares the one ``engine`` + RLS-wrapped sessionmaker;
+    ``engine`` is disposed in the app's ``lifespan`` (ADR B-6).
+    """
+
+    engine: AsyncEngine
+    agent_spec: AgentSpecStore
+    thread_meta: ThreadMetaStore
+    service_account: ServiceAccountStore
+    api_key: ApiKeyStore
+    role_binding: RoleBindingStore
+    tenant_quota: TenantQuotaStore
+    token_reservation: TokenReservationStore
+    tenant_config: TenantConfigStore
+    feedback: FeedbackStore
+    audit_log: AuditLogStore
+
+
+def _build_sql_stores(settings: Settings) -> _SqlStores:
+    """Build the Postgres-backed store bundle from ``settings.db_*`` (ADR B-6).
+
+    One engine, one ``build_rls_sessionmaker``-wrapped sessionmaker,
+    shared by every store. ``create_async_engine`` is lazy — no
+    connection opens here; the engine is disposed in ``lifespan``.
+    """
+    engine = create_async_engine_from_config(
+        DatabaseConfig(
+            dsn=settings.db_dsn,
+            pgbouncer_mode=settings.db_pgbouncer_mode,
+            echo_sql=settings.db_echo,
+        )
+    )
+    session_factory = build_rls_sessionmaker(create_async_session_factory(engine))
+    return _SqlStores(
+        engine=engine,
+        agent_spec=SqlAgentSpecStore(session_factory),
+        thread_meta=SqlThreadMetaStore(session_factory),
+        service_account=SqlServiceAccountStore(session_factory),
+        api_key=SqlApiKeyStore(session_factory),
+        role_binding=SqlRoleBindingStore(session_factory),
+        tenant_quota=SqlTenantQuotaStore(session_factory),
+        token_reservation=SqlTokenReservationStore(session_factory),
+        tenant_config=SqlTenantConfigStore(session_factory),
+        feedback=DbFeedbackStore(session_factory),
+        audit_log=SqlAuditLogStore(session_factory),
+    )
 
 
 def _build_default_jwt_verifier(settings: Settings) -> JWTVerifier:
