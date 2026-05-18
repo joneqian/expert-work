@@ -44,21 +44,10 @@
 ### 3.1 Postgres DDL
 
 ```sql
--- 用户（本地账号 + OIDC 联邦）
-CREATE TABLE app_user (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  username      TEXT NOT NULL UNIQUE,
-  email         TEXT UNIQUE,
-  password_hash TEXT,                       -- bcrypt; OIDC 用户为 NULL
-  oidc_issuer   TEXT,                       -- 联邦时记录 iss
-  oidc_subject  TEXT,                       -- iss + sub 唯一
-  default_tenant TEXT NOT NULL,
-  is_active     BOOLEAN NOT NULL DEFAULT TRUE,
-  failed_logins INT NOT NULL DEFAULT 0,
-  locked_until  TIMESTAMPTZ,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (oidc_issuer, oidc_subject)
-);
+-- 用户身份：见 tenant_user(Stream J.14 —— per-user 注册表,从认证后的
+-- Principal 解析 (tenant_id, subject_type, subject_id))。原计划的
+-- app_user 占位表从未实现,已于 migration 0016 删除;helix 作为 IdP
+-- 联邦平台不自持本地密码库。
 
 -- 服务账号（CLI / CI 用）
 CREATE TABLE service_account (
@@ -232,7 +221,7 @@ RESET ROLE;
 - 协议：OIDC Authorization Code + PKCE
 - 支持 issuer：Google / Okta / Azure AD / Keycloak（自托管）
 - group → role 映射表（`oidc_group_mapping`）：`{issuer, group}` → `{tenant, role}`
-- 首次登录自动创建 `app_user`（password_hash=NULL）
+- 首次出现即自动登记 `tenant_user`（Stream J.14；身份由 OIDC 提供，无本地 password_hash）
 
 ### 5.4 API Key 格式
 

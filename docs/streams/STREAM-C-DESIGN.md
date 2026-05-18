@@ -212,6 +212,8 @@ CREATE TABLE jwt_blacklist (jti TEXT PK, ...);
 
 注：`jwt_blacklist` **不带** `tenant_id` 列（jti 全局唯一），不参与 RLS。同样 `app_user.default_tenant` 是 TEXT 而非租户表的"属于"，也豁免 RLS。落 RLS 的是 `service_account / api_key / role_binding` 三张。
 
+> **后续更新（Stream J.14）**：`app_user` 占位表（含本设计里的 `persistence/auth/app_user.py`）从未实现 —— per-user 身份由 J.14 的 `tenant_user` 注册表承担，`app_user` 表已于 migration 0016 删除。本节为 C 阶段设计原貌，保留作历史记录。
+
 #### 迁移 0006 — Quota tables（subsystem 16 § 3.1 全套）
 
 `tenant_quota` / `token_budget_ledger` / `token_reservation` 三张，全部加 RLS。
