@@ -54,19 +54,34 @@ from sqlalchemy.orm import Session, SessionTransaction
 
 __all__ = [
     "RLS_GUC_NAME",
+    "RLS_USER_GUC_NAME",
     "build_rls_sessionmaker",
     "bypass_rls_var",
     "current_tenant_id_var",
+    "current_user_id_var",
 ]
 
 
 RLS_GUC_NAME: Final[str] = "app.tenant_id"
+
+#: Stream J.3 — the user-level GUC. Per-user data tables (memory_item,
+#: and later workspace / artifact) carry a ``user_id`` predicate on top
+#: of tenant isolation (Mini-ADR J-1, defence in depth).
+RLS_USER_GUC_NAME: Final[str] = "app.user_id"
 
 # Set by the per-request middleware; cleared on response. Default
 # ``None`` means "no tenant scoped", which makes every read return
 # zero rows under RLS — that's the desired fail-closed behaviour.
 current_tenant_id_var: ContextVar[UUID | None] = ContextVar(
     "helix.rls.tenant_id",
+    default=None,
+)
+
+# Stream J.3 — set alongside the tenant var for per-user data access.
+# ``None`` → ``app.user_id`` is not emitted; a query against a
+# user-scoped table (memory_item) then sees zero rows (fail-closed).
+current_user_id_var: ContextVar[UUID | None] = ContextVar(
+    "helix.rls.user_id",
     default=None,
 )
 
@@ -86,11 +101,11 @@ bypass_rls_var: ContextVar[bool] = ContextVar(
 _LISTENER_INSTALLED: list[bool] = []
 
 
-def _emit_set_local(connection: Connection, tenant_id: UUID) -> None:
-    """Run ``SELECT set_config('app.tenant_id', ..., true)`` on ``connection``."""
+def _emit_set_config(connection: Connection, name: str, value: str) -> None:
+    """Run ``SELECT set_config(name, value, true)`` on ``connection``."""
     connection.execute(
         text("SELECT set_config(:name, :value, true)"),
-        {"name": RLS_GUC_NAME, "value": str(tenant_id)},
+        {"name": name, "value": value},
     )
 
 
@@ -99,13 +114,20 @@ def _rls_after_begin(
     _transaction: SessionTransaction,
     connection: Connection,
 ) -> None:
-    """``after_begin`` listener — emits ``SET LOCAL`` from the ContextVar."""
+    """``after_begin`` listener — emits ``SET LOCAL`` from the ContextVars.
+
+    Emits ``app.tenant_id`` and — for per-user data tables (Stream J.3)
+    — ``app.user_id``. An unset var means the GUC is not emitted, so
+    RLS on that axis fails closed (``NULLIF→NULL`` → row denied).
+    """
     if bypass_rls_var.get():
         return
     tenant_id = current_tenant_id_var.get()
-    if tenant_id is None:
-        return
-    _emit_set_local(connection, tenant_id)
+    if tenant_id is not None:
+        _emit_set_config(connection, RLS_GUC_NAME, str(tenant_id))
+    user_id = current_user_id_var.get()
+    if user_id is not None:
+        _emit_set_config(connection, RLS_USER_GUC_NAME, str(user_id))
 
 
 def _install_listener_once() -> None:

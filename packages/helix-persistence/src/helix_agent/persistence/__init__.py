@@ -20,10 +20,14 @@ from helix_agent.persistence.dr import (
     InMemoryBackupRecordStore as InMemoryBackupRecordStore,
 )
 from helix_agent.persistence.dr import SqlBackupRecordStore as SqlBackupRecordStore
+from helix_agent.persistence.memory import InMemoryMemoryStore as InMemoryMemoryStore
+from helix_agent.persistence.memory import MemoryStore as MemoryStore
+from helix_agent.persistence.memory import SqlMemoryStore as SqlMemoryStore
 from helix_agent.persistence.models import AuditLogRow as AuditLogRow
 from helix_agent.persistence.models import BackupRecordRow as BackupRecordRow
 from helix_agent.persistence.models import DrDrillRow as DrDrillRow
 from helix_agent.persistence.models import EventLogRow as EventLogRow
+from helix_agent.persistence.models import MemoryItemRow as MemoryItemRow
 from helix_agent.persistence.models import TenantUserRow as TenantUserRow
 from helix_agent.persistence.models import ThreadMetaRow as ThreadMetaRow
 from helix_agent.persistence.quota import (
@@ -45,9 +49,11 @@ from helix_agent.persistence.quota import (
     TokenReservationStore as TokenReservationStore,
 )
 from helix_agent.persistence.rls import RLS_GUC_NAME as RLS_GUC_NAME
+from helix_agent.persistence.rls import RLS_USER_GUC_NAME as RLS_USER_GUC_NAME
 from helix_agent.persistence.rls import build_rls_sessionmaker as build_rls_sessionmaker
 from helix_agent.persistence.rls import bypass_rls_var as bypass_rls_var
 from helix_agent.persistence.rls import current_tenant_id_var as current_tenant_id_var
+from helix_agent.persistence.rls import current_user_id_var as current_user_id_var
 from helix_agent.persistence.tenant_config import (
     InMemoryTenantConfigStore as InMemoryTenantConfigStore,
 )
@@ -74,6 +80,7 @@ from helix_agent.persistence.thread_meta import ThreadMetaStore as ThreadMetaSto
 
 __all__ = [
     "RLS_GUC_NAME",
+    "RLS_USER_GUC_NAME",
     "AuditLogRow",
     "AuditLogStore",
     "BackupRecordRow",
@@ -84,13 +91,17 @@ __all__ = [
     "EventLogRow",
     "InMemoryAuditLogStore",
     "InMemoryBackupRecordStore",
+    "InMemoryMemoryStore",
     "InMemoryTenantConfigStore",
     "InMemoryTenantQuotaStore",
     "InMemoryTenantUserStore",
     "InMemoryThreadMetaStore",
     "InMemoryTokenReservationStore",
+    "MemoryItemRow",
+    "MemoryStore",
     "SqlAuditLogStore",
     "SqlBackupRecordStore",
+    "SqlMemoryStore",
     "SqlTenantConfigStore",
     "SqlTenantQuotaStore",
     "SqlTenantUserStore",
@@ -108,4 +119,5 @@ __all__ = [
     "create_async_engine_from_config",
     "create_async_session_factory",
     "current_tenant_id_var",
+    "current_user_id_var",
 ]

@@ -43,12 +43,16 @@ def postgres_container() -> Iterator[PostgresContainer]:
     Heavy — adds ~10s session startup. First consumer is Stream A.1
     (``packages/helix-persistence/tests/test_initial_schema.py``).
 
+    Uses the ``pgvector/pgvector`` image (Postgres 16 + the ``vector``
+    extension, Stream J.3) — a superset of stock Postgres, so every
+    pre-J.3 migration / test is unaffected.
+
     Requires Docker daemon available; tests using this fixture should
     be marked ``@pytest.mark.integration``.
     """
     from testcontainers.postgres import PostgresContainer
 
-    container = PostgresContainer("postgres:16-alpine")
+    container = PostgresContainer("pgvector/pgvector:pg16")
     with container:
         yield container
 

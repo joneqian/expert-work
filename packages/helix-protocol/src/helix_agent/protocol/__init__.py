@@ -50,6 +50,7 @@ from helix_agent.protocol.dr import (
     DrillType,
 )
 from helix_agent.protocol.event import EventRecord, EventType
+from helix_agent.protocol.memory_item import MemoryItem
 from helix_agent.protocol.plan import Plan, PlanStep
 from helix_agent.protocol.quota import (
     CheckRequest,
@@ -118,6 +119,7 @@ __all__ = [
     "HTTPToolSpec",
     "JWTClaims",
     "MCPToolSpec",
+    "MemoryItem",
     "MemorySpec",
     "ModelSpec",
     "MountSpec",

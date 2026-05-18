@@ -33,14 +33,18 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
+from helix_agent.persistence.embedding import EMBEDDING_DIM
 from helix_agent.persistence.feedback_store import DbFeedbackStore, FeedbackRecord
+from helix_agent.persistence.memory import SqlMemoryStore
 from helix_agent.persistence.rls import (
     build_rls_sessionmaker,
     bypass_rls_var,
     current_tenant_id_var,
+    current_user_id_var,
 )
 from helix_agent.persistence.tenant_user import SqlTenantUserStore
 from helix_agent.persistence.thread_meta import SqlThreadMetaStore
+from helix_agent.protocol import MemoryItem
 
 pytestmark = pytest.mark.integration
 
@@ -135,11 +139,13 @@ def rls_store(
 def reset_rls_context() -> Iterator[None]:
     t1 = current_tenant_id_var.set(None)
     t2 = bypass_rls_var.set(False)
+    t3 = current_user_id_var.set(None)
     try:
         yield
     finally:
         current_tenant_id_var.reset(t1)
         bypass_rls_var.reset(t2)
+        current_user_id_var.reset(t3)
 
 
 async def _seed(store: SqlThreadMetaStore, tenant_id: UUID) -> UUID:
@@ -341,5 +347,70 @@ async def test_tenant_user_tenants_cannot_see_each_other(
         # ``get`` for the other tenant's user resolves to nothing.
         assert await store.get(user_b.id, tenant_id=tenant_a) is None
         assert await store.get(user_a.id, tenant_id=tenant_a) is not None
+    finally:
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# memory_item table — Stream J.3 (tenant + user RLS)
+# ---------------------------------------------------------------------------
+
+
+def _vec(*head: float) -> tuple[float, ...]:
+    """An ``EMBEDDING_DIM``-wide vector with ``head`` as its leading values."""
+    return tuple(head) + (0.0,) * (EMBEDDING_DIM - len(head))
+
+
+@pytest.fixture
+def memory_rls_store(
+    postgres_container: PostgresContainer,
+) -> Iterator[tuple[SqlMemoryStore, async_sessionmaker[AsyncSession], AsyncEngine]]:
+    """A :class:`SqlMemoryStore` on the unprivileged role — RLS enforced."""
+    cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
+    command.upgrade(cfg, "head")
+    _provision_app_role(_sync_dsn(postgres_container))
+    app_async_dsn = _rewrite_credentials(_async_dsn(postgres_container), APP_ROLE, APP_PASSWORD)
+    engine = create_async_engine_from_config(DatabaseConfig(dsn=app_async_dsn))
+    session_factory = build_rls_sessionmaker(create_async_session_factory(engine))
+    yield SqlMemoryStore(session_factory), session_factory, engine
+
+
+@pytest.mark.asyncio
+async def test_memory_item_isolated_by_tenant_and_user(
+    memory_rls_store: tuple[SqlMemoryStore, async_sessionmaker[AsyncSession], AsyncEngine],
+) -> None:
+    """memory_item RLS enforces both axes — a raw ``count(*)`` (no WHERE)
+    is invisible to a different user even within the same tenant."""
+    store, session_factory, engine = memory_rls_store
+    try:
+        tenant_a, user_a, user_b = uuid4(), uuid4(), uuid4()
+
+        current_tenant_id_var.set(tenant_a)
+        current_user_id_var.set(user_a)
+        await store.write(
+            [
+                MemoryItem(
+                    id=uuid4(),
+                    tenant_id=tenant_a,
+                    user_id=user_a,
+                    kind="fact",
+                    content="secret",
+                    embedding=_vec(1.0),
+                )
+            ]
+        )
+
+        # Same tenant, different user → the row is invisible.
+        current_user_id_var.set(user_b)
+        async with session_factory() as session:
+            count_other = await session.scalar(text("SELECT count(*) FROM memory_item"))
+        assert count_other == 0
+
+        # The owning user sees it.
+        current_user_id_var.set(user_a)
+        async with session_factory() as session:
+            count_owner = await session.scalar(text("SELECT count(*) FROM memory_item"))
+        assert count_owner == 1
     finally:
         await engine.dispose()
