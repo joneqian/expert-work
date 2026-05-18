@@ -1,0 +1,74 @@
+{
+  "uid": "helix-sandbox",
+  "title": "Helix — Sandbox",
+  "tags": ["helix", "g.7"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Scaffold dashboard (Stream G.7). The sandbox metrics below are **not emitted in M0** — panels read \"No data\" until sandbox-supervisor instrumentation lands. Metric names follow subsystems/20 § 5.2."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Cold-start latency P95",
+      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 3 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(helix_sandbox_cold_start_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Sandbox pool size (by state)",
+      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 3 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+          "expr": "sum by (state) (helix_sandbox_pool_size)",
+          "legendFormat": "{{state}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Acquire latency P95 (by result)",
+      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 11 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, result) (rate(helix_sandbox_acquire_latency_seconds_bucket[5m])))",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    }
+  ]
+}

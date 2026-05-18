@@ -1,0 +1,74 @@
+{
+  "uid": "helix-orchestrator",
+  "title": "Helix — Orchestrator",
+  "tags": ["helix", "g.7"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Scaffold dashboard (Stream G.7). The orchestrator metrics below are **not emitted in M0** — panels read \"No data\" until orchestrator instrumentation lands. Metric names follow subsystems/20 § 5.2."
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "LLM tokens / s (by direction)",
+      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 3 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+          "expr": "sum by (direction) (rate(helix_llm_tokens_total[5m]))",
+          "legendFormat": "{{direction}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Session TTFT P95",
+      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 3 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(helix_session_ttft_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Tool-call duration P95 (by tool_type)",
+      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 11 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+          "expr": "histogram_quantile(0.95, sum by (le, tool_type) (rate(helix_tool_call_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{tool_type}}"
+        }
+      ]
+    }
+  ]
+}
