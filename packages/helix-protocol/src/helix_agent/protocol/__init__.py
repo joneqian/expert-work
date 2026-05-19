@@ -24,10 +24,12 @@ from helix_agent.protocol.agent_spec import (
     RouteRule,
     RoutingSpec,
     SandboxSpec,
+    SubAgentSpec,
     SystemPromptSpec,
     TenantConfig,
     ToolSpecEntry,
     WorkflowSpec,
+    parse_agent_ref,
 )
 from helix_agent.protocol.artifact import Artifact, ArtifactKind, ArtifactVersion
 from helix_agent.protocol.audit import (
@@ -150,6 +152,7 @@ __all__ = [
     "RoutingSpec",
     "SandboxSpec",
     "ServiceAccount",
+    "SubAgentSpec",
     "SubjectType",
     "SystemPromptSpec",
     "TenantBudgetRecord",
@@ -166,4 +169,5 @@ __all__ = [
     "ToolSpecEntry",
     "UserWorkspace",
     "WorkflowSpec",
+    "parse_agent_ref",
 ]

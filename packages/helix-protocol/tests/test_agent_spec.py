@@ -14,6 +14,8 @@ from helix_agent.protocol import (
     HTTPToolSpec,
     MCPToolSpec,
     ModelSpec,
+    SubAgentSpec,
+    parse_agent_ref,
 )
 
 _MINIMAL: dict[str, Any] = {
@@ -330,3 +332,108 @@ def test_azure_model_accepts_deployment_fields() -> None:
     )
     assert model.azure_deployment == "gpt-4o-deploy"
     assert model.azure_api_version == "2024-10-21"
+
+
+# ---------------------------------------------------------------------------
+# subagents — agent-as-tool delegation (Stream J.4 / Mini-ADR J-12)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_agent_ref_splits_name_and_version() -> None:
+    assert parse_agent_ref("code-reviewer@1.0.0") == ("code-reviewer", "1.0.0")
+
+
+@pytest.mark.parametrize(
+    "bad_ref",
+    ["noversion", "name@", "@version", "a@b@c", ""],
+)
+def test_parse_agent_ref_rejects_malformed(bad_ref: str) -> None:
+    with pytest.raises(ValueError, match="agent_ref must be"):
+        parse_agent_ref(bad_ref)
+
+
+def test_subagent_spec_validates() -> None:
+    sub = SubAgentSpec.model_validate(
+        {
+            "name": "research_helper",
+            "agent_ref": "researcher@2.1.0",
+            "description": "delegates deep research subtasks",
+        }
+    )
+    assert sub.name == "research_helper"
+    assert parse_agent_ref(sub.agent_ref) == ("researcher", "2.1.0")
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    ["ResearchHelper", "research-helper", "1research", "_helper", "research helper"],
+)
+def test_subagent_name_must_be_snake_case(bad_name: str) -> None:
+    with pytest.raises(ValidationError, match="snake_case"):
+        SubAgentSpec.model_validate(
+            {"name": bad_name, "agent_ref": "researcher@1.0.0", "description": "x"}
+        )
+
+
+def test_subagent_rejects_malformed_agent_ref() -> None:
+    with pytest.raises(ValidationError, match="agent_ref must be"):
+        SubAgentSpec.model_validate(
+            {"name": "helper", "agent_ref": "noversion", "description": "x"}
+        )
+
+
+def test_subagent_rejects_extra_field() -> None:
+    with pytest.raises(ValidationError):
+        SubAgentSpec.model_validate(
+            {
+                "name": "helper",
+                "agent_ref": "researcher@1.0.0",
+                "description": "x",
+                "token_budget_fraction": 0.3,
+            }
+        )
+
+
+def test_subagents_default_is_empty_list() -> None:
+    spec = AgentSpec.model_validate(_doc())
+    assert spec.spec.subagents == []
+
+
+def test_subagents_block_validates_in_manifest() -> None:
+    doc = _doc()
+    doc["spec"]["subagents"] = [
+        {"name": "researcher", "agent_ref": "deep-researcher@1.0.0", "description": "research"},
+        {"name": "writer", "agent_ref": "doc-writer@2.0.0", "description": "drafting"},
+    ]
+    spec = AgentSpec.model_validate(doc)
+    assert [s.name for s in spec.spec.subagents] == ["researcher", "writer"]
+
+
+def test_subagent_self_delegation_rejected() -> None:
+    """A subagent whose agent_ref points back at this agent is refused."""
+    doc = _doc()  # metadata.name == "code-reviewer"
+    doc["spec"]["subagents"] = [
+        {"name": "myself", "agent_ref": "code-reviewer@2.0.0", "description": "loop"},
+    ]
+    with pytest.raises(ValidationError, match="self-delegation"):
+        AgentSpec.model_validate(doc)
+
+
+def test_duplicate_subagent_tool_name_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["subagents"] = [
+        {"name": "helper", "agent_ref": "agent-a@1.0.0", "description": "a"},
+        {"name": "helper", "agent_ref": "agent-b@1.0.0", "description": "b"},
+    ]
+    with pytest.raises(ValidationError, match="duplicate subagent"):
+        AgentSpec.model_validate(doc)
+
+
+def test_subagent_name_colliding_with_builtin_tool_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["tools"] = [{"type": "builtin", "name": "web_search"}]
+    doc["spec"]["subagents"] = [
+        {"name": "web_search", "agent_ref": "searcher@1.0.0", "description": "x"},
+    ]
+    with pytest.raises(ValidationError, match="collides with a declared builtin"):
+        AgentSpec.model_validate(doc)

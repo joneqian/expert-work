@@ -22,6 +22,7 @@ force a churn-heavy migration when each owning Stream lands.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -346,12 +347,66 @@ class MCPToolSpec(BaseModel):
 
 
 #: Discriminated union of the M0-supported tool declarations. ``python``
-#: / ``subagent`` are M1-F — declaring them fails manifest validation
-#: here (no matching ``type`` variant).
+#: is M1-F — declaring it fails manifest validation here (no matching
+#: ``type`` variant). Sub-agents are declared in ``spec.subagents``
+#: (Stream J.4), not as a tool entry.
 ToolSpecEntry = Annotated[
     BuiltinToolSpec | HTTPToolSpec | MCPToolSpec,
     Field(discriminator="type"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# subagents — agent-as-tool delegation (STREAM-J-DESIGN J.4 / Mini-ADR J-12)
+# ---------------------------------------------------------------------------
+
+
+#: Snake_case identifier — same shape the parent LLM expects for a tool name.
+_SUBAGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def parse_agent_ref(ref: str) -> tuple[str, str]:
+    """Split a ``name@version`` agent reference into ``(name, version)``.
+
+    Raises :class:`ValueError` when ``ref`` is not exactly one ``name``
+    and one ``version`` separated by a single ``@`` — used both by
+    :class:`SubAgentSpec` validation and the orchestrator's
+    ``SubAgentTool`` when resolving the referenced AgentSpec.
+    """
+    parts = ref.split("@")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        msg = f"agent_ref must be 'name@version', got {ref!r}."
+        raise ValueError(msg)
+    return parts[0], parts[1]
+
+
+class SubAgentSpec(BaseModel):
+    """One entry in ``spec.subagents`` — Stream J.4.
+
+    Declares a deployed AgentSpec the parent agent may delegate to. The
+    orchestrator wraps each entry into a named ``SubAgentTool`` so the
+    parent's LLM sees delegation as an ordinary tool call (a named tool
+    gives the LLM a clearer selection signal than a single generic
+    ``task`` tool — Mini-ADR J-12).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Tool name handed to the parent LLM — snake_case; the identifier
+    #: the parent calls to delegate a subtask.
+    name: str = Field(min_length=1, max_length=64)
+    #: ``name@version`` reference to a deployed AgentSpec in the same tenant.
+    agent_ref: str = Field(min_length=3)
+    #: Tool description shown to the parent LLM for delegation decisions.
+    description: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_fields(self) -> SubAgentSpec:
+        if not _SUBAGENT_NAME_RE.match(self.name):
+            msg = f"subagent name must be snake_case ([a-z][a-z0-9_]*), got {self.name!r}."
+            raise ValueError(msg)
+        parse_agent_ref(self.agent_ref)  # raises ValueError on bad format
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +428,10 @@ class AgentSpecBody(BaseModel):
     system_prompt: SystemPromptSpec
     dynamic_context: DynamicContextSpec = Field(default_factory=DynamicContextSpec)
     tools: list[ToolSpecEntry] = Field(default_factory=list)
+    subagents: list[SubAgentSpec] = Field(
+        default_factory=list,
+        description="Stream J.4 — deployed agents this agent may delegate to (agent-as-tool)",
+    )
     sandbox: SandboxSpec
     memory: MemorySpec | None = None
     reflection: ReflectionSpec | None = Field(
@@ -422,6 +481,36 @@ class AgentSpec(BaseModel):
                 raise ValueError(msg)
             visited.add(ident)
             stack.extend(current.fallback)
+        return self
+
+    @model_validator(mode="after")
+    def _check_subagents(self) -> AgentSpec:
+        """J.4 — validate the ``spec.subagents`` block.
+
+        Rejects three manifest-local errors: (1) self-delegation — a
+        subagent whose ``agent_ref`` points back at this agent;
+        (2) two subagents sharing a tool name; (3) a subagent tool name
+        colliding with a declared ``builtin`` tool. Cross-manifest cycles
+        (A→B→A) are not caught here — the orchestrator bounds them
+        structurally via the build-time depth limit (Mini-ADR J-12).
+        """
+        builtin_names = {t.name for t in self.spec.tools if isinstance(t, BuiltinToolSpec)}
+        seen: set[str] = set()
+        for sub in self.spec.subagents:
+            if sub.name in seen:
+                msg = f"duplicate subagent tool name {sub.name!r}."
+                raise ValueError(msg)
+            seen.add(sub.name)
+            if sub.name in builtin_names:
+                msg = f"subagent tool name {sub.name!r} collides with a declared builtin tool."
+                raise ValueError(msg)
+            ref_name, _ = parse_agent_ref(sub.agent_ref)
+            if ref_name == self.metadata.name:
+                msg = (
+                    f"subagent {sub.name!r} references the agent itself "
+                    f"({self.metadata.name!r}) — self-delegation is not allowed."
+                )
+                raise ValueError(msg)
         return self
 
 
