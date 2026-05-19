@@ -29,6 +29,7 @@ from helix_agent.protocol.agent_spec import (
     ToolSpecEntry,
     WorkflowSpec,
 )
+from helix_agent.protocol.artifact import Artifact, ArtifactKind, ArtifactVersion
 from helix_agent.protocol.audit import (
     AuditAction,
     AuditEntry,
@@ -96,6 +97,9 @@ __all__ = [
     "ApiKey",
     "ApiKeyCreated",
     "ApiKeyScope",
+    "Artifact",
+    "ArtifactKind",
+    "ArtifactVersion",
     "AuditAction",
     "AuditEntry",
     "AuditPage",

@@ -2,6 +2,7 @@
 
 from helix_agent.persistence.models.agent_spec import AgentSpecRow
 from helix_agent.persistence.models.api_key import ApiKeyRow
+from helix_agent.persistence.models.artifact import ArtifactRow, ArtifactVersionRow
 from helix_agent.persistence.models.audit_log import AuditLogRow
 from helix_agent.persistence.models.backup_record import BackupRecordRow
 from helix_agent.persistence.models.credential_proxy import (
@@ -26,6 +27,8 @@ from helix_agent.persistence.models.user_workspace import UserWorkspaceRow
 __all__ = [
     "AgentSpecRow",
     "ApiKeyRow",
+    "ArtifactRow",
+    "ArtifactVersionRow",
     "AuditLogRow",
     "BackupRecordRow",
     "CredentialProxyAuditRow",

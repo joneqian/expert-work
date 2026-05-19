@@ -33,6 +33,7 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
+from helix_agent.persistence.artifact import SqlArtifactStore
 from helix_agent.persistence.embedding import EMBEDDING_DIM
 from helix_agent.persistence.feedback_store import DbFeedbackStore, FeedbackRecord
 from helix_agent.persistence.memory import SqlMemoryStore
@@ -412,5 +413,65 @@ async def test_memory_item_isolated_by_tenant_and_user(
         async with session_factory() as session:
             count_owner = await session.scalar(text("SELECT count(*) FROM memory_item"))
         assert count_owner == 1
+    finally:
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# artifact / artifact_version tables — Stream J.9 (tenant + user RLS)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def artifact_rls_store(
+    postgres_container: PostgresContainer,
+) -> Iterator[tuple[SqlArtifactStore, async_sessionmaker[AsyncSession], AsyncEngine]]:
+    """A :class:`SqlArtifactStore` on the unprivileged role — RLS enforced."""
+    cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
+    command.upgrade(cfg, "head")
+    _provision_app_role(_sync_dsn(postgres_container))
+    app_async_dsn = _rewrite_credentials(_async_dsn(postgres_container), APP_ROLE, APP_PASSWORD)
+    engine = create_async_engine_from_config(DatabaseConfig(dsn=app_async_dsn))
+    session_factory = build_rls_sessionmaker(create_async_session_factory(engine))
+    yield SqlArtifactStore(session_factory), session_factory, engine
+
+
+@pytest.mark.asyncio
+async def test_artifact_isolated_by_tenant_and_user(
+    artifact_rls_store: tuple[SqlArtifactStore, async_sessionmaker[AsyncSession], AsyncEngine],
+) -> None:
+    """artifact + artifact_version RLS enforce both axes — a raw
+    ``count(*)`` is invisible to a different user within the same tenant."""
+    store, session_factory, engine = artifact_rls_store
+    try:
+        tenant_a, user_a, user_b = uuid4(), uuid4(), uuid4()
+
+        current_tenant_id_var.set(tenant_a)
+        current_user_id_var.set(user_a)
+        await store.save_version(
+            tenant_id=tenant_a,
+            user_id=user_a,
+            name="report.md",
+            kind="document",
+            path_in_workspace="report.md",
+            created_in_thread="t-1",
+        )
+
+        # Same tenant, different user → both rows are invisible.
+        current_user_id_var.set(user_b)
+        async with session_factory() as session:
+            artifacts_other = await session.scalar(text("SELECT count(*) FROM artifact"))
+            versions_other = await session.scalar(text("SELECT count(*) FROM artifact_version"))
+        assert artifacts_other == 0
+        assert versions_other == 0
+
+        # The owning user sees both.
+        current_user_id_var.set(user_a)
+        async with session_factory() as session:
+            artifacts_owner = await session.scalar(text("SELECT count(*) FROM artifact"))
+            versions_owner = await session.scalar(text("SELECT count(*) FROM artifact_version"))
+        assert artifacts_owner == 1
+        assert versions_owner == 1
     finally:
         await engine.dispose()

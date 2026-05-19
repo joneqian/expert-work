@@ -2,6 +2,11 @@
 
 # Explicit `as` re-exports signal intentional public API to static analyzers
 # (mypy --strict, CodeQL py/unused-import).
+from helix_agent.persistence.artifact import ArtifactStore as ArtifactStore
+from helix_agent.persistence.artifact import (
+    InMemoryArtifactStore as InMemoryArtifactStore,
+)
+from helix_agent.persistence.artifact import SqlArtifactStore as SqlArtifactStore
 from helix_agent.persistence.audit_log import AuditLogStore as AuditLogStore
 from helix_agent.persistence.audit_log import (
     InMemoryAuditLogStore as InMemoryAuditLogStore,
@@ -23,6 +28,8 @@ from helix_agent.persistence.dr import SqlBackupRecordStore as SqlBackupRecordSt
 from helix_agent.persistence.memory import InMemoryMemoryStore as InMemoryMemoryStore
 from helix_agent.persistence.memory import MemoryStore as MemoryStore
 from helix_agent.persistence.memory import SqlMemoryStore as SqlMemoryStore
+from helix_agent.persistence.models import ArtifactRow as ArtifactRow
+from helix_agent.persistence.models import ArtifactVersionRow as ArtifactVersionRow
 from helix_agent.persistence.models import AuditLogRow as AuditLogRow
 from helix_agent.persistence.models import BackupRecordRow as BackupRecordRow
 from helix_agent.persistence.models import DrDrillRow as DrDrillRow
@@ -94,6 +101,9 @@ from helix_agent.persistence.workspace import (
 __all__ = [
     "RLS_GUC_NAME",
     "RLS_USER_GUC_NAME",
+    "ArtifactRow",
+    "ArtifactStore",
+    "ArtifactVersionRow",
     "AuditLogRow",
     "AuditLogStore",
     "BackupRecordRow",
@@ -102,6 +112,7 @@ __all__ = [
     "DatabaseConfig",
     "DrDrillRow",
     "EventLogRow",
+    "InMemoryArtifactStore",
     "InMemoryAuditLogStore",
     "InMemoryBackupRecordStore",
     "InMemoryMemoryStore",
@@ -113,6 +124,7 @@ __all__ = [
     "InMemoryUserWorkspaceStore",
     "MemoryItemRow",
     "MemoryStore",
+    "SqlArtifactStore",
     "SqlAuditLogStore",
     "SqlBackupRecordStore",
     "SqlMemoryStore",

@@ -1,0 +1,56 @@
+"""Agent artifacts — Stream J.9.
+
+An :class:`Artifact` is a *named file* an agent explicitly produced — a
+document, code, or data file. Its content lives in the user's J.15
+persistent workspace volume; these models carry only the metadata
+(name, kind, version, volume-relative path). Scoped to
+``(tenant_id, user_id)``; re-saving a name appends a new
+:class:`ArtifactVersion`. See ``docs/streams/STREAM-J-DESIGN.md`` § 10.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+#: An artifact's content category — declared by the agent at save time.
+ArtifactKind = Literal["document", "code", "data", "other"]
+
+
+class ArtifactVersion(BaseModel):
+    """One row of ``artifact_version`` — a single saved revision."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    artifact_id: UUID
+    tenant_id: UUID
+    user_id: UUID
+    version: int = Field(ge=1, description="1-based revision number")
+    path_in_workspace: str = Field(
+        description="path of the file inside the user's persistent workspace volume"
+    )
+    size_bytes: int | None = Field(
+        default=None, ge=0, description="filled lazily on first content read"
+    )
+    sha256: str | None = Field(default=None, description="filled lazily on first content read")
+    created_in_thread: str = Field(description="the thread/run that produced this revision")
+    created_at: datetime | None = None
+
+
+class Artifact(BaseModel):
+    """One row of ``artifact`` — a logical named file with versions."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID
+    user_id: UUID
+    name: str = Field(description="logical name, unique per (tenant, user)")
+    kind: ArtifactKind
+    latest_version: int = Field(ge=1, description="version number of the newest revision")
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
