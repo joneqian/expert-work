@@ -437,3 +437,41 @@ def test_subagent_name_colliding_with_builtin_tool_rejected() -> None:
     ]
     with pytest.raises(ValidationError, match="collides with a declared builtin"):
         AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
+# knowledge block — RAG (Stream J.5)
+# ---------------------------------------------------------------------------
+
+
+def test_knowledge_default_is_none() -> None:
+    assert AgentSpec.model_validate(_doc()).spec.knowledge is None
+
+
+def test_knowledge_block_validates_in_manifest() -> None:
+    doc = _doc()
+    doc["spec"]["knowledge"] = {"knowledge_base_refs": ["hr-policies", "eng-docs"]}
+    spec = AgentSpec.model_validate(doc)
+    assert spec.spec.knowledge is not None
+    assert spec.spec.knowledge.knowledge_base_refs == ["hr-policies", "eng-docs"]
+
+
+def test_knowledge_empty_refs_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["knowledge"] = {"knowledge_base_refs": []}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
+
+
+def test_knowledge_duplicate_refs_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["knowledge"] = {"knowledge_base_refs": ["kb", "kb"]}
+    with pytest.raises(ValidationError, match="duplicate knowledge base ref"):
+        AgentSpec.model_validate(doc)
+
+
+def test_knowledge_blank_ref_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["knowledge"] = {"knowledge_base_refs": ["   "]}
+    with pytest.raises(ValidationError, match="must be non-empty"):
+        AgentSpec.model_validate(doc)

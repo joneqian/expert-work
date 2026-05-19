@@ -272,6 +272,36 @@ class RoutingSpec(BaseModel):
     rules: list[RouteRule] = Field(default_factory=list)
 
 
+class KnowledgeSpec(BaseModel):
+    """Manifest ``knowledge:`` block — Stream J.5 RAG.
+
+    Presence activates the ``knowledge_search`` tool;
+    ``knowledge_base_refs`` names the tenant knowledge bases the agent
+    may query. The names are resolved to base ids at search time, so a
+    base may be created after the agent is deployed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    knowledge_base_refs: list[str] = Field(
+        min_length=1,
+        description="names of tenant knowledge bases this agent may search",
+    )
+
+    @model_validator(mode="after")
+    def _check_refs(self) -> KnowledgeSpec:
+        seen: set[str] = set()
+        for ref in self.knowledge_base_refs:
+            if not ref.strip():
+                msg = "knowledge_base_refs entries must be non-empty"
+                raise ValueError(msg)
+            if ref in seen:
+                msg = f"duplicate knowledge base ref {ref!r}"
+                raise ValueError(msg)
+            seen.add(ref)
+        return self
+
+
 class WorkflowSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -441,6 +471,10 @@ class AgentSpecBody(BaseModel):
     routing: RoutingSpec | None = Field(
         default=None,
         description="Stream J.11 — per-step-class model selection (planner / reflect)",
+    )
+    knowledge: KnowledgeSpec | None = Field(
+        default=None,
+        description="Stream J.5 — knowledge bases (RAG) this agent may search",
     )
     workflow: WorkflowSpec = Field(default_factory=WorkflowSpec)
     policies: PolicySpec = Field(default_factory=PolicySpec)

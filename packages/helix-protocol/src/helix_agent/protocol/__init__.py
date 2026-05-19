@@ -12,6 +12,7 @@ from helix_agent.protocol.agent_spec import (
     DynamicContextSpec,
     FilesystemSpec,
     HTTPToolSpec,
+    KnowledgeSpec,
     LongTermMemorySpec,
     MCPToolSpec,
     MemorySpec,
@@ -54,6 +55,12 @@ from helix_agent.protocol.dr import (
     DrillType,
 )
 from helix_agent.protocol.event import EventRecord, EventType
+from helix_agent.protocol.knowledge import (
+    DocumentStatus,
+    KnowledgeBase,
+    KnowledgeChunk,
+    KnowledgeDocument,
+)
 from helix_agent.protocol.memory_item import MemoryItem
 from helix_agent.protocol.plan import Plan, PlanStep
 from helix_agent.protocol.quota import (
@@ -118,6 +125,7 @@ __all__ = [
     "CodePackageSpec",
     "CommitRequest",
     "CustomReminderSpec",
+    "DocumentStatus",
     "DrillRecord",
     "DrillType",
     "DynamicContextSpec",
@@ -126,6 +134,10 @@ __all__ = [
     "FilesystemSpec",
     "HTTPToolSpec",
     "JWTClaims",
+    "KnowledgeBase",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
+    "KnowledgeSpec",
     "LongTermMemorySpec",
     "MCPToolSpec",
     "MemoryItem",
