@@ -120,6 +120,16 @@ class Settings(BaseSettings):
     #: clear error.
     sandbox_supervisor_url: str | None = None
 
+    #: ``secret://`` reference to the embedding API key — backs long-term
+    #: memory (Stream J.3). ``None`` → no embedder; an agent that declares
+    #: ``memory.long_term`` fails at build time with a clear error.
+    embedding_api_key_ref: str | None = None
+
+    #: Embedding model name for long-term memory (Stream J.3). The default
+    #: is qwen DashScope's ``text-embedding-v4`` (1024-dim — matches
+    #: ``HELIX_AGENT_EMBEDDING_DIM``).
+    embedding_model: str = "text-embedding-v4"
+
     # ------------------------------------------------------------------ auth (C.1)
     # OIDC issuer used to validate the ``iss`` JWT claim and to derive
     # the JWKS endpoint when ``oidc_jwks_uri`` is not set. The default

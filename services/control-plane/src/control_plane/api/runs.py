@@ -44,6 +44,7 @@ from control_plane.quota.base import QuotaService
 from control_plane.runtime import AgentRuntime
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.agent_spec import AgentSpecStore
+from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.protocol import AuditAction, ThreadStatus
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -176,13 +177,19 @@ def build_runs_router() -> APIRouter:
             "step_count": 0,
             "max_steps": built.max_steps,
         }
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": str(thread_id),
-                "tenant_id": str(tenant_id),
-                "run_id": str(run_id),
-            }
+        configurable: dict[str, str] = {
+            "thread_id": str(thread_id),
+            "tenant_id": str(tenant_id),
+            "run_id": str(run_id),
         }
+        if caller_user_id is not None:
+            configurable["user_id"] = str(caller_user_id)
+            # Stream J.3 — carry the user scope into the run worker's
+            # context so the long-term-memory store's user-level RLS
+            # applies. The background task inherits this ContextVar at
+            # creation, exactly as it inherits the tenant id.
+            current_user_id_var.set(caller_user_id)
+        config: RunnableConfig = {"configurable": configurable}
         worker = asyncio.create_task(
             run_agent(
                 bridge=runtime.stream_bridge,

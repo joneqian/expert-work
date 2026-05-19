@@ -82,6 +82,7 @@ from control_plane.runtime import (
     build_tool_env,
     make_agent_builder,
     make_agent_runtime,
+    resolve_embedder,
     resolve_web_search_client,
 )
 from control_plane.settings import Settings
@@ -116,6 +117,11 @@ from helix_agent.persistence.feedback_store import (
     FeedbackStore,
     InMemoryFeedbackStore,
 )
+from helix_agent.persistence.memory import (
+    InMemoryMemoryStore,
+    MemoryStore,
+    SqlMemoryStore,
+)
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore,
     InMemoryTokenReservationStore,
@@ -143,6 +149,7 @@ from helix_agent.persistence.thread_meta import (
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.secret_store import make_secret_store
+from orchestrator import MemoryEnv
 
 __all__ = ["create_app"]
 
@@ -211,6 +218,8 @@ def create_app(
     resolved_tenant_users = tenant_user_repo or (
         sql_stores.tenant_user if sql_stores else InMemoryTenantUserStore()
     )
+    # Stream J.3 — long-term memory store for the agent runtime.
+    resolved_memory_store: MemoryStore = sql_stores.memory if sql_stores else InMemoryMemoryStore()
     resolved_feedback = feedback_repo or (
         sql_stores.feedback if sql_stores else InMemoryFeedbackStore()
     )
@@ -316,6 +325,12 @@ def create_app(
                 mcp_pool = await stack.enter_async_context(
                     build_mcp_pool(resolved_settings.mcp_servers_config_file)
                 )
+                # Stream J.3 — long-term memory backend for the agent.
+                embedder = await resolve_embedder(
+                    api_key_ref=resolved_settings.embedding_api_key_ref,
+                    model=resolved_settings.embedding_model,
+                    secret_store=resolved_secret_store,
+                )
                 resolved_agent_runtime.agent_builder = make_agent_builder(
                     resolved_secret_store,
                     checkpointer,
@@ -328,6 +343,7 @@ def create_app(
                         mcp_pool=mcp_pool,
                     ),
                     middleware_env=build_middleware_env(),
+                    memory_env=MemoryEnv(store=resolved_memory_store, embedder=embedder),
                 )
             if reaper is not None:
                 reaper.start()
@@ -459,6 +475,7 @@ class _SqlStores:
     agent_spec: AgentSpecStore
     thread_meta: ThreadMetaStore
     tenant_user: TenantUserStore
+    memory: MemoryStore
     service_account: ServiceAccountStore
     api_key: ApiKeyStore
     role_binding: RoleBindingStore
@@ -489,6 +506,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         agent_spec=SqlAgentSpecStore(session_factory),
         thread_meta=SqlThreadMetaStore(session_factory),
         tenant_user=SqlTenantUserStore(session_factory),
+        memory=SqlMemoryStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),
         api_key=SqlApiKeyStore(session_factory),
         role_binding=SqlRoleBindingStore(session_factory),

@@ -31,7 +31,8 @@ from helix_agent.runtime.middleware import RecordingLangfuseClient
 from helix_agent.runtime.runs import RunManager
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
-from orchestrator import BuiltAgent, MiddlewareEnv, ToolEnv, build_agent
+from orchestrator import BuiltAgent, MemoryEnv, MiddlewareEnv, ToolEnv, build_agent
+from orchestrator.llm import Embedder, HTTPEmbeddingClient, OpenAICompatibleEmbedder
 from orchestrator.tools import (
     AllowlistProvider,
     HTTPSupervisorClient,
@@ -96,14 +97,15 @@ def make_agent_builder(
     *,
     tool_env: ToolEnv | None = None,
     middleware_env: MiddlewareEnv | None = None,
+    memory_env: MemoryEnv | None = None,
 ) -> AgentBuilder:
     """Production :data:`AgentBuilder` bound to a SecretStore + checkpointer.
 
-    ``tool_env`` / ``middleware_env`` inject the platform tool and
-    middleware backends. Kept separate from :func:`make_agent_runtime`
-    so the app lifespan can rebuild the builder once the durable
-    checkpointer's connection context is open and the tenant-config
-    service is ready.
+    ``tool_env`` / ``middleware_env`` / ``memory_env`` inject the
+    platform tool, middleware, and long-term-memory backends. Kept
+    separate from :func:`make_agent_runtime` so the app lifespan can
+    rebuild the builder once the durable checkpointer's connection
+    context is open and the tenant-config service is ready.
     """
 
     async def _build(spec: AgentSpec) -> BuiltAgent:
@@ -113,9 +115,28 @@ def make_agent_builder(
             checkpointer=checkpointer,
             tool_env=tool_env,
             middleware_env=middleware_env,
+            memory_env=memory_env,
         )
 
     return _build
+
+
+async def resolve_embedder(
+    *,
+    api_key_ref: str | None,
+    model: str,
+    secret_store: SecretStore,
+) -> Embedder | None:
+    """Resolve the embedding API key behind ``api_key_ref`` into an
+    :class:`Embedder` for long-term memory (Stream J.3).
+
+    ``None`` ref → ``None`` — long-term memory is then unavailable and
+    an agent declaring ``memory.long_term`` fails at build time.
+    """
+    if api_key_ref is None:
+        return None
+    api_key = await secret_store.get(parse_secret_ref(api_key_ref))
+    return OpenAICompatibleEmbedder(client=HTTPEmbeddingClient(api_key=api_key), model=model)
 
 
 def _tenant_allowlist_provider(service: TenantConfigService) -> AllowlistProvider:
