@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 
-from helix_agent.persistence import InMemoryMemoryStore
+from helix_agent.persistence import InMemoryKnowledgeStore, InMemoryMemoryStore
 from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.middleware import RecordingLangfuseClient
@@ -27,7 +27,7 @@ from orchestrator import (
     build_step_routers,
 )
 from orchestrator.llm import FakeEmbedder, RateLimitedProvider
-from orchestrator.tools import RecordingTavilyClient
+from orchestrator.tools import KnowledgeRetriever, RecordingTavilyClient
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -310,6 +310,33 @@ async def test_build_agent_subagents_without_builder_raises() -> None:
     async with make_checkpointer("memory") as cp:
         with pytest.raises(AgentFactoryError, match="sub-agent builder"):
             await build_agent(_subagent_spec(), secret_store=_secret_store(), checkpointer=cp)
+
+
+def _knowledge_spec() -> AgentSpec:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["knowledge"] = {"knowledge_base_refs": ["hr-policies"]}
+    return AgentSpec.model_validate(doc)
+
+
+@pytest.mark.asyncio
+async def test_build_agent_with_knowledge_succeeds() -> None:
+    env = ToolEnv(
+        knowledge_retriever=KnowledgeRetriever(
+            store=InMemoryKnowledgeStore(), embedder=FakeEmbedder()
+        )
+    )
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(
+            _knowledge_spec(), secret_store=_secret_store(), checkpointer=cp, tool_env=env
+        )
+    assert isinstance(built, BuiltAgent)
+
+
+@pytest.mark.asyncio
+async def test_build_agent_knowledge_without_retriever_raises() -> None:
+    async with make_checkpointer("memory") as cp:
+        with pytest.raises(AgentFactoryError, match="knowledge retriever"):
+            await build_agent(_knowledge_spec(), secret_store=_secret_store(), checkpointer=cp)
 
 
 @pytest.mark.asyncio

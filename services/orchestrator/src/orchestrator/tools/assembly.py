@@ -23,6 +23,7 @@ from helix_agent.persistence import ArtifactStore
 from helix_agent.protocol import (
     BuiltinToolSpec,
     HTTPToolSpec,
+    KnowledgeSpec,
     MCPToolSpec,
     SubAgentSpec,
     ToolSpecEntry,
@@ -30,6 +31,7 @@ from helix_agent.protocol import (
 from orchestrator.errors import AgentFactoryError
 from orchestrator.tools.artifact import ListArtifactsTool, SaveArtifactTool
 from orchestrator.tools.http import AllowlistProvider, HTTPTool
+from orchestrator.tools.knowledge import KnowledgeRetriever, KnowledgeSearchTool
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
 from orchestrator.tools.registry import ToolRegistry
 from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
@@ -67,6 +69,12 @@ class ToolEnv:
     #: ``subagents`` with this left ``None`` raises
     #: :class:`AgentFactoryError` (wired in J.4 PR4).
     child_agent_builder: ChildAgentBuilder | None = None
+    #: Hybrid knowledge retriever backing the ``knowledge_search`` tool
+    #: a manifest's ``knowledge:`` block activates (Stream J.5). Injected
+    #: by the control-plane (it configures the embedder / rerank LLM). A
+    #: manifest that declares ``knowledge`` with this left ``None`` raises
+    #: :class:`AgentFactoryError`.
+    knowledge_retriever: KnowledgeRetriever | None = None
 
 
 async def build_tool_registry(
@@ -76,6 +84,7 @@ async def build_tool_registry(
     persistent_workspace: bool = False,
     subagents: Sequence[SubAgentSpec] = (),
     subagent_depth: int = 0,
+    knowledge: KnowledgeSpec | None = None,
 ) -> ToolRegistry:
     """Build a :class:`ToolRegistry` from a manifest's ``tools:`` entries.
 
@@ -90,9 +99,13 @@ async def build_tool_registry(
     top-level agent) — at :data:`MAX_SUBAGENT_DEPTH` no ``SubAgentTool``
     is registered, so a delegation chain terminates structurally.
 
+    ``knowledge`` is the manifest's ``spec.knowledge`` block (Stream J.5);
+    its presence activates the ``knowledge_search`` tool.
+
     :raises AgentFactoryError: an entry names an unknown builtin, declares
-        a tool whose ``ToolEnv`` dependency is not configured, or declares
-        ``subagents`` with no ``ToolEnv.child_agent_builder``.
+        a tool whose ``ToolEnv`` dependency is not configured, declares
+        ``subagents`` with no ``ToolEnv.child_agent_builder``, or declares
+        ``knowledge`` with no ``ToolEnv.knowledge_retriever``.
     """
     registry = ToolRegistry()
     for entry in tool_specs:
@@ -103,7 +116,29 @@ async def build_tool_registry(
         elif isinstance(entry, MCPToolSpec):
             await _register_mcp(registry, entry, tool_env)
     _register_subagents(registry, subagents, tool_env, subagent_depth)
+    _register_knowledge_search(registry, knowledge, tool_env)
     return registry
+
+
+def _register_knowledge_search(
+    registry: ToolRegistry, knowledge: KnowledgeSpec | None, env: ToolEnv
+) -> None:
+    """Register the ``knowledge_search`` tool when the manifest declares a
+    ``knowledge:`` block — Stream J.5. A declared block with no
+    :attr:`ToolEnv.knowledge_retriever` is an un-buildable manifest."""
+    if knowledge is None:
+        return
+    if env.knowledge_retriever is None:
+        raise AgentFactoryError(
+            "manifest declares 'knowledge' but no knowledge retriever is "
+            "configured (ToolEnv.knowledge_retriever)"
+        )
+    registry.register(
+        KnowledgeSearchTool(
+            retriever=env.knowledge_retriever,
+            knowledge_base_refs=tuple(knowledge.knowledge_base_refs),
+        )
+    )
 
 
 def _register_subagents(

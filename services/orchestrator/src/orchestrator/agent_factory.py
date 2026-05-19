@@ -167,6 +167,8 @@ async def build_agent(
         # subagent_depth gates the structural recursion cap.
         subagents=spec.spec.subagents,
         subagent_depth=subagent_depth,
+        # Stream J.5 — a ``knowledge:`` block activates the knowledge_search tool.
+        knowledge=spec.spec.knowledge,
     )
     # Stream J.1 — a ``plan_execute`` manifest front-loads a planner node
     # that decomposes the task before the ReAct loop runs.

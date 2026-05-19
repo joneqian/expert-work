@@ -33,6 +33,21 @@ from orchestrator.tools.http import (
 from orchestrator.tools.http import (
     HTTPTool as HTTPTool,
 )
+from orchestrator.tools.knowledge import (
+    KnowledgeRetriever as KnowledgeRetriever,
+)
+from orchestrator.tools.knowledge import (
+    KnowledgeSearchTool as KnowledgeSearchTool,
+)
+from orchestrator.tools.knowledge import (
+    LLMReranker as LLMReranker,
+)
+from orchestrator.tools.knowledge import (
+    Reranker as Reranker,
+)
+from orchestrator.tools.knowledge import (
+    RetrievedChunk as RetrievedChunk,
+)
 from orchestrator.tools.mcp import (
     DEFAULT_MAX_SERVERS as DEFAULT_MAX_SERVERS,
 )
@@ -155,6 +170,9 @@ __all__ = [
     "HTTPSupervisorClient",
     "HTTPTavilyClient",
     "HTTPTool",
+    "KnowledgeRetriever",
+    "KnowledgeSearchTool",
+    "LLMReranker",
     "ListArtifactsTool",
     "MCPCallResult",
     "MCPClient",
@@ -166,6 +184,8 @@ __all__ = [
     "RecordingMCPClient",
     "RecordingSupervisorClient",
     "RecordingTavilyClient",
+    "Reranker",
+    "RetrievedChunk",
     "SandboxOutcome",
     "SandboxSupervisorError",
     "SaveArtifactTool",

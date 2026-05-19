@@ -8,11 +8,21 @@ from uuid import UUID
 
 import pytest
 
-from helix_agent.protocol import BuiltinToolSpec, HTTPToolSpec, MCPToolSpec, SubAgentSpec
+from helix_agent.persistence import InMemoryKnowledgeStore
+from helix_agent.protocol import (
+    BuiltinToolSpec,
+    HTTPToolSpec,
+    KnowledgeSpec,
+    MCPToolSpec,
+    SubAgentSpec,
+)
 from orchestrator import AgentFactoryError
+from orchestrator.llm import FakeEmbedder
 from orchestrator.tools import (
     MAX_SUBAGENT_DEPTH,
     HTTPTool,
+    KnowledgeRetriever,
+    KnowledgeSearchTool,
     MCPServerPool,
     MCPToolDef,
     RecordingMCPClient,
@@ -22,6 +32,10 @@ from orchestrator.tools import (
     WebSearchTool,
     build_tool_registry,
 )
+
+
+def _knowledge_retriever() -> KnowledgeRetriever:
+    return KnowledgeRetriever(store=InMemoryKnowledgeStore(), embedder=FakeEmbedder())
 
 
 class _StubChildBuilder:
@@ -197,3 +211,34 @@ async def test_no_subagents_with_empty_builder_is_fine() -> None:
     # No subagents declared → the missing-builder check never fires.
     registry = await build_tool_registry([], tool_env=ToolEnv())
     assert len(registry) == 0
+
+
+# ---------------------------------------------------------------------------
+# knowledge — knowledge_search activation (Stream J.5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_knowledge_block_activates_search_tool() -> None:
+    env = ToolEnv(knowledge_retriever=_knowledge_retriever())
+    registry = await build_tool_registry(
+        [], tool_env=env, knowledge=KnowledgeSpec(knowledge_base_refs=["hr", "eng"])
+    )
+    tool = registry.get("knowledge_search")
+    assert isinstance(tool, KnowledgeSearchTool)
+    assert tool.knowledge_base_refs == ("hr", "eng")
+
+
+@pytest.mark.asyncio
+async def test_knowledge_block_without_retriever_raises() -> None:
+    with pytest.raises(AgentFactoryError, match="knowledge retriever"):
+        await build_tool_registry(
+            [], tool_env=ToolEnv(), knowledge=KnowledgeSpec(knowledge_base_refs=["hr"])
+        )
+
+
+@pytest.mark.asyncio
+async def test_no_knowledge_block_registers_no_search_tool() -> None:
+    env = ToolEnv(knowledge_retriever=_knowledge_retriever())
+    registry = await build_tool_registry([], tool_env=env)
+    assert registry.get("knowledge_search") is None
