@@ -17,7 +17,8 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID, uuid4
 
-from helix_agent.protocol import AuditEntry
+from helix_agent.persistence import UserWorkspaceStore
+from helix_agent.protocol import AuditEntry, UserWorkspace
 from helix_agent.protocol.audit import AuditAction, AuditResult
 from helix_agent.runtime.sandbox import SandboxResourceLimits, SandboxRuntimeProvider
 from sandbox_supervisor.docker_client import DockerClient, DockerError
@@ -59,12 +60,14 @@ class SandboxSupervisor:
         docker: DockerClient,
         audit: AuditSink,
         runtime_provider: SandboxRuntimeProvider,
+        workspace_store: UserWorkspaceStore,
         settings: SandboxSupervisorSettings,
     ) -> None:
         self._store = store
         self._docker = docker
         self._audit = audit
         self._runtime = runtime_provider
+        self._workspaces = workspace_store
         self._settings = settings
         # Held runner links, keyed by sandbox id — the option-C transport.
         self._links: dict[UUID, RunnerLink] = {}
@@ -78,11 +81,24 @@ class SandboxSupervisor:
         """
         await self._enforce_quota(request.tenant_id)
 
-        record = self._new_record(request)
+        # Stream J.15 — a user-scoped acquire mounts that user's
+        # persistent workspace volume at /workspace; resolve (creating
+        # on first use) the user_workspace row. No user_id → an
+        # ephemeral tmpfs workspace (the pre-J.15 behaviour).
+        workspace: UserWorkspace | None = None
+        if request.user_id is not None:
+            workspace = await self._workspaces.resolve(
+                tenant_id=request.tenant_id, user_id=request.user_id
+            )
+
+        record = self._new_record(request, workspace=workspace)
         await self._store.insert(record)
 
+        workspace_volume = workspace.volume_name if workspace is not None else None
         try:
-            link = await self._docker.launch(self._run_argv(record))
+            link = await self._docker.launch(
+                self._run_argv(record, workspace_volume=workspace_volume)
+            )
             await link.wait_ready(self._settings.runner_ready_timeout_s)
         except (DockerError, RunnerLinkError) as exc:
             await self._store.update(record.with_state(SandboxState.FAILED))
@@ -103,7 +119,11 @@ class SandboxSupervisor:
             action=AuditAction.SANDBOX_ACQUIRED,
             result=AuditResult.SUCCESS,
             sandbox_id=record.id,
-            details={"image_ref": record.image_ref, "thread_id": record.thread_id},
+            details={
+                "image_ref": record.image_ref,
+                "thread_id": record.thread_id,
+                "persistent_workspace": workspace is not None,
+            },
         )
         return AcquireResponse(
             sandbox_id=record.id,
@@ -204,11 +224,15 @@ class SandboxSupervisor:
             )
             raise QuotaExceededError(tenant_id, limit)
 
-    def _new_record(self, request: AcquireRequest) -> SandboxRecord:
+    def _new_record(
+        self, request: AcquireRequest, *, workspace: UserWorkspace | None
+    ) -> SandboxRecord:
         s = self._settings
         return SandboxRecord(
             id=uuid4(),
             tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            workspace_id=workspace.id if workspace is not None else None,
             image_ref=s.sandbox_image,
             node=s.node_name,
             container_id=None,
@@ -223,12 +247,14 @@ class SandboxSupervisor:
             created_at=datetime.now(UTC),
         )
 
-    def _run_argv(self, record: SandboxRecord) -> list[str]:
+    def _run_argv(self, record: SandboxRecord, *, workspace_volume: str | None) -> list[str]:
         """The hardened ``docker run`` argv from the F.3 provider.
 
         The provider's argv already carries ``--interactive`` — option C
         keeps the container attached so the supervisor holds its stdio;
-        no ``--detach`` is added.
+        no ``--detach`` is added. ``workspace_volume`` selects the
+        ``/workspace`` backing — a J.15 persistent volume or an
+        ephemeral tmpfs (``None``).
         """
         return self._runtime.docker_run_argv(
             image=record.image_ref,
@@ -238,6 +264,7 @@ class SandboxSupervisor:
                 memory_mb=record.memory_mb,
                 pids_limit=record.pids_limit,
             ),
+            workspace_volume=workspace_volume,
         )
 
     async def _emit_audit(

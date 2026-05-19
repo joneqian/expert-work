@@ -121,6 +121,8 @@ def _to_row(record: SandboxRecord) -> SandboxInstanceRow:
     return SandboxInstanceRow(
         id=record.id,
         tenant_id=record.tenant_id,
+        user_id=record.user_id,
+        workspace_id=record.workspace_id,
         image_ref=record.image_ref,
         node=record.node,
         container_id=record.container_id,
@@ -142,6 +144,8 @@ def _to_record(row: SandboxInstanceRow) -> SandboxRecord:
     return SandboxRecord(
         id=row.id,
         tenant_id=row.tenant_id,
+        user_id=row.user_id,
+        workspace_id=row.workspace_id,
         image_ref=row.image_ref,
         node=row.node,
         container_id=row.container_id,
