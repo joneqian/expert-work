@@ -111,6 +111,12 @@ from orchestrator.tools.sandbox import (
 from orchestrator.tools.sandbox import (
     SupervisorClient as SupervisorClient,
 )
+from orchestrator.tools.subagent import (
+    MAX_SUBAGENT_DEPTH as MAX_SUBAGENT_DEPTH,
+)
+from orchestrator.tools.subagent import (
+    ChildAgentBuilder as ChildAgentBuilder,
+)
 from orchestrator.tools.web_search import (
     DEFAULT_CONTENT_CHAR_CAP as DEFAULT_CONTENT_CHAR_CAP,
 )
@@ -139,7 +145,9 @@ __all__ = [
     "DEFAULT_MCP_CHAR_CAP",
     "DEFAULT_OUTPUT_CHAR_CAP",
     "KNOWN_BUILTINS",
+    "MAX_SUBAGENT_DEPTH",
     "AllowlistProvider",
+    "ChildAgentBuilder",
     "ExecPythonTool",
     "HTTPSupervisorClient",
     "HTTPTavilyClient",

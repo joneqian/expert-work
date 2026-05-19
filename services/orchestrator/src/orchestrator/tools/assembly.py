@@ -31,6 +31,7 @@ from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
 from orchestrator.tools.registry import ToolRegistry
 from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
+from orchestrator.tools.subagent import ChildAgentBuilder
 from orchestrator.tools.web_search import DEFAULT_MAX_RESULTS, TavilyClient, WebSearchTool
 
 #: Built-in tool names the platform ships in M0.
@@ -55,6 +56,13 @@ class ToolEnv:
     #: Artifact registry backing the ``save_artifact`` / ``list_artifacts``
     #: builtins (Stream J.9).
     artifact_store: ArtifactStore | None = None
+    #: Resolves an ``agent_ref`` and builds the referenced sub-agent —
+    #: backs the ``SubAgentTool``\\s a manifest's ``spec.subagents``
+    #: block declares (Stream J.4). Injected by the control-plane, which
+    #: alone holds the ``AgentSpecStore``. A manifest that declares
+    #: ``subagents`` with this left ``None`` raises
+    #: :class:`AgentFactoryError` (wired in J.4 PR4).
+    child_agent_builder: ChildAgentBuilder | None = None
 
 
 async def build_tool_registry(
