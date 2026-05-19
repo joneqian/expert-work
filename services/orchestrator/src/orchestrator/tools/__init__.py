@@ -117,6 +117,9 @@ from orchestrator.tools.subagent import (
 from orchestrator.tools.subagent import (
     ChildAgentBuilder as ChildAgentBuilder,
 )
+from orchestrator.tools.subagent import (
+    SubAgentTool as SubAgentTool,
+)
 from orchestrator.tools.web_search import (
     DEFAULT_CONTENT_CHAR_CAP as DEFAULT_CONTENT_CHAR_CAP,
 )
@@ -167,6 +170,7 @@ __all__ = [
     "SandboxSupervisorError",
     "SaveArtifactTool",
     "StdioMCPClient",
+    "SubAgentTool",
     "SupervisorClient",
     "TavilyClient",
     "Tool",
