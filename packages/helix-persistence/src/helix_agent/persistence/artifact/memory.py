@@ -73,3 +73,33 @@ class InMemoryArtifactStore(ArtifactStore):
         ]
         rows.sort(key=lambda a: a.updated_at or _MIN_AWARE, reverse=True)
         return rows
+
+    async def get_latest_version(
+        self, *, tenant_id: UUID, user_id: UUID, name: str
+    ) -> ArtifactVersion | None:
+        artifact = next(
+            (
+                a
+                for a in self._artifacts.values()
+                if a.tenant_id == tenant_id and a.user_id == user_id and a.name == name
+            ),
+            None,
+        )
+        if artifact is None:
+            return None
+        return next(
+            (
+                v
+                for v in self._versions
+                if v.artifact_id == artifact.id and v.version == artifact.latest_version
+            ),
+            None,
+        )
+
+    async def set_version_digest(self, *, version_id: UUID, size_bytes: int, sha256: str) -> None:
+        self._versions = [
+            v.model_copy(update={"size_bytes": size_bytes, "sha256": sha256})
+            if v.id == version_id
+            else v
+            for v in self._versions
+        ]

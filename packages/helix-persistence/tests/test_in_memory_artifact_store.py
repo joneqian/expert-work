@@ -124,3 +124,59 @@ async def test_list_for_user_filters_by_tenant_and_user() -> None:
     assert len(await store.list_for_user(tenant_id=tenant_a, user_id=user_x)) == 1
     assert len(await store.list_for_user(tenant_id=tenant_a, user_id=user_y)) == 1
     assert await store.list_for_user(tenant_id=uuid4(), user_id=user_x) == []
+
+
+@pytest.mark.asyncio
+async def test_get_latest_version_returns_newest_revision() -> None:
+    store = InMemoryArtifactStore()
+    tenant_id, user_id = uuid4(), uuid4()
+    await store.save_version(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name="report.md",
+        kind="document",
+        path_in_workspace="v1.md",
+        created_in_thread="t-1",
+    )
+    await store.save_version(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name="report.md",
+        kind="document",
+        path_in_workspace="v2.md",
+        created_in_thread="t-2",
+    )
+    latest = await store.get_latest_version(tenant_id=tenant_id, user_id=user_id, name="report.md")
+    assert latest is not None
+    assert latest.version == 2
+    assert latest.path_in_workspace == "v2.md"
+
+
+@pytest.mark.asyncio
+async def test_get_latest_version_unknown_name_returns_none() -> None:
+    store = InMemoryArtifactStore()
+    assert (
+        await store.get_latest_version(tenant_id=uuid4(), user_id=uuid4(), name="missing") is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_set_version_digest_backfills_size_and_sha() -> None:
+    store = InMemoryArtifactStore()
+    tenant_id, user_id = uuid4(), uuid4()
+    version = await store.save_version(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name="data.bin",
+        kind="data",
+        path_in_workspace="data.bin",
+        created_in_thread="t-1",
+    )
+    assert version.size_bytes is None
+
+    await store.set_version_digest(version_id=version.id, size_bytes=128, sha256="abc123")
+
+    latest = await store.get_latest_version(tenant_id=tenant_id, user_id=user_id, name="data.bin")
+    assert latest is not None
+    assert latest.size_bytes == 128
+    assert latest.sha256 == "abc123"

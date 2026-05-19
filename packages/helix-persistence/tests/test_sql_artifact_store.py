@@ -102,3 +102,48 @@ async def test_list_for_user_isolates_tenant_and_user(sql_store: SqlStoreFixture
         assert await store.list_for_user(tenant_id=uuid4(), user_id=user_x) == []
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_latest_version_and_digest_backfill(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            kind="document",
+            path_in_workspace="v1.md",
+            created_in_thread="t-1",
+        )
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            kind="document",
+            path_in_workspace="v2.md",
+            created_in_thread="t-2",
+        )
+        latest = await store.get_latest_version(
+            tenant_id=tenant_id, user_id=user_id, name="report.md"
+        )
+        assert latest is not None
+        assert latest.version == 2
+        assert latest.path_in_workspace == "v2.md"
+        assert latest.size_bytes is None
+
+        await store.set_version_digest(version_id=latest.id, size_bytes=4096, sha256="deadbeef")
+        refreshed = await store.get_latest_version(
+            tenant_id=tenant_id, user_id=user_id, name="report.md"
+        )
+        assert refreshed is not None
+        assert refreshed.size_bytes == 4096
+        assert refreshed.sha256 == "deadbeef"
+
+        assert (
+            await store.get_latest_version(tenant_id=tenant_id, user_id=user_id, name="nope")
+            is None
+        )
+    finally:
+        await engine.dispose()

@@ -86,6 +86,9 @@ class SupervisorClient(Protocol):
     async def destroy(self, *, sandbox_id: UUID, reason: str) -> None:
         """Forced sandbox teardown (SIGKILL); ``reason`` is audited."""
 
+    async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
+        """Read a file from a user's persistent workspace volume (J.9 artifact download)."""
+
 
 @dataclass
 class HTTPSupervisorClient:
@@ -128,6 +131,21 @@ class HTTPSupervisorClient:
             expect_body=False,
         )
 
+    async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
+        url = f"{self.base_url}/v1/workspaces/{tenant_id}/{user_id}/file"
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            try:
+                response = await client.get(url, params={"path": path})
+            except httpx.HTTPError as exc:
+                msg = f"sandbox supervisor unreachable ({url}): {exc}"
+                raise SandboxSupervisorError(msg) from exc
+        if response.is_error:
+            msg = (
+                f"sandbox supervisor workspace read failed: {response.status_code} {response.text}"
+            )
+            raise SandboxSupervisorError(msg)
+        return response.content
+
     async def _post(
         self,
         path: str,
@@ -168,10 +186,13 @@ class RecordingSupervisorClient:
     )
     exec_error: BaseException | None = None
     destroy_error: Exception | None = None
+    workspace_file: bytes = b""
+    workspace_file_error: Exception | None = None
     acquired: list[tuple[UUID, str, UUID | None]] = field(default_factory=list)
     execs: list[tuple[UUID, str]] = field(default_factory=list)
     released: list[UUID] = field(default_factory=list)
     destroyed: list[tuple[UUID, str]] = field(default_factory=list)
+    workspace_reads: list[tuple[UUID, UUID, str]] = field(default_factory=list)
     _next_id: int = 0
 
     async def acquire(
@@ -195,6 +216,12 @@ class RecordingSupervisorClient:
         if self.destroy_error is not None:
             raise self.destroy_error
         self.destroyed.append((sandbox_id, reason))
+
+    async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
+        self.workspace_reads.append((tenant_id, user_id, path))
+        if self.workspace_file_error is not None:
+            raise self.workspace_file_error
+        return self.workspace_file
 
 
 @dataclass

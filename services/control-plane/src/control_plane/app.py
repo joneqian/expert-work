@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from control_plane.api import (
     build_agents_router,
     build_api_keys_router,
+    build_artifacts_router,
     build_feedback_router,
     build_health_router,
     build_metrics_router,
@@ -172,6 +173,7 @@ def create_app(
     thread_meta_repo: ThreadMetaStore | None = None,
     tenant_user_repo: TenantUserStore | None = None,
     feedback_repo: FeedbackStore | None = None,
+    artifact_repo: ArtifactStore | None = None,
     audit_logger: AuditLogger | None = None,
     manifest_loader: ManifestLoader | None = None,
     jwt_verifier: JWTVerifier | None = None,
@@ -225,10 +227,14 @@ def create_app(
     )
     # Stream J.3 — long-term memory store for the agent runtime.
     resolved_memory_store: MemoryStore = sql_stores.memory if sql_stores else InMemoryMemoryStore()
-    # Stream J.9 — artifact registry backing save_artifact / list_artifacts.
-    resolved_artifact_store: ArtifactStore = (
+    # Stream J.9 — artifact registry backing save_artifact / list_artifacts
+    # and the artifact API. The supervisor client backs artifact content
+    # download (only the supervisor can read a per-user volume); it is
+    # shared with the agent tool env.
+    resolved_artifact_store: ArtifactStore = artifact_repo or (
         sql_stores.artifact if sql_stores else InMemoryArtifactStore()
     )
+    resolved_supervisor_client = build_supervisor_client(resolved_settings.sandbox_supervisor_url)
     resolved_feedback = feedback_repo or (
         sql_stores.feedback if sql_stores else InMemoryFeedbackStore()
     )
@@ -346,9 +352,7 @@ def create_app(
                     tool_env=build_tool_env(
                         resolved_tenant_config_service,
                         web_search_client=web_search_client,
-                        supervisor_client=build_supervisor_client(
-                            resolved_settings.sandbox_supervisor_url
-                        ),
+                        supervisor_client=resolved_supervisor_client,
                         mcp_pool=mcp_pool,
                         artifact_store=resolved_artifact_store,
                     ),
@@ -390,6 +394,8 @@ def create_app(
     app.state.thread_meta_repo = resolved_threads
     app.state.tenant_user_repo = resolved_tenant_users
     app.state.feedback_store = resolved_feedback
+    app.state.artifact_store = resolved_artifact_store
+    app.state.supervisor_client = resolved_supervisor_client
     app.state.audit_logger = resolved_audit
     app.state.manifest_loader = resolved_loader
     app.state.jwt_verifier = resolved_verifier
@@ -463,6 +469,7 @@ def create_app(
     app.include_router(build_sessions_router())
     app.include_router(build_runs_router())
     app.include_router(build_feedback_router())
+    app.include_router(build_artifacts_router())
     app.include_router(build_service_accounts_router())
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())

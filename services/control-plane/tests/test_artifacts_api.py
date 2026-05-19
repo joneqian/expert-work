@@ -1,0 +1,151 @@
+"""Tests for ``GET /v1/artifacts`` — Stream J.9 artifact list + download."""
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import AsyncIterator
+from uuid import UUID
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from control_plane.app import create_app
+from control_plane.audit import build_default_audit_logger
+from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
+from helix_agent.persistence import InMemoryArtifactStore, InMemoryTenantUserStore
+from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from orchestrator.tools import RecordingSupervisorClient
+from tests.auth_fixtures import (
+    TEST_AUDIENCE,
+    TEST_ISSUER,
+    build_test_jwt_verifier,
+    make_test_jwt,
+)
+
+_TENANT = DEFAULT_DEV_TENANT_ID
+_SUBJECT = "user-a"
+_CONTENT = b"report body"
+
+
+def _settings() -> Settings:
+    return Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+
+
+def _headers(subject: str = _SUBJECT) -> dict[str, str]:
+    return {"Authorization": f"Bearer {make_test_jwt(tenant_id=_TENANT, subject=subject)}"}
+
+
+async def _seed() -> tuple[InMemoryTenantUserStore, InMemoryArtifactStore, UUID]:
+    """A user store + artifact store with one artifact owned by ``_SUBJECT``."""
+    users = InMemoryTenantUserStore()
+    artifacts = InMemoryArtifactStore()
+    user = await users.resolve(tenant_id=_TENANT, subject_type="user", subject_id=_SUBJECT)
+    await artifacts.save_version(
+        tenant_id=_TENANT,
+        user_id=user.id,
+        name="report.md",
+        kind="document",
+        path_in_workspace="report.md",
+        created_in_thread="t-1",
+    )
+    return users, artifacts, user.id
+
+
+@pytest.fixture
+async def setup() -> AsyncIterator[tuple[AsyncClient, InMemoryArtifactStore, UUID]]:
+    users, artifacts, user_id = await _seed()
+    app = create_app(
+        settings=_settings(),
+        tenant_user_repo=users,
+        artifact_repo=artifacts,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    app.state.supervisor_client = RecordingSupervisorClient(workspace_file=_CONTENT)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://cp.test", headers=_headers()
+    ) as client:
+        yield client, artifacts, user_id
+
+
+@pytest.mark.asyncio
+async def test_list_artifacts_returns_user_artifacts(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.get("/v1/artifacts")
+    assert resp.status_code == 200
+    artifacts = resp.json()["artifacts"]
+    assert artifacts == [{"name": "report.md", "kind": "document", "latest_version": 1}]
+
+
+@pytest.mark.asyncio
+async def test_list_artifacts_isolated_per_user(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    # A different user sees none of user-a's artifacts.
+    resp = await client.get("/v1/artifacts", headers=_headers("user-b"))
+    assert resp.status_code == 200
+    assert resp.json()["artifacts"] == []
+
+
+@pytest.mark.asyncio
+async def test_download_artifact_returns_content(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.get("/v1/artifacts/download", params={"name": "report.md"})
+    assert resp.status_code == 200
+    assert resp.content == _CONTENT
+
+
+@pytest.mark.asyncio
+async def test_download_artifact_backfills_digest(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, artifacts, user_id = setup
+    await client.get("/v1/artifacts/download", params={"name": "report.md"})
+
+    latest = await artifacts.get_latest_version(
+        tenant_id=_TENANT, user_id=user_id, name="report.md"
+    )
+    assert latest is not None
+    assert latest.size_bytes == len(_CONTENT)
+    assert latest.sha256 == hashlib.sha256(_CONTENT).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_download_unknown_artifact_returns_404(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.get("/v1/artifacts/download", params={"name": "missing.md"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_without_supervisor_returns_503() -> None:
+    users, artifacts, _ = await _seed()
+    app = create_app(
+        settings=_settings(),
+        tenant_user_repo=users,
+        artifact_repo=artifacts,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    # No sandbox_supervisor_url → app.state.supervisor_client is None.
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://cp.test", headers=_headers()
+    ) as client:
+        resp = await client.get("/v1/artifacts/download", params={"name": "report.md"})
+    assert resp.status_code == 503
