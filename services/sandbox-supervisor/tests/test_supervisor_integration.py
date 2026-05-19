@@ -278,6 +278,29 @@ async def test_read_workspace_file_reads_persisted_content(helix: _Harness) -> N
     assert data == b"artifact body"
 
 
+@pytest.mark.asyncio
+async def test_warm_session_reused_across_acquires(helix: _Harness) -> None:
+    # J.15 — a user-scoped acquire reuses the live warm sandbox: the
+    # second acquire does no docker run, and the held runner link still
+    # serves exec on the reused container.
+    tenant, user = uuid4(), uuid4()
+    first = await helix.supervisor.acquire(
+        AcquireRequest(tenant_id=tenant, thread_id="t-warm-1", user_id=user)
+    )
+    await helix.supervisor.exec(first.sandbox_id, code="print('first')")
+
+    second = await helix.supervisor.acquire(
+        AcquireRequest(tenant_id=tenant, thread_id="t-warm-2", user_id=user)
+    )
+    assert second.sandbox_id == first.sandbox_id
+    assert second.cold_start is False
+
+    result = await helix.supervisor.exec(second.sandbox_id, code="print(6 * 7)")
+    await helix.supervisor.destroy(first.sandbox_id, reason="cancelled")
+    assert result.exit_code == 0
+    assert "42" in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # #48 — filesystem + process isolation (gates #1 / #2)
 # ---------------------------------------------------------------------------

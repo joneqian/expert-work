@@ -59,6 +59,8 @@ class SandboxRecord:
     user_id: UUID | None = None
     workspace_id: UUID | None = None
     acquired_at: datetime | None = None
+    #: Time of the last ``exec`` (J.15 warm sessions) — drives idle reaping.
+    last_used_at: datetime | None = None
     released_at: datetime | None = None
     destroyed_at: datetime | None = None
     destroy_reason: str | None = None

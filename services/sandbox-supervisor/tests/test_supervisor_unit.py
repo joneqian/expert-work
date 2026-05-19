@@ -151,13 +151,13 @@ class InMemorySandboxStore:
             if r.tenant_id == tenant_id and r.state in (SandboxState.CREATING, SandboxState.IN_USE)
         )
 
-    async def list_orphans(self, *, now: datetime, grace_s: int) -> list[SandboxRecord]:
+    async def list_idle_sessions(self, *, now: datetime, idle_ttl_s: int) -> list[SandboxRecord]:
         return [
             r
             for r in self.rows.values()
             if r.state == SandboxState.IN_USE
-            and r.acquired_at is not None
-            and r.acquired_at + timedelta(seconds=r.timeout_s + grace_s) < now
+            and (anchor := r.last_used_at or r.acquired_at) is not None
+            and anchor + timedelta(seconds=idle_ttl_s) < now
         ]
 
     async def sandbox_limit_for_tenant(self, tenant_id: UUID) -> int | None:
@@ -402,6 +402,94 @@ async def test_acquire_audit_flags_persistent_workspace() -> None:
 
 
 # ---------------------------------------------------------------------------
+# J.15 — warm per-user sandbox sessions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_acquire_reuses_warm_session_for_same_user() -> None:
+    h = _harness()
+    tenant, user = uuid4(), uuid4()
+
+    first = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+    second = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+
+    # Same warm session — no second docker run, and the reuse is not cold.
+    assert second.sandbox_id == first.sandbox_id
+    assert second.cold_start is False
+    assert len(h.docker.launches) == 1
+
+
+@pytest.mark.asyncio
+async def test_acquire_without_user_never_reuses() -> None:
+    h = _harness()
+    first = await h.supervisor.acquire(_acquire_request())
+    second = await h.supervisor.acquire(_acquire_request())
+
+    assert second.sandbox_id != first.sandbox_id
+    assert len(h.docker.launches) == 2
+
+
+@pytest.mark.asyncio
+async def test_release_keeps_warm_session_alive() -> None:
+    h = _harness()
+    tenant, user = uuid4(), uuid4()
+    acquired = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+
+    await h.supervisor.release(acquired.sandbox_id)
+
+    # A warm session is not torn down on release — it stays IN_USE...
+    assert h.docker.removed == []
+    assert h.store.rows[acquired.sandbox_id].state is SandboxState.IN_USE
+    # ...and the user's next acquire reuses it.
+    again = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+    assert again.sandbox_id == acquired.sandbox_id
+    assert len(h.docker.launches) == 1
+
+
+@pytest.mark.asyncio
+async def test_exec_stamps_last_used_at() -> None:
+    h = _harness()
+    acquired = await h.supervisor.acquire(_acquire_request(user_id=uuid4()))
+    assert h.store.rows[acquired.sandbox_id].last_used_at is None
+
+    await h.supervisor.exec(acquired.sandbox_id, code="print(1)")
+    assert h.store.rows[acquired.sandbox_id].last_used_at is not None
+
+
+@pytest.mark.asyncio
+async def test_destroy_clears_warm_session() -> None:
+    h = _harness()
+    tenant, user = uuid4(), uuid4()
+    first = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+    await h.supervisor.destroy(first.sandbox_id, reason="cancelled")
+
+    # The session entry is gone — the next acquire is a fresh cold start.
+    second = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+    assert second.sandbox_id != first.sandbox_id
+    assert second.cold_start is True
+    assert len(h.docker.launches) == 2
+
+
+@pytest.mark.asyncio
+async def test_reaper_reaps_idle_warm_session() -> None:
+    h = _harness()
+    acquired = await h.supervisor.acquire(_acquire_request(user_id=uuid4()))
+    # Backdate last_used_at past the idle TTL.
+    record = h.store.rows[acquired.sandbox_id]
+    h.store.rows[acquired.sandbox_id] = replace(
+        record, last_used_at=datetime.now(UTC) - timedelta(hours=1)
+    )
+
+    reaper = SandboxReaper(supervisor=h.supervisor, store=h.store, interval_s=10.0, idle_ttl_s=900)
+    reaped = await reaper.run_once()
+
+    assert reaped == 1
+    assert h.store.rows[acquired.sandbox_id].state is SandboxState.DESTROYED
+    assert h.store.rows[acquired.sandbox_id].destroy_reason == DESTROY_REASON_IDLE_TIMEOUT
+
+
+# ---------------------------------------------------------------------------
 # J.9 — workspace file read (artifact content download)
 # ---------------------------------------------------------------------------
 
@@ -588,11 +676,11 @@ async def test_acquire_allowed_below_quota() -> None:
 async def test_reaper_destroys_orphaned_sandbox() -> None:
     h = _harness()
     orphan = h.store.seed_active(uuid4())
-    # Backdate acquired_at well past timeout_s (30) + grace (30).
+    # Backdate acquired_at well past the idle TTL (900s).
     stale = replace(orphan, acquired_at=datetime.now(UTC) - timedelta(hours=1))
     h.store.rows[orphan.id] = stale
 
-    reaper = SandboxReaper(supervisor=h.supervisor, store=h.store, interval_s=10.0, grace_s=30)
+    reaper = SandboxReaper(supervisor=h.supervisor, store=h.store, interval_s=10.0, idle_ttl_s=900)
     reaped = await reaper.run_once()
 
     assert reaped == 1
@@ -606,7 +694,7 @@ async def test_reaper_leaves_fresh_sandbox_alone() -> None:
     h = _harness()
     fresh = h.store.seed_active(uuid4())  # acquired_at = now
 
-    reaper = SandboxReaper(supervisor=h.supervisor, store=h.store, interval_s=10.0, grace_s=30)
+    reaper = SandboxReaper(supervisor=h.supervisor, store=h.store, interval_s=10.0, idle_ttl_s=900)
     reaped = await reaper.run_once()
 
     assert reaped == 0

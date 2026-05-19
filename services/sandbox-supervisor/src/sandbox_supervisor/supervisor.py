@@ -12,6 +12,7 @@ is unit-testable with fakes (test matrix #40 / #41 / #42 + exec).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
@@ -93,20 +94,35 @@ class SandboxSupervisor:
         self._settings = settings
         # Held runner links, keyed by sandbox id — the option-C transport.
         self._links: dict[UUID, RunnerLink] = {}
+        # Stream J.15 — warm per-user sandbox sessions: ``(tenant, user)``
+        # → the live sandbox id. An ``acquire`` with a ``user_id`` reuses
+        # the session here; the idle reaper / destroy clears the entry.
+        self._sessions: dict[tuple[UUID, UUID], UUID] = {}
+        # Per-sandbox exec lock — the held pipe handles one exec at a
+        # time, so concurrent runs sharing a warm session serialise here.
+        self._exec_locks: dict[UUID, asyncio.Lock] = {}
 
     async def acquire(self, request: AcquireRequest) -> AcquireResponse:
-        """Quota-check, launch a fresh sandbox, wait for the runner to be ready.
+        """Reuse the caller's warm session, or launch a fresh sandbox.
+
+        Stream J.15 — a user-scoped acquire reuses that user's warm
+        sandbox session if one is live (no ``docker run``); the idle
+        reaper reclaims it once unused for ``session_idle_ttl_s``.
 
         Raises :class:`QuotaExceededError` when the tenant is at its
         cap, and :class:`SupervisorError` when the container fails to
         launch or never reports ready (the row is left ``FAILED``).
         """
+        if request.user_id is not None:
+            reused = await self._reuse_session(request.tenant_id, request.user_id)
+            if reused is not None:
+                return reused
+
         await self._enforce_quota(request.tenant_id)
 
-        # Stream J.15 — a user-scoped acquire mounts that user's
-        # persistent workspace volume at /workspace; resolve (creating
-        # on first use) the user_workspace row. No user_id → an
-        # ephemeral tmpfs workspace (the pre-J.15 behaviour).
+        # A user-scoped acquire mounts that user's persistent workspace
+        # volume at /workspace; resolve (creating on first use) the
+        # user_workspace row. No user_id → an ephemeral tmpfs workspace.
         workspace: UserWorkspace | None = None
         if request.user_id is not None:
             workspace = await self._workspaces.resolve(
@@ -136,6 +152,9 @@ class SandboxSupervisor:
                 acquired_at=acquired_at,
             )
         )
+        if request.user_id is not None:
+            # Register the warm session for reuse by the user's next run.
+            self._sessions[(request.tenant_id, request.user_id)] = record.id
         await self._emit_audit(
             tenant_id=record.tenant_id,
             action=AuditAction.SANDBOX_ACQUIRED,
@@ -162,19 +181,38 @@ class SandboxSupervisor:
         ``timeout_s`` omitted → the service default. Raises
         :class:`SandboxNotFoundError` when no live sandbox holds that id,
         and :class:`SupervisorError` when the runner link fails.
+
+        The per-sandbox lock serialises concurrent execs sharing one
+        warm session (the held pipe handles one exec at a time); each
+        exec stamps ``last_used_at`` so the idle reaper measures from it.
         """
         link = self._links.get(sandbox_id)
         if link is None:
             raise SandboxNotFoundError(sandbox_id)
         resolved_timeout = timeout_s if timeout_s is not None else self._settings.default_timeout_s
-        try:
-            return await link.exec(code, resolved_timeout)
-        except RunnerLinkError as exc:
-            msg = f"sandbox exec failed: {exc}"
-            raise SupervisorError(msg) from exc
+        lock = self._exec_locks.setdefault(sandbox_id, asyncio.Lock())
+        async with lock:
+            await self._touch(sandbox_id)
+            try:
+                return await link.exec(code, resolved_timeout)
+            except RunnerLinkError as exc:
+                msg = f"sandbox exec failed: {exc}"
+                raise SupervisorError(msg) from exc
 
     async def release(self, sandbox_id: UUID) -> None:
-        """Routine teardown — no force-destroy audit."""
+        """Routine teardown.
+
+        A J.15 warm per-user session is **kept alive** (no-op) — it
+        stays hot for the user's next run and is reclaimed by the idle
+        reaper. A non-session (no ``user_id``) sandbox is destroyed.
+        """
+        record = await self._store.get(sandbox_id)
+        if (
+            record is not None
+            and record.user_id is not None
+            and record.state is SandboxState.IN_USE
+        ):
+            return
         await self.destroy(sandbox_id, reason=DESTROY_REASON_RELEASE)
 
     async def destroy(self, sandbox_id: UUID, *, reason: str) -> None:
@@ -197,6 +235,13 @@ class SandboxSupervisor:
             return
 
         link = self._links.pop(sandbox_id, None)
+        self._exec_locks.pop(sandbox_id, None)
+        # Clear the warm-session entry — but only if it still points here
+        # (a newer session for the same user may have replaced it).
+        if record.user_id is not None:
+            session_key = (record.tenant_id, record.user_id)
+            if self._sessions.get(session_key) == sandbox_id:
+                del self._sessions[session_key]
         forced = reason != DESTROY_REASON_RELEASE
         if forced:
             await self._docker.remove(_container_name(sandbox_id))
@@ -254,6 +299,36 @@ class SandboxSupervisor:
         return data
 
     # ------------------------------------------------------------------
+
+    async def _reuse_session(self, tenant_id: UUID, user_id: UUID) -> AcquireResponse | None:
+        """Return the user's warm session as an :class:`AcquireResponse`, or
+        ``None`` when there is no live session to reuse (J.15).
+
+        Reuse skips the quota check — the session already holds its slot.
+        A stale map entry (link gone, or the row is no longer ``IN_USE``)
+        is dropped so the caller falls through to a fresh launch.
+        """
+        sandbox_id = self._sessions.get((tenant_id, user_id))
+        if sandbox_id is None or sandbox_id not in self._links:
+            return None
+        record = await self._store.get(sandbox_id)
+        if record is None or record.state is not SandboxState.IN_USE:
+            self._sessions.pop((tenant_id, user_id), None)
+            return None
+        return AcquireResponse(
+            sandbox_id=sandbox_id,
+            container_id=_container_name(sandbox_id),
+            cold_start=False,
+            acquired_at=record.acquired_at or record.created_at,
+        )
+
+    async def _touch(self, sandbox_id: UUID) -> None:
+        """Stamp ``last_used_at`` so the idle reaper measures from now."""
+        record = await self._store.get(sandbox_id)
+        if record is not None:
+            await self._store.update(
+                record.with_state(record.state, last_used_at=datetime.now(UTC))
+            )
 
     async def _enforce_quota(self, tenant_id: UUID) -> None:
         limit = await self._store.sandbox_limit_for_tenant(tenant_id)
