@@ -136,6 +136,14 @@ ignore_missing_imports = true
 module = "jieba.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["pymupdf4llm.*", "pymupdf.*", "fitz.*", "markitdown.*"]
+ignore_missing_imports = true
+# These ship incomplete inline types; skip following them so their
+# (partially-typed) symbols are treated as untyped rather than tripping
+# disallow_untyped_calls under --strict.
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/*/tests", "services/*/tests", "tools/*"]
 asyncio_mode = "auto"
