@@ -39,8 +39,8 @@ class SandboxStore(Protocol):
     async def count_active_for_tenant(self, tenant_id: UUID) -> int:
         """Count the tenant's non-terminal sandboxes (``CREATING`` + ``IN_USE``)."""
 
-    async def list_orphans(self, *, now: datetime, grace_s: int) -> list[SandboxRecord]:
-        """Return ``IN_USE`` sandboxes past ``acquired_at + timeout_s + grace_s``."""
+    async def list_idle_sessions(self, *, now: datetime, idle_ttl_s: int) -> list[SandboxRecord]:
+        """Return ``IN_USE`` sandboxes idle past ``last_used_at + idle_ttl_s``."""
 
     async def sandbox_limit_for_tenant(self, tenant_id: UUID) -> int | None:
         """Return the tenant's ``sandboxes`` quota, or ``None`` if unset."""
@@ -66,6 +66,7 @@ class DbSandboxStore:
                     container_id=record.container_id,
                     state=record.state.value,
                     acquired_at=record.acquired_at,
+                    last_used_at=record.last_used_at,
                     released_at=record.released_at,
                     destroyed_at=record.destroyed_at,
                     destroy_reason=record.destroy_reason,
@@ -88,10 +89,11 @@ class DbSandboxStore:
             )
             return len(result.fetchall())
 
-    async def list_orphans(self, *, now: datetime, grace_s: int) -> list[SandboxRecord]:
-        # Per-row deadline = acquired_at + timeout_s + grace_s. M0 sandbox
-        # counts are small, so fetching IN_USE rows and filtering in Python
-        # is simpler than a SQL per-row interval expression.
+    async def list_idle_sessions(self, *, now: datetime, idle_ttl_s: int) -> list[SandboxRecord]:
+        # A warm session is reaped once idle past ``last_used_at +
+        # idle_ttl_s`` (Stream J.15). M0 sandbox counts are small, so
+        # fetching IN_USE rows and filtering in Python is simpler than a
+        # SQL per-row interval expression.
         async with self._sf() as session:
             result = await session.execute(
                 select(SandboxInstanceRow).where(
@@ -99,12 +101,7 @@ class DbSandboxStore:
                 )
             )
             rows = result.scalars().all()
-        return [
-            record
-            for row in rows
-            if (record := _to_record(row)).acquired_at is not None
-            and record.acquired_at + timedelta(seconds=record.timeout_s + grace_s) < now
-        ]
+        return [record for row in rows if _session_idle(record := _to_record(row), now, idle_ttl_s)]
 
     async def sandbox_limit_for_tenant(self, tenant_id: UUID) -> int | None:
         async with self._sf() as session:
@@ -115,6 +112,17 @@ class DbSandboxStore:
                 )
             )
             return result.scalar_one_or_none()
+
+
+def _session_idle(record: SandboxRecord, now: datetime, idle_ttl_s: int) -> bool:
+    """Whether an ``IN_USE`` session is idle past ``idle_ttl_s``.
+
+    Idleness is measured from the last ``exec`` (``last_used_at``); a
+    session that was acquired but never exec'd falls back to
+    ``acquired_at``. A row with neither timestamp is left alone.
+    """
+    anchor = record.last_used_at or record.acquired_at
+    return anchor is not None and anchor + timedelta(seconds=idle_ttl_s) < now
 
 
 def _to_row(record: SandboxRecord) -> SandboxInstanceRow:
@@ -134,6 +142,7 @@ def _to_row(record: SandboxRecord) -> SandboxInstanceRow:
         timeout_s=record.timeout_s,
         created_at=record.created_at,
         acquired_at=record.acquired_at,
+        last_used_at=record.last_used_at,
         released_at=record.released_at,
         destroyed_at=record.destroyed_at,
         destroy_reason=record.destroy_reason,
@@ -157,6 +166,7 @@ def _to_record(row: SandboxInstanceRow) -> SandboxRecord:
         timeout_s=row.timeout_s,
         created_at=row.created_at,
         acquired_at=row.acquired_at,
+        last_used_at=row.last_used_at,
         released_at=row.released_at,
         destroyed_at=row.destroyed_at,
         destroy_reason=row.destroy_reason,

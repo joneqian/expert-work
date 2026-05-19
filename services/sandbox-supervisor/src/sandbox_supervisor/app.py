@@ -115,7 +115,7 @@ def create_app(
                 supervisor=live,
                 store=store,
                 interval_s=resolved_settings.reaper_interval_s,
-                grace_s=resolved_settings.reaper_grace_s,
+                idle_ttl_s=resolved_settings.session_idle_ttl_s,
             )
             reaper_task = asyncio.create_task(reaper.run_forever(stop))
         logger.info("sandbox_supervisor.start reaper=%s", enable_reaper)

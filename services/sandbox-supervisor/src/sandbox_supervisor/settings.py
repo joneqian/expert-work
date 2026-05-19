@@ -48,13 +48,16 @@ class SandboxSupervisorSettings(BaseSettings):
 
     # -------------------------------------------------------------- quota
     #: Per-tenant sandbox cap applied when the tenant has no
-    #: ``tenant_quota`` row for the ``sandboxes`` dimension. Sandboxes are
-    #: an expensive resource, so M0 defaults to a bounded cap rather than
-    #: "unlimited" (STREAM-F-DESIGN § 1.1 F.1).
-    default_max_sandboxes: int = Field(default=10, gt=0, le=1000)
+    #: ``tenant_quota`` row for the ``sandboxes`` dimension. With J.15
+    #: warm sessions a sandbox stays ``IN_USE`` across a user's whole
+    #: active window, so this cap is effectively the number of
+    #: concurrently-active users a tenant supports (STREAM-J-DESIGN § 9).
+    default_max_sandboxes: int = Field(default=50, gt=0, le=1000)
 
     # -------------------------------------------------------------- reaper
     reaper_interval_s: float = Field(default=10.0, gt=0, le=300)
-    #: Grace added to a sandbox's own ``timeout_s`` before the reaper
-    #: treats an ``IN_USE`` row as an orphan (STREAM-F-DESIGN § 2.7).
-    reaper_grace_s: int = Field(default=30, ge=0, le=600)
+    #: Idle TTL for a warm per-user sandbox session (Stream J.15). The
+    #: reaper destroys a session whose last ``exec`` (``last_used_at``)
+    #: is older than this — freeing compute; the persistent volume is
+    #: kept, so the next message cold-starts a fresh container on it.
+    session_idle_ttl_s: int = Field(default=15 * 60, gt=0, le=24 * 60 * 60)

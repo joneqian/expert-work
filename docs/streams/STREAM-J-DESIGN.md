@@ -126,10 +126,11 @@ class AgentState(TypedDict):
 | `0017_long_term_memory` | `memory_item`（pgvector）| J.3 | tenant + user 组合 RLS |
 | `0018_user_workspace` | `user_workspace`、扩 `sandbox_instance` | J.15 | 无 RLS（supervisor 持有,同 `sandbox_instance`）|
 | `0019_artifact` | `artifact`、`artifact_version` | J.9 | tenant + user 组合 RLS |
-| `0020_knowledge_base` | `knowledge_base`、`knowledge_chunk`（pgvector）| J.5 | tenant RLS |
-| `0021_skill` | `skill`、`skill_version` | J.7 | tenant RLS |
-| `0022_trigger` | `trigger`、`trigger_run` | J.10 | tenant RLS |
-| `0023_trajectory` | `trajectory`、`eval_dataset` | J.12 J.13 | tenant RLS |
+| `0020_sandbox_last_used` | 扩 `sandbox_instance`（`last_used_at`）| J.15 | 无 RLS（supervisor 持有）|
+| `0021_knowledge_base` | `knowledge_base`、`knowledge_chunk`（pgvector）| J.5 | tenant RLS |
+| `0022_skill` | `skill`、`skill_version` | J.7 | tenant RLS |
+| `0023_trigger` | `trigger`、`trigger_run` | J.10 | tenant RLS |
+| `0024_trajectory` | `trajectory`、`eval_dataset` | J.12 J.13 | tenant RLS |
 
 ---
 
@@ -369,36 +370,37 @@ class MemorySpec(BaseModel):                # 扩充现有 AgentSpecBody.memory
 
 ### 9.2 设计与边界
 
-**架构：临时容器 + 持久卷**（评估 08 § 4 推荐;Mini-ADR J-9）：
+**架构：持久卷 + per-user 热沙盒会话**（评估 08 § 4 推荐;Mini-ADR J-9 / J-10）：
 
 - **持久卷**：每个 `(tenant_id, user_id)` 一个 docker named volume,存工作区文件 / 中间产物。卷长存,由 `user_workspace` 表登记。
-- **临时容器**：沙盒容器维持 per-run 临时（Mini-ADR F-2 不变）,但启动时**挂载该用户的卷**到 `/workspace`（替代 `--tmpfs`）。run 结束容器即销毁,卷保留。
-- **"restore" = 新容器挂暖卷**（Mini-ADR J-10）：新会话 / 新 run 进来 → 解析该用户的 `user_workspace` → 全新 `docker run` 挂载已有卷。上一轮的文件就在卷里,无需任何容器还原动作。
-- **不做容器 hibernate 状态机**:held-pipe 传输（`docker run -i` 持管道）把容器寿命绑死在 attached 子进程上,`docker stop` / `docker start` 同一容器无法重连;且容器本就 per-run 即销毁,run 之间算力已归零 —— IDLE / HIBERNATED 容器状态机解决的是不存在的问题。算力释放靠"容器随 run 销毁",工作区还原靠"卷长存"。
-- **不走 CRIU 容器快照**——复杂脆弱;持久卷 + 新容器已满足"还原工作区",进程态本就该由 checkpointer（对话）+ 卷（文件）承载。
+- **per-user 热沙盒会话**：每个 `(tenant_id, user_id)` 至多一个 ACTIVE 沙盒容器,挂载该用户的卷到 `/workspace`（替代 `--tmpfs`）,**跨 run / 跨消息保持热**。`acquire`（带 `user_id`）语义 = 取或建该用户的会话沙盒;有热会话则复用、免 `docker run` 冷启动。held-pipe 的 runner 协议本就支持一容器多次 exec。
+- **空闲 TTL 释放**（Mini-ADR J-10）：每次 exec 刷新 `last_used_at`;reaper 回收 `last_used_at + session_idle_ttl_s`（默认 15min）之外的 `IN_USE` 会话 —— `docker rm -f`,**卷保留**。空闲超 TTL 才销毁,而非每个 run 结束。
+- **"restore" = 冷启动新容器挂暖卷**：会话被空闲回收后,下条消息 `acquire` 起全新 `docker run` 挂已有卷 —— 上一轮文件就在卷里。TTL 窗口内的连续消息走热路径、零冷启动。
+- **无 `user_id` 的 run**：退回 per-run 临时 tmpfs 沙盒（机器触发、无用户绑定 —— 无会话可热）,向后兼容。
+- **不走 CRIU 容器快照、不走 `docker stop`/`start` hibernate**——held-pipe（`docker run -i` 持管道）把容器寿命绑死在 attached 子进程,停 / 起同一容器无法重连管道。held-pipe 世界里"hibernate"只能是销毁 + 冷启动重建;持久卷保证零数据损失。
 
 ### 9.3 接口与数据模型
 
 ```python
-# 迁移 0018_user_workspace
-class UserWorkspaceRow(Base):               # 表 user_workspace —— tenant + user RLS
-    id: UUID
-    tenant_id, user_id: UUID
-    volume_name: str                        # docker named volume 标识,(tenant,user) 唯一
-    size_bytes: int                         # 最近一次测量,M0 可选
-    created_at, last_accessed_at: datetime
-
-# 扩 sandbox_instance：加 user_id（裸列）、workspace_id（→ user_workspace.id,可空）
-# SandboxState 不变 —— 容器仍 CREATING / IN_USE / DESTROYED / FAILED
+# 迁移 0018_user_workspace —— user_workspace 表 + sandbox_instance 加
+#   user_id / workspace_id（已落地）
+# 迁移 0020_sandbox_last_used —— sandbox_instance 加 last_used_at:reaper 按
+#   last_used_at + session_idle_ttl_s 回收空闲热会话（非 acquired_at + timeout_s）
+# SandboxState 不变 —— 热会话就是 IN_USE（确实在用,只是不在 exec）
 ```
 
-sandbox-supervisor 变更：`acquire` 解析（或创建）调用方的 `user_workspace` 卷 → 经 runtime_provider 把 named volume 挂到 `/workspace`（替 tmpfs）;`AcquireRequest` 加 `user_id`;无 `user_id` 时退回今天的 tmpfs 临时工作区（向后兼容）。
+sandbox-supervisor 变更：
+- `acquire`（带 `user_id`）→ 取或建 `(tenant,user)` 热会话;`release` 对会话沙盒 = no-op（留热）,对无 `user_id` 的临时沙盒 = 销毁（不变）。
+- `exec` 刷新 `last_used_at`;同会话并发 exec 经 per-session 锁串行化（held-pipe 一次一 exec）。
+- reaper 判定口径从 `acquired_at + timeout_s + grace` 改为 `last_used_at + session_idle_ttl_s`。
+- 取消（Mini-ADR F-8）`destroy` 仍强销毁会话 —— 下条消息冷启动。
+- `default_max_sandboxes` 默认上限抬高 —— 热会话长期占配额槽,上限实质 = 同时活跃用户数。
 
 ### 9.4 整合点
 
-`sandbox-supervisor/supervisor.py`（`acquire` 解析用户卷）、`sandbox-supervisor/runtime_provider`（named volume 挂载替 tmpfs）、`sandbox_instance` 模型、`exec_python` 工具（透传 user 作用域）、`SandboxSpec`（`filesystem` 块加 `persistent_workspace: bool`）。
+`sandbox-supervisor/supervisor.py`（会话取/建/复用、per-session 锁）、`sandbox-supervisor/reaper.py`（`last_used_at + TTL` 口径）、`sandbox-supervisor/runtime_provider`（named volume 挂载替 tmpfs）、`sandbox_instance` 模型 + 迁移、`SandboxSupervisorSettings`（`session_idle_ttl_s`、抬高的 `default_max_sandboxes`）。`exec_python` 工具不变 —— 仍 acquire→exec→release,热复用全在 supervisor 侧。
 
-> **对标**：hermes Daytona / Modal 持久后端（托管平台）、deer-flow 无。helix 自托管,用 docker named volume + 生命周期状态机自建 —— 不引外部托管沙盒依赖。
+> **对标**：hermes Daytona / Modal 持久后端（托管平台）、deer-flow 无。helix 自托管,用 docker named volume + 热会话生命周期自建 —— 不引外部托管沙盒依赖。
 
 ---
 
@@ -748,8 +750,10 @@ J.13 排**最后**,评估并落实升级（Mini-ADR J-20）：
 **J-9｜有状态执行环境 = 临时算力 + 持久卷,不走 CRIU**
 背景：要"还原用户环境"。备选：(a) CRIU 容器进程快照;(b) 持久卷 + 重启容器。决策：(b)。取舍：CRIU 复杂脆弱、跨内核 / 镜像版本易碎;对话态归 checkpointer、文件态归持久卷,进程态无需快照。
 
-**J-10｜restore = 新容器挂暖卷,不做容器 hibernate 状态机**
-背景：per-user 沙盒要"空闲释放算力、来消息快速还原"。备选：(a) 容器生命周期状态机,空闲 `docker stop` → HIBERNATED,新消息 `docker start`;(b) 容器维持 per-run 临时,持久的只有卷,restore = 新容器挂已有卷。决策：(b)。取舍：(a) 与 held-pipe 传输冲突 —— 沙盒经 `docker run -i` 持管道通信,容器寿命绑死在 attached 子进程,`docker stop` / `docker start` 同一容器无法重连管道,要改就得重做 Stream F 传输核心;且容器本就随 run 销毁,run 之间算力已归零,hibernate 状态机解决的是不存在的问题。(b) 零传输改动,算力释放（容器随 run 销毁）与数据保留（卷长存）都满足,`docker run` 挂暖卷即快速 restore。
+**J-10｜per-user 热沙盒会话 + 空闲 TTL 释放**
+背景：per-user 持久 agent 要求"用户活跃时沙盒保持热（连续消息免冷启动）、静默后释放算力"（memory:target-product-form,2026-05-18 用户确认）。J.15 首版曾改为"per-run 即销毁、只持久卷",经用户确认该决策丢失了"活沙盒复用"需求 —— 此 ADR 为修订版。
+备选：(a) 容器 hibernate 状态机,空闲 `docker stop` → `start`;(b) per-run 即销毁,无热路径;(c) per-user 热会话,空闲超 TTL 销毁、下条消息冷启动重建。决策：(c)。
+取舍：(a) 与 held-pipe 冲突 —— `docker run -i` 持管道,停 / 起同一容器无法重连,要改得重做 Stream F 传输核心。(b) 算力释放最彻底但每个 run 冷启动,丢了连续消息的热复用。(c) held-pipe 的 runner 协议本就支持一容器多次 exec —— 会话跨 run 保持 `IN_USE` 即热复用,reaper 按 `last_used_at + session_idle_ttl_s`（默认 15min）回收即"hibernate";销毁后下条消息冷启动挂暖卷,持久卷保证零数据损失。热会话长期占配额槽,故 `default_max_sandboxes` 上限抬高。
 
 **J-11｜artifact 由 agent 显式登记,不自动扫工作区**
 背景：工作区会有大量中间文件。决策：`save_artifact` 工具显式登记。取舍：自动扫会把临时文件当产物,噪声大;显式登记语义清晰、可版本化。

@@ -49,6 +49,10 @@ class SandboxInstanceRow(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: Time of the last ``exec`` (Stream J.15 warm sessions). The reaper
+    #: reclaims a session idle past ``session_idle_ttl_s``; ``None`` until
+    #: the first exec — the reaper then falls back to ``acquired_at``.
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     destroyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: release / idle_timeout / cancelled / oom — ``None`` until terminal.
