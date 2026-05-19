@@ -279,6 +279,39 @@ async def test_build_agent_max_steps_from_workflow() -> None:
     assert built.max_steps == 5
 
 
+class _StubChildBuilder:
+    """Conforms to ``ChildAgentBuilder``; never invoked by ``build_agent``
+    (assembly only *registers* SubAgentTools)."""
+
+    async def __call__(self, *, tenant_id: Any, name: str, version: str, depth: int) -> Any:
+        raise AssertionError("child builder must not be called during build_agent")
+
+
+def _subagent_spec() -> AgentSpec:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["subagents"] = [
+        {"name": "researcher", "agent_ref": "deep-researcher@1.0.0", "description": "research"}
+    ]
+    return AgentSpec.model_validate(doc)
+
+
+@pytest.mark.asyncio
+async def test_build_agent_with_subagents_succeeds() -> None:
+    env = ToolEnv(child_agent_builder=_StubChildBuilder())
+    async with make_checkpointer("memory") as cp:
+        built = await build_agent(
+            _subagent_spec(), secret_store=_secret_store(), checkpointer=cp, tool_env=env
+        )
+    assert isinstance(built, BuiltAgent)
+
+
+@pytest.mark.asyncio
+async def test_build_agent_subagents_without_builder_raises() -> None:
+    async with make_checkpointer("memory") as cp:
+        with pytest.raises(AgentFactoryError, match="sub-agent builder"):
+            await build_agent(_subagent_spec(), secret_store=_secret_store(), checkpointer=cp)
+
+
 @pytest.mark.asyncio
 async def test_build_agent_react_has_no_planner_node() -> None:
     """The default ``react`` workflow builds a graph without a planner."""

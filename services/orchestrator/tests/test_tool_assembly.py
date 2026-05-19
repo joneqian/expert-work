@@ -3,22 +3,39 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 import pytest
 
-from helix_agent.protocol import BuiltinToolSpec, HTTPToolSpec, MCPToolSpec
+from helix_agent.protocol import BuiltinToolSpec, HTTPToolSpec, MCPToolSpec, SubAgentSpec
 from orchestrator import AgentFactoryError
 from orchestrator.tools import (
+    MAX_SUBAGENT_DEPTH,
     HTTPTool,
     MCPServerPool,
     MCPToolDef,
     RecordingMCPClient,
     RecordingTavilyClient,
+    SubAgentTool,
     ToolEnv,
     WebSearchTool,
     build_tool_registry,
 )
+
+
+class _StubChildBuilder:
+    """Conforms to ``ChildAgentBuilder``. Assembly only *registers*
+    SubAgentTools — it never invokes the builder — so the body is unused."""
+
+    async def __call__(self, *, tenant_id: Any, name: str, version: str, depth: int) -> Any:
+        raise AssertionError("child builder must not be called during assembly")
+
+
+_SUBAGENTS = [
+    SubAgentSpec(name="researcher", agent_ref="deep-researcher@1.0.0", description="research"),
+    SubAgentSpec(name="writer", agent_ref="doc-writer@2.0.0", description="drafting"),
+]
 
 
 async def _allowlist(_tenant: UUID | None) -> Sequence[str]:
@@ -118,3 +135,65 @@ async def test_multiple_tools_all_registered() -> None:
     )
     assert registry.get("web_search") is not None
     assert registry.get("http") is not None
+
+
+# ---------------------------------------------------------------------------
+# subagents — agent-as-tool delegation (Stream J.4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_subagents_assembled_into_named_tools() -> None:
+    env = ToolEnv(child_agent_builder=_StubChildBuilder())
+    registry = await build_tool_registry([], tool_env=env, subagents=_SUBAGENTS)
+    researcher = registry.get("researcher")
+    writer = registry.get("writer")
+    assert isinstance(researcher, SubAgentTool)
+    assert isinstance(writer, SubAgentTool)
+    # Top-level agent builds at depth 0 → its children build at depth 1.
+    assert researcher.child_depth == 1
+
+
+@pytest.mark.asyncio
+async def test_subagent_child_depth_is_parent_depth_plus_one() -> None:
+    env = ToolEnv(child_agent_builder=_StubChildBuilder())
+    registry = await build_tool_registry(
+        [], tool_env=env, subagents=_SUBAGENTS[:1], subagent_depth=1
+    )
+    tool = registry.get("researcher")
+    assert isinstance(tool, SubAgentTool)
+    assert tool.child_depth == 2
+
+
+@pytest.mark.asyncio
+async def test_subagents_without_builder_raises() -> None:
+    with pytest.raises(AgentFactoryError, match="sub-agent builder"):
+        await build_tool_registry([], tool_env=ToolEnv(), subagents=_SUBAGENTS)
+
+
+@pytest.mark.asyncio
+async def test_subagents_not_registered_at_depth_cap() -> None:
+    # At MAX_SUBAGENT_DEPTH nothing registers — the structural recursion
+    # guard. The agent still builds; it just cannot delegate further.
+    env = ToolEnv(child_agent_builder=_StubChildBuilder())
+    registry = await build_tool_registry(
+        [], tool_env=env, subagents=_SUBAGENTS, subagent_depth=MAX_SUBAGENT_DEPTH
+    )
+    assert len(registry) == 0
+
+
+@pytest.mark.asyncio
+async def test_depth_cap_skips_missing_builder_check() -> None:
+    # At the cap nothing is registered, so a missing builder is not an
+    # error — the un-buildable check only fires when tools would register.
+    registry = await build_tool_registry(
+        [], tool_env=ToolEnv(), subagents=_SUBAGENTS, subagent_depth=MAX_SUBAGENT_DEPTH
+    )
+    assert len(registry) == 0
+
+
+@pytest.mark.asyncio
+async def test_no_subagents_with_empty_builder_is_fine() -> None:
+    # No subagents declared → the missing-builder check never fires.
+    registry = await build_tool_registry([], tool_env=ToolEnv())
+    assert len(registry) == 0
