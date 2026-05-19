@@ -6,6 +6,12 @@ Concrete tool adapters land in their own modules (``web_search`` E.7,
 :class:`ToolRegistry` at orchestrator startup.
 """
 
+from orchestrator.tools.artifact import (
+    ListArtifactsTool as ListArtifactsTool,
+)
+from orchestrator.tools.artifact import (
+    SaveArtifactTool as SaveArtifactTool,
+)
 from orchestrator.tools.assembly import (
     KNOWN_BUILTINS as KNOWN_BUILTINS,
 )
@@ -138,6 +144,7 @@ __all__ = [
     "HTTPSupervisorClient",
     "HTTPTavilyClient",
     "HTTPTool",
+    "ListArtifactsTool",
     "MCPCallResult",
     "MCPClient",
     "MCPServerConfig",
@@ -150,6 +157,7 @@ __all__ = [
     "RecordingTavilyClient",
     "SandboxOutcome",
     "SandboxSupervisorError",
+    "SaveArtifactTool",
     "StdioMCPClient",
     "SupervisorClient",
     "TavilyClient",

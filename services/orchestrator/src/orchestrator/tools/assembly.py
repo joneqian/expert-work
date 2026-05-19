@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from helix_agent.persistence import ArtifactStore
 from helix_agent.protocol import (
     BuiltinToolSpec,
     HTTPToolSpec,
@@ -25,6 +26,7 @@ from helix_agent.protocol import (
     ToolSpecEntry,
 )
 from orchestrator.errors import AgentFactoryError
+from orchestrator.tools.artifact import ListArtifactsTool, SaveArtifactTool
 from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
 from orchestrator.tools.registry import ToolRegistry
@@ -32,7 +34,7 @@ from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
 from orchestrator.tools.web_search import DEFAULT_MAX_RESULTS, TavilyClient, WebSearchTool
 
 #: Built-in tool names the platform ships in M0.
-KNOWN_BUILTINS = frozenset({"web_search", "exec_python"})
+KNOWN_BUILTINS = frozenset({"web_search", "exec_python", "save_artifact", "list_artifacts"})
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,9 @@ class ToolEnv:
     mcp_pool: MCPServerPool | None = None
     #: Sandbox Supervisor client backing the ``exec_python`` builtin (F.4).
     supervisor_client: SupervisorClient | None = None
+    #: Artifact registry backing the ``save_artifact`` / ``list_artifacts``
+    #: builtins (Stream J.9).
+    artifact_store: ArtifactStore | None = None
 
 
 async def build_tool_registry(
@@ -93,6 +98,10 @@ def _register_builtin(
         _register_web_search(registry, entry, env)
     elif entry.name == "exec_python":
         _register_exec_python(registry, env, persistent_workspace)
+    elif entry.name == "save_artifact":
+        registry.register(SaveArtifactTool(store=_require_artifact_store(env, "save_artifact")))
+    elif entry.name == "list_artifacts":
+        registry.register(ListArtifactsTool(store=_require_artifact_store(env, "list_artifacts")))
 
 
 def _register_web_search(registry: ToolRegistry, entry: BuiltinToolSpec, env: ToolEnv) -> None:
@@ -117,6 +126,15 @@ def _register_exec_python(registry: ToolRegistry, env: ToolEnv, persistent_works
             persistent_workspace=persistent_workspace,
         )
     )
+
+
+def _require_artifact_store(env: ToolEnv, tool_name: str) -> ArtifactStore:
+    if env.artifact_store is None:
+        raise AgentFactoryError(
+            f"builtin {tool_name!r} declared but no artifact store is "
+            "configured (ToolEnv.artifact_store)"
+        )
+    return env.artifact_store
 
 
 def _register_http(registry: ToolRegistry, env: ToolEnv) -> None:

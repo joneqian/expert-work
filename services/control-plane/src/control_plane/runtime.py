@@ -24,6 +24,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
+from helix_agent.persistence import ArtifactStore
 from helix_agent.protocol import AgentSpec
 from helix_agent.runtime.audit import DefaultSecretRedactor
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
@@ -241,18 +242,21 @@ def build_tool_env(
     web_search_client: TavilyClient | None = None,
     supervisor_client: SupervisorClient | None = None,
     mcp_pool: MCPServerPool | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> ToolEnv:
     """Assemble the M0 :class:`ToolEnv`.
 
     Wires the HTTP tool's per-tenant allowlist, and — when supplied —
     the ``web_search`` Tavily client, the ``exec_python`` Sandbox
-    Supervisor client, and the ``mcp`` server pool.
+    Supervisor client, the ``mcp`` server pool, and the J.9 artifact
+    store backing ``save_artifact`` / ``list_artifacts``.
     """
     return ToolEnv(
         allowlist_provider=_tenant_allowlist_provider(tenant_config_service),
         web_search_client=web_search_client,
         supervisor_client=supervisor_client,
         mcp_pool=mcp_pool,
+        artifact_store=artifact_store,
     )
 
 

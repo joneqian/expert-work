@@ -95,6 +95,11 @@ from helix_agent.persistence.agent_spec import (
     InMemoryAgentSpecStore,
     SqlAgentSpecStore,
 )
+from helix_agent.persistence.artifact import (
+    ArtifactStore,
+    InMemoryArtifactStore,
+    SqlArtifactStore,
+)
 from helix_agent.persistence.audit_log import AuditLogStore, SqlAuditLogStore
 from helix_agent.persistence.auth import (
     ApiKeyStore,
@@ -220,6 +225,10 @@ def create_app(
     )
     # Stream J.3 — long-term memory store for the agent runtime.
     resolved_memory_store: MemoryStore = sql_stores.memory if sql_stores else InMemoryMemoryStore()
+    # Stream J.9 — artifact registry backing save_artifact / list_artifacts.
+    resolved_artifact_store: ArtifactStore = (
+        sql_stores.artifact if sql_stores else InMemoryArtifactStore()
+    )
     resolved_feedback = feedback_repo or (
         sql_stores.feedback if sql_stores else InMemoryFeedbackStore()
     )
@@ -341,6 +350,7 @@ def create_app(
                             resolved_settings.sandbox_supervisor_url
                         ),
                         mcp_pool=mcp_pool,
+                        artifact_store=resolved_artifact_store,
                     ),
                     middleware_env=build_middleware_env(),
                     memory_env=MemoryEnv(store=resolved_memory_store, embedder=embedder),
@@ -476,6 +486,7 @@ class _SqlStores:
     thread_meta: ThreadMetaStore
     tenant_user: TenantUserStore
     memory: MemoryStore
+    artifact: ArtifactStore
     service_account: ServiceAccountStore
     api_key: ApiKeyStore
     role_binding: RoleBindingStore
@@ -507,6 +518,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         thread_meta=SqlThreadMetaStore(session_factory),
         tenant_user=SqlTenantUserStore(session_factory),
         memory=SqlMemoryStore(session_factory),
+        artifact=SqlArtifactStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),
         api_key=SqlApiKeyStore(session_factory),
         role_binding=SqlRoleBindingStore(session_factory),
