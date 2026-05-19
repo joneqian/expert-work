@@ -149,7 +149,13 @@ async def build_agent(
         secret_store=secret_store,
         around_llm_chain=chains.around_llm_call,
     )
-    registry = await build_tool_registry(spec.spec.tools, tool_env=tool_env or ToolEnv())
+    registry = await build_tool_registry(
+        spec.spec.tools,
+        tool_env=tool_env or ToolEnv(),
+        # Stream J.15 — opt the exec_python sandbox into the run user's
+        # persistent workspace volume when the manifest asks for it.
+        persistent_workspace=spec.spec.sandbox.filesystem.persistent_workspace,
+    )
     # Stream J.1 — a ``plan_execute`` manifest front-loads a planner node
     # that decomposes the task before the ReAct loop runs.
     planner_node = (

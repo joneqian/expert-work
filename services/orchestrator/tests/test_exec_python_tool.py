@@ -10,7 +10,7 @@ itself is covered by helix-runtime's ``test_sandbox_audit_middleware``.
 from __future__ import annotations
 
 import asyncio
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -28,8 +28,8 @@ from orchestrator.tools import (
 )
 
 
-def _ctx() -> ToolContext:
-    return ToolContext(tenant_id=uuid4(), run_id=uuid4())
+def _ctx(*, user_id: UUID | None = None) -> ToolContext:
+    return ToolContext(tenant_id=uuid4(), run_id=uuid4(), user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,45 @@ def test_exec_python_spec_advertises_code_param() -> None:
 
 
 # ---------------------------------------------------------------------------
+# J.15 — persistent workspace
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_exec_python_persistent_workspace_passes_user_id() -> None:
+    # persistent_workspace + a user-scoped run → acquire carries user_id.
+    client = RecordingSupervisorClient()
+    tool = ExecPythonTool(client=client, persistent_workspace=True)
+    user_id = uuid4()
+
+    await tool.call({"code": "print(1)"}, ctx=_ctx(user_id=user_id))
+
+    assert client.acquired[0][2] == user_id
+
+
+@pytest.mark.asyncio
+async def test_exec_python_default_does_not_pass_user_id() -> None:
+    # Without the opt-in the sandbox stays ephemeral even for a user run.
+    client = RecordingSupervisorClient()
+    tool = ExecPythonTool(client=client)
+
+    await tool.call({"code": "print(1)"}, ctx=_ctx(user_id=uuid4()))
+
+    assert client.acquired[0][2] is None
+
+
+@pytest.mark.asyncio
+async def test_exec_python_persistent_workspace_without_user_falls_back() -> None:
+    # persistent_workspace on but the run has no user binding → tmpfs.
+    client = RecordingSupervisorClient()
+    tool = ExecPythonTool(client=client, persistent_workspace=True)
+
+    await tool.call({"code": "print(1)"}, ctx=_ctx())
+
+    assert client.acquired[0][2] is None
+
+
+# ---------------------------------------------------------------------------
 # cancellation — Stream F.7 (test matrix #58)
 # ---------------------------------------------------------------------------
 
@@ -178,3 +217,15 @@ async def test_exec_python_builtin_assembled_when_supervisor_present() -> None:
 async def test_exec_python_builtin_missing_supervisor_raises() -> None:
     with pytest.raises(AgentFactoryError, match="Sandbox Supervisor"):
         await build_tool_registry([BuiltinToolSpec(name="exec_python")], tool_env=ToolEnv())
+
+
+@pytest.mark.asyncio
+async def test_exec_python_builtin_carries_persistent_workspace_flag() -> None:
+    # The manifest's sandbox.filesystem.persistent_workspace reaches the tool.
+    env = ToolEnv(supervisor_client=RecordingSupervisorClient())
+    registry = await build_tool_registry(
+        [BuiltinToolSpec(name="exec_python")], tool_env=env, persistent_workspace=True
+    )
+    tool = registry.get("exec_python")
+    assert isinstance(tool, ExecPythonTool)
+    assert tool.persistent_workspace is True

@@ -56,8 +56,14 @@ async def build_tool_registry(
     tool_specs: Sequence[ToolSpecEntry],
     *,
     tool_env: ToolEnv,
+    persistent_workspace: bool = False,
 ) -> ToolRegistry:
     """Build a :class:`ToolRegistry` from a manifest's ``tools:`` entries.
+
+    ``persistent_workspace`` comes from the manifest's
+    ``sandbox.filesystem`` block (Stream J.15) — it makes the
+    ``exec_python`` builtin acquire against the run user's persistent
+    workspace volume.
 
     :raises AgentFactoryError: an entry names an unknown builtin, or
         declares a tool whose ``ToolEnv`` dependency is not configured.
@@ -65,7 +71,7 @@ async def build_tool_registry(
     registry = ToolRegistry()
     for entry in tool_specs:
         if isinstance(entry, BuiltinToolSpec):
-            _register_builtin(registry, entry, tool_env)
+            _register_builtin(registry, entry, tool_env, persistent_workspace)
         elif isinstance(entry, HTTPToolSpec):
             _register_http(registry, tool_env)
         elif isinstance(entry, MCPToolSpec):
@@ -73,7 +79,12 @@ async def build_tool_registry(
     return registry
 
 
-def _register_builtin(registry: ToolRegistry, entry: BuiltinToolSpec, env: ToolEnv) -> None:
+def _register_builtin(
+    registry: ToolRegistry,
+    entry: BuiltinToolSpec,
+    env: ToolEnv,
+    persistent_workspace: bool,
+) -> None:
     if entry.name not in KNOWN_BUILTINS:
         raise AgentFactoryError(
             f"unknown builtin tool {entry.name!r} (known: {sorted(KNOWN_BUILTINS)})"
@@ -81,7 +92,7 @@ def _register_builtin(registry: ToolRegistry, entry: BuiltinToolSpec, env: ToolE
     if entry.name == "web_search":
         _register_web_search(registry, entry, env)
     elif entry.name == "exec_python":
-        _register_exec_python(registry, env)
+        _register_exec_python(registry, env, persistent_workspace)
 
 
 def _register_web_search(registry: ToolRegistry, entry: BuiltinToolSpec, env: ToolEnv) -> None:
@@ -94,13 +105,18 @@ def _register_web_search(registry: ToolRegistry, entry: BuiltinToolSpec, env: To
     registry.register(WebSearchTool(client=env.web_search_client, default_max_results=max_results))
 
 
-def _register_exec_python(registry: ToolRegistry, env: ToolEnv) -> None:
+def _register_exec_python(registry: ToolRegistry, env: ToolEnv, persistent_workspace: bool) -> None:
     if env.supervisor_client is None:
         raise AgentFactoryError(
             "builtin 'exec_python' declared but no Sandbox Supervisor client "
             "is configured (ToolEnv.supervisor_client)"
         )
-    registry.register(ExecPythonTool(client=env.supervisor_client))
+    registry.register(
+        ExecPythonTool(
+            client=env.supervisor_client,
+            persistent_workspace=persistent_workspace,
+        )
+    )
 
 
 def _register_http(registry: ToolRegistry, env: ToolEnv) -> None:

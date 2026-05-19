@@ -386,14 +386,15 @@ async def _dispatch_tool(
 
 
 def _build_tool_context(config: RunnableConfig) -> ToolContext:
-    """Lift tenant binding out of ``config["configurable"]`` into a
-    :class:`ToolContext`. Missing values fall through as ``None`` —
+    """Lift tenant / user binding out of ``config["configurable"]`` into
+    a :class:`ToolContext`. Missing values fall through as ``None`` —
     M0 dev / unit tests rarely supply tenant_id, and per-tenant tools
     (E.8 HTTP, E.9 MCP) handle the ``None`` case explicitly (deny-all)."""
     configurable = config.get("configurable") or {}
     tenant_id = _parse_uuid(configurable.get("tenant_id"))
     run_id = _parse_uuid(configurable.get("run_id"))
-    return ToolContext(tenant_id=tenant_id, run_id=run_id)
+    user_id = _parse_uuid(configurable.get("user_id"))
+    return ToolContext(tenant_id=tenant_id, run_id=run_id, user_id=user_id)
 
 
 def _parse_uuid(raw: object) -> UUID | None:

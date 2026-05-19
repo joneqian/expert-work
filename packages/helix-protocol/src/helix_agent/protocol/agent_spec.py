@@ -201,6 +201,10 @@ class FilesystemSpec(BaseModel):
     readonly_root: bool = True
     writable: list[str] = Field(default_factory=list)
     mounts: list[MountSpec] = Field(default_factory=list)
+    #: Stream J.15 — when ``True``, ``exec_python`` mounts the run's
+    #: user's persistent workspace volume at ``/workspace`` so files
+    #: survive across runs. ``False`` (default) → an ephemeral tmpfs.
+    persistent_workspace: bool = False
 
 
 class SandboxSpec(BaseModel):

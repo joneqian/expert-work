@@ -39,10 +39,13 @@ class ToolContext:
     of them; E.8 HTTPTool is the first to require ``tenant_id`` (for
     the per-tenant allowlist lookup). Future tools read ``run_id`` for
     audit attribution; E.15 will retrofit ``cancellation_token``.
+    ``user_id`` (Stream J.15) scopes ``exec_python``'s persistent
+    workspace volume — ``None`` when the run has no user binding.
     """
 
     tenant_id: UUID | None = None
     run_id: UUID | None = None
+    user_id: UUID | None = None
 
 
 @dataclass(frozen=True)

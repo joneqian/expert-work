@@ -68,8 +68,14 @@ class SandboxSupervisorError(RuntimeError):
 class SupervisorClient(Protocol):
     """The Sandbox Supervisor operations the tool needs."""
 
-    async def acquire(self, *, tenant_id: UUID, thread_id: str) -> UUID:
-        """Launch a sandbox for the tenant; return its id."""
+    async def acquire(
+        self, *, tenant_id: UUID, thread_id: str, user_id: UUID | None = None
+    ) -> UUID:
+        """Launch a sandbox for the tenant; return its id.
+
+        ``user_id`` set → the sandbox mounts that user's persistent
+        workspace volume (Stream J.15); ``None`` → an ephemeral tmpfs.
+        """
 
     async def exec(self, *, sandbox_id: UUID, code: str, timeout_s: int | None) -> SandboxOutcome:
         """Run ``code`` in the sandbox; return its captured outcome."""
@@ -91,11 +97,13 @@ class HTTPSupervisorClient:
     base_url: str
     timeout_s: float = _DEFAULT_TIMEOUT_S
 
-    async def acquire(self, *, tenant_id: UUID, thread_id: str) -> UUID:
-        body = await self._post(
-            "/v1/sandboxes:acquire",
-            json={"tenant_id": str(tenant_id), "thread_id": thread_id},
-        )
+    async def acquire(
+        self, *, tenant_id: UUID, thread_id: str, user_id: UUID | None = None
+    ) -> UUID:
+        payload: dict[str, Any] = {"tenant_id": str(tenant_id), "thread_id": thread_id}
+        if user_id is not None:
+            payload["user_id"] = str(user_id)
+        body = await self._post("/v1/sandboxes:acquire", json=payload)
         return UUID(str(body["sandbox_id"]))
 
     async def exec(self, *, sandbox_id: UUID, code: str, timeout_s: int | None) -> SandboxOutcome:
@@ -160,14 +168,16 @@ class RecordingSupervisorClient:
     )
     exec_error: BaseException | None = None
     destroy_error: Exception | None = None
-    acquired: list[tuple[UUID, str]] = field(default_factory=list)
+    acquired: list[tuple[UUID, str, UUID | None]] = field(default_factory=list)
     execs: list[tuple[UUID, str]] = field(default_factory=list)
     released: list[UUID] = field(default_factory=list)
     destroyed: list[tuple[UUID, str]] = field(default_factory=list)
     _next_id: int = 0
 
-    async def acquire(self, *, tenant_id: UUID, thread_id: str) -> UUID:
-        self.acquired.append((tenant_id, thread_id))
+    async def acquire(
+        self, *, tenant_id: UUID, thread_id: str, user_id: UUID | None = None
+    ) -> UUID:
+        self.acquired.append((tenant_id, thread_id, user_id))
         self._next_id += 1
         return UUID(int=self._next_id)
 
@@ -193,6 +203,10 @@ class ExecPythonTool:
 
     client: SupervisorClient
     output_char_cap: int = DEFAULT_OUTPUT_CHAR_CAP
+    #: Stream J.15 — when ``True`` and the run is user-scoped, acquire
+    #: the sandbox against the user's persistent workspace volume so
+    #: files survive across runs. Set from ``SandboxSpec.filesystem``.
+    persistent_workspace: bool = False
 
     @property
     def spec(self) -> ToolSpec:
@@ -229,8 +243,14 @@ class ExecPythonTool:
             msg = "exec_python requires a tenant binding (ctx.tenant_id)"
             raise ToolBlockedError(msg)
         thread_id = str(ctx.run_id) if ctx.run_id is not None else _FALLBACK_THREAD_ID
+        # Stream J.15 — a persistent-workspace agent acquires against the
+        # run's user volume; without the opt-in (or a user binding) the
+        # sandbox falls back to an ephemeral tmpfs.
+        user_id = ctx.user_id if self.persistent_workspace else None
 
-        sandbox_id = await self.client.acquire(tenant_id=ctx.tenant_id, thread_id=thread_id)
+        sandbox_id = await self.client.acquire(
+            tenant_id=ctx.tenant_id, thread_id=thread_id, user_id=user_id
+        )
         cancelled = False
         try:
             outcome = await self.client.exec(sandbox_id=sandbox_id, code=code, timeout_s=timeout_s)
