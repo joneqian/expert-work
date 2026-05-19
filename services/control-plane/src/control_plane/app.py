@@ -35,6 +35,7 @@ from control_plane.api import (
     build_artifacts_router,
     build_feedback_router,
     build_health_router,
+    build_knowledge_router,
     build_metrics_router,
     build_quota_router,
     build_role_bindings_router,
@@ -52,6 +53,7 @@ from control_plane.auth import (
     MTLSVerifier,
     build_mtls_verifier,
 )
+from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
 from control_plane.manifest import ManifestLoader
 from control_plane.middleware import (
     AuditContextMiddleware,
@@ -125,6 +127,7 @@ from helix_agent.persistence.feedback_store import (
     InMemoryFeedbackStore,
 )
 from helix_agent.persistence.knowledge import (
+    InMemoryKnowledgeStore,
     KnowledgeStore,
     SqlKnowledgeStore,
 )
@@ -179,6 +182,8 @@ def create_app(
     tenant_user_repo: TenantUserStore | None = None,
     feedback_repo: FeedbackStore | None = None,
     artifact_repo: ArtifactStore | None = None,
+    knowledge_repo: KnowledgeStore | None = None,
+    knowledge_ingestion_runner: KnowledgeIngestionRunner | None = None,
     audit_logger: AuditLogger | None = None,
     manifest_loader: ManifestLoader | None = None,
     jwt_verifier: JWTVerifier | None = None,
@@ -238,6 +243,11 @@ def create_app(
     # shared with the agent tool env.
     resolved_artifact_store: ArtifactStore = artifact_repo or (
         sql_stores.artifact if sql_stores else InMemoryArtifactStore()
+    )
+    # Stream J.5 — knowledge bases (RAG) backing the knowledge API + the
+    # knowledge_search tool.
+    resolved_knowledge_store: KnowledgeStore = knowledge_repo or (
+        sql_stores.knowledge if sql_stores else InMemoryKnowledgeStore()
     )
     resolved_supervisor_client = build_supervisor_client(resolved_settings.sandbox_supervisor_url)
     resolved_feedback = feedback_repo or (
@@ -379,6 +389,12 @@ def create_app(
                     middleware_env=middleware_env,
                     memory_env=memory_env,
                 )
+                # Stream J.5 — the ingestion runner needs the embedder;
+                # without one, knowledge document upload is unavailable.
+                if embedder is not None:
+                    _app.state.knowledge_ingestion_runner = KnowledgeIngestionRunner(
+                        store=resolved_knowledge_store, embedder=embedder
+                    )
             if reaper is not None:
                 reaper.start()
             resolved_lifecycle.mark_ready()
@@ -391,6 +407,11 @@ def create_app(
             finally:
                 if reaper is not None:
                     await reaper.stop()
+                ingestion_runner: KnowledgeIngestionRunner | None = getattr(
+                    _app.state, "knowledge_ingestion_runner", None
+                )
+                if ingestion_runner is not None:
+                    await ingestion_runner.aclose()
                 await resolved_lifecycle.graceful_shutdown()
                 # ADR B-6: release the pool after the drain so in-flight
                 # requests keep their connections until they complete.
@@ -415,6 +436,10 @@ def create_app(
     app.state.tenant_user_repo = resolved_tenant_users
     app.state.feedback_store = resolved_feedback
     app.state.artifact_store = resolved_artifact_store
+    app.state.knowledge_store = resolved_knowledge_store
+    # The ingestion runner is built in the lifespan (it needs the resolved
+    # embedder); tests inject one. ``None`` → document upload returns 503.
+    app.state.knowledge_ingestion_runner = knowledge_ingestion_runner
     app.state.supervisor_client = resolved_supervisor_client
     app.state.audit_logger = resolved_audit
     app.state.manifest_loader = resolved_loader
@@ -490,6 +515,7 @@ def create_app(
     app.include_router(build_runs_router())
     app.include_router(build_feedback_router())
     app.include_router(build_artifacts_router())
+    app.include_router(build_knowledge_router())
     app.include_router(build_service_accounts_router())
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())
