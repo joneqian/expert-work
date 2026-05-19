@@ -124,6 +124,10 @@ from helix_agent.persistence.feedback_store import (
     FeedbackStore,
     InMemoryFeedbackStore,
 )
+from helix_agent.persistence.knowledge import (
+    KnowledgeStore,
+    SqlKnowledgeStore,
+)
 from helix_agent.persistence.memory import (
     InMemoryMemoryStore,
     MemoryStore,
@@ -509,6 +513,7 @@ class _SqlStores:
     thread_meta: ThreadMetaStore
     tenant_user: TenantUserStore
     memory: MemoryStore
+    knowledge: KnowledgeStore
     artifact: ArtifactStore
     service_account: ServiceAccountStore
     api_key: ApiKeyStore
@@ -541,6 +546,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         thread_meta=SqlThreadMetaStore(session_factory),
         tenant_user=SqlTenantUserStore(session_factory),
         memory=SqlMemoryStore(session_factory),
+        knowledge=SqlKnowledgeStore(session_factory),
         artifact=SqlArtifactStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),
         api_key=SqlApiKeyStore(session_factory),

@@ -12,6 +12,11 @@ from helix_agent.persistence.models.credential_proxy import (
 from helix_agent.persistence.models.dr_drill import DrDrillRow
 from helix_agent.persistence.models.event_log import EventLogRow
 from helix_agent.persistence.models.feedback import FeedbackRow
+from helix_agent.persistence.models.knowledge import (
+    KnowledgeBaseRow,
+    KnowledgeChunkRow,
+    KnowledgeDocumentRow,
+)
 from helix_agent.persistence.models.memory_item import MemoryItemRow
 from helix_agent.persistence.models.role_binding import RoleBindingRow
 from helix_agent.persistence.models.sandbox_instance import SandboxInstanceRow
@@ -35,6 +40,9 @@ __all__ = [
     "DrDrillRow",
     "EventLogRow",
     "FeedbackRow",
+    "KnowledgeBaseRow",
+    "KnowledgeChunkRow",
+    "KnowledgeDocumentRow",
     "MemoryItemRow",
     "RoleBindingRow",
     "SandboxInstanceRow",

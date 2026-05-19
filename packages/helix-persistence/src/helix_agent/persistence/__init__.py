@@ -25,6 +25,12 @@ from helix_agent.persistence.dr import (
     InMemoryBackupRecordStore as InMemoryBackupRecordStore,
 )
 from helix_agent.persistence.dr import SqlBackupRecordStore as SqlBackupRecordStore
+from helix_agent.persistence.knowledge import (
+    DuplicateKnowledgeBaseError as DuplicateKnowledgeBaseError,
+)
+from helix_agent.persistence.knowledge import InMemoryKnowledgeStore as InMemoryKnowledgeStore
+from helix_agent.persistence.knowledge import KnowledgeStore as KnowledgeStore
+from helix_agent.persistence.knowledge import SqlKnowledgeStore as SqlKnowledgeStore
 from helix_agent.persistence.memory import InMemoryMemoryStore as InMemoryMemoryStore
 from helix_agent.persistence.memory import MemoryStore as MemoryStore
 from helix_agent.persistence.memory import SqlMemoryStore as SqlMemoryStore
@@ -34,6 +40,9 @@ from helix_agent.persistence.models import AuditLogRow as AuditLogRow
 from helix_agent.persistence.models import BackupRecordRow as BackupRecordRow
 from helix_agent.persistence.models import DrDrillRow as DrDrillRow
 from helix_agent.persistence.models import EventLogRow as EventLogRow
+from helix_agent.persistence.models import KnowledgeBaseRow as KnowledgeBaseRow
+from helix_agent.persistence.models import KnowledgeChunkRow as KnowledgeChunkRow
+from helix_agent.persistence.models import KnowledgeDocumentRow as KnowledgeDocumentRow
 from helix_agent.persistence.models import MemoryItemRow as MemoryItemRow
 from helix_agent.persistence.models import TenantUserRow as TenantUserRow
 from helix_agent.persistence.models import ThreadMetaRow as ThreadMetaRow
@@ -111,10 +120,12 @@ __all__ = [
     "Base",
     "DatabaseConfig",
     "DrDrillRow",
+    "DuplicateKnowledgeBaseError",
     "EventLogRow",
     "InMemoryArtifactStore",
     "InMemoryAuditLogStore",
     "InMemoryBackupRecordStore",
+    "InMemoryKnowledgeStore",
     "InMemoryMemoryStore",
     "InMemoryTenantConfigStore",
     "InMemoryTenantQuotaStore",
@@ -122,11 +133,16 @@ __all__ = [
     "InMemoryThreadMetaStore",
     "InMemoryTokenReservationStore",
     "InMemoryUserWorkspaceStore",
+    "KnowledgeBaseRow",
+    "KnowledgeChunkRow",
+    "KnowledgeDocumentRow",
+    "KnowledgeStore",
     "MemoryItemRow",
     "MemoryStore",
     "SqlArtifactStore",
     "SqlAuditLogStore",
     "SqlBackupRecordStore",
+    "SqlKnowledgeStore",
     "SqlMemoryStore",
     "SqlTenantConfigStore",
     "SqlTenantQuotaStore",
