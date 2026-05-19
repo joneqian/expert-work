@@ -15,6 +15,7 @@ so the failure surfaces at build time, not on the first tool call.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -23,6 +24,7 @@ from helix_agent.protocol import (
     BuiltinToolSpec,
     HTTPToolSpec,
     MCPToolSpec,
+    SubAgentSpec,
     ToolSpecEntry,
 )
 from orchestrator.errors import AgentFactoryError
@@ -31,8 +33,10 @@ from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
 from orchestrator.tools.registry import ToolRegistry
 from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
-from orchestrator.tools.subagent import ChildAgentBuilder
+from orchestrator.tools.subagent import MAX_SUBAGENT_DEPTH, ChildAgentBuilder, SubAgentTool
 from orchestrator.tools.web_search import DEFAULT_MAX_RESULTS, TavilyClient, WebSearchTool
+
+logger = logging.getLogger(__name__)
 
 #: Built-in tool names the platform ships in M0.
 KNOWN_BUILTINS = frozenset({"web_search", "exec_python", "save_artifact", "list_artifacts"})
@@ -70,6 +74,8 @@ async def build_tool_registry(
     *,
     tool_env: ToolEnv,
     persistent_workspace: bool = False,
+    subagents: Sequence[SubAgentSpec] = (),
+    subagent_depth: int = 0,
 ) -> ToolRegistry:
     """Build a :class:`ToolRegistry` from a manifest's ``tools:`` entries.
 
@@ -78,8 +84,15 @@ async def build_tool_registry(
     ``exec_python`` builtin acquire against the run user's persistent
     workspace volume.
 
-    :raises AgentFactoryError: an entry names an unknown builtin, or
-        declares a tool whose ``ToolEnv`` dependency is not configured.
+    ``subagents`` is the manifest's ``spec.subagents`` block (Stream J.4);
+    each entry becomes a :class:`SubAgentTool`. ``subagent_depth`` is the
+    build-time recursion depth of the agent being assembled (0 for the
+    top-level agent) — at :data:`MAX_SUBAGENT_DEPTH` no ``SubAgentTool``
+    is registered, so a delegation chain terminates structurally.
+
+    :raises AgentFactoryError: an entry names an unknown builtin, declares
+        a tool whose ``ToolEnv`` dependency is not configured, or declares
+        ``subagents`` with no ``ToolEnv.child_agent_builder``.
     """
     registry = ToolRegistry()
     for entry in tool_specs:
@@ -89,7 +102,43 @@ async def build_tool_registry(
             _register_http(registry, tool_env)
         elif isinstance(entry, MCPToolSpec):
             await _register_mcp(registry, entry, tool_env)
+    _register_subagents(registry, subagents, tool_env, subagent_depth)
     return registry
+
+
+def _register_subagents(
+    registry: ToolRegistry,
+    subagents: Sequence[SubAgentSpec],
+    env: ToolEnv,
+    subagent_depth: int,
+) -> None:
+    """Register one :class:`SubAgentTool` per declared sub-agent — Stream J.4.
+
+    At :data:`MAX_SUBAGENT_DEPTH` nothing is registered (a warning, not an
+    error): the agent still runs, it just cannot delegate further — this
+    is the structural recursion guard (Mini-ADR J-12). Below the cap, a
+    declared ``subagents`` block with no
+    :attr:`ToolEnv.child_agent_builder` is an un-buildable manifest.
+    """
+    if not subagents:
+        return
+    if subagent_depth >= MAX_SUBAGENT_DEPTH:
+        logger.warning(
+            "tools.subagent_depth_cap depth=%d not_registered=%d",
+            subagent_depth,
+            len(subagents),
+        )
+        return
+    if env.child_agent_builder is None:
+        raise AgentFactoryError(
+            "manifest declares 'subagents' but no sub-agent builder is "
+            "configured (ToolEnv.child_agent_builder)"
+        )
+    child_depth = subagent_depth + 1
+    for sub in subagents:
+        registry.register(
+            SubAgentTool(subagent=sub, builder=env.child_agent_builder, child_depth=child_depth)
+        )
 
 
 def _register_builtin(

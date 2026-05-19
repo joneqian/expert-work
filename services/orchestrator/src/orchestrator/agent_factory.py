@@ -122,6 +122,7 @@ async def build_agent(
     tool_env: ToolEnv | None = None,
     middleware_env: MiddlewareEnv | None = None,
     memory_env: MemoryEnv | None = None,
+    subagent_depth: int = 0,
 ) -> BuiltAgent:
     """Assemble a :class:`BuiltAgent` from a validated :class:`AgentSpec`.
 
@@ -135,6 +136,13 @@ async def build_agent(
     (redactor / cache / Langfuse client — Mini-ADR E-15). An empty
     :class:`MiddlewareEnv` still wires the three always-on middlewares
     (dynamic context / circuit breaker / loop detection).
+
+    ``subagent_depth`` is this agent's build-time recursion depth
+    (Stream J.4) — 0 for a top-level agent, parent depth + 1 when the
+    control-plane's ``ChildAgentBuilder`` recursively builds a sub-agent.
+    At :data:`~orchestrator.tools.MAX_SUBAGENT_DEPTH` the manifest's
+    ``subagents`` block is not assembled, so a delegation chain
+    terminates structurally.
 
     Raises :class:`AgentFactoryError` for an un-buildable manifest
     (missing ``api_key_ref``, an unsupported provider, an
@@ -155,6 +163,10 @@ async def build_agent(
         # Stream J.15 — opt the exec_python sandbox into the run user's
         # persistent workspace volume when the manifest asks for it.
         persistent_workspace=spec.spec.sandbox.filesystem.persistent_workspace,
+        # Stream J.4 — assemble the manifest's sub-agents into SubAgentTools;
+        # subagent_depth gates the structural recursion cap.
+        subagents=spec.spec.subagents,
+        subagent_depth=subagent_depth,
     )
     # Stream J.1 — a ``plan_execute`` manifest front-loads a planner node
     # that decomposes the task before the ReAct loop runs.
