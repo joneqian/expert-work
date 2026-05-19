@@ -89,6 +89,26 @@ def test_custom_egress_network_reflected() -> None:
     assert _flag_value(argv, "--network") == "custom-net"
 
 
+# ---------- workspace mount: ephemeral tmpfs vs persistent volume (J.15) ----------
+
+
+def test_default_workspace_is_ephemeral_tmpfs() -> None:
+    # No workspace_volume → the pre-J.15 ephemeral tmpfs.
+    argv = _runc_provider().docker_run_argv(image="img", container_name="sb-1")
+    assert _flag_value(argv, "--tmpfs") == "/workspace:rw,size=64m,mode=1777"
+    assert "--volume" not in argv
+
+
+def test_persistent_workspace_mounts_named_volume() -> None:
+    # Stream J.15 — a workspace_volume mounts a docker named volume and
+    # drops the tmpfs entirely.
+    argv = _runc_provider().docker_run_argv(
+        image="img", container_name="sb-1", workspace_volume="helix-ws-abc"
+    )
+    assert _flag_value(argv, "--volume") == "helix-ws-abc:/workspace"
+    assert "--tmpfs" not in argv
+
+
 # ---------- factory ----------
 
 

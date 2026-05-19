@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from helix_agent.persistence import InMemoryUserWorkspaceStore, workspace_volume_name
 from helix_agent.protocol.audit import AuditAction, AuditResult
 from helix_agent.runtime.sandbox import SandboxRuntimeProvider
 from sandbox_supervisor.app import create_app
@@ -174,6 +175,7 @@ class _Harness:
     store: InMemorySandboxStore
     docker: RecordingDockerClient
     audit: RecordingAuditSink
+    workspaces: InMemoryUserWorkspaceStore
 
 
 def _harness(
@@ -185,14 +187,16 @@ def _harness(
     resolved_store = store if store is not None else InMemorySandboxStore()
     resolved_docker = docker if docker is not None else RecordingDockerClient()
     audit = RecordingAuditSink()
+    workspaces = InMemoryUserWorkspaceStore()
     supervisor = SandboxSupervisor(
         store=resolved_store,
         docker=resolved_docker,
         audit=audit,
         runtime_provider=SandboxRuntimeProvider(oci_runtime="runc"),
+        workspace_store=workspaces,
         settings=settings or SandboxSupervisorSettings(),
     )
-    return _Harness(supervisor, resolved_store, resolved_docker, audit)
+    return _Harness(supervisor, resolved_store, resolved_docker, audit, workspaces)
 
 
 def _running_record(tenant_id: UUID, *, acquired_at: datetime) -> SandboxRecord:
@@ -214,8 +218,10 @@ def _running_record(tenant_id: UUID, *, acquired_at: datetime) -> SandboxRecord:
     )
 
 
-def _acquire_request(tenant_id: UUID | None = None) -> AcquireRequest:
-    return AcquireRequest(tenant_id=tenant_id or uuid4(), thread_id="t-1")
+def _acquire_request(
+    tenant_id: UUID | None = None, *, user_id: UUID | None = None
+) -> AcquireRequest:
+    return AcquireRequest(tenant_id=tenant_id or uuid4(), thread_id="t-1", user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +326,63 @@ async def test_forced_destroy_emits_force_destroy_audit() -> None:
 
     actions = [e.action for e in h.audit.entries]
     assert AuditAction.SANDBOX_FORCE_DESTROY in actions
+
+
+# ---------------------------------------------------------------------------
+# J.15 — the per-user persistent workspace
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_acquire_without_user_uses_ephemeral_tmpfs() -> None:
+    # No user_id → the pre-J.15 ephemeral-tmpfs path.
+    h = _harness()
+    response = await h.supervisor.acquire(_acquire_request())
+
+    argv = h.docker.launches[0]
+    assert "--tmpfs" in argv
+    assert "--volume" not in argv
+    row = h.store.rows[response.sandbox_id]
+    assert row.user_id is None
+    assert row.workspace_id is None
+
+
+@pytest.mark.asyncio
+async def test_acquire_with_user_mounts_persistent_volume() -> None:
+    h = _harness()
+    tenant, user = uuid4(), uuid4()
+    response = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+
+    argv = h.docker.launches[0]
+    assert f"{workspace_volume_name(tenant, user)}:/workspace" in argv
+    assert "--tmpfs" not in argv
+
+    row = h.store.rows[response.sandbox_id]
+    assert row.user_id == user
+    assert row.workspace_id is not None
+
+
+@pytest.mark.asyncio
+async def test_acquire_reuses_one_workspace_per_user() -> None:
+    # Two acquires for the same (tenant, user) resolve the same workspace.
+    h = _harness()
+    tenant, user = uuid4(), uuid4()
+    r1 = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+    r2 = await h.supervisor.acquire(_acquire_request(tenant, user_id=user))
+
+    workspace_id = h.store.rows[r1.sandbox_id].workspace_id
+    assert workspace_id is not None
+    assert h.store.rows[r2.sandbox_id].workspace_id == workspace_id
+
+
+@pytest.mark.asyncio
+async def test_acquire_audit_flags_persistent_workspace() -> None:
+    h = _harness()
+    await h.supervisor.acquire(_acquire_request(user_id=uuid4()))
+    assert h.audit.entries[0].details["persistent_workspace"] is True
+
+    await h.supervisor.acquire(_acquire_request())
+    assert h.audit.entries[1].details["persistent_workspace"] is False
 
 
 # ---------------------------------------------------------------------------

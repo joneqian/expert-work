@@ -53,6 +53,11 @@ class SandboxRecord:
     pids_limit: int
     timeout_s: int
     created_at: datetime
+    #: Owning user + their persistent workspace (Stream J.15). Both
+    #: ``None`` for the ephemeral-tmpfs path — a sandbox acquired
+    #: without a user scope.
+    user_id: UUID | None = None
+    workspace_id: UUID | None = None
     acquired_at: datetime | None = None
     released_at: datetime | None = None
     destroyed_at: datetime | None = None

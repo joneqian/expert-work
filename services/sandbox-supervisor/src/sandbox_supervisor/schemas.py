@@ -20,6 +20,10 @@ class AcquireRequest(BaseModel):
 
     tenant_id: UUID
     thread_id: str
+    #: Owning user (Stream J.15). When set, the sandbox mounts that
+    #: user's persistent workspace volume at ``/workspace``; omitted →
+    #: an ephemeral tmpfs workspace (the pre-J.15 behaviour).
+    user_id: UUID | None = None
     #: Optional per-call resource overrides; omitted → the service defaults.
     cpu: float | None = Field(default=None, gt=0, le=16)
     memory_mb: int | None = Field(default=None, gt=0, le=65536)

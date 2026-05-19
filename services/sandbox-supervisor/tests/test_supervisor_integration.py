@@ -32,6 +32,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from helix_agent.persistence import InMemoryUserWorkspaceStore
 from helix_agent.runtime.sandbox import SandboxRuntimeProvider
 from sandbox_supervisor.docker_client import CliDockerClient
 from sandbox_supervisor.domain import SandboxRecord, SandboxState
@@ -75,6 +76,17 @@ def _sweep_sandbox_containers() -> None:
     leftover = _docker("ps", "--all", "--quiet", "--filter", "name=helix-sb-")
     for container_id in leftover.stdout.split():
         _docker("rm", "--force", container_id)
+
+
+def _sweep_workspace_volumes() -> None:
+    """Remove any leftover ``helix-ws-*`` per-user workspace volume (J.15).
+
+    Run *after* the containers are swept — docker refuses to remove a
+    volume still mounted by a live container.
+    """
+    leftover = _docker("volume", "ls", "--quiet", "--filter", "name=helix-ws-")
+    for volume_name in leftover.stdout.split():
+        _docker("volume", "rm", "--force", volume_name)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -129,9 +141,10 @@ def _docker_env() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _sweep_containers() -> Iterator[None]:
-    """Force-remove any leftover ``helix-sb-*`` container after each test."""
+    """Remove leftover ``helix-sb-*`` containers + ``helix-ws-*`` volumes after each test."""
     yield
     _sweep_sandbox_containers()
+    _sweep_workspace_volumes()
 
 
 class _InMemoryStore:
@@ -181,6 +194,7 @@ def helix() -> _Harness:
         docker=CliDockerClient(),
         audit=_NullAudit(),  # type: ignore[arg-type]  # structural AuditSink
         runtime_provider=SandboxRuntimeProvider(oci_runtime="runc", egress_network=_NETWORK),
+        workspace_store=InMemoryUserWorkspaceStore(),
         settings=SandboxSupervisorSettings(sandbox_image=_IMAGE, oci_runtime="runc"),
     )
     return _Harness(supervisor=supervisor, store=store)
@@ -204,6 +218,43 @@ async def test_gate_45_exec_python_runs_code(helix: _Harness) -> None:
     assert result.exit_code == 0
     assert result.timed_out is False
     assert "42" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# J.15 — the per-user persistent workspace volume
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_persistent_workspace_survives_across_containers(helix: _Harness) -> None:
+    # A user-scoped acquire mounts a docker named volume at /workspace.
+    # Files written in one container outlive it and reappear in the next
+    # — STREAM-J-DESIGN § 9 ("临时容器 + 持久卷"). This also proves a
+    # fresh volume is writable by the image's non-root ``agent`` user.
+    tenant, user = uuid4(), uuid4()
+
+    box_a = await helix.supervisor.acquire(
+        AcquireRequest(tenant_id=tenant, thread_id="t-ws-a", user_id=user)
+    )
+    written = await helix.supervisor.exec(
+        box_a.sandbox_id,
+        code="open('/workspace/note.txt', 'w').write('persisted')",
+    )
+    await helix.supervisor.release(box_a.sandbox_id)
+    assert written.exit_code == 0, written.stderr
+
+    # A brand-new container for the same (tenant, user) re-mounts the
+    # same volume — box A's file is still there.
+    box_b = await helix.supervisor.acquire(
+        AcquireRequest(tenant_id=tenant, thread_id="t-ws-b", user_id=user)
+    )
+    seen = await helix.supervisor.exec(
+        box_b.sandbox_id,
+        code="print(open('/workspace/note.txt').read())",
+    )
+    await helix.supervisor.release(box_b.sandbox_id)
+    assert seen.exit_code == 0, seen.stderr
+    assert "persisted" in seen.stdout
 
 
 # ---------------------------------------------------------------------------

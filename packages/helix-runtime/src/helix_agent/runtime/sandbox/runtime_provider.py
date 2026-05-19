@@ -64,14 +64,20 @@ class SandboxRuntimeProvider:
         image: str,
         container_name: str,
         limits: SandboxResourceLimits = DEFAULT_RESOURCE_LIMITS,
+        workspace_volume: str | None = None,
     ) -> list[str]:
         """Return the full ``docker run`` argv for the sandbox.
 
         The argv carries the Mini-ADR F-5 runtime hardening: read-only
-        rootfs, a single writable ``/workspace`` tmpfs, all capabilities
+        rootfs, a single writable ``/workspace`` mount, all capabilities
         dropped, ``no-new-privileges``, and PID / memory / CPU caps.
         ``--interactive`` keeps stdin open for the runner's line-JSON
         protocol; the image is the final argument.
+
+        ``workspace_volume`` selects the ``/workspace`` backing: ``None``
+        → an ephemeral tmpfs (destroyed with the container); a volume
+        name → a docker named volume that persists across containers
+        (Stream J.15 — the per-user persistent workspace).
         """
         argv = [
             "docker",
@@ -80,11 +86,7 @@ class SandboxRuntimeProvider:
             container_name,
             "--interactive",
             "--read-only",
-            "--tmpfs",
-            # mode=1777: the tmpfs root must be writable by the image's
-            # non-root ``agent`` user — without it /workspace is root-owned
-            # and the sandbox cannot create files (F.8 gate #1).
-            f"/workspace:rw,size={limits.workspace_size_mb}m,mode=1777",
+            *self._workspace_mount(limits, workspace_volume),
             "--cap-drop",
             "ALL",
             "--security-opt",
@@ -102,6 +104,22 @@ class SandboxRuntimeProvider:
             argv += ["--runtime", "runsc"]
         argv.append(image)
         return argv
+
+    @staticmethod
+    def _workspace_mount(limits: SandboxResourceLimits, workspace_volume: str | None) -> list[str]:
+        """The ``/workspace`` mount flags — tmpfs or a persistent volume."""
+        if workspace_volume is None:
+            # Ephemeral tmpfs. mode=1777: the tmpfs root mounts root-owned,
+            # so without it the image's non-root ``agent`` user cannot
+            # create files (F.8 gate #1).
+            return [
+                "--tmpfs",
+                f"/workspace:rw,size={limits.workspace_size_mb}m,mode=1777",
+            ]
+        # Stream J.15 — a per-user docker named volume. A fresh volume
+        # inherits the image's ``/workspace`` ownership (``agent:agent``),
+        # so unlike tmpfs it needs no mode override.
+        return ["--volume", f"{workspace_volume}:/workspace"]
 
 
 def make_sandbox_runtime_provider(

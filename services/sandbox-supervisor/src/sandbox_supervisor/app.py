@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from helix_agent.persistence import (
     DatabaseConfig,
     SqlAuditLogStore,
+    SqlUserWorkspaceStore,
     create_async_engine_from_config,
     create_async_session_factory,
 )
@@ -96,6 +97,7 @@ def create_app(
             docker=docker,
             audit=audit,
             runtime_provider=make_sandbox_runtime_provider(resolved_settings.oci_runtime),
+            workspace_store=SqlUserWorkspaceStore(session_factory),
             settings=resolved_settings,
         )
         app.state.supervisor = live
