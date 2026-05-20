@@ -57,6 +57,7 @@ from control_plane.auth import (
 )
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
 from control_plane.manifest import ManifestLoader
+from control_plane.memory import MemoryDLQWorker
 from control_plane.middleware import (
     AuditContextMiddleware,
     AuthMiddleware,
@@ -139,8 +140,11 @@ from helix_agent.persistence.knowledge import (
 )
 from helix_agent.persistence.memory import (
     InMemoryMemoryStore,
+    InMemoryMemoryWritebackDLQ,
     MemoryStore,
+    MemoryWritebackDLQ,
     SqlMemoryStore,
+    SqlMemoryWritebackDLQ,
 )
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore,
@@ -246,6 +250,11 @@ def create_app(
     # Stream J.3 — long-term memory store for the agent runtime.
     resolved_memory_store: MemoryStore = memory_repo or (
         sql_stores.memory if sql_stores else InMemoryMemoryStore()
+    )
+    # Stream K.K7 — DLQ used by the writeback path; defaults match the
+    # memory store's backing (SQL when sql_stores is set, else in-memory).
+    resolved_memory_dlq: MemoryWritebackDLQ = (
+        sql_stores.memory_dlq if sql_stores else InMemoryMemoryWritebackDLQ()
     )
     # Stream J.9 — artifact registry backing save_artifact / list_artifacts
     # and the artifact API. The supervisor client backs artifact content
@@ -416,7 +425,11 @@ def create_app(
                     image_resolver=image_resolver,
                 )
                 middleware_env = build_middleware_env()
-                memory_env = MemoryEnv(store=resolved_memory_store, embedder=embedder)
+                memory_env = MemoryEnv(
+                    store=resolved_memory_store,
+                    embedder=embedder,
+                    dlq=resolved_memory_dlq,  # K.K7 — failed writebacks land here
+                )
                 # Stream J.4 — the ChildAgentBuilder lets a SubAgentTool
                 # resolve an agent_ref and recursively build the sub-agent;
                 # the top-level agent's ToolEnv carries it so delegation
@@ -444,6 +457,19 @@ def create_app(
                     )
             if reaper is not None:
                 reaper.start()
+            # Stream K.K7 — start the DLQ retry worker only when an
+            # embedder is available (the worker re-embeds before write;
+            # without one it would dead-letter every row immediately).
+            memory_dlq_worker: MemoryDLQWorker | None = None
+            if embedder is not None:
+                memory_dlq_worker = MemoryDLQWorker(
+                    dlq=resolved_memory_dlq,
+                    memory_store=resolved_memory_store,
+                    embedder=embedder,
+                    interval_s=resolved_settings.memory_dlq_worker_interval_s,
+                )
+                memory_dlq_worker.start()
+                _app.state.memory_dlq_worker = memory_dlq_worker
             resolved_lifecycle.mark_ready()
             logger.info(
                 "control_plane.lifespan.ready",
@@ -452,6 +478,8 @@ def create_app(
             try:
                 yield
             finally:
+                if memory_dlq_worker is not None:
+                    await memory_dlq_worker.stop()
                 if reaper is not None:
                     await reaper.stop()
                 ingestion_runner: KnowledgeIngestionRunner | None = getattr(
@@ -599,6 +627,7 @@ class _SqlStores:
     thread_meta: ThreadMetaStore
     tenant_user: TenantUserStore
     memory: MemoryStore
+    memory_dlq: MemoryWritebackDLQ  # Stream K.K7
     knowledge: KnowledgeStore
     artifact: ArtifactStore
     service_account: ServiceAccountStore
@@ -632,6 +661,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         thread_meta=SqlThreadMetaStore(session_factory),
         tenant_user=SqlTenantUserStore(session_factory),
         memory=SqlMemoryStore(session_factory),
+        memory_dlq=SqlMemoryWritebackDLQ(session_factory),
         knowledge=SqlKnowledgeStore(session_factory),
         artifact=SqlArtifactStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),

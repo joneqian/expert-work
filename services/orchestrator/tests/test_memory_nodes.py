@@ -183,6 +183,48 @@ async def test_memory_writeback_node_swallows_llm_failure() -> None:
     assert out == {}
 
 
+@pytest.mark.asyncio
+async def test_memory_writeback_node_enqueues_dlq_on_embed_failure() -> None:
+    """Stream K.K7 — after extraction succeeds, an embed / store failure
+    must hand the work to the DLQ so the worker can retry it. Without a
+    DLQ the prior log-and-drop behaviour stands (other tests cover that)."""
+    from helix_agent.persistence.memory import InMemoryMemoryWritebackDLQ
+
+    store = InMemoryMemoryStore()
+    dlq = InMemoryMemoryWritebackDLQ()
+
+    @dataclass
+    class _FailingEmbedder:
+        async def embed(self, texts: Sequence[str]) -> list[tuple[float, ...]]:
+            del texts
+            raise RuntimeError("embed-down")
+
+    node = make_memory_writeback_node(
+        memory_store=store,
+        embedder=_FailingEmbedder(),
+        llm_caller=_RecordingLLM(  # returns one fact in the {"memories": [...]} envelope
+            responses=[
+                AIMessage(content='{"memories": [{"kind": "fact", "content": "Likes espresso"}]}')
+            ]
+        ),
+        dlq=dlq,
+    )
+    out = await node(  # type: ignore[arg-type]
+        _state("done"),
+        {"configurable": {"tenant_id": str(uuid4()), "user_id": str(uuid4())}},
+    )
+    # Node still returns {} — failure must not block the run.
+    assert out == {}
+    # But the extracted pair landed in the DLQ for the retry worker.
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    assert await dlq.count() == 1
+    rows = await dlq.take_ready(limit=10, now=_dt.now(UTC))
+    assert rows[0].extracted == (("fact", "Likes espresso"),)
+    assert "embed-down" in (rows[0].last_error or "")
+
+
 # ---------------------------------------------------------------------------
 # end-to-end — recall injects, write-back persists
 # ---------------------------------------------------------------------------
