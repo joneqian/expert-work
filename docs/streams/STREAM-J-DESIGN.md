@@ -465,7 +465,7 @@ class UserWorkspaceRow(Base):
 - 失败处理：单卷失败不阻塞其他卷；进 K7 模式 DLQ（`volume_backup_dlq` 表，1m→5m→30m→2h→6h backoff）
 
 **Restore 路径**：
-- 手工 runbook 触发：`tools/persistence/restore_volume.py --tenant <X> --user <Y> --date <YYYY-MM-DD>` 
+- 手工 runbook 触发：`tools/persistence/restore_volume.py --tenant <X> --user <Y> --date <YYYY-MM-DD>`
 - 流程：(1) 从 ObjectStore 拉对应 tar；(2) 创建新 volume 名（避免冲突现有热会话）；(3) 流式还原到新卷；(4) 操作员审核后手工把 `user_workspace.volume_name` 改新名（不自动 swap）
 - Restore 演练：testcontainers 集成测试（同 K15 PG restore 模式）+ runbook `docs/runbooks/volume-restore.md`
 
