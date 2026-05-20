@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
+from helix_agent.protocol import Plan
 from helix_agent.runtime.cancellation import CancellationToken
 
 
@@ -51,6 +52,19 @@ class ToolContext:
     run_id: UUID | None = None
     user_id: UUID | None = None
     cancellation_token: CancellationToken | None = None
+    #: Stream K.K8 — current plan (when ``workflow.type == "plan_execute"``).
+    #: ``update_plan`` reads ``plan.goal`` so the agent's revised plan keeps
+    #: the original goal (the tool only rewrites ``steps``). ``None`` for
+    #: react-mode runs and any run before the planner node has executed.
+    plan: Plan | None = None
+
+
+#: Stream K.K8 — keys a tool is allowed to write back to ``AgentState``
+#: via :attr:`ToolResult.state_updates`. Limiting the set prevents a tool
+#: from inadvertently rewriting unrelated channels (``messages``,
+#: ``step_count`` …); add a key here when a new tool needs to mutate a
+#: specific channel. Today only ``plan`` (Stream J.1 / K.K8 ``update_plan``).
+TOOL_ALLOWED_STATE_KEYS: frozenset[str] = frozenset({"plan"})
 
 
 @dataclass(frozen=True)
@@ -61,10 +75,17 @@ class ToolResult:
     ``meta`` carries truncation flags and any per-tool metadata (per
     Mini-ADR E-10 — caller knows e.g. ``meta.truncated=True`` ↔ output
     was cut).
+
+    ``state_updates`` (Stream K.K8) is the narrow channel through which
+    a tool may write back to :class:`AgentState`. The tools node
+    promotes only keys in :data:`TOOL_ALLOWED_STATE_KEYS`; other keys
+    are silently dropped (so a malformed or compromised tool can't
+    rewrite ``messages`` or ``step_count``).
     """
 
     content: str
     meta: Mapping[str, Any] = field(default_factory=dict)
+    state_updates: Mapping[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable

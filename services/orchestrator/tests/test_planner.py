@@ -198,6 +198,70 @@ async def test_plan_execute_graph_runs_planner_then_agent() -> None:
     assert "step one" in system_text
 
 
+# ---------------------------------------------------------------------------
+# update_plan tool — Stream K.K8 (in-run replan path)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_plan_tool_promotes_new_plan_into_state() -> None:
+    """Agent calls ``update_plan`` → ``tools_node`` writes the new plan
+    onto ``AgentState.plan`` via the K.K8 allowlisted state channel."""
+    from orchestrator.tools.update_plan import UpdatePlanTool
+
+    llm = _RecordingLLM(
+        responses=[
+            # 1) planner — initial plan
+            AIMessage(content='{"goal": "ship X", "steps": ["a", "b"]}'),
+            # 2) agent — calls update_plan
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "update_plan",
+                        "args": {
+                            "steps": ["revised one", "revised two", "revised three"],
+                            "reason": "spec changed mid-run",
+                        },
+                        "id": "tc-up-1",
+                        "type": "tool_call",
+                    }
+                ],
+            ),
+            # 3) agent — final answer
+            AIMessage(content="done"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(UpdatePlanTool())  # implicit-tool wiring done in factory
+
+    graph = build_react_graph(
+        llm_caller=llm,
+        tool_registry=registry,
+        planner_node=make_planner_node(llm),
+    )
+    async with make_checkpointer("memory") as cp:
+        compiled = GraphRunner(checkpointer=cp).compile(graph)
+        result = await compiled.ainvoke(
+            {
+                "messages": [HumanMessage(content="ship X")],
+                "step_count": 0,
+                "max_steps": 5,
+            },
+            config={"configurable": {"thread_id": "update-plan-e2e"}},
+        )
+
+    # The new plan replaces the initial one (3 steps, revised content),
+    # but the original goal is preserved by the tool.
+    assert result["plan"].goal == "ship X"
+    assert len(result["plan"].steps) == 3
+    assert [s.description for s in result["plan"].steps] == [
+        "revised one",
+        "revised two",
+        "revised three",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_react_graph_without_planner_has_no_plan() -> None:
     """A plain ReAct graph (no planner) leaves ``plan`` unset."""
