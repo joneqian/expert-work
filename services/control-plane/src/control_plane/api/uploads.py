@@ -15,7 +15,6 @@ must own the thread, and 404 hides cross-user existence.
 
 from __future__ import annotations
 
-import logging
 from typing import Annotated, Final
 from uuid import UUID, uuid4
 
@@ -31,8 +30,6 @@ from control_plane.settings import Settings
 from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.protocol.multimodal import ImageRef
 from helix_agent.runtime.storage import ObjectStore
-
-logger = logging.getLogger("helix.control_plane.uploads")
 
 #: File extension per accepted image content type. The reverse direction
 #: (ext → media_type) lives in the orchestrator's image resolver.
@@ -122,19 +119,9 @@ def build_uploads_router() -> APIRouter:
             ext=ext,
         )
         await store.put(image_ref.storage_key, raw, content_type=content_type)
-        # Avoid logging the raw ``content_type`` — it's user-provided
-        # (CodeQL py/log-injection). The image-id + byte count let ops
-        # correlate to the object; the type is recoverable from
-        # ``image_ref.ext`` if needed.
-        logger.info(
-            "control_plane.upload.image",
-            extra={
-                "tenant_id": str(tenant_id),
-                "thread_id": str(thread_id),
-                "image_id": str(image_ref.image_id),
-                "bytes": len(raw),
-            },
-        )
+        # No app-level INFO log of the upload — request-context logging
+        # is the audit middleware's job. Logging request-derived values
+        # here is both redundant and trips CodeQL py/log-injection.
         return JSONResponse(status_code=201, content={"image_ref": image_ref.to_uri()})
 
     return router
