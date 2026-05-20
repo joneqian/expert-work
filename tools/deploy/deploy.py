@@ -1,4 +1,4 @@
-"""Blue/green deploy for the control-plane — Stream I.2.
+"""Blue/green deploy for the control-plane — Stream I.2 + K.K11.
 
 STREAM-I-DESIGN § 6. The control-plane is stateless after the ADR B-6
 SQL-store cutover, so two colours (``control-plane-blue`` /
@@ -7,13 +7,18 @@ recreates the idle colour with a new image tag, gates on its readiness,
 optionally steps traffic through a weighted canary, flips the nginx
 upstream, and drains the old colour.
 
-The old colour's container is *stopped but kept* — ``rollback.py``
-(I.3) flips the nginx upstream back to it for a sub-second rollback.
+Stream K.K11 added soak-time health checks between canary steps: pass
+``--soak-check-cmd`` and the deploy aborts + auto-rolls-back to 100%
+live when the command exits non-zero (or raises). The old colour's
+container is *stopped but kept* — ``rollback.py`` (I.3) handles the
+post-flip rollback path.
 
 Usage::
 
     python tools/deploy/deploy.py --tag v1.2.3
-    python tools/deploy/deploy.py --tag v1.2.3 --canary 10,50 --canary-pause 60
+    python tools/deploy/deploy.py --tag v1.2.3 --canary 10,30,50 --canary-pause 60
+    python tools/deploy/deploy.py --tag v1.2.3 --canary 10,30,50 \
+        --soak-check-cmd "tools/observability/canary_health.sh"
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 #: Repo root — ``tools/deploy/deploy.py`` → ``parents[2]``.
@@ -41,6 +47,25 @@ _HEADER = (
 )
 
 _SERVER_RE = re.compile(r"server\s+control-plane-(blue|green):\d+(?:\s+weight=(\d+))?")
+
+
+class CanaryAbortedError(RuntimeError):
+    """Stream K.K11 — soak-check at a canary step reported unhealthy.
+
+    Raised by :func:`deploy` after the upstream is restored to 100%
+    live so callers can ``sys.exit(1)`` without orphaning the deploy
+    half-way. The new colour's container is left running so an
+    operator can ``docker logs`` it; ``rollback.py`` is unaffected
+    (nothing was flipped).
+    """
+
+
+#: Stream K.K11 — type of the soak-check callback. Receives the canary
+#: percentage just installed and returns ``True`` when the SLOs look
+#: healthy. Returning ``False`` (or raising) aborts the canary and
+#: rolls back to 100% live. Tests pass a stub; CLI binds a subprocess
+#: invocation of ``--soak-check-cmd``.
+SoakChecker = Callable[[int], bool]
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +206,17 @@ def deploy(
     canary_pause: float,
     drain_timeout: int,
     ready_timeout: float,
+    soak_checker: SoakChecker | None = None,
 ) -> None:
-    """Run a blue/green deploy: recreate idle → gate → canary → flip → drain."""
+    """Run a blue/green deploy: recreate idle → gate → canary → flip → drain.
+
+    Stream K.K11 — when ``soak_checker`` is supplied, it is called after
+    each canary step (post ``canary_pause``) with the current
+    percentage. A ``False`` return (or any raise) aborts the canary,
+    restores nginx to 100% live, and raises :class:`CanaryAbortedError`
+    — the operator gets a clean partial state instead of half-shifted
+    traffic on a regressing build.
+    """
     live = parse_live_color(UPSTREAM_CONF.read_text())
     idle = other_color(live)
     print(f"[deploy] live={live} idle={idle} tag={tag}")
@@ -198,6 +232,22 @@ def deploy(
         reload_nginx()
         print(f"[deploy] canary: {pct}% → {idle}; pausing {canary_pause:.0f}s")
         time.sleep(canary_pause)
+        if soak_checker is not None:
+            try:
+                healthy = soak_checker(pct)
+            except Exception as exc:
+                print(f"[deploy] canary soak-check raised at {pct}%: {exc}", file=sys.stderr)
+                healthy = False
+            if not healthy:
+                print(
+                    f"[deploy] canary soak-check FAILED at {pct}% — rolling back to 100% {live}",
+                    file=sys.stderr,
+                )
+                write_upstream(render_upstream(live))
+                reload_nginx()
+                raise CanaryAbortedError(
+                    f"canary aborted at {pct}% — upstream restored to 100% {live}"
+                )
 
     write_upstream(render_upstream(idle))
     reload_nginx()
@@ -205,6 +255,27 @@ def deploy(
 
     _compose("stop", "-t", str(drain_timeout), f"control-plane-{live}")
     print(f"[deploy] drained + stopped control-plane-{live} (kept for rollback)")
+
+
+def _subprocess_soak_checker(cmd: str) -> SoakChecker:
+    """Stream K.K11 — wrap a shell command into a :data:`SoakChecker`.
+
+    The command is invoked once per canary step with the percentage as
+    its single argument (``$1``). Exit 0 = healthy, anything else =
+    abort. The wrapper itself swallows nothing — a missing binary
+    raises ``FileNotFoundError`` which :func:`deploy` catches as an
+    aborted soak.
+    """
+
+    def _check(pct: int) -> bool:
+        result = subprocess.run(  # noqa: S603 — argv list, no shell
+            [cmd, str(pct)],
+            check=False,
+            timeout=60,
+        )
+        return result.returncode == 0
+
+    return _check
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -238,7 +309,18 @@ def main(argv: list[str] | None = None) -> int:
         default=120.0,
         help="seconds to wait for the new colour's /healthz/ready.",
     )
+    parser.add_argument(
+        "--soak-check-cmd",
+        default=None,
+        help=(
+            "Stream K.K11 — path to an executable invoked after each canary "
+            "step (gets the percentage as $1). Exit 0 = healthy, non-zero = "
+            "abort + roll back to 100%% live."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    soak_checker = _subprocess_soak_checker(args.soak_check_cmd) if args.soak_check_cmd else None
 
     try:
         deploy(
@@ -247,7 +329,11 @@ def main(argv: list[str] | None = None) -> int:
             canary_pause=args.canary_pause,
             drain_timeout=args.drain_timeout,
             ready_timeout=args.ready_timeout,
+            soak_checker=soak_checker,
         )
+    except CanaryAbortedError as exc:
+        print(f"[deploy] ABORTED: {exc}", file=sys.stderr)
+        return 1
     except (TimeoutError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"[deploy] FAILED: {exc}", file=sys.stderr)
         return 1

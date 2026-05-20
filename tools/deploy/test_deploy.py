@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from deploy import (
     UPSTREAM_CONF,
+    CanaryAbortedError,
+    deploy,
     other_color,
     parse_canary_steps,
     parse_live_color,
@@ -112,3 +114,120 @@ def test_parse_canary_steps_empty() -> None:
 def test_parse_canary_steps_rejects_out_of_range() -> None:
     with pytest.raises(ValueError, match="out of range"):
         parse_canary_steps("10,100")
+
+
+# --------------------------------------------------------------------------- K.K11 canary soak
+#
+# ``deploy.deploy`` itself touches Docker + the filesystem; the unit
+# tests below intercept only the bits K.K11 added (soak_checker call
+# + rollback wiring) by monkeypatching the subprocess / fs helpers on
+# the imported module.
+
+
+def _stub_deploy_io(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[object]]:
+    """Replace every external effect deploy() makes with a recorder.
+
+    Returns a dict mapping operation name → list of recorded arguments
+    so tests can assert call order without touching Docker / nginx /
+    the real upstream conf. String-based ``monkeypatch.setattr`` keeps
+    the import style consistent — CodeQL flags mixing ``from deploy
+    import …`` with ``import deploy`` on the same module.
+    """
+    calls: dict[str, list[object]] = {
+        "compose": [],
+        "wait_ready": [],
+        "reload": [],
+        "writes": [],
+        "sleeps": [],
+    }
+    state = {"upstream": render_upstream("blue")}
+
+    def _read_text(_self: object) -> str:
+        return state["upstream"]
+
+    def _fake_write(text: str) -> None:
+        calls["writes"].append(text)
+        state["upstream"] = text
+
+    monkeypatch.setattr(UPSTREAM_CONF.__class__, "read_text", _read_text)
+    monkeypatch.setattr("deploy.write_upstream", _fake_write)
+    monkeypatch.setattr("deploy.reload_nginx", lambda: calls["reload"].append(None))
+    monkeypatch.setattr("deploy.wait_ready", lambda colour, _t: calls["wait_ready"].append(colour))
+    monkeypatch.setattr(
+        "deploy._compose",
+        lambda *args, tag=None: calls["compose"].append((args, tag)),
+    )
+    monkeypatch.setattr("deploy.time.sleep", lambda s: calls["sleeps"].append(s))
+    return calls
+
+
+def test_canary_soak_check_aborts_and_rolls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stream K.K11 — a False soak check at the second canary step must
+    restore upstream to 100% live and raise :class:`CanaryAbortedError`."""
+    calls = _stub_deploy_io(monkeypatch)
+
+    checked: list[int] = []
+
+    def soak_checker(pct: int) -> bool:
+        checked.append(pct)
+        return pct < 30  # pass at 10, fail at 30
+
+    with pytest.raises(CanaryAbortedError, match="canary aborted at 30%"):
+        deploy(
+            tag="vk11",
+            canary=[10, 30, 50],
+            canary_pause=0.0,
+            drain_timeout=1,
+            ready_timeout=1.0,
+            soak_checker=soak_checker,
+        )
+
+    # The soak checker saw 10 then 30; we never reached 50.
+    assert checked == [10, 30]
+    # Final upstream is the original "100% blue" — restored on abort.
+    assert calls["writes"][-1] == render_upstream("blue")
+    # No drain / stop ran (deploy bailed before the final flip).
+    assert not any("stop" in args for args, _ in calls["compose"])
+
+
+def test_canary_soak_check_pass_all_completes_flip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A green soak at every step lets deploy finish: upstream ends at
+    100% green and the old blue is stopped (deploy.py 's normal exit)."""
+    calls = _stub_deploy_io(monkeypatch)
+
+    deploy(
+        tag="vk11",
+        canary=[10, 50],
+        canary_pause=0.0,
+        drain_timeout=1,
+        ready_timeout=1.0,
+        soak_checker=lambda _pct: True,
+    )
+
+    # Final upstream is 100% green (no weights line).
+    assert calls["writes"][-1] == render_upstream("green")
+    # The drain stop ran against blue.
+    stop_calls = [args for args, _ in calls["compose"] if "stop" in args]
+    assert any("control-plane-blue" in a for a in stop_calls)
+
+
+def test_canary_soak_check_raising_callback_counts_as_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A soak checker that raises is treated as a failed check (we don't
+    want a flaky probe to gate the deploy on a silent exception)."""
+    calls = _stub_deploy_io(monkeypatch)
+
+    def _raising(_pct: int) -> bool:
+        raise RuntimeError("probe broken")
+
+    with pytest.raises(CanaryAbortedError):
+        deploy(
+            tag="vk11",
+            canary=[10],
+            canary_pause=0.0,
+            drain_timeout=1,
+            ready_timeout=1.0,
+            soak_checker=_raising,
+        )
+    assert calls["writes"][-1] == render_upstream("blue")

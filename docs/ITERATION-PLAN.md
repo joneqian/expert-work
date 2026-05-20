@@ -369,7 +369,7 @@
 
 **P2 — 阻塞 Gate 前真生产 release**
 - [x] **K10 G.7 大盘真闭环**（补 G10）— orchestrator SSE worker emit `helix_session_ttft_seconds` 在首 chunk + `helix_durable_resume_seconds`（仅 `RunRecord.is_resume=True` 时），sandbox-supervisor.acquire 在 launch 路径 emit `helix_sandbox_cold_start_seconds`；`tools/observability/rules/sli.yml` 加三条 recording rule；02-orchestrator / 03-sandbox 大盘 panel expr 改用 recording rule + 加 durable_resume panel + 去 "Scaffold" 标记。control-plane runs.py 用 `run_manager.list_by_thread` 判 `is_resume`。3 个新单测。
-- [ ] **K11 加权金丝雀**（补 G13）— nginx upstream `weight=` + `deploy.py --canary 10/30/50/100` 渐进推进 + 失败自动回滚
+- [x] **K11 加权金丝雀**（补 G13）— `deploy.py` 已经有 `--canary 10,30,50` 渐进 + nginx `weight=` upstream（Stream I.2 落地），本 PR 补**失败自动回滚**：加 `--soak-check-cmd` 在每 canary step 末跑外部健康探针，非 0 退出 → 把 upstream 写回 100% live + 抛 `CanaryAbortedError` + exit 1。新增 3 个单测覆盖 abort+rollback / 全过完成 flip / 探针 raise 视为失败。`_subprocess_soak_checker` 把 shell 命令包成 `SoakChecker` 回调；callable injection 让单测无需 docker。
 
 **P3 — 阻塞 M1 入口**
 - [ ] **K12 memory recall eval gate**（补 G2c）— `tools/eval/sets/memory_recall_zh_en/` 中英文 benchmark + `recall@5 >= 0.7` SLO
