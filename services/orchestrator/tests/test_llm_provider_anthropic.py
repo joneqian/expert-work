@@ -36,10 +36,14 @@ from orchestrator.tools.registry import ToolSpec
 
 @pytest.mark.asyncio
 async def test_system_message_lifted_to_system_field() -> None:
+    """Pre-L1 wire shape — exercised with ``cache_enabled=False``.
+    The string-shaped ``system`` field still works when caching is
+    explicitly disabled. The L1-enabled shape is in
+    ``test_cache_control_applied_to_system_and_trailing_messages``."""
     client = RecordingAnthropicClient(
         response={"content": [{"type": "text", "text": "ok"}]},
     )
-    provider = AnthropicProvider(client=client, model="claude-sonnet-4-6")
+    provider = AnthropicProvider(client=client, model="claude-sonnet-4-6", cache_enabled=False)
 
     await provider.complete(
         messages=[
@@ -55,10 +59,12 @@ async def test_system_message_lifted_to_system_field() -> None:
 
 @pytest.mark.asyncio
 async def test_multiple_system_messages_concatenated() -> None:
+    """Multiple system messages still concat to a single string when
+    L1 cache is disabled — exercises the string fallback shape."""
     client = RecordingAnthropicClient(
         response={"content": [{"type": "text", "text": "ok"}]},
     )
-    provider = AnthropicProvider(client=client, model="claude")
+    provider = AnthropicProvider(client=client, model="claude", cache_enabled=False)
 
     await provider.complete(
         messages=[
@@ -86,10 +92,13 @@ async def test_no_system_message_leaves_system_none() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_message_with_tool_calls_emits_tool_use_block() -> None:
+    """Exercises the assistant + tool_result wire shape with caching
+    off so the assertions stay focused on the message mapping
+    logic; L1 cache-control markers are covered separately."""
     client = RecordingAnthropicClient(
         response={"content": [{"type": "text", "text": "done"}]},
     )
-    provider = AnthropicProvider(client=client, model="claude")
+    provider = AnthropicProvider(client=client, model="claude", cache_enabled=False)
 
     history_ai = AIMessage(
         content="checking",
@@ -443,7 +452,11 @@ async def test_human_image_ref_emits_base64_image_block() -> None:
 async def test_human_image_ref_dropped_without_resolver() -> None:
     uri = "helix://image/demo.png"
     client = RecordingAnthropicClient(response={"content": [{"type": "text", "text": "ok"}]})
-    provider = AnthropicProvider(client=client, model="claude-sonnet-4-5")  # no image_resolver
+    # cache_enabled=False so the assertion checks the raw mapped
+    # content (caching wraps strings in block lists with cache_control).
+    provider = AnthropicProvider(
+        client=client, model="claude-sonnet-4-5", cache_enabled=False
+    )  # no image_resolver
 
     await provider.complete(
         messages=[HumanMessage(content=[{"type": "text", "text": "hi"}, image_ref_block(uri)])],
@@ -452,3 +465,188 @@ async def test_human_image_ref_dropped_without_resolver() -> None:
 
     # Image silently dropped → plain-text content, no crash.
     assert client.calls[0]["messages"][0]["content"] == "hi"
+
+
+# ---------------------------------------------------------------------------
+# Stream L.L1 — Anthropic prompt caching
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cache_control_applied_to_system_when_enabled() -> None:
+    """L1 default: ``cache_enabled=True`` (the AnthropicProvider's
+    constructor default) wraps the ``system`` field as a one-element
+    block list with an ephemeral ``cache_control`` marker so the
+    upstream caches the system prompt prefix."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude-sonnet-4-6")
+
+    await provider.complete(
+        messages=[
+            SystemMessage(content="you are helpful"),
+            HumanMessage(content="hi"),
+        ],
+        tools=[],
+    )
+
+    system_block = client.calls[0]["system"]
+    assert system_block == [
+        {
+            "type": "text",
+            "text": "you are helpful",
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cache_control_marks_trailing_three_messages() -> None:
+    """L1 layout: the last three non-system messages each get a
+    ``cache_control`` marker on their final content block (Hermes
+    system_and_3 layout, max 4 cache breakpoints)."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+
+    await provider.complete(
+        messages=[
+            HumanMessage(content="m1"),
+            AIMessage(content="m2"),
+            HumanMessage(content="m3"),
+            AIMessage(content="m4"),
+            HumanMessage(content="m5"),
+        ],
+        tools=[],
+    )
+
+    msgs = client.calls[0]["messages"]
+    # First two messages stay un-marked (only the last three carry markers).
+    first_content = msgs[0]["content"]
+    second_content = msgs[1]["content"]
+    assert first_content == "m1"
+    assert second_content == "m2"
+    # The trailing three messages have their content lifted to a block
+    # list with a cache_control marker on the final block.
+    for tail_msg in msgs[2:]:
+        content = tail_msg["content"]
+        assert isinstance(content, list)
+        assert content[-1]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
+async def test_cache_control_marks_existing_block_list_in_place() -> None:
+    """An assistant message that already carries a block list (J.6
+    multimodal / tool_use) gets the marker on its terminal block
+    rather than getting wrapped in another block list."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+    ai_with_tool_call = AIMessage(
+        content="checking",
+        tool_calls=[{"id": "tu_1", "name": "search", "args": {}, "type": "tool_call"}],
+    )
+
+    await provider.complete(
+        messages=[HumanMessage(content="hi"), ai_with_tool_call],
+        tools=[],
+    )
+
+    msgs = client.calls[0]["messages"]
+    # Assistant message had blocks [text, tool_use]; the tool_use block
+    # is the terminal one and gets the cache_control marker. The text
+    # block stays unchanged.
+    assistant_content = msgs[1]["content"]
+    assert assistant_content[0] == {"type": "text", "text": "checking"}
+    assert assistant_content[-1]["type"] == "tool_use"
+    assert assistant_content[-1]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
+async def test_cache_disabled_emits_string_system_and_unmarked_messages() -> None:
+    """L1 opt-out path: ``cache_enabled=False`` produces the legacy
+    string-shape ``system`` and leaves message content untouched. The
+    agent factory wires this from ``ModelSpec.cache_enabled``."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude", cache_enabled=False)
+
+    await provider.complete(
+        messages=[
+            SystemMessage(content="be terse"),
+            HumanMessage(content="hi"),
+        ],
+        tools=[],
+    )
+
+    # No block-list wrapper, no cache_control anywhere.
+    assert client.calls[0]["system"] == "be terse"
+    assert client.calls[0]["messages"] == [{"role": "user", "content": "hi"}]
+
+
+@pytest.mark.asyncio
+async def test_cache_control_no_system_just_messages() -> None:
+    """When there's no SystemMessage the outbound ``system`` field stays
+    ``None`` even with caching enabled — the marker hangs off the
+    trailing messages only."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+
+    await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    assert client.calls[0]["system"] is None
+    # The single message picks up the cache marker (trailing window of
+    # size 3 captures it).
+    assert client.calls[0]["messages"][0]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
+async def test_response_usage_carries_cache_token_counters() -> None:
+    """When the upstream returns cache-aware token counters, the
+    decoder propagates them onto ``AIMessage.usage_metadata`` so
+    observability middleware (E.5 langfuse) can split cached vs
+    uncached input tokens."""
+    client = RecordingAnthropicClient(
+        response={
+            "content": [{"type": "text", "text": "hello"}],
+            "usage": {
+                "input_tokens": 8,
+                "output_tokens": 3,
+                "cache_creation_input_tokens": 100,
+                "cache_read_input_tokens": 500,
+            },
+        },
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+
+    response = await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    usage = response.usage_metadata
+    assert usage is not None
+    assert usage["input_tokens"] == 8
+    assert usage["output_tokens"] == 3
+    assert usage["total_tokens"] == 11
+    details = usage.get("input_token_details") or {}
+    assert details["cache_creation"] == 100
+    assert details["cache_read"] == 500
+
+
+@pytest.mark.asyncio
+async def test_response_without_usage_returns_message_without_metadata() -> None:
+    """Backward-compat: an Anthropic response without ``usage`` (or
+    with all-missing counters) does not crash the decoder; the
+    returned AIMessage simply has no ``usage_metadata``."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "hi"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+
+    response = await provider.complete(messages=[HumanMessage(content="ping")], tools=[])
+
+    assert response.usage_metadata is None

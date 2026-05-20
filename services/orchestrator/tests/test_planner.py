@@ -189,13 +189,20 @@ async def test_plan_execute_graph_runs_planner_then_agent() -> None:
     assert len(result["plan"].steps) == 2
     # Two LLM calls: planner, then the agent step.
     assert len(llm.calls) == 2
-    # The agent's call saw the rendered plan merged into its system message.
+    # Stream L.L1 — the agent's prompt keeps the original system
+    # message byte-stable, and the rendered plan rides on a tail
+    # HumanMessage. Pre-L1 the plan was concatenated into the leading
+    # SystemMessage; that broke the Anthropic prompt-cache prefix.
     agent_prompt = llm.calls[1]
     assert isinstance(agent_prompt[0], SystemMessage)
     system_text = str(agent_prompt[0].content)
-    assert "you help" in system_text
-    assert "Execution plan" in system_text
-    assert "step one" in system_text
+    assert system_text == "you help"  # byte-stable: no plan content here
+    # Plan body now lives in a tail HumanMessage.
+    tail = agent_prompt[-1]
+    assert isinstance(tail, HumanMessage)
+    plan_text = str(tail.content)
+    assert "Execution plan" in plan_text
+    assert "step one" in plan_text
 
 
 # ---------------------------------------------------------------------------

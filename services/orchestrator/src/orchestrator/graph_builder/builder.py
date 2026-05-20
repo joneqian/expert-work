@@ -58,7 +58,7 @@ from collections.abc import Mapping
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
@@ -410,30 +410,37 @@ def _after_reflect(state: AgentState) -> Literal["agent", "__end__"]:
     return "__end__"
 
 
-def _merge_into_system(messages: list[BaseMessage], block: str) -> list[BaseMessage]:
-    """Return a new message list with ``block`` appended to the leading
-    system message (or a fresh system message prepended).
+def _append_tail_human_message(messages: list[BaseMessage], block: str) -> list[BaseMessage]:
+    """Stream L.L1 — append per-turn dynamic context as a tail
+    ``HumanMessage`` so the leading ``SystemMessage`` stays byte-stable
+    across turns (Mini-ADR L-1 — the Anthropic prompt-cache prefix
+    invariant).
 
-    The checkpointed ``state['messages']`` is left untouched — the
-    injected context rides only in this per-call prompt.
+    The checkpointed ``state['messages']`` is left untouched: the
+    injected context rides only in this per-call prompt, the same as
+    the pre-L1 ``_merge_into_system`` helper.
     """
-    if messages and isinstance(messages[0], SystemMessage):
-        head = messages[0]
-        head_text = head.content if isinstance(head.content, str) else str(head.content)
-        return [SystemMessage(content=f"{head_text}\n\n{block}"), *messages[1:]]
-    return [SystemMessage(content=block), *messages]
+    return [*messages, HumanMessage(content=block)]
 
 
 def _inject_plan(messages: list[BaseMessage], plan: Plan) -> list[BaseMessage]:
-    """Render the plan (J.1) into the prompt's system context."""
-    return _merge_into_system(messages, render_plan(plan))
+    """Render the plan (J.1) into the prompt as a tail HumanMessage.
+
+    Before L1 the plan was concatenated into the leading SystemMessage,
+    which would change the cache prefix on every step and disable
+    Anthropic prompt caching. L1 moves the per-turn dynamic context
+    out of system into a tail HumanMessage so ``system`` stays
+    build-once / replay-verbatim.
+    """
+    return _append_tail_human_message(messages, render_plan(plan))
 
 
 def _inject_memories(messages: list[BaseMessage], memories: list[MemoryItem]) -> list[BaseMessage]:
-    """Render recalled long-term memories (J.3) into the system context."""
+    """Render recalled long-term memories (J.3) into the prompt as a
+    tail HumanMessage — same L1 rationale as :func:`_inject_plan`."""
     lines = ["## Relevant memories from past sessions"]
     lines.extend(f"- ({item.kind}) {item.content}" for item in memories)
-    return _merge_into_system(messages, "\n".join(lines))
+    return _append_tail_human_message(messages, "\n".join(lines))
 
 
 def _build_mutation_advisory(failed: list[MutationOutcome]) -> HumanMessage:

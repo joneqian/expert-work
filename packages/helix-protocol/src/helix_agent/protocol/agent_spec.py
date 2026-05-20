@@ -131,6 +131,13 @@ class ModelSpec(BaseModel):
     #: (default) selects Path B (the ``ask_image`` tool routes to a
     #: separate VL model declared in ``spec.vision``).
     supports_vision: bool = False
+    #: Stream L.L1 — opt out of Anthropic prompt caching for this model.
+    #: Defaults ``True`` because the Anthropic adapter only flips the
+    #: ``cache_control`` markers on when the provider is ``anthropic`` AND
+    #: this flag is set; non-Anthropic providers ignore it. Set ``False``
+    #: on Anthropic models where the agent author wants to disable
+    #: caching (debugging, eval reproducibility) — Mini-ADR L-1.
+    cache_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------

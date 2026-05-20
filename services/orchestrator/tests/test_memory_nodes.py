@@ -268,11 +268,17 @@ async def test_memory_graph_recalls_and_writes_back() -> None:
             },
         )
 
-    # The agent's call saw the recalled memory in its system prompt.
+    # Stream L.L1 — recalled memories ride a tail HumanMessage so the
+    # leading SystemMessage stays byte-stable for Anthropic prompt
+    # caching. Pre-L1 the memories were concatenated into system.
     agent_prompt = llm.calls[0]
-    system_text = str(agent_prompt[0].content)
-    assert "Relevant memories" in system_text
-    assert "user is a botanist" in system_text
+    assert isinstance(agent_prompt[0], SystemMessage)
+    assert str(agent_prompt[0].content) == "help"  # byte-stable
+    tail = agent_prompt[-1]
+    assert isinstance(tail, HumanMessage)
+    tail_text = str(tail.content)
+    assert "Relevant memories" in tail_text
+    assert "user is a botanist" in tail_text
 
     # Write-back persisted a new memory for the user.
     stored = await store.retrieve(

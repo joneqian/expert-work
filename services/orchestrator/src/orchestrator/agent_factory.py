@@ -434,6 +434,8 @@ def _build_provider(
             max_tokens=model.max_tokens,
             temperature=model.temperature,
             image_resolver=image_resolver,
+            # Stream L.L1 — propagate the manifest's per-model cache flag.
+            cache_enabled=model.cache_enabled,
         )
     if provider == "openai":
         return OpenAIProvider(

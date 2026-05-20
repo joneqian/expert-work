@@ -24,7 +24,9 @@ Wire-format mapping (covered, deliberately minimal for M0):
 Out of scope for M0 (deferred to M1-D hardening):
 
 - Streaming responses (``stream=true``). Routed through E.14 SSE later.
-- Cache control and tool ``cache_control`` blocks.
+- Tool-level ``cache_control`` blocks. (System + message-level
+  ``cache_control`` landed in Stream L.L1; tool definitions don't yet
+  participate.)
 
 Error mapping per :class:`LLMError` hierarchy (E.4):
 
@@ -68,6 +70,16 @@ DEFAULT_MAX_TOKENS = 4096
 _ANTHROPIC_VERSION = "2023-06-01"
 _ERROR_BODY_CHAR_CAP = 500
 
+#: Stream L.L1 — number of trailing non-system messages that get a
+#: ``cache_control`` marker (Hermes "system_and_3" layout). System
+#: counts as one breakpoint plus three message-level breakpoints =
+#: four total, matching Anthropic's documented maximum.
+_CACHE_CONTROL_TAIL_COUNT: int = 3
+
+#: Stream L.L1 — the wire-level ``cache_control`` shape Anthropic
+#: expects for ephemeral (5-minute TTL) caching.
+_CACHE_CONTROL_EPHEMERAL: dict[str, str] = {"type": "ephemeral"}
+
 
 @runtime_checkable
 class AnthropicClient(Protocol):
@@ -83,7 +95,7 @@ class AnthropicClient(Protocol):
         self,
         *,
         model: str,
-        system: str | None,
+        system: str | list[dict[str, Any]] | None,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
@@ -111,7 +123,7 @@ class HTTPAnthropicClient:
         self,
         *,
         model: str,
-        system: str | None,
+        system: str | list[dict[str, Any]] | None,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
@@ -181,7 +193,7 @@ class RecordingAnthropicClient:
         self,
         *,
         model: str,
-        system: str | None,
+        system: str | list[dict[str, Any]] | None,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
@@ -222,6 +234,15 @@ class AnthropicProvider:
     #: Resolves ``image_ref`` content blocks to bytes at call time (J.6
     #: Path A). ``None`` → image blocks are dropped with a warning.
     image_resolver: ImageResolver | None = None
+    #: Stream L.L1 — flip Anthropic prompt caching markers on. When
+    #: ``True`` the adapter wraps the outbound ``system`` field and the
+    #: trailing ``_CACHE_CONTROL_TAIL_COUNT`` non-system messages in
+    #: ``cache_control: {"type": "ephemeral"}`` so the upstream caches
+    #: the prefix (Mini-ADR L-1). Defaults ``True`` because the
+    #: feature is upstream-supported and lossless when the prefix is
+    #: stable. The agent factory wires this from
+    #: :attr:`ModelSpec.cache_enabled`.
+    cache_enabled: bool = True
 
     async def complete(
         self,
@@ -229,12 +250,23 @@ class AnthropicProvider:
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
     ) -> AIMessage:
-        system, mapped = await _to_anthropic_messages(messages, self.image_resolver)
+        system_text, mapped = await _to_anthropic_messages(messages, self.image_resolver)
         tool_payload = [_to_anthropic_tool(spec) for spec in tools] if tools else None
+
+        # Stream L.L1 — convert ``system`` from string to block list with
+        # cache_control marker, then mark the trailing messages. When
+        # ``cache_enabled`` is False the adapter emits the original
+        # string-shaped system so a manifest-level opt-out cleanly
+        # disables the feature on a per-model basis.
+        system_payload: str | list[dict[str, Any]] | None
+        if self.cache_enabled:
+            system_payload, mapped = _apply_cache_control(system_text, mapped)
+        else:
+            system_payload = system_text
 
         body = await self.client.messages(
             model=self.model,
-            system=system,
+            system=system_payload,
             messages=mapped,
             tools=tool_payload,
             max_tokens=self.max_tokens,
@@ -248,6 +280,64 @@ def _truncate(text: str) -> str:
     if len(text) <= _ERROR_BODY_CHAR_CAP:
         return text
     return text[:_ERROR_BODY_CHAR_CAP] + "...[truncated]"
+
+
+def _apply_cache_control(
+    system: str | None, mapped: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]]]:
+    """Stream L.L1 — annotate the outbound payload for prompt caching.
+
+    Rewrites ``system`` from string form to a one-element block list
+    with ``cache_control`` on the block, and adds ``cache_control`` to
+    the last content block of each of the trailing
+    ``_CACHE_CONTROL_TAIL_COUNT`` non-system messages (Hermes
+    "system_and_3" layout). The block-list shape is what Anthropic
+    requires when marking ``system`` for caching; the per-message marker
+    lets the upstream cache progressively longer prefixes as the
+    conversation grows. See Mini-ADR L-1.
+
+    Returns ``(system_payload, mapped)`` — ``mapped`` is mutated in
+    place for clarity but also returned so callers can keep a
+    single-expression assignment.
+    """
+    system_payload: list[dict[str, Any]] | None = None
+    if system:
+        system_payload = [
+            {"type": "text", "text": system, "cache_control": dict(_CACHE_CONTROL_EPHEMERAL)}
+        ]
+
+    if mapped:
+        tail_indices = range(max(0, len(mapped) - _CACHE_CONTROL_TAIL_COUNT), len(mapped))
+        for idx in tail_indices:
+            _mark_message_cache_control(mapped[idx])
+
+    return system_payload, mapped
+
+
+def _mark_message_cache_control(message: dict[str, Any]) -> None:
+    """Add ``cache_control`` to the last content block of a single
+    outbound message. Plain-text content is upgraded to a block list so
+    the marker has a place to live.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        message["content"] = [
+            {"type": "text", "text": content, "cache_control": dict(_CACHE_CONTROL_EPHEMERAL)}
+        ]
+        return
+    if isinstance(content, list) and content:
+        last = content[-1]
+        if isinstance(last, dict):
+            last["cache_control"] = dict(_CACHE_CONTROL_EPHEMERAL)
+        else:
+            # ``content`` list with a non-dict tail entry — defensive
+            # path; promote to a wrapper block carrying the marker so
+            # the wire payload stays schema-valid.
+            content[-1] = {
+                "type": "text",
+                "text": str(last),
+                "cache_control": dict(_CACHE_CONTROL_EPHEMERAL),
+            }
 
 
 async def _to_anthropic_messages(
@@ -383,7 +473,15 @@ def _to_anthropic_tool(spec: ToolSpec) -> dict[str, Any]:
 
 
 def _from_anthropic_response(body: Mapping[str, Any]) -> AIMessage:
-    """Decode Anthropic's content-blocks array into a LangChain AIMessage."""
+    """Decode Anthropic's content-blocks array into a LangChain AIMessage.
+
+    Stream L.L1 — when the upstream returns cache token counters in
+    ``usage`` (``cache_creation_input_tokens`` / ``cache_read_input_tokens``)
+    they ride along on ``AIMessage.usage_metadata`` so dashboards /
+    middleware (E.5 langfuse) can observe cache hit rate. The decoder
+    is lenient: any of the fields may be missing on older API versions
+    or non-cached requests.
+    """
     blocks = body.get("content") or []
     text_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
@@ -407,4 +505,60 @@ def _from_anthropic_response(body: Mapping[str, Any]) -> AIMessage:
                     }
                 )
 
+    usage_metadata = _extract_usage_metadata(body)
+    if usage_metadata:
+        return AIMessage(
+            content="".join(text_parts),
+            tool_calls=tool_calls,
+            usage_metadata=usage_metadata,
+        )
     return AIMessage(content="".join(text_parts), tool_calls=tool_calls)
+
+
+def _extract_usage_metadata(body: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Stream L.L1 — pull cache-aware token counters out of the body.
+
+    Anthropic returns ``usage`` with ``input_tokens`` /
+    ``output_tokens`` plus the L1-specific
+    ``cache_creation_input_tokens`` / ``cache_read_input_tokens`` when
+    caching is active. The LangChain ``usage_metadata`` shape carries
+    the standard counters in ``input_tokens`` / ``output_tokens`` /
+    ``total_tokens``; cache counters land in
+    ``input_token_details`` so downstream observability can split out
+    the cached portion without crashing on older shapes.
+    """
+    usage_raw = body.get("usage")
+    if not isinstance(usage_raw, Mapping):
+        return None
+    input_tokens = _coerce_int(usage_raw.get("input_tokens"))
+    output_tokens = _coerce_int(usage_raw.get("output_tokens"))
+    cache_creation = _coerce_int(usage_raw.get("cache_creation_input_tokens"))
+    cache_read = _coerce_int(usage_raw.get("cache_read_input_tokens"))
+    if (
+        input_tokens is None
+        and output_tokens is None
+        and cache_creation is None
+        and cache_read is None
+    ):
+        return None
+    metadata: dict[str, Any] = {
+        "input_tokens": input_tokens or 0,
+        "output_tokens": output_tokens or 0,
+        "total_tokens": (input_tokens or 0) + (output_tokens or 0),
+    }
+    cache_details: dict[str, int] = {}
+    if cache_creation is not None:
+        cache_details["cache_creation"] = cache_creation
+    if cache_read is not None:
+        cache_details["cache_read"] = cache_read
+    if cache_details:
+        metadata["input_token_details"] = cache_details
+    return metadata
+
+
+def _coerce_int(value: Any) -> int | None:
+    if isinstance(value, bool):  # bool is a subclass of int — reject explicitly
+        return None
+    if isinstance(value, int):
+        return value
+    return None
