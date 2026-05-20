@@ -68,6 +68,8 @@
 8. **取消即杀** — 发起 long-running `exec_python`（`while True: pass`），触发 cancellation → sandbox 在 **≤1s 内**被 `docker kill` 干净、`sandbox_instance.state=DESTROYED`、资源回收。
 
 > **验证状态约定**（同 Stream E 收尾）：用例 1/2/4/5/8 由 **F.8** 集成 harness 在 CI（runc 即可覆盖隔离语义，对应测试矩阵 #45/#48/#50/#56/#57）跑自动化集成测试；用例 3（egress 隔离）由 **F.9** 用 Docker `--internal` 网络实现并自动化（测试矩阵 #49，Mini-ADR F-14）；用例 6/7 依赖 **真实 runsc 环境**（macOS 不可用 gVisor，CI 在 Linux runner 跑），归入 **M0→M1 Gate 的沙盒渗透测试**。
+>
+> **Stream K.K5 Gate Exit Criteria 锁定**（[STREAM-K-DESIGN § 3.K5](./STREAM-K-DESIGN.md)）：用例 6（timing / side-channel）与用例 7（CVE-2019-5736 PoC）已在 [ITERATION-PLAN.md § M0→M1 Gate Exit Criteria](../ITERATION-PLAN.md) 显式列为必跑通条款 —— **gVisor 7/7 沙盒安全用例在 staging Linux 全部跑通**。"软推迟" 不再被接受：不跑通 = Gate 不能过。本节"归入 Gate"是落地路径，**不是豁免**（[memory:complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md) / [memory:no-design-choice-disguise](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_no_design_choice_disguise.md)）。
 
 ---
 
@@ -450,7 +452,7 @@ POST /forward
 | 59 | stdlib C 扩展可用 | F.8 | integration | Mini-ADR F-13 —— alpine/musl CPython 可 import `ssl`/`sqlite3`/`ctypes`/`lzma` 等 C 扩展 stdlib（切基础镜像护栏） |
 | 60 | egress 端到端 | I.1 | integration | `exec_python` → sandbox →（仅）真 credential-proxy → mock upstream 全链路通（需全栈，原属 F.11 → 移入 I.1）|
 
-> 验收门 #6（timing/side-channel）、#7（CVE-2019-5736 PoC）需真实 runsc，不进 CI 自动化 —— 归 M0→M1 Gate 沙盒渗透测试，§ 1.3 已注明。
+> 验收门 #6（timing/side-channel）、#7（CVE-2019-5736 PoC）需真实 runsc，不进 CI 自动化 —— 归 M0→M1 Gate 沙盒渗透测试，§ 1.3 已注明。**Stream K.K5 把这两条锁进 [ITERATION-PLAN.md § M0→M1 Gate Exit Criteria](../ITERATION-PLAN.md) 必跑通条款**（"gVisor 7/7 staging Linux 跑通"），软推迟不再被接受。
 >
 > **F.8 收口**：测试矩阵 #45 / #48 / #50 / #56 / #57 的 integration 用例由收尾 PR **F.8** 用真实 Docker（runc）集成 harness 实装 —— F.4–F.7 当时只落假桩单测，详见 Mini-ADR F-10。#49（egress 隔离）依赖的 iptables allowlist M0 未实现，待 **F.9**。
 
