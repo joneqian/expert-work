@@ -122,13 +122,17 @@ def build_uploads_router() -> APIRouter:
             ext=ext,
         )
         await store.put(image_ref.storage_key, raw, content_type=content_type)
+        # Avoid logging the raw ``content_type`` — it's user-provided
+        # (CodeQL py/log-injection). The image-id + byte count let ops
+        # correlate to the object; the type is recoverable from
+        # ``image_ref.ext`` if needed.
         logger.info(
             "control_plane.upload.image",
             extra={
                 "tenant_id": str(tenant_id),
                 "thread_id": str(thread_id),
+                "image_id": str(image_ref.image_id),
                 "bytes": len(raw),
-                "content_type": content_type,
             },
         )
         return JSONResponse(status_code=201, content={"image_ref": image_ref.to_uri()})
