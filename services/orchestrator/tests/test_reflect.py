@@ -7,8 +7,10 @@ reflect↔agent loop using a scripted ``LLMCaller``.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -190,6 +192,49 @@ async def test_reflect_node_honours_cancellation() -> None:
     config: RunnableConfig = {"configurable": {CANCELLATION_TOKEN_KEY: token}}
     with pytest.raises(RunCancelledError):
         await node(_state([HumanMessage(content="t")]), config)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# K9 — wall-clock timeout
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reflect_node_wallclock_timeout_falls_back_to_accept() -> None:
+    """Stream K.K9 — a hung provider must not lock the run.
+
+    The fake caller sleeps 0.5s; ``deadline_s=0.05`` means
+    ``asyncio.wait_for`` fires first and the node must force-accept
+    (orthogonal to cancellation, which fires only on client disconnect).
+    """
+
+    async def _hang(*, messages: list[Any], tools: list[Any]) -> AIMessage:
+        del messages, tools  # unused — the caller never gets to act on them
+        await asyncio.sleep(0.5)
+        return AIMessage(content="late")
+
+    node = make_reflect_node(_hang, budget=2, deadline_s=0.05)  # type: ignore[arg-type]
+
+    out = await node(  # type: ignore[arg-type]
+        _state([HumanMessage(content="task"), AIMessage(content="answer")]),
+        {"configurable": {}},
+    )
+    assert out["reflections"][0].verdict == "accept"
+    assert "timed out" in out["reflections"][0].critique
+
+
+@pytest.mark.asyncio
+async def test_reflect_node_returns_normally_within_deadline() -> None:
+    """Sanity: a snappy LLM call still goes through the timeout wrapper."""
+    llm = _RecordingLLM(responses=[AIMessage(content='{"verdict": "accept", "critique": "ok"}')])
+    node = make_reflect_node(llm, budget=2, deadline_s=5)
+
+    out = await node(  # type: ignore[arg-type]
+        _state([HumanMessage(content="task"), AIMessage(content="answer")]),
+        {"configurable": {}},
+    )
+    assert out["reflections"][0].verdict == "accept"
+    assert out["reflections"][0].critique == "ok"
 
 
 # ---------------------------------------------------------------------------

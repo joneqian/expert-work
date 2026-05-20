@@ -365,7 +365,7 @@
 - [ ] **K6 memory CRUD**（补 G2a）— `GET/PATCH/DELETE /v1/memory/{id}` + 迁移 0021 `deleted_at` 列 + per-user 隔离测试；Mini-ADR K-4
 - [ ] **K7 memory writeback 重试 + dedup**（补 G2b）— 迁移 0022 `content_hash` + `UNIQUE` + `memory_writeback_dlq` 表 + retry worker；Mini-ADR K-5
 - [ ] **K8 `update_plan` 工具**（补 G8）— `plan_execute` workflow 注册 builtin tool；闭环 J.1 重规划路径
-- [ ] **K9 reflect wall-clock 超时**（补 G9）— `reflect_node` 套 `asyncio.wait_for(deadline_s=30)`，超时降级 accept
+- [x] **K9 reflect wall-clock 超时**（补 G9）— `ReflectionSpec.deadline_s` 默认 30s（gt=0, le=600）；`reflect_node` 用 `asyncio.wait_for(token.run_cancellable(...), timeout=deadline_s)`；超时降级为 accept + critique="reflection timed out after Ns"。与 cancellation_token 正交（cancel 走客户端断开路径）。2 个新单测：`test_reflect_node_wallclock_timeout_falls_back_to_accept` + `test_reflect_node_returns_normally_within_deadline`
 
 **P2 — 阻塞 Gate 前真生产 release**
 - [ ] **K10 G.7 大盘真闭环**（补 G10）— orchestrator/sandbox/control-plane 补 emit `session_ttft_seconds` / `sandbox_cold_start_seconds` / `durable_resume_seconds` + Prom recording rule + Grafana panel 反指

@@ -26,6 +26,7 @@ always bounded (Mini-ADR J-5a).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -147,11 +148,16 @@ def _parse_revised_plan(steps_raw: object, *, plan: Plan) -> Plan | None:
     return Plan(goal=plan.goal, steps=tuple(steps))
 
 
-def make_reflect_node(llm_caller: LLMCaller, *, budget: int) -> ReflectNode:
+def make_reflect_node(llm_caller: LLMCaller, *, budget: int, deadline_s: int = 30) -> ReflectNode:
     """Build the ``reflect`` graph node bound to ``llm_caller``.
 
     ``budget`` caps the reflection LLM calls per run; once reached the
     node force-accepts without calling the LLM so the run terminates.
+
+    ``deadline_s`` (Stream K.K9) is a wall-clock cap on a single reflect
+    LLM call. When the provider hangs past this many seconds the node
+    fails safe to ``accept`` — orthogonal to the cancellation token,
+    which only fires on client disconnect.
     """
 
     async def reflect_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -179,7 +185,30 @@ def make_reflect_node(llm_caller: LLMCaller, *, budget: int) -> ReflectNode:
             SystemMessage(content=_REFLECT_SYSTEM),
             HumanMessage(content=_build_reflect_prompt(messages, plan)),
         ]
-        response = await token.run_cancellable(llm_caller(messages=reflect_messages, tools=[]))
+        # Stream K.K9 — wrap the LLM call in ``asyncio.wait_for`` so a
+        # provider that never returns can't lock the run. On timeout we
+        # force-accept (same fail-safe shape as the unparseable-reply
+        # path above): a hung reflection should not block the run from
+        # ending.
+        try:
+            response = await asyncio.wait_for(
+                token.run_cancellable(llm_caller(messages=reflect_messages, tools=[])),
+                timeout=deadline_s,
+            )
+        except TimeoutError:
+            logger.warning(
+                "reflect.timeout deadline_s=%d — accepting to keep the run bounded",
+                deadline_s,
+            )
+            return {
+                "reflections": [
+                    Reflection(
+                        run_id=run_id,
+                        verdict="accept",
+                        critique=f"reflection timed out after {deadline_s}s",
+                    )
+                ]
+            }
         parsed, revised_plan = _parse_reflection(_message_text(response), plan=plan)
         reflection = parsed.model_copy(update={"run_id": run_id})
         logger.info("reflect.verdict=%s", reflection.verdict)

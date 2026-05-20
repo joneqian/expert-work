@@ -44,3 +44,16 @@ class ReflectionSpec(BaseModel):
         gt=0,
         description="max reflection LLM calls per run — caps the reflect↔agent loop",
     )
+    deadline_s: int = Field(
+        default=30,
+        gt=0,
+        le=600,
+        description=(
+            "Stream K.K9 — wall-clock cap on a single reflect LLM call. "
+            "If the call has not returned within this many seconds the "
+            "node force-accepts (so a hung provider can't lock the run "
+            "indefinitely). Cancellation-token plumbing still guards "
+            "client-disconnect; this is the orthogonal time-bound on the "
+            "provider itself."
+        ),
+    )
