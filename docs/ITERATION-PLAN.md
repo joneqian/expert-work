@@ -375,7 +375,7 @@
 - [x] **K12 memory recall eval gate**（补 G2c）— 新 harness `tools/eval/memory_recall.py`（schema + recall@k / mrr@k metric + 异步 runner，embedder-agnostic）+ `tools/eval/datasets/memory_recall/zh_en_seed.yaml` 8 case seed（4 zh + 4 en）+ 9 单测覆盖 metric / loader / runner。slo.md 加 SLO #6（M1 目标 recall@5 ≥ 0.7 against real embedder；M0 在 fake keyword-overlap embedder 上锁 1.0 防 harness 回归）。注：100 case 完整 zh+en benchmark 留到 canonical agent dogfood，K12 提供基础设施 + 验证铺底。
 - [x] **K13 KMS 轮换演练**（补 G5）— `FakeKmsBackend` 已支持 reseed（new value/version），加 3 个轮换 drill 测试：rotation 后 cache TTL 过期内仍返旧值（设计预期 stale-by-TTL）→ 过期后取到新值；`put()` 路径立即 invalidate；dynamic kind 用半 TTL 提前收敛。覆盖 \"轮换后 60s 内取新值 < TTL\" 的核心 invariant。
 - [x] **K14 WORM 恢复演练**（补 G6）— `tools/persistence/restore_audit.py` 工具 + `docs/runbooks/audit-restore.md` runbook（pre-flight / sibling table / 调 restore tool / 验证 / promote swap-vs-read-across）+ 3 drill 测试（round-trip integrity / per-tenant 隔离 / 损坏对象 tolerance）。InMemoryObjectStore 上端到端验证序列化和 restore 路径，回归会在 CI 红。
-- [ ] **K15 PG 恢复演练**（补 G7）— 定位备份现状 → `docs/runbooks/pg-restore.md` + 演练脚本 + RTO/RPO 实测
+- [x] **K15 PG 恢复演练**（补 G7）— 定位现状（docs/dr/RUNBOOK.md 已有完整 dev/prod restore procedure + RPO/RTO M0 目标 24h/4h）+ 新增 `docs/runbooks/pg-restore.md` 入口（指向 dr/RUNBOOK + K15 自动化 drill 说明）+ `tools/persistence/test_pg_restore_drill.py` testcontainers 集成测试（pg_dump → drop → pg_restore round-trip + 行数 + body 完整性 + RTO ceiling < 60s）。CI `Test (integration)` 每次跑 drill，schema 回归不会等到季度 DR 演练才发现。
 
 **Stream K Verification**（13 条全勾，详见 STREAM-K-DESIGN § 5）：每条 gap 对应集成测试绿、ITERATION-PLAN checkbox 勾上、零债 6 条全过；Stream K 完成才解锁 Stream J 剩余子项。
 
