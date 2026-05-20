@@ -210,7 +210,11 @@ async def build_agent(
     # before the run ends.
     reflection = spec.spec.reflection
     reflect_node = (
-        make_reflect_node(routers.reflection, budget=reflection.budget)
+        make_reflect_node(
+            routers.reflection,
+            budget=reflection.budget,
+            deadline_s=reflection.deadline_s,
+        )
         if reflection is not None
         else None
     )
