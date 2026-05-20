@@ -93,6 +93,26 @@ def test_cache_middlewares_wired_when_cache_present() -> None:
     assert "llm_cache_store" in chains.after_llm_call.ordered_names
 
 
+def test_cache_middlewares_skipped_when_manifest_disables() -> None:
+    """Stream K.K4 — ``spec.cache.enabled: false`` opts out per manifest.
+
+    The cache backend is wired into ``MiddlewareEnv`` once for the
+    whole orchestrator, but a time-sensitive agent must be able to
+    refuse caching at the manifest level. Even with ``response_cache``
+    present, the lookup / store middlewares must not be attached for
+    this agent.
+    """
+    doc = deepcopy(_MINIMAL)
+    doc["spec"]["cache"] = {"enabled": False}
+    spec = AgentSpec.model_validate(doc)
+
+    chains = build_middleware_chains(spec, env=MiddlewareEnv(response_cache=_cache()))
+    assert chains.before_llm_call is not None
+    assert chains.after_llm_call is not None
+    assert "llm_cache_lookup" not in chains.before_llm_call.ordered_names
+    assert "llm_cache_store" not in chains.after_llm_call.ordered_names
+
+
 def test_langfuse_wired_when_client_present() -> None:
     chains = build_middleware_chains(
         _spec(), env=MiddlewareEnv(langfuse_client=RecordingLangfuseClient())

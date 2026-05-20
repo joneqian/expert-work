@@ -90,7 +90,12 @@ def build_middleware_chains(
 
     if env.redact_text is not None:
         middlewares.append(PIIRedactorMiddleware(redact_text=env.redact_text))
-    if env.response_cache is not None:
+    # Stream K.K4 (Mini-ADR K-3) — manifest can opt out of the LLM
+    # response cache entirely. Time-sensitive agents (date / latest-news
+    # / per-call randomness) must set ``spec.cache.enabled: false`` so
+    # cache hits don't return stale answers. Default ``CacheSpec()`` is
+    # ``enabled=True`` to preserve existing manifests.
+    if env.response_cache is not None and spec.spec.cache.enabled:
         middlewares.append(
             LLMCacheLookupMiddleware(
                 cache=env.response_cache,

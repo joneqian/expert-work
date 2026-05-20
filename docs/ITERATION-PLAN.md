@@ -358,7 +358,7 @@
 - [ ] **K1 API Key rotation**（补 G1）— `POST /v1/api_keys/{id}/rotate` + 双活窗口 + audit；STREAM-K-DESIGN § 3 / Mini-ADR K-1
 - [x] **K2 SSE 跨租户隔离**（补 G3）— 安全模型由 thread 归属校验保证（误判更正），补 `test_runs_cross_tenant_sse_rejected` 锁住 invariant + `runs.py:191` docstring 引用 Mini-ADR K-2 说明不加 SSE 层冗余 guard
 - [x] **K3 retention CI xfail 收尾**（补 G4）— 两条 `permission denied` 测试 → 绿，xfail marker 移除；同时关 M1-B 挂账项。根因不是 PG 配 / asyncpg role 交互，是测试断言用 `SET LOCAL ROLE audit_writer` 越权读 event_log / jwt_blacklist（audit_writer 仅 audit_log 权限），且 event_log RLS 未设 `app.tenant_id` GUC 把数据全过滤。修法：去 SET ROLE，event_log 断言加 `set_config('app.tenant_id', tenant, true)`。job 代码不动。本地 5/5 通过 ×2。
-- [ ] **K4 LLM cache 正确性**（补 G11）— `AgentSpecBody.cache.enabled` manifest 入口 + 中间件 short-circuit；Mini-ADR K-3
+- [x] **K4 LLM cache 正确性**（补 G11）— `AgentSpecBody.cache.enabled` manifest 入口 + `middleware_assembly` 在 `enabled is False` 时跳过 lookup/store 中间件；Mini-ADR K-3。默认 `enabled=True` 保护现有 manifest。`test_cache_middlewares_skipped_when_manifest_disables` 红→绿。
 - [x] **K5 gVisor Gate Exit Criteria**（补 G12）— M0→M1 Gate Exit Criteria 显式列入 7/7 用例 staging Linux 必跑通条款（纯文档；同 PR 在 STREAM-F-DESIGN § 1.3 + § "测试矩阵" 加 K5 锁定引用，让 Stream F 自身文档不再读起来像"软推迟豁免"）
 
 **P1 — 阻塞 Stream J 剩余子项**

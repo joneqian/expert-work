@@ -335,6 +335,33 @@ class WorkflowSpec(BaseModel):
     builder: str | None = None
 
 
+class CacheSpec(BaseModel):
+    """Stream K.K4 (Mini-ADR K-3) — per-agent LLM response cache opt-out.
+
+    The orchestrator's response cache (E.13) wraps every cacheable LLM
+    call by default. Agents whose prompts contain time-sensitive content
+    (date / latest-news lookups / per-call randomness the LLM has to
+    re-compute) must disable it — otherwise a cache hit returns a stale
+    answer, sacrificing correctness for latency.
+
+    The opt-out lives on the manifest, not on ``RunRequest``: an agent
+    declares its caching behaviour once, applies to every run. Per-call
+    skip would let the same agent behave differently across requests
+    (Mini-ADR K-3) and undermine cache key semantics.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "When false the orchestrator does not attach the LLM cache "
+            "lookup / store middlewares for this agent — every LLM call "
+            "goes through to the provider, results are not stored."
+        ),
+    )
+
+
 class PolicySpec(BaseModel):
     """Tightening to per-field types is deferred to the owning Streams
     (C.5 quota, D.2 PII, E.6 fallback). Permissive dicts now, schemas
@@ -506,6 +533,13 @@ class AgentSpecBody(BaseModel):
         "declared only when model.supports_vision is false",
     )
     workflow: WorkflowSpec = Field(default_factory=WorkflowSpec)
+    cache: CacheSpec = Field(
+        default_factory=CacheSpec,
+        description=(
+            "Stream K.K4 — LLM response cache toggle. Default enabled; "
+            "agents with time-sensitive prompts must set ``enabled: false``."
+        ),
+    )
     policies: PolicySpec = Field(default_factory=PolicySpec)
     code: CodePackageSpec | None = None
     hooks: dict[str, str] = Field(default_factory=dict)
