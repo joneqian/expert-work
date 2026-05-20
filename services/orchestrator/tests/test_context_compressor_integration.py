@@ -102,7 +102,7 @@ async def test_agent_node_triggers_compression_when_prompt_oversized() -> None:
         tool_registry=ToolRegistry(),
         context_compressor=compressor,
     )
-    # 16 messages × 80 chars = ~320 tokens — over threshold (300).
+    # 16 messages x 80 chars = ~320 tokens — over threshold (300).
     history: list[BaseMessage] = [HumanMessage(content=_pad(f"user-{i}-", 80)) for i in range(16)]
 
     async with make_checkpointer("memory") as cp:
@@ -241,7 +241,7 @@ async def test_unsummarisable_overflow_raises_context_overflow_error() -> None:
         head_keep=5,
         tail_keep=5,
     )
-    # 10 messages × 80 chars = 800 / 4 = 200 tokens; head_keep + tail_keep
+    # 10 messages x 80 chars = 800 / 4 = 200 tokens; head_keep + tail_keep
     # cover the whole list → no middle to summarise.
     history = [HumanMessage(content=_pad(f"m-{i}-", 80)) for i in range(10)]
     agent_llm = _RecordingLLM()
@@ -330,7 +330,7 @@ async def test_compressor_handles_tool_message_in_middle() -> None:
     )
     head1 = HumanMessage(content=_pad("h1-", 80))
     head2 = AIMessage(content=_pad("h2-", 80))
-    # 14 middle messages × 80 chars → ~280 tokens for middle alone;
+    # 14 middle messages x 80 chars → ~280 tokens for middle alone;
     # with head + tail the total clears the 0.5 threshold of 600.
     middle = [ToolMessage(content=_pad(f"t-{i}-", 80), tool_call_id=f"tc-{i}") for i in range(14)]
     tail_pre = AIMessage(content=_pad("tail-pre-", 80))

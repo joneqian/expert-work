@@ -143,7 +143,7 @@ async def test_compress_preserves_head_and_tail() -> None:
         head_keep=2,
         tail_keep=2,
     )
-    # 20 messages × 80 chars = 1600 chars / 4 = 400 tokens; threshold
+    # 20 messages x 80 chars = 1600 chars / 4 = 400 tokens; threshold
     # 100. After collapsing 16 middle messages into one summary the
     # estimate drops well under the threshold.
     msgs = _conversation(head=2, middle=16, tail=2, char_per_msg=80)
@@ -213,8 +213,8 @@ async def test_compress_summary_lands_between_head_and_tail() -> None:
     summariser = _ScriptedSummariser(summary_text="- compressed bullet")
     compressor = ContextCompressor(
         llm_caller=summariser,
-        # 600 tokens window × 0.5 = 300 tokens threshold. Head + tail
-        # (5 msgs × 20 tok = 100 tok) leaves room for a summary
+        # 600 tokens window x 0.5 = 300 tokens threshold. Head + tail
+        # (5 msgs x 20 tok = 100 tok) leaves room for a summary
         # well under threshold.
         context_window=600,
         threshold_pct=0.5,
