@@ -405,7 +405,16 @@ PR 链（main 上 14 个 squash commits + 1 docs PR）：#172（设计）→ #18
 - [x] **L7 Trajectory recording** — 新 `orchestrator.trajectory` 包：`TrajectoryRecord` + `TrajectoryRecorder` 写 ObjectStore `trajectories/{tenant_id}/{outcome}/{YYYY}/{MM}/{DD}/{thread_id}.jsonl`；ShareGPT 序列化（4 角色 + `tool_calls`/`tool_call_id` 完整携带 + content block list 扁平化）；4 outcome 分流（success / failed / max_steps / cancelled）；`MaxStepsExceededError` 在 sse.py:run_agent 单独 catch，区别于通用 failed。`sse.py` 加 `trajectory_recorder: TrajectoryRecorder | None = None` 参数，每个终态 path `_dispatch_trajectory` 通过 `asyncio.create_task` + 5s outer deadline fire-and-forget；recorder 自身 swallow 所有错误 + 三档 error counter（invalid_record / store_error / unexpected）。`StreamableGraph` Protocol 扩 `aget_state` 用于取终态 messages。`PoliciesSpec.trajectory_recording: bool = True` manifest opt-out。`helix_trajectory_recorded_total{outcome}` + `helix_trajectory_record_errors_total{outcome,reason}` counter。21 个 recorder 单测 + 7 个 sse 集成测试覆盖：serialise / key 布局 / 4 outcome / 失败 swallow / counter / 慢 recorder 不阻塞 / aget_state 失败仍 emit envelope。STREAM-L-DESIGN § 3.L7 / Mini-ADR L-7。
 - [x] **L8 OAuth 401 自动 refresh + 重试一次** — 新 `OAuthCapableProvider` Protocol（`services/orchestrator/src/orchestrator/llm/oauth_provider.py`）+ `LLMRouter._handle_unauthorized` 在 `LLMUnauthorizedError` 后 `isinstance(provider, OAuthCapableProvider)` 才 refresh + 重试 ≤ 1 次；refresh `False` / 重试再 401 → `LLMAuthError`（继承 `LLMServerError` retryable）走 fallback chain。Anthropic/OpenAI adapter 现在 401 路径 raise `LLMUnauthorizedError`（`LLMClientError` 子类，4xx 语义不变）让 OAuth-capable 走分支；non-OAuth provider 401 仍 propagate 不 fallback。`helix_llm_auth_refresh_total{provider_key, result=success|fail}` counter +1。10 个新单测（Protocol 运行时检查 / 401-then-success / 持续 401 / refresh=False / refresh raise / 非 OAuth pass-through / `LLMUnauthorizedError ⊂ LLMClientError` / counter ×2）。STREAM-L-DESIGN § 3.L8 / Mini-ADR L-8。
 
-**Stream L Verification（待落实）**：8 条 gap 全部 PR 合入 main，零债 6 条核验全过；§ 1.4 列的 8 个 Prom counter / recording rule 均 emit；与 Stream K 同验收模板。
+**Stream L Verification ✅ 已完成（2026-05-20）**：8 条 gap（L1–L8，全部代码层）合入 main，零债 6 条核验：
+
+1. **代码干净** ✅ — 新增代码无 `TODO`/`FIXME`/`XXX`/`HACK`（已在每条 PR + 收尾 PR 扫过）
+2. **测试达标** ✅ — 新增测试: L1=11+4 / L2=15+7 / L3=6 / L4=8+8 / L5=11 / L6=21+8 / L7=21+7 / L8=10 ≈ 137 个新测试。Stream L 完成后 orchestrator 套件 546 passed（pre-L 477 → +69 净增；其余更新自现有测试受 L1/L2 invariant 迁移影响而调整）。无新 xfail / skip。
+3. **文档同步** ✅ — `STREAM-L-DESIGN.md` § 3 各小节按实装回炉（L1 类层级修订 / L3 placement 更正 per-provider / L6 builtin 标注表纠正 http GET-only 假设 / L7 § 3.L7 已对齐 / 其余无偏）。Mini-ADR L-1 ~ L-8 与实现一致；anthropic.py module docstring 移除"Cache control 推迟"过期语。
+4. **可观测齐全** ✅ — 6 个新 Prom counter：`helix_llm_stream_stale_total{provider_key}` (L3) / `helix_llm_auth_refresh_total{provider_key,result}` (L8) / `helix_tools_stages_total` + `helix_tools_dispatched_total` (L6 pair) / `helix_trajectory_recorded_total{outcome}` + `helix_trajectory_record_errors_total{outcome,reason}` (L7)。Anthropic L1 cache token counters 经 `AIMessage.usage_metadata.input_token_details` 进 langfuse 观测。
+5. **CI 全绿** ✅ — 9 个 PR 合并时全部 8/8（Lint / mypy / unit / integration / pre-commit / pip-audit / CodeQL Analyze / CodeQL）；CodeQL 无新增 high/critical（合并途中处理 1 处：L4 implicit-string-concat）；CI 工具链 ruff 漂移修过 3 轮（L4 / L7 / L2 的 RUF003 × ambiguous mult-sign，全部 `×` → `x`）。
+6. **bug 不遗留** ✅ — L4 暴露 LangChain `add_messages` reducer 给消息分配新 id（test_sse_trajectory 测试断言 `==` 改为 content compare）；pip-audit 上 `pyjwt 2.12.1` 的 `PYSEC-2025-183` 无 upstream fix → CI workflow 加 `--ignore-vuln PYSEC-2025-183`（与 L5 同 PR 顺手解锁所有后续 PR）；L1 byte-stable 不变式与 L4 advisory / L2 summary 都验过共存（test_system_byte_stable 4 个集成测试）。
+
+PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #200 L5 → #201 L8 → #202 L7 → #203 L6 → #204 L4 → #205 L1 → #206 L2 → 收尾 PR。Stream J 剩余子项 (J.4 / J.5 / J.7 / J.8 / J.9 / J.10 / J.12 / J.13 / J.15) 与 L 完全独立可继续推进。
 
 ### Stream J — Agent Harness 能力补全（大里程碑；canonical agent + dogfood 的前置）
 
@@ -437,7 +446,7 @@ PR 链（main 上 14 个 squash commits + 1 docs PR）：#172（设计）→ #18
 
 - [ ] 24 项 P0 全部勾选完成（参考 [architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §"Gap 严重性矩阵"）
 - [x] **Stream K（Capability Hardening Sprint）15 子项完成** —— 13 条 (c) 类弱版全部补到生产级（[STREAM-K-DESIGN](./streams/STREAM-K-DESIGN.md)）；零债 6 条核验 ✅，PR #172 + #182–#196 全部 squash 合入 main（2026-05-20）
-- [ ] **Stream L（Hermes-derived 单 turn 能力强化）8 子项完成** —— L1-L8 全部补到生产级（[STREAM-L-DESIGN](./streams/STREAM-L-DESIGN.md)）；零债 6 条核验通过
+- [x] **Stream L（Hermes-derived 单 turn 能力强化）8 子项完成** —— L1-L8 全部补到生产级（[STREAM-L-DESIGN](./streams/STREAM-L-DESIGN.md)）；零债 6 条核验 ✅，PRs #198–#206 全部 squash 合入 main（2026-05-20）
 - [ ] **Stream J（Agent Harness 能力补全）15 子项完成** —— 26 维能力矩阵无缺口
 - [ ] canonical 能力 agent 跑通 + staging 冒烟（便宜模型端到端真实 run）
 - [ ] 测试金字塔达标：unit ≥ 85%、integration ≥ 70% 关键路径、E2E 5-10 场景
