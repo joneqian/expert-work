@@ -68,6 +68,7 @@ from helix_agent.runtime.middleware import (
     MiddlewareChain,
     MiddlewareContext,
 )
+from orchestrator.context import ContextCompressor
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.graph_builder._config import cancellation_token
 from orchestrator.graph_builder.memory import MemoryNode
@@ -128,6 +129,7 @@ def build_react_graph(
     before_llm_chain: MiddlewareChain | None = None,
     after_llm_chain: MiddlewareChain | None = None,
     before_tool_dispatch_chain: MiddlewareChain | None = None,
+    context_compressor: ContextCompressor | None = None,
 ) -> StateGraph[AgentState, None, AgentState, AgentState]:
     """Assemble the ReAct ``StateGraph`` and return it uncompiled.
 
@@ -198,6 +200,15 @@ def build_react_graph(
         if failed_mutations:
             advisory_message = _build_mutation_advisory(failed_mutations)
             messages = [*messages, advisory_message]
+        # Stream L.L2 — token preflight + summarise-the-middle. When
+        # the prompt would exceed the model's configured threshold the
+        # compressor swaps the conversation's middle for a
+        # ``<context-summary>`` system message, keeping head + tail
+        # intact. Mini-ADR L-2: a ContextOverflowError here surfaces
+        # as a run failure (no silent fallback) so the orchestrator
+        # can write a clean RUN_FAILED audit row.
+        if context_compressor is not None and context_compressor.should_compress(messages):
+            messages = await context_compressor.compress(messages)
         configurable = config.get("configurable") or {}
         tenant_id = _parse_uuid(configurable.get("tenant_id"))
 

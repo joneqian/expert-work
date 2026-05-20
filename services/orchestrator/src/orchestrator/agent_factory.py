@@ -40,6 +40,7 @@ from helix_agent.persistence.memory import MemoryWritebackDLQ
 from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
+from orchestrator.context import ContextCompressor
 from orchestrator.errors import AgentFactoryError
 from orchestrator.graph_builder import (
     MemoryNode,
@@ -243,6 +244,21 @@ async def build_agent(
     memory_recall_node, memory_writeback_node = _build_memory_nodes(
         spec, memory_env=memory_env, llm_caller=routers.default
     )
+    # Stream L.L2 — context compressor preflight + summariser. The
+    # default summariser shares the agent's main LLM router; a future
+    # ``policies.context_compression.summariser_model`` field can wire
+    # a cheaper dedicated model here without touching the call sites.
+    cc_policy = spec.spec.policies.context_compression
+    context_compressor: ContextCompressor | None = None
+    if cc_policy.enabled:
+        context_compressor = ContextCompressor(
+            llm_caller=routers.default,
+            context_window=spec.spec.model.context_window,
+            threshold_pct=cc_policy.threshold_pct,
+            head_keep=cc_policy.head_keep,
+            tail_keep=cc_policy.tail_keep,
+            max_passes=cc_policy.max_passes,
+        )
     graph = build_react_graph(
         llm_caller=routers.default,
         tool_registry=registry,
@@ -253,6 +269,7 @@ async def build_agent(
         before_llm_chain=chains.before_llm_call,
         after_llm_chain=chains.after_llm_call,
         before_tool_dispatch_chain=chains.before_tool_dispatch,
+        context_compressor=context_compressor,
     )
     compiled = GraphRunner(checkpointer=checkpointer).compile(graph)
     return BuiltAgent(

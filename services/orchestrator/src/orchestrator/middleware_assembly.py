@@ -125,11 +125,16 @@ def build_middleware_chains(
 
 def _dynamic_context(spec: AgentSpec) -> DynamicContextMiddleware:
     """Build the context middleware, reading ``max_turns`` / ``max_tokens``
-    from the manifest's ``policies.context_compression`` block."""
+    from the manifest's ``policies.context_compression`` block.
+
+    Stream L.L2 — ``context_compression`` is now the
+    :class:`ContextCompressionPolicy` model, not a permissive dict; the
+    legacy ``max_turns`` / ``max_tokens`` keys preserved as typed
+    fields so existing manifests keep loading."""
     cc = spec.spec.policies.context_compression
     return DynamicContextMiddleware(
-        max_turns=int(cc.get("max_turns", _DEFAULT_MAX_TURNS)),
-        max_tokens=int(cc.get("max_tokens", _DEFAULT_MAX_TOKENS)),
+        max_turns=cc.max_turns,
+        max_tokens=cc.max_tokens,
     )
 
 

@@ -138,6 +138,13 @@ class ModelSpec(BaseModel):
     #: on Anthropic models where the agent author wants to disable
     #: caching (debugging, eval reproducibility) — Mini-ADR L-1.
     cache_enabled: bool = True
+    #: Stream L.L2 — declared upstream context window in tokens. The
+    #: agent_node preflight compares the estimated prompt size against
+    #: ``context_window * policies.context_compression.threshold_pct``
+    #: and triggers :class:`ContextCompressor` when exceeded (Mini-ADR
+    #: L-2). Default 200_000 matches Claude 3.5 / Sonnet 4 long-context;
+    #: agents pinned to smaller-window models should override here.
+    context_window: int = Field(default=200_000, gt=0)
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +376,38 @@ class CacheSpec(BaseModel):
     )
 
 
+class ContextCompressionPolicy(BaseModel):
+    """Stream L.L2 — per-agent context compression knobs.
+
+    Drives :class:`~orchestrator.context.compressor.ContextCompressor`:
+    the agent_node preflight triggers compression when the estimated
+    prompt size exceeds ``context_window * threshold_pct``. The
+    compressor preserves the first ``head_keep`` and last ``tail_keep``
+    non-system messages, summarising everything in between via an LLM
+    call. ``max_passes`` caps repeated compression attempts before the
+    run aborts with ``ContextOverflowError`` (Mini-ADR L-2 — no
+    silent fallback).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    threshold_pct: float = Field(default=0.7, gt=0.0, le=1.0)
+    head_keep: int = Field(default=4, ge=0)
+    tail_keep: int = Field(default=6, ge=0)
+    max_passes: int = Field(default=3, ge=1)
+    #: Coarse trim caps that pre-date L2's summarising compressor —
+    #: the existing :class:`DynamicContextMiddleware` (Stream E.3)
+    #: still uses these to cut tail history once L2 has folded the
+    #: middle. L2 doesn't replace E.3 because the two operate at
+    #: different layers (E.3 inside the middleware chain after L2's
+    #: preflight). Defaults match the legacy
+    #: ``policies.context_compression`` permissive shape (max_turns
+    #: 20 / max_tokens 8000) so existing manifests keep loading.
+    max_turns: int = Field(default=20, gt=0)
+    max_tokens: int = Field(default=8000, gt=0)
+
+
 class PolicySpec(BaseModel):
     """Tightening to per-field types is deferred to the owning Streams
     (C.5 quota, D.2 PII, E.6 fallback). Permissive dicts now, schemas
@@ -379,7 +418,7 @@ class PolicySpec(BaseModel):
     rate_limit: dict[str, Any] = Field(default_factory=dict)
     pii: dict[str, Any] = Field(default_factory=dict)
     safety: dict[str, Any] = Field(default_factory=dict)
-    context_compression: dict[str, Any] = Field(default_factory=dict)
+    context_compression: ContextCompressionPolicy = Field(default_factory=ContextCompressionPolicy)
     trajectory_recording: bool = Field(
         default=True,
         description=(
