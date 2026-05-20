@@ -377,7 +377,15 @@
 - [x] **K14 WORM 恢复演练**（补 G6）— `tools/persistence/restore_audit.py` 工具 + `docs/runbooks/audit-restore.md` runbook（pre-flight / sibling table / 调 restore tool / 验证 / promote swap-vs-read-across）+ 3 drill 测试（round-trip integrity / per-tenant 隔离 / 损坏对象 tolerance）。InMemoryObjectStore 上端到端验证序列化和 restore 路径，回归会在 CI 红。
 - [x] **K15 PG 恢复演练**（补 G7）— 定位现状（docs/dr/RUNBOOK.md 已有完整 dev/prod restore procedure + RPO/RTO M0 目标 24h/4h）+ 新增 `docs/runbooks/pg-restore.md` 入口（指向 dr/RUNBOOK + K15 自动化 drill 说明）+ `tools/persistence/test_pg_restore_drill.py` testcontainers 集成测试（pg_dump → drop → pg_restore round-trip + 行数 + body 完整性 + RTO ceiling < 60s）。CI `Test (integration)` 每次跑 drill，schema 回归不会等到季度 DR 演练才发现。
 
-**Stream K Verification**（13 条全勾，详见 STREAM-K-DESIGN § 5）：每条 gap 对应集成测试绿、ITERATION-PLAN checkbox 勾上、零债 6 条全过；Stream K 完成才解锁 Stream J 剩余子项。
+**Stream K Verification ✅ 已完成（2026-05-20）**：13 条 gap（K1–K15，K5 是纯文档锁，所以代码层 14 条 PR）全部合入 main，零债 6 条核验：
+1. **代码干净** ✅ — 新增代码无 `TODO`/`FIXME`/`XXX`/`HACK`（docs 内对零债规则本身的引用不计）
+2. **测试达标** ✅ — K1=6 / K2=1 / K3=2 fix / K4=1 / K6=12 / K7=20 / K8=8 / K9=2 / K10=3 / K11=3 / K12=9 / K13=3 / K14=3 / K15=1 integration；无新 xfail / skip
+3. **文档同步** ✅ — STREAM-K-DESIGN § 1.1 + § 3 + Mini-ADR 与实现一致；迁移号偏离（0021/0022 → 0024/0025）每处都有 inline 注释解释
+4. **可观测齐全** ✅ — K7 DLQ worker emit 3 个 prom counter（cycle_errors / dead_letters / retries_succeeded）；K10 emit 3 个 histogram；新建 audit action 入审计流；新建 endpoint emit OTel span 经现有 ObservabilityMiddleware 自动覆盖
+5. **CI 全绿** ✅ — 14 个 PR 合并时全部 8/8（Lint / mypy / unit / integration / pre-commit / pip-audit / CodeQL Analyze / CodeQL）；CodeQL 无新增 high/critical（合并途中处理过 2 处 warning：K1 result-未初始化 / K12 ellipsis-no-effect）
+6. **bug 不遗留** ✅ — K3 中调查的 "asyncpg quirk" 改正诊断；M1-B retention-cleanup-job 挂账已关；同 PR 修了 1 个 Stream C.3 prefix UNIQUE 预存设计 bug（K1 暴露）
+
+PR 链（main 上 14 个 squash commits + 1 docs PR）：#172（设计）→ #182 K3 → #183 K5 → #184 K2 → #185 K4 → #186 K1 → #187 K9 → #188 K8 → #189 K6 → #190 K7 → #191 K10 → #192 K11 → #193 K13 → #194 K12 → #195 K14 → #196 K15。Stream J 剩余子项现可开始。
 
 ### Stream J — Agent Harness 能力补全（大里程碑；canonical agent + dogfood 的前置）
 
@@ -408,7 +416,7 @@
 ### M0 Exit Criteria（M0 → M0→M1 Gate 验证门）
 
 - [ ] 24 项 P0 全部勾选完成（参考 [architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §"Gap 严重性矩阵"）
-- [ ] **Stream K（Capability Hardening Sprint）15 子项完成** —— 13 条 (c) 类弱版补到生产级（[STREAM-K-DESIGN](./streams/STREAM-K-DESIGN.md)）
+- [x] **Stream K（Capability Hardening Sprint）15 子项完成** —— 13 条 (c) 类弱版全部补到生产级（[STREAM-K-DESIGN](./streams/STREAM-K-DESIGN.md)）；零债 6 条核验 ✅，PR #172 + #182–#196 全部 squash 合入 main（2026-05-20）
 - [ ] **Stream J（Agent Harness 能力补全）15 子项完成** —— 26 维能力矩阵无缺口
 - [ ] canonical 能力 agent 跑通 + staging 冒烟（便宜模型端到端真实 run）
 - [ ] 测试金字塔达标：unit ≥ 85%、integration ≥ 70% 关键路径、E2E 5-10 场景
