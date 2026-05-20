@@ -320,21 +320,6 @@ async def test_per_tenant_retention_isolated(
         await worker_engine.dispose()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "CI-only: ``DELETE FROM event_log`` raises ``permission denied`` "
-        "in the testcontainers Postgres image even when running as the "
-        "bootstrap superuser with BYPASSRLS=True and the table's ACL "
-        "showing the role with DELETE. Local reproduction and the "
-        "matching ``audit_log`` delete (same role + grant pattern) both "
-        "succeed; couldn't pin the asyncpg/PG interaction. The retention "
-        "LOGIC is exercised by the audit_log + per_tenant + idempotent "
-        "tests; migration 0010 carries the ACL contract. Tracked: "
-        "docs/ITERATION-PLAN.md M1-B 'retention-cleanup-job CI-only "
-        "permission denied 收尾' — re-enable once the quirk is pinned."
-    ),
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_event_log_retention_deletes_old_rows(
     db_fixture: tuple[AsyncEngine, AsyncEngine, str],
@@ -373,8 +358,16 @@ async def test_event_log_retention_deletes_old_rows(
         report = await job.run_once()
         assert report.event_deleted == 1
 
+        # The assertion SELECT runs as the app role (helix_app_d3_retention).
+        # event_log has FORCE ROW LEVEL SECURITY with a policy keyed on the
+        # ``app.tenant_id`` GUC (migration 0005); without setting it, every
+        # row is filtered out. The original test set ``ROLE audit_writer``
+        # which (a) had no SELECT grant on event_log anyway and (b) wouldn't
+        # have bypassed RLS — masking the real failure as permission denied.
         async with app_engine.begin() as conn:
-            await conn.execute(text("SET LOCAL ROLE audit_writer"))
+            await conn.execute(
+                text("SELECT set_config('app.tenant_id', :t, true)"), {"t": str(tenant)}
+            )
             remaining = (
                 await conn.execute(
                     text("SELECT count(*) FROM event_log WHERE tenant_id = :t"),
@@ -387,15 +380,6 @@ async def test_event_log_retention_deletes_old_rows(
         await worker_engine.dispose()
 
 
-@pytest.mark.xfail(
-    reason=(
-        "CI-only: same unexplained ``permission denied for table "
-        "jwt_blacklist`` as event_log above; see that test's xfail "
-        "reason. Tracked: docs/ITERATION-PLAN.md M1-B "
-        "'retention-cleanup-job CI-only permission denied 收尾'."
-    ),
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_jwt_blacklist_expired_rows_deleted(
     db_fixture: tuple[AsyncEngine, AsyncEngine, str],
@@ -433,8 +417,10 @@ async def test_jwt_blacklist_expired_rows_deleted(
         report = await job.run_once()
         assert report.jwt_blacklist_deleted == 1
 
+        # See test_event_log_retention_deletes_old_rows — assertion SELECT
+        # runs as the app role, which the fixture GRANTs SELECT on
+        # jwt_blacklist. audit_writer is the wrong role here.
         async with app_engine.begin() as conn:
-            await conn.execute(text("SET LOCAL ROLE audit_writer"))
             remaining_jtis = {
                 r[0] for r in (await conn.execute(text("SELECT jti FROM jwt_blacklist"))).all()
             }
