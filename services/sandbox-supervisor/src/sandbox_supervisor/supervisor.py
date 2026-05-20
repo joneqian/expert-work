@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Protocol
 from uuid import UUID, uuid4
 
+from helix_agent.common.observability import helix_histogram
 from helix_agent.persistence import UserWorkspaceStore, workspace_volume_name
 from helix_agent.protocol import AuditEntry, UserWorkspace
 from helix_agent.protocol.audit import AuditAction, AuditResult
@@ -40,6 +42,18 @@ from sandbox_supervisor.settings import SandboxSupervisorSettings
 from sandbox_supervisor.store import SandboxStore
 
 logger = logging.getLogger(__name__)
+
+
+# Stream K.K10 — Sandbox cold-start duration. Measured from the moment
+# ``acquire`` decides to launch (after quota + workspace resolution) to
+# the moment ``wait_ready`` returns. Warm-session reuse (Stream J.15
+# warm path) does not observe — those acquires never run docker. SLO #4
+# (slo.md): P95 < 3s (M0) / < 500ms (M1 with a warm pool).
+_sandbox_cold_start_seconds = helix_histogram(
+    "helix_sandbox_cold_start_seconds",
+    "Seconds from launch decision to ``wait_ready`` success.",
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0),
+)
 
 
 class AuditSink(Protocol):
@@ -133,6 +147,9 @@ class SandboxSupervisor:
         await self._store.insert(record)
 
         workspace_volume = workspace.volume_name if workspace is not None else None
+        # Stream K.K10 — cold-start measurement starts here (after quota
+        # + workspace resolution; before the actual docker launch).
+        cold_start_started = time.monotonic()
         try:
             link = await self._docker.launch(
                 self._run_argv(record, workspace_volume=workspace_volume)
@@ -142,6 +159,7 @@ class SandboxSupervisor:
             await self._store.update(record.with_state(SandboxState.FAILED))
             msg = f"sandbox launch failed: {exc}"
             raise SupervisorError(msg) from exc
+        _sandbox_cold_start_seconds.observe(time.monotonic() - cold_start_started)
 
         self._links[record.id] = link
         acquired_at = datetime.now(UTC)

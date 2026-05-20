@@ -260,6 +260,24 @@ async def test_acquire_launches_container_and_marks_in_use() -> None:
 
 
 @pytest.mark.asyncio
+async def test_acquire_observes_cold_start_histogram() -> None:
+    """Stream K.K10 — a cold acquire writes the cold-start histogram.
+
+    Warm-session reuse (covered by ``test_acquire_reuses_warm_session_for_same_user``)
+    must NOT observe; that test inspects ``cold_start=False`` on the
+    response, which is the same gate the histogram uses (only the
+    launch path executes).
+    """
+    from sandbox_supervisor.supervisor import _sandbox_cold_start_seconds
+
+    before = _sandbox_cold_start_seconds._sum.get()  # type: ignore[attr-defined]
+    h = _harness()
+    await h.supervisor.acquire(_acquire_request())
+    after = _sandbox_cold_start_seconds._sum.get()  # type: ignore[attr-defined]
+    assert after > before
+
+
+@pytest.mark.asyncio
 async def test_acquire_emits_sandbox_acquired_audit() -> None:
     h = _harness()
     await h.supervisor.acquire(_acquire_request())

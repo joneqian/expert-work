@@ -45,6 +45,11 @@ class RunRecord:
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     task: asyncio.Task[None] | None = field(default=None, repr=False)
     abort_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    #: Stream K.K10 — whether this run resumed an existing checkpointed
+    #: thread (caller computes from prior ``thread_meta`` state). The SSE
+    #: worker observes ``helix_durable_resume_seconds`` only when ``True``
+    #: so the histogram cleanly tracks SLO #5 (durable resume latency).
+    is_resume: bool = False
 
 
 class RunManager:
@@ -65,8 +70,14 @@ class RunManager:
         thread_id: UUID,
         tenant_id: UUID,
         on_disconnect: DisconnectMode = DisconnectMode.CANCEL,
+        is_resume: bool = False,
     ) -> RunRecord:
-        """Create + register a new run in PENDING state."""
+        """Create + register a new run in PENDING state.
+
+        ``is_resume`` (Stream K.K10) flags the run as resuming a thread
+        with a non-empty checkpoint so the SSE worker can observe the
+        durable-resume histogram only on those runs.
+        """
         async with self._lock:
             if run_id in self._runs:
                 msg = f"run_id={run_id} already exists"
@@ -77,6 +88,7 @@ class RunManager:
                 tenant_id=tenant_id,
                 status=RunStatus.PENDING,
                 on_disconnect=on_disconnect,
+                is_resume=is_resume,
             )
             self._runs[run_id] = record
             logger.info("run.create id=%s thread=%s tenant=%s", run_id, thread_id, tenant_id)
