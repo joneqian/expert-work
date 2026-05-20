@@ -368,7 +368,7 @@
 - [x] **K9 reflect wall-clock 超时**（补 G9）— `ReflectionSpec.deadline_s` 默认 30s（gt=0, le=600）；`reflect_node` 用 `asyncio.wait_for(token.run_cancellable(...), timeout=deadline_s)`；超时降级为 accept + critique="reflection timed out after Ns"。与 cancellation_token 正交（cancel 走客户端断开路径）。2 个新单测：`test_reflect_node_wallclock_timeout_falls_back_to_accept` + `test_reflect_node_returns_normally_within_deadline`
 
 **P2 — 阻塞 Gate 前真生产 release**
-- [ ] **K10 G.7 大盘真闭环**（补 G10）— orchestrator/sandbox/control-plane 补 emit `session_ttft_seconds` / `sandbox_cold_start_seconds` / `durable_resume_seconds` + Prom recording rule + Grafana panel 反指
+- [x] **K10 G.7 大盘真闭环**（补 G10）— orchestrator SSE worker emit `helix_session_ttft_seconds` 在首 chunk + `helix_durable_resume_seconds`（仅 `RunRecord.is_resume=True` 时），sandbox-supervisor.acquire 在 launch 路径 emit `helix_sandbox_cold_start_seconds`；`tools/observability/rules/sli.yml` 加三条 recording rule；02-orchestrator / 03-sandbox 大盘 panel expr 改用 recording rule + 加 durable_resume panel + 去 "Scaffold" 标记。control-plane runs.py 用 `run_manager.list_by_thread` 判 `is_resume`。3 个新单测。
 - [ ] **K11 加权金丝雀**（补 G13）— nginx upstream `weight=` + `deploy.py --canary 10/30/50/100` 渐进推进 + 失败自动回滚
 
 **P3 — 阻塞 M1 入口**

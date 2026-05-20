@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any, Protocol
@@ -43,6 +44,7 @@ from uuid import UUID
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
+from helix_agent.common.observability import helix_histogram
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.cancellation import (
@@ -58,6 +60,31 @@ from helix_agent.runtime.stream_bridge import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Stream K.K10 — Session TTFT (Time-To-First-Token). Measured from the
+# moment ``run_agent`` flips the run to ``RUNNING`` to the first real
+# ``updates`` chunk published to the bridge. The ``metadata`` event we
+# publish synchronously beforehand isn't counted — TTFT tracks how long
+# the user waits for actual agent work to start. SLO #3 (slo.md):
+# P95 < 1.5s @ 30d.
+_session_ttft_seconds = helix_histogram(
+    "helix_session_ttft_seconds",
+    "Seconds from RUNNING to first agent update chunk.",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+)
+
+# Stream K.K10 — Durable resume duration. Measured at the same point as
+# TTFT, but only emitted when the run resumed an existing checkpointed
+# thread. The control-plane decides ``is_resume`` from the thread's
+# pre-existing state (see ``runs.py``) and passes it via the
+# ``RunRecord``. SLO #5 reformulated to seconds-of-resume + a success
+# counter (resume failures are run failures → already counted).
+_durable_resume_seconds = helix_histogram(
+    "helix_durable_resume_seconds",
+    "Seconds from RUNNING to first chunk on a resumed (non-empty checkpoint) run.",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+)
 
 #: Default LangGraph stream mode. ``"updates"`` yields ``{node: writes}``
 #: per step — the natural granularity for a ReAct SSE stream (one event
@@ -144,10 +171,21 @@ async def run_agent(
             {"run_id": str(run_id), "thread_id": str(record.thread_id)},
         )
 
+        # Stream K.K10 — start the TTFT / durable-resume timer at RUNNING.
+        # The metadata frame above is server-synthesised, not LLM output,
+        # so we measure from this point to the first ``updates`` chunk.
+        ttft_started = time.monotonic()
+        first_chunk_seen = False
         async for chunk in graph.astream(graph_input, effective_config, stream_mode=stream_mode):
             if record.abort_event.is_set():
                 logger.info("run_agent.abort_requested run_id=%s", run_id)
                 break
+            if not first_chunk_seen:
+                ttft = time.monotonic() - ttft_started
+                _session_ttft_seconds.observe(ttft)
+                if getattr(record, "is_resume", False):
+                    _durable_resume_seconds.observe(ttft)
+                first_chunk_seen = True
             await bridge.publish(run_id, stream_mode, _to_jsonable(chunk))
 
         final = RunStatus.INTERRUPTED if record.abort_event.is_set() else RunStatus.SUCCESS

@@ -269,9 +269,22 @@ def build_runs_router() -> APIRouter:
 
         # Register the run + spawn the background worker. The worker
         # streams graph events into the bridge; sse_consumer drains them.
+        #
+        # Stream K.K10 — the SSE worker observes the durable-resume
+        # histogram only on runs that resumed an existing checkpoint.
+        # Per-thread prior runs in the manager are an in-process proxy
+        # for that signal — first run on a thread is cold, second+ is
+        # a resume. A truly checkpoint-aware probe would inspect the
+        # PostgresSaver state, but the prior-runs check is cheap and
+        # correct for the SLO #5 question ("did the user wait through
+        # a resume?").
         run_id = uuid4()
+        prior_runs = await runtime.run_manager.list_by_thread(thread_id, tenant_id=tenant_id)
         run_record = await runtime.run_manager.create(
-            run_id=run_id, thread_id=thread_id, tenant_id=tenant_id
+            run_id=run_id,
+            thread_id=thread_id,
+            tenant_id=tenant_id,
+            is_resume=bool(prior_runs),
         )
         graph_input = {
             "messages": [

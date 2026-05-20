@@ -26,3 +26,34 @@ groups:
             0.99,
             sum by (le) (rate(helix_control_plane_http_request_duration_seconds_bucket[5m]))
           )
+
+      # SLO 3 — Session TTFT P95 (seconds; target < 1.5). Stream K.K10
+      # added the histogram in the orchestrator SSE worker — observed
+      # at the first agent ``updates`` chunk after ``RUNNING``.
+      - record: helix:sli:session_ttft:p95_5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(helix_session_ttft_seconds_bucket[5m]))
+          )
+
+      # SLO 4 — Sandbox cold-start P95 (seconds; target < 3 in M0, < 0.5 in M1).
+      # Stream K.K10 added the histogram in sandbox-supervisor.acquire,
+      # observed only on the cold-launch path (warm-session reuse skips it).
+      - record: helix:sli:sandbox_cold_start:p95_5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(helix_sandbox_cold_start_seconds_bucket[5m]))
+          )
+
+      # SLO 5 — Durable resume P95 (seconds). Stream K.K10 added the
+      # histogram, observed at the first chunk of a run that resumed an
+      # existing checkpointed thread (control-plane sets
+      # ``RunRecord.is_resume`` from prior-runs lookup).
+      - record: helix:sli:durable_resume:p95_5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(helix_durable_resume_seconds_bucket[5m]))
+          )

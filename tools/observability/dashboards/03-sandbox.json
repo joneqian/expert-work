@@ -16,7 +16,7 @@
       "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "Scaffold dashboard (Stream G.7). The sandbox metrics below are **not emitted in M0** — panels read \"No data\" until sandbox-supervisor instrumentation lands. Metric names follow subsystems/20 § 5.2."
+        "content": "Sandbox-supervisor — cold start, pool, acquire latency. Stream K.K10 wired the cold-start histogram + recording rule (SLI for SLO #4)."
       }
     },
     {
@@ -31,7 +31,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(helix_sandbox_cold_start_seconds_bucket[5m])))",
+          "expr": "helix:sli:sandbox_cold_start:p95_5m",
           "legendFormat": "p95"
         }
       ]

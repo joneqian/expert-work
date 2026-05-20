@@ -564,3 +564,70 @@ async def test_run_agent_no_audit_logger_does_not_crash() -> None:
     )
 
     assert rm.get(record.run_id).status is RunStatus.SUCCESS
+
+
+# ---------------------------------------------------------------------------
+# Stream K.K10 — TTFT + durable-resume histogram emission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_agent_observes_session_ttft_histogram() -> None:
+    """First ``updates`` chunk after ``RUNNING`` writes the TTFT
+    histogram. Every run emits — there is no ``is_resume`` gate on TTFT."""
+    from orchestrator.sse import _session_ttft_seconds
+
+    before = _session_ttft_seconds._sum.get()  # type: ignore[attr-defined]
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_ScriptedGraph(chunks=[{"agent": {"step_count": 1}}]),
+        graph_input={"messages": []},
+        config={},
+    )
+    after = _session_ttft_seconds._sum.get()  # type: ignore[attr-defined]
+    assert after > before
+
+
+@pytest.mark.asyncio
+async def test_run_agent_observes_durable_resume_only_when_is_resume() -> None:
+    """``helix_durable_resume_seconds`` is gated on ``record.is_resume``.
+
+    A first run on a fresh thread (``is_resume=False``) must NOT touch
+    the resume histogram; only a run that the caller flagged as
+    resuming an existing thread emits.
+    """
+    from orchestrator.sse import _durable_resume_seconds
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    cold_record = await _new_record(rm)
+    before = _durable_resume_seconds._sum.get()  # type: ignore[attr-defined]
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=cold_record,
+        graph=_ScriptedGraph(chunks=[{"agent": {"step_count": 1}}]),
+        graph_input={"messages": []},
+        config={},
+    )
+    mid = _durable_resume_seconds._sum.get()  # type: ignore[attr-defined]
+    assert mid == before, "cold run must not touch the resume histogram"
+
+    resume_record = await rm.create(
+        run_id=uuid4(), thread_id=uuid4(), tenant_id=uuid4(), is_resume=True
+    )
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=resume_record,
+        graph=_ScriptedGraph(chunks=[{"agent": {"step_count": 1}}]),
+        graph_input={"messages": []},
+        config={},
+    )
+    after = _durable_resume_seconds._sum.get()  # type: ignore[attr-defined]
+    assert after > mid, "resume run must observe the histogram"
