@@ -9,6 +9,9 @@ from helix_agent.persistence.workspace.base import (
     UserWorkspaceStore as UserWorkspaceStore,
 )
 from helix_agent.persistence.workspace.base import (
+    WorkspaceNotFoundError as WorkspaceNotFoundError,
+)
+from helix_agent.persistence.workspace.base import (
     workspace_volume_name as workspace_volume_name,
 )
 from helix_agent.persistence.workspace.memory import (
@@ -22,5 +25,6 @@ __all__ = [
     "InMemoryUserWorkspaceStore",
     "SqlUserWorkspaceStore",
     "UserWorkspaceStore",
+    "WorkspaceNotFoundError",
     "workspace_volume_name",
 ]

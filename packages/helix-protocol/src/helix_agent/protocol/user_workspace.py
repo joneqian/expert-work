@@ -15,7 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class UserWorkspace(BaseModel):
-    """One row of ``user_workspace`` — a user's persistent volume."""
+    """One row of ``user_workspace`` — a user's persistent volume.
+
+    J.15-补强-1 (STREAM-J-DESIGN § 9.5) adds three fields:
+
+    * ``size_limit_bytes`` — quota ceiling (Mini-ADR J-29 第 1 项).
+    * ``deleted_at`` — soft-delete timestamp (Mini-ADR J-36). ``None`` ⇒ active.
+    * ``archived_object_key`` — ObjectStore key where the tar.zst archive
+      landed after the reaper sweep (Mini-ADR J-36). ``None`` while
+      pending archive.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -28,5 +37,21 @@ class UserWorkspace(BaseModel):
     size_bytes: int = Field(
         default=0, ge=0, description="last measured volume size; 0 until first measurement"
     )
+    size_limit_bytes: int = Field(
+        default=10 * 1024 * 1024 * 1024,
+        gt=0,
+        description="quota ceiling — supervisor rejects acquire when size_bytes >= size_limit_bytes",
+    )
     created_at: datetime | None = None
     last_accessed_at: datetime | None = None
+    deleted_at: datetime | None = Field(
+        default=None,
+        description="soft-delete timestamp; None ⇒ active. Acquire rejects deleted workspaces.",
+    )
+    archived_object_key: str | None = Field(
+        default=None,
+        description=(
+            "ObjectStore key of the tar.zst archive. Populated by reaper after archive "
+            "completes; only meaningful when deleted_at is also set."
+        ),
+    )

@@ -99,3 +99,35 @@ class WorkspaceFileNotFoundError(SupervisorError):
 
 class WorkspaceFileTooLargeError(SupervisorError):
     """A workspace file exceeds the supervisor's download size cap (J.9)."""
+
+
+class WorkspaceQuotaExceededError(SupervisorError):
+    """The user's workspace is at its ``size_limit_bytes`` quota (J.15-补强-1).
+
+    Raised by :class:`QuotaEnforcer.check` on acquire when the last-
+    measured volume size has reached the per-workspace ceiling. The
+    control-plane translates this into HTTP 429, matching B.2 / sandbox
+    rate-limit semantics.
+    """
+
+    def __init__(self, workspace_id: UUID, size_bytes: int, size_limit_bytes: int) -> None:
+        super().__init__(
+            f"workspace {workspace_id} at quota: {size_bytes} >= {size_limit_bytes} bytes"
+        )
+        self.workspace_id = workspace_id
+        self.size_bytes = size_bytes
+        self.size_limit_bytes = size_limit_bytes
+
+
+class WorkspaceDeletedError(SupervisorError):
+    """The user's workspace is soft-deleted; acquire is rejected (Mini-ADR J-36).
+
+    Raised by :class:`QuotaEnforcer.check` when ``user_workspace.deleted_at``
+    is set. The control-plane translates this into HTTP 410 Gone — the
+    resource existed but is intentionally unavailable; recovery is a
+    separate operator action (推 M1).
+    """
+
+    def __init__(self, workspace_id: UUID) -> None:
+        super().__init__(f"workspace {workspace_id} is soft-deleted")
+        self.workspace_id = workspace_id

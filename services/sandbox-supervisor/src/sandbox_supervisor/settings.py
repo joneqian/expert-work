@@ -61,3 +61,12 @@ class SandboxSupervisorSettings(BaseSettings):
     #: is older than this — freeing compute; the persistent volume is
     #: kept, so the next message cold-starts a fresh container on it.
     session_idle_ttl_s: int = Field(default=15 * 60, gt=0, le=24 * 60 * 60)
+
+    # ------------------------------------------------------- workspace J.15-补强-1
+    #: Per-workspace volume size ceiling (Mini-ADR J-29 第 1 项). Mirrored
+    #: into ``user_workspace.size_limit_bytes`` at row creation; supervisor
+    #: rejects ``acquire()`` when ``size_bytes >= size_limit_bytes``.
+    #: Default 10 GiB matches migration 0026's server_default.
+    default_workspace_size_limit_mb: int = Field(
+        default=10 * 1024, gt=0, le=1024 * 1024
+    )

@@ -104,6 +104,9 @@ from helix_agent.persistence.workspace import (
     UserWorkspaceStore as UserWorkspaceStore,
 )
 from helix_agent.persistence.workspace import (
+    WorkspaceNotFoundError as WorkspaceNotFoundError,
+)
+from helix_agent.persistence.workspace import (
     workspace_volume_name as workspace_volume_name,
 )
 
@@ -159,6 +162,7 @@ __all__ = [
     "TokenReservationStore",
     "UserWorkspaceRow",
     "UserWorkspaceStore",
+    "WorkspaceNotFoundError",
     "build_rls_sessionmaker",
     "bypass_rls_var",
     "create_async_engine_from_config",

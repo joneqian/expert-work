@@ -32,9 +32,12 @@ from sandbox_supervisor.domain import (
     SandboxRecord,
     SandboxState,
     SupervisorError,
+    WorkspaceDeletedError,
     WorkspaceFileNotFoundError,
     WorkspaceFileTooLargeError,
+    WorkspaceQuotaExceededError,
 )
+from sandbox_supervisor.quota_enforcer import QuotaEnforcer
 from sandbox_supervisor.reaper import SandboxReaper
 from sandbox_supervisor.runner_link import ExecResult, RunnerLinkError
 from sandbox_supervisor.schemas import AcquireRequest
@@ -89,6 +92,8 @@ class RecordingDockerClient:
         link: FakeRunnerLink | None = None,
         volume_file: bytes = b"",
         volume_file_error: DockerError | None = None,
+        measured_size: int = 0,
+        measure_error: DockerError | None = None,
     ) -> None:
         self.launches: list[list[str]] = []
         self.removed: list[str] = []
@@ -99,6 +104,9 @@ class RecordingDockerClient:
         self._volume_file = volume_file
         self._volume_file_error = volume_file_error
         self.volume_reads: list[tuple[str, str]] = []
+        self._measured_size = measured_size
+        self._measure_error = measure_error
+        self.measure_calls: list[tuple[str, str]] = []
 
     async def launch(self, argv: list[str]) -> FakeRunnerLink:
         self.launches.append(argv)
@@ -126,6 +134,12 @@ class RecordingDockerClient:
         if self._volume_file_error is not None:
             raise self._volume_file_error
         return self._volume_file
+
+    async def measure_volume_size(self, *, volume: str, image: str) -> int:
+        self.measure_calls.append((volume, image))
+        if self._measure_error is not None:
+            raise self._measure_error
+        return self._measured_size
 
 
 class InMemorySandboxStore:
@@ -199,18 +213,40 @@ def _harness(
     store: InMemorySandboxStore | None = None,
     docker: RecordingDockerClient | None = None,
     settings: SandboxSupervisorSettings | None = None,
+    quota_enabled: bool = False,
 ) -> _Harness:
+    """Build a fake-backed supervisor harness.
+
+    ``quota_enabled=True`` wires a real :class:`QuotaEnforcer` against
+    the same fakes — used by the J.15-补强-1 acquire / release tests.
+    Default ``False`` keeps the pre-existing tests unchanged (they pre-
+    date workspace quota and don't expect ``measure_volume_size`` to be
+    called).
+    """
     resolved_store = store if store is not None else InMemorySandboxStore()
     resolved_docker = docker if docker is not None else RecordingDockerClient()
     audit = RecordingAuditSink()
     workspaces = InMemoryUserWorkspaceStore()
+    resolved_settings = settings or SandboxSupervisorSettings()
+    quota_enforcer = (
+        QuotaEnforcer(
+            workspace_store=workspaces,
+            audit=audit,
+            docker=resolved_docker,
+            measure_image=resolved_settings.sandbox_image,
+            service_name=resolved_settings.service_name,
+        )
+        if quota_enabled
+        else None
+    )
     supervisor = SandboxSupervisor(
         store=resolved_store,
         docker=resolved_docker,
         audit=audit,
         runtime_provider=SandboxRuntimeProvider(oci_runtime="runc"),
         workspace_store=workspaces,
-        settings=settings or SandboxSupervisorSettings(),
+        settings=resolved_settings,
+        quota_enforcer=quota_enforcer,
     )
     return _Harness(supervisor, resolved_store, resolved_docker, audit, workspaces)
 
@@ -505,6 +541,160 @@ async def test_reaper_reaps_idle_warm_session() -> None:
     assert reaped == 1
     assert h.store.rows[acquired.sandbox_id].state is SandboxState.DESTROYED
     assert h.store.rows[acquired.sandbox_id].destroy_reason == DESTROY_REASON_IDLE_TIMEOUT
+
+
+# ---------------------------------------------------------------------------
+# J.15-补强-1 — volume quota + lifecycle (Mini-ADR J-29 第 1 项 + J-36)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_acquire_rejects_when_workspace_size_at_limit() -> None:
+    """Acquire raises WorkspaceQuotaExceededError when size_bytes >= size_limit_bytes."""
+    h = _harness(quota_enabled=True)
+    tenant_id, user_id = uuid4(), uuid4()
+    workspace = await h.workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
+    # Lower the limit + push size above it to force the reject.
+    await h.workspaces.update_size(workspace_id=workspace.id, size_bytes=2048)
+    # InMemory model_copy idiom — modify the row's size_limit_bytes.
+    h.workspaces._rows[(tenant_id, user_id)] = (
+        h.workspaces._rows[(tenant_id, user_id)].model_copy(
+            update={"size_limit_bytes": 1024}
+        )
+    )
+
+    with pytest.raises(WorkspaceQuotaExceededError):
+        await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+    # Audit captured the deny.
+    actions = [e.action for e in h.audit.entries]
+    assert AuditAction.WORKSPACE_QUOTA_DENIED in actions
+    # And no docker launch happened.
+    assert h.docker.launches == []
+
+
+@pytest.mark.asyncio
+async def test_acquire_rejects_when_workspace_is_soft_deleted() -> None:
+    """Acquire raises WorkspaceDeletedError when deleted_at is set."""
+    h = _harness(quota_enabled=True)
+    tenant_id, user_id = uuid4(), uuid4()
+    workspace = await h.workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
+    await h.workspaces.soft_delete(workspace_id=workspace.id, now=datetime.now(UTC))
+
+    with pytest.raises(WorkspaceDeletedError):
+        await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+
+@pytest.mark.asyncio
+async def test_acquire_succeeds_under_quota_with_enforcer() -> None:
+    """A healthy under-quota acquire still works when the enforcer is wired."""
+    h = _harness(quota_enabled=True)
+    tenant_id, user_id = uuid4(), uuid4()
+    response = await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+    assert response.cold_start is True
+    # No quota-denied audit; only the SANDBOX_ACQUIRED success.
+    quota_denies = [
+        e for e in h.audit.entries if e.action is AuditAction.WORKSPACE_QUOTA_DENIED
+    ]
+    assert quota_denies == []
+
+
+@pytest.mark.asyncio
+async def test_reuse_session_rechecks_quota() -> None:
+    """A warm-session reuse re-runs the workspace quota check (size can grow between
+    acquires; soft-delete can land while a session is warm)."""
+    h = _harness(quota_enabled=True)
+    tenant_id, user_id = uuid4(), uuid4()
+    await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+    # Volume "grew" past quota between runs — push size + tighten limit.
+    workspace = await h.workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
+    await h.workspaces.update_size(workspace_id=workspace.id, size_bytes=4096)
+    h.workspaces._rows[(tenant_id, user_id)] = (
+        h.workspaces._rows[(tenant_id, user_id)].model_copy(
+            update={"size_limit_bytes": 1024}
+        )
+    )
+
+    with pytest.raises(WorkspaceQuotaExceededError):
+        await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+
+@pytest.mark.asyncio
+async def test_release_fires_size_refresh_and_keeps_session_warm() -> None:
+    """Releasing a user-scoped acquire keeps the warm session AND schedules a du.
+
+    The QuotaEnforcer.refresh_size call is fire-and-forget — we let the
+    event loop run pending tasks via ``asyncio.sleep(0)`` so the fake
+    docker's ``measure_calls`` and the store's ``size_bytes`` are
+    populated before we assert.
+    """
+    import asyncio as _asyncio  # local import keeps the test scope explicit
+
+    docker = RecordingDockerClient(measured_size=12345)
+    h = _harness(docker=docker, quota_enabled=True)
+    tenant_id, user_id = uuid4(), uuid4()
+    response = await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+    await h.supervisor.release(response.sandbox_id)
+
+    # Yield once so the create_task'd refresh runs to completion.
+    for _ in range(5):
+        await _asyncio.sleep(0)
+
+    # Warm session stayed alive.
+    row = h.store.rows[response.sandbox_id]
+    assert row.state is SandboxState.IN_USE
+    # And du was scheduled + written back.
+    assert len(docker.measure_calls) == 1
+    refreshed = await h.workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
+    assert refreshed.size_bytes == 12345
+
+
+@pytest.mark.asyncio
+async def test_mark_workspace_deleted_soft_deletes_and_destroys_warm_session() -> None:
+    """mark_workspace_deleted soft-deletes the row + force-destroys any warm session."""
+    h = _harness(quota_enabled=True)
+    tenant_id, user_id = uuid4(), uuid4()
+    response = await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+    await h.supervisor.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
+
+    workspace = await h.workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
+    assert workspace.deleted_at is not None
+
+    # Warm session was force-destroyed; subsequent acquire rejects.
+    with pytest.raises(WorkspaceDeletedError):
+        await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+    # Audit captured the soft-delete + the implicit force-destroy.
+    actions = [e.action for e in h.audit.entries]
+    assert AuditAction.WORKSPACE_SOFT_DELETE in actions
+    assert AuditAction.SANDBOX_FORCE_DESTROY in actions
+
+    # The workspace audit entry uses resource_type="user_workspace".
+    workspace_entries = [
+        e for e in h.audit.entries if e.action is AuditAction.WORKSPACE_SOFT_DELETE
+    ]
+    assert len(workspace_entries) == 1
+    assert workspace_entries[0].resource_type == "user_workspace"
+    assert workspace_entries[0].resource_id == str(workspace.id)
+
+
+@pytest.mark.asyncio
+async def test_mark_workspace_deleted_is_idempotent() -> None:
+    """A second mark_workspace_deleted is a no-op (no extra audit, no extra destroy)."""
+    h = _harness(quota_enabled=True)
+    tenant_id, user_id = uuid4(), uuid4()
+    await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+
+    await h.supervisor.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
+    audits_after_first = len(h.audit.entries)
+
+    await h.supervisor.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
+    # Second call adds no new audit entries.
+    assert len(h.audit.entries) == audits_after_first
 
 
 # ---------------------------------------------------------------------------

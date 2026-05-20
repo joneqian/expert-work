@@ -52,6 +52,15 @@ class DockerClient(Protocol):
     ) -> bytes:
         """Read a file from a named volume; return up to ``max_bytes + 1`` bytes."""
 
+    async def measure_volume_size(self, *, volume: str, image: str) -> int:
+        """Return the total ``/workspace`` size in bytes for a named volume.
+
+        Stream J.15-补强-1 — backs :class:`QuotaEnforcer.refresh_size`.
+        Runs a throwaway ``--rm`` container that mounts ``volume`` read-
+        only and runs ``du -sb``. Returns the apparent total bytes. Raises
+        :class:`DockerError` when the measure can't run.
+        """
+
 
 class CliDockerClient:
     """:class:`DockerClient` backed by the ``docker`` CLI via asyncio subprocess."""
@@ -146,6 +155,48 @@ class CliDockerClient:
             msg = f"workspace file read failed for {path!r}: {detail}"
             raise DockerError(msg)
         return stdout
+
+    async def measure_volume_size(self, *, volume: str, image: str) -> int:
+        """Measure a named volume's total size in bytes (Stream J.15-补强-1).
+
+        Spawns a throwaway ``--rm`` container — read-only rootfs, no
+        network, all capabilities dropped — that mounts ``volume`` at
+        ``/ws`` read-only and runs ``du -sb /ws`` (apparent bytes).
+        Returns the parsed integer. Raises :class:`DockerError` when
+        the measure fails (volume missing, du parse error, etc.).
+
+        ``--entrypoint sh`` overrides the sandbox image's runner so the
+        ``du -sb`` argv reaches busybox / coreutils.
+        """
+        argv = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--volume",
+            f"{volume}:/ws:ro",
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            "du -sb /ws | cut -f1",
+        ]
+        stdout, stderr, code = await self._exec(argv)
+        if code != 0:
+            detail = stderr.strip() or "non-zero exit"
+            msg = f"volume size measure failed for {volume!r}: {detail}"
+            raise DockerError(msg)
+        try:
+            return int(stdout.strip())
+        except ValueError as exc:
+            msg = f"could not parse du output for {volume!r}: {stdout!r}"
+            raise DockerError(msg) from exc
 
     @staticmethod
     async def _exec(argv: list[str]) -> tuple[str, str, int]:

@@ -33,9 +33,12 @@ from sandbox_supervisor.domain import (
     QuotaExceededError,
     SandboxNotFoundError,
     SupervisorError,
+    WorkspaceDeletedError,
     WorkspaceFileNotFoundError,
     WorkspaceFileTooLargeError,
+    WorkspaceQuotaExceededError,
 )
+from sandbox_supervisor.quota_enforcer import QuotaEnforcer
 from sandbox_supervisor.reaper import SandboxReaper
 from sandbox_supervisor.schemas import (
     AcquireRequest,
@@ -98,13 +101,22 @@ def create_app(
         # behind — the held-pipe model (option C) does not survive a
         # supervisor restart, so leftovers must be swept.
         await docker.sweep_orphans()
+        workspace_store = SqlUserWorkspaceStore(session_factory)
+        quota_enforcer = QuotaEnforcer(
+            workspace_store=workspace_store,
+            audit=audit,
+            docker=docker,
+            measure_image=resolved_settings.sandbox_image,
+            service_name=resolved_settings.service_name,
+        )
         live = SandboxSupervisor(
             store=store,
             docker=docker,
             audit=audit,
             runtime_provider=make_sandbox_runtime_provider(resolved_settings.oci_runtime),
-            workspace_store=SqlUserWorkspaceStore(session_factory),
+            workspace_store=workspace_store,
             settings=resolved_settings,
+            quota_enforcer=quota_enforcer,
         )
         app.state.supervisor = live
 
@@ -184,6 +196,22 @@ def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(QuotaExceededError)
     async def _quota(_request: Request, exc: QuotaExceededError) -> JSONResponse:
         return JSONResponse(status_code=429, content={"detail": str(exc)})
+
+    @app.exception_handler(WorkspaceQuotaExceededError)
+    async def _workspace_quota(
+        _request: Request, exc: WorkspaceQuotaExceededError
+    ) -> JSONResponse:
+        # Stream J.15-补强-1 (Mini-ADR J-29 第 1 项): per-workspace size
+        # quota — same 429 status as the sandbox-count quota.
+        return JSONResponse(status_code=429, content={"detail": str(exc)})
+
+    @app.exception_handler(WorkspaceDeletedError)
+    async def _workspace_deleted(
+        _request: Request, exc: WorkspaceDeletedError
+    ) -> JSONResponse:
+        # Stream J.15-补强-1 (Mini-ADR J-36): the workspace was soft-
+        # deleted; recovery is a separate operator action (推 M1).
+        return JSONResponse(status_code=410, content={"detail": str(exc)})
 
     @app.exception_handler(SandboxNotFoundError)
     async def _not_found(_request: Request, exc: SandboxNotFoundError) -> JSONResponse:

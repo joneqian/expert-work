@@ -17,7 +17,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID, uuid4
 
 from helix_agent.common.observability import helix_histogram
@@ -36,10 +36,13 @@ from sandbox_supervisor.domain import (
     WorkspaceFileNotFoundError,
     WorkspaceFileTooLargeError,
 )
+from sandbox_supervisor.quota_enforcer import QuotaEnforcer
 from sandbox_supervisor.runner_link import ExecResult, RunnerLink, RunnerLinkError
 from sandbox_supervisor.schemas import AcquireRequest, AcquireResponse
 from sandbox_supervisor.settings import SandboxSupervisorSettings
 from sandbox_supervisor.store import SandboxStore
+
+DESTROY_REASON_WORKSPACE_SOFT_DELETE = "workspace_soft_delete"
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,7 @@ class SandboxSupervisor:
         runtime_provider: SandboxRuntimeProvider,
         workspace_store: UserWorkspaceStore,
         settings: SandboxSupervisorSettings,
+        quota_enforcer: QuotaEnforcer | None = None,
     ) -> None:
         self._store = store
         self._docker = docker
@@ -106,6 +110,11 @@ class SandboxSupervisor:
         self._runtime = runtime_provider
         self._workspaces = workspace_store
         self._settings = settings
+        # Stream J.15-补强-1 — per-workspace volume quota gate. ``None``
+        # means quota enforcement is disabled (legacy callers + the
+        # ephemeral-tmpfs path; the J.15 warm-session path always
+        # constructs one in ``create_app``).
+        self._quota_enforcer = quota_enforcer
         # Held runner links, keyed by sandbox id — the option-C transport.
         self._links: dict[UUID, RunnerLink] = {}
         # Stream J.15 — warm per-user sandbox sessions: ``(tenant, user)``
@@ -124,8 +133,11 @@ class SandboxSupervisor:
         reaper reclaims it once unused for ``session_idle_ttl_s``.
 
         Raises :class:`QuotaExceededError` when the tenant is at its
-        cap, and :class:`SupervisorError` when the container fails to
-        launch or never reports ready (the row is left ``FAILED``).
+        sandbox cap, :class:`WorkspaceQuotaExceededError` when the
+        user's workspace volume is at its size ceiling (J.15-补强-1,
+        Mini-ADR J-29 第 1 项), :class:`WorkspaceDeletedError` when
+        the workspace has been soft-deleted (Mini-ADR J-36), and
+        :class:`SupervisorError` when the container fails to launch.
         """
         if request.user_id is not None:
             reused = await self._reuse_session(request.tenant_id, request.user_id)
@@ -142,6 +154,11 @@ class SandboxSupervisor:
             workspace = await self._workspaces.resolve(
                 tenant_id=request.tenant_id, user_id=request.user_id
             )
+            # J.15-补强-1: enforce per-workspace quota + soft-delete
+            # before paying for a docker launch. Raises on reject;
+            # ``QuotaEnforcer.check`` emits the audit before raising.
+            if self._quota_enforcer is not None:
+                await self._quota_enforcer.check(workspace=workspace)
 
         record = self._new_record(request, workspace=workspace)
         await self._store.insert(record)
@@ -223,6 +240,10 @@ class SandboxSupervisor:
         A J.15 warm per-user session is **kept alive** (no-op) — it
         stays hot for the user's next run and is reclaimed by the idle
         reaper. A non-session (no ``user_id``) sandbox is destroyed.
+
+        J.15-补强-1 — before keeping warm, fires a fire-and-forget
+        :meth:`QuotaEnforcer.refresh_size` so the next acquire's quota
+        check uses a fresh ``size_bytes`` measurement.
         """
         record = await self._store.get(sandbox_id)
         if (
@@ -230,8 +251,22 @@ class SandboxSupervisor:
             and record.user_id is not None
             and record.state is SandboxState.IN_USE
         ):
+            await self._schedule_size_refresh(record.tenant_id, record.user_id)
             return
         await self.destroy(sandbox_id, reason=DESTROY_REASON_RELEASE)
+
+    async def _schedule_size_refresh(self, tenant_id: UUID, user_id: UUID) -> None:
+        """Fire-and-forget :meth:`QuotaEnforcer.refresh_size` (J.15-补强-1).
+
+        Schedules an async task so the release path is not blocked on
+        the ``du`` measure. The enforcer swallows its own errors —
+        nothing here needs to handle them.
+        """
+        if self._quota_enforcer is None:
+            return
+        workspace = await self._workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
+        enforcer = self._quota_enforcer
+        asyncio.create_task(enforcer.refresh_size(workspace=workspace))
 
     async def destroy(self, sandbox_id: UUID, *, reason: str) -> None:
         """Tear a sandbox down — ``docker rm -f`` + close the link + mark DESTROYED.
@@ -291,6 +326,46 @@ class SandboxSupervisor:
         """Whether the Docker daemon is reachable — for the health probe."""
         return await self._docker.ping()
 
+    async def mark_workspace_deleted(self, *, tenant_id: UUID, user_id: UUID) -> None:
+        """Soft-delete a user's workspace (Mini-ADR J-36 lifecycle 第 2 档).
+
+        Idempotent. After this call:
+
+        * Subsequent ``acquire(user_id=this_user)`` raises
+          :class:`WorkspaceDeletedError` (Mini-ADR J-36).
+        * Any live warm session is force-destroyed — the next acquire
+          would reject anyway, but freeing the slot immediately keeps
+          quota state honest.
+        * The reaper picks the row up on its next sweep and triggers the
+          archive job (J.15-补强-2 backup pipeline reuses the same
+          mechanism). Until then the volume stays on disk but is
+          inaccessible.
+        * Emits ``workspace:soft_delete`` audit (Stream J.15-补强-1).
+        """
+        workspace = await self._workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
+        # Idempotent: skip the audit + destroy when already deleted.
+        if workspace.deleted_at is not None:
+            return
+        now = datetime.now(UTC)
+        await self._workspaces.soft_delete(workspace_id=workspace.id, now=now)
+        session_key = (tenant_id, user_id)
+        sandbox_id = self._sessions.get(session_key)
+        if sandbox_id is not None:
+            await self.destroy(sandbox_id, reason=DESTROY_REASON_WORKSPACE_SOFT_DELETE)
+        await self._emit_audit(
+            tenant_id=tenant_id,
+            action=AuditAction.WORKSPACE_SOFT_DELETE,
+            result=AuditResult.SUCCESS,
+            sandbox_id=None,
+            details={
+                "user_id": str(user_id),
+                "workspace_id": str(workspace.id),
+                "volume_name": workspace.volume_name,
+            },
+            resource_type="user_workspace",
+            resource_id=str(workspace.id),
+        )
+
     async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
         """Read a file from a user's persistent workspace volume (Stream J.9).
 
@@ -322,9 +397,13 @@ class SandboxSupervisor:
         """Return the user's warm session as an :class:`AcquireResponse`, or
         ``None`` when there is no live session to reuse (J.15).
 
-        Reuse skips the quota check — the session already holds its slot.
-        A stale map entry (link gone, or the row is no longer ``IN_USE``)
-        is dropped so the caller falls through to a fresh launch.
+        Tenant-level sandbox-count quota is skipped (the session already
+        holds its slot). But J.15-补强-1 still rechecks per-workspace
+        size quota + soft-delete state — the volume can grow past its
+        ``size_limit_bytes`` between acquires, and a workspace can be
+        soft-deleted while a session is warm; both must reject reuse.
+        A stale map entry (link gone, or the row is no longer
+        ``IN_USE``) is dropped so the caller falls through.
         """
         sandbox_id = self._sessions.get((tenant_id, user_id))
         if sandbox_id is None or sandbox_id not in self._links:
@@ -333,6 +412,15 @@ class SandboxSupervisor:
         if record is None or record.state is not SandboxState.IN_USE:
             self._sessions.pop((tenant_id, user_id), None)
             return None
+        # J.15-补强-1: workspace-level quota + soft-delete recheck on reuse.
+        if self._quota_enforcer is not None:
+            workspace = await self._workspaces.resolve(
+                tenant_id=tenant_id, user_id=user_id
+            )
+            # Raises WorkspaceQuotaExceededError / WorkspaceDeletedError
+            # — let the caller propagate; the warm session entry stays
+            # (the reaper / explicit destroy will clear it).
+            await self._quota_enforcer.check(workspace=workspace)
         return AcquireResponse(
             sandbox_id=sandbox_id,
             container_id=_container_name(sandbox_id),
@@ -416,15 +504,29 @@ class SandboxSupervisor:
         sandbox_id: UUID | None,
         details: dict[str, object],
         reason: str | None = None,
+        resource_type: Literal["sandbox", "user_workspace"] = "sandbox",
+        resource_id: str | None = None,
     ) -> None:
+        """Emit one audit entry. ``resource_id`` overrides ``sandbox_id`` when provided.
+
+        J.15-补强-1 — ``resource_type`` defaults to ``"sandbox"`` for the
+        long-standing F.1 callers; ``mark_workspace_deleted`` passes
+        ``"user_workspace"`` so the workspace audit trail is separable
+        from sandbox lifecycle events.
+        """
+        resolved_resource_id = (
+            resource_id
+            if resource_id is not None
+            else (str(sandbox_id) if sandbox_id is not None else None)
+        )
         await self._audit.write(
             AuditEntry(
                 tenant_id=tenant_id,
                 actor_type="system",
                 actor_id=self._settings.service_name,
                 action=action,
-                resource_type="sandbox",
-                resource_id=str(sandbox_id) if sandbox_id is not None else None,
+                resource_type=resource_type,
+                resource_id=resolved_resource_id,
                 result=result,
                 reason=reason,
                 details=details,
