@@ -58,7 +58,7 @@ from collections.abc import Mapping
 from typing import Any, Literal, cast
 from uuid import UUID
 
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
@@ -75,6 +75,8 @@ from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState
+from orchestrator.tools.mutation_classifier import MutationOutcome
+from orchestrator.tools.mutation_classifier import classify as classify_mutation
 from orchestrator.tools.registry import (
     TOOL_ALLOWED_STATE_KEYS,
     Tool,
@@ -183,6 +185,19 @@ def build_react_graph(
         memories = state.get("recalled_memories")
         if memories:
             messages = _inject_memories(messages, memories)
+        # Stream L.L4 — inject a ``<mutation-advisory>`` HumanMessage
+        # listing file mutations that did NOT land in the previous
+        # tools batch. Mini-ADR L-4: the advisory is part of the
+        # conversation history (persists across turns) and lives in a
+        # HumanMessage, NOT the system block, so the L1 prompt-cache
+        # prefix invariant stays intact. Append once per failure batch
+        # — the channel is reset to ``[]`` in this node's return dict
+        # so a follow-on agent step does not double-inject.
+        failed_mutations = list(state.get("failed_mutations", []))
+        advisory_message: HumanMessage | None = None
+        if failed_mutations:
+            advisory_message = _build_mutation_advisory(failed_mutations)
+            messages = [*messages, advisory_message]
         configurable = config.get("configurable") or {}
         tenant_id = _parse_uuid(configurable.get("tenant_id"))
 
@@ -219,16 +234,31 @@ def build_react_graph(
             )
             await after_llm_chain.invoke(ctx, _noop)
             new_messages = _extract_post_llm_messages(ctx, original=after_messages)
+            # Stream L.L4 — persist the advisory into history so the
+            # next agent step sees it even after this dict's reducer
+            # appends. The middleware path's ``new_messages`` is the
+            # full post-LLM delta; prepend the advisory in case the
+            # middleware filtered the prompt body.
+            persisted_messages: list[BaseMessage] = list(new_messages)
+            if advisory_message is not None and advisory_message not in persisted_messages:
+                persisted_messages = [advisory_message, *persisted_messages]
             return {
-                "messages": new_messages,
+                "messages": persisted_messages,
                 "step_count": step_count + 1,
                 "step_count_refund_pending": 0,
+                "failed_mutations": [],
             }
 
+        # Stream L.L4 — persist the advisory in conversation history
+        # alongside the LLM response so the next agent step sees it.
+        emit_messages: list[BaseMessage] = (
+            [advisory_message, response] if advisory_message is not None else [response]
+        )
         return {
-            "messages": [response],
+            "messages": emit_messages,
             "step_count": step_count + 1,
             "step_count_refund_pending": 0,
+            "failed_mutations": [],
         }
 
     async def tools_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -301,6 +331,11 @@ def build_react_graph(
         # Re-assemble in original tool_call order. L5 / K8 invariants
         # require a stable iteration order downstream.
         new_messages: list[BaseMessage] = []
+        # Stream L.L4 — collect mutations that did NOT land so the next
+        # agent step can inject the advisory footer. The check runs in
+        # original order so the advisory lists failures the LLM would
+        # see in the same sequence the ToolMessages appear.
+        failed_mutations: list[MutationOutcome] = []
         for idx in range(len(tool_calls)):
             tool_message, tool_state, refund_inc = results[idx]
             new_messages.append(tool_message)
@@ -308,12 +343,25 @@ def build_react_graph(
                 if key in TOOL_ALLOWED_STATE_KEYS:
                     accumulated_state[key] = value
             refund_total += refund_inc
+            outcome = classify_mutation(
+                str(tool_calls[idx].get("name", "")),
+                tool_calls[idx].get("args") or {},
+                tool_message,
+            )
+            if outcome is not None and not outcome.landed:
+                failed_mutations.append(outcome)
 
-        return {
+        result_dict: dict[str, Any] = {
             "messages": new_messages,
             "step_count_refund_pending": refund_total,
             **accumulated_state,
         }
+        # Only write the channel when there are failures — the absent
+        # case keeps the agent_node's ``state.get("failed_mutations", [])``
+        # default fast-path active.
+        if failed_mutations:
+            result_dict["failed_mutations"] = failed_mutations
+        return result_dict
 
     graph: StateGraph[AgentState, None, AgentState, AgentState] = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
@@ -386,6 +434,33 @@ def _inject_memories(messages: list[BaseMessage], memories: list[MemoryItem]) ->
     lines = ["## Relevant memories from past sessions"]
     lines.extend(f"- ({item.kind}) {item.content}" for item in memories)
     return _merge_into_system(messages, "\n".join(lines))
+
+
+def _build_mutation_advisory(failed: list[MutationOutcome]) -> HumanMessage:
+    """Stream L.L4 — render a ``<mutation-advisory>`` HumanMessage from
+    the list of file mutations that did NOT land in the previous tools
+    batch (Mini-ADR L-4).
+
+    The wire shape matches Hermes ``conversation_loop.py:3916-3939``:
+    a single bracketed advisory listing tool name + path + error, so
+    the model cannot claim success on those paths in the next response.
+    Lives as a HumanMessage (not SystemMessage) so the L1 prompt-cache
+    prefix invariant — ``system`` is build-once / replay-verbatim —
+    stays intact.
+    """
+    lines = [
+        "<mutation-advisory>",
+        "The following file mutations from the previous tool batch did NOT land. "
+        "DO NOT assume these paths have the requested content; retry or surface "
+        "the failure to the user.",
+    ]
+    for outcome in failed:
+        line = f"- {outcome.tool_name} path={outcome.path}"
+        if outcome.error:
+            line += f": {outcome.error}"
+        lines.append(line)
+    lines.append("</mutation-advisory>")
+    return HumanMessage(content="\n".join(lines))
 
 
 def _should_continue(state: AgentState) -> Literal["tools", "__end__"]:

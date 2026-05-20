@@ -25,6 +25,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 from helix_agent.protocol import MemoryItem, Plan, Reflection
+from orchestrator.tools.mutation_classifier import MutationOutcome
 
 #: Default ReAct hard limit — see Mini-ADR E-6 in the design doc + the
 #: "ReAct 无限循环" risk row. Manifest may override per-agent.
@@ -61,6 +62,15 @@ class AgentState(TypedDict):
     then resets the channel to ``0``. Keeps refund accounting
     observable and auditable instead of letting tools rewrite
     ``step_count`` directly.
+
+    ``failed_mutations`` (Stream L.L4 / Mini-ADR L-4) accumulates
+    :class:`~orchestrator.tools.mutation_classifier.MutationOutcome`
+    rows for file-mutation tool calls that did NOT land in the most
+    recent ``tools`` batch. The next ``agent_node`` reads the list,
+    emits an ``<mutation-advisory>`` ``HumanMessage`` so the model
+    cannot claim success on those paths, and resets the channel to
+    ``[]``. Defaults to empty; tools_node only writes when at least
+    one mutation failed.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -70,3 +80,4 @@ class AgentState(TypedDict):
     reflections: NotRequired[Annotated[list[Reflection], add]]
     recalled_memories: NotRequired[list[MemoryItem]]
     step_count_refund_pending: NotRequired[int]
+    failed_mutations: NotRequired[list[MutationOutcome]]
