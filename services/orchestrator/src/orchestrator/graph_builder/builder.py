@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+from collections.abc import Mapping
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -72,7 +73,13 @@ from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState
-from orchestrator.tools.registry import Tool, ToolContext, ToolNotFoundError, ToolRegistry
+from orchestrator.tools.registry import (
+    TOOL_ALLOWED_STATE_KEYS,
+    Tool,
+    ToolContext,
+    ToolNotFoundError,
+    ToolRegistry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,8 +202,14 @@ def build_react_graph(
         if not tool_calls:
             return {}
 
-        ctx_obj = _build_tool_context(config)
+        ctx_obj = _build_tool_context(config, plan=state.get("plan"))
         new_messages: list[BaseMessage] = []
+        # Stream K.K8 — collect per-tool state writes so we can promote
+        # allowlisted ones to the AgentState update dict below. Order
+        # follows ``tool_calls``: a later call's update wins, matching
+        # the LLM's intent (each subsequent ``update_plan`` revises the
+        # previous one).
+        accumulated_state: dict[str, Any] = {}
         for tc in tool_calls:
             token.raise_if_cancelled()
             # ``run_cancellable`` interrupts a slow tool mid-dispatch. A
@@ -205,17 +218,19 @@ def build_react_graph(
             # the tool's own ``except Exception`` won't swallow it into
             # a ToolMessage; ``run_cancellable`` re-raises it as
             # ``RunCancelledError``.
-            new_messages.append(
-                await token.run_cancellable(
-                    _dispatch_tool(
-                        tc,
-                        tool_registry,
-                        ctx_obj,
-                        before_tool_dispatch_chain=before_tool_dispatch_chain,
-                    )
+            tool_message, tool_state = await token.run_cancellable(
+                _dispatch_tool(
+                    tc,
+                    tool_registry,
+                    ctx_obj,
+                    before_tool_dispatch_chain=before_tool_dispatch_chain,
                 )
             )
-        return {"messages": new_messages}
+            new_messages.append(tool_message)
+            for key, value in tool_state.items():
+                if key in TOOL_ALLOWED_STATE_KEYS:
+                    accumulated_state[key] = value
+        return {"messages": new_messages, **accumulated_state}
 
     graph: StateGraph[AgentState, None, AgentState, AgentState] = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
@@ -346,7 +361,16 @@ async def _dispatch_tool(
     ctx: ToolContext,
     *,
     before_tool_dispatch_chain: MiddlewareChain | None,
-) -> ToolMessage:
+) -> tuple[ToolMessage, Mapping[str, Any]]:
+    """Dispatch one tool call.
+
+    Returns ``(tool_message, state_updates)`` so the surrounding tools
+    node can promote allowlisted ``state_updates`` keys (Stream K.K8)
+    into the ``AgentState`` update dict. ``state_updates`` is empty for
+    every code path that does not produce a successful
+    :class:`~orchestrator.tools.registry.ToolResult` (errors, blocks,
+    unknown tools).
+    """
     name = str(tool_call.get("name", ""))
     call_id = str(tool_call.get("id", ""))
     args = tool_call.get("args") or {}
@@ -363,10 +387,13 @@ async def _dispatch_tool(
         return await _invoke_tool(tool, args, call_id, ctx)
     except ToolNotFoundError as exc:
         logger.warning("tools.unknown_tool name=%s call_id=%s", name, call_id)
-        return ToolMessage(
-            content=_format_error(exc),
-            tool_call_id=call_id,
-            status="error",
+        return (
+            ToolMessage(
+                content=_format_error(exc),
+                tool_call_id=call_id,
+                status="error",
+            ),
+            {},
         )
     except Exception as exc:
         # E.10 sandbox_audit and any other pre-dispatch middleware raise
@@ -378,14 +405,17 @@ async def _dispatch_tool(
             call_id,
             type(exc).__name__,
         )
-        return ToolMessage(
-            content=_format_error(exc),
-            tool_call_id=call_id,
-            status="error",
+        return (
+            ToolMessage(
+                content=_format_error(exc),
+                tool_call_id=call_id,
+                status="error",
+            ),
+            {},
         )
 
 
-def _build_tool_context(config: RunnableConfig) -> ToolContext:
+def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> ToolContext:
     """Lift tenant / user binding out of ``config["configurable"]`` into
     a :class:`ToolContext`. Missing values fall through as ``None`` —
     M0 dev / unit tests rarely supply tenant_id, and per-tenant tools
@@ -393,7 +423,12 @@ def _build_tool_context(config: RunnableConfig) -> ToolContext:
 
     The run's :class:`CancellationToken` is threaded through too (Stream
     J.4) — ``cancellation_token`` returns a fresh, never-cancelled token
-    when the config carries none, so the field is always populated."""
+    when the config carries none, so the field is always populated.
+
+    ``plan`` (Stream K.K8) carries the current ``AgentState.plan`` so the
+    ``update_plan`` builtin can keep the original goal when revising
+    steps. ``None`` for react-mode runs.
+    """
     configurable = config.get("configurable") or {}
     tenant_id = _parse_uuid(configurable.get("tenant_id"))
     run_id = _parse_uuid(configurable.get("run_id"))
@@ -403,6 +438,7 @@ def _build_tool_context(config: RunnableConfig) -> ToolContext:
         run_id=run_id,
         user_id=user_id,
         cancellation_token=cancellation_token(config),
+        plan=plan,
     )
 
 
@@ -422,7 +458,7 @@ async def _invoke_tool(
     args: dict[str, Any],
     call_id: str,
     ctx: ToolContext,
-) -> ToolMessage:
+) -> tuple[ToolMessage, Mapping[str, Any]]:
     try:
         result = await tool.call(args, ctx=ctx)
     except Exception as exc:
@@ -432,12 +468,15 @@ async def _invoke_tool(
             call_id,
             type(exc).__name__,
         )
-        return ToolMessage(
-            content=_format_error(exc),
-            tool_call_id=call_id,
-            status="error",
+        return (
+            ToolMessage(
+                content=_format_error(exc),
+                tool_call_id=call_id,
+                status="error",
+            ),
+            {},
         )
-    return ToolMessage(content=result.content, tool_call_id=call_id)
+    return ToolMessage(content=result.content, tool_call_id=call_id), result.state_updates
 
 
 def _format_error(exc: BaseException) -> str:

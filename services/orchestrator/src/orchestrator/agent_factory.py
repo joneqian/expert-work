@@ -71,6 +71,7 @@ from orchestrator.middleware_assembly import MiddlewareEnv, build_middleware_cha
 from orchestrator.multimodal import ImageResolver
 from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
+from orchestrator.tools.update_plan import UpdatePlanTool
 
 
 @dataclass(frozen=True)
@@ -206,6 +207,13 @@ async def build_agent(
     planner_node = (
         make_planner_node(routers.planning) if spec.spec.workflow.type == "plan_execute" else None
     )
+    # Stream K.K8 — the agent-initiated replan path. Closing the J.1
+    # loop: planner sets the initial plan, ``update_plan`` lets the
+    # agent revise it during the run. Implicit tool — never declared in
+    # the manifest, registered exactly when the workflow is plan_execute
+    # so react-mode runs do not see it.
+    if spec.spec.workflow.type == "plan_execute":
+        registry.register(UpdatePlanTool())
     # Stream J.2 — a ``reflection:`` block inserts a self-critique node
     # before the run ends.
     reflection = spec.spec.reflection
