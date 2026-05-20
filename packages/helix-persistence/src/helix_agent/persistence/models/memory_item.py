@@ -11,7 +11,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, Index, Text, func, text
+from sqlalchemy import CHAR, DateTime, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,6 +38,11 @@ class MemoryItemRow(Base):
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
+    # Stream K.K7 — SHA-256 hex of ``lower(trim(content))``. Filled by
+    # the application store at write time; the partial UNIQUE index on
+    # ``(tenant_id, user_id, content_hash) WHERE deleted_at IS NULL``
+    # backs ON CONFLICT DO NOTHING dedup.
+    content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     source_thread_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

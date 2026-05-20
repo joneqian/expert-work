@@ -1,0 +1,276 @@
+"""Stream K.K7 — dead-letter queue for memory writebacks.
+
+The orchestrator's ``memory_writeback`` node sometimes can't land the
+extracted memories: the LLM extraction raises, the embedder is slow,
+or the DB write hits a transient error. Without a queue those memories
+were ``logger.warning`` + lost (audit gap G2b — best-effort = weak
+version). This module adds the minimum viable retry path:
+
+* ``MemoryWritebackDLQ`` — the abstract repository the writeback node
+  pushes to on failure, and the retention-cleanup-job pulls from on
+  schedule.
+* ``DLQRow`` — wire shape carrying enough context (tenant, user,
+  thread, extracted ``[(kind, content), ...]``, attempts, last_error)
+  for the retry worker to redo the embed + DB write.
+* ``InMemoryMemoryWritebackDLQ`` for unit tests.
+* ``SqlMemoryWritebackDLQ`` for prod (Postgres / asyncpg).
+
+The queue is deliberately thin — no priority, no exponential-backoff
+algebra, no per-key fairness. Stream K.K7's job is to not lose
+memories; sophistication can come later if the failure rate calls for
+it.
+"""
+
+from __future__ import annotations
+
+import abc
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+from sqlalchemy import delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from helix_agent.persistence.models import MemoryWritebackDLQRow
+
+
+@dataclass(frozen=True)
+class DLQRow:
+    """One pending memory writeback in the dead-letter queue.
+
+    ``extracted`` is the list of ``(kind, content)`` pairs the
+    orchestrator originally extracted from the trajectory; the retry
+    worker re-embeds and re-writes them.
+    """
+
+    id: UUID
+    tenant_id: UUID
+    user_id: UUID
+    source_thread_id: str | None
+    extracted: tuple[tuple[str, str], ...]
+    attempts: int
+    next_retry_at: datetime
+    last_error: str | None
+    created_at: datetime
+
+
+def _row_to_dlq(row: MemoryWritebackDLQRow) -> DLQRow:
+    pairs: list[tuple[str, str]] = []
+    for item in row.extracted or ():
+        if isinstance(item, list | tuple) and len(item) == 2:
+            kind, content = item
+            pairs.append((str(kind), str(content)))
+    return DLQRow(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        user_id=row.user_id,
+        source_thread_id=row.source_thread_id,
+        extracted=tuple(pairs),
+        attempts=int(row.attempts),
+        next_retry_at=row.next_retry_at,
+        last_error=row.last_error,
+        created_at=row.created_at,
+    )
+
+
+class MemoryWritebackDLQ(abc.ABC):
+    """Repository for failed memory writebacks."""
+
+    @abc.abstractmethod
+    async def enqueue(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        source_thread_id: str | None,
+        extracted: Sequence[tuple[str, str]],
+        error: str,
+    ) -> DLQRow:
+        """Add one pending writeback. ``next_retry_at`` is ``now()`` so
+        the next sweep picks it up immediately on the first failure;
+        ``record_failure`` schedules subsequent retries further out."""
+
+    @abc.abstractmethod
+    async def take_ready(self, *, limit: int, now: datetime) -> list[DLQRow]:
+        """Return up to ``limit`` rows whose ``next_retry_at <= now``,
+        oldest first. The worker is responsible for either calling
+        :meth:`mark_done` on success or :meth:`record_failure` on a
+        new error."""
+
+    @abc.abstractmethod
+    async def mark_done(self, *, row_id: UUID) -> None:
+        """Delete the row — the retry succeeded."""
+
+    @abc.abstractmethod
+    async def record_failure(
+        self,
+        *,
+        row_id: UUID,
+        error: str,
+        when: datetime,
+        next_retry_at: datetime,
+    ) -> None:
+        """Bump ``attempts``, store ``error``, schedule ``next_retry_at``."""
+
+    @abc.abstractmethod
+    async def count(self) -> int:
+        """Total queue depth — used by the worker for a metric."""
+
+
+# ---------------------------------------------------------------------------
+# In-memory implementation — unit tests
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class InMemoryMemoryWritebackDLQ(MemoryWritebackDLQ):
+    """Process-local DLQ for tests. Not safe across processes."""
+
+    _rows: dict[UUID, DLQRow] = field(default_factory=dict)
+
+    async def enqueue(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        source_thread_id: str | None,
+        extracted: Sequence[tuple[str, str]],
+        error: str,
+    ) -> DLQRow:
+        now = datetime.now(UTC)
+        row = DLQRow(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            source_thread_id=source_thread_id,
+            extracted=tuple((str(k), str(c)) for k, c in extracted),
+            attempts=0,
+            next_retry_at=now,
+            last_error=error,
+            created_at=now,
+        )
+        self._rows[row.id] = row
+        return row
+
+    async def take_ready(self, *, limit: int, now: datetime) -> list[DLQRow]:
+        ready = [r for r in self._rows.values() if r.next_retry_at <= now]
+        ready.sort(key=lambda r: r.next_retry_at)
+        return ready[:limit]
+
+    async def mark_done(self, *, row_id: UUID) -> None:
+        self._rows.pop(row_id, None)
+
+    async def record_failure(
+        self,
+        *,
+        row_id: UUID,
+        error: str,
+        when: datetime,
+        next_retry_at: datetime,
+    ) -> None:
+        del when  # parameter retained for API symmetry with the SQL path
+        existing = self._rows.get(row_id)
+        if existing is None:
+            return
+        updated = DLQRow(
+            id=existing.id,
+            tenant_id=existing.tenant_id,
+            user_id=existing.user_id,
+            source_thread_id=existing.source_thread_id,
+            extracted=existing.extracted,
+            attempts=existing.attempts + 1,
+            next_retry_at=next_retry_at,
+            last_error=error,
+            created_at=existing.created_at,
+        )
+        self._rows[row_id] = updated
+
+    async def count(self) -> int:
+        return len(self._rows)
+
+
+# ---------------------------------------------------------------------------
+# SQLAlchemy implementation — prod
+# ---------------------------------------------------------------------------
+
+
+class SqlMemoryWritebackDLQ(MemoryWritebackDLQ):
+    """Postgres-backed DLQ. Uses one short transaction per call."""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def enqueue(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        source_thread_id: str | None,
+        extracted: Sequence[tuple[str, str]],
+        error: str,
+    ) -> DLQRow:
+        row = MemoryWritebackDLQRow(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            source_thread_id=source_thread_id,
+            extracted=[[str(k), str(c)] for k, c in extracted],
+            last_error=error,
+        )
+        async with self._sf() as session:
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+        return _row_to_dlq(row)
+
+    async def take_ready(self, *, limit: int, now: datetime) -> list[DLQRow]:
+        stmt = (
+            select(MemoryWritebackDLQRow)
+            .where(MemoryWritebackDLQRow.next_retry_at <= now)
+            .order_by(MemoryWritebackDLQRow.next_retry_at.asc())
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dlq(r) for r in rows]
+
+    async def mark_done(self, *, row_id: UUID) -> None:
+        stmt = delete(MemoryWritebackDLQRow).where(MemoryWritebackDLQRow.id == row_id)
+        async with self._sf() as session:
+            await session.execute(stmt)
+            await session.commit()
+
+    async def record_failure(
+        self,
+        *,
+        row_id: UUID,
+        error: str,
+        when: datetime,
+        next_retry_at: datetime,
+    ) -> None:
+        del when
+        stmt = (
+            update(MemoryWritebackDLQRow)
+            .where(MemoryWritebackDLQRow.id == row_id)
+            .values(
+                attempts=MemoryWritebackDLQRow.attempts + 1,
+                last_error=error,
+                next_retry_at=next_retry_at,
+            )
+        )
+        async with self._sf() as session:
+            await session.execute(stmt)
+            await session.commit()
+
+    async def count(self) -> int:
+        async with self._sf() as session:
+            result = await session.execute(select(MemoryWritebackDLQRow.id).limit(10_000))
+            return len(result.all())
+
+
+__all__ = [
+    "DLQRow",
+    "InMemoryMemoryWritebackDLQ",
+    "MemoryWritebackDLQ",
+    "SqlMemoryWritebackDLQ",
+]

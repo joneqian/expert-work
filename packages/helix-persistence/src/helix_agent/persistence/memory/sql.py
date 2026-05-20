@@ -8,9 +8,11 @@ from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.memory.base import MemoryStore
+from helix_agent.persistence.memory.hash import hash_content
 from helix_agent.persistence.models import MemoryItemRow
 from helix_agent.protocol import MemoryItem
 
@@ -22,6 +24,7 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
         user_id=row.user_id,
         kind=row.kind,  # type: ignore[arg-type]
         content=row.content,
+        content_hash=row.content_hash,
         embedding=tuple(float(value) for value in row.embedding),
         source_thread_id=row.source_thread_id,
         created_at=row.created_at,
@@ -39,20 +42,27 @@ class SqlMemoryStore(MemoryStore):
     async def write(self, items: Sequence[MemoryItem]) -> None:
         if not items:
             return
-        rows = [
-            MemoryItemRow(
-                id=item.id,
-                tenant_id=item.tenant_id,
-                user_id=item.user_id,
-                kind=item.kind,
-                content=item.content,
-                embedding=list(item.embedding),
-                source_thread_id=item.source_thread_id,
-            )
+        # Stream K.K7 — fill content_hash here so callers do not need
+        # to import the hash helper, and use ON CONFLICT DO NOTHING
+        # against the (tenant_id, user_id, content_hash) partial unique
+        # index so a re-run that re-extracts the same memory is a no-op
+        # instead of a duplicate row.
+        payload = [
+            {
+                "id": item.id,
+                "tenant_id": item.tenant_id,
+                "user_id": item.user_id,
+                "kind": item.kind,
+                "content": item.content,
+                "content_hash": item.content_hash or hash_content(item.content),
+                "embedding": list(item.embedding),
+                "source_thread_id": item.source_thread_id,
+            }
             for item in items
         ]
+        stmt = pg_insert(MemoryItemRow).values(payload).on_conflict_do_nothing()
         async with self._sf() as session:
-            session.add_all(rows)
+            await session.execute(stmt)
             await session.commit()
 
     async def retrieve(
@@ -126,6 +136,7 @@ class SqlMemoryStore(MemoryStore):
             if row is None:
                 return None
             row.content = content
+            row.content_hash = hash_content(content)  # K.K7 — keep dedup hash in sync
             row.embedding = list(embedding)
             if kind is not None:
                 row.kind = kind

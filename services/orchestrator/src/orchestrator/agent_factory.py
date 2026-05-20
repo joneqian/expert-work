@@ -36,6 +36,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from helix_agent.persistence import MemoryStore
+from helix_agent.persistence.memory import MemoryWritebackDLQ
 from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
@@ -104,6 +105,13 @@ class MemoryEnv:
 
     store: MemoryStore | None = None
     embedder: Embedder | None = None
+    #: Stream K.K7 — dead-letter queue for failed memory writebacks.
+    #: When wired, the writeback node enqueues extracted memory pairs
+    #: on any post-extraction failure (embed / store error) so a
+    #: retry worker can re-do the embed + write. ``None`` keeps the
+    #: previous best-effort log-and-drop behaviour (used by unit tests
+    #: that don't want a queue).
+    dlq: MemoryWritebackDLQ | None = None
 
 
 @dataclass(frozen=True)
@@ -353,7 +361,10 @@ def _build_memory_nodes(
     )
     writeback = (
         make_memory_writeback_node(
-            memory_store=env.store, embedder=env.embedder, llm_caller=llm_caller
+            memory_store=env.store,
+            embedder=env.embedder,
+            llm_caller=llm_caller,
+            dlq=env.dlq,  # K.K7 — None keeps the previous log-and-drop behaviour
         )
         if long_term.write_back
         else None

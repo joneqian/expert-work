@@ -18,6 +18,7 @@ from helix_agent.persistence.models.knowledge import (
     KnowledgeDocumentRow,
 )
 from helix_agent.persistence.models.memory_item import MemoryItemRow
+from helix_agent.persistence.models.memory_writeback_dlq import MemoryWritebackDLQRow
 from helix_agent.persistence.models.role_binding import RoleBindingRow
 from helix_agent.persistence.models.sandbox_instance import SandboxInstanceRow
 from helix_agent.persistence.models.service_account import ServiceAccountRow
@@ -44,6 +45,7 @@ __all__ = [
     "KnowledgeChunkRow",
     "KnowledgeDocumentRow",
     "MemoryItemRow",
+    "MemoryWritebackDLQRow",
     "RoleBindingRow",
     "SandboxInstanceRow",
     "SecretAllowlistRow",

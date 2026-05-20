@@ -9,6 +9,7 @@ from typing import Literal
 from uuid import UUID
 
 from helix_agent.persistence.memory.base import MemoryStore
+from helix_agent.persistence.memory.hash import hash_content
 from helix_agent.protocol import MemoryItem
 
 
@@ -27,7 +28,21 @@ class InMemoryMemoryStore(MemoryStore):
         self._rows: list[MemoryItem] = []
 
     async def write(self, items: Sequence[MemoryItem]) -> None:
-        self._rows.extend(items)
+        for item in items:
+            # Stream K.K7 — fill content_hash if the caller didn't, and
+            # skip the row when an identical live entry already exists
+            # for the same ``(tenant, user, content_hash)`` (mirrors the
+            # SQL ON CONFLICT DO NOTHING path).
+            content_hash = item.content_hash or hash_content(item.content)
+            if any(
+                r.tenant_id == item.tenant_id
+                and r.user_id == item.user_id
+                and r.deleted_at is None
+                and (r.content_hash or hash_content(r.content)) == content_hash
+                for r in self._rows
+            ):
+                continue
+            self._rows.append(item.model_copy(update={"content_hash": content_hash}))
 
     async def retrieve(
         self,
@@ -92,6 +107,8 @@ class InMemoryMemoryStore(MemoryStore):
                 updated = row.model_copy(
                     update={
                         "content": content,
+                        # K.K7 — keep dedup hash in sync with content
+                        "content_hash": hash_content(content),
                         "embedding": tuple(float(v) for v in embedding),
                         "kind": kind if kind is not None else row.kind,
                     }

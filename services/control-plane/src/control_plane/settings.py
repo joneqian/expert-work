@@ -249,6 +249,14 @@ class Settings(BaseSettings):
     #: masse.
     quota_reaper_batch_size: int = Field(default=100, gt=0)
 
+    # ------------------------------------------------------------------ memory DLQ (K.K7)
+    #: Stream K.K7 — how often the memory writeback DLQ worker scans
+    #: for retry-ready rows. Per-row backoff schedule is owned by the
+    #: worker itself (1 min → 5 → 30 → 2 h → 6 h); this is the cycle
+    #: cadence, kept short so a freshly-enqueued row is picked up
+    #: promptly.
+    memory_dlq_worker_interval_s: int = Field(default=30, gt=0)
+
     # ------------------------------------------------------------------ tenant rate limit (C.6)
     #: Per-tenant request bucket capacity (tokens). Drained one token
     #: per authenticated request.
