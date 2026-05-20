@@ -14,6 +14,8 @@
 
 > **2026-05-20 J.6 完成补审**：J.6（PR #167-#171）在上一轮已交付审计时还在进行中（明确"本审计不评"），本次未交付项审计也复述"不重评"。事后补审 9 维 (c) 红线发现 6 维 gap：upload quota 缺位 / upload audit trail 不完整 / image lifecycle 零实现 / Path B VL fallback 单 provider 硬失败 / multi-image 集成测试缺 / EXIF strip + 内容扫描全无 / PII in images 零覆盖。新增 Mini-ADR J-30 ~ J-35（见 § 19 末尾）：J-30 quota 接入 C.5 / J-31 audit trail / J-32 lifecycle / J-33 VL fallback / J-34 EXIF strip + multi-image 测试 / J-35 NSFW + PII in images 显式 (a) 推 M2。J.6 ITERATION-PLAN 行加 4 个 (c) 补强子项 J.6.补强-1~4 + 1 个 (a) 决策项 J.6.决策-5。
 
+> **2026-05-20 J.15 设计 PR**：探查 sandbox-supervisor 现状发现 **§ 9.1 "已落地"声明属实** —— 热会话 + TTL reaper + named volume 创建 + 持久 100% 已交付（supervisor.py + reaper.py + 迁移 0018/0020）。真正待做的是 J-29（quota + backup + encryption）+ J-36（volume lifecycle，新增）共 4 项 M0 补强。本次设计 PR：(1) § 9.1 改写明确"已落地 vs 待做"基线；(2) § 9.5 新增 4 子节详化 J-29 + J-36 实施设计；(3) § 19 新增 Mini-ADR J-36 volume lifecycle 三档。后续 J.15-补强-1 PR（quota + lifecycle）+ J.15-补强-2 PR（backup + 加密文档）按本设计实施。
+
 ---
 
 ## 1. 范围 & 边界
@@ -372,9 +374,21 @@ class MemorySpec(BaseModel):                # 扩充现有 AgentSpecBody.memory
 
 ## 9. J.15 — 有状态 per-user 执行环境
 
-### 9.1 现状
+### 9.1 现状（2026-05-20 设计 PR 修订）
 
-沙盒 per-run 临时无状态（Mini-ADR F-2）：每次 `acquire()` 全新 `docker run`、`--tmpfs /workspace`，run 结束即销毁。无持久工作区 —— 用户上一轮产出的文件下一轮就没了。
+**已落地（M0 内已交付）**：
+- ✅ **热会话 + TTL reaper**（Mini-ADR J-10）：`supervisor.acquire(user_id)` 取/建 per-`(tenant,user)` 会话；`release` 对会话沙盒 = no-op 留热（对无 user_id 临时沙盒销毁）；`exec` 刷新 `last_used_at`；reaper 按 `last_used_at + session_idle_ttl_s`（默认 15min）回收（`supervisor.py:119-291` + `reaper.py:39-58` + `store.py:92-126`）
+- ✅ **持久卷创建 + 登记**：`user_workspace` 表 + `sandbox_instance.user_id / workspace_id`（迁移 0018）+ `sandbox_instance.last_used_at`（迁移 0020）；runtime_provider 用 `--volume {workspace_volume}:/workspace` 挂载（`runtime_provider.py:109-122`）；首次 acquire 自动创建卷
+- ✅ **per-session 锁 + held-pipe**：同会话并发 exec 经 `asyncio.Lock` 串行化（`supervisor.py:211-218`）；held-pipe 一容器多 exec 协议完整
+
+**未落地（本设计 PR 锚定 M0 补强清单）**：
+- ❌ **Volume quota 准入**（J-29 第 1 项）：`user_workspace.size_bytes` 字段有记录但 supervisor 写文件前无 enforcement；单用户能爆磁盘
+- ❌ **Volume backup pipeline**（J-29 第 2 项）：daily rsync 到对象存储 + 7 天保留 + restore runbook 全无；卷数据无 DR 路径
+- ❌ **At-rest 加密文档化**（J-29 第 3 项）：宿主机 LUKS / 云厂托管磁盘加密的依赖关系未文档化（落实 P0 #9）
+- ❌ **Volume lifecycle / 销毁**（新 Mini-ADR J-36）：用户软删除 / `user_workspace` 整 row 删除时无级联卷归档 → hard delete 流程
+- (b) 跨 host 调度 → 推 M1-A（与 sandbox warm pool 同期）
+
+历史背景：沙盒 per-run 临时无状态（Mini-ADR F-2）的设计已被 J.15 的"per-user 持久卷 + 热沙盒会话"取代；无 `user_id` 的 run 仍走 tmpfs 临时沙盒兼容（见 § 9.2）。
 
 ### 9.2 设计与边界
 
@@ -409,6 +423,100 @@ sandbox-supervisor 变更：
 `sandbox-supervisor/supervisor.py`（会话取/建/复用、per-session 锁）、`sandbox-supervisor/reaper.py`（`last_used_at + TTL` 口径）、`sandbox-supervisor/runtime_provider`（named volume 挂载替 tmpfs）、`sandbox_instance` 模型 + 迁移、`SandboxSupervisorSettings`（`session_idle_ttl_s`、抬高的 `default_max_sandboxes`）。`exec_python` 工具不变 —— 仍 acquire→exec→release,热复用全在 supervisor 侧。
 
 > **对标**：hermes Daytona / Modal 持久后端（托管平台）、deer-flow 无。helix 自托管,用 docker named volume + 热会话生命周期自建 —— 不引外部托管沙盒依赖。
+
+### 9.5 M0 补强（J-29 / J-36）—— 生产级数据保护 + lifecycle
+
+> **2026-05-20 J.15 设计 PR 新增**。9.1-9.4 描述的"热会话 + 持久卷"主体已交付；本节锁定 J-29（quota + backup + encryption）+ J-36（lifecycle）共 4 项的实施设计。各项的实施 PR 在此基础上做局部细化。
+
+#### 9.5.1 Volume quota 准入（J-29 第 1 项）
+
+**数据模型变更**（迁移 0026）：
+```python
+# user_workspace 表加 size_limit_bytes 列
+class UserWorkspaceRow(Base):
+    # 既有字段：id, tenant_id, user_id, volume_name, size_bytes, last_accessed_at, created_at
+    size_limit_bytes: int  # 默认从 SandboxSupervisorSettings.default_workspace_size_limit_mb × 1MiB 算
+```
+
+**Enforcement 模式**：
+- **预检式 + 异步对账**（不在 exec 路径做实时 fs walk —— 太慢）：
+  - **预检**：`acquire()` 时检查 `size_bytes < size_limit_bytes`，超 quota → `QuotaExceededError`（HTTP 429 同 B.2 限流语义）
+  - **写后对账**：每次 `release()` 异步 sample `du -sh /workspace` 更新 `size_bytes`（粗粒度；不阻塞 exec）
+  - **强对账**：reaper 周期（默认 15min）对 IDLE 会话精确 du 一次（已挂载状态下 du 不锁卷）
+- **写超 quota 的兜底**：宿主机文件系统级 quota 由 J-29 第 3 项的 LUKS / 云盘 quota 兜底（超 quota 时写失败 → sandbox 进程获 ENOSPC，正常错误传播，不需 supervisor 显式处理）
+
+**新建文件**：`services/sandbox-supervisor/src/sandbox_supervisor/quota_enforcer.py`
+- `QuotaEnforcer.check(workspace_row) -> None | raise QuotaExceededError`
+- `QuotaEnforcer.refresh_size(workspace_row, sandbox_id) -> int`（du -sh 取 size_bytes）
+
+**整合点**：`supervisor.acquire()` 调 `QuotaEnforcer.check`；`supervisor.release()` 起 `asyncio.create_task(QuotaEnforcer.refresh_size())` fire-and-forget。reaper 周期触发对账。
+
+**Settings**：`SandboxSupervisorSettings.default_workspace_size_limit_mb: int = 10240`（默认 10 GB，manifest `policies.workspace_size_limit_mb` 可 override）。
+
+**Audit**：超 quota → `AuditAction.QUOTA_EXCEEDED`（已有 K1 模式，加 resource="workspace_volume"）。
+
+#### 9.5.2 Volume backup pipeline（J-29 第 2 项）
+
+**架构**（复用 audit-backup-worker pattern，但目标是 docker volume 不是 PG 表）：
+- 新独立服务 / cron job `volume-backup-worker`（或并入既有 audit-backup-worker），daily 1 次（off-peak，default 03:00 local）
+- 流程：(1) 枚举所有 `user_workspace.deleted_at IS NULL` 行；(2) per-volume 起 throwaway 容器挂卷 `cat /workspace | tar` 流式到 ObjectStore；(3) 写 `volume_backup` 表登记 backup 元数据
+- 对象存储键：`volume-backups/{tenant_id}/{user_id}/{YYYY-MM-DD}/{volume_name}.tar.zst`
+- 保留期：默认 7 天；retention-cleanup-job 加 volume_backup 维度扫描（同 K3 模式）
+- 失败处理：单卷失败不阻塞其他卷；进 K7 模式 DLQ（`volume_backup_dlq` 表，1m→5m→30m→2h→6h backoff）
+
+**Restore 路径**：
+- 手工 runbook 触发：`tools/persistence/restore_volume.py --tenant <X> --user <Y> --date <YYYY-MM-DD>` 
+- 流程：(1) 从 ObjectStore 拉对应 tar；(2) 创建新 volume 名（避免冲突现有热会话）；(3) 流式还原到新卷；(4) 操作员审核后手工把 `user_workspace.volume_name` 改新名（不自动 swap）
+- Restore 演练：testcontainers 集成测试（同 K15 PG restore 模式）+ runbook `docs/runbooks/volume-restore.md`
+
+**新建文件**：
+- `services/volume-backup-worker/` 或 `services/audit-backup-worker/` 加 volume 维度
+- `tools/persistence/restore_volume.py`
+- `docs/runbooks/volume-restore.md`
+- 迁移 0027 加 `volume_backup` + `volume_backup_dlq` 表
+
+**Settings**：`SandboxSupervisorSettings.volume_backup_enabled: bool = True` / `volume_backup_retention_days: int = 7` / `volume_backup_schedule_cron: str = "0 3 * * *"`。
+
+#### 9.5.3 At-rest 加密文档化（J-29 第 3 项）
+
+**决策**：M0 不在 helix 代码层做加密，**依赖宿主机 / 云磁盘加密**（落实 P0 #9）：
+- 阿里云 ECS：默认数据盘加密（ESSD AES-256-XTS，与 KMS Secrets Manager 同 region 同 key）
+- 自托管 Linux：宿主机 LUKS / dm-crypt（部署文档强约束 `/var/lib/docker` 在加密分区）
+- macOS dev：FileVault（dev 环境，不要求生产强约束）
+
+**整合点**：
+- `docs/runbooks/deployment.md` 加 "Volume at-rest encryption" 章节
+- `infra/docker-compose.yml` README 注明 `/var/lib/docker` 加密前置条件
+- 不引入 helix 应用层加密（容器侧 LUKS / cryfs 增加复杂度 & 性能损 vs 收益 < 1，平台架构红线）
+
+#### 9.5.4 Volume lifecycle / 销毁（新 Mini-ADR J-36）
+
+**Why**：用户软删除 / `user_workspace` 整 row 删除时无级联卷归档 → 卷变成"orphan"长存磁盘，违反 J.9 artifact lifecycle 同款原则（J-25/J-32 已铺保留期范式）。
+
+**数据模型变更**（迁移 0026 一并加，与 quota 同迁移）：
+```python
+class UserWorkspaceRow(Base):
+    # ...
+    deleted_at: datetime | None  # soft-delete 时间戳
+    archived_object_key: str | None  # 软删除后 archive 到对象存储的 key
+```
+
+**Lifecycle 三档**：
+1. **active**：`deleted_at IS NULL` —— 热会话可挂载，正常 backup
+2. **soft-deleted**：`deleted_at IS NOT NULL` 且 `archived_object_key IS NULL` —— acquire 拒绝（404）；reaper 触发 archive job：tar.zst 卷内容到 ObjectStore `volume-archive/{tenant}/{user}/{volume_name}.tar.zst` + 填 `archived_object_key` + 删除 docker volume
+3. **archived**：`archived_object_key IS NOT NULL` —— 卷已物理销毁，archive 保留 90 天（manifest `policies.workspace_archive_retention_days` 可配）；retention-cleanup-job 90 天后 hard delete archive + row
+
+**触发路径**：
+- 用户主动删除（control-plane `DELETE /v1/users/{id}/workspace` 端点，等 H.4 Admin UI 接入）—— 触发 soft-delete
+- tenant_user 整体删除（GDPR forget-me）—— 级联 soft-delete 所有 workspace
+- M0 仅做 soft-delete + archive job + hard delete cron；恢复 API 推 M1（与 J.9 artifact 恢复同期）
+
+**新建文件**：
+- `services/sandbox-supervisor/src/sandbox_supervisor/lifecycle.py`（archive + hard delete cron 入口）
+- 迁移 0026 加 deleted_at + archived_object_key 列
+- 集成测试覆盖：soft-delete → reaper archive → hard delete 完整链路
+
+**Audit**：`AuditAction.WORKSPACE_DELETE` / `WORKSPACE_ARCHIVE` / `WORKSPACE_HARD_DELETE`（三档 audit trail，同 K1 / K6 模式）。
 
 ---
 
@@ -887,6 +995,15 @@ J.13 排**最后**,评估并落实升级（Mini-ADR J-20）：
 
 **J-35｜J.6 NSFW / 恶意 SVG / PII-in-images 显式 (a) 推 M2（不留空决策）**
 背景：(i) 用户上传图的 NSFW / 恶意 SVG 内容扫描；(ii) 图里的 PII（身份证 / 票据 / 病历）走 OCR + redact —— 两件都是另一套范式（NSFW 需 vision 模型 / SVG 解析需 SVG-aware sanitizer / OCR 需独立 pipeline），M0 用户 = 同公司风险低，但按 [memory:no-design-choice-disguise] 不允许留空。决策：**显式标 (a) 推 M2**，配套：(1) STREAM-J-DESIGN.md § 1.2 Out-of-scope 表加这两条；(2) ITERATION-PLAN.md J.6 行加 J.6.决策-5 链到本 ADR；(3) M2-D（Eval Gate + 持续改进 pipeline）扩范围承接 NSFW 检测能力 / 或独立开新 stream `M2-H 图像内容安全`。取舍：(a) 显式决策不是弱版 —— SVG sanitizer 是另一套 lib 范式（如 bleach + svg-sanitizer）、OCR 是独立 pipeline、NSFW 模型是平台决策（接外部 API 还是自训）；M0 用户 = 同公司同信任域，攻击成本 vs 收益不平衡。
+
+---
+
+### 2026-05-20 J.15 设计 PR 补充（J-36）
+
+> J.15 § 9 设计修订时识别：原设计只覆盖 volume 创建 + 热会话生命周期，未覆盖 volume 销毁路径，与 J.9 artifact lifecycle (J-25) / J.6 image lifecycle (J-32) 范式割裂。本 ADR 配套 § 9.5.4 补强。
+
+**J-36｜J.15 volume lifecycle —— soft-delete → archive → hard delete 三档（M0 必含）**
+背景：原 § 9 设计只覆盖 volume 创建 + 挂载 + 热会话生命周期，**未明确 volume 销毁路径**。用户软删除 / `user_workspace` 整 row 删除时无级联卷归档 → 卷变成 orphan 长存磁盘，违反 J.9 artifact lifecycle（J-25）+ J.6 image lifecycle（J-32）同款产品级 lifecycle 范式。决策：lifecycle 三档（active → soft-deleted → archived），soft-delete 触发后由 reaper 起 archive job tar.zst 到 ObjectStore（同 J-29 第 2 项 backup pipeline 复用），90 天后 hard delete archive + row；恢复 API 推 M1。新建 `lifecycle.py` + 迁移 0026 加 `deleted_at` + `archived_object_key` 列 + 三档 audit action（`WORKSPACE_DELETE` / `WORKSPACE_ARCHIVE` / `WORKSPACE_HARD_DELETE`）。取舍：(c) 红线 —— 平台必须有用户数据清理路径（合规 + 磁盘运维），与 J.9 artifact / J.6 image lifecycle 范式一致避免割裂。
 
 ---
 
