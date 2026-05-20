@@ -373,6 +373,15 @@ class PolicySpec(BaseModel):
     pii: dict[str, Any] = Field(default_factory=dict)
     safety: dict[str, Any] = Field(default_factory=dict)
     context_compression: dict[str, Any] = Field(default_factory=dict)
+    trajectory_recording: bool = Field(
+        default=True,
+        description=(
+            "Stream L.L7 — when True, completed runs are serialised to "
+            "ObjectStore as ShareGPT-flavoured JSONL for the J.13 eval "
+            "gate / future fine-tuning. Set False on agents that must "
+            "not leak conversation content to non-WORM storage."
+        ),
+    )
 
 
 class CodePackageSpec(BaseModel):

@@ -37,7 +37,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -57,6 +57,12 @@ from helix_agent.runtime.stream_bridge import (
     END_SENTINEL,
     HEARTBEAT_SENTINEL,
     StreamBridge,
+)
+from orchestrator.errors import MaxStepsExceededError
+from orchestrator.trajectory import (
+    TrajectoryOutcome,
+    TrajectoryRecord,
+    TrajectoryRecorder,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +118,18 @@ class StreamableGraph(Protocol):
     ) -> AsyncIterator[Any]:
         """Yield streaming chunks for one graph execution."""
 
+    async def aget_state(self, config: RunnableConfig) -> Any:
+        """Return the run's final checkpointed state.
+
+        Stream L.L7 — :func:`run_agent` calls this on terminal paths to
+        fetch the conversation messages for trajectory recording.
+        ``langgraph.graph.state.CompiledStateGraph.aget_state`` returns
+        a ``StateSnapshot`` whose ``values`` dict carries
+        :class:`AgentState`. We accept ``Any`` here because the
+        Protocol is intentionally minimal — the snapshot's exact shape
+        is LangGraph-internal.
+        """
+
 
 # ---------------------------------------------------------------------------
 # Producer — background run worker
@@ -128,6 +146,7 @@ async def run_agent(
     config: RunnableConfig,
     audit_logger: AuditLogger | None = None,
     stream_mode: str = DEFAULT_STREAM_MODE,
+    trajectory_recorder: TrajectoryRecorder | None = None,
 ) -> None:
     """Drive ``graph`` to completion, publishing events to ``bridge``.
 
@@ -198,6 +217,15 @@ async def run_agent(
             reason=None,
             status="interrupted" if final is RunStatus.INTERRUPTED else "success",
         )
+        # Stream L.L7 — record the trajectory for the J.13 eval gate.
+        # Fire-and-forget; failures are swallowed inside the recorder.
+        _dispatch_trajectory(
+            trajectory_recorder,
+            graph,
+            effective_config,
+            record,
+            outcome="cancelled" if final is RunStatus.INTERRUPTED else "success",
+        )
 
     except RunCancelledError:
         # A node surfaced cooperative cancellation mid-step (E.15) — a
@@ -212,13 +240,47 @@ async def run_agent(
             reason=None,
             status="interrupted",
         )
+        _dispatch_trajectory(
+            trajectory_recorder, graph, effective_config, record, outcome="cancelled"
+        )
     except asyncio.CancelledError:
         # Task-level cancellation (event-loop shutdown / explicit
         # task.cancel()). The cooperative abort_event path above is the
-        # normal cancel route; this is the defensive backstop.
+        # normal cancel route; this is the defensive backstop. We do
+        # NOT dispatch the trajectory here — awaiting any helper during
+        # loop teardown is unreliable (same reason
+        # ``_emit_run_end_audit`` is skipped on this path).
         await run_manager.set_status(run_id, RunStatus.INTERRUPTED)
         logger.info("run_agent.cancelled run_id=%s", run_id)
         raise
+    except MaxStepsExceededError as exc:
+        # Distinct from a generic failure — the agent hit its iteration
+        # budget. The J.13 eval gate filters this bucket separately
+        # because "budget exhausted" is a tunable trade-off, not a
+        # provider / code failure.
+        await run_manager.set_status(run_id, RunStatus.ERROR)
+        logger.warning(
+            "run_agent.max_steps_exceeded run_id=%s step_count=%d max_steps=%d",
+            run_id,
+            exc.step_count,
+            exc.max_steps,
+        )
+        await bridge.publish(
+            run_id,
+            "error",
+            {"message": str(exc), "name": type(exc).__name__},
+        )
+        await _emit_run_end_audit(
+            audit_logger,
+            record,
+            action=AuditAction.RUN_FAILED,
+            result=AuditResult.ERROR,
+            reason=str(exc),
+            status="error",
+        )
+        _dispatch_trajectory(
+            trajectory_recorder, graph, effective_config, record, outcome="max_steps"
+        )
     except Exception as exc:
         await run_manager.set_status(run_id, RunStatus.ERROR)
         logger.exception("run_agent.failed run_id=%s", run_id)
@@ -235,6 +297,7 @@ async def run_agent(
             reason=str(exc),
             status="error",
         )
+        _dispatch_trajectory(trajectory_recorder, graph, effective_config, record, outcome="failed")
     finally:
         await bridge.publish_end(run_id)
         # Fire-and-forget cleanup; keep a reference so the task isn't
@@ -247,6 +310,132 @@ async def run_agent(
 #: Strong refs to in-flight cleanup tasks — without this the event loop
 #: may garbage-collect a bare ``create_task`` result before it runs.
 _BACKGROUND_CLEANUP_TASKS: set[asyncio.Task[None]] = set()
+
+#: Strong refs to in-flight trajectory dispatch tasks (Stream L.L7) —
+#: same garbage-collection guard as ``_BACKGROUND_CLEANUP_TASKS``.
+_BACKGROUND_TRAJECTORY_TASKS: set[asyncio.Task[None]] = set()
+
+#: Wall-clock cap on trajectory-record dispatch. The recorder swallows
+#: its own errors; this deadline guards against an unrecoverably-slow
+#: ObjectStore put dragging the run's terminal path or piling up tasks.
+_TRAJECTORY_DISPATCH_TIMEOUT_S: float = 5.0
+
+
+def _dispatch_trajectory(
+    recorder: TrajectoryRecorder | None,
+    graph: StreamableGraph,
+    config: RunnableConfig,
+    record: RunRecord,
+    *,
+    outcome: TrajectoryOutcome,
+) -> None:
+    """Stream L.L7 — schedule a fire-and-forget trajectory write.
+
+    Returns immediately. The actual ObjectStore I/O happens in a
+    background task with a hard timeout so a slow / broken store
+    cannot stall the run's terminal path (TraJectoryRecorder.record
+    swallows its own errors; this deadline is the outer guard).
+    ``recorder=None`` is a no-op — manifest opt-out or recorder not
+    configured in this deployment.
+    """
+    if recorder is None:
+        return
+    task = asyncio.create_task(
+        _record_trajectory_safe(recorder, graph, config, record, outcome=outcome)
+    )
+    _BACKGROUND_TRAJECTORY_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TRAJECTORY_TASKS.discard)
+
+
+async def _record_trajectory_safe(
+    recorder: TrajectoryRecorder,
+    graph: StreamableGraph,
+    config: RunnableConfig,
+    record: RunRecord,
+    *,
+    outcome: TrajectoryOutcome,
+) -> None:
+    """Background body for :func:`_dispatch_trajectory`."""
+    try:
+        async with asyncio.timeout(_TRAJECTORY_DISPATCH_TIMEOUT_S):
+            messages = await _fetch_final_messages(graph, config)
+            tenant_id = _tenant_id_from_config(config) or record.tenant_id
+            user_id = _user_id_from_config(config)
+            await recorder.record(
+                TrajectoryRecord(
+                    thread_id=record.thread_id,
+                    tenant_id=tenant_id,
+                    outcome=outcome,
+                    messages=messages,
+                    user_id=user_id,
+                    run_id=record.run_id,
+                    finished_at=datetime.now(UTC),
+                )
+            )
+    except TimeoutError:
+        logger.warning(
+            "run_agent.trajectory_dispatch_timeout run_id=%s outcome=%s",
+            record.run_id,
+            outcome,
+        )
+    except Exception:
+        # The recorder catches its own errors; reaching here means the
+        # state fetch itself failed. Best-effort by design.
+        logger.exception(
+            "run_agent.trajectory_dispatch_failed run_id=%s outcome=%s",
+            record.run_id,
+            outcome,
+        )
+
+
+async def _fetch_final_messages(
+    graph: StreamableGraph, config: RunnableConfig
+) -> Sequence[BaseMessage]:
+    """Best-effort fetch of the run's terminal ``messages`` list.
+
+    Tries ``graph.aget_state(config)`` if the graph exposes it (the
+    real ``CompiledStateGraph`` does; test stubs may not). On any
+    failure the returned list is empty — the recorder will still
+    write the envelope, just without conversation content. That's
+    preferable to crashing the dispatch task.
+    """
+    aget_state = getattr(graph, "aget_state", None)
+    if not callable(aget_state):
+        return []
+    try:
+        snapshot = await aget_state(config)
+    except Exception:
+        logger.exception("run_agent.trajectory_state_fetch_failed")
+        return []
+    values = getattr(snapshot, "values", None)
+    if not isinstance(values, Mapping):
+        return []
+    raw = values.get("messages")
+    if not isinstance(raw, Sequence):
+        return []
+    out: list[BaseMessage] = [m for m in raw if isinstance(m, BaseMessage)]
+    return out
+
+
+def _tenant_id_from_config(config: RunnableConfig) -> UUID | None:
+    configurable = config.get("configurable") or {}
+    return _maybe_uuid(configurable.get("tenant_id"))
+
+
+def _user_id_from_config(config: RunnableConfig) -> UUID | None:
+    configurable = config.get("configurable") or {}
+    return _maybe_uuid(configurable.get("user_id"))
+
+
+def _maybe_uuid(raw: object) -> UUID | None:
+    if isinstance(raw, UUID):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return UUID(raw)
+        except ValueError:
+            return None
+    return None
 
 
 async def _emit_run_end_audit(
