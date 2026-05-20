@@ -301,3 +301,50 @@ async def test_user_cannot_run_another_users_session(runs_client: AsyncClient) -
         f"/v1/sessions/{thread_id}/runs", json={"input": "hi"}, headers=user_a
     )
     assert owner.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# cross-tenant SSE isolation — Stream K.K2 (Mini-ADR K-2)
+#
+# SSE only flows out of POST /v1/sessions/{thread_id}/runs; there is no
+# reconnect endpoint and run_id is server-generated uuid4. The route
+# resolves the thread via threads.get(thread_id, tenant_id=jwt_tenant)
+# at api/runs.py:191, which 404s when the thread does not belong to
+# the caller's tenant. Mini-ADR K-2 commits NOT to add a duplicate
+# SSE-layer guard; this test locks the invariant so any new SSE entry
+# path must keep it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_runs_cross_tenant_sse_rejected(runs_client: AsyncClient) -> None:
+    """A tenant B caller cannot stream a tenant A thread's runs."""
+    from uuid import uuid4
+
+    # Create the thread as tenant A (the default fixture tenant).
+    create = await runs_client.post(
+        "/v1/sessions",
+        json={"agent_name": "code-reviewer", "agent_version": "1.0.0"},
+    )
+    assert create.status_code == 201
+    tenant_a_thread_id = create.json()["data"]["thread_id"]
+
+    # Mint a fresh tenant B JWT. The signature uses the same dev key
+    # the verifier accepts, so the call is authenticated — the
+    # rejection has to come from tenant isolation, not auth failure.
+    tenant_b_id = uuid4()
+    tenant_b_headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=tenant_b_id)}"}
+
+    response = await runs_client.post(
+        f"/v1/sessions/{tenant_a_thread_id}/runs",
+        json={"input": "trying to peek"},
+        headers=tenant_b_headers,
+    )
+
+    # 404 from the thread-ownership check — tenant B caller never
+    # learns whether the thread exists.
+    assert response.status_code == 404, response.text
+    # SSE never started — the response body is JSON, not text/event-stream.
+    # Regression where the stream opens before tenant check would flip
+    # this assertion.
+    assert "text/event-stream" not in response.headers.get("content-type", "")

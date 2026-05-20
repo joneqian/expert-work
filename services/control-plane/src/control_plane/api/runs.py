@@ -188,6 +188,12 @@ def build_runs_router() -> APIRouter:
         actor_id: str = request.state.actor_id
         trace_id = current_trace_id_hex()
 
+        # Stream K.K2 (Mini-ADR K-2) — SSE cross-tenant safety lives here.
+        # ``threads.get(thread_id, tenant_id=tenant_id)`` 404s when the
+        # thread belongs to a different tenant, so the SSE stream never
+        # opens for a cross-tenant caller. No duplicate guard at the
+        # SSE layer (Mini-ADR K-2); the invariant is locked by
+        # tests/test_runs_api.py::test_runs_cross_tenant_sse_rejected.
         meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
         if meta is None:
             raise HTTPException(status_code=404, detail="session not found")
