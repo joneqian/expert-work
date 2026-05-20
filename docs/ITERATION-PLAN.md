@@ -24,6 +24,7 @@
 |------|-------------|---------|---------|
 | **Phase 0 — Pre-flight** | 1 周 | 2-3 周 | monorepo、CI/CD 骨架、Phase 0 决策、ADR backlog |
 | **M0 — Product-grade MVP** | 8-10 周 | **5-7 个月** | 1 个 dogfood 业务 E2E + 全 24 P0 |
+| **Stream K — Capability Hardening Sprint** | — | **7-10 周** | 13 条 (c) 类弱版补到生产级；先于 Stream J 剩余子项 |
 | **M0→M1 Gate** | — | 2-4 周 | dogfood 平行运行 30 天，参数对比 |
 | **M1 — 生产化** | 10-12 周 | **6-8 个月** | 多租户、Sub-Agent、Python 插槽、Envoy/Vault dynamic、可观测、Admin UI 全功能 |
 | **M2 — Durable + Multi-agent** | 8-10 周 | **5-6 个月** | 长会话恢复、Plan-Execute、HITL、Memory 三层、Eval gate |
@@ -346,6 +347,38 @@
 - [x] **I.3 服务回滚机制**（落实 P0 #33）— `tools/deploy/rollback.py`（快路径切回旧色 / `--to-tag` 兜底）+ expand-contract 迁移纪律（迁移只向前）；STREAM-I-DESIGN § 7
 - [x] **I.4 三环境部署文档**（dev / staging / prod）— `docs/runbooks/deployment.md`（三环境矩阵 / 配置来源 / 首次部署 / 发布清单）+ `environments/*.yaml` 结构补全；STREAM-I-DESIGN § 8
 
+### Stream K — Capability Hardening Sprint（临时；先于 Stream J 剩余子项）
+
+参考：[streams/STREAM-K-DESIGN](./streams/STREAM-K-DESIGN.md)（设计先行）
+
+> 2026-05-20 用户用"功能可少，能力不可弱"原则（[memory:complete-not-minimal](../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md)）回头审已交付 Stream，发现 13 条 (c) 类弱版 —— 已声明 `[x]` 完成的功能在失败模式 / 可观测 / 运维路径 / 正确性某一维上未达生产强度。本 Stream 统一补强，**之后才进** Stream J 剩余子项。
+> 三条 agent 误判更正记 STREAM-K-DESIGN § 1.2：C.3 API Key 已有 CRUD（仅缺 rotation）、F.6 KMS 已实装（仅缺轮换演练）、J.11 路由是编译期绑定（已生效）。
+
+**P0 — M0→M1 Gate 阻塞**
+- [ ] **K1 API Key rotation**（补 G1）— `POST /v1/api_keys/{id}/rotate` + 双活窗口 + audit；STREAM-K-DESIGN § 3 / Mini-ADR K-1
+- [ ] **K2 SSE 跨租户隔离**（补 G3）— 安全模型由 thread 归属校验保证（误判更正），补 `test_runs_cross_tenant_sse_rejected` + Mini-ADR K-2
+- [ ] **K3 retention CI xfail 收尾**（补 G4）— 两条 `permission denied` 测试 → XPASS，xfail marker 移除；同时关 M1-B 挂账项
+- [ ] **K4 LLM cache 正确性**（补 G11）— `AgentSpecBody.cache.enabled` manifest 入口 + 中间件 short-circuit；Mini-ADR K-3
+- [ ] **K5 gVisor Gate Exit Criteria**（补 G12）— M0→M1 Gate Exit Criteria 显式列入 7/7 用例 staging Linux 必跑通条款（纯文档）
+
+**P1 — 阻塞 Stream J 剩余子项**
+- [ ] **K6 memory CRUD**（补 G2a）— `GET/PATCH/DELETE /v1/memory/{id}` + 迁移 0021 `deleted_at` 列 + per-user 隔离测试；Mini-ADR K-4
+- [ ] **K7 memory writeback 重试 + dedup**（补 G2b）— 迁移 0022 `content_hash` + `UNIQUE` + `memory_writeback_dlq` 表 + retry worker；Mini-ADR K-5
+- [ ] **K8 `update_plan` 工具**（补 G8）— `plan_execute` workflow 注册 builtin tool；闭环 J.1 重规划路径
+- [ ] **K9 reflect wall-clock 超时**（补 G9）— `reflect_node` 套 `asyncio.wait_for(deadline_s=30)`，超时降级 accept
+
+**P2 — 阻塞 Gate 前真生产 release**
+- [ ] **K10 G.7 大盘真闭环**（补 G10）— orchestrator/sandbox/control-plane 补 emit `session_ttft_seconds` / `sandbox_cold_start_seconds` / `durable_resume_seconds` + Prom recording rule + Grafana panel 反指
+- [ ] **K11 加权金丝雀**（补 G13）— nginx upstream `weight=` + `deploy.py --canary 10/30/50/100` 渐进推进 + 失败自动回滚
+
+**P3 — 阻塞 M1 入口**
+- [ ] **K12 memory recall eval gate**（补 G2c）— `tools/eval/sets/memory_recall_zh_en/` 中英文 benchmark + `recall@5 >= 0.7` SLO
+- [ ] **K13 KMS 轮换演练**（补 G5）— fake KMS endpoint 切换 + cache invalidate 集成测试
+- [ ] **K14 WORM 恢复演练**（补 G6）— `docs/runbooks/audit-restore.md` + `tools/persistence/restore_audit.py` + 演练脚本
+- [ ] **K15 PG 恢复演练**（补 G7）— 定位备份现状 → `docs/runbooks/pg-restore.md` + 演练脚本 + RTO/RPO 实测
+
+**Stream K Verification**（13 条全勾，详见 STREAM-K-DESIGN § 5）：每条 gap 对应集成测试绿、ITERATION-PLAN checkbox 勾上、零债 6 条全过；Stream K 完成才解锁 Stream J 剩余子项。
+
 ### Stream J — Agent Harness 能力补全（大里程碑；canonical agent + dogfood 的前置）
 
 参考：[architecture/08-AGENT-CAPABILITY-ASSESSMENT](./architecture/08-AGENT-CAPABILITY-ASSESSMENT.md)、[streams/STREAM-J-DESIGN](./streams/STREAM-J-DESIGN.md)（设计先行）
@@ -375,6 +408,7 @@
 ### M0 Exit Criteria（M0 → M0→M1 Gate 验证门）
 
 - [ ] 24 项 P0 全部勾选完成（参考 [architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §"Gap 严重性矩阵"）
+- [ ] **Stream K（Capability Hardening Sprint）15 子项完成** —— 13 条 (c) 类弱版补到生产级（[STREAM-K-DESIGN](./streams/STREAM-K-DESIGN.md)）
 - [ ] **Stream J（Agent Harness 能力补全）15 子项完成** —— 26 维能力矩阵无缺口
 - [ ] canonical 能力 agent 跑通 + staging 冒烟（便宜模型端到端真实 run）
 - [ ] 测试金字塔达标：unit ≥ 85%、integration ≥ 70% 关键路径、E2E 5-10 场景
@@ -405,6 +439,7 @@
 - [ ] p95 延迟 < Dify 的 1.2 倍
 - [ ] 回答质量人工评估不劣于 Dify
 - [ ] 30 天无 P0 事故
+- [ ] **gVisor 7/7 沙盒安全用例在 staging Linux 全部跑通** —— 含 `test_gvisor_cve_2019_5736_poc_fails`、`test_gvisor_timing_isolation`；M0 因 macOS dev 限制把这两条推 Gate（Stream F.3 § 1.3），Gate Exit Criteria 锁定它们必须真跑通，**不允许"软推迟"**（Stream K.K5 写入）
 - [ ] **决策点**：是否进入 M1（继续）/暂停（修复后再上量）/回退（架构问题）
 
 ---
@@ -432,7 +467,7 @@
 - [ ] IaC（Terraform）描述基础设施
 - [ ] DB zero-downtime migration 规范（Alembic + expand-contract）
 - [ ] 数据归档完整 pipeline
-- [ ] **retention-cleanup-job CI-only `permission denied` 收尾** — `test_event_log_retention_deletes_old_rows` / `test_jwt_blacklist_expired_rows_deleted` 在 CI 的 testcontainers Postgres 上 `DELETE` 报 `permission denied`（本地通过；`audit_log` 同 role/grant 模式正常）。job 已把 `event_log` 的 `ctid IN (SELECT … LIMIT N)` 改为扁平 `DELETE`，xfail 可能已 stale。需一次 CI run 确认两测试是否 `XPASS`：是 → 删 xfail；否 → 定位 asyncpg/SQLAlchemy 2.0/PG 交互（疑似 persistence engine factory 的 per-txn `SET LOCAL ROLE` 覆盖了 superuser 连接的有效 role）。M0 零技术债盘点新增；`test-integration` job 为 `continue-on-error` 非门控，影响低。
+- [ ] ~~**retention-cleanup-job CI-only `permission denied` 收尾**~~ → 已移入 **Stream K.K3**（P0 Gate 阻塞）。M0 零技术债盘点 + [memory:complete-not-minimal](../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md) 审计认定为 (c) 类弱版必须 M0 内补；不再留到 M1-B。
 
 #### M1-C Credential Proxy 升级（~3 周）
 参考：[architecture/subsystems/11-credential-proxy.md](./architecture/subsystems/11-credential-proxy.md)（如有）
