@@ -374,7 +374,7 @@
 **P3 — 阻塞 M1 入口**
 - [ ] **K12 memory recall eval gate**（补 G2c）— `tools/eval/sets/memory_recall_zh_en/` 中英文 benchmark + `recall@5 >= 0.7` SLO
 - [x] **K13 KMS 轮换演练**（补 G5）— `FakeKmsBackend` 已支持 reseed（new value/version），加 3 个轮换 drill 测试：rotation 后 cache TTL 过期内仍返旧值（设计预期 stale-by-TTL）→ 过期后取到新值；`put()` 路径立即 invalidate；dynamic kind 用半 TTL 提前收敛。覆盖 \"轮换后 60s 内取新值 < TTL\" 的核心 invariant。
-- [ ] **K14 WORM 恢复演练**（补 G6）— `docs/runbooks/audit-restore.md` + `tools/persistence/restore_audit.py` + 演练脚本
+- [x] **K14 WORM 恢复演练**（补 G6）— `tools/persistence/restore_audit.py` 工具 + `docs/runbooks/audit-restore.md` runbook（pre-flight / sibling table / 调 restore tool / 验证 / promote swap-vs-read-across）+ 3 drill 测试（round-trip integrity / per-tenant 隔离 / 损坏对象 tolerance）。InMemoryObjectStore 上端到端验证序列化和 restore 路径，回归会在 CI 红。
 - [ ] **K15 PG 恢复演练**（补 G7）— 定位备份现状 → `docs/runbooks/pg-restore.md` + 演练脚本 + RTO/RPO 实测
 
 **Stream K Verification**（13 条全勾，详见 STREAM-K-DESIGN § 5）：每条 gap 对应集成测试绿、ITERATION-PLAN checkbox 勾上、零债 6 条全过；Stream K 完成才解锁 Stream J 剩余子项。
