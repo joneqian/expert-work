@@ -81,11 +81,34 @@ class ToolResult:
     promotes only keys in :data:`TOOL_ALLOWED_STATE_KEYS`; other keys
     are silently dropped (so a malformed or compromised tool can't
     rewrite ``messages`` or ``step_count``).
+
+    ``refund_iterations`` (Stream L.L5 / Mini-ADR L-5) lets a tool ask
+    the ReAct loop to refund iterations from the agent's ``step_count``
+    budget. Internal-chain tools like ``update_plan`` (K.K8) shouldn't
+    burn user-visible budget for housekeeping calls. The tools node
+    accumulates this across the batch into
+    ``step_count_refund_pending``; the next agent node subtracts it
+    before computing the new ``step_count`` (clamped at 0 — refund
+    never produces negative). Must be ``>= 0`` — a tool can't reverse
+    the polarity and *consume* budget through this channel.
     """
 
     content: str
     meta: Mapping[str, Any] = field(default_factory=dict)
     state_updates: Mapping[str, Any] = field(default_factory=dict)
+    refund_iterations: int = 0
+
+    def __post_init__(self) -> None:
+        # Frozen dataclass — direct setattr is disabled. The check runs
+        # at construction time so a misbehaving tool fails loudly rather
+        # than silently corrupting the agent's iteration budget.
+        if self.refund_iterations < 0:
+            msg = (
+                f"ToolResult.refund_iterations must be >= 0 (got "
+                f"{self.refund_iterations}); a tool cannot consume the "
+                f"agent's iteration budget through this channel."
+            )
+            raise ValueError(msg)
 
 
 @runtime_checkable

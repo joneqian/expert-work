@@ -137,7 +137,16 @@ def build_react_graph(
         token = cancellation_token(config)
         token.raise_if_cancelled()
 
-        step_count = state.get("step_count", 0)
+        # Stream L.L5 — consume any pending refund the previous tools
+        # node wrote (Mini-ADR L-5). Internal-chain tools like
+        # ``update_plan`` (K.K8) ask the loop to refund their
+        # iterations so housekeeping doesn't burn user-visible budget.
+        # Clamp at 0: refund can never produce a negative step count
+        # (defensive invariant — a tool can't push the agent into a
+        # nonsense negative budget).
+        raw_step_count = state.get("step_count", 0)
+        refund_pending = state.get("step_count_refund_pending", 0)
+        step_count = max(0, raw_step_count - refund_pending)
         max_steps = state.get("max_steps", 0)
         if step_count >= max_steps:
             raise MaxStepsExceededError(step_count=step_count, max_steps=max_steps)
@@ -189,9 +198,17 @@ def build_react_graph(
             )
             await after_llm_chain.invoke(ctx, _noop)
             new_messages = _extract_post_llm_messages(ctx, original=after_messages)
-            return {"messages": new_messages, "step_count": step_count + 1}
+            return {
+                "messages": new_messages,
+                "step_count": step_count + 1,
+                "step_count_refund_pending": 0,
+            }
 
-        return {"messages": [response], "step_count": step_count + 1}
+        return {
+            "messages": [response],
+            "step_count": step_count + 1,
+            "step_count_refund_pending": 0,
+        }
 
     async def tools_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         token = cancellation_token(config)
@@ -210,6 +227,12 @@ def build_react_graph(
         # the LLM's intent (each subsequent ``update_plan`` revises the
         # previous one).
         accumulated_state: dict[str, Any] = {}
+        # Stream L.L5 — accumulate iteration refunds across the batch
+        # (Mini-ADR L-5). The next agent node subtracts the total from
+        # ``step_count`` before bumping it. Refunds are additive across
+        # parallel tool calls in the same turn: two ``update_plan``
+        # calls in one batch refund 2 iterations.
+        refund_total = state.get("step_count_refund_pending", 0)
         for tc in tool_calls:
             token.raise_if_cancelled()
             # ``run_cancellable`` interrupts a slow tool mid-dispatch. A
@@ -218,7 +241,7 @@ def build_react_graph(
             # the tool's own ``except Exception`` won't swallow it into
             # a ToolMessage; ``run_cancellable`` re-raises it as
             # ``RunCancelledError``.
-            tool_message, tool_state = await token.run_cancellable(
+            tool_message, tool_state, refund_inc = await token.run_cancellable(
                 _dispatch_tool(
                     tc,
                     tool_registry,
@@ -230,7 +253,12 @@ def build_react_graph(
             for key, value in tool_state.items():
                 if key in TOOL_ALLOWED_STATE_KEYS:
                     accumulated_state[key] = value
-        return {"messages": new_messages, **accumulated_state}
+            refund_total += refund_inc
+        return {
+            "messages": new_messages,
+            "step_count_refund_pending": refund_total,
+            **accumulated_state,
+        }
 
     graph: StateGraph[AgentState, None, AgentState, AgentState] = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
@@ -361,13 +389,15 @@ async def _dispatch_tool(
     ctx: ToolContext,
     *,
     before_tool_dispatch_chain: MiddlewareChain | None,
-) -> tuple[ToolMessage, Mapping[str, Any]]:
+) -> tuple[ToolMessage, Mapping[str, Any], int]:
     """Dispatch one tool call.
 
-    Returns ``(tool_message, state_updates)`` so the surrounding tools
-    node can promote allowlisted ``state_updates`` keys (Stream K.K8)
-    into the ``AgentState`` update dict. ``state_updates`` is empty for
-    every code path that does not produce a successful
+    Returns ``(tool_message, state_updates, refund_iterations)`` so the
+    surrounding tools node can promote allowlisted ``state_updates``
+    keys (Stream K.K8) into the ``AgentState`` update dict and
+    accumulate ``refund_iterations`` (Stream L.L5) for the next agent
+    node to consume. ``state_updates`` is empty and refund is ``0``
+    for every code path that does not produce a successful
     :class:`~orchestrator.tools.registry.ToolResult` (errors, blocks,
     unknown tools).
     """
@@ -394,6 +424,7 @@ async def _dispatch_tool(
                 status="error",
             ),
             {},
+            0,
         )
     except Exception as exc:
         # E.10 sandbox_audit and any other pre-dispatch middleware raise
@@ -412,6 +443,7 @@ async def _dispatch_tool(
                 status="error",
             ),
             {},
+            0,
         )
 
 
@@ -458,7 +490,7 @@ async def _invoke_tool(
     args: dict[str, Any],
     call_id: str,
     ctx: ToolContext,
-) -> tuple[ToolMessage, Mapping[str, Any]]:
+) -> tuple[ToolMessage, Mapping[str, Any], int]:
     try:
         result = await tool.call(args, ctx=ctx)
     except Exception as exc:
@@ -475,8 +507,13 @@ async def _invoke_tool(
                 status="error",
             ),
             {},
+            0,
         )
-    return ToolMessage(content=result.content, tool_call_id=call_id), result.state_updates
+    return (
+        ToolMessage(content=result.content, tool_call_id=call_id),
+        result.state_updates,
+        result.refund_iterations,
+    )
 
 
 def _format_error(exc: BaseException) -> str:

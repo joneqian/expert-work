@@ -131,8 +131,15 @@ class UpdatePlanTool:
         logger.info("update_plan.applied n_steps=%d reason=%r", len(cleaned), reason)
 
         rendered = "\n".join(f"{step.id}. {step.description}" for step in cleaned)
+        # Stream L.L5 — internal-chain housekeeping. update_plan is a
+        # tool the agent calls *between* real progress steps; charging
+        # it against the user-visible iteration budget makes
+        # plan_execute agents starve themselves on every revise. Refund
+        # exactly one iteration so the budget reflects user-visible
+        # work, not implementation detail. Mini-ADR L-5.
         return ToolResult(
             content=f"Plan revised to {len(cleaned)} step(s):\n{rendered}",
             meta={"n_steps": len(cleaned), "reason": reason},
             state_updates={"plan": new_plan},
+            refund_iterations=1,
         )

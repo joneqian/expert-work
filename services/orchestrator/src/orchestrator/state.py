@@ -52,6 +52,15 @@ class AgentState(TypedDict):
     ``recalled_memories`` (Stream J.3) is set once by the ``memory_recall``
     node — the long-term memories ``agent_node`` renders into its system
     context. Absent unless the manifest enables long-term memory.
+
+    ``step_count_refund_pending`` (Stream L.L5 / Mini-ADR L-5) is the
+    narrow channel a ``tools_node`` writes when one or more tools
+    returned :attr:`~orchestrator.tools.registry.ToolResult.refund_iterations`
+    greater than zero. The next ``agent_node`` subtracts it from
+    ``step_count`` (clamped at 0) before computing the post-turn count,
+    then resets the channel to ``0``. Keeps refund accounting
+    observable and auditable instead of letting tools rewrite
+    ``step_count`` directly.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -60,3 +69,4 @@ class AgentState(TypedDict):
     plan: NotRequired[Plan | None]
     reflections: NotRequired[Annotated[list[Reflection], add]]
     recalled_memories: NotRequired[list[MemoryItem]]
+    step_count_refund_pending: NotRequired[int]
