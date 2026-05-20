@@ -12,6 +12,8 @@
 
 > **2026-05-20 未交付项审计补强**：按 [memory:complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md) + [memory:no-design-choice-disguise](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_no_design_choice_disguise.md) 对 J 剩余 8 项的 (c) 维度做补强，新增 Mini-ADR J-21 ~ J-29（见 § 19 末尾）。补强点：J.4 trajectory + budget telemetry / J.5 拆 4 PR + SLO / J.7 范围缩到 J.7a / J.8 必加超时 + audit trail + UI / J.9 lifecycle + quota / J.10 重试 + quota + event + persistence / J.12 与 L7 修剪 / J.13 拆 3 子项 / J.15 volume quota + backup + encryption。各项实施前 PR 必须先修订对应 § 9-§ 18 反映本次补强。
 
+> **2026-05-20 J.6 完成补审**：J.6（PR #167-#171）在上一轮已交付审计时还在进行中（明确"本审计不评"），本次未交付项审计也复述"不重评"。事后补审 9 维 (c) 红线发现 6 维 gap：upload quota 缺位 / upload audit trail 不完整 / image lifecycle 零实现 / Path B VL fallback 单 provider 硬失败 / multi-image 集成测试缺 / EXIF strip + 内容扫描全无 / PII in images 零覆盖。新增 Mini-ADR J-30 ~ J-35（见 § 19 末尾）：J-30 quota 接入 C.5 / J-31 audit trail / J-32 lifecycle / J-33 VL fallback / J-34 EXIF strip + multi-image 测试 / J-35 NSFW + PII in images 显式 (a) 推 M2。J.6 ITERATION-PLAN 行加 4 个 (c) 补强子项 J.6.补强-1~4 + 1 个 (a) 决策项 J.6.决策-5。
+
 ---
 
 ## 1. 范围 & 边界
@@ -47,6 +49,8 @@
 | sandbox warm pool（预热空沙盒）| M1-A | 与 J.15 的 per-user **有状态**沙盒是两回事（评估 08 § 4 注） |
 | 向量库独立中间件（Milvus / Qdrant）| 视规模 M1+ | J.3 / J.5 先用 Postgres `pgvector`,够用不引外部依赖 |
 | 分布式 scheduler（多副本选主）| M1+ | J.10 M0 单副本 scheduler |
+| 图像 NSFW / 恶意 SVG / 病毒扫描 | M2 | Mini-ADR J-35 —— M0 用户 = 同公司同信任域,SVG sanitizer / NSFW 模型 / OCR 是另一套范式;M2-D 或新 stream M2-H 承接 |
+| 图像 PII redaction（OCR + redact）| M2 | Mini-ADR J-35 —— D.2 PII redactor 仅文本;图里 PII 走 OCR pipeline 是另一套范式 |
 
 ### 1.3 验收（Stream J Exit）
 
@@ -859,6 +863,30 @@ J.13 排**最后**,评估并落实升级（Mini-ADR J-20）：
 
 **J-29｜J.15 volume quota + backup + at-rest encryption（生产级数据保护）；跨 host (b) 推 M1-A**
 背景：J-9/J-10 原文只覆盖热会话生命周期 + TTL reaper，volume 自身的数据保护三个维度全缺。决策：(1) volume quota（单用户工作区最大 GB，manifest 可配 / 默认 10 GB）+ 准入检查（写文件前查 quota）；(2) volume backup（每天对所有 active user_workspace 卷 rsync 到对象存储 + 保留 7 天 + restore 演练 runbook）；(3) volume at-rest 加密（依赖宿主机 LUKS / 云厂托管磁盘加密，落实 P0 #9）；(4) 跨 host 调度 **(b) 推 M1-A**（与 sandbox warm pool 同期，M0 单机部署合理）。取舍：(c) 红线 —— 用户数据丢失 / 单用户爆磁盘 / 卷无加密都是产品级事故，M0 不能下移。
+
+---
+
+### 2026-05-20 J.6 完成补审（J-30 ~ J-35）
+
+> J.6 5 个 PR（#167-#171）已合 main，但上一轮 audit 跳过（在进行中）+ 本轮 audit 复述"不重评"。事后补审 9 维 (c) 红线发现 6 维 gap。下面 6 条 Mini-ADR 是 (c) 红线补强 + 1 条 (a) 显式决策，配套 ITERATION-PLAN.md § Stream J 的 J.6.补强-1~4 + J.6.决策-5。
+
+**J-30｜J.6 upload quota 接入 Stream C.5 QuotaService**
+背景：`uploads.py` 当前无 quota 调用（端点完全免配额），单租户 / 单用户可上传无限图片拍死对象存储。J-14 原文未列。决策：扩 `QuotaService` 加 `image_upload_count_30d` + `image_storage_bytes` 两类计费（与 token / sandbox 平行），upload 端点准入检查 + ReservationReaper 同款释放语义；超 quota 返回 429（与 B.2 限流同 status）。取舍：(c) 红线 —— 上传是 expensive 资源（对象存储 + 后续 base64 进 LLM 调用），无 quota 是平台级安全债。
+
+**J-31｜J.6 upload 单独 audit trail（不复用 SESSION_WRITE）**
+背景：`uploads.py:122-124` 注释说"audit middleware 负责"但端点自身无 `emit()` 调用，运行时 `runs.py:259-268` 只记 `SESSION_WRITE input_len`，不带图元数据。决策：新增 `AuditAction.IMAGE_UPLOAD`（同 K1 `API_KEY_ROTATE` 模式），uploads 端点直接 emit；字段：`tenant_id` / `user_id` / `session_id` / `file_size` / `mime_type` / `object_key` / `sha256` / 上传时间 / 调用方主体（user / api-key / m2m）。取舍：(c) 红线 —— 上传是用户主动写操作，不审计 = 不可追溯 = 不合规。复用 `SESSION_WRITE` 字段不够（缺图元数据 + 与文本输入混在一起难查）。
+
+**J-32｜J.6 image lifecycle（保留期 + DELETE API + TTL 清理）**
+背景：上传后对象存储**永久留存** —— 无 DELETE API / 无 TTL 扫描 / 无 session / user 销毁时清理 hook。决策：(1) 新表 `image_upload`（id / tenant_id / user_id / session_id / object_key / size_bytes / sha256 / created_at / deleted_at 软删除）登记每张图；(2) `DELETE /v1/uploads/{id}` 端点（soft-delete + audit）；(3) per-tenant 默认保留期 90 天（manifest 可配 `policies.image_retention_days`），retention-cleanup-job 加 image 维度扫描（复用 K3 模式）；(4) session / user 销毁时级联 soft-delete 该 scope 内所有 image。取舍：(c) 红线 —— 同 J.9 artifact lifecycle 同款（J-25），不能图片无 lifecycle 而 artifact 有。
+
+**J-33｜J.6 Path B VL 模型 fallback chain**
+背景：`vision.py:113` 无 catch + retry，`VisionSpec.model` 单 provider 硬失败；L8 OAuth refresh 未在 VL 路径覆盖。决策：(1) `VisionSpec` 从 `model: ModelSpec` 升级为 `model: ModelSpec` + `fallbacks: list[ModelSpec] = []`（与 E.11 LLM Provider Fallback Chain 同结构）；(2) `AskImageTool` 内复用 `LLMRouter._call_one` 同款错误归类 + fallback 推进逻辑（不能让 VL 路径独造一套）；(3) L8 `OAuthCapableProvider` 协议天然覆盖 VL provider（VL adapter 同属 LLMProvider 子类）。取舍：(c) 红线 —— VL provider 故障率本就比主 LLM 高（Qwen-VL / GLM-4V 稳定性弱于 Qwen-Max / GLM-4），单 provider 硬失败 = 拆分模型租户故障率成本不可接受。
+
+**J-34｜J.6 EXIF strip + multi-image 集成测试**
+背景：(i) 上传图直接 `store.put()` 原样落对象存储，**EXIF 不剥离** —— 是 metadata exfil 通道（GPS 坐标 / 设备指纹 / 时间戳）；(ii) `test_runs_image_refs.py` 测了 Path A 多图块组装，但缺 "单 message 携带 3 张图 + Path A/Path B 端到端" 的集成测试。决策：(1) `uploads.py` 在 `store.put()` 前用 Pillow `Image.open(...).save(..., exif=b"")` 剥 EXIF（mime allowlist 已限到 png/jpeg/webp/gif，对 SVG 不开口）；(2) 新增 `test_multimodal_e2e_multi_image.py` 集成测试：upload 3 张图 → Path A 一次 send 三张 + Path B 三次 `ask_image` 调用、断言 EXIF 已剥 + 三张图都 land。取舍：(c) 红线 —— EXIF metadata exfil 是低成本 zero-day 攻击面，剥离成本 < 100 LOC + Pillow 已是依赖；multi-image 测试覆盖是 J-22 J.5 "SLO baseline" 同款 production-grade 测试纪律。
+
+**J-35｜J.6 NSFW / 恶意 SVG / PII-in-images 显式 (a) 推 M2（不留空决策）**
+背景：(i) 用户上传图的 NSFW / 恶意 SVG 内容扫描；(ii) 图里的 PII（身份证 / 票据 / 病历）走 OCR + redact —— 两件都是另一套范式（NSFW 需 vision 模型 / SVG 解析需 SVG-aware sanitizer / OCR 需独立 pipeline），M0 用户 = 同公司风险低，但按 [memory:no-design-choice-disguise] 不允许留空。决策：**显式标 (a) 推 M2**，配套：(1) STREAM-J-DESIGN.md § 1.2 Out-of-scope 表加这两条；(2) ITERATION-PLAN.md J.6 行加 J.6.决策-5 链到本 ADR；(3) M2-D（Eval Gate + 持续改进 pipeline）扩范围承接 NSFW 检测能力 / 或独立开新 stream `M2-H 图像内容安全`。取舍：(a) 显式决策不是弱版 —— SVG sanitizer 是另一套 lib 范式（如 bleach + svg-sanitizer）、OCR 是独立 pipeline、NSFW 模型是平台决策（接外部 API 还是自训）；M0 用户 = 同公司同信任域，攻击成本 vs 收益不平衡。
 
 ---
 
