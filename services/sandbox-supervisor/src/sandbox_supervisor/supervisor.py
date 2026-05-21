@@ -124,6 +124,10 @@ class SandboxSupervisor:
         # Per-sandbox exec lock — the held pipe handles one exec at a
         # time, so concurrent runs sharing a warm session serialise here.
         self._exec_locks: dict[UUID, asyncio.Lock] = {}
+        # Strong refs for fire-and-forget tasks (J.15-补强-1 refresh_size +
+        # any future background work). Without this Python may GC the
+        # task mid-flight (Ruff RUF006).
+        self._pending_tasks: set[asyncio.Task[None]] = set()
 
     async def acquire(self, request: AcquireRequest) -> AcquireResponse:
         """Reuse the caller's warm session, or launch a fresh sandbox.
@@ -266,7 +270,10 @@ class SandboxSupervisor:
             return
         workspace = await self._workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
         enforcer = self._quota_enforcer
-        asyncio.create_task(enforcer.refresh_size(workspace=workspace))
+        task = asyncio.create_task(enforcer.refresh_size(workspace=workspace))
+        # Strong ref + auto-cleanup so Python doesn't GC the task mid-await.
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
 
     async def destroy(self, sandbox_id: UUID, *, reason: str) -> None:
         """Tear a sandbox down — ``docker rm -f`` + close the link + mark DESTROYED.
@@ -414,9 +421,7 @@ class SandboxSupervisor:
             return None
         # J.15-补强-1: workspace-level quota + soft-delete recheck on reuse.
         if self._quota_enforcer is not None:
-            workspace = await self._workspaces.resolve(
-                tenant_id=tenant_id, user_id=user_id
-            )
+            workspace = await self._workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
             # Raises WorkspaceQuotaExceededError / WorkspaceDeletedError
             # — let the caller propagate; the warm session entry stays
             # (the reaper / explicit destroy will clear it).

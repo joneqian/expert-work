@@ -111,9 +111,7 @@ async def test_soft_delete_sets_deleted_at_and_is_idempotent() -> None:
     # Second soft_delete keeps the original timestamp.
     second_ts = datetime.now(UTC)
     await store.soft_delete(workspace_id=workspace.id, now=second_ts)
-    after_second = await store.resolve(
-        tenant_id=workspace.tenant_id, user_id=workspace.user_id
-    )
+    after_second = await store.resolve(tenant_id=workspace.tenant_id, user_id=workspace.user_id)
     assert after_second.deleted_at == first_ts
 
 
@@ -122,9 +120,7 @@ async def test_resolve_returns_soft_deleted_row_without_bumping_last_accessed() 
     store = InMemoryUserWorkspaceStore()
     workspace = await store.resolve(tenant_id=uuid4(), user_id=uuid4())
     await store.soft_delete(workspace_id=workspace.id, now=datetime.now(UTC))
-    after_delete = await store.resolve(
-        tenant_id=workspace.tenant_id, user_id=workspace.user_id
-    )
+    after_delete = await store.resolve(tenant_id=workspace.tenant_id, user_id=workspace.user_id)
 
     # Caller can still inspect the row, but last_accessed_at is frozen
     # (soft-deleted rows are read-only on the resolve path; Mini-ADR J-36).

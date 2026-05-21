@@ -16,7 +16,7 @@ Covers (Mini-ADR J-29 第 1 项 + J-36):
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -85,9 +85,9 @@ async def _make_workspace(
     return store, workspace
 
 
-def _enforcer(store: InMemoryUserWorkspaceStore, docker: _FakeDocker) -> tuple[
-    QuotaEnforcer, _RecordingAudit
-]:
+def _enforcer(
+    store: InMemoryUserWorkspaceStore, docker: _FakeDocker
+) -> tuple[QuotaEnforcer, _RecordingAudit]:
     audit = _RecordingAudit()
     return (
         QuotaEnforcer(
@@ -160,10 +160,8 @@ async def test_check_soft_delete_takes_precedence_over_quota() -> None:
     # is the one that fires — recovery is the M1 concern, not quota.
     store, workspace = await _make_workspace(size_bytes=2048, size_limit_bytes=1024)
     await store.soft_delete(workspace_id=workspace.id, now=datetime.now(UTC))
-    deleted = (await store.resolve(tenant_id=workspace.tenant_id, user_id=workspace.user_id))
-    deleted_with_size = deleted.model_copy(
-        update={"size_bytes": 2048, "size_limit_bytes": 1024}
-    )
+    deleted = await store.resolve(tenant_id=workspace.tenant_id, user_id=workspace.user_id)
+    deleted_with_size = deleted.model_copy(update={"size_bytes": 2048, "size_limit_bytes": 1024})
     enforcer, _audit = _enforcer(store, _FakeDocker())
 
     with pytest.raises(WorkspaceDeletedError):
@@ -183,9 +181,7 @@ async def test_refresh_size_writes_measure_to_store() -> None:
 
     await enforcer.refresh_size(workspace=workspace)
 
-    refreshed = await store.resolve(
-        tenant_id=workspace.tenant_id, user_id=workspace.user_id
-    )
+    refreshed = await store.resolve(tenant_id=workspace.tenant_id, user_id=workspace.user_id)
     assert refreshed.size_bytes == 4096
     assert docker.measure_calls == [(workspace.volume_name, "helix-sandbox:dev")]
 
@@ -200,9 +196,7 @@ async def test_refresh_size_swallows_docker_error() -> None:
     await enforcer.refresh_size(workspace=workspace)
 
     # Store remains unchanged.
-    refreshed = await store.resolve(
-        tenant_id=workspace.tenant_id, user_id=workspace.user_id
-    )
+    refreshed = await store.resolve(tenant_id=workspace.tenant_id, user_id=workspace.user_id)
     assert refreshed.size_bytes == 42
 
 

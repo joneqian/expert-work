@@ -91,9 +91,7 @@ class QuotaEnforcer:
             await self._emit(
                 action=AuditAction.WORKSPACE_QUOTA_DENIED,
                 workspace=workspace,
-                reason=(
-                    f"size {workspace.size_bytes} >= limit {workspace.size_limit_bytes} bytes"
-                ),
+                reason=(f"size {workspace.size_bytes} >= limit {workspace.size_limit_bytes} bytes"),
                 details={
                     "size_bytes": workspace.size_bytes,
                     "size_limit_bytes": workspace.size_limit_bytes,
@@ -125,14 +123,10 @@ class QuotaEnforcer:
             )
             return
         try:
-            await self.workspace_store.update_size(
-                workspace_id=workspace.id, size_bytes=size_bytes
-            )
+            await self.workspace_store.update_size(workspace_id=workspace.id, size_bytes=size_bytes)
         except WorkspaceNotFoundError:
             # Row was hard-deleted between resolve and refresh — fine.
-            logger.info(
-                "quota_enforcer.refresh_size_workspace_gone workspace=%s", workspace.id
-            )
+            logger.info("quota_enforcer.refresh_size_workspace_gone workspace=%s", workspace.id)
 
     async def _emit(
         self,

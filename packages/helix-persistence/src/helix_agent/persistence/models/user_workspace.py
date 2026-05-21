@@ -5,10 +5,11 @@ volume that backs that user's persistent workspace. The volume outlives
 the ephemeral sandbox containers that mount it; see migration
 ``0018_user_workspace`` and STREAM-J-DESIGN § 9.
 
-J.15-补强-1（migration 0026, STREAM-J-DESIGN § 9.5）adds three columns:
+J.15-补强-1 (migration 0026, STREAM-J-DESIGN § 9.5) adds three columns:
+
 - ``size_limit_bytes`` (Mini-ADR J-29 第 1 项) — quota ceiling.
 - ``deleted_at`` + ``archived_object_key`` (Mini-ADR J-36) — lifecycle
-  三档 (active → soft-deleted → archived).
+  三档 (active -> soft-deleted -> archived).
 """
 
 from __future__ import annotations
@@ -16,7 +17,16 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    Index,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 

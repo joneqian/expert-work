@@ -32,14 +32,14 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0026_user_workspace_quota_lifecycle"
+revision: str = "0026_workspace_quota_lifecycle"
 down_revision: str | Sequence[str] | None = "0025_memory_dedup_and_dlq"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 __all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revision", "upgrade"]
 
-# 10 GiB in bytes — must match SandboxSupervisorSettings.default_workspace_size_limit_mb × 1 MiB.
+# 10 GiB in bytes — must match SandboxSupervisorSettings.default_workspace_size_limit_mb x 1 MiB.
 _DEFAULT_SIZE_LIMIT_BYTES = 10 * 1024 * 1024 * 1024
 
 

@@ -557,10 +557,8 @@ async def test_acquire_rejects_when_workspace_size_at_limit() -> None:
     # Lower the limit + push size above it to force the reject.
     await h.workspaces.update_size(workspace_id=workspace.id, size_bytes=2048)
     # InMemory model_copy idiom — modify the row's size_limit_bytes.
-    h.workspaces._rows[(tenant_id, user_id)] = (
-        h.workspaces._rows[(tenant_id, user_id)].model_copy(
-            update={"size_limit_bytes": 1024}
-        )
+    h.workspaces._rows[(tenant_id, user_id)] = h.workspaces._rows[(tenant_id, user_id)].model_copy(
+        update={"size_limit_bytes": 1024}
     )
 
     with pytest.raises(WorkspaceQuotaExceededError):
@@ -594,9 +592,7 @@ async def test_acquire_succeeds_under_quota_with_enforcer() -> None:
 
     assert response.cold_start is True
     # No quota-denied audit; only the SANDBOX_ACQUIRED success.
-    quota_denies = [
-        e for e in h.audit.entries if e.action is AuditAction.WORKSPACE_QUOTA_DENIED
-    ]
+    quota_denies = [e for e in h.audit.entries if e.action is AuditAction.WORKSPACE_QUOTA_DENIED]
     assert quota_denies == []
 
 
@@ -611,10 +607,8 @@ async def test_reuse_session_rechecks_quota() -> None:
     # Volume "grew" past quota between runs — push size + tighten limit.
     workspace = await h.workspaces.resolve(tenant_id=tenant_id, user_id=user_id)
     await h.workspaces.update_size(workspace_id=workspace.id, size_bytes=4096)
-    h.workspaces._rows[(tenant_id, user_id)] = (
-        h.workspaces._rows[(tenant_id, user_id)].model_copy(
-            update={"size_limit_bytes": 1024}
-        )
+    h.workspaces._rows[(tenant_id, user_id)] = h.workspaces._rows[(tenant_id, user_id)].model_copy(
+        update={"size_limit_bytes": 1024}
     )
 
     with pytest.raises(WorkspaceQuotaExceededError):
@@ -657,7 +651,7 @@ async def test_mark_workspace_deleted_soft_deletes_and_destroys_warm_session() -
     """mark_workspace_deleted soft-deletes the row + force-destroys any warm session."""
     h = _harness(quota_enabled=True)
     tenant_id, user_id = uuid4(), uuid4()
-    response = await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+    await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
 
     await h.supervisor.mark_workspace_deleted(tenant_id=tenant_id, user_id=user_id)
 

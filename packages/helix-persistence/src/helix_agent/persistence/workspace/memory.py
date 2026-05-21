@@ -69,9 +69,7 @@ class InMemoryUserWorkspaceStore(UserWorkspaceStore):
         if existing.deleted_at is None:
             # Mirror the SQL CHECK constraint at the in-memory layer.
             raise ValueError("cannot archive a workspace that isn't soft-deleted")
-        self._rows[key] = existing.model_copy(
-            update={"archived_object_key": archived_object_key}
-        )
+        self._rows[key] = existing.model_copy(update={"archived_object_key": archived_object_key})
 
     async def list_pending_archive(self) -> list[UserWorkspace]:
         return [

@@ -71,12 +71,13 @@ class SqlUserWorkspaceStore(UserWorkspaceStore):
                         UserWorkspaceRow.user_id == user_id,
                     )
                 )
-                row = lookup.scalar_one()
-            else:
-                await session.commit()
-                row = await session.get(UserWorkspaceRow, workspace_id)
-                # Just inserted/updated in this transaction — always resolves.
-                assert row is not None  # noqa: S101
+                return _row_to_workspace(lookup.scalar_one())
+            await session.commit()
+            row = await session.get(UserWorkspaceRow, workspace_id)
+            # Just inserted/updated in this transaction — always resolves.
+            if row is None:
+                msg = f"workspace {workspace_id} vanished between upsert and fetch"
+                raise RuntimeError(msg)
             return _row_to_workspace(row)
 
     async def update_size(self, *, workspace_id: UUID, size_bytes: int) -> None:
@@ -86,7 +87,9 @@ class SqlUserWorkspaceStore(UserWorkspaceStore):
                 .where(UserWorkspaceRow.id == workspace_id)
                 .values(size_bytes=size_bytes)
             )
-            if result.rowcount == 0:
+            # rowcount is supported by CursorResult for UPDATE statements;
+            # mypy stubs for SQLAlchemy's async API don't expose it yet.
+            if result.rowcount == 0:  # type: ignore[attr-defined]
                 raise WorkspaceNotFoundError(workspace_id)
             await session.commit()
 
@@ -102,7 +105,7 @@ class SqlUserWorkspaceStore(UserWorkspaceStore):
                 .values(deleted_at=now)
             )
             await session.commit()
-            if result.rowcount == 0:
+            if result.rowcount == 0:  # type: ignore[attr-defined]
                 # Either row doesn't exist or already soft-deleted.
                 # Disambiguate by checking existence.
                 lookup = await session.get(UserWorkspaceRow, workspace_id)
@@ -124,7 +127,7 @@ class SqlUserWorkspaceStore(UserWorkspaceStore):
                 .values(archived_object_key=archived_object_key)
             )
             await session.commit()
-            if result.rowcount == 0:
+            if result.rowcount == 0:  # type: ignore[attr-defined]
                 lookup = await session.get(UserWorkspaceRow, workspace_id)
                 if lookup is None:
                     raise WorkspaceNotFoundError(workspace_id)

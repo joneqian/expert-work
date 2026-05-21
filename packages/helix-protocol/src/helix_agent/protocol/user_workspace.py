@@ -40,7 +40,9 @@ class UserWorkspace(BaseModel):
     size_limit_bytes: int = Field(
         default=10 * 1024 * 1024 * 1024,
         gt=0,
-        description="quota ceiling — supervisor rejects acquire when size_bytes >= size_limit_bytes",
+        description=(
+            "quota ceiling — supervisor rejects acquire when size_bytes >= size_limit_bytes"
+        ),
     )
     created_at: datetime | None = None
     last_accessed_at: datetime | None = None

@@ -198,17 +198,13 @@ def _register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=429, content={"detail": str(exc)})
 
     @app.exception_handler(WorkspaceQuotaExceededError)
-    async def _workspace_quota(
-        _request: Request, exc: WorkspaceQuotaExceededError
-    ) -> JSONResponse:
+    async def _workspace_quota(_request: Request, exc: WorkspaceQuotaExceededError) -> JSONResponse:
         # Stream J.15-补强-1 (Mini-ADR J-29 第 1 项): per-workspace size
         # quota — same 429 status as the sandbox-count quota.
         return JSONResponse(status_code=429, content={"detail": str(exc)})
 
     @app.exception_handler(WorkspaceDeletedError)
-    async def _workspace_deleted(
-        _request: Request, exc: WorkspaceDeletedError
-    ) -> JSONResponse:
+    async def _workspace_deleted(_request: Request, exc: WorkspaceDeletedError) -> JSONResponse:
         # Stream J.15-补强-1 (Mini-ADR J-36): the workspace was soft-
         # deleted; recovery is a separate operator action (推 M1).
         return JSONResponse(status_code=410, content={"detail": str(exc)})
