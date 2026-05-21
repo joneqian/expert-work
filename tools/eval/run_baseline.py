@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import subprocess
 import sys
@@ -90,7 +91,13 @@ class _FakeKeywordEmbedder:
     def _encode(self, text: str) -> tuple[float, ...]:
         vec = [0.0] * self.DIM
         for token in _tokenise(text):
-            vec[hash(token) % self.DIM] += 1.0
+            # Mini-ADR J-40 closeout — Python's built-in ``hash()`` is
+            # randomised per process (``PYTHONHASHSEED``), making the
+            # baseline yaml non-reproducible without an env var. Use a
+            # stable digest so the recall / MRR values are pinned.
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=4).digest()
+            bucket = int.from_bytes(digest, "big") % self.DIM
+            vec[bucket] += 1.0
         return tuple(vec)
 
 
