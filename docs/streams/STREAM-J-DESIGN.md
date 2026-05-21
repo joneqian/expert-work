@@ -530,9 +530,15 @@ class UserWorkspaceRow(Base):
 
 ## 10. J.9 — 产物 / Artifact 管理
 
+> **2026-05-21 J.9 收尾设计 PR**：~50% 已实装（protocol DTO + 双表 RLS migration + Store + tools + GET list/download + 三套测试），Mini-ADR J-25（2026-05-20 修订）锁定 M0 还要补 lifecycle + quota + DELETE/PATCH + audit + versions endpoint + eval 6 项。本次设计修订 + **新加 § 10.5 MIME-aware download + XSS 防护**（deer-flow 对比启发的 (c) 红线 — helix 当前 `application/octet-stream` 一刀切下载是设计纪律缺口，HTML/SVG inline 渲染有 stored XSS 风险，按 [memory:complete-not-minimal] 修订），同步 Mini-ADR J-25 加第 (4) 项。
+
 ### 10.1 现状
 
 run 只吐 SSE 文本流;沙盒里生成的文件随沙盒销毁即丢。用户拿不到 agent 产出的文件 / 文档 / 代码。
+
+**当前已实装**（main，Mini-ADR J-11 范围）：protocol DTO `Artifact` / `ArtifactVersion` + 迁移 0019_artifact 双表 + `ArtifactStore` ABC/SQL/InMemory + `SaveArtifactTool` / `ListArtifactsTool` + `GET /v1/artifacts` 列表 + `GET /v1/artifacts/download?name=` 经 supervisor 读 volume + 首次读懒回填 size/sha256 + 三套测试。
+
+**尚缺**（Mini-ADR J-25 + 本次 § 10.5 修订）：lifecycle / quota / DELETE/PATCH / versions endpoint / audit / MIME-aware Content-Type + XSS 防护 / eval module。
 
 ### 10.2 设计与边界
 
@@ -563,11 +569,107 @@ class ArtifactVersionRow(Base):             # 表 artifact_version —— 每个
     created_in_thread: str
 ```
 
+**J.9 收尾迁移（新）**：lifecycle 字段加 `deleted_at: datetime | None`（soft-delete 时戳）+ `archived_object_key: str | None`（卷满 archive-to-objectstore 后的对象键）+ partial index `WHERE deleted_at IS NULL`（list 端点默认过滤）。
+
 ### 10.4 整合点
 
 `orchestrator/tools/`（`save_artifact` / `list_artifacts` builtin）、`sse.py`（`artifact` 事件类型）、`sandbox-supervisor`（工作区文件读取端点 —— 临时只读容器挂卷）、control-plane run API（产物列表 + 内容下载端点,下载时回填 size/sha256）、J.15 持久卷（内容载体）。
 
-> **对标**：deer-flow `present_file`、hermes `file_tools`。helix 加**版本化 + 表登记**,因为 per-user 持久形态下产物要跨会话留存可追溯。
+> **对标**：deer-flow `present_file`、hermes `file_tools`。helix 加**版本化 + 表登记 + lifecycle/quota/audit/RLS**,因为 per-user 持久形态下产物要跨会话留存可追溯，多租户企业平台必须有数据清理 + 资源保护 + 审计追溯。
+
+### 10.5 Download endpoint MIME-aware Content-Type + XSS 防护（M0 — (c) 红线）
+
+> 本节由 2026-05-21 helix-vs-deer-flow 对比新加。当前 download endpoint（`services/control-plane/src/control_plane/api/artifacts.py:108`）一律返 `application/octet-stream` —— 安全但**对 HTML / SVG / 主动内容缺纵深防御**（若未来加入 inline preview / API 客户端忽略 octet-stream 直接渲染 → stored XSS）。Mini-ADR J-25 第 (4) 项确认 M0 含此项。
+
+**Content-Type 推断**（按 artifact `kind` + `path_in_workspace` 文件扩展名）：
+
+| Kind / 扩展 | Content-Type | Content-Disposition |
+|------------|--------------|---------------------|
+| `data` / 任意 / 无扩展 / 未识别 | `application/octet-stream` | `attachment; filename=...`（强制下载） |
+| `document` / `.md` / `.txt` / `.log` | `text/plain; charset=utf-8` | `inline; filename=...` |
+| `document` / `.json` / `.yaml` / `.yml` / `.toml` | `application/json` / `application/x-yaml` / `application/toml` | `inline; filename=...` |
+| `code` / `.py` / `.js` / `.ts` / `.go` / `.rs` / `.java` 等 | `text/plain; charset=utf-8` | `inline; filename=...` |
+| image 类（`.png` / `.jpg` / `.jpeg` / `.gif` / `.webp`） | `image/{png\|jpeg\|gif\|webp}` | `inline; filename=...` |
+| **`.html` / `.htm` / `.xhtml` / `.svg` / `.xml` / `.mathml`** | `text/html` 等真实类型 | **`attachment; filename=...` 强制下载** — XSS 红线 |
+| **任何 unknown** | `application/octet-stream` | **`attachment` 强制下载**（fallthrough 安全） |
+
+**实现要点**：
+- 推断函数 `_infer_content_type(kind, path) -> tuple[str, ContentDisposition]` 独立模块 `_artifact_mime.py`，**白名单驱动**（unknown → octet-stream + attachment fallthrough）—— 拒绝 `mimetypes.guess_type` 因为它把 SVG 推断为 `image/svg+xml` inline 是 XSS 通道。
+- 始终设置 `X-Content-Type-Options: nosniff`（防 IE/旧浏览器 sniff override）。
+- `filename` 走 RFC 6266 `filename*=UTF-8''<percent-encoded>` + ASCII fallback。
+- 安全测试：HTML / SVG / XHTML / 内嵌 `<script>` 的 .txt 全部断言 `Content-Disposition: attachment`。
+
+**对标 deer-flow**：`backend/app/gateway/routers/artifacts.py:99-202` 已有同款逻辑（active content 强制 attachment）。helix 把 kind 字段进规则表 → 比 deer-flow 单按扩展名更严谨。
+
+### 10.6 Lifecycle（M0 — Mini-ADR J-25 范围）
+
+**保留期 + soft-delete + archive 三档**（与 J-25 J.15 volume + J-32 image upload 同款范式）：
+
+| 状态 | 触发 | 数据可见性 | 内容存储 |
+|-----|------|----------|---------|
+| **active** | `save_artifact` 写入 | list 可见 / download 可见 | J.15 user volume |
+| **soft-deleted** | `DELETE /v1/artifacts/{name}` 或 user 销毁级联 | list 默认隐藏（`?include_deleted=true` 可见）/ download 404 | volume 文件仍在 |
+| **archived** | retention cron 跑到 + soft-delete 超 30 天 / 或卷满迁出 | list `?include_archived=true` 可见 / download restore-required | tar.zst 进 ObjectStore，volume 删 |
+| **hard-deleted** | archived 超 60 天 / 或租户彻底销毁 | 不可见 | row 删除 + ObjectStore 删除 |
+
+- **默认保留期**：90 天 active → 自动 soft-delete（manifest 可配 `policies.artifact_retention_days`）。
+- **Cleanup job**：复用 `retention-cleanup-job` 现有服务（K3 已铺），加 artifact 维度扫描（同 image_upload J-32 模式）。
+- **卷满 archive**：J.15 卷写满时（quota 满 90%）触发 archive job 把 oldest soft-deleted 迁 ObjectStore 释放卷空间。
+- **级联**：user_workspace soft-delete（J-36）级联 soft-delete 该 user 全部 artifact；tenant 销毁同款级联 hard-delete。
+
+### 10.7 Quota 接入 Stream C.5（M0 — Mini-ADR J-25 范围）
+
+`QuotaService` 扩两类计费（与 token / sandbox 平行）：
+
+| 类目 | 单位 | 默认上限 | 触发点 |
+|------|------|---------|--------|
+| `artifact_download_count_30d` | 次 | 1000 / user / 30d | `GET /v1/artifacts/download` |
+| `artifact_storage_bytes` | bytes | 1 GiB / user | `save_artifact` tool 调用 + 卷满 archive 时减计 |
+
+- 准入检查在端点入口 / tool dispatch 前；超 quota 返回 `429`（与 B.2 限流同 status），audit 记 `ARTIFACT_QUOTA_REJECT`。
+- `ReservationReaper` 复用现有逻辑（30d 滚动窗口 sliding count）。
+- `helix_artifact_quota_reject_total{type=download|storage}` counter 出现，Prometheus scrape。
+
+### 10.8 Audit Trail（M0 — Mini-ADR J-25 范围）
+
+新增 `AuditAction` 三态（同 K1 / K6 模式）：
+
+| Action | 触发 | 关键字段 |
+|--------|-----|---------|
+| `ARTIFACT_SAVE` | `save_artifact` tool 完成 | tenant_id / user_id / artifact_name / version / kind / size_bytes / 调用方主体 |
+| `ARTIFACT_DELETE` | `DELETE /v1/artifacts/{name}` | tenant_id / user_id / artifact_name / soft-delete 时戳 / 调用方主体 |
+| `ARTIFACT_UPDATE` | `PATCH /v1/artifacts/{name}` | tenant_id / user_id / artifact_name / 变更字段（kind / metadata）/ 调用方主体 |
+
+J.14 cross-tenant artifact reject 自动化测试以 audit trail 作 verification 锚点（"cross-tenant DELETE 必须返 404 且不留 audit 记录"）。
+
+### 10.9 控制平面新增 endpoints（M0 — 配合 § 10.5~10.8）
+
+| Endpoint | 用途 |
+|---------|------|
+| `DELETE /v1/artifacts/{name}` | soft-delete（接 quota / audit） |
+| `PATCH /v1/artifacts/{name}` | 改 kind 或 metadata（M0 仅 kind，metadata 字段推 M1） |
+| `GET /v1/artifacts/{name}/versions` | 历史版本列表（H.4 UI 需要） |
+
+所有端点继承现有 404 不泄漏 cross-user 语义。
+
+### 10.10 Eval module（M0 — Mini-ADR J-25 + J-37 范围）
+
+`tools/eval/artifact.py` + `tools/eval/datasets/artifact/m0_baseline.yaml`，pass-rate ≥ 0.80。场景覆盖：
+
+- save_artifact_basic / version_increments / list_artifacts_excludes_deleted
+- delete_then_list_excludes / delete_then_download_404 / patch_kind_then_list_reflects
+- versions_list_desc / download_mime_text / download_mime_image / download_html_forces_attachment / download_svg_forces_attachment
+- quota_storage_reject / quota_download_count_reject / cross_user_404
+
+接 `run_baseline.py` runner，J.9_artifact 切 PASS。
+
+### 10.11 不做项（M0 边界）
+
+- ❌ **`.skill` ZIP artifact + Install 按钮**（deer-flow 启发跨 J.7/J.9 集成）—— 推 M1-K（J.7b skill 进化一起）
+- ❌ **前端 inline preview / 类型感知渲染** —— H.4 admin UI 范畴
+- ❌ **病毒扫描** —— Mini-ADR J-25 已显式 (a) 推 M2
+- ❌ **IM 渠道 ResolvedAttachment** —— Stream A 范畴
+- ❌ **多模态 `kind=image` 特化** —— M0 通过 path 扩展名 + Content-Type 推断已足够区分；增加 enum 推 M1 与 H.4 一并
 
 ---
 
@@ -1288,8 +1390,8 @@ capabilities:
 **J-24｜J.8 审批超时 fallback + audit trail + Admin UI 审批面板接入（M0 必含）**
 背景：J-15 原文写 "M0 不做超时 / 异步通知" —— 按 [[no-design-choice-disguise]] 不允许把"无超时 run 永远占 checkpointer 槽"包装成设计选择。决策：(1) M0 审批必含**默认 24h 超时 fallback**（manifest 可配，超时自动 reject + audit）；(2) 审批 trail 进 `audit_log` schema：审批人 / 时间 / 决策 / 修改入参；(3) Admin UI H.3 必含审批面板接入。取舍：(c) 红线 —— 无超时 = 资源泄漏 + 用户感知"agent 卡死"；无 audit trail = 不可追溯；无 UI = 审批门只能 API 操作。
 
-**J-25｜J.9 artifact lifecycle + quota；病毒扫描 (a) 推 M2**
-背景：J-11 原文只覆盖版本化 + RLS + supervisor 读取，lifecycle / quota / 病毒扫描三个维度未列。决策：(1) M0 加 artifact 保留期（manifest 可配 / 默认 90 天）+ DELETE / PATCH API + 卷满 / 用户超 quota 时的清理策略；(2) 下载频次 + 体积配额接入 Stream C.5 `QuotaService`；(3) 病毒扫描显式 **(a) 推 M2**（M0 用户 = 同公司风险低，但**必须显式决策**，不留空）。取舍：(c) 红线 —— 无 lifecycle 卷会爆；无 quota 单个用户能拖垮平台。
+**J-25｜J.9 artifact lifecycle + quota + audit + MIME/XSS；病毒扫描 (a) 推 M2**
+背景：J-11 原文只覆盖版本化 + RLS + supervisor 读取，lifecycle / quota / 病毒扫描 / audit / download MIME 五个维度未列。决策：(1) M0 加 artifact 保留期（manifest 可配 / 默认 90 天）+ DELETE / PATCH / versions API + 卷满 / 用户超 quota 时的清理策略；(2) 下载频次 + 体积配额接入 Stream C.5 `QuotaService`；(3) **Audit trail 三态**（`ARTIFACT_SAVE` / `ARTIFACT_DELETE` / `ARTIFACT_UPDATE`）；(4) **2026-05-21 helix-vs-deer-flow 对比新加**：Download endpoint MIME-aware Content-Type + XSS 防护（HTML / SVG / 主动内容强制 `Content-Disposition: attachment`；白名单驱动 MIME 推断；`X-Content-Type-Options: nosniff`）—— 当前 `octet-stream` 一刀切是 (c) 红线设计纪律缺口，按 [memory:complete-not-minimal] 必加；(5) 病毒扫描显式 **(a) 推 M2**（M0 用户 = 同公司风险低，但**必须显式决策**，不留空）。取舍：(c) 红线 —— 无 lifecycle 卷会爆；无 quota 单个用户能拖垮平台；无 audit J.14 cross-tenant 测试无锚点；无 XSS 防护 HTML artifact 是 stored XSS 通道。
 
 **J-26｜J.10 触发器 failure handling + quota + event 源 + persistence 4 条**
 背景：J-18 原文只覆盖单副本推 M1+ + webhook 认证，failure handling / scheduler quota / event 源选型 / APScheduler 持久性未列。决策：(1) failed trigger run → K7 模式的 DLQ 重试（backoff 1m→5m→30m→2h→6h，5 次失败入死信）；(2) scheduler quota 接入 Stream C.5（单用户 / 单租户最大 cron 数）；(3) trigger event 源选型 = PG NOTIFY（M0 单 control-plane 副本下足够，M1+ 多副本时考虑 outbox 表）；(4) APScheduler 必须 `SQLAlchemyJobStore` 持久化到 PG，control-plane 重启不丢 cron tick。取舍：(c) 红线 —— 四项缺一 trigger 系统就是弱版。
