@@ -121,6 +121,7 @@ ResourceType = Literal[
     "api_key",
     "service_account",
     "feedback",
+    "image_upload",  # Stream J.6.补强-2 — Mini-ADR J-31
 ]
 
 

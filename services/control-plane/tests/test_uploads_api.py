@@ -244,3 +244,118 @@ async def test_upload_429_when_image_storage_bytes_exhausted(setup: Setup) -> No
     assert second.status_code == 429
     body = second.json()
     assert body["error"]["dimension"] == QuotaDimension.IMAGE_STORAGE_BYTES.value
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-31 (J.6.补强-2) — audit trail
+# ---------------------------------------------------------------------------
+
+
+from helix_agent.persistence.audit_log import InMemoryAuditLogStore  # noqa: E402
+
+AuditSetup = tuple[AsyncClient, UUID, InMemoryAuditLogStore, InMemoryObjectStore]
+
+
+@pytest.fixture
+async def audit_setup() -> AsyncIterator[AuditSetup]:
+    """Same as :func:`setup` but with an introspectable
+    :class:`InMemoryAuditLogStore` so the J.6.补强-2 audit-trail tests
+    can assert on the emitted ``image:upload`` rows."""
+    from control_plane.audit import build_default_audit_logger
+
+    audit_store = InMemoryAuditLogStore()
+    audit_logger = build_default_audit_logger(audit_store)
+    object_store = InMemoryObjectStore()
+    app = create_app(
+        settings=_settings(),
+        audit_logger=audit_logger,
+        jwt_verifier=build_test_jwt_verifier(),
+        enable_reaper=False,
+    )
+    app.state.object_store = object_store
+    thread_id = uuid4()
+    await app.state.thread_meta_repo.create(
+        thread_id=thread_id, tenant_id=_TENANT, created_by="user-a"
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://cp.test", headers=_headers()
+    ) as client:
+        yield client, thread_id, audit_store, object_store
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-31 (J.6.补强-2) — audit trail
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upload_emits_image_upload_audit_row(audit_setup: AuditSetup) -> None:
+    """Successful upload writes a dedicated ``image:upload`` audit row
+    with the full byte-trace metadata (size / mime / object_key / sha256)
+    that the SESSION_WRITE row does not carry."""
+    import hashlib
+
+    from helix_agent.protocol import AuditAction
+
+    client, thread_id, audit_store, _ = audit_setup
+    raw = b"PNGBYTES"
+    response = await client.post(
+        f"/v1/sessions/{thread_id}/uploads",
+        files={"file": ("photo.png", raw, "image/png")},
+    )
+    assert response.status_code == 201
+
+    from helix_agent.protocol import AuditQuery
+
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
+    image_upload_rows = [r for r in page.entries if r.action == AuditAction.IMAGE_UPLOAD]
+    assert len(image_upload_rows) == 1
+    entry = image_upload_rows[0]
+    assert entry.resource_type == "image_upload"
+    assert entry.tenant_id == _TENANT
+    assert entry.details["file_size_bytes"] == len(raw)
+    assert entry.details["mime_type"] == "image/png"
+    assert entry.details["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert entry.details["ext"] == ".png"
+    assert entry.details["thread_id"] == str(thread_id)
+    assert entry.details["object_key"].startswith(f"{_TENANT}/uploads/{thread_id}/")
+    assert entry.details["object_key"].endswith(".png")
+    # Subject identity carried for compliance traceability.
+    assert entry.details["subject_type"]
+    assert entry.details["auth_method"]
+
+
+@pytest.mark.asyncio
+async def test_quota_denial_does_not_emit_image_upload_audit(
+    audit_setup: AuditSetup,
+) -> None:
+    """A 429 from quota admission must NOT emit ``IMAGE_UPLOAD`` (the
+    upload didn't happen). The 429 path already emits its own
+    ``QUOTA_RATE_LIMIT_DENIED`` row via ``check_admission``."""
+    from helix_agent.protocol import AuditAction, QuotaDimension
+
+    client, thread_id, audit_store, _ = audit_setup
+    await _seed_quota_row(
+        client._transport.app,  # type: ignore[attr-defined,union-attr]
+        dimension=QuotaDimension.IMAGE_UPLOAD_COUNT_30D,
+        limit_value=1,
+        burst=1,
+    )
+    first = await client.post(
+        f"/v1/sessions/{thread_id}/uploads",
+        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+    )
+    assert first.status_code == 201
+    second = await client.post(
+        f"/v1/sessions/{thread_id}/uploads",
+        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+    )
+    assert second.status_code == 429
+
+    from helix_agent.protocol import AuditQuery
+
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
+    image_upload_rows = [r for r in page.entries if r.action == AuditAction.IMAGE_UPLOAD]
+    # Only the first (successful) upload should have emitted IMAGE_UPLOAD.
+    assert len(image_upload_rows) == 1
