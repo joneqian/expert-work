@@ -48,6 +48,7 @@ import per_user_isolation as _pui  # type: ignore[import-not-found]  # noqa: E40
 import persistent_volume as _pv  # type: ignore[import-not-found]  # noqa: E402
 import plan_execute as _pe  # type: ignore[import-not-found]  # noqa: E402
 import reflect as _rf  # type: ignore[import-not-found]  # noqa: E402
+import sub_agent as _sa  # type: ignore[import-not-found]  # noqa: E402
 from _capability import (  # type: ignore[import-not-found]  # noqa: E402
     CapabilityReport,
 )
@@ -161,6 +162,11 @@ async def _run_persistent_volume() -> CapabilityReport:
     return await _pv.evaluate_set(cases)
 
 
+async def _run_sub_agent() -> CapabilityReport:
+    cases = _sa.load_cases(_DATASETS / "sub_agent" / "m0_baseline.yaml")
+    return await _sa.evaluate_set(cases)
+
+
 # ---------------------------------------------------------------------------
 # Registry — single source of truth for what enters the baseline.
 # ---------------------------------------------------------------------------
@@ -209,8 +215,8 @@ _RUNNERS: tuple[_Runner, ...] = (
         "J.4_sub_agent",
         "pass-rate",
         {"pass_rate": 0.80},
-        None,
-        _DEFERRED_PENDING_CAPABILITY,
+        _run_sub_agent,
+        "",
     ),
     _Runner(
         "J.5_rag",
