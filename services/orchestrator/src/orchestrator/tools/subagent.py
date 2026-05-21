@@ -21,9 +21,12 @@ See [STREAM-J-DESIGN §11 / Mini-ADR J-12](../../../../../docs/streams/STREAM-J-
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 from uuid import UUID, uuid4
 
@@ -31,14 +34,36 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_core.runnables import RunnableConfig
 
 from helix_agent.protocol import SubAgentSpec, parse_agent_ref
-from helix_agent.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
+from helix_agent.runtime.cancellation import (
+    CANCELLATION_TOKEN_KEY,
+    CancellationToken,
+    RunCancelledError,
+)
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
+from orchestrator.trajectory import (
+    TrajectoryOutcome,
+    TrajectoryRecord,
+    TrajectoryRecorder,
+)
 
 if TYPE_CHECKING:
     from orchestrator.agent_factory import BuiltAgent
 
 logger = logging.getLogger(__name__)
+
+#: Strong refs to in-flight sub-agent trajectory dispatch tasks (Mini-ADR
+#: J-21). Mirrors the orchestrator.sse pattern: ``asyncio.create_task``
+#: drops its return value, so we keep the task in a module set until it
+#: completes — otherwise GC may finalize the task before the ObjectStore
+#: put returns.
+_BACKGROUND_TRAJECTORY_TASKS: set[asyncio.Task[None]] = set()
+
+#: Wall-clock cap on one sub-agent trajectory dispatch. Same rationale as
+#: ``orchestrator.sse._TRAJECTORY_DISPATCH_TIMEOUT_S`` — a hung ObjectStore
+#: must not pin a background task forever; the recorder swallows its own
+#: errors so the deadline is the outer guard.
+_TRAJECTORY_DISPATCH_TIMEOUT_S: float = 5.0
 
 #: Hard cap on recursive sub-agent delegation depth. The top-level agent
 #: builds at depth 0; each delegation step builds the child at parent
@@ -107,6 +132,13 @@ class SubAgentTool:
     #: The child's build-time recursion depth (parent depth + 1). Passed
     #: straight to :attr:`builder` so the depth cap is enforced there.
     child_depth: int
+    #: Mini-ADR J-21 — when set, the child run's trajectory writes to its
+    #: own L7 ObjectStore key (``{prefix}/{tenant}/{outcome}/{date}/
+    #: {sub_thread_id}.jsonl``). Fire-and-forget dispatch; ``None`` is a
+    #: valid deployment (the recorder is not configured) — no trajectory
+    #: rows for sub-agent runs, parent run trajectory still records via
+    #: the orchestrator's SSE worker.
+    trajectory_recorder: TrajectoryRecorder | None = None
 
     @property
     def spec(self) -> ToolSpec:
@@ -144,7 +176,12 @@ class SubAgentTool:
             version=version,
             depth=self.child_depth,
         )
-        child_config = self._child_config(ctx)
+        # Generate the sub-run's thread_id / run_id up front so the L7
+        # trajectory dispatch (Mini-ADR J-21) keys on the same UUIDs as
+        # the child's RunnableConfig.
+        sub_thread_id = uuid4()
+        sub_run_id = uuid4()
+        child_config = self._child_config(ctx, sub_thread_id=sub_thread_id, sub_run_id=sub_run_id)
         child_input: dict[str, Any] = {
             "messages": [
                 SystemMessage(content=child.system_prompt),
@@ -154,34 +191,167 @@ class SubAgentTool:
             "max_steps": child.max_steps,
         }
 
+        # Mini-ADR J-21 — budget telemetry: wall-clock around the whole
+        # child run so even a cancelled / max_steps path still contributes
+        # a real number.
+        started_at = datetime.now(UTC)
+        start_monotonic = time.monotonic()
+        result: Any = None
+        raised_max_steps = False
+
         try:
             result = await child.graph.ainvoke(child_input, child_config)
+            outcome: TrajectoryOutcome = "success"
         except MaxStepsExceededError:
-            # A child that runs out of steps is a *partial result*, not a
-            # tool failure — hand the parent a note so it can decide how
-            # to proceed (vs. RunCancelledError, deliberately not caught:
-            # a cancel tears the whole run down, so it must propagate).
+            # A child that runs out of steps is a *partial result*, not
+            # a tool failure — emit a partial-progress trajectory + meta
+            # so the parent can see how much budget was burned.
+            outcome = "max_steps"
+            raised_max_steps = True
             logger.info(
                 "subagent.max_steps name=%s agent_ref=%s",
                 self.subagent.name,
                 self.subagent.agent_ref,
             )
+        except RunCancelledError:
+            # Cancellation tears the whole run down — must re-raise. But
+            # Mini-ADR J-21 still wants the child's partial trajectory in
+            # ObjectStore so J.13 eval can replay every sub-run, including
+            # cancelled ones. Fire the dispatch (non-blocking) before
+            # bubbling.
+            partial_msgs, partial_steps = await self._fetch_partial(child.graph, child_config)
+            self._dispatch_trajectory(
+                tenant_id=ctx.tenant_id,
+                user_id=ctx.user_id,
+                sub_thread_id=sub_thread_id,
+                sub_run_id=sub_run_id,
+                outcome="cancelled",
+                messages=partial_msgs,
+                started_at=started_at,
+                finished_at=datetime.now(UTC),
+                step_count=partial_steps,
+            )
+            raise
+
+        wall_clock_ms = int((time.monotonic() - start_monotonic) * 1000)
+        finished_at = datetime.now(UTC)
+        if result is not None and isinstance(result, Mapping):
+            messages: Sequence[BaseMessage] = list(result.get("messages", []))
+            step_count = int(result.get("step_count", 0) or 0)
+        else:
+            messages, step_count = await self._fetch_partial(child.graph, child_config)
+
+        llm_call_count = sum(1 for msg in messages if isinstance(msg, AIMessage))
+
+        self._dispatch_trajectory(
+            tenant_id=ctx.tenant_id,
+            user_id=ctx.user_id,
+            sub_thread_id=sub_thread_id,
+            sub_run_id=sub_run_id,
+            outcome=outcome,
+            messages=messages,
+            started_at=started_at,
+            finished_at=finished_at,
+            step_count=step_count,
+        )
+
+        meta: dict[str, Any] = {
+            "subagent": self.subagent.name,
+            "iteration_used": step_count,
+            "llm_call_count": llm_call_count,
+            "wall_clock_ms": wall_clock_ms,
+        }
+
+        if raised_max_steps:
+            meta["subagent_max_steps"] = True
             return ToolResult(
                 content=(
                     f"[sub-agent {self.subagent.name!r} reached its step "
                     "limit before producing a final answer]"
                 ),
-                meta={"subagent_max_steps": True},
+                meta=meta,
             )
 
-        messages = result.get("messages", []) if isinstance(result, Mapping) else []
         answer = _final_answer(messages)
         if answer is None:
+            meta["subagent_empty"] = True
             return ToolResult(
                 content=f"[sub-agent {self.subagent.name!r} produced no answer]",
-                meta={"subagent_empty": True},
+                meta=meta,
             )
-        return ToolResult(content=answer, meta={"subagent": self.subagent.name})
+        return ToolResult(content=answer, meta=meta)
+
+    async def _fetch_partial(
+        self, graph: Any, config: RunnableConfig
+    ) -> tuple[list[BaseMessage], int]:
+        """Best-effort read of a partial child state — Mini-ADR J-21.
+
+        Used by the ``RunCancelledError`` and ``max_steps`` paths where
+        the child's ``ainvoke`` did not return a final state dict but the
+        checkpointer still holds whatever the child managed to write.
+        Mirrors the safe-fetch pattern in ``orchestrator.sse``.
+        """
+        aget_state = getattr(graph, "aget_state", None)
+        if aget_state is None:
+            return [], 0
+        try:
+            snapshot = await aget_state(config)
+        except Exception as exc:
+            logger.warning(
+                "subagent.fetch_partial_failed name=%s err=%s",
+                self.subagent.name,
+                type(exc).__name__,
+            )
+            return [], 0
+        values = getattr(snapshot, "values", None)
+        if not isinstance(values, Mapping):
+            return [], 0
+        msgs = list(values.get("messages", []))
+        step_count = int(values.get("step_count", 0) or 0)
+        return msgs, step_count
+
+    def _dispatch_trajectory(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID | None,
+        sub_thread_id: UUID,
+        sub_run_id: UUID,
+        outcome: TrajectoryOutcome,
+        messages: Sequence[BaseMessage],
+        started_at: datetime,
+        finished_at: datetime,
+        step_count: int,
+    ) -> None:
+        """Schedule a fire-and-forget L7 trajectory write for the child run.
+
+        Mini-ADR J-21: each sub-agent run lands its own ObjectStore object
+        under ``{prefix}/{tenant_id}/{outcome}/{YYYY}/{MM}/{DD}/{sub_thread_id}.jsonl``
+        so J.13 eval can replay every node in the delegation tree
+        independently. ``None`` recorder makes the dispatch a no-op.
+        """
+        recorder = self.trajectory_recorder
+        if recorder is None:
+            return
+        record = TrajectoryRecord(
+            thread_id=sub_thread_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            run_id=sub_run_id,
+            outcome=outcome,
+            messages=list(messages),
+            started_at=started_at,
+            finished_at=finished_at,
+            step_count=step_count,
+            metadata={
+                "subagent_name": self.subagent.name,
+                "subagent_ref": self.subagent.agent_ref,
+                "child_depth": self.child_depth,
+            },
+        )
+        task = asyncio.create_task(_record_subagent_safe(recorder, record))
+        _BACKGROUND_TRAJECTORY_TASKS.add(task)
+        task.add_done_callback(_BACKGROUND_TRAJECTORY_TASKS.discard)
 
     def _require_task(self, args: Mapping[str, Any]) -> str:
         raw = args.get("task")
@@ -190,26 +360,51 @@ class SubAgentTool:
             raise ValueError(msg)
         return raw.strip()
 
-    def _child_config(self, ctx: ToolContext) -> RunnableConfig:
+    def _child_config(
+        self,
+        ctx: ToolContext,
+        *,
+        sub_thread_id: UUID,
+        sub_run_id: UUID,
+    ) -> RunnableConfig:
         """Build the child run's ``RunnableConfig``.
 
-        The child gets a fresh ``thread_id`` / ``run_id`` (delegation is
-        one-shot — the child run never resumes) but **shares the parent's**
-        ``CancellationToken``, so a parent cancel reaches every child node.
-        ``tenant_id`` / ``user_id`` carry over so the child's own tools
-        stay tenant-scoped. Linking the child run to the parent for audit
-        is the control-plane's job (Stream J.4 PR5).
+        ``sub_thread_id`` / ``sub_run_id`` are generated by :meth:`call`
+        so the L7 trajectory dispatch (Mini-ADR J-21) keys on the same
+        UUIDs the child's checkpointer uses. The child **shares the
+        parent's** ``CancellationToken``, so a parent cancel reaches
+        every child node. ``tenant_id`` / ``user_id`` carry over so the
+        child's own tools stay tenant-scoped. Linking the child run to
+        the parent for audit is the control-plane's job (Stream J.4 PR5).
         """
         token = ctx.cancellation_token or CancellationToken()
         configurable: dict[str, Any] = {
             CANCELLATION_TOKEN_KEY: token,
-            "thread_id": str(uuid4()),
-            "run_id": str(uuid4()),
+            "thread_id": str(sub_thread_id),
+            "run_id": str(sub_run_id),
             "tenant_id": str(ctx.tenant_id),
         }
         if ctx.user_id is not None:
             configurable["user_id"] = str(ctx.user_id)
         return {"configurable": configurable}
+
+
+async def _record_subagent_safe(recorder: TrajectoryRecorder, record: TrajectoryRecord) -> None:
+    """Background body for :meth:`SubAgentTool._dispatch_trajectory`.
+
+    Wraps :meth:`TrajectoryRecorder.record` in a wall-clock cap so a slow
+    ObjectStore put can't keep the task alive indefinitely; the recorder
+    itself already swallows transport errors so this deadline is the
+    outer guard.
+    """
+    try:
+        async with asyncio.timeout(_TRAJECTORY_DISPATCH_TIMEOUT_S):
+            await recorder.record(record)
+    except (TimeoutError, asyncio.CancelledError):
+        logger.warning(
+            "subagent.trajectory_dispatch_timeout name=%s",
+            record.metadata.get("subagent_name", "?"),
+        )
 
 
 def _final_answer(messages: Sequence[BaseMessage]) -> str | None:

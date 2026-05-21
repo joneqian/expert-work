@@ -41,6 +41,7 @@ from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
 from orchestrator.tools.subagent import MAX_SUBAGENT_DEPTH, ChildAgentBuilder, SubAgentTool
 from orchestrator.tools.vision import AskImageTool
 from orchestrator.tools.web_search import DEFAULT_MAX_RESULTS, TavilyClient, WebSearchTool
+from orchestrator.trajectory import TrajectoryRecorder
 
 if TYPE_CHECKING:
     # Imported under TYPE_CHECKING only to avoid an ``llm → tools`` cycle.
@@ -88,6 +89,12 @@ class ToolEnv:
     #: ``ask_image`` tool) draw on it; ``None`` → no image input is
     #: available in this deployment.
     image_resolver: ImageResolver | None = None
+    #: Mini-ADR J-21 — when set, sub-agent runs write their own trajectory
+    #: under ``{prefix}/{tenant}/{outcome}/{date}/{sub_thread_id}.jsonl``
+    #: so J.13 eval can replay every node in a delegation tree. ``None``
+    #: keeps sub-agent runs silent — the parent run's own trajectory still
+    #: records via the orchestrator's SSE worker.
+    trajectory_recorder: TrajectoryRecorder | None = None
 
 
 async def build_tool_registry(
@@ -218,7 +225,12 @@ def _register_subagents(
     child_depth = subagent_depth + 1
     for sub in subagents:
         registry.register(
-            SubAgentTool(subagent=sub, builder=env.child_agent_builder, child_depth=child_depth)
+            SubAgentTool(
+                subagent=sub,
+                builder=env.child_agent_builder,
+                child_depth=child_depth,
+                trajectory_recorder=env.trajectory_recorder,
+            )
         )
 
 

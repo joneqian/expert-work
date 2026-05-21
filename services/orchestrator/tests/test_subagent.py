@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
@@ -363,3 +364,203 @@ async def test_parent_delegates_to_child_through_real_graph() -> None:
     # The parent then reasoned over it and finished.
     assert isinstance(messages[-1], AIMessage)
     assert messages[-1].content == "PARENT DONE"
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-21 — sub-agent trajectory + budget telemetry
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _FakeRecorder:
+    """Captures :class:`TrajectoryRecord`\\s the SubAgentTool dispatches.
+
+    Mirrors the surface :meth:`SubAgentTool._dispatch_trajectory` consumes
+    so we can assert without a real ObjectStore. ``.record()`` is the only
+    method called.
+    """
+
+    records: list[Any] = field(default_factory=list)
+
+    async def record(self, record: Any) -> None:
+        self.records.append(record)
+
+
+@dataclass
+class _StatefulGraph:
+    """``_FakeGraph`` with a stub ``aget_state`` so the J-21 partial-fetch
+    path has something to read after a max_steps / cancellation."""
+
+    result: dict[str, Any] | None = None
+    raises: BaseException | None = None
+    snapshot_values: dict[str, Any] | None = None
+    calls: list[tuple[Any, Any]] = field(default_factory=list)
+
+    async def ainvoke(self, state: Any, config: Any) -> Any:
+        self.calls.append((state, config))
+        if self.raises is not None:
+            raise self.raises
+        return self.result
+
+    async def aget_state(self, config: Any) -> Any:
+        del config
+        values = self.snapshot_values or {}
+
+        @dataclass
+        class _Snapshot:
+            values: dict[str, Any]
+
+        return _Snapshot(values=values)
+
+
+@pytest.mark.asyncio
+async def test_call_emits_budget_telemetry_on_success() -> None:
+    """Mini-ADR J-21 — successful child run writes the three counters."""
+    graph = _FakeGraph(
+        result={
+            "messages": [
+                HumanMessage(content="task"),
+                AIMessage(content="thinking"),
+                AIMessage(content="delegated answer"),
+            ],
+            "step_count": 4,
+        }
+    )
+    tool = SubAgentTool(
+        subagent=_SUB, builder=_RecordingBuilder(built=_built(graph)), child_depth=1
+    )
+
+    result = await tool.call({"task": "do research"}, ctx=_ctx())
+
+    assert result.meta["subagent"] == "researcher"
+    assert result.meta["iteration_used"] == 4
+    # Two AIMessages in the trajectory.
+    assert result.meta["llm_call_count"] == 2
+    assert isinstance(result.meta["wall_clock_ms"], int)
+    assert result.meta["wall_clock_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_call_dispatches_trajectory_on_success() -> None:
+    """Mini-ADR J-21 — the L7 record lands with outcome=success + sub_thread_id."""
+    msgs = [HumanMessage(content="task"), AIMessage(content="delegated answer")]
+    graph = _FakeGraph(result={"messages": msgs, "step_count": 2})
+    recorder = _FakeRecorder()
+    tool = SubAgentTool(
+        subagent=_SUB,
+        builder=_RecordingBuilder(built=_built(graph)),
+        child_depth=2,
+        trajectory_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+
+    # Let the fire-and-forget task drain.
+    await asyncio.sleep(0)
+    assert len(recorder.records) == 1
+    rec = recorder.records[0]
+    assert rec.outcome == "success"
+    assert rec.step_count == 2
+    assert rec.metadata["subagent_name"] == "researcher"
+    assert rec.metadata["subagent_ref"] == "deep-researcher@1.0.0"
+    assert rec.metadata["child_depth"] == 2
+    # sub_thread_id keyed by the same UUID the child_config used.
+    _state, child_config = graph.calls[0]
+    assert str(rec.thread_id) == child_config["configurable"]["thread_id"]
+    assert str(rec.run_id) == child_config["configurable"]["run_id"]
+    # Parent meta still carries the answer.
+    assert result.content == "delegated answer"
+
+
+@pytest.mark.asyncio
+async def test_call_dispatches_trajectory_on_max_steps() -> None:
+    """Mini-ADR J-21 — max_steps lands as outcome=max_steps + partial messages."""
+    partial_msgs = [HumanMessage(content="task"), AIMessage(content="partial think")]
+    graph = _StatefulGraph(
+        raises=MaxStepsExceededError(step_count=5, max_steps=5),
+        snapshot_values={"messages": partial_msgs, "step_count": 5},
+    )
+    recorder = _FakeRecorder()
+    tool = SubAgentTool(
+        subagent=_SUB,
+        builder=_RecordingBuilder(built=_built(graph)),  # type: ignore[arg-type]
+        child_depth=1,
+        trajectory_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+
+    await asyncio.sleep(0)
+    assert result.meta["subagent_max_steps"] is True
+    assert result.meta["iteration_used"] == 5
+    assert result.meta["llm_call_count"] == 1
+    assert len(recorder.records) == 1
+    assert recorder.records[0].outcome == "max_steps"
+    assert recorder.records[0].step_count == 5
+
+
+@pytest.mark.asyncio
+async def test_call_dispatches_trajectory_on_cancellation() -> None:
+    """Mini-ADR J-21 — cancellation still dispatches outcome=cancelled before re-raising."""
+    partial_msgs = [HumanMessage(content="task")]
+    graph = _StatefulGraph(
+        raises=RunCancelledError("run cancelled"),
+        snapshot_values={"messages": partial_msgs, "step_count": 1},
+    )
+    recorder = _FakeRecorder()
+    tool = SubAgentTool(
+        subagent=_SUB,
+        builder=_RecordingBuilder(built=_built(graph)),  # type: ignore[arg-type]
+        child_depth=1,
+        trajectory_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RunCancelledError):
+        await tool.call({"task": "x"}, ctx=_ctx())
+
+    await asyncio.sleep(0)
+    assert len(recorder.records) == 1
+    assert recorder.records[0].outcome == "cancelled"
+    assert recorder.records[0].step_count == 1
+
+
+@pytest.mark.asyncio
+async def test_call_without_recorder_still_emits_telemetry() -> None:
+    """Mini-ADR J-21 — ``trajectory_recorder=None`` is valid; meta still carries
+    the budget counters, no ObjectStore writes."""
+    graph = _FakeGraph(result={"messages": [AIMessage(content="answer")], "step_count": 1})
+    tool = SubAgentTool(
+        subagent=_SUB,
+        builder=_RecordingBuilder(built=_built(graph)),
+        child_depth=1,
+        trajectory_recorder=None,
+    )
+
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+
+    assert result.meta["iteration_used"] == 1
+    assert result.meta["llm_call_count"] == 1
+    assert "wall_clock_ms" in result.meta
+
+
+@pytest.mark.asyncio
+async def test_call_partial_fetch_handles_missing_aget_state() -> None:
+    """Graphs without ``aget_state`` fall back to empty messages on max_steps."""
+    graph = _FakeGraph(raises=MaxStepsExceededError(step_count=3, max_steps=3))
+    recorder = _FakeRecorder()
+    tool = SubAgentTool(
+        subagent=_SUB,
+        builder=_RecordingBuilder(built=_built(graph)),
+        child_depth=1,
+        trajectory_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+    await asyncio.sleep(0)
+
+    assert result.meta["subagent_max_steps"] is True
+    # No messages → no AIMessage → 0 LLM calls; iteration_used falls back to 0.
+    assert result.meta["llm_call_count"] == 0
+    assert result.meta["iteration_used"] == 0
+    assert recorder.records[0].outcome == "max_steps"
+    assert recorder.records[0].messages == []
