@@ -12,7 +12,7 @@ _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
-from run_baseline import (  # noqa: E402
+from run_baseline import (  # type: ignore[import-not-found]  # noqa: E402
     _RUNNERS,
     run_baseline,
 )
@@ -44,8 +44,8 @@ def test_runner_registry_has_fourteen_capabilities() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_baseline_produces_seven_pass_seven_deferred(tmp_path: Path) -> None:
-    """J.13a-2 scope: 7 shipped capabilities PASS; remaining 7 DEFERRED."""
+async def test_run_baseline_produces_eight_pass_six_deferred(tmp_path: Path) -> None:
+    """J.4-补强 lands eval too: 8 shipped capabilities PASS; remaining 6 DEFERRED."""
     out = tmp_path / "baseline.yaml"
     reports = await run_baseline(out_path=out)
 
@@ -60,9 +60,10 @@ async def test_run_baseline_produces_seven_pass_seven_deferred(tmp_path: Path) -
         "J.1_plan_execute",
         "J.2_reflect",
         "J.3_memory_recall",
+        "J.4_sub_agent",
         "J.6_multimodal",
     ]
-    assert len(deferred_caps) == 7
+    assert len(deferred_caps) == 6
     assert all(r.status != "FAIL" for r in reports.values())
 
 
@@ -87,9 +88,13 @@ async def test_baseline_yaml_layout_is_stable(tmp_path: Path) -> None:
     assert j3["score"]["mrr_at_5"] >= 0.55
 
     j4 = payload["capabilities"]["J.4_sub_agent"]
-    assert j4["status"] == "DEFERRED"
-    assert j4["score"] == {}
-    assert "deferred_reason" in j4
+    assert j4["status"] == "PASS"
+    assert j4["score"]["pass_rate"] >= 0.80
+
+    j5 = payload["capabilities"]["J.5_rag"]
+    assert j5["status"] == "DEFERRED"
+    assert j5["score"] == {}
+    assert "deferred_reason" in j5
 
     j1 = payload["capabilities"]["J.1_plan_execute"]
     assert j1["status"] == "PASS"

@@ -1,0 +1,150 @@
+# J.4 sub-agent — M0 baseline dataset (Stream J.13a).
+#
+# 8 cases driving SubAgentTool against scripted child runs:
+#   - 4 success: clean delegation / multi-LLM-call / empty answer / large step_count
+#   - 2 max_steps: partial result + trajectory dispatch outcome=max_steps
+#   - 1 cancelled: RunCancelledError re-raises after trajectory dispatch
+#   - 1 no-recorder: meta still emits, no trajectory dispatch
+#
+# Threshold pass-rate ≥ 0.80 (§ 18.3); achievable = 1.00 (all deterministic).
+
+name: sub_agent-m0-baseline
+
+cases:
+  # ---------- success (4) ----------
+  - id: success-001-clean-delegation
+    scenario: success
+    scripted_messages:
+      - role: human
+        content: investigate X
+      - role: ai
+        content: delegated answer for X
+    scripted_step_count: 1
+    has_recorder: true
+    expected_outcome_label: success
+    expected_content_contains: "delegated answer"
+    expected_iteration_used: 1
+    expected_llm_call_count: 1
+    expected_trajectory_dispatched: true
+
+  - id: success-002-multi-llm-call
+    scenario: success
+    scripted_messages:
+      - role: human
+        content: do research
+      - role: ai
+        content: thinking
+      - role: human
+        content: tool result
+      - role: ai
+        content: thinking more
+      - role: ai
+        content: final research summary
+    scripted_step_count: 5
+    has_recorder: true
+    expected_outcome_label: success
+    expected_content_contains: "final research summary"
+    expected_iteration_used: 5
+    expected_llm_call_count: 3
+    expected_trajectory_dispatched: true
+
+  - id: success-003-empty-answer
+    # Child run returns messages with no terminal AIMessage — SubAgentTool
+    # surfaces a placeholder note and meta carries subagent_empty.
+    scenario: success
+    scripted_messages:
+      - role: human
+        content: task
+    scripted_step_count: 1
+    has_recorder: true
+    expected_outcome_label: success
+    expected_content_contains: "no answer"
+    expected_iteration_used: 1
+    expected_llm_call_count: 0
+    expected_meta_flags:
+      - subagent_empty
+    expected_trajectory_dispatched: true
+
+  - id: success-004-large-step-count
+    scenario: success
+    scripted_messages:
+      - role: human
+        content: complex task
+      - role: ai
+        content: very thorough completion
+    scripted_step_count: 12
+    has_recorder: true
+    expected_outcome_label: success
+    expected_content_contains: "thorough"
+    expected_iteration_used: 12
+    expected_llm_call_count: 1
+    expected_trajectory_dispatched: true
+
+  # ---------- max_steps (2) ----------
+  - id: max-steps-001-partial-note
+    scenario: max_steps
+    scripted_messages:
+      - role: human
+        content: long task
+      - role: ai
+        content: partial thinking
+    scripted_step_count: 5
+    has_recorder: true
+    expected_outcome_label: max_steps
+    expected_content_contains: "step limit"
+    expected_iteration_used: 5
+    expected_llm_call_count: 1
+    expected_meta_flags:
+      - subagent_max_steps
+    expected_trajectory_dispatched: true
+
+  - id: max-steps-002-empty-partial-state
+    # max_steps with no AIMessage emitted yet — partial fetch returns the
+    # human turn only.
+    scenario: max_steps
+    scripted_messages:
+      - role: human
+        content: barely started
+    scripted_step_count: 3
+    has_recorder: true
+    expected_outcome_label: max_steps
+    expected_content_contains: "step limit"
+    expected_iteration_used: 3
+    expected_llm_call_count: 0
+    expected_meta_flags:
+      - subagent_max_steps
+    expected_trajectory_dispatched: true
+
+  # ---------- cancelled (1) ----------
+  - id: cancelled-001-propagates-after-dispatch
+    # Cancellation re-raises but Mini-ADR J-21 says trajectory still
+    # dispatches (outcome=cancelled) before propagation.
+    scenario: cancelled
+    scripted_messages:
+      - role: human
+        content: doomed task
+    scripted_step_count: 1
+    has_recorder: true
+    expected_outcome_label: cancelled
+    expected_content_contains: ""  # cancelled — no result content
+    expected_iteration_used: 0
+    expected_llm_call_count: 0
+    expected_trajectory_dispatched: true
+
+  # ---------- no recorder (1) ----------
+  - id: no-recorder-001-meta-still-emits
+    # Mini-ADR J-21 — recorder=None is valid; meta still has budget but
+    # no trajectory dispatch should fire.
+    scenario: success
+    scripted_messages:
+      - role: human
+        content: task
+      - role: ai
+        content: ok
+    scripted_step_count: 2
+    has_recorder: false
+    expected_outcome_label: success
+    expected_content_contains: "ok"
+    expected_iteration_used: 2
+    expected_llm_call_count: 1
+    expected_trajectory_dispatched: false
