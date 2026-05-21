@@ -88,8 +88,14 @@ class ToolContext:
 #: via :attr:`ToolResult.state_updates`. Limiting the set prevents a tool
 #: from inadvertently rewriting unrelated channels (``messages``,
 #: ``step_count`` …); add a key here when a new tool needs to mutate a
-#: specific channel. Today only ``plan`` (Stream J.1 / K.K8 ``update_plan``).
-TOOL_ALLOWED_STATE_KEYS: frozenset[str] = frozenset({"plan"})
+#: specific channel.
+#:
+#: Channels:
+#: - ``plan`` — Stream J.1 / K.K8 ``update_plan``
+#: - ``subagent_invocations`` — Stream J.4-补强-2 / Mini-ADR J-40
+#:   ``SubAgentTool`` appends one :class:`SubAgentInvocation` per
+#:   delegation outcome (the state.py channel uses ``operator.add``).
+TOOL_ALLOWED_STATE_KEYS: frozenset[str] = frozenset({"plan", "subagent_invocations"})
 
 
 @dataclass(frozen=True)

@@ -564,3 +564,136 @@ async def test_call_partial_fetch_handles_missing_aget_state() -> None:
     assert result.meta["iteration_used"] == 0
     assert recorder.records[0].outcome == "max_steps"
     assert recorder.records[0].messages == []
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-40 — sub-agent invocation entries in ToolResult.state_updates
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_call_emits_invocation_on_success() -> None:
+    """Mini-ADR J-40 — success path emits SubAgentInvocation with status=COMPLETED."""
+    from helix_agent.protocol import SubagentStatus
+
+    graph = _FakeGraph(
+        result={
+            "messages": [
+                HumanMessage(content="task"),
+                AIMessage(content="delegated answer"),
+            ],
+            "step_count": 2,
+        }
+    )
+    tool = SubAgentTool(
+        subagent=_SUB, builder=_RecordingBuilder(built=_built(graph)), child_depth=2
+    )
+
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+
+    invocations = result.state_updates.get("subagent_invocations")
+    assert isinstance(invocations, list) and len(invocations) == 1
+    inv = invocations[0]
+    assert inv.status is SubagentStatus.COMPLETED
+    assert inv.name == "researcher"
+    assert inv.agent_ref == "deep-researcher@1.0.0"
+    assert inv.child_depth == 2
+    assert inv.result_excerpt == "delegated answer"
+    assert inv.error is None
+    assert inv.iteration_used == 2
+    assert inv.llm_call_count == 1
+    assert inv.wall_clock_ms >= 0
+    # task_id matches sub_run_id used in child_config
+    _state, child_config = graph.calls[0]
+    assert str(inv.task_id) == child_config["configurable"]["run_id"]
+    assert str(inv.sub_thread_id) == child_config["configurable"]["thread_id"]
+
+
+@pytest.mark.asyncio
+async def test_call_emits_invocation_on_max_steps() -> None:
+    """Mini-ADR J-40 — max_steps path emits SubAgentInvocation with status=FAILED + error."""
+    from helix_agent.protocol import SubagentStatus
+
+    graph = _StatefulGraph(
+        raises=MaxStepsExceededError(step_count=5, max_steps=5),
+        snapshot_values={
+            "messages": [HumanMessage(content="task"), AIMessage(content="partial")],
+            "step_count": 5,
+        },
+    )
+    tool = SubAgentTool(
+        subagent=_SUB,
+        builder=_RecordingBuilder(built=_built(graph)),  # type: ignore[arg-type]
+        child_depth=1,
+    )
+
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+
+    invocations = result.state_updates.get("subagent_invocations")
+    assert len(invocations) == 1
+    inv = invocations[0]
+    assert inv.status is SubagentStatus.FAILED
+    assert inv.iteration_used == 5
+    assert inv.llm_call_count == 1
+    assert "step limit" in (inv.error or "")
+    assert inv.result_excerpt == ""
+
+
+@pytest.mark.asyncio
+async def test_call_emits_invocation_on_empty_answer() -> None:
+    """Status=COMPLETED with empty result_excerpt when child produced no AIMessage."""
+    from helix_agent.protocol import SubagentStatus
+
+    graph = _FakeGraph(result={"messages": [HumanMessage(content="task")], "step_count": 1})
+    tool = SubAgentTool(
+        subagent=_SUB, builder=_RecordingBuilder(built=_built(graph)), child_depth=1
+    )
+
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+
+    invocations = result.state_updates.get("subagent_invocations")
+    assert len(invocations) == 1
+    assert invocations[0].status is SubagentStatus.COMPLETED
+    assert invocations[0].result_excerpt == ""
+    assert result.meta.get("subagent_empty") is True
+
+
+@pytest.mark.asyncio
+async def test_cancellation_does_not_emit_invocation() -> None:
+    """Cancelled path raises before state_updates is built — parent state
+    sees no entry; L7 trajectory still records the cancelled sub-run (PR #220)."""
+    graph = _StatefulGraph(
+        raises=RunCancelledError("run cancelled"),
+        snapshot_values={"messages": [HumanMessage(content="task")], "step_count": 1},
+    )
+    recorder = _FakeRecorder()
+    tool = SubAgentTool(
+        subagent=_SUB,
+        builder=_RecordingBuilder(built=_built(graph)),  # type: ignore[arg-type]
+        child_depth=1,
+        trajectory_recorder=recorder,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(RunCancelledError):
+        await tool.call({"task": "x"}, ctx=_ctx())
+
+    # No state_updates because no ToolResult was returned; L7 trajectory
+    # still captured the cancelled outcome for J.13 eval.
+    await asyncio.sleep(0)
+    assert recorder.records[0].outcome == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_state_updates_uses_allowlisted_key() -> None:
+    """The state_updates key must be ``subagent_invocations`` so the
+    tools_node TOOL_ALLOWED_STATE_KEYS check lets it through."""
+    from orchestrator.tools.registry import TOOL_ALLOWED_STATE_KEYS
+
+    assert "subagent_invocations" in TOOL_ALLOWED_STATE_KEYS
+
+    graph = _FakeGraph(result={"messages": [AIMessage(content="ok")], "step_count": 1})
+    tool = SubAgentTool(
+        subagent=_SUB, builder=_RecordingBuilder(built=_built(graph)), child_depth=1
+    )
+    result = await tool.call({"task": "x"}, ctx=_ctx())
+    assert set(result.state_updates).issubset(TOOL_ALLOWED_STATE_KEYS)

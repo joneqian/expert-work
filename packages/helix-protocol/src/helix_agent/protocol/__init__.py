@@ -91,6 +91,11 @@ from helix_agent.protocol.service_account import (
     RoleBinding,
     ServiceAccount,
 )
+from helix_agent.protocol.subagent import (
+    MAX_RESULT_EXCERPT_CHARS,
+    SubAgentInvocation,
+    SubagentStatus,
+)
 from helix_agent.protocol.tenant_config import (
     TenantConfigPatch,
     TenantConfigRecord,
@@ -104,6 +109,7 @@ __all__ = [
     "API_KEY_STORED_PREFIX_LEN",
     "DEFAULT_CHUNK_MAX_TOKENS",
     "DEFAULT_CHUNK_OVERLAP_TOKENS",
+    "MAX_RESULT_EXCERPT_CHARS",
     "AgentMetadata",
     "AgentSpec",
     "AgentSpecBody",
@@ -171,7 +177,9 @@ __all__ = [
     "RoutingSpec",
     "SandboxSpec",
     "ServiceAccount",
+    "SubAgentInvocation",
     "SubAgentSpec",
+    "SubagentStatus",
     "SubjectType",
     "SystemPromptSpec",
     "TenantBudgetRecord",

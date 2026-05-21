@@ -24,7 +24,7 @@ from typing import Annotated, NotRequired, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
-from helix_agent.protocol import MemoryItem, Plan, Reflection
+from helix_agent.protocol import MemoryItem, Plan, Reflection, SubAgentInvocation
 from orchestrator.tools.mutation_classifier import MutationOutcome
 
 #: Default ReAct hard limit — see Mini-ADR E-6 in the design doc + the
@@ -71,6 +71,17 @@ class AgentState(TypedDict):
     cannot claim success on those paths, and resets the channel to
     ``[]``. Defaults to empty; tools_node only writes when at least
     one mutation failed.
+
+    ``subagent_invocations`` (Stream J.4-补强-2 / Mini-ADR J-40)
+    accumulates one
+    :class:`~helix_agent.protocol.subagent.SubAgentInvocation` per
+    SubAgentTool delegation — every outcome path (success / max_steps /
+    cancelled / future timed_out) appends a terminal-state row via the
+    ``operator.add`` reducer. Lets the parent's LangGraph checkpoint
+    carry the full delegation history (audit + J.13 eval replay), and
+    feeds future M2-B fan-in aggregation (iteration_used sum /
+    llm_call_count sum / wall_clock_ms max). Absent unless the manifest
+    declares ``subagents``.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -81,3 +92,4 @@ class AgentState(TypedDict):
     recalled_memories: NotRequired[list[MemoryItem]]
     step_count_refund_pending: NotRequired[int]
     failed_mutations: NotRequired[list[MutationOutcome]]
+    subagent_invocations: NotRequired[Annotated[list[SubAgentInvocation], add]]

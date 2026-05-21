@@ -33,7 +33,13 @@ from uuid import UUID, uuid4
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import SubAgentSpec, parse_agent_ref
+from helix_agent.protocol import (
+    MAX_RESULT_EXCERPT_CHARS,
+    SubAgentInvocation,
+    SubAgentSpec,
+    SubagentStatus,
+    parse_agent_ref,
+)
 from helix_agent.runtime.cancellation import (
     CANCELLATION_TOKEN_KEY,
     CancellationToken,
@@ -262,24 +268,103 @@ class SubAgentTool:
             "wall_clock_ms": wall_clock_ms,
         }
 
+        answer = _final_answer(messages)
         if raised_max_steps:
             meta["subagent_max_steps"] = True
-            return ToolResult(
+            return self._build_tool_result(
                 content=(
                     f"[sub-agent {self.subagent.name!r} reached its step "
                     "limit before producing a final answer]"
                 ),
                 meta=meta,
+                status=SubagentStatus.FAILED,
+                sub_thread_id=sub_thread_id,
+                sub_run_id=sub_run_id,
+                result_excerpt="",
+                error=f"reached step limit before producing a final answer ({step_count} steps)",
+                started_at=started_at,
+                finished_at=finished_at,
+                iteration_used=step_count,
+                llm_call_count=llm_call_count,
+                wall_clock_ms=wall_clock_ms,
             )
 
-        answer = _final_answer(messages)
         if answer is None:
             meta["subagent_empty"] = True
-            return ToolResult(
+            return self._build_tool_result(
                 content=f"[sub-agent {self.subagent.name!r} produced no answer]",
                 meta=meta,
+                status=SubagentStatus.COMPLETED,
+                sub_thread_id=sub_thread_id,
+                sub_run_id=sub_run_id,
+                result_excerpt="",
+                error=None,
+                started_at=started_at,
+                finished_at=finished_at,
+                iteration_used=step_count,
+                llm_call_count=llm_call_count,
+                wall_clock_ms=wall_clock_ms,
             )
-        return ToolResult(content=answer, meta=meta)
+
+        return self._build_tool_result(
+            content=answer,
+            meta=meta,
+            status=SubagentStatus.COMPLETED,
+            sub_thread_id=sub_thread_id,
+            sub_run_id=sub_run_id,
+            result_excerpt=answer[:MAX_RESULT_EXCERPT_CHARS],
+            error=None,
+            started_at=started_at,
+            finished_at=finished_at,
+            iteration_used=step_count,
+            llm_call_count=llm_call_count,
+            wall_clock_ms=wall_clock_ms,
+        )
+
+    def _build_tool_result(
+        self,
+        *,
+        content: str,
+        meta: dict[str, Any],
+        status: SubagentStatus,
+        sub_thread_id: UUID,
+        sub_run_id: UUID,
+        result_excerpt: str,
+        error: str | None,
+        started_at: datetime,
+        finished_at: datetime,
+        iteration_used: int,
+        llm_call_count: int,
+        wall_clock_ms: int,
+    ) -> ToolResult:
+        """Build the terminal :class:`ToolResult` with the Mini-ADR J-40
+        ``SubAgentInvocation`` appended to ``state_updates``.
+
+        Cancellation does **not** go through here — it re-raises before a
+        ToolResult is built (the parent run tears down anyway). The L7
+        trajectory dispatch in :meth:`call` still records the cancelled
+        sub-run for J.13 eval replay.
+        """
+        invocation = SubAgentInvocation(
+            task_id=sub_run_id,
+            sub_thread_id=sub_thread_id,
+            name=self.subagent.name,
+            agent_ref=self.subagent.agent_ref,
+            child_depth=self.child_depth,
+            status=status,
+            result_excerpt=result_excerpt,
+            error=error,
+            started_at=started_at,
+            finished_at=finished_at,
+            iteration_used=iteration_used,
+            llm_call_count=llm_call_count,
+            wall_clock_ms=wall_clock_ms,
+        )
+        return ToolResult(
+            content=content,
+            meta=meta,
+            state_updates={"subagent_invocations": [invocation]},
+        )
 
     async def _fetch_partial(
         self, graph: Any, config: RunnableConfig
