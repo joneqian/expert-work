@@ -573,9 +573,21 @@ class ArtifactVersionRow(Base):             # 表 artifact_version —— 每个
 
 ## 11. J.4 — Sub-agent / 多智能体
 
+> **2026-05-21 J.4-补强-2 设计 PR**：原 § 11.2 写"M0 是父→子单向、**顺序**委派树，并行扇出推 M0 后"——按 [memory:complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md) + [memory:no-design-choice-disguise](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_no_design_choice_disguise.md) 红线，"顺序"是把弱能力包装成设计选择：子 agent 之间彼此独立（不共享 sandbox session），理论可并发但 L.L6 `plan_stages` 因 `is_read_only=False` 拆 stage 串行，是工程实现限制而非设计意图。本次设计修订 + 新增 Mini-ADR J-40：M0 内交付真正的并行 fan-out（asyncio.gather + cycle detection + global deadline + fan-in 聚合 + AgentState 扩展），原 M2-B 推迟取消。
+
 ### 11.1 现状
 
-单体 agent,无委派。复杂任务无法拆给专长子 agent。
+J.4 核心 5 PR 已交付（#151 / #152 / #154 / #220 / #221）：
+- agent-as-tool 顺序委派 + `CancellationToken` 穿透
+- `MAX_SUBAGENT_DEPTH=3` 结构化递归终止
+- Mini-ADR J-21 trajectory 单独记录 + budget telemetry（`iteration_used` / `llm_call_count` / `wall_clock_ms` 入 `ToolResult.meta`）
+- J.4 eval 8 case PASS
+
+未交付（J.4-补强-2 范围）：
+- 并行 fan-out（父 LLM 一轮调 N 个 SubAgentTool 真正并发执行）
+- 构建期 cycle detection（即使深度未达 `MAX_SUBAGENT_DEPTH`，A→B→A 应拒绝）
+- Global deadline 经 config 传播（父建立，子继承不重置）
+- Fan-in 聚合（N 子 outcome 入父 `AgentState.subagent_invocations` 通道，含 6 态 `SubagentStatus`）
 
 ### 11.2 设计与边界
 
@@ -583,9 +595,13 @@ class ArtifactVersionRow(Base):             # 表 artifact_version —— 每个
 - 子 agent 用 `agent_factory.build_agent()` 递归装配,拿独立 `run_id`;子 `thread_id` 由父 `run_id` + 工具 `call_id` 派生。
 - **隔离与安全**：父的 `CancellationToken` 经 `ToolContext.cancellation_token` 穿透到子（复用现有协作式取消链)。
 - **成本护栏走结构化,非 token 预算** —— helix 没有运行期 token 预算（只有月级 `TokenBudgetLedger` + 事后 `TokenReservation` 记账),故原计划"父预算下钻、子拿 30%"移除。改用:递归深度 ≤ `MAX_SUBAGENT_DEPTH`(3) × 每 agent `workflow.max_iterations` —— 全递归树 LLM 调用数结构化有界。
-- **深度在构建期计数**：`build_agent(subagent_depth=...)`,顶层 depth=0;depth 达上限的 agent 构建时**不注册任何 `SubAgentTool`**(结构化递归终止)。跨 manifest 环(A↔B)由此兜底。
+- **深度在构建期计数**：`build_agent(subagent_depth=...)`,顶层 depth=0;depth 达上限的 agent 构建时**不注册任何 `SubAgentTool`**(结构化递归终止)。
+- **构建期 cycle detection**（Mini-ADR J-40，2026-05-21 新增）：`agent_factory.build_agent` 经 `spec_store` DFS 遍历 `subagents.agent_ref`，发现 A→B→A 这类环立刻抛 `AgentFactoryError("sub-agent delegation cycle detected: A → B → A")`。深度上限作纵深防御保留。
 - **`ChildAgentBuilder` 回调**:orchestrator 无法解析 `agent_ref`(`AgentSpecStore` 只在 control-plane)。control-plane 注入一个 `async (*, tenant_id, name, version, depth) -> BuiltAgent` 回调进 `ToolEnv`,内部 `AgentSpecStore.get` + 递归 `build_agent` + 深度键缓存。
-- **边界**：M0 是父→子单向、**顺序**委派树,不做子 agent 间横向通信 / 黑板协作;并行扇出、子进度 SSE 流式推迟 M0 后。
+- **并行 fan-out**（Mini-ADR J-40，2026-05-21 新增）：父 LLM 一轮发 N 个 SubAgentTool 调用时，`SubAgentTool.spec.is_parallel_safe=True` 让 L.L6 `plan_stages` 把它们放同一 stage；同 stage 内 `asyncio.gather(return_exceptions=True)` + 复用 `MAX_TOOL_WORKERS=5` 信号量并发执行。`return_exceptions=True` 而非 `TaskGroup`——一个子失败不连带 cancel 兄弟，让父 LLM 看 partial 结果。
+- **Global deadline**：父 manifest 可选 `policies.run_deadline_s`；`sse.run_agent` 算 `deadline_at = monotonic + deadline_s` 经 `config["configurable"]["deadline_at"]` 传播；`ToolContext.deadline_at` 透出给 `SubAgentTool.call()`，子 config 继承不重置（避免每层重置导致树深度乘以单子 deadline）。若 `deadline_at - monotonic() <= 0` 直接 `RunCancelledError`。
+- **Fan-in 聚合**：每个 SubAgentTool 还是返回 ToolResult（tools_node 收 N 个 ToolMessage 一起喂回 LLM），同时经 `ToolResult.state_updates` 写 `AgentState.subagent_invocations` 通道。父 state 中拿到 N 条 `SubAgentInvocation` 后：iteration_used 加总 / llm_call_count 加总 / wall_clock_ms **取 max**（并行 wall clock 不能加总）/ status 6 态各 entry 自带。
+- **边界**：仍不做子 agent 间横向通信 / 黑板协作；子 SSE 进度流推迟 M2-B；TIMED_OUT 由 global deadline 触发后映射，非主动调度。
 
 ### 11.3 接口与数据模型
 
@@ -597,15 +613,60 @@ class SubAgentSpec(BaseModel):              # AgentSpecBody.subagents 的条目
 
 MAX_SUBAGENT_DEPTH = 3
 ChildAgentBuilder = async (*, tenant_id, name, version, depth) -> BuiltAgent
+
+
+# 2026-05-21 J.4-补强-2 新增（packages/helix-protocol/.../subagent.py）
+class SubagentStatus(StrEnum):              # 6 态，DeerFlow 2.0 同款
+    PENDING = "pending"                     # 已派工，未开始执行
+    RUNNING = "running"                     # 执行中
+    COMPLETED = "completed"                 # 成功完成
+    FAILED = "failed"                       # 工具层异常（非取消、非超时）
+    CANCELLED = "cancelled"                 # 取消（父或全局 deadline 触发）
+    TIMED_OUT = "timed_out"                 # 超过 global deadline
+
+@dataclass(frozen=True)
+class SubAgentInvocation:                   # AgentState.subagent_invocations 元素
+    task_id: UUID                           # sub_run_id（PR #220 已生成）
+    sub_thread_id: UUID                     # PR #220 已生成
+    name: str                               # SubAgentSpec.name
+    agent_ref: str                          # SubAgentSpec.agent_ref（含 version）
+    child_depth: int
+    status: SubagentStatus
+    result_excerpt: str                     # 子答案截断（≤ N 字，避免长文本入 state）
+    error: str | None                       # FAILED / TIMED_OUT 时填
+    started_at: datetime
+    finished_at: datetime | None
+    iteration_used: int                     # 同 PR #220 meta
+    llm_call_count: int
+    wall_clock_ms: int
+
+# AgentState（services/orchestrator/.../state.py）扩展通道
+class AgentState(TypedDict):
+    # ... 既有通道 ...
+    subagent_invocations: Annotated[list[SubAgentInvocation], add]   # operator.add 拼接
+
+# ToolContext（services/orchestrator/.../tools/registry.py）扩展
+@dataclass(frozen=True)
+class ToolContext:
+    # ... 既有字段 ...
+    deadline_at: float | None = None         # time.monotonic 时间戳，跨层继承不重置
+
+# ToolSpec（services/orchestrator/.../tools/registry.py）扩展
+@dataclass(frozen=True)
+class ToolSpec:
+    # ... 既有字段 ...
+    is_parallel_safe: bool = False           # True → plan_stages 允许同 stage 并发
 ```
 
 校验(`AgentSpec._check_subagents`):拒绝自引用(子 `agent_ref` 指向本 agent)、重复工具名、与已声明 builtin 工具名冲突;`agent_ref` 必须 `name@version` 格式。
 
-`SubAgentTool(Tool)`：`call()` 内经 `ChildAgentBuilder` 构建子 agent → `child_graph.ainvoke(...)`(同步跑在工具 `call()` 内)→ 子 run 末条 `AIMessage` 作 `ToolResult.content` 回父。
+构建期 cycle detection（`agent_factory._detect_subagent_cycle`）：从父 manifest `subagents` 出发，递归 resolve `agent_ref` 经 `spec_store`，以"访问中"/"已完成"双集合做 DFS——访问中节点被再次访问即环。
+
+`SubAgentTool(Tool)`：`spec.is_parallel_safe=True`；`call()` 内经 `ChildAgentBuilder` 构建子 agent → 检查 `ctx.deadline_at` → `child_graph.ainvoke(...)` → 子 run 末条 `AIMessage` 作 `ToolResult.content` 回父；同时 emit `SubAgentInvocation` 到 `ToolResult.state_updates["subagent_invocations"]`。
 
 ### 11.4 整合点
 
-`tools/`（`SubAgentTool` + `ChildAgentBuilder` 协议 + `_register_subagents`）、`agent_factory.py`（`build_agent(subagent_depth=)` 递归装配 + depth 上限）、`tools/registry.py`（`ToolContext.cancellation_token`）、`control-plane`（`make_child_agent_builder` + 深度键缓存 + lifespan 接线）、`helix-protocol` `SubAgentSpec`。
+`tools/`（`SubAgentTool` + `ChildAgentBuilder` 协议 + `_register_subagents`）、`agent_factory.py`（`build_agent(subagent_depth=)` 递归装配 + depth 上限 + cycle detection）、`tools/registry.py`（`ToolContext.cancellation_token` + `ToolContext.deadline_at` + `ToolSpec.is_parallel_safe` + `TOOL_ALLOWED_STATE_KEYS` 加 `subagent_invocations`）、`graph_builder/builder.py`（`plan_stages` 支持 `is_parallel_safe` 并发调度）、`state.py`（`subagent_invocations` 通道）、`sse.py`（`deadline_at` 经 config 注入）、`control-plane`（`make_child_agent_builder` + 深度键缓存 + lifespan 接线）、`helix-protocol`（`SubAgentSpec` + `SubagentStatus` + `SubAgentInvocation`）。
 
 > **对标**：deer-flow `subagents/executor.py`、hermes `delegate_tool`。helix 取 agent-as-tool —— 与现有 `ToolRegistry` 无缝;委派即工具调用,自动获得现有的取消 / 预算 / 审计基建。
 
@@ -1174,6 +1235,15 @@ capabilities:
 
 **J-39｜J.13a LLM-judge 模型 = Haiku 4.5 + temperature=0.0 + N=3 重跑**
 背景：LLM-judge provider 选型直接影响 baseline 成本 / 稳定性。决策：(1) judge 模型 `claude-haiku-4-5-20251001`（Haiku 4.5）—— 90% 大模型质量、3x 成本优势，M0 周跑 ~7 能力 × ~20 case × 3 重跑 ≈ 420 调用 judge cost 可承受；(2) `temperature=0.0` 强制 judge 确定性，否则 baseline 抖动违背"baseline 是锚点"语义；(3) N=3 重跑 + 多数票（pass-rate）/ 平均（连续值）作为 flakiness 缓解 M0 最小版本；(4) judge 走独立 `ModelSpec.role="eval_judge"`，不与生产 model 路由 / fallback 链耦合；(5) CI 内不跑真 judge（mock provider），周跑用真 judge。取舍：(c) 红线 —— judge 选型直接决定 baseline 可信度，必须显式锁定模型 ID + 参数；judge cost 不能成为不跑 baseline 的理由（用 Haiku 而非 Opus）；J.13c 升级到 confidence interval 是这条 ADR 的演进路径。
+
+---
+
+### 2026-05-21 J.4-补强-2 设计 PR 补充（J-40）
+
+> J.4 核心 5 PR 已交付（#151 / #152 / #154 / #220 / #221）；本 ADR 把原"并行 fan-out 推 M2-B"反向：M0 内交付。背景是用户阅读 DeerFlow 2.0 断点续跑文章后提出"现阶段把能力做强、不推 M2"——两 Explore agent 验证 DeerFlow 真相（线程池 + 父 tool 串行轮询，并非 asyncio.gather 并发）+ 审 helix-agent gap（`AgentState` 不存 sub-agent 调用历史、L.L6 `plan_stages` 因 `is_read_only=False` 串行）。修订 § 11 并加本 ADR。
+
+**J-40｜J.4 并行 fan-out + cycle detection + global deadline + fan-in 聚合（提前到 M0）**
+背景：J-12 / J-21 原文明确"M0 是顺序委派树，并行扇出推 M2-B"。这是把"工程实现限制"包装成"设计选择"——子 agent 之间彼此独立（不共享 sandbox session、各拿独立 thread_id / run_id），理论可并发但 L.L6 `plan_stages` 因 `ToolSpec.is_read_only=False` 把每个 SubAgentTool 拆 stage 串行执行。按 [[no-design-choice-disguise]] 不允许"弱能力 = 设计意图"。决策：M0 内交付五项：(1) `ToolSpec.is_parallel_safe: bool = False` 新字段，`SubAgentTool.spec.is_parallel_safe = True`，`plan_stages` 同 stage 收集 `is_parallel_safe=True` 的 tool_calls 经 `asyncio.gather(return_exceptions=True)` 并发跑（复用 L.L6 `MAX_TOOL_WORKERS=5` 信号量）；(2) `agent_factory._detect_subagent_cycle` 构建期 DFS 经 `spec_store` 拒环（A→B→A 即使深度未达 `MAX_SUBAGENT_DEPTH` 也立刻抛 `AgentFactoryError`，深度上限作纵深保留）；(3) Global deadline 经 `config["configurable"]["deadline_at"]` + `ToolContext.deadline_at` 跨层传播（父建立、子继承不重置），子超时直接 `RunCancelledError`；(4) Fan-in 聚合：每个 SubAgentTool emit `SubAgentInvocation` 经 `ToolResult.state_updates` 写新通道 `AgentState.subagent_invocations`（`Annotated[list[SubAgentInvocation], add]` reducer，参照 `reflections`）；新增 6 态 `SubagentStatus` 枚举（`PENDING / RUNNING / COMPLETED / FAILED / CANCELLED / TIMED_OUT`）+ `SubAgentInvocation` frozen dataclass 入 `helix-protocol`；(5) 错误语义：`return_exceptions=True` 让一个子失败不连带 cancel 兄弟（父 LLM 看 partial 结果），父 cancel → 所有在跑子收取消传播 + invocation 全标 cancelled。取舍：(c) 红线 —— "顺序"意味着 N 个子委派 wall_clock 加总（用户感知 N 倍延迟），无法做 multi-agent orchestration 任何形式；M0 用户场景虽暂时不暴露 N 路并发委派需求，但 canonical agent (per-user 持久 agent) 与 J.10 trigger / J.8 HITL 一旦组合就会需要并发委派，等 M2-B 重做的成本远高于 M0 内做（要回头改已上线 SubAgentTool 接口 + tools_node 调度）。设计先行（[[design-first-iteration]]），4-PR 拆分见 ITERATION-PLAN J.4 行。
 
 ---
 
