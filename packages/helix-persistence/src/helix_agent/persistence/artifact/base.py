@@ -130,6 +130,41 @@ class ArtifactStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def update_kind(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+        kind: ArtifactKind,
+    ) -> Artifact | None:
+        """Mini-ADR J-25 — change the artifact's ``kind``.
+
+        Returns the updated row on success. Returns ``None`` when the
+        name is unknown / soft-deleted / cross-user (callers turn that
+        into 404 — same hiding rule as :meth:`get_latest_version`).
+        Idempotent: passing the current ``kind`` is a successful no-op
+        that still returns the row.
+        """
+
+    @abc.abstractmethod
+    async def list_versions(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+    ) -> list[ArtifactVersion] | None:
+        """Mini-ADR J-25 — every version of one logical artifact, newest first.
+
+        Returns ``None`` when the parent artifact is unknown / soft-deleted
+        / cross-user (callers turn that into 404 — same hiding rule).
+        Returning ``[]`` would conflate "artifact exists with no
+        versions" (impossible — versions are created on save) with
+        "artifact doesn't exist"; ``None`` keeps the two distinguishable.
+        """
+
+    @abc.abstractmethod
     async def hard_delete(self, *, artifact_ids: Sequence[UUID]) -> int:
         """Remove the named artifact rows + their version rows.
 

@@ -1,8 +1,17 @@
-"""``GET /v1/artifacts`` — Stream J.9 artifact list + content download.
+"""``/v1/artifacts`` — Stream J.9 artifact list / download / delete / patch / versions.
 
-Artifacts are per-``(tenant, user)`` (Mini-ADR J-1). The list endpoint
-returns the caller's artifacts' metadata; the download endpoint streams
-one artifact's latest-version content.
+Artifacts are per-``(tenant, user)`` (Mini-ADR J-1). The endpoints
+collectively expose:
+
+* ``GET /v1/artifacts`` — list the caller's artifacts.
+* ``GET /v1/artifacts/download?name=…`` — stream the latest version's
+  content (MIME-aware + XSS-safe Content-Disposition; J.9-step3,
+  STREAM-J-DESIGN § 10.5).
+* ``DELETE /v1/artifacts/{name}`` — soft-delete (J.9-step3, Mini-ADR
+  J-25). Lifecycle is metadata-only; the J.15 volume bytes stay until
+  the retention sweep / volume lifecycle removes them.
+* ``PATCH /v1/artifacts/{name}`` — update ``kind`` (J.9-step3).
+* ``GET /v1/artifacts/{name}/versions`` — version history (J.9-step3).
 
 Content lives in the user's J.15 workspace volume — only the
 sandbox-supervisor can read a docker volume, so the download endpoint
@@ -14,22 +23,45 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Annotated
+import urllib.parse
+from datetime import UTC, datetime
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, ConfigDict
 
+from control_plane.api._artifact_mime import infer_content_type
 from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
+from control_plane.audit import emit as audit_emit
 from control_plane.quota.base import QuotaService
+from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import ArtifactStore
 from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
+from helix_agent.protocol import ArtifactKind, AuditAction, AuditResult
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.tools import SandboxSupervisorError, SupervisorClient
 
 logger = logging.getLogger("helix.control_plane.artifacts")
+
+#: Allowed values for ``PATCH``'s ``kind`` field — kept narrow on purpose.
+_ARTIFACT_KINDS: frozenset[str] = frozenset({"document", "code", "data", "other"})
+
+
+class _ArtifactPatchBody(BaseModel):
+    """Mutable fields the PATCH endpoint accepts.
+
+    M0 only takes ``kind`` — the rest of the row is immutable user
+    data. Future fields (description / category / tags) land in M1
+    with a corresponding schema bump.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: ArtifactKind
 
 
 def _get_artifact_store(request: Request) -> ArtifactStore:
@@ -46,6 +78,21 @@ def _get_quota(request: Request) -> QuotaService:
 
 def _get_audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
+
+
+def _content_disposition_header(filename: str, *, disposition: str) -> str:
+    """RFC 6266 ``Content-Disposition`` with both ASCII fallback + utf-8.
+
+    ``filename=`` carries an ASCII-safe approximation (replacing
+    anything outside printable ASCII with ``_``) for legacy clients;
+    ``filename*=UTF-8''…`` carries the percent-encoded original.
+    Quoting the ASCII fallback escapes embedded quotes (defence
+    against a CR/LF / quote in the artifact name leaking into the
+    header).
+    """
+    ascii_safe = "".join(c if 32 <= ord(c) < 127 and c != '"' else "_" for c in filename)
+    encoded = urllib.parse.quote(filename, safe="")
+    return f"{disposition}; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}"
 
 
 def build_artifacts_router() -> APIRouter:
@@ -94,11 +141,16 @@ def build_artifacts_router() -> APIRouter:
         )
         if version is None:
             raise HTTPException(status_code=404, detail="artifact not found")
-        # Mini-ADR J-25 (J.9-step2) — quota admission. Deducts ``cost=1``
-        # from QPS + ``ARTIFACT_DOWNLOAD_COUNT_30D`` (only the dimensions
-        # a tenant has rows for run; others are no-ops). 429 on denial.
-        # Storage-bytes is not deducted here: it's a save-side concern
-        # and ships with the orchestrator quota plumbing in a later step.
+        # Re-fetch the parent row to know the ``kind`` for MIME inference.
+        artifacts = await store.list_for_user(tenant_id=tenant_id, user_id=caller_user_id)
+        artifact = next((a for a in artifacts if a.name == name), None)
+        if artifact is None:
+            # Defensive — would mean a version exists but its parent does
+            # not, which the store invariants forbid.
+            raise HTTPException(status_code=404, detail="artifact not found")
+        # Mini-ADR J-25 (J.9-step2) — quota admission. ``cost=1`` deducts
+        # from QPS + ``ARTIFACT_DOWNLOAD_COUNT_30D`` (only the
+        # dimensions a tenant has rows for run; others are no-ops).
         actor_id: str = getattr(request.state, "actor_id", "anonymous")
         denial = await check_admission(
             quota=quota,
@@ -135,6 +187,143 @@ def build_artifacts_router() -> APIRouter:
                 size_bytes=len(data),
                 sha256=hashlib.sha256(data).hexdigest(),
             )
-        return Response(content=data, media_type="application/octet-stream")
+        # Mini-ADR J-25 (J.9-step3, STREAM-J-DESIGN § 10.5) — MIME +
+        # XSS-safe disposition. Active content (HTML / SVG / etc.) is
+        # always sent ``attachment`` regardless of how the kind / path
+        # are spelled; unknown extensions fall through to
+        # ``application/octet-stream`` + attachment.
+        inferred = infer_content_type(kind=artifact.kind, path=version.path_in_workspace)
+        headers = {
+            "Content-Disposition": _content_disposition_header(
+                artifact.name, disposition=inferred.disposition
+            ),
+            "X-Content-Type-Options": "nosniff",
+        }
+        return Response(content=data, media_type=inferred.content_type, headers=headers)
+
+    @router.delete("/{name:path}", response_model=None)
+    async def delete_artifact(
+        name: str,
+        request: Request,
+        store: Annotated[ArtifactStore, Depends(_get_artifact_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Mini-ADR J-25 — soft-delete one artifact (metadata only).
+
+        Hides the row from list / download / versions; the J.15 volume
+        bytes remain until the retention sweep hard-deletes the row, or
+        the user re-saves the same name (which un-deletes).
+        """
+        tenant_id: UUID = request.state.tenant_id
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if caller_user_id is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        current_user_id_var.set(caller_user_id)
+        hit = await store.soft_delete(
+            tenant_id=tenant_id, user_id=caller_user_id, name=name, now=datetime.now(UTC)
+        )
+        # Hides cross-user / already-deleted / unknown behind the same 404.
+        if not hit:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.ARTIFACT_DELETE,
+            resource_type="artifact",
+            resource_id=name,
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={"user_id": str(caller_user_id)},
+        )
+        return JSONResponse(status_code=200, content={"deleted": name})
+
+    @router.patch("/{name:path}", response_model=None)
+    async def patch_artifact(
+        name: str,
+        body: _ArtifactPatchBody,
+        request: Request,
+        store: Annotated[ArtifactStore, Depends(_get_artifact_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Mini-ADR J-25 — update an artifact's mutable fields (M0: ``kind``).
+
+        Returns 404 when the name is unknown / soft-deleted /
+        cross-user (same hiding rule as the other endpoints). Returns
+        409 when ``kind`` is unchanged so callers know the PATCH was a
+        no-op and can stop retrying.
+        """
+        if body.kind not in _ARTIFACT_KINDS:
+            # FastAPI already validated this against the ``ArtifactKind``
+            # Literal — guard kept for the rare future divergence.
+            raise HTTPException(status_code=422, detail="invalid kind")
+        tenant_id: UUID = request.state.tenant_id
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if caller_user_id is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        current_user_id_var.set(caller_user_id)
+        updated = await store.update_kind(
+            tenant_id=tenant_id, user_id=caller_user_id, name=name, kind=body.kind
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.ARTIFACT_UPDATE,
+            resource_type="artifact",
+            resource_id=name,
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={"user_id": str(caller_user_id), "kind": body.kind},
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "name": updated.name,
+                "kind": updated.kind,
+                "latest_version": updated.latest_version,
+            },
+        )
+
+    @router.get("/{name:path}/versions", response_model=None)
+    async def list_versions(
+        name: str,
+        request: Request,
+        store: Annotated[ArtifactStore, Depends(_get_artifact_store)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+    ) -> JSONResponse:
+        """Mini-ADR J-25 — version history for one artifact.
+
+        Sorted newest-first; soft-deleted artifacts return 404 (same
+        hiding rule). Each entry exposes the per-version metadata —
+        ``size_bytes`` / ``sha256`` may still be NULL when the version
+        has never been downloaded (lazy backfill).
+        """
+        tenant_id: UUID = request.state.tenant_id
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if caller_user_id is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        current_user_id_var.set(caller_user_id)
+        versions = await store.list_versions(tenant_id=tenant_id, user_id=caller_user_id, name=name)
+        if versions is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        items: list[dict[str, Any]] = [
+            {
+                "version": v.version,
+                "path_in_workspace": v.path_in_workspace,
+                "size_bytes": v.size_bytes,
+                "sha256": v.sha256,
+                "created_in_thread": v.created_in_thread,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+            }
+            for v in versions
+        ]
+        return JSONResponse(content={"name": name, "versions": items})
 
     return router

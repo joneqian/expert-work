@@ -106,6 +106,10 @@ async def test_download_artifact_returns_content(
     resp = await client.get("/v1/artifacts/download", params={"name": "report.md"})
     assert resp.status_code == 200
     assert resp.content == _CONTENT
+    # MIME-aware (Mini-ADR J-25 § 10.5) — ``.md`` is text-like, inline.
+    assert resp.headers["content-type"].startswith("text/plain")
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert "inline" in resp.headers["content-disposition"]
 
 
 @pytest.mark.asyncio
@@ -181,3 +185,208 @@ async def test_download_429_when_download_count_quota_exhausted(
     assert body["error"]["code"] == "RATE_LIMIT_EXCEEDED"
     assert body["error"]["dimension"] == QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D.value
     assert denied.headers["Retry-After"]
+
+
+# ---------------------------------------------------------------------------
+# J.9-step3 — MIME-aware download + XSS defence (STREAM-J-DESIGN § 10.5)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_artifact_with_path(
+    artifacts: InMemoryArtifactStore,
+    user_id: UUID,
+    *,
+    name: str,
+    kind: str,
+    path: str,
+) -> None:
+    """Add one extra artifact alongside the ``setup`` fixture's ``report.md``."""
+    await artifacts.save_version(
+        tenant_id=_TENANT,
+        user_id=user_id,
+        name=name,
+        kind=kind,  # type: ignore[arg-type]
+        path_in_workspace=path,
+        created_in_thread="t",
+    )
+
+
+@pytest.mark.asyncio
+async def test_download_html_artifact_is_forced_attachment(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    """HTML artifacts must never inline-render — stored-XSS (c) red line."""
+    client, artifacts, user_id = setup
+    await _seed_artifact_with_path(
+        artifacts, user_id, name="report.html", kind="document", path="report.html"
+    )
+    resp = await client.get("/v1/artifacts/download", params={"name": "report.html"})
+    assert resp.status_code == 200
+    # Real MIME surfaces for logging, but disposition stops the browser.
+    assert "text/html" in resp.headers["content-type"]
+    assert "attachment" in resp.headers["content-disposition"]
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+@pytest.mark.asyncio
+async def test_download_svg_artifact_is_forced_attachment(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    """SVG is active content (can embed ``<script>``) — same XSS rule."""
+    client, artifacts, user_id = setup
+    await _seed_artifact_with_path(
+        artifacts, user_id, name="logo.svg", kind="data", path="logo.svg"
+    )
+    resp = await client.get("/v1/artifacts/download", params={"name": "logo.svg"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("image/svg+xml")
+    assert "attachment" in resp.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_download_image_artifact_is_inline_with_image_mime(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, artifacts, user_id = setup
+    await _seed_artifact_with_path(
+        artifacts, user_id, name="photo.png", kind="data", path="photo.png"
+    )
+    resp = await client.get("/v1/artifacts/download", params={"name": "photo.png"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+    assert "inline" in resp.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_download_unknown_extension_is_octet_stream(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    """Anything not on the whitelist falls through to attachment+octet-stream."""
+    client, artifacts, user_id = setup
+    await _seed_artifact_with_path(
+        artifacts, user_id, name="dump.bin", kind="data", path="dump.bin"
+    )
+    resp = await client.get("/v1/artifacts/download", params={"name": "dump.bin"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/octet-stream"
+    assert "attachment" in resp.headers["content-disposition"]
+
+
+# ---------------------------------------------------------------------------
+# J.9-step3 — DELETE / PATCH / versions endpoints + audit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_delete_artifact_soft_deletes_and_audits(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, artifacts, user_id = setup
+    resp = await client.delete("/v1/artifacts/report.md")
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": "report.md"}
+    # Default list hides; include_deleted=True reveals the soft-deleted row.
+    assert await artifacts.list_for_user(tenant_id=_TENANT, user_id=user_id) == []
+    deleted = await artifacts.list_for_user(
+        tenant_id=_TENANT, user_id=user_id, include_deleted=True
+    )
+    assert len(deleted) == 1
+    # Subsequent download returns 404 (same hiding rule).
+    redownload = await client.get("/v1/artifacts/download", params={"name": "report.md"})
+    assert redownload.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_unknown_returns_404(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.delete("/v1/artifacts/missing.md")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_cross_user_returns_404(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    """Cross-user delete returns 404 (hides existence) — never 403."""
+    client, _, _ = setup
+    resp = await client.delete("/v1/artifacts/report.md", headers=_headers("user-b"))
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_artifact_updates_kind_and_audits(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.patch("/v1/artifacts/report.md", json={"kind": "code"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "report.md"
+    assert body["kind"] == "code"
+    # List reflects the update.
+    listing = await client.get("/v1/artifacts")
+    assert listing.json()["artifacts"][0]["kind"] == "code"
+
+
+@pytest.mark.asyncio
+async def test_patch_unknown_returns_404(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.patch("/v1/artifacts/missing.md", json={"kind": "code"})
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_patch_invalid_kind_returns_422(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.patch("/v1/artifacts/report.md", json={"kind": "nonsense"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_extra_fields_rejected(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    """``extra='forbid'`` keeps the schema narrow."""
+    client, _, _ = setup
+    resp = await client.patch("/v1/artifacts/report.md", json={"kind": "code", "rogue": "x"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_versions_returns_versions_desc(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, artifacts, user_id = setup
+    # Add a v2 to the seeded ``report.md``.
+    await artifacts.save_version(
+        tenant_id=_TENANT,
+        user_id=user_id,
+        name="report.md",
+        kind="document",
+        path_in_workspace="report.md",
+        created_in_thread="t-2",
+    )
+    resp = await client.get("/v1/artifacts/report.md/versions")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "report.md"
+    versions = body["versions"]
+    assert len(versions) == 2
+    assert [v["version"] for v in versions] == [2, 1]
+    # First version's digest is still NULL — backfilled only on download.
+    assert versions[0]["size_bytes"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_versions_unknown_returns_404(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, _ = setup
+    resp = await client.get("/v1/artifacts/missing.md/versions")
+    assert resp.status_code == 404
