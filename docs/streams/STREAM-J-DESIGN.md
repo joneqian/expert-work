@@ -16,6 +16,8 @@
 
 > **2026-05-20 J.15 设计 PR**：探查 sandbox-supervisor 现状发现 **§ 9.1 "已落地"声明属实** —— 热会话 + TTL reaper + named volume 创建 + 持久 100% 已交付（supervisor.py + reaper.py + 迁移 0018/0020）。真正待做的是 J-29（quota + backup + encryption）+ J-36（volume lifecycle，新增）共 4 项 M0 补强。本次设计 PR：(1) § 9.1 改写明确"已落地 vs 待做"基线；(2) § 9.5 新增 4 子节详化 J-29 + J-36 实施设计；(3) § 19 新增 Mini-ADR J-36 volume lifecycle 三档。后续 J.15-补强-1 PR（quota + lifecycle）+ J.15-补强-2 PR（backup + 加密文档）按本设计实施。
 
+> **2026-05-21 J.13a 设计 PR**：原 § 18 是"四点纲领"骨架（Mini-ADR J-20）；J-28 已先于本 PR 把 J.13 拆为 J.13a M0 / J.13b M1 / J.13c M1。本次 PR：(1) § 18 全文重写按 J-28 落实 J.13a 实施设计 —— 7 已交付能力（J.1 / J.2 / J.3 / J.6 / J.11 / J.14 / J.15）各定 eval module + dataset + metric + threshold，8 个 deferred 能力写 skeleton stub；(2) § 19 新增 Mini-ADR J-37（per-cap metric 类型矩阵）+ J-38（baseline 文件 = checked-in YAML + 能力 PR 同步更新）+ J-39（LLM-judge 模型选型 Haiku 4.5 + temperature=0.0 + N=3 重跑）；(3) baseline 制品锁定路径 `tools/eval/baselines/m0_gate_baseline.yaml`，Stream M Gate Exit Criteria 直接读它。后续 J.13a 实施 PR 按本设计执行；J.13b / J.13c 在 § 18.7 仅占位，M1 早期或并入 M2-D 再展开。
+
 ---
 
 ## 1. 范围 & 边界
@@ -853,26 +855,173 @@ class EvalDatasetRow(Base):                 # 表 eval_dataset(J.13 共用)
 
 ---
 
-## 18. J.13 — eval 强化
+## 18. J.13 — eval 强化（J-28 拆分后展开为 J.13a M0 / J.13b M1 / J.13c M1）
+
+> **2026-05-21 J.13a 设计 PR**：原 § 18 是"四点纲领"骨架（Mini-ADR J-20）；J-28 已先把 J.13 拆为三子项。本节展开 J.13a 实施设计；J.13b / J.13c 在 § 18.7 仅占位。
 
 ### 18.1 现状
 
-`tools/eval`（G.4 离线 harness）+ G.5 golden/regression 集 —— 三参考项目里最有意的 eval 故事,但 M0 为骨架级。
+`tools/eval` 已落地两层基建 + L7 提供"线上 trajectory → 离线 dataset"上游底座：
 
-### 18.2 设计与边界
+- **G.4 通用 harness**（`tools/eval/helix_eval.py`）：prompt + machine-checkable assertions（`contains` / `regex` / `equals` / `not_contains`）+ mock provider（CI 内零 LLM 依赖）+ 可插 `complete(prompt) -> str` 真 LLM provider。
+- **K12 memory recall 模板**（`tools/eval/memory_recall.py` + `datasets/memory_recall/zh_en_seed.yaml`）：per-capability evaluator 范式 —— 可插 Embedder + Store，输出 `recall@k` / `mrr@k`，已含 zh + en 各 4 case seed。
+- **L7 trajectory ObjectStore**（PR #202）：完整 messages 按 outcome 分流（success / error / cancelled / timeout）落 ObjectStore — J.13a 离线 eval 的"线上 trajectory → 策划 dataset"上游底座，J.12 负责策划环节。
 
-J.13 排**最后**,评估并落实升级（Mini-ADR J-20）：
+骨架已可用，缺的是**两件事**：
+1. 没有 per-capability eval 场景集覆盖已交付的 7 个能力（J.1 / J.2 / J.3 / J.6 / J.11 / J.14 / J.15）—— Stream M Gate 缺锚点。
+2. 没有 baseline 制品文件 —— 每周跑分数没地方"落"，回归无对照。
 
-1. **逐能力 eval 场景**：给 J.1–J.14 每项写 eval 场景（规划质量 / 反思有效性 / 记忆召回 / sub-agent 委派正确性 / 隔离不泄漏 …）—— 这是"26 维矩阵无缺口"的判定依据。
-2. **在线采样 eval**：生产 run 按比例采样 → 自动跑评分（LLM-as-judge / 规则）→ 进 dashboard。
-3. **CI 回归门**：golden/regression 集（含 J.12 策划的 `eval_dataset`）跑进 CI,回归即红。
-4. eval-set 格式统一到 J.12 的 `eval_dataset` 表。
+### 18.2 设计与边界（J-28 拆分确认）
 
-### 18.3 整合点
+J.13 按 Mini-ADR J-28 拆 3 子项，**M0 内仅交付 J.13a**：
 
-`tools/eval`（G.4 harness 升级）、`eval_dataset` 模型（J.12 共用)、CI（`.github/workflows/ci.yml` 加 eval 回归 job 或并入现有 `Test` job)、observability（在线 eval 指标进 Grafana)。
+| 子项 | 范围 | 工期 | 推后判定 |
+|------|------|------|---------|
+| **J.13a 逐能力 eval 场景集 + baseline 制品** | 7 已交付能力各 1 个 eval module + 8 deferred 能力 skeleton stub + `tools/eval/run_baseline.py` aggregator + `tools/eval/baselines/m0_gate_baseline.yaml` checked-in 制品 + LLM-judge provider 配 Haiku 4.5 | M0 内 | (c) 红线 — 不达标 Stream M Gate 无锚点 |
+| **J.13b 在线采样 + LLM-judge 配额 + budget cap** | 生产 run 按比例采样 → LLM-judge 评分进 Grafana + per-tenant budget cap | M1 早期 / 并入 M2-D | (a) 独立 dashboard 范式，与离线 baseline 解耦 |
+| **J.13c CI 回归门 + flakiness 缓解** | baseline 分数进 CI（drift > 阈值即红）+ N 次重跑置信区间 + 软门 / 硬门拆分 | M1 早期 / 并入 M2-D | (b) M0 PR 节奏紧；软门设计需先观察 J.13b 真实 flakiness 数据 |
 
-> **对标**：三项目 eval 都弱。helix 借 G.4/G.5 已有基建,J.13 把它从骨架推到生产级 —— 这是 canonical agent 的度量工具,也是 Stream J 验收的尺子。
+M0 内 J.13a 严格按 (c) 红线交付：每个已交付能力都有 metric 落 baseline，不允许"覆盖率指标"代替"能力分数"。deferred 8 项写 skeleton stub（YAML 含 `status: DEFERRED` + 1 个 placeholder case + 对应 PR 锚 issue）—— 该能力 PR 着陆时把 stub 转实测。
+
+### 18.3 J.13a 范围 —— 已交付 7 能力的 eval 场景设计（Mini-ADR J-37）
+
+per-capability metric 类型按 Mini-ADR J-37 的"deterministic 优先、LLM-judge 限用"原则：
+
+| 能力 | metric 类型 | sample size (M0) | threshold | eval module | dataset |
+|------|------------|------------------|-----------|-------------|---------|
+| **J.1 plan_execute** | `pass-rate + llm-judge`（plan 结构合法 + LLM judge 任务覆盖度评分 1-5）| ≥ 20 case | pass-rate ≥ 0.80 / judge mean ≥ 4.0/5.0 | `tools/eval/plan_execute.py` | `datasets/plan_execute/m0_baseline.yaml` |
+| **J.2 reflect** | `pass-rate`（注入 bug seed 上 reflect 修正率 + 正确回答上不过度修正率）| ≥ 16 case（8 buggy + 8 correct）| 修正率 ≥ 0.75 / 假阳率 ≤ 0.20 | `tools/eval/reflect.py` | `datasets/reflect/m0_baseline.yaml` |
+| **J.3 long-term memory** | `recall@5` + `mrr@5`（沿用 K12 模板，扩 zh + en + 多语种混合 + episodic 各 8 case，共 32 case）| 32 case | recall@5 ≥ 0.70 / mrr@5 ≥ 0.55 | `tools/eval/memory_recall.py`（K12 已落，J.13a 仅扩 dataset） | `datasets/memory_recall/m0_baseline.yaml`（沿 zh_en_seed 扩） |
+| **J.6 multimodal** | `pass-rate`（Path A content block + Path B `ask_image` 各 1 套图像 keyword recall case，复用 mock 图像 fixture）| ≥ 12 case（Path A 6 + Path B 6）| pass-rate ≥ 0.80 per path | `tools/eval/multimodal.py` | `datasets/multimodal/m0_baseline.yaml` |
+| **J.11 model routing** | `pass-rate`（input → expected_route 选择正确率 + fallback 触发条件）| ≥ 16 case（plan / reflect / vision / default 四个步骤类别 × 4 fallback 触发） | pass-rate ≥ 0.95 | `tools/eval/model_routing.py` | `datasets/model_routing/m0_baseline.yaml` |
+| **J.14 per-user isolation** | `pass-rate`（cross-user query 拒绝率 + admin 旁路通过率 + machine identity 租户级通过率）| ≥ 12 case | pass-rate = 1.00（隔离类不容许部分通过） | `tools/eval/per_user_isolation.py` | `datasets/per_user_isolation/m0_baseline.yaml` |
+| **J.15 persistent volume** | `pass-rate`（cross-run 文件持久 + quota 拒绝 + lifecycle 状态机转换 + archive backup restore drill）| ≥ 10 case | pass-rate ≥ 0.90 | `tools/eval/persistent_volume.py` | `datasets/persistent_volume/m0_baseline.yaml` |
+
+**统一原则**：
+- 每个 eval module 一个 `evaluate_set(...) -> CapabilityReport` 入口 + 自有 metric dataclass；`run_baseline.py` 通过 `import` + 反射收集每个 module 的 `evaluate_set`。
+- mock provider 必须能跑（CI 内零 LLM 依赖）；real LLM provider 走 J-39 模型（Haiku 4.5）+ N=3 重跑取多数 / 平均。
+- 含 `not_implemented_yet: true` 字段的 case 跳过不算分（用于 deferred 能力的占位 case）。
+- 隔离类 metric（J.14）必须 pass-rate = 1.00 才算 PASS — 不允许"接近就行"。
+- LLM-judge 仅用在 J.1 plan_execute 任务覆盖度评分；其余能力都有 deterministic metric（pass-rate / recall@k）— 不为了用 judge 而用 judge。
+
+### 18.4 接口与数据模型
+
+**eval module 协议**（与现有 `helix_eval.py` / `memory_recall.py` 同结构）：
+
+```python
+# 每个 tools/eval/<capability>.py 必须 export 3 个符号
+async def evaluate_set(
+    cases: Sequence[CapabilityCase],
+    *,
+    judge: JudgeCompletionFn | None = None,
+    rerun_count: int = 3,
+) -> CapabilityReport:
+    """Run all cases through the capability harness; return aggregate + per-case."""
+
+@dataclass(frozen=True)
+class CapabilityReport:
+    capability: str                  # e.g. "J.1_plan_execute"
+    metric_type: str                 # see § 18.3 table
+    aggregate_score: dict[str, float]  # metric_name -> score（多 metric 可并列）
+    sample_size: int
+    threshold: dict[str, float]
+    status: Literal["PASS", "FAIL", "DEFERRED"]
+    per_case: tuple[CapabilityCaseResult, ...]
+
+def load_cases(path: Path) -> Sequence[CapabilityCase]:
+    """Parse the per-capability YAML dataset."""
+```
+
+**aggregator**：
+
+```python
+# tools/eval/run_baseline.py
+async def run_baseline(
+    *,
+    judge_model: str = "claude-haiku-4-5-20251001",
+    rerun_count: int = 3,
+    out_path: Path = Path("tools/eval/baselines/m0_gate_baseline.yaml"),
+) -> dict[str, CapabilityReport]:
+    """Discover every capability module under tools/eval/, run evaluate_set,
+    aggregate into the baseline file. M0 deferred capabilities emit
+    status: DEFERRED with empty score so the file shape is locked."""
+```
+
+**LLM-judge provider**：复用 `LLMRouter`（control-plane）的 `ModelSpec` 接口（不另起一套），但走独立 `ModelSpec.role="eval_judge"`，避免与生产 model 路由 / fallback 链耦合。
+
+### 18.5 baseline 文件格式（Mini-ADR J-38）
+
+```yaml
+# tools/eval/baselines/m0_gate_baseline.yaml
+# Checked into git. Refreshed weekly by tools/eval/run_baseline.py.
+# (manual run during M0; CI scheduled job after J.13c.)
+# Stream M Gate Exit Criteria reads this file directly.
+
+metadata:
+  generated_at: 2026-05-21T10:00:00Z
+  helix_commit: <sha>
+  judge_model: claude-haiku-4-5-20251001
+  judge_temperature: 0.0
+  rerun_count: 3
+  embedder: helix-fake-embedder-v1  # 或真 embedder 名
+
+capabilities:
+  J.1_plan_execute:
+    metric_type: pass-rate+llm-judge
+    sample_size: 20
+    threshold:
+      pass_rate: 0.80
+      judge_mean: 4.0
+    score:
+      pass_rate: 0.85
+      judge_mean: 4.2
+    status: PASS
+  # ...
+  J.3_memory_recall:
+    metric_type: recall@5+mrr@5
+    sample_size: 32
+    threshold:
+      recall_at_5: 0.70
+      mrr_at_5: 0.55
+    score:
+      recall_at_5_zh: 0.75
+      recall_at_5_en: 0.80
+      mrr_at_5_zh: 0.62
+      mrr_at_5_en: 0.68
+    status: PASS
+  J.4_sub_agent:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold: { pass_rate: 0.80 }
+    score: {}
+    status: DEFERRED
+    deferred_reason: "J.4 not yet shipped; placeholder case in dataset"
+```
+
+**生命周期**：
+- M0 周跑 → 手动执行 `python -m tools.eval.run_baseline` → 生成新 yaml 覆盖旧文件 → git commit
+- 每次能力 PR 着陆，**必须**在同一 PR 内重跑 + 更新 baseline 行（能力增加 = baseline 同步）
+- Stream M Gate 判定：每个非 `DEFERRED` 能力 `status: PASS`
+- J.13c 着陆时把"git commit 更新 baseline"改为"CI 周跑 job + drift 阈值告警"
+
+### 18.6 LLM-judge 选型（Mini-ADR J-39）
+
+| 选型 | 理由 |
+|------|------|
+| **Haiku 4.5（`claude-haiku-4-5-20251001`）作 judge** | 90% 大模型质量、3x 成本优势；M0 周跑 ~7 能力 × ~20 case × 3 重跑 ≈ 420 调用，judge cost 可承受；CI 不跑真 LLM（mock provider） |
+| `temperature=0.0` | judge 必须确定性，否则 baseline 抖动 |
+| N=3 重跑取多数（pass-rate）/ 平均（连续值）| flakiness 缓解 M0 最小版本；J.13c 升级到含 confidence interval + 偏离阈值告警 |
+| LLM-judge 范围严限于 J.1 plan_execute | 其他能力都有 deterministic metric（pass-rate / recall@k）；不"为用 judge 而用 judge"，judge 也会错 |
+
+### 18.7 整合点
+
+- **Stream M Gate**：`STREAM-M-DESIGN.md` § Exit Criteria 引用 `tools/eval/baselines/m0_gate_baseline.yaml` 的 `capabilities.*.status == PASS` 作为 Exit Criteria；J.13a baseline 是 M0 → M1 Gate 的硬锚点。
+- **J.13b**（M1）：在线采样 → judge 评分 → Grafana metric（per-tenant budget cap 接 Stream C.5 QuotaService）。本节仅占位；M1 早期 / 并入 M2-D 再展开。
+- **J.13c**（M1）：CI scheduled job 周跑 + drift > 10% 阈值即红 + N 次重跑取置信区间 + 软门 / 硬门拆分。本节仅占位。
+- **J.12 学习闭环**：J.12 策划后的 `eval_dataset` 行可作为 baseline dataset 的补充来源（人工 / 规则筛选 trajectory → 加入 baseline yaml）；J.12 自身工作不阻塞 J.13a。
+- **CI**：M0 内 J.13a 不进 CI 周跑（J.13c 才接）；M0 CI 内只跑 mock provider 单测，覆盖 harness 自身。
+
+> **对标**：三参考项目 eval 都弱。helix J.13a 把"逐能力 baseline 制品 + LLM-judge"两件事一次拉到生产级雏形 —— Stream M Gate 的尺子是这套 baseline yaml，不是体感。
 
 ---
 
@@ -1010,6 +1159,21 @@ J.13 排**最后**,评估并落实升级（Mini-ADR J-20）：
 
 **J-36｜J.15 volume lifecycle —— soft-delete → archive → hard delete 三档（M0 必含）**
 背景：原 § 9 设计只覆盖 volume 创建 + 挂载 + 热会话生命周期，**未明确 volume 销毁路径**。用户软删除 / `user_workspace` 整 row 删除时无级联卷归档 → 卷变成 orphan 长存磁盘，违反 J.9 artifact lifecycle（J-25）+ J.6 image lifecycle（J-32）同款产品级 lifecycle 范式。决策：lifecycle 三档（active → soft-deleted → archived），soft-delete 触发后由 reaper 起 archive job tar.zst 到 ObjectStore（同 J-29 第 2 项 backup pipeline 复用），90 天后 hard delete archive + row；恢复 API 推 M1。新建 `lifecycle.py` + 迁移 0026 加 `deleted_at` + `archived_object_key` 列 + 三档 audit action（`WORKSPACE_DELETE` / `WORKSPACE_ARCHIVE` / `WORKSPACE_HARD_DELETE`）。取舍：(c) 红线 —— 平台必须有用户数据清理路径（合规 + 磁盘运维），与 J.9 artifact / J.6 image lifecycle 范式一致避免割裂。
+
+---
+
+### 2026-05-21 J.13a 设计 PR 补充（J-37 ~ J-39）
+
+> J.13a 设计 PR 把 § 18 从"四点纲领"骨架重写为"7 已交付能力 × per-cap metric + baseline 制品"实施设计。本组 3 条 Mini-ADR 锁住三个关键决策：metric 类型矩阵、baseline 文件交付物形态、LLM-judge 模型选型。
+
+**J-37｜J.13a per-capability metric 类型矩阵 —— deterministic 优先，LLM-judge 限用在 J.1**
+背景：每个能力都可以套 LLM-judge 评分，但 judge 本身有误差 + 抖动 + 成本。决策：per-cap metric 按能力性质选 deterministic 还是 LLM-judge —— J.3 用 `recall@k`（K12 已落，K12 模板复用）/ J.11 / J.14 / J.15 用 `pass-rate`（隔离类 J.14 强制 1.00）/ J.2 用 `pass-rate`（修正率 + 假阳率双指标）/ J.6 用 `pass-rate`（Path A + Path B 双套）/ 只有 J.1 plan_execute 任务覆盖度无 deterministic 指标，用 `pass-rate（结构合法）+ LLM-judge mean（1-5 分）` 双指标。取舍：(c) 红线 —— "为用 judge 而用 judge"是把 eval baseline 从锚点变成噪声源；J.14 / J.15 这类安全类指标必须确定性 100%，不容许 judge 概率性判定。
+
+**J-38｜J.13a baseline 文件 = checked-in YAML + 能力 PR 同步更新（不另起 PG 表）**
+背景：baseline 可以放 PG `eval_dataset` 表（J.12 共用）或 checked-in YAML。决策：M0 用 checked-in YAML —— `tools/eval/baselines/m0_gate_baseline.yaml`，每次能力 PR 着陆同步更新 baseline 行；Stream M Gate Exit Criteria 直接读这个文件。备选：PG 表 + 后台 job。取舍：(b) 工程选择 —— M0 单 control-plane 副本 + 单 dev 团队，checked-in YAML 走 git review 流程更易看 diff / 审 baseline 变化 / 在 PR 内一起评审；PG 表方案需要额外 API + admin UI 才好运维，M0 投入不值。J.13c 着陆时升级为"CI 周跑 + commit baseline 更新 PR"自动化路径。`eval_dataset` PG 表仍由 J.12 管，定位是"策划数据集源"，不是"baseline 制品"。
+
+**J-39｜J.13a LLM-judge 模型 = Haiku 4.5 + temperature=0.0 + N=3 重跑**
+背景：LLM-judge provider 选型直接影响 baseline 成本 / 稳定性。决策：(1) judge 模型 `claude-haiku-4-5-20251001`（Haiku 4.5）—— 90% 大模型质量、3x 成本优势，M0 周跑 ~7 能力 × ~20 case × 3 重跑 ≈ 420 调用 judge cost 可承受；(2) `temperature=0.0` 强制 judge 确定性，否则 baseline 抖动违背"baseline 是锚点"语义；(3) N=3 重跑 + 多数票（pass-rate）/ 平均（连续值）作为 flakiness 缓解 M0 最小版本；(4) judge 走独立 `ModelSpec.role="eval_judge"`，不与生产 model 路由 / fallback 链耦合；(5) CI 内不跑真 judge（mock provider），周跑用真 judge。取舍：(c) 红线 —— judge 选型直接决定 baseline 可信度，必须显式锁定模型 ID + 参数；judge cost 不能成为不跑 baseline 的理由（用 Haiku 而非 Opus）；J.13c 升级到 confidence interval 是这条 ADR 的演进路径。
 
 ---
 
