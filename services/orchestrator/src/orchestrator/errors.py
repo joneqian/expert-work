@@ -34,3 +34,43 @@ class MaxStepsExceededError(OrchestratorError):
         super().__init__(f"ReAct loop exceeded max_steps={max_steps} (step_count={step_count})")
         self.step_count = step_count
         self.max_steps = max_steps
+
+
+class SkillNotFoundError(AgentFactoryError):
+    """Manifest references a skill name that the tenant has no skill row for.
+
+    Stream J.7a — caller (control-plane) maps to HTTP 422 (manifest is
+    un-buildable until the skill exists).
+    """
+
+
+class SkillVersionNotFoundError(AgentFactoryError):
+    """Manifest pins ``name@N`` but no ``skill_version`` row has that version.
+
+    Stream J.7a — caller maps to HTTP 422. Distinct from
+    :class:`SkillNotFoundError` so the operator can tell "skill exists
+    but pin is bad" from "skill never existed".
+    """
+
+
+class SkillNotActiveError(AgentFactoryError):
+    """Bare-name reference to a skill that is not in ``ACTIVE`` status.
+
+    Stream J.7a — caller maps to HTTP 422. Pinned ``name@N`` references
+    bypass this check (they explicitly opt into draft / archived).
+    """
+
+
+class SkillConflictError(AgentFactoryError):
+    """Two skills in a manifest declare the same tool name.
+
+    Stream J.7a — Mini-ADR J-23 § 15.6 (c) 红线 build 期校验:tool 重叠
+    必须 reject build,避免 agent 在运行期拿到非预期 tool (safety > 灵活).
+    """
+
+
+class SkillModelMismatchError(AgentFactoryError):
+    """Skill declares ``required_models`` and the agent's primary model is not in it.
+
+    Stream J.7a — Mini-ADR J-23 § 15.6 build 期 5 项校验之一。
+    """

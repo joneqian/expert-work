@@ -66,6 +66,13 @@ class ToolSpec:
     #: collide. Defaults to ``False`` — third-party tools stay on the
     #: ``is_read_only`` path.
     is_parallel_safe: bool = False
+    #: Stream J.7a (Mini-ADR J-23) — name of the skill that contributed
+    #: this tool to the agent's registry, or ``None`` when the tool is
+    #: declared directly in the manifest's ``tools:`` block. The dispatch
+    #: path uses this to label the ``helix_skill_call_total`` /
+    #: ``helix_skill_call_errors_total`` metrics so per-skill usage can
+    #: be observed (Mini-ADR J-23 § 15.4 telemetry 双 counter).
+    from_skill: str | None = None
 
 
 @dataclass(frozen=True)
