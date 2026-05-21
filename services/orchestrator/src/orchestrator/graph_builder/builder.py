@@ -617,7 +617,7 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
     # ["deadline_at"] (a ``time.monotonic`` timestamp). ``None`` when the
     # manifest carries no ``policies.run_deadline_s``.
     deadline_raw = configurable.get("deadline_at")
-    deadline_at = float(deadline_raw) if isinstance(deadline_raw, (int, float)) else None
+    deadline_at = float(deadline_raw) if isinstance(deadline_raw, int | float) else None
     return ToolContext(
         tenant_id=tenant_id,
         run_id=run_id,
