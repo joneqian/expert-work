@@ -15,7 +15,6 @@ from __future__ import annotations
 import io
 import zipfile
 from collections.abc import AsyncIterator
-from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -124,9 +123,7 @@ async def test_add_version_increments_and_emits_audit(setup: Setup) -> None:
     assert v2.json()["version"] == 2
 
     page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
-    version_actions = [
-        r for r in page.entries if r.action == AuditAction.SKILL_VERSION_CREATE
-    ]
+    version_actions = [r for r in page.entries if r.action == AuditAction.SKILL_VERSION_CREATE]
     assert len(version_actions) == 2
     assert version_actions[0].details["source"] == "json_api"
 
@@ -142,9 +139,7 @@ async def test_patch_status_transitions_and_audits(setup: Setup) -> None:
     assert response.json()["status"] == "active"
 
     page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
-    status_changes = [
-        r for r in page.entries if r.action == AuditAction.SKILL_STATUS_CHANGE
-    ]
+    status_changes = [r for r in page.entries if r.action == AuditAction.SKILL_STATUS_CHANGE]
     assert len(status_changes) == 1
     assert status_changes[0].details == {"from": "draft", "to": "active"}
 
@@ -184,9 +179,7 @@ async def test_add_version_404_for_unknown_skill(setup: Setup) -> None:
     client, _ = setup
     from uuid import uuid4
 
-    response = await client.post(
-        f"/v1/skills/{uuid4()}/versions", json={"prompt_fragment": "x"}
-    )
+    response = await client.post(f"/v1/skills/{uuid4()}/versions", json={"prompt_fragment": "x"})
     assert response.status_code == 404
 
 
@@ -239,9 +232,7 @@ def _build_zip(
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(
-            "skill.yaml", yaml.safe_dump({"name": name, "description": description})
-        )
+        archive.writestr("skill.yaml", yaml.safe_dump({"name": name, "description": description}))
         archive.writestr("prompt.md", prompt)
         archive.writestr("tools.txt", "\n".join(tools))
         for k, v in (extra or {}).items():
@@ -263,9 +254,7 @@ async def test_zip_import_creates_skill_and_version(setup: Setup) -> None:
 
     # Audit row marks source=zip_import.
     page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=20))
-    version_create = next(
-        r for r in page.entries if r.action == AuditAction.SKILL_VERSION_CREATE
-    )
+    version_create = next(r for r in page.entries if r.action == AuditAction.SKILL_VERSION_CREATE)
     assert version_create.details["source"] == "zip_import"
 
 
@@ -326,9 +315,7 @@ async def test_zip_export_round_trip(setup: Setup) -> None:
     """POST + version + GET .../export yields a parseable ZIP whose content
     matches what was stored."""
     client, _ = setup
-    skill_resp = await client.post(
-        "/v1/skills", json={"name": "foo", "category": "data"}
-    )
+    skill_resp = await client.post("/v1/skills", json={"name": "foo", "category": "data"})
     skill_id = skill_resp.json()["id"]
     await client.post(
         f"/v1/skills/{skill_id}/versions",

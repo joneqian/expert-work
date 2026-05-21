@@ -363,9 +363,7 @@ def build_skills_router() -> APIRouter:
             except DuplicateSkillError as exc:
                 # Race — another import won the create; resolve + add version.
                 logger.info("skills.import_race name=%s", payload.name)
-                existing = await store.get_skill_by_name(
-                    tenant_id=tenant_id, name=payload.name
-                )
+                existing = await store.get_skill_by_name(tenant_id=tenant_id, name=payload.name)
                 if existing is None:
                     raise HTTPException(status_code=409, detail=str(exc)) from exc
             await audit_emit(

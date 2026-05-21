@@ -81,8 +81,7 @@ def parse_skill_zip(blob: bytes) -> SkillZipPayload:
     members = archive.namelist()
     if len(members) > MAX_ENTRIES:
         raise SkillZipError(
-            f"ZIP has {len(members)} entries > {MAX_ENTRIES} entry cap "
-            f"(possible zip bomb)"
+            f"ZIP has {len(members)} entries > {MAX_ENTRIES} entry cap (possible zip bomb)"
         )
 
     files_seen: dict[str, bytes] = {}
@@ -97,9 +96,7 @@ def parse_skill_zip(blob: bytes) -> SkillZipPayload:
                 f"(supporting files推 M1 J.7b)"
             )
         if member not in _WHITELIST_NAMES:
-            raise SkillZipError(
-                f"ZIP entry {member!r} not in whitelist {sorted(_WHITELIST_NAMES)}"
-            )
+            raise SkillZipError(f"ZIP entry {member!r} not in whitelist {sorted(_WHITELIST_NAMES)}")
         # Belt-and-suspenders zip slip check: resolve against fake root.
         # ``os.path.commonpath`` raises ``ValueError`` on cross-drive
         # paths (Windows) — we don't run on Windows but the explicit
@@ -135,9 +132,7 @@ def parse_skill_zip(blob: bytes) -> SkillZipPayload:
     prompt_fragment = files_seen["prompt.md"].decode("utf-8")
     tool_names_blob = files_seen.get("tools.txt", b"")
     tool_names = tuple(
-        line.strip()
-        for line in tool_names_blob.decode("utf-8").splitlines()
-        if line.strip()
+        line.strip() for line in tool_names_blob.decode("utf-8").splitlines() if line.strip()
     )
 
     # ``_parse_skill_yaml`` already validated these types at runtime; the
@@ -175,8 +170,10 @@ def _parse_skill_yaml(blob: bytes) -> dict[str, object]:
     # Normalise optional fields' types.
     if "description" in data and not isinstance(data["description"], str):
         raise SkillZipError("skill.yaml 'description' must be a string")
-    if "category" in data and data["category"] is not None and not isinstance(
-        data["category"], str
+    if (
+        "category" in data
+        and data["category"] is not None
+        and not isinstance(data["category"], str)
     ):
         raise SkillZipError("skill.yaml 'category' must be a string or null")
     if "required_models" in data:
