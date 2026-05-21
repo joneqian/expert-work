@@ -108,3 +108,13 @@ class UserWorkspaceStore(abc.ABC):
         ``user_workspace_pending_archive_idx`` for constant-time scans
         as the active table grows.
         """
+
+    @abc.abstractmethod
+    async def list_active(self) -> list[UserWorkspace]:
+        """Return every active (not soft-deleted) workspace.
+
+        Stream J.15-补强-2 — the daily backup sweep iterates this list
+        and snapshots each volume to ObjectStore. M0 reads the whole
+        list (single supervisor, single tenant block); scalable
+        pagination can come with the multi-host migration (推 M1).
+        """

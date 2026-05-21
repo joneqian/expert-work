@@ -14,6 +14,21 @@ from helix_agent.persistence.workspace.base import (
 from helix_agent.persistence.workspace.base import (
     workspace_volume_name as workspace_volume_name,
 )
+from helix_agent.persistence.workspace.dlq import (
+    InMemoryVolumeBackupDLQ as InMemoryVolumeBackupDLQ,
+)
+from helix_agent.persistence.workspace.dlq import (
+    SqlVolumeBackupDLQ as SqlVolumeBackupDLQ,
+)
+from helix_agent.persistence.workspace.dlq import (
+    VolumeBackupDLQ as VolumeBackupDLQ,
+)
+from helix_agent.persistence.workspace.dlq import (
+    VolumeDLQRow as VolumeDLQRow,
+)
+from helix_agent.persistence.workspace.dlq import (
+    VolumeOpKind as VolumeOpKind,
+)
 from helix_agent.persistence.workspace.memory import (
     InMemoryUserWorkspaceStore as InMemoryUserWorkspaceStore,
 )
@@ -23,8 +38,13 @@ from helix_agent.persistence.workspace.sql import (
 
 __all__ = [
     "InMemoryUserWorkspaceStore",
+    "InMemoryVolumeBackupDLQ",
     "SqlUserWorkspaceStore",
+    "SqlVolumeBackupDLQ",
     "UserWorkspaceStore",
+    "VolumeBackupDLQ",
+    "VolumeDLQRow",
+    "VolumeOpKind",
     "WorkspaceNotFoundError",
     "workspace_volume_name",
 ]

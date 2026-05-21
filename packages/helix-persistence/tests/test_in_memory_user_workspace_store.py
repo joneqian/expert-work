@@ -171,3 +171,18 @@ async def test_list_pending_archive_filters_correctly() -> None:
     assert ids == {pending.id}
     assert active.id not in ids
     assert archived.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_list_active_returns_only_undeleted_rows() -> None:
+    """Stream J.15-补强-2 — daily backup sweep reads this list."""
+    store = InMemoryUserWorkspaceStore()
+    tenant = uuid4()
+    active = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    soft_deleted = await store.resolve(tenant_id=tenant, user_id=uuid4())
+    await store.soft_delete(workspace_id=soft_deleted.id, now=datetime.now(UTC))
+
+    rows = await store.list_active()
+    ids = {r.id for r in rows}
+    assert ids == {active.id}
+    assert soft_deleted.id not in ids

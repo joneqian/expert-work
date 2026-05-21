@@ -67,6 +67,8 @@ class AuditAction(StrEnum):
     WORKSPACE_QUOTA_DENIED = "workspace:quota_denied"
     WORKSPACE_SOFT_DELETE = "workspace:soft_delete"
     WORKSPACE_ARCHIVE = "workspace:archive"
+    # workspace (Stream J.15-补强-2 — Mini-ADR J-29 第 2 项 backup pipeline)
+    WORKSPACE_BACKUP = "workspace:backup"
     # tools (Stream E.6 + E.8 + onwards)
     TOOL_CALL = "tool:call"
     TOOL_BLOCKED = "tool:blocked"
