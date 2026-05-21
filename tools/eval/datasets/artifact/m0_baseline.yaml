@@ -1,0 +1,57 @@
+# J.9 Artifact — M0 baseline dataset (Stream J.13a + Mini-ADR J-25 closeout).
+#
+# 16 cases driving the artifact store + lifecycle + admin endpoints + MIME
+# inference. All-deterministic; expected pass_rate = 1.00.
+#
+# Coverage:
+#   - 3 save: basic / version-increment / kind-sticky
+#   - 4 lifecycle: soft-delete hides / cross-user miss / idempotent / re-save undeletes
+#   - 2 update + 2 versions: kind round-trip + soft-delete hiding +
+#     descending list + unknown returns None
+#   - 5 MIME inference: md inline / html attachment / svg attachment /
+#     png inline / unknown octet+attachment
+#
+# Threshold (Mini-ADR J-37): pass_rate ≥ 0.90.
+
+name: artifact-m0-baseline
+
+cases:
+  # ---------- save (3) ----------
+  - id: save-001-basic
+    scenario: save_basic
+  - id: save-002-version-increment
+    scenario: save_version_increment
+  - id: save-003-kind-sticky
+    scenario: save_keeps_kind
+
+  # ---------- lifecycle (4) ----------
+  - id: lifecycle-001-soft-delete-hides
+    scenario: soft_delete_hides_from_list
+  - id: lifecycle-002-cross-user-misses
+    scenario: soft_delete_cross_user_misses
+  - id: lifecycle-003-idempotent
+    scenario: soft_delete_idempotent
+  - id: lifecycle-004-resave-undeletes
+    scenario: resave_undeletes
+
+  # ---------- update + versions (4) ----------
+  - id: update-001-kind-round-trip
+    scenario: update_kind_round_trip
+  - id: update-002-hides-soft-deleted
+    scenario: update_kind_hides_soft_deleted
+  - id: versions-001-desc
+    scenario: list_versions_desc
+  - id: versions-002-unknown-none
+    scenario: list_versions_unknown_returns_none
+
+  # ---------- MIME / XSS (5) ----------
+  - id: mime-001-md-inline-text
+    scenario: mime_md_inline_text
+  - id: mime-002-html-attachment
+    scenario: mime_html_forces_attachment
+  - id: mime-003-svg-attachment
+    scenario: mime_svg_forces_attachment
+  - id: mime-004-png-inline-image
+    scenario: mime_png_inline_image
+  - id: mime-005-unknown-octet-attachment
+    scenario: mime_unknown_octet_attachment

@@ -42,6 +42,7 @@ _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
+import artifact as _art  # type: ignore[import-not-found]  # noqa: E402
 import memory_recall as _mr  # type: ignore[import-not-found]  # noqa: E402
 import model_routing as _mrt  # type: ignore[import-not-found]  # noqa: E402
 import multimodal as _mm  # type: ignore[import-not-found]  # noqa: E402
@@ -181,6 +182,11 @@ async def _run_skill() -> CapabilityReport:
     return await _sk.evaluate_set(cases)
 
 
+async def _run_artifact() -> CapabilityReport:
+    cases = _art.load_cases(_DATASETS / "artifact" / "m0_baseline.yaml")
+    return await _art.evaluate_set(cases)
+
+
 async def _run_sub_agent() -> CapabilityReport:
     cases = _sa.load_cases(_DATASETS / "sub_agent" / "m0_baseline.yaml")
     return await _sa.evaluate_set(cases)
@@ -269,8 +275,8 @@ _RUNNERS: tuple[_Runner, ...] = (
         "J.9_artifact",
         "pass-rate",
         {"pass_rate": 0.90},
-        None,
-        _DEFERRED_PENDING_CAPABILITY,
+        _run_artifact,
+        "",
     ),
     _Runner(
         "J.10_trigger",

@@ -44,8 +44,8 @@ def test_runner_registry_has_fourteen_capabilities() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_baseline_produces_ten_pass_four_deferred(tmp_path: Path) -> None:
-    """J.7a closeout adds eval: 10 shipped capabilities PASS; remaining 4 DEFERRED."""
+async def test_run_baseline_produces_eleven_pass_three_deferred(tmp_path: Path) -> None:
+    """J.9 closeout adds eval: 11 shipped capabilities PASS; remaining 3 DEFERRED."""
     out = tmp_path / "baseline.yaml"
     reports = await run_baseline(out_path=out)
 
@@ -64,8 +64,9 @@ async def test_run_baseline_produces_ten_pass_four_deferred(tmp_path: Path) -> N
         "J.5_rag",
         "J.6_multimodal",
         "J.7_skill",
+        "J.9_artifact",
     ]
-    assert len(deferred_caps) == 4
+    assert len(deferred_caps) == 3
     assert all(r.status != "FAIL" for r in reports.values())
 
 
