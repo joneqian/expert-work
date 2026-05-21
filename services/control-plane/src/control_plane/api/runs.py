@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -298,7 +299,7 @@ def build_runs_router() -> APIRouter:
             "step_count": 0,
             "max_steps": built.max_steps,
         }
-        configurable: dict[str, str] = {
+        configurable: dict[str, Any] = {
             "thread_id": str(thread_id),
             "tenant_id": str(tenant_id),
             "run_id": str(run_id),
@@ -310,6 +311,13 @@ def build_runs_router() -> APIRouter:
             # applies. The background task inherits this ContextVar at
             # creation, exactly as it inherits the tenant id.
             current_user_id_var.set(caller_user_id)
+        # Mini-ADR J-40 — when the manifest declares
+        # ``policies.run_deadline_s > 0`` the worker pins a wall-clock
+        # absolute deadline on config; SubAgentTool propagates it to
+        # every child config unchanged so the whole delegation tree
+        # honours the single budget.
+        if built.run_deadline_s > 0:
+            configurable["deadline_at"] = time.monotonic() + float(built.run_deadline_s)
         config: RunnableConfig = {"configurable": configurable}
         worker = asyncio.create_task(
             run_agent(

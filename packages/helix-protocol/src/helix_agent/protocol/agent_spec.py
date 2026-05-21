@@ -428,6 +428,20 @@ class PolicySpec(BaseModel):
             "not leak conversation content to non-WORM storage."
         ),
     )
+    run_deadline_s: int = Field(
+        default=0,
+        ge=0,
+        le=86400,
+        description=(
+            "Mini-ADR J-40 (J.4-补强-2) — wall-clock cap on the whole "
+            "run *including any sub-agent recursion*. ``0`` (default) "
+            "disables the deadline. When > 0, ``sse.run_agent`` "
+            "computes ``deadline_at = time.monotonic() + run_deadline_s`` "
+            "once and threads it through config; SubAgentTool checks "
+            "the value before each delegation and propagates to child "
+            "config unchanged (the child does not reset)."
+        ),
+    )
 
 
 class CodePackageSpec(BaseModel):

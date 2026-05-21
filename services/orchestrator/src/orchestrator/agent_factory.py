@@ -29,6 +29,7 @@ each adapter and onto the request body.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,7 +38,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from helix_agent.persistence import MemoryStore
 from helix_agent.persistence.memory import MemoryWritebackDLQ
-from helix_agent.protocol import AgentSpec, ModelSpec
+from helix_agent.protocol import AgentSpec, ModelSpec, parse_agent_ref
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from orchestrator.context import ContextCompressor
@@ -92,6 +93,11 @@ class BuiltAgent:
     #: The control-plane run assembler uses this to decide whether to
     #: emit a multimodal ``HumanMessage`` or a plain-text one.
     supports_vision: bool = False
+    #: Mini-ADR J-40 (J.4-补强-2) — wall-clock cap on the whole run
+    #: including sub-agent recursion, in seconds. ``0`` disables the
+    #: deadline. ``sse.run_agent`` reads this to compute
+    #: ``deadline_at = time.monotonic() + run_deadline_s`` once per run.
+    run_deadline_s: int = 0
 
 
 @dataclass(frozen=True)
@@ -277,7 +283,68 @@ async def build_agent(
         system_prompt=spec.spec.system_prompt.template,
         max_steps=spec.spec.workflow.max_iterations,
         supports_vision=spec.spec.model.supports_vision,
+        run_deadline_s=spec.spec.policies.run_deadline_s,
     )
+
+
+#: Mini-ADR J-40 (J.4-补强-2) — resolver signature for cycle detection.
+#: Takes the parsed ``(name, version)`` from a ``SubAgentSpec.agent_ref``
+#: and returns the referenced :class:`AgentSpec`, or ``None`` if the ref
+#: cannot be resolved (the caller treats that as a build failure
+#: surfaced elsewhere — cycle detection only walks resolvable nodes).
+SubagentSpecResolver = Callable[[str, str], AgentSpec | None]
+
+
+def detect_subagent_cycle(
+    spec: AgentSpec,
+    *,
+    resolve: SubagentSpecResolver,
+) -> None:
+    """Refuse a manifest whose sub-agent graph contains a cycle.
+
+    Walks the delegation graph from ``spec``'s declared sub-agents,
+    resolving each ``agent_ref`` via ``resolve`` and recursing into its
+    sub-agents. The conservative two-set DFS (``visiting`` / ``visited``)
+    detects A→B→A even when both manifests pass the static
+    ``_check_subagents`` self-reference test (which only catches the
+    trivial A→A case).
+
+    Falls back gracefully on unresolvable refs: ``resolve`` returning
+    ``None`` skips that node — the orchestrator will surface a
+    ``SubAgentNotFoundError`` at run-time for that delegation, but the
+    cycle walk does not get to fail spuriously on an unrelated missing
+    ref.
+
+    Raises :class:`AgentFactoryError` with the full cycle path when a
+    cycle is found. ``MAX_SUBAGENT_DEPTH`` remains the nominal recursion
+    guard — cycle detection catches the design defect at build time
+    rather than relying on the depth cap at run time.
+    """
+    visiting: list[str] = []
+    visited: set[str] = set()
+
+    def visit(current: AgentSpec) -> None:
+        name = current.metadata.name
+        if name in visiting:
+            cycle = " → ".join([*visiting, name])
+            raise AgentFactoryError(
+                f"sub-agent delegation cycle detected: {cycle}",
+            )
+        if name in visited:
+            return
+        visiting.append(name)
+        try:
+            for sub in current.spec.subagents:
+                child_name, child_version = parse_agent_ref(sub.agent_ref)
+                child_spec = resolve(child_name, child_version)
+                if child_spec is None:
+                    continue
+                visit(child_spec)
+        finally:
+            visiting.pop()
+            visited.add(name)
+
+    visit(spec)
 
 
 async def build_llm_router(

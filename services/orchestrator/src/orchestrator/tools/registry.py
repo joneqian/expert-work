@@ -57,6 +57,15 @@ class ToolSpec:
     #: "conflicts with every other tool" stance (e.g., ``update_plan``
     #: writes ``AgentState.plan``, a global channel).
     path_args: tuple[str, ...] = ()
+    #: Mini-ADR J-40 (J.4-补强-2) — a tool that **mutates** but whose
+    #: invocations are nevertheless independent of one another. Multiple
+    #: calls to such a tool (including against the same name) may share
+    #: a stage and run via ``asyncio.gather``. ``SubAgentTool`` is the
+    #: canonical example: each delegation spins up a fresh child
+    #: ``thread_id`` / sandbox session, so two sub-agent calls don't
+    #: collide. Defaults to ``False`` — third-party tools stay on the
+    #: ``is_read_only`` path.
+    is_parallel_safe: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +91,15 @@ class ToolContext:
     #: the original goal (the tool only rewrites ``steps``). ``None`` for
     #: react-mode runs and any run before the planner node has executed.
     plan: Plan | None = None
+    #: Mini-ADR J-40 (J.4-补强-2) — wall-clock deadline (``time.monotonic``
+    #: timestamp) for the *current run including any sub-agent recursion*.
+    #: Established once in ``sse.run_agent`` from the manifest's
+    #: ``policies.run_deadline_s``; ``SubAgentTool`` propagates the value
+    #: to child config unchanged (child does not reset). A tool that
+    #: opts in checks ``deadline_at - time.monotonic() <= 0`` before
+    #: doing expensive work and short-circuits with a cancel. ``None``
+    #: when no deadline is configured.
+    deadline_at: float | None = None
 
 
 #: Stream K.K8 — keys a tool is allowed to write back to ``AgentState``

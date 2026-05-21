@@ -613,12 +613,18 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
     tenant_id = _parse_uuid(configurable.get("tenant_id"))
     run_id = _parse_uuid(configurable.get("run_id"))
     user_id = _parse_uuid(configurable.get("user_id"))
+    # Mini-ADR J-40 — global deadline lands in config["configurable"]
+    # ["deadline_at"] (a ``time.monotonic`` timestamp). ``None`` when the
+    # manifest carries no ``policies.run_deadline_s``.
+    deadline_raw = configurable.get("deadline_at")
+    deadline_at = float(deadline_raw) if isinstance(deadline_raw, int | float) else None
     return ToolContext(
         tenant_id=tenant_id,
         run_id=run_id,
         user_id=user_id,
         cancellation_token=cancellation_token(config),
         plan=plan,
+        deadline_at=deadline_at,
     )
 
 

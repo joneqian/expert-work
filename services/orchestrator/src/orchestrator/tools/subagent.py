@@ -165,6 +165,10 @@ class SubAgentTool:
                 },
                 "required": ["task"],
             },
+            # Mini-ADR J-40 — sibling delegations share neither ``thread_id``
+            # nor sandbox session, so plan_stages may schedule them in the
+            # same stage and run them concurrently via ``asyncio.gather``.
+            is_parallel_safe=True,
         )
 
     async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
@@ -173,6 +177,15 @@ class SubAgentTool:
                 f"sub-agent {self.subagent.name!r} cannot be delegated to without a tenant binding"
             )
             raise ToolBlockedError(msg)
+        # Mini-ADR J-40 — refuse the delegation up front when the global
+        # deadline has already expired. The child run would only race with
+        # cancellation propagation; short-circuiting here gives the parent
+        # a clean ``RunCancelledError`` to land in fan-in's exception
+        # bucket.
+        if ctx.deadline_at is not None and ctx.deadline_at - time.monotonic() <= 0:
+            raise RunCancelledError(
+                f"sub-agent {self.subagent.name!r} declined: global deadline already expired"
+            )
         task = self._require_task(args)
         name, version = parse_agent_ref(self.subagent.agent_ref)
 
@@ -471,6 +484,13 @@ class SubAgentTool:
         }
         if ctx.user_id is not None:
             configurable["user_id"] = str(ctx.user_id)
+        # Mini-ADR J-40 — propagate the parent's global deadline to the
+        # child config verbatim. The child does NOT reset it: a 30s
+        # deadline at depth 0 stays 30s at every depth, so the whole
+        # delegation tree honours the same wall-clock cap (otherwise N
+        # levels of delegation would multiply the budget).
+        if ctx.deadline_at is not None:
+            configurable["deadline_at"] = ctx.deadline_at
         return {"configurable": configurable}
 
 

@@ -41,6 +41,7 @@ from orchestrator import (
     build_agent,
     build_llm_router,
 )
+from orchestrator.agent_factory import SubagentSpecResolver, detect_subagent_cycle
 from orchestrator.llm import Embedder, HTTPEmbeddingClient, OpenAICompatibleEmbedder
 from orchestrator.multimodal import ImageResolver, ObjectStoreImageResolver
 from orchestrator.tools import (
@@ -111,6 +112,7 @@ def make_agent_builder(
     tool_env: ToolEnv | None = None,
     middleware_env: MiddlewareEnv | None = None,
     memory_env: MemoryEnv | None = None,
+    subagent_spec_resolver: SubagentSpecResolver | None = None,
 ) -> AgentBuilder:
     """Production :data:`AgentBuilder` bound to a SecretStore + checkpointer.
 
@@ -119,9 +121,20 @@ def make_agent_builder(
     separate from :func:`make_agent_runtime` so the app lifespan can
     rebuild the builder once the durable checkpointer's connection
     context is open and the tenant-config service is ready.
+
+    ``subagent_spec_resolver`` (Mini-ADR J-40) lets the top-level
+    builder check the manifest's delegation graph for cycles before
+    assembling any tools. When ``None`` (the default), the check is
+    skipped — for unit tests + agents that declare no ``subagents``
+    block. The app lifespan binds it to an ``AgentSpecStore`` synchronous
+    resolver so a cycle in production is rejected at build time
+    (``AgentFactoryError``) rather than blowing the depth cap at run
+    time.
     """
 
     async def _build(spec: AgentSpec) -> BuiltAgent:
+        if subagent_spec_resolver is not None and spec.spec.subagents:
+            detect_subagent_cycle(spec, resolve=subagent_spec_resolver)
         return await build_agent(
             spec,
             secret_store=secret_store,

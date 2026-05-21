@@ -85,6 +85,16 @@ def conflicts(a: _ScheduledCall, b: _ScheduledCall) -> bool:
     # Rule 1 — two reads never conflict.
     if a_read and b_read:
         return False
+    # Mini-ADR J-40 (J.4-补强-2) — two ``is_parallel_safe`` calls don't
+    # conflict either. The canonical case is SubAgentTool: each
+    # delegation gets its own ``thread_id`` / sandbox session, so
+    # multiple sibling sub-agents can run via ``asyncio.gather``. This
+    # is checked *before* the empty-paths rule below — a SubAgentTool
+    # has no declared paths but is explicitly safe.
+    a_par = a.spec is not None and a.spec.is_parallel_safe
+    b_par = b.spec is not None and b.spec.is_parallel_safe
+    if a_par and b_par:
+        return False
     # Both empty path sets and at least one is a write → conservative
     # conflict (e.g., ``update_plan`` writes AgentState; reads of state
     # might be affected by a sibling write).

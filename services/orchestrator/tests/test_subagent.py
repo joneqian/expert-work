@@ -697,3 +697,226 @@ async def test_state_updates_uses_allowlisted_key() -> None:
     )
     result = await tool.call({"task": "x"}, ctx=_ctx())
     assert set(result.state_updates).issubset(TOOL_ALLOWED_STATE_KEYS)
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-40 — ToolSpec.is_parallel_safe + fan-out via plan_stages
+# ---------------------------------------------------------------------------
+
+
+def test_subagent_tool_spec_is_parallel_safe() -> None:
+    """``is_parallel_safe=True`` lets plan_stages place sibling delegations
+    in the same stage (independent thread_ids + sandbox sessions)."""
+    spec = SubAgentTool(subagent=_SUB, builder=_RecordingBuilder(), child_depth=1).spec
+    assert spec.is_parallel_safe is True
+    # SubAgentTool still mutates parent state (subagent_invocations), so it
+    # is NOT is_read_only.
+    assert spec.is_read_only is False
+
+
+def test_plan_stages_groups_sibling_subagent_calls_into_one_stage() -> None:
+    """Mini-ADR J-40 — three sibling SubAgentTool calls share a single
+    stage (concurrency 3), not three serial stages."""
+    from orchestrator.tools.scheduling import plan_stages
+
+    sub_a = SubAgentTool(
+        subagent=SubAgentSpec(name="alpha", agent_ref="alpha@1.0.0", description="alpha sub"),
+        builder=_RecordingBuilder(),
+        child_depth=1,
+    )
+    sub_b = SubAgentTool(
+        subagent=SubAgentSpec(name="beta", agent_ref="beta@1.0.0", description="beta sub"),
+        builder=_RecordingBuilder(),
+        child_depth=1,
+    )
+    sub_c = SubAgentTool(
+        subagent=SubAgentSpec(name="gamma", agent_ref="gamma@1.0.0", description="gamma sub"),
+        builder=_RecordingBuilder(),
+        child_depth=1,
+    )
+    specs = {sub.spec.name: sub.spec for sub in (sub_a, sub_b, sub_c)}
+    calls = [
+        {"id": "tc-1", "name": "alpha", "args": {"task": "x"}},
+        {"id": "tc-2", "name": "beta", "args": {"task": "y"}},
+        {"id": "tc-3", "name": "gamma", "args": {"task": "z"}},
+    ]
+
+    stages = plan_stages(calls, specs)
+
+    assert len(stages) == 1
+    assert {call.name for call in stages[0]} == {"alpha", "beta", "gamma"}
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-40 — global deadline propagation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_child_config_inherits_parent_deadline_unchanged() -> None:
+    """Mini-ADR J-40 — child config carries the same ``deadline_at`` value
+    the parent passed in (no per-level reset)."""
+    graph = _FakeGraph(result={"messages": [AIMessage(content="ok")], "step_count": 1})
+    tool = SubAgentTool(
+        subagent=_SUB, builder=_RecordingBuilder(built=_built(graph)), child_depth=1
+    )
+    import time as _time
+
+    parent_deadline = _time.monotonic() + 30.0
+
+    await tool.call(
+        {"task": "x"},
+        ctx=ToolContext(
+            tenant_id=uuid4(),
+            cancellation_token=CancellationToken(),
+            deadline_at=parent_deadline,
+        ),
+    )
+
+    _state, child_config = graph.calls[0]
+    assert child_config["configurable"]["deadline_at"] == parent_deadline
+
+
+@pytest.mark.asyncio
+async def test_call_refuses_delegation_when_deadline_expired() -> None:
+    """A ``deadline_at`` already in the past short-circuits to
+    ``RunCancelledError`` without invoking the child graph."""
+    graph = _FakeGraph(result={"messages": [AIMessage(content="ok")], "step_count": 1})
+    builder = _RecordingBuilder(built=_built(graph))
+    tool = SubAgentTool(subagent=_SUB, builder=builder, child_depth=1)
+    import time as _time
+
+    expired = _time.monotonic() - 5.0
+
+    with pytest.raises(RunCancelledError, match="deadline"):
+        await tool.call(
+            {"task": "x"},
+            ctx=ToolContext(
+                tenant_id=uuid4(),
+                cancellation_token=CancellationToken(),
+                deadline_at=expired,
+            ),
+        )
+    # Child graph must not be invoked.
+    assert graph.calls == []
+
+
+@pytest.mark.asyncio
+async def test_child_config_omits_deadline_when_parent_has_none() -> None:
+    """No ``policies.run_deadline_s`` configured → child config has no
+    ``deadline_at`` key (vs an explicit ``None`` which would still set
+    the key); cleaner than leaking the absence as a sentinel."""
+    graph = _FakeGraph(result={"messages": [AIMessage(content="ok")], "step_count": 1})
+    tool = SubAgentTool(
+        subagent=_SUB, builder=_RecordingBuilder(built=_built(graph)), child_depth=1
+    )
+
+    await tool.call({"task": "x"}, ctx=_ctx())  # _ctx() has deadline_at=None
+
+    _state, child_config = graph.calls[0]
+    assert "deadline_at" not in child_config["configurable"]
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-40 — cycle detection at build time
+# ---------------------------------------------------------------------------
+
+
+def _make_spec_with_subagents(name: str, *children: str) -> Any:
+    """Build a minimal ``AgentSpec`` referencing the given child names."""
+    from helix_agent.protocol import AgentSpec
+
+    return AgentSpec.model_validate(
+        {
+            "apiVersion": "helix.io/v1",
+            "kind": "Agent",
+            "metadata": {"name": name, "version": "1.0.0", "tenant": "test-tenant"},
+            "spec": {
+                "tenant_config": {},
+                "model": {
+                    "provider": "anthropic",
+                    "name": "claude-sonnet-4-6",
+                    "api_key_ref": "secret://test",
+                },
+                "system_prompt": {"template": "you are an agent"},
+                "sandbox": {
+                    "resources": {"cpu": "1.0", "memory": "1Gi"},
+                    "network": {"egress": "proxy", "allowlist": ["api.anthropic.com"]},
+                    "filesystem": {"readonly_root": True, "writable": ["/workspace"]},
+                },
+                "subagents": [
+                    {
+                        "name": child,
+                        "agent_ref": f"{child}@1.0.0",
+                        "description": f"{child} sub-agent",
+                    }
+                    for child in children
+                ],
+            },
+        }
+    )
+
+
+def test_detect_subagent_cycle_passes_acyclic_graph() -> None:
+    """A → B → C: no cycle, no exception."""
+    from orchestrator.agent_factory import detect_subagent_cycle
+    from orchestrator.errors import AgentFactoryError  # noqa: F401  - imported for type ref
+
+    specs = {
+        "alpha": _make_spec_with_subagents("alpha", "beta"),
+        "beta": _make_spec_with_subagents("beta", "gamma"),
+        "gamma": _make_spec_with_subagents("gamma"),
+    }
+    detect_subagent_cycle(specs["alpha"], resolve=lambda n, v: specs.get(n))
+
+
+def test_detect_subagent_cycle_detects_two_node_cycle() -> None:
+    """A → B → A: AgentFactoryError with cycle path."""
+    from orchestrator.agent_factory import detect_subagent_cycle
+    from orchestrator.errors import AgentFactoryError
+
+    specs = {
+        "alpha": _make_spec_with_subagents("alpha", "beta"),
+        "beta": _make_spec_with_subagents("beta", "alpha"),
+    }
+    with pytest.raises(AgentFactoryError, match=r"alpha .* beta .* alpha"):
+        detect_subagent_cycle(specs["alpha"], resolve=lambda n, v: specs.get(n))
+
+
+def test_detect_subagent_cycle_detects_three_node_cycle() -> None:
+    """A → B → C → A."""
+    from orchestrator.agent_factory import detect_subagent_cycle
+    from orchestrator.errors import AgentFactoryError
+
+    specs = {
+        "alpha": _make_spec_with_subagents("alpha", "beta"),
+        "beta": _make_spec_with_subagents("beta", "gamma"),
+        "gamma": _make_spec_with_subagents("gamma", "alpha"),
+    }
+    with pytest.raises(AgentFactoryError, match="cycle"):
+        detect_subagent_cycle(specs["alpha"], resolve=lambda n, v: specs.get(n))
+
+
+def test_detect_subagent_cycle_skips_unresolvable_refs() -> None:
+    """A → B (unresolvable) does NOT raise — the unresolved ref will
+    surface as a SubAgentNotFoundError at run time, but cycle detection
+    must not synthesise a false positive."""
+    from orchestrator.agent_factory import detect_subagent_cycle
+
+    spec_a = _make_spec_with_subagents("alpha", "beta")
+    detect_subagent_cycle(spec_a, resolve=lambda _n, _v: None)
+
+
+def test_detect_subagent_cycle_tolerates_shared_subagents() -> None:
+    """Diamond — A → B, A → C, B → D, C → D — no cycle even though D is
+    visited via two paths. The ``visited`` set short-circuits the second
+    walk."""
+    from orchestrator.agent_factory import detect_subagent_cycle
+
+    specs = {
+        "alpha": _make_spec_with_subagents("alpha", "beta", "gamma"),
+        "beta": _make_spec_with_subagents("beta", "delta"),
+        "gamma": _make_spec_with_subagents("gamma", "delta"),
+        "delta": _make_spec_with_subagents("delta"),
+    }
+    detect_subagent_cycle(specs["alpha"], resolve=lambda n, v: specs.get(n))
