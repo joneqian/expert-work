@@ -23,7 +23,6 @@ import sys as _sys
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from pathlib import Path as _Path
 from typing import Any, Literal, cast
@@ -32,7 +31,7 @@ from uuid import UUID, uuid4
 import yaml
 
 from helix_agent.persistence import InMemorySkillStore
-from helix_agent.protocol import AgentSpec, Skill, SkillStatus, SkillVersion
+from helix_agent.protocol import AgentSpec, SkillStatus
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.secret_store import LocalDevSecretStore
 
@@ -172,7 +171,9 @@ def _make_resolver(store: InMemorySkillStore, tenant_id: UUID) -> Any:
         row = await store.get_version_by_number(
             skill_id=skill.id, tenant_id=tenant_id, version=version
         )
-        return _SkillLookupResult.ok(row) if row is not None else _SkillLookupResult.version_not_found()
+        if row is None:
+            return _SkillLookupResult.version_not_found()
+        return _SkillLookupResult.ok(row)
 
     return resolver
 
@@ -199,9 +200,7 @@ async def _run_resolve_case(case: SkillCase) -> CapabilityCaseResult:
         if needle not in built.system_prompt:
             notes.append(f"system_prompt missing {needle!r}")
     if case.expected_order:
-        positions = [
-            built.system_prompt.find(needle) for needle in case.expected_order
-        ]
+        positions = [built.system_prompt.find(needle) for needle in case.expected_order]
         if any(p < 0 for p in positions):
             notes.append(f"system_prompt missing one of expected_order: {case.expected_order}")
         elif positions != sorted(positions):
@@ -209,7 +208,9 @@ async def _run_resolve_case(case: SkillCase) -> CapabilityCaseResult:
     return CapabilityCaseResult(case_id=case.case_id, passed=not notes, notes=tuple(notes))
 
 
-async def _run_error_case(case: SkillCase, expected_exc: type[BaseException]) -> CapabilityCaseResult:
+async def _run_error_case(
+    case: SkillCase, expected_exc: type[BaseException]
+) -> CapabilityCaseResult:
     from orchestrator.agent_factory import build_agent
 
     notes: list[str] = []
@@ -227,15 +228,11 @@ async def _run_error_case(case: SkillCase, expected_exc: type[BaseException]) ->
                 skill_resolver=resolver,
                 tenant_id=tenant_id,
             )
-        notes.append(
-            f"expected {expected_exc.__name__} but build_agent succeeded"
-        )
+        notes.append(f"expected {expected_exc.__name__} but build_agent succeeded")
     except expected_exc:
         pass  # success — expected exception raised
-    except BaseException as exc:  # noqa: BLE001 — eval needs to see any raised type
-        notes.append(
-            f"expected {expected_exc.__name__} but got {type(exc).__name__}: {exc}"
-        )
+    except BaseException as exc:
+        notes.append(f"expected {expected_exc.__name__} but got {type(exc).__name__}: {exc}")
     return CapabilityCaseResult(case_id=case.case_id, passed=not notes, notes=tuple(notes))
 
 
@@ -260,8 +257,7 @@ def _run_moderation_case(case: SkillCase, expected_pattern: str) -> CapabilityCa
     except ModerationError as exc:
         if expected_pattern not in exc.code:
             notes.append(
-                f"ModerationError raised but code={exc.code!r} != "
-                f"expected {expected_pattern!r}"
+                f"ModerationError raised but code={exc.code!r} != expected {expected_pattern!r}"
             )
     return CapabilityCaseResult(case_id=case.case_id, passed=not notes, notes=tuple(notes))
 
