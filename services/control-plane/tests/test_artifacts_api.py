@@ -149,3 +149,35 @@ async def test_download_without_supervisor_returns_503() -> None:
     ) as client:
         resp = await client.get("/v1/artifacts/download", params={"name": "report.md"})
     assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_download_429_when_download_count_quota_exhausted(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    """After ``ARTIFACT_DOWNLOAD_COUNT_30D`` is consumed the next
+    download returns 429 with the dimension surfaced — Mini-ADR J-25."""
+    from helix_agent.protocol import QuotaDimension, TenantQuotaPatch
+
+    client, _, _ = setup
+    # Seed a 2-burst capacity bucket.
+    app = client._transport.app  # type: ignore[attr-defined,union-attr]
+    patch = TenantQuotaPatch(
+        dimension=QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D,
+        scope={},
+        limit_value=2,
+        burst=2,
+    )
+    await app.state.tenant_quota_repo.upsert(tenant_id=_TENANT, patch=patch, updated_by="test")
+
+    # 2 downloads within capacity (200 + 200).
+    for _ in range(2):
+        ok = await client.get("/v1/artifacts/download", params={"name": "report.md"})
+        assert ok.status_code == 200
+    # 3rd exceeds capacity; slow drip cannot refill in-time.
+    denied = await client.get("/v1/artifacts/download", params={"name": "report.md"})
+    assert denied.status_code == 429
+    body = denied.json()
+    assert body["error"]["code"] == "RATE_LIMIT_EXCEEDED"
+    assert body["error"]["dimension"] == QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D.value
+    assert denied.headers["Retry-After"]

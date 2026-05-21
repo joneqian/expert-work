@@ -445,3 +445,74 @@ async def test_image_storage_bytes_does_not_refill() -> None:
         )
     )
     assert not next_call.allowed
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-25 (J.9-step2) — artifact dimensions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_artifact_download_count_30d_denies_after_capacity() -> None:
+    """``ARTIFACT_DOWNLOAD_COUNT_30D`` exhausts after ``burst`` downloads
+    on the same slow-drip 30-day refill shape as the image counterpart."""
+    tenant = _tenant()
+    store = InMemoryTenantQuotaStore()
+    await _seed(
+        store,
+        tenant,
+        TenantQuotaPatch(
+            dimension=QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D,
+            scope={},
+            limit_value=2,
+            burst=2,
+        ),
+    )
+    svc = InMemoryQuotaService(quota_store=store, reservation_store=InMemoryTokenReservationStore())
+
+    for _ in range(2):
+        result = await svc.check(CheckRequest(tenant_id=tenant, cost=1))
+        assert result.allowed
+    denied = await svc.check(CheckRequest(tenant_id=tenant, cost=1))
+    assert not denied.allowed
+    assert denied.blocked_dimension is QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D
+
+
+@pytest.mark.asyncio
+async def test_artifact_storage_bytes_sticky_no_refill() -> None:
+    """``ARTIFACT_STORAGE_BYTES`` mirrors ``IMAGE_STORAGE_BYTES``: sticky
+    ceiling, spent tokens stay spent. Wired ahead of the save-side
+    plumbing so the dimension is ready when orchestrator quota lands."""
+    tenant = _tenant()
+    store = InMemoryTenantQuotaStore()
+    await _seed(
+        store,
+        tenant,
+        TenantQuotaPatch(
+            dimension=QuotaDimension.ARTIFACT_STORAGE_BYTES,
+            scope={},
+            limit_value=1024,
+            burst=None,
+        ),
+    )
+    svc = InMemoryQuotaService(quota_store=store, reservation_store=InMemoryTokenReservationStore())
+
+    first = await svc.check(
+        CheckRequest(
+            tenant_id=tenant,
+            cost=1,
+            cost_overrides={QuotaDimension.ARTIFACT_STORAGE_BYTES: 600},
+        )
+    )
+    assert first.allowed
+    assert first.remaining[QuotaDimension.ARTIFACT_STORAGE_BYTES.value] == 424
+
+    second = await svc.check(
+        CheckRequest(
+            tenant_id=tenant,
+            cost=1,
+            cost_overrides={QuotaDimension.ARTIFACT_STORAGE_BYTES: 500},
+        )
+    )
+    assert not second.allowed
+    assert second.blocked_dimension is QuotaDimension.ARTIFACT_STORAGE_BYTES

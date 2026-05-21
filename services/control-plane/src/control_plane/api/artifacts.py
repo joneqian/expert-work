@@ -20,10 +20,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
+from control_plane.quota.base import QuotaService
 from helix_agent.persistence import ArtifactStore
 from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
+from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.tools import SandboxSupervisorError, SupervisorClient
 
 logger = logging.getLogger("helix.control_plane.artifacts")
@@ -35,6 +38,14 @@ def _get_artifact_store(request: Request) -> ArtifactStore:
 
 def _get_supervisor_client(request: Request) -> SupervisorClient | None:
     return request.app.state.supervisor_client  # type: ignore[no-any-return]
+
+
+def _get_quota(request: Request) -> QuotaService:
+    return request.app.state.quota_service  # type: ignore[no-any-return]
+
+
+def _get_audit(request: Request) -> AuditLogger:
+    return request.app.state.audit_logger  # type: ignore[no-any-return]
 
 
 def build_artifacts_router() -> APIRouter:
@@ -69,6 +80,8 @@ def build_artifacts_router() -> APIRouter:
         store: Annotated[ArtifactStore, Depends(_get_artifact_store)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
+        quota: Annotated[QuotaService, Depends(_get_quota)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> Response:
         tenant_id: UUID = request.state.tenant_id
         caller_user_id = await resolve_caller_user_id(request, users)
@@ -81,6 +94,23 @@ def build_artifacts_router() -> APIRouter:
         )
         if version is None:
             raise HTTPException(status_code=404, detail="artifact not found")
+        # Mini-ADR J-25 (J.9-step2) — quota admission. Deducts ``cost=1``
+        # from QPS + ``ARTIFACT_DOWNLOAD_COUNT_30D`` (only the dimensions
+        # a tenant has rows for run; others are no-ops). 429 on denial.
+        # Storage-bytes is not deducted here: it's a save-side concern
+        # and ships with the orchestrator quota plumbing in a later step.
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+        denial = await check_admission(
+            quota=quota,
+            audit=audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            agent=None,
+            resource_kind="artifact_download",
+            cost=1,
+        )
+        if denial is not None:
+            return denial
         if supervisor is None:
             raise HTTPException(
                 status_code=503,

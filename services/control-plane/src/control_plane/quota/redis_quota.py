@@ -231,6 +231,25 @@ class RedisQuotaService(QuotaService):
                 key = "qb:" + _bucket_key("img_bytes", req.tenant_id, row.scope)
                 cost = req.cost_overrides.get(QuotaDimension.IMAGE_STORAGE_BYTES, req.cost)
                 out.append((QuotaDimension.IMAGE_STORAGE_BYTES, key, capacity, 0.0, cost))
+            elif row.dimension is QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D:
+                # Mini-ADR J-25 (J.9-step2) — rolling 30-day artifact
+                # download count, same slow-drip shape as the image
+                # equivalent above.
+                capacity = row.burst or row.limit_value
+                refill = float(row.limit_value) / float(30 * 86_400)
+                key = "qb:" + _bucket_key("art_dl_count_30d", req.tenant_id, row.scope)
+                cost = req.cost_overrides.get(QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D, req.cost)
+                out.append(
+                    (QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D, key, capacity, refill, cost)
+                )
+            elif row.dimension is QuotaDimension.ARTIFACT_STORAGE_BYTES:
+                # Mini-ADR J-25 (J.9-step2) — sticky artifact bytes
+                # ceiling. Wired here so a future ``save_artifact`` quota
+                # path has the dimension ready.
+                capacity = row.limit_value
+                key = "qb:" + _bucket_key("art_bytes", req.tenant_id, row.scope)
+                cost = req.cost_overrides.get(QuotaDimension.ARTIFACT_STORAGE_BYTES, req.cost)
+                out.append((QuotaDimension.ARTIFACT_STORAGE_BYTES, key, capacity, 0.0, cost))
 
         if not any(d[0] is QuotaDimension.QPS for d in out) and self._default_qps_limit:
             qps_cost = req.cost_overrides.get(QuotaDimension.QPS, req.cost)

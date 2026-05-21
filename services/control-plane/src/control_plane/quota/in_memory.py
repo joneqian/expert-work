@@ -226,6 +226,44 @@ class InMemoryQuotaService(QuotaService):
                         cost=req.cost_overrides.get(QuotaDimension.IMAGE_STORAGE_BYTES, req.cost),
                     )
                 )
+            elif row.dimension is QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D:
+                # Mini-ADR J-25 (J.9-step2) — rolling 30-day artifact
+                # download count, same slow-drip shape as
+                # ``IMAGE_UPLOAD_COUNT_30D``.
+                capacity = row.burst or row.limit_value
+                refill = float(row.limit_value) / float(30 * 86_400)
+                key = _bucket_key("art_dl_count_30d", req.tenant_id, row.scope)
+                out.append(
+                    _ResolvedDimension(
+                        name=QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D,
+                        key=key,
+                        capacity=capacity,
+                        refill_rate_per_s=refill,
+                        cost=req.cost_overrides.get(
+                            QuotaDimension.ARTIFACT_DOWNLOAD_COUNT_30D, req.cost
+                        ),
+                    )
+                )
+            elif row.dimension is QuotaDimension.ARTIFACT_STORAGE_BYTES:
+                # Mini-ADR J-25 (J.9-step2) — sticky artifact bytes ceiling
+                # (no refill in M0; per-name lifecycle hard-delete refund is
+                # a future step that mirrors Mini-ADR J-32). Wired into the
+                # bucket runtime so a future ``save_artifact`` quota path
+                # has the dimension ready; download endpoints don't deduct
+                # storage_bytes.
+                capacity = row.limit_value
+                key = _bucket_key("art_bytes", req.tenant_id, row.scope)
+                out.append(
+                    _ResolvedDimension(
+                        name=QuotaDimension.ARTIFACT_STORAGE_BYTES,
+                        key=key,
+                        capacity=capacity,
+                        refill_rate_per_s=0.0,
+                        cost=req.cost_overrides.get(
+                            QuotaDimension.ARTIFACT_STORAGE_BYTES, req.cost
+                        ),
+                    )
+                )
 
         # Default per-tenant QPS bucket when nothing was configured.
         if not any(d.name is QuotaDimension.QPS for d in out) and self._default_qps_limit:

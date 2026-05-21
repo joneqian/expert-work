@@ -63,6 +63,18 @@ class QuotaDimension(StrEnum):
     # deletion → bytes refund is the J.6.补强-3 / Mini-ADR J-32 scope,
     # not landed yet.)
     IMAGE_STORAGE_BYTES = "image_storage_bytes"
+    # Mini-ADR J-25 (J.9-step2) — artifact download count over a rolling
+    # 30-day window. Same shape as ``IMAGE_UPLOAD_COUNT_30D``: bucket
+    # capacity = limit_value, refill_rate = limit / (30 * 86400) — slow
+    # drip approximating the rolling window. ``cost=1`` per download.
+    ARTIFACT_DOWNLOAD_COUNT_30D = "artifact_download_count_30d"
+    # Mini-ADR J-25 — total artifact storage bytes per user (sticky
+    # ceiling like ``IMAGE_STORAGE_BYTES``). Wired at the save-artifact
+    # tool layer is a follow-up step (orchestrator → quota plumbing);
+    # for M0 the J.15 ``user_workspace`` volume quota (Mini-ADR J-29) is
+    # the underlying storage cap, and this dimension is reserved for
+    # future per-artifact charging.
+    ARTIFACT_STORAGE_BYTES = "artifact_storage_bytes"
 
 
 class QuotaPurpose(StrEnum):
