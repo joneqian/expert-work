@@ -43,6 +43,7 @@ from control_plane.api import (
     build_runs_router,
     build_service_accounts_router,
     build_sessions_router,
+    build_skills_router,
     build_tenant_config_router,
     build_tenant_quotas_router,
     build_uploads_router,
@@ -160,6 +161,11 @@ from helix_agent.persistence.quota import (
     TokenReservationStore,
 )
 from helix_agent.persistence.rls import build_rls_sessionmaker
+from helix_agent.persistence.skill import (
+    InMemorySkillStore,
+    SkillStore,
+    SqlSkillStore,
+)
 from helix_agent.persistence.tenant_config import (
     InMemoryTenantConfigStore,
     SqlTenantConfigStore,
@@ -200,6 +206,7 @@ def create_app(
     artifact_repo: ArtifactStore | None = None,
     knowledge_repo: KnowledgeStore | None = None,
     image_upload_repo: ImageUploadStore | None = None,
+    skill_repo: SkillStore | None = None,
     knowledge_ingestion_runner: KnowledgeIngestionRunner | None = None,
     audit_logger: AuditLogger | None = None,
     manifest_loader: ManifestLoader | None = None,
@@ -277,6 +284,10 @@ def create_app(
     # Stream J.6.补强-3 (Mini-ADR J-32) — image upload registry.
     resolved_image_upload_store: ImageUploadStore = image_upload_repo or (
         sql_stores.image_upload if sql_stores else InMemoryImageUploadStore()
+    )
+    # Stream J.7a (Mini-ADR J-23) — skill registry.
+    resolved_skill_store: SkillStore = skill_repo or (
+        sql_stores.skill if sql_stores else InMemorySkillStore()
     )
     resolved_supervisor_client = build_supervisor_client(resolved_settings.sandbox_supervisor_url)
     resolved_feedback = feedback_repo or (
@@ -523,6 +534,7 @@ def create_app(
     app.state.artifact_store = resolved_artifact_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
+    app.state.skill_store = resolved_skill_store
     # Stream J.6 — the object store is created in the lifespan (it goes on
     # the AsyncExitStack); the upload endpoint reads it from app.state.
     app.state.object_store = None
@@ -614,6 +626,7 @@ def create_app(
     app.include_router(build_artifacts_router())
     app.include_router(build_knowledge_router())
     app.include_router(build_memory_router())
+    app.include_router(build_skills_router())
     app.include_router(build_uploads_router())
     app.include_router(build_service_accounts_router())
     app.include_router(build_api_keys_router())
@@ -640,6 +653,7 @@ class _SqlStores:
     memory: MemoryStore
     memory_dlq: MemoryWritebackDLQ  # Stream K.K7
     knowledge: KnowledgeStore
+    skill: SkillStore
     image_upload: ImageUploadStore  # Stream J.6.补强-3 (Mini-ADR J-32)
     artifact: ArtifactStore
     service_account: ServiceAccountStore
@@ -675,6 +689,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         memory=SqlMemoryStore(session_factory),
         memory_dlq=SqlMemoryWritebackDLQ(session_factory),
         knowledge=SqlKnowledgeStore(session_factory),
+        skill=SqlSkillStore(session_factory),
         image_upload=SqlImageUploadStore(session_factory),
         artifact=SqlArtifactStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),

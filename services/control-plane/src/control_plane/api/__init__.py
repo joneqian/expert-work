@@ -13,6 +13,7 @@ from control_plane.api.role_bindings import build_role_bindings_router
 from control_plane.api.runs import build_runs_router
 from control_plane.api.service_accounts import build_service_accounts_router
 from control_plane.api.sessions import build_sessions_router
+from control_plane.api.skills import build_skills_router
 from control_plane.api.tenant_config import build_tenant_config_router
 from control_plane.api.tenant_quotas import build_tenant_quotas_router
 from control_plane.api.uploads import build_uploads_router
@@ -31,6 +32,7 @@ __all__ = [
     "build_runs_router",
     "build_service_accounts_router",
     "build_sessions_router",
+    "build_skills_router",
     "build_tenant_config_router",
     "build_tenant_quotas_router",
     "build_uploads_router",
