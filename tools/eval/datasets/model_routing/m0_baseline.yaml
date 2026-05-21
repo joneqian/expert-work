@@ -1,0 +1,171 @@
+# J.11 model routing — M0 baseline dataset (Stream J.13a).
+#
+# 16 cases: 12 step-class resolution + 4 fallback chain.
+#
+# Each case has a "scenario" discriminator. See
+# tools/eval/model_routing.py for the parser + evaluator.
+
+name: model_routing-m0-baseline
+
+cases:
+  # ---------- step-class resolution (12) ----------
+
+  - id: resolution-001-single-planning-rule-hits
+    scenario: resolution
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: planning
+    expected_model_key: "anthropic:opus-4-7"
+
+  - id: resolution-002-single-planning-rule-reflection-falls-back
+    scenario: resolution
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: reflection
+    expected_model_key: "anthropic:haiku-4-5"
+
+  - id: resolution-003-single-planning-rule-default-falls-back
+    scenario: resolution
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: default
+    expected_model_key: "anthropic:haiku-4-5"
+
+  - id: resolution-004-single-reflection-rule-hits
+    scenario: resolution
+    routing_rules:
+      - when: reflection
+        model_key: "openai:gpt-4o"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: reflection
+    expected_model_key: "openai:gpt-4o"
+
+  - id: resolution-005-single-reflection-rule-planning-falls-back
+    scenario: resolution
+    routing_rules:
+      - when: reflection
+        model_key: "openai:gpt-4o"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: planning
+    expected_model_key: "anthropic:haiku-4-5"
+
+  - id: resolution-006-two-rules-planning-hits
+    scenario: resolution
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+      - when: reflection
+        model_key: "openai:gpt-4o"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: planning
+    expected_model_key: "anthropic:opus-4-7"
+
+  - id: resolution-007-two-rules-reflection-hits
+    scenario: resolution
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+      - when: reflection
+        model_key: "openai:gpt-4o"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: reflection
+    expected_model_key: "openai:gpt-4o"
+
+  - id: resolution-008-two-rules-default-falls-back
+    scenario: resolution
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+      - when: reflection
+        model_key: "openai:gpt-4o"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: default
+    expected_model_key: "anthropic:haiku-4-5"
+
+  - id: resolution-009-empty-rules-falls-back
+    scenario: resolution
+    routing_rules: []
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: planning
+    expected_model_key: "anthropic:haiku-4-5"
+
+  - id: resolution-010-duplicate-when-first-wins
+    scenario: resolution
+    # Build-time validators reject duplicate `when` rules, but the
+    # resolution helper must still behave predictably if they slip
+    # through — first-match-wins keeps the decision stable.
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+      - when: planning
+        model_key: "openai:gpt-4o"
+    default_model_key: "anthropic:haiku-4-5"
+    step_class: planning
+    expected_model_key: "anthropic:opus-4-7"
+
+  - id: resolution-011-unknown-step-class-falls-back
+    scenario: resolution
+    routing_rules:
+      - when: planning
+        model_key: "anthropic:opus-4-7"
+    default_model_key: "anthropic:haiku-4-5"
+    # "vision" is on the design roadmap (STREAM-J-DESIGN § 18.3) but
+    # current RouteRule.when only matches planning|reflection — vision
+    # falls back to the default until shipped.
+    step_class: vision
+    expected_model_key: "anthropic:haiku-4-5"
+
+  - id: resolution-012-default-and-routed-distinct
+    scenario: resolution
+    routing_rules:
+      - when: reflection
+        model_key: "openai:gpt-4o"
+    default_model_key: "anthropic:opus-4-7"
+    step_class: reflection
+    expected_model_key: "openai:gpt-4o"
+
+  # ---------- fallback chain (4) ----------
+
+  - id: fallback-001-single-success
+    scenario: fallback
+    providers:
+      - key: "anthropic:primary"
+        action: success
+    expected_outcome: success
+    expected_winner_key: "anthropic:primary"
+
+  - id: fallback-002-primary-5xx-fallback-wins
+    scenario: fallback
+    providers:
+      - key: "anthropic:primary"
+        action: server_error
+      - key: "openai:fallback"
+        action: success
+    expected_outcome: success
+    expected_winner_key: "openai:fallback"
+
+  - id: fallback-003-primary-4xx-no-fallback
+    scenario: fallback
+    providers:
+      - key: "anthropic:primary"
+        action: client_error
+      - key: "openai:fallback"
+        action: success
+    expected_outcome: client_error
+
+  - id: fallback-004-all-exhausted
+    scenario: fallback
+    providers:
+      - key: "anthropic:primary"
+        action: server_error
+      - key: "openai:fallback-1"
+        action: rate_limit
+      - key: "openai:fallback-2"
+        action: network_error
+    expected_outcome: exhausted

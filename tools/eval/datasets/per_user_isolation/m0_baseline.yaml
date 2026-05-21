@@ -1,0 +1,123 @@
+# J.14 per-user isolation — M0 baseline dataset (Stream J.13a).
+#
+# 12 cases covering the four branches of caller_owns_thread:
+#   1. meta.user_id is None        (legacy unowned, tenant-scoped)
+#   2. principal.subject_type != user  (machine principals, tenant-scoped)
+#   3. is_admin(principal)         (tenant-wide bypass)
+#   4. else: caller_user_id == meta.user_id
+#
+# Threshold = pass-rate 1.00 (Mini-ADR J-37 — isolation = no slack).
+#
+# Two fixed test UUIDs:
+#   user-A = 11111111-1111-1111-1111-111111111111
+#   user-B = 22222222-2222-2222-2222-222222222222
+
+name: per_user_isolation-m0-baseline
+
+cases:
+  # ---------- Branch 1: legacy unowned thread (meta.user_id is None) ----------
+
+  - id: legacy-001-plain-user-passes
+    meta_user_id: null
+    caller_user_id: "11111111-1111-1111-1111-111111111111"
+    principal:
+      subject_type: user
+      roles: []
+    expected_allowed: true
+
+  - id: legacy-002-admin-passes
+    meta_user_id: null
+    caller_user_id: "11111111-1111-1111-1111-111111111111"
+    principal:
+      subject_type: user
+      roles: [admin]
+    expected_allowed: true
+
+  - id: legacy-003-service-passes
+    meta_user_id: null
+    caller_user_id: null
+    principal:
+      subject_type: service
+      roles: []
+    expected_allowed: true
+
+  # ---------- Branch 2: machine principal on owned thread ----------
+
+  - id: machine-001-service-on-owned-thread-passes
+    meta_user_id: "11111111-1111-1111-1111-111111111111"
+    caller_user_id: null
+    principal:
+      subject_type: service
+      roles: []
+    expected_allowed: true
+
+  - id: machine-002-service-account-on-owned-thread-passes
+    meta_user_id: "11111111-1111-1111-1111-111111111111"
+    caller_user_id: null
+    principal:
+      subject_type: service_account
+      roles: []
+    expected_allowed: true
+
+  # ---------- Branch 3: admin bypass ----------
+
+  - id: admin-001-on-other-users-thread-passes
+    meta_user_id: "22222222-2222-2222-2222-222222222222"
+    caller_user_id: "11111111-1111-1111-1111-111111111111"
+    principal:
+      subject_type: user
+      roles: [admin]
+    expected_allowed: true
+
+  - id: admin-002-on-own-thread-passes
+    meta_user_id: "11111111-1111-1111-1111-111111111111"
+    caller_user_id: "11111111-1111-1111-1111-111111111111"
+    principal:
+      subject_type: user
+      roles: [admin]
+    expected_allowed: true
+
+  # ---------- Branch 4: plain user on owned thread ----------
+
+  - id: user-001-on-own-thread-passes
+    meta_user_id: "11111111-1111-1111-1111-111111111111"
+    caller_user_id: "11111111-1111-1111-1111-111111111111"
+    principal:
+      subject_type: user
+      roles: []
+    expected_allowed: true
+
+  - id: user-002-cross-user-denied
+    meta_user_id: "22222222-2222-2222-2222-222222222222"
+    caller_user_id: "11111111-1111-1111-1111-111111111111"
+    principal:
+      subject_type: user
+      roles: []
+    expected_allowed: false
+
+  - id: user-003-cross-user-reverse-denied
+    meta_user_id: "11111111-1111-1111-1111-111111111111"
+    caller_user_id: "22222222-2222-2222-2222-222222222222"
+    principal:
+      subject_type: user
+      roles: []
+    expected_allowed: false
+
+  - id: user-004-no-caller-id-denied
+    # Edge case: human-user principal somehow reached caller_owns_thread
+    # without a resolved tenant_user id. Must deny (None != UUID).
+    meta_user_id: "11111111-1111-1111-1111-111111111111"
+    caller_user_id: null
+    principal:
+      subject_type: user
+      roles: []
+    expected_allowed: false
+
+  - id: user-005-non-admin-role-denied
+    # Role other than admin must not bypass.
+    meta_user_id: "22222222-2222-2222-2222-222222222222"
+    caller_user_id: "11111111-1111-1111-1111-111111111111"
+    principal:
+      subject_type: user
+      roles: [operator, viewer]
+    expected_allowed: false

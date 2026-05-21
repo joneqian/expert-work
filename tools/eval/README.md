@@ -53,3 +53,28 @@ set. Deferred to M2-D: LLM-as-judge assertions, a real provider wired to
 the orchestrator LLM stack, regression-gating, A/B. Eval **dataset**
 organisation — golden / regression sets — lives in
 [`datasets/`](./datasets/README.md) (Stream G.5).
+
+## J.13a baseline aggregator (Stream J.13a, Mini-ADR J-38)
+
+Per-capability eval modules sit next to this harness:
+
+- `memory_recall.py` — J.3 recall / MRR (K12 module).
+- `model_routing.py` — J.11 step-class resolution + fallback chain.
+- `per_user_isolation.py` — J.14 `caller_owns_thread` decision table.
+- (J.1 / J.2 / J.6 / J.15 land in the J.13a-2 PR; 8 other capabilities
+  emit `status: DEFERRED` stubs.)
+
+`run_baseline.py` walks the registry and writes the checked-in baseline
+file that ``STREAM-M-DESIGN.md`` Exit Criteria reads:
+
+```bash
+.venv/bin/python tools/eval/run_baseline.py
+# writes tools/eval/baselines/m0_gate_baseline.yaml
+```
+
+Each capability module exports `evaluate_set(cases, *, judge=None,
+rerun_count=3) -> CapabilityReport` + `load_cases(path)`. The shared
+report shape lives in [`_capability.py`](./_capability.py). LLM-judge
+defaults (Mini-ADR J-39) are `claude-haiku-4-5-20251001` at
+`temperature=0.0` with N=3 reruns, but no J.13a-1 capability uses the
+judge — J.1 plan_execute is the only consumer and ships in J.13a-2.

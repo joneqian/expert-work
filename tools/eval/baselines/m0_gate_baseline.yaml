@@ -1,0 +1,133 @@
+metadata:
+  generated_at: '2026-05-21T03:06:33+00:00'
+  helix_commit: 69b3b0de0f0675874ed383fc35a3a300530a1fdb
+  judge_model: claude-haiku-4-5-20251001
+  judge_temperature: 0.0
+  rerun_count: 3
+  embedder: helix-fake-keyword-embedder-v1
+capabilities:
+  J.1_plan_execute:
+    metric_type: pass-rate+llm-judge
+    sample_size: 0
+    threshold:
+      pass_rate: 0.8
+      judge_mean: 4.0
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability shipped; eval scheduled for J.13a-2 PR.
+  J.2_reflect:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      correction_rate: 0.75
+      false_positive_rate: 0.2
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability shipped; eval scheduled for J.13a-2 PR.
+  J.3_memory_recall:
+    metric_type: recall@5+mrr@5
+    sample_size: 32
+    threshold:
+      recall_at_5: 0.7
+      mrr_at_5: 0.55
+    score:
+      recall_at_5: 1.0
+      mrr_at_5: 0.984375
+    status: PASS
+  J.4_sub_agent:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate: 0.8
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
+      stub locks the baseline file shape.
+  J.5_rag:
+    metric_type: pass-rate+recall@k
+    sample_size: 0
+    threshold:
+      pass_rate: 0.8
+      recall_at_k: 0.7
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
+      stub locks the baseline file shape.
+  J.6_multimodal:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate_path_a: 0.8
+      pass_rate_path_b: 0.8
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability shipped; eval scheduled for J.13a-2 PR.
+  J.7_skill:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate: 0.8
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
+      stub locks the baseline file shape.
+  J.8_hitl:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate: 0.95
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
+      stub locks the baseline file shape.
+  J.9_artifact:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate: 0.9
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
+      stub locks the baseline file shape.
+  J.10_trigger:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate: 0.9
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
+      stub locks the baseline file shape.
+  J.11_model_routing:
+    metric_type: pass-rate
+    sample_size: 16
+    threshold:
+      pass_rate: 0.95
+    score:
+      pass_rate: 1.0
+    status: PASS
+  J.12_learning:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate: 0.8
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
+      stub locks the baseline file shape.
+  J.14_per_user_isolation:
+    metric_type: pass-rate
+    sample_size: 12
+    threshold:
+      pass_rate: 1.0
+    score:
+      pass_rate: 1.0
+    status: PASS
+  J.15_persistent_volume:
+    metric_type: pass-rate
+    sample_size: 0
+    threshold:
+      pass_rate: 0.9
+    score: {}
+    status: DEFERRED
+    deferred_reason: Capability shipped; eval scheduled for J.13a-2 PR.

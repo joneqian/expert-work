@@ -1,0 +1,407 @@
+# J.3 memory recall — M0 baseline dataset (Stream J.13a).
+#
+# 32 cases extending the 8-case K12 seed (zh_en_seed.yaml) with two more
+# axes:
+#   - language: zh + en (8 each)
+#   - kind:     fact + episodic (8 each per language)
+#
+# Layout (8 each, total 32):
+#   zh fact     (zhf-001 .. zhf-008)
+#   en fact     (enf-001 .. enf-008)
+#   zh episodic (zhe-001 .. zhe-008)
+#   en episodic (ene-001 .. ene-008)
+#
+# Threshold against the deterministic FakeKeywordEmbedder
+# (tools/eval/run_baseline.py) is recall@5 ≥ 0.70 / mrr@5 ≥ 0.55
+# (Mini-ADR J-37; see STREAM-J-DESIGN § 18.3).
+
+name: memory_recall-m0-baseline
+
+cases:
+  # ---------- zh fact (8) ----------
+  - id: zhf-001
+    language: zh
+    query: 我喜欢喝咖啡
+    memories:
+      - id: m1
+        content: 用户偏好咖啡而不是茶
+        kind: fact
+      - id: m2
+        content: 用户家有一只猫
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhf-002
+    language: zh
+    query: 用户的工作领域
+    memories:
+      - id: m1
+        content: 用户是一名后端工程师
+        kind: fact
+      - id: m2
+        content: 用户喜欢周末去爬山
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhf-003
+    language: zh
+    query: 用户对部署偏好的回答
+    memories:
+      - id: m1
+        content: 用户偏好 docker compose 而不是 K8s
+        kind: fact
+      - id: m2
+        content: 用户喜欢用 vim 写代码
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhf-004
+    language: zh
+    query: 用户喜欢的编辑器
+    memories:
+      - id: m1
+        content: 用户用 vim 作为主要编辑器
+        kind: fact
+      - id: m2
+        content: 用户家里有两只猫
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhf-005
+    language: zh
+    query: 用户的母语
+    memories:
+      - id: m1
+        content: 用户母语是中文
+        kind: fact
+      - id: m2
+        content: 用户在上海工作
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhf-006
+    language: zh
+    query: 用户偏好的数据库
+    memories:
+      - id: m1
+        content: 用户长期使用 PostgreSQL 数据库
+        kind: fact
+      - id: m2
+        content: 用户偏好 Python 编程语言
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhf-007
+    language: zh
+    query: 用户的所在城市
+    memories:
+      - id: m1
+        content: 用户长期居住在上海
+        kind: fact
+      - id: m2
+        content: 用户曾经去过北京旅游
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhf-008
+    language: zh
+    query: 用户的饮食偏好
+    memories:
+      - id: m1
+        content: 用户偏好素食饮食
+        kind: fact
+      - id: m2
+        content: 用户喜欢看科幻电影
+        kind: fact
+    expected_recall_ids: [m1]
+
+  # ---------- en fact (8) ----------
+  - id: enf-001
+    language: en
+    query: What does the user drink in the morning?
+    memories:
+      - id: m1
+        content: User drinks coffee every morning
+        kind: fact
+      - id: m2
+        content: User has a cat named Mochi
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: enf-002
+    language: en
+    query: User's role at work
+    memories:
+      - id: m1
+        content: User is a backend engineer at a fintech startup
+        kind: fact
+      - id: m2
+        content: User likes hiking on weekends
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: enf-003
+    language: en
+    query: User's deployment preferences
+    memories:
+      - id: m1
+        content: User prefers docker compose over Kubernetes for self-hosting
+        kind: fact
+      - id: m2
+        content: User uses vim for editing
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: enf-004
+    language: en
+    query: User's primary editor
+    memories:
+      - id: m1
+        content: User uses vim as the primary editor
+        kind: fact
+      - id: m2
+        content: User has two cats at home
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: enf-005
+    language: en
+    query: User's native language
+    memories:
+      - id: m1
+        content: User's native language is Mandarin Chinese
+        kind: fact
+      - id: m2
+        content: User works in Shanghai
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: enf-006
+    language: en
+    query: User's preferred database
+    memories:
+      - id: m1
+        content: User has long used PostgreSQL as the primary database
+        kind: fact
+      - id: m2
+        content: User prefers Python as a programming language
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: enf-007
+    language: en
+    query: User's city of residence
+    memories:
+      - id: m1
+        content: User lives in Shanghai
+        kind: fact
+      - id: m2
+        content: User once visited Beijing as a tourist
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: enf-008
+    language: en
+    query: User's dietary preferences
+    memories:
+      - id: m1
+        content: User follows a vegetarian diet
+        kind: fact
+      - id: m2
+        content: User enjoys watching science fiction films
+        kind: fact
+    expected_recall_ids: [m1]
+
+  # ---------- zh episodic (8) ----------
+  - id: zhe-001
+    language: zh
+    query: 上次问的关于 Python 的问题
+    memories:
+      - id: m1
+        content: 用户上次询问 Python 异步编程
+        kind: episodic
+      - id: m2
+        content: 用户在准备一次法语考试
+        kind: episodic
+    expected_recall_ids: [m1]
+
+  - id: zhe-002
+    language: zh
+    query: 用户上次的部署问题
+    memories:
+      - id: m1
+        content: 用户上次询问关于 docker 部署的步骤
+        kind: episodic
+      - id: m2
+        content: 用户上次预订过一次旅行机票
+        kind: episodic
+    expected_recall_ids: [m1]
+
+  - id: zhe-003
+    language: zh
+    query: 之前会议的总结
+    memories:
+      - id: m1
+        content: 上周一与产品团队的会议总结
+        kind: episodic
+      - id: m2
+        content: 用户家里有一只猫
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhe-004
+    language: zh
+    query: 上次反馈过的 bug
+    memories:
+      - id: m1
+        content: 用户上次反馈了一个登录页 bug
+        kind: episodic
+      - id: m2
+        content: 用户喜欢喝美式咖啡
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhe-005
+    language: zh
+    query: 用户上周提到的项目
+    memories:
+      - id: m1
+        content: 用户上周提到正在做一个数据可视化项目
+        kind: episodic
+      - id: m2
+        content: 用户家里养了两条金鱼
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhe-006
+    language: zh
+    query: 上次的代码评审反馈
+    memories:
+      - id: m1
+        content: 用户上次代码评审收到关于命名的反馈
+        kind: episodic
+      - id: m2
+        content: 用户最近读了一本科幻小说
+        kind: episodic
+    expected_recall_ids: [m1]
+
+  - id: zhe-007
+    language: zh
+    query: 用户最近一次的体检结果
+    memories:
+      - id: m1
+        content: 用户最近一次体检结果显示身体健康
+        kind: episodic
+      - id: m2
+        content: 用户喜欢周末去爬山
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: zhe-008
+    language: zh
+    query: 上次的项目演示
+    memories:
+      - id: m1
+        content: 用户上次的项目演示获得了好评
+        kind: episodic
+      - id: m2
+        content: 用户喜欢使用 PostgreSQL 数据库
+        kind: fact
+    expected_recall_ids: [m1]
+
+  # ---------- en episodic (8) ----------
+  - id: ene-001
+    language: en
+    query: Question the user asked about Python earlier
+    memories:
+      - id: m1
+        content: User asked about Python async / await patterns
+        kind: episodic
+      - id: m2
+        content: User is studying for the French DELF exam
+        kind: episodic
+    expected_recall_ids: [m1]
+
+  - id: ene-002
+    language: en
+    query: User's previous deployment question
+    memories:
+      - id: m1
+        content: User previously asked about docker deployment steps
+        kind: episodic
+      - id: m2
+        content: User booked a travel ticket last month
+        kind: episodic
+    expected_recall_ids: [m1]
+
+  - id: ene-003
+    language: en
+    query: Summary of the earlier product meeting
+    memories:
+      - id: m1
+        content: Summary of last Monday's product team meeting
+        kind: episodic
+      - id: m2
+        content: User has a cat at home
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: ene-004
+    language: en
+    query: Bug the user reported earlier
+    memories:
+      - id: m1
+        content: User reported a bug on the login page last time
+        kind: episodic
+      - id: m2
+        content: User prefers Americano coffee
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: ene-005
+    language: en
+    query: Project the user mentioned last week
+    memories:
+      - id: m1
+        content: User mentioned working on a data visualization project last week
+        kind: episodic
+      - id: m2
+        content: User keeps two goldfish at home
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: ene-006
+    language: en
+    query: Last code review feedback
+    memories:
+      - id: m1
+        content: User received naming feedback at the last code review
+        kind: episodic
+      - id: m2
+        content: User recently read a science fiction novel
+        kind: episodic
+    expected_recall_ids: [m1]
+
+  - id: ene-007
+    language: en
+    query: User's recent health checkup
+    memories:
+      - id: m1
+        content: User's recent health checkup showed good results
+        kind: episodic
+      - id: m2
+        content: User enjoys hiking on weekends
+        kind: fact
+    expected_recall_ids: [m1]
+
+  - id: ene-008
+    language: en
+    query: User's previous project demo
+    memories:
+      - id: m1
+        content: User's previous project demo received positive feedback
+        kind: episodic
+      - id: m2
+        content: User prefers PostgreSQL as a database
+        kind: fact
+    expected_recall_ids: [m1]
