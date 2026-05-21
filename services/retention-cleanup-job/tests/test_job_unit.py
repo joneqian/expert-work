@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence import InMemoryImageUploadStore
+from helix_agent.persistence import InMemoryArtifactStore, InMemoryImageUploadStore
 from helix_agent.runtime.storage import InMemoryObjectStore
 from retention_cleanup_job.job import CleanupReport, RetentionCleanupJob
 
@@ -21,6 +21,8 @@ def test_cleanup_report_default_is_all_zero() -> None:
     assert report.image_uploads_hard_deleted == 0
     assert report.image_object_keys_removed == 0
     assert report.image_object_keys_failed == 0
+    assert report.artifacts_soft_deleted == 0
+    assert report.artifacts_hard_deleted == 0
     assert report.duration_seconds == 0.0
     assert report.audit_deleted_by_tenant == {}
 
@@ -39,6 +41,22 @@ def test_job_rejects_non_positive_image_retention_days() -> None:
         RetentionCleanupJob(
             db_session_factory=lambda: None,  # type: ignore[arg-type]
             image_retention_days=0,
+        )
+
+
+def test_job_rejects_non_positive_artifact_retention_days() -> None:
+    with pytest.raises(ValueError, match="artifact_retention_days"):
+        RetentionCleanupJob(
+            db_session_factory=lambda: None,  # type: ignore[arg-type]
+            artifact_retention_days=0,
+        )
+
+
+def test_job_rejects_non_positive_artifact_hard_delete_grace_days() -> None:
+    with pytest.raises(ValueError, match="artifact_hard_delete_grace_days"):
+        RetentionCleanupJob(
+            db_session_factory=lambda: None,  # type: ignore[arg-type]
+            artifact_hard_delete_grace_days=0,
         )
 
 
@@ -169,3 +187,116 @@ async def test_delete_expired_images_noop_without_stores() -> None:
     )
     rows, keys_ok, keys_failed = await job._delete_expired_images()
     assert (rows, keys_ok, keys_failed) == (0, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-25 (J.9-step1) — artifact lifecycle sweep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sweep_artifacts_noop_without_store() -> None:
+    """Job constructed without ArtifactStore skips the artifact pass cleanly."""
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+    )
+    soft, hard = await job._sweep_artifacts()
+    assert (soft, hard) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_sweep_artifacts_soft_deletes_stale_active_rows() -> None:
+    """Active rows past ``artifact_retention_days`` get soft-deleted."""
+    artifacts = InMemoryArtifactStore()
+    tenant, user = uuid4(), uuid4()
+    await artifacts.save_version(
+        tenant_id=tenant,
+        user_id=user,
+        name="stale.md",
+        kind="document",
+        path_in_workspace="stale.md",
+        created_in_thread="t-1",
+    )
+    # Backdate ``updated_at`` to before the retention horizon.
+    stale = (await artifacts.list_for_user(tenant_id=tenant, user_id=user))[0]
+    artifacts._artifacts[stale.id] = stale.model_copy(
+        update={"updated_at": datetime.now(UTC) - timedelta(days=120)}
+    )
+    # And a fresh row that must survive.
+    await artifacts.save_version(
+        tenant_id=tenant,
+        user_id=user,
+        name="fresh.md",
+        kind="document",
+        path_in_workspace="fresh.md",
+        created_in_thread="t-2",
+    )
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        artifact_store=artifacts,
+        artifact_retention_days=90,
+    )
+    soft, hard = await job._sweep_artifacts()
+    assert (soft, hard) == (1, 0)
+    # Only ``fresh.md`` remains in the default (non-deleted) listing.
+    active = await artifacts.list_for_user(tenant_id=tenant, user_id=user)
+    assert [a.name for a in active] == ["fresh.md"]
+
+
+@pytest.mark.asyncio
+async def test_sweep_artifacts_hard_deletes_expired_soft_deleted_rows() -> None:
+    """Soft-deleted rows past the hard-delete grace are removed entirely."""
+    artifacts = InMemoryArtifactStore()
+    tenant, user = uuid4(), uuid4()
+    await artifacts.save_version(
+        tenant_id=tenant,
+        user_id=user,
+        name="old.md",
+        kind="document",
+        path_in_workspace="old.md",
+        created_in_thread="t-1",
+    )
+    # Soft-delete with a backdated timestamp past the grace window.
+    long_ago = datetime.now(UTC) - timedelta(days=120)
+    await artifacts.soft_delete(tenant_id=tenant, user_id=user, name="old.md", now=long_ago)
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        artifact_store=artifacts,
+        artifact_hard_delete_grace_days=60,
+    )
+    soft, hard = await job._sweep_artifacts()
+    # Active sweep finds nothing; hard sweep clears the soft-deleted row.
+    assert (soft, hard) == (0, 1)
+    # No row should remain even with include_deleted=True.
+    assert await artifacts.list_for_user(tenant_id=tenant, user_id=user, include_deleted=True) == []
+
+
+@pytest.mark.asyncio
+async def test_sweep_artifacts_skips_recent_soft_deleted_rows() -> None:
+    """Recent soft-deletes (within the grace window) survive the sweep."""
+    artifacts = InMemoryArtifactStore()
+    tenant, user = uuid4(), uuid4()
+    await artifacts.save_version(
+        tenant_id=tenant,
+        user_id=user,
+        name="recent.md",
+        kind="document",
+        path_in_workspace="recent.md",
+        created_in_thread="t-1",
+    )
+    # Soft-delete only 10 days ago — must stay.
+    recent = datetime.now(UTC) - timedelta(days=10)
+    await artifacts.soft_delete(tenant_id=tenant, user_id=user, name="recent.md", now=recent)
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        artifact_store=artifacts,
+        artifact_hard_delete_grace_days=60,
+    )
+    soft, hard = await job._sweep_artifacts()
+    assert (soft, hard) == (0, 0)
+    # Row still in include_deleted listing.
+    deleted = await artifacts.list_for_user(tenant_id=tenant, user_id=user, include_deleted=True)
+    assert len(deleted) == 1

@@ -29,6 +29,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from helix_agent.persistence.artifact import ArtifactStore
 from helix_agent.persistence.image_upload import ImageUploadStore
 from helix_agent.runtime.storage import ObjectStore
 
@@ -58,6 +59,9 @@ class CleanupReport:
     image_uploads_hard_deleted: int = 0
     image_object_keys_removed: int = 0
     image_object_keys_failed: int = 0
+    # Mini-ADR J-25 (J.9-step1) — artifact lifecycle counts.
+    artifacts_soft_deleted: int = 0
+    artifacts_hard_deleted: int = 0
     duration_seconds: float = 0.0
     # Per-tenant breakdown of audit deletes (for observability).
     audit_deleted_by_tenant: dict[str, int] = field(default_factory=dict)
@@ -74,6 +78,9 @@ class RetentionCleanupJob:
         image_upload_store: ImageUploadStore | None = None,
         object_store: ObjectStore | None = None,
         image_retention_days: int = 90,
+        artifact_store: ArtifactStore | None = None,
+        artifact_retention_days: int = 90,
+        artifact_hard_delete_grace_days: int = 60,
     ) -> None:
         if batch_size <= 0:
             msg = "batch_size must be positive"
@@ -81,11 +88,20 @@ class RetentionCleanupJob:
         if image_retention_days < 1:
             msg = "image_retention_days must be >= 1"
             raise ValueError(msg)
+        if artifact_retention_days < 1:
+            msg = "artifact_retention_days must be >= 1"
+            raise ValueError(msg)
+        if artifact_hard_delete_grace_days < 1:
+            msg = "artifact_hard_delete_grace_days must be >= 1"
+            raise ValueError(msg)
         self._sf = db_session_factory
         self._batch_size = batch_size
         self._image_upload_store = image_upload_store
         self._object_store = object_store
         self._image_retention_days = image_retention_days
+        self._artifact_store = artifact_store
+        self._artifact_retention_days = artifact_retention_days
+        self._artifact_hard_delete_grace_days = artifact_hard_delete_grace_days
 
     async def run_once(self) -> CleanupReport:
         """Run the retention passes once and return a tally.
@@ -109,6 +125,7 @@ class RetentionCleanupJob:
         event_deleted = await self._delete_event_log()
         jwt_deleted = await self._delete_expired_jwt_blacklist()
         image_rows, image_keys_ok, image_keys_failed = await self._delete_expired_images()
+        artifact_soft, artifact_hard = await self._sweep_artifacts()
 
         return CleanupReport(
             audit_deleted=audit_deleted,
@@ -119,8 +136,53 @@ class RetentionCleanupJob:
             image_uploads_hard_deleted=image_rows,
             image_object_keys_removed=image_keys_ok,
             image_object_keys_failed=image_keys_failed,
+            artifacts_soft_deleted=artifact_soft,
+            artifacts_hard_deleted=artifact_hard,
             duration_seconds=time.monotonic() - started,
         )
+
+    async def _sweep_artifacts(self) -> tuple[int, int]:
+        """Mini-ADR J-25 (J.9-step1) — two-stage artifact lifecycle sweep.
+
+        Stage 1: active rows past ``artifact_retention_days`` → soft-delete
+        (sets ``deleted_at``). Stage 2: soft-deleted rows past
+        ``artifact_hard_delete_grace_days`` → hard-delete (row +
+        version rows).
+
+        No-op when :class:`ArtifactStore` is not wired (unit-test path
+        + deployments not running J.9). Workspace files are *not*
+        removed here — J.15 volume lifecycle (Mini-ADR J-36) owns the
+        underlying bytes; ``J.9-step1`` deliberately stops at the
+        metadata. The follow-up archive 中间档 (tar.zst → ObjectStore)
+        will land in a later step that reuses the J.15 archive flow.
+        """
+        if self._artifact_store is None:
+            return 0, 0
+        now = datetime.now(UTC)
+        # Stage 1 — soft-delete active rows past retention.
+        soft_cutoff = now - timedelta(days=self._artifact_retention_days)
+        active = await self._artifact_store.list_active_past_retention(
+            before=soft_cutoff, limit=self._batch_size
+        )
+        soft_count = 0
+        for row in active:
+            ok = await self._artifact_store.soft_delete(
+                tenant_id=row.tenant_id,
+                user_id=row.user_id,
+                name=row.name,
+                now=now,
+            )
+            if ok:
+                soft_count += 1
+        # Stage 2 — hard-delete soft-deleted rows past the grace window.
+        hard_cutoff = now - timedelta(days=self._artifact_hard_delete_grace_days)
+        expired = await self._artifact_store.list_expired(
+            before=hard_cutoff, limit=self._batch_size
+        )
+        if not expired:
+            return soft_count, 0
+        hard_count = await self._artifact_store.hard_delete(artifact_ids=[a.id for a in expired])
+        return soft_count, hard_count
 
     async def _delete_expired_images(self) -> tuple[int, int, int]:
         """Remove image rows past their retention window + their bytes.
