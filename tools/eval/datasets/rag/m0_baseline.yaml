@@ -242,4 +242,3 @@ cases:
               - id: gdpr-misc-003
                 content: GDPR controller and processor roles are defined separately
     expected_chunk_ids: [gdpr-dsar-001]
-

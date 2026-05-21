@@ -293,8 +293,7 @@ def _parse_base(entry: dict[str, Any]) -> RagKnowledgeBase:
 
 def _parse_doc(entry: dict[str, Any]) -> RagDocument:
     chunks = tuple(
-        RagChunk(id=str(c["id"]), content=str(c["content"]))
-        for c in entry.get("chunks", [])
+        RagChunk(id=str(c["id"]), content=str(c["content"])) for c in entry.get("chunks", [])
     )
     return RagDocument(filename=str(entry["filename"]), chunks=chunks)
 
@@ -302,11 +301,11 @@ def _parse_doc(entry: dict[str, Any]) -> RagDocument:
 __all__ = [
     "CAPABILITY",
     "METRIC_TYPE",
+    "THRESHOLD",
     "RagCase",
     "RagChunk",
     "RagDocument",
     "RagKnowledgeBase",
-    "THRESHOLD",
     "evaluate_case",
     "evaluate_set",
     "load_cases",
