@@ -93,9 +93,7 @@ class InMemorySkillStore(SkillStore):
             return page[:limit], page[limit - 1].id
         return page, None
 
-    async def set_status(
-        self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus
-    ) -> Skill:
+    async def set_status(self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus) -> Skill:
         row = await self.get_skill(skill_id=skill_id, tenant_id=tenant_id)
         if row is None:
             raise SkillNotFoundError(str(skill_id))
@@ -151,9 +149,7 @@ class InMemorySkillStore(SkillStore):
         )
         return version
 
-    async def get_version(
-        self, *, version_id: UUID, tenant_id: UUID
-    ) -> SkillVersion | None:
+    async def get_version(self, *, version_id: UUID, tenant_id: UUID) -> SkillVersion | None:
         for v in self._versions:
             if v.id == version_id and v.tenant_id == tenant_id:
                 return v
@@ -163,30 +159,20 @@ class InMemorySkillStore(SkillStore):
         self, *, skill_id: UUID, tenant_id: UUID, version: int
     ) -> SkillVersion | None:
         for v in self._versions:
-            if (
-                v.skill_id == skill_id
-                and v.tenant_id == tenant_id
-                and v.version == version
-            ):
+            if v.skill_id == skill_id and v.tenant_id == tenant_id and v.version == version:
                 return v
         return None
 
-    async def list_versions(
-        self, *, skill_id: UUID, tenant_id: UUID
-    ) -> list[SkillVersion]:
+    async def list_versions(self, *, skill_id: UUID, tenant_id: UUID) -> list[SkillVersion]:
         versions = [
-            v
-            for v in self._versions
-            if v.skill_id == skill_id and v.tenant_id == tenant_id
+            v for v in self._versions if v.skill_id == skill_id and v.tenant_id == tenant_id
         ]
         versions.sort(key=lambda v: v.version, reverse=True)
         return versions
 
     # ------------------------------------------------------------ resolve
 
-    async def resolve_by_name(
-        self, *, tenant_id: UUID, name: str
-    ) -> SkillVersion | None:
+    async def resolve_by_name(self, *, tenant_id: UUID, name: str) -> SkillVersion | None:
         skill = await self.get_skill_by_name(tenant_id=tenant_id, name=name)
         if skill is None or skill.status != SkillStatus.ACTIVE or skill.latest_version == 0:
             return None

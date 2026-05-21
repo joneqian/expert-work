@@ -12,9 +12,9 @@ from helix_agent.protocol import (
 
 
 def test_skill_status_enum_values() -> None:
-    assert SkillStatus.DRAFT == "draft"
-    assert SkillStatus.ACTIVE == "active"
-    assert SkillStatus.ARCHIVED == "archived"
+    assert SkillStatus.DRAFT.value == "draft"
+    assert SkillStatus.ACTIVE.value == "active"
+    assert SkillStatus.ARCHIVED.value == "archived"
 
 
 @pytest.mark.parametrize(
@@ -70,9 +70,11 @@ def test_skill_ref_pattern_constant_exposed() -> None:
 
 def test_skill_ref_frozen_dto() -> None:
     """Pydantic ConfigDict(frozen=True) — sanity check immutability."""
+    from pydantic import ValidationError
+
     ref = parse_skill_ref("foo@2")
-    with pytest.raises(Exception):
-        ref.name = "bar"  # type: ignore[misc]
+    with pytest.raises(ValidationError):
+        ref.name = "bar"
 
 
 def test_agent_spec_skills_field_validator_accepts_mixed() -> None:
@@ -84,17 +86,21 @@ def test_agent_spec_skills_field_validator_accepts_mixed() -> None:
 
 
 def test_agent_spec_skills_rejects_invalid_ref() -> None:
+    from pydantic import ValidationError
+
     from helix_agent.protocol import AgentSpec
 
-    with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError wraps ValueError
+    with pytest.raises(ValidationError):
         AgentSpec.model_validate(_spec_dict(skills=["Foo"]))  # uppercase
 
 
 def test_agent_spec_skills_rejects_duplicate_names() -> None:
     """Same skill name twice — even with different pins — is a manifest defect."""
+    from pydantic import ValidationError
+
     from helix_agent.protocol import AgentSpec
 
-    with pytest.raises(Exception):  # noqa: B017 - pydantic wraps ValueError
+    with pytest.raises(ValidationError):
         AgentSpec.model_validate(_spec_dict(skills=["foo", "foo@3"]))
 
 

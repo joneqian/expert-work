@@ -158,15 +158,9 @@ async def test_resolve_pinned_missing_version_returns_none() -> None:
 async def test_list_skills_filters_by_status_and_category() -> None:
     store = InMemorySkillStore()
     tenant = _t()
-    a = await store.create_skill(
-        skill_id=uuid4(), tenant_id=tenant, name="a", category="data"
-    )
-    b = await store.create_skill(
-        skill_id=uuid4(), tenant_id=tenant, name="b", category="ops"
-    )
-    c = await store.create_skill(
-        skill_id=uuid4(), tenant_id=tenant, name="c", category="data"
-    )
+    a = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="a", category="data")
+    b = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="b", category="ops")
+    c = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="c", category="data")
     await store.set_status(skill_id=a.id, tenant_id=tenant, status=SkillStatus.ACTIVE)
     await store.set_status(skill_id=c.id, tenant_id=tenant, status=SkillStatus.ACTIVE)
     # Filter by status.
@@ -176,9 +170,7 @@ async def test_list_skills_filters_by_status_and_category() -> None:
     data_skills, _ = await store.list_skills(tenant_id=tenant, category="data")
     assert {r.id for r in data_skills} == {a.id, c.id}
     # Combined.
-    combo, _ = await store.list_skills(
-        tenant_id=tenant, status=SkillStatus.ACTIVE, category="ops"
-    )
+    combo, _ = await store.list_skills(tenant_id=tenant, status=SkillStatus.ACTIVE, category="ops")
     assert combo == []
     # Tenant isolation.
     other = await store.list_skills(tenant_id=_t())
@@ -193,9 +185,7 @@ async def test_list_skills_paginates_with_cursor() -> None:
     tenant = _t()
     ids = []
     for i in range(5):
-        skill = await store.create_skill(
-            skill_id=uuid4(), tenant_id=tenant, name=f"s{i}"
-        )
+        skill = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name=f"s{i}")
         ids.append(skill.id)
     page1, cursor = await store.list_skills(tenant_id=tenant, limit=2)
     assert len(page1) == 2
@@ -243,9 +233,7 @@ async def test_add_version_mirrors_description_and_category() -> None:
 async def test_set_status_unknown_skill_raises() -> None:
     store = InMemorySkillStore()
     with pytest.raises(SkillNotFoundError):
-        await store.set_status(
-            skill_id=uuid4(), tenant_id=_t(), status=SkillStatus.ACTIVE
-        )
+        await store.set_status(skill_id=uuid4(), tenant_id=_t(), status=SkillStatus.ACTIVE)
 
 
 @pytest.mark.asyncio
@@ -275,5 +263,5 @@ async def test_add_version_rejects_invalid_authored_by() -> None:
             skill_id=skill.id,
             tenant_id=tenant,
             prompt_fragment="x",
-            authored_by="alien",  # type: ignore[arg-type]
+            authored_by="alien",
         )

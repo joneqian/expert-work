@@ -92,9 +92,7 @@ class SqlSkillStore(SkillStore):
         async with self._sf() as session:
             row = (
                 await session.execute(
-                    select(SkillRow).where(
-                        SkillRow.id == skill_id, SkillRow.tenant_id == tenant_id
-                    )
+                    select(SkillRow).where(SkillRow.id == skill_id, SkillRow.tenant_id == tenant_id)
                 )
             ).scalar_one_or_none()
         return _skill_row_to_dto(row) if row is not None else None
@@ -103,9 +101,7 @@ class SqlSkillStore(SkillStore):
         async with self._sf() as session:
             row = (
                 await session.execute(
-                    select(SkillRow).where(
-                        SkillRow.tenant_id == tenant_id, SkillRow.name == name
-                    )
+                    select(SkillRow).where(SkillRow.tenant_id == tenant_id, SkillRow.name == name)
                 )
             ).scalar_one_or_none()
         return _skill_row_to_dto(row) if row is not None else None
@@ -142,10 +138,7 @@ class SqlSkillStore(SkillStore):
                 if cur_row is not None:
                     stmt = stmt.where(
                         (SkillRow.created_at < cur_row.created_at)
-                        | (
-                            (SkillRow.created_at == cur_row.created_at)
-                            & (SkillRow.id > cur_row.id)
-                        )
+                        | ((SkillRow.created_at == cur_row.created_at) & (SkillRow.id > cur_row.id))
                     )
             stmt = stmt.limit(limit + 1)
             rows = (await session.execute(stmt)).scalars().all()
@@ -154,9 +147,7 @@ class SqlSkillStore(SkillStore):
             return items[:limit], items[limit - 1].id
         return items, None
 
-    async def set_status(
-        self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus
-    ) -> Skill:
+    async def set_status(self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus) -> Skill:
         async with self._sf() as session:
             result = await session.execute(
                 update(SkillRow)
@@ -192,9 +183,7 @@ class SqlSkillStore(SkillStore):
         async with self._sf() as session:
             parent = (
                 await session.execute(
-                    select(SkillRow).where(
-                        SkillRow.id == skill_id, SkillRow.tenant_id == tenant_id
-                    )
+                    select(SkillRow).where(SkillRow.id == skill_id, SkillRow.tenant_id == tenant_id)
                 )
             ).scalar_one_or_none()
             if parent is None:
@@ -224,9 +213,7 @@ class SqlSkillStore(SkillStore):
             await session.refresh(version_row)
             return _version_row_to_dto(version_row)
 
-    async def get_version(
-        self, *, version_id: UUID, tenant_id: UUID
-    ) -> SkillVersion | None:
+    async def get_version(self, *, version_id: UUID, tenant_id: UUID) -> SkillVersion | None:
         async with self._sf() as session:
             row = (
                 await session.execute(
@@ -253,9 +240,7 @@ class SqlSkillStore(SkillStore):
             ).scalar_one_or_none()
         return _version_row_to_dto(row) if row is not None else None
 
-    async def list_versions(
-        self, *, skill_id: UUID, tenant_id: UUID
-    ) -> list[SkillVersion]:
+    async def list_versions(self, *, skill_id: UUID, tenant_id: UUID) -> list[SkillVersion]:
         async with self._sf() as session:
             rows = (
                 (
@@ -275,9 +260,7 @@ class SqlSkillStore(SkillStore):
 
     # ------------------------------------------------------------ resolve
 
-    async def resolve_by_name(
-        self, *, tenant_id: UUID, name: str
-    ) -> SkillVersion | None:
+    async def resolve_by_name(self, *, tenant_id: UUID, name: str) -> SkillVersion | None:
         skill = await self.get_skill_by_name(tenant_id=tenant_id, name=name)
         if skill is None or skill.status != SkillStatus.ACTIVE or skill.latest_version == 0:
             return None

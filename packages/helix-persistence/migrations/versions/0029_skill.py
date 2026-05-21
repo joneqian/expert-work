@@ -46,9 +46,7 @@ def upgrade() -> None:
         sa.Column("tenant_id", UUID(as_uuid=True), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'draft'")),
-        sa.Column(
-            "latest_version", sa.Integer(), nullable=False, server_default=sa.text("0")
-        ),
+        sa.Column("latest_version", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("description", sa.Text(), nullable=False, server_default=sa.text("''")),
         sa.Column("category", sa.Text(), nullable=True),
         sa.Column(
@@ -63,9 +61,7 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
-        sa.CheckConstraint(
-            "status IN ('draft', 'active', 'archived')", name="skill_status_check"
-        ),
+        sa.CheckConstraint("status IN ('draft', 'active', 'archived')", name="skill_status_check"),
         sa.CheckConstraint("latest_version >= 0", name="skill_latest_version_nonneg"),
         sa.UniqueConstraint("tenant_id", "name", name="skill_tenant_name_uq"),
     )

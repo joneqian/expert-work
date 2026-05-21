@@ -42,9 +42,7 @@ class SkillRow(Base):
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
-    latest_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    latest_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -55,9 +53,7 @@ class SkillRow(Base):
     )
 
     __table_args__ = (
-        CheckConstraint(
-            "status IN ('draft', 'active', 'archived')", name="skill_status_check"
-        ),
+        CheckConstraint("status IN ('draft', 'active', 'archived')", name="skill_status_check"),
         CheckConstraint("latest_version >= 0", name="skill_latest_version_nonneg"),
         UniqueConstraint("tenant_id", "name", name="skill_tenant_name_uq"),
         Index("ix_skill_tenant_id", "tenant_id"),
@@ -97,9 +93,7 @@ class SkillVersionRow(Base):
     required_models: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
-    authored_by: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'human'")
-    )
+    authored_by: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'human'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

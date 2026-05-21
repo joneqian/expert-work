@@ -100,9 +100,7 @@ class SkillStore(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def set_status(
-        self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus
-    ) -> Skill:
+    async def set_status(self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus) -> Skill:
         """Move the lifecycle state forward (or back to archived).
 
         Raises :class:`SkillNotFoundError` when the id is unknown for
@@ -134,9 +132,7 @@ class SkillStore(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def get_version(
-        self, *, version_id: UUID, tenant_id: UUID
-    ) -> SkillVersion | None:
+    async def get_version(self, *, version_id: UUID, tenant_id: UUID) -> SkillVersion | None:
         """Return version row by id, or ``None`` (cross-tenant hides)."""
 
     @abc.abstractmethod
@@ -146,17 +142,13 @@ class SkillStore(abc.ABC):
         """Return version row by ``(skill_id, version)`` — pinned ref path."""
 
     @abc.abstractmethod
-    async def list_versions(
-        self, *, skill_id: UUID, tenant_id: UUID
-    ) -> list[SkillVersion]:
+    async def list_versions(self, *, skill_id: UUID, tenant_id: UUID) -> list[SkillVersion]:
         """All versions of a skill, ordered ``version DESC``."""
 
     # ------------------------------------------------------------ resolve (loader)
 
     @abc.abstractmethod
-    async def resolve_by_name(
-        self, *, tenant_id: UUID, name: str
-    ) -> SkillVersion | None:
+    async def resolve_by_name(self, *, tenant_id: UUID, name: str) -> SkillVersion | None:
         """Bare-name resolution — current ``latest_version`` of an
         ``ACTIVE`` skill. Returns ``None`` when:
 

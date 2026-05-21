@@ -1,7 +1,7 @@
 """J.7a Skill 静态启用 — DTOs.
 
-Mini-ADR J-23 + 2026-05-21 修订（STREAM-J-DESIGN § 15）. M0 = prompt
-片段 + tools 子集（不含 code 字段）+ 版本化 + draft 闸门 + admin
+Mini-ADR J-23 + 2026-05-21 修订 (STREAM-J-DESIGN § 15). M0 = prompt
+片段 + tools 子集 (不含 code 字段)+ 版本化 + draft 闸门 + admin
 CRUD API + ZIP import/export + ``name@version`` 版本固定.
 
 These DTOs are the wire shape between control-plane (admin API),
