@@ -170,6 +170,50 @@ class InMemoryArtifactStore(ArtifactStore):
         rows.sort(key=lambda a: a.updated_at or _MIN_AWARE)
         return rows[:limit]
 
+    async def update_kind(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+        kind: ArtifactKind,
+    ) -> Artifact | None:
+        for aid, a in self._artifacts.items():
+            if (
+                a.tenant_id == tenant_id
+                and a.user_id == user_id
+                and a.name == name
+                and a.deleted_at is None
+            ):
+                updated = a.model_copy(update={"kind": kind, "updated_at": datetime.now(UTC)})
+                self._artifacts[aid] = updated
+                return updated
+        return None
+
+    async def list_versions(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+    ) -> list[ArtifactVersion] | None:
+        artifact = next(
+            (
+                a
+                for a in self._artifacts.values()
+                if a.tenant_id == tenant_id
+                and a.user_id == user_id
+                and a.name == name
+                and a.deleted_at is None
+            ),
+            None,
+        )
+        if artifact is None:
+            return None
+        rows = [v for v in self._versions if v.artifact_id == artifact.id]
+        rows.sort(key=lambda v: v.version, reverse=True)
+        return rows
+
     async def hard_delete(self, *, artifact_ids: Sequence[UUID]) -> int:
         ids = set(artifact_ids)
         removed = 0

@@ -342,6 +342,84 @@ async def test_hard_delete_empty_input_is_zero() -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_kind_returns_updated_row() -> None:
+    store = InMemoryArtifactStore()
+    tenant_id, user_id = uuid4(), uuid4()
+    await store.save_version(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name="report.md",
+        kind="document",
+        path_in_workspace="report.md",
+        created_in_thread="t-1",
+    )
+    updated = await store.update_kind(
+        tenant_id=tenant_id, user_id=user_id, name="report.md", kind="code"
+    )
+    assert updated is not None
+    assert updated.kind == "code"
+
+
+@pytest.mark.asyncio
+async def test_update_kind_hides_soft_deleted_and_cross_user() -> None:
+    store = InMemoryArtifactStore()
+    tenant_id, user_x, user_y = uuid4(), uuid4(), uuid4()
+    await store.save_version(
+        tenant_id=tenant_id,
+        user_id=user_x,
+        name="report.md",
+        kind="document",
+        path_in_workspace="report.md",
+        created_in_thread="t-1",
+    )
+    # Cross-user → None.
+    assert (
+        await store.update_kind(tenant_id=tenant_id, user_id=user_y, name="report.md", kind="code")
+        is None
+    )
+    # Soft-delete then try → None (hidden).
+    await store.soft_delete(
+        tenant_id=tenant_id, user_id=user_x, name="report.md", now=datetime.now(UTC)
+    )
+    assert (
+        await store.update_kind(tenant_id=tenant_id, user_id=user_x, name="report.md", kind="code")
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_versions_returns_desc_or_none() -> None:
+    store = InMemoryArtifactStore()
+    tenant_id, user_id = uuid4(), uuid4()
+    await store.save_version(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name="report.md",
+        kind="document",
+        path_in_workspace="v1.md",
+        created_in_thread="t-1",
+    )
+    await store.save_version(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        name="report.md",
+        kind="document",
+        path_in_workspace="v2.md",
+        created_in_thread="t-2",
+    )
+    versions = await store.list_versions(tenant_id=tenant_id, user_id=user_id, name="report.md")
+    assert versions is not None
+    assert [v.version for v in versions] == [2, 1]
+    # Unknown name → None.
+    assert await store.list_versions(tenant_id=tenant_id, user_id=user_id, name="missing") is None
+    # Soft-deleted → None.
+    await store.soft_delete(
+        tenant_id=tenant_id, user_id=user_id, name="report.md", now=datetime.now(UTC)
+    )
+    assert await store.list_versions(tenant_id=tenant_id, user_id=user_id, name="report.md") is None
+
+
+@pytest.mark.asyncio
 async def test_set_version_digest_backfills_size_and_sha() -> None:
     store = InMemoryArtifactStore()
     tenant_id, user_id = uuid4(), uuid4()

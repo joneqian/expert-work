@@ -220,6 +220,67 @@ class SqlArtifactStore(ArtifactStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_artifact(row) for row in rows]
 
+    async def update_kind(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+        kind: ArtifactKind,
+    ) -> Artifact | None:
+        now = datetime.now(UTC)
+        async with self._sf() as session:
+            result = await session.execute(
+                update(ArtifactRow)
+                .where(
+                    ArtifactRow.tenant_id == tenant_id,
+                    ArtifactRow.user_id == user_id,
+                    ArtifactRow.name == name,
+                    ArtifactRow.deleted_at.is_(None),
+                )
+                .values(kind=kind, updated_at=now)
+                .returning(ArtifactRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                await session.commit()
+                return None
+            await session.commit()
+        return _row_to_artifact(row)
+
+    async def list_versions(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+    ) -> list[ArtifactVersion] | None:
+        async with self._sf() as session:
+            artifact = (
+                await session.execute(
+                    select(ArtifactRow).where(
+                        ArtifactRow.tenant_id == tenant_id,
+                        ArtifactRow.user_id == user_id,
+                        ArtifactRow.name == name,
+                        ArtifactRow.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if artifact is None:
+                return None
+            rows = (
+                (
+                    await session.execute(
+                        select(ArtifactVersionRow)
+                        .where(ArtifactVersionRow.artifact_id == artifact.id)
+                        .order_by(ArtifactVersionRow.version.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_version(row) for row in rows]
+
     async def hard_delete(self, *, artifact_ids: Sequence[UUID]) -> int:
         if not artifact_ids:
             return 0

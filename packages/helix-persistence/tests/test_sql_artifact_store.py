@@ -305,6 +305,68 @@ async def test_list_active_past_retention_picks_stale_active_only(
 
 
 @pytest.mark.asyncio
+async def test_update_kind_changes_kind_and_hides_when_soft_deleted(
+    sql_store: SqlStoreFixture,
+) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            kind="document",
+            path_in_workspace="report.md",
+            created_in_thread="t-1",
+        )
+        updated = await store.update_kind(
+            tenant_id=tenant_id, user_id=user_id, name="report.md", kind="code"
+        )
+        assert updated is not None
+        assert updated.kind == "code"
+        # Soft-delete then attempt → None (hidden).
+        await store.soft_delete(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            now=datetime.now(UTC),
+        )
+        assert (
+            await store.update_kind(
+                tenant_id=tenant_id, user_id=user_id, name="report.md", kind="data"
+            )
+            is None
+        )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_versions_desc_or_none(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        for path in ("v1.md", "v2.md", "v3.md"):
+            await store.save_version(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                name="report.md",
+                kind="document",
+                path_in_workspace=path,
+                created_in_thread="t",
+            )
+        versions = await store.list_versions(tenant_id=tenant_id, user_id=user_id, name="report.md")
+        assert versions is not None
+        assert [v.version for v in versions] == [3, 2, 1]
+        # Unknown name → None.
+        assert (
+            await store.list_versions(tenant_id=tenant_id, user_id=user_id, name="missing") is None
+        )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_hard_delete_removes_artifact_and_versions(
     sql_store: SqlStoreFixture,
 ) -> None:

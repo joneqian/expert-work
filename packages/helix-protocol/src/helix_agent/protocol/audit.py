@@ -75,6 +75,11 @@ class AuditAction(StrEnum):
     SKILL_CREATE = "skill:create"
     SKILL_VERSION_CREATE = "skill_version:create"
     SKILL_STATUS_CHANGE = "skill:status_change"
+    # artifact (Stream J.9-step3 — Mini-ADR J-25). ``ARTIFACT_SAVE`` is
+    # reserved for the orchestrator-side save-artifact tool emit; that
+    # wiring lands when ToolEnv gains an :class:`AuditLogger` handle.
+    ARTIFACT_DELETE = "artifact:delete"
+    ARTIFACT_UPDATE = "artifact:update"
     # tools (Stream E.6 + E.8 + onwards)
     TOOL_CALL = "tool:call"
     TOOL_BLOCKED = "tool:blocked"
@@ -136,6 +141,7 @@ class AuditEntry(BaseModel):
         "user_workspace",  # Stream J.15-补强-1 — volume quota + lifecycle
         "image_upload",  # Stream J.6.补强-2 — Mini-ADR J-31
         "skill",  # Stream J.7a — Mini-ADR J-23
+        "artifact",  # Stream J.9-step3 — Mini-ADR J-25
     ]
     resource_id: str | None = None
     result: AuditResult
