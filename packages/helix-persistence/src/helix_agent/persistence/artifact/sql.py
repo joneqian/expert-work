@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -24,6 +25,8 @@ def _row_to_artifact(row: ArtifactRow) -> Artifact:
         latest_version=row.latest_version,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        deleted_at=row.deleted_at,
+        archived_object_key=row.archived_object_key,
     )
 
 
@@ -62,7 +65,8 @@ class SqlArtifactStore(ArtifactStore):
         # INSERT ... ON CONFLICT DO UPDATE — a race-free upsert of the
         # logical artifact. On first save ``latest_version`` is 1; a
         # repeat save bumps it. ``kind`` is left out of the conflict
-        # SET, so an existing artifact keeps its original kind.
+        # SET, so an existing artifact keeps its original kind. Mini-ADR
+        # J-25: a re-save on a soft-deleted name un-deletes it.
         insert_artifact = pg_insert(ArtifactRow).values(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -74,7 +78,11 @@ class SqlArtifactStore(ArtifactStore):
         )
         upsert = insert_artifact.on_conflict_do_update(
             constraint="artifact_identity_uniq",
-            set_={"latest_version": ArtifactRow.latest_version + 1, "updated_at": now},
+            set_={
+                "latest_version": ArtifactRow.latest_version + 1,
+                "updated_at": now,
+                "deleted_at": None,
+            },
         ).returning(ArtifactRow.id, ArtifactRow.latest_version)
 
         version_id = uuid4()
@@ -105,12 +113,20 @@ class SqlArtifactStore(ArtifactStore):
             created_at=now,
         )
 
-    async def list_for_user(self, *, tenant_id: UUID, user_id: UUID) -> list[Artifact]:
+    async def list_for_user(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        include_deleted: bool = False,
+    ) -> list[Artifact]:
         stmt = (
             select(ArtifactRow)
             .where(ArtifactRow.tenant_id == tenant_id, ArtifactRow.user_id == user_id)
             .order_by(ArtifactRow.updated_at.desc())
         )
+        if not include_deleted:
+            stmt = stmt.where(ArtifactRow.deleted_at.is_(None))
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_artifact(row) for row in rows]
@@ -125,6 +141,7 @@ class SqlArtifactStore(ArtifactStore):
                         ArtifactRow.tenant_id == tenant_id,
                         ArtifactRow.user_id == user_id,
                         ArtifactRow.name == name,
+                        ArtifactRow.deleted_at.is_(None),
                     )
                 )
             ).scalar_one_or_none()
@@ -148,3 +165,72 @@ class SqlArtifactStore(ArtifactStore):
                 .values(size_bytes=size_bytes, sha256=sha256)
             )
             await session.commit()
+
+    async def soft_delete(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+        now: datetime,
+    ) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                update(ArtifactRow)
+                .where(
+                    ArtifactRow.tenant_id == tenant_id,
+                    ArtifactRow.user_id == user_id,
+                    ArtifactRow.name == name,
+                    ArtifactRow.deleted_at.is_(None),
+                )
+                .values(deleted_at=now)
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def list_expired(
+        self,
+        *,
+        before: datetime,
+        limit: int = 1000,
+    ) -> list[Artifact]:
+        stmt = (
+            select(ArtifactRow)
+            .where(ArtifactRow.deleted_at.is_not(None), ArtifactRow.deleted_at < before)
+            .order_by(ArtifactRow.deleted_at.asc())
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_artifact(row) for row in rows]
+
+    async def list_active_past_retention(
+        self,
+        *,
+        before: datetime,
+        limit: int = 1000,
+    ) -> list[Artifact]:
+        stmt = (
+            select(ArtifactRow)
+            .where(ArtifactRow.deleted_at.is_(None), ArtifactRow.updated_at < before)
+            .order_by(ArtifactRow.updated_at.asc())
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_artifact(row) for row in rows]
+
+    async def hard_delete(self, *, artifact_ids: Sequence[UUID]) -> int:
+        if not artifact_ids:
+            return 0
+        ids = list(artifact_ids)
+        async with self._sf() as session:
+            # Versions first — no FK ON DELETE CASCADE because
+            # ``artifact_id`` is a bare UUID column (FORCE-RLS footgun,
+            # Mini-ADR J-1a).
+            await session.execute(
+                delete(ArtifactVersionRow).where(ArtifactVersionRow.artifact_id.in_(ids))
+            )
+            result = await session.execute(delete(ArtifactRow).where(ArtifactRow.id.in_(ids)))
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)

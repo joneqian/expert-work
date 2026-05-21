@@ -45,6 +45,14 @@ class ArtifactRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    #: Soft-delete timestamp (Mini-ADR J-25). NULL = active.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: ObjectStore key when the workspace files have been archived.
+    #: CHECK ``artifact_archive_consistency`` enforces ``deleted_at IS NOT NULL``
+    #: when this is set. The supervisor-side archive flow ships in a
+    #: follow-up step (reuses J.15 volume archive path); ``J.9-step1``
+    #: leaves this NULL and goes active → soft → hard directly.
+    archived_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "user_id", "name", name="artifact_identity_uniq"),

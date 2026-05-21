@@ -54,3 +54,8 @@ class Artifact(BaseModel):
     latest_version: int = Field(ge=1, description="version number of the newest revision")
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    #: Soft-delete timestamp (Mini-ADR J-25). NULL = active.
+    deleted_at: datetime | None = None
+    #: ObjectStore key when the workspace files have been archived;
+    #: NULL while the row is active or pending archive.
+    archived_object_key: str | None = None

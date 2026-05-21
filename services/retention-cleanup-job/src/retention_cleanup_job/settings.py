@@ -41,6 +41,16 @@ class RetentionCleanupSettings(BaseSettings):
     # override; tenants needing longer retention set the env var.
     image_retention_days: int = Field(default=90, ge=1, le=3650)
 
+    # --------------------------------------------------- artifact retention (Mini-ADR J-25)
+    # Active artifact rows with ``updated_at < now() - artifact_retention_days``
+    # are soft-deleted; soft-deleted rows past
+    # ``artifact_hard_delete_grace_days`` are hard-deleted entirely.
+    # M0 defaults match the J-25 spec (90 days active → soft → 60 days
+    # → hard). Workspace files are *not* removed here; J.15 volume
+    # lifecycle owns the bytes.
+    artifact_retention_days: int = Field(default=90, ge=1, le=3650)
+    artifact_hard_delete_grace_days: int = Field(default=60, ge=1, le=3650)
+
     # Object-store backend that owns the uploaded image bytes. ``memory``
     # (default) skips the image pass — useful for unit-tested local cron
     # ticks and for envs that haven't deployed J.6 yet. ``s3-compatible``

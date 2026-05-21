@@ -13,6 +13,7 @@ import logging
 
 from helix_agent.persistence import (
     DatabaseConfig,
+    SqlArtifactStore,
     SqlImageUploadStore,
     create_async_engine_from_config,
     create_async_session_factory,
@@ -63,19 +64,28 @@ async def _amain() -> None:
             )
             image_store = SqlImageUploadStore(session_factory)
 
+        # Mini-ADR J-25 (J.9-step1) — artifact lifecycle sweep wires the
+        # SqlArtifactStore in unconditionally; the artifact pass is
+        # metadata-only (no object store / supervisor calls), so it is
+        # safe to enable even on deployments without J.6 image uploads.
+        artifact_store = SqlArtifactStore(session_factory)
+
         job = RetentionCleanupJob(
             db_session_factory=session_factory,
             batch_size=settings.batch_size,
             image_upload_store=image_store,
             object_store=object_store,
             image_retention_days=settings.image_retention_days,
+            artifact_store=artifact_store,
+            artifact_retention_days=settings.artifact_retention_days,
+            artifact_hard_delete_grace_days=settings.artifact_hard_delete_grace_days,
         )
         logger.info("retention_cleanup_job.start batch=%d", settings.batch_size)
         report = await job.run_once()
         logger.info(
             "retention_cleanup_job.done audit=%d audit_skipped_unacked=%d "
             "event=%d jwt=%d image_rows=%d image_keys_ok=%d image_keys_failed=%d "
-            "duration=%.2fs",
+            "artifact_soft=%d artifact_hard=%d duration=%.2fs",
             report.audit_deleted,
             report.audit_skipped_unacked,
             report.event_deleted,
@@ -83,6 +93,8 @@ async def _amain() -> None:
             report.image_uploads_hard_deleted,
             report.image_object_keys_removed,
             report.image_object_keys_failed,
+            report.artifacts_soft_deleted,
+            report.artifacts_hard_deleted,
             report.duration_seconds,
         )
         if report.audit_skipped_unacked > 0:

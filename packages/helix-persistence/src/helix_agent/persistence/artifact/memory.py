@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -49,8 +50,13 @@ class InMemoryArtifactStore(ArtifactStore):
                 updated_at=now,
             )
         else:
+            # Re-save on a soft-deleted name un-deletes it (Mini-ADR J-25).
             artifact = existing.model_copy(
-                update={"latest_version": existing.latest_version + 1, "updated_at": now}
+                update={
+                    "latest_version": existing.latest_version + 1,
+                    "updated_at": now,
+                    "deleted_at": None,
+                }
             )
         self._artifacts[artifact.id] = artifact
 
@@ -67,9 +73,19 @@ class InMemoryArtifactStore(ArtifactStore):
         self._versions.append(version)
         return version
 
-    async def list_for_user(self, *, tenant_id: UUID, user_id: UUID) -> list[Artifact]:
+    async def list_for_user(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        include_deleted: bool = False,
+    ) -> list[Artifact]:
         rows = [
-            a for a in self._artifacts.values() if a.tenant_id == tenant_id and a.user_id == user_id
+            a
+            for a in self._artifacts.values()
+            if a.tenant_id == tenant_id
+            and a.user_id == user_id
+            and (include_deleted or a.deleted_at is None)
         ]
         rows.sort(key=lambda a: a.updated_at or _MIN_AWARE, reverse=True)
         return rows
@@ -81,7 +97,10 @@ class InMemoryArtifactStore(ArtifactStore):
             (
                 a
                 for a in self._artifacts.values()
-                if a.tenant_id == tenant_id and a.user_id == user_id and a.name == name
+                if a.tenant_id == tenant_id
+                and a.user_id == user_id
+                and a.name == name
+                and a.deleted_at is None
             ),
             None,
         )
@@ -103,3 +122,60 @@ class InMemoryArtifactStore(ArtifactStore):
             else v
             for v in self._versions
         ]
+
+    async def soft_delete(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        name: str,
+        now: datetime,
+    ) -> bool:
+        for aid, a in list(self._artifacts.items()):
+            if (
+                a.tenant_id == tenant_id
+                and a.user_id == user_id
+                and a.name == name
+                and a.deleted_at is None
+            ):
+                self._artifacts[aid] = a.model_copy(update={"deleted_at": now})
+                return True
+        return False
+
+    async def list_expired(
+        self,
+        *,
+        before: datetime,
+        limit: int = 1000,
+    ) -> list[Artifact]:
+        rows = [
+            a
+            for a in self._artifacts.values()
+            if a.deleted_at is not None and a.deleted_at < before
+        ]
+        rows.sort(key=lambda a: a.deleted_at or _MIN_AWARE)
+        return rows[:limit]
+
+    async def list_active_past_retention(
+        self,
+        *,
+        before: datetime,
+        limit: int = 1000,
+    ) -> list[Artifact]:
+        rows = [
+            a
+            for a in self._artifacts.values()
+            if a.deleted_at is None and (a.updated_at or _MIN_AWARE) < before
+        ]
+        rows.sort(key=lambda a: a.updated_at or _MIN_AWARE)
+        return rows[:limit]
+
+    async def hard_delete(self, *, artifact_ids: Sequence[UUID]) -> int:
+        ids = set(artifact_ids)
+        removed = 0
+        for aid in list(self._artifacts):
+            if aid in ids:
+                del self._artifacts[aid]
+                removed += 1
+        self._versions = [v for v in self._versions if v.artifact_id not in ids]
+        return removed

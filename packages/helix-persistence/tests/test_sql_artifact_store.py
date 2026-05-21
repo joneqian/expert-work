@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from testcontainers.postgres import PostgresContainer
 
@@ -145,5 +147,197 @@ async def test_get_latest_version_and_digest_backfill(sql_store: SqlStoreFixture
             await store.get_latest_version(tenant_id=tenant_id, user_id=user_id, name="nope")
             is None
         )
+    finally:
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-25 (J.9-step1) — lifecycle: soft-delete / list_expired / hard-delete
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_hides_from_list_and_get(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            kind="document",
+            path_in_workspace="report.md",
+            created_in_thread="t-1",
+        )
+        now = datetime.now(UTC)
+        hit = await store.soft_delete(
+            tenant_id=tenant_id, user_id=user_id, name="report.md", now=now
+        )
+        assert hit is True
+        # Default list hides; include_deleted=True reveals + ``deleted_at``
+        # round-trips.
+        assert await store.list_for_user(tenant_id=tenant_id, user_id=user_id) == []
+        deleted = await store.list_for_user(
+            tenant_id=tenant_id, user_id=user_id, include_deleted=True
+        )
+        assert len(deleted) == 1
+        assert deleted[0].deleted_at is not None
+        # get_latest_version hides soft-deleted.
+        assert (
+            await store.get_latest_version(tenant_id=tenant_id, user_id=user_id, name="report.md")
+            is None
+        )
+        # Second soft-delete is a no-op miss.
+        assert not await store.soft_delete(
+            tenant_id=tenant_id, user_id=user_id, name="report.md", now=now
+        )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_save_version_undeletes_soft_deleted_row(
+    sql_store: SqlStoreFixture,
+) -> None:
+    """A re-save on a soft-deleted name un-deletes it (Mini-ADR J-25)."""
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            kind="document",
+            path_in_workspace="v1.md",
+            created_in_thread="t-1",
+        )
+        await store.soft_delete(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            now=datetime.now(UTC),
+        )
+        v2 = await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="report.md",
+            kind="document",
+            path_in_workspace="v2.md",
+            created_in_thread="t-2",
+        )
+        assert v2.version == 2
+        active = await store.list_for_user(tenant_id=tenant_id, user_id=user_id)
+        assert len(active) == 1
+        assert active[0].deleted_at is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_expired_returns_soft_deleted_past_horizon(
+    sql_store: SqlStoreFixture,
+) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        for name in ("old.md", "recent.md"):
+            await store.save_version(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                name=name,
+                kind="document",
+                path_in_workspace=name,
+                created_in_thread="t",
+            )
+        old_time = datetime.now(UTC) - timedelta(days=70)
+        recent_time = datetime.now(UTC) - timedelta(days=10)
+        await store.soft_delete(tenant_id=tenant_id, user_id=user_id, name="old.md", now=old_time)
+        await store.soft_delete(
+            tenant_id=tenant_id, user_id=user_id, name="recent.md", now=recent_time
+        )
+        cutoff = datetime.now(UTC) - timedelta(days=60)
+        expired = await store.list_expired(before=cutoff)
+        assert [a.name for a in expired] == ["old.md"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_active_past_retention_picks_stale_active_only(
+    sql_store: SqlStoreFixture,
+) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="stale.md",
+            kind="document",
+            path_in_workspace="stale.md",
+            created_in_thread="t-old",
+        )
+        # Backdate ``updated_at`` directly via SQL (the SET LOCAL RLS
+        # role is already configured by the fixture).
+        backdated = datetime.now(UTC) - timedelta(days=100)
+        engine_for_update = engine
+        async with engine_for_update.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE artifact SET updated_at = :ts "
+                    "WHERE tenant_id = :t AND user_id = :u AND name = 'stale.md'"
+                ),
+                {"ts": backdated, "t": tenant_id, "u": user_id},
+            )
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="fresh.md",
+            kind="document",
+            path_in_workspace="fresh.md",
+            created_in_thread="t-new",
+        )
+        cutoff = datetime.now(UTC) - timedelta(days=90)
+        rows = await store.list_active_past_retention(before=cutoff)
+        assert [a.name for a in rows] == ["stale.md"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_removes_artifact_and_versions(
+    sql_store: SqlStoreFixture,
+) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id, user_id = uuid4(), uuid4()
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="doomed.md",
+            kind="document",
+            path_in_workspace="v1.md",
+            created_in_thread="t-1",
+        )
+        await store.save_version(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            name="doomed.md",
+            kind="document",
+            path_in_workspace="v2.md",
+            created_in_thread="t-2",
+        )
+        artifacts = await store.list_for_user(tenant_id=tenant_id, user_id=user_id)
+        assert len(artifacts) == 1
+        artifact_id = artifacts[0].id
+        removed = await store.hard_delete(artifact_ids=[artifact_id])
+        assert removed == 1
+        # Both artifact and version rows gone.
+        assert (
+            await store.list_for_user(tenant_id=tenant_id, user_id=user_id, include_deleted=True)
+            == []
+        )
+        # Empty list is a no-op.
+        assert await store.hard_delete(artifact_ids=[]) == 0
     finally:
         await engine.dispose()
