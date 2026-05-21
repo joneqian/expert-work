@@ -1,10 +1,14 @@
-# J.4 sub-agent — M0 baseline dataset (Stream J.13a).
+# J.4 sub-agent — M0 baseline dataset (Stream J.13a + J.4-补强-2).
 #
-# 8 cases driving SubAgentTool against scripted child runs:
+# 12 cases driving SubAgentTool against scripted child runs:
 #   - 4 success: clean delegation / multi-LLM-call / empty answer / large step_count
 #   - 2 max_steps: partial result + trajectory dispatch outcome=max_steps
 #   - 1 cancelled: RunCancelledError re-raises after trajectory dispatch
 #   - 1 no-recorder: meta still emits, no trajectory dispatch
+#   - 3 parallel_fanout (Mini-ADR J-40): N concurrent SubAgentTool.call via
+#     asyncio.gather; wall-clock < N * child delay proves concurrency
+#   - 1 cycle_detection (Mini-ADR J-40): A→B→A manifest triggers
+#     AgentFactoryError at build time
 #
 # Threshold pass-rate ≥ 0.80 (§ 18.3); achievable = 1.00 (all deterministic).
 
@@ -148,3 +152,89 @@ cases:
     expected_iteration_used: 2
     expected_llm_call_count: 1
     expected_trajectory_dispatched: false
+
+  # ---------- parallel_fanout (3, Mini-ADR J-40) ----------
+  - id: parallel-fanout-001-three-siblings
+    # 3 SubAgentTool.call dispatched via asyncio.gather; each child sleeps
+    # 0.10s. Serial would take ≥ 0.30s; concurrent should land well under
+    # the 0.20s cap. Verifies state_updates.subagent_invocations carries
+    # one entry per call (parent's state.subagent_invocations adds them).
+    scenario: parallel_fanout
+    scripted_messages:
+      - role: human
+        content: investigate slice
+      - role: ai
+        content: parallel sibling answer
+    scripted_step_count: 1
+    has_recorder: false
+    expected_outcome_label: success
+    expected_content_contains: "parallel sibling answer"
+    expected_iteration_used: 1
+    expected_llm_call_count: 1
+    expected_trajectory_dispatched: false
+    parallel_count: 3
+    parallel_child_delay_s: 0.10
+    parallel_max_wall_clock_s: 0.20
+
+  - id: parallel-fanout-002-five-siblings
+    # 5-way fan-out — same shape, denser concurrency. Validates the
+    # contract scales beyond the 3-call sweet spot used by the
+    # plan_stages tests in test_subagent.py.
+    scenario: parallel_fanout
+    scripted_messages:
+      - role: human
+        content: gather facts
+      - role: ai
+        content: aggregated finding
+    scripted_step_count: 1
+    has_recorder: false
+    expected_outcome_label: success
+    expected_content_contains: "aggregated finding"
+    expected_iteration_used: 1
+    expected_llm_call_count: 1
+    expected_trajectory_dispatched: false
+    parallel_count: 5
+    parallel_child_delay_s: 0.10
+    parallel_max_wall_clock_s: 0.25
+
+  - id: parallel-fanout-003-two-siblings-fast
+    # Minimum N=2 fan-out — proves the concurrency contract holds at the
+    # smallest non-trivial scale (one sibling alone can't prove parallelism).
+    scenario: parallel_fanout
+    scripted_messages:
+      - role: human
+        content: quick probe
+      - role: ai
+        content: probe result
+    scripted_step_count: 1
+    has_recorder: false
+    expected_outcome_label: success
+    expected_content_contains: "probe result"
+    expected_iteration_used: 1
+    expected_llm_call_count: 1
+    expected_trajectory_dispatched: false
+    parallel_count: 2
+    parallel_child_delay_s: 0.05
+    parallel_max_wall_clock_s: 0.08
+
+  # ---------- cycle_detection (1, Mini-ADR J-40) ----------
+  - id: cycle-detection-001-two-node-cycle
+    # A→B→A manifest — detect_subagent_cycle raises AgentFactoryError
+    # at build time with the cycle path embedded in the message.
+    # ``scripted_messages`` / ``scripted_step_count`` are unused for this
+    # scenario but the schema requires them; keep them minimal.
+    scenario: cycle_detection
+    scripted_messages:
+      - role: human
+        content: unused
+    scripted_step_count: 0
+    has_recorder: false
+    expected_outcome_label: success
+    expected_content_contains: "cycle"
+    expected_iteration_used: 0
+    expected_llm_call_count: 0
+    expected_trajectory_dispatched: false
+    cycle_chain:
+      - alpha
+      - beta
+      - alpha

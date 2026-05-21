@@ -1,6 +1,6 @@
 metadata:
-  generated_at: '2026-05-21T05:20:46+00:00'
-  helix_commit: 8f49536b6b64d3a2bac02a62fe60627d4df96921
+  generated_at: '2026-05-21T06:49:52+00:00'
+  helix_commit: 27a1ffc055435ae173d69119ddd6d120583aeb16
   judge_model: claude-haiku-4-5-20251001
   judge_temperature: 0.0
   rerun_count: 3
@@ -34,11 +34,11 @@ capabilities:
       mrr_at_5: 0.55
     score:
       recall_at_5: 1.0
-      mrr_at_5: 1.0
+      mrr_at_5: 0.96875
     status: PASS
   J.4_sub_agent:
     metric_type: pass-rate
-    sample_size: 8
+    sample_size: 12
     threshold:
       pass_rate: 0.8
     score:
