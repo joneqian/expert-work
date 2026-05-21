@@ -69,6 +69,8 @@ class AuditAction(StrEnum):
     WORKSPACE_ARCHIVE = "workspace:archive"
     # workspace (Stream J.15-补强-2 — Mini-ADR J-29 第 2 项 backup pipeline)
     WORKSPACE_BACKUP = "workspace:backup"
+    # image upload (Stream J.6.补强-2 — Mini-ADR J-31)
+    IMAGE_UPLOAD = "image:upload"
     # tools (Stream E.6 + E.8 + onwards)
     TOOL_CALL = "tool:call"
     TOOL_BLOCKED = "tool:blocked"
@@ -128,6 +130,7 @@ class AuditEntry(BaseModel):
         "feedback",
         "memory_item",  # Stream K.K6 — long-term memory CRUD
         "user_workspace",  # Stream J.15-补强-1 — volume quota + lifecycle
+        "image_upload",  # Stream J.6.补强-2 — Mini-ADR J-31
     ]
     resource_id: str | None = None
     result: AuditResult

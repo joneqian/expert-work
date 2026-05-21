@@ -15,6 +15,7 @@ must own the thread, and 404 hides cross-user existence.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated, Final
 from uuid import UUID, uuid4
 
@@ -27,10 +28,12 @@ from control_plane.api._user_scope import (
     get_user_repo,
     resolve_caller_user_id,
 )
+from control_plane.audit import emit as audit_emit
 from control_plane.quota.base import QuotaService
 from control_plane.settings import Settings
+from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import QuotaDimension
+from helix_agent.protocol import AuditAction, AuditResult, QuotaDimension
 from helix_agent.protocol.multimodal import ImageRef
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.storage import ObjectStore
@@ -152,9 +155,43 @@ def build_uploads_router() -> APIRouter:
             ext=ext,
         )
         await store.put(image_ref.storage_key, raw, content_type=content_type)
-        # No app-level INFO log of the upload — request-context logging
-        # is the audit middleware's job. Logging request-derived values
-        # here is both redundant and trips CodeQL py/log-injection.
+
+        # Mini-ADR J-31 (J.6.补强-2) — uploads emit their own audit row.
+        # The audit middleware's SESSION_WRITE row covers run dispatch but
+        # not image-specific metadata (size / mime / object_key / sha256),
+        # which the SOC / compliance pipeline needs to trace every byte.
+        sha256_hex = hashlib.sha256(raw).hexdigest()
+        principal = getattr(request.state, "principal", None)
+        subject_type = (
+            principal.subject_type
+            if principal is not None and hasattr(principal, "subject_type")
+            else "user"
+        )
+        auth_method = (
+            principal.auth_method
+            if principal is not None and hasattr(principal, "auth_method")
+            else "jwt"
+        )
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.IMAGE_UPLOAD,
+            resource_type="image_upload",
+            resource_id=str(image_ref.image_id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={
+                "thread_id": str(thread_id),
+                "object_key": image_ref.storage_key,
+                "file_size_bytes": len(raw),
+                "mime_type": content_type,
+                "sha256": sha256_hex,
+                "subject_type": str(subject_type),
+                "auth_method": str(auth_method),
+                "ext": ext,
+            },
+        )
         return JSONResponse(status_code=201, content={"image_ref": image_ref.to_uri()})
 
     return router
