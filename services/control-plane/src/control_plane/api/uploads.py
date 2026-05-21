@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
+from control_plane.api._image_sanitize import ImageSanitizeError, strip_exif
 from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import (
     caller_owns_thread,
@@ -142,6 +143,16 @@ def build_uploads_router() -> APIRouter:
             raise HTTPException(status_code=413, detail=f"image exceeds {max_bytes}-byte limit")
         if not raw:
             raise HTTPException(status_code=400, detail="uploaded file is empty")
+
+        # Mini-ADR J-34 (J.6.补强-4) — strip EXIF / metadata before any
+        # downstream code touches the bytes. The sanitised payload is
+        # what lands in the object store + gets counted against quota
+        # + gets sha256'd for the audit row — every consumer sees the
+        # same metadata-free bytes.
+        try:
+            raw = strip_exif(raw, mime_type=content_type)
+        except ImageSanitizeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # Mini-ADR J-30 (J.6.补强-1) — quota admission. The single
         # ``check`` call deducts ``cost=1`` from QPS +

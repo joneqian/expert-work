@@ -154,6 +154,37 @@ async def test_build_llm_router_nested_fallback_preorder() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_llm_router_extra_fallbacks_appended_after_chain() -> None:
+    """Mini-ADR J-33 (J.6.补强-4) — ``extra_fallbacks`` lands after the
+    primary's own ``.fallback`` chain so priority is
+    ``primary → primary.fallback... → extra_fallbacks[0]...``."""
+    primary = _spec(
+        fallback=[
+            {
+                "provider": "openai",
+                "name": "gpt-4o",
+                "api_key_ref": f"secret://{_OPENAI_KEY_NAME}",
+            },
+        ],
+    ).spec.model
+    extra = _spec(
+        provider="kimi",
+        name="moonshot-v1-128k",
+        api_key_ref=f"secret://{_KIMI_KEY_NAME}",
+    ).spec.model
+    router = await build_llm_router(
+        primary,
+        secret_store=_secret_store(),
+        extra_fallbacks=[extra],
+    )
+    assert [h.key for h in router.providers] == [
+        "anthropic:claude-sonnet-4-6",
+        "openai:gpt-4o",
+        "kimi:moonshot-v1-128k",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_build_llm_router_rate_limit_from_model_spec() -> None:
     model = _spec(rate_limit_rpm=3).spec.model
     router = await build_llm_router(model, secret_store=_secret_store())

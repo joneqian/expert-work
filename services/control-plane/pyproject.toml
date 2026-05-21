@@ -47,6 +47,12 @@ dependencies = [
     # block structure; tiktoken counts tokens for the size cap.
     "markdown-it-py>=3.0,<4",
     "tiktoken>=0.8,<1",
+    # Stream J.6.补强-4 (Mini-ADR J-34) — Pillow strips EXIF from
+    # uploaded images on the way to the object store. Metadata exfil
+    # (GPS / device / timestamps) is a low-cost zero-day attack
+    # surface; strip cost < 100 LOC + transitive dep already pinned by
+    # markitdown.
+    "pillow>=12.0,<13",
 ]
 
 [build-system]

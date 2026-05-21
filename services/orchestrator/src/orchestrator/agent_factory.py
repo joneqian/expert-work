@@ -204,6 +204,8 @@ async def build_agent(
             around_llm_chain=chains.around_llm_call,
             image_resolver=env.image_resolver,
             stream_deadline_s=float(vl_deadline_s) if vl_deadline_s > 0 else None,
+            # Mini-ADR J-33 — VL fallback chain (J.6.补强-4).
+            extra_fallbacks=list(spec.spec.vision.fallbacks),
         )
     registry = await build_tool_registry(
         spec.spec.tools,
@@ -354,6 +356,7 @@ async def build_llm_router(
     around_llm_chain: MiddlewareChain | None = None,
     image_resolver: ImageResolver | None = None,
     stream_deadline_s: float | None = None,
+    extra_fallbacks: list[ModelSpec] | None = None,
 ) -> LLMRouter:
     """Build an :class:`LLMRouter` from a ``ModelSpec`` + its fallback tree.
 
@@ -372,9 +375,19 @@ async def build_llm_router(
     ``stream_deadline_s`` (Stream L.L3) caps each provider's ``complete()``
     call in wall-clock time; ``None`` / ``0`` disables. See
     :class:`LLMRouter.stream_deadline_s`.
+
+    Mini-ADR J-33 (J.6.补强-4) — ``extra_fallbacks`` is the J.6 VL
+    path's mirror of E.11 fallback. The list is appended **after** the
+    primary's own ``.fallback`` chain so the priority is:
+    ``primary → primary.fallback... → extra_fallbacks[0] → ...``. Each
+    ``extra_fallbacks`` entry is itself walked through ``_flatten_chain``
+    so a VL fallback can carry its own E.11-style sub-chain.
     """
     handles: list[ProviderHandle] = []
-    for entry in _flatten_chain(model):
+    chain: list[ModelSpec] = list(_flatten_chain(model))
+    for extra in extra_fallbacks or ():
+        chain.extend(_flatten_chain(extra))
+    for entry in chain:
         if entry.api_key_ref is None:
             raise AgentFactoryError(
                 f"model {entry.provider}:{entry.name} has no api_key_ref — "

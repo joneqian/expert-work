@@ -333,11 +333,23 @@ class VisionSpec(BaseModel):
     the strong text model. A ``vision:`` block on a vision-capable agent
     is rejected at agent-build time: the two J.6 paths are mutually
     exclusive (see ``docs/streams/STREAM-J-DESIGN.md`` § 13).
+
+    Mini-ADR J-33 (J.6.补强-4) — ``fallbacks`` is the VL-side mirror of
+    E.11 LLM Provider Fallback Chain. VL providers (Qwen-VL / GLM-4V)
+    have lower stability than the strong text models; a single hard
+    failure on the primary should fall over to a secondary VL model
+    rather than 500 the whole image question. Reuse of
+    :class:`LLMRouter` keeps the error-classification + fallback
+    semantics identical to the main reasoning loop.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     model: ModelSpec = Field(description="VL model the ask_image tool routes to")
+    fallbacks: list[ModelSpec] = Field(
+        default_factory=list,
+        description="Mini-ADR J-33 — VL providers tried in order when the primary fails",
+    )
 
 
 class WorkflowSpec(BaseModel):

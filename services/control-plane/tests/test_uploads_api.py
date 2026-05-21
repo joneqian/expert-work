@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from PIL import Image
 
 from control_plane.app import create_app
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
@@ -19,6 +21,20 @@ from tests.auth_fixtures import (
 )
 
 _TENANT = DEFAULT_DEV_TENANT_ID
+
+
+def _png_bytes(*, size: tuple[int, int] = (1, 1), color: int = 0) -> bytes:
+    """Generate a real PNG payload — needed since Mini-ADR J-34 sanitisation
+    round-trips uploads through Pillow."""
+    buf = BytesIO()
+    Image.new("RGB", size, color=(color, color, color)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _jpeg_bytes() -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (1, 1), color=(0, 0, 0)).save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 def _settings(**overrides: object) -> Settings:
@@ -68,7 +84,7 @@ async def test_upload_image_returns_image_ref_and_persists_bytes(setup: Setup) -
     client, thread_id, store = setup
     response = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
 
     assert response.status_code == 201
@@ -76,10 +92,13 @@ async def test_upload_image_returns_image_ref_and_persists_bytes(setup: Setup) -
     assert image_ref.startswith(f"helix://image/{_TENANT}/{thread_id}/")
     assert image_ref.endswith(".png")
 
-    # The bytes landed under the ADR-0004 prefix.
+    # The bytes landed under the ADR-0004 prefix. Mini-ADR J-34 round-trips
+    # through Pillow (EXIF strip) so we verify a PNG signature lands rather
+    # than asserting bit-identical equality with the input.
     keys = await store.list_prefix(f"{_TENANT}/uploads/{thread_id}/")
     assert len(keys) == 1
-    assert await store.get(keys[0]) == b"PNGBYTES"
+    stored = await store.get(keys[0])
+    assert stored.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 @pytest.mark.asyncio
@@ -87,7 +106,7 @@ async def test_upload_picks_jpg_extension_for_jpeg(setup: Setup) -> None:
     client, thread_id, _ = setup
     response = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.jpeg", b"JPEGBYTES", "image/jpeg")},
+        files={"file": ("photo.jpeg", _jpeg_bytes(), "image/jpeg")},
     )
     assert response.status_code == 201
     assert response.json()["image_ref"].endswith(".jpg")
@@ -130,7 +149,7 @@ async def test_upload_404_for_unknown_thread(setup: Setup) -> None:
     client, _, _ = setup
     response = await client.post(
         f"/v1/sessions/{uuid4()}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert response.status_code == 404
 
@@ -154,7 +173,7 @@ async def test_upload_503_when_no_object_store_configured() -> None:
     ) as client:
         response = await client.post(
             f"/v1/sessions/{thread_id}/uploads",
-            files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+            files={"file": ("photo.png", _png_bytes(), "image/png")},
         )
     assert response.status_code == 503
 
@@ -202,13 +221,13 @@ async def test_upload_429_when_image_count_quota_exhausted(setup: Setup) -> None
     for _ in range(2):
         response = await client.post(
             f"/v1/sessions/{thread_id}/uploads",
-            files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+            files={"file": ("photo.png", _png_bytes(), "image/png")},
         )
         assert response.status_code == 201
     # 3rd exceeds capacity; slow drip cannot refill in-time.
     response = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert response.status_code == 429
     body = response.json()
@@ -224,22 +243,22 @@ async def test_upload_429_when_image_storage_bytes_exhausted(setup: Setup) -> No
     from helix_agent.protocol import QuotaDimension
 
     client, thread_id, _ = setup
+    # 1x1 PNG round-tripped through Pillow lands around 70 bytes; a
+    # ceiling of 100 lets one upload land but denies the second.
     await _seed_quota_row(
         client._transport.app,  # type: ignore[attr-defined,union-attr]
         dimension=QuotaDimension.IMAGE_STORAGE_BYTES,
-        limit_value=12,  # below the second upload's combined cost
+        limit_value=100,
         burst=None,
     )
-    # First upload of 8 bytes leaves 4 bytes of headroom.
     first = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},  # 8 bytes
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert first.status_code == 201
-    # Second upload of 8 bytes would push total to 16 > 12 — denied.
     second = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"OTHERAAA", "image/png")},  # 8 bytes
+        files={"file": ("photo.png", _png_bytes(color=128), "image/png")},
     )
     assert second.status_code == 429
     body = second.json()
@@ -294,17 +313,22 @@ async def test_upload_emits_image_upload_audit_row(audit_setup: AuditSetup) -> N
     """Successful upload writes a dedicated ``image:upload`` audit row
     with the full byte-trace metadata (size / mime / object_key / sha256)
     that the SESSION_WRITE row does not carry."""
-    import hashlib
-
     from helix_agent.protocol import AuditAction
 
-    client, thread_id, audit_store, _ = audit_setup
-    raw = b"PNGBYTES"
+    client, thread_id, audit_store, object_store = audit_setup
+    raw = _png_bytes()
     response = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
         files={"file": ("photo.png", raw, "image/png")},
     )
     assert response.status_code == 201
+
+    # Mini-ADR J-34 strips EXIF before audit/store, so the audit's
+    # ``file_size_bytes`` + ``sha256`` reflect the sanitised payload
+    # actually persisted — verify they match the stored bytes.
+    keys = await object_store.list_prefix(f"{_TENANT}/uploads/{thread_id}/")
+    stored = await object_store.get(keys[0])
+    import hashlib
 
     from helix_agent.protocol import AuditQuery
 
@@ -314,9 +338,9 @@ async def test_upload_emits_image_upload_audit_row(audit_setup: AuditSetup) -> N
     entry = image_upload_rows[0]
     assert entry.resource_type == "image_upload"
     assert entry.tenant_id == _TENANT
-    assert entry.details["file_size_bytes"] == len(raw)
+    assert entry.details["file_size_bytes"] == len(stored)
     assert entry.details["mime_type"] == "image/png"
-    assert entry.details["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert entry.details["sha256"] == hashlib.sha256(stored).hexdigest()
     assert entry.details["ext"] == ".png"
     assert entry.details["thread_id"] == str(thread_id)
     assert entry.details["object_key"].startswith(f"{_TENANT}/uploads/{thread_id}/")
@@ -344,12 +368,12 @@ async def test_quota_denial_does_not_emit_image_upload_audit(
     )
     first = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert first.status_code == 201
     second = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert second.status_code == 429
 
@@ -373,7 +397,7 @@ async def test_upload_registers_row_in_image_upload_store(audit_setup: AuditSetu
     client, thread_id, _, _ = audit_setup
     response = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert response.status_code == 201
 
@@ -381,7 +405,9 @@ async def test_upload_registers_row_in_image_upload_store(audit_setup: AuditSetu
     rows = await images.list_active_for_thread(tenant_id=_TENANT, thread_id=thread_id)
     assert len(rows) == 1
     row = rows[0]
-    assert row.size_bytes == 8
+    # Mini-ADR J-34 — size reflects the EXIF-stripped payload, not the
+    # raw upload (raw + sanitised differ by metadata bytes for real images).
+    assert row.size_bytes > 0
     assert row.mime_type == "image/png"
     assert row.deleted_at is None
     assert row.object_key.endswith(".png")
@@ -396,7 +422,7 @@ async def test_delete_image_soft_deletes_row_and_emits_audit(audit_setup: AuditS
     client, thread_id, audit_store, _ = audit_setup
     upload = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     assert upload.status_code == 201
     image_ref = upload.json()["image_ref"]
@@ -429,12 +455,52 @@ async def test_delete_image_404_for_unknown_id(audit_setup: AuditSetup) -> None:
 
 
 @pytest.mark.asyncio
+async def test_multi_image_upload_round_trips_three_images(audit_setup: AuditSetup) -> None:
+    """Mini-ADR J-34 — three uploads in a single thread land EXIF-stripped
+    + each gets its own registry row + audit row. Verifies the upload
+    pipeline scales beyond a single-image sweet spot."""
+    from helix_agent.protocol import AuditAction, AuditQuery
+
+    client, thread_id, audit_store, object_store = audit_setup
+
+    # Upload 3 distinct-color PNGs to the same thread.
+    for color in (0, 64, 192):
+        response = await client.post(
+            f"/v1/sessions/{thread_id}/uploads",
+            files={"file": (f"photo-{color}.png", _png_bytes(color=color), "image/png")},
+        )
+        assert response.status_code == 201
+
+    # All 3 bytes blobs sit under the thread's prefix.
+    keys = await object_store.list_prefix(f"{_TENANT}/uploads/{thread_id}/")
+    assert len(keys) == 3
+    # All 3 are PNG (signature intact post-sanitisation).
+    for key in keys:
+        stored = await object_store.get(key)
+        assert stored.startswith(b"\x89PNG\r\n\x1a\n")
+
+    # Registry holds 3 active rows for the thread.
+    images = client._transport.app.state.image_upload_store  # type: ignore[attr-defined,union-attr]
+    rows = await images.list_active_for_thread(tenant_id=_TENANT, thread_id=thread_id)
+    assert len(rows) == 3
+
+    # Audit emitted 3 IMAGE_UPLOAD rows.
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
+    image_upload_rows = [
+        r
+        for r in page.entries
+        if r.action == AuditAction.IMAGE_UPLOAD and r.details.get("operation") != "soft_delete"
+    ]
+    assert len(image_upload_rows) == 3
+
+
+@pytest.mark.asyncio
 async def test_delete_image_is_idempotent(audit_setup: AuditSetup) -> None:
     """Second DELETE on an already soft-deleted image returns 404."""
     client, thread_id, _, _ = audit_setup
     upload = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("photo.png", b"PNGBYTES", "image/png")},
+        files={"file": ("photo.png", _png_bytes(), "image/png")},
     )
     image_ref = upload.json()["image_ref"]
     image_id = image_ref.rsplit("/", 1)[-1].split(".", 1)[0]
