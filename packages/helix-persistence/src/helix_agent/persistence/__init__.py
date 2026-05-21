@@ -98,10 +98,22 @@ from helix_agent.persistence.workspace import (
     InMemoryUserWorkspaceStore as InMemoryUserWorkspaceStore,
 )
 from helix_agent.persistence.workspace import (
+    InMemoryVolumeBackupDLQ as InMemoryVolumeBackupDLQ,
+)
+from helix_agent.persistence.workspace import (
     SqlUserWorkspaceStore as SqlUserWorkspaceStore,
 )
 from helix_agent.persistence.workspace import (
+    SqlVolumeBackupDLQ as SqlVolumeBackupDLQ,
+)
+from helix_agent.persistence.workspace import (
     UserWorkspaceStore as UserWorkspaceStore,
+)
+from helix_agent.persistence.workspace import (
+    VolumeBackupDLQ as VolumeBackupDLQ,
+)
+from helix_agent.persistence.workspace import (
+    VolumeDLQRow as VolumeDLQRow,
 )
 from helix_agent.persistence.workspace import (
     WorkspaceNotFoundError as WorkspaceNotFoundError,
@@ -136,6 +148,7 @@ __all__ = [
     "InMemoryThreadMetaStore",
     "InMemoryTokenReservationStore",
     "InMemoryUserWorkspaceStore",
+    "InMemoryVolumeBackupDLQ",
     "KnowledgeBaseRow",
     "KnowledgeChunkRow",
     "KnowledgeDocumentRow",
@@ -153,6 +166,7 @@ __all__ = [
     "SqlThreadMetaStore",
     "SqlTokenReservationStore",
     "SqlUserWorkspaceStore",
+    "SqlVolumeBackupDLQ",
     "TenantConfigStore",
     "TenantQuotaStore",
     "TenantUserRow",
@@ -162,6 +176,8 @@ __all__ = [
     "TokenReservationStore",
     "UserWorkspaceRow",
     "UserWorkspaceStore",
+    "VolumeBackupDLQ",
+    "VolumeDLQRow",
     "WorkspaceNotFoundError",
     "build_rls_sessionmaker",
     "bypass_rls_var",

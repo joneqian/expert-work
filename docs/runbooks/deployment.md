@@ -78,6 +78,28 @@ python tools/deploy/rollback.py --to-tag v1.2.2  # 兜底路径
 
 > 完整的零停机迁移规范（在线建索引、分批 backfill、迁移 linter / CI 自动拦 contract 迁移）属 M1-B。本阶段只立规则 + 在下方清单设强制检查点。
 
+## Volume at-rest encryption（落实 P0 #9 / Stream J.15-补强-2 / Mini-ADR J-29 第 3 项）
+
+> Stream J.15 持久卷里有用户文件 + agent 中间产物。我们**不在 helix 应用层做加密** —— 依赖宿主机 / 云磁盘加密。本节锁定每种环境的强约束。
+
+| 环境 | 加密责任方 | 强约束 |
+|------|-----------|--------|
+| **阿里云 ECS（prod / staging）** | ECS 数据盘加密 + KMS Secrets Manager 同 region 同 key | 部署前 `aliyun ecs DescribeDisks --DiskIds <id> --DiskCategory cloud_essd` 必须返回 `Encrypted: true` + `KMSKeyId` 非空；`/var/lib/docker` 必须落在该加密盘上（不能用 OS 自带的非加密盘） |
+| **自托管 Linux（staging 备用 / on-prem prod）** | 宿主机 LUKS / dm-crypt | `/var/lib/docker` 所在分区 `cryptsetup status <luks-name>` 返回 `is active`；密钥短语经 systemd-cryptsetup 启动时挂载（不能写明文密钥到磁盘） |
+| **macOS dev** | FileVault | `fdesetup status` = `FileVault is On`（dev only，不要求企业级 key escrow） |
+| **CI / 临时容器** | 不要求 | testcontainers 在 ephemeral runner 上跑，磁盘随 runner 销毁 |
+
+**为什么不在 helix 应用层做加密**：
+
+- 容器层 LUKS / cryfs 会触发 1) double-encrypt 性能损（云盘已经 hw-accelerated XTS），2) 复杂的 key-rotation 链路与 KMS-managed disk encryption 路径割裂。
+- ObjectStore 侧的 J-36 archive + J-29 backup blobs 走对象存储 SSE-KMS（同 ADR-0007 KMS key），落地即加密；不需要在 supervisor 层重复打包加密。
+
+**部署前验证 checklist（每发布加一项）**：
+
+- [ ] 部署前 `aliyun cli ecs DescribeDisks` 确认 `Encrypted: true`（或自托管 `cryptsetup status` ）。
+- [ ] `/var/lib/docker` 所在 mount point 与上一项是同一卷（`df /var/lib/docker | tail -1`）。
+- [ ] ObjectStore bucket（`HELIX_SANDBOX_OBJECT_STORE_BUCKET`）开启 SSE-KMS。
+
 ## 环境差异与坑
 
 - **dev 的 redis 占宿主 6379** —— 若宿主已跑 redis，集成测试用 `HELIX_TEST_COMPOSE_OVERRIDE` 指向一个 `redis: {ports: !reset []}` 的 override 文件（CI 无此冲突）。

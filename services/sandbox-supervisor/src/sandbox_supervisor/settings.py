@@ -68,3 +68,39 @@ class SandboxSupervisorSettings(BaseSettings):
     #: rejects ``acquire()`` when ``size_bytes >= size_limit_bytes``.
     #: Default 10 GiB matches migration 0026's server_default.
     default_workspace_size_limit_mb: int = Field(default=10 * 1024, gt=0, le=1024 * 1024)
+
+    # ------------------------------------------------------ workspace J.15-补强-2
+    #: When set, the supervisor periodically archives soft-deleted
+    #: workspaces (Mini-ADR J-36 lifecycle 第 2 → 第 3 档) and writes a
+    #: daily snapshot of each active workspace (Mini-ADR J-29 第 2 项).
+    workspace_lifecycle_enabled: bool = True
+    #: ObjectStore key prefix for J-36 archives. Layout:
+    #: ``{prefix}/{tenant_id}/{user_id}/{volume_name}.tar.gz``.
+    workspace_archive_prefix: str = "volume-archive"
+    #: ObjectStore key prefix for J-29 第 2 项 daily backups. Layout:
+    #: ``{prefix}/{tenant_id}/{user_id}/{YYYY-MM-DD}/{volume_name}.tar.gz``.
+    workspace_backup_prefix: str = "volume-backups"
+    #: Days a daily backup snapshot is retained before retention-cleanup
+    #: prunes it. The archive (J-36) is kept until 90-day hard-delete
+    #: (推 M1 per Mini-ADR J-36); this knob is the rolling window only.
+    workspace_backup_retention_days: int = Field(default=7, gt=0, le=365)
+    #: Local hour-of-day (0-23) the daily backup sweep runs. Default 03:00
+    #: lands in off-peak. Set to ``-1`` to disable the daily backup loop
+    #: (archive-on-soft-delete still runs every reaper tick).
+    workspace_backup_hour: int = Field(default=3, ge=-1, le=23)
+    #: Hard cap on the in-memory tar.gz buffer per volume archive (see
+    #: :meth:`DockerClient.archive_volume`). 1.5 GiB matches the
+    #: practical single-shot ObjectStore.put ceiling — multipart is M1.
+    workspace_archive_max_inflight_bytes: int = Field(default=1536 * 1024 * 1024, gt=0)
+
+    # -------------------------------------------------------- object store
+    #: Object-store backend for the J.15 archive + backup pipelines.
+    #: ``memory`` is the dev / CI default; ``s3-compatible`` plugs into
+    #: MinIO / Aliyun OSS for prod (ADR-0004).
+    object_store_backend: Literal["memory", "s3-compatible"] = "memory"
+    object_store_endpoint_url: str = ""
+    object_store_region: str = "cn-hangzhou"
+    object_store_bucket: str = "helix-agent-volume-backups"
+    object_store_access_key: str = ""
+    object_store_secret_key: str = ""
+    object_store_use_path_style: bool = True

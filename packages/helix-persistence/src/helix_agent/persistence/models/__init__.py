@@ -29,6 +29,7 @@ from helix_agent.persistence.models.thread_meta import ThreadMetaRow
 from helix_agent.persistence.models.token_budget_ledger import TokenBudgetLedgerRow
 from helix_agent.persistence.models.token_reservation import TokenReservationRow
 from helix_agent.persistence.models.user_workspace import UserWorkspaceRow
+from helix_agent.persistence.models.volume_backup_dlq import VolumeBackupDLQRow
 
 __all__ = [
     "AgentSpecRow",
@@ -57,4 +58,5 @@ __all__ = [
     "TokenBudgetLedgerRow",
     "TokenReservationRow",
     "UserWorkspaceRow",
+    "VolumeBackupDLQRow",
 ]

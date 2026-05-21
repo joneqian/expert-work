@@ -61,6 +61,25 @@ class DockerClient(Protocol):
         :class:`DockerError` when the measure can't run.
         """
 
+    async def archive_volume(self, *, volume: str, image: str, max_bytes: int) -> bytes:
+        """Stream a tar.gz snapshot of a named volume into memory.
+
+        Stream J.15-补强-2 — backs the J.15 lifecycle archive + daily
+        backup pipelines. Spawns a throwaway ``--rm`` container that
+        mounts ``volume`` read-only and runs ``tar -czf - .`` from
+        ``/ws``. ``max_bytes`` caps the buffer so a runaway / malicious
+        volume can't OOM the supervisor; over-cap archives raise
+        :class:`DockerError`. Raises on any non-zero exit.
+        """
+
+    async def remove_volume(self, *, volume: str) -> None:
+        """Force-remove a named volume (``docker volume rm --force``).
+
+        Stream J.15-补强-2 — called after a successful archive to free
+        the disk. Idempotent — removing a missing volume is logged but
+        does not raise.
+        """
+
 
 class CliDockerClient:
     """:class:`DockerClient` backed by the ``docker`` CLI via asyncio subprocess."""
@@ -197,6 +216,71 @@ class CliDockerClient:
         except ValueError as exc:
             msg = f"could not parse du output for {volume!r}: {stdout!r}"
             raise DockerError(msg) from exc
+
+    async def archive_volume(self, *, volume: str, image: str, max_bytes: int) -> bytes:
+        """Stream a tar.gz of ``volume`` to stdout via a throwaway container.
+
+        Stream J.15-补强-2. The container mounts ``volume`` read-only at
+        ``/ws`` and emits ``tar -czf - .`` on stdout. We capture up to
+        ``max_bytes + 1`` bytes — one over the cap so callers can detect
+        an over-cap volume and raise. Hardening mirrors
+        :meth:`read_volume_file`: no network, read-only rootfs, all caps
+        dropped.
+        """
+        argv = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--volume",
+            f"{volume}:/ws:ro",
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            "cd /ws && tar -czf - .",
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=max_bytes + 1024,
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            msg = f"volume archive failed for {volume!r}: {detail}"
+            raise DockerError(msg)
+        if len(stdout) > max_bytes:
+            msg = (
+                f"volume archive for {volume!r} exceeds the in-memory cap "
+                f"({len(stdout)} > {max_bytes} bytes); upgrade to multipart "
+                "ObjectStore.put (推 M1) before enabling larger workspaces"
+            )
+            raise DockerError(msg)
+        return stdout
+
+    async def remove_volume(self, *, volume: str) -> None:
+        """Force-remove a named volume; idempotent.
+
+        Stream J.15-补强-2 — called after successful archive to free disk.
+        """
+        _, stderr, code = await self._exec(["docker", "volume", "rm", "--force", volume])
+        if code != 0:
+            # A missing volume is fine — archive may have raced with a
+            # manual cleanup; the row's archived_object_key already
+            # records the only durable copy.
+            logger.warning(
+                "docker_client.volume_remove_failed volume=%s reason=%s",
+                volume,
+                stderr.strip(),
+            )
 
     @staticmethod
     async def _exec(argv: list[str]) -> tuple[str, str, int]:

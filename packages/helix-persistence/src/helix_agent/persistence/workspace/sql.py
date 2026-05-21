@@ -143,3 +143,10 @@ class SqlUserWorkspaceStore(UserWorkspaceStore):
                 )
             )
             return [_row_to_workspace(row) for row in result.scalars().all()]
+
+    async def list_active(self) -> list[UserWorkspace]:
+        async with self._sf() as session:
+            result = await session.execute(
+                select(UserWorkspaceRow).where(UserWorkspaceRow.deleted_at.is_(None))
+            )
+            return [_row_to_workspace(row) for row in result.scalars().all()]

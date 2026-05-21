@@ -77,3 +77,6 @@ class InMemoryUserWorkspaceStore(UserWorkspaceStore):
             for row in self._rows.values()
             if row.deleted_at is not None and row.archived_object_key is None
         ]
+
+    async def list_active(self) -> list[UserWorkspace]:
+        return [row for row in self._rows.values() if row.deleted_at is None]
