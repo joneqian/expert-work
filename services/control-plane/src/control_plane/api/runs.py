@@ -591,11 +591,11 @@ def build_runs_router() -> APIRouter:
             )
         )
         await runtime.run_manager.attach_task(continuation_run_id, worker)
-        logger.info(
-            "control_plane.run.resumed run_id=%s continuation=%s",
-            run_id,
-            continuation_run_id,
-        )
+        # Log only ``continuation_run_id`` — it is server-generated
+        # (``uuid4()``). The paused ``run_id`` is a request path param;
+        # CodeQL py/log-injection taints it even though FastAPI has
+        # already validated it as a UUID. Same rule as ``trigger_run``.
+        logger.info("control_plane.run.resumed continuation=%s", continuation_run_id)
         return StreamingResponse(
             sse_consumer(
                 bridge=runtime.stream_bridge,
