@@ -120,6 +120,14 @@ from helix_agent.protocol.tenant_config import (
 )
 from helix_agent.protocol.tenant_user import TenantUser
 from helix_agent.protocol.thread_meta import ThreadMeta, ThreadStatus
+from helix_agent.protocol.trigger import (
+    TriggerKind,
+    TriggerRecord,
+    TriggerRunRecord,
+    TriggerRunStatus,
+    TriggerSource,
+    TriggerSpec,
+)
 from helix_agent.protocol.user_workspace import UserWorkspace
 
 __all__ = [
@@ -223,6 +231,12 @@ __all__ = [
     "ThreadStatus",
     "TokenReservationRecord",
     "ToolSpecEntry",
+    "TriggerKind",
+    "TriggerRecord",
+    "TriggerRunRecord",
+    "TriggerRunStatus",
+    "TriggerSource",
+    "TriggerSpec",
     "UserWorkspace",
     "VisionSpec",
     "WorkflowSpec",

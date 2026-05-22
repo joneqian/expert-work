@@ -31,6 +31,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from helix_agent.protocol.reflection import ReflectionSpec
+from helix_agent.protocol.trigger import TriggerSpec
 
 # ---------------------------------------------------------------------------
 # metadata
@@ -645,6 +646,14 @@ class AgentSpecBody(BaseModel):
             "Validated against ``SKILL_REF_PATTERN``."
         ),
     )
+    triggers: list[TriggerSpec] = Field(
+        default_factory=list,
+        description=(
+            "Stream J.10 — cron / webhook triggers that start runs of "
+            "this agent automatically. Reconciled into the agent_trigger "
+            "table on deploy (source='manifest')."
+        ),
+    )
     workflow: WorkflowSpec = Field(default_factory=WorkflowSpec)
     cache: CacheSpec = Field(
         default_factory=CacheSpec,
@@ -756,6 +765,22 @@ class AgentSpec(BaseModel):
                 )
                 raise ValueError(msg)
             seen_names.add(ref.name)
+        return self
+
+    @model_validator(mode="after")
+    def _check_triggers(self) -> AgentSpec:
+        """J.10 — reject duplicate trigger names within the manifest.
+
+        Trigger names are the manifest-reconciliation key
+        ``(tenant, agent, name)``; two ``triggers:`` entries sharing a
+        name would collide on deploy.
+        """
+        seen: set[str] = set()
+        for trig in self.spec.triggers:
+            if trig.name in seen:
+                msg = f"duplicate trigger name {trig.name!r} in triggers."
+                raise ValueError(msg)
+            seen.add(trig.name)
         return self
 
 

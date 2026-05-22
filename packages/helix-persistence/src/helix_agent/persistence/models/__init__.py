@@ -3,6 +3,7 @@
 from helix_agent.persistence.models.agent_approval import AgentApprovalRow
 from helix_agent.persistence.models.agent_run import AgentRunRow
 from helix_agent.persistence.models.agent_spec import AgentSpecRow
+from helix_agent.persistence.models.agent_trigger import AgentTriggerRow, TriggerRunRow
 from helix_agent.persistence.models.api_key import ApiKeyRow
 from helix_agent.persistence.models.artifact import ArtifactRow, ArtifactVersionRow
 from helix_agent.persistence.models.audit_log import AuditLogRow
@@ -39,6 +40,7 @@ __all__ = [
     "AgentApprovalRow",
     "AgentRunRow",
     "AgentSpecRow",
+    "AgentTriggerRow",
     "ApiKeyRow",
     "ArtifactRow",
     "ArtifactVersionRow",
@@ -66,6 +68,7 @@ __all__ = [
     "ThreadMetaRow",
     "TokenBudgetLedgerRow",
     "TokenReservationRow",
+    "TriggerRunRow",
     "UserWorkspaceRow",
     "VolumeBackupDLQRow",
 ]

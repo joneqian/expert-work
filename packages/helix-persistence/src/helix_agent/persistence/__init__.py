@@ -120,6 +120,9 @@ from helix_agent.persistence.thread_meta import (
     SqlThreadMetaStore as SqlThreadMetaStore,
 )
 from helix_agent.persistence.thread_meta import ThreadMetaStore as ThreadMetaStore
+from helix_agent.persistence.trigger import InMemoryTriggerStore as InMemoryTriggerStore
+from helix_agent.persistence.trigger import SqlTriggerStore as SqlTriggerStore
+from helix_agent.persistence.trigger import TriggerStore as TriggerStore
 from helix_agent.persistence.workspace import (
     InMemoryUserWorkspaceStore as InMemoryUserWorkspaceStore,
 )
@@ -175,6 +178,7 @@ __all__ = [
     "InMemoryTenantUserStore",
     "InMemoryThreadMetaStore",
     "InMemoryTokenReservationStore",
+    "InMemoryTriggerStore",
     "InMemoryUserWorkspaceStore",
     "InMemoryVolumeBackupDLQ",
     "KnowledgeBaseRow",
@@ -194,6 +198,7 @@ __all__ = [
     "SqlTenantUserStore",
     "SqlThreadMetaStore",
     "SqlTokenReservationStore",
+    "SqlTriggerStore",
     "SqlUserWorkspaceStore",
     "SqlVolumeBackupDLQ",
     "TenantConfigStore",
@@ -203,6 +208,7 @@ __all__ = [
     "ThreadMetaRow",
     "ThreadMetaStore",
     "TokenReservationStore",
+    "TriggerStore",
     "UserWorkspaceRow",
     "UserWorkspaceStore",
     "VolumeBackupDLQ",
