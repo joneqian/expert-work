@@ -1,0 +1,47 @@
+# J.10 调度 / 触发 — M0 baseline dataset (Stream J.13a + Mini-ADR J-26 / J-42 closeout).
+#
+# 17 cases driving the J.10 trigger capability — all deterministic;
+# expected pass_rate = 1.00 (threshold ≥ 0.90).
+#
+# Coverage:
+#   - 4 cron: next-fire / is-due true / is-due false / not-due after fire
+#   - 3 backoff: first retry / escalation / clamp
+#   - 2 webhook: secret roundtrip / mismatch
+#   - 3 spec: cron requires expr / cron rejects blank / webhook needs no expr
+#   - 5 store: create+get / cross-tenant hidden / count cron /
+#     run-store list_fired / run-store list_due_retries
+cases:
+  - id: trigger-001
+    scenario: cron_next_fire
+  - id: trigger-002
+    scenario: cron_is_due_true
+  - id: trigger-003
+    scenario: cron_is_due_false
+  - id: trigger-004
+    scenario: cron_not_due_after_fire
+  - id: trigger-005
+    scenario: backoff_first_retry
+  - id: trigger-006
+    scenario: backoff_escalates
+  - id: trigger-007
+    scenario: backoff_clamps
+  - id: trigger-008
+    scenario: webhook_secret_roundtrip
+  - id: trigger-009
+    scenario: webhook_secret_mismatch
+  - id: trigger-010
+    scenario: spec_cron_requires_expr
+  - id: trigger-011
+    scenario: spec_cron_rejects_blank_expr
+  - id: trigger-012
+    scenario: spec_webhook_needs_no_expr
+  - id: trigger-013
+    scenario: store_create_get
+  - id: trigger-014
+    scenario: store_cross_tenant_hidden
+  - id: trigger-015
+    scenario: store_count_cron
+  - id: trigger-016
+    scenario: run_store_list_fired
+  - id: trigger-017
+    scenario: run_store_list_due_retries

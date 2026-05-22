@@ -54,6 +54,7 @@ import rag as _rag  # type: ignore[import-not-found]  # noqa: E402
 import reflect as _rf  # type: ignore[import-not-found]  # noqa: E402
 import skill as _sk  # type: ignore[import-not-found]  # noqa: E402
 import sub_agent as _sa  # type: ignore[import-not-found]  # noqa: E402
+import trigger as _trigger  # type: ignore[import-not-found]  # noqa: E402
 from _capability import (  # type: ignore[import-not-found]  # noqa: E402
     CapabilityReport,
 )
@@ -198,6 +199,11 @@ async def _run_sub_agent() -> CapabilityReport:
     return await _sa.evaluate_set(cases)
 
 
+async def _run_trigger() -> CapabilityReport:
+    cases = _trigger.load_cases(_DATASETS / "trigger" / "m0_baseline.yaml")
+    return await _trigger.evaluate_set(cases)
+
+
 # ---------------------------------------------------------------------------
 # Registry — single source of truth for what enters the baseline.
 # ---------------------------------------------------------------------------
@@ -288,8 +294,8 @@ _RUNNERS: tuple[_Runner, ...] = (
         "J.10_trigger",
         "pass-rate",
         {"pass_rate": 0.90},
-        None,
-        _DEFERRED_PENDING_CAPABILITY,
+        _run_trigger,
+        "",
     ),
     _Runner(
         "J.11_model_routing",

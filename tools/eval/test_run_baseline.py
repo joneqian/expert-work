@@ -44,16 +44,17 @@ def test_runner_registry_has_fourteen_capabilities() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_baseline_produces_twelve_pass_two_deferred(tmp_path: Path) -> None:
-    """J.8 closeout adds eval: 12 shipped capabilities PASS; remaining 2 DEFERRED."""
+async def test_run_baseline_produces_thirteen_pass_one_deferred(tmp_path: Path) -> None:
+    """J.10 closeout adds eval: 13 shipped capabilities PASS; J.12 DEFERRED."""
     out = tmp_path / "baseline.yaml"
     reports = await run_baseline(out_path=out)
 
     pass_caps = sorted(c for c, r in reports.items() if r.status == "PASS")
     deferred_caps = sorted(c for c, r in reports.items() if r.status == "DEFERRED")
-    # ``sorted()`` is lexicographic — "J.11" < "J.1_" because '1' (0x31)
-    # precedes '_' (0x5F).
+    # ``sorted()`` is lexicographic — "J.10" < "J.11" < "J.1_" because
+    # '0' < '1' < '_' at the fourth character.
     assert pass_caps == [
+        "J.10_trigger",
         "J.11_model_routing",
         "J.14_per_user_isolation",
         "J.15_persistent_volume",
@@ -67,7 +68,7 @@ async def test_run_baseline_produces_twelve_pass_two_deferred(tmp_path: Path) ->
         "J.8_hitl",
         "J.9_artifact",
     ]
-    assert len(deferred_caps) == 2
+    assert deferred_caps == ["J.12_learning"]
     assert all(r.status != "FAIL" for r in reports.values())
 
 
