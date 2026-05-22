@@ -1,0 +1,62 @@
+# J.8 HITL / 审批 — M0 baseline dataset (Stream J.13a + Mini-ADR J-24 closeout).
+#
+# 17 cases driving the approval gate + resume decision-application +
+# ApprovalStore + ApprovalDecision validator. All-deterministic;
+# expected pass_rate = 1.00.
+#
+# Coverage:
+#   - 4 detect: declarative gate / ask_for_approval / nothing gated / first hit
+#   - 3 request: policy_gate / agent reason_kind / bogus reason_kind fallback
+#   - 4 resume: approve dispatch / modify rewrite / reject gate terminal /
+#     reject ask non-terminal
+#   - 4 store: create+get / cross-tenant hidden / list_expired / mark_decided once
+#   - 2 decision: modify requires args / approve rejects args
+#
+# Threshold (Mini-ADR J-37): pass_rate >= 0.95.
+
+name: hitl-m0-baseline
+
+cases:
+  # ---------- detect (4) ----------
+  - id: detect-001-declarative-gate
+    scenario: detect_declarative_gate
+  - id: detect-002-ask-for-approval
+    scenario: detect_ask_for_approval
+  - id: detect-003-nothing-gated
+    scenario: detect_nothing_gated
+  - id: detect-004-first-hit
+    scenario: detect_first_hit
+
+  # ---------- request (3) ----------
+  - id: request-001-policy-gate
+    scenario: request_policy_gate
+  - id: request-002-agent-reason-kind
+    scenario: request_agent_reason_kind
+  - id: request-003-bogus-reason-kind-falls-back
+    scenario: request_bogus_reason_kind_falls_back
+
+  # ---------- resume (4) ----------
+  - id: resume-001-approve-dispatches
+    scenario: resume_approve_dispatches
+  - id: resume-002-modify-rewrites-args
+    scenario: resume_modify_rewrites_args
+  - id: resume-003-reject-gate-terminal
+    scenario: resume_reject_gate_is_terminal
+  - id: resume-004-reject-ask-not-terminal
+    scenario: resume_reject_ask_not_terminal
+
+  # ---------- store (4) ----------
+  - id: store-001-create-get
+    scenario: store_create_get
+  - id: store-002-cross-tenant-hidden
+    scenario: store_cross_tenant_hidden
+  - id: store-003-list-expired
+    scenario: store_list_expired
+  - id: store-004-mark-decided-once
+    scenario: store_mark_decided_once
+
+  # ---------- decision validator (2) ----------
+  - id: decision-001-modify-requires-args
+    scenario: decision_modify_requires_args
+  - id: decision-002-approve-rejects-args
+    scenario: decision_approve_rejects_args

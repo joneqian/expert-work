@@ -43,6 +43,7 @@ if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
 import artifact as _art  # type: ignore[import-not-found]  # noqa: E402
+import hitl as _hitl  # type: ignore[import-not-found]  # noqa: E402
 import memory_recall as _mr  # type: ignore[import-not-found]  # noqa: E402
 import model_routing as _mrt  # type: ignore[import-not-found]  # noqa: E402
 import multimodal as _mm  # type: ignore[import-not-found]  # noqa: E402
@@ -187,6 +188,11 @@ async def _run_artifact() -> CapabilityReport:
     return await _art.evaluate_set(cases)
 
 
+async def _run_hitl() -> CapabilityReport:
+    cases = _hitl.load_cases(_DATASETS / "hitl" / "m0_baseline.yaml")
+    return await _hitl.evaluate_set(cases)
+
+
 async def _run_sub_agent() -> CapabilityReport:
     cases = _sa.load_cases(_DATASETS / "sub_agent" / "m0_baseline.yaml")
     return await _sa.evaluate_set(cases)
@@ -268,8 +274,8 @@ _RUNNERS: tuple[_Runner, ...] = (
         "J.8_hitl",
         "pass-rate",
         {"pass_rate": 0.95},
-        None,
-        _DEFERRED_PENDING_CAPABILITY,
+        _run_hitl,
+        "",
     ),
     _Runner(
         "J.9_artifact",
