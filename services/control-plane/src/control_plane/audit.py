@@ -124,6 +124,8 @@ ResourceType = Literal[
     "image_upload",  # Stream J.6.补强-2 — Mini-ADR J-31
     "skill",  # Stream J.7a — Mini-ADR J-23
     "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42
+    "eval_dataset",  # Stream J.12 — Mini-ADR J-43
+    "curation_candidate",  # Stream J.12 — Mini-ADR J-43
 ]
 
 

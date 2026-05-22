@@ -33,6 +33,8 @@ from control_plane.api import (
     build_agents_router,
     build_api_keys_router,
     build_artifacts_router,
+    build_curation_router,
+    build_eval_dataset_router,
     build_feedback_router,
     build_health_router,
     build_knowledge_router,
@@ -135,8 +137,11 @@ from helix_agent.persistence.auth import (
 )
 from helix_agent.persistence.curation import (
     CurationCandidateStore,
+    EvalDatasetStore,
     InMemoryCurationCandidateStore,
+    InMemoryEvalDatasetStore,
     SqlCurationCandidateStore,
+    SqlEvalDatasetStore,
 )
 from helix_agent.persistence.database import (
     DatabaseConfig,
@@ -228,6 +233,7 @@ def create_app(
     tenant_user_repo: TenantUserStore | None = None,
     feedback_repo: FeedbackStore | None = None,
     curation_candidate_repo: CurationCandidateStore | None = None,
+    eval_dataset_repo: EvalDatasetStore | None = None,
     artifact_repo: ArtifactStore | None = None,
     knowledge_repo: KnowledgeStore | None = None,
     image_upload_repo: ImageUploadStore | None = None,
@@ -334,9 +340,12 @@ def create_app(
     resolved_trigger_run_store: TriggerRunStore = trigger_run_repo or (
         sql_stores.trigger_run if sql_stores else InMemoryTriggerRunStore()
     )
-    # Stream J.12 (Mini-ADR J-43) — curation candidate registry.
+    # Stream J.12 (Mini-ADR J-43) — curation candidate + eval-dataset registries.
     resolved_curation_candidate_store: CurationCandidateStore = curation_candidate_repo or (
         sql_stores.curation_candidate if sql_stores else InMemoryCurationCandidateStore()
+    )
+    resolved_eval_dataset_store: EvalDatasetStore = eval_dataset_repo or (
+        sql_stores.eval_dataset if sql_stores else InMemoryEvalDatasetStore()
     )
     # Stream J.7a (Mini-ADR J-23) — skill registry.
     resolved_skill_store: SkillStore = skill_repo or (
@@ -632,6 +641,7 @@ def create_app(
     app.state.trigger_store = resolved_trigger_store
     app.state.trigger_run_store = resolved_trigger_run_store
     app.state.curation_candidate_store = resolved_curation_candidate_store
+    app.state.eval_dataset_store = resolved_eval_dataset_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
     app.state.skill_store = resolved_skill_store
@@ -736,6 +746,8 @@ def create_app(
     app.include_router(build_tenant_config_router())
     app.include_router(build_triggers_router())
     app.include_router(build_webhooks_router())
+    app.include_router(build_curation_router())
+    app.include_router(build_eval_dataset_router())
 
     return app
 
@@ -763,6 +775,7 @@ class _SqlStores:
     trigger: TriggerStore  # Stream J.10 (Mini-ADR J-26 / J-42)
     trigger_run: TriggerRunStore  # Stream J.10
     curation_candidate: CurationCandidateStore  # Stream J.12 (Mini-ADR J-43)
+    eval_dataset: EvalDatasetStore  # Stream J.12 (Mini-ADR J-43)
     service_account: ServiceAccountStore
     api_key: ApiKeyStore
     role_binding: RoleBindingStore
@@ -804,6 +817,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         trigger=SqlTriggerStore(session_factory),
         trigger_run=SqlTriggerRunStore(session_factory),
         curation_candidate=SqlCurationCandidateStore(session_factory),
+        eval_dataset=SqlEvalDatasetStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),
         api_key=SqlApiKeyStore(session_factory),
         role_binding=SqlRoleBindingStore(session_factory),

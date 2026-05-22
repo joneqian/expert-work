@@ -88,6 +88,12 @@ class AuditAction(StrEnum):
     TRIGGER_UPDATE = "trigger:update"
     TRIGGER_DELETE = "trigger:delete"
     TRIGGER_FIRE = "trigger:fire"
+    # curation / eval-dataset (Stream J.12 — Mini-ADR J-43)
+    EVAL_DATASET_CREATE = "eval_dataset:create"
+    EVAL_DATASET_UPDATE = "eval_dataset:update"
+    EVAL_DATASET_DELETE = "eval_dataset:delete"
+    CURATION_PROMOTE = "curation_candidate:promote"
+    CURATION_DISMISS = "curation_candidate:dismiss"
     # tools (Stream E.6 + E.8 + onwards)
     TOOL_CALL = "tool:call"
     TOOL_BLOCKED = "tool:blocked"
@@ -152,6 +158,8 @@ class AuditEntry(BaseModel):
         "artifact",  # Stream J.9-step3 — Mini-ADR J-25
         "approval",  # Stream J.8 — Mini-ADR J-24
         "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42
+        "eval_dataset",  # Stream J.12 — Mini-ADR J-43
+        "curation_candidate",  # Stream J.12 — Mini-ADR J-43
     ]
     resource_id: str | None = None
     result: AuditResult

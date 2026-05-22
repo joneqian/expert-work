@@ -282,6 +282,11 @@ class Settings(BaseSettings):
     #: Max trajectories examined per curation sweep — caps a cycle's work.
     curation_worker_batch_size: int = Field(default=200, gt=0)
 
+    #: Stream J.12 (Mini-ADR J-43) — max curated eval-dataset rows a
+    #: tenant may hold. Checked at create + promote; "current count"
+    #: ceiling, the table is the authoritative count (like cron quota).
+    max_eval_dataset_rows_per_tenant: int = Field(default=1000, gt=0)
+
     # ------------------------------------------------------------------ tenant rate limit (C.6)
     #: Per-tenant request bucket capacity (tokens). Drained one token
     #: per authenticated request.
