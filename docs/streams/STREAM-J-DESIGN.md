@@ -1120,36 +1120,91 @@ J.7b 扩展：含 `scripts/` `templates/` `references/` 子目录。
 
 ### 16.1 现状
 
-纯 `POST /runs` 同步请求-响应。agent 不能定时跑 / 被事件触发。
+纯 `POST /v1/sessions/{tid}/runs` 同步请求-响应。agent 不能定时跑 / 被外部事件触发。
 
-### 16.2 设计与边界
+### 16.2 设计与边界（2026-05-22 deer-flow 对比修订 — Mini-ADR J-42）
 
-- 三类触发器：`cron`（定时）、`event`（内部事件,如另一 run 完成）、`webhook`（外部 HTTP 入站）。
-- control-plane 内一个 **scheduler 组件**（M0 单副本,APScheduler 或等价）扫 `trigger` 表 → 到点 / 命中即发起 run。
-- 触发式 run 与请求式 run 共用执行路径,只是发起来源不同;触发记录进 `trigger_run`。
-- **边界**：M0 单副本 scheduler（无选主 / 无分布式锁,§ 1.2);webhook 入站要过认证（复用 Stream C API Key）。
+- **两类触发器**：`cron`（定时）、`webhook`（外部 HTTP 入站）。`event`（内部事件触发，如另一 run 完成）+ PG NOTIFY **推 M1** —— M0 无具体消费场景，更像 workflow 串联原语（Mini-ADR J-26 (3) 修订 / J-42）。
+- **scheduler = 轮询 `agent_trigger` 表**（非 APScheduler）。control-plane 内一个单副本后台 worker，复用 `ReservationReaper` 范式（`start` / `stop` / `run_once` / `_loop`），每 ~60s 扫 `agent_trigger`，`croniter` 算 cron 下次触发，到点即起 run。`agent_trigger` 表是唯一真相源 —— APScheduler 自带 `SQLAlchemyJobStore` 会与之形成双真相源（每次增删改启停双写、易漂移），故弃用（Mini-ADR J-26 (4) 修订 / J-42）。
+- 触发式 run 与请求式 run **共用执行路径**（`run_agent` 发起链），只是发起来源不同、无 SSE 消费者；每次触发记录进 `trigger_run`。
+- **触发式 run 的 thread**：每次触发起一个新 thread —— 一次 cron / webhook run 是独立会话；`config.seed_input` 作首条 user 消息。
+- **边界**：M0 单副本 scheduler（无选主 / 无分布式锁，§ 1.2 + Mini-ADR J-18）；webhook 入站经**每触发器独立 secret token** 鉴权（非复用全权 API key — J-42）。
 
 ### 16.3 接口与数据模型
 
+迁移 `0033_agent_trigger` —— 两表，均 tenant RLS（`agent_trigger` 命名避开 `trigger` SQL 保留字）：
+
 ```python
-# 迁移 0021_trigger
-class TriggerRow(Base):                     # 表 trigger
+class AgentTriggerRow(Base):                 # 表 agent_trigger
     id: UUID
-    tenant_id, user_id: UUID
-    agent_ref: str
-    kind: Literal["cron", "event", "webhook"]
-    config: dict                            # cron 表达式 / 事件名 / webhook 路径
+    tenant_id: UUID
+    user_id: UUID | None
+    agent_name: str
+    agent_version: str
+    name: str                                # 触发器名，(tenant, agent, name) 唯一
+    kind: Literal["cron", "webhook"]
+    config: dict                             # cron: {expr, seed_input} / webhook: {seed_input}
     enabled: bool
-class TriggerSpec(BaseModel):               # AgentSpecBody.triggers
-    kind: Literal["cron", "event", "webhook"]
+    source: Literal["manifest", "api"]       # 来源（manifest 声明 / API 创建）
+    webhook_secret_hash: str | None          # webhook kind 专用；明文仅创建时返回一次
+    last_fired_at: datetime | None
+    created_at, updated_at: datetime
+
+class TriggerRunRow(Base):                   # 表 trigger_run
+    id: UUID
+    tenant_id: UUID
+    trigger_id: UUID                         # → agent_trigger（裸列，FK-light）
+    run_id: UUID | None                      # → agent_run（run 起成功后回填）
+    status: Literal["fired", "succeeded", "failed", "retrying", "dead_letter"]
+    attempt: int                             # DLQ 重试计数，1 起
+    next_retry_at: datetime | None
+    error: str | None
+    triggered_at: datetime
+
+class TriggerSpec(BaseModel):                # AgentSpecBody.triggers 元素
+    name: str
+    kind: Literal["cron", "webhook"]
     config: dict
 ```
 
-### 16.4 整合点
+`helix-protocol` 加 `TriggerKind` Literal + `TriggerSpec`。manifest 声明的触发器在 agent 部署时 upsert 进 `agent_trigger`（keyed by `(tenant, agent, name)`，`source="manifest"`）；API 创建的是独立行（`source="api"`）—— J.7 skill 同款双路。`TriggerStore` ABC + `InMemoryTriggerStore` + `SqlTriggerStore`（`agent_approval` / `agent_run` store 同款范式）。
 
-control-plane 新 `scheduler` 模块 + lifespan 启停、run API（触发式发起路径)、`trigger` 模型、`helix-protocol` `TriggerSpec`。
+### 16.4 scheduler 组件
 
-> **对标**：hermes 完整 cron 系统、deer-flow 无。helix 做 cron + event + webhook 三类,够覆盖"非请求-响应 agent"。
+`TriggerScheduler` —— control-plane 内单副本后台 worker（`ReservationReaper` 范式）。`run_once` 每轮：(1) 扫 `agent_trigger`（`kind=cron`、`enabled`、`croniter(expr, last_fired_at)` 下次触发 ≤ now）→ 复用 `run_agent` 发起链起 run（新 thread、无 SSE）→ 写 `trigger_run` 行 + 更新 `last_fired_at`；(2) 扫 `trigger_run`（`status=retrying`、`next_retry_at ≤ now`）→ 按 DLQ 重试（§ 16.6）。单次 `run_once` 异常不崩进程（计数 + 继续）。lifespan 启停同 reaper。
+
+### 16.5 webhook 入站
+
+入站 endpoint `POST /v1/triggers/{trigger_id}/webhook` —— 经 `AuthMiddleware` 豁免（加 path 前缀），改用**每触发器独立 secret token** 鉴权：创建 webhook 触发器时生成 secret，哈希存 `webhook_secret_hash`，明文仅返回一次（API key 同款）；入站请求带 secret（header），端点 `compare_digest` 校验，失败 403。命中即复用 `run_agent` 发起链起 run + 写 `trigger_run`。
+
+### 16.6 DLQ 重试（M0 — Mini-ADR J-26 (1)）
+
+failed trigger run → K.K7 范式 DLQ 重试：backoff `1m→5m→30m→2h→6h`，5 次失败入死信。重试状态落 `trigger_run`（`attempt` / `next_retry_at` / `status`）—— `failed` 后置 `retrying` + 算 `next_retry_at`，scheduler `run_once` 第 (2) 步重投；第 5 次仍失败 → `dead_letter`。
+
+### 16.7 scheduler quota（M0 — Mini-ADR J-26 (2)）
+
+新 `QuotaDimension`（per-tenant / per-user 最大 cron 触发器数）。Trigger 创建（CRUD）时经 `check_admission` 接入 Stream C.5 `QuotaService`；超额 429。
+
+### 16.8 Audit Trail（M0）
+
+新 `AuditAction`：`TRIGGER_CREATE` / `TRIGGER_UPDATE` / `TRIGGER_DELETE` / `TRIGGER_FIRE`。`resource_type` Literal 加 `"trigger"`。
+
+### 16.9 Eval module（M0）
+
+`tools/eval/trigger.py` + `datasets/trigger/m0_baseline.yaml` —— 确定性场景（cron 下次触发计算 / webhook secret 校验 / DLQ backoff 排程 / quota 强制）。`run_baseline.py` 激活 `J.10_trigger` runner。
+
+### 16.10 不做项（M0 边界）
+
+- ❌ **`event` 触发器 + PG NOTIFY** → M1（无 M0 具体消费场景；Mini-ADR J-26 (3) 修订 / J-42）
+- ❌ **分布式 scheduler / 多副本选主** → M1+（§ 1.2 + Mini-ADR J-18）
+- ❌ **HMAC 载荷签名**（webhook 防重放 / 完整性）→ M1（M0 用 secret token 鉴权）
+- ❌ **webhook 完成回调**（run 完成后 POST 回调用方）→ M1
+
+### 16.11 整合点
+
+control-plane 新 `scheduler` 模块 + lifespan 启停、新 `triggers` API（CRUD + webhook 入站）、`run_agent` 触发式发起路径、`agent_trigger` / `trigger_run` 模型、`helix-protocol` `TriggerSpec` + `AgentSpecBody.triggers`、Stream C.5 `QuotaService`、`audit_log`。
+
+> **对标**：deer-flow 无调度 / 触发系统（`after_seconds` / `webhook` 字段是死代码）。helix 做 cron + webhook 两类生产级触发器（DLQ / quota / 鉴权齐全），`event` 推 M1。
 
 ---
 
@@ -1470,6 +1525,8 @@ capabilities:
 **J-26｜J.10 触发器 failure handling + quota + event 源 + persistence 4 条**
 背景：J-18 原文只覆盖单副本推 M1+ + webhook 认证，failure handling / scheduler quota / event 源选型 / APScheduler 持久性未列。决策：(1) failed trigger run → K7 模式的 DLQ 重试（backoff 1m→5m→30m→2h→6h，5 次失败入死信）；(2) scheduler quota 接入 Stream C.5（单用户 / 单租户最大 cron 数）；(3) trigger event 源选型 = PG NOTIFY（M0 单 control-plane 副本下足够，M1+ 多副本时考虑 outbox 表）；(4) APScheduler 必须 `SQLAlchemyJobStore` 持久化到 PG，control-plane 重启不丢 cron tick。取舍：(c) 红线 —— 四项缺一 trigger 系统就是弱版。
 
+**2026-05-22 J.10 启动前 deer-flow 对比修订（Mini-ADR J-42）**：(3) `event` 触发器 + PG NOTIFY **整体推 M1** —— M0 无具体消费场景，cron + webhook 已覆盖两个具体需求；(4) APScheduler + `SQLAlchemyJobStore` **弃用** —— 改 scheduler 轮询 `agent_trigger` 表（该表本就为 webhook / CRUD 而建，APScheduler jobstore 与之双真相源），`croniter` 仅做 cron 数学。(1) DLQ 重试 + (2) scheduler quota 不变。详见 J-42。
+
 **J-27｜J.12 与 L7 trajectory 分工修剪 —— J.12 不再写 trajectory PG 表**
 背景：L7 已经把 trajectory 写 ObjectStore（JSONL / ShareGPT / 4 outcome 分流，PR #202 已合）；J-19 原文还要写 `trajectory` PG 表 + `after_llm_call` 中间件 = 重复实现。决策：修订 J.12 分工 —— L7 ObjectStore trajectory = **eval / 训练数据底座**（完整 messages，J.13 离线 eval 消费）；J.12 PG `eval_dataset` 表 = **策划后的 dataset**（人工 / 规则筛选 trajectory + expected 标注）；J.12 不再写 `trajectory` PG 表，middleware 改为"读 L7 ObjectStore + 关联 G.6 feedback → 策划"。取舍：(c) 红线 —— 重复实现违反"功能可少、能力不可弱"的反面（不是弱，是冗余）。
 
@@ -1567,6 +1624,19 @@ capabilities:
 `RunStore` ABC + `InMemoryRunStore` + `SqlRunStore`（`helix-persistence`，与 `ApprovalStore` 同目录同范式）；`RunManager.__init__` 加可选 `store: RunStore | None`，`create / set_status / cancel` 内部镜像写库 —— `sse.py` 6 处 `set_status` + `runs.py` 2 处 `create` 全部自动获持久化；`cleanup(delay=300)` 只 pop 内存不删库行；`set_status` 加可选 `error: str | None`，终态时一并写 `error` + `finished_at`；`GET .../runs/{rid}` 把当前"`runtime_run_status` → None → 404"路径改为"内存未命中读 `SqlRunStore`"，消除 404 不对称；`agent_approval.run_id` 维持裸列（FK-light，J-1a），逻辑父表 = `agent_run`。**② run 排队 / multitask 策略 / 重试 / DLQ（留 J.10，Mini-ADR J-26）** —— 设计未锁（multitask 策略选项集、重试退避列形态、DLQ 独立表 vs 状态）；J-26 已规划 trigger failed run 的 DLQ 重试，run 排队压力本就来自 trigger。M0 不提前做 —— 凭空加 `multitask_strategy / retry_count / next_retry_at` 列 = 给不存在的子系统建空 schema（CLAUDE.md § 2），且 J.10 真正设计时大概率改形状反而多一次 migrate；J.10 着陆时经 expand-contract 给 `agent_run` 加列即可，表已在。
 
 取舍：(c) 红线 —— `GET` 名实不符 + `agent_approval` 平行 status 是"把工程缺失包装成设计选择"，① 必须翻案进 M0；① 成本可控 —— 字段全部已知，与 `artifact` / `agent_approval` 同款 row→DTO store 范式，约 1 个实施 PR；② 留 J.10 不是"推迟弱能力" —— 它的设计本就属 J.10 那一轮（J-26），提前做是猜测 + 注定返工，违背 [[design-first-iteration]]；连带收益 —— `trigger_run`（J.10）从此是 `trigger_id + run_id` 链接行不再重扛 run 生命周期，H.3 run 列表 UI 的查询底座由 `agent_run` 提供（表 M0 就位，列表 endpoint 随 H.3 交付）。配套修订：§ 14.3a 注明 `agent_approval` 逻辑父表 `agent_run` 已在 M0；`runs/manager.py` 头注释"`runs` 表 M1+"改指向本 ADR；ITERATION-PLAN J.8 行加收尾复审補強子项。2-PR 拆分见 ITERATION-PLAN。
+
+---
+
+### 2026-05-22 J.10 启动前 deer-flow 对比（J-42）
+
+> J.10（调度 / 触发）启动前按惯例做 deer-flow 对比。本 ADR 锁三个 J.10 设计决策，配套 § 16 重写 + Mini-ADR J-26 (3)(4) 修订。
+
+**J-42｜J.10 调度机制 = 轮询 `agent_trigger` 表；M0 = cron + webhook（event 推 M1）；webhook 鉴权 = 每触发器独立 secret**
+背景：J.10 启动前按惯例做 deer-flow 对比（`/Users/mac/src/github/deer-flow`）。结论：**deer-flow 基本无调度 / 触发系统** —— `after_seconds` / `webhook` 字段是死代码，唯一相关的 channel `MessageBus`（IM 入站消息 → run）属 helix Stream A（渠道）范畴、非 J.10。helix J.10 设计严格领先，对比无可拉进 M0 的能力，但暴露 3 个 J.10 设计决策需定。
+
+决策：(1) **cron 调度 = 轮询 `agent_trigger` 表 + `croniter`**，非 APScheduler —— helix 无论如何需要 `agent_trigger` 表承载 webhook 触发器 + 用户 CRUD；APScheduler 自带 `SQLAlchemyJobStore` 会与之形成双真相源（每次增删改启停双写、易漂移）。改用单副本后台 worker 轮询（复用 `ReservationReaper` 范式），`croniter` 仅做 cron 表达式数学。修订 Mini-ADR J-26 (4)。(2) **M0 = cron + webhook 两类**，`event` 触发器 + PG NOTIFY 推 M1 —— `event`（内部事件触发，如另一 run 完成）M0 无具体消费场景，更像 workflow 串联原语；cron + webhook 已覆盖"定时跑"+"外部 HTTP 事件跑"两个具体需求，且都按生产级全做（DLQ / quota / 鉴权齐全）。修订 Mini-ADR J-26 (3)。(3) **webhook 鉴权 = 每触发器独立 secret token** —— § 16.2 原文"复用 Stream C API Key"会让外部 webhook 源（GitHub 等）持有全权 helix API key（权限过宽）；改为每 webhook 触发器一个独立 secret（哈希存储、明文仅创建时返回一次），泄漏只影响那一个触发器。HMAC 载荷签名推 M1。
+
+取舍：(1) 单一真相源 > 双写同步，省 APScheduler 重依赖，轮询粒度（~60s）对 cron 足够；(2) `event` 推 M1 是 [[no-design-choice-disguise]] 合规的范围裁剪 —— cron / webhook 不削弱、`event` 显式记录边界，非"弱版伪装设计选择"；(3) 最小权限优于复用宽凭证，secret token 比 HMAC 简单且对 M0 足够（HMAC 防重放 M1 补）。6-PR 拆分见 ITERATION-PLAN。
 
 ---
 
