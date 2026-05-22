@@ -39,7 +39,7 @@
 | **J.8** | 人在回路 / 审批 | 缺失 | LangGraph `interrupt()` 审批节点;run 暂停 → control-plane 暴露审批请求 → API resume;危险操作按策略门控 | J-15 |
 | **J.7** | Skill + skill 进化 | 缺失 | skill = 可复用能力包（prompt 片段 + 工具集 + 可选代码）;`skill` 库表;agent 可习得 / 精化 skill（有界,非无界自改）| J-16 J-17 |
 | **J.10** | 调度 / 触发 | 缺失 | cron / 事件 / webhook 触发器;`trigger` 表 + control-plane scheduler;触发式 run | J-18 |
-| **J.12** | 学习 / 反馈闭环 | 缺失 | trajectory 采集 + feedback（G.6）→ 策划数据集 → eval / 微调输入;离线数据驱动（区别于 J.7 运行期自改）| J-19 |
+| **J.12** | 学习 / 反馈闭环 | 缺失 | L7 trajectory + feedback（G.6）→ 规则候选 + 人工策划 → `eval_dataset`（与 J.13 共用,按 tenant+agent 归集）;离线数据驱动（区别于 J.7 运行期自改）| J-19 J-43 |
 | **J.13** | eval 强化 | 骨架 | 评估 G.4/G.5,落实升级：J.1–J.14 的逐能力 eval 场景 + 在线采样 eval + CI 回归门 | J-20 |
 
 ### 1.2 Out-of-scope（明确推迟）
@@ -88,7 +88,7 @@ helix 现有架构已是"无状态计算 + 持久状态（checkpointer）"。per
 | 现有扩展面 | 文件 | Stream J 接入 |
 |-----------|------|--------------|
 | **LangGraph 图节点** | `orchestrator/graph_builder/builder.py` `build_react_graph()` | J.1 `planner` 节点、J.2 `reflect` 节点、J.8 `interrupt` 审批节点 |
-| **中间件链**（4 锚点）| `helix-runtime/runtime/middleware/` | J.3 记忆注入（复用 `DynamicContextMiddleware`）、J.11 路由（`around_llm_call`）、J.12 trajectory 采集（`after_llm_call`）|
+| **中间件链**（4 锚点）| `helix-runtime/runtime/middleware/` | J.3 记忆注入（复用 `DynamicContextMiddleware`）、J.11 路由（`around_llm_call`）|
 | **工具注册表** | `orchestrator/tools/` `ToolRegistry` | J.4 sub-agent-as-tool、J.5 `knowledge_search`、J.9 artifact 工具、J.1 `update_plan` 工具、J.6 `ask_image` 工具（Path B）|
 | **AgentSpec / 持久化** | `helix-protocol/` `AgentSpec`、`helix-persistence/` | 全部子项的声明字段 + 新表（迁移 0015+）|
 
@@ -142,7 +142,7 @@ class AgentState(TypedDict):
 | `0022_knowledge_chunking_hybrid` | 扩 `knowledge_base`（per-KB 切块参数）、扩 `knowledge_chunk`（`content_tsv` 全文检索列 + GIN）| J.5 | — |
 | `0023_skill` | `skill`、`skill_version` | J.7 | tenant RLS |
 | `0024_trigger` | `trigger`、`trigger_run` | J.10 | tenant RLS |
-| `0025_trajectory` | `trajectory`、`eval_dataset` | J.12 J.13 | tenant RLS |
+| `0034_eval_dataset` | `eval_dataset`、`curation_candidate` | J.12 J.13 | tenant RLS |
 
 ---
 
@@ -1212,40 +1212,99 @@ control-plane 新 `scheduler` 模块 + lifespan 启停、新 `triggers` API（CR
 
 ### 17.1 现状
 
-G.6 已采 👍/👎 feedback,但无闭环 —— 数据躺着,不回流改进 agent。
+G.6 已采 👍/👎 feedback（`feedback` 表）、L7 已把完整 run trajectory 落 ObjectStore（PR #202，按 outcome 分流），但**两者各躺各的** —— trajectory 不回流改进、feedback 只用于前端显示一个图标。无"线上数据 → 策划 eval 数据集"的闭环。
 
-### 17.2 设计与边界
+### 17.2 设计与边界（2026-05-22 deer-flow 对比修订 — Mini-ADR J-43）
 
-- **trajectory 采集**：`after_llm_call` 中间件记录完整 run trajectory（输入 / 计划 / 工具调用 / 输出),写 `trajectory` 表。
-- **数据集策划**：把 trajectory + feedback（G.6）关联 → 经筛选（如低评分 run、纠正过的 run）产出 `eval_dataset` 行 —— 格式与 J.13 共用。
-- 用途：喂 J.13 的 eval-set（回归 + 能力评估）;为未来微调留数据。
-- **边界**：J.12 只交付到"策划好的数据集",**不含训练 / 微调**（§ 1.2,M2+）。区别于 J.7 skill 进化 —— J.7 是运行期 agent 自改能力,J.12 是离线数据驱动的人 / 流程改进。
+- **J.12 = 策划层**,不重造采集层。两个输入端已就位：L7 trajectory ObjectStore（完整 messages，4 outcome 分流）+ G.6 `feedback` 表（👍/👎，挂 `thread_id`）。J.12 **不写** `trajectory` PG 表（Mini-ADR J-27 —— L7 ObjectStore 已是底座，再建 PG 表 = 重复实现）。
+- **策划机制 = 规则候选 + 人工策划**（Mini-ADR J-43）。后台 `CurationWorker` 按规则从 trajectory + feedback 排出**候选**（`curation_candidate` 表）；人工 review 后 promote（→ `eval_dataset` 行，标注 expected）/ dismiss。纯人工 = 退化成 CRUD 表（能力弱）；纯规则自动 = 👎 run 的正确 expected 无人能机器生成、数据集含噪声 —— 故取规则筛 + 人工判的组合。
+- **候选生成 = 后台 worker 预生成**（Mini-ADR J-43）。`CurationWorker` 单副本后台进程（复用 `TriggerScheduler` / `ReservationReaper` 范式），周期扫 trajectory ObjectStore + feedback → 规则命中即 upsert `curation_candidate` 行；策划 API 直读该表（扫描成本不在请求路径上）。
+- **候选规则**（3 类信号）：👎 feedback → `negative_feedback`；`failed` / `max_steps` outcome → `failed_outcome`；👍 feedback → `positive_feedback`（作 golden 正例）。前两类是回归材料、第三类是 golden 材料。
+- **scope = (tenant, agent)，非 per-instance**。helix 目标形态是 per-user 持久 agent 实例 —— 同一 agent 下每用户一个隔离实例。feedback / trajectory 的**采集**天然 per-instance（挂 `thread_id` = 某用户实例的某次会话）；但策划**产出** `eval_dataset` 按 **(tenant, agent_name)** 归集 —— 学习闭环改的是 agent 定义（prompt / tools / model），改一次所有实例受益，"回归测试某个实例"不成立（实例 = agent 定义 + 该用户私有 memory / workspace）。J.12 汇聚一个 agent 所有用户实例的 trajectory + feedback → 策划 → 产出该 agent 的数据集。per-instance 个性化属 J.3 记忆，不在 J.12。
+- **关联键**：trajectory / feedback 均挂 `thread_id`（`feedback` 表无 `run_id`）；`thread_meta` 表记 `thread_id → agent_name / agent_version / user_id` —— worker 由此盖上 agent 身份，`user_id` / `trajectory_key` 留作**溯源**（采自哪个实例 / 哪条 trajectory），非 scope 键。
+- **`eval_dataset` 与 J.13 共用**（Mini-ADR J-20）：策划产出落 `eval_dataset` PG 表（tenant RLS）；导出 CLI 把 `eval_dataset` 行写成 `tools/eval/datasets/<name>/*.yaml` 供 J.13 eval module 消费。`eval_dataset` PG 表 = "策划数据集源"，checked-in baseline YAML 仍是 Gate 制品（Mini-ADR J-38，两者分离）。
+- **边界**：J.12 只交付到"策划好的数据集",**不含训练 / 微调**（§ 1.2,M2+,Mini-ADR J-19）。区别于 J.7 skill 进化 —— J.7 是运行期 agent 自改能力,J.12 是离线数据驱动的人 / 流程改进。
 
 ### 17.3 接口与数据模型
 
+迁移 `0034_eval_dataset` —— 两表,均 tenant RLS：
+
 ```python
-# 迁移 0022_trajectory
-class TrajectoryRow(Base):                  # 表 trajectory
-    id: UUID
-    tenant_id, user_id: UUID
-    thread_id: str
-    steps: JSONB                            # 规范化的 run 轨迹
-    feedback_id: UUID | None                # 关联 feedback(G.6)
-    created_at: datetime
-class EvalDatasetRow(Base):                 # 表 eval_dataset(J.13 共用)
+class CurationCandidateRow(Base):            # 表 curation_candidate
     id: UUID
     tenant_id: UUID
-    name: str
-    input: JSONB
-    expected: JSONB | None
+    agent_name: str                          # 候选所属 agent（thread_meta 解析）
+    agent_version: str | None                # 溯源：采自哪个 agent 版本
+    thread_id: UUID                          # trajectory 的 thread（= 某用户实例的一次会话）
+    user_id: UUID | None                     # 溯源：采自哪个用户实例
+    trajectory_key: str                      # ObjectStore key，(tenant, trajectory_key) 唯一
+    outcome: Literal["success", "failed", "max_steps", "cancelled"]
+    signal: Literal["negative_feedback", "failed_outcome", "positive_feedback"]
+    feedback_rating: Literal["up", "down"] | None   # thread_id 命中 feedback 时回填
+    status: Literal["pending", "promoted", "dismissed"]
+    eval_dataset_id: UUID | None             # promote 后回填
+    detected_at: datetime                    # worker 首次识别为候选的时刻
+    reviewed_at: datetime | None
+
+class EvalDatasetRow(Base):                  # 表 eval_dataset（J.13 共用）
+    id: UUID
+    tenant_id: UUID
+    agent_name: str                          # 数据集归属的 agent —— 按 (tenant, agent_name) 归集
+    name: str                                # dataset 名（一个 agent 可有多个命名 dataset）
+    input: dict                              # JSONB —— eval case 输入
+    expected: dict | None                    # JSONB —— 期望输出（人工标注；golden/regression 必填）
     source: Literal["golden", "trajectory", "regression"]
+    source_trajectory_key: str | None        # 溯源：来自哪条 trajectory
+    source_user_id: UUID | None              # 溯源：来自哪个用户实例
+    created_at, updated_at: datetime
 ```
 
-### 17.4 整合点
+`helix-protocol` 加 `EvalDatasetSource` / `CurationSignal` / `CandidateStatus` Literal + `EvalDatasetRecord` / `CurationCandidateRecord` 冻结 DTO。`CurationCandidateStore` ABC + `InMemory` + `Sql` 三件套、`EvalDatasetStore` 同款（`agent_trigger` / `agent_run` store 范式）。trajectory ObjectStore 当前**只有写无读 API** —— J.12 加 `TrajectoryReader`（按 `tenant / outcome / date` 前缀 `list` + `get` + JSONL 解析）。
 
-新 `TrajectoryMiddleware`（`after_llm_call`)、`feedback` 模型（G.6,关联)、`tools/eval`（G.4 数据集消费方)、新 `trajectory` / `eval_dataset` 模型。
+### 17.4 CurationWorker 组件
 
-> **对标**：hermes trajectory→dataset。helix 同思路,并把数据集格式与 J.13 eval 统一。
+`CurationWorker` —— control-plane 内单副本后台 worker（`TriggerScheduler` 范式）。`run_once` 每轮：跨租户（`bypass_rls`,reaper 范式）枚举 trajectory ObjectStore 新对象 → 对每条 trajectory：(1) join `thread_meta` 取 `agent_name / agent_version / user_id`；(2) join `feedback`（by `thread_id`）取 rating；(3) 规则判定（👎 / `failed`·`max_steps` / 👍）；(4) upsert `curation_candidate`（by `(tenant, trajectory_key)`，已存在即跳过）。单次 `run_once` 异常不崩进程（计数 + 继续）。lifespan 启停同 reaper / scheduler。
+
+### 17.5 策划 API
+
+- `GET /v1/curation/candidates` —— 列 `curation_candidate`（filter `agent_name` / `status` / `signal`，游标分页），读 PG 表（非实时扫 ObjectStore）。
+- `GET /v1/curation/candidates/{id}` —— 候选详情,含从 ObjectStore 拉的完整 trajectory messages。
+- `POST /v1/curation/candidates/{id}/promote` —— body `{name, input, expected, source}` → 建 `eval_dataset` 行（`agent_name` 取自候选）+ 候选 `status=promoted` + 回填 `eval_dataset_id`。
+- `POST /v1/curation/candidates/{id}/dismiss` —— 候选 `status=dismissed`。
+- `eval_dataset` CRUD —— `POST/GET/PATCH/DELETE /v1/eval-datasets`（`source=golden` 支持纯手工建例,无需 trajectory；`?agent_name=` 过滤）。
+
+> 策划是 tenant-admin 职能 —— 策划人本就能看本租户全部 trajectory（候选详情展示完整 messages），promote 到 `eval_dataset` 不扩大可见面。
+
+### 17.6 quota（M0）
+
+`eval_dataset` 行数 per-tenant 上限 —— `POST /v1/eval-datasets` + promote 时 `count_by_tenant` 比对 `settings.max_eval_dataset_rows_per_tenant`（默认 1000），超额 429。同 J.10 cron quota —— "当前计数"上限,表本身即权威计数,不走 `QuotaService`。
+
+### 17.7 导出（M0）
+
+导出 CLI `tools/eval/export_dataset.py` —— 按 `name` 把 `eval_dataset` 行写成 `tools/eval/datasets/<name>/curated.yaml`（J.13a case 格式）。人工 review YAML diff 后 commit —— checked-in YAML 仍是 Gate 制品（Mini-ADR J-38），`eval_dataset` PG 表是其上游"策划源"。
+
+### 17.8 Audit Trail（M0）
+
+新 `AuditAction`：`EVAL_DATASET_CREATE` / `EVAL_DATASET_UPDATE` / `EVAL_DATASET_DELETE` / `CURATION_PROMOTE` / `CURATION_DISMISS`。`resource_type` Literal 加 `"eval_dataset"` / `"curation_candidate"`。
+
+### 17.9 Eval module（M0）
+
+`tools/eval/learning.py` + `datasets/learning/m0_baseline.yaml` —— 确定性场景（规则命中 👎 / failed trajectory、trajectory↔feedback by `thread_id` 关联、`thread_meta` 解析 agent 身份、promote 产出合法 `eval_dataset` 行、导出产出合法 YAML、golden / regression source、跨租户隔离）。`run_baseline.py` 激活 `J.12_learning` runner —— baseline 转 14 PASS / 0 DEFERRED。
+
+### 17.10 不做项（M0 边界）
+
+- ❌ **训练 / 微调管线** → M2+（§ 1.2,Mini-ADR J-19 —— J.12 终点是"策划好的数据集"）
+- ❌ **`trajectory` PG 表 + `after_llm_call` 中间件** —— 不做（Mini-ADR J-27 —— L7 ObjectStore 已是底座）
+- ❌ **策划 review 前端 UI** → Stream H（J.12 仅交 API + audit，对标 J.8 / H.3 分工）
+- ❌ **`eval_dataset` → J.13 自动回归门** → J.13c M1（导出 CLI 是半自动：导出 + 人工 commit；CI 周跑自动化是 J.13c）
+- ❌ **feedback 驱动的 prompt 自动改进 / RLHF** → M2-D（J.12 只到数据集，改进环节是 M2-D pipeline）
+- ❌ **per-instance 个性化**（按单用户反馈调其实例 memory）→ 属 J.3 记忆,非 J.12
+
+### 17.11 整合点
+
+control-plane 新 `curation` 模块（worker + API）+ lifespan 启停、新 `eval-datasets` / `curation` API、L7 trajectory ObjectStore（读）、G.6 `feedback` 表 + `thread_meta` 表（读）、`eval_dataset` / `curation_candidate` 模型、`audit_log`、`tools/eval`（导出目标 + J.13 消费方）。
+
+> **对标**：deer-flow 无学习 / 反馈闭环（无 trajectory→dataset→eval 管线、无策划层、无 eval harness）。其 feedback 采集层成熟,但 helix G.6 `feedback` 已对等;其 `RunJournal` ≈ helix L7 trajectory ObjectStore。helix 两个输入端均已就位,J.12 净新建策划层把两者接成 `eval_dataset`,设计领先。
 
 ---
 
@@ -1637,6 +1696,19 @@ capabilities:
 决策：(1) **cron 调度 = 轮询 `agent_trigger` 表 + `croniter`**，非 APScheduler —— helix 无论如何需要 `agent_trigger` 表承载 webhook 触发器 + 用户 CRUD；APScheduler 自带 `SQLAlchemyJobStore` 会与之形成双真相源（每次增删改启停双写、易漂移）。改用单副本后台 worker 轮询（复用 `ReservationReaper` 范式），`croniter` 仅做 cron 表达式数学。修订 Mini-ADR J-26 (4)。(2) **M0 = cron + webhook 两类**，`event` 触发器 + PG NOTIFY 推 M1 —— `event`（内部事件触发，如另一 run 完成）M0 无具体消费场景，更像 workflow 串联原语；cron + webhook 已覆盖"定时跑"+"外部 HTTP 事件跑"两个具体需求，且都按生产级全做（DLQ / quota / 鉴权齐全）。修订 Mini-ADR J-26 (3)。(3) **webhook 鉴权 = 每触发器独立 secret token** —— § 16.2 原文"复用 Stream C API Key"会让外部 webhook 源（GitHub 等）持有全权 helix API key（权限过宽）；改为每 webhook 触发器一个独立 secret（哈希存储、明文仅创建时返回一次），泄漏只影响那一个触发器。HMAC 载荷签名推 M1。
 
 取舍：(1) 单一真相源 > 双写同步，省 APScheduler 重依赖，轮询粒度（~60s）对 cron 足够；(2) `event` 推 M1 是 [[no-design-choice-disguise]] 合规的范围裁剪 —— cron / webhook 不削弱、`event` 显式记录边界，非"弱版伪装设计选择"；(3) 最小权限优于复用宽凭证，secret token 比 HMAC 简单且对 M0 足够（HMAC 防重放 M1 补）。6-PR 拆分见 ITERATION-PLAN。
+
+---
+
+### 2026-05-22 J.12 启动前 deer-flow 对比（J-43）
+
+> J.12（学习 / 反馈闭环）启动前按惯例做 deer-flow 对比。本 ADR 锁两个 J.12 设计决策,配套 § 17 全重写（按 Mini-ADR J-27 删 `trajectory` PG 表 + 补 agent-scoped 数据模型）。
+
+**J-43｜J.12 策划机制 = 规则候选 + 人工策划；候选生成 = 后台 CurationWorker 预生成；`eval_dataset` 按 (tenant, agent) 归集**
+背景：J.12 启动前按惯例做 deer-flow 对比（`/Users/mac/src/github/deer-flow`）。结论：**deer-flow 无学习 / 反馈闭环** —— 无 trajectory→dataset→eval 管线、无策划层、无 eval harness。其 feedback 采集层（`FeedbackRow` + REST CRUD + thumbs UI）成熟,但 helix G.6 `feedback` 表已对等;其 `RunJournal` 事件日志 ≈ helix L7 trajectory ObjectStore（PR #202）。helix 两个输入端（trajectory + feedback）均已就位,对比无可拉进 M0 的能力,但暴露 J.12 设计决策需定。
+
+决策：(1) **策划机制 = 规则候选 + 人工策划** —— 后台 worker 按规则（👎 feedback / `failed`·`max_steps` outcome / 👍 feedback）从 trajectory + feedback 排出候选,人工 review 后 promote（标注 expected → `eval_dataset` 行）/ dismiss。备选「纯人工」（无规则排序、人工直接浏览 trajectory）实质把"学习闭环"退化成一张 CRUD 表 —— 能力弱;备选「纯规则自动写入」（规则直接写 `eval_dataset`）的致命问题是 👎 run 的正确 expected 无人能机器生成、数据集必然含噪声。规则筛（收窄人工面）+ 人工判（保证 expected 质量）是唯一兼顾覆盖与质量的组合。(2) **候选生成 = 后台 `CurationWorker` 预生成** —— 单副本后台 worker（复用 `TriggerScheduler` / `ReservationReaper` 范式）周期扫 trajectory ObjectStore + feedback,规则命中即 upsert `curation_candidate` 表;策划 API 直读该表。备选「按需实时计算」在 trajectory 对象增多后会让策划视图请求随 `list_prefix` 线性变慢 —— 预生成把扫描成本挪出请求路径。(3) **`eval_dataset` 按 (tenant, agent_name) 归集,非 per-instance** —— helix 目标形态是 per-user 持久 agent 实例,feedback / trajectory 采集天然 per-instance（挂 `thread_id`）,但学习闭环改的是 agent 定义、改一次所有实例受益,"回归测试单个实例"不成立。`curation_candidate` / `eval_dataset` 加 `agent_name`（+ `agent_version`）维度,由 `thread_meta`（`thread_id → agent_name / user_id`）解析,无需新采集;`user_id` / `trajectory_key` 留作溯源。
+
+取舍：(1) 规则候选 + 人工策划 = [[no-design-choice-disguise]] 合规 —— 不是"砍掉自动化的弱版",而是 expected 标注本质需要人（👎 run 没有机器可得的 ground truth）;规则承担"收窄"、人工承担"判定",各司其职。(2) 后台 worker 多一张 `curation_candidate` 表 + 一个需看护的进程,但换来策划 API 请求路径与 ObjectStore 规模解耦 —— 与 J.10 选轮询 scheduler 同理。(3) (tenant, agent) 归集是 per-user 持久 agent 形态的必然推论 —— per-instance 个性化是 J.3 记忆的事,J.12 是离线 agent / 流程改进。配套修订：§ 17 全重写、Mini-ADR J-27 补"后台 worker + agent-scoped"细化、Mini-ADR J-19 确认仍成立（不含训练）。5-PR 拆分见 ITERATION-PLAN。
 
 ---
 
