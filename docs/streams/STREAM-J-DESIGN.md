@@ -973,7 +973,7 @@ ask_for_approval(reason_kind: str, action_summary: str, proposed_args: dict) -> 
 
 ### 14.3a agent_approval 持久表（M0 — J.8-step3b）
 
-helix `RunManager` 纯内存（`runs` 表 M1+），暂停 run 无持久落点。新建 `agent_approval` 表（migration 0031，tenant RLS）登记每个暂停 run：`run_id`（唯一）/ `thread_id` / `tenant_id` / `request_id` / `node` / `reason_kind` / `action_summary` / `proposed_args` / `requested_at` / `timeout_at` / `status`（pending/approved/rejected/modified/timeout）/ `decided_by` / `decided_at` / `modified_args`。run 暂停时 `sse.py` 写一行；resume 端点 + `GET` + 超时 job 都读它（control-plane 重启后仍可用）。是 M1 `runs` 表的 J.8-收敛子集。
+helix `RunManager` 纯内存，暂停 run 无持久落点。新建 `agent_approval` 表（migration 0031，tenant RLS）登记每个暂停 run：`run_id`（唯一）/ `thread_id` / `tenant_id` / `request_id` / `node` / `reason_kind` / `action_summary` / `proposed_args` / `requested_at` / `timeout_at` / `status`（pending/approved/rejected/modified/timeout）/ `decided_by` / `decided_at` / `modified_args`。run 暂停时 `sse.py` 写一行；resume 端点 + `GET` + 超时 job 都读它（control-plane 重启后仍可用）。其逻辑父表 `agent_run`（裸 run 生命周期表）由 Mini-ADR J-41 提前到 M0（迁移 0032）—— `agent_approval` 自此是 `agent_run` 的审批扩展子表，不再扛 run 生命周期。
 
 ### 14.8 Audit Trail（M0 — Mini-ADR J-24）
 
@@ -1535,6 +1535,38 @@ capabilities:
 
 **J-40｜J.4 并行 fan-out + cycle detection + global deadline + fan-in 聚合（提前到 M0）**
 背景：J-12 / J-21 原文明确"M0 是顺序委派树，并行扇出推 M2-B"。这是把"工程实现限制"包装成"设计选择"——子 agent 之间彼此独立（不共享 sandbox session、各拿独立 thread_id / run_id），理论可并发但 L.L6 `plan_stages` 因 `ToolSpec.is_read_only=False` 把每个 SubAgentTool 拆 stage 串行执行。按 [[no-design-choice-disguise]] 不允许"弱能力 = 设计意图"。决策：M0 内交付五项：(1) `ToolSpec.is_parallel_safe: bool = False` 新字段，`SubAgentTool.spec.is_parallel_safe = True`，`plan_stages` 同 stage 收集 `is_parallel_safe=True` 的 tool_calls 经 `asyncio.gather(return_exceptions=True)` 并发跑（复用 L.L6 `MAX_TOOL_WORKERS=5` 信号量）；(2) `agent_factory._detect_subagent_cycle` 构建期 DFS 经 `spec_store` 拒环（A→B→A 即使深度未达 `MAX_SUBAGENT_DEPTH` 也立刻抛 `AgentFactoryError`，深度上限作纵深保留）；(3) Global deadline 经 `config["configurable"]["deadline_at"]` + `ToolContext.deadline_at` 跨层传播（父建立、子继承不重置），子超时直接 `RunCancelledError`；(4) Fan-in 聚合：每个 SubAgentTool emit `SubAgentInvocation` 经 `ToolResult.state_updates` 写新通道 `AgentState.subagent_invocations`（`Annotated[list[SubAgentInvocation], add]` reducer，参照 `reflections`）；新增 6 态 `SubagentStatus` 枚举（`PENDING / RUNNING / COMPLETED / FAILED / CANCELLED / TIMED_OUT`）+ `SubAgentInvocation` frozen dataclass 入 `helix-protocol`；(5) 错误语义：`return_exceptions=True` 让一个子失败不连带 cancel 兄弟（父 LLM 看 partial 结果），父 cancel → 所有在跑子收取消传播 + invocation 全标 cancelled。取舍：(c) 红线 —— "顺序"意味着 N 个子委派 wall_clock 加总（用户感知 N 倍延迟），无法做 multi-agent orchestration 任何形式；M0 用户场景虽暂时不暴露 N 路并发委派需求，但 canonical agent (per-user 持久 agent) 与 J.10 trigger / J.8 HITL 一旦组合就会需要并发委派，等 M2-B 重做的成本远高于 M0 内做（要回头改已上线 SubAgentTool 接口 + tools_node 调度）。设计先行（[[design-first-iteration]]），4-PR 拆分见 ITERATION-PLAN J.4 行。
+
+---
+
+### 2026-05-22 J.8 收尾复审補強（J-41）
+
+> J.8 6-PR 链（#242–#247）合并后复审 `RunManager` 持久化缺口。本 ADR 把 `runs/manager.py` 头注释 + § 2.6 + § 14.3a 记录的"`runs` 表 M1+"决策**部分翻案** —— 裸 run 生命周期层提前到 M0，排队 / 重试子系统仍留 J.10。
+
+**J-41｜runs 持久化拆分 —— 裸 run 生命周期表 `agent_run` 提前到 M0，排队 / 重试子系统留 J.10**
+背景：`RunManager`（`helix-runtime`，adapted from deer-flow）M0 砍掉 deer-flow 的持久 `RunStore` 背板，纯进程内 `dict` + 5 分钟 TTL（`cleanup(delay=300)`）；原决策记于 `runs/manager.py` 头注释 + § 2.6 + § 14.3a："`runs` 表 M1+"。J.8 收尾复审发现两处后果不是"明确推迟"，而是 [[no-design-choice-disguise]] 命中的隐性弱能力：(1) **`GET /v1/sessions/{tid}/runs/{rid}` 契约名实不符** —— docstring 写"a run's status"，实测只对 5 分钟内的活 run + 暂停 run（`agent_approval` 兜底）可靠，一个昨天成功的 run 查询返回 `404 run not found`，5 分钟 TTL 单独即触发不必重启；(2) **`agent_approval` 被迫成为"runs 表形状的洞"** —— 复制 `run_id / thread_id / tenant_id / user_id / requested_at` + 自带平行 `status`，只因没有 `agent_run.status` 可依赖，J.10 还要再建 `trigger_run`，三张表都挂 run 的影子。
+
+决策：把"runs 表"拆成两个交付物，分属不同里程碑。**① 裸 run 生命周期表 `agent_run`（提前到 M0）** —— 持久化 `RunRecord` 现已在内存里全部追踪的字段，设计零猜测：
+
+```
+迁移 0032_agent_run —— agent_run 表，tenant RLS
+  id            UUID PK            (= run_id)
+  tenant_id     UUID NOT NULL
+  user_id       UUID NULL
+  thread_id     UUID NOT NULL
+  status        TEXT NOT NULL      CHECK status IN (pending/running/success/error/timeout/interrupted/paused)
+  on_disconnect TEXT NOT NULL      CHECK on_disconnect IN (cancel/continue)
+  is_resume     BOOL NOT NULL DEFAULT false
+  error         TEXT NULL          —— ERROR/TIMEOUT 的失败详情（nullable）
+  created_at    TIMESTAMPTZ NOT NULL
+  updated_at    TIMESTAMPTZ NOT NULL
+  finished_at   TIMESTAMPTZ NULL   —— 进入终态的时刻
+  索引：tenant_id / thread_id / (thread_id, status) 部分索引 WHERE status IN (pending, running)
+  RLS：current_setting('app.tenant_id') GUC（与 agent_approval / image_upload / artifact 同款）
+```
+
+`RunStore` ABC + `InMemoryRunStore` + `SqlRunStore`（`helix-persistence`，与 `ApprovalStore` 同目录同范式）；`RunManager.__init__` 加可选 `store: RunStore | None`，`create / set_status / cancel` 内部镜像写库 —— `sse.py` 6 处 `set_status` + `runs.py` 2 处 `create` 全部自动获持久化；`cleanup(delay=300)` 只 pop 内存不删库行；`set_status` 加可选 `error: str | None`，终态时一并写 `error` + `finished_at`；`GET .../runs/{rid}` 把当前"`runtime_run_status` → None → 404"路径改为"内存未命中读 `SqlRunStore`"，消除 404 不对称；`agent_approval.run_id` 维持裸列（FK-light，J-1a），逻辑父表 = `agent_run`。**② run 排队 / multitask 策略 / 重试 / DLQ（留 J.10，Mini-ADR J-26）** —— 设计未锁（multitask 策略选项集、重试退避列形态、DLQ 独立表 vs 状态）；J-26 已规划 trigger failed run 的 DLQ 重试，run 排队压力本就来自 trigger。M0 不提前做 —— 凭空加 `multitask_strategy / retry_count / next_retry_at` 列 = 给不存在的子系统建空 schema（CLAUDE.md § 2），且 J.10 真正设计时大概率改形状反而多一次 migrate；J.10 着陆时经 expand-contract 给 `agent_run` 加列即可，表已在。
+
+取舍：(c) 红线 —— `GET` 名实不符 + `agent_approval` 平行 status 是"把工程缺失包装成设计选择"，① 必须翻案进 M0；① 成本可控 —— 字段全部已知，与 `artifact` / `agent_approval` 同款 row→DTO store 范式，约 1 个实施 PR；② 留 J.10 不是"推迟弱能力" —— 它的设计本就属 J.10 那一轮（J-26），提前做是猜测 + 注定返工，违背 [[design-first-iteration]]；连带收益 —— `trigger_run`（J.10）从此是 `trigger_id + run_id` 链接行不再重扛 run 生命周期，H.3 run 列表 UI 的查询底座由 `agent_run` 提供（表 M0 就位，列表 endpoint 随 H.3 交付）。配套修订：§ 14.3a 注明 `agent_approval` 逻辑父表 `agent_run` 已在 M0；`runs/manager.py` 头注释"`runs` 表 M1+"改指向本 ADR；ITERATION-PLAN J.8 行加收尾复审補強子项。2-PR 拆分见 ITERATION-PLAN。
 
 ---
 
