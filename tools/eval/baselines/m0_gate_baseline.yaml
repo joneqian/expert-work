@@ -1,6 +1,6 @@
 metadata:
-  generated_at: '2026-05-22T12:23:44+00:00'
-  helix_commit: 648d908e1dcccf6b3fadd395c7740d134d2af175
+  generated_at: '2026-05-22T15:20:48+00:00'
+  helix_commit: 5cf59175ff6f5334f61e36606eb4bb1281b87887
   judge_model: claude-haiku-4-5-20251001
   judge_temperature: 0.0
   rerun_count: 3
@@ -106,13 +106,12 @@ capabilities:
     status: PASS
   J.12_learning:
     metric_type: pass-rate
-    sample_size: 0
+    sample_size: 21
     threshold:
       pass_rate: 0.8
-    score: {}
-    status: DEFERRED
-    deferred_reason: Capability not yet shipped (see Stream J ITERATION-PLAN); skeleton
-      stub locks the baseline file shape.
+    score:
+      pass_rate: 1.0
+    status: PASS
   J.14_per_user_isolation:
     metric_type: pass-rate
     sample_size: 12
