@@ -44,6 +44,7 @@ if str(_EVAL_DIR) not in sys.path:
 
 import artifact as _art  # type: ignore[import-not-found]  # noqa: E402
 import hitl as _hitl  # type: ignore[import-not-found]  # noqa: E402
+import learning as _learning  # type: ignore[import-not-found]  # noqa: E402
 import memory_recall as _mr  # type: ignore[import-not-found]  # noqa: E402
 import model_routing as _mrt  # type: ignore[import-not-found]  # noqa: E402
 import multimodal as _mm  # type: ignore[import-not-found]  # noqa: E402
@@ -204,6 +205,11 @@ async def _run_trigger() -> CapabilityReport:
     return await _trigger.evaluate_set(cases)
 
 
+async def _run_learning() -> CapabilityReport:
+    cases = _learning.load_cases(_DATASETS / "learning" / "m0_baseline.yaml")
+    return await _learning.evaluate_set(cases)
+
+
 # ---------------------------------------------------------------------------
 # Registry — single source of truth for what enters the baseline.
 # ---------------------------------------------------------------------------
@@ -219,11 +225,6 @@ class _Runner:
     runner_fn: Callable[[], Awaitable[CapabilityReport]] | None
     deferred_reason: str
 
-
-_DEFERRED_PENDING_CAPABILITY = (
-    "Capability not yet shipped (see Stream J ITERATION-PLAN); "
-    "skeleton stub locks the baseline file shape."
-)
 
 # Order = the order capabilities appear in the baseline YAML.
 _RUNNERS: tuple[_Runner, ...] = (
@@ -308,8 +309,8 @@ _RUNNERS: tuple[_Runner, ...] = (
         "J.12_learning",
         "pass-rate",
         {"pass_rate": 0.80},
-        None,
-        _DEFERRED_PENDING_CAPABILITY,
+        _run_learning,
+        "",
     ),
     _Runner(
         "J.14_per_user_isolation",

@@ -44,8 +44,8 @@ def test_runner_registry_has_fourteen_capabilities() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_baseline_produces_thirteen_pass_one_deferred(tmp_path: Path) -> None:
-    """J.10 closeout adds eval: 13 shipped capabilities PASS; J.12 DEFERRED."""
+async def test_run_baseline_produces_fourteen_pass(tmp_path: Path) -> None:
+    """J.12 closeout — all 14 shipped capabilities PASS, none DEFERRED."""
     out = tmp_path / "baseline.yaml"
     reports = await run_baseline(out_path=out)
 
@@ -56,6 +56,7 @@ async def test_run_baseline_produces_thirteen_pass_one_deferred(tmp_path: Path) 
     assert pass_caps == [
         "J.10_trigger",
         "J.11_model_routing",
+        "J.12_learning",
         "J.14_per_user_isolation",
         "J.15_persistent_volume",
         "J.1_plan_execute",
@@ -68,7 +69,7 @@ async def test_run_baseline_produces_thirteen_pass_one_deferred(tmp_path: Path) 
         "J.8_hitl",
         "J.9_artifact",
     ]
-    assert deferred_caps == ["J.12_learning"]
+    assert deferred_caps == []
     assert all(r.status != "FAIL" for r in reports.values())
 
 
@@ -108,3 +109,7 @@ async def test_baseline_yaml_layout_is_stable(tmp_path: Path) -> None:
     j15 = payload["capabilities"]["J.15_persistent_volume"]
     assert j15["status"] == "PASS"
     assert j15["score"]["pass_rate"] >= 0.90
+
+    j12 = payload["capabilities"]["J.12_learning"]
+    assert j12["status"] == "PASS"
+    assert j12["score"]["pass_rate"] >= 0.80

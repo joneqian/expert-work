@@ -1,0 +1,57 @@
+# J.12 学习 / 反馈闭环 — M0 baseline dataset (Stream J.13a + Mini-ADR J-43 closeout).
+#
+# 21 cases driving the J.12 curation capability — all deterministic;
+# expected pass_rate = 1.00 (threshold ≥ 0.80).
+#
+# Coverage:
+#   - 6 classify: negative / failed / max_steps / positive / plain-skip / priority
+#   - 2 key: tenant parse valid / malformed
+#   - 4 spec: golden+regression require expected / trajectory allows none /
+#     promoted requires eval_dataset_id
+#   - 6 store: eval create-get / eval cross-tenant / eval count /
+#     candidate upsert dedup / candidate cross-tenant / candidate filter
+#   - 2 reader: trajectory round-trip / malformed skip
+#   - 1 export: render curated rows → J.13 YAML
+cases:
+  - id: learning-001
+    scenario: classify_negative_feedback
+  - id: learning-002
+    scenario: classify_failed_outcome
+  - id: learning-003
+    scenario: classify_max_steps_outcome
+  - id: learning-004
+    scenario: classify_positive_feedback
+  - id: learning-005
+    scenario: classify_plain_success_skipped
+  - id: learning-006
+    scenario: classify_negative_outranks_failed
+  - id: learning-007
+    scenario: tenant_from_key_valid
+  - id: learning-008
+    scenario: tenant_from_key_malformed
+  - id: learning-009
+    scenario: spec_golden_requires_expected
+  - id: learning-010
+    scenario: spec_regression_requires_expected
+  - id: learning-011
+    scenario: spec_trajectory_allows_no_expected
+  - id: learning-012
+    scenario: spec_promoted_requires_dataset_id
+  - id: learning-013
+    scenario: eval_store_create_get
+  - id: learning-014
+    scenario: eval_store_cross_tenant_hidden
+  - id: learning-015
+    scenario: eval_store_count_by_tenant
+  - id: learning-016
+    scenario: candidate_store_upsert_dedup
+  - id: learning-017
+    scenario: candidate_store_cross_tenant_hidden
+  - id: learning-018
+    scenario: candidate_list_filter_signal
+  - id: learning-019
+    scenario: trajectory_reader_roundtrip
+  - id: learning-020
+    scenario: trajectory_reader_malformed
+  - id: learning-021
+    scenario: export_renders_cases
