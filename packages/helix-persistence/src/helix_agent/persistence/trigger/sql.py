@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import cast
 from uuid import UUID
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -162,6 +163,18 @@ class SqlTriggerStore(TriggerStore):
             ).scalar_one_or_none()
         return _row_to_dto(row) if row is not None else None
 
+    async def count_cron_by_tenant(self, *, tenant_id: UUID) -> int:
+        async with self._sf() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(AgentTriggerRow)
+                .where(
+                    AgentTriggerRow.tenant_id == tenant_id,
+                    AgentTriggerRow.kind == "cron",
+                )
+            )
+        return int(result.scalar_one())
+
 
 def _run_row_to_dto(row: TriggerRunRow) -> TriggerRunRecord:
     return TriggerRunRecord(
@@ -243,6 +256,43 @@ class SqlTriggerRunStore(TriggerRunStore):
                             TriggerRunRow.tenant_id == tenant_id,
                         )
                         .order_by(TriggerRunRow.triggered_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_run_row_to_dto(r) for r in rows]
+
+    async def list_fired(self, *, limit: int = 1000) -> list[TriggerRunRecord]:
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(TriggerRunRow)
+                        .where(TriggerRunRow.status == TriggerRunStatus.FIRED.value)
+                        .order_by(TriggerRunRow.triggered_at.asc())
+                        .limit(limit)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_run_row_to_dto(r) for r in rows]
+
+    async def list_due_retries(
+        self, *, before: datetime, limit: int = 1000
+    ) -> list[TriggerRunRecord]:
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(TriggerRunRow)
+                        .where(
+                            TriggerRunRow.status == TriggerRunStatus.RETRYING.value,
+                            TriggerRunRow.next_retry_at <= before,
+                        )
+                        .order_by(TriggerRunRow.next_retry_at.asc())
+                        .limit(limit)
                     )
                 )
                 .scalars()

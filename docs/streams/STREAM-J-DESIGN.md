@@ -1179,11 +1179,11 @@ class TriggerSpec(BaseModel):                # AgentSpecBody.triggers 元素
 
 ### 16.6 DLQ 重试（M0 — Mini-ADR J-26 (1)）
 
-failed trigger run → K.K7 范式 DLQ 重试：backoff `1m→5m→30m→2h→6h`，5 次失败入死信。重试状态落 `trigger_run`（`attempt` / `next_retry_at` / `status`）—— `failed` 后置 `retrying` + 算 `next_retry_at`，scheduler `run_once` 第 (2) 步重投；第 5 次仍失败 → `dead_letter`。
+failed trigger run → K.K7 范式 DLQ 重试：backoff `1m→5m→30m→2h→6h`，`_MAX_ATTEMPTS=5`。scheduler `run_once` 三遍扫描：(1) cron 起 run；(2) **reconcile** —— 扫 `fired` 的 `trigger_run`，读其 `agent_run` 终态：success → `succeeded`；error/timeout → `retrying`（算 `next_retry_at`）或 attempt 用尽 → `dead_letter`；interrupted → `failed`；(3) **retry** —— 重投 `next_retry_at` 已到的 `retrying` 行（attempt++、新 run、`fired`）。重试状态全落 `trigger_run`（`attempt` / `next_retry_at` / `status`）。
 
 ### 16.7 scheduler quota（M0 — Mini-ADR J-26 (2)）
 
-新 `QuotaDimension`（per-tenant / per-user 最大 cron 触发器数）。Trigger 创建（CRUD）时经 `check_admission` 接入 Stream C.5 `QuotaService`；超额 429。
+cron 触发器创建（`POST /v1/triggers`）时，直接 `count_cron_by_tenant` 比对 `settings.max_cron_triggers_per_tenant`（默认 100）—— 超额 429。**不走 `QuotaService`** —— 触发器数是「当前计数」上限，不适配 `QuotaService` 的预留 / 速率模型（强行接入会引入计数器漂移，同 APScheduler jobstore 双真相源问题）；表本身即权威计数（Mini-ADR J-26 (2) 修订 / J-42）。
 
 ### 16.8 Audit Trail（M0）
 
@@ -1525,7 +1525,7 @@ capabilities:
 **J-26｜J.10 触发器 failure handling + quota + event 源 + persistence 4 条**
 背景：J-18 原文只覆盖单副本推 M1+ + webhook 认证，failure handling / scheduler quota / event 源选型 / APScheduler 持久性未列。决策：(1) failed trigger run → K7 模式的 DLQ 重试（backoff 1m→5m→30m→2h→6h，5 次失败入死信）；(2) scheduler quota 接入 Stream C.5（单用户 / 单租户最大 cron 数）；(3) trigger event 源选型 = PG NOTIFY（M0 单 control-plane 副本下足够，M1+ 多副本时考虑 outbox 表）；(4) APScheduler 必须 `SQLAlchemyJobStore` 持久化到 PG，control-plane 重启不丢 cron tick。取舍：(c) 红线 —— 四项缺一 trigger 系统就是弱版。
 
-**2026-05-22 J.10 启动前 deer-flow 对比修订（Mini-ADR J-42）**：(3) `event` 触发器 + PG NOTIFY **整体推 M1** —— M0 无具体消费场景，cron + webhook 已覆盖两个具体需求；(4) APScheduler + `SQLAlchemyJobStore` **弃用** —— 改 scheduler 轮询 `agent_trigger` 表（该表本就为 webhook / CRUD 而建，APScheduler jobstore 与之双真相源），`croniter` 仅做 cron 数学。(1) DLQ 重试 + (2) scheduler quota 不变。详见 J-42。
+**2026-05-22 J.10 启动前 deer-flow 对比修订（Mini-ADR J-42）**：(3) `event` 触发器 + PG NOTIFY **整体推 M1** —— M0 无具体消费场景，cron + webhook 已覆盖两个具体需求；(4) APScheduler + `SQLAlchemyJobStore` **弃用** —— 改 scheduler 轮询 `agent_trigger` 表（该表本就为 webhook / CRUD 而建，APScheduler jobstore 与之双真相源），`croniter` 仅做 cron 数学。(1) DLQ 重试不变（K.K7 范式）；(2) scheduler quota 改为创建时直接 `count_cron_by_tenant` 校验，不走 `QuotaService` —— 触发器数是「当前计数」上限，不适配 `QuotaService` 的预留 / 速率模型。详见 J-42 + § 16.6 / § 16.7。
 
 **J-27｜J.12 与 L7 trajectory 分工修剪 —— J.12 不再写 trajectory PG 表**
 背景：L7 已经把 trajectory 写 ObjectStore（JSONL / ShareGPT / 4 outcome 分流，PR #202 已合）；J-19 原文还要写 `trajectory` PG 表 + `after_llm_call` 中间件 = 重复实现。决策：修订 J.12 分工 —— L7 ObjectStore trajectory = **eval / 训练数据底座**（完整 messages，J.13 离线 eval 消费）；J.12 PG `eval_dataset` 表 = **策划后的 dataset**（人工 / 规则筛选 trajectory + expected 标注）；J.12 不再写 `trajectory` PG 表，middleware 改为"读 L7 ObjectStore + 关联 G.6 feedback → 策划"。取舍：(c) 红线 —— 重复实现违反"功能可少、能力不可弱"的反面（不是弱，是冗余）。

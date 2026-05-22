@@ -269,6 +269,10 @@ class Settings(BaseSettings):
     #: Max triggers fired per scheduler sweep — caps a single cycle's work.
     trigger_scheduler_batch_size: int = Field(default=100, gt=0)
 
+    #: Stream J.10 (Mini-ADR J-26 (2)) — max cron triggers a tenant may
+    #: register. Caps the scheduler's per-sweep work + a runaway client.
+    max_cron_triggers_per_tenant: int = Field(default=100, gt=0)
+
     # ------------------------------------------------------------------ tenant rate limit (C.6)
     #: Per-tenant request bucket capacity (tokens). Drained one token
     #: per authenticated request.

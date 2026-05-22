@@ -17,6 +17,7 @@ Implementations:
 from __future__ import annotations
 
 import abc
+from datetime import datetime
 from uuid import UUID
 
 from helix_agent.protocol import TriggerRecord, TriggerRunRecord
@@ -73,6 +74,10 @@ class TriggerStore(abc.ABC):
         cross-tenant read on the trigger store.
         """
 
+    @abc.abstractmethod
+    async def count_cron_by_tenant(self, *, tenant_id: UUID) -> int:
+        """Count a tenant's ``cron`` triggers — backs the create-time quota."""
+
 
 class TriggerRunStore(abc.ABC):
     """Registry of trigger firings — the ``trigger_run`` table.
@@ -96,3 +101,16 @@ class TriggerRunStore(abc.ABC):
     @abc.abstractmethod
     async def list_by_trigger(self, *, trigger_id: UUID, tenant_id: UUID) -> list[TriggerRunRecord]:
         """Return every firing of ``trigger_id`` under the tenant, newest first."""
+
+    @abc.abstractmethod
+    async def list_fired(self, *, limit: int = 1000) -> list[TriggerRunRecord]:
+        """Cross-tenant — every ``fired`` firing awaiting an outcome reconcile.
+
+        The caller (the scheduler) enters an RLS-bypass context.
+        """
+
+    @abc.abstractmethod
+    async def list_due_retries(
+        self, *, before: datetime, limit: int = 1000
+    ) -> list[TriggerRunRecord]:
+        """Cross-tenant — ``retrying`` firings whose ``next_retry_at`` has passed."""

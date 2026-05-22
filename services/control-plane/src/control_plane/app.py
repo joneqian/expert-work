@@ -398,6 +398,7 @@ def create_app(
         TriggerScheduler(
             trigger_store=resolved_trigger_store,
             trigger_run_store=resolved_trigger_run_store,
+            run_store=resolved_run_store,
             agent_spec_store=resolved_repo,
             thread_store=resolved_threads,
             runtime=resolved_agent_runtime,

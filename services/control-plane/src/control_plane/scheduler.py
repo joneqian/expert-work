@@ -1,15 +1,19 @@
 """Trigger scheduler — Stream J.10 (Mini-ADR J-26 / J-42).
 
-A single-replica background worker inside the control-plane. Every
-``interval_s`` it polls the ``agent_trigger`` table for enabled ``cron``
-triggers, computes each one's next fire time with ``croniter``, and —
-for any trigger whose schedule has come due — starts an agent run via
-the shared :func:`control_plane.trigger_firing.fire_trigger` path.
+A single-replica background worker inside the control-plane. Each
+``run_once`` sweep does three passes:
+
+1. **fire** — poll ``agent_trigger`` for enabled ``cron`` triggers
+   whose ``croniter`` schedule has come due, and start a run for each.
+2. **reconcile** — for every ``fired`` ``trigger_run``, read the linked
+   ``agent_run`` outcome: success → ``succeeded``; failure → ``retrying``
+   (with a backoff) or ``dead_letter`` once the attempt budget is spent.
+3. **retry** — re-fire ``retrying`` ``trigger_run`` rows whose
+   ``next_retry_at`` has passed (Mini-ADR J-26 (1), K.K7 DLQ pattern).
 
 Mini-ADR J-42: the ``agent_trigger`` table is the single source of
-truth (no APScheduler jobstore). Restart-safe — on restart the next
-fire time is recomputed from the cron expression + ``last_fired_at``;
-a long outage fires a due trigger once, not once per missed slot.
+truth (no APScheduler jobstore). Restart-safe — a long outage fires a
+due trigger once, not once per missed slot.
 
 Wiring (in :func:`control_plane.app.create_app`): started from the
 FastAPI ``lifespan`` ``yield``, stopped via :meth:`stop` from the
@@ -20,7 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 from croniter import croniter
 
@@ -39,15 +46,29 @@ from helix_agent.persistence.rls import (
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.protocol import TriggerRecord
+from helix_agent.protocol import TriggerRecord, TriggerRunRecord, TriggerRunStatus
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.runs import RunStatus, RunStore
 
 logger = logging.getLogger("helix.control_plane.scheduler")
 
-#: Periodic-loop failures — alerting keys off ``rate(...)``.
+#: DLQ retry budget — after this many failed firings a trigger_run is
+#: dead-lettered (K.K7 pattern, Mini-ADR J-26 (1)).
+_MAX_ATTEMPTS = 5
+
+#: Per-failure backoff before the next retry: 1m → 5m → 30m → 2h → 6h.
+_BACKOFF_SECONDS: tuple[int, ...] = (60, 5 * 60, 30 * 60, 2 * 3600, 6 * 3600)
+
+#: agent_run statuses that count as a failed firing (→ DLQ retry).
+_FAILED_RUN_STATUSES = frozenset({RunStatus.ERROR, RunStatus.TIMEOUT})
+
 _scheduler_cycle_errors = helix_counter(
     "helix_control_plane_trigger_scheduler_cycle_errors_total",
     "Trigger scheduler cycles that ended in a caught exception.",
+)
+_dead_letters = helix_counter(
+    "helix_control_plane_trigger_dead_letters_total",
+    "Trigger firings that exhausted the retry budget and were dead-lettered.",
 )
 
 
@@ -72,14 +93,47 @@ def _is_cron_due(trigger: TriggerRecord, *, now: datetime) -> bool:
     return _next_fire(expr, base) <= now
 
 
+def _backoff_for(attempt: int) -> int:
+    """Seconds to wait before the retry that follows failure ``attempt``."""
+    idx = min(max(attempt - 1, 0), len(_BACKOFF_SECONDS) - 1)
+    return _BACKOFF_SECONDS[idx]
+
+
+@contextmanager
+def _bypass_rls() -> Iterator[None]:
+    """RLS-bypass scope for a cross-tenant store scan (reaper pattern)."""
+    bypass = bypass_rls_var.set(True)
+    tenant = current_tenant_id_var.set(None)
+    try:
+        yield
+    finally:
+        current_tenant_id_var.reset(tenant)
+        bypass_rls_var.reset(bypass)
+
+
+@contextmanager
+def _tenant_scope(tenant_id: UUID, user_id: UUID | None = None) -> Iterator[None]:
+    """Scope per-trigger work to the trigger's own tenant (+ user)."""
+    tenant = current_tenant_id_var.set(tenant_id)
+    bypass = bypass_rls_var.set(False)
+    user = current_user_id_var.set(user_id)
+    try:
+        yield
+    finally:
+        current_user_id_var.reset(user)
+        bypass_rls_var.reset(bypass)
+        current_tenant_id_var.reset(tenant)
+
+
 class TriggerScheduler:
-    """Background worker: poll ``agent_trigger`` + fire due cron triggers."""
+    """Background worker: fire due cron triggers + run the DLQ sweep."""
 
     def __init__(
         self,
         *,
         trigger_store: TriggerStore,
         trigger_run_store: TriggerRunStore,
+        run_store: RunStore,
         agent_spec_store: AgentSpecStore,
         thread_store: ThreadMetaStore,
         runtime: AgentRuntime,
@@ -93,6 +147,7 @@ class TriggerScheduler:
             raise ValueError(msg)
         self._triggers = trigger_store
         self._trigger_runs = trigger_run_store
+        self._runs = run_store
         self._agents = agent_spec_store
         self._threads = thread_store
         self._runtime = runtime
@@ -127,68 +182,180 @@ class TriggerScheduler:
             self._task = None
 
     async def run_once(self) -> int:
-        """Run one sweep: fire every due cron trigger. Return the count fired.
-
-        The ``agent_trigger`` scan is cross-tenant, so it runs in an
-        RLS-bypass context (same as :class:`ReservationReaper`); each
-        firing then re-scopes to the trigger's own tenant.
-        """
-        bypass = bypass_rls_var.set(True)
-        tenant = current_tenant_id_var.set(None)
-        try:
-            triggers = await self._triggers.list_enabled_cron()
-        finally:
-            current_tenant_id_var.reset(tenant)
-            bypass_rls_var.reset(bypass)
-
+        """One sweep — fire due cron triggers, reconcile, retry. Return
+        the number of runs spawned (cron fires + retries)."""
         now = datetime.now(UTC)
+        spawned = await self._fire_due_cron(now)
+        await self._reconcile_fired()
+        spawned += await self._retry_due(now)
+        return spawned
+
+    # -- pass 1: fire due cron triggers ----------------------------------
+
+    async def _fire_due_cron(self, now: datetime) -> int:
+        with _bypass_rls():
+            triggers = await self._triggers.list_enabled_cron()
         fired = 0
         for trigger in triggers[: self._batch_size]:
             try:
                 if not _is_cron_due(trigger, now=now):
                     continue
-                if await self._fire(trigger, now=now):
+                if await self._fire_cron(trigger, now=now):
                     fired += 1
             except Exception:
-                # One bad trigger (malformed cron, missing agent, …)
-                # must never abort the sweep.
-                logger.exception(
-                    "scheduler.trigger_failed",
-                    extra={
-                        "trigger_id": str(trigger.id),
-                        "tenant_id": str(trigger.tenant_id),
-                    },
-                )
+                logger.exception("scheduler.trigger_failed", extra={"trigger_id": str(trigger.id)})
         return fired
 
-    async def _fire(self, trigger: TriggerRecord, *, now: datetime) -> bool:
-        """Fire ``trigger`` inside its own tenant (+ user) RLS context."""
-        tenant_tok = current_tenant_id_var.set(trigger.tenant_id)
-        bypass_tok = bypass_rls_var.set(False)
-        user_tok = current_user_id_var.set(trigger.user_id)
-        try:
-            return await fire_trigger(
-                trigger,
-                now=now,
-                agent_spec_store=self._agents,
-                runtime=self._runtime,
-                thread_store=self._threads,
-                audit_logger=self._audit,
-                approval_store=self._approvals,
-                trigger_store=self._triggers,
-                trigger_run_store=self._trigger_runs,
+    async def _fire_cron(self, trigger: TriggerRecord, *, now: datetime) -> bool:
+        with _tenant_scope(trigger.tenant_id, trigger.user_id):
+            run_id = await self._fire(trigger, now=now)
+            if run_id is None:
+                return False
+            await self._trigger_runs.create(
+                TriggerRunRecord(
+                    id=uuid4(),
+                    tenant_id=trigger.tenant_id,
+                    trigger_id=trigger.id,
+                    run_id=run_id,
+                    status=TriggerRunStatus.FIRED,
+                    attempt=1,
+                    triggered_at=now,
+                )
             )
-        finally:
-            current_user_id_var.reset(user_tok)
-            bypass_rls_var.reset(bypass_tok)
-            current_tenant_id_var.reset(tenant_tok)
+            return True
+
+    async def _fire(self, trigger: TriggerRecord, *, now: datetime) -> UUID | None:
+        """Spawn a run for ``trigger`` — caller already set the tenant scope."""
+        return await fire_trigger(
+            trigger,
+            now=now,
+            agent_spec_store=self._agents,
+            runtime=self._runtime,
+            thread_store=self._threads,
+            audit_logger=self._audit,
+            approval_store=self._approvals,
+            trigger_store=self._triggers,
+        )
+
+    # -- pass 2: reconcile fired firings against their run outcome -------
+
+    async def _reconcile_fired(self) -> None:
+        with _bypass_rls():
+            rows = await self._trigger_runs.list_fired(limit=self._batch_size)
+        now = datetime.now(UTC)
+        for row in rows:
+            try:
+                await self._reconcile_one(row, now=now)
+            except Exception:
+                logger.exception(
+                    "scheduler.reconcile_failed", extra={"trigger_run_id": str(row.id)}
+                )
+
+    async def _reconcile_one(self, row: TriggerRunRecord, *, now: datetime) -> None:
+        if row.run_id is None:
+            return
+        with _tenant_scope(row.tenant_id):
+            run = await self._runs.get(run_id=row.run_id, tenant_id=row.tenant_id)
+            if run is None:
+                return
+            if run.status is RunStatus.SUCCESS:
+                await self._trigger_runs.update(
+                    row.model_copy(update={"status": TriggerRunStatus.SUCCEEDED})
+                )
+            elif run.status in _FAILED_RUN_STATUSES:
+                await self._trigger_runs.update(self._after_failure(row, now=now, error=run.error))
+            elif run.status is RunStatus.INTERRUPTED:
+                # A deliberately-cancelled run is a terminal failure — no retry.
+                await self._trigger_runs.update(
+                    row.model_copy(
+                        update={
+                            "status": TriggerRunStatus.FAILED,
+                            "error": "run interrupted",
+                        }
+                    )
+                )
+            # PAUSED / RUNNING / PENDING — not terminal; reconcile next sweep.
+
+    def _after_failure(
+        self, row: TriggerRunRecord, *, now: datetime, error: str | None
+    ) -> TriggerRunRecord:
+        """Transition a failed firing — ``retrying`` with a backoff, or
+        ``dead_letter`` once the retry budget is spent."""
+        if row.attempt >= _MAX_ATTEMPTS:
+            _dead_letters.inc()
+            logger.warning(
+                "scheduler.dead_letter",
+                extra={"trigger_run_id": str(row.id), "attempt": row.attempt},
+            )
+            return row.model_copy(update={"status": TriggerRunStatus.DEAD_LETTER, "error": error})
+        return row.model_copy(
+            update={
+                "status": TriggerRunStatus.RETRYING,
+                "next_retry_at": now + timedelta(seconds=_backoff_for(row.attempt)),
+                "error": error,
+            }
+        )
+
+    # -- pass 3: re-fire retrying firings whose backoff has elapsed ------
+
+    async def _retry_due(self, now: datetime) -> int:
+        with _bypass_rls():
+            rows = await self._trigger_runs.list_due_retries(before=now, limit=self._batch_size)
+        fired = 0
+        for row in rows:
+            try:
+                if await self._retry_one(row, now=now):
+                    fired += 1
+            except Exception:
+                logger.exception("scheduler.retry_failed", extra={"trigger_run_id": str(row.id)})
+        return fired
+
+    async def _retry_one(self, row: TriggerRunRecord, *, now: datetime) -> bool:
+        with _tenant_scope(row.tenant_id):
+            trigger = await self._triggers.get(trigger_id=row.trigger_id, tenant_id=row.tenant_id)
+        if trigger is None or not trigger.enabled:
+            # Trigger deleted / disabled while retrying — abandon it.
+            with _tenant_scope(row.tenant_id):
+                await self._trigger_runs.update(
+                    row.model_copy(
+                        update={
+                            "status": TriggerRunStatus.FAILED,
+                            "next_retry_at": None,
+                        }
+                    )
+                )
+            return False
+        with _tenant_scope(trigger.tenant_id, trigger.user_id):
+            run_id = await self._fire(trigger, now=now)
+            if run_id is None:
+                # Agent gone / un-buildable — terminal, no infinite loop.
+                await self._trigger_runs.update(
+                    row.model_copy(
+                        update={
+                            "status": TriggerRunStatus.FAILED,
+                            "next_retry_at": None,
+                        }
+                    )
+                )
+                return False
+            await self._trigger_runs.update(
+                row.model_copy(
+                    update={
+                        "attempt": row.attempt + 1,
+                        "run_id": run_id,
+                        "status": TriggerRunStatus.FIRED,
+                        "next_retry_at": None,
+                    }
+                )
+            )
+            return True
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                fired = await self.run_once()
-                if fired:
-                    logger.info("scheduler.swept", extra={"fired_count": fired})
+                spawned = await self.run_once()
+                if spawned:
+                    logger.info("scheduler.swept", extra={"spawned_count": spawned})
             except Exception:
                 logger.exception("scheduler.cycle_failed")
                 _scheduler_cycle_errors.inc()

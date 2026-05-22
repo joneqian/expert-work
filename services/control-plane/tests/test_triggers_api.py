@@ -56,6 +56,7 @@ async def triggers_client() -> AsyncIterator[AsyncClient]:
         rate_limit_per_second=10_000.0,
         oidc_issuer=TEST_ISSUER,
         oidc_audience=[TEST_AUDIENCE],
+        max_cron_triggers_per_tenant=2,  # low cap so the quota test is cheap
     )
     app = create_app(
         settings=settings,
@@ -265,3 +266,21 @@ async def test_webhook_unknown_trigger_404(triggers_client: AsyncClient) -> None
         headers={"X-Helix-Webhook-Secret": "anything"},
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cron_trigger_quota_returns_429(triggers_client: AsyncClient) -> None:
+    """Creating cron triggers past the per-tenant cap (test cap = 2) is rejected."""
+    await _create_cron(triggers_client, name="q1")
+    await _create_cron(triggers_client, name="q2")
+    resp = await triggers_client.post(
+        "/v1/triggers",
+        json={
+            "agent_name": "reporter",
+            "agent_version": "1.0.0",
+            "name": "q3",
+            "kind": "cron",
+            "config": {"expr": "0 9 * * *"},
+        },
+    )
+    assert resp.status_code == 429

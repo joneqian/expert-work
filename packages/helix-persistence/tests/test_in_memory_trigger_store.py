@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -177,6 +177,7 @@ def _run_record(
     trigger_id: UUID | None = None,
     status: TriggerRunStatus = TriggerRunStatus.FIRED,
     triggered_at: datetime = _BASE,
+    next_retry_at: datetime | None = None,
 ) -> TriggerRunRecord:
     return TriggerRunRecord(
         id=run_record_id or uuid4(),
@@ -185,6 +186,7 @@ def _run_record(
         run_id=uuid4(),
         status=status,
         attempt=1,
+        next_retry_at=next_retry_at,
         triggered_at=triggered_at,
     )
 
@@ -266,3 +268,47 @@ async def test_run_store_list_by_trigger_filters_and_sorts() -> None:
     assert len(listed) == 2
     # newest first
     assert listed[0].triggered_at > listed[1].triggered_at
+
+
+@pytest.mark.asyncio
+async def test_count_cron_by_tenant() -> None:
+    store = InMemoryTriggerStore()
+    tenant_a, tenant_b = uuid4(), uuid4()
+    await store.create(_record(tenant_id=tenant_a, name="c1", kind="cron"))
+    await store.create(_record(tenant_id=tenant_a, name="c2", kind="cron"))
+    await store.create(_record(tenant_id=tenant_a, name="w1", kind="webhook"))
+    await store.create(_record(tenant_id=tenant_b, name="c1", kind="cron"))
+
+    assert await store.count_cron_by_tenant(tenant_id=tenant_a) == 2
+    assert await store.count_cron_by_tenant(tenant_id=tenant_b) == 1
+    assert await store.count_cron_by_tenant(tenant_id=uuid4()) == 0
+
+
+@pytest.mark.asyncio
+async def test_run_store_list_fired_is_status_filtered() -> None:
+    store = InMemoryTriggerRunStore()
+    await store.create(_run_record(status=TriggerRunStatus.FIRED))
+    await store.create(_run_record(status=TriggerRunStatus.FIRED))
+    await store.create(_run_record(status=TriggerRunStatus.SUCCEEDED))
+    await store.create(_run_record(status=TriggerRunStatus.RETRYING))
+
+    listed = await store.list_fired()
+    assert len(listed) == 2
+    assert all(r.status is TriggerRunStatus.FIRED for r in listed)
+
+
+@pytest.mark.asyncio
+async def test_run_store_list_due_retries() -> None:
+    store = InMemoryTriggerRunStore()
+    now = datetime(2026, 5, 22, 15, 0, 0, tzinfo=UTC)
+    await store.create(
+        _run_record(status=TriggerRunStatus.RETRYING, next_retry_at=now - timedelta(minutes=1))
+    )
+    await store.create(
+        _run_record(status=TriggerRunStatus.RETRYING, next_retry_at=now + timedelta(hours=1))
+    )
+    await store.create(_run_record(status=TriggerRunStatus.FIRED))
+
+    due = await store.list_due_retries(before=now)
+    assert len(due) == 1
+    assert due[0].status is TriggerRunStatus.RETRYING

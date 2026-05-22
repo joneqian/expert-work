@@ -30,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit
 from control_plane.runtime import AgentRuntime
+from control_plane.settings import Settings
 from control_plane.trigger_firing import fire_trigger
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import (
@@ -45,7 +46,14 @@ from helix_agent.persistence.rls import (
     current_user_id_var,
 )
 from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import AuditAction, TriggerKind, TriggerRecord, TriggerSpec
+from helix_agent.protocol import (
+    AuditAction,
+    TriggerKind,
+    TriggerRecord,
+    TriggerRunRecord,
+    TriggerRunStatus,
+    TriggerSpec,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 
 logger = logging.getLogger("helix.control_plane.triggers")
@@ -141,6 +149,10 @@ def _get_approval_store(request: Request) -> ApprovalStore:
     return request.app.state.approval_store  # type: ignore[no-any-return]
 
 
+def _get_settings(request: Request) -> Settings:
+    return request.app.state.settings  # type: ignore[no-any-return]
+
+
 def build_triggers_router() -> APIRouter:
     """Stream J.10 — authenticated trigger CRUD."""
     router = APIRouter(prefix="/v1/triggers", tags=["triggers"])
@@ -152,10 +164,24 @@ def build_triggers_router() -> APIRouter:
         triggers: Annotated[TriggerStore, Depends(_get_trigger_store)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        settings: Annotated[Settings, Depends(_get_settings)],
     ) -> JSONResponse:
         tenant_id: UUID = request.state.tenant_id
         actor_id: str = request.state.actor_id
         _validate_config(body.kind, body.name, body.config)
+
+        # Scheduler quota (Mini-ADR J-26 (2)) — cap a tenant's cron
+        # triggers so a runaway client cannot flood the scheduler.
+        if body.kind == "cron":
+            existing = await triggers.count_cron_by_tenant(tenant_id=tenant_id)
+            if existing >= settings.max_cron_triggers_per_tenant:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        "cron trigger quota exhausted "
+                        f"(max {settings.max_cron_triggers_per_tenant} per tenant)"
+                    ),
+                )
 
         user_id = await resolve_caller_user_id(request, users)
         now = datetime.now(UTC)
@@ -328,28 +354,39 @@ def build_webhooks_router() -> APIRouter:
             raise HTTPException(status_code=403, detail="invalid webhook secret")
 
         # Fire inside the trigger's own tenant (+ user) RLS scope.
+        now = datetime.now(UTC)
         tenant_tok = current_tenant_id_var.set(trigger.tenant_id)
         bypass_tok = bypass_rls_var.set(False)
         user_tok = current_user_id_var.set(trigger.user_id)
         try:
-            spawned = await fire_trigger(
+            run_id = await fire_trigger(
                 trigger,
-                now=datetime.now(UTC),
+                now=now,
                 agent_spec_store=agents,
                 runtime=runtime,
                 thread_store=threads,
                 audit_logger=audit,
                 approval_store=approvals,
                 trigger_store=triggers,
-                trigger_run_store=trigger_runs,
+            )
+            if run_id is None:
+                raise HTTPException(status_code=503, detail="trigger agent unavailable")
+            await trigger_runs.create(
+                TriggerRunRecord(
+                    id=uuid4(),
+                    tenant_id=trigger.tenant_id,
+                    trigger_id=trigger.id,
+                    run_id=run_id,
+                    status=TriggerRunStatus.FIRED,
+                    attempt=1,
+                    triggered_at=now,
+                )
             )
         finally:
             current_user_id_var.reset(user_tok)
             bypass_rls_var.reset(bypass_tok)
             current_tenant_id_var.reset(tenant_tok)
 
-        if not spawned:
-            raise HTTPException(status_code=503, detail="trigger agent unavailable")
         return JSONResponse(status_code=202, content={"status": "accepted"})
 
     return router

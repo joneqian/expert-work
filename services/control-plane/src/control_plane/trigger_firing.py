@@ -3,8 +3,13 @@
 Both the cron scheduler and the webhook ingest endpoint start an agent
 run from a trigger. :func:`fire_trigger` is that shared path — it
 resolves + builds the agent, opens a fresh thread, spawns the
-``run_agent`` worker (no SSE consumer), records a ``trigger_run`` row,
-stamps ``last_fired_at``, and emits a ``TRIGGER_FIRE`` audit row.
+``run_agent`` worker (no SSE consumer), stamps ``last_fired_at``, and
+emits a ``TRIGGER_FIRE`` audit row.
+
+It returns the new ``run_id`` (or ``None`` on a preflight failure). The
+caller owns the ``trigger_run`` row — a fresh fire creates one, a DLQ
+retry updates the existing one — so this function is reused unchanged
+by both the first fire and every retry.
 
 The caller owns the RLS context — ``fire_trigger`` runs entirely within
 the trigger's own tenant scope, set by the caller before the call.
@@ -17,7 +22,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -25,20 +30,9 @@ from langchain_core.runnables import RunnableConfig
 from control_plane.audit import emit
 from control_plane.runtime import AgentRuntime
 from helix_agent.common.observability import current_trace_id_hex, helix_counter
-from helix_agent.persistence import (
-    ApprovalStore,
-    ThreadMetaStore,
-    TriggerRunStore,
-    TriggerStore,
-)
+from helix_agent.persistence import ApprovalStore, ThreadMetaStore, TriggerStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.protocol import (
-    AgentSpecStatus,
-    AuditAction,
-    TriggerRecord,
-    TriggerRunRecord,
-    TriggerRunStatus,
-)
+from helix_agent.protocol import AgentSpecStatus, AuditAction, TriggerRecord
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator import AgentFactoryError, run_agent
 
@@ -61,13 +55,13 @@ async def fire_trigger(
     audit_logger: AuditLogger,
     approval_store: ApprovalStore,
     trigger_store: TriggerStore,
-    trigger_run_store: TriggerRunStore,
-) -> bool:
-    """Start a run for ``trigger``; return ``True`` iff a run was spawned.
+) -> UUID | None:
+    """Start a run for ``trigger``; return the new ``run_id``, or ``None``.
 
     Must be called within the trigger's tenant RLS context. A preflight
-    failure (agent gone / un-buildable) logs and returns ``False`` —
-    no thread, run, or ``trigger_run`` row is created.
+    failure (agent gone / un-buildable) logs and returns ``None`` — no
+    thread or run is created. The caller records the ``trigger_run``
+    row from the returned ``run_id``.
     """
     record = await agent_spec_store.get(
         tenant_id=trigger.tenant_id,
@@ -79,7 +73,7 @@ async def fire_trigger(
             "trigger_firing.agent_unavailable",
             extra={"trigger_id": str(trigger.id), "agent": trigger.agent_name},
         )
-        return False
+        return None
     try:
         built = await runtime.get_agent(
             tenant_id=trigger.tenant_id,
@@ -89,7 +83,7 @@ async def fire_trigger(
         )
     except AgentFactoryError:
         logger.exception("trigger_firing.agent_build_failed", extra={"trigger_id": str(trigger.id)})
-        return False
+        return None
 
     # A triggered run is an independent conversation — fresh thread.
     thread_id = uuid4()
@@ -149,17 +143,6 @@ async def fire_trigger(
     )
     await runtime.run_manager.attach_task(run_id, worker)
 
-    await trigger_run_store.create(
-        TriggerRunRecord(
-            id=uuid4(),
-            tenant_id=trigger.tenant_id,
-            trigger_id=trigger.id,
-            run_id=run_id,
-            status=TriggerRunStatus.FIRED,
-            attempt=1,
-            triggered_at=now,
-        )
-    )
     await trigger_store.update(trigger.model_copy(update={"last_fired_at": now}))
     await emit(
         audit_logger,
@@ -176,7 +159,7 @@ async def fire_trigger(
         "trigger_firing.fired",
         extra={"trigger_id": str(trigger.id), "run_id": str(run_id)},
     )
-    return True
+    return run_id
 
 
 __all__ = ["fire_trigger"]

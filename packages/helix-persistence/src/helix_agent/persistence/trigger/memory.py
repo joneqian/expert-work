@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from helix_agent.persistence.trigger.base import TriggerRunStore, TriggerStore
-from helix_agent.protocol import TriggerRecord, TriggerRunRecord
+from helix_agent.protocol import TriggerRecord, TriggerRunRecord, TriggerRunStatus
 
 
 class InMemoryTriggerStore(TriggerStore):
@@ -59,6 +60,9 @@ class InMemoryTriggerStore(TriggerStore):
     async def get_for_webhook(self, *, trigger_id: UUID) -> TriggerRecord | None:
         return self._rows.get(trigger_id)
 
+    async def count_cron_by_tenant(self, *, tenant_id: UUID) -> int:
+        return sum(1 for r in self._rows.values() if r.tenant_id == tenant_id and r.kind == "cron")
+
 
 class InMemoryTriggerRunStore(TriggerRunStore):
     """In-memory ``TriggerRunStore`` — keyed by firing id."""
@@ -94,3 +98,21 @@ class InMemoryTriggerRunStore(TriggerRunStore):
         ]
         rows.sort(key=lambda r: r.triggered_at, reverse=True)
         return rows
+
+    async def list_fired(self, *, limit: int = 1000) -> list[TriggerRunRecord]:
+        rows = [r for r in self._rows.values() if r.status is TriggerRunStatus.FIRED]
+        rows.sort(key=lambda r: r.triggered_at)
+        return rows[:limit]
+
+    async def list_due_retries(
+        self, *, before: datetime, limit: int = 1000
+    ) -> list[TriggerRunRecord]:
+        rows = [
+            r
+            for r in self._rows.values()
+            if r.status is TriggerRunStatus.RETRYING
+            and r.next_retry_at is not None
+            and r.next_retry_at <= before
+        ]
+        rows.sort(key=lambda r: r.next_retry_at or before)
+        return rows[:limit]

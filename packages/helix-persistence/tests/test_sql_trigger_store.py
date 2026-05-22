@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -214,6 +214,7 @@ def _run_record(
     trigger_id: UUID | None = None,
     status: TriggerRunStatus = TriggerRunStatus.FIRED,
     triggered_at: datetime = _BASE,
+    next_retry_at: datetime | None = None,
 ) -> TriggerRunRecord:
     return TriggerRunRecord(
         id=run_record_id or uuid4(),
@@ -222,6 +223,7 @@ def _run_record(
         run_id=uuid4(),
         status=status,
         attempt=1,
+        next_retry_at=next_retry_at,
         triggered_at=triggered_at,
     )
 
@@ -282,3 +284,40 @@ async def test_run_store_list_by_trigger(trigger_run_store: SqlTriggerRunStore) 
     listed = await trigger_run_store.list_by_trigger(trigger_id=trigger_id, tenant_id=tenant)
     assert len(listed) == 2
     assert listed[0].triggered_at > listed[1].triggered_at  # newest first
+
+
+@pytest.mark.asyncio
+async def test_count_cron_by_tenant(trigger_store: SqlTriggerStore) -> None:
+    tenant_a, tenant_b = uuid4(), uuid4()
+    await trigger_store.create(_record(tenant_id=tenant_a, name="c1", kind="cron"))
+    await trigger_store.create(_record(tenant_id=tenant_a, name="c2", kind="cron"))
+    await trigger_store.create(_record(tenant_id=tenant_a, name="w1", kind="webhook"))
+    await trigger_store.create(_record(tenant_id=tenant_b, name="c1", kind="cron"))
+
+    assert await trigger_store.count_cron_by_tenant(tenant_id=tenant_a) == 2
+    assert await trigger_store.count_cron_by_tenant(tenant_id=tenant_b) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_store_list_fired(trigger_run_store: SqlTriggerRunStore) -> None:
+    await trigger_run_store.create(_run_record(status=TriggerRunStatus.FIRED))
+    await trigger_run_store.create(_run_record(status=TriggerRunStatus.SUCCEEDED))
+    await trigger_run_store.create(_run_record(status=TriggerRunStatus.RETRYING))
+
+    listed = await trigger_run_store.list_fired()
+    assert all(r.status is TriggerRunStatus.FIRED for r in listed)
+    assert len(listed) >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_store_list_due_retries(trigger_run_store: SqlTriggerRunStore) -> None:
+    now = datetime(2026, 5, 22, 15, 0, 0, tzinfo=UTC)
+    due = _run_record(status=TriggerRunStatus.RETRYING, next_retry_at=now - timedelta(minutes=1))
+    not_due = _run_record(status=TriggerRunStatus.RETRYING, next_retry_at=now + timedelta(hours=1))
+    await trigger_run_store.create(due)
+    await trigger_run_store.create(not_due)
+
+    listed = await trigger_run_store.list_due_retries(before=now)
+    ids = {r.id for r in listed}
+    assert due.id in ids
+    assert not_due.id not in ids

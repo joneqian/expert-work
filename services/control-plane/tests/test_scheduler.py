@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -19,7 +19,13 @@ from helix_agent.persistence import (
 )
 from helix_agent.persistence.agent_spec import InMemoryAgentSpecStore
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AgentSpec, TriggerRecord, TriggerRunStatus
+from helix_agent.protocol import (
+    AgentSpec,
+    TriggerRecord,
+    TriggerRunRecord,
+    TriggerRunStatus,
+)
+from helix_agent.runtime.runs import DisconnectMode, InMemoryRunStore, RunInfo, RunStatus
 from tests.agent_fixtures import stub_agent_runtime
 
 _BASE = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
@@ -69,6 +75,7 @@ async def _build_scheduler(
     *,
     trigger_store: InMemoryTriggerStore,
     trigger_run_store: InMemoryTriggerRunStore,
+    run_store: InMemoryRunStore | None = None,
     seed_agent: bool = True,
 ) -> tuple[TriggerScheduler, AgentRuntime]:
     agents = InMemoryAgentSpecStore()
@@ -83,6 +90,7 @@ async def _build_scheduler(
     scheduler = TriggerScheduler(
         trigger_store=trigger_store,
         trigger_run_store=trigger_run_store,
+        run_store=run_store or InMemoryRunStore(),
         agent_spec_store=agents,
         thread_store=InMemoryThreadMetaStore(),
         runtime=runtime,
@@ -91,6 +99,34 @@ async def _build_scheduler(
         interval_s=60,
     )
     return scheduler, runtime
+
+
+def _run_info(run_id: UUID, *, status: RunStatus, error: str | None = None) -> RunInfo:
+    return RunInfo(
+        run_id=run_id,
+        tenant_id=_TENANT,
+        thread_id=uuid4(),
+        user_id=None,
+        status=status,
+        on_disconnect=DisconnectMode.CANCEL,
+        is_resume=False,
+        error=error,
+        created_at=_BASE,
+        updated_at=_BASE,
+        finished_at=_BASE,
+    )
+
+
+def _fired_run(*, trigger_id: UUID, run_id: UUID, attempt: int = 1) -> TriggerRunRecord:
+    return TriggerRunRecord(
+        id=uuid4(),
+        tenant_id=_TENANT,
+        trigger_id=trigger_id,
+        run_id=run_id,
+        status=TriggerRunStatus.FIRED,
+        attempt=attempt,
+        triggered_at=_BASE,
+    )
 
 
 # --- cron math ------------------------------------------------------------
@@ -205,3 +241,124 @@ async def test_start_stop_is_idempotent() -> None:
     assert scheduler.is_running is True
     await scheduler.stop()
     assert scheduler.is_running is False
+
+
+# --- DLQ: reconcile + retry -----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reconcile_marks_succeeded() -> None:
+    trigger_runs = InMemoryTriggerRunStore()
+    run_store = InMemoryRunStore()
+    run_id, trigger_id = uuid4(), uuid4()
+    await run_store.create(_run_info(run_id, status=RunStatus.SUCCESS))
+    fired = await trigger_runs.create(_fired_run(trigger_id=trigger_id, run_id=run_id))
+    scheduler, _ = await _build_scheduler(
+        trigger_store=InMemoryTriggerStore(),
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+    )
+
+    await scheduler._reconcile_fired()
+
+    row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+    assert row is not None
+    assert row.status is TriggerRunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_reconcile_failure_schedules_retry() -> None:
+    trigger_runs = InMemoryTriggerRunStore()
+    run_store = InMemoryRunStore()
+    run_id, trigger_id = uuid4(), uuid4()
+    await run_store.create(_run_info(run_id, status=RunStatus.ERROR, error="boom"))
+    fired = await trigger_runs.create(_fired_run(trigger_id=trigger_id, run_id=run_id, attempt=1))
+    scheduler, _ = await _build_scheduler(
+        trigger_store=InMemoryTriggerStore(),
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+    )
+
+    await scheduler._reconcile_fired()
+
+    row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+    assert row is not None
+    assert row.status is TriggerRunStatus.RETRYING
+    assert row.next_retry_at is not None
+    assert row.error == "boom"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_exhausted_budget_dead_letters() -> None:
+    trigger_runs = InMemoryTriggerRunStore()
+    run_store = InMemoryRunStore()
+    run_id, trigger_id = uuid4(), uuid4()
+    await run_store.create(_run_info(run_id, status=RunStatus.ERROR))
+    fired = await trigger_runs.create(_fired_run(trigger_id=trigger_id, run_id=run_id, attempt=5))
+    scheduler, _ = await _build_scheduler(
+        trigger_store=InMemoryTriggerStore(),
+        trigger_run_store=trigger_runs,
+        run_store=run_store,
+    )
+
+    await scheduler._reconcile_fired()
+
+    row = await trigger_runs.get(trigger_run_id=fired.id, tenant_id=_TENANT)
+    assert row is not None
+    assert row.status is TriggerRunStatus.DEAD_LETTER
+
+
+@pytest.mark.asyncio
+async def test_retry_re_fires_due_row() -> None:
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    # last_fired_at=now → pass-1 cron-fire won't also pick this up.
+    trig = await triggers.create(_trigger(last_fired_at=datetime.now(UTC)))
+    retrying = TriggerRunRecord(
+        id=uuid4(),
+        tenant_id=_TENANT,
+        trigger_id=trig.id,
+        run_id=uuid4(),
+        status=TriggerRunStatus.RETRYING,
+        attempt=1,
+        next_retry_at=datetime.now(UTC) - timedelta(minutes=1),
+        triggered_at=_BASE,
+    )
+    await trigger_runs.create(retrying)
+    scheduler, runtime = await _build_scheduler(
+        trigger_store=triggers, trigger_run_store=trigger_runs
+    )
+
+    fired = await scheduler._retry_due(datetime.now(UTC))
+    assert fired == 1
+
+    row = await trigger_runs.get(trigger_run_id=retrying.id, tenant_id=_TENANT)
+    assert row is not None
+    assert row.status is TriggerRunStatus.FIRED
+    assert row.attempt == 2
+
+    record = runtime.run_manager.get(row.run_id)
+    assert record is not None and record.task is not None
+    await record.task
+
+
+@pytest.mark.asyncio
+async def test_retry_skips_not_due_row() -> None:
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    trig = await triggers.create(_trigger(last_fired_at=datetime.now(UTC)))
+    retrying = TriggerRunRecord(
+        id=uuid4(),
+        tenant_id=_TENANT,
+        trigger_id=trig.id,
+        run_id=uuid4(),
+        status=TriggerRunStatus.RETRYING,
+        attempt=1,
+        next_retry_at=datetime.now(UTC) + timedelta(hours=1),
+        triggered_at=_BASE,
+    )
+    await trigger_runs.create(retrying)
+    scheduler, _ = await _build_scheduler(trigger_store=triggers, trigger_run_store=trigger_runs)
+
+    fired = await scheduler._retry_due(datetime.now(UTC))
+    assert fired == 0
