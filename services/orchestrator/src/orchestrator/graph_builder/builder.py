@@ -71,6 +71,7 @@ from helix_agent.runtime.middleware import (
 from orchestrator.context import ContextCompressor
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.graph_builder._approval import (
+    apply_resume_decision,
     build_approval_request,
     find_approval_target,
 )
@@ -287,16 +288,36 @@ def build_react_graph(
         if not tool_calls:
             return {}
 
-        # Stream J.8 (Mini-ADR J-24) — approval gate. Before staging,
-        # scan for the first approval-gated call: a tool named in
-        # ``approval_required_tools`` (the declarative gate) or the
-        # ``ask_for_approval`` builtin (agent-initiated). On a hit, write
-        # ``pending_approval`` and dispatch nothing — ``_after_tools``
-        # routes the run to END (RunStatus.PAUSED) with its checkpoint
-        # intact for ``POST /v1/runs/{id}/resume``. The end-and-resume
-        # model (vs LangGraph ``interrupt()``) keeps the parallel L.L6
-        # staging below untouched — see ``_approval`` module docstring.
-        if not state.get("pending_approval"):
+        # Stream J.8 (Mini-ADR J-24) — approval gate. Two re-entrant paths:
+        #
+        # 1. RESUME — ``approval_resume`` set: a human verdict came back
+        #    via ``aupdate_state``. Apply it (approve dispatches, modify
+        #    rewrites args, reject synthesises rejection ToolMessages)
+        #    and clear the channel. Skips re-detection so the gate does
+        #    not re-fire on the same turn.
+        # 2. DETECT — no resume in flight: scan for the first gated call
+        #    (a tool in ``approval_required_tools`` or ``ask_for_approval``).
+        #    On a hit, write ``pending_approval`` + dispatch nothing —
+        #    ``_after_tools`` routes to END (RunStatus.PAUSED). The
+        #    end-and-resume model (vs LangGraph ``interrupt()``) keeps
+        #    the parallel L.L6 staging below untouched.
+        approval_resume = state.get("approval_resume")
+        if approval_resume is not None:
+            resume_outcome = apply_resume_decision(
+                tool_calls, approval_required_tools, approval_resume
+            )
+            if resume_outcome.reject_messages:
+                rejected: dict[str, Any] = {
+                    "messages": list(resume_outcome.reject_messages),
+                    "approval_resume": None,
+                }
+                if resume_outcome.terminal:
+                    rejected["approval_outcome"] = "rejected"
+                return rejected
+            # approve / modify — fall through to dispatch the (possibly
+            # arg-rewritten) calls; clear the resume channel on return.
+            tool_calls = resume_outcome.tool_calls
+        elif not state.get("pending_approval"):
             target = find_approval_target(tool_calls, approval_required_tools)
             if target is not None:
                 configurable = config.get("configurable") or {}
@@ -400,6 +421,11 @@ def build_react_graph(
         # default fast-path active.
         if failed_mutations:
             result_dict["failed_mutations"] = failed_mutations
+        # Stream J.8 — when this batch ran on an approve / modify resume,
+        # clear the transient ``approval_resume`` channel so a follow-on
+        # turn does not re-apply the stale verdict.
+        if approval_resume is not None:
+            result_dict["approval_resume"] = None
         return result_dict
 
     graph: StateGraph[AgentState, None, AgentState, AgentState] = StateGraph(AgentState)
@@ -523,11 +549,18 @@ def _should_continue(state: AgentState) -> Literal["tools", "__end__"]:
 def _after_tools(state: AgentState) -> Literal["agent", "__end__"]:
     """Route out of ``tools`` — Stream J.8.
 
-    A run with ``pending_approval`` set ends here (RunStatus.PAUSED);
-    the checkpoint is what ``POST /v1/runs/{id}/resume`` re-invokes
-    from. A normal tools batch loops back to ``agent``.
+    Ends the run (→ END) in two cases:
+
+    * ``pending_approval`` set — the run paused at an approval gate
+      (RunStatus.PAUSED); the checkpoint is what the resume endpoint
+      re-invokes from.
+    * ``approval_outcome == "rejected"`` — a declarative-gate reject
+      vetoed the run; it terminates rather than looping back.
+
+    A normal tools batch (and an agent-initiated ask_for_approval
+    reject) loops back to ``agent``.
     """
-    if state.get("pending_approval"):
+    if state.get("pending_approval") or state.get("approval_outcome") == "rejected":
         return "__end__"
     return "agent"
 

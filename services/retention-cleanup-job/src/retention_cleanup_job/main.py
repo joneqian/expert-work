@@ -13,6 +13,7 @@ import logging
 
 from helix_agent.persistence import (
     DatabaseConfig,
+    SqlApprovalStore,
     SqlArtifactStore,
     SqlImageUploadStore,
     create_async_engine_from_config,
@@ -69,6 +70,9 @@ async def _amain() -> None:
         # metadata-only (no object store / supervisor calls), so it is
         # safe to enable even on deployments without J.6 image uploads.
         artifact_store = SqlArtifactStore(session_factory)
+        # Mini-ADR J-24 (J.8-step3b) — approval-timeout sweep; also
+        # metadata-only, safe to wire unconditionally.
+        approval_store = SqlApprovalStore(session_factory)
 
         job = RetentionCleanupJob(
             db_session_factory=session_factory,
@@ -79,13 +83,14 @@ async def _amain() -> None:
             artifact_store=artifact_store,
             artifact_retention_days=settings.artifact_retention_days,
             artifact_hard_delete_grace_days=settings.artifact_hard_delete_grace_days,
+            approval_store=approval_store,
         )
         logger.info("retention_cleanup_job.start batch=%d", settings.batch_size)
         report = await job.run_once()
         logger.info(
             "retention_cleanup_job.done audit=%d audit_skipped_unacked=%d "
             "event=%d jwt=%d image_rows=%d image_keys_ok=%d image_keys_failed=%d "
-            "artifact_soft=%d artifact_hard=%d duration=%.2fs",
+            "artifact_soft=%d artifact_hard=%d approvals_timed_out=%d duration=%.2fs",
             report.audit_deleted,
             report.audit_skipped_unacked,
             report.event_deleted,
@@ -95,6 +100,7 @@ async def _amain() -> None:
             report.image_object_keys_failed,
             report.artifacts_soft_deleted,
             report.artifacts_hard_deleted,
+            report.approvals_timed_out,
             report.duration_seconds,
         )
         if report.audit_skipped_unacked > 0:

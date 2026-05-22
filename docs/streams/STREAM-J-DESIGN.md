@@ -955,11 +955,11 @@ class PolicySpec(BaseModel):
 ask_for_approval(reason_kind: str, action_summary: str, proposed_args: dict) -> str
 ```
 
-- 工具调用被 middleware 拦截 → 构造 `ApprovalRequest`（`reason_kind` 取 agent 传入值，`node="ask_for_approval"`）→ `interrupt()` → run 暂停。
-- resume `decision="approve"` → 工具返回 `"approved"` 字符串作 `ToolMessage` 注入 message history，LLM 看到批准继续。
-- resume `decision="reject"` → 工具返回 `"rejected: <reason>"`，LLM 看到拒绝换策略（**不终止 run** —— 与声明式门控的 reject 不同：门控 reject 是平台否决整个 run；agent 主动请求的 reject 只是这一次询问被否，agent 继续）。
-- resume `decision="modify"` → `modified_args` 作 `ToolMessage` 内容回给 LLM。
-- 与声明式门控**共享同一套** `interrupt`/`resume`/`AgentState.pending_approval`/audit 机制 —— 唯一区别是 reject 语义（见上）。
+- agent 调 `ask_for_approval` 时 `tools_node` 按名特判（不走 `_dispatch_tool`）→ 构造 `ApprovalRequest`（`reason_kind` 取 agent 传入值）→ 写 `pending_approval` + 路由 END（同声明式门控）。
+- resume `decision="approve"` → `tools_node` 续跑期正常派发原 tool_call。
+- resume `decision="reject"` → `tools_node` 合成 `"[approval rejected] <reason>"` `ToolMessage`，LLM 看到拒绝换策略（**不终止 run** —— 与声明式门控的 reject 不同：门控 reject 平台否决整个 run（`approval_outcome="rejected"` → END）；agent 主动请求的 reject 只否这次询问，run loop 回 `agent` 继续）。
+- resume `decision="modify"` → `tools_node` 用 `modified_args` 重写 tool_call args 后派发。
+- 与声明式门控**共享同一套** `goto=END`/resume/`AgentState.pending_approval`/`approval_resume`/audit 机制 —— 唯一区别是 reject 语义（见上）。
 
 ### 14.6 审批原因分类 reason_kind（M0 — deer-flow 启发）
 
@@ -967,9 +967,13 @@ ask_for_approval(reason_kind: str, action_summary: str, proposed_args: dict) -> 
 
 ### 14.7 超时 fallback（M0 — Mini-ADR J-24）
 
-- `ApprovalRequest.timeout_at = requested_at + policies.approval_timeout_s`（默认 24h，manifest 可配）。
-- 新后台 job（扩 `retention-cleanup-job` 或新建 `approval-timeout-job`）周期扫描 `timeout_at < now()` 的 pending run → 自动 `decision="reject"` reason=`"timeout"` → run 转 `failed` + audit `APPROVAL_DECIDED`。
-- 取舍：(c) 红线 —— 无超时 = 无限期 pending run 永占 checkpointer 槽 = 资源泄漏（Mini-ADR J-24）。
+- `ApprovalRequest.timeout_at = requested_at + policies.approval_timeout_s`（默认 24h，manifest 可配）。`agent_approval` 行持久化 `timeout_at`（§ 14.3a）。
+- `retention-cleanup-job` 加 approval-timeout 扫描 pass（J.8-step3b）：扫 `agent_approval` `status='pending' AND timeout_at < now()` → `mark_decided(status=TIMEOUT, decided_by='system')`。超时后该 run 的 `POST .../resume` 返回 409（already-decided），暂停的 checkpoint 逻辑死亡（不再有 run 永占审批槽）。
+- 取舍：(c) 红线 —— 无超时 = 无限期 pending run 永占审批槽 = 资源泄漏（Mini-ADR J-24）。
+
+### 14.3a agent_approval 持久表（M0 — J.8-step3b）
+
+helix `RunManager` 纯内存（`runs` 表 M1+），暂停 run 无持久落点。新建 `agent_approval` 表（migration 0031，tenant RLS）登记每个暂停 run：`run_id`（唯一）/ `thread_id` / `tenant_id` / `request_id` / `node` / `reason_kind` / `action_summary` / `proposed_args` / `requested_at` / `timeout_at` / `status`（pending/approved/rejected/modified/timeout）/ `decided_by` / `decided_at` / `modified_args`。run 暂停时 `sse.py` 写一行；resume 端点 + `GET` + 超时 job 都读它（control-plane 重启后仍可用）。是 M1 `runs` 表的 J.8-收敛子集。
 
 ### 14.8 Audit Trail（M0 — Mini-ADR J-24）
 
@@ -977,10 +981,10 @@ ask_for_approval(reason_kind: str, action_summary: str, proposed_args: dict) -> 
 
 | Action | 触发 | 关键字段 |
 |--------|-----|---------|
-| `APPROVAL_REQUESTED` | approval 节点 / `ask_for_approval` 触发 interrupt | tenant_id / run_id / node / reason_kind / action_summary |
-| `APPROVAL_DECIDED` | resume endpoint / 超时 job | tenant_id / run_id / decision / decided_by / modified_args 摘要 / reason（timeout 时） |
+| `APPROVAL_REQUESTED` | run 暂停（`sse.py` 写 `agent_approval` 行后） | tenant_id / run_id / node / reason_kind / action_summary |
+| `APPROVAL_DECIDED` | resume endpoint | tenant_id / run_id / decision / decided_by / request_id |
 
-`resource_type` Literal 加 `"approval"`。
+`resource_type` Literal 加 `"approval"`。超时 job 的 verdict 记在 `agent_approval` 行（`status=timeout` / `decided_by='system'` / `decided_at`）—— 该行本身即 tenant-RLS 的可查终态记录，超时路径不另发 `audit_log` 行（retention-cleanup-job 无 AuditLogger，M1 可补）。
 
 ### 14.9 不做项（M0 边界）
 

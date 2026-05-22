@@ -28,11 +28,15 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from langchain_core.messages import ToolMessage
+
 from helix_agent.protocol import ApprovalReasonKind, ApprovalRequest
 from orchestrator.tools.approval import ASK_FOR_APPROVAL_TOOL
 
 __all__ = [
     "ApprovalTarget",
+    "ResumeOutcome",
+    "apply_resume_decision",
     "build_approval_request",
     "find_approval_target",
 ]
@@ -150,4 +154,74 @@ def build_approval_request(
         proposed_args=proposed_args,
         requested_at=moment,
         timeout_at=moment + timedelta(seconds=timeout_s),
+    )
+
+
+class ResumeOutcome:
+    """The result of applying a human verdict to a paused turn's tool_calls.
+
+    Exactly one of two shapes:
+
+    * **dispatch** — ``reject_messages`` empty, ``tool_calls`` carries
+      the (possibly arg-rewritten) calls to run normally.
+    * **reject** — ``reject_messages`` carries one synthetic
+      ``ToolMessage`` per call (so no orphan tool_call is left), and
+      ``tool_calls`` is empty (nothing runs). ``terminal`` is ``True``
+      for a declarative-gate reject (the platform vetoed the run →
+      route to END) and ``False`` for an ``ask_for_approval`` reject
+      (the agent just loops back, sees the rejection, re-plans).
+    """
+
+    __slots__ = ("reject_messages", "terminal", "tool_calls")
+
+    def __init__(
+        self,
+        *,
+        tool_calls: list[dict[str, Any]],
+        reject_messages: list[ToolMessage],
+        terminal: bool,
+    ) -> None:
+        self.tool_calls = tool_calls
+        self.reject_messages = reject_messages
+        self.terminal = terminal
+
+
+def apply_resume_decision(
+    tool_calls: list[dict[str, Any]],
+    approval_required_tools: frozenset[str],
+    resume: Mapping[str, Any],
+) -> ResumeOutcome:
+    """Apply a resume ``{decision, modified_args}`` to a paused turn.
+
+    ``approve`` → dispatch every call unchanged. ``modify`` → rewrite
+    the gated call's args with ``modified_args``, then dispatch.
+    ``reject`` → dispatch nothing; return a rejection ``ToolMessage``
+    per call. ``terminal`` is set for a declarative-gate reject.
+    """
+    decision = str(resume.get("decision", "approve"))
+    target = find_approval_target(tool_calls, approval_required_tools)
+    if decision == "reject":
+        reason = str(resume.get("reason") or "approval rejected by reviewer")
+        messages = [
+            ToolMessage(
+                content=f"[approval rejected] {reason}",
+                tool_call_id=str(call.get("id") or ""),
+                status="error",
+            )
+            for call in tool_calls
+        ]
+        # A declarative-gate reject vetoes the whole run; an
+        # agent-initiated ask_for_approval reject just informs the agent.
+        terminal = target is not None and not target.is_agent_initiated
+        return ResumeOutcome(tool_calls=[], reject_messages=messages, terminal=terminal)
+    if decision == "modify" and target is not None:
+        modified = dict(resume.get("modified_args") or {})
+        rewritten = [dict(call) for call in tool_calls]
+        rewritten[target.index] = {**rewritten[target.index], "args": modified}
+        return ResumeOutcome(tool_calls=rewritten, reject_messages=[], terminal=False)
+    # approve (or modify with no target — defensive: dispatch unchanged).
+    return ResumeOutcome(
+        tool_calls=[dict(call) for call in tool_calls],
+        reject_messages=[],
+        terminal=False,
     )

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -414,5 +415,92 @@ async def test_get_run_cross_tenant_returns_404(runs_client: AsyncClient) -> Non
     tenant_b_headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=uuid4())}"}
     resp = await runs_client.get(
         f"/v1/sessions/{thread_id}/runs/{uuid4()}", headers=tenant_b_headers
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST resume — Stream J.8-step3b (Mini-ADR J-24)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_pending_approval(
+    client: AsyncClient,
+    thread_id: str,
+    *,
+    status: str = "pending",
+) -> UUID:
+    """Seed an ``agent_approval`` row directly into the in-memory store."""
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from helix_agent.protocol import ApprovalRecord, ApprovalStatus
+
+    run_id = uuid4()
+    app = client._transport.app  # type: ignore[attr-defined,union-attr]
+    now = datetime.now(UTC)
+    rec = ApprovalRecord(
+        id=uuid4(),
+        tenant_id=DEFAULT_DEV_TENANT_ID,
+        run_id=run_id,
+        thread_id=UUID(thread_id),
+        request_id="approval:seed",
+        node="tools",
+        reason_kind="policy_gate",
+        action_summary="approval-gated tool 'send_email'",
+        proposed_args={"to": "ops@example.com"},
+        requested_at=now,
+        timeout_at=now + timedelta(hours=24),
+        status=ApprovalStatus(status),
+    )
+    await app.state.approval_store.create(rec)
+    return run_id
+
+
+@pytest.mark.asyncio
+async def test_resume_unknown_run_returns_404(runs_client: AsyncClient) -> None:
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    resp = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs/{uuid4()}/resume",
+        json={"decision": "approve"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resume_already_decided_returns_409(runs_client: AsyncClient) -> None:
+    thread_id = await _create_session(runs_client)
+    run_id = await _seed_pending_approval(runs_client, thread_id, status="approved")
+    resp = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/resume",
+        json={"decision": "approve"},
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_resume_modify_without_args_returns_422(runs_client: AsyncClient) -> None:
+    thread_id = await _create_session(runs_client)
+    run_id = await _seed_pending_approval(runs_client, thread_id)
+    resp = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/resume",
+        json={"decision": "modify"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_resume_cross_tenant_returns_404(runs_client: AsyncClient) -> None:
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    run_id = await _seed_pending_approval(runs_client, thread_id)
+    tenant_b_headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=uuid4())}"}
+    resp = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/resume",
+        json={"decision": "approve"},
+        headers=tenant_b_headers,
     )
     assert resp.status_code == 404

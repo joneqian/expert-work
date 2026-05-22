@@ -25,7 +25,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Annotated, Any
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -74,6 +75,22 @@ class RunRequest(BaseModel):
         for ref in value:
             parse_image_ref(ref)  # raises ValueError if malformed → 422
         return value
+
+
+class ResumeRequest(BaseModel):
+    """POST body for the J.8 resume endpoint — a human's approval verdict.
+
+    ``decided_by`` is *not* a body field — it is taken from the
+    authenticated caller so a client cannot spoof the reviewer
+    identity. ``modified_args`` is required for — and only for —
+    ``decision == "modify"``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["approve", "reject", "modify"]
+    modified_args: dict[str, Any] | None = None
+    reason: str | None = Field(default=None, max_length=2048)
 
 
 def _get_thread_repo(request: Request) -> object:
@@ -416,6 +433,183 @@ def build_runs_router() -> APIRouter:
                 "status": status,
                 "pending_approval": pending,
             }
+        )
+
+    @router.post("/{thread_id}/runs/{run_id}/resume", response_model=None)
+    async def resume_run(
+        thread_id: UUID,
+        run_id: UUID,
+        payload: ResumeRequest,
+        request: Request,
+        threads: Annotated[object, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        agent_repo: Annotated[AgentSpecStore, Depends(_get_agent_repo)],
+        runtime: Annotated[AgentRuntime, Depends(_get_agent_runtime)],
+        approvals: Annotated[ApprovalStore, Depends(_get_approval_store)],
+    ) -> StreamingResponse | JSONResponse:
+        """Stream J.8 — apply a human verdict + resume a paused run.
+
+        Writes the verdict into the checkpoint via ``aupdate_state``
+        (re-positioned ``as_node="agent"`` so the graph re-enters
+        ``tools``), then streams a continuation run. The continuation
+        gets a fresh ``run_id``; the original paused ``run_id`` is what
+        the ``agent_approval`` row + APPROVAL_DECIDED audit reference.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        actor_id: str = request.state.actor_id
+        trace_id = current_trace_id_hex()
+
+        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+        # ``modify`` carries replacement args; the other verdicts must not.
+        if payload.decision == "modify" and payload.modified_args is None:
+            raise HTTPException(status_code=422, detail="decision 'modify' requires modified_args")
+        if payload.decision != "modify" and payload.modified_args is not None:
+            raise HTTPException(
+                status_code=422, detail="modified_args is only valid with decision 'modify'"
+            )
+
+        approval = await approvals.get_by_run(run_id=run_id, tenant_id=tenant_id)
+        if approval is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        if approval.status is not ApprovalStatus.PENDING:
+            raise HTTPException(
+                status_code=409,
+                detail=f"approval already decided ({approval.status.value})",
+            )
+
+        _status_for = {
+            "approve": ApprovalStatus.APPROVED,
+            "reject": ApprovalStatus.REJECTED,
+            "modify": ApprovalStatus.MODIFIED,
+        }
+        decided = await approvals.mark_decided(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            status=_status_for[payload.decision],
+            decided_by=actor_id,
+            decided_at=datetime.now(UTC),
+            modified_args=payload.modified_args,
+        )
+        # ``mark_decided`` returns False on a lost race — another resume
+        # (or the timeout job) decided it between our get + update.
+        if not decided:
+            raise HTTPException(status_code=409, detail="approval already decided")
+
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.APPROVAL_DECIDED,
+            resource_type="approval",
+            resource_id=str(run_id),
+            trace_id=trace_id,
+            details={
+                "thread_id": str(thread_id),
+                "decision": payload.decision,
+                "request_id": approval.request_id,
+            },
+        )
+
+        if meta.agent_name is None or meta.agent_version is None:
+            raise HTTPException(status_code=409, detail="session is not bound to an agent")
+        spec_record = await agent_repo.get(
+            tenant_id=tenant_id, name=meta.agent_name, version=meta.agent_version
+        )
+        if spec_record is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        try:
+            built = await runtime.get_agent(
+                tenant_id=tenant_id,
+                name=meta.agent_name,
+                version=meta.agent_version,
+                spec=spec_record.spec,
+            )
+        except AgentFactoryError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"agent manifest cannot be built: {exc}"
+            ) from exc
+
+        # Write the verdict into the paused thread's checkpoint. ``as_node=
+        # "agent"`` re-positions the graph as if the agent had just run,
+        # so the next step evaluates the agent's conditional edge — the
+        # last message still carries the gated tool_calls → routes to
+        # ``tools``, where ``approval_resume`` is applied.
+        checkpoint_config: RunnableConfig = {
+            "configurable": {"thread_id": str(thread_id), "tenant_id": str(tenant_id)}
+        }
+        await built.graph.aupdate_state(  # type: ignore[attr-defined]
+            checkpoint_config,
+            {
+                "pending_approval": None,
+                "approval_resume": {
+                    "decision": payload.decision,
+                    "modified_args": payload.modified_args,
+                    "reason": payload.reason,
+                },
+            },
+            as_node="agent",
+        )
+
+        # Spawn a continuation worker. Fresh run_id — RunManager tracks
+        # it as a new run; the checkpoint (keyed by thread_id) is the
+        # continuity. ``graph_input=None`` resumes from the checkpoint.
+        continuation_run_id = uuid4()
+        run_record = await runtime.run_manager.create(
+            run_id=continuation_run_id,
+            thread_id=thread_id,
+            tenant_id=tenant_id,
+            is_resume=True,
+        )
+        config: RunnableConfig = {
+            "configurable": {
+                "thread_id": str(thread_id),
+                "tenant_id": str(tenant_id),
+                "run_id": str(continuation_run_id),
+            }
+        }
+        if caller_user_id is not None:
+            config["configurable"]["user_id"] = str(caller_user_id)  # type: ignore[index]
+            current_user_id_var.set(caller_user_id)
+        worker = asyncio.create_task(
+            run_agent(
+                bridge=runtime.stream_bridge,
+                run_manager=runtime.run_manager,
+                record=run_record,
+                graph=built.graph,  # type: ignore[arg-type]
+                graph_input=None,
+                config=config,
+                audit_logger=audit,
+                approval_store=approvals,
+            )
+        )
+        await runtime.run_manager.attach_task(continuation_run_id, worker)
+        # Log only ``continuation_run_id`` — it is server-generated
+        # (``uuid4()``). The paused ``run_id`` is a request path param;
+        # CodeQL py/log-injection taints it even though FastAPI has
+        # already validated it as a UUID. Same rule as ``trigger_run``.
+        logger.info("control_plane.run.resumed continuation=%s", continuation_run_id)
+        return StreamingResponse(
+            sse_consumer(
+                bridge=runtime.stream_bridge,
+                record=run_record,
+                run_manager=runtime.run_manager,
+                is_disconnected=request.is_disconnected,
+                last_event_id=request.headers.get("Last-Event-ID"),
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Helix-Run-Id": str(continuation_run_id),
+            },
         )
 
     return router

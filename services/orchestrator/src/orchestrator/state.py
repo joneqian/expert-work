@@ -19,7 +19,7 @@ checkpointed:
 from __future__ import annotations
 
 from operator import add
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -91,10 +91,22 @@ class AgentState(TypedDict):
 
     ``pending_approval`` (Stream J.8 / Mini-ADR J-24) carries the
     :class:`~helix_agent.protocol.approval.ApprovalRequest` a run is
-    paused on — set by the ``approval`` node (declarative gate) or the
-    ``ask_for_approval`` builtin before the LangGraph ``interrupt()``.
-    The overwrite reducer applies: a resume clears it back to ``None``.
-    Absent on a run that has never hit an approval point.
+    paused on — ``tools_node`` writes it before the run routes to END
+    (RunStatus.PAUSED). The overwrite reducer applies: a resume clears
+    it back to ``None``. Absent on a run that has never paused.
+
+    ``approval_resume`` (Stream J.8-step3b) is the transient channel the
+    resume endpoint writes via ``aupdate_state`` — a
+    ``{"decision", "modified_args"}`` dict. ``tools_node`` reads it on
+    re-entry to apply the human verdict (approve dispatches the gated
+    tool_call, modify rewrites its args, reject synthesises a rejection
+    ``ToolMessage``) and clears it back to ``None``.
+
+    ``approval_outcome`` (Stream J.8-step3b) is the terminal signal a
+    declarative-gate *reject* sets — ``_after_tools`` routes the run to
+    END when it is ``"rejected"`` (the platform vetoed the run). An
+    agent-initiated ``ask_for_approval`` reject leaves it unset so the
+    run loops back to the agent.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -107,3 +119,5 @@ class AgentState(TypedDict):
     failed_mutations: NotRequired[list[MutationOutcome]]
     subagent_invocations: NotRequired[Annotated[list[SubAgentInvocation], add]]
     pending_approval: NotRequired[ApprovalRequest | None]
+    approval_resume: NotRequired[dict[str, Any] | None]
+    approval_outcome: NotRequired[str | None]

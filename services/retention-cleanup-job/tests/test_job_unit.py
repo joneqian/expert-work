@@ -23,6 +23,7 @@ def test_cleanup_report_default_is_all_zero() -> None:
     assert report.image_object_keys_failed == 0
     assert report.artifacts_soft_deleted == 0
     assert report.artifacts_hard_deleted == 0
+    assert report.approvals_timed_out == 0
     assert report.duration_seconds == 0.0
     assert report.audit_deleted_by_tenant == {}
 
@@ -300,3 +301,71 @@ async def test_sweep_artifacts_skips_recent_soft_deleted_rows() -> None:
     # Row still in include_deleted listing.
     deleted = await artifacts.list_for_user(tenant_id=tenant, user_id=user, include_deleted=True)
     assert len(deleted) == 1
+
+
+# ---------------------------------------------------------------------------
+# Mini-ADR J-24 (J.8-step3b) — approval timeout sweep
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sweep_approval_timeouts_noop_without_store() -> None:
+    """Job constructed without ApprovalStore skips the approval pass cleanly."""
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+    )
+    assert await job._sweep_approval_timeouts() == 0
+
+
+@pytest.mark.asyncio
+async def test_sweep_approval_timeouts_auto_rejects_expired_pending() -> None:
+    """Pending rows past ``timeout_at`` flip to TIMEOUT; fresh ones survive."""
+    from helix_agent.persistence import InMemoryApprovalStore
+    from helix_agent.protocol import ApprovalRecord, ApprovalStatus
+
+    approvals = InMemoryApprovalStore()
+    now = datetime.now(UTC)
+
+    def _rec(*, run_id: object, timeout_at: datetime) -> ApprovalRecord:
+        return ApprovalRecord(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            run_id=run_id,  # type: ignore[arg-type]
+            thread_id=uuid4(),
+            request_id="approval:x",
+            node="tools",
+            reason_kind="policy_gate",
+            action_summary="gated tool",
+            requested_at=now - timedelta(hours=30),
+            timeout_at=timeout_at,
+        )
+
+    expired_run = uuid4()
+    fresh_run = uuid4()
+    await approvals.create(_rec(run_id=expired_run, timeout_at=now - timedelta(hours=6)))
+    await approvals.create(_rec(run_id=fresh_run, timeout_at=now + timedelta(hours=6)))
+
+    job = RetentionCleanupJob(
+        db_session_factory=lambda: None,  # type: ignore[arg-type]
+        approval_store=approvals,
+    )
+    timed_out = await job._sweep_approval_timeouts()
+    assert timed_out == 1
+
+    expired = await approvals.get_by_run(
+        run_id=expired_run, tenant_id=(await _tenant_of(approvals, expired_run))
+    )
+    assert expired is not None
+    assert expired.status is ApprovalStatus.TIMEOUT
+    assert expired.decided_by == "system"
+    fresh = await approvals.get_by_run(
+        run_id=fresh_run, tenant_id=(await _tenant_of(approvals, fresh_run))
+    )
+    assert fresh is not None
+    assert fresh.status is ApprovalStatus.PENDING
+
+
+async def _tenant_of(store: object, run_id: object) -> object:
+    """Test helper — pull a seeded record's tenant_id back out."""
+    rows = store._rows  # type: ignore[attr-defined]
+    return rows[run_id].tenant_id

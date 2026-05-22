@@ -101,6 +101,43 @@ async def _run(
         )
 
 
+async def _run_pause_then_resume(
+    llm: _ScriptedLLM,
+    registry: ToolRegistry,
+    *,
+    approval_required_tools: frozenset[str],
+    resume: dict[str, Any],
+) -> AgentState:
+    """Drive a run to its approval pause, apply ``resume`` via
+    ``aupdate_state`` (as the resume endpoint does), then continue."""
+    async with make_checkpointer("memory") as cp:
+        runner = GraphRunner(checkpointer=cp)
+        compiled = runner.compile(
+            build_react_graph(
+                llm_caller=llm,
+                tool_registry=registry,
+                approval_required_tools=approval_required_tools,
+            )
+        )
+        cfg: RunnableConfig = {"configurable": {"thread_id": "t", "run_id": "r-1"}}
+        paused = await compiled.ainvoke(
+            {
+                "messages": [HumanMessage(content="start")],
+                "step_count": 0,
+                "max_steps": 5,
+            },
+            config=cfg,
+        )
+        assert paused.get("pending_approval") is not None
+        # Resume endpoint's move: write the verdict, re-position as_node="agent".
+        await compiled.aupdate_state(
+            cfg,
+            {"pending_approval": None, "approval_resume": resume},
+            as_node="agent",
+        )
+        return await compiled.ainvoke(None, config=cfg)
+
+
 # ---------------------------------------------------------------------------
 # _approval helper units
 # ---------------------------------------------------------------------------
@@ -276,3 +313,134 @@ async def test_ask_for_approval_call_pauses_run() -> None:
     assert pending is not None
     assert pending.reason_kind == "risk_confirmation"
     assert pending.action_summary == "ok?"
+
+
+# ---------------------------------------------------------------------------
+# resume — decision application (Stream J.8-step3b)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resume_approve_dispatches_the_gated_tool() -> None:
+    """An ``approve`` verdict resumes the run + runs the gated tool."""
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(content="", tool_calls=[_tool_call("send_email", {"to": "x"}, "tc-1")]),
+            AIMessage(content="email sent"),
+        ]
+    )
+    registry = ToolRegistry()
+    email_tool = _ScriptedTool(name="send_email", result="delivered")
+    registry.register(email_tool)
+
+    state = await _run_pause_then_resume(
+        llm,
+        registry,
+        approval_required_tools=frozenset({"send_email"}),
+        resume={"decision": "approve", "modified_args": None},
+    )
+    # Gated tool ran; run continued to a final answer.
+    assert email_tool.dispatched == 1
+    assert state.get("pending_approval") is None
+    assert state.get("approval_resume") is None
+    assert state["messages"][-1].content == "email sent"
+
+
+@pytest.mark.asyncio
+async def test_resume_modify_rewrites_the_tool_args() -> None:
+    """A ``modify`` verdict dispatches the gated tool with replaced args."""
+    seen_args: dict[str, Any] = {}
+
+    @dataclass
+    class _ArgCapturingTool:
+        name: str = "send_email"
+
+        @property
+        def spec(self) -> ToolSpec:
+            return ToolSpec(name=self.name, description="capture")
+
+        async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+            del ctx
+            seen_args.update(args)
+            return ToolResult(content="ok")
+
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[_tool_call("send_email", {"to": "danger@evil.com"}, "tc-1")],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(_ArgCapturingTool())
+
+    await _run_pause_then_resume(
+        llm,
+        registry,
+        approval_required_tools=frozenset({"send_email"}),
+        resume={"decision": "modify", "modified_args": {"to": "safe@example.com"}},
+    )
+    assert seen_args == {"to": "safe@example.com"}
+
+
+@pytest.mark.asyncio
+async def test_resume_reject_declarative_gate_terminates_run() -> None:
+    """A declarative-gate reject does not run the tool + ends the run."""
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(content="", tool_calls=[_tool_call("send_email", {"to": "x"}, "tc-1")]),
+        ]
+    )
+    registry = ToolRegistry()
+    email_tool = _ScriptedTool(name="send_email")
+    registry.register(email_tool)
+
+    state = await _run_pause_then_resume(
+        llm,
+        registry,
+        approval_required_tools=frozenset({"send_email"}),
+        resume={"decision": "reject", "modified_args": None, "reason": "not allowed"},
+    )
+    # Gated tool never ran; run terminated (approval_outcome marks it).
+    assert email_tool.dispatched == 0
+    assert state.get("approval_outcome") == "rejected"
+    # A rejection ToolMessage closed out the orphan tool_call.
+    rejections = [m for m in state["messages"] if "[approval rejected]" in str(m.content)]
+    assert len(rejections) == 1
+    # The scripted LLM was only ever called once — the run did not loop.
+    assert llm.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_reject_ask_for_approval_returns_to_agent() -> None:
+    """An ask_for_approval reject loops back to the agent (not terminal)."""
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    _tool_call(
+                        ASK_FOR_APPROVAL_TOOL,
+                        {"reason_kind": "approach_choice", "action_summary": "plan A or B?"},
+                        "tc-1",
+                    )
+                ],
+            ),
+            AIMessage(content="ok, going with plan B then"),
+        ]
+    )
+    registry = ToolRegistry()
+    registry.register(AskForApprovalTool())
+
+    state = await _run_pause_then_resume(
+        llm,
+        registry,
+        approval_required_tools=frozenset(),
+        resume={"decision": "reject", "modified_args": None, "reason": "use B"},
+    )
+    # Not terminal — the agent ran again and produced a final answer.
+    assert state.get("approval_outcome") is None
+    assert state["messages"][-1].content == "ok, going with plan B then"
+    assert llm.calls == 2

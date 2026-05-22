@@ -29,8 +29,10 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from helix_agent.persistence.approval import ApprovalStore
 from helix_agent.persistence.artifact import ArtifactStore
 from helix_agent.persistence.image_upload import ImageUploadStore
+from helix_agent.protocol import ApprovalStatus
 from helix_agent.runtime.storage import ObjectStore
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,9 @@ class CleanupReport:
     # Mini-ADR J-25 (J.9-step1) — artifact lifecycle counts.
     artifacts_soft_deleted: int = 0
     artifacts_hard_deleted: int = 0
+    # Mini-ADR J-24 (J.8-step3b) — approvals auto-rejected past their
+    # 24h ``timeout_at``.
+    approvals_timed_out: int = 0
     duration_seconds: float = 0.0
     # Per-tenant breakdown of audit deletes (for observability).
     audit_deleted_by_tenant: dict[str, int] = field(default_factory=dict)
@@ -81,6 +86,7 @@ class RetentionCleanupJob:
         artifact_store: ArtifactStore | None = None,
         artifact_retention_days: int = 90,
         artifact_hard_delete_grace_days: int = 60,
+        approval_store: ApprovalStore | None = None,
     ) -> None:
         if batch_size <= 0:
             msg = "batch_size must be positive"
@@ -102,6 +108,7 @@ class RetentionCleanupJob:
         self._artifact_store = artifact_store
         self._artifact_retention_days = artifact_retention_days
         self._artifact_hard_delete_grace_days = artifact_hard_delete_grace_days
+        self._approval_store = approval_store
 
     async def run_once(self) -> CleanupReport:
         """Run the retention passes once and return a tally.
@@ -126,6 +133,7 @@ class RetentionCleanupJob:
         jwt_deleted = await self._delete_expired_jwt_blacklist()
         image_rows, image_keys_ok, image_keys_failed = await self._delete_expired_images()
         artifact_soft, artifact_hard = await self._sweep_artifacts()
+        approvals_timed_out = await self._sweep_approval_timeouts()
 
         return CleanupReport(
             audit_deleted=audit_deleted,
@@ -138,8 +146,39 @@ class RetentionCleanupJob:
             image_object_keys_failed=image_keys_failed,
             artifacts_soft_deleted=artifact_soft,
             artifacts_hard_deleted=artifact_hard,
+            approvals_timed_out=approvals_timed_out,
             duration_seconds=time.monotonic() - started,
         )
+
+    async def _sweep_approval_timeouts(self) -> int:
+        """Mini-ADR J-24 (J.8-step3b) — auto-reject approvals past 24h.
+
+        A run paused for human approval has a ``timeout_at`` (default
+        ``requested_at + 24h``). A pending row past that horizon is
+        auto-rejected: ``mark_decided`` flips it to ``TIMEOUT`` with
+        ``decided_by='system'``, so a later ``POST .../resume`` is
+        refused (409 already-decided) and the paused checkpoint becomes
+        logically dead — no run pins an approval slot forever.
+
+        No-op when no :class:`ApprovalStore` is wired (unit-test path /
+        deployments not running J.8).
+        """
+        if self._approval_store is None:
+            return 0
+        now = datetime.now(UTC)
+        expired = await self._approval_store.list_expired(before=now, limit=self._batch_size)
+        timed_out = 0
+        for row in expired:
+            ok = await self._approval_store.mark_decided(
+                run_id=row.run_id,
+                tenant_id=row.tenant_id,
+                status=ApprovalStatus.TIMEOUT,
+                decided_by="system",
+                decided_at=now,
+            )
+            if ok:
+                timed_out += 1
+        return timed_out
 
     async def _sweep_artifacts(self) -> tuple[int, int]:
         """Mini-ADR J-25 (J.9-step1) — two-stage artifact lifecycle sweep.
