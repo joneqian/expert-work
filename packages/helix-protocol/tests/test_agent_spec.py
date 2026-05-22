@@ -233,6 +233,44 @@ def test_rate_limit_rpm_custom_value_accepted() -> None:
 
 
 # ---------------------------------------------------------------------------
+# policies.approval — J.8 (Mini-ADR J-24)
+# ---------------------------------------------------------------------------
+
+
+def test_approval_fields_default_empty_and_24h() -> None:
+    spec = AgentSpec.model_validate(_doc())
+    assert spec.spec.policies.approval_required_tools == []
+    assert spec.spec.policies.approval_timeout_s == 86400
+
+
+def test_approval_required_tools_accepted() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {
+        "approval_required_tools": ["send_email", "http"],
+        "approval_timeout_s": 3600,
+    }
+    spec = AgentSpec.model_validate(doc)
+    assert spec.spec.policies.approval_required_tools == ["send_email", "http"]
+    assert spec.spec.policies.approval_timeout_s == 3600
+
+
+def test_approval_timeout_below_floor_rejected() -> None:
+    """``approval_timeout_s`` floor is 60s — a too-short window is a config error."""
+    doc = _doc()
+    doc["spec"]["policies"] = {"approval_timeout_s": 30}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
+
+
+def test_approval_timeout_above_ceiling_rejected() -> None:
+    """Ceiling is 7 days — anything longer is almost certainly a mistake."""
+    doc = _doc()
+    doc["spec"]["policies"] = {"approval_timeout_s": 604801}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
 # tools: discriminated union (Mini-ADR E-14)
 # ---------------------------------------------------------------------------
 

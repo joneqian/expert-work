@@ -33,6 +33,11 @@ from helix_agent.protocol.agent_spec import (
     WorkflowSpec,
     parse_agent_ref,
 )
+from helix_agent.protocol.approval import (
+    ApprovalDecision,
+    ApprovalReasonKind,
+    ApprovalRequest,
+)
 from helix_agent.protocol.artifact import Artifact, ArtifactKind, ArtifactVersion
 from helix_agent.protocol.audit import (
     AuditAction,
@@ -129,6 +134,9 @@ __all__ = [
     "ApiKey",
     "ApiKeyCreated",
     "ApiKeyScope",
+    "ApprovalDecision",
+    "ApprovalReasonKind",
+    "ApprovalRequest",
     "Artifact",
     "ArtifactKind",
     "ArtifactVersion",

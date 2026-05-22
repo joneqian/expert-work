@@ -454,6 +454,29 @@ class PolicySpec(BaseModel):
             "config unchanged (the child does not reset)."
         ),
     )
+    approval_required_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Stream J.8 (Mini-ADR J-24) — declarative approval gate. "
+            "Each named tool, when the agent dispatches it, triggers a "
+            "LangGraph ``interrupt()`` so a human approves / rejects / "
+            "modifies the call before it runs. This is the platform-"
+            "enforced path; the agent cannot bypass it. (The agent may "
+            "*also* request approval on its own via the ``ask_for_"
+            "approval`` builtin — see STREAM-J-DESIGN § 14.5.)"
+        ),
+    )
+    approval_timeout_s: int = Field(
+        default=86400,
+        ge=60,
+        le=604800,
+        description=(
+            "Stream J.8 (Mini-ADR J-24) — seconds a pending approval "
+            "may sit before the timeout job auto-rejects it. Default "
+            "24h; an un-actioned approval otherwise pins a checkpointer "
+            "slot forever (resource leak)."
+        ),
+    )
 
 
 class CodePackageSpec(BaseModel):

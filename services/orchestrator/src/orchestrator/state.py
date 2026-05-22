@@ -24,7 +24,13 @@ from typing import Annotated, NotRequired, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
-from helix_agent.protocol import MemoryItem, Plan, Reflection, SubAgentInvocation
+from helix_agent.protocol import (
+    ApprovalRequest,
+    MemoryItem,
+    Plan,
+    Reflection,
+    SubAgentInvocation,
+)
 from orchestrator.tools.mutation_classifier import MutationOutcome
 
 #: Default ReAct hard limit — see Mini-ADR E-6 in the design doc + the
@@ -82,6 +88,13 @@ class AgentState(TypedDict):
     feeds future M2-B fan-in aggregation (iteration_used sum /
     llm_call_count sum / wall_clock_ms max). Absent unless the manifest
     declares ``subagents``.
+
+    ``pending_approval`` (Stream J.8 / Mini-ADR J-24) carries the
+    :class:`~helix_agent.protocol.approval.ApprovalRequest` a run is
+    paused on — set by the ``approval`` node (declarative gate) or the
+    ``ask_for_approval`` builtin before the LangGraph ``interrupt()``.
+    The overwrite reducer applies: a resume clears it back to ``None``.
+    Absent on a run that has never hit an approval point.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -93,3 +106,4 @@ class AgentState(TypedDict):
     step_count_refund_pending: NotRequired[int]
     failed_mutations: NotRequired[list[MutationOutcome]]
     subagent_invocations: NotRequired[Annotated[list[SubAgentInvocation], add]]
+    pending_approval: NotRequired[ApprovalRequest | None]

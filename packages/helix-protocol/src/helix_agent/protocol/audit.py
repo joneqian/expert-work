@@ -80,6 +80,9 @@ class AuditAction(StrEnum):
     # wiring lands when ToolEnv gains an :class:`AuditLogger` handle.
     ARTIFACT_DELETE = "artifact:delete"
     ARTIFACT_UPDATE = "artifact:update"
+    # approval / HITL (Stream J.8 — Mini-ADR J-24)
+    APPROVAL_REQUESTED = "approval:requested"
+    APPROVAL_DECIDED = "approval:decided"
     # tools (Stream E.6 + E.8 + onwards)
     TOOL_CALL = "tool:call"
     TOOL_BLOCKED = "tool:blocked"
@@ -142,6 +145,7 @@ class AuditEntry(BaseModel):
         "image_upload",  # Stream J.6.补强-2 — Mini-ADR J-31
         "skill",  # Stream J.7a — Mini-ADR J-23
         "artifact",  # Stream J.9-step3 — Mini-ADR J-25
+        "approval",  # Stream J.8 — Mini-ADR J-24
     ]
     resource_id: str | None = None
     result: AuditResult

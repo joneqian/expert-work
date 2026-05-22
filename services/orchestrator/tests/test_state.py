@@ -11,7 +11,8 @@ def test_required_keys_present() -> None:
     """E.6 ``step_count`` / ``max_steps`` on top of E.1 ``messages``;
     J.1 ``plan``, J.2 ``reflections``, J.3 ``recalled_memories``,
     L.5 ``step_count_refund_pending``, L.4 ``failed_mutations``,
-    J.4-补强-2 ``subagent_invocations`` (last six ``NotRequired``)."""
+    J.4-补强-2 ``subagent_invocations``, J.8 ``pending_approval``
+    (last seven ``NotRequired``)."""
     annotations = inspect.get_annotations(AgentState)
     assert set(annotations) == {
         "messages",
@@ -23,6 +24,7 @@ def test_required_keys_present() -> None:
         "step_count_refund_pending",
         "failed_mutations",
         "subagent_invocations",
+        "pending_approval",
     }
 
 
