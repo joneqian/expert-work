@@ -419,6 +419,44 @@ async def test_get_run_cross_tenant_returns_404(runs_client: AsyncClient) -> Non
     assert resp.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_get_run_falls_back_to_durable_run_store(runs_client: AsyncClient) -> None:
+    """A finished run dropped from RunManager (5-min TTL / restart) stays
+    queryable — GET reads the durable ``agent_run`` row (Mini-ADR J-41)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+
+    thread_id = await _create_session(runs_client)
+    run_id = uuid4()
+    # Seed a finished run straight into the durable store — it is NOT in
+    # the in-memory RunManager, mimicking a run past its 5-minute TTL.
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+    now = datetime.now(UTC)
+    await app.state.run_store.create(
+        RunInfo(
+            run_id=run_id,
+            tenant_id=DEFAULT_DEV_TENANT_ID,
+            thread_id=UUID(thread_id),
+            user_id=None,
+            status=RunStatus.SUCCESS,
+            on_disconnect=DisconnectMode.CANCEL,
+            is_resume=False,
+            error=None,
+            created_at=now,
+            updated_at=now,
+            finished_at=now,
+        )
+    )
+
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "success"
+    assert body["pending_approval"] is None
+
+
 # ---------------------------------------------------------------------------
 # POST resume — Stream J.8-step3b (Mini-ADR J-24)
 # ---------------------------------------------------------------------------

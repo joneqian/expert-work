@@ -53,6 +53,7 @@ from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.protocol import ApprovalStatus, AuditAction, ThreadStatus
 from helix_agent.protocol.multimodal import parse_image_ref
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.runs import RunStore
 from orchestrator import AgentFactoryError, run_agent, sse_consumer
 from orchestrator.multimodal import image_ref_block
 
@@ -191,6 +192,10 @@ def _get_approval_store(request: Request) -> ApprovalStore:
     return request.app.state.approval_store  # type: ignore[no-any-return]
 
 
+def _get_run_store(request: Request) -> RunStore:
+    return request.app.state.run_store  # type: ignore[no-any-return]
+
+
 def build_runs_router() -> APIRouter:
     router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -308,6 +313,7 @@ def build_runs_router() -> APIRouter:
             run_id=run_id,
             thread_id=thread_id,
             tenant_id=tenant_id,
+            user_id=caller_user_id,
             is_resume=bool(prior_runs),
         )
         graph_input = {
@@ -390,13 +396,15 @@ def build_runs_router() -> APIRouter:
         threads: Annotated[object, Depends(_get_thread_repo)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         approvals: Annotated[ApprovalStore, Depends(_get_approval_store)],
+        runs: Annotated[RunStore, Depends(_get_run_store)],
     ) -> JSONResponse:
         """Stream J.8 — a run's status + any pending approval.
 
-        Reads the durable ``agent_approval`` row so a paused run is
-        visible even after a control-plane restart (the in-memory
-        RunManager would have lost it). 404 hides cross-tenant /
-        cross-user existence, identical to ``trigger_run``.
+        Reads the durable ``agent_run`` row (Mini-ADR J-41) so a run's
+        status survives the in-memory RunManager's 5-minute TTL and a
+        control-plane restart; the ``agent_approval`` row carries any
+        pending verdict. 404 hides cross-tenant / cross-user existence,
+        identical to ``trigger_run``.
         """
         tenant_id: UUID = request.state.tenant_id
         meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
@@ -420,12 +428,19 @@ def build_runs_router() -> APIRouter:
                 "requested_at": approval.requested_at.isoformat(),
                 "timeout_at": approval.timeout_at.isoformat(),
             }
-        # Status: the in-memory RunManager is authoritative while the run
-        # is live; after a restart the agent_approval row carries it.
-        run_record = runtime_run_status(request, run_id)
-        if run_record is None and approval is None:
+        # Status resolution (Mini-ADR J-41): the in-memory RunManager is
+        # authoritative while the run is live, but its record is dropped
+        # 5 minutes after the run ends — and on a control-plane restart.
+        # The durable ``agent_run`` row is the fallback, so a finished
+        # run stays queryable past the TTL instead of 404-ing.
+        run_status = runtime_run_status(request, run_id)
+        if run_status is None:
+            persisted = await runs.get(run_id=run_id, tenant_id=tenant_id)
+            if persisted is not None:
+                run_status = persisted.status.value
+        if run_status is None and approval is None:
             raise HTTPException(status_code=404, detail="run not found")
-        status = run_record or (approval.status.value if approval is not None else "unknown")
+        status = run_status or (approval.status.value if approval is not None else "unknown")
         return JSONResponse(
             content={
                 "run_id": str(run_id),
@@ -566,6 +581,7 @@ def build_runs_router() -> APIRouter:
             run_id=continuation_run_id,
             thread_id=thread_id,
             tenant_id=tenant_id,
+            user_id=caller_user_id,
             is_resume=True,
         )
         config: RunnableConfig = {

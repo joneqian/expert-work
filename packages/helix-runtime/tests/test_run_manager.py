@@ -6,7 +6,12 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.runtime.runs import DisconnectMode, RunManager, RunStatus
+from helix_agent.runtime.runs import (
+    DisconnectMode,
+    InMemoryRunStore,
+    RunManager,
+    RunStatus,
+)
 
 
 @pytest.mark.asyncio
@@ -126,3 +131,89 @@ async def test_cleanup_removes_run() -> None:
 
     await mgr.cleanup(run_id, delay=0)
     assert mgr.get(run_id) is None
+
+
+# ---------------------------------------------------------------------------
+# Durable RunStore mirroring — Mini-ADR J-41
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_mirrors_to_store() -> None:
+    store = InMemoryRunStore()
+    mgr = RunManager(store=store)
+    run_id, thread_id, tenant_id, user_id = uuid4(), uuid4(), uuid4(), uuid4()
+
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id, user_id=user_id)
+
+    persisted = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert persisted is not None
+    assert persisted.status is RunStatus.PENDING
+    assert persisted.thread_id == thread_id
+    assert persisted.user_id == user_id
+
+
+@pytest.mark.asyncio
+async def test_set_status_mirrors_to_store() -> None:
+    store = InMemoryRunStore()
+    mgr = RunManager(store=store)
+    run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id)
+
+    await mgr.set_status(run_id, RunStatus.RUNNING)
+    running = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert running is not None
+    assert running.status is RunStatus.RUNNING
+    assert running.finished_at is None  # RUNNING is not terminal
+
+    await mgr.set_status(run_id, RunStatus.SUCCESS)
+    done = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert done is not None
+    assert done.status is RunStatus.SUCCESS
+    assert done.finished_at is not None  # terminal → finished_at stamped
+
+
+@pytest.mark.asyncio
+async def test_set_status_error_mirrors_detail() -> None:
+    store = InMemoryRunStore()
+    mgr = RunManager(store=store)
+    run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id)
+
+    await mgr.set_status(run_id, RunStatus.ERROR, error="provider 503")
+    failed = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert failed is not None
+    assert failed.status is RunStatus.ERROR
+    assert failed.error == "provider 503"
+    assert failed.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_mirrors_interrupted_to_store() -> None:
+    store = InMemoryRunStore()
+    mgr = RunManager(store=store)
+    run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id)
+
+    await mgr.cancel(run_id)
+    persisted = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert persisted is not None
+    assert persisted.status is RunStatus.INTERRUPTED
+    assert persisted.finished_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_keeps_durable_row() -> None:
+    """The 5-minute TTL drops the in-memory record but not the agent_run row."""
+    store = InMemoryRunStore()
+    mgr = RunManager(store=store)
+    run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id)
+    await mgr.set_status(run_id, RunStatus.SUCCESS)
+
+    await mgr.cleanup(run_id, delay=0)
+
+    assert mgr.get(run_id) is None  # in-memory record gone
+    persisted = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert persisted is not None  # durable row survives the TTL sweep
+    assert persisted.status is RunStatus.SUCCESS

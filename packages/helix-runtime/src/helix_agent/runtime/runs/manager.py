@@ -3,12 +3,13 @@
 # Source: backend/packages/harness/deerflow/runtime/runs/manager.py
 # License: MIT (see vendor LICENSE)
 # Modifications:
-#   - Dropped persistent RunStore backing — M0 is in-memory only; the
-#     `runs` table is M1+ work behind its own ADR (per 06-OPEN-SOURCE-DEPS)
+#   - In-memory per-process registry; Mini-ADR J-41 adds a durable
+#     RunStore mirror (agent_run table) so run status survives the
+#     5-minute TTL sweep + control-plane restarts
 #   - run_id / thread_id typed as UUID (helix-agent convention)
-#   - Added tenant_id (ADR-0002 + Stream C.4 RLS)
-#   - Dropped assistant_id / multitask_strategy / metadata / kwargs / error
-#     fields — those can be added when needed for a specific use case
+#   - Added tenant_id (ADR-0002 + Stream C.4 RLS) + user_id
+#   - Dropped assistant_id / multitask_strategy / metadata / kwargs —
+#     run queueing / retry / DLQ are J.10 work (Mini-ADR J-26)
 #   - Lock retained from DeerFlow; mutations are serialized
 # Last sync: 2026-05-11
 # ============================================================
@@ -23,7 +24,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
-from helix_agent.runtime.runs.schemas import DisconnectMode, RunStatus
+from helix_agent.runtime.runs.schemas import (
+    TERMINAL_RUN_STATUSES,
+    DisconnectMode,
+    RunInfo,
+    RunStatus,
+)
+from helix_agent.runtime.runs.store import RunStore
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +47,7 @@ class RunRecord:
     thread_id: UUID
     tenant_id: UUID
     status: RunStatus
+    user_id: UUID | None = None
     on_disconnect: DisconnectMode = DisconnectMode.CANCEL
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -52,16 +60,44 @@ class RunRecord:
     is_resume: bool = False
 
 
+def _record_to_info(record: RunRecord) -> RunInfo:
+    """Project a :class:`RunRecord` into the persistable :class:`RunInfo`.
+
+    Called at run creation — ``error`` / ``finished_at`` are always
+    ``None`` for a fresh PENDING run; later transitions reach the store
+    through :meth:`RunManager.set_status`.
+    """
+    return RunInfo(
+        run_id=record.run_id,
+        tenant_id=record.tenant_id,
+        thread_id=record.thread_id,
+        user_id=record.user_id,
+        status=record.status,
+        on_disconnect=record.on_disconnect,
+        is_resume=record.is_resume,
+        error=None,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        finished_at=None,
+    )
+
+
 class RunManager:
     """Per-process registry of active runs.
 
-    All mutations are serialized by an :class:`asyncio.Lock`. Persistent
-    history (e.g. a ``runs`` Postgres table) is deferred to M1+.
+    All mutations are serialized by an :class:`asyncio.Lock`. When a
+    :class:`RunStore` is supplied (Mini-ADR J-41) every create / status
+    transition is mirror-written to the durable ``agent_run`` table so
+    a run's status outlives the in-memory record's 5-minute TTL.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, store: RunStore | None = None) -> None:
         self._runs: dict[UUID, RunRecord] = {}
         self._lock = asyncio.Lock()
+        #: Durable mirror (Mini-ADR J-41). ``None`` keeps the registry
+        #: purely in-memory — unit tests + the default app before the
+        #: SQL backend is wired.
+        self._store = store
 
     async def create(
         self,
@@ -69,6 +105,7 @@ class RunManager:
         run_id: UUID,
         thread_id: UUID,
         tenant_id: UUID,
+        user_id: UUID | None = None,
         on_disconnect: DisconnectMode = DisconnectMode.CANCEL,
         is_resume: bool = False,
     ) -> RunRecord:
@@ -86,10 +123,15 @@ class RunManager:
                 run_id=run_id,
                 thread_id=thread_id,
                 tenant_id=tenant_id,
+                user_id=user_id,
                 status=RunStatus.PENDING,
                 on_disconnect=on_disconnect,
                 is_resume=is_resume,
             )
+            # Mirror to the durable store before the in-memory insert —
+            # a store failure then leaves no orphan registry entry.
+            if self._store is not None:
+                await self._store.create(_record_to_info(record))
             self._runs[run_id] = record
             logger.info("run.create id=%s thread=%s tenant=%s", run_id, thread_id, tenant_id)
             return record
@@ -107,14 +149,32 @@ class RunManager:
                 if r.thread_id == thread_id and r.tenant_id == tenant_id
             ]
 
-    async def set_status(self, run_id: UUID, status: RunStatus) -> bool:
-        """Update a run's status. Returns ``True`` iff the run exists."""
+    async def set_status(
+        self, run_id: UUID, status: RunStatus, *, error: str | None = None
+    ) -> bool:
+        """Update a run's status. Returns ``True`` iff the run exists.
+
+        ``error`` carries the failure detail for ERROR / TIMEOUT
+        transitions; it lands in the durable ``agent_run`` row. A
+        transition into a terminal status also stamps ``finished_at``.
+        """
         async with self._lock:
             record = self._runs.get(run_id)
             if record is None:
                 return False
+            now = datetime.now(UTC)
             record.status = status
-            record.updated_at = datetime.now(UTC)
+            record.updated_at = now
+            if self._store is not None:
+                finished_at = now if status in TERMINAL_RUN_STATUSES else None
+                await self._store.set_status(
+                    run_id=run_id,
+                    tenant_id=record.tenant_id,
+                    status=status,
+                    updated_at=now,
+                    error=error,
+                    finished_at=finished_at,
+                )
             logger.info("run.status_change id=%s status=%s", run_id, status)
             return True
 
@@ -140,8 +200,17 @@ class RunManager:
                 return False
             record.abort_event.set()
             if record.status in (RunStatus.PENDING, RunStatus.RUNNING):
+                now = datetime.now(UTC)
                 record.status = RunStatus.INTERRUPTED
-                record.updated_at = datetime.now(UTC)
+                record.updated_at = now
+                if self._store is not None:
+                    await self._store.set_status(
+                        run_id=run_id,
+                        tenant_id=record.tenant_id,
+                        status=RunStatus.INTERRUPTED,
+                        updated_at=now,
+                        finished_at=now,
+                    )
             logger.info("run.cancel id=%s prev_status=%s", run_id, record.status)
             return True
 
@@ -160,7 +229,9 @@ class RunManager:
 
         Default 5 min — long enough for late SSE consumers to drain
         replayed events from the stream bridge but short enough to keep
-        memory bounded.
+        memory bounded. Only the in-memory record is dropped; the
+        durable ``agent_run`` row (Mini-ADR J-41) is left intact so the
+        run's status stays queryable past the TTL.
         """
         if delay > 0:
             await asyncio.sleep(delay)

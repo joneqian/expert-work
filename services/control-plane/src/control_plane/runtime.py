@@ -29,7 +29,7 @@ from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.audit import DefaultSecretRedactor
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
 from helix_agent.runtime.middleware import RecordingLangfuseClient
-from helix_agent.runtime.runs import RunManager
+from helix_agent.runtime.runs import RunManager, RunStore
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from helix_agent.runtime.storage import ObjectStore, ObjectStoreBackend, S3CompatibleConfig
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
@@ -392,7 +392,9 @@ def build_middleware_env() -> MiddlewareEnv:
     )
 
 
-def make_agent_runtime(secret_store: SecretStore) -> AgentRuntime:
+def make_agent_runtime(
+    secret_store: SecretStore, *, run_store: RunStore | None = None
+) -> AgentRuntime:
     """Build the production :class:`AgentRuntime` with an in-memory checkpointer.
 
     :class:`InMemorySaver` has no async setup / teardown, so it is safe
@@ -400,9 +402,13 @@ def make_agent_runtime(secret_store: SecretStore) -> AgentRuntime:
     ``settings.checkpointer_backend`` is ``postgres`` the app lifespan
     opens the durable checkpointer's connection context and swaps
     ``agent_builder`` before any run starts — see ``control_plane.app``.
+
+    ``run_store`` (Mini-ADR J-41) is the durable ``agent_run`` mirror
+    the :class:`RunManager` writes every create / status transition to;
+    ``None`` keeps the registry purely in-memory.
     """
     return AgentRuntime(
-        run_manager=RunManager(),
+        run_manager=RunManager(store=run_store),
         stream_bridge=InMemoryStreamBridge(),
         agent_builder=make_agent_builder(secret_store, InMemorySaver()),
     )

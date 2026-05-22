@@ -188,6 +188,7 @@ from helix_agent.persistence.thread_meta import (
 )
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.checkpointer import make_checkpointer
+from helix_agent.runtime.runs import InMemoryRunStore, RunStore, SqlRunStore
 from helix_agent.runtime.secret_store import make_secret_store
 from helix_agent.runtime.storage import make_object_store
 from orchestrator import MemoryEnv
@@ -212,6 +213,7 @@ def create_app(
     knowledge_repo: KnowledgeStore | None = None,
     image_upload_repo: ImageUploadStore | None = None,
     approval_repo: ApprovalStore | None = None,
+    run_repo: RunStore | None = None,
     skill_repo: SkillStore | None = None,
     knowledge_ingestion_runner: KnowledgeIngestionRunner | None = None,
     audit_logger: AuditLogger | None = None,
@@ -295,6 +297,13 @@ def create_app(
     resolved_approval_store: ApprovalStore = approval_repo or (
         sql_stores.approval if sql_stores else InMemoryApprovalStore()
     )
+    # Stream J.8 closeout follow-up (Mini-ADR J-41) — durable run
+    # lifecycle store. The same instance is wired into the RunManager
+    # (mirror writes) and read by GET .../runs/{id} as the fallback
+    # once the in-memory record has expired.
+    resolved_run_store: RunStore = run_repo or (
+        sql_stores.run if sql_stores else InMemoryRunStore()
+    )
     # Stream J.7a (Mini-ADR J-23) — skill registry.
     resolved_skill_store: SkillStore = skill_repo or (
         sql_stores.skill if sql_stores else InMemorySkillStore()
@@ -309,7 +318,9 @@ def create_app(
     resolved_secret_store = make_secret_store(
         "local_dev", env_file=resolved_settings.secret_store_env_file
     )
-    resolved_agent_runtime = agent_runtime or make_agent_runtime(resolved_secret_store)
+    resolved_agent_runtime = agent_runtime or make_agent_runtime(
+        resolved_secret_store, run_store=resolved_run_store
+    )
     # Late-bound PII resolver: lets the audit logger reference
     # tenant_config without forcing it to exist yet (D.2 cycle break).
     pii_resolver = TenantConfigPiiResolver()
@@ -543,6 +554,7 @@ def create_app(
     app.state.feedback_store = resolved_feedback
     app.state.artifact_store = resolved_artifact_store
     app.state.approval_store = resolved_approval_store
+    app.state.run_store = resolved_run_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
     app.state.skill_store = resolved_skill_store
@@ -668,6 +680,7 @@ class _SqlStores:
     image_upload: ImageUploadStore  # Stream J.6.补强-3 (Mini-ADR J-32)
     artifact: ArtifactStore
     approval: ApprovalStore  # Stream J.8 (Mini-ADR J-24)
+    run: RunStore  # Stream J.8 closeout follow-up (Mini-ADR J-41)
     service_account: ServiceAccountStore
     api_key: ApiKeyStore
     role_binding: RoleBindingStore
@@ -705,6 +718,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         image_upload=SqlImageUploadStore(session_factory),
         artifact=SqlArtifactStore(session_factory),
         approval=SqlApprovalStore(session_factory),
+        run=SqlRunStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),
         api_key=SqlApiKeyStore(session_factory),
         role_binding=SqlRoleBindingStore(session_factory),

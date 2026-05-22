@@ -1,6 +1,7 @@
 """ORM models for Helix-Agent state layer."""
 
 from helix_agent.persistence.models.agent_approval import AgentApprovalRow
+from helix_agent.persistence.models.agent_run import AgentRunRow
 from helix_agent.persistence.models.agent_spec import AgentSpecRow
 from helix_agent.persistence.models.api_key import ApiKeyRow
 from helix_agent.persistence.models.artifact import ArtifactRow, ArtifactVersionRow
@@ -36,6 +37,7 @@ from helix_agent.persistence.models.volume_backup_dlq import VolumeBackupDLQRow
 
 __all__ = [
     "AgentApprovalRow",
+    "AgentRunRow",
     "AgentSpecRow",
     "ApiKeyRow",
     "ArtifactRow",

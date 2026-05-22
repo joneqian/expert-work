@@ -334,7 +334,7 @@ async def run_agent(
         # because "budget exhausted" is a tunable trade-off, not a
         # provider / code failure.
         session_outcome = "max_steps"
-        await run_manager.set_status(run_id, RunStatus.ERROR)
+        await run_manager.set_status(run_id, RunStatus.ERROR, error=str(exc))
         logger.warning(
             "run_agent.max_steps_exceeded run_id=%s step_count=%d max_steps=%d",
             run_id,
@@ -359,7 +359,7 @@ async def run_agent(
         )
     except Exception as exc:
         session_outcome = "error"
-        await run_manager.set_status(run_id, RunStatus.ERROR)
+        await run_manager.set_status(run_id, RunStatus.ERROR, error=str(exc))
         logger.exception("run_agent.failed run_id=%s", run_id)
         await bridge.publish(
             run_id,

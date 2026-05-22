@@ -7,11 +7,14 @@
 # Last sync: 2026-05-11
 # ============================================================
 
-"""Run lifecycle status + disconnect-mode enums."""
+"""Run lifecycle status + disconnect-mode enums + the ``RunStore`` DTO."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 
 class RunStatus(StrEnum):
@@ -37,3 +40,40 @@ class DisconnectMode(StrEnum):
 
     CANCEL = "cancel"  # abort the run
     CONTINUE = "continue"  # keep running; results still go to event_log
+
+
+#: Run statuses that mark a run as finished — ``RunManager`` stamps
+#: ``finished_at`` when a run transitions into one of these.
+TERMINAL_RUN_STATUSES: frozenset[RunStatus] = frozenset(
+    {
+        RunStatus.SUCCESS,
+        RunStatus.ERROR,
+        RunStatus.TIMEOUT,
+        RunStatus.INTERRUPTED,
+        RunStatus.PAUSED,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RunInfo:
+    """Serialisable run-lifecycle snapshot — the ``RunStore`` DTO.
+
+    A persistence-facing projection of
+    :class:`~helix_agent.runtime.runs.manager.RunRecord` without the
+    live-execution handles (``task`` / ``abort_event``), which are
+    process-bound and never persisted. ``RunStore`` reads and writes
+    this; ``RunManager`` builds it on each create.
+    """
+
+    run_id: UUID
+    tenant_id: UUID
+    thread_id: UUID
+    user_id: UUID | None
+    status: RunStatus
+    on_disconnect: DisconnectMode
+    is_resume: bool
+    error: str | None
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
