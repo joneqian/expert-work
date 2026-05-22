@@ -891,34 +891,104 @@ class VisionSpec(BaseModel):                # AgentSpecBody.vision —— 仅 Pa
 
 ## 14. J.8 — 人在回路 / 审批
 
+> **2026-05-22 J.8 收尾设计 PR**：实装 ~5-10%（仅 `audit_log` 表 + `PolicySpec` 容器 + `AgentState` 框架就绪，零 approval 节点 / 零 resume endpoint / 零审批 DTO）。本次设计修订按 2026-05-22 helix-vs-deer-flow 对比新增 **§ 14.5 agent 主动请求路径**（deer-flow `ask_clarification` 启发 — 声明式门控之外加 agent 自主请求路径，用户复审拉进 M0）+ **§ 14.6 reason_kind 分类** + **§ 14.7 超时 fallback 详化** + **§ 14.8 audit 详化** + **§ 14.9 边界**，并同步 Mini-ADR J-24 加 (4)(5) 两项。
+
 ### 14.1 现状
 
 run 一旦启动,人无法中途审批 / 纠偏。危险操作（如 sub-agent 派生、外部写操作）无人工门。
 
+**当前已实装**：`audit_log` 表 + `AuditAction` enum + emit/write 路径（Stream D.1）；`PolicySpec` 容器（通用字段，审批字段未加）；LangGraph `interrupt()` + checkpointer 暂停/恢复机制（天然支持）。**尚缺**：approval DTO / `AgentState.pending_approval` / approval 图节点 / resume endpoint / 超时 job / `ask_for_approval` tool / eval。
+
 ### 14.2 设计与边界
 
 - 用 LangGraph 原生 `interrupt()`：`approval` 节点在危险操作前 `interrupt`,run 暂停并 checkpoint。
-- control-plane 暴露暂停态：`GET /runs/{id}`（含 `pending_approval`）+ `POST /runs/{id}/resume`（批准 / 拒绝 / 修改后继续）。
-- 危险操作按 `PolicySpec` 声明门控（哪些工具 / 操作要审批）。
-- **边界**：M0 是同步审批门（run 挂起等人）;不做异步通知 / 超时自动决策（M1）。
+- control-plane 暴露暂停态：`GET /v1/runs/{id}`（含 `pending_approval`）+ `POST /v1/runs/{id}/resume`（批准 / 拒绝 / 修改后继续）。
+- **两条触发路径并存**（2026-05-22 修订）：
+  1. **声明式门控**（主路径）—— 危险操作按 `PolicySpec.approval_required_tools` 声明门控，平台强制，agent 不可绕过。
+  2. **agent 主动请求**（§ 14.5，deer-flow 启发）—— agent 跑到不确定决策点时调 `ask_for_approval` builtin 工具主动请求人确认。
+- **边界**：M0 是同步审批门（run 挂起等人）。M0 含 24h 超时自动 reject（Mini-ADR J-24 — 不再"软推迟"）；不做异步通知 / 多审批人 / 升级链（M1）。
 
 ### 14.3 接口与数据模型
 
 ```python
+ApprovalReasonKind = Literal[              # § 14.6 — 借鉴 deer-flow 5 类型
+    "policy_gate",        # 声明式门控触发（PolicySpec.approval_required_tools）
+    "missing_info",       # agent 缺信息
+    "ambiguous_requirement",
+    "approach_choice",    # agent 在多方案间犹豫
+    "risk_confirmation",  # agent 自评高风险操作
+]
 class ApprovalRequest(BaseModel):           # AgentState.pending_approval
+    request_id: str                         # 稳定哈希(thread_id+node+content) 防重试重复
     node: str
+    reason_kind: ApprovalReasonKind
     action_summary: str
     proposed_args: dict
+    requested_at: datetime
+    timeout_at: datetime                    # requested_at + policies.approval_timeout_s
 class ApprovalDecision(BaseModel):          # resume API 入参
     decision: Literal["approve", "reject", "modify"]
-    modified_args: dict | None
+    modified_args: dict | None              # 仅 decision="modify" 时
+    decided_by: str                         # 审批人 subject id
+```
+
+`PolicySpec` 新增两字段（§ 14.2 主路径门控）：
+
+```python
+class PolicySpec(BaseModel):
+    ...
+    approval_required_tools: list[str] = []   # 这些工具 dispatch 前 interrupt
+    approval_timeout_s: int = 86400           # 默认 24h；超时 auto-reject
 ```
 
 ### 14.4 整合点
 
-`graph_builder/builder.py`（`approval` 节点 + `interrupt()`）、`state.py`（`pending_approval`）、checkpointer（暂停态持久,本就支持）、control-plane run API（resume 端点）、`PolicySpec`（门控声明）。
+`graph_builder/builder.py`（`approval` 节点 + `interrupt()`）、`state.py`（`pending_approval`）、checkpointer（暂停态持久,本就支持）、control-plane run API（`GET` 含 pending_approval + `POST .../resume` 端点）、`PolicySpec`（门控声明）、`tools/approval.py`（`ask_for_approval` builtin + middleware）、approval-timeout job（24h 扫描 auto-reject）。
 
-> **对标**：hermes 中断 + 审批门、deer-flow `ask_clarification`。helix 直接用 LangGraph `interrupt` —— 与现有 checkpointer 暂停 / 恢复机制天然契合。
+> **对标**：hermes 中断 + 审批门、deer-flow `ask_clarification`。helix 直接用 LangGraph `interrupt` —— 与现有 checkpointer 暂停 / 恢复机制天然契合。helix 比 deer-flow 多：声明式门控（平台强制不可绕过）+ typed `ApprovalDecision` 3 态 + 24h 超时 + audit trail。
+
+### 14.5 agent 主动请求路径（M0 — deer-flow 启发，用户 2026-05-22 复审拉进）
+
+声明式门控（§ 14.2 路径 1）是平台强制规则 —— "敏感工具必须人审批"。但 agent 跑到运行期才知道的不确定决策点（"我不确定用方案 A 还是 B"、"我打算清空这个目录，确认吗"）也需要主动开口。新增 `ask_for_approval` builtin 工具：
+
+```
+ask_for_approval(reason_kind: str, action_summary: str, proposed_args: dict) -> str
+```
+
+- 工具调用被 middleware 拦截 → 构造 `ApprovalRequest`（`reason_kind` 取 agent 传入值，`node="ask_for_approval"`）→ `interrupt()` → run 暂停。
+- resume `decision="approve"` → 工具返回 `"approved"` 字符串作 `ToolMessage` 注入 message history，LLM 看到批准继续。
+- resume `decision="reject"` → 工具返回 `"rejected: <reason>"`，LLM 看到拒绝换策略（**不终止 run** —— 与声明式门控的 reject 不同：门控 reject 是平台否决整个 run；agent 主动请求的 reject 只是这一次询问被否，agent 继续）。
+- resume `decision="modify"` → `modified_args` 作 `ToolMessage` 内容回给 LLM。
+- 与声明式门控**共享同一套** `interrupt`/`resume`/`AgentState.pending_approval`/audit 机制 —— 唯一区别是 reject 语义（见上）。
+
+### 14.6 审批原因分类 reason_kind（M0 — deer-flow 启发）
+
+`ApprovalReasonKind` 枚举（见 § 14.3）借鉴 deer-flow `ask_clarification` 的 5 种类型。声明式门控触发的 `ApprovalRequest` 固定 `reason_kind="policy_gate"`；agent 主动请求的取 agent 传入值。用途：Admin UI（H.3）按类型过滤 / 排序；audit 分析"哪类审批最频繁"。
+
+### 14.7 超时 fallback（M0 — Mini-ADR J-24）
+
+- `ApprovalRequest.timeout_at = requested_at + policies.approval_timeout_s`（默认 24h，manifest 可配）。
+- 新后台 job（扩 `retention-cleanup-job` 或新建 `approval-timeout-job`）周期扫描 `timeout_at < now()` 的 pending run → 自动 `decision="reject"` reason=`"timeout"` → run 转 `failed` + audit `APPROVAL_DECIDED`。
+- 取舍：(c) 红线 —— 无超时 = 无限期 pending run 永占 checkpointer 槽 = 资源泄漏（Mini-ADR J-24）。
+
+### 14.8 Audit Trail（M0 — Mini-ADR J-24）
+
+新增 `AuditAction` 两态：
+
+| Action | 触发 | 关键字段 |
+|--------|-----|---------|
+| `APPROVAL_REQUESTED` | approval 节点 / `ask_for_approval` 触发 interrupt | tenant_id / run_id / node / reason_kind / action_summary |
+| `APPROVAL_DECIDED` | resume endpoint / 超时 job | tenant_id / run_id / decision / decided_by / modified_args 摘要 / reason（timeout 时） |
+
+`resource_type` Literal 加 `"approval"`。
+
+### 14.9 不做项（M0 边界）
+
+- ❌ **多审批人 / 升级链**（任一审批 / 全部审批 / 升级 manager）→ M1 配 H.3 高级 UI
+- ❌ **成本阈值自动审批**（"超 X token 必审批"）→ M1 与 J.12 一起
+- ❌ **异步通知**（Slack / 邮件 / webhook）→ M1 与 Stream A 渠道
+- ❌ **审批 SLA 监控指标** → M1+
+- ❌ **Admin UI 审批面板代码** → H.3 stream（J.8 仅交 API + audit，UI 接入由 H.3 做）
 
 ---
 
@@ -1387,8 +1457,8 @@ capabilities:
 
 完整 M1+ J.7b backlog（agent 进化 / code 字段 / lazy loading / LLM moderation / public 内置库 / supporting files / per-thread 启停 / UI 元数据 + per-thread/A/B/canary 推 M2+）见 ITERATION-PLAN § M1-K Agent skill 进化。详细 § 15 已按本次修订重写。
 
-**J-24｜J.8 审批超时 fallback + audit trail + Admin UI 审批面板接入（M0 必含）**
-背景：J-15 原文写 "M0 不做超时 / 异步通知" —— 按 [[no-design-choice-disguise]] 不允许把"无超时 run 永远占 checkpointer 槽"包装成设计选择。决策：(1) M0 审批必含**默认 24h 超时 fallback**（manifest 可配，超时自动 reject + audit）；(2) 审批 trail 进 `audit_log` schema：审批人 / 时间 / 决策 / 修改入参；(3) Admin UI H.3 必含审批面板接入。取舍：(c) 红线 —— 无超时 = 资源泄漏 + 用户感知"agent 卡死"；无 audit trail = 不可追溯；无 UI = 审批门只能 API 操作。
+**J-24｜J.8 审批超时 fallback + audit trail + Admin UI 审批面板接入 + agent 主动请求路径（M0 必含）**
+背景：J-15 原文写 "M0 不做超时 / 异步通知" —— 按 [[no-design-choice-disguise]] 不允许把"无超时 run 永远占 checkpointer 槽"包装成设计选择。决策：(1) M0 审批必含**默认 24h 超时 fallback**（manifest 可配 `policies.approval_timeout_s`，超时自动 reject + audit）；(2) 审批 trail 进 `audit_log` schema：审批人 / 时间 / 决策 / 修改入参（新 `APPROVAL_REQUESTED` / `APPROVAL_DECIDED` action）；(3) Admin UI H.3 必含审批面板接入（J.8 仅交 API + audit，UI 代码由 H.3 stream 做）；(4) **2026-05-22 helix-vs-deer-flow 对比新加**：agent 主动请求路径 —— 新 `ask_for_approval` builtin 工具让 agent 在运行期不确定决策点主动请求人确认（与声明式 `PolicySpec.approval_required_tools` 门控并存；共享同一套 interrupt/resume；唯一区别是 reject 语义 —— 门控 reject 否决整个 run，agent 主动请求 reject 仅否这次询问 agent 继续）；(5) `ApprovalRequest.reason_kind` 枚举（borrow deer-flow 5 类型：policy_gate / missing_info / ambiguous_requirement / approach_choice / risk_confirmation）—— Admin UI 按类型过滤 + audit 分析。取舍：(c) 红线 —— 无超时 = 资源泄漏 + 用户感知"agent 卡死"；无 audit trail = 不可追溯；无 UI = 审批门只能 API 操作；agent 主动请求是 deer-flow 真优能力（agent 自主性），按 [[complete-not-minimal]] 拉进 M0。
 
 **J-25｜J.9 artifact lifecycle + quota + audit + MIME/XSS；病毒扫描 (a) 推 M2**
 背景：J-11 原文只覆盖版本化 + RLS + supervisor 读取，lifecycle / quota / 病毒扫描 / audit / download MIME 五个维度未列。决策：(1) M0 加 artifact 保留期（manifest 可配 / 默认 90 天）+ DELETE / PATCH / versions API + 卷满 / 用户超 quota 时的清理策略；(2) 下载频次 + 体积配额接入 Stream C.5 `QuotaService`；(3) **Audit trail 三态**（`ARTIFACT_SAVE` / `ARTIFACT_DELETE` / `ARTIFACT_UPDATE`）；(4) **2026-05-21 helix-vs-deer-flow 对比新加**：Download endpoint MIME-aware Content-Type + XSS 防护（HTML / SVG / 主动内容强制 `Content-Disposition: attachment`；白名单驱动 MIME 推断；`X-Content-Type-Options: nosniff`）—— 当前 `octet-stream` 一刀切是 (c) 红线设计纪律缺口，按 [memory:complete-not-minimal] 必加；(5) 病毒扫描显式 **(a) 推 M2**（M0 用户 = 同公司风险低，但**必须显式决策**，不留空）。取舍：(c) 红线 —— 无 lifecycle 卷会爆；无 quota 单个用户能拖垮平台；无 audit J.14 cross-tenant 测试无锚点；无 XSS 防护 HTML artifact 是 stored XSS 通道。
