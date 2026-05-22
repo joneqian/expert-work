@@ -248,9 +248,7 @@ async def test_candidate_get_by_trajectory_key() -> None:
 async def test_candidate_list_for_review_filters() -> None:
     store = InMemoryCurationCandidateStore()
     tenant = uuid4()
-    await store.upsert(
-        _candidate(tenant_id=tenant, agent_name="reporter", signal="failed_outcome")
-    )
+    await store.upsert(_candidate(tenant_id=tenant, agent_name="reporter", signal="failed_outcome"))
     await store.upsert(
         _candidate(
             tenant_id=tenant,

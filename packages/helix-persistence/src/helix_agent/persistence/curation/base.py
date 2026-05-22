@@ -43,9 +43,7 @@ class EvalDatasetStore(abc.ABC):
         """Return the case row, or ``None`` when unknown / cross-tenant."""
 
     @abc.abstractmethod
-    async def list_by_agent(
-        self, *, tenant_id: UUID, agent_name: str
-    ) -> list[EvalDatasetRecord]:
+    async def list_by_agent(self, *, tenant_id: UUID, agent_name: str) -> list[EvalDatasetRecord]:
         """Return every curated case for ``agent_name`` — backs the export CLI."""
 
     @abc.abstractmethod
@@ -79,9 +77,7 @@ class CurationCandidateStore(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def get(
-        self, *, candidate_id: UUID, tenant_id: UUID
-    ) -> CurationCandidateRecord | None:
+    async def get(self, *, candidate_id: UUID, tenant_id: UUID) -> CurationCandidateRecord | None:
         """Return the candidate row, or ``None`` when unknown / cross-tenant."""
 
     @abc.abstractmethod

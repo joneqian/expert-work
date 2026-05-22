@@ -32,9 +32,7 @@ class InMemoryEvalDatasetStore(EvalDatasetStore):
             return None
         return row
 
-    async def list_by_agent(
-        self, *, tenant_id: UUID, agent_name: str
-    ) -> list[EvalDatasetRecord]:
+    async def list_by_agent(self, *, tenant_id: UUID, agent_name: str) -> list[EvalDatasetRecord]:
         rows = [
             r
             for r in self._rows.values()
@@ -82,9 +80,7 @@ class InMemoryCurationCandidateStore(CurationCandidateStore):
         self._rows[record.id] = record
         return True
 
-    async def get(
-        self, *, candidate_id: UUID, tenant_id: UUID
-    ) -> CurationCandidateRecord | None:
+    async def get(self, *, candidate_id: UUID, tenant_id: UUID) -> CurationCandidateRecord | None:
         row = self._rows.get(candidate_id)
         if row is None or row.tenant_id != tenant_id:
             return None

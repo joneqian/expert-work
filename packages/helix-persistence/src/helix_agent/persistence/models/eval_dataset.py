@@ -94,9 +94,7 @@ class CurationCandidateRow(Base):
             f"feedback_rating IN {_RATING_VALUES}", name="curation_candidate_rating_valid"
         ),
         CheckConstraint(f"status IN {_STATUS_VALUES}", name="curation_candidate_status_valid"),
-        UniqueConstraint(
-            "tenant_id", "trajectory_key", name="curation_candidate_trajectory_uniq"
-        ),
+        UniqueConstraint("tenant_id", "trajectory_key", name="curation_candidate_trajectory_uniq"),
         Index("ix_curation_candidate_tenant_id", "tenant_id"),
         Index("ix_curation_candidate_agent", "tenant_id", "agent_name"),
         Index(

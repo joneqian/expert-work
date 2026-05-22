@@ -78,9 +78,7 @@ class SqlEvalDatasetStore(EvalDatasetStore):
             ).scalar_one_or_none()
         return _row_to_dto(row) if row is not None else None
 
-    async def list_by_agent(
-        self, *, tenant_id: UUID, agent_name: str
-    ) -> list[EvalDatasetRecord]:
+    async def list_by_agent(self, *, tenant_id: UUID, agent_name: str) -> list[EvalDatasetRecord]:
         async with self._sf() as session:
             rows = (
                 (
@@ -206,9 +204,7 @@ class SqlCurationCandidateStore(CurationCandidateStore):
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
 
-    async def get(
-        self, *, candidate_id: UUID, tenant_id: UUID
-    ) -> CurationCandidateRecord | None:
+    async def get(self, *, candidate_id: UUID, tenant_id: UUID) -> CurationCandidateRecord | None:
         async with self._sf() as session:
             row = (
                 await session.execute(
