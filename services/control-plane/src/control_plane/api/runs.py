@@ -45,10 +45,11 @@ from control_plane.quota.base import QuotaService
 from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
 from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.persistence import ApprovalStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import AuditAction, ThreadStatus
+from helix_agent.protocol import ApprovalStatus, AuditAction, ThreadStatus
 from helix_agent.protocol.multimodal import parse_image_ref
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator import AgentFactoryError, run_agent, sse_consumer
@@ -169,6 +170,10 @@ def _get_agent_runtime(request: Request) -> AgentRuntime:
     return request.app.state.agent_runtime  # type: ignore[no-any-return]
 
 
+def _get_approval_store(request: Request) -> ApprovalStore:
+    return request.app.state.approval_store  # type: ignore[no-any-return]
+
+
 def build_runs_router() -> APIRouter:
     router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -184,6 +189,7 @@ def build_runs_router() -> APIRouter:
         agent_repo: Annotated[AgentSpecStore, Depends(_get_agent_repo)],
         runtime: Annotated[AgentRuntime, Depends(_get_agent_runtime)],
         settings: Annotated[Settings, Depends(_get_settings)],
+        approvals: Annotated[ApprovalStore, Depends(_get_approval_store)],
     ) -> StreamingResponse | JSONResponse:
         tenant_id: UUID = request.state.tenant_id
         actor_id: str = request.state.actor_id
@@ -332,6 +338,7 @@ def build_runs_router() -> APIRouter:
                 graph_input=graph_input,
                 config=config,
                 audit_logger=audit,
+                approval_store=approvals,
             )
         )
         await runtime.run_manager.attach_task(run_id, worker)
@@ -358,4 +365,69 @@ def build_runs_router() -> APIRouter:
             },
         )
 
+    @router.get("/{thread_id}/runs/{run_id}", response_model=None)
+    async def get_run(
+        thread_id: UUID,
+        run_id: UUID,
+        request: Request,
+        threads: Annotated[object, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        approvals: Annotated[ApprovalStore, Depends(_get_approval_store)],
+    ) -> JSONResponse:
+        """Stream J.8 — a run's status + any pending approval.
+
+        Reads the durable ``agent_approval`` row so a paused run is
+        visible even after a control-plane restart (the in-memory
+        RunManager would have lost it). 404 hides cross-tenant /
+        cross-user existence, identical to ``trigger_run``.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        approval = await approvals.get_by_run(run_id=run_id, tenant_id=tenant_id)
+        pending: dict[str, Any] | None = None
+        if approval is not None and approval.status is ApprovalStatus.PENDING:
+            pending = {
+                "request_id": approval.request_id,
+                "node": approval.node,
+                "reason_kind": approval.reason_kind,
+                "action_summary": approval.action_summary,
+                "proposed_args": approval.proposed_args,
+                "requested_at": approval.requested_at.isoformat(),
+                "timeout_at": approval.timeout_at.isoformat(),
+            }
+        # Status: the in-memory RunManager is authoritative while the run
+        # is live; after a restart the agent_approval row carries it.
+        run_record = runtime_run_status(request, run_id)
+        if run_record is None and approval is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        status = run_record or (approval.status.value if approval is not None else "unknown")
+        return JSONResponse(
+            content={
+                "run_id": str(run_id),
+                "thread_id": str(thread_id),
+                "status": status,
+                "pending_approval": pending,
+            }
+        )
+
     return router
+
+
+def runtime_run_status(request: Request, run_id: UUID) -> str | None:
+    """Return the in-memory RunManager's status string for ``run_id``.
+
+    ``None`` when the run is unknown to this process — either it never
+    ran here or the control-plane restarted (RunManager is in-memory;
+    Mini-ADR J-24 — the ``agent_approval`` row is the durable fallback).
+    """
+    runtime: AgentRuntime = request.app.state.agent_runtime
+    record = runtime.run_manager.get(run_id)
+    return record.status.value if record is not None else None

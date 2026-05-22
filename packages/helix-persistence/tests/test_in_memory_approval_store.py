@@ -1,0 +1,161 @@
+"""Unit tests for InMemoryApprovalStore — Stream J.8 (Mini-ADR J-24)."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+
+from helix_agent.persistence import InMemoryApprovalStore
+from helix_agent.protocol import ApprovalRecord, ApprovalStatus
+
+
+def _record(
+    *,
+    tenant_id: object = None,
+    run_id: object = None,
+    timeout_at: datetime | None = None,
+) -> ApprovalRecord:
+    now = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
+    return ApprovalRecord(
+        id=uuid4(),
+        tenant_id=tenant_id or uuid4(),  # type: ignore[arg-type]
+        run_id=run_id or uuid4(),  # type: ignore[arg-type]
+        thread_id=uuid4(),
+        request_id="approval:abc",
+        node="tools",
+        reason_kind="policy_gate",
+        action_summary="approval-gated tool 'send_email'",
+        proposed_args={"to": "x@example.com"},
+        requested_at=now,
+        timeout_at=timeout_at or (now + timedelta(hours=24)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_and_get_by_run() -> None:
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    rec = _record(tenant_id=tenant_id, run_id=run_id)
+    await store.create(rec)
+    fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.run_id == run_id
+    assert fetched.status is ApprovalStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_get_by_run_cross_tenant_returns_none() -> None:
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(_record(tenant_id=tenant_id, run_id=run_id))
+    # A different tenant probing the same run id sees nothing.
+    assert await store.get_by_run(run_id=run_id, tenant_id=uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_get_by_run_unknown_returns_none() -> None:
+    store = InMemoryApprovalStore()
+    assert await store.get_by_run(run_id=uuid4(), tenant_id=uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_create_duplicate_run_raises() -> None:
+    """A run pauses at most once at a time — a second create is a bug."""
+    store = InMemoryApprovalStore()
+    run_id = uuid4()
+    await store.create(_record(run_id=run_id))
+    with pytest.raises(ValueError, match="already exists"):
+        await store.create(_record(run_id=run_id))
+
+
+@pytest.mark.asyncio
+async def test_list_expired_returns_pending_past_horizon() -> None:
+    store = InMemoryApprovalStore()
+    now = datetime.now(UTC)
+    await store.create(_record(timeout_at=now - timedelta(hours=2)))  # expired
+    await store.create(_record(timeout_at=now + timedelta(hours=2)))  # fresh
+    expired = await store.list_expired(before=now)
+    assert len(expired) == 1
+    assert expired[0].timeout_at < now
+
+
+@pytest.mark.asyncio
+async def test_list_expired_excludes_decided_rows() -> None:
+    """Only pending rows count — a decided row past timeout is not re-swept."""
+    store = InMemoryApprovalStore()
+    now = datetime.now(UTC)
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(
+        _record(tenant_id=tenant_id, run_id=run_id, timeout_at=now - timedelta(hours=2))
+    )
+    await store.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=ApprovalStatus.APPROVED,
+        decided_by="user-a",
+        decided_at=now,
+    )
+    assert await store.list_expired(before=now) == []
+
+
+@pytest.mark.asyncio
+async def test_mark_decided_flips_status_once() -> None:
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(_record(tenant_id=tenant_id, run_id=run_id))
+    now = datetime.now(UTC)
+    hit = await store.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=ApprovalStatus.REJECTED,
+        decided_by="user-a",
+        decided_at=now,
+    )
+    assert hit is True
+    fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.status is ApprovalStatus.REJECTED
+    assert fetched.decided_by == "user-a"
+    # A second decide is a no-op miss (idempotent-once).
+    assert not await store.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=ApprovalStatus.APPROVED,
+        decided_by="user-b",
+        decided_at=now,
+    )
+
+
+@pytest.mark.asyncio
+async def test_mark_decided_cross_tenant_misses() -> None:
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(_record(tenant_id=tenant_id, run_id=run_id))
+    miss = await store.mark_decided(
+        run_id=run_id,
+        tenant_id=uuid4(),
+        status=ApprovalStatus.APPROVED,
+        decided_by="attacker",
+        decided_at=datetime.now(UTC),
+    )
+    assert miss is False
+
+
+@pytest.mark.asyncio
+async def test_mark_decided_modified_carries_args() -> None:
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(_record(tenant_id=tenant_id, run_id=run_id))
+    await store.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=ApprovalStatus.MODIFIED,
+        decided_by="user-a",
+        decided_at=datetime.now(UTC),
+        modified_args={"to": "safe@example.com"},
+    )
+    fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.modified_args == {"to": "safe@example.com"}

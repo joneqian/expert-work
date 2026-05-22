@@ -38,12 +38,15 @@ class _ScriptedGraph:
 
     ``chunk_delay_s`` spaces the chunks out so a test can interleave a
     cancel / disconnect mid-stream. ``started`` flips on first chunk so
-    a test can await the run actually beginning.
+    a test can await the run actually beginning. ``final_state`` is what
+    ``aget_state`` returns — a J.8 pause test sets ``pending_approval``
+    in it.
     """
 
     chunks: list[Any]
     chunk_delay_s: float = 0.0
     started: asyncio.Event = field(default_factory=asyncio.Event)
+    final_state: dict[str, Any] = field(default_factory=dict)
 
     async def astream(
         self,
@@ -61,9 +64,9 @@ class _ScriptedGraph:
 
     async def aget_state(self, config: Any) -> Any:
         """Stub final-state read — J.8 pause-check + L.L7 trajectory both
-        consult it. No ``pending_approval`` → the run finalises normally."""
+        consult it. Empty ``final_state`` → the run finalises normally."""
         del config
-        return SimpleNamespace(values={})
+        return SimpleNamespace(values=dict(self.final_state))
 
 
 async def _new_record(
@@ -203,6 +206,57 @@ async def test_run_agent_publishes_error_on_graph_exception() -> None:
     assert error_events[0].data["name"] == "RuntimeError"
     assert "graph exploded" in error_events[0].data["message"]
     assert rm.get(record.run_id).status is RunStatus.ERROR
+
+
+@pytest.mark.asyncio
+async def test_paused_run_registers_approval_row_and_audits() -> None:
+    """Stream J.8 — a run ending with ``pending_approval`` set finalises
+    PAUSED, writes an ``agent_approval`` row, and emits APPROVAL_REQUESTED."""
+    from datetime import UTC, datetime, timedelta
+
+    from helix_agent.persistence import InMemoryApprovalStore
+    from helix_agent.protocol import ApprovalRequest
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    now = datetime.now(UTC)
+    request = ApprovalRequest(
+        request_id="approval:deadbeef",
+        node="tools",
+        reason_kind="policy_gate",
+        action_summary="approval-gated tool 'send_email'",
+        proposed_args={"to": "ops@example.com"},
+        requested_at=now,
+        timeout_at=now + timedelta(hours=24),
+    )
+    graph = _ScriptedGraph(
+        chunks=[{"tools": {"step_count": 1}}],
+        final_state={"pending_approval": request.model_dump(mode="json")},
+    )
+    approvals = InMemoryApprovalStore()
+    audit = _RecordingAuditLogger()
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={"messages": []},
+        config={},
+        audit_logger=audit,
+        approval_store=approvals,
+    )
+
+    assert rm.get(record.run_id).status is RunStatus.PAUSED
+    row = await approvals.get_by_run(run_id=record.run_id, tenant_id=record.tenant_id)
+    assert row is not None
+    assert row.reason_kind == "policy_gate"
+    assert row.action_summary == "approval-gated tool 'send_email'"
+    actions = [e.action for e in audit.entries]
+    assert AuditAction.APPROVAL_REQUESTED in actions
+    # A paused run does NOT emit RUN_COMPLETED.
+    assert AuditAction.RUN_COMPLETED not in actions
 
 
 @pytest.mark.asyncio

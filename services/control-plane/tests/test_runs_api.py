@@ -348,3 +348,71 @@ async def test_runs_cross_tenant_sse_rejected(runs_client: AsyncClient) -> None:
     # Regression where the stream opens before tenant check would flip
     # this assertion.
     assert "text/event-stream" not in response.headers.get("content-type", "")
+
+
+# ---------------------------------------------------------------------------
+# GET run — Stream J.8 (Mini-ADR J-24)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_run_surfaces_pending_approval(runs_client: AsyncClient) -> None:
+    """A run with an ``agent_approval`` row reports its pending approval."""
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from helix_agent.protocol import ApprovalRecord
+
+    thread_id = await _create_session(runs_client)
+    run_id = uuid4()
+    # Seed a pending approval row directly into the in-memory store.
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+    now = datetime.now(UTC)
+    await app.state.approval_store.create(
+        ApprovalRecord(
+            id=uuid4(),
+            tenant_id=DEFAULT_DEV_TENANT_ID,
+            run_id=run_id,
+            thread_id=thread_id,  # type: ignore[arg-type]
+            request_id="approval:seed",
+            node="tools",
+            reason_kind="policy_gate",
+            action_summary="approval-gated tool 'send_email'",
+            proposed_args={"to": "ops@example.com"},
+            requested_at=now,
+            timeout_at=now + timedelta(hours=24),
+        )
+    )
+
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "pending"
+    pending = body["pending_approval"]
+    assert pending is not None
+    assert pending["reason_kind"] == "policy_gate"
+    assert pending["action_summary"] == "approval-gated tool 'send_email'"
+    assert pending["proposed_args"] == {"to": "ops@example.com"}
+
+
+@pytest.mark.asyncio
+async def test_get_run_unknown_returns_404(runs_client: AsyncClient) -> None:
+    """An unknown run id on a known thread — no approval, not in RunManager."""
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs/{uuid4()}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_run_cross_tenant_returns_404(runs_client: AsyncClient) -> None:
+    """A tenant B caller cannot read a tenant A thread's run."""
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    tenant_b_headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=uuid4())}"}
+    resp = await runs_client.get(
+        f"/v1/sessions/{thread_id}/runs/{uuid4()}", headers=tenant_b_headers
+    )
+    assert resp.status_code == 404

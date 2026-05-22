@@ -39,13 +39,20 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
 from helix_agent.common.observability import helix_histogram
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
+from helix_agent.persistence import ApprovalStore
+from helix_agent.protocol import (
+    ApprovalRecord,
+    ApprovalRequest,
+    AuditAction,
+    AuditEntry,
+    AuditResult,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.cancellation import (
     CANCELLATION_TOKEN_KEY,
@@ -160,6 +167,7 @@ async def run_agent(
     audit_logger: AuditLogger | None = None,
     stream_mode: str = DEFAULT_STREAM_MODE,
     trajectory_recorder: TrajectoryRecorder | None = None,
+    approval_store: ApprovalStore | None = None,
 ) -> None:
     """Drive ``graph`` to completion, publishing events to ``bridge``.
 
@@ -231,22 +239,28 @@ async def run_agent(
         # Stream J.8 (Mini-ADR J-24) — a run that streamed to its natural
         # end with ``pending_approval`` set did not finish: it paused at
         # an approval gate (RunStatus.PAUSED). The checkpoint persists so
-        # ``POST /v1/runs/{id}/resume`` can re-invoke. A paused run emits
-        # no RUN_COMPLETED audit + no trajectory — both belong to the
-        # *true* run end after a resume. A failing ``aget_state`` degrades
-        # to "not paused" (same graceful-degradation contract as the
+        # ``POST .../resume`` can re-invoke. A paused run emits no
+        # RUN_COMPLETED audit + no trajectory — both belong to the *true*
+        # run end after a resume. A failing ``aget_state`` degrades to
+        # "not paused" (same graceful-degradation contract as the
         # trajectory recorder) rather than failing the run.
-        paused = False
+        pending_request: ApprovalRequest | None = None
         if not record.abort_event.is_set():
             try:
                 snapshot = await graph.aget_state(effective_config)
-                paused = bool(snapshot.values.get("pending_approval"))
+                raw_pending = snapshot.values.get("pending_approval")
+                if raw_pending is not None:
+                    pending_request = (
+                        raw_pending
+                        if isinstance(raw_pending, ApprovalRequest)
+                        else ApprovalRequest.model_validate(raw_pending)
+                    )
             except Exception:
                 logger.warning("run_agent.pause_check_failed run_id=%s", run_id, exc_info=True)
 
         if record.abort_event.is_set():
             final = RunStatus.INTERRUPTED
-        elif paused:
+        elif pending_request is not None:
             final = RunStatus.PAUSED
         else:
             final = RunStatus.SUCCESS
@@ -256,6 +270,17 @@ async def run_agent(
             RunStatus.SUCCESS: "success",
         }[final]
         await run_manager.set_status(run_id, final)
+        if final is RunStatus.PAUSED and pending_request is not None:
+            # Register the paused run in the durable ``agent_approval``
+            # table + emit APPROVAL_REQUESTED. The table — not the
+            # in-memory RunManager — is what the resume endpoint, the
+            # GET surface, and the 24h timeout job all consult.
+            await _register_pending_approval(
+                approval_store=approval_store,
+                audit_logger=audit_logger,
+                record=record,
+                request=pending_request,
+            )
         if final is not RunStatus.PAUSED:
             await _emit_run_end_audit(
                 audit_logger,
@@ -531,6 +556,68 @@ async def _emit_run_end_audit(
         )
     except Exception:
         logger.exception("run_agent.audit_failed run_id=%s", record.run_id)
+
+
+async def _register_pending_approval(
+    *,
+    approval_store: ApprovalStore | None,
+    audit_logger: AuditLogger | None,
+    record: RunRecord,
+    request: ApprovalRequest,
+) -> None:
+    """Persist a paused run's ``agent_approval`` row + emit APPROVAL_REQUESTED.
+
+    Stream J.8 (Mini-ADR J-24). The durable row — not the in-memory
+    RunManager — is what survives a control-plane restart so the resume
+    endpoint / GET surface / 24h timeout job can all find the paused
+    run. A store / audit failure is logged and swallowed: the run
+    already paused cleanly with its checkpoint intact; a missing
+    registry row degrades to "resume-by-checkpoint only", never a
+    crash.
+    """
+    if approval_store is not None:
+        try:
+            await approval_store.create(
+                ApprovalRecord(
+                    id=uuid4(),
+                    tenant_id=record.tenant_id,
+                    user_id=None,
+                    run_id=record.run_id,
+                    thread_id=record.thread_id,
+                    request_id=request.request_id,
+                    node=request.node,
+                    reason_kind=request.reason_kind,
+                    action_summary=request.action_summary,
+                    proposed_args=request.proposed_args,
+                    requested_at=request.requested_at,
+                    timeout_at=request.timeout_at,
+                )
+            )
+        except Exception:
+            logger.exception("run_agent.approval_register_failed run_id=%s", record.run_id)
+    if audit_logger is not None:
+        try:
+            await audit_logger.write(
+                AuditEntry(
+                    tenant_id=record.tenant_id,
+                    actor_type="system",
+                    actor_id="orchestrator",
+                    action=AuditAction.APPROVAL_REQUESTED,
+                    resource_type="approval",
+                    resource_id=str(record.run_id),
+                    result=AuditResult.SUCCESS,
+                    reason=None,
+                    details={
+                        "run_id": str(record.run_id),
+                        "thread_id": str(record.thread_id),
+                        "node": request.node,
+                        "reason_kind": request.reason_kind,
+                        "action_summary": request.action_summary,
+                    },
+                )
+            )
+        except Exception:
+            logger.exception("run_agent.approval_audit_failed run_id=%s", record.run_id)
 
 
 # ---------------------------------------------------------------------------

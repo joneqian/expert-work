@@ -36,7 +36,9 @@ from helix_agent.protocol.agent_spec import (
 from helix_agent.protocol.approval import (
     ApprovalDecision,
     ApprovalReasonKind,
+    ApprovalRecord,
     ApprovalRequest,
+    ApprovalStatus,
 )
 from helix_agent.protocol.artifact import Artifact, ArtifactKind, ArtifactVersion
 from helix_agent.protocol.audit import (
@@ -136,7 +138,9 @@ __all__ = [
     "ApiKeyScope",
     "ApprovalDecision",
     "ApprovalReasonKind",
+    "ApprovalRecord",
     "ApprovalRequest",
+    "ApprovalStatus",
     "Artifact",
     "ArtifactKind",
     "ArtifactVersion",

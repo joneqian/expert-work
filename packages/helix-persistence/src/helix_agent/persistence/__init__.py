@@ -2,6 +2,11 @@
 
 # Explicit `as` re-exports signal intentional public API to static analyzers
 # (mypy --strict, CodeQL py/unused-import).
+from helix_agent.persistence.approval import ApprovalStore as ApprovalStore
+from helix_agent.persistence.approval import (
+    InMemoryApprovalStore as InMemoryApprovalStore,
+)
+from helix_agent.persistence.approval import SqlApprovalStore as SqlApprovalStore
 from helix_agent.persistence.artifact import ArtifactStore as ArtifactStore
 from helix_agent.persistence.artifact import (
     InMemoryArtifactStore as InMemoryArtifactStore,
@@ -146,6 +151,7 @@ from helix_agent.persistence.workspace import (
 __all__ = [
     "RLS_GUC_NAME",
     "RLS_USER_GUC_NAME",
+    "ApprovalStore",
     "ArtifactRow",
     "ArtifactStore",
     "ArtifactVersionRow",
@@ -158,6 +164,7 @@ __all__ = [
     "DrDrillRow",
     "DuplicateKnowledgeBaseError",
     "EventLogRow",
+    "InMemoryApprovalStore",
     "InMemoryArtifactStore",
     "InMemoryAuditLogStore",
     "InMemoryBackupRecordStore",
@@ -176,6 +183,7 @@ __all__ = [
     "KnowledgeStore",
     "MemoryItemRow",
     "MemoryStore",
+    "SqlApprovalStore",
     "SqlArtifactStore",
     "SqlAuditLogStore",
     "SqlBackupRecordStore",

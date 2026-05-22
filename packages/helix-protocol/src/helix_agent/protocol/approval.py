@@ -12,14 +12,18 @@ control-plane (the resume endpoint takes :class:`ApprovalDecision`).
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "ApprovalDecision",
     "ApprovalReasonKind",
+    "ApprovalRecord",
     "ApprovalRequest",
+    "ApprovalStatus",
 ]
 
 #: Why a run is paused for approval — borrowed from deer-flow's
@@ -114,3 +118,50 @@ class ApprovalDecision(BaseModel):
             msg = f"modified_args is only valid with decision='modify', not {self.decision!r}"
             raise ValueError(msg)
         return self
+
+
+class ApprovalStatus(StrEnum):
+    """Lifecycle status of an :class:`ApprovalRecord` row.
+
+    ``PENDING`` is the only non-terminal state — the run is paused
+    waiting on a human. The four terminal states correspond to the
+    resume endpoint's verdict (``APPROVED`` / ``REJECTED`` /
+    ``MODIFIED``) or the timeout job's auto-reject (``TIMEOUT``).
+    """
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    MODIFIED = "modified"
+    TIMEOUT = "timeout"
+
+
+class ApprovalRecord(BaseModel):
+    """One row of ``agent_approval`` — a paused run's persistent registry entry.
+
+    helix's ``RunManager`` is in-memory only, so this table is the
+    durable home of a paused run (Mini-ADR J-24). It is what the 24h
+    timeout job scans, what ``GET`` reads to surface ``pending_approval``
+    across a control-plane restart, and what ``POST .../resume`` looks
+    up. Carries the :class:`ApprovalRequest` fields plus the run /
+    tenant binding and the eventual verdict.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID
+    user_id: UUID | None = None
+    run_id: UUID
+    thread_id: UUID
+    request_id: str = Field(min_length=1)
+    node: str = Field(min_length=1)
+    reason_kind: ApprovalReasonKind
+    action_summary: str = Field(min_length=1)
+    proposed_args: dict[str, object] = Field(default_factory=dict)
+    requested_at: datetime
+    timeout_at: datetime
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    decided_by: str | None = None
+    decided_at: datetime | None = None
+    modified_args: dict[str, object] | None = None
