@@ -297,6 +297,8 @@ class TriggerScheduler:
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval_s)
             except TimeoutError:
+                # Normal periodic wake-up — the interval elapsed with no stop
+                # signal, so loop round for the next sweep.
                 pass
 
 
