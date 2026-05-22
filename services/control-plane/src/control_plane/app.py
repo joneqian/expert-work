@@ -58,6 +58,7 @@ from control_plane.auth import (
     MTLSVerifier,
     build_mtls_verifier,
 )
+from control_plane.curation_worker import CurationWorker
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
 from control_plane.manifest import ManifestLoader
 from control_plane.memory import MemoryDLQWorker
@@ -132,6 +133,11 @@ from helix_agent.persistence.auth import (
     SqlRoleBindingStore,
     SqlServiceAccountStore,
 )
+from helix_agent.persistence.curation import (
+    CurationCandidateStore,
+    InMemoryCurationCandidateStore,
+    SqlCurationCandidateStore,
+)
 from helix_agent.persistence.database import (
     DatabaseConfig,
     create_async_engine_from_config,
@@ -203,6 +209,7 @@ from helix_agent.runtime.runs import InMemoryRunStore, RunStore, SqlRunStore
 from helix_agent.runtime.secret_store import make_secret_store
 from helix_agent.runtime.storage import make_object_store
 from orchestrator import MemoryEnv
+from orchestrator.trajectory import TrajectoryReader
 
 __all__ = ["create_app"]
 
@@ -220,6 +227,7 @@ def create_app(
     thread_meta_repo: ThreadMetaStore | None = None,
     tenant_user_repo: TenantUserStore | None = None,
     feedback_repo: FeedbackStore | None = None,
+    curation_candidate_repo: CurationCandidateStore | None = None,
     artifact_repo: ArtifactStore | None = None,
     knowledge_repo: KnowledgeStore | None = None,
     image_upload_repo: ImageUploadStore | None = None,
@@ -242,6 +250,7 @@ def create_app(
     quota_service: QuotaService | None = None,
     enable_reaper: bool = True,
     enable_scheduler: bool = True,
+    enable_curation_worker: bool = True,
     tenant_rate_limiter: RateLimiter | None = None,
     tenant_config_repo: TenantConfigStore | None = None,
     tenant_config_service: TenantConfigService | None = None,
@@ -324,6 +333,10 @@ def create_app(
     )
     resolved_trigger_run_store: TriggerRunStore = trigger_run_repo or (
         sql_stores.trigger_run if sql_stores else InMemoryTriggerRunStore()
+    )
+    # Stream J.12 (Mini-ADR J-43) — curation candidate registry.
+    resolved_curation_candidate_store: CurationCandidateStore = curation_candidate_repo or (
+        sql_stores.curation_candidate if sql_stores else InMemoryCurationCandidateStore()
     )
     # Stream J.7a (Mini-ADR J-23) — skill registry.
     resolved_skill_store: SkillStore = skill_repo or (
@@ -436,6 +449,7 @@ def create_app(
             # (PR1.5). No run starts before lifespan completes, so the
             # agent cache is still empty — swapping the builder is
             # race-free. An injected runtime (tests) is left untouched.
+            curation_worker: CurationWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
                     if not resolved_settings.checkpointer_dsn:
@@ -472,6 +486,18 @@ def create_app(
                     )
                 )
                 _app.state.object_store = object_store
+                # Stream J.12 — the curation worker reads the L7
+                # trajectory ObjectStore, so it is constructed here
+                # where the store exists (mirrors MemoryDLQWorker).
+                if enable_curation_worker:
+                    curation_worker = CurationWorker(
+                        trajectory_reader=TrajectoryReader(object_store=object_store),
+                        candidate_store=resolved_curation_candidate_store,
+                        thread_store=resolved_threads,
+                        feedback_store=resolved_feedback,
+                        interval_s=resolved_settings.curation_worker_interval_s,
+                        batch_size=resolved_settings.curation_worker_batch_size,
+                    )
                 image_resolver = make_image_resolver(object_store)
                 # Stream J.3 — long-term memory backend for the agent.
                 embedder = await resolve_embedder(
@@ -540,6 +566,9 @@ def create_app(
             if scheduler is not None:
                 scheduler.start()
                 _app.state.trigger_scheduler = scheduler
+            if curation_worker is not None:
+                curation_worker.start()
+                _app.state.curation_worker = curation_worker
             # Stream K.K7 — start the DLQ retry worker only when an
             # embedder is available (the worker re-embeds before write;
             # without one it would dead-letter every row immediately).
@@ -567,6 +596,8 @@ def create_app(
                     await reaper.stop()
                 if scheduler is not None:
                     await scheduler.stop()
+                if curation_worker is not None:
+                    await curation_worker.stop()
                 ingestion_runner: KnowledgeIngestionRunner | None = getattr(
                     _app.state, "knowledge_ingestion_runner", None
                 )
@@ -600,6 +631,7 @@ def create_app(
     app.state.run_store = resolved_run_store
     app.state.trigger_store = resolved_trigger_store
     app.state.trigger_run_store = resolved_trigger_run_store
+    app.state.curation_candidate_store = resolved_curation_candidate_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
     app.state.skill_store = resolved_skill_store
@@ -730,6 +762,7 @@ class _SqlStores:
     run: RunStore  # Stream J.8 closeout follow-up (Mini-ADR J-41)
     trigger: TriggerStore  # Stream J.10 (Mini-ADR J-26 / J-42)
     trigger_run: TriggerRunStore  # Stream J.10
+    curation_candidate: CurationCandidateStore  # Stream J.12 (Mini-ADR J-43)
     service_account: ServiceAccountStore
     api_key: ApiKeyStore
     role_binding: RoleBindingStore
@@ -770,6 +803,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         run=SqlRunStore(session_factory),
         trigger=SqlTriggerStore(session_factory),
         trigger_run=SqlTriggerRunStore(session_factory),
+        curation_candidate=SqlCurationCandidateStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),
         api_key=SqlApiKeyStore(session_factory),
         role_binding=SqlRoleBindingStore(session_factory),

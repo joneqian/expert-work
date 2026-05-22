@@ -273,6 +273,15 @@ class Settings(BaseSettings):
     #: register. Caps the scheduler's per-sweep work + a runaway client.
     max_cron_triggers_per_tenant: int = Field(default=100, gt=0)
 
+    # ------------------------------------------------------------------ curation worker (J.12)
+    #: Stream J.12 — how often the curation worker scans the L7 trajectory
+    #: ObjectStore for new candidates. Curation is not latency-sensitive;
+    #: a few minutes is plenty.
+    curation_worker_interval_s: int = Field(default=300, gt=0)
+
+    #: Max trajectories examined per curation sweep — caps a cycle's work.
+    curation_worker_batch_size: int = Field(default=200, gt=0)
+
     # ------------------------------------------------------------------ tenant rate limit (C.6)
     #: Per-tenant request bucket capacity (tokens). Drained one token
     #: per authenticated request.
