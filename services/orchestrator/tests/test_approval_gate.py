@@ -35,7 +35,6 @@ from orchestrator.graph_builder._approval import (
 )
 from orchestrator.tools.approval import ASK_FOR_APPROVAL_TOOL, AskForApprovalTool
 
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -160,7 +159,7 @@ def test_build_approval_request_agent_initiated() -> None:
             {
                 "reason_kind": "approach_choice",
                 "action_summary": "delete the temp dir?",
-                "proposed_args": {"path": "/tmp/work"},
+                "proposed_args": {"path": "workdir/scratch"},
             },
             "tc-1",
         )
@@ -170,7 +169,7 @@ def test_build_approval_request_agent_initiated() -> None:
     req = build_approval_request(target, thread_id="r-1", timeout_s=86400)
     assert req.reason_kind == "approach_choice"
     assert req.action_summary == "delete the temp dir?"
-    assert req.proposed_args == {"path": "/tmp/work"}
+    assert req.proposed_args == {"path": "workdir/scratch"}
 
 
 def test_build_approval_request_unknown_reason_kind_falls_back() -> None:
