@@ -1,6 +1,6 @@
 /**
  * Agent detail page — Stream H.1b PR 3 (scaffold) + H.2 PR 1 (Manifest
- * Monaco editor).
+ * Monaco editor) + H.2 PR 3 (Playground tab).
  *
  * Real fetch of ``GET /v1/agents/{name}/{version}``. Route shape moved
  * from the demo's ``/agents/:agentId/:tab`` (mock id) to the canonical
@@ -8,14 +8,11 @@
  * (Mini-ADR B-3 keeps ``name + version`` as the agent's natural key —
  * the row UUID is internal).
  *
- * Tabs the backend already supports are wired (``overview`` / ``manifest``).
- * The remaining tabs land in subsequent Stream H.2 / H.3 PRs:
- *
- *   - **Playground** (H.2 PR 3) — SSE-streamed debug session against
- *     the live control-plane ``POST /v1/sessions/{id}/runs`` endpoint.
- *   - **Runs / Skills / Triggers / Memory** — per-agent sub-views that
- *     today need a separate filter parameter the list endpoints don't
- *     accept yet (eg. ``GET /v1/runs?agent_name=…``).
+ * Wired tabs: ``overview`` / ``manifest`` / ``playground``. The
+ * remaining per-agent sub-views (Runs / Skills / Triggers / Memory)
+ * land in Stream H.3 / H.4 — they need separate list-filter parameters
+ * the backend list endpoints don't accept yet (eg. ``GET /v1/runs?
+ * agent_name=…``).
  */
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -38,6 +35,7 @@ import { useTranslation } from "react-i18next";
 import { getAgent, type AgentDetailResponse } from "../api/agents";
 import { ApiError } from "../api/client";
 import { ManifestTab } from "./agent_detail/ManifestTab";
+import { PlaygroundTab } from "./agent_detail/PlaygroundTab";
 
 const { Text } = Typography;
 
@@ -180,7 +178,8 @@ export function AgentDetail() {
 
       {activeTab === "overview" && <OverviewTab detail={detail} />}
       {activeTab === "manifest" && <ManifestTab detail={detail} onSaved={refresh} />}
-      {!["overview", "manifest"].includes(activeTab) && (
+      {activeTab === "playground" && <PlaygroundTab detail={detail} />}
+      {!["overview", "manifest", "playground"].includes(activeTab) && (
         <Empty
           description={t("agent_detail.tab_coming_soon", { tab: activeTab })}
           style={{ marginTop: 64 }}

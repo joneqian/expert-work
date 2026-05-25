@@ -76,6 +76,21 @@ export interface TranslationKeys {
     cancel: string;
     save_failed: string;
   };
+  playground: {
+    session_label: string;
+    new_session: string;
+    session_failed: string;
+    thread_id: string;
+    loading_thread: string;
+    input_placeholder: string;
+    run: string;
+    running: string;
+    stop: string;
+    event_log: string;
+    event_count: string;
+    stream_failed: string;
+    empty_log: string;
+  };
   run_detail: {
     failed_to_load: string;
     thread_label: string;
@@ -255,6 +270,21 @@ const en: TranslationKeys = {
     save: "Save",
     cancel: "Cancel",
     save_failed: "Failed to save manifest",
+  },
+  playground: {
+    session_label: "Session",
+    new_session: "New session",
+    session_failed: "Failed to create session",
+    thread_id: "thread",
+    loading_thread: "Creating thread…",
+    input_placeholder: "Type a prompt to send to the agent. The full SSE event stream lands on the right.",
+    run: "Run",
+    running: "Running…",
+    stop: "Stop",
+    event_log: "Event log",
+    event_count: "{{n}} events",
+    stream_failed: "Stream failed",
+    empty_log: "No events yet — click Run to start.",
   },
   run_detail: {
     failed_to_load: "Failed to load run",
