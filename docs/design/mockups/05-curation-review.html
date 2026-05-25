@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 05 — Curation 候选评审 (J.12 学习闭环)
+  ============================================================
+  双栏:左列表 + 右候选详情(trajectory replay + promote/dismiss + 目标 eval dataset 选)
+
+  Tokens used:
+    --hx-color-accent-500 (selected list item)
+    --hx-status-{success,danger}-{bg,fg} (promote/dismiss CTAs)
+
+  Antd 5:
+    <List>           → 左侧候选列表
+    <Modal> (promote dialog) → 右下区
+    <Select>         → 目标 dataset 选
+
+  键盘:
+    j/k     上下选候选
+    p       promote
+    d       dismiss
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Curation 评审 — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .cur-grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: var(--hx-space-4);
+      min-height: 0;
+    }
+    .cur-list {
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      overflow: hidden;
+    }
+    .cur-list__filter {
+      padding: var(--hx-space-3);
+      border-bottom: 1px solid var(--hx-border-subtle);
+      display: flex; gap: var(--hx-space-2);
+    }
+    .cur-list__filter .hx-select { flex: 1; }
+
+    .cur-list__items { list-style: none; padding: 0; margin: 0; max-height: 70vh; overflow-y: auto; }
+    .cur-list__item {
+      display: block;
+      padding: var(--hx-space-3) var(--hx-space-4);
+      border-bottom: 1px solid var(--hx-border-subtle);
+      cursor: pointer;
+      transition: background var(--hx-duration-fast) var(--hx-ease-standard);
+    }
+    .cur-list__item:hover { background: var(--hx-surface-hover); }
+    .cur-list__item[aria-selected="true"] {
+      background: var(--hx-surface-selected);
+      border-left: 2px solid var(--hx-color-brand-500);
+      padding-left: calc(var(--hx-space-4) - 2px);
+    }
+    .cur-list__item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .cur-list__item-signal {
+      font-size: var(--hx-font-size-xs);
+      font-weight: var(--hx-font-weight-medium);
+    }
+    .cur-list__item-snippet {
+      font-size: var(--hx-font-size-sm);
+      color: var(--hx-text-secondary);
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .cur-list__item-meta {
+      display: flex; gap: 8px;
+      font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-tertiary);
+      margin-top: 6px;
+    }
+
+    .cur-detail {
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-4);
+    }
+    .cur-detail__header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 12px;
+      padding-bottom: var(--hx-space-3);
+      margin-bottom: var(--hx-space-4);
+      border-bottom: 1px solid var(--hx-border-subtle);
+    }
+    .cur-detail__meta { display: grid; grid-template-columns: 100px 1fr; row-gap: 4px; font-size: var(--hx-font-size-sm); }
+    .cur-detail__meta dt { color: var(--hx-text-tertiary); }
+
+    .traj-msgs { display: flex; flex-direction: column; gap: var(--hx-space-3); margin-top: var(--hx-space-3); }
+    .traj-msg {
+      padding: var(--hx-space-3);
+      border-radius: var(--hx-radius-sm);
+      border: 1px solid var(--hx-border-subtle);
+      font-size: var(--hx-font-size-sm);
+    }
+    .traj-msg__role {
+      font-size: var(--hx-font-size-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: var(--hx-font-weight-medium);
+      color: var(--hx-text-tertiary);
+      margin-bottom: 4px;
+    }
+    .traj-msg--user .traj-msg__role { color: var(--hx-color-accent-400); }
+    .traj-msg--assistant .traj-msg__role { color: var(--hx-color-brand-400); }
+    .traj-msg--tool {
+      background: var(--hx-surface-raised);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-xs);
+    }
+
+    .promote-card {
+      margin-top: var(--hx-space-4);
+      padding: var(--hx-space-4);
+      background: var(--hx-status-info-bg);
+      border: 1px solid var(--hx-status-info-fg);
+      border-radius: var(--hx-radius-sm);
+    }
+    .promote-card__head {
+      font-weight: var(--hx-font-weight-semibold);
+      margin-bottom: var(--hx-space-3);
+    }
+    .promote-form { display: grid; grid-template-columns: 1fr 1fr; gap: var(--hx-space-3); margin-bottom: var(--hx-space-3); }
+    .promote-form__field { display: flex; flex-direction: column; gap: 4px; }
+    .promote-form__field label { font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary); }
+  </style>
+</head>
+<body>
+
+<div class="hx-app">
+  <aside class="hx-sidebar">
+    <div class="hx-sidebar__brand"><svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg><span>helix</span></div>
+    <nav class="hx-sidebar__nav">
+      <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+      <a class="hx-sidebar__item" href="./04-run-trace.html">Runs</a>
+      <a class="hx-sidebar__item" href="./05-curation-review.html" aria-current="page">Curation+Eval</a>
+      <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
+      <a class="hx-sidebar__item" href="#">Skills</a>
+      <a class="hx-sidebar__item" href="#">Triggers</a>
+      <div class="hx-sidebar__group-label">Settings</div>
+      <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+    </nav>
+  </aside>
+
+  <header class="hx-topbar">
+    <div class="hx-topbar__tenant"><strong>acme-corp</strong></div>
+    <div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div>
+    <div class="hx-topbar__spacer"></div>
+  </header>
+
+  <main class="hx-main">
+    <div class="hx-main__container">
+
+      <nav class="hx-breadcrumb">
+        <a href="#">acme-corp</a><span class="hx-breadcrumb__sep">/</span>
+        <a href="#">Curation</a><span class="hx-breadcrumb__sep">/</span>
+        <span class="hx-text-primary">候选评审</span>
+      </nav>
+
+      <div class="hx-page-header">
+        <div>
+          <h1 class="hx-heading-2">候选评审</h1>
+          <p class="hx-text-secondary" style="margin: 8px 0 0;">CurationWorker 扫 trajectory + feedback 自动产生的候选;promote 即写入 eval dataset 反哺 agent 改进</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="hx-btn hx-btn--secondary">Eval Datasets →</button>
+          <button class="hx-btn hx-btn--secondary">触发 worker 再扫 <span class="hx-kbd">R</span></button>
+        </div>
+      </div>
+
+      <div class="cur-grid">
+
+        <!-- 左:候选列表 -->
+        <div class="cur-list" role="region" aria-label="候选列表">
+          <div class="cur-list__filter">
+            <select class="hx-select" aria-label="agent 筛选"><option>所有 agents</option><option>customer-support-bot</option></select>
+            <select class="hx-select" aria-label="signal 筛选"><option>所有 signals</option><option>negative</option><option>failed</option><option>positive</option></select>
+          </div>
+          <ul class="cur-list__items">
+            <li class="cur-list__item" aria-selected="true" tabindex="0">
+              <div class="cur-list__item-head">
+                <span class="hx-badge hx-badge--danger"><span class="hx-badge__dot"></span>negative</span>
+                <span class="cur-list__item-signal hx-text-secondary">customer-support-bot</span>
+              </div>
+              <p class="cur-list__item-snippet">客户反馈"机器人完全没解决我的问题",反复转人工失败 …</p>
+              <div class="cur-list__item-meta"><span class="hx-text-mono">tj_4c9b…</span><span>·</span><span>2h ago</span><span>·</span><span>👎 + failed</span></div>
+            </li>
+            <li class="cur-list__item" tabindex="0">
+              <div class="cur-list__item-head">
+                <span class="hx-badge hx-badge--warning"><span class="hx-badge__dot"></span>failed</span>
+                <span class="cur-list__item-signal hx-text-secondary">customer-support-bot</span>
+              </div>
+              <p class="cur-list__item-snippet">rag.knowledge timeout 后未 fallback,直接报错给用户</p>
+              <div class="cur-list__item-meta"><span class="hx-text-mono">tj_2e0a…</span><span>·</span><span>5h ago</span></div>
+            </li>
+            <li class="cur-list__item" tabindex="0">
+              <div class="cur-list__item-head">
+                <span class="hx-badge hx-badge--success"><span class="hx-badge__dot"></span>positive</span>
+                <span class="cur-list__item-signal hx-text-secondary">sales-research-analyst</span>
+              </div>
+              <p class="cur-list__item-snippet">完美完成多步骤公司画像生成,客户给五星好评</p>
+              <div class="cur-list__item-meta"><span class="hx-text-mono">tj_9f8c…</span><span>·</span><span>1d ago</span><span>·</span><span>👍</span></div>
+            </li>
+            <li class="cur-list__item" tabindex="0">
+              <div class="cur-list__item-head">
+                <span class="hx-badge hx-badge--warning"><span class="hx-badge__dot"></span>failed</span>
+                <span class="cur-list__item-signal hx-text-secondary">contract-redliner</span>
+              </div>
+              <p class="cur-list__item-snippet">max_steps (12) 耗尽,合同段落未审完</p>
+              <div class="cur-list__item-meta"><span class="hx-text-mono">tj_5a83…</span><span>·</span><span>3h ago</span></div>
+            </li>
+            <li class="cur-list__item" tabindex="0">
+              <div class="cur-list__item-head">
+                <span class="hx-badge hx-badge--danger"><span class="hx-badge__dot"></span>negative</span>
+                <span class="cur-list__item-signal hx-text-secondary">customer-support-bot</span>
+              </div>
+              <p class="cur-list__item-snippet">物流追踪错误链接 → 用户被引导到错误页</p>
+              <div class="cur-list__item-meta"><span class="hx-text-mono">tj_71b9…</span><span>·</span><span>4h ago</span></div>
+            </li>
+          </ul>
+          <div style="padding: 8px; text-align: center; font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary);">42 个候选 · 显示前 5</div>
+        </div>
+
+        <!-- 右:候选详情 -->
+        <div class="cur-detail">
+          <div class="cur-detail__header">
+            <div>
+              <h2 class="hx-heading-3" style="font-family: var(--hx-font-mono);">tj_4c9b8e21f60d</h2>
+              <dl class="cur-detail__meta" style="margin-top: 8px;">
+                <dt>signal</dt><dd><span class="hx-badge hx-badge--danger"><span class="hx-badge__dot"></span>negative</span></dd>
+                <dt>agent</dt><dd>customer-support-bot <span class="hx-text-tertiary">v3.4.2</span></dd>
+                <dt>user_id</dt><dd class="hx-text-mono">u_88234</dd>
+                <dt>outcome</dt><dd>failed (rag.knowledge timeout) + 👎 feedback</dd>
+                <dt>captured</dt><dd>2h ago by CurationWorker</dd>
+              </dl>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="hx-btn hx-btn--secondary">复制到 Playground</button>
+              <button class="hx-btn hx-btn--secondary">看完整 trace</button>
+            </div>
+          </div>
+
+          <div>
+            <p class="pg-section__label">Trajectory 回放</p>
+            <div class="traj-msgs">
+              <div class="traj-msg traj-msg--user"><div class="traj-msg__role">user</div>我的订单 #88234 一直没到,你帮我查查到哪了</div>
+              <div class="traj-msg traj-msg--tool">
+                <div class="traj-msg__role">tool · rag.knowledge</div>
+                <div>query: "订单 物流 追踪"<br/>error: <span style="color: var(--hx-color-danger-500);">timeout after 5000ms</span></div>
+              </div>
+              <div class="traj-msg traj-msg--assistant"><div class="traj-msg__role">assistant</div>抱歉,我现在无法查询您的订单信息。请稍后再试或联系客服。</div>
+              <div class="traj-msg traj-msg--user"><div class="traj-msg__role">user (👎 feedback)</div>这就是机器人完全没用,我直接转人工。</div>
+            </div>
+          </div>
+
+          <!-- promote 区 -->
+          <div class="promote-card">
+            <div class="promote-card__head">Promote 到 eval dataset</div>
+            <p class="hx-text-sm hx-text-secondary" style="margin: 0 0 12px;">把这个 trajectory 作为回归测试加进 dataset。下次 agent 改进后会用它复跑校验。</p>
+            <div class="promote-form">
+              <div class="promote-form__field">
+                <label>目标 dataset</label>
+                <select class="hx-select">
+                  <option>customer-support-regression (32 cases)</option>
+                  <option>customer-support-golden (12 cases)</option>
+                  <option>+ 新建 dataset…</option>
+                </select>
+              </div>
+              <div class="promote-form__field">
+                <label>类型</label>
+                <select class="hx-select">
+                  <option>regression</option>
+                  <option>golden</option>
+                </select>
+              </div>
+            </div>
+            <div class="promote-form__field" style="margin-bottom: 12px;">
+              <label>期望输出(可空 — 仅作 trajectory 留档)</label>
+              <textarea class="pg-input" placeholder="正确的回复应该是 …"></textarea>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="hx-btn hx-btn--primary">Promote <span class="hx-kbd">P</span></button>
+              <button class="hx-btn hx-btn--danger">Dismiss <span class="hx-kbd">D</span></button>
+              <button class="hx-btn hx-btn--ghost" style="margin-left: auto;">下一个 →</button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div class="hx-theme-toggle"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div>
+<script>
+  document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
+    document.documentElement.setAttribute('data-theme', btn.dataset.theme);
+    document.querySelectorAll('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === btn.dataset.theme)));
+  }));
+</script>
+
+</body>
+</html>

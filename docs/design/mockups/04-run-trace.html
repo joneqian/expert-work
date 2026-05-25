@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 04 — Run 详情 + Trace + Approval(J.8 HITL)
+  ============================================================
+  Tokens used:
+    --hx-trace__bar--{ok, slow, err}
+    --hx-color-warning-500 (approval pending banner)
+
+  Antd 5:
+    <Tree>           → spans 树
+    <Tabs>           → Trace / Logs / Input/Output
+    <Result>         → approval pending 行动卡
+    <Modal>(approval action) → ConfirmDialog
+
+  键盘:
+    j/k     上下选 span
+    a       批准(若 approval pending)
+    r       拒绝
+    .       重新执行
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>run_4c9b… — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .run-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: var(--hx-space-4);
+    }
+    .run-spans { font-family: var(--hx-font-mono); font-size: var(--hx-font-size-xs); }
+    .span-row {
+      display: flex; align-items: center; gap: var(--hx-space-2);
+      padding: var(--hx-space-1) var(--hx-space-2);
+      border-radius: var(--hx-radius-xs);
+      cursor: pointer;
+    }
+    .span-row:hover { background: var(--hx-surface-hover); }
+    .span-row[aria-selected="true"] {
+      background: var(--hx-surface-selected);
+      color: var(--hx-text-primary);
+    }
+    .span-row__indent { display: inline-block; width: 12px; }
+    .span-row__dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .span-row__name { flex: 1; }
+    .span-row__dur { color: var(--hx-text-tertiary); font-size: 10px; }
+    .span-row--ok .span-row__dot { background: var(--hx-color-success-500); }
+    .span-row--slow .span-row__dot { background: var(--hx-color-warning-500); }
+    .span-row--err .span-row__dot { background: var(--hx-color-danger-500); }
+    .span-row--pending .span-row__dot { background: var(--hx-color-warning-500); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 50% { opacity: 0.4; } }
+
+    .run-detail-tabs { margin-top: var(--hx-space-3); }
+    .json-block {
+      background: var(--hx-color-neutral-950);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-3);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-secondary);
+      overflow-x: auto;
+      line-height: var(--hx-line-height-normal);
+    }
+    .json-block .k { color: var(--hx-color-brand-400); }
+    .json-block .v-str { color: var(--hx-color-accent-300); }
+    .json-block .v-num { color: var(--hx-color-warning-300); }
+
+    .approval-card {
+      background: var(--hx-status-warning-bg);
+      border: 1px solid var(--hx-status-warning-fg);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-4);
+      margin-bottom: var(--hx-space-4);
+    }
+    .approval-card__head {
+      display: flex; align-items: center; gap: var(--hx-space-2);
+      font-weight: var(--hx-font-weight-semibold);
+      margin-bottom: var(--hx-space-2);
+      color: var(--hx-status-warning-fg);
+    }
+    .approval-card__body {
+      padding: var(--hx-space-3);
+      background: var(--hx-surface-base);
+      border-radius: var(--hx-radius-sm);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-xs);
+      margin: var(--hx-space-2) 0;
+    }
+    .approval-actions { display: flex; gap: var(--hx-space-2); margin-top: var(--hx-space-3); }
+  </style>
+</head>
+<body>
+
+<div class="hx-app">
+  <aside class="hx-sidebar">
+    <div class="hx-sidebar__brand">
+      <svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg>
+      <span>helix</span>
+    </div>
+    <nav class="hx-sidebar__nav">
+      <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+      <a class="hx-sidebar__item" href="./04-run-trace.html" aria-current="page">Runs</a>
+      <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+      <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
+      <a class="hx-sidebar__item" href="#">Skills</a>
+      <a class="hx-sidebar__item" href="#">Triggers</a>
+      <div class="hx-sidebar__group-label">Settings</div>
+      <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+    </nav>
+  </aside>
+
+  <header class="hx-topbar">
+    <div class="hx-topbar__tenant"><strong>acme-corp</strong></div>
+    <div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div>
+    <div class="hx-topbar__spacer"></div>
+  </header>
+
+  <main class="hx-main">
+    <div class="hx-main__container">
+
+      <nav class="hx-breadcrumb">
+        <a href="#">acme-corp</a>
+        <span class="hx-breadcrumb__sep">/</span>
+        <a href="#">Runs</a>
+        <span class="hx-breadcrumb__sep">/</span>
+        <span class="hx-text-mono hx-text-primary">run_4c9b8e21…</span>
+      </nav>
+
+      <div class="hx-page-header">
+        <div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <h1 class="hx-heading-2" style="font-family: var(--hx-font-mono);">run_4c9b8e21f60d</h1>
+            <span class="hx-badge hx-badge--warning"><span class="hx-badge__dot"></span>approval pending</span>
+          </div>
+          <p class="hx-text-secondary" style="margin: 8px 0 0;">customer-support-bot · v3.4.2 · started 12m ago by webhook trigger</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="hx-btn hx-btn--secondary">复制 input → Playground</button>
+          <button class="hx-btn hx-btn--secondary">重跑 <span class="hx-kbd">.</span></button>
+          <button class="hx-btn hx-btn--danger">强制结束</button>
+        </div>
+      </div>
+
+      <!-- HITL approval banner -->
+      <div class="approval-card">
+        <div class="approval-card__head">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+          handover.human — 等待审批
+        </div>
+        <p class="hx-text-secondary hx-text-sm">Agent 在 step 7 触发了 <code class="hx-text-mono">handover.human</code> skill,需要工单经理决策:是直接转人工还是先尝试自助理赔。</p>
+        <p class="hx-text-sm" style="margin: 8px 0 4px;">建议参数:</p>
+        <pre class="approval-card__body">{
+  "ticket_id": "TK-2026-0532",
+  "customer_id": "u_88234",
+  "reason": "logistics_dispute",
+  "urgency": "medium",
+  "suggested_handler": "logistics-team"
+}</pre>
+        <div class="approval-actions">
+          <button class="hx-btn hx-btn--primary">批准 <span class="hx-kbd">A</span></button>
+          <button class="hx-btn hx-btn--secondary">修改参数后批准</button>
+          <button class="hx-btn hx-btn--danger">拒绝 <span class="hx-kbd">R</span></button>
+        </div>
+      </div>
+
+      <div class="run-grid">
+
+        <!-- 左:spans 树 -->
+        <div class="hx-card" style="padding: var(--hx-space-2);">
+          <p class="pg-section__label" style="padding: var(--hx-space-2);">SPANS · 1.84s · 8 steps</p>
+          <div class="run-spans" role="tree">
+            <div class="span-row span-row--ok" role="treeitem"><span class="span-row__dot"></span><span class="span-row__name">step.plan</span><span class="span-row__dur">142ms</span></div>
+            <div class="span-row span-row--ok" role="treeitem"><span class="span-row__indent"></span><span class="span-row__dot"></span><span class="span-row__name">llm.call (sonnet)</span><span class="span-row__dur">386ms</span></div>
+            <div class="span-row span-row--ok" role="treeitem"><span class="span-row__dot"></span><span class="span-row__name">step.act</span><span class="span-row__dur">312ms</span></div>
+            <div class="span-row span-row--ok" role="treeitem"><span class="span-row__indent"></span><span class="span-row__dot"></span><span class="span-row__name">tool.rag.knowledge</span><span class="span-row__dur">312ms</span></div>
+            <div class="span-row span-row--ok" role="treeitem"><span class="span-row__dot"></span><span class="span-row__name">step.act</span><span class="span-row__dur">186ms</span></div>
+            <div class="span-row span-row--ok" role="treeitem"><span class="span-row__indent"></span><span class="span-row__dot"></span><span class="span-row__name">tool.logistics.lookup</span><span class="span-row__dur">186ms</span></div>
+            <div class="span-row span-row--slow" role="treeitem"><span class="span-row__dot"></span><span class="span-row__name">step.reflect</span><span class="span-row__dur">624ms</span></div>
+            <div class="span-row span-row--slow" role="treeitem"><span class="span-row__indent"></span><span class="span-row__dot"></span><span class="span-row__name">llm.call (sonnet)</span><span class="span-row__dur">624ms</span></div>
+            <div class="span-row span-row--pending" aria-selected="true" role="treeitem"><span class="span-row__dot"></span><span class="span-row__name">step.handover (await approval)</span><span class="span-row__dur">12m</span></div>
+            <div class="span-row span-row--pending" role="treeitem"><span class="span-row__indent"></span><span class="span-row__dot"></span><span class="span-row__name">tool.handover.human</span><span class="span-row__dur">…</span></div>
+          </div>
+        </div>
+
+        <!-- 右:trace timeline + step inspector -->
+        <div>
+
+          <div class="hx-card">
+            <div class="hx-card__header"><h3 class="hx-card__title">Trace timeline</h3><span class="hx-text-tertiary hx-text-sm">点击 span 查看详情;Langfuse <a href="#" style="margin-left: 4px;">外部链接 ↗</a></span></div>
+            <div class="hx-trace">
+              <div class="hx-trace__span"><span>step.plan</span><div class="hx-trace__bar hx-trace__bar--ok" style="width: 8%;"></div><span class="hx-trace__duration">142ms</span></div>
+              <div class="hx-trace__span"><span>llm.call</span><div class="hx-trace__bar hx-trace__bar--ok" style="width: 21%; margin-left: 1%;"></div><span class="hx-trace__duration">386ms</span></div>
+              <div class="hx-trace__span"><span>rag.knowledge</span><div class="hx-trace__bar hx-trace__bar--ok" style="width: 17%; margin-left: 22%;"></div><span class="hx-trace__duration">312ms</span></div>
+              <div class="hx-trace__span"><span>logistics.lookup</span><div class="hx-trace__bar hx-trace__bar--ok" style="width: 10%; margin-left: 39%;"></div><span class="hx-trace__duration">186ms</span></div>
+              <div class="hx-trace__span"><span>llm.call (reflect)</span><div class="hx-trace__bar hx-trace__bar--slow" style="width: 34%; margin-left: 49%;"></div><span class="hx-trace__duration">624ms</span></div>
+              <div class="hx-trace__span"><span>handover.human (pending)</span><div class="hx-trace__bar hx-trace__bar--err" style="width: 4%; margin-left: 83%; opacity: 0.5;"></div><span class="hx-trace__duration">…</span></div>
+            </div>
+          </div>
+
+          <div class="hx-tabs run-detail-tabs" role="tablist" style="margin-top: 16px; margin-bottom: 12px;">
+            <button class="hx-tab" role="tab" aria-selected="true">Input/Output</button>
+            <button class="hx-tab" role="tab" aria-selected="false">Span detail</button>
+            <button class="hx-tab" role="tab" aria-selected="false">Logs</button>
+            <button class="hx-tab" role="tab" aria-selected="false">Tokens</button>
+          </div>
+          <div class="json-block"><span class="k">"input"</span>: {
+  <span class="k">"thread_id"</span>: <span class="v-str">"th_5a3c8e21"</span>,
+  <span class="k">"user_id"</span>: <span class="v-str">"u_88234"</span>,
+  <span class="k">"message"</span>: <span class="v-str">"订单 #88234 的物流为什么显示已签收但客户说没收到?需要我帮他理赔吗?"</span>,
+  <span class="k">"channel"</span>: <span class="v-str">"webhook"</span>,
+  <span class="k">"trigger_id"</span>: <span class="v-str">"trg_help_desk"</span>
+},
+<span class="k">"output"</span>: {
+  <span class="k">"status"</span>: <span class="v-str">"awaiting_approval"</span>,
+  <span class="k">"pending_action"</span>: <span class="v-str">"handover.human"</span>,
+  <span class="k">"step"</span>: <span class="v-num">7</span>
+}</div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div class="hx-theme-toggle"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div>
+<script>
+  document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
+    document.documentElement.setAttribute('data-theme', btn.dataset.theme);
+    document.querySelectorAll('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === btn.dataset.theme)));
+  }));
+</script>
+
+</body>
+</html>

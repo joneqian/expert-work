@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 07 — Settings / API Keys (C.3 + K1 rotation)
+  ============================================================
+  列表 + 创建对话框(scopes 多选)+ rotate 流程 + show-once 卡片
+
+  Tokens used:
+    --hx-color-warning-500 (rotation grace window)
+    --hx-color-danger-500 (revoke action)
+    --hx-color-brand-500 (show-once card)
+
+  Antd 5:
+    <Table>          → key 列表
+    <Modal>          → 创建 / rotate / show-once
+    <Checkbox.Group> → scopes
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Keys — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: var(--hx-space-6);
+    }
+    .settings-nav { display: flex; flex-direction: column; gap: 2px; }
+    .settings-nav a {
+      padding: 8px 12px;
+      border-radius: var(--hx-radius-sm);
+      color: var(--hx-text-secondary);
+      font-size: var(--hx-font-size-sm);
+    }
+    .settings-nav a:hover { background: var(--hx-surface-hover); color: var(--hx-text-primary); }
+    .settings-nav a[aria-current="page"] {
+      background: var(--hx-surface-selected);
+      color: var(--hx-text-primary);
+      font-weight: var(--hx-font-weight-medium);
+    }
+
+    .key-row-name { font-family: var(--hx-font-mono); font-weight: var(--hx-font-weight-medium); }
+    .key-row-prefix {
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-tertiary);
+      background: var(--hx-surface-raised);
+      padding: 2px 6px;
+      border-radius: var(--hx-radius-xs);
+    }
+
+    .show-once-key {
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-md);
+      padding: var(--hx-space-3);
+      background: var(--hx-color-neutral-950);
+      border: 1px solid var(--hx-border-default);
+      border-radius: var(--hx-radius-sm);
+      display: flex; align-items: center; gap: 12px;
+      margin: var(--hx-space-3) 0;
+    }
+    .show-once-key__value { flex: 1; word-break: break-all; }
+
+    [data-state="show-once"] .show-once-overlay,
+    [data-state="create"] .create-overlay { display: flex; }
+    [data-state] .hx-modal-backdrop { display: none; }
+    [data-state="show-once"] .show-once-overlay,
+    [data-state="create"] .create-overlay { display: flex; }
+  </style>
+</head>
+<body data-state="default">
+
+<div class="hx-app">
+  <aside class="hx-sidebar">
+    <div class="hx-sidebar__brand"><svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg><span>helix</span></div>
+    <nav class="hx-sidebar__nav">
+      <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+      <a class="hx-sidebar__item" href="./04-run-trace.html">Runs</a>
+      <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+      <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
+      <a class="hx-sidebar__item" href="#">Skills</a>
+      <a class="hx-sidebar__item" href="#">Triggers</a>
+      <div class="hx-sidebar__group-label">Settings</div>
+      <a class="hx-sidebar__item" href="./07-settings-api-keys.html" aria-current="page">API Keys</a>
+      <a class="hx-sidebar__item" href="#">Service Accounts</a>
+      <a class="hx-sidebar__item" href="#">Audit</a>
+    </nav>
+  </aside>
+
+  <header class="hx-topbar">
+    <div class="hx-topbar__tenant"><strong>acme-corp</strong></div>
+    <div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div>
+    <div class="hx-topbar__spacer"></div>
+  </header>
+
+  <main class="hx-main">
+    <div class="hx-main__container">
+
+      <nav class="hx-breadcrumb"><a href="#">acme-corp</a><span class="hx-breadcrumb__sep">/</span><a href="#">Settings</a><span class="hx-breadcrumb__sep">/</span><span class="hx-text-primary">API Keys</span></nav>
+
+      <div class="hx-page-header">
+        <div>
+          <h1 class="hx-heading-2">API Keys</h1>
+          <p class="hx-text-secondary" style="margin: 8px 0 0;">服务账户的访问密钥;每个 key 绑定 scopes(权限范围)。支持轮换(双活窗口)与立即撤销。</p>
+        </div>
+        <button class="hx-btn hx-btn--primary" id="create-btn">
+          <svg class="hx-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          创建 API Key
+        </button>
+      </div>
+
+      <div class="settings-grid">
+
+        <nav class="settings-nav" aria-label="Settings 二级导航">
+          <a href="#" aria-current="page">API Keys</a>
+          <a href="#">Service Accounts</a>
+          <a href="#">Role Bindings</a>
+          <a href="#">Quotas</a>
+          <a href="#">Tenant Config</a>
+          <a href="#">Audit</a>
+        </nav>
+
+        <div>
+
+          <!-- 轮换中的 key banner -->
+          <div class="hx-banner hx-banner--warning">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            <div style="flex: 1;">
+              <strong>2 个 key 处于轮换 grace 窗口</strong>
+              <p class="hx-text-sm hx-text-secondary" style="margin: 4px 0 0;">旧 key 仍可用,3600s 后失效。引导调用方尽快切到新 key。</p>
+            </div>
+            <button class="hx-btn hx-btn--secondary hx-btn--sm">查看详情</button>
+          </div>
+
+          <div class="hx-table-wrap">
+            <table class="hx-table">
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>Prefix</th>
+                  <th>Scopes</th>
+                  <th>Service Account</th>
+                  <th>状态</th>
+                  <th>Last used</th>
+                  <th>过期</th>
+                  <th style="width: 32px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="key-row-name">prod-ingest</span></td>
+                  <td><span class="key-row-prefix">helix_pat_4f1a8e21</span></td>
+                  <td><span class="hx-badge hx-badge--neutral">agents:read</span> <span class="hx-badge hx-badge--neutral">runs:write</span></td>
+                  <td class="hx-text-secondary hx-text-sm">prod-ingest-svc</td>
+                  <td><span class="hx-badge hx-badge--success"><span class="hx-badge__dot"></span>active</span></td>
+                  <td class="hx-text-secondary hx-text-sm">2m ago</td>
+                  <td class="hx-text-secondary hx-text-sm">2027-02-14</td>
+                  <td><button class="hx-btn hx-btn--ghost hx-btn--sm">⋮</button></td>
+                </tr>
+                <tr>
+                  <td><span class="key-row-name">prod-ingest</span> <span class="hx-text-tertiary hx-text-xs">(rotation old)</span></td>
+                  <td><span class="key-row-prefix">helix_pat_2c0f9a18</span></td>
+                  <td><span class="hx-badge hx-badge--neutral">agents:read</span> <span class="hx-badge hx-badge--neutral">runs:write</span></td>
+                  <td class="hx-text-secondary hx-text-sm">prod-ingest-svc</td>
+                  <td><span class="hx-badge hx-badge--warning"><span class="hx-badge__dot"></span>grace 41m</span></td>
+                  <td class="hx-text-secondary hx-text-sm">8m ago</td>
+                  <td class="hx-text-secondary hx-text-sm">2026-05-25 16:42</td>
+                  <td><button class="hx-btn hx-btn--ghost hx-btn--sm">⋮</button></td>
+                </tr>
+                <tr>
+                  <td><span class="key-row-name">analyst-readonly</span></td>
+                  <td><span class="key-row-prefix">helix_pat_8e3a1b29</span></td>
+                  <td><span class="hx-badge hx-badge--neutral">agents:read</span> <span class="hx-badge hx-badge--neutral">runs:read</span></td>
+                  <td class="hx-text-secondary hx-text-sm">analyst-svc</td>
+                  <td><span class="hx-badge hx-badge--success"><span class="hx-badge__dot"></span>active</span></td>
+                  <td class="hx-text-secondary hx-text-sm">1h ago</td>
+                  <td class="hx-text-secondary hx-text-sm">2026-12-01</td>
+                  <td><button class="hx-btn hx-btn--ghost hx-btn--sm">⋮</button></td>
+                </tr>
+                <tr>
+                  <td><span class="key-row-name">ci-webhook</span></td>
+                  <td><span class="key-row-prefix">helix_pat_77b3e210</span></td>
+                  <td><span class="hx-badge hx-badge--neutral">triggers:write</span></td>
+                  <td class="hx-text-secondary hx-text-sm">ci-bot-svc</td>
+                  <td><span class="hx-badge hx-badge--danger"><span class="hx-badge__dot"></span>revoked</span></td>
+                  <td class="hx-text-tertiary hx-text-sm">14d ago</td>
+                  <td class="hx-text-tertiary hx-text-sm">—</td>
+                  <td><button class="hx-btn hx-btn--ghost hx-btn--sm">⋮</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- 创建 modal -->
+<div class="hx-modal-backdrop create-overlay" style="display: none;">
+  <div class="hx-modal" role="dialog" aria-modal="true">
+    <div class="hx-modal__header">
+      <h3 class="hx-card__title">创建 API Key</h3>
+    </div>
+    <div class="hx-modal__body">
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div>
+          <label class="pg-section__label">名称</label>
+          <input class="hx-input" placeholder="如 prod-ingest / staging-readonly" style="width: 100%; margin-top: 4px;" value="prod-ingest" />
+        </div>
+        <div>
+          <label class="pg-section__label">绑定 Service Account</label>
+          <select class="hx-select" style="width: 100%; margin-top: 4px;">
+            <option>prod-ingest-svc</option>
+            <option>analyst-svc</option>
+            <option>+ 新建 Service Account…</option>
+          </select>
+        </div>
+        <div>
+          <label class="pg-section__label">Scopes (多选)</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" checked /> agents:read</label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" checked /> agents:write</label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" checked /> runs:read</label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" checked /> runs:write</label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" /> memory:read</label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" /> memory:write</label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" /> triggers:write</label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><input type="checkbox" /> admin:* <span class="hx-text-tertiary hx-text-xs">(危险)</span></label>
+          </div>
+        </div>
+        <div>
+          <label class="pg-section__label">过期时间</label>
+          <select class="hx-select" style="width: 100%; margin-top: 4px;">
+            <option>90 天</option>
+            <option>180 天</option>
+            <option selected>1 年</option>
+            <option>永不过期 (不推荐)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="hx-modal__footer">
+      <button class="hx-btn hx-btn--secondary" id="cancel-create-btn">取消</button>
+      <button class="hx-btn hx-btn--primary" id="confirm-create-btn">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- show-once modal -->
+<div class="hx-modal-backdrop show-once-overlay" style="display: none;">
+  <div class="hx-modal" role="dialog" aria-modal="true">
+    <div class="hx-modal__header">
+      <h3 class="hx-card__title" style="color: var(--hx-color-brand-400);">
+        <svg style="width: 18px; height: 18px; vertical-align: -3px; margin-right: 4px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="20 6 9 17 4 12"/></svg>
+        API Key 已创建
+      </h3>
+    </div>
+    <div class="hx-modal__body">
+      <p>请立即复制此 key 并安全保存 —— <strong>窗口关闭后无法再次查看完整 key</strong>。</p>
+      <div class="show-once-key">
+        <code class="show-once-key__value">helix_pat_4f1a8e21c3d9a72b8e0f7165acd842ce</code>
+        <button class="hx-btn hx-btn--secondary hx-btn--sm" aria-label="复制">
+          <svg class="hx-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+      </div>
+      <p class="hx-text-secondary hx-text-sm">prefix <code class="hx-text-mono">helix_pat_4f1a8e21</code> 会保留显示在列表中,完整 key 仅此一次。</p>
+    </div>
+    <div class="hx-modal__footer">
+      <button class="hx-btn hx-btn--primary" id="done-show-once-btn">我已保存,关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="hx-theme-toggle">
+  <button data-theme="dark" aria-pressed="true">Dark</button>
+  <button data-theme="light" aria-pressed="false">Light</button>
+  <span style="width: 1px; background: var(--hx-border-subtle); margin: 0 4px;"></span>
+  <button data-state="default" aria-pressed="true">列表</button>
+  <button data-state="create" aria-pressed="false">创建对话框</button>
+  <button data-state="show-once" aria-pressed="false">show-once</button>
+</div>
+<script>
+  const html = document.documentElement, body = document.body;
+  document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
+    html.setAttribute('data-theme', btn.dataset.theme);
+    document.querySelectorAll('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === btn.dataset.theme)));
+  }));
+  document.querySelectorAll('[data-state]').forEach(btn => btn.addEventListener('click', () => {
+    body.setAttribute('data-state', btn.dataset.state);
+    document.querySelectorAll('[data-state]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.state === btn.dataset.state)));
+  }));
+  document.getElementById('create-btn').addEventListener('click', () => body.setAttribute('data-state', 'create'));
+  document.getElementById('cancel-create-btn').addEventListener('click', () => body.setAttribute('data-state', 'default'));
+  document.getElementById('confirm-create-btn').addEventListener('click', () => body.setAttribute('data-state', 'show-once'));
+  document.getElementById('done-show-once-btn').addEventListener('click', () => body.setAttribute('data-state', 'default'));
+</script>
+
+</body>
+</html>

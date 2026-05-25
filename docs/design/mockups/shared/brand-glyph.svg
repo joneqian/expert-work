@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- helix DNA glyph — 简化双螺旋 4 交叉点
+     线宽 2、描边色 currentColor;dark 用 brand-cyan,light 用 brand-cyan-700。
+     viewBox 24×24,可缩放为 favicon 16/32/180 与 sidebar 20。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 左螺旋:从左上到左下的 S 形 -->
+  <path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21" />
+  <!-- 右螺旋:从右上到右下的 反 S 形(镜像) -->
+  <path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21" />
+  <!-- 交叉点连线(横向小线段,加强 DNA 双螺旋感) -->
+  <line x1="9" y1="7"  x2="15" y2="7"  opacity="0.5" />
+  <line x1="9" y1="12" x2="15" y2="12" opacity="0.5" />
+  <line x1="9" y1="17" x2="15" y2="17" opacity="0.5" />
+</svg>

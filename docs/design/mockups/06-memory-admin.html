@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 06 — Memory admin (K.6)
+  ============================================================
+  双栏:左 per-user memory 树 + 右 memory item 编辑器(JSON/Markdown)
+
+  Tokens used:
+    --hx-color-danger-500 (destructive delete)
+    --hx-font-mono (JSON editor)
+
+  Antd 5:
+    <Tree>             → user tree
+    <Modal> (confirm delete) → ConfirmDialog with type-to-confirm
+    Monaco editor       → memory body editor
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Memory — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .mem-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: var(--hx-space-4);
+    }
+    .mem-tree {
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-2);
+      max-height: 70vh;
+      overflow-y: auto;
+      font-size: var(--hx-font-size-sm);
+    }
+    .mem-tree__user {
+      padding: var(--hx-space-2) var(--hx-space-3);
+      border-radius: var(--hx-radius-sm);
+      display: flex; align-items: center; gap: 8px;
+      cursor: pointer;
+    }
+    .mem-tree__user:hover { background: var(--hx-surface-hover); }
+    .mem-tree__user[aria-expanded="true"] { background: var(--hx-surface-selected); color: var(--hx-text-primary); }
+    .mem-tree__user-count {
+      margin-left: auto;
+      font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-tertiary);
+      background: var(--hx-surface-raised);
+      padding: 1px 6px;
+      border-radius: var(--hx-radius-xs);
+    }
+    .mem-tree__items { list-style: none; padding: 0 0 0 24px; margin: 4px 0; }
+    .mem-tree__item {
+      padding: 4px 8px;
+      cursor: pointer;
+      border-radius: var(--hx-radius-xs);
+      font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .mem-tree__item:hover { background: var(--hx-surface-hover); color: var(--hx-text-primary); }
+    .mem-tree__item[aria-selected="true"] {
+      background: var(--hx-surface-selected);
+      color: var(--hx-text-primary);
+      border-left: 2px solid var(--hx-color-brand-500);
+      padding-left: 6px;
+    }
+    .mem-tree__item-key { font-family: var(--hx-font-mono); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .mem-editor {
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      overflow: hidden;
+    }
+    .mem-editor__head {
+      padding: var(--hx-space-3) var(--hx-space-4);
+      border-bottom: 1px solid var(--hx-border-subtle);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .mem-editor__title { font-family: var(--hx-font-mono); font-weight: var(--hx-font-weight-semibold); }
+    .mem-editor__actions { margin-left: auto; display: flex; gap: 8px; }
+    .mem-editor__meta {
+      padding: var(--hx-space-3) var(--hx-space-4);
+      border-bottom: 1px solid var(--hx-border-subtle);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--hx-space-3);
+      font-size: var(--hx-font-size-xs);
+    }
+    .mem-editor__meta-label { color: var(--hx-text-tertiary); display: block; margin-bottom: 2px; }
+    .mem-editor__meta-value { color: var(--hx-text-primary); font-family: var(--hx-font-mono); }
+
+    .mem-editor__tabs { display: flex; padding: 0 var(--hx-space-4); border-bottom: 1px solid var(--hx-border-subtle); }
+    .mem-editor__body {
+      padding: var(--hx-space-4);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-sm);
+      color: var(--hx-text-primary);
+      background: var(--hx-color-neutral-950);
+      min-height: 320px;
+      line-height: var(--hx-line-height-normal);
+      white-space: pre-wrap;
+    }
+    .mem-editor__body .k { color: var(--hx-color-brand-400); }
+    .mem-editor__body .v-str { color: var(--hx-color-accent-300); }
+    .mem-editor__body .v-num { color: var(--hx-color-warning-300); }
+
+    /* ConfirmDialog overlay (visible by default for mockup) */
+    .confirm-overlay { display: none; }
+    [data-state="confirm"] .confirm-overlay { display: flex; }
+    [data-state="confirm"] .mem-editor { filter: blur(2px); pointer-events: none; }
+  </style>
+</head>
+<body data-state="default">
+
+<div class="hx-app">
+  <aside class="hx-sidebar">
+    <div class="hx-sidebar__brand"><svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg><span>helix</span></div>
+    <nav class="hx-sidebar__nav">
+      <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+      <a class="hx-sidebar__item" href="./04-run-trace.html">Runs</a>
+      <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+      <a class="hx-sidebar__item" href="./06-memory-admin.html" aria-current="page">Memory</a>
+      <a class="hx-sidebar__item" href="#">Skills</a>
+      <a class="hx-sidebar__item" href="#">Triggers</a>
+      <div class="hx-sidebar__group-label">Settings</div>
+      <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+    </nav>
+  </aside>
+
+  <header class="hx-topbar">
+    <div class="hx-topbar__tenant"><strong>acme-corp</strong></div>
+    <div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div>
+    <div class="hx-topbar__spacer"></div>
+  </header>
+
+  <main class="hx-main">
+    <div class="hx-main__container">
+
+      <nav class="hx-breadcrumb"><a href="#">acme-corp</a><span class="hx-breadcrumb__sep">/</span><span class="hx-text-primary">Memory</span></nav>
+
+      <div class="hx-page-header">
+        <div>
+          <h1 class="hx-heading-2">Memory(治理视角)</h1>
+          <p class="hx-text-secondary" style="margin: 8px 0 0;">跨 user / 跨 agent 的长期记忆条目;支持查询、编辑、删除(soft delete + audit)。末端用户对话面记忆在 business 系统侧管理。</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <select class="hx-select"><option>所有 agents</option><option>customer-support-bot</option></select>
+          <button class="hx-btn hx-btn--secondary">导出 CSV</button>
+        </div>
+      </div>
+
+      <div class="mem-grid">
+
+        <!-- 左:user tree -->
+        <div class="mem-tree" role="tree" aria-label="memory by user">
+          <input class="hx-input" placeholder="搜 user_id / 内容" style="width: 100%; margin-bottom: 8px;" />
+
+          <div class="mem-tree__user" aria-expanded="true">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="6 9 12 15 18 9"/></svg>
+            <span class="hx-text-mono">u_88234</span>
+            <span class="hx-text-tertiary" style="font-size: 11px;">(zhang.san@cust)</span>
+            <span class="mem-tree__user-count">12</span>
+          </div>
+          <ul class="mem-tree__items">
+            <li class="mem-tree__item" aria-selected="true"><span class="hx-badge__dot" style="background: var(--hx-color-brand-500);"></span><span class="mem-tree__item-key">profile.preferred_language</span></li>
+            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-brand-500);"></span><span class="mem-tree__item-key">profile.timezone</span></li>
+            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-success-500);"></span><span class="mem-tree__item-key">order.history.summary</span></li>
+            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-success-500);"></span><span class="mem-tree__item-key">support.previous_tickets</span></li>
+            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-accent-500);"></span><span class="mem-tree__item-key">vector.recall.top_5</span></li>
+          </ul>
+
+          <div class="mem-tree__user">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
+            <span class="hx-text-mono">u_92810</span>
+            <span class="hx-text-tertiary" style="font-size: 11px;">(li.si@cust)</span>
+            <span class="mem-tree__user-count">8</span>
+          </div>
+
+          <div class="mem-tree__user">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
+            <span class="hx-text-mono">u_77103</span>
+            <span class="hx-text-tertiary" style="font-size: 11px;">(wang.wu@cust)</span>
+            <span class="mem-tree__user-count">21</span>
+          </div>
+
+          <div class="mem-tree__user">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
+            <span class="hx-text-mono">u_55409</span>
+            <span class="hx-text-tertiary" style="font-size: 11px;">(zhao.liu@cust)</span>
+            <span class="mem-tree__user-count">5</span>
+          </div>
+        </div>
+
+        <!-- 右:editor -->
+        <div class="mem-editor">
+          <div class="mem-editor__head">
+            <span class="mem-editor__title">u_88234 / profile.preferred_language</span>
+            <span class="hx-badge hx-badge--info"><span class="hx-badge__dot"></span>vector + summary</span>
+            <div class="mem-editor__actions">
+              <button class="hx-btn hx-btn--secondary hx-btn--sm">复制 ID</button>
+              <button class="hx-btn hx-btn--secondary hx-btn--sm">保存</button>
+              <button class="hx-btn hx-btn--danger hx-btn--sm" id="delete-btn">删除</button>
+            </div>
+          </div>
+          <div class="mem-editor__meta">
+            <div><span class="mem-editor__meta-label">id</span><span class="mem-editor__meta-value">mem_8a2c3f…</span></div>
+            <div><span class="mem-editor__meta-label">agent</span><span class="mem-editor__meta-value">customer-support-bot</span></div>
+            <div><span class="mem-editor__meta-label">created</span><span class="mem-editor__meta-value">2026-04-12</span></div>
+            <div><span class="mem-editor__meta-label">TTL 到期</span><span class="mem-editor__meta-value">2026-07-11</span></div>
+          </div>
+          <div class="mem-editor__tabs">
+            <button class="hx-tab" aria-selected="true">JSON</button>
+            <button class="hx-tab" aria-selected="false">Markdown</button>
+            <button class="hx-tab" aria-selected="false">Vector embedding</button>
+            <button class="hx-tab" aria-selected="false">History (3)</button>
+          </div>
+          <pre class="mem-editor__body">{
+  <span class="k">"id"</span>: <span class="v-str">"mem_8a2c3f12d801"</span>,
+  <span class="k">"user_id"</span>: <span class="v-str">"u_88234"</span>,
+  <span class="k">"agent_name"</span>: <span class="v-str">"customer-support-bot"</span>,
+  <span class="k">"key"</span>: <span class="v-str">"profile.preferred_language"</span>,
+  <span class="k">"value"</span>: {
+    <span class="k">"language"</span>: <span class="v-str">"zh-CN"</span>,
+    <span class="k">"formality"</span>: <span class="v-str">"polite"</span>,
+    <span class="k">"learned_at"</span>: <span class="v-str">"2026-04-12T08:30:00Z"</span>,
+    <span class="k">"confidence"</span>: <span class="v-num">0.94</span>
+  },
+  <span class="k">"summary"</span>: <span class="v-str">"用户偏好简体中文,客气表达"</span>,
+  <span class="k">"ttl_days"</span>: <span class="v-num">90</span>,
+  <span class="k">"created_at"</span>: <span class="v-str">"2026-04-12T08:30:00Z"</span>,
+  <span class="k">"updated_at"</span>: <span class="v-str">"2026-05-22T14:18:00Z"</span>,
+  <span class="k">"source_run_id"</span>: <span class="v-str">"run_9f8c2e3a"</span>
+}</pre>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- Confirm dialog (按"删除"出现) -->
+<div class="hx-modal-backdrop confirm-overlay">
+  <div class="hx-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="hx-modal__header">
+      <h3 class="hx-card__title" id="confirm-title" style="color: var(--hx-color-danger-500);">删除 memory 条目</h3>
+    </div>
+    <div class="hx-modal__body">
+      <p>此操作会软删除该 memory 条目(可在 30 天内恢复),并在 audit log 记录。</p>
+      <p class="hx-text-secondary hx-text-sm">受影响:user <code class="hx-text-mono">u_88234</code> · key <code class="hx-text-mono">profile.preferred_language</code></p>
+      <p style="margin-top: 16px;">输入 <strong class="hx-text-mono">profile.preferred_language</strong> 确认删除:</p>
+      <input class="hx-input" style="width: 100%; margin-top: 8px;" placeholder="输入完整 key 名" />
+    </div>
+    <div class="hx-modal__footer">
+      <button class="hx-btn hx-btn--secondary" id="cancel-btn">取消</button>
+      <button class="hx-btn hx-btn--danger" disabled>删除</button>
+    </div>
+  </div>
+</div>
+
+<div class="hx-theme-toggle">
+  <button data-theme="dark" aria-pressed="true">Dark</button>
+  <button data-theme="light" aria-pressed="false">Light</button>
+  <span style="width: 1px; background: var(--hx-border-subtle); margin: 0 4px;"></span>
+  <button data-state="default" aria-pressed="true">默认</button>
+  <button data-state="confirm" aria-pressed="false">确认弹窗</button>
+</div>
+<script>
+  const html = document.documentElement;
+  const body = document.body;
+  document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
+    html.setAttribute('data-theme', btn.dataset.theme);
+    document.querySelectorAll('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === btn.dataset.theme)));
+  }));
+  document.querySelectorAll('[data-state]').forEach(btn => btn.addEventListener('click', () => {
+    body.setAttribute('data-state', btn.dataset.state);
+    document.querySelectorAll('[data-state]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.state === btn.dataset.state)));
+  }));
+  document.getElementById('delete-btn').addEventListener('click', () => {
+    body.setAttribute('data-state', 'confirm');
+    document.querySelectorAll('[data-state]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.state === 'confirm')));
+  });
+  document.getElementById('cancel-btn').addEventListener('click', () => {
+    body.setAttribute('data-state', 'default');
+    document.querySelectorAll('[data-state]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.state === 'default')));
+  });
+</script>
+
+</body>
+</html>

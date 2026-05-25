@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 03 — Agent 详情 / Playground tab (核心 debug 能力)
+  ============================================================
+  这是 per-agent Playground tab(Mini-ADR H-2):debug 能力嵌在 Agent 详情页 tab,
+  不是独立产品面。布局 = 左 input + manifest snippet,右 SSE 消息流 + trace timeline。
+
+  Tokens used:
+    --hx-color-accent-500 (user message bubble)
+    --hx-color-brand-500 (assistant streaming cursor)
+    --hx-font-mono (system / tool calls)
+
+  Antd 5 components:
+    Monaco editor wrapper → .pg-manifest-snippet (本 mockup 用 <pre> 简化)
+    <Input.TextArea>      → .pg-input
+    <Button>              → .hx-btn--primary (运行)
+    Custom MessageBubble  → .pg-msg
+    Custom TraceTimeline  → .hx-trace (右侧 panel)
+    Custom SSELiveLog     → .pg-tool-call
+
+  键盘:
+    Cmd+Enter  发送
+    Cmd+/      切 manifest snippet 折叠
+    Esc        终止运行(stop streaming)
+
+  状态变体:
+    streaming  右侧消息流中出现 typing cursor + tool call card 渐入
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>customer-support-bot — Playground</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .hx-main { padding: 0; }
+    .pg-shell {
+      height: calc(100vh - var(--hx-topbar-height));
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .pg-header {
+      display: flex; align-items: center; gap: var(--hx-space-3);
+      padding: var(--hx-space-3) var(--hx-space-6);
+      border-bottom: 1px solid var(--hx-border-subtle);
+      background: var(--hx-surface-base);
+    }
+    .pg-header__title {
+      font-weight: var(--hx-font-weight-semibold);
+      font-size: var(--hx-font-size-md);
+    }
+    .pg-header__meta { color: var(--hx-text-tertiary); font-size: var(--hx-font-size-sm); }
+    .pg-header__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+    .pg-grid {
+      display: grid;
+      grid-template-columns: 360px 1fr 360px;
+      min-height: 0;
+    }
+
+    /* 左:input + manifest snippet */
+    .pg-left {
+      border-right: 1px solid var(--hx-border-subtle);
+      display: flex; flex-direction: column;
+      background: var(--hx-surface-base);
+      min-height: 0;
+    }
+    .pg-section {
+      padding: var(--hx-space-4);
+      border-bottom: 1px solid var(--hx-border-subtle);
+    }
+    .pg-section__label {
+      font-size: var(--hx-font-size-xs);
+      font-weight: var(--hx-font-weight-medium);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--hx-text-tertiary);
+      margin: 0 0 var(--hx-space-2);
+    }
+    .pg-input {
+      width: 100%;
+      min-height: 96px;
+      resize: vertical;
+      padding: var(--hx-space-3);
+      border-radius: var(--hx-radius-sm);
+      border: 1px solid var(--hx-border-default);
+      background: var(--hx-surface-base);
+      color: var(--hx-text-primary);
+      font-family: var(--hx-font-sans);
+      font-size: var(--hx-font-size-sm);
+      line-height: var(--hx-line-height-normal);
+    }
+    .pg-input:focus { outline: none; border-color: var(--hx-border-focus); box-shadow: 0 0 0 1px var(--hx-border-focus); }
+
+    .pg-manifest-snippet {
+      flex: 1;
+      overflow: auto;
+      padding: var(--hx-space-3);
+      background: var(--hx-color-neutral-950);
+      border-top: 1px solid var(--hx-border-subtle);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-xs);
+      line-height: var(--hx-line-height-snug);
+      color: var(--hx-text-secondary);
+      margin: 0;
+    }
+    .pg-manifest-snippet .k { color: var(--hx-color-brand-400); }
+    .pg-manifest-snippet .v { color: var(--hx-color-accent-400); }
+    .pg-manifest-snippet .c { color: var(--hx-text-tertiary); font-style: italic; }
+
+    /* 中:消息流 */
+    .pg-center {
+      display: flex; flex-direction: column;
+      min-height: 0;
+      background: var(--hx-surface-bg);
+    }
+    .pg-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--hx-space-6);
+      display: flex; flex-direction: column; gap: var(--hx-space-4);
+    }
+    .pg-msg {
+      display: flex; gap: var(--hx-space-3);
+      max-width: 720px;
+      width: 100%;
+    }
+    .pg-msg__avatar {
+      width: 28px; height: 28px;
+      flex-shrink: 0;
+      border-radius: var(--hx-radius-full);
+      display: flex; align-items: center; justify-content: center;
+      font-size: var(--hx-font-size-xs);
+      font-weight: var(--hx-font-weight-semibold);
+    }
+    .pg-msg--user { align-self: flex-end; flex-direction: row-reverse; }
+    .pg-msg--user .pg-msg__avatar { background: var(--hx-color-accent-500); color: var(--hx-color-neutral-0); }
+    .pg-msg--user .pg-msg__body {
+      background: var(--hx-color-accent-500);
+      color: var(--hx-color-neutral-0);
+      border-radius: var(--hx-radius-md);
+      padding: var(--hx-space-3) var(--hx-space-4);
+      font-size: var(--hx-font-size-sm);
+    }
+    .pg-msg--assistant .pg-msg__avatar { background: var(--hx-surface-selected); color: var(--hx-color-brand-400); }
+    .pg-msg--assistant .pg-msg__body {
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-md);
+      padding: var(--hx-space-3) var(--hx-space-4);
+      font-size: var(--hx-font-size-sm);
+      line-height: var(--hx-line-height-normal);
+    }
+    .pg-msg__cursor {
+      display: inline-block;
+      width: 6px; height: 14px;
+      background: var(--hx-color-brand-500);
+      margin-left: 2px;
+      vertical-align: -2px;
+      animation: pg-blink 1s steps(2) infinite;
+    }
+    @keyframes pg-blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .pg-msg__cursor { animation: none; opacity: 0.7; } }
+
+    /* Tool call card */
+    .pg-tool-call {
+      max-width: 720px;
+      width: 100%;
+      margin-left: 40px;
+      background: var(--hx-surface-raised);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-2) var(--hx-space-3);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-xs);
+    }
+    .pg-tool-call__head {
+      display: flex; align-items: center; gap: var(--hx-space-2);
+      color: var(--hx-text-secondary);
+    }
+    .pg-tool-call__name {
+      font-weight: var(--hx-font-weight-medium);
+      color: var(--hx-color-accent-400);
+    }
+    .pg-tool-call__args {
+      margin-top: var(--hx-space-2);
+      padding: var(--hx-space-2);
+      background: var(--hx-color-neutral-950);
+      border-radius: var(--hx-radius-xs);
+      color: var(--hx-text-tertiary);
+      overflow-x: auto;
+    }
+
+    /* Input area at bottom of center */
+    .pg-bottom {
+      padding: var(--hx-space-3) var(--hx-space-6);
+      border-top: 1px solid var(--hx-border-subtle);
+      background: var(--hx-surface-base);
+      display: flex; gap: var(--hx-space-2); align-items: flex-end;
+    }
+    .pg-bottom .pg-input { flex: 1; min-height: 56px; }
+
+    /* 右:trace timeline + step inspector */
+    .pg-right {
+      border-left: 1px solid var(--hx-border-subtle);
+      display: flex; flex-direction: column;
+      background: var(--hx-surface-base);
+      min-height: 0;
+    }
+    .pg-right__section { padding: var(--hx-space-4); border-bottom: 1px solid var(--hx-border-subtle); }
+    .pg-right__section:last-child { flex: 1; overflow-y: auto; }
+
+    .pg-step-detail {
+      padding: var(--hx-space-3);
+      background: var(--hx-color-neutral-950);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-secondary);
+      line-height: var(--hx-line-height-normal);
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+
+<div class="hx-app">
+  <aside class="hx-sidebar">
+    <div class="hx-sidebar__brand">
+      <svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg>
+      <span>helix</span>
+    </div>
+    <nav class="hx-sidebar__nav">
+      <a class="hx-sidebar__item" href="./01-agents-list.html" aria-current="page">Agents</a>
+      <a class="hx-sidebar__item" href="./04-run-trace.html">Runs</a>
+      <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+      <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
+      <a class="hx-sidebar__item" href="#">Skills</a>
+      <a class="hx-sidebar__item" href="#">Triggers</a>
+      <div class="hx-sidebar__group-label">Settings</div>
+      <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+    </nav>
+  </aside>
+
+  <header class="hx-topbar">
+    <div class="hx-topbar__tenant"><strong>acme-corp</strong><span class="hx-text-tertiary">/ leyi@acme</span></div>
+    <div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div>
+    <div class="hx-topbar__spacer"></div>
+  </header>
+
+  <main class="hx-main">
+    <div class="pg-shell">
+
+      <!-- pg header -->
+      <div class="pg-header">
+        <nav class="hx-breadcrumb" style="margin: 0;">
+          <a href="./01-agents-list.html">Agents</a>
+          <span class="hx-breadcrumb__sep">/</span>
+          <a href="./02-agent-detail-overview.html">customer-support-bot</a>
+          <span class="hx-breadcrumb__sep">/</span>
+          <span class="pg-header__title hx-text-primary">Playground</span>
+        </nav>
+        <div class="hx-text-tertiary hx-text-sm" style="margin-left: 16px;">debug session · thread_id <span class="hx-text-mono">th_5a3c…</span></div>
+        <div class="pg-header__actions">
+          <span class="hx-badge hx-badge--info"><span class="hx-badge__dot"></span>streaming</span>
+          <button class="hx-btn hx-btn--secondary hx-btn--sm">清空会话</button>
+          <button class="hx-btn hx-btn--danger hx-btn--sm">停止 <span class="hx-kbd">Esc</span></button>
+        </div>
+      </div>
+
+      <!-- pg grid -->
+      <div class="pg-grid">
+
+        <!-- 左:input + manifest snippet -->
+        <aside class="pg-left">
+          <div class="pg-section">
+            <p class="pg-section__label">Input</p>
+            <textarea class="pg-input" placeholder="输入 prompt 测试 agent ..." aria-label="prompt input">订单 #88234 的物流为什么显示已签收但客户说没收到?需要我帮他理赔吗?</textarea>
+          </div>
+          <div class="pg-section" style="border-bottom: none;">
+            <p class="pg-section__label">附加上下文(可选)</p>
+            <input class="hx-input" placeholder="user_id / thread_id / 自定义字段" style="width: 100%;" />
+          </div>
+          <pre class="pg-manifest-snippet"><span class="c"># manifest snippet (可改可重跑)</span>
+<span class="k">name:</span> customer-support-bot
+<span class="k">version:</span> <span class="v">v3.4.2</span>
+<span class="k">model:</span>
+  <span class="k">primary:</span> <span class="v">claude-sonnet-4-6</span>
+  <span class="k">fallback:</span> <span class="v">claude-haiku-4-5</span>
+  <span class="k">temperature:</span> <span class="v">0.3</span>
+<span class="k">max_steps:</span> <span class="v">12</span>
+<span class="k">skills:</span>
+  - <span class="v">rag.knowledge</span>
+  - <span class="v">ticket.create</span>
+  - <span class="v">handover.human</span>
+<span class="k">memory:</span>
+  <span class="k">backend:</span> <span class="v">vector+summary</span>
+  <span class="k">ttl_days:</span> <span class="v">90</span>
+<span class="c"># 改完点"运行"会用临时版本重跑,不影响生产版本</span></pre>
+        </aside>
+
+        <!-- 中:消息流 -->
+        <section class="pg-center">
+          <div class="pg-messages" aria-live="polite">
+
+            <!-- User message -->
+            <div class="pg-msg pg-msg--user">
+              <div class="pg-msg__avatar">L</div>
+              <div class="pg-msg__body">订单 #88234 的物流为什么显示已签收但客户说没收到?需要我帮他理赔吗?</div>
+            </div>
+
+            <!-- Tool call card -->
+            <div class="pg-tool-call">
+              <div class="pg-tool-call__head">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
+                <span class="pg-tool-call__name">rag.knowledge</span>
+                <span style="margin-left: auto;" class="hx-text-tertiary">312ms · 4 docs</span>
+              </div>
+              <pre class="pg-tool-call__args">query: "订单 已签收 客户未收到 理赔流程"
+top_k: 5
+filter: { collection: "logistics-policy" }</pre>
+            </div>
+
+            <!-- Tool call card 2 -->
+            <div class="pg-tool-call">
+              <div class="pg-tool-call__head">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+                <span class="pg-tool-call__name">logistics.lookup</span>
+                <span style="margin-left: auto;" class="hx-text-tertiary">186ms</span>
+              </div>
+              <pre class="pg-tool-call__args">order_id: "88234"
+status: "delivered"
+delivered_at: "2026-05-20T14:32:00Z"
+signed_by: "前台-王经理"
+photo_url: "https://…/proof.jpg"</pre>
+            </div>
+
+            <!-- Assistant message (streaming) -->
+            <div class="pg-msg pg-msg--assistant">
+              <div class="pg-msg__avatar">A</div>
+              <div class="pg-msg__body">
+                好的,我查了一下订单 <strong>#88234</strong> 的物流详情和理赔流程,情况是这样:<br/><br/>
+                <strong>物流方:</strong>已在 5 月 20 日 14:32 由"前台-王经理"代签收,有 <a href="#">签收照片</a>。<br/>
+                <strong>常见原因:</strong>包裹被前台 / 物业 / 同事代收后未及时转交;少数情况下确实是错签。<br/><br/>
+                建议先按这个顺序处理:<br/>
+                1. 让客户联系收件地址的前台或同事确认是否代收
+                2. 如确认未送达,我可以帮你<span class="pg-msg__cursor"></span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Bottom input(在 streaming 期间 disabled) -->
+          <div class="pg-bottom">
+            <textarea class="pg-input" placeholder="继续对话(Cmd+Enter 发送)..." disabled aria-label="对话输入"></textarea>
+            <button class="hx-btn hx-btn--primary" disabled>发送 <span class="hx-kbd">⌘↵</span></button>
+          </div>
+        </section>
+
+        <!-- 右:trace timeline + step inspector -->
+        <aside class="pg-right">
+          <div class="pg-right__section">
+            <p class="pg-section__label">Trace · step 3/N · 1.42s</p>
+            <div class="hx-trace">
+              <div class="hx-trace__span">
+                <span>step.plan</span>
+                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 22%;"></div>
+                <span class="hx-trace__duration">142ms</span>
+              </div>
+              <div class="hx-trace__span">
+                <span>llm.call (sonnet)</span>
+                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 60%; margin-left: 6%;"></div>
+                <span class="hx-trace__duration">386ms</span>
+              </div>
+              <div class="hx-trace__span">
+                <span>tool.rag.knowledge</span>
+                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 28%; margin-left: 22%;"></div>
+                <span class="hx-trace__duration">312ms</span>
+              </div>
+              <div class="hx-trace__span">
+                <span>tool.logistics.lookup</span>
+                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 16%; margin-left: 48%;"></div>
+                <span class="hx-trace__duration">186ms</span>
+              </div>
+              <div class="hx-trace__span">
+                <span>llm.call (sonnet streaming)</span>
+                <div class="hx-trace__bar hx-trace__bar--slow" style="width: 30%; margin-left: 66%;"></div>
+                <span class="hx-trace__duration">… stream</span>
+              </div>
+            </div>
+          </div>
+          <div class="pg-right__section">
+            <p class="pg-section__label">Step 4 detail</p>
+            <div class="pg-step-detail">{
+  "step": 4,
+  "node": "llm.call",
+  "model": "claude-sonnet-4-6",
+  "prompt_tokens": 1842,
+  "completion_tokens": 96,
+  "cached_tokens": 1640,
+  "stop_reason": "streaming"
+}</div>
+          </div>
+        </aside>
+
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="hx-theme-toggle"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div>
+<script>
+  document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
+    document.documentElement.setAttribute('data-theme', btn.dataset.theme);
+    document.querySelectorAll('[data-theme]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === btn.dataset.theme)));
+  }));
+</script>
+
+</body>
+</html>
