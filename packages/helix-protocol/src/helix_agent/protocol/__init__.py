@@ -49,6 +49,7 @@ from helix_agent.protocol.audit import (
     AuditResult,
 )
 from helix_agent.protocol.auth import (
+    ALL_TENANTS,
     AuthMethod,
     JWTClaims,
     Principal,
@@ -142,6 +143,7 @@ from helix_agent.protocol.trigger import (
 from helix_agent.protocol.user_workspace import UserWorkspace
 
 __all__ = [
+    "ALL_TENANTS",
     "API_KEY_STORED_PREFIX_LEN",
     "DEFAULT_CHUNK_MAX_TOKENS",
     "DEFAULT_CHUNK_OVERLAP_TOKENS",

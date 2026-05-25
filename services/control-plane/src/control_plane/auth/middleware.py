@@ -32,7 +32,9 @@ from control_plane.auth.api_key_verifier import ApiKeyVerifier, is_api_key_beare
 from control_plane.auth.errors import AuthError, MissingCredentialsError
 from control_plane.auth.jwt_verifier import JWTVerifier
 from control_plane.auth.mtls import MTLSVerifier
+from control_plane.auth.system_admin import resolve_system_admin
 from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.persistence.auth import RoleBindingStore
 from helix_agent.protocol import AuditAction, AuditResult, Principal
 from helix_agent.runtime.audit.logger import AuditLogger
 
@@ -60,6 +62,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         mtls_verifier: MTLSVerifier | None = None,
         mtls_header_name: str = _DEFAULT_XFCC_HEADER,
         api_key_verifier: ApiKeyVerifier | None = None,
+        role_binding_store: RoleBindingStore | None = None,
     ) -> None:
         super().__init__(app)
         self._verifier = verifier
@@ -69,6 +72,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self._mtls_verifier = mtls_verifier
         self._mtls_header = mtls_header_name
         self._api_key_verifier = api_key_verifier
+        # Stream N:after a JWT or API Key verifier produces a base Principal,
+        # ``resolve_system_admin`` queries this store for a platform-scope
+        # role binding and augments the Principal with ``is_system_admin``
+        # + ``allowed_tenants="*"``. mTLS path bypasses this lookup —
+        # internal service principals are not platform admins
+        # (they already carry ``allowed_tenants=(system_tenant_id,)``).
+        self._role_binding_store = role_binding_store
 
     async def dispatch(
         self,
@@ -87,14 +97,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     principal = await self._api_key_verifier.verify(bearer)
                 except AuthError as exc:
                     return await self._reject(request, exc)
+                # Stream N — augment with platform-admin status if applicable.
+                principal = await resolve_system_admin(principal, self._role_binding_store)
                 return await self._call_with_principal(request, call_next, principal)
             try:
                 claims = await self._verifier.verify(bearer)
             except AuthError as exc:
                 return await self._reject(request, exc)
-            return await self._call_with_principal(
-                request, call_next, Principal.from_jwt_claims(claims)
-            )
+            principal = Principal.from_jwt_claims(claims)
+            # Stream N — augment with platform-admin status if applicable.
+            principal = await resolve_system_admin(principal, self._role_binding_store)
+            return await self._call_with_principal(request, call_next, principal)
 
         if self._mtls_verifier is not None:
             xfcc = request.headers.get(self._mtls_header)
@@ -103,6 +116,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     principal = self._mtls_verifier.verify(xfcc)
                 except AuthError as exc:
                     return await self._reject(request, exc)
+                # mTLS principals are internal service identities — they
+                # carry ``allowed_tenants=(system_tenant_id,)`` already
+                # and do not go through the platform-admin lookup.
                 return await self._call_with_principal(request, call_next, principal)
 
         return await self._reject(request, MissingCredentialsError())

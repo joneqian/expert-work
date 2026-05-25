@@ -724,6 +724,9 @@ def create_app(
         mtls_verifier=resolved_mtls,
         mtls_header_name=resolved_settings.mtls_xfcc_header_name,
         api_key_verifier=resolved_api_key_verifier,
+        # Stream N — AuthMiddleware queries this store to populate
+        # ``Principal.is_system_admin`` from a platform-scope role binding.
+        role_binding_store=resolved_role_bindings,
     )
     app.add_middleware(ObservabilityMiddleware)
 
