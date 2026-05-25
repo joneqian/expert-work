@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from control_plane.api._authz import require
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.memory import MemoryStore
 from helix_agent.persistence.tenant_user import TenantUserStore
@@ -100,19 +101,40 @@ def build_memory_router() -> APIRouter:
     @router.get("")
     async def list_memories(
         request: Request,
-        _: Annotated[Principal, Depends(require("memory", "read"))],
+        principal: Annotated[Principal, Depends(require("memory", "read"))],
         store: Annotated[MemoryStore, Depends(_get_memory_repo)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
         kind: Annotated[Literal["fact", "episodic"] | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> dict[str, Any]:
-        tenant_id, user_id = await _require_caller_user(request, users)
-        items = await store.list_for_user(
-            tenant_id=tenant_id, user_id=user_id, kind=kind, limit=limit
+        scope = await ensure_tenant_scope(
+            principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/memory",
         )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                # Platform-admin view aggregates every user's memories
+                # across every tenant — per-user binding is intentionally
+                # dropped (system_admin sees the whole picture).
+                items = await store.list_all_tenants(kind=kind, limit=limit)
+            else:
+                # Single-tenant: keep the per-user enforcement.
+                _, user_id = await _require_caller_user(request, users)
+                items = await store.list_for_user(
+                    tenant_id=scope.tenant_id, user_id=user_id, kind=kind, limit=limit
+                )
         return {
             "success": True,
-            "data": {"items": [_serialise(i) for i in items], "total": len(items)},
+            "data": {
+                "items": [_serialise(i) for i in items],
+                "total": len(items),
+                "cross_tenant": isinstance(scope, CrossTenant),
+            },
             "error": None,
         }
 

@@ -77,6 +77,16 @@ class InMemoryServiceAccountStore(ServiceAccountStore):
             )
             return ordered[offset : offset + limit]
 
+    async def list_all_tenants(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ServiceAccount]:
+        async with self._lock:
+            ordered = sorted(self._rows.values(), key=lambda r: r.created_at, reverse=True)
+            return ordered[offset : offset + limit]
+
     async def delete(self, *, tenant_id: UUID, service_account_id: UUID) -> bool:
         async with self._lock:
             row = self._rows.get(service_account_id)
@@ -145,6 +155,40 @@ class InMemoryApiKeyStore(ApiKeyStore):
                     row
                     for row in self._rows.values()
                     if row.tenant_id == tenant_id and row.service_account_id == service_account_id
+                ),
+                key=lambda r: r.created_at,
+                reverse=True,
+            )
+
+    async def list_by_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        service_account_id: UUID | None = None,
+    ) -> list[ApiKey]:
+        async with self._lock:
+            return sorted(
+                (
+                    row
+                    for row in self._rows.values()
+                    if row.tenant_id == tenant_id
+                    and (service_account_id is None or row.service_account_id == service_account_id)
+                ),
+                key=lambda r: r.created_at,
+                reverse=True,
+            )
+
+    async def list_all_tenants(
+        self,
+        *,
+        service_account_id: UUID | None = None,
+    ) -> list[ApiKey]:
+        async with self._lock:
+            return sorted(
+                (
+                    row
+                    for row in self._rows.values()
+                    if service_account_id is None or row.service_account_id == service_account_id
                 ),
                 key=lambda r: r.created_at,
                 reverse=True,
@@ -295,6 +339,10 @@ class InMemoryRoleBindingStore(RoleBindingStore):
                 for row in self._rows.values()
                 if not row.platform_scope and row.tenant_id == tenant_id
             ]
+
+    async def list_all_tenants(self) -> list[RoleBinding]:
+        async with self._lock:
+            return list(self._rows.values())
 
     async def list_platform_scope(self) -> list[RoleBinding]:
         async with self._lock:

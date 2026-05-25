@@ -87,6 +87,23 @@ class InMemoryMemoryStore(MemoryStore):
         )
         return candidates[:limit]
 
+    async def list_all_tenants(
+        self,
+        *,
+        kind: Literal["fact", "episodic"] | None = None,
+        limit: int = 50,
+    ) -> list[MemoryItem]:
+        candidates = [
+            row
+            for row in self._rows
+            if row.deleted_at is None and (kind is None or row.kind == kind)
+        ]
+        candidates.sort(
+            key=lambda row: row.created_at or datetime.min.replace(tzinfo=UTC),
+            reverse=True,
+        )
+        return candidates[:limit]
+
     async def update_content(
         self,
         *,

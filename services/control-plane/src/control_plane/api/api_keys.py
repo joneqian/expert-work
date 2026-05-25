@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from control_plane.api._authz import require
 from control_plane.audit import emit
 from control_plane.auth.api_key_verifier import mint_api_key
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.auth import (
     ApiKeyStore,
@@ -149,6 +150,44 @@ def build_api_keys_router() -> APIRouter:
         return {
             "success": True,
             "data": {"items": [k.model_dump(mode="json") for k in items], "total": len(items)},
+            "error": None,
+        }
+
+    @router.get("/v1/api_keys")
+    async def list_api_keys_admin(
+        principal: Annotated[Principal, Depends(require("api_key", "read"))],
+        keys: Annotated[ApiKeyStore, Depends(_get_keys)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        service_account_id: Annotated[UUID | None, Query()] = None,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
+    ) -> dict[str, object]:
+        """Stream N — top-level admin list across SAs / tenants.
+
+        - Tenant admin: ``tenant_id`` omitted / equals home → list all
+          keys in their tenant, optional ``service_account_id`` filter.
+        - System admin: ``tenant_id=*`` → list every tenant's keys.
+        """
+        scope = await ensure_tenant_scope(
+            principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/api_keys",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await keys.list_all_tenants(service_account_id=service_account_id)
+            else:
+                items = await keys.list_by_tenant(
+                    tenant_id=scope.tenant_id, service_account_id=service_account_id
+                )
+        return {
+            "success": True,
+            "data": {
+                "items": [k.model_dump(mode="json") for k in items],
+                "total": len(items),
+                "cross_tenant": isinstance(scope, CrossTenant),
+            },
             "error": None,
         }
 

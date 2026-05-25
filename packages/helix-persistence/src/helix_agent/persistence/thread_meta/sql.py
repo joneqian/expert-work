@@ -104,6 +104,22 @@ class SqlThreadMetaStore(ThreadMetaStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_meta(r) for r in rows]
 
+    async def list_all_tenants(
+        self,
+        *,
+        status: ThreadStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ThreadMeta]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        stmt = select(ThreadMetaRow)
+        if status is not None:
+            stmt = stmt.where(ThreadMetaRow.status == status.value)
+        stmt = stmt.order_by(ThreadMetaRow.created_at.desc()).limit(limit).offset(offset)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_meta(r) for r in rows]
+
     async def update_status(
         self,
         thread_id: UUID,

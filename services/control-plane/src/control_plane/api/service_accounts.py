@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from control_plane.api._authz import require
 from control_plane.audit import emit
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.auth import (
     DuplicateServiceAccountError,
@@ -32,6 +33,7 @@ class ServiceAccountListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     items: list[ServiceAccount]
     total: int
+    cross_tenant: bool = False  # Stream N — true ⇔ ?tenant_id=* response
 
 
 def _get_repo(request: Request) -> ServiceAccountStore:
@@ -84,11 +86,28 @@ def build_service_accounts_router() -> APIRouter:
     async def list_service_accounts(
         principal: Annotated[Principal, Depends(require("service_account", "read"))],
         repo: Annotated[ServiceAccountStore, Depends(_get_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
         limit: int = Query(default=100, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> dict[str, object]:
-        items = await repo.list_by_tenant(tenant_id=principal.tenant_id, limit=limit, offset=offset)
-        body = ServiceAccountListResponse(items=items, total=len(items))
+        scope = await ensure_tenant_scope(
+            principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/service_accounts",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await repo.list_all_tenants(limit=limit, offset=offset)
+            else:
+                items = await repo.list_by_tenant(
+                    tenant_id=scope.tenant_id, limit=limit, offset=offset
+                )
+        body = ServiceAccountListResponse(
+            items=items, total=len(items), cross_tenant=isinstance(scope, CrossTenant)
+        )
         return {"success": True, "data": body.model_dump(mode="json"), "error": None}
 
     @router.delete("/{service_account_id}", status_code=204)

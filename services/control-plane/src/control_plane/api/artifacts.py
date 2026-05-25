@@ -25,10 +25,10 @@ import hashlib
 import logging
 import urllib.parse
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict
 
@@ -37,6 +37,7 @@ from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit as audit_emit
 from control_plane.quota.base import QuotaService
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import ArtifactStore
 from helix_agent.persistence.rls import current_user_id_var
@@ -103,20 +104,50 @@ def build_artifacts_router() -> APIRouter:
         request: Request,
         store: Annotated[ArtifactStore, Depends(_get_artifact_store)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> JSONResponse:
-        tenant_id: UUID = request.state.tenant_id
-        caller_user_id = await resolve_caller_user_id(request, users)
-        # Artifacts are per-user; a machine principal owns none.
-        if caller_user_id is None:
-            return JSONResponse(content={"artifacts": []})
-        current_user_id_var.set(caller_user_id)
-        artifacts = await store.list_for_user(tenant_id=tenant_id, user_id=caller_user_id)
-        return JSONResponse(
-            content={
-                "artifacts": [
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/artifacts",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                # Platform-admin view aggregates every user's artifacts.
+                artifacts = await store.list_all_tenants()
+                items = [
+                    {
+                        "name": a.name,
+                        "kind": a.kind,
+                        "latest_version": a.latest_version,
+                        "tenant_id": str(a.tenant_id),
+                        "user_id": str(a.user_id),
+                    }
+                    for a in artifacts
+                ]
+            else:
+                caller_user_id = await resolve_caller_user_id(request, users)
+                # Artifacts are per-user; a machine principal owns none.
+                if caller_user_id is None:
+                    return JSONResponse(
+                        content={"artifacts": [], "items": [], "cross_tenant": False}
+                    )
+                current_user_id_var.set(caller_user_id)
+                artifacts = await store.list_for_user(
+                    tenant_id=scope.tenant_id, user_id=caller_user_id
+                )
+                items = [
                     {"name": a.name, "kind": a.kind, "latest_version": a.latest_version}
                     for a in artifacts
                 ]
+        return JSONResponse(
+            content={
+                "artifacts": items,
+                "items": items,
+                "cross_tenant": isinstance(scope, CrossTenant),
             }
         )
 

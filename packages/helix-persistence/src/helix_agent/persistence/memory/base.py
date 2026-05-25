@@ -58,6 +58,21 @@ class MemoryStore(abc.ABC):
         away at the API boundary)."""
 
     @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        kind: Literal["fact", "episodic"] | None = None,
+        limit: int = 50,
+    ) -> list[MemoryItem]:
+        """Cross-tenant memory list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside ``bypass_rls_session()``. No ``user_id``
+        filter — the platform admin view aggregates every user's
+        memories across every tenant. Soft-deleted rows are excluded,
+        newest first.
+        """
+
+    @abc.abstractmethod
     async def update_content(
         self,
         *,

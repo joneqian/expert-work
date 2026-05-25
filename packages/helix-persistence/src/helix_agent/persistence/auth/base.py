@@ -93,6 +93,18 @@ class ServiceAccountStore(abc.ABC):
         """Paginated list, newest first."""
 
     @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ServiceAccount]:
+        """Cross-tenant service-account list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside ``bypass_rls_session()``. Newest first.
+        """
+
+    @abc.abstractmethod
     async def delete(self, *, tenant_id: UUID, service_account_id: UUID) -> bool:
         """Hard-delete (cascades to API keys). Returns ``False`` if no row matched."""
 
@@ -132,6 +144,32 @@ class ApiKeyStore(abc.ABC):
         service_account_id: UUID,
     ) -> list[ApiKey]:
         """All keys for one service account; newest first."""
+
+    @abc.abstractmethod
+    async def list_by_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        service_account_id: UUID | None = None,
+    ) -> list[ApiKey]:
+        """All keys in a tenant — Stream N (Mini-ADR N-4).
+
+        Optional ``service_account_id`` narrows further. Used by the
+        admin ``/v1/api_keys`` top-level endpoint.
+        """
+
+    @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        service_account_id: UUID | None = None,
+    ) -> list[ApiKey]:
+        """Cross-tenant API-key list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside ``bypass_rls_session()``. Optional
+        ``service_account_id`` filter applied across all tenants.
+        Newest first.
+        """
 
     @abc.abstractmethod
     async def revoke(self, *, tenant_id: UUID, api_key_id: UUID) -> bool:
@@ -217,6 +255,16 @@ class RoleBindingStore(abc.ABC):
         """All tenant-scope role rows for the tenant — used by the admin UI.
 
         Does NOT include platform-scope bindings (those have ``tenant_id IS NULL``).
+        """
+
+    @abc.abstractmethod
+    async def list_all_tenants(self) -> list[RoleBinding]:
+        """Cross-tenant role-binding list — Stream N (Mini-ADR N-4).
+
+        Returns every row in the table, both tenant-scope and
+        platform-scope. Caller MUST be inside ``bypass_rls_session()``.
+        Used by the platform admin view to audit who holds what role
+        across every tenant.
         """
 
     @abc.abstractmethod

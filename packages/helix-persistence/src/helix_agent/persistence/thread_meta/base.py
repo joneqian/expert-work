@@ -80,6 +80,21 @@ class ThreadMetaStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        status: ThreadStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ThreadMeta]:
+        """Cross-tenant thread list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside ``bypass_rls_session()``. No ``user_id``
+        filter — the platform admin view aggregates every user's
+        sessions across every tenant. Newest first.
+        """
+
+    @abc.abstractmethod
     async def update_status(
         self,
         thread_id: UUID,

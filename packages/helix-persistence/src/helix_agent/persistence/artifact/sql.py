@@ -131,6 +131,19 @@ class SqlArtifactStore(ArtifactStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_artifact(row) for row in rows]
 
+    async def list_all_tenants(
+        self,
+        *,
+        include_deleted: bool = False,
+    ) -> list[Artifact]:
+        # Stream N — no tenant / user filter; caller must wrap in bypass_rls_session().
+        stmt = select(ArtifactRow).order_by(ArtifactRow.updated_at.desc())
+        if not include_deleted:
+            stmt = stmt.where(ArtifactRow.deleted_at.is_(None))
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_artifact(row) for row in rows]
+
     async def get_latest_version(
         self, *, tenant_id: UUID, user_id: UUID, name: str
     ) -> ArtifactVersion | None:

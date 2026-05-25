@@ -28,10 +28,12 @@ from helix_agent.protocol import (
     AgentMetadata,
     AgentSpec,
     AgentSpecBody,
+    ApiKeyScope,
     CandidateStatus,
     CurationCandidateRecord,
     EvalDatasetRecord,
     FilesystemSpec,
+    MemoryItem,
     MemorySpec,
     ModelSpec,
     NetworkSpec,
@@ -40,6 +42,7 @@ from helix_agent.protocol import (
     SandboxSpec,
     SystemPromptSpec,
     TenantConfig,
+    ThreadStatus,
     TriggerRecord,
 )
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt
@@ -173,6 +176,93 @@ async def app_state() -> AsyncIterator[tuple[AsyncClient, UUID]]:
             )
         )
 
+    # ── N.4b: 6 more stores ────────────────────────────────────────────────
+    threads = app.state.thread_meta_repo
+    for tenant in (_TENANT_A, _TENANT_B):
+        await threads.create(
+            thread_id=uuid4(),
+            tenant_id=tenant,
+            created_by="seed",
+            user_id=None,  # unowned — admin sees these
+            agent_name=f"agent-in-{tenant.hex[:6]}",
+            agent_version="1.0.0",
+        )
+
+    accounts = app.state.service_account_repo
+    sa_by_tenant: dict[UUID, UUID] = {}
+    for tenant in (_TENANT_A, _TENANT_B):
+        sa = await accounts.create(
+            tenant_id=tenant,
+            name=f"sa-{tenant.hex[:6]}",
+            description="",
+            created_by="seed",
+        )
+        sa_by_tenant[tenant] = sa.id
+
+    api_keys = app.state.api_key_repo
+    for tenant in (_TENANT_A, _TENANT_B):
+        await api_keys.create(
+            tenant_id=tenant,
+            service_account_id=sa_by_tenant[tenant],
+            prefix=f"hk_{tenant.hex[:6]}",
+            secret_hash="x" * 64,
+            scopes=[ApiKeyScope.READ],
+            expires_at=None,
+            created_by="seed",
+        )
+
+    role_bindings = app.state.role_binding_repo
+    for tenant in (_TENANT_A, _TENANT_B):
+        await role_bindings.create(
+            subject_type="user",
+            subject_id=uuid4(),
+            tenant_id=tenant,
+            role=Role.OPERATOR,
+            granted_by="seed",
+        )
+
+    # Memory + artifact rows need a user_id; seed a placeholder user.
+    user_store = app.state.tenant_user_repo
+    seeded_users: dict[UUID, UUID] = {}
+    for tenant in (_TENANT_A, _TENANT_B):
+        user = await user_store.resolve(
+            tenant_id=tenant,
+            subject_type="user",
+            subject_id=f"seed-user-{tenant.hex[:6]}",
+            display_name=None,
+        )
+        seeded_users[tenant] = user.id
+
+    memory_store = app.state.memory_repo
+    for tenant in (_TENANT_A, _TENANT_B):
+        await memory_store.write(
+            [
+                MemoryItem(
+                    id=uuid4(),
+                    tenant_id=tenant,
+                    user_id=seeded_users[tenant],
+                    kind="fact",
+                    content=f"hello from {tenant.hex[:6]}",
+                    embedding=tuple(0.0 for _ in range(8)),
+                    created_at=now,
+                )
+            ]
+        )
+
+    artifact_store = app.state.artifact_store
+    for tenant in (_TENANT_A, _TENANT_B):
+        await artifact_store.save_version(
+            tenant_id=tenant,
+            user_id=seeded_users[tenant],
+            name=f"file-{tenant.hex[:6]}.md",
+            kind="document",
+            path_in_workspace="/workspace/file.md",
+            created_in_thread="seed-thread",
+        )
+
+    # Stream H placeholder: silence unused locals when adding more rows.
+    _ = ThreadStatus
+
     # System-admin user pre-seeded with platform-scope binding.
     sys_admin_id = uuid4()
     await app.state.role_binding_repo.create(
@@ -205,51 +295,80 @@ def _system_admin_token(sys_admin_id: UUID) -> str:
 # ---------------------------------------------------------------------------
 
 
-_ENDPOINTS: list[tuple[str, str]] = [
-    ("agents", "/v1/agents"),
-    ("skills", "/v1/skills"),
-    ("triggers", "/v1/triggers"),
-    ("curation", "/v1/curation/candidates"),
-    ("eval-datasets", "/v1/eval-datasets"),
+# (name, path, home_count, star_count)
+#   home_count = rows visible to tenant_admin home tenant (1 per tenant seeded)
+#   star_count = rows visible to system_admin across both tenants (2 seeded)
+# memory + artifacts are per-user — the tenant_admin JWT resolves to a fresh
+# tenant_user (different from the seeded user that owns the row) so home_count=0;
+# cross-tenant aggregates without user filter so star_count=2.
+_ENDPOINTS: list[tuple[str, str, int, int]] = [
+    ("agents", "/v1/agents", 1, 2),
+    ("skills", "/v1/skills", 1, 2),
+    ("triggers", "/v1/triggers", 1, 2),
+    ("curation", "/v1/curation/candidates", 1, 2),
+    ("eval-datasets", "/v1/eval-datasets", 1, 2),
+    # ── N.4b ──────────────────────────────────────────────────────────────
+    ("service_accounts", "/v1/service_accounts", 1, 2),
+    # role_bindings star sees 2 tenant rows + 1 platform-scope (system admin) = 3
+    ("role_bindings", "/v1/role_bindings", 1, 3),
+    ("sessions", "/v1/sessions", 1, 2),
+    ("memory", "/v1/memory", 0, 2),
+    ("artifacts", "/v1/artifacts", 0, 2),
+    ("api_keys", "/v1/api_keys", 1, 2),
 ]
 
 
 def _items(body: dict[str, object]) -> list[dict[str, object]]:
     """Some endpoints wrap items in ``data``, others put items at the top level."""
-    if "data" in body and isinstance(body["data"], dict):
-        data = body["data"]
-        return list(data.get("items", []))  # type: ignore[arg-type]
-    return list(body.get("items", []))  # type: ignore[arg-type]
+    raw: object
+    data = body.get("data")
+    if isinstance(data, dict):
+        raw = data.get("items", [])
+    else:
+        raw = body.get("items", [])
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, dict)]
 
 
 def _is_cross_tenant(body: dict[str, object]) -> bool:
-    if "data" in body and isinstance(body["data"], dict):
-        return bool(body["data"].get("cross_tenant"))  # type: ignore[union-attr]
+    data = body.get("data")
+    if isinstance(data, dict):
+        return bool(data.get("cross_tenant"))
     return bool(body.get("cross_tenant"))
 
 
-@pytest.mark.parametrize("name,path", _ENDPOINTS)
+@pytest.mark.parametrize("name,path,home_count,star_count", _ENDPOINTS)
 @pytest.mark.asyncio
 async def test_tenant_admin_home_tenant_returns_only_home_rows(
-    app_state: tuple[AsyncClient, UUID], name: str, path: str
+    app_state: tuple[AsyncClient, UUID],
+    name: str,
+    path: str,
+    home_count: int,
+    star_count: int,
 ) -> None:
-    client, _ = app_state
+    _ = star_count
+    client, _sys = app_state
     headers = {"Authorization": f"Bearer {_tenant_admin_token()}"}
     response = await client.get(path, headers=headers)
     assert response.status_code == 200, f"{name}: {response.text}"
     body = response.json()
     assert _is_cross_tenant(body) is False
     items = _items(body)
-    # Seeded 1 row per tenant; home tenant_admin sees exactly 1.
-    assert len(items) == 1, f"{name}: expected 1, got {len(items)} — {items}"
+    assert len(items) == home_count, f"{name}: expected {home_count}, got {len(items)} — {items}"
 
 
-@pytest.mark.parametrize("name,path", _ENDPOINTS)
+@pytest.mark.parametrize("name,path,home_count,star_count", _ENDPOINTS)
 @pytest.mark.asyncio
 async def test_tenant_admin_star_tenant_id_returns_403(
-    app_state: tuple[AsyncClient, UUID], name: str, path: str
+    app_state: tuple[AsyncClient, UUID],
+    name: str,
+    path: str,
+    home_count: int,
+    star_count: int,
 ) -> None:
-    client, _ = app_state
+    _ = home_count, star_count
+    client, _sys = app_state
     headers = {"Authorization": f"Bearer {_tenant_admin_token()}"}
     response = await client.get(f"{path}?tenant_id=*", headers=headers)
     assert response.status_code == 403, f"{name}: {response.status_code} {response.text}"
@@ -260,11 +379,16 @@ async def test_tenant_admin_star_tenant_id_returns_403(
         assert detail.get("code") == "CROSS_TENANT_FORBIDDEN", f"{name}: {detail}"
 
 
-@pytest.mark.parametrize("name,path", _ENDPOINTS)
+@pytest.mark.parametrize("name,path,home_count,star_count", _ENDPOINTS)
 @pytest.mark.asyncio
 async def test_system_admin_star_tenant_id_returns_all_tenants(
-    app_state: tuple[AsyncClient, UUID], name: str, path: str
+    app_state: tuple[AsyncClient, UUID],
+    name: str,
+    path: str,
+    home_count: int,
+    star_count: int,
 ) -> None:
+    _ = home_count
     client, sys_admin_id = app_state
     headers = {"Authorization": f"Bearer {_system_admin_token(sys_admin_id)}"}
     response = await client.get(f"{path}?tenant_id=*", headers=headers)
@@ -272,5 +396,4 @@ async def test_system_admin_star_tenant_id_returns_all_tenants(
     body = response.json()
     assert _is_cross_tenant(body) is True, f"{name}: cross_tenant flag missing"
     items = _items(body)
-    # Seeded 2 tenants, 1 row each.
-    assert len(items) == 2, f"{name}: expected 2 rows across tenants, got {len(items)}"
+    assert len(items) == star_count, f"{name}: expected {star_count}, got {len(items)}"

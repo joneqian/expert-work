@@ -112,6 +112,21 @@ class SqlMemoryStore(MemoryStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_item(row) for row in rows]
 
+    async def list_all_tenants(
+        self,
+        *,
+        kind: Literal["fact", "episodic"] | None = None,
+        limit: int = 50,
+    ) -> list[MemoryItem]:
+        # Stream N — no tenant / user filter; caller must wrap in bypass_rls_session().
+        stmt = select(MemoryItemRow).where(MemoryItemRow.deleted_at.is_(None))
+        if kind is not None:
+            stmt = stmt.where(MemoryItemRow.kind == kind)
+        stmt = stmt.order_by(MemoryItemRow.created_at.desc()).limit(limit)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_item(row) for row in rows]
+
     async def update_content(
         self,
         *,

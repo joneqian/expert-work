@@ -90,6 +90,15 @@ class InMemoryArtifactStore(ArtifactStore):
         rows.sort(key=lambda a: a.updated_at or _MIN_AWARE, reverse=True)
         return rows
 
+    async def list_all_tenants(
+        self,
+        *,
+        include_deleted: bool = False,
+    ) -> list[Artifact]:
+        rows = [a for a in self._artifacts.values() if include_deleted or a.deleted_at is None]
+        rows.sort(key=lambda a: a.updated_at or _MIN_AWARE, reverse=True)
+        return rows
+
     async def get_latest_version(
         self, *, tenant_id: UUID, user_id: UUID, name: str
     ) -> ArtifactVersion | None:

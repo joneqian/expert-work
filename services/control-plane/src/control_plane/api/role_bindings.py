@@ -6,11 +6,12 @@ import logging
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict
 
 from control_plane.api._authz import require
 from control_plane.audit import emit
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.auth import (
     DuplicateRoleBindingError,
@@ -83,11 +84,28 @@ def build_role_bindings_router() -> APIRouter:
     async def list_role_bindings(
         principal: Annotated[Principal, Depends(require("role_binding", "read"))],
         repo: Annotated[RoleBindingStore, Depends(_get_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> dict[str, object]:
-        items = await repo.list_for_tenant(tenant_id=principal.tenant_id)
+        scope = await ensure_tenant_scope(
+            principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/role_bindings",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await repo.list_all_tenants()
+            else:
+                items = await repo.list_for_tenant(tenant_id=scope.tenant_id)
         return {
             "success": True,
-            "data": {"items": [b.model_dump(mode="json") for b in items], "total": len(items)},
+            "data": {
+                "items": [b.model_dump(mode="json") for b in items],
+                "total": len(items),
+                "cross_tenant": isinstance(scope, CrossTenant),
+            },
             "error": None,
         }
 

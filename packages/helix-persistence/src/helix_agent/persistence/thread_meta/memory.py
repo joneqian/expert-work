@@ -74,6 +74,19 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return rows[offset : offset + limit]
 
+    async def list_all_tenants(
+        self,
+        *,
+        status: ThreadStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ThreadMeta]:
+        rows = list(self._rows.values())
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+        rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
+        return rows[offset : offset + limit]
+
     async def update_status(
         self,
         thread_id: UUID,

@@ -21,7 +21,7 @@ logged server-side.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -37,6 +37,7 @@ from control_plane.api._user_scope import (
 )
 from control_plane.audit import emit
 from control_plane.quota.base import QuotaService
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.tenant_user import TenantUserStore
@@ -237,20 +238,42 @@ def build_sessions_router() -> APIRouter:
         status: ThreadStatus | None = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> JSONResponse:
-        tenant_id: UUID = request.state.tenant_id
-        # Stream J.14 — a plain user lists only their own threads;
-        # admins / machine principals list the whole tenant.
-        caller_user_id = await resolve_caller_user_id(request, users)
-        user_filter = thread_list_filter(
-            caller_user_id=caller_user_id, principal=request.state.principal
+        # Stream N — resolve ``?tenant_id=`` against the caller's scope.
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/sessions",
         )
-        items = await threads.list_by_tenant(
-            tenant_id, status=status, user_id=user_filter, limit=limit, offset=offset
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                # Platform-admin view aggregates every user's sessions
+                # across every tenant — per-user filter is intentionally
+                # dropped (system_admin sees the whole picture).
+                items = await threads.list_all_tenants(status=status, limit=limit, offset=offset)
+            else:
+                # Stream J.14 — a plain user lists only their own threads;
+                # admins / machine principals list the whole tenant.
+                caller_user_id = await resolve_caller_user_id(request, users)
+                user_filter = thread_list_filter(
+                    caller_user_id=caller_user_id, principal=request.state.principal
+                )
+                items = await threads.list_by_tenant(
+                    scope.tenant_id,
+                    status=status,
+                    user_id=user_filter,
+                    limit=limit,
+                    offset=offset,
+                )
+        audit_tenant = (
+            request.state.principal.tenant_id if isinstance(scope, CrossTenant) else scope.tenant_id
         )
         await emit(
             audit,
-            tenant_id=tenant_id,
+            tenant_id=audit_tenant,
             actor_id=request.state.actor_id,
             action=AuditAction.SESSION_READ,
             resource_type="session",
@@ -263,6 +286,7 @@ def build_sessions_router() -> APIRouter:
                 "data": {
                     "items": [m.model_dump(mode="json") for m in items],
                     "total": len(items),
+                    "cross_tenant": isinstance(scope, CrossTenant),
                 },
             }
         )

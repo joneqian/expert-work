@@ -63,6 +63,20 @@ class ArtifactStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        include_deleted: bool = False,
+    ) -> list[Artifact]:
+        """Cross-tenant artifact list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside ``bypass_rls_session()``. No
+        ``tenant_id`` / ``user_id`` filter — the platform admin view
+        aggregates every user's artifacts across every tenant.
+        Most-recently-updated first.
+        """
+
+    @abc.abstractmethod
     async def get_latest_version(
         self, *, tenant_id: UUID, user_id: UUID, name: str
     ) -> ArtifactVersion | None:

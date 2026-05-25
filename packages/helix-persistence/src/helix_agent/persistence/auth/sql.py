@@ -129,6 +129,23 @@ class SqlServiceAccountStore(ServiceAccountStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_service_account(r) for r in rows]
 
+    async def list_all_tenants(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ServiceAccount]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        stmt = (
+            select(ServiceAccountRow)
+            .order_by(ServiceAccountRow.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_service_account(r) for r in rows]
+
     async def delete(self, *, tenant_id: UUID, service_account_id: UUID) -> bool:
         stmt = delete(ServiceAccountRow).where(
             ServiceAccountRow.id == service_account_id,
@@ -199,6 +216,36 @@ class SqlApiKeyStore(ApiKeyStore):
             )
             .order_by(ApiKeyRow.created_at.desc())
         )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_api_key(r) for r in rows]
+
+    async def list_by_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        service_account_id: UUID | None = None,
+    ) -> list[ApiKey]:
+        stmt = (
+            select(ApiKeyRow)
+            .where(ApiKeyRow.tenant_id == tenant_id)
+            .order_by(ApiKeyRow.created_at.desc())
+        )
+        if service_account_id is not None:
+            stmt = stmt.where(ApiKeyRow.service_account_id == service_account_id)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_api_key(r) for r in rows]
+
+    async def list_all_tenants(
+        self,
+        *,
+        service_account_id: UUID | None = None,
+    ) -> list[ApiKey]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        stmt = select(ApiKeyRow).order_by(ApiKeyRow.created_at.desc())
+        if service_account_id is not None:
+            stmt = stmt.where(ApiKeyRow.service_account_id == service_account_id)
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_api_key(r) for r in rows]
@@ -337,6 +384,14 @@ class SqlRoleBindingStore(RoleBindingStore):
             RoleBindingRow.tenant_id == tenant_id,
             RoleBindingRow.platform_scope.is_(False),
         )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_role_binding(r) for r in rows]
+
+    async def list_all_tenants(self) -> list[RoleBinding]:
+        # Stream N — every row, both scopes; caller must wrap in
+        # bypass_rls_session(). Used by the platform admin view.
+        stmt = select(RoleBindingRow).order_by(RoleBindingRow.granted_at.desc())
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_role_binding(r) for r in rows]
