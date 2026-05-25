@@ -234,4 +234,3 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
     </Row>
   );
 }
-
