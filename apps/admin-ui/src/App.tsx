@@ -7,6 +7,8 @@ import { Shell } from "./components/Shell";
 import { CommandPaletteProvider } from "./components/CommandPalette";
 import { AppRouter } from "./router";
 import { ProtectedRoute } from "./auth/ProtectedRoute";
+import { AuthCallback } from "./pages/AuthCallback";
+import { AuthSilent } from "./pages/AuthSilent";
 import { Login } from "./pages/Login";
 
 export default function App() {
@@ -18,6 +20,11 @@ export default function App() {
       <AntApp>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* OIDC callback + silent renew routes must stay outside
+              ProtectedRoute — the user is unauthenticated at the moment
+              the IdP redirects them here. */}
+          <Route path="/auth/callback" element={<AuthCallback />} />
+          <Route path="/auth/silent" element={<AuthSilent />} />
           <Route
             path="/*"
             element={

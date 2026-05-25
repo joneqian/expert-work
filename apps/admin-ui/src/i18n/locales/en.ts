@@ -39,6 +39,16 @@ export interface TranslationKeys {
     token_required: string;
     token_empty: string;
     pr2_hint: string;
+    sign_in_sso: string;
+    sso_help: string;
+    dev_login_toggle: string;
+    dev_login_hide: string;
+    dev_login_section: string;
+  };
+  auth_callback: {
+    title: string;
+    exchanging: string;
+    failed: string;
   };
   tenant: {
     home_label_prefix: string;
@@ -121,6 +131,18 @@ const en: TranslationKeys = {
     token_required: "Token is required",
     token_empty: "Token cannot be empty",
     pr2_hint: "OIDC code-flow login lands in H.1b PR 2 — see",
+    sign_in_sso: "Sign in with SSO",
+    sso_help:
+      "You will be redirected to your organization's identity provider.",
+    dev_login_toggle: "Developer login (paste token)",
+    dev_login_hide: "Hide developer login",
+    dev_login_section: "Developer login",
+  },
+  auth_callback: {
+    title: "Signing in…",
+    exchanging:
+      "Exchanging the authorization code with your identity provider.",
+    failed: "Sign-in failed",
   },
   tenant: {
     home_label_prefix: "Home",

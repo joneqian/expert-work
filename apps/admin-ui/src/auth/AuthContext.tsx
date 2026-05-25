@@ -28,6 +28,7 @@ import type { ReactNode } from "react";
 
 import { getStoredToken, setStoredToken, ApiError } from "../api/client";
 import { getMe, ALL_TENANTS, type MeResponse } from "../api/me";
+import { registerEvents, signOut as oidcSignOut } from "./oidc";
 
 export interface AuthIdentity {
   /** ``"jwt"`` for OIDC tokens, ``"api_key"`` for helix bearer keys,
@@ -211,6 +212,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [resolveServerIdentity]);
 
+  // OIDC integration — when a silent renew completes, swap the token in
+  // place; when the access token expires without a renew, log out.
+  // No-op when OIDC isn't configured.
+  useEffect(() => {
+    const unsubscribe = registerEvents({
+      onUserLoaded: (idToken) => {
+        setStoredToken(idToken);
+        setState((prev) => ({
+          ...prev,
+          status: "authenticated",
+          token: idToken,
+          identity:
+            prev.identity !== null
+              ? { ...prev.identity, serverResolved: false }
+              : optimisticIdentityFromToken(idToken),
+        }));
+        void resolveServerIdentity(idToken);
+      },
+      onExpired: () => {
+        setStoredToken(null);
+        setState({ status: "anonymous", identity: null, token: null });
+      },
+      onSilentRenewError: () => {
+        // Soft failure — keep the existing token, surface only via
+        // structured logs. Hard failure arrives via ``onExpired``.
+      },
+    });
+    return unsubscribe;
+  }, [resolveServerIdentity]);
+
   const login = useCallback(
     (token: string) => {
       setStoredToken(token);
@@ -227,6 +258,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setStoredToken(null);
     setState({ status: "anonymous", identity: null, token: null });
+    // Best-effort IdP-side end-session; the local session is already
+    // cleared either way, so a failed remote signout doesn't strand the
+    // user as half-logged-in.
+    void oidcSignOut().catch(() => {});
   }, []);
 
   const refreshIdentity = useCallback(async () => {

@@ -41,6 +41,16 @@ const zhCN: TranslationKeys = {
     token_required: "Token 必填",
     token_empty: "Token 不能为空",
     pr2_hint: "OIDC code-flow 登录会在 H.1b PR 2 落地,详见",
+    sign_in_sso: "用 SSO 登录",
+    sso_help: "你将被跳转到所在组织的身份认证服务(IdP)。",
+    dev_login_toggle: "开发者登录(粘贴 Token)",
+    dev_login_hide: "收起开发者登录",
+    dev_login_section: "开发者登录",
+  },
+  auth_callback: {
+    title: "登录中…",
+    exchanging: "正在用授权码向 IdP 换取 Token。",
+    failed: "登录失败",
   },
   tenant: {
     home_label_prefix: "Home",
