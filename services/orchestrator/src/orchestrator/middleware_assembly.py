@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from helix_agent.persistence.token_usage_store import TokenUsageStore
 from helix_agent.protocol import AgentSpec
 from helix_agent.runtime.llm.cache import LLMResponseCache
 from helix_agent.runtime.middleware import (
@@ -35,6 +36,7 @@ from helix_agent.runtime.middleware import (
     PIIRedactorMiddleware,
     RedactText,
     SandboxAuditMiddleware,
+    TokenUsageMiddleware,
 )
 
 #: Mirror of :class:`DynamicContextMiddleware`'s constructor defaults —
@@ -59,6 +61,11 @@ class MiddlewareEnv:
     #: Shared circuit-breaker registry. ``None`` → each agent gets its
     #: own; inject a shared one to pool breaker state across agents.
     breaker_registry: BreakerRegistry | None = None
+    #: Stream G.9 — per-LLM-call token-usage recorder. ``None`` skips
+    #: both the Prometheus counter (still defined but never incremented
+    #: by this agent) and the DB persistence. M0 wires the store from
+    #: ``control_plane.app``; tests can leave it unset.
+    token_usage_store: TokenUsageStore | None = None
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,15 @@ def build_middleware_chains(
         )
     if env.langfuse_client is not None:
         middlewares.append(LangfuseMiddleware(client=env.langfuse_client))
+    if env.token_usage_store is not None:
+        middlewares.append(
+            TokenUsageMiddleware(
+                store=env.token_usage_store,
+                agent_name=spec.metadata.name,
+                agent_version=spec.metadata.version,
+                model=model.name,
+            )
+        )
 
     return MiddlewareChains(
         before_llm_call=_chain("before_llm_call", middlewares),

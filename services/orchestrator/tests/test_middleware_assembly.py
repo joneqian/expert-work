@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
+from helix_agent.persistence.token_usage_store import InMemoryTokenUsageStore
 from helix_agent.protocol import AgentSpec
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
 from helix_agent.runtime.middleware import RecordingLangfuseClient
@@ -142,6 +143,18 @@ def test_all_env_gated_middlewares_wired_together() -> None:
         "loop_detection",
         "llm_cache_store",
     }
+
+
+def test_token_usage_middleware_wired_when_store_present() -> None:
+    """Stream G.9 — when the env supplies a TokenUsageStore, the
+    ``after_llm_call`` chain picks up the token_usage middleware bound
+    to this agent's identity (name + version + model)."""
+    chains = build_middleware_chains(
+        _spec(),
+        env=MiddlewareEnv(token_usage_store=InMemoryTokenUsageStore()),
+    )
+    assert chains.after_llm_call is not None
+    assert "token_usage" in chains.after_llm_call.ordered_names
 
 
 # ---------------------------------------------------------------------------

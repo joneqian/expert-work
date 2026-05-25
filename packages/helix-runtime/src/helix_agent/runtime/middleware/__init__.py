@@ -129,6 +129,9 @@ from helix_agent.runtime.middleware.sandbox_audit import (
 from helix_agent.runtime.middleware.sandbox_audit import (
     SandboxAuditMiddleware as SandboxAuditMiddleware,
 )
+from helix_agent.runtime.middleware.token_usage import (
+    TokenUsageMiddleware as TokenUsageMiddleware,
+)
 
 __all__ = [
     "ANCHORS",
@@ -167,6 +170,7 @@ __all__ = [
     "RedactText",
     "SandboxAuditBlockedError",
     "SandboxAuditMiddleware",
+    "TokenUsageMiddleware",
     "UnknownAnchorError",
     "clone_ai_message_with_tool_calls",
     "default_token_estimator",

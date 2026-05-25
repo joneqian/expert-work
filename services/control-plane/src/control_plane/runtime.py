@@ -25,6 +25,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from helix_agent.persistence import ArtifactStore, KnowledgeStore
+from helix_agent.persistence.token_usage_store import TokenUsageStore
 from helix_agent.protocol import AgentSpec, ModelSpec
 from helix_agent.runtime.audit import DefaultSecretRedactor
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
@@ -370,7 +371,10 @@ def make_image_resolver(store: ObjectStore) -> ImageResolver:
     return ObjectStoreImageResolver(store=store)
 
 
-def build_middleware_env() -> MiddlewareEnv:
+def build_middleware_env(
+    *,
+    token_usage_store: TokenUsageStore | None = None,
+) -> MiddlewareEnv:
     """Assemble the M0 :class:`MiddlewareEnv`.
 
     Single-instance defaults: an in-process response cache, the
@@ -379,6 +383,11 @@ def build_middleware_env() -> MiddlewareEnv:
     middleware. Per-tenant ``pii_fields`` mask only dict-shaped audit
     details (D.2); free-text LLM messages use the global patterns, so
     ``redact_text`` is a plain sync call — no per-tenant lookup.
+
+    Stream G.9 — when ``token_usage_store`` is supplied,
+    :class:`TokenUsageMiddleware` lands on the ``after_llm_call`` chain
+    of every agent built from this env. ``app.py`` wires the SQL store;
+    tests can leave it unset to keep the chain shape unchanged.
     """
     secret_redactor = DefaultSecretRedactor()
 
@@ -389,6 +398,7 @@ def build_middleware_env() -> MiddlewareEnv:
         response_cache=LLMResponseCache(redis=InMemoryRedisCache()),
         langfuse_client=RecordingLangfuseClient(),
         redact_text=_redact_text,
+        token_usage_store=token_usage_store,
     )
 
 

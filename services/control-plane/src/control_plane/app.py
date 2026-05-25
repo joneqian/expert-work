@@ -201,6 +201,11 @@ from helix_agent.persistence.thread_meta import (
     SqlThreadMetaStore,
     ThreadMetaStore,
 )
+from helix_agent.persistence.token_usage_store import (
+    DbTokenUsageStore,
+    InMemoryTokenUsageStore,
+    TokenUsageStore,
+)
 from helix_agent.persistence.trigger import (
     InMemoryTriggerRunStore,
     InMemoryTriggerStore,
@@ -233,6 +238,7 @@ def create_app(
     thread_meta_repo: ThreadMetaStore | None = None,
     tenant_user_repo: TenantUserStore | None = None,
     feedback_repo: FeedbackStore | None = None,
+    token_usage_repo: TokenUsageStore | None = None,
     curation_candidate_repo: CurationCandidateStore | None = None,
     eval_dataset_repo: EvalDatasetStore | None = None,
     artifact_repo: ArtifactStore | None = None,
@@ -355,6 +361,9 @@ def create_app(
     resolved_supervisor_client = build_supervisor_client(resolved_settings.sandbox_supervisor_url)
     resolved_feedback = feedback_repo or (
         sql_stores.feedback if sql_stores else InMemoryFeedbackStore()
+    )
+    resolved_token_usage = token_usage_repo or (
+        sql_stores.token_usage if sql_stores else InMemoryTokenUsageStore()
     )
     # In-process agent runtime (RunManager + StreamBridge + manifest→agent
     # build path). Default wires a local-dev SecretStore; tests inject a
@@ -540,7 +549,9 @@ def create_app(
                     knowledge_retriever=knowledge_retriever,
                     image_resolver=image_resolver,
                 )
-                middleware_env = build_middleware_env()
+                middleware_env = build_middleware_env(
+                    token_usage_store=resolved_token_usage,
+                )
                 memory_env = MemoryEnv(
                     store=resolved_memory_store,
                     embedder=embedder,
@@ -636,6 +647,7 @@ def create_app(
     app.state.thread_meta_repo = resolved_threads
     app.state.tenant_user_repo = resolved_tenant_users
     app.state.feedback_store = resolved_feedback
+    app.state.token_usage_store = resolved_token_usage
     app.state.artifact_store = resolved_artifact_store
     app.state.approval_store = resolved_approval_store
     app.state.run_store = resolved_run_store
@@ -788,6 +800,7 @@ class _SqlStores:
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
     feedback: FeedbackStore
+    token_usage: TokenUsageStore
     audit_log: AuditLogStore
 
 
@@ -830,6 +843,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         token_reservation=SqlTokenReservationStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         feedback=DbFeedbackStore(session_factory),
+        token_usage=DbTokenUsageStore(session_factory),
         audit_log=SqlAuditLogStore(session_factory),
     )
 
