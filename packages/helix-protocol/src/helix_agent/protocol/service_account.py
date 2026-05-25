@@ -21,7 +21,7 @@ from enum import StrEnum
 from typing import Self
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ---------------------------------------------------------------------------
 # Service Account
@@ -137,22 +137,69 @@ class ApiKeyCreated(BaseModel):
 
 
 class Role(StrEnum):
-    """The three-tier role model per ``subsystems/15`` § 3.3."""
+    """Role model.
+
+    Three-tier tenant-scoped roles (per ``subsystems/15`` § 3.3):
+    ``ADMIN`` / ``OPERATOR`` / ``VIEWER`` — bound to one ``tenant_id``.
+
+    One platform-scoped role (Stream N — Mini-ADR N-1):
+    ``SYSTEM_ADMIN`` — no ``tenant_id`` binding; sees all tenants;
+    paired with ``RoleBinding.platform_scope = True``. See
+    ``docs/streams/STREAM-N-DESIGN.md``.
+    """
 
     ADMIN = "admin"
     OPERATOR = "operator"
     VIEWER = "viewer"
+    SYSTEM_ADMIN = "system_admin"
+
+
+# Roles allowed only when ``platform_scope=True`` (i.e. ``tenant_id IS NULL``).
+PLATFORM_SCOPE_ROLES: frozenset[Role] = frozenset({Role.SYSTEM_ADMIN})
+
+# Roles allowed only when ``platform_scope=False`` (i.e. tenant-scoped).
+TENANT_SCOPE_ROLES: frozenset[Role] = frozenset({Role.ADMIN, Role.OPERATOR, Role.VIEWER})
 
 
 class RoleBinding(BaseModel):
-    """Maps a subject (user / service_account) to a role within a tenant."""
+    """Maps a subject (user / service_account) to a role.
+
+    Two scopes (Stream N — Mini-ADR N-1):
+
+    * **Tenant scope** (``platform_scope=False``, default) — ``tenant_id``
+      required; ``role`` ∈ {ADMIN, OPERATOR, VIEWER}.
+    * **Platform scope** (``platform_scope=True``) — ``tenant_id`` MUST
+      be ``None``; ``role`` ∈ {SYSTEM_ADMIN}. Grants cross-tenant
+      capabilities (see :mod:`control_plane.tenant_scope`).
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: UUID = Field(default_factory=uuid4)
     subject_type: str  # "user" | "service_account"
     subject_id: UUID
-    tenant_id: UUID
+    tenant_id: UUID | None = None  # None iff platform_scope is True
     role: Role
+    platform_scope: bool = False  # Stream N
     granted_by: str
     granted_at: datetime
+
+    @model_validator(mode="after")
+    def _validate_scope_triple(self) -> RoleBinding:
+        if self.platform_scope:
+            if self.tenant_id is not None:
+                raise ValueError("platform_scope binding must have tenant_id=None")
+            if self.role not in PLATFORM_SCOPE_ROLES:
+                allowed = sorted(r.value for r in PLATFORM_SCOPE_ROLES)
+                raise ValueError(
+                    f"platform_scope binding requires role in {allowed}; got {self.role.value!r}"
+                )
+        else:
+            if self.tenant_id is None:
+                raise ValueError("tenant-scoped binding requires tenant_id to be set")
+            if self.role not in TENANT_SCOPE_ROLES:
+                allowed = sorted(r.value for r in TENANT_SCOPE_ROLES)
+                raise ValueError(
+                    f"tenant-scoped binding requires role in {allowed}; got {self.role.value!r}"
+                )
+        return self

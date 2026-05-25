@@ -63,6 +63,7 @@ def _row_to_role_binding(row: RoleBindingRow) -> RoleBinding:
         subject_id=row.subject_id,
         tenant_id=row.tenant_id,
         role=Role(row.role),
+        platform_scope=row.platform_scope,
         granted_by=row.granted_by,
         granted_at=row.granted_at,
     )
@@ -285,15 +286,17 @@ class SqlRoleBindingStore(RoleBindingStore):
         *,
         subject_type: str,
         subject_id: UUID,
-        tenant_id: UUID,
+        tenant_id: UUID | None,
         role: Role,
         granted_by: str,
+        platform_scope: bool = False,
     ) -> RoleBinding:
         row = RoleBindingRow(
             subject_type=subject_type,
             subject_id=subject_id,
             tenant_id=tenant_id,
             role=role.value,
+            platform_scope=platform_scope,
             granted_by=granted_by,
         )
         async with self._sf() as session:
@@ -328,16 +331,51 @@ class SqlRoleBindingStore(RoleBindingStore):
         return [_row_to_role_binding(r) for r in rows]
 
     async def list_for_tenant(self, *, tenant_id: UUID) -> list[RoleBinding]:
-        stmt = select(RoleBindingRow).where(RoleBindingRow.tenant_id == tenant_id)
+        # Excludes platform-scope rows (their tenant_id is NULL anyway,
+        # but be explicit for readability).
+        stmt = select(RoleBindingRow).where(
+            RoleBindingRow.tenant_id == tenant_id,
+            RoleBindingRow.platform_scope.is_(False),
+        )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_role_binding(r) for r in rows]
 
-    async def delete(self, *, tenant_id: UUID, role_binding_id: UUID) -> bool:
-        stmt = delete(RoleBindingRow).where(
-            RoleBindingRow.id == role_binding_id,
-            RoleBindingRow.tenant_id == tenant_id,
+    async def list_platform_scope(self) -> list[RoleBinding]:
+        stmt = select(RoleBindingRow).where(RoleBindingRow.platform_scope.is_(True))
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_role_binding(r) for r in rows]
+
+    async def get_platform_admin_for_subject(
+        self,
+        *,
+        subject_type: str,
+        subject_id: UUID,
+    ) -> RoleBinding | None:
+        stmt = select(RoleBindingRow).where(
+            RoleBindingRow.platform_scope.is_(True),
+            RoleBindingRow.subject_type == subject_type,
+            RoleBindingRow.subject_id == subject_id,
         )
+        async with self._sf() as session:
+            row = (await session.execute(stmt)).scalars().first()
+        return _row_to_role_binding(row) if row else None
+
+    async def delete(
+        self,
+        *,
+        tenant_id: UUID | None,
+        role_binding_id: UUID,
+    ) -> bool:
+        stmt = delete(RoleBindingRow).where(RoleBindingRow.id == role_binding_id)
+        if tenant_id is None:
+            stmt = stmt.where(RoleBindingRow.platform_scope.is_(True))
+        else:
+            stmt = stmt.where(
+                RoleBindingRow.tenant_id == tenant_id,
+                RoleBindingRow.platform_scope.is_(False),
+            )
         async with self._sf() as session:
             result = await session.execute(stmt)
             await session.commit()

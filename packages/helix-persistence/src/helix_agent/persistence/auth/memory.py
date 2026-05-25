@@ -221,14 +221,18 @@ class InMemoryRoleBindingStore(RoleBindingStore):
         *,
         subject_type: str,
         subject_id: UUID,
-        tenant_id: UUID,
+        tenant_id: UUID | None,
         role: Role,
         granted_by: str,
+        platform_scope: bool = False,
     ) -> RoleBinding:
         async with self._lock:
             for row in self._rows.values():
+                # Tenant-scope duplicate:same (subject, tenant, role).
                 if (
-                    row.subject_type == subject_type
+                    not platform_scope
+                    and not row.platform_scope
+                    and row.subject_type == subject_type
                     and row.subject_id == subject_id
                     and row.tenant_id == tenant_id
                     and row.role == role
@@ -239,12 +243,28 @@ class InMemoryRoleBindingStore(RoleBindingStore):
                         tenant_id=tenant_id,
                         role=role,
                     )
+                # Platform-scope duplicate:one platform binding per subject.
+                if (
+                    platform_scope
+                    and row.platform_scope
+                    and row.subject_type == subject_type
+                    and row.subject_id == subject_id
+                ):
+                    raise DuplicateRoleBindingError(
+                        subject_type=subject_type,
+                        subject_id=subject_id,
+                        tenant_id=None,
+                        role=role,
+                    )
+            # The DTO's model_validator enforces the (platform_scope,
+            # tenant_id, role) triple; mismatched calls raise ValueError here.
             binding = RoleBinding(
                 id=uuid4(),
                 subject_type=subject_type,
                 subject_id=subject_id,
                 tenant_id=tenant_id,
                 role=role,
+                platform_scope=platform_scope,
                 granted_by=granted_by,
                 granted_at=_now(),
             )
@@ -268,13 +288,51 @@ class InMemoryRoleBindingStore(RoleBindingStore):
             ]
 
     async def list_for_tenant(self, *, tenant_id: UUID) -> list[RoleBinding]:
+        # Excludes platform-scope rows (they have ``tenant_id IS NULL``).
         async with self._lock:
-            return [row for row in self._rows.values() if row.tenant_id == tenant_id]
+            return [
+                row
+                for row in self._rows.values()
+                if not row.platform_scope and row.tenant_id == tenant_id
+            ]
 
-    async def delete(self, *, tenant_id: UUID, role_binding_id: UUID) -> bool:
+    async def list_platform_scope(self) -> list[RoleBinding]:
+        async with self._lock:
+            return [row for row in self._rows.values() if row.platform_scope]
+
+    async def get_platform_admin_for_subject(
+        self,
+        *,
+        subject_type: str,
+        subject_id: UUID,
+    ) -> RoleBinding | None:
+        async with self._lock:
+            for row in self._rows.values():
+                if (
+                    row.platform_scope
+                    and row.subject_type == subject_type
+                    and row.subject_id == subject_id
+                ):
+                    return row
+            return None
+
+    async def delete(
+        self,
+        *,
+        tenant_id: UUID | None,
+        role_binding_id: UUID,
+    ) -> bool:
         async with self._lock:
             row = self._rows.get(role_binding_id)
-            if row is None or row.tenant_id != tenant_id:
+            if row is None:
                 return False
+            if tenant_id is None:
+                # Targeting a platform-scope binding.
+                if not row.platform_scope:
+                    return False
+            else:
+                # Targeting a tenant-scope binding.
+                if row.platform_scope or row.tenant_id != tenant_id:
+                    return False
             del self._rows[role_binding_id]
             return True

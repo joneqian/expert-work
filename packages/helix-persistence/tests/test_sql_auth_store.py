@@ -295,3 +295,172 @@ async def test_role_binding_delete(auth_stores: AuthStores) -> None:
         assert second is False
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# RoleBinding — Stream N platform_scope (CHECK constraint + partial UNIQUE)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_platform_scope_binding_round_trip(auth_stores: AuthStores) -> None:
+    """Create + retrieve + list a SYSTEM_ADMIN platform-scope binding."""
+    _, _, rb_store, engine = auth_stores
+    try:
+        subject = uuid4()
+        binding = await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=None,
+            role=Role.SYSTEM_ADMIN,
+            platform_scope=True,
+            granted_by="root",
+        )
+        assert binding.platform_scope is True
+        assert binding.tenant_id is None
+
+        admin = await rb_store.get_platform_admin_for_subject(
+            subject_type="user", subject_id=subject
+        )
+        assert admin is not None
+        assert admin.id == binding.id
+
+        platform = await rb_store.list_platform_scope()
+        assert binding.id in [b.id for b in platform]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_platform_scope_partial_unique_blocks_duplicate(auth_stores: AuthStores) -> None:
+    """Partial UNIQUE index — each subject has at most one platform binding."""
+    _, _, rb_store, engine = auth_stores
+    try:
+        subject = uuid4()
+        await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=None,
+            role=Role.SYSTEM_ADMIN,
+            platform_scope=True,
+            granted_by="root",
+        )
+        with pytest.raises(DuplicateRoleBindingError):
+            await rb_store.create(
+                subject_type="user",
+                subject_id=subject,
+                tenant_id=None,
+                role=Role.SYSTEM_ADMIN,
+                platform_scope=True,
+                granted_by="root",
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_platform_scope_subject_can_also_have_tenant_binding(
+    auth_stores: AuthStores,
+) -> None:
+    """The partial UNIQUE only restricts duplicate platform bindings; the same
+    subject can still hold a separate tenant-scope binding."""
+    _, _, rb_store, engine = auth_stores
+    try:
+        subject, tenant = uuid4(), uuid4()
+        tenant_b = await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=tenant,
+            role=Role.ADMIN,
+            granted_by="root",
+        )
+        platform_b = await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=None,
+            role=Role.SYSTEM_ADMIN,
+            platform_scope=True,
+            granted_by="root",
+        )
+        assert tenant_b.id != platform_b.id
+
+        all_for_subject = await rb_store.list_for_subject(subject_type="user", subject_id=subject)
+        assert {b.id for b in all_for_subject} == {tenant_b.id, platform_b.id}
+
+        # list_for_tenant must NOT return the platform binding.
+        for_tenant = await rb_store.list_for_tenant(tenant_id=tenant)
+        assert [b.id for b in for_tenant] == [tenant_b.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_db_check_rejects_platform_scope_with_wrong_role(auth_stores: AuthStores) -> None:
+    """DB-level CHECK rejects platform_scope=true + role=ADMIN (i.e. the DTO
+    validator is also enforced at the DB layer in case of direct INSERTs).
+    """
+    _, _, _, engine = auth_stores
+    from sqlalchemy import text
+
+    try:
+        # Direct INSERT bypassing the DTO validator should fail the CHECK.
+        async with engine.connect() as conn:
+            with pytest.raises(Exception, match=r"role_binding_scope_triple_ck|check"):
+                await conn.execute(
+                    text(
+                        "INSERT INTO role_binding "
+                        "(id, subject_type, subject_id, tenant_id, role, platform_scope,"
+                        " granted_by, granted_at) "
+                        "VALUES (gen_random_uuid(), 'user', gen_random_uuid(), NULL, 'admin',"
+                        " true, 'root', NOW())"
+                    )
+                )
+                await conn.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_db_check_rejects_tenant_scope_with_system_admin_role(
+    auth_stores: AuthStores,
+) -> None:
+    """DB-level CHECK rejects platform_scope=false + role=system_admin."""
+    _, _, _, engine = auth_stores
+    from sqlalchemy import text
+
+    try:
+        async with engine.connect() as conn:
+            with pytest.raises(Exception, match=r"role_binding_scope_triple_ck|check"):
+                await conn.execute(
+                    text(
+                        "INSERT INTO role_binding "
+                        "(id, subject_type, subject_id, tenant_id, role, platform_scope,"
+                        " granted_by, granted_at) "
+                        "VALUES (gen_random_uuid(), 'user', gen_random_uuid(),"
+                        " gen_random_uuid(), 'system_admin', false, 'root', NOW())"
+                    )
+                )
+                await conn.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_delete_platform_binding_with_tenant_none(auth_stores: AuthStores) -> None:
+    _, _, rb_store, engine = auth_stores
+    try:
+        binding = await rb_store.create(
+            subject_type="user",
+            subject_id=uuid4(),
+            tenant_id=None,
+            role=Role.SYSTEM_ADMIN,
+            platform_scope=True,
+            granted_by="root",
+        )
+        # platform-scope delete uses tenant_id=None
+        ok = await rb_store.delete(tenant_id=None, role_binding_id=binding.id)
+        assert ok is True
+        again = await rb_store.delete(tenant_id=None, role_binding_id=binding.id)
+        assert again is False
+    finally:
+        await engine.dispose()

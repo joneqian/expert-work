@@ -35,19 +35,25 @@ class DuplicateApiKeyPrefixError(Exception):
 
 
 class DuplicateRoleBindingError(Exception):
-    """``(subject_type, subject_id, tenant_id, role)`` collision."""
+    """``(subject_type, subject_id, tenant_id, role)`` collision.
+
+    For Stream N platform-scope bindings, ``tenant_id`` is ``None`` and
+    the actual collision is on the partial-unique-index
+    ``(subject_type, subject_id) WHERE platform_scope=true``.
+    """
 
     def __init__(
         self,
         *,
         subject_type: str,
         subject_id: UUID,
-        tenant_id: UUID,
+        tenant_id: UUID | None,
         role: Role,
     ) -> None:
+        scope = f"tenant={tenant_id}" if tenant_id is not None else "platform"
         super().__init__(
             f"role_binding already exists: subject={subject_type}:{subject_id} "
-            f"tenant={tenant_id} role={role.value}"
+            f"{scope} role={role.value}"
         )
         self.subject_type = subject_type
         self.subject_id = subject_id
@@ -176,11 +182,20 @@ class RoleBindingStore(abc.ABC):
         *,
         subject_type: str,
         subject_id: UUID,
-        tenant_id: UUID,
+        tenant_id: UUID | None,
         role: Role,
         granted_by: str,
+        platform_scope: bool = False,
     ) -> RoleBinding:
-        """Raises :class:`DuplicateRoleBindingError` on conflict."""
+        """Create a binding.
+
+        For tenant-scope bindings (default), pass ``tenant_id`` and a role in
+        ``{ADMIN, OPERATOR, VIEWER}``. For platform-scope bindings (Stream N),
+        pass ``platform_scope=True``, ``tenant_id=None``, and ``role=SYSTEM_ADMIN``.
+        The DTO and DB CHECK constraint enforce the triple invariant.
+
+        Raises :class:`DuplicateRoleBindingError` on conflict.
+        """
 
     @abc.abstractmethod
     async def list_for_subject(
@@ -190,12 +205,49 @@ class RoleBindingStore(abc.ABC):
         subject_id: UUID,
         tenant_id: UUID | None = None,
     ) -> list[RoleBinding]:
-        """All role rows for a given subject; optionally filtered by tenant."""
+        """All role rows for a given subject — tenant-scope AND platform-scope.
+
+        ``tenant_id`` filter (when set) matches only tenant-scope rows with
+        that tenant; platform-scope rows are excluded unless ``tenant_id``
+        is left as ``None`` (default), in which case all rows are returned.
+        """
 
     @abc.abstractmethod
     async def list_for_tenant(self, *, tenant_id: UUID) -> list[RoleBinding]:
-        """All role rows for the tenant — used by the admin UI."""
+        """All tenant-scope role rows for the tenant — used by the admin UI.
+
+        Does NOT include platform-scope bindings (those have ``tenant_id IS NULL``).
+        """
 
     @abc.abstractmethod
-    async def delete(self, *, tenant_id: UUID, role_binding_id: UUID) -> bool:
-        """Delete by id. Returns ``False`` if no row matched."""
+    async def list_platform_scope(self) -> list[RoleBinding]:
+        """All platform-scope role bindings — Stream N.
+
+        Used by the platform admin UI to manage who has system-wide access.
+        Only callers with platform-scope themselves should reach this method.
+        """
+
+    @abc.abstractmethod
+    async def get_platform_admin_for_subject(
+        self,
+        *,
+        subject_type: str,
+        subject_id: UUID,
+    ) -> RoleBinding | None:
+        """Return the platform-scope binding for a subject if it exists — Stream N.
+
+        Used by ``AuthMiddleware`` to populate ``Principal.is_system_admin``
+        on each verified request. ``None`` ⇒ the subject is NOT a system admin.
+        """
+
+    @abc.abstractmethod
+    async def delete(
+        self,
+        *,
+        tenant_id: UUID | None,
+        role_binding_id: UUID,
+    ) -> bool:
+        """Delete by id. ``tenant_id=None`` targets platform-scope bindings.
+
+        Returns ``False`` if no row matched (wrong id, wrong scope, etc.).
+        """

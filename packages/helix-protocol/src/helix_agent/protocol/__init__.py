@@ -101,6 +101,8 @@ from helix_agent.protocol.quota import (
 from helix_agent.protocol.reflection import Reflection, ReflectionSpec
 from helix_agent.protocol.service_account import (
     API_KEY_STORED_PREFIX_LEN,
+    PLATFORM_SCOPE_ROLES,
+    TENANT_SCOPE_ROLES,
     ApiKey,
     ApiKeyCreated,
     ApiKeyScope,
@@ -144,7 +146,9 @@ __all__ = [
     "DEFAULT_CHUNK_MAX_TOKENS",
     "DEFAULT_CHUNK_OVERLAP_TOKENS",
     "MAX_RESULT_EXCERPT_CHARS",
+    "PLATFORM_SCOPE_ROLES",
     "SKILL_REF_PATTERN",
+    "TENANT_SCOPE_ROLES",
     "AgentMetadata",
     "AgentSpec",
     "AgentSpecBody",
