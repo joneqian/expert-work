@@ -21,6 +21,7 @@ from prometheus_client import REGISTRY
 
 from helix_agent.persistence.token_usage_store import (
     InMemoryTokenUsageStore,
+    TokenUsageRecord,
 )
 from helix_agent.runtime.middleware import MiddlewareContext
 from helix_agent.runtime.middleware.token_usage import TokenUsageMiddleware
@@ -188,7 +189,7 @@ async def test_no_persist_when_tenant_missing() -> None:
 @pytest.mark.asyncio
 async def test_persist_failure_does_not_propagate() -> None:
     class _FailingStore(InMemoryTokenUsageStore):
-        async def insert(self, record):  # type: ignore[override]
+        async def insert(self, record: TokenUsageRecord) -> TokenUsageRecord:
             raise RuntimeError("simulated DB outage")
 
     store = _FailingStore()
