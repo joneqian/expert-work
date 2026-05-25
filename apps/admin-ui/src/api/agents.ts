@@ -5,7 +5,7 @@
  * callers can pass ``"*"`` for the cross-tenant aggregate; the
  * ``cross_tenant`` flag on the response tells the UI which mode it got.
  */
-import { getJson, withTenantScope, type TenantScope } from "./client";
+import { getJson, putJson, withTenantScope, type TenantScope } from "./client";
 
 export interface AgentRecord {
   id: string;
@@ -56,5 +56,28 @@ export async function getAgent(
 ): Promise<AgentDetailResponse> {
   return getJson<AgentDetailResponse>(
     `/v1/agents/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+  );
+}
+
+/** Server-side ``ManifestPayload`` accepts raw YAML + optional template
+ *  vars; the backend re-loads it through :class:`ManifestLoader` so the
+ *  spec is validated end-to-end (Pydantic + ManifestError) on save. */
+export interface ManifestPayload {
+  manifest_yaml: string;
+  template_vars?: Record<string, unknown> | null;
+}
+
+/** PUT /v1/agents/{name}/{version} — in-place spec update. The
+ *  ``manifest_yaml`` metadata block MUST match the path's ``name`` and
+ *  ``version`` or the server rejects with ``MANIFEST_PATH_MISMATCH``
+ *  (422). */
+export async function updateAgent(
+  name: string,
+  version: string,
+  payload: ManifestPayload,
+): Promise<AgentDetailResponse> {
+  return putJson<AgentDetailResponse>(
+    `/v1/agents/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+    payload,
   );
 }

@@ -1,5 +1,6 @@
 /**
- * Agent detail page — Stream H.1b PR 3.
+ * Agent detail page — Stream H.1b PR 3 (scaffold) + H.2 PR 1 (Manifest
+ * Monaco editor).
  *
  * Real fetch of ``GET /v1/agents/{name}/{version}``. Route shape moved
  * from the demo's ``/agents/:agentId/:tab`` (mock id) to the canonical
@@ -8,10 +9,10 @@
  * the row UUID is internal).
  *
  * Tabs the backend already supports are wired (``overview`` / ``manifest``).
- * Stream H.2 fills in:
+ * The remaining tabs land in subsequent Stream H.2 / H.3 PRs:
  *
- *   - **Playground** — SSE-streamed debug session against the live
- *     control-plane ``POST /v1/sessions/{id}/runs`` endpoint.
+ *   - **Playground** (H.2 PR 3) — SSE-streamed debug session against
+ *     the live control-plane ``POST /v1/sessions/{id}/runs`` endpoint.
  *   - **Runs / Skills / Triggers / Memory** — per-agent sub-views that
  *     today need a separate filter parameter the list endpoints don't
  *     accept yet (eg. ``GET /v1/runs?agent_name=…``).
@@ -36,6 +37,7 @@ import { useTranslation } from "react-i18next";
 
 import { getAgent, type AgentDetailResponse } from "../api/agents";
 import { ApiError } from "../api/client";
+import { ManifestTab } from "./agent_detail/ManifestTab";
 
 const { Text } = Typography;
 
@@ -177,7 +179,7 @@ export function AgentDetail() {
       />
 
       {activeTab === "overview" && <OverviewTab detail={detail} />}
-      {activeTab === "manifest" && <ManifestTab detail={detail} />}
+      {activeTab === "manifest" && <ManifestTab detail={detail} onSaved={refresh} />}
       {!["overview", "manifest"].includes(activeTab) && (
         <Empty
           description={t("agent_detail.tab_coming_soon", { tab: activeTab })}
@@ -230,30 +232,5 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
         </Card>
       </Col>
     </Row>
-  );
-}
-
-function ManifestTab({ detail }: { detail: AgentDetailResponse }) {
-  return (
-    <Card>
-      <pre
-        style={{
-          margin: 0,
-          padding: 12,
-          background: "var(--hx-color-neutral-950, #0a0a0a)",
-          border: "1px solid var(--hx-border-subtle)",
-          borderRadius: 6,
-          fontFamily: "var(--hx-font-mono)",
-          fontSize: 12,
-          color: "var(--hx-text-secondary)",
-          lineHeight: 1.5,
-          overflow: "auto",
-          maxHeight: "calc(100vh - 320px)",
-        }}
-        data-testid="agent-manifest"
-      >
-        {JSON.stringify(detail.record.spec, null, 2)}
-      </pre>
-    </Card>
   );
 }

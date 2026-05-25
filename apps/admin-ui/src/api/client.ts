@@ -129,3 +129,12 @@ export async function postJson<T>(
   const response = await apiClient.post<ApiEnvelope<T>>(path, body, config);
   return unwrap(response.data);
 }
+
+export async function putJson<T>(
+  path: string,
+  body: unknown,
+  config?: AxiosRequestConfig,
+): Promise<T> {
+  const response = await apiClient.put<ApiEnvelope<T>>(path, body, config);
+  return unwrap(response.data);
+}
