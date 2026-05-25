@@ -23,13 +23,22 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  admin-ui-demo:
-    name: admin-ui-demo (typecheck + test + build)
+  admin-ui:
+    name: ${{ matrix.app }} (typecheck + test + build)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          # Stream H.1b PR 1 added apps/admin-ui (production target).
+          # apps/admin-ui-demo stays around as the visual-baseline
+          # sandbox until H.1b PR 4 deletes it.
+          - admin-ui
+          - admin-ui-demo
     defaults:
       run:
-        working-directory: apps/admin-ui-demo
+        working-directory: apps/${{ matrix.app }}
     steps:
       - uses: actions/checkout@v6
 
@@ -43,7 +52,7 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-          cache-dependency-path: apps/admin-ui-demo/pnpm-lock.yaml
+          cache-dependency-path: apps/${{ matrix.app }}/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile

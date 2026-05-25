@@ -1,0 +1,37 @@
+{
+  "name": "@helix-agent/admin-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "helix Admin UI — Stream H.1b production scaffold. Operator-facing SPA for platform / tenant administrators. See memory:admin-ui-design-baseline + memory:cross-tenant-admin. demo sibling lives at apps/admin-ui-demo/ for visual-baseline reference.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ant-design/cssinjs": "^1.21.1",
+    "antd": "^5.23.0",
+    "axios": "^1.7.9",
+    "lucide-react": "^0.469.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^6.28.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  },
+  "packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748"
+}
