@@ -100,6 +100,29 @@ class SqlTriggerStore(TriggerStore):
             )
         return [_row_to_dto(r) for r in rows]
 
+    async def list_by_tenant(
+        self, *, tenant_id: UUID, agent_name: str | None = None
+    ) -> list[TriggerRecord]:
+        stmt = (
+            select(AgentTriggerRow)
+            .where(AgentTriggerRow.tenant_id == tenant_id)
+            .order_by(AgentTriggerRow.created_at.asc())
+        )
+        if agent_name is not None:
+            stmt = stmt.where(AgentTriggerRow.agent_name == agent_name)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
+    async def list_all_tenants(self, *, agent_name: str | None = None) -> list[TriggerRecord]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        stmt = select(AgentTriggerRow).order_by(AgentTriggerRow.created_at.asc())
+        if agent_name is not None:
+            stmt = stmt.where(AgentTriggerRow.agent_name == agent_name)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
     async def list_enabled_cron(self) -> list[TriggerRecord]:
         async with self._sf() as session:
             rows = (

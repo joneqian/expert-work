@@ -85,6 +85,25 @@ class InMemoryAgentSpecStore(AgentSpecStore):
         matched.sort(key=lambda r: r.created_at, reverse=True)
         return matched[offset : offset + limit]
 
+    async def list_all_tenants(
+        self,
+        *,
+        status: AgentSpecStatus | None = None,
+        name: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AgentSpecRecord]:
+        # Stream N — no tenant_id filter; relies on the caller wrapping
+        # the call in ``bypass_rls_session()`` for SQL stores.
+        async with self._lock:
+            matched = [
+                r
+                for r in self._rows.values()
+                if (status is None or r.status is status) and (name is None or r.name == name)
+            ]
+        matched.sort(key=lambda r: r.created_at, reverse=True)
+        return matched[offset : offset + limit]
+
     async def update_spec(
         self,
         *,

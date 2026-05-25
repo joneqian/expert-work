@@ -115,26 +115,45 @@ class SqlSkillStore(SkillStore):
         cursor: UUID | None = None,
         limit: int = 50,
     ) -> tuple[list[Skill], UUID | None]:
+        return await self._list_skills(
+            tenant_id=tenant_id, status=status, category=category, cursor=cursor, limit=limit
+        )
+
+    async def list_skills_all_tenants(
+        self,
+        *,
+        status: SkillStatus | None = None,
+        category: str | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[Skill], UUID | None]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        return await self._list_skills(
+            tenant_id=None, status=status, category=category, cursor=cursor, limit=limit
+        )
+
+    async def _list_skills(
+        self,
+        *,
+        tenant_id: UUID | None,
+        status: SkillStatus | None,
+        category: str | None,
+        cursor: UUID | None,
+        limit: int,
+    ) -> tuple[list[Skill], UUID | None]:
         async with self._sf() as session:
-            stmt = (
-                select(SkillRow)
-                .where(SkillRow.tenant_id == tenant_id)
-                .order_by(SkillRow.created_at.desc(), SkillRow.id)
-            )
+            stmt = select(SkillRow).order_by(SkillRow.created_at.desc(), SkillRow.id)
+            if tenant_id is not None:
+                stmt = stmt.where(SkillRow.tenant_id == tenant_id)
             if status is not None:
                 stmt = stmt.where(SkillRow.status == status.value)
             if category is not None:
                 stmt = stmt.where(SkillRow.category == category)
             if cursor is not None:
-                # Cursor = last row's id; load it to get (created_at) for
-                # keyset comparison.
-                cur_row = (
-                    await session.execute(
-                        select(SkillRow).where(
-                            SkillRow.id == cursor, SkillRow.tenant_id == tenant_id
-                        )
-                    )
-                ).scalar_one_or_none()
+                cur_stmt = select(SkillRow).where(SkillRow.id == cursor)
+                if tenant_id is not None:
+                    cur_stmt = cur_stmt.where(SkillRow.tenant_id == tenant_id)
+                cur_row = (await session.execute(cur_stmt)).scalar_one_or_none()
                 if cur_row is not None:
                     stmt = stmt.where(
                         (SkillRow.created_at < cur_row.created_at)

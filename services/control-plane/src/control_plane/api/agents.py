@@ -15,7 +15,8 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Mapping
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -28,6 +29,11 @@ from control_plane.manifest import (
     ManifestSyntaxError,
     ManifestTemplateError,
     ManifestValidationError,
+)
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    ensure_tenant_scope,
 )
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
@@ -55,6 +61,7 @@ class AgentList(BaseModel):
 
     items: list[AgentSpecRecord]
     total: int
+    cross_tenant: bool = False  # Stream N — true ⇔ ?tenant_id=* response
 
 
 # ---------------------------------------------------------------------------
@@ -241,25 +248,49 @@ def build_agents_router() -> APIRouter:
         name: str | None = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> JSONResponse:
-        tenant_id = request.state.tenant_id
-        items = await repo.list_by_tenant(
-            tenant_id=tenant_id,
-            status=status,
-            name=name,
-            limit=limit,
-            offset=offset,
+        # Stream N — resolve ``?tenant_id=`` against the caller's scope.
+        # ``"*"`` requires ``is_system_admin``; non-home UUID requires
+        # ``allowed_tenants`` membership. See control_plane.tenant_scope.
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/agents",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await repo.list_all_tenants(
+                    status=status, name=name, limit=limit, offset=offset
+                )
+            else:
+                items = await repo.list_by_tenant(
+                    tenant_id=scope.tenant_id,
+                    status=status,
+                    name=name,
+                    limit=limit,
+                    offset=offset,
+                )
+        # Manifest-read audit — recorded under the actual queried tenant for
+        # SingleTenant; under principal's home for CrossTenant (the cross-tenant
+        # audit was already emitted by ensure_tenant_scope).
+        audit_tenant = (
+            request.state.principal.tenant_id if isinstance(scope, CrossTenant) else scope.tenant_id
         )
         await emit(
             audit,
-            tenant_id=tenant_id,
+            tenant_id=audit_tenant,
             actor_id=request.state.actor_id,
             action=AuditAction.MANIFEST_READ,
             resource_type="manifest",
             trace_id=current_trace_id_hex(),
             details={"count": len(items)},
         )
-        payload = AgentList(items=items, total=len(items))
+        payload = AgentList(
+            items=items, total=len(items), cross_tenant=isinstance(scope, CrossTenant)
+        )
         return JSONResponse({"success": True, "data": payload.model_dump(mode="json")})
 
     @router.get("/{name}/{version}")

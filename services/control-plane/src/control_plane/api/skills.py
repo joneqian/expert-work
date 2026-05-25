@@ -22,7 +22,7 @@ safety net.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -41,6 +41,7 @@ from control_plane.api._skill_zip import (
     parse_skill_zip,
 )
 from control_plane.audit import emit as audit_emit
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import (
     DuplicateSkillError,
@@ -249,24 +250,39 @@ def build_skills_router() -> APIRouter:
     async def list_skills(
         request: Request,
         store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
         status: Annotated[SkillStatus | None, Query()] = None,
         category: Annotated[str | None, Query()] = None,
         cursor: Annotated[UUID | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> JSONResponse:
-        tenant_id: UUID = request.state.tenant_id
-        rows, next_cursor = await store.list_skills(
-            tenant_id=tenant_id,
-            status=status,
-            category=category,
-            cursor=cursor,
-            limit=limit,
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/skills",
         )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                rows, next_cursor = await store.list_skills_all_tenants(
+                    status=status, category=category, cursor=cursor, limit=limit
+                )
+            else:
+                rows, next_cursor = await store.list_skills(
+                    tenant_id=scope.tenant_id,
+                    status=status,
+                    category=category,
+                    cursor=cursor,
+                    limit=limit,
+                )
         return JSONResponse(
             status_code=200,
             content={
                 "items": [_skill_dict(r) for r in rows],
                 "next_cursor": str(next_cursor) if next_cursor is not None else None,
+                "cross_tenant": isinstance(scope, CrossTenant),
             },
         )
 

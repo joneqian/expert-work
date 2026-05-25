@@ -46,6 +46,12 @@ class InMemoryEvalDatasetStore(EvalDatasetStore):
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows
 
+    async def list_all_tenants(self) -> list[EvalDatasetRecord]:
+        # Stream N — no tenant filter.
+        rows = list(self._rows.values())
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows
+
     async def update(self, record: EvalDatasetRecord) -> bool:
         existing = self._rows.get(record.id)
         if existing is None or existing.tenant_id != record.tenant_id:
@@ -107,6 +113,24 @@ class InMemoryCurationCandidateStore(CurationCandidateStore):
             for r in self._rows.values()
             if r.tenant_id == tenant_id
             and (agent_name is None or r.agent_name == agent_name)
+            and (status is None or r.status is status)
+            and (signal is None or r.signal == signal)
+        ]
+        rows.sort(key=lambda r: r.detected_at, reverse=True)
+        return rows
+
+    async def list_for_review_all_tenants(
+        self,
+        *,
+        agent_name: str | None = None,
+        status: CandidateStatus | None = None,
+        signal: CurationSignal | None = None,
+    ) -> list[CurationCandidateRecord]:
+        # Stream N — no tenant filter.
+        rows = [
+            r
+            for r in self._rows.values()
+            if (agent_name is None or r.agent_name == agent_name)
             and (status is None or r.status is status)
             and (signal is None or r.signal == signal)
         ]

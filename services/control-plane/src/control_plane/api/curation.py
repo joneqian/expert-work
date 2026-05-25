@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from control_plane.audit import emit
 from control_plane.settings import Settings
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.curation import CurationCandidateStore, EvalDatasetStore
 from helix_agent.protocol import (
@@ -156,16 +157,37 @@ def build_curation_router() -> APIRouter:
     async def list_candidates(
         request: Request,
         candidates: Annotated[CurationCandidateStore, Depends(_get_curation_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
         agent_name: Annotated[str | None, Query(min_length=1)] = None,
         status: Annotated[CandidateStatus | None, Query()] = None,
         signal: Annotated[CurationSignal | None, Query()] = None,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> JSONResponse:
-        tenant_id: UUID = request.state.tenant_id
-        items = await candidates.list_for_review(
-            tenant_id=tenant_id, agent_name=agent_name, status=status, signal=signal
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/curation/candidates",
         )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await candidates.list_for_review_all_tenants(
+                    agent_name=agent_name, status=status, signal=signal
+                )
+            else:
+                items = await candidates.list_for_review(
+                    tenant_id=scope.tenant_id,
+                    agent_name=agent_name,
+                    status=status,
+                    signal=signal,
+                )
         return JSONResponse(
-            content={"items": [_candidate_dict(c) for c in items], "total": len(items)}
+            content={
+                "items": [_candidate_dict(c) for c in items],
+                "total": len(items),
+                "cross_tenant": isinstance(scope, CrossTenant),
+            }
         )
 
     @router.get("/candidates/{candidate_id}", response_model=None)
@@ -329,12 +351,35 @@ def build_eval_dataset_router() -> APIRouter:
     async def list_eval_datasets(
         request: Request,
         datasets: Annotated[EvalDatasetStore, Depends(_get_eval_dataset_store)],
-        agent_name: Annotated[str, Query(min_length=1)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        agent_name: Annotated[str | None, Query(min_length=1)] = None,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> JSONResponse:
-        tenant_id: UUID = request.state.tenant_id
-        items = await datasets.list_by_agent(tenant_id=tenant_id, agent_name=agent_name)
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/eval-datasets",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await datasets.list_all_tenants()
+            elif agent_name is not None:
+                items = await datasets.list_by_agent(
+                    tenant_id=scope.tenant_id, agent_name=agent_name
+                )
+            else:
+                items = await datasets.list_by_tenant(tenant_id=scope.tenant_id)
+        # Apply agent_name filter in CrossTenant mode at the response layer.
+        if isinstance(scope, CrossTenant) and agent_name is not None:
+            items = [d for d in items if d.agent_name == agent_name]
         return JSONResponse(
-            content={"items": [_eval_dataset_dict(d) for d in items], "total": len(items)}
+            content={
+                "items": [_eval_dataset_dict(d) for d in items],
+                "total": len(items),
+                "cross_tenant": isinstance(scope, CrossTenant),
+            }
         )
 
     @router.get("/{dataset_id}", response_model=None)

@@ -111,6 +111,20 @@ class SqlEvalDatasetStore(EvalDatasetStore):
             )
         return [_row_to_dto(r) for r in rows]
 
+    async def list_all_tenants(self) -> list[EvalDatasetRecord]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(EvalDatasetRow).order_by(EvalDatasetRow.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_dto(r) for r in rows]
+
     async def update(self, record: EvalDatasetRecord) -> bool:
         async with self._sf() as session:
             result = await session.execute(
@@ -238,7 +252,33 @@ class SqlCurationCandidateStore(CurationCandidateStore):
         status: CandidateStatus | None = None,
         signal: CurationSignal | None = None,
     ) -> list[CurationCandidateRecord]:
-        stmt = select(CurationCandidateRow).where(CurationCandidateRow.tenant_id == tenant_id)
+        return await self._list_for_review(
+            tenant_id=tenant_id, agent_name=agent_name, status=status, signal=signal
+        )
+
+    async def list_for_review_all_tenants(
+        self,
+        *,
+        agent_name: str | None = None,
+        status: CandidateStatus | None = None,
+        signal: CurationSignal | None = None,
+    ) -> list[CurationCandidateRecord]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        return await self._list_for_review(
+            tenant_id=None, agent_name=agent_name, status=status, signal=signal
+        )
+
+    async def _list_for_review(
+        self,
+        *,
+        tenant_id: UUID | None,
+        agent_name: str | None,
+        status: CandidateStatus | None,
+        signal: CurationSignal | None,
+    ) -> list[CurationCandidateRecord]:
+        stmt = select(CurationCandidateRow)
+        if tenant_id is not None:
+            stmt = stmt.where(CurationCandidateRow.tenant_id == tenant_id)
         if agent_name is not None:
             stmt = stmt.where(CurationCandidateRow.agent_name == agent_name)
         if status is not None:

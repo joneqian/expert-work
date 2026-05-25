@@ -51,6 +51,13 @@ class EvalDatasetStore(abc.ABC):
         """Return every curated case under the tenant, newest first."""
 
     @abc.abstractmethod
+    async def list_all_tenants(self) -> list[EvalDatasetRecord]:
+        """Cross-tenant list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside ``bypass_rls_session()`` or RLS denies all rows.
+        """
+
+    @abc.abstractmethod
     async def update(self, record: EvalDatasetRecord) -> bool:
         """Replace a case row (matched by ``id`` + ``tenant_id``); return hit."""
 
@@ -98,6 +105,19 @@ class CurationCandidateStore(abc.ABC):
         """Return candidates for the review UI, newest first.
 
         ``agent_name`` / ``status`` / ``signal`` are optional filters.
+        """
+
+    @abc.abstractmethod
+    async def list_for_review_all_tenants(
+        self,
+        *,
+        agent_name: str | None = None,
+        status: CandidateStatus | None = None,
+        signal: CurationSignal | None = None,
+    ) -> list[CurationCandidateRecord]:
+        """Cross-tenant review list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside ``bypass_rls_session()``.
         """
 
     @abc.abstractmethod

@@ -19,6 +19,32 @@ from helix_agent.persistence.skill.base import (
 from helix_agent.protocol import Skill, SkillStatus, SkillVersion
 
 
+def _paginate_skills(
+    rows: list[Skill],
+    *,
+    status: SkillStatus | None,
+    category: str | None,
+    cursor: UUID | None,
+    limit: int,
+) -> tuple[list[Skill], UUID | None]:
+    """Shared keyset-pagination helper for ``list_skills`` + ``list_skills_all_tenants``."""
+    if status is not None:
+        rows = [r for r in rows if r.status == status]
+    if category is not None:
+        rows = [r for r in rows if r.category == category]
+    rows.sort(key=lambda r: (r.created_at, r.id), reverse=True)
+    if cursor is not None:
+        try:
+            cut_idx = next(i for i, r in enumerate(rows) if r.id == cursor)
+            rows = rows[cut_idx + 1 :]
+        except StopIteration:
+            rows = []
+    page = rows[: limit + 1]
+    if len(page) > limit:
+        return page[:limit], page[limit - 1].id
+    return page, None
+
+
 class InMemorySkillStore(SkillStore):
     """Single-process skill registry. Process-local; no concurrency guard."""
 
@@ -77,21 +103,19 @@ class InMemorySkillStore(SkillStore):
         limit: int = 50,
     ) -> tuple[list[Skill], UUID | None]:
         rows = [r for r in self._skills.values() if r.tenant_id == tenant_id]
-        if status is not None:
-            rows = [r for r in rows if r.status == status]
-        if category is not None:
-            rows = [r for r in rows if r.category == category]
-        rows.sort(key=lambda r: (r.created_at, r.id), reverse=True)
-        if cursor is not None:
-            try:
-                cut_idx = next(i for i, r in enumerate(rows) if r.id == cursor)
-                rows = rows[cut_idx + 1 :]
-            except StopIteration:
-                rows = []
-        page = rows[: limit + 1]
-        if len(page) > limit:
-            return page[:limit], page[limit - 1].id
-        return page, None
+        return _paginate_skills(rows, status=status, category=category, cursor=cursor, limit=limit)
+
+    async def list_skills_all_tenants(
+        self,
+        *,
+        status: SkillStatus | None = None,
+        category: str | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[Skill], UUID | None]:
+        # Stream N — no tenant filter.
+        rows = list(self._skills.values())
+        return _paginate_skills(rows, status=status, category=category, cursor=cursor, limit=limit)
 
     async def set_status(self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus) -> Skill:
         row = await self.get_skill(skill_id=skill_id, tenant_id=tenant_id)

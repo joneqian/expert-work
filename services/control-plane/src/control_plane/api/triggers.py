@@ -18,7 +18,7 @@ import hmac
 import logging
 import secrets
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from croniter import croniter
@@ -31,6 +31,7 @@ from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit
 from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from control_plane.trigger_firing import fire_trigger
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import (
@@ -230,12 +231,30 @@ def build_triggers_router() -> APIRouter:
     async def list_triggers(
         request: Request,
         triggers: Annotated[TriggerStore, Depends(_get_trigger_store)],
-        agent_name: Annotated[str, Query(min_length=1)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        agent_name: Annotated[str | None, Query(min_length=1)] = None,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
     ) -> JSONResponse:
-        tenant_id: UUID = request.state.tenant_id
-        items = await triggers.list_by_agent(tenant_id=tenant_id, agent_name=agent_name)
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/triggers",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await triggers.list_all_tenants(agent_name=agent_name)
+            else:
+                items = await triggers.list_by_tenant(
+                    tenant_id=scope.tenant_id, agent_name=agent_name
+                )
         return JSONResponse(
-            content={"items": [_trigger_dict(t) for t in items], "total": len(items)}
+            content={
+                "items": [_trigger_dict(t) for t in items],
+                "total": len(items),
+                "cross_tenant": isinstance(scope, CrossTenant),
+            }
         )
 
     @router.get("/{trigger_id}", response_model=None)

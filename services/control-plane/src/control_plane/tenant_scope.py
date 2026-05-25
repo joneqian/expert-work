@@ -196,10 +196,53 @@ async def bypass_rls_session() -> AsyncIterator[None]:
         bypass_rls_var.reset(bypass)
 
 
+@asynccontextmanager
+async def applied_scope(scope: TenantScopeResolution) -> AsyncIterator[None]:
+    """Apply a :class:`TenantScopeResolution` to the SQL session — Stream N.
+
+    * :class:`CrossTenant` → ``bypass_rls_var=True`` + ``current_tenant_id_var=None``;
+      the SQL store's own WHERE clauses (or ``list_all_tenants`` methods) decide
+      what gets returned.
+    * :class:`SingleTenant` → ``bypass_rls_var=False`` + ``current_tenant_id_var=scope.tenant_id``;
+      this **rebinds** the GUC away from the request-middleware default
+      (``principal.tenant_id``) so a system_admin's tenant-switch query
+      filters at the RLS layer instead of relying purely on the store's
+      ``WHERE tenant_id = ?`` clause (defense in depth).
+
+    Endpoints should wrap their SQL store call inside this manager:
+
+    .. code:: python
+
+        scope = await ensure_tenant_scope(principal, tenant_id, audit, ...)
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                rows = await store.list_all_tenants(...)
+            else:
+                rows = await store.list_by_tenant(tenant_id=scope.tenant_id, ...)
+    """
+    if isinstance(scope, CrossTenant):
+        b = bypass_rls_var.set(True)
+        t = current_tenant_id_var.set(None)
+        try:
+            yield
+        finally:
+            current_tenant_id_var.reset(t)
+            bypass_rls_var.reset(b)
+    else:
+        b = bypass_rls_var.set(False)
+        t = current_tenant_id_var.set(scope.tenant_id)
+        try:
+            yield
+        finally:
+            current_tenant_id_var.reset(t)
+            bypass_rls_var.reset(b)
+
+
 __all__ = [
     "CrossTenant",
     "SingleTenant",
     "TenantScopeResolution",
+    "applied_scope",
     "bypass_rls_session",
     "ensure_tenant_scope",
 ]

@@ -106,6 +106,26 @@ class SqlAgentSpecStore(AgentSpecStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_record(r) for r in rows]
 
+    async def list_all_tenants(
+        self,
+        *,
+        status: AgentSpecStatus | None = None,
+        name: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AgentSpecRecord]:
+        # Stream N (Mini-ADR N-4) — no tenant_id WHERE clause; caller MUST
+        # have ``bypass_rls_var=True`` or RLS filters everything out.
+        stmt = select(AgentSpecRow)
+        if status is not None:
+            stmt = stmt.where(AgentSpecRow.status == status.value)
+        if name is not None:
+            stmt = stmt.where(AgentSpecRow.name == name)
+        stmt = stmt.order_by(AgentSpecRow.created_at.desc()).limit(limit).offset(offset)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_record(r) for r in rows]
+
     async def update_spec(
         self,
         *,

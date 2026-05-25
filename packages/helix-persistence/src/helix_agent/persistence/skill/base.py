@@ -100,6 +100,22 @@ class SkillStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def list_skills_all_tenants(
+        self,
+        *,
+        status: SkillStatus | None = None,
+        category: str | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[Skill], UUID | None]:
+        """Cross-tenant page through skills — Stream N (Mini-ADR N-4).
+
+        Identical shape to :meth:`list_skills` minus the ``tenant_id``
+        filter. Caller MUST be inside ``bypass_rls_session()``
+        (or :func:`applied_scope` with a :class:`CrossTenant`).
+        """
+
+    @abc.abstractmethod
     async def set_status(self, *, skill_id: UUID, tenant_id: UUID, status: SkillStatus) -> Skill:
         """Move the lifecycle state forward (or back to archived).
 

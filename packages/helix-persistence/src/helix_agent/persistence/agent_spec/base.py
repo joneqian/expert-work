@@ -65,6 +65,23 @@ class AgentSpecStore(abc.ABC):
         """Paginated list, newest first."""
 
     @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        status: AgentSpecStatus | None = None,
+        name: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AgentSpecRecord]:
+        """Cross-tenant list — Stream N (Mini-ADR N-4).
+
+        Caller MUST be inside a ``bypass_rls_session()`` (or ``applied_scope``
+        with a :class:`CrossTenant` resolution); otherwise RLS filters
+        all rows out. Used only by ``system_admin`` requests with
+        ``tenant_id=*``.
+        """
+
+    @abc.abstractmethod
     async def update_spec(
         self,
         *,
