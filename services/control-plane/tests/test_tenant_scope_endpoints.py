@@ -272,5 +272,5 @@ async def test_system_admin_star_tenant_id_returns_all_tenants(
     body = response.json()
     assert _is_cross_tenant(body) is True, f"{name}: cross_tenant flag missing"
     items = _items(body)
-    # Seeded 2 tenants × 1 row each.
+    # Seeded 2 tenants, 1 row each.
     assert len(items) == 2, f"{name}: expected 2 rows across tenants, got {len(items)}"
