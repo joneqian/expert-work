@@ -1,0 +1,85 @@
+/* helix Admin UI demo — 全局基础样式 (Antd 不覆盖的部分) */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+html { font-size: 16px; }
+
+body {
+  font-family: var(--hx-font-sans);
+  font-size: var(--hx-font-size-base);
+  line-height: var(--hx-line-height-snug);
+  color: var(--hx-text-primary);
+  background: var(--hx-surface-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, kbd, pre { font-family: var(--hx-font-mono); }
+
+a { color: var(--hx-text-link); text-decoration: none; }
+a:hover { color: var(--hx-text-link-hover); }
+
+:focus-visible {
+  outline: var(--hx-focus-ring-width) solid var(--hx-border-focus);
+  outline-offset: var(--hx-focus-ring-offset);
+}
+
+/* helix kbd badge */
+.hx-kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--hx-border-default);
+  border-radius: var(--hx-radius-xs);
+  background: var(--hx-surface-overlay);
+  font-family: var(--hx-font-mono);
+  font-size: 0.7rem;
+  color: var(--hx-text-secondary);
+  line-height: 1;
+}
+
+/* Antd 一些细微 override —— 大部分通过 ConfigProvider theme token 覆盖,
+   这里仅补 ConfigProvider 接触不到的细节 */
+
+/* sidebar 选中态用 helix surface-selected,而不是 Antd 默认 */
+.hx-sidebar-menu .ant-menu-item-selected {
+  background: var(--hx-surface-selected) !important;
+  color: var(--hx-text-primary) !important;
+}
+.hx-sidebar-menu .ant-menu-item:hover {
+  color: var(--hx-text-primary) !important;
+}
+
+/* 表格行高 36px、表头 uppercase xs — Antd density "small" 接近但不到位 */
+.hx-table .ant-table-thead > tr > th {
+  background: var(--hx-surface-raised) !important;
+  font-size: var(--hx-font-size-xs);
+  font-weight: var(--hx-font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--hx-text-tertiary);
+  border-bottom: 1px solid var(--hx-border-subtle) !important;
+}
+.hx-table .ant-table-tbody > tr > td { padding-top: 8px; padding-bottom: 8px; }
+
+/* 数字单元格 mono + 右对齐 */
+.hx-num { font-family: var(--hx-font-mono); text-align: right; }
+
+/* page heading */
+.hx-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.hx-page-header h1 {
+  font-size: var(--hx-font-size-xl);
+  font-weight: var(--hx-font-weight-semibold);
+  margin: 0;
+  line-height: var(--hx-line-height-tight);
+}
+
+/* mono utility */
+.mono { font-family: var(--hx-font-mono); }

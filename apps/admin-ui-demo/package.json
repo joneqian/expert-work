@@ -1,0 +1,28 @@
+{
+  "name": "@helix-agent/admin-ui-demo",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Interactive demo for helix Admin UI (Stream H) — 临时验证 design baseline + Antd 5 + helix tokens 集成,审核 H.1b 实施视觉前的 sign-off。生产 admin-ui 推 apps/admin-ui/ (H.1b 实施)。",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --port 4173"
+  },
+  "dependencies": {
+    "@ant-design/cssinjs": "^1.21.1",
+    "antd": "^5.23.0",
+    "lucide-react": "^0.469.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^6.28.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.5"
+  },
+  "packageManager": "pnpm@10.14.0+sha512.ad27a79641b49c3e481a16a805baa71817a04bbe06a38d17e60e2eaee83f6a146c6a688125f5792e48dd5ba30e7da52a5cda4c3992b9ccf333f9ce223af84748"
+}
