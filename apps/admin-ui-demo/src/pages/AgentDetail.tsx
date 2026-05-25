@@ -578,4 +578,3 @@ function TraceBars() {
     </div>
   );
 }
-
