@@ -321,19 +321,22 @@
 
 **Stream G Verification**：触发已知错误 → 告警弹出；跑 eval 集 → 拿到 score；feedback 写入并能溯源到 trace；归档脚本可恢复一条历史 event；`helix_llm_token_usage_total` counter 在大盘可见，按 (tenant, agent, model) 维度可拆
 
-### Stream H — Admin UI（~3-4 周；产品级 UI/UX）
+### Stream H — Admin UI（~2.5-3 周；产品级 UI/UX；操作端唯一）
 
-参考：[architecture/00-OVERVIEW](./architecture/00-OVERVIEW.md)、新建 [streams/STREAM-H-DESIGN](./streams/STREAM-H-DESIGN.md)（设计先行）
+参考：[architecture/00-OVERVIEW](./architecture/00-OVERVIEW.md)、[streams/STREAM-H-DESIGN](./streams/STREAM-H-DESIGN.md)（设计先行）
 
-> **2026-05-20 范围重写**（按 [memory:complete-not-minimal](../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md) + [memory:admin-ui-product-grade](../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_admin_ui_product_grade.md)）：原 H.1–H.4 范围过于通用、没接入 J/K 已交付的能力面 → 重写为五子项，每项显式锚定一个能力面。原 H.5/H.6 dogfood 已经由 canonical 能力 agent 取代（与具体 Dify 业务解耦，见 [architecture/08-AGENT-CAPABILITY-ASSESSMENT](./architecture/08-AGENT-CAPABILITY-ASSESSMENT.md)）；H.5 docker-compose dev.yml 已经在 I.1 落地。Admin UI 必须**产品级 UI/UX**（先出设计规范文档再实现，不堆 Antd 默认组件）。
+> **2026-05-25 范围澄清**（用户确认）：Business 系统通过 API 消费 helix 的 per-user 持久 agent；helix **不自带末端用户对话 UI**（末端用户通过 business 系统自己的 UI 与 agent 对话）。Admin UI 仅服务操作人群（平台 admin / agent 开发者 / 运营 / SRE）—— **单面 SPA**。debug 能力作为 per-agent **Playground tab** 嵌入 Agent 详情页。原 H.4（用户面）取消；其中 memory / artifact / sandbox 的 backend API 不变，但治理视角下出现在 H.4 跨 agent 治理面，不再独立"用户面"。
+>
+> **2026-05-20 范围重写**：原 H.1–H.4 范围过于通用 → 重写为锚定能力面的五子项；H.5/H.6 dogfood 已由 canonical 能力 agent 取代；H.5 docker-compose dev.yml 已在 I.1 落地。Admin UI 必须**产品级 UI/UX**（[memory:admin-ui-product-grade](../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_admin_ui_product_grade.md)：先出设计规范文档再实现，不堆 Antd 默认组件）。
 
-- [ ] **H.1 React 19 + Vite + Antd 5 骨架 + 设计规范文档**（`docs/design/admin-ui-guidelines.md`：色板 / 字体 / 间距 / 组件库 / 交互模式）+ 国际化（中 / 英）+ 路由 + 鉴权（JWT / API Key）
-- [ ] **H.2 Agent / Manifest 管理**：agent 列表 / Monaco YAML 编辑器（manifest 编辑 + Pydantic 校验实时回显）/ 版本对比 / 历史回滚。接 B.5 Agent CRUD API
-- [ ] **H.3 Run 时间线 + Trace + 审批面板**：thread / run 列表 / SSE 实时事件回放 / Langfuse trace 嵌入 / **J.8 审批请求列表 + 批准 / 拒绝 / 修改入参面板**。接 B.6/B.7 + E.5 Langfuse + **J.8**
-- [ ] **H.4 用户面（per-user 持久 agent 形态）**：memory 列表 / 编辑 / 删除（接 **K6 memory CRUD**）+ artifact 浏览 / 下载（接 **J.9**）+ 用户活跃沙盒会话查看（接 J.15）
+- [ ] **H.1a 设计基线**（philosophy + language + 8 张 mockup；任何 React 代码前先合入）— `docs/design/admin-ui-philosophy.md`（6 原则 + Agent-中心 IA + WCAG AA 承诺）+ `admin-ui-language.md`（tokens 全量值 + Antd override + 术语表）+ `mockups/01..08-*.html` + `mockups/shared/{tokens.css, shell.css}` + `docs/streams/STREAM-H-DESIGN.md`。锁 [memory:admin-ui-design-baseline](../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_admin_ui_design_baseline.md) 10 条决策
+- [ ] **H.1b React 19 + Vite + Antd 5 骨架** — `apps/admin-ui/` Vite 工程 + Antd 5 ConfigProvider 接入 helix tokens + i18n（zh-CN/en）+ 路由（`react-router-dom` v7）+ 鉴权（API Key / JWT）+ CommandPalette（Cmd+K）+ Lucide 图标 + dark/light theme toggle + Shell（瘦左导航 + 薄顶 bar）
+- [ ] **H.2 Agent / Manifest 管理 + Playground**：agents 列表 / Monaco YAML 编辑器（Pydantic 实时回显）/ 版本对比 / 历史回滚 / **per-agent Playground tab**（左 input + 可改 manifest snippet；右 SSE 消息流 + tool calls + trace timeline；改 manifest 重跑）。接 B.5 + runs SSE + J.8
+- [ ] **H.3 Runs + Trace + Approval**：thread / run 列表 / SSE 实时回放 / Langfuse trace 嵌入 / **J.8 审批请求列表 + 批准/拒绝/修改入参面板**。接 B.6/B.7 + E.5 + **J.8**
+- [ ] **H.4 治理面（Memory / Curation+Eval / Skills / Triggers / Settings / Audit）**：跨 agent / 跨 user 治理视图 —— memory 列表+编辑+删除（接 **K6**）+ curation 候选评审 / eval dataset CRUD（接 **J.12**）+ skill 库（接 **J.7**）+ trigger 列表（接 **J.10**）+ Settings（API Key / Service Account / Role Binding / Tenant Quota / Tenant Config, 接 C/D/F/G）+ Audit 查询
 - [x] **H.5 docker-compose dev.yml 单机一键启** — 已经在 I.1 `--profile full` 落地
 
-**Stream H Verification**：UI/UX 设计规范文档先于实现合入；每个子项有产品级体验（不仅"能用"），含响应式 / 键盘可达 / a11y / 性能（首屏 < 2s）；UI 集成测试覆盖 happy path；接入的 B/E/J/K 能力面在 UI 上端到端可见。
+**Stream H Verification**：H.1a 设计基线 PR 先于 H.1b+ 任何代码 PR 合入；每个子项有产品级体验（响应式 ≥1280px / 键盘可达 / a11y axe 0 critical / 性能 首屏 < 2s, Lighthouse ≥ 90）；UI 集成测试覆盖 happy path；接入的 B/E/J/K 能力面在 UI 上端到端可见。
 
 ### Stream I — 部署与发布闭环（~2 周；承接 Phase 0.3 CI/CD）
 
