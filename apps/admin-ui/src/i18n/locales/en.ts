@@ -146,6 +146,14 @@ export interface TranslationKeys {
     column_status: string;
     column_tenant: string;
     column_created: string;
+    create: string;
+  };
+  create_agent: {
+    title: string;
+    hint: string;
+    submit: string;
+    cancel: string;
+    create_failed: string;
   };
   coming_soon: {
     title_prefix: string;
@@ -319,12 +327,20 @@ const en: TranslationKeys = {
     page_title: "Agents",
     cross_tenant_banner: "cross-tenant view",
     failed_to_load: "Failed to load agents",
-    empty_home: "No agents in this tenant. Use POST /v1/agents to create one.",
+    empty_home: "No agents in this tenant yet — click Create to add one.",
     empty_cross: "No agents across all tenants yet.",
     column_name: "Name",
     column_status: "Status",
     column_tenant: "Tenant",
     column_created: "Created",
+    create: "Create",
+  },
+  create_agent: {
+    title: "Create Agent",
+    hint: "Edit the manifest then click Create. The backend validates the YAML through ManifestLoader; errors surface here.",
+    submit: "Create",
+    cancel: "Cancel",
+    create_failed: "Failed to create agent",
   },
   coming_soon: {
     title_prefix: "This page is being implemented",

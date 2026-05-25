@@ -5,7 +5,7 @@
  * callers can pass ``"*"`` for the cross-tenant aggregate; the
  * ``cross_tenant`` flag on the response tells the UI which mode it got.
  */
-import { getJson, putJson, withTenantScope, type TenantScope } from "./client";
+import { getJson, postJson, putJson, withTenantScope, type TenantScope } from "./client";
 
 export interface AgentRecord {
   id: string;
@@ -80,4 +80,14 @@ export async function updateAgent(
     `/v1/agents/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
     payload,
   );
+}
+
+/** POST /v1/agents — create a new agent from raw YAML. The backend
+ *  derives ``name + version`` from the manifest's ``metadata`` block.
+ *  409 ``MANIFEST_DUPLICATE`` on collision; 422 with envelope code on
+ *  Pydantic / template validation errors. */
+export async function createAgent(
+  payload: ManifestPayload,
+): Promise<AgentDetailResponse> {
+  return postJson<AgentDetailResponse>("/v1/agents", payload);
 }

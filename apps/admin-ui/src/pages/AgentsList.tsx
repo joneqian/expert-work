@@ -1,25 +1,26 @@
 /**
- * Agents list page — Stream H.1b PR 1.
+ * Agents list page — Stream H.1b PR 1 (read) + H.2 PR 2 (create).
  *
  * Hooks straight into the live ``/v1/agents`` endpoint and threads the
  * current :ref:`TenantScopeContext` through so a system_admin's
  * "All tenants" choice flips to the cross-tenant aggregate without
  * extra plumbing.
  *
- * H.2 will flesh out the rest of the Agents IA (create modal, manifest
- * upload, Cmd+K hooks, real-time status). For now the page is purely
- * read-only — but the read path is end-to-end real, which is the H.1b
- * exit criterion.
+ * H.2 PR 2 adds the **Create** button + ``CreateAgentDrawer`` (Monaco
+ * YAML); on success the list refreshes and the new agent's detail page
+ * loads. Cmd+K real routes + manifest upload are deferred follow-ups.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Breadcrumb, Empty, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableColumnsType } from "antd";
-import { Bot, ChevronRight, Globe2, RefreshCw } from "lucide-react";
+import { Bot, ChevronRight, Globe2, Plus, RefreshCw } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { listAgents, type AgentRecord, type AgentList } from "../api/agents";
 import { ApiError } from "../api/client";
 import { useTenantScope } from "../tenant/TenantScopeContext";
+import { CreateAgentDrawer } from "../components/CreateAgentDrawer";
 
 const { Text } = Typography;
 
@@ -33,9 +34,11 @@ const STATUS_COLOR: Record<string, string> = {
 export function AgentsList() {
   const { t } = useTranslation();
   const { scope, apiTenantScope } = useTenantScope();
+  const navigate = useNavigate();
   const [data, setData] = useState<AgentList | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -161,6 +164,26 @@ export function AgentsList() {
             <RefreshCw size={14} strokeWidth={1.5} />
             {loading ? t("common.loading") : t("common.refresh")}
           </button>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            data-testid="agents-create"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 10px",
+              border: "1px solid var(--hx-color-brand-500)",
+              borderRadius: 6,
+              background: "var(--hx-color-brand-500)",
+              color: "var(--hx-on-brand)",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            <Plus size={14} strokeWidth={1.75} />
+            {t("agents_page.create")}
+          </button>
         </div>
       </div>
 
@@ -197,6 +220,18 @@ export function AgentsList() {
           ),
         }}
         data-testid="agents-table"
+      />
+
+      <CreateAgentDrawer
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(created) => {
+          setCreateOpen(false);
+          const { name, version } = created.record;
+          navigate(
+            `/agents/${encodeURIComponent(name)}/${encodeURIComponent(version)}/overview`,
+          );
+        }}
       />
     </div>
   );
