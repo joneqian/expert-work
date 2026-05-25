@@ -68,6 +68,14 @@ export interface TranslationKeys {
     field_created: string;
     field_updated: string;
   };
+  manifest_tab: {
+    read_only_hint: string;
+    edit_hint: string;
+    edit: string;
+    save: string;
+    cancel: string;
+    save_failed: string;
+  };
   run_detail: {
     failed_to_load: string;
     thread_label: string;
@@ -231,6 +239,14 @@ const en: TranslationKeys = {
     field_status: "Status",
     field_created: "Created",
     field_updated: "Updated",
+  },
+  manifest_tab: {
+    read_only_hint: "Read-only — click Edit to modify the spec.",
+    edit_hint: "Editing — Save writes through PUT /v1/agents, Cancel discards changes.",
+    edit: "Edit",
+    save: "Save",
+    cancel: "Cancel",
+    save_failed: "Failed to save manifest",
   },
   run_detail: {
     failed_to_load: "Failed to load run",

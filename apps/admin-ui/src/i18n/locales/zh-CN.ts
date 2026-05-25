@@ -70,6 +70,14 @@ const zhCN: TranslationKeys = {
     field_created: "创建时间",
     field_updated: "更新时间",
   },
+  manifest_tab: {
+    read_only_hint: "只读 — 点击「编辑」修改 spec。",
+    edit_hint: "编辑中 — 「保存」会调用 PUT /v1/agents，「取消」放弃改动。",
+    edit: "编辑",
+    save: "保存",
+    cancel: "取消",
+    save_failed: "Manifest 保存失败",
+  },
   run_detail: {
     failed_to_load: "Run 加载失败",
     thread_label: "Thread",
