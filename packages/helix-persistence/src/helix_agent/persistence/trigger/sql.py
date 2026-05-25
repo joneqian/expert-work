@@ -114,9 +114,7 @@ class SqlTriggerStore(TriggerStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
 
-    async def list_all_tenants(
-        self, *, agent_name: str | None = None
-    ) -> list[TriggerRecord]:
+    async def list_all_tenants(self, *, agent_name: str | None = None) -> list[TriggerRecord]:
         # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
         stmt = select(AgentTriggerRow).order_by(AgentTriggerRow.created_at.asc())
         if agent_name is not None:

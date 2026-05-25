@@ -55,9 +55,7 @@ class TriggerStore(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def list_all_tenants(
-        self, *, agent_name: str | None = None
-    ) -> list[TriggerRecord]:
+    async def list_all_tenants(self, *, agent_name: str | None = None) -> list[TriggerRecord]:
         """Cross-tenant trigger list — Stream N (Mini-ADR N-4).
 
         Caller MUST be inside ``bypass_rls_session()``. Optional

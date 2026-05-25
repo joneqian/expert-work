@@ -99,8 +99,7 @@ class InMemoryAgentSpecStore(AgentSpecStore):
             matched = [
                 r
                 for r in self._rows.values()
-                if (status is None or r.status is status)
-                and (name is None or r.name == name)
+                if (status is None or r.status is status) and (name is None or r.name == name)
             ]
         matched.sort(key=lambda r: r.created_at, reverse=True)
         return matched[offset : offset + limit]

@@ -277,9 +277,7 @@ def build_agents_router() -> APIRouter:
         # SingleTenant; under principal's home for CrossTenant (the cross-tenant
         # audit was already emitted by ensure_tenant_scope).
         audit_tenant = (
-            request.state.principal.tenant_id
-            if isinstance(scope, CrossTenant)
-            else scope.tenant_id
+            request.state.principal.tenant_id if isinstance(scope, CrossTenant) else scope.tenant_id
         )
         await emit(
             audit,
