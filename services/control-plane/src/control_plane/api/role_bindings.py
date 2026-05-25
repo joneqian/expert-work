@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from control_plane.api._authz import require
 from control_plane.audit import emit
@@ -28,6 +28,18 @@ class CreateRoleBindingRequest(BaseModel):
     subject_type: Literal["user", "service_account"]
     subject_id: UUID
     role: Role
+    # Stream N — when ``True``, mint a platform-scope binding (role
+    # must be ``SYSTEM_ADMIN``). Only ``is_system_admin`` callers may
+    # set this; the endpoint enforces that check before persisting.
+    platform_scope: bool = False
+
+    @model_validator(mode="after")
+    def _check_scope_role_consistency(self) -> CreateRoleBindingRequest:
+        if self.platform_scope and self.role is not Role.SYSTEM_ADMIN:
+            raise ValueError("platform_scope=true requires role=system_admin")
+        if not self.platform_scope and self.role is Role.SYSTEM_ADMIN:
+            raise ValueError("role=system_admin requires platform_scope=true")
+        return self
 
 
 def _get_repo(request: Request) -> RoleBindingStore:
@@ -48,13 +60,25 @@ def build_role_bindings_router() -> APIRouter:
         repo: Annotated[RoleBindingStore, Depends(_get_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> dict[str, object]:
+        # Stream N — platform-scope bindings (system admins) can only be
+        # created by another system admin. The DTO validator already
+        # guarantees role=SYSTEM_ADMIN when platform_scope=true.
+        if payload.platform_scope and not principal.is_system_admin:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "PLATFORM_SCOPE_FORBIDDEN",
+                    "message": "only a system admin may grant platform-scope bindings",
+                },
+            )
         try:
             binding = await repo.create(
                 subject_type=payload.subject_type,
                 subject_id=payload.subject_id,
-                tenant_id=principal.tenant_id,
+                tenant_id=None if payload.platform_scope else principal.tenant_id,
                 role=payload.role,
                 granted_by=principal.subject_id,
+                platform_scope=payload.platform_scope,
             )
         except DuplicateRoleBindingError as exc:
             raise HTTPException(
@@ -64,6 +88,10 @@ def build_role_bindings_router() -> APIRouter:
                     "message": "the subject already has this role for this tenant",
                 },
             ) from exc
+        # Audit is recorded under the principal's home tenant when the
+        # binding is platform-scope (the binding itself has no tenant);
+        # the cross-tenant audit emitted by ensure_tenant_scope is the
+        # other half of the trail.
         await emit(
             audit,
             tenant_id=principal.tenant_id,
@@ -76,6 +104,7 @@ def build_role_bindings_router() -> APIRouter:
                 "subject_type": payload.subject_type,
                 "subject_id": str(payload.subject_id),
                 "role": payload.role.value,
+                "platform_scope": payload.platform_scope,
             },
         )
         return {"success": True, "data": binding.model_dump(mode="json"), "error": None}
@@ -86,7 +115,20 @@ def build_role_bindings_router() -> APIRouter:
         repo: Annotated[RoleBindingStore, Depends(_get_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
+        platform_scope: Annotated[bool | None, Query()] = None,  # Stream N
     ) -> dict[str, object]:
+        # Stream N — listing platform-scope bindings is itself a
+        # platform-admin view; non-system-admins cannot read who else
+        # holds platform-scope. Forbid before paying the scope-resolve
+        # cost so we don't emit a misleading cross-tenant audit row.
+        if platform_scope and not principal.is_system_admin:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "PLATFORM_SCOPE_FORBIDDEN",
+                    "message": "only a system admin may list platform-scope bindings",
+                },
+            )
         scope = await ensure_tenant_scope(
             principal,
             tenant_id,
@@ -95,7 +137,12 @@ def build_role_bindings_router() -> APIRouter:
             endpoint="GET /v1/role_bindings",
         )
         async with applied_scope(scope):
-            if isinstance(scope, CrossTenant):
+            if platform_scope:
+                # ``platform_scope=true`` is the dedicated lookup —
+                # cross-tenant filter is implicit so ignore ``tenant_id``
+                # other than the scope-resolution audit (already emitted).
+                items = await repo.list_platform_scope()
+            elif isinstance(scope, CrossTenant):
                 items = await repo.list_all_tenants()
             else:
                 items = await repo.list_for_tenant(tenant_id=scope.tenant_id)
@@ -104,7 +151,7 @@ def build_role_bindings_router() -> APIRouter:
             "data": {
                 "items": [b.model_dump(mode="json") for b in items],
                 "total": len(items),
-                "cross_tenant": isinstance(scope, CrossTenant),
+                "cross_tenant": isinstance(scope, CrossTenant) or bool(platform_scope),
             },
             "error": None,
         }

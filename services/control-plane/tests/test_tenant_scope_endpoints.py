@@ -397,3 +397,100 @@ async def test_system_admin_star_tenant_id_returns_all_tenants(
     assert _is_cross_tenant(body) is True, f"{name}: cross_tenant flag missing"
     items = _items(body)
     assert len(items) == star_count, f"{name}: expected {star_count}, got {len(items)}"
+
+
+# ---------------------------------------------------------------------------
+# Stream N — role_binding platform_scope writes + list filter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tenant_admin_cannot_create_platform_scope_binding(
+    app_state: tuple[AsyncClient, UUID],
+) -> None:
+    client, _ = app_state
+    headers = {"Authorization": f"Bearer {_tenant_admin_token()}"}
+    response = await client.post(
+        "/v1/role_bindings",
+        headers=headers,
+        json={
+            "subject_type": "user",
+            "subject_id": str(uuid4()),
+            "role": "system_admin",
+            "platform_scope": True,
+        },
+    )
+    assert response.status_code == 403, response.text
+    detail = response.json().get("detail", {})
+    assert detail.get("code") == "PLATFORM_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_system_admin_can_create_platform_scope_binding(
+    app_state: tuple[AsyncClient, UUID],
+) -> None:
+    client, sys_admin_id = app_state
+    headers = {"Authorization": f"Bearer {_system_admin_token(sys_admin_id)}"}
+    response = await client.post(
+        "/v1/role_bindings",
+        headers=headers,
+        json={
+            "subject_type": "user",
+            "subject_id": str(uuid4()),
+            "role": "system_admin",
+            "platform_scope": True,
+        },
+    )
+    assert response.status_code == 201, response.text
+    binding = response.json()["data"]
+    assert binding["platform_scope"] is True
+    assert binding["tenant_id"] is None
+    assert binding["role"] == "system_admin"
+
+
+@pytest.mark.asyncio
+async def test_platform_scope_role_mismatch_rejected_by_validator(
+    app_state: tuple[AsyncClient, UUID],
+) -> None:
+    client, sys_admin_id = app_state
+    headers = {"Authorization": f"Bearer {_system_admin_token(sys_admin_id)}"}
+    response = await client.post(
+        "/v1/role_bindings",
+        headers=headers,
+        json={
+            "subject_type": "user",
+            "subject_id": str(uuid4()),
+            "role": "admin",  # tenant-scope role, but platform_scope=True
+            "platform_scope": True,
+        },
+    )
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.asyncio
+async def test_tenant_admin_platform_scope_list_filter_denied(
+    app_state: tuple[AsyncClient, UUID],
+) -> None:
+    client, _ = app_state
+    headers = {"Authorization": f"Bearer {_tenant_admin_token()}"}
+    response = await client.get("/v1/role_bindings?platform_scope=true", headers=headers)
+    assert response.status_code == 403, response.text
+    detail = response.json().get("detail", {})
+    assert detail.get("code") == "PLATFORM_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_system_admin_platform_scope_list_returns_platform_rows(
+    app_state: tuple[AsyncClient, UUID],
+) -> None:
+    client, sys_admin_id = app_state
+    headers = {"Authorization": f"Bearer {_system_admin_token(sys_admin_id)}"}
+    response = await client.get("/v1/role_bindings?platform_scope=true", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    items = _items(body)
+    # Fixture pre-seeded 1 platform-scope binding (the test sys_admin user).
+    assert len(items) == 1
+    assert items[0]["platform_scope"] is True
+    assert items[0]["tenant_id"] is None
+    assert items[0]["role"] == "system_admin"

@@ -1,0 +1,64 @@
+# Stream N platform-admin M0 baseline dataset.
+#
+# 8 cases covering the full decision matrix of ``ensure_tenant_scope``:
+#
+#   tenant_admin (is_system_admin=false):
+#     - request=home       → SingleTenant(home)         (single_home)
+#     - request=none       → SingleTenant(home)         (single_home)
+#     - request=other      → 403 TENANT_NOT_ALLOWED     (forbid_other)
+#     - request=*          → 403 CROSS_TENANT_FORBIDDEN (forbid_cross)
+#
+#   system_admin (is_system_admin=true, allowed_tenants="*"):
+#     - request=home       → SingleTenant(home)         (single_home)
+#     - request=none       → SingleTenant(home)         (single_home)
+#     - request=other      → SingleTenant(other)        (single_other, audit: tenant_switch)
+#     - request=*          → CrossTenant                (cross, audit: cross_tenant_query)
+#
+# Threshold = pass-rate 1.00 — cross-tenant authorization is security-class.
+
+name: platform_admin-m0-baseline
+
+cases:
+  # ---------- tenant_admin ----------
+
+  - id: tenant-admin-001-home-explicit-allowed
+    is_system_admin: false
+    requested: home
+    expected: single_home
+
+  - id: tenant-admin-002-none-defaults-to-home
+    is_system_admin: false
+    requested: none
+    expected: single_home
+
+  - id: tenant-admin-003-other-tenant-blocked
+    is_system_admin: false
+    requested: other
+    expected: forbid_other
+
+  - id: tenant-admin-004-star-blocked
+    is_system_admin: false
+    requested: star
+    expected: forbid_cross
+
+  # ---------- system_admin ----------
+
+  - id: system-admin-001-home-passes
+    is_system_admin: true
+    requested: home
+    expected: single_home
+
+  - id: system-admin-002-none-defaults-to-home
+    is_system_admin: true
+    requested: none
+    expected: single_home
+
+  - id: system-admin-003-other-tenant-switch
+    is_system_admin: true
+    requested: other
+    expected: single_other
+
+  - id: system-admin-004-star-cross-tenant
+    is_system_admin: true
+    requested: star
+    expected: cross

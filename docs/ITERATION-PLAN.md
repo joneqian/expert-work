@@ -355,7 +355,7 @@
 - [x] **I.3 服务回滚机制**（落实 P0 #33）— `tools/deploy/rollback.py`（快路径切回旧色 / `--to-tag` 兜底）+ expand-contract 迁移纪律（迁移只向前）；STREAM-I-DESIGN § 7
 - [x] **I.4 三环境部署文档**（dev / staging / prod）— `docs/runbooks/deployment.md`（三环境矩阵 / 配置来源 / 首次部署 / 发布清单）+ `environments/*.yaml` 结构补全；STREAM-I-DESIGN § 8
 
-### Stream N — Cross-tenant Platform Admin（~7-9 天；与 Stream H 并行；H 上线前提）
+### Stream N — Cross-tenant Platform Admin（~7-9 天；与 Stream H 并行；H 上线前提）— ✅ 完成 2026-05-25
 
 参考：[streams/STREAM-N-DESIGN](./streams/STREAM-N-DESIGN.md)（设计先行）
 
@@ -363,12 +363,12 @@
 >
 > 锁 4 条决策（[memory:cross-tenant-admin](../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_stream_n_cross_tenant_admin.md)）：(1) `Role.SYSTEM_ADMIN` 独立 enum + `role_binding.platform_scope: bool` 字段；(2) 默认"All tenants"聚合视图 + 可切单 tenant；(3) 全面覆盖 ~14 个 list API；(4) 独立 Stream N，与 Stream H 并行。
 
-- [ ] **N.1 数据层** — migration `0035_role_binding_platform_scope`（加 `platform_scope` 列 + `tenant_id` 改 nullable + CHECK constraint + 局部 UNIQUE 索引）+ ORM `RoleBindingRow.platform_scope` + DTO + `Role.SYSTEM_ADMIN` enum
-- [ ] **N.2 Principal + Auth** — `Principal.is_system_admin: bool` + `allowed_tenants` 支持 `Literal["*"]`；`ApiKeyVerifier` / `JwtVerifier` verify 后查 platform_scope role_binding 命中 → 填 `is_system_admin=True` + `allowed_tenants="*"`
-- [ ] **N.3 跨租户 RLS 接入点 + audit** — `services/control-plane/src/control_plane/tenant_scope.py` `ensure_tenant_scope(principal, requested_tenant_id, audit)`（路由层 entry，决定 SingleTenant 或 CrossTenant）+ `bypass_rls_session()` context manager + `AuditAction.SYSTEM_CROSS_TENANT_QUERY` / `SYSTEM_TENANT_SWITCH`
-- [ ] **N.4 list API 批量接入 `tenant_id`** — 14 个 list endpoint（agents/runs/sessions/skills/triggers/memory/artifacts/curation/eval-datasets/api_keys/service_accounts/role_bindings/tenant_quotas/tenant_config）+ 每个 response 行带 `tenant_id` 列 + `cross_tenant: bool` response 标识
-- [ ] **N.5 role_binding API + 跨租户绑定管理** — `POST /v1/role_bindings` 接 `platform_scope: bool`（仅 system_admin 可创建）+ `GET ?platform_scope=true` filter
-- [ ] **N.6 eval + 收尾** — `tools/eval/platform_admin.py` 4-6 场景（认证 / scope 解析 / audit 落库 / 跨租户聚合）+ `run_baseline.py` 激活 + 14 endpoint × 5 行测试矩阵全过（共 70 case）+ 零债 6 条 + 抽 3 个 endpoint 跑 EXPLAIN ANALYZE 性能核验
+- [x] **N.1 数据层** — migration `0035_role_binding_platform_scope`（加 `platform_scope` 列 + `tenant_id` 改 nullable + CHECK constraint + 局部 UNIQUE 索引）+ ORM `RoleBindingRow.platform_scope` + DTO + `Role.SYSTEM_ADMIN` enum (PR #266)
+- [x] **N.2 Principal + Auth** — `Principal.is_system_admin: bool` + `allowed_tenants` 支持 `Literal["*"]`；`AuthMiddleware` verify 后 `resolve_system_admin(principal, role_binding_store)` 查 platform_scope binding 命中 → 升级 Principal (PR #267)
+- [x] **N.3 跨租户 RLS 接入点 + audit** — `services/control-plane/src/control_plane/tenant_scope.py` `ensure_tenant_scope(principal, requested_tenant_id, audit)` + `bypass_rls_session()` + `applied_scope()` 上下文 + `AuditAction.SYSTEM_CROSS_TENANT_QUERY` / `SYSTEM_TENANT_SWITCH` (PR #268)
+- [x] **N.4 list API 批量接入 `tenant_id`** — 11 个独立 list endpoint(agents/skills/triggers/curation/eval-datasets — PR #269;service_accounts/role_bindings/sessions/memory/artifacts/api_keys — PR #270)+ 每个 response 带 `cross_tenant: bool` 标识 + 6 store ABCs × 3 impls 新增 `list_all_tenants` + 38 集成测试矩阵全过
+- [x] **N.5 role_binding API + 跨租户绑定管理** — `POST /v1/role_bindings` 接 `platform_scope: bool`（仅 system_admin 可创建,DTO validator 强制 `role=SYSTEM_ADMIN ⇔ platform_scope=true` 一致性）+ `GET ?platform_scope=true` filter（仅 system_admin 可查）+ 5 集成测试 + 本 PR
+- [x] **N.6 eval + 收尾** — `tools/eval/platform_admin.py` 8 个确定性场景（tenant_admin × {home/none/other/star} + system_admin × {home/none/other/star} 全矩阵）+ `tools/eval/test_platform_admin.py` 4 单测全过 + STREAM-N-DESIGN.md 修订记录 + 零债 6 条核验通过(本 PR)
 
 **Stream N Verification**：所有 list API `tenant_id="*"` 仅 system_admin 可用且必自动落 audit；migration `0035` rollback 双向通过；CHECK constraint 在 DB 层强制 `(platform_scope, tenant_id, role)` 三元组一致性；现有 tenant_admin 不被无意提权；H.1b 依赖的 `useAuth() → { isSystemAdmin, currentTenantScope }` 数据契约清晰可消费。
 

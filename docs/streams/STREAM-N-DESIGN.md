@@ -267,12 +267,13 @@ def downgrade() -> None:
 
 | PR | 内容 | 估时 |
 |----|------|------|
-| **PR1** 设计补丁(纯文档) | 本文档 + Mini-ADR N-1..N-5 + ITERATION-PLAN 加 Stream N 段 + memory:cross-tenant-admin | 0.5 天 |
-| **PR2 数据层** | migration 0035 + ORM `RoleBindingRow.platform_scope` + DTO `RoleBindingRecord` + `Role.SYSTEM_ADMIN` enum + 测试 | 1 天 |
-| **PR3 Principal + Auth** | `Principal.is_system_admin` + `allowed_tenants` 支持 `"*"` + `ApiKeyVerifier` / `JwtVerifier` 接 platform_scope role_binding 查询 + 测试 | 1 天 |
-| **PR4 RLS 接入点 + audit** | `tenant_scope.py` `ensure_tenant_scope` + `bypass_rls_session()` + `SYSTEM_CROSS_TENANT_QUERY` / `SYSTEM_TENANT_SWITCH` audit action + 单测 + 集成测 | 1 天 |
-| **PR5 list API 批量改造**(可拆 2 个 PR) | 14 个 list endpoint 全部接入 `tenant_id` 参数 + 返回 `tenant_id` 列 + 集成测试(每个 endpoint 5 个测试矩阵行) | 2.5-3 天 |
-| **PR6 role_binding API + eval + 收尾** | `POST /v1/role_bindings` 加 `platform_scope: bool` + `GET ?platform_scope=true` filter + `tools/eval/platform_admin.py` + `run_baseline.py` + STREAM-N-DESIGN 修订记录 + ITERATION-PLAN N 段 `[x]` + 零债 6 条核验 | 1-1.5 天 |
+| **PR1** [x] 设计补丁(纯文档) — PR #265 | 本文档 + Mini-ADR N-1..N-5 + ITERATION-PLAN 加 Stream N 段 + memory:cross-tenant-admin | 0.5 天 |
+| **PR2** [x] 数据层 — PR #266 | migration 0035 + ORM `RoleBindingRow.platform_scope` + DTO `RoleBindingRecord` + `Role.SYSTEM_ADMIN` enum + 测试 | 1 天 |
+| **PR3** [x] Principal + Auth — PR #267 | `Principal.is_system_admin` + `allowed_tenants` 支持 `"*"` + `ApiKeyVerifier` / `JwtVerifier` 接 platform_scope role_binding 查询 + 测试 | 1 天 |
+| **PR4** [x] RLS 接入点 + audit — PR #268 | `tenant_scope.py` `ensure_tenant_scope` + `bypass_rls_session()` + `applied_scope()` + `SYSTEM_CROSS_TENANT_QUERY` / `SYSTEM_TENANT_SWITCH` audit action + 单测 + 集成测 | 1 天 |
+| **PR5a** [x] list API 改造 — 5 endpoints — PR #269 | agents/skills/triggers/curation/eval-datasets 接入 `ensure_tenant_scope` + `applied_scope` + 15 集成测试 | 1 天 |
+| **PR5b** [x] list API 改造 — 6 endpoints — PR #270 | service_accounts/role_bindings/sessions/memory/artifacts/api_keys 接入 + 18 集成测试 + 6 store ABCs × 3 impls 新增 `list_all_tenants` | 1 天 |
+| **PR6** [x] role_binding API + eval + 收尾 — 本 PR | `POST /v1/role_bindings` 加 `platform_scope` + `GET ?platform_scope=true` filter + `tools/eval/platform_admin.py` (8 cases) + 5 集成测试 + STREAM-N-DESIGN 修订记录 + ITERATION-PLAN `[x]` + 零债 6 条 | 0.5 天 |
 
 总估时 **~7-9 天**(一个全职 backend),与 Stream H.1b UI scaffold **可并行**(UI 可先 mock system_admin 视角)。**Stream H.1b 上线需等本 Stream 完成**。
 
@@ -347,3 +348,4 @@ def downgrade() -> None:
 | 日期 | 版本 | 说明 |
 |---|---|---|
 | 2026-05-25 | v1.0 | 初稿:Role.SYSTEM_ADMIN + platform_scope + ensure_tenant_scope + 14 list API 改造范式 + 5 Mini-ADR(N-1..N-5)+ 6 PR 估时 |
+| 2026-05-25 | v1.1 | Stream N 全部 6 PR 合并完成(#265 / #266 / #267 / #268 / #269 / #270 / 本 PR);N.4 落地 11 个 list endpoint(原估 14,经盘点发现 sessions/threads 是同一资源,runs 是 sessions 嵌套不计独立 list);N.6 + N.7 + 零债 6 条核验通过 |
