@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 14 — Settings Ops(Tenant Quotas + Tenant Config)
+  ============================================================
+  对应 H.4 PR 8。Backend C.5(tenant_quotas)+ C.7(tenant_config)已 shipped。
+
+  特点:
+    - 两个独立路由:/settings/tenant-quotas + /settings/tenant-config
+    - 单 tenant only(backend 无跨租户 list)→ system_admin 通过 TenantSwitcher 切看其它 tenant
+    - Tenant Config 用 Monaco JSON 编辑 + ETag 并发兜底(412 conflict banner)
+    - pristine vs dirty 检测(复用 ApprovalCard 范式)
+
+  本 mockup 横向展示两个子页(scroll 即可)。
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings Ops — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .section { margin-bottom: var(--hx-space-6); }
+    .section__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--hx-space-3); padding-bottom: var(--hx-space-2); border-bottom: 1px solid var(--hx-border-subtle); }
+    .tenant-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--hx-surface-raised);
+      border: 1px solid var(--hx-border-subtle);
+      padding: 4px 10px;
+      border-radius: var(--hx-radius-sm);
+      font-size: var(--hx-font-size-sm);
+    }
+    .quota-bar {
+      width: 100%;
+      height: 6px;
+      background: var(--hx-surface-raised);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .quota-bar__fill {
+      height: 100%;
+      background: var(--hx-color-brand-500);
+    }
+    .quota-bar__fill--warn { background: var(--hx-status-warning-fg); }
+    .quota-bar__fill--danger { background: var(--hx-status-danger-fg); }
+
+    .config-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--hx-space-2); }
+    .config-meta { display: flex; gap: var(--hx-space-3); font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary); }
+    .dirty-pill { background: var(--hx-status-warning-bg); color: var(--hx-status-warning-fg); padding: 2px 8px; border-radius: var(--hx-radius-xs); font-size: var(--hx-font-size-xs); }
+
+    .monaco-stub {
+      background: var(--hx-surface-bg);
+      border: 1px solid var(--hx-border-strong);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-3);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-sm);
+      color: var(--hx-text-primary);
+      white-space: pre;
+      min-height: 280px;
+      overflow-x: auto;
+    }
+
+    .etag-banner {
+      background: var(--hx-status-danger-bg);
+      color: var(--hx-status-danger-fg);
+      border: 1px solid var(--hx-status-danger-fg);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-2) var(--hx-space-3);
+      margin-bottom: var(--hx-space-3);
+      display: flex; align-items: center; gap: var(--hx-space-3);
+    }
+    .etag-banner__msg { flex: 1; font-size: var(--hx-font-size-sm); }
+
+    .demo-toggle { position: fixed; bottom: 24px; right: 24px; z-index: 100; }
+  </style>
+</head>
+<body>
+  <div class="hx-app">
+    <aside class="hx-sidebar">
+      <div class="hx-sidebar__brand"><span class="hx-sidebar__glyph">⟁</span><span>helix</span></div>
+      <nav class="hx-sidebar__nav">
+        <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+        <a class="hx-sidebar__item" href="./09-runs-list.html">Runs</a>
+        <a class="hx-sidebar__item" href="./12-audit.html">Audit</a>
+        <div class="hx-sidebar__group-label">Settings</div>
+        <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+        <a class="hx-sidebar__item" href="./13-settings-iam.html">Service Accounts</a>
+        <a class="hx-sidebar__item" href="./13-settings-iam.html">Role Bindings</a>
+        <a class="hx-sidebar__item" href="./14-settings-ops.html" aria-current="page">Tenant Quotas</a>
+        <a class="hx-sidebar__item" href="./14-settings-ops.html" aria-current="page">Tenant Config</a>
+      </nav>
+    </aside>
+
+    <header class="hx-topbar">
+      <button class="hx-topbar__tenant"><span>Tenant: acme</span></button>
+      <button class="hx-topbar__cmdk"><span>Search or jump</span><span class="hx-kbd">⌘K</span></button>
+      <div class="hx-topbar__spacer"></div>
+    </header>
+
+    <main class="hx-main">
+      <div class="hx-main__container">
+
+        <!-- Section 1: Tenant Quotas -->
+        <div class="section">
+          <div class="section__header">
+            <div>
+              <h2 class="hx-heading-2">Tenant Quotas</h2>
+              <p class="hx-text-secondary hx-text-sm" style="margin: 4px 0 0;">资源用量上限 per-tenant + period。单 tenant only — system_admin 用顶 bar 切到其它 tenant。</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <span class="tenant-pill">当前 tenant: <strong>acme</strong></span>
+              <button class="hx-btn hx-btn--primary">+ 新建 Quota</button>
+            </div>
+          </div>
+
+          <table class="hx-table">
+            <thead>
+              <tr><th>资源</th><th>周期</th><th>上限</th><th>已用</th><th>用量</th><th>动作</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code class="hx-text-mono">llm_tokens</code></td>
+                <td>per_day</td>
+                <td>1,000,000</td>
+                <td>247,392 (24.7%)</td>
+                <td><div class="quota-bar"><div class="quota-bar__fill" style="width: 24.7%;"></div></div></td>
+                <td><button class="hx-btn hx-btn--ghost hx-btn--sm">编辑</button> <button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+              </tr>
+              <tr>
+                <td><code class="hx-text-mono">runs</code></td>
+                <td>per_hour</td>
+                <td>500</td>
+                <td>423 (84.6%)</td>
+                <td><div class="quota-bar"><div class="quota-bar__fill quota-bar__fill--warn" style="width: 84.6%;"></div></div></td>
+                <td><button class="hx-btn hx-btn--ghost hx-btn--sm">编辑</button> <button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+              </tr>
+              <tr>
+                <td><code class="hx-text-mono">sandbox_hours</code></td>
+                <td>per_day</td>
+                <td>100</td>
+                <td>97 (97%)</td>
+                <td><div class="quota-bar"><div class="quota-bar__fill quota-bar__fill--danger" style="width: 97%;"></div></div></td>
+                <td><button class="hx-btn hx-btn--ghost hx-btn--sm">编辑</button> <button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Section 2: Tenant Config -->
+        <div class="section">
+          <div class="section__header">
+            <div>
+              <h2 class="hx-heading-2">Tenant Config</h2>
+              <p class="hx-text-secondary hx-text-sm" style="margin: 4px 0 0;">租户级配置 — feature flags / 默认 LLM 模型 / retention / etc.</p>
+            </div>
+            <span class="tenant-pill">当前 tenant: <strong>acme</strong></span>
+          </div>
+
+          <div class="etag-banner">
+            <span style="font-size: 18px;">⚠</span>
+            <div class="etag-banner__msg">
+              <strong>Config changed by another user.</strong>
+              你的本地版本是 ETag <code class="hx-text-mono">"r3a2b1c"</code>,服务端已是 <code class="hx-text-mono">"r5d4e3f"</code>。请 Reload 后重新编辑。
+            </div>
+            <button class="hx-btn hx-btn--secondary hx-btn--sm">Reload</button>
+          </div>
+
+          <div class="config-toolbar">
+            <div class="config-meta">
+              <span>ETag <code class="hx-text-mono">"r3a2b1c"</code></span>
+              <span>updated_by user_alice@acme</span>
+              <span>2 小时前</span>
+              <span class="dirty-pill">已编辑(未保存)</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="hx-btn hx-btn--secondary hx-btn--sm">取消编辑</button>
+              <button class="hx-btn hx-btn--primary hx-btn--sm">保存</button>
+            </div>
+          </div>
+
+          <div class="monaco-stub">{
+  "default_llm_model": "claude-opus-4-7",
+  "default_llm_temperature": 0.2,
+  "retention_days": {
+    "audit_log": 365,
+    "run_event": 90,
+    "memory": 730
+  },
+  "feature_flags": {
+    "enable_curation_v2": true,
+    "enable_skill_marketplace": false,
+    "enable_audit_export_csv": false
+  },
+  "rate_limit": {
+    "burst_factor": 1.5,
+    "decay_seconds": 60
+  }
+}</div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <div class="demo-toggle">
+    <button class="hx-btn hx-btn--ghost hx-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
+  </div>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 13 — Settings IAM(Service Accounts + Role Bindings)
+  ============================================================
+  对应 H.4 PR 7。Backend C.3 已 shipped(service_accounts.py / role_bindings.py)。
+
+  特点:
+    - 双 sub-page(同 sidebar 入口,两条路由 /settings/service-accounts + /settings/role-bindings)
+    - Role Binding 含 platform_scope checkbox(仅 SYSTEM_ADMIN 可见)
+    - self-elevation 确认 dialog(向自己加 SYSTEM_ADMIN 必触发二次确认)
+    - cross-tenant 视图保留 banner 一致性
+
+  本 mockup 在同一 HTML 里横向展示两个子页(scroll 即可,实际部署是两个独立路由)。
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings IAM — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .section { margin-bottom: var(--hx-space-6); }
+    .section__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--hx-space-3); padding-bottom: var(--hx-space-2); border-bottom: 1px solid var(--hx-border-subtle); }
+    .platform-badge { background: var(--hx-status-danger-bg); color: var(--hx-status-danger-fg); border: 1px solid var(--hx-status-danger-fg); padding: 2px 8px; border-radius: var(--hx-radius-xs); font-size: var(--hx-font-size-xs); font-weight: var(--hx-font-weight-semibold); }
+    .cross-banner {
+      background: var(--hx-status-info-bg);
+      color: var(--hx-status-info-fg);
+      border: 1px solid var(--hx-status-info-fg);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-2) var(--hx-space-3);
+      margin-bottom: var(--hx-space-3);
+      font-size: var(--hx-font-size-sm);
+    }
+    .confirm-dialog {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+    }
+    .confirm-dialog__panel {
+      background: var(--hx-surface-base);
+      border: 2px solid var(--hx-status-danger-fg);
+      border-radius: var(--hx-radius-md);
+      padding: var(--hx-space-4);
+      max-width: 480px;
+      box-shadow: var(--hx-shadow-lg);
+    }
+    .confirm-dialog__title { margin: 0 0 var(--hx-space-2); color: var(--hx-status-danger-fg); display: flex; align-items: center; gap: 8px; }
+    .confirm-dialog__body { font-size: var(--hx-font-size-sm); color: var(--hx-text-secondary); margin-bottom: var(--hx-space-3); }
+    .confirm-dialog__field { margin-bottom: var(--hx-space-3); }
+    .confirm-dialog__actions { display: flex; gap: var(--hx-space-2); justify-content: flex-end; }
+    .demo-toggle { position: fixed; bottom: 24px; right: 24px; z-index: 100; }
+  </style>
+</head>
+<body>
+  <div class="hx-app">
+    <aside class="hx-sidebar">
+      <div class="hx-sidebar__brand"><span class="hx-sidebar__glyph">⟁</span><span>helix</span></div>
+      <nav class="hx-sidebar__nav">
+        <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+        <a class="hx-sidebar__item" href="./09-runs-list.html">Runs</a>
+        <a class="hx-sidebar__item" href="./12-audit.html">Audit</a>
+        <div class="hx-sidebar__group-label">Settings</div>
+        <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+        <a class="hx-sidebar__item" href="./13-settings-iam.html" aria-current="page">Service Accounts</a>
+        <a class="hx-sidebar__item" href="./13-settings-iam.html" aria-current="page">Role Bindings</a>
+        <a class="hx-sidebar__item" href="./14-settings-ops.html">Tenant Quotas</a>
+        <a class="hx-sidebar__item" href="./14-settings-ops.html">Tenant Config</a>
+      </nav>
+    </aside>
+
+    <header class="hx-topbar">
+      <button class="hx-topbar__tenant"><span>All tenants (system_admin)</span></button>
+      <button class="hx-topbar__cmdk"><span>Search or jump</span><span class="hx-kbd">⌘K</span></button>
+      <div class="hx-topbar__spacer"></div>
+    </header>
+
+    <main class="hx-main">
+      <div class="hx-main__container">
+
+        <!-- Section 1: Service Accounts (path /settings/service-accounts) -->
+        <div class="section">
+          <div class="section__header">
+            <div>
+              <h2 class="hx-heading-2">Service Accounts</h2>
+              <p class="hx-text-secondary hx-text-sm" style="margin: 4px 0 0;">非人类身份 — Bot / 工作流 / 集成。每个 SA 可挂多个 API Key,scope 跟 SA 走。</p>
+            </div>
+            <button class="hx-btn hx-btn--primary">+ 新建 Service Account</button>
+          </div>
+
+          <div class="cross-banner">👁 跨 Tenant 视图 — 显示所有 tenant 的 SA</div>
+
+          <table class="hx-table">
+            <thead>
+              <tr><th>名称</th><th>描述</th><th>Tenant</th><th>关联 API Keys</th><th>创建时间</th><th>动作</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code class="hx-text-mono">sa_data_pipeline</code></td>
+                <td>data-pipeline agent 调用的 service account</td>
+                <td>acme</td>
+                <td>2 / max 5</td>
+                <td>2026-04-12</td>
+                <td><button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+              </tr>
+              <tr>
+                <td><code class="hx-text-mono">sa_webhook_ingest</code></td>
+                <td>webhook trigger 触发用</td>
+                <td>acme</td>
+                <td>1 / max 5</td>
+                <td>2026-04-20</td>
+                <td><button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+              </tr>
+              <tr>
+                <td><code class="hx-text-mono">sa_globex_crm_sync</code></td>
+                <td>CRM 同步任务</td>
+                <td>globex</td>
+                <td>1 / max 5</td>
+                <td>2026-05-01</td>
+                <td><button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Section 2: Role Bindings (path /settings/role-bindings) -->
+        <div class="section">
+          <div class="section__header">
+            <div>
+              <h2 class="hx-heading-2">Role Bindings</h2>
+              <p class="hx-text-secondary hx-text-sm" style="margin: 4px 0 0;">将 user / service_account 绑定到 role。<code class="hx-text-mono">platform_scope=true</code> 给跨租户权限,仅 SYSTEM_ADMIN 可创建。</p>
+            </div>
+            <button class="hx-btn hx-btn--primary">+ 新建 Role Binding</button>
+          </div>
+
+          <table class="hx-table">
+            <thead>
+              <tr><th>Subject</th><th>类型</th><th>Role</th><th>Platform Scope</th><th>Tenant</th><th>创建时间</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code class="hx-text-mono">user_alice@acme</code></td>
+                <td>user</td>
+                <td>admin</td>
+                <td>—</td>
+                <td>acme</td>
+                <td>2026-04-12</td>
+              </tr>
+              <tr>
+                <td><code class="hx-text-mono">user_platform_ops</code></td>
+                <td>user</td>
+                <td>system_admin</td>
+                <td><span class="platform-badge">platform</span></td>
+                <td>—</td>
+                <td>2026-04-01</td>
+              </tr>
+              <tr>
+                <td><code class="hx-text-mono">sa_data_pipeline</code></td>
+                <td>service_account</td>
+                <td>writer</td>
+                <td>—</td>
+                <td>acme</td>
+                <td>2026-04-12</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Confirm Dialog: self-elevation -->
+  <div class="confirm-dialog">
+    <div class="confirm-dialog__panel">
+      <h3 class="confirm-dialog__title">⚠ 平台权限确认</h3>
+      <div class="confirm-dialog__body">
+        你正在创建 <strong>platform_scope=true</strong> 的 Role Binding,这会授予 <code class="hx-text-mono">user_alice@acme</code> 跨所有 tenant 的 system_admin 权限。
+        <br /><br />
+        此操作不可撤销且会被 audit 记录。请输入 <code class="hx-text-mono">CONFIRM PLATFORM ROLE</code> 确认。
+      </div>
+      <div class="confirm-dialog__field">
+        <input class="hx-input" placeholder="输入 CONFIRM PLATFORM ROLE" />
+      </div>
+      <div class="confirm-dialog__actions">
+        <button class="hx-btn hx-btn--secondary">取消</button>
+        <button class="hx-btn hx-btn--danger" disabled>确认创建</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo-toggle">
+    <button class="hx-btn hx-btn--ghost hx-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
+  </div>
+</body>
+</html>

@@ -785,6 +785,461 @@ CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id) WHERE trace_id IS NO
 
 ---
 
+## 6.6 H.4 详细设计
+
+> 范式继承自 § 6.5(H.3)— PR0 设计先行,合入后才开实施 PR(PR1–PR8),PR9 收尾。覆盖 6 个治理子面 + 1 个新 backend Audit endpoint。复刻 § 6.5 的 18 子章节结构。
+
+### 6.6.1 范围 & 出入
+
+**In-scope**(7 个子面 + Stream H 整体收官):
+
+| 子面 | UI 路径 | backend 状态 | UI 能力(完整 CRUD,per `[[feedback_complete_not_minimal]]`)|
+|---|---|---|---|
+| Curation+Eval | `/curation` | ✅ shipped J.12 | candidates list/filter/detail/promote/dismiss + eval_datasets full CRUD |
+| Memory | `/memory` | ✅ shipped K.6 | list + kind filter + client-side search + edit content (Monaco) + delete |
+| Skills | `/skills` 与 `/skills/:id` | ✅ shipped J.7 | list + cursor 加载 + create (Monaco YAML) + version list + ZIP import/export |
+| Triggers | `/triggers` | ✅ shipped J.10 | list + 分类 Tab cron/webhook + enabled toggle + create (kind 切换) + webhook secret show-once + delete |
+| Settings IAM | `/settings/service-accounts` + `/settings/role-bindings` | ✅ shipped C.3 | SA list + create + delete;RB list + create (platform_scope checkbox) + delete + cross-tenant 视图 |
+| Settings Ops | `/settings/tenant-quotas` + `/settings/tenant-config` | ✅ shipped C.5/C.7 | per-tenant Quota list + create + delete;Config KV 视图 + Monaco JSON 编辑 + ETag 并发兜底 |
+| Audit | `/audit` + `/audit/:id` | ⚠️ **backend 0 起点** | `GET /v1/audit` endpoint 新建(PR3)+ list + filter chips + cursor 加载 + 详情 drawer |
+
+**Out-of-scope**(显式推迟):
+
+- Audit CSV 导出 → M1(canonical agent 期间需求自然浮现再做)
+- Skills marketplace / 公开仓库 → M1+
+- Memory retention sweep UI(per-tenant)→ M1
+- Trigger run 历史 list endpoint → M1(M0 走 `/v1/runs?trigger_id=<id>` 间接看)
+- Webhook secret rotate endpoint → M1(M0 走删-重建)
+- SLA monitoring / cost-threshold-auto-approval → M2
+
+### 6.6.2 后端契约
+
+**新 `GET /v1/audit`**(PR3 新建)
+
+```http
+GET /v1/audit?tenant_id=<UUID|*>&actor_id=<id>&action=<AuditAction>
+            &resource_type=<resource_type>&resource_id=<id>&result=<SUCCESS|DENY|FAILURE>
+            &from_ts=<ISO8601>&to_ts=<ISO8601>&cursor=<base64>&limit=<int,1-100>
+
+200 OK
+{
+  "success": true,
+  "data": {
+    "items": [<AuditEntry>],
+    "cursor": "<opaque-base64>",
+    "has_more": true,
+    "applied_scope": "home" | "cross_tenant" | "<UUID>"
+  },
+  "error": null
+}
+```
+
+- **Cursor 分页**:opaque base64,客户端只能透传不能解析(per [[feedback_last_event_id_semantics]] 同理保守原则)
+- **Cross-tenant**:`tenant_id=*` 需 `is_system_admin`;复用 Stream N `ensure_tenant_scope` + `applied_scope` + `bypass_rls_session` 三件套
+- **自审计**:`GET /v1/audit` 调用自身写 `AuditAction.AUDIT_QUERY` 一行(actor_tenant_id = caller tenant;result = SUCCESS / FAILURE)
+- **`actor_tenant_id` 必填**:用于 RLS 即使 cross-tenant 也保留 caller 的责任链
+- **`from_ts < to_ts` 校验**:400 + clear error message
+- **`AuditAction` enum 加 `AUDIT_QUERY = "audit:query"`**(单源 `packages/helix-protocol/src/helix_agent/protocol/audit.py`)
+- **ResourceType Literal 加 `"audit"`**(必须双份改:`protocol/audit.py:146` + `control-plane/audit.py:111`,per [[project_audit_literal_drift]])
+
+**`GET /v1/audit/{id}`**:单条详情(已包含 `redacted_keys` 字段)+ 自审计
+
+**其余 6 个子面**链既有契约,本设计文档不复制 schema:
+- Memory(K.6): `GET /v1/memory` / `PATCH /v1/memory/{id}` / `DELETE /v1/memory/{id}`
+- Curation(J.12): `GET /v1/curation/candidates` + detail + promote + dismiss;`/v1/eval-datasets` full CRUD
+- Skills(J.7): `/v1/skills` CRUD + versions + ZIP import/export
+- Triggers(J.10): `/v1/triggers` CRUD + webhook ingest
+- Settings IAM: `/v1/service_accounts` + `/v1/role_bindings`(含 `platform_scope`)
+- Settings Ops: `/v1/tenants/{id}/quotas` + `/v1/tenants/{id}/config`
+
+### 6.6.3 前端 IA — 6 子面
+
+**Curation+Eval(2 个 sub-tab)**
+
+```
+/curation
+├─ [Candidates Tab(默认)]
+│  ├─ Filter chips: status(new/promoted/dismissed)/ signal kind / agent_name
+│  ├─ Cross-tenant banner(scope="*"时)
+│  ├─ Table: trajectory_summary / signal / agent / score / created_at / actions
+│  └─ Row click → Drawer(trajectory 详情 + Promote button → Modal:选 eval_dataset)
+└─ [Eval Datasets Tab]
+   ├─ Toolbar: Create button + agent filter
+   ├─ Table: name / agent / item_count / created_at / actions
+   └─ Edit drawer: Monaco JSON(input + expected_output)+ Delete confirm
+```
+
+**Memory**
+
+```
+/memory
+├─ Toolbar: Tenant scope banner + kind filter (Select) + 搜索框(client-side filter on content)
+├─ Table: kind / content_preview / created_at / updated_at / actions
+└─ Edit drawer: Monaco textarea (content,复用 ApprovalCard 范式)+ Save / Delete (Popconfirm)
+```
+
+**Skills(list + detail 双页)**
+
+```
+/skills
+├─ Toolbar: Import ZIP button + Create drawer + status filter + category filter
+├─ Table: name / status / category / version_count / updated_at
+├─ "Load more" 按钮(cursor 分页)
+└─ Row click → /skills/:id
+
+/skills/:id
+├─ Hero: name + status + category
+├─ Metadata Card: description / created_by / created_at
+└─ Versions Card: Table (version_n / created_at / Export ZIP button)
+```
+
+**Triggers**
+
+```
+/triggers
+├─ Toolbar: Create button + Tabs (cron / webhook)
+├─ Table: name / agent_name / enabled (toggle) / next_fire_at / last_fired_at / fired_count
+├─ Row click → Detail drawer (config 只读 + Edit / Delete)
+└─ Create drawer:
+   ├─ kind 切换(Radio):cron / webhook
+   ├─ cron → cron_expr 输入 + 校验
+   └─ webhook → submit 后 secret show-once Card(复用 ApiKeyCreated 范式)
+```
+
+**Audit**
+
+```
+/audit
+├─ Filter chips:
+│  ├─ Actor (text)
+│  ├─ Action (multi-Select,枚举 AuditAction 全部值)
+│  ├─ ResourceType (multi-Select)
+│  ├─ Result (radio: All / SUCCESS / DENY / FAILURE)
+│  ├─ RangePicker (from_ts → to_ts)
+│  └─ Tenant scope (TenantSwitcher)
+├─ Timeline list: timestamp / actor / action / resource / result tag
+├─ "Load more" 按钮(cursor;disabled 当 has_more=false)
+└─ Row click → Drawer(完整 JSON viewer + redacted_keys 高亮)
+```
+
+**Settings IAM(2 个独立路由)**
+
+```
+/settings/service-accounts
+├─ Toolbar: Create modal + scope banner
+├─ Table: name / description / created_at / actions
+└─ Create modal: name + description → 创建后跳 API Key sub-flow(可选)
+
+/settings/role-bindings
+├─ Toolbar: Create drawer + platform_scope filter + scope banner
+├─ Table: subject_id / subject_type / role / platform_scope (badge) / created_at
+└─ Create drawer:
+   ├─ subject_type + subject_id
+   ├─ role (Select)
+   └─ platform_scope checkbox(仅 SYSTEM_ADMIN 可见,勾选时 confirm dialog)
+```
+
+**Settings Ops(2 个独立路由)**
+
+```
+/settings/tenant-quotas
+├─ TenantSwitcher (system_admin 切看其它租户)
+├─ Toolbar: Create drawer
+├─ Table: resource / period / limit_int / used / actions
+└─ Create drawer: resource (Select) + period + limit_int
+
+/settings/tenant-config
+├─ TenantSwitcher
+├─ KV 视图(Monaco JSON 只读)
+├─ Edit button → Monaco JSON 可编辑 + Save (确认 dialog) + ETag conflict banner
+└─ pristine vs dirty 检测(复用 ApprovalCard 范式)
+```
+
+### 6.6.4 共享 pattern 复用清单
+
+| Pattern | 来源 PR | H.4 复用位置 |
+|---|---|---|
+| `TenantScopeContext` / `TenantSwitcher` / `apiTenantScope` 线程到 SDK | H.1b PR 2a | 所有 list 页 |
+| `useCallback(refresh) → listXXX({tenantScope}) → Antd Table + cross_tenant banner + empty state` | RunsList/AgentsList | 6 个 list 页全部 |
+| `useStatusPolling` visibility-aware 3s 轮询 | H.3 PR 5 | Triggers enabled/fired 状态轮询 |
+| ApprovalCard Monaco JSON 编辑 + pristine vs dirty 检测 | H.3 PR 5 | Memory edit / TenantConfig edit / EvalDataset input&expected edit |
+| show-once Card (API Key) | H.1b PR 3 | Trigger webhook secret 创建后展示一次 |
+| `ApprovalPendingBadge` 60s 轮询 + visibilitychange + soft-fail | H.3 PR 6 | (备选:Curation 待评审条数 badge,如果用户决策要做)|
+| Cmd+K registration | H.1b PR 4 | 每子面注册 entity 跳转 |
+| i18n 双语 zh-CN/en + 术语表保留不译 | H.1b PR 2a | 所有 7 个 namespace |
+| Storybook stories 范式(decorators with mocked axios adapter)| H.3 各 PR | 所有新页面 ~33 stories |
+| Stream N 跨租户三件套 `ensure_tenant_scope` + `applied_scope` + `bypass_rls_session` | Stream N | PR3 Audit endpoint |
+| `_clamp_limit` / `MAX_LIST_LIMIT=500` + `X-Limit-Capped` header | H.3 PR 1 | PR3 Audit endpoint limit clamp |
+
+### 6.6.5 已知不解决的耦合
+
+- **Audit `actor_id` 不 JOIN 用户名**:M0 显示 raw subject_id(UUID 或 service-account ID);M1 加 user_index endpoint 时再 enrich
+- **Skills cursor-only 无 total**:UI 显示"Load more"按钮而非分页器,与 AgentsList/RunsList 的 offset 风格不一致(Skills backend 仅支持 cursor)
+- **Trigger webhook secret rotate endpoint 缺失**:M0 走删-重建路径;UI Show "Rotate" button 但调用是 delete+create 组合(显式 dialog 提示)
+- **Audit `actor_tenant_id` 自审计开销**:每次 `GET /v1/audit` 自己写一条 audit_log,长期下产生 audit 自我繁殖;M1 加 `audit:query` 写入采样(每 N 条采 1 条)
+- **Memory `EMBEDDER_UNCONFIGURED` 503**:某些部署没配 embedder,Memory 整面 503;UI 显示"backend not configured"清晰错误,不静默
+- **TenantConfig 单租户 only**:无跨租户 list,system_admin 必须用 TenantSwitcher 一个一个看(批量编辑推 M1)
+
+### 6.6.6 PR 拆分
+
+详见 § 6 PR 链表(H.4 PR0–PR9)。
+
+### 6.6.7 验收
+
+每 PR 满足 `[[feedback_zero_tech_debt]]` 6 条:
+1. 无 TODO/FIXME/XXX 标记
+2. 测试覆盖:backend ≥ 8 测(PR3)+ frontend 5–8 单测 × 7 实施 PR + ≥ 4 Storybook stories
+3. 文档同步:设计文档实施期变更落 § 6.6.x changelog;ITERATION-PLAN 行同步
+4. 可观测齐全:PR3 新增 `helix_control_plane_audit_query_total` + `_seconds`;`AUDIT_QUERY` audit
+5. CI 全绿:11/11 检查
+6. bug 不遗留:实施期发现的非本 PR scope bug 显式立 issue 或同 PR 修复
+
+**Stream H 整体验收**(PR9 完成时):
+- 6 个治理子面 ComingSoon → 真页面
+- system_admin 跨租户端到端可见(登录默认 "All tenants" → 切单 tenant → 切回 → 所有 audit 留痕)
+- 性能:首屏 < 2s,Lighthouse Performance ≥ 90
+- a11y axe 0 critical
+
+### 6.6.8 文件级影响图
+
+**PR0**(设计):
+- `docs/streams/STREAM-H-DESIGN.md` § 6.6 新增 18 子章节
+- `docs/design/mockups/{09-runs-list,10-skills,11-triggers,12-audit,13-settings-iam,14-settings-ops}.html` 新建
+- `docs/design/mockups/README.md` 更新索引
+- `docs/ITERATION-PLAN.md` Stream H.4 行展开
+
+**PR1**(Curation+Eval):
+- `apps/admin-ui/src/api/curation.ts` 补 6 个 mutation
+- `apps/admin-ui/src/pages/CurationReview.tsx` 新建
+- `apps/admin-ui/src/pages/EvalDatasets.tsx` 新建
+- `apps/admin-ui/src/pages/__tests__/{CurationReview,EvalDatasets}.test.tsx` + stories
+- `apps/admin-ui/src/i18n/locales/{en,zh-CN}.ts` 加 `curation.*` + `eval_datasets.*`
+- `apps/admin-ui/src/router.tsx` `/curation` 解 ComingSoon
+
+**PR2**(Memory):
+- `apps/admin-ui/src/api/memory.ts` 补 update/delete
+- `apps/admin-ui/src/pages/MemoryAdmin.tsx` 新建 + test + story
+- i18n + router
+
+**PR3**(Audit backend):
+- `services/control-plane/src/control_plane/api/audit.py` 新建(`build_audit_router()`)
+- `services/control-plane/src/control_plane/app.py` `include_router`
+- `services/control-plane/src/control_plane/audit.py` ResourceType Literal 加 `"audit"`
+- `services/control-plane/src/control_plane/api/__init__.py` 导出
+- `packages/helix-protocol/src/helix_agent/protocol/audit.py` `AuditAction.AUDIT_QUERY` + ResourceType Literal 加 `"audit"`
+- `services/control-plane/tests/test_audit_api.py` 新建(~10 测)
+
+**PR4**(Audit UI):
+- `apps/admin-ui/src/api/audit.ts` 新建
+- `apps/admin-ui/src/pages/AuditLog.tsx` + test + story
+- i18n + router(`/audit`)
+- `apps/admin-ui/src/components/Sidebar.tsx` 加 Audit 主导航项
+
+**PR5**(Skills):
+- `apps/admin-ui/src/api/skills.ts` 补 7 个 mutation(含 multipart import + blob export)
+- `apps/admin-ui/src/pages/{SkillsList,SkillDetail}.tsx` 新建
+- test + stories + i18n + router(`/skills/:id`)
+
+**PR6**(Triggers):
+- `apps/admin-ui/src/api/triggers.ts` 补 4 个 mutation
+- `apps/admin-ui/src/pages/TriggersList.tsx` 新建 + `triggers_list/{CreateTriggerDrawer,WebhookSecretShowOnce}.tsx`
+- test + stories + i18n + router
+
+**PR7**(Settings IAM):
+- `apps/admin-ui/src/api/{service_accounts,role_bindings}.ts` 新建
+- `apps/admin-ui/src/pages/{SettingsServiceAccounts,SettingsRoleBindings}.tsx` 新建
+- test + stories + i18n + router(`/settings/service-accounts`,`/settings/role-bindings`)
+
+**PR8**(Settings Ops):
+- `apps/admin-ui/src/api/{tenant_quotas,tenant_config}.ts` 新建
+- `apps/admin-ui/src/pages/{SettingsTenantQuotas,SettingsTenantConfig}.tsx` 新建
+- test + stories + i18n + router
+
+**PR9**(收尾):
+- `docs/streams/STREAM-H-DESIGN.md` § 6.6.18 + § 7 Stream H 整体验收 ✅
+- `docs/design/mockups/04-run-trace.html` 加 ApprovalCard 编辑态 section(H.3 留账)
+- `docs/ITERATION-PLAN.md` Stream H ✅
+- `apps/admin-ui/e2e/governance.spec.ts` 新建(7 happy-path 冒烟)
+
+### 6.6.9 状态机
+
+**AuditList cursor 加载**(PR4):
+
+```
+[idle] ──(初始 fetch)──→ [loading]
+   ↑                         │
+   │     ┌───────────────────┴───────────────────┐
+   │     ▼                                       ▼
+   │  [data + has_more=true]              [data + has_more=false]
+   │     │                                       │
+   │     │  Load more click                      │
+   │     ▼                                       │
+   │  [loadingMore]                              │
+   │     │                                       │
+   │     ▼                                       ▼
+   └── [data appended] ────────────────→ [end-of-stream UI]
+
+   Filter change → [idle] (重置 cursor)
+   Error → [error banner + retry button]
+```
+
+**Skill ZIP import**(PR5):
+
+```
+[idle] ──(用户选文件)──→ [uploading]
+                          │ (XHR multipart progress)
+                          ▼
+                       [validating] ──→ 后端 5xx → [error banner]
+                          │
+                          ▼
+                       [success] ──→ 表格 prepend 新行 + 1s 后回到 [idle]
+```
+
+**Trigger create webhook secret show-once**(PR6):
+
+```
+[form] ──(submit)──→ [submitting]
+                       │
+                       ▼
+                    [secret-shown-once Card]
+                       │
+                       ├─(用户 copy)──→ [copied toast]
+                       │
+                       └─(用户关闭 Card)──→ [done] (secret 永久不可再访问)
+```
+
+### 6.6.10 错误 / 边界场景矩阵
+
+| 场景 | 触发 | UI 表现 |
+|---|---|---|
+| Memory `EMBEDDER_UNCONFIGURED` 503 | embedder 未配 | 整面 Alert "Memory backend not configured" + 不显示空表 |
+| Trigger cron expr 无效 | 用户输入错 cron | 表单 inline 校验红字 + Submit 禁用 |
+| Audit cursor 过期 (410) | 长时间停留 | "Cursor expired, refresh to start over" + 自动重置 cursor |
+| Skill ZIP MIME mismatch | 上传非 .skill ZIP | 表单红字 + Submit 禁用;不发 XHR |
+| Skill ZIP size > 10MB | 大文件上传 | 表单红字 + 提示 size limit;不发 XHR |
+| RoleBinding 试图给自己加 SYSTEM_ADMIN | system_admin self-target | Frontend 确认 dialog;backend 接受(已有 platform_scope 双重保护即足够,见 PR0 spike 4) |
+| TenantConfig 并发 PUT 412(ETag mismatch) | 两个 admin 同时编辑 | "Config changed by another user. Reload to see latest" + Reload button |
+| Webhook secret 创建后未保存 | 用户关 Card 没 copy | 二次确认 dialog "Secret will never be shown again. Continue?" |
+| Curation candidate trajectory ObjectStore 404 | trajectory 文件丢 | Drawer 显示 "Trajectory artifact missing" + 仍允许 promote/dismiss |
+| Eval dataset JSON 解析失败 | 用户填非法 JSON | Monaco 红字 + Save 禁用 |
+| Trigger fire history endpoint 缺失 | 用户想看历史 | 跳 `/runs?trigger_id=<id>` + 顶部提示 "Trigger fire history via Runs page (M0 limitation)" |
+| Cross-tenant view 但 caller 非 system_admin | 普通 admin 误试 | 403 + redirect to home scope + toast "Cross-tenant view requires system_admin" |
+
+### 6.6.11 可观测 / 审计
+
+**新 Prometheus metrics**(PR3,通过 `helix_agent.common.observability.helix_counter` / `helix_histogram` helper,**不直接 import `prometheus_client`**):
+- `helix_control_plane_audit_query_total{tenant_scope, result}` — counter
+- `helix_control_plane_audit_query_seconds{tenant_scope}` — histogram
+
+**新 AuditAction**(PR3):
+- `AUDIT_QUERY = "audit:query"` — 自审计
+
+**新 ResourceType**(PR3,**双份改**):
+- `"audit"` — audit entry 作为资源被查询
+
+**复用既有 audit**:Memory `MEMORY_UPDATE` / `MEMORY_FORGET`,Curation `CURATION_PROMOTE` / `CURATION_DISMISS`,Skills `SKILL_CREATE` / `SKILL_VERSION_CREATE` / `SKILL_STATUS_CHANGE`,Triggers `TRIGGER_CREATE` / `TRIGGER_UPDATE` / `TRIGGER_DELETE` / `TRIGGER_FIRE`,Settings `API_KEY_*` / `SERVICE_ACCOUNT_*` / `ROLE_BINDING_*` / `QUOTA_CONFIG_*` / `TENANT_CONFIG_READ` / `TENANT_CONFIG_WRITE`
+
+### 6.6.12 i18n keys 全量
+
+7 个 namespace × ~15-24 keys ≈ 130+ keys 总量:
+
+- `curation.*` ~14 keys(filter/列名/promote/dismiss/empty/error)
+- `eval_datasets.*` ~10 keys(列名/create/edit/delete)
+- `memory.*` ~14 keys(filter/search/edit/delete/empty)
+- `audit.*` ~18 keys(filter chips/load more/timeline/detail drawer/cursor-expired)
+- `skills.*` ~20 keys(list/import/export/versions/status/category)
+- `triggers.*` ~22 keys(cron/webhook/secret-show-once/enabled/fire-count)
+- `settings_iam.*` ~14 keys(SA/RB/platform_scope/self-elevation-confirm)
+- `settings_ops.*` ~10 keys(quotas/config/ETag-conflict)
+
+术语表保留不译:Audit / AuditEntry / Curation / Eval / Memory / Skill / Trigger / Cron / Webhook / Service Account / Role Binding / Tenant Config / Tenant Quota / Cursor。
+
+### 6.6.13 测试计划
+
+**Backend**(PR3):
+- `services/control-plane/tests/test_audit_api.py` ~10 测:
+  - happy path:home scope list + cursor 加载
+  - cross-tenant `tenant_id=*` 需 system_admin
+  - 普通 admin 试 cross-tenant → 403
+  - filter chips(action / resource_type / result / from_ts/to_ts)
+  - `from_ts > to_ts` → 400
+  - cursor 过期 → 410
+  - 自审计:每次 query 写 `AUDIT_QUERY` 一行
+  - `actor_tenant_id` 必填
+  - cross-tenant 时 `applied_scope: "cross_tenant"` 在响应
+  - limit clamp(>500 时 `X-Limit-Capped: true` header)
+
+**Frontend**:
+- 每实施 PR(1/2/4/5/6/7/8)5–8 单测,共 ~45 单测
+- 涵盖:happy / empty / error / loading / cross-tenant scope 切换 / show-once (PR6) / Monaco edit pristine vs dirty (PR2/4/8)
+- Storybook stories:每页 ≥ 4 stories (default / loading / empty / error),Triggers 加 cron vs webhook 区分,Settings IAM 加 system_admin vs tenant_admin 视图区分;共 ~33 stories
+
+**E2E**(PR9):
+- `apps/admin-ui/e2e/governance.spec.ts` 7 happy-path:
+  - 登录 → /curation 看到列表
+  - /memory list + edit drawer 打开
+  - /skills + import button visible
+  - /triggers + cron tab + webhook tab
+  - /audit list + filter chip 至少 1 个交互
+  - /settings/service-accounts list
+  - /settings/tenant-config Edit 打开 Monaco
+- 每 spec axe 0 critical
+
+### 6.6.14 Mockup 引用
+
+PR0 新增 mockup(5+ 张):
+
+| # | 路径 | 用途 |
+|---|---|---|
+| 09 | `docs/design/mockups/09-runs-list.html` | 补 H.3 留账;RunsList 视觉基准(已实施,补 mockup 作为参考)|
+| 10 | `docs/design/mockups/10-skills.html` | Skills list + Detail + Version + Import ZIP + Create drawer Monaco YAML |
+| 11 | `docs/design/mockups/11-triggers.html` | Triggers list + cron/webhook Tab + Create drawer(双 kind 切换)+ Webhook secret show-once Card |
+| 12 | `docs/design/mockups/12-audit.html` | Audit timeline + filter chips + Entry detail Drawer + cursor "Load more" |
+| 13 | `docs/design/mockups/13-settings-iam.html` | Settings SA + RB list + Create drawer(platform_scope checkbox + 确认 dialog)|
+| 14 | `docs/design/mockups/14-settings-ops.html` | Tenant Quotas table + Tenant Config Monaco JSON + ETag conflict banner |
+
+复用既有 mockup:`05-curation-review.html`(PR1 Curation 直接用)+ `06-memory-admin.html`(PR2 Memory 直接用)+ `07-settings-api-keys.html`(已实施)。
+
+PR9 补 `04-run-trace.html` 加 ApprovalCard 编辑态 section。
+
+### 6.6.15 Migration / Schema 影响
+
+**无 DDL 改动**:
+- `audit_log` 表(migration 0008)已存在
+- 既有 RLS 策略覆盖 audit 跨租户访问
+- 仅新增 `AuditAction.AUDIT_QUERY` enum 值(Python 层,无 DDL)
+
+### 6.6.16 Backwards Compat
+
+- 既有 `listMemories` / `listSkills` / `listTriggers` / `listCandidates` / `listEvalDatasets` SDK 签名不变(仅补 mutation)
+- 既有 `AuditLogger.query()` 接口不变(PR3 直接用)
+- 既有 `audit.AuditAction` enum 仅 append `AUDIT_QUERY`,不改 existing 值
+- 既有 router prefix(`/v1/memory` / `/v1/skills` / `/v1/triggers` / `/v1/curation` / `/v1/eval-datasets` / `/v1/service_accounts` / `/v1/role_bindings` / `/v1/tenants/{id}/*`)不动;`/v1/audit` 是新前缀
+
+### 6.6.17 安全 / 鉴权
+
+**Audit RBAC matrix**(PR3):
+
+| 端点 | authn | authz | 资源访问 |
+|---|---|---|---|
+| `GET /v1/audit?tenant_id=<UUID>` | Bearer JWT / API Key | caller 必须 `allowed_tenants` 含 UUID | `AuditLogger.query(tenant_id=UUID)` |
+| `GET /v1/audit?tenant_id=*` | 同上 | caller 必须 `is_system_admin` | `bypass_rls_session()` + `query()` |
+| `GET /v1/audit`(无 tenant_id)| 同上 | 自动用 caller home tenant | `query(tenant_id=home)` |
+| `GET /v1/audit/{id}` | 同上 | 走 RLS;cross-tenant 同上 | `AuditLogger.get(id)` |
+
+**其余安全考量**:
+- **Skills ZIP MIME + size limit**:复用既有 `_skill_zip.py`(J.7 已落),前端 SDK `importSkillZip` 用 multipart/form-data,backend 校验 MIME + size + ZIP slip
+- **Trigger webhook secret 只在 create response 出现一次**:已在 backend 实现(triggers.py:86-87, 228;PR0 spike 1 确认)
+- **RB platform_scope 写需 caller 为 SYSTEM_ADMIN**:已在 backend 实现(role_bindings.py:66;PR0 spike 4 确认);self-target 路径间接被 platform_scope ↔ SYSTEM_ADMIN ↔ caller `is_system_admin` 三重链堵死
+- **TenantConfig ETag 并发兜底**:M0 用 If-Match;无 ETag 时 PUT 接受最后写者赢(M1 加 ETag header 才严格)
+- 无新增 secret;无新增 CSRF surface(GET);所有 mutation 已被现有 AuthMiddleware 覆盖
+
+### 6.6.18 H.4 收尾摘要
+
+(由 PR9 落入,空模板供未来填充。模仿 § 6.5.18 H.3 收尾范式:PR 全部合入 main 列表 / 决议核验 / 零债 6 条审计 / 留给后续 stream 的债务清单 / capability gap 声明)
+
+---
+
 ## 6. PR 链(预估)
 
 | PR | 内容 | 估时 |
@@ -801,13 +1256,18 @@ CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id) WHERE trace_id IS NO
 | PR7d ✅ | H.3 PR 4 — `GET .../events` endpoint (live + replay) + RunDetail Event stream panel(Mini-ADR H-7 frontend)#292 | 1.5-2 天 |
 | PR7e ✅ | H.3 PR 5 — Approval `override_args` Monaco UX + 状态轮询(Mini-ADR H-9)#293 | 1.5 天 |
 | PR7f ✅ | H.3 PR 6 — Trace 链接外跳(Mini-ADR H-8)+ Approval pending badge + 体感打磨 #294 | 1 天 |
-| PR8 | H.4(Curation+Eval)— 候选评审 + eval dataset CRUD | 2 天 |
-| PR9 | H.4(Memory)— per-user memory 列表 + 编辑 + 删除 | 1.5 天 |
-| PR10 | H.4(Skills+Triggers)— 跨 agent skill / trigger 列表 + CRUD | 2 天 |
-| PR11 | H.4(Settings)— API Keys + Service Accounts + Role Bindings + Quotas + Tenant Config | 2-3 天 |
-| PR12 | H.4(Audit)— audit 查询 + 过滤 + 详情 | 1 天 |
+| PR8 (H.4 PR0) | H.4 设计基线 — § 6.6 详细设计(18 子章节) + 5+ mockup(09-runs-list 补 H.3 留账 + 10-skills + 11-triggers + 12-audit + 13-settings-iam + 14-settings-ops) + mockups/README.md + ITERATION-PLAN 同步 | 2.5-3 天 |
+| PR9 (H.4 PR1) | H.4 PR 1 — Curation+Eval UI(`api/curation.ts` 补 mutation + `pages/CurationReview.tsx` + `pages/EvalDatasets.tsx`)| 2 天 |
+| PR10 (H.4 PR2) | H.4 PR 2 — Memory CRUD(`api/memory.ts` 补 update/delete + `pages/MemoryAdmin.tsx`,复用 ApprovalCard Monaco 范式)| 1.5 天 |
+| PR11 (H.4 PR3) | H.4 PR 3 — Audit backend endpoint(`build_audit_router()` + `AuditAction.AUDIT_QUERY` + ResourceType `"audit"` 双份改 + `test_audit_api.py` ~10 测)| 2 天 |
+| PR12 (H.4 PR4) | H.4 PR 4 — Audit UI(`api/audit.ts` cursor 分页 + `pages/AuditLog.tsx` timeline + filter chips + entry drawer)| 2 天 |
+| PR13 (H.4 PR5) | H.4 PR 5 — Skills(create / update / version / import ZIP / export ZIP + `pages/SkillsList.tsx` + `pages/SkillDetail.tsx`)| 2.5 天 |
+| PR14 (H.4 PR6) | H.4 PR 6 — Triggers(CRUD + `pages/TriggersList.tsx` cron/webhook Tab + Create drawer + webhook secret show-once + `useStatusPolling` 状态轮询)| 2.5 天 |
+| PR15 (H.4 PR7) | H.4 PR 7 — Settings IAM(`api/{service_accounts,role_bindings}.ts` + `pages/SettingsServiceAccounts.tsx` + `pages/SettingsRoleBindings.tsx` + platform_scope 自提权确认 dialog)| 2 天 |
+| PR16 (H.4 PR8) | H.4 PR 8 — Settings Ops(`api/{tenant_quotas,tenant_config}.ts` + `pages/SettingsTenantQuotas.tsx` + `pages/SettingsTenantConfig.tsx` ETag 并发兜底)| 2 天 |
+| PR17 (H.4 PR9) | H.4 收尾 + Stream H 整体收尾 — § 6.6.18 收尾摘要 + ITERATION-PLAN ✅ + Stream H § 7 全部验收 + `governance.spec.ts` 7 happy-path 冒烟 + 补 mockup 04 ApprovalCard 编辑态(H.3 留账)| 0.5-1 天 |
 
-> 总估时 25-32 天 = 2.5-3 周(一个全职前端)。可与后端 / 其他 stream 并行。
+> 总估时(H.1a → H.4):**42-50 天**(H.1a/H.1b/H.2/H.3 实际 ~35 天 + H.4 14-18 天)。H.4 PR0 是阻塞 PR,合入后 PR1/2/5/6/7/8 可并行,PR3 → PR4 顺序。
 
 ---
 
@@ -841,3 +1301,4 @@ CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id) WHERE trace_id IS NO
 | 2026-05-26 | v1.5 | review 第二轮决议 A-F 落地:(A) SSE id wire format `"{created_at_ms}-{seq}"` 一致,`run_event` 加 `created_at_ms bigint` 列 — replay endpoint emit 与 live 同型,客户端 `parseSseStream` 不区分 / (B) `RunManager.create(trace_id=)` 显式参数 — handler 路径传 `current_trace_id_hex()`,scheduler 路径传 None / (C) `run_event` FK 改 `ON DELETE RESTRICT` — 锁定 M1 archive-then-delete 灵活性 / (D) `list_for_tenant` / `list_all_tenants` / `RunEventStore.list` 均强制 `max_limit=500` + `X-Limit-Capped` header / (E) EventStreamPanel 默认折叠,展开才连;localStorage 记 per-user 偏好 / (F) 5 个新组件全加 Storybook story(共 19 个 story);approval 完整 E2E 推 M0 dogfood |
 | 2026-05-26 | v1.6 | 实现期发现 PR 2 (trace_id) 必须先落、PR 3 (run_event) 后落,但原设计文档 migration 编号是反过来的 (PR 2=0038, PR 3=0037)。修正为 PR 2=0037, PR 3=0038 与 Alembic linear chain (down_revision 链)对齐。无功能变更。 |
 | 2026-05-26 | v1.7 | **H.3 收尾**:6 个 PR 全部合入 main(#289–#294);新增 § 6.5.18 H.3 收尾摘要 — 决议 A–F 全部兑现、设计文档 § 6.5.13 漏交的 2 个 story(EventStreamPanel + ApprovalCard)在收尾 PR 补齐;遗留待办全部归类到 M0 dogfood / H.4 收尾(approval 完整 E2E、RunsList mockup、ApprovalCard 编辑态 mockup) |
+| 2026-05-26 | v1.8 | **H.4 设计基线**:加 § 6.6 H.4 详细设计(18 子章节,复刻 § 6.5 范式)— 范围 7 子面(Curation+Eval / Memory / Skills / Triggers / Audit / Settings IAM / Settings Ops)+ Audit backend endpoint 新建 + 跨租户 RBAC matrix + 错误边界矩阵(12 条)+ i18n 8 namespace ~130 keys + 测试计划(backend 10 测 + frontend 45 单测 + 33 stories + E2E 7 happy-path)。锁定 4 个 spike 结果:(1) Trigger webhook secret 回包 schema 已有 — PR6 backend 不需改;(2) ResourceType Literal 双份漂移 — PR3 必须改 `protocol/audit.py:146` + `control-plane/audit.py:111` 两处;(3) audit_logger fixture pattern = 每测试自建,不走 conftest — PR3 遵循同型;(4) RoleBinding self-elevation 已被 DTO + caller 双重保护 — PR7 backend 不需改。PR 链拆 PR8-12(原 5 个 H.4 PR)为 PR8-17(10 个 PR:1 设计 + 8 实施 + 1 收尾),总估时 14-18 天。|

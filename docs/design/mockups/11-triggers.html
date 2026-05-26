@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 11 — Triggers(cron / webhook)
+  ============================================================
+  对应 H.4 PR 6。Backend J.10 已 shipped(triggers.py:CRUD + webhook ingest)。
+
+  特点(决议:show-once webhook secret 复用 ApiKeyCreated 范式):
+    - Tabs 切换 cron / webhook
+    - Create drawer 内 kind 切换 → 表单字段联动
+    - Webhook secret 仅在 create 响应里出现一次 → show-once Card
+
+  Antd 5(H.4 PR 6):
+    <Tabs>             → cron / webhook 双 tab
+    <Drawer>           → Create trigger
+    <Switch>           → enabled 行内切换
+    <Modal> dangerous  → Delete 二次确认(red ring)
+    Show-once Card     → 复用 SettingsApiKeys ApiKeyCreated.tsx
+
+  键盘交互:
+    Tab     Tabs → Create → Table row → Enabled toggle
+    /       聚焦搜索
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Triggers — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    .trg-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--hx-border-subtle); margin-bottom: var(--hx-space-3); }
+    .trg-tab {
+      padding: var(--hx-space-2) var(--hx-space-3);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      color: var(--hx-text-secondary);
+      font-size: var(--hx-font-size-sm);
+    }
+    .trg-tab[aria-selected="true"] {
+      color: var(--hx-text-primary);
+      border-bottom-color: var(--hx-color-brand-500);
+    }
+    .trg-tab__count { margin-left: 6px; background: var(--hx-surface-raised); padding: 1px 6px; border-radius: var(--hx-radius-xs); font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary); }
+
+    .switch {
+      width: 32px; height: 18px;
+      border-radius: 9px;
+      background: var(--hx-color-brand-500);
+      position: relative;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .switch::after { content: ''; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: white; }
+    .switch--off { background: var(--hx-surface-raised); }
+    .switch--off::after { left: 2px; right: auto; }
+
+    .cron-cell { font-family: var(--hx-font-mono); font-size: var(--hx-font-size-xs); color: var(--hx-text-secondary); }
+
+    .secret-card {
+      background: var(--hx-status-warning-bg);
+      border: 1px solid var(--hx-status-warning-fg);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-3);
+      margin-top: var(--hx-space-3);
+    }
+    .secret-card__title { font-weight: var(--hx-font-weight-semibold); display: flex; align-items: center; gap: 8px; color: var(--hx-status-warning-fg); }
+    .secret-card__value {
+      margin-top: var(--hx-space-2);
+      background: var(--hx-surface-bg);
+      border: 1px dashed var(--hx-border-subtle);
+      padding: var(--hx-space-2) var(--hx-space-3);
+      border-radius: var(--hx-radius-xs);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-sm);
+      word-break: break-all;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .secret-card__hint { margin-top: var(--hx-space-2); font-size: var(--hx-font-size-xs); color: var(--hx-status-warning-fg); }
+
+    .drawer {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 480px;
+      background: var(--hx-surface-base);
+      border-left: 1px solid var(--hx-border-subtle);
+      box-shadow: var(--hx-shadow-lg);
+      padding: var(--hx-space-4);
+      display: flex; flex-direction: column;
+      overflow-y: auto;
+    }
+    .drawer h3 { margin: 0 0 var(--hx-space-3); }
+    .drawer__field { margin-bottom: var(--hx-space-3); }
+    .drawer__field label { display: block; font-size: var(--hx-font-size-sm); color: var(--hx-text-secondary); margin-bottom: 4px; }
+    .drawer__actions { margin-top: var(--hx-space-3); display: flex; gap: var(--hx-space-2); justify-content: flex-end; }
+    .demo-toggle { position: fixed; bottom: 24px; right: 24px; z-index: 100; }
+  </style>
+</head>
+<body>
+  <div class="hx-app">
+    <aside class="hx-sidebar">
+      <div class="hx-sidebar__brand"><span class="hx-sidebar__glyph">⟁</span><span>helix</span></div>
+      <nav class="hx-sidebar__nav">
+        <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+        <a class="hx-sidebar__item" href="./09-runs-list.html">Runs</a>
+        <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+        <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
+        <a class="hx-sidebar__item" href="./10-skills.html">Skills</a>
+        <a class="hx-sidebar__item" href="./11-triggers.html" aria-current="page">Triggers</a>
+        <a class="hx-sidebar__item" href="./12-audit.html">Audit</a>
+      </nav>
+    </aside>
+
+    <header class="hx-topbar">
+      <button class="hx-topbar__tenant"><span>Tenant: acme</span></button>
+      <button class="hx-topbar__cmdk"><span>Search or jump</span><span class="hx-kbd">⌘K</span></button>
+      <div class="hx-topbar__spacer"></div>
+    </header>
+
+    <main class="hx-main">
+      <div class="hx-main__container">
+        <div class="hx-page-header">
+          <div>
+            <h1 class="hx-heading-1">Triggers</h1>
+            <p class="hx-text-secondary hx-text-sm">Agent 自动启动入口 — cron 表达式定时 + webhook 外部触发(HMAC secret 鉴权)。</p>
+          </div>
+          <button class="hx-btn hx-btn--primary">+ 新建 Trigger</button>
+        </div>
+
+        <div class="trg-tabs">
+          <div class="trg-tab" aria-selected="true">⏰ Cron<span class="trg-tab__count">12</span></div>
+          <div class="trg-tab">🪝 Webhook<span class="trg-tab__count">4</span></div>
+        </div>
+
+        <table class="hx-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>Agent</th>
+              <th>Cron 表达式</th>
+              <th>下次触发</th>
+              <th>累计触发</th>
+              <th>启用</th>
+              <th>动作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>daily_summary</td>
+              <td>research-agent@v2.1</td>
+              <td class="cron-cell">0 9 * * *</td>
+              <td>明天 09:00</td>
+              <td>34</td>
+              <td><span class="switch"></span></td>
+              <td><button class="hx-btn hx-btn--ghost hx-btn--sm">编辑</button> <button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+            </tr>
+            <tr>
+              <td>hourly_health_check</td>
+              <td>customer-support@v3.2</td>
+              <td class="cron-cell">0 * * * *</td>
+              <td>14 分钟后</td>
+              <td>2,431</td>
+              <td><span class="switch"></span></td>
+              <td><button class="hx-btn hx-btn--ghost hx-btn--sm">编辑</button> <button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+            </tr>
+            <tr>
+              <td>weekly_report_disabled</td>
+              <td>data-pipeline@v1.0</td>
+              <td class="cron-cell">0 8 * * MON</td>
+              <td>—</td>
+              <td>13</td>
+              <td><span class="switch switch--off"></span></td>
+              <td><button class="hx-btn hx-btn--ghost hx-btn--sm">编辑</button> <button class="hx-btn hx-btn--ghost hx-btn--sm hx-text-danger">删除</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- Drawer demo: Create Webhook Trigger + show-once secret -->
+  <aside class="drawer" data-state="open">
+    <h3 class="hx-heading-3">新建 Trigger</h3>
+
+    <div class="drawer__field">
+      <label>类型</label>
+      <div style="display: flex; gap: var(--hx-space-2);">
+        <label style="display: flex; align-items: center; gap: 6px;"><input type="radio" name="kind" /> ⏰ Cron</label>
+        <label style="display: flex; align-items: center; gap: 6px;"><input type="radio" name="kind" checked /> 🪝 Webhook</label>
+      </div>
+    </div>
+
+    <div class="drawer__field">
+      <label>名称</label>
+      <input class="hx-input" placeholder="e.g. external_event_handler" />
+    </div>
+
+    <div class="drawer__field">
+      <label>绑定 Agent</label>
+      <select class="hx-select">
+        <option>customer-support@v3.2</option>
+        <option>research-agent@v2.1</option>
+        <option>data-pipeline@v1.0</option>
+      </select>
+    </div>
+
+    <button class="hx-btn hx-btn--primary" style="width: 100%;">生成 + 显示一次 Secret</button>
+
+    <div class="secret-card">
+      <div class="secret-card__title">⚠ Webhook Secret(仅显示一次)</div>
+      <div class="secret-card__value">
+        <code>hx_whk_8f3a2b1c9d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8</code>
+        <button class="hx-btn hx-btn--ghost hx-btn--sm">复制</button>
+      </div>
+      <div class="secret-card__hint">关闭后无法再次查看完整 Secret。请立即复制并写入调用方配置。</div>
+    </div>
+
+    <div class="drawer__actions">
+      <button class="hx-btn hx-btn--secondary">关闭(已保存)</button>
+    </div>
+  </aside>
+
+  <div class="demo-toggle">
+    <button class="hx-btn hx-btn--ghost hx-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
+  </div>
+</body>
+</html>

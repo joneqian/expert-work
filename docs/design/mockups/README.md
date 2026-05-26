@@ -1,6 +1,6 @@
 # helix Admin UI — Mockups
 
-8 张 helix Admin UI 关键页面的**可视化 mockup**,作为 [admin-ui-philosophy.md](../admin-ui-philosophy.md) + [admin-ui-language.md](../admin-ui-language.md) + [STREAM-H-DESIGN.md](../../streams/STREAM-H-DESIGN.md) 的视觉锚点。
+14 张 helix Admin UI 关键页面的**可视化 mockup**(H.1a 初版 8 张 + H.4 PR 0 补 6 张),作为 [admin-ui-philosophy.md](../admin-ui-philosophy.md) + [admin-ui-language.md](../admin-ui-language.md) + [STREAM-H-DESIGN.md](../../streams/STREAM-H-DESIGN.md) 的视觉锚点。
 
 H.1b 实施时,**临摹这些 mockup 作为视觉基线**;`shared/tokens.css` 可直接移植进 Vite 工程,所有 token 已固化。
 
@@ -33,6 +33,12 @@ cd docs/design/mockups && python3 -m http.server 8765
 | **06** | [Memory admin](./06-memory-admin.html) | per-user memory 树 + JSON 编辑器 + history tabs + **type-to-confirm 删除对话框**(`profile.preferred_language` 输入确认) | H.4(Memory) |
 | **07** | [Settings — API Keys](./07-settings-api-keys.html) | Settings 二级导航 + 列表(prefix / scopes / rotation grace) + 创建对话框(scopes 多选) + **show-once key 卡片**(只显示一次 + 复制) | H.4(Settings) |
 | **08** | [Cmd+K 命令面板](./08-cmdk-palette.html) | 全局浮层 + 分组(Agents / 动作 / 跳转 / 最近) + 模糊匹配高亮 + 键盘 hint 底栏 | H.1b 全局 |
+| **09** | [Runs 列表](./09-runs-list.html) | 跨 thread 索引;表格 + status 筛选 + cross-tenant banner;补 H.3 留账 | H.3 |
+| **10** | [Skills](./10-skills.html) | Skill 库 + 版本管理 + Import ZIP + Create drawer Monaco YAML;cursor "Load more" 分页 | H.4 PR 5 |
+| **11** | [Triggers](./11-triggers.html) | cron/webhook Tabs + Create drawer 双 kind 切换 + **Webhook secret show-once Card**;enabled toggle | H.4 PR 6 |
+| **12** | [Audit](./12-audit.html) | Timeline + filter chips + Entry detail Drawer 含 `redacted_keys` 高亮 + cursor "Load more" | H.4 PR 3+4 |
+| **13** | [Settings IAM](./13-settings-iam.html) | Service Accounts + Role Bindings 双子页;platform_scope checkbox + **self-elevation type-to-confirm dialog** | H.4 PR 7 |
+| **14** | [Settings Ops](./14-settings-ops.html) | Tenant Quotas 进度条(色彩阈值)+ Tenant Config Monaco JSON + **ETag 412 conflict banner** + pristine/dirty 检测 | H.4 PR 8 |
 
 ---
 
@@ -49,6 +55,12 @@ docs/design/mockups/
 ├── 06-memory-admin.html
 ├── 07-settings-api-keys.html
 ├── 08-cmdk-palette.html
+├── 09-runs-list.html        (H.4 PR 0 补 H.3 留账)
+├── 10-skills.html           (H.4 PR 0)
+├── 11-triggers.html         (H.4 PR 0)
+├── 12-audit.html            (H.4 PR 0)
+├── 13-settings-iam.html     (H.4 PR 0)
+├── 14-settings-ops.html     (H.4 PR 0)
 └── shared/
     ├── tokens.css            (所有 design token CSS custom properties,双主题语义层)
     ├── shell.css             (布局外壳 / 排版 / 17 组基础组件 — mockup 共用)
@@ -116,3 +128,4 @@ Antd 5 components:  实施时映射的 Antd 组件 + override 要点
 | 日期 | 版本 | 说明 |
 |---|---|---|
 | 2026-05-25 | v1.0 | 初版:8 张 mockup + shared/{tokens, shell}.css + brand-glyph.svg;对齐 [admin-ui-design-baseline] 10 条决策 |
+| 2026-05-26 | v1.1 | H.4 PR 0 设计基线:补 6 张 mockup(09 Runs 补 H.3 留账 + 10 Skills + 11 Triggers + 12 Audit + 13 Settings IAM + 14 Settings Ops)。覆盖 H.4 PR 5/6/3+4/7/8 共 6 子面。每张延续 H.1a 视觉规则(220px sidebar / 48px topbar / cyan brand 500 / mono for ID/secret/JSON / 36-40px table row / `.hx-badge--*` 状态色)。新增 mockup-only 样式有:Webhook secret show-once Card(triggers)/ Quotas 进度条阈值上色(settings-ops)/ ETag conflict banner(settings-ops)/ Audit timeline dot 颜色编码 |
