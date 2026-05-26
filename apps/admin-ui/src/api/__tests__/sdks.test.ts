@@ -113,11 +113,11 @@ describe("resumeRun POSTs the approval body", () => {
       status: "running",
       pending_approval: null,
     });
-    await resumeRun("t-1", "r-1", { approved: true, reason: "ship it" });
+    await resumeRun("t-1", "r-1", { decision: "approve", reason: "ship it" });
     expect(calls[0].url).toBe("/v1/sessions/t-1/runs/r-1/resume");
     expect(calls[0].method).toBe("post");
     const parsed = JSON.parse(calls[0].data as string);
-    expect(parsed.approved).toBe(true);
+    expect(parsed.decision).toBe("approve");
     expect(parsed.reason).toBe("ship it");
   });
 });

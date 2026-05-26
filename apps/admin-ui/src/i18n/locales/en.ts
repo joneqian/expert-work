@@ -98,6 +98,24 @@ export interface TranslationKeys {
     stream_failed: string;
     empty: string;
   };
+  approval_card: {
+    awaiting_human: string;
+    reason_kind: string;
+    requested_at: string;
+    timeout_at: string;
+    proposed_args_label: string;
+    editing_hint: string;
+    edit_arguments: string;
+    cancel_edit: string;
+    approve: string;
+    approve_with_edits: string;
+    reject: string;
+    approved: string;
+    approved_with_edits: string;
+    rejected: string;
+    json_parse_error: string;
+    json_must_be_object: string;
+  };
   run_detail: {
     failed_to_load: string;
     thread_label: string;
@@ -316,6 +334,24 @@ const en: TranslationKeys = {
     event_count: "{{n}} events",
     stream_failed: "Stream failed",
     empty: "No events yet.",
+  },
+  approval_card: {
+    awaiting_human: "awaiting approval",
+    reason_kind: "Reason",
+    requested_at: "Requested",
+    timeout_at: "Timeout",
+    proposed_args_label: "Proposed arguments (read-only)",
+    editing_hint: "Editing arguments — Approve sends them as 'modify' decision",
+    edit_arguments: "Edit arguments",
+    cancel_edit: "Cancel edit",
+    approve: "Approve",
+    approve_with_edits: "Approve with edits",
+    reject: "Reject",
+    approved: "Approved — run resuming.",
+    approved_with_edits: "Approved with edits — run resuming.",
+    rejected: "Rejected — run cancelled.",
+    json_parse_error: "Invalid JSON",
+    json_must_be_object: "Top-level value must be a JSON object",
   },
   run_detail: {
     failed_to_load: "Failed to load run",

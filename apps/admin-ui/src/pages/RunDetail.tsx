@@ -16,18 +16,19 @@
  * H.4 wires the Tempo / Grafana embed.
  */
 import { useCallback, useEffect, useState } from "react";
-import { App, Alert, Breadcrumb, Button, Card, Empty, Skeleton, Space, Tag, Typography } from "antd";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, ChevronRight } from "lucide-react";
+import { Alert, Breadcrumb, Button, Card, Empty, Skeleton, Space, Tag, Typography } from "antd";
+import { Link, useParams } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
 import {
   getRun,
-  resumeRun,
   type RunDetail as RunDetailModel,
   type RunStatus,
 } from "../api/runs";
+import { useStatusPolling } from "../hooks/useStatusPolling";
+import { ApprovalCard } from "./run_detail/ApprovalCard";
 import { EventStreamPanel } from "./run_detail/EventStreamPanel";
 
 const { Text } = Typography;
@@ -51,13 +52,28 @@ const STATUS_COLOR: Record<RunStatus, string> = {
 export function RunDetail() {
   const { t } = useTranslation();
   const { threadId, runId } = useParams<{ threadId: string; runId: string }>();
-  const navigate = useNavigate();
-  const { message } = App.useApp();
 
   const [run, setRun] = useState<RunDetailModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [resuming, setResuming] = useState(false);
+
+  /** Silent refresh — polled by ``useStatusPolling`` so the Skeleton
+   *  flicker only happens on the initial fetch and explicit user
+   *  refreshes, not every 3 seconds. */
+  const refreshSilent = useCallback(async () => {
+    if (!threadId || !runId) return;
+    try {
+      setRun(await getRun(threadId, runId));
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `${err.code}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : "unknown error";
+      setError(msg);
+    }
+  }, [threadId, runId]);
 
   const refresh = useCallback(async () => {
     if (!threadId || !runId) return;
@@ -82,20 +98,15 @@ export function RunDetail() {
     void refresh();
   }, [refresh]);
 
-  const handleResume = async (approved: boolean) => {
-    if (!threadId || !runId) return;
-    setResuming(true);
-    try {
-      await resumeRun(threadId, runId, { approved });
-      message.success(t(approved ? "run_detail.approved" : "run_detail.rejected"));
-      await refresh();
-    } catch (err) {
-      const msg = err instanceof ApiError ? err.message : String(err);
-      message.error(msg);
-    } finally {
-      setResuming(false);
-    }
-  };
+  // Mini-ADR H-7 — 3s poll while the run is active and the tab is
+  // visible. Terminal status stops the timer; the page-visibility gate
+  // is inside the hook.
+  useStatusPolling({
+    status: run?.status ?? null,
+    onTick: () => {
+      void refreshSilent();
+    },
+  });
 
   if (!threadId || !runId) {
     return <Empty description="Missing :threadId or :runId" style={{ marginTop: 80 }} />;
@@ -153,74 +164,11 @@ export function RunDetail() {
       </div>
 
       {approval !== null && (
-        <Alert
-          showIcon
-          icon={<AlertTriangle size={16} strokeWidth={1.5} />}
-          type="warning"
-          message={
-            <strong>
-              {approval.node} — {t("run_detail.awaiting_approval")}
-            </strong>
-          }
-          description={
-            <div style={{ marginTop: 8 }}>
-              <p style={{ margin: "0 0 8px", color: "var(--hx-text-secondary)" }}>
-                {approval.action_summary}
-              </p>
-              <Space size={16} style={{ marginBottom: 8, fontSize: 12, color: "var(--hx-text-tertiary)" }}>
-                <span>
-                  {t("run_detail.reason_kind")}:{" "}
-                  <Text code style={{ fontSize: 11 }}>
-                    {approval.reason_kind}
-                  </Text>
-                </span>
-                <span>
-                  {t("run_detail.requested_at")}: {new Date(approval.requested_at).toLocaleString()}
-                </span>
-                <span>
-                  {t("run_detail.timeout_at")}: {new Date(approval.timeout_at).toLocaleString()}
-                </span>
-              </Space>
-              <div style={{ fontSize: 12, color: "var(--hx-text-tertiary)", marginBottom: 4 }}>
-                {t("run_detail.proposed_args")}:
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: 12,
-                  background: "var(--hx-surface-base)",
-                  borderRadius: 6,
-                  fontFamily: "var(--hx-font-mono)",
-                  fontSize: 11,
-                  color: "var(--hx-text-primary)",
-                  overflow: "auto",
-                  maxHeight: 240,
-                }}
-              >
-                {JSON.stringify(approval.proposed_args, null, 2)}
-              </pre>
-              <Space style={{ marginTop: 12 }}>
-                <Button
-                  type="primary"
-                  loading={resuming}
-                  onClick={() => void handleResume(true)}
-                  data-testid="run-approve"
-                >
-                  {t("run_detail.approve")}
-                </Button>
-                <Button
-                  danger
-                  loading={resuming}
-                  onClick={() => void handleResume(false)}
-                  data-testid="run-reject"
-                >
-                  {t("run_detail.reject")}
-                </Button>
-                <Button onClick={() => navigate("/runs")}>{t("common.cancel")}</Button>
-              </Space>
-            </div>
-          }
-          style={{ marginBottom: 16 }}
+        <ApprovalCard
+          threadId={threadId}
+          runId={runId}
+          approval={approval}
+          onResolved={() => void refresh()}
         />
       )}
 

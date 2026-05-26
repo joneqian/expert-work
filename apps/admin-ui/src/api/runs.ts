@@ -65,10 +65,15 @@ export async function getRun(
   return response.data;
 }
 
+/** POST body — matches backend ``ResumeRequest`` shape:
+ *  ``decision ∈ {"approve","reject","modify"}``;
+ *  ``modified_args`` MUST be present iff ``decision === "modify"``.
+ *  H.3 PR 5 — Mini-ADR H-9: ``modify`` lands when the reviewer edits
+ *  the agent's proposed_args in the Monaco JSON inline. */
 export interface ResumeRunRequest {
-  approved: boolean;
+  decision: "approve" | "reject" | "modify";
   reason?: string;
-  override_args?: Record<string, unknown>;
+  modified_args?: Record<string, unknown>;
 }
 
 export async function resumeRun(
