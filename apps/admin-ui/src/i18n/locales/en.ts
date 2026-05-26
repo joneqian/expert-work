@@ -17,6 +17,7 @@ export interface TranslationKeys {
     confirm: string;
     save: string;
     delete: string;
+    edit: string;
     search_or_jump: string;
     notifications: string;
     user_menu: string;
@@ -146,6 +147,63 @@ export interface TranslationKeys {
     tooltip_one: string;
     tooltip_other: string;
   };
+  curation: {
+    page_title: string;
+    subtitle: string;
+    tab_candidates: string;
+    tab_datasets: string;
+    cross_tenant_banner: string;
+    failed_to_load: string;
+    empty_home: string;
+    empty_cross: string;
+    col_signal: string;
+    col_agent: string;
+    col_status: string;
+    col_detected: string;
+    col_outcome: string;
+    filter_status: string;
+    filter_status_all: string;
+    filter_signal: string;
+    filter_signal_all: string;
+    detail_title: string;
+    detail_signal: string;
+    detail_outcome: string;
+    detail_trajectory: string;
+    trajectory_missing: string;
+    promote: string;
+    dismiss: string;
+    promote_modal_title: string;
+    promote_dataset_name: string;
+    promote_name_required: string;
+    promote_hint: string;
+    promoted: string;
+    dismissed: string;
+  };
+  eval_datasets: {
+    failed_to_load: string;
+    empty_home: string;
+    empty_cross: string;
+    col_name: string;
+    col_agent: string;
+    col_source: string;
+    col_updated: string;
+    col_actions: string;
+    create: string;
+    create_modal_title: string;
+    field_agent_name: string;
+    field_name: string;
+    agent_required: string;
+    name_required: string;
+    edit_title: string;
+    edit_input_label: string;
+    edit_expected_label: string;
+    json_parse_error: string;
+    created: string;
+    updated: string;
+    deleted: string;
+    delete_confirm_title: string;
+    delete_confirm_body: string;
+  };
   api_keys: {
     page_title: string;
     subtitle: string;
@@ -263,6 +321,7 @@ const en: TranslationKeys = {
     confirm: "Confirm",
     save: "Save",
     delete: "Delete",
+    edit: "Edit",
     search_or_jump: "Search or jump",
     notifications: "Notifications",
     user_menu: "User menu",
@@ -395,6 +454,63 @@ const en: TranslationKeys = {
     aria_label: "Pending approvals",
     tooltip_one: "{{count}} run is awaiting approval",
     tooltip_other: "{{count}} runs are awaiting approval",
+  },
+  curation: {
+    page_title: "Curation+Eval",
+    subtitle: "Review candidate runs surfaced by the curation worker and promote them to golden eval datasets.",
+    tab_candidates: "Candidates",
+    tab_datasets: "Eval Datasets",
+    cross_tenant_banner: "cross-tenant view",
+    failed_to_load: "Failed to load candidates",
+    empty_home: "No pending candidates in this tenant.",
+    empty_cross: "No candidates across all tenants.",
+    col_signal: "Signal",
+    col_agent: "Agent",
+    col_status: "Status",
+    col_detected: "Detected",
+    col_outcome: "Outcome",
+    filter_status: "Status filter",
+    filter_status_all: "All statuses",
+    filter_signal: "Signal filter",
+    filter_signal_all: "All signals",
+    detail_title: "Candidate detail",
+    detail_signal: "Signal",
+    detail_outcome: "Outcome",
+    detail_trajectory: "Trajectory",
+    trajectory_missing: "Trajectory artifact missing — promote / dismiss still allowed.",
+    promote: "Promote",
+    dismiss: "Dismiss",
+    promote_modal_title: "Promote candidate to eval dataset",
+    promote_dataset_name: "Eval dataset name",
+    promote_name_required: "Name is required",
+    promote_hint: "Trajectory input + expected output are copied from the candidate. Edit later via the Eval Datasets tab.",
+    promoted: "Candidate promoted to eval dataset.",
+    dismissed: "Candidate dismissed.",
+  },
+  eval_datasets: {
+    failed_to_load: "Failed to load eval datasets",
+    empty_home: "No eval datasets in this tenant yet.",
+    empty_cross: "No eval datasets across all tenants yet.",
+    col_name: "Name",
+    col_agent: "Agent",
+    col_source: "Source",
+    col_updated: "Updated",
+    col_actions: "Actions",
+    create: "Create",
+    create_modal_title: "Create eval dataset",
+    field_agent_name: "Agent name",
+    field_name: "Dataset name",
+    agent_required: "Agent name is required",
+    name_required: "Name is required",
+    edit_title: "Edit eval dataset",
+    edit_input_label: "Input (JSON object)",
+    edit_expected_label: "Expected output (JSON object or empty for null)",
+    json_parse_error: "JSON parse error",
+    created: "Eval dataset created.",
+    updated: "Eval dataset updated.",
+    deleted: "Eval dataset deleted.",
+    delete_confirm_title: "Delete this eval dataset?",
+    delete_confirm_body: "This row will be removed from the golden suite. Cannot be undone.",
   },
   api_keys: {
     page_title: "API Keys",

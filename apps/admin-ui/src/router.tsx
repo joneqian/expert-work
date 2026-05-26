@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AgentsList } from "./pages/AgentsList";
 import { AgentDetail } from "./pages/AgentDetail";
+import { Curation } from "./pages/Curation";
 import { RunDetail } from "./pages/RunDetail";
 import { RunsList } from "./pages/RunsList";
 import { SettingsApiKeys } from "./pages/SettingsApiKeys";
@@ -15,7 +16,7 @@ export function AppRouter() {
       <Route path="/agents/:name/:version/:tab" element={<AgentDetail />} />
       <Route path="/runs" element={<RunsList />} />
       <Route path="/runs/:threadId/:runId" element={<RunDetail />} />
-      <Route path="/curation" element={<ComingSoon title="Curation+Eval" />} />
+      <Route path="/curation" element={<Curation />} />
       <Route path="/memory" element={<ComingSoon title="Memory" />} />
       <Route path="/skills" element={<ComingSoon title="Skills" />} />
       <Route path="/triggers" element={<ComingSoon title="Triggers" />} />

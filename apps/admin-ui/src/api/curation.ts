@@ -1,13 +1,30 @@
 /**
  * Curation + Eval SDK — backed by ``/v1/curation/*`` + ``/v1/eval-datasets``.
  *
- * Stream H.1b PR 3. Curation candidates are produced by the curation
- * worker; reviewers promote them to eval datasets or dismiss. The
- * list endpoints accept ``tenant_id=*`` for system_admin aggregate.
+ * Stream H.1b PR 3 added the list-only skeletons; H.4 PR 1 fills in all
+ * mutations + a latent bug fix:
+ *
+ * **Latent bug fix (H.4 PR 1)**: the H.1b PR 3 SDK used ``getJson`` which
+ * unwraps a ``{success, data, error}`` envelope, but the curation backend
+ * returns *raw* ``JSONResponse(content={...})`` payloads — there is no
+ * envelope middleware (envelopes are authored per-endpoint, see
+ * ``api/agents.py``). The SDK tests passed only because they mocked
+ * enveloped responses. We now match the actual backend contract by going
+ * through ``apiClient`` directly, mirroring the ``getRun`` pattern in
+ * ``runs.ts``.
  */
-import { getJson, withTenantScope, type TenantScope } from "./client";
+import { apiClient, withTenantScope, type TenantScope } from "./client";
 
 export type CandidateStatus = "pending" | "promoted" | "dismissed";
+
+export type CurationSignal =
+  | "manual"
+  | "negative_feedback"
+  | "tool_failure"
+  | "timeout"
+  | "policy_block";
+
+export type EvalDatasetSource = "golden" | "promoted_candidate";
 
 export interface CurationCandidate {
   id: string;
@@ -26,6 +43,16 @@ export interface CurationCandidate {
   reviewed_at: string | null;
 }
 
+export interface CandidateTrajectory {
+  /** ObjectStore-backed message list pulled at detail-fetch time. */
+  messages: Record<string, unknown>[];
+  step_count: number;
+}
+
+export interface CurationCandidateDetail extends CurationCandidate {
+  trajectory: CandidateTrajectory | null;
+}
+
 export interface CurationCandidateList {
   items: CurationCandidate[];
   total: number;
@@ -35,6 +62,7 @@ export interface CurationCandidateList {
 export interface ListCandidatesParams {
   tenantScope?: TenantScope;
   status?: CandidateStatus;
+  signal?: CurationSignal;
   agentName?: string;
   limit?: number;
   offset?: number;
@@ -43,14 +71,51 @@ export interface ListCandidatesParams {
 export async function listCandidates(
   params: ListCandidatesParams = {},
 ): Promise<CurationCandidateList> {
-  const { tenantScope, status, agentName, limit, offset } = params;
+  const { tenantScope, status, signal, agentName, limit, offset } = params;
   const query = withTenantScope(
-    { status, agent_name: agentName, limit, offset },
+    { status, signal, agent_name: agentName, limit, offset },
     tenantScope,
   );
-  return getJson<CurationCandidateList>("/v1/curation/candidates", {
-    params: query,
-  });
+  const response = await apiClient.get<CurationCandidateList>(
+    "/v1/curation/candidates",
+    { params: query },
+  );
+  return response.data;
+}
+
+export async function getCandidate(
+  candidateId: string,
+): Promise<CurationCandidateDetail> {
+  const response = await apiClient.get<CurationCandidateDetail>(
+    `/v1/curation/candidates/${encodeURIComponent(candidateId)}`,
+  );
+  return response.data;
+}
+
+export interface PromoteCandidateBody {
+  name: string;
+  /** Optional override of the candidate's trajectory input. Empty
+   *  ``{}`` is fine — backend defaults to empty dict. */
+  input?: Record<string, unknown>;
+  expected?: Record<string, unknown> | null;
+  source: EvalDatasetSource;
+}
+
+export async function promoteCandidate(
+  candidateId: string,
+  body: PromoteCandidateBody,
+): Promise<EvalDataset> {
+  const response = await apiClient.post<EvalDataset>(
+    `/v1/curation/candidates/${encodeURIComponent(candidateId)}/promote`,
+    body,
+  );
+  return response.data;
+}
+
+export async function dismissCandidate(candidateId: string): Promise<void> {
+  await apiClient.post<{ dismissed: true }>(
+    `/v1/curation/candidates/${encodeURIComponent(candidateId)}/dismiss`,
+  );
 }
 
 export interface EvalDataset {
@@ -59,8 +124,8 @@ export interface EvalDataset {
   agent_name: string;
   name: string;
   input: Record<string, unknown>;
-  expected: Record<string, unknown>;
-  source: string;
+  expected: Record<string, unknown> | null;
+  source: EvalDatasetSource;
   source_trajectory_key: string | null;
   source_user_id: string | null;
   created_at: string;
@@ -88,5 +153,56 @@ export async function listEvalDatasets(
     { agent_name: agentName, limit, offset },
     tenantScope,
   );
-  return getJson<EvalDatasetList>("/v1/eval-datasets", { params: query });
+  const response = await apiClient.get<EvalDatasetList>("/v1/eval-datasets", {
+    params: query,
+  });
+  return response.data;
+}
+
+export interface CreateEvalDatasetBody {
+  agent_name: string;
+  name: string;
+  input?: Record<string, unknown>;
+  expected?: Record<string, unknown> | null;
+  source?: EvalDatasetSource;
+}
+
+export async function createEvalDataset(
+  body: CreateEvalDatasetBody,
+): Promise<EvalDataset> {
+  const response = await apiClient.post<EvalDataset>(
+    "/v1/eval-datasets",
+    body,
+  );
+  return response.data;
+}
+
+export async function getEvalDataset(datasetId: string): Promise<EvalDataset> {
+  const response = await apiClient.get<EvalDataset>(
+    `/v1/eval-datasets/${encodeURIComponent(datasetId)}`,
+  );
+  return response.data;
+}
+
+export interface PatchEvalDatasetBody {
+  name?: string;
+  input?: Record<string, unknown>;
+  expected?: Record<string, unknown> | null;
+}
+
+export async function patchEvalDataset(
+  datasetId: string,
+  body: PatchEvalDatasetBody,
+): Promise<EvalDataset> {
+  const response = await apiClient.patch<EvalDataset>(
+    `/v1/eval-datasets/${encodeURIComponent(datasetId)}`,
+    body,
+  );
+  return response.data;
+}
+
+export async function deleteEvalDataset(datasetId: string): Promise<void> {
+  await apiClient.delete<{ deleted: true }>(
+    `/v1/eval-datasets/${encodeURIComponent(datasetId)}`,
+  );
 }

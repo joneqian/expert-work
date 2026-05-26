@@ -127,8 +127,6 @@ describe("list endpoints share the envelope path", () => {
     ["skills", () => listSkills(), "/v1/skills"],
     ["triggers", () => listTriggers(), "/v1/triggers"],
     ["memory", () => listMemories(), "/v1/memory"],
-    ["candidates", () => listCandidates(), "/v1/curation/candidates"],
-    ["eval-datasets", () => listEvalDatasets(), "/v1/eval-datasets"],
     ["api-keys", () => listApiKeys(), "/v1/api_keys"],
     ["service-accounts", () => listServiceAccounts(), "/v1/service_accounts"],
   ])("%s hits %s", async (_name, call, expectedUrl) => {
@@ -137,6 +135,21 @@ describe("list endpoints share the envelope path", () => {
       data: { items: [], total: 0, cross_tenant: false },
       error: null,
     });
+    await call();
+    expect(calls[0].url).toBe(expectedUrl);
+  });
+});
+
+describe("curation + eval-datasets — raw (un-enveloped) endpoints", () => {
+  // H.4 PR 1 latent-bug fix: the curation backend returns raw
+  // ``JSONResponse(content={...})`` payloads, *not* enveloped
+  // ``{success, data}``. The SDK now matches that contract by going
+  // through ``apiClient`` directly.
+  it.each([
+    ["candidates", () => listCandidates(), "/v1/curation/candidates"],
+    ["eval-datasets", () => listEvalDatasets(), "/v1/eval-datasets"],
+  ])("%s hits %s", async (_name, call, expectedUrl) => {
+    const calls = captureAdapter({ items: [], total: 0, cross_tenant: false });
     await call();
     expect(calls[0].url).toBe(expectedUrl);
   });
