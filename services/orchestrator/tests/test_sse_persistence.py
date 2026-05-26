@@ -73,9 +73,7 @@ async def test_run_agent_mirrors_metadata_and_updates_to_event_store() -> None:
     rm = RunManager()
     record = await _new_record(rm)
     store = InMemoryRunEventStore()
-    graph = _ScriptedGraph(
-        chunks=[{"agent": {"step_count": 1}}, {"agent": {"step_count": 2}}]
-    )
+    graph = _ScriptedGraph(chunks=[{"agent": {"step_count": 1}}, {"agent": {"step_count": 2}}])
 
     await run_agent(
         bridge=bridge,

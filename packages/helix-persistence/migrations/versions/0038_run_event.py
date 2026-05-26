@@ -23,7 +23,7 @@ The schema mirrors the in-memory ``StreamBridge.memory.py`` event log
 natural primary key and covers the only query pattern:
 ``WHERE run_id = ? AND seq >= ? ORDER BY seq ASC``.
 
-Capacity: ~20-60 events × ~500 bytes ≈ 10-30 KB/run. 1000 runs/day →
+Capacity: ~20-60 events x ~500 bytes ≈ 10-30 KB/run. 1000 runs/day →
 11 GB/year — acceptable until M1's retention sweep (~30 days, aligned
 with ``event_log``).
 """
