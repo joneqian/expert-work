@@ -205,6 +205,53 @@ export interface TranslationKeys {
     detail_payload: string;
     detail_payload_hint: string;
   };
+  triggers: {
+    page_title: string;
+    subtitle: string;
+    cross_tenant_banner: string;
+    failed_to_load: string;
+    empty_cron: string;
+    empty_webhook: string;
+    empty_cross: string;
+    tab_cron: string;
+    tab_webhook: string;
+    col_name: string;
+    col_agent: string;
+    col_cron_expr: string;
+    col_webhook_path: string;
+    col_enabled: string;
+    col_updated: string;
+    col_actions: string;
+    create: string;
+    create_submit: string;
+    create_cron_title: string;
+    create_webhook_title: string;
+    field_name: string;
+    field_agent_name: string;
+    field_agent_version: string;
+    field_cron_expr: string;
+    name_required: string;
+    agent_required: string;
+    agent_version_required: string;
+    cron_required: string;
+    cron_hint: string;
+    webhook_secret_info_title: string;
+    webhook_secret_info_body: string;
+    secret_drawer_title: string;
+    secret_warn_title: string;
+    secret_warn_body: string;
+    secret_trigger_name: string;
+    secret_label: string;
+    secret_copy: string;
+    secret_copied: string;
+    secret_copy_failed: string;
+    secret_acknowledged: string;
+    toggled: string;
+    created: string;
+    deleted: string;
+    delete_confirm_title: string;
+    delete_confirm_body: string;
+  };
   skills: {
     page_title: string;
     subtitle: string;
@@ -609,6 +656,57 @@ const en: TranslationKeys = {
     detail_payload: "Payload (details)",
     detail_payload_hint:
       "Already redactor-cleaned at write time — sensitive fields surface as [REDACTED].",
+  },
+  triggers: {
+    page_title: "Triggers",
+    subtitle:
+      "Agent auto-start hooks — cron expression timers or external webhook ingest (HMAC secret auth). Cross-tenant view requires system_admin.",
+    cross_tenant_banner: "cross-tenant view",
+    failed_to_load: "Failed to load triggers",
+    empty_cron: "No cron triggers yet.",
+    empty_webhook: "No webhook triggers yet.",
+    empty_cross: "No triggers across all tenants.",
+    tab_cron: "Cron",
+    tab_webhook: "Webhook",
+    col_name: "Name",
+    col_agent: "Agent",
+    col_cron_expr: "Cron expression",
+    col_webhook_path: "Webhook path",
+    col_enabled: "Enabled",
+    col_updated: "Updated",
+    col_actions: "Actions",
+    create: "Create Trigger",
+    create_submit: "Create",
+    create_cron_title: "Create cron trigger",
+    create_webhook_title: "Create webhook trigger",
+    field_name: "Name",
+    field_agent_name: "Agent name",
+    field_agent_version: "Agent version",
+    field_cron_expr: "Cron expression",
+    name_required: "Name is required",
+    agent_required: "Agent name is required",
+    agent_version_required: "Agent version is required",
+    cron_required: "Cron expression is required",
+    cron_hint: "Standard 5-field cron, e.g. \"0 9 * * *\" runs at 09:00 daily.",
+    webhook_secret_info_title: "Webhook secret will be generated server-side",
+    webhook_secret_info_body:
+      "After creation a one-time secret will be shown. Save it now — there is no way to retrieve it later (rotation = delete + re-create in M0).",
+    secret_drawer_title: "Webhook secret (show once)",
+    secret_warn_title: "Save this secret now",
+    secret_warn_body:
+      "This is the only time the full secret is shown. Treat it like a password — copy it to your secret manager before closing.",
+    secret_trigger_name: "Trigger",
+    secret_label: "Secret",
+    secret_copy: "Copy",
+    secret_copied: "Secret copied to clipboard.",
+    secret_copy_failed: "Clipboard copy failed — manually copy from the field.",
+    secret_acknowledged: "I saved the secret",
+    toggled: "Trigger updated.",
+    created: "Trigger created.",
+    deleted: "Trigger deleted.",
+    delete_confirm_title: "Delete this trigger?",
+    delete_confirm_body:
+      "The cron schedule / webhook endpoint will stop firing immediately. Cannot be undone.",
   },
   skills: {
     page_title: "Skills",

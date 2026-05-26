@@ -9,6 +9,7 @@ import { SettingsApiKeys } from "./pages/SettingsApiKeys";
 import { SettingsAudit } from "./pages/SettingsAudit";
 import { SkillDetail } from "./pages/SkillDetail";
 import { SkillsList } from "./pages/SkillsList";
+import { TriggersList } from "./pages/TriggersList";
 import { ComingSoon } from "./pages/ComingSoon";
 
 export function AppRouter() {
@@ -24,7 +25,7 @@ export function AppRouter() {
       <Route path="/memory" element={<MemoryAdmin />} />
       <Route path="/skills" element={<SkillsList />} />
       <Route path="/skills/:skillId" element={<SkillDetail />} />
-      <Route path="/triggers" element={<ComingSoon title="Triggers" />} />
+      <Route path="/triggers" element={<TriggersList />} />
       <Route path="/settings/api-keys" element={<SettingsApiKeys />} />
       <Route path="/settings/audit" element={<SettingsAudit />} />
       <Route path="/settings/*" element={<ComingSoon title="Settings" />} />
