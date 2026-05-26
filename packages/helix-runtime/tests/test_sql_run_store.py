@@ -233,9 +233,14 @@ async def test_list_for_tenant_offset_limit(run_store: SqlRunStore) -> None:
 async def test_list_all_tenants_returns_runs_across_tenants(
     run_store: SqlRunStore,
 ) -> None:
+    """The test container's postgres user has BYPASSRLS, so prior tests
+    in the same session may have left rows. Assert ``tenant_a`` and
+    ``tenant_b`` are *both visible* as a subset rather than exact match."""
     tenant_a, tenant_b = uuid4(), uuid4()
     await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_a))
     await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_b))
 
-    listed = await run_store.list_all_tenants()
-    assert {r.tenant_id for r in listed} == {tenant_a, tenant_b}
+    listed = await run_store.list_all_tenants(limit=500)
+    tenants = {r.tenant_id for r in listed}
+    assert tenant_a in tenants
+    assert tenant_b in tenants
