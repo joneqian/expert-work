@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -45,15 +45,23 @@ from control_plane.audit import emit
 from control_plane.quota.base import QuotaService
 from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
-from helix_agent.common.observability import current_trace_id_hex
+from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from helix_agent.common.observability import (
+    current_trace_id_hex,
+    helix_counter,
+    helix_histogram,
+)
 from helix_agent.persistence import ApprovalStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import ApprovalStatus, AuditAction, ThreadStatus
+from helix_agent.persistence.thread_meta import ThreadMetaStore
+from helix_agent.protocol import ApprovalStatus, AuditAction, AuditResult, ThreadStatus
 from helix_agent.protocol.multimodal import parse_image_ref
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.runs import RunStore
+from helix_agent.runtime.runs.schemas import RunStatus
+from helix_agent.runtime.runs.store import MAX_LIST_LIMIT, _clamp_limit
 from orchestrator import AgentFactoryError, run_agent, sse_consumer
 from orchestrator.multimodal import image_ref_block
 
@@ -94,8 +102,9 @@ class ResumeRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=2048)
 
 
-def _get_thread_repo(request: Request) -> object:
-    return request.app.state.thread_meta_repo
+def _get_thread_repo(request: Request) -> ThreadMetaStore:
+    repo: ThreadMetaStore = request.app.state.thread_meta_repo
+    return repo
 
 
 def _get_settings(request: Request) -> Settings:
@@ -641,3 +650,165 @@ def runtime_run_status(request: Request, run_id: UUID) -> str | None:
     runtime: AgentRuntime = request.app.state.agent_runtime
     record = runtime.run_manager.get(run_id)
     return record.status.value if record is not None else None
+
+
+# ---------------------------------------------------------------------------
+# Stream H.3 PR 1 — cross-thread Runs index
+#
+# Mini-ADR H-6 — ``/v1/sessions`` is per-thread; the admin UI's
+# Runs page needs a flat aggregate. We mount a SECOND router with
+# prefix ``/v1/runs`` exposing only the cross-thread list. Stream N
+# tenant-scope framework (ensure_tenant_scope + applied_scope +
+# bypass_rls_session) is reused unchanged.
+# ---------------------------------------------------------------------------
+
+# Prometheus signals — declared at module import (idempotent collector
+# registry handles double-import in tests).
+_RUN_LIST_TOTAL = helix_counter(
+    "helix_control_plane_run_list_total",
+    "GET /v1/runs invocations by tenant scope.",
+    ("tenant_scope",),
+)
+_RUN_LIST_SECONDS = helix_histogram(
+    "helix_control_plane_run_list_seconds",
+    "GET /v1/runs latency in seconds.",
+)
+
+
+def _run_to_dict(
+    info: Any,
+    *,
+    agent_name: str | None,
+    agent_version: str | None,
+) -> dict[str, Any]:
+    """Serialise a :class:`RunInfo` + JOIN'd thread agent fields to JSON.
+
+    ``agent_name`` / ``agent_version`` come from a per-row
+    ``ThreadMetaStore.get`` (Mini-ADR H-6 § 6.5.5 — N+1 JOIN at M0;
+    M1 turns into SQL JOIN). ``None`` when the thread has been deleted.
+    """
+    return {
+        "run_id": str(info.run_id),
+        "tenant_id": str(info.tenant_id),
+        "thread_id": str(info.thread_id),
+        "user_id": str(info.user_id) if info.user_id is not None else None,
+        "status": info.status.value,
+        "is_resume": info.is_resume,
+        "error": info.error,
+        "agent_name": agent_name,
+        "agent_version": agent_version,
+        "created_at": info.created_at.isoformat(),
+        "updated_at": info.updated_at.isoformat(),
+        "finished_at": info.finished_at.isoformat() if info.finished_at is not None else None,
+    }
+
+
+def build_runs_list_router() -> APIRouter:
+    """Mount ``GET /v1/runs`` — the cross-thread index.
+
+    Lives next to ``build_runs_router`` (per-thread) but ships its own
+    APIRouter so the prefix ``/v1/runs`` stays clean.
+    """
+    router = APIRouter(prefix="/v1/runs", tags=["runs"])
+
+    @router.get("", response_model=None)
+    async def list_runs(
+        request: Request,
+        runs: Annotated[RunStore, Depends(_get_run_store)],
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        status: Annotated[RunStatus | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=10000)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,
+    ) -> JSONResponse:
+        trace_id = current_trace_id_hex()
+        start = time.monotonic()
+
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=trace_id,
+            endpoint="GET /v1/runs",
+        )
+
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                items = await runs.list_all_tenants(status=status, limit=limit, offset=offset)
+                tenant_scope_label = "cross"
+            else:
+                items = await runs.list_for_tenant(
+                    tenant_id=scope.tenant_id,
+                    status=status,
+                    limit=limit,
+                    offset=offset,
+                )
+                tenant_scope_label = (
+                    "home" if scope.tenant_id == request.state.principal.tenant_id else "target"
+                )
+
+            # § 6.5.5 (b) — server-side JOIN agent_name from thread_meta.
+            # M0 = N+1; M1 = SQL JOIN. Capped at MAX_LIST_LIMIT (=500) so
+            # the loop bound is safe.
+            agents_by_thread: dict[UUID, tuple[str | None, str | None]] = {}
+            for info in items:
+                if info.thread_id in agents_by_thread:
+                    continue
+                meta = await threads.get(info.thread_id, tenant_id=info.tenant_id)
+                if meta is None:
+                    agents_by_thread[info.thread_id] = (None, None)
+                else:
+                    agents_by_thread[info.thread_id] = (meta.agent_name, meta.agent_version)
+
+        items_json = [
+            _run_to_dict(
+                i,
+                agent_name=agents_by_thread[i.thread_id][0],
+                agent_version=agents_by_thread[i.thread_id][1],
+            )
+            for i in items
+        ]
+
+        # Mini-ADR H-7 (D) — Hard cap signal so clients know the page was
+        # clamped. ``_clamp_limit`` (silently) bounds to MAX_LIST_LIMIT.
+        clamped = limit > MAX_LIST_LIMIT
+        headers = {"X-Limit-Capped": "true"} if clamped else None
+        if clamped:
+            limit = _clamp_limit(limit)
+
+        await emit(
+            audit,
+            tenant_id=request.state.tenant_id,
+            actor_id=request.state.actor_id,
+            action=AuditAction.RUN_LIST_READ,
+            resource_type="run",
+            resource_id=None,
+            result=AuditResult.SUCCESS,
+            trace_id=trace_id,
+            details={
+                "status": status.value if status is not None else None,
+                "cross_tenant": isinstance(scope, CrossTenant),
+                "count": len(items_json),
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+
+        _RUN_LIST_TOTAL.labels(tenant_scope=tenant_scope_label).inc()
+        _RUN_LIST_SECONDS.observe(time.monotonic() - start)
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "data": {
+                    "items": items_json,
+                    "total": len(items_json),
+                    "cross_tenant": isinstance(scope, CrossTenant),
+                },
+                "error": None,
+            },
+            headers=headers,
+        )
+
+    return router

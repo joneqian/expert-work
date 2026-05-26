@@ -170,6 +170,23 @@ export interface TranslationKeys {
     cancel: string;
     create_failed: string;
   };
+  runs_page: {
+    page_title: string;
+    subtitle: string;
+    cross_tenant_banner: string;
+    failed_to_load: string;
+    empty_home: string;
+    empty_cross: string;
+    column_run_id: string;
+    column_status: string;
+    column_thread: string;
+    column_agent: string;
+    column_created: string;
+    filter_status: string;
+    filter_status_all: string;
+    detail_hint: string;
+    detail_hint_link: string;
+  };
   coming_soon: {
     title_prefix: string;
     body: string;
@@ -371,6 +388,23 @@ const en: TranslationKeys = {
     submit: "Create",
     cancel: "Cancel",
     create_failed: "Failed to create agent",
+  },
+  runs_page: {
+    page_title: "Runs",
+    subtitle: "Cross-thread index of every agent run.",
+    cross_tenant_banner: "cross-tenant view",
+    failed_to_load: "Failed to load runs",
+    empty_home: "No runs in this tenant yet.",
+    empty_cross: "No runs across all tenants yet.",
+    column_run_id: "Run ID",
+    column_status: "Status",
+    column_thread: "Thread",
+    column_agent: "Agent",
+    column_created: "Created",
+    filter_status: "Status filter",
+    filter_status_all: "All statuses",
+    detail_hint: "Need to start a new run?",
+    detail_hint_link: "Open the Playground tab on an agent.",
   },
   coming_soon: {
     title_prefix: "This page is being implemented",

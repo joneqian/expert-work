@@ -12,7 +12,7 @@ from control_plane.api.memory import build_memory_router
 from control_plane.api.metrics import build_metrics_router
 from control_plane.api.quota import build_quota_router
 from control_plane.api.role_bindings import build_role_bindings_router
-from control_plane.api.runs import build_runs_router
+from control_plane.api.runs import build_runs_list_router, build_runs_router
 from control_plane.api.service_accounts import build_service_accounts_router
 from control_plane.api.sessions import build_sessions_router
 from control_plane.api.skills import build_skills_router
@@ -35,6 +35,7 @@ __all__ = [
     "build_metrics_router",
     "build_quota_router",
     "build_role_bindings_router",
+    "build_runs_list_router",
     "build_runs_router",
     "build_service_accounts_router",
     "build_sessions_router",

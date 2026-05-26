@@ -73,6 +73,32 @@ const EMPTY_LIST = {
   error: null,
 };
 
+// Stream H.3 PR 1 — one stable run row so the /runs E2E has content.
+const RUNS_RESPONSE = {
+  success: true,
+  data: {
+    items: [
+      {
+        run_id: "44444444-4444-4444-4444-444444444444",
+        tenant_id: "22222222-2222-2222-2222-222222222222",
+        thread_id: "55555555-5555-5555-5555-555555555555",
+        user_id: null,
+        status: "success",
+        is_resume: false,
+        error: null,
+        agent_name: "customer-support-bot",
+        agent_version: "3.4.2",
+        created_at: "2026-05-26T08:00:00Z",
+        updated_at: "2026-05-26T08:00:32Z",
+        finished_at: "2026-05-26T08:00:32Z",
+      },
+    ],
+    total: 1,
+    cross_tenant: false,
+  },
+  error: null,
+};
+
 export async function installControlPlaneStub(page: Page): Promise<void> {
   await page.route("**/v1/me", async (route) => {
     await route.fulfill({ json: ME_RESPONSE });
@@ -85,6 +111,9 @@ export async function installControlPlaneStub(page: Page): Promise<void> {
   });
   await page.route("**/v1/service_accounts*", async (route) => {
     await route.fulfill({ json: EMPTY_LIST });
+  });
+  await page.route("**/v1/runs*", async (route) => {
+    await route.fulfill({ json: RUNS_RESPONSE });
   });
 }
 

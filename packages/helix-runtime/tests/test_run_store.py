@@ -195,3 +195,142 @@ async def test_list_by_thread_filters_and_sorts() -> None:
 
     listed = await store.list_by_thread(thread_id=thread_id, tenant_id=tenant_a)
     assert [r.run_id for r in listed] == [older, newer]
+
+
+# ---------------------------------------------------------------------------
+# Stream H.3 PR 1 — list_for_tenant / list_all_tenants
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_returns_only_matching_tenant() -> None:
+    store = InMemoryRunStore()
+    tenant_a, tenant_b = uuid4(), uuid4()
+    a_ids = [uuid4(), uuid4(), uuid4()]
+    for i, rid in enumerate(a_ids):
+        await store.create(
+            _info(run_id=rid, tenant_id=tenant_a, created_at=_BASE + timedelta(minutes=i))
+        )
+    # Tenant B runs that must not leak through.
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant_b))
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant_b))
+
+    listed = await store.list_for_tenant(tenant_id=tenant_a)
+    assert {r.run_id for r in listed} == set(a_ids)
+    assert all(r.tenant_id == tenant_a for r in listed)
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_orders_newest_first() -> None:
+    store = InMemoryRunStore()
+    tenant_id = uuid4()
+    oldest, middle, newest = uuid4(), uuid4(), uuid4()
+    await store.create(_info(run_id=oldest, tenant_id=tenant_id, created_at=_BASE))
+    await store.create(
+        _info(run_id=middle, tenant_id=tenant_id, created_at=_BASE + timedelta(minutes=1))
+    )
+    await store.create(
+        _info(run_id=newest, tenant_id=tenant_id, created_at=_BASE + timedelta(minutes=2))
+    )
+
+    listed = await store.list_for_tenant(tenant_id=tenant_id)
+    assert [r.run_id for r in listed] == [newest, middle, oldest]
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_status_filter() -> None:
+    store = InMemoryRunStore()
+    tenant_id = uuid4()
+    paused_id, running_id, success_id = uuid4(), uuid4(), uuid4()
+    await store.create(_info(run_id=paused_id, tenant_id=tenant_id, status=RunStatus.PAUSED))
+    await store.create(_info(run_id=running_id, tenant_id=tenant_id, status=RunStatus.RUNNING))
+    await store.create(_info(run_id=success_id, tenant_id=tenant_id, status=RunStatus.SUCCESS))
+
+    paused = await store.list_for_tenant(tenant_id=tenant_id, status=RunStatus.PAUSED)
+    assert [r.run_id for r in paused] == [paused_id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_pagination_offset_and_limit() -> None:
+    store = InMemoryRunStore()
+    tenant_id = uuid4()
+    ids = []
+    for i in range(7):
+        rid = uuid4()
+        ids.append(rid)
+        await store.create(
+            _info(run_id=rid, tenant_id=tenant_id, created_at=_BASE + timedelta(minutes=i))
+        )
+
+    # Newest first → reverse insertion order.
+    expected_desc = list(reversed(ids))
+    page1 = await store.list_for_tenant(tenant_id=tenant_id, limit=3, offset=0)
+    page2 = await store.list_for_tenant(tenant_id=tenant_id, limit=3, offset=3)
+    page3 = await store.list_for_tenant(tenant_id=tenant_id, limit=3, offset=6)
+
+    assert [r.run_id for r in page1] == expected_desc[:3]
+    assert [r.run_id for r in page2] == expected_desc[3:6]
+    assert [r.run_id for r in page3] == expected_desc[6:9]  # only 1 row left
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_clamps_to_max_limit() -> None:
+    """``MAX_LIST_LIMIT = 500`` — silently clamps oversized requests."""
+    from helix_agent.runtime.runs.store import MAX_LIST_LIMIT
+
+    store = InMemoryRunStore()
+    tenant_id = uuid4()
+    # Create 5 runs; ask for 10000 — should return 5 (not crash).
+    for i in range(5):
+        await store.create(
+            _info(run_id=uuid4(), tenant_id=tenant_id, created_at=_BASE + timedelta(seconds=i))
+        )
+
+    listed = await store.list_for_tenant(tenant_id=tenant_id, limit=10000)
+    assert len(listed) == 5  # less than MAX_LIST_LIMIT cap
+    # Bound the cap itself — pass exactly MAX_LIST_LIMIT and one more, prove
+    # the clamp is the limit applied.
+    listed_at_cap = await store.list_for_tenant(tenant_id=tenant_id, limit=MAX_LIST_LIMIT + 50)
+    assert len(listed_at_cap) == 5
+
+
+@pytest.mark.asyncio
+async def test_list_all_tenants_returns_runs_across_tenants() -> None:
+    store = InMemoryRunStore()
+    tenant_a, tenant_b = uuid4(), uuid4()
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant_a))
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant_a))
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant_b))
+
+    listed = await store.list_all_tenants()
+    tenants = {r.tenant_id for r in listed}
+    assert tenants == {tenant_a, tenant_b}
+    assert len(listed) == 3
+
+
+@pytest.mark.asyncio
+async def test_list_all_tenants_status_filter_and_ordering() -> None:
+    store = InMemoryRunStore()
+    tenant_a, tenant_b = uuid4(), uuid4()
+    paused_a = uuid4()
+    paused_b = uuid4()
+    await store.create(
+        _info(
+            run_id=paused_a,
+            tenant_id=tenant_a,
+            status=RunStatus.PAUSED,
+            created_at=_BASE,
+        )
+    )
+    await store.create(
+        _info(
+            run_id=paused_b,
+            tenant_id=tenant_b,
+            status=RunStatus.PAUSED,
+            created_at=_BASE + timedelta(minutes=1),
+        )
+    )
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant_a, status=RunStatus.SUCCESS))
+
+    paused = await store.list_all_tenants(status=RunStatus.PAUSED)
+    assert [r.run_id for r in paused] == [paused_b, paused_a]  # newest first

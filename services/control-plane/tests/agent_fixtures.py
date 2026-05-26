@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.runtime import AgentRuntime
-from helix_agent.runtime.runs import RunManager
+from helix_agent.runtime.runs import RunManager, RunStore
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge
 from orchestrator import (
     BuiltAgent,
@@ -32,8 +32,14 @@ async def _fake_llm(*, messages: Sequence[BaseMessage], tools: Sequence[ToolSpec
     return AIMessage(content="stub agent reply", id="ai-stub")
 
 
-def stub_agent_runtime() -> AgentRuntime:
-    """Build an :class:`AgentRuntime` whose builder returns a fake-LLM agent."""
+def stub_agent_runtime(*, run_store: RunStore | None = None) -> AgentRuntime:
+    """Build an :class:`AgentRuntime` whose builder returns a fake-LLM agent.
+
+    ``run_store`` mirrors the production wiring (Mini-ADR J-41) so tests
+    that inspect ``/v1/runs`` see the runs the fake LLM actually
+    triggered. Pass the same store ``create_app`` uses (`app.state.
+    run_store`) for end-to-end coherence.
+    """
 
     async def _build(spec: object) -> BuiltAgent:
         del spec
@@ -43,7 +49,7 @@ def stub_agent_runtime() -> AgentRuntime:
         return BuiltAgent(graph=graph, system_prompt="stub system prompt", max_steps=5)
 
     return AgentRuntime(
-        run_manager=RunManager(),
+        run_manager=RunManager(store=run_store),
         stream_bridge=InMemoryStreamBridge(),
         agent_builder=_build,
     )

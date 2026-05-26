@@ -23,6 +23,7 @@ from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.protocol import AuditQuery
+from helix_agent.runtime.runs import InMemoryRunStore
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -73,11 +74,16 @@ async def runs_client(audit_store: InMemoryAuditLogStore) -> AsyncIterator[Async
         oidc_issuer=TEST_ISSUER,
         oidc_audience=[TEST_AUDIENCE],
     )
+    # Stream H.3 PR 1 — share one RunStore between the runtime's manager
+    # and ``app.state.run_store`` so ``GET /v1/runs`` sees rows created
+    # by the SSE worker (test fixture parity with production wiring).
+    run_store = InMemoryRunStore()
     app = create_app(
         settings=settings,
         audit_logger=build_default_audit_logger(audit_store),
         jwt_verifier=build_test_jwt_verifier(),
-        agent_runtime=stub_agent_runtime(),
+        agent_runtime=stub_agent_runtime(run_store=run_store),
+        run_repo=run_store,
     )
     transport = ASGITransport(app=app)
     headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=_DEFAULT_TENANT)}"}
@@ -542,3 +548,88 @@ async def test_resume_cross_tenant_returns_404(runs_client: AsyncClient) -> None
         headers=tenant_b_headers,
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Stream H.3 PR 1 — GET /v1/runs (cross-thread index)
+#
+# The cross-tenant + system_admin matrix lives in
+# ``test_tenant_scope_endpoints.py`` (one row per endpoint covers home /
+# "*" forbidden / system_admin "*"). Tests below cover the bits unique to
+# this endpoint: status filter, agent_name JOIN, limit cap, audit emit.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_completed_run(runs_client: AsyncClient) -> tuple[str, str]:
+    """Trigger one happy-path SSE run and return ``(thread_id, run_id)``.
+
+    Drains the stream so the run hits a terminal status before listing.
+    """
+    thread_id = await _create_session(runs_client)
+    async with runs_client.stream(
+        "POST",
+        f"/v1/sessions/{thread_id}/runs",
+        json={"input": "hello"},
+    ) as response:
+        assert response.status_code == 200
+        body = await response.aread()
+    events = _parse_sse(body.decode())
+    metadata = next((d for evt, d in events if evt == "metadata"), None)
+    assert isinstance(metadata, dict)
+    run_id = str(metadata["run_id"])
+    return thread_id, run_id
+
+
+@pytest.mark.asyncio
+async def test_list_runs_includes_agent_name_via_thread_join(
+    runs_client: AsyncClient,
+) -> None:
+    """`agent_name` / `agent_version` come from a per-thread JOIN
+    (§ 6.5.5 (b))."""
+    await _seed_completed_run(runs_client)
+    resp = await runs_client.get("/v1/runs")
+    assert resp.status_code == 200
+    body = resp.json()
+    items = body["data"]["items"]
+    assert len(items) >= 1
+    assert items[0]["agent_name"] == "code-reviewer"
+    assert items[0]["agent_version"] == "1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_list_runs_status_filter(runs_client: AsyncClient) -> None:
+    """``?status=success`` returns only success rows."""
+    await _seed_completed_run(runs_client)
+    resp = await runs_client.get("/v1/runs", params={"status": "success"})
+    assert resp.status_code == 200
+    items = resp.json()["data"]["items"]
+    assert items
+    assert all(item["status"] == "success" for item in items)
+
+
+@pytest.mark.asyncio
+async def test_list_runs_limit_cap_sets_header(runs_client: AsyncClient) -> None:
+    """``limit > MAX_LIST_LIMIT`` is silently clamped + ``X-Limit-Capped: true``."""
+    await _seed_completed_run(runs_client)
+    resp = await runs_client.get("/v1/runs", params={"limit": 9999})
+    assert resp.status_code == 200
+    assert resp.headers.get("x-limit-capped") == "true"
+
+
+@pytest.mark.asyncio
+async def test_list_runs_emits_audit(
+    runs_client: AsyncClient, audit_store: InMemoryAuditLogStore
+) -> None:
+    """Successful list emits one ``run:list_read`` audit row."""
+    await _seed_completed_run(runs_client)
+    resp = await runs_client.get("/v1/runs")
+    assert resp.status_code == 200
+
+    page = await audit_store.query(AuditQuery(tenant_id=_DEFAULT_TENANT, action="run:list_read"))
+    assert len(page.entries) >= 1
+    row = page.entries[-1]
+    assert row.result == "success"
+    assert row.resource_type == "run"
+    details = row.details or {}
+    assert details.get("cross_tenant") is False
+    assert details.get("count") >= 1

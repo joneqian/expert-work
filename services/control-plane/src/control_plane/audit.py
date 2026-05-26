@@ -127,6 +127,7 @@ ResourceType = Literal[
     "eval_dataset",  # Stream J.12 — Mini-ADR J-43
     "curation_candidate",  # Stream J.12 — Mini-ADR J-43
     "system",  # Stream N — Mini-ADR N-5
+    "run",  # Stream H.3 PR 1 — Mini-ADR H-6 (RUN_LIST_READ)
 ]
 
 

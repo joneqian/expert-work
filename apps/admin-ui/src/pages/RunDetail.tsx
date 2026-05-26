@@ -32,12 +32,17 @@ import {
 const { Text } = Typography;
 
 const STATUS_COLOR: Record<RunStatus, string> = {
+  pending: "default",
   queued: "default",
   running: "processing",
   paused: "warning",
   awaiting_approval: "warning",
+  success: "success",
   completed: "success",
+  error: "error",
   failed: "error",
+  timeout: "error",
+  interrupted: "default",
   cancelled: "default",
   unknown: "default",
 };

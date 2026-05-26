@@ -73,6 +73,52 @@ class RunStore(abc.ABC):
     async def list_by_thread(self, *, thread_id: UUID, tenant_id: UUID) -> list[RunInfo]:
         """Return all runs for ``thread_id`` under ``tenant_id``, oldest first."""
 
+    @abc.abstractmethod
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: RunStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunInfo]:
+        """Return runs for ``tenant_id``, newest first; paginated.
+
+        Stream H.3 PR 1 — feeds the cross-thread ``GET /v1/runs`` index.
+        ``limit`` is clamped to ``MAX_LIST_LIMIT`` (Mini-ADR H-7 D).
+        """
+
+    @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunInfo]:
+        """Cross-tenant variant for ``system_admin`` aggregate views.
+
+        Stream N: callers MUST wrap this in ``bypass_rls_session()`` so
+        the SQL backend bypasses tenant RLS. ``limit`` is clamped to
+        ``MAX_LIST_LIMIT`` (Mini-ADR H-7 D).
+        """
+
+
+#: Stream H.3 PR 1 — Mini-ADR H-7 (D) hard cap so a single page can never
+#: return more than this many rows. Callers passing a larger ``limit``
+#: are silently clamped; ``/v1/runs`` sets ``X-Limit-Capped: true`` in
+#: that case (same envelope-header convention as agents / triggers
+#: list endpoints).
+MAX_LIST_LIMIT = 500
+
+
+def _clamp_limit(limit: int) -> int:
+    """Apply the :data:`MAX_LIST_LIMIT` ceiling — public so the API
+    layer can set the response header when it actually clamped."""
+    if limit < 1:
+        return 1
+    return min(limit, MAX_LIST_LIMIT)
+
 
 class InMemoryRunStore(RunStore):
     """In-memory ``RunStore`` for unit tests."""
@@ -121,6 +167,35 @@ class InMemoryRunStore(RunStore):
         ]
         rows.sort(key=lambda r: r.created_at)
         return rows
+
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: RunStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunInfo]:
+        rows = [r for r in self._rows.values() if r.tenant_id == tenant_id]
+        if status is not None:
+            rows = [r for r in rows if r.status is status]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        clamped = _clamp_limit(limit)
+        return rows[offset : offset + clamped]
+
+    async def list_all_tenants(
+        self,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunInfo]:
+        rows = list(self._rows.values())
+        if status is not None:
+            rows = [r for r in rows if r.status is status]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        clamped = _clamp_limit(limit)
+        return rows[offset : offset + clamped]
 
 
 def _row_to_dto(row: AgentRunRow) -> RunInfo:
@@ -216,4 +291,47 @@ class SqlRunStore(RunStore):
                 .scalars()
                 .all()
             )
+        return [_row_to_dto(r) for r in rows]
+
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: RunStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunInfo]:
+        clamped = _clamp_limit(limit)
+        stmt = (
+            select(AgentRunRow)
+            .where(AgentRunRow.tenant_id == tenant_id)
+            .order_by(AgentRunRow.created_at.desc())
+            .limit(clamped)
+            .offset(max(0, offset))
+        )
+        if status is not None:
+            stmt = stmt.where(AgentRunRow.status == status.value)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
+    async def list_all_tenants(
+        self,
+        *,
+        status: RunStatus | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[RunInfo]:
+        # Stream N — no tenant filter; caller MUST wrap in bypass_rls_session().
+        clamped = _clamp_limit(limit)
+        stmt = (
+            select(AgentRunRow)
+            .order_by(AgentRunRow.created_at.desc())
+            .limit(clamped)
+            .offset(max(0, offset))
+        )
+        if status is not None:
+            stmt = stmt.where(AgentRunRow.status == status.value)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]

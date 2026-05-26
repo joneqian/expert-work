@@ -173,3 +173,74 @@ async def test_list_by_thread_filters_and_sorts(run_store: SqlRunStore) -> None:
 
     listed = await run_store.list_by_thread(thread_id=thread_id, tenant_id=tenant_a)
     assert [r.run_id for r in listed] == [older, newer]
+
+
+# ---------------------------------------------------------------------------
+# Stream H.3 PR 1 — list_for_tenant / list_all_tenants
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_orders_desc_and_filters_by_tenant(
+    run_store: SqlRunStore,
+) -> None:
+    tenant_a, tenant_b = uuid4(), uuid4()
+    oldest, newest = uuid4(), uuid4()
+    await run_store.create(_info(run_id=oldest, tenant_id=tenant_a, created_at=_BASE))
+    await run_store.create(
+        _info(run_id=newest, tenant_id=tenant_a, created_at=_BASE + timedelta(minutes=1))
+    )
+    # tenant B row must not leak.
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_b))
+
+    listed = await run_store.list_for_tenant(tenant_id=tenant_a)
+    assert [r.run_id for r in listed] == [newest, oldest]
+    assert all(r.tenant_id == tenant_a for r in listed)
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_status_filter(run_store: SqlRunStore) -> None:
+    tenant_id = uuid4()
+    paused_id = uuid4()
+    await run_store.create(_info(run_id=paused_id, tenant_id=tenant_id, status=RunStatus.PAUSED))
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_id, status=RunStatus.SUCCESS))
+
+    paused = await run_store.list_for_tenant(tenant_id=tenant_id, status=RunStatus.PAUSED)
+    assert [r.run_id for r in paused] == [paused_id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_offset_limit(run_store: SqlRunStore) -> None:
+    tenant_id = uuid4()
+    ids = []
+    for i in range(5):
+        rid = uuid4()
+        ids.append(rid)
+        await run_store.create(
+            _info(run_id=rid, tenant_id=tenant_id, created_at=_BASE + timedelta(minutes=i))
+        )
+    expected_desc = list(reversed(ids))
+
+    page1 = await run_store.list_for_tenant(tenant_id=tenant_id, limit=2, offset=0)
+    page2 = await run_store.list_for_tenant(tenant_id=tenant_id, limit=2, offset=2)
+    page3 = await run_store.list_for_tenant(tenant_id=tenant_id, limit=2, offset=4)
+    assert [r.run_id for r in page1] == expected_desc[:2]
+    assert [r.run_id for r in page2] == expected_desc[2:4]
+    assert [r.run_id for r in page3] == expected_desc[4:5]
+
+
+@pytest.mark.asyncio
+async def test_list_all_tenants_returns_runs_across_tenants(
+    run_store: SqlRunStore,
+) -> None:
+    """The test container's postgres user has BYPASSRLS, so prior tests
+    in the same session may have left rows. Assert ``tenant_a`` and
+    ``tenant_b`` are *both visible* as a subset rather than exact match."""
+    tenant_a, tenant_b = uuid4(), uuid4()
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_a))
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_b))
+
+    listed = await run_store.list_all_tenants(limit=500)
+    tenants = {r.tenant_id for r in listed}
+    assert tenant_a in tenants
+    assert tenant_b in tenants

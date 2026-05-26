@@ -178,14 +178,38 @@ async def app_state() -> AsyncIterator[tuple[AsyncClient, UUID]]:
 
     # ── N.4b: 6 more stores ────────────────────────────────────────────────
     threads = app.state.thread_meta_repo
+    thread_by_tenant: dict[UUID, UUID] = {}
     for tenant in (_TENANT_A, _TENANT_B):
+        thread_id = uuid4()
+        thread_by_tenant[tenant] = thread_id
         await threads.create(
-            thread_id=uuid4(),
+            thread_id=thread_id,
             tenant_id=tenant,
             created_by="seed",
             user_id=None,  # unowned — admin sees these
             agent_name=f"agent-in-{tenant.hex[:6]}",
             agent_version="1.0.0",
+        )
+
+    # ── Stream H.3 PR 1: seed one run row per tenant so /v1/runs has rows ──
+    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+
+    run_store = app.state.run_store
+    for tenant in (_TENANT_A, _TENANT_B):
+        await run_store.create(
+            RunInfo(
+                run_id=uuid4(),
+                tenant_id=tenant,
+                thread_id=thread_by_tenant[tenant],
+                user_id=None,
+                status=RunStatus.SUCCESS,
+                on_disconnect=DisconnectMode.CANCEL,
+                is_resume=False,
+                error=None,
+                created_at=now,
+                updated_at=now,
+                finished_at=now,
+            )
         )
 
     accounts = app.state.service_account_repo
@@ -312,6 +336,7 @@ _ENDPOINTS: list[tuple[str, str, int, int]] = [
     # role_bindings star sees 2 tenant rows + 1 platform-scope (system admin) = 3
     ("role_bindings", "/v1/role_bindings", 1, 3),
     ("sessions", "/v1/sessions", 1, 2),
+    ("runs", "/v1/runs", 1, 2),  # Stream H.3 PR 1 — Mini-ADR H-6
     ("memory", "/v1/memory", 0, 2),
     ("artifacts", "/v1/artifacts", 0, 2),
     ("api_keys", "/v1/api_keys", 1, 2),

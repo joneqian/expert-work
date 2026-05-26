@@ -44,6 +44,8 @@ class AuditAction(StrEnum):
     # run lifecycle — emitted by the orchestrator worker at run end
     RUN_COMPLETED = "run:completed"
     RUN_FAILED = "run:failed"
+    # H.3 PR 1 — emitted by ``GET /v1/runs`` cross-thread index (Stream H Mini-ADR H-6)
+    RUN_LIST_READ = "run:list_read"
     # secret
     SECRET_READ = "secret:read"
     SECRET_WRITE = "secret:write"
@@ -164,6 +166,7 @@ class AuditEntry(BaseModel):
         "eval_dataset",  # Stream J.12 — Mini-ADR J-43
         "curation_candidate",  # Stream J.12 — Mini-ADR J-43
         "system",  # Stream N — Mini-ADR N-5 (cross-tenant query / tenant switch)
+        "run",  # Stream H.3 PR 1 — Mini-ADR H-6 (RUN_LIST_READ)
     ]
     resource_id: str | None = None
     result: AuditResult
