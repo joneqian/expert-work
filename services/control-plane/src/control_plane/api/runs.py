@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
@@ -59,11 +60,13 @@ from helix_agent.persistence.thread_meta import ThreadMetaStore
 from helix_agent.protocol import ApprovalStatus, AuditAction, AuditResult, ThreadStatus
 from helix_agent.protocol.multimodal import parse_image_ref
 from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunStore
-from helix_agent.runtime.runs.schemas import RunStatus
+from helix_agent.runtime.runs import RunEventStore, RunStore
+from helix_agent.runtime.runs.schemas import TERMINAL_RUN_STATUSES, RunStatus
 from helix_agent.runtime.runs.store import MAX_LIST_LIMIT, _clamp_limit
+from helix_agent.runtime.stream_bridge import END_SENTINEL, HEARTBEAT_SENTINEL
 from orchestrator import AgentFactoryError, run_agent, sse_consumer
 from orchestrator.multimodal import image_ref_block
+from orchestrator.sse import format_sse
 
 logger = logging.getLogger("helix.control_plane.runs")
 
@@ -203,6 +206,15 @@ def _get_approval_store(request: Request) -> ApprovalStore:
 
 def _get_run_store(request: Request) -> RunStore:
     return request.app.state.run_store  # type: ignore[no-any-return]
+
+
+def _get_run_event_store(request: Request) -> RunEventStore | None:
+    """Stream H.3 PR 4 — the durable SSE event store wired by ``app.py``.
+
+    ``None`` when the deployment opted out (no SSE replay; the
+    ``/events`` endpoint then live-attaches only)."""
+    store: RunEventStore | None = getattr(request.app.state, "run_event_store", None)
+    return store
 
 
 def build_runs_router() -> APIRouter:
@@ -468,6 +480,98 @@ def build_runs_router() -> APIRouter:
                 "pending_approval": pending,
                 "trace_id": trace_id,
             }
+        )
+
+    @router.get("/{thread_id}/runs/{run_id}/events", response_model=None)
+    async def stream_run_events(
+        thread_id: UUID,
+        run_id: UUID,
+        request: Request,
+        threads: Annotated[object, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        runs: Annotated[RunStore, Depends(_get_run_store)],
+        event_store: Annotated[RunEventStore | None, Depends(_get_run_event_store)],
+        since_seq: Annotated[int | None, Query(ge=0)] = None,
+    ) -> StreamingResponse:
+        """Stream H.3 PR 4 (Mini-ADR H-7) — SSE event stream for one run.
+
+        Two backends, one wire format:
+
+        * Active run (``RunStatus.PENDING`` / ``RUNNING``) → live attach
+          via :meth:`StreamBridge.subscribe`. The bridge buffer holds up
+          to 256 events (drop-oldest) so a late opener still catches the
+          last 256 frames; older frames depend on the durable store.
+        * Terminal run (``SUCCESS`` / ``ERROR`` / ``TIMEOUT`` /
+          ``INTERRUPTED`` / ``PAUSED``) → replay via
+          :meth:`RunEventStore.list` with ``since_seq`` (Last-Event-ID).
+
+        Either way the response is ``text/event-stream`` with SSE id
+        ``"{created_at_ms}-{seq}"`` so the client's parser doesn't have
+        to know which mode it got (decision A).
+
+        404 hides cross-tenant / cross-user existence, identical to
+        ``get_run``.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        persisted = await runs.get(run_id=run_id, tenant_id=tenant_id)
+        if persisted is None:
+            raise HTTPException(status_code=404, detail="run not found")
+
+        # Active vs terminal — picks live attach vs replay.
+        is_terminal = persisted.status in TERMINAL_RUN_STATUSES
+        runtime: AgentRuntime = request.app.state.agent_runtime
+
+        async def _stream_replay() -> AsyncIterator[bytes]:
+            """Pull from RunEventStore (one shot, ordered by seq)."""
+            if event_store is None:
+                # No store wired — yield an end frame so the client closes
+                # cleanly instead of waiting forever.
+                yield format_sse("end", None)
+                return
+            rows = await event_store.list(run_id=run_id, since_seq=since_seq, limit=MAX_LIST_LIMIT)
+            for row in rows:
+                yield format_sse(
+                    row.event_name,
+                    row.data,
+                    event_id=f"{row.created_at_ms}-{row.seq}",
+                )
+            yield format_sse("end", None)
+
+        async def _stream_live() -> AsyncIterator[bytes]:
+            """Subscribe to the in-memory bridge (live attach).
+
+            Disconnect is handled via the iterator's GeneratorExit when
+            the StreamingResponse is cancelled; the bridge subscription
+            naturally tears down.
+            """
+            async for entry in runtime.stream_bridge.subscribe(run_id, heartbeat_interval=15.0):
+                if entry is HEARTBEAT_SENTINEL:
+                    yield b": heartbeat\n\n"
+                    continue
+                if entry is END_SENTINEL:
+                    yield format_sse("end", None)
+                    return
+                yield format_sse(entry.event, entry.data, event_id=entry.id or None)
+
+        producer = _stream_replay() if is_terminal else _stream_live()
+        return StreamingResponse(
+            producer,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Helix-Run-Id": str(run_id),
+                "X-Helix-Stream-Mode": "replay" if is_terminal else "live",
+            },
         )
 
     @router.post("/{thread_id}/runs/{run_id}/resume", response_model=None)

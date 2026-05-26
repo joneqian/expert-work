@@ -28,6 +28,7 @@ import {
   type RunDetail as RunDetailModel,
   type RunStatus,
 } from "../api/runs";
+import { EventStreamPanel } from "./run_detail/EventStreamPanel";
 
 const { Text } = Typography;
 
@@ -249,6 +250,8 @@ export function RunDetail() {
         style={{ marginTop: 16 }}
         message={t("run_detail.trace_in_observability")}
       />
+
+      <EventStreamPanel threadId={threadId} runId={runId} />
     </div>
   );
 }

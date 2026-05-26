@@ -1,0 +1,127 @@
+/**
+ * EventStreamPanel tests — Stream H.3 PR 4.
+ *
+ * The streamRunEvents SDK is mocked (it would otherwise hit fetch); we
+ * drive it as an async generator from the test body.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import "../../i18n";
+
+import * as runsSdk from "../../api/runs";
+import { EventStreamPanel } from "../run_detail/EventStreamPanel";
+import type { SseEvent } from "../../api/sessions";
+
+const streamMock = vi.spyOn(runsSdk, "streamRunEvents");
+
+beforeEach(() => {
+  streamMock.mockReset();
+  if (typeof window !== "undefined") window.localStorage.clear();
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+function makeStream(events: SseEvent[]): AsyncGenerator<SseEvent, void, void> {
+  return (async function* () {
+    for (const e of events) yield e;
+  })();
+}
+
+describe("EventStreamPanel", () => {
+  it("starts collapsed by default — no stream connection", () => {
+    render(<EventStreamPanel threadId="t-1" runId="r-1" />);
+    expect(screen.getByTestId("event-stream-toggle")).toHaveAttribute("aria-expanded", "false");
+    expect(streamMock).not.toHaveBeenCalled();
+  });
+
+  it("expanding opens the stream and renders frames", async () => {
+    const user = userEvent.setup();
+    streamMock.mockReturnValue(
+      makeStream([
+        {
+          id: "1",
+          event: "metadata",
+          data: { run_id: "r-1" },
+          rawData: "",
+          receivedAt: "2026-05-26T08:00:00Z",
+        },
+        {
+          id: "2",
+          event: "updates",
+          data: { agent: "stub" },
+          rawData: "",
+          receivedAt: "2026-05-26T08:00:01Z",
+        },
+        {
+          id: "3",
+          event: "end",
+          data: null,
+          rawData: "null",
+          receivedAt: "2026-05-26T08:00:02Z",
+        },
+      ]),
+    );
+
+    render(<EventStreamPanel threadId="t-1" runId="r-1" />);
+    await user.click(screen.getByTestId("event-stream-toggle"));
+
+    await screen.findByTestId("event-stream-event-metadata");
+    expect(screen.getByTestId("event-stream-event-updates")).toBeInTheDocument();
+    expect(screen.getByTestId("event-stream-event-end")).toBeInTheDocument();
+  });
+
+  it("persists the expanded preference via localStorage", async () => {
+    const user = userEvent.setup();
+    streamMock.mockReturnValue(makeStream([]));
+    render(<EventStreamPanel threadId="t-1" runId="r-1" />);
+    await user.click(screen.getByTestId("event-stream-toggle"));
+    await waitFor(() => {
+      expect(window.localStorage.getItem("helix.runDetail.eventStream.expanded")).toBe("1");
+    });
+  });
+
+  it("surfaces a stream-failure alert when streamRunEvents throws", async () => {
+    const user = userEvent.setup();
+    streamMock.mockImplementation(() => {
+      return (async function* () {
+        throw new Error("boom");
+      })();
+    });
+    render(<EventStreamPanel threadId="t-1" runId="r-1" />);
+    await user.click(screen.getByTestId("event-stream-toggle"));
+    const alert = await screen.findByTestId("event-stream-error");
+    expect(alert).toHaveTextContent("boom");
+  });
+
+  it("collapsing aborts the in-flight stream", async () => {
+    const user = userEvent.setup();
+    // A stream that never ends — caller must abort.
+    streamMock.mockImplementation((_t: string, _r: string, opts: { signal?: AbortSignal } = {}) => {
+      return (async function* () {
+        // Park until aborted; the test then collapses the panel.
+        await new Promise<void>((resolve, reject) => {
+          opts.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+          setTimeout(resolve, 5000);
+        });
+      })();
+    });
+
+    render(<EventStreamPanel threadId="t-1" runId="r-1" />);
+    await user.click(screen.getByTestId("event-stream-toggle"));
+    await waitFor(() => expect(streamMock).toHaveBeenCalled());
+    // Collapse — the generator should be aborted and no error surfaces.
+    await user.click(screen.getByTestId("event-stream-toggle"));
+    await waitFor(() => {
+      expect(screen.getByTestId("event-stream-toggle")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(screen.queryByTestId("event-stream-error")).not.toBeInTheDocument();
+  });
+});

@@ -124,3 +124,44 @@ export async function listRuns(params: ListRunsParams = {}): Promise<RunList> {
   const query = withTenantScope({ status, limit, offset }, tenantScope);
   return getJson<RunList>("/v1/runs", { params: query });
 }
+
+/** GET /v1/sessions/{thread}/runs/{run}/events — SSE stream.
+ *
+ *  Active runs (running/paused/pending) get a live attach via the
+ *  StreamBridge; terminal runs get a one-shot replay from the
+ *  ``run_event`` table. The wire format is identical (Mini-ADR H-7
+ *  decision A — SSE id ``"{ms}-{seq}"``); this SDK doesn't have to
+ *  know which mode it got.
+ *
+ *  ``sinceSeq`` is Last-Event-ID semantics: ``undefined`` returns the
+ *  stream from the beginning; ``N`` returns events with ``seq > N``. */
+export async function* streamRunEvents(
+  threadId: string,
+  runId: string,
+  options: {
+    sinceSeq?: number;
+    signal?: AbortSignal;
+    baseUrl?: string;
+  } = {},
+): AsyncGenerator<import("./sessions").SseEvent, void, void> {
+  const { sinceSeq, signal, baseUrl = "" } = options;
+  const params = new URLSearchParams();
+  if (sinceSeq !== undefined) params.set("since_seq", String(sinceSeq));
+  const qs = params.toString();
+  const url =
+    `${baseUrl}/v1/sessions/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/events` +
+    (qs ? `?${qs}` : "");
+  const { getStoredToken } = await import("./client");
+  const token = getStoredToken();
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const response = await fetch(url, { method: "GET", headers, signal });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} on /events`);
+  }
+  if (!response.body) {
+    throw new Error("response has no body — SSE not available");
+  }
+  const { parseSseStream } = await import("./sessions");
+  yield* parseSseStream(response.body, signal);
+}

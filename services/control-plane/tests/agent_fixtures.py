@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.runtime import AgentRuntime
-from helix_agent.runtime.runs import RunManager, RunStore
+from helix_agent.runtime.runs import RunEventStore, RunManager, RunStore
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge
 from orchestrator import (
     BuiltAgent,
@@ -32,13 +32,22 @@ async def _fake_llm(*, messages: Sequence[BaseMessage], tools: Sequence[ToolSpec
     return AIMessage(content="stub agent reply", id="ai-stub")
 
 
-def stub_agent_runtime(*, run_store: RunStore | None = None) -> AgentRuntime:
+def stub_agent_runtime(
+    *,
+    run_store: RunStore | None = None,
+    run_event_store: RunEventStore | None = None,
+) -> AgentRuntime:
     """Build an :class:`AgentRuntime` whose builder returns a fake-LLM agent.
 
     ``run_store`` mirrors the production wiring (Mini-ADR J-41) so tests
     that inspect ``/v1/runs`` see the runs the fake LLM actually
     triggered. Pass the same store ``create_app`` uses (`app.state.
     run_store`) for end-to-end coherence.
+
+    ``run_event_store`` (Stream H.3 PR 3 — Mini-ADR H-7) durable-mirrors
+    every SSE frame so the ``GET .../events`` endpoint can replay
+    terminal runs; pass the same store ``create_app`` uses for tests
+    that exercise the replay path.
     """
 
     async def _build(spec: object) -> BuiltAgent:
@@ -52,4 +61,5 @@ def stub_agent_runtime(*, run_store: RunStore | None = None) -> AgentRuntime:
         run_manager=RunManager(store=run_store),
         stream_bridge=InMemoryStreamBridge(),
         agent_builder=_build,
+        run_event_store=run_event_store,
     )

@@ -23,7 +23,7 @@ from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.protocol import AuditQuery
-from helix_agent.runtime.runs import InMemoryRunStore
+from helix_agent.runtime.runs import InMemoryRunEventStore, InMemoryRunStore
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -78,12 +78,17 @@ async def runs_client(audit_store: InMemoryAuditLogStore) -> AsyncIterator[Async
     # and ``app.state.run_store`` so ``GET /v1/runs`` sees rows created
     # by the SSE worker (test fixture parity with production wiring).
     run_store = InMemoryRunStore()
+    # Stream H.3 PR 3 — same parity for the durable SSE event store so
+    # the events endpoint's replay path returns rows the worker just
+    # wrote.
+    run_event_store = InMemoryRunEventStore()
     app = create_app(
         settings=settings,
         audit_logger=build_default_audit_logger(audit_store),
         jwt_verifier=build_test_jwt_verifier(),
-        agent_runtime=stub_agent_runtime(run_store=run_store),
+        agent_runtime=stub_agent_runtime(run_store=run_store, run_event_store=run_event_store),
         run_repo=run_store,
+        run_event_repo=run_event_store,
     )
     transport = ASGITransport(app=app)
     headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=_DEFAULT_TENANT)}"}
@@ -688,3 +693,100 @@ async def test_get_run_includes_trace_id_field(runs_client: AsyncClient) -> None
     assert resp.status_code == 200
     body = resp.json()
     assert body["trace_id"] == "deadbeef" * 4
+
+
+# ---------------------------------------------------------------------------
+# Stream H.3 PR 4 — GET /v1/sessions/{thread}/runs/{run}/events (live + replay)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_events_endpoint_replays_terminal_run_from_store(
+    runs_client: AsyncClient,
+) -> None:
+    """A terminal run's events are served from the persisted store —
+    the bridge cleanup may have already dropped them, but the store has
+    everything since the dual-write."""
+    thread_id, run_id = await _seed_completed_run(runs_client)
+
+    async with runs_client.stream(
+        "GET", f"/v1/sessions/{thread_id}/runs/{run_id}/events"
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["x-helix-stream-mode"] == "replay"
+        assert response.headers["x-helix-run-id"] == run_id
+        body = await response.aread()
+
+    events = _parse_sse(body.decode())
+    types = [e[0] for e in events]
+    # The fake LLM run emits metadata + at least one updates + (terminal
+    # is reached so the producer doesn't emit error). The replay then
+    # caps with our own ``end`` frame.
+    assert types[0] == "metadata"
+    assert "updates" in types
+    assert types[-1] == "end"
+
+
+@pytest.mark.asyncio
+async def test_events_endpoint_since_seq_skips_already_received(
+    runs_client: AsyncClient,
+) -> None:
+    """``?since_seq=N`` is Last-Event-ID semantics — events with seq > N."""
+    thread_id, run_id = await _seed_completed_run(runs_client)
+
+    # First fetch — get everything to discover the actual seq numbers.
+    async with runs_client.stream(
+        "GET", f"/v1/sessions/{thread_id}/runs/{run_id}/events"
+    ) as response:
+        body = await response.aread()
+    full = _parse_sse(body.decode())
+
+    # Second fetch — skip the first frame (seq=0 → since_seq=0).
+    async with runs_client.stream(
+        "GET", f"/v1/sessions/{thread_id}/runs/{run_id}/events?since_seq=0"
+    ) as response:
+        body2 = await response.aread()
+    skipped = _parse_sse(body2.decode())
+
+    # The replay (without including the end frame) should be one shorter.
+    full_events = [e for e in full if e[0] != "end"]
+    skipped_events = [e for e in skipped if e[0] != "end"]
+    assert len(skipped_events) == len(full_events) - 1
+    # The skipped one is exactly the first (metadata).
+    assert full_events[0][0] == "metadata"
+    assert skipped_events[0][0] != "metadata" or len(skipped_events) == 0
+
+
+@pytest.mark.asyncio
+async def test_events_endpoint_cross_tenant_returns_404(
+    runs_client: AsyncClient,
+) -> None:
+    from uuid import uuid4
+
+    thread_id, run_id = await _seed_completed_run(runs_client)
+    tenant_b_headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=uuid4())}"}
+    resp = await runs_client.get(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/events", headers=tenant_b_headers
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_events_endpoint_unknown_run_returns_404(
+    runs_client: AsyncClient,
+) -> None:
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs/{uuid4()}/events")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_events_endpoint_unknown_session_returns_404(
+    runs_client: AsyncClient,
+) -> None:
+    from uuid import uuid4
+
+    resp = await runs_client.get(f"/v1/sessions/{uuid4()}/runs/{uuid4()}/events")
+    assert resp.status_code == 404

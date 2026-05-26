@@ -93,6 +93,13 @@ const zhCN: TranslationKeys = {
     stream_failed: "事件流失败",
     empty_log: "暂无事件 — 点击「运行」开始。",
   },
+  event_stream: {
+    title: "事件流",
+    connecting: "连接中…",
+    event_count: "共 {{n}} 条",
+    stream_failed: "事件流失败",
+    empty: "暂无事件。",
+  },
   run_detail: {
     failed_to_load: "Run 加载失败",
     thread_label: "Thread",

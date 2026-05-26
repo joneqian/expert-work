@@ -91,6 +91,13 @@ export interface TranslationKeys {
     stream_failed: string;
     empty_log: string;
   };
+  event_stream: {
+    title: string;
+    connecting: string;
+    event_count: string;
+    stream_failed: string;
+    empty: string;
+  };
   run_detail: {
     failed_to_load: string;
     thread_label: string;
@@ -302,6 +309,13 @@ const en: TranslationKeys = {
     event_count: "{{n}} events",
     stream_failed: "Stream failed",
     empty_log: "No events yet — click Run to start.",
+  },
+  event_stream: {
+    title: "Event stream",
+    connecting: "Connecting…",
+    event_count: "{{n}} events",
+    stream_failed: "Stream failed",
+    empty: "No events yet.",
   },
   run_detail: {
     failed_to_load: "Failed to load run",
