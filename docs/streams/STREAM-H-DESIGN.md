@@ -746,6 +746,43 @@ CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id) WHERE trace_id IS NO
 
 无新增 secret;无新增 CSRF surface(都是 GET);RLS 策略不变。
 
+### 6.5.18 H.3 收尾摘要(2026-05-26)
+
+**PR 全部合入 main**:
+
+| PR | 内容 | 合入 |
+|----|------|------|
+| H.3 PR 1 (#289) | `GET /v1/runs` 跨 thread 索引 + RunsList 页 + e2e | ✅ |
+| H.3 PR 2 (#290) | `agent_run.trace_id` 持久化(migration 0037)| ✅ |
+| H.3 PR 3 (#291) | `run_event` 持久层(migration 0038)+ producer 双写 | ✅ |
+| H.3 PR 4 (#292) | `GET .../events` endpoint (live + replay) + EventStreamPanel | ✅ |
+| H.3 PR 5 (#293) | Approval Monaco UX + `useStatusPolling` + 修了 `ResumeRunRequest` SDK 与后端契约 mismatch | ✅ |
+| H.3 PR 6 (#294) | TraceToolbar + ApprovalPendingBadge + `config/env.ts` | ✅ |
+
+**决议 A–F 实施核验**:
+- **A** SSE wire id `"{created_at_ms}-{seq}"` — `run_event.created_at_ms bigint` 列 + replay endpoint emit 同型(`api/runs.py:_stream_replay`)。客户端 `parseSseStream` 不区分 live / replay ✅
+- **B** `RunManager.create(trace_id=)` 显式参数 — `api/runs.py` trigger_run + resume_run 传 `current_trace_id_hex()`;scheduler 路径传 None ✅
+- **C** `run_event` FK `ON DELETE RESTRICT` — migration 0038 落地 ✅
+- **D** `MAX_LIST_LIMIT=500` 硬上限 + `X-Limit-Capped` header — `runs/store.py:_clamp_limit` ✅
+- **E** EventStreamPanel 默认折叠 + localStorage `helix.runDetail.eventStream.expanded` 持久化 ✅
+- **F** Storybook stories — RunsList / TraceToolbar / ApprovalPendingBadge 在 PR 链内已落;**EventStreamPanel + ApprovalCard 在收尾 PR 补齐**(原 PR 4 / PR 5 漏交);approval 完整 E2E 留 M0 dogfood ✅
+
+**零技术债 6 条核验**(per `feedback_zero_tech_debt`):
+1. **无 TODO/FIXME/XXX** — `git diff main~7..main` 涉及 51 文件,新增源码内无 TODO/FIXME/XXX 标记
+2. **测试覆盖** — backend 新增 `test_run_event_store.py` / `test_sql_run_store.py` / `test_sse_persistence.py` / 扩展 `test_runs_api.py`;frontend 93/93 vitest 全过(从 H.2 完工时的 ~70 增长)+ Playwright `runs.spec.ts` 接入 axe
+3. **文档同步** — 设计文档 v1.0→v1.7 共 8 版,实现 ↔ 设计映射齐;`ITERATION-PLAN.md` Stream H.3 行同步
+4. **可观测齐全** — 新 metrics: `helix_runs_list_total` / `helix_run_event_persist_total` / `helix_run_event_persist_errors_total`;audit:`RUN_LIST_READ`(per § 6.5.11)
+5. **CI 全绿** — #289–#294 每个 PR 11/11 检查通过(`gh pr checks` 验证)
+6. **bug 不遗留** — PR 5 顺手修了 `ResumeRunRequest` SDK 字段 mismatch(`{approved}` → `{decision}`),这是 H.1b PR 3 旧 bug
+
+**留给后续 stream 的待办**(债务不在 H.3,显式记账):
+- **mockup 09 RunsList**(债务来源:§ 6.5.14)→ H.4 收尾 PR 补
+- **`04-run-trace.html` ApprovalCard 编辑态截图**(债务来源:§ 6.5.14)→ H.4 收尾 PR 补
+- **Approval full E2E**(决议 F)→ M0 dogfood 期间补
+- **Trace 嵌入式时间线**(Mini-ADR H-8 deferred)→ H.4 范围
+
+**capability gap**:无。H.3 范围内的"完整能力"(`/v1/runs` 跨 thread + trace 持久化 + SSE replay + Approval edit)全部落地,无"弱能力包装成设计选择"的 [[feedback_no_design_choice_disguise]] 风险。
+
 ---
 
 ## 6. PR 链(预估)
@@ -758,12 +795,12 @@ CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id) WHERE trace_id IS NO
 | PR4 ✅ | H.1b — CommandPalette + TenantSwitcher + 主题切换 + Lucide 接入 + OIDC + 6 SDK + Storybook/E2E #277 #278 #279 #280 #281 | 1-2 天 |
 | PR5 ✅ | H.2 — Agent 详情 Manifest tab Monaco YAML(view/edit/save)+ Create Agent drawer + POST/PUT /v1/agents #284 #285 | 3-4 天 |
 | PR6 ✅ | H.2 — Agent 详情 Playground tab(fetch+ReadableStream SSE + 色彩分类事件日志 + Stop)#286;**(a) 推迟**:改 manifest 重跑(需后端 ad-hoc spec override)/ 工具调用语义化时间线 / 审批 mid-run UX(H.3) | 3-4 天 |
-| PR7a | H.3 PR 1 — Backend `GET /v1/runs` 跨 thread 索引 + SDK + RunsList 页(Mini-ADR H-6)| 2-3 天 |
-| PR7b | H.3 PR 2 — `agent_run.trace_id` 持久化(migration 0037 + DTO + RunStore.set_trace_id + 序列化 + frontend 类型)(Mini-ADR H-9.5)| 1.5 天 |
-| PR7c | H.3 PR 3 — `run_event` 持久层(migration 0038 + RunEventStore + run_agent 双写接入)(Mini-ADR H-7 backend)| 2 天 |
-| PR7d | H.3 PR 4 — `GET .../events` endpoint (live + replay) + RunDetail Event stream panel(Mini-ADR H-7 frontend) | 1.5-2 天 |
-| PR7e | H.3 PR 5 — Approval `override_args` Monaco UX + 状态轮询(Mini-ADR H-9)| 1.5 天 |
-| PR7f | H.3 PR 6 — Trace 链接外跳(Mini-ADR H-8)+ Approval pending badge + 体感打磨 | 1 天 |
+| PR7a ✅ | H.3 PR 1 — Backend `GET /v1/runs` 跨 thread 索引 + SDK + RunsList 页(Mini-ADR H-6)#289 | 2-3 天 |
+| PR7b ✅ | H.3 PR 2 — `agent_run.trace_id` 持久化(migration 0037 + DTO + RunStore.set_trace_id + 序列化 + frontend 类型)(Mini-ADR H-9.5)#290 | 1.5 天 |
+| PR7c ✅ | H.3 PR 3 — `run_event` 持久层(migration 0038 + RunEventStore + run_agent 双写接入)(Mini-ADR H-7 backend)#291 | 2 天 |
+| PR7d ✅ | H.3 PR 4 — `GET .../events` endpoint (live + replay) + RunDetail Event stream panel(Mini-ADR H-7 frontend)#292 | 1.5-2 天 |
+| PR7e ✅ | H.3 PR 5 — Approval `override_args` Monaco UX + 状态轮询(Mini-ADR H-9)#293 | 1.5 天 |
+| PR7f ✅ | H.3 PR 6 — Trace 链接外跳(Mini-ADR H-8)+ Approval pending badge + 体感打磨 #294 | 1 天 |
 | PR8 | H.4(Curation+Eval)— 候选评审 + eval dataset CRUD | 2 天 |
 | PR9 | H.4(Memory)— per-user memory 列表 + 编辑 + 删除 | 1.5 天 |
 | PR10 | H.4(Skills+Triggers)— 跨 agent skill / trigger 列表 + CRUD | 2 天 |
@@ -803,3 +840,4 @@ CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id) WHERE trace_id IS NO
 | 2026-05-26 | v1.4 | **用户决策"#2 SSE 实时回放 + #6 trace_id 持久化做完整,不推迟"**:Mini-ADR H-7 重写 — 新 `run_event` 表 + `RunEventStore` 三态 + producer 双写 + `GET .../events` 端点(live attach + replay 双路径);新 Mini-ADR H-9.5 — `agent_run.trace_id` 持久化(migration 0038)。PR 链拆 PR7a-c 为 PR7a-f(共 6 PR),总估时 9.5-11 天(原 4.5-5.5 天);§ 6.5.15 加 migration 0037 / 0038 详情;§ 6.5.8 加 PR 2/3/4 文件表;§ 6.5.11 加 3 个 Prometheus 信号;§ 6.5.12 加 `event_stream` 6 keys;§ 6.5.10 加 4 条新边界场景 |
 | 2026-05-26 | v1.5 | review 第二轮决议 A-F 落地:(A) SSE id wire format `"{created_at_ms}-{seq}"` 一致,`run_event` 加 `created_at_ms bigint` 列 — replay endpoint emit 与 live 同型,客户端 `parseSseStream` 不区分 / (B) `RunManager.create(trace_id=)` 显式参数 — handler 路径传 `current_trace_id_hex()`,scheduler 路径传 None / (C) `run_event` FK 改 `ON DELETE RESTRICT` — 锁定 M1 archive-then-delete 灵活性 / (D) `list_for_tenant` / `list_all_tenants` / `RunEventStore.list` 均强制 `max_limit=500` + `X-Limit-Capped` header / (E) EventStreamPanel 默认折叠,展开才连;localStorage 记 per-user 偏好 / (F) 5 个新组件全加 Storybook story(共 19 个 story);approval 完整 E2E 推 M0 dogfood |
 | 2026-05-26 | v1.6 | 实现期发现 PR 2 (trace_id) 必须先落、PR 3 (run_event) 后落,但原设计文档 migration 编号是反过来的 (PR 2=0038, PR 3=0037)。修正为 PR 2=0037, PR 3=0038 与 Alembic linear chain (down_revision 链)对齐。无功能变更。 |
+| 2026-05-26 | v1.7 | **H.3 收尾**:6 个 PR 全部合入 main(#289–#294);新增 § 6.5.18 H.3 收尾摘要 — 决议 A–F 全部兑现、设计文档 § 6.5.13 漏交的 2 个 story(EventStreamPanel + ApprovalCard)在收尾 PR 补齐;遗留待办全部归类到 M0 dogfood / H.4 收尾(approval 完整 E2E、RunsList mockup、ApprovalCard 编辑态 mockup) |
