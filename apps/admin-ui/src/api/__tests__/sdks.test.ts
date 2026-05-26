@@ -124,7 +124,6 @@ describe("resumeRun POSTs the approval body", () => {
 
 describe("list endpoints share the envelope path", () => {
   it.each([
-    ["skills", () => listSkills(), "/v1/skills"],
     ["triggers", () => listTriggers(), "/v1/triggers"],
     ["memory", () => listMemories(), "/v1/memory"],
     ["api-keys", () => listApiKeys(), "/v1/api_keys"],
@@ -140,16 +139,21 @@ describe("list endpoints share the envelope path", () => {
   });
 });
 
-describe("curation + eval-datasets — raw (un-enveloped) endpoints", () => {
-  // H.4 PR 1 latent-bug fix: the curation backend returns raw
-  // ``JSONResponse(content={...})`` payloads, *not* enveloped
-  // ``{success, data}``. The SDK now matches that contract by going
-  // through ``apiClient`` directly.
+describe("raw (un-enveloped) list endpoints", () => {
+  // H.4 latent-bug fixes (PR 1 + PR 5): curation + skills backends
+  // return raw ``JSONResponse(content={...})`` payloads, *not*
+  // enveloped ``{success, data}``. The SDK matches that contract by
+  // going through ``apiClient`` directly.
   it.each([
     ["candidates", () => listCandidates(), "/v1/curation/candidates"],
     ["eval-datasets", () => listEvalDatasets(), "/v1/eval-datasets"],
+    ["skills", () => listSkills(), "/v1/skills"],
   ])("%s hits %s", async (_name, call, expectedUrl) => {
-    const calls = captureAdapter({ items: [], total: 0, cross_tenant: false });
+    const calls = captureAdapter({
+      items: [],
+      next_cursor: null,
+      cross_tenant: false,
+    });
     await call();
     expect(calls[0].url).toBe(expectedUrl);
   });

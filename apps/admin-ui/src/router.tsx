@@ -7,6 +7,8 @@ import { RunDetail } from "./pages/RunDetail";
 import { RunsList } from "./pages/RunsList";
 import { SettingsApiKeys } from "./pages/SettingsApiKeys";
 import { SettingsAudit } from "./pages/SettingsAudit";
+import { SkillDetail } from "./pages/SkillDetail";
+import { SkillsList } from "./pages/SkillsList";
 import { ComingSoon } from "./pages/ComingSoon";
 
 export function AppRouter() {
@@ -20,7 +22,8 @@ export function AppRouter() {
       <Route path="/runs/:threadId/:runId" element={<RunDetail />} />
       <Route path="/curation" element={<Curation />} />
       <Route path="/memory" element={<MemoryAdmin />} />
-      <Route path="/skills" element={<ComingSoon title="Skills" />} />
+      <Route path="/skills" element={<SkillsList />} />
+      <Route path="/skills/:skillId" element={<SkillDetail />} />
       <Route path="/triggers" element={<ComingSoon title="Triggers" />} />
       <Route path="/settings/api-keys" element={<SettingsApiKeys />} />
       <Route path="/settings/audit" element={<SettingsAudit />} />

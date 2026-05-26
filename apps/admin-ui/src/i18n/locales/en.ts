@@ -205,6 +205,47 @@ export interface TranslationKeys {
     detail_payload: string;
     detail_payload_hint: string;
   };
+  skills: {
+    page_title: string;
+    subtitle: string;
+    cross_tenant_banner: string;
+    failed_to_load: string;
+    empty_home: string;
+    empty_cross: string;
+    col_name: string;
+    col_status: string;
+    col_category: string;
+    col_description: string;
+    col_updated: string;
+    col_created: string;
+    col_version: string;
+    col_tools: string;
+    col_authored_by: string;
+    col_actions: string;
+    filter_status: string;
+    filter_status_all: string;
+    filter_category: string;
+    load_more: string;
+    create: string;
+    create_modal_title: string;
+    import_zip: string;
+    export_zip: string;
+    field_name: string;
+    field_category: string;
+    field_description: string;
+    name_required: string;
+    category_required: string;
+    description_required: string;
+    create_hint: string;
+    created: string;
+    imported: string;
+    status_changed: string;
+    change_status: string;
+    metadata_title: string;
+    versions_title: string;
+    no_versions: string;
+    latest_version_hint: string;
+  };
   memory: {
     page_title: string;
     subtitle: string;
@@ -568,6 +609,48 @@ const en: TranslationKeys = {
     detail_payload: "Payload (details)",
     detail_payload_hint:
       "Already redactor-cleaned at write time — sensitive fields surface as [REDACTED].",
+  },
+  skills: {
+    page_title: "Skills",
+    subtitle:
+      "Reusable skill library — each skill carries versions with prompt fragments + tool name allow-lists. Import / export as .skill ZIP for cross-instance sync.",
+    cross_tenant_banner: "cross-tenant view",
+    failed_to_load: "Failed to load skills",
+    empty_home: "No skills in this tenant yet.",
+    empty_cross: "No skills across all tenants yet.",
+    col_name: "Name",
+    col_status: "Status",
+    col_category: "Category",
+    col_description: "Description",
+    col_updated: "Updated",
+    col_created: "Created",
+    col_version: "Version",
+    col_tools: "Tools",
+    col_authored_by: "Authored by",
+    col_actions: "Actions",
+    filter_status: "Status filter",
+    filter_status_all: "All statuses",
+    filter_category: "Category",
+    load_more: "Load more",
+    create: "Create",
+    create_modal_title: "Create skill (empty draft)",
+    import_zip: "Import ZIP",
+    export_zip: "Export ZIP",
+    field_name: "Skill name (a-z, 0-9, _, -)",
+    field_category: "Category",
+    field_description: "Description",
+    name_required: "Name is required",
+    category_required: "Category is required",
+    description_required: "Description is required",
+    create_hint: "Empty draft — add a version (prompt fragment + tool names) via API or ZIP import to make it usable.",
+    created: "Skill created.",
+    imported: "Imported {{name}} v{{version}}.",
+    status_changed: "Status changed to {{status}}.",
+    change_status: "Change status",
+    metadata_title: "Metadata",
+    versions_title: "Versions",
+    no_versions: "No versions yet — add one via API or ZIP import.",
+    latest_version_hint: "Latest version number",
   },
   memory: {
     page_title: "Memory",
