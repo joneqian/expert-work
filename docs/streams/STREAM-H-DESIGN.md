@@ -244,6 +244,8 @@ apps/admin-ui/
   - 若 run 在 `running` / `paused` / `pending` → 走 `bridge.subscribe(last_event_id=...)`(live)
   - 若 run 终态 → 走 `RunEventStore.list(since_seq=...)`(replay)
   - 返回标准 SSE 流(`text/event-stream`),前端同 Playground 复用 `parseSseStream`
+  - **SSE id 字段**(决议 A):replay 路径 emit `event.id = f"{row.created_at_ms}-{row.seq}"`,与 `StreamBridge` live emit 同型;客户端 `parseSseStream` 不区分两种来源。
+  - **`list_all_tenants` hard cap**(决议 D):`RunEventStore.list` 与 `RunStore.list_for_tenant` / `list_all_tenants` 均强制 `max_limit=500`;caller 传 `limit>500` 被静默截断 + 响应 header `X-Limit-Capped: true`(与 agents/triggers list 既有惯例一致)
 - **保留期**:M0 永久(无清理);M1 接入 `retention-cleanup-job`(默认 30 天,与 `event_log` 对齐)。
 - **存储成本估算**:typical run ~20-60 frames × ~500 bytes JSON ≈ 10-30 KB/run。1000 runs/day = 30 MB/day = 11 GB/年。M0 可接受;M1 retention 控制。
 
@@ -264,7 +266,12 @@ apps/admin-ui/
 **Decision**:
 - **Migration 0038**:给 `agent_run` 加 `trace_id varchar(32) NULL`(`current_trace_id_hex()` 返回 16 字节 hex = 32 字符)+ 非唯一索引 `(trace_id) WHERE trace_id IS NOT NULL`(支持反查 "from Langfuse trace_id back to run")。
 - **`RunInfo` DTO** + **`RunStore`**:加 `trace_id: str | None`。新方法 `set_trace_id(run_id, tenant_id, trace_id)`(idempotent overwrite)。
-- **`RunManager`**:`create` 之后立刻调 `set_trace_id(record.run_id, tenant_id, current_trace_id_hex())`;trace_id 在 API 处理器到 background task 间用 OTel context propagation 自动延续(asyncio context vars,FastAPI middleware 已配)。`run_agent` 工作循环开头如发现 trace_id 与 RunStore 中存的不同(罕见;表示 worker 启了自己的 trace),覆写一次。
+- **`RunManager`**:`create(*, trace_id: str | None = None, …)` 加显式参数(决议 B);调用方:
+  - API handler 路径(`trigger_run` / J.8 resume):传 `trace_id=current_trace_id_hex()`,获取 caller-bound user trace。
+  - 自动调度路径(J.10 trigger scheduler / J.13a 自动评估等):传 `trace_id=None`,表示"自动触发,无 user trace"。
+  - **不在 `create` 内部隐式调 `current_trace_id_hex()`** —— 若 context propagation 不在(如 trigger scheduler 在自己的 asyncio loop),会取到 scheduler 自己的 trace,污染数据。显式传参保护此场景。
+
+`run_agent` 工作循环开头若发现 OTel 当前 trace_id 与 RunStore 中存的不同(罕见;表示 worker 启了自己的 trace),覆写一次。
 - **GET response**:`/v1/sessions/{thread_id}/runs/{run_id}` 返回字段加 `trace_id`;`/v1/runs` 列表也加。
 - **Frontend**:`RunInfo` 类型加 `trace_id?`;TraceToolbar 优先读 `run.trace_id`;若仍 null(老数据)兜底为 SSE metadata 取(向后兼容)。
 
@@ -466,9 +473,9 @@ Authorization: Bearer <jwt>
 | `services/control-plane/src/control_plane/api/runs.py` | 新 endpoint `GET /v1/sessions/{thread_id}/runs/{run_id}/events?since_seq=N`;若 run 在 active 状态 → `bridge.subscribe(last_event_id=...)`;若 terminal → `RunEventStore.list(...)`;响应 `text/event-stream`;复用 `format_sse` | +110 |
 | `services/control-plane/tests/test_runs_api.py` | +`test_events_live_attach_running` / `_replay_terminal` / `_since_seq_cursor` / `_cross_tenant_rejected` / `_run_not_found` | +180 |
 | `apps/admin-ui/src/api/runs.ts` | `streamRunEvents(threadId, runId, sinceSeq=0)` async generator,复用 `parseSseStream` | +35 |
-| `apps/admin-ui/src/pages/run_detail/EventStreamPanel.tsx` | **新文件** — RunDetail 加 Event stream panel(色彩分类同 Playground,自动滚屏)| +180 |
+| `apps/admin-ui/src/pages/run_detail/EventStreamPanel.tsx` | **新文件** — RunDetail Event stream panel(色彩分类同 Playground,自动滚屏);**默认折叠**(决议 E)— 顶 toolbar "Show events stream" 按钮,展开时才连 endpoint;状态用 localStorage 记 per-user 偏好 | +200 |
 | `apps/admin-ui/src/pages/RunDetail.tsx` | wire EventStreamPanel | +/-10 |
-| `apps/admin-ui/src/pages/__tests__/EventStreamPanel.test.tsx` | 4 测(live attach / replay / since_seq 继续 / 错误 alert)| +120 |
+| `apps/admin-ui/src/pages/__tests__/EventStreamPanel.test.tsx` | 5 测(默认折叠 / 展开后 live attach / replay / since_seq 继续 / 错误 alert)| +140 |
 | `apps/admin-ui/src/i18n/locales/{en,zh-CN}.ts` | 加 `event_stream.*`(6 keys)| +20 |
 
 **PR7e — Approval override_args Monaco + 状态轮询**
@@ -666,9 +673,15 @@ aria_label
 - `__tests__/TraceToolbar.test.tsx`(3 测,vi.stubEnv 切 LANGFUSE_BASE_URL)
 - `__tests__/ApprovalPendingBadge.test.tsx`(3 测;0 不显示 / N 显示 / SDK 报错 swallow)
 
-**E2E**(Playwright,PR7c 落地)
-- `e2e/runs.spec.ts`: paste-login → /runs → 至少 1 行 + axe 0 critical
-- `e2e/approval.spec.ts`(M0 后):start Playground run → 触发审批 gate → 跨 tab 切 /runs → 看到 paused 行 → 点进 detail → Approve → terminal
+**Storybook(决议 F)— 每 PR 加对应组件 story,延 H.1b `Login.stories.tsx` 模式**
+- PR 7a:`RunsList.stories.tsx` — empty / loading / 5 rows / cross-tenant / error 5 个 story
+- PR 7d:`EventStreamPanel.stories.tsx` — collapsed / expanded-empty / expanded-streaming / expanded-replay 4 个 story
+- PR 7e:`ApprovalCard.stories.tsx` — view / editing / submitting / approved / error 5 个 story
+- PR 7f:`TraceToolbar.stories.tsx`(env on/off 2 个)+ `ApprovalPendingBadge.stories.tsx`(0 / 5 / 99+ 3 个)
+
+**E2E**(Playwright)
+- PR 7a 落:`e2e/runs.spec.ts` — paste-login → /runs → 至少 1 row + axe 0 critical
+- **不在 H.3 加 approval full E2E**(决议 F):需要 mock LLM 触发 approval,环境复杂度高;推 M0 dogfood 期间(canonical agent 跑起来后顺势加)。Storybook + 单元测覆盖等同 UI surface 验证
 
 ### 6.5.14 Mockup 引用
 
@@ -685,16 +698,19 @@ H.3 涉及的 3 张 mockup(已落地 H.1a PR 2,无需新增):
 **Migration 0037 — `run_event` 表**(PR 3,Mini-ADR H-7)
 ```sql
 CREATE TABLE run_event (
-    run_id       uuid         NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
-    seq          bigint       NOT NULL,
-    event_name   text         NOT NULL,
-    data         jsonb        NOT NULL,
-    created_at   timestamptz  NOT NULL DEFAULT now(),
+    run_id          uuid         NOT NULL REFERENCES agent_run(id) ON DELETE RESTRICT,
+    seq             bigint       NOT NULL,
+    event_name      text         NOT NULL,
+    data            jsonb        NOT NULL,
+    created_at_ms   bigint       NOT NULL,  -- millisecond epoch — feeds SSE id 重组
+    created_at      timestamptz  NOT NULL DEFAULT now(),
     PRIMARY KEY (run_id, seq)
 );
 -- RLS via JOIN agent_run.tenant_id;list 查询模式 = (run_id, seq ASC)
 -- 主键即覆盖,无额外索引。
 ```
+- **FK = `ON DELETE RESTRICT`**(决议 C):锁定 M1 retention 灵活性 — agent_run 在 M1 走 archive-then-delete 流程,RESTRICT 强制 retention sweep 必须**先**清 `run_event` 再清 `agent_run`,M1 想把 events 归档到 ObjectStore 时不会被级联抢先删掉。M0 没 retention 时无影响。
+- **`created_at_ms` 列**(决议 A):SSE wire id 字段格式 = `"{created_at_ms}-{seq}"`(与 `StreamBridge.memory.py:67-71` `_next_id` 同型)。replay endpoint emit 时按这个组装;**客户端 `parseSseStream` 不区分 live / replay**。`since_seq` 查询参数取 bigint(client 从最后一个 id 字符串截尾 split `-`)。
 - 写量级:每 run ~20-60 行 × 500 bytes ≈ 10-30 KB
 - 容量预算:1000 runs/day → 30 MB/day → 11 GB/年(M0 可接受;M1 retention sweep 30 天对齐 event_log)
 - 索引选择:主键 `(run_id, seq)` 即 list 查询的最优 prefix;不加 `(created_at)` 索引(retention sweep 走 `JOIN agent_run ON finished_at < ?` 走 `agent_run.finished_at` 已有索引)
@@ -785,3 +801,4 @@ CREATE INDEX idx_agent_run_trace_id ON agent_run (trace_id) WHERE trace_id IS NO
 | 2026-05-26 | v1.2 | 加 § 6.5 **H.3 详细设计** + Mini-ADR H-6 / H-7 / H-8 / H-9;原 PR7 拆为 PR7a/b/c 3 个;锁定:`GET /v1/runs` 跨 thread 索引兑现 Mini-ADR J-41 deferred / SSE 实时回放推 M1 / Trace = 外链跳 Langfuse / Approval `override_args` Monaco inline 编辑 |
 | 2026-05-26 | v1.3 | § 6.5 补全实现期细节:§ 6.5.8 文件级影响图(每 PR 表)+ § 6.5.9 状态机(RunsList / RunDetail polling / Approval edit ASCII 图)+ § 6.5.10 错误/边界场景矩阵(12 条)+ § 6.5.11 audit + Prometheus 信号 + § 6.5.12 i18n keys 全量(4 namespace)+ § 6.5.13 测试计划(unit/integration/E2E)+ § 6.5.14 mockup 引用 + 缺 09-runs-list mockup 标作待办债务 + § 6.5.15 schema 影响(none)+ § 6.5.16 backwards compat + § 6.5.17 安全/鉴权矩阵 |
 | 2026-05-26 | v1.4 | **用户决策"#2 SSE 实时回放 + #6 trace_id 持久化做完整,不推迟"**:Mini-ADR H-7 重写 — 新 `run_event` 表 + `RunEventStore` 三态 + producer 双写 + `GET .../events` 端点(live attach + replay 双路径);新 Mini-ADR H-9.5 — `agent_run.trace_id` 持久化(migration 0038)。PR 链拆 PR7a-c 为 PR7a-f(共 6 PR),总估时 9.5-11 天(原 4.5-5.5 天);§ 6.5.15 加 migration 0037 / 0038 详情;§ 6.5.8 加 PR 2/3/4 文件表;§ 6.5.11 加 3 个 Prometheus 信号;§ 6.5.12 加 `event_stream` 6 keys;§ 6.5.10 加 4 条新边界场景 |
+| 2026-05-26 | v1.5 | review 第二轮决议 A-F 落地:(A) SSE id wire format `"{created_at_ms}-{seq}"` 一致,`run_event` 加 `created_at_ms bigint` 列 — replay endpoint emit 与 live 同型,客户端 `parseSseStream` 不区分 / (B) `RunManager.create(trace_id=)` 显式参数 — handler 路径传 `current_trace_id_hex()`,scheduler 路径传 None / (C) `run_event` FK 改 `ON DELETE RESTRICT` — 锁定 M1 archive-then-delete 灵活性 / (D) `list_for_tenant` / `list_all_tenants` / `RunEventStore.list` 均强制 `max_limit=500` + `X-Limit-Capped` header / (E) EventStreamPanel 默认折叠,展开才连;localStorage 记 per-user 偏好 / (F) 5 个新组件全加 Storybook story(共 19 个 story);approval 完整 E2E 推 M0 dogfood |
