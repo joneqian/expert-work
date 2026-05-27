@@ -244,9 +244,7 @@ async def test_per_turn_memory_position_drifts_across_turns() -> None:
         assert block.additional_kwargs.get("helix_cache_anchor") is None
     # Turn 1 had [system, start, memories]; turn 2 has [system, start,
     # AI, ToolMessage, memories] — different absolute indices.
-    assert positions[0] != positions[1], (
-        f"per_turn should drift across turns; got {positions}"
-    )
+    assert positions[0] != positions[1], f"per_turn should drift across turns; got {positions}"
 
 
 @pytest.mark.asyncio
@@ -254,9 +252,7 @@ async def test_empty_recalled_memories_injects_nothing() -> None:
     """Both modes no-op when there's nothing to inject."""
     # One LLM response per outer-loop iteration; the graph terminates
     # after the first agent reply (no tool calls).
-    llm = _RecordingLLM(
-        responses=[AIMessage(content="done"), AIMessage(content="done")]
-    )
+    llm = _RecordingLLM(responses=[AIMessage(content="done"), AIMessage(content="done")])
 
     for mode in ("per_session", "per_turn"):
         graph = build_react_graph(

@@ -152,9 +152,7 @@ def _simulate_billing(
     return int(billed)
 
 
-def _build_long_session_input(
-    memory_text: str, task: str
-) -> dict[str, Any]:
+def _build_long_session_input(memory_text: str, task: str) -> dict[str, Any]:
     return {
         "messages": [
             SystemMessage(content="you are a helpful long-running agent" * 5),
