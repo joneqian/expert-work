@@ -605,13 +605,301 @@ async def retrieve(self, ...) -> list[MemoryItem]:
 
 ## 7. Sprint #6 — Memory Hybrid Retrieval(向量 + 全文 RRF)
 
-> **本章节 stub** — Sprint #6 开工前补完。预计 Week 4-5(与 #5 并行)。
+> **执行顺序**:本项作为 Sprint **#3 执行**(完全无依赖,无新设计风险,可直接 port J.5 现成代码;比 #3 / #5 / #8 启动成本更低)。
+>
+> **依赖前置**:✅ Sprint #1 + #2 已 merge(commit `442cd69` + `be5e6ed`)。本 Sprint 复用 J.5 RAG 子系统的成熟代码,不引入新算法。
 
-主要设计要点(占位)：
-- `memory_item` 加 tsvector 列 + 自动 trigger 维护
-- `MemoryStore.recall()` 改 hybrid(向量 + 全文)+ RRF rerank — **直接 port J.5 `KnowledgeRetriever`(PR #161 已落地)**
-- K.K12 eval baseline 重跑(向量 vs hybrid 对比 + 锁新 baseline)
-- per-tenant manifest 可关闭 hybrid 回退纯向量
+### 7.1 背景
+
+helix M0 的 `MemoryStore.retrieve()` 仅做向量召回(pgvector cosine distance)。已知短板:
+
+- **精确词匹配丢失**:用户上次说 "use error code E-2031";向量化后 "E-2031" 不一定排进 top-k(尤其是 episodic 类 memory 较长时)
+- **CJK 中文召回弱**:helix 已有 user 用中文 memory(per dogfood)。中文 query 经 embedder 后语义召回偏,关键词召回(jieba 分词)能补
+- **多模态 caption / OCR 文本召回低**:vision 上传的 caption 文本里的命名实体也是同样问题
+
+J.5 RAG 子系统在 `knowledge_chunk` 上已经走了完整的 hybrid path(向量 + 全文 + RRF + 可选 LLM rerank)— see `services/orchestrator/src/orchestrator/tools/knowledge.py` § 124-156。port 到 memory 是直接的代码搬运,**不开新模型 / 不新增依赖**。
+
+### 7.2 范围 & 边界
+
+#### 7.2.1 In-scope
+
+| 子项 | 实现内容 | 关联 |
+|------|---------|------|
+| **#6.1 Schema** | migration `0040_memory_item_content_tsv`:`memory_item` 加 `content_tsv` TSVECTOR 列 + GIN 索引;app-side 用 `tokenize_for_search()`(已存在,K.K7 用过)填充 | 复用 J.5 模式 |
+| **#6.2 Store 写时维护** | `MemoryStore.write()` 写入 `content_tsv`(SQL + InMemory parity);`update_content()` 同步更新;`SqlMemoryStore` 用 `func.to_tsvector('simple', tokenize_for_search(content))` | InMemory 用 `tokenize_for_search` token set 做关键词查 |
+| **#6.3 Store 读时 hybrid** | `MemoryStore.retrieve()` 新增 `query_text: str \| None = None` 参数。`None` → 旧 vector-only 行为(backward compat);`str` → 双路召回 + RRF 融合,top-N 返回 | Mini-ADR U-5 |
+| **#6.4 RRF 提到 helix-common** | 从 `orchestrator/tools/knowledge.py:264` 抽出 `_rrf_fuse` → `helix-common/src/.../search/rrf.py`(新模块);knowledge.py 改用 helix-common 版,memory 新代码也用 | Mini-ADR U-6 |
+| **#6.5 Recall node 接 hybrid** | `memory_recall_node` 读 `tenant_config.memory_recall_mode`(新字段);默认 `hybrid` 时把 user task text 作 `query_text=` 传给 store;`vector` 时不传 | per-tenant escape hatch |
+| **#6.6 Tenant config 字段** | migration `0041_memory_recall_mode`:`tenant_config.memory_recall_mode VARCHAR(8) NOT NULL DEFAULT 'hybrid'` + CHECK constraint(`IN ('hybrid','vector')`);protocol layer 加 `MemoryRecallMode` Literal | per Sprint #1 同模式 |
+| **#6.7 Observability** | 3 个 metric:`helix_uplift_memory_retrieval_total{mode,result}` / `helix_uplift_memory_hybrid_rrf_overlap` histogram / `helix_uplift_memory_retrieval_latency_seconds` histogram;recording rule `helix:uplift:memory_hybrid_adoption_ratio:1h`(衡量启用情况) | uplift_metrics 扩展 |
+| **#6.8 Eval baseline** | `tools/eval/per_user_isolation.py` 加 hybrid 模式 baseline 对比(vector vs hybrid 在 50 个 memory + 20 query 上的 hit ratio / MRR)|  |
+| **#6.9 Runbook** | `docs/runbooks/threat-scanner-tuning.md` 加 § 9:hybrid 退化排查 + tenant 切回 vector 的步骤 |  |
+
+#### 7.2.2 Out-of-scope(明确推迟)
+
+| 推迟项 | 落地 | 备注 |
+|-------|------|------|
+| LLM reranker(J.5 已有) | M1 或更晚 | memory recall top_k 通常 ≤ 5,rerank 价值边际;且 rerank 引入 1 个额外 LLM call/recall,成本不接受 |
+| 第三种召回(BM25 / SPLADE / ColBERT) | 永不做 | 不在能力 gap 内;vector + tsvector 覆盖 90% 案例 |
+| Per-user 个性化 RRF k 值 | M1 dogfood 数据后 | M0 锁标准 RRF `k=60`(知识子系统已验证) |
+| `memory_recall_mode = "keyword_only"` 选项 | 永不做 | 没有合理用例(纯关键词 = vector 退化版) |
+| 自动从向量 baseline 切到 hybrid 默认的"灰度开关" | 永不做 | 默认 hybrid + tenant opt-out 已经是灰度控制 |
+
+#### 7.2.3 验收(Sprint Exit)
+
+1. migration 0040 + 0041 在 dev/staging 应用成功;rollback 测试通过
+2. `MemoryStore.retrieve()` 双签名(`query_text=None` / `query_text=<str>`)在 SQL + InMemory 等价
+3. `memory_recall_node` 在 hybrid 模式下两路召回 + RRF;在 vector 模式下回退纯向量
+4. RRF 共享模块 `helix_agent.common.search.rrf` 上线;`knowledge.py` 改用共享版,行为不变
+5. eval baseline:hybrid 相对 vector 在 K.K12 上 hit ratio 提升 ≥ 10%(否则推后实施,改进算法)
+6. 零债 6 条全过
+7. CI 全绿 + CodeQL 无新增
+
+### 7.3 架构
+
+#### 7.3.1 数据流
+
+```
+                    AgentState["messages"]                       (last HumanMessage = task)
+                              │
+              ┌───────────────┼────────────────┐
+              │               │                │
+              ▼               ▼                ▼
+       embed(task)     tokenize(task)    tenant_config.memory_recall_mode 决定走哪条
+              │               │
+              │               │
+              ▼               ▼
+  MemoryStore.retrieve(query_embedding=..., query_text=task)
+              │
+        ┌─────┴──────┐
+        ▼            ▼
+   vector hit     keyword hit          (each capped at recall_limit ~= 20)
+        │            │
+        └─────┬──────┘
+              ▼
+        RRF fuse (k=60)
+              │
+              ▼
+       top-N MemoryItem
+              │
+              ▼
+        recall node (Sprint #2 redact)
+              │
+              ▼
+        AgentState["recalled_memories"]
+```
+
+#### 7.3.2 Mini-ADR U-5:`MemoryStore.retrieve(query_text=None)` 双签名
+
+- **决定**:retrieve 新参数 `query_text: str | None = None`。`None` 走旧 vector-only(backward compat — 老调用方不受影响);`str` 走 hybrid(双路召回 + RRF)
+- **替代方案 1** 拆 `retrieve_vector` / `retrieve_hybrid` 两个方法:拒 — 调用方决策点从 store API 转移到 caller,违反 single point of decision;且 backward compat 复杂
+- **替代方案 2** retrieve 永远 hybrid:拒 — 老路径(write-back 流程的 memory recall 调用)不需要 hybrid;还会引入不必要的 keyword 查询成本
+- **替代方案 3** retrieve 加 `mode` 参数:拒 — `mode` 隐式依赖 `query_text` 是否提供,容易传错;`query_text=str` 自带"模式"语义
+- **InMemory 实现策略**:`query_text=str` 时用 Python `set()` 取 token 交集做关键词侧的 ranking(不需要数据库);跟 SQL 实现 RRF 结果一致(同样的 RRF k=60)
+
+#### 7.3.3 Mini-ADR U-6:RRF 提到 `helix_agent.common.search.rrf`
+
+- **决定**:从 `orchestrator/tools/knowledge.py:264` 抽出 `_rrf_fuse` 到新模块 `packages/helix-common/src/helix_agent/common/search/rrf.py`;knowledge.py 改 import,memory 新代码同样 import
+- **泛型设计**:`def rrf_fuse[T: Hashable](rankings: Sequence[Sequence[T]], *, k: int = 60) -> list[T]` — `T` 由调用方决定(可以是 `KnowledgeChunk` / `MemoryItem` / `UUID`);只要 hashable 即可
+- **替代方案 1** 复制粘贴一份到 memory 模块:拒 — 两份要同步,违反 DRY;此前 Sprint #2 用 `helix-common` 已经验证过这种共享是干净的
+- **替代方案 2** 放 `helix-persistence`:拒 — 不依赖任何持久化逻辑,纯算法
+- **替代方案 3** 放 `orchestrator`:拒 — memory 在 store 层就要用,反向依赖
+
+#### 7.3.4 InMemory store hybrid 实现
+
+`InMemoryMemoryStore.retrieve(query_text=str)`:
+1. 复用现有 cosine 排序得到 `vector_hits: list[MemoryItem]`(top recall_limit)
+2. 简易关键词排序:对 candidates(所有非 deleted_at row,filter by tenant/user/kind)做 `tokens = set(tokenize_for_search(content).split())`;query tokens 也 split;`overlap = len(tokens & query_tokens)`,按 overlap 倒序取 top recall_limit → `keyword_hits`
+3. `rrf_fuse([vector_hits, keyword_hits])[:limit]`
+4. 仍走 `_with_drift_flag()`(Sprint #2)
+
+InMemory 不追求与 PG `to_tsvector` 100% 一致(那是工程实现细节);追求**对外契约一致**:hybrid 返回更精确的混合 ranking,vector 返回纯向量 ranking。
+
+### 7.4 实施细节
+
+**文件清单**:
+
+| 文件 | 改动 |
+|------|------|
+| `packages/helix-common/src/.../search/rrf.py` | **新建** — 泛型 `rrf_fuse[T]` |
+| `packages/helix-common/src/.../search/__init__.py` | **新建** — 模块包初始化 |
+| `packages/helix-common/tests/test_rrf.py` | 新建 — 移植 `knowledge.py` 测试覆盖 + 泛型场景 |
+| `packages/helix-persistence/migrations/versions/0040_memory_item_content_tsv.py` | 新建 — 加 TSVECTOR 列 + GIN 索引(参考 0022) |
+| `packages/helix-persistence/migrations/versions/0041_memory_recall_mode.py` | 新建 — `tenant_config.memory_recall_mode` 加列(同 0039 模式) |
+| `packages/helix-persistence/src/.../models/memory_item.py` | ORM 加 `content_tsv` Mapped 列(用 sqlalchemy.dialects.postgresql.TSVECTOR) |
+| `packages/helix-persistence/src/.../memory/sql.py` | `write()` 填 `content_tsv`;`update_content()` 同步;新参数 `query_text` |
+| `packages/helix-persistence/src/.../memory/memory.py` | InMemory parity(Python token set 实现) |
+| `packages/helix-persistence/src/.../memory/base.py` | `retrieve` 抽象签名加 `query_text` |
+| `packages/helix-persistence/tests/test_in_memory_memory_store.py` | 加 6-8 个 hybrid 测试 |
+| `packages/helix-persistence/tests/test_sql_memory_store.py` | 加 4-5 个 hybrid 测试(docker) |
+| `packages/helix-protocol/src/.../tenant_config.py` | 加 `MemoryRecallMode` Literal + 字段 |
+| `packages/helix-persistence/src/.../models/tenant_config.py` | ORM 加列 |
+| `packages/helix-persistence/src/.../tenant_config/sql.py + memory.py` | upsert / row_to_record 扩展 |
+| `services/orchestrator/src/.../graph_builder/memory.py` | `make_memory_recall_node` 加 `tenant_config_store` 可选参数 + 读 mode |
+| `services/orchestrator/src/.../tools/knowledge.py` | 改 import 用 `helix_agent.common.search.rrf`,删本地 `_rrf_fuse` |
+| `services/orchestrator/tests/test_memory_nodes.py` | 加 hybrid mode 测试 |
+| `services/orchestrator/tests/test_knowledge_tool.py` | 已用 `_rrf_fuse` 间接;验证 import 改后行为不变(已有 5 个测试覆盖) |
+| `packages/helix-common/src/.../uplift_metrics.py` | 加 3 个 retrieval counter / histogram |
+| `tools/observability/rules/uplift.yml` | recording rule:hybrid adoption ratio |
+| `tools/eval/per_user_isolation.py` | 加 hybrid 模式 baseline 对比 |
+| `docs/runbooks/threat-scanner-tuning.md` | § 9 hybrid 退化排查 |
+
+**关键代码骨架(伪)**:
+
+```python
+# helix-common/src/.../search/rrf.py
+def rrf_fuse[T](rankings: Sequence[Sequence[T]], *, k: int = 60) -> list[T]:
+    scores: dict[T, float] = {}  # T must be hashable
+    for ranking in rankings:
+        for rank, item in enumerate(ranking):
+            scores[item] = scores.get(item, 0.0) + 1.0 / (k + rank + 1)
+    return sorted(scores.keys(), key=lambda t: scores[t], reverse=True)
+```
+
+```python
+# helix-persistence/.../memory/sql.py
+async def retrieve(self, *, tenant_id, user_id, query_embedding,
+                   query_text: str | None = None, kind=None, limit=5):
+    if query_text is None:
+        # backward-compat — pure vector
+        return await self._vector_retrieve(...)
+    vector_hits = await self._vector_retrieve(..., limit=self._recall_limit)
+    keyword_hits = await self._keyword_retrieve(..., query_text=query_text,
+                                                  limit=self._recall_limit)
+    fused = rrf_fuse([vector_hits, keyword_hits])[:limit]
+    return [_with_drift_flag(...) for row in fused]
+
+async def _keyword_retrieve(self, ...):
+    tokenized = tokenize_for_search(query_text)
+    if not tokenized:
+        return []
+    ts_query = func.plainto_tsquery("simple", tokenized)
+    stmt = (
+        select(MemoryItemRow)
+        .where(
+            MemoryItemRow.tenant_id == tenant_id,
+            MemoryItemRow.user_id == user_id,
+            MemoryItemRow.deleted_at.is_(None),
+            MemoryItemRow.content_tsv.op("@@")(ts_query),
+        )
+        .order_by(func.ts_rank(MemoryItemRow.content_tsv, ts_query).desc())
+        .limit(limit)
+    )
+    ...
+```
+
+```python
+# orchestrator/.../graph_builder/memory.py memory_recall_node
+async def memory_recall_node(state, config):
+    ...
+    mode = await _resolve_recall_mode(tenant_id, tenant_config_store)
+    if mode == "hybrid":
+        memories = await memory_store.retrieve(
+            tenant_id=..., user_id=..., query_embedding=vec, query_text=task, limit=top_k,
+        )
+    else:
+        memories = await memory_store.retrieve(
+            tenant_id=..., user_id=..., query_embedding=vec, limit=top_k,
+        )
+    redacted = [_redact_memory(m) for m in memories]
+    return {"recalled_memories": redacted}
+```
+
+### 7.5 关键决策点(开发期可能踩)
+
+下面是 review 期需要拍板的:
+
+1. **InMemory 关键词排序是否严格匹配 SQL 行为?**
+   - 选项 A:严格 — 用 Python 模拟 `to_tsvector` 行为(stopwords / weights / etc),保证 testcontainers 测和 InMemory 测结果完全一致
+   - **选项 B(推荐)**:不严格 — InMemory 用简易 token set overlap;`MemoryStore` contract 只承诺"hybrid mode 比 vector mode 在 mixed query 上召回更好",不承诺 RRF 排序逐行一致
+   - 理由:严格模拟成本高(jieba + tsvector stopwords 行为复杂)且不增加正确性 — InMemory 是测试 fixture,产线行为以 SQL 为准
+2. **RRF `k` 值锁 60 还是 per-recall_path 可配?**
+   - **选项 A(推荐)**:全局 `k=60`(知识子系统已验证)
+   - 选项 B:为 memory 单独 `k=30`(更激进偏向高排名 item;memory top-k 通常 5,vs knowledge 20)
+   - 理由:M0 数据不足以判断 30 vs 60 哪个更好;锁 60 与 J.5 一致;M1 跑 dogfood 数据后再调
+3. **`memory_recall_mode` 字段默认值**
+   - **选项 A(推荐)**:`hybrid` 默认(per Sprint 1/2 经验:默认安全/高质量行为 + opt-out)
+   - 选项 B:`vector` 默认(per-tenant 显式 opt-in)
+   - 理由:hybrid 是更好的召回,降级到 vector 是 fallback;新 tenant 直接享受新能力
+4. **`memory_recall_node` 是否需要 `audit_logger` 注入?**
+   - **选项 A(推荐)**:不注入。recall 走 hybrid / vector 是性能优化路径,不是安全事件,无需 audit row;Prometheus counter 足够
+   - 选项 B:每次 recall 都 emit audit:噪音过大(每个 turn 一次),冲淡有用的 audit 数据
+5. **K.K12 baseline 退化 ≥ 5% 是否仍 merge?**
+   - **选项 A(推荐)**:不 merge;改进算法(可能是 `k` 值或 recall_limit)再交付
+   - 选项 B:merge,接受 5% 退化:拒 — hybrid 的目的是提升召回,退化反而说明实现有问题
+
+### 7.6 测试矩阵
+
+**单测(helix-common)**:
+- [ ] `rrf_fuse` 单 ranking 退化为 identity
+- [ ] `rrf_fuse` 两 ranking 全相同 → 与单 ranking identity
+- [ ] `rrf_fuse` 两 ranking 全相反 → 中间值
+- [ ] `rrf_fuse` 泛型 — 用 UUID / dataclass / 自定义类(参考 knowledge.py 现有测试)
+- [ ] `rrf_fuse(rankings=[], k=60) == []` edge case
+
+**单测(persistence InMemory)**:
+- [ ] hybrid 模式比 vector 模式在精确词命中场景排名更高(seed memory "user error code E-2031",query "error code E-2031" → hybrid 排第 1)
+- [ ] hybrid 模式 query_text 为空 → 退化为 vector
+- [ ] hybrid 模式中文 query(jieba 分词)正常工作
+- [ ] hybrid 模式空结果集 → 返 []
+- [ ] vector 模式(`query_text=None`)行为与 Sprint #2 完全一致(backward compat)
+
+**集成测(persistence SQL,docker)**:
+- [ ] hybrid 模式精确词命中
+- [ ] hybrid 模式 RRF 排序与 InMemory 大致一致(top-3 相同;不要求逐行)
+- [ ] tsvector 列 GIN 索引建成 + EXPLAIN ANALYZE 命中 index
+- [ ] write/update_content/retrieve hybrid 在并发下数据一致(已有 Sprint #2 的 fixture)
+
+**集成测(orchestrator)**:
+- [ ] memory_recall_node hybrid 模式调用走 hybrid path(用 spy 验证)
+- [ ] memory_recall_node vector 模式调用走 vector-only path
+- [ ] 缺失 tenant_config_store(向后兼容)→ 默认 hybrid 但 silently 退到 vector(对接收 None 友好)
+- [ ] 测试默认值 — 新 tenant(无 tenant_config 行)→ hybrid 默认生效
+
+**eval baseline(`tools/eval`)**:
+- [ ] `per_user_isolation.py` 加 50 个 fact + episodic memory + 20 query
+- [ ] vector 模式 hit@5 / MRR baseline 锁定
+- [ ] hybrid 模式 hit@5 / MRR baseline ≥ vector + 10%(否则 Sprint exit 失败)
+
+### 7.7 可观测
+
+| Metric | 类型 | 标签 | 说明 |
+|--------|------|------|------|
+| `helix_uplift_memory_retrieval_total{mode,result}` | counter | mode=vector/hybrid, result=hit/miss | 记录调用分布 |
+| `helix_uplift_memory_hybrid_rrf_overlap` | histogram | — | vector ∩ keyword overlap 比例(衡量 hybrid 价值) |
+| `helix_uplift_memory_retrieval_latency_seconds{mode}` | histogram | mode=vector/hybrid | 退化预警:hybrid 显著慢于 vector |
+
+| Recording rule | 用途 |
+|----------------|------|
+| `helix:uplift:memory_hybrid_adoption_ratio:1h = sum(rate(memory_retrieval_total{mode="hybrid"}[1h])) / sum(rate(memory_retrieval_total[1h]))` | 看 hybrid mode 在所有 tenant 中的采用率 |
+
+### 7.8 与 Sprint #1/#2 的复用矩阵
+
+| 已有产出 | Sprint #6 复用方式 |
+|---------|-------------------|
+| `helix_agent.common.threat_patterns` | 不动 |
+| `helix_agent.common.uplift_metrics` | 扩展(加 3 个 retrieval metric) |
+| `MemoryStore.retrieve()` 接口 | **扩展**(加 query_text 参数,backward compat) |
+| `MemoryItem.drift` field(Sprint #2) | 保留;hybrid path 同样走 `_with_drift_flag()` |
+| `_redact_memory()` 函数(Sprint #2 recall node) | 保留;hybrid / vector mode 都经它过 |
+| `tenant_config.trigger_fire_scan_mode` 模式 | 类比:`memory_recall_mode` 同模式(default + per-tenant opt-out) |
+| `tokenize_for_search` (J.5) | 直接复用 |
+| `KnowledgeStore.keyword_search` SQL pattern | 直接 port 到 `_keyword_retrieve()` |
+| `_rrf_fuse` (J.5) | **抽出**到 helix-common,J.5 + memory 共用 |
+| Sprint #1 + #2 oracle-safe 422 模式 | hybrid 不涉及用户拒绝(纯读),不需要 |
+| Sprint #1 + #2 preflight 流程 | 严格遵循(per Sprint #1 教训) |
+
+### 7.9 Sprint #6 验收清单
+
+- [ ] 2 migrations 应用 dev/staging;rollback 测试通过
+- [ ] `helix_agent.common.search.rrf` 上线;`knowledge.py` 改用,5 个旧测试不退化
+- [ ] `MemoryStore.retrieve(query_text=)` 双签名在 SQL + InMemory 等价
+- [ ] `memory_recall_node` 接 `tenant_config.memory_recall_mode`,默认 hybrid
+- [ ] 3 个 Prometheus metric + 1 个 recording rule 上线
+- [ ] eval baseline:hybrid hit@5 ≥ vector + 10%
+- [ ] 零债 6 条全过
+- [ ] CI 全绿 + CodeQL 无新增 high/critical
+- [ ] `docs/runbooks/threat-scanner-tuning.md` § 9 新增
 
 ---
 
