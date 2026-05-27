@@ -258,6 +258,22 @@ class LongTermMemorySpec(BaseModel):
 
     retrieve_top_k: int = Field(default=5, gt=0, description="memories injected per run")
     write_back: bool = Field(default=True, description="extract + persist memories at run end")
+    # Capability Uplift Sprint #8 — Mini-ADR U-8.
+    # ``per_session`` (default): inject the recalled memory list at a
+    # stable prefix slot once per session and mark it with a cache
+    # anchor so the Anthropic prompt cache covers the prefix
+    # ``[system, task, memories]`` across all turns. ``per_turn``:
+    # legacy J.3 behavior — re-render the memory list at the tail of
+    # each turn's messages. Kept as an escape hatch for agents that
+    # self-modify their memory mid-session and need the next turn to
+    # see the change (M0 has no such tool; reserved for M1).
+    recall_mode: Literal["per_session", "per_turn"] = Field(
+        default="per_session",
+        description=(
+            "where the recalled memory list is rendered in the prompt; "
+            "``per_session`` enables Anthropic prompt-cache anchoring"
+        ),
+    )
 
 
 class MemorySpec(BaseModel):

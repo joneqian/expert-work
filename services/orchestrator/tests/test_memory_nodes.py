@@ -493,17 +493,22 @@ async def test_memory_graph_recalls_and_writes_back() -> None:
             },
         )
 
-    # Stream L.L1 — recalled memories ride a tail HumanMessage so the
-    # leading SystemMessage stays byte-stable for Anthropic prompt
-    # caching. Pre-L1 the memories were concatenated into system.
+    # Stream L.L1 — leading SystemMessage stays byte-stable for
+    # Anthropic prompt caching (pre-L1 the memories were concatenated
+    # into system). Capability Uplift Sprint #8 (Mini-ADR U-8) — the
+    # platform default is now ``recall_mode='per_session'``, so
+    # memories land at messages[1] with a ``helix_cache_anchor``
+    # marker instead of the legacy tail position.
     agent_prompt = llm.calls[0]
     assert isinstance(agent_prompt[0], SystemMessage)
     assert str(agent_prompt[0].content) == "help"  # byte-stable
-    tail = agent_prompt[-1]
-    assert isinstance(tail, HumanMessage)
-    tail_text = str(tail.content)
-    assert "Relevant memories" in tail_text
-    assert "user is a botanist" in tail_text
+    memory_msg = agent_prompt[1]
+    assert isinstance(memory_msg, HumanMessage)
+    memory_text = str(memory_msg.content)
+    assert "Relevant memories" in memory_text
+    assert "user is a botanist" in memory_text
+    # Sprint #8 cache anchor flag rides the per_session memory block.
+    assert memory_msg.additional_kwargs.get("helix_cache_anchor") is True
 
     # Write-back persisted a new memory for the user.
     stored = await store.retrieve(

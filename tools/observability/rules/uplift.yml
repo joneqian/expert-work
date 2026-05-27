@@ -70,6 +70,18 @@ groups:
           /
           clamp_min(sum by (mode) (rate(helix_uplift_memory_retrieval_total[1h])), 1)
 
+      # Capability Uplift Sprint #8 — memory frozen snapshot adoption +
+      # Anthropic cache anchor application.
+      - record: helix:uplift:memory_per_session_adoption_ratio:1h
+        expr: |
+          sum(rate(helix_uplift_memory_recall_inject_mode_total{mode="per_session"}[1h]))
+          /
+          clamp_min(sum(rate(helix_uplift_memory_recall_inject_mode_total[1h])), 1)
+
+      - record: helix:uplift:anthropic_cache_anchor_rate:5m
+        expr: |
+          sum(rate(helix_uplift_anthropic_cache_anchors_total[5m]))
+
   - name: helix_uplift_alerts
     rules:
       # P1 — sustained block-rate spike. Catches a noisy pattern-set

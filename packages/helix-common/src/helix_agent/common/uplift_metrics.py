@@ -67,6 +67,19 @@ _memory_retrieval_total = helix_counter(
     label_names=("mode", "result"),  # mode=hybrid|vector, result=hit|miss
 )
 
+# Capability Uplift Sprint #8 — memory frozen snapshot + Anthropic cache anchor.
+_memory_inject_mode_total = helix_counter(
+    "helix_uplift_memory_recall_inject_mode_total",
+    "Memory recall injection mode chosen at agent_node render time.",
+    label_names=("mode",),  # per_session | per_turn
+)
+
+_anthropic_cache_anchors_total = helix_counter(
+    "helix_uplift_anthropic_cache_anchors_total",
+    "Total cache_control anchor markers added by upstream injectors "
+    "(currently only Sprint #8 memory frozen snapshot).",
+)
+
 
 def record_threat_scan(*, scope: str, result: str) -> None:
     """Bump ``helix_uplift_threat_scan_total``."""
@@ -111,9 +124,25 @@ def record_memory_retrieval(*, mode: str, result: str) -> None:
     _memory_retrieval_total.labels(mode=mode, result=result).inc()
 
 
+def record_memory_inject_mode(*, mode: str) -> None:
+    """Bump ``helix_uplift_memory_recall_inject_mode_total{mode}``.
+
+    ``mode`` ∈ ``{"per_session", "per_turn"}`` (Sprint #8 § 9.8).
+    """
+    _memory_inject_mode_total.labels(mode=mode).inc()
+
+
+def record_anthropic_cache_anchor() -> None:
+    """Bump ``helix_uplift_anthropic_cache_anchors_total`` once per
+    anchor marker applied on the outbound Anthropic request."""
+    _anthropic_cache_anchors_total.inc()
+
+
 __all__ = [
+    "record_anthropic_cache_anchor",
     "record_memory_blocked",
     "record_memory_drift",
+    "record_memory_inject_mode",
     "record_memory_redacted",
     "record_memory_retrieval",
     "record_threat_pattern_hits",

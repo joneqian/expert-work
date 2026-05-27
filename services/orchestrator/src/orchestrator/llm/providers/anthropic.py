@@ -52,6 +52,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from helix_agent.common.uplift_metrics import record_anthropic_cache_anchor
 from helix_agent.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
@@ -70,11 +71,15 @@ DEFAULT_MAX_TOKENS = 4096
 _ANTHROPIC_VERSION = "2023-06-01"
 _ERROR_BODY_CHAR_CAP = 500
 
-#: Stream L.L1 — number of trailing non-system messages that get a
-#: ``cache_control`` marker (Hermes "system_and_3" layout). System
-#: counts as one breakpoint plus three message-level breakpoints =
-#: four total, matching Anthropic's documented maximum.
-_CACHE_CONTROL_TAIL_COUNT: int = 3
+#: Number of trailing non-system messages that get a ``cache_control``
+#: marker. Capability Uplift Sprint #8 (Mini-ADR U-7) lowered this from
+#: 3 to 2 to make room for the Sprint #8 memory-anchor breakpoint
+#: while keeping the total under Anthropic's 4-breakpoint cap:
+#: ``system (1) + tail (2) + memory anchor (0..1) ≤ 4``.
+#: The lost tail message (typically a Tool result) costs a few hundred
+#: tokens not being cached; the memory anchor saves ~25K tokens on a
+#: 50-turn session with a 10-fact memory list — net positive.
+_CACHE_CONTROL_TAIL_COUNT: int = 2
 
 #: Stream L.L1 — the wire-level ``cache_control`` shape Anthropic
 #: expects for ephemeral (5-minute TTL) caching.
@@ -250,17 +255,25 @@ class AnthropicProvider:
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
     ) -> AIMessage:
-        system_text, mapped = await _to_anthropic_messages(messages, self.image_resolver)
+        system_text, mapped, anchor_indices = await _to_anthropic_messages(
+            messages, self.image_resolver
+        )
         tool_payload = [_to_anthropic_tool(spec) for spec in tools] if tools else None
 
         # Stream L.L1 — convert ``system`` from string to block list with
-        # cache_control marker, then mark the trailing messages. When
-        # ``cache_enabled`` is False the adapter emits the original
+        # cache_control marker, then mark the trailing messages.
+        # Capability Uplift Sprint #8 (Mini-ADR U-7) — also mark any
+        # messages flagged with ``helix_cache_anchor`` (currently only
+        # the per_session memory block) so the cache covers the prefix
+        # ``[system, task, memories]`` across all turns.
+        # When ``cache_enabled`` is False the adapter emits the original
         # string-shaped system so a manifest-level opt-out cleanly
         # disables the feature on a per-model basis.
         system_payload: str | list[dict[str, Any]] | None
         if self.cache_enabled:
-            system_payload, mapped = _apply_cache_control(system_text, mapped)
+            system_payload, mapped = _apply_cache_control(
+                system_text, mapped, cache_anchor_indices=anchor_indices
+            )
         else:
             system_payload = system_text
 
@@ -283,18 +296,30 @@ def _truncate(text: str) -> str:
 
 
 def _apply_cache_control(
-    system: str | None, mapped: list[dict[str, Any]]
+    system: str | None,
+    mapped: list[dict[str, Any]],
+    *,
+    cache_anchor_indices: Sequence[int] = (),
 ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]]]:
     """Stream L.L1 — annotate the outbound payload for prompt caching.
 
     Rewrites ``system`` from string form to a one-element block list
     with ``cache_control`` on the block, and adds ``cache_control`` to
     the last content block of each of the trailing
-    ``_CACHE_CONTROL_TAIL_COUNT`` non-system messages (Hermes
-    "system_and_3" layout). The block-list shape is what Anthropic
-    requires when marking ``system`` for caching; the per-message marker
-    lets the upstream cache progressively longer prefixes as the
-    conversation grows. See Mini-ADR L-1.
+    ``_CACHE_CONTROL_TAIL_COUNT`` non-system messages. The block-list
+    shape is what Anthropic requires when marking ``system`` for
+    caching; the per-message marker lets the upstream cache
+    progressively longer prefixes as the conversation grows. See
+    Mini-ADR L-1.
+
+    Capability Uplift Sprint #8 (Mini-ADR U-7): also marks any
+    messages whose index appears in ``cache_anchor_indices`` —
+    currently the ``per_session`` memory block at position 1. These
+    are deduplicated against the trailing window so a message that
+    is both an anchor and in the tail only gets one marker. Anthropic
+    caps total ``cache_control`` markers at 4 per request
+    (``system + _CACHE_CONTROL_TAIL_COUNT (2) + anchors (≤ 1) = ≤ 4``
+    in Sprint #8 setup).
 
     Returns ``(system_payload, mapped)`` — ``mapped`` is mutated in
     place for clarity but also returned so callers can keep a
@@ -306,10 +331,24 @@ def _apply_cache_control(
             {"type": "text", "text": system, "cache_control": dict(_CACHE_CONTROL_EPHEMERAL)}
         ]
 
-    if mapped:
-        tail_indices = range(max(0, len(mapped) - _CACHE_CONTROL_TAIL_COUNT), len(mapped))
-        for idx in tail_indices:
-            _mark_message_cache_control(mapped[idx])
+    if not mapped:
+        return system_payload, mapped
+
+    # Build the set of indices to mark — union of the tail window and
+    # the explicit anchor list. ``set`` collapses overlap (an anchor
+    # already inside the tail window only gets one marker).
+    tail_start = max(0, len(mapped) - _CACHE_CONTROL_TAIL_COUNT)
+    indices_to_mark: set[int] = set(range(tail_start, len(mapped)))
+    for idx in cache_anchor_indices:
+        if 0 <= idx < len(mapped):
+            indices_to_mark.add(idx)
+            # Track anchor application separately from the tail so the
+            # uplift metric reflects helix-injected breakpoints only.
+            if idx < tail_start:
+                record_anthropic_cache_anchor()
+
+    for idx in sorted(indices_to_mark):
+        _mark_message_cache_control(mapped[idx])
 
     return system_payload, mapped
 
@@ -342,20 +381,29 @@ def _mark_message_cache_control(message: dict[str, Any]) -> None:
 
 async def _to_anthropic_messages(
     messages: Sequence[BaseMessage], resolver: ImageResolver | None
-) -> tuple[str | None, list[dict[str, Any]]]:
+) -> tuple[str | None, list[dict[str, Any]], list[int]]:
     """Split system content from the message list and map the rest.
 
     Anthropic places system prompts in a top-level ``system`` field; we
     concatenate any :class:`SystemMessage` instances we find rather
     than emitting an unsupported ``role: "system"`` message.
+
+    Capability Uplift Sprint #8 (Mini-ADR U-7): tracks the indices
+    (in the mapped list) of messages whose ``additional_kwargs`` carry
+    ``"helix_cache_anchor": True`` so :func:`_apply_cache_control` can
+    mark them with ``cache_control`` for prompt-cache prefix coverage.
+    Returned as a side channel rather than baked into the mapped dicts
+    so the wire payload stays Anthropic-clean.
     """
     system_parts: list[str] = []
     mapped: list[dict[str, Any]] = []
+    cache_anchor_indices: list[int] = []
 
     for msg in messages:
         if isinstance(msg, SystemMessage):
             system_parts.append(_message_text(msg))
-        elif isinstance(msg, HumanMessage):
+            continue
+        if isinstance(msg, HumanMessage):
             mapped.append({"role": "user", "content": await _human_content(msg, resolver)})
         elif isinstance(msg, AIMessage):
             mapped.append(_ai_message_to_anthropic(msg))
@@ -370,9 +418,14 @@ async def _to_anthropic_messages(
                 type(msg).__name__,
             )
             mapped.append({"role": "user", "content": _message_text(msg)})
+        # Sprint #8 — note cache anchors AFTER the mapped append so the
+        # index points at the freshly-added dict.
+        extra = getattr(msg, "additional_kwargs", None)
+        if isinstance(extra, dict) and extra.get("helix_cache_anchor"):
+            cache_anchor_indices.append(len(mapped) - 1)
 
     system = "\n\n".join(p for p in system_parts if p) or None
-    return system, mapped
+    return system, mapped, cache_anchor_indices
 
 
 def _ai_message_to_anthropic(msg: AIMessage) -> dict[str, Any]:

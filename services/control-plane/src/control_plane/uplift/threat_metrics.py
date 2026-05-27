@@ -11,8 +11,10 @@ thin re-export so Sprint #1 callers (``api/triggers.py``,
 from __future__ import annotations
 
 from helix_agent.common.uplift_metrics import (
+    record_anthropic_cache_anchor,
     record_memory_blocked,
     record_memory_drift,
+    record_memory_inject_mode,
     record_memory_redacted,
     record_memory_retrieval,
     record_threat_pattern_hits,
@@ -21,8 +23,10 @@ from helix_agent.common.uplift_metrics import (
 )
 
 __all__ = [
+    "record_anthropic_cache_anchor",
     "record_memory_blocked",
     "record_memory_drift",
+    "record_memory_inject_mode",
     "record_memory_redacted",
     "record_memory_retrieval",
     "record_threat_pattern_hits",

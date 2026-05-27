@@ -63,6 +63,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
 from helix_agent.common.observability import helix_counter
+from helix_agent.common.uplift_metrics import record_memory_inject_mode
 from helix_agent.protocol import MemoryItem, Plan
 from helix_agent.runtime.middleware import (
     MiddlewareChain,
@@ -137,6 +138,8 @@ def build_react_graph(
     context_compressor: ContextCompressor | None = None,
     approval_required_tools: frozenset[str] = frozenset(),
     approval_timeout_s: int = 86400,
+    # Capability Uplift Sprint #8 — Mini-ADR U-8.
+    memory_recall_mode: Literal["per_session", "per_turn"] = "per_session",
 ) -> StateGraph[AgentState, None, AgentState, AgentState]:
     """Assemble the ReAct ``StateGraph`` and return it uncompiled.
 
@@ -191,9 +194,16 @@ def build_react_graph(
         if plan is not None:
             messages = _inject_plan(messages, plan)
         # Stream J.3 — render recalled long-term memories into context.
+        # Capability Uplift Sprint #8 (Mini-ADR U-8) — ``memory_recall_mode``
+        # decides where the block lands: ``per_session`` (default) anchors
+        # it at the prefix slot ``messages[1]`` so the Anthropic adapter
+        # can mark it with ``cache_control`` and the prompt cache covers
+        # ``[system, task, memories]`` across all turns. ``per_turn`` keeps
+        # the J.3 tail-injection behavior as a legacy escape hatch.
         memories = state.get("recalled_memories")
         if memories:
-            messages = _inject_memories(messages, memories)
+            messages = _inject_memories(messages, memories, mode=memory_recall_mode)
+            record_memory_inject_mode(mode=memory_recall_mode)
         # Stream L.L4 — inject a ``<mutation-advisory>`` HumanMessage
         # listing file mutations that did NOT land in the previous
         # tools batch. Mini-ADR L-4: the advisory is part of the
@@ -504,12 +514,48 @@ def _inject_plan(messages: list[BaseMessage], plan: Plan) -> list[BaseMessage]:
     return _append_tail_human_message(messages, render_plan(plan))
 
 
-def _inject_memories(messages: list[BaseMessage], memories: list[MemoryItem]) -> list[BaseMessage]:
-    """Render recalled long-term memories (J.3) into the prompt as a
-    tail HumanMessage — same L1 rationale as :func:`_inject_plan`."""
+def _inject_memories(
+    messages: list[BaseMessage],
+    memories: list[MemoryItem],
+    *,
+    mode: Literal["per_session", "per_turn"] = "per_session",
+) -> list[BaseMessage]:
+    """Render recalled long-term memories (J.3) into the prompt.
+
+    ``mode='per_turn'`` (legacy J.3): append a HumanMessage at the tail
+    every turn — same L1 rationale as :func:`_inject_plan`. The memory
+    block's position shifts every turn as AI/Tool messages accumulate,
+    so the Anthropic prompt cache cannot include it.
+
+    ``mode='per_session'`` (Sprint #8 default, Mini-ADR U-8): insert
+    the memory block once at messages position 1 (right after the
+    user's task) with ``additional_kwargs["helix_cache_anchor"] = True``
+    so the Anthropic adapter (Mini-ADR U-7) marks it with
+    ``cache_control: ephemeral``. The prefix
+    ``[system_payload, task, memories]`` is then cached across every
+    turn of the session — long sessions stop paying full price for the
+    memory block on every step.
+    """
     lines = ["## Relevant memories from past sessions"]
     lines.extend(f"- ({item.kind}) {item.content}" for item in memories)
-    return _append_tail_human_message(messages, "\n".join(lines))
+    body = "\n".join(lines)
+
+    if mode == "per_turn":
+        return _append_tail_human_message(messages, body)
+
+    # per_session: stable prefix slot + cache anchor metadata. The
+    # block lands at position 1 so it sits right after the user task
+    # (messages[0] is typically the SystemMessage placeholder for
+    # in-graph state, but the provider builds ``system`` separately
+    # from its first SystemMessage entry, so ``messages[1]`` is the
+    # first non-system slot for downstream content).
+    block = HumanMessage(
+        content=body,
+        additional_kwargs={"helix_cache_anchor": True},
+    )
+    if not messages:
+        return [block]
+    return [messages[0], block, *messages[1:]]
 
 
 def _build_mutation_advisory(failed: list[MutationOutcome]) -> HumanMessage:

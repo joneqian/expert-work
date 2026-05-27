@@ -390,3 +390,117 @@ The current eval `tools/eval/datasets/memory_recall/zh_en_seed.yaml`
 mixes 4 zh + 4 en cases. M1 should split the baseline so we can detect
 "hybrid regressed on Chinese but improved on English" cleanly — today
 that signal is washed out by the mean.
+
+## 10 — Memory frozen snapshot troubleshooting (Capability Uplift Sprint #8)
+
+Sprint #8 lands ``LongTermMemorySpec.recall_mode`` (default
+``per_session``) plus an Anthropic ``cache_control`` anchor on the
+``per_session`` memory block. The expected effect: long sessions stop
+paying full input-token price for the memory list on every turn.
+
+### 10.1 Quick health check
+
+After the Sprint #8 deploy, the following metrics should move:
+
+```promql
+# Should climb toward 1.0 — every active recall picks per_session
+# unless the manifest explicitly opts out.
+helix:uplift:memory_per_session_adoption_ratio:1h
+
+# Should be > 0 once any per_session session runs against Anthropic.
+helix:uplift:anthropic_cache_anchor_rate:5m
+
+# Pre-Sprint-#8 baseline + the climb after deploy is the headline
+# metric (L.L1 already wired it).
+helix:llm:anthropic_cache_read_ratio:5m
+```
+
+A flat ``anthropic_cache_anchor_rate`` after deploy is the red flag
+that something in the metadata propagation broke (see § 10.4).
+
+### 10.2 When to suspect cache miss is back
+
+- ``anthropic_cache_read_ratio:5m`` did NOT climb 24 h after deploy.
+- A tenant's per-run input token cost stays flat across many turns
+  of one session (no cache hits accumulating).
+- ``anthropic_cache_anchor_rate:5m`` is 0 even though
+  ``memory_per_session_adoption_ratio:1h`` is > 0.
+
+### 10.3 Switch a tenant back to `per_turn`
+
+The escape hatch for an agent that self-modifies its memory mid-session
+and needs the next turn to see the change (M0 has no such tool;
+reserved for M1):
+
+```sh
+# Currently set via manifest publish; agent_spec
+# memory.long_term.recall_mode = "per_turn"
+```
+
+After publish the next agent build picks up the legacy tail-injection
+behavior. The metric ``memory_per_session_adoption_ratio:1h`` will
+fall as the tenant's traffic shifts modes.
+
+### 10.4 Diagnose `anthropic_cache_anchor_rate` = 0
+
+Walk the propagation path top-down:
+
+1. **Did the protocol field land?** Pull the active manifest:
+
+   ```sh
+   curl /v1/agents/<name>/versions/<v> | jq '.spec.spec.memory.long_term.recall_mode'
+   ```
+
+   Expected: ``"per_session"``. Anything else → tenant opted out.
+
+2. **Did the builder pick the per_session branch?** Grep agent logs
+   for the structured line ``memory.recall count=N mode=per_session``
+   (`graph_builder/memory.py memory_recall_node`). Missing or
+   ``mode=per_turn`` → ``_build_memory_nodes`` lost the manifest field.
+
+3. **Did the anchor flag survive into the message?** Add a one-shot
+   log in ``_inject_memories`` to confirm
+   ``additional_kwargs["helix_cache_anchor"] = True`` ends up on the
+   built block.
+
+4. **Did the Anthropic adapter see the flag?** Add a one-shot log in
+   ``_to_anthropic_messages`` for the ``cache_anchor_indices`` it
+   returns. ``[]`` → the propagation lost the metadata somewhere
+   upstream (the agent_node middleware chain rewrites the message
+   list; check for an unwrap that dropped ``additional_kwargs``).
+
+5. **Did the marker land on the wire?** Inspect the outbound body for
+   ``cache_control`` count via the
+   ``test_cache_anchor_total_markers_within_anthropic_cap`` pattern:
+
+   ```python
+   any(b.get("cache_control") for m in body["messages"]
+       for b in (m["content"] if isinstance(m["content"], list) else []))
+   ```
+
+   If False here, the anchor exists but the adapter dropped it —
+   regression in ``_apply_cache_control``.
+
+### 10.5 Cache breakpoint budget
+
+Anthropic caps ``cache_control`` markers at **4 per request**.
+Sprint #8 layout: system (1) + tail-2 (2) + memory anchor (≤ 1) ≤ 4.
+A future feature that wants its own anchor will need either:
+
+- to share the existing ``helix_cache_anchor`` marker slot (only one
+  feature can use it at a time), OR
+- to land alongside another tail-count reduction (e.g.
+  ``_CACHE_CONTROL_TAIL_COUNT`` from 2 to 1) to free a slot.
+
+Pre-merge any such feature, add a regression test in
+``test_llm_provider_anthropic.py`` that exercises the worst-case
+message list and asserts ``_count_cache_markers(call) <= 4`` to catch
+the regression in CI.
+
+### 10.6 M1 follow-up: per-tenant memory-cache budget tracking
+
+Sprint #8 metrics report aggregate cache anchor application; M1 should
+add per-tenant decomposition (``cache_anchor_total{tenant_id}``) so
+SecOps can answer "which tenant's memory churn is breaking the cache
+the most" (e.g. an agent that re-extracts memory every turn would
+defeat the snapshot benefit even with the per_session mode).

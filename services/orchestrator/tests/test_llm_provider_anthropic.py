@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -502,10 +503,11 @@ async def test_cache_control_applied_to_system_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cache_control_marks_trailing_three_messages() -> None:
-    """L1 layout: the last three non-system messages each get a
-    ``cache_control`` marker on their final content block (Hermes
-    system_and_3 layout, max 4 cache breakpoints)."""
+async def test_cache_control_marks_trailing_two_messages() -> None:
+    """L1 layout + Capability Uplift Sprint #8 (Mini-ADR U-7):
+    ``_CACHE_CONTROL_TAIL_COUNT`` dropped from 3 to 2 to make room
+    for the Sprint #8 memory anchor breakpoint (system + tail-2 +
+    anchor ≤ Anthropic's 4-breakpoint cap)."""
     client = RecordingAnthropicClient(
         response={"content": [{"type": "text", "text": "ok"}]},
     )
@@ -523,14 +525,13 @@ async def test_cache_control_marks_trailing_three_messages() -> None:
     )
 
     msgs = client.calls[0]["messages"]
-    # First two messages stay un-marked (only the last three carry markers).
-    first_content = msgs[0]["content"]
-    second_content = msgs[1]["content"]
-    assert first_content == "m1"
-    assert second_content == "m2"
-    # The trailing three messages have their content lifted to a block
+    # First three messages stay un-marked (only the last two carry markers).
+    assert msgs[0]["content"] == "m1"
+    assert msgs[1]["content"] == "m2"
+    assert msgs[2]["content"] == "m3"
+    # The trailing two messages have their content lifted to a block
     # list with a cache_control marker on the final block.
-    for tail_msg in msgs[2:]:
+    for tail_msg in msgs[3:]:
         content = tail_msg["content"]
         assert isinstance(content, list)
         assert content[-1]["cache_control"] == {"type": "ephemeral"}
@@ -602,8 +603,155 @@ async def test_cache_control_no_system_just_messages() -> None:
 
     assert client.calls[0]["system"] is None
     # The single message picks up the cache marker (trailing window of
-    # size 3 captures it).
+    # size 2 captures it).
     assert client.calls[0]["messages"][0]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
+# ---------------------------------------------------------------------------
+# Capability Uplift Sprint #8 — cache anchor (Mini-ADR U-7)
+# ---------------------------------------------------------------------------
+
+
+def _count_cache_markers(call: dict[str, Any]) -> int:
+    """Count every ``cache_control`` marker in the outbound call body
+    (system block + message content blocks)."""
+    n = 0
+    system = call.get("system")
+    if isinstance(system, list):
+        for block in system:
+            if isinstance(block, dict) and "cache_control" in block:
+                n += 1
+    for msg in call.get("messages", []):
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and "cache_control" in block:
+                    n += 1
+    return n
+
+
+@pytest.mark.asyncio
+async def test_cache_anchor_marks_helix_cache_anchor_message() -> None:
+    """Sprint #8 Mini-ADR U-7: a message whose ``additional_kwargs``
+    carry ``helix_cache_anchor: True`` gets a ``cache_control`` marker
+    on its terminal content block — even if it sits well outside the
+    trailing tail window."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+
+    memory_block = HumanMessage(
+        content="user prefers concise replies",
+        additional_kwargs={"helix_cache_anchor": True},
+    )
+
+    await provider.complete(
+        messages=[
+            HumanMessage(content="task"),
+            memory_block,
+            AIMessage(content="thinking"),
+            HumanMessage(content="m3"),
+            AIMessage(content="m4"),
+            HumanMessage(content="m5"),
+        ],
+        tools=[],
+    )
+
+    msgs = client.calls[0]["messages"]
+    # Anchor at index 1 — far outside the trailing two-message window
+    # (which starts at index 4) — still picks up the marker.
+    anchor = msgs[1]["content"]
+    assert isinstance(anchor, list)
+    assert anchor[-1]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.asyncio
+async def test_cache_anchor_total_markers_within_anthropic_cap() -> None:
+    """Sprint #8 Mini-ADR U-7: system (1) + tail-2 (2) + memory anchor
+    (1) ≤ 4 ≤ Anthropic's documented per-request cache_control cap."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+
+    memory_block = HumanMessage(
+        content="memory",
+        additional_kwargs={"helix_cache_anchor": True},
+    )
+
+    await provider.complete(
+        messages=[
+            SystemMessage(content="system"),
+            HumanMessage(content="task"),
+            memory_block,
+            AIMessage(content="a1"),
+            HumanMessage(content="h2"),
+            AIMessage(content="a2"),
+            HumanMessage(content="h3"),
+        ],
+        tools=[],
+    )
+
+    assert _count_cache_markers(client.calls[0]) <= 4
+
+
+@pytest.mark.asyncio
+async def test_cache_anchor_inside_tail_window_does_not_double_mark() -> None:
+    """An anchor that already sits in the trailing window gets exactly
+    one marker, not two — the cap-counting must dedup."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude")
+
+    short_session = HumanMessage(
+        content="memory",
+        additional_kwargs={"helix_cache_anchor": True},
+    )
+
+    await provider.complete(
+        messages=[
+            HumanMessage(content="task"),
+            short_session,
+        ],
+        tools=[],
+    )
+
+    msgs = client.calls[0]["messages"]
+    anchor_blocks = msgs[1]["content"]
+    assert isinstance(anchor_blocks, list)
+    # Exactly one cache_control marker on the anchor, not two.
+    marker_blocks = [b for b in anchor_blocks if isinstance(b, dict) and "cache_control" in b]
+    assert len(marker_blocks) == 1
+
+
+@pytest.mark.asyncio
+async def test_cache_anchor_skipped_when_caching_disabled() -> None:
+    """``cache_enabled=False`` disables the whole feature including
+    the Sprint #8 anchor — a per-model opt-out remains absolute."""
+    client = RecordingAnthropicClient(
+        response={"content": [{"type": "text", "text": "ok"}]},
+    )
+    provider = AnthropicProvider(client=client, model="claude", cache_enabled=False)
+
+    memory_block = HumanMessage(
+        content="memory",
+        additional_kwargs={"helix_cache_anchor": True},
+    )
+
+    await provider.complete(
+        messages=[
+            HumanMessage(content="task"),
+            memory_block,
+            AIMessage(content="a"),
+        ],
+        tools=[],
+    )
+
+    # No system block; messages are plain strings (no block wrapping);
+    # no markers anywhere.
+    assert _count_cache_markers(client.calls[0]) == 0
 
 
 @pytest.mark.asyncio

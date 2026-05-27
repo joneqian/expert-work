@@ -365,6 +365,14 @@ async def build_agent(
         skill_fragments=loaded_skills.prompt_fragments,
     )
 
+    # Capability Uplift Sprint #8 (Mini-ADR U-8) — render mode for the
+    # recalled memory list. Pulls from ``memory.long_term.recall_mode``
+    # (defaults to ``per_session`` per the protocol Literal default);
+    # manifests without ``long_term`` keep the default since the recall
+    # node itself is absent (the parameter is then inert).
+    long_term = spec.spec.memory.long_term if spec.spec.memory is not None else None
+    memory_recall_mode = long_term.recall_mode if long_term is not None else "per_session"
+
     graph = build_react_graph(
         llm_caller=routers.default,
         tool_registry=registry,
@@ -379,6 +387,7 @@ async def build_agent(
         # Stream J.8 (Mini-ADR J-24) — declarative approval gate.
         approval_required_tools=frozenset(spec.spec.policies.approval_required_tools),
         approval_timeout_s=spec.spec.policies.approval_timeout_s,
+        memory_recall_mode=memory_recall_mode,
     )
     compiled = GraphRunner(checkpointer=checkpointer).compile(graph)
     return BuiltAgent(
