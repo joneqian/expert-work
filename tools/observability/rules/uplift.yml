@@ -1,7 +1,7 @@
-# Capability Uplift Sprint #1 + #2 — threat scanner + memory poisoning
-# recording rules and alerts.
+# Capability Uplift Sprint #1 + #2 + #5 — threat scanner + memory
+# poisoning + MCP client HTTP/SSE transport recording rules and alerts.
 #
-# See docs/streams/STREAM-UPLIFT-DESIGN.md § 2.6 + § 3.7.
+# See docs/streams/STREAM-UPLIFT-DESIGN.md § 2.6 + § 3.7 + § 6.7.
 #
 # Sprint #1 SecOps signals:
 #   * helix:uplift:threat_block_rate:5m — total blocked-rate; sustained
@@ -21,6 +21,13 @@
 #     means a pattern-set update is catching historical poisoned memories.
 #   * helix:uplift:memory_block_rate:5m{source=…} — write-time blocks
 #     partitioned by source (api / writeback / dlq).
+#
+# Sprint #5 MCP-client operability signals:
+#   * helix:uplift:mcp_call_failure_rate:5m{transport,server} — short
+#     window for paging; spike points at a degraded remote MCP server.
+#   * helix:uplift:mcp_circuit_open_total{server} — instantaneous count
+#     of servers whose breaker tripped in the last 30 minutes (Mini-ADR
+#     U-13); non-zero means at least one MCP server is offline cap.
 
 groups:
   - name: helix_uplift_threat_scan
@@ -82,6 +89,49 @@ groups:
         expr: |
           sum(rate(helix_uplift_anthropic_cache_anchors_total[5m]))
 
+  - name: helix_uplift_mcp_client
+    interval: 30s
+    rules:
+      # Capability Uplift Sprint #5 — MCP client HTTP/SSE transport.
+      #   * mcp_call_failure_rate:5m — per-(transport, server) failure
+      #     ratio; spikes mean a remote MCP server is degraded.
+      #   * mcp_call_failure_rate:1h — slower trend for capacity reviews.
+      #   * mcp_circuit_open_total — instantaneous count of servers
+      #     currently in the open state (Mini-ADR U-13); >0 means at
+      #     least one MCP server is hard-disabled for the 30-min
+      #     cool-down.
+      - record: helix:uplift:mcp_call_failure_rate:5m
+        expr: |
+          sum by (transport, server) (
+            rate(helix_uplift_mcp_call_total{result!="ok"}[5m])
+          )
+          /
+          clamp_min(
+            sum by (transport, server) (
+              rate(helix_uplift_mcp_call_total[5m])
+            ),
+            1
+          )
+
+      - record: helix:uplift:mcp_call_failure_rate:1h
+        expr: |
+          sum by (transport, server) (
+            rate(helix_uplift_mcp_call_total{result!="ok"}[1h])
+          )
+          /
+          clamp_min(
+            sum by (transport, server) (
+              rate(helix_uplift_mcp_call_total[1h])
+            ),
+            1
+          )
+
+      - record: helix:uplift:mcp_circuit_open_total
+        expr: |
+          sum by (server) (
+            increase(helix_uplift_mcp_circuit_state_total{state="open"}[30m])
+          )
+
   - name: helix_uplift_alerts
     rules:
       # P1 — sustained block-rate spike. Catches a noisy pattern-set
@@ -136,3 +186,34 @@ groups:
           summary: "Memory recall redaction rate elevated"
           description: "Recall redact rate is {{ $value }} / hr sustained 30m — either a noisy pattern update or a write-time scan miss."
           runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/threat-scanner-tuning.md"
+
+      # Capability Uplift Sprint #5 (Mini-ADR U-13) — an MCP server
+      # that the circuit breaker has opened in the last 30 minutes
+      # means every agent that depends on its tools is degraded.
+      # Treat as P2: failure is contained (other tools still work)
+      # but operator should know the server is down and either fix
+      # the remote endpoint or pull the entry from
+      # mcp_servers_config_file.
+      - alert: HelixUpliftMCPServerUnhealthy
+        expr: helix:uplift:mcp_circuit_open_total > 0
+        for: 10m
+        labels:
+          severity: P2
+        annotations:
+          summary: "MCP server circuit open ≥ 10m"
+          description: "Server {{ $labels.server }} is unreachable; agents lose access to its tools. See runbook § 5 to triage."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/mcp-client-tuning.md"
+
+      # P2 — sustained MCP call failure rate spike. Differs from
+      # HelixUpliftMCPServerUnhealthy in that the breaker may not yet
+      # have tripped (failures distributed across many servers / brief
+      # bursts that don't hit threshold).
+      - alert: HelixUpliftMCPCallFailureRateSpike
+        expr: helix:uplift:mcp_call_failure_rate:5m > 0.5
+        for: 15m
+        labels:
+          severity: P2
+        annotations:
+          summary: "MCP call failure rate spike on {{ $labels.server }}"
+          description: "{{ $labels.transport }} server {{ $labels.server }} failure rate is {{ $value }} sustained 15m. See runbook § 2."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/mcp-client-tuning.md"

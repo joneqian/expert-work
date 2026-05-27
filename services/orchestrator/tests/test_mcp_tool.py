@@ -67,6 +67,130 @@ def test_server_config_accepts_command_and_env() -> None:
     assert cfg.env["DEBUG"] == "1"
 
 
+# --- Capability Uplift Sprint #5 — MCPServerConfig transport extension ----
+
+
+def test_server_config_default_transport_is_stdio() -> None:
+    """Backward compat: existing operator JSON files have no transport field."""
+    cfg = MCPServerConfig(name="fs", command=("npx", "mcp-server-fs"))
+    assert cfg.transport == "stdio"
+
+
+def test_server_config_stdio_rejects_url() -> None:
+    with pytest.raises(ValueError, match=r"stdio.*url"):
+        MCPServerConfig(
+            name="fs",
+            transport="stdio",
+            command=("npx", "x"),
+            url="https://example.com/mcp",
+        )
+
+
+def test_server_config_sse_requires_url() -> None:
+    with pytest.raises(ValueError, match=r"sse.*url"):
+        MCPServerConfig(name="time", transport="sse")
+
+
+def test_server_config_sse_rejects_command() -> None:
+    with pytest.raises(ValueError, match=r"sse.*command"):
+        MCPServerConfig(
+            name="time",
+            transport="sse",
+            url="https://example.com/sse",
+            command=("npx", "x"),
+        )
+
+
+def test_server_config_streamable_http_requires_url() -> None:
+    with pytest.raises(ValueError, match=r"streamable_http.*url"):
+        MCPServerConfig(name="github", transport="streamable_http")
+
+
+def test_server_config_streamable_http_accepts_url_and_headers() -> None:
+    cfg = MCPServerConfig(
+        name="github",
+        transport="streamable_http",
+        url="https://api.githubcopilot.com/mcp/",
+        headers={"X-GitHub-Api-Version": "2025-11-28"},
+    )
+    assert cfg.url == "https://api.githubcopilot.com/mcp/"
+    assert cfg.headers["X-GitHub-Api-Version"] == "2025-11-28"
+
+
+def test_server_config_bearer_requires_token_ref() -> None:
+    with pytest.raises(ValueError, match=r"bearer.*token_ref"):
+        MCPServerConfig(
+            name="github",
+            transport="streamable_http",
+            url="https://api.example.com/mcp",
+            auth_type="bearer",
+            auth_config={},
+        )
+
+
+def test_server_config_bearer_accepts_token_ref() -> None:
+    cfg = MCPServerConfig(
+        name="github",
+        transport="streamable_http",
+        url="https://api.example.com/mcp",
+        auth_type="bearer",
+        auth_config={"token_ref": "secret://mcp/github/api-token"},
+    )
+    assert cfg.auth_type == "bearer"
+    assert cfg.auth_config["token_ref"] == "secret://mcp/github/api-token"
+
+
+def test_server_config_oauth2_requires_client_id_and_scope() -> None:
+    with pytest.raises(ValueError, match=r"oauth2.*client_id"):
+        MCPServerConfig(
+            name="linear",
+            transport="streamable_http",
+            url="https://mcp.linear.app/",
+            auth_type="oauth2",
+            auth_config={"scope": "read"},
+        )
+    with pytest.raises(ValueError, match=r"oauth2.*scope"):
+        MCPServerConfig(
+            name="linear",
+            transport="streamable_http",
+            url="https://mcp.linear.app/",
+            auth_type="oauth2",
+            auth_config={"client_id": "abc"},
+        )
+
+
+def test_server_config_oauth2_accepts_with_client_id_and_scope() -> None:
+    """Storing oauth2 config is allowed; the runtime fail-fast (U-12)
+    happens later in the factory when build_mcp_pool tries to connect."""
+    cfg = MCPServerConfig(
+        name="linear",
+        transport="streamable_http",
+        url="https://mcp.linear.app/",
+        auth_type="oauth2",
+        auth_config={"client_id": "helix-agent", "scope": "read"},
+    )
+    assert cfg.auth_type == "oauth2"
+
+
+def test_server_config_repr_redacts_headers_and_auth_config() -> None:
+    """Secret 隔离 (Mini-ADR U-11): bearer token / auth headers must not
+    appear in dataclass repr so logs / tracebacks never leak credentials."""
+    cfg = MCPServerConfig(
+        name="github",
+        transport="streamable_http",
+        url="https://api.example.com/mcp",
+        headers={"Authorization": "Bearer SECRET-TOKEN-DO-NOT-LEAK"},
+        auth_type="bearer",
+        auth_config={"token_ref": "secret://mcp/github/api-token"},
+    )
+    rendered = repr(cfg)
+    assert "SECRET-TOKEN-DO-NOT-LEAK" not in rendered
+    assert "secret://mcp/github/api-token" not in rendered
+    # name + transport + url are operator metadata, fine to show
+    assert "github" in rendered
+    assert "streamable_http" in rendered
+
+
 # ---------------------------------------------------------------------------
 # RecordingMCPClient
 # ---------------------------------------------------------------------------

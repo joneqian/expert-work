@@ -55,7 +55,9 @@ from orchestrator.tools import (
     MCPServerConfig,
     MCPServerPool,
     Reranker,
+    SseMCPClient,
     StdioMCPClient,
+    StreamableHttpMCPClient,
     SupervisorClient,
     TavilyClient,
 )
@@ -227,49 +229,129 @@ async def resolve_web_search_client(
 
 
 #: Builds an :class:`MCPClient` from a server config. The default
-#: launches a real stdio subprocess; tests inject a recording client.
+#: dispatches on ``config.transport``; tests inject a recording client.
 McpClientFactory = Callable[[MCPServerConfig], Awaitable[MCPClient]]
 
 
 def _load_mcp_server_configs(path: str) -> list[MCPServerConfig]:
-    """Parse the platform MCP-server JSON file (Mini-ADR E-17).
+    """Parse the platform MCP-server JSON file (Mini-ADR E-17 + U-10).
 
-    Shape: ``[{"name": str, "command": [str, ...], "env": {str: str}}]``.
-    A malformed entry raises at boot — fail-fast on misconfiguration.
+    Backward-compatible shapes:
+
+    - stdio (legacy default): ``{"name", "command": [...], "env": {...}}``
+    - stdio (explicit): ``{"name", "transport": "stdio", "command": [...]}``
+    - sse / streamable_http (new in Capability Uplift Sprint #5):
+      ``{"name", "transport": "sse" | "streamable_http", "url": str,
+         "headers": {...}, "auth_type": "none" | "bearer" | "oauth2",
+         "auth_config": {...}, "timeout_s": float, "retry_max": int}``
+
+    Unknown keys raise — fail-fast on operator typos.
     """
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         msg = f"mcp_servers_config_file must contain a JSON array: {path}"
         raise ValueError(msg)
-    return [
-        MCPServerConfig(
-            name=entry["name"],
-            command=entry["command"],
-            env=entry.get("env", {}),
+    return [_build_mcp_server_config(entry) for entry in raw]
+
+
+def _build_mcp_server_config(entry: dict[str, Any]) -> MCPServerConfig:
+    """Promote one JSON entry to a typed :class:`MCPServerConfig`.
+
+    Validation (transport/url/auth pairing) happens in the dataclass
+    ``__post_init__``; this helper only does the dict→kwarg lift +
+    backward-compatible transport defaulting.
+    """
+    transport = entry.get("transport", "stdio")
+    kwargs: dict[str, Any] = {"name": entry["name"], "transport": transport}
+    if transport == "stdio":
+        kwargs["command"] = entry["command"]
+        if "env" in entry:
+            kwargs["env"] = entry["env"]
+    else:
+        kwargs["url"] = entry.get("url")
+        if "headers" in entry:
+            kwargs["headers"] = entry["headers"]
+    for opt in ("auth_type", "auth_config", "timeout_s", "retry_max"):
+        if opt in entry:
+            kwargs[opt] = entry[opt]
+    return MCPServerConfig(**kwargs)
+
+
+async def _build_mcp_client(
+    config: MCPServerConfig,
+    *,
+    secret_store: SecretStore | None,
+) -> MCPClient:
+    """Build the right :class:`MCPClient` for ``config.transport``.
+
+    OAuth2 servers fail fast (Mini-ADR U-12) — the schema accepts the
+    config but the flow ships in a follow-up sprint. Bearer auth
+    resolves ``auth_config["token_ref"]`` through the
+    :class:`SecretStore` (Mini-ADR U-11) and injects an
+    ``Authorization`` header without storing the value on the config.
+    """
+    if config.transport == "stdio":
+        client: MCPClient = StdioMCPClient(config=config)
+        await client.start()  # type: ignore[attr-defined]
+        return client
+
+    if config.auth_type == "oauth2":
+        from orchestrator.tools.mcp import MCPOAuthNotImplementedError
+
+        msg = (
+            f"mcp server {config.name!r}: oauth2 auth flow not implemented "
+            "in this release — see Mini-ADR L.L8-MCP. Switch to "
+            'auth_type="bearer" with a token_ref or remove the server.'
         )
-        for entry in raw
-    ]
+        raise MCPOAuthNotImplementedError(msg)
 
+    resolved_headers = dict(config.headers)
+    if config.auth_type == "bearer":
+        if secret_store is None:
+            msg = (
+                f"mcp server {config.name!r}: bearer auth needs a "
+                "SecretStore but none was provided to build_mcp_pool"
+            )
+            raise RuntimeError(msg)
+        token_ref = config.auth_config["token_ref"]
+        token = await secret_store.get(parse_secret_ref(token_ref))
+        resolved_headers["Authorization"] = f"Bearer {token}"
 
-async def _default_mcp_client(config: MCPServerConfig) -> MCPClient:
-    client = StdioMCPClient(config=config)
-    await client.start()
-    return client
+    remote: SseMCPClient | StreamableHttpMCPClient
+    if config.transport == "sse":
+        remote = SseMCPClient(config=config, resolved_headers=resolved_headers)
+    else:
+        remote = StreamableHttpMCPClient(config=config, resolved_headers=resolved_headers)
+    await remote.start()
+    return remote
 
 
 @asynccontextmanager
 async def build_mcp_pool(
     config_file: str | None,
     *,
-    client_factory: McpClientFactory = _default_mcp_client,
+    secret_store: SecretStore | None = None,
+    client_factory: McpClientFactory | None = None,
 ) -> AsyncIterator[MCPServerPool]:
     """Yield an :class:`MCPServerPool` of the platform's MCP servers.
 
-    The pool launches one subprocess per entry in ``config_file``
-    (Mini-ADR E-17 — operator-controlled, never tenant input). ``None``
-    yields an empty pool. The pool — and every subprocess — is torn
-    down on exit, including when a mid-startup failure aborts boot.
+    The pool launches each entry in ``config_file`` (Mini-ADR E-17 —
+    operator-controlled, never tenant input). ``None`` yields an empty
+    pool. The pool — and every connection / subprocess — is torn down
+    on exit, including when a mid-startup failure aborts boot.
+
+    ``client_factory`` overrides the default transport-dispatching
+    factory (used by tests injecting a :class:`RecordingMCPClient`).
+    ``secret_store`` is required for bearer-auth remote servers but
+    unused for stdio / unauthenticated remotes.
     """
+    if client_factory is None:
+
+        async def _factory(cfg: MCPServerConfig) -> MCPClient:
+            return await _build_mcp_client(cfg, secret_store=secret_store)
+
+        client_factory = _factory
+
     pool = MCPServerPool()
     try:
         if config_file:

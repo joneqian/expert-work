@@ -619,7 +619,7 @@ helix orchestrator ──── stdin/stdout pipe ──── 本地子进程(M
 
 #### 6.2.1 In-scope
 
-- 扩 `MCPClient` 实现:新增 `HttpMCPClient` / `SseMCPClient` / `StreamableHttpMCPClient`(基于 anthropic 官方 `mcp` Python SDK)。
+- 扩 `MCPClient` 实现:新增 `SseMCPClient` / `StreamableHttpMCPClient`(基于 anthropic 官方 `mcp` Python SDK)。
 - `MCPServerConfig` dataclass 扩展支持多 transport(`transport` 字段 + transport-specific 字段)。
 - 平台 MCP servers 配置文件(`mcp_servers_config_file`,Mini-ADR E-17 控制点)schema 扩展兼容多 transport。
 - per-tenant manifest `mcp_servers` 维度 — 只用作 enablement / filtering(沿用 E-17,**不允许 tenant 提交 transport/url/headers**)。
@@ -660,16 +660,16 @@ helix orchestrator ──── stdin/stdout pipe ──── 本地子进程(M
         │     MCPClient Protocol        │
         └──────────────┬───────────────┘
                        │
-       ┌───────────────┼───────────────┬────────────────┐
-       │               │               │                │
-       ▼               ▼               ▼                ▼
-  StdioMCPClient  HttpMCPClient   SseMCPClient   StreamableHttpMCPClient
-  (existing)      (new)           (new)          (new)
-       │               │               │                │
-       └───────────────┴───────────────┴────────────────┘
+       ┌───────────────┼────────────────────┐
+       │               │                    │
+       ▼               ▼                    ▼
+  StdioMCPClient  SseMCPClient   StreamableHttpMCPClient
+  (existing)      (new)          (new)
+       │               │                    │
+       └───────────────┴────────────────────┘
                             │
                   anthropic mcp SDK
-            (stdio_client / http_client / sse_client /
+            (stdio_client / sse_client /
               streamablehttp_client + ClientSession)
 ```
 
@@ -677,7 +677,9 @@ helix orchestrator ──── stdin/stdout pipe ──── 本地子进程(M
 
 #### 6.3.2 Mini-ADR U-9:transport 实现复用官方 SDK,不自研
 
-**决策**:`HttpMCPClient` / `SseMCPClient` / `StreamableHttpMCPClient` 全部包装 anthropic 官方 `mcp` Python SDK 的对应客户端(`mcp.client.streamable_http.streamablehttp_client` / `mcp.client.sse.sse_client` / `mcp.client.http.http_client`)。
+> **2026-05-27 实施期纠正**:设计 PR(#311) U-10 transport 列表写了 4 个(`stdio | http | sse | streamable_http`),其中 `http` 是事实错误 — MCP 协议规范只有 SSE(legacy)+ StreamableHTTP(modern)两种 HTTP-based transport,SDK 无 `mcp.client.http` 模块。实际实施 3 个 transport(`stdio | sse | streamable_http`)。WebSocket 仍按设计 out-of-scope。
+
+**决策**:`SseMCPClient` / `StreamableHttpMCPClient` 包装 anthropic 官方 `mcp` Python SDK 对应客户端(`mcp.client.sse.sse_client` / `mcp.client.streamable_http.streamablehttp_client`)。
 
 **理由**:
 - MCP 协议在 2026 仍有 draft 字段;自研 transport 需要持续追协议变更,工程成本爆炸
@@ -688,7 +690,7 @@ helix orchestrator ──── stdin/stdout pipe ──── 本地子进程(M
 
 #### 6.3.3 Mini-ADR U-10:`MCPServerConfig` 扩展 — 中央配置 + transport 字段
 
-**决策**:`MCPServerConfig` dataclass 加 `transport: Literal["stdio", "http", "sse", "streamable_http"] = "stdio"` 字段 + transport-specific 字段(`url`, `headers`, `auth_type`, `auth_config`)。stdio 配置无 `transport` 字段时默认 `"stdio"`(后向兼容现有 `mcp_servers_config_file`)。
+**决策**:`MCPServerConfig` dataclass 加 `transport: Literal["stdio", "sse", "streamable_http"] = "stdio"` 字段 + transport-specific 字段(`url`, `headers`, `auth_type`, `auth_config`)。stdio 配置无 `transport` 字段时默认 `"stdio"`(后向兼容现有 `mcp_servers_config_file`)。
 
 新 shape:
 
@@ -696,11 +698,11 @@ helix orchestrator ──── stdin/stdout pipe ──── 本地子进程(M
 @dataclass(frozen=True)
 class MCPServerConfig:
     name: str
-    transport: Literal["stdio", "http", "sse", "streamable_http"] = "stdio"
+    transport: Literal["stdio", "sse", "streamable_http"] = "stdio"
     # stdio fields(transport="stdio" 时必填)
     command: Sequence[str] | None = None
     env: Mapping[str, str] = field(default_factory=dict)
-    # http / sse / streamable_http fields(对应 transport 时必填)
+    # sse / streamable_http fields(对应 transport 时必填)
     url: str | None = None
     headers: Mapping[str, str] = field(default_factory=dict)
     # auth(本 Sprint 只实现 "none" 和 "bearer";"oauth2" 存配置不实现 flow)
@@ -713,7 +715,7 @@ class MCPServerConfig:
 
 `__post_init__` 校验:
 - `transport == "stdio"` → `command` 必填,`url` 必须为 None
-- `transport in ("http", "sse", "streamable_http")` → `url` 必填,`command` 必须为 None
+- `transport in ("sse", "streamable_http")` → `url` 必填,`command` 必须为 None
 - `auth_type == "bearer"` → `auth_config["token_ref"]` 必填(指向 `secret://...`)
 - `auth_type == "oauth2"` → `auth_config` 必须有 `client_id` / `scope`(本 Sprint 只存,运行时若实际 connect 抛 `NotImplementedError`)
 
@@ -805,7 +807,7 @@ per-tenant `tenant_config.mcp_servers` 字段在本 Sprint **不增加新含义*
 ```
 services/orchestrator/src/orchestrator/tools/mcp.py
   - 扩 MCPServerConfig(transport 字段 + url/headers/auth_type/auth_config + timeout_s/retry_max)
-  - 加 HttpMCPClient / SseMCPClient / StreamableHttpMCPClient(各 ~80 行,包装 SDK)
+  - 加 SseMCPClient / StreamableHttpMCPClient(各 ~80 行,包装 SDK)
   - 加 _MCPCircuitBreaker(同进程内每 server 状态机)
   - 加 MCPCallTimeoutError / MCPServerUnhealthyError 异常类
 

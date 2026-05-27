@@ -504,7 +504,10 @@ def create_app(
                     secret_store=resolved_secret_store,
                 )
                 mcp_pool = await stack.enter_async_context(
-                    build_mcp_pool(resolved_settings.mcp_servers_config_file)
+                    build_mcp_pool(
+                        resolved_settings.mcp_servers_config_file,
+                        secret_store=resolved_secret_store,
+                    )
                 )
                 # Stream J.6 — object store for uploaded images + the
                 # image resolver both multimodal paths draw on (Path A

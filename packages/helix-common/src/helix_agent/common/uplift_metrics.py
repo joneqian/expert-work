@@ -80,6 +80,21 @@ _anthropic_cache_anchors_total = helix_counter(
     "(currently only Sprint #8 memory frozen snapshot).",
 )
 
+# Capability Uplift Sprint #5 — MCP client HTTP/SSE transport observability.
+_mcp_call_total = helix_counter(
+    "helix_uplift_mcp_call_total",
+    "MCP tool-call attempts partitioned by transport / server / result. "
+    "Result enum: ok | timeout | 4xx | 5xx | circuit_open | transport_err.",
+    label_names=("transport", "server", "result"),
+)
+
+_mcp_circuit_state_total = helix_counter(
+    "helix_uplift_mcp_circuit_state_total",
+    "MCP per-server circuit-breaker transitions (Mini-ADR U-13). "
+    "State enum: closed | half_open | open.",
+    label_names=("server", "state"),
+)
+
 
 def record_threat_scan(*, scope: str, result: str) -> None:
     """Bump ``helix_uplift_threat_scan_total``."""
@@ -138,8 +153,27 @@ def record_anthropic_cache_anchor() -> None:
     _anthropic_cache_anchors_total.inc()
 
 
+def record_mcp_call(*, transport: str, server: str, result: str) -> None:
+    """Bump ``helix_uplift_mcp_call_total{transport,server,result}``.
+
+    ``transport`` ∈ ``{"stdio", "sse", "streamable_http"}``;
+    ``result`` ∈ ``{"ok", "timeout", "4xx", "5xx", "circuit_open",
+    "transport_err"}`` (Sprint #5 § 6.7).
+    """
+    _mcp_call_total.labels(transport=transport, server=server, result=result).inc()
+
+
+def record_mcp_circuit_state(*, server: str, state: str) -> None:
+    """Bump ``helix_uplift_mcp_circuit_state_total{server,state}`` once
+    per state transition (Mini-ADR U-13). ``state`` ∈ ``{"closed",
+    "half_open", "open"}``."""
+    _mcp_circuit_state_total.labels(server=server, state=state).inc()
+
+
 __all__ = [
     "record_anthropic_cache_anchor",
+    "record_mcp_call",
+    "record_mcp_circuit_state",
     "record_memory_blocked",
     "record_memory_drift",
     "record_memory_inject_mode",
