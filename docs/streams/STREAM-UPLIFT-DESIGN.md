@@ -312,24 +312,254 @@ async def fire_trigger(...) -> UUID | None:
 
 ---
 
-## 3. Sprint #2 — Memory 投毒防御 + drift backup
+## 3. Sprint #2 — Memory 投毒防御 + drift detection
 
-> **依赖前置**：必须等 Sprint #1 的 `helix_agent.common.threat_patterns` 模块上线后开工(复用 scope=strict + invisible Unicode 表)。
+> **依赖前置**：✅ Sprint #1 已 merge(commit `442cd69`，PR #307)。本 Sprint 复用 `helix_agent.common.threat_patterns`(strict scope + 17 invisible Unicode 表)+ `control_plane.uplift.threat_metrics`(counter helper)+ runbook `threat-scanner-tuning.md`(同一份 SecOps 流程)。
+>
+> **复用范围**：不引入新的扫描器,不动 threat_patterns 注册表;只是把 Sprint #1 的库装到第二组 entry-points(memory write / recall)+ 引入一条新数据完整性能力(drift 检测)。
 
-### 3.1 威胁模型(简述，开工前补全)
+### 3.1 威胁模型
 
-- **Memory write API**：tenant 用户经 API 写 memory → strict scan + block
-- **Memory recall**：从 DB 读出 → recall 期再扫；命中条目在送往 system prompt 时替换为 `[BLOCKED:<finding>]` 占位符；live state 保留原文供用户 audit + 删除
-- **Memory drift backup**：定期 hash + backup；外部直接改 DB 后下次 recall 检测到 hash 不一致 → 触发 drift 流程
+**Attack surface 枚举**(全 memory 子系统所有进入用户 prompt 的可控输入):
 
-### 3.2 关键 ADR(开工前补)
+| 入口 | 字段 | 控制者 | 当前防御 |
+|------|------|--------|----------|
+| `PATCH /v1/memory/{id}` (`api/memory.py:141`) | `body.content` (≤ 4000 字符) | tenant 用户 | ❌ 仅 length cap,无内容扫描 |
+| `memory_writeback_node`(`orchestrator/graph_builder/memory.py:170`) | LLM 提取的 `content` 串 | tenant 用户(经 LLM 间接) | ❌ |
+| `MemoryWritebackDLQ` 重试(`memory/dlq_worker.py:175`) | 同上(失败 writeback 重试) | 同上 | ❌ |
+| `MemoryStore.retrieve()` → `recalled_memories` → 渲染进 system prompt(`graph_builder/memory.py:137`) | DB 持久化的 `content` | tenant 用户 + 内部人员(SQL 注入 / 直连 DB) | ❌ |
+| DB 直连改 `memory_item.content` | DB 列 | 内部人员 / 库被攻破 | ✅ 已有 `content_hash` 列(K.K7),但 **未做读时校验** |
 
-- **U-3**：write strict block vs recall context redaction 的边界
-- **U-4**：drift hash 算法 + 备份频率 + 触发恢复策略
+**威胁分类**:
 
-### 3.3 开发开工前需补完本节
+| 威胁 | 攻击者画像 | 攻击效果(per-user 持久 agent 场景) |
+|------|----------|---------|
+| 用户经 PATCH 直接写恶意 memory | 恶意 tenant 用户 | 后续所有 session 的 recall 喂毒 prompt → agent 长期偏移 |
+| LLM 抽取 trajectory 中混入的 promptware → writeback | 高级攻击者(把恶意指令塞进 tool 输出 / 上传的文档) | 同上,但绕过用户主观意愿(用户没主动写) |
+| DB drift(SQL 注入 / DBA 篡改) | 内部人员 / 高级攻击 | 绕过创建期审核,持久注入 |
+| 模式集更新发现历史 memory 命中新模式 | (非攻击,运营场景) | recall 时被 redact;用户可见,可重写 |
 
-> **本章节 stub** — Sprint #1 完成后、#2 启动前补完(per [memory:design-first-iteration](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)：每个 phase 开始前先做架构设计)。
+**与 Sprint #1 trigger 威胁的差异**(决定 Sprint #2 设计选择):
+
+| 维度 | Trigger(Sprint #1) | Memory(Sprint #2) |
+|------|---------------------|-------------------|
+| Lifetime | 单次 fire 完毕 | **跨 session 持久**(per-user 持久 agent 核心) |
+| 影响面 | 1 个 run 偏离 | **所有未来 sessions** + 跨 agent 实例 |
+| 入口数 | 2(create/patch + fire) | 5(API + writeback + DLQ + retrieve + DB drift) |
+| Drift 风险 | 低(trigger 一旦审过基本不变) | **高**(memory 一直被读写,DB 暴露面大) |
+| 适合的 fail-mode | block(drift) / warn(默认) | **block(write)** / **redact(recall)** |
+
+### 3.2 双层扫描设计 + drift 检测
+
+**Layer A — Write(strict + 全量 block)**:
+
+- **位置**:`MemoryStore.write()`(`packages/helix-persistence/src/.../memory/sql.py` + `memory.py`)→ 内置 strict 扫
+- **行为**:遇到任一 finding → 该 batch 整体拒绝 + raise `MemoryInjectionBlocked` + 一并 emit `MEMORY_INJECTION_BLOCKED` 每条 item;**不进行部分写入**(batch atomicity)
+- **同时**:`api/memory.py` PATCH 预扫一次(给用户 422 oracle-safe 通用文案),失败前不调 embedder(省 OpenAI 调用)
+- **同时**:`orchestrator/graph_builder/memory.py::memory_writeback_node` 捕 `MemoryInjectionBlocked` → DLQ 跳过(不 retry,不丢已学的合法 items — 进 DLQ dead-letter 让 SecOps review)
+- **理由**:写入是创作期,用户有完整 intervene 通道;LLM 写入也应严格,否则 promptware 永久落地
+
+**Layer B — Recall(strict + redact,**不**block**)**:
+
+- **位置**:`memory_recall_node` 在 `memory_store.retrieve()` 之后、写 `recalled_memories` 之前
+- **行为**:每条返回 memory 扫一遍 → 命中即把该 item 的 `content` 替换为 `[BLOCKED:<category>]` 占位符,**留在 list 中** → 再 emit `MEMORY_INJECTION_REDACTED`
+- **不删除 DB 行**:live state 保留 → user 可 UI 看到 + 自决定 `DELETE /v1/memory/{id}`(per K.K6 forget)
+- **理由**:DB drift 场景下 silent-block 会丢用户可见性;redact 同时给安全 + UX
+- **递归 walk vs 仅 content**:memory.content 是 plain `str`,不需要递归
+
+**Drift 检测(轻量,无 schema 变更)**:
+
+- **位置**:`MemoryStore.retrieve()` 内部
+- **行为**:对每条返回 item,重算 `sha256(lower(trim(content)))` → 与 `content_hash` 列比对 → 不一致即:
+  1. emit `MEMORY_DRIFT_DETECTED` audit(`details: {memory_id, stored_hash_prefix, computed_hash_prefix, kind}`,**不写明文 content**)
+  2. 该条仍走 Layer B redact 流程(替占位符,因为内容已不可信)
+  3. 在 SecOps dashboard 形成飙升告警
+- **不做** drift backup / 自动 restore(per § 0.3 out-of-scope,M1 escape hatch)
+- **理由**:`content_hash` 列已经存在(K.K7),零 schema 变更;recompute 是 O(N) 算法不影响 retrieve 延迟(典型 top_k=10)
+
+**Mini-ADR U-3:write block / recall redact 的边界**
+
+- **决定**:write 期 strict + block;recall 期 strict + redact(留 live state)
+- **替代方案 1** write + recall 都 block:拒 — DB drift 场景下用户看不到"我以前的 memory 哪去了",sup ux 灾难
+- **替代方案 2** write + recall 都 redact:拒 — 写入是创作期,strict 模式拒一条用户重写就好;redact 写入会让用户困惑"我刚写的怎么是占位符"
+- **替代方案 3** recall scope=context 而非 strict:拒 — memory lifetime 是跨 session 持久的,污染影响远超 trigger;高强度模式合适
+
+**Mini-ADR U-4:drift 检测在 retrieve 内做,不做 background sweep**
+
+- **决定**:`MemoryStore.retrieve()` 内部 lazy 校验,无独立 worker
+- **替代方案 1** background sweep 全表轮巡:拒 — 大租户 memory 表可能上百万行,定期全扫成本高;且 drift 通常在攻击后第一次 recall 时立即出现,lazy 检测时效性等价
+- **替代方案 2** DB trigger:拒 — 跨数据库可移植性差(M0 only Postgres,但 testcontainers 测试 InMemory store 也要走同一逻辑)
+- **替代方案 3** retrieve 前先 SELECT WHERE content_hash != sha256(content):拒 — Postgres 的 hash 函数和 Python `hashlib.sha256` 在 normalization 上有差(`lower()` / unicode NFC 等),容易假阳
+
+### 3.3 关键 ADR(归档,实施期不可推翻)
+
+参见 § 3.2 末尾 **U-3 + U-4** 两条 Mini-ADR。
+
+### 3.4 实施细节
+
+**文件清单**:
+
+| 文件 | 改动 |
+|------|------|
+| `packages/helix-persistence/src/.../memory/base.py` | 加 `MemoryInjectionBlocked` 异常 + 拓展 `MemoryStore.retrieve()` 返回类型(从 `list[MemoryItem]` → `list[ScannedMemoryItem]` 或加 `redacted: bool` 字段?见 § 3.6 决策) |
+| `packages/helix-persistence/src/.../memory/sql.py` | `SqlMemoryStore.write()` + `.retrieve()` 接入扫描 |
+| `packages/helix-persistence/src/.../memory/memory.py` | `InMemoryMemoryStore.write()` + `.retrieve()` 同上 |
+| `packages/helix-persistence/tests/test_*_memory_store.py` | unit 测试矩阵(§ 3.5) |
+| `services/control-plane/src/control_plane/api/memory.py` | PATCH 预扫,接 422 + audit,oracle-safe 文案 |
+| `services/control-plane/src/control_plane/memory/dlq_worker.py` | 捕 `MemoryInjectionBlocked` → dead-letter 不重试 |
+| `services/orchestrator/src/orchestrator/graph_builder/memory.py` | `memory_recall_node` 后处理:redact + audit;`memory_writeback_node` 捕 block 异常 |
+| `services/control-plane/src/control_plane/uplift/threat_metrics.py` | 加 3 个 memory counter |
+| `packages/helix-protocol/src/helix_agent/protocol/audit.py` | 加 3 个 AuditAction(已在 § 1.2 预声明) |
+| `tools/observability/rules/uplift.yml` | 加 memory drift / redact rate recording rules + alerts |
+| `docs/runbooks/threat-scanner-tuning.md` | 加 § 8 memory drift 响应流程 |
+
+**代码骨架(伪)**:
+
+```python
+# packages/helix-persistence/.../memory/sql.py 内
+class MemoryInjectionBlocked(ValueError):
+    """raised by MemoryStore.write() when any item's content fails strict scan."""
+
+async def write(self, items: Sequence[MemoryItem]) -> None:
+    blocked: list[tuple[MemoryItem, list[ThreatFinding]]] = []
+    for item in items:
+        findings = scan_for_threats(item.content, scope="strict")
+        if findings:
+            blocked.append((item, findings))
+    if blocked:
+        # 一次性 emit 全部命中的 audit(不依赖外部 audit logger,放 _audit_emitter callback)
+        for item, findings in blocked:
+            await self._emit_audit(item, AuditAction.MEMORY_INJECTION_BLOCKED, findings)
+        raise MemoryInjectionBlocked(
+            f"{len(blocked)}/{len(items)} memory items blocked by strict scan"
+        )
+    # ... 原有 batch insert(每行附带 content_hash)
+```
+
+```python
+# graph_builder/memory.py 内 memory_recall_node
+memories = await memory_store.retrieve(...)
+redacted_memories: list[MemoryItem] = []
+for m in memories:
+    findings = scan_for_threats(m.content, scope="strict")
+    if findings:
+        await audit_emit(MEMORY_INJECTION_REDACTED, m, findings)
+        redacted_memories.append(m.model_copy(update={
+            "content": f"[BLOCKED:{findings[0].category}]"
+        }))
+    else:
+        redacted_memories.append(m)
+return {"recalled_memories": redacted_memories}
+```
+
+```python
+# packages/helix-persistence/.../memory/sql.py 内 retrieve drift check
+async def retrieve(self, ...) -> list[MemoryItem]:
+    rows = await self._query(...)
+    out: list[MemoryItem] = []
+    for row in rows:
+        computed = sha256(row.content.lower().strip().encode()).hexdigest()
+        if computed != row.content_hash:
+            await self._emit_audit_drift(row)
+            # 同步走 redact 路径(由 recall 节点拿到后处理)
+            # 这里仅保留 row,标记 drift 通过返回值传递
+        out.append(row_to_item(row))
+    return out
+```
+
+**为什么 audit 在 store 层而非节点层**:
+- 三个入口(API PATCH / DLQ retry / writeback node)都走 store 写入,统一在 store 不容易遗漏
+- store 接 audit logger 需要新依赖注入,通过新的 `AuditEmitter` Protocol 注入(类似 SecretStore 的方式),避免 store 直接 import control-plane audit
+
+### 3.5 测试矩阵
+
+**单测(persistence 包)**:
+- [ ] `SqlMemoryStore.write()` 含 1 条 prompt_injection → 整 batch raise + audit 全条 emit
+- [ ] `SqlMemoryStore.write()` 含 1 条 invisible Unicode → raise
+- [ ] `SqlMemoryStore.write()` 全清 → 正常 insert
+- [ ] `InMemoryMemoryStore.write()` 同上 3 条(parity)
+- [ ] `SqlMemoryStore.retrieve()` DB 内容篡改 → emit drift + content 不变(redact 由调用方做)
+- [ ] `SqlMemoryStore.retrieve()` 含恶意 content → emit redacted + content 仍是原文(parser 拿到原文,节点层再 redact)
+- [ ] `content_hash` 计算用 NFC normalize 还是 raw?— 与 K.K7 现有行为一致
+
+**集成测(control-plane API)**:
+- [ ] `PATCH /v1/memory/{id}` 含 classic injection → 422 + audit BLOCKED + memory 行不变(不写入)
+- [ ] `PATCH /v1/memory/{id}` 含 ZWJ → 422
+- [ ] `PATCH /v1/memory/{id}` 422 body 不含 pattern_id / matched substring(oracle 防御同 #1)
+- [ ] `PATCH /v1/memory/{id}` 合法 → 200(正常 update + embed)
+
+**集成测(orchestrator memory node)**:
+- [ ] DB 预置含恶意 content 的 memory → recall → `recalled_memories[i].content == "[BLOCKED:<category>]"` + audit REDACTED
+- [ ] DB drift(直接 UPDATE 表)→ recall → audit DRIFT + content 被 redact
+- [ ] 清白 memory → 不 audit + 不 redact + content 原样喂 agent
+
+**集成测(DLQ + writeback)**:
+- [ ] writeback LLM 提取的 1 条含 injection → `write()` raise → DLQ enqueue(per K.K7 已有逻辑)→ 下次 retry 同样 raise → 5 次后 dead-letter
+- [ ] writeback 5 条全清 → 正常 write
+
+### 3.6 开发期需决策点
+
+下面 3 条是设计 review 期需要你拍板的:
+
+1. **`MemoryStore.retrieve()` 返回类型怎么传递"drift detected"信号给调用方?**
+   - 选项 A:在 `MemoryItem` 加 transient `drift: bool` 字段(per-call 不持久化)
+   - 选项 B:返回 `tuple[list[MemoryItem], list[UUID drifted_ids]]`
+   - 选项 C:不传递,recall 节点重算一次 hash(性能略差但接口干净)
+   - **推荐 A**:零冗余计算,API 干净;`drift` 字段默认 False,只在 retrieve 期设
+2. **writeback LLM 提取的 batch 部分命中 → 部分写入 vs 整 batch 拒?**
+   - 选项 A:整 batch 拒(blob 拒绝)
+   - 选项 B:per-item filter,clean 的写入 + dirty 的 audit
+   - **推荐 A**:简单 + 攻击场景下"部分写入"反而留下污染线索给攻击者迭代;LLM 重新 extract 一次成本很低
+3. **`memory_recall_node` redact 时占位符格式**
+   - 选项 A:`"[BLOCKED:<category>]"`(类别名,如 `injection` / `c2`)
+   - 选项 B:`"[BLOCKED:memory:<memory_id_prefix>]"`(指向具体行,user 可对应到 UI)
+   - 选项 C:不告诉 agent 是什么 — 直接整条 memory 从 list 里去掉
+   - **推荐 A**:category 给 agent 足够上下文知道是个被屏蔽的内容(可决定要不要 ask user 重新提供),不暴露 pattern_id(oracle defense)
+
+### 3.7 可观测
+
+| Metric | 类型 | 标签 | 说明 |
+|--------|------|------|------|
+| `helix_uplift_memory_writes_blocked_total{source}` | counter | source=api/writeback/dlq | 写入被拒次数 |
+| `helix_uplift_memory_recalls_redacted_total` | counter | — | recall 期被 redact 的 item 累计 |
+| `helix_uplift_memory_drift_total` | counter | — | drift 检测次数 |
+
+| Recording rule | 用途 |
+|----------------|------|
+| `helix:uplift:memory_drift_rate:1h = rate(helix_uplift_memory_drift_total[1h])` | drift 飙升 = 真攻击信号 |
+| `helix:uplift:memory_redact_rate:1h = rate(helix_uplift_memory_recalls_redacted_total[1h])` | recall 期发现历史 memory 命中模式(可能是模式集刚 deploy) |
+
+| Alert | severity | for | 触发条件 |
+|-------|----------|-----|----------|
+| `HelixUpliftMemoryDriftDetected` | **P0** | 15min | `memory_drift_rate:1h > 0` 持续 — drift 几乎只可能是攻击 |
+| `HelixUpliftMemoryRedactSpike` | P1 | 30min | `memory_redact_rate:1h > 1` 持续 — 异常多的 recall 命中 |
+
+### 3.8 Sprint #2 验收清单
+
+- [ ] `MemoryInjectionBlocked` 异常 + `MemoryStore.write()` strict 扫拦截在 sql/memory 双实现一致
+- [ ] `MemoryStore.retrieve()` content_hash 重算 drift 检测在 sql 实现(InMemory 跳过 drift,因为不会被外部改)
+- [ ] `PATCH /v1/memory/{id}` 接入预扫 + oracle-safe 422
+- [ ] `memory_recall_node` 接入 redact 逻辑 + audit emit
+- [ ] `memory_writeback_node` 捕 `MemoryInjectionBlocked` → DLQ enqueue 走 dead-letter 路径(不重试)
+- [ ] 3 个新 AuditAction(`MEMORY_INJECTION_BLOCKED` / `MEMORY_INJECTION_REDACTED` / `MEMORY_DRIFT_DETECTED`)在 protocol Enum 上线
+- [ ] 3 个 Prometheus counter + 2 个 recording rule + 2 个 alert 上线
+- [ ] `docs/runbooks/threat-scanner-tuning.md` 新增 § 8(memory drift 响应步骤)
+- [ ] 单测 ≥ 95% / 集成测覆盖 § 3.5 全部矩阵
+- [ ] K.K12 eval baseline 重跑无退化 ≥ 5%
+- [ ] 零债 6 条全过(per § 0.4)
+
+### 3.9 与 Sprint #1 的复用矩阵
+
+| Sprint #1 产出 | Sprint #2 复用方式 |
+|---------------|-------------------|
+| `helix_agent.common.threat_patterns.scan_for_threats` | 直接调用(scope=strict) |
+| `helix_agent.common.threat_patterns.ThreatFinding` | 同上 |
+| `control_plane.uplift.threat_metrics.record_*` | 扩展(加 memory counter) |
+| `control_plane.uplift.threat_scan.scan_payload_strict` | **不复用**(memory 是单 str,不需要递归 walk + 10KB cap) |
+| `docs/runbooks/threat-scanner-tuning.md` | 扩展(加 § 8) |
+| 422 oracle-safe 文案模式 | 复用思想(memory PATCH 文案统一) |
+| Mini-ADR U-1(模块位置) | 锁定 — 不动 |
+| Mini-ADR U-2(strict block / context warn) | **不复用** — memory 走 U-3(strict block / strict redact) |
 
 ---
 
