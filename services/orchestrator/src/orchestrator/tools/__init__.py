@@ -79,7 +79,13 @@ from orchestrator.tools.mcp import (
     RecordingMCPClient as RecordingMCPClient,
 )
 from orchestrator.tools.mcp import (
+    SseMCPClient as SseMCPClient,
+)
+from orchestrator.tools.mcp import (
     StdioMCPClient as StdioMCPClient,
+)
+from orchestrator.tools.mcp import (
+    StreamableHttpMCPClient as StreamableHttpMCPClient,
 )
 from orchestrator.tools.mcp import (
     register_mcp_tools as register_mcp_tools,

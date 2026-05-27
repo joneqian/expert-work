@@ -40,10 +40,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Collection, Mapping, Sequence
+import time
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
+from helix_agent.common.uplift_metrics import (
+    record_mcp_call,
+    record_mcp_circuit_state,
+)
 from orchestrator.tools.registry import (
     ToolContext,
     ToolNotFoundError,
@@ -57,8 +62,38 @@ logger = logging.getLogger(__name__)
 DEFAULT_MCP_CHAR_CAP = 20_000
 DEFAULT_MAX_SERVERS = 5
 DEFAULT_TIMEOUT_S = 30.0
+DEFAULT_RETRY_MAX = 3
+# Mini-ADR U-13: per-server circuit breaker thresholds.
+DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5
+DEFAULT_CIRCUIT_WINDOW_S: float = 30 * 60  # 30 minutes
 _TRUNCATION_PREFIX = "...["
 _TRUNCATION_SUFFIX = " chars truncated]..."
+
+MCPTransport = Literal["stdio", "sse", "streamable_http"]
+MCPAuthType = Literal["none", "bearer", "oauth2"]
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+class MCPCallTimeoutError(TimeoutError):
+    """Raised when a single ``call_tool`` exceeds the configured timeout."""
+
+
+class MCPServerUnhealthyError(RuntimeError):
+    """Raised when the circuit breaker is open and rejects a call."""
+
+
+class MCPOAuthNotImplementedError(NotImplementedError):
+    """Raised at boot when a server is configured with ``auth_type=oauth2``.
+
+    Mini-ADR U-12: the schema accepts oauth2 configs but the flow itself
+    (authorization code / refresh / per-tenant token store) ships in the
+    follow-up Mini-ADR L.L8-MCP sprint. Fail-fast at boot beats silently
+    skipping a server the operator believed was online.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -68,23 +103,81 @@ _TRUNCATION_SUFFIX = " chars truncated]..."
 
 @dataclass(frozen=True)
 class MCPServerConfig:
-    """Per-server launch config from ``tenant_config.mcp_servers``.
+    """Per-server launch config from the platform JSON file
+    (``mcp_servers_config_file``, Mini-ADR E-17 — operator-controlled).
 
-    Mirrors the JSONB row shape: ``{"name", "command": [...], "env": {...}}``.
-    Validation of the JSONB rows themselves lives in
-    :class:`helix_agent.protocol.TenantConfigPatch` — this dataclass
-    is just the runtime-typed view orchestrator startup hands to the
-    pool.
+    ``transport`` selects between local subprocess (``stdio``, default
+    for backward compat with the original Stream E.9 shape) and the
+    remote MCP transports added in Capability Uplift Sprint #5
+    (``sse`` / ``streamable_http``). Per-tenant ``mcp_servers`` may
+    still only **enable / filter** entries from this central pool — the
+    URL / headers / auth fields are operator-controlled to keep tenants
+    from injecting exfiltration targets (sanity check echoed in
+    :mod:`services.control_plane.runtime` loader).
+
+    ``headers`` and ``auth_config`` are :class:`field` ``repr=False``
+    so a stray ``logger.exception(cfg)`` cannot leak the bearer token
+    or token reference (Mini-ADR U-11).
     """
 
     name: str
-    command: Sequence[str]
+    transport: MCPTransport = "stdio"
+    # stdio fields
+    command: Sequence[str] | None = None
     env: Mapping[str, str] = field(default_factory=dict)
+    # sse / streamable_http fields
+    url: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict, repr=False)
+    # auth
+    auth_type: MCPAuthType = "none"
+    auth_config: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    # failure handling (Mini-ADR U-13)
+    timeout_s: float = DEFAULT_TIMEOUT_S
+    retry_max: int = DEFAULT_RETRY_MAX
 
     def __post_init__(self) -> None:
-        if not self.command:
-            msg = f"mcp server {self.name!r} has empty command"
+        if self.transport == "stdio":
+            if not self.command:
+                # Preserve the historical message — Stream E.9 callers
+                # match on "empty command" via test fixtures.
+                msg = f"mcp server {self.name!r} has empty command"
+                raise ValueError(msg)
+            if self.url is not None:
+                msg = (
+                    f"mcp server {self.name!r}: stdio transport must not "
+                    "set url (URL is for sse/streamable_http only)"
+                )
+                raise ValueError(msg)
+        else:
+            # sse / streamable_http
+            if not self.url:
+                msg = f"mcp server {self.name!r}: {self.transport} transport requires url"
+                raise ValueError(msg)
+            if self.command is not None:
+                msg = (
+                    f"mcp server {self.name!r}: {self.transport} transport "
+                    "must not set command (command is for stdio only)"
+                )
+                raise ValueError(msg)
+        if self.auth_type == "bearer" and "token_ref" not in self.auth_config:
+            msg = (
+                f"mcp server {self.name!r}: bearer auth requires "
+                'auth_config["token_ref"] pointing at a secret:// URI'
+            )
             raise ValueError(msg)
+        if self.auth_type == "oauth2":
+            if "client_id" not in self.auth_config:
+                msg = (
+                    f"mcp server {self.name!r}: oauth2 auth requires "
+                    'auth_config["client_id"] (see Mini-ADR U-12)'
+                )
+                raise ValueError(msg)
+            if "scope" not in self.auth_config:
+                msg = (
+                    f"mcp server {self.name!r}: oauth2 auth requires "
+                    'auth_config["scope"] (see Mini-ADR U-12)'
+                )
+                raise ValueError(msg)
 
 
 @dataclass(frozen=True)
@@ -204,9 +297,16 @@ class StdioMCPClient:
             msg = f"StdioMCPClient {self.config.name!r} already started"
             raise RuntimeError(msg)
 
+        command = self.config.command
+        if command is None:  # pragma: no cover — guarded by post_init
+            msg = (
+                f"StdioMCPClient {self.config.name!r}: stdio transport "
+                "requires command (impossible to reach: post_init enforces)"
+            )
+            raise RuntimeError(msg)
         params = StdioServerParameters(
-            command=self.config.command[0],
-            args=list(self.config.command[1:]),
+            command=command[0],
+            args=list(command[1:]),
             env=dict(self.config.env) or None,
         )
         stack = contextlib.AsyncExitStack()
@@ -256,6 +356,160 @@ class StdioMCPClient:
         await self._stack.__aexit__(None, None, None)
         self._stack = None
         self._session = None
+
+
+@dataclass
+class _RemoteMCPClientBase:
+    """Shared scaffolding for :class:`SseMCPClient` /
+    :class:`StreamableHttpMCPClient`.
+
+    Both transports converge on the same :class:`mcp.ClientSession` pattern
+    after handshake — the per-transport difference is just which SDK
+    helper opens the underlying streams. Subclasses implement
+    :meth:`_open_streams` (an async-context-managed (read, write[, ...])
+    tuple) and inherit the rest from here.
+    """
+
+    config: MCPServerConfig
+    resolved_headers: Mapping[str, str] = field(default_factory=dict, repr=False)
+    _stack: contextlib.AsyncExitStack | None = field(default=None, init=False, repr=False)
+    _session: Any = field(default=None, init=False, repr=False)
+
+    async def _open_streams(self, stack: contextlib.AsyncExitStack) -> tuple[Any, Any]:
+        msg = "_open_streams must be implemented by transport subclass"
+        raise NotImplementedError(msg)
+
+    async def start(self) -> None:
+        # Imports kept local so orchestrator can be imported in contexts
+        # that don't have the mcp SDK on the path (e.g. middleware-only
+        # unit tests with no MCP wiring).
+        from mcp import ClientSession
+
+        if self._stack is not None:
+            msg = f"{type(self).__name__} {self.config.name!r} already started"
+            raise RuntimeError(msg)
+        stack = contextlib.AsyncExitStack()
+        await stack.__aenter__()
+        try:
+            read, write = await self._open_streams(stack)
+            session = await stack.enter_async_context(ClientSession(read, write))
+            await session.initialize()
+        except BaseException:
+            await stack.__aexit__(None, None, None)
+            raise
+        self._stack = stack
+        self._session = session
+
+    async def list_tools(self) -> Sequence[MCPToolDef]:
+        if self._session is None:
+            msg = f"{type(self).__name__} {self.config.name!r} not started"
+            raise RuntimeError(msg)
+        result = await self._session.list_tools()
+        return tuple(
+            MCPToolDef(
+                name=str(t.name),
+                description=str(getattr(t, "description", "") or ""),
+                input_schema=dict(getattr(t, "inputSchema", {}) or {}),
+            )
+            for t in result.tools
+        )
+
+    async def call_tool(
+        self,
+        name: str,
+        args: Mapping[str, Any],
+    ) -> MCPCallResult:
+        if self._session is None:
+            msg = f"{type(self).__name__} {self.config.name!r} not started"
+            raise RuntimeError(msg)
+        transport = self.config.transport
+        server = self.config.name
+        try:
+            result = await asyncio.wait_for(
+                self._session.call_tool(name, dict(args)),
+                timeout=self.config.timeout_s,
+            )
+        except TimeoutError as exc:
+            record_mcp_call(transport=transport, server=server, result="timeout")
+            msg = f"mcp call timed out after {self.config.timeout_s}s on {server!r}:{name!r}"
+            raise MCPCallTimeoutError(msg) from exc
+        except Exception:
+            record_mcp_call(transport=transport, server=server, result="transport_err")
+            raise
+        record_mcp_call(transport=transport, server=server, result="ok")
+        return MCPCallResult(
+            content=_render_content_blocks(result.content),
+            is_error=bool(getattr(result, "isError", False)),
+        )
+
+    async def close(self) -> None:
+        if self._stack is None:
+            return
+        await self._stack.__aexit__(None, None, None)
+        self._stack = None
+        self._session = None
+
+
+@dataclass
+class SseMCPClient(_RemoteMCPClientBase):
+    """:class:`MCPClient` over the SSE transport (legacy MCP HTTP form).
+
+    Wraps ``mcp.client.sse.sse_client``. ``resolved_headers`` must
+    already have the bearer token / api-key injected by the runtime
+    factory (the dataclass itself never sees the secret value — see
+    Mini-ADR U-11).
+    """
+
+    async def _open_streams(self, stack: contextlib.AsyncExitStack) -> tuple[Any, Any]:
+        from mcp.client.sse import sse_client
+
+        if not self.config.url:  # pragma: no cover — guarded by post_init
+            msg = "sse transport requires url"
+            raise RuntimeError(msg)
+        read, write = await stack.enter_async_context(
+            sse_client(
+                url=self.config.url,
+                headers=dict(self.resolved_headers) or None,
+                timeout=self.config.timeout_s,
+            )
+        )
+        return read, write
+
+
+@dataclass
+class StreamableHttpMCPClient(_RemoteMCPClientBase):
+    """:class:`MCPClient` over the modern StreamableHTTP transport.
+
+    Wraps ``mcp.client.streamable_http.streamable_http_client`` (the
+    canonical name as of mcp SDK ≥ 1.x; the older ``streamablehttp_client``
+    spelling is deprecated). Headers / timeout are configured on a
+    dedicated :class:`httpx.AsyncClient` so the SDK helper sees them
+    through its single ``http_client`` parameter. The SDK yields
+    ``(read, write, get_session_id)``; we drop the session callback
+    because the orchestrator doesn't (yet) surface it — M1 may use it
+    for resumption.
+    """
+
+    async def _open_streams(self, stack: contextlib.AsyncExitStack) -> tuple[Any, Any]:
+        import httpx
+        from mcp.client.streamable_http import streamable_http_client
+
+        if not self.config.url:  # pragma: no cover — guarded by post_init
+            msg = "streamable_http transport requires url"
+            raise RuntimeError(msg)
+        http_client = await stack.enter_async_context(
+            httpx.AsyncClient(
+                headers=dict(self.resolved_headers) or None,
+                timeout=self.config.timeout_s,
+            )
+        )
+        read, write, _get_session_id = await stack.enter_async_context(
+            streamable_http_client(
+                url=self.config.url,
+                http_client=http_client,
+            )
+        )
+        return read, write
 
 
 def _render_content_blocks(blocks: Sequence[Any]) -> str:
@@ -440,3 +694,94 @@ async def register_mcp_tools(
         registered.append(helix_tool.spec.name)
     logger.info("mcp.registered server=%s tools=%s", server_name, registered)
     return registered
+
+
+# ---------------------------------------------------------------------------
+# Circuit breaker (Mini-ADR U-13)
+# ---------------------------------------------------------------------------
+
+
+CircuitState = Literal["closed", "half_open", "open"]
+
+
+@dataclass
+class MCPCircuitBreaker:
+    """Per-server failure isolator for the remote MCP transports.
+
+    A remote MCP server going down (URL 5xx, connection refused, mid-
+    stream SSE close) used to surface as a 30s timeout on every agent
+    call, dragging the whole orchestrator's tool latency. The breaker
+    flips to ``open`` after :attr:`failure_threshold` consecutive
+    failures and short-circuits subsequent calls for
+    :attr:`window_s` seconds, then probes a single half-open call to
+    re-validate. A success closes; a failure re-opens the window.
+
+    Thresholds mirror Envoy / Istio defaults (5 failures, 30-minute
+    window) so operators familiar with mesh circuit breakers see
+    expected behavior; tunables are constructor arguments so per-server
+    overrides land cleanly when M1 surfaces per-tenant config.
+
+    Time is injected via :attr:`now` so tests can advance the clock
+    without real :func:`time.sleep`.
+    """
+
+    server: str
+    failure_threshold: int = DEFAULT_CIRCUIT_FAILURE_THRESHOLD
+    window_s: float = DEFAULT_CIRCUIT_WINDOW_S
+    now: Callable[[], float] = time.monotonic
+    _failures: int = field(default=0, init=False)
+    _state: CircuitState = field(default="closed", init=False)
+    _opened_at: float | None = field(default=None, init=False)
+
+    @property
+    def state(self) -> CircuitState:
+        return self._state
+
+    def allow_call(self) -> bool:
+        """Return ``True`` if the caller may attempt a real round-trip.
+
+        Probes the half-open transition when the window has elapsed —
+        side-effecting on purpose so the next ``record_success`` /
+        ``record_failure`` resolves the probe outcome.
+        """
+        if self._state == "closed":
+            return True
+        if self._state == "half_open":
+            return True
+        # open: check window
+        if self._opened_at is None:  # pragma: no cover — defensive
+            return False
+        if self.now() - self._opened_at >= self.window_s:
+            self._state = "half_open"
+            record_mcp_circuit_state(server=self.server, state="half_open")
+            return True
+        return False
+
+    def record_success(self) -> None:
+        """A real call returned cleanly — clear the breaker."""
+        was_half_open = self._state == "half_open"
+        self._failures = 0
+        self._state = "closed"
+        self._opened_at = None
+        if was_half_open:
+            record_mcp_circuit_state(server=self.server, state="closed")
+
+    def record_failure(self) -> None:
+        """A real call failed (timeout / transport error / 5xx).
+
+        In ``closed`` state: increments and trips at the threshold.
+        In ``half_open`` state: a single failure re-opens the window
+        immediately (no need to wait for another threshold burst since
+        we're already in failure mode).
+        """
+        if self._state == "half_open":
+            self._open()
+            return
+        self._failures += 1
+        if self._failures >= self.failure_threshold:
+            self._open()
+
+    def _open(self) -> None:
+        self._state = "open"
+        self._opened_at = self.now()
+        record_mcp_circuit_state(server=self.server, state="open")
