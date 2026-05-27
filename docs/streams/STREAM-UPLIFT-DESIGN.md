@@ -27,7 +27,7 @@ helix M0 在 [helix-vs-hermes-tldr.md](../research/helix-vs-hermes-tldr.md) 的 
 |------|------|--------|---------|------------|
 | #1 | Cron / Webhook Prompt 注入扫描(含隐形 Unicode) | ~3 天 | 无 | § 2 |
 | #2 | Memory 投毒防御 + drift backup | ~1.5 周 | 复用 #1 威胁模式库 | § 3 |
-| #3 | Skill 附属文件 + Claude Code 标准 SKILL.md + Progressive Disclosure | ~2.5 周 | 无 | § 4 |
+| #3 | Skill 附属文件 + Claude Code 标准 SKILL.md + Progressive Disclosure + 威胁扫描 / drift 检测 | ~3 周 | 无 | § 4 |
 | #4 | Curator 自动状态机(active/stale/archived) | ~1 周 | 基础设施可提前；启用调参 M1-K J.7b-1 | § 5 |
 | #5 | **MCP Client HTTP/SSE transport**(agent 沙箱接入外部 MCP 生态;原"MCP Server"已 2026-05-27 复审推翻,见 § 6) | ~1.5 周 | 无 | § 6 |
 | #6 | Memory hybrid retrieval(向量 + 全文 RRF) | ~1.5 周 | 无(port J.5) | § 7 |
@@ -564,14 +564,15 @@ async def retrieve(self, ...) -> list[MemoryItem]:
 
 ---
 
-## 4. Sprint #3 — Skill 附属文件 + Claude Code 标准对齐 + Progressive Disclosure
+## 4. Sprint #3 — Skill 附属文件 + Claude Code 标准对齐 + Progressive Disclosure + 威胁扫描
 
-> **本 Sprint 把 3 件事捆一起做**:
+> **本 Sprint 把 4 件事捆一起做**:
 > 1. 加 supporting files(reference / scripts / 任意子目录文件)— 补 Hermes 维度 14 高价值 gap;
 > 2. ZIP 格式重设计为 Claude Code 标准 `SKILL.md` 形态 — 跟 agentskills.io / `~/.claude/skills/` 互操作,M3 marketplace 上线时跨平台天然;
-> 3. **Progressive disclosure**(M1-K J.7b-3 backlog 提前)— 系统 prompt 只注 skill 简介,body + supporting files 通过 `skill_view` 按需 load。
+> 3. **Progressive disclosure**(M1-K J.7b-3 backlog 提前)— 系统 prompt 只注 skill 简介,body + supporting files 通过 `skill_view` 按需 load;
+> 4. **Skill 内容威胁扫描 + drift 检测**(U-21,2026-05-27 复审追加)— ZIP import 走 Sprint #1 strict scan;skill_view 走 Sprint #2 drift / context-scope redact 模式;跟 trigger / memory 防线对称,基础设施 100% 复用。
 >
-> **预计 2.5 周**(包含完整 Admin UI;比原 stub 估计的 2 周略长,因为接受了 [memory:complete-not-minimal] + [memory:zero-tech-debt] 反馈,UI 做全)。
+> **预计 3 周**(包含完整 Admin UI + 威胁扫描;比原 stub 估计的 2 周长,因为接受了 [memory:complete-not-minimal] + [memory:zero-tech-debt] + [memory:complete-not-minimal] 三轮反馈,所有"能砍范围不能砍能力强度"的项都做全)。
 
 ### 4.1 背景
 
@@ -628,16 +629,19 @@ license: Complete terms in LICENSE.txt   # optional
 #### 4.2.1 In-scope
 
 - `SkillVersionRow.supporting_files` 列(JSONB,5MB cap;Mini-ADR U-16)
+- `SkillVersionRow.content_hash` 列(bytea,for drift 检测;Mini-ADR U-21)
 - SKILL.md 格式 + helix: frontmatter 扩展(U-14)
 - ZIP import 重做:支持 SKILL.md + 任意子目录 + 字符/扩展名校验 + backward compat 读老格式(U-18, U-19)
+- **ZIP import 写时威胁扫描**:SKILL.md body + 每个 supporting file 的 text content 跑 Sprint #1 strict scan;任何 finding → reject 整 ZIP + audit(U-21)
 - ZIP export:输出新格式
 - `skill_view(skill_name, path)` 工具(U-17)
+- **`skill_view` 运行时 drift 检测 + redact**:content_hash 校验 + context-scope re-scan;drift / 命中 → 返回 `[BLOCKED:...]` 占位符(U-21,跟 Sprint #2 memory 模式对称)
 - Progressive disclosure 默认 + per-skill `lazy: false` 默认保留现有 eager 行为(U-15)
 - agent_factory 改造:lazy=true 的 skill 只注 summary,lazy=false 的 skill 仍 eager 注 body
-- Audit actions: `SKILL_SUPPORTING_FILE_UPLOADED` / `SKILL_SUPPORTING_FILE_REMOVED`
+- Audit actions: `SKILL_SUPPORTING_FILE_UPLOADED` / `SKILL_SUPPORTING_FILE_REMOVED` / **`SKILL_PROMPT_INJECTION_BLOCKED` / `SKILL_DRIFT_DETECTED`**(U-21)
 - Admin UI 完整:file tree + Markdown/code preview + edit/upload/delete/rename/diff(U-20)
-- 可观测:`helix_uplift_skill_view_total{skill, path, result}` + `helix_uplift_skill_zip_reject_total{reason}`
-- runbook:`docs/runbooks/skill-packaging.md`
+- 可观测:`helix_uplift_skill_view_total{skill, path, result}` + `helix_uplift_skill_zip_reject_total{reason}` + **`helix_uplift_skill_blocked_total{phase}` + `helix_uplift_skill_drift_total` + `helix_uplift_skill_redacted_total`**(U-21)
+- runbook:`docs/runbooks/skill-packaging.md`(含威胁扫描 / drift triage 章节)
 
 #### 4.2.2 Out-of-scope(明确推迟,不掩盖)
 
@@ -660,10 +664,12 @@ license: Complete terms in LICENSE.txt   # optional
 2. **Backward compat 测试**:老 ZIP(`skill.yaml`+`prompt.md`+`tools.txt`)能 import + warn
 3. **Progressive disclosure 测试**:同一 agent 含 lazy=true + lazy=false 两个 skill;system prompt 只含 lazy=true 的 summary,不含其 body;agent 调 `skill_view` 能拿到 body
 4. **Admin UI 5 mutation 路径**:Playwright e2e 验 view / edit / upload / rename / delete 每个都生成新 SkillVersion
-5. 单元测试 ≥ 80% 覆盖(frontmatter parser / path validator / skill_view tool / lazy 注入逻辑 / JSONB 操作)
-6. STREAM-UPLIFT-DESIGN § 4 完整 + Mini-ADRs U-14 ~ U-20 锁定
-7. runbook 完整
-8. CI 全绿 + 无 TODO 遗留
+5. **Poison ZIP 测试矩阵**(U-21,8 种 attack vector):invisible Unicode in SKILL.md body / RTL override / ZWJ / 直接 prompt injection 句式 / 系统提示伪装 / role override / `[INST]` 标记 / base64 编码后的 injection — 每种 reject + audit `SKILL_PROMPT_INJECTION_BLOCKED` 写入 + Oracle defense 验证(API 返 generic,不暴露具体 finding)
+6. **Drift 检测测试**(U-21):import 一个干净 skill → SQL `UPDATE skill_version SET prompt_fragment='恶意内容' WHERE ...` 模拟 DB 旁路写入 → `skill_view` 应返回 `[BLOCKED: skill content drift detected]` + audit `SKILL_DRIFT_DETECTED` + metric `helix_uplift_skill_drift_total` +1,**绝不返回** mutated 内容
+7. 单元测试 ≥ 80% 覆盖(frontmatter parser / path validator / skill_view tool / lazy 注入逻辑 / JSONB 操作 / **content hashing / drift check / write-time scan / read-time scan**)
+8. STREAM-UPLIFT-DESIGN § 4 完整 + Mini-ADRs U-14 ~ **U-21** 锁定
+9. runbook 完整(含 U-21 威胁扫描 / drift triage 章节)
+10. CI 全绿 + 无 TODO 遗留
 
 ### 4.3 架构
 
@@ -869,7 +875,111 @@ else:
 
 每次 mutation 后 UI navigate 到新 version detail + toast "v{n+1} created"。
 
-#### 4.3.9 数据流(综合)
+#### 4.3.9 Mini-ADR U-21 — Skill 内容威胁扫描(写时 block + 读时 drift / redact)
+
+> **触发**:2026-05-27 用户复审指出 Sprint #3 当前设计只防结构性 ZIP 攻击(U-18),没防内容级 prompt injection。任何 ZIP 来源都是 **untrusted**(本地编辑、公开 hub 下载、git clone 第三方仓)— 跟 Sprint #1 trigger / Sprint #2 memory 完全同攻击面。
+
+**决策**:Sprint #3 ZIP import + skill_view 双向接入 Sprint #1 已建好的威胁扫描 + Sprint #2 已建好的 drift 检测,**完全复用基础设施**:
+
+##### 写时(ZIP import — strict block + Oracle defense)
+
+```python
+# services/control-plane/src/control_plane/api/_skill_zip.py 内
+def _scan_skill_package(skill_md_body: str, supporting_files: dict[str, bytes]) -> None:
+    findings = scan_for_threats(skill_md_body, scope="strict")
+    for path, content in supporting_files.items():
+        if _is_text_extension(path):
+            findings.extend(scan_for_threats(content.decode("utf-8", errors="ignore"), scope="strict"))
+    if findings:
+        record_threat_pattern_hits(findings, scope="strict")
+        record_skill_blocked(phase="zip_import")
+        # audit row 内部记完整 finding 列表 + path(SecOps 查)
+        await audit.write(action="SKILL_PROMPT_INJECTION_BLOCKED", findings=findings, paths=...)
+        raise SkillPackageLayoutError("invalid skill package")  # Oracle defense:不暴露具体 finding
+```
+
+##### 读时(`skill_view` 运行时 — drift 检测 + context-scope redact)
+
+```python
+# services/orchestrator/src/orchestrator/tools/skill_view.py 内
+async def skill_view(skill_name: str, path: str) -> str:
+    row = await skill_store.fetch_active(tenant_id, skill_name)
+    content = await _extract_path(row, path)
+
+    # Drift check(同 Sprint #2 § 3.2 memory drift 模式)
+    recomputed_hash = blake2b(_canonicalize(row)).digest()
+    if recomputed_hash != row.content_hash:
+        record_skill_drift()
+        await audit.write(action="SKILL_DRIFT_DETECTED", skill=skill_name, path=path)
+        return f"[BLOCKED: skill content drift detected for {skill_name}/{path}]"
+
+    # Context-scope re-scan(模式更新后追溯防御)
+    findings = scan_for_threats(content, scope="context")
+    if findings:
+        record_threat_pattern_hits(findings, scope="context")
+        record_skill_redacted()
+        return f"[BLOCKED: content matched threat pattern at runtime]"
+
+    return content  # 还要走 size truncation,跟 MCP 同模式
+```
+
+##### Schema 配套
+
+`SkillVersionRow` 加 `content_hash: bytea NOT NULL`。`_canonicalize(row)` 输出稳定字节序列(prompt_fragment + supporting_files JSONB sorted-by-key 的拼接)→ blake2b 32-byte 摘要。**只在 ZIP import 期间计算一次**,跟 row commit 同事务。
+
+##### Audit Literal 双份同步(per [memory:audit-literal-drift])
+
+```
+packages/helix-protocol/src/helix_agent/protocol/audit.py:
+    AuditAction Literal[..., "SKILL_PROMPT_INJECTION_BLOCKED", "SKILL_DRIFT_DETECTED", ...]
+
+services/control-plane/src/control_plane/audit/types.py(或对应文件):
+    镜像 Literal 跟进
+```
+
+##### 可观测扩展(独立 metric 不复用 memory 系列)
+
+```python
+# packages/helix-common/src/helix_agent/common/uplift_metrics.py:
+def record_skill_blocked(*, phase: Literal["zip_import", "skill_view"]) -> None: ...
+def record_skill_drift() -> None: ...
+def record_skill_redacted() -> None: ...
+```
+
+理由不复用 `record_memory_*`:semantic 不同(memory 写入 vs skill ZIP import vs skill_view 调用),独立 counter 让 alert 分流清晰。
+
+##### Recording rules + alerts
+
+```yaml
+- record: helix:uplift:skill_drift_rate:1h
+  expr: sum(rate(helix_uplift_skill_drift_total[1h]))
+
+- alert: HelixUpliftSkillDriftDetected
+  expr: helix:uplift:skill_drift_rate:1h > 0
+  for: 15m
+  labels:
+    severity: P0  # 跟 memory drift 同级别 — DB row 被绕开 API 直写,几乎必是攻击
+```
+
+**理由**:
+- **基础设施 100% 复用** — `scan_for_threats` / `record_threat_pattern_hits` / hashing 都在 Sprint #1/#2 已 ready
+- **跟 Sprint #1/#2 防线对称** — trigger 创建 + memory 写入 + skill 上传 = helix 三大"内容进库"路径,都该 strict scan;memory 读 + skill_view = "内容出库给 LLM" 路径,都该 context-scope re-scan + drift detect
+- **Sprint #3 现状不补 = 漏 attack surface** — per [memory:complete-not-minimal] / [memory:no-design-choice-disguise],核心能力不能弱
+- **Oracle defense 跟 Sprint #1 trigger 同模式** — reject 不暴露具体 finding,防 attacker 通过 reject 反馈微调 prompt
+
+**Risk**:context-scope re-scan 增加 skill_view 延迟。**缓解**:scan 是纯 regex match on 文本(Sprint #1/#2 已 benchmark < 5ms / 10KB);skill_view 不是 hot path(每次 agent 用 skill 才调,不是每 token)。
+
+##### Scope 估算(增量 vs U-14~U-20)
+
+| 任务 | 天 |
+|------|---|
+| 写时 scan 集成 + audit | 0.5 |
+| Drift detect schema + hash 计算 + 读时校验 + redact | 1.0 |
+| Poison ZIP 测试矩阵(8 attack)+ Drift 集成测试 + Oracle defense 测试 | 0.5 |
+
+**+2 天 → Sprint #3 总 ~3 周**(vs 原 2.5 周)。
+
+#### 4.3.10 数据流(综合)
 
 **Build 时**(agent_factory `_load_skills` + `_assemble_system_prompt`):
 
@@ -885,7 +995,7 @@ agent spec ─→ skill refs ─→ SkillVersionRow rows
                                         body 不注入(等 skill_view)
 ```
 
-**Runtime 时**(agent 调 skill_view):
+**Runtime 时**(agent 调 skill_view,含 U-21 drift + redact):
 
 ```
 agent: skill_view("api-debug", "reference/error_codes.md")
@@ -895,11 +1005,49 @@ agent: skill_view("api-debug", "reference/error_codes.md")
          │
          ├─ 查活跃版本(tenant_id, skill_name="api-debug", status="active") → SkillVersionRow
          │
-         ├─ if path == "SKILL.md":
-         │       re-pack frontmatter + prompt_fragment body → 返回 markdown 文本
+         ├─ ★ U-21 Drift check:
+         │     recomputed_hash = blake2b(canonicalize(row))
+         │     if recomputed_hash != row.content_hash:
+         │         record_skill_drift() + audit SKILL_DRIFT_DETECTED
+         │         return "[BLOCKED: skill content drift detected]"
          │
-         └─ else:
-                 查 supporting_files->>path → base64 decode → 返回(超 20KB 中间截断)
+         ├─ if path == "SKILL.md":
+         │       content = re-pack(frontmatter + prompt_fragment body)
+         │   else:
+         │       content = base64 decode(supporting_files->>path)
+         │
+         ├─ ★ U-21 Context-scope re-scan:
+         │     findings = scan_for_threats(content, scope="context")
+         │     if findings:
+         │         record_skill_redacted() + record_threat_pattern_hits(...)
+         │         return "[BLOCKED: content matched threat pattern]"
+         │
+         └─ 中间截断(超 20KB)+ 返回
+```
+
+**ZIP import 时**(含 U-21 strict scan):
+
+```
+operator: 上传 my-skill.zip
+         │
+         ▼
+   _skill_zip.py 实现:
+         │
+         ├─ 结构校验(U-18):path / extension / size / symlink / 整 ZIP reject
+         │
+         ├─ 解析 SKILL.md frontmatter + 收集 supporting_files
+         │
+         ├─ ★ U-21 Write-time strict scan:
+         │     findings = scan_for_threats(SKILL.md body + 每个文本 supporting_file, scope="strict")
+         │     if findings:
+         │         record_skill_blocked(phase="zip_import")
+         │         record_threat_pattern_hits(findings, scope="strict")
+         │         audit SKILL_PROMPT_INJECTION_BLOCKED(详情入 row)
+         │         raise SkillPackageLayoutError("invalid skill package")  # Oracle defense
+         │
+         ├─ 计算 content_hash = blake2b(canonicalize(prompt_fragment + supporting_files))
+         │
+         └─ 同事务 INSERT SkillVersionRow(supporting_files, content_hash, ...)
 ```
 
 ### 4.4 实施细节
@@ -911,9 +1059,12 @@ packages/helix-persistence/
 ├── migrations/versions/0042_skill_supporting_files.py  (新)
 │   - skill_version.supporting_files JSONB DEFAULT '{}'
 │   - skill_version.lazy_load BOOL DEFAULT false  ← per U-15
+│   - skill_version.content_hash BYTEA NOT NULL DEFAULT ''  ← per U-21
 │   - CHECK (octet_length(supporting_files::text) <= 5_242_880)
+│   - 对存量行(M0 数据)backfill content_hash:hash(prompt_fragment + '{}')
 └── src/helix_agent/persistence/models/skill.py
-    - SkillVersionRow 加 supporting_files / lazy_load 字段
+    - SkillVersionRow 加 supporting_files / lazy_load / content_hash 字段
+    - _canonicalize(row) helper:稳定字节序列拼装 + blake2b
 
 packages/helix-protocol/src/helix_agent/protocol/skill.py
     - SkillVersion pydantic 模型加字段
@@ -925,31 +1076,41 @@ services/control-plane/src/control_plane/api/_skill_zip.py
     - 重写:加 SKILL.md detect + layout 分发
     - U-19 backward-compat 双读
     - U-18 path validator(整 ZIP reject oracle defense)
-    - 加 supporting_files JSONB 装配
+    - U-21 写时 strict scan(_scan_skill_package):SKILL.md body + text supporting files;
+      finding → record_threat_pattern_hits + record_skill_blocked(phase="zip_import") +
+      audit SKILL_PROMPT_INJECTION_BLOCKED + raise SkillPackageLayoutError("invalid skill package")
+    - U-21 写时 content_hash 计算 + 同事务存入 SkillVersionRow.content_hash
 
 services/control-plane/src/control_plane/api/skills.py
     - 加 POST /v1/skills/{id}/versions/{v}/supporting-files/{path}(create/update/delete)
     - 沿用现有 audit 路径,加 SKILL_SUPPORTING_FILE_UPLOADED / SKILL_SUPPORTING_FILE_REMOVED
+    - U-21:每次单文件 mutation 重新走 strict scan + 重算 content_hash
 
 packages/helix-protocol/src/helix_agent/protocol/audit.py
     - AuditAction Literal 加 SKILL_SUPPORTING_FILE_UPLOADED / SKILL_SUPPORTING_FILE_REMOVED
+      + SKILL_PROMPT_INJECTION_BLOCKED + SKILL_DRIFT_DETECTED
       (per [memory:audit-literal-drift] — 同时改 control-plane 端)
 services/control-plane/src/control_plane/audit/...
-    - 镜像 Literal 跟进
+    - 镜像 Literal 跟进(4 个新 action)
 
 services/orchestrator/src/orchestrator/tools/skill_view.py  (新)
     - skill_view tool 实现:tenant-scoped SkillStore.fetch_supporting_file
+    - U-21 读时 drift check:recomputed_hash != row.content_hash → return [BLOCKED:...] + audit
+    - U-21 读时 context-scope re-scan:findings → return [BLOCKED:...] + record_skill_redacted
     - 注册逻辑:agent_factory 装配 ToolRegistry 时,if agent 有 skill → register
 
 services/orchestrator/src/orchestrator/agent_factory.py
     - _load_skills:lazy=false skill 仍取 prompt_fragment,lazy=true 只取 metadata
     - _assemble_system_prompt:加 <available-skills> summary block + 条件 <skill name> body block
     - skill_view 工具条件注册
+    - U-21:build 时 system prompt 注入的 eager body 也走 context-scope re-scan(防 build 时 drift / 模式更新追溯)
 
 packages/helix-common/src/helix_agent/common/uplift_metrics.py
     - record_skill_view(skill, result)
-    - record_skill_zip_reject(reason)
-    - 注:reason label 必须 allowlist(oracle defense — 不暴露具体 path,但聚合统计是合法 SecOps 信号)
+    - record_skill_zip_reject(reason)  # 注:reason label 必须 allowlist(oracle defense)
+    - U-21: record_skill_blocked(phase: Literal["zip_import", "skill_view"])
+    - U-21: record_skill_drift()
+    - U-21: record_skill_redacted()
 
 apps/admin-ui/
 ├── package.json:加 @uiw/react-codemirror + @codemirror/lang-* + react-diff-viewer-continued
@@ -961,14 +1122,18 @@ apps/admin-ui/
 
 services/control-plane/tests/test_skill_zip_v2.py (新)
 services/control-plane/tests/test_skill_supporting_files_api.py (新)
-services/orchestrator/tests/test_skill_view_tool.py (新)
+services/control-plane/tests/test_skill_zip_poison.py (新 U-21):8 attack vector + Oracle defense
+services/orchestrator/tests/test_skill_view_tool.py (新,含 U-21 drift / redact paths)
 services/orchestrator/tests/test_agent_factory_lazy_skill.py (新)
 apps/admin-ui/e2e/skill-mutations.spec.ts (新 Playwright)
 
 tools/observability/rules/uplift.yml
     - helix:uplift:skill_view_rate:5m / :1h
     - helix:uplift:skill_zip_reject_rate:1h
+    - U-21: helix:uplift:skill_blocked_rate:5m / helix:uplift:skill_drift_rate:1h /
+            helix:uplift:skill_redacted_rate:1h
     - alert HelixUpliftSkillZipRejectSpike(P2)
+    - U-21 alerts: HelixUpliftSkillDriftDetected(P0) + HelixUpliftSkillBlockedSpike(P1)
 
 docs/runbooks/skill-packaging.md (新)
     - § 1 SKILL.md frontmatter 完整 schema(标准 + helix:)
@@ -977,6 +1142,8 @@ docs/runbooks/skill-packaging.md (新)
     - § 4 backward compat(老 ZIP 升新格式)
     - § 5 progressive disclosure(lazy: true 的 skill 调试)
     - § 6 Admin UI mutation 操作流
+    - § 7 U-21 威胁扫描 reject triage(SKILL_PROMPT_INJECTION_BLOCKED audit row → 怎么读 finding)
+    - § 8 U-21 drift 触发应急(SKILL_DRIFT_DETECTED → 锁定 + 强制 reload + SecOps 通报)
 ```
 
 #### 4.4.2 PR 拆分
@@ -999,6 +1166,9 @@ PR C 依赖 PR B merge(API 必须先到位)。
 | 4 | `skill_view` 返回二进制文件如何展示 | base64 + "binary file (N bytes, mime=X)" 头 | M2 多模态加 image content block |
 | 5 | CodeMirror 6 兼容性 | React 19 兼容 | bundle size > 500KB 时考虑动态 import |
 | 6 | Audit action 是 `skill_supporting_file:uploaded` 还是 `skill:supporting_file_uploaded` | 前者(resource:verb 跟现有一致) | per [memory:audit-literal-drift] 两处 Literal 必须同步 |
+| 7 | U-21 context-scope 命中是 redact 还是 hard-block(类似 memory) | redact 占位符(跟 Sprint #2 memory 一致) | dogfood 看误杀率;若 >1% 改 strict-only |
+| 8 | U-21 二进制 supporting file 是否扫 | 不扫(二进制 prompt injection 不存在;只 size + extension 校验) | M2 多模态加 image safety scan 时再评估 |
+| 9 | U-21 单文件 mutation API 是否走 strict scan | 走(等同于 ZIP 包内单 entry) | 性能不达标时考虑差异 scan(只扫改的部分) |
 
 ### 4.6 测试矩阵
 
@@ -1008,10 +1178,14 @@ PR C 依赖 PR B merge(API 必须先到位)。
 | Unit(path validator)| pytest parametrize | 各种合法 + 各种攻击向量(`..` / 符号链接 / 绝对 / Windows / 超长 / 非法字符 / 非白名单扩展)|
 | Unit(skill_view tool)| RecordingSkillStore | SKILL.md re-pack / supporting file lookup / not found / over-size truncation |
 | Unit(agent_factory lazy)| 假 SkillStore | lazy=true 只注 summary,lazy=false 注 body,混合 |
+| **Unit(U-21 hash + canonicalize)** | pytest parametrize | hash 稳定性(JSONB key 顺序无关)/ canonical bytes vs prompt_fragment 变动检测 |
 | Integration(ZIP roundtrip)| TestContainer Postgres + 真 ZIP | 新格式 round trip + 老格式 backward compat + 拒绝 12 种坏 ZIP |
-| Integration(supporting-files API)| FastAPI TestClient | upload / update / delete / rename,每个验新 SkillVersion 行 |
-| Integration(audit)| TestContainer | 每个 mutation 写 SKILL_SUPPORTING_FILE_* audit row |
-| E2E(Playwright)| 真 browser | 5 mutation 路径每个走通 + 文件 preview Markdown 正确 + diff 视图正确 |
+| Integration(supporting-files API)| FastAPI TestClient | upload / update / delete / rename,每个验新 SkillVersion 行 + content_hash 重算 |
+| Integration(audit)| TestContainer | 每个 mutation 写 SKILL_SUPPORTING_FILE_* audit row;**U-21:reject 写 SKILL_PROMPT_INJECTION_BLOCKED;drift 写 SKILL_DRIFT_DETECTED** |
+| **Integration(U-21 poison ZIP)** | TestContainer + crafted ZIPs | 8 attack vector(invisible Unicode / RTL / ZWJ / role override / `[INST]` / base64 injection / 系统提示伪装 / 直接 prompt injection)每个 reject + audit row 内部完整 finding;API 返 generic message(Oracle defense 验证) |
+| **Integration(U-21 drift)** | TestContainer + SQL UPDATE | 直接 `UPDATE skill_version SET prompt_fragment = '恶意' WHERE ...` → skill_view 返回 `[BLOCKED]` + audit + metric +1;**绝不返回 mutated 内容** |
+| **Integration(U-21 context-scope re-scan)** | TestContainer + dynamically extended pattern set | import 时模式不命中 → 模式更新追加新 pattern → 同 row skill_view 返回 redact 占位符 |
+| E2E(Playwright)| 真 browser | 5 mutation 路径每个走通 + 文件 preview Markdown 正确 + diff 视图正确 + **upload poison file 报错 toast 验证(不暴露 finding 细节)** |
 
 ### 4.7 可观测
 
@@ -1030,11 +1204,17 @@ def record_skill_zip_reject(*, reason: Literal[
     "file_too_large",
     "total_too_large",
     "too_many_entries",
-    "legacy_format",  # 这条是 warn,不 reject;计数用
+    "prompt_injection",   # U-21 — 内容级威胁扫描命中
+    "legacy_format",      # 这条是 warn,不 reject;计数用
 ]) -> None: ...
+
+# U-21 新增独立 metric(语义不复用 memory 系列,alert 分流清晰)
+def record_skill_blocked(*, phase: Literal["zip_import", "skill_view"]) -> None: ...
+def record_skill_drift() -> None: ...
+def record_skill_redacted() -> None: ...
 ```
 
-reason label allowlist(有限枚举,不暴露用户路径)— 跟 Sprint #1 oracle defense 同模式。
+reason label allowlist(有限枚举,不暴露用户路径)— 跟 Sprint #1 oracle defense 同模式。`record_threat_pattern_hits` 仍走 Sprint #1 已有的 `helix_uplift_threat_pattern_hit_total{pattern_id, scope}`(跨 trigger / memory / skill 共享)。
 
 **recording rules + alerts**:
 
@@ -1054,6 +1234,36 @@ reason label allowlist(有限枚举,不暴露用户路径)— 跟 Sprint #1 orac
     summary: "Skill ZIP reject rate elevated"
     description: "User upload ZIPs are being rejected ≥ 6 / hr — check audit log for attack pattern or doc gap."
     runbook_url: ".../skill-packaging.md"
+
+# U-21:
+- record: helix:uplift:skill_blocked_rate:5m
+  expr: sum by (phase) (rate(helix_uplift_skill_blocked_total[5m]))
+
+- record: helix:uplift:skill_drift_rate:1h
+  expr: sum(rate(helix_uplift_skill_drift_total[1h]))
+
+- record: helix:uplift:skill_redacted_rate:1h
+  expr: sum(rate(helix_uplift_skill_redacted_total[1h]))
+
+- alert: HelixUpliftSkillDriftDetected
+  expr: helix:uplift:skill_drift_rate:1h > 0
+  for: 15m
+  labels:
+    severity: P0
+  annotations:
+    summary: "Skill content drift detected"
+    description: "DB row mutated past the write-time strict scan — almost certainly SQL injection or internal actor. See runbook § 8."
+    runbook_url: ".../skill-packaging.md#section-8"
+
+- alert: HelixUpliftSkillBlockedSpike
+  expr: sum(rate(helix_uplift_skill_blocked_total{phase="zip_import"}[15m])) > 0.1
+  for: 30m
+  labels:
+    severity: P1
+  annotations:
+    summary: "Skill ZIP upload threat scan blocks elevated"
+    description: "ZIP import strict scan blocked ≥ 6 / hr — pattern-set tuning or attack probing. See runbook § 7."
+    runbook_url: ".../skill-packaging.md#section-7"
 ```
 
 ### 4.8 复用矩阵
@@ -1061,10 +1271,14 @@ reason label allowlist(有限枚举,不暴露用户路径)— 跟 Sprint #1 orac
 | 复用面 | 来自 | 本 Sprint 用法 |
 |------|-----|----------------|
 | Oracle defense(整体 reject 不暴露细节)| Sprint #1 § 2.4 / Sprint #2 § 3.2 | ZIP reject + audit 内部记 reason,API 返 generic |
-| Audit Literal 双份漂移 | [memory:audit-literal-drift] | SKILL_SUPPORTING_FILE_* 两处 Literal 必须同步 |
+| Audit Literal 双份漂移 | [memory:audit-literal-drift] | SKILL_SUPPORTING_FILE_* + SKILL_PROMPT_INJECTION_BLOCKED + SKILL_DRIFT_DETECTED 4 个 action 两处 Literal 必须同步 |
 | log-injection 规避 | [memory:codeql-log-injection-request-taint] | reason / path 不进 `logger.warning(extra=)` |
 | ruff/mypy lint trap | [memory:ruff-strict-lint-traps] | pytest match=r"..." raw / pre-commit format check |
 | Admin UI 设计基线 10 条 | [memory:admin-ui-design-baseline] | CodeMirror 风格融入 dark-first / Inter+JBMono / cyan+violet brand |
+| **`threat_patterns.scan_for_threats` + `ThreatFinding`** | **Sprint #1 § 1.1** | **U-21:ZIP import strict scan + skill_view context-scope re-scan,基础设施 100% 复用零新代码** |
+| **`record_threat_pattern_hits` 共享 metric** | **Sprint #1 § 1.3** | **U-21 写时 + 读时都 bump 同 metric;label `pattern_id` + `scope` 跨 trigger / memory / skill 统一聚合** |
+| **Content hash drift 检测模式** | **Sprint #2 § 3.2 memory drift** | **U-21:SkillVersionRow.content_hash 字段;skill_view 读时校验 + drift redact;P0 alert(跟 memory drift 同级)** |
+| **Write-time strict block + read-time redact 双层防御** | **Sprint #2 § 3.2** | **U-21:ZIP 写时 strict reject + skill_view 读时 context-scope redact 占位符,对称 memory 子系统** |
 | Stream J.5 PDF 上传 path safety | Stream J.5 design | ZIP path validator 复用同套 sanitization 思路 |
 | Stream L L1 + Sprint #8 prompt cache | Stream L + Sprint #8 | lazy skill 的 skill_view 返回作为 message 走 cache anchor 后照常缓存 |
 | zero-tech-debt 6 条 | [memory:zero-tech-debt] | Sprint Exit 验收 |
@@ -1077,12 +1291,15 @@ reason label allowlist(有限枚举,不暴露用户路径)— 跟 Sprint #1 orac
 - [ ] ZIP roundtrip e2e:`zip -r helix.zip ~/.claude/skills/mcp-builder/ ; upload ; skill_view ; export ; diff` 全过
 - [ ] 老 ZIP backward compat 测试:M0 三件套 ZIP 能 import + warn
 - [ ] Progressive disclosure 测试:混合 lazy=true + lazy=false skill,system prompt 内容正确,skill_view 工作
-- [ ] Admin UI 5 mutation 路径 Playwright 全过
-- [ ] 单元测试覆盖 ≥ 80%
+- [ ] **Poison ZIP 8 attack vector 全部 reject + audit + Oracle defense 验证**(U-21)
+- [ ] **Drift 检测测试**:SQL UPDATE 后 skill_view 返回 BLOCKED + 不泄 mutated 内容(U-21)
+- [ ] **Context-scope re-scan 测试**:动态扩 pattern 后 skill_view 命中老 row 走 redact(U-21)
+- [ ] Admin UI 5 mutation 路径 Playwright 全过 + **upload poison file 报错 toast 不暴露 finding**(U-21)
+- [ ] 单元测试覆盖 ≥ 80%(含 U-21 hash / drift / write 写时扫 / 读时扫)
 - [ ] CI 全绿(ruff / mypy / pre-commit / CodeQL / pytest / integration / playwright)
-- [ ] runbook 6 节齐
-- [ ] uplift.yml 新 recording rules + alert 加入
-- [ ] [memory:audit-literal-drift] 两处 Literal 同步检查通过
+- [ ] runbook 8 节齐(含 U-21 § 7 reject triage + § 8 drift 应急)
+- [ ] uplift.yml 新 recording rules + 4 个 alert 加入(含 U-21 P0 drift + P1 blocked spike)
+- [ ] [memory:audit-literal-drift] 两处 Literal 同步检查通过(4 个新 action)
 - [ ] [memory:ruff-strict-lint-traps] preflight 跑过
 
 ---

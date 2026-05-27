@@ -19,7 +19,7 @@
 |---|------|--------|-----------|------|
 | 1 | Cron prompt 注入扫描 | ~3 天 | 无 | **Gate sprint** |
 | 2 | Memory 投毒防御 + drift backup | ~1.5 周 | 复用 #1 威胁模式库 | **Gate sprint** |
-| 3 | Skill 附属文件 + Claude Code 标准 SKILL.md + Progressive Disclosure（含 M1-K J.7b-3 / J.7b-6 提前）| ~2.5 周 | 无 | **Gate sprint** |
+| 3 | Skill 附属文件 + Claude Code 标准 SKILL.md + Progressive Disclosure + 威胁扫描 / drift 检测（含 M1-K J.7b-3 / J.7b-6 提前）| ~3 周 | 无 | **Gate sprint** |
 | 4 | Curator 自动状态机 | ~1 周 | **真实价值要等 J.7b-1 agent 自创建上线** | **基础设施 Gate sprint + 启用 M1-K** |
 | 5 | **MCP Client HTTP/SSE transport**（原"MCP Server"已推翻，见复审修正） | ~1.5 周 | 无 | **Gate sprint** |
 | 6 | Memory hybrid retrieval（向量 + 全文 RRF） | ~1.5 周 | 无（直接 port J.5 现成代码） | **Gate sprint** |
@@ -155,22 +155,29 @@ Week 11                 Week 12                 Week 13
 
 **Risk**：session 内 memory 内容更新不及时（写完 memory 当前 session 看不到）。**缓解**：跟 Hermes 一样接受这个 trade-off（snapshot 是 frozen，下次 session 才生效）。
 
-### Week 7-10 — #3 Skill 附属文件 + Claude Code 标准 SKILL.md + Progressive Disclosure
+### Week 7-10 — #3 Skill 附属文件 + Claude Code 标准 SKILL.md + Progressive Disclosure + 威胁扫描
 
-> **2026-05-27 复审**:原 plan 漏了 ZIP 格式标准对齐 + progressive disclosure。补做这两件后,Sprint 范围接近"完整 Skill 子系统升级"。详见 [STREAM-UPLIFT-DESIGN.md § 4](../streams/STREAM-UPLIFT-DESIGN.md)。
+> **2026-05-27 复审**(两轮):
+> - 第一轮:原 plan 漏了 ZIP 格式标准对齐 + progressive disclosure。补做这两件后,Sprint 范围接近"完整 Skill 子系统升级"。
+> - 第二轮:复审进一步发现 ZIP 内容威胁扫描完全没做(相比 Sprint #1 trigger / Sprint #2 memory 的 strict scan + drift 模式不对称)→ 追加 Mini-ADR U-21(写时 strict reject + 读时 drift / context-scope redact)。
+>
+> 详见 [STREAM-UPLIFT-DESIGN.md § 4](../streams/STREAM-UPLIFT-DESIGN.md)。
 
 **实施面**:
 - 对齐 Claude Code 标准:ZIP 用 `SKILL.md`(YAML frontmatter + body)+ 任意子目录;helix 字段放 `helix:` 命名空间
-- `skill_version` 加 `supporting_files: JSONB` + `lazy_load: BOOL`(迁移 0042);5MB cap;ObjectStore 不做(JSONB 够)
-- 新 `skill_view(skill_name, path)` 工具:`SKILL.md` 跟 supporting files 对称访问
+- `skill_version` 加 `supporting_files: JSONB` + `lazy_load: BOOL` + `content_hash: BYTEA`(迁移 0042);5MB cap;ObjectStore 不做(JSONB 够)
+- 新 `skill_view(skill_name, path)` 工具:`SKILL.md` 跟 supporting files 对称访问;**读时 drift 检测 + context-scope re-scan + redact**
 - agent_factory:**progressive disclosure 默认架构** —— system prompt 只注 skill summary;per-skill `lazy: false` 默认保留现有 eager 行为
 - 完整 Admin UI:CodeMirror 6 + 5 mutation 路径(edit / upload / delete / rename / ZIP)+ diff 视图
 - ZIP backward compat 双读:老 ZIP(skill.yaml + prompt.md + tools.txt)能 import + warn
 - Path 校验:字符 + 扩展名 + 大小 allowlist;子目录命名自由(对齐 Claude 标准);Oracle defense(整 ZIP reject 不暴露细节)
+- **U-21 写时威胁扫描**:ZIP import + 单文件 mutation 都走 Sprint #1 strict scan(基础设施 100% 复用);finding → reject + audit `SKILL_PROMPT_INJECTION_BLOCKED`
+- **U-21 P0 alert**:`HelixUpliftSkillDriftDetected`(drift 几乎必是 SQL 注入或内部 actor,跟 memory drift 同级)
 
 **借鉴源**:
 - Claude Code 标准 SKILL.md(`~/.claude/skills/` 实测)— 单文件 + 任意子目录
 - Hermes 维度 14 — supporting files 思路(但 helix 子目录命名跟 Claude Code 对齐,不照搬 Hermes 强制 references/templates/scripts)
+- Sprint #1 + #2 防线 — 威胁扫描 + drift 检测基础设施全复用,trigger / memory / skill 三条"内容进库"路径对称防御
 
 ### Week 11-12 — #4 Curator 自动状态机（基础设施完整）
 
