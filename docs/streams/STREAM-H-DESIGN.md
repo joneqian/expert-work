@@ -1234,9 +1234,65 @@ PR9 补 `04-run-trace.html` 加 ApprovalCard 编辑态 section。
 - **TenantConfig ETag 并发兜底**:M0 用 If-Match;无 ETag 时 PUT 接受最后写者赢(M1 加 ETag header 才严格)
 - 无新增 secret;无新增 CSRF surface(GET);所有 mutation 已被现有 AuthMiddleware 覆盖
 
-### 6.6.18 H.4 收尾摘要
+### 6.6.18 H.4 收尾摘要(2026-05-26)
 
-(由 PR9 落入,空模板供未来填充。模仿 § 6.5.18 H.3 收尾范式:PR 全部合入 main 列表 / 决议核验 / 零债 6 条审计 / 留给后续 stream 的债务清单 / capability gap 声明)
+**PR 全部合入 main**:
+
+| PR | 内容 | 合入 |
+|----|------|------|
+| H.4 PR 0 (#296) | 设计基线 § 6.6 + 6 mockup(09–14)+ 4 spike resolve | ✅ |
+| H.4 PR 1 (#297) | Curation+Eval UI(Tabs / Promote Modal / Monaco JSON Edit Drawer)+ latent bug 修 1 | ✅ |
+| H.4 PR 2 (#298) | Memory CRUD(ApprovalCard Monaco 复用 + client-side 搜索)+ patchJson helper | ✅ |
+| H.4 PR 3 (#299) | Audit backend endpoint(`GET /v1/audit` + detail + `AuditLogger.get_by_id`)+ 11 e2e 测 | ✅ |
+| H.4 PR 4 (#300) | Audit UI(Timeline + Filter Chips + Cursor Load more + Drawer JSON) | ✅ |
+| H.4 PR 5 (#301) | Skills(List + Detail + ZIP import multipart + ZIP export blob)+ latent bug 修 2 | ✅ |
+| H.4 PR 6 (#302) | Triggers(cron/webhook Tabs + Show-once Secret Drawer)+ latent bug 修 3 | ✅ |
+| H.4 PR 7 (#303) | Settings IAM(SA + RB,platform_scope 三重防御 + type-to-confirm) | ✅ |
+| H.4 PR 8 (#304) | Settings Ops(Quotas + Config,per-tenant + Monaco JSON Edit + last-writer-wins) | ✅ |
+
+**PR0 4 个 spike 实施期核验**:
+- **Spike 1**(Trigger webhook secret 回包 schema 已有)— ✅ PR 6 直接读 `webhook_secret`,backend 无改动
+- **Spike 2**(`ResourceType` Literal 双份漂移 vs `AUDIT_QUERY`)— ✅ PR 3 spike 简化 — 既有 `AUDIT_READ` enum + 双 Literal 都已含 `"audit"`,**两条原计划改动取消**
+- **Spike 3**(audit_logger fixture parity)— ✅ PR 3 遵循"每测试自建 `build_default_audit_logger`"pattern,不需改 conftest
+- **Spike 4**(RoleBinding self-elevation 防御)— ✅ PR 7 frontend 加 type-to-confirm `CONFIRM PLATFORM ROLE` 为第三道防线(backend DTO + caller `is_system_admin` 已是前两道)
+
+**实施期发现的 3 个 latent SDK bug**(同型,首次 H.4 PR 1 暴露):
+- **PR 1** 修了 `listCandidates` / `listEvalDatasets` — backend 返回 raw,SDK 误用 `getJson` 期望 envelope
+- **PR 5** 修了 `listSkills` 同型 bug + 顺手修 `current_version → latest_version` 字段名 + 删 `total` 字段(backend cursor 不是 offset)
+- **PR 6** 修了 `listTriggers` 同型 bug
+- **根因**:H.1b PR 3 (#280) 写 SDK skeleton 时 mock 了 enveloped 响应,test 通过但 backend 实际 raw,production 第一次真正调用就会在 `unwrap()` 处 500
+- **教训**:见新 memory [[feedback_envelope_vs_raw_contract_check]]
+
+**零技术债 6 条核验**(per `[[feedback_zero_tech_debt]]`):
+1. **无 TODO/FIXME/XXX** — `git diff main~9..main` 9 个 PR 共 ~+9,500 行,无未来留账标记
+2. **测试覆盖** — backend 11 e2e (audit_api);frontend 130/130(was 99 起步,加 31 新单测)+ ~30 Storybook stories;Playwright `governance.spec.ts` 7 happy-path(本 PR)
+3. **文档同步** — 设计文档 v1.7→v1.9,实施 ↔ 设计完全映射,18 子章节全部 ready
+4. **可观测齐全** — PR 3 加 2 Prometheus(`helix_control_plane_audit_query_total` + `_seconds`);所有 mutation 经既有 audit_emit(MEMORY_UPDATE / CURATION_PROMOTE / SKILL_CREATE / TRIGGER_CREATE / SERVICE_ACCOUNT_CREATE / ROLE_BINDING_CREATE / QUOTA_CONFIG_WRITE / TENANT_CONFIG_WRITE)
+5. **CI 全绿** — 每 PR 11/11(`gh pr checks` 验证;PR 4 + PR 8 各 rerun 一次 flaky `test_react_graph_parallel` timing test)
+6. **bug 不遗留** — 3 个 latent SDK bug 在 H.4 期间全部修了;`SkillRecord` 字段名 mismatch 一并修
+
+**留给后续 stream 的债务**(显式记账):
+- **Skills ZIP Marketplace**(公开 / cross-tenant 共享)→ M1
+- **Memory retention sweep UI**(per-tenant)→ M1
+- **Audit CSV 导出**(operator 需求出现时)→ M1
+- **Tenant Config ETag 并发控制**(M0 last-writer-wins → M1 加 If-Match → 412)→ M1
+- **Trigger webhook secret rotate endpoint**(M0 走删-重建)→ M1
+- **Trace 嵌入式时间线**(Mini-ADR H-8 外链只是第一步)→ M1+(Tempo / Grafana 嵌入)
+- **Trigger fire 历史 list endpoint** → M1(M0 走 `/v1/runs?trigger_id=` 间接)
+- **Audit `actor_id` JOIN 用户名**(显示 raw subject_id)→ M1
+- **Approval 完整 E2E**(H.3 留账)→ M0 dogfood
+- **mockup 04 ApprovalCard 编辑态截图**(H.3 留账)→ 本 PR 补
+
+**capability gap**:无。H.4 7 个治理子面 + Audit endpoint 全部完整 CRUD 落地,per `[[feedback_complete_not_minimal]]` 没有任何"弱能力包装成设计选择"的 [[feedback_no_design_choice_disguise]] 风险。
+
+**Stream H 整体收官**(per § 7 整体验收清单):
+- ✅ 6 个治理子面 + 7 个 Settings 子页 ComingSoon → 真页面
+- ✅ system_admin 跨租户视角端到端可见(登录默认 "All tenants" → 切到具体 tenant → 切回 → 所有 audit 留痕)
+- ✅ a11y axe 0 critical(Playwright + axe 在 CI 每 PR 跑)
+- ✅ 性能:首屏 < 2s,Lighthouse Performance ≥ 90(H.1a a11y 自检 baseline + H.4 持续监控)
+- ✅ `[[feedback_zero_tech_debt]]` 6 条 H.1 → H.4 全部满足
+- ✅ ITERATION-PLAN Stream H 全部子项 ✅,Stream H 收官归档
+- ✅ 接入的 B/E/J/K 能力面在 UI 上端到端可见(Agent CRUD / Sessions+Runs SSE / Memory CRUD / Curation+Eval / Skills / Triggers / API Keys / SA / RB / Tenant Quotas / Tenant Config / Audit)
 
 ---
 
@@ -1256,16 +1312,16 @@ PR9 补 `04-run-trace.html` 加 ApprovalCard 编辑态 section。
 | PR7d ✅ | H.3 PR 4 — `GET .../events` endpoint (live + replay) + RunDetail Event stream panel(Mini-ADR H-7 frontend)#292 | 1.5-2 天 |
 | PR7e ✅ | H.3 PR 5 — Approval `override_args` Monaco UX + 状态轮询(Mini-ADR H-9)#293 | 1.5 天 |
 | PR7f ✅ | H.3 PR 6 — Trace 链接外跳(Mini-ADR H-8)+ Approval pending badge + 体感打磨 #294 | 1 天 |
-| PR8 (H.4 PR0) | H.4 设计基线 — § 6.6 详细设计(18 子章节) + 5+ mockup(09-runs-list 补 H.3 留账 + 10-skills + 11-triggers + 12-audit + 13-settings-iam + 14-settings-ops) + mockups/README.md + ITERATION-PLAN 同步 | 2.5-3 天 |
-| PR9 (H.4 PR1) | H.4 PR 1 — Curation+Eval UI(`api/curation.ts` 补 mutation + `pages/CurationReview.tsx` + `pages/EvalDatasets.tsx`)| 2 天 |
-| PR10 (H.4 PR2) | H.4 PR 2 — Memory CRUD(`api/memory.ts` 补 update/delete + `pages/MemoryAdmin.tsx`,复用 ApprovalCard Monaco 范式)| 1.5 天 |
-| PR11 (H.4 PR3) | H.4 PR 3 — Audit backend endpoint(`build_audit_router()` + `AuditAction.AUDIT_QUERY` + ResourceType `"audit"` 双份改 + `test_audit_api.py` ~10 测)| 2 天 |
-| PR12 (H.4 PR4) | H.4 PR 4 — Audit UI(`api/audit.ts` cursor 分页 + `pages/AuditLog.tsx` timeline + filter chips + entry drawer)| 2 天 |
-| PR13 (H.4 PR5) | H.4 PR 5 — Skills(create / update / version / import ZIP / export ZIP + `pages/SkillsList.tsx` + `pages/SkillDetail.tsx`)| 2.5 天 |
-| PR14 (H.4 PR6) | H.4 PR 6 — Triggers(CRUD + `pages/TriggersList.tsx` cron/webhook Tab + Create drawer + webhook secret show-once + `useStatusPolling` 状态轮询)| 2.5 天 |
-| PR15 (H.4 PR7) | H.4 PR 7 — Settings IAM(`api/{service_accounts,role_bindings}.ts` + `pages/SettingsServiceAccounts.tsx` + `pages/SettingsRoleBindings.tsx` + platform_scope 自提权确认 dialog)| 2 天 |
-| PR16 (H.4 PR8) | H.4 PR 8 — Settings Ops(`api/{tenant_quotas,tenant_config}.ts` + `pages/SettingsTenantQuotas.tsx` + `pages/SettingsTenantConfig.tsx` ETag 并发兜底)| 2 天 |
-| PR17 (H.4 PR9) | H.4 收尾 + Stream H 整体收尾 — § 6.6.18 收尾摘要 + ITERATION-PLAN ✅ + Stream H § 7 全部验收 + `governance.spec.ts` 7 happy-path 冒烟 + 补 mockup 04 ApprovalCard 编辑态(H.3 留账)| 0.5-1 天 |
+| PR8 (H.4 PR0) ✅ | H.4 设计基线 — § 6.6 详细设计(18 子章节) + 5+ mockup(09-runs-list 补 H.3 留账 + 10-skills + 11-triggers + 12-audit + 13-settings-iam + 14-settings-ops) + mockups/README.md + ITERATION-PLAN 同步 #296 | 2.5-3 天 |
+| PR9 (H.4 PR1) ✅ | H.4 PR 1 — Curation+Eval UI(`api/curation.ts` 补 mutation + `pages/CurationReview.tsx` + `pages/EvalDatasets.tsx`)#297 | 2 天 |
+| PR10 (H.4 PR2) ✅ | H.4 PR 2 — Memory CRUD(`api/memory.ts` 补 update/delete + `pages/MemoryAdmin.tsx`,复用 ApprovalCard Monaco 范式)#298 | 1.5 天 |
+| PR11 (H.4 PR3) ✅ | H.4 PR 3 — Audit backend endpoint(`build_audit_router()` + 复用既有 `AUDIT_READ` + ResourceType `"audit"` 双份已存在,无 enum/Literal 改动 + `test_audit_api.py` 11 测)#299 | 2 天 |
+| PR12 (H.4 PR4) ✅ | H.4 PR 4 — Audit UI(`api/audit.ts` cursor 分页 + `pages/SettingsAudit.tsx` timeline + filter chips + entry drawer)#300 | 2 天 |
+| PR13 (H.4 PR5) ✅ | H.4 PR 5 — Skills(create / update / version / import ZIP / export ZIP + `pages/SkillsList.tsx` + `pages/SkillDetail.tsx`)#301 | 2.5 天 |
+| PR14 (H.4 PR6) ✅ | H.4 PR 6 — Triggers(CRUD + `pages/TriggersList.tsx` cron/webhook Tab + Create drawer + webhook secret show-once + Switch 内联 PATCH)#302 | 2.5 天 |
+| PR15 (H.4 PR7) ✅ | H.4 PR 7 — Settings IAM(`api/{service_accounts,role_bindings}.ts` + `pages/SettingsServiceAccounts.tsx` + `pages/SettingsRoleBindings.tsx` + platform_scope type-to-confirm 三重防御)#303 | 2 天 |
+| PR16 (H.4 PR8) ✅ | H.4 PR 8 — Settings Ops(`api/{tenant_quotas,tenant_config}.ts` + `pages/SettingsTenantQuotas.tsx` + `pages/SettingsTenantConfig.tsx` Monaco JSON Edit + last-writer-wins)#304 | 2 天 |
+| PR17 (H.4 PR9) ✅ | H.4 收尾 + Stream H 整体收尾 — § 6.6.18 收尾摘要 + ITERATION-PLAN ✅ + Stream H § 7 全部验收 + `governance.spec.ts` 7 happy-path 冒烟 + 补 mockup 04 ApprovalCard 编辑态(H.3 留账)| 0.5-1 天 |
 
 > 总估时(H.1a → H.4):**42-50 天**(H.1a/H.1b/H.2/H.3 实际 ~35 天 + H.4 14-18 天)。H.4 PR0 是阻塞 PR,合入后 PR1/2/5/6/7/8 可并行,PR3 → PR4 顺序。
 
@@ -1281,11 +1337,14 @@ PR9 补 `04-run-trace.html` 加 ApprovalCard 编辑态 section。
 - 术语表覆盖所有 mockup 中可见英中字符串
 - `tokens.css` + `shell.css` 无外部依赖,无 SCSS,无 build —— 浏览器直接渲染
 
-### Stream H 整体验收(所有 PR 合并后)
-1. UI/UX 设计基线文档先于实现合入(H.1a PR1+PR2 在最前) ✓
-2. 每个 H.* 子项产品级体验:响应式(≥1280px desktop)/ 键盘可达 / a11y(axe 0 critical)/ 性能(首屏 < 2s, Lighthouse Performance ≥ 90)
-3. UI 集成测试覆盖 happy path(`@testing-library/react`)
-4. 接入的 B/E/J/K 能力面在 UI 上端到端可见
+### Stream H 整体验收(所有 PR 合并后)— **2026-05-26 全部 ✅**
+1. ✅ UI/UX 设计基线文档先于实现合入(H.1a PR1+PR2 在最前 #262 #263)
+2. ✅ 每个 H.* 子项产品级体验:响应式(≥1280px desktop)/ 键盘可达 / a11y(axe 0 critical,Playwright + axe CI 每 PR 跑)/ 性能(首屏 < 2s, Lighthouse Performance ≥ 90 — H.1a baseline + H.4 持续监控)
+3. ✅ UI 集成测试覆盖 happy path(`@testing-library/react` 130/130 + Playwright governance.spec.ts 7 happy-path)
+4. ✅ 接入的 B/E/J/K 能力面在 UI 上端到端可见(Agent CRUD / Sessions+Runs SSE / Memory CRUD / Curation+Eval / Skills(含 ZIP)/ Triggers(cron+webhook)/ API Keys / Service Accounts / Role Bindings(含 platform_scope)/ Tenant Quotas / Tenant Config / Audit)
+5. ✅ system_admin 跨租户视角端到端可见(登录默认 "All tenants" → 切到具体 tenant → 切回 → 所有 audit 留痕,11 个 list endpoint 经 Stream N 改造)
+6. ✅ `[[feedback_zero_tech_debt]]` 6 条 H.1 → H.4 全部满足,每 stage 收尾 PR 显式审计(§ 6.5.18 H.3 + § 6.6.18 H.4)
+7. ✅ ITERATION-PLAN Stream H 全部子项 ✅,Stream H 收官归档
 
 ---
 
@@ -1302,3 +1361,4 @@ PR9 补 `04-run-trace.html` 加 ApprovalCard 编辑态 section。
 | 2026-05-26 | v1.6 | 实现期发现 PR 2 (trace_id) 必须先落、PR 3 (run_event) 后落,但原设计文档 migration 编号是反过来的 (PR 2=0038, PR 3=0037)。修正为 PR 2=0037, PR 3=0038 与 Alembic linear chain (down_revision 链)对齐。无功能变更。 |
 | 2026-05-26 | v1.7 | **H.3 收尾**:6 个 PR 全部合入 main(#289–#294);新增 § 6.5.18 H.3 收尾摘要 — 决议 A–F 全部兑现、设计文档 § 6.5.13 漏交的 2 个 story(EventStreamPanel + ApprovalCard)在收尾 PR 补齐;遗留待办全部归类到 M0 dogfood / H.4 收尾(approval 完整 E2E、RunsList mockup、ApprovalCard 编辑态 mockup) |
 | 2026-05-26 | v1.8 | **H.4 设计基线**:加 § 6.6 H.4 详细设计(18 子章节,复刻 § 6.5 范式)— 范围 7 子面(Curation+Eval / Memory / Skills / Triggers / Audit / Settings IAM / Settings Ops)+ Audit backend endpoint 新建 + 跨租户 RBAC matrix + 错误边界矩阵(12 条)+ i18n 8 namespace ~130 keys + 测试计划(backend 10 测 + frontend 45 单测 + 33 stories + E2E 7 happy-path)。锁定 4 个 spike 结果:(1) Trigger webhook secret 回包 schema 已有 — PR6 backend 不需改;(2) ResourceType Literal 双份漂移 — PR3 必须改 `protocol/audit.py:146` + `control-plane/audit.py:111` 两处;(3) audit_logger fixture pattern = 每测试自建,不走 conftest — PR3 遵循同型;(4) RoleBinding self-elevation 已被 DTO + caller 双重保护 — PR7 backend 不需改。PR 链拆 PR8-12(原 5 个 H.4 PR)为 PR8-17(10 个 PR:1 设计 + 8 实施 + 1 收尾),总估时 14-18 天。|
+| 2026-05-26 | v1.9 | **H.4 收尾 + Stream H 整体收官**:9 个 H.4 PR 全部合入 main(#296–#304),共 ~+9,500 行;§ 6.6.18 H.4 收尾摘要落地(决议核验 / 零债 6 条 / 留给后续 stream 的债务清单 / capability gap 声明);PR0 spike 简化兑现:(spike 2) `AUDIT_READ` enum + `"audit"` ResourceType 已存在 — 取消"新增 AUDIT_QUERY enum / 双份 Literal drift 修复"两条原计划改动;(spike 1/3/4) backend 不需改;实施期发现 3 个 latent SDK envelope-vs-raw bug 全部修复(`listCandidates` PR1 + `listSkills` PR5 + `listTriggers` PR6),根因写入新 memory `feedback_envelope_vs_raw_contract_check`;Stream H 整体验收(§ 7)全部 ✅(7 条全勾);ITERATION-PLAN Stream H 收官归档;Playwright `e2e/governance.spec.ts` 7 happy-path 冒烟;补 mockup `04-run-trace.html` ApprovalCard 编辑态截图(H.3 留账兑现)|

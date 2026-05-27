@@ -224,6 +224,81 @@
 
       </div>
 
+      <!-- ============================================================
+           H.3 PR 5 — ApprovalCard editing-state extension (added in H.4
+           PR 9 closeout per § 6.5.18 留账)
+           Shows the inline Monaco JSON editor for override_args, with
+           the "Approve" button label switching to "Approve with edits"
+           when the buffer differs from the server-sent pristine JSON.
+           ============================================================ -->
+      <section style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--hx-border-subtle);">
+        <h3 class="hx-heading-3" style="margin: 0 0 4px;">ApprovalCard — editing state (H.3 PR 5)</h3>
+        <p class="hx-text-secondary hx-text-sm" style="margin: 0 0 12px;">
+          Reviewer edits the agent's proposed JSON before approving. Pristine vs dirty
+          buffer detection drives the Approve button label.
+        </p>
+
+        <div style="
+          background: var(--hx-status-warning-bg);
+          border: 1px solid var(--hx-status-warning-fg);
+          border-radius: var(--hx-radius-md);
+          padding: var(--hx-space-4);
+        ">
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+            <span style="font-size: 18px;">⚠</span>
+            <div style="flex: 1;">
+              <div style="font-weight: var(--hx-font-weight-semibold); color: var(--hx-status-warning-fg);">
+                Awaiting human approval
+              </div>
+              <div class="hx-text-sm hx-text-secondary">
+                <span style="margin-right: 16px;"><strong>Reason:</strong> destructive</span>
+                <span style="margin-right: 16px;"><strong>Action:</strong> handover.human</span>
+                <span><strong>Timeout:</strong> in 23h 47m</span>
+              </div>
+            </div>
+            <button class="hx-btn hx-btn--ghost hx-btn--sm">Edit arguments</button>
+          </div>
+
+          <div class="hx-text-secondary hx-text-sm" style="margin-bottom: 4px;">
+            Proposed arguments (editing — Approve sends them as 'modify' decision)
+            <span style="
+              background: var(--hx-status-warning-bg);
+              color: var(--hx-status-warning-fg);
+              padding: 1px 8px;
+              border-radius: var(--hx-radius-xs);
+              font-size: var(--hx-font-size-xs);
+              margin-left: 8px;
+            ">edited (dirty)</span>
+          </div>
+          <div style="
+            background: var(--hx-surface-bg);
+            border: 1px solid var(--hx-border-strong);
+            border-radius: var(--hx-radius-sm);
+            padding: var(--hx-space-3);
+            font-family: var(--hx-font-mono);
+            font-size: var(--hx-font-size-sm);
+            color: var(--hx-text-primary);
+            white-space: pre;
+          ">{
+  "ticket_id": "tk_88234_refund",
+  "compensation": <span style="background: rgba(245, 158, 11, 0.2); padding: 0 2px; border-radius: 2px;">25</span>,
+  "reason": "logistics confirmed loss after delivery scan, escalate to refund team"
+}</div>
+
+          <div style="display: flex; gap: var(--hx-space-2); justify-content: flex-end; margin-top: var(--hx-space-3);">
+            <button class="hx-btn hx-btn--danger">Reject</button>
+            <button class="hx-btn hx-btn--secondary">Cancel edit</button>
+            <button class="hx-btn hx-btn--primary">Approve with edits</button>
+          </div>
+        </div>
+
+        <p class="hx-text-tertiary hx-text-xs" style="margin-top: 12px;">
+          When the buffer matches the server-sent pristine JSON: button label = <code>Approve</code> + decision=<code>approve</code>.
+          When dirty: label = <code>Approve with edits</code> + decision=<code>modify</code> + body carries <code>modified_args</code>.
+          Invalid JSON disables Approve and surfaces an inline parser error.
+        </p>
+      </section>
+
     </div>
   </main>
 </div>

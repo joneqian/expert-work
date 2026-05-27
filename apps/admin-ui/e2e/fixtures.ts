@@ -100,6 +100,22 @@ const RUNS_RESPONSE = {
   error: null,
 };
 
+/** Raw (un-enveloped) list shape used by curation / skills / triggers
+ *  / audit endpoints — see H.4 PR 1 / PR 5 / PR 6 SDK rewrites. */
+const RAW_EMPTY_LIST = { items: [], total: 0, cross_tenant: false };
+const RAW_EMPTY_CURSOR = { items: [], next_cursor: null, cross_tenant: false };
+const RAW_EMPTY_AUDIT = {
+  items: [],
+  next_cursor: null,
+  has_more: false,
+  applied_scope: "22222222-2222-2222-2222-222222222222",
+};
+const ENVELOPED_EMPTY_LIST = {
+  success: true,
+  data: { items: [], total: 0, cross_tenant: false },
+  error: null,
+};
+
 export async function installControlPlaneStub(page: Page): Promise<void> {
   await page.route("**/v1/me", async (route) => {
     await route.fulfill({ json: ME_RESPONSE });
@@ -111,10 +127,49 @@ export async function installControlPlaneStub(page: Page): Promise<void> {
     await route.fulfill({ json: EMPTY_LIST });
   });
   await page.route("**/v1/service_accounts*", async (route) => {
-    await route.fulfill({ json: EMPTY_LIST });
+    await route.fulfill({ json: ENVELOPED_EMPTY_LIST });
+  });
+  await page.route("**/v1/role_bindings*", async (route) => {
+    await route.fulfill({ json: ENVELOPED_EMPTY_LIST });
   });
   await page.route("**/v1/runs*", async (route) => {
     await route.fulfill({ json: RUNS_RESPONSE });
+  });
+  // Memory backend is enveloped (Stream K.K6).
+  await page.route("**/v1/memory*", async (route) => {
+    await route.fulfill({ json: ENVELOPED_EMPTY_LIST });
+  });
+  // Curation / skills / triggers / audit backends are raw — Stream H.4
+  // SDKs read them through ``apiClient`` directly.
+  await page.route("**/v1/curation/candidates*", async (route) => {
+    await route.fulfill({ json: RAW_EMPTY_LIST });
+  });
+  await page.route("**/v1/eval-datasets*", async (route) => {
+    await route.fulfill({ json: RAW_EMPTY_LIST });
+  });
+  await page.route("**/v1/skills*", async (route) => {
+    await route.fulfill({ json: RAW_EMPTY_CURSOR });
+  });
+  await page.route("**/v1/triggers*", async (route) => {
+    await route.fulfill({ json: RAW_EMPTY_LIST });
+  });
+  await page.route("**/v1/audit*", async (route) => {
+    await route.fulfill({ json: RAW_EMPTY_AUDIT });
+  });
+  // Tenant-scoped endpoints — match any tenant UUID in path.
+  await page.route("**/v1/tenants/*/quotas*", async (route) => {
+    await route.fulfill({ json: { success: true, data: [], error: null } });
+  });
+  await page.route("**/v1/tenants/*/config*", async (route) => {
+    await route.fulfill({
+      status: 404,
+      json: {
+        detail: {
+          code: "TENANT_CONFIG_NOT_FOUND",
+          message: "no tenant_config row exists for this tenant",
+        },
+      },
+    });
   });
 }
 
