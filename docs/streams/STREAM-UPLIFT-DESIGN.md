@@ -918,13 +918,188 @@ async def memory_recall_node(state, config):
 
 ## 9. Sprint #8 — Memory Frozen Snapshot / 前缀缓存优化
 
-> **本章节 stub** — Sprint #8 开工前补完。预计 Week 5-6(与 #5 / #6 并行)。
+> **执行顺序**:本项作为 Sprint **#4 执行**(完全无依赖,无 schema 变更,实施面最窄;依赖 Stream L.L1 prompt caching 已在 M0 落地)。
+>
+> **依赖前置**:✅ Sprint #1 + #2 + #6 已 merge(`442cd69` + `be5e6ed` + `26b115e`)+ L.L1 prompt caching middleware(M0)。本 Sprint 不引入新算法,不动 schema,纯 orchestrator + protocol 层。
 
-主要设计要点(占位)：
-- `memory_recall_node` 加 "frozen snapshot" 模式：per-session 召回一次 + 整 session 复用(vs 默认 per-turn)
-- L.L1 prompt caching middleware 适配，cache_control 加在 memory block 末尾(per [STREAM-L-DESIGN.md § L1](./STREAM-L-DESIGN.md))
-- manifest `policies.memory_recall_mode: "per_turn" | "per_session"`
-- 默认仍 `per_turn`；`per_session` 启用条件 M1 评估 token 成本数据
+### 9.1 背景:为什么 memory recall 不参与 L.L1 prompt cache
+
+L.L1(Stream L Mini-ADR L-1)给 Anthropic adapter 加了 `cache_control: ephemeral` 标记到 system payload + 最后 3 条非 system message。但 J.3 long-term memory 的 `_inject_memories`(见 `graph_builder/builder.py:507`)在 **每个 turn 把 memory list 追加到 messages 尾部**。后果:
+
+- Turn 1 tail:`[Human(task), Human(memories)]`
+- Turn 2 tail:`[Human(task), AI, ToolMessage, Human(memories)]` ← memory 位置漂了
+- Turn N:memory 还是末尾,但 position 随对话长度递增
+
+Anthropic prompt cache 按 prefix 缓存:**位置不稳定的 block 无法参与缓存**。memory 集合本身在 session 内是 frozen 的(`memory_recall_node` 只在 START 跑一次),但 RENDER 位置每 turn 漂,导致包含 memory 的 prefix 每 turn 不同 → cache miss → memory tokens 每 turn 全价计费。
+
+实际成本估算:典型 10 个 fact memory ≈ 500 tokens;50-turn session 重复全价 ≈ 25K extra input tokens(M0 dogfood per-user 持久 agent 长 session 是核心场景)。
+
+### 9.2 设计:frozen snapshot = render 位置稳定 + 显式 cache anchor
+
+**核心思路**:memory 集合本来 session 内就 frozen,把 render 位置也 frozen — 让它进入 prefix 固定槽位 + 给它打专门的 `cache_control` marker。
+
+**两阶段**:
+
+**阶段 A — render 位置稳定(builder.py 修改)**:
+- `per_session` 模式(新,推荐默认):memory block 插入到 messages **position 1**(紧跟 user task)。整 session 不动 — 任何 turn 的 prefix 都是 `[task, memories, ...]` 的扩展
+- `per_turn` 模式(legacy / escape hatch):保留 tail 注入 — 给 mid-session 用 `manage_memory` tool 自修改的 agent 用
+
+**阶段 B — 跨 message cache anchor(anthropic.py 修改)**:
+- L.L1 只标 tail 3,session 长了 memory block 出 trail window。需要给 memory block 独立 anchor marker
+- 实现:`BaseMessage.additional_kwargs = {"helix_cache_anchor": True}`;Anthropic provider 扫到此 flag 就加 cache_control
+
+**Anthropic breakpoint cap**:每 request 最多 4 个。当前 L.L1 用 system(1)+ tail(3)= 4 满。Sprint #8 加 anchor 后 = 5,超 cap。
+
+**解决**:tail count 从 3 降到 2,让 anchor 占第 4 slot。memory anchor 价值远大于 tail 多缓存 1 条(50-turn 25K vs 几百 tokens)。Mini-ADR U-7 锁。
+
+### 9.3 Mini-ADR U-7:tail count 3 → 2 + 加 memory cache anchor
+
+- **决定**:L.L1 `_CACHE_CONTROL_TAIL_COUNT` 从 `3` 降到 `2`;新增 metadata-based cache anchor(`helix_cache_anchor: True`)给 frozen-snapshot 模式的 memory block 用
+- **总 breakpoint**:system(1)+ tail(2)+ memory anchor(0 或 1)= **3 或 4**,在 Anthropic 4 上限内
+- **替代方案 1** 不动 L.L1,memory 走 tail-3:拒 — memory 每 turn 漂位置,失去 frozen snapshot 价值
+- **替代方案 2** 把 memory 注入 system payload(扩展 system block):拒 — 破 L.L1 "system 是 build-once 不变式";跨 session cache 失效
+- **替代方案 3** anchor 用 position-based(必标 `messages[2]`):拒 — 跟 plan / mutation-advisory 注入起冲突;metadata 显式可组合
+- **per_turn 模式不打 anchor**:legacy 接受不优化换灵活
+
+### 9.4 Mini-ADR U-8:默认 `per_session`(行为反转,需用户确认)
+
+- **原 capability-uplift-plan.md 提议**:默认 `per_turn`(保守)
+- **本 Sprint 反转**:默认 `per_session` — 跟 Sprint #1/#2/#6 一贯"默认更好行为 + opt-out"模式一致
+- **理由**:
+  - memory 集合在 session 内本来就 frozen(`memory_recall_node` 只在 START 跑),没有"per-turn 重召回"的实际语义
+  - mid-session memory 改动是 corner case(常规更新在 writeback / API PATCH 触发,不要求当前 session 立即生效)
+  - per_session 直接节省 token,per_turn 是历史包袱
+- **风险与缓解**:
+  - 中途用 memory tool 自修改 memory 的 agent(M0 没有,M1 可能加):per_session 当前 session 看不到更新,需新 session;runbook 说明 + 推 `per_turn`
+  - **反转需用户显式确认**(per [memory:surface-requirement-changes](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_surface_requirement_changes.md)),见 § 9.7 决策点 #1
+
+### 9.5 实施细节
+
+| 文件 | 改动 |
+|------|------|
+| `packages/helix-protocol/src/.../agent_spec.py` | `LongTermMemorySpec` 加 `recall_mode: Literal["per_session", "per_turn"] = "per_session"` |
+| `services/orchestrator/src/.../graph_builder/builder.py` | `_inject_memories` 双分支(per_session 插 position 1 + metadata anchor;per_turn 当前 tail);签名加 `mode` |
+| `services/orchestrator/src/.../agent_factory.py` | agent_node closure 拿 manifest `recall_mode` |
+| `services/orchestrator/src/.../llm/providers/anthropic.py` | `_CACHE_CONTROL_TAIL_COUNT`:`3` → `2`;`_to_anthropic_messages` 传 `helix_cache_anchor` flag;`_apply_cache_control` 加 anchor 扫描分支 |
+| `services/orchestrator/tests/test_memory_nodes.py` | 加 per_session vs per_turn 渲染位置测试 |
+| `services/orchestrator/tests/test_llm_providers.py` 或 anthropic 专门测 | cache_control marker 计数 ≤ 4;anchor 检测 |
+| `packages/helix-common/src/.../uplift_metrics.py` | 2 counter:`memory_recall_inject_mode_total{mode}` + `anthropic_cache_anchors_total` |
+| `tools/observability/rules/uplift.yml` | recording rule `memory_per_session_adoption_ratio:1h` |
+| `docs/runbooks/threat-scanner-tuning.md` | § 10 frozen snapshot 切换 + 故障排查 |
+
+**代码骨架(伪)**:
+
+```python
+# graph_builder/builder.py
+def _inject_memories(
+    messages: list[BaseMessage],
+    memories: list[MemoryItem],
+    *,
+    mode: Literal["per_session", "per_turn"],
+) -> list[BaseMessage]:
+    if mode == "per_turn":
+        return _append_tail_human_message(messages, _render_memories(memories))
+    # per_session: stable prefix slot + cache anchor metadata
+    block = HumanMessage(
+        content=_render_memories(memories),
+        additional_kwargs={"helix_cache_anchor": True},
+    )
+    return [messages[0], block, *messages[1:]] if messages else [block]
+```
+
+```python
+# llm/providers/anthropic.py
+_CACHE_CONTROL_TAIL_COUNT = 2  # was 3 (Mini-ADR U-7)
+
+def _apply_cache_control(system, mapped):
+    # ... existing tail-2 + system marker ...
+    # Mini-ADR U-7 — anchor marker for messages tagged
+    # ``helix_cache_anchor`` (Sprint #8 memory)
+    for msg in mapped:
+        if msg.get("_helix_meta", {}).get("cache_anchor"):
+            _mark_message_cache_control(msg)
+```
+
+### 9.6 测试矩阵
+
+**单测(builder 注入)**:
+- [ ] `per_session`:memory block 在 `messages[1]`,`additional_kwargs["helix_cache_anchor"] == True`
+- [ ] `per_turn`:memory block 在 `messages[-1]`,无 anchor flag(向后兼容)
+- [ ] 空 `recalled_memories`:不插入(两 mode 都)
+- [ ] Multi-turn 一致性:per_session 连续 3 turn 后 memory block 位置不变
+
+**单测(Anthropic provider cache_control)**:
+- [ ] `cache_anchor` flag 的 message 末块得到 `cache_control: ephemeral`
+- [ ] 单 request marker 数 ≤ 4
+- [ ] `cache_enabled=False` 时 anchor 不打
+- [ ] tail count 改 2 后,3-message session 仍正确(tail 2 + system + anchor = 4)
+
+**集成测**:
+- [ ] 完整 5-turn session:第 2 turn 起 memory block prefix 字节一致(抓 outbound body)
+- [ ] tenant manifest `recall_mode = "per_turn"`:行为退回 J.3 原状
+
+**eval baseline**:
+- [ ] K.K12 重跑:per_session vs per_turn 在 hit@5 / MRR 不退化
+- [ ] 新增 token-cost benchmark:模拟 10-turn / 500-token memory;per_session 比 per_turn 实际计费 input tokens 低 ≥ **30%**(Sprint exit gate)
+
+### 9.7 关键决策点(需要拍板)
+
+1. **默认 mode = `per_session`(行为反转)** — 原 plan 提议 per_turn 保守。Per [memory:surface-requirement-changes] 需显式确认
+   - **A(推荐)**:`per_session` — 跟前 3 Sprint 一致,直接省 token
+   - B:`per_turn` — 跟原 plan 一致;主功能只 opt-in tenant 受益
+   - **我的判断**:A — 反转有充分理由(memory 集合本身就 frozen)
+2. **cache anchor 实现方式**
+   - **A(推荐)**:metadata-based(`additional_kwargs["helix_cache_anchor"]`)— 显式、可组合
+   - B:position-based(必标 `messages[1]`)— 跟 plan/mutation-advisory 注入冲突
+   - C:sentinel 字符串扫 content — 太耦合
+3. **tail count 降到 2 vs 保留 3**
+   - **A(推荐)**:2 + anchor — memory anchor 价值远大
+   - B:保 3,memory 不打 anchor — 等于本 Sprint 没做 cache 优化
+   - C:动态(empty memories tail=3,有 memories tail=2)— 复杂度不值
+4. **Sprint exit gate:token cost 比 per_turn 低 ≥ 30%**
+   - **A(推荐)**:30% — 接近 90% cache 折扣理论上限的合理 buffer
+   - B:更严(50%)/ 更宽松(15%)— M1 dogfood 数据再调
+5. **`per_turn` 是否在 manifest 加 deprecation warning?**
+   - **A(推荐)**:不加 — 保留为合法选项,runbook 说明适用场景
+   - B:加 warning — M0 没人用 memory tool 自修改,过早 deprecate 是噪音
+   - C:M0 直接砍 per_turn — 跟 § 9.4 风险评估冲突
+
+### 9.8 可观测
+
+| Metric | 类型 | 标签 | 说明 |
+|--------|------|------|------|
+| `helix_uplift_memory_recall_inject_mode_total{mode}` | counter | mode=per_session/per_turn | inject 模式分布 |
+| `helix_uplift_anthropic_cache_anchors_total` | counter | — | cache anchor 累计 |
+
+| Recording rule | 用途 |
+|----------------|------|
+| `helix:uplift:memory_per_session_adoption_ratio:1h` | per_session 覆盖率 |
+| `helix:llm:anthropic_cache_read_ratio:5m` **(L.L1 已有)** | Sprint #8 后应明显上升 |
+
+### 9.9 Sprint #8 验收清单
+
+- [ ] `LongTermMemorySpec.recall_mode` 字段上线
+- [ ] `_inject_memories` 双模式;per_session 写 anchor metadata
+- [ ] `_apply_cache_control` 扫 metadata + tail count → 2;total marker ≤ 4
+- [ ] agent_factory 把 manifest `recall_mode` 传到 agent_node
+- [ ] 单测覆盖 § 9.6 全部(11 个)
+- [ ] eval K.K12 无退化
+- [ ] token cost benchmark per_session 比 per_turn 低 ≥ 30%
+- [ ] `anthropic_cache_read_ratio:5m` staging 部署后 24h 内明显上升
+- [ ] 零债 6 条全过
+- [ ] CI 全绿 + CodeQL 无新增
+- [ ] runbook § 10
+
+### 9.10 与 Sprint #1/#2/#6 + Stream L 的复用
+
+| 已有产出 | Sprint #8 复用方式 |
+|---------|-------------------|
+| L.L1 `_CACHE_CONTROL_EPHEMERAL` / `_apply_cache_control` / `_mark_message_cache_control` | 复用 + 扩展(加 metadata 扫描);tail count 常量改 |
+| L.L1 "system 是 build-once 不变式" | **不破** — memory 仍是 user-message,不进 system |
+| Sprint #2 `_redact_memory` | 不动 — redact 在 recall node,inject 在 builder |
+| Sprint #6 `MemoryStore.retrieve(query_text=)` | 不动 — recall 拿到列表后怎么 inject 才是本 Sprint 的事 |
+| `helix_agent.common.uplift_metrics` | 扩展(加 2 metric) |
+| Sprint #1/#2/#6 preflight | 严格执行 |
 
 ---
 
