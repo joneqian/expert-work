@@ -229,3 +229,115 @@ async def test_retrieve_no_drift_on_clean_rows(sql_store: SqlStoreFixture) -> No
         assert hits[0].drift is False
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Capability Uplift Sprint #6 — hybrid retrieve (Mini-ADR U-5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_query_text_none_is_backward_compatible(sql_store: SqlStoreFixture) -> None:
+    """``query_text=None`` ⇒ pre-Sprint-#6 pure-vector behavior."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        await store.write(
+            [
+                _item(tenant=tenant, user=user, embedding=_vec(1.0), content="east"),
+                _item(tenant=tenant, user=user, embedding=_vec(0.0, 1.0), content="north"),
+            ]
+        )
+        hits = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0), limit=2
+        )
+        assert hits[0].content == "east"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_lifts_exact_keyword_match(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        vector_winner = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(1.0),
+            content="user generally prefers verbose logs",
+        )
+        keyword_winner = _item(
+            tenant=tenant,
+            user=user,
+            embedding=_vec(0.3, 0.95),
+            content="error code E-2031 happens on cold start of the worker pool",
+        )
+        await store.write([vector_winner, keyword_winner])
+        hybrid = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user,
+            query_embedding=_vec(1.0),
+            query_text="error code E-2031",
+            limit=2,
+        )
+        assert hybrid[0].id == keyword_winner.id
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_user_isolation(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant, user_a, user_b = uuid4(), uuid4(), uuid4()
+        await store.write(
+            [
+                _item(
+                    tenant=tenant,
+                    user=user_a,
+                    embedding=_vec(1.0),
+                    content="error code E-2031 affects user_a",
+                ),
+                _item(
+                    tenant=tenant,
+                    user=user_b,
+                    embedding=_vec(1.0),
+                    content="error code E-2031 affects user_b",
+                ),
+            ]
+        )
+        hits = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user_a,
+            query_embedding=_vec(1.0),
+            query_text="error code E-2031",
+            limit=5,
+        )
+        assert len(hits) == 1
+        assert "user_a" in hits[0].content
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_hybrid_empty_query_text_degrades_to_vector(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        await store.write(
+            [
+                _item(tenant=tenant, user=user, embedding=_vec(1.0), content="east"),
+                _item(tenant=tenant, user=user, embedding=_vec(0.0, 1.0), content="north"),
+            ]
+        )
+        hits = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user,
+            query_embedding=_vec(1.0),
+            query_text="   ",
+            limit=2,
+        )
+        assert hits[0].content == "east"
+    finally:
+        await engine.dispose()

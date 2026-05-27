@@ -38,6 +38,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from helix_agent.persistence import MemoryStore
 from helix_agent.persistence.memory import MemoryWritebackDLQ
+from helix_agent.persistence.tenant_config import TenantConfigStore
 from helix_agent.protocol import (
     AgentSpec,
     ModelSpec,
@@ -132,6 +133,12 @@ class MemoryEnv:
     #: previous best-effort log-and-drop behaviour (used by unit tests
     #: that don't want a queue).
     dlq: MemoryWritebackDLQ | None = None
+    #: Capability Uplift Sprint #6 (Mini-ADR U-5) — per-tenant memory
+    #: recall mode toggle. When wired, ``memory_recall_node`` reads
+    #: ``tenant_config.memory_recall_mode`` to decide hybrid vs vector;
+    #: ``None`` defaults to hybrid (the platform default) so test
+    #: fixtures that omit the tenant_config store still benefit.
+    tenant_config_store: TenantConfigStore | None = None
 
 
 @dataclass(frozen=True)
@@ -721,7 +728,10 @@ def _build_memory_nodes(
             "MemoryStore / Embedder (memory_env)"
         )
     recall = make_memory_recall_node(
-        memory_store=env.store, embedder=env.embedder, top_k=long_term.retrieve_top_k
+        memory_store=env.store,
+        embedder=env.embedder,
+        top_k=long_term.retrieve_top_k,
+        tenant_config_store=env.tenant_config_store,
     )
     writeback = (
         make_memory_writeback_node(

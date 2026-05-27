@@ -68,6 +68,8 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                     row_kwargs["event_log_retention_days"] = patch.event_log_retention_days
                 if patch.trigger_fire_scan_mode is not None:
                     row_kwargs["trigger_fire_scan_mode"] = patch.trigger_fire_scan_mode
+                if patch.memory_recall_mode is not None:
+                    row_kwargs["memory_recall_mode"] = patch.memory_recall_mode
                 row = TenantConfigRecord(**row_kwargs)  # type: ignore[arg-type]
             else:
                 row = existing.model_copy(
@@ -85,6 +87,7 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                             "audit_retention_days": patch.audit_retention_days,
                             "event_log_retention_days": patch.event_log_retention_days,
                             "trigger_fire_scan_mode": patch.trigger_fire_scan_mode,
+                            "memory_recall_mode": patch.memory_recall_mode,
                         }.items()
                         if v is not None
                     }

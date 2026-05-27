@@ -57,6 +57,13 @@ class TenantConfigRow(Base):
     trigger_fire_scan_mode: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'warn'"), default="warn"
     )
+    # Capability Uplift Sprint #6 — Mini-ADR U-5.
+    # ``hybrid`` is platform-wide default; ``vector`` is the legacy
+    # pure-pgvector path retained as an escape hatch. CHECK constraint
+    # in migration 0041.
+    memory_recall_mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'hybrid'"), default="hybrid"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

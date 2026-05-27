@@ -56,6 +56,20 @@ groups:
         expr: |
           sum(rate(helix_uplift_memory_writes_blocked_total[5m])) by (source)
 
+      # Capability Uplift Sprint #6 — hybrid retrieval adoption +
+      # hit-rate-by-mode (tracks whether tenants opt out of hybrid).
+      - record: helix:uplift:memory_hybrid_adoption_ratio:1h
+        expr: |
+          sum(rate(helix_uplift_memory_retrieval_total{mode="hybrid"}[1h]))
+          /
+          clamp_min(sum(rate(helix_uplift_memory_retrieval_total[1h])), 1)
+
+      - record: helix:uplift:memory_retrieval_hit_ratio:1h
+        expr: |
+          sum by (mode) (rate(helix_uplift_memory_retrieval_total{result="hit"}[1h]))
+          /
+          clamp_min(sum by (mode) (rate(helix_uplift_memory_retrieval_total[1h])), 1)
+
   - name: helix_uplift_alerts
     rules:
       # P1 — sustained block-rate spike. Catches a noisy pattern-set

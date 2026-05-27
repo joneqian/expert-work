@@ -303,3 +303,90 @@ detection time. For M1 we should plumb an `AuditEmitter` Protocol into
 the store so drift gets a dedicated `memory:drift_detected` audit row
 the moment the hash mismatch is observed — useful for tenants who
 only `list_for_user` without going through the recall node.
+
+## 9 — Memory hybrid retrieval troubleshooting (Capability Uplift Sprint #6)
+
+Sprint #6 added hybrid memory recall (vector + Postgres full-text + RRF
+k=60). Default mode is `hybrid` for every tenant; per-tenant
+`memory_recall_mode` is the opt-out to the pre-Sprint-#6 pure-vector
+path. The signal that something has gone wrong is the K.K12 baseline
+regressing OR the `helix:uplift:memory_retrieval_hit_ratio:1h` for
+`mode="hybrid"` dropping below the `mode="vector"` ratio.
+
+### 9.1 When to suspect hybrid degraded
+
+- K.K12 eval baseline (`tools/eval/test_memory_recall.py`) reports
+  `hybrid` recall@5 worse than `vector` recall@5 (test
+  `test_hybrid_recall_does_not_regress_against_vector` catches it in CI).
+- `helix:uplift:memory_hybrid_adoption_ratio:1h` is 1.0 (every tenant
+  on hybrid) but the corresponding hit ratio drops by more than
+  a few percent vs the historical vector-only baseline.
+- A tenant reports "my agent's memory feels worse than last week" right
+  after the Sprint #6 deploy.
+
+### 9.2 Investigate
+
+1. **Is the `content_tsv` column populated?** A tenant whose memory
+   was written before the migration landed will have `NULL` for
+   `content_tsv`, so the keyword side of the hybrid returns 0 rows
+   and RRF degrades to pure vector. Run:
+
+   ```sql
+   SELECT count(*) AS rows,
+          count(content_tsv) AS with_tsv
+   FROM memory_item
+   WHERE tenant_id = '<tid>' AND deleted_at IS NULL;
+   ```
+
+   If `with_tsv` is much smaller than `rows`, run the lazy backfill:
+   any `update_content()` / re-write populates the column. A one-shot
+   bulk backfill is on the M1 punch list.
+
+2. **Is jieba tokenizing the query?** For CJK queries: print
+   `tokenize_for_search(query)` (the helper in
+   `packages/helix-persistence/src/helix_agent/persistence/knowledge/text_search.py`).
+   If the tokenizer returns the whole sentence as one token, jieba's
+   dictionary is missing or stale.
+
+3. **Is the GIN index being used?** A `psql -c "EXPLAIN ANALYZE
+   SELECT ... WHERE content_tsv @@ plainto_tsquery('simple', '...')"`
+   should show `Bitmap Index Scan on memory_item_content_tsv_idx`.
+   If you see `Seq Scan`, the planner stats need a refresh:
+
+   ```sql
+   ANALYZE memory_item;
+   ```
+
+4. **Are recall_limit / RRF k correct?** Sprint #6 locks
+   `_HYBRID_RECALL_LIMIT=20` and `rrf_fuse k=60` per Mini-ADR U-5
+   (matches J.5 knowledge subsystem). If those constants have been
+   changed, revert the change before further investigation.
+
+### 9.3 Switch a tenant back to `vector` mode
+
+If a tenant is hurt by hybrid right now and you need an immediate
+escape hatch:
+
+```sh
+curl -X PUT "/v1/tenants/{tid}/config" \
+  -d '{"memory_recall_mode": "vector"}'
+```
+
+This takes effect on the next recall. The tenant's existing memory
+data is untouched — only the retrieval path changes. Open a ticket
+to investigate (the default-hybrid expectation is that almost no
+tenants need this).
+
+### 9.4 Re-tune RRF k or recall_limit per-tenant (M1)
+
+Per § 7.2.2 these are out-of-scope for Sprint #6: M0 locks the
+J.5-equivalent constants. M1 dogfood data will tell us whether memory
+needs different tuning than knowledge — only adjust then, with eval
+baseline numbers to back the change.
+
+### 9.5 M1 follow-up: per-language eval baseline
+
+The current eval `tools/eval/datasets/memory_recall/zh_en_seed.yaml`
+mixes 4 zh + 4 en cases. M1 should split the baseline so we can detect
+"hybrid regressed on Chinese but improved on English" cleanly — today
+that signal is washed out by the mean.

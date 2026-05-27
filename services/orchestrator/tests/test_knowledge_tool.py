@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage
 
+from helix_agent.common.search.rrf import rrf_fuse as _rrf_fuse
 from helix_agent.persistence import InMemoryKnowledgeStore
 from helix_agent.protocol import KnowledgeChunk
 from orchestrator.tools import (
@@ -20,7 +21,7 @@ from orchestrator.tools import (
     ToolBlockedError,
     ToolContext,
 )
-from orchestrator.tools.knowledge import _parse_rerank_order, _rrf_fuse
+from orchestrator.tools.knowledge import _parse_rerank_order
 
 # ---------------------------------------------------------------------------
 # Test doubles

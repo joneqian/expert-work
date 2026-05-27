@@ -28,6 +28,7 @@ from uuid import UUID
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from helix_agent.common.search.rrf import rrf_fuse
 from helix_agent.persistence import KnowledgeStore
 from helix_agent.protocol import KnowledgeChunk
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
@@ -39,9 +40,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-#: Reciprocal Rank Fusion constant — the standard 60. Dampens the weight
-#: of any single list's top ranks so the two recall lists combine fairly.
-_RRF_K = 60
 #: Per-side recall depth fetched before fusion / rerank — wider than the
 #: final top-k so fusion and the reranker have candidates to work with.
 _DEFAULT_RECALL_LIMIT = 20
@@ -149,7 +147,7 @@ class KnowledgeRetriever:
         keyword_hits = await self.store.keyword_search(
             tenant_id=tenant_id, kb_ids=kb_ids, query=query, limit=self.recall_limit
         )
-        fused = _rrf_fuse([vector_hits, keyword_hits])
+        fused = rrf_fuse([vector_hits, keyword_hits])
         if not fused:
             return []
         chunks = await self._rerank(query, fused, limit)
@@ -259,21 +257,6 @@ class KnowledgeSearchTool:
             msg = "knowledge_search requires a non-empty 'query' string"
             raise ValueError(msg)
         return raw.strip()
-
-
-def _rrf_fuse(rankings: Sequence[Sequence[KnowledgeChunk]]) -> list[KnowledgeChunk]:
-    """Reciprocal Rank Fusion of several ranked chunk lists.
-
-    A chunk's score is ``Σ 1/(K + rank)`` over the lists it appears in;
-    a chunk ranked well by *both* recall paths rises to the top.
-    """
-    scores: dict[UUID, float] = {}
-    by_id: dict[UUID, KnowledgeChunk] = {}
-    for ranking in rankings:
-        for rank, chunk in enumerate(ranking):
-            scores[chunk.id] = scores.get(chunk.id, 0.0) + 1.0 / (_RRF_K + rank + 1)
-            by_id[chunk.id] = chunk
-    return sorted(by_id.values(), key=lambda chunk: scores[chunk.id], reverse=True)
 
 
 def _parse_rerank_order(text: str, count: int) -> list[int]:

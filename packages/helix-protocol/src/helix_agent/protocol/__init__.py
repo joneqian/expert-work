@@ -126,6 +126,7 @@ from helix_agent.protocol.subagent import (
     SubagentStatus,
 )
 from helix_agent.protocol.tenant_config import (
+    MemoryRecallMode,
     TenantConfigPatch,
     TenantConfigRecord,
     TenantPlan,
@@ -208,6 +209,7 @@ __all__ = [
     "LongTermMemorySpec",
     "MCPToolSpec",
     "MemoryItem",
+    "MemoryRecallMode",
     "MemorySpec",
     "ModelSpec",
     "MountSpec",

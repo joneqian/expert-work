@@ -12,6 +12,7 @@ from uuid import UUID
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import CHAR, DateTime, Index, Text, func, text
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -58,5 +59,12 @@ class MemoryItemRow(Base):
     # list endpoint filter out rows with ``deleted_at IS NOT NULL``;
     # a future retention sweep hard-deletes 30+ days after.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Capability Uplift Sprint #6 (Mini-ADR U-5 / U-6) — keyword-search
+    # vector backing hybrid retrieve. Populated app-side from
+    # ``tokenize_for_search(content)`` under the ``simple`` config so
+    # jieba-segmented CJK works without a Postgres extension. Nullable
+    # so the migration is non-blocking; the GIN index in migration 0040
+    # backs the ``@@ plainto_tsquery`` filter.
+    content_tsv: Mapped[str | None] = mapped_column(TSVECTOR(), nullable=True)
 
     __table_args__ = (Index("memory_item_tenant_user_idx", "tenant_id", "user_id"),)

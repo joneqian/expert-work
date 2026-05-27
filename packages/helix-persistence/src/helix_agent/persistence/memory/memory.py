@@ -8,10 +8,39 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
+from helix_agent.common.search.rrf import rrf_fuse
 from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
+from helix_agent.persistence.knowledge.text_search import tokenize_for_search
 from helix_agent.persistence.memory.base import MemoryInjectionBlockedError, MemoryStore
 from helix_agent.persistence.memory.hash import hash_content
 from helix_agent.protocol import MemoryItem
+
+#: Per-side recall depth fetched before RRF fusion — mirrors the J.5
+#: knowledge subsystem so behavior is comparable across hybrid paths.
+_HYBRID_RECALL_LIMIT = 20
+
+
+def _keyword_rank(rows: Sequence[MemoryItem], *, query_text: str) -> list[MemoryItem]:
+    """Capability Uplift Sprint #6 — InMemory keyword ranking.
+
+    Approximates Postgres ``ts_rank`` with a token-overlap count on
+    jieba-segmented content. The contract is "items whose content
+    shares more search tokens with the query rank higher"; the absolute
+    score is not part of the contract — the SQL implementation computes
+    it differently (``ts_rank``) and that's fine, RRF normalizes by
+    rank, not by raw score (Mini-ADR U-5 § 7.3.4).
+    """
+    query_tokens = set(tokenize_for_search(query_text).split())
+    if not query_tokens:
+        return []
+
+    def score(row: MemoryItem) -> int:
+        return len(query_tokens & set(tokenize_for_search(row.content).split()))
+
+    scored = [(row, score(row)) for row in rows]
+    scored = [(row, s) for row, s in scored if s > 0]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return [row for row, _ in scored]
 
 
 def _with_drift_flag(item: MemoryItem) -> MemoryItem:
@@ -72,6 +101,7 @@ class InMemoryMemoryStore(MemoryStore):
         tenant_id: UUID,
         user_id: UUID,
         query_embedding: Sequence[float],
+        query_text: str | None = None,
         kind: Literal["fact", "episodic"] | None = None,
         limit: int = 5,
     ) -> list[MemoryItem]:
@@ -83,8 +113,20 @@ class InMemoryMemoryStore(MemoryStore):
             and row.deleted_at is None  # Stream K.K6 — hide soft-deleted
             and (kind is None or row.kind == kind)
         ]
-        candidates.sort(key=lambda row: _cosine_distance(query_embedding, row.embedding))
-        return [_with_drift_flag(row) for row in candidates[:limit]]
+        # Vector recall — closest cosine distance first.
+        vector_hits = sorted(
+            candidates, key=lambda row: _cosine_distance(query_embedding, row.embedding)
+        )
+
+        # Capability Uplift Sprint #6 (Mini-ADR U-5) — hybrid path.
+        if query_text is not None and query_text.strip():
+            keyword_hits = _keyword_rank(candidates, query_text=query_text)
+            fused = rrf_fuse(
+                [vector_hits[:_HYBRID_RECALL_LIMIT], keyword_hits[:_HYBRID_RECALL_LIMIT]]
+            )
+            return [_with_drift_flag(row) for row in fused[:limit]]
+
+        return [_with_drift_flag(row) for row in vector_hits[:limit]]
 
     async def list_for_user(
         self,

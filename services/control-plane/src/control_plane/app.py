@@ -575,6 +575,9 @@ def create_app(
                     store=resolved_memory_store,
                     embedder=embedder,
                     dlq=resolved_memory_dlq,  # K.K7 — failed writebacks land here
+                    # Capability Uplift Sprint #6 (Mini-ADR U-5) — recall
+                    # node reads tenant_config.memory_recall_mode.
+                    tenant_config_store=resolved_tenant_config_repo,
                 )
                 # Stream J.4 — the ChildAgentBuilder lets a SubAgentTool
                 # resolve an agent_ref and recursively build the sub-agent;

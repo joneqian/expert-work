@@ -7,15 +7,24 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from helix_agent.common.search.rrf import rrf_fuse
 from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
+from helix_agent.persistence.knowledge.text_search import tokenize_for_search
 from helix_agent.persistence.memory.base import MemoryInjectionBlockedError, MemoryStore
 from helix_agent.persistence.memory.hash import hash_content
 from helix_agent.persistence.models import MemoryItemRow
 from helix_agent.protocol import MemoryItem
+
+#: Postgres ``tsvector`` configuration — ``simple`` so app-side jieba
+#: segmentation is what controls tokenization (mirrors J.5 knowledge).
+_TS_CONFIG = "simple"
+
+#: Per-side recall depth fetched before RRF fusion — mirrors J.5.
+_HYBRID_RECALL_LIMIT = 20
 
 
 def _row_to_item(row: MemoryItemRow) -> MemoryItem:
@@ -70,6 +79,11 @@ class SqlMemoryStore(MemoryStore):
                 "content_hash": item.content_hash or hash_content(item.content),
                 "embedding": list(item.embedding),
                 "source_thread_id": item.source_thread_id,
+                # Capability Uplift Sprint #6 — populate the tsvector
+                # column from jieba-segmented content. ``func.to_tsvector``
+                # is evaluated server-side so the value lands as a real
+                # tsvector, not a string cast.
+                "content_tsv": func.to_tsvector(_TS_CONFIG, tokenize_for_search(item.content)),
             }
             for item in items
         ]
@@ -84,8 +98,36 @@ class SqlMemoryStore(MemoryStore):
         tenant_id: UUID,
         user_id: UUID,
         query_embedding: Sequence[float],
+        query_text: str | None = None,
         kind: Literal["fact", "episodic"] | None = None,
         limit: int = 5,
+    ) -> list[MemoryItem]:
+        # Capability Uplift Sprint #6 (Mini-ADR U-5) — hybrid path.
+        if query_text is not None and query_text.strip():
+            return await self._hybrid_retrieve(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                query_embedding=query_embedding,
+                query_text=query_text,
+                kind=kind,
+                limit=limit,
+            )
+        return await self._vector_retrieve(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            query_embedding=query_embedding,
+            kind=kind,
+            limit=limit,
+        )
+
+    async def _vector_retrieve(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        query_embedding: Sequence[float],
+        kind: Literal["fact", "episodic"] | None,
+        limit: int,
     ) -> list[MemoryItem]:
         stmt = select(MemoryItemRow).where(
             MemoryItemRow.tenant_id == tenant_id,
@@ -101,6 +143,57 @@ class SqlMemoryStore(MemoryStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_item(row) for row in rows]
+
+    async def _hybrid_retrieve(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        query_embedding: Sequence[float],
+        query_text: str,
+        kind: Literal["fact", "episodic"] | None,
+        limit: int,
+    ) -> list[MemoryItem]:
+        tokenized = tokenize_for_search(query_text)
+        if not tokenized:
+            return await self._vector_retrieve(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                query_embedding=query_embedding,
+                kind=kind,
+                limit=limit,
+            )
+        # Two parallel selects under the same RLS-scoped session; fuse
+        # in Python (cheaper than a SQL UNION + window function for the
+        # small recall_limit window we work with).
+        ts_query = func.plainto_tsquery(_TS_CONFIG, tokenized)
+        base_where = [
+            MemoryItemRow.tenant_id == tenant_id,
+            MemoryItemRow.user_id == user_id,
+            MemoryItemRow.deleted_at.is_(None),
+        ]
+        if kind is not None:
+            base_where.append(MemoryItemRow.kind == kind)
+
+        vector_stmt = (
+            select(MemoryItemRow)
+            .where(*base_where)
+            .order_by(MemoryItemRow.embedding.cosine_distance(list(query_embedding)))
+            .limit(_HYBRID_RECALL_LIMIT)
+        )
+        keyword_stmt = (
+            select(MemoryItemRow)
+            .where(*base_where, MemoryItemRow.content_tsv.op("@@")(ts_query))
+            .order_by(func.ts_rank(MemoryItemRow.content_tsv, ts_query).desc())
+            .limit(_HYBRID_RECALL_LIMIT)
+        )
+        async with self._sf() as session:
+            vector_rows = (await session.execute(vector_stmt)).scalars().all()
+            keyword_rows = (await session.execute(keyword_stmt)).scalars().all()
+        # RRF on the row IDs (hashable); resolve back to rows after fusion.
+        by_id = {row.id: row for row in list(vector_rows) + list(keyword_rows)}
+        fused_ids = rrf_fuse([[r.id for r in vector_rows], [r.id for r in keyword_rows]])
+        return [_row_to_item(by_id[mid]) for mid in fused_ids[:limit]]
 
     async def list_for_user(
         self,
@@ -165,6 +258,9 @@ class SqlMemoryStore(MemoryStore):
                 return None
             row.content = content
             row.content_hash = hash_content(content)  # K.K7 — keep dedup hash in sync
+            # Capability Uplift Sprint #6 — keep keyword search vector in
+            # sync with the new content.
+            row.content_tsv = func.to_tsvector(_TS_CONFIG, tokenize_for_search(content))
             row.embedding = list(embedding)
             if kind is not None:
                 row.kind = kind

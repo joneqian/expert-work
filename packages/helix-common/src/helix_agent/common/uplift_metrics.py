@@ -60,6 +60,13 @@ _memory_drift_total = helix_counter(
     "Memory rows whose recomputed content_hash diverged from the stored value.",
 )
 
+# Capability Uplift Sprint #6 — memory hybrid retrieval observability.
+_memory_retrieval_total = helix_counter(
+    "helix_uplift_memory_retrieval_total",
+    "Memory recall invocations, partitioned by mode and result.",
+    label_names=("mode", "result"),  # mode=hybrid|vector, result=hit|miss
+)
+
 
 def record_threat_scan(*, scope: str, result: str) -> None:
     """Bump ``helix_uplift_threat_scan_total``."""
@@ -95,10 +102,20 @@ def record_memory_drift() -> None:
     _memory_drift_total.inc()
 
 
+def record_memory_retrieval(*, mode: str, result: str) -> None:
+    """Bump ``helix_uplift_memory_retrieval_total{mode,result}``.
+
+    ``mode`` ∈ ``{"hybrid", "vector"}`` (Sprint #6 § 7.7).
+    ``result`` ∈ ``{"hit", "miss"}``.
+    """
+    _memory_retrieval_total.labels(mode=mode, result=result).inc()
+
+
 __all__ = [
     "record_memory_blocked",
     "record_memory_drift",
     "record_memory_redacted",
+    "record_memory_retrieval",
     "record_threat_pattern_hits",
     "record_threat_scan",
     "record_trigger_blocked",

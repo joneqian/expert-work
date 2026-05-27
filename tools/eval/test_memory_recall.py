@@ -156,3 +156,37 @@ async def test_per_case_breakdown_carries_language_label() -> None:
     for result in report.per_case:
         by_lang[result.language] += 1
     assert by_lang == {"zh": 4, "en": 4}
+
+
+# ---------------------------------------------------------------------------
+# Capability Uplift Sprint #6 — hybrid baseline gate (Mini-ADR U-5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hybrid_mode_runs_end_to_end_on_seed_set() -> None:
+    """Smoke: ``mode='hybrid'`` runs the same seed set without errors
+    and returns a report of the same cardinality as the vector path."""
+    cases = load_cases(_EVAL_DIR / "datasets/memory_recall/zh_en_seed.yaml")
+    report = await evaluate_set(cases, embedder=_KeywordOverlapEmbedder(), k=5, mode="hybrid")
+    assert report.n_cases == 8
+
+
+@pytest.mark.asyncio
+async def test_hybrid_recall_does_not_regress_against_vector() -> None:
+    """Sprint #6 gate (in-memory tier): hybrid recall@5 must be at
+    least as good as the pre-Sprint-#6 vector path on the same set.
+
+    The 10% lift gate documented in § 7.2.3 is enforced by the SQL
+    integration suite (docker required) — the real keyword-search
+    path is what produces the lift, the InMemory token-overlap
+    approximation just has to not *regress*.
+    """
+    cases = load_cases(_EVAL_DIR / "datasets/memory_recall/zh_en_seed.yaml")
+    vector = await evaluate_set(cases, embedder=_KeywordOverlapEmbedder(), k=5, mode="vector")
+    hybrid = await evaluate_set(cases, embedder=_KeywordOverlapEmbedder(), k=5, mode="hybrid")
+    # Small tolerance for RRF tie-break ordering on saturated cases.
+    assert hybrid.mean_recall_at_k >= vector.mean_recall_at_k - 0.01, (
+        f"hybrid recall@5 regressed against vector "
+        f"(hybrid={hybrid.mean_recall_at_k:.3f}, vector={vector.mean_recall_at_k:.3f})"
+    )

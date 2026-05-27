@@ -188,3 +188,187 @@ async def test_retrieve_drift_false_on_unmutated_rows() -> None:
     )
     assert hits[0].drift is False
     assert hits[0].content_hash == hash_content(hits[0].content)
+
+
+# ---------------------------------------------------------------------------
+# Capability Uplift Sprint #6 — hybrid retrieval (Mini-ADR U-5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_retrieve_query_text_none_is_backward_compatible() -> None:
+    """``query_text=None`` retains the pre-Sprint-#6 pure-vector path —
+    same ordering, same items as before."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await store.write(
+        [
+            _item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="east"),
+            _item(tenant=tenant, user=user, embedding=(0.0, 1.0), content="north"),
+            _item(tenant=tenant, user=user, embedding=(0.7, 0.7), content="ne"),
+        ]
+    )
+    hits = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0), limit=3)
+    assert [h.content for h in hits] == ["east", "ne", "north"]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_lifts_exact_keyword_match_above_vector_loser() -> None:
+    """Canonical hybrid win: a memory with the exact error code in
+    its content should outrank a semantically-near but token-miss
+    memory when the query mentions the code by name."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    # Vector says "near to (1,0)" wins (embedding=(1,0)) — but it's
+    # off-topic content. The on-topic content has a less-good vector.
+    vector_winner = _item(
+        tenant=tenant,
+        user=user,
+        embedding=(1.0, 0.0),
+        content="user generally prefers verbose logs",
+    )
+    keyword_winner = _item(
+        tenant=tenant,
+        user=user,
+        embedding=(0.3, 0.95),  # vector-distant
+        content="error code E-2031 happens on cold start of the worker pool",
+    )
+    await store.write([vector_winner, keyword_winner])
+    # Pure vector: vector_winner ranks first.
+    vec_only = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0),
+        limit=2,
+    )
+    assert vec_only[0].id == vector_winner.id
+    # Hybrid with the exact code in query_text: keyword_winner rises.
+    hybrid = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0),
+        query_text="error code E-2031",
+        limit=2,
+    )
+    assert hybrid[0].id == keyword_winner.id
+
+
+@pytest.mark.asyncio
+async def test_hybrid_empty_query_text_degrades_to_vector() -> None:
+    """An empty or whitespace-only ``query_text`` reduces to vector-only
+    — no keyword path can contribute, no fusion is meaningful."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await store.write(
+        [
+            _item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="east"),
+            _item(tenant=tenant, user=user, embedding=(0.0, 1.0), content="north"),
+        ]
+    )
+    vec_only = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0), limit=2
+    )
+    hybrid_empty = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0),
+        query_text="   ",
+        limit=2,
+    )
+    assert [h.id for h in vec_only] == [h.id for h in hybrid_empty]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_cjk_query_uses_jieba_segmentation() -> None:
+    """Chinese queries route through ``tokenize_for_search`` (jieba).
+    Exact-phrase memory ranks above semantically-distant rows."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    keyword_winner = _item(
+        tenant=tenant,
+        user=user,
+        embedding=(0.0, 1.0),
+        content="用户偏好深色模式 优先在晚上 22 点后启用",
+    )
+    distractor = _item(
+        tenant=tenant,
+        user=user,
+        embedding=(1.0, 0.0),
+        content="user generally prefers light themes during office hours",
+    )
+    await store.write([keyword_winner, distractor])
+    hybrid = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0),  # vector says distractor wins
+        query_text="深色模式",
+        limit=2,
+    )
+    assert hybrid[0].id == keyword_winner.id
+
+
+@pytest.mark.asyncio
+async def test_hybrid_empty_result_set() -> None:
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    hits = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0),
+        query_text="whatever",
+        limit=5,
+    )
+    assert hits == []
+
+
+@pytest.mark.asyncio
+async def test_hybrid_respects_user_isolation() -> None:
+    """Hybrid path must preserve the (tenant_id, user_id) RLS-equivalent
+    filter — keyword hits from another user must not leak."""
+    store = InMemoryMemoryStore()
+    tenant, user_a, user_b = uuid4(), uuid4(), uuid4()
+    await store.write(
+        [
+            _item(
+                tenant=tenant,
+                user=user_a,
+                embedding=(1.0, 0.0),
+                content="error code E-2031 affects user_a",
+            ),
+            _item(
+                tenant=tenant,
+                user=user_b,
+                embedding=(1.0, 0.0),
+                content="error code E-2031 affects user_b",
+            ),
+        ]
+    )
+    hybrid = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user_a,
+        query_embedding=(1.0, 0.0),
+        query_text="error code E-2031",
+        limit=5,
+    )
+    assert len(hybrid) == 1
+    assert "user_a" in hybrid[0].content
+
+
+@pytest.mark.asyncio
+async def test_hybrid_preserves_drift_flag() -> None:
+    """Sprint #2 drift detection still runs on the hybrid path."""
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await store.write([_item(tenant=tenant, user=user, embedding=(1.0, 0.0), content="clean fact")])
+    # Simulate DB drift.
+    row = store._rows[0]
+    store._rows[0] = row.model_copy(update={"content": "tampered content"})
+    hybrid = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0),
+        query_text="tampered",
+        limit=5,
+    )
+    assert len(hybrid) == 1
+    assert hybrid[0].drift is True

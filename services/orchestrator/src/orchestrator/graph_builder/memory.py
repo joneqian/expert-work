@@ -34,11 +34,13 @@ from helix_agent.common.threat_patterns import scan_for_threats
 from helix_agent.common.uplift_metrics import (
     record_memory_drift,
     record_memory_redacted,
+    record_memory_retrieval,
 )
 from helix_agent.persistence import MemoryStore
 from helix_agent.persistence.memory import MemoryWritebackDLQ
 from helix_agent.persistence.memory.base import MemoryInjectionBlockedError
-from helix_agent.protocol import MemoryItem
+from helix_agent.persistence.tenant_config import TenantConfigStore
+from helix_agent.protocol import MemoryItem, MemoryRecallMode
 from helix_agent.runtime.cancellation import RunCancelledError
 from orchestrator.graph_builder._config import cancellation_token, configurable_uuid
 from orchestrator.llm import Embedder, LLMCaller
@@ -145,10 +147,42 @@ def _redact_memory(item: MemoryItem) -> MemoryItem:
     return item
 
 
+async def _resolve_memory_recall_mode(
+    *,
+    tenant_id: Any,
+    tenant_config_store: TenantConfigStore | None,
+) -> MemoryRecallMode:
+    """Read ``tenant_config.memory_recall_mode``; default ``hybrid``.
+
+    No store wired or no tenant_config row → ``hybrid`` (platform-wide
+    default, Mini-ADR U-5). Mirrors the trigger fire-scan-mode resolver
+    in ``control_plane.trigger_firing``.
+    """
+    if tenant_config_store is None:
+        return "hybrid"
+    record = await tenant_config_store.get(tenant_id=tenant_id)
+    if record is None:
+        return "hybrid"
+    return record.memory_recall_mode
+
+
 def make_memory_recall_node(
-    *, memory_store: MemoryStore, embedder: Embedder, top_k: int
+    *,
+    memory_store: MemoryStore,
+    embedder: Embedder,
+    top_k: int,
+    tenant_config_store: TenantConfigStore | None = None,
 ) -> MemoryNode:
-    """Build the ``memory_recall`` node bound to the store + embedder."""
+    """Build the ``memory_recall`` node bound to the store + embedder.
+
+    Capability Uplift Sprint #6 (Mini-ADR U-5): when
+    ``tenant_config_store`` is wired and the tenant's
+    ``memory_recall_mode`` is ``hybrid`` (the default), the user's task
+    text is forwarded to ``MemoryStore.retrieve(query_text=...)`` for
+    hybrid vector + full-text + RRF recall. ``vector`` mode keeps the
+    pre-Sprint-#6 pure-pgvector path. No store wired → default hybrid
+    (so test fixtures that omit the store still get the improved recall).
+    """
 
     async def memory_recall_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         token = cancellation_token(config)
@@ -161,21 +195,27 @@ def make_memory_recall_node(
         task = _last_human_text(list(state["messages"]))
         if not task:
             return {}
+        mode = await _resolve_memory_recall_mode(
+            tenant_id=tenant_id, tenant_config_store=tenant_config_store
+        )
         try:
             vectors = await token.run_cancellable(embedder.embed([task]))
             memories = await memory_store.retrieve(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 query_embedding=vectors[0],
+                query_text=task if mode == "hybrid" else None,
                 limit=top_k,
             )
         except RunCancelledError:
             raise
         except Exception:
             logger.warning("memory.recall_failed — continuing without memories", exc_info=True)
+            record_memory_retrieval(mode=mode, result="miss")
             return {}
+        record_memory_retrieval(mode=mode, result="hit" if memories else "miss")
         redacted = [_redact_memory(m) for m in memories]
-        logger.info("memory.recall count=%d", len(redacted))
+        logger.info("memory.recall count=%d mode=%s", len(redacted), mode)
         return {"recalled_memories": redacted}
 
     return memory_recall_node

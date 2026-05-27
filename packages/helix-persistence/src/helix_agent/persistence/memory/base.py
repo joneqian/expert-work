@@ -56,12 +56,20 @@ class MemoryStore(abc.ABC):
         tenant_id: UUID,
         user_id: UUID,
         query_embedding: Sequence[float],
+        query_text: str | None = None,
         kind: Literal["fact", "episodic"] | None = None,
         limit: int = 5,
     ) -> list[MemoryItem]:
-        """Return the user's ``limit`` memories nearest ``query_embedding``
-        by cosine distance, closest first. ``kind`` optionally filters.
-        Soft-deleted rows are excluded (Stream K.K6)."""
+        """Return the user's ``limit`` memories nearest ``query_embedding``,
+        closest first. Soft-deleted rows are excluded (Stream K.K6).
+
+        Capability Uplift Sprint #6 (Mini-ADR U-5): when ``query_text``
+        is ``None`` the retrieval is pure-vector (cosine distance against
+        the pgvector column) — the pre-Sprint-#6 behavior, kept for
+        backward compatibility. When ``query_text`` is a non-empty string
+        the retrieval is **hybrid**: vector recall is fused with Postgres
+        full-text recall via Reciprocal Rank Fusion (``k=60``). Empty /
+        whitespace-only ``query_text`` degrades to the vector path."""
 
     @abc.abstractmethod
     async def list_for_user(

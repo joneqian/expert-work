@@ -27,6 +27,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "MemoryRecallMode",
     "TenantConfigPatch",
     "TenantConfigRecord",
     "TenantPlan",
@@ -39,6 +40,14 @@ __all__ = [
 # High-compliance tenants opt in to ``block``: a match emits
 # ``TRIGGER_PROMPT_INJECTION_BLOCKED`` and the run does not start.
 TriggerFireScanMode = Literal["warn", "block"]
+
+# Capability Uplift Sprint #6 — Mini-ADR U-5.
+# ``hybrid`` is the platform-wide default: ``MemoryStore.retrieve()``
+# runs vector + Postgres full-text and fuses via Reciprocal Rank Fusion
+# (k=60). Tenants can opt out to ``vector`` to keep the legacy pure-
+# pgvector cosine path (e.g. for workloads where the eval baseline
+# regressed against expectations).
+MemoryRecallMode = Literal["hybrid", "vector"]
 
 
 class TenantPlan(StrEnum):
@@ -85,6 +94,8 @@ class TenantConfigRecord(BaseModel):
     )
     # Capability Uplift Sprint #1 — Mini-ADR U-2.
     trigger_fire_scan_mode: TriggerFireScanMode = "warn"
+    # Capability Uplift Sprint #6 — Mini-ADR U-5.
+    memory_recall_mode: MemoryRecallMode = "hybrid"
     created_at: datetime
     updated_at: datetime
     updated_by: str
@@ -116,3 +127,5 @@ class TenantConfigPatch(BaseModel):
     )
     # Capability Uplift Sprint #1 — Mini-ADR U-2.
     trigger_fire_scan_mode: TriggerFireScanMode | None = None
+    # Capability Uplift Sprint #6 — Mini-ADR U-5.
+    memory_recall_mode: MemoryRecallMode | None = None

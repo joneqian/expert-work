@@ -187,12 +187,19 @@ async def evaluate_case(
     *,
     embedder: _EmbedderLike,
     k: int = 5,
+    mode: Literal["vector", "hybrid"] = "vector",
 ) -> CaseResult:
     """Score one case.
 
     The case's corpus is loaded into a fresh in-memory store so the
     metric reflects retrieval against exactly the memories the case
     declared — no cross-case contamination, no order dependence.
+
+    Capability Uplift Sprint #6 (Mini-ADR U-5): when ``mode='hybrid'``
+    the query text is forwarded to ``MemoryStore.retrieve(query_text=)``
+    so the keyword side runs alongside the vector side. ``mode='vector'``
+    keeps the pre-Sprint-#6 pure-vector baseline (the default — used
+    when a caller wants the older comparison point).
     """
     # Import inside the function so this module's import surface stays
     # narrow — the runner is the only path that touches helix-persistence.
@@ -233,6 +240,7 @@ async def evaluate_case(
         tenant_id=tenant_id,
         user_id=user_id,
         query_embedding=query_vector,
+        query_text=case.query if mode == "hybrid" else None,
         limit=max(k, len(case.expected_recall_ids)),
     )
     retrieved_ids = [id_map[item.id] for item in retrieved]
@@ -249,9 +257,10 @@ async def evaluate_set(
     *,
     embedder: _EmbedderLike,
     k: int = 5,
+    mode: Literal["vector", "hybrid"] = "vector",
 ) -> EvalReport:
     """Score a whole set and return aggregate + per-case results."""
-    per_case = [await evaluate_case(case, embedder=embedder, k=k) for case in cases]
+    per_case = [await evaluate_case(case, embedder=embedder, k=k, mode=mode) for case in cases]
     if not per_case:
         return EvalReport(k=k, n_cases=0, mean_recall_at_k=0.0, mean_mrr_at_k=0.0)
     mean_recall = sum(r.recall_at_k for r in per_case) / len(per_case)

@@ -255,6 +255,100 @@ async def test_recall_passes_clean_content_unchanged() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Capability Uplift Sprint #6 — recall mode (hybrid vs vector)
+# ---------------------------------------------------------------------------
+
+
+class _SpyMemoryStore:
+    """Tracks every retrieve() call so tests can assert which mode the
+    node selected. Returns an empty hit list (mode-selection is the
+    thing under test; not the recall itself)."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def retrieve(self, **kwargs: object) -> list[MemoryItem]:
+        self.calls.append(kwargs)
+        return []
+
+
+@pytest.mark.asyncio
+async def test_recall_default_no_tenant_config_uses_hybrid() -> None:
+    """No tenant_config_store wired → default hybrid (so test fixtures
+    that omit the store still benefit from the new path)."""
+    store = _SpyMemoryStore()
+    node = make_memory_recall_node(
+        memory_store=store,  # type: ignore[arg-type]
+        embedder=FakeEmbedder(dim=_DIM),
+        top_k=5,
+    )
+    tenant, user = uuid4(), uuid4()
+    await node(  # type: ignore[arg-type]
+        _state("what timezone am I in"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert len(store.calls) == 1
+    # hybrid mode → query_text forwarded.
+    assert store.calls[0]["query_text"] == "what timezone am I in"
+
+
+@pytest.mark.asyncio
+async def test_recall_vector_mode_omits_query_text() -> None:
+    """A tenant configured to ``vector`` mode bypasses the hybrid
+    path — query_text is not forwarded to retrieve."""
+    from helix_agent.persistence import InMemoryTenantConfigStore
+    from helix_agent.protocol import TenantConfigPatch
+
+    tcs = InMemoryTenantConfigStore()
+    tenant, user = uuid4(), uuid4()
+    await tcs.upsert(
+        tenant_id=tenant,
+        patch=TenantConfigPatch(display_name="t", memory_recall_mode="vector"),
+        actor_id="test",
+    )
+    store = _SpyMemoryStore()
+    node = make_memory_recall_node(
+        memory_store=store,  # type: ignore[arg-type]
+        embedder=FakeEmbedder(dim=_DIM),
+        top_k=5,
+        tenant_config_store=tcs,
+    )
+    await node(  # type: ignore[arg-type]
+        _state("what timezone am I in"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert len(store.calls) == 1
+    assert store.calls[0]["query_text"] is None
+
+
+@pytest.mark.asyncio
+async def test_recall_hybrid_mode_explicit() -> None:
+    """A tenant explicitly configured to ``hybrid`` forwards query_text."""
+    from helix_agent.persistence import InMemoryTenantConfigStore
+    from helix_agent.protocol import TenantConfigPatch
+
+    tcs = InMemoryTenantConfigStore()
+    tenant, user = uuid4(), uuid4()
+    await tcs.upsert(
+        tenant_id=tenant,
+        patch=TenantConfigPatch(display_name="t", memory_recall_mode="hybrid"),
+        actor_id="test",
+    )
+    store = _SpyMemoryStore()
+    node = make_memory_recall_node(
+        memory_store=store,  # type: ignore[arg-type]
+        embedder=FakeEmbedder(dim=_DIM),
+        top_k=5,
+        tenant_config_store=tcs,
+    )
+    await node(  # type: ignore[arg-type]
+        _state("what timezone am I in"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert store.calls[0]["query_text"] == "what timezone am I in"
+
+
+# ---------------------------------------------------------------------------
 # memory_writeback node
 # ---------------------------------------------------------------------------
 
