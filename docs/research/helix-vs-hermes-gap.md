@@ -405,28 +405,38 @@ helix 在 J.4-补强-2（2026-05-21 取消 M2-B 推迟，M0 内交付并行 fan-
 
 **复合**：
 
-- **MCP Client HTTP/SSE transport** → **A**（M1+ backlog，Mini-ADR E-5 已规划）
-- **MCP Server（暴露 helix 能力给 Claude Code / Cursor）** → **B-边界**：当前无 backlog；但产品定位上不冲突 —— "让 IDE 通过 MCP 反向访问 helix 的 sessions / runs / approvals" 跟 backend platform 定位是 compatible 的
-- **Sampling（server 反向请求 LLM）** → **A-边界**（M1+ 加 transport 时可一并考虑）
-- **OAuth manager** → **A**（OAuth refresh L.L8 已有，但 MCP server 走 OAuth 流程是另一回事）
+- **MCP Client HTTP/SSE transport** → **A**（M1+ backlog，Mini-ADR E-5 已规划；2026-05-27 提前到 capability uplift Sprint #5）
+- **MCP Server（暴露 helix 能力给 Claude Code / Cursor）** → **B**（2026-05-27 复审从 "B-边界" 升级到明确 B，见 § 11.5）
+- **Sampling（server 反向请求 LLM）** → **B**（与 MCP Server 同期取消 — Sampling 是 server-side capability，helix 不做 server 就不存在 Sampling 路径）
+- **OAuth manager** → **A**（MCP client 调外部 server 时部分 server 走 OAuth；Mini-ADR L.L8-MCP 后续 sprint）
 
 ## 11.3 借鉴价值评级
 
-**中**。
+**中**（仅指 MCP Client 方向）。
 
-- HTTP/SSE transport：**中**。helix M1+ 已 backlog；Hermes 实现路径（per-server `transport: sse` / `url:` 配置）可直接参考。
-- MCP Server：**中-高**（**反直觉的高价值**）。理由：
-  - helix 当前 Admin UI 通过 control-plane REST API 操作；如果暴露 MCP Server，Claude Code / Cursor 用户可以通过 MCP 直接"在 IDE 里看 helix 跑的 sessions、回 approval、读 trajectory"。
-  - 跟 helix backend platform 定位 compatible —— MCP Server 也是面向"专业用户的工具接入"而不是末端用户。
-  - 对企业内部用 Claude Code / Cursor 写 manifest / debug agent 的开发者体验提升大。
-  - 实施成本中等（用 `FastMCP` lib 包装现有 control-plane API）。
+- HTTP/SSE transport：**中-高**。helix Mini-ADR E-5 已 backlog；2026-05-27 提前到 Sprint #5 — 2026 年大量公开 MCP server (GitHub / Postgres / Linear / Notion / Slack ...) 是 remote HTTP/SSE 形态，stdio-only 锁死本地 process，agent 沙箱无法触达。Hermes 实现路径（per-server `transport: sse` / `url:` 配置）可直接参考。
+- MCP Server：**不适用**（2026-05-27 复审推翻，见 § 11.5）。
 
 ## 11.4 关键决策点
 
-- MCP Server 的 auth 怎么做：复用 control-plane 的 OIDC + JWT，还是单独 API Key？
-- MCP Server 暴露的工具集是只读（list / get）还是含写（messages_send / permissions_respond）？写权限对多租户 RLS 的影响。
-- 跨租户 system_admin 能不能通过 MCP Server 操作？
-- Sampling 路径：MCP server 反向请求 LLM 走哪个 router？token 计费算 server 还是 client tenant？
+- MCP Client HTTP/SSE：per-tenant secret 隔离怎么做（HTTP header auth token 走 helix secret store？）
+- MCP Client HTTP/SSE：远端 server 调用超时 + retry 策略（vs stdio 本地 process 完全不同的失败模式）
+- OAuth：先存配置不实现 flow 是否够 M0→M1 Gate 阶段（哪些常用公开 MCP server 实际需要 OAuth？）
+
+## 11.5 2026-05-27 复审记录 — MCP Server 评级翻新
+
+原本 § 11.3 给 MCP Server 评 "**中-高(反直觉的高价值)**"，列了 4 条论据。Capability uplift Sprint #5 实施前复审，4 条论据逐条不立：
+
+| 原论据 | 复审推翻 |
+|------|---------|
+| 企业开发者用 Claude Code / Cursor 写 manifest / debug agent 是真实场景 | 混了"写 manifest"(编辑器 + git + CLI，跟 MCP 无关) 和 "IDE 看 sessions"(Admin UI 已覆盖)两件事；真需要 IDE-as-helix-frontend 的人群没被验证 |
+| 跟 backend platform 定位 compatible | "不冲突" ≠ "值得做"；REST API + Admin UI + Python SDK 已覆盖所有操作面，再加一层 MCP wrapper 没增量价值 |
+| 实施成本中等(用 FastMCP 包装现有 API) | 列出的 6 工具 (conversations_list / messages_send / channels_list / events_poll ...)**是 Hermes 消息平台子系统术语**;helix 不是消息平台,直接 port 等于把 Hermes 产品形态 graft 到 helix,违反 [memory:general-platform-positioning] |
+| Hermes-equivalent operator experience | Hermes 做 MCP server 是因为它是 local-first CLI(agent + IDE 都在用户本机,本地进程互通有意义);helix 是 server-side 多租户 backend,这个互通模型不适用 — 把 Hermes 设计当 baseline 是 [memory:no-design-choice-disguise] 的反面 |
+
+**结论**:agent 平台的边界 = 消费外部 MCP 生态,不是再造一个被消费的 server。MCP Server 在 helix 永久 B 档,除非未来出现"reverse-MCP 是真用户群体最强需求"的硬证据。详见 [memory:mcp-direction-client-only]。
+
+横断面 § B "5 条该补" 清单里原 #5 "MCP Server" 已被 "MCP Client HTTP/SSE transport" 替换。
 
 ---
 
@@ -577,7 +587,7 @@ helix 的扩展机制路径**已经选定**（声明式 manifest + cosign Python
 | 8. 子 Agent | D + C-边际 | 低 |
 | 9. Cron 调度 | D + **C** | **中-高** |
 | 10. 消息平台 | B | 不适用 |
-| 11. MCP | **A + B-边界** | **中**（MCP Server 反直觉高价值） |
+| 11. MCP | **A + B** | **中-高**（MCP Client HTTP/SSE 真 gap；MCP Server 2026-05-27 复审推翻为 B，见 § 11.5） |
 | 12. 扩展机制 | B + A | 低 |
 | 13. UI | B + A | 低 |
 | 14. 技能可移植 | **A** + B + D | **中-高**（多子项） |
@@ -625,12 +635,14 @@ helix 的扩展机制路径**已经选定**（声明式 manifest + cosign Python
 - **实施时主要矛盾**：时间阈值的 per-tenant 可配？跟 helix "manifest 显式声明"哲学协调（archived skill 不能引用，但 archive 是后台自动的）？
 - **建议**：**M1 评估池**（J.7b-1 启动同期或稍晚）。
 
-### #5 MCP Server（暴露 helix 能力给 Claude Code / Cursor）
+### #5 MCP Client HTTP/SSE transport（agent 沙箱接入外部 MCP 生态）
 
-- **是什么**：Hermes 把自己作为 stdio MCP server 暴露 10 个工具（conversations_list / messages_send / permissions_respond / 等）给 Claude Code / Cursor 等 IDE 用。helix 当前完全没有。
-- **为什么 #5（反直觉的高价值）**：(a) **企业内部开发者用 Claude Code / Cursor 写 manifest / debug agent 是 helix 的真实使用场景**；(b) 跟 helix backend platform 定位完全 compatible（MCP server 面向"专业用户"不是末端用户）；(c) 实施成本中等（用 `FastMCP` lib 包装现有 control-plane API + auth 复用）；(d) 让 helix 在 IDE 用户群体里有 "Hermes-equivalent operator experience"。
-- **实施时主要矛盾**：auth 模型（复用 OIDC vs API Key）？写权限工具暴露（messages_send / permissions_respond）对 RLS 影响？跨租户 system_admin 路径？
-- **建议**：**M1 评估池**（同 M1-I CLI 节奏，operator experience 一并升级）。
+> **2026-05-27 复审重写**：原 #5 "MCP Server" 已推翻(详见 § 11.5)。本条是 reframe 后的真 gap。
+
+- **是什么**：helix MCP client 当前 stdio only(M1+ Mini-ADR E-5 才有 HTTP/SSE)；2026 年大量公开 MCP server (GitHub / Postgres / Linear / Notion / Slack / filesystem 等)是 remote HTTP/SSE 形态,stdio-only 锁死本地 process,agent 沙箱无法触达 → agent 能力扩展面被卡。
+- **为什么 #5(真 capability gap)**：(a) **agent 平台的核心竞争力 = 消费外部 MCP 生态**(详见 [memory:mcp-direction-client-only]),HTTP/SSE 不通就接入不了 → 直接卡 agent 能力面;(b) Mini-ADR E-5 已 backlog,只是顺位提前;(c) 实施成本 1.5 周(用 anthropic 官方 `mcp` Python SDK 而非自研);(d) 不动 helix 自身资源模型,纯加入"消费层"。
+- **实施时主要矛盾**：per-tenant secret 隔离怎么做(HTTP header auth token 走 helix secret store)?远端 server 调用超时 + retry 策略?OAuth 配置先存还是先实现 flow(2026 公开 MCP server OAuth 使用率多高)?
+- **建议**：**M0→M1 Gate capability uplift Sprint #5**(从 M1 评估池提前)。
 
 ## C. 明确不该照搬的清单（按理由分组）
 
@@ -641,6 +653,7 @@ helix 的扩展机制路径**已经选定**（声明式 manifest + cosign Python
 - **末端用户 slash 命令** —— 业务系统的 UI 自己设计
 - **end-user-facing 富媒体 / 卡片 / 按钮** —— 业务系统负责
 - **手机 / 平板响应式 UI** —— Admin UI 是 desktop 操作员场景
+- **MCP Server**（让 IDE 通过 MCP 反向调用 helix）—— 2026-05-27 复审推翻(详见 § 11.5)。agent 平台边界 = 消费 MCP 生态,不再造一个被消费的端点;helix REST API + Admin UI + SDK 已覆盖 operator/developer 场景;且 Hermes 那套 MCP server 工具集(conversations / messages / channels / events)是消息平台子系统术语,graft 到 helix 反向定义资源模型,违反 [memory:general-platform-positioning]。详见 [memory:mcp-direction-client-only]。
 
 ### C.2 多租户 / 合规决定
 

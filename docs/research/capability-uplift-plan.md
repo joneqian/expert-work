@@ -8,6 +8,8 @@
 > 3. Gate 收尾期可以扩展成一个 "capability uplift sprint"
 >
 > **重要修正**（vs 上一版）：上一版按"实施成本 ≤ 1 周"筛只塞了 1 项，是误读约束。本版按"真正硬依赖"重排，**6 项进 Gate sprint，2 项拆基础设施提前 + 启用等节奏**。
+>
+> **2026-05-27 复审修正**：原 #5 "MCP Server"（让 IDE 通过 MCP 调用 helix）被复审推翻 — gap doc 论据(企业开发者 / backend platform compatible / 实施成本中等 / Hermes-equivalent operator experience) 逐条不立。helix 是 server-side 多租户 backend 平台，不是 local-CLI，MCP server wrapper 没有真用户群体支撑；且 gap doc 列的工具集(conversations_list / messages_send / channels_list ...)是 Hermes 消息平台子系统术语，graft 过来违反 [memory:general-platform-positioning]。**#5 重定义为 "MCP Client HTTP/SSE transport"** — agent 平台的真正价值是消费外部 MCP 生态(GitHub / Postgres / Linear / Notion / filesystem 等)，不是反过来包装自己。详见 [memory:mcp-direction-client-only]。
 
 ---
 
@@ -19,7 +21,7 @@
 | 2 | Memory 投毒防御 + drift backup | ~1.5 周 | 复用 #1 威胁模式库 | **Gate sprint** |
 | 3 | Skill 附属文件（references/templates/scripts） | ~2 周 | 无 | **Gate sprint** |
 | 4 | Curator 自动状态机 | ~1 周 | **真实价值要等 J.7b-1 agent 自创建上线** | **基础设施 Gate sprint + 启用 M1-K** |
-| 5 | MCP Server | ~2 周 | 无 | **Gate sprint** |
+| 5 | **MCP Client HTTP/SSE transport**（原"MCP Server"已推翻，见复审修正） | ~1.5 周 | 无 | **Gate sprint** |
 | 6 | Memory hybrid retrieval（向量 + 全文 RRF） | ~1.5 周 | 无（直接 port J.5 现成代码） | **Gate sprint** |
 | 7 | Memory 短期 → 长期自动凝结 | ~3-4 周 | **凝结策略调优要 M1 dogfood 数据** | **凝结引擎 Gate sprint + 策略 M1 调优** |
 | 8 | Memory frozen snapshot / 前缀缓存优化 | ~1.5 周 | 无 | **Gate sprint** |
@@ -38,7 +40,7 @@
 
 - **#1 Cron 注入扫描**：trigger 路径独立
 - **#3 Skill 附属文件**：J.7a 已稳定，加 supporting_files 字段是独立 schema 变更
-- **#5 MCP Server**：完全新接口面，包装现有 control-plane API
+- **#5 MCP Client HTTP/SSE transport**：扩 MCP client transport(现 stdio only)，agent 沙箱可调远端 MCP server，Mini-ADR E-5 已 backlog
 - **#6 Memory hybrid retrieval**：J.5 RAG 子系统的 hybrid + RRF + tsvector **已经 PR #161 落地**，是直接 port
 - **#8 Memory frozen snapshot**：memory_recall_node 加一种模式 + manifest 配置
 
@@ -71,7 +73,8 @@ Week 1                  Week 2                  Week 3
 
 Week 4                  Week 5                  Week 6
 ─────────────────────────────────────────────────────
-#5 MCP Server              ████████████
+#5 MCP Client HTTP/SSE     ████████
+                          (transport 扩展 + per-server config + OAuth 配置)
 #6 Memory hybrid           ████████
                            (port J.5)
 #8 Memory frozen snapshot          ████████
@@ -121,18 +124,20 @@ Week 11                 Week 12                 Week 13
 
 **Risk**：影响 J.3 已 deploy 的 write throughput。**缓解**：write 扫为可选 strict mode（per-tenant 配置），默认仅 read 扫做占位符。
 
-### Week 4-6 — #5 MCP Server
+### Week 4-5 — #5 MCP Client HTTP/SSE transport
+
+> **2026-05-27 复审**：原 framing "MCP Server 暴露 helix 给 IDE" 已推翻(见文档头复审修正)。本节是 reframe 后的 scope。
 
 **实施面**：
-- 新建 `services/control-plane/src/control_plane/mcp_server.py`：用 `FastMCP` lib 包装现有 API
-- 暴露 **M0 仅读权限工具**：conversations_list / conversation_get / messages_read / events_poll / events_wait / channels_list（6 个）
-- 写权限工具（messages_send / permissions_respond）留到 M1 后期
-- auth 复用现有 OIDC，新增可选 MCP-specific token（per-user 隔离）
-- RLS 复用 tenant_scope；system_admin 跨租户路径正常工作 + 必 audit
+- 扩 MCP client transport：现 stdio only → 增 HTTP + SSE + StreamableHTTP 三种(对齐 Hermes / 公开 MCP server 标准形态)
+- per-tenant manifest `mcp_servers[].transport`：`stdio | http | sse | streamable_http`，对应 config 字段(url / headers / etc)
+- per-tenant secret 隔离：MCP server 的 auth header / token 走 helix secret store(复用 J.4 secret resolver)
+- OAuth 配置层(只存配置不实现 flow)：`mcp_servers[].auth_type: none | bearer | oauth2` + OAuth client_id/scope 配置存储，OAuth refresh flow 留 Mini-ADR L.L8-MCP 后续
+- 单元 + 集成测试：mock HTTP/SSE server 验协议合规，e2e 跑一个公开 MCP server(如 `mcp-server-time`)
 
-**Risk**：写权限对 RLS 副作用。**缓解**：本期不出写工具。
+**Risk**：HTTP/SSE MCP server 多种形态(rev draft 期协议变动)。**缓解**：用 anthropic `mcp` 官方 Python SDK 而非自研。**Risk**：tenant 配置 oauth 但 flow 未实现。**缓解**：oauth_type 字段先支持，运行时若选 oauth 则 400 "OAuth flow 未在本期实现"。
 
-### Week 4-5 — #6 Memory hybrid retrieval（与 #5 并行）
+### Week 5 — #6 Memory hybrid retrieval（与 #5 并行）
 
 **实施面**：
 - `memory_item` 加 tsvector 列（迁移 0039）+ 自动 trigger 维护
@@ -188,7 +193,7 @@ Week 11                 Week 12                 Week 13
 | 项 | M1 要做什么 |
 |---|-----------|
 | #4 Curator 启用 | J.7b-1 agent 自创建上线后跑 2-4 周，按真实膨胀率调阈值（默认 30/90 可能改 7/30） |
-| #5 MCP Server 写权限 | 把 messages_send / permissions_respond 暴露给 IDE 用户，RLS 审计验证后 |
+| #5 MCP Client OAuth flow | OAuth refresh + 跨 session 持久 token，等公开 MCP 生态 OAuth 使用率上来再做(Mini-ADR L.L8-MCP) |
 | #7 凝结策略调优 | M1 dogfood 跑完看哪些 trigger 信号误学率高，调防误学约束 |
 | #8 frozen snapshot 启用条件 | 看客户 token 成本报告，memory recall cache miss > 15% 才让 per_session 成为默认 |
 
@@ -214,7 +219,7 @@ Week 11                 Week 12                 Week 13
                           ├─ M1-B 数据生命周期硬化（原 backlog）
                           ├─ M1-K J.7b 8 项（原 backlog，本计划 #3 / #4 已并入）
                           │     └─ J.7b-1 上线触发 #4 Curator 启用调参
-                          ├─ M1-I CLI 升级（本计划 #5 MCP Server 已并入）
+                          ├─ M1-I CLI 升级（独立项，MCP Server 框架已确认不做，见 [memory:mcp-direction-client-only]）
                           └─ M1 dogfood 数据反过来调 #4 + #7 阈值
                           │
                           ▼

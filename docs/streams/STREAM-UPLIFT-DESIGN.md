@@ -29,7 +29,7 @@ helix M0 在 [helix-vs-hermes-tldr.md](../research/helix-vs-hermes-tldr.md) 的 
 | #2 | Memory 投毒防御 + drift backup | ~1.5 周 | 复用 #1 威胁模式库 | § 3 |
 | #3 | Skill 附属文件(references/templates/scripts) | ~2 周 | 无 | § 4 |
 | #4 | Curator 自动状态机(active/stale/archived) | ~1 周 | 基础设施可提前；启用调参 M1-K J.7b-1 | § 5 |
-| #5 | MCP Server(暴露给 Claude Code/Cursor) | ~2 周 | 无 | § 6 |
+| #5 | **MCP Client HTTP/SSE transport**(agent 沙箱接入外部 MCP 生态;原"MCP Server"已 2026-05-27 复审推翻,见 § 6) | ~1.5 周 | 无 | § 6 |
 | #6 | Memory hybrid retrieval(向量 + 全文 RRF) | ~1.5 周 | 无(port J.5) | § 7 |
 | #7 | Memory 短期 → 长期自动凝结 | ~3-4 周 | 凝结引擎可提前；策略调优 M1 dogfood | § 8 |
 | #8 | Memory frozen snapshot / 前缀缓存优化 | ~1.5 周 | 无 | § 9 |
@@ -38,7 +38,8 @@ helix M0 在 [helix-vs-hermes-tldr.md](../research/helix-vs-hermes-tldr.md) 的 
 
 | 推迟项 | 落地 | 备注 |
 |-------|------|------|
-| MCP Server 写权限工具(`messages_send` / `permissions_respond`) | M1-I | M0 仅暴露读权限工具，写跨租户 RLS 风险需先在生产观察一段 |
+| MCP Client OAuth flow(authorization code + refresh + per-tenant token store) | Mini-ADR L.L8-MCP(独立 sprint) | 本 Sprint 只存配置(`auth_type: "oauth2"`),flow 实现 2-3 周值得独立 |
+| ~~MCP Server(暴露 helix 给 IDE)~~ | **永久 B 档** | 2026-05-27 复审推翻;详见 [memory:mcp-direction-client-only] + § 6 重定向说明 |
 | Curator 启用阈值调参(30/90 天默认改成什么) | M1 J.7b-1 上线 2-4 周后 | Sprint 内只锁基础设施 + 默认值；启用看真实数据 |
 | Memory 凝结策略阈值调优 | M1 dogfood 跑完 | Sprint 内只锁引擎 + 默认 trigger 信号 + 防误学约束 |
 | Memory frozen snapshot 设为默认 | M1 后期 | Sprint 内只做 manifest 字段 + per_session 模式，默认仍 per_turn |
@@ -590,16 +591,350 @@ async def retrieve(self, ...) -> list[MemoryItem]:
 
 ---
 
-## 6. Sprint #5 — MCP Server(暴露给 Claude Code / Cursor)
+## 6. Sprint #5 — MCP Client HTTP/SSE Transport(接入外部 MCP 生态)
 
-> **本章节 stub** — Sprint #5 开工前补完。预计 Week 4-6。
+> **2026-05-27 复审重定向**:原 Sprint #5 "MCP Server(暴露给 Claude Code / Cursor)"已被推翻。详见 [`capability-uplift-plan.md` 文档头复审修正](../research/capability-uplift-plan.md) + [`helix-vs-hermes-gap.md` § 11.5](../research/helix-vs-hermes-gap.md)。
+>
+> **新方向**:扩 MCP client transport(现 stdio only → 加 HTTP / SSE / StreamableHTTP),让 agent 沙箱能接入 2026 年公开 MCP 生态(GitHub / Postgres / Linear / Notion / Slack / filesystem 等)。
+>
+> **永久原则**:agent 平台的边界 = 消费 MCP 生态,不再造一个被消费的 server。详见 [memory:mcp-direction-client-only]。
 
-主要设计要点(占位)：
-- 新建 `services/control-plane/src/control_plane/mcp_server.py`：FastMCP 包装现有 API
-- **M0 仅暴露读权限工具**：conversations_list / conversation_get / messages_read / events_poll / events_wait / channels_list(6 个)
-- 写权限工具(messages_send / permissions_respond)推 M1-I
-- auth 复用现有 OIDC，新增可选 MCP-specific token(per-user 隔离)
-- RLS 复用 tenant_scope；system_admin 跨租户路径正常工作 + 必 audit(per [memory:stream-n-cross-tenant-admin](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_stream_n_cross_tenant_admin.md))
+### 6.1 背景:为什么 stdio-only 锁死了 agent 能力面
+
+helix 当前 MCP client 在 `services/orchestrator/src/orchestrator/tools/mcp.py` 只有 `StdioMCPClient`(Mini-ADR E-5 / Stream E.9 落地)。stdio transport 模型:
+
+```
+helix orchestrator ──── stdin/stdout pipe ──── 本地子进程(MCP server)
+                       (fork + exec command)
+```
+
+这个模型在两个场景失效:
+
+1. **公开 MCP 生态远端化**:2026 年大量公开 MCP server(GitHub MCP / Postgres MCP / Linear MCP / Notion MCP / Slack MCP / filesystem MCP / time MCP ...)是 remote HTTP / SSE / StreamableHTTP 形态。stdio-only client 无法触达。
+2. **多租户 sandbox 隔离**:helix orchestrator 是 server-side 多租户 backend,本地 `subprocess.Popen` 在多租户场景 + gVisor 沙箱里有运维复杂度(每 tenant 多个 stdio 子进程占文件描述符 + 进程数)。HTTP/SSE 走网络层 → 沙箱可控、scale 简单。
+
+**Mini-ADR E-5** 写明 HTTP / SSE 是 M1+ backlog。本 Sprint 是把 E-5 提前到 M0→M1 Gate(capability uplift)期间做完。
+
+### 6.2 范围 & 边界
+
+#### 6.2.1 In-scope
+
+- 扩 `MCPClient` 实现:新增 `HttpMCPClient` / `SseMCPClient` / `StreamableHttpMCPClient`(基于 anthropic 官方 `mcp` Python SDK)。
+- `MCPServerConfig` dataclass 扩展支持多 transport(`transport` 字段 + transport-specific 字段)。
+- 平台 MCP servers 配置文件(`mcp_servers_config_file`,Mini-ADR E-17 控制点)schema 扩展兼容多 transport。
+- per-tenant manifest `mcp_servers` 维度 — 只用作 enablement / filtering(沿用 E-17,**不允许 tenant 提交 transport/url/headers**)。
+- Secret 隔离:HTTP/SSE 的 auth header(Bearer / API key)通过 `secret://` 引用走 J.4 secret resolver,平台配置文件里不存明文。
+- 失败模式:timeout / retry / circuit breaker per server。
+- 可观测:`helix_uplift_mcp_call_total{transport, server, result}` + 失败率 alert + recording rules。
+- 测试:mock HTTP / SSE server 协议合规 + e2e 接公开 `mcp-server-time`(选它是因为最简单 / 无 OAuth / 无 state / 行为可预测)。
+
+#### 6.2.2 Out-of-scope(明确推迟,不掩盖)
+
+| 项 | 推迟到 | 理由 |
+|---|------|------|
+| **OAuth flow 实现**(authorization code / refresh) | Mini-ADR L.L8-MCP(独立 sprint) | 完整 OAuth flow 涉及 callback endpoint / token persistence / refresh / per-tenant token store,2-3 周;本 Sprint 只**存配置**(`auth_type: "oauth2"` + `client_id` / `scope`),运行时若选 oauth2 则 422 "OAuth flow not implemented in this release" |
+| **Sampling**(server 反向调 LLM) | 永久不做 | helix 不做 MCP server,Sampling 是 server-side 概念,client 端不存在该路径 |
+| **MCP server inspector / debugger UI** | M2+ | Admin UI 新页面,跟 Skills page 同期 |
+| **WebSocket transport** | 看生态采纳率 | 2026-05 时 anthropic SDK 未官方支持 WebSocket,等公开 MCP server 出现 WS 形态再补 |
+| **MCP Server**(暴露 helix 自身) | **永久 B 档** | 见 [memory:mcp-direction-client-only] 论证 |
+
+#### 6.2.3 验收(Sprint Exit)
+
+参考 [memory:zero-tech-debt] 6 条 + 本 Sprint 专属:
+
+1. **真实 e2e**:跑 anthropic 官方 `mcp-server-time` remote SSE → 在 helix agent 沙箱里 `mcp:time.get_current_time` 工具能正确返回。
+2. 单元测试 ≥ 80% 覆盖(transport dispatcher / 各 transport client / secret resolution / circuit breaker)。
+3. STREAM-UPLIFT-DESIGN § 6 完整 + Mini-ADRs U-9 ~ U-13 锁定不可推翻。
+4. runbook `docs/runbooks/mcp-client-tuning.md` 新建(故障排查 / transport 选择 / OAuth 配置坑)。
+5. 可观测齐:metrics + recording rules + alert + Grafana 面板 placeholder。
+6. CI 全绿 + 无 TODO 遗留。
+
+### 6.3 架构
+
+#### 6.3.1 transport 扩展点 — 复用现有 `MCPClient` Protocol
+
+现有 `MCPClient` Protocol(`services/orchestrator/src/orchestrator/tools/mcp.py:118-135`)定义了 `list_tools` / `call_tool` / `close` 三方法。三个新 transport client 实现同 Protocol,**消费方零改动**:
+
+```
+        ┌──────────────────────────────┐
+        │     MCPClient Protocol        │
+        └──────────────┬───────────────┘
+                       │
+       ┌───────────────┼───────────────┬────────────────┐
+       │               │               │                │
+       ▼               ▼               ▼                ▼
+  StdioMCPClient  HttpMCPClient   SseMCPClient   StreamableHttpMCPClient
+  (existing)      (new)           (new)          (new)
+       │               │               │                │
+       └───────────────┴───────────────┴────────────────┘
+                            │
+                  anthropic mcp SDK
+            (stdio_client / http_client / sse_client /
+              streamablehttp_client + ClientSession)
+```
+
+`MCPServerPool` / `MCPTool` / `register_mcp_tools` 都依赖 Protocol,不需要 transport-specific 分支。
+
+#### 6.3.2 Mini-ADR U-9:transport 实现复用官方 SDK,不自研
+
+**决策**:`HttpMCPClient` / `SseMCPClient` / `StreamableHttpMCPClient` 全部包装 anthropic 官方 `mcp` Python SDK 的对应客户端(`mcp.client.streamable_http.streamablehttp_client` / `mcp.client.sse.sse_client` / `mcp.client.http.http_client`)。
+
+**理由**:
+- MCP 协议在 2026 仍有 draft 字段;自研 transport 需要持续追协议变更,工程成本爆炸
+- 现有 `StdioMCPClient` 就是这个模式(包装 `mcp.client.stdio.stdio_client` + `ClientSession`),架构上一致
+- 安全审计简单:依赖 anthropic 官方维护的协议层
+
+**Risk**:SDK 版本升级可能引入 breaking change → **缓解**:在 `pyproject.toml` pin `mcp` minor version,升级走 PR + ADR。
+
+#### 6.3.3 Mini-ADR U-10:`MCPServerConfig` 扩展 — 中央配置 + transport 字段
+
+**决策**:`MCPServerConfig` dataclass 加 `transport: Literal["stdio", "http", "sse", "streamable_http"] = "stdio"` 字段 + transport-specific 字段(`url`, `headers`, `auth_type`, `auth_config`)。stdio 配置无 `transport` 字段时默认 `"stdio"`(后向兼容现有 `mcp_servers_config_file`)。
+
+新 shape:
+
+```python
+@dataclass(frozen=True)
+class MCPServerConfig:
+    name: str
+    transport: Literal["stdio", "http", "sse", "streamable_http"] = "stdio"
+    # stdio fields(transport="stdio" 时必填)
+    command: Sequence[str] | None = None
+    env: Mapping[str, str] = field(default_factory=dict)
+    # http / sse / streamable_http fields(对应 transport 时必填)
+    url: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
+    # auth(本 Sprint 只实现 "none" 和 "bearer";"oauth2" 存配置不实现 flow)
+    auth_type: Literal["none", "bearer", "oauth2"] = "none"
+    auth_config: Mapping[str, Any] = field(default_factory=dict)
+    # 失败模式(Mini-ADR U-13)
+    timeout_s: float = 30.0
+    retry_max: int = 3
+```
+
+`__post_init__` 校验:
+- `transport == "stdio"` → `command` 必填,`url` 必须为 None
+- `transport in ("http", "sse", "streamable_http")` → `url` 必填,`command` 必须为 None
+- `auth_type == "bearer"` → `auth_config["token_ref"]` 必填(指向 `secret://...`)
+- `auth_type == "oauth2"` → `auth_config` 必须有 `client_id` / `scope`(本 Sprint 只存,运行时若实际 connect 抛 `NotImplementedError`)
+
+**理由**:
+- 沿用 E-17 中央配置原则(operator-controlled);per-tenant 不能提交 transport/url/headers,防止 tenant 注入恶意 URL 做数据外泄
+- 字段 typing 强约束,Pydantic 反序列化时直接拒绝非法组合
+
+#### 6.3.4 Mini-ADR U-11:Secret 隔离 — `secret://` 引用 + J.4 resolver
+
+**决策**:平台配置文件里 auth header 不存明文 token。bearer auth 写 `auth_config: {"token_ref": "secret://mcp/github/api-token"}`,在 `_default_mcp_client` 工厂里通过 J.4 `SecretStore` resolver 解析为实际 token,**只在内存里短暂存在**(不日志、不 audit row 里、不 metric label 里)。
+
+**理由**:
+- 复用 J.4 已有的 secret resolver(`web_search` `api_key_ref` 同模式)
+- 配置文件 commit 到 git 仍然安全(只是 secret reference,不是 secret 本身)
+- 跨多 secret backend(Vault / AWS Secrets Manager / Kubernetes Secret)一处替换
+
+**Risk**:误把 token 写到日志/audit。**缓解**:
+- `MCPServerConfig.__repr__` 自动 redact `headers` / `auth_config` 字段(改 `repr=False`)
+- 加 unit test 验 `repr(config)` 不含 secret string
+- CodeQL `py/clear-text-logging-of-sensitive-data` rule 兜底(已有)
+
+#### 6.3.5 Mini-ADR U-12:OAuth 本 Sprint 只存配置,不实现 flow
+
+**决策**:`auth_type: "oauth2"` 字段先支持,`auth_config` 校验 `client_id` + `scope` 必填。`_default_mcp_client` 工厂遇到 oauth2 时**直接抛 `NotImplementedError("MCP OAuth flow not implemented in this release; tracking Mini-ADR L.L8-MCP")`**,boot 阶段失败可见;启动若有 oauth2 server 配置 → fail-fast(不 silent skip)。
+
+**理由**:
+- OAuth 完整 flow(callback endpoint / authorization code → access token / refresh / per-tenant token store)2-3 周,值得独立 sprint
+- 但 schema 先就位 = 未来 L.L8-MCP 落地时不需要 migrate 配置
+- fail-fast 优于 silent skip,避免"配了 oauth2 看似 OK 实际没接通"的隐性 bug
+
+**Risk**:operator 配 oauth2 后 boot 失败困惑。**缓解**:错误信息明确指向 Mini-ADR;runbook § OAuth 配置一节专门写"本 Sprint 不支持,要么走 bearer 要么等 L.L8-MCP"。
+
+#### 6.3.6 Mini-ADR U-13:远端 server 失败模式 — timeout + retry + circuit breaker
+
+**决策**:每个 HTTP/SSE/StreamableHttp client 实施三层失败处理:
+
+| 层 | 策略 | 配置点 |
+|---|------|------|
+| **Per-call timeout** | 默认 30s,可在 `MCPServerConfig.timeout_s` 覆盖;超时 raise `MCPCallTimeoutError` | `timeout_s` |
+| **Connection retry** | 连接失败 / 5xx → 指数退避 retry(1s / 2s / 4s),最多 3 次;4xx 不 retry(语义错误) | `retry_max` |
+| **Per-server circuit breaker** | 同 server 30 分钟窗口内连续失败 ≥ 5 次 → 标记 `unhealthy`,跳过该 server 的所有调用 30 分钟,半开探测恢复 | 硬编码(本 Sprint),M1 可调 |
+
+**理由**:
+- 远端调用失败模式完全不同于 stdio(stdio 只有 process crash / 协议错误两种;HTTP 有网络层无数失败模式)
+- 不加 circuit breaker → 一个挂掉的 MCP server 会让所有 agent 都卡 30s timeout,拖累整个 orchestrator
+- 30 分钟 + 5 次阈值是行业默认(参考 Envoy / Istio default),无需创新
+
+**Risk**:circuit breaker 误开导致暂时故障变长。**缓解**:metrics + alert 暴露 unhealthy 状态,operator 可手动 reset(API 留 backlog);runbook 写明"unhealthy 状态如何排查"。
+
+#### 6.3.7 平台配置文件 schema 扩展
+
+`mcp_servers_config_file` 仍是 JSON 数组,每条目兼容现有 stdio 形态 + 新 HTTP/SSE 形态:
+
+```json
+[
+  {
+    "name": "filesystem",
+    "transport": "stdio",
+    "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/data"]
+  },
+  {
+    "name": "github",
+    "transport": "streamable_http",
+    "url": "https://api.githubcopilot.com/mcp/",
+    "auth_type": "bearer",
+    "auth_config": {"token_ref": "secret://mcp/github/api-token"}
+  },
+  {
+    "name": "time",
+    "transport": "sse",
+    "url": "https://mcp.example.com/time/sse"
+  }
+]
+```
+
+`_load_mcp_server_configs` 加 transport 分发逻辑;遇到未知 transport 在 boot 时 fail。
+
+#### 6.3.8 与 per-tenant `mcp_servers` 字段的关系(沿用 E-17)
+
+per-tenant `tenant_config.mcp_servers` 字段在本 Sprint **不增加新含义**:
+- 仍然只作 enablement / filtering(列出 platform pool 里的 server name 表示这个 tenant 启用)
+- **不允许 tenant 提交 transport / url / headers / auth_config**(防止租户注入恶意 URL 做数据外泄)
+- M1+ 才扩展"per-tenant override 已 platform-listed server 的 enabled tools"
+
+### 6.4 实施细节
+
+#### 6.4.1 文件修改清单
+
+```
+services/orchestrator/src/orchestrator/tools/mcp.py
+  - 扩 MCPServerConfig(transport 字段 + url/headers/auth_type/auth_config + timeout_s/retry_max)
+  - 加 HttpMCPClient / SseMCPClient / StreamableHttpMCPClient(各 ~80 行,包装 SDK)
+  - 加 _MCPCircuitBreaker(同进程内每 server 状态机)
+  - 加 MCPCallTimeoutError / MCPServerUnhealthyError 异常类
+
+services/control-plane/src/control_plane/runtime.py
+  - _load_mcp_server_configs 加 transport 分发
+  - _default_mcp_client 工厂改 transport switch(stdio → 已有;http/sse/streamable_http → 新;oauth2 → NotImplementedError)
+  - secret resolver 注入(bearer 时解析 token_ref)
+
+services/control-plane/src/control_plane/app.py
+  - build_mcp_pool 签名加 secret_store 参数,贯穿到 runtime
+
+packages/helix-common/src/helix_agent/common/uplift_metrics.py
+  - 加 record_mcp_call(transport, server, result) / record_mcp_circuit_state(server, state)
+  - 复用 [memory:audit-literal-drift] 模式:metric label 必须 allowlist
+
+services/orchestrator/tests/test_mcp_tool.py
+  - 加 HTTP/SSE client 单测(用 SDK 自带 mock transport)
+  - 加 circuit breaker 单测(time machine,推时间过 30 分钟探测恢复)
+  - 加 secret resolution 单测(MockSecretStore + repr redaction 断言)
+
+services/control-plane/tests/test_runtime_mcp.py(新)
+  - 加 transport dispatcher 单测
+  - 加 oauth2 fail-fast 单测
+
+services/control-plane/tests/test_mcp_e2e.py(新)
+  - 真实连 mcp-server-time(本地起 SDK 自带 example server)
+  - 验 SSE / streamable_http 各跑一遍 list_tools + call_tool
+
+tools/observability/rules/uplift.yml
+  - 加 helix:uplift:mcp_call_failure_rate:5m{transport, server}
+  - 加 alert HelixUpliftMCPServerUnhealthy(circuit open ≥ 10 分钟)
+
+docs/runbooks/mcp-client-tuning.md(新)
+  - § 1 transport 选择指南
+  - § 2 故障排查(timeout / 4xx / 5xx / SSE 断连)
+  - § 3 secret 配置示范
+  - § 4 OAuth 配置说明(本 Sprint 限制 + 未来 L.L8-MCP 指引)
+  - § 5 circuit breaker 状态查看与重置
+```
+
+#### 6.4.2 PR 拆分
+
+按零债 6 条 + design-first 原则,Sprint #5 拆 2 个 PR:
+
+1. **PR A — `uplift/5-mcp-client-http-sse-design`**(本 PR):仅本 § 6 + capability-uplift-plan + helix-vs-hermes-gap + memory 沉淀,无代码。
+2. **PR B — `uplift/5-mcp-client-http-sse-impl`**:实施所有代码 + 单测 + e2e + runbook + metrics + alert。
+
+### 6.5 关键决策点(开发期可能踩)
+
+| # | 问题 | 默认 | 何时复审 |
+|---|------|------|---------|
+| 1 | `mcp` SDK 版本 pin | 取 PR 时 latest stable minor | 半年 review 一次 |
+| 2 | circuit breaker 30 分钟窗口 / 5 次阈值是否合理 | 是,行业默认 | M1 dogfood 后看真实失败率分布 |
+| 3 | mcp-server-time 是否一直可用作 e2e fixture | 不一定 — 公开 server 有维护风险 | e2e 失败时 fallback 用 SDK 自带 example server,留 fixture-only flag |
+| 4 | 远端 server 协议层崩溃(SDK panic)怎么 isolated | AsyncExitStack 已覆盖 stdio,HTTP/SSE 同模式 + 加 outer try 兜底 raise | 实施期复检 |
+| 5 | per-tenant `mcp_servers` 启用 platform-listed name 拼错时 | warn log + skip(不 fail-fast,租户可能有遗留配置) | M1 加 tenant config validation API 时改 strict |
+
+### 6.6 测试矩阵
+
+| 层 | 用 | 覆盖 |
+|---|----|-----|
+| Unit(client) | SDK 自带 mock transport | 各 transport client 的 list_tools / call_tool / close / 异常路径 |
+| Unit(circuit breaker) | time machine fixture | 关闭 / 半开 / 重置三态转移 + 阈值 |
+| Unit(config validation) | pytest parametrize | 各 transport 必填字段 + auth 必填字段 + oauth2 fail-fast |
+| Unit(secret) | MockSecretStore | bearer token 正常解析 + token_ref 缺失 + repr 不含 secret |
+| Integration(runtime) | TestContainer Postgres | _load_mcp_server_configs 各 transport + build_mcp_pool 异常路径 |
+| E2E | SDK 自带 example mcp-server-time(本地起) | SSE + streamable_http 各跑 list_tools + call_tool + 返回值校验 |
+| Property | hypothesis(可选) | timeout 边界 / retry 次数边界 |
+
+### 6.7 可观测
+
+参考 Sprint #1 + #6 + #8 已有的 uplift_metrics 风格,新增:
+
+```python
+# packages/helix-common/src/helix_agent/common/uplift_metrics.py
+def record_mcp_call(*, transport: str, server: str, result: Literal["ok", "timeout", "4xx", "5xx", "circuit_open", "transport_err"]) -> None: ...
+def record_mcp_circuit_state(*, server: str, state: Literal["closed", "half_open", "open"]) -> None: ...
+```
+
+recording rules + alerts:
+
+```yaml
+# tools/observability/rules/uplift.yml
+- record: helix:uplift:mcp_call_failure_rate:5m
+  expr: |
+    sum by (transport, server) (rate(helix_uplift_mcp_call_total{result!="ok"}[5m]))
+    /
+    clamp_min(sum by (transport, server) (rate(helix_uplift_mcp_call_total[5m])), 1)
+
+- record: helix:uplift:mcp_circuit_open_total
+  expr: |
+    sum by (server) (helix_uplift_mcp_circuit_state{state="open"})
+
+- alert: HelixUpliftMCPServerUnhealthy
+  expr: helix:uplift:mcp_circuit_open_total > 0
+  for: 10m
+  labels:
+    severity: P2
+  annotations:
+    summary: "MCP server circuit open ≥ 10m"
+    description: "Server {{ $labels.server }} unreachable; agents lose access to its tools. Runbook § 5."
+```
+
+### 6.8 与 Stream H + Mini-ADR E-17 + J.4 的复用矩阵
+
+| 复用面 | 来自 | 本 Sprint 怎么用 |
+|------|-----|----------------|
+| `MCPClient` Protocol | Stream E.9 | 新 transport client 实现同 Protocol,消费方零改动 |
+| `MCPServerPool` 生命周期 | Stream E.9 | 完全复用(N=5 cap / AsyncExitStack / close_all 全适用) |
+| Mini-ADR E-17 中央配置 | Stream E.9 | 沿用模型,HTTP/SSE 同 platform-controlled,租户只 enable/filter |
+| `SecretStore` + `parse_secret_ref` | J.4 | bearer auth token_ref 走同一 resolver |
+| `tenant_config.mcp_servers` 字段 | E.8 | 字段语义不变(enablement / filtering) |
+| uplift_metrics 命名约定 | Sprint #1 § 1.3 | mcp 指标加 `helix_uplift_mcp_*` 前缀 |
+| zero-tech-debt 6 条 | [memory:zero-tech-debt] | Sprint Exit 验收 |
+
+### 6.9 Sprint #5 验收清单
+
+实施 PR(PR B)merge 前 hard check:
+
+- [ ] `mcp-server-time` real SSE + streamable_http e2e 跑通(2 个 transport × list_tools + call_tool = 4 个 assert 全过)
+- [ ] 单元测试覆盖 ≥ 80%(client / circuit breaker / config validation / secret 四类)
+- [ ] CI 全绿(ruff / mypy / pre-commit / CodeQL / pytest / integration)
+- [ ] STREAM-UPLIFT-DESIGN § 6 实施期无新增"开发期决策点"(若有需 ADR amend + PR review)
+- [ ] runbook `docs/runbooks/mcp-client-tuning.md` 5 节齐
+- [ ] uplift.yml 新 recording rules + alert 加入
+- [ ] memory:audit-literal-drift 提醒:新增 audit action 时 protocol + control-plane 两处同时改(本 Sprint 暂无新 audit action,见 6.9 备注)
+- [ ] memory:ruff-strict-lint-traps + uv-lock-and-precommit-ruff 第 4 条 preflight 跑过
+
+> **备注**:Sprint #5 本身不引入新 audit action(MCP 工具调用走现有 tool registry audit 路径,namespace `mcp:<server>.<tool>` 已覆盖)。如未来加 "MCP 配置变更" audit,记得双份 Literal。
 
 ---
 
@@ -1114,7 +1449,7 @@ Week 1                  Week 2                  Week 3
 
 Week 4                  Week 5                  Week 6
 ─────────────────────────────────────────────────────
-#5 MCP Server              ████████████
+#5 MCP Client HTTP/SSE     ████████
 #6 Memory hybrid           ████████
                            (port J.5)
 #8 Memory frozen snapshot          ████████
@@ -1168,7 +1503,7 @@ Week 11                 Week 12                 Week 13
 | #2 | § M0→M1 Gate § Capability Uplift Sprint | — |
 | #3 | § M0→M1 Gate § Capability Uplift Sprint | M1-K J.7b-6(标"已并入") |
 | #4 | § M0→M1 Gate § Capability Uplift Sprint(基础设施) | M1-K J.7b-1(启用调参) |
-| #5 | § M0→M1 Gate § Capability Uplift Sprint(读权限工具) | M1-I(写权限工具) |
+| #5 | § M0→M1 Gate § Capability Uplift Sprint(MCP Client HTTP/SSE transport) | Mini-ADR E-5(2026-05-27 提前)+ Mini-ADR L.L8-MCP(OAuth flow 后续) |
 | #6 | § M0→M1 Gate § Capability Uplift Sprint | — |
 | #7 | § M0→M1 Gate § Capability Uplift Sprint(基础设施) | M2-C(archive 对接) + M1 策略调优 |
 | #8 | § M0→M1 Gate § Capability Uplift Sprint | M1(默认启用条件) |
