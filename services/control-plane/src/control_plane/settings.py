@@ -17,6 +17,8 @@ from uuid import UUID
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from helix_agent.protocol import Provider, Tool
+
 #: Default tenant UUID assigned to header-less dev requests. ``00...00`` is
 #: deliberately the nil UUID so it sticks out in audit_log dumps.
 DEFAULT_DEV_TENANT_ID: UUID = UUID("00000000-0000-0000-0000-000000000000")
@@ -105,6 +107,10 @@ class Settings(BaseSettings):
     #: ``secret://`` reference to the Tavily API key for the built-in
     #: ``web_search`` tool. ``None`` → ``web_search`` is unavailable; an
     #: agent that declares it fails at build time with a clear error.
+    #:
+    #: Stream O (Mini-ADR O-5) — **deprecated**: prefer
+    #: ``platform_tool_credentials["web_search"]``. Removal scheduled
+    #: M1 Q? after all callers migrate to :class:`CredentialsResolver`.
     tavily_api_key_ref: str | None = None
 
     #: Path to a JSON file listing the platform's MCP servers —
@@ -123,6 +129,11 @@ class Settings(BaseSettings):
     #: ``secret://`` reference to the embedding API key — backs long-term
     #: memory (Stream J.3). ``None`` → no embedder; an agent that declares
     #: ``memory.long_term`` fails at build time with a clear error.
+    #:
+    #: Stream O (Mini-ADR O-5) — **deprecated**: prefer
+    #: ``platform_provider_credentials[<embedding_provider>]``. Removal
+    #: scheduled M1 Q? after the embedder migrates to
+    #: :class:`CredentialsResolver`.
     embedding_api_key_ref: str | None = None
 
     #: Embedding model name for long-term memory (Stream J.3). The default
@@ -134,6 +145,11 @@ class Settings(BaseSettings):
     #: ``None`` → no reranker; hybrid search then returns the RRF-fused
     #: order without an LLM rerank pass. ``rerank_provider`` is an
     #: OpenAI-compatible provider id (``ModelSpec.provider``).
+    #:
+    #: Stream O (Mini-ADR O-5) — ``rerank_api_key_ref`` **deprecated**;
+    #: prefer ``platform_provider_credentials[rerank_provider]``.
+    #: Removal scheduled M1 Q? after the reranker migrates to
+    #: :class:`CredentialsResolver`.
     rerank_api_key_ref: str | None = None
     rerank_provider: str = "qwen"
     rerank_model: str = "qwen-plus"
@@ -314,6 +330,44 @@ class Settings(BaseSettings):
     #: a stronger model; this is a cold path so the cost premium is
     #: bounded.
     memory_consolidator_default_aux_model: str = "claude-sonnet-4-6"
+
+    #: Stream O — default provider for the consolidator's aux model when
+    #: the manifest leaves ``policies.memory_consolidation.aux_model``
+    #: unset. The :class:`LLMRouterAuxModelAdapter` uses this to build
+    #: a single-provider :class:`LLMRouter` with the appropriate
+    #: credential resolved via :class:`CredentialsResolver`.
+    memory_consolidator_default_aux_provider: Provider = "anthropic"
+
+    # ----------------------------------------------- credentials catalog (Stream O)
+    #: Stream O (Mini-ADR O-1) — LLM providers the platform deployment
+    #: opts in to. A provider not in this list is unavailable to all
+    #: tenants regardless of agent manifest (publish-time gate, Mini-ADR
+    #: O-4) and cannot be configured by tenants in ``tenant`` mode.
+    #: Default is the empty list — every deployment must explicitly
+    #: enable providers via env (e.g.
+    #: ``HELIX_AGENT_SUPPORTED_PROVIDERS=anthropic,openai,qwen``) along
+    #: with a matching ``platform_provider_credentials`` entry. The
+    #: startup validator (Mini-ADR O-1) refuses to boot if the two
+    #: don't match.
+    supported_providers: list[Provider] = Field(default_factory=list)
+
+    #: Stream O (Mini-ADR O-1) — platform-level secret_ref per supported
+    #: provider. The startup validator rejects any non-empty difference
+    #: between ``supported_providers`` and the keys of this dict, so a
+    #: deployment that opts a provider in **must** supply its credential.
+    platform_provider_credentials: dict[Provider, str] = Field(
+        default_factory=dict,
+        description="provider → secret:// URI; startup validates full coverage",
+    )
+
+    #: Stream O (Mini-ADR O-1) — external tools the platform deployment
+    #: opts in to. Same opt-in + tenant-mode-whitelist semantics as
+    #: ``supported_providers``. Default empty; operators opt in explicitly.
+    supported_tools: list[Tool] = Field(default_factory=list)
+
+    #: Stream O (Mini-ADR O-1) — platform-level secret_ref per supported
+    #: tool.
+    platform_tool_credentials: dict[Tool, str] = Field(default_factory=dict)
 
     # ------------------------------------------------------------------ tenant rate limit (C.6)
     #: Per-tenant request bucket capacity (tokens). Drained one token

@@ -114,9 +114,19 @@ class ConsolidatorAuxModel(Protocol):
     deployment uses (Anthropic, OpenAI, internal vLLM, etc). The worker
     only needs a synchronous request-response shape; tool-calling is
     out-of-scope (anti-mislearn / summarisation are pure-text outputs).
+
+    ``tenant_id`` is passed so production adapters can route the call
+    through :class:`CredentialsResolver` (Stream O) and pick the right
+    credential per-tenant. The null adapter ignores it.
     """
 
-    async def __call__(self, *, prompt: str, model: str | None) -> ConsolidatorLLMReply:
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        tenant_id: UUID,
+    ) -> ConsolidatorLLMReply:
         """Send ``prompt`` to the aux model and return its reply."""
 
 
@@ -151,13 +161,19 @@ class _NullConsolidatorAuxModel:
 
     Sprint #7 ships the worker infrastructure (schema + sweep + audit +
     metrics) without committing the platform to a specific LLM client
-    wire-up. Operators wire a real adapter (LLMRouter / Anthropic
-    direct / vLLM) in a follow-on PR; until then the worker runs but
-    consolidates nothing. The "null" reply path is intentionally a
-    valid JSON shape so the parser path is exercised in production
-    even before a real aux model lands."""
+    wire-up. Stream O PR B replaces this with
+    :class:`~control_plane.credentials_aux_adapter.LLMRouterAuxModelAdapter`
+    in production; this null implementation is preserved as the
+    explicit "no LLM configured" fallback for tests and as a graceful
+    degrade if credentials are unavailable."""
 
-    async def __call__(self, *, prompt: str, model: str | None) -> ConsolidatorLLMReply:
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        tenant_id: UUID,
+    ) -> ConsolidatorLLMReply:
         # Single-item review uses a different shape; we return a "keep"
         # verdict for that path so reviewed_durable counts increment
         # rather than silently dropping the row. Both shapes are
@@ -618,7 +634,7 @@ class MemoryConsolidator:
         summary: ConsolidatorRunSummary,
     ) -> None:
         prompt = _build_cluster_prompt(cluster)
-        reply = await self._aux(prompt=prompt, model=None)
+        reply = await self._aux(prompt=prompt, model=None, tenant_id=tenant_id)
         record_consolidator_llm_tokens(
             model=reply.model or self._default_model,
             input_tokens=reply.input_tokens,
@@ -682,7 +698,7 @@ class MemoryConsolidator:
         summary: ConsolidatorRunSummary,
     ) -> None:
         prompt = _build_single_review_prompt(item)
-        reply = await self._aux(prompt=prompt, model=None)
+        reply = await self._aux(prompt=prompt, model=None, tenant_id=tenant_id)
         record_consolidator_llm_tokens(
             model=reply.model or self._default_model,
             input_tokens=reply.input_tokens,

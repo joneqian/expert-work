@@ -13,10 +13,12 @@ from helix_agent.persistence.models import TenantConfigRow
 from helix_agent.persistence.tenant_config.base import TenantConfigStore
 from helix_agent.persistence.tenant_config.memory import FirstUpsertRequiresDisplayNameError
 from helix_agent.protocol import (
+    CredentialsMode,
     MemoryRecallMode,
     TenantConfigPatch,
     TenantConfigRecord,
     TenantPlan,
+    Tool,
     TriggerFireScanMode,
 )
 
@@ -47,6 +49,9 @@ def _row_to_record(row: TenantConfigRow) -> TenantConfigRecord:
         memory_consolidation_similarity=row.memory_consolidation_similarity,
         memory_purge_enabled=row.memory_purge_enabled,
         memory_purge_min_age_days=row.memory_purge_min_age_days,
+        # Stream O — credentials mode + tool credentials.
+        credentials_mode=cast(CredentialsMode, row.credentials_mode),
+        tool_credentials={cast(Tool, str(k)): str(v) for k, v in row.tool_credentials.items()},
         created_at=row.created_at,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
@@ -124,6 +129,13 @@ class SqlTenantConfigStore(TenantConfigStore):
                     values["memory_purge_enabled"] = patch.memory_purge_enabled
                 if patch.memory_purge_min_age_days is not None:
                     values["memory_purge_min_age_days"] = patch.memory_purge_min_age_days
+                # Stream O — credentials mode + tool credentials.
+                if patch.credentials_mode is not None:
+                    values["credentials_mode"] = patch.credentials_mode
+                if patch.tool_credentials is not None:
+                    values["tool_credentials"] = {
+                        str(k): str(v) for k, v in patch.tool_credentials.items()
+                    }
                 stmt = (
                     pg_insert(TenantConfigRow)
                     .values(**values)
@@ -190,6 +202,17 @@ class SqlTenantConfigStore(TenantConfigStore):
                 existing.memory_purge_enabled = patch.memory_purge_enabled
             if patch.memory_purge_min_age_days is not None:
                 existing.memory_purge_min_age_days = patch.memory_purge_min_age_days
+            # Stream O — credentials mode + tool credentials. The
+            # all-or-nothing invariant for ``mode='tenant'`` is enforced
+            # by the TenantConfigService gate (Mini-ADR O-4), not here
+            # — the store accepts a syntactically valid patch and lets
+            # the service decide validity.
+            if patch.credentials_mode is not None:
+                existing.credentials_mode = patch.credentials_mode
+            if patch.tool_credentials is not None:
+                existing.tool_credentials = {
+                    str(k): str(v) for k, v in patch.tool_credentials.items()
+                }
             existing.updated_at = _utc_now()
             existing.updated_by = actor_id
             await session.commit()

@@ -63,11 +63,13 @@ from control_plane.auth import (
     MTLSVerifier,
     build_mtls_verifier,
 )
+from control_plane.aux_model_adapter import make_llm_router_aux_model
 from control_plane.curation_worker import CurationWorker
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
 from control_plane.manifest import ManifestLoader
 from control_plane.memory import MemoryDLQWorker
 from control_plane.memory_consolidator import (
+    ConsolidatorAuxModel,
     MemoryConsolidator,
     make_consolidator_embedder,
     make_null_consolidator_aux_model,
@@ -115,6 +117,7 @@ from control_plane.skill_activity import ThrottledActivityRecorder
 from control_plane.skill_curator import SkillCurator
 from control_plane.subagent_runtime import make_child_agent_builder
 from control_plane.tenancy import TenantConfigService
+from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
 from helix_agent.common.observability import init_logging, init_tracing
@@ -300,6 +303,10 @@ def create_app(
         Keycloak; production wiring builds one from ``settings`` (C.1).
     """
     resolved_settings = settings or Settings()
+    # Stream O (Mini-ADR O-1) — Platform Catalog startup validation.
+    # Fail fast at create_app rather than at first LLM call so a
+    # mis-configured deployment crashes the pipeline at boot.
+    _validate_platform_catalog(resolved_settings)
     # ADR B-6: in ``sql`` mode every store is Postgres-backed off one
     # RLS-wrapped sessionmaker; the engine is disposed in ``lifespan``.
     # Injected repos still win, so unit tests keep their in-memory
@@ -659,18 +666,46 @@ def create_app(
                 _app.state.memory_dlq_worker = memory_dlq_worker
             # Capability Uplift Sprint #7 (Mini-ADRs U-34 / U-39) —
             # MemoryConsolidator. Starts only when an embedder is
-            # available (needed to embed the consolidated summary text);
-            # ships with a no-op aux model (returns ``false_cluster`` for
-            # every cluster + ``durable`` for every lone item) so the
-            # worker runs end-to-end without consolidating until a real
-            # LLM adapter is wired in a follow-on M1 task.
+            # available (needed to embed the consolidated summary text).
+            #
+            # Stream O Mini-ADR O-6 — the aux model now flows through
+            # the production :class:`LLMRouterAuxModelAdapter`, which
+            # resolves credentials per-tenant via
+            # :class:`CredentialsResolver` (platform / tenant mode).
+            # The deployment falls back to the null adapter when the
+            # default provider has no platform credential and no tenant
+            # has opted into tenant mode for it (operator deploys with
+            # supported_providers but no platform secret → can't reach
+            # the LLM yet → ship the worker idle rather than crash).
             memory_consolidator: MemoryConsolidator | None = None
             if enable_scheduler and embedder is not None:
+                default_provider = resolved_settings.memory_consolidator_default_aux_provider
+                credentials_resolver = CredentialsResolver(
+                    platform_provider_credentials=(resolved_settings.platform_provider_credentials),
+                    platform_tool_credentials=(resolved_settings.platform_tool_credentials),
+                    tenant_config_getter=resolved_tenant_config_service,
+                )
+                _app.state.credentials_resolver = credentials_resolver
+                aux_model: ConsolidatorAuxModel
+                if default_provider in resolved_settings.platform_provider_credentials:
+                    aux_model = make_llm_router_aux_model(
+                        resolver=credentials_resolver,
+                        secret_store=resolved_secret_store,
+                        default_provider=default_provider,
+                        default_model=(resolved_settings.memory_consolidator_default_aux_model),
+                    )
+                else:
+                    logger.warning(
+                        "memory_consolidator.aux_model.fallback_to_null reason="
+                        "platform_credential_missing provider=%s",
+                        default_provider,
+                    )
+                    aux_model = make_null_consolidator_aux_model()
                 memory_consolidator = MemoryConsolidator(
                     memory_store=resolved_memory_store,
                     tenant_config_service=resolved_tenant_config_service,
                     audit_logger=resolved_audit,
-                    aux_model=make_null_consolidator_aux_model(),
+                    aux_model=aux_model,
                     embedder=make_consolidator_embedder(embedder),
                     interval_s=float(resolved_settings.memory_consolidator_interval_s),
                     default_aux_model_name=(
@@ -891,6 +926,49 @@ class _SqlStores:
     feedback: FeedbackStore
     token_usage: TokenUsageStore
     audit_log: AuditLogStore
+
+
+def _validate_platform_catalog(settings: Settings) -> None:
+    """Stream O (Mini-ADR O-1) — Platform Catalog startup validation.
+
+    Three checks, fail-fast on any:
+    1. Every entry in ``supported_providers`` has a matching
+       ``platform_provider_credentials`` entry.
+    2. Every entry in ``supported_tools`` has a matching
+       ``platform_tool_credentials`` entry.
+    3. No extraneous credential entries (would point at a typo in env).
+
+    Pydantic already validates that the Literal values are in the
+    catalog; this checks the cross-field consistency.
+    """
+    supported_provs = set(settings.supported_providers)
+    cred_provs = set(settings.platform_provider_credentials)
+    missing_provs = supported_provs - cred_provs
+    extra_provs = cred_provs - supported_provs
+    supported_tools = set(settings.supported_tools)
+    cred_tools = set(settings.platform_tool_credentials)
+    missing_tools = supported_tools - cred_tools
+    extra_tools = cred_tools - supported_tools
+    if missing_provs or extra_provs or missing_tools or extra_tools:
+        details = []
+        if missing_provs:
+            details.append(
+                f"providers in supported_providers without credentials: {sorted(missing_provs)}"
+            )
+        if extra_provs:
+            details.append(
+                f"platform_provider_credentials with providers not in "
+                f"supported_providers: {sorted(extra_provs)}"
+            )
+        if missing_tools:
+            details.append(f"tools in supported_tools without credentials: {sorted(missing_tools)}")
+        if extra_tools:
+            details.append(
+                f"platform_tool_credentials with tools not in supported_tools: "
+                f"{sorted(extra_tools)}"
+            )
+        msg = "Platform Catalog mismatch — " + "; ".join(details)
+        raise RuntimeError(msg)
 
 
 def _build_sql_stores(settings: Settings) -> _SqlStores:

@@ -679,15 +679,15 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 > 3. **Provider/Tool 白名单** — 租户在 tenant mode 下只能给平台已支持的配凭证
 > 4. **凭证缺失硬失败** — tenant mode 缺凭证 → 401 fail-fast，不静默回退
 
-- [ ] **O.1 Platform Catalog** — settings 加 `supported_providers: list[Provider]` + `platform_provider_credentials` + `supported_tools` + `platform_tool_credentials`；启动期 fail-fast 校验。**Mini-ADR O-1**
-- [ ] **O.2 tenant_config schema 扩展** — 加 `credentials_mode: Literal["platform","tenant"]` + rename `model_credentials_ref` → `provider_credentials` + 新加 `tool_credentials`；migration 0047；DB CHECK + JSONB 校验。**Mini-ADR O-2**
-- [ ] **O.3 CredentialsResolver** — 新建 `helix-common.credentials.CredentialsResolver`；`resolve_provider(tenant_id, provider)` / `resolve_tool(tenant_id, tool)`；mode 决策 + tenant mode 缺凭证 raise。**Mini-ADR O-3**
-- [ ] **O.4 All-or-nothing 校验（2 gates）** — `TenantConfigService.upsert` 切换 mode 时校验已用 provider/tool 凭证完整性（403 + 缺失列表）+ agent manifest publish 时 provider 白名单校验（403）。**Mini-ADR O-4**
-- [ ] **O.5 Legacy settings 派生** — `embedding_api_key_ref` / `rerank_api_key_ref` / `tavily_api_key_ref` 改派生自 Platform Catalog，1 个 minor 版本作 fallback + deprecation warning。**Mini-ADR O-5**
-- [ ] **O.6 Caller 集成（PR 1 范围）** — consolidator aux model：新建 `LLMRouterAuxModelAdapter` 走 CredentialsResolver + LLMRouter，替换 Sprint #7 `_NullConsolidatorAuxModel`；embedder / reranker / web_search 推 PR 2（per-tenant 改造影响面大）。**Mini-ADR O-6**
-- [ ] **O.7 Admin UI Credentials 面板** — Settings 加 Credentials 子 tab：mode 切换（带 dry-run）+ Provider Credentials 表 + Tool Credentials 表；Playwright e2e。**Mini-ADR O-7**
-- [ ] **O.8 Audit + 可观测** — 4 audit actions（CREDENTIALS_MODE_CHANGED / PROVIDER_CREDENTIALS_UPDATED / TOOL_CREDENTIALS_UPDATED / CREDENTIALS_RESOLVE_FAILED）双 Literal 同步 + 5 metrics + 3 recording rules + 2 alerts。**Mini-ADR O-8**
-- [ ] **O.9 runbook** — `docs/runbooks/credentials.md`：平台凭证配置 / 租户 mode 切换流程 / 401 诊断 / Sprint #7 aux wire 步骤
+- [x] **O.1 Platform Catalog** — settings 加 `supported_providers: list[Provider]` + `platform_provider_credentials` + `supported_tools` + `platform_tool_credentials`；启动期 fail-fast 校验（`_validate_platform_catalog` in app.py）。**Mini-ADR O-1**。**2026-05-28 完成（PR #?）**
+- [x] **O.2 tenant_config schema 扩展** — 加 `credentials_mode: Literal["platform","tenant"]` + `tool_credentials` JSONB；migration 0047；DB CHECK；**保留 `model_credentials_ref` 字段名不变**（rename 改动面 7+ 文件含 admin-ui，业务价值低于代价，per [memory:business-value-over-implementation-cost]）。**Mini-ADR O-2**。**2026-05-28 完成**
+- [x] **O.3 CredentialsResolver** — 新建 `helix-common.credentials.CredentialsResolver`；`resolve_provider(tenant_id, provider)` / `resolve_tool(tenant_id, tool)`；mode 决策 + tenant mode 缺凭证 raise + no silent platform fallback。**Mini-ADR O-3**。**2026-05-28 完成**
+- [x] **O.4 All-or-nothing 校验（2 gates）** — `_validate_credentials_mode_switch` 在 PUT `/v1/tenants/{id}/config` 切换 mode 时校验已用 provider/tool 凭证完整性（403 `CREDENTIALS_MODE_SWITCH_INCOMPLETE` + missing 列表）+ agent manifest publish 时 provider 白名单校验（403 `MANIFEST_PROVIDER_NOT_SUPPORTED`）。**Mini-ADR O-4**。**2026-05-28 完成**
+- [x] **O.5 Legacy settings deprecation 标注** — `embedding_api_key_ref` / `rerank_api_key_ref` / `tavily_api_key_ref` 字段加 deprecation 注释 + 指明 platform_*_credentials 迁移路径；callers 仍读 legacy 字段（per-tenant 改造留 PR 2，影响面大）。**Mini-ADR O-5**。**2026-05-28 完成**
+- [x] **O.6 Caller 集成（PR 1 范围）** — consolidator aux model：新建 `LLMRouterAuxModelAdapter`（`control_plane.aux_model_adapter`）走 CredentialsResolver + `build_llm_router`，替换 Sprint #7 `_NullConsolidatorAuxModel`；`ConsolidatorAuxModel.__call__` 加 `tenant_id` 参数；wire 在 app.py（默认 provider 缺凭证时降级 null + log warning）。**Mini-ADR O-6**。**2026-05-28 完成**
+- [ ] **O.7 Admin UI Credentials 面板** — **推到 Stream O PR 2**（PR B 范围聚焦 backend；Admin UI 留到 callers 全迁移完一起做，避免 UI 反复迭代）。**Mini-ADR O-7**
+- [x] **O.8 Audit + 可观测** — 4 audit actions（CREDENTIALS_MODE_CHANGED / PROVIDER_CREDENTIALS_UPDATED / TOOL_CREDENTIALS_UPDATED / CREDENTIALS_RESOLVE_FAILED）；5 metrics + gauge；3 recording rules（resolve_failure_rate + tenant_mode_adoption_ratio + legacy_fallback_rate）+ 2 alerts（CredentialsResolveFailureSpike P1 + LegacyCredentialsFallbackPresent P3）。**Mini-ADR O-8**。**2026-05-28 完成**
+- [x] **O.9 runbook** — `docs/runbooks/credentials.md` 7 节（概念 / 平台 setup / 2 alert 诊断 / mode 切换流程 / Sprint #7 aux wire / M1 follow-ups）。**2026-05-28 完成**
 
 **Stream O Verification**：8 项按零债 6 条核验；Platform Catalog 启动校验在 fail-fast 路径上不绕过；CredentialsResolver 双 mode 4 路径 fixture 全过；mode 切换缺凭证返回 403 + 完整 missing 列表；agent manifest publish 引用未支持 provider 立刻 reject；Sprint #7 consolidator aux 在 dogfood 启动前真接 LLMRouter（M1 dogfood 凝结数据采集前提）。
 

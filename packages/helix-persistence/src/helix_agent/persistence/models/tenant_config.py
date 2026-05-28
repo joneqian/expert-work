@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, Text, func, text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -89,6 +89,15 @@ class TenantConfigRow(Base):
     )
     memory_purge_min_age_days: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("30"), default=30
+    )
+    # Stream O — Mini-ADR O-2. Credentials mode + tool API key map.
+    # CHECK constraint in migration 0047 mirrors the Python
+    # ``CredentialsMode`` Literal.
+    credentials_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default=text("'platform'"), default="platform"
+    )
+    tool_credentials: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

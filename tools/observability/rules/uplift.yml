@@ -213,6 +213,37 @@ groups:
         expr: |
           sum(increase(helix_uplift_consolidator_llm_tokens_total{kind="input"}[1d]))
 
+  - name: helix_uplift_credentials
+    interval: 60s
+    rules:
+      # Stream O — Mini-ADR O-8. Credentials management surface.
+      #   * credentials_resolve_failure_rate:5m{role,key,mode} — fail-fast
+      #     401 rate per (provider/tool, mode). Spikes mean tenant mode +
+      #     missing cred OR platform cred misconfigured.
+      #   * credentials_tenant_mode_adoption_ratio:1d — fraction of
+      #     tenants on tenant credentials_mode; tracks Stream O rollout.
+      #   * legacy_credentials_fallback_rate:1d{role} — Stream O
+      #     transition-period signal; should drop to zero after PR 2.
+      - record: helix:uplift:credentials_resolve_failure_rate:5m
+        expr: |
+          sum by (role, key, mode) (
+            rate(helix_uplift_credentials_resolve_total{result!="ok"}[5m])
+          )
+
+      - record: helix:uplift:credentials_tenant_mode_adoption_ratio:1d
+        expr: |
+          helix_uplift_credentials_tenant_mode_count
+          /
+          clamp_min(
+            helix_uplift_credentials_tenant_mode_count
+            + count(count_over_time(helix_uplift_credentials_resolve_total{mode="platform"}[1d])),
+            1
+          )
+
+      - record: helix:uplift:legacy_credentials_fallback_rate:1d
+        expr: |
+          sum by (role) (rate(helix_uplift_legacy_credentials_fallback_total[1d]))
+
   - name: helix_uplift_mcp_client
     interval: 30s
     rules:
@@ -480,3 +511,32 @@ groups:
           summary: "MemoryConsolidator anti-mislearn rejection > 50% of decisions"
           description: "Rejection ratio is {{ $value }} sustained 1d — either upstream writeback is leaking noise (good catch) or anti-mislearn prompt regressed. See runbook § 6."
           runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/memory-consolidator.md#section-6"
+
+      # Stream O — Credentials.
+      # P1 — sustained 401 fail-fast rate. Either tenant mode + missing
+      # cred (user misconfig — they need to add credentials or switch
+      # back to platform mode) or platform-side outage (platform cred
+      # was revoked). Runbook walks the {{ $labels.mode }} split.
+      - alert: HelixUpliftCredentialsResolveFailureSpike
+        expr: helix:uplift:credentials_resolve_failure_rate:5m > 0.1
+        for: 10m
+        labels:
+          severity: P1
+        annotations:
+          summary: "Credentials resolve failures sustained on {{ $labels.role }}/{{ $labels.key }}"
+          description: "{{ $value }} missing-cred lookups/sec sustained 10m for {{ $labels.role }}={{ $labels.key }} in mode={{ $labels.mode }}. See runbook § 3."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/credentials.md#section-3"
+
+      # P3 — Stream O transition-period signal. After PR 2 wires the
+      # remaining callers (embedder / reranker / web_search) the legacy
+      # fallback should reach zero. If still non-zero 30d after PR 2
+      # merge, the migration regressed somewhere.
+      - alert: HelixUpliftLegacyCredentialsFallbackPresent
+        expr: helix:uplift:legacy_credentials_fallback_rate:1d > 0
+        for: 1d
+        labels:
+          severity: P3
+        annotations:
+          summary: "Stream O legacy credential fallback still triggering for {{ $labels.role }}"
+          description: "Migrate {{ $labels.role }} caller to CredentialsResolver and remove legacy settings env. See runbook § 4."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/credentials.md#section-4"

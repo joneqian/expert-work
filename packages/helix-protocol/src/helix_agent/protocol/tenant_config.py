@@ -26,7 +26,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from helix_agent.protocol.provider_catalog import Tool
+
 __all__ = [
+    "CredentialsMode",
     "MemoryRecallMode",
     "TenantConfigPatch",
     "TenantConfigRecord",
@@ -48,6 +51,18 @@ TriggerFireScanMode = Literal["warn", "block"]
 # pgvector cosine path (e.g. for workloads where the eval baseline
 # regressed against expectations).
 MemoryRecallMode = Literal["hybrid", "vector"]
+
+# Stream O — Mini-ADR O-2. Tenant credentials mode.
+# ``platform`` (default): all LLM provider + tool API key lookups resolve
+# to the platform-level secret_refs. ``model_credentials_ref`` /
+# ``tool_credentials`` fields are preserved (admin can pre-stage) but
+# ignored at resolve time.
+# ``tenant``: all lookups resolve to the tenant's own secret_refs.
+# Switching to ``tenant`` is gated by an all-or-nothing API check —
+# every provider / tool currently referenced by the tenant's agents
+# must have a configured credential, or the switch returns 403.
+# See ``docs/streams/STREAM-O-DESIGN.md`` § 2.4 (Mini-ADR O-4).
+CredentialsMode = Literal["platform", "tenant"]
 
 
 class TenantPlan(StrEnum):
@@ -148,6 +163,15 @@ class TenantConfigRecord(BaseModel):
     memory_purge_min_age_days: int = Field(
         default=30, ge=_MEMORY_PURGE_MIN_DAYS, le=_MEMORY_PURGE_MAX_DAYS
     )
+    # Stream O — Mini-ADR O-2. Credentials management.
+    # ``credentials_mode`` decides whether LLM provider + tool API key
+    # lookups resolve via the platform's secret_refs or the tenant's
+    # own. ``tool_credentials`` is the per-tool counterpart to the
+    # pre-existing ``model_credentials_ref`` (kept under its legacy name
+    # to avoid a wide rename churn — see PR description for the
+    # business-value vs implementation-cost trade-off).
+    credentials_mode: CredentialsMode = "platform"
+    tool_credentials: dict[Tool, str] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     updated_by: str
@@ -214,3 +238,6 @@ class TenantConfigPatch(BaseModel):
     memory_purge_min_age_days: int | None = Field(
         default=None, ge=_MEMORY_PURGE_MIN_DAYS, le=_MEMORY_PURGE_MAX_DAYS
     )
+    # Stream O — Mini-ADR O-2. Credentials patch fields.
+    credentials_mode: CredentialsMode | None = None
+    tool_credentials: dict[Tool, str] | None = None

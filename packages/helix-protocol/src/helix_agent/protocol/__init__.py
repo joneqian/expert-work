@@ -85,6 +85,12 @@ from helix_agent.protocol.knowledge import (
 from helix_agent.protocol.memory_item import MemoryItem
 from helix_agent.protocol.multimodal import ImageRef, parse_image_ref
 from helix_agent.protocol.plan import Plan, PlanStep
+from helix_agent.protocol.provider_catalog import (
+    PROVIDER_CATALOG,
+    TOOL_CATALOG,
+    Provider,
+    Tool,
+)
 from helix_agent.protocol.quota import (
     CheckRequest,
     CheckResult,
@@ -126,6 +132,7 @@ from helix_agent.protocol.subagent import (
     SubagentStatus,
 )
 from helix_agent.protocol.tenant_config import (
+    CredentialsMode,
     MemoryRecallMode,
     TenantConfigPatch,
     TenantConfigRecord,
@@ -151,8 +158,10 @@ __all__ = [
     "DEFAULT_CHUNK_OVERLAP_TOKENS",
     "MAX_RESULT_EXCERPT_CHARS",
     "PLATFORM_SCOPE_ROLES",
+    "PROVIDER_CATALOG",
     "SKILL_REF_PATTERN",
     "TENANT_SCOPE_ROLES",
+    "TOOL_CATALOG",
     "AgentMetadata",
     "AgentSpec",
     "AgentSpecBody",
@@ -185,6 +194,7 @@ __all__ = [
     "CheckResult",
     "CodePackageSpec",
     "CommitRequest",
+    "CredentialsMode",
     "CurationCandidateRecord",
     "CurationSignal",
     "CustomReminderSpec",
@@ -219,6 +229,7 @@ __all__ = [
     "PlanStep",
     "PolicySpec",
     "Principal",
+    "Provider",
     "QuotaDimension",
     "QuotaPurpose",
     "Reflection",
@@ -254,6 +265,7 @@ __all__ = [
     "ThreadMeta",
     "ThreadStatus",
     "TokenReservationRecord",
+    "Tool",
     "ToolSpecEntry",
     "TrajectoryOutcome",
     "TriggerFireScanMode",

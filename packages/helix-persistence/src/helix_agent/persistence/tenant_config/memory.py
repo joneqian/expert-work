@@ -87,6 +87,11 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                     row_kwargs["memory_purge_enabled"] = patch.memory_purge_enabled
                 if patch.memory_purge_min_age_days is not None:
                     row_kwargs["memory_purge_min_age_days"] = patch.memory_purge_min_age_days
+                # Stream O — credentials mode + tool credentials.
+                if patch.credentials_mode is not None:
+                    row_kwargs["credentials_mode"] = patch.credentials_mode
+                if patch.tool_credentials is not None:
+                    row_kwargs["tool_credentials"] = dict(patch.tool_credentials)
                 row = TenantConfigRecord(**row_kwargs)  # type: ignore[arg-type]
             else:
                 row = existing.model_copy(
@@ -116,6 +121,9 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                             ),
                             "memory_purge_enabled": patch.memory_purge_enabled,
                             "memory_purge_min_age_days": patch.memory_purge_min_age_days,
+                            # Stream O — credentials mode + tool credentials.
+                            "credentials_mode": patch.credentials_mode,
+                            "tool_credentials": patch.tool_credentials,
                         }.items()
                         if v is not None
                     }

@@ -66,7 +66,13 @@ class _ScriptedAuxModel:
         self._replies = list(replies)
         self.calls: list[str] = []
 
-    async def __call__(self, *, prompt: str, model: str | None) -> ConsolidatorLLMReply:
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        tenant_id: UUID,
+    ) -> ConsolidatorLLMReply:
         self.calls.append(prompt)
         text = self._replies.pop(0) if self._replies else "{}"
         return ConsolidatorLLMReply(
@@ -193,7 +199,7 @@ def test_parse_single_reply_invalid_category() -> None:
 @pytest.mark.asyncio
 async def test_null_aux_model_cluster_path_parses() -> None:
     null = make_null_consolidator_aux_model()
-    reply = await null(prompt='{"items":[]}', model=None)
+    reply = await null(prompt='{"items":[]}', model=None, tenant_id=_TENANT)
     verdict = _parse_cluster_reply(reply.text)
     assert verdict is not None
     assert verdict.keep is False
@@ -203,7 +209,7 @@ async def test_null_aux_model_cluster_path_parses() -> None:
 @pytest.mark.asyncio
 async def test_null_aux_model_single_path_parses() -> None:
     null = make_null_consolidator_aux_model()
-    reply = await null(prompt='{"is_noise": true}', model=None)
+    reply = await null(prompt='{"is_noise": true}', model=None, tenant_id=_TENANT)
     verdict = _parse_single_reply(reply.text)
     assert verdict is not None
     assert verdict.is_noise is False

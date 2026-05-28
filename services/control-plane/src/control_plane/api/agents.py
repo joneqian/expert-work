@@ -36,8 +36,16 @@ from control_plane.tenant_scope import (
     ensure_tenant_scope,
 )
 from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.common.uplift_metrics import record_manifest_provider_rejected
 from helix_agent.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
-from helix_agent.protocol import AgentSpecRecord, AgentSpecStatus, AuditAction, AuditResult
+from helix_agent.protocol import (
+    AgentSpec,
+    AgentSpecRecord,
+    AgentSpecStatus,
+    AuditAction,
+    AuditResult,
+    Provider,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 
 logger = logging.getLogger("helix.control_plane.agents")
@@ -79,6 +87,31 @@ def _get_audit(request: Request) -> AuditLogger:
 
 def _get_loader(request: Request) -> ManifestLoader:
     return request.app.state.manifest_loader  # type: ignore[no-any-return]
+
+
+def _collect_manifest_providers(spec: AgentSpec) -> set[Provider]:
+    """Stream O Mini-ADR O-4 — collect every provider this manifest
+    transitively references for the publish-time whitelist gate.
+
+    Mirrors :func:`control_plane.api.tenant_config._collect_used_providers`
+    but operates on a single :class:`AgentSpec` rather than an iterable
+    of stored records. Includes the primary model + its fallback chain,
+    vision model + its fallbacks, and the memory_consolidation aux
+    model (Sprint #7).
+    """
+    referenced: set[Provider] = set()
+    stack = [spec.spec.model]
+    if spec.spec.vision is not None:
+        stack.append(spec.spec.vision.model)
+        stack.extend(spec.spec.vision.fallbacks)
+    consolidation = spec.spec.policies.memory_consolidation
+    if consolidation.aux_model is not None:
+        stack.append(consolidation.aux_model)
+    while stack:
+        current = stack.pop()
+        referenced.add(current.provider)  # type: ignore[arg-type]
+        stack.extend(current.fallback)
+    return referenced
 
 
 def _envelope_error(code: str, message: str, status_code: int) -> JSONResponse:
@@ -193,6 +226,44 @@ def build_agents_router() -> APIRouter:
                 trace_id=trace_id,
             )
             return _manifest_error_to_response(exc)
+
+        # Stream O Mini-ADR O-4 — manifest publish provider whitelist gate.
+        # Reject if the spec references a provider the platform does not
+        # support. Runtime LLMRouter would also reject (build_llm_router
+        # uses these providers), but the manifest-time gate gives a
+        # clean 403 with the offending provider list rather than a
+        # late agent-build error.
+        #
+        # Empty ``supported_providers`` = deployment hasn't opted into
+        # Stream O yet (legacy / dev mode); the gate is a no-op so
+        # existing manifests keep working. Operators opt in by setting
+        # ``HELIX_AGENT_SUPPORTED_PROVIDERS`` env, which activates the
+        # whitelist enforcement.
+        settings = request.app.state.settings
+        supported = set(settings.supported_providers)
+        referenced = _collect_manifest_providers(spec)
+        invalid = sorted(referenced - supported) if supported else []
+        if invalid:
+            for provider in invalid:
+                record_manifest_provider_rejected(provider=provider)
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action=AuditAction.MANIFEST_WRITE,
+                resource_type="manifest",
+                resource_id=f"{spec.metadata.name}/{spec.metadata.version}",
+                result=AuditResult.DENIED,
+                reason="provider_not_supported",
+                trace_id=trace_id,
+                details={"unsupported_providers": invalid},
+            )
+            return _envelope_error(
+                "MANIFEST_PROVIDER_NOT_SUPPORTED",
+                f"manifest references providers not in the platform's "
+                f"supported_providers list: {invalid}",
+                403,
+            )
 
         try:
             record = await repo.create(

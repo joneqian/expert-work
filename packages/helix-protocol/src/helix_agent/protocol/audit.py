@@ -61,6 +61,19 @@ class AuditAction(StrEnum):
     # tenant_config (C.7)
     TENANT_CONFIG_READ = "tenant_config:read"
     TENANT_CONFIG_WRITE = "tenant_config:write"
+    # tenant credentials — Stream O Mini-ADR O-8.
+    # MODE_CHANGED is emitted by the credentials-mode switch endpoint
+    # (audit details ``from`` / ``to``); PROVIDER_CREDENTIALS_UPDATED
+    # and TOOL_CREDENTIALS_UPDATED are emitted whenever the corresponding
+    # dict is mutated via PUT; RESOLVE_FAILED is emitted by the
+    # CredentialsResolver when a tenant in ``tenant`` mode looks up a
+    # provider / tool with no configured credential (a 401 fail-fast
+    # signal — not an attack, but a misconfiguration the runbook
+    # walks through).
+    CREDENTIALS_MODE_CHANGED = "credentials:mode_changed"
+    PROVIDER_CREDENTIALS_UPDATED = "credentials:provider_updated"
+    TOOL_CREDENTIALS_UPDATED = "credentials:tool_updated"
+    CREDENTIALS_RESOLVE_FAILED = "credentials:resolve_failed"
     # sandbox
     SANDBOX_ACQUIRED = "sandbox:acquired"
     SANDBOX_FORCE_DESTROY = "sandbox:force_destroy"
