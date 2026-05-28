@@ -123,6 +123,10 @@ ResourceType = Literal[
     "feedback",
     "image_upload",  # Stream J.6.补强-2 — Mini-ADR J-31
     "skill",  # Stream J.7a — Mini-ADR J-23
+    # Capability Uplift Sprint #3 (Mini-ADR U-17 supporting files).
+    # Separate resource type — supporting-files API has its own surface
+    # under /v1/skills/{id}/versions/{v}/supporting-files/{path}.
+    "skill_supporting_file",
     "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42
     "eval_dataset",  # Stream J.12 — Mini-ADR J-43
     "curation_candidate",  # Stream J.12 — Mini-ADR J-43

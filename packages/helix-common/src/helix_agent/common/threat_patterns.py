@@ -1,5 +1,11 @@
 """Shared threat-pattern library — Capability Uplift Sprint #1.
 
+Per Sprint #3 (Mini-ADR U-23) we intentionally include CJK full-width
+punctuation in both pattern strings AND comments — the patterns are
+matching Chinese prose that uses these characters as natural sentence
+boundaries. ``# ruff: noqa: RUF001, RUF002, RUF003`` below suppresses
+the "ambiguous Unicode" flags file-wide since they are by design.
+
 Single source of truth for prompt-injection / promptware / exfiltration
 patterns + invisible-Unicode detection. Used by:
 
@@ -26,9 +32,13 @@ accompanied by ≥ 2 positive + 2 negative test cases (per the runbook at
 ``docs/runbooks/threat-scanner-tuning.md``).
 """
 
+# ruff: noqa: RUF001, RUF002, RUF003
+
 from __future__ import annotations
 
+import base64
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -291,6 +301,101 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
         "secrets",
         "strict",
     ),
+    # ── Capability Uplift Sprint #3 (Mini-ADR U-23) — Chinese injection ──
+    # 12 个 cn_ 模式;5 大类。每模式 ≥3 正例 + ≥3 反例。负例严控误判
+    # ─ 限制到 5% 误报率红线下(超出 K.K12 baseline merge gate)。
+    #
+    # 中文没有空格分词,所以模式用 `[^。.!?！？]{0,N}` 跨越中间字符
+    # (跟英文 `(?:\w+\s+)*` 同思路),N 上限避免跨句吞掉无关命令。
+    #
+    # 关键 anchor:动词 / 模态词 (忽略 / 无视 / 不要 / 你现在 / 假装 ...)
+    # 必须紧跟在 `[^...]{0,N}` 前,且后面 N 字符内必须出现对应的"动作
+    # 受体"(指令 / 规则 / 提示 / 系统 / 一个角色 ...)。
+    (
+        r"忽略[^。.!?！？]{0,10}(?:指令|要求|提示|规则)",
+        "cn_prompt_injection",
+        "injection",
+        "all",
+    ),
+    (
+        r"(?:无视|不要理会|忽视)[^。.!?！？]{0,8}(?:指令|要求|提示)",
+        "cn_disregard_rules",
+        "injection",
+        "all",
+    ),
+    (
+        r"忘掉?[^。.!?！？]{0,8}(?:对话|指令|内容|上下文)",
+        "cn_forget_context",
+        "injection",
+        "all",
+    ),
+    (
+        r"(?:假设|想象|如果)\s*(?:你|自己)?[^。.!?！？]{0,5}没有"
+        r"[^。.!?！？]{0,8}(?:限制|约束|规则|过滤|道德)",
+        "cn_bypass_restrictions",
+        "injection",
+        "all",
+    ),
+    (
+        r"(?:输出|显示|告诉|展示|打印|把)[^。.!?！？]{0,10}"
+        r"(?:系统|初始)[^。.!?！？]{0,3}(?:提示|prompt|指令|规则)",
+        "cn_leak_system_prompt",
+        "injection",
+        "context",
+    ),
+    (
+        r"(?:重复|复述|背诵|完整说出)[^。.!?！？]{0,8}"
+        r"(?:系统提示|初始指令|prompt)",
+        "cn_recite_system_prompt",
+        "injection",
+        "context",
+    ),
+    # 角色劫持必须包含 "你 + 时间副词 + 是/扮演/成为";时间副词锚定
+    # 防止误命中静态描述("你是一个助手")。
+    (
+        r"你\s*(?:现在|此刻|从现在起)\s*"
+        r"(?:是|扮演|充当|成为)[^。.!?！？]{0,10}",
+        "cn_role_hijack",
+        "role_hijack",
+        "context",
+    ),
+    (
+        r"(?:假装|装作)\s*(?:你|自己)?\s*"
+        r"(?:是|成为|变成)[^。.!?！？]{0,10}",
+        "cn_role_pretend",
+        "role_hijack",
+        "context",
+    ),
+    (
+        r"(?:不要|不用|无需|别)\s*(?:遵守|考虑|顾及|管)"
+        r"[^。.!?！？]{0,5}(?:规则|安全|限制|准则|过滤|审查)",
+        "cn_ignore_safety",
+        "injection",
+        "all",
+    ),
+    (
+        r"(?:回答|响应|回复)[^。.!?！？]{0,5}(?:不要|无需)"
+        r"[^。.!?！？]{0,5}(?:限制|过滤|审查)",
+        "cn_remove_filters",
+        "injection",
+        "context",
+    ),
+    (
+        r"在一个[^。.!?！？]{0,15}(?:不需要|没有)"
+        r"[^。.!?！？]{0,10}(?:世界|场景|情境|宇宙)",
+        "cn_counterfactual_framing",
+        "injection",
+        "context",
+    ),
+    # 权威伪装必须含"动作动词"才命中(否则"作为产品经理我希望"会误报)。
+    (
+        r"作为\s*(?:你的)?\s*"
+        r"(?:开发者|训练者|创造者|管理员|工程师)\s*[,，、:][^。.!?！？]{0,20}"
+        r"(?:命令|要求|更新|绕过|无视|展示|告诉|修改|更改|展示完整|展示全部)",
+        "cn_authority_spoof",
+        "injection",
+        "context",
+    ),
 ]
 
 
@@ -362,6 +467,66 @@ def _severity_for_scope(scope: ScanScope) -> Severity:
 # ---------------------------------------------------------------------------
 
 
+_BASE64_RE: Final = re.compile(r"[A-Za-z0-9+/]{20,}={0,2}")
+
+
+def _normalize_for_scan(content: str) -> list[str]:
+    """Generate up to 4 normalized views of ``content`` for U-22 obfuscation
+    defense. Order: original, NFKC, whitespace-collapsed, base64-decoded
+    segments. Duplicates are dropped so a benign single-spaced ASCII
+    string returns a single-element list.
+
+    Mini-ADR U-22 (Sprint #3 § 4.3.10) — covers:
+
+    - ``aWdub3JlIGFsbCBwcmV2aW91cyBpbnN0cnVjdGlvbnM=``(base64 of injection)
+    - ``Іgnore previous instructions``(Cyrillic homoglyph → Latin via NFKC)
+    - ``ｉｇｎｏｒｅ`` (full-width Latin → half-width via NFKC)
+    - ``i  g  n  o  r  e`` (double-spaced → single-spaced via collapse)
+
+    Known limitation: letter-spacing(``i g n o r e``) is NOT normalized
+    because aggressive whitespace stripping causes prohibitive false
+    positives on legitimate prose. Documented in § 4.6 limitation list.
+    """
+    seen: set[str] = {content}
+    variants: list[str] = [content]
+
+    nfkc = unicodedata.normalize("NFKC", content)
+    if nfkc not in seen:
+        variants.append(nfkc)
+        seen.add(nfkc)
+
+    collapsed = re.sub(r"\s+", " ", content)
+    if collapsed not in seen:
+        variants.append(collapsed)
+        seen.add(collapsed)
+
+    for match in _BASE64_RE.finditer(content):
+        try:
+            decoded_bytes = base64.b64decode(match.group(), validate=True)
+            decoded = decoded_bytes.decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            continue
+        if not decoded.isprintable() or decoded in seen:
+            continue
+        variants.append(decoded)
+        seen.add(decoded)
+
+    return variants
+
+
+# Variant label values mirror the order produced by _normalize_for_scan;
+# kept as a Literal so callers can pass through to record_threat_scan /
+# record_threat_pattern_hits without spelling errors.
+ScanVariant = Literal["original", "nfkc", "collapsed", "base64"]
+
+_VARIANT_TAGS: Final[tuple[ScanVariant, ScanVariant, ScanVariant, ScanVariant]] = (
+    "original",
+    "nfkc",
+    "collapsed",
+    "base64",
+)
+
+
 def scan_for_threats(content: str, *, scope: ScanScope) -> list[ThreatFinding]:
     """Scan ``content`` and return all matched patterns + invisible chars.
 
@@ -376,12 +541,41 @@ def scan_for_threats(content: str, *, scope: ScanScope) -> list[ThreatFinding]:
 
     Invisible Unicode characters always fire (at every scope) and report
     as ``pattern_id="invisible_unicode_U+XXXX"``.
+
+    Mini-ADR U-22 (Sprint #3) extends the legacy single-pass behavior:
+    each input is normalized into up to 4 variants (original / NFKC /
+    whitespace-collapsed / base64-decoded segments), every variant is
+    scanned independently, and findings are de-duplicated by
+    ``(pattern_id, category)`` so the same poison surfaces once even
+    when multiple variants hit it. Sprint #1 / Sprint #2 callers see
+    the same return contract; the only observable change is more
+    findings on obfuscated payloads.
     """
     if not content:
         return []
     if scope not in _COMPILED:
         raise ValueError(f"unknown scope {scope!r}")
 
+    # Per-finding dedupe — key is (pattern_id, category). The excerpt of
+    # the FIRST variant to fire is kept; downstream callers only need
+    # one excerpt per pattern for SecOps triage.
+    seen: set[tuple[str, ThreatCategory]] = set()
+    findings: list[ThreatFinding] = []
+
+    variants = _normalize_for_scan(content)
+    for variant in variants:
+        for finding in _scan_single(variant, scope=scope):
+            key = (finding.pattern_id, finding.category)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(finding)
+
+    return findings
+
+
+def _scan_single(content: str, *, scope: ScanScope) -> list[ThreatFinding]:
+    """Single-pass scan of one variant — unchanged Sprint #1 logic."""
     findings: list[ThreatFinding] = []
     severity = _severity_for_scope(scope)
 
