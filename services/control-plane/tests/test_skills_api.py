@@ -275,14 +275,18 @@ async def test_zip_import_existing_skill_adds_version(setup: Setup) -> None:
 
 @pytest.mark.asyncio
 async def test_zip_import_rejects_unknown_entry(setup: Setup) -> None:
-    """ZIP entries outside the whitelist trip the SkillZipError guard."""
+    """Sprint #3 (Mini-ADR U-19): legacy layout rejects stray entries.
+
+    Sprint #3 also enforces Oracle defense (Mini-ADR U-18) — the
+    user-facing message is generic; the real reason is on the audit row.
+    """
     client, _ = setup
     blob = _build_zip(extra={"scripts/run.sh": b"#!/bin/sh"})
     response = await client.post(
         "/v1/skills/import", files={"file": ("bad.skill", blob, "application/zip")}
     )
     assert response.status_code == 400
-    assert "whitelist" in response.json()["detail"]
+    assert "invalid skill package" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 from helix_agent.persistence.skill.base import (
@@ -139,6 +140,10 @@ class InMemorySkillStore(SkillStore):
         category: str | None = None,
         required_models: Sequence[str] = (),
         authored_by: str = "human",
+        supporting_files: dict[str, dict[str, Any]] | None = None,
+        lazy_load: bool = False,
+        content_hash: bytes = b"",
+        high_risk: bool = False,
     ) -> SkillVersion:
         parent = await self.get_skill(skill_id=skill_id, tenant_id=tenant_id)
         if parent is None:
@@ -148,6 +153,11 @@ class InMemorySkillStore(SkillStore):
         if authored_by not in {"human", "agent"}:
             msg = f"authored_by must be 'human' or 'agent' (got {authored_by!r})"
             raise ValueError(msg)
+        from helix_agent.protocol.skill import SkillSupportingFile  # local to avoid cycle
+
+        typed_supporting = {
+            path: SkillSupportingFile(**meta) for path, meta in (supporting_files or {}).items()
+        }
         version = SkillVersion(
             id=version_id,
             skill_id=skill_id,
@@ -159,6 +169,10 @@ class InMemorySkillStore(SkillStore):
             category=category if category is not None else parent.category,
             required_models=tuple(required_models),
             authored_by=authored_by,  # type: ignore[arg-type]
+            supporting_files=typed_supporting,
+            lazy_load=lazy_load,
+            content_hash=content_hash,
+            high_risk=high_risk,
             created_at=now,
         )
         self._versions.append(version)

@@ -1,7 +1,8 @@
-# Capability Uplift Sprint #1 + #2 + #5 — threat scanner + memory
-# poisoning + MCP client HTTP/SSE transport recording rules and alerts.
+# Capability Uplift Sprint #1 + #2 + #3 + #5 + #6 + #8 — threat scanner
+# + memory poisoning + skill packaging + MCP client HTTP/SSE transport
+# + hybrid retrieval + Anthropic cache anchor recording rules and alerts.
 #
-# See docs/streams/STREAM-UPLIFT-DESIGN.md § 2.6 + § 3.7 + § 6.7.
+# See docs/streams/STREAM-UPLIFT-DESIGN.md § 2.6 + § 3.7 + § 4.7 + § 6.7.
 #
 # Sprint #1 SecOps signals:
 #   * helix:uplift:threat_block_rate:5m — total blocked-rate; sustained
@@ -21,6 +22,23 @@
 #     means a pattern-set update is catching historical poisoned memories.
 #   * helix:uplift:memory_block_rate:5m{source=…} — write-time blocks
 #     partitioned by source (api / writeback / dlq).
+#
+# Sprint #3 SecOps signals (Mini-ADRs U-21 / U-22 / U-23 / U-24):
+#   * helix:uplift:skill_view_rate:5m{result} — skill_view tool calls
+#     by outcome; baseline traffic + early indicator for skill misuse.
+#   * helix:uplift:skill_zip_reject_rate:1h{reason} — ZIP boundary
+#     reject by allowlisted reason (Oracle defense: no user paths).
+#   * helix:uplift:skill_blocked_rate:5m{phase} — strict-scan blocks
+#     partitioned by phase (zip_import vs skill_view).
+#   * helix:uplift:skill_drift_rate:1h — P0 — DB drift on skill rows
+#     means the row was mutated past the write-time strict scan.
+#   * helix:uplift:skill_redacted_rate:1h — context-scope read-time
+#     matches; usually a pattern-set update catching historical content.
+#   * helix:uplift:threat_scan_variant_rate:1h{variant} — U-22 telemetry
+#     for which obfuscation pre-processing variant fires patterns
+#     (original / nfkc / collapsed / base64).
+#   * helix:uplift:skill_high_risk_event_rate:1h{event} — U-24 publish
+#     gate (activation_blocked / activated).
 #
 # Sprint #5 MCP-client operability signals:
 #   * helix:uplift:mcp_call_failure_rate:5m{transport,server} — short
@@ -88,6 +106,40 @@ groups:
       - record: helix:uplift:anthropic_cache_anchor_rate:5m
         expr: |
           sum(rate(helix_uplift_anthropic_cache_anchors_total[5m]))
+
+  - name: helix_uplift_skill
+    interval: 30s
+    rules:
+      # Capability Uplift Sprint #3 (Mini-ADRs U-21 / U-22 / U-24) — skill
+      # packaging + supporting files + content threat scan + drift +
+      # high-risk publish gate.
+      - record: helix:uplift:skill_view_rate:5m
+        expr: |
+          sum by (result) (rate(helix_uplift_skill_view_total[5m]))
+
+      - record: helix:uplift:skill_zip_reject_rate:1h
+        expr: |
+          sum by (reason) (rate(helix_uplift_skill_zip_reject_total[1h]))
+
+      - record: helix:uplift:skill_blocked_rate:5m
+        expr: |
+          sum by (phase) (rate(helix_uplift_skill_blocked_total[5m]))
+
+      - record: helix:uplift:skill_drift_rate:1h
+        expr: |
+          sum(rate(helix_uplift_skill_drift_total[1h]))
+
+      - record: helix:uplift:skill_redacted_rate:1h
+        expr: |
+          sum(rate(helix_uplift_skill_redacted_total[1h]))
+
+      - record: helix:uplift:threat_scan_variant_rate:1h
+        expr: |
+          sum by (variant) (rate(helix_uplift_threat_scan_total[1h]))
+
+      - record: helix:uplift:skill_high_risk_event_rate:1h
+        expr: |
+          sum by (event) (rate(helix_uplift_skill_high_risk_event_total[1h]))
 
   - name: helix_uplift_mcp_client
     interval: 30s
@@ -217,3 +269,65 @@ groups:
           summary: "MCP call failure rate spike on {{ $labels.server }}"
           description: "{{ $labels.transport }} server {{ $labels.server }} failure rate is {{ $value }} sustained 15m. See runbook § 2."
           runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/mcp-client-tuning.md"
+
+      # Capability Uplift Sprint #3 (Mini-ADR U-21) — drift on skill_version
+      # rows is the same P0 attack signature as memory drift: the stored
+      # content_hash no longer matches sha256(prompt_fragment + supporting
+      # files), so the row was mutated past the write-time strict scan.
+      # Almost certainly SQL injection / internal actor / restored-from-
+      # backup-without-rehash. See runbook § 8.
+      - alert: HelixUpliftSkillDriftDetected
+        expr: helix:uplift:skill_drift_rate:1h > 0
+        for: 15m
+        labels:
+          severity: P0
+        annotations:
+          summary: "Skill content drift detected"
+          description: "Skill drift rate is {{ $value }} / hr — DB row mutated past write-time strict scan, almost certainly SQL injection or internal actor. See runbook § 8."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/skill-packaging.md#section-8"
+
+      # Capability Uplift Sprint #3 (Mini-ADR U-21) — sustained ZIP
+      # import strict-scan blocks point at either (a) a noisy pattern
+      # update catching legitimate skill content, or (b) an actor
+      # probing the ZIP endpoint with poisoned content. > 6 blocks/hr
+      # sustained 30 min is the trigger; runbook § 7 walks triage.
+      - alert: HelixUpliftSkillBlockedSpike
+        expr: sum(rate(helix_uplift_skill_blocked_total{phase="zip_import"}[15m])) > 0.1
+        for: 30m
+        labels:
+          severity: P1
+        annotations:
+          summary: "Skill ZIP threat-scan blocks elevated"
+          description: "ZIP import strict scan blocked {{ $value }} / sec sustained 30m (~6/hr) — pattern tuning or attack probing. See runbook § 7."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/skill-packaging.md#section-7"
+
+      # Capability Uplift Sprint #3 (Mini-ADR U-21) — ZIP reject rate
+      # is a softer signal than blocked-scan: rejects happen before
+      # content scan (path traversal, size cap, symlink, etc) so a
+      # spike here usually means a user is iterating on packaging or
+      # an attacker is probing the boundary validator. Excludes
+      # legacy_format because that's expected drift from M0 → M0+.
+      - alert: HelixUpliftSkillZipRejectSpike
+        expr: sum(rate(helix_uplift_skill_zip_reject_total{reason!="legacy_format"}[15m])) > 0.1
+        for: 30m
+        labels:
+          severity: P2
+        annotations:
+          summary: "Skill ZIP reject rate elevated"
+          description: "User upload ZIPs being rejected {{ $value }} / sec sustained 30m (~6/hr) — check audit log for attack pattern or doc gap."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/skill-packaging.md"
+
+      # Capability Uplift Sprint #3 (Mini-ADR U-24) — surge in non-admin
+      # activation attempts on high-risk skills. M0 reality: this is
+      # ~0 because all writes today are admin-driven; signal will grow
+      # once M1-K J.7b-1 ships agent self-authored skills. > 30/hr
+      # sustained 30m is the trigger; investigate skill author + intent.
+      - alert: HelixUpliftSkillHighRiskActivationSurge
+        expr: sum(rate(helix_uplift_skill_high_risk_event_total{event="activation_blocked"}[1h])) > 0.5
+        for: 30m
+        labels:
+          severity: P2
+        annotations:
+          summary: "High-risk skill activation attempts elevated"
+          description: "Non-admin actors trying to activate high-risk skills {{ $value }} / sec sustained 30m (~30/hr) — investigate skill author + intent. See runbook § 11."
+          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/skill-packaging.md#section-11"

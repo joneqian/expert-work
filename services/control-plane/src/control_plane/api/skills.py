@@ -21,7 +21,10 @@ safety net.
 
 from __future__ import annotations
 
+import base64
 import logging
+import re
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
@@ -41,8 +44,15 @@ from control_plane.api._skill_zip import (
     parse_skill_zip,
 )
 from control_plane.audit import emit as audit_emit
+from control_plane.auth.rbac import _collect_roles
 from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
 from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.common.threat_patterns import scan_for_threats
+from helix_agent.common.uplift_metrics import (
+    record_skill_blocked,
+    record_skill_high_risk_event,
+    record_threat_pattern_hits,
+)
 from helix_agent.persistence import (
     DuplicateSkillError,
     SkillNotFoundError,
@@ -52,9 +62,16 @@ from helix_agent.protocol import (
     SKILL_REF_PATTERN,
     AuditAction,
     AuditResult,
+    Role,
     Skill,
     SkillStatus,
     SkillVersion,
+)
+from helix_agent.protocol.skill import (
+    SkillPackageLayoutError,
+    compute_content_hash,
+    is_high_risk_skill_version,
+    supporting_files_to_jsonable,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
 
@@ -84,6 +101,86 @@ class _PatchStatusBody(BaseModel):
     """``PATCH /v1/skills/{id}`` request body."""
 
     status: SkillStatus
+
+
+class _PutSupportingFileBody(BaseModel):
+    """``PUT /v1/skills/{id}/versions/{v}/supporting-files/{path:path}`` body.
+
+    Mini-ADR U-17 supporting-files API. Every mutation creates a new
+    ``SkillVersion`` (D3 immutability), copying the prior version's
+    other fields and replacing / adding the named file.
+    """
+
+    content: str = Field(min_length=0)  # base64 of raw bytes
+    size: int = Field(ge=0)
+    mime: str = Field(default="", max_length=128)
+
+
+# Path-validation allowlist used by the supporting-files single-file
+# mutation API. Stays in sync with the U-18 ZIP validator extension list
+# in ``_skill_zip.py``; if you add an extension here, mirror there.
+_SUPPORTING_FILE_EXT_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        ".md",
+        ".txt",
+        ".yaml",
+        ".yml",
+        ".json",
+        ".py",
+        ".js",
+        ".ts",
+        ".sh",
+        ".toml",
+        ".html",
+        ".css",
+        ".png",
+        ".jpg",
+        ".svg",
+    }
+)
+_SUPPORTING_FILE_TEXT_EXTS: frozenset[str] = frozenset(
+    {
+        ".md",
+        ".txt",
+        ".yaml",
+        ".yml",
+        ".json",
+        ".py",
+        ".js",
+        ".ts",
+        ".sh",
+        ".toml",
+        ".html",
+        ".css",
+    }
+)
+_MAX_SUPPORTING_FILE_SIZE: int = 1 * 1024 * 1024  # 1 MB per file
+_MAX_SUPPORTING_PATH_LEN: int = 256
+_MAX_SUPPORTING_DEPTH: int = 3
+_SUPPORTING_PATH_SEGMENT_RE: re.Pattern[str] = re.compile(r"^[a-zA-Z0-9_.\-]+$")
+
+
+def _validate_supporting_file_path(path: str) -> str:
+    """Mini-ADR U-18 path validator for the single-file API.
+
+    Raises :class:`SkillPackageLayoutError` with a **generic** message
+    on any violation — Oracle defense. The caller logs the real reason
+    via audit.
+    """
+    if len(path) >= _MAX_SUPPORTING_PATH_LEN:
+        raise SkillPackageLayoutError("invalid supporting file path")
+    if "\\" in path or path.startswith("/") or ".." in path.split("/"):
+        raise SkillPackageLayoutError("invalid supporting file path")
+    segments = path.split("/")
+    if len(segments) > _MAX_SUPPORTING_DEPTH:
+        raise SkillPackageLayoutError("invalid supporting file path")
+    for segment in segments:
+        if not _SUPPORTING_PATH_SEGMENT_RE.fullmatch(segment):
+            raise SkillPackageLayoutError("invalid supporting file path")
+    ext = Path(path).suffix.lower()
+    if ext not in _SUPPORTING_FILE_EXT_ALLOWLIST:
+        raise SkillPackageLayoutError("invalid supporting file path")
+    return path
 
 
 def _get_skill_store(request: Request) -> SkillStore:
@@ -181,6 +278,39 @@ def build_skills_router() -> APIRouter:
         except ModerationError as exc:
             raise HTTPException(status_code=400, detail=exc.detail) from exc
 
+        # Capability Uplift Sprint #3 — Mini-ADR U-21 write-time strict scan
+        # on prompt_fragment (the JSON-API path is the third "content into
+        # the system" surface alongside ZIP import + supporting-files API).
+        findings = scan_for_threats(body.prompt_fragment, scope="strict")
+        if findings:
+            record_threat_pattern_hits(findings, scope="strict")
+            record_skill_blocked(phase="supporting_file_api")
+            await audit_emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action=AuditAction.SKILL_PROMPT_INJECTION_BLOCKED,
+                resource_type="skill",
+                resource_id=str(skill_id),
+                result=AuditResult.DENIED,
+                trace_id=current_trace_id_hex(),
+                details={
+                    "finding_count": len(findings),
+                    "findings": [
+                        {"pattern_id": f.pattern_id, "category": f.category} for f in findings
+                    ],
+                    "source": "json_api",
+                },
+            )
+            raise HTTPException(status_code=400, detail="invalid skill content")
+
+        # Mini-ADR U-21 / U-24 — compute content_hash + high_risk at write
+        # time. JSON-API path produces empty supporting_files (the path is
+        # the legacy structured-create endpoint; ZIP / supporting-files API
+        # produce non-empty ones).
+        content_hash = compute_content_hash(body.prompt_fragment, {})
+        high_risk = is_high_risk_skill_version(tool_names=body.tool_names, supporting_file_paths=[])
+
         try:
             version = await store.add_version(
                 version_id=uuid4(),
@@ -192,6 +322,8 @@ def build_skills_router() -> APIRouter:
                 category=body.category,
                 required_models=body.required_models,
                 authored_by=body.authored_by,
+                content_hash=content_hash,
+                high_risk=high_risk,
             )
         except SkillNotFoundError as exc:
             raise HTTPException(status_code=404, detail="skill not found") from exc
@@ -213,6 +345,218 @@ def build_skills_router() -> APIRouter:
         )
         return JSONResponse(status_code=201, content=_version_dict(version))
 
+    @router.put(
+        "/{skill_id}/versions/{version}/supporting-files/{file_path:path}",
+        response_model=None,
+    )
+    async def put_supporting_file(
+        skill_id: UUID,
+        version: int,
+        file_path: str,
+        body: _PutSupportingFileBody,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Mini-ADR U-17 — add or replace a single supporting file.
+
+        Creates a **new SkillVersion** that mirrors ``version``'s fields
+        plus the new/replaced file. Runs U-18 path validation + U-21
+        write-time threat scan + U-24 high_risk recompute.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+
+        # U-18 path validation
+        try:
+            _validate_supporting_file_path(file_path)
+        except SkillPackageLayoutError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # Size cap on raw bytes (declared) — defense in depth alongside
+        # the JSONB total-size CHECK constraint on the table.
+        if body.size > _MAX_SUPPORTING_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="invalid supporting file path")
+
+        prior = await store.get_version_by_number(
+            skill_id=skill_id, tenant_id=tenant_id, version=version
+        )
+        if prior is None:
+            raise HTTPException(status_code=404, detail="skill version not found")
+
+        # Validate base64 + size invariant (declared `size` must match)
+        try:
+            raw = base64.b64decode(body.content, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail="invalid supporting file path") from exc
+        if len(raw) != body.size:
+            raise HTTPException(status_code=400, detail="invalid supporting file path")
+
+        # U-21 write-time strict scan (text extensions only).
+        ext = Path(file_path).suffix.lower()
+        if ext in _SUPPORTING_FILE_TEXT_EXTS:
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                # Declared text extension but content isn't UTF-8 —
+                # suspect (binary disguised as text). Treat as scan
+                # finding equivalent for audit purposes.
+                record_skill_blocked(phase="supporting_file_api")
+                await audit_emit(
+                    audit,
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=AuditAction.SKILL_PROMPT_INJECTION_BLOCKED,
+                    resource_type="skill_supporting_file",
+                    resource_id=f"{skill_id}/{version}/{file_path}",
+                    result=AuditResult.DENIED,
+                    trace_id=current_trace_id_hex(),
+                    details={"reason": "text_extension_binary_content"},
+                )
+                raise HTTPException(status_code=400, detail="invalid supporting file path") from exc
+            findings = scan_for_threats(text, scope="strict")
+            if findings:
+                record_threat_pattern_hits(findings, scope="strict")
+                record_skill_blocked(phase="supporting_file_api")
+                await audit_emit(
+                    audit,
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=AuditAction.SKILL_PROMPT_INJECTION_BLOCKED,
+                    resource_type="skill_supporting_file",
+                    resource_id=f"{skill_id}/{version}/{file_path}",
+                    result=AuditResult.DENIED,
+                    trace_id=current_trace_id_hex(),
+                    details={
+                        "finding_count": len(findings),
+                        "findings": [
+                            {"pattern_id": f.pattern_id, "category": f.category} for f in findings
+                        ],
+                    },
+                )
+                raise HTTPException(status_code=400, detail="invalid supporting file path")
+
+        # Build merged supporting_files map. ``supporting_files_to_jsonable``
+        # already serializes deterministically (sorted keys).
+        merged = supporting_files_to_jsonable(prior.supporting_files)
+        merged[file_path] = {
+            "content": body.content,
+            "size": body.size,
+            "mime": body.mime,
+        }
+
+        new_paths = list(merged.keys())
+        new_high_risk = is_high_risk_skill_version(
+            tool_names=prior.tool_names, supporting_file_paths=new_paths
+        )
+        new_hash = compute_content_hash(prior.prompt_fragment, merged)
+
+        new_version = await store.add_version(
+            version_id=uuid4(),
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            prompt_fragment=prior.prompt_fragment,
+            tool_names=list(prior.tool_names),
+            description=prior.description,
+            category=prior.category,
+            required_models=list(prior.required_models),
+            authored_by=prior.authored_by,
+            supporting_files=merged,
+            lazy_load=prior.lazy_load,
+            content_hash=new_hash,
+            high_risk=new_high_risk,
+        )
+
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.SKILL_SUPPORTING_FILE_UPLOADED,
+            resource_type="skill_supporting_file",
+            resource_id=f"{skill_id}/{new_version.version}/{file_path}",
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={
+                "from_version": prior.version,
+                "to_version": new_version.version,
+                "path": file_path,
+                "size": body.size,
+                "high_risk_after": new_high_risk,
+            },
+        )
+        return JSONResponse(status_code=201, content=_version_dict(new_version))
+
+    @router.delete(
+        "/{skill_id}/versions/{version}/supporting-files/{file_path:path}",
+        response_model=None,
+    )
+    async def delete_supporting_file(
+        skill_id: UUID,
+        version: int,
+        file_path: str,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Mini-ADR U-17 — remove a single supporting file (new version)."""
+        tenant_id: UUID = request.state.tenant_id
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+
+        try:
+            _validate_supporting_file_path(file_path)
+        except SkillPackageLayoutError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        prior = await store.get_version_by_number(
+            skill_id=skill_id, tenant_id=tenant_id, version=version
+        )
+        if prior is None:
+            raise HTTPException(status_code=404, detail="skill version not found")
+        if file_path not in prior.supporting_files:
+            raise HTTPException(status_code=404, detail="supporting file not found")
+
+        merged = supporting_files_to_jsonable(prior.supporting_files)
+        merged.pop(file_path)
+        new_paths = list(merged.keys())
+        new_high_risk = is_high_risk_skill_version(
+            tool_names=prior.tool_names, supporting_file_paths=new_paths
+        )
+        new_hash = compute_content_hash(prior.prompt_fragment, merged)
+
+        new_version = await store.add_version(
+            version_id=uuid4(),
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            prompt_fragment=prior.prompt_fragment,
+            tool_names=list(prior.tool_names),
+            description=prior.description,
+            category=prior.category,
+            required_models=list(prior.required_models),
+            authored_by=prior.authored_by,
+            supporting_files=merged,
+            lazy_load=prior.lazy_load,
+            content_hash=new_hash,
+            high_risk=new_high_risk,
+        )
+
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.SKILL_SUPPORTING_FILE_REMOVED,
+            resource_type="skill_supporting_file",
+            resource_id=f"{skill_id}/{new_version.version}/{file_path}",
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={
+                "from_version": prior.version,
+                "to_version": new_version.version,
+                "path": file_path,
+                "high_risk_after": new_high_risk,
+            },
+        )
+        return JSONResponse(status_code=200, content=_version_dict(new_version))
+
     @router.patch("/{skill_id}", response_model=None)
     async def patch_status(
         skill_id: UUID,
@@ -226,6 +570,49 @@ def build_skills_router() -> APIRouter:
         prior = await store.get_skill(skill_id=skill_id, tenant_id=tenant_id)
         if prior is None:
             raise HTTPException(status_code=404, detail="skill not found")
+
+        # ── Capability Uplift Sprint #3 (Mini-ADR U-24) ──────────────
+        # High-risk publish gate: when activating, look up the version
+        # that's becoming live and check its ``high_risk`` flag. If
+        # high-risk + caller is not ADMIN / SYSTEM_ADMIN → 403 + audit.
+        # M0 reality: all skill mutations are admin-only so this almost
+        # never fires; the gate activates with M1-K J.7b-1 agent-self-
+        # authored skills.
+        if body.status == SkillStatus.ACTIVE and prior.latest_version > 0:
+            latest = await store.get_version_by_number(
+                skill_id=skill_id,
+                tenant_id=tenant_id,
+                version=prior.latest_version,
+            )
+            if latest is not None and latest.high_risk:
+                principal = getattr(request.state, "principal", None)
+                roles = _collect_roles(principal) if principal is not None else set()
+                if Role.ADMIN not in roles and Role.SYSTEM_ADMIN not in roles:
+                    record_skill_high_risk_event(event="activation_blocked")
+                    await audit_emit(
+                        audit,
+                        tenant_id=tenant_id,
+                        actor_id=actor_id,
+                        action=AuditAction.SKILL_HIGH_RISK_ACTIVATION_BLOCKED,
+                        resource_type="skill",
+                        resource_id=str(skill_id),
+                        result=AuditResult.DENIED,
+                        trace_id=current_trace_id_hex(),
+                        details={
+                            "version": latest.version,
+                            "tool_names": list(latest.tool_names),
+                            "has_scripts_subdir": any(
+                                p.startswith("scripts/") for p in latest.supporting_files
+                            ),
+                        },
+                    )
+                    raise HTTPException(
+                        status_code=403,
+                        detail=(
+                            "high-risk skill requires tenant admin or system admin role to activate"
+                        ),
+                    )
+
         try:
             updated = await store.set_status(
                 skill_id=skill_id, tenant_id=tenant_id, status=body.status
@@ -244,6 +631,32 @@ def build_skills_router() -> APIRouter:
             trace_id=current_trace_id_hex(),
             details={"from": prior.status.value, "to": updated.status.value},
         )
+
+        # If we just activated a high-risk skill with the right role,
+        # leave a positive audit + metric trail (Mini-ADR U-24).
+        if body.status == SkillStatus.ACTIVE and prior.latest_version > 0:
+            latest_after = await store.get_version_by_number(
+                skill_id=skill_id,
+                tenant_id=tenant_id,
+                version=prior.latest_version,
+            )
+            if latest_after is not None and latest_after.high_risk:
+                record_skill_high_risk_event(event="activated")
+                await audit_emit(
+                    audit,
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=AuditAction.SKILL_HIGH_RISK_ACTIVATED,
+                    resource_type="skill",
+                    resource_id=str(skill_id),
+                    result=AuditResult.SUCCESS,
+                    trace_id=current_trace_id_hex(),
+                    details={
+                        "version": latest_after.version,
+                        "tool_names": list(latest_after.tool_names),
+                    },
+                )
+
         return JSONResponse(status_code=200, content=_skill_dict(updated))
 
     @router.get("", response_model=None)

@@ -11,21 +11,58 @@ orchestrator (skill loader at build time), and helix-persistence
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Final, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
+    "HIGH_RISK_TOOLS",
     "Skill",
     "SkillAuthoredBy",
+    "SkillPackageLayoutError",
     "SkillRef",
     "SkillStatus",
+    "SkillSupportingFile",
     "SkillVersion",
+    "canonicalize_skill_content",
+    "compute_content_hash",
+    "is_high_risk_skill_version",
     "parse_skill_ref",
+    "supporting_files_to_jsonable",
 ]
+
+
+# ── Capability Uplift Sprint #3 (Mini-ADR U-24) ──────────────────────────
+# Tools that escalate a skill's blast-radius to "needs human review before
+# activate". Includes any tool that lets the skill execute arbitrary code
+# (exec_python / exec_shell) or make uncontrolled network egress (http).
+# A skill with any of these in ``tool_names`` flips ``high_risk = True``
+# and the publish gate at PATCH /v1/skills/{id} status=active rejects
+# non-admin actors.
+HIGH_RISK_TOOLS: Final[frozenset[str]] = frozenset(
+    {
+        "exec_python",
+        "exec_shell",
+        "http",
+    }
+)
+
+
+class SkillPackageLayoutError(ValueError):
+    """Raised by ZIP / SKILL.md parsers when the input is structurally
+    invalid (missing SKILL.md / bad path / banned extension / etc).
+
+    The control-plane layer catches this and returns a **generic** 400
+    so attackers don't get an oracle that reveals which check fired
+    (Mini-ADR U-18 / U-21 Oracle defense). The full violation detail
+    is recorded in the audit row for SecOps triage.
+    """
 
 
 class SkillStatus(StrEnum):
@@ -81,7 +118,44 @@ class SkillVersion(BaseModel):
     category: str | None = None
     required_models: tuple[str, ...] = ()
     authored_by: SkillAuthoredBy = "human"
+    # Capability Uplift Sprint #3 (Mini-ADR U-16) — supporting files
+    # under arbitrary subdirectories. Map of path → SkillSupportingFile.
+    # The DB column is JSONB; this DTO uses ``dict`` rather than
+    # ``Mapping`` so Pydantic can construct from raw JSON payloads.
+    supporting_files: dict[str, SkillSupportingFile] = Field(default_factory=dict)
+    # Mini-ADR U-15: per-skill progressive disclosure flag. False = body
+    # eager-loaded into system prompt (current behavior); True = body
+    # lazy-loaded via ``skill_view`` tool.
+    lazy_load: bool = False
+    # Mini-ADR U-21: blake2b-32 hash of canonicalized content. Recomputed
+    # at ``skill_view`` time; mismatch fires SKILL_DRIFT_DETECTED.
+    # bytes(b"") on records written before the migration backfill;
+    # consumers should compute via :func:`compute_content_hash` rather
+    # than rely on whatever is in the row.
+    content_hash: bytes = b""
+    # Mini-ADR U-24: high-risk publish gate. True when tool_names ∩
+    # HIGH_RISK_TOOLS ≠ ∅ or any supporting_files path starts with
+    # "scripts/".
+    high_risk: bool = False
     created_at: datetime
+
+
+class SkillSupportingFile(BaseModel):
+    """One entry in :attr:`SkillVersion.supporting_files`.
+
+    Stored in Postgres as a JSONB object under the file's relative path.
+    ``content`` is base64-encoded raw bytes so the JSONB blob is text-safe
+    even for binary file types (PNG / SVG); the size cap (1 MB per file,
+    5 MB per skill total) is enforced at the API layer.
+
+    See Mini-ADR U-16 in ``docs/streams/STREAM-UPLIFT-DESIGN.md`` § 4.3.4.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    content: str  # base64 of raw bytes
+    size: int = Field(ge=0)  # raw byte length (for cap checks + UI display)
+    mime: str = ""
 
 
 class Skill(BaseModel):
@@ -157,3 +231,90 @@ def parse_skill_ref(raw: str) -> SkillRef:
         name, version_str = raw.split("@", 1)
         return SkillRef(name=name, version=int(version_str))
     return SkillRef(name=raw, version=None)
+
+
+# ─── Capability Uplift Sprint #3 helpers (Mini-ADR U-21 / U-24) ──────────
+
+
+def is_high_risk_skill_version(
+    *,
+    tool_names: Iterable[str],
+    supporting_file_paths: Iterable[str],
+) -> bool:
+    """Compute the ``high_risk`` flag for a skill version (Mini-ADR U-24).
+
+    High-risk when **either**:
+
+    1. ``tool_names`` intersects :data:`HIGH_RISK_TOOLS` (one of
+       ``exec_python`` / ``exec_shell`` / ``http`` — tools that grant
+       arbitrary code execution or unfiltered network egress); **or**
+    2. Any supporting-file path starts with ``"scripts/"`` — convention
+       for executable code intended to be picked up by ``exec_*`` tools.
+
+    M0 reality: all skill mutations are admin-only so the publish gate
+    is transparent. Will activate with M1-K J.7b-1 agent-self-authored
+    skills, where an agent could declare ``exec_python`` and quietly
+    drop a backdoor in ``scripts/diagnose.py``.
+    """
+    if HIGH_RISK_TOOLS & set(tool_names):
+        return True
+    return any(path.startswith("scripts/") for path in supporting_file_paths)
+
+
+def canonicalize_skill_content(
+    prompt_fragment: str,
+    supporting_files: Mapping[str, object] | None = None,
+) -> bytes:
+    """Stable byte sequence for content hashing (Mini-ADR U-21).
+
+    The hash is computed at write time + recomputed at every
+    ``skill_view`` call;mismatch fires SKILL_DRIFT_DETECTED (almost
+    certainly a SQL-injection or internal-actor signal). Hashing
+    deterministically requires a canonical ordering of the
+    ``supporting_files`` JSONB (Python dict insertion order is unstable
+    when the row round-trips through Postgres).
+
+    The serialization rule MUST match what migration 0042 backfill uses
+    to seed existing M0 rows — otherwise every M0 skill_view would
+    immediately fire a spurious P0 alert.
+    """
+    sorted_files = json.dumps(
+        supporting_files or {},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return prompt_fragment.encode("utf-8") + b"\x00" + sorted_files.encode("utf-8")
+
+
+def compute_content_hash(
+    prompt_fragment: str,
+    supporting_files: Mapping[str, object] | None = None,
+) -> bytes:
+    """``blake2b(_canonicalize(...), digest_size=32)`` — Mini-ADR U-21.
+
+    32-byte digest is enough for collision resistance against accidental
+    drift detection (we are not protecting against intentional collision
+    crafting; the hash exists to detect tampering, not to be a MAC).
+    """
+    canonical = canonicalize_skill_content(prompt_fragment, supporting_files)
+    return hashlib.blake2b(canonical, digest_size=32).digest()
+
+
+def supporting_files_to_jsonable(
+    supporting_files: Mapping[str, SkillSupportingFile],
+) -> dict[str, dict[str, object]]:
+    """Typed DTO → plain JSON shape for hashing / DB persist.
+
+    Keys sorted so JSON serialization is deterministic across Python
+    dict ordering; matches what :func:`canonicalize_skill_content`
+    expects.
+    """
+    return {
+        path: {
+            "content": sf.content,
+            "size": sf.size,
+            "mime": sf.mime,
+        }
+        for path, sf in sorted(supporting_files.items())
+    }

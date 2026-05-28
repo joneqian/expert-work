@@ -77,6 +77,23 @@ class AuditAction(StrEnum):
     SKILL_CREATE = "skill:create"
     SKILL_VERSION_CREATE = "skill_version:create"
     SKILL_STATUS_CHANGE = "skill:status_change"
+    # skill — Capability Uplift Sprint #3 supporting files (Mini-ADR U-17)
+    SKILL_SUPPORTING_FILE_UPLOADED = "skill_supporting_file:uploaded"
+    SKILL_SUPPORTING_FILE_REMOVED = "skill_supporting_file:removed"
+    # skill — Capability Uplift Sprint #3 threat scan + drift (Mini-ADR U-21).
+    # PROMPT_INJECTION_BLOCKED fires on write-time strict-scope match;
+    # DRIFT_DETECTED fires when skill_view recomputes content_hash and
+    # finds a mismatch (DB row tampered past the strict scan — almost
+    # certainly SQL injection or internal actor).
+    SKILL_PROMPT_INJECTION_BLOCKED = "skill:prompt_injection_blocked"
+    SKILL_DRIFT_DETECTED = "skill:drift_detected"
+    # skill — Capability Uplift Sprint #3 high-risk publish gate (Mini-ADR
+    # U-24). High-risk = tool_names ∩ {exec_python, http, exec_shell} ≠ ∅
+    # or any supporting_files path starts with "scripts/". The gate
+    # blocks DRAFT → ACTIVE for non-admin actors. M0 transparent (all
+    # writes are admin); M1-K J.7b-1 self-authored skills get gated.
+    SKILL_HIGH_RISK_ACTIVATION_BLOCKED = "skill:high_risk_activation_blocked"
+    SKILL_HIGH_RISK_ACTIVATED = "skill:high_risk_activated"
     # artifact (Stream J.9-step3 — Mini-ADR J-25). ``ARTIFACT_SAVE`` is
     # reserved for the orchestrator-side save-artifact tool emit; that
     # wiring lands when ToolEnv gains an :class:`AuditLogger` handle.
@@ -167,6 +184,11 @@ class AuditEntry(BaseModel):
         "user_workspace",  # Stream J.15-补强-1 — volume quota + lifecycle
         "image_upload",  # Stream J.6.补强-2 — Mini-ADR J-31
         "skill",  # Stream J.7a — Mini-ADR J-23
+        # Capability Uplift Sprint #3 (Mini-ADR U-17) — supporting-files
+        # subresource. Mirrors the control-plane ResourceType Literal in
+        # services/control-plane/src/control_plane/audit.py (per
+        # [memory:audit-literal-drift] — both must stay in sync).
+        "skill_supporting_file",
         "artifact",  # Stream J.9-step3 — Mini-ADR J-25
         "approval",  # Stream J.8 — Mini-ADR J-24
         "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -17,6 +18,7 @@ from helix_agent.persistence.skill.base import (
     SkillStore,
 )
 from helix_agent.protocol import Skill, SkillStatus, SkillVersion
+from helix_agent.protocol.skill import SkillSupportingFile
 
 
 def _skill_row_to_dto(row: SkillRow) -> Skill:
@@ -34,6 +36,8 @@ def _skill_row_to_dto(row: SkillRow) -> Skill:
 
 
 def _version_row_to_dto(row: SkillVersionRow) -> SkillVersion:
+    raw_supporting = dict(row.supporting_files or {})
+    typed_supporting = {path: SkillSupportingFile(**meta) for path, meta in raw_supporting.items()}
     return SkillVersion(
         id=row.id,
         skill_id=row.skill_id,
@@ -45,6 +49,12 @@ def _version_row_to_dto(row: SkillVersionRow) -> SkillVersion:
         category=row.category,
         required_models=tuple(row.required_models or ()),
         authored_by=row.authored_by,  # type: ignore[arg-type]
+        # Capability Uplift Sprint #3 fields. Existing M0 rows have
+        # default-empty values per migration 0042 backfill.
+        supporting_files=typed_supporting,
+        lazy_load=bool(row.lazy_load),
+        content_hash=bytes(row.content_hash or b""),
+        high_risk=bool(row.high_risk),
         created_at=row.created_at,
     )
 
@@ -194,6 +204,10 @@ class SqlSkillStore(SkillStore):
         category: str | None = None,
         required_models: Sequence[str] = (),
         authored_by: str = "human",
+        supporting_files: dict[str, dict[str, Any]] | None = None,
+        lazy_load: bool = False,
+        content_hash: bytes = b"",
+        high_risk: bool = False,
     ) -> SkillVersion:
         if authored_by not in {"human", "agent"}:
             msg = f"authored_by must be 'human' or 'agent' (got {authored_by!r})"
@@ -221,6 +235,13 @@ class SqlSkillStore(SkillStore):
                 category=new_category,
                 required_models=list(required_models),
                 authored_by=authored_by,
+                # Capability Uplift Sprint #3 fields. Default-empty values
+                # keep Stream J.7a JSON-API path safe; ZIP / supporting-files
+                # mutation paths compute + pass real values.
+                supporting_files=supporting_files or {},
+                lazy_load=lazy_load,
+                content_hash=content_hash,
+                high_risk=high_risk,
                 created_at=now,
             )
             session.add(version_row)

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 from helix_agent.protocol import Skill, SkillStatus, SkillVersion
@@ -138,6 +139,14 @@ class SkillStore(abc.ABC):
         category: str | None = None,
         required_models: Sequence[str] = (),
         authored_by: str = "human",
+        # Capability Uplift Sprint #3 (Mini-ADR U-16 / U-15 / U-21 / U-24).
+        # Default values keep Stream J.7a callers (M0 JSON-API path) working
+        # without touching them; the ZIP / supporting-files paths populate
+        # all four explicitly.
+        supporting_files: dict[str, dict[str, Any]] | None = None,
+        lazy_load: bool = False,
+        content_hash: bytes = b"",
+        high_risk: bool = False,
     ) -> SkillVersion:
         """Append the next version to a skill.
 
@@ -145,6 +154,14 @@ class SkillStore(abc.ABC):
         Updates ``skill.latest_version`` + mirrors ``description`` /
         ``category`` onto the parent skill row. Raises
         :class:`SkillNotFoundError` if the skill is unknown.
+
+        ``supporting_files`` / ``lazy_load`` / ``content_hash`` / ``high_risk``
+        default to the pre-Sprint #3 shape so the Stream J.7a JSON-API
+        path doesn't need to compute them. Callers that DO compute them
+        (ZIP import + supporting-files single-file mutation API) must
+        pass all four to avoid leaving a row with an empty
+        ``content_hash`` (which would fire a spurious drift alert on the
+        first ``skill_view``).
         """
 
     @abc.abstractmethod
