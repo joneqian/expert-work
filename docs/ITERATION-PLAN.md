@@ -619,30 +619,32 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **P0 — 安全 / 合规盲点（必须 Gate 内完成）**
 
-- [ ] **#1 Cron prompt 注入扫描（含隐形 Unicode）** —— `helix-common` 抽威胁模式库 + `services/control-plane/api/triggers.py` create/update 严扫 + `trigger_firing.py` 拼完 skill 后宽扫 + 新 audit action `TRIGGER_PROMPT_INJECTION_BLOCKED`。借鉴 Hermes `tools/cronjob_tools.py:68-200` 的双层扫描思路。**Week 1，~3 天**。
-- [ ] **#2 Memory 投毒防御 + drift backup** —— `MemoryStore.write/recall` 复用 #1 威胁模式库；写时扫拒入（可选 strict mode）+ 读时扫中毒条目替换为 `[BLOCKED:...]` 占位符（live 保留原文给用户审）+ drift detection 检测外部直改 DB；新 audit action `MEMORY_INJECTION_BLOCKED` / `MEMORY_DRIFT_DETECTED`。**Week 2-3，~1.5 周**。前置：#1 威胁模式库已抽到 `helix-common`。
+- [x] **#1 Cron prompt 注入扫描（含隐形 Unicode）** —— `helix-common` 抽威胁模式库 + `services/control-plane/api/triggers.py` create/update 严扫 + `trigger_firing.py` 拼完 skill 后宽扫 + 新 audit action `TRIGGER_PROMPT_INJECTION_BLOCKED`。借鉴 Hermes `tools/cronjob_tools.py:68-200` 的双层扫描思路。**2026-05-27 完成（PR #307）**。
+- [x] **#2 Memory 投毒防御 + drift backup** —— `MemoryStore.write/recall` 复用 #1 威胁模式库；写时扫拒入（可选 strict mode）+ 读时扫中毒条目替换为 `[BLOCKED:...]` 占位符（live 保留原文给用户审）+ drift detection 检测外部直改 DB；新 audit action `MEMORY_INJECTION_BLOCKED` / `MEMORY_DRIFT_DETECTED`。**2026-05-27 完成（PR #308）**。
 
 **P1 — Operator / IDE experience**
 
-- [ ] **#5 MCP Server** —— `FastMCP` lib 包装现有 control-plane API；M0 仅暴露 6 个**读权限**工具（conversations_list / conversation_get / messages_read / events_poll / events_wait / channels_list），写权限（messages_send / permissions_respond）留 M1 后期；auth 复用现有 OIDC + 可选 MCP-specific token；RLS 复用 tenant_scope。**Week 4-6，~2 周**。
+- [x] **#5 MCP Client HTTP/SSE transport（接入外部 MCP 生态，原"MCP Server"已推翻）** —— 2026-05-27 复审重定向：原方向"暴露 MCP Server 给 Claude Code / Cursor"违反 helix server-side 多租户 backend 定位，推翻。新方向：扩 `MCPClient` transport（stdio only → 加 HTTP / SSE / StreamableHTTP）让 agent 沙箱能接入 2026 年公开 MCP 生态（GitHub / Postgres / Linear / Notion / Slack）。`MCPServerConfig` 加 `transport` 字段 + secret 隔离 + 远端 server 失败模式（timeout + retry + circuit breaker）。**2026-05-27 完成（PR #311 设计 / PR #312 实施）**。M1-I 写权限暴露推迟（仍记入 backlog，但实际由 MCP 远端 server 提供）。
 
 **P1 — Memory 系统深化**
 
-- [ ] **#6 Memory hybrid retrieval（向量 + 全文 RRF）** —— `memory_item` 加 tsvector 列（迁移 0039）+ 自动 trigger 维护；`MemoryStore.recall()` 直接 port `J.5 KnowledgeRetriever`（hybrid + RRF rerank）；K.K12 eval baseline 重跑 + 锁新 baseline；per-tenant manifest 可关闭 hybrid 回退纯向量。**Week 4-5，~1.5 周**（与 #5 并行）。
-- [ ] **#8 Memory frozen snapshot / 前缀缓存优化** —— `memory_recall_node` 加 `per_session` 召回模式（vs 默认 `per_turn`）；L.L1 prompt caching middleware 适配 cache_control 加在 memory block 末尾；manifest `policies.memory_recall_mode` 字段。**Week 5-6，~1.5 周**（与 #5 / #6 并行）。
+- [x] **#6 Memory hybrid retrieval（向量 + 全文 RRF）** —— `memory_item` 加 tsvector 列（migration 0040）+ 自动 trigger 维护；`MemoryStore.recall()` 直接 port `J.5 KnowledgeRetriever`（hybrid + RRF rerank）；K.K12 eval baseline 重跑 + 锁新 baseline；per-tenant manifest 可关闭 hybrid 回退纯向量。**2026-05-27 完成（PR #309）**。
+- [x] **#8 Memory frozen snapshot / 前缀缓存优化** —— `memory_recall_node` 加 `per_session` 召回模式（vs 默认 `per_turn`）；L.L1 prompt caching middleware 适配 cache_control 加在 memory block 末尾；manifest `policies.memory_recall_mode` 字段。**2026-05-27 完成（PR #310）**。
 
 **P2 — Skill 库进化基础**
 
-- [ ] **#3 Skill 附属文件（references / templates / scripts）** —— `skill_version.supporting_files` JSONB 列（迁移 0040）+ `skill_manager_tool` 加 `write_file` / `remove_file` action + agent_factory 加载 skill 时按需暴露 `skill_view(name, "references/...")` 三层 API + ZIP import/export 支持子目录 + Admin UI Skills page 文件浏览。**直接抄 Hermes 目录约定 + 用途分工**（references=session 细节 / templates=可复用 / scripts=可执行），省 1-2 轮 ADR。**Week 7-10，~2 周**。
-- [ ] **#4 Curator 自动状态机（基础设施）** —— `SkillRow` 加 `pinned: bool` + `last_activity_at: timestamptz`（迁移 0041）+ 新建 `services/control-plane/skill_curator.py` 周期 worker 纯启发式三态转移（默认 30 天 → stale / 90 天 → archived，per-tenant 可配）+ Admin UI Skills page pin 操作 + 状态显示。**基础设施 Gate 期内完成**；启用阈值调参等 J.7b-1 上线后看真实膨胀率（M1-K 期间）。**Week 11-12，~1 周**。
-- [ ] **#7 Memory 短期 → 长期凝结引擎（基础设施）** —— 新建 `services/control-plane/memory_consolidator.py` 凝结引擎本体（识别反复事实 trigger + 用 Haiku 等辅助模型总结 N 轮对话窗口 → 写 long-term memory）+ 防误学约束（参考 Hermes Skill review prompt "什么坚决别写"4 条分类：环境性失败 / 负面工具断言 / session-specific transient errors / one-off task narratives）+ M2-C archive 流水线接口预留。**基础设施 Gate 期内完成**；触发策略 + 阈值调优等 M1 dogfood 数据反过来调。**Week 11-13，~3 周**。
+- [x] **#3 Skill 附属文件 + Claude Code 标准 SKILL.md + Progressive Disclosure + 多层威胁防御** —— `skill_version.supporting_files` JSONB 列（migration 0042，5 MB cap）+ Claude Code 标准 SKILL.md 格式（YAML frontmatter + `helix:` 命名空间扩展，跨平台互通）+ progressive disclosure（per-skill `lazy_load` flag，可选 body 懒加载到 `skill_view` 工具）+ 单文件 PUT/DELETE supporting-files API + ZIP 双格式 read（向后兼容）+ U-21 drift detection（blake2b content_hash + 读时校验 → BLOCKED）+ U-22 obfuscation 防御（base64 / NFKC / 空格归一 4 variants）+ U-23 中文 prompt injection patterns（12 cn_* 规则）+ U-24 high-risk publish gate（含 `exec_python` / `http` / `scripts/*` → DRAFT→ACTIVE 必 admin）+ Admin UI 双栏 Monaco 编辑器（5 mutation 路径 + 高危徽章 + Lazy 调试视图）。**Mini-ADRs U-14 ~ U-24**（PR A 设计 #313 + PR B 设计补强 #314 + PR B backend #315 + PR C Admin UI #316）。**2026-05-28 完成**。**J.7b-6 supporting files 已并入,M1-K J.7b 仅剩 7 项**;**J.7b-1 visibility / fork / promote 三大支柱**在 2026-05-28 预约定到 STREAM-J-DESIGN § 15.7（PR #319），M1-K design phase 直接基于此展开。
+- [x] **#4 Curator 自动状态机** —— `SkillRow` 加 `pinned: bool` + `last_used_at: timestamptz` + `state_changed_at: timestamptz`（migration 0043）+ `tenant_config` 加 `skill_stale_days` / `skill_archive_days`（migration 0044，cross-field validator + DB CHECK）+ 新建 `services/control-plane/skill_curator.py` 每天 03:00 UTC 周期 worker 四条状态机路径（active→stale / stale→archived / pin 屏蔽 / stale→active 自动复活）+ `ThrottledActivityRecorder` 双路径 activity 跟踪（_load_skills + skill_view）+ Admin UI Pin 按钮 + 状态分组 + 距 stale ETA hint + Tenant Config 阈值显示 + 5 个新 audit action + 4 recording rules + 2 alerts + runbook 7 节。**Mini-ADRs U-25 ~ U-32**（PR A 设计 #317 + PR B 实施 #318）。**2026-05-28 完成**。**基础设施 Gate 期完成**；启用阈值调参等 J.7b-1 上线后看真实膨胀率（M1-K 期间，默认 30/90 可能改 7/30）。
+- [ ] **#7 Memory 短期 → 长期凝结引擎（基础设施）** —— 新建 `services/control-plane/memory_consolidator.py` 凝结引擎本体（识别反复事实 trigger + 用 Haiku 等辅助模型总结 N 轮对话窗口 → 写 long-term memory）+ 防误学约束（参考 Hermes Skill review prompt "什么坚决别写"4 条分类：环境性失败 / 负面工具断言 / session-specific transient errors / one-off task narratives）+ M2-C archive 流水线接口预留。**基础设施 Gate 期内完成**；触发策略 + 阈值调优等 M1 dogfood 数据反过来调。**Week 11-13，~3 周**。**唯一剩余项**。
 
 **Sprint Verification**：
 
 - 8 项按零债 6 条核验（无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留）
 - 每项 PR merge 前 K.K12 + J.13a baseline 回放无退化（≥ 5% 退化卡 PR）
 - 30 天稳定性观察期不被搅动（SLO 实时采集，破任一立刻 retro）
-- schema 变更（#3 迁移 0040 / #4 迁移 0041）**串行上 main**（先 #3 跑 1 周再上 #4），不并行降风险
+- schema 变更（#6 migration 0040 → #3 migration 0042 → #4 migrations 0043+0044）**串行上 main**，不并行降风险
+
+**进度（2026-05-28）**：**7/8 闭环**(#1 #2 #3 #4 #5 #6 #8 全部 shipped)；只剩 **#7 Memory 凝结引擎**未启动。
 
 **M1 期间需要做的事项**（仅启用 + 调参，非新能力开发）：
 
