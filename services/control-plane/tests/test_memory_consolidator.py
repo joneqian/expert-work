@@ -215,7 +215,7 @@ async def test_null_aux_model_single_path_parses() -> None:
 
 @pytest.mark.asyncio
 async def test_cluster_consolidate_writes_parent_and_links_sources() -> None:
-    worker, store, aux, audit_store = await _build_worker(
+    worker, store, _aux, audit_store = await _build_worker(
         aux_replies=[
             # SUB-PASS 1 reply for the cluster
             '{"keep": true, "summary": "user prefers dark mode", "reject_reason": null}'
@@ -238,7 +238,7 @@ async def test_cluster_consolidate_writes_parent_and_links_sources() -> None:
 
 @pytest.mark.asyncio
 async def test_cluster_reject_anti_mislearn_skips_write_and_audits() -> None:
-    worker, store, aux, audit_store = await _build_worker(
+    worker, store, _aux, audit_store = await _build_worker(
         aux_replies=[
             '{"keep": false, "summary": null, "reject_reason": "anti_mislearn:env_failure"}'
         ]
@@ -260,7 +260,7 @@ async def test_cluster_reject_anti_mislearn_skips_write_and_audits() -> None:
 async def test_lone_item_purge_classifies_noise_and_soft_deletes() -> None:
     # SUB-PASS 1 returns no clusters (single item, can't form cluster of 3);
     # SUB-PASS 2 reviews the lone item and classifies it noise.
-    worker, store, aux, audit_store = await _build_worker(
+    worker, store, _aux, audit_store = await _build_worker(
         aux_replies=[
             # SUB-PASS 2 — single-review noise verdict
             '{"is_noise": true, "category": "transient_error"}'
@@ -283,7 +283,7 @@ async def test_lone_item_purge_classifies_noise_and_soft_deletes() -> None:
 
 @pytest.mark.asyncio
 async def test_lone_item_reviewed_durable_stamps_last_reviewed_at() -> None:
-    worker, store, aux, audit_store = await _build_worker(
+    worker, store, _aux, audit_store = await _build_worker(
         aux_replies=['{"is_noise": false, "category": "durable"}']
     )
     _seed_transient(
@@ -307,7 +307,7 @@ async def test_lone_item_reviewed_durable_stamps_last_reviewed_at() -> None:
 @pytest.mark.asyncio
 async def test_already_reviewed_item_skipped_next_tick() -> None:
     # Pre-stamp last_reviewed_at so the second tick doesn't re-review.
-    worker, store, aux, audit_store = await _build_worker(aux_replies=[])
+    worker, store, aux, _audit_store = await _build_worker(aux_replies=[])
     _seed_transient(
         store,
         contents=["already reviewed"],
