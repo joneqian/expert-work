@@ -1656,14 +1656,364 @@ reason label allowlist(有限枚举,不暴露用户路径)— 跟 Sprint #1 orac
 
 ## 5. Sprint #4 — Curator 自动状态机(基础设施提前 + 启用 M1)
 
-> **本章节 stub** — Sprint #4 开工前补完。预计 Week 11-12。
+> **2026-05-28 完整设计**(原 Week 11-12 stub 填实)。基础设施 ~1 周本 Sprint 做完;启用阈值调参等 M1-K J.7b-1 agent 自创建上线后 2-4 周看真实膨胀率再调(默认 30/90 也许改 7/30,数据说话)。
 
-主要设计要点(占位)：
-- `SkillRow` 加 `pinned: bool` + `last_activity_at: timestamptz`
-- 新建 `services/control-plane/src/control_plane/skill_curator.py`：周期 worker 纯启发式三态转移
-- 默认阈值 30 天 → stale / 90 天 → archived，per-tenant 可配
-- Admin UI Skills page 加 pin 操作 + 状态显示
-- **启用调参等 M1-K J.7b-1 agent 自创建上线后 2-4 周再做**(本 Sprint 不动)
+### 5.1 背景:为什么不能不做
+
+helix M0 的 skill 状态(`draft/active/archived`)只能**人工切**。这在 M0 没问题 — 操作员手工管理 5-10 个 skill 撑得住。但 M1-K J.7b-1 上线后:
+
+- agent 自己创建 skill(`authored_by="agent"`)→ skill 库可能在几周内从十几个膨胀到几百个
+- 操作员手工 triage 不现实 — 没有"哪些还在用"的信号面
+- 旧 / 失败的 agent-authored skill 占用 UI / SDK list / orchestrator skill loader 的注意力
+
+→ **需要自动 lifecycle**:无 activity 的 skill 自动 `stale`,长期 `stale` 自动 `archived`。pin 是逃生舱:操作员认为某 skill"永远要在",pin 后 Curator 不动。
+
+### 5.2 范围 & 边界
+
+#### 5.2.1 In-scope
+
+1. **`SkillRow` schema 扩展** — `pinned: bool` + `last_used_at: timestamptz` + `state_changed_at: timestamptz`(后两个用于阈值计算 + audit)
+2. **Activity 跟踪** — agent build 时(`_load_skills`)+ skill_view 工具调用时,bump `last_used_at`(throttled 到每 skill 1 小时 1 次 SQL 写)
+3. **Curator worker** — 周期(每天 03:00 UTC)扫描所有 tenant + 应用启发式状态机:
+   - `active` + (`last_used_at < now - stale_days`) → `stale`(发 audit)
+   - `stale` + (`last_used_at < now - archive_days`) → `archived`(发 audit)
+   - 任一状态 + `pinned=true` → 不动
+   - `stale` 被 bind/view → 自动复活成 `active`(发 audit)
+   - `archived` 被 bind/view → 跳过 + warning log(需 manual unarchive)
+4. **per-tenant 阈值** — `tenant_config` 加 `skill_stale_days`(default 30,ge=1 le=365)+ `skill_archive_days`(default 90,ge=2 le=730,> stale_days)
+5. **Admin UI** — Skills 列表加 📌 pin 按钮 + "Pending stale" / "Auto-archived" 状态分组 + tooltip 显示距 stale/archive 还有 N 天
+6. **可观测** — `helix_uplift_curator_transition_total{from,to}` counter + `helix_uplift_curator_pinned_total` gauge + 4 recording rules + 2 alerts(active→stale surge / archived→active manual revive surge)
+7. **Runbook** — 新章节 `docs/runbooks/skill-curator.md`:阈值调参建议 + revive 流程 + 异常诊断
+
+#### 5.2.2 Out-of-scope(明确不做)
+
+- **LLM-based 智能 curation**(看 skill 内容判定相关性 / 合并相似 skill 等)— Curator 只跑启发式,LLM 留 Sprint #7+
+- **Cross-tenant skill consolidation**(合并多个租户重复 skill)— 违反多租户隔离原则
+- **Skill DELETE**(物理删除)— archive 是终态,不删数据;符合 [memory:zero-tech-debt](保留回溯能力)
+- **agent-side skill 删除策略**(agent 不应能删自己创建的 skill)— J.7b-1 控制面,不在 Curator scope
+- **跨 SkillVersion 状态**(不同 version 不同状态)— 状态在 Skill 层(已有设计),不在 SkillVersion 层
+
+#### 5.2.3 验收(Sprint Exit)
+
+参考 § 4.5 同款 6 条结尾门(per [memory:zero-tech-debt]):
+- 无 TODO/FIXME / 测试覆盖 ≥ 80% / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留
+- + Sprint #4 特有:
+  - Curator worker 在 fixture-driven test 跑过完整 active→stale→archived + stale→active(revive)+ pin 屏蔽 4 条状态机路径
+  - tenant_config patch API + Admin UI 阈值编辑 e2e 一遍
+
+### 5.3 架构
+
+#### 5.3.1 Mini-ADR U-25 — SkillRow schema 扩展
+
+**决策**:`SkillRow` 加 3 个字段:
+
+```python
+# packages/helix-persistence/src/helix_agent/persistence/models/skill.py
+class SkillRow(Base):
+    ...
+    # Capability Uplift Sprint #4 — migration 0043.
+    pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"),
+    )
+    # Last time this skill was either bound to an agent (build time) or
+    # read via the skill_view tool. Throttled to one write/hour/skill at
+    # the application layer to keep the write rate bounded under high
+    # agent-build / skill_view fan-out.
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    # State-change timestamp — bumped on every active↔stale / *→archived
+    # transition. Used by the runbook to answer "when did this skill go
+    # stale?" without joining the audit log.
+    state_changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()"),
+    )
+```
+
+**Backfill**(migration 0043 inline):
+- `pinned = false`
+- `last_used_at = updated_at`(已存在 skill 保留"最近一次显式改动" 作为最佳 activity estimate)
+- `state_changed_at = updated_at`
+
+**索引**:`ix_skill_curator_scan` ON `(tenant_id, status)` WHERE `status IN ('active', 'stale')` AND `pinned = false` — Curator 周期 worker 的扫描路径。
+
+#### 5.3.2 Mini-ADR U-26 — Curator worker 架构
+
+**决策**:复用 H.4 已有的 `scheduler.py` 模式,新建 `services/control-plane/src/control_plane/skill_curator.py`:
+
+```python
+# 周期 hook 注册在 app.py:
+scheduler.add_job(
+    skill_curator.run_once,
+    trigger="cron",
+    hour=3, minute=0,  # UTC 03:00 daily
+    id="skill_curator",
+    coalesce=True,
+    max_instances=1,
+)
+```
+
+**worker 内部**(pure heuristic,无 LLM):
+
+```python
+async def run_once(*, store: SkillStore, tenant_config: TenantConfigStore) -> CuratorRunSummary:
+    """One full sweep across all tenants. Idempotent — re-running has no
+    effect on already-transitioned rows since state_changed_at moves
+    monotonically."""
+    summary = CuratorRunSummary()
+    async for tenant_row in tenant_config.iter_all():
+        stale_days = tenant_row.skill_stale_days
+        archive_days = tenant_row.skill_archive_days
+        # Single SQL UPDATE per tenant per transition — RLS isolates;
+        # the `pinned = false` predicate is the safety belt.
+        n_to_stale = await store.curator_promote_active_to_stale(
+            tenant_id=tenant_row.tenant_id, stale_days=stale_days,
+        )
+        n_to_archive = await store.curator_promote_stale_to_archived(
+            tenant_id=tenant_row.tenant_id, archive_days=archive_days,
+        )
+        summary.tenant_count += 1
+        summary.active_to_stale += n_to_stale
+        summary.stale_to_archived += n_to_archive
+    record_curator_summary(summary)
+    return summary
+```
+
+**为什么是 UPDATE 不是 SELECT-then-UPDATE**:Curator 不需要每个 transition 都发独立 audit row — `state_changed_at` 列就是审计源。批量 UPDATE 一条 SQL 比 row-by-row 快几十倍 + 不会因为 audit 队列堵塞而停。
+
+**audit 仍发**,但是聚合形式:`record_curator_run_summary` 写一条 `audit` `action=SKILL_CURATOR_RUN`,details 含 `{active_to_stale: N, stale_to_archived: M, tenant_count: T}`。Per-skill 状态变更通过 `state_changed_at` 列 + 周期 `SKILL_CURATOR_RUN` 行联合定位。
+
+#### 5.3.3 Mini-ADR U-27 — Activity 跟踪(bind + view 双路径)
+
+**决策**:`_load_skills`(orchestrator build time)+ `skill_view`(orchestrator runtime)各自在 happy path 调 `store.record_activity(skill_id)`,内部 throttle 到每 skill 1 小时 1 次 SQL 写。
+
+**为什么 bind + view 都计**:
+- `lazy_load=false` skill body 直接进 system prompt,**不需要** `skill_view` 调用 — 只有 bind 信号
+- `lazy_load=true` skill 只在 agent 真的需要时 `skill_view` — bind 信号弱(可能 agent 加载了但没用)
+- 两者都计:bind 是"被引用"(必要条件)+ view 是"真的读了"(强信号)
+
+**Throttle 实现** — 同 skill 1 小时内多次 record_activity 只产生 1 次 SQL UPDATE:
+
+```python
+# services/control-plane/src/control_plane/skill_activity.py(新建)
+class ThrottledActivityRecorder:
+    """In-process throttle. Process-local — running multiple control-plane
+    instances behind a load balancer will produce up to N writes/hour
+    where N = instance count; that's acceptable for Curator's 30/90 day
+    decisions."""
+
+    def __init__(self, *, ttl_seconds: int = 3600) -> None:
+        self._last: dict[UUID, float] = {}
+        self._ttl = ttl_seconds
+        self._lock = asyncio.Lock()
+
+    async def maybe_record(self, store: SkillStore, *, skill_id: UUID, tenant_id: UUID) -> bool:
+        """Returns True if a SQL UPDATE actually fired."""
+        now = time.monotonic()
+        async with self._lock:
+            last = self._last.get(skill_id, 0.0)
+            if now - last < self._ttl:
+                return False
+            self._last[skill_id] = now
+        # Fire-and-forget — the agent run path must NOT block on this.
+        await store.bump_last_used_at(skill_id=skill_id, tenant_id=tenant_id)
+        return True
+```
+
+**Auto-revive(stale → active)集成在 SQL**:
+
+```sql
+-- store.bump_last_used_at SQL:
+UPDATE skill
+SET last_used_at = NOW(),
+    status = CASE WHEN status = 'stale' THEN 'active' ELSE status END,
+    state_changed_at = CASE WHEN status = 'stale' THEN NOW() ELSE state_changed_at END
+WHERE id = $1 AND tenant_id = $2 AND status IN ('active', 'stale');
+```
+
+`archived` 不在 `IN` 列表 → 自动跳过,WHERE 条件 0 行更新 → caller 应检测并发 warning log(`skill_view` 见 archived 直接 BLOCKED + log "archived skill loaded, manual unarchive required")。
+
+#### 5.3.4 Mini-ADR U-28 — tenant_config 阈值字段
+
+**决策**:`TenantConfigRecord` + `TenantConfigPatch` 加 2 字段:
+
+```python
+# packages/helix-protocol/src/helix_agent/protocol/tenant_config.py
+class TenantConfigRecord(BaseModel):
+    ...
+    # Capability Uplift Sprint #4 — Curator thresholds. Default
+    # 30 / 90 picked from external skill-marketplace observations;
+    # M1-K J.7b-1 will revisit after 2-4 weeks of real agent-self-create
+    # data. ge / le bounds mirror the migration CHECK constraints.
+    skill_stale_days: int = Field(default=30, ge=1, le=365)
+    skill_archive_days: int = Field(default=90, ge=2, le=730)
+```
+
+**Cross-field validation**(Pydantic `@model_validator`):`skill_archive_days > skill_stale_days`,否则 raise — 不能让一个 skill 在被标 stale 同一天就被 archive。
+
+**Migration 0044**(单独 migration,不混进 0043 — 表不同,关注点不同):
+- `tenant_config` 加 `skill_stale_days INTEGER NOT NULL DEFAULT 30 CHECK (skill_stale_days BETWEEN 1 AND 365)`
+- 同 `skill_archive_days`
+- 添加 row-level CHECK:`skill_archive_days > skill_stale_days`
+
+#### 5.3.5 Mini-ADR U-29 — Stale 自动复活 / Archived 手动 unarchive
+
+**决策**:
+- `stale → active`:auto,在 `bump_last_used_at` SQL 内 atomic(见 § 5.3.3)
+- `archived → ?`:需要 admin 显式 PATCH status,不会被 activity 触发
+
+**为什么不对称**:
+- `stale` 语义 = "睡着了" — 被人 wake up 应该立刻醒
+- `archived` 语义 = "搬进冷藏库" — 重新启用是审计事件,操作员要决策
+- 防御 J.7b-1 agent 误伤自己 — agent 自己创建的 skill 被 archive 后不应能因 agent 又跑了一次就复活,要操作员 review
+
+**`skill_view` 见 archived skill 的行为**:
+- 返回 `[BLOCKED: skill X is archived, contact admin to unarchive]`
+- 写 audit `action=SKILL_VIEW_BLOCKED_ARCHIVED`(per [memory:audit-literal-drift] 两处 Literal 同步)
+- 不影响 agent 继续跑(不抛异常)
+- 因为是冷路径(archived skill 极少被读),不 throttle log
+
+#### 5.3.6 Mini-ADR U-30 — Admin UI Pin + 状态分组
+
+**决策**:`apps/admin-ui/src/pages/SkillsList.tsx` + `SkillDetail.tsx` 加 3 个 surface:
+
+1. **SkillsList 状态列扩展** — 现有 `status` Tag 旁加 📌 (pinned) 图标 + 距离 stale/archive 的天数 hint:
+   ```
+   web_search   active 📌                       (永不 stale)
+   sql_query    active                          (距 stale 12 天)
+   slack_notify stale                           (距 archive 47 天)
+   old_skill    archived                        (2026-03-15 自动归档)
+   ```
+
+2. **SkillsList 顶部加状态分组 filter** — `All / Active / Pending stale (active + last_used > stale_days × 0.5)/ Stale / Archived` — 操作员一眼看见快进入 stale 的 skill
+
+3. **SkillDetail 加 📌 pin 按钮** — toggle pinned;高危 skill 不能 pin(防 agent 自创建的高危 skill 通过 pin 永久挂起 — 安全考虑)
+
+4. **Settings/Tenant Config 加阈值编辑** — 复用 H.4 PR 8 已有 Tenant Config UI;两个 InputNumber 字段 + cross-field validation 错误提示
+
+**新 testid**(同 PR C 风格):
+- `skill-pin-button` / `skill-pin-icon` / `skill-stale-eta` / `skills-filter-state-bucket`
+
+#### 5.3.7 Mini-ADR U-31 — 可观测
+
+**Metrics**(`packages/helix-common/src/helix_agent/common/uplift_metrics.py`):
+
+```python
+def record_curator_transition(*, from_state: Literal["active", "stale"], to_state: Literal["stale", "archived", "active"]) -> None:
+    """Bump by 1 — Curator worker SQL UPDATE row count rolled up to per-tenant."""
+
+def record_curator_pinned_total(*, count: int) -> None:
+    """Gauge — total pinned skills across all tenants."""
+
+def record_skill_view_archived_blocked() -> None:
+    """skill_view encountered an archived skill (cold path; expected rare)."""
+```
+
+**Recording rules**(`tools/observability/rules/uplift.yml` 新 `helix_uplift_curator` group):
+
+```yaml
+- record: helix:uplift:curator_active_to_stale_rate:1d
+  expr: sum(increase(helix_uplift_curator_transition_total{from_state="active",to_state="stale"}[1d]))
+
+- record: helix:uplift:curator_stale_to_archived_rate:1d
+  expr: sum(increase(helix_uplift_curator_transition_total{from_state="stale",to_state="archived"}[1d]))
+
+- record: helix:uplift:curator_stale_to_active_rate:1d
+  expr: sum(increase(helix_uplift_curator_transition_total{from_state="stale",to_state="active"}[1d]))
+
+- record: helix:uplift:skill_view_archived_blocked_rate:1h
+  expr: sum(rate(helix_uplift_skill_view_archived_blocked_total[1h]))
+```
+
+**Alerts**:
+
+```yaml
+- alert: HelixUpliftCuratorStaleSurge
+  expr: helix:uplift:curator_active_to_stale_rate:1d > 50
+  for: 1d
+  labels: { severity: P2 }
+  annotations:
+    summary: "Curator marked > 50 skills stale in last day"
+    description: "Unusually high stale rate — investigate whether activity tracking broke or a tenant's threshold is misconfigured"
+
+- alert: HelixUpliftSkillArchivedAccessAttempts
+  expr: helix:uplift:skill_view_archived_blocked_rate:1h > 0.1
+  for: 30m
+  labels: { severity: P2 }
+  annotations:
+    summary: "Agents trying to read archived skills > 6/hr"
+    description: "An agent's manifest probably references an auto-archived skill — operator should review and either unarchive or update the manifest"
+```
+
+#### 5.3.8 Mini-ADR U-32 — Audit Literal 双份同步(per [memory:audit-literal-drift])
+
+**新 audit actions**(同时改 protocol + control-plane 两处 Literal):
+
+```
+SKILL_CURATOR_RUN              # 周期 worker 一次 sweep 的 summary 行
+SKILL_AUTO_REVIVED             # stale → active(activity 触发)
+SKILL_VIEW_BLOCKED_ARCHIVED    # skill_view 见 archived 拒绝
+SKILL_PINNED                   # admin 显式 pin
+SKILL_UNPINNED                 # admin 显式 unpin
+```
+
+**5 个新 action**,两处必须同步。Pre-merge checklist 必须 grep 验证。
+
+### 5.4 数据流(综合)
+
+```
+agent build:
+  _load_skills → ThrottledActivityRecorder.maybe_record(skill_id)
+    │
+    ├─ Δt ≥ 1h:UPDATE skill SET last_used_at=NOW(), [stale→active if status=stale]
+    └─ Δt < 1h:no-op
+
+agent runtime:
+  skill_view(name) → resolve → if status=archived:return [BLOCKED] + log
+                              else: ThrottledActivityRecorder.maybe_record + 返回 content
+
+Curator(每天 03:00 UTC):
+  per tenant:
+    UPDATE skill SET status='stale',  state_changed_at=NOW()
+      WHERE status='active' AND pinned=false AND last_used_at < NOW() - stale_days
+    UPDATE skill SET status='archived', state_changed_at=NOW()
+      WHERE status='stale'  AND pinned=false AND last_used_at < NOW() - archive_days
+  record_curator_run_summary(...)
+  audit.write(SKILL_CURATOR_RUN, details=summary)
+
+admin manual:
+  PATCH /v1/skills/{id} {pinned: true}  → SKILL_PINNED audit
+  PATCH /v1/skills/{id} {status: "active"} on archived row → SKILL_STATUS_CHANGE(unarchive)
+```
+
+### 5.5 PR 拆分
+
+预计 ~1 周(5 个工作日),小 sprint 单 impl PR 足够:
+
+1. **PR A — `uplift/4-curator-design`**(本 PR):仅本 § 5 + memory(如需);无代码。
+2. **PR B — `uplift/4-curator-impl`**:migration 0043/0044 + protocol/persistence schema 扩展 + tenant_config 扩展 + skill_curator.py worker + scheduler hook + ThrottledActivityRecorder + _load_skills/skill_view 集成 + Admin UI(SkillsList + SkillDetail + TenantConfig)+ observability + runbook + 单测 + 集成测 + e2e 一遍。
+
+### 5.6 Sprint Exit 验收(checklist)
+
+参照 § 4.5 6 条 base + Sprint #4 特有 6 条:
+
+- [ ] **migration 0043**(SkillRow)+ **0044**(tenant_config)backfill 跑通,M0 deployed rows pinned=false / last_used_at=updated_at
+- [ ] **U-27 Activity 跟踪** — bind + view 双路径都 record;同 skill 1 小时内不超 1 次 SQL UPDATE(throttle 测试覆盖)
+- [ ] **U-26 Curator worker 4 条状态机路径** — active→stale / stale→archived / pin 屏蔽 / stale→active(auto-revive)分别有 fixture-driven test
+- [ ] **U-29 archived skill view 拒绝**:返回 `[BLOCKED]` + audit `SKILL_VIEW_BLOCKED_ARCHIVED` + 不抛异常 + 不再触发 auto-revive
+- [ ] **U-30 Admin UI** — 📌 pin 按钮 + 状态分组 filter + Tenant Config 阈值编辑 + Playwright e2e
+- [ ] **U-31 可观测** — `helix_uplift_curator_transition_total` 4 个 from→to 组合 + 2 alerts 加入
+- [ ] **U-32 [memory:audit-literal-drift]**:5 个新 action(SKILL_CURATOR_RUN / AUTO_REVIVED / VIEW_BLOCKED_ARCHIVED / PINNED / UNPINNED)protocol + control-plane 两处同步
+- [ ] runbook `docs/runbooks/skill-curator.md`:阈值调参建议 + revive 流程 + Stale Surge 诊断 + Archived Access 诊断
+- [ ] CI 全绿(ruff / mypy / pre-commit / CodeQL / pytest / integration / playwright)
+- [ ] 单测覆盖 ≥ 80%(含 throttle / SQL UPDATE 状态机 / auto-revive / 阈值 cross-field validation)
+- [ ] [memory:ruff-strict-lint-traps] preflight 跑过
+- [ ] [memory:codeql-unused-global] preflight — 不留预备性 module-level 名字
+
+### 5.7 与其他 Sprint 的依赖关系
+
+- **依赖**:零(Curator 独立基础设施)
+- **被依赖**:M1-K J.7b-1 agent 自创建上线时 Curator 已就绪;无 Curator,J.7b-1 上线 1-2 个月就会出现 skill 库膨胀
 
 ---
 

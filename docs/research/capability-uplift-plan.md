@@ -185,11 +185,15 @@ Week 11                 Week 12                 Week 13
 
 ### Week 11-12 — #4 Curator 自动状态机（基础设施完整）
 
-**实施面**：
-- `SkillRow` 加 `pinned: bool` + `last_activity_at: timestamptz`（迁移 0041）
-- 新建 `services/control-plane/src/control_plane/skill_curator.py`：周期 worker，纯启发式（无 LLM）三态转移
-- 默认阈值 30 天 → stale / 90 天 → archived，per-tenant 可配
-- Admin UI Skills page 加 pin 操作 + stale/archived 状态显示
+> 2026-05-28 设计落定 — 详细 Mini-ADRs U-25~U-32 见 [`STREAM-UPLIFT-DESIGN.md` § 5](../streams/STREAM-UPLIFT-DESIGN.md#5-sprint-4--curator-自动状态机基础设施提前--启用-m1)。
+
+**实施面**（PR A 设计 + PR B 实施）：
+- `SkillRow` 加 `pinned: bool` + `last_used_at: timestamptz` + `state_changed_at: timestamptz`（migration 0043）
+- `tenant_config` 加 `skill_stale_days` / `skill_archive_days`（migration 0044）
+- 新建 `services/control-plane/src/control_plane/skill_curator.py`：每天 03:00 UTC 周期 worker，纯启发式（无 LLM）四条状态机路径（active→stale、stale→archived、pin 屏蔽、stale→active 自动复活）
+- `ThrottledActivityRecorder`：bind + view 双路径都计 activity，throttle 到每 skill 1 小时 1 次 SQL UPDATE
+- Admin UI Skills page 加 📌 pin 按钮 + stale/archived 分组 filter + 距 stale ETA hint；Tenant Config 加阈值编辑
+- 5 个新 audit action + 4 个 recording rules + 2 alerts
 
 **完成 = 基础设施 + 默认阈值**。**启用 = J.7b-1 上线后跑一段看真实数据再调**（不是阻塞，而是"启用了但 30/90 阈值可能 J.7b-1 后调成 7/30"）。
 
