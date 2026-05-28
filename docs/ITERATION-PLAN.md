@@ -737,7 +737,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 > **2026-05-21 补加**（J.7a 启动前 deer-flow 对比调研后用户复审）：M0 J.7a 锁 8 项进 M0 scope；以下 8 项 (c) 红线推迟到 M1，必须显式落 backlog 不丢失（按 [memory:no-design-choice-disguise] + [memory:zero-tech-debt]）。参考：STREAM-J-DESIGN § 15 + Mini-ADR J-23（2026-05-21 修订）。
 
-- [ ] **J.7b-1 agent 进化工具**（`author_skill` / `refine_skill`）—— agent 在 run 期沉淀新 skill 进 draft；用户审批后切 active；带 audit + 速率限制。**[2026-05-27 关联]** 上线后启动 **Capability Uplift Sprint #4 Curator 自动状态机调参**（基础设施已在 Gate 期完成，跑 2-4 周看真实 skill 库膨胀率，按需把默认 30/90 阈值改 7/30）；**防误学约束**优先参考 Hermes Skill review prompt "什么坚决别写" 4 条分类（已在 Sprint #7 沉淀进 memory consolidator，可同源复用）
+- [ ] **J.7b-1 agent 进化工具**（`author_skill` / `refine_skill` / `fork_skill` / `propose_skill_to_tenant`）—— agent 在 run 期沉淀新 skill 进 draft；用户审批后切 active；带 audit + 速率限制。**[2026-05-27 关联]** 上线后启动 **Capability Uplift Sprint #4 Curator 自动状态机调参**（基础设施已在 Gate 期完成，跑 2-4 周看真实 skill 库膨胀率，按需把默认 30/90 阈值改 7/30）；**防误学约束**优先参考 Hermes Skill review prompt "什么坚决别写" 4 条分类（已在 Sprint #7 沉淀进 memory consolidator，可同源复用）。**[2026-05-28 设计预约定]** 关键 visibility / fork / promote 三大支柱见 `STREAM-J-DESIGN.md` § 15.7（agent 创建的 skill 默认 `agent_private`、fork 是经验复用通路、promote 走 admin 审）；schema 加 3 列 `visibility` / `created_by_agent_id` / `forked_from` + 6 个新 audit actions；M1-K design phase 必须基于 § 15.7 5 条准入条件展开
 - [ ] **J.7b-2 `code` 字段执行边界** —— `SkillVersion.code: str | None` 解禁；依赖 M1-F2 Python 插槽 + sandbox（gVisor 7/7 用例通过）+ AST 静态校验
 - [ ] **J.7b-3 Progressive / lazy skill loading** —— agent 引用时才注入 skill prompt（非 build-time 静态拼）；与 M0 静态拼共存模式可配
 - [ ] **J.7b-4 LLM-based admin content moderation** —— 升级 M0 的正则 deny-list 到 LLM 审核（用 Haiku judge 模式）；依赖 stable LLM router + budget cap

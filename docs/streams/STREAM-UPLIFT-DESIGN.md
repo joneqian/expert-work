@@ -1214,7 +1214,7 @@ async def update_skill_status(skill_id: UUID, payload: SkillStatusPatch, request
 
 **M0 行为**:所有 skill 操作已经是 admin-only(没有 non-admin actor),gate **几乎不触发**(no-op)。**这是预防性部署 — 为 M1-K J.7b-1 agent self-authored skill 提前布防**。
 
-**M1-K 行为**:agent 自创建的 skill 默认 `authored_by="agent"`,如果含高危工具,**必须人审才能 active**(防 agent 给自己装 RCE 后门)。
+**M1-K 行为**:agent 自创建的 skill 默认 `authored_by="agent"`,如果含高危工具,**必须人审才能 active**(防 agent 给自己装 RCE 后门)。**[2026-05-28 J.7b-1 设计预约定 cross-ref]**:U-24 gate 仅是 J.7b-1 安全链路的一环 — 完整的 visibility / fork / promote 三大支柱见 `STREAM-J-DESIGN.md` § 15.7。agent 创建的 skill 默认 `agent_private` visibility,即使过了 U-24 gate 也只有创建者 agent 可见,需 `propose_skill_to_tenant` + admin 审才能扩到 tenant 共享。
 
 **Admin UI 配套(U-20 扩展)**:
 - file tree / skill detail 顶栏加 `🔒 High-risk` 徽章

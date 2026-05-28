@@ -1114,6 +1114,91 @@ J.7b 扩展：含 `scripts/` `templates/` `references/` 子目录。
 
 > **对标**：deer-flow skill installer + 进化 + 文件系统存储 + Markdown SKILL.md；hermes 自主创建 loop。helix M0 关键独立设计：**(a) 进化产物默认 draft + 需启用** 防无界自改失控；**(b) typed DB schema** 不丢字段；**(c) build-time tool 冲突 reject** 防 agent 拿到意外 tool；**(d) per-manifest 启停**天然按 agent 隔离；**(e) telemetry 双 counter** 支持运行时观察。J.7b 借鉴 deer-flow `skill_manage_tool` 进化模式 + `.skill` ZIP supporting files 扩展。完整对比见 `.claude/plans/witty-hugging-widget.md`（2026-05-21 J.7a 启动前调研）。
 
+### 15.7 J.7b-1 设计预约定（visibility / fork / promote 三大支柱）
+
+> **2026-05-28 用户提问触发** — agent 创建的 skill 谁能用 / agent 能改哪些 skill。问题暴露 J.7b-1 原始 backlog 描述（`author_skill` / `refine_skill` 两工具 + draft 闸门）**缺少归属 + 共享 + 修改权矩阵**，会让 M1-K design phase 重新走一轮决策。本节先定方向，M1-K 实施 PR 在此基础上展开。
+
+> **状态**：纯设计预约定，**0 行代码**。实际 schema / 工具 / 审批 surface 全部在 M1-K J.7b-1 实施 PR 内交付。
+
+#### 15.7.1 三大支柱
+
+helix 形态是 **per-user persistent agent**（[memory:target-product-form]），agent 学到的 skill 大部分是 user-specific 偏好 / context，少部分是团队通用知识。如果 default tenant-shared，会污染同事 + 泄露用户偏好，违反基础信任。三个支柱守住价值线：
+
+1. **Default `agent_private`**：agent 创建的 skill 默认仅创建者 agent 可见 + 可用（不像 J.7a admin 创建的 skill 是 tenant 维度自动可见）。
+2. **Fork 是经验复用的核心通路**：agent 看见 tenant-shared 或 admin 创建的 skill，**能 fork 一份到自己 scope 改造**，不影响源 — 类比 GitHub fork。这是把 skill 库变成 commons 的关键设计。
+3. **Promote 是显式审批**：agent 觉得"这条经验值得入团队库"，发起 `propose_skill_to_tenant(skill_id, reason)` → tenant admin 审 → 通过后 visibility 从 `agent_private` → `tenant`。Promote 不是 publish（publish 是 status → active，由 U-24 publish gate 把守，正交维度）。
+
+#### 15.7.2 数据模型扩展（M1-K J.7b-1 落地，本节列契约）
+
+`Skill` 加 3 列（migration 待定，先占编号 `0045_skill_authorship`）：
+
+```python
+class Skill(BaseModel):
+    ...
+    # M1-K J.7b-1 — visibility 维度，与 lifecycle status 正交。
+    # ``agent_private`` → 仅 created_by_agent_id 的 agent 可读 + 可引用
+    # ``tenant`` → 同 tenant 任何 agent 可读 + 可引用（J.7a admin 创建的 skill
+    #             默认就是 tenant 维度，相当于上来就 tenant）
+    visibility: Literal["agent_private", "tenant"] = "tenant"
+    # 创建者 agent id；human 创建为 NULL；fork 来的 skill 填新 owner agent id。
+    created_by_agent_id: UUID | None = None
+    # Fork 谱系。``None`` 表示原创；非空 = 从 source_skill_id fork 来的。
+    # Fork 不复用 SkillVersion（D3 immutability），fork 时 copy 当前 latest_version
+    # 内容 + supporting_files 到新 Skill 的 v1（authored_by="agent"）。
+    forked_from: UUID | None = None
+```
+
+#### 15.7.3 修改权操作矩阵
+
+| skill 来源 vs agent 操作 | `refine_skill`（改产生新 version） | `fork_skill` | `archive_skill` | `propose_promote` | `delete` | `pin` | `status → active` |
+|------|-----|-----|-----|-----|-----|-----|-----|
+| **自己 author**（`created_by_agent_id == self`） | ✅ | n/a | ✅ | ✅（仅 agent_private） | ❌ | ❌ | ❌（走 U-24 + 默认人审） |
+| **其他 agent author（tenant-shared）** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **admin/human author** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **system / J.7b-5 public** | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+**判定规则**：`agent 可操作 = (authored_by == "agent" AND created_by_agent_id == self.id) AND 操作 ∈ {refine, archive, propose_promote}` + `fork` 对任何 visible skill 开放。所有"提权类"操作（delete / pin / publish→active）admin-only。
+
+理由收紧：
+- agent **不能改 admin / human skill** — platform-curated 内容是公司 policy / SOP，agent 改了违反规则
+- agent **不能改其他 agent 的 skill** — 防 agent 间接破坏（A 改 B 用的 skill 里塞 prompt injection）
+- agent **不能 delete** — Curator 90 天后自动 archive 已足够回收 + 数据保留可追溯
+- agent **不能 pin** — Sprint #4 已加 pin 必 admin（高危）+ 一般情况 agent 无 admin role 自然 403；保持
+- agent **不能 status→active** — Sprint #3 U-24 已把守（高危 skill 必 admin）；M1-K J.7b-1 实施时建议**所有 agent-authored skill 默认走 admin 审**（不仅高危）
+
+#### 15.7.4 新增 audit actions（per [memory:audit-literal-drift]）
+
+```
+SKILL_AUTHORED_BY_AGENT       # agent 通过 author_skill 创建新 skill
+SKILL_REFINED_BY_AGENT        # agent 通过 refine_skill 改自己 skill（产生新 version）
+SKILL_FORKED                  # agent 通过 fork_skill 复制别人 skill 到自己 scope
+SKILL_PROMOTE_REQUESTED       # agent 通过 propose_skill_to_tenant 发起 promote
+SKILL_PROMOTE_APPROVED        # tenant admin 审过 promote → visibility 改 tenant
+SKILL_PROMOTE_REJECTED        # tenant admin 拒 promote → 保持 agent_private
+```
+
+protocol AuditAction StrEnum 单源（M1-K J.7b-1 实施时一并加）。
+
+#### 15.7.5 与已有机制的衔接
+
+| 已有机制 | 与 J.7b-1 的关系 |
+|---------|------------------|
+| U-24 high-risk publish gate（Sprint #3） | 透明复用 — agent author 高危 skill → DRAFT → propose active → admin 审（gate 自动触发） |
+| Curator（Sprint #4） | agent_private skill 也走 Curator stale/archive，但 `created_by_agent_id` 列让 UI 能 filter "看 agent X 创建的" |
+| Sprint #4 high-risk pin 防御 | agent 创建后 pin 工具不可调（无 admin role）— 自然封死自我提权路径 |
+| J.7b-5 system skill 库 | system 是 visibility=`tenant` + tenant_id 是平台租户的特殊形态；fork_skill 对 system skill 同样有效 |
+| J.7a 现有 admin-created skill | visibility 字段默认 `tenant`，行为无变化（M0 部署的 skill 保持现状） |
+
+#### 15.7.6 M1-K design phase 准入条件
+
+J.7b-1 实施 PR 启动前，design PR 必须基于本节扩展以下：
+
+- [ ] `propose_promote` 审批流细化：admin 一票否决 vs 多 admin 投票 vs 自动通过条件
+- [ ] Fork 行为细化：fork 的 skill 名字默认 `{原名}-fork-{agent短id}` 还是 agent 自命名
+- [ ] 速率限制：per-agent 每小时 author / refine / fork 上限（防 agent 自我爆炸创建）
+- [ ] 防误学约束：agent author skill 时的 LLM judge prompt（参考 Hermes Skill review prompt "什么坚决别写" 4 条 — environment failure / negative tool assertions / session-specific transients / one-off narratives）
+- [ ] Admin UI:agent-authored skill 在 SkillsList 是单独 tab 还是混在主列表 + filter
+
 ---
 
 ## 16. J.10 — 调度 / 触发
