@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<!--
+  Mockup 10b — Skill Detail(dual-pane editor)
+  ============================================================
+  对应 Capability Uplift Sprint #3 PR C(Mini-ADR U-20)。
+  PR B 落 backend(supporting_files JSONB + PUT/DELETE/GET per-file +
+  drift detect + high_risk gate),PR C 落 Admin UI:
+
+  - file tree(SKILL.md pinned + supporting files 按 top-level dir 分组)
+  - Monaco editor(view / edit / DiffEditor)+ 5 mutation 路径
+  - 🔒 High-risk 徽章(Mini-ADR U-24)+ 非 admin Activate gating
+  - Lazy badge(Mini-ADR U-15)— "body 通过 skill_view 按需拉取"
+
+  Tokens used:
+    --hx-color-brand-500 (Lazy badge, cyan accents)
+    --hx-status-danger-{bg,fg} (High-risk warning, 🔒 markers)
+    --hx-font-mono (file tree paths, version tags, editor body)
+    --hx-surface-bg/base/hover (dual-pane card backgrounds)
+    --hx-text-primary/secondary/tertiary (text hierarchy)
+
+  Antd 5 mapping(实施时):
+    <Tree>             → file tree(SKILL.md pinned + 分组)
+    @monaco-editor/react → Editor + DiffEditor(view/edit/diff)
+    <Modal>            → AddFileModal / RenameModal / DeleteConfirmModal
+    <Select>           → status select(active 选项含 disabled 状态)
+    <Tag color="error">→ 🔒 High-risk
+    <Tag color="blue"> → Lazy / Eager
+    <Alert type="warn">→ "High-risk warning" 横幅
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Skill Detail · api_debug — helix Admin</title>
+  <link rel="stylesheet" href="./shared/tokens.css" />
+  <link rel="stylesheet" href="./shared/shell.css" />
+  <style>
+    /* Hero + breadcrumb */
+    .breadcrumb {
+      display: flex; align-items: center; gap: var(--hx-space-1);
+      font-size: var(--hx-font-size-sm); color: var(--hx-text-tertiary);
+      margin-bottom: var(--hx-space-2);
+    }
+    .breadcrumb code {
+      font-family: var(--hx-font-mono); font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-secondary);
+      background: var(--hx-surface-hover);
+      padding: 2px 6px; border-radius: var(--hx-radius-sm);
+    }
+    .breadcrumb__sep { color: var(--hx-text-quaternary); }
+
+    .hero {
+      display: flex; align-items: center; gap: var(--hx-space-3);
+      flex-wrap: wrap; margin-bottom: var(--hx-space-3);
+    }
+    .hero h1 {
+      margin: 0; font-family: var(--hx-font-mono);
+      font-size: 20px; color: var(--hx-text-primary);
+    }
+    .hero__spacer { flex: 1; }
+    .hero__status {
+      display: flex; align-items: center; gap: var(--hx-space-2);
+      font-size: var(--hx-font-size-sm); color: var(--hx-text-secondary);
+    }
+
+    /* Metadata card */
+    .meta-card {
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-md);
+      padding: var(--hx-space-3);
+      margin-bottom: var(--hx-space-3);
+    }
+    .meta-card__title {
+      font-size: var(--hx-font-size-sm); font-weight: var(--hx-font-weight-medium);
+      color: var(--hx-text-secondary); margin-bottom: var(--hx-space-2);
+    }
+    .meta-card dl {
+      display: grid; grid-template-columns: 160px 1fr;
+      row-gap: 8px; column-gap: 16px; margin: 0;
+      font-size: var(--hx-font-size-sm);
+    }
+    .meta-card dt { color: var(--hx-text-tertiary); }
+    .meta-card dd { margin: 0; }
+
+    /* High-risk warning alert */
+    .warn-alert {
+      display: flex; align-items: center; gap: var(--hx-space-2);
+      background: var(--hx-status-warning-bg);
+      border: 1px solid var(--hx-status-warning-fg);
+      color: var(--hx-status-warning-fg);
+      padding: var(--hx-space-2) var(--hx-space-3);
+      border-radius: var(--hx-radius-sm);
+      margin-bottom: var(--hx-space-2);
+      font-size: var(--hx-font-size-sm);
+    }
+
+    /* Version bar */
+    .version-bar {
+      display: flex; align-items: center; gap: var(--hx-space-2);
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-md);
+      padding: var(--hx-space-2) var(--hx-space-3);
+      margin-bottom: var(--hx-space-3);
+    }
+    .version-bar__label {
+      font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary);
+    }
+    .version-bar__picker {
+      font-family: var(--hx-font-mono); font-size: var(--hx-font-size-sm);
+      background: var(--hx-surface-hover);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      padding: 4px 10px;
+      display: inline-flex; align-items: center; gap: var(--hx-space-1);
+    }
+    .version-bar__spacer { flex: 1; }
+
+    /* Dual pane */
+    .dual-pane {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: var(--hx-space-3);
+      align-items: start;
+    }
+    .tree-card, .editor-card {
+      background: var(--hx-surface-base);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-md);
+      padding: var(--hx-space-3);
+    }
+    .tree-card__title {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: var(--hx-font-size-sm); font-weight: var(--hx-font-weight-medium);
+      color: var(--hx-text-secondary);
+      margin-bottom: var(--hx-space-2);
+    }
+    .tree {
+      font-size: var(--hx-font-size-sm);
+    }
+    .tree__node {
+      padding: 4px 6px; border-radius: var(--hx-radius-sm);
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--hx-font-mono); font-size: var(--hx-font-size-xs);
+      color: var(--hx-text-secondary);
+      cursor: pointer;
+    }
+    .tree__node:hover { background: var(--hx-surface-hover); }
+    .tree__node--selected {
+      background: var(--hx-surface-hover);
+      color: var(--hx-text-primary);
+    }
+    .tree__group { color: var(--hx-text-tertiary); padding-left: 6px; }
+    .tree__indent { padding-left: 20px; }
+    .tree__add {
+      color: var(--hx-text-tertiary); margin-top: var(--hx-space-2);
+      border-top: 1px dashed var(--hx-border-subtle);
+      padding-top: var(--hx-space-2);
+    }
+
+    /* Editor */
+    .editor-card__header {
+      display: flex; align-items: center; gap: var(--hx-space-2);
+      margin-bottom: var(--hx-space-2);
+    }
+    .editor-card__path {
+      font-family: var(--hx-font-mono); font-size: var(--hx-font-size-sm);
+      font-weight: var(--hx-font-weight-medium); color: var(--hx-text-primary);
+    }
+    .editor-card__meta {
+      font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary);
+    }
+    .editor-card__spacer { flex: 1; }
+    .monaco-stub {
+      background: var(--hx-surface-bg);
+      border: 1px solid var(--hx-border-subtle);
+      border-radius: var(--hx-radius-sm);
+      padding: var(--hx-space-3);
+      font-family: var(--hx-font-mono);
+      font-size: var(--hx-font-size-sm);
+      color: var(--hx-text-secondary);
+      min-height: 320px;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+    .editor-card__actions {
+      display: flex; justify-content: flex-end; gap: var(--hx-space-2);
+      margin-top: var(--hx-space-2);
+    }
+
+    /* Badges */
+    .badge-risk {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--hx-status-danger-bg);
+      color: var(--hx-status-danger-fg);
+      border: 1px solid var(--hx-status-danger-fg);
+      font-size: var(--hx-font-size-xs);
+      padding: 2px 8px;
+      border-radius: var(--hx-radius-pill);
+    }
+    .badge-lazy {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: rgba(6, 182, 212, 0.12);
+      color: var(--hx-color-brand-500);
+      border: 1px solid var(--hx-color-brand-500);
+      font-size: var(--hx-font-size-xs);
+      padding: 2px 8px;
+      border-radius: var(--hx-radius-pill);
+    }
+    .badge-eager {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--hx-surface-hover);
+      color: var(--hx-text-secondary);
+      font-size: var(--hx-font-size-xs);
+      padding: 2px 8px;
+      border-radius: var(--hx-radius-pill);
+    }
+
+    /* Status select hint(disabled active option) */
+    .gate-hint {
+      font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary);
+      margin-top: 4px;
+    }
+
+    .demo-toggle { position: fixed; bottom: 24px; right: 24px; z-index: 100; }
+  </style>
+</head>
+<body>
+  <div class="hx-app">
+    <aside class="hx-sidebar">
+      <div class="hx-sidebar__brand"><span class="hx-sidebar__glyph">⟁</span><span>helix</span></div>
+      <nav class="hx-sidebar__nav">
+        <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
+        <a class="hx-sidebar__item" href="./09-runs-list.html">Runs</a>
+        <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+        <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
+        <a class="hx-sidebar__item" href="./10-skills.html" aria-current="page">Skills</a>
+        <a class="hx-sidebar__item" href="./11-triggers.html">Triggers</a>
+        <a class="hx-sidebar__item" href="./12-audit.html">Audit</a>
+      </nav>
+    </aside>
+
+    <header class="hx-topbar">
+      <button class="hx-topbar__tenant"><span>Tenant: acme</span></button>
+      <button class="hx-topbar__cmdk"><span>Search or jump</span><span class="hx-kbd">⌘K</span></button>
+      <div class="hx-topbar__spacer"></div>
+    </header>
+
+    <main class="hx-main">
+      <div class="hx-main__container">
+        <div class="breadcrumb">
+          <a href="./10-skills.html">Skills</a>
+          <span class="breadcrumb__sep">›</span>
+          <code>api_debug</code>
+        </div>
+
+        <div class="hero">
+          <span style="font-size: 20px;">📄</span>
+          <h1>api_debug</h1>
+          <span class="hx-badge hx-badge--warning">draft</span>
+          <span class="hx-badge">v3</span>
+          <span class="badge-risk">⚠ 🔒 High-risk</span>
+          <span class="hero__spacer"></span>
+          <div class="hero__status">
+            <span>切换状态</span>
+            <select class="hx-select" style="min-width: 160px;">
+              <option value="draft" selected>draft</option>
+              <option value="active" disabled>active 🔒</option>
+              <option value="archived">archived</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="warn-alert">
+          ⚠ 本版本为高危(声明了 <code style="font-family: var(--hx-font-mono);">exec_python</code> + <code style="font-family: var(--hx-font-mono);">http</code>,且带 <code style="font-family: var(--hx-font-mono);">scripts/</code> 文件)。Activate 前请仔细审查 supporting files 和工具列表 — 联系 tenant admin 才能激活。
+        </div>
+
+        <!-- Metadata card -->
+        <div class="meta-card">
+          <div class="meta-card__title">Metadata</div>
+          <dl>
+            <dt>Category</dt><dd>ops</dd>
+            <dt>Description</dt><dd>Inspect HTTP / gRPC requests + run diagnostics.</dd>
+            <dt>Tools</dt><dd>
+              <span class="hx-badge">exec_python</span>
+              <span class="hx-badge">http</span>
+            </dd>
+            <dt>Authored by</dt><dd>human</dd>
+            <dt>Version</dt><dd>
+              <span class="hx-badge" style="font-family: var(--hx-font-mono);">v3</span>
+              &nbsp;<span class="badge-lazy">⚡ Lazy</span>
+              &nbsp;<span class="badge-risk">🔒 High-risk</span>
+            </dd>
+            <dt>Created</dt><dd>2026-05-26 11:23:45</dd>
+          </dl>
+        </div>
+
+        <!-- Version bar -->
+        <div class="version-bar">
+          <span class="version-bar__label">Version</span>
+          <span class="version-bar__picker">
+            v3 <span style="color: var(--hx-text-tertiary);">(latest)</span> ⚡ 🔒 ▾
+          </span>
+          <span class="version-bar__spacer"></span>
+          <button class="hx-btn hx-btn--secondary hx-btn--sm">⬇ Export ZIP</button>
+        </div>
+
+        <!-- Dual pane -->
+        <div class="dual-pane">
+          <!-- Left: file tree -->
+          <div class="tree-card">
+            <div class="tree-card__title">
+              <span>文件</span>
+              <span class="badge-lazy">⚡ Lazy</span>
+            </div>
+            <div class="tree">
+              <div class="tree__node">📄 SKILL.md</div>
+
+              <div class="tree__group">📁 reference/</div>
+              <div class="tree__node tree__indent tree__node--selected">📄 error_codes.md</div>
+              <div class="tree__node tree__indent">📄 api_overview.md</div>
+
+              <div class="tree__group">📁 scripts/</div>
+              <div class="tree__node tree__indent">📄 diagnose.py</div>
+
+              <div class="tree__node tree__add">＋ 添加文件</div>
+            </div>
+          </div>
+
+          <!-- Right: editor -->
+          <div class="editor-card">
+            <div class="editor-card__header">
+              <span class="editor-card__path">reference/error_codes.md</span>
+              <span class="editor-card__meta">Size: 1842 · MIME: text/markdown</span>
+              <span class="editor-card__spacer"></span>
+              <span class="editor-card__meta">⊟ 对比 server 显示 diff</span>
+              <input type="checkbox" checked />
+            </div>
+
+            <div class="monaco-stub"># Error codes reference
+
+| Code | Meaning | Common cause |
+|------|---------|--------------|
+| E001 | Invalid auth | Bearer 过期或被拒 |
+| E002 | Rate limit | 单租户 QPS &gt; 100 |
+| E003 | Tenant isolation breach | 跨租户读 — 立即上报 SecOps |
+| E100 | Tool not allowlisted | manifest tools_allowlist 漏配 |
+| E120 | Skill drift detected | content_hash mismatch — 几乎必是 SQL 直写攻击 |
+
+调用约定:
+1. 任何工具调用先检查返回的 envelope
+2. envelope.success === false → 查 envelope.error.code
+3. ...</div>
+
+            <div class="editor-card__actions">
+              <button class="hx-btn hx-btn--danger hx-btn--sm">🗑 删除</button>
+              <button class="hx-btn hx-btn--secondary hx-btn--sm">✎ 重命名</button>
+              <button class="hx-btn hx-btn--secondary hx-btn--sm">— 取消</button>
+              <button class="hx-btn hx-btn--primary hx-btn--sm">💾 保存</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="gate-hint" style="margin-top: var(--hx-space-3);">
+          所有改动都会生成新的不可变 version;旧 version 保留以便回滚。状态切到 <code style="font-family: var(--hx-font-mono);">active</code> 时,若 latest version 标记为高危,非 admin 用户会被 backend 直接拒绝(U-24 publish gate)。
+        </p>
+      </div>
+    </main>
+  </div>
+
+  <div class="demo-toggle">
+    <button class="hx-btn hx-btn--ghost hx-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
+  </div>
+</body>
+</html>

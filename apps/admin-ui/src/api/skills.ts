@@ -29,6 +29,25 @@ export interface SkillRecord {
   updated_at: string;
 }
 
+/** Metadata for one supporting file on a skill version.
+ *
+ *  Capability Uplift Sprint #3 (Mini-ADR U-16/U-20). The version detail
+ *  response carries metadata only — the file's base64 ``content`` is
+ *  fetched lazily through :func:`getSupportingFile` when the user clicks
+ *  a path in the file tree. Keeps version-list responses cheap even when
+ *  a skill has megabytes of supporting files.
+ */
+export interface SupportingFileMeta {
+  size: number;
+  mime: string;
+}
+
+export interface SupportingFileBody extends SupportingFileMeta {
+  /** Base64-encoded raw bytes. UTF-8 text → ``atob`` to render; binary
+   *  → preview as ``[BINARY: ...]`` placeholder per Admin UI design. */
+  content: string;
+}
+
 export interface SkillVersion {
   id: string;
   skill_id: string;
@@ -39,6 +58,18 @@ export interface SkillVersion {
   category: string;
   required_models: string[];
   authored_by: string;
+  /** Path → metadata. Empty object when the version has no supporting
+   *  files (e.g., versions created via the JSON-API ``POST .../versions``
+   *  endpoint instead of ZIP import). */
+  supporting_files: Record<string, SupportingFileMeta>;
+  /** Mini-ADR U-15 — when ``true``, body is fetched via ``skill_view``
+   *  tool at agent runtime instead of being eager-loaded into the system
+   *  prompt. UI shows a debug badge. */
+  lazy_load: boolean;
+  /** Mini-ADR U-24 — version declares any of ``exec_python``/
+   *  ``exec_shell``/``http`` OR has a ``scripts/*`` supporting file.
+   *  Activate flow requires admin role + UI shows a 🔒 badge. */
+  high_risk: boolean;
   created_at: string;
 }
 
@@ -175,4 +206,112 @@ export async function exportSkillVersion(
     { responseType: "blob" },
   );
   return response.data;
+}
+
+// ─── Capability Uplift Sprint #3 (Mini-ADR U-17/U-20) ───────────────────
+// Single-file supporting-files mutation API. Each call creates a NEW
+// SkillVersion (preserves D3 immutability); callers should navigate to
+// the new version after the response.
+
+function encodeFilePath(filePath: string): string {
+  // Mirror FastAPI's ``{path:path}`` behavior: keep slashes intact,
+  // encode each segment individually so spaces / unicode / reserved
+  // chars in filenames survive transit.
+  return filePath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+export async function getSupportingFile(
+  skillId: string,
+  versionNumber: number,
+  filePath: string,
+): Promise<SupportingFileBody> {
+  const response = await apiClient.get<SupportingFileBody>(
+    `/v1/skills/${encodeURIComponent(skillId)}/versions/${versionNumber}/supporting-files/${encodeFilePath(filePath)}`,
+  );
+  return response.data;
+}
+
+export interface PutSupportingFileBody {
+  /** Base64-encoded raw bytes. UI converts text via ``btoa(unescape(encodeURIComponent(text)))``
+   *  to preserve multi-byte UTF-8. */
+  content: string;
+  size: number;
+  mime: string;
+}
+
+/** Add or replace a single supporting file. Returns the new
+ *  SkillVersion. Path validation + threat scan + high_risk recompute
+ *  all happen server-side; a 400 means the content was rejected. */
+export async function putSupportingFile(
+  skillId: string,
+  versionNumber: number,
+  filePath: string,
+  body: PutSupportingFileBody,
+): Promise<SkillVersion> {
+  const response = await apiClient.put<SkillVersion>(
+    `/v1/skills/${encodeURIComponent(skillId)}/versions/${versionNumber}/supporting-files/${encodeFilePath(filePath)}`,
+    body,
+  );
+  return response.data;
+}
+
+/** Remove a single supporting file. Returns the new SkillVersion. */
+export async function deleteSupportingFile(
+  skillId: string,
+  versionNumber: number,
+  filePath: string,
+): Promise<SkillVersion> {
+  const response = await apiClient.delete<SkillVersion>(
+    `/v1/skills/${encodeURIComponent(skillId)}/versions/${versionNumber}/supporting-files/${encodeFilePath(filePath)}`,
+  );
+  return response.data;
+}
+
+/** Rename = put-new + delete-old. We do put first so a failure leaves
+ *  the original intact; a successful put followed by a failed delete
+ *  leaves both, which the user can recover from in the UI. Returns the
+ *  version produced by the delete (the latest one). */
+export async function renameSupportingFile(
+  skillId: string,
+  versionNumber: number,
+  oldPath: string,
+  newPath: string,
+  body: SupportingFileBody,
+): Promise<SkillVersion> {
+  const afterPut = await putSupportingFile(skillId, versionNumber, newPath, {
+    content: body.content,
+    size: body.size,
+    mime: body.mime,
+  });
+  return await deleteSupportingFile(skillId, afterPut.version, oldPath);
+}
+
+/** Base64-encode a UTF-8 string for ``putSupportingFile``. ``btoa``
+ *  alone breaks on non-ASCII; this preserves multi-byte chars. */
+export function encodeUtf8Base64(text: string): string {
+  return btoa(
+    Array.from(new TextEncoder().encode(text))
+      .map((byte) => String.fromCharCode(byte))
+      .join(""),
+  );
+}
+
+/** Decode a base64 string returned by ``getSupportingFile`` back to
+ *  UTF-8 text. Returns ``null`` for non-UTF-8 (binary) payloads — UI
+ *  shows a ``[BINARY: ... bytes]`` placeholder rather than corrupted
+ *  text. */
+export function decodeBase64Utf8(base64: string): string | null {
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
 }

@@ -390,6 +390,55 @@ export interface TranslationKeys {
     versions_title: string;
     no_versions: string;
     latest_version_hint: string;
+    // ── Capability Uplift Sprint #3 PR C — Admin UI dual-pane editor ──
+    detail_files_title: string;
+    detail_editor_title: string;
+    detail_no_file_selected: string;
+    detail_select_file_hint: string;
+    detail_skill_md_pinned: string;
+    detail_supporting_files_section: string;
+    detail_no_supporting_files: string;
+    detail_version_picker_label: string;
+    detail_active_version_marker: string;
+    detail_lazy_badge: string;
+    detail_lazy_tooltip: string;
+    detail_eager_tooltip: string;
+    detail_high_risk_badge: string;
+    detail_high_risk_tooltip: string;
+    detail_high_risk_warning: string;
+    detail_admin_required_tooltip: string;
+    detail_unsaved_changes_warning: string;
+    detail_diff_toggle: string;
+    detail_diff_original_label: string;
+    detail_diff_draft_label: string;
+    file_add: string;
+    file_add_modal_title: string;
+    file_add_path_label: string;
+    file_add_path_placeholder: string;
+    file_add_content_label: string;
+    file_add_upload_label: string;
+    file_add_upload_hint: string;
+    file_add_submit: string;
+    file_action_edit: string;
+    file_action_delete: string;
+    file_action_rename: string;
+    file_action_save: string;
+    file_action_cancel: string;
+    file_save_failed: string;
+    file_saved: string;
+    file_deleted: string;
+    file_delete_confirm_title: string;
+    file_delete_confirm_body: string;
+    file_delete_confirm_input_hint: string;
+    file_rename_modal_title: string;
+    file_rename_new_path_label: string;
+    file_rename_submit: string;
+    file_renamed: string;
+    file_binary_placeholder: string;
+    file_size_label: string;
+    file_mime_label: string;
+    file_load_failed: string;
+    detail_skill_md_readonly_hint: string;
   };
   memory: {
     page_title: string;
@@ -959,6 +1008,54 @@ const en: TranslationKeys = {
     versions_title: "Versions",
     no_versions: "No versions yet — add one via API or ZIP import.",
     latest_version_hint: "Latest version number",
+    detail_files_title: "Files",
+    detail_editor_title: "Editor",
+    detail_no_file_selected: "Select a file from the tree to view or edit it.",
+    detail_select_file_hint: "All edits create a new immutable version — the prior version stays intact for rollback.",
+    detail_skill_md_pinned: "SKILL.md (main body)",
+    detail_supporting_files_section: "Supporting files",
+    detail_no_supporting_files: "No supporting files. Use + Add to upload reference docs, prompts, or scripts.",
+    detail_version_picker_label: "Version",
+    detail_active_version_marker: "(latest)",
+    detail_lazy_badge: "Lazy",
+    detail_lazy_tooltip: "Body fetched on-demand via the skill_view tool — only the summary is in the system prompt.",
+    detail_eager_tooltip: "Body eager-loaded into the system prompt at agent build time.",
+    detail_high_risk_badge: "High-risk",
+    detail_high_risk_tooltip: "Declares exec_python / exec_shell / http, or carries scripts/* files — Activate requires admin role.",
+    detail_high_risk_warning: "This version is high-risk. Review the supporting files + tool list carefully before activating.",
+    detail_admin_required_tooltip: "Contact a tenant admin to activate.",
+    detail_unsaved_changes_warning: "You have unsaved changes. Save or cancel before switching files.",
+    detail_diff_toggle: "Show diff vs. server",
+    detail_diff_original_label: "Server",
+    detail_diff_draft_label: "Draft",
+    file_add: "+ Add file",
+    file_add_modal_title: "Add supporting file",
+    file_add_path_label: "Relative path",
+    file_add_path_placeholder: "e.g. reference/error_codes.md",
+    file_add_content_label: "Content (text)",
+    file_add_upload_label: "Or upload a file",
+    file_add_upload_hint: "Max 1 MB per file, 5 MB per skill total. Path / extension validated server-side.",
+    file_add_submit: "Add",
+    file_action_edit: "Edit",
+    file_action_delete: "Delete",
+    file_action_rename: "Rename",
+    file_action_save: "Save",
+    file_action_cancel: "Cancel",
+    file_save_failed: "Save failed",
+    file_saved: "Saved as v{{version}}.",
+    file_deleted: "Deleted — new v{{version}} created.",
+    file_delete_confirm_title: "Delete {{path}}?",
+    file_delete_confirm_body: "A new SkillVersion will be created without this file. The prior version stays intact.",
+    file_delete_confirm_input_hint: "Type the file path to confirm",
+    file_rename_modal_title: "Rename {{path}}",
+    file_rename_new_path_label: "New relative path",
+    file_rename_submit: "Rename",
+    file_renamed: "Renamed — new v{{version}} created.",
+    file_binary_placeholder: "[BINARY: {{size}} bytes, mime={{mime}}] — preview disabled. Export the ZIP to inspect.",
+    file_size_label: "Size",
+    file_mime_label: "MIME",
+    file_load_failed: "Failed to load file",
+    detail_skill_md_readonly_hint: "SKILL.md represents the version's prompt fragment + frontmatter. Edit through ZIP import or the JSON-API to create a new version.",
   },
   memory: {
     page_title: "Memory",

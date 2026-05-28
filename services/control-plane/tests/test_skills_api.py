@@ -340,3 +340,121 @@ async def test_zip_export_round_trip(setup: Setup) -> None:
     assert payload.prompt_fragment == "be helpful with X"
     assert payload.tool_names == ("web_search", "http_get")
     assert payload.required_models == ("claude-sonnet-4-6",)
+
+
+# ---------------------------------------------------------------------------
+# Capability Uplift Sprint #3 PR C — Admin UI backend gap fill (Mini-ADR U-20)
+# ---------------------------------------------------------------------------
+
+
+def _build_skill_md_zip(
+    *,
+    name: str = "foo",
+    description: str = "imported skill",
+    body: str = "be helpful",
+    extras: dict[str, bytes] | None = None,
+) -> bytes:
+    """SKILL.md-format ZIP — the canonical Claude Code layout. Extras land
+    in ``supporting_files`` per Mini-ADR U-19 layout-detection rules."""
+    skill_md = (
+        f"---\nname: {name}\ndescription: {description}\nhelix:\n  version: 1\n---\n\n{body}\n"
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("SKILL.md", skill_md)
+        for k, v in (extras or {}).items():
+            archive.writestr(k, v)
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_version_dict_exposes_supporting_files_lazy_high_risk(setup: Setup) -> None:
+    """GET /v1/skills/{id}/versions/{n} surfaces the 3 fields PR C UI needs."""
+    client, _ = setup
+    blob = _build_skill_md_zip(
+        body="be helpful",
+        extras={"reference/error_codes.md": b"# Error codes\n\nE100: ..."},
+    )
+    create = await client.post(
+        "/v1/skills/import", files={"file": ("foo.skill", blob, "application/zip")}
+    )
+    assert create.status_code == 201
+    skill_id = create.json()["skill"]["id"]
+    version_n = create.json()["version"]["version"]
+
+    response = await client.get(f"/v1/skills/{skill_id}/versions/{version_n}")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert "supporting_files" in body
+    assert body["supporting_files"] == {
+        "reference/error_codes.md": {
+            "size": len(b"# Error codes\n\nE100: ..."),
+            "mime": "text/markdown",
+        },
+    }
+    # Metadata-only — never echo base64 content here (would inflate
+    # responses for skills with megabyte files).
+    for meta in body["supporting_files"].values():
+        assert "content" not in meta
+
+    assert body["lazy_load"] is False
+    assert body["high_risk"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_supporting_file_returns_base64_content(setup: Setup) -> None:
+    """GET .../supporting-files/{path} returns the file body."""
+    import base64
+
+    client, _ = setup
+    raw = b"line 1\nline 2\n"
+    blob = _build_skill_md_zip(extras={"reference/notes.md": raw})
+    create = await client.post(
+        "/v1/skills/import", files={"file": ("foo.skill", blob, "application/zip")}
+    )
+    skill_id = create.json()["skill"]["id"]
+    version_n = create.json()["version"]["version"]
+
+    response = await client.get(
+        f"/v1/skills/{skill_id}/versions/{version_n}/supporting-files/reference/notes.md"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert base64.b64decode(body["content"]) == raw
+    assert body["size"] == len(raw)
+    assert body["mime"] == "text/markdown"
+
+
+@pytest.mark.asyncio
+async def test_get_supporting_file_404_for_unknown_path(setup: Setup) -> None:
+    client, _ = setup
+    blob = _build_skill_md_zip(extras={"reference/notes.md": b"hello"})
+    create = await client.post(
+        "/v1/skills/import", files={"file": ("foo.skill", blob, "application/zip")}
+    )
+    skill_id = create.json()["skill"]["id"]
+    version_n = create.json()["version"]["version"]
+
+    response = await client.get(
+        f"/v1/skills/{skill_id}/versions/{version_n}/supporting-files/reference/missing.md"
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_supporting_file_400_for_invalid_path(setup: Setup) -> None:
+    """Path-traversal probes get the U-18 generic 400 (oracle defense)."""
+    client, _ = setup
+    blob = _build_skill_md_zip(extras={"reference/notes.md": b"hello"})
+    create = await client.post(
+        "/v1/skills/import", files={"file": ("foo.skill", blob, "application/zip")}
+    )
+    skill_id = create.json()["skill"]["id"]
+    version_n = create.json()["version"]["version"]
+
+    # An extension outside the allowlist trips U-18 first.
+    response = await client.get(
+        f"/v1/skills/{skill_id}/versions/{version_n}/supporting-files/reference/secret.env"
+    )
+    assert response.status_code == 400

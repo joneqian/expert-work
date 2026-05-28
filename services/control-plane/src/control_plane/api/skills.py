@@ -205,6 +205,13 @@ def _skill_dict(skill: Skill) -> dict[str, Any]:
 
 
 def _version_dict(version: SkillVersion) -> dict[str, Any]:
+    # supporting_files: metadata-only (path → {size, mime}); body is
+    # base64 in the DB and can be megabytes — UI fetches one file at a
+    # time via the GET supporting-files endpoint when the user clicks.
+    files_meta: dict[str, dict[str, Any]] = {
+        path: {"size": entry.size, "mime": entry.mime}
+        for path, entry in version.supporting_files.items()
+    }
     return {
         "id": str(version.id),
         "skill_id": str(version.skill_id),
@@ -215,6 +222,9 @@ def _version_dict(version: SkillVersion) -> dict[str, Any]:
         "category": version.category,
         "required_models": list(version.required_models),
         "authored_by": version.authored_by,
+        "supporting_files": files_meta,
+        "lazy_load": version.lazy_load,
+        "high_risk": version.high_risk,
         "created_at": version.created_at.isoformat(),
     }
 
@@ -344,6 +354,58 @@ def build_skills_router() -> APIRouter:
             },
         )
         return JSONResponse(status_code=201, content=_version_dict(version))
+
+    @router.get(
+        "/{skill_id}/versions/{version}/supporting-files/{file_path:path}",
+        response_model=None,
+    )
+    async def get_supporting_file(
+        skill_id: UUID,
+        version: int,
+        file_path: str,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+    ) -> JSONResponse:
+        """Admin UI single-file content fetch (Mini-ADR U-20).
+
+        ``_version_dict`` only returns supporting-file *metadata* (path,
+        size, mime) to keep skill detail responses small. The UI fetches
+        each file's base64 content lazily through this endpoint when the
+        user clicks a file in the tree.
+
+        Returns ``{"content": <base64>, "size": <int>, "mime": <str>}``.
+        Skips U-21 context-scope re-scan on purpose — admin operators
+        viewing through the UI must see the literal stored bytes
+        (including substrings that would be blocked at agent runtime) so
+        they can audit / triage threat-scanner findings. The drift hash
+        is enforced at ``skill_view`` (agent path), not here (admin path).
+        """
+        tenant_id: UUID = request.state.tenant_id
+
+        # U-18 path validation — same allowlist enforcement as the
+        # mutation surfaces, so a probe of an invalid path returns 400
+        # rather than 404 (consistent oracle).
+        try:
+            _validate_supporting_file_path(file_path)
+        except SkillPackageLayoutError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        row = await store.get_version_by_number(
+            skill_id=skill_id, tenant_id=tenant_id, version=version
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="skill version not found")
+        entry = row.supporting_files.get(file_path)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="supporting file not found")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "content": entry.content,
+                "size": entry.size,
+                "mime": entry.mime,
+            },
+        )
 
     @router.put(
         "/{skill_id}/versions/{version}/supporting-files/{file_path:path}",
@@ -811,6 +873,12 @@ def build_skills_router() -> APIRouter:
                 },
             )
 
+        # PR B latent bug fix (PR C): the ZIP import path was previously
+        # dropping ``supporting_files`` / ``lazy_load`` / ``content_hash`` /
+        # ``high_risk`` — fields ``parse_skill_zip`` already computed but
+        # nothing forwarded to ``add_version``. Without them, imported
+        # skills had empty file trees in the Admin UI and the U-21 drift
+        # check would fire on every read.
         version = await store.add_version(
             version_id=uuid4(),
             skill_id=existing.id,
@@ -821,6 +889,10 @@ def build_skills_router() -> APIRouter:
             category=payload.category,
             required_models=payload.required_models,
             authored_by="human",
+            supporting_files=supporting_files_to_jsonable(payload.supporting_files),
+            lazy_load=payload.lazy_load,
+            content_hash=payload.content_hash,
+            high_risk=payload.high_risk,
         )
         await audit_emit(
             audit,

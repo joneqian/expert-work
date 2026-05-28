@@ -1,0 +1,262 @@
+/**
+ * Rename + Delete confirmation modals — Capability Uplift Sprint #3 PR C.
+ *
+ * Both flows produce a new SkillVersion (D3 immutability). Delete asks
+ * for the file path to be typed back as confirmation — same pattern as
+ * the rest of the destructive surfaces in Admin UI.
+ */
+import { useCallback, useState } from "react";
+import { Alert, App, Button, Form, Input, Modal, Typography } from "antd";
+import { useTranslation } from "react-i18next";
+
+import { ApiError } from "../../api/client";
+import {
+  deleteSupportingFile,
+  getSupportingFile,
+  renameSupportingFile,
+  type SkillVersion,
+} from "../../api/skills";
+
+const { Text } = Typography;
+
+// ─── Rename ──────────────────────────────────────────────────────────
+
+interface RenameModalProps {
+  open: boolean;
+  skillId: string;
+  versionNumber: number;
+  oldPath: string;
+  onClose: () => void;
+  onRenamed: (newVersion: SkillVersion, newPath: string) => void;
+}
+
+export function RenameModal({
+  open,
+  skillId,
+  versionNumber,
+  oldPath,
+  onClose,
+  onRenamed,
+}: RenameModalProps) {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [form] = Form.useForm<{ newPath: string }>();
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleClose = useCallback(() => {
+    form.resetFields();
+    setError(null);
+    onClose();
+  }, [form, onClose]);
+
+  const handleSubmit = useCallback(async () => {
+    setError(null);
+    let values: { newPath: string };
+    try {
+      values = await form.validateFields();
+    } catch {
+      return;
+    }
+    const newPath = values.newPath.trim();
+    if (newPath === oldPath) {
+      setError("new path must differ from current path");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const original = await getSupportingFile(skillId, versionNumber, oldPath);
+      const newVersion = await renameSupportingFile(
+        skillId,
+        versionNumber,
+        oldPath,
+        newPath,
+        original,
+      );
+      message.success(t("skills.file_renamed", { version: newVersion.version }));
+      onRenamed(newVersion, newPath);
+      handleClose();
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `${err.code}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : "unknown error";
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    form,
+    handleClose,
+    message,
+    oldPath,
+    onRenamed,
+    skillId,
+    t,
+    versionNumber,
+  ]);
+
+  return (
+    <Modal
+      open={open}
+      title={t("skills.file_rename_modal_title", { path: oldPath })}
+      onCancel={handleClose}
+      destroyOnHidden
+      footer={[
+        <Button key="cancel" onClick={handleClose} disabled={submitting}>
+          {t("skills.file_action_cancel")}
+        </Button>,
+        <Button
+          key="submit"
+          type="primary"
+          onClick={handleSubmit}
+          loading={submitting}
+          data-testid="skill-rename-submit"
+        >
+          {t("skills.file_rename_submit")}
+        </Button>,
+      ]}
+    >
+      {error !== null && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("skills.file_save_failed")}
+          description={error}
+          style={{ marginBottom: 12 }}
+          data-testid="skill-rename-error"
+        />
+      )}
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={{ newPath: oldPath }}
+      >
+        <Form.Item
+          name="newPath"
+          label={t("skills.file_rename_new_path_label")}
+          rules={[{ required: true }]}
+        >
+          <Input data-testid="skill-rename-new-path" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+}
+
+// ─── Delete ──────────────────────────────────────────────────────────
+
+interface DeleteConfirmModalProps {
+  open: boolean;
+  skillId: string;
+  versionNumber: number;
+  path: string;
+  onClose: () => void;
+  onDeleted: (newVersion: SkillVersion) => void;
+}
+
+export function DeleteConfirmModal({
+  open,
+  skillId,
+  versionNumber,
+  path,
+  onClose,
+  onDeleted,
+}: DeleteConfirmModalProps) {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [typed, setTyped] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleClose = useCallback(() => {
+    setTyped("");
+    setError(null);
+    onClose();
+  }, [onClose]);
+
+  const canDelete = typed === path;
+
+  const handleSubmit = useCallback(async () => {
+    if (!canDelete) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const newVersion = await deleteSupportingFile(skillId, versionNumber, path);
+      message.success(t("skills.file_deleted", { version: newVersion.version }));
+      onDeleted(newVersion);
+      handleClose();
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `${err.code}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : "unknown error";
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    canDelete,
+    handleClose,
+    message,
+    onDeleted,
+    path,
+    skillId,
+    t,
+    versionNumber,
+  ]);
+
+  return (
+    <Modal
+      open={open}
+      title={t("skills.file_delete_confirm_title", { path })}
+      onCancel={handleClose}
+      destroyOnHidden
+      footer={[
+        <Button key="cancel" onClick={handleClose} disabled={submitting}>
+          {t("skills.file_action_cancel")}
+        </Button>,
+        <Button
+          key="submit"
+          danger
+          type="primary"
+          onClick={handleSubmit}
+          loading={submitting}
+          disabled={!canDelete}
+          data-testid="skill-delete-submit"
+        >
+          {t("skills.file_action_delete")}
+        </Button>,
+      ]}
+    >
+      {error !== null && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("skills.file_save_failed")}
+          description={error}
+          style={{ marginBottom: 12 }}
+          data-testid="skill-delete-error"
+        />
+      )}
+      <Text style={{ fontSize: 13, display: "block", marginBottom: 12 }}>
+        {t("skills.file_delete_confirm_body")}
+      </Text>
+      <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+        {t("skills.file_delete_confirm_input_hint")}
+      </Text>
+      <Input
+        value={typed}
+        onChange={(e) => setTyped(e.target.value)}
+        placeholder={path}
+        data-testid="skill-delete-confirm-input"
+        style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}
+      />
+    </Modal>
+  );
+}

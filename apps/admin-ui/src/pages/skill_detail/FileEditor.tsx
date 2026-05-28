@@ -1,0 +1,456 @@
+/**
+ * Skill file editor — Capability Uplift Sprint #3 PR C, Mini-ADR U-20.
+ *
+ * Right pane. Three modes:
+ *
+ *   - ``SKILL.md`` selected → render the version's prompt fragment as
+ *     a read-only Monaco buffer. Editing the prompt itself goes through
+ *     ZIP import / the JSON-API ``POST .../versions`` flow; the operator
+ *     UX never directly mutates the body from here.
+ *   - Supporting file in **view** mode → read-only Monaco buffer with
+ *     Edit / Rename / Delete action row.
+ *   - Supporting file in **edit** mode → Monaco editor with Save /
+ *     Cancel + an optional "show diff vs server" toggle that swaps the
+ *     ``Editor`` for ``DiffEditor``.
+ *
+ * Save creates a new SkillVersion server-side; the parent receives the
+ * new version through ``onSaved`` and updates the version picker.
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Space,
+  Switch,
+  Typography,
+} from "antd";
+import Editor, { DiffEditor } from "@monaco-editor/react";
+import {
+  Edit3,
+  GitCompare,
+  PencilLine,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
+
+import { ApiError } from "../../api/client";
+import {
+  decodeBase64Utf8,
+  encodeUtf8Base64,
+  getSupportingFile,
+  putSupportingFile,
+  type SkillVersion,
+  type SupportingFileBody,
+} from "../../api/skills";
+import { SKILL_MD_PATH } from "./FileTree";
+
+const { Text } = Typography;
+
+interface FileEditorProps {
+  skillId: string;
+  version: SkillVersion;
+  /** Path of the file currently selected in the tree, or ``null`` when
+   *  nothing is selected (initial state). */
+  selectedPath: string | null;
+  /** Toggled to ``true`` by the editor when the user starts typing —
+   *  parent reads this to gate the "are you sure?" dialog when the user
+   *  picks another file. */
+  onDirtyChange: (dirty: boolean) => void;
+  /** Parent updates the version picker + file tree after each successful
+   *  PUT. */
+  onSaved: (newVersion: SkillVersion) => void;
+  onRequestDelete: (path: string) => void;
+  onRequestRename: (path: string) => void;
+}
+
+function languageFor(path: string): string {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  switch (ext) {
+    case "md":
+      return "markdown";
+    case "py":
+      return "python";
+    case "js":
+      return "javascript";
+    case "ts":
+      return "typescript";
+    case "json":
+      return "json";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    case "html":
+      return "html";
+    case "css":
+      return "css";
+    case "sh":
+      return "shell";
+    case "sql":
+      return "sql";
+    case "toml":
+      return "ini";
+    default:
+      return "plaintext";
+  }
+}
+
+interface LoadedFile {
+  path: string;
+  body: SupportingFileBody;
+  /** ``null`` when the file is binary (decode failed). */
+  text: string | null;
+}
+
+export function FileEditor({
+  skillId,
+  version,
+  selectedPath,
+  onDirtyChange,
+  onSaved,
+  onRequestDelete,
+  onRequestRename,
+}: FileEditorProps) {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+
+  const [loaded, setLoaded] = useState<LoadedFile | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"view" | "edit">("view");
+  const [buffer, setBuffer] = useState<string>("");
+  const [showDiff, setShowDiff] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Fetch when selection changes (and not SKILL.md — that one renders
+  // from the version's prompt_fragment without a network round-trip).
+  useEffect(() => {
+    setMode("view");
+    setShowDiff(false);
+    setSaveError(null);
+    setLoadError(null);
+    if (selectedPath === null) {
+      setLoaded(null);
+      setBuffer("");
+      onDirtyChange(false);
+      return;
+    }
+    if (selectedPath === SKILL_MD_PATH) {
+      setLoaded(null);
+      setBuffer(version.prompt_fragment);
+      onDirtyChange(false);
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await getSupportingFile(skillId, version.version, selectedPath);
+        if (cancelled) return;
+        const text = decodeBase64Utf8(body.content);
+        setLoaded({ path: selectedPath, body, text });
+        setBuffer(text ?? "");
+        onDirtyChange(false);
+      } catch (err) {
+        if (cancelled) return;
+        const msg =
+          err instanceof ApiError
+            ? `${err.code}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "unknown error";
+        setLoadError(msg);
+        setLoaded(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [skillId, selectedPath, version.version, version.prompt_fragment, onDirtyChange]);
+
+  const isSkillMd = selectedPath === SKILL_MD_PATH;
+  const isBinary = loaded !== null && loaded.text === null;
+
+  const dirty = useMemo(() => {
+    if (mode !== "edit") return false;
+    if (loaded === null) return false;
+    return buffer !== (loaded.text ?? "");
+  }, [buffer, loaded, mode]);
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+
+  const handleEdit = useCallback(() => {
+    if (loaded === null || isBinary) return;
+    setMode("edit");
+    setSaveError(null);
+  }, [isBinary, loaded]);
+
+  const handleCancel = useCallback(() => {
+    if (loaded === null) return;
+    setBuffer(loaded.text ?? "");
+    setMode("view");
+    setShowDiff(false);
+    setSaveError(null);
+  }, [loaded]);
+
+  const handleSave = useCallback(async () => {
+    if (loaded === null || selectedPath === null) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const utf8 = new TextEncoder().encode(buffer);
+      const newVersion = await putSupportingFile(skillId, version.version, selectedPath, {
+        content: encodeUtf8Base64(buffer),
+        size: utf8.byteLength,
+        mime: loaded.body.mime || "text/plain",
+      });
+      message.success(t("skills.file_saved", { version: newVersion.version }));
+      setMode("view");
+      setShowDiff(false);
+      onSaved(newVersion);
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `${err.code}: ${err.message}`
+          : err instanceof Error
+            ? err.message
+            : "unknown error";
+      setSaveError(msg);
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    buffer,
+    loaded,
+    message,
+    onSaved,
+    selectedPath,
+    skillId,
+    t,
+    version.version,
+  ]);
+
+  if (selectedPath === null) {
+    return (
+      <Card size="small" data-testid="skill-editor-empty">
+        <div
+          style={{
+            minHeight: 320,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            color: "var(--hx-text-tertiary)",
+            fontSize: 13,
+          }}
+        >
+          <PencilLine size={20} strokeWidth={1.5} />
+          <span>{t("skills.detail_no_file_selected")}</span>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("skills.detail_select_file_hint")}
+          </Text>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card size="small" data-testid="skill-editor-pane">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 8,
+        }}
+      >
+        <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 13 }} strong>
+          {selectedPath}
+        </Text>
+        {loaded !== null && (
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {t("skills.file_size_label")}: {loaded.body.size} ·{" "}
+            {t("skills.file_mime_label")}: {loaded.body.mime || "—"}
+          </Text>
+        )}
+        <span style={{ flex: 1 }} />
+        {mode === "edit" && !isBinary && (
+          <Space size={6}>
+            <Switch
+              size="small"
+              checked={showDiff}
+              onChange={setShowDiff}
+              checkedChildren={<GitCompare size={11} strokeWidth={1.75} />}
+              unCheckedChildren={<GitCompare size={11} strokeWidth={1.75} />}
+              data-testid="skill-editor-diff-toggle"
+            />
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {t("skills.detail_diff_toggle")}
+            </Text>
+          </Space>
+        )}
+      </div>
+
+      {isSkillMd && (
+        <Alert
+          type="info"
+          showIcon
+          message={t("skills.detail_skill_md_readonly_hint")}
+          style={{ marginBottom: 12 }}
+          data-testid="skill-md-readonly-hint"
+        />
+      )}
+
+      {loadError !== null && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("skills.file_load_failed")}
+          description={loadError}
+          style={{ marginBottom: 12 }}
+          data-testid="skill-editor-load-error"
+        />
+      )}
+
+      {saveError !== null && (
+        <Alert
+          type="error"
+          showIcon
+          message={t("skills.file_save_failed")}
+          description={saveError}
+          style={{ marginBottom: 12 }}
+          data-testid="skill-editor-save-error"
+        />
+      )}
+
+      {isBinary && (
+        <Alert
+          type="warning"
+          showIcon
+          message={t("skills.file_binary_placeholder", {
+            size: loaded?.body.size,
+            mime: loaded?.body.mime,
+          })}
+          style={{ marginBottom: 12 }}
+          data-testid="skill-editor-binary"
+        />
+      )}
+
+      {!isBinary && (
+        // ``@monaco-editor/react`` doesn't forward ``data-testid`` to a
+        // queryable DOM node — wrap so Playwright + vitest both have a
+        // stable handle on the editor container.
+        <div data-testid="skill-editor-monaco">
+          {mode === "edit" && showDiff && loaded !== null ? (
+            <DiffEditor
+              language={languageFor(selectedPath)}
+              original={loaded.text ?? ""}
+              modified={buffer}
+              theme="vs-dark"
+              height="calc(100vh - 480px)"
+              options={{
+                renderSideBySide: true,
+                originalEditable: false,
+                minimap: { enabled: false },
+                fontFamily: "var(--hx-font-mono)",
+                fontSize: 12,
+                scrollBeyondLastLine: false,
+              }}
+            />
+          ) : (
+            <Editor
+              language={languageFor(selectedPath)}
+              value={buffer}
+              onChange={(v) => setBuffer(v ?? "")}
+              theme="vs-dark"
+              height="calc(100vh - 480px)"
+              options={{
+                readOnly: mode === "view" || loading,
+                minimap: { enabled: false },
+                fontFamily: "var(--hx-font-mono)",
+                fontSize: 12,
+                tabSize: 2,
+                scrollBeyondLastLine: false,
+                renderWhitespace: "boundary",
+                wordWrap: "on",
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 8,
+          marginTop: 12,
+        }}
+      >
+        {!isSkillMd && mode === "view" && !isBinary && (
+          <>
+            <Button
+              size="small"
+              danger
+              icon={<Trash2 size={13} strokeWidth={1.75} />}
+              onClick={() => onRequestDelete(selectedPath)}
+              data-testid="skill-editor-delete-btn"
+            >
+              {t("skills.file_action_delete")}
+            </Button>
+            <Button
+              size="small"
+              icon={<PencilLine size={13} strokeWidth={1.75} />}
+              onClick={() => onRequestRename(selectedPath)}
+              data-testid="skill-editor-rename-btn"
+            >
+              {t("skills.file_action_rename")}
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              icon={<Edit3 size={13} strokeWidth={1.75} />}
+              onClick={handleEdit}
+              data-testid="skill-editor-edit-btn"
+            >
+              {t("skills.file_action_edit")}
+            </Button>
+          </>
+        )}
+        {mode === "edit" && (
+          <>
+            <Button
+              size="small"
+              icon={<X size={13} strokeWidth={1.75} />}
+              onClick={handleCancel}
+              disabled={saving}
+              data-testid="skill-editor-cancel-btn"
+            >
+              {t("skills.file_action_cancel")}
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              icon={<Save size={13} strokeWidth={1.75} />}
+              onClick={handleSave}
+              loading={saving}
+              disabled={!dirty}
+              data-testid="skill-editor-save-btn"
+            >
+              {t("skills.file_action_save")}
+            </Button>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
