@@ -10,6 +10,7 @@ import { SettingsAudit } from "./pages/SettingsAudit";
 import { SettingsRoleBindings } from "./pages/SettingsRoleBindings";
 import { SettingsServiceAccounts } from "./pages/SettingsServiceAccounts";
 import { SettingsTenantConfig } from "./pages/SettingsTenantConfig";
+import { SettingsTenantCredentials } from "./pages/SettingsTenantCredentials";
 import { SettingsTenantQuotas } from "./pages/SettingsTenantQuotas";
 import { SkillDetail } from "./pages/SkillDetail";
 import { SkillsList } from "./pages/SkillsList";
@@ -35,6 +36,7 @@ export function AppRouter() {
       <Route path="/settings/role-bindings" element={<SettingsRoleBindings />} />
       <Route path="/settings/tenant-quotas" element={<SettingsTenantQuotas />} />
       <Route path="/settings/tenant-config" element={<SettingsTenantConfig />} />
+      <Route path="/settings/credentials" element={<SettingsTenantCredentials />} />
       <Route path="/settings/audit" element={<SettingsAudit />} />
       <Route path="/settings/*" element={<ComingSoon title="Settings" />} />
       <Route path="*" element={<ComingSoon title="404" />} />

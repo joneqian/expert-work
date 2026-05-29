@@ -251,6 +251,41 @@ export interface TranslationKeys {
     config_etag_hint_title: string;
     config_etag_hint_body: string;
   };
+  settings_credentials: {
+    page_title: string;
+    subtitle: string;
+    failed_to_load: string;
+    mode_label: string;
+    mode_platform: string;
+    mode_tenant: string;
+    mode_help_platform: string;
+    mode_help_tenant: string;
+    switch_to: string;
+    mode_switched: string;
+    switch_modal_title: string;
+    switch_to_platform_note: string;
+    dry_run_running: string;
+    dry_run_ok: string;
+    dry_run_incomplete: string;
+    missing_providers: string;
+    missing_tools: string;
+    providers_heading: string;
+    tools_heading: string;
+    col_provider: string;
+    col_tool: string;
+    col_platform_status: string;
+    col_tenant_ref: string;
+    col_used_by: string;
+    col_actions: string;
+    status_configured: string;
+    status_not_set: string;
+    not_set: string;
+    empty: string;
+    cred_saved: string;
+    edit_modal_title: string;
+    secret_ref_label: string;
+    secret_ref_hint: string;
+  };
   settings_iam: {
     sa_page_title: string;
     sa_subtitle: string;
@@ -866,6 +901,47 @@ const en: TranslationKeys = {
     config_etag_hint_title: "Last-writer-wins (M0)",
     config_etag_hint_body:
       "No ETag concurrency check yet — M1 will add If-Match. If another admin is editing simultaneously, the last Save will overwrite. Reload after save to see latest.",
+  },
+  settings_credentials: {
+    page_title: "Credentials",
+    subtitle:
+      "Choose where this tenant's LLM + tool credentials come from — the platform's keys or your own — and manage the per-provider / per-tool references. All-or-nothing: tenant mode requires a credential for every provider/tool your agents use.",
+    failed_to_load: "Failed to load credentials",
+    mode_label: "Credentials mode",
+    mode_platform: "Platform",
+    mode_tenant: "Tenant",
+    mode_help_platform:
+      "All LLM / tool calls use the platform's credentials. Your own credentials below are kept (visible + editable) but do not take effect.",
+    mode_help_tenant:
+      "All LLM / tool calls use your own credentials below. The platform's keys are not used.",
+    switch_to: "Switch to {{mode}}",
+    mode_switched: "Credentials mode updated.",
+    switch_modal_title: "Switch to {{mode}} mode",
+    switch_to_platform_note:
+      "Platform credentials cover every supported provider + tool, so this switch always succeeds.",
+    dry_run_running: "Checking credential coverage…",
+    dry_run_ok: "All providers + tools your agents use have a tenant credential. Safe to switch.",
+    dry_run_incomplete:
+      "Cannot switch yet — configure the missing credentials below first, then retry.",
+    missing_providers: "Missing providers",
+    missing_tools: "Missing tools",
+    providers_heading: "Provider credentials",
+    tools_heading: "Tool credentials",
+    col_provider: "Provider",
+    col_tool: "Tool",
+    col_platform_status: "Platform status",
+    col_tenant_ref: "Tenant secret ref",
+    col_used_by: "Used by (agents)",
+    col_actions: "Actions",
+    status_configured: "Configured",
+    status_not_set: "Not configured",
+    not_set: "(not set)",
+    empty: "No entries — the platform has opted into no providers / tools yet.",
+    cred_saved: "Credential saved.",
+    edit_modal_title: "Edit {{key}} credential",
+    secret_ref_label: "Secret reference (KMS URI)",
+    secret_ref_hint:
+      "A secret manager reference (e.g. kms://tenant/provider-key) — never the raw API key. Leave empty to clear.",
   },
   settings_iam: {
     sa_page_title: "Service Accounts",

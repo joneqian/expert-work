@@ -711,6 +711,67 @@ fallback + vision + consolidation aux),**漏了平台基础设施 provider**:租
 
 ---
 
+## 2ter. PR 2b — Admin UI Credentials 面板(O-7 落地)
+
+> O-7(§2.7)定了 3 个 surface(mode 切换器 + provider 表 + tool 表)。PR 2a 把后端 caller
+> 全迁完后,PR 2b 落地 Admin UI。实现期发现后端缺两个**只读/预览**端点(现有只有
+> `GET`/`PUT /config`),补在本 PR;写仍复用 `PUT /config`。
+
+### 2ter.1 Mini-ADR O-13 — 两个新端点 + 面板结构
+
+**问题**:面板要渲染"provider × 平台是否已配 × 租户 secret_ref × 被几个 agent 引用 × 当前 mode",
+单靠 `GET /config` 拿不到(catalog 在 settings,used-by 要遍历 agent manifest,平台凭证只暴露存在性)。
+切 mode 前还要 dry-run 预览缺哪些凭证(O-7 顶部切换器),而 mode-switch 校验目前只埋在 `PUT /config`(切失败才 403)。
+
+**决策**:加 2 个端点,写复用现有 `PUT /config`。
+
+1. **`GET /v1/tenants/{id}/config/credentials`** — 组合视图(单次请求驱动整个面板):
+   ```jsonc
+   {
+     "mode": "platform",                       // 当前 credentials_mode
+     "providers": [
+       { "provider": "anthropic",
+         "platform_configured": true,          // 平台是否有该 provider 凭证(仅布尔,不回显 secret)
+         "tenant_secret_ref": null,            // 租户自配 ref(tenant mode 用;平台 mode 也可见可改)
+         "used_by_agents": 3 }                 // 引用该 provider 的 agent 数(含 infra:embedding)
+     ],
+     "tools": [ { "tool": "web_search", "platform_configured": true,
+                  "tenant_secret_ref": "kms://...", "used_by_agents": 1 } ]
+   }
+   ```
+   - `providers` 行集 = `settings.effective_supported_providers`(catalog);`platform_configured` =
+     该 provider ∈ `effective_platform_provider_credentials`;`tenant_secret_ref` 来自
+     `tenant_config.model_credentials_ref`;`used_by_agents` 复用 O-12 的遍历逻辑(按 provider 计数,
+     含 `memory.long_term → embedding_provider`)。
+   - tenant admin 可读 catalog(知道平台支持哪些 provider 才能自配),**不回显任何 secret 值**,只回 ref + 布尔。
+
+2. **`POST /v1/tenants/{id}/config/credentials-mode/dry-run`** — 切换前预览:
+   ```jsonc
+   // req:  { "model_credentials_ref": {...}, "tool_credentials": {...} }   // 拟用的租户凭证(可选,缺则取现有)
+   // resp: { "ok": false, "missing_providers": ["openai"], "missing_tools": [] }
+   ```
+   - 复用 `_collect_used_providers` / `_collect_used_tools` / `_validate_credentials_mode_switch` 的纯逻辑,
+     **不落库**。前端"Switch to Tenant"按钮先打 dry-run → 红框列缺项 → 补完 → 真 `PUT`(PUT 仍有 O-4 闸门兜底)。
+
+**写路径**:provider/tool 凭证增改删 + mode 切换,都走现有 `PUT /v1/tenants/{id}/config`(patch
+`credentials_mode` / `model_credentials_ref` / `tool_credentials`)—— 不新增写端点。
+
+### 2ter.2 面板结构(`SettingsTenantCredentials.tsx`,挂 `/settings/credentials`)
+
+镜像 `SettingsTenantQuotas`(header + Alert + Antd Table + Modal + `message` toast),用 `--hx-*` token,
+zh-CN/en 双语,全交互元素带 `data-testid`,Storybook + Playwright + axe 覆盖。3 个 surface:
+
+1. **mode 切换器**(顶部 Card):当前 mode tag + "Switch to Tenant/Platform" 按钮 → dry-run →
+   缺项红框(`Configure N missing` 跳转)→ 确认 PUT。切 platform 无需 dry-run(平台凭证恒在)。
+2. **Provider Credentials 表**:`provider | Platform status | Tenant Secret Ref | Used By | [Edit]`;
+   Edit 弹窗输入/清空 KMS URI(写 `model_credentials_ref[provider]`)。
+3. **Tool Credentials 表**:同构(`tool_credentials[tool]`)。
+
+**cross-tenant(`scope='*'`)**:同其他 Settings 页,显示 block Alert,不允许编辑(per
+[[project_stream_n_cross_tenant_admin]] system_admin 只读跨租户)。
+
+---
+
 ## 3. 数据流(综合)
 
 ```

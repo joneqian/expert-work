@@ -685,7 +685,8 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **O.4 All-or-nothing 校验（2 gates）** — `_validate_credentials_mode_switch` 在 PUT `/v1/tenants/{id}/config` 切换 mode 时校验已用 provider/tool 凭证完整性（403 `CREDENTIALS_MODE_SWITCH_INCOMPLETE` + missing 列表）+ agent manifest publish 时 provider 白名单校验（403 `MANIFEST_PROVIDER_NOT_SUPPORTED`）。**Mini-ADR O-4**。**2026-05-28 完成**
 - [x] **O.5 Legacy settings deprecation 标注** — `embedding_api_key_ref` / `rerank_api_key_ref` / `tavily_api_key_ref` 字段加 deprecation 注释 + 指明 platform_*_credentials 迁移路径；callers 仍读 legacy 字段（per-tenant 改造留 PR 2，影响面大）。**Mini-ADR O-5**。**2026-05-28 完成**
 - [x] **O.6 Caller 集成（PR 1 范围）** — consolidator aux model：新建 `LLMRouterAuxModelAdapter`（`control_plane.aux_model_adapter`）走 CredentialsResolver + `build_llm_router`，替换 Sprint #7 `_NullConsolidatorAuxModel`；`ConsolidatorAuxModel.__call__` 加 `tenant_id` 参数；wire 在 app.py（默认 provider 缺凭证时降级 null + log warning）。**Mini-ADR O-6**。**2026-05-28 完成**
-- [ ] **O.7 Admin UI Credentials 面板** — **推到 Stream O PR 2**（PR B 范围聚焦 backend；Admin UI 留到 callers 全迁移完一起做，避免 UI 反复迭代）。**Mini-ADR O-7**
+- [x] **O.7 Admin UI Credentials 面板（PR 2b）** — `SettingsTenantCredentials.tsx`（挂 `/settings/credentials` + Sidebar 入口）：mode 切换器(dry-run 预览缺项后再 PUT) + Provider 凭证表 + Tool 凭证表(平台状态 / 租户 ref / used-by / 编辑弹窗)；镜像 `SettingsTenantQuotas` + `--hx-*` token + zh-CN/en + Storybook(3 stories) + Playwright e2e + axe。**Mini-ADR O-7**。**2026-05-29 完成**
+- [x] **O.13 Credentials 面板后端端点（PR 2b）** — `GET /v1/tenants/{id}/config/credentials`(组合视图:catalog provider/tool × platform-configured × 租户 ref × used-by × mode,不回显 secret 值) + `POST .../config/credentials-mode/dry-run`(切 tenant 前预览缺项,不落库);写复用现有 `PUT /config`;`_collect_used_*` 重构出 per-agent helper 供 used-by 计数复用。**Mini-ADR O-13**。**2026-05-29 完成**
 - [x] **O.8 Audit + 可观测** — 4 audit actions（CREDENTIALS_MODE_CHANGED / PROVIDER_CREDENTIALS_UPDATED / TOOL_CREDENTIALS_UPDATED / CREDENTIALS_RESOLVE_FAILED）；5 metrics + gauge；3 recording rules（resolve_failure_rate + tenant_mode_adoption_ratio + legacy_fallback_rate）+ 2 alerts（CredentialsResolveFailureSpike P1 + LegacyCredentialsFallbackPresent P3）。**Mini-ADR O-8**。**2026-05-28 完成**
 - [x] **O.9 runbook** — `docs/runbooks/credentials.md` 7 节（概念 / 平台 setup / 2 alert 诊断 / mode 切换流程 / Sprint #7 aux wire / M1 follow-ups）。**2026-05-28 完成**
 - [x] **O.10 Per-tenant resolving callers（PR 2a）** — embedder / reranker / web_search 迁到 `CredentialsResolver`：`Embedder.embed(*, tenant_id)` / `Reranker.rerank(*, tenant_id)` / `TavilyClient.search(*, tenant_id)` 协议签名扩展 + `ResolvingEmbedder` / `ResolvingReranker` / `ResolvingTavilyClient` 包装类（control-plane glue，结构化实现 orchestrator 协议）；全 call site 透传 tenant_id（memory recall/writeback / knowledge tool / ingestion+chunking / DLQ worker / consolidator adapter）。reranker 缺凭证优雅降级到 RRF-fused。**Mini-ADR O-9**。**2026-05-29 完成**
@@ -700,7 +701,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **后续 PR**（Stream O 范围内但 PR 1 不做）：
 - **PR 2a**（~3-4 天）✅ **2026-05-29 完成**：embedder / reranker / web_search 迁到 resolver（per-tenant 改造）+ legacy effective-catalog 派生 + mode-switch gate 补 embedding_provider（O.10/O.11/O.12）
-- **PR 2b**（~3-4 天）：Admin UI Credentials 面板（mode 切换器 + dry-run + provider/tool 凭证表）— O-7 设计落地
+- **PR 2b**（~3-4 天）✅ **2026-05-29 完成**：Admin UI Credentials 面板（mode 切换器 + dry-run + provider/tool 凭证表）+ 2 后端只读/预览端点（O.7 / O.13）
 - **PR 3**（~1 周）：MCP servers 纳入 mode + mcp_servers 字段 schema 迁移 + MCP-specific Admin UI
 
 ---
