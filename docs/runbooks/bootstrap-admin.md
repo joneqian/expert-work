@@ -1,0 +1,128 @@
+# Bootstrap 第一个平台管理员(system_admin)
+
+> Stream P / Mini-ADR P-6。解决**鸡生蛋**:建 platform-scope role binding 需要
+> `is_system_admin`(`api/role_bindings.py`),而 `resolve_system_admin` 又只在该
+> binding 已存在时才报 `is_system_admin=True` —— 空 `role_binding` 表里没人能授第一个 admin。
+>
+> 本 runbook 用 `python -m control_plane.bootstrap_admin` **直插 DB 一条 platform binding**
+> 打破死锁。它没有 HTTP/JWT 入口,只靠 DB 直连权限(ops 控制),**每个部署跑一次**;
+> 之后所有授权走审计化的 `POST /v1/role_bindings`,不再需要本脚本。
+
+---
+
+## 0. 前置
+
+```sh
+cd infra
+# 数据层 + control-plane(full)+ Keycloak(auth)
+docker compose --profile full --profile auth up -d
+# 等就绪
+curl -sS http://localhost:8000/healthz/ready | python3 -m json.tool   # status: ready
+```
+
+迁移必须已 apply(`role_binding` 表存在):若 control-plane 未自动迁移,
+`docker compose exec control-plane alembic upgrade head`。
+
+---
+
+## 1. 取 dev 用户的 subject id(UUID,**不是 email**)
+
+`bootstrap_admin` 要的 `--subject-id` 必须等于 Keycloak 用户的 JWT `sub` claim
+(`resolve_system_admin` 用 `UUID(principal.subject_id)` 匹配;填 email 会被静默跳过)。
+
+dev realm(`infra/keycloak/realm-helix-agent.json`)预置用户 `dev` / 密码 `devpass`,
+但其 `id` 由 Keycloak 导入时生成,需查一次:
+
+**方式 A — Keycloak Admin Console(推荐,可靠)**
+1. 开 `http://localhost:8080`,用 `admin` / `admin_dev` 登录(compose env `HELIX_KEYCLOAK_ADMIN(_PASSWORD)`)。
+2. 左上 realm 切到 `helix-agent` → Users → 点 `dev`。
+3. 复制 **ID** 字段(形如 `3f8c…` 的 UUID)—— 这就是 `sub`。
+
+**方式 B — token 解码(无界面时)**
+```sh
+# 若 admin-ui client 开了 direct access grants,可用 password grant 取 token:
+TOKEN=$(curl -sS -X POST \
+  http://localhost:8080/realms/helix-agent/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=helix-agent-admin-ui \
+  -d username=dev -d password=devpass -d scope=openid | jq -r .access_token)
+# 解码 payload 取 sub(不验签,仅读 claim):
+echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r .sub
+```
+
+---
+
+## 2. 跑 bootstrap
+
+```sh
+cd /Users/mac/src/github/jone_qian/helix-agent
+# DSN 默认取 Settings.db_dsn(本地 postgresql+asyncpg://…@localhost:6432/helix_agent_dev);
+# 也可 --dsn 覆盖或 export HELIX_AGENT_DB_DSN=…
+uv run python -m control_plane.bootstrap_admin --subject-id <上一步的 UUID>
+```
+
+期望:
+```
+OK: created platform system_admin binding <binding-uuid> for <subject-uuid>
+```
+再跑一次同 subject 是幂等的:
+```
+OK (idempotent): <subject-uuid> already holds platform system_admin
+```
+
+---
+
+## 3. 验证
+
+登录 admin-ui(见 §4)后:
+```sh
+curl -sS http://localhost:8000/v1/me -H "Authorization: Bearer <token>" | jq '{is_system_admin, allowed_tenants}'
+# 期望:{"is_system_admin": true, "allowed_tenants": "*"}
+```
+
+之后即可建租户(`POST /v1/tenants`)、授更多 admin(`POST /v1/role_bindings`
+`{platform_scope: true, role: system_admin}`)—— 都走 API,不再用本脚本。
+
+---
+
+## 4. 登录 admin-ui(本地)
+
+- admin-ui dev server 默认端口 **5173**(`apps/admin-ui/vite.config.ts`)。
+- ⚠️ **已知配置点**:dev realm 的 `helix-agent-admin-ui` client `redirectUris` 是
+  `http://localhost:3000/*`。若你在 5173 起前端,OIDC 重定向需让二者一致 ——
+  改 vite `server.port` 为 3000,或在 Keycloak client 加 `http://localhost:5173/*`
+  redirect,或用 admin-ui 的 **token-paste fallback**(未配 `VITE_OIDC_*` 时)直接粘贴 §1B 的 token。
+  (此一致性会在 PR N 的 E2E SOP 重写里统一收敛。)
+- 配 OIDC env(`apps/admin-ui/.env.development.local`):
+  ```
+  VITE_OIDC_ISSUER=http://localhost:8080/realms/helix-agent
+  VITE_OIDC_CLIENT_ID=helix-agent-admin-ui
+  ```
+- 登录后 `/v1/me` 返回服务端真实 `is_system_admin`(本地解码的 roles 不可信)。
+
+---
+
+## 5. dev 跑真实 agent turn:配真 LLM key(Mini-ADR P-13)
+
+`infra/mock-upstream` 只是 egress e2e 的 echo server,**不是 mock LLM**;dev 跑出真实
+agent 回话需要一个真 provider key。本地通过 env 注入(**绝不入仓明文**):
+
+```sh
+# 1. 本地 .env(已 gitignore;参照 infra/.env.example 的占位)
+#    平台凭证以 ref 形式声明,值放 secret manager / 本地 env passthrough。
+export HELIX_AGENT_SUPPORTED_PROVIDERS='["anthropic"]'
+export HELIX_AGENT_PLATFORM_PROVIDER_CREDENTIALS='{"anthropic":"secret://anthropic_api_key"}'
+export ANTHROPIC_API_KEY=sk-ant-...     # 真 key,仅本地 shell / .env(不提交)
+
+# 2. 起栈时 docker-compose 把上面 env 透传给 control-plane(见 PR J 的 compose 改动)
+```
+
+> 平台级 provider 凭证也可在 **平台配置页 `/settings/platform`**(PR I)运行时填(DB 覆盖 env)。
+> 无 key 时 dev 只能验证到 API / 结构层,跑不出真实 LLM 回话(Phase 2/4/5 真实推理依赖真 key)。
+
+---
+
+## 6. 安全
+
+- 脚本只在 `HELIX_AGENT_DB_DSN` 指向可写 DB 时能跑 —— 受网络 + DB 凭证(ops 掌握)天然门控,无 HTTP 暴露。
+- 它只写 **一行** binding,不删、不提权既有行。
+- 这是**唯一**绕过"is_system_admin 才能授 is_system_admin"的代码路径,且需 infra 级访问。生产:从受控 ops 主机/跳板跑一次,用后收紧 DB 凭证;之后授权全走审计化 API。
