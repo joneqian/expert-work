@@ -19,6 +19,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Segmented,
   Space,
   Switch,
   Table,
@@ -39,6 +40,7 @@ import {
   type PlatformCredentialsView,
   type PlatformProviderRow,
   type PlatformSecretSource,
+  type PlatformSecretUpsertBody,
   type PlatformToolRow,
 } from "../api/platform_config";
 import { ApiError } from "../api/client";
@@ -69,7 +71,8 @@ export function SettingsPlatformConfig() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<EditTarget | null>(null);
-  const [editForm] = Form.useForm<{ secret_ref: string; enabled: boolean }>();
+  const [editForm] = Form.useForm<{ secret_ref?: string; value?: string; enabled: boolean }>();
+  const [editMode, setEditMode] = useState<"value" | "ref">("value");
   const [saving, setSaving] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -97,11 +100,11 @@ export function SettingsPlatformConfig() {
   );
 
   const doUpsert = useCallback(
-    async (kind: Kind, key: string, secret_ref: string, enabled: boolean) => {
+    async (kind: Kind, key: string, body: PlatformSecretUpsertBody) => {
       if (kind === "provider") {
-        await upsertPlatformProvider(key, { secret_ref, enabled });
+        await upsertPlatformProvider(key, body);
       } else {
-        await upsertPlatformTool(key, { secret_ref, enabled });
+        await upsertPlatformTool(key, body);
       }
     },
     [],
@@ -113,7 +116,8 @@ export function SettingsPlatformConfig() {
         return;
       }
       try {
-        await doUpsert(kind, key, secret_ref, enabled);
+        // Flipping enabled re-upserts the existing ref (never a raw value).
+        await doUpsert(kind, key, { secret_ref, enabled });
         message.success(t("settings_platform.saved"));
         refresh();
       } catch (err) {
@@ -145,9 +149,13 @@ export function SettingsPlatformConfig() {
       return;
     }
     const values = await editForm.validateFields();
+    const body: PlatformSecretUpsertBody =
+      editMode === "value"
+        ? { value: values.value, enabled: values.enabled }
+        : { secret_ref: values.secret_ref, enabled: values.enabled };
     setSaving(true);
     try {
-      await doUpsert(edit.kind, edit.key, values.secret_ref, values.enabled);
+      await doUpsert(edit.kind, edit.key, body);
       message.success(t("settings_platform.saved"));
       setEdit(null);
       refresh();
@@ -156,7 +164,7 @@ export function SettingsPlatformConfig() {
     } finally {
       setSaving(false);
     }
-  }, [edit, editForm, doUpsert, errText, message, refresh, t]);
+  }, [edit, editMode, editForm, doUpsert, errText, message, refresh, t]);
 
   const makeColumns = useCallback(
     (kind: Kind): TableColumnsType<PlatformProviderRow | PlatformToolRow> => [
@@ -260,7 +268,9 @@ export function SettingsPlatformConfig() {
 
   useEffect(() => {
     if (edit !== null) {
-      editForm.setFieldsValue({ secret_ref: edit.secret_ref, enabled: true });
+      // Default to the paste-a-key flow; clear any prior pasted value.
+      setEditMode("value");
+      editForm.setFieldsValue({ secret_ref: edit.secret_ref, value: "", enabled: true });
     }
   }, [edit, editForm]);
 
@@ -340,21 +350,55 @@ export function SettingsPlatformConfig() {
         data-testid="pc-edit-modal"
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item
-            name="secret_ref"
-            label={t("settings_platform.secret_ref_label")}
-            extra={t("settings_platform.secret_ref_hint")}
-            rules={[
-              {
-                validator: (_r, value: string) =>
-                  typeof value === "string" && /^(secret|kms):\/\//.test(value)
-                    ? Promise.resolve()
-                    : Promise.reject(new Error(t("settings_platform.secret_ref_hint"))),
-              },
-            ]}
-          >
-            <Input placeholder="kms://platform/anthropic-key" data-testid="pc-edit-ref" />
+          <Form.Item label={t("settings_platform.mode_label")}>
+            <Segmented
+              value={editMode}
+              onChange={(v) => setEditMode(v as "value" | "ref")}
+              options={[
+                { label: t("settings_platform.mode_value"), value: "value" },
+                { label: t("settings_platform.mode_ref"), value: "ref" },
+              ]}
+              aria-label={t("settings_platform.mode_label")}
+              data-testid="pc-edit-mode"
+            />
           </Form.Item>
+          {editMode === "value" ? (
+            <Form.Item
+              name="value"
+              label={t("settings_platform.value_label")}
+              extra={t("settings_platform.value_hint")}
+              rules={[
+                {
+                  validator: (_r, value: string) =>
+                    typeof value === "string" && value.length > 0
+                      ? Promise.resolve()
+                      : Promise.reject(new Error(t("settings_platform.value_required"))),
+                },
+              ]}
+            >
+              <Input.Password
+                placeholder="sk-ant-…"
+                autoComplete="off"
+                data-testid="pc-edit-value"
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="secret_ref"
+              label={t("settings_platform.secret_ref_label")}
+              extra={t("settings_platform.secret_ref_hint")}
+              rules={[
+                {
+                  validator: (_r, value: string) =>
+                    typeof value === "string" && /^(secret|kms):\/\//.test(value)
+                      ? Promise.resolve()
+                      : Promise.reject(new Error(t("settings_platform.secret_ref_hint"))),
+                },
+              ]}
+            >
+              <Input placeholder="kms://platform/anthropic-key" data-testid="pc-edit-ref" />
+            </Form.Item>
+          )}
           <Form.Item name="enabled" label={t("settings_platform.enabled_label")} valuePropName="checked">
             <Switch aria-label={t("settings_platform.enabled_label")} data-testid="pc-edit-enabled" />
           </Form.Item>

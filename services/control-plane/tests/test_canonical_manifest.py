@@ -43,14 +43,15 @@ def test_canonical_manifest_declares_phase_capabilities() -> None:
     assert spec.spec.policies.approval_required_tools == ["http"]
 
 
-def test_canonical_manifest_every_model_has_a_key_ref() -> None:
-    """Every model in the fallback tree needs an ``api_key_ref`` — the agent
-    factory rejects a ``None`` ref, so a missing one would only surface when
-    the agent is built mid-E2E."""
+def test_canonical_manifest_relies_on_platform_key() -> None:
+    """No model in the fallback tree pins ``api_key_ref`` — the canonical agent
+    resolves its provider key from the platform-configured credential (Stream Q,
+    Mini-ADR Q-8), so the whole E2E can be driven by pasting a key in the web UI.
+    The per-agent override path (an explicit ``api_key_ref``) is covered by the
+    orchestrator's ``build_llm_router`` tests."""
     spec = ManifestLoader().load_from_path(_CANONICAL)
     stack = [spec.spec.model]
     while stack:
         model = stack.pop()
-        assert model.api_key_ref is not None
-        assert model.api_key_ref.startswith("secret://")
+        assert model.api_key_ref is None
         stack.extend(model.fallback)

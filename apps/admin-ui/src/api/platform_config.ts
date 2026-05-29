@@ -33,8 +33,15 @@ export interface PlatformCredentialsView {
   tools: PlatformToolRow[];
 }
 
+/**
+ * Write body — provide exactly one of:
+ *  - ``secret_ref``: a ``secret://`` / ``kms://`` reference (operator-managed); or
+ *  - ``value``: a raw key pasted in the UI. The backend encrypts it and stores
+ *    only the generated ref (Stream Q). Never logged; sent over the wire once.
+ */
 export interface PlatformSecretUpsertBody {
-  secret_ref: string;
+  secret_ref?: string;
+  value?: string;
   enabled: boolean;
 }
 

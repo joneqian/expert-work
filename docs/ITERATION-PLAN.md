@@ -772,15 +772,15 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **范围决策(2026-05-29)**：① 加密落库做成新 `SecretStore` 后端(非裸列)；② 两半都做(金库+UI / chat-LLM 接线)；③ canonical manifest 去 `api_key_ref` 走平台 key + 留 override fixture；④ 出口只平台级(租户级/MCP/S3 后续按需接,后端通用不返工)。
 
-- [ ] **Q.1 `SqlEncryptedSecretStore`(加密落库做 SecretStore 后端,get/put 复用,解析链零改)（PR B）** — **Mini-ADR Q-1**
-- [ ] **Q.2 AES-256-GCM 单 KEK + per-row nonce + AAD 绑 name；env KEK(`HELIX_AGENT_SECRET_ENCRYPTION_KEY`)now / KMS-wrap follow-up；`kek_version` 留轮换钩子（PR B）** — **Mini-ADR Q-2**
-- [ ] **Q.3 `encrypted_secret` 表 `tenant_id NULL` + RLS `IS NOT DISTINCT FROM`,平台行 bypass_rls；通用后端、本迭代只平台行（PR B,migration 0050）** — **Mini-ADR Q-3**
-- [ ] **Q.4 写路径 `PUT /v1/platform/credentials` 收原始 `value`(SecretStr,与 secret_ref 二选一)→ put → catalog 存 ref(表不改 schema)；re-paste=新 version（PR C）** — **Mini-ADR Q-4**
-- [ ] **Q.5 chat-LLM 接线 `ProviderKeyResolver` 闭包穿 build_llm_router/step_routers/agent/vision + agent/child builder + app；manifest 优先/平台兜底；子 agent+vision 都接（PR E）** — **Mini-ADR Q-5**
-- [ ] **Q.6 P-8 姿态变更(显式)：明文绝不进任何表;`encrypted_secret` 只存 AES-GCM 密文;catalog 仍 refs-only（PR B/A）** — **Mini-ADR Q-6**
-- [ ] **Q.7 安全:value 全程 SecretStr / 不 log 值 / 审计去值 / 前端 type=password 不回显 / nonce os.urandom（PR B/C/D）** — **Mini-ADR Q-7**
-- [ ] **Q.8 canonical manifest 去 `api_key_ref` 走平台 key + override fixture 守回归 + E2E 文档收口（PR F）** — **Mini-ADR Q-8**
-- [ ] **Q.9 Admin UI `/settings/platform` 粘贴 key 输入(type=password 不回显)+ i18n + Storybook/Playwright/axe（PR D）**
+- [x] **Q.1 `SqlEncryptedSecretStore`(加密落库做 SecretStore 后端,get/put 复用,解析链零改)（PR B #343）** — **Mini-ADR Q-1** ✅
+- [x] **Q.2 AES-256-GCM 单 KEK + per-row nonce + AAD 绑 name；env KEK(`HELIX_AGENT_SECRET_ENCRYPTION_KEY`)now / KMS-wrap follow-up；`kek_version` 留轮换钩子（PR B #343）** — **Mini-ADR Q-2** ✅
+- [x] **Q.3 `encrypted_secret` 表 `tenant_id NULL` + RLS `IS NOT DISTINCT FROM`,平台行 bypass_rls；通用后端、本迭代只平台行（PR B #343,migration 0050）** — **Mini-ADR Q-3** ✅
+- [x] **Q.4 写路径 `PUT /v1/platform/credentials` 收原始 `value`(SecretStr,与 secret_ref 二选一)→ put → catalog 存 ref(表不改 schema)；re-paste=新 version（PR C #344）** — **Mini-ADR Q-4** ✅
+- [x] **Q.5 chat-LLM 接线 `ProviderKeyResolver` 闭包穿 build_llm_router/step_routers/agent/vision + agent/child builder + app；manifest 优先/平台兜底；子 agent+vision 都接（PR DEF）** — **Mini-ADR Q-5** ✅
+- [x] **Q.6 P-8 姿态变更(显式)：明文绝不进任何表;`encrypted_secret` 只存 AES-GCM 密文;catalog 仍 refs-only（PR A/B）** — **Mini-ADR Q-6** ✅
+- [x] **Q.7 安全:value 全程 SecretStr / 不 log 值 / 审计去值 / 前端 type=password 不回显 / nonce os.urandom（PR B/C/DEF）** — **Mini-ADR Q-7** ✅
+- [x] **Q.8 canonical manifest 去 `api_key_ref` 走平台 key + E2E 文档收口（PR DEF；override 路径由 build_llm_router 测覆盖,不另建 fixture）** — **Mini-ADR Q-8** ✅
+- [x] **Q.9 Admin UI `/settings/platform` 粘贴 key 输入(type=password 不回显)+ i18n + Playwright/axe（PR DEF）** ✅
 
 **Stream Q Verification**：PR B 加解密 round-trip + 密文落库(grep 不到明文)+ 错 KEK 失败 + RLS；PR C 粘贴/覆盖/非 admin 403/值不入日志；PR E `build_llm_router` manifest-wins/平台-fallback/皆无 raise/子 agent；PR D Playwright type=password+axe；**端到端**(PR F 后,真 key)：起栈无 dev-keys 文件 → 登录 → web 粘贴真 key → 注册无 api_key_ref 的 canonical manifest → Playground 真实回话。每 PR 零债 6 条。
 

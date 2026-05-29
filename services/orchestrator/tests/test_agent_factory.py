@@ -210,6 +210,42 @@ async def test_build_llm_router_missing_api_key_ref_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_llm_router_uses_provider_key_resolver_when_no_ref() -> None:
+    """Stream Q (Q-5) — no manifest api_key_ref → the platform resolver supplies
+    the ref, which then resolves through the SecretStore."""
+    model = ModelSpec.model_validate({"provider": "anthropic", "name": "claude"})
+    seen: list[str] = []
+
+    async def resolver(provider: str) -> str:
+        seen.append(provider)
+        return f"secret://{_ANTHROPIC_KEY_NAME}"
+
+    router = await build_llm_router(
+        model, secret_store=_secret_store(), provider_key_resolver=resolver
+    )
+    assert seen == ["anthropic"]
+    assert router is not None
+
+
+@pytest.mark.asyncio
+async def test_build_llm_router_manifest_ref_wins_over_resolver() -> None:
+    """Stream Q (Q-5) — manifest api_key_ref is the explicit override; the
+    platform resolver is not consulted when a ref is present."""
+    called = False
+
+    async def resolver(provider: str) -> str:
+        nonlocal called
+        called = True
+        return "secret://unused"
+
+    router = await build_llm_router(
+        _spec().spec.model, secret_store=_secret_store(), provider_key_resolver=resolver
+    )
+    assert called is False
+    assert router is not None
+
+
+@pytest.mark.asyncio
 async def test_build_llm_router_missing_secret_propagates() -> None:
     """A ref pointing at a non-existent secret surfaces the
     SecretStore's error, not a silent empty key."""
