@@ -91,6 +91,11 @@ export interface TranslationKeys {
     event_count: string;
     stream_failed: string;
     empty_log: string;
+    attach_image: string;
+    attachments_label: string;
+    remove_attachment: string;
+    upload_failed: string;
+    uploading: string;
   };
   event_stream: {
     title: string;
@@ -776,6 +781,11 @@ const en: TranslationKeys = {
     event_count: "{{n}} events",
     stream_failed: "Stream failed",
     empty_log: "No events yet — click Run to start.",
+    attach_image: "Attach image",
+    attachments_label: "Attachments",
+    remove_attachment: "Remove attachment",
+    upload_failed: "Image upload failed",
+    uploading: "Uploading…",
   },
   event_stream: {
     title: "Event stream",

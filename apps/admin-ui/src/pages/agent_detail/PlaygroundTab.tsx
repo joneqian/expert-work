@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Space, Tag, Typography } from "antd";
-import { Play, RotateCcw, Send, Square } from "lucide-react";
+import { ImagePlus, Play, RotateCcw, Send, Square, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
@@ -23,7 +23,16 @@ import {
   type SseEvent,
   type ThreadMeta,
 } from "../../api/sessions";
+import { uploadImage } from "../../api/uploads";
 import type { AgentDetailResponse } from "../../api/agents";
+
+/** An image attached to the next turn — uploaded ahead of Run so the
+ *  run request carries only the lightweight ``helix://image/...`` ref. */
+interface Attachment {
+  id: string;
+  name: string;
+  ref: string;
+}
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -50,15 +59,21 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [events, setEvents] = useState<SseEvent[]>([]);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
   const eventListRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const newThread = useCallback(async () => {
     setCreatingThread(true);
     setThreadError(null);
     setEvents([]);
     setRunError(null);
+    setAttachments([]);
+    setUploadError(null);
     try {
       const created = await createSession({
         agent_name: r.name,
@@ -92,22 +107,56 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     if (node) node.scrollTop = node.scrollHeight;
   }, [events]);
 
+  const handleAttach = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      // Reset the input so picking the same file twice still fires onChange.
+      event.target.value = "";
+      if (!file || !thread) return;
+      setUploading(true);
+      setUploadError(null);
+      try {
+        const ref = await uploadImage(thread.thread_id, file);
+        setAttachments((prev) => [...prev, { id: ref, name: file.name, ref }]);
+      } catch (err) {
+        const message =
+          err instanceof ApiError
+            ? `${err.code}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "upload failed";
+        setUploadError(message);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [thread],
+  );
+
+  const handleRemoveAttachment = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
   const handleRun = useCallback(async () => {
     if (!thread || running) return;
     setRunning(true);
     setRunError(null);
     setEvents([]);
+    const imageRefs = attachments.map((a) => a.ref);
     const ac = new AbortController();
     abortRef.current = ac;
     try {
       for await (const frame of streamRun(
         thread.thread_id,
-        { input },
+        imageRefs.length > 0 ? { input, image_refs: imageRefs } : { input },
         { signal: ac.signal },
       )) {
         setEvents((prev) => [...prev, frame]);
         if (frame.event === "end") break;
       }
+      // The turn consumed the attached images — clear so the next turn
+      // starts fresh. On error we keep them so the user can retry.
+      setAttachments([]);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         // Cancelled by the user — not an error.
@@ -119,7 +168,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setRunning(false);
       abortRef.current = null;
     }
-  }, [thread, input, running]);
+  }, [thread, input, running, attachments]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -187,6 +236,52 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           data-testid="playground-input"
         />
 
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          style={{ display: "none" }}
+          onChange={handleAttach}
+          data-testid="playground-file-input"
+        />
+
+        {uploadError !== null && (
+          <Alert
+            type="error"
+            showIcon
+            message={t("playground.upload_failed")}
+            description={uploadError}
+            data-testid="playground-upload-error"
+          />
+        )}
+
+        {attachments.length > 0 && (
+          <div data-testid="playground-attachments">
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t("playground.attachments_label")}
+            </Text>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+              {attachments.map((a) => (
+                <Tag
+                  key={a.id}
+                  closable
+                  onClose={(e) => {
+                    e.preventDefault();
+                    handleRemoveAttachment(a.id);
+                  }}
+                  closeIcon={
+                    <X size={11} strokeWidth={1.75} aria-label={t("playground.remove_attachment")} />
+                  }
+                  bordered={false}
+                  data-testid="playground-attachment"
+                >
+                  {a.name}
+                </Tag>
+              ))}
+            </div>
+          </div>
+        )}
+
         <Space size={8}>
           <Button
             type="primary"
@@ -197,6 +292,15 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             data-testid="playground-run"
           >
             {running ? t("playground.running") : t("playground.run")}
+          </Button>
+          <Button
+            icon={<ImagePlus size={14} strokeWidth={1.75} />}
+            onClick={() => fileInputRef.current?.click()}
+            loading={uploading}
+            disabled={!thread || running}
+            data-testid="playground-attach"
+          >
+            {uploading ? t("playground.uploading") : t("playground.attach_image")}
           </Button>
           {running && (
             <Button

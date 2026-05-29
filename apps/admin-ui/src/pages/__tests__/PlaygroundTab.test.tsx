@@ -12,6 +12,7 @@ import "../../i18n";
 
 import { ApiError } from "../../api/client";
 import * as sessionsSdk from "../../api/sessions";
+import * as uploadsSdk from "../../api/uploads";
 import { PlaygroundTab } from "../agent_detail/PlaygroundTab";
 import type { AgentDetailResponse } from "../../api/agents";
 import type { SseEvent, ThreadMeta } from "../../api/sessions";
@@ -45,10 +46,12 @@ const sampleThread: ThreadMeta = {
 
 const createSessionMock = vi.spyOn(sessionsSdk, "createSession");
 const streamRunMock = vi.spyOn(sessionsSdk, "streamRun");
+const uploadImageMock = vi.spyOn(uploadsSdk, "uploadImage");
 
 beforeEach(() => {
   createSessionMock.mockReset();
   streamRunMock.mockReset();
+  uploadImageMock.mockReset();
 });
 
 afterEach(() => {
@@ -144,5 +147,66 @@ describe("PlaygroundTab", () => {
     render(<PlaygroundTab detail={sampleDetail} />);
     await screen.findByText(/33333333-3333-3333/);
     expect(screen.getByTestId("playground-run")).toBeDisabled();
+  });
+
+  it("uploads an attached image and sends its ref with the run", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    uploadImageMock.mockResolvedValue("helix://image/img-1.png");
+    streamRunMock.mockReturnValue(
+      makeStream([
+        { id: "1", event: "end", data: "ok", rawData: "ok", receivedAt: "2026-05-25T00:00:03Z" },
+      ]),
+    );
+    render(<PlaygroundTab detail={sampleDetail} />);
+    await screen.findByText(/33333333-3333-3333/);
+
+    const file = new File(["\x89PNG"], "shot.png", { type: "image/png" });
+    await user.upload(screen.getByTestId("playground-file-input"), file);
+
+    expect(await screen.findByTestId("playground-attachment")).toHaveTextContent("shot.png");
+    expect(uploadImageMock).toHaveBeenCalledWith(sampleThread.thread_id, file);
+
+    await user.type(screen.getByTestId("playground-input"), "describe this");
+    await user.click(screen.getByTestId("playground-run"));
+    await screen.findByTestId("playground-event-end");
+
+    expect(streamRunMock).toHaveBeenCalledWith(
+      sampleThread.thread_id,
+      { input: "describe this", image_refs: ["helix://image/img-1.png"] },
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    // The turn consumed the attachment — chip is cleared afterward.
+    expect(screen.queryByTestId("playground-attachment")).not.toBeInTheDocument();
+  });
+
+  it("shows an upload-error alert and keeps Run usable when upload fails", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    uploadImageMock.mockRejectedValue(new ApiError("too big", "IMAGE_TOO_LARGE", 413));
+    render(<PlaygroundTab detail={sampleDetail} />);
+    await screen.findByText(/33333333-3333-3333/);
+
+    const file = new File(["x"], "huge.png", { type: "image/png" });
+    await user.upload(screen.getByTestId("playground-file-input"), file);
+
+    const alert = await screen.findByTestId("playground-upload-error");
+    expect(alert).toHaveTextContent("IMAGE_TOO_LARGE");
+    expect(screen.queryByTestId("playground-attachment")).not.toBeInTheDocument();
+  });
+
+  it("removes an attachment when its tag is closed", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    uploadImageMock.mockResolvedValue("helix://image/img-2.png");
+    render(<PlaygroundTab detail={sampleDetail} />);
+    await screen.findByText(/33333333-3333-3333/);
+
+    const file = new File(["x"], "pic.png", { type: "image/png" });
+    await user.upload(screen.getByTestId("playground-file-input"), file);
+    await screen.findByTestId("playground-attachment");
+
+    await user.click(screen.getByLabelText("Remove attachment"));
+    expect(screen.queryByTestId("playground-attachment")).not.toBeInTheDocument();
   });
 });

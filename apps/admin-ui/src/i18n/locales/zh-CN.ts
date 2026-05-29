@@ -93,6 +93,11 @@ const zhCN: TranslationKeys = {
     event_count: "共 {{n}} 条",
     stream_failed: "事件流失败",
     empty_log: "暂无事件 — 点击「运行」开始。",
+    attach_image: "添加图片",
+    attachments_label: "附件",
+    remove_attachment: "移除附件",
+    upload_failed: "图片上传失败",
+    uploading: "上传中…",
   },
   event_stream: {
     title: "事件流",
