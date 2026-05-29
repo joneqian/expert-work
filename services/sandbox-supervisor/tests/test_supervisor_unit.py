@@ -749,6 +749,21 @@ def test_read_workspace_file_route_404_on_missing() -> None:
     assert resp.status_code == 404
 
 
+def test_metrics_route_exposes_prometheus_text() -> None:
+    # Stream P (Mini-ADR P-15) — the supervisor is a standalone scrape target;
+    # /metrics must expose its in-process registry (cold-start histogram et al.)
+    # so Prometheus can collect the Phase 6 sandbox SLO.
+    h = _harness(docker=RecordingDockerClient(volume_file=b"hi"))
+    app = create_app(SandboxSupervisorSettings(), supervisor=h.supervisor, enable_reaper=False)
+    with TestClient(app) as client:
+        resp = client.get("/metrics")
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers["content-type"]
+    # The cold-start histogram is module-level in supervisor.py, registered at
+    # import, so it appears in the exposition even before any observation.
+    assert "helix_sandbox_cold_start_seconds" in resp.text
+
+
 # ---------------------------------------------------------------------------
 # F.4a — the held-pipe exec channel
 # ---------------------------------------------------------------------------

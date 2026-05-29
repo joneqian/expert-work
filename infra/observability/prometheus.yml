@@ -21,9 +21,19 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  # Only the control-plane exposes /metrics in M0 (A.9 — control_plane
-  # api/metrics.py). sandbox-supervisor / credential-proxy gain it later.
+  # The control-plane exposes /metrics (A.9 — control_plane api/metrics.py).
+  # The orchestrator runs in-process inside the control-plane, so its metrics
+  # (helix_session_ttft_seconds / _duration_seconds / helix_durable_resume_* /
+  # helix_llm_stream_stale_total) register to the same shared registry and are
+  # scraped here — there is no separate orchestrator scrape target.
   - job_name: helix-control-plane
     metrics_path: /metrics
     static_configs:
       - targets: ["control-plane:8000"]
+
+  # Stream P (Mini-ADR P-15) — the sandbox-supervisor is a standalone service;
+  # scrape its own /metrics for helix_sandbox_cold_start_seconds (Phase 6 SLO).
+  - job_name: helix-sandbox-supervisor
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["sandbox-supervisor:8000"]

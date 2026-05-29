@@ -19,6 +19,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
+from helix_agent.common.observability import metrics_text
 from helix_agent.persistence import (
     DatabaseConfig,
     SqlAuditLogStore,
@@ -275,6 +276,15 @@ def _register_routes(app: FastAPI) -> None:
     async def health(supervisor: SupervisorDep) -> HealthResponse:
         docker_ok = await supervisor.docker_ok()
         return HealthResponse(status="ok" if docker_ok else "degraded", docker_ok=docker_ok)
+
+    # Stream P (Mini-ADR P-15) — Prometheus scrape target. The supervisor is a
+    # standalone service, so its in-process metrics (helix_sandbox_cold_start_*
+    # etc.) need their own /metrics endpoint; the control-plane scrape can't see
+    # them. Same shared registry helper the control-plane uses.
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics() -> Response:
+        body, content_type = metrics_text()
+        return Response(content=body, media_type=content_type)
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
