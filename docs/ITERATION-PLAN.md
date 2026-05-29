@@ -709,6 +709,63 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ---
 
+### Stream P — E2E Readiness（平台入驻 + 端到端测试 Phase 0–6 跑通；~2-3 周；M0→M1 Gate 前置）
+
+参考：[streams/STREAM-P-DESIGN](./streams/STREAM-P-DESIGN.md)（设计先行）
+
+> **2026-05-29 用户提出**：准备按 [`canonical-agent-e2e-test.md`](./runbooks/canonical-agent-e2e-test.md) 跑 M0→M1 Gate 端到端测试。`/goal` 把目标定为"评估跑通整个 E2E（Phase 0–7）到底还缺多少 + 完整迭代规划"。经 5 个 Explore agent 逐 Phase 体检：这份 SOP 写于 #306，**早于 Stream N(system_admin) 和 Stream O(凭证/provider catalog)**，前半段(Phase 0)既无文档又有代码缺口；Phase 1/2 现就能跑(仅文档)；Phase 3/4/5 是小代码+UI+文档；Phase 6 可观测接线缺；Phase 7 需 staging Linux。
+>
+> **本次范围**：dev 跑通 **Phase 0–6**；**Phase 7**（staging Linux 安全/数据保护）单列后续。
+>
+> **Phase 0 决策**（管理员入驻）：(1) "配模型"= 平台级运行时配模型 UI/API（DB 覆盖 env、DB 优先，向后兼容）；(2) "建租户"= 真端点 `POST /v1/tenants`（system_admin 门控）+ Admin UI；(3) bootstrap = CLI（`python -m control_plane.bootstrap_admin`）+ runbook。
+>
+> **E2E 决策**（Phase 1–6）：(4) dev 真实 turn = 配真 LLM key（最简，`mock-upstream` 只是 echo server 非 mock LLM，不造 mock-LLM）；(5) 本次只到 Phase 0–6，Phase 7 单列；(6) Phase 4 审批门用现有 `policies.approval_required_tools`（精确工具名，`hitl.triggers.match` 正则运行期不存在，不新建）。
+>
+> **硬缺口**：① 首个 system_admin 鸡生蛋；② 无建租户 API；③ 本地登录无 recipe；④ E2E 文档过期(`POST /v1/tenants` 虚构 / `--profile full` 起不全 / `status=awaiting_approval` 应 `paused` / `hitl.triggers.match` 已弃);⑤ canonical manifest 没入仓;⑥ 平台配模型只能改 env;⑦ Phase 3 `POST /v1/sandboxes/reap` 端点缺;⑧ Phase 5 Playground 无传图 UI;⑨ Phase 6 sandbox scrape job + Grafana 4 panel 缺。
+>
+> **范围纪律**（simplicity first）：显式不做 — mock-LLM 服务、HITL 正则、凭证轮换/版本化、诊断页、批量导入、manifest JSON Schema/dry-run/文件上传 UI、跨租户凭证共享、租户级 tool/skill allowlist、独立 Artifacts UI 页。Phase 7 单列。
+
+- [ ] **P.1 建租户：不加主表，POST = 显式写第一行 tenant_config（PR C/D）** — **Mini-ADR P-1**
+- [ ] **P.2 建租户权限 = is_system_admin inline，不加 RBAC `tenant` Resource（PR D）** — **Mini-ADR P-2**
+- [ ] **P.3 `TenantConfigStore.create` + `TenantConfigAlreadyExistsError`（已存在 409，不复用 upsert）（PR C）** — **Mini-ADR P-3**
+- [ ] **P.4 建租户只建 tenant_config 一行（不连带 quota/binding/user）（PR D）** — **Mini-ADR P-4**
+- [ ] **P.5 tenant_id 默认服务端 uuid4，也接受客户端传（PR D）** — **Mini-ADR P-5**
+- [ ] **P.6 bootstrap CLI `python -m control_plane.bootstrap_admin`（复用 Settings/Store/bypass_rls，幂等，不建 platform 租户）+ runbook（PR B）** — **Mini-ADR P-6**
+- [ ] **P.7 平台凭证存储 = DB 行覆盖 env seed、DB 优先（env 仍 fallback，未写 DB 行为不变）（PR F/G）** — **Mini-ADR P-7**
+- [ ] **P.8 平台凭证只存 ref（secret://、kms://），拒绝明文（validator）（PR F）** — **Mini-ADR P-8**
+- [ ] **P.9 `PlatformCredentialsService`（TTL 缓存 merged 视图）+ resolver getter（additive）+ 写端点 invalidate（PR F/G）** — **Mini-ADR P-9**
+- [ ] **P.10 boot `_validate_platform_catalog` 对 env 字段语义不变（仍 fail-fast），不加新 fatal boot check（PR G）** — **Mini-ADR P-10**
+- [ ] **P.11 平台端点 is_system_admin inline 门控 + handler 在 bypass_rls_session 内（PR H）** — **Mini-ADR P-11**
+- [ ] **P.12 删除受被引用检查门控（agent 在用/env 定义则 409），enabled=false 软停用永远可用（PR H）** — **Mini-ADR P-12**
+- [ ] **P.13 平台配置 Admin UI `SettingsPlatformConfig.tsx`（非 tenant-scoped + isSystemAdmin 门控）+ 建租户 UI `SettingsCreateTenant.tsx`（PR E/I）**
+- [ ] **P.14 canonical manifest 入仓（用 `approval_required_tools` + `supports_vision`）（PR J）**
+- [ ] **P.15 dev 真实 turn 用真 LLM key：docker-compose env 注入 + `.env.example` 占位 + 文档（不入仓明文）（PR J）** — **Mini-ADR P-13**
+- [ ] **P.16 Phase 3 `POST /v1/sandboxes/reap?force=true` admin 端点（is_system_admin → supervisor reaper，返 reaped_count，volume 保留）（PR K）** — **Mini-ADR P-14**
+- [ ] **P.17 Phase 6 可观测接线：确认 orchestrator 指标在 control-plane /metrics + sandbox-supervisor scrape job（+确认其 /metrics）+ Grafana 01-overview 补 4 panel（PR L）** — **Mini-ADR P-15**
+- [ ] **P.18 Phase 5 Playground 传图 UI：`PlaygroundTab.tsx` 文件选择 → POST /uploads → image_ref 进 turn（PR M）** — **Mini-ADR P-16**
+- [ ] **P.19 Phase 4 贴合现状：manifest 用 `approval_required_tools`；SOP query 改 `status=paused`；不做正则（PR J/N）** — **Mini-ADR P-17**
+- [ ] **P.20 E2E SOP 全面重写（Phase 0–6 修正 + Phase 7 单列）（PR N，capstone）** — **Mini-ADR P-18**
+
+**Stream P Verification**：dev 跑通 Phase 0–6 — 起栈(full+auth+observability)+真 key → bootstrap admin 幂等 → OIDC 登录 `/v1/me` is_system_admin → 平台配置页填 provider → `POST /v1/tenants`(201/403/409) → 注册 manifest → **P1** baseline diff 空+J.1/3/6 过 → **P2** 跨 thread 召回+cross-tenant 隔离 → **P3** reap 后文件仍在+cold_start P95<5s → **P4** artifact 跨 thread+危险工具 PAUSED+`status=paused`+ApprovalCard+resume+audit → **P5** Playground 传图描述+ask_image → **P6** 8 项 query 有数据+Grafana 8 panel。每 PR 零债 6 条;平台凭证 env-only→DB 可变向后兼容。
+
+**PR 拆分**（~13 PR；可酌情合并 C+D、F+G、K+L）：
+- **PR A**（设计）✅ **[#328]**：本 Stream § + STREAM-P-DESIGN + backlog；无代码
+- **PR B**（bootstrap）：CLI + runbook + dev-key recipe + 测试（独立）
+- **PR C → D → E**（建租户）：store+protocol → 端点 → 前端
+- **PR F → G → H → I**（平台配模型）：持久层+resolver → service+boot → API → 前端
+- **PR K**（Phase 3）：`POST /v1/sandboxes/reap` admin 端点 + 集成测（独立）
+- **PR L**（Phase 6）：sandbox scrape job + 确认 orchestrator 指标 + Grafana 补 4 panel（独立）
+- **PR M**（Phase 5）：Playground 传图 UI（独立）
+- **PR J**（manifest+key）：canonical manifest + dev key 注入 + 登录 recipe
+- **PR N**（capstone）：E2E SOP 全面重写（Phase 0–6 + Phase 7 单列）
+
+> **关键路径**：A → B + C/D → J 先让链走通；F→G→H→I / K / L / M 并行；N 收口（等 feature 齐）。
+
+**后续（不在本迭代）**：
+- **Phase 7 — 安全 + 数据保护（staging Linux）**：gVisor 7 用例 + cross-tenant 3 命名件套（现有覆盖散在 `test_tenant_scope_endpoints.py` 等，需集中/补名）+ KMS 轮换 runbook + **staging Linux 主机 provisioning**（现 `environments/staging.yaml` 全 TBD）。等 staging 就绪单列 Stream/PR。
+
+---
+
 ## Phase M1 — 生产化（6-8 个月）
 
 ### 目标
