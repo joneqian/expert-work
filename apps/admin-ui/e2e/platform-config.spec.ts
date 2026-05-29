@@ -53,7 +53,7 @@ test("system_admin sees platform credential tables + passes axe", async ({ page 
   await page.goto("/settings/platform");
 
   await expect(page.getByTestId("pc-providers-table")).toBeVisible();
-  await expect(page.getByText("anthropic")).toBeVisible();
+  await expect(page.getByText("anthropic", { exact: true })).toBeVisible();
   await expect(page.getByTestId("pc-tools-table")).toBeVisible();
   await expectNoA11yViolations(page, "/settings/platform");
 });
