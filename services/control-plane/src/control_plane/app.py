@@ -87,6 +87,7 @@ from control_plane.middleware import (
     RLSContextMiddleware,
     TenantRateLimitMiddleware,
 )
+from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.quota import (
     InMemoryQuotaService,
     QuotaService,
@@ -187,6 +188,11 @@ from helix_agent.persistence.memory import (
     MemoryWritebackDLQ,
     SqlMemoryStore,
     SqlMemoryWritebackDLQ,
+)
+from helix_agent.persistence.platform_secrets import (
+    InMemoryPlatformSecretStore,
+    PlatformSecretStore,
+    SqlPlatformSecretStore,
 )
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore,
@@ -292,6 +298,7 @@ def create_app(
     tenant_rate_limiter: RateLimiter | None = None,
     tenant_config_repo: TenantConfigStore | None = None,
     tenant_config_service: TenantConfigService | None = None,
+    platform_secret_store: PlatformSecretStore | None = None,
     agent_runtime: AgentRuntime | None = None,
     memory_repo: MemoryStore | None = None,
 ) -> FastAPI:
@@ -451,6 +458,18 @@ def create_app(
         audit_logger=resolved_audit,
         ttl_s=float(resolved_settings.tenant_config_cache_ttl_s),
     )
+    # Stream P (Mini-ADR P-7/P-9) — platform credential overlay (DB wins over
+    # env). The service is lazy (no DB read until first getter call), so it is
+    # safe to build in the synchronous factory; lifespan wires its getters into
+    # the CredentialsResolver.
+    resolved_platform_secret_store = platform_secret_store or (
+        sql_stores.platform_secret if sql_stores else InMemoryPlatformSecretStore()
+    )
+    resolved_platform_secrets_service = PlatformSecretsService(
+        store=resolved_platform_secret_store,
+        settings=resolved_settings,
+        ttl_s=float(resolved_settings.tenant_config_cache_ttl_s),
+    )
     # Complete the D.2 cycle: TenantAwareRedactor → resolver → service.
     pii_resolver.bind(resolved_tenant_config_service)
     reaper: ReservationReaper | None = (
@@ -552,6 +571,16 @@ def create_app(
                         resolved_settings.effective_platform_tool_credentials
                     ),
                     tenant_config_getter=resolved_tenant_config_service,
+                    # Stream P (Mini-ADR P-9) — live merged view (env + DB
+                    # overlay); these win over the static dicts above so a
+                    # platform admin's runtime change takes effect within the
+                    # service's TTL without a restart.
+                    platform_provider_getter=(
+                        resolved_platform_secrets_service.effective_provider_credentials
+                    ),
+                    platform_tool_getter=(
+                        resolved_platform_secrets_service.effective_tool_credentials
+                    ),
                 )
                 _app.state.credentials_resolver = credentials_resolver
                 web_search_client = await resolve_web_search_client(
@@ -825,6 +854,8 @@ def create_app(
     app.state.quota_reaper = reaper
     app.state.tenant_config_repo = resolved_tenant_config_repo
     app.state.tenant_config_service = resolved_tenant_config_service
+    app.state.platform_secret_store = resolved_platform_secret_store
+    app.state.platform_secrets_service = resolved_platform_secrets_service
     app.state.agent_runtime = resolved_agent_runtime
     # Stream K.K6 — memory CRUD endpoints. ``memory_repo`` is the store
     # already resolved above (SQL when ``store_backend == "sql"``, else
@@ -946,6 +977,7 @@ class _SqlStores:
     service_account: ServiceAccountStore
     api_key: ApiKeyStore
     role_binding: RoleBindingStore
+    platform_secret: PlatformSecretStore
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
@@ -1069,6 +1101,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         role_binding=SqlRoleBindingStore(session_factory),
         tenant_quota=SqlTenantQuotaStore(session_factory),
         token_reservation=SqlTokenReservationStore(session_factory),
+        platform_secret=SqlPlatformSecretStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         feedback=DbFeedbackStore(session_factory),
         token_usage=DbTokenUsageStore(session_factory),
