@@ -16,7 +16,6 @@ paths); the HTTP surface keeps the design's ``/v1/platform/credentials`` path.
 
 from __future__ import annotations
 
-import logging
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -43,8 +42,6 @@ from helix_agent.protocol import (
     Tool,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
-
-logger = logging.getLogger("helix.control_plane.api.platform_config")
 
 
 def _get_store(request: Request) -> PlatformSecretStore:
