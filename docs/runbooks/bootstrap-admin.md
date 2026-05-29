@@ -104,19 +104,35 @@ curl -sS http://localhost:8000/v1/me -H "Authorization: Bearer <token>" | jq '{i
 ## 5. dev 跑真实 agent turn:配真 LLM key(Mini-ADR P-13)
 
 `infra/mock-upstream` 只是 egress e2e 的 echo server,**不是 mock LLM**;dev 跑出真实
-agent 回话需要一个真 provider key。本地通过 env 注入(**绝不入仓明文**):
+agent 回话需要一个真 provider key。
+
+**key 值只活在 SecretStore 里,绝不入仓、绝不靠进程 env。** 关键机制:dev 用
+`local_dev` SecretStore,它**只读一个 `name=value` 文件**(`HELIX_AGENT_SECRET_STORE_ENV_FILE`),
+**不读 `ANTHROPIC_API_KEY` 这类进程环境变量**。所有 key 最终都经
+`secret_store.get(<name>)` 取值,其中:
+
+- **agent 主对话模型** ← manifest 的 `model.api_key_ref`(canonical manifest 写的是
+  `secret://helix-agent/dev/llm/anthropic-api-key`)直接走 SecretStore。
+- **embedder(Phase 2 长记忆)/ reranker / web_search** ← 平台/租户凭证
+  `resolve_provider`/`resolve_tool` 返回一个 `secret://…` ref,**同样**再过一次 SecretStore 取值。
+
+所以无论哪条路,真 key 都要落进那个文件:
 
 ```sh
-# 1. 本地 .env(已 gitignore;参照 infra/.env.example 的占位)
-#    平台凭证以 ref 形式声明,值放 secret manager / 本地 env passthrough。
-export HELIX_AGENT_SUPPORTED_PROVIDERS='["anthropic"]'
-export HELIX_AGENT_PLATFORM_PROVIDER_CREDENTIALS='{"anthropic":"secret://anthropic_api_key"}'
-export ANTHROPIC_API_KEY=sk-ant-...     # 真 key,仅本地 shell / .env(不提交)
+# 1. 拷模板 → 填真 key(.local 已被 *.local gitignore,绝不提交)
+cp infra/dev-keys/dev-llm-keys.example infra/dev-keys/dev-llm-keys.local
+$EDITOR infra/dev-keys/dev-llm-keys.local
+#   helix-agent/dev/llm/anthropic-api-key=sk-ant-<真key>      # ← 主对话模型(必填)
+#   # 跑 Phase 2 记忆 / web_search 时,再把 embedder / tavily 的 ref 名也填进来
 
-# 2. 起栈时 docker-compose 把上面 env 透传给 control-plane(见 PR J 的 compose 改动)
+# 2. 起栈:compose 已把 infra/dev-keys 挂进 control-plane 并设好
+#    HELIX_AGENT_SECRET_STORE_ENV_FILE(见 infra/docker-compose.yml)
+cd infra && docker compose --profile full up -d
 ```
 
-> 平台级 provider 凭证也可在 **平台配置页 `/settings/platform`**(PR I)运行时填(DB 覆盖 env)。
+> embedder / web_search 的**平台级 provider/tool 凭证**(即那些 `secret://…` ref 名)
+> 可在**平台配置页 `/settings/platform`**(PR I)运行时填(DB 覆盖 env),但 ref 指向的
+> **值**仍由上面的 SecretStore 文件提供。
 > 无 key 时 dev 只能验证到 API / 结构层,跑不出真实 LLM 回话(Phase 2/4/5 真实推理依赖真 key)。
 
 ---

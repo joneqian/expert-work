@@ -1,0 +1,105 @@
+# Canonical full-capability agent — M0→M1 Gate E2E (Stream P, Mini-ADR P-17).
+#
+# This is the agent the canonical-agent-e2e-test.md SOP registers and runs
+# through Phases 1-6. It is authored against the live `AgentSpec` schema
+# (packages/helix-protocol/.../agent_spec.py) and is kept loadable by
+# services/control-plane/tests/test_canonical_manifest.py — that test is the
+# CI guard that this file never drifts out of validity.
+#
+# Capability surface it exercises:
+#   * Phase 2 — long-term memory (memory.long_term: recall + write-back)
+#   * Phase 3 — persistent workspace (sandbox.filesystem.persistent_workspace)
+#   * Phase 4 — human-approval gate via policies.approval_required_tools
+#               (exact tool name "http" — NOT a regex; the SOP's old
+#               hitl.triggers.match regex does not exist at runtime, P-17)
+#   * Phase 5 — multimodal input Path A (model.supports_vision: true → image
+#               content blocks flow straight into the main model)
+#
+# Provider key: model.api_key_ref is a `secret://` URI the agent factory
+# resolves through the SecretStore. In dev that is the local_dev store backed
+# by the git-ignored secrets file (see infra/secrets/dev-secrets.example +
+# docs/runbooks/bootstrap-admin.md § dev LLM key). The manifest NEVER embeds
+# the key value.
+apiVersion: helix.io/v1
+kind: Agent
+metadata:
+  name: canonical-agent
+  version: "1.0.0"
+  # Logical tenant slug, not the UUID — registration maps it to the caller's
+  # tenant via session (AgentMetadata docstring). Informational placeholder.
+  tenant: canonical
+spec:
+  description: >-
+    Canonical full-capability reference agent used by the M0→M1 Gate
+    end-to-end test. Exercises long-term memory, persistent workspace, the
+    human-approval gate, and multimodal (vision) input.
+
+  tenant_config:
+    isolation_level: dedicated_sandbox
+
+  model:
+    provider: anthropic
+    name: claude-sonnet-4-5
+    api_key_ref: secret://helix-agent/dev/llm/anthropic-api-key
+    temperature: 0.2
+    max_tokens: 4096
+    # Phase 5 Path A — the strong model is vision-capable, so images ride in
+    # the HumanMessage as content blocks and there is NO `vision:` block
+    # (the two J.6 paths are mutually exclusive).
+    supports_vision: true
+    fallback:
+      - provider: anthropic
+        name: claude-haiku-4-5-20251001
+        api_key_ref: secret://helix-agent/dev/llm/anthropic-api-key
+        supports_vision: true
+
+  system_prompt:
+    template: |
+      You are the canonical Helix reference agent. Be concise and helpful.
+      You have web_search and an HTTP tool. Use long-term memory to recall
+      facts the user told you in earlier sessions. When you need to call the
+      HTTP tool, expect a human to approve the call first.
+
+  dynamic_context:
+    inject_memory: true
+    inject_current_date: true
+
+  tools:
+    - { type: builtin, name: web_search }
+    - { type: http }
+
+  memory:
+    long_term:
+      retrieve_top_k: 5
+      write_back: true
+
+  sandbox:
+    # Production intent is gVisor; on a macOS dev host the sandbox-supervisor
+    # falls back to runc — the SOP notes this (Phase 3 / Phase 7). Declaring
+    # gvisor here does not block loading or dev runs.
+    runtime: gvisor
+    resources:
+      cpu: "1.0"
+      memory: 1Gi
+    network:
+      egress: proxy
+      allowlist:
+        - api.anthropic.com
+        - api.tavily.com
+    filesystem:
+      readonly_root: true
+      writable:
+        - /tmp
+      # Phase 3 — mount the user's persistent workspace volume at /workspace
+      # so files survive a forced cold start (POST /v1/sandboxes/reap).
+      persistent_workspace: true
+
+  policies:
+    # Phase 4 — platform-enforced human approval. Each named tool triggers a
+    # LangGraph interrupt() before it runs; the agent cannot bypass it.
+    approval_required_tools:
+      - http
+    approval_timeout_s: 86400
+
+  observability:
+    log_level: info
