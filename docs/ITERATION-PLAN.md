@@ -743,8 +743,8 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **P.16 Phase 3 `POST /v1/sandboxes/reap?force=true` admin 端点（is_system_admin → supervisor reaper，返 reaped_count，volume 保留）（PR K #338）** — **Mini-ADR P-14** ✅ shipped
 - [x] **P.17 Phase 6 可观测接线：确认 orchestrator 指标在 control-plane /metrics + sandbox-supervisor scrape job（+确认其 /metrics）+ Grafana 01-overview 补 4 panel（PR L）** — **Mini-ADR P-15** ✅ shipped
 - [x] **P.18 Phase 5 Playground 传图 UI：`PlaygroundTab.tsx` 文件选择 → POST /uploads → image_ref 进 turn（PR M #339）** — **Mini-ADR P-16** ✅ shipped
-- [ ] **P.19 Phase 4 贴合现状：manifest 用 `approval_required_tools`(✅ PR J)；SOP query 改 `status=paused`(→ PR N)；不做正则** — **Mini-ADR P-17**
-- [ ] **P.20 E2E SOP 全面重写（Phase 0–6 修正 + Phase 7 单列）（PR N，capstone）** — **Mini-ADR P-18**
+- [x] **P.19 Phase 4 贴合现状：manifest 用 `approval_required_tools`(✅ PR J)；SOP query 改 `status=paused`(✅ PR N)；不做正则** — **Mini-ADR P-17** ✅
+- [x] **P.20 E2E SOP 全面重写（Phase 0–6 修正 + Phase 7 单列）（PR N #341，capstone）** — **Mini-ADR P-18** ✅ shipped
 
 **Stream P Verification**：dev 跑通 Phase 0–6 — 起栈(full+auth+observability)+真 key → bootstrap admin 幂等 → OIDC 登录 `/v1/me` is_system_admin → 平台配置页填 provider → `POST /v1/tenants`(201/403/409) → 注册 manifest → **P1** baseline diff 空+J.1/3/6 过 → **P2** 跨 thread 召回+cross-tenant 隔离 → **P3** reap 后文件仍在+cold_start P95<5s → **P4** artifact 跨 thread+危险工具 PAUSED+`status=paused`+ApprovalCard+resume+audit → **P5** Playground 传图描述+ask_image → **P6** 8 项 query 有数据+Grafana 8 panel。每 PR 零债 6 条;平台凭证 env-only→DB 可变向后兼容。
 
@@ -763,6 +763,30 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **后续（不在本迭代）**：
 - **Phase 7 — 安全 + 数据保护（staging Linux）**：gVisor 7 用例 + cross-tenant 3 命名件套（现有覆盖散在 `test_tenant_scope_endpoints.py` 等，需集中/补名）+ KMS 轮换 runbook + **staging Linux 主机 provisioning**（现 `environments/staging.yaml` 全 TBD）。等 staging 就绪单列 Stream/PR。
+
+---
+
+### Stream Q — Web Key Management（平台统一密钥管理 + agent 主模型接线；~1-2 周）— 设计 [STREAM-Q-DESIGN](./streams/STREAM-Q-DESIGN.md)
+
+**触发**：用户问"大模型 key 不是该登录后 web 上填么?为什么写文件?"——戳中真实 gap：① 平台配置页只存 ref(P-8 拒明文)、值要另放 secret 后端(dev 落文件、`LocalDevSecretStore.put` 还不持久)；② agent 主对话模型 key 走 manifest `api_key_ref` 根本不经过配置页。**目标**：web 粘贴真 key(OpenAI 控制台式)→ 加密落库 → agent 主模型也用它 → E2E 全程 web。
+
+**范围决策(2026-05-29)**：① 加密落库做成新 `SecretStore` 后端(非裸列)；② 两半都做(金库+UI / chat-LLM 接线)；③ canonical manifest 去 `api_key_ref` 走平台 key + 留 override fixture；④ 出口只平台级(租户级/MCP/S3 后续按需接,后端通用不返工)。
+
+- [ ] **Q.1 `SqlEncryptedSecretStore`(加密落库做 SecretStore 后端,get/put 复用,解析链零改)（PR B）** — **Mini-ADR Q-1**
+- [ ] **Q.2 AES-256-GCM 单 KEK + per-row nonce + AAD 绑 name；env KEK(`HELIX_AGENT_SECRET_ENCRYPTION_KEY`)now / KMS-wrap follow-up；`kek_version` 留轮换钩子（PR B）** — **Mini-ADR Q-2**
+- [ ] **Q.3 `encrypted_secret` 表 `tenant_id NULL` + RLS `IS NOT DISTINCT FROM`,平台行 bypass_rls；通用后端、本迭代只平台行（PR B,migration 0050）** — **Mini-ADR Q-3**
+- [ ] **Q.4 写路径 `PUT /v1/platform/credentials` 收原始 `value`(SecretStr,与 secret_ref 二选一)→ put → catalog 存 ref(表不改 schema)；re-paste=新 version（PR C）** — **Mini-ADR Q-4**
+- [ ] **Q.5 chat-LLM 接线 `ProviderKeyResolver` 闭包穿 build_llm_router/step_routers/agent/vision + agent/child builder + app；manifest 优先/平台兜底；子 agent+vision 都接（PR E）** — **Mini-ADR Q-5**
+- [ ] **Q.6 P-8 姿态变更(显式)：明文绝不进任何表;`encrypted_secret` 只存 AES-GCM 密文;catalog 仍 refs-only（PR B/A）** — **Mini-ADR Q-6**
+- [ ] **Q.7 安全:value 全程 SecretStr / 不 log 值 / 审计去值 / 前端 type=password 不回显 / nonce os.urandom（PR B/C/D）** — **Mini-ADR Q-7**
+- [ ] **Q.8 canonical manifest 去 `api_key_ref` 走平台 key + override fixture 守回归 + E2E 文档收口（PR F）** — **Mini-ADR Q-8**
+- [ ] **Q.9 Admin UI `/settings/platform` 粘贴 key 输入(type=password 不回显)+ i18n + Storybook/Playwright/axe（PR D）**
+
+**Stream Q Verification**：PR B 加解密 round-trip + 密文落库(grep 不到明文)+ 错 KEK 失败 + RLS；PR C 粘贴/覆盖/非 admin 403/值不入日志；PR E `build_llm_router` manifest-wins/平台-fallback/皆无 raise/子 agent；PR D Playwright type=password+axe；**端到端**(PR F 后,真 key)：起栈无 dev-keys 文件 → 登录 → web 粘贴真 key → 注册无 api_key_ref 的 canonical manifest → Playground 真实回话。每 PR 零债 6 条。
+
+**PR 拆分(~6 PR)**：A(设计) → B(金库后端) → C(写路径) → D(UI) → E(接线,可与 C/D 并行) → F(canonical 收口)。关键路径 A→B→C→D；E 依赖 B 接口可并行；F 收口(依赖 B+E)。
+
+**后续(不在本迭代)**：真 KMS-wrapped KEK(等 aliyun_kms 落地)+ KEK 轮换自动化；租户级粘贴 UI + MCP/S3 secret 迁入金库;`ChainedSecretStore` 混合后端;版本回滚端点。
 
 ---
 
