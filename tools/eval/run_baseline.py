@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 import yaml
 
@@ -91,7 +92,10 @@ class _FakeKeywordEmbedder:
 
     DIM: int = 256
 
-    async def embed(self, texts: Sequence[str]) -> list[tuple[float, ...]]:
+    async def embed(
+        self, texts: Sequence[str], *, tenant_id: UUID
+    ) -> list[tuple[float, ...]]:
+        del tenant_id  # Stream O O-9 — eval double has no per-tenant key
         return [self._encode(t) for t in texts]
 
     def _encode(self, text: str) -> tuple[float, ...]:

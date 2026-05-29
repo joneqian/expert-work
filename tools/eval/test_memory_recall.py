@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -97,7 +98,10 @@ class _KeywordOverlapEmbedder:
 
     DIM: int = 256
 
-    async def embed(self, texts: Sequence[str]) -> list[tuple[float, ...]]:
+    async def embed(
+        self, texts: Sequence[str], *, tenant_id: UUID
+    ) -> list[tuple[float, ...]]:
+        del tenant_id  # Stream O O-9 — eval double has no per-tenant key
         return [self._encode(t) for t in texts]
 
     def _encode(self, text: str) -> tuple[float, ...]:

@@ -178,7 +178,9 @@ def _parse_case(entry: Any) -> RecallCase:
 
 
 class _EmbedderLike(Protocol):
-    async def embed(self, texts: Sequence[str]) -> list[tuple[float, ...]]:
+    async def embed(
+        self, texts: Sequence[str], *, tenant_id: UUID
+    ) -> list[tuple[float, ...]]:
         """Embed each text and return one vector per input."""
 
 
@@ -213,7 +215,7 @@ async def evaluate_case(
     # Embed every memory + the query in one batch so the embedder gets
     # the cheapest call shape on the production path too.
     texts = [m.content for m in case.memories] + [case.query]
-    vectors = await embedder.embed(texts)
+    vectors = await embedder.embed(texts, tenant_id=tenant_id)
     memory_vectors = vectors[:-1]
     query_vector = vectors[-1]
 

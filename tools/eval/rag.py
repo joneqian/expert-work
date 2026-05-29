@@ -102,7 +102,9 @@ class RagCase:
 
 
 class _EmbedderLike(Protocol):
-    async def embed(self, texts: Sequence[str]) -> list[tuple[float, ...]]:
+    async def embed(
+        self, texts: Sequence[str], *, tenant_id: UUID
+    ) -> list[tuple[float, ...]]:
         """Embed each text and return one vector per input."""
 
 
@@ -130,7 +132,7 @@ async def _seed_store(
                 all_chunks.append((kb, doc, chunk))
     if not all_chunks:
         return store, {}
-    vectors = await embedder.embed([c.content for *_, c in all_chunks])
+    vectors = await embedder.embed([c.content for *_, c in all_chunks], tenant_id=tenant_id)
 
     locator: dict[tuple[str, int], str] = {}
     by_kb: dict[str, UUID] = {}
