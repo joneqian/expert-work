@@ -204,6 +204,7 @@ export function SettingsPlatformConfig() {
               checked={enabled}
               disabled={row.secret_ref === null}
               onChange={(checked) => onToggle(kind, key, row.secret_ref, checked)}
+              aria-label={`${key} ${t("settings_platform.col_enabled")}`}
               data-testid={`pc-toggle-${key}`}
             />
           );
@@ -355,7 +356,7 @@ export function SettingsPlatformConfig() {
             <Input placeholder="kms://platform/anthropic-key" data-testid="pc-edit-ref" />
           </Form.Item>
           <Form.Item name="enabled" label={t("settings_platform.enabled_label")} valuePropName="checked">
-            <Switch data-testid="pc-edit-enabled" />
+            <Switch aria-label={t("settings_platform.enabled_label")} data-testid="pc-edit-enabled" />
           </Form.Item>
         </Form>
       </Modal>
