@@ -737,13 +737,13 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [ ] **P.10 boot `_validate_platform_catalog` 对 env 字段语义不变（仍 fail-fast），不加新 fatal boot check（PR G）** — **Mini-ADR P-10**
 - [ ] **P.11 平台端点 is_system_admin inline 门控 + handler 在 bypass_rls_session 内（PR H）** — **Mini-ADR P-11**
 - [ ] **P.12 删除受被引用检查门控（agent 在用/env 定义则 409），enabled=false 软停用永远可用（PR H）** — **Mini-ADR P-12**
-- [ ] **P.13 平台配置 Admin UI `SettingsPlatformConfig.tsx`（非 tenant-scoped + isSystemAdmin 门控）+ 建租户 UI `SettingsCreateTenant.tsx`（PR E/I）**
-- [ ] **P.14 canonical manifest 入仓（用 `approval_required_tools` + `supports_vision`）（PR J）**
-- [ ] **P.15 dev 真实 turn 用真 LLM key：docker-compose env 注入 + `.env.example` 占位 + 文档（不入仓明文）（PR J）** — **Mini-ADR P-13**
-- [ ] **P.16 Phase 3 `POST /v1/sandboxes/reap?force=true` admin 端点（is_system_admin → supervisor reaper，返 reaped_count，volume 保留）（PR K）** — **Mini-ADR P-14**
-- [ ] **P.17 Phase 6 可观测接线：确认 orchestrator 指标在 control-plane /metrics + sandbox-supervisor scrape job（+确认其 /metrics）+ Grafana 01-overview 补 4 panel（PR L）** — **Mini-ADR P-15**
-- [ ] **P.18 Phase 5 Playground 传图 UI：`PlaygroundTab.tsx` 文件选择 → POST /uploads → image_ref 进 turn（PR M）** — **Mini-ADR P-16**
-- [ ] **P.19 Phase 4 贴合现状：manifest 用 `approval_required_tools`；SOP query 改 `status=paused`；不做正则（PR J/N）** — **Mini-ADR P-17**
+- [x] **P.13 平台配置 Admin UI `SettingsPlatformConfig.tsx`（非 tenant-scoped + isSystemAdmin 门控）+ 建租户 UI `SettingsCreateTenant.tsx`（PR E/I）** ✅ shipped
+- [x] **P.14 canonical manifest 入仓（用 `approval_required_tools` + `supports_vision`）（PR J）** ✅ `manifests/canonical-agent/v1.0.0.yaml` + CI guard `test_canonical_manifest.py`
+- [x] **P.15 dev 真实 turn 用真 LLM key：local_dev SecretStore 文件（非进程 env）+ compose 挂载 `infra/dev-keys` + `.example` 模板 + 文档（不入仓明文）（PR J）** — **Mini-ADR P-13** ✅ 修正了 PR B 把 key 走 `ANTHROPIC_API_KEY` 进程 env 的失效 recipe
+- [x] **P.16 Phase 3 `POST /v1/sandboxes/reap?force=true` admin 端点（is_system_admin → supervisor reaper，返 reaped_count，volume 保留）（PR K #338）** — **Mini-ADR P-14** ✅ shipped
+- [x] **P.17 Phase 6 可观测接线：确认 orchestrator 指标在 control-plane /metrics + sandbox-supervisor scrape job（+确认其 /metrics）+ Grafana 01-overview 补 4 panel（PR L）** — **Mini-ADR P-15** ✅ shipped
+- [x] **P.18 Phase 5 Playground 传图 UI：`PlaygroundTab.tsx` 文件选择 → POST /uploads → image_ref 进 turn（PR M #339）** — **Mini-ADR P-16** ✅ shipped
+- [ ] **P.19 Phase 4 贴合现状：manifest 用 `approval_required_tools`(✅ PR J)；SOP query 改 `status=paused`(→ PR N)；不做正则** — **Mini-ADR P-17**
 - [ ] **P.20 E2E SOP 全面重写（Phase 0–6 修正 + Phase 7 单列）（PR N，capstone）** — **Mini-ADR P-18**
 
 **Stream P Verification**：dev 跑通 Phase 0–6 — 起栈(full+auth+observability)+真 key → bootstrap admin 幂等 → OIDC 登录 `/v1/me` is_system_admin → 平台配置页填 provider → `POST /v1/tenants`(201/403/409) → 注册 manifest → **P1** baseline diff 空+J.1/3/6 过 → **P2** 跨 thread 召回+cross-tenant 隔离 → **P3** reap 后文件仍在+cold_start P95<5s → **P4** artifact 跨 thread+危险工具 PAUSED+`status=paused`+ApprovalCard+resume+audit → **P5** Playground 传图描述+ask_image → **P6** 8 项 query 有数据+Grafana 8 panel。每 PR 零债 6 条;平台凭证 env-only→DB 可变向后兼容。
