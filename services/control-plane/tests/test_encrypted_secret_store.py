@@ -139,15 +139,18 @@ async def test_put_get_round_trip_and_ciphertext_at_rest(
     vault: tuple[SqlEncryptedSecretStore, AsyncEngine],
 ) -> None:
     store, engine = vault
+    # Distinct name per integration test — the postgres_container fixture is
+    # shared, so rows persist across tests in the suite.
+    name = "helix-agent/platform/llm/roundtrip"
     try:
-        await store.put(_NAME, "sk-ant-REAL")
-        assert await store.get(_NAME) == "sk-ant-REAL"
+        await store.put(name, "sk-ant-REAL")
+        assert await store.get(name) == "sk-ant-REAL"
 
         # The value at rest is ciphertext — the plaintext must not appear in any
         # column of the row.
         async with engine.connect() as conn:
             stmt = text("SELECT ciphertext FROM encrypted_secret WHERE name=:n")
-            row = (await conn.execute(stmt, {"n": _NAME})).one()
+            row = (await conn.execute(stmt, {"n": name})).one()
         assert b"sk-ant-REAL" not in bytes(row[0])
     finally:
         await engine.dispose()
@@ -159,16 +162,17 @@ async def test_repaste_versions_and_current(
     vault: tuple[SqlEncryptedSecretStore, AsyncEngine],
 ) -> None:
     store, engine = vault
+    name = "helix-agent/platform/llm/repaste"  # distinct — shared container
     try:
-        await store.put(_NAME, "key-v1")
-        await store.put(_NAME, "key-v2")
+        await store.put(name, "key-v1")
+        await store.put(name, "key-v2")
         # get() returns the latest (current) version.
-        assert await store.get(_NAME) == "key-v2"
-        versions = await store.list_versions(_NAME)
+        assert await store.get(name) == "key-v2"
+        versions = await store.list_versions(name)
         assert len(versions) == 2
         # Both versions are independently fetchable and decrypt to the two values
         # (order-independent so the test doesn't flake on equal created_at).
-        assert {await store.get(_NAME, version=v) for v in versions} == {"key-v1", "key-v2"}
+        assert {await store.get(name, version=v) for v in versions} == {"key-v1", "key-v2"}
     finally:
         await engine.dispose()
 
