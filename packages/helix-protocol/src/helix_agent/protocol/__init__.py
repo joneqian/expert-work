@@ -85,6 +85,12 @@ from helix_agent.protocol.knowledge import (
 from helix_agent.protocol.memory_item import MemoryItem
 from helix_agent.protocol.multimodal import ImageRef, parse_image_ref
 from helix_agent.protocol.plan import Plan, PlanStep
+from helix_agent.protocol.platform_secret import (
+    PlatformProviderSecretRecord,
+    PlatformSecretUpsert,
+    PlatformToolSecretRecord,
+    validate_secret_ref,
+)
 from helix_agent.protocol.provider_catalog import (
     PROVIDER_CATALOG,
     TOOL_CATALOG,
@@ -227,6 +233,9 @@ __all__ = [
     "ObservabilitySpec",
     "Plan",
     "PlanStep",
+    "PlatformProviderSecretRecord",
+    "PlatformSecretUpsert",
+    "PlatformToolSecretRecord",
     "PolicySpec",
     "Principal",
     "Provider",
@@ -281,4 +290,5 @@ __all__ = [
     "parse_agent_ref",
     "parse_image_ref",
     "parse_skill_ref",
+    "validate_secret_ref",
 ]

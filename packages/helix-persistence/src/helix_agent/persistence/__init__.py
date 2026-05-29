@@ -77,6 +77,15 @@ from helix_agent.persistence.models import SkillVersionRow as SkillVersionRow
 from helix_agent.persistence.models import TenantUserRow as TenantUserRow
 from helix_agent.persistence.models import ThreadMetaRow as ThreadMetaRow
 from helix_agent.persistence.models import UserWorkspaceRow as UserWorkspaceRow
+from helix_agent.persistence.platform_secrets import (
+    InMemoryPlatformSecretStore as InMemoryPlatformSecretStore,
+)
+from helix_agent.persistence.platform_secrets import (
+    PlatformSecretStore as PlatformSecretStore,
+)
+from helix_agent.persistence.platform_secrets import (
+    SqlPlatformSecretStore as SqlPlatformSecretStore,
+)
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore as InMemoryTenantQuotaStore,
 )
@@ -196,6 +205,7 @@ __all__ = [
     "InMemoryEvalDatasetStore",
     "InMemoryKnowledgeStore",
     "InMemoryMemoryStore",
+    "InMemoryPlatformSecretStore",
     "InMemoryTenantConfigStore",
     "InMemoryTenantQuotaStore",
     "InMemoryTenantUserStore",
@@ -211,6 +221,7 @@ __all__ = [
     "KnowledgeStore",
     "MemoryItemRow",
     "MemoryStore",
+    "PlatformSecretStore",
     "SqlApprovalStore",
     "SqlArtifactStore",
     "SqlAuditLogStore",
@@ -219,6 +230,7 @@ __all__ = [
     "SqlEvalDatasetStore",
     "SqlKnowledgeStore",
     "SqlMemoryStore",
+    "SqlPlatformSecretStore",
     "SqlTenantConfigStore",
     "SqlTenantQuotaStore",
     "SqlTenantUserStore",

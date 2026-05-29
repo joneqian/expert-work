@@ -1,0 +1,162 @@
+"""SQLAlchemy-backed :class:`PlatformSecretStore` — Stream P (Mini-ADR P-7)."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import cast
+
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from helix_agent.persistence.models import PlatformProviderSecretRow, PlatformToolSecretRow
+from helix_agent.persistence.platform_secrets.base import PlatformSecretStore
+from helix_agent.protocol import (
+    PlatformProviderSecretRecord,
+    PlatformToolSecretRecord,
+    Provider,
+    Tool,
+)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(tz=UTC)
+
+
+def _provider_record(row: PlatformProviderSecretRow) -> PlatformProviderSecretRecord:
+    return PlatformProviderSecretRecord(
+        provider=cast(Provider, row.provider),
+        secret_ref=row.secret_ref,
+        enabled=row.enabled,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        updated_by=row.updated_by,
+    )
+
+
+def _tool_record(row: PlatformToolSecretRow) -> PlatformToolSecretRecord:
+    return PlatformToolSecretRecord(
+        tool=cast(Tool, row.tool),
+        secret_ref=row.secret_ref,
+        enabled=row.enabled,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        updated_by=row.updated_by,
+    )
+
+
+class SqlPlatformSecretStore(PlatformSecretStore):
+    """Postgres-backed platform secret-ref repository."""
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def list_providers(self) -> list[PlatformProviderSecretRecord]:
+        async with self._sf() as session:
+            rows = (await session.execute(select(PlatformProviderSecretRow))).scalars().all()
+        return [_provider_record(r) for r in rows]
+
+    async def get_provider(self, provider: Provider) -> PlatformProviderSecretRecord | None:
+        async with self._sf() as session:
+            row = await session.get(PlatformProviderSecretRow, provider)
+        return _provider_record(row) if row is not None else None
+
+    async def upsert_provider(
+        self,
+        *,
+        provider: Provider,
+        secret_ref: str,
+        enabled: bool,
+        actor_id: str,
+    ) -> PlatformProviderSecretRecord:
+        now = _utc_now()
+        async with self._sf() as session:
+            stmt = (
+                pg_insert(PlatformProviderSecretRow)
+                .values(
+                    provider=provider,
+                    secret_ref=secret_ref,
+                    enabled=enabled,
+                    created_at=now,
+                    updated_at=now,
+                    updated_by=actor_id,
+                )
+                .on_conflict_do_update(
+                    index_elements=["provider"],
+                    set_={
+                        "secret_ref": secret_ref,
+                        "enabled": enabled,
+                        "updated_at": now,
+                        "updated_by": actor_id,
+                    },
+                )
+                .returning(PlatformProviderSecretRow)
+            )
+            row = (await session.execute(stmt)).scalar_one()
+            await session.commit()
+            await session.refresh(row)
+            return _provider_record(row)
+
+    async def delete_provider(self, provider: Provider) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                delete(PlatformProviderSecretRow).where(
+                    PlatformProviderSecretRow.provider == provider
+                )
+            )
+            await session.commit()
+            return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def list_tools(self) -> list[PlatformToolSecretRecord]:
+        async with self._sf() as session:
+            rows = (await session.execute(select(PlatformToolSecretRow))).scalars().all()
+        return [_tool_record(r) for r in rows]
+
+    async def get_tool(self, tool: Tool) -> PlatformToolSecretRecord | None:
+        async with self._sf() as session:
+            row = await session.get(PlatformToolSecretRow, tool)
+        return _tool_record(row) if row is not None else None
+
+    async def upsert_tool(
+        self,
+        *,
+        tool: Tool,
+        secret_ref: str,
+        enabled: bool,
+        actor_id: str,
+    ) -> PlatformToolSecretRecord:
+        now = _utc_now()
+        async with self._sf() as session:
+            stmt = (
+                pg_insert(PlatformToolSecretRow)
+                .values(
+                    tool=tool,
+                    secret_ref=secret_ref,
+                    enabled=enabled,
+                    created_at=now,
+                    updated_at=now,
+                    updated_by=actor_id,
+                )
+                .on_conflict_do_update(
+                    index_elements=["tool"],
+                    set_={
+                        "secret_ref": secret_ref,
+                        "enabled": enabled,
+                        "updated_at": now,
+                        "updated_by": actor_id,
+                    },
+                )
+                .returning(PlatformToolSecretRow)
+            )
+            row = (await session.execute(stmt)).scalar_one()
+            await session.commit()
+            await session.refresh(row)
+            return _tool_record(row)
+
+    async def delete_tool(self, tool: Tool) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                delete(PlatformToolSecretRow).where(PlatformToolSecretRow.tool == tool)
+            )
+            await session.commit()
+            return int(getattr(result, "rowcount", 0) or 0) > 0

@@ -24,6 +24,10 @@ from helix_agent.persistence.models.knowledge import (
 )
 from helix_agent.persistence.models.memory_item import MemoryItemRow
 from helix_agent.persistence.models.memory_writeback_dlq import MemoryWritebackDLQRow
+from helix_agent.persistence.models.platform_secret import (
+    PlatformProviderSecretRow,
+    PlatformToolSecretRow,
+)
 from helix_agent.persistence.models.role_binding import RoleBindingRow
 from helix_agent.persistence.models.run_event import RunEventRow
 from helix_agent.persistence.models.sandbox_instance import SandboxInstanceRow
@@ -60,6 +64,8 @@ __all__ = [
     "KnowledgeDocumentRow",
     "MemoryItemRow",
     "MemoryWritebackDLQRow",
+    "PlatformProviderSecretRow",
+    "PlatformToolSecretRow",
     "RoleBindingRow",
     "RunEventRow",
     "SandboxInstanceRow",
