@@ -85,10 +85,8 @@ class CredentialsResolver:
         platform_provider_credentials: dict[Provider, str],
         platform_tool_credentials: dict[Tool, str],
         tenant_config_getter: TenantConfigGetter,
-        platform_provider_getter: Callable[[
-        ], Awaitable[dict[Provider, str]]] | None = None,
-        platform_tool_getter: Callable[[],
-                                       Awaitable[dict[Tool, str]]] | None = None,
+        platform_provider_getter: Callable[[], Awaitable[dict[Provider, str]]] | None = None,
+        platform_tool_getter: Callable[[], Awaitable[dict[Tool, str]]] | None = None,
     ) -> None:
         self._platform_providers = dict(platform_provider_credentials)
         self._platform_tools = dict(platform_tool_credentials)
@@ -120,8 +118,7 @@ class CredentialsResolver:
                     f"platform credentials missing for provider={provider}. "
                     "Add to settings.platform_provider_credentials."
                 )
-                raise CredentialsResolverError(
-                    msg, mode="platform", kind="provider", key=provider)
+                raise CredentialsResolverError(msg, mode="platform", kind="provider", key=provider)
             return secret_ref
         # tenant mode
         secret_ref = cfg.model_credentials_ref.get(provider)
@@ -132,8 +129,7 @@ class CredentialsResolver:
                 f"credentials via PUT /v1/tenants/{tenant_id}/config or "
                 "switch credentials_mode back to 'platform'."
             )
-            raise CredentialsResolverError(
-                msg, mode="tenant", kind="provider", key=provider)
+            raise CredentialsResolverError(msg, mode="tenant", kind="provider", key=provider)
         return secret_ref
 
     async def resolve_tool(
@@ -153,8 +149,7 @@ class CredentialsResolver:
                     f"platform credentials missing for tool={tool}. "
                     "Add to settings.platform_tool_credentials."
                 )
-                raise CredentialsResolverError(
-                    msg, mode="platform", kind="tool", key=tool)
+                raise CredentialsResolverError(msg, mode="platform", kind="tool", key=tool)
             return secret_ref
         secret_ref = cfg.tool_credentials.get(tool)
         if not secret_ref:
@@ -164,8 +159,7 @@ class CredentialsResolver:
                 f"credentials via PUT /v1/tenants/{tenant_id}/config or "
                 "switch credentials_mode back to 'platform'."
             )
-            raise CredentialsResolverError(
-                msg, mode="tenant", kind="tool", key=tool)
+            raise CredentialsResolverError(msg, mode="tenant", kind="tool", key=tool)
         return secret_ref
 
     async def _effective_providers(self) -> dict[Provider, str]:
