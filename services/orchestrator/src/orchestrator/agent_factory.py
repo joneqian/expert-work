@@ -29,7 +29,7 @@ each adapter and onto the request body.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -257,6 +257,10 @@ async def build_agent(
     subagent_depth: int = 0,
     skill_resolver: SkillResolver | None = None,
     tenant_id: Any = None,
+    # Stream Q (Mini-ADR Q-5) — resolves a provider's platform-configured key
+    # when the manifest model omits ``api_key_ref``. Bound to the tenant by the
+    # control-plane; ``None`` keeps the build resolvable only via api_key_ref.
+    provider_key_resolver: ProviderKeyResolver | None = None,
     # Capability Uplift Sprint #4 — Mini-ADR U-27. When wired, every
     # skill resolved during the build (and every ``skill_view`` runtime
     # read, via the tool wiring below) bumps ``skill.last_used_at`` so
@@ -311,6 +315,7 @@ async def build_agent(
         secret_store=secret_store,
         around_llm_chain=chains.around_llm_call,
         image_resolver=env.image_resolver,
+        provider_key_resolver=provider_key_resolver,
     )
     # Stream J.6 Path B — build the VL router when a ``vision:`` block is
     # declared; ``ask_image`` will route through it. Stream L.L3 — the VL
@@ -327,6 +332,7 @@ async def build_agent(
             stream_deadline_s=float(vl_deadline_s) if vl_deadline_s > 0 else None,
             # Mini-ADR J-33 — VL fallback chain (J.6.补强-4).
             extra_fallbacks=list(spec.spec.vision.fallbacks),
+            provider_key_resolver=provider_key_resolver,
         )
     registry = await build_tool_registry(
         spec.spec.tools,
@@ -738,6 +744,15 @@ def detect_subagent_cycle(
     visit(spec)
 
 
+#: Resolve a provider name → a ``secret://`` ref for its platform-configured
+#: key (Stream Q, Mini-ADR Q-5). The control-plane binds this to a
+#: ``CredentialsResolver`` + the run's tenant_id and passes it in, so the
+#: orchestrator never imports helix-common.credentials (same decoupling as
+#: ``mcp_allowlist_provider``). Raising surfaces as ``AgentFactoryError`` —
+#: the control-plane closure translates ``CredentialsResolverError``.
+ProviderKeyResolver = Callable[[str], Awaitable[str]]
+
+
 async def build_llm_router(
     model: ModelSpec,
     *,
@@ -746,6 +761,7 @@ async def build_llm_router(
     image_resolver: ImageResolver | None = None,
     stream_deadline_s: float | None = None,
     extra_fallbacks: list[ModelSpec] | None = None,
+    provider_key_resolver: ProviderKeyResolver | None = None,
 ) -> LLMRouter:
     """Build an :class:`LLMRouter` from a ``ModelSpec`` + its fallback tree.
 
@@ -777,12 +793,20 @@ async def build_llm_router(
     for extra in extra_fallbacks or ():
         chain.extend(_flatten_chain(extra))
     for entry in chain:
-        if entry.api_key_ref is None:
+        # Manifest api_key_ref is the explicit override; the platform-configured
+        # key (Stream Q) is the fallback when the manifest omits it. Resolved
+        # per-entry so each model in the fallback chain (possibly a different
+        # provider) resolves independently.
+        if entry.api_key_ref is not None:
+            secret_ref = entry.api_key_ref
+        elif provider_key_resolver is not None:
+            secret_ref = await provider_key_resolver(entry.provider)
+        else:
             raise AgentFactoryError(
-                f"model {entry.provider}:{entry.name} has no api_key_ref — "
-                f"cannot resolve a provider API key"
+                f"model {entry.provider}:{entry.name} has no api_key_ref and no "
+                f"platform credential is configured for provider {entry.provider!r}"
             )
-        api_key = await secret_store.get(parse_secret_ref(entry.api_key_ref))
+        api_key = await secret_store.get(parse_secret_ref(secret_ref))
         provider = _build_provider(entry, api_key, image_resolver=image_resolver)
         rate_limited = RateLimitedProvider.with_rpm(provider, rate_limit_rpm=entry.rate_limit_rpm)
         handles.append(ProviderHandle(provider=rate_limited, key=f"{entry.provider}:{entry.name}"))
@@ -799,6 +823,7 @@ async def build_step_routers(
     secret_store: SecretStore,
     around_llm_chain: MiddlewareChain | None = None,
     image_resolver: ImageResolver | None = None,
+    provider_key_resolver: ProviderKeyResolver | None = None,
 ) -> StepRouters:
     """Resolve the LLM router for each step class (Stream J.11).
 
@@ -821,6 +846,7 @@ async def build_step_routers(
         around_llm_chain=around_llm_chain,
         image_resolver=image_resolver,
         stream_deadline_s=deadline,
+        provider_key_resolver=provider_key_resolver,
     )
     planning = default
     reflection = default
@@ -833,6 +859,7 @@ async def build_step_routers(
                 around_llm_chain=around_llm_chain,
                 image_resolver=image_resolver,
                 stream_deadline_s=deadline,
+                provider_key_resolver=provider_key_resolver,
             )
             if rule.when == "planning":
                 planning = routed

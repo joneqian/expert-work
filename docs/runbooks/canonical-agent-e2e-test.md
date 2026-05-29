@@ -63,12 +63,16 @@ gVisor),环境就绪后单列 Stream/PR。**Phase 0–6 累计 3-4 工作日。*
 cd /Users/mac/src/github/jone_qian/helix-agent
 git checkout main && git pull --ff-only
 
-# 1. dev 真实 LLM key —— agent 主对话模型 / embedder / web_search 的 key 值都
-#    从 local_dev SecretStore 文件取(它只读文件,不读 ANTHROPIC_API_KEY 进程 env)。
-#    详见 docs/runbooks/bootstrap-admin.md § 5。
-cp infra/dev-keys/dev-llm-keys.example infra/dev-keys/dev-llm-keys.local
-$EDITOR infra/dev-keys/dev-llm-keys.local
-#   helix-agent/dev/llm/anthropic-api-key=sk-ant-<真key>   ← canonical manifest 引用这个
+# 1. dev 真实 LLM key —— 两种后端,二选一:
+#  (A) 推荐 / 全程 web:加密金库后端。key 在 0.3 直接在网页粘贴,加密落库,
+#      agent 主对话模型(canonical manifest 已无 api_key_ref)自动取它。设两个 env:
+#        export HELIX_AGENT_SECRET_STORE_BACKEND=sql_encrypted
+#        export HELIX_AGENT_SECRET_ENCRYPTION_KEY=$(openssl rand -base64 32)  # 32B KEK,别提交
+#      (compose 已 passthrough 这两个 env;需 store_backend=sql)
+#  (B) 文件后端(legacy):local_dev SecretStore 只读文件,不读进程 env。
+#        cp infra/dev-keys/dev-llm-keys.example infra/dev-keys/dev-llm-keys.local
+#        # 填 helix-agent/dev/llm/anthropic-api-key=sk-ant-<真key>
+#      详见 docs/runbooks/bootstrap-admin.md § 5。
 
 # 2. 起栈 —— 三个 profile 缺一不可:
 #      full          control-plane / postgres / pgbouncer / redis / sandbox-supervisor / minio
@@ -110,19 +114,31 @@ curl -sS http://localhost:8000/v1/me -H "Authorization: Bearer ${TOKEN}" | jq '.
 > Admin UI 登录(localhost:5173):走同一个 keycloak;登录后右上角应出现平台级入口
 > `/settings/platform`(仅 system_admin 可见)。
 
-### 0.3 配平台 provider / tool 凭证
+### 0.3 配平台 provider / tool 凭证(web 粘贴真 key)
 
-embedder(Phase 2 长记忆)和 web_search 工具的 key 通过**平台凭证**解析。两种配法:
-
-- **env 种子**(最简):`HELIX_AGENT_PLATFORM_PROVIDER_CREDENTIALS` / `..._TOOL_CREDENTIALS`
-  声明 `provider/tool → secret://<name>` ref,ref 指向的**值**仍由 0.1 的 SecretStore 文件提供。
-- **运行时**:平台配置页 **`/settings/platform`**(system_admin)填写,DB 覆盖 env。
+**agent 主对话模型 + embedder + web_search 的 key 全在这里配**(canonical manifest 已不带
+`api_key_ref`,主模型也从平台凭证取 —— Stream Q)。后端 = `sql_encrypted` 时,**直接粘贴真 key**,
+后端加密落库;catalog 只存生成的 `secret://` ref。
 
 ```sh
-# GET 当前合并视图(env 种子 + DB 覆盖)
+# 粘贴 anthropic 真 key(主对话模型 + 视觉都用它)
+curl -sS -X PUT http://localhost:8000/v1/platform/credentials/providers/anthropic \
+  -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+  -d '{"value":"sk-ant-<真key>","enabled":true}'
+# 期望:200;data.secret_ref = secret://helix-agent/platform/llm/anthropic(是 ref,非明文)
+
+# (可选)web_search 的 Tavily key
+curl -sS -X PUT http://localhost:8000/v1/platform/credentials/tools/web_search \
+  -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+  -d '{"value":"tvly-<真key>","enabled":true}'
+
+# 查合并视图(refs + flags,绝无明文值)
 curl -sS http://localhost:8000/v1/platform/credentials -H "Authorization: Bearer ${TOKEN}" | jq .
-# 期望:providers/tools 列表反映已启用的 provider(anthropic 等)与 tool(web_search)
 ```
+
+> **或** 用平台配置页 **`/settings/platform`**(system_admin)在浏览器粘贴(`type=password` 不回显)。
+> 后端 = `local_dev`(文件)时,这里改填 `secret_ref`(`secret://<name>`),值由 0.1(B) 的文件提供。
+> `value`(粘贴真 key)二选一,与 `secret_ref` 互斥。
 
 ### 0.4 创建租户
 
@@ -140,6 +156,7 @@ echo "tenant_id=$TENANT_ID"
 ✅ **manifest 已入仓:`manifests/canonical-agent/v1.0.0.yaml`**(按真 `AgentSpec` schema 写,
 CI 由 `services/control-plane/tests/test_canonical_manifest.py` 守护)。能力面:长记忆 /
 持久工作区 / 审批门(`approval_required_tools: [http]`)/ 多模态(`model.supports_vision: true`)。
+**它不带 `api_key_ref`** —— 主对话模型的 key 来自 0.3 配的平台 anthropic 凭证(Stream Q)。
 直接注册即可,无需手写:
 
 ```sh

@@ -16,6 +16,8 @@ from uuid import UUID
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from control_plane.runtime import make_provider_key_resolver
+from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.runtime.secret_store import SecretStore
 from orchestrator import BuiltAgent, MemoryEnv, MiddlewareEnv, ToolEnv, build_agent
@@ -50,6 +52,7 @@ def make_child_agent_builder(
     base_tool_env: ToolEnv,
     middleware_env: MiddlewareEnv | None = None,
     memory_env: MemoryEnv | None = None,
+    credentials_resolver: CredentialsResolver | None = None,
 ) -> ChildAgentBuilder:
     """Build the :class:`ChildAgentBuilder` the orchestrator's ``ToolEnv`` carries.
 
@@ -78,6 +81,11 @@ def make_child_agent_builder(
         record = await spec_store.get(tenant_id=tenant_id, name=name, version=version)
         if record is None:
             raise SubAgentNotFoundError(tenant_id=tenant_id, name=name, version=version)
+        provider_key_resolver = (
+            make_provider_key_resolver(resolver=credentials_resolver, tenant_id=tenant_id)
+            if credentials_resolver is not None
+            else None
+        )
         built = await build_agent(
             record.spec,
             secret_store=secret_store,
@@ -86,6 +94,8 @@ def make_child_agent_builder(
             middleware_env=middleware_env,
             memory_env=memory_env,
             subagent_depth=depth,
+            tenant_id=tenant_id,
+            provider_key_resolver=provider_key_resolver,
         )
         cache[key] = built
         logger.info(

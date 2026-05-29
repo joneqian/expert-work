@@ -686,6 +686,9 @@ def create_app(
                     base_tool_env=base_tool_env,
                     middleware_env=middleware_env,
                     memory_env=memory_env,
+                    # Stream Q (Mini-ADR Q-5) — sub-agents whose manifest omits
+                    # api_key_ref resolve the chat-LLM key from platform creds too.
+                    credentials_resolver=credentials_resolver,
                 )
                 resolved_agent_runtime.agent_builder = make_agent_builder(
                     resolved_secret_store,
@@ -697,6 +700,9 @@ def create_app(
                     mcp_allowlist_provider=make_mcp_allowlist_provider(
                         resolved_tenant_config_service
                     ),
+                    # Stream Q (Mini-ADR Q-5) — chat-LLM key from platform creds
+                    # when the manifest model has no api_key_ref.
+                    credentials_resolver=credentials_resolver,
                 )
                 # Stream J.5 — the ingestion runner needs the embedder;
                 # without one, knowledge document upload is unavailable.

@@ -58,6 +58,54 @@ test("system_admin sees platform credential tables + passes axe", async ({ page 
   await expectNoA11yViolations(page, "/settings/platform");
 });
 
+test("system_admin pastes a raw key — PUT carries value, not a ref (Stream Q)", async ({
+  page,
+}) => {
+  await page.route("**/v1/me", async (route) => {
+    await route.fulfill({ json: SYS_ADMIN_ME });
+  });
+  await page.route("**/v1/platform/credentials", async (route) => {
+    await route.fulfill({ json: VIEW });
+  });
+  await page.route("**/v1/platform/credentials/providers/anthropic", async (route) => {
+    await route.fulfill({
+      json: {
+        success: true,
+        data: {
+          provider: "anthropic",
+          source: "db",
+          secret_ref: "secret://helix-agent/platform/llm/anthropic",
+          enabled: true,
+          used_by_agents: 3,
+        },
+        error: null,
+      },
+    });
+  });
+  await login(page);
+  await page.goto("/settings/platform");
+
+  await page.getByTestId("pc-edit-anthropic").click();
+  // The mode toggle confirms the modal opened (antd keeps a hidden Modal-root
+  // wrapper in the DOM, so don't assert on the root's visibility).
+  await expect(page.getByTestId("pc-edit-mode")).toBeVisible();
+  // Default mode is "paste a key" — a password input (not echoed). antd
+  // Input.Password forwards data-testid to the input element itself.
+  const valueInput = page.getByTestId("pc-edit-value");
+  await expect(valueInput).toBeVisible();
+  await expect(valueInput).toHaveAttribute("type", "password");
+  await valueInput.fill("sk-ant-REAL-KEY");
+  await expectNoA11yViolations(page, "/settings/platform (paste modal)");
+
+  const [req] = await Promise.all([
+    page.waitForRequest("**/v1/platform/credentials/providers/anthropic"),
+    page.getByRole("button", { name: "Save" }).click(),
+  ]);
+  const body = req.postDataJSON();
+  expect(body.value).toBe("sk-ant-REAL-KEY");
+  expect(body.secret_ref).toBeUndefined();
+});
+
 test("non-admin sees system-admin-only notice + passes axe", async ({ page }) => {
   await login(page);
   await page.goto("/settings/platform");

@@ -33,6 +33,11 @@ x-control-plane-base: &control-plane-base
     # ignored). Missing file → empty store → agent build fails loud only when
     # a key is actually requested. See infra/dev-keys/dev-llm-keys.example.
     HELIX_AGENT_SECRET_STORE_ENV_FILE: /run/dev-keys/dev-llm-keys.local
+    # Stream Q — encrypted-vault backend. Default keeps the file-backed local_dev
+    # store; set these to paste keys in the web UI (encrypted at rest). The KEK
+    # is env-passthrough (never committed): export a 32-byte base64 key locally.
+    HELIX_AGENT_SECRET_STORE_BACKEND: ${HELIX_AGENT_SECRET_STORE_BACKEND:-local_dev}
+    HELIX_AGENT_SECRET_ENCRYPTION_KEY: ${HELIX_AGENT_SECRET_ENCRYPTION_KEY:-}
   volumes:
     # The directory always exists (committed .example); the .local inside it
     # is git-ignored, so this bind mount never breaks `up` when a dev hasn't

@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -44,7 +44,12 @@ from orchestrator import (
     build_agent,
     build_llm_router,
 )
-from orchestrator.agent_factory import SubagentSpecResolver, detect_subagent_cycle
+from orchestrator.agent_factory import (
+    ProviderKeyResolver,
+    SubagentSpecResolver,
+    detect_subagent_cycle,
+)
+from orchestrator.errors import AgentFactoryError
 from orchestrator.llm import Embedder, HTTPEmbeddingClient, OpenAICompatibleEmbedder
 from orchestrator.multimodal import ImageResolver, ObjectStoreImageResolver
 from orchestrator.tools import (
@@ -129,6 +134,29 @@ class AgentRuntime:
         return built
 
 
+def make_provider_key_resolver(
+    *, resolver: CredentialsResolver, tenant_id: UUID
+) -> ProviderKeyResolver:
+    """Bind a :class:`CredentialsResolver` + tenant to a provider→secret_ref
+    getter for the agent build (Stream Q, Mini-ADR Q-5).
+
+    Translates :class:`CredentialsResolverError` into
+    :class:`AgentFactoryError` here (control-plane) so the orchestrator's
+    ``build_llm_router`` stays free of any ``helix-common.credentials`` import.
+    """
+
+    async def _resolve(provider: str) -> str:
+        try:
+            return await resolver.resolve_provider(
+                tenant_id=tenant_id, provider=cast(Provider, provider)
+            )
+        except CredentialsResolverError as exc:
+            msg = f"no platform credential is configured for provider {provider!r}"
+            raise AgentFactoryError(msg) from exc
+
+    return _resolve
+
+
 def make_agent_builder(
     secret_store: SecretStore,
     checkpointer: BaseCheckpointSaver[Any],
@@ -138,6 +166,7 @@ def make_agent_builder(
     memory_env: MemoryEnv | None = None,
     subagent_spec_resolver: SubagentSpecResolver | None = None,
     mcp_allowlist_provider: Callable[[UUID], Awaitable[Sequence[str]]] | None = None,
+    credentials_resolver: CredentialsResolver | None = None,
 ) -> AgentBuilder:
     """Production :data:`AgentBuilder` bound to a SecretStore + checkpointer.
 
@@ -172,6 +201,15 @@ def make_agent_builder(
             allowlist = await mcp_allowlist_provider(tenant_id)
             if allowlist:
                 build_tool_env = replace(tool_env, mcp_allowlist=tuple(allowlist))
+        # Stream Q (Mini-ADR Q-5) — when the manifest model omits api_key_ref,
+        # resolve its key from the tenant's platform-configured credential.
+        # Needs a tenant; preview/validation builds (tenant_id None) keep the
+        # api_key_ref-only behaviour.
+        provider_key_resolver = (
+            make_provider_key_resolver(resolver=credentials_resolver, tenant_id=tenant_id)
+            if credentials_resolver is not None and tenant_id is not None
+            else None
+        )
         return await build_agent(
             spec,
             secret_store=secret_store,
@@ -179,6 +217,8 @@ def make_agent_builder(
             tool_env=build_tool_env,
             middleware_env=middleware_env,
             memory_env=memory_env,
+            tenant_id=tenant_id,
+            provider_key_resolver=provider_key_resolver,
         )
 
     return _build

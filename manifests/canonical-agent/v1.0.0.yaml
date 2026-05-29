@@ -15,11 +15,11 @@
 #   * Phase 5 — multimodal input Path A (model.supports_vision: true → image
 #               content blocks flow straight into the main model)
 #
-# Provider key: model.api_key_ref is a `secret://` URI the agent factory
-# resolves through the SecretStore. In dev that is the local_dev store backed
-# by the git-ignored secrets file (see infra/secrets/dev-secrets.example +
-# docs/runbooks/bootstrap-admin.md § dev LLM key). The manifest NEVER embeds
-# the key value.
+# Provider key: this manifest declares NO model.api_key_ref — the agent build
+# resolves the anthropic key from the platform-configured credential (Stream Q).
+# An admin pastes the key once in /settings/platform; it is encrypted at rest
+# and every agent on that provider uses it. The manifest never embeds a key,
+# and may optionally pin `api_key_ref: secret://...` to override per-agent.
 apiVersion: helix.io/v1
 kind: Agent
 metadata:
@@ -40,7 +40,10 @@ spec:
   model:
     provider: anthropic
     name: claude-sonnet-4-5
-    api_key_ref: secret://helix-agent/dev/llm/anthropic-api-key
+    # No api_key_ref — the agent build resolves the anthropic key from the
+    # platform-configured credential (Stream Q): an admin pastes it once in
+    # /settings/platform and every agent on that provider uses it. A manifest
+    # MAY still pin `api_key_ref: secret://...` to override per-agent.
     temperature: 0.2
     max_tokens: 4096
     # Phase 5 Path A — the strong model is vision-capable, so images ride in
@@ -50,7 +53,6 @@ spec:
     fallback:
       - provider: anthropic
         name: claude-haiku-4-5-20251001
-        api_key_ref: secret://helix-agent/dev/llm/anthropic-api-key
         supports_vision: true
 
   system_prompt:

@@ -326,6 +326,12 @@ export interface TranslationKeys {
     edit_btn: string;
     delete_confirm: string;
     edit_modal_title: string;
+    mode_label: string;
+    mode_value: string;
+    mode_ref: string;
+    value_label: string;
+    value_hint: string;
+    value_required: string;
     secret_ref_label: string;
     secret_ref_hint: string;
     enabled_label: string;
@@ -1034,6 +1040,12 @@ const en: TranslationKeys = {
     edit_modal_title: "Edit {{key}} credential",
     secret_ref_label: "Secret reference (KMS / secret URI)",
     secret_ref_hint: "A secret manager reference (e.g. kms://platform/anthropic-key) — never a plaintext key.",
+    mode_label: "Credential source",
+    mode_value: "Paste a key",
+    mode_ref: "Reference (URI)",
+    value_label: "API key",
+    value_hint: "Pasted once and encrypted at rest — it is never shown again or stored in plaintext.",
+    value_required: "Paste a key, or switch to Reference.",
     enabled_label: "Enabled",
     saved: "Credential saved.",
     deleted: "Credential deleted.",
