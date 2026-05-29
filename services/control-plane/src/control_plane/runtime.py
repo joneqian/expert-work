@@ -78,7 +78,8 @@ class AgentBuilder(Protocol):
     the platform default). Optional + defaulted so test stubs that ignore
     tenancy still conform."""
 
-    async def __call__(self, spec: AgentSpec, *, tenant_id: UUID | None = None) -> BuiltAgent: ...
+    async def __call__(self, spec: AgentSpec, *, tenant_id: UUID | None = None) -> BuiltAgent:
+        """Build the agent for ``spec``; ``tenant_id`` selects the per-tenant ToolEnv."""
 
 
 logger = logging.getLogger(__name__)
