@@ -52,6 +52,7 @@ from control_plane.api import (
     build_skills_router,
     build_tenant_config_router,
     build_tenant_quotas_router,
+    build_tenants_router,
     build_triggers_router,
     build_uploads_router,
     build_webhooks_router,
@@ -905,6 +906,7 @@ def create_app(
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())
     app.include_router(build_quota_router())
+    app.include_router(build_tenants_router())
     app.include_router(build_tenant_quotas_router())
     app.include_router(build_tenant_config_router())
     app.include_router(build_triggers_router())
