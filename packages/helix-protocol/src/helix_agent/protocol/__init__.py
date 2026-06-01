@@ -83,6 +83,7 @@ from helix_agent.protocol.knowledge import (
     KnowledgeDocument,
 )
 from helix_agent.protocol.memory_item import MemoryItem
+from helix_agent.protocol.model_catalog import MODEL_CATALOG, ModelEntry, models_for_provider
 from helix_agent.protocol.multimodal import ImageRef, parse_image_ref
 from helix_agent.protocol.plan import Plan, PlanStep
 from helix_agent.protocol.platform_secret import (
@@ -168,6 +169,7 @@ __all__ = [
     "DEFAULT_CHUNK_MAX_TOKENS",
     "DEFAULT_CHUNK_OVERLAP_TOKENS",
     "MAX_RESULT_EXCERPT_CHARS",
+    "MODEL_CATALOG",
     "PLATFORM_SCOPE_ROLES",
     "PROVIDER_CATALOG",
     "SKILL_REF_PATTERN",
@@ -234,6 +236,7 @@ __all__ = [
     "MemoryItem",
     "MemoryRecallMode",
     "MemorySpec",
+    "ModelEntry",
     "ModelSpec",
     "MountSpec",
     "NetworkSpec",
@@ -295,6 +298,7 @@ __all__ = [
     "UserWorkspace",
     "VisionSpec",
     "WorkflowSpec",
+    "models_for_provider",
     "parse_agent_ref",
     "parse_image_ref",
     "parse_skill_ref",

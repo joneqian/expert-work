@@ -32,6 +32,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from control_plane.api import (
+    build_agent_schema_router,
     build_agents_router,
     build_api_keys_router,
     build_artifacts_router,
@@ -45,6 +46,7 @@ from control_plane.api import (
     build_members_router,
     build_memory_router,
     build_metrics_router,
+    build_model_catalog_router,
     build_platform_config_router,
     build_quota_router,
     build_role_bindings_router,
@@ -61,6 +63,7 @@ from control_plane.api import (
     build_uploads_router,
     build_webhooks_router,
 )
+from control_plane.api.model_catalog import PlatformConfiguredProviders
 from control_plane.audit import TenantConfigPiiResolver, build_default_audit_logger
 from control_plane.auth import (
     ApiKeyVerifier,
@@ -893,6 +896,11 @@ def create_app(
     app.state.keycloak_admin_client = resolved_keycloak_admin_client
     app.state.platform_secret_store = resolved_platform_secret_store
     app.state.platform_secrets_service = resolved_platform_secrets_service
+    # Stream S (Mini-ADR S-4) — model catalog reads only usable providers
+    # (configured + enabled) via the same service; thin adapter wraps it.
+    app.state.model_catalog_providers = PlatformConfiguredProviders(
+        resolved_platform_secrets_service
+    )
     # Stream Q (PR C) — the SecretStore is exposed so the platform-config write
     # path can encrypt a pasted raw key via ``secret_store.put`` before storing
     # only the ``secret://`` ref in the catalog.
@@ -963,6 +971,8 @@ def create_app(
 
     app.include_router(build_health_router(health_provider))
     app.include_router(build_metrics_router())
+    app.include_router(build_agent_schema_router())
+    app.include_router(build_model_catalog_router())
     app.include_router(build_agents_router())
     app.include_router(build_sessions_router())
     app.include_router(build_runs_router())
