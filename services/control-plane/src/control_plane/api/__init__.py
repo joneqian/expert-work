@@ -13,6 +13,7 @@ from control_plane.api.me import build_me_router
 from control_plane.api.members import build_members_router
 from control_plane.api.memory import build_memory_router
 from control_plane.api.metrics import build_metrics_router
+from control_plane.api.model_catalog import build_model_catalog_router
 from control_plane.api.platform_config import build_platform_config_router
 from control_plane.api.quota import build_quota_router
 from control_plane.api.role_bindings import build_role_bindings_router
@@ -42,6 +43,7 @@ __all__ = [
     "build_members_router",
     "build_memory_router",
     "build_metrics_router",
+    "build_model_catalog_router",
     "build_platform_config_router",
     "build_quota_router",
     "build_role_bindings_router",
