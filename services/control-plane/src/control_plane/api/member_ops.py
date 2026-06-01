@@ -141,7 +141,8 @@ async def _provision_keycloak(
             platform_scope=False,
         )
     except DuplicateRoleBindingError:
-        pass
+        # Idempotent: a prior partial attempt already wrote this binding.
+        logger.debug("member.binding_already_exists member_id=%s", member.id)
 
     # Set-password email — failure does not roll back; resend can retry.
     try:
