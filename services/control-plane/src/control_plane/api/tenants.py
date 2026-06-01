@@ -16,20 +16,29 @@ Listing/reading/configuring an existing tenant lives in ``tenant_config`` /
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Annotated, Self
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from control_plane.api._authz import _principal
+from control_plane.api.first_admin import (
+    FirstAdminConflictError,
+    FirstAdminKeycloakUnavailableError,
+    provision_first_admin,
+)
 from control_plane.audit import emit
+from control_plane.keycloak import KeycloakAdminClient
+from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
 from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.persistence.auth import RoleBindingStore
 from helix_agent.persistence.tenant_config.base import (
     TenantConfigAlreadyExistsError,
     TenantConfigStore,
 )
+from helix_agent.persistence.tenant_member import TenantMemberStore
 from helix_agent.protocol import AuditAction, Principal, TenantPlan
 from helix_agent.runtime.audit.logger import AuditLogger
 
@@ -43,6 +52,22 @@ class CreateTenantRequest(BaseModel):
     tenant_id: UUID | None = None
     display_name: str = Field(min_length=1, max_length=128)
     plan: TenantPlan | None = None
+    # Stream R W1 — provision the company's first admin in the same step.
+    # ``None`` creates a bare tenant (backwards compatible). email uses a plain
+    # ``str`` + light validation (Mini-ADR R-12: no email-validator dependency).
+    first_admin_email: str | None = Field(default=None, max_length=320)
+    first_admin_display_name: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def _validate_first_admin(self) -> Self:
+        if self.first_admin_display_name and not self.first_admin_email:
+            raise ValueError("first_admin_display_name requires first_admin_email")
+        if self.first_admin_email is not None:
+            email = self.first_admin_email.strip()
+            if "@" not in email or email.startswith("@") or email.endswith("@"):
+                raise ValueError("first_admin_email is not a valid email address")
+            object.__setattr__(self, "first_admin_email", email.lower())
+        return self
 
 
 def _get_repo(request: Request) -> TenantConfigStore:
@@ -51,6 +76,22 @@ def _get_repo(request: Request) -> TenantConfigStore:
 
 def _get_audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
+
+
+def _get_member_repo(request: Request) -> TenantMemberStore:
+    return request.app.state.tenant_member_repo  # type: ignore[no-any-return]
+
+
+def _get_role_binding_repo(request: Request) -> RoleBindingStore:
+    return request.app.state.role_binding_repo  # type: ignore[no-any-return]
+
+
+def _get_keycloak(request: Request) -> KeycloakAdminClient:
+    return request.app.state.keycloak_admin_client  # type: ignore[no-any-return]
+
+
+def _get_settings(request: Request) -> Settings:
+    return request.app.state.settings  # type: ignore[no-any-return]
 
 
 def build_tenants_router() -> APIRouter:
@@ -62,6 +103,10 @@ def build_tenants_router() -> APIRouter:
         principal: Annotated[Principal, Depends(_principal)],
         repo: Annotated[TenantConfigStore, Depends(_get_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        member_repo: Annotated[TenantMemberStore, Depends(_get_member_repo)],
+        role_binding_repo: Annotated[RoleBindingStore, Depends(_get_role_binding_repo)],
+        keycloak: Annotated[KeycloakAdminClient, Depends(_get_keycloak)],
+        settings: Annotated[Settings, Depends(_get_settings)],
     ) -> dict[str, object]:
         # Mini-ADR P-2 — tenant creation is platform-level; only system admins.
         if not principal.is_system_admin:
@@ -75,6 +120,10 @@ def build_tenants_router() -> APIRouter:
         tenant_id = payload.tenant_id or uuid4()
         # The new tenant_id is not the caller's home tenant, so the write +
         # its audit row must bypass RLS (Mini-ADR P-1, risk: audit-in-bypass).
+        # Stream R W1 — the tenant row + (optional) first-admin roster row are
+        # both written in this one bypass session so the local state is atomic
+        # (Mini-ADR R-4 DB-first); the Keycloak side follows, with compensation.
+        first_admin = None
         async with bypass_rls_session():
             try:
                 record = await repo.create(
@@ -101,6 +150,51 @@ def build_tenants_router() -> APIRouter:
                 trace_id=current_trace_id_hex(),
                 details={"display_name": record.display_name, "plan": record.plan.value},
             )
-        return {"success": True, "data": record.model_dump(mode="json"), "error": None}
+
+            if payload.first_admin_email is not None:
+                try:
+                    result = await provision_first_admin(
+                        tenant_id=tenant_id,
+                        email=payload.first_admin_email,
+                        display_name=payload.first_admin_display_name,
+                        actor_id=principal.subject_id,
+                        member_store=member_repo,
+                        role_binding_store=role_binding_repo,
+                        keycloak=keycloak,
+                        audit=audit,
+                        email_action_lifespan_s=settings.keycloak_email_action_lifespan_s,
+                    )
+                except FirstAdminConflictError as exc:
+                    # Tenant is created; the email collides in Keycloak. The admin
+                    # retries with a different email (Mini-ADR R-11).
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "MEMBER_KEYCLOAK_CONFLICT",
+                            "message": "first admin email already exists; retry with another",
+                        },
+                    ) from exc
+                except FirstAdminKeycloakUnavailableError as exc:
+                    # Tenant + invited roster row exist; resend finishes Keycloak.
+                    raise HTTPException(
+                        status_code=502,
+                        detail={
+                            "code": "KEYCLOAK_UNAVAILABLE",
+                            "message": "tenant created; admin account pending — retry via resend",
+                        },
+                    ) from exc
+                first_admin = {
+                    "member_id": str(result.member_id),
+                    "email": result.email,
+                    "status": result.status,
+                    "keycloak_user_id": result.keycloak_user_id,
+                }
+        # ``data`` stays the tenant record (backwards compatible with Stream P
+        # callers that read ``data.tenant_id`` / ``data.display_name``); the
+        # first-admin summary is a sibling field, present only when requested.
+        data = record.model_dump(mode="json")
+        if first_admin is not None:
+            data["first_admin"] = first_admin
+        return {"success": True, "data": data, "error": None}
 
     return router

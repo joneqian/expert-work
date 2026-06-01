@@ -145,6 +145,11 @@ from helix_agent.protocol.tenant_config import (
     TenantPlan,
     TriggerFireScanMode,
 )
+from helix_agent.protocol.tenant_member import (
+    MemberRole,
+    MemberStatus,
+    TenantMember,
+)
 from helix_agent.protocol.tenant_user import TenantUser
 from helix_agent.protocol.thread_meta import ThreadMeta, ThreadStatus
 from helix_agent.protocol.trigger import (
@@ -224,6 +229,8 @@ __all__ = [
     "KnowledgeSpec",
     "LongTermMemorySpec",
     "MCPToolSpec",
+    "MemberRole",
+    "MemberStatus",
     "MemoryItem",
     "MemoryRecallMode",
     "MemorySpec",
@@ -267,6 +274,7 @@ __all__ = [
     "TenantConfig",
     "TenantConfigPatch",
     "TenantConfigRecord",
+    "TenantMember",
     "TenantPlan",
     "TenantQuotaPatch",
     "TenantQuotaRecord",

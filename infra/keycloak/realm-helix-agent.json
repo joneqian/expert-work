@@ -107,6 +107,14 @@
       "attributes": {
         "tenant_id": ["00000000-0000-0000-0000-000000000000"]
       }
+    },
+    {
+      "username": "service-account-helix-agent-api-internal",
+      "enabled": true,
+      "serviceAccountClientId": "helix-agent-api-internal",
+      "clientRoles": {
+        "realm-management": ["manage-users"]
+      }
     }
   ]
 }

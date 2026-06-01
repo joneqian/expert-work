@@ -223,6 +223,31 @@ class Settings(BaseSettings):
     #: Leeway when validating ``exp`` (seconds). Clock skew tolerance.
     oidc_jwt_leeway_s: int = Field(default=30, ge=0)
 
+    # ------------------------------------------------------ Keycloak Admin (Stream R)
+    #: Toggle the real Keycloak Admin REST client. ``False`` (default) wires a
+    #: ``FakeKeycloakAdminClient`` so dev/CI never depend on a live Keycloak;
+    #: integration / prod set it ``True`` to provision real accounts.
+    keycloak_enabled: bool = False
+
+    #: Keycloak base URL for the Admin API + service-account token grant.
+    keycloak_base_url: str = "http://keycloak:8080"
+
+    #: Realm the Admin client manages (member accounts live here).
+    keycloak_realm: str = "helix-agent"
+
+    #: Confidential client whose service account holds ``manage-users`` and
+    #: drives the Admin API (``helix-agent-api-internal`` already has
+    #: ``serviceAccountsEnabled``).
+    keycloak_admin_client_id: str = "helix-agent-api-internal"
+
+    #: Vault name of the service-account client secret (Stream Q
+    #: ``SqlEncryptedSecretStore``). The secret value never lives in settings.
+    keycloak_admin_secret_name: str = "helix-agent/platform/keycloak/admin-client-secret"  # noqa: S105 — vault key NAME, not a secret value
+
+    #: Lifespan (seconds) of the Keycloak ``execute-actions-email`` set-password
+    #: link sent on member invite. Default 24h.
+    keycloak_email_action_lifespan_s: int = Field(default=86400, gt=0)
+
     #: Path-prefix exemption list. Health + metrics are always allowed
     #: through; ``/v1/webhooks`` is exempt because an external webhook
     #: caller has no helix principal — that endpoint authenticates with
