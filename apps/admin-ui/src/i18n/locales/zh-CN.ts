@@ -93,6 +93,14 @@ const zhCN: TranslationKeys = {
     cancel: "取消",
     save_failed: "配置清单保存失败",
   },
+  manifest_editor: {
+    tab_form: "表单",
+    tab_yaml: "YAML",
+    loading_schema: "正在加载配置清单结构…",
+    schema_load_failed: "加载配置清单结构失败",
+    invalid_yaml_title: "无法切换到表单",
+    invalid_yaml_hint: "当前 YAML 不合法或不符合配置清单结构，请先在此修正。",
+  },
   playground: {
     session_label: "会话",
     new_session: "新建会话",

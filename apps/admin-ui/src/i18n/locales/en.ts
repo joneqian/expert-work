@@ -90,6 +90,14 @@ export interface TranslationKeys {
     cancel: string;
     save_failed: string;
   };
+  manifest_editor: {
+    tab_form: string;
+    tab_yaml: string;
+    loading_schema: string;
+    schema_load_failed: string;
+    invalid_yaml_title: string;
+    invalid_yaml_hint: string;
+  };
   playground: {
     session_label: string;
     new_session: string;
@@ -841,6 +849,15 @@ const en: TranslationKeys = {
     save: "Save",
     cancel: "Cancel",
     save_failed: "Failed to save manifest",
+  },
+  manifest_editor: {
+    tab_form: "Form",
+    tab_yaml: "YAML",
+    loading_schema: "Loading schema…",
+    schema_load_failed: "Failed to load the manifest schema",
+    invalid_yaml_title: "Can't switch to Form",
+    invalid_yaml_hint:
+      "The YAML is invalid or doesn't match the manifest schema. Fix it here first.",
   },
   playground: {
     session_label: "Session",
