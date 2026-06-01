@@ -42,6 +42,7 @@ from control_plane.api import (
     build_health_router,
     build_knowledge_router,
     build_me_router,
+    build_members_router,
     build_memory_router,
     build_metrics_router,
     build_platform_config_router,
@@ -978,6 +979,7 @@ def create_app(
     app.include_router(build_role_bindings_router())
     app.include_router(build_quota_router())
     app.include_router(build_tenants_router())
+    app.include_router(build_members_router())
     app.include_router(build_sandboxes_router())
     app.include_router(build_platform_config_router())
     app.include_router(build_tenant_quotas_router())

@@ -8,6 +8,7 @@ import { RunsList } from "./pages/RunsList";
 import { SettingsApiKeys } from "./pages/SettingsApiKeys";
 import { SettingsAudit } from "./pages/SettingsAudit";
 import { SettingsCreateTenant } from "./pages/SettingsCreateTenant";
+import { SettingsMembers } from "./pages/SettingsMembers";
 import { SettingsPlatformConfig } from "./pages/SettingsPlatformConfig";
 import { SettingsRoleBindings } from "./pages/SettingsRoleBindings";
 import { SettingsServiceAccounts } from "./pages/SettingsServiceAccounts";
@@ -36,6 +37,7 @@ export function AppRouter() {
       <Route path="/settings/api-keys" element={<SettingsApiKeys />} />
       <Route path="/settings/service-accounts" element={<SettingsServiceAccounts />} />
       <Route path="/settings/role-bindings" element={<SettingsRoleBindings />} />
+      <Route path="/settings/members" element={<SettingsMembers />} />
       <Route path="/settings/tenant-quotas" element={<SettingsTenantQuotas />} />
       <Route path="/settings/tenant-config" element={<SettingsTenantConfig />} />
       <Route path="/settings/credentials" element={<SettingsTenantCredentials />} />

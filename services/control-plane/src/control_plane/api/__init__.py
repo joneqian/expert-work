@@ -9,6 +9,7 @@ from control_plane.api.feedback import build_feedback_router
 from control_plane.api.health import build_health_router
 from control_plane.api.knowledge import build_knowledge_router
 from control_plane.api.me import build_me_router
+from control_plane.api.members import build_members_router
 from control_plane.api.memory import build_memory_router
 from control_plane.api.metrics import build_metrics_router
 from control_plane.api.platform_config import build_platform_config_router
@@ -36,6 +37,7 @@ __all__ = [
     "build_health_router",
     "build_knowledge_router",
     "build_me_router",
+    "build_members_router",
     "build_memory_router",
     "build_metrics_router",
     "build_platform_config_router",

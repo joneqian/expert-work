@@ -394,6 +394,44 @@ export interface TranslationKeys {
     subject_id_required: string;
     role_required: string;
   };
+  settings_members: {
+    page_title: string;
+    subtitle: string;
+    invite: string;
+    filter_all: string;
+    col_email: string;
+    col_name: string;
+    col_role: string;
+    col_status: string;
+    col_invited_at: string;
+    col_actions: string;
+    status_invited: string;
+    status_active: string;
+    status_suspended: string;
+    status_revoked: string;
+    resend: string;
+    remove: string;
+    revoke_confirm_title: string;
+    revoke_confirm_body: string;
+    suspend_confirm_title: string;
+    suspend_confirm_body: string;
+    invite_drawer_title: string;
+    field_email: string;
+    field_role: string;
+    field_display_name: string;
+    field_display_name_placeholder: string;
+    email_required: string;
+    email_invalid: string;
+    role_required: string;
+    invite_submit: string;
+    invite_success: string;
+    invite_partial_fail: string;
+    resent: string;
+    removed: string;
+    failed_to_load: string;
+    empty: string;
+    empty_cross: string;
+  };
   triggers: {
     page_title: string;
     subtitle: string;
@@ -1113,6 +1151,47 @@ const en: TranslationKeys = {
     name_required: "Name is required",
     subject_id_required: "Subject ID is required",
     role_required: "Role is required",
+  },
+  settings_members: {
+    page_title: "Members",
+    subtitle:
+      "People in this tenant and their invitation lifecycle. Invite by email, resend pending invites, or remove a member.",
+    invite: "Invite",
+    filter_all: "All",
+    col_email: "Email",
+    col_name: "Name",
+    col_role: "Role",
+    col_status: "Status",
+    col_invited_at: "Invited at",
+    col_actions: "Actions",
+    status_invited: "Invited",
+    status_active: "Active",
+    status_suspended: "Suspended",
+    status_revoked: "Revoked",
+    resend: "Resend",
+    remove: "Remove",
+    revoke_confirm_title: "Revoke this invite?",
+    revoke_confirm_body:
+      "The pending invitation is cancelled and the link stops working immediately.",
+    suspend_confirm_title: "Suspend this member?",
+    suspend_confirm_body:
+      "The member loses access immediately. They can be re-invited later.",
+    invite_drawer_title: "Invite a member",
+    field_email: "Email",
+    field_role: "Role",
+    field_display_name: "Display name",
+    field_display_name_placeholder: "Optional",
+    email_required: "Email is required",
+    email_invalid: "Enter a valid email address",
+    role_required: "Role is required",
+    invite_submit: "Send invite",
+    invite_success: "Invitation sent.",
+    invite_partial_fail: "Some invitations failed: {{detail}}",
+    resent: "Invitation resent.",
+    removed: "Member removed.",
+    failed_to_load: "Failed to load members",
+    empty: "No members in this tenant yet.",
+    empty_cross: "No members across all tenants.",
   },
   triggers: {
     page_title: "Triggers",
