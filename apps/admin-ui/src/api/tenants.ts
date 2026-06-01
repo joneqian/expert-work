@@ -19,8 +19,25 @@ export interface CreateTenantBody {
   tenant_id?: string;
   display_name: string;
   plan?: TenantPlan;
+  /**
+   * Provision the company's first admin in the same step (Stream R W1). Omit
+   * for a bare tenant. ``first_admin_display_name`` requires ``first_admin_email``.
+   */
+  first_admin_email?: string;
+  first_admin_display_name?: string;
 }
 
-export async function createTenant(body: CreateTenantBody): Promise<TenantConfigRecord> {
-  return postJson<TenantConfigRecord>("/v1/tenants", body);
+/** First-admin summary echoed back when ``first_admin_email`` was supplied. */
+export interface FirstAdminSummary {
+  member_id: string;
+  email: string;
+  status: string;
+  keycloak_user_id: string | null;
+}
+
+/** ``POST /v1/tenants`` data payload: the tenant record + optional first admin. */
+export type CreatedTenant = TenantConfigRecord & { first_admin?: FirstAdminSummary };
+
+export async function createTenant(body: CreateTenantBody): Promise<CreatedTenant> {
+  return postJson<CreatedTenant>("/v1/tenants", body);
 }

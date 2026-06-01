@@ -812,6 +812,13 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **B 层（交互入口）显式化（2026-06-01）**：员工跑 agent 的**最低可用角色 = operator**(viewer 只有 `session:read` 发不了 run);本轮**交互入口 = admin-ui Playground**(员工登录→打开默认 agent Playground→发对话);**专属员工产品 UI 留后续独立 Stream**(别再犯 STREAM-H §0 假装 B 层不存在的错)。
 
+**W4 — dev Keycloak 接通（收尾补丁,实跑 E2E 前置）**
+> 实跑准备时发现:W1–W3 代码 ship 且用 Fake 客户端单测覆盖,但**在 dev 真让员工浏览器登录**的环境管线没接通(`keycloak_enabled` 默认关、admin-client-secret 无种入金库路径、realm 无 SMTP、admin-ui redirectUris 端口漂移)。调查确认**两条 provision 路径已先写账号+binding 再发邮件且容错邮件失败**(`member_ops.py:147`/`first_admin.py:147`)→ 无 SMTP 时 invite/建租户仍 201,控制台手设密码即可。**纯环境接线 + 文档 + UI 暴露,零 product 代码改动。**
+- [ ] **R-13 compose 加 `HELIX_AGENT_KEYCLOAK_ENABLED`(默认 false→CI integration 不受影响;dev 在 infra/.env 开 true)；realm admin-ui `:3000`→`:5173` 端口对齐** — **Mini-ADR R-13**
+- [ ] **R-14 seed CLI `control_plane.seed_keycloak_secret`(镜像 bootstrap_admin;把 admin-client-secret put 进金库;value 走 `--value`/env,不进容器运行时 env)+ 单测** — **Mini-ADR R-14**
+- [ ] **R-15 建租户 UI 暴露 first_admin(`SettingsCreateTenant` 加 email/display_name 字段+成功回显 first_admin;api 类型+i18n+e2e)→ 建公司+首管全程浏览器** — **Mini-ADR R-15**
+- [ ] **R-16 `getting-started.md` 重写成真实 Stream R 闭环 + 修 `bootstrap-admin.md`(subject-id 改服务账号 Admin API,绕开已禁 password grant;`control-plane`→`control-plane-blue`)** — 文档同步
+
 **Stream R Verification**：单测 Keycloak client(token 过期重取/409 映射/unavailable)+`TenantMemberStore`(状态机+幂等键+kc 反查)+`resolve_tenant_roles`(merge/隔离)+`ensure_member_active` 幂等 + session 默认 agent 解析;集成(FakeKeycloak)W1 建租户+first_admin 全链+各失败点补偿/W2 invite/resend/revoke;**端到端**:建公司(填首admin email)→ admin 邀请员工(operator)→ 员工收 Keycloak 邮件设密码登录 → 员工 Playground 真实回话(全程 web,人只在网页填过 email)。每 PR 零债 6 条。email 用普通 str 校验(不引 email-validator)。
 
 **PR 拆分(按 wave 合并,减 CI 等待)**：A(设计 #350) → W1 PR(R-1+2+3+4 #351) → W2 PR(R-5+6 #352) → W3 PR(R-7+8 #353)。关键路径 A→W1→W2→W3 全部 shipped。

@@ -21,7 +21,7 @@ curl -sS http://localhost:8000/healthz/ready | python3 -m json.tool   # status: 
 ```
 
 迁移必须已 apply(`role_binding` 表存在):若 control-plane 未自动迁移,
-`docker compose exec control-plane alembic upgrade head`。
+`docker compose exec control-plane-blue alembic upgrade head`。
 
 ---
 
@@ -38,15 +38,16 @@ dev realm(`infra/keycloak/realm-helix-agent.json`)预置用户 `dev` / 密码 `d
 2. 左上 realm 切到 `helix-agent` → Users → 点 `dev`。
 3. 复制 **ID** 字段(形如 `3f8c…` 的 UUID)—— 这就是 `sub`。
 
-**方式 B — token 解码(无界面时)**
+**方式 B — 服务账号 Admin API(可脚本化)**
 ```sh
-# 若 admin-ui client 开了 direct access grants,可用 password grant 取 token:
-TOKEN=$(curl -sS -X POST \
+# admin-ui 是 PKCE 公有客户端,已禁用 password grant。改用服务账号
+# helix-agent-api-internal(client_credentials + manage-users)查用户 id:
+SA_TOKEN=$(curl -sS -X POST \
   http://localhost:8080/realms/helix-agent/protocol/openid-connect/token \
-  -d grant_type=password -d client_id=helix-agent-admin-ui \
-  -d username=dev -d password=devpass -d scope=openid | jq -r .access_token)
-# 解码 payload 取 sub(不验签,仅读 claim):
-echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq -r .sub
+  -d grant_type=client_credentials -d client_id=helix-agent-api-internal \
+  -d client_secret=dev-internal-secret-rotate-me | jq -r .access_token)
+curl -sS "http://localhost:8080/admin/realms/helix-agent/users?username=dev&exact=true" \
+  -H "Authorization: Bearer ${SA_TOKEN}" | jq -r '.[0].id'
 ```
 
 ---
@@ -87,11 +88,8 @@ curl -sS http://localhost:8000/v1/me -H "Authorization: Bearer <token>" | jq '{i
 ## 4. 登录 admin-ui(本地)
 
 - admin-ui dev server 默认端口 **5173**(`apps/admin-ui/vite.config.ts`)。
-- ⚠️ **已知配置点**:dev realm 的 `helix-agent-admin-ui` client `redirectUris` 是
-  `http://localhost:3000/*`。若你在 5173 起前端,OIDC 重定向需让二者一致 ——
-  改 vite `server.port` 为 3000,或在 Keycloak client 加 `http://localhost:5173/*`
-  redirect,或用 admin-ui 的 **token-paste fallback**(未配 `VITE_OIDC_*` 时)直接粘贴 §1B 的 token。
-  (此一致性会在 PR N 的 E2E SOP 重写里统一收敛。)
+- dev realm 的 `helix-agent-admin-ui` client `redirectUris` / `webOrigins` 已对齐到
+  `http://localhost:5173/*`(Stream R W4),5173 起前端直接走 OIDC 授权码流即可。
 - 配 OIDC env(`apps/admin-ui/.env.development.local`):
   ```
   VITE_OIDC_ISSUER=http://localhost:8080/realms/helix-agent

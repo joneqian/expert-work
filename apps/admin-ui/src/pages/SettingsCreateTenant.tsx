@@ -21,7 +21,7 @@ import {
 import { Building2, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { createTenant, type CreateTenantBody } from "../api/tenants";
+import { createTenant, type CreateTenantBody, type FirstAdminSummary } from "../api/tenants";
 import type { TenantPlan } from "../api/tenant_config";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -34,6 +34,8 @@ interface CreateTenantForm {
   display_name: string;
   plan: TenantPlan;
   tenant_id?: string;
+  first_admin_email?: string;
+  first_admin_display_name?: string;
 }
 
 export function SettingsCreateTenant() {
@@ -45,6 +47,7 @@ export function SettingsCreateTenant() {
   const [form] = Form.useForm<CreateTenantForm>();
   const [submitting, setSubmitting] = useState(false);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [firstAdmin, setFirstAdmin] = useState<FirstAdminSummary | null>(null);
 
   const onCreate = useCallback(async () => {
     const values = await form.validateFields();
@@ -56,10 +59,19 @@ export function SettingsCreateTenant() {
     if (tid) {
       body.tenant_id = tid;
     }
+    const adminEmail = values.first_admin_email?.trim();
+    if (adminEmail) {
+      body.first_admin_email = adminEmail;
+      const adminName = values.first_admin_display_name?.trim();
+      if (adminName) {
+        body.first_admin_display_name = adminName;
+      }
+    }
     setSubmitting(true);
     try {
       const record = await createTenant(body);
       setCreatedId(record.tenant_id);
+      setFirstAdmin(record.first_admin ?? null);
       message.success(t("settings_create_tenant.created"));
       form.resetFields();
     } catch (err) {
@@ -113,6 +125,12 @@ export function SettingsCreateTenant() {
                   <Text code copyable data-testid="ct-created-id">
                     {createdId}
                   </Text>
+                  {firstAdmin !== null && (
+                    <div style={{ marginTop: 8 }} data-testid="ct-first-admin">
+                      {t("settings_create_tenant.first_admin_provisioned")}{" "}
+                      <Text code>{firstAdmin.email}</Text> ({firstAdmin.status})
+                    </div>
+                  )}
                 </span>
               }
               data-testid="ct-created"
@@ -143,6 +161,20 @@ export function SettingsCreateTenant() {
               extra={t("settings_create_tenant.tenant_id_hint")}
             >
               <Input data-testid="ct-tenant-id" placeholder={t("settings_create_tenant.tenant_id_placeholder")} />
+            </Form.Item>
+            <Form.Item
+              name="first_admin_email"
+              label={t("settings_create_tenant.field_first_admin_email")}
+              extra={t("settings_create_tenant.first_admin_hint")}
+              rules={[{ type: "email", message: t("settings_create_tenant.first_admin_email_invalid") }]}
+            >
+              <Input data-testid="ct-first-admin-email" maxLength={320} />
+            </Form.Item>
+            <Form.Item
+              name="first_admin_display_name"
+              label={t("settings_create_tenant.field_first_admin_display_name")}
+            >
+              <Input data-testid="ct-first-admin-name" maxLength={128} />
             </Form.Item>
             <Button
               type="primary"

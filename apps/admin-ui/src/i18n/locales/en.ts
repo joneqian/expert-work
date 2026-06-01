@@ -305,6 +305,11 @@ export interface TranslationKeys {
     create_btn: string;
     created: string;
     created_detail: string;
+    field_first_admin_email: string;
+    field_first_admin_display_name: string;
+    first_admin_hint: string;
+    first_admin_email_invalid: string;
+    first_admin_provisioned: string;
   };
   settings_platform: {
     page_title: string;
@@ -1054,6 +1059,12 @@ const en: TranslationKeys = {
     create_btn: "Create tenant",
     created: "Tenant created.",
     created_detail: "New tenant id:",
+    field_first_admin_email: "First admin email (optional)",
+    field_first_admin_display_name: "First admin display name (optional)",
+    first_admin_hint:
+      "Provisions the company's first admin and sends a set-password email. In dev (no SMTP) set the password in the Keycloak admin console instead.",
+    first_admin_email_invalid: "Enter a valid email address",
+    first_admin_provisioned: "First admin invited:",
   },
   settings_platform: {
     page_title: "Platform Credentials",

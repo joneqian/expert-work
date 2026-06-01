@@ -38,6 +38,13 @@ x-control-plane-base: &control-plane-base
     # is env-passthrough (never committed): export a 32-byte base64 key locally.
     HELIX_AGENT_SECRET_STORE_BACKEND: ${HELIX_AGENT_SECRET_STORE_BACKEND:-local_dev}
     HELIX_AGENT_SECRET_ENCRYPTION_KEY: ${HELIX_AGENT_SECRET_ENCRYPTION_KEY:-}
+    # Stream R W4 — member onboarding via the live Keycloak Admin API. Default
+    # OFF so the `full`-only stack (and CI integration without the `auth`
+    # profile) keeps the in-process fake client. Set true in infra/.env to
+    # provision real accounts; the admin client secret is NOT passed here — it
+    # is loaded from the encrypted vault, seeded once via
+    # `python -m control_plane.seed_keycloak_secret`. See getting-started.md.
+    HELIX_AGENT_KEYCLOAK_ENABLED: ${HELIX_AGENT_KEYCLOAK_ENABLED:-false}
   volumes:
     # The directory always exists (committed .example); the .local inside it
     # is git-ignored, so this bind mount never breaks `up` when a dev hasn't

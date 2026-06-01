@@ -317,6 +317,12 @@ const zhCN: TranslationKeys = {
     create_btn: "创建租户",
     created: "租户已创建。",
     created_detail: "新租户 id:",
+    field_first_admin_email: "首位管理员邮箱(可选)",
+    field_first_admin_display_name: "首位管理员显示名(可选)",
+    first_admin_hint:
+      "同时为公司创建首位管理员并发送设密码邮件。dev 环境无 SMTP 时,请到 Keycloak 控制台手动设密码。",
+    first_admin_email_invalid: "请输入有效的邮箱地址",
+    first_admin_provisioned: "首位管理员已邀请:",
   },
   settings_platform: {
     page_title: "平台凭证",

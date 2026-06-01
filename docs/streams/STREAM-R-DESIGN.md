@@ -88,6 +88,13 @@ member 角色变更端点(本版只 invite/list/resend/revoke + W3 自动 activa
 - **R-11** Keycloak `409 User exists` → helix `409 MEMBER_KEYCLOAK_CONFLICT`,member 留 `invited`/`keycloak_user_id=NULL`。**不跨租户自动复用** Keycloak 账号(一邮箱一租户;`duplicateEmailsAllowed:false` 已锁)。
 - **R-12** email 字段用普通 `str` + 校验函数(非空、含 `@`、长度上限、`lower()` normalize),**不引入 `email-validator`/`pydantic[email]`**(simplicity first;引依赖单独决策)。
 
+### W4 追加(2026-06-01,实跑 E2E 前置收尾;纯环境接线,零 product 代码改动)
+
+- **R-13** dev Keycloak 启用 = compose 加 `HELIX_AGENT_KEYCLOAK_ENABLED: ${...:-false}`(默认 false→`full`-only 栈 / CI integration 无 `auth` profile 时仍用进程内 Fake;dev 在 `infra/.env` 开 true)。realm `helix-agent-admin-ui` 的 `rootUrl`/`redirectUris`/`webOrigins` `:3000`→`:5173`(对齐 vite 真实端口,否则浏览器登录 redirect_uri mismatch)。
+- **R-14** Keycloak admin client secret 种入 = 新 CLI `control_plane.seed_keycloak_secret`(镜像 `bootstrap_admin`:建同款 `SqlEncryptedSecretStore` → `put(keycloak_admin_secret_name, value)`,幂等写新版本)。value 走 `--value`/env,**绝不进容器运行时 env**(运行时只从金库取,settings 无该字段)。`sql_encrypted` 后端专用;`local_dev` 走 dev-keys 文件。
+- **R-15** first_admin 全程 web = `SettingsCreateTenant` 暴露 `first_admin_email` + `first_admin_display_name` 字段,成功回显 first_admin(email/status,提示去 Keycloak 控制台设密码);`api/tenants.ts` 加 `CreatedTenant`(record + 可选 `first_admin`)+ i18n(en/zh-CN)+ e2e。补 W1 API 能力的 UI 缺口。
+- **R-16** 无 SMTP 设密码路径 = 两条 provision 路径(`invite_member`/`provision_first_admin`)已先写账号+role binding、再 best-effort 发邮件且容错失败(代码既有,无需改)→ dev 无 SMTP 时仍 201,管理员在 Keycloak 控制台手设密码。subject-id 改用服务账号 Admin API 查(绕开 admin-ui 已禁的 password grant);文档 exec 目标 `control-plane`→`control-plane-blue`(蓝绿对真实服务名)。
+
 ---
 
 ## 3. 数据模型
