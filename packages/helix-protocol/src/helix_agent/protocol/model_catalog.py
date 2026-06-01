@@ -43,11 +43,12 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(name="claude-haiku-4-5", vision=True, context_window=200_000),
     ),
     # OpenAI — platform.openai.com/docs/models (2026-06)
-    # gpt-5.4 / gpt-5.4-mini are current in-sale; gpt-4o family retired from
-    # ChatGPT on 2026-02-13 but still callable via API — kept as deprecated so
-    # existing manifests remain referenceable.
+    # GPT-5.5 / GPT-5.5 Pro (2026-04-24) are the current production flagships and
+    # support vision; gpt-5.4-mini stays for low-latency/cost. gpt-4o family is
+    # retired from the API but kept deprecated so existing manifests resolve.
     "openai": (
-        ModelEntry(name="gpt-5.4", vision=True, context_window=128_000),
+        ModelEntry(name="gpt-5.5", vision=True, context_window=128_000),
+        ModelEntry(name="gpt-5.5-pro", vision=True, context_window=128_000),
         ModelEntry(name="gpt-5.4-mini", vision=True, context_window=128_000),
         ModelEntry(name="text-embedding-3-large", embeddings=True),
         ModelEntry(name="gpt-4o", vision=True, context_window=128_000, deprecated=True),
@@ -65,28 +66,40 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(name="deepseek-reasoner", vision=False, context_window=64_000),
     ),
     # Kimi (Moonshot AI) — platform.moonshot.cn/docs (2026-06)
-    # kimi-k2.6 and kimi-k2.5 are current; moonshot-v1 series still callable
-    # but being phased out in favour of the K2 lineup.
+    # kimi-k2.6 (2026-04-20) is natively multimodal — text + image + video via
+    # the MoonViT encoder — with a 256K context; k2.5 also accepts images. The
+    # moonshot-v1 series is text-only and being phased out (kept deprecated).
     "kimi": (
-        ModelEntry(name="kimi-k2.6", vision=False, context_window=128_000),
-        ModelEntry(name="kimi-k2.5", vision=False, context_window=128_000),
+        ModelEntry(name="kimi-k2.6", vision=True, context_window=256_000),
+        ModelEntry(name="kimi-k2.5", vision=True, context_window=128_000),
         ModelEntry(name="moonshot-v1-128k", vision=False, context_window=128_000, deprecated=True),
         ModelEntry(name="moonshot-v1-32k", vision=False, context_window=32_000, deprecated=True),
     ),
-    # Zhipu GLM — open.bigmodel.cn (2026-06)
-    # glm-4-plus (128K, text) and glm-4v-plus (8K, vision) remain available.
-    # glm-4.1v-thinking is a newer vision-reasoning model.
+    # Zhipu GLM — docs.bigmodel.cn (2026-06)
+    # glm-5.1 (2026-04, 200K ctx / 128K out, deep-thinking) is the text flagship;
+    # glm-4.7 (355B MoE, 200K) and glm-4.6 (200K) are current text models. Vision
+    # goes through glm-4.6v (128K) and glm-4.5v. The older glm-4*-plus line is
+    # kept deprecated so existing manifests resolve.
     "glm": (
-        ModelEntry(name="glm-4-plus", vision=False, context_window=128_000),
-        ModelEntry(name="glm-4v-plus", vision=True, context_window=8_000),
-        ModelEntry(name="glm-4.1v-thinking", vision=True, context_window=32_000),
+        ModelEntry(name="glm-5.1", vision=False, context_window=200_000),
+        ModelEntry(name="glm-4.7", vision=False, context_window=200_000),
+        ModelEntry(name="glm-4.6", vision=False, context_window=200_000),
+        ModelEntry(name="glm-4.6v", vision=True, context_window=128_000),
+        ModelEntry(name="glm-4.5v", vision=True),
+        ModelEntry(name="glm-4-plus", vision=False, context_window=128_000, deprecated=True),
+        ModelEntry(name="glm-4v-plus", vision=True, context_window=8_000, deprecated=True),
+        ModelEntry(name="glm-4.1v-thinking", vision=True, context_window=32_000, deprecated=True),
     ),
-    # Alibaba Qwen / DashScope — alibabacloud.com/help/en/model-studio (2026-06)
-    # qwen3-max is the current flagship; qwen3-vl-plus supports vision.
-    # Legacy qwen-max / qwen-vl-max still callable but superseded.
+    # Alibaba Qwen / DashScope (Model Studio / 百炼) — help.aliyun.com/zh/model-studio (2026-06)
+    # qwen3-max is the flagship; qwen3.5-plus is multimodal (text/image/video).
+    # qwen3-vl-plus / qwen3-vl-flash are the vision tiers. Context windows left
+    # unset where not confirmed against the 百炼 console. Legacy qwen-max /
+    # qwen-vl-max kept deprecated.
     "qwen": (
-        ModelEntry(name="qwen3-max", vision=False, context_window=128_000),
-        ModelEntry(name="qwen3-vl-plus", vision=True, context_window=128_000),
+        ModelEntry(name="qwen3.5-plus", vision=True),
+        ModelEntry(name="qwen3-max", vision=False),
+        ModelEntry(name="qwen3-vl-plus", vision=True),
+        ModelEntry(name="qwen3-vl-flash", vision=True),
         ModelEntry(name="qwen-max", vision=False, context_window=32_000, deprecated=True),
         ModelEntry(name="qwen-vl-max", vision=True, context_window=32_000, deprecated=True),
     ),
