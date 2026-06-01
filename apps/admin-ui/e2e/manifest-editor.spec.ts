@@ -1,0 +1,67 @@
+/**
+ * Manifest editor E2E — Stream S PR C.
+ *
+ * Proves the Create-Agent drawer opens the visual ``<ManifestEditor>``
+ * on its Form tab, that the YAML tab switches the view, and that the
+ * open drawer passes the axe a11y check.
+ *
+ * The editor fetches ``GET /v1/agents/schema`` (enveloped) on mount, so
+ * we stub it here. Because the shared ``installControlPlaneStub`` fixture
+ * registers ``**​/v1/agents*`` (which also matches ``/agents/schema``),
+ * we register the more specific schema route *after* it — Playwright runs
+ * the most-recently-added handler first, so ours wins.
+ */
+import { test, expect, expectNoA11yViolations, SAMPLE_JWT } from "./fixtures";
+
+const SCHEMA_ENVELOPE = {
+  success: true,
+  error: null,
+  data: {
+    type: "object",
+    properties: {
+      metadata: {
+        type: "object",
+        properties: {
+          name: { type: "string", title: "Name" },
+        },
+      },
+    },
+  },
+};
+
+test.beforeEach(async ({ page }) => {
+  // More specific than the fixture's ``**/v1/agents*`` stub; registered
+  // after it so it takes precedence for the schema fetch.
+  await page.route("**/v1/agents/schema", async (route) => {
+    await route.fulfill({ json: SCHEMA_ENVELOPE });
+  });
+  await page.goto("/login");
+  await expect(page.getByTestId("login-card")).toBeVisible();
+  // The paste-token form sits behind the "Developer login" disclosure
+  // whenever OIDC is configured (``VITE_OIDC_ISSUER``). In CI it is
+  // open by default; locally it may be collapsed — reveal it if needed.
+  const tokenField = page.getByTestId("login-token");
+  if (!(await tokenField.isVisible())) {
+    await page.getByTestId("login-dev-toggle").click();
+  }
+  await tokenField.fill(SAMPLE_JWT);
+  await page.getByTestId("login-submit").click();
+  await expect(page).toHaveURL(/\/agents$/);
+  await expect(page.getByText("customer-support-bot")).toBeVisible();
+});
+
+test("create drawer opens the manifest editor on the Form tab", async ({ page }) => {
+  await page.getByTestId("agents-create").click();
+  await expect(page.getByTestId("create-agent-drawer")).toBeVisible();
+  await expect(page.getByTestId("manifest-editor-create")).toBeVisible();
+  await expect(page.getByTestId("manifest-form-view")).toBeVisible();
+
+  await page.getByTestId("manifest-tab-yaml").click();
+  await expect(page.getByTestId("manifest-yaml-view")).toBeVisible();
+});
+
+test("create drawer passes axe (serious + critical)", async ({ page }) => {
+  await page.getByTestId("agents-create").click();
+  await expect(page.getByTestId("manifest-editor-create")).toBeVisible();
+  await expectNoA11yViolations(page, "create-agent-drawer");
+});
