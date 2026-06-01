@@ -790,6 +790,34 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ---
 
+### Stream R — 公司成员 Onboarding + per-user Agent 编排（~2-3 周）— 设计 [STREAM-R-DESIGN](./streams/STREAM-R-DESIGN.md)
+
+**触发**：跑 canonical E2E 前用户追问"新增管理员/租户新增账号怎么办?"——审计暴露:平台 admin 新增 ✅ 通,但**租户成员 onboarding 缺**:Keycloak `registrationAllowed:false`,新人账号从哪来无解(无邀请流程/无 Keycloak Admin API 集成/无成员 UI)。与目标产品形态(per-user 持久 agent,用户=公司的人)冲突,作废 STREAM-H §0"不做用户面"。**目标**：system_admin 建公司+首admin → admin 邀请员工 → helix 调 Keycloak Admin API 自动开账号 → 员工登录 → 员工用上专属 agent(全程 web)。
+
+**范围决策(2026-06-01)**：① 邀请态建表(状态机+审计+list)；② 删装饰性 Keycloak realm role,维持应用自管授权(Keycloak 只管认证+tenant_id 属性)；③ Keycloak Admin 凭据走 Stream Q 加密金库,service account `helix-agent-api-internal` 配最小 `manage-users`；④ per-user agent 惰性初始化；⑤ 租户可配默认 agent;⑥ 链路终点=员工用上 agent;⑦ W3 本轮做。
+
+**W1 — 地基**
+- [ ] **R-1 Keycloak Admin client 封装(`keycloak/` module:Protocol+Http+token cache+errors+Fake;service-account client_credentials grant;凭据金库取)** — **Mini-ADR R-1/R-2**
+- [ ] **R-2 删装饰 realm role `admin`(realm json + auth 回归断言:无 roles claim 仍 system_admin via binding)** — **Mini-ADR R-7**
+- [ ] **R-3 `tenant_member` 表(migration 0051,状态机+partial-unique 幂等键+RLS)+ audit Literal 两处同改 + `TenantMemberStore`** — **Mini-ADR R-6/R-10**
+- [ ] **R-4 `POST /v1/tenants` 加 first_admin(DB-first+幂等补偿跨系统事务;cross-tenant role_binding 写;Keycloak 建号+发设密码邮件)** — **Mini-ADR R-4/R-5/R-11**
+
+**W2 — 成员 onboarding**
+- [ ] **R-5 邀请 API `/v1/members`(invite batch/list/resend 幂等补偿/revoke;Keycloak 原生 execute-actions-email)** — **Mini-ADR R-3**
+- [ ] **R-6 成员 UI `SettingsMembers.tsx`(邀请 drawer+status badge+resend/revoke;envelope 对账;Playwright/axe)**
+
+**W3 — per-user agent 编排**
+- [ ] **R-7 租户默认 agent(migration 0052 `tenant_config.default_agent_name`+thread 创建读默认 fallback canonical-agent)** — **Mini-ADR R-9**
+- [ ] **R-8 per-user 惰性编排(`ensure_user_instance`:workspace.resolve+member 首登 invited→active;接入 trigger_run)** — **Mini-ADR R-8**
+
+**Stream R Verification**：单测 Keycloak client(token 过期重取/409 映射/unavailable)+`TenantMemberStore`(状态机+幂等键+kc 反查)+`ensure_user_instance` 幂等;集成(FakeKeycloak)W1 建租户+first_admin 全链+各失败点补偿/W2 invite/resend/revoke/W3 首 run 建 workspace+member→active;**端到端**:建公司(填首admin email)→ admin 邀请员工 → 员工收 Keycloak 邮件设密码登录 → 员工 Playground 真实回话(全程 web,人只在网页填过 email)。每 PR 零债 6 条。email 用普通 str 校验(不引 email-validator)。
+
+**PR 拆分(按 wave 合并,减 CI 等待)**：A(设计) → W1 PR(R-1+2+3+4 合) → W2 PR(R-5+6 合) → W3 PR(R-7+8 合)。关键路径 A→W1→W2→W3。
+
+**后续(不在本迭代)**：真 KMS-wrap Keycloak secret;member 角色变更端点+suspended 反激活(本版单向);SCIM/SSO 联邦/Keycloak group 同步;per-员工 agent 模板;`ensure_user_instance` 进程内缓存。
+
+---
+
 ## Phase M1 — 生产化（6-8 个月）
 
 ### 目标
