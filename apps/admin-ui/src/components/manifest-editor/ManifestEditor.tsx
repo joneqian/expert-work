@@ -28,7 +28,11 @@ interface ManifestEditorProps {
 
 function safeSeed(initialYaml: string): unknown {
   try {
-    return parseYaml(initialYaml) ?? {};
+    const parsed = parseYaml(initialYaml);
+    // The Form view (RJSF) expects an object. A scalar/array/empty seed (e.g.
+    // a stray "42") would render a broken form, so fall back to {} — the raw
+    // value is still recoverable via the YAML tab.
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -57,6 +61,10 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
   }, []);
 
   function handleFormChange(data: unknown): void {
+    // The Form is schema-authoritative: only fields declared in the AgentSpec
+    // schema survive a Form round-trip. Keys a user hand-added in raw YAML that
+    // aren't in the schema do not persist once they edit via the Form. The
+    // backend ManifestLoader re-validates on submit regardless.
     setManifestObject(data);
     const y = dumpYaml(data);
     setYamlText(y);

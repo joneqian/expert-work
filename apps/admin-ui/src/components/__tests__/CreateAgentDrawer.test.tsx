@@ -24,7 +24,7 @@ import * as agentsSdk from "../../api/agents";
 import * as schemaSdk from "../../api/manifest_schema";
 import { __resetSchemaCacheForTest } from "../manifest-editor/schema";
 import { ApiError } from "../../api/client";
-import { CreateAgentDrawer, DEFAULT_AGENT_YAML } from "../CreateAgentDrawer";
+import { CreateAgentDrawer } from "../CreateAgentDrawer";
 
 const sampleCreated = {
   record: { name: "my-agent", version: "1.0.0" },
@@ -77,5 +77,3 @@ describe("CreateAgentDrawer", () => {
     expect(alert).toHaveTextContent("MANIFEST_DUPLICATE");
   });
 });
-
-void DEFAULT_AGENT_YAML;
