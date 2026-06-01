@@ -43,19 +43,15 @@ class KeycloakAdminClient(Protocol):
         Raises :class:`KeycloakUserExistsError` on 409,
         :class:`KeycloakUnavailableError` on transport / 5xx.
         """
-        ...
 
     async def send_setup_email(self, *, user_id: str, lifespan_s: int) -> None:
         """Send the native set-password / verify-email action link."""
-        ...
 
     async def set_enabled(self, *, user_id: str, enabled: bool) -> None:
         """Enable/disable an account (member suspend / reactivate)."""
-        ...
 
     async def delete_user(self, *, user_id: str) -> None:
         """Delete an account (invite revoke); a 404 is treated as success."""
-        ...
 
 
 def _split_name(display_name: str | None) -> tuple[str | None, str | None]:
