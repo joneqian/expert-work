@@ -85,4 +85,30 @@ describe("ManifestEditor", () => {
     await user.type(ta, "metadata:\n  name: edited");
     expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining("edited"));
   });
+
+  it("blocks the YAML→Form switch when YAML is syntactically broken", async () => {
+    const user = userEvent.setup();
+    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />);
+    await screen.findByTestId("manifest-form-view");
+    await user.click(screen.getByTestId("manifest-tab-yaml"));
+
+    const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
+    await user.clear(ta);
+    // "[[" is userEvent's escape for a literal "[", yielding "metadata: [unterminated"
+    // (an unterminated flow sequence) which js-yaml v4 rejects, exercising the parse-throw branch.
+    await user.type(ta, "metadata: [[unterminated");
+
+    await user.click(screen.getByTestId("manifest-tab-form"));
+    expect(screen.getByTestId("manifest-switch-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("manifest-form-view")).not.toBeInTheDocument();
+  });
+
+  it("emits the dumped YAML through onChange when switching Form→YAML", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={onChange} />);
+    await screen.findByTestId("manifest-form-view");
+    await user.click(screen.getByTestId("manifest-tab-yaml"));
+    expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining("name: bot"));
+  });
 });

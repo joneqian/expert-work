@@ -117,6 +117,8 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
     return (
       <button
         type="button"
+        role="tab"
+        aria-selected={active}
         data-testid={`manifest-tab-${value}`}
         onClick={() => switchTo(value)}
         style={{
@@ -134,7 +136,7 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
 
   return (
     <div data-testid={`manifest-editor-${mode}`}>
-      <div style={{ display: "inline-flex", marginBottom: 12 }}>
+      <div role="tablist" style={{ display: "inline-flex", marginBottom: 12 }}>
         {tabButton("form", t("manifest_editor.tab_form"))}
         {tabButton("yaml", t("manifest_editor.tab_yaml"))}
       </div>
