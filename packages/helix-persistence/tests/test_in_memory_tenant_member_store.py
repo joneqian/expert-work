@@ -7,14 +7,21 @@ cross-tenant isolation, Keycloak-id reverse lookup).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from helix_agent.persistence import DuplicateMemberError, InMemoryTenantMemberStore
+from helix_agent.protocol import MemberRole, TenantMember
 
 
-async def _invite(store: InMemoryTenantMemberStore, *, tenant, email="a@co.com", role="viewer"):
+async def _invite(
+    store: InMemoryTenantMemberStore,
+    *,
+    tenant: UUID,
+    email: str = "a@co.com",
+    role: MemberRole = "viewer",
+) -> TenantMember:
     return await store.create(tenant_id=tenant, email=email, role=role, invited_by="admin-sub")
 
 
