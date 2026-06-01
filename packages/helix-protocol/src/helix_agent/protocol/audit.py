@@ -64,6 +64,18 @@ class AuditAction(StrEnum):
     # tenant lifecycle — Stream P Mini-ADR P-1 (POST /v1/tenants creates the
     # first tenant_config row; system_admin-gated).
     TENANT_CREATE = "tenant:create"
+    # tenant member onboarding — Stream R (Mini-ADR R-3/R-6). MEMBER_INVITE
+    # on invite; RESEND on the idempotent compensation path; REVOKE/SUSPEND
+    # on DELETE (invited→revoked / active→suspended); ACTIVATE on the W3
+    # first-run hook (invited→active). KEYCLOAK_USER_CREATE(_FAILED) record
+    # the cross-system account-provisioning side of the DB-first compensation.
+    MEMBER_INVITE = "member:invite"
+    MEMBER_RESEND = "member:resend"
+    MEMBER_REVOKE = "member:revoke"
+    MEMBER_SUSPEND = "member:suspend"
+    MEMBER_ACTIVATE = "member:activate"
+    KEYCLOAK_USER_CREATE = "keycloak_user:create"
+    KEYCLOAK_USER_CREATE_FAILED = "keycloak_user:create_failed"
     # tenant credentials — Stream O Mini-ADR O-8.
     # MODE_CHANGED is emitted by the credentials-mode switch endpoint
     # (audit details ``from`` / ``to``); PROVIDER_CREDENTIALS_UPDATED
@@ -250,6 +262,8 @@ class AuditEntry(BaseModel):
         "run",  # Stream H.3 PR 1 — Mini-ADR H-6 (RUN_LIST_READ)
         "tenant",  # Stream P — Mini-ADR P-1 (POST /v1/tenants)
         "platform_credential",  # Stream P — Mini-ADR P-11 (/v1/platform/credentials)
+        "tenant_member",  # Stream R — Mini-ADR R-3 (member onboarding)
+        "keycloak_user",  # Stream R — Mini-ADR R-3 (Keycloak account provisioning)
     ]
     resource_id: str | None = None
     result: AuditResult

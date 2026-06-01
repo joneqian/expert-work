@@ -139,6 +139,8 @@ ResourceType = Literal[
     # packages/helix-protocol/src/helix_agent/protocol/audit.py per
     # [memory:audit-literal-drift] (both must stay in sync).
     "memory_item",
+    "tenant_member",  # Stream R — Mini-ADR R-3 (member onboarding)
+    "keycloak_user",  # Stream R — Mini-ADR R-3 (Keycloak account provisioning)
 ]
 
 

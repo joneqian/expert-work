@@ -33,6 +33,7 @@ from control_plane.auth.errors import AuthError, MissingCredentialsError
 from control_plane.auth.jwt_verifier import JWTVerifier
 from control_plane.auth.mtls import MTLSVerifier
 from control_plane.auth.system_admin import resolve_system_admin
+from control_plane.auth.tenant_roles import resolve_tenant_roles
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.auth import RoleBindingStore
 from helix_agent.protocol import AuditAction, AuditResult, Principal
@@ -107,6 +108,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             principal = Principal.from_jwt_claims(claims)
             # Stream N — augment with platform-admin status if applicable.
             principal = await resolve_system_admin(principal, self._role_binding_store)
+            # Stream R — merge tenant-scope role-binding roles so the
+            # authorization layer (auth.rbac) sees roles granted via the
+            # invite flow / role_bindings API, not only the JWT claim.
+            principal = await resolve_tenant_roles(principal, self._role_binding_store)
             return await self._call_with_principal(request, call_next, principal)
 
         if self._mtls_verifier is not None:

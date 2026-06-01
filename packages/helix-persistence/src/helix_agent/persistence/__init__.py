@@ -74,6 +74,7 @@ from helix_agent.persistence.models import KnowledgeDocumentRow as KnowledgeDocu
 from helix_agent.persistence.models import MemoryItemRow as MemoryItemRow
 from helix_agent.persistence.models import SkillRow as SkillRow
 from helix_agent.persistence.models import SkillVersionRow as SkillVersionRow
+from helix_agent.persistence.models import TenantMemberRow as TenantMemberRow
 from helix_agent.persistence.models import TenantUserRow as TenantUserRow
 from helix_agent.persistence.models import ThreadMetaRow as ThreadMetaRow
 from helix_agent.persistence.models import UserWorkspaceRow as UserWorkspaceRow
@@ -128,6 +129,18 @@ from helix_agent.persistence.tenant_config import (
 )
 from helix_agent.persistence.tenant_config import (
     TenantConfigStore as TenantConfigStore,
+)
+from helix_agent.persistence.tenant_member import (
+    DuplicateMemberError as DuplicateMemberError,
+)
+from helix_agent.persistence.tenant_member import (
+    InMemoryTenantMemberStore as InMemoryTenantMemberStore,
+)
+from helix_agent.persistence.tenant_member import (
+    SqlTenantMemberStore as SqlTenantMemberStore,
+)
+from helix_agent.persistence.tenant_member import (
+    TenantMemberStore as TenantMemberStore,
 )
 from helix_agent.persistence.tenant_user import (
     InMemoryTenantUserStore as InMemoryTenantUserStore,
@@ -195,6 +208,7 @@ __all__ = [
     "DatabaseConfig",
     "DrDrillRow",
     "DuplicateKnowledgeBaseError",
+    "DuplicateMemberError",
     "EvalDatasetStore",
     "EventLogRow",
     "InMemoryApprovalStore",
@@ -207,6 +221,7 @@ __all__ = [
     "InMemoryMemoryStore",
     "InMemoryPlatformSecretStore",
     "InMemoryTenantConfigStore",
+    "InMemoryTenantMemberStore",
     "InMemoryTenantQuotaStore",
     "InMemoryTenantUserStore",
     "InMemoryThreadMetaStore",
@@ -232,6 +247,7 @@ __all__ = [
     "SqlMemoryStore",
     "SqlPlatformSecretStore",
     "SqlTenantConfigStore",
+    "SqlTenantMemberStore",
     "SqlTenantQuotaStore",
     "SqlTenantUserStore",
     "SqlThreadMetaStore",
@@ -241,6 +257,8 @@ __all__ = [
     "SqlUserWorkspaceStore",
     "SqlVolumeBackupDLQ",
     "TenantConfigStore",
+    "TenantMemberRow",
+    "TenantMemberStore",
     "TenantQuotaStore",
     "TenantUserRow",
     "TenantUserStore",

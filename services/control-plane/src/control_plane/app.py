@@ -26,6 +26,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from typing import cast
 
+import httpx
 from fastapi import FastAPI
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -72,6 +73,12 @@ from control_plane.curation_worker import CurationWorker
 from control_plane.encrypted_secret_store import (
     SqlEncryptedSecretStore,
     build_kek_from_b64,
+)
+from control_plane.keycloak import (
+    FakeKeycloakAdminClient,
+    HttpKeycloakAdminClient,
+    KeycloakAdminClient,
+    ServiceAccountTokenProvider,
 )
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
 from control_plane.manifest import ManifestLoader
@@ -219,6 +226,11 @@ from helix_agent.persistence.tenant_config import (
     SqlTenantConfigStore,
     TenantConfigStore,
 )
+from helix_agent.persistence.tenant_member import (
+    InMemoryTenantMemberStore,
+    SqlTenantMemberStore,
+    TenantMemberStore,
+)
 from helix_agent.persistence.tenant_user import (
     InMemoryTenantUserStore,
     SqlTenantUserStore,
@@ -304,6 +316,8 @@ def create_app(
     tenant_rate_limiter: RateLimiter | None = None,
     tenant_config_repo: TenantConfigStore | None = None,
     tenant_config_service: TenantConfigService | None = None,
+    tenant_member_repo: TenantMemberStore | None = None,
+    keycloak_admin_client: KeycloakAdminClient | None = None,
     platform_secret_store: PlatformSecretStore | None = None,
     secret_store: SecretStore | None = None,
     agent_runtime: AgentRuntime | None = None,
@@ -462,6 +476,14 @@ def create_app(
         store=resolved_tenant_config_repo,
         audit_logger=resolved_audit,
         ttl_s=float(resolved_settings.tenant_config_cache_ttl_s),
+    )
+    # Stream R — member roster + Keycloak Admin client. The client is a Fake
+    # unless ``keycloak_enabled`` (dev/CI never depend on a live Keycloak).
+    resolved_tenant_member_repo = tenant_member_repo or (
+        sql_stores.tenant_member if sql_stores else InMemoryTenantMemberStore()
+    )
+    resolved_keycloak_admin_client = keycloak_admin_client or _build_keycloak_admin_client(
+        resolved_settings, resolved_secret_store
     )
     # Stream P (Mini-ADR P-7/P-9) — platform credential overlay (DB wins over
     # env). The service is lazy (no DB read until first getter call), so it is
@@ -865,6 +887,9 @@ def create_app(
     app.state.quota_reaper = reaper
     app.state.tenant_config_repo = resolved_tenant_config_repo
     app.state.tenant_config_service = resolved_tenant_config_service
+    # Stream R — member onboarding roster + Keycloak Admin client.
+    app.state.tenant_member_repo = resolved_tenant_member_repo
+    app.state.keycloak_admin_client = resolved_keycloak_admin_client
     app.state.platform_secret_store = resolved_platform_secret_store
     app.state.platform_secrets_service = resolved_platform_secrets_service
     # Stream Q (PR C) — the SecretStore is exposed so the platform-config write
@@ -1001,6 +1026,7 @@ class _SqlStores:
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
+    tenant_member: TenantMemberStore  # Stream R
     feedback: FeedbackStore
     token_usage: TokenUsageStore
     audit_log: AuditLogStore
@@ -1109,6 +1135,39 @@ def _build_secret_store(settings: Settings, sql_stores: _SqlStores | None) -> Se
     return make_secret_store(backend, env_file=settings.secret_store_env_file)
 
 
+def _build_keycloak_admin_client(
+    settings: Settings, secret_store: SecretStore
+) -> KeycloakAdminClient:
+    """Build the Keycloak Admin client for member provisioning (Stream R).
+
+    Returns a :class:`FakeKeycloakAdminClient` unless ``keycloak_enabled`` so
+    dev/CI run the full onboarding flow without a live Keycloak. When enabled,
+    the service-account client secret is loaded lazily from the vault on each
+    token refresh (never held in settings).
+    """
+    if not settings.keycloak_enabled:
+        return FakeKeycloakAdminClient()
+
+    http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=30.0))
+
+    async def _load_secret() -> str:
+        return await secret_store.get(settings.keycloak_admin_secret_name)
+
+    token_provider = ServiceAccountTokenProvider(
+        base_url=settings.keycloak_base_url,
+        realm=settings.keycloak_realm,
+        client_id=settings.keycloak_admin_client_id,
+        secret_loader=_load_secret,
+        http=http,
+    )
+    return HttpKeycloakAdminClient(
+        base_url=settings.keycloak_base_url,
+        realm=settings.keycloak_realm,
+        token_provider=token_provider,
+        http=http,
+    )
+
+
 def _build_sql_stores(settings: Settings) -> _SqlStores:
     """Build the Postgres-backed store bundle from ``settings.db_*`` (ADR B-6).
 
@@ -1150,6 +1209,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         token_reservation=SqlTokenReservationStore(session_factory),
         platform_secret=SqlPlatformSecretStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
+        tenant_member=SqlTenantMemberStore(session_factory),
         feedback=DbFeedbackStore(session_factory),
         token_usage=DbTokenUsageStore(session_factory),
         audit_log=SqlAuditLogStore(session_factory),
