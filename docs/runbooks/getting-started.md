@@ -194,6 +194,17 @@ cd apps/admin-ui && pnpm install && pnpm dev      # 起在 http://localhost:5173
 
 **【实跑回填】** —— 网页粘贴流程截图、确认 DB 里是密文不是明文。
 
+### 5.1 配平台 Embedding & Rerank(Stream T)
+
+新建智能体默认开启**长期记忆**,需要平台级 Embedding 模型(rerank 可选)。**建任何 agent 前必须先配**,否则建 agent 入口会挡住并引导回这里。
+
+浏览器:`/settings/platform`(system_admin)→ **Embedding & Rerank** 区:
+1. **Embedding provider** 选一个已配 key 的 provider(只列有 embedding 模型的)→ **Embedding model** 选一个(如通义 `text-embedding-v4`、智谱 `embedding-3`)。
+2. (可选)打开 **Rerank**,选 provider/model(如通义 `qwen3-vl-rerank`)。
+3. 保存。没配该 provider 的 key 会被拦,先回 §5 配 key。
+
+> 立即生效:embedder 运行期读当前平台配置,改完无需重启。
+
 ---
 
 ## 6. 建公司 + 首位管理员(Stream R W1)

@@ -223,3 +223,54 @@ async def test_put_non_admin_forbidden(
     )
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "PLATFORM_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_status_configured_true(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    resp = await client.get("/v1/platform/embedding-config/status", headers=_headers(admin))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["error"] is None
+    assert body["data"] == {"configured": True}
+
+
+@pytest.mark.asyncio
+async def test_status_configured_false(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    # No configured providers (no credentials, none supported) → the env
+    # embedding fallback resolves to None → status reports configured: False.
+    settings = settings.model_copy(
+        update={
+            "supported_providers": [],
+            "platform_provider_credentials": {},
+        }
+    )
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        resp = await client.get("/v1/platform/embedding-config/status", headers=_headers(admin))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["error"] is None
+    assert body["data"] == {"configured": False}
+
+
+@pytest.mark.asyncio
+async def test_status_non_admin_allowed(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    # A non-system-admin principal (not seeded) can read the boolean status,
+    # unlike the full GET which 403s for the same principal.
+    client, _ = admin_client
+    resp = await client.get("/v1/platform/embedding-config/status", headers=_headers(uuid4()))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"] == {"configured": True}

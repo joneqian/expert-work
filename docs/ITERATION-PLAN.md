@@ -849,11 +849,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **锁定决策**：① 立即生效（动态解析，embedder 运行期读当前平台配置）；② 未配 embedding 时建 agent **挡住+引导**（不静默降级）；③ rerank 一起做、可选；④ 平台全局（不做 per-tenant override）；⑤ 记忆默认开落在 **UI 默认模板**层（schema 默认仍 None，向后兼容）；⑥ **回炉 PR D**：删 `ModelSelectField` "主模型 provider 无 embedding→记忆不可用" 误导提示（embedding 与主模型 provider 解耦）。
 
-- [ ] **T-A 设计先行**（STREAM-T-DESIGN + 本 backlog）— **Mini-ADR T-1~T-8**
-- [ ] **T-B 后端核心**：`platform_embedding_config` 单行表 + `PlatformEmbeddingConfigService`（DB 优先/env 回落/TTL 缓存）+ `DynamicResolvingEmbedder/Reranker`（运行期读配置，立即生效）+ app 接线
-- [ ] **T-C 后端 API + 门控**：`GET/PUT /v1/platform/embedding-config`（校验 model∈目录且 embeddings、provider key 已配）+ build-time gate 复用 + 建 agent precheck + 审计
-- [ ] **T-D 前端配置 UI**：`/settings/platform` Embedding/Rerank 区（provider 只列有 embedding 模型的、model 只列 embeddings、rerank 可选、校验 key 已配）+ SDK + i18n + Storybook/Playwright/axe
-- [ ] **T-E 记忆默认化 + 回炉 + 收尾**：默认模板 memory-on + 删 PR D 误导提示 + 建 agent "先配 embedding" 引导 + getting-started onboarding 必配 + create/edit/E2E
+- [x] **T-A 设计先行**（STREAM-T-DESIGN + 本 backlog）— **Mini-ADR T-1~T-8**（PR #364）
+- [x] **T-B 后端核心**：`platform_embedding_config` 单行表 + `PlatformEmbeddingConfigService`（DB 优先/env 回落/TTL 缓存）+ `DynamicResolvingEmbedder/Reranker`（运行期读配置，立即生效）+ app 接线（PR #365）
+- [x] **T-C 后端 API + 门控**：`GET/PUT /v1/platform/embedding-config`（校验 model∈目录且 embeddings、provider key 已配）+ build-time gate 复用 + 审计（PR #366）
+- [x] **T-D 前端配置 UI**：`/settings/platform` Embedding/Rerank 区（provider 只列有 embedding 模型的、model 只列 embeddings、rerank 可选、校验 key 已配）+ SDK + i18n + Storybook/Playwright/axe（PR #367）
+- [x] **T-E 记忆默认化 + 回炉 + 收尾**：默认模板 memory-on + 删 PR D 误导提示 + 建 agent "先配 embedding" 引导（新增 role-agnostic `GET /v1/platform/embedding-config/status`，租户 admin 也能预检）+ getting-started §5.1 必配 + create-agent gate e2e（PR E）
 
 **关键路径** A→B→C→D→E。每 PR CI-green + 零债 6 条。**E 之后跑 E2E 闭环**：平台配 embedding → 可视化编辑器建 memory-on DeepSeek agent → 真实多轮验证记忆召回（全程 web）。
 

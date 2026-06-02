@@ -83,6 +83,11 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/v1/model-catalog", async (route) => {
     await route.fulfill({ json: CATALOG_ENVELOPE });
   });
+  // The drawer fetches the platform embedding status on open (Stream T PR E);
+  // stub the configured path so the editor renders deterministically.
+  await page.route("**/v1/platform/embedding-config/status", (route) =>
+    route.fulfill({ json: { success: true, data: { configured: true }, error: null } }),
+  );
   await page.goto("/login");
   await expect(page.getByTestId("login-card")).toBeVisible();
   // The paste-token form sits behind the "Developer login" disclosure

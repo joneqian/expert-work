@@ -4,8 +4,11 @@
  * ``BASE_MANIFEST_YAML`` is the blank-canvas manifest. ``buildDefaultManifest``
  * pre-selects the first *configured* provider's first chat (non-embedding)
  * model and copies its vision capability, so a new agent starts on a model the
- * platform can actually build. Long-term memory stays off (default), so the
- * embedder gate can't trip at runtime.
+ * platform can actually build. Long-term memory is ON by default
+ * (Stream T): a memory-less agent has little product value, so new agents seed
+ * with ``spec.memory.long_term``. This requires a platform embedding config —
+ * CreateAgentDrawer blocks+guides when none is set (the build-time embedder
+ * gate is the backstop).
  */
 import { parseYaml } from "./yaml";
 import type { CatalogModel, ModelCatalog } from "../../api/model_catalog";
@@ -23,6 +26,11 @@ spec:
     name: claude-sonnet-4-6
   system_prompt:
     template: "You are a helpful assistant."
+  memory:
+    long_term:
+      retrieve_top_k: 5
+      write_back: true
+      recall_mode: per_session
   sandbox:
     resources: { cpu: "1.0", memory: "1Gi" }
     network:

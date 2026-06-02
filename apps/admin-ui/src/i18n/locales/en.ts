@@ -105,7 +105,6 @@ export interface TranslationKeys {
     model_placeholder: string;
     vision_on: string;
     vision_off: string;
-    no_embeddings: string;
     advanced: string;
   };
   playground: {
@@ -742,6 +741,9 @@ export interface TranslationKeys {
     submit: string;
     cancel: string;
     create_failed: string;
+    embedding_required_title: string;
+    embedding_required_desc: string;
+    embedding_required_cta: string;
   };
   runs_page: {
     page_title: string;
@@ -891,8 +893,6 @@ const en: TranslationKeys = {
     model_placeholder: "Select a model",
     vision_on: "Vision: supported",
     vision_off: "Vision: not supported",
-    no_embeddings:
-      "This provider has no embedding model — long-term memory won't work with it.",
     advanced: "Advanced",
   },
   playground: {
@@ -1568,6 +1568,10 @@ const en: TranslationKeys = {
     submit: "Create",
     cancel: "Cancel",
     create_failed: "Failed to create agent",
+    embedding_required_title: "Configure platform embedding first",
+    embedding_required_desc:
+      "New agents use long-term memory, which needs a platform embedding model. No embedding is configured yet — set one in Platform Settings, then create your agent.",
+    embedding_required_cta: "Go to Platform Settings",
   },
   runs_page: {
     page_title: "Runs",

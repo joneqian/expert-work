@@ -91,9 +91,9 @@ describe("ModelSelectField", () => {
     );
   });
 
-  it("shows the no-embeddings note for a provider without an embedding model", () => {
+  it("does not show a main-model embedding hint (embedding is platform-level)", () => {
     renderField({ provider: "deepseek" });
-    expect(screen.getByTestId("model-select-no-embeddings")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-select-no-embeddings")).toBeNull();
   });
 
   it("keeps a remaining ModelSpec field (temperature) editable", () => {

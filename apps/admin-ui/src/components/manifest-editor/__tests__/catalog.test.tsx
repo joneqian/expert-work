@@ -6,7 +6,6 @@ import {
   providerNames,
   modelsFor,
   lookupModel,
-  providerHasEmbeddings,
 } from "../catalog";
 
 const CATALOG = {
@@ -46,7 +45,5 @@ describe("model catalog", () => {
     expect(modelsFor(CATALOG, "openai").map((m) => m.name)).toEqual(["gpt-5.5", "text-embedding-3-large"]);
     expect(lookupModel(CATALOG, "openai", "gpt-5.5")?.vision).toBe(true);
     expect(lookupModel(CATALOG, "openai", "nope")).toBeUndefined();
-    expect(providerHasEmbeddings(CATALOG, "openai")).toBe(true);
-    expect(providerHasEmbeddings(CATALOG, "deepseek")).toBe(false);
   });
 });

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildDefaultManifest } from "../defaults";
 
-type Manifest = { spec: { model: { provider: string; name: string; supports_vision: boolean } } };
+type Manifest = {
+  spec: {
+    model: { provider: string; name: string; supports_vision: boolean };
+    memory?: { long_term?: { retrieve_top_k: number; write_back: boolean; recall_mode: string } };
+  };
+};
 
 describe("buildDefaultManifest", () => {
   it("picks the first configured provider's first chat model and its vision flag", () => {
@@ -25,6 +30,11 @@ describe("buildDefaultManifest", () => {
   it("falls back to the base template when no provider is configured", () => {
     const m = buildDefaultManifest({ providers: [] }) as Manifest;
     expect(m.spec.model.provider).toBeTruthy();
-    expect(m).not.toHaveProperty("spec.memory.long_term");
+    expect(m).toHaveProperty("spec.memory.long_term");
+    expect(m.spec.memory?.long_term).toMatchObject({
+      retrieve_top_k: 5,
+      write_back: true,
+      recall_mode: "per_session",
+    });
   });
 });

@@ -108,7 +108,6 @@ const zhCN: TranslationKeys = {
     model_placeholder: "选择模型",
     vision_on: "视觉：支持",
     vision_off: "视觉：不支持",
-    no_embeddings: "该提供方没有 embedding 模型，长期记忆无法在其上使用。",
     advanced: "高级",
   },
   playground: {
@@ -768,6 +767,10 @@ const zhCN: TranslationKeys = {
     submit: "创建",
     cancel: "取消",
     create_failed: "智能体创建失败",
+    embedding_required_title: "请先配置平台 Embedding",
+    embedding_required_desc:
+      "新建智能体默认开启长期记忆，需要平台的 Embedding 模型。平台尚未配置 Embedding——请先在「平台设置」里配置，再创建智能体。",
+    embedding_required_cta: "前往平台设置",
   },
   runs_page: {
     page_title: "运行记录",
