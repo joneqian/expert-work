@@ -100,4 +100,11 @@ describe("ModelSelectField", () => {
     renderField({ provider: "openai", name: "gpt-5.5" });
     expect(screen.getByText(/temperature/i)).toBeInTheDocument();
   });
+
+  it("renders translated labels (not raw i18n keys)", () => {
+    renderField({ provider: "deepseek", name: "deepseek-v4-pro", supports_vision: false });
+    // vision Tag uses a real translation, not the literal key
+    expect(screen.queryByText("model_select.vision_off")).not.toBeInTheDocument();
+    expect(screen.getByTestId("model-select-vision")).toHaveTextContent(/视觉|Vision/);
+  });
 });

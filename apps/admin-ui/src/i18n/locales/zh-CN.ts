@@ -101,6 +101,15 @@ const zhCN: TranslationKeys = {
     invalid_yaml_title: "无法切换到表单",
     invalid_yaml_hint: "当前 YAML 不合法或不符合配置清单结构，请先在此修正。",
   },
+  model_select: {
+    provider_label: "提供方",
+    provider_placeholder: "选择已配置密钥的提供方",
+    model_label: "模型",
+    model_placeholder: "选择模型",
+    vision_on: "视觉：支持",
+    vision_off: "视觉：不支持",
+    no_embeddings: "该提供方没有 embedding 模型，长期记忆无法在其上使用。",
+  },
   playground: {
     session_label: "会话",
     new_session: "新建会话",

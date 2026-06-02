@@ -14,7 +14,7 @@
  * jsdom). NOTE: because the advanced set is enumerated here, a future new
  * ModelSpec scalar needs a one-line addition below (or use the YAML tab).
  */
-import { Alert, Collapse, Input, InputNumber, Select, Switch, Tag } from "antd";
+import { Alert, Collapse, Input, InputNumber, Select, Tag } from "antd";
 import type { FieldProps } from "@rjsf/utils";
 import { useTranslation } from "react-i18next";
 
@@ -28,7 +28,7 @@ type ModelSpecData = {
   [k: string]: unknown;
 };
 
-type AdvancedKind = "number" | "text" | "boolean";
+type AdvancedKind = "number" | "text";
 type AdvancedField = { key: string; label: string; kind: AdvancedKind };
 
 /**
@@ -139,12 +139,6 @@ export function ModelSelectField(props: FieldProps) {
                           onChange={(e) =>
                             onAdvanced(f.key, e.target.value === "" ? undefined : e.target.value)
                           }
-                        />
-                      )}
-                      {f.kind === "boolean" && (
-                        <Switch
-                          checked={Boolean(data[f.key])}
-                          onChange={(v) => onAdvanced(f.key, v)}
                         />
                       )}
                     </label>

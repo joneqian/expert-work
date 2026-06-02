@@ -98,6 +98,15 @@ export interface TranslationKeys {
     invalid_yaml_title: string;
     invalid_yaml_hint: string;
   };
+  model_select: {
+    provider_label: string;
+    provider_placeholder: string;
+    model_label: string;
+    model_placeholder: string;
+    vision_on: string;
+    vision_off: string;
+    no_embeddings: string;
+  };
   playground: {
     session_label: string;
     new_session: string;
@@ -858,6 +867,16 @@ const en: TranslationKeys = {
     invalid_yaml_title: "Can't switch to Form",
     invalid_yaml_hint:
       "The YAML is invalid or doesn't match the manifest schema. Fix it here first.",
+  },
+  model_select: {
+    provider_label: "Provider",
+    provider_placeholder: "Select a configured provider",
+    model_label: "Model",
+    model_placeholder: "Select a model",
+    vision_on: "Vision: supported",
+    vision_off: "Vision: not supported",
+    no_embeddings:
+      "This provider has no embedding model — long-term memory won't work with it.",
   },
   playground: {
     session_label: "Session",
