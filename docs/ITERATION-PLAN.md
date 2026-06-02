@@ -859,6 +859,23 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ---
 
+### Stream U — 租户管理（列表 / 切进去管 / 停用 / 后台设密码）— 设计 [STREAM-U-DESIGN](./streams/STREAM-U-DESIGN.md)
+
+**触发（2026-06-02 dogfood 实测）**：`POST /v1/tenants` 能建租户，租户作用域的 config/quota/credential 端点能改，但中间断了——**无 `GET /v1/tenants` 列表**、`TenantSwitcher` 对 system_admin 只有「主租户/全部租户(聚合)」**切不进具体租户**（聚合模式不让编辑），于是刚建的租户 UI 上**管不了**；且**无停用能力**、给首管/成员**设密码要去 Keycloak 控制台**（dev 无 SMTP）。
+
+**锁定决策**：① 列表 + 切进去都做；② 改 display_name/plan 复用现有租户配置页（不重复）；③ **停用要做**（删除=follow-up）；④ 后台设密码 = **管理员输临时密码**（temporary=true 首登强改）；⑤ 停用 enforcement 单一卡口在 auth middleware（被停租户成员 403，system_admin 不受影响）。
+
+- [ ] **U-A 设计先行**（STREAM-U-DESIGN + 本 backlog）— **Mini-ADR U-1~U-8**
+- [ ] **U-B 列表后端**：`tenant_config` store `list()`（sql+memory）+ `GET /v1/tenants`（system_admin、分页）+ SDK `listTenants()` + 测试
+- [ ] **U-C 切进租户**：`TenantSwitcher` system_admin 填充具体租户 + 切进设 `TenantScope`（解死结，现有租户作用域页生效）+ 单测/e2e
+- [ ] **U-D 租户管理页**：`/settings/tenants` 列表/管理页（显示名/套餐/状态/id/创建时间 + 「管理」切进去）+ 导航「租户」+ i18n + storybook/e2e/axe
+- [ ] **U-E 停用/恢复**：migration `0053_tenant_status`（status 列）+ model/protocol + `POST /v1/tenants/{id}/deactivate`·`/activate` + middleware 403 enforcement（30s TTL 缓存）+ runs 防御 + 审计双 Literal + 列表页状态徽章&操作
+- [ ] **U-F 后台设密码**：Keycloak `reset_password`（temporary）+ `POST /v1/members/{id}/reset-password`（SecretStr 不落日志）+ SDK + 成员页「设密码」+ i18n + 测试
+
+**关键路径** A→B→{C, D, E, F}。每 PR CI-green + 零债 6 条。**完成 = system_admin 全程在 helix 后台管租户**（建→列出→切进去→给首管设临时密码登录→需要时停用），不再碰 Keycloak 控制台。
+
+---
+
 ## Phase M1 — 生产化（6-8 个月）
 
 ### 目标
