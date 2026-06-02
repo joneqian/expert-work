@@ -135,6 +135,26 @@ def build_platform_embedding_config_router() -> APIRouter:
             "error": None,
         }
 
+    @router.get("/status")
+    async def get_platform_embedding_config_status(
+        principal: Annotated[Principal, Depends(_principal)],
+        embedding_config_service: Annotated[
+            PlatformEmbeddingConfigService, Depends(_get_embedding_config_service)
+        ],
+    ) -> dict[str, object]:
+        """Whether the platform has an effective embedding config.
+
+        Role-agnostic (any authenticated principal): exposes only a boolean so
+        an agent-creator — typically a tenant admin, who cannot read the full
+        system_admin-only config — can block+guide before building a
+        long-term-memory agent. No provider/model names are returned."""
+        embedding = await embedding_config_service.effective_embedding_config()
+        return {
+            "success": True,
+            "data": {"configured": embedding is not None},
+            "error": None,
+        }
+
     @router.put("")
     async def put_platform_embedding_config(
         payload: PlatformEmbeddingConfigWrite,
