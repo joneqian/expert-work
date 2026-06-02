@@ -158,6 +158,12 @@ def make_provider_key_resolver(
     return _resolve
 
 
+def _declares_long_term(spec: AgentSpec) -> bool:
+    """True when the manifest declares ``memory.long_term`` (Stream T)."""
+    memory = spec.spec.memory
+    return memory is not None and memory.long_term is not None
+
+
 def make_agent_builder(
     secret_store: SecretStore,
     checkpointer: BaseCheckpointSaver[Any],
@@ -168,6 +174,7 @@ def make_agent_builder(
     subagent_spec_resolver: SubagentSpecResolver | None = None,
     mcp_allowlist_provider: Callable[[UUID], Awaitable[Sequence[str]]] | None = None,
     credentials_resolver: CredentialsResolver | None = None,
+    platform_embedding_config_service: PlatformEmbeddingConfigService | None = None,
 ) -> AgentBuilder:
     """Production :data:`AgentBuilder` bound to a SecretStore + checkpointer.
 
@@ -185,9 +192,29 @@ def make_agent_builder(
     resolver so a cycle in production is rejected at build time
     (``AgentFactoryError``) rather than blowing the depth cap at run
     time.
+
+    ``platform_embedding_config_service`` (Stream T, PR B) hosts the
+    build-time embedding gate. The dynamic embedder is never ``None`` (it
+    resolves the live config per call), so the orchestrator's
+    ``embedder is None`` gate can no longer fire; this builder checks the
+    effective config instead — a manifest declaring ``memory.long_term``
+    with platform embedding unconfigured is rejected here at build time.
+    ``None`` skips the check (unit tests / the placeholder builder
+    ``make_agent_runtime`` installs before the lifespan swap); the
+    orchestrator gate stays as defense.
     """
 
     async def _build(spec: AgentSpec, *, tenant_id: UUID | None = None) -> BuiltAgent:
+        # Stream T (PR B) — build-time embedding gate. A manifest that
+        # declares long-term memory needs a configured platform embedder;
+        # the dynamic embedder object is always present, so we check the
+        # effective config rather than ``embedder is None``.
+        if platform_embedding_config_service is not None and _declares_long_term(spec):
+            if await platform_embedding_config_service.effective_embedding_config() is None:
+                raise AgentFactoryError(
+                    "manifest declares memory.long_term but platform embedding is not "
+                    "configured — configure it in platform settings"
+                )
         if subagent_spec_resolver is not None and spec.spec.subagents:
             detect_subagent_cycle(spec, resolve=subagent_spec_resolver)
         # Stream O (Mini-ADR O-14) — apply the tenant's MCP server allowlist

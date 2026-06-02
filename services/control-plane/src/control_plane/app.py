@@ -24,7 +24,6 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
-from typing import cast
 
 import httpx
 from fastapi import FastAPI
@@ -104,6 +103,7 @@ from control_plane.middleware import (
     RLSContextMiddleware,
     TenantRateLimitMiddleware,
 )
+from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.quota import (
     InMemoryQuotaService,
@@ -118,6 +118,8 @@ from control_plane.ratelimit import (
 )
 from control_plane.runtime import (
     AgentRuntime,
+    DynamicResolvingEmbedder,
+    DynamicResolvingReranker,
     build_mcp_pool,
     build_middleware_env,
     build_supervisor_client,
@@ -127,9 +129,7 @@ from control_plane.runtime import (
     make_image_resolver,
     make_knowledge_retriever,
     make_mcp_allowlist_provider,
-    resolve_embedder,
     resolve_object_store_config,
-    resolve_reranker,
     resolve_web_search_client,
 )
 from control_plane.scheduler import TriggerScheduler
@@ -206,6 +206,11 @@ from helix_agent.persistence.memory import (
     SqlMemoryStore,
     SqlMemoryWritebackDLQ,
 )
+from helix_agent.persistence.platform_embedding_config import (
+    InMemoryPlatformEmbeddingConfigStore,
+    PlatformEmbeddingConfigStore,
+    SqlPlatformEmbeddingConfigStore,
+)
 from helix_agent.persistence.platform_secrets import (
     InMemoryPlatformSecretStore,
     PlatformSecretStore,
@@ -258,7 +263,7 @@ from helix_agent.persistence.trigger import (
     TriggerRunStore,
     TriggerStore,
 )
-from helix_agent.protocol import PROVIDER_CATALOG, Provider
+from helix_agent.protocol import PROVIDER_CATALOG
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.runs import (
@@ -501,6 +506,22 @@ def create_app(
         settings=resolved_settings,
         ttl_s=float(resolved_settings.tenant_config_cache_ttl_s),
     )
+    # Stream T (PR B) — effective embedding/rerank config (DB-row wins, env
+    # fallback), TTL-cached like PlatformSecretsService. The dynamic
+    # embedder/reranker read it per call so an admin's change takes effect
+    # without a restart; PR C's write endpoint calls ``invalidate`` for
+    # immediate effect on the writing instance. Lazy (no DB read until the
+    # first getter), so it is safe to build in the synchronous factory.
+    resolved_platform_embedding_config_store = (
+        sql_stores.platform_embedding_config
+        if sql_stores
+        else InMemoryPlatformEmbeddingConfigStore()
+    )
+    resolved_platform_embedding_config_service = PlatformEmbeddingConfigService(
+        store=resolved_platform_embedding_config_store,
+        settings=resolved_settings,
+        ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
+    )
     # Complete the D.2 cycle: TenantAwareRedactor → resolver → service.
     pii_resolver.bind(resolved_tenant_config_service)
     reaper: ReservationReaper | None = (
@@ -656,27 +677,33 @@ def create_app(
                         batch_size=resolved_settings.curation_worker_batch_size,
                     )
                 image_resolver = make_image_resolver(object_store)
-                # Stream J.3 — long-term memory backend for the agent.
-                embedder = await resolve_embedder(
+                # Stream J.3 + Stream T (PR B) — long-term memory backend for
+                # the agent. The embedder reads the live platform embedding
+                # config per call (DB-row wins, env fallback), so an admin's
+                # config change takes effect without a restart (Mini-ADR T-3).
+                # It is ALWAYS a valid object; if embedding is unconfigured the
+                # ``embed`` call raises ``AgentFactoryError`` at use time. The
+                # build-time "memory.long_term needs embedding" gate now lives
+                # in ``make_agent_builder`` (it checks the effective config).
+                embedder = DynamicResolvingEmbedder(
+                    config_service=resolved_platform_embedding_config_service,
                     resolver=credentials_resolver,
                     secret_store=resolved_secret_store,
-                    provider=resolved_settings.embedding_provider,
-                    model=resolved_settings.embedding_model,
-                    supported_providers=resolved_settings.effective_supported_providers,
                 )
                 # Stream K.K6 — memory CRUD endpoint needs the embedder
                 # for the PATCH path (re-embed on content change). GET /
-                # DELETE work without it; the endpoint surfaces 503 on
-                # PATCH when the embedder is unconfigured.
+                # DELETE work without it; the PATCH path surfaces the
+                # embedding-unconfigured error at call time now that the
+                # embedder object is always present.
                 _app.state.embedder = embedder
                 # Stream J.5 — the knowledge retriever backing knowledge_search:
                 # hybrid recall + an optional (deployment-configured) LLM rerank.
-                reranker = await resolve_reranker(
+                # The reranker likewise reads the live rerank config per call and
+                # degrades to identity order when rerank is unconfigured.
+                reranker = DynamicResolvingReranker(
+                    config_service=resolved_platform_embedding_config_service,
                     resolver=credentials_resolver,
                     secret_store=resolved_secret_store,
-                    provider=cast(Provider, resolved_settings.rerank_provider),
-                    model=resolved_settings.rerank_model,
-                    supported_providers=resolved_settings.effective_supported_providers,
                 )
                 knowledge_retriever = make_knowledge_retriever(
                     store=resolved_knowledge_store, embedder=embedder, reranker=reranker
@@ -729,6 +756,14 @@ def create_app(
                     # Stream Q (Mini-ADR Q-5) — chat-LLM key from platform creds
                     # when the manifest model has no api_key_ref.
                     credentials_resolver=credentials_resolver,
+                    # Stream T (PR B) — build-time embedding gate. The dynamic
+                    # embedder is never None, so the orchestrator's
+                    # ``embedder is None`` gate can't fire; the builder checks
+                    # the effective config and rejects a memory.long_term
+                    # manifest when platform embedding is unconfigured.
+                    platform_embedding_config_service=(
+                        resolved_platform_embedding_config_service
+                    ),
                 )
                 # Stream J.5 — the ingestion runner needs the embedder;
                 # without one, knowledge document upload is unavailable.
@@ -865,6 +900,11 @@ def create_app(
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
     app.state.skill_store = resolved_skill_store
+    # Stream T (PR B) — PR C's write endpoint resolves the config service off
+    # app.state to upsert the row + invalidate the cache for immediate effect.
+    app.state.platform_embedding_config_service = (
+        resolved_platform_embedding_config_service
+    )
     # Capability Uplift Sprint #4 — exposed on app.state so a future
     # PR (when skill_resolver is wired into ``make_agent_builder``) can
     # thread it through to ``_load_skills`` + ``SkillViewTool`` for
@@ -1035,6 +1075,7 @@ class _SqlStores:
     api_key: ApiKeyStore
     role_binding: RoleBindingStore
     platform_secret: PlatformSecretStore
+    platform_embedding_config: PlatformEmbeddingConfigStore  # Stream T (PR B)
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
@@ -1220,6 +1261,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         tenant_quota=SqlTenantQuotaStore(session_factory),
         token_reservation=SqlTokenReservationStore(session_factory),
         platform_secret=SqlPlatformSecretStore(session_factory),
+        platform_embedding_config=SqlPlatformEmbeddingConfigStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         feedback=DbFeedbackStore(session_factory),
