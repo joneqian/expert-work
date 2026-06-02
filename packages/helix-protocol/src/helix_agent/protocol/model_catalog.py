@@ -28,6 +28,8 @@ class ModelEntry(BaseModel):
     name: str
     vision: bool = False
     embeddings: bool = False
+    # ``rerank`` marks rerank-capable models for the platform rerank config (Stream T).
+    rerank: bool = False
     context_window: int | None = None
     deprecated: bool = False
 
@@ -86,6 +88,8 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(name="glm-4.6", vision=False, context_window=200_000),
         ModelEntry(name="glm-4.6v", vision=True, context_window=128_000),
         ModelEntry(name="glm-4.5v", vision=True),
+        # Platform embedding model (Stream T, user-specified).
+        ModelEntry(name="embedding-3", embeddings=True),
         ModelEntry(name="glm-4-plus", vision=False, context_window=128_000, deprecated=True),
         ModelEntry(name="glm-4v-plus", vision=True, context_window=8_000, deprecated=True),
         ModelEntry(name="glm-4.1v-thinking", vision=True, context_window=32_000, deprecated=True),
@@ -103,6 +107,10 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ModelEntry(name="qwen3-max", vision=False),
         ModelEntry(name="qwen3-vl-plus", vision=True),
         ModelEntry(name="qwen3-vl-flash", vision=True),
+        # Platform embedding model (Stream T, user-specified).
+        ModelEntry(name="text-embedding-v4", embeddings=True),
+        # Platform rerank model (Stream T, user-specified).
+        ModelEntry(name="qwen3-vl-rerank", rerank=True),
         ModelEntry(name="qwen-max", vision=False, context_window=32_000, deprecated=True),
         ModelEntry(name="qwen-vl-max", vision=True, context_window=32_000, deprecated=True),
     ),

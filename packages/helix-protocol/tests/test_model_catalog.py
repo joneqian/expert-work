@@ -35,3 +35,16 @@ def test_models_for_provider_excludes_deprecated() -> None:
 
 def test_models_for_unknown_provider_is_empty() -> None:
     assert models_for_provider("not-a-provider") == ()
+
+
+def test_required_embedding_and_rerank_models_present() -> None:
+    glm = {e.name: e for e in MODEL_CATALOG["glm"]}
+    qwen = {e.name: e for e in MODEL_CATALOG["qwen"]}
+    assert glm["embedding-3"].embeddings is True
+    assert qwen["text-embedding-v4"].embeddings is True
+    assert qwen["qwen3-vl-rerank"].rerank is True
+
+
+def test_model_entry_has_rerank_flag_defaulting_false() -> None:
+    e = ModelEntry(name="x")
+    assert e.rerank is False
