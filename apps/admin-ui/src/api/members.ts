@@ -86,3 +86,13 @@ export async function resendMember(memberId: string): Promise<ResendResult> {
 export async function revokeMember(memberId: string): Promise<void> {
   await apiClient.delete(`/v1/members/${encodeURIComponent(memberId)}`);
 }
+
+export async function resetMemberPassword(
+  memberId: string,
+  password: string,
+): Promise<void> {
+  await postJson(
+    `/v1/members/${encodeURIComponent(memberId)}/reset-password`,
+    { password },
+  );
+}

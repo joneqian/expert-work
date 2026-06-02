@@ -18,6 +18,7 @@ import {
   Empty,
   Form,
   Input,
+  Modal,
   Popconfirm,
   Segmented,
   Select,
@@ -28,13 +29,14 @@ import {
   Typography,
 } from "antd";
 import type { TableColumnsType } from "antd";
-import { ChevronRight, RefreshCw, Send, Trash2, UserPlus, Users } from "lucide-react";
+import { ChevronRight, KeyRound, RefreshCw, Send, Trash2, UserPlus, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
   inviteMembers,
   listMembers,
   resendMember,
+  resetMemberPassword,
   revokeMember,
   type InvitationItem,
   type MemberList,
@@ -85,6 +87,10 @@ export function SettingsMembers() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [inviteForm] = Form.useForm<InviteForm>();
+
+  const [pwTarget, setPwTarget] = useState<TenantMember | null>(null);
+  const [pw, setPw] = useState("");
+  const [pwErr, setPwErr] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -168,6 +174,29 @@ export function SettingsMembers() {
     [message, refresh, t],
   );
 
+  const closePw = useCallback(() => {
+    setPwTarget(null);
+    setPw("");
+    setPwErr(null);
+  }, []);
+
+  const submitPw = useCallback(async () => {
+    if (pwTarget === null) {
+      return;
+    }
+    if (pw.length < 8) {
+      setPwErr(t("settings_members.set_password_too_short"));
+      return;
+    }
+    try {
+      await resetMemberPassword(pwTarget.id, pw);
+      message.success(t("settings_members.set_password_ok"));
+      closePw();
+    } catch {
+      message.error(t("settings_members.set_password_failed"));
+    }
+  }, [pwTarget, pw, message, t, closePw]);
+
   const columns: TableColumnsType<TenantMember> = useMemo(
     () => [
       {
@@ -237,6 +266,9 @@ export function SettingsMembers() {
         render: (_, record) => {
           const removable =
             record.status === "invited" || record.status === "active";
+          const settable =
+            record.keycloak_user_id !== null &&
+            (record.status === "active" || record.status === "invited");
           return (
             <Space size={6}>
               {record.status === "invited" && (
@@ -247,6 +279,20 @@ export function SettingsMembers() {
                   data-testid={`members-resend-${record.id}`}
                 >
                   {t("settings_members.resend")}
+                </Button>
+              )}
+              {settable && (
+                <Button
+                  size="small"
+                  icon={<KeyRound size={12} strokeWidth={1.75} />}
+                  onClick={() => {
+                    setPwTarget(record);
+                    setPw("");
+                    setPwErr(null);
+                  }}
+                  data-testid={`members-set-password-${record.id}`}
+                >
+                  {t("settings_members.set_password")}
                 </Button>
               )}
               {removable && (
@@ -442,6 +488,58 @@ export function SettingsMembers() {
           </Form.Item>
         </Form>
       </Drawer>
+
+      <Modal
+        open={pwTarget !== null}
+        title={t("settings_members.set_password_title")}
+        onCancel={closePw}
+        data-testid="members-set-password-modal"
+        footer={
+          <Space>
+            <Button onClick={closePw}>{t("common.cancel")}</Button>
+            <Button
+              type="primary"
+              onClick={submitPw}
+              data-testid="members-set-password-submit"
+            >
+              {t("settings_members.set_password_submit")}
+            </Button>
+          </Space>
+        }
+      >
+        <p
+          style={{
+            color: "var(--hx-text-secondary)",
+            fontSize: 13,
+            margin: "0 0 12px",
+          }}
+        >
+          {t("settings_members.set_password_hint")}
+        </p>
+        <Text style={{ fontSize: 13 }}>
+          {t("settings_members.set_password_label")}
+        </Text>
+        <Input.Password
+          data-testid="members-set-password-input"
+          value={pw}
+          onChange={(e) => {
+            setPw(e.target.value);
+            setPwErr(null);
+          }}
+          placeholder={t("settings_members.set_password_placeholder")}
+          autoComplete="new-password"
+          style={{ marginTop: 6 }}
+        />
+        {pwErr !== null && (
+          <Text
+            type="danger"
+            style={{ display: "block", marginTop: 8, fontSize: 12 }}
+            data-testid="members-set-password-error"
+          >
+            {pwErr}
+          </Text>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -485,6 +485,15 @@ export interface TranslationKeys {
     status_revoked: string;
     resend: string;
     remove: string;
+    set_password: string;
+    set_password_title: string;
+    set_password_hint: string;
+    set_password_label: string;
+    set_password_placeholder: string;
+    set_password_submit: string;
+    set_password_ok: string;
+    set_password_failed: string;
+    set_password_too_short: string;
     revoke_confirm_title: string;
     revoke_confirm_body: string;
     suspend_confirm_title: string;
@@ -1326,6 +1335,15 @@ const en: TranslationKeys = {
     status_revoked: "Revoked",
     resend: "Resend",
     remove: "Remove",
+    set_password: "Set password",
+    set_password_title: "Set a temporary password",
+    set_password_hint: "The member must change it on first login.",
+    set_password_label: "Temporary password",
+    set_password_placeholder: "At least 8 characters",
+    set_password_submit: "Set password",
+    set_password_ok: "Password set.",
+    set_password_failed: "Failed to set password",
+    set_password_too_short: "At least 8 characters",
     revoke_confirm_title: "Revoke this invite?",
     revoke_confirm_body:
       "The pending invitation is cancelled and the link stops working immediately.",
