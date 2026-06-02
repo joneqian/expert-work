@@ -871,8 +871,9 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [ ] **U-D 租户管理页**：`/settings/tenants` 列表/管理页（显示名/套餐/状态/id/创建时间 + 「管理」切进去）+ 导航「租户」+ i18n + storybook/e2e/axe
 - [x] **U-E 停用/恢复**：migration `0053_tenant_status`（status 列）+ model/protocol + `POST /v1/tenants/{id}/deactivate`·`/activate` + middleware 403 `TENANT_SUSPENDED` enforcement（`TenantStatusService` 30s TTL 缓存，system_admin 不受影响）+ runs 防御 + 审计（`AuditAction` 单一 StrEnum，非双 Literal）+ 列表页状态徽章&停用/恢复操作（PR E）
 - [x] **U-F 后台设密码**：Keycloak `reset_password`（temporary=true）+ `POST /v1/members/{id}/reset-password`（SecretStr 不落日志、审计无值、`require("user","write")`）+ SDK + 成员页「设密码」modal（Input.Password）+ i18n + 测试（PR F）
+- [x] **U-G IA 收口**：创建租户折进 `/settings/tenants` 抽屉（`CreateTenantDrawer`，保留 tenant_id UUID 校验）+ 删独立创建页/路由/「创建租户」菜单（PR G）
 
-**关键路径** A→B→{C, D, E, F}。每 PR CI-green + 零债 6 条。**完成 = system_admin 全程在 helix 后台管租户**（建→列出→切进去→给首管设临时密码登录→需要时停用），不再碰 Keycloak 控制台。
+**关键路径** A→B→{C, D, E, F}（G 收口）。每 PR CI-green + 零债 6 条。**完成 = system_admin 全程在 helix 后台管租户**（建→列出→切进去→给首管设临时密码登录→需要时停用），不再碰 Keycloak 控制台。
 
 ---
 
