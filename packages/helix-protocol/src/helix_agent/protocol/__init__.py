@@ -144,6 +144,7 @@ from helix_agent.protocol.tenant_config import (
     TenantConfigPatch,
     TenantConfigRecord,
     TenantPlan,
+    TenantStatus,
     TriggerFireScanMode,
 )
 from helix_agent.protocol.tenant_member import (
@@ -281,6 +282,7 @@ __all__ = [
     "TenantPlan",
     "TenantQuotaPatch",
     "TenantQuotaRecord",
+    "TenantStatus",
     "TenantUser",
     "ThreadMeta",
     "ThreadStatus",

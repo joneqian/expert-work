@@ -8,6 +8,7 @@ from uuid import UUID
 
 from helix_agent.persistence.tenant_config.base import (
     TenantConfigAlreadyExistsError,
+    TenantConfigNotFoundError,
     TenantConfigStore,
 )
 from helix_agent.protocol import TenantConfigPatch, TenantConfigRecord, TenantPlan
@@ -173,6 +174,19 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                 row = TenantConfigRecord.model_validate(row.model_dump())
             self._rows[tenant_id] = row
             return row
+
+    async def set_status(
+        self, *, tenant_id: UUID, status: str, actor_id: str
+    ) -> TenantConfigRecord:
+        async with self._lock:
+            existing = self._rows.get(tenant_id)
+            if existing is None:
+                raise TenantConfigNotFoundError(tenant_id=tenant_id)
+            updated = existing.model_copy(
+                update={"status": status, "updated_by": actor_id, "updated_at": _now()}
+            )
+            self._rows[tenant_id] = updated
+            return updated
 
     async def list_all(self, *, limit: int = 50, offset: int = 0) -> list[TenantConfigRecord]:
         async with self._lock:

@@ -68,6 +68,13 @@ class TenantConfigStore(abc.ABC):
         """Insert-or-merge the patch. ``display_name`` is required for first insert."""
 
     @abc.abstractmethod
+    async def set_status(
+        self, *, tenant_id: UUID, status: str, actor_id: str
+    ) -> TenantConfigRecord:
+        """Set tenant lifecycle status ('active'|'suspended'). Raises
+        TenantConfigNotFoundError if the tenant has no config row."""
+
+    @abc.abstractmethod
     async def list_all(self, *, limit: int = 50, offset: int = 0) -> list[TenantConfigRecord]:
         """Return tenant config rows ordered by ``created_at`` (oldest first).
 

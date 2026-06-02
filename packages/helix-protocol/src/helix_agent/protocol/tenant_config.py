@@ -34,6 +34,7 @@ __all__ = [
     "TenantConfigPatch",
     "TenantConfigRecord",
     "TenantPlan",
+    "TenantStatus",
     "TriggerFireScanMode",
 ]
 
@@ -63,6 +64,13 @@ MemoryRecallMode = Literal["hybrid", "vector"]
 # must have a configured credential, or the switch returns 403.
 # See ``docs/streams/STREAM-O-DESIGN.md`` § 2.4 (Mini-ADR O-4).
 CredentialsMode = Literal["platform", "tenant"]
+
+# Stream U — PR E. Tenant lifecycle status.
+# ``active`` (default): the tenant operates normally.
+# ``suspended``: the tenant is administratively disabled; enforcement
+# (rejecting its requests) lands in PR E Task 2. CHECK constraint in
+# migration 0053 mirrors this Literal.
+TenantStatus = Literal["active", "suspended"]
 
 
 class TenantPlan(StrEnum):
@@ -111,6 +119,8 @@ class TenantConfigRecord(BaseModel):
     tenant_id: UUID
     display_name: str
     plan: TenantPlan = TenantPlan.FREE
+    # Stream U — PR E. Tenant lifecycle status ('active'|'suspended').
+    status: TenantStatus = "active"
     model_credentials_ref: dict[str, str] = Field(default_factory=dict)
     mcp_allowlist: list[str] = Field(default_factory=list)
     rate_limit_override: dict[str, Any] = Field(default_factory=dict)

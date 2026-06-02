@@ -227,6 +227,7 @@ def build_tenants_router() -> APIRouter:
                     "tenant_id": str(r.tenant_id),
                     "display_name": r.display_name,
                     "plan": r.plan.value,
+                    "status": r.status,
                     "created_at": r.created_at.isoformat(),
                 }
                 for r in records

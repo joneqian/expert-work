@@ -22,6 +22,9 @@ class TenantConfigRow(Base):
     tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
     plan: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
+    # Stream U — PR E. Tenant lifecycle status ('active'|'suspended').
+    # CHECK constraint in migration 0053 mirrors the Python ``TenantStatus``.
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
     model_credentials_ref: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )

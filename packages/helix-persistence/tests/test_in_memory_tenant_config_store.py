@@ -6,7 +6,10 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence.tenant_config.base import TenantConfigAlreadyExistsError
+from helix_agent.persistence.tenant_config.base import (
+    TenantConfigAlreadyExistsError,
+    TenantConfigNotFoundError,
+)
 from helix_agent.persistence.tenant_config.memory import InMemoryTenantConfigStore
 from helix_agent.protocol import TenantPlan
 
@@ -61,6 +64,38 @@ async def test_create_rejects_existing_tenant() -> None:
     fetched = await store.get(tenant_id=tenant_id)
     assert fetched is not None
     assert fetched.display_name == "First"
+
+
+@pytest.mark.asyncio
+async def test_created_tenant_status_is_active() -> None:
+    store = InMemoryTenantConfigStore()
+    tenant_id = uuid4()
+    record = await store.create(tenant_id=tenant_id, display_name="Acme", actor_id="a")
+    assert record.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_set_status_suspends_tenant() -> None:
+    store = InMemoryTenantConfigStore()
+    tenant_id = uuid4()
+    await store.create(tenant_id=tenant_id, display_name="Acme", actor_id="a")
+
+    updated = await store.set_status(tenant_id=tenant_id, status="suspended", actor_id="ops")
+
+    assert updated.status == "suspended"
+    assert updated.updated_by == "ops"
+    fetched = await store.get(tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.status == "suspended"
+
+
+@pytest.mark.asyncio
+async def test_set_status_unknown_tenant_raises() -> None:
+    store = InMemoryTenantConfigStore()
+    missing = uuid4()
+    with pytest.raises(TenantConfigNotFoundError) as exc:
+        await store.set_status(tenant_id=missing, status="suspended", actor_id="ops")
+    assert exc.value.tenant_id == missing
 
 
 @pytest.mark.asyncio

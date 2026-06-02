@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from helix_agent.persistence.models import TenantConfigRow
 from helix_agent.persistence.tenant_config.base import (
     TenantConfigAlreadyExistsError,
+    TenantConfigNotFoundError,
     TenantConfigStore,
 )
 from helix_agent.persistence.tenant_config.memory import FirstUpsertRequiresDisplayNameError
@@ -23,6 +24,7 @@ from helix_agent.protocol import (
     TenantConfigPatch,
     TenantConfigRecord,
     TenantPlan,
+    TenantStatus,
     Tool,
     TriggerFireScanMode,
 )
@@ -37,6 +39,7 @@ def _row_to_record(row: TenantConfigRow) -> TenantConfigRecord:
         tenant_id=row.tenant_id,
         display_name=row.display_name,
         plan=TenantPlan(row.plan),
+        status=cast(TenantStatus, row.status),
         model_credentials_ref={str(k): str(v) for k, v in row.model_credentials_ref.items()},
         mcp_allowlist=[str(x) for x in row.mcp_allowlist],
         rate_limit_override=dict(row.rate_limit_override),
@@ -267,6 +270,20 @@ class SqlTenantConfigStore(TenantConfigStore):
                 }
             if patch.default_agent_name is not None:
                 existing.default_agent_name = patch.default_agent_name
+            existing.updated_at = _utc_now()
+            existing.updated_by = actor_id
+            await session.commit()
+            await session.refresh(existing)
+            return _row_to_record(existing)
+
+    async def set_status(
+        self, *, tenant_id: UUID, status: str, actor_id: str
+    ) -> TenantConfigRecord:
+        async with self._sf() as session:
+            existing = await session.get(TenantConfigRow, tenant_id)
+            if existing is None:
+                raise TenantConfigNotFoundError(tenant_id=tenant_id)
+            existing.status = status
             existing.updated_at = _utc_now()
             existing.updated_by = actor_id
             await session.commit()

@@ -129,7 +129,14 @@ async def test_list_tenants_system_admin_lists_all(
     assert body["success"] is True
     ids = {t["tenant_id"] for t in body["data"]}
     assert seeded_a in ids and seeded_b in ids
-    assert set(body["data"][0].keys()) == {"tenant_id", "display_name", "plan", "created_at"}
+    assert set(body["data"][0].keys()) == {
+        "tenant_id",
+        "display_name",
+        "plan",
+        "status",
+        "created_at",
+    }
+    assert all(t["status"] == "active" for t in body["data"])
 
 
 @pytest.mark.asyncio
