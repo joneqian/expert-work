@@ -343,6 +343,7 @@ export interface TranslationKeys {
     manage: string;
     failed_to_load: string;
     empty: string;
+    create: string;
   };
   settings_create_tenant: {
     page_title: string;
@@ -1179,6 +1180,7 @@ const en: TranslationKeys = {
     manage: "Manage",
     failed_to_load: "Failed to load tenants",
     empty: "No tenants yet — create one from Create Tenant.",
+    create: "Create Tenant",
   },
   settings_create_tenant: {
     page_title: "Create Tenant",
