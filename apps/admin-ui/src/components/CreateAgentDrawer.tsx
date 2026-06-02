@@ -10,7 +10,7 @@
  * On success the drawer closes and the parent decides what to do
  * (refresh list + optionally navigate to the new agent's detail page).
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Drawer, Space, Typography } from "antd";
 import { Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -18,35 +18,15 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../api/client";
 import { createAgent, type AgentDetailResponse } from "../api/agents";
 import { ManifestEditor } from "./manifest-editor";
+import { BASE_MANIFEST_YAML, buildDefaultManifest } from "./manifest-editor/defaults";
+import { loadModelCatalog } from "./manifest-editor/catalog";
+import { dumpYaml } from "./manifest-editor/yaml";
 
 const { Text } = Typography;
 
-/** Blank canvas — minimal valid AgentSpec shape. The user is expected
- *  to edit ``name`` / ``version`` / ``model`` before saving. Kept in
- *  sync with the integration-test fixtures so a copy-paste into the
- *  drawer always yields a valid manifest. */
-export const DEFAULT_AGENT_YAML = `apiVersion: helix.io/v1
-kind: Agent
-metadata:
-  name: my-agent
-  version: "1.0.0"
-  tenant: my-tenant
-spec:
-  tenant_config: {}
-  model:
-    provider: anthropic
-    name: claude-sonnet-4-6
-  system_prompt:
-    template: "You are a helpful assistant."
-  sandbox:
-    resources: { cpu: "1.0", memory: "1Gi" }
-    network:
-      egress: proxy
-      allowlist: []
-    filesystem:
-      readonly_root: true
-      writable: ["/workspace"]
-`;
+/** Re-exported for back-compat; the drawer now seeds a capability-adaptive
+ *  default at open time (falls back to this base). */
+export const DEFAULT_AGENT_YAML = BASE_MANIFEST_YAML;
 
 interface CreateAgentDrawerProps {
   open: boolean;
@@ -58,12 +38,33 @@ interface CreateAgentDrawerProps {
 
 export function CreateAgentDrawer({ open, onClose, onCreated }: CreateAgentDrawerProps) {
   const { t } = useTranslation();
-  const [buffer, setBuffer] = useState<string>(DEFAULT_AGENT_YAML);
+  const [buffer, setBuffer] = useState<string>(BASE_MANIFEST_YAML);
+  const [initialYaml, setInitialYaml] = useState<string>(BASE_MANIFEST_YAML);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    loadModelCatalog().then(
+      (catalog) => {
+        if (!alive) return;
+        const seeded = dumpYaml(buildDefaultManifest(catalog));
+        setInitialYaml(seeded);
+        setBuffer(seeded);
+      },
+      () => {
+        /* keep BASE_MANIFEST_YAML seed on failure */
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
   const reset = useCallback(() => {
-    setBuffer(DEFAULT_AGENT_YAML);
+    setBuffer(BASE_MANIFEST_YAML);
+    setInitialYaml(BASE_MANIFEST_YAML);
     setError(null);
     setSubmitting(false);
   }, []);
@@ -143,7 +144,12 @@ export function CreateAgentDrawer({ open, onClose, onCreated }: CreateAgentDrawe
         />
       )}
 
-      <ManifestEditor mode="create" initialYaml={DEFAULT_AGENT_YAML} onChange={setBuffer} />
+      <ManifestEditor
+        key={initialYaml}
+        mode="create"
+        initialYaml={initialYaml}
+        onChange={setBuffer}
+      />
     </Drawer>
   );
 }

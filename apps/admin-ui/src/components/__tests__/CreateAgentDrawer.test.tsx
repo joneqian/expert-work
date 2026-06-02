@@ -22,7 +22,9 @@ vi.mock("@monaco-editor/react", () => {
 
 import * as agentsSdk from "../../api/agents";
 import * as schemaSdk from "../../api/manifest_schema";
+import * as catalogSdk from "../../api/model_catalog";
 import { __resetSchemaCacheForTest } from "../manifest-editor/schema";
+import { __resetCatalogCacheForTest } from "../manifest-editor/catalog";
 import { ApiError } from "../../api/client";
 import { CreateAgentDrawer } from "../CreateAgentDrawer";
 
@@ -38,6 +40,23 @@ beforeEach(() => {
   vi.spyOn(schemaSdk, "fetchAgentSchema").mockResolvedValue({
     type: "object",
     properties: { metadata: { type: "object", properties: { name: { type: "string" } } } },
+  });
+  __resetCatalogCacheForTest();
+  vi.spyOn(catalogSdk, "fetchModelCatalog").mockResolvedValue({
+    providers: [
+      {
+        provider: "deepseek",
+        models: [
+          {
+            name: "deepseek-v4-pro",
+            vision: false,
+            embeddings: false,
+            context_window: 1000000,
+            deprecated: false,
+          },
+        ],
+      },
+    ],
   });
   onClose.mockClear();
   onCreated.mockClear();
@@ -75,5 +94,14 @@ describe("CreateAgentDrawer", () => {
     await user.click(screen.getByTestId("create-agent-submit"));
     const alert = await screen.findByTestId("create-agent-error");
     expect(alert).toHaveTextContent("MANIFEST_DUPLICATE");
+  });
+
+  it("seeds the editor with the first configured provider's model", async () => {
+    const user = userEvent.setup();
+    render(<CreateAgentDrawer open onClose={onClose} onCreated={onCreated} />);
+    await screen.findByTestId("manifest-editor-create");
+    await user.click(screen.getByTestId("manifest-tab-yaml"));
+    const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
+    await waitFor(() => expect(ta.value).toContain("provider: deepseek"));
   });
 });
