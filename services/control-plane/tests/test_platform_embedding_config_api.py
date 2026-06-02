@@ -96,3 +96,130 @@ async def test_get_returns_selection_and_options(
     configured = {opt["provider"] for opt in data["available_embedding"]}
     assert configured == {"qwen"}
     assert all(opt["provider"] == "qwen" for opt in data["available_rerank"])
+
+
+@pytest.mark.asyncio
+async def test_put_embedding_only_then_get_reflects(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    resp = await client.put(
+        "/v1/platform/embedding-config",
+        headers=_headers(admin),
+        json={"embedding_provider": "qwen", "embedding_model": "text-embedding-v4"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["success"] is True
+    assert body["error"] is None
+    assert body["data"]["embedding"] == {"provider": "qwen", "model": "text-embedding-v4"}
+    # A DB row exists now → rerank is off (no fallback to env once a row exists).
+    assert body["data"]["rerank"] is None
+
+    get_resp = await client.get("/v1/platform/embedding-config", headers=_headers(admin))
+    assert get_resp.status_code == 200, get_resp.text
+    get_data = get_resp.json()["data"]
+    assert get_data["embedding"] == {"provider": "qwen", "model": "text-embedding-v4"}
+    assert get_data["rerank"] is None
+
+
+@pytest.mark.asyncio
+async def test_put_emits_audit_without_secret(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    resp = await client.put(
+        "/v1/platform/embedding-config",
+        headers=_headers(admin),
+        json={"embedding_provider": "qwen", "embedding_model": "text-embedding-v4"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    store = client._transport.app.state.audit_logger._store  # type: ignore[attr-defined]
+    entries = list(store._rows.values())
+    matched = [e for e in entries if e.action.value == "platform_embedding_config:updated"]
+    assert matched, "expected a PLATFORM_EMBEDDING_CONFIG_UPDATED audit row"
+    serialized = matched[0].model_dump_json()
+    assert "secret://" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_put_embedding_provider_key_missing(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    resp = await client.put(
+        "/v1/platform/embedding-config",
+        headers=_headers(admin),
+        json={"embedding_provider": "openai", "embedding_model": "text-embedding-3-large"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "EMBEDDING_PROVIDER_KEY_MISSING"
+
+
+@pytest.mark.asyncio
+async def test_put_invalid_embedding_model(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    # qwen3.7-max is a chat model (not an embedding model).
+    resp = await client.put(
+        "/v1/platform/embedding-config",
+        headers=_headers(admin),
+        json={"embedding_provider": "qwen", "embedding_model": "qwen3.7-max"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "INVALID_EMBEDDING_MODEL"
+
+
+@pytest.mark.asyncio
+async def test_put_embedding_and_rerank(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    resp = await client.put(
+        "/v1/platform/embedding-config",
+        headers=_headers(admin),
+        json={
+            "embedding_provider": "qwen",
+            "embedding_model": "text-embedding-v4",
+            "rerank_provider": "qwen",
+            "rerank_model": "qwen3-vl-rerank",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["embedding"] == {"provider": "qwen", "model": "text-embedding-v4"}
+    assert data["rerank"] == {"provider": "qwen", "model": "qwen3-vl-rerank"}
+
+
+@pytest.mark.asyncio
+async def test_put_invalid_rerank_pair(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    resp = await client.put(
+        "/v1/platform/embedding-config",
+        headers=_headers(admin),
+        json={
+            "embedding_provider": "qwen",
+            "embedding_model": "text-embedding-v4",
+            "rerank_provider": "qwen",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "INVALID_RERANK_PAIR"
+
+
+@pytest.mark.asyncio
+async def test_put_non_admin_forbidden(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, _ = admin_client
+    resp = await client.put(
+        "/v1/platform/embedding-config",
+        headers=_headers(uuid4()),
+        json={"embedding_provider": "qwen", "embedding_model": "text-embedding-v4"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "PLATFORM_SCOPE_FORBIDDEN"
