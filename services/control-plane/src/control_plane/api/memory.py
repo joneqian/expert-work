@@ -49,6 +49,7 @@ from helix_agent.persistence.memory import MemoryStore
 from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.protocol import AuditAction, MemoryItem, Principal
 from helix_agent.runtime.audit.logger import AuditLogger
+from orchestrator import AgentFactoryError
 
 logger = logging.getLogger("helix.control_plane.api.memory")
 
@@ -217,12 +218,16 @@ def build_memory_router() -> APIRouter:
             actor_id=principal.subject_id,
             audit=audit,
         )
-        embedder = getattr(request.app.state, "embedder", None)
-        if embedder is None:
-            # Re-embedding is required to keep recall ranking honest;
-            # without it the row would carry a vector for the old
-            # content and silently mis-rank. Refuse rather than silently
-            # update only the text.
+        # Stream T (PR B) — the embedder is always a ``DynamicResolvingEmbedder``
+        # object now; it resolves the live platform embedding config at call time
+        # and raises ``AgentFactoryError`` when embedding is unconfigured.
+        # Re-embedding is required to keep recall ranking honest; without it the
+        # row would carry a vector for the old content and silently mis-rank.
+        # Catch the unconfigured failure and surface the same typed 503 as before.
+        embedder = request.app.state.embedder
+        try:
+            vectors = await embedder.embed([payload.content], tenant_id=tenant_id)
+        except AgentFactoryError as exc:
             raise HTTPException(
                 status_code=503,
                 detail={
@@ -233,9 +238,8 @@ def build_memory_router() -> APIRouter:
                         "HELIX_AGENT_EMBEDDING_MODEL"
                     ),
                 },
-            )
+            ) from exc
 
-        vectors = await embedder.embed([payload.content], tenant_id=tenant_id)
         updated = await store.update_content(
             tenant_id=tenant_id,
             user_id=user_id,

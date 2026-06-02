@@ -765,12 +765,25 @@ def create_app(
                         resolved_platform_embedding_config_service
                     ),
                 )
-                # Stream J.5 — the ingestion runner needs the embedder;
-                # without one, knowledge document upload is unavailable.
-                if embedder is not None:
-                    _app.state.knowledge_ingestion_runner = KnowledgeIngestionRunner(
-                        store=resolved_knowledge_store, embedder=embedder
-                    )
+                # Stream T (PR B) — these background workers (ingestion runner,
+                # DLQ worker, consolidator) are ALWAYS started. ``embedder`` is a
+                # ``DynamicResolvingEmbedder`` that resolves the live platform
+                # embedding config at use-time, so it is never None; the previous
+                # ``if embedder is not None`` guards were dead. The build-time
+                # gate in ``make_agent_builder`` rejects a ``memory.long_term``
+                # agent when embedding is unconfigured, so no memory data (hence
+                # no DLQ rows) can exist without embedding configured — making it
+                # safe to always start these workers. An ``embed`` call against an
+                # unconfigured embedding raises ``AgentFactoryError``, which each
+                # worker loop already catches and backs off on. We deliberately do
+                # NOT gate on a startup config check: that would break "config
+                # takes effect without a restart" (resolve-at-use-time is intended).
+                #
+                # Stream J.5 — the ingestion runner needs the embedder to embed
+                # uploaded knowledge documents.
+                _app.state.knowledge_ingestion_runner = KnowledgeIngestionRunner(
+                    store=resolved_knowledge_store, embedder=embedder
+                )
             if reaper is not None:
                 reaper.start()
             if scheduler is not None:
@@ -782,22 +795,23 @@ def create_app(
             if curation_worker is not None:
                 curation_worker.start()
                 _app.state.curation_worker = curation_worker
-            # Stream K.K7 — start the DLQ retry worker only when an
-            # embedder is available (the worker re-embeds before write;
-            # without one it would dead-letter every row immediately).
-            memory_dlq_worker: MemoryDLQWorker | None = None
-            if embedder is not None:
-                memory_dlq_worker = MemoryDLQWorker(
-                    dlq=resolved_memory_dlq,
-                    memory_store=resolved_memory_store,
-                    embedder=embedder,
-                    interval_s=resolved_settings.memory_dlq_worker_interval_s,
-                )
-                memory_dlq_worker.start()
-                _app.state.memory_dlq_worker = memory_dlq_worker
+            # Stream K.K7 — the DLQ retry worker re-embeds failed writebacks
+            # before re-attempting the store write. Always started (see the
+            # always-on note above): the embedder is the always-present dynamic
+            # embedder, and DLQ rows can only exist for a memory.long_term agent,
+            # which the build-time gate already requires embedding for.
+            memory_dlq_worker = MemoryDLQWorker(
+                dlq=resolved_memory_dlq,
+                memory_store=resolved_memory_store,
+                embedder=embedder,
+                interval_s=resolved_settings.memory_dlq_worker_interval_s,
+            )
+            memory_dlq_worker.start()
+            _app.state.memory_dlq_worker = memory_dlq_worker
             # Capability Uplift Sprint #7 (Mini-ADRs U-34 / U-39) —
-            # MemoryConsolidator. Starts only when an embedder is
-            # available (needed to embed the consolidated summary text).
+            # MemoryConsolidator. Started whenever the scheduler is enabled
+            # (the always-present dynamic embedder embeds the consolidated
+            # summary text — see the always-on note above).
             #
             # Stream O Mini-ADR O-6 — the aux model now flows through
             # the production :class:`LLMRouterAuxModelAdapter`, which
@@ -809,7 +823,7 @@ def create_app(
             # supported_providers but no platform secret → can't reach
             # the LLM yet → ship the worker idle rather than crash).
             memory_consolidator: MemoryConsolidator | None = None
-            if enable_scheduler and embedder is not None:
+            if enable_scheduler:
                 default_provider = resolved_settings.memory_consolidator_default_aux_provider
                 # Reuse the CredentialsResolver built above (Mini-ADR O-9).
                 aux_model: ConsolidatorAuxModel
@@ -948,9 +962,12 @@ def create_app(
     app.state.agent_runtime = resolved_agent_runtime
     # Stream K.K6 — memory CRUD endpoints. ``memory_repo`` is the store
     # already resolved above (SQL when ``store_backend == "sql"``, else
-    # InMemory); ``embedder`` is populated in the lifespan (may stay
-    # ``None`` when no embedding key is configured — the PATCH path
-    # surfaces a 503 in that case, GET / DELETE are unaffected).
+    # InMemory). In normal operation the lifespan sets ``app.state.embedder``
+    # to the always-present ``DynamicResolvingEmbedder``; the PATCH path catches
+    # the embedding-unconfigured ``AgentFactoryError`` at call time and returns a
+    # 503. GET / DELETE never touch the embedder. The ``None`` fallback below
+    # only applies when a runtime is injected (tests) and the lifespan wiring
+    # block above was skipped.
     app.state.memory_repo = resolved_memory_store
     if not hasattr(app.state, "embedder"):
         app.state.embedder = None

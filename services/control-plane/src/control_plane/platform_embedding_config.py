@@ -71,6 +71,9 @@ class PlatformEmbeddingConfigService:
             await self._reload()
 
     async def _reload(self) -> None:
+        # No ``bypass_rls_session()`` here (unlike ``PlatformSecretsService``):
+        # ``platform_embedding_config`` is a tenant-less platform table with no
+        # RLS policy (migration 0051), so an RLS-context wrapper is unnecessary.
         row = await self._store.get()
         if row is not None:
             self._embedding = self._pair(row.embedding_provider, row.embedding_model)

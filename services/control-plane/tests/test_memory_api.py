@@ -14,6 +14,7 @@ from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from helix_agent.persistence import InMemoryMemoryStore, InMemoryTenantUserStore
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.protocol import AuditAction, AuditQuery, MemoryItem
+from orchestrator import AgentFactoryError
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -32,6 +33,16 @@ class _StubEmbedder:
     async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
         del tenant_id
         return [(float(len(t)), 0.0, 0.0) for t in texts]
+
+
+class _UnconfiguredEmbedder:
+    """Mirrors ``DynamicResolvingEmbedder`` when platform embedding is
+    unconfigured: the object is always present, but ``embed`` raises
+    ``AgentFactoryError`` at call time (Stream T PR B)."""
+
+    async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
+        del texts, tenant_id
+        raise AgentFactoryError("embedding is unconfigured")
 
 
 def _settings() -> Settings:
@@ -314,10 +325,11 @@ async def test_patch_accepts_legitimate_content(
 
 
 @pytest.mark.asyncio
-async def test_patch_without_embedder_returns_503() -> None:
-    """Re-embedding is mandatory — without an embedder, refuse rather
-    than silently update only the text (which would corrupt recall
-    ranking)."""
+async def test_patch_with_unconfigured_embedding_returns_503() -> None:
+    """Re-embedding is mandatory — when platform embedding is unconfigured
+    the always-present dynamic embedder raises ``AgentFactoryError`` at call
+    time; the PATCH route catches it and returns the typed 503 rather than
+    silently updating only the text (which would corrupt recall ranking)."""
     users, store, _, mem_id = await _seed()
     app = create_app(
         settings=_settings(),
@@ -326,7 +338,9 @@ async def test_patch_without_embedder_returns_503() -> None:
         audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
         jwt_verifier=build_test_jwt_verifier(),
     )
-    # No app.state.embedder assignment — defaults to None.
+    # Embedder is always present (Stream T PR B); an unconfigured embedding
+    # surfaces via ``AgentFactoryError`` from ``embed`` at call time.
+    app.state.embedder = _UnconfiguredEmbedder()
     transport = ASGITransport(app=app)
     async with AsyncClient(
         transport=transport, base_url="http://cp.test", headers=_headers()
