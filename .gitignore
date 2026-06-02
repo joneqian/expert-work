@@ -27,3 +27,7 @@ apps/*/*.tsbuildinfo
 apps/admin-ui/storybook-static/
 apps/admin-ui/playwright-report/
 apps/admin-ui/test-results/
+
+# Local docker-compose overrides (per-machine port remaps etc.)
+docker-compose.override.yml
+infra/docker-compose.override.yml

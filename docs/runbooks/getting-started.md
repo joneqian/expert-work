@@ -87,6 +87,42 @@ curl -sS http://localhost:8000/healthz/ready | python3 -m json.tool
 
 **【实跑回填】** —— 首次起栈实际耗时、`docker compose ps` 真实输出、健康检查结果、坑。
 
+### 2.1 本机 override(端口冲突 + 浏览器 OIDC 登录)
+
+实跑发现两个 **per-machine** 问题,需要一个本地 `docker compose` override 解决。该文件
+**被 git 忽略**(每台机器不同),`docker compose` 会自动加载,所以**首次起栈前手动建**
+`infra/docker-compose.override.yml`:
+
+```yaml
+# infra/docker-compose.override.yml —— 本机专用,git 忽略,docker compose 自动加载。
+services:
+  # 1) 本机已有宿主 redis 占着 6379;helix 走 compose 网络(redis://redis:6379)通信,
+  #    宿主端口映射纯属 dev 便利,丢掉它避免 bind 冲突。!override 替换(而非拼接)base 的 ports。
+  redis:
+    ports: !override []
+  # 2) 浏览器 OIDC 登录:Keycloak(start-dev 无固定 hostname)按浏览器用的 URL 签 iss
+  #    (http://localhost:8080),而后端默认 oidc_issuer 是容器 URL(http://keycloak:8080)。
+  #    把校验器期望的 issuer 指到 localhost,但 JWKS 仍从容器内可达的 keycloak 主机名取。
+  #    admin-ui 发的是 Keycloak **ID token**,其 aud = SPA client id(非 API service client),
+  #    所以 audience 要同时接受两者(service-account audience 留给 M2M 调用)。
+  control-plane-blue:
+    environment:
+      HELIX_AGENT_OIDC_ISSUER: http://localhost:8080/realms/helix-agent
+      HELIX_AGENT_OIDC_JWKS_URI: http://keycloak:8080/realms/helix-agent/protocol/openid-connect/certs
+      HELIX_AGENT_OIDC_AUDIENCE: '["helix-agent-api-internal","helix-agent-admin-ui"]'
+```
+
+admin-ui(Vite dev server,如果你单独跑前端)也要知道 OIDC 端点 —— 建
+`apps/admin-ui/.env.development.local`(同样 git 忽略):
+
+```sh
+VITE_OIDC_ISSUER=http://localhost:8080/realms/helix-agent
+VITE_OIDC_CLIENT_ID=helix-agent-admin-ui
+```
+
+> 没有 ①,起栈会因 6379 端口冲突起不来(或你本机 redis 没占 6379 就不用)。
+> 没有 ②,浏览器能登 Keycloak 但回跳后端会 `AUTH_INVALID_TOKEN`(issuer/audience 不匹配)。
+
 ---
 
 ## 3. 种入 Keycloak Admin secret(Stream R)
