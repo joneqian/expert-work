@@ -20,9 +20,19 @@ vi.mock("@monaco-editor/react", () => {
   return { default: Editor };
 });
 
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => mockNavigate,
+}));
+
+vi.mock("../../api/platform_embedding_config", () => ({
+  getPlatformEmbeddingStatus: vi.fn(),
+}));
+
 import * as agentsSdk from "../../api/agents";
 import * as schemaSdk from "../../api/manifest_schema";
 import * as catalogSdk from "../../api/model_catalog";
+import { getPlatformEmbeddingStatus } from "../../api/platform_embedding_config";
 import { __resetSchemaCacheForTest } from "../manifest-editor/schema";
 import { __resetCatalogCacheForTest } from "../manifest-editor/catalog";
 import { ApiError } from "../../api/client";
@@ -58,6 +68,8 @@ beforeEach(() => {
       },
     ],
   });
+  vi.mocked(getPlatformEmbeddingStatus).mockResolvedValue({ configured: true });
+  mockNavigate.mockClear();
   onClose.mockClear();
   onCreated.mockClear();
 });
@@ -103,5 +115,37 @@ describe("CreateAgentDrawer", () => {
     await user.click(screen.getByTestId("manifest-tab-yaml"));
     const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
     await waitFor(() => expect(ta.value).toContain("provider: deepseek"));
+  });
+
+  it("blocks creation and shows the gate when platform embedding is unconfigured", async () => {
+    vi.mocked(getPlatformEmbeddingStatus).mockResolvedValue({ configured: false });
+    render(<CreateAgentDrawer open onClose={onClose} onCreated={onCreated} />);
+
+    await screen.findByTestId("create-agent-embedding-gate");
+    expect(screen.queryByTestId("manifest-editor-create")).not.toBeInTheDocument();
+    expect(screen.getByTestId("create-agent-submit")).toBeDisabled();
+  });
+
+  it("does not show the gate when platform embedding is configured", async () => {
+    vi.mocked(getPlatformEmbeddingStatus).mockResolvedValue({ configured: true });
+    render(<CreateAgentDrawer open onClose={onClose} onCreated={onCreated} />);
+
+    await screen.findByTestId("manifest-editor-create");
+    await waitFor(() =>
+      expect(screen.queryByTestId("create-agent-embedding-gate")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("create-agent-submit")).toBeEnabled();
+  });
+
+  it("navigates to platform settings and closes when the gate CTA is clicked", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getPlatformEmbeddingStatus).mockResolvedValue({ configured: false });
+    render(<CreateAgentDrawer open onClose={onClose} onCreated={onCreated} />);
+
+    await screen.findByTestId("create-agent-embedding-gate");
+    await user.click(screen.getByTestId("create-agent-embedding-cta"));
+
+    expect(mockNavigate).toHaveBeenCalledWith("/settings/platform");
+    expect(onClose).toHaveBeenCalled();
   });
 });

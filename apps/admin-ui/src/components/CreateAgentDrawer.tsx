@@ -14,8 +14,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Drawer, Space, Typography } from "antd";
 import { Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 import { ApiError } from "../api/client";
+import { getPlatformEmbeddingStatus } from "../api/platform_embedding_config";
 import { createAgent, type AgentDetailResponse } from "../api/agents";
 import { ManifestEditor } from "./manifest-editor";
 import { BASE_MANIFEST_YAML, buildDefaultManifest } from "./manifest-editor/defaults";
@@ -38,14 +40,25 @@ interface CreateAgentDrawerProps {
 
 export function CreateAgentDrawer({ open, onClose, onCreated }: CreateAgentDrawerProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [buffer, setBuffer] = useState<string>(BASE_MANIFEST_YAML);
   const [initialYaml, setInitialYaml] = useState<string>(BASE_MANIFEST_YAML);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [embeddingConfigured, setEmbeddingConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!open) return;
     let alive = true;
+    setEmbeddingConfigured(null);
+    getPlatformEmbeddingStatus().then(
+      (s) => {
+        if (alive) setEmbeddingConfigured(s.configured);
+      },
+      () => {
+        if (alive) setEmbeddingConfigured(true);
+      }, // fail-open: a transient status-fetch error must not block legitimate creation; the control-plane build-time embedder gate is the hard backstop
+    );
     loadModelCatalog().then(
       (catalog) => {
         if (!alive) return;
@@ -94,6 +107,8 @@ export function CreateAgentDrawer({ open, onClose, onCreated }: CreateAgentDrawe
     }
   }, [buffer, onCreated, reset]);
 
+  const blocked = embeddingConfigured === false;
+
   return (
     <Drawer
       open={open}
@@ -121,6 +136,7 @@ export function CreateAgentDrawer({ open, onClose, onCreated }: CreateAgentDrawe
             icon={<Plus size={14} strokeWidth={1.75} />}
             onClick={handleSubmit}
             loading={submitting}
+            disabled={submitting || blocked}
             data-testid="create-agent-submit"
           >
             {t("create_agent.submit")}
@@ -144,16 +160,38 @@ export function CreateAgentDrawer({ open, onClose, onCreated }: CreateAgentDrawe
         />
       )}
 
-      {/* ManifestEditor seeds from initialYaml only at mount, so key-remount it
+      {blocked ? (
+        <div data-testid="create-agent-embedding-gate">
+          <Alert
+            type="warning"
+            showIcon
+            message={t("create_agent.embedding_required_title")}
+            description={t("create_agent.embedding_required_desc")}
+            style={{ marginBottom: 12 }}
+          />
+          <Button
+            type="primary"
+            data-testid="create-agent-embedding-cta"
+            onClick={() => {
+              onClose();
+              navigate("/settings/platform");
+            }}
+          >
+            {t("create_agent.embedding_required_cta")}
+          </Button>
+        </div>
+      ) : (
+        /* ManifestEditor seeds from initialYaml only at mount, so key-remount it
           when the catalog-derived default arrives. The brief pre-catalog window
           (one cached round-trip on a freshly-opened drawer) discards edits made
-          before the seed lands — deliberate; the seed is the intended start. */}
-      <ManifestEditor
-        key={initialYaml}
-        mode="create"
-        initialYaml={initialYaml}
-        onChange={setBuffer}
-      />
+          before the seed lands — deliberate; the seed is the intended start. */
+        <ManifestEditor
+          key={initialYaml}
+          mode="create"
+          initialYaml={initialYaml}
+          onChange={setBuffer}
+        />
+      )}
     </Drawer>
   );
 }
