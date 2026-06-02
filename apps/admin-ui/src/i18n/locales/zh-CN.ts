@@ -40,7 +40,6 @@ const zhCN: TranslationKeys = {
     skills: "技能",
     triggers: "触发器",
     tenants: "租户",
-    create_tenant: "创建租户",
     platform_credentials: "平台凭证",
     api_keys: "API 密钥",
     credentials: "凭证",
@@ -355,6 +354,7 @@ const zhCN: TranslationKeys = {
     manage: "管理",
     failed_to_load: "租户列表加载失败",
     empty: "还没有租户——去「创建租户」新建一个。",
+    create: "创建租户",
   },
   settings_create_tenant: {
     page_title: "创建租户",

@@ -1,27 +1,19 @@
 /**
- * Create-Tenant form tests — tenant_id client-side UUID validation.
+ * CreateTenantDrawer tests — ported from SettingsCreateTenant.test.tsx.
  *
- * The backend ``tenant_id`` is a UUID (optional; server auto-generates).
- * A human-typed slug like "leyi-company" used to sail through to the API
- * and bounce back as a raw 422. These tests pin the client-side guard:
- * blank → omitted, valid UUID → forwarded, slug → blocked before the POST.
+ * Pins the PR #370 tenant_id client-side UUID validation after folding the
+ * standalone Create-Tenant page into a drawer: blank → omitted, valid UUID →
+ * forwarded, slug → blocked before the POST. Also asserts ``onCreated`` fires
+ * with the created record on success so the parent list can refresh.
  */
-import { describe, expect, it, beforeEach } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { App } from "antd";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n";
 
-import { SettingsCreateTenant } from "../SettingsCreateTenant";
-import { AuthProvider } from "../../auth/AuthContext";
-import { apiClient, setStoredToken } from "../../api/client";
-
-function makeJwt(payload: Record<string, unknown>): string {
-  const header = btoa(JSON.stringify({ alg: "none", typ: "JWT" }));
-  const body = btoa(JSON.stringify(payload));
-  return `${header}.${body}.`;
-}
+import { CreateTenantDrawer } from "../CreateTenantDrawer";
+import { apiClient } from "../../api/client";
 
 interface PostCall {
   body: Record<string, unknown>;
@@ -39,7 +31,11 @@ function installAdapter(): void {
         typeof config.data === "string" ? JSON.parse(config.data) : (config.data ?? {});
       postCalls.push({ body });
       return Promise.resolve({
-        data: { success: true, data: { tenant_id: "11111111-1111-1111-1111-111111111111" }, error: null },
+        data: {
+          success: true,
+          data: { tenant_id: "11111111-1111-1111-1111-111111111111" },
+          error: null,
+        },
         status: 201,
         statusText: "Created",
         headers: {},
@@ -58,28 +54,23 @@ function installAdapter(): void {
   };
 }
 
-function renderForm(): void {
-  // system_admin so the form (not the not-admin alert) renders.
-  setStoredToken(makeJwt({ sub: "u1", tenant_id: "t1", roles: ["admin", "system_admin"] }));
+function renderDrawer(onCreated = vi.fn()): { onCreated: ReturnType<typeof vi.fn> } {
   render(
-    <MemoryRouter>
-      <AuthProvider>
-        <App>
-          <SettingsCreateTenant />
-        </App>
-      </AuthProvider>
-    </MemoryRouter>,
+    <App>
+      <CreateTenantDrawer open onClose={vi.fn()} onCreated={onCreated} />
+    </App>,
   );
+  return { onCreated };
 }
 
 beforeEach(() => {
   installAdapter();
 });
 
-describe("SettingsCreateTenant tenant_id validation", () => {
+describe("CreateTenantDrawer tenant_id validation", () => {
   it("blocks a non-UUID tenant_id and does not POST", async () => {
     const user = userEvent.setup();
-    renderForm();
+    renderDrawer();
 
     await user.type(screen.getByTestId("ct-display-name"), "乐毅大公司");
     await user.type(screen.getByTestId("ct-tenant-id"), "leyi-company");
@@ -93,7 +84,7 @@ describe("SettingsCreateTenant tenant_id validation", () => {
 
   it("omits tenant_id when left blank (server auto-generates)", async () => {
     const user = userEvent.setup();
-    renderForm();
+    renderDrawer();
 
     await user.type(screen.getByTestId("ct-display-name"), "乐毅大公司");
     await user.click(screen.getByTestId("ct-submit"));
@@ -105,7 +96,7 @@ describe("SettingsCreateTenant tenant_id validation", () => {
 
   it("forwards a valid UUID tenant_id", async () => {
     const user = userEvent.setup();
-    renderForm();
+    renderDrawer();
     const uuid = "123e4567-e89b-12d3-a456-426614174000";
 
     await user.type(screen.getByTestId("ct-display-name"), "乐毅大公司");
@@ -114,5 +105,18 @@ describe("SettingsCreateTenant tenant_id validation", () => {
 
     await waitFor(() => expect(postCalls).toHaveLength(1));
     expect(postCalls[0].body.tenant_id).toBe(uuid);
+  });
+
+  it("fires onCreated with the created record on success", async () => {
+    const user = userEvent.setup();
+    const { onCreated } = renderDrawer();
+
+    await user.type(screen.getByTestId("ct-display-name"), "乐毅大公司");
+    await user.click(screen.getByTestId("ct-submit"));
+
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(onCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ tenant_id: "11111111-1111-1111-1111-111111111111" }),
+    );
   });
 });

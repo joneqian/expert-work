@@ -109,6 +109,17 @@ test("manage navigates to tenant-config", async ({ page }) => {
   await expect(page).toHaveURL(/\/settings\/tenant-config/);
 });
 
+test("create button opens the create-tenant drawer", async ({ page }) => {
+  await login(page);
+  await page.goto("/settings/tenants");
+
+  await expect(page.getByTestId("st-table")).toBeVisible();
+  await expect(page.getByTestId("create-tenant-drawer")).toHaveCount(0);
+  await page.getByTestId("tenants-create").click();
+  await expect(page.getByTestId("create-tenant-drawer")).toBeVisible();
+  await expect(page.getByTestId("ct-display-name")).toBeVisible();
+});
+
 test("settings/tenants passes axe", async ({ page }) => {
   await login(page);
   await page.goto("/settings/tenants");

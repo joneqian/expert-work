@@ -38,7 +38,6 @@ export interface TranslationKeys {
     skills: string;
     triggers: string;
     tenants: string;
-    create_tenant: string;
     platform_credentials: string;
     api_keys: string;
     credentials: string;
@@ -343,6 +342,7 @@ export interface TranslationKeys {
     manage: string;
     failed_to_load: string;
     empty: string;
+    create: string;
   };
   settings_create_tenant: {
     page_title: string;
@@ -855,7 +855,6 @@ const en: TranslationKeys = {
     skills: "Skills",
     triggers: "Triggers",
     tenants: "Tenants",
-    create_tenant: "Create Tenant",
     platform_credentials: "Platform Credentials",
     api_keys: "API Keys",
     credentials: "Credentials",
@@ -1179,6 +1178,7 @@ const en: TranslationKeys = {
     manage: "Manage",
     failed_to_load: "Failed to load tenants",
     empty: "No tenants yet — create one from Create Tenant.",
+    create: "Create Tenant",
   },
   settings_create_tenant: {
     page_title: "Create Tenant",

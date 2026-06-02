@@ -27,6 +27,11 @@ vi.mock("../../api/tenants", () => ({
   activateTenant: vi.fn(),
 }));
 
+vi.mock("../../components/CreateTenantDrawer", () => ({
+  CreateTenantDrawer: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="create-tenant-drawer" /> : null,
+}));
+
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>(
     "react-router-dom",
@@ -186,6 +191,23 @@ describe("SettingsTenants", () => {
       "11111111-1111-1111-1111-111111111111",
     );
     await vi.waitFor(() => expect(listTenants).toHaveBeenCalledTimes(2));
+  });
+
+  it("opens the create-tenant drawer from the Create button", async () => {
+    const user = userEvent.setup();
+    setStoredToken(
+      makeJwt({ sub: "u1", tenant_id: "t1", roles: ["admin", "system_admin"] }),
+    );
+    vi.mocked(listTenants).mockResolvedValue([]);
+    renderPage();
+
+    await screen.findByTestId("tenants-create");
+    expect(screen.queryByTestId("create-tenant-drawer")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("tenants-create"));
+
+    expect(
+      await screen.findByTestId("create-tenant-drawer"),
+    ).toBeInTheDocument();
   });
 
   it("gates non-admins and never lists", async () => {

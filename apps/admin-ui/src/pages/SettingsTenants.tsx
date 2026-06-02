@@ -22,6 +22,7 @@ import {
 } from "../api/tenants";
 import { useAuth } from "../auth/AuthContext";
 import { useTenantScope } from "../tenant/TenantScopeContext";
+import { CreateTenantDrawer } from "../components/CreateTenantDrawer";
 
 export function SettingsTenants() {
   const { t } = useTranslation();
@@ -34,6 +35,7 @@ export function SettingsTenants() {
   const [rows, setRows] = useState<TenantSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -160,6 +162,16 @@ export function SettingsTenants() {
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8, marginBottom: 16 }}>
           <Building size={20} strokeWidth={1.5} />
           <h1 style={{ margin: 0 }}>{t("settings_tenants.page_title")}</h1>
+          {isSystemAdmin && (
+            <Button
+              type="primary"
+              data-testid="tenants-create"
+              style={{ marginLeft: "auto" }}
+              onClick={() => setCreateOpen(true)}
+            >
+              {t("settings_tenants.create")}
+            </Button>
+          )}
         </div>
         <p style={{ color: "var(--hx-text-secondary)", fontSize: 13, margin: "0 0 12px" }}>
           {t("settings_tenants.subtitle")}
@@ -194,6 +206,14 @@ export function SettingsTenants() {
             pagination={false}
             locale={{ emptyText: t("settings_tenants.empty") }}
             columns={columns}
+          />
+          <CreateTenantDrawer
+            open={createOpen}
+            onClose={() => setCreateOpen(false)}
+            onCreated={() => {
+              setCreateOpen(false);
+              reload();
+            }}
           />
         </>
       )}
