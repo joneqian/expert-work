@@ -23,6 +23,7 @@ import {
   rotateApiKey,
   listServiceAccounts,
 } from "../api_keys";
+import { getPlatformEmbeddingConfig } from "../platform_embedding_config";
 
 interface Capture {
   url: string;
@@ -156,6 +157,28 @@ describe("raw (un-enveloped) list endpoints", () => {
     });
     await call();
     expect(calls[0].url).toBe(expectedUrl);
+  });
+});
+
+describe("getPlatformEmbeddingConfig — enveloped platform endpoint", () => {
+  it("hits /v1/platform/embedding-config and unwraps the envelope", async () => {
+    const calls = captureAdapter({
+      success: true,
+      data: {
+        embedding: { provider: "openai", model: "text-embedding-3-small" },
+        rerank: null,
+        available_embedding: [
+          { provider: "openai", model: "text-embedding-3-small" },
+        ],
+        available_rerank: [],
+      },
+      error: null,
+    });
+    const result = await getPlatformEmbeddingConfig();
+    expect(calls[0].url).toBe("/v1/platform/embedding-config");
+    expect(calls[0].method).toBe("get");
+    expect(result.embedding?.provider).toBe("openai");
+    expect(result.rerank).toBeNull();
   });
 });
 

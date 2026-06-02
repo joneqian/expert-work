@@ -374,6 +374,21 @@ export interface TranslationKeys {
     saved: string;
     deleted: string;
     unset_ref: string;
+    embedding_heading: string;
+    embedding_current: string;
+    embedding_unconfigured: string;
+    embedding_provider_label: string;
+    embedding_model_label: string;
+    rerank_enable: string;
+    rerank_provider_label: string;
+    rerank_model_label: string;
+    embedding_save: string;
+    embedding_saved: string;
+    embedding_err_EMBEDDING_PROVIDER_KEY_MISSING: string;
+    embedding_err_INVALID_EMBEDDING_MODEL: string;
+    embedding_err_INVALID_RERANK_PAIR: string;
+    embedding_err_RERANK_PROVIDER_KEY_MISSING: string;
+    embedding_err_INVALID_RERANK_MODEL: string;
   };
   settings_iam: {
     sa_page_title: string;
@@ -1163,6 +1178,23 @@ const en: TranslationKeys = {
     saved: "Credential saved.",
     deleted: "Credential deleted.",
     unset_ref: "not set",
+    embedding_heading: "Embedding & Rerank",
+    embedding_current: "Current",
+    embedding_unconfigured:
+      "No embedding model configured — long-term memory is unavailable until you set one.",
+    embedding_provider_label: "Embedding provider",
+    embedding_model_label: "Embedding model",
+    rerank_enable: "Enable rerank",
+    rerank_provider_label: "Rerank provider",
+    rerank_model_label: "Rerank model",
+    embedding_save: "Save",
+    embedding_saved: "Embedding configuration saved.",
+    embedding_err_EMBEDDING_PROVIDER_KEY_MISSING:
+      "This provider has no configured key — add it under Providers above first.",
+    embedding_err_INVALID_EMBEDDING_MODEL: "That model can't be used for embeddings.",
+    embedding_err_INVALID_RERANK_PAIR: "Set both rerank provider and model, or neither.",
+    embedding_err_RERANK_PROVIDER_KEY_MISSING: "The rerank provider has no configured key.",
+    embedding_err_INVALID_RERANK_MODEL: "That model can't be used for rerank.",
   },
   settings_iam: {
     sa_page_title: "Service Accounts",

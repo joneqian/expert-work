@@ -45,6 +45,7 @@ import {
 } from "../api/platform_config";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { PlatformEmbeddingSection } from "./settings_platform/PlatformEmbeddingSection";
 
 const { Text } = Typography;
 
@@ -336,6 +337,11 @@ export function SettingsPlatformConfig() {
             size="small"
             data-testid="pc-tools-table"
           />
+
+          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
+            {t("settings_platform.embedding_heading")}
+          </h2>
+          <PlatformEmbeddingSection />
         </>
       )}
 
