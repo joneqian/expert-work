@@ -14,12 +14,12 @@
  * jsdom). NOTE: because the advanced set is enumerated here, a future new
  * ModelSpec scalar needs a one-line addition below (or use the YAML tab).
  */
-import { Alert, Collapse, Input, InputNumber, Select, Tag } from "antd";
+import { Collapse, Input, InputNumber, Select, Tag } from "antd";
 import type { FieldProps } from "@rjsf/utils";
 import { useTranslation } from "react-i18next";
 
 import type { ModelCatalog } from "../../../api/model_catalog";
-import { lookupModel, modelsFor, providerHasEmbeddings, providerNames } from "../catalog";
+import { lookupModel, modelsFor, providerNames } from "../catalog";
 
 type ModelSpecData = {
   provider?: string;
@@ -66,8 +66,6 @@ export function ModelSelectField(props: FieldProps) {
     onChange({ ...data, [key]: value });
   }
 
-  const noEmbeddings = catalog && data.provider ? !providerHasEmbeddings(catalog, data.provider) : false;
-
   // Only render advanced fields that exist in this ModelSpec subschema.
   const schemaProps = (schema.properties as Record<string, unknown> | undefined) ?? {};
   const advanced = ADVANCED_FIELDS.filter((f) => f.key in schemaProps);
@@ -102,15 +100,6 @@ export function ModelSelectField(props: FieldProps) {
           {data.supports_vision ? t("model_select.vision_on") : t("model_select.vision_off")}
         </Tag>
       </div>
-      {noEmbeddings && (
-        <Alert
-          type="info"
-          showIcon
-          message={t("model_select.no_embeddings")}
-          style={{ marginBottom: 8 }}
-          data-testid="model-select-no-embeddings"
-        />
-      )}
       {advanced.length > 0 && (
         <Collapse
           defaultActiveKey={["advanced"]}

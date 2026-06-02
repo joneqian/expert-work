@@ -108,7 +108,6 @@ const zhCN: TranslationKeys = {
     model_placeholder: "选择模型",
     vision_on: "视觉：支持",
     vision_off: "视觉：不支持",
-    no_embeddings: "该提供方没有 embedding 模型，长期记忆无法在其上使用。",
     advanced: "高级",
   },
   playground: {

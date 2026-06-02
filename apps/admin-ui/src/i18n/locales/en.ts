@@ -105,7 +105,6 @@ export interface TranslationKeys {
     model_placeholder: string;
     vision_on: string;
     vision_off: string;
-    no_embeddings: string;
     advanced: string;
   };
   playground: {
@@ -891,8 +890,6 @@ const en: TranslationKeys = {
     model_placeholder: "Select a model",
     vision_on: "Vision: supported",
     vision_off: "Vision: not supported",
-    no_embeddings:
-      "This provider has no embedding model — long-term memory won't work with it.",
     advanced: "Advanced",
   },
   playground: {

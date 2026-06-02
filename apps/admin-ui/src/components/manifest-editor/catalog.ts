@@ -36,7 +36,3 @@ export function lookupModel(
 ): CatalogModel | undefined {
   return modelsFor(catalog, provider).find((m) => m.name === name);
 }
-
-export function providerHasEmbeddings(catalog: ModelCatalog, provider: string): boolean {
-  return modelsFor(catalog, provider).some((m) => m.embeddings);
-}
