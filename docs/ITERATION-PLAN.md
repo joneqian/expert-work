@@ -833,13 +833,13 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **锁定决策**：① 全字段表单；② **schema 驱动**（后端导出 `AgentSpec` JSON Schema，前端 RJSF 渲染，`uiSchema` 精修，永不漂移）；③ 表单⇄YAML **切标签同步**（非实时）；④ 模型 = provider 下拉（已配 key）+ 模型名内置目录（选定自动带出 vision）；⑤ create+edit 复用 `<ManifestEditor>`。
 
-- [ ] **S-A 设计先行**（STREAM-S-DESIGN + 本 backlog）— **Mini-ADR S-1~S-8**
-- [ ] **S-B 后端**：`GET /v1/agents/schema`（`model_json_schema()`）+ `MODEL_CATALOG`（官网核对最新模型 + 能力）+ `GET /v1/model-catalog`（目录 ∩ 已配 provider）
-- [ ] **S-C 前端内核**：`<ManifestEditor>` = RJSF + 表单/YAML 双标签 + 切换同步 + ajv 校验 → 替换 Create 抽屉
-- [ ] **S-D 前端模型选择 + 默认模板**：`ModelSelect` 联动控件 + 默认模板按能力自适应（无 vision/无 embedding 自动裁剪 + 黄条）+ 三层校验 + i18n
-- [ ] **S-E 编辑接入**：接 `智能体详情→配置清单` 标签 + create/edit 两条 Playwright/axe + 收尾
+- [x] **S-A 设计先行**（STREAM-S-DESIGN + 本 backlog）— **Mini-ADR S-1~S-8** #356 ✅
+- [x] **S-B 后端**：`GET /v1/agents/schema`（`model_json_schema()`）+ `MODEL_CATALOG`（官网核对最新模型 + 能力）+ `GET /v1/model-catalog`（目录 ∩ 已配 provider）#357；模型清单后续按各 provider 官网刷新一轮 #359 ✅
+- [x] **S-C 前端内核**：`<ManifestEditor>` = RJSF + 表单/YAML 双标签 + 切换同步 + ajv 校验 → 替换 Create 抽屉 #360 ✅
+- [x] **S-D 前端模型选择 + 默认模板**：`ModelSelect` 联动控件（provider 下拉只列已配 key + model 目录选 + 自动带出 vision）+ 默认模板按能力自适应（capability-adaptive 默认 + 无 embedding 内联提示）+ i18n #361。**作用域**：主模型 + 直接 fallback（routing/vision/aux 走默认字段 + YAML）✅
+- [x] **S-E 编辑接入**：`智能体详情→配置清单` 标签编辑态接 `<ManifestEditor>`（保留只读默认浏览，点 Edit 进编辑器）+ create/edit 两条 Playwright/axe + 收尾 ✅
 
-**关键路径** A→B→C→D→E；C 依赖 B 两端点。每 PR CI-green + 零债 6 条。**新前端依赖** `@rjsf/core`+`@rjsf/antd`+`@rjsf/validator-ajv8`。
+**关键路径** A→B→C→D→E；C 依赖 B 两端点。每 PR CI-green + 零债 6 条。**新前端依赖** `@rjsf/core`+`@rjsf/antd`+`@rjsf/utils`+`@rjsf/validator-ajv8`（v5.24，React 19 / Antd 5 零 peer-dep workaround）。**Stream S 全部 shipped（2026-06-02）**。RJSF `SchemaField` 委托递归 schema 会死循环 → ModelSpec 高级字段改手渲染有界集（详见 PR D）。
 
 ---
 
