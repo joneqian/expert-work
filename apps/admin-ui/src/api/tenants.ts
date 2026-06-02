@@ -11,7 +11,7 @@
  * unwrapped payload is a full ``TenantConfigRecord`` (reused from the
  * tenant-config SDK so the two stay in sync).
  */
-import { postJson } from "./client";
+import { getJson, postJson } from "./client";
 import type { TenantConfigRecord, TenantPlan } from "./tenant_config";
 
 export interface CreateTenantBody {
@@ -40,4 +40,16 @@ export type CreatedTenant = TenantConfigRecord & { first_admin?: FirstAdminSumma
 
 export async function createTenant(body: CreateTenantBody): Promise<CreatedTenant> {
   return postJson<CreatedTenant>("/v1/tenants", body);
+}
+
+/** ``GET /v1/tenants`` list row — a compact tenant summary. */
+export interface TenantSummary {
+  tenant_id: string;
+  display_name: string;
+  plan: TenantPlan;
+  created_at: string;
+}
+
+export async function listTenants(limit = 50, offset = 0): Promise<TenantSummary[]> {
+  return getJson<TenantSummary[]>(`/v1/tenants?limit=${limit}&offset=${offset}`);
 }

@@ -23,6 +23,7 @@ import {
   rotateApiKey,
   listServiceAccounts,
 } from "../api_keys";
+import { listTenants } from "../tenants";
 import {
   getPlatformEmbeddingConfig,
   getPlatformEmbeddingStatus,
@@ -194,6 +195,28 @@ describe("getPlatformEmbeddingConfig — enveloped platform endpoint", () => {
     expect(calls[0].url).toBe("/v1/platform/embedding-config/status");
     expect(calls[0].method).toBe("get");
     expect(out).toEqual({ configured: true });
+  });
+});
+
+describe("listTenants — enveloped platform list endpoint", () => {
+  it("listTenants calls GET /v1/tenants and unwraps data", async () => {
+    const calls = captureAdapter({
+      success: true,
+      data: [
+        {
+          tenant_id: "t1",
+          display_name: "Acme",
+          plan: "free",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      error: null,
+    });
+    const out = await listTenants();
+    expect(calls[0].url).toMatch(/^\/v1\/tenants/);
+    expect(calls[0].method).toBe("get");
+    expect(out).toHaveLength(1);
+    expect(out[0].display_name).toBe("Acme");
   });
 });
 
