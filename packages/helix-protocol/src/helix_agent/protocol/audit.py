@@ -214,6 +214,9 @@ class AuditAction(StrEnum):
     PLATFORM_PROVIDER_CREDENTIAL_DELETE = "platform_credential:provider_delete"
     PLATFORM_TOOL_CREDENTIAL_UPSERT = "platform_credential:tool_upsert"
     PLATFORM_TOOL_CREDENTIAL_DELETE = "platform_credential:tool_delete"
+    # platform embedding/rerank config (the runtime DB overlay) — Stream T PR C.
+    # system_admin-only write to the platform embedding-config row.
+    PLATFORM_EMBEDDING_CONFIG_UPDATED = "platform_embedding_config:updated"
 
 
 class AuditEntry(BaseModel):

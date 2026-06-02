@@ -58,6 +58,25 @@ class PlatformEmbeddingConfigService:
         await self._maybe_refresh()
         return self._rerank
 
+    async def put(
+        self,
+        *,
+        embedding_provider: str | None,
+        embedding_model: str | None,
+        rerank_provider: str | None,
+        rerank_model: str | None,
+        updated_by: str | None,
+    ) -> None:
+        """Upsert the singleton config row then invalidate the cache."""
+        await self._store.put(
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
+            rerank_provider=rerank_provider,
+            rerank_model=rerank_model,
+            updated_by=updated_by,
+        )
+        self.invalidate()
+
     def invalidate(self) -> None:
         """Drop the cache so the next read reloads from DB + env."""
         self._expires_at = 0.0

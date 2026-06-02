@@ -63,3 +63,19 @@ async def test_cache_then_invalidate_picks_up_new_row() -> None:
     assert await svc.effective_embedding_config() == ("qwen", "text-embedding-v4")
     svc.invalidate()
     assert await svc.effective_embedding_config() == ("glm", "embedding-3")
+
+
+@pytest.mark.asyncio
+async def test_put_writes_and_invalidates() -> None:
+    store = InMemoryPlatformEmbeddingConfigStore()
+    svc = PlatformEmbeddingConfigService(store=store, settings=_Settings())
+    assert await svc.effective_embedding_config() == ("qwen", "text-embedding-v4")  # env, cached
+    await svc.put(
+        embedding_provider="glm",
+        embedding_model="embedding-3",
+        rerank_provider=None,
+        rerank_model=None,
+        updated_by="admin-1",
+    )
+    assert await svc.effective_embedding_config() == ("glm", "embedding-3")
+    assert await svc.effective_rerank_config() is None
