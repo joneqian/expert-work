@@ -332,6 +332,14 @@ export interface TranslationKeys {
     col_tenant_id: string;
     col_created: string;
     col_actions: string;
+    col_status: string;
+    st_active: string;
+    st_suspended: string;
+    deactivate: string;
+    activate: string;
+    deactivate_confirm: string;
+    status_change_failed: string;
+    status_changed: string;
     manage: string;
     failed_to_load: string;
     empty: string;
@@ -1151,6 +1159,14 @@ const en: TranslationKeys = {
     col_tenant_id: "Tenant id",
     col_created: "Created",
     col_actions: "Actions",
+    col_status: "Status",
+    st_active: "Active",
+    st_suspended: "Suspended",
+    deactivate: "Deactivate",
+    activate: "Activate",
+    deactivate_confirm: "Suspend this tenant? Its members will be blocked until reactivated.",
+    status_change_failed: "Failed to change tenant status",
+    status_changed: "Tenant status updated.",
     manage: "Manage",
     failed_to_load: "Failed to load tenants",
     empty: "No tenants yet — create one from Create Tenant.",

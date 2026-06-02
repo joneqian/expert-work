@@ -17,12 +17,14 @@ import { SettingsTenants } from "../SettingsTenants";
 import { AuthProvider } from "../../auth/AuthContext";
 import { TenantScopeProvider } from "../../tenant/TenantScopeContext";
 import { setStoredToken } from "../../api/client";
-import { listTenants } from "../../api/tenants";
+import { activateTenant, deactivateTenant, listTenants } from "../../api/tenants";
 
 const mockNavigate = vi.fn();
 
 vi.mock("../../api/tenants", () => ({
   listTenants: vi.fn(),
+  deactivateTenant: vi.fn(),
+  activateTenant: vi.fn(),
 }));
 
 vi.mock("react-router-dom", async () => {
@@ -69,6 +71,7 @@ describe("SettingsTenants", () => {
         display_name: "乐毅大公司",
         plan: "free",
         created_at: "2026-06-02T00:00:00Z",
+        status: "active",
       },
     ]);
     renderPage();
@@ -87,6 +90,7 @@ describe("SettingsTenants", () => {
         display_name: "乐毅大公司",
         plan: "free",
         created_at: "2026-06-02T00:00:00Z",
+        status: "active",
       },
     ]);
     renderPage();
@@ -100,6 +104,88 @@ describe("SettingsTenants", () => {
     expect(window.sessionStorage.getItem("helix.admin.tenantScope")).toBe(
       "11111111-1111-1111-1111-111111111111",
     );
+  });
+
+  it("renders the suspended badge for a suspended tenant", async () => {
+    setStoredToken(
+      makeJwt({ sub: "u1", tenant_id: "t1", roles: ["admin", "system_admin"] }),
+    );
+    vi.mocked(listTenants).mockResolvedValue([
+      {
+        tenant_id: "22222222-2222-2222-2222-222222222222",
+        display_name: "停用公司",
+        plan: "free",
+        created_at: "2026-06-02T00:00:00Z",
+        status: "suspended",
+      },
+    ]);
+    renderPage();
+
+    const badge = await screen.findByTestId(
+      "st-status-22222222-2222-2222-2222-222222222222",
+    );
+    expect(badge).toHaveTextContent("Suspended");
+    expect(
+      screen.getByTestId("st-activate-22222222-2222-2222-2222-222222222222"),
+    ).toBeInTheDocument();
+  });
+
+  it("activate calls activateTenant then re-fetches", async () => {
+    const user = userEvent.setup();
+    setStoredToken(
+      makeJwt({ sub: "u1", tenant_id: "t1", roles: ["admin", "system_admin"] }),
+    );
+    vi.mocked(listTenants).mockResolvedValue([
+      {
+        tenant_id: "22222222-2222-2222-2222-222222222222",
+        display_name: "停用公司",
+        plan: "free",
+        created_at: "2026-06-02T00:00:00Z",
+        status: "suspended",
+      },
+    ]);
+    vi.mocked(activateTenant).mockResolvedValue();
+    renderPage();
+
+    await screen.findByText("停用公司");
+    await user.click(
+      screen.getByTestId("st-activate-22222222-2222-2222-2222-222222222222"),
+    );
+
+    expect(activateTenant).toHaveBeenCalledWith(
+      "22222222-2222-2222-2222-222222222222",
+    );
+    await vi.waitFor(() => expect(listTenants).toHaveBeenCalledTimes(2));
+  });
+
+  it("deactivate confirms then calls deactivateTenant and re-fetches", async () => {
+    const user = userEvent.setup();
+    setStoredToken(
+      makeJwt({ sub: "u1", tenant_id: "t1", roles: ["admin", "system_admin"] }),
+    );
+    vi.mocked(listTenants).mockResolvedValue([
+      {
+        tenant_id: "11111111-1111-1111-1111-111111111111",
+        display_name: "乐毅大公司",
+        plan: "free",
+        created_at: "2026-06-02T00:00:00Z",
+        status: "active",
+      },
+    ]);
+    vi.mocked(deactivateTenant).mockResolvedValue();
+    renderPage();
+
+    await screen.findByText("乐毅大公司");
+    await user.click(
+      screen.getByTestId("st-deactivate-11111111-1111-1111-1111-111111111111"),
+    );
+    // Popconfirm: click through the OK button (antd default okText is "OK").
+    await user.click(await screen.findByRole("button", { name: "OK" }));
+
+    expect(deactivateTenant).toHaveBeenCalledWith(
+      "11111111-1111-1111-1111-111111111111",
+    );
+    await vi.waitFor(() => expect(listTenants).toHaveBeenCalledTimes(2));
   });
 
   it("gates non-admins and never lists", async () => {

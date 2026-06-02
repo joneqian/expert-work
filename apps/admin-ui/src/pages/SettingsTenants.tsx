@@ -8,18 +8,24 @@
  * config page, where config / quotas / credentials are edited.
  */
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Breadcrumb, Button, Table, Typography } from "antd";
+import { Alert, App, Breadcrumb, Button, Popconfirm, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Building, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
-import { listTenants, type TenantSummary } from "../api/tenants";
+import {
+  activateTenant,
+  deactivateTenant,
+  listTenants,
+  type TenantSummary,
+} from "../api/tenants";
 import { useAuth } from "../auth/AuthContext";
 import { useTenantScope } from "../tenant/TenantScopeContext";
 
 export function SettingsTenants() {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const auth = useAuth();
   const isSystemAdmin = auth.identity?.isSystemAdmin ?? false;
   const { setScope } = useTenantScope();
@@ -29,28 +35,44 @@ export function SettingsTenants() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const reload = useCallback(() => {
+    setLoading(true);
+    listTenants().then(
+      (data) => {
+        setRows(data);
+        setLoading(false);
+      },
+      (err: unknown) => {
+        setError(err instanceof Error ? err.message : "unknown error");
+        setLoading(false);
+      },
+    );
+  }, []);
+
   useEffect(() => {
     if (!isSystemAdmin) {
       setLoading(false);
       return;
     }
-    let alive = true;
-    setLoading(true);
-    listTenants()
-      .then((data) => {
-        if (!alive) return;
-        setRows(data);
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        setError(err instanceof Error ? err.message : "unknown error");
-        setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [isSystemAdmin]);
+    reload();
+  }, [isSystemAdmin, reload]);
+
+  const changeStatus = useCallback(
+    async (id: string, kind: "deactivate" | "activate") => {
+      try {
+        if (kind === "deactivate") {
+          await deactivateTenant(id);
+        } else {
+          await activateTenant(id);
+        }
+        message.success(t("settings_tenants.status_changed"));
+        reload();
+      } catch {
+        message.error(t("settings_tenants.status_change_failed"));
+      }
+    },
+    [message, t, reload],
+  );
 
   const manage = useCallback(
     (id: string) => {
@@ -80,16 +102,50 @@ export function SettingsTenants() {
       render: (v: string) => new Date(v).toLocaleString(),
     },
     {
+      title: t("settings_tenants.col_status"),
+      key: "status",
+      render: (_: unknown, r: TenantSummary) => (
+        <Tag
+          color={r.status === "suspended" ? "red" : "green"}
+          data-testid={`st-status-${r.tenant_id}`}
+        >
+          {r.status === "suspended"
+            ? t("settings_tenants.st_suspended")
+            : t("settings_tenants.st_active")}
+        </Tag>
+      ),
+    },
+    {
       title: t("settings_tenants.col_actions"),
       key: "actions",
       render: (_: unknown, r: TenantSummary) => (
-        <Button
-          size="small"
-          data-testid={`st-manage-${r.tenant_id}`}
-          onClick={() => manage(r.tenant_id)}
-        >
-          {t("settings_tenants.manage")}
-        </Button>
+        <span style={{ display: "inline-flex", gap: 8 }}>
+          <Button
+            size="small"
+            data-testid={`st-manage-${r.tenant_id}`}
+            onClick={() => manage(r.tenant_id)}
+          >
+            {t("settings_tenants.manage")}
+          </Button>
+          {r.status === "active" ? (
+            <Popconfirm
+              title={t("settings_tenants.deactivate_confirm")}
+              onConfirm={() => changeStatus(r.tenant_id, "deactivate")}
+            >
+              <Button size="small" danger data-testid={`st-deactivate-${r.tenant_id}`}>
+                {t("settings_tenants.deactivate")}
+              </Button>
+            </Popconfirm>
+          ) : (
+            <Button
+              size="small"
+              data-testid={`st-activate-${r.tenant_id}`}
+              onClick={() => changeStatus(r.tenant_id, "activate")}
+            >
+              {t("settings_tenants.activate")}
+            </Button>
+          )}
+        </span>
       ),
     },
   ];

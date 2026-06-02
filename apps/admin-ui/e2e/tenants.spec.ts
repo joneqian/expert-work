@@ -37,6 +37,14 @@ const TENANTS_LIST = {
       display_name: "乐毅大公司",
       plan: "free",
       created_at: "2026-06-02T00:00:00Z",
+      status: "active",
+    },
+    {
+      tenant_id: "33333333-3333-3333-3333-333333333333",
+      display_name: "停用公司",
+      plan: "free",
+      created_at: "2026-06-02T00:00:00Z",
+      status: "suspended",
     },
   ],
   error: null,
@@ -75,6 +83,19 @@ test("lists tenants", async ({ page }) => {
 
   await expect(page.getByTestId("st-table")).toBeVisible();
   await expect(page.getByText("乐毅大公司")).toBeVisible();
+});
+
+test("shows tenant status badges", async ({ page }) => {
+  await login(page);
+  await page.goto("/settings/tenants");
+
+  await expect(page.getByTestId("st-table")).toBeVisible();
+  await expect(
+    page.getByTestId("st-status-11111111-1111-1111-1111-111111111111"),
+  ).toHaveText("Active");
+  await expect(
+    page.getByTestId("st-status-33333333-3333-3333-3333-333333333333"),
+  ).toHaveText("Suspended");
 });
 
 test("manage navigates to tenant-config", async ({ page }) => {

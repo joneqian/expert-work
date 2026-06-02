@@ -48,8 +48,17 @@ export interface TenantSummary {
   display_name: string;
   plan: TenantPlan;
   created_at: string;
+  status: "active" | "suspended";
 }
 
 export async function listTenants(limit = 50, offset = 0): Promise<TenantSummary[]> {
   return getJson<TenantSummary[]>(`/v1/tenants?limit=${limit}&offset=${offset}`);
+}
+
+export async function deactivateTenant(tenantId: string): Promise<void> {
+  await postJson(`/v1/tenants/${tenantId}/deactivate`, {});
+}
+
+export async function activateTenant(tenantId: string): Promise<void> {
+  await postJson(`/v1/tenants/${tenantId}/activate`, {});
 }
