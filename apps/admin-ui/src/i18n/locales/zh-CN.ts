@@ -345,6 +345,7 @@ const zhCN: TranslationKeys = {
     field_tenant_id: "租户 id(可选)",
     tenant_id_hint: "留空则由服务端生成 UUID。仅在需要上游幂等 provisioning 时手动指定。",
     tenant_id_placeholder: "自动生成",
+    tenant_id_invalid: "必须是合法 UUID(如 123e4567-e89b-12d3-a456-426614174000),或留空自动生成。",
     create_btn: "创建租户",
     created: "租户已创建。",
     created_detail: "新租户 id:",

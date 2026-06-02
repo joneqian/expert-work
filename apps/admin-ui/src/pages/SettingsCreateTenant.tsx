@@ -30,6 +30,9 @@ const { Text } = Typography;
 
 const PLAN_OPTIONS: TenantPlan[] = ["free", "pro", "enterprise"];
 
+/** Canonical UUID form (any version) — the backend's ``tenant_id`` is a UUID. */
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 interface CreateTenantForm {
   display_name: string;
   plan: TenantPlan;
@@ -50,7 +53,13 @@ export function SettingsCreateTenant() {
   const [firstAdmin, setFirstAdmin] = useState<FirstAdminSummary | null>(null);
 
   const onCreate = useCallback(async () => {
-    const values = await form.validateFields();
+    let values: CreateTenantForm;
+    try {
+      values = await form.validateFields();
+    } catch {
+      // Field-level errors are already surfaced by the form; nothing to submit.
+      return;
+    }
     const body: CreateTenantBody = {
       display_name: values.display_name,
       plan: values.plan,
@@ -159,6 +168,17 @@ export function SettingsCreateTenant() {
               name="tenant_id"
               label={t("settings_create_tenant.field_tenant_id")}
               extra={t("settings_create_tenant.tenant_id_hint")}
+              rules={[
+                {
+                  validator: (_rule, value) => {
+                    const v = (value ?? "").trim();
+                    if (v === "" || UUID_RE.test(v)) return Promise.resolve();
+                    return Promise.reject(
+                      new Error(t("settings_create_tenant.tenant_id_invalid")),
+                    );
+                  },
+                },
+              ]}
             >
               <Input data-testid="ct-tenant-id" placeholder={t("settings_create_tenant.tenant_id_placeholder")} />
             </Form.Item>

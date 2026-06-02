@@ -332,6 +332,7 @@ export interface TranslationKeys {
     field_tenant_id: string;
     tenant_id_hint: string;
     tenant_id_placeholder: string;
+    tenant_id_invalid: string;
     create_btn: string;
     created: string;
     created_detail: string;
@@ -1135,6 +1136,7 @@ const en: TranslationKeys = {
     field_tenant_id: "Tenant id (optional)",
     tenant_id_hint: "Leave empty to let the server generate a UUID. Supply one only for idempotent provisioning.",
     tenant_id_placeholder: "auto-generated",
+    tenant_id_invalid: "Must be a valid UUID (e.g. 123e4567-e89b-12d3-a456-426614174000), or leave empty to auto-generate.",
     create_btn: "Create tenant",
     created: "Tenant created.",
     created_detail: "New tenant id:",
