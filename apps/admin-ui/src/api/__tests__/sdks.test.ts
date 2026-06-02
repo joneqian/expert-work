@@ -23,7 +23,10 @@ import {
   rotateApiKey,
   listServiceAccounts,
 } from "../api_keys";
-import { getPlatformEmbeddingConfig } from "../platform_embedding_config";
+import {
+  getPlatformEmbeddingConfig,
+  getPlatformEmbeddingStatus,
+} from "../platform_embedding_config";
 
 interface Capture {
   url: string;
@@ -179,6 +182,18 @@ describe("getPlatformEmbeddingConfig — enveloped platform endpoint", () => {
     expect(calls[0].method).toBe("get");
     expect(result.embedding?.provider).toBe("openai");
     expect(result.rerank).toBeNull();
+  });
+
+  it("getPlatformEmbeddingStatus calls the status endpoint", async () => {
+    const calls = captureAdapter({
+      success: true,
+      data: { configured: true },
+      error: null,
+    });
+    const out = await getPlatformEmbeddingStatus();
+    expect(calls[0].url).toBe("/v1/platform/embedding-config/status");
+    expect(calls[0].method).toBe("get");
+    expect(out).toEqual({ configured: true });
   });
 });
 

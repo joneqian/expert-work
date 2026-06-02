@@ -27,6 +27,16 @@ export async function getPlatformEmbeddingConfig(): Promise<PlatformEmbeddingCon
   return getJson<PlatformEmbeddingConfigView>("/v1/platform/embedding-config");
 }
 
+export interface PlatformEmbeddingStatus {
+  configured: boolean;
+}
+
+export async function getPlatformEmbeddingStatus(): Promise<PlatformEmbeddingStatus> {
+  return getJson<PlatformEmbeddingStatus>(
+    "/v1/platform/embedding-config/status",
+  );
+}
+
 export async function putPlatformEmbeddingConfig(
   body: PlatformEmbeddingConfigWrite,
 ): Promise<{ embedding: ProviderModel | null; rerank: ProviderModel | null }> {
