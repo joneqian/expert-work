@@ -6,12 +6,12 @@ from uuid import uuid4
 
 import pytest
 
-from control_plane.tenant_mcp_pool import TenantMcpPoolService
+from control_plane.tenant_mcp_pool import McpClientFactory, TenantMcpPoolService
 from helix_agent.persistence import InMemoryTenantMcpServerStore
 from orchestrator.tools.mcp import MCPServerConfig, MCPToolDef, RecordingMCPClient
 
 
-def _client_factory_spy(calls: list[str]):
+def _client_factory_spy(calls: list[str]) -> McpClientFactory:
     async def _factory(config: MCPServerConfig):
         calls.append(config.name)
         return RecordingMCPClient(tools=(MCPToolDef(name="t", description="", input_schema={}),))
@@ -121,3 +121,32 @@ async def test_close_all_clears_cache() -> None:
     await svc.close_all()
     # after close_all a fresh build is required again (cache cleared)
     assert svc._pools == {}
+
+
+@pytest.mark.asyncio
+async def test_servers_beyond_cap_are_closed_not_leaked() -> None:
+    store = InMemoryTenantMcpServerStore()
+    tid = uuid4()
+    for i in range(6):  # one over the default cap of 5
+        await _seed(store, tid, f"srv{i}")
+    closed: list[str] = []
+
+    def _factory() -> McpClientFactory:
+        async def _f(config: MCPServerConfig) -> RecordingMCPClient:
+            client = RecordingMCPClient(tools=())
+            orig_close = client.close
+            name = config.name
+
+            async def _tracked() -> None:
+                closed.append(name)
+                await orig_close()
+
+            client.close = _tracked  # type: ignore[method-assign]
+            return client
+
+        return _f
+
+    svc = TenantMcpPoolService(store=store, secret_store=None, client_factory=_factory())
+    pool = await svc.get_or_build(tid)
+    assert len(pool.names()) == 5  # cap enforced
+    assert len(closed) >= 1  # the over-cap client was closed, not leaked

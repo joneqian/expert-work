@@ -20,7 +20,12 @@ from uuid import UUID
 from helix_agent.persistence import TenantMcpServerStore
 from helix_agent.protocol import TenantMcpServerRecord
 from helix_agent.runtime.secret_store import SecretStore
-from orchestrator.tools.mcp import MCPClient, MCPServerConfig, MCPServerPool
+from orchestrator.tools.mcp import (
+    MCPClient,
+    MCPServerConfig,
+    MCPServerPool,
+    MCPServerPoolLimitError,
+)
 
 logger = logging.getLogger("helix.control_plane.tenant_mcp_pool")
 
@@ -64,15 +69,29 @@ class TenantMcpPoolService:
         self._secret_store = secret_store
         self._client_factory = client_factory
         self._pools: dict[UUID, MCPServerPool] = {}
-        self._lock = asyncio.Lock()
+        self._locks_guard = asyncio.Lock()  # guards _pools + _tenant_locks dict mutations
+        self._tenant_locks: dict[UUID, asyncio.Lock] = {}
+
+    async def _tenant_lock(self, tenant_id: UUID) -> asyncio.Lock:
+        async with self._locks_guard:
+            lock = self._tenant_locks.get(tenant_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._tenant_locks[tenant_id] = lock
+            return lock
 
     async def get_or_build(self, tenant_id: UUID) -> MCPServerPool:
         """Return the tenant's remote pool, building (and caching) on miss.
 
-        A server that fails to connect is skipped (logged, no tenant-derived
-        values) so one bad server cannot break the whole agent build.
+        Uses a per-tenant lock so different tenants build in parallel while
+        still deduplicating concurrent builds for the same tenant.  A server
+        that fails to connect is skipped (logged, no tenant-derived values) so
+        one bad server cannot break the whole agent build.  When the server cap
+        is hit the just-opened client is closed before breaking — it was never
+        added to the pool so ``pool.close_all`` cannot reach it.
         """
-        async with self._lock:
+        lock = await self._tenant_lock(tenant_id)
+        async with lock:
             cached = self._pools.get(tenant_id)
             if cached is not None:
                 return cached
@@ -84,6 +103,16 @@ class TenantMcpPoolService:
                 try:
                     client = await self._client_factory(_record_to_config(record))
                     await pool.add(record.name, client)
+                except MCPServerPoolLimitError:
+                    # Cap reached: close the just-opened client (it was never
+                    # added, so pool.close_all can't reach it) and stop —
+                    # further adds would also be rejected.
+                    try:
+                        await client.close()
+                    except Exception:
+                        logger.warning("tenant_mcp_pool.cap_orphan_close_failed")
+                    logger.warning("tenant_mcp_pool.server_cap_reached")
+                    break
                 except Exception:
                     logger.warning("tenant_mcp_pool.server_build_failed")
             self._pools[tenant_id] = pool
@@ -91,7 +120,7 @@ class TenantMcpPoolService:
 
     async def invalidate(self, tenant_id: UUID) -> None:
         """Close + drop the tenant's cached pool (next build rebuilds it)."""
-        async with self._lock:
+        async with self._locks_guard:
             pool = self._pools.pop(tenant_id, None)
         if pool is not None:
             try:
@@ -101,11 +130,16 @@ class TenantMcpPoolService:
 
     async def close_all(self) -> None:
         """Close every cached pool (app shutdown)."""
-        async with self._lock:
+        async with self._locks_guard:
             pools = list(self._pools.values())
             self._pools.clear()
+            self._tenant_locks.clear()
         for pool in pools:
             try:
                 await pool.close_all()
-            except Exception:
-                logger.warning("tenant_mcp_pool.close_all_failed")
+            except Exception as exc:
+                logger.warning(
+                    "tenant_mcp_pool.close_all_failed pool_count=%d",
+                    len(pools),
+                    exc_info=exc,
+                )
