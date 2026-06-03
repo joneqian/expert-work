@@ -147,6 +147,12 @@ from helix_agent.protocol.tenant_config import (
     TenantStatus,
     TriggerFireScanMode,
 )
+from helix_agent.protocol.tenant_mcp_server import (
+    McpServerAuthType,
+    McpServerTransport,
+    TenantMcpServerPatch,
+    TenantMcpServerRecord,
+)
 from helix_agent.protocol.tenant_member import (
     MemberRole,
     MemberStatus,
@@ -232,6 +238,8 @@ __all__ = [
     "KnowledgeSpec",
     "LongTermMemorySpec",
     "MCPToolSpec",
+    "McpServerAuthType",
+    "McpServerTransport",
     "MemberRole",
     "MemberStatus",
     "MemoryItem",
@@ -278,6 +286,8 @@ __all__ = [
     "TenantConfig",
     "TenantConfigPatch",
     "TenantConfigRecord",
+    "TenantMcpServerPatch",
+    "TenantMcpServerRecord",
     "TenantMember",
     "TenantPlan",
     "TenantQuotaPatch",
