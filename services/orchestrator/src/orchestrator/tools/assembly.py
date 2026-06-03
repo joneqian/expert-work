@@ -76,6 +76,13 @@ class ToolEnv:
     #: Set per-tenant by the control-plane's agent builder from
     #: ``tenant_config.mcp_allowlist``; bypasses no platform-server cap.
     mcp_allowlist: tuple[str, ...] = ()
+    #: Stream V (Mini-ADR V-4) — the calling tenant's own registered REMOTE
+    #: MCP servers (sse / streamable_http), built per-tenant by the control
+    #: plane from ``tenant_mcp_server`` + the encrypted secret store. Unlike
+    #: ``mcp_pool`` (the operator-controlled platform pool, gated by
+    #: ``mcp_allowlist``), this pool is the tenant's own and is never gated by
+    #: the allowlist. ``None`` → the tenant registered no remote servers.
+    tenant_mcp_pool: MCPServerPool | None = None
     #: Sandbox Supervisor client backing the ``exec_python`` builtin (F.4).
     supervisor_client: SupervisorClient | None = None
     #: Artifact registry backing the ``save_artifact`` / ``list_artifacts``
@@ -311,23 +318,40 @@ def _register_http(registry: ToolRegistry, env: ToolEnv) -> None:
 
 
 async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv) -> None:
-    if env.mcp_pool is None:
+    if env.mcp_pool is None and env.tenant_mcp_pool is None:
         raise AgentFactoryError(
-            "'mcp' tool declared but no MCP server pool is configured (ToolEnv.mcp_pool)"
+            "'mcp' tool declared but no MCP server pool is configured "
+            "(ToolEnv.mcp_pool / ToolEnv.tenant_mcp_pool)"
         )
     allow = set(entry.allow_tools) or None
-    # Stream O (Mini-ADR O-14) — a non-empty tenant allowlist hides every
-    # platform server not on it; empty means no restriction.
-    server_allow = set(env.mcp_allowlist) or None
-    for server_name in env.mcp_pool.names():
-        if server_allow is not None and server_name not in server_allow:
-            continue
-        client = env.mcp_pool.get(server_name)
-        if client is None:  # pragma: no cover - name came from names()
-            continue
-        await register_mcp_tools(
-            server_name=server_name,
-            client=client,
-            registry=registry,
-            allow_tools=allow,
-        )
+    registered_servers: set[str] = set()
+
+    # Platform pool — gated by the per-tenant allowlist (Mini-ADR O-14).
+    if env.mcp_pool is not None:
+        server_allow = set(env.mcp_allowlist) or None
+        for server_name in env.mcp_pool.names():
+            if server_allow is not None and server_name not in server_allow:
+                continue
+            client = env.mcp_pool.get(server_name)
+            if client is None:  # pragma: no cover - name came from names()
+                continue
+            await register_mcp_tools(
+                server_name=server_name, client=client, registry=registry, allow_tools=allow
+            )
+            registered_servers.add(server_name)
+
+    # Tenant pool — the tenant's own remote servers; never gated by the
+    # allowlist. On a name collision the platform server wins (already
+    # registered above); skip the tenant duplicate to avoid a double
+    # ``mcp:<name>.*`` registration.
+    if env.tenant_mcp_pool is not None:
+        for server_name in env.tenant_mcp_pool.names():
+            if server_name in registered_servers:
+                continue
+            client = env.tenant_mcp_pool.get(server_name)
+            if client is None:  # pragma: no cover
+                continue
+            await register_mcp_tools(
+                server_name=server_name, client=client, registry=registry, allow_tools=allow
+            )
+            registered_servers.add(server_name)
