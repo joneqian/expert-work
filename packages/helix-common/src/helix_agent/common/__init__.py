@@ -66,6 +66,12 @@ from helix_agent.common.lifecycle import (
 from helix_agent.common.lifecycle import (
     ShutdownState as ShutdownState,
 )
+from helix_agent.common.url_validation import (
+    RemoteURLError as RemoteURLError,
+)
+from helix_agent.common.url_validation import (
+    validate_remote_url as validate_remote_url,
+)
 
 __version__ = "0.0.0"
 
@@ -80,6 +86,7 @@ __all__ = [
     "HealthReportProvider",
     "HealthStatus",
     "Lifecycle",
+    "RemoteURLError",
     "ShutdownState",
     "__version__",
     "deadline_check",
@@ -92,5 +99,6 @@ __all__ = [
     "reset_current_trace_id",
     "set_current_tenant",
     "set_current_trace_id",
+    "validate_remote_url",
     "with_deadline",
 ]
