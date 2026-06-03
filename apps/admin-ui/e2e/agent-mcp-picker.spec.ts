@@ -19,6 +19,15 @@
  *     ``/v1/mcp-servers/github/tools``
  *   - POST body intercepted via ``page.waitForRequest`` (mirrors the PUT
  *     intercept in ``manifest-edit.spec.ts``)
+ *
+ * The shared ``installControlPlaneStub`` fixture auto-registers
+ * ``**​/v1/agents*`` (returns a list with customer-support-bot) so the
+ * Agents page renders.  We do NOT assert on that agent name — the test
+ * only needs the Create button to appear.
+ *
+ * For the POST we register a ``**​/v1/agents`` route that intercepts only
+ * POST requests and calls ``route.fallback()`` for everything else so the
+ * fixture's broader glob still handles the GET list.
  */
 import { test, expect, expectNoA11yViolations, SAMPLE_JWT } from "./fixtures";
 
@@ -37,6 +46,27 @@ const SCHEMA_ENVELOPE = {
         },
       },
     },
+  },
+};
+
+const CATALOG_ENVELOPE = {
+  success: true,
+  error: null,
+  data: {
+    providers: [
+      {
+        provider: "openai",
+        models: [
+          {
+            name: "gpt-5.5",
+            vision: true,
+            embeddings: false,
+            context_window: 128000,
+            deprecated: false,
+          },
+        ],
+      },
+    ],
   },
 };
 
@@ -87,13 +117,17 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ json: SCHEMA_ENVELOPE });
   });
 
+  // Model catalog — needed by the form's ModelSelect field on open.
+  await page.route("**/v1/model-catalog", async (route) => {
+    await route.fulfill({ json: CATALOG_ENVELOPE });
+  });
+
   // Embedding-status stub — drawer renders the editor only when configured.
   await page.route("**/v1/platform/embedding-config/status", (route) =>
     route.fulfill({ json: { success: true, data: { configured: true }, error: null } }),
   );
 
-  // MCP available-servers list.  Registered before the more-specific
-  // tools route so tool requests still reach their own handler first.
+  // MCP available-servers list.
   await page.route("**/v1/mcp-servers/available", async (route) => {
     await route.fulfill({ json: AVAILABLE_SERVERS });
   });
@@ -104,14 +138,14 @@ test.beforeEach(async ({ page }) => {
   });
 
   // POST /v1/agents — stub so the drawer can close after submit.
-  // Registered after the fixture's generic ``**/v1/agents*`` GET stub
-  // (LIFO), but we branch on method to make the POST explicit.
+  // Uses route.fallback() for non-POST requests so the fixture's broader
+  // ``**/v1/agents*`` GET stub still handles the agents-list fetch.
   await page.route("**/v1/agents", async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({ json: CREATE_AGENT_OK });
       return;
     }
-    await route.continue();
+    await route.fallback();
   });
 
   // Login.
@@ -124,7 +158,10 @@ test.beforeEach(async ({ page }) => {
   await tokenField.fill(SAMPLE_JWT);
   await page.getByTestId("login-submit").click();
   await expect(page).toHaveURL(/\/agents$/);
-  await expect(page.getByText("customer-support-bot")).toBeVisible();
+  // Wait for the agents page to settle (list rendered) — assert on the
+  // create button, not a specific agent name, so no pre-existing agent is
+  // required.
+  await expect(page.getByTestId("agents-create")).toBeVisible();
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────
