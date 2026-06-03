@@ -164,16 +164,16 @@ async def test_duplicate_name_rejected(tenant_mcp_server_store) -> None:
     try:
         tid = uuid4()
         current_tenant_id_var.set(tid)
-        kwargs = dict(
-            tenant_id=tid,
-            name="github",
-            transport="streamable_http",
-            url="https://a.example.com/mcp",
-            auth_type="none",
-            token_secret_ref=None,
-            timeout_s=30.0,
-            created_by="a@x",
-        )
+        kwargs = {
+            "tenant_id": tid,
+            "name": "github",
+            "transport": "streamable_http",
+            "url": "https://a.example.com/mcp",
+            "auth_type": "none",
+            "token_secret_ref": None,
+            "timeout_s": 30.0,
+            "created_by": "a@x",
+        }
         await store.create(**kwargs)
         with pytest.raises(TenantMcpServerAlreadyExistsError):
             await store.create(**kwargs)

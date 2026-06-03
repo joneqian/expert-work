@@ -11,18 +11,17 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.protocol import (
-    McpServerAuthType,
-    McpServerTransport,
-    TenantMcpServerPatch,
-    TenantMcpServerRecord,
-)
-
 from helix_agent.persistence.models import TenantMcpServerRow
 from helix_agent.persistence.tenant_mcp_server.base import (
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
     TenantMcpServerStore,
+)
+from helix_agent.protocol import (
+    McpServerAuthType,
+    McpServerTransport,
+    TenantMcpServerPatch,
+    TenantMcpServerRecord,
 )
 
 
@@ -89,9 +88,7 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
                 await session.commit()
             except IntegrityError as exc:
                 await session.rollback()
-                raise TenantMcpServerAlreadyExistsError(
-                    tenant_id=tenant_id, name=name
-                ) from exc
+                raise TenantMcpServerAlreadyExistsError(tenant_id=tenant_id, name=name) from exc
             await session.refresh(row)
             return _row_to_record(row)
 

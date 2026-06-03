@@ -130,6 +130,21 @@ from helix_agent.persistence.tenant_config import (
 from helix_agent.persistence.tenant_config import (
     TenantConfigStore as TenantConfigStore,
 )
+from helix_agent.persistence.tenant_mcp_server import (
+    InMemoryTenantMcpServerStore as InMemoryTenantMcpServerStore,
+)
+from helix_agent.persistence.tenant_mcp_server import (
+    SqlTenantMcpServerStore as SqlTenantMcpServerStore,
+)
+from helix_agent.persistence.tenant_mcp_server import (
+    TenantMcpServerAlreadyExistsError as TenantMcpServerAlreadyExistsError,
+)
+from helix_agent.persistence.tenant_mcp_server import (
+    TenantMcpServerNotFoundError as TenantMcpServerNotFoundError,
+)
+from helix_agent.persistence.tenant_mcp_server import (
+    TenantMcpServerStore as TenantMcpServerStore,
+)
 from helix_agent.persistence.tenant_member import (
     DuplicateMemberError as DuplicateMemberError,
 )
@@ -221,6 +236,7 @@ __all__ = [
     "InMemoryMemoryStore",
     "InMemoryPlatformSecretStore",
     "InMemoryTenantConfigStore",
+    "InMemoryTenantMcpServerStore",
     "InMemoryTenantMemberStore",
     "InMemoryTenantQuotaStore",
     "InMemoryTenantUserStore",
@@ -247,6 +263,7 @@ __all__ = [
     "SqlMemoryStore",
     "SqlPlatformSecretStore",
     "SqlTenantConfigStore",
+    "SqlTenantMcpServerStore",
     "SqlTenantMemberStore",
     "SqlTenantQuotaStore",
     "SqlTenantUserStore",
@@ -257,6 +274,9 @@ __all__ = [
     "SqlUserWorkspaceStore",
     "SqlVolumeBackupDLQ",
     "TenantConfigStore",
+    "TenantMcpServerAlreadyExistsError",
+    "TenantMcpServerNotFoundError",
+    "TenantMcpServerStore",
     "TenantMemberRow",
     "TenantMemberStore",
     "TenantQuotaStore",
