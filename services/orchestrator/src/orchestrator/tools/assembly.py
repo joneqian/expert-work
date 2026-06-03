@@ -338,6 +338,11 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
             await register_mcp_tools(
                 server_name=server_name, client=client, registry=registry, allow_tools=allow
             )
+            # Platform reserves the server NAME unconditionally — even if
+            # allow_tools filtered out all its tools this build — so a tenant
+            # can't shadow a platform server by crafting allow_tools.
+            # Server-level dedup is sufficient because tools are namespaced
+            # mcp:<server>.<tool>.
             registered_servers.add(server_name)
 
     # Tenant pool — the tenant's own remote servers; never gated by the
@@ -347,6 +352,7 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
     if env.tenant_mcp_pool is not None:
         for server_name in env.tenant_mcp_pool.names():
             if server_name in registered_servers:
+                logger.info("tenant_mcp.server_shadowed_by_platform")
                 continue
             client = env.tenant_mcp_pool.get(server_name)
             if client is None:  # pragma: no cover

@@ -463,3 +463,33 @@ async def test_name_collision_platform_wins() -> None:
 async def test_mcp_declared_but_no_pools_raises() -> None:
     with pytest.raises(AgentFactoryError, match="MCP server pool"):
         await build_tool_registry([MCPToolSpec()], tool_env=ToolEnv())
+
+
+@pytest.mark.asyncio
+async def test_platform_reserves_name_even_when_all_its_tools_filtered() -> None:
+    # Platform reserves the server NAME unconditionally even when allow_tools
+    # filters out every one of its tools for this build.  A tenant server with
+    # the same name must NOT be registered — otherwise a tenant could shadow a
+    # platform server by crafting allow_tools to exclude all platform tools.
+    platform = MCPServerPool()
+    await platform.add(
+        "github",
+        RecordingMCPClient(
+            tools=(MCPToolDef(name="platform_tool", description="", input_schema={}),)
+        ),
+    )
+    tenant = MCPServerPool()
+    await tenant.add(
+        "github",
+        RecordingMCPClient(
+            tools=(MCPToolDef(name="tenant_tool", description="", input_schema={}),)
+        ),
+    )
+    # allow_tools excludes the platform server's only tool; tenant has a matching name.
+    registry = await build_tool_registry(
+        [MCPToolSpec(allow_tools=["tenant_tool"])],
+        tool_env=ToolEnv(mcp_pool=platform, tenant_mcp_pool=tenant),
+    )
+    # Platform reserved "github" → tenant's mcp:github.tenant_tool is NOT registered.
+    assert registry.get("mcp:github.tenant_tool") is None
+    assert registry.get("mcp:github.platform_tool") is None  # filtered out by allow_tools
