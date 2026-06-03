@@ -20,8 +20,8 @@ import { test, expect, expectNoA11yViolations, SAMPLE_JWT } from "./fixtures";
 const AGENT_NAME = "customer-support-bot";
 const AGENT_VERSION = "3.4.2";
 
-// spec.model is an OBJECT (provider/name/supports_vision) so RJSF routes the
-// node to the custom ModelSelect field — same shape as manifest-model-select.
+// spec.model is an OBJECT (provider/name/supports_vision); the curated form
+// reads it into the ModelSelect picker — same shape as manifest-model-select.
 const SCHEMA_ENVELOPE = {
   success: true,
   error: null,

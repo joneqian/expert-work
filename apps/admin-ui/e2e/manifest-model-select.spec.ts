@@ -1,8 +1,8 @@
 /**
  * Manifest model-select E2E — Stream S PR D.
  *
- * Proves an admin can pick a provider + model through the visual Form tab's
- * linked model picker (``<ModelSelectField>``), that choosing a vision-capable
+ * Proves an admin can pick a provider + model through the curated Form tab's
+ * linked model picker (``<ModelSelect>``), that choosing a vision-capable
  * model flips the vision indicator to its supported state, and that the open
  * Create-Agent drawer (with the picker mounted) passes the axe a11y check.
  *
@@ -16,8 +16,8 @@
  */
 import { test, expect, expectNoA11yViolations, SAMPLE_JWT } from "./fixtures";
 
-// spec.model is an OBJECT here (provider/name/supports_vision) so RJSF routes
-// the node to the custom ModelSelect field and the linked dropdowns engage.
+// spec.model is an OBJECT here (provider/name/supports_vision); the curated
+// form reads it into the ModelSelect picker and the linked dropdowns engage.
 const SCHEMA_ENVELOPE = {
   success: true,
   error: null,

@@ -74,6 +74,7 @@ export function ModelSelect({ value, catalog, onChange }: ModelSelectProps) {
           max={2}
           step={0.1}
           value={temperature}
+          ariaLabelForHandle={t("model_select.temperature")}
           onChange={(v) => onChange({ ...value, temperature: v })}
         />
       </label>
