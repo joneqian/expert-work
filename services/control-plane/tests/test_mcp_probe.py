@@ -9,10 +9,18 @@ from orchestrator.tools.mcp import MCPToolDef
 
 
 class _FakeClient:
-    def __init__(self, *, tools=None, raise_on_start=None, raise_on_list=None):
+    def __init__(
+        self,
+        *,
+        tools=None,
+        raise_on_start=None,
+        raise_on_list=None,
+        raise_on_close=None,
+    ):
         self._tools = tools or []
         self._raise_on_start = raise_on_start
         self._raise_on_list = raise_on_list
+        self._raise_on_close = raise_on_close
         self.closed = False
 
     async def start(self) -> None:
@@ -26,6 +34,8 @@ class _FakeClient:
 
     async def close(self) -> None:
         self.closed = True
+        if self._raise_on_close is not None:
+            raise self._raise_on_close
 
 
 @pytest.mark.asyncio
@@ -116,3 +126,36 @@ async def test_probe_always_closes_client() -> None:
             client_factory=factory,
         )
     assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_probe_always_closes_client_on_start_failure() -> None:
+    client = _FakeClient(raise_on_start=RuntimeError("refused"))
+    with pytest.raises(McpProbeError):
+        await probe_remote_mcp(
+            name="x",
+            transport="sse",
+            url="https://x.example.com/sse",
+            bearer_token=None,
+            timeout_s=10.0,
+            client_factory=lambda c, h: client,
+        )
+    assert client.closed is True
+
+
+@pytest.mark.asyncio
+async def test_probe_error_not_masked_when_close_raises() -> None:
+    client = _FakeClient(
+        raise_on_list=RuntimeError("list failed"),
+        raise_on_close=RuntimeError("close failed"),
+    )
+    with pytest.raises(McpProbeError) as ei:
+        await probe_remote_mcp(
+            name="x",
+            transport="sse",
+            url="https://x.example.com/sse",
+            bearer_token=None,
+            timeout_s=10.0,
+            client_factory=lambda c, h: client,
+        )
+    assert ei.value.code == "MCP_SERVER_PROBE_FAILED"

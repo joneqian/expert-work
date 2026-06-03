@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol, runtime_checkable
 
 from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
 from orchestrator.tools.mcp import (
@@ -23,9 +24,17 @@ from orchestrator.tools.mcp import (
 
 logger = logging.getLogger("helix.control_plane.mcp_probe")
 
+
+@runtime_checkable
+class _ProbeClient(Protocol):
+    async def start(self) -> None: ...
+    async def list_tools(self) -> Sequence[MCPToolDef]: ...
+    async def close(self) -> None: ...
+
+
 # A factory so tests can inject a fake client. Production builds the real
 # transport client from config + already-resolved headers.
-ProbeClientFactory = Callable[[MCPServerConfig, Mapping[str, str]], object]
+ProbeClientFactory = Callable[[MCPServerConfig, Mapping[str, str]], _ProbeClient]
 
 
 class McpProbeError(Exception):
@@ -37,7 +46,7 @@ class McpProbeError(Exception):
         self.message = message
 
 
-def _default_client_factory(config: MCPServerConfig, headers: Mapping[str, str]) -> object:
+def _default_client_factory(config: MCPServerConfig, headers: Mapping[str, str]) -> _ProbeClient:
     if config.transport == "sse":
         return SseMCPClient(config=config, resolved_headers=dict(headers))
     return StreamableHttpMCPClient(config=config, resolved_headers=dict(headers))
@@ -57,6 +66,9 @@ async def probe_remote_mcp(
     Raises :class:`McpProbeError` (with ``code`` in
     ``{MCP_SERVER_INVALID_URL, MCP_SERVER_PROBE_FAILED}``) on SSRF rejection,
     connect failure, timeout, or list_tools error. Never logs the token.
+
+    Each phase (start, list_tools) gets the full timeout_s; total wall time is
+    at most 2x timeout_s.
     """
     try:
         validate_remote_url(url)
@@ -64,7 +76,7 @@ async def probe_remote_mcp(
         raise McpProbeError("MCP_SERVER_INVALID_URL", str(exc)) from exc
 
     headers: dict[str, str] = {}
-    if bearer_token:
+    if bearer_token is not None:
         headers["Authorization"] = f"Bearer {bearer_token}"
 
     # MCPServerConfig.__post_init__ requires auth_config["token_ref"] when
@@ -76,25 +88,23 @@ async def probe_remote_mcp(
         name=name,
         transport=transport,  # type: ignore[arg-type]
         url=url,
-        auth_type="bearer" if bearer_token else "none",
-        auth_config={"token_ref": "secret://probe"} if bearer_token else {},
+        auth_type="bearer" if bearer_token is not None else "none",
+        auth_config={"token_ref": "secret://probe"} if bearer_token is not None else {},
         timeout_s=timeout_s,
     )
-    client = client_factory(config, headers)
+    client: _ProbeClient = client_factory(config, headers)
     try:
-        await asyncio.wait_for(client.start(), timeout=timeout_s)  # type: ignore[attr-defined]
-        tools: Sequence[MCPToolDef] = await asyncio.wait_for(client.list_tools(), timeout=timeout_s)  # type: ignore[attr-defined]
+        await asyncio.wait_for(client.start(), timeout=timeout_s)
+        tools: Sequence[MCPToolDef] = await asyncio.wait_for(client.list_tools(), timeout=timeout_s)
         return tools
-    except McpProbeError:
-        raise
     except Exception as exc:  # probe maps all failures (incl. TimeoutError) to McpProbeError
-        logger.info("mcp_probe.failed server=%s transport=%s", name, transport)
+        logger.warning("mcp_probe.failed server=%s transport=%s", name, transport)
         raise McpProbeError(
             "MCP_SERVER_PROBE_FAILED",
             f"could not connect to MCP server {name!r}: {type(exc).__name__}",
         ) from exc
     finally:
         try:
-            await client.close()  # type: ignore[attr-defined]
+            await client.close()
         except Exception:  # best-effort teardown; close errors must not mask probe errors
-            logger.info("mcp_probe.close_failed server=%s", name)
+            logger.warning("mcp_probe.close_failed server=%s", name)
