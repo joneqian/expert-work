@@ -10,6 +10,7 @@ import {
   Clock,
   Key,
   KeyRound,
+  Plug,
   UserCircle2,
   Users,
   Building,
@@ -45,6 +46,7 @@ const SETTINGS_ITEMS: NavItem[] = [
   { key: "settings-service-accounts", labelKey: "nav.service_accounts", icon: <UserCircle2 size={16} strokeWidth={1.5} />, path: "/settings/service-accounts" },
   { key: "settings-members", labelKey: "nav.members", icon: <Users size={16} strokeWidth={1.5} />, path: "/settings/members" },
   { key: "settings-audit", labelKey: "nav.audit", icon: <Shield size={16} strokeWidth={1.5} />, path: "/settings/audit" },
+  { key: "settings-mcp-servers", labelKey: "nav.mcp_servers", icon: <Plug size={16} strokeWidth={1.5} />, path: "/settings/mcp-servers" },
 ];
 
 export function Sidebar() {
