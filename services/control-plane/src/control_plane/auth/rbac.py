@@ -40,6 +40,7 @@ Resource = Literal[
     "service_account",
     "api_key",
     "memory",  # Stream K.K6 — long-term memory CRUD
+    "mcp_server",  # Stream V — tenant remote MCP server registry
 ]
 
 Action = Literal[
@@ -80,6 +81,8 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             # filtering still applies in the endpoint via
             # ``caller_user_id``; admin has no extra cross-user power.
             "memory": {"read", "write", "delete"},
+            # Stream V — tenant remote MCP server registry
+            "mcp_server": {"read", "write", "delete"},
         }
     if role is Role.OPERATOR:
         return {
@@ -99,6 +102,8 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             # user via JWT carrying ``operator``) own their own memory
             # CRUD. Per-user scoping is enforced in the endpoint.
             "memory": {"read", "write", "delete"},
+            # Stream V — tenant remote MCP server registry
+            "mcp_server": {"read"},
         }
     # VIEWER
     return {
@@ -110,6 +115,8 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
         "tenant_config": {"read"},
         # Viewers can list their own memory but not edit / forget.
         "memory": {"read"},
+        # Stream V — tenant remote MCP server registry
+        "mcp_server": {"read"},
     }
 
 
