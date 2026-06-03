@@ -841,6 +841,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **关键路径** A→B→C→D→E；C 依赖 B 两端点。每 PR CI-green + 零债 6 条。**新前端依赖** `@rjsf/core`+`@rjsf/antd`+`@rjsf/utils`+`@rjsf/validator-ajv8`（v5.24，React 19 / Antd 5 零 peer-dep workaround）。**Stream S 全部 shipped（2026-06-02）**。RJSF `SchemaField` 委托递归 schema 会死循环 → ModelSpec 高级字段改手渲染有界集（详见 PR D）。
 
+**UI polish（2026-06-03）**：RJSF schema-dump 仍把后端类名 / Pydantic docstring / 英文标签 / 坏枚举 / `tenant_config`·`apiVersion`·`api_key_ref` 直接糊到表单，对管理员不可用。
+
+- [x] 重做建/改 agent 表单：RJSF schema-dump → 手工 curated 表单（名称/描述/模型+温度/系统提示词/长期记忆开关/工具 web_search·http·mcp），中文 + 下拉 + 开关；非 curated 字段合并保留；YAML 页保留为完整逃生口
+
 ---
 
 ### Stream T — 平台 Embedding/Rerank 配置 + 长期记忆默认化 — 设计 [STREAM-T-DESIGN](./streams/STREAM-T-DESIGN.md)
