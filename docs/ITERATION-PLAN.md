@@ -881,19 +881,19 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ---
 
-### Stream V — MCP Server 管理（租户自助注册远程 server + agent 表单按 server 选择）— 设计 [STREAM-V-DESIGN](./streams/STREAM-V-DESIGN.md)
+### Stream V — MCP Server 管理（租户自助注册远程 server + agent 表单按 server 选择）— ✅ 完成 2026-06-03（PR #381–#387）— 设计 [STREAM-V-DESIGN](./streams/STREAM-V-DESIGN.md)
 
 **触发（2026-06-03 dogfood 实测）**：MCP 运行时早已生产级（client + pool + 远程 sse/streamable_http 客户端 + token 注入 + 熔断），但**管理面/用户面几乎全缺**——从"配置一个 MCP server"到"在 agent 里勾选它"这条链路**一格 UI 都没有**。Agent 表单 MCP = 一个开关 + 一个**手打逗号分隔工具名**的文本框（`MCPToolSpec` 连 server 选择字段都没有）；无枚举接口（UI 不知道能用哪些 server / 哪些工具）；租户 `mcp_allowlist` 只读、`mcp_credentials` 无 UI；租户**加不了自己的远程 server**（只能等 ops 改磁盘文件）。
 
 **锁定决策**：① server 来源 = **租户自助加远程 server**（URL+token，HTTP/SSE，无 RCE；stdio 仍 ops-only）；② agent 层 = **先选 server 再可选窄到工具**（给 `MCPToolSpec` 加 `servers` 字段）；③ **平台 stdio + 租户远程并存**（不取代 allowlist）；④ **按租户建 pool**（私有 token 隔离）；⑤ token 走 encrypted secret store（与 LLM key web 粘贴同款）；⑥ **SSRF 防护**（注册+探测+运行时三处统一 URL 校验）。
 
-- [ ] **V-A 设计先行**（STREAM-V-DESIGN + 本 backlog）— **Mini-ADR V-1~V-11**
-- [ ] **V-B 注册表后端**：`tenant_mcp_server` model + migration `0054_tenant_mcp_server` + persistence store（base/sql/memory）+ protocol `TenantMcpServerRecord` + SSRF 校验 util；单测 CRUD/RLS/SSRF 拒私网
-- [ ] **V-C 注册 API + 探测**：CRUD 端点 + 注册时同步探测（连+list_tools，失败 422 不落库）+ token→encrypted store + DELETE 引用检查（409）+ 审计（`AuditAction` 单 StrEnum + `ResourceType` 双 Literal）；API 测（token 不入日志/非 admin 403/SSRF 422）
-- [ ] **V-D 按租户 pool 运行时**：`tenant_mcp_servers_provider` 闭包 + 租户 pool 构建 + token 解析注入 header + `_register_mcp` 并集逻辑（平台 stdio ∪ 租户远程，按 `servers`/`allow_tools` 过滤）+ 运行时 SSRF 校验；单测过滤/注入/并存/缓存复用/单 server 失败不炸 build
-- [ ] **V-E manifest schema**：`MCPToolSpec.servers`（空=全部，向后兼容）+ canonical manifest 验证；单测旧 manifest 无 servers=全部、servers 过滤生效
-- [ ] **V-F 发现接口 + 租户管理 UI**：`GET /v1/mcp-servers/available`（平台∪租户）+ `/{name}/tools`（live list_tools）+ `/settings/mcp-servers` 页 + 添加抽屉 +「测试连接」+ SDK + i18n + storybook/e2e/axe
-- [ ] **V-G agent 表单选择器**：FormView MCP 段重做（server 多选 + 工具展开勾选，替换开关+文本框）+ `form_model.ts` accessor（merge-preserving）+ i18n + Playwright 勾 server/展开工具/存读往返
+- [x] **V-A 设计先行**（PR #381）（STREAM-V-DESIGN + 本 backlog）— **Mini-ADR V-1~V-11**
+- [x] **V-B 注册表后端**（PR #382）：`tenant_mcp_server` model + migration `0054_tenant_mcp_server` + persistence store（base/sql/memory）+ protocol `TenantMcpServerRecord` + SSRF 校验 util；单测 CRUD/RLS/SSRF 拒私网
+- [x] **V-C 注册 API + 探测**（PR #383）：CRUD 端点 + 注册时同步探测（连+list_tools，失败 422 不落库）+ token→encrypted store + DELETE 引用检查（409）+ 审计（`AuditAction` 单 StrEnum + `ResourceType` 双 Literal）；API 测（token 不入日志/非 admin 403/SSRF 422）
+- [x] **V-D 按租户 pool 运行时**（PR #384）：`tenant_mcp_servers_provider` 闭包 + 租户 pool 构建 + token 解析注入 header + `_register_mcp` 并集逻辑（平台 stdio ∪ 租户远程，按 `servers`/`allow_tools` 过滤）+ 运行时 SSRF 校验；单测过滤/注入/并存/缓存复用/单 server 失败不炸 build
+- [x] **V-E manifest schema**（PR #385）：`MCPToolSpec.servers`（空=全部，向后兼容）+ canonical manifest 验证；单测旧 manifest 无 servers=全部、servers 过滤生效
+- [x] **V-F 发现接口 + 租户管理 UI**（PR #386）：`GET /v1/mcp-servers/available`（平台∪租户）+ `/{name}/tools`（live list_tools）+ `/settings/mcp-servers` 页 + 添加抽屉 +「测试连接」+ SDK + i18n + storybook/e2e/axe
+- [x] **V-G agent 表单选择器**（PR #387）：FormView MCP 段重做（server 多选 + 工具展开勾选，替换开关+文本框）+ `form_model.ts` accessor（merge-preserving）+ i18n + Playwright 勾 server/展开工具/存读往返
 
 **关键路径** A→B→C→D（后端链）；E 可与 C/D 并行；F 依赖 C；G 依赖 E+F。每 PR CI-green + 零债 6 条。**完成 = 租户在 helix 后台自助接入远程 MCP server，agent 表单按 server 勾选**（注册→测试连接→建 agent 勾选→Playground 真实调用），token 全程只在 web 填、加密存。
 
