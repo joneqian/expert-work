@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.mcp_connector_catalog.base import (
     McpConnectorCatalogAlreadyExistsError,
+    McpConnectorCatalogInUseError,
     McpConnectorCatalogNotFoundError,
     McpConnectorCatalogStore,
 )
@@ -155,6 +156,15 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
         )
         async with self._sf() as session:
             deleted = (await session.execute(stmt)).scalar_one_or_none()
-            await session.commit()
-        if deleted is None:
-            raise McpConnectorCatalogNotFoundError(catalog_id=catalog_id)
+            if deleted is None:
+                # Roll back the no-op DELETE before raising NotFound.
+                await session.rollback()
+                raise McpConnectorCatalogNotFoundError(catalog_id=catalog_id)
+            # The FK from tenant_mcp_server.catalog_id is ON DELETE RESTRICT, so
+            # the constraint fires on commit (not on the DELETE statement) when a
+            # tenant has instantiated this catalog entry — surface it as InUse.
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                await session.rollback()
+                raise McpConnectorCatalogInUseError(catalog_id=catalog_id) from exc

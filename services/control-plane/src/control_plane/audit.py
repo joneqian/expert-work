@@ -142,6 +142,11 @@ ResourceType = Literal[
     "tenant_member",  # Stream R — Mini-ADR R-3 (member onboarding)
     "keycloak_user",  # Stream R — Mini-ADR R-3 (Keycloak account provisioning)
     "tenant_mcp_server",  # Stream V — tenant remote MCP server registry
+    # Stream W — platform MCP connector catalog. Mirrors the protocol-side
+    # ``ResourceType`` Literal in
+    # packages/helix-protocol/src/helix_agent/protocol/audit.py per
+    # [memory:audit-literal-drift] (both must stay in sync).
+    "mcp_connector_catalog",
 ]
 
 

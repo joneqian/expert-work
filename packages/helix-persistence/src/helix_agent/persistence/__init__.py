@@ -65,6 +65,9 @@ from helix_agent.persistence.mcp_connector_catalog import (
     McpConnectorCatalogAlreadyExistsError as McpConnectorCatalogAlreadyExistsError,
 )
 from helix_agent.persistence.mcp_connector_catalog import (
+    McpConnectorCatalogInUseError as McpConnectorCatalogInUseError,
+)
+from helix_agent.persistence.mcp_connector_catalog import (
     McpConnectorCatalogNotFoundError as McpConnectorCatalogNotFoundError,
 )
 from helix_agent.persistence.mcp_connector_catalog import (
@@ -268,6 +271,7 @@ __all__ = [
     "KnowledgeDocumentRow",
     "KnowledgeStore",
     "McpConnectorCatalogAlreadyExistsError",
+    "McpConnectorCatalogInUseError",
     "McpConnectorCatalogNotFoundError",
     "McpConnectorCatalogRow",
     "McpConnectorCatalogStore",

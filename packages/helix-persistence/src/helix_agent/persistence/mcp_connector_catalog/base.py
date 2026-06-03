@@ -35,6 +35,19 @@ class McpConnectorCatalogAlreadyExistsError(Exception):
         self.name = name
 
 
+class McpConnectorCatalogInUseError(Exception):
+    """The catalog row is referenced by a tenant's ``tenant_mcp_server.catalog_id``.
+
+    The FK is ``ON DELETE RESTRICT`` (migration 0056), so the database refuses to
+    delete a catalog entry that any tenant has instantiated — cross-tenant and
+    RLS-independent. Surfaced as a 409 by the control-plane DELETE handler.
+    """
+
+    def __init__(self, *, catalog_id: UUID) -> None:
+        super().__init__(f"mcp_connector_catalog in use: id={catalog_id}")
+        self.catalog_id = catalog_id
+
+
 class McpConnectorCatalogStore(abc.ABC):
     """CRUD for platform-curated MCP connector catalog entries."""
 

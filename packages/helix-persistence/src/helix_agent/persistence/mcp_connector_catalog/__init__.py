@@ -2,6 +2,7 @@
 
 from helix_agent.persistence.mcp_connector_catalog.base import (
     McpConnectorCatalogAlreadyExistsError,
+    McpConnectorCatalogInUseError,
     McpConnectorCatalogNotFoundError,
     McpConnectorCatalogStore,
 )
@@ -13,6 +14,7 @@ from helix_agent.persistence.mcp_connector_catalog.sql import SqlMcpConnectorCat
 __all__ = [
     "InMemoryMcpConnectorCatalogStore",
     "McpConnectorCatalogAlreadyExistsError",
+    "McpConnectorCatalogInUseError",
     "McpConnectorCatalogNotFoundError",
     "McpConnectorCatalogStore",
     "SqlMcpConnectorCatalogStore",

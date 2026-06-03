@@ -225,6 +225,10 @@ class AuditAction(StrEnum):
     MCP_SERVER_CREATE = "mcp_server:create"
     MCP_SERVER_UPDATE = "mcp_server:update"
     MCP_SERVER_DELETE = "mcp_server:delete"
+    # mcp_catalog (Stream W — platform MCP connector catalog, system_admin)
+    MCP_CATALOG_CREATE = "mcp_catalog:create"
+    MCP_CATALOG_UPDATE = "mcp_catalog:update"
+    MCP_CATALOG_DELETE = "mcp_catalog:delete"
 
 
 ResourceType = Literal[
@@ -261,6 +265,7 @@ ResourceType = Literal[
     "tenant_member",  # Stream R — Mini-ADR R-3 (member onboarding)
     "keycloak_user",  # Stream R — Mini-ADR R-3 (Keycloak account provisioning)
     "tenant_mcp_server",  # Stream V — tenant remote MCP server registry
+    "mcp_connector_catalog",  # Stream W — platform MCP connector catalog
 ]
 """Canonical resource type strings used in audit log entries.
 

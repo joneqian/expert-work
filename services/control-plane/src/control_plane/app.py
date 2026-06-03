@@ -41,6 +41,7 @@ from control_plane.api import (
     build_feedback_router,
     build_health_router,
     build_knowledge_router,
+    build_mcp_catalog_router,
     build_mcp_servers_router,
     build_me_router,
     build_members_router,
@@ -202,6 +203,11 @@ from helix_agent.persistence.knowledge import (
     InMemoryKnowledgeStore,
     KnowledgeStore,
     SqlKnowledgeStore,
+)
+from helix_agent.persistence.mcp_connector_catalog import (
+    InMemoryMcpConnectorCatalogStore,
+    McpConnectorCatalogStore,
+    SqlMcpConnectorCatalogStore,
 )
 from helix_agent.persistence.memory import (
     InMemoryMemoryStore,
@@ -511,6 +517,10 @@ def create_app(
     # Stream V — tenant-registered remote MCP server registry.
     resolved_tenant_mcp_server_store = (
         sql_stores.tenant_mcp_server if sql_stores else InMemoryTenantMcpServerStore()
+    )
+    # Stream W — platform-curated MCP connector catalog (NULL-tenant rows).
+    resolved_mcp_connector_catalog_store = (
+        sql_stores.mcp_connector_catalog if sql_stores else InMemoryMcpConnectorCatalogStore()
     )
     resolved_keycloak_admin_client = keycloak_admin_client or _build_keycloak_admin_client(
         resolved_settings, resolved_secret_store
@@ -992,6 +1002,7 @@ def create_app(
     # remote pool (V-D). The pool service is built in the lifespan (needs the
     # AsyncExitStack for shutdown); ``None`` until the lifespan sets it.
     app.state.tenant_mcp_server_store = resolved_tenant_mcp_server_store
+    app.state.mcp_connector_catalog_store = resolved_mcp_connector_catalog_store
     app.state.tenant_mcp_pool_service = None
     app.state.platform_secret_store = resolved_platform_secret_store
     app.state.platform_secrets_service = resolved_platform_secrets_service
@@ -1090,6 +1101,7 @@ def create_app(
     app.include_router(build_uploads_router())
     app.include_router(build_service_accounts_router())
     app.include_router(build_mcp_servers_router())
+    app.include_router(build_mcp_catalog_router())
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())
     app.include_router(build_quota_router())
@@ -1147,6 +1159,7 @@ class _SqlStores:
     tenant_config: TenantConfigStore
     tenant_member: TenantMemberStore  # Stream R
     tenant_mcp_server: TenantMcpServerStore  # Stream V
+    mcp_connector_catalog: McpConnectorCatalogStore  # Stream W
     feedback: FeedbackStore
     token_usage: TokenUsageStore
     audit_log: AuditLogStore
@@ -1332,6 +1345,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         tenant_config=SqlTenantConfigStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
+        mcp_connector_catalog=SqlMcpConnectorCatalogStore(session_factory),
         feedback=DbFeedbackStore(session_factory),
         token_usage=DbTokenUsageStore(session_factory),
         audit_log=SqlAuditLogStore(session_factory),

@@ -41,6 +41,7 @@ Resource = Literal[
     "api_key",
     "memory",  # Stream K.K6 — long-term memory CRUD
     "mcp_server",  # Stream V — tenant remote MCP server registry
+    "mcp_catalog",  # Stream W — platform MCP connector catalog (system_admin)
 ]
 
 Action = Literal[
@@ -83,6 +84,9 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             "memory": {"read", "write", "delete"},
             # Stream V — tenant remote MCP server registry
             "mcp_server": {"read", "write", "delete"},
+            # Stream W — platform MCP connector catalog (system_admin auto-gets
+            # ADMIN via is_allowed; the endpoint also re-checks is_system_admin).
+            "mcp_catalog": {"read", "write", "delete"},
         }
     if role is Role.OPERATOR:
         return {
@@ -104,6 +108,8 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             "memory": {"read", "write", "delete"},
             # Stream V — tenant remote MCP server registry
             "mcp_server": {"read"},
+            # Stream W — platform MCP connector catalog
+            "mcp_catalog": {"read"},
         }
     # VIEWER
     return {
@@ -117,6 +123,8 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
         "memory": {"read"},
         # Stream V — tenant remote MCP server registry
         "mcp_server": {"read"},
+        # Stream W — platform MCP connector catalog
+        "mcp_catalog": {"read"},
     }
 
 
