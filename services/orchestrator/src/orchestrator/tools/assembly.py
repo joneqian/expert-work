@@ -324,6 +324,7 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
             "(ToolEnv.mcp_pool / ToolEnv.tenant_mcp_pool)"
         )
     allow = set(entry.allow_tools) or None
+    server_select = set(entry.servers) or None  # None = no per-agent restriction
     registered_servers: set[str] = set()
 
     # Platform pool — gated by the per-tenant allowlist (Mini-ADR O-14).
@@ -331,6 +332,8 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
         server_allow = set(env.mcp_allowlist) or None
         for server_name in env.mcp_pool.names():
             if server_allow is not None and server_name not in server_allow:
+                continue
+            if server_select is not None and server_name not in server_select:
                 continue
             client = env.mcp_pool.get(server_name)
             if client is None:  # pragma: no cover - name came from names()
@@ -353,6 +356,8 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
         for server_name in env.tenant_mcp_pool.names():
             if server_name in registered_servers:
                 logger.info("tenant_mcp.server_shadowed_by_platform")
+                continue
+            if server_select is not None and server_name not in server_select:
                 continue
             client = env.tenant_mcp_pool.get(server_name)
             if client is None:  # pragma: no cover

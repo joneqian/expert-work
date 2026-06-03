@@ -466,6 +466,79 @@ async def test_mcp_declared_but_no_pools_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_servers_filter_restricts_to_named_servers() -> None:
+    pool = MCPServerPool()
+    await pool.add(
+        "github",
+        RecordingMCPClient(tools=(MCPToolDef(name="gh", description="", input_schema={}),)),
+    )
+    await pool.add(
+        "linear",
+        RecordingMCPClient(tools=(MCPToolDef(name="li", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry(
+        [MCPToolSpec(servers=["github"])], tool_env=ToolEnv(mcp_pool=pool)
+    )
+    assert registry.get("mcp:github.gh") is not None
+    assert registry.get("mcp:linear.li") is None
+
+
+@pytest.mark.asyncio
+async def test_empty_servers_means_all() -> None:
+    pool = MCPServerPool()
+    await pool.add(
+        "github",
+        RecordingMCPClient(tools=(MCPToolDef(name="gh", description="", input_schema={}),)),
+    )
+    await pool.add(
+        "linear",
+        RecordingMCPClient(tools=(MCPToolDef(name="li", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry([MCPToolSpec()], tool_env=ToolEnv(mcp_pool=pool))
+    assert registry.get("mcp:github.gh") is not None
+    assert registry.get("mcp:linear.li") is not None
+
+
+@pytest.mark.asyncio
+async def test_servers_filter_applies_to_tenant_pool() -> None:
+    tenant = MCPServerPool()
+    await tenant.add(
+        "github",
+        RecordingMCPClient(tools=(MCPToolDef(name="gh", description="", input_schema={}),)),
+    )
+    await tenant.add(
+        "postgres",
+        RecordingMCPClient(tools=(MCPToolDef(name="pg", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry(
+        [MCPToolSpec(servers=["github"])], tool_env=ToolEnv(tenant_mcp_pool=tenant)
+    )
+    assert registry.get("mcp:github.gh") is not None
+    assert registry.get("mcp:postgres.pg") is None
+
+
+@pytest.mark.asyncio
+async def test_servers_filter_composes_with_platform_and_tenant() -> None:
+    platform = MCPServerPool()
+    await platform.add(
+        "ops",
+        RecordingMCPClient(tools=(MCPToolDef(name="deploy", description="", input_schema={}),)),
+    )
+    tenant = MCPServerPool()
+    await tenant.add(
+        "github",
+        RecordingMCPClient(tools=(MCPToolDef(name="gh", description="", input_schema={}),)),
+    )
+    # select only the tenant's github; the platform ops server is excluded.
+    registry = await build_tool_registry(
+        [MCPToolSpec(servers=["github"])],
+        tool_env=ToolEnv(mcp_pool=platform, tenant_mcp_pool=tenant),
+    )
+    assert registry.get("mcp:github.gh") is not None
+    assert registry.get("mcp:ops.deploy") is None
+
+
+@pytest.mark.asyncio
 async def test_platform_reserves_name_even_when_all_its_tools_filtered() -> None:
     # Platform reserves the server NAME unconditionally even when allow_tools
     # filters out every one of its tools for this build.  A tenant server with
