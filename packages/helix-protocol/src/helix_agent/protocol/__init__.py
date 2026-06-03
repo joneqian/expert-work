@@ -63,6 +63,10 @@ from helix_agent.protocol.dr import (
     DrillRecord,
     DrillType,
 )
+from helix_agent.protocol.entitlement import (
+    TIER_ORDER,
+    tier_satisfies,
+)
 from helix_agent.protocol.eval_dataset import (
     CandidateStatus,
     CurationCandidateRecord,
@@ -81,6 +85,13 @@ from helix_agent.protocol.knowledge import (
     KnowledgeBase,
     KnowledgeChunk,
     KnowledgeDocument,
+)
+from helix_agent.protocol.mcp_connector_catalog import (
+    McpConnectorAuthField,
+    McpConnectorAuthSchema,
+    McpConnectorCatalogPatch,
+    McpConnectorCatalogRecord,
+    McpConnectorCatalogUpsert,
 )
 from helix_agent.protocol.memory_item import MemoryItem
 from helix_agent.protocol.model_catalog import MODEL_CATALOG, ModelEntry, models_for_provider
@@ -181,6 +192,7 @@ __all__ = [
     "PROVIDER_CATALOG",
     "SKILL_REF_PATTERN",
     "TENANT_SCOPE_ROLES",
+    "TIER_ORDER",
     "TOOL_CATALOG",
     "AgentMetadata",
     "AgentSpec",
@@ -238,6 +250,11 @@ __all__ = [
     "KnowledgeSpec",
     "LongTermMemorySpec",
     "MCPToolSpec",
+    "McpConnectorAuthField",
+    "McpConnectorAuthSchema",
+    "McpConnectorCatalogPatch",
+    "McpConnectorCatalogRecord",
+    "McpConnectorCatalogUpsert",
     "McpServerAuthType",
     "McpServerTransport",
     "MemberRole",
@@ -314,5 +331,6 @@ __all__ = [
     "parse_agent_ref",
     "parse_image_ref",
     "parse_skill_ref",
+    "tier_satisfies",
     "validate_secret_ref",
 ]

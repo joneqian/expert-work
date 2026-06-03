@@ -49,6 +49,11 @@ class TenantMcpServerRecord(BaseModel):
     token_secret_ref: str | None = None
     timeout_s: float = Field(default=30.0, gt=0, le=300)
     enabled: bool = True
+    # Stream W (Mini-ADR W-2). NULL = off-catalog custom server (every
+    # Stream V row); non-NULL = an instantiation of an ``mcp_connector_catalog``
+    # entry. Resolved url/transport/auth are snapshotted onto this row at
+    # instantiation, so the runtime pool reads this record unchanged.
+    catalog_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
     created_by: str

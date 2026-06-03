@@ -74,6 +74,17 @@ def test_valid_server_name_accepted(good_name: str) -> None:
     assert _record(name=good_name).name == good_name
 
 
+def test_catalog_id_defaults_none() -> None:
+    """Stream W: off-catalog custom servers (every Stream V row) have no catalog_id."""
+    assert _record().catalog_id is None
+
+
+def test_catalog_id_accepts_uuid() -> None:
+    """A catalog instance carries the originating catalog entry id."""
+    cat_id = uuid4()
+    assert _record(catalog_id=cat_id).catalog_id == cat_id
+
+
 def test_frozen() -> None:
     rec = _record()
     with pytest.raises(ValidationError):

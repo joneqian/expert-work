@@ -190,6 +190,11 @@ class TenantConfigRecord(BaseModel):
     # when a thread is created without an explicit agent. ``None`` → platform
     # fallback (``canonical-agent``).
     default_agent_name: str | None = None
+    # Stream W — Mini-ADR W-4. When False, the tenant may only instantiate MCP
+    # servers from the platform catalog; off-catalog custom registration is
+    # rejected. Defaults True to preserve Stream V self-service behavior — a
+    # platform admin sets it False per tenant for catalog-only governance.
+    allow_custom_mcp_servers: bool = True
     created_at: datetime
     updated_at: datetime
     updated_by: str
@@ -265,3 +270,5 @@ class TenantConfigPatch(BaseModel):
     # "leave unchanged"; clearing it back to platform fallback is out of scope
     # this iteration — an admin re-points it instead).
     default_agent_name: str | None = None
+    # Stream W — Mini-ADR W-4. None = leave unchanged.
+    allow_custom_mcp_servers: bool | None = None

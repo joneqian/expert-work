@@ -912,7 +912,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 **演进 Stream V，不破坏已上线行/端点**。平台维护精选连接器目录（system_admin），租户从目录实例化、填自己凭证；premium 项按档位门控。保留自定义逃生口（per-tenant kill-switch）。
 
 - [ ] **W0 设计先行**（STREAM-W-DESIGN + 本 backlog）— **Mini-ADR W-1~W-11**
-- [ ] **W1 协议 + entitlement 原语**：`protocol/mcp_connector_catalog.py`（records + `McpConnectorAuthSchema`）+ `TenantMcpServerRecord.catalog_id` + `TenantConfigRecord/Patch.allow_custom_mcp_servers` + `helix-common` `TIER_ORDER`/`tier_satisfies`；纯 schema 单测
+- [ ] **W1 协议 + entitlement 原语**：`protocol/mcp_connector_catalog.py`（records + `McpConnectorAuthSchema`）+ `TenantMcpServerRecord.catalog_id` + `TenantConfigRecord/Patch.allow_custom_mcp_servers` + `protocol/entitlement.py` `TIER_ORDER`/`tier_satisfies`（放 helix-protocol 非 helix-common，避免新增跨包依赖）；纯 schema 单测
 - [ ] **W2 持久化**：迁移 `0055_mcp_connector_catalog`（NULL-tenant RLS，照抄 0050）+ `0056_mcp_server_catalog_id`（加列）+ ORM + `McpConnectorCatalogStore`(base/sql/memory) + store `catalog_id` kwarg + `tenant_config` 列；**RLS 测（租户读目录须 bypass）+ 迁移安全测（V 旧行→catalog_id=NULL）**
 - [ ] **W3 平台目录 CRUD API + RBAC**：`mcp_catalog` 资源 + `api/mcp_catalog.py`（system_admin，bypass_rls）+ delete-in-use 409 + 审计双 Literal；authz 测
 - [ ] **W4 租户实例化 + 档位门控 + `/available` + 自定义 kill-switch**：`GET /catalog`（带 entitled）+ `POST /catalog/{id}/instances`（复用 probe/secret/invalidate）+ `tier_satisfies` 门控 + `allow_custom_mcp_servers` enforce；**复跑 V pool 测验证运行时零改动**
