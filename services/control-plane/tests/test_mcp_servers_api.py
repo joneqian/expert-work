@@ -213,6 +213,76 @@ async def test_duplicate_name_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_post_none_auth_with_token_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST auth_type='none' + token set → 422 MCP_SERVER_TOKEN_NOT_ALLOWED; nothing persisted."""
+    app, admin_headers, _ = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "noauth",
+                "transport": "sse",
+                "url": "https://x.example.com/sse",
+                "auth_type": "none",
+                "token": "x",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "MCP_SERVER_TOKEN_NOT_ALLOWED"
+        lst = await client.get("/v1/mcp-servers", headers=admin_headers)
+        assert lst.json()["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_post_bearer_empty_token_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST auth_type='bearer' + empty token → 422 MCP_SERVER_TOKEN_REQUIRED; nothing persisted."""
+    app, admin_headers, _ = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "bearer-empty",
+                "transport": "streamable_http",
+                "url": "https://x.example.com/mcp",
+                "auth_type": "bearer",
+                "token": "",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "MCP_SERVER_TOKEN_REQUIRED"
+        lst = await client.get("/v1/mcp-servers", headers=admin_headers)
+        assert lst.json()["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_post_invalid_name_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST name='Bad Name!' (fails pattern) → 422 request-validation error; nothing persisted."""
+    app, admin_headers, _ = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "Bad Name!",
+                "transport": "sse",
+                "url": "https://x.example.com/sse",
+                "auth_type": "none",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        lst = await client.get("/v1/mcp-servers", headers=admin_headers)
+        assert lst.json()["data"] == []
+
+
+@pytest.mark.asyncio
 async def test_delete_succeeds_when_unreferenced(monkeypatch: pytest.MonkeyPatch) -> None:
     """DELETE an existing server that is not referenced by any agent → 204."""
     app, admin_headers, _ = await _make_app_with_admin()

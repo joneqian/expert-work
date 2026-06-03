@@ -64,7 +64,7 @@ def manifest_references_server(spec_json: Mapping[str, Any], server_name: str) -
 
 class CreateMcpServerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
     transport: McpServerTransport
     url: str = Field(min_length=1)
     auth_type: McpServerAuthType = "none"
@@ -145,13 +145,22 @@ def build_mcp_servers_router() -> APIRouter:
                 status_code=422,
                 detail={"code": "MCP_SERVER_INVALID_URL", "message": str(exc)},
             ) from exc
-        # 2) bearer auth requires a token.
-        if payload.auth_type == "bearer" and payload.token is None:
+        # 2) auth_type / token consistency — reject BEFORE any I/O.
+        raw_token = payload.token.get_secret_value() if payload.token is not None else None
+        if payload.auth_type == "bearer" and not (raw_token and raw_token.strip()):
             raise HTTPException(
                 status_code=422,
                 detail={
                     "code": "MCP_SERVER_TOKEN_REQUIRED",
-                    "message": "bearer auth requires token",
+                    "message": "bearer auth requires a non-empty token",
+                },
+            )
+        if payload.auth_type == "none" and payload.token is not None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "MCP_SERVER_TOKEN_NOT_ALLOWED",
+                    "message": "token must not be set when auth_type='none'",
                 },
             )
         # 3) reject duplicate BEFORE probe / secret write (avoid orphan secret version).
@@ -163,7 +172,6 @@ def build_mcp_servers_router() -> APIRouter:
                     "message": "name already registered",
                 },
             )
-        raw_token = payload.token.get_secret_value() if payload.token is not None else None
         # 4) connect-probe (connect + list_tools) with the raw token in memory.
         try:
             tools = await probe_remote_mcp(
@@ -206,6 +214,7 @@ def build_mcp_servers_router() -> APIRouter:
                     "message": "name already registered",
                 },
             ) from exc
+        logger.info("mcp_server.registered server=%s transport=%s", record.name, record.transport)
         await emit(
             audit,
             tenant_id=tenant_id,
@@ -260,6 +269,15 @@ def build_mcp_servers_router() -> APIRouter:
                     status_code=422,
                     detail={"code": "MCP_SERVER_INVALID_URL", "message": str(exc)},
                 ) from exc
+        # Reject an explicitly-empty token rotation before any I/O.
+        if payload.token is not None and not payload.token.get_secret_value().strip():
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "MCP_SERVER_TOKEN_REQUIRED",
+                    "message": "token must be non-empty",
+                },
+            )
         # Re-probe when connectivity-affecting fields change (url or token).
         # next_token_secret_ref: will be set to the new ref only when rotating; else None
         # (TenantMcpServerPatch treats None as "leave unchanged").
