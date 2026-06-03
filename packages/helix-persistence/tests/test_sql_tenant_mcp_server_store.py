@@ -212,6 +212,38 @@ async def test_update_and_delete(tenant_mcp_server_store) -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_invalid_patch_rejects_atomically(tenant_mcp_server_store) -> None:
+    store, engine = tenant_mcp_server_store
+    tid = uuid4()
+    current_tenant_id_var.set(tid)
+    try:
+        await store.create(
+            tenant_id=tid,
+            name="github",
+            transport="streamable_http",
+            url="https://a.example.com/mcp",
+            auth_type="none",
+            token_secret_ref=None,
+            timeout_s=30.0,
+            created_by="a@x",
+        )
+        with pytest.raises(ValueError):
+            await store.update(
+                tenant_id=tid,
+                name="github",
+                patch=TenantMcpServerPatch(token_secret_ref="secret://x"),
+            )
+        # atomic reject: the row must be unchanged
+        unchanged = await store.get(tenant_id=tid, name="github")
+        assert unchanged is not None
+        assert unchanged.token_secret_ref is None
+        assert unchanged.auth_type == "none"
+    finally:
+        current_tenant_id_var.set(None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_rls_blocks_cross_tenant_write(tenant_mcp_server_store) -> None:
     store, engine = tenant_mcp_server_store
     a, b = uuid4(), uuid4()

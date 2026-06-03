@@ -17,6 +17,8 @@ down_revision: str | Sequence[str] | None = "0053_tenant_status"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+__all__ = ["branch_labels", "depends_on", "down_revision", "downgrade", "revision", "upgrade"]
+
 _TABLE = "tenant_mcp_server"
 _POLICY = "tenant_mcp_server_tenant_isolation"
 

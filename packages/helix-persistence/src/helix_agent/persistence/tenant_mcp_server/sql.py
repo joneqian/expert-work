@@ -131,9 +131,13 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
             if patch.enabled is not None:
                 existing.enabled = patch.enabled
             existing.updated_at = _utc_now()
+            # Validate the prospective record BEFORE commit: if the merged row
+            # violates a cross-field invariant, _row_to_record raises and the
+            # context-manager rolls back — no corrupt row is persisted (parity
+            # with the in-memory store's validate-before-write semantics).
+            record = _row_to_record(existing)
             await session.commit()
-            await session.refresh(existing)
-            return _row_to_record(existing)
+            return record
 
     async def delete(self, *, tenant_id: UUID, name: str) -> None:
         stmt = (
