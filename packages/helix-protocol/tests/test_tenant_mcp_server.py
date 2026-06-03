@@ -51,13 +51,25 @@ def test_none_auth_with_token_ref_rejected() -> None:
         _record(auth_type="none", token_secret_ref="secret://x")
 
 
+def test_none_auth_with_empty_string_token_ref_rejected() -> None:
+    """Empty string must not bypass the auth guard (falsy trap)."""
+    with pytest.raises(ValueError, match="token_secret_ref must be empty"):
+        _record(auth_type="none", token_secret_ref="")
+
+
+def test_bearer_with_plaintext_token_rejected() -> None:
+    """Plaintext token values (no secret:// / kms:// prefix) must be rejected."""
+    with pytest.raises(ValueError, match="secret:// or kms://"):
+        _record(auth_type="bearer", token_secret_ref="ghp_plaintext_token")
+
+
 @pytest.mark.parametrize("bad_name", ["", "Has Space", "UPPER", "a/b", "x" * 65, "-leading"])
 def test_invalid_server_name_rejected(bad_name: str) -> None:
     with pytest.raises(ValueError):
         _record(name=bad_name)
 
 
-@pytest.mark.parametrize("good_name", ["github", "linear-prod", "pg_main", "a1"])
+@pytest.mark.parametrize("good_name", ["a", "github", "linear-prod", "pg_main", "a1"])
 def test_valid_server_name_accepted(good_name: str) -> None:
     assert _record(name=good_name).name == good_name
 
