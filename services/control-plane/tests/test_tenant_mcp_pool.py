@@ -155,9 +155,11 @@ async def test_invalidation_during_build_is_not_lost() -> None:
     await svc.invalidate(tid)  # invalidation lands mid-build
 
     release.set()  # unblock the build
-    await build_task  # completes; must NOT have cached the stale pool
+    served = await build_task  # the in-flight caller is still served a pool...
 
-    # The key assertion: the racing build must not have stored to _pools.
+    # ...but because the invalidation landed mid-build, that pool must NOT have
+    # been cached (serve-once-uncached — the generation-counter guarantee).
+    assert served is not None
     assert svc._pools.get(tid) is None
 
     # Next call must trigger a real rebuild (not a cache hit).
