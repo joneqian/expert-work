@@ -572,13 +572,18 @@ class HTTPToolSpec(BaseModel):
 
 
 class MCPToolSpec(BaseModel):
-    """Enable MCP tools for this agent. MCP servers are tenant-scoped
-    (``tenant_config.mcp_servers``). ``allow_tools`` optionally filters
-    which advertised tools the agent sees — empty means all."""
+    """Enable MCP tools for this agent.
+
+    ``servers`` optionally restricts the agent to the named MCP servers
+    (from the platform pool the tenant is allowed to use + the tenant's own
+    registered remote servers); empty means every available server. Stream V.
+    ``allow_tools`` optionally filters which advertised tools the agent sees
+    (by bare tool name, across the selected servers); empty means all."""
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["mcp"] = "mcp"
+    servers: list[str] = Field(default_factory=list)
     allow_tools: list[str] = Field(default_factory=list)
 
 

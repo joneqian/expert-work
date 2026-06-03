@@ -558,3 +558,31 @@ def test_vision_block_extra_field_rejected() -> None:
     }
     with pytest.raises(ValidationError):
         AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
+# MCPToolSpec.servers — per-agent server selection (Stream V-E)
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_tool_spec_defaults_empty_servers() -> None:
+    spec = MCPToolSpec()
+    assert spec.servers == []  # empty = all available servers
+    assert spec.allow_tools == []
+
+
+def test_mcp_tool_spec_accepts_servers() -> None:
+    spec = MCPToolSpec(servers=["github", "linear"], allow_tools=["create_issue"])
+    assert spec.servers == ["github", "linear"]
+
+
+def test_mcp_tool_spec_backward_compatible_without_servers() -> None:
+    # A manifest dict from before V-E (no "servers" key) must still parse,
+    # defaulting servers to [].
+    spec = MCPToolSpec.model_validate({"type": "mcp", "allow_tools": ["x"]})
+    assert spec.servers == []
+
+
+def test_mcp_tool_spec_still_forbids_extra() -> None:
+    with pytest.raises(ValidationError):
+        MCPToolSpec.model_validate({"type": "mcp", "bogus": 1})
