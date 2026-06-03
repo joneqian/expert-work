@@ -27,9 +27,14 @@ logger = logging.getLogger("helix.control_plane.mcp_probe")
 
 @runtime_checkable
 class _ProbeClient(Protocol):
-    async def start(self) -> None: ...
-    async def list_tools(self) -> Sequence[MCPToolDef]: ...
-    async def close(self) -> None: ...
+    async def start(self) -> None:
+        """Open the transport connection + MCP session."""
+
+    async def list_tools(self) -> Sequence[MCPToolDef]:
+        """Return the tools the server advertises."""
+
+    async def close(self) -> None:
+        """Tear the connection down."""
 
 
 # A factory so tests can inject a fake client. Production builds the real
@@ -98,7 +103,10 @@ async def probe_remote_mcp(
         tools: Sequence[MCPToolDef] = await asyncio.wait_for(client.list_tools(), timeout=timeout_s)
         return tools
     except Exception as exc:  # probe maps all failures (incl. TimeoutError) to McpProbeError
-        logger.warning("mcp_probe.failed server=%s transport=%s", name, transport)
+        # NB: do not log the tenant-supplied server name/url/transport — CodeQL
+        # py/log-injection flags request-derived values; the caller surfaces the
+        # failure (with context) to the API response + audit already.
+        logger.warning("mcp_probe.failed")
         raise McpProbeError(
             "MCP_SERVER_PROBE_FAILED",
             f"could not connect to MCP server {name!r}: {type(exc).__name__}",
@@ -107,4 +115,4 @@ async def probe_remote_mcp(
         try:
             await client.close()
         except Exception:  # best-effort teardown; close errors must not mask probe errors
-            logger.warning("mcp_probe.close_failed server=%s", name)
+            logger.warning("mcp_probe.close_failed")
