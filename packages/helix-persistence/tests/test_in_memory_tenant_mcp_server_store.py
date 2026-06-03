@@ -131,3 +131,22 @@ async def test_delete_absent_raises() -> None:
 async def test_list_for_tenant_empty_when_no_rows() -> None:
     store = InMemoryTenantMcpServerStore()
     assert await store.list_for_tenant(tenant_id=uuid4()) == []
+
+
+@pytest.mark.asyncio
+async def test_create_without_catalog_id_defaults_none() -> None:
+    store = InMemoryTenantMcpServerStore()
+    tid = uuid4()
+    created = await _make(store, tid)
+    assert created.catalog_id is None
+
+
+@pytest.mark.asyncio
+async def test_create_with_catalog_id_round_trips() -> None:
+    store = InMemoryTenantMcpServerStore()
+    tid = uuid4()
+    catalog_id = uuid4()
+    created = await _make(store, tid, catalog_id=catalog_id)
+    assert created.catalog_id == catalog_id
+    fetched = await store.get(tenant_id=tid, name="github")
+    assert fetched is not None and fetched.catalog_id == catalog_id

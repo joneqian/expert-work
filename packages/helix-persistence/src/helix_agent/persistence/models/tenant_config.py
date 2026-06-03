@@ -111,6 +111,13 @@ class TenantConfigRow(Base):
     # when they don't pick one. NULL → platform fallback (canonical-agent).
     # Added in migration 0052.
     default_agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stream W — Mini-ADR W-4. When False, the tenant may only instantiate MCP
+    # servers from the platform catalog; off-catalog custom registration is
+    # rejected. Defaults True (preserves Stream V self-service). Added in
+    # migration 0056.
+    allow_custom_mcp_servers: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true"), default=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

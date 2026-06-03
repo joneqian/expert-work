@@ -41,6 +41,7 @@ class InMemoryTenantMcpServerStore(TenantMcpServerStore):
         token_secret_ref: str | None,
         timeout_s: float,
         created_by: str,
+        catalog_id: UUID | None = None,
     ) -> TenantMcpServerRecord:
         async with self._lock:
             key = (tenant_id, name)
@@ -55,6 +56,7 @@ class InMemoryTenantMcpServerStore(TenantMcpServerStore):
                 url=url,
                 auth_type=auth_type,
                 token_secret_ref=token_secret_ref,
+                catalog_id=catalog_id,
                 timeout_s=timeout_s,
                 enabled=True,
                 created_at=now,

@@ -58,6 +58,21 @@ from helix_agent.persistence.knowledge import (
 from helix_agent.persistence.knowledge import InMemoryKnowledgeStore as InMemoryKnowledgeStore
 from helix_agent.persistence.knowledge import KnowledgeStore as KnowledgeStore
 from helix_agent.persistence.knowledge import SqlKnowledgeStore as SqlKnowledgeStore
+from helix_agent.persistence.mcp_connector_catalog import (
+    InMemoryMcpConnectorCatalogStore as InMemoryMcpConnectorCatalogStore,
+)
+from helix_agent.persistence.mcp_connector_catalog import (
+    McpConnectorCatalogAlreadyExistsError as McpConnectorCatalogAlreadyExistsError,
+)
+from helix_agent.persistence.mcp_connector_catalog import (
+    McpConnectorCatalogNotFoundError as McpConnectorCatalogNotFoundError,
+)
+from helix_agent.persistence.mcp_connector_catalog import (
+    McpConnectorCatalogStore as McpConnectorCatalogStore,
+)
+from helix_agent.persistence.mcp_connector_catalog import (
+    SqlMcpConnectorCatalogStore as SqlMcpConnectorCatalogStore,
+)
 from helix_agent.persistence.memory import InMemoryMemoryStore as InMemoryMemoryStore
 from helix_agent.persistence.memory import MemoryStore as MemoryStore
 from helix_agent.persistence.memory import SqlMemoryStore as SqlMemoryStore
@@ -71,6 +86,7 @@ from helix_agent.persistence.models import ImageUploadRow as ImageUploadRow
 from helix_agent.persistence.models import KnowledgeBaseRow as KnowledgeBaseRow
 from helix_agent.persistence.models import KnowledgeChunkRow as KnowledgeChunkRow
 from helix_agent.persistence.models import KnowledgeDocumentRow as KnowledgeDocumentRow
+from helix_agent.persistence.models import McpConnectorCatalogRow as McpConnectorCatalogRow
 from helix_agent.persistence.models import MemoryItemRow as MemoryItemRow
 from helix_agent.persistence.models import SkillRow as SkillRow
 from helix_agent.persistence.models import SkillVersionRow as SkillVersionRow
@@ -233,6 +249,7 @@ __all__ = [
     "InMemoryCurationCandidateStore",
     "InMemoryEvalDatasetStore",
     "InMemoryKnowledgeStore",
+    "InMemoryMcpConnectorCatalogStore",
     "InMemoryMemoryStore",
     "InMemoryPlatformSecretStore",
     "InMemoryTenantConfigStore",
@@ -250,6 +267,10 @@ __all__ = [
     "KnowledgeChunkRow",
     "KnowledgeDocumentRow",
     "KnowledgeStore",
+    "McpConnectorCatalogAlreadyExistsError",
+    "McpConnectorCatalogNotFoundError",
+    "McpConnectorCatalogRow",
+    "McpConnectorCatalogStore",
     "MemoryItemRow",
     "MemoryStore",
     "PlatformSecretStore",
@@ -260,6 +281,7 @@ __all__ = [
     "SqlCurationCandidateStore",
     "SqlEvalDatasetStore",
     "SqlKnowledgeStore",
+    "SqlMcpConnectorCatalogStore",
     "SqlMemoryStore",
     "SqlPlatformSecretStore",
     "SqlTenantConfigStore",

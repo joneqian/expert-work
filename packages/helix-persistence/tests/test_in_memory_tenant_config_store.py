@@ -11,7 +11,7 @@ from helix_agent.persistence.tenant_config.base import (
     TenantConfigNotFoundError,
 )
 from helix_agent.persistence.tenant_config.memory import InMemoryTenantConfigStore
-from helix_agent.protocol import TenantPlan
+from helix_agent.protocol import TenantConfigPatch, TenantPlan
 
 
 @pytest.mark.asyncio
@@ -120,3 +120,37 @@ async def test_list_all_paginates() -> None:
         await store.create(tenant_id=uuid4(), display_name=f"T{i}", actor_id="sys")
     assert len(await store.list_all(limit=2, offset=0)) == 2
     assert len(await store.list_all(limit=2, offset=2)) == 1
+
+
+@pytest.mark.asyncio
+async def test_allow_custom_mcp_servers_defaults_true() -> None:
+    store = InMemoryTenantConfigStore()
+    record = await store.create(tenant_id=uuid4(), display_name="Acme", actor_id="sys")
+    assert record.allow_custom_mcp_servers is True
+
+
+@pytest.mark.asyncio
+async def test_allow_custom_mcp_servers_patch_round_trips() -> None:
+    store = InMemoryTenantConfigStore()
+    tid = uuid4()
+    await store.create(tenant_id=tid, display_name="Acme", actor_id="sys")
+    updated = await store.upsert(
+        tenant_id=tid,
+        patch=TenantConfigPatch(allow_custom_mcp_servers=False),
+        actor_id="ops",
+    )
+    assert updated.allow_custom_mcp_servers is False
+    got = await store.get(tenant_id=tid)
+    assert got is not None and got.allow_custom_mcp_servers is False
+
+
+@pytest.mark.asyncio
+async def test_allow_custom_mcp_servers_set_false_on_first_upsert() -> None:
+    store = InMemoryTenantConfigStore()
+    tid = uuid4()
+    record = await store.upsert(
+        tenant_id=tid,
+        patch=TenantConfigPatch(display_name="Acme", allow_custom_mcp_servers=False),
+        actor_id="sys",
+    )
+    assert record.allow_custom_mcp_servers is False

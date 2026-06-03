@@ -126,6 +126,8 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                     row_kwargs["mcp_credentials"] = dict(patch.mcp_credentials)
                 if patch.default_agent_name is not None:
                     row_kwargs["default_agent_name"] = patch.default_agent_name
+                if patch.allow_custom_mcp_servers is not None:
+                    row_kwargs["allow_custom_mcp_servers"] = patch.allow_custom_mcp_servers
                 row = TenantConfigRecord(**row_kwargs)  # type: ignore[arg-type]
             else:
                 row = existing.model_copy(
@@ -161,6 +163,8 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                             "mcp_credentials": patch.mcp_credentials,
                             # Stream R — tenant default agent.
                             "default_agent_name": patch.default_agent_name,
+                            # Stream W — custom MCP kill-switch.
+                            "allow_custom_mcp_servers": patch.allow_custom_mcp_servers,
                         }.items()
                         if v is not None
                     }

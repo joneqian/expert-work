@@ -26,12 +26,13 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
+from helix_agent.persistence.mcp_connector_catalog import SqlMcpConnectorCatalogStore
 from helix_agent.persistence.rls import build_rls_sessionmaker, current_tenant_id_var
 from helix_agent.persistence.tenant_mcp_server import (
     SqlTenantMcpServerStore,
     TenantMcpServerAlreadyExistsError,
 )
-from helix_agent.protocol import TenantMcpServerPatch
+from helix_agent.protocol import McpConnectorCatalogUpsert, TenantMcpServerPatch
 
 pytestmark = pytest.mark.integration
 
@@ -96,6 +97,21 @@ def tenant_mcp_server_store(
     engine = create_async_engine_from_config(DatabaseConfig(dsn=app_dsn))
     sf = build_rls_sessionmaker(create_async_session_factory(engine))
     yield SqlTenantMcpServerStore(sf), engine
+
+
+@pytest.fixture
+def tenant_mcp_server_with_catalog(
+    postgres_container: PostgresContainer,
+) -> Iterator[tuple[SqlTenantMcpServerStore, SqlMcpConnectorCatalogStore, AsyncEngine]]:
+    cfg = Config(str(ALEMBIC_INI))
+    cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
+    command.upgrade(cfg, "head")
+    _provision_app_role(_sync_dsn(postgres_container))
+
+    app_dsn = _rewrite_credentials(_async_dsn(postgres_container), APP_ROLE, APP_PASSWORD)
+    engine = create_async_engine_from_config(DatabaseConfig(dsn=app_dsn))
+    sf = build_rls_sessionmaker(create_async_session_factory(engine))
+    yield SqlTenantMcpServerStore(sf), SqlMcpConnectorCatalogStore(sf), engine
 
 
 @pytest.fixture(autouse=True)
@@ -249,6 +265,48 @@ async def test_update_invalid_patch_rejects_atomically(
         assert unchanged is not None
         assert unchanged.token_secret_ref is None
         assert unchanged.auth_type == "none"
+    finally:
+        current_tenant_id_var.set(None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_with_catalog_id_round_trips(
+    tenant_mcp_server_with_catalog: tuple[
+        SqlTenantMcpServerStore, SqlMcpConnectorCatalogStore, AsyncEngine
+    ],
+) -> None:
+    servers, catalog, engine = tenant_mcp_server_with_catalog
+    try:
+        # Platform catalog row written under an UNSCOPED (NULL-tenant) session.
+        current_tenant_id_var.set(None)
+        entry = await catalog.create(
+            upsert=McpConnectorCatalogUpsert(
+                name="github",
+                display_name="GitHub",
+                transport="streamable_http",
+                url_template="https://api.github.com/mcp",
+                auth_type="none",
+            ),
+            actor_id="sysadmin",
+        )
+
+        tid = uuid4()
+        current_tenant_id_var.set(tid)
+        created = await servers.create(
+            tenant_id=tid,
+            name="github",
+            transport="streamable_http",
+            url="https://api.github.com/mcp",
+            auth_type="none",
+            token_secret_ref=None,
+            timeout_s=30.0,
+            created_by="admin@acme",
+            catalog_id=entry.id,
+        )
+        assert created.catalog_id == entry.id
+        got = await servers.get(tenant_id=tid, name="github")
+        assert got is not None and got.catalog_id == entry.id
     finally:
         current_tenant_id_var.set(None)
         await engine.dispose()

@@ -38,6 +38,7 @@ def _row_to_record(row: TenantMcpServerRow) -> TenantMcpServerRecord:
         url=row.url,
         auth_type=row.auth_type,  # type: ignore[arg-type]
         token_secret_ref=row.token_secret_ref,
+        catalog_id=row.catalog_id,
         timeout_s=row.timeout_s,
         enabled=row.enabled,
         created_at=row.created_at,
@@ -63,6 +64,7 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
         token_secret_ref: str | None,
         timeout_s: float,
         created_by: str,
+        catalog_id: UUID | None = None,
     ) -> TenantMcpServerRecord:
         now = _utc_now()
         stmt = (
@@ -74,6 +76,7 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
                 url=url,
                 auth_type=auth_type,
                 token_secret_ref=token_secret_ref,
+                catalog_id=catalog_id,
                 timeout_s=timeout_s,
                 enabled=True,
                 created_at=now,

@@ -23,6 +23,7 @@ from helix_agent.persistence.models.knowledge import (
     KnowledgeChunkRow,
     KnowledgeDocumentRow,
 )
+from helix_agent.persistence.models.mcp_connector_catalog import McpConnectorCatalogRow
 from helix_agent.persistence.models.memory_item import MemoryItemRow
 from helix_agent.persistence.models.memory_writeback_dlq import MemoryWritebackDLQRow
 from helix_agent.persistence.models.platform_embedding_config import (
@@ -69,6 +70,7 @@ __all__ = [
     "KnowledgeBaseRow",
     "KnowledgeChunkRow",
     "KnowledgeDocumentRow",
+    "McpConnectorCatalogRow",
     "MemoryItemRow",
     "MemoryWritebackDLQRow",
     "PlatformEmbeddingConfigRow",

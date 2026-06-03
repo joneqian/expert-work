@@ -46,9 +46,13 @@ class TenantMcpServerStore(abc.ABC):
         token_secret_ref: str | None,
         timeout_s: float,
         created_by: str,
+        catalog_id: UUID | None = None,
     ) -> TenantMcpServerRecord:
         """Insert a new server row. Raises
-        :class:`TenantMcpServerAlreadyExistsError` on (tenant, name) conflict."""
+        :class:`TenantMcpServerAlreadyExistsError` on (tenant, name) conflict.
+
+        ``catalog_id`` (Stream W) binds the row to a platform catalog entry;
+        ``None`` (the default) = an off-catalog custom registration."""
 
     @abc.abstractmethod
     async def get(self, *, tenant_id: UUID, name: str) -> TenantMcpServerRecord | None:

@@ -227,3 +227,27 @@ async def test_create_rejects_duplicate_tenant(
         assert fetched.display_name == "First"
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_allow_custom_mcp_servers_default_and_patch(
+    tenant_config_store: tuple[SqlTenantConfigStore, AsyncEngine],
+) -> None:
+    """``allow_custom_mcp_servers`` defaults True and round-trips False — Stream W."""
+    store, engine = tenant_config_store
+    try:
+        tenant = uuid4()
+        current_tenant_id_var.set(tenant)
+        created = await store.create(tenant_id=tenant, display_name="Acme", actor_id="bootstrap")
+        assert created.allow_custom_mcp_servers is True
+
+        updated = await store.upsert(
+            tenant_id=tenant,
+            patch=TenantConfigPatch(allow_custom_mcp_servers=False),
+            actor_id="ops",
+        )
+        assert updated.allow_custom_mcp_servers is False
+        fetched = await store.get(tenant_id=tenant)
+        assert fetched is not None and fetched.allow_custom_mcp_servers is False
+    finally:
+        await engine.dispose()
