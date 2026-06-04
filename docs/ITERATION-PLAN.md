@@ -930,7 +930,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **X2 持久化 + 迁移**（PR #400）：协议 `Skill/SkillVersion.tenant_id → UUID|None` + 迁移 `0057_platform_skill`（skill/skill_version tenant_id 改 NULLABLE + RLS 严格相等→`IS NOT DISTINCT FROM` + COALESCE 唯一索引 + `required_tier` 列）+ store/curator/orchestrator 的 `UUID|None` ripple（memory store set、`SkillActivityRecorder.record`、`_load_skills`）+ curator `WHERE tenant_id IS NOT NULL`；**RLS 回归测 + 迁移安全测**（最高风险=已有数据表换 RLS）
 - [x] **X3 resolver 接线 + 双查 + 门控**（PR #401）：`make_skill_resolver`（租户优先 + 平台 bypass 兜底 + `tier_satisfies` not_entitled）+ **首次线程穿 `make_agent_builder`/`make_child_agent_builder`/`build_agent`/子 agent + `SkillViewTool` + activity recorder**（补 Stream U 运行时接线）
 - [x] **X4 平台 skill CRUD API + 租户合并视图**（PR #402）（system_admin，bypass_rls，复用 moderation/high-risk）+ `GET /v1/skills` 加 source/entitled
-- [ ] **X5 Admin UI**：平台库管理页（system_admin）+ 租户库 source/entitled 徽章 + i18n
+- [x] **X5 Admin UI**（PR #403）：平台库管理页（system_admin）+ 租户库 source/entitled 徽章 + i18n
 
 ### Stream Y — LLM 平台独占 + Rate Card + 计量（治理 + 成本地基）
 

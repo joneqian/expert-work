@@ -26,8 +26,10 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import {
+  Boxes,
   FileCode2,
   Globe2,
+  Lock,
   Pin,
   Plus,
   RefreshCw,
@@ -88,6 +90,11 @@ export function SkillsList() {
 
   const [data, setData] = useState<SkillList | null>(null);
   const [accumulated, setAccumulated] = useState<SkillRecord[]>([]);
+  // Stream X-6 — platform skills returned by the merged view. They arrive
+  // on the first page only (no pagination), so we capture them on refresh
+  // and prepend them to the table. Server-side name-shadowing already
+  // de-dupes against the tenant's own skills.
+  const [platformItems, setPlatformItems] = useState<SkillRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<SkillStatus | undefined>(undefined);
   const [categoryFilter, setCategoryFilter] = useState("");
   const [loading, setLoading] = useState(false);
@@ -109,6 +116,7 @@ export function SkillsList() {
       });
       setData(result);
       setAccumulated(result.items);
+      setPlatformItems(result.platform_items ?? []);
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -188,29 +196,73 @@ export function SkillsList() {
   const isCrossTenant = data?.cross_tenant ?? false;
   const hasMore = data?.next_cursor !== null && data?.next_cursor !== undefined;
 
+  // Stream X-6 — platform skills render first, then the tenant's own
+  // (paginated) skills. Platform rows are read-only in the tenant view.
+  const dataSource = useMemo(
+    () => [...platformItems, ...accumulated],
+    [platformItems, accumulated],
+  );
+
   const columns: TableColumnsType<SkillRecord> = useMemo(() => [
     {
       title: t("skills.col_name"),
       dataIndex: "name",
       key: "name",
-      render: (v: string, record) => (
-        <Space size={6}>
-          {record.pinned && (
-            <Tooltip title={t("skills.pin_tooltip_on")}>
-              <Pin
-                size={12}
-                strokeWidth={2}
-                style={{ color: "var(--hx-color-brand-500)" }}
-                data-testid={`skill-pin-icon-${record.id}`}
-              />
-            </Tooltip>
-          )}
-          <Text strong>{v}</Text>
-          {record.latest_version !== null && (
-            <Tag bordered={false}>v{record.latest_version}</Tag>
-          )}
-        </Space>
-      ),
+      render: (v: string, record) => {
+        const isPlatform = record.source === "platform";
+        return (
+          <Space size={6}>
+            {record.pinned && (
+              <Tooltip title={t("skills.pin_tooltip_on")}>
+                <Pin
+                  size={12}
+                  strokeWidth={2}
+                  style={{ color: "var(--hx-color-brand-500)" }}
+                  data-testid={`skill-pin-icon-${record.id}`}
+                />
+              </Tooltip>
+            )}
+            <Text strong>{v}</Text>
+            {record.latest_version !== null && (
+              <Tag bordered={false}>v{record.latest_version}</Tag>
+            )}
+            {/* Stream X-6 — source badge: distinguish curated platform
+                skills from the tenant's own. */}
+            {isPlatform ? (
+              <Tag
+                icon={<Boxes size={11} strokeWidth={1.75} />}
+                color="purple"
+                data-testid={`skill-source-platform-${record.id}`}
+              >
+                {t("skills.source_platform")}
+              </Tag>
+            ) : (
+              <Tag bordered={false} data-testid={`skill-source-tenant-${record.id}`}>
+                {t("skills.source_tenant")}
+              </Tag>
+            )}
+            {/* Stream X-6 — entitlement lock for platform rows the
+                tenant's plan tier does not cover. */}
+            {isPlatform && record.entitled === false && (
+              <Tooltip
+                title={t("skills.requires_tier_tooltip", {
+                  tier: record.required_tier ?? "pro",
+                })}
+              >
+                <Tag
+                  icon={<Lock size={11} strokeWidth={1.75} />}
+                  color="default"
+                  data-testid={`skill-locked-${record.id}`}
+                >
+                  {t("skills.requires_tier", {
+                    tier: record.required_tier ?? "pro",
+                  })}
+                </Tag>
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: t("skills.col_status"),
@@ -319,14 +371,21 @@ export function SkillsList() {
 
       <Table<SkillRecord>
         columns={columns}
-        dataSource={accumulated}
-        rowKey={(r) => r.id}
+        dataSource={dataSource}
+        rowKey={(r) => `${r.source ?? "tenant"}:${r.id}`}
         loading={loading}
         pagination={false}
-        onRow={(record) => ({
-          onClick: () => navigate(`/skills/${encodeURIComponent(record.id)}`),
-          style: { cursor: "pointer" },
-        })}
+        onRow={(record) =>
+          // Platform rows are read-only in the tenant scope — a tenant
+          // ``getSkill(id)`` would 404, so don't navigate. Bind via the
+          // agent manifest instead.
+          record.source === "platform"
+            ? {}
+            : {
+                onClick: () => navigate(`/skills/${encodeURIComponent(record.id)}`),
+                style: { cursor: "pointer" },
+              }
+        }
         locale={{
           emptyText: (
             <Empty description={scope === "*" ? t("skills.empty_cross") : t("skills.empty_home")} />

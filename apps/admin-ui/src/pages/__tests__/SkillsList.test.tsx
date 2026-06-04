@@ -228,6 +228,56 @@ describe("SkillsList", () => {
     expect(screen.getByText("web_search")).toBeInTheDocument();
   });
 
+  it("renders platform_items with source badge + entitled lock (X-6)", async () => {
+    const platformEntitled = {
+      ...skillRow,
+      id: "pk1",
+      name: "platform_search",
+      source: "platform" as const,
+      entitled: true,
+      required_tier: "pro" as const,
+    };
+    const platformLocked = {
+      ...skillRow,
+      id: "pk2",
+      name: "platform_sql",
+      source: "platform" as const,
+      entitled: false,
+      required_tier: "enterprise" as const,
+    };
+    const tenantRow = {
+      ...skillRow,
+      id: "sk1",
+      name: "my_skill",
+      source: "tenant" as const,
+      entitled: true,
+    };
+    installAdapter([
+      { match: (u) => u === "/v1/me", respond: () => meResponse },
+      {
+        match: (u) => u === "/v1/skills",
+        respond: () => ({
+          items: [tenantRow],
+          platform_items: [platformEntitled, platformLocked],
+          next_cursor: null,
+          cross_tenant: false,
+        }),
+      },
+    ]);
+    renderSkillsRouter();
+    await waitFor(() => expect(screen.getByText("platform_search")).toBeInTheDocument());
+    // Source badges.
+    expect(screen.getByTestId("skill-source-platform-pk1")).toBeInTheDocument();
+    expect(screen.getByTestId("skill-source-platform-pk2")).toBeInTheDocument();
+    expect(screen.getByTestId("skill-source-tenant-sk1")).toBeInTheDocument();
+    // Locked platform row shows the entitlement lock with its tier.
+    const lock = screen.getByTestId("skill-locked-pk2");
+    expect(lock).toBeInTheDocument();
+    expect(lock).toHaveTextContent(/enterprise/i);
+    // Entitled platform row has no lock.
+    expect(screen.queryByTestId("skill-locked-pk1")).not.toBeInTheDocument();
+  });
+
   it("opens the Create drawer + validates required fields", async () => {
     installAdapter([
       {

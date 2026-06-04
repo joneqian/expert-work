@@ -38,6 +38,16 @@ export interface SkillRecord {
   state_changed_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Stream X-6 merged view — present on rows from ``GET /v1/skills``.
+   *  ``"tenant"`` for the tenant's own skills, ``"platform"`` for curated
+   *  platform skills surfaced alongside them. */
+  source?: "tenant" | "platform";
+  /** Stream X-6 — whether the tenant's plan tier meets the skill's
+   *  ``required_tier``. Tenant rows are always entitled; platform rows
+   *  may be locked. */
+  entitled?: boolean;
+  /** Stream X-6 — platform-skill entitlement gate. */
+  required_tier?: "free" | "pro" | "enterprise";
 }
 
 /** Metadata for one supporting file on a skill version.
@@ -86,6 +96,10 @@ export interface SkillVersion {
 
 export interface SkillList {
   items: SkillRecord[];
+  /** Stream X-6 merged view — active platform skills surfaced alongside
+   *  the tenant's own. ``[]`` when none. Name-shadowing (a tenant skill
+   *  of the same name hides the platform one) is applied server-side. */
+  platform_items: SkillRecord[];
   /** Opaque UUID-encoded cursor; pass back verbatim. */
   next_cursor: string | null;
   cross_tenant: boolean;

@@ -45,6 +45,7 @@ export interface TranslationKeys {
     audit: string;
     mcp_servers: string;
     mcp_catalog: string;
+    platform_skills: string;
   };
   login: {
     title: string;
@@ -815,6 +816,65 @@ export interface TranslationKeys {
     pin_tooltip_off: string;
     eta_days_to_stale: string;
     eta_due_soon: string;
+    // Stream X-6 — merged tenant/platform library badges.
+    source_platform: string;
+    source_tenant: string;
+    requires_tier: string;
+    requires_tier_tooltip: string;
+  };
+  platform_skills: {
+    page_title: string;
+    subtitle: string;
+    add: string;
+    manage: string;
+    pin: string;
+    unpin: string;
+    not_admin_title: string;
+    not_admin_body: string;
+    failed_to_load: string;
+    col_name: string;
+    col_category: string;
+    col_tier: string;
+    col_status: string;
+    col_version: string;
+    col_actions: string;
+    empty_title: string;
+    empty_hint: string;
+    tier_free: string;
+    tier_pro: string;
+    tier_enterprise: string;
+    status_draft: string;
+    status_active: string;
+    status_archived: string;
+    create_title: string;
+    create_submit: string;
+    field_name: string;
+    field_name_hint: string;
+    field_category: string;
+    field_description: string;
+    field_required_tier: string;
+    name_required: string;
+    created: string;
+    duplicate_name: string;
+    when_to_use_hint: string;
+    manage_title: string;
+    lifecycle_title: string;
+    add_version_title: string;
+    add_version_submit: string;
+    field_prompt_fragment: string;
+    field_version_description: string;
+    field_tool_names: string;
+    field_required_models: string;
+    prompt_fragment_required: string;
+    csv_hint: string;
+    versions_title: string;
+    no_versions: string;
+    version_added: string;
+    status_changed: string;
+    pinned: string;
+    unpinned: string;
+    high_risk: string;
+    lazy: string;
   };
   memory: {
     page_title: string;
@@ -1017,6 +1077,7 @@ const en: TranslationKeys = {
     audit: "Audit",
     mcp_servers: "MCP Servers",
     mcp_catalog: "MCP Catalog",
+    platform_skills: "Platform Skills",
   },
   login: {
     title: "helix Admin",
@@ -1825,6 +1886,69 @@ const en: TranslationKeys = {
     pin_tooltip_off: "Pin to exempt this skill from auto-stale / auto-archive.",
     eta_days_to_stale: "{{days}}d to stale",
     eta_due_soon: "stale soon",
+    source_platform: "Platform",
+    source_tenant: "Mine",
+    requires_tier: "Requires {{tier}}",
+    requires_tier_tooltip:
+      "Your plan doesn't include this skill — upgrade to {{tier}} to use it.",
+  },
+  platform_skills: {
+    page_title: "Platform Skills",
+    subtitle:
+      "Curate reusable skills tenants can bind to their agents. Platform-level, system admins only.",
+    add: "New skill",
+    manage: "Manage",
+    pin: "Pin",
+    unpin: "Unpin",
+    not_admin_title: "System admin only",
+    not_admin_body:
+      "The platform skill catalog is managed by system admins. Ask one to add skills.",
+    failed_to_load: "Failed to load platform skills",
+    col_name: "Name",
+    col_category: "Category",
+    col_tier: "Required plan",
+    col_status: "Status",
+    col_version: "Version",
+    col_actions: "Actions",
+    empty_title: "No platform skills yet",
+    empty_hint:
+      "Add curated skills so every tenant can bind battle-tested capabilities without reinventing them.",
+    tier_free: "Free",
+    tier_pro: "Pro",
+    tier_enterprise: "Enterprise",
+    status_draft: "Draft",
+    status_active: "Active",
+    status_archived: "Archived",
+    create_title: "New platform skill",
+    create_submit: "Create",
+    field_name: "Name (slug)",
+    field_name_hint: "Lowercase identifier, immutable after creation",
+    field_category: "Category",
+    field_description: "Description",
+    field_required_tier: "Required plan",
+    name_required: "A valid lowercase slug is required",
+    created: "Platform skill created.",
+    duplicate_name: "A platform skill with this name already exists.",
+    when_to_use_hint:
+      "Describe WHEN to use this skill — model-driven selection keys off this text.",
+    manage_title: "Manage {{name}}",
+    lifecycle_title: "Lifecycle",
+    add_version_title: "Add version",
+    add_version_submit: "Add version",
+    field_prompt_fragment: "Prompt fragment",
+    field_version_description: "Description",
+    field_tool_names: "Tool names",
+    field_required_models: "Required models",
+    prompt_fragment_required: "Prompt fragment is required",
+    csv_hint: "Comma-separated.",
+    versions_title: "Versions",
+    no_versions: "No versions yet — add one above to make this skill usable.",
+    version_added: "Added v{{version}}.",
+    status_changed: "Status changed to {{status}}.",
+    pinned: "Pinned",
+    unpinned: "Unpinned",
+    high_risk: "High-risk",
+    lazy: "Lazy",
   },
   memory: {
     page_title: "Memory",

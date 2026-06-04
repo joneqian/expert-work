@@ -17,6 +17,7 @@ import { SettingsTenantQuotas } from "./pages/SettingsTenantQuotas";
 import { SettingsTenants } from "./pages/SettingsTenants";
 import { SettingsMcpServers } from "./pages/SettingsMcpServers";
 import { SettingsMcpCatalog } from "./pages/SettingsMcpCatalog";
+import { SettingsPlatformSkills } from "./pages/SettingsPlatformSkills";
 import { SkillDetail } from "./pages/SkillDetail";
 import { SkillsList } from "./pages/SkillsList";
 import { TriggersList } from "./pages/TriggersList";
@@ -46,6 +47,7 @@ export function AppRouter() {
       <Route path="/settings/credentials" element={<SettingsTenantCredentials />} />
       <Route path="/settings/platform" element={<SettingsPlatformConfig />} />
       <Route path="/settings/mcp-catalog" element={<SettingsMcpCatalog />} />
+      <Route path="/settings/platform-skills" element={<SettingsPlatformSkills />} />
       <Route path="/settings/audit" element={<SettingsAudit />} />
       <Route path="/settings/mcp-servers" element={<SettingsMcpServers />} />
       <Route path="/settings/*" element={<ComingSoon title="Settings" />} />
