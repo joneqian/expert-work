@@ -942,11 +942,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **Y3 Rate Card**（PR #407）：`model_rate_card` 表（NULL-tenant FORCE RLS + 整数 micro-USD + markup_bps + 时序 effective_from/until + plan_tier 最具体优先 + resolve 半开窗）+ store（双实现）+ admin API（system_admin/bypass）+ `billing` RBAC + audit ResourceType + `token_usage.provider` 列（additive,中间件填充）+ 迁移 `0059`
 - [x] **Y4 成本派生 + billing ledger**（PR #408）：`tenant_billing_ledger`（tenant-scoped RLS；不扩展 token_budget_ledger；base/markup/billed 拆分内部存）+ `billing-rollup-job` 服务（按 row `observed_at` 当时生效 rate **逐行**定价→聚合 bucket→幂等 upsert-overwrite；provider 反查 + 歧义/无 rate 标 unpriced）+ `token_usage` windowed read + 迁移 `0060`。**Stream Y 收官**
 
-### Stream Z — Chargeback / 用量面（计费层出口）
+### Stream Z — Chargeback / 用量面（计费层出口）— 设计 [STREAM-Z-DESIGN](./streams/STREAM-Z-DESIGN.md)
 
-租户看自己用量/成本，system_admin 看跨租户分账，成本可观测。发票推迟 M2。
+租户看自己用量/成本，system_admin 看跨租户分账，成本可观测。**硬约束：租户面只暴露 billed，绝不回显 base/markup**。发票推迟 M2。
 
-- [ ] **Z0 设计先行**（STREAM-Z-DESIGN + Mini-ADR）
+- [x] **Z0 设计先行**（PR #409）（STREAM-Z-DESIGN + Mini-ADR Z-1~Z-4 + 现状核实）
 - [ ] **Z1 租户用量/成本 API**：`GET /v1/usage/cost`（RLS 自隔离）+ `/v1/usage/tokens`（当月实时）+ `billing:read`
 - [ ] **Z2 admin chargeback API + 指标**：`GET /v1/admin/billing/chargeback`（跨租户，bypass_rls，显 margin）+ `helix_llm_cost_micros_total` counter
 - [ ] **Z3 看板 UI**（前端）：月选择 + 按 agent/model 拆分 + 环比
