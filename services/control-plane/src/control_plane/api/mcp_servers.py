@@ -13,9 +13,12 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from control_plane.api._authz import require
 from control_plane.audit import emit
 from control_plane.mcp_probe import McpProbeError, probe_remote_mcp
+from control_plane.tenancy.tenant_config import TenantConfigNotConfiguredError
+from control_plane.tenant_scope import bypass_rls_session
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
 from helix_agent.persistence import (
+    McpConnectorCatalogStore,
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
     TenantMcpServerStore,
@@ -26,6 +29,8 @@ from helix_agent.protocol import (
     McpServerTransport,
     Principal,
     TenantMcpServerPatch,
+    TenantPlan,
+    tier_satisfies,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
@@ -33,6 +38,14 @@ from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 logger = logging.getLogger("helix.control_plane.api.mcp_servers")
 
 _DEFAULT_TIMEOUT_S = 30.0
+
+# URL-structural characters forbidden in tenant-supplied catalog param values
+# (Stream W-7) — prevents a param from pivoting the resolved URL's host /
+# authority / scheme. ``%`` blocks percent-encoding tricks (``%2F`` → ``/``);
+# ``[]`` block IPv6-literal injection; ``@`` blocks userinfo; ``:`` blocks
+# host:port / scheme; ``/\?#`` block path/query/fragment breakout. Whitespace is
+# rejected separately via ``str.isspace()``.
+_DISALLOWED_PARAM_CHARS = frozenset("/\\?#@:%[]")
 
 
 def manifest_references_server(spec_json: Mapping[str, Any], server_name: str) -> bool:
@@ -89,6 +102,17 @@ class TestConnectionRequest(BaseModel):
     timeout_s: float = Field(default=_DEFAULT_TIMEOUT_S, gt=0, le=300)
 
 
+class InstantiateRequest(BaseModel):
+    """Tenant-supplied values when instantiating a catalog entry (Stream W-4)."""
+
+    model_config = ConfigDict(extra="forbid")
+    # Defaults to the catalog entry name when omitted (resolved in the handler).
+    name: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    params: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, SecretStr] = Field(default_factory=dict)
+    timeout_s: float = Field(default=_DEFAULT_TIMEOUT_S, gt=0, le=300)
+
+
 # ---------------------------------------------------------------------------
 # DI accessors
 # ---------------------------------------------------------------------------
@@ -96,6 +120,10 @@ class TestConnectionRequest(BaseModel):
 
 def _get_store(request: Request) -> TenantMcpServerStore:
     return request.app.state.tenant_mcp_server_store  # type: ignore[no-any-return]
+
+
+def _get_catalog_store(request: Request) -> McpConnectorCatalogStore:
+    return request.app.state.mcp_connector_catalog_store  # type: ignore[no-any-return]
 
 
 def _get_secret_store(request: Request) -> SecretStore:
@@ -147,6 +175,21 @@ def _token_secret_name(tenant_id: UUID, name: str) -> str:
     return f"helix-agent/tenant/{tenant_id}/mcp/{name}/token"
 
 
+async def _resolve_plan(tenant_config_service: object, tenant_id: UUID) -> TenantPlan:
+    """Tenant plan tier for entitlement.
+
+    FREE (the default tier) when the config service is unwired or the tenant has
+    no config row yet — mirroring the ``allow_custom_mcp_servers`` default.
+    """
+    if tenant_config_service is None:
+        return TenantPlan.FREE
+    try:
+        cfg = await tenant_config_service.get(tenant_id=tenant_id)  # type: ignore[attr-defined]
+    except TenantConfigNotConfiguredError:
+        return TenantPlan.FREE
+    return cfg.plan  # type: ignore[no-any-return]
+
+
 def _public(record: object) -> dict[str, object]:
     # Serialize the record WITHOUT exposing the token_secret_ref — a ref
     # (not a secret value) but dropped from the public payload to keep the
@@ -173,8 +216,30 @@ def build_mcp_servers_router() -> APIRouter:
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         pool_service: Annotated[object, Depends(_get_tenant_mcp_pool_service)],
         agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
+        tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
     ) -> dict[str, object]:
         tenant_id = principal.tenant_id
+        # 0) Custom kill-switch (Stream W-4): a tenant in catalog-only mode may
+        # not register off-catalog custom servers. Skipped when the config
+        # service is unwired (preserves Stream V self-service behavior).
+        if tenant_config_service is not None:
+            try:
+                cfg = await tenant_config_service.get(tenant_id=tenant_id)  # type: ignore[attr-defined]
+                allow_custom = cfg.allow_custom_mcp_servers
+            except TenantConfigNotConfiguredError:
+                # No config row yet → the default (allow_custom_mcp_servers=True).
+                allow_custom = True
+            if not allow_custom:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "MCP_CUSTOM_DISABLED",
+                        "message": (
+                            "custom MCP server registration is disabled for this "
+                            "tenant; use the connector catalog"
+                        ),
+                    },
+                )
         # 1) SSRF check — fail fast with a clear error code before any I/O.
         try:
             validate_remote_url(payload.url)
@@ -275,6 +340,214 @@ def build_mcp_servers_router() -> APIRouter:
             "error": None,
         }
 
+    @router.get("/catalog")
+    async def list_catalog(
+        principal: Annotated[Principal, Depends(require("mcp_server", "read"))],
+        catalog_store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
+        tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
+    ) -> dict[str, object]:
+        tenant_id = principal.tenant_id
+        plan = await _resolve_plan(tenant_config_service, tenant_id)
+        # The catalog is NULL-tenant — a tenant-scoped session sees zero rows, so
+        # every catalog read MUST run inside bypass_rls_session (W-8).
+        async with bypass_rls_session():
+            entries = await catalog_store.list()
+        data = [
+            {
+                "id": str(entry.id),
+                "name": entry.name,
+                "display_name": entry.display_name,
+                "description": entry.description,
+                "category": entry.category,
+                "icon": entry.icon,
+                "transport": entry.transport,
+                "auth_type": entry.auth_type,
+                "auth_schema": entry.auth_schema.model_dump(mode="json"),
+                "required_tier": entry.required_tier.value,
+                "enabled": entry.enabled,
+                "entitled": tier_satisfies(plan, entry.required_tier),
+            }
+            for entry in entries
+        ]
+        return {"success": True, "data": data, "error": None}
+
+    @router.post("/catalog/{catalog_id}/instances", status_code=201)
+    async def instantiate_catalog_entry(
+        catalog_id: UUID,
+        payload: InstantiateRequest,
+        principal: Annotated[Principal, Depends(require("mcp_server", "write"))],
+        store: Annotated[TenantMcpServerStore, Depends(_get_store)],
+        catalog_store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        pool_service: Annotated[object, Depends(_get_tenant_mcp_pool_service)],
+        agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
+        tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
+    ) -> dict[str, object]:
+        tenant_id = principal.tenant_id
+        # 1) Load the catalog entry (NULL-tenant — bypass RLS, W-8).
+        async with bypass_rls_session():
+            entry = await catalog_store.get_by_id(catalog_id)
+        if entry is None or not entry.enabled:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "MCP_CATALOG_NOT_FOUND", "message": "catalog entry not found"},
+            )
+        # 2) Tier gate — instantiate-time only (never on the runtime hot path).
+        plan = await _resolve_plan(tenant_config_service, tenant_id)
+        if not tier_satisfies(plan, entry.required_tier):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "MCP_CATALOG_TIER_REQUIRED",
+                    "message": f"requires {entry.required_tier.value} plan",
+                },
+            )
+        # 3) Validate supplied fields against the entry's declared auth_schema.
+        fields = entry.auth_schema.fields
+        declared = {f.key for f in fields}
+        supplied = set(payload.params) | set(payload.secrets)
+        unknown = supplied - declared
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "MCP_CATALOG_FIELD_UNKNOWN",
+                    "message": f"unknown field(s): {', '.join(sorted(unknown))}",
+                },
+            )
+        for field in fields:
+            source = payload.secrets if field.kind == "secret" else payload.params
+            if field.required and field.key not in source:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "MCP_CATALOG_FIELD_MISSING",
+                        "message": f"missing required field: {field.key}",
+                    },
+                )
+        # 4) Resolve the url_template from the supplied param values.
+        param_values = {
+            f.key: payload.params[f.key]
+            for f in fields
+            if f.kind == "param" and f.key in payload.params
+        }
+        # Reject URL-structural characters in tenant param values so a value can
+        # NOT pivot the resolved URL's host/authority (SSRF → bearer-token
+        # exfiltration), e.g. org="evil.com/" against "https://{org}.example.com/x"
+        # → "https://evil.com/.example.com/x" whose host is evil.com. The SSRF
+        # guard below only blocks private IPs, not a pivot to an attacker host.
+        for key, val in param_values.items():
+            if any(c in _DISALLOWED_PARAM_CHARS or c.isspace() for c in val):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "MCP_CATALOG_PARAM_INVALID",
+                        "message": f"param {key!r} contains a disallowed character",
+                    },
+                )
+        try:
+            resolved_url = entry.url_template.format(**param_values)
+        except (KeyError, IndexError, ValueError) as exc:
+            # KeyError/IndexError: template references an unsupplied param.
+            # ValueError: malformed template (stray/unbalanced brace) — platform
+            # authored, but a typo must surface as 422, not an unhandled 500.
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "MCP_CATALOG_URL_TEMPLATE",
+                    "message": "url_template could not be resolved from the supplied parameters",
+                },
+            ) from exc
+        try:
+            validate_remote_url(resolved_url)
+        except RemoteURLError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "MCP_SERVER_INVALID_URL", "message": str(exc)},
+            ) from exc
+        # 5) Instance name (defaults to the catalog entry name); dup check before I/O.
+        name = payload.name or entry.name
+        if await store.get(tenant_id=tenant_id, name=name) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "MCP_SERVER_DUPLICATE", "message": "name already registered"},
+            )
+        # 6) Bearer token: the catalog enforces exactly one secret field for bearer.
+        raw_token: str | None = None
+        if entry.auth_type == "bearer":
+            secret_field = entry.auth_schema.secret_fields()[0]
+            raw_token = payload.secrets[secret_field.key].get_secret_value()
+            if not raw_token.strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "MCP_SERVER_TOKEN_REQUIRED",
+                        "message": "bearer auth requires a non-empty token",
+                    },
+                )
+        # 7) Connect-probe with the raw token in memory.
+        try:
+            tools = await probe_remote_mcp(
+                name=name,
+                transport=entry.transport,
+                url=resolved_url,
+                bearer_token=raw_token,
+                timeout_s=payload.timeout_s,
+            )
+        except McpProbeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": exc.code, "message": exc.message},
+            ) from exc
+        # 8) Persist token as a secret ref — only after probe success.
+        token_secret_ref: str | None = None
+        if raw_token is not None:
+            sname = _token_secret_name(tenant_id, name)
+            await secret_store.put(sname, raw_token)
+            token_secret_ref = f"secret://{sname}"
+        # 9) Create the DB row from the SNAPSHOTTED resolved values.
+        try:
+            record = await store.create(
+                tenant_id=tenant_id,
+                name=name,
+                transport=entry.transport,
+                url=resolved_url,
+                auth_type=entry.auth_type,
+                token_secret_ref=token_secret_ref,
+                timeout_s=payload.timeout_s,
+                created_by=principal.subject_id,
+                catalog_id=entry.id,
+            )
+        except TenantMcpServerAlreadyExistsError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "MCP_SERVER_DUPLICATE", "message": "name already registered"},
+            ) from exc
+        logger.info("mcp_server.instantiated server=%s catalog=%s", record.name, entry.name)
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=principal.subject_id,
+            action=AuditAction.MCP_SERVER_CREATE,
+            resource_type="tenant_mcp_server",
+            resource_id=str(record.id),
+            trace_id=current_trace_id_hex(),
+            details={
+                "name": record.name,
+                "transport": record.transport,
+                "url": resolved_url,
+                "tool_count": len(tools),
+                "catalog_id": str(entry.id),
+            },  # NEVER include the token
+        )
+        await _invalidate_tenant_mcp(pool_service, agent_runtime, tenant_id)
+        return {
+            "success": True,
+            "data": {**_public(record), "tool_count": len(tools)},
+            "error": None,
+        }
+
     @router.get("")
     async def list_mcp_servers(
         principal: Annotated[Principal, Depends(require("mcp_server", "read"))],
@@ -317,6 +590,7 @@ def build_mcp_servers_router() -> APIRouter:
     async def list_available_mcp_servers(
         principal: Annotated[Principal, Depends(require("mcp_server", "read"))],
         store: Annotated[TenantMcpServerStore, Depends(_get_store)],
+        catalog_store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
         tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
     ) -> dict[str, object]:
         tenant_id = principal.tenant_id
@@ -328,8 +602,24 @@ def build_mcp_servers_router() -> APIRouter:
                     available.append({"name": name, "source": "platform"})
             except Exception:
                 logger.info("mcp_servers.available.no_tenant_config")
-        for rec in await store.list_for_tenant(tenant_id=tenant_id):
-            available.append({"name": rec.name, "source": "tenant", "enabled": rec.enabled})
+        tenant_rows = await store.list_for_tenant(tenant_id=tenant_id)
+        # Resolve catalog names in a single bypass-RLS query, only when any tenant
+        # row is catalog-bound (avoids an extra query for custom-only tenants).
+        catalog_names: dict[UUID, str] = {}
+        if any(getattr(r, "catalog_id", None) is not None for r in tenant_rows):
+            async with bypass_rls_session():
+                catalog_names = {e.id: e.name for e in await catalog_store.list()}
+        for rec in tenant_rows:
+            row: dict[str, object] = {
+                "name": rec.name,
+                "source": "tenant",
+                "enabled": rec.enabled,
+            }
+            catalog_id = getattr(rec, "catalog_id", None)
+            if catalog_id is not None:
+                row["catalog_id"] = str(catalog_id)
+                row["catalog_name"] = catalog_names.get(catalog_id)
+            available.append(row)
         return {"success": True, "data": available, "error": None}
 
     @router.get("/{name}/tools")
