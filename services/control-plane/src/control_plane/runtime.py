@@ -321,10 +321,11 @@ def make_agent_builder(
             if tenant_pool.names():
                 base_env = build_tool_env if build_tool_env is not None else ToolEnv()
                 build_tool_env = replace(base_env, tenant_mcp_pool=tenant_pool)
-        # Stream Q (Mini-ADR Q-5) — when the manifest model omits api_key_ref,
-        # resolve its key from the tenant's platform-configured credential.
-        # Needs a tenant; preview/validation builds (tenant_id None) keep the
-        # api_key_ref-only behaviour.
+        # Stream Q (Mini-ADR Q-5) / Stream Y-2 — resolve each model's key from
+        # the tenant's platform-configured credential. Y-2: manifest api_key_ref
+        # is ignored for agent builds, so this resolver is the ONLY key source.
+        # Needs a tenant; preview/validation builds (tenant_id None) get no
+        # resolver and therefore cannot build a runnable agent (by design).
         provider_key_resolver = (
             make_provider_key_resolver(resolver=credentials_resolver, tenant_id=tenant_id)
             if credentials_resolver is not None and tenant_id is not None

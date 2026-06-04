@@ -8,9 +8,11 @@ references, never in the manifest.
 M0 v1 scope:
 
 - **LLM routing — real.** :func:`build_llm_router` walks the
-  ``ModelSpec`` fallback tree, resolves each ``api_key_ref`` through the
-  SecretStore, builds the matching provider adapter, wraps it in E.12's
-  rate limiter, and assembles an :class:`LLMRouter`.
+  ``ModelSpec`` fallback tree, resolves each provider's key (the platform
+  credential via ``provider_key_resolver``; Stream Y-2 ignores any
+  manifest-pinned ``api_key_ref`` for agent builds) through the SecretStore,
+  builds the matching provider adapter, wraps it in E.12's rate limiter, and
+  assembles an :class:`LLMRouter`.
 - **Tools — assembled.** The manifest's ``tools`` field is a
   ``type``-discriminated union (Mini-ADR E-14); :func:`build_tool_registry`
   maps each entry to a concrete adapter. Platform runtime deps (Tavily
@@ -29,6 +31,7 @@ each adapter and onto the request body.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
@@ -95,6 +98,8 @@ from orchestrator.multimodal import ImageResolver
 from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
 from orchestrator.tools.update_plan import UpdatePlanTool
+
+logger = logging.getLogger("helix.orchestrator.agent_factory")
 
 
 @dataclass(frozen=True)
@@ -269,9 +274,10 @@ async def build_agent(
     subagent_depth: int = 0,
     skill_resolver: SkillResolver | None = None,
     tenant_id: Any = None,
-    # Stream Q (Mini-ADR Q-5) — resolves a provider's platform-configured key
-    # when the manifest model omits ``api_key_ref``. Bound to the tenant by the
-    # control-plane; ``None`` keeps the build resolvable only via api_key_ref.
+    # Stream Q (Mini-ADR Q-5) — resolves a provider's platform-configured key.
+    # Bound to the tenant by the control-plane. Stream Y-2: agent builds always
+    # resolve via this (manifest ``api_key_ref`` is ignored), so ``None`` makes
+    # the build fail unless every provider has a platform credential configured.
     provider_key_resolver: ProviderKeyResolver | None = None,
     # Capability Uplift Sprint #4 — Mini-ADR U-27. When wired, every
     # skill resolved during the build (and every ``skill_view`` runtime
@@ -303,8 +309,8 @@ async def build_agent(
     terminates structurally.
 
     Raises :class:`AgentFactoryError` for an un-buildable manifest
-    (missing ``api_key_ref``, an unsupported provider, an
-    un-assemblable ``tools:`` entry, …).
+    (a provider with no platform credential configured, an unsupported
+    provider, an un-assemblable ``tools:`` entry, …).
     """
     env = tool_env or ToolEnv()
     # Stream J.6 — Path A and Path B are mutually exclusive. A ``vision:``
@@ -328,6 +334,9 @@ async def build_agent(
         around_llm_chain=chains.around_llm_call,
         image_resolver=env.image_resolver,
         provider_key_resolver=provider_key_resolver,
+        # Stream Y-2 — manifest-pinned api_key_ref is ignored for agent builds
+        # (LLM spend must go through platform-metered credentials).
+        ignore_api_key_ref=True,
     )
     # Stream J.6 Path B — build the VL router when a ``vision:`` block is
     # declared; ``ask_image`` will route through it. Stream L.L3 — the VL
@@ -345,6 +354,7 @@ async def build_agent(
             # Mini-ADR J-33 — VL fallback chain (J.6.补强-4).
             extra_fallbacks=list(spec.spec.vision.fallbacks),
             provider_key_resolver=provider_key_resolver,
+            ignore_api_key_ref=True,  # Stream Y-2 (manifest-sourced VL model)
         )
     registry = await build_tool_registry(
         spec.spec.tools,
@@ -779,13 +789,15 @@ async def build_llm_router(
     stream_deadline_s: float | None = None,
     extra_fallbacks: list[ModelSpec] | None = None,
     provider_key_resolver: ProviderKeyResolver | None = None,
+    ignore_api_key_ref: bool = False,
 ) -> LLMRouter:
     """Build an :class:`LLMRouter` from a ``ModelSpec`` + its fallback tree.
 
     The tree is flattened pre-order — primary first, then each fallback
     (and its own fallbacks) in declaration order — into the router's
-    ordered provider chain. Each model's ``api_key_ref`` is resolved
-    through ``secret_store``; the provider adapter is wrapped in E.12's
+    ordered provider chain. Each model's key is resolved through
+    ``secret_store`` (see ``ignore_api_key_ref`` below for the manifest vs
+    internal-plumbing split); the provider adapter is wrapped in E.12's
     :class:`RateLimitedProvider` at the model's ``rate_limit_rpm``.
 
     ``around_llm_chain`` is the ``around_llm_call`` anchor chain — the
@@ -804,25 +816,43 @@ async def build_llm_router(
     ``primary → primary.fallback... → extra_fallbacks[0] → ...``. Each
     ``extra_fallbacks`` entry is itself walked through ``_flatten_chain``
     so a VL fallback can carry its own E.11-style sub-chain.
+
+    Stream Y-2 — ``ignore_api_key_ref`` (set by :func:`build_agent` for all
+    manifest-sourced routers): a manifest-pinned ``api_key_ref`` is a spend
+    path that bypasses platform metering, so when this is ``True`` the field
+    is IGNORED (resolution is forced through ``provider_key_resolver``) and a
+    warning is logged. The default ``False`` preserves the internal-plumbing
+    contract — control-plane rerank/embed/aux callers resolve the *platform*
+    key themselves and pass it in via ``api_key_ref`` (no bypass).
     """
     handles: list[ProviderHandle] = []
     chain: list[ModelSpec] = list(_flatten_chain(model))
     for extra in extra_fallbacks or ():
         chain.extend(_flatten_chain(extra))
     for entry in chain:
-        # Manifest api_key_ref is the explicit override; the platform-configured
-        # key (Stream Q) is the fallback when the manifest omits it. Resolved
-        # per-entry so each model in the fallback chain (possibly a different
-        # provider) resolves independently.
-        if entry.api_key_ref is not None:
+        # api_key_ref is resolved per-entry so each model in the fallback chain
+        # (possibly a different provider) resolves independently.
+        if entry.api_key_ref is not None and not ignore_api_key_ref:
+            # Internal-plumbing path: the caller already resolved a platform
+            # secret_ref and pinned it here (Stream Q rerank/embed/aux).
             secret_ref = entry.api_key_ref
-        elif provider_key_resolver is not None:
-            secret_ref = await provider_key_resolver(entry.provider)
         else:
-            raise AgentFactoryError(
-                f"model {entry.provider}:{entry.name} has no api_key_ref and no "
-                f"platform credential is configured for provider {entry.provider!r}"
-            )
+            if entry.api_key_ref is not None:
+                # ignore_api_key_ref is True — a manifest still carries the
+                # deprecated override. Ignore it (Stream Y-2) and resolve from
+                # the platform so spend can never bypass metering.
+                logger.warning(
+                    "manifest model %s:%s carries a deprecated api_key_ref; it is "
+                    "ignored (Stream Y-2) and the platform credential is used instead",
+                    entry.provider,
+                    entry.name,
+                )
+            if provider_key_resolver is None:
+                raise AgentFactoryError(
+                    f"model {entry.provider}:{entry.name} has no platform credential "
+                    f"configured for provider {entry.provider!r}"
+                )
+            secret_ref = await provider_key_resolver(entry.provider)
         api_key = await secret_store.get(parse_secret_ref(secret_ref))
         provider = _build_provider(entry, api_key, image_resolver=image_resolver)
         rate_limited = RateLimitedProvider.with_rpm(provider, rate_limit_rpm=entry.rate_limit_rpm)
@@ -841,6 +871,7 @@ async def build_step_routers(
     around_llm_chain: MiddlewareChain | None = None,
     image_resolver: ImageResolver | None = None,
     provider_key_resolver: ProviderKeyResolver | None = None,
+    ignore_api_key_ref: bool = False,
 ) -> StepRouters:
     """Resolve the LLM router for each step class (Stream J.11).
 
@@ -864,6 +895,7 @@ async def build_step_routers(
         image_resolver=image_resolver,
         stream_deadline_s=deadline,
         provider_key_resolver=provider_key_resolver,
+        ignore_api_key_ref=ignore_api_key_ref,
     )
     planning = default
     reflection = default
@@ -877,6 +909,7 @@ async def build_step_routers(
                 image_resolver=image_resolver,
                 stream_deadline_s=deadline,
                 provider_key_resolver=provider_key_resolver,
+                ignore_api_key_ref=ignore_api_key_ref,
             )
             if rule.when == "planning":
                 planning = routed

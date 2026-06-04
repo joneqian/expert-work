@@ -106,6 +106,13 @@ class SkillCase:
 _ANTHROPIC_KEY_NAME = "anthropic-test"
 
 
+async def _platform_resolver(provider: str) -> str:
+    # Stream Y-2 — agent builds resolve the LLM key via the platform resolver
+    # (manifest ``api_key_ref`` is ignored). These cases are all anthropic.
+    del provider
+    return f"secret://{_ANTHROPIC_KEY_NAME}"
+
+
 def _spec_with_skills(skills: tuple[str, ...], model_name: str) -> AgentSpec:
     return AgentSpec.model_validate(
         {
@@ -195,6 +202,7 @@ async def _run_resolve_case(case: SkillCase) -> CapabilityCaseResult:
             checkpointer=cp,
             skill_resolver=resolver,
             tenant_id=tenant_id,
+            provider_key_resolver=_platform_resolver,
         )
     for needle in case.expected_prompt_contains:
         if needle not in built.system_prompt:
@@ -227,6 +235,7 @@ async def _run_error_case(
                 checkpointer=cp,
                 skill_resolver=resolver,
                 tenant_id=tenant_id,
+                provider_key_resolver=_platform_resolver,
             )
         notes.append(f"expected {expected_exc.__name__} but build_agent succeeded")
     except expected_exc:

@@ -108,9 +108,13 @@ class ModelSpec(BaseModel):
     rate_limit_rpm: int = Field(default=60, gt=0)
     #: Reference to the provider API key — a ``secret://`` URI resolved
     #: at agent-build time via the SecretStore (ADR-0007 / F.6). The
-    #: manifest never embeds the key value itself. ``None`` is valid in
-    #: the schema (keeps existing manifests / tests loading) but the
-    #: agent factory rejects it: a provider with no key cannot be built.
+    #: manifest never embeds the key value itself. **Stream Y-2 deprecated
+    #: for manifests**: agent builds ignore this field and resolve the key
+    #: from the platform credential (LLM spend must be platform-metered);
+    #: ``None`` is the normal case. The field is retained because the
+    #: control-plane's internal rerank/embed/aux plumbing still pins an
+    #: already-platform-resolved ``secret://`` ref here when calling
+    #: ``build_llm_router`` directly (no metering bypass).
     api_key_ref: str | None = None
     #: Base URL for the ``self-hosted`` provider (an OpenAI-compatible
     #: server — vLLM / Ollama / …) and the ``azure`` resource endpoint

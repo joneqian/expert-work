@@ -938,7 +938,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 - [x] **Y0 设计先行**（PR #404）（STREAM-Y-DESIGN + Mini-ADR Y-1~Y-5 + 现状核实）
 - [x] **Y1 平台独占锁**（PR #405）：resolver 删 tenant 分支 + `CredentialsMode` 收窄 `Literal["platform"]` + 全量移除 tenant-mode 机器（mcp_auth 死代码 / switch gate / dry-run 端点 / metrics）+ 防御性迁移 `0058`（翻 tenant→platform + CHECK 收紧）+ admin-ui 裁剪。PATCH `tenant`→422
-- [ ] **Y2 移除 manifest `api_key_ref`**：`agent_factory:813-826` 删分支 → 100% 主 key 走平台 resolver（过渡 ignore+warn）；杜绝 spend 绕过计量
+- [x] **Y2 移除 manifest `api_key_ref`**（PR #406）：`build_agent` 路径 `ignore_api_key_ref=True` → manifest api_key_ref 被忽略（ignore+warn）+ 100% 主 key 走平台 resolver；内部 rerank/embed/aux 管道（默认 honor）不变；杜绝 spend 绕过计量
 - [ ] **Y3 Rate Card**：`model_rate_card` 表（NULL-tenant + 整数 micro-USD + markup_bps + 时序 effective_from/until + plan_tier 最具体优先）+ store + admin API + `billing` RBAC + `token_usage.provider` 列（additive）+ 迁移 `0059`
 - [ ] **Y4 成本派生 + billing ledger**：`tenant_billing_ledger`（不扩展 token_budget_ledger；base/markup/billed 拆分内部存）+ rollup job（读 token_usage→当时生效 rate 定价→幂等 upsert；provider 歧义标 unpriced）+ 迁移 `0060`
 
