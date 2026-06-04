@@ -907,16 +907,16 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **依赖**：`W（含 entitlement 地基）→ X（Skills，复用）∥ Y（LLM 锁+rate card+计量）→ Z（chargeback 面）`。
 
-### Stream W — MCP Connector Catalog（平台精选目录 + 租户实例化 + entitlement 地基）— 设计 [STREAM-W-DESIGN](./streams/STREAM-W-DESIGN.md)
+### Stream W — MCP Connector Catalog（平台精选目录 + 租户实例化 + entitlement 地基）— ✅ 核心完成 2026-06-04（W0–W5 / PR #390–#393,#395–#396；W6 可选未做）— 设计 [STREAM-W-DESIGN](./streams/STREAM-W-DESIGN.md)
 
 **演进 Stream V，不破坏已上线行/端点**。平台维护精选连接器目录（system_admin），租户从目录实例化、填自己凭证；premium 项按档位门控。保留自定义逃生口（per-tenant kill-switch）。
 
-- [ ] **W0 设计先行**（STREAM-W-DESIGN + 本 backlog）— **Mini-ADR W-1~W-11**
-- [ ] **W1 协议 + entitlement 原语**：`protocol/mcp_connector_catalog.py`（records + `McpConnectorAuthSchema`）+ `TenantMcpServerRecord.catalog_id` + `TenantConfigRecord/Patch.allow_custom_mcp_servers` + `protocol/entitlement.py` `TIER_ORDER`/`tier_satisfies`（放 helix-protocol 非 helix-common，避免新增跨包依赖）；纯 schema 单测
-- [ ] **W2 持久化**：迁移 `0055_mcp_connector_catalog`（NULL-tenant RLS，照抄 0050）+ `0056_mcp_server_catalog_id`（加列）+ ORM + `McpConnectorCatalogStore`(base/sql/memory) + store `catalog_id` kwarg + `tenant_config` 列；**RLS 测（租户读目录须 bypass）+ 迁移安全测（V 旧行→catalog_id=NULL）**
-- [ ] **W3 平台目录 CRUD API + RBAC**：`mcp_catalog` 资源 + `api/mcp_catalog.py`（system_admin，bypass_rls）+ delete-in-use 409 + 审计双 Literal；authz 测
-- [ ] **W4 租户实例化 + 档位门控 + `/available` + 自定义 kill-switch**：`GET /catalog`（带 entitled）+ `POST /catalog/{id}/instances`（复用 probe/secret/invalidate）+ `tier_satisfies` 门控 + `allow_custom_mcp_servers` enforce；**复跑 V pool 测验证运行时零改动**
-- [ ] **W5 Admin UI**：平台目录管理页 + 租户"从目录添加"向导（auth_schema 驱动表单 + entitlement 锁标 + 测试连接）+ 自定义降级为 Advanced + i18n
+- [x] **W0 设计先行**（PR #390）（STREAM-W-DESIGN + 本 backlog）— **Mini-ADR W-1~W-11**
+- [x] **W1 协议 + entitlement 原语**（PR #391）：`protocol/mcp_connector_catalog.py`（records + `McpConnectorAuthSchema`）+ `TenantMcpServerRecord.catalog_id` + `TenantConfigRecord/Patch.allow_custom_mcp_servers` + `protocol/entitlement.py` `TIER_ORDER`/`tier_satisfies`（放 helix-protocol 非 helix-common，避免新增跨包依赖）；纯 schema 单测
+- [x] **W2 持久化**（PR #392）：迁移 `0055_mcp_connector_catalog`（NULL-tenant RLS，照抄 0050）+ `0056_mcp_catalog_columns`（catalog_id + allow_custom_mcp_servers）+ ORM + `McpConnectorCatalogStore`(base/sql/memory) + store `catalog_id` kwarg + `tenant_config` 列；RLS 测（租户读目录须 bypass）+ 迁移安全测（V 旧行→catalog_id=NULL）+ validate-before-commit 负向测
+- [x] **W3 平台目录 CRUD API + RBAC**（PR #393）：`mcp_catalog` 资源 + `api/mcp_catalog.py`（system_admin，bypass_rls）+ delete-in-use 409（FK RESTRICT→IntegrityError）+ 审计双 Literal；9 authz/CRUD 测
+- [x] **W4 租户实例化 + 档位门控 + `/available` + 自定义 kill-switch**（PR #395）：`GET /catalog`（带 entitled）+ `POST /catalog/{id}/instances`（复用 probe/secret/invalidate）+ `tier_satisfies` 门控 + `allow_custom_mcp_servers` enforce；**param 结构字符黑名单防 host-pivot SSRF**（review HIGH）；15 测
+- [x] **W5 Admin UI**（PR #396）：平台目录管理页（system_admin）+ 租户"从目录添加"向导（auth_schema 驱动表单 + entitlement 锁标）+ 自定义降级为 Advanced + i18n en/zh-CN；vitest 240 + storybook + Playwright 9 + axe；TS-review 1 HIGH（auth_type 编辑不可变）+3 MED 修完
 - [ ] **W6（可选）初始目录 seed**：GitHub/Postgres 官方连接器（config flag 后）
 
 **关键路径** W0→W1→W2→W3→W4→W5。**完成 = system_admin 维护连接器目录，租户从目录实例化（含 premium 档位门控）并在 agent 里使用**；entitlement 地基（tier_satisfies）就绪供 X/Y/Z 复用。
