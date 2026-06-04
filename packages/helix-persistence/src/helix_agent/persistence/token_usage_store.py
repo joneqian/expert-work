@@ -74,6 +74,22 @@ class TokenUsageStore(abc.ABC):
         isolation check at the data layer.
         """
 
+    @abc.abstractmethod
+    async def list_for_tenant_window(
+        self,
+        *,
+        tenant_id: UUID,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[TokenUsageRecord]:
+        """Return **all** rows with ``start <= observed_at < end`` — Stream Y4.
+
+        Half-open window (start inclusive, end exclusive). No row cap: the Y4
+        rollup must price every usage row in a month, so this reads the full
+        window (the SQL impl pages internally). Tenant scoping rides on the RLS
+        context, like :meth:`list_for_tenant`.
+        """
+
 
 class InMemoryTokenUsageStore(TokenUsageStore):
     """In-memory :class:`TokenUsageStore` — dev / unit tests."""
@@ -102,6 +118,21 @@ class InMemoryTokenUsageStore(TokenUsageStore):
             rows = [r for r in rows if r.model == model]
         rows.sort(key=lambda r: r.id or 0, reverse=True)
         return rows[:limit]
+
+    async def list_for_tenant_window(
+        self,
+        *,
+        tenant_id: UUID,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[TokenUsageRecord]:
+        return [
+            r
+            for r in self._rows
+            if r.tenant_id == tenant_id
+            and r.observed_at is not None
+            and start <= r.observed_at < end
+        ]
 
 
 class DbTokenUsageStore(TokenUsageStore):
@@ -155,6 +186,47 @@ class DbTokenUsageStore(TokenUsageStore):
             stmt = stmt.order_by(TokenUsageRow.id.desc()).limit(limit)
             result = await session.execute(stmt)
             return [_row_to_record(r) for r in result.scalars().all()]
+
+    async def list_for_tenant_window(
+        self,
+        *,
+        tenant_id: UUID,
+        start: datetime,
+        end: datetime,
+    ) -> Sequence[TokenUsageRecord]:
+        # Keyset pagination by ascending id: no row cap, bounded memory per
+        # page. ``observed_at`` is monotonic with insert but not guaranteed
+        # unique, so we page on the surrogate ``id`` instead.
+        #
+        # NOTE (Y4 operability follow-up): all pages stream inside ONE session,
+        # so a very large tenant-month holds a read transaction (+ connection)
+        # open for the whole scan. Acceptable for the M1 rollup cadence and a
+        # direct-to-Postgres connection (see the rollup job's settings); revisit
+        # with per-page sessions if the job runs behind transaction-mode pooling
+        # or tenants accumulate millions of rows per month.
+        page_size = 5000
+        out: list[TokenUsageRecord] = []
+        after_id = 0
+        async with self._sf() as session:
+            while True:
+                stmt = (
+                    select(TokenUsageRow)
+                    .where(
+                        TokenUsageRow.observed_at >= start,
+                        TokenUsageRow.observed_at < end,
+                        TokenUsageRow.id > after_id,
+                    )
+                    .order_by(TokenUsageRow.id.asc())
+                    .limit(page_size)
+                )
+                rows = (await session.execute(stmt)).scalars().all()
+                if not rows:
+                    break
+                out.extend(_row_to_record(r) for r in rows)
+                after_id = rows[-1].id
+                if len(rows) < page_size:
+                    break
+        return out
 
 
 def _row_to_record(row: TokenUsageRow) -> TokenUsageRecord:

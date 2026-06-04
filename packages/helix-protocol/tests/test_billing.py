@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -11,8 +12,12 @@ from helix_agent.protocol import (
     ModelRateCardPatch,
     ModelRateCardRecord,
     ModelRateCardUpsert,
+    TenantBillingLedgerRecord,
     apply_markup,
+    provider_for_model,
 )
+from helix_agent.protocol.billing import _build_model_provider_index
+from helix_agent.protocol.model_catalog import ModelEntry
 from helix_agent.protocol.tenant_config import TenantPlan
 
 _FROM = datetime(2026, 6, 1, tzinfo=UTC)
@@ -141,3 +146,91 @@ def test_patch_partial_ok() -> None:
     patch = ModelRateCardPatch(markup_bps=3000)
     assert patch.markup_bps == 3000
     assert patch.input_token_micros is None
+
+
+# ---------------------------------------------------------------------------
+# provider_for_model — reverse MODEL_CATALOG lookup (Y4)
+# ---------------------------------------------------------------------------
+
+
+def test_provider_for_model_happy_path() -> None:
+    assert provider_for_model("claude-opus-4-8") == "anthropic"
+
+
+def test_provider_for_model_unknown_returns_none() -> None:
+    assert provider_for_model("not-a-real-model") is None
+
+
+def test_provider_for_model_includes_deprecated() -> None:
+    # gpt-4o is deprecated but must still reverse-resolve to its provider.
+    assert provider_for_model("gpt-4o") == "openai"
+
+
+def test_build_index_marks_ambiguous_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model name registered under >1 provider maps to None (ambiguous)."""
+    fake_catalog = {
+        "anthropic": (ModelEntry(name="shared-model"),),
+        "openai": (ModelEntry(name="shared-model"), ModelEntry(name="solo-model")),
+    }
+    monkeypatch.setattr("helix_agent.protocol.billing.MODEL_CATALOG", fake_catalog)
+    index = _build_model_provider_index()
+    assert index["shared-model"] is None
+    assert index["solo-model"] == "openai"
+
+
+# ---------------------------------------------------------------------------
+# TenantBillingLedgerRecord validation (Y4)
+# ---------------------------------------------------------------------------
+
+
+def _ledger(**over: object) -> TenantBillingLedgerRecord:
+    now = datetime.now(UTC)
+    kwargs: dict[str, object] = {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "month": date(2026, 6, 1),
+        "provider": "anthropic",
+        "model": "claude-opus-4-8",
+        "agent_name": "support",
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+        "base_cost_micros": 1000,
+        "markup_cost_micros": 200,
+        "billed_cost_micros": 1200,
+        "priced": True,
+        "rate_card_priced_at": now,
+        "created_at": now,
+        "updated_at": now,
+    }
+    kwargs.update(over)
+    return TenantBillingLedgerRecord(**kwargs)  # type: ignore[arg-type]
+
+
+def test_ledger_record_valid() -> None:
+    rec = _ledger()
+    assert rec.billed_cost_micros == 1200
+    assert rec.priced is True
+
+
+def test_ledger_record_rejects_negative_tokens() -> None:
+    with pytest.raises(ValidationError):
+        _ledger(input_tokens=-1)
+
+
+def test_ledger_record_rejects_negative_cost() -> None:
+    with pytest.raises(ValidationError):
+        _ledger(base_cost_micros=-1)
+
+
+def test_ledger_record_unpriced_zero_cost() -> None:
+    rec = _ledger(
+        provider="unknown",
+        priced=False,
+        base_cost_micros=0,
+        markup_cost_micros=0,
+        billed_cost_micros=0,
+    )
+    assert rec.priced is False
+    assert rec.billed_cost_micros == 0

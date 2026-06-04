@@ -39,6 +39,7 @@ from helix_agent.persistence.models.run_event import RunEventRow
 from helix_agent.persistence.models.sandbox_instance import SandboxInstanceRow
 from helix_agent.persistence.models.service_account import ServiceAccountRow
 from helix_agent.persistence.models.skill import SkillRow, SkillVersionRow
+from helix_agent.persistence.models.tenant_billing_ledger import TenantBillingLedgerRow
 from helix_agent.persistence.models.tenant_config import TenantConfigRow
 from helix_agent.persistence.models.tenant_mcp_server import TenantMcpServerRow
 from helix_agent.persistence.models.tenant_member import TenantMemberRow
@@ -85,6 +86,7 @@ __all__ = [
     "ServiceAccountRow",
     "SkillRow",
     "SkillVersionRow",
+    "TenantBillingLedgerRow",
     "TenantConfigRow",
     "TenantMcpServerRow",
     "TenantMemberRow",

@@ -59,7 +59,9 @@ from helix_agent.protocol.billing import (
     ModelRateCardPatch,
     ModelRateCardRecord,
     ModelRateCardUpsert,
+    TenantBillingLedgerRecord,
     apply_markup,
+    provider_for_model,
 )
 from helix_agent.protocol.dr import (
     BackupAssetType,
@@ -308,6 +310,7 @@ __all__ = [
     "SubagentStatus",
     "SubjectType",
     "SystemPromptSpec",
+    "TenantBillingLedgerRecord",
     "TenantBudgetRecord",
     "TenantConfig",
     "TenantConfigPatch",
@@ -341,6 +344,7 @@ __all__ = [
     "parse_agent_ref",
     "parse_image_ref",
     "parse_skill_ref",
+    "provider_for_model",
     "tier_satisfies",
     "validate_secret_ref",
 ]

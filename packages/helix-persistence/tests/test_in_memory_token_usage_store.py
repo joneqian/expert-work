@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from dataclasses import replace
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -146,5 +148,59 @@ async def test_list_does_not_leak_across_tenants(
         )
     )
     rows = list(await store.list_for_tenant(tenant_id=tenant_a))
+    assert len(rows) == 1
+    assert rows[0].tenant_id == tenant_a
+
+
+# ---------------------------------------------------------------------------
+# list_for_tenant_window — Stream Y4 (half-open [start, end))
+# ---------------------------------------------------------------------------
+
+
+async def _insert_at(
+    store: InMemoryTokenUsageStore, *, tenant_id: UUID, observed_at: datetime
+) -> None:
+    """Insert a row, then pin its observed_at (insert() stamps now())."""
+    stored = await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant_id,
+            agent_name="bot",
+            agent_version="1.0.0",
+            model="claude-sonnet-4-6",
+            input_tokens=1,
+        )
+    )
+    # Replace the just-inserted row with a fixed observed_at.
+    store._rows[-1] = replace(stored, observed_at=observed_at)
+
+
+@pytest.mark.asyncio
+async def test_window_is_half_open(store: InMemoryTokenUsageStore) -> None:
+    tenant = uuid4()
+    start = datetime(2026, 6, 1, tzinfo=UTC)
+    end = datetime(2026, 7, 1, tzinfo=UTC)
+    # observed_at == start  → included
+    await _insert_at(store, tenant_id=tenant, observed_at=start)
+    # mid-window            → included
+    await _insert_at(store, tenant_id=tenant, observed_at=datetime(2026, 6, 15, tzinfo=UTC))
+    # observed_at == end    → excluded
+    await _insert_at(store, tenant_id=tenant, observed_at=end)
+    # before start          → excluded
+    await _insert_at(store, tenant_id=tenant, observed_at=datetime(2026, 5, 31, tzinfo=UTC))
+
+    rows = list(await store.list_for_tenant_window(tenant_id=tenant, start=start, end=end))
+    observed = sorted(r.observed_at for r in rows if r.observed_at is not None)
+    assert observed == [start, datetime(2026, 6, 15, tzinfo=UTC)]
+
+
+@pytest.mark.asyncio
+async def test_window_isolates_tenants(store: InMemoryTokenUsageStore) -> None:
+    tenant_a = uuid4()
+    tenant_b = uuid4()
+    start = datetime(2026, 6, 1, tzinfo=UTC)
+    end = datetime(2026, 7, 1, tzinfo=UTC)
+    await _insert_at(store, tenant_id=tenant_a, observed_at=start)
+    await _insert_at(store, tenant_id=tenant_b, observed_at=start)
+    rows = list(await store.list_for_tenant_window(tenant_id=tenant_a, start=start, end=end))
     assert len(rows) == 1
     assert rows[0].tenant_id == tenant_a

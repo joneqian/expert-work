@@ -14,6 +14,7 @@ dependencies = [
     "helix-agent-protocol",
     "helix-agent-runtime",
     "helix-agent-audit-backup-worker",
+    "helix-agent-billing-rollup-job",
     "helix-agent-control-plane",
     "helix-agent-credential-proxy",
     "helix-agent-event-log-archive-job",
@@ -48,6 +49,7 @@ members = [
     "packages/helix-protocol",
     "packages/helix-runtime",
     "services/audit-backup-worker",
+    "services/billing-rollup-job",
     "services/control-plane",
     "services/credential-proxy",
     "services/event-log-archive-job",
@@ -62,6 +64,7 @@ helix-agent-persistence = { workspace = true }
 helix-agent-protocol = { workspace = true }
 helix-agent-runtime = { workspace = true }
 helix-agent-audit-backup-worker = { workspace = true }
+helix-agent-billing-rollup-job = { workspace = true }
 helix-agent-control-plane = { workspace = true }
 helix-agent-credential-proxy = { workspace = true }
 helix-agent-event-log-archive-job = { workspace = true }
@@ -118,7 +121,7 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/audit-backup-worker/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src:$MYPY_CONFIG_FILE_DIR/services/credential-proxy/src:$MYPY_CONFIG_FILE_DIR/services/orchestrator/src:$MYPY_CONFIG_FILE_DIR/services/retention-cleanup-job/src:$MYPY_CONFIG_FILE_DIR/services/sandbox-supervisor/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/audit-backup-worker/src:$MYPY_CONFIG_FILE_DIR/services/billing-rollup-job/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src:$MYPY_CONFIG_FILE_DIR/services/credential-proxy/src:$MYPY_CONFIG_FILE_DIR/services/orchestrator/src:$MYPY_CONFIG_FILE_DIR/services/retention-cleanup-job/src:$MYPY_CONFIG_FILE_DIR/services/sandbox-supervisor/src"
 
 [[tool.mypy.overrides]]
 module = "testcontainers.*"

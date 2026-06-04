@@ -27,7 +27,7 @@ mirroring ``mcp_connector_catalog`` / ``encrypted_secret``).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -39,8 +39,44 @@ __all__ = [
     "ModelRateCardPatch",
     "ModelRateCardRecord",
     "ModelRateCardUpsert",
+    "TenantBillingLedgerRecord",
     "apply_markup",
+    "provider_for_model",
 ]
+
+
+def _build_model_provider_index() -> dict[str, str | None]:
+    """Reverse :data:`MODEL_CATALOG` into ``model name → provider``.
+
+    Built once at import time. A model name that appears under more than one
+    provider maps to ``None`` (ambiguous) so the rollup refuses to guess; an
+    unknown model is simply absent from the index. Deprecated entries are
+    included so historical usage stays resolvable.
+    """
+    index: dict[str, str | None] = {}
+    for provider, entries in MODEL_CATALOG.items():
+        for entry in entries:
+            if entry.name in index and index[entry.name] != provider:
+                # Same model name under >1 provider → ambiguous, refuse to guess.
+                index[entry.name] = None
+            elif entry.name not in index:
+                index[entry.name] = provider
+    return index
+
+
+# Module-level reverse index (model name → provider | None-for-ambiguous).
+_MODEL_PROVIDER_INDEX: dict[str, str | None] = _build_model_provider_index()
+
+
+def provider_for_model(model: str) -> str | None:
+    """Reverse-look-up the provider that owns ``model``.
+
+    Returns the provider iff the model name maps to **exactly one** provider.
+    Returns ``None`` when the model is unknown OR ambiguous (the same name is
+    registered under more than one provider). Used by the Y4 rollup only as a
+    fallback when ``token_usage.provider`` is NULL (legacy rows).
+    """
+    return _MODEL_PROVIDER_INDEX.get(model)
 
 
 def apply_markup(base_micros: int, markup_bps: int) -> int:
@@ -145,3 +181,50 @@ class ModelRateCardPatch(BaseModel):
     cache_read_token_micros: int | None = Field(default=None, ge=0)
     markup_bps: int | None = Field(default=None, ge=0)
     effective_until: datetime | None = None
+
+
+class TenantBillingLedgerRecord(BaseModel):
+    """One derived per-tenant monthly billing bucket — Stream Y (Mini-ADR Y-4).
+
+    Produced by the Y4 rollup job: ``token_usage`` rows for a tenant + month are
+    priced by the rate effective at each row's ``observed_at`` and aggregated
+    into ``(tenant, month, provider, model, agent_name)`` buckets. Pure
+    derivation, so re-running the rollup overwrites (upsert) a month's buckets
+    rather than double-counting.
+
+    Cost is stored as the ``base`` / ``markup`` / ``billed`` split (integer
+    micro-USD): tenants see only ``billed_cost_micros`` (Stream Z exposure
+    control), while ``base``/``markup`` are retained internally for system_admin
+    chargeback (transparency decision 2). ``markup_cost_micros`` is always
+    ``billed - base`` — never recomputed by division.
+
+    ``priced`` is ``False`` when the provider could not be derived (unknown /
+    ambiguous model) or no rate matched; the token sums are still recorded but
+    the cost fields are 0. Unpriced rows are bucketed under ``provider="unknown"``
+    so they never pollute a priced bucket.
+
+    No ``extra="forbid"``: materialized from a trusted DB row, not untrusted
+    input.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID
+    # First-of-month convention (e.g. 2026-06-01 = June 2026).
+    month: date
+    provider: str
+    model: str
+    agent_name: str
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    cache_creation_tokens: int = Field(ge=0)
+    cache_read_tokens: int = Field(ge=0)
+    base_cost_micros: int = Field(ge=0)
+    markup_cost_micros: int = Field(ge=0)
+    billed_cost_micros: int = Field(ge=0)
+    priced: bool
+    # When the rollup priced this bucket (audit — distinct from created/updated).
+    rate_card_priced_at: datetime
+    created_at: datetime
+    updated_at: datetime

@@ -940,7 +940,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **Y1 平台独占锁**（PR #405）：resolver 删 tenant 分支 + `CredentialsMode` 收窄 `Literal["platform"]` + 全量移除 tenant-mode 机器（mcp_auth 死代码 / switch gate / dry-run 端点 / metrics）+ 防御性迁移 `0058`（翻 tenant→platform + CHECK 收紧）+ admin-ui 裁剪。PATCH `tenant`→422
 - [x] **Y2 移除 manifest `api_key_ref`**（PR #406）：`build_agent` 路径 `ignore_api_key_ref=True` → manifest api_key_ref 被忽略（ignore+warn）+ 100% 主 key 走平台 resolver；内部 rerank/embed/aux 管道（默认 honor）不变；杜绝 spend 绕过计量
 - [x] **Y3 Rate Card**（PR #407）：`model_rate_card` 表（NULL-tenant FORCE RLS + 整数 micro-USD + markup_bps + 时序 effective_from/until + plan_tier 最具体优先 + resolve 半开窗）+ store（双实现）+ admin API（system_admin/bypass）+ `billing` RBAC + audit ResourceType + `token_usage.provider` 列（additive,中间件填充）+ 迁移 `0059`
-- [ ] **Y4 成本派生 + billing ledger**：`tenant_billing_ledger`（不扩展 token_budget_ledger；base/markup/billed 拆分内部存）+ rollup job（读 token_usage→当时生效 rate 定价→幂等 upsert；provider 歧义标 unpriced）+ 迁移 `0060`
+- [x] **Y4 成本派生 + billing ledger**（PR #408）：`tenant_billing_ledger`（tenant-scoped RLS；不扩展 token_budget_ledger；base/markup/billed 拆分内部存）+ `billing-rollup-job` 服务（按 row `observed_at` 当时生效 rate **逐行**定价→聚合 bucket→幂等 upsert-overwrite；provider 反查 + 歧义/无 rate 标 unpriced）+ `token_usage` windowed read + 迁移 `0060`。**Stream Y 收官**
 
 ### Stream Z — Chargeback / 用量面（计费层出口）
 
