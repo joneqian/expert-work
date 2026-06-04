@@ -926,10 +926,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 平台发布精选 skill 库（`tenant_id NULL`，可 premium），租户继续自建；manifest 同时可绑平台/租户 skill。复用 W 的 `tier_satisfies`、Stream U 的 moderation/curator。**关键发现**：skill resolver 当前**未接入 agent build**（Stream U 遗留缺口，app.py:972 TODO）→ 租户 skill 运行时也未生效；X3 首次接线（租户+平台），属行为变更。
 
 - [ ] **X0 设计先行**（STREAM-X-DESIGN + Mini-ADR W… X-1~X-9）
-- [ ] **X1 协议**（PR #399）：`Skill.required_tier`（纯 additive，default FREE）。`tenant_id: UUID|None` 的放宽**移到 X2**（它会 ripple 进 store/curator/orchestrator，须与迁移同 PR 处理，避免悬空类型变更）
-- [ ] **X2 持久化 + 迁移**：协议 `Skill/SkillVersion.tenant_id → UUID|None` + 迁移 `0057_platform_skill`（skill/skill_version tenant_id 改 NULLABLE + RLS 严格相等→`IS NOT DISTINCT FROM` + COALESCE 唯一索引 + `required_tier` 列）+ store/curator/orchestrator 的 `UUID|None` ripple（memory store set、`SkillActivityRecorder.record`、`_load_skills`）+ curator `WHERE tenant_id IS NOT NULL`；**RLS 回归测 + 迁移安全测**（最高风险=已有数据表换 RLS）
-- [ ] **X3 resolver 接线 + 双查 + 门控**：`make_skill_resolver`（租户优先 + 平台 bypass 兜底 + `tier_satisfies` not_entitled）+ **首次线程穿 `make_agent_builder`/`make_child_agent_builder`/`build_agent`/子 agent + `SkillViewTool` + activity recorder**（补 Stream U 运行时接线）
-- [ ] **X4 平台 skill CRUD API + 租户合并视图**（system_admin，bypass_rls，复用 moderation/high-risk）+ `GET /v1/skills` 加 source/entitled
+- [x] **X1 协议**（PR #399）：`Skill.required_tier`（纯 additive，default FREE）。`tenant_id: UUID|None` 的放宽**移到 X2**（它会 ripple 进 store/curator/orchestrator，须与迁移同 PR 处理，避免悬空类型变更）
+- [x] **X2 持久化 + 迁移**（PR #400）：协议 `Skill/SkillVersion.tenant_id → UUID|None` + 迁移 `0057_platform_skill`（skill/skill_version tenant_id 改 NULLABLE + RLS 严格相等→`IS NOT DISTINCT FROM` + COALESCE 唯一索引 + `required_tier` 列）+ store/curator/orchestrator 的 `UUID|None` ripple（memory store set、`SkillActivityRecorder.record`、`_load_skills`）+ curator `WHERE tenant_id IS NOT NULL`；**RLS 回归测 + 迁移安全测**（最高风险=已有数据表换 RLS）
+- [x] **X3 resolver 接线 + 双查 + 门控**（PR #401）：`make_skill_resolver`（租户优先 + 平台 bypass 兜底 + `tier_satisfies` not_entitled）+ **首次线程穿 `make_agent_builder`/`make_child_agent_builder`/`build_agent`/子 agent + `SkillViewTool` + activity recorder**（补 Stream U 运行时接线）
+- [x] **X4 平台 skill CRUD API + 租户合并视图**（PR #402）（system_admin，bypass_rls，复用 moderation/high-risk）+ `GET /v1/skills` 加 source/entitled
 - [ ] **X5 Admin UI**：平台库管理页（system_admin）+ 租户库 source/entitled 徽章 + i18n
 
 ### Stream Y — LLM 平台独占 + Rate Card + 计量（治理 + 成本地基）
