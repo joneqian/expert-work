@@ -76,7 +76,19 @@ async function login(page: import("@playwright/test").Page): Promise<void> {
 
 // ── Route setup ──────────────────────────────────────────────────────────
 
+// Stream W — the "Add MCP server" action now opens a catalog browser first.
+const CATALOG_LIST = { success: true, data: [], error: null };
+
 test.beforeEach(async ({ page }) => {
+  // GET /v1/mcp-servers/catalog → tenant catalog (register before the broader
+  // /v1/mcp-servers route so glob ordering is correct).
+  await page.route("**/v1/mcp-servers/catalog", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: CATALOG_LIST });
+      return;
+    }
+    await route.fallback();
+  });
   // GET /v1/mcp-servers → server list (must be registered before the
   // more-specific tools route so the glob ordering is correct).
   await page.route("**/v1/mcp-servers", async (route) => {
@@ -84,7 +96,7 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({ json: MCP_SERVERS_LIST });
       return;
     }
-    await route.continue();
+    await route.fallback();
   });
   // GET /v1/mcp-servers/*/tools → tool list.
   await page.route("**/v1/mcp-servers/*/tools", async (route) => {
@@ -96,7 +108,7 @@ test.beforeEach(async ({ page }) => {
       await route.fulfill({ json: TEST_CONNECTION_OK });
       return;
     }
-    await route.continue();
+    await route.fallback();
   });
 });
 
@@ -107,7 +119,7 @@ test("(a) lists MCP servers in the table", async ({ page }) => {
   await page.goto("/settings/mcp-servers");
 
   await expect(page.getByTestId("ms-table")).toBeVisible();
-  await expect(page.getByText("github")).toBeVisible();
+  await expect(page.getByText("github", { exact: true })).toBeVisible();
 });
 
 test("(b) expanding a row shows its live tools", async ({ page }) => {
@@ -138,16 +150,16 @@ test("(c) clicking 测试 shows connected status", async ({ page }) => {
   await expect(page.getByText(/已连接|Connected/)).toBeVisible();
 });
 
-test("(d) opening the add drawer and clicking 测试连接 shows success", async ({
-  page,
-}) => {
+test("(d) advanced custom path → 测试连接 shows success", async ({ page }) => {
   await login(page);
   await page.goto("/settings/mcp-servers");
 
   await expect(page.getByTestId("ms-table")).toBeVisible();
 
-  // Open the add-server drawer.
+  // Open the catalog browser, then reach the legacy custom form via the
+  // demoted "Advanced — add a custom server" affordance (Stream W).
   await page.getByTestId("ms-add").click();
+  await page.getByTestId("amsd-custom").click();
   await expect(page.getByTestId("cms-form")).toBeVisible();
 
   // Fill in the minimum required fields.

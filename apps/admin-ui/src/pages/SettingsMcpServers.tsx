@@ -39,6 +39,7 @@ import {
 } from "../api/mcp-servers";
 import { ApiError } from "../api/client";
 import { CreateMcpServerDrawer } from "../components/CreateMcpServerDrawer";
+import { AddMcpServerDrawer } from "../components/mcp_catalog/AddMcpServerDrawer";
 import { PageHeader } from "../components/PageHeader";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -59,8 +60,10 @@ export function SettingsMcpServers() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Drawer state — shared for both create and edit.
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Catalog "Add MCP server" flow (browse → instantiate / advanced custom).
+  const [addOpen, setAddOpen] = useState(false);
+  // Edit drawer — the legacy single-server editor, reused for edits only.
+  const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<McpServer | null>(null);
 
   // Per-row probe state keyed by server name.
@@ -148,17 +151,16 @@ export function SettingsMcpServers() {
   );
 
   const openCreate = useCallback(() => {
-    setEditing(null);
-    setDrawerOpen(true);
+    setAddOpen(true);
   }, []);
 
   const openEdit = useCallback((row: McpServer) => {
     setEditing(row);
-    setDrawerOpen(true);
+    setEditOpen(true);
   }, []);
 
-  const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
+  const closeEdit = useCallback(() => {
+    setEditOpen(false);
     setEditing(null);
   }, []);
 
@@ -421,11 +423,20 @@ export function SettingsMcpServers() {
         }}
       />
 
-      <CreateMcpServerDrawer
-        open={drawerOpen}
-        onClose={closeDrawer}
+      <AddMcpServerDrawer
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
         onSaved={() => {
-          closeDrawer();
+          setAddOpen(false);
+          reload();
+        }}
+      />
+
+      <CreateMcpServerDrawer
+        open={editOpen}
+        onClose={closeEdit}
+        onSaved={() => {
+          closeEdit();
           reload();
         }}
         editing={editing}

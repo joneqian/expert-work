@@ -58,6 +58,11 @@ export interface AvailableMcpServer {
   name: string;
   source: "platform" | "tenant";
   enabled?: boolean;
+  /** Catalog connector id this tenant server was instantiated from (Stream W).
+   *  Absent for custom-registered / platform-allowlisted servers. */
+  catalog_id?: string;
+  /** Human-readable catalog connector name (Stream W). */
+  catalog_name?: string;
 }
 
 export interface TestConnectionBody {

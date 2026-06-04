@@ -202,6 +202,11 @@ export function CreateMcpServerDrawer({
       reset();
       onClose();
     } catch (err) {
+      // Custom registration may be disabled platform-wide (Stream W).
+      if (err instanceof ApiError && err.code === "MCP_CUSTOM_DISABLED") {
+        message.error(t("create_mcp_server.custom_disabled"));
+        return;
+      }
       const msg =
         err instanceof ApiError
           ? `${err.code}: ${err.message}`
@@ -212,7 +217,7 @@ export function CreateMcpServerDrawer({
     } finally {
       setSubmitting(false);
     }
-  }, [form, editing, message, onSaved, onClose, reset]);
+  }, [form, editing, message, onSaved, onClose, reset, t]);
 
   // ── Render ─────────────────────────────────────────────────────────────
 

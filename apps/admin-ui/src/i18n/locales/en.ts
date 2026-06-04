@@ -44,6 +44,7 @@ export interface TranslationKeys {
     members: string;
     audit: string;
     mcp_servers: string;
+    mcp_catalog: string;
   };
   login: {
     title: string;
@@ -440,6 +441,84 @@ export interface TranslationKeys {
     token_required: string;
     submit_add: string;
     submit_save: string;
+    custom_disabled: string;
+  };
+  mcp_catalog: {
+    page_title: string;
+    subtitle: string;
+    add: string;
+    not_admin_title: string;
+    not_admin_body: string;
+    failed_to_load: string;
+    col_name: string;
+    col_category: string;
+    col_transport: string;
+    col_tier: string;
+    col_enabled: string;
+    col_actions: string;
+    empty_title: string;
+    empty_hint: string;
+    delete_confirm: string;
+    delete_in_use: string;
+    deleted: string;
+    tier_free: string;
+    tier_pro: string;
+    tier_enterprise: string;
+    auth_none: string;
+    auth_bearer: string;
+    add_title: string;
+    edit_title: string;
+    submit_add: string;
+    submit_save: string;
+    field_name: string;
+    field_name_hint: string;
+    field_display_name: string;
+    field_description: string;
+    field_category: string;
+    field_icon: string;
+    field_transport: string;
+    field_url_template: string;
+    url_template_hint: string;
+    field_auth: string;
+    field_required_tier: string;
+    field_auth_schema: string;
+    auth_schema_hint: string;
+    field_enabled: string;
+    name_required: string;
+    display_name_required: string;
+    url_template_required: string;
+    guard_bearer_one_secret: string;
+    guard_none_zero_secret: string;
+    field_builder_empty: string;
+    field_key_placeholder: string;
+    field_label_placeholder: string;
+    field_kind_param: string;
+    field_kind_secret: string;
+    field_required: string;
+    field_remove: string;
+    field_add: string;
+    browser_title: string;
+    browser_empty: string;
+    browser_failed: string;
+    select: string;
+    locked_ribbon: string;
+    requires_tier: string;
+    advanced_hint: string;
+    advanced_custom: string;
+    instantiate_title: string;
+    instance_name: string;
+    instance_name_hint: string;
+    field_value_required: string;
+    back: string;
+    create: string;
+    err_tier_required: string;
+    err_field_missing: string;
+    err_field_unknown: string;
+    err_param_invalid: string;
+    err_url_template: string;
+    err_invalid_url: string;
+    err_duplicate: string;
+    err_not_found: string;
   };
   settings_platform: {
     page_title: string;
@@ -937,6 +1016,7 @@ const en: TranslationKeys = {
     members: "Members",
     audit: "Audit",
     mcp_servers: "MCP Servers",
+    mcp_catalog: "MCP Catalog",
   },
   login: {
     title: "helix Admin",
@@ -1354,6 +1434,84 @@ const en: TranslationKeys = {
     token_required: "Token is required for bearer auth",
     submit_add: "Add",
     submit_save: "Save",
+    custom_disabled: "Custom servers are disabled by your platform admin; use the catalog.",
+  },
+  mcp_catalog: {
+    page_title: "MCP Catalog",
+    subtitle: "Curate the MCP connector types tenants can add. Platform-level, system admins only.",
+    add: "New connector",
+    not_admin_title: "System admin only",
+    not_admin_body: "The MCP connector catalog is managed by system admins. Ask one to add connectors.",
+    failed_to_load: "Failed to load the MCP catalog",
+    col_name: "Connector",
+    col_category: "Category",
+    col_transport: "Transport",
+    col_tier: "Required plan",
+    col_enabled: "Enabled",
+    col_actions: "Actions",
+    empty_title: "No connectors yet",
+    empty_hint: "Add connector types so tenants can wire up GitHub, Linear and other MCP servers in a few clicks.",
+    delete_confirm: "Delete connector {{name}}?",
+    delete_in_use: "In use by tenants — cannot delete. Disable it instead.",
+    deleted: "Connector deleted",
+    tier_free: "Free",
+    tier_pro: "Pro",
+    tier_enterprise: "Enterprise",
+    auth_none: "None",
+    auth_bearer: "Bearer token",
+    add_title: "New connector",
+    edit_title: "Edit connector",
+    submit_add: "Create",
+    submit_save: "Save",
+    field_name: "Name (slug)",
+    field_name_hint: "Lowercase identifier, immutable after creation",
+    field_display_name: "Display name",
+    field_description: "Description",
+    field_category: "Category",
+    field_icon: "Icon",
+    field_transport: "Transport",
+    field_url_template: "URL template",
+    url_template_hint: "Use {param} placeholders — they are filled from the param fields at instantiation.",
+    field_auth: "Auth type",
+    field_required_tier: "Required plan",
+    field_auth_schema: "Auth schema fields",
+    auth_schema_hint: "Fields the tenant fills in when adding this connector. Secrets are stored encrypted; params fill the URL template.",
+    field_enabled: "Enabled",
+    name_required: "A valid lowercase slug is required",
+    display_name_required: "Display name is required",
+    url_template_required: "URL template is required",
+    guard_bearer_one_secret: "Bearer auth requires exactly one secret field.",
+    guard_none_zero_secret: "Auth type None must have no secret fields.",
+    field_builder_empty: "No fields yet — add one below.",
+    field_key_placeholder: "key",
+    field_label_placeholder: "Label",
+    field_kind_param: "Param",
+    field_kind_secret: "Secret",
+    field_required: "Required",
+    field_remove: "Remove field",
+    field_add: "Add field",
+    browser_title: "Add MCP server",
+    browser_empty: "No connectors are available for your plan yet.",
+    browser_failed: "Failed to load the catalog",
+    select: "Add",
+    locked_ribbon: "Locked",
+    requires_tier: "Requires {{tier}} plan",
+    advanced_hint: "Need something not in the catalog?",
+    advanced_custom: "Advanced — add a custom server",
+    instantiate_title: "Add {{name}}",
+    instance_name: "Instance name (optional)",
+    instance_name_hint: "Defaults to the connector name; override to add more than one.",
+    field_value_required: "{{label}} is required",
+    back: "Back",
+    create: "Create",
+    err_tier_required: "Your plan does not include this connector. Upgrade to add it.",
+    err_field_missing: "A required field is missing.",
+    err_field_unknown: "An unexpected field was supplied.",
+    err_param_invalid: "A parameter value is invalid.",
+    err_url_template: "The connector URL template could not be filled — check your params.",
+    err_invalid_url: "The resulting server URL is invalid.",
+    err_duplicate: "A server with this name already exists.",
+    err_not_found: "This connector no longer exists.",
   },
   settings_platform: {
     page_title: "Platform Credentials",

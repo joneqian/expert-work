@@ -10,6 +10,7 @@ import {
   Clock,
   Key,
   KeyRound,
+  Boxes,
   Plug,
   UserCircle2,
   Users,
@@ -41,6 +42,7 @@ const NAV_ITEMS: NavItem[] = [
 const SETTINGS_ITEMS: NavItem[] = [
   { key: "settings-tenants", labelKey: "nav.tenants", icon: <Building size={16} strokeWidth={1.5} />, path: "/settings/tenants" },
   { key: "settings-platform", labelKey: "nav.platform_credentials", icon: <KeyRound size={16} strokeWidth={1.5} />, path: "/settings/platform" },
+  { key: "settings-mcp-catalog", labelKey: "nav.mcp_catalog", icon: <Boxes size={16} strokeWidth={1.5} />, path: "/settings/mcp-catalog" },
   { key: "settings-api-keys", labelKey: "nav.api_keys", icon: <Key size={16} strokeWidth={1.5} />, path: "/settings/api-keys" },
   { key: "settings-credentials", labelKey: "nav.credentials", icon: <KeyRound size={16} strokeWidth={1.5} />, path: "/settings/credentials" },
   { key: "settings-service-accounts", labelKey: "nav.service_accounts", icon: <UserCircle2 size={16} strokeWidth={1.5} />, path: "/settings/service-accounts" },
