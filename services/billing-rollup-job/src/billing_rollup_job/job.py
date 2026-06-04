@@ -33,13 +33,14 @@ from __future__ import annotations
 import calendar
 import logging
 import time
+from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
-from helix_agent.common.observability import helix_counter
+from helix_agent.common.observability import helix_counter, helix_gauge
 from helix_agent.persistence import (
     ModelRateCardStore,
     TenantBillingLedgerStore,
@@ -70,6 +71,14 @@ _unpriced_rows = helix_counter(
 _unpriced_buckets = helix_counter(
     "helix_billing_rollup_unpriced_buckets_total",
     "Ledger buckets written with priced=false.",
+)
+#: Stream Z-2 — rollup-computed billed cost (micro-USD) per (tenant, model) for
+#: the processed month. A gauge (SET each run) not a counter: the rollup
+#: recomputes the whole month, so set-overwrite is idempotent across re-runs.
+_billed_cost = helix_gauge(
+    "helix_llm_billed_cost_micros",
+    "Rollup-computed billed LLM cost (micro-USD) per tenant+model for the month.",
+    ("tenant", "model"),
 )
 
 
@@ -312,9 +321,18 @@ class BillingRollupJob:
 
         priced_at = datetime.now(tz=UTC)
         ordered = list(buckets.values())
+        # Stream Z-2 cost metric: SET (not inc) the billed total per (tenant,
+        # model) — the rollup recomputes the whole month, so a set is idempotent
+        # across re-runs where an inc would double-count. Label cardinality is
+        # tenant x model (no agent_name) by design.
+        billed_by_model: dict[str, int] = defaultdict(int)
         for bucket in ordered:
             if not bucket.priced:
                 _unpriced_buckets.inc()
+            billed_by_model[bucket.model] += bucket.billed_cost_micros
+        for model, billed in billed_by_model.items():
+            _billed_cost.labels(tenant=str(tenant_id), model=model).set(billed)
+        for bucket in ordered:
             record = TenantBillingLedgerRecord(
                 id=uuid4(),
                 tenant_id=tenant_id,

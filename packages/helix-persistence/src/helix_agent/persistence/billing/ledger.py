@@ -27,7 +27,7 @@ from datetime import UTC, date, datetime
 from uuid import UUID
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -41,6 +41,19 @@ def _utc_now() -> datetime:
 
 #: Unique key identifying a billing bucket (declared in migration 0060).
 _BUCKET_CONSTRAINT = "tenant_billing_ledger_bucket_uniq"
+
+# Cross-tenant chargeback read (Stream Z-2) must ``SET LOCAL ROLE`` to a
+# BYPASSRLS role, exactly like the audit cross-tenant read precedent
+# (``SqlAuditLogStore`` → ``audit_writer``). ``tenant_billing_ledger`` is
+# FORCE ROW LEVEL SECURITY: the application's main connection role is NOT
+# BYPASSRLS, so merely flipping ``bypass_rls_var`` (which skips emitting
+# the ``app.tenant_id`` GUC) leaves the policy as ``tenant_id = NULL`` →
+# zero rows. Assuming ``audit_reader`` (NOLOGIN BYPASSRLS, migration 0005;
+# GRANTed SELECT on this table by migration 0061) is what actually lets
+# the read cross tenants. ``SET LOCAL`` is transaction-scoped, so it lifts
+# on commit/rollback — no reset needed, matching the audit_writer idiom.
+_AUDIT_READER_ROLE = "audit_reader"
+_SET_AUDIT_READER_ROLE = text(f"SET LOCAL ROLE {_AUDIT_READER_ROLE}")
 
 
 class TenantBillingLedgerStore(abc.ABC):
@@ -62,6 +75,14 @@ class TenantBillingLedgerStore(abc.ABC):
         self, *, tenant_id: UUID, month: date
     ) -> list[TenantBillingLedgerRecord]:
         """Return all buckets for ``tenant_id`` in ``month``."""
+
+    @abc.abstractmethod
+    async def list_for_month_all_tenants(self, *, month: date) -> list[TenantBillingLedgerRecord]:
+        """Return every tenant's buckets for ``month`` (Stream Z-2 chargeback).
+
+        Cross-tenant read — caller MUST be inside ``bypass_rls_session()``
+        (system_admin only); a tenant-scoped session sees only its own rows.
+        """
 
     @abc.abstractmethod
     async def delete_month(self, *, tenant_id: UUID, month: date) -> int:
@@ -117,6 +138,12 @@ class InMemoryTenantBillingLedgerStore(TenantBillingLedgerStore):
         async with self._lock:
             rows = [r for r in self._rows.values() if r.tenant_id == tenant_id and r.month == month]
         rows.sort(key=lambda r: (r.provider, r.model, r.agent_name))
+        return rows
+
+    async def list_for_month_all_tenants(self, *, month: date) -> list[TenantBillingLedgerRecord]:
+        async with self._lock:
+            rows = [r for r in self._rows.values() if r.month == month]
+        rows.sort(key=lambda r: (str(r.tenant_id), r.provider, r.model, r.agent_name))
         return rows
 
     async def delete_month(self, *, tenant_id: UUID, month: date) -> int:
@@ -223,6 +250,31 @@ class DbTenantBillingLedgerStore(TenantBillingLedgerStore):
             )
         )
         async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_record(r) for r in rows]
+
+    async def list_for_month_all_tenants(self, *, month: date) -> list[TenantBillingLedgerRecord]:
+        # No tenant filter — caller MUST be inside ``bypass_rls_session()``
+        # (which skips emitting the ``app.tenant_id`` GUC). On its own that
+        # is NOT enough on a FORCE-RLS table for the non-BYPASSRLS app role:
+        # the policy collapses to ``tenant_id = NULL`` → zero rows. We must
+        # also ``SET LOCAL ROLE audit_reader`` (BYPASSRLS) so the cross-
+        # tenant read actually sees every tenant — same precedent as the
+        # audit cross-tenant read / ``SqlAuditLogStore``'s ``audit_writer``.
+        stmt = (
+            select(TenantBillingLedgerRow)
+            .where(TenantBillingLedgerRow.month == month)
+            .order_by(
+                TenantBillingLedgerRow.tenant_id,
+                TenantBillingLedgerRow.provider,
+                TenantBillingLedgerRow.model,
+                TenantBillingLedgerRow.agent_name,
+            )
+        )
+        async with self._sf() as session:
+            # First statement: opens the txn AND assumes the BYPASSRLS role.
+            # ``SET LOCAL`` lifts on commit/rollback — no reset needed.
+            await session.execute(_SET_AUDIT_READER_ROLE)
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_record(r) for r in rows]
 

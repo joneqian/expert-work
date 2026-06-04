@@ -36,6 +36,7 @@ from control_plane.api import (
     build_api_keys_router,
     build_artifacts_router,
     build_audit_router,
+    build_billing_admin_router,
     build_curation_router,
     build_eval_dataset_router,
     build_feedback_router,
@@ -1135,6 +1136,7 @@ def create_app(
     app.include_router(build_mcp_catalog_router())
     app.include_router(build_rate_card_router())
     app.include_router(build_usage_router())
+    app.include_router(build_billing_admin_router())
     app.include_router(build_platform_skills_router())
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())
