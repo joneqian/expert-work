@@ -27,10 +27,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
+from control_plane.tenant_scope import bypass_rls_session
 from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
+from helix_agent.common.skill_activity import SkillActivityRecorder
 from helix_agent.persistence import ArtifactStore, KnowledgeStore
+from helix_agent.persistence.skill import SkillStore
 from helix_agent.persistence.token_usage_store import TokenUsageStore
-from helix_agent.protocol import AgentSpec, ModelSpec, Provider, Tool
+from helix_agent.protocol import AgentSpec, ModelSpec, Provider, TenantPlan, Tool, tier_satisfies
 from helix_agent.runtime.audit import DefaultSecretRedactor
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
 from helix_agent.runtime.middleware import RecordingLangfuseClient
@@ -48,7 +51,9 @@ from orchestrator import (
 )
 from orchestrator.agent_factory import (
     ProviderKeyResolver,
+    SkillResolver,
     SubagentSpecResolver,
+    _SkillLookupResult,
     detect_subagent_cycle,
 )
 from orchestrator.errors import AgentFactoryError
@@ -169,6 +174,72 @@ def make_provider_key_resolver(
     return _resolve
 
 
+def make_skill_resolver(
+    *, store: SkillStore, tenant_config_service: TenantConfigService
+) -> SkillResolver:
+    """Bind a :class:`SkillStore` to the agent build's skill resolver
+    (Stream X, Mini-ADR X-4).
+
+    Resolution follows tenant-first / platform-fallback semantics:
+
+    * **Tenant-first (name-shadowing, R2)** — if the tenant owns a skill
+      with this ``name`` it wins, *even if* the tenant's copy is draft /
+      archived (a tenant name shadows the platform library; we never fall
+      back to a platform skill of the same name).
+    * **Platform-fallback (R3 tier gate)** — when the tenant has no skill
+      of that name, read the platform (NULL-tenant) library under
+      :func:`bypass_rls_session` (platform rows are invisible to the
+      tenant-scoped session otherwise — the X-1/W-8 property). A platform
+      skill the tenant's plan tier doesn't satisfy returns
+      ``not_entitled`` so the loader names the required plan.
+
+    The plan lookup runs outside ``bypass_rls_session`` — ``tenant_config``
+    is its own RLS table and must read under the tenant's normal scope.
+    """
+
+    async def _resolve(tenant_id: Any, name: str, version: int | None) -> _SkillLookupResult:
+        # Tenant-first (R2): a tenant skill of this name shadows the
+        # platform library, draft / archived included → no fallback.
+        tskill = await store.get_skill_by_name(tenant_id=tenant_id, name=name)
+        if tskill is not None:
+            if version is not None:
+                pinned = await store.resolve_pinned(tenant_id=tenant_id, name=name, version=version)
+                if pinned is not None:
+                    return _SkillLookupResult.ok(pinned, skill=tskill)
+                return _SkillLookupResult.version_not_found()
+            active = await store.resolve_by_name(tenant_id=tenant_id, name=name)
+            if active is not None:
+                return _SkillLookupResult.ok(active, skill=tskill)
+            return _SkillLookupResult.not_active(skill=tskill)
+
+        # Platform-fallback. Resolve the tenant's plan first, under its own
+        # RLS scope (tenant_config is a tenant-scoped table).
+        try:
+            plan = (await tenant_config_service.get(tenant_id=tenant_id)).plan
+        except TenantConfigNotConfiguredError:
+            plan = TenantPlan.FREE
+
+        async with bypass_rls_session():
+            pskill = await store.get_platform_skill_by_name(name=name)
+            if pskill is None:
+                return _SkillLookupResult.not_found()
+            # R3 tier gate — an un-entitled platform skill is treated as a
+            # distinct build-time error so the loader can name the plan.
+            if not tier_satisfies(plan, pskill.required_tier):
+                return _SkillLookupResult.not_entitled(required_tier=pskill.required_tier.value)
+            if version is not None:
+                pinned = await store.resolve_platform_pinned(name=name, version=version)
+                if pinned is not None:
+                    return _SkillLookupResult.ok(pinned, skill=pskill)
+                return _SkillLookupResult.version_not_found()
+            active = await store.resolve_platform_by_name(name=name)
+            if active is not None:
+                return _SkillLookupResult.ok(active, skill=pskill)
+            return _SkillLookupResult.not_active(skill=pskill)
+
+    return _resolve
+
+
 def _declares_long_term(spec: AgentSpec) -> bool:
     """True when the manifest declares ``memory.long_term`` (Stream T)."""
     memory = spec.spec.memory
@@ -187,6 +258,9 @@ def make_agent_builder(
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     platform_embedding_config_service: PlatformEmbeddingConfigService | None = None,
+    skill_store: SkillStore | None = None,
+    skill_activity_recorder: SkillActivityRecorder | None = None,
+    tenant_config_service: TenantConfigService | None = None,
 ) -> AgentBuilder:
     """Production :data:`AgentBuilder` bound to a SecretStore + checkpointer.
 
@@ -256,6 +330,16 @@ def make_agent_builder(
             if credentials_resolver is not None and tenant_id is not None
             else None
         )
+        # Stream X (Mini-ADR X-4) — first wiring of skill resolution into the
+        # agent build. Needs a tenant; preview / validation builds (tenant_id
+        # None) keep today's behaviour (a skills manifest errors at build).
+        skill_resolver = (
+            make_skill_resolver(store=skill_store, tenant_config_service=tenant_config_service)
+            if skill_store is not None
+            and tenant_config_service is not None
+            and tenant_id is not None
+            else None
+        )
         return await build_agent(
             spec,
             secret_store=secret_store,
@@ -265,6 +349,8 @@ def make_agent_builder(
             memory_env=memory_env,
             tenant_id=tenant_id,
             provider_key_resolver=provider_key_resolver,
+            skill_resolver=skill_resolver,
+            skill_activity_recorder=skill_activity_recorder,
         )
 
     return _build

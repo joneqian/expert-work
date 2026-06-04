@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -172,7 +172,7 @@ class StepRouters:
 #: exception types.
 SkillResolver = Callable[
     [Any, str, int | None],  # (tenant_id, name, version_or_None)
-    "_SkillLookupResult",
+    "Awaitable[_SkillLookupResult]",
 ]
 
 
@@ -189,6 +189,10 @@ class _SkillLookupResult:
     * ``not_active()`` — skill exists, bare-name reference, but skill
       status is neither ``ACTIVE`` nor ``STALE`` (Mini-ADR U-29: stale
       auto-revives on bind, so it's also bind-able at build time).
+    * ``not_entitled(required_tier=...)`` — Stream X (Mini-ADR X-4):
+      a platform skill the tenant's plan tier doesn't satisfy. The
+      tenant-first/platform-fallback resolver returns this so the loader
+      can name the required plan in the build error.
 
     ``skill`` is optional: resolvers that have the parent ``Skill`` row
     cheaply available (the production SqlSkillStore-backed callable
@@ -200,8 +204,12 @@ class _SkillLookupResult:
     """
 
     version: SkillVersion | None = None
-    reason: str | None = None  # "not_found" | "version_not_found" | "not_active"
+    # "not_found" | "version_not_found" | "not_active" | "not_entitled"
+    reason: str | None = None
     skill: Skill | None = None
+    # Stream X (Mini-ADR X-4) — the plan tier a ``not_entitled`` platform
+    # skill requires, so the loader can name it in the build error.
+    required_tier: str | None = None
 
     @classmethod
     def ok(cls, version: SkillVersion, *, skill: Skill | None = None) -> _SkillLookupResult:
@@ -218,6 +226,10 @@ class _SkillLookupResult:
     @classmethod
     def not_active(cls, *, skill: Skill | None = None) -> _SkillLookupResult:
         return cls(version=None, reason="not_active", skill=skill)
+
+    @classmethod
+    def not_entitled(cls, *, required_tier: str) -> _SkillLookupResult:
+        return cls(version=None, reason="not_entitled", required_tier=required_tier)
 
 
 @dataclass(frozen=True)
@@ -584,13 +596,13 @@ async def _resolve_one(
     name: str,
     version: int | None,
 ) -> _SkillLookupResult:
-    """Resolver may be sync or async; normalise."""
+    """Resolver is async (see :data:`SkillResolver`); tolerate a sync one too."""
     import inspect
 
-    out = resolver(tenant_id, name, version)
+    out: Any = resolver(tenant_id, name, version)
     if inspect.isawaitable(out):
         out = await out
-    return out
+    return cast("_SkillLookupResult", out)
 
 
 def _unwrap_skill_lookup(result: _SkillLookupResult, *, name: str, pinned: bool) -> SkillVersion:
@@ -607,6 +619,8 @@ def _unwrap_skill_lookup(result: _SkillLookupResult, *, name: str, pinned: bool)
             f"skill {name!r} is not in 'active' status; pin with "
             f"name@version to opt into a draft / archived version"
         )
+    if result.reason == "not_entitled":
+        raise AgentFactoryError(f"skill {name!r} requires the {result.required_tier} plan")
     # Defensive — should never reach here for a well-formed resolver.
     raise AgentFactoryError(
         f"skill {name!r} resolver returned an unrecognised result; "

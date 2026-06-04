@@ -793,6 +793,10 @@ def create_app(
                     credentials_resolver=credentials_resolver,
                     # Stream V (Mini-ADR V-4) — tenant's own remote MCP pool.
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
+                    # Stream X (Mini-ADR X-4) — sub-agents resolve skills too.
+                    skill_store=resolved_skill_store,
+                    skill_activity_recorder=skill_activity_recorder,
+                    tenant_config_service=resolved_tenant_config_service,
                 )
                 resolved_agent_runtime.agent_builder = make_agent_builder(
                     resolved_secret_store,
@@ -815,6 +819,12 @@ def create_app(
                     platform_embedding_config_service=(resolved_platform_embedding_config_service),
                     # Stream V (Mini-ADR V-4) — tenant's own remote MCP pool.
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
+                    # Stream X (Mini-ADR X-4) — first wiring of skill resolution
+                    # into the agent build: tenant-first / platform-fallback +
+                    # plan-tier gate, plus bind-activity tracking.
+                    skill_store=resolved_skill_store,
+                    skill_activity_recorder=skill_activity_recorder,
+                    tenant_config_service=resolved_tenant_config_service,
                 )
                 # Stream T (PR B) — these background workers (ingestion runner,
                 # DLQ worker, consolidator) are ALWAYS started. ``embedder`` is a
@@ -968,10 +978,10 @@ def create_app(
     # Stream T (PR B) — PR C's write endpoint resolves the config service off
     # app.state to upsert the row + invalidate the cache for immediate effect.
     app.state.platform_embedding_config_service = resolved_platform_embedding_config_service
-    # Capability Uplift Sprint #4 — exposed on app.state so a future
-    # PR (when skill_resolver is wired into ``make_agent_builder``) can
-    # thread it through to ``_load_skills`` + ``SkillViewTool`` for
-    # bind / view activity tracking.
+    # Capability Uplift Sprint #4 — exposed on app.state for callers that
+    # need it directly. Stream X (Mini-ADR X-4) wires it through
+    # ``make_agent_builder`` / ``make_child_agent_builder`` into
+    # ``_load_skills`` + ``SkillViewTool`` for bind / view activity tracking.
     app.state.skill_activity_recorder = skill_activity_recorder
     # Stream J.6 — the object store is created in the lifespan (it goes on
     # the AsyncExitStack); the upload endpoint reads it from app.state.

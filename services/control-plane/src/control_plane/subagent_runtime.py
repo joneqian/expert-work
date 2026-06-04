@@ -16,10 +16,13 @@ from uuid import UUID
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from control_plane.runtime import make_provider_key_resolver
+from control_plane.runtime import make_provider_key_resolver, make_skill_resolver
+from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
 from helix_agent.common.credentials import CredentialsResolver
+from helix_agent.common.skill_activity import SkillActivityRecorder
 from helix_agent.persistence.agent_spec import AgentSpecStore
+from helix_agent.persistence.skill import SkillStore
 from helix_agent.runtime.secret_store import SecretStore
 from orchestrator import BuiltAgent, MemoryEnv, MiddlewareEnv, ToolEnv, build_agent
 from orchestrator.tools import ChildAgentBuilder
@@ -55,6 +58,9 @@ def make_child_agent_builder(
     memory_env: MemoryEnv | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
+    skill_store: SkillStore | None = None,
+    skill_activity_recorder: SkillActivityRecorder | None = None,
+    tenant_config_service: TenantConfigService | None = None,
 ) -> ChildAgentBuilder:
     """Build the :class:`ChildAgentBuilder` the orchestrator's ``ToolEnv`` carries.
 
@@ -88,6 +94,13 @@ def make_child_agent_builder(
             if credentials_resolver is not None
             else None
         )
+        # Stream X (Mini-ADR X-4) — sub-agents resolve skills too; a child
+        # whose manifest declares skills would otherwise hard-fail at build.
+        skill_resolver = (
+            make_skill_resolver(store=skill_store, tenant_config_service=tenant_config_service)
+            if skill_store is not None and tenant_config_service is not None
+            else None
+        )
         # Stream V (Mini-ADR V-4) — attach the tenant's own remote MCP pool
         # per-call so delegated sub-agents can also use tenant MCP servers.
         call_tool_env = child_tool_env
@@ -105,6 +118,8 @@ def make_child_agent_builder(
             subagent_depth=depth,
             tenant_id=tenant_id,
             provider_key_resolver=provider_key_resolver,
+            skill_resolver=skill_resolver,
+            skill_activity_recorder=skill_activity_recorder,
         )
         cache[key] = built
         logger.info(

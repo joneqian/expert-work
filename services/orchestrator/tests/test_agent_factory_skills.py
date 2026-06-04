@@ -244,6 +244,24 @@ async def test_build_agent_bare_ref_to_inactive_skill_raises(
 
 
 @pytest.mark.asyncio
+async def test_build_agent_not_entitled_raises_requires_plan_error(
+    cp: BaseCheckpointSaver[object],
+) -> None:
+    """Stream X (Mini-ADR X-4) — a platform skill the tenant's plan tier
+    doesn't satisfy surfaces a clear ``requires the {tier} plan`` build error."""
+    spec = _spec_with_skills(["foo"])
+    resolver = _make_resolver({("foo", None): _SkillLookupResult.not_entitled(required_tier="pro")})
+    with pytest.raises(AgentFactoryError, match="requires the pro plan"):
+        await build_agent(
+            spec,
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            skill_resolver=resolver,
+            tenant_id=uuid4(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_build_agent_required_models_mismatch_raises(
     cp: BaseCheckpointSaver[object],
 ) -> None:
