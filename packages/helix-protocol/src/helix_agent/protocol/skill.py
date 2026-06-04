@@ -125,7 +125,10 @@ class SkillVersion(BaseModel):
 
     id: UUID
     skill_id: UUID
-    tenant_id: UUID
+    # Stream X — Mini-ADR X-1/X-2. ``None`` = platform (NULL-tenant) skill
+    # version; non-NULL = tenant-owned. X2 relaxes the column to NULLABLE so
+    # the platform-curated library shares the ``skill_version`` table.
+    tenant_id: UUID | None
     version: int = Field(ge=1)
     prompt_fragment: str
     tool_names: tuple[str, ...] = ()
@@ -188,7 +191,10 @@ class Skill(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: UUID
-    tenant_id: UUID
+    # Stream X — Mini-ADR X-1/X-2. ``None`` = platform (NULL-tenant) skill;
+    # non-NULL = tenant-owned. X2 relaxes the column to NULLABLE so the
+    # platform-curated library shares the ``skill`` table.
+    tenant_id: UUID | None
     name: str
     status: SkillStatus
     latest_version: int = Field(ge=0)  # 0 only between create + first version insert

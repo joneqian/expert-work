@@ -24,13 +24,19 @@ from typing import Any
 from uuid import UUID
 
 from helix_agent.protocol import Skill, SkillStatus, SkillVersion
+from helix_agent.protocol.tenant_config import TenantPlan
 
 
 class DuplicateSkillError(Exception):
-    """``(tenant_id, name)`` already exists — admin POST collision."""
+    """``(tenant_id, name)`` already exists — admin POST collision.
 
-    def __init__(self, *, tenant_id: UUID, name: str) -> None:
-        super().__init__(f"skill {name!r} already exists for tenant {tenant_id}")
+    ``tenant_id`` is ``None`` for a platform-skill (NULL-tenant) collision
+    (Stream X, Mini-ADR X-1).
+    """
+
+    def __init__(self, *, tenant_id: UUID | None, name: str) -> None:
+        scope = f"tenant {tenant_id}" if tenant_id is not None else "the platform library"
+        super().__init__(f"skill {name!r} already exists for {scope}")
         self.tenant_id = tenant_id
         self.name = name
 
@@ -68,11 +74,14 @@ class SkillStore(abc.ABC):
         name: str,
         description: str = "",
         category: str | None = None,
+        required_tier: TenantPlan = TenantPlan.FREE,
     ) -> Skill:
         """Insert a new skill row (status=draft, latest_version=0).
 
         Raises :class:`DuplicateSkillError` when ``(tenant_id, name)``
-        already exists.
+        already exists. ``required_tier`` defaults to ``FREE`` — only
+        meaningful for platform skills (a tenant's own skills are always
+        usable), but accepted on the tenant path for symmetry (Mini-ADR X-2).
         """
 
     @abc.abstractmethod
@@ -206,6 +215,141 @@ class SkillStore(abc.ABC):
         ``None`` when either the name or the version row is absent.
         """
 
+    # -------------------------------------------------- platform (Stream X)
+    #
+    # Platform skills are NULL-tenant rows in the SAME ``skill`` /
+    # ``skill_version`` tables (Mini-ADR X-1). They are addressed by these
+    # explicit ``*_platform_*`` methods (which filter ``tenant_id IS NULL``)
+    # rather than by passing ``tenant_id=None`` to the tenant methods — the
+    # latter already means "all tenants" (cross-tenant system_admin reads).
+    #
+    # Every platform method MUST be invoked inside ``bypass_rls_session()``
+    # (an UNSCOPED session): under the 0057 ``IS NOT DISTINCT FROM`` policy,
+    # an unset ``app.tenant_id`` makes ``tenant_id IS NULL`` rows visible,
+    # while any tenant-scoped session sees ZERO platform rows (the X-8 / W-8
+    # isolation property). Wiring the bypass is the caller's job (X3 / X4).
+
+    @abc.abstractmethod
+    async def create_platform_skill(
+        self,
+        *,
+        skill_id: UUID,
+        name: str,
+        description: str = "",
+        category: str | None = None,
+        required_tier: TenantPlan = TenantPlan.FREE,
+    ) -> Skill:
+        """Insert a platform (NULL-tenant) skill row.
+
+        Records carry ``tenant_id=None``. Raises :class:`DuplicateSkillError`
+        when a platform skill with ``name`` already exists. Caller MUST be
+        inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def get_platform_skill(self, *, skill_id: UUID) -> Skill | None:
+        """Return the platform skill by id (``tenant_id IS NULL``) or ``None``.
+
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def get_platform_skill_by_name(self, *, name: str) -> Skill | None:
+        """Return the platform skill by ``name`` or ``None``.
+
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def list_platform_skills(
+        self,
+        *,
+        status: SkillStatus | None = None,
+        category: str | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[Skill], UUID | None]:
+        """Page through platform (NULL-tenant) skills.
+
+        Same shape as :meth:`list_skills` but filters ``tenant_id IS NULL``.
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def add_platform_version(
+        self,
+        *,
+        version_id: UUID,
+        skill_id: UUID,
+        prompt_fragment: str,
+        tool_names: Sequence[str] = (),
+        description: str = "",
+        category: str | None = None,
+        required_models: Sequence[str] = (),
+        authored_by: str = "human",
+        supporting_files: dict[str, dict[str, Any]] | None = None,
+        lazy_load: bool = False,
+        content_hash: bytes = b"",
+        high_risk: bool = False,
+    ) -> SkillVersion:
+        """Append a version to a platform skill (``tenant_id=None``).
+
+        Same semantics as :meth:`add_version`. Raises
+        :class:`SkillNotFoundError` if the platform skill is unknown.
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def get_platform_version(self, *, version_id: UUID) -> SkillVersion | None:
+        """Return a platform version row by id, or ``None``.
+
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def get_platform_version_by_number(
+        self, *, skill_id: UUID, version: int
+    ) -> SkillVersion | None:
+        """Return a platform version by ``(skill_id, version)`` — pinned path.
+
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def list_platform_versions(self, *, skill_id: UUID) -> list[SkillVersion]:
+        """All versions of a platform skill, ordered ``version DESC``.
+
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def set_platform_status(self, *, skill_id: UUID, status: SkillStatus) -> Skill:
+        """Move a platform skill's lifecycle state. Raises
+        :class:`SkillNotFoundError` if unknown. Caller MUST be inside
+        ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def set_platform_pinned(self, *, skill_id: UUID, pinned: bool) -> Skill:
+        """Admin pin / unpin a platform skill. Raises
+        :class:`SkillNotFoundError` if unknown. Caller MUST be inside
+        ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def resolve_platform_by_name(self, *, name: str) -> SkillVersion | None:
+        """Bare-name resolution of a platform skill — current
+        ``latest_version`` of an ``ACTIVE`` platform skill, else ``None``.
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def resolve_platform_pinned(self, *, name: str, version: int) -> SkillVersion | None:
+        """Pinned ``name@version`` resolution of a platform skill (any
+        lifecycle state). Returns ``None`` when name or version is absent.
+        Caller MUST be inside ``bypass_rls_session()``.
+        """
+
     # -------------------------------------------------- Curator (Sprint #4)
 
     @abc.abstractmethod
@@ -262,6 +406,11 @@ class SkillStore(abc.ABC):
         platform) so a fresh tenant with no skills doesn't burn cycles.
         Caller MUST be inside ``bypass_rls_session()`` — Curator is a
         platform background worker, not a tenant-scoped request.
+
+        Stream X (Mini-ADR X-3): platform (NULL-tenant) skills are EXCLUDED
+        (``WHERE tenant_id IS NOT NULL``) — they are shared resources whose
+        lifecycle is system_admin-managed, not subject to any one tenant's
+        inactivity sweep.
         """
 
     @abc.abstractmethod

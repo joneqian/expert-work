@@ -42,12 +42,19 @@ class SkillRow(Base):
     __tablename__ = "skill"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
-    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # Stream X (Mini-ADR X-1) — NULL = platform-global skill; non-NULL =
+    # tenant-owned. The COALESCE(tenant_id, zero-uuid) unique index that
+    # replaces UNIQUE(tenant_id, name) is declared in migration 0057, not
+    # here (mirrors mcp_connector_catalog).
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
     latest_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stream X (Mini-ADR X-2) — minimum plan tier to bind this (platform)
+    # skill. CHECK free|pro|enterprise lives in migration 0057.
+    required_tier: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
     # Capability Uplift Sprint #4 — migration 0043.
     # ``pinned`` is the operator's "do not Curator-touch" escape hatch.
     # ``last_used_at`` is the throttled activity timestamp; backfilled to
@@ -74,7 +81,15 @@ class SkillRow(Base):
             name="skill_status_check",
         ),
         CheckConstraint("latest_version >= 0", name="skill_latest_version_nonneg"),
-        UniqueConstraint("tenant_id", "name", name="skill_tenant_name_uq"),
+        CheckConstraint(
+            "required_tier IN ('free', 'pro', 'enterprise')",
+            name="skill_required_tier_check",
+        ),
+        # The (tenant_id, name) uniqueness is enforced by the COALESCE
+        # unique index ``skill_tenant_name_uniq`` declared in migration
+        # 0057 (NULLs are distinct, so a plain UniqueConstraint would not
+        # collide two platform NULL-tenant rows). Not declared on the model
+        # — mirrors mcp_connector_catalog.
         Index("ix_skill_tenant_id", "tenant_id"),
         Index(
             "ix_skill_status_active",
@@ -106,7 +121,8 @@ class SkillVersionRow(Base):
     __tablename__ = "skill_version"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
-    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # Stream X (Mini-ADR X-1) — NULL = platform version; non-NULL = tenant.
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     skill_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("skill.id", ondelete="CASCADE", name="skill_version_skill_id_fk"),

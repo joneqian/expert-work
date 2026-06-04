@@ -18,6 +18,7 @@ from helix_agent.persistence.skill.base import (
     SkillStore,
 )
 from helix_agent.protocol import Skill, SkillStatus, SkillVersion
+from helix_agent.protocol.tenant_config import TenantPlan
 
 
 def _paginate_skills(
@@ -63,6 +64,26 @@ class InMemorySkillStore(SkillStore):
         name: str,
         description: str = "",
         category: str | None = None,
+        required_tier: TenantPlan = TenantPlan.FREE,
+    ) -> Skill:
+        return await self._create_skill_row(
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            name=name,
+            description=description,
+            category=category,
+            required_tier=required_tier,
+        )
+
+    async def _create_skill_row(
+        self,
+        *,
+        skill_id: UUID,
+        tenant_id: UUID | None,
+        name: str,
+        description: str,
+        category: str | None,
+        required_tier: TenantPlan,
     ) -> Skill:
         for existing in self._skills.values():
             if existing.tenant_id == tenant_id and existing.name == name:
@@ -76,6 +97,7 @@ class InMemorySkillStore(SkillStore):
             latest_version=0,
             description=description,
             category=category,
+            required_tier=required_tier,
             # Sprint #4 — match the SQL ``server_default=text("now()")``
             # so the in-memory and Postgres backends emit the same
             # DTO shape on first read.
@@ -153,6 +175,41 @@ class InMemorySkillStore(SkillStore):
         high_risk: bool = False,
     ) -> SkillVersion:
         parent = await self.get_skill(skill_id=skill_id, tenant_id=tenant_id)
+        return await self._append_version(
+            parent=parent,
+            version_id=version_id,
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            prompt_fragment=prompt_fragment,
+            tool_names=tool_names,
+            description=description,
+            category=category,
+            required_models=required_models,
+            authored_by=authored_by,
+            supporting_files=supporting_files,
+            lazy_load=lazy_load,
+            content_hash=content_hash,
+            high_risk=high_risk,
+        )
+
+    async def _append_version(
+        self,
+        *,
+        parent: Skill | None,
+        version_id: UUID,
+        skill_id: UUID,
+        tenant_id: UUID | None,
+        prompt_fragment: str,
+        tool_names: Sequence[str],
+        description: str,
+        category: str | None,
+        required_models: Sequence[str],
+        authored_by: str,
+        supporting_files: dict[str, dict[str, Any]] | None,
+        lazy_load: bool,
+        content_hash: bytes,
+        high_risk: bool,
+    ) -> SkillVersion:
         if parent is None:
             raise SkillNotFoundError(str(skill_id))
         next_version = parent.latest_version + 1
@@ -234,6 +291,138 @@ class InMemorySkillStore(SkillStore):
         return await self.get_version_by_number(
             skill_id=skill.id, tenant_id=tenant_id, version=version
         )
+
+    # ------------------------------------------------------------ platform (Stream X)
+    #
+    # Platform rows have ``tenant_id is None``. Mirrors the SQL store's
+    # ``tenant_id IS NULL`` filter.
+
+    async def create_platform_skill(
+        self,
+        *,
+        skill_id: UUID,
+        name: str,
+        description: str = "",
+        category: str | None = None,
+        required_tier: TenantPlan = TenantPlan.FREE,
+    ) -> Skill:
+        return await self._create_skill_row(
+            skill_id=skill_id,
+            tenant_id=None,
+            name=name,
+            description=description,
+            category=category,
+            required_tier=required_tier,
+        )
+
+    async def get_platform_skill(self, *, skill_id: UUID) -> Skill | None:
+        row = self._skills.get(skill_id)
+        if row is None or row.tenant_id is not None:
+            return None
+        return row
+
+    async def get_platform_skill_by_name(self, *, name: str) -> Skill | None:
+        for row in self._skills.values():
+            if row.tenant_id is None and row.name == name:
+                return row
+        return None
+
+    async def list_platform_skills(
+        self,
+        *,
+        status: SkillStatus | None = None,
+        category: str | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[Skill], UUID | None]:
+        rows = [r for r in self._skills.values() if r.tenant_id is None]
+        return _paginate_skills(rows, status=status, category=category, cursor=cursor, limit=limit)
+
+    async def add_platform_version(
+        self,
+        *,
+        version_id: UUID,
+        skill_id: UUID,
+        prompt_fragment: str,
+        tool_names: Sequence[str] = (),
+        description: str = "",
+        category: str | None = None,
+        required_models: Sequence[str] = (),
+        authored_by: str = "human",
+        supporting_files: dict[str, dict[str, Any]] | None = None,
+        lazy_load: bool = False,
+        content_hash: bytes = b"",
+        high_risk: bool = False,
+    ) -> SkillVersion:
+        parent = await self.get_platform_skill(skill_id=skill_id)
+        return await self._append_version(
+            parent=parent,
+            version_id=version_id,
+            skill_id=skill_id,
+            tenant_id=None,
+            prompt_fragment=prompt_fragment,
+            tool_names=tool_names,
+            description=description,
+            category=category,
+            required_models=required_models,
+            authored_by=authored_by,
+            supporting_files=supporting_files,
+            lazy_load=lazy_load,
+            content_hash=content_hash,
+            high_risk=high_risk,
+        )
+
+    async def get_platform_version(self, *, version_id: UUID) -> SkillVersion | None:
+        for v in self._versions:
+            if v.id == version_id and v.tenant_id is None:
+                return v
+        return None
+
+    async def get_platform_version_by_number(
+        self, *, skill_id: UUID, version: int
+    ) -> SkillVersion | None:
+        for v in self._versions:
+            if v.skill_id == skill_id and v.tenant_id is None and v.version == version:
+                return v
+        return None
+
+    async def list_platform_versions(self, *, skill_id: UUID) -> list[SkillVersion]:
+        versions = [v for v in self._versions if v.skill_id == skill_id and v.tenant_id is None]
+        versions.sort(key=lambda v: v.version, reverse=True)
+        return versions
+
+    async def set_platform_status(self, *, skill_id: UUID, status: SkillStatus) -> Skill:
+        row = await self.get_platform_skill(skill_id=skill_id)
+        if row is None:
+            raise SkillNotFoundError(str(skill_id))
+        now = datetime.now(UTC)
+        updated = row.model_copy(
+            update={"status": status, "updated_at": now, "state_changed_at": now}
+        )
+        self._skills[skill_id] = updated
+        return updated
+
+    async def set_platform_pinned(self, *, skill_id: UUID, pinned: bool) -> Skill:
+        row = await self.get_platform_skill(skill_id=skill_id)
+        if row is None:
+            raise SkillNotFoundError(str(skill_id))
+        updated = row.model_copy(update={"pinned": pinned, "updated_at": datetime.now(UTC)})
+        self._skills[skill_id] = updated
+        return updated
+
+    async def resolve_platform_by_name(self, *, name: str) -> SkillVersion | None:
+        skill = await self.get_platform_skill_by_name(name=name)
+        if skill is None or skill.status != SkillStatus.ACTIVE or skill.latest_version == 0:
+            return None
+        return await self.get_platform_version_by_number(
+            skill_id=skill.id, version=skill.latest_version
+        )
+
+    async def resolve_platform_pinned(self, *, name: str, version: int) -> SkillVersion | None:
+        skill = await self.get_platform_skill_by_name(name=name)
+        if skill is None:
+            return None
+        return await self.get_platform_version_by_number(skill_id=skill.id, version=version)
 
     # ------------------------------------------------------------ Curator (Sprint #4)
 
@@ -318,7 +507,12 @@ class InMemorySkillStore(SkillStore):
     async def curator_distinct_tenant_ids(self) -> list[UUID]:
         seen: set[UUID] = set()
         for row in self._skills.values():
-            if row.status in (SkillStatus.ACTIVE, SkillStatus.STALE):
+            # Stream X (Mini-ADR X-3): skip platform (NULL-tenant) skills —
+            # they are never swept by per-tenant inactivity.
+            if row.tenant_id is not None and row.status in (
+                SkillStatus.ACTIVE,
+                SkillStatus.STALE,
+            ):
                 seen.add(row.tenant_id)
         return sorted(seen)
 

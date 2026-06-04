@@ -19,6 +19,7 @@ from helix_agent.persistence.skill.base import (
 )
 from helix_agent.protocol import Skill, SkillStatus, SkillVersion
 from helix_agent.protocol.skill import SkillSupportingFile
+from helix_agent.protocol.tenant_config import TenantPlan
 
 
 def _skill_row_to_dto(row: SkillRow) -> Skill:
@@ -30,6 +31,8 @@ def _skill_row_to_dto(row: SkillRow) -> Skill:
         latest_version=row.latest_version,
         description=row.description,
         category=row.category,
+        # Stream X (Mini-ADR X-2) — minimum plan tier (platform skills).
+        required_tier=TenantPlan(row.required_tier),
         # Capability Uplift Sprint #4 (Mini-ADR U-25). Existing rows
         # carry default values per migration 0043 backfill
         # (pinned=false, last_used_at=updated_at, state_changed_at=updated_at).
@@ -81,6 +84,26 @@ class SqlSkillStore(SkillStore):
         name: str,
         description: str = "",
         category: str | None = None,
+        required_tier: TenantPlan = TenantPlan.FREE,
+    ) -> Skill:
+        return await self._create_skill_row(
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            name=name,
+            description=description,
+            category=category,
+            required_tier=required_tier,
+        )
+
+    async def _create_skill_row(
+        self,
+        *,
+        skill_id: UUID,
+        tenant_id: UUID | None,
+        name: str,
+        description: str,
+        category: str | None,
+        required_tier: TenantPlan,
     ) -> Skill:
         now = datetime.now(UTC)
         async with self._sf() as session:
@@ -92,6 +115,7 @@ class SqlSkillStore(SkillStore):
                 latest_version=0,
                 description=description,
                 category=category,
+                required_tier=required_tier.value,
                 created_at=now,
                 updated_at=now,
             )
@@ -99,7 +123,7 @@ class SqlSkillStore(SkillStore):
             try:
                 await session.commit()
             except IntegrityError as exc:
-                # ``skill_tenant_name_uq`` violation — admin POST collision.
+                # ``skill_tenant_name_uniq`` (COALESCE) violation — POST collision.
                 raise DuplicateSkillError(tenant_id=tenant_id, name=name) from exc
             await session.refresh(row)
             return _skill_row_to_dto(row)
@@ -325,6 +349,229 @@ class SqlSkillStore(SkillStore):
             skill_id=skill.id, tenant_id=tenant_id, version=version
         )
 
+    # ------------------------------------------------------------ platform (Stream X)
+    #
+    # NULL-tenant rows in the same tables. ``WHERE tenant_id IS NULL``
+    # everywhere. Caller MUST be inside ``bypass_rls_session()`` so the
+    # 0057 ``IS NOT DISTINCT FROM`` policy lets the NULL rows through.
+
+    async def create_platform_skill(
+        self,
+        *,
+        skill_id: UUID,
+        name: str,
+        description: str = "",
+        category: str | None = None,
+        required_tier: TenantPlan = TenantPlan.FREE,
+    ) -> Skill:
+        return await self._create_skill_row(
+            skill_id=skill_id,
+            tenant_id=None,
+            name=name,
+            description=description,
+            category=category,
+            required_tier=required_tier,
+        )
+
+    async def get_platform_skill(self, *, skill_id: UUID) -> Skill | None:
+        async with self._sf() as session:
+            row = (
+                await session.execute(
+                    select(SkillRow).where(SkillRow.id == skill_id, SkillRow.tenant_id.is_(None))
+                )
+            ).scalar_one_or_none()
+        return _skill_row_to_dto(row) if row is not None else None
+
+    async def get_platform_skill_by_name(self, *, name: str) -> Skill | None:
+        async with self._sf() as session:
+            row = (
+                await session.execute(
+                    select(SkillRow).where(SkillRow.tenant_id.is_(None), SkillRow.name == name)
+                )
+            ).scalar_one_or_none()
+        return _skill_row_to_dto(row) if row is not None else None
+
+    async def list_platform_skills(
+        self,
+        *,
+        status: SkillStatus | None = None,
+        category: str | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[Skill], UUID | None]:
+        async with self._sf() as session:
+            stmt = (
+                select(SkillRow)
+                .where(SkillRow.tenant_id.is_(None))
+                .order_by(SkillRow.created_at.desc(), SkillRow.id)
+            )
+            if status is not None:
+                stmt = stmt.where(SkillRow.status == status.value)
+            if category is not None:
+                stmt = stmt.where(SkillRow.category == category)
+            if cursor is not None:
+                cur_row = (
+                    await session.execute(
+                        select(SkillRow).where(SkillRow.id == cursor, SkillRow.tenant_id.is_(None))
+                    )
+                ).scalar_one_or_none()
+                if cur_row is not None:
+                    stmt = stmt.where(
+                        (SkillRow.created_at < cur_row.created_at)
+                        | ((SkillRow.created_at == cur_row.created_at) & (SkillRow.id > cur_row.id))
+                    )
+            stmt = stmt.limit(limit + 1)
+            rows = (await session.execute(stmt)).scalars().all()
+        items = [_skill_row_to_dto(r) for r in rows]
+        if len(items) > limit:
+            return items[:limit], items[limit - 1].id
+        return items, None
+
+    async def add_platform_version(
+        self,
+        *,
+        version_id: UUID,
+        skill_id: UUID,
+        prompt_fragment: str,
+        tool_names: Sequence[str] = (),
+        description: str = "",
+        category: str | None = None,
+        required_models: Sequence[str] = (),
+        authored_by: str = "human",
+        supporting_files: dict[str, dict[str, Any]] | None = None,
+        lazy_load: bool = False,
+        content_hash: bytes = b"",
+        high_risk: bool = False,
+    ) -> SkillVersion:
+        if authored_by not in {"human", "agent"}:
+            msg = f"authored_by must be 'human' or 'agent' (got {authored_by!r})"
+            raise ValueError(msg)
+        now = datetime.now(UTC)
+        async with self._sf() as session:
+            parent = (
+                await session.execute(
+                    select(SkillRow).where(SkillRow.id == skill_id, SkillRow.tenant_id.is_(None))
+                )
+            ).scalar_one_or_none()
+            if parent is None:
+                raise SkillNotFoundError(str(skill_id))
+            next_version = parent.latest_version + 1
+            new_description = description or parent.description
+            new_category = category if category is not None else parent.category
+            version_row = SkillVersionRow(
+                id=version_id,
+                tenant_id=None,
+                skill_id=skill_id,
+                version=next_version,
+                prompt_fragment=prompt_fragment,
+                tool_names=list(tool_names),
+                description=new_description,
+                category=new_category,
+                required_models=list(required_models),
+                authored_by=authored_by,
+                supporting_files=supporting_files or {},
+                lazy_load=lazy_load,
+                content_hash=content_hash,
+                high_risk=high_risk,
+                created_at=now,
+            )
+            session.add(version_row)
+            parent.latest_version = next_version
+            parent.description = new_description
+            parent.category = new_category
+            parent.updated_at = now
+            await session.commit()
+            await session.refresh(version_row)
+            return _version_row_to_dto(version_row)
+
+    async def get_platform_version(self, *, version_id: UUID) -> SkillVersion | None:
+        async with self._sf() as session:
+            row = (
+                await session.execute(
+                    select(SkillVersionRow).where(
+                        SkillVersionRow.id == version_id,
+                        SkillVersionRow.tenant_id.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+        return _version_row_to_dto(row) if row is not None else None
+
+    async def get_platform_version_by_number(
+        self, *, skill_id: UUID, version: int
+    ) -> SkillVersion | None:
+        async with self._sf() as session:
+            row = (
+                await session.execute(
+                    select(SkillVersionRow).where(
+                        SkillVersionRow.skill_id == skill_id,
+                        SkillVersionRow.tenant_id.is_(None),
+                        SkillVersionRow.version == version,
+                    )
+                )
+            ).scalar_one_or_none()
+        return _version_row_to_dto(row) if row is not None else None
+
+    async def list_platform_versions(self, *, skill_id: UUID) -> list[SkillVersion]:
+        async with self._sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(SkillVersionRow)
+                        .where(
+                            SkillVersionRow.skill_id == skill_id,
+                            SkillVersionRow.tenant_id.is_(None),
+                        )
+                        .order_by(SkillVersionRow.version.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_version_row_to_dto(r) for r in rows]
+
+    async def set_platform_status(self, *, skill_id: UUID, status: SkillStatus) -> Skill:
+        async with self._sf() as session:
+            now = datetime.now(UTC)
+            result = await session.execute(
+                update(SkillRow)
+                .where(SkillRow.id == skill_id, SkillRow.tenant_id.is_(None))
+                .values(status=status.value, updated_at=now, state_changed_at=now)
+                .returning(SkillRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                raise SkillNotFoundError(str(skill_id))
+            await session.commit()
+        return _skill_row_to_dto(row)
+
+    async def set_platform_pinned(self, *, skill_id: UUID, pinned: bool) -> Skill:
+        async with self._sf() as session:
+            result = await session.execute(
+                update(SkillRow)
+                .where(SkillRow.id == skill_id, SkillRow.tenant_id.is_(None))
+                .values(pinned=pinned, updated_at=datetime.now(UTC))
+                .returning(SkillRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                raise SkillNotFoundError(str(skill_id))
+            await session.commit()
+        return _skill_row_to_dto(row)
+
+    async def resolve_platform_by_name(self, *, name: str) -> SkillVersion | None:
+        skill = await self.get_platform_skill_by_name(name=name)
+        if skill is None or skill.status != SkillStatus.ACTIVE or skill.latest_version == 0:
+            return None
+        return await self.get_platform_version_by_number(
+            skill_id=skill.id, version=skill.latest_version
+        )
+
+    async def resolve_platform_pinned(self, *, name: str, version: int) -> SkillVersion | None:
+        skill = await self.get_platform_skill_by_name(name=name)
+        if skill is None:
+            return None
+        return await self.get_platform_version_by_number(skill_id=skill.id, version=version)
+
     # ------------------------------------------------------------ Curator (Sprint #4)
 
     async def bump_last_used_at(self, *, skill_id: UUID, tenant_id: UUID) -> tuple[bool, bool]:
@@ -432,11 +679,17 @@ class SqlSkillStore(SkillStore):
             rows = (
                 await session.execute(
                     select(SkillRow.tenant_id)
-                    .where(SkillRow.status.in_(["active", "stale"]))
+                    .where(
+                        SkillRow.status.in_(["active", "stale"]),
+                        # Stream X (Mini-ADR X-3): platform (NULL-tenant) skills
+                        # are shared resources, never swept by per-tenant
+                        # inactivity. Exclude them from the Curator's tenant list.
+                        SkillRow.tenant_id.isnot(None),
+                    )
                     .distinct()
                 )
             ).all()
-        return [r[0] for r in rows]
+        return [r[0] for r in rows if r[0] is not None]
 
     async def count_pinned(self) -> int:
         from sqlalchemy import func

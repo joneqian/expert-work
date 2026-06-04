@@ -265,3 +265,120 @@ async def test_add_version_rejects_invalid_authored_by() -> None:
             prompt_fragment="x",
             authored_by="alien",
         )
+
+
+# ---------------------------------------------------------------------------
+# Stream X — required_tier round-trip
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_skill_required_tier_round_trip() -> None:
+    from helix_agent.protocol.tenant_config import TenantPlan
+
+    store = InMemorySkillStore()
+    tenant = _t()
+    default_skill = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="a")
+    assert default_skill.required_tier == TenantPlan.FREE
+    pro_skill = await store.create_skill(
+        skill_id=uuid4(), tenant_id=tenant, name="b", required_tier=TenantPlan.PRO
+    )
+    assert pro_skill.required_tier == TenantPlan.PRO
+    refreshed = await store.get_skill(skill_id=pro_skill.id, tenant_id=tenant)
+    assert refreshed is not None and refreshed.required_tier == TenantPlan.PRO
+
+
+# ---------------------------------------------------------------------------
+# Stream X — platform (NULL-tenant) skills
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_platform_skill_has_null_tenant() -> None:
+    from helix_agent.protocol.tenant_config import TenantPlan
+
+    store = InMemorySkillStore()
+    skill = await store.create_platform_skill(
+        skill_id=uuid4(), name="summarize", required_tier=TenantPlan.PRO
+    )
+    assert skill.tenant_id is None
+    assert skill.required_tier == TenantPlan.PRO
+    by_id = await store.get_platform_skill(skill_id=skill.id)
+    by_name = await store.get_platform_skill_by_name(name="summarize")
+    assert by_id is not None and by_id.id == skill.id
+    assert by_name is not None and by_name.id == skill.id
+
+
+@pytest.mark.asyncio
+async def test_platform_skill_invisible_to_tenant_methods() -> None:
+    store = InMemorySkillStore()
+    skill = await store.create_platform_skill(skill_id=uuid4(), name="summarize")
+    tenant = _t()
+    # Tenant-scoped accessors never see a NULL-tenant row.
+    assert await store.get_skill(skill_id=skill.id, tenant_id=tenant) is None
+    assert await store.get_skill_by_name(tenant_id=tenant, name="summarize") is None
+    tenant_rows, _ = await store.list_skills(tenant_id=tenant)
+    assert tenant_rows == []
+    # ...and a tenant can have its own skill of the same name (no collision).
+    own = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="summarize")
+    assert own.tenant_id == tenant
+
+
+@pytest.mark.asyncio
+async def test_platform_skill_duplicate_name_rejected() -> None:
+    store = InMemorySkillStore()
+    await store.create_platform_skill(skill_id=uuid4(), name="dup")
+    with pytest.raises(DuplicateSkillError):
+        await store.create_platform_skill(skill_id=uuid4(), name="dup")
+
+
+@pytest.mark.asyncio
+async def test_resolve_platform_by_name_active_vs_draft() -> None:
+    store = InMemorySkillStore()
+    skill = await store.create_platform_skill(skill_id=uuid4(), name="summarize")
+    await store.add_platform_version(
+        version_id=uuid4(), skill_id=skill.id, prompt_fragment="summarize text"
+    )
+    # Still draft → bare-name resolve returns None.
+    assert await store.resolve_platform_by_name(name="summarize") is None
+    # Activate → resolves to latest version.
+    await store.set_platform_status(skill_id=skill.id, status=SkillStatus.ACTIVE)
+    resolved = await store.resolve_platform_by_name(name="summarize")
+    assert resolved is not None and resolved.version == 1 and resolved.tenant_id is None
+    # Pinned resolve works regardless of lifecycle.
+    pinned = await store.resolve_platform_pinned(name="summarize", version=1)
+    assert pinned is not None and pinned.version == 1
+
+
+@pytest.mark.asyncio
+async def test_platform_versions_listing_and_pin() -> None:
+    store = InMemorySkillStore()
+    skill = await store.create_platform_skill(skill_id=uuid4(), name="s")
+    for n in range(2):
+        await store.add_platform_version(
+            version_id=uuid4(), skill_id=skill.id, prompt_fragment=f"v{n + 1}"
+        )
+    versions = await store.list_platform_versions(skill_id=skill.id)
+    assert [v.version for v in versions] == [2, 1]
+    v1 = await store.get_platform_version_by_number(skill_id=skill.id, version=1)
+    assert v1 is not None and v1.version == 1
+    pinned = await store.set_platform_pinned(skill_id=skill.id, pinned=True)
+    assert pinned.pinned is True
+
+
+# ---------------------------------------------------------------------------
+# Stream X — curator excludes platform (NULL-tenant) skills
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_curator_distinct_tenant_ids_excludes_platform() -> None:
+    store = InMemorySkillStore()
+    tenant = _t()
+    tenant_skill = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="t")
+    await store.set_status(skill_id=tenant_skill.id, tenant_id=tenant, status=SkillStatus.ACTIVE)
+    plat = await store.create_platform_skill(skill_id=uuid4(), name="p")
+    await store.set_platform_status(skill_id=plat.id, status=SkillStatus.ACTIVE)
+    ids = await store.curator_distinct_tenant_ids()
+    assert ids == [tenant]
+    assert None not in ids

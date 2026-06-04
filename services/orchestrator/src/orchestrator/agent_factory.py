@@ -556,7 +556,10 @@ async def _load_skills(
         # skill that's actively bound to a building agent. Errors are
         # swallowed by the recorder; never fail the build because the
         # bookkeeping hiccuped.
-        if activity_recorder is not None:
+        # Stream X (Mini-ADR X-3): platform (NULL-tenant) skill versions don't
+        # participate in the per-tenant Curator, and the recorder protocol
+        # requires a concrete tenant_id — skip them.
+        if activity_recorder is not None and version.tenant_id is not None:
             try:
                 await activity_recorder.record(
                     skill_id=version.skill_id, tenant_id=version.tenant_id
