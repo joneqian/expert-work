@@ -932,14 +932,15 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **X4 平台 skill CRUD API + 租户合并视图**（PR #402）（system_admin，bypass_rls，复用 moderation/high-risk）+ `GET /v1/skills` 加 source/entitled
 - [x] **X5 Admin UI**（PR #403）：平台库管理页（system_admin）+ 租户库 source/entitled 徽章 + i18n
 
-### Stream Y — LLM 平台独占 + Rate Card + 计量（治理 + 成本地基）
+### Stream Y — LLM 平台独占 + Rate Card + 计量（治理 + 成本地基）— 设计 [STREAM-Y-DESIGN](./streams/STREAM-Y-DESIGN.md)
 
-锁死 LLM 平台独占（移除租户 BYOK + manifest `api_key_ref` override）；在 G.9 `token_usage` 上建 rate card + 成本派生 rollup + 按租户分月 billing ledger（**不碰 C.5 热路径**）。
+锁死 LLM 平台独占（移除租户 BYOK + manifest `api_key_ref` override）；在 G.9 `token_usage` 上建 rate card + 成本派生 rollup + 按租户分月 billing ledger（**不碰 C.5 热路径**）。业务决策：加价=按模型行+档位覆盖；成本透明度=租户只看最终计费价。
 
-- [ ] **Y0 设计先行**（STREAM-Y-DESIGN + Mini-ADR）
-- [ ] **Y1 平台独占锁**：resolver 删 tenant 分支 + `credentials_mode` 收窄/switch gate 硬拒 + 移除 `api_key_ref` override（过渡 ignore+warn）+ 防御性迁移
-- [ ] **Y2 Rate Card**：`model_rate_card` 表（整数 micro-USD + markup_bps + 时序版本 + plan_tier）+ store + admin API + `billing` RBAC 资源
-- [ ] **Y3 成本派生 + billing ledger**：`tenant_billing_ledger`（不扩展 token_budget_ledger）+ rollup job（读 token_usage→定价→幂等 upsert）
+- [x] **Y0 设计先行**（PR #404）（STREAM-Y-DESIGN + Mini-ADR Y-1~Y-5 + 现状核实）
+- [ ] **Y1 平台独占锁**：resolver 删 tenant 分支 + `CredentialsMode` 收窄 `Literal["platform"]` + switch gate 硬拒 `tenant`（403）+ 防御性迁移 `0058`（翻 tenant→platform）+ preflight 脚本
+- [ ] **Y2 移除 manifest `api_key_ref`**：`agent_factory:813-826` 删分支 → 100% 主 key 走平台 resolver（过渡 ignore+warn）；杜绝 spend 绕过计量
+- [ ] **Y3 Rate Card**：`model_rate_card` 表（NULL-tenant + 整数 micro-USD + markup_bps + 时序 effective_from/until + plan_tier 最具体优先）+ store + admin API + `billing` RBAC + `token_usage.provider` 列（additive）+ 迁移 `0059`
+- [ ] **Y4 成本派生 + billing ledger**：`tenant_billing_ledger`（不扩展 token_budget_ledger；base/markup/billed 拆分内部存）+ rollup job（读 token_usage→当时生效 rate 定价→幂等 upsert；provider 歧义标 unpriced）+ 迁移 `0060`
 
 ### Stream Z — Chargeback / 用量面（计费层出口）
 
