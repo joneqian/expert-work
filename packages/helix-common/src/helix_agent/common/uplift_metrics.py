@@ -229,13 +229,6 @@ _credentials_resolve_total = helix_counter(
     label_names=("mode", "role", "key", "result"),
 )
 
-_credentials_mode_switch_total = helix_counter(
-    "helix_uplift_credentials_mode_switch_total",
-    "Tenant credentials_mode switch attempts. ``mode_to`` ∈ platform | "
-    "tenant; ``result`` ∈ ok | incomplete | rejected.",
-    label_names=("mode_to", "result"),
-)
-
 _manifest_provider_rejected_total = helix_counter(
     "helix_uplift_manifest_provider_rejected_total",
     "Agent manifest publish attempts rejected because the referenced "
@@ -250,13 +243,6 @@ _legacy_credentials_fallback_total = helix_counter(
     "``tavily_api_key_ref`` env fields. Should drop to zero once ops "
     "migrate to platform_*_credentials; removal in M1 Q?.",
     label_names=("role",),
-)
-
-_credentials_tenant_mode_gauge = helix_gauge(
-    "helix_uplift_credentials_tenant_mode_count",
-    "Number of tenants currently in 'tenant' credentials_mode. Used as "
-    "the numerator for the adoption-ratio recording rule. Refreshed by "
-    "the credentials API on mutation.",
 )
 
 
@@ -495,14 +481,6 @@ def record_credentials_resolve(*, mode: str, role: str, key: str, result: str) -
     _credentials_resolve_total.labels(mode=mode, role=role, key=key, result=result).inc()
 
 
-def record_credentials_mode_switch(*, mode_to: str, result: str) -> None:
-    """Bump ``helix_uplift_credentials_mode_switch_total``.
-
-    ``mode_to`` ∈ ``{"platform", "tenant"}``;
-    ``result`` ∈ ``{"ok", "incomplete", "rejected"}``."""
-    _credentials_mode_switch_total.labels(mode_to=mode_to, result=result).inc()
-
-
 def record_manifest_provider_rejected(*, provider: str) -> None:
     """Bump ``helix_uplift_manifest_provider_rejected_total{provider}``."""
     _manifest_provider_rejected_total.labels(provider=provider).inc()
@@ -515,16 +493,10 @@ def record_legacy_credentials_fallback(*, role: str) -> None:
     _legacy_credentials_fallback_total.labels(role=role).inc()
 
 
-def set_credentials_tenant_mode_count(count: int) -> None:
-    """Refresh the ``helix_uplift_credentials_tenant_mode_count`` gauge."""
-    _credentials_tenant_mode_gauge.set(count)
-
-
 __all__ = [
     "record_anthropic_cache_anchor",
     "record_consolidator_llm_tokens",
     "record_consolidator_run",
-    "record_credentials_mode_switch",
     "record_credentials_resolve",
     "record_curator_transition",
     "record_legacy_credentials_fallback",
@@ -551,6 +523,5 @@ __all__ = [
     "record_threat_pattern_hits",
     "record_threat_scan",
     "record_trigger_blocked",
-    "set_credentials_tenant_mode_count",
     "set_curator_pinned_skills",
 ]

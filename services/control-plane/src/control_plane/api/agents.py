@@ -93,7 +93,7 @@ def _collect_manifest_providers(spec: AgentSpec) -> set[Provider]:
     """Stream O Mini-ADR O-4 — collect every provider this manifest
     transitively references for the publish-time whitelist gate.
 
-    Mirrors :func:`control_plane.api.tenant_config._collect_used_providers`
+    Mirrors :func:`control_plane.api.tenant_config._providers_referenced_by`
     but operates on a single :class:`AgentSpec` rather than an iterable
     of stored records. Includes the primary model + its fallback chain,
     vision model + its fallbacks, and the memory_consolidation aux

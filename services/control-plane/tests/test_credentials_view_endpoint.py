@@ -1,7 +1,9 @@
-"""HTTP tests for the Stream O Mini-ADR O-13 Credentials-panel endpoints:
+"""HTTP tests for the Stream O Mini-ADR O-13 Credentials-panel endpoint:
 
 * ``GET  /v1/tenants/{tid}/config/credentials``      — composite view
-* ``POST /v1/tenants/{tid}/config/credentials-mode/dry-run`` — switch preview
+
+Stream Y-1 removed the dry-run switch-preview endpoint (LLM credentials are
+platform-exclusive; there is no tenant mode to switch into).
 """
 
 from __future__ import annotations
@@ -152,54 +154,3 @@ async def test_view_used_by_counts_include_embedding(
     assert provs["anthropic"]["used_by_agents"] == 1
     assert provs["qwen"]["used_by_agents"] == 1  # embedding_provider default
     assert provs["openai"]["used_by_agents"] == 0
-
-
-# ─── dry-run ────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_dry_run_ok_when_no_agents(app_client: tuple[object, AsyncClient]) -> None:
-    _, client = app_client
-    resp = await client.post(
-        f"/v1/tenants/{_TENANT}/config/credentials-mode/dry-run",
-        headers={"Authorization": f"Bearer {_token()}"},
-        json={"model_credentials_ref": {}, "tool_credentials": {}},
-    )
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["ok"] is True
-    assert data["missing_providers"] == []
-    assert data["missing_tools"] == []
-
-
-@pytest.mark.asyncio
-async def test_dry_run_reports_missing_provider(
-    app_client: tuple[object, AsyncClient],
-) -> None:
-    app, client = app_client
-    await _seed_agent(app, _agent_spec(model_provider="openai"))
-    # Propose only anthropic → openai is missing.
-    resp = await client.post(
-        f"/v1/tenants/{_TENANT}/config/credentials-mode/dry-run",
-        headers={"Authorization": f"Bearer {_token()}"},
-        json={"model_credentials_ref": {"anthropic": "kms://acme/anthropic"}},
-    )
-    data = resp.json()["data"]
-    assert data["ok"] is False
-    assert data["missing_providers"] == ["openai"]
-
-
-@pytest.mark.asyncio
-async def test_dry_run_ok_when_all_covered(
-    app_client: tuple[object, AsyncClient],
-) -> None:
-    app, client = app_client
-    await _seed_agent(app, _agent_spec(model_provider="openai"))
-    resp = await client.post(
-        f"/v1/tenants/{_TENANT}/config/credentials-mode/dry-run",
-        headers={"Authorization": f"Bearer {_token()}"},
-        json={"model_credentials_ref": {"openai": "kms://acme/openai"}},
-    )
-    data = resp.json()["data"]
-    assert data["ok"] is True
-    assert data["missing_providers"] == []

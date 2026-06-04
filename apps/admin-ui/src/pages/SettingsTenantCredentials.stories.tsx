@@ -72,42 +72,6 @@ export const PlatformMode: Story = {
   decorators: [withView(PLATFORM_VIEW)],
 };
 
-export const TenantMode: Story = {
-  decorators: [
-    withView({
-      mode: "tenant",
-      providers: [
-        {
-          provider: "anthropic",
-          platform_configured: true,
-          tenant_secret_ref: "kms://acme/anthropic",
-          used_by_agents: 3,
-        },
-        {
-          provider: "openai",
-          platform_configured: true,
-          tenant_secret_ref: "kms://acme/openai",
-          used_by_agents: 1,
-        },
-        {
-          provider: "qwen",
-          platform_configured: true,
-          tenant_secret_ref: "kms://acme/qwen",
-          used_by_agents: 2,
-        },
-      ],
-      tools: [
-        {
-          tool: "web_search",
-          platform_configured: true,
-          tenant_secret_ref: "kms://acme/tavily",
-          used_by_agents: 1,
-        },
-      ],
-    }),
-  ],
-};
-
 export const Empty: Story = {
   decorators: [withView({ mode: "platform", providers: [], tools: [] })],
 };

@@ -46,7 +46,6 @@ test("credentials panel renders the mode card + provider/tool tables", async ({ 
   await expect(page.getByTestId("credentials-mode-current")).toHaveText(/Platform|平台/);
   await expect(page.getByTestId("provider-creds-table")).toBeVisible();
   await expect(page.getByTestId("tool-creds-table")).toBeVisible();
-  await expect(page.getByTestId("credentials-mode-switch-btn")).toBeVisible();
 });
 
 test("/settings/credentials passes axe (serious + critical)", async ({ page }) => {

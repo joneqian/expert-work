@@ -2,8 +2,8 @@
 
 Single source of truth for "which providers / tools does the platform know about".
 Platform deployment then opts in a subset via ``settings.supported_providers``
-(Stream O Mini-ADR O-1); tenants in ``credentials_mode='tenant'`` (Stream O
-Mini-ADR O-2) can only configure credentials for items in that opted-in subset.
+(Stream O Mini-ADR O-1). Stream Y-1 made LLM credentials platform-exclusive,
+so all provider credentials are resolved from the platform's secret_refs.
 
 Adding a new provider here is a deliberate platform decision — the type
 literal forms part of the wire contract and the audit log; every new entry

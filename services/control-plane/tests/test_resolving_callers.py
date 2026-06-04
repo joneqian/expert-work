@@ -35,11 +35,7 @@ class _TenantConfig:
         return self._record
 
 
-def _record(
-    *,
-    mode: str,
-    model_creds: dict[str, str] | None = None,
-) -> TenantConfigRecord:
+def _record() -> TenantConfigRecord:
     from datetime import UTC, datetime
 
     now = datetime.now(UTC)
@@ -47,9 +43,7 @@ def _record(
         tenant_id=uuid4(),
         display_name=_NOW_DISPLAY,
         plan=TenantPlan.FREE,
-        credentials_mode=mode,  # type: ignore[arg-type]
-        model_credentials_ref=model_creds or {},
-        tool_credentials={},
+        credentials_mode="platform",
         created_at=now,
         updated_at=now,
         updated_by="tester",
@@ -75,7 +69,7 @@ def _resolver(
 async def test_embedder_empty_input_skips_resolution() -> None:
     # No texts → no resolution, no error even with an empty catalog.
     embedder = ResolvingEmbedder(
-        resolver=_resolver(record=_record(mode="platform")),
+        resolver=_resolver(record=_record()),
         secret_store=InMemorySecretStore(),
         provider="qwen",
         model="text-embedding-v4",
@@ -84,13 +78,12 @@ async def test_embedder_empty_input_skips_resolution() -> None:
 
 
 @pytest.mark.asyncio
-async def test_embedder_tenant_mode_missing_credential_raises() -> None:
-    # Tenant mode without the provider's key → fail fast (no platform
-    # fallback, Mini-ADR O-3).
+async def test_embedder_missing_platform_credential_raises() -> None:
+    # No platform key for the embedding provider → fail fast (Mini-ADR O-3).
     embedder = ResolvingEmbedder(
         resolver=_resolver(
-            record=_record(mode="tenant", model_creds={}),
-            platform_provs={"qwen": "secret://platform/qwen"},
+            record=_record(),
+            platform_provs={},
         ),
         secret_store=InMemorySecretStore(),
         provider="qwen",
@@ -106,7 +99,7 @@ async def test_embedder_tenant_mode_missing_credential_raises() -> None:
 @pytest.mark.asyncio
 async def test_reranker_empty_documents_returns_empty() -> None:
     reranker = ResolvingReranker(
-        resolver=_resolver(record=_record(mode="platform")),
+        resolver=_resolver(record=_record()),
         secret_store=InMemorySecretStore(),
         provider="qwen",
         model="qwen-plus",
@@ -116,12 +109,12 @@ async def test_reranker_empty_documents_returns_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_reranker_missing_credential_degrades_to_fused_order() -> None:
-    # Tenant mode, no rerank key → the wrapper swallows the resolver error
+    # No platform rerank key → the wrapper swallows the resolver error
     # and returns the input order (truncated to top_k) — rerank is optional.
     reranker = ResolvingReranker(
         resolver=_resolver(
-            record=_record(mode="tenant", model_creds={}),
-            platform_provs={"qwen": "secret://platform/qwen"},
+            record=_record(),
+            platform_provs={},
         ),
         secret_store=InMemorySecretStore(),
         provider="qwen",
@@ -137,7 +130,7 @@ async def test_reranker_missing_credential_degrades_to_fused_order() -> None:
 @pytest.mark.asyncio
 async def test_web_search_none_tenant_raises() -> None:
     client = ResolvingTavilyClient(
-        resolver=_resolver(record=_record(mode="platform")),
+        resolver=_resolver(record=_record()),
         secret_store=InMemorySecretStore(),
     )
     with pytest.raises(CredentialsResolverError):
@@ -145,12 +138,12 @@ async def test_web_search_none_tenant_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_tenant_mode_missing_credential_raises() -> None:
-    record = _record(mode="tenant")
+async def test_web_search_missing_platform_credential_raises() -> None:
+    record = _record()
     client = ResolvingTavilyClient(
         resolver=CredentialsResolver(
             platform_provider_credentials={},  # type: ignore[arg-type]
-            platform_tool_credentials={"web_search": "secret://platform/tavily"},  # type: ignore[arg-type]
+            platform_tool_credentials={},  # type: ignore[arg-type]
             tenant_config_getter=_TenantConfig(record),
         ),
         secret_store=InMemorySecretStore(),
@@ -186,7 +179,7 @@ async def test_embedder_platform_mode_resolves_and_reads_key() -> None:
 
     embedder = _NoNetworkEmbedder(
         resolver=_resolver(
-            record=_record(mode="platform"),
+            record=_record(),
             platform_provs={"qwen": "secret://platform/qwen"},
         ),
         secret_store=_CapturingSecretStore(),  # type: ignore[arg-type]

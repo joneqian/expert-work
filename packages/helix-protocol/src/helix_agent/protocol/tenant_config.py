@@ -53,17 +53,14 @@ TriggerFireScanMode = Literal["warn", "block"]
 # regressed against expectations).
 MemoryRecallMode = Literal["hybrid", "vector"]
 
-# Stream O — Mini-ADR O-2. Tenant credentials mode.
-# ``platform`` (default): all LLM provider + tool API key lookups resolve
-# to the platform-level secret_refs. ``model_credentials_ref`` /
-# ``tool_credentials`` fields are preserved (admin can pre-stage) but
-# ignored at resolve time.
-# ``tenant``: all lookups resolve to the tenant's own secret_refs.
-# Switching to ``tenant`` is gated by an all-or-nothing API check —
-# every provider / tool currently referenced by the tenant's agents
-# must have a configured credential, or the switch returns 403.
-# See ``docs/streams/STREAM-O-DESIGN.md`` § 2.4 (Mini-ADR O-4).
-CredentialsMode = Literal["platform", "tenant"]
+# Stream Y-1 — LLM platform-exclusive. Tenant credentials mode.
+# ``platform`` is now the ONLY mode: all LLM provider + tool API key
+# lookups resolve to the platform-level secret_refs. The former
+# ``tenant`` BYOK mode (resolve to the tenant's own secret_refs) was
+# removed — LLM keys are platform-exclusive. The ``model_credentials_ref``
+# / ``tool_credentials`` fields are retained dormant (no destructive
+# schema drop) but are never read at resolve time.
+CredentialsMode = Literal["platform"]
 
 # Stream U — PR E. Tenant lifecycle status.
 # ``active`` (default): the tenant operates normally.
@@ -121,6 +118,9 @@ class TenantConfigRecord(BaseModel):
     plan: TenantPlan = TenantPlan.FREE
     # Stream U — PR E. Tenant lifecycle status ('active'|'suspended').
     status: TenantStatus = "active"
+    # Stream Y-1 — DEPRECATED/DORMANT: tenant LLM BYOK was removed (LLM keys
+    # are platform-exclusive). Field retained for non-destructive schema
+    # compatibility but no longer resolved.
     model_credentials_ref: dict[str, str] = Field(default_factory=dict)
     mcp_allowlist: list[str] = Field(default_factory=list)
     rate_limit_override: dict[str, Any] = Field(default_factory=dict)
@@ -173,18 +173,18 @@ class TenantConfigRecord(BaseModel):
     memory_purge_min_age_days: int = Field(
         default=30, ge=_MEMORY_PURGE_MIN_DAYS, le=_MEMORY_PURGE_MAX_DAYS
     )
-    # Stream O — Mini-ADR O-2. Credentials management.
-    # ``credentials_mode`` decides whether LLM provider + tool API key
-    # lookups resolve via the platform's secret_refs or the tenant's
-    # own. ``tool_credentials`` is the per-tool counterpart to the
-    # pre-existing ``model_credentials_ref`` (kept under its legacy name
-    # to avoid a wide rename churn — see PR description for the
-    # business-value vs implementation-cost trade-off).
+    # Stream Y-1 — LLM platform-exclusive. ``credentials_mode`` is now
+    # always ``platform`` (the only permitted value); all LLM provider +
+    # tool API key lookups resolve via the platform's secret_refs.
     credentials_mode: CredentialsMode = "platform"
+    # Stream Y-1 — DEPRECATED/DORMANT: tenant LLM BYOK was removed. Field
+    # retained for non-destructive schema compatibility but no longer
+    # resolved.
     tool_credentials: dict[Tool, str] = Field(default_factory=dict)
-    # Stream O — Mini-ADR O-14. Per-tenant MCP server credentials:
-    # ``server_name`` (platform-defined, never tenant input) → tenant
-    # secret_ref backing that server's bearer auth in ``tenant`` mode.
+    # Stream Y-1 — DORMANT: previously the per-tenant MCP bearer secret_ref
+    # used in the removed ``tenant`` credentials mode. Stream V/W tenant MCP
+    # servers store their own ``token_secret_ref`` on the server row, so this
+    # field is no longer read. Retained for non-destructive compatibility.
     mcp_credentials: dict[str, str] = Field(default_factory=dict)
     # Stream R — Mini-ADR R-9. The agent a tenant's members get by default
     # when a thread is created without an explicit agent. ``None`` → platform
@@ -261,10 +261,13 @@ class TenantConfigPatch(BaseModel):
     memory_purge_min_age_days: int | None = Field(
         default=None, ge=_MEMORY_PURGE_MIN_DAYS, le=_MEMORY_PURGE_MAX_DAYS
     )
-    # Stream O — Mini-ADR O-2. Credentials patch fields.
+    # Stream Y-1 — LLM platform-exclusive. ``credentials_mode`` can only be
+    # patched to ``platform`` now; Pydantic rejects other values with 422.
     credentials_mode: CredentialsMode | None = None
+    # Stream Y-1 — DEPRECATED/DORMANT: tenant LLM BYOK removed; retained for
+    # non-destructive compatibility but no longer resolved.
     tool_credentials: dict[Tool, str] | None = None
-    # Stream O — Mini-ADR O-14. Per-tenant MCP server credentials.
+    # Stream Y-1 — DORMANT: see TenantConfigRecord.mcp_credentials.
     mcp_credentials: dict[str, str] | None = None
     # Stream R — Mini-ADR R-9. Tenant default agent (None in a patch means
     # "leave unchanged"; clearing it back to platform fallback is out of scope

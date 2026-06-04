@@ -104,32 +104,23 @@ class CredentialsResolver:
         tenant_id: UUID,
         provider: Provider,
     ) -> str:
-        """Return the secret_ref to use for this ``(tenant, provider)`` pair.
+        """Return the platform secret_ref for this provider.
 
-        Raises :class:`CredentialsResolverError` when:
-        * mode=platform + platform catalog missing the provider
-        * mode=tenant + tenant's ``model_credentials_ref`` missing it
+        Stream Y-1: LLM credentials are platform-exclusive — tenant BYOK
+        (``credentials_mode='tenant'``) has been removed. Raises
+        :class:`CredentialsResolverError` when the platform catalog is
+        missing the provider. ``tenant_id`` is still validated for existence.
         """
-        cfg = await self._tenant_config.get(tenant_id=tenant_id)
-        if cfg.credentials_mode == "platform":
-            secret_ref = (await self._effective_providers()).get(provider)
-            if secret_ref is None:
-                msg = (
-                    f"platform credentials missing for provider={provider}. "
-                    "Add to settings.platform_provider_credentials."
-                )
-                raise CredentialsResolverError(msg, mode="platform", kind="provider", key=provider)
-            return secret_ref
-        # tenant mode
-        secret_ref = cfg.model_credentials_ref.get(provider)
-        if not secret_ref:
+        # Validate the tenant exists (raises on unknown id); platform
+        # secret_refs are tenant-independent so cfg is not otherwise read.
+        await self._tenant_config.get(tenant_id=tenant_id)
+        secret_ref = (await self._effective_providers()).get(provider)
+        if secret_ref is None:
             msg = (
-                f"tenant {tenant_id} in 'tenant' credentials_mode but no "
-                f"credentials configured for provider={provider}. Either add "
-                f"credentials via PUT /v1/tenants/{tenant_id}/config or "
-                "switch credentials_mode back to 'platform'."
+                f"platform credentials missing for provider={provider}. "
+                "Add to settings.platform_provider_credentials."
             )
-            raise CredentialsResolverError(msg, mode="tenant", kind="provider", key=provider)
+            raise CredentialsResolverError(msg, mode="platform", kind="provider", key=provider)
         return secret_ref
 
     async def resolve_tool(
@@ -138,28 +129,18 @@ class CredentialsResolver:
         tenant_id: UUID,
         tool: Tool,
     ) -> str:
-        """Return the secret_ref to use for this ``(tenant, tool)`` pair.
+        """Return the platform secret_ref for this tool.
 
-        Same failure semantics as :meth:`resolve_provider`."""
-        cfg = await self._tenant_config.get(tenant_id=tenant_id)
-        if cfg.credentials_mode == "platform":
-            secret_ref = (await self._effective_tools()).get(tool)
-            if secret_ref is None:
-                msg = (
-                    f"platform credentials missing for tool={tool}. "
-                    "Add to settings.platform_tool_credentials."
-                )
-                raise CredentialsResolverError(msg, mode="platform", kind="tool", key=tool)
-            return secret_ref
-        secret_ref = cfg.tool_credentials.get(tool)
-        if not secret_ref:
+        Same failure semantics as :meth:`resolve_provider`; Stream Y-1
+        platform-exclusive (tenant BYOK removed)."""
+        await self._tenant_config.get(tenant_id=tenant_id)
+        secret_ref = (await self._effective_tools()).get(tool)
+        if secret_ref is None:
             msg = (
-                f"tenant {tenant_id} in 'tenant' credentials_mode but no "
-                f"credentials configured for tool={tool}. Either add "
-                f"credentials via PUT /v1/tenants/{tenant_id}/config or "
-                "switch credentials_mode back to 'platform'."
+                f"platform credentials missing for tool={tool}. "
+                "Add to settings.platform_tool_credentials."
             )
-            raise CredentialsResolverError(msg, mode="tenant", kind="tool", key=tool)
+            raise CredentialsResolverError(msg, mode="platform", kind="tool", key=tool)
         return secret_ref
 
     async def _effective_providers(self) -> dict[Provider, str]:

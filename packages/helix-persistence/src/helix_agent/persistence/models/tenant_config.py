@@ -94,8 +94,8 @@ class TenantConfigRow(Base):
         Integer, nullable=False, server_default=text("30"), default=30
     )
     # Stream O — Mini-ADR O-2. Credentials mode + tool API key map.
-    # CHECK constraint in migration 0047 mirrors the Python
-    # ``CredentialsMode`` Literal.
+    # Stream Y-1 narrowed ``CredentialsMode`` to ``Literal["platform"]``;
+    # the CHECK constraint (migration 0058) mirrors it as ``IN ('platform')``.
     credentials_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default=text("'platform'"), default="platform"
     )

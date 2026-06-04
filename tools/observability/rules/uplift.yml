@@ -218,26 +218,16 @@ groups:
     rules:
       # Stream O — Mini-ADR O-8. Credentials management surface.
       #   * credentials_resolve_failure_rate:5m{role,key,mode} — fail-fast
-      #     401 rate per (provider/tool, mode). Spikes mean tenant mode +
-      #     missing cred OR platform cred misconfigured.
-      #   * credentials_tenant_mode_adoption_ratio:1d — fraction of
-      #     tenants on tenant credentials_mode; tracks Stream O rollout.
+      #     401 rate per (provider/tool, mode). Spikes mean a platform
+      #     cred is misconfigured.
       #   * legacy_credentials_fallback_rate:1d{role} — Stream O
       #     transition-period signal; should drop to zero after PR 2.
+      # Stream Y-1 removed the tenant credentials_mode adoption ratio rule
+      # (LLM credentials are platform-exclusive; the backing gauge is gone).
       - record: helix:uplift:credentials_resolve_failure_rate:5m
         expr: |
           sum by (role, key, mode) (
             rate(helix_uplift_credentials_resolve_total{result!="ok"}[5m])
-          )
-
-      - record: helix:uplift:credentials_tenant_mode_adoption_ratio:1d
-        expr: |
-          helix_uplift_credentials_tenant_mode_count
-          /
-          clamp_min(
-            helix_uplift_credentials_tenant_mode_count
-            + count(count_over_time(helix_uplift_credentials_resolve_total{mode="platform"}[1d])),
-            1
           )
 
       - record: helix:uplift:legacy_credentials_fallback_rate:1d

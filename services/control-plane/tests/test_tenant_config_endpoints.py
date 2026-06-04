@@ -110,6 +110,20 @@ async def test_get_returns_404_when_not_seeded(tc_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_put_rejects_tenant_credentials_mode(tc_client: AsyncClient) -> None:
+    # Stream Y-1 — LLM credentials are platform-exclusive. ``credentials_mode``
+    # is a ``Literal["platform"]``, so a PATCH attempting the removed 'tenant'
+    # mode is rejected by Pydantic with 422 before reaching the handler.
+    token = _admin_token()
+    resp = await tc_client.put(
+        f"/v1/tenants/{_TENANT}/config",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"display_name": "ACME", "credentials_mode": "tenant"},
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_first_put_requires_display_name(tc_client: AsyncClient) -> None:
     token = _admin_token()
     resp = await tc_client.put(

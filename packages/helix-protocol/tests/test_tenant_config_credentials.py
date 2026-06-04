@@ -44,9 +44,10 @@ def test_default_credentials_mode_is_platform() -> None:
     assert record.tool_credentials == {}
 
 
-def test_credentials_mode_tenant_accepted() -> None:
-    record = _make(credentials_mode="tenant")
-    assert record.credentials_mode == "tenant"
+def test_credentials_mode_tenant_rejected() -> None:
+    # Stream Y-1 — LLM platform-exclusive: 'tenant' BYOK mode removed.
+    with pytest.raises(ValidationError):
+        _make(credentials_mode="tenant")
 
 
 def test_credentials_mode_invalid_rejected() -> None:
@@ -60,9 +61,16 @@ def test_tool_credentials_accepts_supported_tool() -> None:
 
 
 def test_patch_credentials_mode_field() -> None:
-    patch = TenantConfigPatch(credentials_mode="tenant")
-    assert patch.credentials_mode == "tenant"
+    patch = TenantConfigPatch(credentials_mode="platform")
+    assert patch.credentials_mode == "platform"
     assert patch.tool_credentials is None
+
+
+def test_patch_credentials_mode_tenant_rejected() -> None:
+    # Stream Y-1 — PATCH carrying the removed 'tenant' mode is rejected by
+    # the narrowed Literal (Pydantic 422 at the API boundary).
+    with pytest.raises(ValidationError):
+        TenantConfigPatch(credentials_mode="tenant")  # type: ignore[arg-type]
 
 
 def test_patch_tool_credentials_field() -> None:

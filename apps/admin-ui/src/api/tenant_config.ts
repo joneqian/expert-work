@@ -9,22 +9,23 @@
  * M1 will add ``If-Match``; until then the UI surfaces a soft
  * "Reload to see latest" hint after every save, not a 412.
  */
-import { getJson, postJson, putJson } from "./client";
+import { getJson, putJson } from "./client";
 
 export type TenantPlan = "free" | "pro" | "enterprise";
 
-/** Stream O (Mini-ADR O-2) — all-or-nothing credentials source. */
-export type CredentialsMode = "platform" | "tenant";
+/** Stream Y-1 — LLM credentials are platform-exclusive; ``platform`` is the
+ *  only mode (tenant BYOK was removed). */
+export type CredentialsMode = "platform";
 
 export interface TenantConfigRecord {
   tenant_id: string;
   display_name: string;
   plan: TenantPlan;
-  /** Stream O — credentials source for every LLM/tool call. */
+  /** Stream Y-1 — always ``platform``; LLM credentials are platform-exclusive. */
   credentials_mode: CredentialsMode;
-  /** Stream O — provider → tenant secret_ref (kms:// URI). */
+  /** Stream Y-1 — DORMANT: tenant LLM BYOK removed; no longer resolved. */
   model_credentials_ref: Record<string, string>;
-  /** Stream O — tool → tenant secret_ref (kms:// URI). */
+  /** Stream Y-1 — DORMANT: tenant LLM BYOK removed; no longer resolved. */
   tool_credentials: Record<string, string>;
   mcp_allowlist: string[];
   rate_limit_override: Record<string, unknown>;
@@ -48,9 +49,9 @@ export interface TenantConfigRecord {
 export interface TenantConfigPatchBody {
   display_name?: string;
   plan?: TenantPlan;
-  credentials_mode?: CredentialsMode;
+  /** Stream Y-1 — DORMANT: tenant LLM BYOK removed; retained so the generic
+   *  JSON tenant-config editor round-trips the field without resolving it. */
   model_credentials_ref?: Record<string, string>;
-  tool_credentials?: Record<string, string>;
   mcp_allowlist?: string[];
   rate_limit_override?: Record<string, unknown>;
   pii_fields?: string[];
@@ -80,17 +81,6 @@ export interface CredentialsView {
   tools: CredentialRow[];
 }
 
-export interface DryRunResult {
-  ok: boolean;
-  missing_providers: string[];
-  missing_tools: string[];
-}
-
-export interface DryRunBody {
-  model_credentials_ref?: Record<string, string>;
-  tool_credentials?: Record<string, string>;
-}
-
 export async function getTenantConfig(tenantId: string): Promise<TenantConfigRecord> {
   return getJson<TenantConfigRecord>(
     `/v1/tenants/${encodeURIComponent(tenantId)}/config`,
@@ -107,21 +97,10 @@ export async function upsertTenantConfig(
   );
 }
 
-/** Stream O Mini-ADR O-13 — composite view driving the Credentials panel. */
+/** Stream O Mini-ADR O-13 — composite (read-only) view driving the
+ *  Credentials panel. */
 export async function getCredentialsView(tenantId: string): Promise<CredentialsView> {
   return getJson<CredentialsView>(
     `/v1/tenants/${encodeURIComponent(tenantId)}/config/credentials`,
-  );
-}
-
-/** Stream O Mini-ADR O-13 — preview a switch to ``tenant`` mode without
- *  persisting; returns the providers/tools still missing a credential. */
-export async function dryRunCredentialsMode(
-  tenantId: string,
-  body: DryRunBody,
-): Promise<DryRunResult> {
-  return postJson<DryRunResult>(
-    `/v1/tenants/${encodeURIComponent(tenantId)}/config/credentials-mode/dry-run`,
-    body,
   );
 }

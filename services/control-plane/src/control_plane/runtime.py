@@ -396,10 +396,9 @@ class ResolvingEmbedder:
 class ResolvingReranker:
     """Per-tenant credential-resolving :class:`Reranker` (Mini-ADR O-9).
 
-    Rerank is an optional quality pass — if the tenant has no credential
-    for the rerank provider (tenant mode, not configured), degrade to the
-    RRF-fused order rather than failing. This is why rerank is *not* gated
-    at credentials-mode switch time (Mini-ADR O-12)."""
+    Rerank is an optional quality pass — if the platform has no credential
+    for the rerank provider, degrade to the RRF-fused order rather than
+    failing (Mini-ADR O-12)."""
 
     resolver: CredentialsResolver
     secret_store: SecretStore

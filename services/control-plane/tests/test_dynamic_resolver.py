@@ -86,7 +86,7 @@ async def test_reranker_degrades_to_identity_when_unconfigured():
 class _RaisingResolver:
     async def resolve_provider(self, *, tenant_id, provider):
         raise CredentialsResolverError(
-            "no credential", mode="tenant", kind="provider", key=provider
+            "no credential", mode="platform", kind="provider", key=provider
         )
 
 
