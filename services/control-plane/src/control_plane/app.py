@@ -65,6 +65,7 @@ from control_plane.api import (
     build_tenants_router,
     build_triggers_router,
     build_uploads_router,
+    build_usage_router,
     build_webhooks_router,
 )
 from control_plane.api.model_catalog import PlatformConfiguredProviders
@@ -180,8 +181,11 @@ from helix_agent.persistence.auth import (
 )
 from helix_agent.persistence.billing import (
     DbModelRateCardStore,
+    DbTenantBillingLedgerStore,
     InMemoryModelRateCardStore,
+    InMemoryTenantBillingLedgerStore,
     ModelRateCardStore,
+    TenantBillingLedgerStore,
 )
 from helix_agent.persistence.curation import (
     CurationCandidateStore,
@@ -532,6 +536,10 @@ def create_app(
     # Stream Y (Y-3) — platform-curated model rate card (NULL-tenant rows).
     resolved_model_rate_card_store = (
         sql_stores.model_rate_card if sql_stores else InMemoryModelRateCardStore()
+    )
+    # Stream Y (Y-4) — per-tenant billing ledger (tenant-scoped; Stream Z reads it).
+    resolved_tenant_billing_ledger_store = (
+        sql_stores.tenant_billing_ledger if sql_stores else InMemoryTenantBillingLedgerStore()
     )
     resolved_keycloak_admin_client = keycloak_admin_client or _build_keycloak_admin_client(
         resolved_settings, resolved_secret_store
@@ -1025,6 +1033,7 @@ def create_app(
     app.state.tenant_mcp_server_store = resolved_tenant_mcp_server_store
     app.state.mcp_connector_catalog_store = resolved_mcp_connector_catalog_store
     app.state.model_rate_card_store = resolved_model_rate_card_store
+    app.state.tenant_billing_ledger_store = resolved_tenant_billing_ledger_store
     app.state.tenant_mcp_pool_service = None
     app.state.platform_secret_store = resolved_platform_secret_store
     app.state.platform_secrets_service = resolved_platform_secrets_service
@@ -1125,6 +1134,7 @@ def create_app(
     app.include_router(build_mcp_servers_router())
     app.include_router(build_mcp_catalog_router())
     app.include_router(build_rate_card_router())
+    app.include_router(build_usage_router())
     app.include_router(build_platform_skills_router())
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())
@@ -1185,6 +1195,7 @@ class _SqlStores:
     tenant_mcp_server: TenantMcpServerStore  # Stream V
     mcp_connector_catalog: McpConnectorCatalogStore  # Stream W
     model_rate_card: ModelRateCardStore  # Stream Y (Y-3)
+    tenant_billing_ledger: TenantBillingLedgerStore  # Stream Y (Y-4)
     feedback: FeedbackStore
     token_usage: TokenUsageStore
     audit_log: AuditLogStore
@@ -1372,6 +1383,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
         mcp_connector_catalog=SqlMcpConnectorCatalogStore(session_factory),
         model_rate_card=DbModelRateCardStore(session_factory),
+        tenant_billing_ledger=DbTenantBillingLedgerStore(session_factory),
         feedback=DbFeedbackStore(session_factory),
         token_usage=DbTokenUsageStore(session_factory),
         audit_log=SqlAuditLogStore(session_factory),

@@ -34,6 +34,7 @@ from control_plane.api.tenant_quotas import build_tenant_quotas_router
 from control_plane.api.tenants import build_tenants_router
 from control_plane.api.triggers import build_triggers_router, build_webhooks_router
 from control_plane.api.uploads import build_uploads_router
+from control_plane.api.usage import build_usage_router
 
 __all__ = [
     "build_agent_schema_router",
@@ -70,5 +71,6 @@ __all__ = [
     "build_tenants_router",
     "build_triggers_router",
     "build_uploads_router",
+    "build_usage_router",
     "build_webhooks_router",
 ]

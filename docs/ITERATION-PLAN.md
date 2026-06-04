@@ -947,7 +947,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 租户看自己用量/成本，system_admin 看跨租户分账，成本可观测。**硬约束：租户面只暴露 billed，绝不回显 base/markup**。发票推迟 M2。
 
 - [x] **Z0 设计先行**（PR #409）（STREAM-Z-DESIGN + Mini-ADR Z-1~Z-4 + 现状核实）
-- [ ] **Z1 租户用量/成本 API**：`GET /v1/usage/cost`（RLS 自隔离）+ `/v1/usage/tokens`（当月实时）+ `billing:read`
+- [x] **Z1 租户用量/成本 API**（PR #410）：`GET /v1/usage/cost`（RLS 自隔离，**只 billed**，group_by agent/model/none，unpriced 标记）+ `/v1/usage/tokens`（当月实时直读 token_usage）+ `billing:read`；ledger store 接入 control-plane app.state
 - [ ] **Z2 admin chargeback API + 指标**：`GET /v1/admin/billing/chargeback`（跨租户，bypass_rls，显 margin）+ `helix_llm_cost_micros_total` counter
 - [ ] **Z3 看板 UI**（前端）：月选择 + 按 agent/model 拆分 + 环比
 
