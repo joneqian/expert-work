@@ -45,7 +45,13 @@ from control_plane.api._skill_zip import (
 )
 from control_plane.audit import emit as audit_emit
 from control_plane.auth.rbac import _collect_roles
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenancy import TenantConfigNotConfiguredError
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    bypass_rls_session,
+    ensure_tenant_scope,
+)
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.common.threat_patterns import scan_for_threats
 from helix_agent.common.uplift_metrics import (
@@ -66,6 +72,8 @@ from helix_agent.protocol import (
     Skill,
     SkillStatus,
     SkillVersion,
+    TenantPlan,
+    tier_satisfies,
 )
 from helix_agent.protocol.skill import (
     SkillPackageLayoutError,
@@ -211,6 +219,10 @@ def _skill_dict(skill: Skill) -> dict[str, Any]:
         "latest_version": skill.latest_version,
         "description": skill.description,
         "category": skill.category,
+        # Stream X (X4 / X-1). Surface the entitlement tier so both the
+        # platform CRUD responses and the X-6 tenant merged view carry it
+        # (additive / backward-compatible).
+        "required_tier": skill.required_tier.value,
         # Capability Uplift Sprint #4 (Mini-ADR U-25 / U-30). UI needs
         # these to render the 📌 pin icon + "distance to stale" hint
         # without a separate fetch.
@@ -816,6 +828,10 @@ def build_skills_router() -> APIRouter:
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/skills",
         )
+        # Stream X (X-6) merged view — the tenant's own skills ("items")
+        # plus the platform-curated NULL-tenant library it can see
+        # ("platform_items"), each tagged with ``source`` + ``entitled``.
+        platform_items: list[dict[str, Any]] = []
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):
                 rows, next_cursor = await store.list_skills_all_tenants(
@@ -829,10 +845,52 @@ def build_skills_router() -> APIRouter:
                     cursor=cursor,
                     limit=limit,
                 )
+                # Resolve the tenant's plan under its own RLS scope
+                # (``tenant_config`` is a tenant-scoped table); an
+                # unconfigured tenant is treated as FREE.
+                try:
+                    plan = (
+                        await request.app.state.tenant_config_service.get(tenant_id=scope.tenant_id)
+                    ).plan
+                except TenantConfigNotConfiguredError:
+                    plan = TenantPlan.FREE
+                # Only ACTIVE platform skills are bindable. The library is
+                # small; a single 200 cap is acceptable here.
+                async with bypass_rls_session():
+                    p_rows, _ = await store.list_platform_skills(
+                        status=SkillStatus.ACTIVE, limit=200
+                    )
+                for p in p_rows:
+                    # Name-shadowing (R2): a tenant skill of the same name
+                    # hides the platform one. Check in tenant scope, outside
+                    # the bypass block above.
+                    shadow = await store.get_skill_by_name(tenant_id=scope.tenant_id, name=p.name)
+                    if shadow is not None:
+                        continue
+                    entry = _skill_dict(p)
+                    entry["source"] = "platform"
+                    # Show both entitled and not-entitled rows (UI renders a
+                    # lock badge on the latter) — do not filter by tier.
+                    entry["entitled"] = tier_satisfies(plan, p.required_tier)
+                    platform_items.append(entry)
+
+        items: list[dict[str, Any]] = []
+        for r in rows:
+            entry = _skill_dict(r)
+            # In the cross-tenant (system_admin ``tenant_id=*``) path
+            # ``list_skills_all_tenants`` has no tenant filter, so it also
+            # returns NULL-tenant platform rows — label by ``tenant_id`` so
+            # those aren't mislabeled ``tenant``. The normal tenant path only
+            # ever sees its own (non-NULL) rows, so this stays ``tenant`` there.
+            entry["source"] = "platform" if r.tenant_id is None else "tenant"
+            entry["entitled"] = True
+            items.append(entry)
+
         return JSONResponse(
             status_code=200,
             content={
-                "items": [_skill_dict(r) for r in rows],
+                "items": items,
+                "platform_items": platform_items,
                 "next_cursor": str(next_cursor) if next_cursor is not None else None,
                 "cross_tenant": isinstance(scope, CrossTenant),
             },

@@ -20,6 +20,7 @@ from control_plane.api.platform_config import build_platform_config_router
 from control_plane.api.platform_embedding_config import (
     build_platform_embedding_config_router,
 )
+from control_plane.api.platform_skills import build_platform_skills_router
 from control_plane.api.quota import build_quota_router
 from control_plane.api.role_bindings import build_role_bindings_router
 from control_plane.api.runs import build_runs_list_router, build_runs_router
@@ -53,6 +54,7 @@ __all__ = [
     "build_model_catalog_router",
     "build_platform_config_router",
     "build_platform_embedding_config_router",
+    "build_platform_skills_router",
     "build_quota_router",
     "build_role_bindings_router",
     "build_runs_list_router",

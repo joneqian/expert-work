@@ -50,6 +50,7 @@ from control_plane.api import (
     build_model_catalog_router,
     build_platform_config_router,
     build_platform_embedding_config_router,
+    build_platform_skills_router,
     build_quota_router,
     build_role_bindings_router,
     build_runs_list_router,
@@ -1112,6 +1113,7 @@ def create_app(
     app.include_router(build_service_accounts_router())
     app.include_router(build_mcp_servers_router())
     app.include_router(build_mcp_catalog_router())
+    app.include_router(build_platform_skills_router())
     app.include_router(build_api_keys_router())
     app.include_router(build_role_bindings_router())
     app.include_router(build_quota_router())
