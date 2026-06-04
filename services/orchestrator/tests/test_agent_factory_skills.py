@@ -75,6 +75,19 @@ def _secret_store() -> LocalDevSecretStore:
     return LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"})
 
 
+async def _platform_resolver(provider: str) -> str:
+    # Stream Y-2 — agent builds resolve the platform key; these specs are all
+    # anthropic, so every provider maps to the seeded anthropic dev key.
+    del provider
+    return f"secret://{_ANTHROPIC_KEY_NAME}"
+
+
+async def _build(spec: AgentSpec, **kwargs: Any) -> Any:
+    """``build_agent`` with the platform key resolver defaulted (Stream Y-2)."""
+    kwargs.setdefault("provider_key_resolver", _platform_resolver)
+    return await build_agent(spec, **kwargs)
+
+
 def _make_version(
     *,
     name: str = "foo",
@@ -118,7 +131,7 @@ def _make_resolver(rows: dict[tuple[str, int | None], _SkillLookupResult]) -> An
 async def test_build_agent_no_skills_no_resolver_works(cp: BaseCheckpointSaver[object]) -> None:
     """An empty ``spec.skills`` builds cleanly without a resolver."""
     spec = AgentSpec.model_validate(_MINIMAL_SPEC)
-    built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+    built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert built.system_prompt == "you are an agent"
 
 
@@ -129,7 +142,7 @@ async def test_build_agent_bare_skill_ref_resolves_and_wraps_prompt(
     spec = _spec_with_skills(["foo"])
     version = _make_version(name="foo", prompt_fragment="explain X to the user")
     resolver = _make_resolver({("foo", None): _SkillLookupResult.ok(version)})
-    built = await build_agent(
+    built = await _build(
         spec,
         secret_store=_secret_store(),
         checkpointer=cp,
@@ -148,7 +161,7 @@ async def test_build_agent_pinned_skill_ref_resolves(cp: BaseCheckpointSaver[obj
     spec = _spec_with_skills(["bar@3"])
     version = _make_version(name="bar", version=3)
     resolver = _make_resolver({("bar", 3): _SkillLookupResult.ok(version)})
-    built = await build_agent(
+    built = await _build(
         spec,
         secret_store=_secret_store(),
         checkpointer=cp,
@@ -171,7 +184,7 @@ async def test_build_agent_multiple_skills_preserve_declaration_order(
             ("beta", 2): _SkillLookupResult.ok(beta),
         }
     )
-    built = await build_agent(
+    built = await _build(
         spec,
         secret_store=_secret_store(),
         checkpointer=cp,
@@ -194,7 +207,7 @@ async def test_build_agent_skill_without_resolver_fails(cp: BaseCheckpointSaver[
     refuse to silently ignore the skill at run time."""
     spec = _spec_with_skills(["foo"])
     with pytest.raises(AgentFactoryError, match="skill_resolver"):
-        await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+        await _build(spec, secret_store=_secret_store(), checkpointer=cp)
 
 
 @pytest.mark.asyncio
@@ -202,7 +215,7 @@ async def test_build_agent_skill_not_found_raises(cp: BaseCheckpointSaver[object
     spec = _spec_with_skills(["missing"])
     resolver = _make_resolver({})
     with pytest.raises(SkillNotFoundError):
-        await build_agent(
+        await _build(
             spec,
             secret_store=_secret_store(),
             checkpointer=cp,
@@ -218,7 +231,7 @@ async def test_build_agent_pinned_version_missing_raises(
     spec = _spec_with_skills(["foo@99"])
     resolver = _make_resolver({("foo", 99): _SkillLookupResult.version_not_found()})
     with pytest.raises(SkillVersionNotFoundError):
-        await build_agent(
+        await _build(
             spec,
             secret_store=_secret_store(),
             checkpointer=cp,
@@ -234,7 +247,7 @@ async def test_build_agent_bare_ref_to_inactive_skill_raises(
     spec = _spec_with_skills(["foo"])
     resolver = _make_resolver({("foo", None): _SkillLookupResult.not_active()})
     with pytest.raises(SkillNotActiveError):
-        await build_agent(
+        await _build(
             spec,
             secret_store=_secret_store(),
             checkpointer=cp,
@@ -252,7 +265,7 @@ async def test_build_agent_not_entitled_raises_requires_plan_error(
     spec = _spec_with_skills(["foo"])
     resolver = _make_resolver({("foo", None): _SkillLookupResult.not_entitled(required_tier="pro")})
     with pytest.raises(AgentFactoryError, match="requires the pro plan"):
-        await build_agent(
+        await _build(
             spec,
             secret_store=_secret_store(),
             checkpointer=cp,
@@ -270,7 +283,7 @@ async def test_build_agent_required_models_mismatch_raises(
     version = _make_version(name="foo", required_models=("gpt-4o",))
     resolver = _make_resolver({("foo", None): _SkillLookupResult.ok(version)})
     with pytest.raises(SkillModelMismatchError, match="gpt-4o"):
-        await build_agent(
+        await _build(
             spec,
             secret_store=_secret_store(),
             checkpointer=cp,
@@ -287,7 +300,7 @@ async def test_build_agent_required_models_match_passes(
     spec = _spec_with_skills(["foo"])
     version = _make_version(name="foo", required_models=("claude-sonnet-4-6",))
     resolver = _make_resolver({("foo", None): _SkillLookupResult.ok(version)})
-    built = await build_agent(
+    built = await _build(
         spec,
         secret_store=_secret_store(),
         checkpointer=cp,
@@ -312,7 +325,7 @@ async def test_build_agent_conflicting_tool_names_raises(
         }
     )
     with pytest.raises(SkillConflictError, match="web_search"):
-        await build_agent(
+        await _build(
             spec,
             secret_store=_secret_store(),
             checkpointer=cp,

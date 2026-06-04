@@ -269,6 +269,17 @@ def _spec_with_skills(skills: list[str] | None) -> AgentSpec:
     return AgentSpec.model_validate(manifest)
 
 
+def _anthropic_credentials_resolver() -> CredentialsResolver:
+    """Stream Y-2 — agent builds resolve the LLM key via the platform
+    credential, so the builder needs a resolver carrying the anthropic key
+    (the manifest ``api_key_ref`` is ignored for agent builds)."""
+    return CredentialsResolver(
+        platform_provider_credentials={"anthropic": f"secret://{_ANTHROPIC_KEY_NAME}"},  # type: ignore[arg-type]
+        platform_tool_credentials={},  # type: ignore[arg-type]
+        tenant_config_getter=_StubTenantConfig(),  # type: ignore[arg-type]
+    )
+
+
 async def _seed_active_tenant_skill(
     store: InMemorySkillStore, *, tenant_id: UUID, name: str
 ) -> None:
@@ -292,6 +303,7 @@ async def test_make_agent_builder_builds_agent_with_skill_injected() -> None:
         InMemorySaver(),
         skill_store=store,
         tenant_config_service=_StubTenantConfig(),  # type: ignore[arg-type]
+        credentials_resolver=_anthropic_credentials_resolver(),
     )
     built = await builder(_spec_with_skills(["foo"]), tenant_id=tenant_id)
     assert "SKILL-BODY" in built.system_prompt
@@ -307,6 +319,7 @@ async def test_make_agent_builder_no_skills_still_builds() -> None:
         InMemorySaver(),
         skill_store=store,
         tenant_config_service=_StubTenantConfig(),  # type: ignore[arg-type]
+        credentials_resolver=_anthropic_credentials_resolver(),
     )
     built = await builder(_spec_with_skills(None), tenant_id=uuid4())
     assert built.system_prompt == "you help"
@@ -314,8 +327,10 @@ async def test_make_agent_builder_no_skills_still_builds() -> None:
 
 @pytest.mark.asyncio
 async def test_make_agent_builder_skills_manifest_without_tenant_errors() -> None:
-    """A preview / validation build (tenant_id None) gets no resolver, so a
-    skills manifest still hard-fails — today's behaviour is preserved."""
+    """A preview / validation build (tenant_id None) gets no resolvers, so the
+    build still hard-fails. Stream Y-2: with the manifest ``api_key_ref``
+    ignored and no ``provider_key_resolver`` (no tenant), the credential gate
+    is the first hard failure — the build is refused either way."""
     from orchestrator.errors import AgentFactoryError
 
     store = InMemorySkillStore()
@@ -324,6 +339,7 @@ async def test_make_agent_builder_skills_manifest_without_tenant_errors() -> Non
         InMemorySaver(),
         skill_store=store,
         tenant_config_service=_StubTenantConfig(),  # type: ignore[arg-type]
+        credentials_resolver=_anthropic_credentials_resolver(),
     )
-    with pytest.raises(AgentFactoryError, match="skill_resolver"):
+    with pytest.raises(AgentFactoryError, match="no platform credential"):
         await builder(_spec_with_skills(["foo"]), tenant_id=None)

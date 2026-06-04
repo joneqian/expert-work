@@ -74,6 +74,34 @@ def _secret_store() -> LocalDevSecretStore:
     )
 
 
+# Stream Y-2 — agent builds resolve every manifest model's key through the
+# platform resolver (manifest-pinned ``api_key_ref`` is ignored). The dev
+# secret store seeds a key per provider, so map each provider to its ref.
+_PROVIDER_KEY_NAMES = {
+    "anthropic": _ANTHROPIC_KEY_NAME,
+    "openai": _OPENAI_KEY_NAME,
+    "kimi": _KIMI_KEY_NAME,
+    "self-hosted": _OPENAI_KEY_NAME,
+    "azure": _OPENAI_KEY_NAME,
+    "qwen": _OPENAI_KEY_NAME,
+}
+
+
+async def _platform_resolver(provider: str) -> str:
+    return f"secret://{_PROVIDER_KEY_NAMES[provider]}"
+
+
+async def _build(spec: AgentSpec, **kwargs: Any) -> BuiltAgent:
+    """``build_agent`` with the platform key resolver defaulted (Stream Y-2).
+
+    Agent builds ignore manifest ``api_key_ref`` and require a
+    ``provider_key_resolver``; tests that don't care about credential
+    plumbing go through this wrapper so the resolver is supplied once.
+    """
+    kwargs.setdefault("provider_key_resolver", _platform_resolver)
+    return await build_agent(spec, **kwargs)
+
+
 # ---------------------------------------------------------------------------
 # build_llm_router
 # ---------------------------------------------------------------------------
@@ -204,8 +232,10 @@ async def test_build_llm_router_temperature_from_model_spec() -> None:
 
 @pytest.mark.asyncio
 async def test_build_llm_router_missing_api_key_ref_raises() -> None:
+    """Direct ``build_llm_router`` (default ``ignore_api_key_ref=False``) with
+    neither a manifest ref nor a resolver → the no-platform-credential error."""
     model = ModelSpec.model_validate({"provider": "anthropic", "name": "claude"})
-    with pytest.raises(AgentFactoryError, match="no api_key_ref"):
+    with pytest.raises(AgentFactoryError, match="no platform credential"):
         await build_llm_router(model, secret_store=_secret_store())
 
 
@@ -328,7 +358,7 @@ async def test_build_llm_router_azure_missing_config_raises() -> None:
 @pytest.mark.asyncio
 async def test_build_agent_returns_built_agent() -> None:
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
     assert isinstance(built, BuiltAgent)
     assert isinstance(built.graph, CompiledStateGraph)
     assert built.system_prompt == "you are a test agent"
@@ -342,7 +372,7 @@ async def test_build_agent_max_steps_from_workflow() -> None:
     doc["spec"]["workflow"] = {"type": "react", "max_iterations": 5}
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert built.max_steps == 5
 
 
@@ -350,7 +380,7 @@ async def test_build_agent_max_steps_from_workflow() -> None:
 async def test_build_agent_supports_vision_defaults_to_false() -> None:
     """``ModelSpec.supports_vision`` default → ``BuiltAgent.supports_vision`` False."""
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
     assert built.supports_vision is False
 
 
@@ -361,7 +391,7 @@ async def test_build_agent_supports_vision_propagates_from_manifest() -> None:
     doc["spec"]["model"]["supports_vision"] = True
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert built.supports_vision is True
 
 
@@ -376,7 +406,7 @@ async def test_build_agent_rejects_vision_block_on_visual_model() -> None:
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
         with pytest.raises(AgentFactoryError, match="mutually exclusive"):
-            await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+            await _build(spec, secret_store=_secret_store(), checkpointer=cp)
 
 
 class _StubChildBuilder:
@@ -399,7 +429,7 @@ def _subagent_spec() -> AgentSpec:
 async def test_build_agent_with_subagents_succeeds() -> None:
     env = ToolEnv(child_agent_builder=_StubChildBuilder())
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(
+        built = await _build(
             _subagent_spec(), secret_store=_secret_store(), checkpointer=cp, tool_env=env
         )
     assert isinstance(built, BuiltAgent)
@@ -409,7 +439,7 @@ async def test_build_agent_with_subagents_succeeds() -> None:
 async def test_build_agent_subagents_without_builder_raises() -> None:
     async with make_checkpointer("memory") as cp:
         with pytest.raises(AgentFactoryError, match="sub-agent builder"):
-            await build_agent(_subagent_spec(), secret_store=_secret_store(), checkpointer=cp)
+            await _build(_subagent_spec(), secret_store=_secret_store(), checkpointer=cp)
 
 
 def _knowledge_spec() -> AgentSpec:
@@ -426,7 +456,7 @@ async def test_build_agent_with_knowledge_succeeds() -> None:
         )
     )
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(
+        built = await _build(
             _knowledge_spec(), secret_store=_secret_store(), checkpointer=cp, tool_env=env
         )
     assert isinstance(built, BuiltAgent)
@@ -436,14 +466,14 @@ async def test_build_agent_with_knowledge_succeeds() -> None:
 async def test_build_agent_knowledge_without_retriever_raises() -> None:
     async with make_checkpointer("memory") as cp:
         with pytest.raises(AgentFactoryError, match="knowledge retriever"):
-            await build_agent(_knowledge_spec(), secret_store=_secret_store(), checkpointer=cp)
+            await _build(_knowledge_spec(), secret_store=_secret_store(), checkpointer=cp)
 
 
 @pytest.mark.asyncio
 async def test_build_agent_react_has_no_planner_node() -> None:
     """The default ``react`` workflow builds a graph without a planner."""
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
     assert "planner" not in built.graph.nodes
 
 
@@ -454,7 +484,7 @@ async def test_build_agent_plan_execute_adds_planner_node() -> None:
     doc["spec"]["workflow"] = {"type": "plan_execute"}
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "planner" in built.graph.nodes
     assert "agent" in built.graph.nodes
 
@@ -463,7 +493,7 @@ async def test_build_agent_plan_execute_adds_planner_node() -> None:
 async def test_build_agent_no_reflection_has_no_reflect_node() -> None:
     """Without a ``reflection:`` block the graph has no reflect node."""
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
     assert "reflect" not in built.graph.nodes
 
 
@@ -474,7 +504,7 @@ async def test_build_agent_reflection_block_adds_reflect_node() -> None:
     doc["spec"]["reflection"] = {"budget": 3}
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "reflect" in built.graph.nodes
 
 
@@ -548,7 +578,7 @@ async def test_build_agent_with_routing_block_builds() -> None:
     }
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "planner" in built.graph.nodes
 
 
@@ -564,7 +594,7 @@ def _memory_env() -> MemoryEnv:
 @pytest.mark.asyncio
 async def test_build_agent_no_memory_has_no_memory_nodes() -> None:
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
     assert "memory_recall" not in built.graph.nodes
     assert "memory_writeback" not in built.graph.nodes
 
@@ -575,7 +605,7 @@ async def test_build_agent_long_term_memory_adds_both_nodes() -> None:
     doc["spec"]["memory"] = {"long_term": {}}
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(
+        built = await _build(
             spec, secret_store=_secret_store(), checkpointer=cp, memory_env=_memory_env()
         )
     assert "memory_recall" in built.graph.nodes
@@ -589,7 +619,7 @@ async def test_build_agent_long_term_memory_write_back_off() -> None:
     doc["spec"]["memory"] = {"long_term": {"write_back": False}}
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(
+        built = await _build(
             spec, secret_store=_secret_store(), checkpointer=cp, memory_env=_memory_env()
         )
     assert "memory_recall" in built.graph.nodes
@@ -603,16 +633,18 @@ async def test_build_agent_long_term_memory_without_env_raises() -> None:
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
         with pytest.raises(AgentFactoryError, match=r"memory\.long_term"):
-            await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+            await _build(spec, secret_store=_secret_store(), checkpointer=cp)
 
 
 @pytest.mark.asyncio
 async def test_build_agent_missing_key_raises() -> None:
+    """Stream Y-2 — agent builds require a platform credential. With no
+    ``provider_key_resolver`` (and the manifest ref ignored), the build fails."""
     doc = deepcopy(_MINIMAL_SPEC)
     del doc["spec"]["model"]["api_key_ref"]
     spec = AgentSpec.model_validate(doc)
     async with make_checkpointer("memory") as cp:
-        with pytest.raises(AgentFactoryError, match="no api_key_ref"):
+        with pytest.raises(AgentFactoryError, match="no platform credential"):
             await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
 
 
@@ -628,7 +660,7 @@ async def test_build_agent_tool_declared_without_env_raises() -> None:
     spec = _spec_with_web_search()
     async with make_checkpointer("memory") as cp:
         with pytest.raises(AgentFactoryError, match="Tavily client"):
-            await build_agent(spec, secret_store=_secret_store(), checkpointer=cp)
+            await _build(spec, secret_store=_secret_store(), checkpointer=cp)
 
 
 @pytest.mark.asyncio
@@ -637,7 +669,7 @@ async def test_build_agent_with_tool_env_succeeds() -> None:
     spec = _spec_with_web_search()
     env = ToolEnv(web_search_client=RecordingTavilyClient())
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(spec, secret_store=_secret_store(), checkpointer=cp, tool_env=env)
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp, tool_env=env)
     assert isinstance(built, BuiltAgent)
 
 
@@ -646,7 +678,62 @@ async def test_build_agent_with_middleware_env_succeeds() -> None:
     """``middleware_env`` is threaded to build_middleware_chains."""
     env = MiddlewareEnv(langfuse_client=RecordingLangfuseClient())
     async with make_checkpointer("memory") as cp:
-        built = await build_agent(
+        built = await _build(
             _spec(), secret_store=_secret_store(), checkpointer=cp, middleware_env=env
         )
     assert isinstance(built, BuiltAgent)
+
+
+# ---------------------------------------------------------------------------
+# Stream Y-2 — agent builds ignore manifest api_key_ref (platform-metered keys)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_agent_ignores_manifest_api_key_ref_for_resolver(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A manifest model that pins ``api_key_ref`` is built via the platform
+    resolver instead; the manifest ref is ignored + a deprecation warning logs."""
+    # The manifest pins the anthropic dev ref. If that ref had won,
+    # build_llm_router would short-circuit on api_key_ref and NEVER consult the
+    # resolver — so the resolver being invoked at all (``seen`` non-empty) is
+    # proof the manifest ref was ignored and the platform path was taken.
+    seen: list[str] = []
+
+    async def resolver(provider: str) -> str:
+        seen.append(provider)
+        return f"secret://{_OPENAI_KEY_NAME}"
+
+    with caplog.at_level("WARNING", logger="helix.orchestrator.agent_factory"):
+        async with make_checkpointer("memory") as cp:
+            built = await build_agent(
+                _spec(),
+                secret_store=_secret_store(),
+                checkpointer=cp,
+                provider_key_resolver=resolver,
+            )
+    assert isinstance(built, BuiltAgent)
+    # The resolver was consulted for the manifest provider despite the pinned ref.
+    assert seen == ["anthropic"]
+    assert any("ignored (Stream Y-2)" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_build_agent_no_resolver_raises_no_platform_credential() -> None:
+    """A manifest with a pinned ``api_key_ref`` but no ``provider_key_resolver``
+    fails the build — the manifest ref is ignored, leaving no platform key."""
+    async with make_checkpointer("memory") as cp:
+        with pytest.raises(AgentFactoryError, match="no platform credential"):
+            await build_agent(_spec(), secret_store=_secret_store(), checkpointer=cp)
+
+
+@pytest.mark.asyncio
+async def test_build_llm_router_default_honors_api_key_ref_internal_plumbing() -> None:
+    """The internal-plumbing default (``ignore_api_key_ref=False``) still honors a
+    pinned ``api_key_ref`` with no resolver — control-plane aux callers rely on it."""
+    router = await build_llm_router(_spec().spec.model, secret_store=_secret_store())
+    inner = router.providers[0].provider.inner  # type: ignore[union-attr]
+    assert isinstance(inner, AnthropicProvider)
+    # The manifest-pinned anthropic ref resolved through the store, unchanged.
+    assert inner.client.api_key == "sk-ant-test"  # type: ignore[union-attr]
