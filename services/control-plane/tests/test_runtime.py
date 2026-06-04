@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.runtime import (
     AgentRuntime,
     ResolvingEmbedder,
     ResolvingReranker,
+    make_agent_builder,
     make_image_resolver,
     make_knowledge_retriever,
     resolve_embedder,
@@ -19,9 +22,10 @@ from control_plane.runtime import (
 )
 from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.protocol import AgentSpec, TenantConfigRecord
+from helix_agent.persistence.skill import InMemorySkillStore
+from helix_agent.protocol import AgentSpec, SkillStatus, TenantConfigRecord, TenantPlan
 from helix_agent.runtime.runs import RunManager
-from helix_agent.runtime.secret_store import parse_secret_ref
+from helix_agent.runtime.secret_store import LocalDevSecretStore, parse_secret_ref
 from helix_agent.runtime.storage import InMemoryObjectStore
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge
 from helix_agent.testing import InMemorySecretStore
@@ -224,3 +228,102 @@ async def test_invalidate_tenant_drops_only_that_tenants_cached_agents() -> None
     await runtime.get_agent(tenant_id=a, name="x", version="1", spec=spec)
     await runtime.get_agent(tenant_id=b, name="x", version="1", spec=spec)
     assert len(builds) == 3  # only a rebuilt
+
+
+# ---------------------------------------------------------------------------
+# Stream X (Mini-ADR X-4) — make_agent_builder threads make_skill_resolver
+# end-to-end so a skills manifest actually builds (it hard-failed before).
+# ---------------------------------------------------------------------------
+
+_ANTHROPIC_KEY_NAME = "anthropic-test"
+
+
+class _StubTenantConfig:
+    """Minimal tenant-config service returning FREE — exercises the real
+    ``make_skill_resolver`` plan lookup without a DB."""
+
+    async def get(self, *, tenant_id: UUID, actor_id: str | None = None) -> TenantConfigRecord:
+        now = datetime.now(UTC)
+        return TenantConfigRecord(
+            tenant_id=tenant_id,
+            display_name="t",
+            plan=TenantPlan.FREE,
+            created_at=now,
+            updated_at=now,
+            updated_by="test",
+        )
+
+
+def _spec_with_skills(skills: list[str] | None) -> AgentSpec:
+    manifest = dict(_MINIMAL_MANIFEST)
+    manifest["spec"] = dict(
+        manifest["spec"],
+        model={
+            "provider": "anthropic",
+            "name": "claude-haiku-4-5",
+            "api_key_ref": f"secret://{_ANTHROPIC_KEY_NAME}",
+        },
+    )
+    if skills is not None:
+        manifest["spec"] = dict(manifest["spec"], skills=skills)
+    return AgentSpec.model_validate(manifest)
+
+
+async def _seed_active_tenant_skill(
+    store: InMemorySkillStore, *, tenant_id: UUID, name: str
+) -> None:
+    skill_id = uuid4()
+    await store.create_skill(skill_id=skill_id, tenant_id=tenant_id, name=name)
+    await store.add_version(
+        version_id=uuid4(), skill_id=skill_id, tenant_id=tenant_id, prompt_fragment="SKILL-BODY"
+    )
+    await store.set_status(skill_id=skill_id, tenant_id=tenant_id, status=SkillStatus.ACTIVE)
+
+
+@pytest.mark.asyncio
+async def test_make_agent_builder_builds_agent_with_skill_injected() -> None:
+    """End-to-end: a manifest declaring a skill now BUILDS and injects the
+    skill body — proving the X-4 wiring through ``make_skill_resolver``."""
+    tenant_id = uuid4()
+    store = InMemorySkillStore()
+    await _seed_active_tenant_skill(store, tenant_id=tenant_id, name="foo")
+    builder = make_agent_builder(
+        LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+        InMemorySaver(),
+        skill_store=store,
+        tenant_config_service=_StubTenantConfig(),  # type: ignore[arg-type]
+    )
+    built = await builder(_spec_with_skills(["foo"]), tenant_id=tenant_id)
+    assert "SKILL-BODY" in built.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_make_agent_builder_no_skills_still_builds() -> None:
+    """Regression — a no-skills manifest builds cleanly with the skill deps
+    wired in."""
+    store = InMemorySkillStore()
+    builder = make_agent_builder(
+        LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+        InMemorySaver(),
+        skill_store=store,
+        tenant_config_service=_StubTenantConfig(),  # type: ignore[arg-type]
+    )
+    built = await builder(_spec_with_skills(None), tenant_id=uuid4())
+    assert built.system_prompt == "you help"
+
+
+@pytest.mark.asyncio
+async def test_make_agent_builder_skills_manifest_without_tenant_errors() -> None:
+    """A preview / validation build (tenant_id None) gets no resolver, so a
+    skills manifest still hard-fails — today's behaviour is preserved."""
+    from orchestrator.errors import AgentFactoryError
+
+    store = InMemorySkillStore()
+    builder = make_agent_builder(
+        LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+        InMemorySaver(),
+        skill_store=store,
+        tenant_config_service=_StubTenantConfig(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(AgentFactoryError, match="skill_resolver"):
+        await builder(_spec_with_skills(["foo"]), tenant_id=None)
