@@ -948,7 +948,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 - [x] **Z0 设计先行**（PR #409）（STREAM-Z-DESIGN + Mini-ADR Z-1~Z-4 + 现状核实）
 - [x] **Z1 租户用量/成本 API**（PR #410）：`GET /v1/usage/cost`（RLS 自隔离，**只 billed**，group_by agent/model/none，unpriced 标记）+ `/v1/usage/tokens`（当月实时直读 token_usage）+ `billing:read`；ledger store 接入 control-plane app.state
-- [ ] **Z2 admin chargeback API + 指标**：`GET /v1/admin/billing/chargeback`（跨租户，bypass_rls，显 margin）+ `helix_llm_cost_micros_total` counter
+- [x] **Z2 admin chargeback API + 指标**（PR #411）：`GET /v1/admin/billing/chargeback`（system_admin，跨租户，显 base/markup/billed/margin）+ ledger `list_for_month_all_tenants`（**`SET LOCAL ROLE audit_reader`** 跨 FORCE-RLS + migration `0061` 授权 + 真 PG 集成测）+ `helix_llm_billed_cost_micros` gauge（rollup set-overwrite）。⚠️ follow-up：`api/audit.py` 跨租户读有同款潜伏 RLS bug（见 [memory:reference_cross_tenant_read_force_rls_set_role]）
 - [ ] **Z3 看板 UI**（前端）：月选择 + 按 agent/model 拆分 + 环比
 
 ---

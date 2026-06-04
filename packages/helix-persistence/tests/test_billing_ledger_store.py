@@ -102,3 +102,16 @@ async def test_delete_month(store: InMemoryTenantBillingLedgerStore) -> None:
     assert deleted == 2
     remaining = await store.list_for_tenant(tenant_id=tenant, month=date(2026, 7, 1))
     assert len(remaining) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_for_month_all_tenants_crosses_tenants(
+    store: InMemoryTenantBillingLedgerStore,
+) -> None:
+    t1, t2 = uuid4(), uuid4()
+    await store.upsert(_record(tenant_id=t1, agent_name="a", month=date(2026, 6, 1)))
+    await store.upsert(_record(tenant_id=t2, agent_name="b", month=date(2026, 6, 1)))
+    await store.upsert(_record(tenant_id=t1, agent_name="c", month=date(2026, 7, 1)))
+    rows = await store.list_for_month_all_tenants(month=date(2026, 6, 1))
+    assert len(rows) == 2  # both tenants, June only — July excluded
+    assert {r.tenant_id for r in rows} == {t1, t2}
