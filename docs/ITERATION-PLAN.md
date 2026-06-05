@@ -967,7 +967,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 把"改进版 Tool 执行引擎"落地 helix（源自 Go Harness 专栏 + openclaw/deer-flow/hermes 源码对照 + helix 现状探查）。**关键利好**：文章最难的并行调度（只读并发/涉写串行）helix 已成熟（`tools/scheduling.py`，L.L6），不重做。**用户拍板**：bash IN / edit 鲁棒化 / 跨副本锁做强 / 性能+可观测进门 / 另开办公能力包 / 按"办公读多写少"杠杆重排（可观测·工具面·bash 前置，锁·CAS 押后保留）。**TE-0 核实关键事实**：workspace **非单 sandbox 独占租约**（多 sandbox 可并挂同卷、supervisor 可多副本、无 DB 锁）→ 跨副本锁**必须** PG `pg_advisory_xact_lock`（仿 `DbEventStore`，合规 infra 约束），in-process 锁不安全。
 
-**进度（2026-06-05）**：**P0（TE-1~5）+ P1（TE-6/6b）+ P2（TE-7→10：文件原语/锁/edit-CAS+模糊/性能门）全部已交付**（PR #415–#429）。**Stream TE 引擎层完成**。仅 TE-3b（Langfuse span + trajectory 富化）延后（无 sink/数据源）；Stream OFFICE（办公能力包）未开。详见各条。
+**进度（2026-06-05）**：**P0（TE-1~5）+ P1（TE-6/6b）+ P2（TE-7→10：文件原语/锁/edit-CAS+模糊/性能门）全部已交付**（PR #415–#429）。**Stream TE 引擎层完成**。仅 TE-3b（Langfuse span + trajectory 富化）延后（无 sink/数据源）。**Stream OFFICE（国内办公能力包）OFFICE-0 设计已出**（PR #430，纯 Python 库 + office variant + 连接器暂缓），OFFICE-1/3 待开。详见各条。
 
 - [x] **TE-0 设计先行**（PR #415）：`STREAM-TE-DESIGN.md` + 本 backlog — Mini-ADR TE-ADR-1~6。核实 workspace 非单 sandbox 独占 → 跨副本锁必须 PG advisory
 - [x] **TE-1 工具元数据**（PR #416）：`ToolSpec` 加 `side_effect: SideEffectLevel|None`（None→由 `is_read_only` 保守派生 read_only/reversible）+ `idempotent` + `resolved_side_effect` 属性。纯增量、零行为变更（无消费者）
@@ -984,14 +984,15 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **TE-9b edit 模糊降级**（P2，PR #428）：精确→空白归一行块 多级降级 + 全失败 difflib 候选提示（`near line N`）；`meta.match=exact|fuzzy`；纯 CRLF 文件 fuzzy rebuild 保留行尾。过 code 评审（CRLF 修复 + strip 语义文档化 + 3 回归测试）
 - [x] **TE-10 性能验收门**（P2，PR #429）：**诚实分界**——CI 无完整沙箱，文件原语端到端延迟/soak 是生产压测。CI 门禁=**锁竞争 benchmark**（真 PG：10 并发写同 workspace 无死锁/饥饿、5 不同 workspace 真并发）；**SLO** 写入 STREAM-TE-DESIGN §6（warm read P95<500ms / write·edit P95<1s / cold-start acquire P95<5s，TE-3 per-tool 延迟指标已采集）；**load/soak runbook**（staging k6/locust，盯延迟尾+泄漏）。warm/cold 分别度量列为可选增强（需 acquire 暴露 cold_start）
 
-## Stream OFFICE — 企业办公能力包（应对办公 70%，可与 TE 并行）
+## Stream OFFICE — 企业办公能力包（国内）— 设计 [STREAM-OFFICE-DESIGN](./streams/STREAM-OFFICE-DESIGN.md)
 
-补足办公场景的工具面/连接器/技能。**TE 做引擎"能承载"，OFFICE 做能力面"能办公"**。办公读多写少，杠杆高于 Tier3 锁/CAS。
+补足 per-user 持久 agent"日常办公占 70%"的工具面。**TE 做引擎"能承载"，OFFICE 做能力面"能办公"**。**2026-06-05 拍板：服务国内客户、去国外连接器**；本轮做文件能力 + 办公 Skill，**国内协作连接器（钉钉/企微/飞书）暂缓**（MCP-client-only + 国内 remote MCP 生态薄）。
 
-- [ ] **OFFICE-0 设计先行**：办公场景盘点 + Skill/连接器清单 + 优先级
-- [ ] **OFFICE-1 沙箱镜像办公依赖**：pandas/openpyxl/python-docx/python-pptx/pypdf/pdfplumber/Pillow + 系统二进制（pandoc/libreoffice-headless）；独立可先行
-- [ ] **OFFICE-2 seed MCP catalog**（复活推迟的 W6）：Gmail/Outlook/Slack/Drive/Notion 等官方连接器进平台目录（复用 Stream W catalog 基建）
-- [ ] **OFFICE-3 办公 Skill 打包**（复用 Stream X）：读文档/出报告/做 PPT/数据分析模板
+- [x] **OFFICE-0 设计先行**（PR #430）：STREAM-OFFICE-DESIGN + 现状核实 + Mini-ADR（纯 Python 库 / office variant / 中文 / 连接器暂缓 / 办公 Skill）；3 个范围决策经 AskUserQuestion 拍板
+- [ ] **OFFICE-1a 镜像 variant 机制**：`SandboxSpec.image_variant: minimal|office` + supervisor `_select_image` + `AcquireRequest.image_variant` + orchestrator 链路（照搬 persistent_workspace 模板）；先用 minimal 镜像验机制（OFFICE-ADR-2）
+- [ ] **OFFICE-1b office 镜像**：`sandbox-image-office` = `python:3.12-slim` + build-time pip（pandas/openpyxl/python-docx/python-pptx/pypdf/pdfplumber/Pillow/matplotlib）+ Noto CJK 字体 + zh_CN.UTF-8 + 装完卸 pip；CI 构建（OFFICE-ADR-1/3）。libreoffice/pandoc 重型转换推后（OFFICE-1c，看真需求）
+- [ ] **OFFICE-3 办公 Skill 包**（复用 Stream X）：中文办公模板（数据分析报告/Excel 批处理/Word 生成/PPT 制作/PDF 提取汇总）；`lazy_load` + `required_tier` 变现门控（OFFICE-ADR-5）
+- [ ] **OFFICE-2 国内连接器**（暂缓，backlog）：钉钉/企微/飞书需官方 remote MCP（sse/streamable_http）进 catalog；国内生态薄→等成熟，或单租户 on-prem stdio off-catalog；不破 client-only（OFFICE-ADR-4）
 
 ---
 
