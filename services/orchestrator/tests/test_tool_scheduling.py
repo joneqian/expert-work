@@ -8,7 +8,7 @@ planner :func:`plan_stages`. The end-to-end ``tools_node`` integration
 
 from __future__ import annotations
 
-from orchestrator.tools.registry import ToolSpec
+from orchestrator.tools.registry import SideEffectLevel, ToolSpec
 from orchestrator.tools.scheduling import (
     MAX_TOOL_WORKERS,
     _resolve_paths,
@@ -18,12 +18,19 @@ from orchestrator.tools.scheduling import (
 )
 
 
-def _spec(name: str, *, read_only: bool = False, path_args: tuple[str, ...] = ()) -> ToolSpec:
+def _spec(
+    name: str,
+    *,
+    read_only: bool = False,
+    path_args: tuple[str, ...] = (),
+    side_effect: SideEffectLevel | None = None,
+) -> ToolSpec:
     return ToolSpec(
         name=name,
         description=f"scripted {name}",
         is_read_only=read_only,
         path_args=path_args,
+        side_effect=side_effect,
     )
 
 
@@ -240,3 +247,58 @@ def test_max_tool_workers_is_eight() -> None:
     """Mini-ADR L-6 pins the per-stage concurrency cap at 8 to match
     Hermes ``_MAX_TOOL_WORKERS``."""
     assert MAX_TOOL_WORKERS == 8
+
+
+# ---------------------------------------------------------------------------
+# Stream TE-4 — irreversible tools are forced serial
+# ---------------------------------------------------------------------------
+
+
+def test_irreversible_conflicts_with_read() -> None:
+    """An irreversible tool conflicts even with a pure read (which would
+    otherwise be the safest possible sibling)."""
+    irrev = _spec("bash", side_effect="irreversible")
+    reader = _spec("read", read_only=True, path_args=("p",))
+    a = _call(0, "bash", spec=irrev)
+    b = _call(1, "read", args={"p": "x"}, spec=reader)
+    assert conflicts(a, b)
+    assert conflicts(b, a)
+
+
+def test_irreversible_conflicts_with_disjoint_path_write() -> None:
+    """Path-disjoint writes normally run in parallel, but an irreversible
+    tool overrides that and still conflicts."""
+    irrev = _spec("bash", side_effect="irreversible", path_args=("p",))
+    writer = _spec("write", path_args=("p",))
+    a = _call(0, "bash", args={"p": "a.txt"}, spec=irrev)
+    b = _call(1, "write", args={"p": "b.txt"}, spec=writer)  # disjoint path
+    assert conflicts(a, b)
+
+
+def test_irreversible_overrides_parallel_safe() -> None:
+    """A parallel-safe sibling cannot share a stage with an irreversible
+    call — the irreversible check runs before the parallel-safe rule."""
+    irrev = _spec("bash", side_effect="irreversible")
+    par = ToolSpec(name="sub", description="d", is_parallel_safe=True)
+    a = _call(0, "bash", spec=irrev)
+    b = _call(1, "sub", spec=par)
+    assert conflicts(a, b)
+
+
+def test_irreversible_lands_alone_across_stages() -> None:
+    """End-to-end: two reads + one irreversible bash → reads share a
+    stage, bash runs solo in its own."""
+    reader = _spec("read", read_only=True)
+    irrev = _spec("bash", side_effect="irreversible")
+    tool_calls = [
+        {"name": "read", "args": {}, "id": "tc-0"},
+        {"name": "bash", "args": {}, "id": "tc-1"},
+        {"name": "read", "args": {}, "id": "tc-2"},
+    ]
+    stages = plan_stages(tool_calls, {"read": reader, "bash": irrev})
+    # bash never shares a stage with anything.
+    for stage in stages:
+        names = {c.name for c in stage}
+        if "bash" in names:
+            assert names == {"bash"}
+            assert len(stage) == 1

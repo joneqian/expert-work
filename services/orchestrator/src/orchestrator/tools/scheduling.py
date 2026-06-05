@@ -17,6 +17,9 @@ Conflict rules (Mini-ADR L-6, conservative defaults):
 * Two writes conflict on path overlap; both with empty ``path_args``
   also conflict (they write shared state — ``update_plan`` /
   ``subagent`` style).
+* Stream TE-4 — an ``irreversible`` tool (``resolved_side_effect ==
+  "irreversible"``: bash, destructive ops) conflicts with every other
+  call, so it always runs alone in its own stage (forced serial).
 
 The scheduler is greedy: each tool call lands in the earliest stage
 that has no conflict with anyone already there. This keeps the total
@@ -80,6 +83,16 @@ def conflicts(a: _ScheduledCall, b: _ScheduledCall) -> bool:
 
     See module docstring for the full rule set.
     """
+    # Stream TE-4 — an ``irreversible`` tool (bash, destructive ops) is
+    # forced serial: it conflicts with EVERY other call so it always lands
+    # alone in its own stage. Checked FIRST — before the read-read fast-path
+    # and the parallel-safe / path rules — so nothing (not even a pure read,
+    # a parallel-safe sibling, or a contradictory ``read_only + irreversible``
+    # spec) can share a stage with it.
+    a_irrev = a.spec is not None and a.spec.resolved_side_effect == "irreversible"
+    b_irrev = b.spec is not None and b.spec.resolved_side_effect == "irreversible"
+    if a_irrev or b_irrev:
+        return True
     a_read = a.spec is not None and a.spec.is_read_only
     b_read = b.spec is not None and b.spec.is_read_only
     # Rule 1 — two reads never conflict.

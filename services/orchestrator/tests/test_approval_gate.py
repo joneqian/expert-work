@@ -287,6 +287,45 @@ async def test_ungated_tool_runs_normally() -> None:
     assert state["messages"][-1].content == "done"
 
 
+@dataclass
+class _IrreversibleTool:
+    """A scripted tool that declares ``side_effect="irreversible"`` (TE-4)."""
+
+    name: str
+    dispatched: int = 0
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name=self.name, description="d", side_effect="irreversible")
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        del args, ctx
+        self.dispatched += 1
+        return ToolResult(content="ran")
+
+
+@pytest.mark.asyncio
+async def test_irreversible_tool_auto_gates_without_manifest_listing() -> None:
+    """Stream TE-4 — a tool declaring ``side_effect="irreversible"`` pauses
+    for approval even when it is NOT in ``approval_required_tools``."""
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(content="", tool_calls=[_tool_call("bash", {"cmd": "rm -rf /"}, "tc-1")]),
+        ]
+    )
+    registry = ToolRegistry()
+    danger = _IrreversibleTool(name="bash")
+    registry.register(danger)
+
+    # Empty manifest gate list — gating must come purely from side_effect.
+    state = await _run(llm, registry, approval_required_tools=frozenset())
+
+    pending = state.get("pending_approval")
+    assert pending is not None
+    assert pending.reason_kind == "policy_gate"
+    assert danger.dispatched == 0  # paused before dispatch
+
+
 @pytest.mark.asyncio
 async def test_ask_for_approval_call_pauses_run() -> None:
     """An ``ask_for_approval`` call pauses even with no declarative gate."""

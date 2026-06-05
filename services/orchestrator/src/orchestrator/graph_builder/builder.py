@@ -192,6 +192,18 @@ def build_react_graph(
     at construction time.
     """
 
+    # Stream TE-4 — side-effect-driven approval gating. Tools that declare
+    # ``side_effect="irreversible"`` (resolved via ToolSpec) are auto-gated:
+    # union them into the manifest's ``approval_required_tools`` so the
+    # approval gate fires on them without each manifest having to list them.
+    # Computed once at build time (the registry is fixed for the agent's
+    # life). Zero behaviour change until a tool actually declares
+    # irreversible — no builtin does yet; ``bash`` (TE-5) is the first.
+    _irreversible_tools = frozenset(
+        spec.name for spec in tool_registry.specs() if spec.resolved_side_effect == "irreversible"
+    )
+    _gated_tools = approval_required_tools | _irreversible_tools
+
     async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         token = cancellation_token(config)
         token.raise_if_cancelled()
@@ -330,16 +342,15 @@ def build_react_graph(
         #    and clear the channel. Skips re-detection so the gate does
         #    not re-fire on the same turn.
         # 2. DETECT — no resume in flight: scan for the first gated call
-        #    (a tool in ``approval_required_tools`` or ``ask_for_approval``).
+        #    (a tool in ``_gated_tools`` = manifest ``approval_required_tools``
+        #    plus TE-4 irreversible tools, or ``ask_for_approval``).
         #    On a hit, write ``pending_approval`` + dispatch nothing —
         #    ``_after_tools`` routes to END (RunStatus.PAUSED). The
         #    end-and-resume model (vs LangGraph ``interrupt()``) keeps
         #    the parallel L.L6 staging below untouched.
         approval_resume = state.get("approval_resume")
         if approval_resume is not None:
-            resume_outcome = apply_resume_decision(
-                tool_calls, approval_required_tools, approval_resume
-            )
+            resume_outcome = apply_resume_decision(tool_calls, _gated_tools, approval_resume)
             if resume_outcome.reject_messages:
                 rejected: dict[str, Any] = {
                     "messages": list(resume_outcome.reject_messages),
@@ -352,7 +363,7 @@ def build_react_graph(
             # arg-rewritten) calls; clear the resume channel on return.
             tool_calls = resume_outcome.tool_calls
         elif not state.get("pending_approval"):
-            target = find_approval_target(tool_calls, approval_required_tools)
+            target = find_approval_target(tool_calls, _gated_tools)
             if target is not None:
                 configurable = config.get("configurable") or {}
                 thread_id = str(configurable.get("run_id") or "run")
