@@ -35,7 +35,12 @@ from orchestrator.multimodal import ImageResolver
 from orchestrator.tools.approval import AskForApprovalTool
 from orchestrator.tools.artifact import ListArtifactsTool, SaveArtifactTool
 from orchestrator.tools.bash import BashTool
-from orchestrator.tools.file_ops import ListDirTool, ReadFileTool, WriteFileTool
+from orchestrator.tools.file_ops import (
+    EditFileTool,
+    ListDirTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from orchestrator.tools.find_tools import FindToolsTool
 from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.knowledge import KnowledgeRetriever, KnowledgeSearchTool
@@ -62,6 +67,7 @@ KNOWN_BUILTINS = frozenset(
         "bash",
         "read_file",
         "write_file",
+        "edit_file",
         "list_dir",
         "save_artifact",
         "list_artifacts",
@@ -294,7 +300,7 @@ def _register_builtin(
         _register_exec_python(registry, env, persistent_workspace)
     elif entry.name == "bash":
         _register_bash(registry, env, persistent_workspace)
-    elif entry.name in ("read_file", "write_file", "list_dir"):
+    elif entry.name in ("read_file", "write_file", "edit_file", "list_dir"):
         _register_file_op(registry, entry.name, env, persistent_workspace)
     elif entry.name == "save_artifact":
         registry.register(SaveArtifactTool(store=_require_artifact_store(env, "save_artifact")))
@@ -363,6 +369,14 @@ def _register_file_op(
     elif name == "write_file":
         registry.register(
             WriteFileTool(
+                client=env.supervisor_client,
+                persistent_workspace=persistent_workspace,
+                workspace_lock=env.workspace_lock,
+            )
+        )
+    elif name == "edit_file":
+        registry.register(
+            EditFileTool(
                 client=env.supervisor_client,
                 persistent_workspace=persistent_workspace,
                 workspace_lock=env.workspace_lock,

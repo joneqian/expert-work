@@ -126,6 +126,22 @@ def _resolve(rel):
     if full == _WS or full.startswith(_WS + os.sep):
         return full
     return None
+
+
+def _atomic_write(full, data):
+    parent = os.path.dirname(full) or _WS
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=parent)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, full)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 """
 
 _READ_MAIN = """
@@ -180,26 +196,69 @@ def _main():
         data = _P["content"].encode("utf-8")
     except UnicodeEncodeError:
         return {"ok": False, "error": "invalid_unicode"}
-    parent = os.path.dirname(full) or _WS
     try:
-        os.makedirs(parent, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=parent)
-        try:
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(data)
-            os.replace(tmp, full)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        _atomic_write(full, data)
     except OSError as exc:
         return {"ok": False, "error": "io_error", "detail": str(exc)}
     return {
         "ok": True,
         "content_hash": hashlib.sha256(data).hexdigest(),
         "size": len(data),
+        "path": _P["rel"],
+    }
+
+
+print(json.dumps(_main()))
+"""
+
+_EDIT_MAIN = """
+
+def _main():
+    full = _resolve(_P["rel"])
+    if full is None:
+        return {"ok": False, "error": "path_escapes_workspace"}
+    try:
+        with open(full, "rb") as fh:
+            data = fh.read()
+    except FileNotFoundError:
+        return {"ok": False, "error": "not_found"}
+    except IsADirectoryError:
+        return {"ok": False, "error": "is_a_directory"}
+    except OSError as exc:
+        return {"ok": False, "error": "io_error", "detail": str(exc)}
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"ok": False, "error": "binary_unsupported", "size": len(data)}
+    current_hash = hashlib.sha256(data).hexdigest()
+    expected = _P.get("expected_hash")
+    if expected is not None and expected != current_hash:
+        return {
+            "ok": False,
+            "error": "stale",
+            "detail": "current_hash=" + current_hash,
+            "current_hash": current_hash,
+        }
+    old = _P["old"]
+    # str.count / str.replace share non-overlapping semantics, so the count
+    # used for the ambiguity check matches the occurrence replace() targets.
+    count = text.count(old)
+    if count == 0:
+        return {"ok": False, "error": "no_match"}
+    if count > 1:
+        return {"ok": False, "error": "ambiguous", "detail": "count=" + str(count), "count": count}
+    try:
+        out = text.replace(old, _P["new"], 1).encode("utf-8")
+    except UnicodeEncodeError:
+        return {"ok": False, "error": "invalid_unicode"}
+    try:
+        _atomic_write(full, out)
+    except OSError as exc:
+        return {"ok": False, "error": "io_error", "detail": str(exc)}
+    return {
+        "ok": True,
+        "content_hash": hashlib.sha256(out).hexdigest(),
+        "size": len(out),
         "path": _P["rel"],
     }
 
@@ -265,6 +324,22 @@ def build_list_wrapper(
 ) -> str:
     """Snippet that lists directory ``ws/rel`` and prints a JSON envelope."""
     return _snippet({"ws": ws, "rel": rel, "max_entries": max_entries}, _LIST_MAIN)
+
+
+def build_edit_wrapper(
+    rel: str,
+    old: str,
+    new: str,
+    *,
+    expected_hash: str | None = None,
+    ws: str = _WORKSPACE_ROOT,
+) -> str:
+    """Snippet that replaces an exact substring in ``ws/rel`` (atomic write),
+    with an optional ``expected_hash`` compare-and-swap."""
+    params: dict[str, Any] = {"ws": ws, "rel": rel, "old": old, "new": new}
+    if expected_hash is not None:
+        params["expected_hash"] = expected_hash
+    return _snippet(params, _EDIT_MAIN)
 
 
 def parse_envelope(outcome: SandboxOutcome, *, tool: str) -> Mapping[str, Any]:
@@ -499,6 +574,100 @@ class ListDirTool:
                 "entries": entries,
                 "n_entries": len(entries),
                 "truncated": bool(env.get("truncated")),
+            },
+        )
+
+
+@dataclass
+class EditFileTool:
+    """Replace an exact substring in a workspace text file (exposed as ``edit_file``).
+
+    Optimistic concurrency (TE-9a): with ``expected_hash`` the edit is a hard
+    compare-and-swap — rejected as ``stale`` if the file changed since it was
+    read. Exact match only here; fuzzy/anchored fallbacks land in TE-9b."""
+
+    client: SupervisorClient
+    persistent_workspace: bool = False
+    #: Stream TE-8 — write lock held around the edit exec.
+    workspace_lock: WorkspaceLock = field(default_factory=NullWorkspaceLock)
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="edit_file",
+            description=(
+                "Replace an exact substring in a workspace text file. 'old_string' "
+                "must occur exactly once. Optionally pass 'expected_hash' (from "
+                "read_file) for a safe compare-and-swap: the edit is rejected as "
+                "stale if the file changed since you read it. Path is relative to "
+                "/workspace."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace-relative file path (no leading '/' or '..').",
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": "Exact text to replace; must occur exactly once.",
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "Replacement text (may be empty to delete).",
+                    },
+                    "expected_hash": {
+                        "type": "string",
+                        "description": "Optional content hash from read_file for compare-and-swap.",
+                    },
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+            path_args=("path",),
+            side_effect="reversible",
+            # Re-running the same edit fails (old_string no longer present), so
+            # it is not idempotent.
+            idempotent=False,
+        )
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        rel = _require_path(args, tool="edit_file")
+        old = args.get("old_string")
+        if not isinstance(old, str) or old == "":
+            msg = "edit_file requires a non-empty 'old_string'"
+            raise ValueError(msg)
+        new = args.get("new_string")
+        if not isinstance(new, str):
+            msg = "edit_file requires a 'new_string' string"
+            raise ValueError(msg)
+        if len(new) > _MAX_WRITE_CHARS:
+            msg = f"edit_file new_string exceeds the {_MAX_WRITE_CHARS}-character limit"
+            raise ValueError(msg)
+        expected = args.get("expected_hash")
+        if expected is not None and not isinstance(expected, str):
+            msg = "edit_file 'expected_hash' must be a string"
+            raise ValueError(msg)
+        lock_user = ctx.user_id if self.persistent_workspace else None
+        async with self.workspace_lock.acquire(tenant_id=ctx.tenant_id, user_id=lock_user):
+            outcome = await run_in_sandbox(
+                self.client,
+                code=build_edit_wrapper(rel, old, new, expected_hash=expected),
+                timeout_s=None,
+                ctx=ctx,
+                persistent_workspace=self.persistent_workspace,
+                tool_label="edit_file",
+                fallback_thread_id="edit_file",
+            )
+        env = parse_envelope(outcome, tool="edit_file")
+        _raise_for_error(env, tool="edit_file")
+        size = env.get("size")
+        return ToolResult(
+            content=f"Edited {rel} ({size} bytes)",
+            meta={
+                "path": rel,
+                "content_hash": env.get("content_hash"),
+                "size": size,
             },
         )
 
