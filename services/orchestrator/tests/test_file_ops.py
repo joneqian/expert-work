@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from orchestrator.tools import (
+    EditFileTool,
     FileOpError,
     ListDirTool,
     ReadFileTool,
@@ -36,6 +37,7 @@ from orchestrator.tools import (
     WriteFileTool,
 )
 from orchestrator.tools.file_ops import (
+    build_edit_wrapper,
     build_list_wrapper,
     build_read_wrapper,
     build_write_wrapper,
@@ -218,6 +220,109 @@ def test_list_dir_truncates(tmp_path: Path) -> None:
     assert len(out["entries"]) == 2
 
 
+# --- edit_file snippet (TE-9a: exact match + hard CAS) ---
+
+
+def test_edit_exact_replace(tmp_path: Path) -> None:
+    ws = str(tmp_path)
+    (tmp_path / "f.txt").write_text("hello world")
+    out = _run_snippet(build_edit_wrapper("f.txt", "world", "there", ws=ws))
+    assert out["ok"] is True
+    assert (tmp_path / "f.txt").read_text() == "hello there"
+    assert out["content_hash"] == hashlib.sha256(b"hello there").hexdigest()
+
+
+def test_edit_empty_new_deletes(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("abcXYZdef")
+    out = _run_snippet(build_edit_wrapper("f.txt", "XYZ", "", ws=str(tmp_path)))
+    assert out["ok"] is True
+    assert (tmp_path / "f.txt").read_text() == "abcdef"
+
+
+def test_edit_no_match(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("hello")
+    out = _run_snippet(build_edit_wrapper("f.txt", "absent", "x", ws=str(tmp_path)))
+    assert out == {"ok": False, "error": "no_match"}
+
+
+def test_edit_ambiguous(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("a a a")
+    out = _run_snippet(build_edit_wrapper("f.txt", "a", "b", ws=str(tmp_path)))
+    assert out["ok"] is False
+    assert out["error"] == "ambiguous"
+    assert out["count"] == 3
+
+
+def test_edit_stale_when_hash_mismatch(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("current content")
+    out = _run_snippet(
+        build_edit_wrapper("f.txt", "current", "new", expected_hash="deadbeef", ws=str(tmp_path))
+    )
+    assert out["ok"] is False
+    assert out["error"] == "stale"
+    assert out["current_hash"] == hashlib.sha256(b"current content").hexdigest()
+    # File untouched on stale.
+    assert (tmp_path / "f.txt").read_text() == "current content"
+
+
+def test_edit_cas_passes_with_correct_hash(tmp_path: Path) -> None:
+    body = "current content"
+    (tmp_path / "f.txt").write_text(body)
+    good = hashlib.sha256(body.encode()).hexdigest()
+    out = _run_snippet(
+        build_edit_wrapper("f.txt", "current", "fresh", expected_hash=good, ws=str(tmp_path))
+    )
+    assert out["ok"] is True
+    assert (tmp_path / "f.txt").read_text() == "fresh content"
+
+
+def test_edit_not_found(tmp_path: Path) -> None:
+    out = _run_snippet(build_edit_wrapper("missing.txt", "a", "b", ws=str(tmp_path)))
+    assert out == {"ok": False, "error": "not_found"}
+
+
+def test_edit_binary_unsupported(tmp_path: Path) -> None:
+    (tmp_path / "b.bin").write_bytes(b"\xff\xfe")
+    out = _run_snippet(build_edit_wrapper("b.bin", "a", "b", ws=str(tmp_path)))
+    assert out["ok"] is False
+    assert out["error"] == "binary_unsupported"
+
+
+def test_edit_atomic_no_temp_leftover(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("v1 value")
+    _run_snippet(build_edit_wrapper("f.txt", "v1", "v2", ws=str(tmp_path)))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["f.txt"]
+
+
+def test_edit_escape_rejected(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (tmp_path / "secret.txt").write_text("top")
+    out = _run_snippet(build_edit_wrapper("../secret.txt", "top", "x", ws=str(ws)))
+    assert out == {"ok": False, "error": "path_escapes_workspace"}
+
+
+def test_edit_directory_rejected(tmp_path: Path) -> None:
+    (tmp_path / "sub").mkdir()
+    out = _run_snippet(build_edit_wrapper("sub", "a", "b", ws=str(tmp_path)))
+    assert out == {"ok": False, "error": "is_a_directory"}
+
+
+def test_edit_invalid_unicode_new_string(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("hello")
+    out = _run_snippet(build_edit_wrapper("f.txt", "hello", "\ud800", ws=str(tmp_path)))
+    assert out == {"ok": False, "error": "invalid_unicode"}
+    assert (tmp_path / "f.txt").read_text() == "hello"  # untouched
+
+
+def test_edit_noop_when_old_equals_new(tmp_path: Path) -> None:
+    # old == new (occurring once) rewrites identical bytes — documented as ok.
+    (tmp_path / "f.txt").write_text("keep this")
+    out = _run_snippet(build_edit_wrapper("f.txt", "keep", "keep", ws=str(tmp_path)))
+    assert out["ok"] is True
+    assert (tmp_path / "f.txt").read_text() == "keep this"
+
+
 # --------------------------------------------------------------------------
 # Layer 2 — tool orchestration (envelope parsing + checks + metadata)
 # --------------------------------------------------------------------------
@@ -335,6 +440,52 @@ async def test_write_content_too_large_rejected() -> None:
     oversized = "x" * (_MAX_WRITE_CHARS + 1)
     with pytest.raises(ValueError, match="limit"):
         await WriteFileTool(client=client).call({"path": "a.txt", "content": oversized}, ctx=_ctx())
+
+
+async def test_edit_file_parses_envelope() -> None:
+    env = {"ok": True, "content_hash": "newhash", "size": 11, "path": "f.txt"}
+    client = _client(json.dumps(env))
+    result = await EditFileTool(client=client).call(
+        {"path": "f.txt", "old_string": "a", "new_string": "b"}, ctx=_ctx()
+    )
+    assert "f.txt" in result.content
+    assert result.meta["content_hash"] == "newhash"
+
+
+async def test_edit_no_match_raises_fileop() -> None:
+    client = _client(json.dumps({"ok": False, "error": "no_match"}))
+    with pytest.raises(FileOpError, match="no_match"):
+        await EditFileTool(client=client).call(
+            {"path": "f.txt", "old_string": "a", "new_string": "b"}, ctx=_ctx()
+        )
+
+
+async def test_edit_stale_surfaces_current_hash() -> None:
+    env = {"ok": False, "error": "stale", "detail": "current_hash=abc", "current_hash": "abc"}
+    client = _client(json.dumps(env))
+    with pytest.raises(FileOpError, match=r"stale.*current_hash=abc"):
+        await EditFileTool(client=client).call(
+            {"path": "f.txt", "old_string": "a", "new_string": "b", "expected_hash": "old"},
+            ctx=_ctx(),
+        )
+
+
+async def test_edit_requires_non_empty_old_string() -> None:
+    client = _client(json.dumps({"ok": True, "content_hash": "h", "size": 0, "path": "f"}))
+    with pytest.raises(ValueError, match="old_string"):
+        await EditFileTool(client=client).call(
+            {"path": "f.txt", "old_string": "", "new_string": "b"}, ctx=_ctx()
+        )
+
+
+async def test_edit_expected_hash_threaded_into_snippet() -> None:
+    client = _client(json.dumps({"ok": True, "content_hash": "h", "size": 1, "path": "f.txt"}))
+    await EditFileTool(client=client).call(
+        {"path": "f.txt", "old_string": "a", "new_string": "b", "expected_hash": "cafe"},
+        ctx=_ctx(),
+    )
+    code = client.execs[0][1]
+    assert '"expected_hash": "cafe"' in code
 
 
 @pytest.mark.parametrize("bad", ["/etc/passwd", "../escape", "", "  ", "a\x00b"])

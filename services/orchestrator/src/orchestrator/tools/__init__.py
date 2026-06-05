@@ -25,6 +25,9 @@ from orchestrator.tools.bash import (
     BashTool as BashTool,
 )
 from orchestrator.tools.file_ops import (
+    EditFileTool as EditFileTool,
+)
+from orchestrator.tools.file_ops import (
     FileOpError as FileOpError,
 )
 from orchestrator.tools.file_ops import (
@@ -204,6 +207,7 @@ __all__ = [
     "AskImageTool",
     "BashTool",
     "ChildAgentBuilder",
+    "EditFileTool",
     "ExecPythonTool",
     "FileOpError",
     "FindToolsTool",

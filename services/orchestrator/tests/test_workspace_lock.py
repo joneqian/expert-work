@@ -18,6 +18,7 @@ import pytest
 
 from orchestrator.tools import (
     BashTool,
+    EditFileTool,
     ListDirTool,
     NullWorkspaceLock,
     ReadFileTool,
@@ -127,10 +128,31 @@ async def test_write_file_releases_lock_on_cancel() -> None:
     assert lock.active == 0  # ...and released despite the cancel
 
 
+async def test_edit_file_holds_lock_during_exec() -> None:
+    lock = RecordingWorkspaceLock()
+    client = _LockProbeClient(lock=lock, envelope=_OK_WRITE)
+    ctx = _ctx()
+    tool = EditFileTool(client=client, persistent_workspace=True, workspace_lock=lock)
+    await tool.call({"path": "a.txt", "old_string": "a", "new_string": "b"}, ctx=ctx)
+    assert client.active_at_exec == 1
+    assert lock.acquired == [(ctx.tenant_id, ctx.user_id)]
+    assert lock.active == 0
+
+
+async def test_edit_file_ephemeral_locks_with_none_user() -> None:
+    lock = RecordingWorkspaceLock()
+    client = _LockProbeClient(lock=lock, envelope=_OK_WRITE)
+    ctx = _ctx()
+    tool = EditFileTool(client=client, persistent_workspace=False, workspace_lock=lock)
+    await tool.call({"path": "a.txt", "old_string": "a", "new_string": "b"}, ctx=ctx)
+    assert lock.acquired == [(ctx.tenant_id, None)]
+
+
 def test_reads_are_lock_free() -> None:
     # read_file / list_dir declare no workspace_lock field — reads never
     # serialise; only the write tools carry the lock.
     assert "workspace_lock" not in {f.name for f in fields(ReadFileTool)}
     assert "workspace_lock" not in {f.name for f in fields(ListDirTool)}
     assert "workspace_lock" in {f.name for f in fields(WriteFileTool)}
+    assert "workspace_lock" in {f.name for f in fields(EditFileTool)}
     assert "workspace_lock" in {f.name for f in fields(BashTool)}

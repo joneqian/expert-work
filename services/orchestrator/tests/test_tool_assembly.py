@@ -25,16 +25,22 @@ from orchestrator.multimodal import InMemoryImageResolver
 from orchestrator.tools import (
     MAX_SUBAGENT_DEPTH,
     AskImageTool,
+    EditFileTool,
     HTTPTool,
     KnowledgeRetriever,
     KnowledgeSearchTool,
+    ListDirTool,
     MCPServerPool,
     MCPToolDef,
+    ReadFileTool,
     RecordingMCPClient,
+    RecordingSupervisorClient,
     RecordingTavilyClient,
+    RecordingWorkspaceLock,
     SubAgentTool,
     ToolEnv,
     WebSearchTool,
+    WriteFileTool,
     build_tool_registry,
 )
 
@@ -583,3 +589,43 @@ async def test_platform_reserves_name_even_when_all_its_tools_filtered() -> None
     # Platform reserved "github" → tenant's mcp:github.tenant_tool is NOT registered.
     assert registry.get("mcp:github.tenant_tool") is None
     assert registry.get("mcp:github.platform_tool") is None  # filtered out by allow_tools
+
+
+# --- Stream TE-7/TE-8/TE-9a file-op builtins ---
+
+
+@pytest.mark.parametrize(
+    ("name", "cls"),
+    [
+        ("read_file", ReadFileTool),
+        ("write_file", WriteFileTool),
+        ("edit_file", EditFileTool),
+        ("list_dir", ListDirTool),
+    ],
+)
+async def test_file_op_builtin_assembles(name: str, cls: type) -> None:
+    registry = await build_tool_registry(
+        [BuiltinToolSpec(name=name)],
+        tool_env=ToolEnv(supervisor_client=RecordingSupervisorClient()),
+    )
+    assert isinstance(registry.get(name), cls)
+
+
+async def test_file_op_write_tools_receive_workspace_lock() -> None:
+    lock = RecordingWorkspaceLock()
+    env = ToolEnv(supervisor_client=RecordingSupervisorClient(), workspace_lock=lock)
+    registry = await build_tool_registry(
+        [BuiltinToolSpec(name="write_file"), BuiltinToolSpec(name="edit_file")],
+        tool_env=env,
+    )
+    write_tool = registry.get("write_file")
+    edit_tool = registry.get("edit_file")
+    assert isinstance(write_tool, WriteFileTool)
+    assert isinstance(edit_tool, EditFileTool)
+    assert write_tool.workspace_lock is lock
+    assert edit_tool.workspace_lock is lock
+
+
+async def test_file_op_without_supervisor_raises() -> None:
+    with pytest.raises(AgentFactoryError):
+        await build_tool_registry([BuiltinToolSpec(name="edit_file")], tool_env=ToolEnv())
