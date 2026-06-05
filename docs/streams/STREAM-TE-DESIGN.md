@@ -43,15 +43,18 @@
 - **理由**:`exec_python` 已能 `subprocess.run` 任意命令——真正边界是 gVisor 沙箱,不是"有无 bash 工具";拒 bash 是洁癖。bash 是兜底(git/grep/pandoc/zip/格式转换),对办公场景高杠杆。
 - **约束**:`side_effect` 默认判 `irreversible`(一条命令可能 `ls` 也可能 `rm -rf`)→ 串行 + 门控,除非模型声明读写集走"快档";bash 视为**沙箱内全局写锁**(覆盖其逃逸 path 锁的洞,见 TE-ADR-3)。超时复用 supervisor 30/300s。
 
-### TE-ADR-2 文件原语执行 locus = sandbox-supervisor
-- **决策**:文件原语(read/write/edit)与 bash **经 sandbox-supervisor 执行**(它拥有 workspace 卷挂载),orchestrator 进程**不直接碰 FS**。supervisor 加 file API(read/write/edit/stat)或复用 exec 通道。
-- **理由**:orchestrator 不挂 workspace 卷;隔离边界、超时、quota 都在 supervisor 已建;复用沙箱可观测。
+### TE-ADR-2 文件原语执行 locus = exec-warm 通道(2026-06-05 复议改定)
+- **决策**:文件原语(read/write/edit)经 **`run_in_sandbox` exec 通道**执行(像 `bash`/TE-5 那样把操作 `_build_wrapper` 成 python 跑在 J.15 warm 沙箱内),**复用 `persistent_workspace=True` 的 per-user 热沙箱**;orchestrator 进程仍**不直接碰 FS**。
+- **复议背景(TE-7 探查推翻初稿)**:初稿倾向"supervisor 加专用 file API"。探查发现 supervisor 现有 `read_workspace_file` 的底层是**每次 `docker run` 起临时容器**(`docker_client.py:129-176`)——若 write/edit 照此模式,**每次文件操作冷启动一个容器(秒级)**,直撞用户反馈第 4 点"性能要有保障"。exec-warm 复用热沙箱(15min TTL,`run_in_sandbox`/`bash` 已走通),无冷启动(毫秒级)。用 AskUserQuestion 复议拍板走 exec-warm(见 [[feedback_design_doc_assumptions_age]])。
+- **理由**:① 性能——复用 warm session,避开临时容器冷启动;② CAS 原子性——read→verify hash→atomic rename 在**单个 exec 内天然原子**,无需跨 HTTP 协调;③ surgical——纯 orchestrator 工具层,不动 sandbox-supervisor。
+- **代价/兜底**:exec 跑 python 读写,二进制/超大文件(>10MiB)交给已有 `read_workspace_file` 专用 API 兜底;文件原语主打文本工作区操作。
 
-### TE-ADR-3 跨副本锁 = PG advisory xact lock(必须,做强做完整)
-- **决策**(据 §0.3):写操作经 `pg_advisory_xact_lock(hash64(tenant_id, canonical_path))` 串行化(事务级,自动释放,合规 `infra/README.md:103`,仿 `DbEventStore`)。**写排他、读 lock-free**(读靠 CAS 保一致,见 TE-ADR-6;读多写少场景读不串行=性能友好)。
-- **诚实限制**:PG advisory 仅排他无共享读锁 → 做不出真 RWMutex;采"写排他 + 读无锁 + edit CAS"组合,正确且对办公读多写少最优。
-- **canonical path**:`realpath`(防 `..`/symlink/`./` 同文件不同 key)+ workspace 根前缀校验,再 hash 取锁。
-- **in-process 复用**:supervisor 内同 workspace 仍可叠一层 `WeakValueDictionary[canonical_path, asyncio.Lock]`(抄 deer-flow `file_operation_lock.py`,防泄漏)减少同进程 DB 往返;**跨进程正确性由 advisory lock 保证,非 in-process 锁**。
+### TE-ADR-3 跨副本锁 = PG advisory xact lock + per-workspace 排他写锁(必须,做强做完整)
+- **决策**(据 §0.3 + 2026-06-05 粒度复议):**写**操作(文件原语 + bash)在 orchestrator 侧开 DB 事务 → `pg_advisory_xact_lock(hashtextextended("{tenant_id}:{user_id}", 0))`(**per-workspace 单锁**)→ 锁内调 `run_in_sandbox` 跑写 exec → 提交事务自动释放(事务级,合规 `infra/README.md:103`,镜像 `event_log/db.py:51-63` `_acquire_thread_lock`)。
+- **为何 per-workspace 而非 per-path**:`bash`(`side_effect=irreversible`)无 path 参数、无法静态解析读写集;PG advisory 按**精确 hash 互斥且无共享读锁**,故 per-path 锁无法干净覆盖 bash 与文件写的互斥(全局 key 与 path key 的 hash 不同→不互斥)。per-workspace 单锁让 bash 与所有文件写**自然互斥**,绝对正确且简单。代价:同 user 跨副本/跨 run 写不同文件也串行——但同 turn 内 `scheduling.py` 已串行写、per-user workspace(单 agent 实例为主)并发写本就极低,损失几乎不存在,契合"读多写少"。(2026-06-05 AskUserQuestion 复议拍板,反转初稿 per-canonical-path)
+- **读无锁 + 原子写消除"读串行"限制**:写 exec 用**临时文件 + `os.replace` 原子 rename**;原子 rename 保证读永远看到完整的旧/新快照,故**读/list 完全不取锁、永远并发**。advisory 仅排他无共享读锁的限制因此不影响读。
+- **锁横跨 exec 的诚实代价**:一个 DB 连接被占用在整个写 exec 期间(acquire+exec,通常几百 ms);受 `idle_in_transaction_session_timeout=60s`/`lock_timeout=5s` 约束,写 exec timeout ≤30s 安全;写不高频,连接池压力可接受。RED 集成测验证并发写不交错。
+- **path 归一化(服务越界防护/CAS,非锁 key)**:锁 key 只含 `tenant:user`;文件原语仍需 `PurePosixPath` 归一化路径(拒绝绝对路径 / `..`,与 `artifact.py:_validate_path`、`scheduling.py` 一致)+ 沙箱内 `os.path.realpath` confinement 防 symlink 越界(校验落在 `/workspace` 内)。这些用于越界防护与 CAS hash,不参与锁。
 
 ### TE-ADR-4 tool RAG(deferred registry + find_tools)对标 deer-flow
 - **决策**:`ToolRegistry` 支持 deferred entries + `specs(selector)` 子集;新增 `find_tools` 元工具,查询语法对标 deer-flow `tool_search`(`select:name1,name2` / `+keyword rest` / regex)+ `promote()` 激活;bind 前 middleware 过滤未激活工具 schema(复用 `skill_view` 元工具模式 + `deferred_tool_filter` 思路)。
@@ -59,7 +62,7 @@
 
 ### TE-ADR-5 可观测 + 性能 SLO(从范围外提为范围内)
 - **可观测**:per-tool Prometheus(`helix_tool_call_total{tool,outcome}` / `helix_tool_latency_seconds{tool}` / `helix_tool_error_total{tool}`,label 控基数不含 tenant 高基维)+ 每工具 Langfuse span + trajectory 富化(exit_code / 读写路径集 / 耗时)。
-- **性能 SLO(验收门)**:文件原语经 supervisor 单次往返延迟预算(P50/P95 目标设计期定)+ keep-warm/批量避免冷启动 + 锁竞争 benchmark + load/soak,作为 Tier3 PR 合并门。
+- **性能 SLO(验收门)**:文件原语经 exec-warm 单次往返延迟预算(P50/P95 目标设计期定;warm session 命中 vs 冷启动 fallback 分别度量)+ 锁竞争 benchmark + load/soak,作为 Tier3 PR 合并门。
 
 ### TE-ADR-6 edit 鲁棒化 + 硬 CAS(独立分量 PR)
 - **决策**:`edit_file` 做**多级匹配降级**:精确 → 空白/缩进归一 → 锚点/模糊匹配 → 失败返回结构化错误(列候选/上下文)让模型重试。参考 `openclaw` `wrapEditToolWithRecovery`、aider edit 策略。
@@ -91,9 +94,10 @@
 - **TE-6 deferred registry + find_tools**:TE-ADR-4。
 
 **P2(押后保留)**
-- **TE-7 workspace 文件原语**:read/write/edit(基础),经 supervisor(TE-ADR-2),workspace 根 + realpath 防越界,声明完整元数据。
-- **TE-8 per-canonical-path 锁**:TE-ADR-3,PG advisory xact lock(+ in-process 叠层),接入文件工具 + bash 全局写锁。
-- **TE-9 edit 鲁棒化 + CAS**:TE-ADR-6(独立分量 PR)。
+- **TE-7 workspace 文件原语**:`read_file`/`write_file`/`list_dir`(基础 exact write),走 exec-warm 通道(TE-ADR-2),沙箱内 realpath confinement 防越界,声明完整元数据(`side_effect`/`path_args`/`is_read_only`);原子写(tmp+`os.replace`)。
+- **TE-8 per-workspace 排他写锁**:TE-ADR-3,写(文件原语 + bash)经 PG advisory xact lock(key=`{tenant}:{user}`,orchestrator DB 事务横跨写 exec),读无锁。
+- **TE-9a edit 精确 + 硬 CAS**:`edit_file` 精确匹配 + `expected_hash` 硬 CAS;`stale`/`no_match`/`ambiguous` 结构化错误(TE-ADR-6 第一半)。
+- **TE-9b edit 模糊降级**:精确→空白归一→锚点/模糊 多级降级链 + 失败结构化候选(TE-ADR-6 第二半,紧接 TE-9a)。
 - **TE-10 性能验收门**:TE-ADR-5 性能部分(基线/锁竞争/load-soak/SLO)。
 
 ### Stream OFFICE — 办公能力包(应对办公 70%,可与 TE 并行)
@@ -106,7 +110,7 @@
 
 ```
 TE-0 ─> P0(TE-1→TE-2→TE-3→TE-4→TE-5) ─> P1(TE-6)
-                                          └> P2(TE-7→TE-8→TE-9, TE-10 perf 门)
+                                          └> P2(TE-7→TE-8→TE-9a→TE-9b, TE-10 perf 门)
 Stream OFFICE: OFFICE-0 ─> (OFFICE-1 ∥ OFFICE-2 ∥ OFFICE-3)   // 可与 TE 并行;OFFICE-3 接 TE-5/7 更顺
 ```
 
@@ -121,9 +125,10 @@ Stream OFFICE: OFFICE-0 ─> (OFFICE-1 ∥ OFFICE-2 ∥ OFFICE-3)   // 可与 TE
 - **TE-4**:`irreversible` 工具批次强制串行;`side_effect=irreversible` 自动触发 approval gate(非硬编码列表)。
 - **TE-5**:bash 在沙箱内执行、限 workspace、越界/超时被挡、审计有记录。
 - **TE-6**:大量工具下默认只暴露核心 + `find_tools`;`find_tools` 三查询命中并 promote 后可调用;token 占用受控。
-- **TE-7**:read/write/edit 经 supervisor 作用于 workspace;`realpath` 越界(`..`/symlink/绝对路径)被拒。
-- **TE-8**(真 PG 集成测):并发写同一 canonical path 经 advisory lock 串行、不交错;`./x` vs `x` vs symlink → 同锁;读不被写阻塞(lock-free)。
-- **TE-9**:edit 精确/空白/锚点多级命中;`expected_hash` 不符→`stale` 结构化回传;模型可据此重读重改。
+- **TE-7**:read/write/list 经 exec-warm 作用于 workspace;沙箱内 realpath confinement 拒越界(`..`/symlink/绝对路径);写原子(tmp+replace);锁 key 归一化 `./x`==`x`。
+- **TE-8**(真 PG 集成测):并发写同一 workspace 经 per-workspace advisory lock 串行、不交错;bash 与文件写互斥(同一 workspace 锁);读/list 不取锁、不被写阻塞(原子 rename 保读一致快照)。
+- **TE-9a**:edit 精确命中;`expected_hash` 不符→`stale`{current_hash};0 命中→`no_match`;>1 命中→`ambiguous`{count};模型据此重读重改。
+- **TE-9b**:精确失败时空白归一/锚点/模糊多级降级命中;全失败返回结构化候选位置。
 - **TE-10**:文件原语 P50/P95 达 SLO;锁竞争 benchmark 无死锁/饥饿;load/soak 稳定。
 - **OFFICE**:沙箱内 import 办公库成功 + pandoc/libreoffice 可调;catalog 出现办公连接器且租户可实例化;办公 Skill 可绑定生效。
 

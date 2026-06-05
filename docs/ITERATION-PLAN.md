@@ -978,10 +978,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **TE-5 bash 工具**（PR #420）：经 sandbox-supervisor 复用 exec 通道（subprocess wrapper，零 supervisor 改动）；`side_effect="irreversible"`→首个被 TE-4 自动串行+门控的工具；信号退出码映射 shell 惯例。抽取 `run_in_sandbox`/`format_sandbox_outcome` 与 exec_python 共用
 - [x] **TE-6 deferred registry + find_tools**（PR #421）：`ToolRegistry` `register(deferred=)` + `specs()`/`all_specs()`/`deferred_specs()`/`search()`（select:/+keyword/regex）；`find_tools` 元工具 + `AgentState.promoted_tools` 通道（per-run 隔离，非 ContextVar）。**机制层默认休眠**。bind 经 `specs()` 过滤（无需 middleware）。顺带修好 `subagent_invocations` 并行 fan-out 丢行潜伏 bug
 - [x] **TE-6b 激活 tool RAG**（PR #422）：MCP 工具默认全部 deferred（deer-flow always-defer-MCP，无阈值）+ 有 deferred 时自动注册 `find_tools`(active)。有意行为变更（MCP 先 find_tools 再调）；无 MCP 的 agent 零变更
-- [ ] **TE-7 workspace 文件原语**（P2）：read/write/edit（基础）经 supervisor 作用于 workspace 卷；workspace 根 + realpath 防越界；声明完整元数据
-- [ ] **TE-8 per-canonical-path 锁**（P2）：PG `pg_advisory_xact_lock(hash64(tenant_id,canonical_path))` 写排他 + 读 lock-free + in-process `WeakValueDictionary` 叠层（抄 deer-flow `file_operation_lock.py`）+ realpath 归一化；接入文件工具 + bash 全局写锁（TE-ADR-3）
-- [ ] **TE-9 edit 鲁棒化 + 硬 CAS**（P2，独立分量 PR）：多级匹配降级（精确→空白归一→锚点/模糊→结构化报错；参考 openclaw `wrapEditToolWithRecovery`/aider）+ `expected_hash` 硬 CAS（stale→结构化回传接自纠错）。差异化优势（三家最强也只 advisory）
-- [ ] **TE-10 性能验收门**（P2）：文件原语 P50/P95 延迟基线 + keep-warm/批量避免冷启动 + 锁竞争 benchmark + load/soak + SLO
+- [ ] **TE-7 workspace 文件原语**（P2）：`read_file`/`write_file`/`list_dir`（基础 exact）走 **exec-warm 通道**（复用 J.15 warm 沙箱，非 supervisor 专用 API——探查发现专用 API 每次 `docker run` 临时容器秒级，2026-06-05 复议改定 TE-ADR-2）；沙箱内 realpath confinement 防越界；原子写（tmp+`os.replace`）；声明完整元数据（`side_effect`/`path_args`/`is_read_only`）
+- [ ] **TE-8 per-workspace 排他写锁**（P2）：**写**（文件原语 + bash）经 PG `pg_advisory_xact_lock(hashtextextended("{tenant}:{user}",0))`（**per-workspace 单锁**，orchestrator DB 事务横跨写 exec，镜像 `event_log/db.py:51-63`）；**读/list 无锁**（原子 rename 保读一致快照）。per-workspace 而非 per-path：bash 无 path 参数 + advisory 按精确 hash 互斥无共享锁 → per-path 无法干净覆盖 bash 互斥；2026-06-05 复议拍板（TE-ADR-3）
+- [ ] **TE-9a edit 精确 + 硬 CAS**（P2）：`edit_file` 精确匹配 + `expected_hash` 硬 CAS；`stale`{current_hash}/`no_match`/`ambiguous`{count} 结构化错误（接自纠错）。硬 CAS 是 helix 差异化（三家最强也只 advisory）
+- [ ] **TE-9b edit 模糊降级**（P2，紧接 TE-9a）：精确→空白归一→锚点/模糊 多级降级链 + 全失败结构化候选位置（参考 openclaw `wrapEditToolWithRecovery`/aider）
+- [ ] **TE-10 性能验收门**（P2）：文件原语 P50/P95 延迟基线（warm 命中 vs 冷启动 fallback 分别度量）+ 锁竞争 benchmark + load/soak + SLO
 
 ## Stream OFFICE — 企业办公能力包（应对办公 70%，可与 TE 并行）
 
