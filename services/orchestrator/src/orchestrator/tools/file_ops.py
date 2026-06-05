@@ -460,6 +460,8 @@ class ReadFileTool:
     output_char_cap: int = DEFAULT_OUTPUT_CHAR_CAP
     #: Stream J.15 — acquire against the run user's persistent workspace.
     persistent_workspace: bool = False
+    #: Stream OFFICE-1a — sandbox image variant ("office" → office-libs image).
+    image_variant: str | None = None
 
     @property
     def spec(self) -> ToolSpec:
@@ -496,6 +498,7 @@ class ReadFileTool:
             persistent_workspace=self.persistent_workspace,
             tool_label="read_file",
             fallback_thread_id="read_file",
+            image_variant=self.image_variant,
         )
         env = parse_envelope(outcome, tool="read_file")
         _raise_for_error(env, tool="read_file")
@@ -516,6 +519,8 @@ class WriteFileTool:
 
     client: SupervisorClient
     persistent_workspace: bool = False
+    #: Stream OFFICE-1a — sandbox image variant ("office" → office-libs image).
+    image_variant: str | None = None
     #: Stream TE-8 — cross-replica per-workspace write lock held around the
     #: write exec. Defaults to a no-op (single process / tests).
     workspace_lock: WorkspaceLock = field(default_factory=NullWorkspaceLock)
@@ -571,6 +576,7 @@ class WriteFileTool:
                 persistent_workspace=self.persistent_workspace,
                 tool_label="write_file",
                 fallback_thread_id="write_file",
+                image_variant=self.image_variant,
             )
         env = parse_envelope(outcome, tool="write_file")
         _raise_for_error(env, tool="write_file")
@@ -591,6 +597,8 @@ class ListDirTool:
 
     client: SupervisorClient
     persistent_workspace: bool = False
+    #: Stream OFFICE-1a — sandbox image variant ("office" → office-libs image).
+    image_variant: str | None = None
 
     @property
     def spec(self) -> ToolSpec:
@@ -626,6 +634,7 @@ class ListDirTool:
             persistent_workspace=self.persistent_workspace,
             tool_label="list_dir",
             fallback_thread_id="list_dir",
+            image_variant=self.image_variant,
         )
         env = parse_envelope(outcome, tool="list_dir")
         _raise_for_error(env, tool="list_dir")
@@ -653,6 +662,8 @@ class EditFileTool:
 
     client: SupervisorClient
     persistent_workspace: bool = False
+    #: Stream OFFICE-1a — sandbox image variant ("office" → office-libs image).
+    image_variant: str | None = None
     #: Stream TE-8 — write lock held around the edit exec.
     workspace_lock: WorkspaceLock = field(default_factory=NullWorkspaceLock)
 
@@ -726,6 +737,7 @@ class EditFileTool:
                 persistent_workspace=self.persistent_workspace,
                 tool_label="edit_file",
                 fallback_thread_id="edit_file",
+                image_variant=self.image_variant,
             )
         env = parse_envelope(outcome, tool="edit_file")
         _raise_for_error(env, tool="edit_file")

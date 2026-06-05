@@ -69,12 +69,19 @@ class SupervisorClient(Protocol):
     """The Sandbox Supervisor operations the tool needs."""
 
     async def acquire(
-        self, *, tenant_id: UUID, thread_id: str, user_id: UUID | None = None
+        self,
+        *,
+        tenant_id: UUID,
+        thread_id: str,
+        user_id: UUID | None = None,
+        image_variant: str | None = None,
     ) -> UUID:
         """Launch a sandbox for the tenant; return its id.
 
         ``user_id`` set → the sandbox mounts that user's persistent
         workspace volume (Stream J.15); ``None`` → an ephemeral tmpfs.
+        ``image_variant`` (Stream OFFICE-1a) selects the image (``"office"``
+        → office-libs image; else the default minimal image).
         """
 
     async def exec(self, *, sandbox_id: UUID, code: str, timeout_s: int | None) -> SandboxOutcome:
@@ -109,11 +116,18 @@ class HTTPSupervisorClient:
     timeout_s: float = _DEFAULT_TIMEOUT_S
 
     async def acquire(
-        self, *, tenant_id: UUID, thread_id: str, user_id: UUID | None = None
+        self,
+        *,
+        tenant_id: UUID,
+        thread_id: str,
+        user_id: UUID | None = None,
+        image_variant: str | None = None,
     ) -> UUID:
         payload: dict[str, Any] = {"tenant_id": str(tenant_id), "thread_id": thread_id}
         if user_id is not None:
             payload["user_id"] = str(user_id)
+        if image_variant is not None:
+            payload["image_variant"] = image_variant
         body = await self._post("/v1/sandboxes:acquire", json=payload)
         return UUID(str(body["sandbox_id"]))
 
@@ -200,7 +214,7 @@ class RecordingSupervisorClient:
     destroy_error: Exception | None = None
     workspace_file: bytes = b""
     workspace_file_error: Exception | None = None
-    acquired: list[tuple[UUID, str, UUID | None]] = field(default_factory=list)
+    acquired: list[tuple[UUID, str, UUID | None, str | None]] = field(default_factory=list)
     execs: list[tuple[UUID, str]] = field(default_factory=list)
     released: list[UUID] = field(default_factory=list)
     destroyed: list[tuple[UUID, str]] = field(default_factory=list)
@@ -210,9 +224,14 @@ class RecordingSupervisorClient:
     _next_id: int = 0
 
     async def acquire(
-        self, *, tenant_id: UUID, thread_id: str, user_id: UUID | None = None
+        self,
+        *,
+        tenant_id: UUID,
+        thread_id: str,
+        user_id: UUID | None = None,
+        image_variant: str | None = None,
     ) -> UUID:
-        self.acquired.append((tenant_id, thread_id, user_id))
+        self.acquired.append((tenant_id, thread_id, user_id, image_variant))
         self._next_id += 1
         return UUID(int=self._next_id)
 
@@ -251,6 +270,7 @@ async def run_in_sandbox(
     persistent_workspace: bool,
     tool_label: str,
     fallback_thread_id: str,
+    image_variant: str | None = None,
 ) -> SandboxOutcome:
     """Acquire a sandbox, run ``code``, and tear it down — shared by the
     ``exec_python`` (F.4) and ``bash`` (TE-5) tools.
@@ -270,7 +290,12 @@ async def run_in_sandbox(
     # user volume; without the opt-in (or a user binding) the sandbox falls
     # back to an ephemeral tmpfs.
     user_id = ctx.user_id if persistent_workspace else None
-    sandbox_id = await client.acquire(tenant_id=ctx.tenant_id, thread_id=thread_id, user_id=user_id)
+    sandbox_id = await client.acquire(
+        tenant_id=ctx.tenant_id,
+        thread_id=thread_id,
+        user_id=user_id,
+        image_variant=image_variant,
+    )
     cancelled = False
     try:
         return await client.exec(sandbox_id=sandbox_id, code=code, timeout_s=timeout_s)
@@ -346,6 +371,9 @@ class ExecPythonTool:
     #: the sandbox against the user's persistent workspace volume so
     #: files survive across runs. Set from ``SandboxSpec.filesystem``.
     persistent_workspace: bool = False
+    #: Stream OFFICE-1a — sandbox image variant ("office" → office-libs
+    #: image). Set from ``SandboxSpec.image_variant``; ``None`` → minimal.
+    image_variant: str | None = None
 
     @property
     def spec(self) -> ToolSpec:
@@ -385,6 +413,7 @@ class ExecPythonTool:
             persistent_workspace=self.persistent_workspace,
             tool_label="exec_python",
             fallback_thread_id=_FALLBACK_THREAD_ID,
+            image_variant=self.image_variant,
         )
         return format_sandbox_outcome(outcome, self.output_char_cap)
 

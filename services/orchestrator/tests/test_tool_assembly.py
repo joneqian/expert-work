@@ -629,3 +629,32 @@ async def test_file_op_write_tools_receive_workspace_lock() -> None:
 async def test_file_op_without_supervisor_raises() -> None:
     with pytest.raises(AgentFactoryError):
         await build_tool_registry([BuiltinToolSpec(name="edit_file")], tool_env=ToolEnv())
+
+
+async def test_image_variant_threaded_to_all_sandbox_tools() -> None:
+    # Stream OFFICE-1a — every sandbox-backed builtin carries the variant.
+    env = ToolEnv(supervisor_client=RecordingSupervisorClient())
+    registry = await build_tool_registry(
+        [
+            BuiltinToolSpec(name="exec_python"),
+            BuiltinToolSpec(name="bash"),
+            BuiltinToolSpec(name="read_file"),
+            BuiltinToolSpec(name="write_file"),
+            BuiltinToolSpec(name="edit_file"),
+            BuiltinToolSpec(name="list_dir"),
+        ],
+        tool_env=env,
+        image_variant="office",
+    )
+    for name in ("exec_python", "bash", "read_file", "write_file", "edit_file", "list_dir"):
+        tool = registry.get(name)
+        assert tool is not None
+        assert tool.image_variant == "office"  # type: ignore[attr-defined]
+
+
+async def test_image_variant_defaults_none() -> None:
+    env = ToolEnv(supervisor_client=RecordingSupervisorClient())
+    registry = await build_tool_registry([BuiltinToolSpec(name="exec_python")], tool_env=env)
+    tool = registry.get("exec_python")
+    assert tool is not None
+    assert tool.image_variant is None  # type: ignore[attr-defined]

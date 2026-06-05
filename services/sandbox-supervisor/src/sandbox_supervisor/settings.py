@@ -32,6 +32,10 @@ class SandboxSupervisorSettings(BaseSettings):
     # -------------------------------------------------------------- sandbox
     #: Image the `exec_python` sandbox runs (built from infra/sandbox-image).
     sandbox_image: str = "helix-sandbox:dev"
+    #: Stream OFFICE-1a — image for the "office" variant (built from
+    #: infra/sandbox-image-office: slim + office libs + CJK fonts). Selected
+    #: per-acquire via ``AcquireRequest.image_variant == "office"``.
+    sandbox_image_office: str = "helix-sandbox-office:dev"
     #: OCI runtime — `runc` for dev / macOS, `runsc` (gVisor) for Linux prod.
     oci_runtime: Literal["runc", "runsc"] = "runc"
     #: Host identifier recorded on each sandbox_instance row. M0 single-node.

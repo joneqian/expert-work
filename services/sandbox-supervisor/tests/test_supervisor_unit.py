@@ -271,9 +271,17 @@ def _running_record(tenant_id: UUID, *, acquired_at: datetime) -> SandboxRecord:
 
 
 def _acquire_request(
-    tenant_id: UUID | None = None, *, user_id: UUID | None = None
+    tenant_id: UUID | None = None,
+    *,
+    user_id: UUID | None = None,
+    image_variant: str | None = None,
 ) -> AcquireRequest:
-    return AcquireRequest(tenant_id=tenant_id or uuid4(), thread_id="t-1", user_id=user_id)
+    return AcquireRequest(
+        tenant_id=tenant_id or uuid4(),
+        thread_id="t-1",
+        user_id=user_id,
+        image_variant=image_variant,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1027,3 +1035,43 @@ def test_health_route_reports_docker_status() -> None:
     body = resp.json()
     assert body["docker_ok"] is True
     assert body["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Stream OFFICE-1a — image variant selection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_acquire_office_variant_selects_office_image() -> None:
+    settings = SandboxSupervisorSettings(sandbox_image_office="helix-sandbox-office:test")
+    h = _harness(settings=settings)
+    resp = await h.supervisor.acquire(_acquire_request(image_variant="office"))
+    assert h.store.rows[resp.sandbox_id].image_ref == "helix-sandbox-office:test"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant", [None, "minimal", "bogus"])
+async def test_acquire_default_variant_selects_minimal_image(variant: str | None) -> None:
+    settings = SandboxSupervisorSettings(sandbox_image="helix-sandbox:test")
+    h = _harness(settings=settings)
+    resp = await h.supervisor.acquire(_acquire_request(image_variant=variant))
+    assert h.store.rows[resp.sandbox_id].image_ref == "helix-sandbox:test"
+
+
+@pytest.mark.asyncio
+async def test_warm_session_not_reused_across_image_variants() -> None:
+    # A minimal warm session must not be reused for an office acquire — the
+    # office agent needs the office-libs image (Stream OFFICE-1a).
+    user = uuid4()
+    tenant = uuid4()
+    h = _harness()
+    r1 = await h.supervisor.acquire(_acquire_request(tenant, user_id=user, image_variant=None))
+    assert r1.cold_start is True
+    r2 = await h.supervisor.acquire(_acquire_request(tenant, user_id=user, image_variant="office"))
+    assert r2.cold_start is True  # NOT reused
+    assert r2.sandbox_id != r1.sandbox_id
+    assert h.store.rows[r2.sandbox_id].image_ref == h.supervisor._settings.sandbox_image_office
+    # The stale-variant session is torn down now (not left for the reaper),
+    # so it stops counting toward the tenant sandbox quota (review MEDIUM).
+    assert h.store.rows[r1.sandbox_id].state is SandboxState.DESTROYED

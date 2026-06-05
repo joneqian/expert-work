@@ -46,7 +46,12 @@ class _LockProbeClient:
     released: list[UUID] = field(default_factory=list)
 
     async def acquire(
-        self, *, tenant_id: UUID, thread_id: str, user_id: UUID | None = None
+        self,
+        *,
+        tenant_id: UUID,
+        thread_id: str,
+        user_id: UUID | None = None,
+        image_variant: str | None = None,
     ) -> UUID:
         return uuid4()
 

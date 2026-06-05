@@ -81,6 +81,8 @@ class BashTool:
     #: Stream TE-8 — cross-replica per-workspace write lock. bash can write
     #: anything, so it takes the same exclusive workspace lock as write_file.
     workspace_lock: WorkspaceLock = field(default_factory=NullWorkspaceLock)
+    #: Stream OFFICE-1a — sandbox image variant ("office" → office-libs image).
+    image_variant: str | None = None
 
     @property
     def spec(self) -> ToolSpec:
@@ -131,6 +133,7 @@ class BashTool:
                 persistent_workspace=self.persistent_workspace,
                 tool_label="bash",
                 fallback_thread_id=_FALLBACK_THREAD_ID,
+                image_variant=self.image_variant,
             )
         return format_sandbox_outcome(outcome, self.output_char_cap)
 

@@ -362,6 +362,8 @@ async def build_agent(
         # Stream J.15 — opt the exec_python sandbox into the run user's
         # persistent workspace volume when the manifest asks for it.
         persistent_workspace=spec.spec.sandbox.filesystem.persistent_workspace,
+        # Stream OFFICE-1a — select the sandbox image variant (office libs).
+        image_variant=spec.spec.sandbox.image_variant,
         # Stream J.4 — assemble the manifest's sub-agents into SubAgentTools;
         # subagent_depth gates the structural recursion cap.
         subagents=spec.spec.subagents,

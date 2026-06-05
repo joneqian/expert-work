@@ -24,6 +24,10 @@ class AcquireRequest(BaseModel):
     #: user's persistent workspace volume at ``/workspace``; omitted →
     #: an ephemeral tmpfs workspace (the pre-J.15 behaviour).
     user_id: UUID | None = None
+    #: Stream OFFICE-1a — prebuilt image variant to launch ("minimal" /
+    #: "office"). Omitted / unknown → the default (minimal) image. The
+    #: supervisor maps it to a configured image name via ``_select_image``.
+    image_variant: str | None = None
     #: Optional per-call resource overrides; omitted → the service defaults.
     cpu: float | None = Field(default=None, gt=0, le=16)
     memory_mb: int | None = Field(default=None, gt=0, le=65536)
