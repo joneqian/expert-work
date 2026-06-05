@@ -43,6 +43,9 @@ from sandbox_supervisor.settings import SandboxSupervisorSettings
 from sandbox_supervisor.store import SandboxStore
 
 DESTROY_REASON_WORKSPACE_SOFT_DELETE = "workspace_soft_delete"
+#: Stream OFFICE-1a — a warm session is torn down because the new acquire
+#: asks for a different image variant than the session was built from.
+DESTROY_REASON_VARIANT_CHANGED = "image_variant_changed"
 
 logger = logging.getLogger(__name__)
 
@@ -425,9 +428,12 @@ class SandboxSupervisor:
             return None
         # Stream OFFICE-1a — never reuse a warm session built from a different
         # image variant (an office agent must not inherit a minimal session,
-        # which lacks the office libraries). Fall through to a cold start; the
-        # session entry is overwritten by the new record below.
+        # which lacks the office libraries). Tear the stale-variant session
+        # down now (rather than waiting for the idle reaper) so it stops
+        # counting toward the tenant sandbox quota, then fall through to a
+        # cold start.
         if record.image_ref != self._select_image(image_variant):
+            await self.destroy(sandbox_id, reason=DESTROY_REASON_VARIANT_CHANGED)
             return None
         # J.15-补强-1: workspace-level quota + soft-delete recheck on reuse.
         if self._quota_enforcer is not None:
@@ -475,6 +481,11 @@ class SandboxSupervisor:
         image, so an unrecognised value degrades safely."""
         if image_variant == "office":
             return self._settings.sandbox_image_office
+        if image_variant not in (None, "minimal"):
+            logger.warning(
+                "unknown image_variant %r — falling back to the minimal image",
+                image_variant,
+            )
         return self._settings.sandbox_image
 
     def _new_record(

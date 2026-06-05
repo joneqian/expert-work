@@ -1072,3 +1072,6 @@ async def test_warm_session_not_reused_across_image_variants() -> None:
     assert r2.cold_start is True  # NOT reused
     assert r2.sandbox_id != r1.sandbox_id
     assert h.store.rows[r2.sandbox_id].image_ref == h.supervisor._settings.sandbox_image_office
+    # The stale-variant session is torn down now (not left for the reaper),
+    # so it stops counting toward the tenant sandbox quota (review MEDIUM).
+    assert h.store.rows[r1.sandbox_id].state is SandboxState.DESTROYED

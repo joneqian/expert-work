@@ -636,3 +636,23 @@ async def test_read_file_threads_image_variant_to_acquire() -> None:
     client = _client(json.dumps({"ok": True, "content": "", "content_hash": "x", "size": 0}))
     await ReadFileTool(client=client, image_variant="office").call({"path": "a.txt"}, ctx=_ctx())
     assert client.acquired[0][3] == "office"
+
+
+async def test_http_acquire_sends_image_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    # OFFICE-1a — the wire payload carries image_variant when set, omits when None.
+    from orchestrator.tools.sandbox import HTTPSupervisorClient
+
+    client = HTTPSupervisorClient(base_url="http://x")
+    seen: dict[str, Any] = {}
+
+    async def fake_post(path: str, *, json: Any, expect_body: bool = True) -> dict[str, Any]:
+        seen["json"] = json
+        return {"sandbox_id": str(uuid4())}
+
+    monkeypatch.setattr(client, "_post", fake_post)
+    await client.acquire(tenant_id=uuid4(), thread_id="t", image_variant="office")
+    assert seen["json"]["image_variant"] == "office"
+
+    seen.clear()
+    await client.acquire(tenant_id=uuid4(), thread_id="t")
+    assert "image_variant" not in seen["json"]
