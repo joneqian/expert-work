@@ -15,14 +15,11 @@ from orchestrator.tools import (
     MCPServerPool,
     MCPToolDef,
     RecordingMCPClient,
-    ToolContext,
     ToolEnv,
     ToolRegistry,
     build_tool_registry,
     register_mcp_tools,
 )
-
-_CTX = ToolContext()
 
 
 def _tool_def(name: str) -> MCPToolDef:
