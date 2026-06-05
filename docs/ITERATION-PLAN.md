@@ -991,7 +991,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **OFFICE-0 设计先行**（PR #430）：STREAM-OFFICE-DESIGN + 现状核实 + Mini-ADR（纯 Python 库 / office variant / 中文 / 连接器暂缓 / 办公 Skill）；3 个范围决策经 AskUserQuestion 拍板
 - [ ] **OFFICE-1a 镜像 variant 机制**：`SandboxSpec.image_variant: minimal|office` + supervisor `_select_image` + `AcquireRequest.image_variant` + orchestrator 链路（照搬 persistent_workspace 模板）；先用 minimal 镜像验机制（OFFICE-ADR-2）
 - [ ] **OFFICE-1b office 镜像**：`sandbox-image-office` = `python:3.12-slim` + build-time pip（pandas/openpyxl/python-docx/python-pptx/pypdf/pdfplumber/Pillow/matplotlib）+ Noto CJK 字体 + zh_CN.UTF-8 + 装完卸 pip；CI 构建（OFFICE-ADR-1/3）。libreoffice/pandoc 重型转换推后（OFFICE-1c，看真需求）
-- [ ] **OFFICE-3 办公 Skill 包**（复用 Stream X）：中文办公模板（数据分析报告/Excel 批处理/Word 生成/PPT 制作/PDF 提取汇总）；`lazy_load` + `required_tier` 变现门控（OFFICE-ADR-5）
+- [ ] **OFFICE-3 平台 skill 导入端点**（OFFICE-ADR-5，改向）：`POST /v1/platform/skills/import`（system_admin + bypass_rls，multipart `.skill` ZIP，复用租户 `_skill_zip` 解析 + 威胁扫描）→ 平台 skill（NULL-tenant），租户经 X-6 merged view 自动可见。**不自写/不批量移植 skill**（实证：Anthropic 官方 office skill Proprietary 禁移植、ClawHub 第三方多无 license）。**content_hash 幂等(租户+平台统一)**：同名导入与 latest hash 同则跳过、不同则加版本（顺带补租户 import 现缺的幂等）
 - [ ] **OFFICE-2 国内连接器**（暂缓，backlog）：钉钉/企微/飞书需官方 remote MCP（sse/streamable_http）进 catalog；国内生态薄→等成熟，或单租户 on-prem stdio off-catalog；不破 client-only（OFFICE-ADR-4）
 
 ---

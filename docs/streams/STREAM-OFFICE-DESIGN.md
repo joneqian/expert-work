@@ -41,16 +41,19 @@
 ### OFFICE-ADR-4 国内连接器暂缓（不破 client-only）
 - **决策**：钉钉/企微/飞书连接器**本轮不做**。国内官方 remote MCP server 生态薄，catalog 只收 remote；强上要么破 client-only 自搭 wrapper、要么仅单租户 on-prem stdio off-catalog。记 backlog，待生态成熟或单租户场景再开。helix 本就 backend-only、不内置末端 adapter。
 
-### OFFICE-ADR-5 办公 Skill（SKILL.md 包，中文模板）
-- **决策**：平台 Skill 打包常见办公流程（中文）：数据分析报告 / Excel 批处理 / Word 文档生成 / PPT 制作 / PDF 提取汇总。`tool_names` 声明用 `exec_python`（或 file 原语）；`lazy_load=true`；`required_tier` 可做变现门控。降低"每次手写 python"成本。
+### OFFICE-ADR-5 办公 Skill = 平台导入端点（不自写，2026-06-05 改定）
+- **背景（实证后改向）**：调研 ClawHub / anthropics/skills，办公 skill 的"现成轮子"没有能无脑直接搬的——Anthropic 官方 docx/xlsx/pptx/pdf 是 **Proprietary 明文禁移植**；ClawHub 第三方多**无 LICENSE**（版权全保留）+ 质量/安全参差。**故 helix 不自写、也不批量移植办公 skill**。
+- **决策**：补一个**平台级 skill 导入端点** `POST /v1/platform/skills/import`（system_admin + `bypass_rls`，multipart `.skill` ZIP，复用租户侧 `_skill_zip` 解析 + 威胁扫描），让平台管理员把 `.skill` 包导入成**平台级 skill**（NULL-tenant），租户经 X-6 merged view + X-4 resolver 自动可见 + `required_tier` 门控。**包来源由管理员定**（自打 / 挑 license 干净的现成包），平台不预置内容。
+- **content_hash 幂等（租户+平台统一）**：导入同名 skill 时，与 **latest 版本 content_hash 相同则跳过**（不产生冗余版本），不同则 `add_version` 生成新版本。租户现有 `POST /v1/skills/import` **每次都加版本**，本轮一并补幂等，两边语义一致。
+- store 接口齐全无需新方法：`get_skill_by_name`/`get_platform_skill_by_name` + `get_version_by_number`/`get_platform_version_by_number`（取 latest content_hash）+ `add_version`/`add_platform_version`/`create_*`。
 
 ## 2. Stream 切分
 - **OFFICE-1a 镜像 variant 机制**：manifest `image_variant` + supervisor `_select_image` + acquire 字段 + orchestrator 链路。先用现有 minimal 镜像验证机制（不依赖 office 镜像就绪）。
 - **OFFICE-1b office 镜像**：`infra/sandbox-image-office/Dockerfile`（slim + 库 + 中文）+ CI 构建 + supervisor settings 接线。
-- **OFFICE-3 办公 Skill 包**：平台 Skill（中文办公模板）。
+- **OFFICE-3 平台 skill 导入端点**：`POST /v1/platform/skills/import`（system_admin，multipart `.skill` ZIP，复用 `_skill_zip`）+ 租户/平台 **content_hash 幂等**（同 latest hash 跳过，否则加版本）。**不自写/不批量移植 skill 内容**（OFFICE-ADR-5）。独立于镜像，可先做。
 - **OFFICE-2 国内连接器**：暂缓（backlog）。
 
-依赖：`OFFICE-1a → OFFICE-1b`（机制先于镜像，但 1a 用 minimal 可独立验）；`OFFICE-1b → OFFICE-3`（Skill 用办公库需镜像就绪）。
+依赖：`OFFICE-1a → OFFICE-1b`（机制先于镜像，但 1a 用 minimal 可独立验）。OFFICE-3 与镜像无依赖，可独立先行。
 
 ## 3. CI / 约束
 - **manifest schema 改动**（SandboxSpec 加 image_variant）走 protocol 包；无 DB migration（image_variant 是 runtime，不入库）。
@@ -62,6 +65,6 @@
 ## 4. Verification
 - **OFFICE-1a**：manifest `image_variant: office` → acquire 收到 variant → supervisor `_select_image` 选对镜像名；None/未知 → 默认 minimal（向后兼容，现有 agent 不变）。
 - **OFFICE-1b**：office 镜像内 `import pandas/openpyxl/docx/pptx/pypdf/pdfplumber/PIL` 成功；生成含中文的 xlsx/docx/pptx + matplotlib 图表不乱码；运行时无 pip。
-- **OFFICE-3**：办公 Skill 可绑定、lazy_load 摘要进 prompt、skill_view 取全文；中文威胁扫描通过。
+- **OFFICE-3**：平台管理员 `POST /v1/platform/skills/import` 上传 `.skill` ZIP → 平台 skill；租户经 merged view 可见；同名导入 content_hash 同则跳过、不同则加版本（租户+平台一致）；非 system_admin 403；威胁扫描拦恶意包。
 
 **完成 = 国内办公场景文件处理能力生产级 + 办公 Skill 可用**（连接器待生态）。
