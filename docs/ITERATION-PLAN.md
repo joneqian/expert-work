@@ -948,8 +948,20 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 - [x] **Z0 设计先行**（PR #409）（STREAM-Z-DESIGN + Mini-ADR Z-1~Z-4 + 现状核实）
 - [x] **Z1 租户用量/成本 API**（PR #410）：`GET /v1/usage/cost`（RLS 自隔离，**只 billed**，group_by agent/model/none，unpriced 标记）+ `/v1/usage/tokens`（当月实时直读 token_usage）+ `billing:read`；ledger store 接入 control-plane app.state
-- [x] **Z2 admin chargeback API + 指标**（PR #411）：`GET /v1/admin/billing/chargeback`（system_admin，跨租户，显 base/markup/billed/margin）+ ledger `list_for_month_all_tenants`（**`SET LOCAL ROLE audit_reader`** 跨 FORCE-RLS + migration `0061` 授权 + 真 PG 集成测）+ `helix_llm_billed_cost_micros` gauge（rollup set-overwrite）。⚠️ follow-up：`api/audit.py` 跨租户读有同款潜伏 RLS bug（见 [memory:reference_cross_tenant_read_force_rls_set_role]）
+- [x] **Z2 admin chargeback API + 指标**（PR #411）：`GET /v1/admin/billing/chargeback`（system_admin，跨租户，显 base/markup/billed/margin）+ ledger `list_for_month_all_tenants`（**`SET LOCAL ROLE audit_reader`** 跨 FORCE-RLS + migration `0061` 授权 + 真 PG 集成测）+ `helix_llm_billed_cost_micros` gauge（rollup set-overwrite）。✅ 收尾顺手修复同款潜伏 RLS bug：`audit_log/sql.py` 跨租户读（`tenant_id="*"`）缺 `SET LOCAL ROLE audit_reader` → 生产返零行（PR #412，真 PG 集成测 RED/GREEN；见 [memory:reference_cross_tenant_read_force_rls_set_role]）
 - [x] **Z3 看板 UI**（PR #413）（前端）：租户用量页 `/settings/usage`（月选择 + agent/model 拆分 + billed-only + 实时 token）+ system_admin chargeback 页 `/settings/billing-chargeback`（跨租户 base/markup/billed/margin）+ `formatMicros` + i18n + vitest/storybook/Playwright/axe。**W/X/Y/Z 路线图收官**
+
+### W/X/Y/Z 显式推迟项（M2+ follow-up backlog）
+
+路线图收官时显式登记的 out-of-scope 项（核心变现能力已交付，以下为增量/演进，不阻塞）。遵循零技术债收尾原则：宁可显式登记也不留空决策（见 [memory:feedback_no_design_choice_disguise] / [memory:feedback_zero_tech_debt]）。
+
+- [ ] **发票 / 支付集成**（M2）— 发票 = 月度 `tenant_billing_ledger` 的冻结快照，需编号 / 税务 / PDF / 支付网关；**无 schema 阻塞**（chargeback 报表已交付变现价值）
+- [ ] **目录模板 re-sync**（M2）— 现为快照语义（实例化时把 url/transport/auth_type 快照到行，目录改模板不静默改活实例）；批量"重建活实例"流程留后续。来源 Mini-ADR W（实例快照）
+- [ ] **平台级 named-key 池**（M2）— 替代已移除的 manifest `api_key_ref` override，覆盖"高频 key 钉选"场景（当前 100% 走平台 resolver；Y2 移除 override 时记的过渡缺口）
+- [ ] **à-la-carte per-feature entitlement**（按需）— 现 tier 比较（`tier_satisfies`）够用；真需要细粒度授权再加 `tenant_entitlement` 表，不提前建
+- [ ] **W6（可选）初始目录 seed**（已在 W backlog）— GitHub/Postgres 官方连接器（config flag 后）
+- [ ] **KEK → 真 KMS wrap**（依赖 aliyun_kms 落地）— 现 env KEK（`HELIX_AGENT_SECRET_ENCRYPTION_KEY`）；与 Stream Q 后续项同源，非本路线图新增
+- [ ] **跨租户 write**（按需）— Stream N 仍 read-only；chargeback / catalog 平台面均为 read 或 system_admin 受控写
 
 ---
 

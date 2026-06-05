@@ -315,11 +315,11 @@
 | **持续改进流水线** | 🟠 P1 | 用户反馈 → 自动加入 eval → 触发 prompt 改进 → 验证 → 上线 |
 | **Cost optimization 建议** | 🟡 P2 | 检测高 token 调用、长上下文未用 cache、可优化的 prompt |
 | **Quality dashboard** | 🟠 P1 | 每个 agent 当前质量得分（来自 eval + 用户反馈）|
-| **Chargeback 报表** | 🟠 P1 | 按租户/部门/agent 维度的成本归因报表 |
+| ~~**Chargeback 报表**~~ ✅ | ~~🟠 P1~~ | **已由 Stream Y/Z 关闭（2026-06-05）**：rate card 计量 + 成本派生 rollup（base/markup/billed 拆分）+ 按租户/agent/model 维度的 chargeback 报表与用量面。发票推迟 M2。详见 [ITERATION-PLAN](../ITERATION-PLAN.md) 平台中心化路线图 |
 
 ### 建议
 - M0：feedback 表 + 简单 usage stats 大盘
-- M1：eval 数据集管理 + chargeback
+- M1：eval 数据集管理 + ~~chargeback~~（chargeback 已由 Stream Y/Z 提前交付，2026-06-05）
 - M2：持续改进流水线
 
 ---
@@ -336,8 +336,8 @@
 |-----|--------|------|
 | **Agent 内部市场** | 🟠 P1 | 团队 A 发布 agent 让团队 B 复用；版本/评分/文档 |
 | **Tool 注册中心** | 🟠 P1 | 公司内部所有工具的目录；权限申请；用量统计 |
-| **MCP server 注册发现** | 🟠 P1 | 内部 MCP server 目录；自动健康检查 |
-| **Skill / Template 库** | 🟠 P1 | 常见模式打包为模板（继承机制）|
+| ~~**MCP server 注册发现**~~ 🔄 | ~~🟠 P1~~ | **方向调整为 client-only（不再自建内部 MCP server registry）**：Stream W 交付的是**平台 MCP 连接器目录 + 租户实例化**（消费外部 MCP 生态，含 probe 健康检查 + 档位门控）。详见 [memory:project_mcp_direction_client_only] |
+| ~~**Skill / Template 库**~~ ✅ | ~~🟠 P1~~ | **已由 Stream X 关闭（2026-06-05）**：平台精选 skill 库（`tenant_id NULL` + 档位门控）+ 租户自建（混合）+ resolver 双查接入 agent build。继承/mixin 机制仍 M1（见下条 Manifest 复用）|
 | **Manifest 复用机制** | 🟠 P1 | YAML inherit / mixin（避免每个 agent 拷贝）|
 | **跨 agent 通信协议**（A2A） | 🟡 P2 | Google A2A 或自定义 |
 | **Plugin 机制** | 🟠 P1 | 第三方 middleware / tool / hook 怎么打包发布（@Next/@Prev 提供运行时机制，但分发流程缺）|
