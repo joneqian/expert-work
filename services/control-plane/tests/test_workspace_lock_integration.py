@@ -104,3 +104,38 @@ async def test_ephemeral_workspace_takes_no_lock(engine: AsyncEngine) -> None:
     # user_id=None → no lock → concurrent.
     assert order[0].endswith("-enter")
     assert order[1].endswith("-enter")
+
+
+async def test_lock_contention_no_starvation(engine: AsyncEngine) -> None:
+    # TE-10 — N writers contend for one workspace lock. All must complete
+    # exactly once (no deadlock, no starvation); advisory serialises them.
+    lock = PgWorkspaceLock(create_async_session_factory(engine))
+    tenant, user = uuid4(), uuid4()
+    n_workers = 10
+    completed: list[int] = []
+
+    async def worker(idx: int) -> None:
+        async with lock.acquire(tenant_id=tenant, user_id=user):
+            completed.append(idx)
+            await asyncio.sleep(0.02)
+
+    await asyncio.gather(*(worker(i) for i in range(n_workers)))
+    assert sorted(completed) == list(range(n_workers))
+
+
+async def test_lock_distinct_workspaces_scale_concurrently(engine: AsyncEngine) -> None:
+    # TE-10 — distinct workspaces must NOT serialise: their holds overlap.
+    lock = PgWorkspaceLock(create_async_session_factory(engine))
+    tenant = uuid4()
+    users = [uuid4() for _ in range(5)]
+    state = {"cur": 0, "max": 0}
+
+    async def worker(u: object) -> None:
+        async with lock.acquire(tenant_id=tenant, user_id=u):  # type: ignore[arg-type]
+            state["cur"] += 1
+            state["max"] = max(state["max"], state["cur"])
+            await asyncio.sleep(0.1)
+            state["cur"] -= 1
+
+    await asyncio.gather(*(worker(u) for u in users))
+    assert state["max"] >= 2  # genuine concurrency across workspaces

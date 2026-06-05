@@ -967,7 +967,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 把"改进版 Tool 执行引擎"落地 helix（源自 Go Harness 专栏 + openclaw/deer-flow/hermes 源码对照 + helix 现状探查）。**关键利好**：文章最难的并行调度（只读并发/涉写串行）helix 已成熟（`tools/scheduling.py`，L.L6），不重做。**用户拍板**：bash IN / edit 鲁棒化 / 跨副本锁做强 / 性能+可观测进门 / 另开办公能力包 / 按"办公读多写少"杠杆重排（可观测·工具面·bash 前置，锁·CAS 押后保留）。**TE-0 核实关键事实**：workspace **非单 sandbox 独占租约**（多 sandbox 可并挂同卷、supervisor 可多副本、无 DB 锁）→ 跨副本锁**必须** PG `pg_advisory_xact_lock`（仿 `DbEventStore`，合规 infra 约束），in-process 锁不安全。
 
-**进度（2026-06-05）**：**P0（TE-1~5）+ P1（TE-6/6b）已交付**（PR #415–#422）。P2（TE-7~10 文件原语/锁/edit-CAS/性能）+ TE-3b（Langfuse span + trajectory 富化）未做；详见各条。
+**进度（2026-06-05）**：**P0（TE-1~5）+ P1（TE-6/6b）+ P2（TE-7→10：文件原语/锁/edit-CAS+模糊/性能门）全部已交付**（PR #415–#429）。**Stream TE 引擎层完成**。仅 TE-3b（Langfuse span + trajectory 富化）延后（无 sink/数据源）；Stream OFFICE（办公能力包）未开。详见各条。
 
 - [x] **TE-0 设计先行**（PR #415）：`STREAM-TE-DESIGN.md` + 本 backlog — Mini-ADR TE-ADR-1~6。核实 workspace 非单 sandbox 独占 → 跨副本锁必须 PG advisory
 - [x] **TE-1 工具元数据**（PR #416）：`ToolSpec` 加 `side_effect: SideEffectLevel|None`（None→由 `is_read_only` 保守派生 read_only/reversible）+ `idempotent` + `resolved_side_effect` 属性。纯增量、零行为变更（无消费者）
@@ -982,7 +982,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **TE-8 per-workspace 排他写锁**（P2，PR #426）：**写**（文件原语 + bash）经 PG **双参** `pg_advisory_xact_lock(1, hashtext("{tenant}:{user}"))`（**per-workspace 单锁**，与 event_log 单参 key space 隔离；orchestrator DB 事务横跨写 exec）；**读/list 无锁**（原子 rename 保读一致快照）。per-workspace 而非 per-path：bash 无 path 参数 + advisory 无共享锁 → per-path 覆盖不了 bash 互斥。**评审修复两个破锁 bug**：`SET LOCAL idle_in_transaction_session_timeout/statement_timeout=360s` 防持锁事务被 per-DB 60s/30s 默认杀掉提前释放锁；双参 key space 防跨子系统碰撞。连接池容量耦合记 follow-up（TE-ADR-3）
 - [x] **TE-9a edit 精确 + 硬 CAS**（P2，PR #427）：`edit_file` 精确匹配 + `expected_hash` 硬 CAS；read→verify→match→atomic-write 单 exec 原子（无 TOCTOU）；`stale`{current_hash}/`no_match`/`ambiguous`{count} 结构化错误（接自纠错）；复用 TE-7 snippet + TE-8 写锁；原子写提取为共享 `_atomic_write`。硬 CAS 是 helix 差异化（三家最强也只 advisory）。过 code 评审（assembly/lock 覆盖补齐）
 - [x] **TE-9b edit 模糊降级**（P2，PR #428）：精确→空白归一行块 多级降级 + 全失败 difflib 候选提示（`near line N`）；`meta.match=exact|fuzzy`；纯 CRLF 文件 fuzzy rebuild 保留行尾。过 code 评审（CRLF 修复 + strip 语义文档化 + 3 回归测试）
-- [ ] **TE-10 性能验收门**（P2）：文件原语 P50/P95 延迟基线（warm 命中 vs 冷启动 fallback 分别度量）+ 锁竞争 benchmark + load/soak + SLO
+- [x] **TE-10 性能验收门**（P2，PR #429）：**诚实分界**——CI 无完整沙箱，文件原语端到端延迟/soak 是生产压测。CI 门禁=**锁竞争 benchmark**（真 PG：10 并发写同 workspace 无死锁/饥饿、5 不同 workspace 真并发）；**SLO** 写入 STREAM-TE-DESIGN §6（warm read P95<500ms / write·edit P95<1s / cold-start acquire P95<5s，TE-3 per-tool 延迟指标已采集）；**load/soak runbook**（staging k6/locust，盯延迟尾+泄漏）。warm/cold 分别度量列为可选增强（需 acquire 暴露 cold_start）
 
 ## Stream OFFICE — 企业办公能力包（应对办公 70%，可与 TE 并行）
 

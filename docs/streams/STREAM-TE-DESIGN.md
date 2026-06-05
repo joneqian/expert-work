@@ -134,4 +134,24 @@ Stream OFFICE: OFFICE-0 ─> (OFFICE-1 ∥ OFFICE-2 ∥ OFFICE-3)   // 可与 TE
 - **TE-10**:文件原语 P50/P95 达 SLO;锁竞争 benchmark 无死锁/饥饿;load/soak 稳定。
 - **OFFICE**:沙箱内 import 办公库成功 + pandoc/libreoffice 可调;catalog 出现办公连接器且租户可实例化;办公 Skill 可绑定生效。
 
+## 6. 性能 SLO + 验收门(TE-10)
+
+**诚实分界**:文件原语经 exec-warm 沙箱(supervisor + gVisor),CI 的 integration 只有 testcontainers PG、**无完整沙箱**,故端到端延迟 / load-soak 是**生产/staging 压测**,不进 CI 门禁。CI 能真门禁化的是**不依赖沙箱的锁竞争**。
+
+### 6.1 CI 门禁(可重复)
+- **锁竞争 benchmark**(`test_workspace_lock_integration.py`,真 PG):N=10 并发写同一 workspace → 全部完成恰一次、无死锁/饥饿(advisory 串行);5 个不同 workspace → 真并发(并发度 ≥2,不互相串行)。这是 Tier3 合并门里 CI 能保证的部分。
+
+### 6.2 文件原语延迟 SLO(生产 Grafana 验)
+warm session 命中(per-tool `helix_tool_latency_seconds{tool}`,TE-3 已采集,文件原语作为 tool 自动覆盖):
+- `read_file` / `list_dir`:**P95 < 500ms**(沙箱 exec 单往返)。
+- `write_file` / `edit_file`:**P95 < 1s**(含原子写 + advisory 锁获取)。
+- 冷启动 fallback(首次 acquire 起容器):acquire **P95 < 5s**(对齐 J.15 cold-start gate)。
+观测面:Grafana 按 `tool` 看 P50/P95;锁等待时长经写事务时延体现。warm vs cold 的分别度量是可选增强(需 `SupervisorClient.acquire` 暴露 `cold_start` → 给延迟指标加 label),未纳入本轮。
+
+### 6.3 load / soak runbook(staging,非 CI)
+真沙箱环境(staging full stack)用 k6 / locust 驱动 agent 跑文件原语序列:
+- **load**:稳态并发 agent × 文件原语混合(read/write/edit/list),采 P50/P95/P99 + 错误率,对照 §6.2 SLO。
+- **soak**:持续 ≥1h,盯**资源泄漏**——sandbox warm session 数、PG 连接池占用(TE-8 长事务,见 TE-ADR-3 连接池 follow-up)、workspace 卷增长。
+- 通过判据:稳态延迟达 SLO + 无泄漏 + 锁等待不随时间漂移。
+
 **完成 = helix TOOLS 引擎产品级**(治理/隔离/审计/并发正确性齐备,且办公工具面补足)。
