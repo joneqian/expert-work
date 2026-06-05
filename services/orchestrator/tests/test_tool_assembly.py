@@ -137,8 +137,15 @@ async def test_http_tool_missing_allowlist_raises() -> None:
 async def test_mcp_tools_assembled_from_pool() -> None:
     pool = await _seeded_pool()
     registry = await build_tool_registry([MCPToolSpec()], tool_env=ToolEnv(mcp_pool=pool))
-    # Both server-advertised tools register, namespaced ``mcp:<server>.<tool>``.
-    assert len(registry) == 2
+    # Stream TE-6b — both server-advertised tools register *deferred*
+    # (namespaced ``mcp:<server>.<tool>``, absent from the bind), and
+    # ``find_tools`` is auto-added active so they can be discovered.
+    assert {s.name for s in registry.specs()} == {"find_tools"}
+    assert {s.name for s in registry.all_specs()} == {
+        "find_tools",
+        "mcp:gitlab.read_pr",
+        "mcp:gitlab.post_comment",
+    }
 
 
 @pytest.mark.asyncio
@@ -147,7 +154,9 @@ async def test_mcp_allow_tools_filters() -> None:
     registry = await build_tool_registry(
         [MCPToolSpec(allow_tools=["read_pr"])], tool_env=ToolEnv(mcp_pool=pool)
     )
-    assert len(registry) == 1
+    # TE-6b — only read_pr registers (deferred); find_tools auto-added active.
+    assert {s.name for s in registry.specs()} == {"find_tools"}
+    assert {s.name for s in registry.all_specs()} == {"find_tools", "mcp:gitlab.read_pr"}
 
 
 async def _two_server_pool() -> MCPServerPool:
@@ -170,7 +179,13 @@ async def test_mcp_server_allowlist_empty_sees_all_servers() -> None:
     # Stream O Mini-ADR O-14 — empty allowlist (default) = no restriction.
     pool = await _two_server_pool()
     registry = await build_tool_registry([MCPToolSpec()], tool_env=ToolEnv(mcp_pool=pool))
-    assert len(registry) == 2
+    # TE-6b — both servers' tools register deferred; find_tools auto-added.
+    assert {s.name for s in registry.all_specs()} == {
+        "find_tools",
+        "mcp:gitlab.read_pr",
+        "mcp:linear.list_issues",
+    }
+    assert {s.name for s in registry.specs()} == {"find_tools"}
 
 
 @pytest.mark.asyncio
@@ -182,7 +197,9 @@ async def test_mcp_server_allowlist_hides_unlisted_servers() -> None:
         [MCPToolSpec()],
         tool_env=ToolEnv(mcp_pool=pool, mcp_allowlist=("gitlab",)),
     )
-    assert len(registry) == 1
+    # TE-6b — gitlab's tool registers deferred (dispatchable via get), linear
+    # is hidden by the allowlist; find_tools auto-added active.
+    assert {s.name for s in registry.all_specs()} == {"find_tools", "mcp:gitlab.read_pr"}
     assert registry.get("mcp:gitlab.read_pr") is not None
     assert registry.get("mcp:linear.list_issues") is None
 

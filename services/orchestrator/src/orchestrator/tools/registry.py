@@ -408,6 +408,13 @@ class ToolRegistry:
             if pattern.search(spec.name) or pattern.search(spec.description)
         ]
 
+    def has_deferred(self) -> bool:
+        """Whether any tool is registered deferred (Stream TE-6).
+
+        The assembler uses this to auto-register ``find_tools`` only when
+        there is something to discover (TE-6b)."""
+        return bool(self._deferred)
+
     def __contains__(self, name: object) -> bool:
         return isinstance(name, str) and name in self._tools
 

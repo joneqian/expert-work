@@ -35,6 +35,7 @@ from orchestrator.multimodal import ImageResolver
 from orchestrator.tools.approval import AskForApprovalTool
 from orchestrator.tools.artifact import ListArtifactsTool, SaveArtifactTool
 from orchestrator.tools.bash import BashTool
+from orchestrator.tools.find_tools import FindToolsTool
 from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.knowledge import KnowledgeRetriever, KnowledgeSearchTool
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
@@ -163,6 +164,14 @@ async def build_tool_registry(
     _register_subagents(registry, subagents, tool_env, subagent_depth)
     _register_knowledge_search(registry, knowledge, tool_env)
     _register_ask_image(registry, vision, tool_env, vl_caller)
+    # Stream TE-6b — MCP tools register deferred (deer-flow's always-defer-MCP
+    # policy, the Context-Bloat fix). Add the ``find_tools`` meta-tool so the
+    # model can retrieve them on demand — but only when there IS something
+    # deferred, so a no-MCP agent's tool set is byte-identical to pre-TE-6.
+    # ``find_tools`` is registered active (never deferred), so the discovery
+    # entry point is always reachable.
+    if registry.has_deferred():
+        registry.register(FindToolsTool(registry=registry))
     return registry
 
 
@@ -357,7 +366,11 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
             if client is None:  # pragma: no cover - name came from names()
                 continue
             await register_mcp_tools(
-                server_name=server_name, client=client, registry=registry, allow_tools=allow
+                server_name=server_name,
+                client=client,
+                registry=registry,
+                allow_tools=allow,
+                deferred=True,
             )
             # Platform reserves the server NAME unconditionally — even if
             # allow_tools filtered out all its tools this build — so a tenant
@@ -381,6 +394,10 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
             if client is None:  # pragma: no cover
                 continue
             await register_mcp_tools(
-                server_name=server_name, client=client, registry=registry, allow_tools=allow
+                server_name=server_name,
+                client=client,
+                registry=registry,
+                allow_tools=allow,
+                deferred=True,
             )
             registered_servers.add(server_name)

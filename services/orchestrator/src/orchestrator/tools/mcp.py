@@ -669,12 +669,19 @@ async def register_mcp_tools(
     registry: ToolRegistry,
     content_char_cap: int = DEFAULT_MCP_CHAR_CAP,
     allow_tools: Collection[str] | None = None,
+    deferred: bool = False,
 ) -> list[str]:
     """List tools from ``client`` and register each as :class:`MCPTool`.
 
     ``allow_tools`` optionally filters by the server-advertised (bare)
     tool name — ``None`` registers every tool, a set registers only the
     listed ones (the manifest's ``MCPToolSpec.allow_tools``).
+
+    ``deferred`` (Stream TE-6b) registers each MCP tool deferred — absent
+    from the per-turn LLM bind until the model retrieves it via
+    ``find_tools``. MCP servers are the main Context-Bloat source (one
+    server can advertise dozens of verbose tool schemas), so the assembler
+    passes ``deferred=True`` (deer-flow's always-defer-MCP policy).
 
     Returns the namespaced names registered, useful for audit
     attribution at orchestrator startup.
@@ -690,7 +697,7 @@ async def register_mcp_tools(
             server_name=server_name,
             content_char_cap=content_char_cap,
         )
-        registry.register(helix_tool)
+        registry.register(helix_tool, deferred=deferred)
         registered.append(helix_tool.spec.name)
     logger.info("mcp.registered server=%s tools=%s", server_name, registered)
     return registered
