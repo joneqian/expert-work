@@ -68,12 +68,14 @@ from orchestrator.tools import (
     MCPClient,
     MCPServerConfig,
     MCPServerPool,
+    NullWorkspaceLock,
     Reranker,
     SseMCPClient,
     StdioMCPClient,
     StreamableHttpMCPClient,
     SupervisorClient,
     TavilyClient,
+    WorkspaceLock,
 )
 
 
@@ -764,6 +766,7 @@ def build_tool_env(
     artifact_store: ArtifactStore | None = None,
     knowledge_retriever: KnowledgeRetriever | None = None,
     image_resolver: ImageResolver | None = None,
+    workspace_lock: WorkspaceLock | None = None,
 ) -> ToolEnv:
     """Assemble the M0 :class:`ToolEnv`.
 
@@ -782,6 +785,7 @@ def build_tool_env(
         artifact_store=artifact_store,
         knowledge_retriever=knowledge_retriever,
         image_resolver=image_resolver,
+        workspace_lock=workspace_lock or NullWorkspaceLock(),
     )
 
 

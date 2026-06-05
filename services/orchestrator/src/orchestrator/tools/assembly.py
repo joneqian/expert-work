@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from helix_agent.persistence import ArtifactStore
@@ -39,6 +39,7 @@ from orchestrator.tools.file_ops import ListDirTool, ReadFileTool, WriteFileTool
 from orchestrator.tools.find_tools import FindToolsTool
 from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.knowledge import KnowledgeRetriever, KnowledgeSearchTool
+from orchestrator.tools.locks import NullWorkspaceLock, WorkspaceLock
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
 from orchestrator.tools.registry import ToolRegistry
 from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
@@ -125,6 +126,11 @@ class ToolEnv:
     #: keeps sub-agent runs silent — the parent run's own trajectory still
     #: records via the orchestrator's SSE worker.
     trajectory_recorder: TrajectoryRecorder | None = None
+    #: Stream TE-8 — cross-replica per-workspace write lock held around
+    #: ``write_file`` / ``bash`` writes. Defaults to the no-op
+    #: :class:`NullWorkspaceLock` (single process / tests); the control plane
+    #: injects a Postgres advisory-lock implementation in production.
+    workspace_lock: WorkspaceLock = field(default_factory=NullWorkspaceLock)
 
 
 async def build_tool_registry(
@@ -335,6 +341,7 @@ def _register_bash(registry: ToolRegistry, env: ToolEnv, persistent_workspace: b
         BashTool(
             client=env.supervisor_client,
             persistent_workspace=persistent_workspace,
+            workspace_lock=env.workspace_lock,
         )
     )
 
@@ -355,7 +362,11 @@ def _register_file_op(
         )
     elif name == "write_file":
         registry.register(
-            WriteFileTool(client=env.supervisor_client, persistent_workspace=persistent_workspace)
+            WriteFileTool(
+                client=env.supervisor_client,
+                persistent_workspace=persistent_workspace,
+                workspace_lock=env.workspace_lock,
+            )
         )
     else:  # list_dir
         registry.register(

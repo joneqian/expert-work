@@ -66,6 +66,15 @@ from orchestrator.tools.knowledge import (
 from orchestrator.tools.knowledge import (
     RetrievedChunk as RetrievedChunk,
 )
+from orchestrator.tools.locks import (
+    NullWorkspaceLock as NullWorkspaceLock,
+)
+from orchestrator.tools.locks import (
+    RecordingWorkspaceLock as RecordingWorkspaceLock,
+)
+from orchestrator.tools.locks import (
+    WorkspaceLock as WorkspaceLock,
+)
 from orchestrator.tools.mcp import (
     DEFAULT_MAX_SERVERS as DEFAULT_MAX_SERVERS,
 )
@@ -213,10 +222,12 @@ __all__ = [
     "MCPServerPoolLimitError",
     "MCPTool",
     "MCPToolDef",
+    "NullWorkspaceLock",
     "ReadFileTool",
     "RecordingMCPClient",
     "RecordingSupervisorClient",
     "RecordingTavilyClient",
+    "RecordingWorkspaceLock",
     "Reranker",
     "RetrievedChunk",
     "SandboxOutcome",
@@ -235,6 +246,7 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "WebSearchTool",
+    "WorkspaceLock",
     "WriteFileTool",
     "build_tool_registry",
     "register_mcp_tools",

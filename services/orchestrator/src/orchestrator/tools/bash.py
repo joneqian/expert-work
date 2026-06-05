@@ -31,9 +31,10 @@ to be listed in the manifest's ``approval_required_tools``).
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
+from orchestrator.tools.locks import NullWorkspaceLock, WorkspaceLock
 from orchestrator.tools.registry import ToolContext, ToolResult, ToolSpec
 from orchestrator.tools.sandbox import (
     DEFAULT_OUTPUT_CHAR_CAP,
@@ -77,6 +78,9 @@ class BashTool:
     #: volume when ``True`` and the run is user-scoped, so files written by
     #: a command survive across runs. Set from ``SandboxSpec.filesystem``.
     persistent_workspace: bool = False
+    #: Stream TE-8 — cross-replica per-workspace write lock. bash can write
+    #: anything, so it takes the same exclusive workspace lock as write_file.
+    workspace_lock: WorkspaceLock = field(default_factory=NullWorkspaceLock)
 
     @property
     def spec(self) -> ToolSpec:
@@ -115,15 +119,19 @@ class BashTool:
     async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
         command = self._require_command(args)
         timeout_s = coerce_timeout(args.get("timeout_s"))
-        outcome = await run_in_sandbox(
-            self.client,
-            code=_build_wrapper(command),
-            timeout_s=timeout_s,
-            ctx=ctx,
-            persistent_workspace=self.persistent_workspace,
-            tool_label="bash",
-            fallback_thread_id=_FALLBACK_THREAD_ID,
-        )
+        # Stream TE-8 — hold the per-workspace write lock around the command so
+        # bash serialises against write_file (and other bash) across replicas.
+        lock_user = ctx.user_id if self.persistent_workspace else None
+        async with self.workspace_lock.acquire(tenant_id=ctx.tenant_id, user_id=lock_user):
+            outcome = await run_in_sandbox(
+                self.client,
+                code=_build_wrapper(command),
+                timeout_s=timeout_s,
+                ctx=ctx,
+                persistent_workspace=self.persistent_workspace,
+                tool_label="bash",
+                fallback_thread_id=_FALLBACK_THREAD_ID,
+            )
         return format_sandbox_outcome(outcome, self.output_char_cap)
 
     def _require_command(self, args: Mapping[str, Any]) -> str:

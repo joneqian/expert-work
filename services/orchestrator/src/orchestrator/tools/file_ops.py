@@ -41,10 +41,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any
 
+from orchestrator.tools.locks import NullWorkspaceLock, WorkspaceLock
 from orchestrator.tools.registry import (
     ToolBlockedError,
     ToolContext,
@@ -375,6 +376,9 @@ class WriteFileTool:
 
     client: SupervisorClient
     persistent_workspace: bool = False
+    #: Stream TE-8 — cross-replica per-workspace write lock held around the
+    #: write exec. Defaults to a no-op (single process / tests).
+    workspace_lock: WorkspaceLock = field(default_factory=NullWorkspaceLock)
 
     @property
     def spec(self) -> ToolSpec:
@@ -414,15 +418,20 @@ class WriteFileTool:
         if len(content) > _MAX_WRITE_CHARS:
             msg = f"write_file content exceeds the {_MAX_WRITE_CHARS}-character limit"
             raise ValueError(msg)
-        outcome = await run_in_sandbox(
-            self.client,
-            code=build_write_wrapper(rel, content),
-            timeout_s=None,
-            ctx=ctx,
-            persistent_workspace=self.persistent_workspace,
-            tool_label="write_file",
-            fallback_thread_id="write_file",
-        )
+        # Stream TE-8 — hold the per-workspace write lock around the write exec
+        # so concurrent writes (and bash) across replicas serialise. Only a
+        # persistent workspace is shared; an ephemeral one needs no lock.
+        lock_user = ctx.user_id if self.persistent_workspace else None
+        async with self.workspace_lock.acquire(tenant_id=ctx.tenant_id, user_id=lock_user):
+            outcome = await run_in_sandbox(
+                self.client,
+                code=build_write_wrapper(rel, content),
+                timeout_s=None,
+                ctx=ctx,
+                persistent_workspace=self.persistent_workspace,
+                tool_label="write_file",
+                fallback_thread_id="write_file",
+            )
         env = parse_envelope(outcome, tool="write_file")
         _raise_for_error(env, tool="write_file")
         size = env.get("size")

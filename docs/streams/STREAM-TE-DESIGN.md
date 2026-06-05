@@ -53,7 +53,9 @@
 - **决策**(据 §0.3 + 2026-06-05 粒度复议):**写**操作(文件原语 + bash)在 orchestrator 侧开 DB 事务 → `pg_advisory_xact_lock(hashtextextended("{tenant_id}:{user_id}", 0))`(**per-workspace 单锁**)→ 锁内调 `run_in_sandbox` 跑写 exec → 提交事务自动释放(事务级,合规 `infra/README.md:103`,镜像 `event_log/db.py:51-63` `_acquire_thread_lock`)。
 - **为何 per-workspace 而非 per-path**:`bash`(`side_effect=irreversible`)无 path 参数、无法静态解析读写集;PG advisory 按**精确 hash 互斥且无共享读锁**,故 per-path 锁无法干净覆盖 bash 与文件写的互斥(全局 key 与 path key 的 hash 不同→不互斥)。per-workspace 单锁让 bash 与所有文件写**自然互斥**,绝对正确且简单。代价:同 user 跨副本/跨 run 写不同文件也串行——但同 turn 内 `scheduling.py` 已串行写、per-user workspace(单 agent 实例为主)并发写本就极低,损失几乎不存在,契合"读多写少"。(2026-06-05 AskUserQuestion 复议拍板,反转初稿 per-canonical-path)
 - **读无锁 + 原子写消除"读串行"限制**:写 exec 用**临时文件 + `os.replace` 原子 rename**;原子 rename 保证读永远看到完整的旧/新快照,故**读/list 完全不取锁、永远并发**。advisory 仅排他无共享读锁的限制因此不影响读。
-- **锁横跨 exec 的诚实代价**:一个 DB 连接被占用在整个写 exec 期间(acquire+exec,通常几百 ms);受 `idle_in_transaction_session_timeout=60s`/`lock_timeout=5s` 约束,写 exec timeout ≤30s 安全;写不高频,连接池压力可接受。RED 集成测验证并发写不交错。
+- **锁横跨 exec 的诚实代价 + 超时修正(评审发现)**:持锁事务在整个写 exec(acquire+exec,bash 可达 300s)期间 idle-in-transaction。初稿误判"≤30s 安全"——实际 per-DB 默认 `idle_in_transaction_session_timeout=60s` 会**杀掉超 60s 的持锁事务→advisory 提前释放→跨副本互斥失效**,`statement_timeout=30s` 也会让等锁的 SELECT 超 30s 失败。修复:取锁事务内 `SET LOCAL idle_in_transaction_session_timeout / statement_timeout = 360000`(>bash 300s,txn 级自动还原,PgBouncer 安全)。
+- **advisory key space 隔离(评审发现)**:用**双参** `pg_advisory_xact_lock(classid=1, hashtext(key))`,与 event_log 的单参 64-bit 空间结构性分离,杜绝跨子系统键碰撞误互斥。
+- **连接池容量(已知耦合,follow-up)**:每个持久写占一个 DB 连接整个 exec 期间(≤360s 上限 bound),高并发持久写会压 PgBouncer pool;现为共享主 engine,follow-up 评估独立 pool/直连隔离 + 告警。RED 集成测验证并发写不交错。
 - **path 归一化(服务越界防护/CAS,非锁 key)**:锁 key 只含 `tenant:user`;文件原语仍需 `PurePosixPath` 归一化路径(拒绝绝对路径 / `..`,与 `artifact.py:_validate_path`、`scheduling.py` 一致)+ 沙箱内 `os.path.realpath` confinement 防 symlink 越界(校验落在 `/workspace` 内)。这些用于越界防护与 CAS hash,不参与锁。
 
 ### TE-ADR-4 tool RAG(deferred registry + find_tools)对标 deer-flow

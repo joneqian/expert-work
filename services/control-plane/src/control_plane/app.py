@@ -148,6 +148,7 @@ from control_plane.subagent_runtime import make_child_agent_builder
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolService
 from control_plane.tenant_status import TenantStatusService
+from control_plane.workspace_lock import PgWorkspaceLock
 from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
@@ -785,6 +786,14 @@ def create_app(
                     artifact_store=resolved_artifact_store,
                     knowledge_retriever=knowledge_retriever,
                     image_resolver=image_resolver,
+                    # Stream TE-8 — cross-replica per-workspace write lock for
+                    # write_file / bash. A raw (non-RLS) sessionmaker: the
+                    # advisory lock touches no tenant tables.
+                    workspace_lock=(
+                        PgWorkspaceLock(create_async_session_factory(sql_stores.engine))
+                        if sql_stores is not None
+                        else None
+                    ),
                 )
                 middleware_env = build_middleware_env(
                     token_usage_store=resolved_token_usage,
