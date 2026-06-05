@@ -63,7 +63,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from helix_agent.common.observability import helix_counter
+from helix_agent.common.observability import helix_counter, helix_histogram
 from helix_agent.common.uplift_metrics import record_memory_inject_mode
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, MemoryItem, Plan
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -113,6 +113,28 @@ _tools_dispatched_total = helix_counter(
         "Individual tool calls dispatched within L6 stages — divide by "
         "stages to get average concurrency."
     ),
+)
+
+# Stream TE-3 — per-tool observability. ``outcome`` is one of ``ok`` (tool
+# returned a non-error result), ``error`` (tool raised / returned an error /
+# unknown tool), or ``blocked`` (a pre-dispatch middleware refused the call).
+# A separate ``helix_tool_error_total`` would be redundant: errors are exactly
+# ``helix_tool_call_total{outcome="error"}`` + ``{outcome="blocked"}``.
+# Cardinality: ``outcome`` is a fixed 3-value set; the ``tool`` label is
+# normalised by ``_metric_tool_label`` so externally-defined MCP tool names
+# (``mcp:<server>.<tool>`` — a single server can expose dozens) collapse to
+# ``mcp:<server>`` and never blow up the series count. tenant / call_id are
+# deliberately omitted — those unbounded identifiers live in the TE-2 audit row.
+_tool_call_total = helix_counter(
+    "helix_tool_call_total",
+    "Tool dispatches by tool name and outcome (ok / error / blocked).",
+    ("tool", "outcome"),
+)
+_tool_latency_seconds = helix_histogram(
+    "helix_tool_latency_seconds",
+    "Wall-clock seconds per tool dispatch, labelled by tool name.",
+    ("tool",),
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
 )
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
@@ -702,6 +724,7 @@ async def _dispatch_tool(
         tool = registry.get_required(name)
         outcome = await _invoke_tool(tool, args, call_id, ctx)
         ok = outcome[0].status != "error"
+        _record_tool_metrics(name, started, "ok" if ok else "error")
         await _emit_tool_audit(
             audit_logger,
             ctx,
@@ -718,6 +741,7 @@ async def _dispatch_tool(
         return outcome
     except ToolNotFoundError as exc:
         logger.warning("tools.unknown_tool name=%s call_id=%s", name, call_id)
+        _record_tool_metrics(name, started, "error")
         await _emit_tool_audit(
             audit_logger,
             ctx,
@@ -750,6 +774,7 @@ async def _dispatch_tool(
             call_id,
             type(exc).__name__,
         )
+        _record_tool_metrics(name, started, "blocked")
         await _emit_tool_audit(
             audit_logger,
             ctx,
@@ -777,6 +802,36 @@ async def _dispatch_tool(
 def _elapsed_ms(started: float) -> int:
     """Whole milliseconds elapsed since a ``time.monotonic`` timestamp."""
     return int((time.monotonic() - started) * 1000)
+
+
+def _metric_tool_label(name: str) -> str:
+    """Bound the ``tool`` metric label (Stream TE-3).
+
+    MCP tool names are server-defined (``mcp:<server>.<tool>``) and thus
+    not bounded by anything we author — one server can expose dozens of
+    tools. Collapse them to ``mcp:<server>`` so the label stays bounded by
+    the (catalog-curated, pool-capped) server set. The exact tool name is
+    still recorded in the TE-2 audit row, the right home for unbounded
+    identifiers. Builtin / manifest-authored HTTP / skill tool names are
+    human-authored and finite-per-config, so they pass through unchanged.
+    """
+    if name.startswith("mcp:"):
+        return name.split(".", 1)[0]
+    return name
+
+
+def _record_tool_metrics(name: str, started: float, outcome: str) -> None:
+    """Emit per-tool Prometheus metrics for one dispatch (Stream TE-3).
+
+    Unconditional (unlike the audit emit, which needs a tenant): every
+    dispatch increments ``helix_tool_call_total{tool,outcome}`` and
+    observes ``helix_tool_latency_seconds{tool}``. ``outcome`` is one of
+    ``ok`` / ``error`` / ``blocked``; ``tool`` is normalised for cardinality
+    via :func:`_metric_tool_label`.
+    """
+    label = _metric_tool_label(name)
+    _tool_call_total.labels(tool=label, outcome=outcome).inc()
+    _tool_latency_seconds.labels(tool=label).observe(time.monotonic() - started)
 
 
 async def _emit_tool_audit(
