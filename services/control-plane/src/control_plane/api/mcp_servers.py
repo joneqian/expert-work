@@ -250,7 +250,9 @@ async def _record_health(
             error=error,
         )
     except Exception:
-        logger.warning("mcp_server.health_record_failed name=%s status=%s", name, status)
+        # Don't log the request-derived server name (CodeQL py/log-injection);
+        # status is a fixed enum and the trace context carries the rest.
+        logger.warning("mcp_server.health_record_failed status=%s", status)
         return None
 
 
