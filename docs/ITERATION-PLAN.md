@@ -921,6 +921,21 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **关键路径** W0→W1→W2→W3→W4→W5。**完成 = system_admin 维护连接器目录，租户从目录实例化（含 premium 档位门控）并在 agent 里使用**；entitlement 地基（tier_satisfies）就绪供 X/Y/Z 复用。
 
+### Stream MCP-OAUTH — per-user OAuth 2.1 连接器（解锁 OAuth-only 托管 MCP）— 设计 [STREAM-MCP-OAUTH-DESIGN](./streams/STREAM-MCP-OAUTH-DESIGN.md)
+
+**触发（2026-06-06）**：审计后盘点 MCP 生态发现最热门的 SaaS 连接器（Notion/Linear/Jira/Confluence/Sentry/Asana）托管端点**只支持交互式 OAuth 2.1 授权码流程**，现有 catalog 只认 `none/bearer` 全挡在门外。**用户拍板**：授权主体 = **per-user**；首个端到端验证 = **Linear**。规范化实现 OAuth 2.1 + PKCE + 元数据发现（RFC 9728/8414）。
+
+- [x] **OA-0 设计先行**：STREAM-MCP-OAUTH-DESIGN + 本 backlog（per-user / Linear-first / 6 阶段 / Mini-ADR OA-1~OA-6）
+- [x] **OA-1a catalog OAuth 基础**：`CatalogAuthType += "oauth2"`（auth_schema 校验:oauth2 无 secret 字段 + 必须 `oauth_client_id`）+ catalog `oauth_client_id`/`oauth_scopes` 列（DTO/ORM/store 三层）+ 迁移 `0062_mcp_catalog_oauth`（加列 + auth_type CHECK 扩 oauth2）；protocol + memory store 单测。无 control-plane 重声明（单源 protocol）
+- [ ] **OA-1b 连接表**：`mcp_oauth_connection`（per-(tenant,user,catalog) + token ref + status）model/store/migration（RLS 租户隔离 + 行内 user_id 过滤）
+- [ ] **OA-2 OAuth 引擎**：PRM/authz 发现 + PKCE + initiate/callback + token 交换 + refresh（纯逻辑 + secret 存储）
+- [ ] **OA-3 Linear 垂直切片**：catalog 加 Linear(oauth2) + per-user pool 解析 + `_build_mcp_client` oauth2 分支 + 端到端
+- [ ] **OA-4 per-user pool 维度** + 连接管理端点（list/disconnect）+ 状态可观测
+- [ ] **OA-5 扩连接器**：Notion/Jira/Sentry/Asana 进 catalog（复用引擎）
+- [ ] **OA-6 刷新/UX 硬化**：后台预刷新 + 撤销处理 + 过期提示 + 审计/metrics
+
+**关键路径** OA-0→OA-1a→OA-1b→OA-2→OA-3（首连接器端到端）→OA-4→OA-5→OA-6。**out-of-scope**：per-tenant 共享连接、DCR/CIMD（用静态预注册 client_id）。
+
 ### Stream X — Platform Skill Library（平台精选库 + 租户自建，混合）— 设计 [STREAM-X-DESIGN](./streams/STREAM-X-DESIGN.md)
 
 平台发布精选 skill 库（`tenant_id NULL`，可 premium），租户继续自建；manifest 同时可绑平台/租户 skill。复用 W 的 `tier_satisfies`、Stream U 的 moderation/curator。**关键发现**：skill resolver 当前**未接入 agent build**（Stream U 遗留缺口，app.py:972 TODO）→ 租户 skill 运行时也未生效；X3 首次接线（租户+平台），属行为变更。

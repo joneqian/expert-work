@@ -44,6 +44,10 @@ class McpConnectorCatalogRow(Base):
     auth_schema: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # Stream MCP-OAUTH — platform-registered OAuth app for an ``oauth2`` entry
+    # (NULL for none/bearer). ``oauth_scopes`` is space-separated.
+    oauth_client_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    oauth_scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
     required_tier: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(

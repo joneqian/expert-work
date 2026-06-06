@@ -90,6 +90,52 @@ def test_none_auth_with_secret_field_rejected() -> None:
         _record(auth_type="none", auth_schema=one_secret)
 
 
+# --- Stream MCP-OAUTH (OA-1a) — oauth2 catalog auth type --------------------
+
+
+def test_valid_oauth2_record() -> None:
+    rec = _record(
+        auth_type="oauth2",
+        auth_schema=McpConnectorAuthSchema(),
+        oauth_client_id="helix-linear-app",
+        oauth_scopes="read write",
+    )
+    assert rec.auth_type == "oauth2"
+    assert rec.oauth_client_id == "helix-linear-app"
+    assert rec.oauth_scopes == "read write"
+
+
+def test_oauth2_requires_client_id() -> None:
+    with pytest.raises(ValueError, match=r"oauth2.*requires oauth_client_id"):
+        _record(auth_type="oauth2", auth_schema=McpConnectorAuthSchema())
+
+
+def test_oauth2_with_secret_field_rejected() -> None:
+    one_secret = McpConnectorAuthSchema(
+        fields=[McpConnectorAuthField(key="t", label="T", kind="secret")]
+    )
+    with pytest.raises(ValueError, match=r"oauth2.*must not declare secret fields"):
+        _record(
+            auth_type="oauth2",
+            auth_schema=one_secret,
+            oauth_client_id="helix-linear-app",
+        )
+
+
+def test_upsert_oauth2_round_trips() -> None:
+    up = McpConnectorCatalogUpsert(
+        name="linear",
+        display_name="Linear",
+        transport="sse",
+        url_template="https://mcp.linear.app/sse",
+        auth_type="oauth2",
+        oauth_client_id="helix-linear-app",
+        oauth_scopes="read",
+    )
+    assert up.auth_type == "oauth2"
+    assert up.oauth_client_id == "helix-linear-app"
+
+
 def test_duplicate_auth_field_keys_rejected() -> None:
     with pytest.raises(ValueError, match="field keys must be unique"):
         McpConnectorAuthSchema(

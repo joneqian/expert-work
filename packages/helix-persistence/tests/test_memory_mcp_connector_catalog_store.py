@@ -72,6 +72,27 @@ async def test_auth_schema_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_oauth2_fields_round_trip() -> None:
+    """Stream MCP-OAUTH (OA-1a): oauth_client_id / oauth_scopes survive the store."""
+    store = InMemoryMcpConnectorCatalogStore()
+    created = await _make(
+        store,
+        name="linear",
+        transport="sse",
+        url_template="https://mcp.linear.app/sse",
+        auth_type="oauth2",
+        auth_schema=McpConnectorAuthSchema(),
+        oauth_client_id="helix-linear-app",
+        oauth_scopes="read write",
+    )
+    fetched = await store.get_by_id(created.id)
+    assert fetched is not None
+    assert fetched.auth_type == "oauth2"
+    assert fetched.oauth_client_id == "helix-linear-app"
+    assert fetched.oauth_scopes == "read write"
+
+
+@pytest.mark.asyncio
 async def test_get_by_name() -> None:
     store = InMemoryMcpConnectorCatalogStore()
     await _make(store)
