@@ -30,6 +30,7 @@ from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
 from control_plane.tenant_scope import bypass_rls_session
 from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
 from helix_agent.common.skill_activity import SkillActivityRecorder
+from helix_agent.common.url_validation import validate_remote_url
 from helix_agent.persistence import ArtifactStore, KnowledgeStore
 from helix_agent.persistence.skill import SkillStore
 from helix_agent.persistence.token_usage_store import TokenUsageStore
@@ -119,6 +120,10 @@ class AgentRuntime:
     #: :class:`InMemoryRunEventStore` (dev) or :class:`SqlRunEventStore`.
     run_event_store: RunEventStore | None = None
     _cache: dict[tuple[UUID, str, str], BuiltAgent] = field(default_factory=dict, repr=False)
+    #: Extra per-tenant cache invalidators fanned out by ``invalidate_tenant``
+    #: — the sub-agent builder registers its own cache here (Stream V-D, audit
+    #: #1) since it caches built agents independently of ``_cache``.
+    _invalidation_hooks: list[Callable[[UUID], None]] = field(default_factory=list, repr=False)
 
     async def get_agent(
         self,
@@ -142,15 +147,27 @@ class AgentRuntime:
         self._cache[key] = built
         return built
 
+    def register_invalidation_hook(self, hook: Callable[[UUID], None]) -> None:
+        """Register an extra per-tenant cache invalidator (Stream V-D, audit #1).
+
+        The sub-agent builder caches built agents independently of ``_cache``;
+        registering its invalidator here keeps the delegation path coherent with
+        the top-level cache when a tenant's MCP registry changes.
+        """
+        self._invalidation_hooks.append(hook)
+
     def invalidate_tenant(self, tenant_id: UUID) -> None:
         """Drop every cached built-agent for ``tenant_id``.
 
         Called when the tenant's MCP server registry changes so the next run
         rebuilds the agent against the refreshed tenant MCP pool (Stream V-D).
-        The cache key is ``(tenant_id, name, version)``.
+        The cache key is ``(tenant_id, name, version)``. Registered hooks
+        (e.g. the sub-agent builder cache) are fanned out too.
         """
         for key in [k for k in self._cache if k[0] == tenant_id]:
             del self._cache[key]
+        for hook in self._invalidation_hooks:
+            hook(tenant_id)
 
 
 def make_provider_key_resolver(
@@ -700,6 +717,14 @@ async def _build_mcp_client(
         token_ref = config.auth_config["token_ref"]
         token = await secret_store.get(parse_secret_ref(token_ref))
         resolved_headers["Authorization"] = f"Bearer {token}"
+
+    # Re-validate at the connect-out site (audit #4) so registration, probe,
+    # and runtime share one gate — a row that ever reached the DB unvalidated
+    # cannot be dialed. NOTE: the guard is static (no DNS resolution), so it
+    # does not by itself defeat DNS rebinding; pinning the resolved IP is a
+    # separate follow-up.
+    if config.url is not None:
+        validate_remote_url(config.url)
 
     remote: SseMCPClient | StreamableHttpMCPClient
     if config.transport == "sse":

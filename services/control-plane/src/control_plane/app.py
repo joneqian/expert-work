@@ -393,6 +393,12 @@ def create_app(
     resolved_tenant_limiter = tenant_rate_limiter or _build_default_tenant_limiter(
         resolved_settings
     )
+    # Dedicated tight bucket for MCP probe-bearing endpoints (audit #6).
+    resolved_mcp_probe_limiter = (
+        _build_mcp_probe_limiter(resolved_settings)
+        if resolved_settings.tenant_rate_limit_enabled
+        else None
+    )
     resolved_repo = agent_spec_repo or (
         sql_stores.agent_spec if sql_stores else InMemoryAgentSpecStore()
     )
@@ -826,6 +832,9 @@ def create_app(
                     skill_store=resolved_skill_store,
                     skill_activity_recorder=skill_activity_recorder,
                     tenant_config_service=resolved_tenant_config_service,
+                    # Stream V-D (audit #1) — evict cached sub-agents when a
+                    # tenant's MCP registry changes, like the top-level cache.
+                    register_invalidation=resolved_agent_runtime.register_invalidation_hook,
                 )
                 resolved_agent_runtime.agent_builder = make_agent_builder(
                     resolved_secret_store,
@@ -987,6 +996,7 @@ def create_app(
     app.state.db_engine = sql_stores.engine if sql_stores else None
     app.state.health_provider = health_provider
     app.state.rate_limiter = resolved_limiter
+    app.state.mcp_probe_limiter = resolved_mcp_probe_limiter
     app.state.tenant_rate_limiter = resolved_tenant_limiter
     app.state.agent_spec_repo = resolved_repo
     app.state.thread_meta_repo = resolved_threads
@@ -1471,6 +1481,32 @@ def _build_default_tenant_limiter(settings: Settings) -> RateLimiter:
     return InProcessTokenBucketLimiter(
         capacity=settings.tenant_rate_limit_capacity,
         refill_per_sec=settings.tenant_rate_limit_refill_per_sec,
+    )
+
+
+def _build_mcp_probe_limiter(settings: Settings) -> RateLimiter:
+    """Tight per-tenant limiter for MCP probe-bearing endpoints (audit #6).
+
+    Mirrors the tenant-tier impl selection (Redis multi-replica / in-process
+    single-replica) but with a much smaller bucket — these endpoints each open
+    a server-side outbound connection to a tenant-chosen URL.
+    """
+    if not settings.single_instance and settings.quota_redis_url:
+        import redis.asyncio as redis_async
+
+        client = redis_async.from_url(
+            settings.quota_redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+        )
+        return RedisTokenBucketLimiter(
+            redis_client=client,
+            capacity=settings.mcp_probe_rate_limit_capacity,
+            refill_per_sec=settings.mcp_probe_rate_limit_refill_per_sec,
+        )
+    return InProcessTokenBucketLimiter(
+        capacity=settings.mcp_probe_rate_limit_capacity,
+        refill_per_sec=settings.mcp_probe_rate_limit_refill_per_sec,
     )
 
 

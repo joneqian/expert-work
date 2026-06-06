@@ -509,3 +509,43 @@ async def test_patch_invalidates_tenant_mcp_cache(
 
     assert pool_spy.invalidated.count(tenant_id) == 1
     assert rt_spy.invalidated.count(tenant_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_probe_endpoints_have_dedicated_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Audit #6: probe-bearing endpoints draw on a tight dedicated bucket — a
+    second probe past the (capacity-1) bucket is 429'd before the outbound call."""
+    lifecycle = Lifecycle()
+    lifecycle.mark_ready()
+    settings = Settings(
+        service_name="control_plane_test",
+        env="dev",
+        auth_mode="dev",
+        db_dsn="postgresql+asyncpg://test@localhost/test",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+        # Tight probe bucket: 1 token, near-zero refill so the 2nd call is denied.
+        mcp_probe_rate_limit_capacity=1,
+        mcp_probe_rate_limit_refill_per_sec=0.001,
+    )
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=build_test_jwt_verifier())
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    token = make_test_jwt(tenant_id=uuid4(), subject=str(uuid4()), roles=("admin",))
+    headers = {"Authorization": f"Bearer {token}"}
+    body = {
+        "transport": "streamable_http",
+        "url": "https://mcp.example.com/mcp",
+        "auth_type": "none",
+        "timeout_s": 30.0,
+    }
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        r1 = await client.post("/v1/mcp-servers/test", json=body, headers=headers)
+        r2 = await client.post("/v1/mcp-servers/test", json=body, headers=headers)
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 429
+    assert r2.json()["detail"]["code"] == "MCP_PROBE_RATE_LIMITED"

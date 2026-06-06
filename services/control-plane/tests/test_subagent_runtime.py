@@ -152,6 +152,45 @@ async def test_unknown_agent_ref_raises(build_calls: list[dict[str, Any]]) -> No
 
 
 @pytest.mark.asyncio
+async def test_register_invalidation_clears_subagent_cache(
+    build_calls: list[dict[str, Any]],
+) -> None:
+    """Audit #1: a registered invalidator evicts cached sub-agents for a tenant,
+    so a tenant MCP registry change rebuilds the delegated sub-agent (whose
+    ToolEnv would otherwise hold a now-closed tenant MCP pool)."""
+    tenant = uuid4()
+    other = uuid4()
+    store = InMemoryAgentSpecStore()
+    for tid in (tenant, other):
+        await store.create(
+            tenant_id=tid, spec=_spec("researcher"), spec_sha256=_SHA, created_by="test"
+        )
+
+    invalidators: list[Any] = []
+    builder = make_child_agent_builder(
+        spec_store=store,
+        secret_store=InMemorySecretStore(),
+        checkpointer=InMemorySaver(),
+        base_tool_env=ToolEnv(),
+        register_invalidation=invalidators.append,
+    )
+    # The builder registered exactly one invalidator with the runtime.
+    assert len(invalidators) == 1
+    invalidate = invalidators[0]
+
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+    await builder(tenant_id=other, name="researcher", version="1.0.0", depth=1)
+    assert len(build_calls) == 2
+
+    invalidate(tenant)  # evict only `tenant`'s cached sub-agents
+
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+    await builder(tenant_id=other, name="researcher", version="1.0.0", depth=1)
+    # `tenant` rebuilt (3rd build); `other` still cached (no 4th build).
+    assert len(build_calls) == 3
+
+
+@pytest.mark.asyncio
 async def test_soft_deleted_agent_ref_raises(build_calls: list[dict[str, Any]]) -> None:
     tenant = uuid4()
     store = InMemoryAgentSpecStore()

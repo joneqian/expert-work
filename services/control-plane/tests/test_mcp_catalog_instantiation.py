@@ -370,6 +370,35 @@ async def test_instantiate_param_host_pivot_rejected(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_instantiate_param_non_ascii_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit #8: a non-ASCII param (Unicode homoglyph such as U+3002 ideographic
+    full stop) is rejected before the probe — it could otherwise fold to ``.``
+    in the resolver and pivot the host past the ASCII blacklist."""
+    app, admin_headers, _ = await _make_app_with_admin()
+
+    async def _probe_must_not_run(**_kwargs: object) -> list[object]:
+        raise AssertionError("probe must not run for a rejected param value")
+
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _probe_must_not_run)
+    store = await _wire_catalog(app, plan=TenantPlan.FREE)
+    entry = await _seed_entry(
+        store,
+        name="sub2",
+        url_template="https://{org}.example.com/mcp",
+        fields=[McpConnectorAuthField(key="org", label="Org", kind="param")],
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            f"/v1/mcp-servers/catalog/{entry.id}/instances",
+            json={"params": {"org": "evil。com"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "MCP_CATALOG_PARAM_INVALID"
+
+
+@pytest.mark.asyncio
 async def test_instantiate_duplicate_name(monkeypatch: pytest.MonkeyPatch) -> None:
     app, admin_headers, _ = await _make_app_with_admin()
     monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)

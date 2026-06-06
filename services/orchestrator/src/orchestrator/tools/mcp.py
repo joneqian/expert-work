@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -66,6 +67,13 @@ DEFAULT_RETRY_MAX = 3
 # Mini-ADR U-13: per-server circuit breaker thresholds.
 DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5
 DEFAULT_CIRCUIT_WINDOW_S: float = 30 * 60  # 30 minutes
+# Defensive caps on a server-advertised tool list. A remote MCP server is
+# tenant-controlled and ``list_tools`` is materialised in-process (including in
+# the control-plane probe), so an unbounded response is a memory-exhaustion
+# vector (security audit #5). Cap the tool count and per-field size.
+DEFAULT_MAX_TOOLS_PER_SERVER = 256
+DEFAULT_MAX_TOOL_DESC_CHARS = 16_384
+DEFAULT_MAX_TOOL_SCHEMA_CHARS = 65_536
 _TRUNCATION_PREFIX = "...["
 _TRUNCATION_SUFFIX = " chars truncated]..."
 
@@ -203,6 +211,43 @@ class MCPCallResult:
     is_error: bool = False
 
 
+def _materialize_tool_defs(raw_tools: Sequence[Any], *, server: str) -> tuple[MCPToolDef, ...]:
+    """Map SDK tool objects to :class:`MCPToolDef` with defensive caps.
+
+    A remote MCP server is tenant-controlled and its ``list_tools`` response is
+    materialised in-process (notably in the control-plane probe), so an
+    unbounded reply is a memory-exhaustion vector. Cap the tool count and the
+    per-field size; oversized schemas are dropped rather than carried as
+    megabytes of attacker-controlled JSON (security audit #5).
+    """
+    defs: list[MCPToolDef] = []
+    for t in raw_tools:
+        if len(defs) >= DEFAULT_MAX_TOOLS_PER_SERVER:
+            logger.warning(
+                "mcp.tool_list_truncated server=%s cap=%d",
+                server,
+                DEFAULT_MAX_TOOLS_PER_SERVER,
+            )
+            break
+        description = str(getattr(t, "description", "") or "")
+        if len(description) > DEFAULT_MAX_TOOL_DESC_CHARS:
+            description = description[:DEFAULT_MAX_TOOL_DESC_CHARS]
+        schema = dict(getattr(t, "inputSchema", {}) or {})
+        try:
+            oversized = len(json.dumps(schema)) > DEFAULT_MAX_TOOL_SCHEMA_CHARS
+        except (TypeError, ValueError):
+            oversized = True
+        if oversized:
+            logger.warning(
+                "mcp.tool_schema_dropped server=%s tool=%s",
+                server,
+                getattr(t, "name", "?"),
+            )
+            schema = {}
+        defs.append(MCPToolDef(name=str(t.name), description=description, input_schema=schema))
+    return tuple(defs)
+
+
 # ---------------------------------------------------------------------------
 # Client protocol + impls
 # ---------------------------------------------------------------------------
@@ -327,14 +372,7 @@ class StdioMCPClient:
             msg = f"StdioMCPClient {self.config.name!r} not started"
             raise RuntimeError(msg)
         result = await self._session.list_tools()
-        return tuple(
-            MCPToolDef(
-                name=str(t.name),
-                description=str(getattr(t, "description", "") or ""),
-                input_schema=dict(getattr(t, "inputSchema", {}) or {}),
-            )
-            for t in result.tools
-        )
+        return _materialize_tool_defs(result.tools, server=self.config.name)
 
     async def call_tool(
         self,
@@ -344,7 +382,19 @@ class StdioMCPClient:
         if self._session is None:
             msg = f"StdioMCPClient {self.config.name!r} not started"
             raise RuntimeError(msg)
-        result = await self._session.call_tool(name, dict(args))
+        # Honor timeout_s like the remote transports do — a wedged stdio
+        # subprocess must not hang the agent run indefinitely (audit #7).
+        try:
+            result = await asyncio.wait_for(
+                self._session.call_tool(name, dict(args)),
+                timeout=self.config.timeout_s,
+            )
+        except TimeoutError as exc:
+            msg = (
+                f"mcp call timed out after {self.config.timeout_s}s "
+                f"on {self.config.name!r}:{name!r}"
+            )
+            raise MCPCallTimeoutError(msg) from exc
         return MCPCallResult(
             content=_render_content_blocks(result.content),
             is_error=bool(getattr(result, "isError", False)),
@@ -374,6 +424,12 @@ class _RemoteMCPClientBase:
     resolved_headers: Mapping[str, str] = field(default_factory=dict, repr=False)
     _stack: contextlib.AsyncExitStack | None = field(default=None, init=False, repr=False)
     _session: Any = field(default=None, init=False, repr=False)
+    #: Mini-ADR U-13 — per-server breaker so a down remote server short-circuits
+    #: instead of eating the full ``timeout_s`` on every call (audit #3).
+    _breaker: MCPCircuitBreaker = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._breaker = MCPCircuitBreaker(server=self.config.name)
 
     async def _open_streams(self, stack: contextlib.AsyncExitStack) -> tuple[Any, Any]:
         msg = "_open_streams must be implemented by transport subclass"
@@ -405,14 +461,7 @@ class _RemoteMCPClientBase:
             msg = f"{type(self).__name__} {self.config.name!r} not started"
             raise RuntimeError(msg)
         result = await self._session.list_tools()
-        return tuple(
-            MCPToolDef(
-                name=str(t.name),
-                description=str(getattr(t, "description", "") or ""),
-                input_schema=dict(getattr(t, "inputSchema", {}) or {}),
-            )
-            for t in result.tools
-        )
+        return _materialize_tool_defs(result.tools, server=self.config.name)
 
     async def call_tool(
         self,
@@ -424,18 +473,28 @@ class _RemoteMCPClientBase:
             raise RuntimeError(msg)
         transport = self.config.transport
         server = self.config.name
+        # Circuit breaker (audit #3): a server that has tripped open is
+        # short-circuited without a round-trip, so a persistently-down server
+        # stops draining ``timeout_s`` on every call.
+        if not self._breaker.allow_call():
+            record_mcp_call(transport=transport, server=server, result="circuit_open")
+            msg = f"mcp server {server!r} circuit open — skipping call to {name!r}"
+            raise MCPServerUnhealthyError(msg)
         try:
             result = await asyncio.wait_for(
                 self._session.call_tool(name, dict(args)),
                 timeout=self.config.timeout_s,
             )
         except TimeoutError as exc:
+            self._breaker.record_failure()
             record_mcp_call(transport=transport, server=server, result="timeout")
             msg = f"mcp call timed out after {self.config.timeout_s}s on {server!r}:{name!r}"
             raise MCPCallTimeoutError(msg) from exc
         except Exception:
+            self._breaker.record_failure()
             record_mcp_call(transport=transport, server=server, result="transport_err")
             raise
+        self._breaker.record_success()
         record_mcp_call(transport=transport, server=server, result="ok")
         return MCPCallResult(
             content=_render_content_blocks(result.content),

@@ -122,6 +122,23 @@ async def test_build_client_oauth2_fails_fast() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_client_revalidates_url_at_runtime() -> None:
+    """Audit #4: the runtime connect-out re-validates the URL so a private /
+    metadata target (or any row that reached the DB unvalidated) cannot be
+    dialed — registration, probe, and runtime share one gate."""
+    from helix_agent.common.url_validation import RemoteURLError
+
+    cfg = MCPServerConfig(
+        name="internal",
+        transport="streamable_http",
+        url="http://169.254.169.254/latest/meta-data/",
+        auth_type="none",
+    )
+    with pytest.raises(RemoteURLError):
+        await _build_mcp_client(cfg, secret_store=None)
+
+
+@pytest.mark.asyncio
 async def test_build_client_bearer_resolves_token_via_secret_store(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

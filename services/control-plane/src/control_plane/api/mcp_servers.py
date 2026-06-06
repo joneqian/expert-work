@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Mapping
 from typing import Annotated, Any
 from uuid import UUID
@@ -151,6 +152,34 @@ def _get_tenant_config_service(request: Request) -> object:  # type: ignore[no-u
     return getattr(request.app.state, "tenant_config_service", None)
 
 
+def _get_mcp_probe_limiter(request: Request) -> object:  # type: ignore[no-untyped-def]
+    return getattr(request.app.state, "mcp_probe_limiter", None)
+
+
+async def _enforce_probe_rate_limit(limiter: object, tenant_id: UUID) -> None:
+    """Charge the dedicated MCP-probe bucket (audit #6); 429 on exhaustion.
+
+    Every probe-bearing endpoint opens a server-side outbound connection to a
+    tenant-chosen URL, so it gets a tighter bucket than the global tenant-tier
+    limiter. ``None`` (limiter disabled / unwired) is a no-op so tests and dev
+    that don't build it keep working.
+    """
+    if limiter is None:
+        return
+    decision = await limiter.acquire(dimension="mcp_probe", key=str(tenant_id))  # type: ignore[attr-defined]
+    if not decision.allowed:
+        retry_after = max(1, math.ceil(decision.retry_after_s))
+        raise HTTPException(
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+            detail={
+                "code": "MCP_PROBE_RATE_LIMITED",
+                "message": "too many MCP connection probes; slow down",
+                "retry_after_s": retry_after,
+            },
+        )
+
+
 async def _invalidate_tenant_mcp(
     pool_service: object, agent_runtime: object, tenant_id: UUID
 ) -> None:
@@ -217,8 +246,10 @@ def build_mcp_servers_router() -> APIRouter:
         pool_service: Annotated[object, Depends(_get_tenant_mcp_pool_service)],
         agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
         tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
+        probe_limiter: Annotated[object, Depends(_get_mcp_probe_limiter)],
     ) -> dict[str, object]:
         tenant_id = principal.tenant_id
+        await _enforce_probe_rate_limit(probe_limiter, tenant_id)
         # 0) Custom kill-switch (Stream W-4): a tenant in catalog-only mode may
         # not register off-catalog custom servers. Skipped when the config
         # service is unwired (preserves Stream V self-service behavior).
@@ -383,8 +414,10 @@ def build_mcp_servers_router() -> APIRouter:
         pool_service: Annotated[object, Depends(_get_tenant_mcp_pool_service)],
         agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
         tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
+        probe_limiter: Annotated[object, Depends(_get_mcp_probe_limiter)],
     ) -> dict[str, object]:
         tenant_id = principal.tenant_id
+        await _enforce_probe_rate_limit(probe_limiter, tenant_id)
         # 1) Load the catalog entry (NULL-tenant — bypass RLS, W-8).
         async with bypass_rls_session():
             entry = await catalog_store.get_by_id(catalog_id)
@@ -438,7 +471,11 @@ def build_mcp_servers_router() -> APIRouter:
         # → "https://evil.com/.example.com/x" whose host is evil.com. The SSRF
         # guard below only blocks private IPs, not a pivot to an attacker host.
         for key, val in param_values.items():
-            if any(c in _DISALLOWED_PARAM_CHARS or c.isspace() for c in val):
+            # Non-ASCII is rejected first (audit #8): a Unicode homoglyph that
+            # NFKC-folds to a structural char (e.g. U+3002 ideographic full
+            # stop -> ".") could slip past the ASCII blacklist and still pivot
+            # the resolved host. Legitimate org/workspace slugs are ASCII.
+            if not val.isascii() or any(c in _DISALLOWED_PARAM_CHARS or c.isspace() for c in val):
                 raise HTTPException(
                     status_code=422,
                     detail={
@@ -560,7 +597,9 @@ def build_mcp_servers_router() -> APIRouter:
     async def test_mcp_connection(
         payload: TestConnectionRequest,
         principal: Annotated[Principal, Depends(require("mcp_server", "write"))],
+        probe_limiter: Annotated[object, Depends(_get_mcp_probe_limiter)],
     ) -> dict[str, object]:
+        await _enforce_probe_rate_limit(probe_limiter, principal.tenant_id)
         if payload.auth_type == "bearer" and (
             payload.token is None or not payload.token.get_secret_value().strip()
         ):
@@ -628,7 +667,9 @@ def build_mcp_servers_router() -> APIRouter:
         principal: Annotated[Principal, Depends(require("mcp_server", "read"))],
         store: Annotated[TenantMcpServerStore, Depends(_get_store)],
         secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
+        probe_limiter: Annotated[object, Depends(_get_mcp_probe_limiter)],
     ) -> dict[str, object]:
+        await _enforce_probe_rate_limit(probe_limiter, principal.tenant_id)
         record = await store.get(tenant_id=principal.tenant_id, name=name)
         if record is None:
             raise HTTPException(

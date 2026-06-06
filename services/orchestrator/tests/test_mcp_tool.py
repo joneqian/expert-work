@@ -439,3 +439,147 @@ async def test_pool_close_all_collects_errors_into_exceptiongroup() -> None:
     assert any(isinstance(e, RuntimeError) for e in excinfo.value.exceptions)
     # Even with the broken client, the pool empties.
     assert pool.names() == []
+
+
+# ---------------------------------------------------------------------------
+# MCP infra hardening — list_tools size caps (audit #5)
+# ---------------------------------------------------------------------------
+
+
+class _RawTool:
+    """Minimal stand-in for an SDK tool object (``.name/.description/.inputSchema``)."""
+
+    def __init__(self, name: str, description: str = "", input_schema: object = None) -> None:
+        self.name = name
+        self.description = description
+        self.inputSchema = input_schema if input_schema is not None else {}
+
+
+def test_materialize_tool_defs_caps_tool_count() -> None:
+    from orchestrator.tools.mcp import (
+        DEFAULT_MAX_TOOLS_PER_SERVER,
+        _materialize_tool_defs,
+    )
+
+    raw = [_RawTool(f"t{i}") for i in range(DEFAULT_MAX_TOOLS_PER_SERVER + 25)]
+    defs = _materialize_tool_defs(raw, server="evil")
+    assert len(defs) == DEFAULT_MAX_TOOLS_PER_SERVER
+
+
+def test_materialize_tool_defs_truncates_description() -> None:
+    from orchestrator.tools.mcp import (
+        DEFAULT_MAX_TOOL_DESC_CHARS,
+        _materialize_tool_defs,
+    )
+
+    raw = [_RawTool("t", description="x" * (DEFAULT_MAX_TOOL_DESC_CHARS + 5000))]
+    defs = _materialize_tool_defs(raw, server="evil")
+    assert len(defs[0].description) == DEFAULT_MAX_TOOL_DESC_CHARS
+
+
+def test_materialize_tool_defs_drops_oversized_schema() -> None:
+    from orchestrator.tools.mcp import (
+        DEFAULT_MAX_TOOL_SCHEMA_CHARS,
+        _materialize_tool_defs,
+    )
+
+    huge = {"blob": "y" * (DEFAULT_MAX_TOOL_SCHEMA_CHARS + 1000)}
+    raw = [_RawTool("t", input_schema=huge)]
+    defs = _materialize_tool_defs(raw, server="evil")
+    assert defs[0].input_schema == {}
+
+
+# ---------------------------------------------------------------------------
+# MCP infra hardening — remote circuit breaker wiring (audit #3)
+# ---------------------------------------------------------------------------
+
+
+class _RaisingSession:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def call_tool(self, name, args):  # type: ignore[no-untyped-def]
+        self.calls += 1
+        raise ConnectionError("server down")
+
+
+@pytest.mark.asyncio
+async def test_remote_client_circuit_opens_and_short_circuits() -> None:
+    from orchestrator.tools.mcp import (
+        DEFAULT_CIRCUIT_FAILURE_THRESHOLD,
+        MCPServerUnhealthyError,
+        SseMCPClient,
+    )
+
+    client = SseMCPClient(config=MCPServerConfig(name="down", transport="sse", url="https://x/y"))
+    sess = _RaisingSession()
+    client._session = sess  # type: ignore[attr-defined]
+
+    # Each real failure propagates the transport error and trips the breaker.
+    for _ in range(DEFAULT_CIRCUIT_FAILURE_THRESHOLD):
+        with pytest.raises(ConnectionError):
+            await client.call_tool("t", {})
+    assert sess.calls == DEFAULT_CIRCUIT_FAILURE_THRESHOLD
+    assert client._breaker.state == "open"  # type: ignore[attr-defined]
+
+    # Breaker open: the next call is short-circuited WITHOUT a round-trip.
+    with pytest.raises(MCPServerUnhealthyError):
+        await client.call_tool("t", {})
+    assert sess.calls == DEFAULT_CIRCUIT_FAILURE_THRESHOLD  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_remote_client_circuit_half_open_recovers() -> None:
+    from orchestrator.tools.mcp import MCPCircuitBreaker, SseMCPClient
+
+    clock = {"t": 0.0}
+    client = SseMCPClient(config=MCPServerConfig(name="flap", transport="sse", url="https://x/y"))
+    # Swap in a breaker with an injectable clock + tiny window so we can
+    # drive the open -> half_open -> closed transition deterministically.
+    client._breaker = MCPCircuitBreaker(  # type: ignore[attr-defined]
+        server="flap", failure_threshold=1, window_s=10.0, now=lambda: clock["t"]
+    )
+
+    failing = _RaisingSession()
+    client._session = failing  # type: ignore[attr-defined]
+    with pytest.raises(ConnectionError):
+        await client.call_tool("t", {})
+    assert client._breaker.state == "open"  # type: ignore[attr-defined]
+
+    # Advance past the window -> half_open allows one probe; a success closes it.
+    clock["t"] = 20.0
+
+    import types
+
+    class _OkSession:
+        async def call_tool(self, name, args):  # type: ignore[no-untyped-def]
+            return types.SimpleNamespace(content=[], isError=False)
+
+    client._session = _OkSession()  # type: ignore[attr-defined]
+    result = await client.call_tool("t", {})
+    assert result.is_error is False
+    assert client._breaker.state == "closed"  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# MCP infra hardening — stdio call_tool honors timeout_s (audit #7)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stdio_call_tool_times_out() -> None:
+    import asyncio
+
+    from orchestrator.tools.mcp import MCPCallTimeoutError, StdioMCPClient
+
+    client = StdioMCPClient(
+        config=MCPServerConfig(name="slow", transport="stdio", command=["echo"], timeout_s=0.01)
+    )
+
+    class _SlowSession:
+        async def call_tool(self, name, args):  # type: ignore[no-untyped-def]
+            await asyncio.sleep(1.0)
+
+    client._session = _SlowSession()  # type: ignore[attr-defined]
+    with pytest.raises(MCPCallTimeoutError):
+        await client.call_tool("t", {})

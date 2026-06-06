@@ -230,6 +230,26 @@ async def test_invalidate_tenant_drops_only_that_tenants_cached_agents() -> None
     assert len(builds) == 3  # only a rebuilt
 
 
+@pytest.mark.asyncio
+async def test_invalidate_tenant_fans_out_to_registered_hooks() -> None:
+    """Audit #1: invalidate_tenant fans out to registered hooks (e.g. the
+    sub-agent builder cache, which caches built agents independently)."""
+
+    async def _builder(spec: AgentSpec, *, tenant_id: UUID | None = None) -> object:
+        return object()
+
+    runtime = AgentRuntime(
+        run_manager=RunManager(store=None),  # type: ignore[arg-type]
+        stream_bridge=InMemoryStreamBridge(),
+        agent_builder=_builder,  # type: ignore[arg-type]
+    )
+    seen: list[UUID] = []
+    runtime.register_invalidation_hook(seen.append)
+    t = uuid4()
+    runtime.invalidate_tenant(t)
+    assert seen == [t]
+
+
 # ---------------------------------------------------------------------------
 # Stream X (Mini-ADR X-4) — make_agent_builder threads make_skill_resolver
 # end-to-end so a skills manifest actually builds (it hard-failed before).

@@ -10,6 +10,7 @@ the spec store and the recursive ``build_agent`` path to produce the
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 from uuid import UUID
@@ -61,6 +62,7 @@ def make_child_agent_builder(
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
+    register_invalidation: Callable[[Callable[[UUID], None]], None] | None = None,
 ) -> ChildAgentBuilder:
     """Build the :class:`ChildAgentBuilder` the orchestrator's ``ToolEnv`` carries.
 
@@ -129,6 +131,19 @@ def make_child_agent_builder(
             depth,
         )
         return built
+
+    def _invalidate_tenant(tenant_id: UUID) -> None:
+        """Drop cached sub-agents for a tenant (Stream V-D, audit #1).
+
+        Registered with the :class:`AgentRuntime` so a tenant's MCP registry
+        change evicts stale delegated sub-agents (whose ``ToolEnv`` holds a
+        now-closed tenant MCP pool), mirroring the top-level cache.
+        """
+        for key in [k for k in cache if k[0] == tenant_id]:
+            del cache[key]
+
+    if register_invalidation is not None:
+        register_invalidation(_invalidate_tenant)
 
     # The sub-agent's ToolEnv carries _build itself so a child can in turn
     # delegate to a grandchild. Assigned after _build is defined; the

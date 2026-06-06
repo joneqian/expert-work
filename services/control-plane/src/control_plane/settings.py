@@ -488,6 +488,17 @@ class Settings(BaseSettings):
     #: storms).
     tenant_rate_limit_audit_sample_every: int = Field(default=100, ge=1)
 
+    #: Dedicated, tighter per-tenant bucket for the MCP probe-bearing
+    #: endpoints (register / instantiate / test / list-tools). Each of those
+    #: triggers a server-side outbound connection to a tenant-chosen URL, so
+    #: they get a far smaller bucket than ordinary CRUD to blunt
+    #: outbound-amplification / scanning (security audit #6). Gated by the
+    #: same ``tenant_rate_limit_enabled`` toggle.
+    mcp_probe_rate_limit_capacity: int = Field(default=10, gt=0)
+
+    #: Refill rate (tokens / second) for the MCP probe bucket.
+    mcp_probe_rate_limit_refill_per_sec: float = Field(default=0.5, gt=0)
+
     #: When the runtime has a Redis URL (``quota_redis_url``) and
     #: ``single_instance`` is ``False``, the gateway / tenant limiter
     #: use Redis (multi-replica safe). On the default single-instance
