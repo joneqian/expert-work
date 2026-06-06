@@ -933,7 +933,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **OA-3b-1 per-user OAuth pool 解析引擎**（PR #443）：`UserMcpOAuthPoolService`（按 (tenant,user) 缓存）—— 读该用户 `connected` 且未过期的 `mcp_oauth_connection` → 产出 **bearer 式** `MCPServerConfig`（`token_ref=access_token_ref`,transport 从 catalog 读）→ client_factory → pool。**复用现有 `_build_mcp_client` bearer 分支注入,无需 oauth2 client 改动**;过期则跳过(proactive refresh 留 OA-6);并发用 V-D 同款(per-key lock + generation + rebuild-on-conflict)。6 单测(connected/expired/pending/cache/invalidate/用户隔离)。**不动 hot path**
 - [x] **OA-3b-2 build 路径接入**（PR #444）：`subject_id`（=连接 user_id）串过 `get_agent`→`AgentBuilder`→`make_agent_builder._build` + `ToolEnv.user_mcp_oauth_pool`（assembly `_register_mcp` 注册,allowlist 不 gate,名冲突让平台/租户先）+ app 接 `UserMcpOAuthPoolService`/provider + `runs.py` 两处传 `principal.subject_id`（触发器无 subject 传 None）。**缓存按需 per-user**:`get_agent` 先解析 user pool,**仅当非空才用 4 元组 key**（无 OAuth 的 agent 仍全租户共享,不膨胀）+ `invalidate_user` + callback 连接成功后 invalidate user pool + user agents。子 agent 的 per-user OAuth 留后续。runtime + assembly 单测;全套 1854 回归零失败。**复用 bearer 注入,`_build_mcp_client` 未改**
 - [ ] **OA-3b-后续（可选）**：子 agent(委派)解析调用方 OAuth 池（需 SubAgentTool 透传 user_id）
-- [ ] **OA-4 per-user pool 维度** + 连接管理端点（list/disconnect）+ 状态可观测
+- [x] **OA-4 连接管理端点 + 状态可观测**（PR #445）：`GET /v1/mcp-oauth/connections`（当前用户连接:status/scopes/expiry/last_error,**token ref + 流程态永不暴露**)+ `DELETE /v1/mcp-oauth/connections/{id}`（断开:best-effort 覆写 token 吊销[SecretStore 无 delete]+ 删行 + invalidate user pool/agents + 审计 MCP_SERVER_DELETE scope=oauth）。callback/disconnect 共用 `_invalidate_user_caches`。8 API 测。per-user pool 维度已在 OA-3b 落地
 - [ ] **OA-5 扩连接器**：Notion/Jira/Sentry/Asana 进 catalog（复用引擎）
 - [ ] **OA-6 刷新/UX 硬化**：后台预刷新 + 撤销处理 + 过期提示 + 审计/metrics
 

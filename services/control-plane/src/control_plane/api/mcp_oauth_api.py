@@ -16,6 +16,7 @@ establishes the token; the agent consumes it next.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
@@ -50,8 +51,11 @@ from helix_agent.protocol import (
     TenantPlan,
     tier_satisfies,
 )
+from helix_agent.protocol.mcp_oauth_connection import McpOAuthConnectionRecord
 from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store import SecretStore
+from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
+
+logger = logging.getLogger("helix.control_plane.mcp_oauth_api")
 
 
 def _catalog_store(request: Request) -> McpConnectorCatalogStore:
@@ -97,6 +101,29 @@ async def _resolve_plan(request: Request, tenant_id: UUID) -> TenantPlan:
 def _secret_name(tenant_id: UUID, connection_id: UUID, kind: str) -> str:
     # connection_id (a UUID) keeps the path injection-safe — user_id is opaque.
     return f"helix-agent/tenant/{tenant_id}/mcp-oauth/{connection_id}/{kind}"
+
+
+# Fields safe to expose: never the token refs or the short-lived flow secrets.
+_PUBLIC_DROP = frozenset({"access_token_ref", "refresh_token_ref", "oauth_state", "pkce_verifier"})
+
+
+def _public(record: McpOAuthConnectionRecord) -> dict[str, object]:
+    data: dict[str, object] = record.model_dump(mode="json")
+    for key in _PUBLIC_DROP:
+        data.pop(key, None)
+    return data
+
+
+async def _invalidate_user_caches(request: Request, tenant_id: UUID, user_id: str) -> None:
+    """Drop the user's OAuth pool + per-user agents so the next run rebuilds.
+
+    Both services are optional (tests may not wire them)."""
+    pool_svc = getattr(request.app.state, "user_mcp_oauth_pool_service", None)
+    if pool_svc is not None:
+        await pool_svc.invalidate(tenant_id, user_id)
+    agent_runtime = getattr(request.app.state, "agent_runtime", None)
+    if agent_runtime is not None:
+        agent_runtime.invalidate_user(tenant_id, user_id)
 
 
 def build_mcp_oauth_router() -> APIRouter:
@@ -283,16 +310,68 @@ def build_mcp_oauth_router() -> APIRouter:
             details={"scope": "oauth", "name": updated.name, "source": "oauth_callback"},
         )
         # OA-3b — drop the user's cached OAuth pool + per-user agents so the next
-        # run rebuilds with the new connection. Both are optional (tests).
-        pool_svc = getattr(request.app.state, "user_mcp_oauth_pool_service", None)
-        if pool_svc is not None:
-            await pool_svc.invalidate(tenant_id, user_id)
-        agent_runtime = getattr(request.app.state, "agent_runtime", None)
-        if agent_runtime is not None:
-            agent_runtime.invalidate_user(tenant_id, user_id)
+        # run rebuilds with the new connection.
+        await _invalidate_user_caches(request, tenant_id, user_id)
         return JSONResponse(
             status_code=200,
             content={"connection_id": str(updated.id), "name": updated.name, "status": "connected"},
         )
+
+    @router.get("/v1/mcp-oauth/connections", response_model=None)
+    async def list_connections(
+        principal: Annotated[Principal, Depends(require("mcp_server", "read"))],
+        request: Request,
+    ) -> JSONResponse:
+        """OA-4 — the caller's own OAuth connections (status / scopes / expiry /
+        last_error). Token refs + flow secrets are never exposed."""
+        conns = await _conn_store(request).list_for_user(
+            tenant_id=principal.tenant_id, user_id=principal.subject_id
+        )
+        return JSONResponse(status_code=200, content={"items": [_public(c) for c in conns]})
+
+    @router.delete("/v1/mcp-oauth/connections/{connection_id}", response_model=None)
+    async def disconnect(
+        connection_id: Annotated[UUID, Path()],
+        principal: Annotated[Principal, Depends(require("mcp_server", "write"))],
+        request: Request,
+    ) -> JSONResponse:
+        """OA-4 — disconnect: revoke the stored tokens (best-effort overwrite —
+        the secret store has no delete), drop the row, invalidate the caches."""
+        tenant_id = principal.tenant_id
+        user_id = principal.subject_id
+        conn_store = _conn_store(request)
+        secret_store = _secret_store(request)
+        audit = _audit(request)
+
+        existing = await conn_store.get(
+            connection_id=connection_id, tenant_id=tenant_id, user_id=user_id
+        )
+        if existing is None:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "MCP_OAUTH_CONNECTION_NOT_FOUND", "message": "not found"},
+            )
+        # Best-effort token revocation (no SecretStore.delete): overwrite the
+        # value so the real token is no longer retrievable after disconnect.
+        for ref in (existing.access_token_ref, existing.refresh_token_ref):
+            if ref:
+                try:
+                    await secret_store.put(parse_secret_ref(ref), "")
+                except Exception:
+                    logger.warning("mcp_oauth.disconnect_secret_overwrite_failed")
+        await conn_store.delete(connection_id=connection_id, tenant_id=tenant_id, user_id=user_id)
+        await _invalidate_user_caches(request, tenant_id, user_id)
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=user_id,
+            action=AuditAction.MCP_SERVER_DELETE,
+            resource_type="tenant_mcp_server",
+            resource_id=str(connection_id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={"scope": "oauth", "name": existing.name, "source": "oauth_disconnect"},
+        )
+        return JSONResponse(status_code=204, content=None)
 
     return router

@@ -198,3 +198,87 @@ async def test_initiate_not_configured_returns_503() -> None:
         )
     assert resp.status_code == 503
     assert resp.json()["detail"]["code"] == "MCP_OAUTH_NOT_CONFIGURED"
+
+
+# --- OA-4: list + disconnect ----------------------------------------------
+
+
+async def _connect(client: AsyncClient, cat_id: UUID, headers: dict[str, str]) -> str:
+    init = await client.post(f"/v1/mcp-servers/catalog/{cat_id}/oauth/initiate", headers=headers)
+    assert init.status_code == 201
+    return init.json()["connection_id"]
+
+
+@pytest.mark.asyncio
+async def test_list_connections_excludes_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    app, headers, tenant_id, user_id = await _make_app()
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.discover_oauth_metadata", _fake_discover)
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.exchange_code", _fake_exchange)
+    cat_id = await _seed_oauth2_entry(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        await _connect(client, cat_id, headers)
+        conn = await app.state.mcp_oauth_connection_store.get_for_connector(  # type: ignore[attr-defined]
+            tenant_id=tenant_id, user_id=user_id, catalog_id=cat_id
+        )
+        cb = await client.get(
+            "/v1/mcp-oauth/callback",
+            params={"state": conn.oauth_state, "code": "c"},
+            headers=headers,
+        )
+        assert cb.status_code == 200
+        listed = await client.get("/v1/mcp-oauth/connections", headers=headers)
+    assert listed.status_code == 200
+    items = listed.json()["items"]
+    assert len(items) == 1
+    item = items[0]
+    assert item["status"] == "connected"
+    assert item["name"] == "linear"
+    # Token refs + flow secrets must never be exposed.
+    for leaked in ("access_token_ref", "refresh_token_ref", "oauth_state", "pkce_verifier"):
+        assert leaked not in item
+
+
+@pytest.mark.asyncio
+async def test_disconnect_revokes_and_removes(monkeypatch: pytest.MonkeyPatch) -> None:
+    app, headers, tenant_id, user_id = await _make_app()
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.discover_oauth_metadata", _fake_discover)
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.exchange_code", _fake_exchange)
+    cat_id = await _seed_oauth2_entry(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        cid = await _connect(client, cat_id, headers)
+        conn = await app.state.mcp_oauth_connection_store.get_for_connector(  # type: ignore[attr-defined]
+            tenant_id=tenant_id, user_id=user_id, catalog_id=cat_id
+        )
+        await client.get(
+            "/v1/mcp-oauth/callback",
+            params={"state": conn.oauth_state, "code": "c"},
+            headers=headers,
+        )
+        access_ref = (
+            await app.state.mcp_oauth_connection_store.get(  # type: ignore[attr-defined]
+                connection_id=conn.id, tenant_id=tenant_id, user_id=user_id
+            )
+        ).access_token_ref
+        dele = await client.delete(f"/v1/mcp-oauth/connections/{cid}", headers=headers)
+    assert dele.status_code == 204
+    # Row gone.
+    gone = await app.state.mcp_oauth_connection_store.get_for_connector(  # type: ignore[attr-defined]
+        tenant_id=tenant_id, user_id=user_id, catalog_id=cat_id
+    )
+    assert gone is None
+    # Token overwritten (best-effort revoke).
+    assert access_ref is not None
+    revoked = await app.state.secret_store.get(access_ref.removeprefix("secret://"))  # type: ignore[attr-defined]
+    assert revoked == ""
+
+
+@pytest.mark.asyncio
+async def test_disconnect_unknown_returns_404() -> None:
+    app, headers, _, _ = await _make_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.delete(f"/v1/mcp-oauth/connections/{uuid4()}", headers=headers)
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "MCP_OAUTH_CONNECTION_NOT_FOUND"
