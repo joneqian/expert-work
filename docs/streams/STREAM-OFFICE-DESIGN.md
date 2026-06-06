@@ -51,7 +51,7 @@
 ## 2. Stream 切分
 - **OFFICE-1a 镜像 variant 机制**：manifest `image_variant` + supervisor `_select_image` + acquire 字段 + orchestrator 链路。先用现有 minimal 镜像验证机制（不依赖 office 镜像就绪）。
 - **OFFICE-1b office 镜像** ✅：`infra/sandbox-image-office/Dockerfile`（slim + 库 + 中文）+ CI 构建（`.github/workflows/sandbox-image-office.yml`，阿里云 ACR）+ supervisor settings（1a 已接）。**runner.py 不复制**：build context = `infra/`，COPY 共享 `sandbox-image/runner.py`（防安全敏感文件 drift）。smoke（`smoke_test.py` 驱动 runner 协议 + `smoke_payload.py` 内验 import + 中文渲染）本地实跑通过；gVisor/read-only-rootfs 验证留目标主机。
-- **OFFICE-3 平台 skill 导入端点**：`POST /v1/platform/skills/import`（system_admin，multipart `.skill` ZIP，复用 `_skill_zip`）+ 租户/平台 **content_hash 幂等**（同 latest hash 跳过，否则加版本）。**不自写/不批量移植 skill 内容**（OFFICE-ADR-5）。独立于镜像，可先做。
+- **OFFICE-3 平台 skill 导入端点** ✅（PR #437）：`POST /v1/platform/skills/import`（system_admin + bypass_rls，multipart `.skill` ZIP，复用 `parse_skill_zip` + moderation + U-21 strict scan）+ 租户/平台 **content_hash 幂等**（同 latest hash 跳过返 `200`+`created:false`，否则 `add_version` 返 `201`+`created:true`）。顺带补租户 `POST /v1/skills/import` 此前缺的幂等。**不自写/不批量移植 skill 内容**（OFFICE-ADR-5）。纯 API，无 migration。
 - **OFFICE-2 国内连接器**：暂缓（backlog）。
 
 依赖：`OFFICE-1a → OFFICE-1b`（机制先于镜像，但 1a 用 minimal 可独立验）。OFFICE-3 与镜像无依赖，可独立先行。

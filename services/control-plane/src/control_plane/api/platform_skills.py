@@ -20,10 +20,11 @@ Every handler:
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, File, HTTPException, Path, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -33,6 +34,7 @@ from control_plane.api._skill_moderation import (
     moderate_required_models,
     moderate_tool_names,
 )
+from control_plane.api._skill_zip import SkillZipError, parse_skill_zip
 from control_plane.api.skills import _get_audit, _get_skill_store, _skill_dict, _version_dict
 from control_plane.audit import emit as audit_emit
 from control_plane.tenant_scope import bypass_rls_session
@@ -53,7 +55,11 @@ from helix_agent.protocol import (
     SkillStatus,
     TenantPlan,
 )
-from helix_agent.protocol.skill import compute_content_hash, is_high_risk_skill_version
+from helix_agent.protocol.skill import (
+    compute_content_hash,
+    is_high_risk_skill_version,
+    supporting_files_to_jsonable,
+)
 
 
 class _CreatePlatformSkillBody(BaseModel):
@@ -239,6 +245,162 @@ def build_platform_skills_router() -> APIRouter:
             },
         )
         return JSONResponse(status_code=201, content=_version_dict(version))
+
+    @router.post("/import", response_model=None)
+    async def import_platform_skill(
+        file: Annotated[UploadFile, File()],
+        request: Request,
+    ) -> JSONResponse:
+        """OFFICE-3: multipart ``.skill`` ZIP → platform (NULL-tenant) skill.
+
+        system_admin only. Same ZIP parse + moderation + Mini-ADR U-21 strict
+        threat scan as the tenant ``POST /v1/skills/import``, but writes a
+        tenant-less row via ``bypass_rls_session()``. content_hash idempotent
+        (same semantics as the tenant path): re-importing identical content
+        returns ``200`` + ``created: false`` with the existing latest version,
+        instead of churning a duplicate version.
+        """
+        principal = _principal(request)
+        store = _get_skill_store(request)
+        audit = _get_audit(request)
+
+        blob = await file.read()
+        try:
+            payload = parse_skill_zip(blob)
+        except SkillZipError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if not re.fullmatch(r"^[a-z][a-z0-9_-]{0,63}$", payload.name):
+            raise HTTPException(
+                status_code=400,
+                detail=f"skill name {payload.name!r} fails validation",
+            )
+
+        # Moderation gate before any DB write.
+        try:
+            moderate_prompt_fragment(payload.prompt_fragment)
+            moderate_tool_names(payload.tool_names)
+            moderate_required_models(payload.required_models)
+        except ModerationError as exc:
+            raise HTTPException(status_code=400, detail=exc.detail) from exc
+
+        # Mini-ADR U-21 write-time strict scan (same as add_platform_version).
+        findings = scan_for_threats(payload.prompt_fragment, scope="strict")
+        if findings:
+            record_threat_pattern_hits(findings, scope="strict")
+            record_skill_blocked(phase="platform_zip_import")
+            await audit_emit(
+                audit,
+                tenant_id=principal.tenant_id,
+                actor_id=principal.subject_id,
+                action=AuditAction.SKILL_PROMPT_INJECTION_BLOCKED,
+                resource_type="skill",
+                resource_id=payload.name,
+                result=AuditResult.DENIED,
+                trace_id=current_trace_id_hex(),
+                details={
+                    "scope": "platform",
+                    "finding_count": len(findings),
+                    "findings": [
+                        {"pattern_id": f.pattern_id, "category": f.category} for f in findings
+                    ],
+                    "source": "zip_import",
+                },
+            )
+            raise HTTPException(status_code=400, detail="invalid skill content")
+
+        created_skill = False
+        async with bypass_rls_session():
+            existing = await store.get_platform_skill_by_name(name=payload.name)
+
+            # OFFICE-3 idempotency (mirrors the tenant import path): if the
+            # latest version already carries this exact content_hash, the
+            # re-import is a no-op — return it (200, created=False).
+            if existing is not None and existing.latest_version > 0:
+                latest = await store.get_platform_version_by_number(
+                    skill_id=existing.id, version=existing.latest_version
+                )
+                if latest is not None and latest.content_hash == payload.content_hash:
+                    return JSONResponse(
+                        status_code=200,
+                        content={
+                            "skill": _skill_dict(existing),
+                            "version": _version_dict(latest),
+                            "created": False,
+                        },
+                    )
+
+            if existing is None:
+                try:
+                    existing = await store.create_platform_skill(
+                        skill_id=uuid4(),
+                        name=payload.name,
+                        description=payload.description,
+                        category=payload.category,
+                        required_tier=TenantPlan.FREE,
+                    )
+                    created_skill = True
+                except DuplicateSkillError as exc:
+                    # Race — another import won the create; resolve + add.
+                    existing = await store.get_platform_skill_by_name(name=payload.name)
+                    if existing is None:
+                        raise HTTPException(status_code=409, detail=str(exc)) from exc
+            version = await store.add_platform_version(
+                version_id=uuid4(),
+                skill_id=existing.id,
+                prompt_fragment=payload.prompt_fragment,
+                tool_names=payload.tool_names,
+                description=payload.description,
+                category=payload.category,
+                required_models=payload.required_models,
+                authored_by="human",
+                supporting_files=supporting_files_to_jsonable(payload.supporting_files),
+                lazy_load=payload.lazy_load,
+                content_hash=payload.content_hash,
+                high_risk=payload.high_risk,
+            )
+
+        if created_skill:
+            await audit_emit(
+                audit,
+                tenant_id=principal.tenant_id,
+                actor_id=principal.subject_id,
+                action=AuditAction.SKILL_CREATE,
+                resource_type="skill",
+                resource_id=str(existing.id),
+                result=AuditResult.SUCCESS,
+                trace_id=current_trace_id_hex(),
+                details={
+                    "scope": "platform",
+                    "name": existing.name,
+                    "category": existing.category,
+                    "source": "zip_import",
+                },
+            )
+        await audit_emit(
+            audit,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.subject_id,
+            action=AuditAction.SKILL_VERSION_CREATE,
+            resource_type="skill",
+            resource_id=str(existing.id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={
+                "scope": "platform",
+                "version": version.version,
+                "tool_names": list(version.tool_names),
+                "source": "zip_import",
+            },
+        )
+        return JSONResponse(
+            status_code=201,
+            content={
+                "skill": _skill_dict(existing),
+                "version": _version_dict(version),
+                "created": True,
+            },
+        )
 
     @router.patch("/{skill_id}", response_model=None)
     async def patch_platform_skill(

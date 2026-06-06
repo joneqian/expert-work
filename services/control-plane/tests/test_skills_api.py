@@ -274,6 +274,33 @@ async def test_zip_import_existing_skill_adds_version(setup: Setup) -> None:
 
 
 @pytest.mark.asyncio
+async def test_zip_import_idempotent_same_content(setup: Setup) -> None:
+    """OFFICE-3: re-importing identical content (same content_hash as the
+    latest version) skips ``add_version`` — returns 200 + ``created: false``
+    and the existing latest version, instead of churning a duplicate."""
+    client, audit_store = setup
+    blob = _build_zip(prompt="stable prompt")
+    r1 = await client.post(
+        "/v1/skills/import", files={"file": ("foo.skill", blob, "application/zip")}
+    )
+    assert r1.status_code == 201
+    assert r1.json()["created"] is True
+    assert r1.json()["version"]["version"] == 1
+
+    r2 = await client.post(
+        "/v1/skills/import", files={"file": ("foo.skill", blob, "application/zip")}
+    )
+    assert r2.status_code == 200
+    assert r2.json()["created"] is False
+    assert r2.json()["version"]["version"] == 1  # no new version churned
+
+    # Only one SKILL_VERSION_CREATE audit row — the skip emits none.
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=20))
+    version_creates = [r for r in page.entries if r.action == AuditAction.SKILL_VERSION_CREATE]
+    assert len(version_creates) == 1
+
+
+@pytest.mark.asyncio
 async def test_zip_import_rejects_unknown_entry(setup: Setup) -> None:
     """Sprint #3 (Mini-ADR U-19): legacy layout rejects stray entries.
 

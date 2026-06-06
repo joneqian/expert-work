@@ -977,6 +977,24 @@ def build_skills_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=exc.detail) from exc
 
         existing = await store.get_skill_by_name(tenant_id=tenant_id, name=payload.name)
+
+        # OFFICE-3 idempotency: if the latest version already carries this exact
+        # content_hash, the re-import is a no-op — return it (200, created=False)
+        # rather than churning an identical duplicate version.
+        if existing is not None and existing.latest_version > 0:
+            latest = await store.get_version_by_number(
+                skill_id=existing.id, tenant_id=tenant_id, version=existing.latest_version
+            )
+            if latest is not None and latest.content_hash == payload.content_hash:
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "skill": _skill_dict(existing),
+                        "version": _version_dict(latest),
+                        "created": False,
+                    },
+                )
+
         if existing is None:
             try:
                 existing = await store.create_skill(
@@ -1049,6 +1067,7 @@ def build_skills_router() -> APIRouter:
             content={
                 "skill": _skill_dict(existing),
                 "version": _version_dict(version),
+                "created": True,
             },
         )
 
