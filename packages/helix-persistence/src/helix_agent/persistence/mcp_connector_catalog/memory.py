@@ -48,6 +48,8 @@ class InMemoryMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 url_template=upsert.url_template,
                 auth_type=upsert.auth_type,
                 auth_schema=upsert.auth_schema,
+                oauth_client_id=upsert.oauth_client_id,
+                oauth_scopes=upsert.oauth_scopes,
                 required_tier=upsert.required_tier,
                 enabled=upsert.enabled,
                 created_at=now,

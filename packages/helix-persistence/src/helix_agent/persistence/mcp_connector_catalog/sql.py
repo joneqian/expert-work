@@ -48,6 +48,8 @@ def _row_to_record(row: McpConnectorCatalogRow) -> McpConnectorCatalogRecord:
         url_template=row.url_template,
         auth_type=row.auth_type,  # type: ignore[arg-type]
         auth_schema=McpConnectorAuthSchema.model_validate(row.auth_schema),
+        oauth_client_id=row.oauth_client_id,
+        oauth_scopes=row.oauth_scopes,
         required_tier=TenantPlan(row.required_tier),
         enabled=row.enabled,
         created_at=row.created_at,
@@ -79,6 +81,8 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 url_template=upsert.url_template,
                 auth_type=upsert.auth_type,
                 auth_schema=upsert.auth_schema.model_dump(),
+                oauth_client_id=upsert.oauth_client_id,
+                oauth_scopes=upsert.oauth_scopes,
                 required_tier=upsert.required_tier.value,
                 enabled=upsert.enabled,
                 created_at=now,

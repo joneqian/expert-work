@@ -35,7 +35,10 @@ __all__ = [
 _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 CatalogTransport = Literal["sse", "streamable_http"]
-CatalogAuthType = Literal["none", "bearer"]
+# ``oauth2`` (Stream MCP-OAUTH) instantiates into a per-user ``mcp_oauth_connection``
+# via the OAuth 2.1 + PKCE flow, not into a tenant_mcp_server row. The token comes
+# from the flow, so an oauth2 entry declares no user-supplied secret fields.
+CatalogAuthType = Literal["none", "bearer", "oauth2"]
 AuthFieldKind = Literal["secret", "param"]
 
 
@@ -85,14 +88,26 @@ def _validate_catalog_name(value: str) -> str:
 
 
 def _validate_auth_consistency(
-    *, auth_type: CatalogAuthType, auth_schema: McpConnectorAuthSchema
+    *,
+    auth_type: CatalogAuthType,
+    auth_schema: McpConnectorAuthSchema,
+    oauth_client_id: str | None = None,
 ) -> None:
-    """``bearer`` needs exactly one secret field; ``none`` allows no secret fields."""
+    """``bearer`` needs exactly one secret field; ``none``/``oauth2`` allow none.
+
+    ``oauth2`` additionally requires ``oauth_client_id`` (the platform-registered
+    OAuth app) — its token is obtained via the OAuth flow, not a declared field.
+    """
     secrets = auth_schema.secret_fields()
     if auth_type == "bearer" and len(secrets) != 1:
         raise ValueError("bearer auth requires exactly one secret field in auth_schema")
     if auth_type == "none" and secrets:
         raise ValueError("auth_type='none' must not declare secret fields")
+    if auth_type == "oauth2":
+        if secrets:
+            raise ValueError("auth_type='oauth2' must not declare secret fields")
+        if not oauth_client_id:
+            raise ValueError("auth_type='oauth2' requires oauth_client_id")
 
 
 class McpConnectorCatalogRecord(BaseModel):
@@ -116,6 +131,10 @@ class McpConnectorCatalogRecord(BaseModel):
     url_template: str = Field(min_length=1)
     auth_type: CatalogAuthType = "none"
     auth_schema: McpConnectorAuthSchema = Field(default_factory=McpConnectorAuthSchema)
+    # Stream MCP-OAUTH — platform-registered OAuth app for an ``oauth2`` entry.
+    # NULL for none/bearer. ``oauth_scopes`` is space-separated (OAuth convention).
+    oauth_client_id: str | None = None
+    oauth_scopes: str | None = None
     required_tier: TenantPlan = TenantPlan.FREE
     enabled: bool = True
     created_at: datetime
@@ -129,7 +148,11 @@ class McpConnectorCatalogRecord(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> McpConnectorCatalogRecord:
-        _validate_auth_consistency(auth_type=self.auth_type, auth_schema=self.auth_schema)
+        _validate_auth_consistency(
+            auth_type=self.auth_type,
+            auth_schema=self.auth_schema,
+            oauth_client_id=self.oauth_client_id,
+        )
         return self
 
 
@@ -147,6 +170,8 @@ class McpConnectorCatalogUpsert(BaseModel):
     url_template: str = Field(min_length=1)
     auth_type: CatalogAuthType = "none"
     auth_schema: McpConnectorAuthSchema = Field(default_factory=McpConnectorAuthSchema)
+    oauth_client_id: str | None = None
+    oauth_scopes: str | None = None
     required_tier: TenantPlan = TenantPlan.FREE
     enabled: bool = True
 
@@ -157,7 +182,11 @@ class McpConnectorCatalogUpsert(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> McpConnectorCatalogUpsert:
-        _validate_auth_consistency(auth_type=self.auth_type, auth_schema=self.auth_schema)
+        _validate_auth_consistency(
+            auth_type=self.auth_type,
+            auth_schema=self.auth_schema,
+            oauth_client_id=self.oauth_client_id,
+        )
         return self
 
 
