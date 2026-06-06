@@ -939,6 +939,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **关键路径** OA-0→OA-1a→OA-1b→OA-2→OA-3（首连接器端到端）→OA-4→OA-5→OA-6。**out-of-scope**：per-tenant 共享连接、DCR/CIMD（用静态预注册 client_id）。
 
+**MCP 基建加固 follow-up**（加固审计 #438 后口头提的 3 项）：
+- [x] **#1 OAuth-only 连接器支持** — 即 Stream MCP-OAUTH 全套（OA-0~OA-6，上文）
+- [x] **#3 DNS-rebind / egress 防御决议**（PR #448）：[ADR-0009](./adr/0009-control-plane-egress-ssrf-dns-rebind.md) — DNS-rebind 防御放基础设施 egress 层（部署须拒 control-plane 出方向私网/loopback/链路本地），不在 app 层做 resolve-then-pin 半成品；保留 `validate_remote_url` 作纵深第一层；沙箱 `helix-sandbox-egress` 只覆盖沙箱出站不覆盖 control-plane connect-out。`url_validation.py` docstring 指向该 ADR。纯文档
+- [ ] **#2 catalog/instance 健康状态字段**：现 `mcp_probe.py` 能探活但结果不持久化（protocol 无 health/last_probe 字段）→ 加字段 + store + migration + probe 写入 + list 暴露
+
 ### Stream X — Platform Skill Library（平台精选库 + 租户自建，混合）— 设计 [STREAM-X-DESIGN](./streams/STREAM-X-DESIGN.md)
 
 平台发布精选 skill 库（`tenant_id NULL`，可 premium），租户继续自建；manifest 同时可绑平台/租户 skill。复用 W 的 `tier_satisfies`、Stream U 的 moderation/curator。**关键发现**：skill resolver 当前**未接入 agent build**（Stream U 遗留缺口，app.py:972 TODO）→ 租户 skill 运行时也未生效；X3 首次接线（租户+平台），属行为变更。

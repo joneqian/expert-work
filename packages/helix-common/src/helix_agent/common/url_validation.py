@@ -7,9 +7,12 @@ cloud metadata endpoint (169.254.169.254) — a classic SSRF. This guard is
 applied at every connect-out site (registration, probe, runtime).
 
 The check is static (scheme + IP-literal ranges + localhost names). It does
-NOT resolve DNS; DNS-rebind defense (resolve, then re-check the resolved IP)
-is a deeper follow-up. Static checks block the common cases (literal private
-IPs, localhost, metadata IP).
+NOT resolve DNS, so it does not stop DNS-rebind (a hostname that resolves to a
+public IP at check time and a private one at connect time). By decision, that
+defense lives at the infrastructure egress layer (deny RFC1918 / loopback /
+link-local egress from the control plane), NOT in this module — see
+ADR-0009. This static guard is the defense-in-depth first layer: it blocks the
+common cases (literal private IPs, localhost, metadata IP) cheaply.
 """
 
 from __future__ import annotations
