@@ -257,6 +257,10 @@ ResourceType = Literal[
     # services/control-plane/src/control_plane/audit.py (per
     # [memory:audit-literal-drift] — both must stay in sync).
     "skill_supporting_file",
+    # Stream SE (Mini-ADR SE-A2) — replay-verification evidence row.
+    # Mirrors the control-plane ``ResourceType`` Literal per
+    # [memory:audit-literal-drift] (both must stay in sync).
+    "skill_eval_result",
     "artifact",  # Stream J.9-step3 — Mini-ADR J-25
     "approval",  # Stream J.8 — Mini-ADR J-24
     "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42

@@ -38,7 +38,7 @@ helix 当前的 skill 是"**人写、版本化、静态启用**"(Stream J.7a + X
 | 子项 | 能力 | 当前成熟度 | 本 Stream 交付 | Mini-ADR |
 |------|------|-----------|---------------|----------|
 | **SE-0** | 总设计 | — | 本文件 + ITERATION-PLAN backlog | — |
-| **SE-1** | 数据模型 | 缺失 | 迁移 0058:skill/skill_version 加归属+溯源列 + 新表 `skill_eval_result`;DTO 扩展;审计 Literal | SE-A1 SE-A2 |
+| **SE-1** | 数据模型 | 缺失 | 迁移 0065(skill/skill_version 加归属+溯源列 + 新表 `skill_eval_result`);DTO 扩展;`ResourceType` 加 `skill_eval_result`(审计**事件**成员随各自 emit 的 PR 加) | SE-A1 SE-A2 |
 | **SE-2** | SkillStore 演化 API | 缺失 | author/refine/fork/promote/record_eval_result + visibility 过滤(base+sql+memory)| SE-A3 |
 | **SE-3** | in-session 自著(Layer A，= J.7b-1)| 仅设计 | 4 个 builtin 工具 + provenance + 高危 gate 接线 | SE-A4 |
 | **SE-4** | 重放验证 runner(咽喉)| 缺失 | with-vs-without 重放 + judge/assert 打分 → grounding 分 | SE-A5 SE-A6 |
@@ -99,7 +99,7 @@ helix 当前的 skill 是"**人写、版本化、静态启用**"(Stream J.7a + X
 
 ---
 
-## 4. 跨切面数据模型(SE-1，纯增量迁移 0058)
+## 4. 跨切面数据模型(SE-1，纯增量迁移 0065)
 
 > Mini-ADR SE-A1:全部为 additive 列 + 一张新表,无破坏性变更;沿用 0057 的 NULL-tenant RLS 模式(平台 skill `tenant_id IS NULL`)。revision id ≤ 32 字符。
 
@@ -229,7 +229,7 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 ## 8. Verification(端到端怎么证明)
 
 - **单测**(`-m "not integration"`,CI 门):DTO / store(visibility 隔离、RLS)/ 4 工具 / replay 打分方向 / 蒸馏 / 归因(环境失败被判"不学")/ 策略(高危拦截、熔断、回滚触发)。
-- **集成**(真 PG):迁移 0058 + RLS + worker `run_once` 全链 + 真 Haiku judge 重放。
+- **集成**(真 PG):迁移 0065 + RLS + worker `run_once` 全链 + 真 Haiku judge 重放。
 - **端到端**:踩坑轨迹 → 蒸馏 → 重放 delta>0 → 自动 active → 同类新任务成功率↑(SE-9 基准)。
 - **安全**:高危自动通道被拦 / 跨租户被拦 / 注入回归触发回滚 / 熔断生效 / agent_private 不泄漏到他 agent。
 
@@ -237,7 +237,7 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 
 ## 9. CI / 约束(复用 helix 门禁)
 
-- 迁移 0058 revision id ≤ 32 字符([memory:alembic_revision_id_32_chars](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_alembic_revision_id_32_chars.md));只在 integration 验证。
+- 迁移 0065 revision id ≤ 32 字符(0058 已占用、链头 0064)([memory:alembic_revision_id_32_chars](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_alembic_revision_id_32_chars.md));只在 integration 验证。
 - `audit.py` 双 Literal(protocol+control-plane);mypy 不覆盖 control-plane/src([memory:ci_lint_type_test_scopes](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/reference_ci_lint_type_test_scopes.md));pytest `-m "not integration"`。
 - CodeQL:审计 / 日志脱敏 —— 别 log 请求派生值([memory:codeql_log_injection_request_taint](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_codeql_log_injection_request_taint.md))、别 log secret 命名名字、assert 无副作用、Protocol 体用 docstring、不留未引用 module-level 名。
 - 协议改签名 sweep 含 tools/eval doubles([memory:protocol_sweep_includes_tools_eval](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/reference_protocol_sweep_includes_tools_eval.md))。

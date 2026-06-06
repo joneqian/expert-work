@@ -127,6 +127,10 @@ ResourceType = Literal[
     # Separate resource type — supporting-files API has its own surface
     # under /v1/skills/{id}/versions/{v}/supporting-files/{path}.
     "skill_supporting_file",
+    # Stream SE (Mini-ADR SE-A2) — replay-verification evidence row.
+    # Mirrors the protocol-side ``ResourceType`` Literal per
+    # [memory:audit-literal-drift] (both must stay in sync).
+    "skill_eval_result",
     "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42
     "eval_dataset",  # Stream J.12 — Mini-ADR J-43
     "curation_candidate",  # Stream J.12 — Mini-ADR J-43

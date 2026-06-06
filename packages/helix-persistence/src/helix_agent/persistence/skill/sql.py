@@ -39,6 +39,11 @@ def _skill_row_to_dto(row: SkillRow) -> Skill:
         pinned=bool(row.pinned),
         last_used_at=row.last_used_at,
         state_changed_at=row.state_changed_at,
+        # Stream SE (Mini-ADR SE-A1) — ownership / lineage. Existing rows
+        # carry migration 0065 defaults (visibility='tenant', NULL ids).
+        visibility=row.visibility,  # type: ignore[arg-type]
+        created_by_agent_id=row.created_by_agent_id,
+        forked_from=row.forked_from,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -64,6 +69,12 @@ def _version_row_to_dto(row: SkillVersionRow) -> SkillVersion:
         lazy_load=bool(row.lazy_load),
         content_hash=bytes(row.content_hash or b""),
         high_risk=bool(row.high_risk),
+        # Stream SE (Mini-ADR SE-A1) — evolution provenance. Existing rows
+        # carry migration 0065 defaults (origin NULL, round 0).
+        evolution_origin=row.evolution_origin,  # type: ignore[arg-type]
+        distilled_from_trajectory_key=row.distilled_from_trajectory_key,
+        distilled_from_candidate_id=row.distilled_from_candidate_id,
+        evolution_round=row.evolution_round,
         created_at=row.created_at,
     )
 

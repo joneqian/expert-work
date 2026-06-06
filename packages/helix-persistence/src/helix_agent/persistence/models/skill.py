@@ -16,6 +16,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -68,6 +69,15 @@ class SkillRow(Base):
     state_changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
+    # Stream SE (Mini-ADR SE-A1) — migration 0065. ``visibility`` defaults
+    # to 'tenant' so M0 human-authored skills keep current sharing; agent
+    # self-authored skills go 'agent_private' until a governance gate
+    # promotes them. ``created_by_agent_id`` / ``forked_from`` are
+    # provenance / lineage pointers (no FK — deleting a source skill must
+    # not cascade-delete its forks/derivatives).
+    visibility: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'tenant'"))
+    created_by_agent_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    forked_from: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -84,6 +94,10 @@ class SkillRow(Base):
         CheckConstraint(
             "required_tier IN ('free', 'pro', 'enterprise')",
             name="skill_required_tier_check",
+        ),
+        CheckConstraint(
+            "visibility IN ('agent_private', 'tenant')",
+            name="skill_visibility_check",
         ),
         # The (tenant_id, name) uniqueness is enforced by the COALESCE
         # unique index ``skill_tenant_name_uniq`` declared in migration
@@ -160,6 +174,19 @@ class SkillVersionRow(Base):
     # starts with "scripts/". M0 transparent (all writes are admin);
     # M1-K J.7b-1 agent-self-authored skills get gated.
     high_risk: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # Stream SE (Mini-ADR SE-A1) — migration 0065. Provenance of how this
+    # version was produced. NULL = human-authored (M0/admin history).
+    # ``in_session`` = agent self-authored in a run (Layer A); ``distilled``
+    # = posterior-distilled by the evolution worker (Layer B, SPARK). The
+    # ``distilled_from_*`` columns point back at the real evidence so a
+    # distilled version is fully traceable; ``evolution_round`` is the
+    # co-evolve iteration (SE-6).
+    evolution_origin: Mapped[str | None] = mapped_column(Text, nullable=True)
+    distilled_from_trajectory_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    distilled_from_candidate_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
+    evolution_round: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -173,7 +200,61 @@ class SkillVersionRow(Base):
             "octet_length(supporting_files::text) <= 5242880",
             name="skill_version_supporting_files_size_ck",
         ),
+        CheckConstraint(
+            "evolution_origin IS NULL OR evolution_origin IN ('in_session', 'distilled')",
+            name="skill_version_evolution_origin_check",
+        ),
+        CheckConstraint("evolution_round >= 0", name="skill_version_evolution_round_nonneg"),
         UniqueConstraint("skill_id", "version", name="skill_version_skill_version_uq"),
         Index("ix_skill_version_tenant_id", "tenant_id"),
         Index("ix_skill_version_skill_id", "skill_id"),
+    )
+
+
+class SkillEvalResultRow(Base):
+    """One row of ``skill_eval_result`` — Stream SE (Mini-ADR SE-A2).
+
+    Replay-verification evidence for a candidate skill version: the
+    ``baseline`` (without the skill) vs ``skill`` (with it) score over
+    ``n_cases`` held-out replays, plus the resulting ``verdict``. The
+    auto-promote gate (SE-7) requires a ``verdict='pass'`` row before a
+    non-high-risk skill goes active (SE-A0). ``tenant_id`` is NULLABLE so
+    platform-skill evaluations share the table (0057 NULL-tenant pattern).
+    """
+
+    __tablename__ = "skill_eval_result"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    skill_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("skill.id", ondelete="CASCADE", name="skill_eval_result_skill_id_fk"),
+        nullable=False,
+    )
+    skill_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    baseline_score: Mapped[float] = mapped_column(Float, nullable=False)
+    skill_score: Mapped[float] = mapped_column(Float, nullable=False)
+    delta: Mapped[float] = mapped_column(Float, nullable=False)
+    n_cases: Mapped[int] = mapped_column(Integer, nullable=False)
+    replay_source: Mapped[str] = mapped_column(Text, nullable=False)
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)
+    high_risk: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    evolution_round: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        CheckConstraint("skill_version >= 1", name="skill_eval_result_version_positive"),
+        CheckConstraint("n_cases >= 0", name="skill_eval_result_n_cases_nonneg"),
+        CheckConstraint(
+            "replay_source IN ('trajectory', 'eval_dataset')",
+            name="skill_eval_result_replay_source_check",
+        ),
+        CheckConstraint(
+            "verdict IN ('pass', 'fail', 'inconclusive')",
+            name="skill_eval_result_verdict_check",
+        ),
+        Index("ix_skill_eval_result_tenant_id", "tenant_id"),
+        Index("ix_skill_eval_result_skill", "skill_id", "skill_version"),
     )

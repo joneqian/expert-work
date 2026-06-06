@@ -25,13 +25,18 @@ from helix_agent.protocol.tenant_config import TenantPlan
 
 __all__ = [
     "HIGH_RISK_TOOLS",
+    "EvalVerdict",
+    "EvolutionOrigin",
+    "ReplaySource",
     "Skill",
     "SkillAuthoredBy",
+    "SkillEvalResult",
     "SkillPackageLayoutError",
     "SkillRef",
     "SkillStatus",
     "SkillSupportingFile",
     "SkillVersion",
+    "SkillVisibility",
     "canonicalize_skill_content",
     "compute_content_hash",
     "is_high_risk_skill_version",
@@ -103,6 +108,19 @@ class SkillStatus(StrEnum):
 
 SkillAuthoredBy = Literal["human", "agent"]
 
+# ── Stream SE — 自我进化 skill ────────────────────────────────────────────
+# ``visibility`` — Mini-ADR SE-A1 (落实 J.7b-1 §15.7). ``agent_private`` =
+# 仅创建它的 agent 实例可见(自著默认);``tenant`` = 租户内共享(需经治理门
+# promote)。平台 skill(tenant_id NULL)始终视为 tenant 可见。
+SkillVisibility = Literal["agent_private", "tenant"]
+# ``evolution_origin`` — 一个版本是怎么来的。``None`` = 人写(历史/admin);
+# ``in_session`` = agent 在 run 内自著(Layer A);``distilled`` = 后台后验
+# 蒸馏 worker 产出(Layer B,SPARK)。
+EvolutionOrigin = Literal["in_session", "distilled"]
+# 重放验证(SE-4)的判定与来源。
+EvalVerdict = Literal["pass", "fail", "inconclusive"]
+ReplaySource = Literal["trajectory", "eval_dataset"]
+
 
 class SkillVersion(BaseModel):
     """One row of ``skill_version`` — an immutable published version.
@@ -155,6 +173,14 @@ class SkillVersion(BaseModel):
     # HIGH_RISK_TOOLS ≠ ∅ or any supporting_files path starts with
     # "scripts/".
     high_risk: bool = False
+    # ── Stream SE — 进化溯源(Mini-ADR SE-A1)。NULL/默认 = 人写历史行。 ──
+    # ``evolution_origin`` 区分 in_session(Layer A 自著)/ distilled(Layer B
+    # 蒸馏);``distilled_from_*`` 指回产生这个版本的真实证据(轨迹 + candidate);
+    # ``evolution_round`` 是 co-evolve 的迭代轮次(SE-6,生成↔验证有界轮)。
+    evolution_origin: EvolutionOrigin | None = None
+    distilled_from_trajectory_key: str | None = None
+    distilled_from_candidate_id: UUID | None = None
+    evolution_round: int = Field(default=0, ge=0)
     created_at: datetime
 
 
@@ -215,8 +241,45 @@ class Skill(BaseModel):
     pinned: bool = False
     last_used_at: datetime | None = None
     state_changed_at: datetime | None = None
+    # ── Stream SE — 归属 / 血缘(Mini-ADR SE-A1,落实 J.7b-1 §15.7)。 ──
+    # ``visibility`` 默认 ``tenant`` 保持 M0 现状(人写 skill 租户内共享);
+    # agent 自著走 ``agent_private`` 隔离。``created_by_agent_id`` 记自著来源
+    # agent 实例(provenance);``forked_from`` 记 fork 血缘源 skill_id。
+    visibility: SkillVisibility = "tenant"
+    created_by_agent_id: UUID | None = None
+    forked_from: UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class SkillEvalResult(BaseModel):
+    """One row of ``skill_eval_result`` — Stream SE (Mini-ADR SE-A2).
+
+    重放验证(SE-4)的**可溯账**:把一个候选 skill 版本注入原任务重跑,
+    对比"装该 skill(treatment)"vs"不装(baseline)"的打分。这是"尽量
+    全自动"治理的安全根 —— 任何自动 promote 到 active 的非高危 skill,
+    必须有一条 ``verdict='pass'`` 证据(SE-A0:验证门单一收口)。
+
+    ``tenant_id is None`` = 平台 skill 的验证结果(沿用 0057 NULL-tenant)。
+    ``delta = skill_score - baseline_score``;判定规则(delta≥θ ∧ n≥N ∧
+    无新增失败 → pass)在 SE-4 的 runner 里,本 DTO 只承载结果。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID | None
+    skill_id: UUID
+    skill_version: int = Field(ge=1)
+    baseline_score: float
+    skill_score: float
+    delta: float
+    n_cases: int = Field(ge=0)
+    replay_source: ReplaySource
+    verdict: EvalVerdict
+    high_risk: bool = False
+    evolution_round: int = Field(default=0, ge=0)
+    created_at: datetime
 
 
 class SkillRef(BaseModel):
