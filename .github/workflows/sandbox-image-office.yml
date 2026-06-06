@@ -43,16 +43,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      # Actions are SHA-pinned (a mutable tag could be re-pointed at malicious
+      # code in this credential-holding workflow); the trailing comment tracks
+      # the human-readable version. These majors also run on Node 24 (the
+      # Node 20 actions runtime is removed from runners 2026-09).
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       # Build once into the local daemon so the smoke test can `docker run` it.
       # Build context is infra/ (the office Dockerfile COPYs the shared
       # sandbox-image/runner.py).
       - name: Build (load local)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: infra
           file: infra/sandbox-image-office/Dockerfile
@@ -67,7 +71,7 @@ jobs:
       # ---- push (main / manual only, and only when the registry is configured)
       - name: Log in to Aliyun ACR
         if: github.event_name != 'pull_request' && vars.ALIYUN_ACR_REGISTRY != ''
-        uses: docker/login-action@v3
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ${{ vars.ALIYUN_ACR_REGISTRY }}
           username: ${{ secrets.ALIYUN_ACR_USERNAME }}
@@ -75,7 +79,7 @@ jobs:
 
       - name: Build + push to ACR
         if: github.event_name != 'pull_request' && vars.ALIYUN_ACR_REGISTRY != ''
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: infra
           file: infra/sandbox-image-office/Dockerfile
