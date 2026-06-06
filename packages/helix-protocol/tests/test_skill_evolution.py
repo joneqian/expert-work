@@ -107,7 +107,7 @@ def test_version_distilled_provenance() -> None:
         evolution_round=3,
     )
     assert v.evolution_origin == "distilled"
-    assert v.distilled_from_trajectory_key.endswith("x.jsonl")
+    assert v.distilled_from_trajectory_key == "t/abc/success/2026/06/06/x.jsonl"
     assert v.distilled_from_candidate_id == cand
     assert v.evolution_round == 3
 
@@ -166,4 +166,4 @@ def test_eval_result_n_cases_non_negative() -> None:
 def test_eval_result_frozen() -> None:
     r = _eval_result()
     with pytest.raises(ValidationError):
-        r.verdict = "fail"  # type: ignore[misc]
+        r.verdict = "fail"
