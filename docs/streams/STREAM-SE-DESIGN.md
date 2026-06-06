@@ -166,13 +166,80 @@ created_at TIMESTAMPTZ NOT NULL
 - 输入:一个候选 skill(DRAFT)+ 一组 held-out 任务(来源:① 同类 trajectory 的初始 user 消息;② `eval_dataset` 该 agent 的 golden/regression 案例)。
 - 过程:对每个任务跑两遍 agent graph —— **baseline(不装该 skill)** vs **treatment(装该 skill)**,用 `tools/eval` 的 judge(Haiku,temp=0)+ assertions 各打分。
 - 输出:`SkillEvalResult`(baseline_score / skill_score / delta / n_cases / verdict)。
-  - **Mini-ADR SE-A5(grounding 判定)**:`verdict=pass` 要求 `delta ≥ θ_delta`(默认可配)且 `n_cases ≥ N_min`(默认可配)且 treatment 无新增失败;否则 `inconclusive`(落 DRAFT 待人审)或 `fail`。
+  - **Mini-ADR SE-A5(grounding 判定,经外部检索强化为配对显著性)**:`verdict=pass` 要求(a)配对显著性检验 p < α(默认 α=0.05;二元结果 McNemar、连续/序数分 Wilcoxon 符号秩)、(b)效应量 `delta ≥ θ_delta`(默认 0.08 ≈ 8pp,对齐 n≈100 时 95% CI 半宽经验)、(c)`n_cases ≥ N_min`(默认 5,对齐 T≥5 重复稳定估计)、(d)treatment 无新增失败;任一不满足 → `inconclusive`(落 DRAFT 待人审),execution/environment 错则归 `inconclusive` 不归 `fail`。判定依据见下「SE-4 设计依据」。
   - **Mini-ADR SE-A6(确定性 / 成本)**:CI 用 `ScriptedJudge` + mock completion(确定性,`-m "not integration"`);真 Haiku judge + 真 graph 重放只在 integration。高危 skill 的重放在 gVisor 沙箱内(复用 ExecPythonTool 路径)。
 - 防泄漏:held-out 任务不得与蒸馏来源轨迹同一条(SPARK 的 held-out 精神),避免"对着训练样本刷分"。
 
+#### SE-4 设计依据:三问题 × 论文启示 × 外部工程实践
+
+> SE-4 是咽喉。本节把"为什么这样验证"落到可追溯的依据上 —— 三篇核心论文回答了三个必答问题(**用什么判 / 判的依据 / 判错怎么办**),并各配一轮外部检索(2026-06,见文末 Sources),确认别人已有的工程实现方法,据此强化 SE-A5/SE-A6。
+
+**前置事实(SE-4 必须存在的最强外部背书)**:SkillsBench(86 任务 / 11 域 / 确定性 verifier / 7 配置 / 7308 轨迹)实测 **自生成 skill 平均比 skill-free 基线低 1.3pp,5 个配置里仅 1 个有改善**。结论:零验证的自生成会**劣化**性能;自生成的可行性取决于"域特异性 + 自动验证可得性"。这正是 SE-A0(无 pass 证据只能停 DRAFT)的实证根据 —— **没有 SE-4,自进化大概率是负收益**。
+
+**问题 1 —— 用什么判(验证器形态)**
+- 论文(CoEvoSkills):验证器要随生成器协同进化,标量分只在**相对基线**下才有意义。
+- 外部实现:
+  - **CTA(Counterfactual Trace Auditing)**:同任务跑 with-skill vs without-skill 两条轨迹,切成目标导向阶段(Orientation/Implementation/Validation/Debugging/Finalization,确定性 FSM),用 DTW 对齐阶段 + 在 reasoning 文本上做 intent 级 TF-IDF 余弦对齐,对每个分歧 emit 一条 Skill Influence Pattern(SIP)。**关键教训**:pass-rate 会饱和、且 skill 的有益/有害效应会在终态相互抵消(其 SWE-Skills-Bench 49 任务上聚合仅 +0.3pp);只看 pass-rate 会漏判。
+  - **Voyager**:双通道验证 = LLM self-verifier + 客观环境反馈(物品是否到手),迭代最多 4 轮(环境态 / 执行错 / 自检),**只有真成功才入库**。
+  - **swap-order 配对 judge(可直接落地的方法)**:pairwise LLM-judge 有 60–75% 的位置偏置(偏向第一个)。工程做法 = **同一对 baseline/treatment 答案跑两次、互换位置、聚合**;两次一致才算"位置一致",不一致计半胜/平局(three-option A/B/C-tie 模式)。代价是每次评估 ≥2 次 judge 调用。
+- **对 SE-4 的强化**:① with-vs-without 对照保留(已定);② **新增轨迹级 SIP 作为二级信号**:当 baseline/treatment 终态打分接近(|delta| < θ_delta)时,落到轨迹 diff 看 skill 是否在中间阶段产生有益偏移(读/写/搜索/执行的差异),避免被饱和 pass-rate 误判为"无效";③ **judge 用 swap-order 配对法消位置偏**(treatment vs baseline 互换两跑),分层可替换不变(CI scripted / integration Haiku)。
+
+**问题 2 —— 判的依据(后验证据 + 统计有效性)**
+- 论文(SPARK/PDI):只信环境后验证据(任务过没过 / assert 红绿 / reward),不信模型自评;held-out 分离。
+- 外部实现:
+  - **执行式验证(grounding 的"硬"来源,可直接落地)**:Reflexion / Self-Refine / Self-Debug 的统一做法 —— 不靠模型自夸,而是**跑出来**:生成产物 → 在环境/自生成单测里执行 → 把执行错与环境反馈喂回 → 迭代至停止条件(LangGraph 里就是一条 conditional edge 回环)。编程类任务能 self-generated unit test → 直接 pass@1。对 SE-4 的含义:**能 assert 的任务一律走执行式后验(最硬信号),judge 仅作无法 assert 时的退路**。
+  - 统计严谨性(原 SE-A5 的薄弱处):配对二元结果用 **McNemar 检验**;配对连续/序数分用 **Wilcoxon 符号秩检验**,出 p 值而非只看 delta 均值。
+  - 样本量现实:n=100 二元试验时 95% CI 半宽约 7–9.5pp(成功率 0.3–0.8),**差异 < ~8–10pp 须谨慎**;**T≥5 次重复**即可显著稳住估计(ICC 研究亦支持报置信区间)。
+- **对 SE-4 的强化(改写 SE-A5)**:grounding 判定从"裸 delta ≥ θ"升级为 **配对显著性检验**:`verdict=pass` 要求(a)配对检验 p < α(默认 α=0.05,二元用 McNemar、连续用 Wilcoxon),(b)效应量 `delta ≥ θ_delta`(默认 θ_delta=0.08,即 ~8pp,对齐 CI 经验),(c)`n_cases ≥ N_min`(默认 N_min=5,对齐 T≥5),(d)treatment 无新增失败。任一不满足 → `inconclusive`(落 DRAFT 待人审)。`skill_eval_result` 增记 p 值与检验类型(写入既有 `replay_source`/扩展字段或证据 JSON,SE-1 表已可承载,必要时 SE-7 细化补列)。
+
+**问题 3 —— 判错怎么办(失败归因)**
+- 论文(EmbodiSkill):skill 没生效 ≠ skill 坏;分 skill-content-error vs execution-lapse。
+- 外部实现(三个可跑算法 + 一条关键准确率天花板):
+  - **ICML 2025 Spotlight《Which Agent Causes Task Failures and When?》**(`github.com/mingyin1/Agents_Failure_Attribution`)给了 3 个可直接复用的归因算法,带可运行入口(`python inference.py --method step_by_step --model ...`):
+    - **All-at-Once**:整条失败日志一次过,LLM 直接点名责任方。最省 token,粒度最粗。
+    - **Binary Search**:把日志对半切、迭代收窄定位失败步。token 与精度折中。
+    - **Step-by-Step**:逐步串行判定每一步对错。最贵,理论最细。
+  - **关键天花板(直接改变我们的设计取舍)**:即便最优方法,**定位"责任 agent" 仅 53.5%、定位"失败步" 仅 14.2%**,o1/R1 等顶级推理模型也达不到实用 → **自动化的细粒度步级归因不可信,不能拿它当门控**。
+  - 业界失败 taxonomy 与 EmbodiSkill 同构:**execution error**(早崩 / 环境装配失败 / 没走到产出)、**skill content error**(领域知识缺口 / 逻辑错)、**tool/environment failure**(依赖装不上 / 权限 / 配置)。
+  - **动态归因 / 反事实探针**:对候选失败步做**受控重执行**(DoVer 的 intervention-driven、AgentRx 的轨迹诊断)过滤伪候选;AgentNoiseBench 证明工具噪声会显著拉低成功率 → 佐证须容忍瞬时抖动。
+- **对 SE-4 的强化**:① replay 失败时**必须留存原始失败信号**(错误类型 / 退出阶段 / 工具负面断言),作为 SE-5 归因(SE-A8)的输入,不能只回一个 `fail`;② **归因只做粗粒度二分类(内容错 vs 执行/环境错),不做自动步级定位**(因 14.2% 步级准确率不可信)—— 用 All-at-Once 量级的成本,辅以失败信号 taxonomy 规则(环境/工具型直接归执行错),不上昂贵的 Step-by-Step;③ verdict 三态中 **execution/environment error 一律归 `inconclusive` 而非 `fail`**,绝不喂回自进化(防在噪声上自我强化、防坍缩);④ 高危候选沙箱重放(已定),收敛 execution-lapse 来源。
+
+**问题 4(补查)—— 无预言机 / 开放式任务能否可信地自动验证?**
+
+> 上面三问的方法,威力几乎都来自"环境自带 ground-truth 预言机"(Minecraft 物品 / 单测 / deterministic verifier)。但 helix 头号形态是 per-user 持久 agent 做开放式业务/知识工作,**大面积任务无硬 verifier**。这片是 SE-4 最大的未验证风险,故补查一轮"无预言机下的可信验证"。
+
+- **风险被实证证实(不是臆测)**:self-rewarding / intrinsic reward 训练会导致 **reward hacking 与模型坍缩**,最优策略退化成"无论输入都吐同一答案";intrinsic reward 通常**无法超越基于真值的 reward**(SRT / DARL)。→ 坐实了对 CoEvoSkills 共进化"无外部锚→漂移"的担忧。
+- **破局量化结论(最值钱)**:哪怕只在 **1% 的评估样本中混入可验证真值**,就足以**大幅压制 reward-hacking**(1% 已显著,10% 更稳)。→ 不必每任务都有预言机,**每轮验证掺一小撮可验证锚点即可钉住 judge/verifier**。
+- **无预言机的实际方法族**:① **Generative Reward Model**(UI-TARS-2 的 ORM 对整条 trajectory 产标量分;pairwise GenRM 对固定参考产胜出置信度);② **rubric-guided verification**(开放式研究 agent,2601.15808);③ 可靠性靠**校准**——用人工修正建 few-shot、**持续追踪 judge 与人的一致率**;④ `Audited Skill-Graph Self-Improvement`(2512.23760)印证:skill 自进化须**锚在 verifiable rewards**。
+- **关键限定(防过度乐观)**:这些方法的验证强度是给 "RL reward 信号 / eval proxy" 用的,**无人证明其强到可当"多租户线上自动上线门"**——上线门可靠性要求更高。故无预言机 skill 的全自动仍比上述论文用例更冒险。
+- **对 SE-4/SE-7 的强化(新 Mini-ADR SE-A5b:grounding 信号强度三级分流)**:auto-promote 前置加"信号强度"维度——
+  - **T1 有硬 verifier**(assert/确定性/golden):执行式验证 + 配对统计 → **全自动**(迁移已验证)。
+  - **T2 无硬 verifier 但有校准 rubric-GenRM**:要求(a)replay 集内**掺入的可验证锚点全过**、(b)GenRM 置信高、(c)judge 与人**追踪一致率 ≥ 阈** → **限定自动**(三条全满足)。
+  - **T3 无 verifier、无校准锚点**:→ **人审**(无方法证明可自动)。
+- **对 SE-6 的强化(给 SE-A9 共进化环补防坍缩)**:**每轮验证强制掺 1%–10% 可验证锚点任务**(量化背书),锚点一旦回归即判该轮无效 —— 把"生成/验证器分离"从口号变成有外部锚的硬约束。
+
+> Sources(2026-06 检索)—— 方法级在前,结果/背书在后:
+> **问题1(判)**:[CTA — Counterfactual Trace Auditing](https://arxiv.org/abs/2605.11946) ·
+> [Voyager(双通道验证)](https://arxiv.org/abs/2305.16291) ·
+> [位置偏置 + swap-order 配对 judge](https://arxiv.org/html/2406.07791v9)。
+> **问题2(依据)**:[Reflexion(执行式验证回环)](https://openreview.net/pdf?id=vAElhFcKW6) ·
+> [Self-Refine](https://openreview.net/pdf?id=S37hOerQLB) ·
+> [Stochasticity in Agentic Evaluations(ICC/置信区间)](https://arxiv.org/pdf/2512.06710)。
+> **问题3(归因)**:[Which Agent Causes Task Failures and When?(ICML'25 Spotlight,3 算法+准确率天花板)](https://ag2ai.github.io/Agents_Failure_Attribution/)([code](https://github.com/mingyin1/Agents_Failure_Attribution)) ·
+> [DoVer(反事实受控重执行)](https://arxiv.org/pdf/2512.06749) ·
+> [AgentNoiseBench](https://arxiv.org/pdf/2602.11348)。
+> **问题4(无预言机/防坍缩)**:[1% 锚点压制 reward-hacking(RL-from-Meta-Evaluation)](https://arxiv.org/pdf/2601.21268) ·
+> [LLMs Gaming Verifiers / RLVR reward hacking](https://arxiv.org/pdf/2604.15149) ·
+> [SRT: Can LRMs Self-Train?(自奖励坍缩)](https://self-rewarding-llm-training.github.io/) ·
+> [UI-TARS-2(generative ORM)](https://arxiv.org/pdf/2509.02544) ·
+> [Inference-Time Scaling of Verification(rubric-guided)](https://arxiv.org/html/2601.15808v1) ·
+> [Audited Skill-Graph Self-Improvement](https://arxiv.org/pdf/2512.23760)。
+> **结果背书/综述**:[SkillsBench(零验证 −1.3pp)](https://arxiv.org/html/2602.12670v1) ·
+> [SoK: Agentic Skills](https://arxiv.org/html/2602.20867v1)。
+
 ### SE-5 — 蒸馏 + 归因(Mini-ADR SE-A7 / SE-A8)
 - **蒸馏** `control_plane/skill_distiller.py`(SE-A7,SPARK 后验):输入一条 `curation_candidate`(优先 `positive_feedback` = 成功打法、`failed_outcome`+后续修复)+ 其轨迹;用 aux LLM(`LLMRouterAuxModelAdapter`)产出 skill 草案(prompt_fragment + tool_names + name 建议)。**只蒸馏后验证据**(真实交互),不从先验计划编。
-- **归因** `control_plane/skill_attribution.py`(SE-A8,EmbodiSkill):当重放失败,用 LLM 归因为「**skill 内容错**」(→ 进入 co-evolve 修订草案)还是「**执行 / 环境错**」(→ 丢弃该信号,不喂回)。归因 prompt 内置 hermes 的"不捕获清单"(环境依赖失败 / 工具负面断言 / 一次性瞬时错),防伪进化与坍缩。
+- **归因** `control_plane/skill_attribution.py`(SE-A8,EmbodiSkill):当重放失败,用 LLM 归因为「**skill 内容错**」(→ 进入 co-evolve 修订草案)还是「**执行 / 环境错**」(→ 丢弃该信号,不喂回)。归因 prompt 内置 hermes 的"不捕获清单"(环境依赖失败 / 工具负面断言 / 一次性瞬时错),防伪进化与坍缩。**取舍(据 SE-4 设计依据问题 3 的准确率天花板)**:只做**粗粒度二分类**(内容 vs 执行/环境),**不做自动步级定位**(步级准确率仅 14.2% 不可信);算法用 All-at-Once 量级 + 失败信号 taxonomy 规则前置(环境/工具型信号直接判执行错,不喂 LLM),不上 Step-by-Step。
 
 ### SE-6 — 进化 worker(Layer B 引擎，Mini-ADR SE-A9)
 新文件 `control_plane/skill_evolution_worker.py`,克隆 `CurationWorker` 骨架(`start`/`stop`/`_loop`/`_bypass_rls`/`_tenant_scope`),`run_once` 编排:
@@ -256,11 +323,12 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | SE-A2 | `skill_eval_result` 作 grounding 可溯账 | § 4.3 |
 | SE-A3 | SkillStore 演化 API + visibility 过滤 + §15.7 权限矩阵 | SE-2 |
 | SE-A4 | 4 个自著工具(拆分语义)+ provenance + 默认 DRAFT | SE-3 |
-| SE-A5 | grounding 判定:delta≥θ ∧ n≥N ∧ 无新失败 | SE-4 |
-| SE-A6 | 验证确定性 / 成本:CI scripted + integration 真 judge;高危走沙箱 | SE-4 |
+| SE-A5 | grounding 判定:配对显著性(p<α)∧ delta≥θ ∧ n≥N ∧ 无新失败 | SE-4 |
+| SE-A5b | grounding 信号强度三级分流(T1 硬verifier全自动 / T2 校准GenRM+锚点限定自动 / T3 人审)| SE-4 + SE-7 |
+| SE-A6 | 验证确定性 / 成本:CI scripted + integration 真 judge;高危走沙箱;judge 用 swap-order 配对消位置偏 | SE-4 |
 | SE-A7 | 蒸馏只取后验证据(SPARK) | SE-5 |
 | SE-A8 | 失败归因(内容错/执行错)+ hermes 不捕获清单(防伪进化) | SE-5 |
-| SE-A9 | co-evolve 有界轮 + 生成器/验证器分离(CoEvoSkills) | SE-6 |
+| SE-A9 | co-evolve 有界轮 + 生成/验证器分离 + 每轮掺 1%–10% 可验证锚点防坍缩(CoEvoSkills + 1% 锚点)| SE-6 |
 | SE-A10 | auto-promote 策略 + 边界 | SE-7 |
 | SE-A11 | 回归回滚 | SE-7 |
 | SE-A12 | 速率限制 + 熔断 | SE-7 |
@@ -279,3 +347,10 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | hermes background_review | 后台隔离复查 + 不捕获环境失败清单 | SE-6 worker + SE-5 归因清单 |
 | deer-flow skill_manage | 自著 CRUD + 写时安全扫描 + 历史归属 | SE-3 工具 + U-22 scan + provenance 列 |
 | openclaw(反例)| 有 skill 基建但无生成闭环 | 警示:基建 ≠ 自进化 → 本 Stream 重心在闭环与验证 |
+| SkillsBench(2602.12670)| 零验证自生成 skill 平均 −1.3pp、5 配置仅 1 改善 | SE-4 存在必要性的实证背书 → SE-A0「无 pass 证据停 DRAFT」 |
+| CTA(2605.11946)| with/without 轨迹 diff + SIP;pass-rate 会饱和/抵消 | SE-4 轨迹级二级信号(|delta|<θ 时看中间阶段偏移) |
+| Voyager(2305.16291)| 双通道验证(自检 + 客观环境反馈),真成功才入库 | SE-4 judge + assert 双信号 / SE-A0 入库前置验证 |
+| 配对统计(McNemar/Wilcoxon/ICC,2512.06710)| 配对显著性 + 置信区间 + T≥5 重复 | SE-A5 升级为配对显著性检验(p<α ∧ delta≥θ ∧ n≥N) |
+| 失败归因(ICML'25 Spotlight / DoVer / AgentNoiseBench)| 3 算法(All-at-Once/Binary/Step)+ 步级仅 14.2% 不可信 | SE-A8 只做粗粒度内容/执行二分类、不做自动步级定位 |
+| 无预言机验证(GenRM/rubric/校准:UI-TARS-2 / 2601.15808)| 开放式任务用生成式 reward model + rubric + 人-judge 一致率校准 | SE-A5b 的 T2 限定自动路径 |
+| 防坍缩(1% 锚点:2601.21268 / 2604.15149 / SRT)| 自奖励会坍缩;掺 1% 可验证真值即大幅压制 | SE-A5b T2 锚点门 + SE-A9 共进化每轮掺锚点 |
