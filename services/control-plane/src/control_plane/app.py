@@ -43,6 +43,7 @@ from control_plane.api import (
     build_health_router,
     build_knowledge_router,
     build_mcp_catalog_router,
+    build_mcp_oauth_router,
     build_mcp_servers_router,
     build_me_router,
     build_members_router,
@@ -221,6 +222,11 @@ from helix_agent.persistence.mcp_connector_catalog import (
     InMemoryMcpConnectorCatalogStore,
     McpConnectorCatalogStore,
     SqlMcpConnectorCatalogStore,
+)
+from helix_agent.persistence.mcp_oauth_connection import (
+    InMemoryMcpOAuthConnectionStore,
+    McpOAuthConnectionStore,
+    SqlMcpOAuthConnectionStore,
 )
 from helix_agent.persistence.memory import (
     InMemoryMemoryStore,
@@ -540,6 +546,10 @@ def create_app(
     # Stream W — platform-curated MCP connector catalog (NULL-tenant rows).
     resolved_mcp_connector_catalog_store = (
         sql_stores.mcp_connector_catalog if sql_stores else InMemoryMcpConnectorCatalogStore()
+    )
+    # Stream MCP-OAUTH — per-user OAuth connections to hosted MCP connectors.
+    resolved_mcp_oauth_connection_store = (
+        sql_stores.mcp_oauth_connection if sql_stores else InMemoryMcpOAuthConnectionStore()
     )
     # Stream Y (Y-3) — platform-curated model rate card (NULL-tenant rows).
     resolved_model_rate_card_store = (
@@ -1052,6 +1062,7 @@ def create_app(
     # AsyncExitStack for shutdown); ``None`` until the lifespan sets it.
     app.state.tenant_mcp_server_store = resolved_tenant_mcp_server_store
     app.state.mcp_connector_catalog_store = resolved_mcp_connector_catalog_store
+    app.state.mcp_oauth_connection_store = resolved_mcp_oauth_connection_store
     app.state.model_rate_card_store = resolved_model_rate_card_store
     app.state.tenant_billing_ledger_store = resolved_tenant_billing_ledger_store
     app.state.tenant_mcp_pool_service = None
@@ -1153,6 +1164,7 @@ def create_app(
     app.include_router(build_service_accounts_router())
     app.include_router(build_mcp_servers_router())
     app.include_router(build_mcp_catalog_router())
+    app.include_router(build_mcp_oauth_router())
     app.include_router(build_rate_card_router())
     app.include_router(build_usage_router())
     app.include_router(build_billing_admin_router())
@@ -1215,6 +1227,7 @@ class _SqlStores:
     tenant_member: TenantMemberStore  # Stream R
     tenant_mcp_server: TenantMcpServerStore  # Stream V
     mcp_connector_catalog: McpConnectorCatalogStore  # Stream W
+    mcp_oauth_connection: McpOAuthConnectionStore  # Stream MCP-OAUTH
     model_rate_card: ModelRateCardStore  # Stream Y (Y-3)
     tenant_billing_ledger: TenantBillingLedgerStore  # Stream Y (Y-4)
     feedback: FeedbackStore
@@ -1403,6 +1416,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
         mcp_connector_catalog=SqlMcpConnectorCatalogStore(session_factory),
+        mcp_oauth_connection=SqlMcpOAuthConnectionStore(session_factory),
         model_rate_card=DbModelRateCardStore(session_factory),
         tenant_billing_ledger=DbTenantBillingLedgerStore(session_factory),
         feedback=DbFeedbackStore(session_factory),

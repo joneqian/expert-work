@@ -499,6 +499,12 @@ class Settings(BaseSettings):
     #: Refill rate (tokens / second) for the MCP probe bucket.
     mcp_probe_rate_limit_refill_per_sec: float = Field(default=0.5, gt=0)
 
+    #: Public redirect URI for the per-user MCP OAuth callback (Stream MCP-OAUTH).
+    #: Must be reachable by the user's browser and registered in each connector's
+    #: OAuth app allowlist, e.g. ``https://app.example.com/v1/mcp-oauth/callback``.
+    #: ``None`` (default) makes the OAuth initiate endpoint return 503.
+    mcp_oauth_redirect_uri: str | None = None
+
     #: When the runtime has a Redis URL (``quota_redis_url``) and
     #: ``single_instance`` is ``False``, the gateway / tenant limiter
     #: use Redis (multi-replica safe). On the default single-instance
