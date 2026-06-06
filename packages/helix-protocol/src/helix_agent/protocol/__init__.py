@@ -101,6 +101,11 @@ from helix_agent.protocol.mcp_connector_catalog import (
     McpConnectorCatalogRecord,
     McpConnectorCatalogUpsert,
 )
+from helix_agent.protocol.mcp_oauth_connection import (
+    McpOAuthConnectionPatch,
+    McpOAuthConnectionRecord,
+    OAuthConnectionStatus,
+)
 from helix_agent.protocol.memory_item import MemoryItem
 from helix_agent.protocol.model_catalog import MODEL_CATALOG, ModelEntry, models_for_provider
 from helix_agent.protocol.multimodal import ImageRef, parse_image_ref
@@ -263,6 +268,8 @@ __all__ = [
     "McpConnectorCatalogPatch",
     "McpConnectorCatalogRecord",
     "McpConnectorCatalogUpsert",
+    "McpOAuthConnectionPatch",
+    "McpOAuthConnectionRecord",
     "McpServerAuthType",
     "McpServerTransport",
     "MemberRole",
@@ -277,6 +284,7 @@ __all__ = [
     "ModelSpec",
     "MountSpec",
     "NetworkSpec",
+    "OAuthConnectionStatus",
     "ObservabilitySpec",
     "Plan",
     "PlanStep",

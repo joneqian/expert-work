@@ -24,6 +24,7 @@ from helix_agent.persistence.models.knowledge import (
     KnowledgeDocumentRow,
 )
 from helix_agent.persistence.models.mcp_connector_catalog import McpConnectorCatalogRow
+from helix_agent.persistence.models.mcp_oauth_connection import McpOAuthConnectionRow
 from helix_agent.persistence.models.memory_item import MemoryItemRow
 from helix_agent.persistence.models.memory_writeback_dlq import MemoryWritebackDLQRow
 from helix_agent.persistence.models.model_rate_card import ModelRateCardRow
@@ -73,6 +74,7 @@ __all__ = [
     "KnowledgeChunkRow",
     "KnowledgeDocumentRow",
     "McpConnectorCatalogRow",
+    "McpOAuthConnectionRow",
     "MemoryItemRow",
     "MemoryWritebackDLQRow",
     "ModelRateCardRow",
