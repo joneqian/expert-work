@@ -100,6 +100,21 @@ from helix_agent.persistence.mcp_connector_catalog import (
 from helix_agent.persistence.mcp_connector_catalog import (
     SqlMcpConnectorCatalogStore as SqlMcpConnectorCatalogStore,
 )
+from helix_agent.persistence.mcp_oauth_connection import (
+    InMemoryMcpOAuthConnectionStore as InMemoryMcpOAuthConnectionStore,
+)
+from helix_agent.persistence.mcp_oauth_connection import (
+    McpOAuthConnectionAlreadyExistsError as McpOAuthConnectionAlreadyExistsError,
+)
+from helix_agent.persistence.mcp_oauth_connection import (
+    McpOAuthConnectionNotFoundError as McpOAuthConnectionNotFoundError,
+)
+from helix_agent.persistence.mcp_oauth_connection import (
+    McpOAuthConnectionStore as McpOAuthConnectionStore,
+)
+from helix_agent.persistence.mcp_oauth_connection import (
+    SqlMcpOAuthConnectionStore as SqlMcpOAuthConnectionStore,
+)
 from helix_agent.persistence.memory import InMemoryMemoryStore as InMemoryMemoryStore
 from helix_agent.persistence.memory import MemoryStore as MemoryStore
 from helix_agent.persistence.memory import SqlMemoryStore as SqlMemoryStore
@@ -281,6 +296,7 @@ __all__ = [
     "InMemoryEvalDatasetStore",
     "InMemoryKnowledgeStore",
     "InMemoryMcpConnectorCatalogStore",
+    "InMemoryMcpOAuthConnectionStore",
     "InMemoryMemoryStore",
     "InMemoryModelRateCardStore",
     "InMemoryPlatformSecretStore",
@@ -305,6 +321,9 @@ __all__ = [
     "McpConnectorCatalogNotFoundError",
     "McpConnectorCatalogRow",
     "McpConnectorCatalogStore",
+    "McpOAuthConnectionAlreadyExistsError",
+    "McpOAuthConnectionNotFoundError",
+    "McpOAuthConnectionStore",
     "MemoryItemRow",
     "MemoryStore",
     "ModelRateCardConflictError",
@@ -320,6 +339,7 @@ __all__ = [
     "SqlEvalDatasetStore",
     "SqlKnowledgeStore",
     "SqlMcpConnectorCatalogStore",
+    "SqlMcpOAuthConnectionStore",
     "SqlMemoryStore",
     "SqlPlatformSecretStore",
     "SqlTenantConfigStore",

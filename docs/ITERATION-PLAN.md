@@ -927,7 +927,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 - [x] **OA-0 设计先行**：STREAM-MCP-OAUTH-DESIGN + 本 backlog（per-user / Linear-first / 6 阶段 / Mini-ADR OA-1~OA-6）
 - [x] **OA-1a catalog OAuth 基础**：`CatalogAuthType += "oauth2"`（auth_schema 校验:oauth2 无 secret 字段 + 必须 `oauth_client_id`）+ catalog `oauth_client_id`/`oauth_scopes` 列（DTO/ORM/store 三层）+ 迁移 `0062_mcp_catalog_oauth`（加列 + auth_type CHECK 扩 oauth2）；protocol + memory store 单测。无 control-plane 重声明（单源 protocol）
-- [ ] **OA-1b 连接表**：`mcp_oauth_connection`（per-(tenant,user,catalog) + token ref + status）model/store/migration（RLS 租户隔离 + 行内 user_id 过滤）
+- [x] **OA-1b 连接表**（PR #440）：`mcp_oauth_connection`（per-(tenant,user,catalog) + token ref + status pending/connected/expired/revoked/error + 短期 oauth_state/pkce_verifier 流程字段）；protocol DTO（`McpOAuthConnectionRecord`/`Patch` + `OAuthConnectionStatus`，connected 必须有 access_token_ref）+ ORM + 迁移 `0063_mcp_oauth_connection`（RLS 租户隔离严格相等 + catalog FK CASCADE + unique(tenant,user,catalog) + status CHECK）+ store 三层（base/sql/memory，**每方法按 user_id 过滤=用户级隔离**叠加 RLS 租户级）；protocol + memory store 单测（含用户隔离、clear_flow_state、duplicate）
 - [ ] **OA-2 OAuth 引擎**：PRM/authz 发现 + PKCE + initiate/callback + token 交换 + refresh（纯逻辑 + secret 存储）
 - [ ] **OA-3 Linear 垂直切片**：catalog 加 Linear(oauth2) + per-user pool 解析 + `_build_mcp_client` oauth2 分支 + 端到端
 - [ ] **OA-4 per-user pool 维度** + 连接管理端点（list/disconnect）+ 状态可观测
