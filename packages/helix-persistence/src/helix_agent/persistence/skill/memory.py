@@ -17,7 +17,14 @@ from helix_agent.persistence.skill.base import (
     SkillNotFoundError,
     SkillStore,
 )
-from helix_agent.protocol import Skill, SkillStatus, SkillVersion
+from helix_agent.protocol import (
+    EvolutionOrigin,
+    Skill,
+    SkillEvalResult,
+    SkillStatus,
+    SkillVersion,
+    SkillVisibility,
+)
 from helix_agent.protocol.tenant_config import TenantPlan
 
 
@@ -53,6 +60,7 @@ class InMemorySkillStore(SkillStore):
     def __init__(self) -> None:
         self._skills: dict[UUID, Skill] = {}
         self._versions: list[SkillVersion] = []
+        self._eval_results: list[SkillEvalResult] = []  # Stream SE (SE-A2)
 
     # ------------------------------------------------------------ skill
 
@@ -65,6 +73,9 @@ class InMemorySkillStore(SkillStore):
         description: str = "",
         category: str | None = None,
         required_tier: TenantPlan = TenantPlan.FREE,
+        visibility: SkillVisibility = "tenant",
+        created_by_agent_id: UUID | None = None,
+        forked_from: UUID | None = None,
     ) -> Skill:
         return await self._create_skill_row(
             skill_id=skill_id,
@@ -73,6 +84,9 @@ class InMemorySkillStore(SkillStore):
             description=description,
             category=category,
             required_tier=required_tier,
+            visibility=visibility,
+            created_by_agent_id=created_by_agent_id,
+            forked_from=forked_from,
         )
 
     async def _create_skill_row(
@@ -84,6 +98,9 @@ class InMemorySkillStore(SkillStore):
         description: str,
         category: str | None,
         required_tier: TenantPlan,
+        visibility: SkillVisibility = "tenant",
+        created_by_agent_id: UUID | None = None,
+        forked_from: UUID | None = None,
     ) -> Skill:
         for existing in self._skills.values():
             if existing.tenant_id == tenant_id and existing.name == name:
@@ -98,6 +115,9 @@ class InMemorySkillStore(SkillStore):
             description=description,
             category=category,
             required_tier=required_tier,
+            visibility=visibility,
+            created_by_agent_id=created_by_agent_id,
+            forked_from=forked_from,
             # Sprint #4 — match the SQL ``server_default=text("now()")``
             # so the in-memory and Postgres backends emit the same
             # DTO shape on first read.
@@ -173,6 +193,10 @@ class InMemorySkillStore(SkillStore):
         lazy_load: bool = False,
         content_hash: bytes = b"",
         high_risk: bool = False,
+        evolution_origin: EvolutionOrigin | None = None,
+        distilled_from_trajectory_key: str | None = None,
+        distilled_from_candidate_id: UUID | None = None,
+        evolution_round: int = 0,
     ) -> SkillVersion:
         parent = await self.get_skill(skill_id=skill_id, tenant_id=tenant_id)
         return await self._append_version(
@@ -190,6 +214,10 @@ class InMemorySkillStore(SkillStore):
             lazy_load=lazy_load,
             content_hash=content_hash,
             high_risk=high_risk,
+            evolution_origin=evolution_origin,
+            distilled_from_trajectory_key=distilled_from_trajectory_key,
+            distilled_from_candidate_id=distilled_from_candidate_id,
+            evolution_round=evolution_round,
         )
 
     async def _append_version(
@@ -209,6 +237,10 @@ class InMemorySkillStore(SkillStore):
         lazy_load: bool,
         content_hash: bytes,
         high_risk: bool,
+        evolution_origin: EvolutionOrigin | None = None,
+        distilled_from_trajectory_key: str | None = None,
+        distilled_from_candidate_id: UUID | None = None,
+        evolution_round: int = 0,
     ) -> SkillVersion:
         if parent is None:
             raise SkillNotFoundError(str(skill_id))
@@ -237,6 +269,10 @@ class InMemorySkillStore(SkillStore):
             lazy_load=lazy_load,
             content_hash=content_hash,
             high_risk=high_risk,
+            evolution_origin=evolution_origin,
+            distilled_from_trajectory_key=distilled_from_trajectory_key,
+            distilled_from_candidate_id=distilled_from_candidate_id,
+            evolution_round=evolution_round,
             created_at=now,
         )
         self._versions.append(version)
@@ -291,6 +327,21 @@ class InMemorySkillStore(SkillStore):
         return await self.get_version_by_number(
             skill_id=skill.id, tenant_id=tenant_id, version=version
         )
+
+    # ------------------------------------------------------------ evolution (Stream SE)
+
+    async def record_eval_result(self, *, result: SkillEvalResult) -> SkillEvalResult:
+        self._eval_results.append(result)
+        return result
+
+    async def list_eval_results(
+        self, *, skill_id: UUID, tenant_id: UUID | None
+    ) -> list[SkillEvalResult]:
+        rows = [
+            r for r in self._eval_results if r.skill_id == skill_id and r.tenant_id == tenant_id
+        ]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows
 
     # ------------------------------------------------------------ platform (Stream X)
     #

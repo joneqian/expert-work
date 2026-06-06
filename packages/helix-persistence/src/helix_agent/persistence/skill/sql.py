@@ -11,13 +11,20 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.persistence.models import SkillRow, SkillVersionRow
+from helix_agent.persistence.models import SkillEvalResultRow, SkillRow, SkillVersionRow
 from helix_agent.persistence.skill.base import (
     DuplicateSkillError,
     SkillNotFoundError,
     SkillStore,
 )
-from helix_agent.protocol import Skill, SkillStatus, SkillVersion
+from helix_agent.protocol import (
+    EvolutionOrigin,
+    Skill,
+    SkillEvalResult,
+    SkillStatus,
+    SkillVersion,
+    SkillVisibility,
+)
 from helix_agent.protocol.skill import SkillSupportingFile
 from helix_agent.protocol.tenant_config import TenantPlan
 
@@ -79,6 +86,24 @@ def _version_row_to_dto(row: SkillVersionRow) -> SkillVersion:
     )
 
 
+def _eval_result_row_to_dto(row: SkillEvalResultRow) -> SkillEvalResult:
+    return SkillEvalResult(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        skill_id=row.skill_id,
+        skill_version=row.skill_version,
+        baseline_score=row.baseline_score,
+        skill_score=row.skill_score,
+        delta=row.delta,
+        n_cases=row.n_cases,
+        replay_source=row.replay_source,  # type: ignore[arg-type]
+        verdict=row.verdict,  # type: ignore[arg-type]
+        high_risk=bool(row.high_risk),
+        evolution_round=row.evolution_round,
+        created_at=row.created_at,
+    )
+
+
 class SqlSkillStore(SkillStore):
     """Postgres-backed skill registry."""
 
@@ -96,6 +121,9 @@ class SqlSkillStore(SkillStore):
         description: str = "",
         category: str | None = None,
         required_tier: TenantPlan = TenantPlan.FREE,
+        visibility: SkillVisibility = "tenant",
+        created_by_agent_id: UUID | None = None,
+        forked_from: UUID | None = None,
     ) -> Skill:
         return await self._create_skill_row(
             skill_id=skill_id,
@@ -104,6 +132,9 @@ class SqlSkillStore(SkillStore):
             description=description,
             category=category,
             required_tier=required_tier,
+            visibility=visibility,
+            created_by_agent_id=created_by_agent_id,
+            forked_from=forked_from,
         )
 
     async def _create_skill_row(
@@ -115,6 +146,9 @@ class SqlSkillStore(SkillStore):
         description: str,
         category: str | None,
         required_tier: TenantPlan,
+        visibility: SkillVisibility = "tenant",
+        created_by_agent_id: UUID | None = None,
+        forked_from: UUID | None = None,
     ) -> Skill:
         now = datetime.now(UTC)
         async with self._sf() as session:
@@ -127,6 +161,9 @@ class SqlSkillStore(SkillStore):
                 description=description,
                 category=category,
                 required_tier=required_tier.value,
+                visibility=visibility,
+                created_by_agent_id=created_by_agent_id,
+                forked_from=forked_from,
                 created_at=now,
                 updated_at=now,
             )
@@ -250,6 +287,10 @@ class SqlSkillStore(SkillStore):
         lazy_load: bool = False,
         content_hash: bytes = b"",
         high_risk: bool = False,
+        evolution_origin: EvolutionOrigin | None = None,
+        distilled_from_trajectory_key: str | None = None,
+        distilled_from_candidate_id: UUID | None = None,
+        evolution_round: int = 0,
     ) -> SkillVersion:
         if authored_by not in {"human", "agent"}:
             msg = f"authored_by must be 'human' or 'agent' (got {authored_by!r})"
@@ -284,6 +325,11 @@ class SqlSkillStore(SkillStore):
                 lazy_load=lazy_load,
                 content_hash=content_hash,
                 high_risk=high_risk,
+                # Stream SE (SE-A1) — evolution provenance.
+                evolution_origin=evolution_origin,
+                distilled_from_trajectory_key=distilled_from_trajectory_key,
+                distilled_from_candidate_id=distilled_from_candidate_id,
+                evolution_round=evolution_round,
                 created_at=now,
             )
             session.add(version_row)
@@ -359,6 +405,47 @@ class SqlSkillStore(SkillStore):
         return await self.get_version_by_number(
             skill_id=skill.id, tenant_id=tenant_id, version=version
         )
+
+    # ------------------------------------------------------------ evolution (Stream SE)
+
+    async def record_eval_result(self, *, result: SkillEvalResult) -> SkillEvalResult:
+        async with self._sf() as session:
+            row = SkillEvalResultRow(
+                id=result.id,
+                tenant_id=result.tenant_id,
+                skill_id=result.skill_id,
+                skill_version=result.skill_version,
+                baseline_score=result.baseline_score,
+                skill_score=result.skill_score,
+                delta=result.delta,
+                n_cases=result.n_cases,
+                replay_source=result.replay_source,
+                verdict=result.verdict,
+                high_risk=result.high_risk,
+                evolution_round=result.evolution_round,
+                created_at=result.created_at,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _eval_result_row_to_dto(row)
+
+    async def list_eval_results(
+        self, *, skill_id: UUID, tenant_id: UUID | None
+    ) -> list[SkillEvalResult]:
+        async with self._sf() as session:
+            stmt = (
+                select(SkillEvalResultRow)
+                .where(SkillEvalResultRow.skill_id == skill_id)
+                .order_by(SkillEvalResultRow.created_at.desc())
+            )
+            stmt = (
+                stmt.where(SkillEvalResultRow.tenant_id == tenant_id)
+                if tenant_id is not None
+                else stmt.where(SkillEvalResultRow.tenant_id.is_(None))
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_eval_result_row_to_dto(r) for r in rows]
 
     # ------------------------------------------------------------ platform (Stream X)
     #

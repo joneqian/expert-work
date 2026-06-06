@@ -23,7 +23,15 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from helix_agent.protocol import Skill, SkillStatus, SkillVersion
+from helix_agent.protocol import (
+    EvolutionOrigin,
+    Skill,
+    SkillEvalResult,
+    SkillStatus,
+    SkillVersion,
+    SkillVisibility,
+)
+from helix_agent.protocol.skill import supporting_files_to_jsonable
 from helix_agent.protocol.tenant_config import TenantPlan
 
 
@@ -75,6 +83,11 @@ class SkillStore(abc.ABC):
         description: str = "",
         category: str | None = None,
         required_tier: TenantPlan = TenantPlan.FREE,
+        # Stream SE (Mini-ADR SE-A1 / SE-A3). Defaults preserve the M0
+        # human-authored shape: tenant-visible, no agent provenance.
+        visibility: SkillVisibility = "tenant",
+        created_by_agent_id: UUID | None = None,
+        forked_from: UUID | None = None,
     ) -> Skill:
         """Insert a new skill row (status=draft, latest_version=0).
 
@@ -82,6 +95,10 @@ class SkillStore(abc.ABC):
         already exists. ``required_tier`` defaults to ``FREE`` — only
         meaningful for platform skills (a tenant's own skills are always
         usable), but accepted on the tenant path for symmetry (Mini-ADR X-2).
+
+        ``visibility`` / ``created_by_agent_id`` / ``forked_from`` (Stream
+        SE) default to the human-authored shape; agent self-authored skills
+        pass ``visibility='agent_private'`` + the authoring agent id.
         """
 
     @abc.abstractmethod
@@ -156,6 +173,12 @@ class SkillStore(abc.ABC):
         lazy_load: bool = False,
         content_hash: bytes = b"",
         high_risk: bool = False,
+        # Stream SE (Mini-ADR SE-A1). Evolution provenance — default None/0
+        # keeps human-authored rows unchanged; Layer A/B paths populate them.
+        evolution_origin: EvolutionOrigin | None = None,
+        distilled_from_trajectory_key: str | None = None,
+        distilled_from_candidate_id: UUID | None = None,
+        evolution_round: int = 0,
     ) -> SkillVersion:
         """Append the next version to a skill.
 
@@ -214,6 +237,89 @@ class SkillStore(abc.ABC):
         allowed — pinning is the reproducibility escape hatch). Returns
         ``None`` when either the name or the version row is absent.
         """
+
+    # -------------------------------------------------- evolution (Stream SE)
+
+    async def fork_skill(
+        self,
+        *,
+        tenant_id: UUID,
+        source_skill_id: UUID,
+        new_name: str,
+        by_agent_id: UUID,
+        new_skill_id: UUID,
+        new_version_id: UUID,
+    ) -> Skill:
+        """Fork a same-tenant source skill into a new agent-private skill.
+
+        Concrete composition over the abstract primitives (Mini-ADR SE-A3,
+        §15.7 "fork is the reuse path"): copy the source skill's *latest*
+        version content into a brand-new ``agent_private`` skill (v1) owned
+        by ``by_agent_id`` with ``forked_from = source_skill_id``. The new
+        skill starts in ``DRAFT`` like any freshly authored skill.
+
+        Raises :class:`SkillNotFoundError` if the source skill is unknown
+        for this tenant, :class:`SkillVersionNotFoundError` if it has no
+        published version yet (``latest_version == 0``).
+
+        Not atomic across the two writes (create + add_version) on the SQL
+        backend — a crash between them leaves an empty DRAFT skill, which is
+        harmless (no bare-name resolution until ACTIVE) and admin-cleanable.
+        """
+        source = await self.get_skill(skill_id=source_skill_id, tenant_id=tenant_id)
+        if source is None:
+            raise SkillNotFoundError(str(source_skill_id))
+        src_version = await self.get_version_by_number(
+            skill_id=source_skill_id, tenant_id=tenant_id, version=source.latest_version
+        )
+        if src_version is None:
+            raise SkillVersionNotFoundError(f"{source_skill_id}@{source.latest_version}")
+        await self.create_skill(
+            skill_id=new_skill_id,
+            tenant_id=tenant_id,
+            name=new_name,
+            description=src_version.description,
+            category=src_version.category,
+            visibility="agent_private",
+            created_by_agent_id=by_agent_id,
+            forked_from=source_skill_id,
+        )
+        await self.add_version(
+            version_id=new_version_id,
+            skill_id=new_skill_id,
+            tenant_id=tenant_id,
+            prompt_fragment=src_version.prompt_fragment,
+            tool_names=src_version.tool_names,
+            description=src_version.description,
+            category=src_version.category,
+            required_models=src_version.required_models,
+            authored_by="agent",
+            supporting_files=supporting_files_to_jsonable(src_version.supporting_files),
+            lazy_load=src_version.lazy_load,
+            content_hash=src_version.content_hash,
+            high_risk=src_version.high_risk,
+            evolution_origin="in_session",
+        )
+        forked = await self.get_skill(skill_id=new_skill_id, tenant_id=tenant_id)
+        if forked is None:  # pragma: no cover — just-created row must exist
+            raise SkillNotFoundError(str(new_skill_id))
+        return forked
+
+    @abc.abstractmethod
+    async def record_eval_result(self, *, result: SkillEvalResult) -> SkillEvalResult:
+        """Persist one replay-verification result (Mini-ADR SE-A2).
+
+        ``result.tenant_id is None`` = a platform-skill evaluation (caller
+        MUST be inside ``bypass_rls_session()``); otherwise the row is
+        tenant-scoped under the standard RLS GUC.
+        """
+
+    @abc.abstractmethod
+    async def list_eval_results(
+        self, *, skill_id: UUID, tenant_id: UUID | None
+    ) -> list[SkillEvalResult]:
+        """All eval results for a skill, newest first. ``tenant_id=None``
+        for a platform skill (caller inside ``bypass_rls_session()``)."""
 
     # -------------------------------------------------- platform (Stream X)
     #
