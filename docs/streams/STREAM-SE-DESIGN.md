@@ -162,13 +162,13 @@ created_at TIMESTAMPTZ NOT NULL
 接线:在 `KNOWN_BUILTINS`(`tools/assembly.py`)注册;经 `make_agent_builder` 注入 `created_by_agent_id` 上下文(provenance);复用 U-22 threat scan(写时)+ U-24 高危 gate(active 时);每个动作 emit 对应 AuditAction;**速率限制**(SE-7)前置。默认产出即进验证门(SE-4/6),不直接 active。
 
 ### SE-4 — 重放验证 runner(咽喉，Mini-ADR SE-A5 / SE-A6)
-新目录 `services/orchestrator/src/orchestrator/evolution/replay.py`。
+拆三 PR(`services/orchestrator/src/orchestrator/evolution/`):**SE-4a** `grounding.py`(判定大脑,纯逻辑)+ **SE-4b** `replay.py`(编排核心,接缝解耦,CI 全测)+ **SE-4c** 真 graph adapter(`TaskRunner` 实现,integration 门)。
 - 输入:一个候选 skill(DRAFT)+ 一组 held-out 任务(来源:① 同类 trajectory 的初始 user 消息;② `eval_dataset` 该 agent 的 golden/regression 案例)。
-- 过程:对每个任务跑两遍 agent graph —— **baseline(不装该 skill)** vs **treatment(装该 skill)**,用 `tools/eval` 的 judge(Haiku,temp=0)+ assertions 各打分。
+- 过程:对每个任务跑两遍 agent graph —— **baseline(不装该 skill)** vs **treatment(装该 skill)**,judge(Haiku,temp=0)+ assertions 各打分。真 graph 与真 judge 经 `TaskRunner`/`ReplayJudge` 两个 Protocol 接缝注入(SE-4c 提供真实现;CI 用 fake runner + scripted/marker judge)。
 - 输出:`SkillEvalResult`(baseline_score / skill_score / delta / n_cases / verdict)。
-  - **Mini-ADR SE-A5(grounding 判定,经外部检索强化为配对显著性)**:`verdict=pass` 要求(a)配对显著性检验 p < α(默认 α=0.05;二元结果 McNemar、连续/序数分 Wilcoxon 符号秩)、(b)效应量 `delta ≥ θ_delta`(默认 0.08 ≈ 8pp,对齐 n≈100 时 95% CI 半宽经验)、(c)`n_cases ≥ N_min`(默认 5,对齐 T≥5 重复稳定估计)、(d)treatment 无新增失败;任一不满足 → `inconclusive`(落 DRAFT 待人审),execution/environment 错则归 `inconclusive` 不归 `fail`。判定依据见下「SE-4 设计依据」。
-  - **Mini-ADR SE-A6(确定性 / 成本)**:CI 用 `ScriptedJudge` + mock completion(确定性,`-m "not integration"`);真 Haiku judge + 真 graph 重放只在 integration。高危 skill 的重放在 gVisor 沙箱内(复用 ExecPythonTool 路径)。
-- 防泄漏:held-out 任务不得与蒸馏来源轨迹同一条(SPARK 的 held-out 精神),避免"对着训练样本刷分"。
+  - **Mini-ADR SE-A5(grounding 判定,经外部检索强化为配对显著性)**:`verdict=pass` 要求(a)配对显著性检验 p < α(默认 α=0.05;二元结果 McNemar、连续/序数分 Wilcoxon 符号秩)、(b)效应量 `delta ≥ θ_delta`(默认 0.08 ≈ 8pp,对齐 n≈100 时 95% CI 半宽经验)、(c)`n_cases ≥ N_min`(默认 **6** —— 双侧精确 p 在 n=5 下限 0.0625>0.05,6 才是 α=0.05 的显著性下限;T≥5 仅稳定性指南)、(d)treatment 无新增失败;任一不满足 → `inconclusive`(落 DRAFT 待人审),execution/environment 错则归 `inconclusive` 不归 `fail`。判定依据见下「SE-4 设计依据」。
+  - **Mini-ADR SE-A6(确定性 / 成本 / 打分形态)**:CI 用 `ScriptedJudge`/fake runner(确定性,`-m "not integration"`);真 Haiku judge + 真 graph 重放只在 integration。高危 skill 的重放在 gVisor 沙箱内(复用 ExecPythonTool 路径,SE-4c)。**打分用逐点(pointwise)**:baseline/treatment 各自独立打分 → 天然无位置偏置,不需 swap-order(swap-order 只在 pairwise A/B judge 才需)。
+- 防泄漏:held-out 任务不得与蒸馏来源轨迹同一条(SPARK 的 held-out 精神),`replay.py` 在重放前剔除 `trajectory_key==distilled_from_trajectory_key` 的任务,避免"对着训练样本刷分"。
 
 #### SE-4 设计依据:三问题 × 论文启示 × 外部工程实践
 
