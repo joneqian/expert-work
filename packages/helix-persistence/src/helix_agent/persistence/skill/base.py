@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -27,9 +28,11 @@ from helix_agent.protocol import (
     EvolutionOrigin,
     Skill,
     SkillEvalResult,
+    SkillRunUsage,
     SkillStatus,
     SkillVersion,
     SkillVisibility,
+    TrajectoryOutcome,
 )
 from helix_agent.protocol.skill import supporting_files_to_jsonable
 from helix_agent.protocol.tenant_config import TenantPlan
@@ -325,6 +328,35 @@ class SkillStore(abc.ABC):
     ) -> list[SkillEvalResult]:
         """All eval results for a skill, newest first. ``tenant_id=None``
         for a platform skill (caller inside ``bypass_rls_session()``)."""
+
+    # ------------------------------------- run-usage attribution (SE-7d-1)
+
+    @abc.abstractmethod
+    async def record_skill_run_usage(self, *, usage: SkillRunUsage) -> SkillRunUsage:
+        """Append one ``skill_run_usage`` row (Mini-ADR SE-A11, SE-7d-1).
+
+        Best-effort attribution: a run (``usage.thread_id``) loaded
+        ``usage.skill_version`` and ended with ``usage.outcome``. The
+        rollback monitor (SE-7d-3) aggregates these per version.
+        ``usage.tenant_id is None`` = platform skill (caller inside
+        ``bypass_rls_session()``); otherwise tenant-scoped under the RLS GUC.
+        """
+
+    @abc.abstractmethod
+    async def skill_run_outcomes(
+        self,
+        *,
+        skill_id: UUID,
+        skill_version: int,
+        tenant_id: UUID | None,
+        since: datetime,
+    ) -> list[TrajectoryOutcome]:
+        """Outcomes of runs that used ``(skill_id, skill_version)`` with
+        ``created_at >= since`` — the rolling-window signal the regression-
+        rollback judge (SE-7d-2) scores. Filtered **per version** so a
+        rollback never连坐 the next (possibly human-fixed) version.
+        ``tenant_id=None`` for a platform skill (caller inside
+        ``bypass_rls_session()``)."""
 
     # -------------------------------------------------- platform (Stream X)
     #

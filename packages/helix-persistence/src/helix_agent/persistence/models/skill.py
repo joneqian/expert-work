@@ -260,3 +260,49 @@ class SkillEvalResultRow(Base):
         Index("ix_skill_eval_result_tenant_id", "tenant_id"),
         Index("ix_skill_eval_result_skill", "skill_id", "skill_version"),
     )
+
+
+class SkillRunUsageRow(Base):
+    """One row of ``skill_run_usage`` — Stream SE (Mini-ADR SE-A11, SE-7d-1).
+
+    Skill-centric attribution for regression rollback: a run
+    (``thread_id``) loaded ``skill_version`` and ended with ``outcome``.
+    The rollback monitor (SE-7d-3) aggregates these per ``(skill_id,
+    skill_version)`` over a rolling window — the ``ix_skill_run_usage_window``
+    index makes that a range scan. ``tenant_id`` is NULLABLE so platform-skill
+    usage shares the table (0057 NULL-tenant pattern); ``agent_name`` is half
+    the circuit-breaker scope key ``{tenant}:{agent}``.
+    """
+
+    __tablename__ = "skill_run_usage"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    skill_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("skill.id", ondelete="CASCADE", name="skill_run_usage_skill_id_fk"),
+        nullable=False,
+    )
+    skill_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    thread_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    agent_name: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        CheckConstraint("skill_version >= 1", name="skill_run_usage_version_positive"),
+        CheckConstraint(
+            "outcome IN ('success', 'failed', 'max_steps', 'cancelled')",
+            name="skill_run_usage_outcome_check",
+        ),
+        Index("ix_skill_run_usage_tenant_id", "tenant_id"),
+        Index(
+            "ix_skill_run_usage_window",
+            "tenant_id",
+            "skill_id",
+            "skill_version",
+            "created_at",
+        ),
+    )

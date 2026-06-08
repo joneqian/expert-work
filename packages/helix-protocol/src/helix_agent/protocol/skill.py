@@ -21,6 +21,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from helix_agent.protocol.eval_dataset import TrajectoryOutcome
 from helix_agent.protocol.tenant_config import TenantPlan
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "SkillEvalResult",
     "SkillPackageLayoutError",
     "SkillRef",
+    "SkillRunUsage",
     "SkillStatus",
     "SkillSupportingFile",
     "SkillVersion",
@@ -283,6 +285,35 @@ class SkillEvalResult(BaseModel):
     verdict: EvalVerdict
     high_risk: bool = False
     evolution_round: int = Field(default=0, ge=0)
+    created_at: datetime
+
+
+class SkillRunUsage(BaseModel):
+    """One row of ``skill_run_usage`` — Stream SE (Mini-ADR SE-A11, SE-7d-1).
+
+    上线后归因的 **skill-centric** 事实:某次 run(``thread_id``)装载了某个
+    skill 的具体 ``skill_version``,以及那次 run 的 ``outcome``。回归回滚监控
+    (SE-7d-3)按 ``(skill_id, skill_version)`` 聚合滚动窗口的成功率 —— 显著
+    下降即自动 archive。
+
+    为什么是专表而非借 trajectory metadata:回滚判定是 skill-centric 查询,
+    trajectory 是 run-centric 存储,把前者架在后者全扫上是建模错配(详见
+    ``docs/streams/STREAM-SE-DESIGN.md`` § 4.4)。``skill_version`` 让回滚
+    **按版本判定、不连坐**下一个(可能是人审改好的)版本。
+
+    ``tenant_id is None`` = 平台 skill 的使用记录(沿用 0057 NULL-tenant);
+    ``agent_name`` 是熔断 scope key ``{tenant}:{agent}`` 的一半(SE-7c/d-3)。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID | None
+    skill_id: UUID
+    skill_version: int = Field(ge=1)
+    thread_id: UUID
+    agent_name: str
+    outcome: TrajectoryOutcome
     created_at: datetime
 
 
