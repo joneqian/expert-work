@@ -433,7 +433,33 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 
 ---
 
-## 10. Mini-ADR 索引
+## 10. agentic-harness-engineering 借鉴增强(SE-10 ~ SE-15)
+
+深度对照外部研究仓 `agentic-harness-engineering`(Terminal-Bench 2.0 #3,「模型冻结、进化 7 正交 harness 组件」)后,提炼 6 个增量子项。三原则:**泛化复用现有验证门、不新建并行子系统、守代码进化红线**(工具实现/中间件/子agent 代码不进化,强制人审)。完整设计见各子项小节;对账见 `docs/research/2026-06-08-hermes-vs-stream-l-harness-reconciliation.md`。
+
+| 子项 | 借鉴点 | 状态 |
+|---|---|---|
+| SE-10 | 进化对象从「仅 skill」扩到文本类组件(system_prompt 增量 / tool 描述 / 长期记忆),复用同一重放门 | 设计待落 |
+| SE-11 | 变更「预测—自动证伪」纪律(predicted_impact → verdict),叠加不替代回滚 | 设计待落 |
+| SE-12 | 分层 + 带源回链失败报告(Agent Debugger 式 overview/detail) | 设计待落 |
+| SE-13 | 进化前领域预研(冷启动 + KB/web → DRAFT 先验) | 设计待落 |
+| SE-14 | Best-of-N 候选多样性(策略 hint 分流 + winner 选举) | 设计待落 |
+| SE-15 | harness 规范 + linter + profile 对账 | ✅ 已落 |
+
+### SE-F(SE-15)— harness 规范 + linter(Mini-ADR SE-A34 / A35 / A36 / A37)
+
+helix 是**声明式 harness**(`AgentSpec` manifest 装配成 `BuiltAgent`),非外部那种文件树式工作区。SE-15 把外部 HARNESS.md v1.0 的 7 组件**映射到 AgentSpec 字段**(规范 `docs/HARNESS-COMPLIANCE.md`),并补一个可执行校验器,覆盖 `model_validator` 表达不了的跨组件 / 命名 / 合规规则。
+
+- **SE-A34 映射而非照搬**:7 组件 ↔ AgentSpec(system_prompt+dynamic_context / tools / 工具注册 / middleware / skills / subagents / memory.long_term);不复制外部目录结构(声明式 vs 文件树是不同形态)。
+- **SE-A35 linter 只补 validator 覆盖不到的**:R1 schema 合规(error)/ R2 builtin∈KNOWN_BUILTINS(error)/ R3 启用的 HIGH_RISK_TOOLS ⊆ approval_required_tools(error,manifest 层映射 SE 高危永人审)/ R4 名 kebab(warn)/ R5 system_prompt 不嵌代码(warn,正交性)/ R6 vision 与视觉模型互斥(warn)/ R-prof profile 推荐块(warn)。误杀缓解:启发式归 warn,硬规则才 error。
+- **SE-A36 纯静态接 CI lint job**:`tools/harness/check_harness_compliance.py`(stdlib+pydantic+pyyaml),扫 `manifests/**` 的 `kind: Agent`。R2 需 orchestrator 取 `KNOWN_BUILTINS`,不可导入时**打印 notice 跳过**(不静默放过;CI 必装全量 workspace 故必跑)。不接 mypy/pytest scope。
+- **SE-A37 profile 复用思想不照搬工具**:`tools/harness/helix_profile.yaml`(对标外部 hermes/codex/openclaw profile 的「不同形态不同必填」思想);外部 `validate_harness.py`(文件树审计器)与 manifest 形态不符,**不进 CI**。
+
+验证:`tools/harness/test_harness_compliance.py`(15 测,各规则正/反例 + canonical manifest 合规自检,CI 自检证非误杀)。
+
+---
+
+## 11. Mini-ADR 索引
 
 | ID | 决策 | 章节 |
 |---|---|---|
@@ -456,6 +482,10 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | SE-A13c | 持久 kill-switch 专表 `skill_evolution_kill_switch`(scope global/tenant;补 in-process breaker 持久化缺口;喂 `decide_promotion` 作 halt 输入);与 archive(停单 skill)正交 | SE-8 |
 | SE-A13d | 前端不新建页/不加导航:丰富 Skills 列表(live vs latest + 可见性/来源/verdict/待审,筛"仅待审"=队列)+ SkillDetail 展开全貌 + 列表头 kill-switch 开关 | SE-8 |
 | SE-A14 | self-evolution 基准 + SLO 合并门 | SE-9 |
+| SE-A34 | harness 规范 = AgentSpec 的 7 组件映射,不照搬外部文件树目录 | SE-15 |
+| SE-A35 | linter 只补 model_validator 覆盖不到的跨组件/命名/合规规则(R1-R6+R-prof) | SE-15 |
+| SE-A36 | 纯静态脚本接 CI lint job;R2 缺 orchestrator 时打印 notice 跳过不静默 | SE-15 |
+| SE-A37 | profile 复用「不同形态不同必填」思想;外部 validate_harness.py 不进 CI | SE-15 |
 
 ---
 

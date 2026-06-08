@@ -1075,6 +1075,14 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 > **Stream SE 整体收官** — SE-0 设计 / SE-1~7 自著+蒸馏+重放验证+归因+co-evolve+全自动护栏 / SE-8 admin API+UI / SE-9 基准+SLO 合并门。自进化 skill 从"人写静态启用"升级为"agent 自生成、被重放证据验证、有界自动演化、可治理可回滚可熔断"的一等能力。
 
+> **SE-10 ~ SE-15 借鉴增强（2026-06-08 起）** — 深度对照外部研究仓 `agentic-harness-engineering`（Terminal-Bench 2.0 #3，「模型冻结、进化 7 正交 harness 组件」）后提炼 6 个增量子项（设计 [STREAM-SE-DESIGN § 10](./streams/STREAM-SE-DESIGN.md)；对账 [docs/research/2026-06-08-hermes-vs-stream-l...](./research/2026-06-08-hermes-vs-stream-l-harness-reconciliation.md)）。三原则：泛化复用现有验证门 / 不新建并行子系统 / 守代码进化红线。
+- [x] **SE-15 harness 规范 + linter + profile 对账**（本次）：helix 版 harness 合规规范 `docs/HARNESS-COMPLIANCE.md`（7 组件 ↔ AgentSpec 映射）+ 可执行校验器 `tools/harness/check_harness_compliance.py`（R1 schema / R2 builtin∈KNOWN_BUILTINS / R3 高危⊆approval_required_tools 三 error + R4 名kebab / R5 prompt 不嵌码 / R6 vision 互斥 / R-prof 三 warn；R2 缺 orchestrator 打印 notice 跳过不静默）+ `helix_profile.yaml`（对标外部 hermes/codex/openclaw profile 思想）+ hermes.yaml↔Stream L 对账文档（结论：Hermes 7 组件+L 8 条+Change-Manifest 全已落地或超出）+ 接 CI lint job + 4 Mini-ADR（SE-A34~A37）。15 单测（各规则正反例 + canonical manifest 合规自检）。外部 `validate_harness.py`（文件树审计器）不进 CI（形态不符）
+- [ ] **SE-10 文本类 harness 组件进化扩展**（SE-A15~A17）：SkillVersion 加 `component_type`(system_prompt/tool_description/memory_entry)+`target_tool_name`（迁移 0069 纯增量）；agent_factory 三类 render；3 个 in-session builtin；蒸馏分流；C1 严 gate（agent_private→tenant 永人审）
+- [ ] **SE-11 进化变更预测—自动证伪纪律**（SE-A18/A19）：迁移 0070 两表（skill_change_prediction/skill_prediction_verdict）；generator+replay_derived 双源预测；纯逻辑 `decide_prediction_verdict`（5 级）并入 RollbackMonitor sweep；反哺 co-evolve；叠加不替代 decide_rollback
+- [ ] **SE-12 分层带源失败报告**（SE-A20~A23）：FailureReport DTO + ObjectStore JSON blob；程序化预聚类 + Haiku 命名；`is_too_specific` 提取 helix-common；喂生成器信号 + 治理 UI FailureReportPanel；只做输入信号不当门控
+- [ ] **SE-13 进化前领域预研**（SE-A24~A28）：DomainResearcher（KB+可选 web_search+Haiku 综述）；冷启动+TTL；产物 DRAFT agent_private knowledge-skill 当先验；settings 默认 off；跨租户红线
+- [ ] **SE-14 Best-of-N 候选多样性**（SE-A29~A33）：DistillHint（prompt/tools/anchored）；纯逻辑 `pick_winner`+BestOfNConfig；processor fan-out N draft→各 persist→fan-out replay→winner→落选 archive→winner 进 revise；replay_budget+breaker 三重闸；默认关闭 opt-in
+
 ---
 
 ## Phase M1 — 生产化（6-8 个月）
