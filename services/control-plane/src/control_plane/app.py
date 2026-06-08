@@ -25,6 +25,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -150,7 +151,9 @@ from control_plane.scheduler import TriggerScheduler
 from control_plane.settings import Settings
 from control_plane.skill_activity import ThrottledActivityRecorder
 from control_plane.skill_curator import SkillCurator
+from control_plane.skill_evolution_limits import CircuitBreaker
 from control_plane.skill_evolution_worker import SkillEvolutionWorker
+from control_plane.skill_rollback_monitor import RollbackMonitor
 from control_plane.subagent_runtime import make_child_agent_builder
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolService
@@ -680,6 +683,7 @@ def create_app(
             # race-free. An injected runtime (tests) is left untouched.
             curation_worker: CurationWorker | None = None
             skill_evolution_worker: SkillEvolutionWorker | None = None
+            skill_rollback_monitor: RollbackMonitor | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
                     if not resolved_settings.checkpointer_dsn:
@@ -1005,6 +1009,12 @@ def create_app(
             # Stream SE (SE-6d) — Layer B skill-evolution worker (gated OFF by
             # default). Built lazily so the orchestrator graph import it needs
             # stays out of the module-import path.
+            # SE-7 auto-promote channel breaker, shared by the promote gate
+            # (SE-7c) and the rollback monitor (SE-7d) so a promote that later
+            # rolls back trips the same channel (SE-A12). In-process state.
+            skill_evo_breaker = CircuitBreaker(
+                failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)
+            )
             if resolved_settings.enable_skill_evolution_worker:
                 from control_plane.skill_evolution_wiring import build_evolution_worker
 
@@ -1026,6 +1036,7 @@ def create_app(
                         agent_builder=resolved_agent_runtime.agent_builder,
                         interval_s=resolved_settings.skill_evolution_worker_interval_s,
                         audit_logger=resolved_audit,
+                        breaker=skill_evo_breaker,
                     )
                     skill_evolution_worker.start()
                     _app.state.skill_evolution_worker = skill_evolution_worker
@@ -1033,6 +1044,27 @@ def create_app(
                     logger.warning(
                         "skill_evolution_worker.aux_model.unavailable provider=%s", se_provider
                     )
+
+            # Stream SE (SE-7d-3b-i) — regression-rollback monitor. DB-only (no
+            # LLM/graph), so no provider gate; shares the auto-promote breaker.
+            if resolved_settings.enable_skill_rollback_monitor:
+                from control_plane.skill_rollback_gate import RollbackGate
+                from control_plane.skill_rollback_monitor import RollbackMonitorConfig
+
+                skill_rollback_monitor = RollbackMonitor(
+                    skill_store=resolved_skill_store,
+                    gate=RollbackGate(
+                        skill_store=resolved_skill_store,
+                        breaker=skill_evo_breaker,
+                        audit_logger=resolved_audit,
+                    ),
+                    config=RollbackMonitorConfig(
+                        window=timedelta(days=resolved_settings.skill_rollback_window_days)
+                    ),
+                    interval_s=resolved_settings.skill_rollback_monitor_interval_s,
+                )
+                skill_rollback_monitor.start()
+                _app.state.skill_rollback_monitor = skill_rollback_monitor
             resolved_lifecycle.mark_ready()
             logger.info(
                 "control_plane.lifespan.ready",
@@ -1055,6 +1087,8 @@ def create_app(
                     await curation_worker.stop()
                 if skill_evolution_worker is not None:
                     await skill_evolution_worker.stop()
+                if skill_rollback_monitor is not None:
+                    await skill_rollback_monitor.stop()
                 ingestion_runner: KnowledgeIngestionRunner | None = getattr(
                     _app.state, "knowledge_ingestion_runner", None
                 )

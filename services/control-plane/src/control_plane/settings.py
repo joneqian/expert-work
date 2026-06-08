@@ -348,6 +348,16 @@ class Settings(BaseSettings):
     #: Evolution sweeps run real replays (LLM + graph) — keep the cadence slow.
     skill_evolution_worker_interval_s: int = Field(default=600, gt=0)
 
+    #: SE-7d regression-rollback monitor (gated OFF by default). Periodically
+    #: archives auto-promoted ACTIVE distilled skills that regressed. Shares the
+    #: evolution worker's circuit breaker so rollbacks trip the auto-promote
+    #: channel — only meaningful with ``enable_skill_evolution_worker`` on.
+    enable_skill_rollback_monitor: bool = Field(default=False)
+    #: Rollback sweeps are cheap (DB-only); hourly is plenty.
+    skill_rollback_monitor_interval_s: int = Field(default=3600, gt=0)
+    #: Rolling outcome window (days) per version for the regression test.
+    skill_rollback_window_days: int = Field(default=7, gt=0)
+
     #: Max trajectories examined per curation sweep — caps a cycle's work.
     curation_worker_batch_size: int = Field(default=200, gt=0)
 
