@@ -340,6 +340,14 @@ class Settings(BaseSettings):
     #: a few minutes is plenty.
     curation_worker_interval_s: int = Field(default=300, gt=0)
 
+    #: Stream SE (SE-6d) — the Layer B skill-evolution worker. OFF by default:
+    #: it distils + replay-verifies candidate skills into DRAFTs, which only
+    #: matter once the SE-7 governance gate can promote them. Enable per-env
+    #: once governance + the SE-9 benchmark are in place.
+    enable_skill_evolution_worker: bool = Field(default=False)
+    #: Evolution sweeps run real replays (LLM + graph) — keep the cadence slow.
+    skill_evolution_worker_interval_s: int = Field(default=600, gt=0)
+
     #: Max trajectories examined per curation sweep — caps a cycle's work.
     curation_worker_batch_size: int = Field(default=200, gt=0)
 

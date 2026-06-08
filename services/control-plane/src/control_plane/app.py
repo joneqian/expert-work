@@ -150,6 +150,7 @@ from control_plane.scheduler import TriggerScheduler
 from control_plane.settings import Settings
 from control_plane.skill_activity import ThrottledActivityRecorder
 from control_plane.skill_curator import SkillCurator
+from control_plane.skill_evolution_worker import SkillEvolutionWorker
 from control_plane.subagent_runtime import make_child_agent_builder
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolService
@@ -678,6 +679,7 @@ def create_app(
             # agent cache is still empty — swapping the builder is
             # race-free. An injected runtime (tests) is left untouched.
             curation_worker: CurationWorker | None = None
+            skill_evolution_worker: SkillEvolutionWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
                     if not resolved_settings.checkpointer_dsn:
@@ -999,6 +1001,37 @@ def create_app(
                 )
                 memory_consolidator.start()
                 _app.state.memory_consolidator = memory_consolidator
+
+            # Stream SE (SE-6d) — Layer B skill-evolution worker (gated OFF by
+            # default). Built lazily so the orchestrator graph import it needs
+            # stays out of the module-import path.
+            if resolved_settings.enable_skill_evolution_worker:
+                from control_plane.skill_evolution_wiring import build_evolution_worker
+
+                se_provider = resolved_settings.memory_consolidator_default_aux_provider
+                if se_provider in resolved_settings.effective_platform_provider_credentials:
+                    skill_evolution_worker = build_evolution_worker(
+                        aux_model=make_llm_router_aux_model(
+                            resolver=credentials_resolver,
+                            secret_store=resolved_secret_store,
+                            default_provider=se_provider,
+                            default_model=resolved_settings.memory_consolidator_default_aux_model,
+                        ),
+                        aux_default_model=resolved_settings.memory_consolidator_default_aux_model,
+                        candidate_store=resolved_curation_candidate_store,
+                        skill_store=resolved_skill_store,
+                        eval_store=resolved_eval_dataset_store,
+                        agent_spec_store=resolved_repo,
+                        trajectory_reader=TrajectoryReader(object_store=object_store),
+                        agent_builder=resolved_agent_runtime.agent_builder,
+                        interval_s=resolved_settings.skill_evolution_worker_interval_s,
+                    )
+                    skill_evolution_worker.start()
+                    _app.state.skill_evolution_worker = skill_evolution_worker
+                else:
+                    logger.warning(
+                        "skill_evolution_worker.aux_model.unavailable provider=%s", se_provider
+                    )
             resolved_lifecycle.mark_ready()
             logger.info(
                 "control_plane.lifespan.ready",
@@ -1019,6 +1052,8 @@ def create_app(
                     await skill_curator.stop()
                 if curation_worker is not None:
                     await curation_worker.stop()
+                if skill_evolution_worker is not None:
+                    await skill_evolution_worker.stop()
                 ingestion_runner: KnowledgeIngestionRunner | None = getattr(
                     _app.state, "knowledge_ingestion_runner", None
                 )
