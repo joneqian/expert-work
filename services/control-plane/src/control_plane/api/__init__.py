@@ -30,6 +30,7 @@ from control_plane.api.runs import build_runs_list_router, build_runs_router
 from control_plane.api.sandboxes import build_sandboxes_router
 from control_plane.api.service_accounts import build_service_accounts_router
 from control_plane.api.sessions import build_sessions_router
+from control_plane.api.skill_evolution import build_skill_evolution_router
 from control_plane.api.skills import build_skills_router
 from control_plane.api.tenant_config import build_tenant_config_router
 from control_plane.api.tenant_quotas import build_tenant_quotas_router
@@ -69,6 +70,7 @@ __all__ = [
     "build_sandboxes_router",
     "build_service_accounts_router",
     "build_sessions_router",
+    "build_skill_evolution_router",
     "build_skills_router",
     "build_tenant_config_router",
     "build_tenant_quotas_router",

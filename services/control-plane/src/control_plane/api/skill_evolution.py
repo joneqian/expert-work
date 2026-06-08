@@ -1,0 +1,378 @@
+"""``/v1/skill-evolution`` — Stream SE (SE-8-2) admin governance surface.
+
+The read + approval API over the self-evolving-skill backend (SE-1…SE-7):
+
+* ``GET  /v1/skill-evolution/promote-requests``                  review queue
+* ``POST /v1/skill-evolution/skills/{id}/promote-requests``      open a request
+* ``POST /v1/skill-evolution/promote-requests/{rid}/approve``    approve (→tenant)
+* ``POST /v1/skill-evolution/promote-requests/{rid}/reject``     reject
+* ``GET  /v1/skill-evolution/skills/{id}/eval-results``          replay evidence
+* ``GET  /v1/skill-evolution/skills/{id}/lineage``               fork/distill lineage
+
+Lives on its own prefix (not under ``/v1/skills``) so the literal
+``promote-requests`` path can't collide with the ``/v1/skills/{skill_id}``
+UUID path param. The kill-switch API is SE-8-3; this PR is read + approval only.
+
+Authz (SE-8): a tenant admin manages their own tenant; a system_admin manages
+all tenants (``?tenant_id=<uuid>`` to act on another, ``?tenant_id=*`` to span
+the review queue). Enforced via :func:`ensure_tenant_scope`. Responses are raw
+``JSONResponse`` (matching ``/v1/skills`` / ``/v1/curation``); every write emits
+an audit row.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Annotated, Any, Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from control_plane.api.skills import (
+    _get_audit,
+    _get_skill_store,
+    _skill_dict,
+    _version_dict,
+)
+from control_plane.audit import emit as audit_emit
+from control_plane.tenant_scope import (
+    CrossTenant,
+    SingleTenant,
+    applied_scope,
+    ensure_tenant_scope,
+)
+from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.persistence import (
+    DuplicatePromoteRequestError,
+    PromoteRequestNotFoundError,
+    SkillNotFoundError,
+    SkillStore,
+)
+from helix_agent.protocol import (
+    AuditAction,
+    AuditResult,
+    PromoteRequestStatus,
+    SkillEvalResult,
+    SkillPromoteRequest,
+)
+from helix_agent.runtime.audit.logger import AuditLogger
+
+logger = logging.getLogger("helix.control_plane.skill_evolution")
+
+
+class _RequestPromoteBody(BaseModel):
+    """``POST /skills/{id}/promote-requests`` body."""
+
+    skill_version: int = Field(ge=1)
+    reason: str = Field(default="", max_length=1024)
+
+
+class _DecideBody(BaseModel):
+    """``POST /promote-requests/{rid}/approve|reject`` body."""
+
+    decision_reason: str = Field(default="", max_length=1024)
+
+
+def _promote_request_dict(req: SkillPromoteRequest) -> dict[str, Any]:
+    return {
+        "id": str(req.id),
+        "tenant_id": str(req.tenant_id),
+        "skill_id": str(req.skill_id),
+        "skill_version": req.skill_version,
+        "status": req.status,
+        "requested_by_user_id": (
+            str(req.requested_by_user_id) if req.requested_by_user_id is not None else None
+        ),
+        "requested_by_agent_name": req.requested_by_agent_name,
+        "reason": req.reason,
+        "decided_by_user_id": (
+            str(req.decided_by_user_id) if req.decided_by_user_id is not None else None
+        ),
+        "decided_at": req.decided_at.isoformat() if req.decided_at is not None else None,
+        "decision_reason": req.decision_reason,
+        "created_at": req.created_at.isoformat(),
+    }
+
+
+def _eval_result_dict(r: SkillEvalResult) -> dict[str, Any]:
+    return {
+        "id": str(r.id),
+        "tenant_id": str(r.tenant_id) if r.tenant_id is not None else None,
+        "skill_id": str(r.skill_id),
+        "skill_version": r.skill_version,
+        "baseline_score": r.baseline_score,
+        "skill_score": r.skill_score,
+        "delta": r.delta,
+        "n_cases": r.n_cases,
+        "replay_source": r.replay_source,
+        "verdict": r.verdict,
+        "high_risk": r.high_risk,
+        "evolution_round": r.evolution_round,
+        "created_at": r.created_at.isoformat(),
+    }
+
+
+def build_skill_evolution_router() -> APIRouter:
+    """SE-8-2 admin governance router (read + promote-approval)."""
+    router = APIRouter(prefix="/v1/skill-evolution", tags=["skill-evolution"])
+
+    # ------------------------------------------------ review queue (read)
+
+    @router.get("/promote-requests", response_model=None)
+    async def list_promote_requests(
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        status: Annotated[PromoteRequestStatus | None, Query()] = None,
+        cursor: Annotated[UUID | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,
+    ) -> JSONResponse:
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/skill-evolution/promote-requests",
+        )
+        async with applied_scope(scope):
+            if isinstance(scope, CrossTenant):
+                rows, next_cursor = await store.list_promote_requests_all_tenants(
+                    status=status, cursor=cursor, limit=limit
+                )
+            else:
+                rows, next_cursor = await store.list_promote_requests(
+                    tenant_id=scope.tenant_id, status=status, cursor=cursor, limit=limit
+                )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "items": [_promote_request_dict(r) for r in rows],
+                "next_cursor": str(next_cursor) if next_cursor is not None else None,
+                "cross_tenant": isinstance(scope, CrossTenant),
+            },
+        )
+
+    # ------------------------------------------------ open a request (write)
+
+    @router.post("/skills/{skill_id}/promote-requests", response_model=None)
+    async def request_promote(
+        skill_id: UUID,
+        body: _RequestPromoteBody,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        scope = await _single_scope(request, tenant_id, audit, "POST .../promote-requests")
+        actor_id = getattr(request.state, "actor_id", "anonymous")
+        try:
+            async with applied_scope(scope):
+                req = await store.request_skill_promote(
+                    request_id=_new_uuid(),
+                    tenant_id=scope.tenant_id,
+                    skill_id=skill_id,
+                    skill_version=body.skill_version,
+                    requested_by_user_id=_actor_uuid(request),
+                    reason=body.reason,
+                )
+        except SkillNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="skill not found") from exc
+        except DuplicatePromoteRequestError as exc:
+            raise HTTPException(
+                status_code=409, detail="a pending promote request already exists for this skill"
+            ) from exc
+        await audit_emit(
+            audit,
+            tenant_id=scope.tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.SKILL_PROMOTE_REQUESTED,
+            resource_type="skill_promote_request",
+            resource_id=str(req.id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={"skill_id": str(skill_id), "skill_version": body.skill_version},
+        )
+        return JSONResponse(status_code=201, content=_promote_request_dict(req))
+
+    # ------------------------------------------------ approve / reject (write)
+
+    @router.post("/promote-requests/{request_id}/approve", response_model=None)
+    async def approve_promote(
+        request_id: UUID,
+        body: _DecideBody,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        return await _decide(
+            request_id,
+            body,
+            request,
+            store,
+            audit,
+            tenant_id,
+            approve=True,
+        )
+
+    @router.post("/promote-requests/{request_id}/reject", response_model=None)
+    async def reject_promote(
+        request_id: UUID,
+        body: _DecideBody,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        return await _decide(
+            request_id,
+            body,
+            request,
+            store,
+            audit,
+            tenant_id,
+            approve=False,
+        )
+
+    async def _decide(
+        request_id: UUID,
+        body: _DecideBody,
+        request: Request,
+        store: SkillStore,
+        audit: AuditLogger,
+        tenant_id: UUID | None,
+        *,
+        approve: bool,
+    ) -> JSONResponse:
+        scope = await _single_scope(request, tenant_id, audit, "POST .../decide")
+        decider = _actor_uuid(request)
+        if decider is None:
+            raise HTTPException(status_code=403, detail="a user identity is required to decide")
+        try:
+            async with applied_scope(scope):
+                if approve:
+                    decided = await store.approve_skill_promote(
+                        request_id=request_id,
+                        tenant_id=scope.tenant_id,
+                        decided_by_user_id=decider,
+                        decision_reason=body.decision_reason,
+                    )
+                else:
+                    decided = await store.reject_skill_promote(
+                        request_id=request_id,
+                        tenant_id=scope.tenant_id,
+                        decided_by_user_id=decider,
+                        decision_reason=body.decision_reason,
+                    )
+        except PromoteRequestNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="promote request not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail="promote request is not pending") from exc
+        await audit_emit(
+            audit,
+            tenant_id=scope.tenant_id,
+            actor_id=getattr(request.state, "actor_id", "anonymous"),
+            action=(
+                AuditAction.SKILL_PROMOTE_APPROVED
+                if approve
+                else AuditAction.SKILL_PROMOTE_REJECTED
+            ),
+            resource_type="skill_promote_request",
+            resource_id=str(request_id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={"skill_id": str(decided.skill_id), "skill_version": decided.skill_version},
+        )
+        return JSONResponse(status_code=200, content=_promote_request_dict(decided))
+
+    # ------------------------------------------------ eval evidence + lineage (read)
+
+    @router.get("/skills/{skill_id}/eval-results", response_model=None)
+    async def eval_results(
+        skill_id: UUID,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        scope = await _single_scope(request, tenant_id, audit, "GET .../eval-results")
+        async with applied_scope(scope):
+            rows = await store.list_eval_results(skill_id=skill_id, tenant_id=scope.tenant_id)
+        return JSONResponse(
+            status_code=200, content={"items": [_eval_result_dict(r) for r in rows]}
+        )
+
+    @router.get("/skills/{skill_id}/lineage", response_model=None)
+    async def lineage(
+        skill_id: UUID,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        scope = await _single_scope(request, tenant_id, audit, "GET .../lineage")
+        async with applied_scope(scope):
+            skill = await store.get_skill(skill_id=skill_id, tenant_id=scope.tenant_id)
+            if skill is None:
+                raise HTTPException(status_code=404, detail="skill not found")
+            versions = await store.list_versions(skill_id=skill_id, tenant_id=scope.tenant_id)
+            # Resolve the fork source's name (same tenant) so the UI can render
+            # the lineage edge without a second round-trip; None if it was
+            # deleted or lives in another scope.
+            forked_from_source = None
+            if skill.forked_from is not None:
+                src = await store.get_skill(skill_id=skill.forked_from, tenant_id=scope.tenant_id)
+                forked_from_source = _skill_dict(src) if src is not None else None
+        return JSONResponse(
+            status_code=200,
+            content={
+                "skill": _skill_dict(skill),
+                "forked_from_source": forked_from_source,
+                "versions": [_version_dict(v) for v in versions],
+            },
+        )
+
+    return router
+
+
+# ── helpers ────────────────────────────────────────────────────────────────
+
+
+def _new_uuid() -> UUID:
+    from uuid import uuid4
+
+    return uuid4()
+
+
+def _actor_uuid(request: Request) -> UUID | None:
+    """The acting user's id as a UUID, or ``None`` if the subject isn't one
+    (e.g. an mTLS service principal)."""
+    actor_id = getattr(request.state, "actor_id", None)
+    if actor_id is None:
+        return None
+    try:
+        return UUID(str(actor_id))
+    except (ValueError, TypeError):
+        return None
+
+
+async def _single_scope(
+    request: Request,
+    tenant_id: UUID | None,
+    audit: AuditLogger,
+    endpoint: str,
+) -> SingleTenant:
+    """Resolve to a concrete tenant (writes + per-skill reads never span ``*``)."""
+    scope = await ensure_tenant_scope(
+        request.state.principal,
+        tenant_id,
+        audit,
+        trace_id=current_trace_id_hex(),
+        endpoint=endpoint,
+    )
+    if isinstance(scope, CrossTenant):  # pragma: no cover — query type excludes "*"
+        raise HTTPException(status_code=400, detail="tenant_id=* is not valid for this endpoint")
+    return scope

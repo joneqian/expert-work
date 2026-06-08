@@ -172,9 +172,15 @@ from helix_agent.persistence.rls import bypass_rls_var as bypass_rls_var
 from helix_agent.persistence.rls import current_tenant_id_var as current_tenant_id_var
 from helix_agent.persistence.rls import current_user_id_var as current_user_id_var
 from helix_agent.persistence.skill import (
+    DuplicatePromoteRequestError as DuplicatePromoteRequestError,
+)
+from helix_agent.persistence.skill import (
     DuplicateSkillError as DuplicateSkillError,
 )
 from helix_agent.persistence.skill import InMemorySkillStore as InMemorySkillStore
+from helix_agent.persistence.skill import (
+    PromoteRequestNotFoundError as PromoteRequestNotFoundError,
+)
 from helix_agent.persistence.skill import SkillNotFoundError as SkillNotFoundError
 from helix_agent.persistence.skill import SkillStore as SkillStore
 from helix_agent.persistence.skill import (

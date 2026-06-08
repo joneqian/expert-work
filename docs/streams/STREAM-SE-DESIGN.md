@@ -363,9 +363,10 @@ wire 进 `app.py` lifespan(同 CurationWorker/MemoryConsolidator;单副本;aux L
 
 #### SE-8 API(control-plane,全 raw JSONResponse + audit_emit;authz 租户 admin 管本租户 / system_admin 跨租户)
 样板 `api/{skills,curation,platform_skills,audit}.py`;envelope 对账见 [memory:envelope-vs-raw](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_envelope_vs_raw_contract_check.md)(skill 端点返 raw,SDK 用 `apiClient` 直取不 `getJson`)。
-- 读:`GET /v1/skills`(扩展过滤,已有)、`GET /v1/skills/{id}/eval-results`、`GET /v1/skills/{id}/lineage`(或前端由 get_skill+versions 组装)、`GET /v1/skills/promote-requests?status=&tenant_id=*`(review 队列)。
-- 写:`POST /v1/skills/{id}/promote-requests`(发起,admin 代发或 agent 工具走 SE-7)、`POST /v1/skills/promote-requests/{rid}/approve|reject`、`POST /v1/skills/{id}/archive`(或复用 PATCH status)。
-- kill-switch:`GET /v1/skill-evolution/kill-switch`、`POST .../engage`、`POST .../release`(scope 感知:tenant scope 校验 = 本租户;global = 仅 system_admin)。
+- **实现修正(SE-8-2)**:除 `GET /v1/skills`(原地扩展 visibility/created_by_user_id 过滤 + `_skill_dict`/`_version_dict` 补 SE 字段)外,所有 SE-8 治理端点放**独立 router `api/skill_evolution.py`(prefix `/v1/skill-evolution`)**——因 `/v1/skills/promote-requests` 与既有 `/v1/skills/{skill_id}`(UUID path param)冲突(非 UUID 段 422 而非 fall-through)。**archive 不新建端点**:复用既有 `PATCH /v1/skills/{id}` status=archived(能力已在,不重复)。
+- 读:`GET /v1/skills`(扩展过滤,已有)、`GET /v1/skill-evolution/skills/{id}/eval-results`、`GET /v1/skill-evolution/skills/{id}/lineage`(skill + versions + forked_from 源)、`GET /v1/skill-evolution/promote-requests?status=&tenant_id=*`(review 队列)。
+- 写:`POST /v1/skill-evolution/skills/{id}/promote-requests`(发起,admin 代发或 agent 工具走 SE-7)、`POST /v1/skill-evolution/promote-requests/{rid}/approve|reject`。
+- kill-switch(SE-8-3):`GET /v1/skill-evolution/kill-switch`、`POST .../engage`、`POST .../release`(scope 感知:tenant scope 校验 = 本租户;global = 仅 system_admin)。
 
 #### SE-8 实现顺序(拆 6 PR;设计先行 → 数据 → API → UI)
 | 子 PR | 内容 | CI 边界 |
