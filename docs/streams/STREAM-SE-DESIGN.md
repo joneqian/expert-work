@@ -42,7 +42,7 @@ helix 当前的 skill 是"**人写、版本化、静态启用**"(Stream J.7a + X
 | **SE-2** | SkillStore 演化 API | 缺失 | author/refine/fork/promote/record_eval_result + visibility 过滤(base+sql+memory)| SE-A3 |
 | **SE-3** | in-session 自著(Layer A，= J.7b-1)| 仅设计 | 4 个 builtin 工具 + provenance + 高危 gate 接线 | SE-A4 |
 | **SE-4** | 重放验证 runner(咽喉)| 缺失 | with-vs-without 重放 + judge/assert 打分 → grounding 分 | SE-A5 SE-A6 |
-| **SE-5** | 蒸馏 + 归因 | 缺失 | LLM 从轨迹蒸馏草案(SPARK)+ 失败归因(内容错/执行错，EmbodiSkill)| SE-A7 SE-A8 |
+| **SE-5** | 蒸馏 + 归因 | 缺失 | 对比式蒸馏(成功+失败,SkillGen)+ 抽象 guard;失败归因规则前置(Aegis)+ LLM 兜底 | SE-A7 SE-A8 |
 | **SE-6** | 进化 worker(Layer B 引擎)| 缺失 | 编排 蒸馏→重放→归因→co-evolve(有界轮)→DRAFT→治理门;wire lifespan | SE-A9 |
 | **SE-7** | 全自动治理护栏 | 缺失 | auto-promote 策略 + 速率限制 + 回归回滚 + 熔断 + 审计/指标 | SE-A10 SE-A11 SE-A12 |
 | **SE-8** | admin API / UI | 缺失 | review / lineage / eval 证据 / 手动覆盖 / 紧急停 | SE-A13 |
@@ -238,8 +238,37 @@ created_at TIMESTAMPTZ NOT NULL
 > [SoK: Agentic Skills](https://arxiv.org/html/2602.20867v1)。
 
 ### SE-5 — 蒸馏 + 归因(Mini-ADR SE-A7 / SE-A8)
-- **蒸馏** `control_plane/skill_distiller.py`(SE-A7,SPARK 后验):输入一条 `curation_candidate`(优先 `positive_feedback` = 成功打法、`failed_outcome`+后续修复)+ 其轨迹;用 aux LLM(`LLMRouterAuxModelAdapter`)产出 skill 草案(prompt_fragment + tool_names + name 建议)。**只蒸馏后验证据**(真实交互),不从先验计划编。
-- **归因** `control_plane/skill_attribution.py`(SE-A8,EmbodiSkill):当重放失败,用 LLM 归因为「**skill 内容错**」(→ 进入 co-evolve 修订草案)还是「**执行 / 环境错**」(→ 丢弃该信号,不喂回)。归因 prompt 内置 hermes 的"不捕获清单"(环境依赖失败 / 工具负面断言 / 一次性瞬时错),防伪进化与坍缩。**取舍(据 SE-4 设计依据问题 3 的准确率天花板)**:只做**粗粒度二分类**(内容 vs 执行/环境),**不做自动步级定位**(步级准确率仅 14.2% 不可信);算法用 All-at-Once 量级 + 失败信号 taxonomy 规则前置(环境/工具型信号直接判执行错,不喂 LLM),不上 Step-by-Step。
+拆两 PR:**SE-5a** `skill_distiller.py`(蒸馏)+ **SE-5b** `skill_attribution.py`(归因)。aux LLM 均经接缝注入(CI fake / 真 aux LLM 接线推到 SE-6 worker)。
+
+- **蒸馏(SE-5a,SE-A7)**:输入一条 `curation_candidate` + 其轨迹(`TrajectoryReader.read(trajectory_key).messages`),产出结构化 `SkillDraft`(name / prompt_fragment / tool_names / description / category / high_risk),**不落库**(落 DRAFT 是 SE-6 的活)。
+  - **对比式蒸馏(contrastive induction,经检索升级,SkillGen)**:不只学 `positive_feedback` 成功打法,而是**对比成功 vs 失败轨迹** —— 抽"成功流程 + 复发失败模式 + 在邻近成功里出现却在失败里缺失的行为",失败模式编成 prompt_fragment 里的 guard("别这么做")。比原 positive-only 强一档([memory:feedback_complete_not_minimal] 能力不可弱)。
+  - **抽象 guard(经检索补,防过度具体)**:蒸馏 prompt 强制 **type-level 抽象**(抽规律 / 前提条件,不抄轨迹原文);校验**拒绝含轨迹原值 / ID / 时间戳的草案**(否则退化成记忆碎片,失通用性)。
+  - **只蒸馏后验证据**(SPARK):只从真实交互蒸馏,不从先验计划编;`tool_names ⊆ 轨迹实际用过的工具`(防 LLM 瞎加工具)。
+- **归因(SE-5b,SE-A8,EmbodiSkill)**:当重放失败,判「**skill 内容错**」(→ co-evolve 修订)还是「**执行 / 环境错**」(→ 丢弃,不喂回)。**两阶段混合(经检索验证 = 业界主流分法)**:
+  - **① 规则前置(程序化,SkillsBench 式)**:失败信号命中**环境失败 taxonomy(锚 Aegis 6 模式)**+ hermes 不捕获清单(环境依赖 / 工具负面断言 / 一次性瞬时错 / 沙箱·网络·超时)→ 直接判执行/环境错,不调 LLM。
+  - **② LLM 兜底(LLM-as-judge,Terminal-Bench 式)**:规则判不了时,All-at-Once 喂失败轨迹 + skill 内容问一个粗问题(内容 vs 执行)。**保守默认**:不确定 → 执行错(不学,偏向防坍缩)。
+  - **取舍**:只做粗粒度二分类,**不做自动步级定位**(步级准确率仅 14.2% 不可信);不上 Step-by-Step。
+
+#### SE-5 设计依据:对比检索(2026-06)
+> 与 SE-4 同纪律,蒸馏/归因方法各配一轮检索验证(见文末 Sources)。结论:**整体架构被 SkillGen 近乎 1:1 印证(SOTA 形态)**,但原蒸馏方法偏弱,据检索升级。
+
+- **架构印证 —— SkillGen(2605.10999)**:把 skill 合成建模为 **intervention problem**(= helix baseline-vs-treatment),pipeline = **contrastive induction → generation-verification-refinement loop → 按 held-out 净效应选 skill(计入修复与回归)**,产出单个**可审计** skill。这与 SE-4(净效应验证)+ SE-5(轨迹蒸馏)+ SE-6(gen-verify-refine 环)几乎重合 → 验证 helix 路线是 SOTA。
+- **蒸馏强化 1(对比式)**:SkillGen 从成功+失败双向对比蒸馏,强于原 positive-only → 升级(见上)。
+- **蒸馏强化 2(抽象)**:多源点名"解决单实例的轨迹须抽象成处理整类的 skill",否则退化记忆碎片;缓解 = type-level 抽象 → 加 prompt 约束 + 草案校验(见上)。
+- **归因验证(混合法)**:SkillsBench = 程序化分析结构化输出(= 规则前置);Terminal-Bench = LLM-as-judge 分类轨迹(= LLM 兜底)。两阶段正是两大基准的分法。
+- **环境 taxonomy 锚点 —— Aegis(2508.19504)**:agent-environment 失败 6 模式(142 轨迹 / 3656 turn 实证)→ 替代 ad-hoc 不捕获清单,给"执行/环境错"一个有据的判定基。
+
+> Sources(2026-06):
+> **蒸馏**:[SkillGen(intervention + contrastive + 净效应验证)](https://arxiv.org/abs/2605.10999) ·
+> [Trace2Skill](https://arxiv.org/html/2603.25158v1) ·
+> [ExpeL / AWM(经验→可复用)](https://arxiv.org/html/2604.08224v1) ·
+> [SkillWeaver(web agent 自发现+打磨 skill)](https://arxiv.org/pdf/2504.07079) ·
+> [SkillGenBench](https://arxiv.org/html/2605.18693)。
+> **抽象/过拟合**:[Structured Agent Distillation(span 级监督防 token 模仿)](https://arxiv.org/pdf/2505.13820) ·
+> [MemSkill(type-level 抽象)](https://arxiv.org/html/2602.02474)。
+> **归因**:[Aegis(agent-environment 6 模式 taxonomy)](https://arxiv.org/abs/2508.19504) ·
+> [Which Agent Causes Task Failures(14.2% 步级天花板)](https://arxiv.org/abs/2505.00212) ·
+> [SkillsBench](https://arxiv.org/pdf/2602.12670)。
 
 ### SE-6 — 进化 worker(Layer B 引擎，Mini-ADR SE-A9)
 新文件 `control_plane/skill_evolution_worker.py`,克隆 `CurationWorker` 骨架(`start`/`stop`/`_loop`/`_bypass_rls`/`_tenant_scope`),`run_once` 编排:
@@ -326,8 +355,8 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | SE-A5 | grounding 判定:配对显著性(p<α)∧ delta≥θ ∧ n≥N ∧ 无新失败 | SE-4 |
 | SE-A5b | grounding 信号强度三级分流(T1 硬verifier全自动 / T2 校准GenRM+锚点限定自动 / T3 人审)| SE-4 + SE-7 |
 | SE-A6 | 验证确定性 / 成本:CI scripted + integration 真 judge;高危走沙箱;judge 用 swap-order 配对消位置偏 | SE-4 |
-| SE-A7 | 蒸馏只取后验证据(SPARK) | SE-5 |
-| SE-A8 | 失败归因(内容错/执行错)+ hermes 不捕获清单(防伪进化) | SE-5 |
+| SE-A7 | 蒸馏:对比式(成功+失败,SkillGen)+ 抽象 guard(防过度具体)+ 只取后验证据(SPARK)| SE-5a |
+| SE-A8 | 失败归因:规则前置(锚 Aegis taxonomy)+ LLM 兜底两阶段;只粗粒度二分类(不步级);执行/环境错不喂回(防伪进化)| SE-5b |
 | SE-A9 | co-evolve 有界轮 + 生成/验证器分离 + 每轮掺 1%–10% 可验证锚点防坍缩(CoEvoSkills + 1% 锚点)| SE-6 |
 | SE-A10 | auto-promote 策略 + 边界 | SE-7 |
 | SE-A11 | 回归回滚 | SE-7 |
@@ -354,3 +383,6 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | 失败归因(ICML'25 Spotlight / DoVer / AgentNoiseBench)| 3 算法(All-at-Once/Binary/Step)+ 步级仅 14.2% 不可信 | SE-A8 只做粗粒度内容/执行二分类、不做自动步级定位 |
 | 无预言机验证(GenRM/rubric/校准:UI-TARS-2 / 2601.15808)| 开放式任务用生成式 reward model + rubric + 人-judge 一致率校准 | SE-A5b 的 T2 限定自动路径 |
 | 防坍缩(1% 锚点:2601.21268 / 2604.15149 / SRT)| 自奖励会坍缩;掺 1% 可验证真值即大幅压制 | SE-A5b T2 锚点门 + SE-A9 共进化每轮掺锚点 |
+| **SkillGen(2605.10999)** | 把 skill 合成建模为 intervention;contrastive induction(成功+失败)→ gen-verify-refine → 按 held-out 净效应选 | **整体架构 1:1 印证(SE-4 净效应 + SE-5 蒸馏 + SE-6 环);SE-A7 升级对比式蒸馏** |
+| 抽象/过拟合(Structured Agent Distillation 2505.13820 / MemSkill)| 单实例轨迹须抽象成处理整类;type-level 抽象防记忆碎片 | SE-A7 抽象 guard(prompt type-level + 拒绝含原值草案)|
+| Aegis(2508.19504)| agent-environment 失败 6 模式 taxonomy(142 轨迹实证)| SE-A8 环境/执行错判定锚点(替代 ad-hoc 清单)|
