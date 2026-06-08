@@ -60,6 +60,7 @@ import {
 import { useAuth } from "../auth/AuthContext";
 import { AddFileModal } from "./skill_detail/AddFileModal";
 import { FileEditor } from "./skill_detail/FileEditor";
+import { GovernancePanel } from "./skill_detail/GovernancePanel";
 import { FileTree, SKILL_MD_PATH } from "./skill_detail/FileTree";
 import { MetadataPanel } from "./skill_detail/MetadataPanel";
 import {
@@ -380,6 +381,8 @@ export function SkillDetail() {
       {selectedVersion !== null && (
         <MetadataPanel skill={skill} version={selectedVersion} />
       )}
+
+      <GovernancePanel skill={skill} isAdmin={isAdmin} onChanged={refresh} />
 
       <Card size="small" style={{ marginBottom: 16 }} data-testid="skill-version-bar">
         <Space size={12} wrap>

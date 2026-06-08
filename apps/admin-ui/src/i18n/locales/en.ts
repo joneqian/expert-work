@@ -1062,6 +1062,23 @@ export interface TranslationKeys {
     hint_close: string;
     hint_shortcuts: string;
   };
+  skill_evolution: {
+    governance_title: string;
+    visibility_agent_private: string;
+    visibility_tenant: string;
+    owner: string;
+    forked_from: string;
+    propose_to_tenant: string;
+    pending_tenant_promotion: string;
+    approve: string;
+    reject: string;
+    proposed_toast: string;
+    approved_toast: string;
+    rejected_toast: string;
+    no_version_to_propose: string;
+    filter_visibility: string;
+    filter_visibility_all: string;
+  };
 }
 
 const en: TranslationKeys = {
@@ -2164,6 +2181,23 @@ const en: TranslationKeys = {
     hint_jump: "Jump",
     hint_close: "Close",
     hint_shortcuts: "Type ? for shortcuts",
+  },
+  skill_evolution: {
+    governance_title: "Evolution governance",
+    visibility_agent_private: "Agent-private",
+    visibility_tenant: "Tenant-wide",
+    owner: "Owner",
+    forked_from: "Forked",
+    propose_to_tenant: "Propose to tenant",
+    pending_tenant_promotion: "Pending tenant promotion",
+    approve: "Approve",
+    reject: "Reject",
+    proposed_toast: "Promotion requested",
+    approved_toast: "Promoted to tenant",
+    rejected_toast: "Promotion rejected",
+    no_version_to_propose: "This skill has no published version to propose",
+    filter_visibility: "Visibility filter",
+    filter_visibility_all: "All visibility",
   },
 };
 

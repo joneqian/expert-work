@@ -1086,6 +1086,23 @@ const zhCN: TranslationKeys = {
     hint_close: "关闭",
     hint_shortcuts: "输入 ? 查看快捷键",
   },
+  skill_evolution: {
+    governance_title: "演化治理",
+    visibility_agent_private: "Agent 私有",
+    visibility_tenant: "租户共享",
+    owner: "归属",
+    forked_from: "Fork 而来",
+    propose_to_tenant: "提升到租户",
+    pending_tenant_promotion: "待审批提升",
+    approve: "批准",
+    reject: "拒绝",
+    proposed_toast: "已发起提升申请",
+    approved_toast: "已提升为租户共享",
+    rejected_toast: "已拒绝提升",
+    no_version_to_propose: "该技能尚无已发布版本可提升",
+    filter_visibility: "可见性筛选",
+    filter_visibility_all: "全部可见性",
+  },
 };
 
 export default zhCN;

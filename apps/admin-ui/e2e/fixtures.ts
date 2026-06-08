@@ -150,6 +150,11 @@ export async function installControlPlaneStub(page: Page): Promise<void> {
   await page.route("**/v1/skills*", async (route) => {
     await route.fulfill({ json: RAW_EMPTY_CURSOR });
   });
+  // Stream SE (SE-8) — skill-evolution governance (promote-requests queue,
+  // eval-results, lineage, kill-switch). Raw, cursor-shaped where listy.
+  await page.route("**/v1/skill-evolution/**", async (route) => {
+    await route.fulfill({ json: RAW_EMPTY_CURSOR });
+  });
   await page.route("**/v1/triggers*", async (route) => {
     await route.fulfill({ json: RAW_EMPTY_LIST });
   });

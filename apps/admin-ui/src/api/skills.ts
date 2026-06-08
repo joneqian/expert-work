@@ -18,6 +18,10 @@ import { apiClient, withTenantScope, type TenantScope } from "./client";
 
 export type SkillStatus = "draft" | "active" | "stale" | "archived";
 
+/** Stream SE (SE-8) — skill visibility + version provenance literals. */
+export type SkillVisibility = "agent_private" | "tenant";
+export type EvolutionOrigin = "in_session" | "distilled";
+
 export interface SkillRecord {
   id: string;
   name: string;
@@ -48,6 +52,14 @@ export interface SkillRecord {
   entitled?: boolean;
   /** Stream X-6 — platform-skill entitlement gate. */
   required_tier?: "free" | "pro" | "enterprise";
+  /** Stream SE (SE-8) — ``agent_private`` = only the authoring agent sees
+   *  it; ``tenant`` = shared tenant-wide. Optional so pre-SE mocks stay valid. */
+  visibility?: SkillVisibility;
+  /** Stream SE (SE-8) — owning per-user agent (agent-authored skills). */
+  created_by_user_id?: string | null;
+  created_by_agent_name?: string | null;
+  /** Stream SE (SE-8) — fork lineage source skill id. */
+  forked_from?: string | null;
 }
 
 /** Metadata for one supporting file on a skill version.
@@ -91,6 +103,12 @@ export interface SkillVersion {
    *  ``exec_shell``/``http`` OR has a ``scripts/*`` supporting file.
    *  Activate flow requires admin role + UI shows a 🔒 badge. */
   high_risk: boolean;
+  /** Stream SE (SE-8) — evolution provenance for the lineage view. Optional
+   *  so pre-SE mocks stay valid. ``null`` origin = human-authored. */
+  evolution_origin?: EvolutionOrigin | null;
+  distilled_from_trajectory_key?: string | null;
+  distilled_from_candidate_id?: string | null;
+  evolution_round?: number;
   created_at: string;
 }
 
@@ -111,14 +129,24 @@ export interface ListSkillsParams {
   category?: string;
   cursor?: string | null;
   limit?: number;
+  /** Stream SE (SE-8) — filter to the agent-self-authored slice. */
+  visibility?: SkillVisibility;
+  createdByUserId?: string;
 }
 
 export async function listSkills(
   params: ListSkillsParams = {},
 ): Promise<SkillList> {
-  const { tenantScope, status, category, cursor, limit } = params;
+  const { tenantScope, status, category, cursor, limit, visibility, createdByUserId } = params;
   const query = withTenantScope(
-    { status, category, cursor: cursor ?? undefined, limit },
+    {
+      status,
+      category,
+      cursor: cursor ?? undefined,
+      limit,
+      visibility,
+      created_by_user_id: createdByUserId,
+    },
     tenantScope,
   );
   const response = await apiClient.get<SkillList>("/v1/skills", { params: query });

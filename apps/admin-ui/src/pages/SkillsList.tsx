@@ -45,6 +45,7 @@ import {
   type SkillList,
   type SkillRecord,
   type SkillStatus,
+  type SkillVisibility,
 } from "../api/skills";
 import { ApiError } from "../api/client";
 import { useTenantScope } from "../tenant/TenantScopeContext";
@@ -96,6 +97,7 @@ export function SkillsList() {
   // de-dupes against the tenant's own skills.
   const [platformItems, setPlatformItems] = useState<SkillRecord[]>([]);
   const [statusFilter, setStatusFilter] = useState<SkillStatus | undefined>(undefined);
+  const [visibilityFilter, setVisibilityFilter] = useState<SkillVisibility | undefined>(undefined);
   const [categoryFilter, setCategoryFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -112,6 +114,7 @@ export function SkillsList() {
       const result = await listSkills({
         tenantScope: apiTenantScope,
         status: statusFilter,
+        visibility: visibilityFilter,
         category: categoryFilter.trim().length > 0 ? categoryFilter.trim() : undefined,
       });
       setData(result);
@@ -128,7 +131,7 @@ export function SkillsList() {
     } finally {
       setLoading(false);
     }
-  }, [apiTenantScope, statusFilter, categoryFilter]);
+  }, [apiTenantScope, statusFilter, visibilityFilter, categoryFilter]);
 
   const loadMore = useCallback(async () => {
     if (data?.next_cursor === undefined || data?.next_cursor === null) return;
@@ -137,6 +140,7 @@ export function SkillsList() {
       const result = await listSkills({
         tenantScope: apiTenantScope,
         status: statusFilter,
+        visibility: visibilityFilter,
         category: categoryFilter.trim().length > 0 ? categoryFilter.trim() : undefined,
         cursor: data.next_cursor,
       });
@@ -147,7 +151,7 @@ export function SkillsList() {
     } finally {
       setLoadingMore(false);
     }
-  }, [apiTenantScope, statusFilter, categoryFilter, data, message]);
+  }, [apiTenantScope, statusFilter, visibilityFilter, categoryFilter, data, message]);
 
   useEffect(() => {
     refresh();
@@ -225,6 +229,19 @@ export function SkillsList() {
             <Text strong>{v}</Text>
             {record.latest_version !== null && (
               <Tag bordered={false}>v{record.latest_version}</Tag>
+            )}
+            {/* Stream SE (SE-8) — agent_private visibility badge. Only the
+                authoring agent sees these until promoted to tenant scope. */}
+            {record.visibility === "agent_private" && (
+              <Tooltip title={t("skill_evolution.visibility_agent_private")}>
+                <Tag
+                  icon={<Lock size={11} strokeWidth={1.75} />}
+                  bordered={false}
+                  data-testid={`skill-visibility-private-${record.id}`}
+                >
+                  {t("skill_evolution.visibility_agent_private")}
+                </Tag>
+              </Tooltip>
             )}
             {/* Stream X-6 — source badge: distinguish curated platform
                 skills from the tenant's own. */}
@@ -333,6 +350,20 @@ export function SkillsList() {
               options={[
                 { value: "all", label: t("skills.filter_status_all") },
                 ...STATUS_OPTIONS.map((s) => ({ value: s, label: s })),
+              ]}
+            />
+            <Select<SkillVisibility | "all">
+              value={visibilityFilter ?? "all"}
+              onChange={(v) =>
+                setVisibilityFilter(v === "all" ? undefined : (v as SkillVisibility))
+              }
+              style={{ width: 150 }}
+              aria-label={t("skill_evolution.filter_visibility")}
+              data-testid="skills-visibility-filter"
+              options={[
+                { value: "all", label: t("skill_evolution.filter_visibility_all") },
+                { value: "agent_private", label: t("skill_evolution.visibility_agent_private") },
+                { value: "tenant", label: t("skill_evolution.visibility_tenant") },
               ]}
             />
             <Input
