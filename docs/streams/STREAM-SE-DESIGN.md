@@ -162,7 +162,7 @@ created_at TIMESTAMPTZ NOT NULL
 接线:在 `KNOWN_BUILTINS`(`tools/assembly.py`)注册;经 `make_agent_builder` 注入 `created_by_agent_id` 上下文(provenance);复用 U-22 threat scan(写时)+ U-24 高危 gate(active 时);每个动作 emit 对应 AuditAction;**速率限制**(SE-7)前置。默认产出即进验证门(SE-4/6),不直接 active。
 
 ### SE-4 — 重放验证 runner(咽喉，Mini-ADR SE-A5 / SE-A6)
-拆三 PR(`services/orchestrator/src/orchestrator/evolution/`):**SE-4a** `grounding.py`(判定大脑,纯逻辑)+ **SE-4b** `replay.py`(编排核心,接缝解耦,CI 全测)+ **SE-4c** 真 graph adapter(`TaskRunner` 实现,integration 门)。
+拆三 PR(`services/orchestrator/src/orchestrator/evolution/`):**SE-4a** `grounding.py`(判定大脑,纯逻辑)+ **SE-4b** `replay.py`(编排核心,接缝解耦,CI 全测)+ **SE-4c** `graph_runner.py`(`GraphReplayTaskRunner` —— `TaskRunner` 真实现:`from_candidate` 构造两个仅差 `spec.skills` 的 AgentSpec、注入式 builder→`graph.ainvoke`→取末条 AIMessage、两变体各 build 一次缓存;高危沙箱由 builder 接 sandboxed ToolEnv 天然满足。wiring 用 fake CI 单测,**真 LLM e2e 归 SE-9 基准/eval harness**——CI integration 无 model key)。
 - 输入:一个候选 skill(DRAFT)+ 一组 held-out 任务(来源:① 同类 trajectory 的初始 user 消息;② `eval_dataset` 该 agent 的 golden/regression 案例)。
 - 过程:对每个任务跑两遍 agent graph —— **baseline(不装该 skill)** vs **treatment(装该 skill)**,judge(Haiku,temp=0)+ assertions 各打分。真 graph 与真 judge 经 `TaskRunner`/`ReplayJudge` 两个 Protocol 接缝注入(SE-4c 提供真实现;CI 用 fake runner + scripted/marker judge)。
 - 输出:`SkillEvalResult`(baseline_score / skill_score / delta / n_cases / verdict)。
