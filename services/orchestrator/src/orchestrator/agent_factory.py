@@ -44,6 +44,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from helix_agent.common.skill_activity import SkillActivityRecorder
+from helix_agent.common.skill_run_usage import BoundDistilledSkill
 from helix_agent.persistence import MemoryStore
 from helix_agent.persistence.memory import MemoryWritebackDLQ
 from helix_agent.persistence.skill.base import SkillStore
@@ -130,6 +131,11 @@ class BuiltAgent:
     #: deadline. ``sse.run_agent`` reads this to compute
     #: ``deadline_at = time.monotonic() + run_deadline_s`` once per run.
     run_deadline_s: int = 0
+    #: Stream SE (SE-7d-3b-ii) — distilled skill versions bound into this agent
+    #: at build time. The run carries these to its finalization hook so the
+    #: rollback monitor can attribute each run's outcome to the versions it used.
+    #: Only distilled (auto-promotable) versions — human skills never roll back.
+    bound_distilled_skills: tuple[BoundDistilledSkill, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -268,6 +274,23 @@ class _LoadedSkills:
     # skill_name) → SkillVersion. Filled at build time so the runtime
     # tool doesn't re-query for every skill_view call.
     resolved_versions: dict[str, SkillVersion] = field(default_factory=dict)
+
+
+def _bound_distilled_skills(
+    resolved_versions: dict[str, SkillVersion], *, agent_name: str
+) -> tuple[BoundDistilledSkill, ...]:
+    """The distilled (auto-promotable) subset of bound versions — SE-7d-3b-ii.
+
+    Pure: deterministically ordered by ``(skill_id, version)`` so the run-end
+    emission is stable. Tenant skills only (platform versions have no
+    ``tenant_id`` and never participate in per-tenant rollback)."""
+    bound = [
+        BoundDistilledSkill(skill_id=v.skill_id, skill_version=v.version, agent_name=agent_name)
+        for v in resolved_versions.values()
+        if v.evolution_origin == "distilled" and v.tenant_id is not None
+    ]
+    bound.sort(key=lambda b: (str(b.skill_id), b.skill_version))
+    return tuple(bound)
 
 
 async def build_agent(
@@ -531,6 +554,9 @@ async def build_agent(
         max_steps=spec.spec.workflow.max_iterations,
         supports_vision=spec.spec.model.supports_vision,
         run_deadline_s=spec.spec.policies.run_deadline_s,
+        bound_distilled_skills=_bound_distilled_skills(
+            loaded_skills.resolved_versions, agent_name=spec.metadata.name
+        ),
     )
 
 
