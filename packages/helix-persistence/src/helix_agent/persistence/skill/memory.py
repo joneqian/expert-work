@@ -21,9 +21,11 @@ from helix_agent.protocol import (
     EvolutionOrigin,
     Skill,
     SkillEvalResult,
+    SkillRunUsage,
     SkillStatus,
     SkillVersion,
     SkillVisibility,
+    TrajectoryOutcome,
 )
 from helix_agent.protocol.tenant_config import TenantPlan
 
@@ -61,6 +63,7 @@ class InMemorySkillStore(SkillStore):
         self._skills: dict[UUID, Skill] = {}
         self._versions: list[SkillVersion] = []
         self._eval_results: list[SkillEvalResult] = []  # Stream SE (SE-A2)
+        self._run_usage: list[SkillRunUsage] = []  # Stream SE (SE-A11, SE-7d-1)
 
     # ------------------------------------------------------------ skill
 
@@ -346,6 +349,29 @@ class InMemorySkillStore(SkillStore):
         ]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         return rows
+
+    async def record_skill_run_usage(self, *, usage: SkillRunUsage) -> SkillRunUsage:
+        self._run_usage.append(usage)
+        return usage
+
+    async def skill_run_outcomes(
+        self,
+        *,
+        skill_id: UUID,
+        skill_version: int,
+        tenant_id: UUID | None,
+        since: datetime,
+    ) -> list[TrajectoryOutcome]:
+        rows = [
+            r
+            for r in self._run_usage
+            if r.skill_id == skill_id
+            and r.skill_version == skill_version
+            and r.tenant_id == tenant_id
+            and r.created_at >= since
+        ]
+        rows.sort(key=lambda r: r.created_at)
+        return [r.outcome for r in rows]
 
     # ------------------------------------------------------------ platform (Stream X)
     #

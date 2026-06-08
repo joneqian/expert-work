@@ -42,6 +42,7 @@ from helix_agent.persistence.models.service_account import ServiceAccountRow
 from helix_agent.persistence.models.skill import (
     SkillEvalResultRow,
     SkillRow,
+    SkillRunUsageRow,
     SkillVersionRow,
 )
 from helix_agent.persistence.models.tenant_billing_ledger import TenantBillingLedgerRow
@@ -92,6 +93,7 @@ __all__ = [
     "ServiceAccountRow",
     "SkillEvalResultRow",
     "SkillRow",
+    "SkillRunUsageRow",
     "SkillVersionRow",
     "TenantBillingLedgerRow",
     "TenantConfigRow",

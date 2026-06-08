@@ -11,7 +11,12 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.persistence.models import SkillEvalResultRow, SkillRow, SkillVersionRow
+from helix_agent.persistence.models import (
+    SkillEvalResultRow,
+    SkillRow,
+    SkillRunUsageRow,
+    SkillVersionRow,
+)
 from helix_agent.persistence.skill.base import (
     DuplicateSkillError,
     SkillNotFoundError,
@@ -21,9 +26,11 @@ from helix_agent.protocol import (
     EvolutionOrigin,
     Skill,
     SkillEvalResult,
+    SkillRunUsage,
     SkillStatus,
     SkillVersion,
     SkillVisibility,
+    TrajectoryOutcome,
 )
 from helix_agent.protocol.skill import SkillSupportingFile
 from helix_agent.protocol.tenant_config import TenantPlan
@@ -101,6 +108,19 @@ def _eval_result_row_to_dto(row: SkillEvalResultRow) -> SkillEvalResult:
         verdict=row.verdict,  # type: ignore[arg-type]
         high_risk=bool(row.high_risk),
         evolution_round=row.evolution_round,
+        created_at=row.created_at,
+    )
+
+
+def _run_usage_row_to_dto(row: SkillRunUsageRow) -> SkillRunUsage:
+    return SkillRunUsage(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        skill_id=row.skill_id,
+        skill_version=row.skill_version,
+        thread_id=row.thread_id,
+        agent_name=row.agent_name,
+        outcome=row.outcome,  # type: ignore[arg-type]
         created_at=row.created_at,
     )
 
@@ -451,6 +471,49 @@ class SqlSkillStore(SkillStore):
             )
             rows = (await session.execute(stmt)).scalars().all()
         return [_eval_result_row_to_dto(r) for r in rows]
+
+    async def record_skill_run_usage(self, *, usage: SkillRunUsage) -> SkillRunUsage:
+        async with self._sf() as session:
+            row = SkillRunUsageRow(
+                id=usage.id,
+                tenant_id=usage.tenant_id,
+                skill_id=usage.skill_id,
+                skill_version=usage.skill_version,
+                thread_id=usage.thread_id,
+                agent_name=usage.agent_name,
+                outcome=usage.outcome,
+                created_at=usage.created_at,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _run_usage_row_to_dto(row)
+
+    async def skill_run_outcomes(
+        self,
+        *,
+        skill_id: UUID,
+        skill_version: int,
+        tenant_id: UUID | None,
+        since: datetime,
+    ) -> list[TrajectoryOutcome]:
+        async with self._sf() as session:
+            stmt = (
+                select(SkillRunUsageRow)
+                .where(
+                    SkillRunUsageRow.skill_id == skill_id,
+                    SkillRunUsageRow.skill_version == skill_version,
+                    SkillRunUsageRow.created_at >= since,
+                )
+                .order_by(SkillRunUsageRow.created_at.asc())
+            )
+            stmt = (
+                stmt.where(SkillRunUsageRow.tenant_id == tenant_id)
+                if tenant_id is not None
+                else stmt.where(SkillRunUsageRow.tenant_id.is_(None))
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_run_usage_row_to_dto(r).outcome for r in rows]
 
     # ------------------------------------------------------------ platform (Stream X)
     #

@@ -131,9 +131,25 @@ evolution_round INT NOT NULL DEFAULT 0
 created_at TIMESTAMPTZ NOT NULL
 -- index (tenant_id, skill_id, skill_version); RLS tenant_id = GUC 或 NULL(平台)
 ```
-这张表是"为什么这个 skill 被自动上线"的唯一可信依据,admin UI(SE-8)直接读它,回归回滚(SE-7)也读它。
+这张表是"为什么这个 skill 被自动上线"的唯一可信依据,admin UI(SE-8)直接读它,回归回滚(SE-7d)的**判定基线**也读它(对比 promote 时的 baseline/skill score)。
 
-### 4.4 DTO + 审计(`protocol/skill.py` / `protocol/audit.py`)
+### 4.4 新表 `skill_run_usage`(上线后归因 —— 回归回滚的成功率信号,SE-7d-1 引入)
+```
+id UUID PK
+tenant_id UUID NULL                 -- 平台 skill = NULL(沿用 0057 RLS)
+skill_id UUID NOT NULL
+skill_version INT NOT NULL           -- 上线的是具体 version;回滚按 version 判定,不连坐
+thread_id UUID NOT NULL              -- 关联 run(可溯 + 去重)
+agent_name TEXT NOT NULL             -- 熔断 scope key {tenant}:{agent} 的一半
+outcome TEXT NOT NULL                -- 复用 TrajectoryOutcome('success'|'failed'|'max_steps')
+created_at TIMESTAMPTZ NOT NULL
+-- index (tenant_id, skill_id, skill_version, created_at); RLS tenant_id = GUC 或 NULL(平台)
+```
+- **为什么专表、不借 trajectory metadata**:回滚判定是 **skill-centric** 查询(给定 skill_version,窗口内它参与的 run 成功率),trajectory 是 **run-centric** 存储 —— 把 skill-centric 查询架在 run-centric blob 全扫上是建模错配,在高吞吐(SkillActivityRecorder 设计目标 1000 runs/sec)下不可持续。专表 `(tenant_id, skill_id, skill_version, created_at)` 索引让滚动窗口聚合 = 范围扫。
+- **为什么带 `skill_version`**:promote 的是具体 version,回滚也按 version(下一版可能是人审改好的版本,不该连坐),与 SE 全流程"证据可溯到 version"一致。
+- **采集纪律**:`_load_skills` 绑定时已知 skill+version,run 收尾 best-effort 落一行(run 级一次、非 per-step、失败 swallow 不污染 agent 热路径,同 `SkillActivityRecorder` 纪律)。覆盖 build-time 注入 + runtime skill_view 两种绑定路径。
+
+### 4.5 DTO + 审计(`protocol/skill.py` / `protocol/audit.py`)
 - `SkillVersion` 加 4 字段(§4.2);`Skill` 加 3 字段(§4.1);新增 `SkillEvalResult`、`SkillVisibility = Literal["agent_private","tenant"]`、`EvolutionOrigin = Literal["in_session","distilled"]`。均 `frozen=True`。
 - `audit.py` **双 Literal**(protocol + control-plane 两处,见 [memory:project_audit_literal_drift](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_audit_literal_drift.md)):新增 `SKILL_AUTHORED_BY_AGENT` / `SKILL_REFINED_BY_AGENT` / `SKILL_FORKED` / `SKILL_DISTILLED` / `SKILL_EVOLUTION_VERIFIED` / `SKILL_EVOLUTION_AUTO_PROMOTED` / `SKILL_EVOLUTION_ROLLED_BACK` / `SKILL_EVOLUTION_CIRCUIT_OPEN`;promote 审批复用 §15.7 的 `SKILL_PROMOTE_REQUESTED/APPROVED/REJECTED`。
 
@@ -282,7 +298,10 @@ wire 进 `app.py` lifespan(同 CurationWorker/MemoryConsolidator;单副本;aux L
 ### SE-7 — 全自动治理护栏(Mini-ADR SE-A10/A11/A12)
 `control_plane/skill_evolution_policy.py`:
 - **auto-promote 策略(SE-A10)**:`verdict=pass` 且 `not high_risk` 且目标 visibility 在边界内 → 自动 set_status active(agent_private 直接 active;agent_private→tenant 需达标的同时仍走 request/approve,除非配置允许 tenant 内自动)。`high_risk` → 永远人审(U-24)。跨租户/平台 → 永远人审。`inconclusive`/`fail` → 停 DRAFT。
-- **回归回滚(SE-A11)**:promote 后监控该 skill 关联 run 的 outcome/feedback(复用 curation 信号);滚动窗口内成功率显著下降 → 自动 archive + `SKILL_EVOLUTION_ROLLED_BACK` 审计(对标报告 § 7 防坍缩)。
+- **回归回滚(SE-A11,拆 SE-7d-1/2/3)**:promote 后按 **专表 `skill_run_usage`(§4.4)** 归因该 skill_version 关联 run 的 outcome,滚动窗口内成功率显著下降 → 自动 archive(对标报告 § 7 防坍缩)。**按 version 判定不连坐**。
+  - **SE-7d-1 归因采集**:`_load_skills` 绑定时落 `skill_run_usage` 一行(run 收尾 best-effort,run 级一次、失败 swallow,同 `SkillActivityRecorder` 纪律)。迁移 + DTO + store 写/聚合方法。
+  - **SE-7d-2 判定器**(纯逻辑,CI 可测):`decide_rollback(*, window, promote_baseline, config) -> RollbackDecision`,复用 SE-4a `grounding.py` 的 McNemar/Wilcoxon 配对显著性 + 绝对地板阈值;`n < n_min` → 不动(防小样本误杀)。
+  - **SE-7d-3 monitor + 动作**:周期扫 ACTIVE distilled version → 聚合 `skill_run_usage` 窗口 → 判定 → `set_status(ARCHIVED)` + `breaker.record(ok=False)`(同 `{tenant}:{agent}` scope,坏 skill 累积自动熔断全自动通道)+ emit `SKILL_EVOLUTION_ROLLED_BACK` + 落 `skill_eval_result` 回滚证据。真路径 integration 验证。
 - **速率 / 熔断(SE-A12)**:per-agent / per-tenant 每小时自著 + 自动 promote 上限;自动通道异常率超阈值 → 熔断(`SKILL_EVOLUTION_CIRCUIT_OPEN`),降级为全人审直到人工复位。
 - 内容安全复用:U-22 threat scan + content_hash drift + 沙箱。全程 AuditAction + Prometheus 指标(`helix_skill_evolution_*`)。
 
@@ -359,7 +378,7 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | SE-A8 | 失败归因:规则前置(锚 Aegis taxonomy)+ LLM 兜底两阶段;只粗粒度二分类(不步级);执行/环境错不喂回(防伪进化)| SE-5b |
 | SE-A9 | co-evolve 有界轮 + 生成/验证器分离 + 每轮掺 1%–10% 可验证锚点防坍缩(CoEvoSkills + 1% 锚点)| SE-6 |
 | SE-A10 | auto-promote 策略 + 边界 | SE-7 |
-| SE-A11 | 回归回滚 | SE-7 |
+| SE-A11 | 回归回滚:`skill_run_usage` 专表 skill-centric 归因 + per-version 判定 + 配对显著性 + 喂熔断 | § 4.4 / SE-7d |
 | SE-A12 | 速率限制 + 熔断 | SE-7 |
 | SE-A13 | admin review / lineage / 证据 / 紧急停 | SE-8 |
 | SE-A14 | self-evolution 基准 + SLO 合并门 | SE-9 |
