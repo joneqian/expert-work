@@ -147,6 +147,13 @@ class AuditAction(StrEnum):
     # auto-promoted to ACTIVE by the evolution worker (non-high-risk, eligible,
     # within rate limit + breaker closed). High-risk / ineligible stay DRAFT.
     SKILL_EVOLUTION_AUTO_PROMOTED = "skill:evolution_auto_promoted"
+    # skill — Stream SE (SE-7d) regression rollback: an auto-promoted ACTIVE
+    # version regressed in production (windowed success rate significantly below
+    # its promote-time baseline, or below the absolute floor) and was auto-
+    # archived. The audit details carry the rollback evidence (observed rate /
+    # baseline / drop / p-value / n) — it is not a replay, so it does not write
+    # a ``skill_eval_result`` row.
+    SKILL_EVOLUTION_ROLLED_BACK = "skill:evolution_rolled_back"
     # artifact (Stream J.9-step3 — Mini-ADR J-25). ``ARTIFACT_SAVE`` is
     # reserved for the orchestrator-side save-artifact tool emit; that
     # wiring lands when ToolEnv gains an :class:`AuditLogger` handle.
