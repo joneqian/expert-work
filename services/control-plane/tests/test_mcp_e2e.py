@@ -80,7 +80,7 @@ async def _run_uvicorn(app: object, port: int) -> AsyncIterator[None]:
         except (TimeoutError, asyncio.CancelledError):
             task.cancel()
             with suppress(asyncio.CancelledError):
-                await task
+                _ = await task  # assign-to-_ dodges CodeQL py/ineffectual-statement
 
 
 @pytest.mark.asyncio
