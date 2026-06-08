@@ -300,7 +300,7 @@ wire 进 `app.py` lifespan(同 CurationWorker/MemoryConsolidator;单副本;aux L
 - **auto-promote 策略(SE-A10)**:`verdict=pass` 且 `not high_risk` 且目标 visibility 在边界内 → 自动 set_status active(agent_private 直接 active;agent_private→tenant 需达标的同时仍走 request/approve,除非配置允许 tenant 内自动)。`high_risk` → 永远人审(U-24)。跨租户/平台 → 永远人审。`inconclusive`/`fail` → 停 DRAFT。
 - **回归回滚(SE-A11,拆 SE-7d-1/2/3)**:promote 后按 **专表 `skill_run_usage`(§4.4)** 归因该 skill_version 关联 run 的 outcome,滚动窗口内成功率显著下降 → 自动 archive(对标报告 § 7 防坍缩)。**按 version 判定不连坐**。
   - **SE-7d-1 归因采集**:`_load_skills` 绑定时落 `skill_run_usage` 一行(run 收尾 best-effort,run 级一次、失败 swallow,同 `SkillActivityRecorder` 纪律)。迁移 + DTO + store 写/聚合方法。
-  - **SE-7d-2 判定器**(纯逻辑,CI 可测):`decide_rollback(*, window, promote_baseline, config) -> RollbackDecision`,复用 SE-4a `grounding.py` 的 McNemar/Wilcoxon 配对显著性 + 绝对地板阈值;`n < n_min` → 不动(防小样本误杀)。
+  - **SE-7d-2 判定器**(纯逻辑,CI 可测):`decide_rollback(outcomes, *, promote_baseline, config) -> RollbackDecision`。**统计修正**:回滚**不是配对场景**(无 case 级 with-vs-without 配对),不能复用 SE-4a 的 McNemar/Wilcoxon;正确检验是**单侧精确二项**(窗口成功数 ~ Binomial(n, baseline);成功率显著低于 baseline 即 `p<α` ∧ `drop≥θ`)+ **绝对地板**(窗口率 < floor 即回滚,兜底"在弱 baseline 上 promote 又退化到净有害");`cancelled` 不计入样本(用户取消非 skill 之过);`n < n_min` → 不动(防小样本误杀)。二项 CDF 手写无 scipy(同 SE-4a)。
   - **SE-7d-3 monitor + 动作**:周期扫 ACTIVE distilled version → 聚合 `skill_run_usage` 窗口 → 判定 → `set_status(ARCHIVED)` + `breaker.record(ok=False)`(同 `{tenant}:{agent}` scope,坏 skill 累积自动熔断全自动通道)+ emit `SKILL_EVOLUTION_ROLLED_BACK` + 落 `skill_eval_result` 回滚证据。真路径 integration 验证。
 - **速率 / 熔断(SE-A12)**:per-agent / per-tenant 每小时自著 + 自动 promote 上限;自动通道异常率超阈值 → 熔断(`SKILL_EVOLUTION_CIRCUIT_OPEN`),降级为全人审直到人工复位。
 - 内容安全复用:U-22 threat scan + content_hash drift + 沙箱。全程 AuditAction + Prometheus 指标(`helix_skill_evolution_*`)。
@@ -378,7 +378,7 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | SE-A8 | 失败归因:规则前置(锚 Aegis taxonomy)+ LLM 兜底两阶段;只粗粒度二分类(不步级);执行/环境错不喂回(防伪进化)| SE-5b |
 | SE-A9 | co-evolve 有界轮 + 生成/验证器分离 + 每轮掺 1%–10% 可验证锚点防坍缩(CoEvoSkills + 1% 锚点)| SE-6 |
 | SE-A10 | auto-promote 策略 + 边界 | SE-7 |
-| SE-A11 | 回归回滚:`skill_run_usage` 专表 skill-centric 归因 + per-version 判定 + 配对显著性 + 喂熔断 | § 4.4 / SE-7d |
+| SE-A11 | 回归回滚:`skill_run_usage` 专表 skill-centric 归因 + per-version 判定 + 单侧二项(非配对)+ 绝对地板 + 喂熔断 | § 4.4 / SE-7d |
 | SE-A12 | 速率限制 + 熔断 | SE-7 |
 | SE-A13 | admin review / lineage / 证据 / 紧急停 | SE-8 |
 | SE-A14 | self-evolution 基准 + SLO 合并门 | SE-9 |
