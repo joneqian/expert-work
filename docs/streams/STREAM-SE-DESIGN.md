@@ -310,9 +310,74 @@ wire 进 `app.py` lifespan(同 CurationWorker/MemoryConsolidator;单副本;aux L
 - **速率 / 熔断(SE-A12)**:per-agent / per-tenant 每小时自著 + 自动 promote 上限;自动通道异常率超阈值 → 熔断(`SKILL_EVOLUTION_CIRCUIT_OPEN`),降级为全人审直到人工复位。
 - 内容安全复用:U-22 threat scan + content_hash drift + 沙箱。全程 AuditAction + Prometheus 指标(`helix_skill_evolution_*`)。
 
-### SE-8 — admin API / UI(Mini-ADR SE-A13)
-- API(control-plane):列 agent 自著 / 蒸馏 skill、查 `skill_eval_result` 证据、查 lineage(forked_from / distilled_from)、手动 approve/reject promote、手动 archive、**紧急停**(关闭某租户 / 全局自动通道 = 手动开熔断)。
-- UI(Stream H 设计基线):review 队列 + eval 证据可视化(baseline vs skill delta)+ lineage 图。遵 [admin UI 设计基线](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_admin_ui_design_baseline.md)。SDK 契约对账见 [memory:envelope-vs-raw](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_envelope_vs_raw_contract_check.md)。
+### SE-8 — admin API / UI(Mini-ADR SE-A13 / SE-A13b / SE-A13c / SE-A13d)
+
+> **SE-8-0 细化设计(2026-06-08)**:把 SE-1…SE-7 已闭环的自进化后端暴露给运营人审。用户拍板 4 项需求级决策:① promote 审批做**完整流**(request/approve/reject + 审计 + 状态机);② 紧急停做**持久 kill-switch**(非进程内);③ 可视化用**手工 SVG + dagre**(否决 Recharts,贴 Stream H "不堆组件库 / 避免通用审美"基线);④ **IA 不新建页 / 不加导航**——丰富 Skills 列表 + SkillDetail 展开全貌 + 列表头 kill-switch 开关(用户心智:列表 OK 但信息匮乏,完整信息进 detail)。**权限统一规则**:租户管理员操作**本租户内**,系统管理员操作**所有租户**(promote 审批 + 紧急停 + 回滚同此规则)。
+
+#### SE-8 IA(前端形态,Mini-ADR SE-A13d)
+落 [admin UI 设计基线](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_admin_ui_design_baseline.md);接线点清单见 [memory:admin_ui_wiring_touchpoints](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/reference_admin_ui_wiring_touchpoints.md)。**不新建路由 / 不加侧导航项**:
+- **Skills 列表(`SkillsList.tsx` 丰富,= review 队列)**:现有列太薄(仅 Name/Status/Category/Description/Updated)。补:**生效版本 vs 最新版本**(`live v2 · latest v4` —— 自进化下蒸馏草案版本常 ≠ 线上 active 版本,否则看不出"有新版本待审")、**可见性**(agent_private/tenant)、**来源**(人写/in_session/distilled)、**owner**(自著 agent)、**最近验证**(verdict+delta 如 `pass +0.12`)、**promote 状态**(待审/无)。新筛选:可见性 / 来源 / **"仅待审 promote"**(勾上即 review 队列,不单独建队列页)。
+- **SkillDetail(`SkillDetail.tsx` 展开全貌)**:版本列表(已有)+ 每版 **eval 证据**(baseline-vs-skill delta 手工 SVG 配对条 + p值/n_cases)+ **lineage 血缘**(forked_from / distilled_from 链,dagre 布局 + 自定义 SVG 节点)+ **provenance**(自著 agent/user、蒸馏来源轨迹)+ **操作区**:approve / reject promote、**archive(= 停单个 skill)**。
+- **kill-switch(Skills 列表页头部,scope 感知开关)**:租户管理员见本租户开关;系统管理员见全局 + 按租户。旁显熔断状态(in-process breaker 自动熔断也在此可见)。**与 archive 正交**:archive 停一个已有 skill;kill-switch 停"自动造/上线**新** skill"的整条流水线(不动已有 skill)。
+
+#### SE-8 数据模型(新迁移 0068,纯增量;沿用 0057 NULL-tenant RLS;revision id ≤ 32 字符)
+- **新表 `skill_promote_request`(Mini-ADR SE-A13b,promote 审批流)**——与 status(draft→active)**正交**,承载 agent_private→tenant 可见性审批:
+  ```
+  id UUID PK
+  tenant_id UUID NOT NULL              -- agent_private→tenant 恒在租户内;ENABLE RLS tenant_id=GUC
+  skill_id UUID NOT NULL
+  skill_version INT NOT NULL           -- 申请提升的具体版本(与 SE 全流程"证据可溯到 version"一致)
+  status TEXT NOT NULL                 -- CHECK in (pending/approved/rejected/superseded)
+  requested_by_user_id UUID NULL       -- agent 经 propose_skill_to_tenant 发起则记 owner;admin 代发起可空
+  requested_by_agent_name TEXT NULL
+  reason TEXT NOT NULL DEFAULT ''
+  decided_by_user_id UUID NULL         -- 审批人(租户 admin 或 system_admin)
+  decided_at TIMESTAMPTZ NULL
+  decision_reason TEXT NOT NULL DEFAULT ''
+  created_at TIMESTAMPTZ NOT NULL
+  -- index (tenant_id, status, created_at); 同 skill 仅一条 pending(部分唯一索引 where status='pending')
+  ```
+  - **为何专表非 status 字段**:要可查"待审队列"+ 决策审计 + 多次申请历史;status 机已被 draft/active/stale/archived 占满,可见性是独立维度(§5 SE-2 已定"正交")。
+  - **跨租户读**:system_admin review 队列用 `list_promote_requests_all_tenants`(对标 `curation.list_for_review_all_tenants`);RLS ENABLE-only + tenant GUC,跨租户读经 `ensure_tenant_scope`+CrossTenant(skill 生态 ENABLE-only,**不加 FORCE**,见 [memory:skill_curator_owner_rls_exemption])。**仅 integration 真 PG 验**。
+- **新表 `skill_evolution_kill_switch`(Mini-ADR SE-A13c,持久紧急停)**——补 in-process `CircuitBreaker`(`skill_evolution_limits.py`,per-worker、重启即丢、多副本不一致)的持久化缺口:
+  ```
+  id UUID PK
+  scope TEXT NOT NULL                  -- CHECK in (global/tenant)
+  tenant_id UUID NULL                  -- global=NULL(平台行,沿用 0057;租户读也要 bypass);tenant=该租户
+  engaged BOOL NOT NULL
+  reason TEXT NOT NULL DEFAULT ''
+  engaged_by_user_id UUID NULL  engaged_at TIMESTAMPTZ NULL
+  released_by_user_id UUID NULL  released_at TIMESTAMPTZ NULL
+  updated_at TIMESTAMPTZ NOT NULL
+  -- 部分唯一索引:global 一行(where scope='global')、每租户一行(where scope='tenant', tenant_id)
+  ```
+  - **接线**:`decide_promotion`(SE-7a)新增输入 `evolution_halted: bool`(与现有 `breaker_open` 并列)→ true 则 HUMAN_REVIEW(降级全人审);gate 在判定前 `is_evolution_halted(tenant_id)`(global OR 该 tenant)。**与 in-process breaker 互补**:breaker=自动(失败率超阈自熔断),kill-switch=人工持久总闸。
+- **DTO(`protocol/skill.py`)**:新增 `SkillPromoteRequest`、`PromoteRequestStatus = Literal[...]`、`KillSwitch`、`KillSwitchScope = Literal["global","tenant"]`,均 `frozen=True`。
+- **审计(双 Literal,protocol + control-plane,见 [memory:audit_literal_drift])**:`SKILL_PROMOTE_REQUESTED` / `SKILL_PROMOTE_APPROVED` / `SKILL_PROMOTE_REJECTED`(§4.5 已预告)+ `SKILL_EVOLUTION_KILL_SWITCH_ENGAGED` / `SKILL_EVOLUTION_KILL_SWITCH_RELEASED`;`ResourceType` 加 `skill_promote_request` / `skill_evolution_kill_switch`。
+
+#### SE-8 Store 方法(SkillStore base+sql+memory)
+- **list_skills 扩展**:加 `visibility` / `evolution_origin` / `created_by_user_id` 过滤参;列表需带 live-version + 最近 verdict/delta + pending 标志 → 设计为**批量旁路查询**(列表主查 skill,再按 id 批量取 `skill_eval_result` 最近一条 + `skill_promote_request` pending),不在主查塞重 JOIN(避免高吞吐退化)。
+- **promote 审批**:`request_skill_promote` / `approve_skill_promote`(置 status=approved + `set_visibility(tenant)`)/ `reject_skill_promote` / `list_promote_requests(+_all_tenants)`。approve 同时把 skill `visibility` agent_private→tenant(原子)。
+- **kill-switch**:`get_kill_switch(scope, tenant_id)` / `set_kill_switch(...)` / `is_evolution_halted(tenant_id) -> bool`(global OR tenant)。
+- 复用现成:`list_eval_results`(eval 证据)、`get_skill`+`get_version_by_number`(lineage 字段)、`set_status(ARCHIVED)`(archive)。
+
+#### SE-8 API(control-plane,全 raw JSONResponse + audit_emit;authz 租户 admin 管本租户 / system_admin 跨租户)
+样板 `api/{skills,curation,platform_skills,audit}.py`;envelope 对账见 [memory:envelope-vs-raw](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_envelope_vs_raw_contract_check.md)(skill 端点返 raw,SDK 用 `apiClient` 直取不 `getJson`)。
+- 读:`GET /v1/skills`(扩展过滤,已有)、`GET /v1/skills/{id}/eval-results`、`GET /v1/skills/{id}/lineage`(或前端由 get_skill+versions 组装)、`GET /v1/skills/promote-requests?status=&tenant_id=*`(review 队列)。
+- 写:`POST /v1/skills/{id}/promote-requests`(发起,admin 代发或 agent 工具走 SE-7)、`POST /v1/skills/promote-requests/{rid}/approve|reject`、`POST /v1/skills/{id}/archive`(或复用 PATCH status)。
+- kill-switch:`GET /v1/skill-evolution/kill-switch`、`POST .../engage`、`POST .../release`(scope 感知:tenant scope 校验 = 本租户;global = 仅 system_admin)。
+
+#### SE-8 实现顺序(拆 6 PR;设计先行 → 数据 → API → UI)
+| 子 PR | 内容 | CI 边界 |
+|---|---|---|
+| **SE-8-0** | 本细化设计(已落本节)+ Mini-ADR + ITERATION-PLAN backlog | 设计 |
+| **SE-8-1** | 迁移 0068(两表)+ DTO + 审计双 Literal + Store 方法(promote 审批 / kill-switch / list_skills 过滤);`decide_promotion` 加 `evolution_halted` 入参 | 单测;RLS/迁移仅 integration |
+| **SE-8-2** | API:review 列表 / eval 证据 / lineage / approve-reject promote / archive,raw + audit + authz | control-plane(mypy 不覆盖,单测+手验) |
+| **SE-8-3** | API:kill-switch engage/release/get + gate 接线(PromotionGate 读持久开关)+ app lifespan | 同上 |
+| **SE-8-4** | UI:SkillsList 丰富(列+筛选+SDK 类型补 SE-1 字段)+ SkillDetail approve/reject/archive + i18n 双语 + Storybook + Playwright | admin-ui CI 门 |
+| **SE-8-5** | UI:eval 证据 SVG 配对条 + lineage dagre+SVG + kill-switch 头部开关 + Storybook + Playwright | admin-ui CI 门 |
+
+> **前端隐性缺口(SE-8-4 必含,否则漏做)**:`api/skills.ts` 的 `SkillRecord`/`SkillVersion` TS 类型**现完全无 SE-1 演化字段**(visibility/created_by_*/forked_from/evolution_origin/distilled_from_*/evolution_round),也无 `SkillEvalResult`/`SkillPromoteRequest`/`KillSwitch` —— 必须补镜像;router/Sidebar/CommandPalette **本 IA 不动**(无新页);i18n 必 zh-CN+en 双份;Storybook+Playwright 是 CI 门。
 
 ### SE-9 — self-evolution 基准 + SLO(Mini-ADR SE-A14)
 - `tools/eval/datasets/self_evolution/`:构造"agent 反复踩同一坑 / 重复打法"的轨迹集 → 跑 worker → 断言:蒸馏出 skill 且 `delta>0` 且同类新任务成功率↑。证明闭环真有效(非 benchmark gaming:held-out 分离 + 确定性 mock + 真 integration 两套)。
@@ -386,6 +451,9 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | SE-A11 | 回归回滚:`skill_run_usage` 专表 skill-centric 归因 + per-version 判定 + 单侧二项(非配对)+ 绝对地板 + 喂熔断 | § 4.4 / SE-7d |
 | SE-A12 | 速率限制 + 熔断 | SE-7 |
 | SE-A13 | admin review / lineage / 证据 / 紧急停 | SE-8 |
+| SE-A13b | promote 审批用专表 `skill_promote_request`(正交 status;可查待审队列+决策审计+历史);租户 admin 管本租户 / system_admin 跨租户 | SE-8 |
+| SE-A13c | 持久 kill-switch 专表 `skill_evolution_kill_switch`(scope global/tenant;补 in-process breaker 持久化缺口;喂 `decide_promotion` 作 halt 输入);与 archive(停单 skill)正交 | SE-8 |
+| SE-A13d | 前端不新建页/不加导航:丰富 Skills 列表(live vs latest + 可见性/来源/verdict/待审,筛"仅待审"=队列)+ SkillDetail 展开全貌 + 列表头 kill-switch 开关 | SE-8 |
 | SE-A14 | self-evolution 基准 + SLO 合并门 | SE-9 |
 
 ---
