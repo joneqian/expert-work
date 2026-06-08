@@ -1,12 +1,15 @@
-"""In-session agent skill authoring builtins — Stream SE (SE-3b, Layer A).
+"""In-session agent skill authoring builtins — Stream SE (SE-3b/SE-3c, Layer A).
 
-Three builtins let an agent grow its own skill library *during a run*
+Four builtins let an agent grow its own skill library *during a run*
 (the deer-flow / hermes ``skill_manage`` equivalent, split into clear
 verbs per J.7b-1 §15.7):
 
-* ``author_skill``  — create a brand-new skill from scratch.
-* ``refine_skill``  — append an improved version to a skill this agent owns.
-* ``fork_skill``    — copy any visible skill into a new agent-private one.
+* ``author_skill``            — create a brand-new skill from scratch.
+* ``refine_skill``            — append an improved version to a skill it owns.
+* ``fork_skill``              — copy any visible skill into a new agent-private one.
+* ``propose_skill_to_tenant`` — request promotion of an owned agent_private skill
+  to tenant-wide visibility (SE-3c). Opens a review request (SE-8 governance);
+  it does NOT promote — a tenant admin / system_admin approves.
 
 Everything an agent produces is **DRAFT + agent_private** (owner = the
 per-user persistent agent = ``(tenant_id, user_id, agent_name)``):
@@ -35,6 +38,7 @@ from uuid import UUID, uuid4
 
 from helix_agent.common.threat_patterns import first_threat_message
 from helix_agent.persistence.skill.base import (
+    DuplicatePromoteRequestError,
     DuplicateSkillError,
     SkillNotFoundError,
     SkillStore,
@@ -51,7 +55,9 @@ _SKILL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 #: The builtin names this module backs. ``agent_factory.build_agent``
 #: registers the matching tool objects (it alone has ``agent_name`` + the
 #: ``SkillStore``); ``assembly._register_builtin`` treats them as no-ops.
-SKILL_AUTHORING_BUILTINS: frozenset[str] = frozenset({"author_skill", "refine_skill", "fork_skill"})
+SKILL_AUTHORING_BUILTINS: frozenset[str] = frozenset(
+    {"author_skill", "refine_skill", "fork_skill", "propose_skill_to_tenant"}
+)
 
 
 def _require(ctx: ToolContext) -> tuple[UUID, UUID]:
@@ -404,19 +410,133 @@ class ForkSkillTool:
         )
 
 
+@dataclass(frozen=True)
+class ProposeSkillToTenantTool:
+    """``propose_skill_to_tenant`` — request agent_private→tenant promotion (SE-3c).
+
+    Opens a review request (SE-8 ``skill_promote_request``) for a skill this
+    agent owns. It does NOT change visibility — a tenant admin / system_admin
+    approves (or rejects) via the governance surface. The agent can only propose
+    its own agent_private skills, and at most one request stays pending per skill.
+    """
+
+    store: SkillStore
+    agent_name: str
+    audit_logger: AuditLogger | None = None
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="propose_skill_to_tenant",
+            description=(
+                "Request that a skill you authored be shared tenant-wide. This "
+                "opens a review request for an admin to approve — it does NOT "
+                "activate or share the skill by itself. Use it when a private "
+                "skill has proven broadly useful."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "name of the skill to propose"},
+                    "reason": {
+                        "type": "string",
+                        "description": "why it is worth sharing tenant-wide (for the reviewer)",
+                    },
+                },
+                "required": ["name"],
+            },
+            is_read_only=False,
+            side_effect="reversible",
+        )
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        tenant_id, user_id = _require(ctx)
+        name = str(args.get("name", "")).strip()
+        reason = str(args.get("reason", "")).strip()
+
+        skill = await self.store.get_skill_by_name(tenant_id=tenant_id, name=name)
+        if skill is None:
+            return ToolResult(
+                content=f"[No skill named {name!r} found.]",
+                meta={"result": "not_found", "is_error": True},
+            )
+        if not (
+            skill.created_by_user_id == user_id and skill.created_by_agent_name == self.agent_name
+        ):
+            return ToolResult(
+                content=f"[Skill {name!r} is not yours to propose.]",
+                meta={"result": "forbidden", "is_error": True},
+            )
+        if skill.visibility == "tenant":
+            return ToolResult(
+                content=f"[Skill {name!r} is already tenant-wide; nothing to propose.]",
+                meta={"result": "already_tenant"},
+            )
+        if skill.latest_version < 1:
+            return ToolResult(
+                content=f"[Skill {name!r} has no published version to propose yet.]",
+                meta={"result": "no_version", "is_error": True},
+            )
+
+        try:
+            request = await self.store.request_skill_promote(
+                request_id=uuid4(),
+                tenant_id=tenant_id,
+                skill_id=skill.id,
+                skill_version=skill.latest_version,
+                requested_by_user_id=user_id,
+                requested_by_agent_name=self.agent_name,
+                reason=reason,
+            )
+        except DuplicatePromoteRequestError:
+            return ToolResult(
+                content=f"[A promotion request for {name!r} is already pending review.]",
+                meta={"result": "already_pending"},
+            )
+
+        if self.audit_logger is not None:
+            await self.audit_logger.write(
+                AuditEntry(
+                    tenant_id=tenant_id,
+                    actor_type="agent",
+                    actor_id=str(ctx.run_id) if ctx.run_id is not None else "agent",
+                    action=AuditAction.SKILL_PROMOTE_REQUESTED,
+                    resource_type="skill_promote_request",
+                    resource_id=str(request.id),
+                    result=AuditResult.SUCCESS,
+                    details={"skill_id": str(skill.id), "skill_version": skill.latest_version},
+                )
+            )
+        return ToolResult(
+            content=(
+                f"Requested promotion of {name!r} (v{skill.latest_version}) to tenant-wide. "
+                f"An admin will review it; it stays private until approved."
+            ),
+            meta={
+                "result": "ok",
+                "skill_name": name,
+                "skill_id": str(skill.id),
+                "request_id": str(request.id),
+            },
+        )
+
+
+_AuthoringTool = AuthorSkillTool | RefineSkillTool | ForkSkillTool | ProposeSkillToTenantTool
+
+
 def build_skill_authoring_tools(
     *,
     declared: Sequence[str],
     store: SkillStore,
     agent_name: str,
     audit_logger: AuditLogger | None,
-) -> list[AuthorSkillTool | RefineSkillTool | ForkSkillTool]:
+) -> list[_AuthoringTool]:
     """Build the authoring tool objects the manifest declared.
 
     ``declared`` is the set of builtin names the manifest's ``tools:`` block
     listed (intersected with :data:`SKILL_AUTHORING_BUILTINS` by the caller).
     """
-    tools: list[AuthorSkillTool | RefineSkillTool | ForkSkillTool] = []
+    tools: list[_AuthoringTool] = []
     wanted = set(declared)
     if "author_skill" in wanted:
         tools.append(AuthorSkillTool(store=store, agent_name=agent_name, audit_logger=audit_logger))
@@ -424,4 +544,8 @@ def build_skill_authoring_tools(
         tools.append(RefineSkillTool(store=store, agent_name=agent_name, audit_logger=audit_logger))
     if "fork_skill" in wanted:
         tools.append(ForkSkillTool(store=store, agent_name=agent_name, audit_logger=audit_logger))
+    if "propose_skill_to_tenant" in wanted:
+        tools.append(
+            ProposeSkillToTenantTool(store=store, agent_name=agent_name, audit_logger=audit_logger)
+        )
     return tools
