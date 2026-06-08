@@ -79,6 +79,7 @@ KNOWN_BUILTINS = frozenset(
         "author_skill",
         "refine_skill",
         "fork_skill",
+        "propose_skill_to_tenant",
     }
 )
 

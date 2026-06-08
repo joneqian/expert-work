@@ -12,6 +12,7 @@ from orchestrator.tools.registry import ToolContext
 from orchestrator.tools.skill_authoring import (
     AuthorSkillTool,
     ForkSkillTool,
+    ProposeSkillToTenantTool,
     RefineSkillTool,
     build_skill_authoring_tools,
 )
@@ -192,13 +193,73 @@ async def test_fork_rejects_bad_new_name() -> None:
         )
 
 
+# ── propose_skill_to_tenant (SE-3c) ───────────────────────────────────────
+
+
+async def _author_owned(store, tid, uid, *, agent=AGENT, name="s"):
+    await AuthorSkillTool(store=store, agent_name=agent).call(
+        {"name": name, "description": "d", "prompt_fragment": "v1"}, ctx=_ctx(tid, uid)
+    )
+
+
+@pytest.mark.asyncio
+async def test_propose_opens_pending_request() -> None:
+    store = InMemorySkillStore()
+    tid, uid = uuid4(), uuid4()
+    await _author_owned(store, tid, uid)
+    res = await ProposeSkillToTenantTool(store=store, agent_name=AGENT).call(
+        {"name": "s", "reason": "broadly useful"}, ctx=_ctx(tid, uid)
+    )
+    assert res.meta["result"] == "ok"
+    skill = await store.get_skill_by_name(tenant_id=tid, name="s")
+    assert skill is not None
+    rows, _ = await store.list_promote_requests(tenant_id=tid, status="pending")
+    assert [r.skill_id for r in rows] == [skill.id]
+    # NOT promoted — stays agent_private until an admin approves.
+    assert skill.visibility == "agent_private"
+
+
+@pytest.mark.asyncio
+async def test_propose_not_owned_forbidden() -> None:
+    store = InMemorySkillStore()
+    tid = uuid4()
+    await _author_owned(store, tid, uuid4())  # owned by user A
+    res = await ProposeSkillToTenantTool(store=store, agent_name=AGENT).call(
+        {"name": "s"},
+        ctx=_ctx(tid, uuid4()),  # user B
+    )
+    assert res.meta["result"] == "forbidden" and res.meta["is_error"] is True
+
+
+@pytest.mark.asyncio
+async def test_propose_unknown_skill() -> None:
+    res = await ProposeSkillToTenantTool(store=InMemorySkillStore(), agent_name=AGENT).call(
+        {"name": "nope"}, ctx=_ctx()
+    )
+    assert res.meta["result"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_propose_duplicate_pending() -> None:
+    store = InMemorySkillStore()
+    tid, uid = uuid4(), uuid4()
+    await _author_owned(store, tid, uid)
+    tool = ProposeSkillToTenantTool(store=store, agent_name=AGENT)
+    assert (await tool.call({"name": "s"}, ctx=_ctx(tid, uid))).meta["result"] == "ok"
+    res = await tool.call({"name": "s"}, ctx=_ctx(tid, uid))
+    assert res.meta["result"] == "already_pending"
+
+
 # ── builder ───────────────────────────────────────────────────────────────
 
 
 def test_build_skill_authoring_tools_filters_declared() -> None:
     store = InMemorySkillStore()
     tools = build_skill_authoring_tools(
-        declared=["author_skill", "fork_skill"], store=store, agent_name=AGENT, audit_logger=None
+        declared=["author_skill", "fork_skill", "propose_skill_to_tenant"],
+        store=store,
+        agent_name=AGENT,
+        audit_logger=None,
     )
     names = {t.spec.name for t in tools}
-    assert names == {"author_skill", "fork_skill"}
+    assert names == {"author_skill", "fork_skill", "propose_skill_to_tenant"}
