@@ -154,6 +154,19 @@ class AuditAction(StrEnum):
     # baseline / drop / p-value / n) — it is not a replay, so it does not write
     # a ``skill_eval_result`` row.
     SKILL_EVOLUTION_ROLLED_BACK = "skill:evolution_rolled_back"
+    # skill — Stream SE (SE-8, Mini-ADR SE-A13b) promote-approval flow. An
+    # agent_private skill version is proposed for tenant-wide visibility
+    # (REQUESTED), then a tenant admin / system_admin APPROVES (visibility
+    # agent_private→tenant) or REJECTS it. Orthogonal to status (draft→active).
+    SKILL_PROMOTE_REQUESTED = "skill:promote_requested"
+    SKILL_PROMOTE_APPROVED = "skill:promote_approved"
+    SKILL_PROMOTE_REJECTED = "skill:promote_rejected"
+    # skill — Stream SE (SE-8, Mini-ADR SE-A13c) persistent emergency stop.
+    # A human ENGAGES the kill-switch to degrade the whole auto-promote channel
+    # to human review (tenant or global scope), then RELEASES it. Complements
+    # the in-process SE-7b CircuitBreaker (automatic) with a durable manual override.
+    SKILL_EVOLUTION_KILL_SWITCH_ENGAGED = "skill:evolution_kill_switch_engaged"
+    SKILL_EVOLUTION_KILL_SWITCH_RELEASED = "skill:evolution_kill_switch_released"
     # artifact (Stream J.9-step3 — Mini-ADR J-25). ``ARTIFACT_SAVE`` is
     # reserved for the orchestrator-side save-artifact tool emit; that
     # wiring lands when ToolEnv gains an :class:`AuditLogger` handle.
@@ -280,6 +293,11 @@ ResourceType = Literal[
     # Mirrors the control-plane ``ResourceType`` Literal per
     # [memory:audit-literal-drift] (both must stay in sync).
     "skill_eval_result",
+    # Stream SE (SE-8, Mini-ADR SE-A13b/c) — promote-approval request +
+    # persistent kill-switch. Mirrors the control-plane ``ResourceType``
+    # Literal per [memory:audit-literal-drift] (both must stay in sync).
+    "skill_promote_request",
+    "skill_evolution_kill_switch",
     "artifact",  # Stream J.9-step3 — Mini-ADR J-25
     "approval",  # Stream J.8 — Mini-ADR J-24
     "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42

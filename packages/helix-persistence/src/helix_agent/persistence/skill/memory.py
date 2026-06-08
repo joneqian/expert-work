@@ -13,14 +13,20 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from helix_agent.persistence.skill.base import (
+    DuplicatePromoteRequestError,
     DuplicateSkillError,
+    PromoteRequestNotFoundError,
     SkillNotFoundError,
     SkillStore,
 )
 from helix_agent.protocol import (
     EvolutionOrigin,
+    KillSwitch,
+    KillSwitchScope,
+    PromoteRequestStatus,
     Skill,
     SkillEvalResult,
+    SkillPromoteRequest,
     SkillRunUsage,
     SkillStatus,
     SkillVersion,
@@ -37,12 +43,41 @@ def _paginate_skills(
     category: str | None,
     cursor: UUID | None,
     limit: int,
+    visibility: SkillVisibility | None = None,
+    created_by_user_id: UUID | None = None,
 ) -> tuple[list[Skill], UUID | None]:
     """Shared keyset-pagination helper for ``list_skills`` + ``list_skills_all_tenants``."""
     if status is not None:
         rows = [r for r in rows if r.status == status]
     if category is not None:
         rows = [r for r in rows if r.category == category]
+    if visibility is not None:
+        rows = [r for r in rows if r.visibility == visibility]
+    if created_by_user_id is not None:
+        rows = [r for r in rows if r.created_by_user_id == created_by_user_id]
+    rows.sort(key=lambda r: (r.created_at, r.id), reverse=True)
+    if cursor is not None:
+        try:
+            cut_idx = next(i for i, r in enumerate(rows) if r.id == cursor)
+            rows = rows[cut_idx + 1 :]
+        except StopIteration:
+            rows = []
+    page = rows[: limit + 1]
+    if len(page) > limit:
+        return page[:limit], page[limit - 1].id
+    return page, None
+
+
+def _paginate_promote_requests(
+    rows: list[SkillPromoteRequest],
+    *,
+    status: PromoteRequestStatus | None,
+    cursor: UUID | None,
+    limit: int,
+) -> tuple[list[SkillPromoteRequest], UUID | None]:
+    """Keyset-pagination helper for the SE-8 promote-request review queue."""
+    if status is not None:
+        rows = [r for r in rows if r.status == status]
     rows.sort(key=lambda r: (r.created_at, r.id), reverse=True)
     if cursor is not None:
         try:
@@ -64,6 +99,8 @@ class InMemorySkillStore(SkillStore):
         self._versions: list[SkillVersion] = []
         self._eval_results: list[SkillEvalResult] = []  # Stream SE (SE-A2)
         self._run_usage: list[SkillRunUsage] = []  # Stream SE (SE-A11, SE-7d-1)
+        self._promote_requests: dict[UUID, SkillPromoteRequest] = {}  # SE-8 (SE-A13b)
+        self._kill_switches: list[KillSwitch] = []  # SE-8 (SE-A13c)
 
     # ------------------------------------------------------------ skill
 
@@ -153,11 +190,21 @@ class InMemorySkillStore(SkillStore):
         tenant_id: UUID,
         status: SkillStatus | None = None,
         category: str | None = None,
+        visibility: SkillVisibility | None = None,
+        created_by_user_id: UUID | None = None,
         cursor: UUID | None = None,
         limit: int = 50,
     ) -> tuple[list[Skill], UUID | None]:
         rows = [r for r in self._skills.values() if r.tenant_id == tenant_id]
-        return _paginate_skills(rows, status=status, category=category, cursor=cursor, limit=limit)
+        return _paginate_skills(
+            rows,
+            status=status,
+            category=category,
+            visibility=visibility,
+            created_by_user_id=created_by_user_id,
+            cursor=cursor,
+            limit=limit,
+        )
 
     async def list_skills_all_tenants(
         self,
@@ -372,6 +419,196 @@ class InMemorySkillStore(SkillStore):
         ]
         rows.sort(key=lambda r: r.created_at)
         return [r.outcome for r in rows]
+
+    # ----------------------------------- promote approval flow (SE-8, SE-A13b)
+
+    async def request_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        skill_id: UUID,
+        skill_version: int,
+        requested_by_user_id: UUID | None = None,
+        requested_by_agent_name: str | None = None,
+        reason: str = "",
+    ) -> SkillPromoteRequest:
+        skill = await self.get_skill(skill_id=skill_id, tenant_id=tenant_id)
+        if skill is None:
+            raise SkillNotFoundError(str(skill_id))
+        for existing in self._promote_requests.values():
+            if (
+                existing.skill_id == skill_id
+                and existing.tenant_id == tenant_id
+                and existing.status == "pending"
+            ):
+                raise DuplicatePromoteRequestError(skill_id=skill_id)
+        req = SkillPromoteRequest(
+            id=request_id,
+            tenant_id=tenant_id,
+            skill_id=skill_id,
+            skill_version=skill_version,
+            status="pending",
+            requested_by_user_id=requested_by_user_id,
+            requested_by_agent_name=requested_by_agent_name,
+            reason=reason,
+            created_at=datetime.now(UTC),
+        )
+        self._promote_requests[request_id] = req
+        return req
+
+    async def _decide_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        status: PromoteRequestStatus,
+        decided_by_user_id: UUID,
+        decision_reason: str,
+    ) -> SkillPromoteRequest:
+        req = await self.get_promote_request(request_id=request_id, tenant_id=tenant_id)
+        if req is None:
+            raise PromoteRequestNotFoundError(str(request_id))
+        if req.status != "pending":
+            msg = f"promote request {request_id} is {req.status}, not pending"
+            raise ValueError(msg)
+        decided = req.model_copy(
+            update={
+                "status": status,
+                "decided_by_user_id": decided_by_user_id,
+                "decided_at": datetime.now(UTC),
+                "decision_reason": decision_reason,
+            }
+        )
+        self._promote_requests[request_id] = decided
+        return decided
+
+    async def approve_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        decided_by_user_id: UUID,
+        decision_reason: str = "",
+    ) -> SkillPromoteRequest:
+        decided = await self._decide_promote(
+            request_id=request_id,
+            tenant_id=tenant_id,
+            status="approved",
+            decided_by_user_id=decided_by_user_id,
+            decision_reason=decision_reason,
+        )
+        # Flip the skill's visibility agent_private→tenant (atomic with decision).
+        skill = self._skills.get(decided.skill_id)
+        if skill is not None and skill.tenant_id == tenant_id:
+            self._skills[decided.skill_id] = skill.model_copy(
+                update={"visibility": "tenant", "updated_at": datetime.now(UTC)}
+            )
+        return decided
+
+    async def reject_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        decided_by_user_id: UUID,
+        decision_reason: str = "",
+    ) -> SkillPromoteRequest:
+        return await self._decide_promote(
+            request_id=request_id,
+            tenant_id=tenant_id,
+            status="rejected",
+            decided_by_user_id=decided_by_user_id,
+            decision_reason=decision_reason,
+        )
+
+    async def get_promote_request(
+        self, *, request_id: UUID, tenant_id: UUID
+    ) -> SkillPromoteRequest | None:
+        req = self._promote_requests.get(request_id)
+        if req is None or req.tenant_id != tenant_id:
+            return None
+        return req
+
+    async def list_promote_requests(
+        self,
+        *,
+        tenant_id: UUID,
+        status: PromoteRequestStatus | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[SkillPromoteRequest], UUID | None]:
+        rows = [r for r in self._promote_requests.values() if r.tenant_id == tenant_id]
+        return _paginate_promote_requests(rows, status=status, cursor=cursor, limit=limit)
+
+    async def list_promote_requests_all_tenants(
+        self,
+        *,
+        status: PromoteRequestStatus | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[SkillPromoteRequest], UUID | None]:
+        rows = list(self._promote_requests.values())
+        return _paginate_promote_requests(rows, status=status, cursor=cursor, limit=limit)
+
+    # -------------------------------------- evolution kill-switch (SE-8, SE-A13c)
+
+    async def get_kill_switch(
+        self, *, scope: KillSwitchScope, tenant_id: UUID | None
+    ) -> KillSwitch | None:
+        for sw in self._kill_switches:
+            if sw.scope == scope and sw.tenant_id == tenant_id:
+                return sw
+        return None
+
+    async def set_kill_switch(
+        self,
+        *,
+        switch_id: UUID,
+        scope: KillSwitchScope,
+        tenant_id: UUID | None,
+        engaged: bool,
+        reason: str = "",
+        actor_user_id: UUID | None = None,
+    ) -> KillSwitch:
+        now = datetime.now(UTC)
+        existing = await self.get_kill_switch(scope=scope, tenant_id=tenant_id)
+        if existing is None:
+            sw = KillSwitch(
+                id=switch_id,
+                scope=scope,
+                tenant_id=tenant_id,
+                engaged=engaged,
+                reason=reason,
+                engaged_by_user_id=actor_user_id if engaged else None,
+                engaged_at=now if engaged else None,
+                released_by_user_id=None if engaged else actor_user_id,
+                released_at=None if engaged else now,
+                updated_at=now,
+            )
+            self._kill_switches.append(sw)
+            return sw
+        update: dict[str, object] = {"engaged": engaged, "reason": reason, "updated_at": now}
+        if engaged:
+            update["engaged_by_user_id"] = actor_user_id
+            update["engaged_at"] = now
+        else:
+            update["released_by_user_id"] = actor_user_id
+            update["released_at"] = now
+        replaced = existing.model_copy(update=update)
+        self._kill_switches = [
+            replaced if (s.scope == scope and s.tenant_id == tenant_id) else s
+            for s in self._kill_switches
+        ]
+        return replaced
+
+    async def is_evolution_halted(self, *, tenant_id: UUID) -> bool:
+        for sw in self._kill_switches:
+            if not sw.engaged:
+                continue
+            if sw.scope == "global" or (sw.scope == "tenant" and sw.tenant_id == tenant_id):
+                return True
+        return False
 
     # ------------------------------------------------------------ platform (Stream X)
     #

@@ -306,3 +306,102 @@ class SkillRunUsageRow(Base):
             "created_at",
         ),
     )
+
+
+class SkillPromoteRequestRow(Base):
+    """One row of ``skill_promote_request`` — Stream SE (SE-8, Mini-ADR SE-A13b).
+
+    agent_private→tenant visibility-promotion approval, orthogonal to
+    ``skill.status`` (draft→active). ``status='pending'`` rows are the review
+    queue; APPROVE flips the parent skill's ``visibility`` to ``tenant``.
+    ``tenant_id`` is NOT NULL — agent_private→tenant is always within a tenant
+    (no platform rows) — but the table still uses the SAME NULL-tenant RLS shape
+    as ``skill`` / ``skill_eval_result`` (ENABLE-only) so the SE-8 review queue
+    reads cross-tenant as the table owner while tenant sessions stay isolated.
+    A partial unique index keeps at most one ``pending`` request per skill.
+    """
+
+    __tablename__ = "skill_promote_request"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    skill_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("skill.id", ondelete="CASCADE", name="skill_promote_request_skill_id_fk"),
+        nullable=False,
+    )
+    skill_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    requested_by_agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    decided_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_reason: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        CheckConstraint("skill_version >= 1", name="skill_promote_request_version_positive"),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'superseded')",
+            name="skill_promote_request_status_check",
+        ),
+        # At most one pending request per skill (a new propose supersedes the
+        # old; APPROVE/REJECT moves it out of 'pending').
+        Index(
+            "uq_skill_promote_request_pending",
+            "skill_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_skill_promote_request_queue", "tenant_id", "status", "created_at"),
+    )
+
+
+class SkillEvolutionKillSwitchRow(Base):
+    """One row of ``skill_evolution_kill_switch`` — Stream SE (SE-8, SE-A13c).
+
+    Persistent emergency stop for the auto-promote pipeline. ``scope='global'``
+    rows carry ``tenant_id IS NULL`` (platform, system_admin only, sharing the
+    0057 NULL-tenant RLS); ``scope='tenant'`` rows carry the tenant id (tenant
+    admin manages their own). A partial unique index keeps one global row and at
+    most one row per tenant. Complements the in-process SE-7b ``CircuitBreaker``
+    with a durable, cross-restart / cross-replica manual override.
+    """
+
+    __tablename__ = "skill_evolution_kill_switch"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    engaged: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    reason: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    engaged_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    engaged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    released_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(scope = 'global' AND tenant_id IS NULL) "
+            "OR (scope = 'tenant' AND tenant_id IS NOT NULL)",
+            name="skill_evolution_kill_switch_scope_check",
+        ),
+        Index(
+            "uq_skill_evolution_kill_switch_global",
+            "scope",
+            unique=True,
+            postgresql_where=text("scope = 'global'"),
+        ),
+        Index(
+            "uq_skill_evolution_kill_switch_tenant",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("scope = 'tenant'"),
+        ),
+    )

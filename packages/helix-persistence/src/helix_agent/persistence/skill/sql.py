@@ -7,25 +7,33 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models import (
     SkillEvalResultRow,
+    SkillEvolutionKillSwitchRow,
+    SkillPromoteRequestRow,
     SkillRow,
     SkillRunUsageRow,
     SkillVersionRow,
 )
 from helix_agent.persistence.skill.base import (
+    DuplicatePromoteRequestError,
     DuplicateSkillError,
+    PromoteRequestNotFoundError,
     SkillNotFoundError,
     SkillStore,
 )
 from helix_agent.protocol import (
     EvolutionOrigin,
+    KillSwitch,
+    KillSwitchScope,
+    PromoteRequestStatus,
     Skill,
     SkillEvalResult,
+    SkillPromoteRequest,
     SkillRunUsage,
     SkillStatus,
     SkillVersion,
@@ -122,6 +130,38 @@ def _run_usage_row_to_dto(row: SkillRunUsageRow) -> SkillRunUsage:
         agent_name=row.agent_name,
         outcome=row.outcome,  # type: ignore[arg-type]
         created_at=row.created_at,
+    )
+
+
+def _promote_request_row_to_dto(row: SkillPromoteRequestRow) -> SkillPromoteRequest:
+    return SkillPromoteRequest(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        skill_id=row.skill_id,
+        skill_version=row.skill_version,
+        status=row.status,  # type: ignore[arg-type]
+        requested_by_user_id=row.requested_by_user_id,
+        requested_by_agent_name=row.requested_by_agent_name,
+        reason=row.reason,
+        decided_by_user_id=row.decided_by_user_id,
+        decided_at=row.decided_at,
+        decision_reason=row.decision_reason,
+        created_at=row.created_at,
+    )
+
+
+def _kill_switch_row_to_dto(row: SkillEvolutionKillSwitchRow) -> KillSwitch:
+    return KillSwitch(
+        id=row.id,
+        scope=row.scope,  # type: ignore[arg-type]
+        tenant_id=row.tenant_id,
+        engaged=bool(row.engaged),
+        reason=row.reason,
+        engaged_by_user_id=row.engaged_by_user_id,
+        engaged_at=row.engaged_at,
+        released_by_user_id=row.released_by_user_id,
+        released_at=row.released_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -225,11 +265,19 @@ class SqlSkillStore(SkillStore):
         tenant_id: UUID,
         status: SkillStatus | None = None,
         category: str | None = None,
+        visibility: SkillVisibility | None = None,
+        created_by_user_id: UUID | None = None,
         cursor: UUID | None = None,
         limit: int = 50,
     ) -> tuple[list[Skill], UUID | None]:
         return await self._list_skills(
-            tenant_id=tenant_id, status=status, category=category, cursor=cursor, limit=limit
+            tenant_id=tenant_id,
+            status=status,
+            category=category,
+            visibility=visibility,
+            created_by_user_id=created_by_user_id,
+            cursor=cursor,
+            limit=limit,
         )
 
     async def list_skills_all_tenants(
@@ -253,6 +301,8 @@ class SqlSkillStore(SkillStore):
         category: str | None,
         cursor: UUID | None,
         limit: int,
+        visibility: SkillVisibility | None = None,
+        created_by_user_id: UUID | None = None,
     ) -> tuple[list[Skill], UUID | None]:
         async with self._sf() as session:
             stmt = select(SkillRow).order_by(SkillRow.created_at.desc(), SkillRow.id)
@@ -262,6 +312,10 @@ class SqlSkillStore(SkillStore):
                 stmt = stmt.where(SkillRow.status == status.value)
             if category is not None:
                 stmt = stmt.where(SkillRow.category == category)
+            if visibility is not None:
+                stmt = stmt.where(SkillRow.visibility == visibility)
+            if created_by_user_id is not None:
+                stmt = stmt.where(SkillRow.created_by_user_id == created_by_user_id)
             if cursor is not None:
                 cur_stmt = select(SkillRow).where(SkillRow.id == cursor)
                 if tenant_id is not None:
@@ -514,6 +568,272 @@ class SqlSkillStore(SkillStore):
             )
             rows = (await session.execute(stmt)).scalars().all()
         return [_run_usage_row_to_dto(r).outcome for r in rows]
+
+    # ----------------------------------- promote approval flow (SE-8, SE-A13b)
+
+    async def request_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        skill_id: UUID,
+        skill_version: int,
+        requested_by_user_id: UUID | None = None,
+        requested_by_agent_name: str | None = None,
+        reason: str = "",
+    ) -> SkillPromoteRequest:
+        async with self._sf() as session:
+            parent = (
+                await session.execute(
+                    select(SkillRow).where(SkillRow.id == skill_id, SkillRow.tenant_id == tenant_id)
+                )
+            ).scalar_one_or_none()
+            if parent is None:
+                raise SkillNotFoundError(str(skill_id))
+            row = SkillPromoteRequestRow(
+                id=request_id,
+                tenant_id=tenant_id,
+                skill_id=skill_id,
+                skill_version=skill_version,
+                status="pending",
+                requested_by_user_id=requested_by_user_id,
+                requested_by_agent_name=requested_by_agent_name,
+                reason=reason,
+                created_at=datetime.now(UTC),
+            )
+            session.add(row)
+            try:
+                await session.commit()
+            except IntegrityError as exc:
+                # uq_skill_promote_request_pending — one open request per skill.
+                raise DuplicatePromoteRequestError(skill_id=skill_id) from exc
+            await session.refresh(row)
+            return _promote_request_row_to_dto(row)
+
+    async def approve_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        decided_by_user_id: UUID,
+        decision_reason: str = "",
+    ) -> SkillPromoteRequest:
+        async with self._sf() as session:
+            row = await self._load_pending_request(
+                session, request_id=request_id, tenant_id=tenant_id
+            )
+            now = datetime.now(UTC)
+            row.status = "approved"
+            row.decided_by_user_id = decided_by_user_id
+            row.decided_at = now
+            row.decision_reason = decision_reason
+            # Flip the skill's visibility agent_private→tenant (atomic).
+            await session.execute(
+                update(SkillRow)
+                .where(SkillRow.id == row.skill_id, SkillRow.tenant_id == tenant_id)
+                .values(visibility="tenant", updated_at=now)
+            )
+            await session.commit()
+            await session.refresh(row)
+            return _promote_request_row_to_dto(row)
+
+    async def reject_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        decided_by_user_id: UUID,
+        decision_reason: str = "",
+    ) -> SkillPromoteRequest:
+        async with self._sf() as session:
+            row = await self._load_pending_request(
+                session, request_id=request_id, tenant_id=tenant_id
+            )
+            row.status = "rejected"
+            row.decided_by_user_id = decided_by_user_id
+            row.decided_at = datetime.now(UTC)
+            row.decision_reason = decision_reason
+            await session.commit()
+            await session.refresh(row)
+            return _promote_request_row_to_dto(row)
+
+    @staticmethod
+    async def _load_pending_request(
+        session: AsyncSession, *, request_id: UUID, tenant_id: UUID
+    ) -> SkillPromoteRequestRow:
+        row = (
+            await session.execute(
+                select(SkillPromoteRequestRow).where(
+                    SkillPromoteRequestRow.id == request_id,
+                    SkillPromoteRequestRow.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise PromoteRequestNotFoundError(str(request_id))
+        if row.status != "pending":
+            msg = f"promote request {request_id} is {row.status}, not pending"
+            raise ValueError(msg)
+        return row
+
+    async def get_promote_request(
+        self, *, request_id: UUID, tenant_id: UUID
+    ) -> SkillPromoteRequest | None:
+        async with self._sf() as session:
+            row = (
+                await session.execute(
+                    select(SkillPromoteRequestRow).where(
+                        SkillPromoteRequestRow.id == request_id,
+                        SkillPromoteRequestRow.tenant_id == tenant_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        return _promote_request_row_to_dto(row) if row is not None else None
+
+    async def list_promote_requests(
+        self,
+        *,
+        tenant_id: UUID,
+        status: PromoteRequestStatus | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[SkillPromoteRequest], UUID | None]:
+        return await self._list_promote_requests(
+            tenant_id=tenant_id, status=status, cursor=cursor, limit=limit
+        )
+
+    async def list_promote_requests_all_tenants(
+        self,
+        *,
+        status: PromoteRequestStatus | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[SkillPromoteRequest], UUID | None]:
+        # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        return await self._list_promote_requests(
+            tenant_id=None, status=status, cursor=cursor, limit=limit
+        )
+
+    async def _list_promote_requests(
+        self,
+        *,
+        tenant_id: UUID | None,
+        status: PromoteRequestStatus | None,
+        cursor: UUID | None,
+        limit: int,
+    ) -> tuple[list[SkillPromoteRequest], UUID | None]:
+        async with self._sf() as session:
+            stmt = select(SkillPromoteRequestRow).order_by(
+                SkillPromoteRequestRow.created_at.desc(), SkillPromoteRequestRow.id
+            )
+            if tenant_id is not None:
+                stmt = stmt.where(SkillPromoteRequestRow.tenant_id == tenant_id)
+            if status is not None:
+                stmt = stmt.where(SkillPromoteRequestRow.status == status)
+            if cursor is not None:
+                cur_stmt = select(SkillPromoteRequestRow).where(SkillPromoteRequestRow.id == cursor)
+                if tenant_id is not None:
+                    cur_stmt = cur_stmt.where(SkillPromoteRequestRow.tenant_id == tenant_id)
+                cur_row = (await session.execute(cur_stmt)).scalar_one_or_none()
+                if cur_row is not None:
+                    stmt = stmt.where(
+                        (SkillPromoteRequestRow.created_at < cur_row.created_at)
+                        | (
+                            (SkillPromoteRequestRow.created_at == cur_row.created_at)
+                            & (SkillPromoteRequestRow.id > cur_row.id)
+                        )
+                    )
+            stmt = stmt.limit(limit + 1)
+            rows = (await session.execute(stmt)).scalars().all()
+        items = [_promote_request_row_to_dto(r) for r in rows]
+        if len(items) > limit:
+            return items[:limit], items[limit - 1].id
+        return items, None
+
+    # -------------------------------------- evolution kill-switch (SE-8, SE-A13c)
+
+    async def get_kill_switch(
+        self, *, scope: KillSwitchScope, tenant_id: UUID | None
+    ) -> KillSwitch | None:
+        async with self._sf() as session:
+            stmt = select(SkillEvolutionKillSwitchRow).where(
+                SkillEvolutionKillSwitchRow.scope == scope
+            )
+            stmt = (
+                stmt.where(SkillEvolutionKillSwitchRow.tenant_id == tenant_id)
+                if tenant_id is not None
+                else stmt.where(SkillEvolutionKillSwitchRow.tenant_id.is_(None))
+            )
+            row = (await session.execute(stmt)).scalar_one_or_none()
+        return _kill_switch_row_to_dto(row) if row is not None else None
+
+    async def set_kill_switch(
+        self,
+        *,
+        switch_id: UUID,
+        scope: KillSwitchScope,
+        tenant_id: UUID | None,
+        engaged: bool,
+        reason: str = "",
+        actor_user_id: UUID | None = None,
+    ) -> KillSwitch:
+        now = datetime.now(UTC)
+        async with self._sf() as session:
+            stmt = select(SkillEvolutionKillSwitchRow).where(
+                SkillEvolutionKillSwitchRow.scope == scope
+            )
+            stmt = (
+                stmt.where(SkillEvolutionKillSwitchRow.tenant_id == tenant_id)
+                if tenant_id is not None
+                else stmt.where(SkillEvolutionKillSwitchRow.tenant_id.is_(None))
+            )
+            row = (await session.execute(stmt)).scalar_one_or_none()
+            if row is None:
+                row = SkillEvolutionKillSwitchRow(
+                    id=switch_id,
+                    scope=scope,
+                    tenant_id=tenant_id,
+                    engaged=engaged,
+                    reason=reason,
+                    engaged_by_user_id=actor_user_id if engaged else None,
+                    engaged_at=now if engaged else None,
+                    released_by_user_id=None if engaged else actor_user_id,
+                    released_at=None if engaged else now,
+                    updated_at=now,
+                )
+                session.add(row)
+            else:
+                row.engaged = engaged
+                row.reason = reason
+                row.updated_at = now
+                if engaged:
+                    row.engaged_by_user_id = actor_user_id
+                    row.engaged_at = now
+                else:
+                    row.released_by_user_id = actor_user_id
+                    row.released_at = now
+            await session.commit()
+            await session.refresh(row)
+            return _kill_switch_row_to_dto(row)
+
+    async def is_evolution_halted(self, *, tenant_id: UUID) -> bool:
+        async with self._sf() as session:
+            stmt = (
+                select(SkillEvolutionKillSwitchRow.id)
+                .where(
+                    SkillEvolutionKillSwitchRow.engaged.is_(True),
+                    or_(
+                        SkillEvolutionKillSwitchRow.scope == "global",
+                        and_(
+                            SkillEvolutionKillSwitchRow.scope == "tenant",
+                            SkillEvolutionKillSwitchRow.tenant_id == tenant_id,
+                        ),
+                    ),
+                )
+                .limit(1)
+            )
+            hit = (await session.execute(stmt)).scalar_one_or_none()
+        return hit is not None
 
     # ------------------------------------------------------------ platform (Stream X)
     #

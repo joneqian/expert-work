@@ -41,6 +41,8 @@ from helix_agent.persistence.models.sandbox_instance import SandboxInstanceRow
 from helix_agent.persistence.models.service_account import ServiceAccountRow
 from helix_agent.persistence.models.skill import (
     SkillEvalResultRow,
+    SkillEvolutionKillSwitchRow,
+    SkillPromoteRequestRow,
     SkillRow,
     SkillRunUsageRow,
     SkillVersionRow,
@@ -92,6 +94,8 @@ __all__ = [
     "SecretAllowlistRow",
     "ServiceAccountRow",
     "SkillEvalResultRow",
+    "SkillEvolutionKillSwitchRow",
+    "SkillPromoteRequestRow",
     "SkillRow",
     "SkillRunUsageRow",
     "SkillVersionRow",

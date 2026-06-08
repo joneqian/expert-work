@@ -26,8 +26,12 @@ from uuid import UUID
 
 from helix_agent.protocol import (
     EvolutionOrigin,
+    KillSwitch,
+    KillSwitchScope,
+    PromoteRequestStatus,
     Skill,
     SkillEvalResult,
+    SkillPromoteRequest,
     SkillRunUsage,
     SkillStatus,
     SkillVersion,
@@ -58,6 +62,23 @@ class SkillNotFoundError(KeyError):
 
 class SkillVersionNotFoundError(KeyError):
     """``(skill_id, version)`` row is absent — pin / rollback failure path."""
+
+
+class PromoteRequestNotFoundError(KeyError):
+    """Promote-request id is unknown for this tenant — approve/reject 404 path."""
+
+
+class DuplicatePromoteRequestError(Exception):
+    """A ``pending`` promote request already exists for this skill (SE-8).
+
+    The ``uq_skill_promote_request_pending`` partial unique index keeps at
+    most one open request per skill; a second ``request_skill_promote`` while
+    one is still pending raises this.
+    """
+
+    def __init__(self, *, skill_id: UUID) -> None:
+        super().__init__(f"a pending promote request already exists for skill {skill_id}")
+        self.skill_id = skill_id
 
 
 class SkillStore(abc.ABC):
@@ -121,6 +142,8 @@ class SkillStore(abc.ABC):
         tenant_id: UUID,
         status: SkillStatus | None = None,
         category: str | None = None,
+        visibility: SkillVisibility | None = None,
+        created_by_user_id: UUID | None = None,
         cursor: UUID | None = None,
         limit: int = 50,
     ) -> tuple[list[Skill], UUID | None]:
@@ -129,6 +152,11 @@ class SkillStore(abc.ABC):
         Returns ``(rows, next_cursor)``. ``next_cursor`` is ``None``
         when the last page was returned. Cursor is the last row's
         ``id`` for keyset pagination (sorted by ``created_at DESC, id``).
+
+        Stream SE (SE-8): ``visibility`` / ``created_by_user_id`` filter the
+        agent-self-authored slice (e.g. "this user's agent_private skills")
+        for the admin governance surface. Both default ``None`` (no filter),
+        preserving the M0 list shape.
         """
 
     @abc.abstractmethod
@@ -357,6 +385,129 @@ class SkillStore(abc.ABC):
         rollback never连坐 the next (possibly human-fixed) version.
         ``tenant_id=None`` for a platform skill (caller inside
         ``bypass_rls_session()``)."""
+
+    # ----------------------------------- promote approval flow (SE-8, SE-A13b)
+
+    @abc.abstractmethod
+    async def request_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        skill_id: UUID,
+        skill_version: int,
+        requested_by_user_id: UUID | None = None,
+        requested_by_agent_name: str | None = None,
+        reason: str = "",
+    ) -> SkillPromoteRequest:
+        """Open a ``pending`` agent_private→tenant promote request (SE-A13b).
+
+        Raises :class:`SkillNotFoundError` if the skill is unknown for this
+        tenant, :class:`DuplicatePromoteRequestError` if one is already pending
+        for the skill (``uq_skill_promote_request_pending``). Orthogonal to
+        ``skill.status`` — this only governs ``visibility``.
+        """
+
+    @abc.abstractmethod
+    async def approve_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        decided_by_user_id: UUID,
+        decision_reason: str = "",
+    ) -> SkillPromoteRequest:
+        """Approve a pending request → flip the skill's ``visibility`` to
+        ``tenant`` (atomic) and mark the request ``approved``.
+
+        Raises :class:`PromoteRequestNotFoundError` if the request id is
+        unknown for this tenant, :class:`ValueError` if it is not ``pending``.
+        """
+
+    @abc.abstractmethod
+    async def reject_skill_promote(
+        self,
+        *,
+        request_id: UUID,
+        tenant_id: UUID,
+        decided_by_user_id: UUID,
+        decision_reason: str = "",
+    ) -> SkillPromoteRequest:
+        """Reject a pending request — mark ``rejected``; skill ``visibility``
+        stays ``agent_private``. Same error semantics as
+        :meth:`approve_skill_promote`.
+        """
+
+    @abc.abstractmethod
+    async def get_promote_request(
+        self, *, request_id: UUID, tenant_id: UUID
+    ) -> SkillPromoteRequest | None:
+        """Return the promote request by id, or ``None`` (cross-tenant hides)."""
+
+    @abc.abstractmethod
+    async def list_promote_requests(
+        self,
+        *,
+        tenant_id: UUID,
+        status: PromoteRequestStatus | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[SkillPromoteRequest], UUID | None]:
+        """Page through a tenant's promote requests (newest first), the SE-8
+        review queue when ``status='pending'``. Keyset cursor = last row id."""
+
+    @abc.abstractmethod
+    async def list_promote_requests_all_tenants(
+        self,
+        *,
+        status: PromoteRequestStatus | None = None,
+        cursor: UUID | None = None,
+        limit: int = 50,
+    ) -> tuple[list[SkillPromoteRequest], UUID | None]:
+        """Cross-tenant review queue (Stream N shape). Same as
+        :meth:`list_promote_requests` minus the tenant filter; caller MUST be
+        inside ``bypass_rls_session()`` (system_admin cross-tenant read)."""
+
+    # -------------------------------------- evolution kill-switch (SE-8, SE-A13c)
+
+    @abc.abstractmethod
+    async def get_kill_switch(
+        self, *, scope: KillSwitchScope, tenant_id: UUID | None
+    ) -> KillSwitch | None:
+        """Return the kill-switch row for ``(scope, tenant_id)`` or ``None``.
+
+        ``scope='global'`` → ``tenant_id`` MUST be ``None`` (caller inside
+        ``bypass_rls_session()`` — the global row is a NULL-tenant platform row).
+        """
+
+    @abc.abstractmethod
+    async def set_kill_switch(
+        self,
+        *,
+        switch_id: UUID,
+        scope: KillSwitchScope,
+        tenant_id: UUID | None,
+        engaged: bool,
+        reason: str = "",
+        actor_user_id: UUID | None = None,
+    ) -> KillSwitch:
+        """Upsert the kill-switch for ``(scope, tenant_id)`` (Mini-ADR SE-A13c).
+
+        ``engaged=True`` engages the emergency stop (sets ``engaged_by/at``);
+        ``False`` releases it (sets ``released_by/at``). ``switch_id`` is used
+        only when inserting the first row for this scope. ``scope='global'``
+        requires ``tenant_id is None`` and a ``bypass_rls_session()`` caller.
+        """
+
+    @abc.abstractmethod
+    async def is_evolution_halted(self, *, tenant_id: UUID) -> bool:
+        """``True`` if the global OR this tenant's kill-switch is engaged.
+
+        The SE-7 promote gate reads this as the ``evolution_halted`` input to
+        :func:`decide_promotion`. Called by the evolution worker (cross-tenant
+        owner / ``bypass_rls_session()``) so it can see the global NULL-tenant
+        row alongside the tenant row.
+        """
 
     # -------------------------------------------------- platform (Stream X)
     #

@@ -28,11 +28,15 @@ __all__ = [
     "HIGH_RISK_TOOLS",
     "EvalVerdict",
     "EvolutionOrigin",
+    "KillSwitch",
+    "KillSwitchScope",
+    "PromoteRequestStatus",
     "ReplaySource",
     "Skill",
     "SkillAuthoredBy",
     "SkillEvalResult",
     "SkillPackageLayoutError",
+    "SkillPromoteRequest",
     "SkillRef",
     "SkillRunUsage",
     "SkillStatus",
@@ -122,6 +126,12 @@ EvolutionOrigin = Literal["in_session", "distilled"]
 # 重放验证(SE-4)的判定与来源。
 EvalVerdict = Literal["pass", "fail", "inconclusive"]
 ReplaySource = Literal["trajectory", "eval_dataset"]
+# SE-8(Mini-ADR SE-A13b)promote 审批流状态:agent_private→tenant 可见性提升
+# 的审批单生命周期。``superseded`` = 同 skill 新建了更新的请求或版本已变。
+PromoteRequestStatus = Literal["pending", "approved", "rejected", "superseded"]
+# SE-8(Mini-ADR SE-A13c)紧急停 kill-switch 的作用域:``global`` = 全平台
+# 自动通道(tenant_id NULL);``tenant`` = 单租户(tenant_id 非空)。
+KillSwitchScope = Literal["global", "tenant"]
 
 
 class SkillVersion(BaseModel):
@@ -315,6 +325,62 @@ class SkillRunUsage(BaseModel):
     agent_name: str
     outcome: TrajectoryOutcome
     created_at: datetime
+
+
+class SkillPromoteRequest(BaseModel):
+    """One row of ``skill_promote_request`` — Stream SE (Mini-ADR SE-A13b).
+
+    agent_private→tenant 可见性提升的审批单,与 ``skill.status``(draft→active)
+    **正交**:status 管"发布到哪条生命周期",本表管"可见范围从私有提升到租户
+    共享"。承载可查的待审队列(``status='pending'``)+ 决策审计 + 多次申请历史。
+
+    审批通过(``approved``)时,store 原子地把 skill 的 ``visibility``
+    agent_private→tenant。``requested_by_*`` 记发起的 per-user agent
+    (agent 经 propose_skill_to_tenant 工具发起);admin 代发起则两者可空。
+    权限(SE-8):租户管理员审本租户,系统管理员审所有租户。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID  # agent_private→tenant 恒在租户内,无平台行
+    skill_id: UUID
+    skill_version: int = Field(ge=1)
+    status: PromoteRequestStatus
+    requested_by_user_id: UUID | None = None
+    requested_by_agent_name: str | None = None
+    reason: str = ""
+    decided_by_user_id: UUID | None = None
+    decided_at: datetime | None = None
+    decision_reason: str = ""
+    created_at: datetime
+
+
+class KillSwitch(BaseModel):
+    """One row of ``skill_evolution_kill_switch`` — Stream SE (Mini-ADR SE-A13c).
+
+    持久的"紧急停":人工把自动 generate/promote 流水线降级为全人审。补 SE-7b
+    in-process ``CircuitBreaker``(per-worker、重启即丢、多副本不一致)的持久化
+    缺口 —— kill-switch 跨重启/副本一致。``decide_promotion`` 读它作 halt 输入。
+
+    与 archive(停单个已有 skill)**正交**:archive 下线一个 skill;kill-switch
+    停"自动造/上线**新** skill"的整条通道,不动已有 skill。``scope='global'``
+    时 ``tenant_id is None``(平台行,沿用 0057 NULL-tenant;仅 system_admin 可改);
+    ``scope='tenant'`` 时 ``tenant_id`` 为该租户(租户管理员可改本租户)。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    scope: KillSwitchScope
+    tenant_id: UUID | None  # None ⇔ scope='global'
+    engaged: bool
+    reason: str = ""
+    engaged_by_user_id: UUID | None = None
+    engaged_at: datetime | None = None
+    released_by_user_id: UUID | None = None
+    released_at: datetime | None = None
+    updated_at: datetime
 
 
 class SkillRef(BaseModel):

@@ -231,3 +231,159 @@ async def test_eval_result_round_trip_and_tenant_isolation(
     finally:
         current_tenant_id_var.set(None)
         await engine.dispose()
+
+
+# ── SE-8-1: promote-approval flow (migration 0068) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_promote_request_approve_flips_visibility_real_pg(
+    skill_store: tuple[SqlSkillStore, AsyncEngine],
+) -> None:
+    store, engine = skill_store
+    tenant, user_id, admin = uuid4(), uuid4(), uuid4()
+    try:
+        current_tenant_id_var.set(tenant)
+        sid = uuid4()
+        await store.create_skill(
+            skill_id=sid,
+            tenant_id=tenant,
+            name=f"priv-{uuid4().hex[:8]}",
+            visibility="agent_private",
+            created_by_user_id=user_id,
+            created_by_agent_name="researcher",
+        )
+        await store.add_version(
+            version_id=uuid4(),
+            skill_id=sid,
+            tenant_id=tenant,
+            prompt_fragment="body",
+            authored_by="agent",
+        )
+        rid = uuid4()
+        req = await store.request_skill_promote(
+            request_id=rid,
+            tenant_id=tenant,
+            skill_id=sid,
+            skill_version=1,
+            requested_by_user_id=user_id,
+            requested_by_agent_name="researcher",
+            reason="tenant-wide useful",
+        )
+        assert req.status == "pending"
+
+        decided = await store.approve_skill_promote(
+            request_id=rid, tenant_id=tenant, decided_by_user_id=admin, decision_reason="ok"
+        )
+        assert decided.status == "approved" and decided.decided_by_user_id == admin
+        # Visibility flipped agent_private→tenant atomically.
+        skill = await store.get_skill(skill_id=sid, tenant_id=tenant)
+        assert skill is not None and skill.visibility == "tenant"
+    finally:
+        current_tenant_id_var.set(None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_request_pending_uniqueness_real_pg(
+    skill_store: tuple[SqlSkillStore, AsyncEngine],
+) -> None:
+    from helix_agent.persistence.skill.base import DuplicatePromoteRequestError
+
+    store, engine = skill_store
+    tenant = uuid4()
+    try:
+        current_tenant_id_var.set(tenant)
+        sid = uuid4()
+        await store.create_skill(
+            skill_id=sid, tenant_id=tenant, name=f"u-{uuid4().hex[:8]}", visibility="agent_private"
+        )
+        await store.add_version(
+            version_id=uuid4(), skill_id=sid, tenant_id=tenant, prompt_fragment="b"
+        )
+        await store.request_skill_promote(
+            request_id=uuid4(), tenant_id=tenant, skill_id=sid, skill_version=1
+        )
+        with pytest.raises(DuplicatePromoteRequestError):
+            await store.request_skill_promote(
+                request_id=uuid4(), tenant_id=tenant, skill_id=sid, skill_version=1
+            )
+    finally:
+        current_tenant_id_var.set(None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_promote_request_tenant_isolation_real_pg(
+    skill_store: tuple[SqlSkillStore, AsyncEngine],
+) -> None:
+    store, engine = skill_store
+    tenant_a, tenant_b = uuid4(), uuid4()
+    try:
+        current_tenant_id_var.set(tenant_a)
+        sid = uuid4()
+        await store.create_skill(
+            skill_id=sid,
+            tenant_id=tenant_a,
+            name=f"iso-{uuid4().hex[:8]}",
+            visibility="agent_private",
+        )
+        await store.add_version(
+            version_id=uuid4(), skill_id=sid, tenant_id=tenant_a, prompt_fragment="b"
+        )
+        rid = uuid4()
+        await store.request_skill_promote(
+            request_id=rid, tenant_id=tenant_a, skill_id=sid, skill_version=1
+        )
+        rows_a, _ = await store.list_promote_requests(tenant_id=tenant_a, status="pending")
+        assert [r.id for r in rows_a] == [rid]
+
+        # RLS: tenant B sees nothing.
+        current_tenant_id_var.set(tenant_b)
+        rows_b, _ = await store.list_promote_requests(tenant_id=tenant_b, status="pending")
+        assert rows_b == []
+        assert await store.get_promote_request(request_id=rid, tenant_id=tenant_b) is None
+    finally:
+        current_tenant_id_var.set(None)
+        await engine.dispose()
+
+
+# ── SE-8-1: persistent kill-switch (migration 0068) ───────────────────────
+
+
+@pytest.mark.asyncio
+async def test_kill_switch_round_trip_and_halt_real_pg(
+    skill_store: tuple[SqlSkillStore, AsyncEngine],
+) -> None:
+    store, engine = skill_store
+    tenant, admin = uuid4(), uuid4()
+    try:
+        # Tenant-scoped switch: engage under the tenant's RLS scope.
+        current_tenant_id_var.set(tenant)
+        sw = await store.set_kill_switch(
+            switch_id=uuid4(),
+            scope="tenant",
+            tenant_id=tenant,
+            engaged=True,
+            reason="runaway",
+            actor_user_id=admin,
+        )
+        assert sw.engaged is True and sw.engaged_by_user_id == admin
+        got = await store.get_kill_switch(scope="tenant", tenant_id=tenant)
+        assert got is not None and got.engaged is True
+        assert await store.is_evolution_halted(tenant_id=tenant) is True
+
+        # Upsert toggles the same row off.
+        released = await store.set_kill_switch(
+            switch_id=uuid4(), scope="tenant", tenant_id=tenant, engaged=False, actor_user_id=admin
+        )
+        assert released.id == sw.id and released.engaged is False
+        assert await store.is_evolution_halted(tenant_id=tenant) is False
+    finally:
+        current_tenant_id_var.set(None)
+        await engine.dispose()
+
+    # Global switch (NULL-tenant row) requires the unscoped owner session;
+    # under tenant scope the IS-NOT-DISTINCT-FROM policy hides NULL rows. The
+    # in-process + SQL parity for the global OR tenant logic is covered by the
+    # in-memory suite; here we assert the tenant-scoped path end-to-end.

@@ -131,6 +131,11 @@ ResourceType = Literal[
     # Mirrors the protocol-side ``ResourceType`` Literal per
     # [memory:audit-literal-drift] (both must stay in sync).
     "skill_eval_result",
+    # Stream SE (SE-8, Mini-ADR SE-A13b/c) — promote-approval request +
+    # persistent kill-switch. Mirrors the protocol-side ``ResourceType``
+    # Literal per [memory:audit-literal-drift] (both must stay in sync).
+    "skill_promote_request",
+    "skill_evolution_kill_switch",
     "trigger",  # Stream J.10 — Mini-ADR J-26 / J-42
     "eval_dataset",  # Stream J.12 — Mini-ADR J-43
     "curation_candidate",  # Stream J.12 — Mini-ADR J-43

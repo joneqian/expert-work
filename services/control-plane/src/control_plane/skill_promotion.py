@@ -43,6 +43,7 @@ def decide_promotion(
     high_risk: bool,
     breaker_open: bool,
     within_rate_limit: bool,
+    evolution_halted: bool = False,
 ) -> PromoteDecision:
     """Decide a grounded DRAFT's fate (SE-A10).
 
@@ -50,15 +51,22 @@ def decide_promotion(
 
     1. not grounded → ``HOLD`` (no replay-pass evidence; SE-A0).
     2. high-risk → ``HUMAN_REVIEW`` (never auto, even if otherwise eligible).
-    3. circuit breaker open → ``HUMAN_REVIEW`` (degraded to all-human, SE-A12).
-    4. not auto-promote-eligible → ``HUMAN_REVIEW`` (signal tier / anchors / etc).
-    5. rate limit exceeded → ``HUMAN_REVIEW`` (defer, SE-A12).
-    6. otherwise → ``AUTO_PROMOTE``.
+    3. kill-switch engaged → ``HUMAN_REVIEW`` (persistent manual emergency stop,
+       SE-8 / SE-A13c — a human halted the whole auto channel; outranks the
+       automatic breaker because it is an explicit operator override).
+    4. circuit breaker open → ``HUMAN_REVIEW`` (degraded to all-human, SE-A12).
+    5. not auto-promote-eligible → ``HUMAN_REVIEW`` (signal tier / anchors / etc).
+    6. rate limit exceeded → ``HUMAN_REVIEW`` (defer, SE-A12).
+    7. otherwise → ``AUTO_PROMOTE``.
     """
     if not grounded:
         return PromoteDecision(PromoteAction.HOLD, "not grounded: no replay-pass evidence")
     if high_risk:
         return PromoteDecision(PromoteAction.HUMAN_REVIEW, "high-risk skill always needs review")
+    if evolution_halted:
+        return PromoteDecision(
+            PromoteAction.HUMAN_REVIEW, "evolution kill-switch engaged (manual emergency stop)"
+        )
     if breaker_open:
         return PromoteDecision(
             PromoteAction.HUMAN_REVIEW, "auto-promote circuit breaker is open (degraded)"
