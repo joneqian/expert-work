@@ -60,13 +60,15 @@ __all__ = [
 class TaskRunner(Protocol):
     """Runs one replay task and returns the agent's answer text."""
 
-    async def run(self, *, case_id: str, prompt: str, with_skill: bool) -> str: ...
+    async def run(self, *, case_id: str, prompt: str, with_skill: bool) -> str:
+        """Run ``prompt`` with or without the candidate skill; return the answer."""
 
 
 class ReplayJudge(Protocol):
     """Scores one answer (the answer is embedded in ``prompt``) on an int scale."""
 
-    async def score(self, *, case_id: str, prompt: str) -> int: ...
+    async def score(self, *, case_id: str, prompt: str) -> int:
+        """Return an integer score for the answer embedded in ``prompt``."""
 
 
 @dataclass(frozen=True)
