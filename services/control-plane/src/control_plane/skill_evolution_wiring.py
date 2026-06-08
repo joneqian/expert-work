@@ -325,18 +325,25 @@ def build_evolution_worker(
     batch_size: int = 50,
     max_rounds: int = 3,
     max_promotes_per_hour: int = 5,
+    breaker: CircuitBreaker | None = None,
 ) -> SkillEvolutionWorker:
     """Assemble the production skill-evolution worker (lifespan wiring).
 
     Wires the SE-7c governance gate (auto-promote policy + rate limiter +
     circuit breaker) so a grounded, eligible, non-high-risk DRAFT auto-promotes
     to ACTIVE within the guardrails; everything else stays DRAFT for review.
+
+    ``breaker`` may be injected so the SE-7d rollback monitor shares the SAME
+    circuit breaker instance: a promote that later rolls back feeds ``ok=False``
+    on the same ``{tenant}:{agent}`` scope, tripping the auto-promote channel
+    (SE-A12). When ``None`` the worker owns a private breaker.
     """
     aux_text = _AuxText(aux_model, default_model=aux_default_model)
     gate = PromotionGate(
         skill_store=skill_store,
         rate_limiter=RateLimiter(max_per_window=max_promotes_per_hour, window=timedelta(hours=1)),
-        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
+        breaker=breaker
+        or CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
         audit_logger=audit_logger,
     )
     processor = EvolutionProcessor(
