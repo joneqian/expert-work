@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -33,12 +33,15 @@ from control_plane.skill_evolution_assembly import (
     first_user_message,
     select_signal_tier,
 )
+from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
 from control_plane.skill_evolution_processor import EvolutionProcessor, SkillEvidence
 from control_plane.skill_evolution_worker import SkillEvolutionWorker
+from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import CurationCandidateStore, SkillStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.curation import EvalDatasetStore
 from helix_agent.protocol import AgentSpecStatus, CurationCandidateRecord, EvalDatasetRecord
+from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.evolution.graph_runner import GraphReplayTaskRunner
 
 # Orchestrator imports — heavy (pull agent_factory); safe here because this
@@ -286,7 +289,10 @@ class _GraphReplayInvoker:
         )
         signal = FailureSignal(error_text=decision.reason) if decision.verdict == "fail" else None
         return ReplayOutcome(
-            verdict=decision.verdict, failure_signal=signal, eval_result_id=result.id
+            verdict=decision.verdict,
+            failure_signal=signal,
+            eval_result_id=result.id,
+            auto_promote_eligible=decision.auto_promote_eligible,
         )
 
     async def _base_spec(self, candidate: CurationCandidateRecord) -> Any:
@@ -315,11 +321,24 @@ def build_evolution_worker(
     trajectory_reader: TrajectoryReader,
     agent_builder: Callable[..., Awaitable[Any]],
     interval_s: int,
+    audit_logger: AuditLogger | None = None,
     batch_size: int = 50,
     max_rounds: int = 3,
+    max_promotes_per_hour: int = 5,
 ) -> SkillEvolutionWorker:
-    """Assemble the production skill-evolution worker (lifespan wiring)."""
+    """Assemble the production skill-evolution worker (lifespan wiring).
+
+    Wires the SE-7c governance gate (auto-promote policy + rate limiter +
+    circuit breaker) so a grounded, eligible, non-high-risk DRAFT auto-promotes
+    to ACTIVE within the guardrails; everything else stays DRAFT for review.
+    """
     aux_text = _AuxText(aux_model, default_model=aux_default_model)
+    gate = PromotionGate(
+        skill_store=skill_store,
+        rate_limiter=RateLimiter(max_per_window=max_promotes_per_hour, window=timedelta(hours=1)),
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
+        audit_logger=audit_logger,
+    )
     processor = EvolutionProcessor(
         distiller=SkillDistiller(model=aux_text, model_name=aux_default_model),
         attributor=SkillAttributor(model=aux_text, model_name=aux_default_model),
@@ -333,6 +352,7 @@ def build_evolution_worker(
             skill_store=skill_store,
         ),
         config=EvolutionConfig(max_rounds=max_rounds),
+        promotion_gate=gate,
     )
     return SkillEvolutionWorker(
         candidate_store=candidate_store,

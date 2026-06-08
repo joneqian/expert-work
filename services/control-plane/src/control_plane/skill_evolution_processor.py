@@ -18,14 +18,21 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from control_plane.skill_attribution import AttributionVerdict, FailureSignal, SkillAttributor
 from control_plane.skill_distiller import SkillDistiller, SkillDraft
 from control_plane.skill_evolution import EvolutionConfig, EvolutionResult, ReplayOutcome, evolve
+from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import DuplicateSkillError, SkillStore
 from helix_agent.protocol import CurationCandidateRecord
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
+
 
 __all__ = [
     "EvidenceProvider",
@@ -92,6 +99,11 @@ class EvolutionProcessor:
     held_out_provider: HeldOutProvider
     replay_invoker: ReplayInvoker
     config: EvolutionConfig = field(default_factory=EvolutionConfig)
+    #: SE-7c governance gate. When wired, a grounded DRAFT is run through the
+    #: auto-promote policy + guardrails (may flip it to ACTIVE). ``None`` leaves
+    #: every grounded skill as DRAFT for human review.
+    promotion_gate: PromotionGate | None = None
+    clock: Callable[[], datetime] = _utcnow
 
     async def __call__(self, candidate: CurationCandidateRecord) -> EvolutionResult:
         evidence = await self.evidence_provider(candidate)
@@ -140,13 +152,30 @@ class EvolutionProcessor:
             await self._persist(revised, candidate, state, round_no=state.version)
             return revised
 
-        return await evolve(
+        result = await evolve(
             distill=distill,
             replay=replay,
             attribute=attribute,
             revise=revise,
             config=self.config,
         )
+
+        # SE-7c governance: a grounded DRAFT goes through the auto-promote gate
+        # (may flip to ACTIVE); without a gate it stays DRAFT for human review.
+        if (
+            self.promotion_gate is not None
+            and result.outcome == "grounded"
+            and result.draft is not None
+            and state.skill_id is not None
+        ):
+            await self.promotion_gate.maybe_promote(
+                candidate=candidate,
+                skill_id=state.skill_id,
+                auto_promote_eligible=result.auto_promote_eligible,
+                high_risk=result.draft.high_risk,
+                now=self.clock(),
+            )
+        return result
 
     async def _persist(
         self,

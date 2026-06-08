@@ -78,6 +78,40 @@ def _processor(*, draft_reply: str, invoker: Any) -> EvolutionProcessor:
     )
 
 
+async def test_promotion_gate_activates_eligible_grounded_draft() -> None:
+    from datetime import timedelta
+
+    from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
+    from control_plane.skill_promotion_gate import PromotionGate
+    from helix_agent.protocol.skill import SkillStatus
+
+    store = InMemorySkillStore()
+
+    async def invoker(**_kw: Any) -> ReplayOutcome:
+        return ReplayOutcome(verdict="pass", auto_promote_eligible=True)
+
+    gate = PromotionGate(
+        skill_store=store,
+        rate_limiter=RateLimiter(max_per_window=5, window=timedelta(hours=1)),
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=1)),
+    )
+    proc = EvolutionProcessor(
+        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        attributor=SkillAttributor(model=FakeModel("content_error")),
+        skill_store=store,
+        evidence_provider=_evidence,
+        held_out_provider=_held_out,
+        replay_invoker=invoker,
+        promotion_gate=gate,
+        clock=lambda: datetime(2026, 6, 8, tzinfo=UTC),
+    )
+    result = await proc(_candidate())
+    assert result.outcome == "grounded"
+    skill = await store.get_skill_by_name(tenant_id=_TENANT, name="summarise-data")
+    assert skill is not None
+    assert skill.status is SkillStatus.ACTIVE  # auto-promoted by the gate
+
+
 async def test_grounded_persists_distilled_draft() -> None:
     async def invoker(**_kw: Any) -> ReplayOutcome:
         return ReplayOutcome(verdict="pass")

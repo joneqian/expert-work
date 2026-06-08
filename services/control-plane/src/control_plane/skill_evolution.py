@@ -53,6 +53,9 @@ class ReplayOutcome:
     verdict: EvalVerdict
     failure_signal: FailureSignal | None = None
     eval_result_id: UUID | None = None
+    #: SE-4a auto-promote eligibility (signal tier + anchors + not high-risk),
+    #: surfaced so the SE-7c gate can act on a grounded result.
+    auto_promote_eligible: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,8 @@ class EvolutionResult:
     rounds: int
     reason: str
     history: tuple[RoundRecord, ...]
+    #: True only on a grounded result whose passing replay was auto-eligible.
+    auto_promote_eligible: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,7 +123,14 @@ async def evolve(
 
         if outcome.verdict == "pass":
             history.append(RoundRecord(round_no, "pass", None))
-            return EvolutionResult("grounded", draft, round_no, "replay passed", tuple(history))
+            return EvolutionResult(
+                "grounded",
+                draft,
+                round_no,
+                "replay passed",
+                tuple(history),
+                auto_promote_eligible=outcome.auto_promote_eligible,
+            )
 
         if outcome.verdict == "inconclusive":
             history.append(RoundRecord(round_no, "inconclusive", None))

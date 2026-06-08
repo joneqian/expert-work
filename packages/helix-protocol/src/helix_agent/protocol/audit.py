@@ -143,6 +143,10 @@ class AuditAction(StrEnum):
     SKILL_AUTHORED_BY_AGENT = "skill:authored_by_agent"
     SKILL_REFINED_BY_AGENT = "skill:refined_by_agent"
     SKILL_FORKED_BY_AGENT = "skill:forked_by_agent"
+    # skill — Stream SE (SE-7c) Layer B governance: a replay-verified DRAFT was
+    # auto-promoted to ACTIVE by the evolution worker (non-high-risk, eligible,
+    # within rate limit + breaker closed). High-risk / ineligible stay DRAFT.
+    SKILL_EVOLUTION_AUTO_PROMOTED = "skill:evolution_auto_promoted"
     # artifact (Stream J.9-step3 — Mini-ADR J-25). ``ARTIFACT_SAVE`` is
     # reserved for the orchestrator-side save-artifact tool emit; that
     # wiring lands when ToolEnv gains an :class:`AuditLogger` handle.

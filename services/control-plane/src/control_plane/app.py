@@ -1025,6 +1025,7 @@ def create_app(
                         trajectory_reader=TrajectoryReader(object_store=object_store),
                         agent_builder=resolved_agent_runtime.agent_builder,
                         interval_s=resolved_settings.skill_evolution_worker_interval_s,
+                        audit_logger=resolved_audit,
                     )
                     skill_evolution_worker.start()
                     _app.state.skill_evolution_worker = skill_evolution_worker
