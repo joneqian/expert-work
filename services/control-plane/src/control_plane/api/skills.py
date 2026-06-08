@@ -72,6 +72,7 @@ from helix_agent.protocol import (
     Skill,
     SkillStatus,
     SkillVersion,
+    SkillVisibility,
     TenantPlan,
     tier_satisfies,
 )
@@ -233,6 +234,15 @@ def _skill_dict(skill: Skill) -> dict[str, Any]:
         "state_changed_at": (
             skill.state_changed_at.isoformat() if skill.state_changed_at is not None else None
         ),
+        # Stream SE (SE-8) — ownership / lineage so the admin governance
+        # surface can render visibility / owner / fork source without a
+        # second fetch. Additive / backward-compatible.
+        "visibility": skill.visibility,
+        "created_by_user_id": (
+            str(skill.created_by_user_id) if skill.created_by_user_id is not None else None
+        ),
+        "created_by_agent_name": skill.created_by_agent_name,
+        "forked_from": str(skill.forked_from) if skill.forked_from is not None else None,
         "created_at": skill.created_at.isoformat(),
         "updated_at": skill.updated_at.isoformat(),
     }
@@ -259,6 +269,16 @@ def _version_dict(version: SkillVersion) -> dict[str, Any]:
         "supporting_files": files_meta,
         "lazy_load": version.lazy_load,
         "high_risk": version.high_risk,
+        # Stream SE (SE-8) — evolution provenance for the SkillDetail lineage
+        # view. Additive / backward-compatible.
+        "evolution_origin": version.evolution_origin,
+        "distilled_from_trajectory_key": version.distilled_from_trajectory_key,
+        "distilled_from_candidate_id": (
+            str(version.distilled_from_candidate_id)
+            if version.distilled_from_candidate_id is not None
+            else None
+        ),
+        "evolution_round": version.evolution_round,
         "created_at": version.created_at.isoformat(),
     }
 
@@ -820,6 +840,10 @@ def build_skills_router() -> APIRouter:
         cursor: Annotated[UUID | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
+        # Stream SE (SE-8) — agent-self-authored slice for the governance
+        # surface (e.g. "this user's agent_private skills"). Single-tenant only.
+        visibility: Annotated[SkillVisibility | None, Query()] = None,
+        created_by_user_id: Annotated[UUID | None, Query()] = None,
     ) -> JSONResponse:
         scope = await ensure_tenant_scope(
             request.state.principal,
@@ -842,6 +866,8 @@ def build_skills_router() -> APIRouter:
                     tenant_id=scope.tenant_id,
                     status=status,
                     category=category,
+                    visibility=visibility,
+                    created_by_user_id=created_by_user_id,
                     cursor=cursor,
                     limit=limit,
                 )

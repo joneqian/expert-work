@@ -64,6 +64,7 @@ from control_plane.api import (
     build_sandboxes_router,
     build_service_accounts_router,
     build_sessions_router,
+    build_skill_evolution_router,
     build_skills_router,
     build_tenant_config_router,
     build_tenant_quotas_router,
@@ -1274,6 +1275,7 @@ def create_app(
     app.include_router(build_me_router())
     app.include_router(build_memory_router())
     app.include_router(build_skills_router())
+    app.include_router(build_skill_evolution_router())
     app.include_router(build_uploads_router())
     app.include_router(build_service_accounts_router())
     app.include_router(build_mcp_servers_router())
