@@ -79,6 +79,13 @@ _memory_inject_mode_total = helix_counter(
     label_names=("mode",),  # per_session | per_turn
 )
 
+# Stream CM-4 — cross-encoder rerank of long-term memory recall candidates.
+_memory_rerank_total = helix_counter(
+    "helix_cm_memory_rerank_total",
+    "Long-term memory recall reranks, partitioned by outcome.",
+    label_names=("outcome",),  # reranked | degraded
+)
+
 _anthropic_cache_anchors_total = helix_counter(
     "helix_uplift_anthropic_cache_anchors_total",
     "Total cache_control anchor markers added by upstream injectors "
@@ -306,6 +313,18 @@ def record_memory_inject_mode(*, mode: str) -> None:
     ``mode`` ∈ ``{"per_session", "per_turn"}`` (Sprint #8 § 9.8).
     """
     _memory_inject_mode_total.labels(mode=mode).inc()
+
+
+def record_memory_rerank(*, outcome: str) -> None:
+    """Bump ``helix_cm_memory_rerank_total{outcome}`` (Stream CM-4).
+
+    ``outcome`` ∈ ``{"reranked", "degraded"}`` — ``reranked`` = the
+    reranker reordered the recall candidates; ``degraded`` = rerank failed
+    or returned nothing usable and the RRF order was kept. Only emitted
+    when a reranker is wired (its absence is signalled by the metric's
+    absence).
+    """
+    _memory_rerank_total.labels(outcome=outcome).inc()
 
 
 def record_anthropic_cache_anchor() -> None:

@@ -34,6 +34,7 @@ from helix_agent.common.threat_patterns import scan_for_threats
 from helix_agent.common.uplift_metrics import (
     record_memory_drift,
     record_memory_redacted,
+    record_memory_rerank,
     record_memory_retrieval,
 )
 from helix_agent.persistence import MemoryStore
@@ -45,11 +46,17 @@ from helix_agent.runtime.cancellation import CancellationToken, RunCancelledErro
 from orchestrator.graph_builder._config import cancellation_token, configurable_uuid
 from orchestrator.llm import Embedder, LLMCaller
 from orchestrator.state import AgentState
+from orchestrator.tools.knowledge import Reranker
 
 logger = logging.getLogger(__name__)
 
 #: A memory graph node: takes state + config, returns state updates.
 MemoryNode = Callable[[AgentState, RunnableConfig], Awaitable[dict[str, Any]]]
+
+#: Stream CM-4 — candidate depth recalled before reranking, wider than the
+#: final top-k so the cross-encoder has alternatives to reorder. Mirrors the
+#: knowledge retriever's recall limit. Only used when a reranker is wired.
+_MEMORY_RERANK_RECALL_LIMIT = 20
 
 #: Per-message cap when rendering the trajectory for the extraction prompt.
 _TRAJECTORY_CHAR_CAP = 1000
@@ -166,12 +173,53 @@ async def _resolve_memory_recall_mode(
     return record.memory_recall_mode
 
 
+async def _rerank_memories(
+    *,
+    reranker: Reranker,
+    query: str,
+    candidates: list[MemoryItem],
+    top_k: int,
+    tenant_id: UUID,
+    token: CancellationToken,
+) -> list[MemoryItem]:
+    """Stream CM-4 — reorder recall candidates by cross-encoder relevance.
+
+    Best-effort: the reranker's own implementations already degrade to the
+    fused order (LLM parse failure / no credential); this wraps the call so
+    any unexpected error still degrades to the RRF order (``candidates``
+    truncated to ``top_k``) rather than dropping recall entirely. Cancellation
+    propagates. Operates on raw content — redaction happens on the final set.
+    """
+    try:
+        order = await token.run_cancellable(
+            reranker.rerank(
+                query=query,
+                documents=[m.content for m in candidates],
+                top_k=top_k,
+                tenant_id=tenant_id,
+            )
+        )
+    except RunCancelledError:
+        raise
+    except Exception:
+        logger.warning("memory.rerank_failed — using RRF order", exc_info=True)
+        record_memory_rerank(outcome="degraded")
+        return candidates[:top_k]
+    reranked = [candidates[i] for i in order if 0 <= i < len(candidates)]
+    if not reranked:
+        record_memory_rerank(outcome="degraded")
+        return candidates[:top_k]
+    record_memory_rerank(outcome="reranked")
+    return reranked[:top_k]
+
+
 def make_memory_recall_node(
     *,
     memory_store: MemoryStore,
     embedder: Embedder,
     top_k: int,
     tenant_config_store: TenantConfigStore | None = None,
+    reranker: Reranker | None = None,
 ) -> MemoryNode:
     """Build the ``memory_recall`` node bound to the store + embedder.
 
@@ -182,6 +230,12 @@ def make_memory_recall_node(
     hybrid vector + full-text + RRF recall. ``vector`` mode keeps the
     pre-Sprint-#6 pure-pgvector path. No store wired → default hybrid
     (so test fixtures that omit the store still get the improved recall).
+
+    Stream CM-4: when ``reranker`` is wired, recall fetches a wider
+    candidate set (``max(top_k, _MEMORY_RERANK_RECALL_LIMIT)``) and the
+    cross-encoder reorders it down to ``top_k`` before redaction. ``None``
+    → no rerank, ``retrieve(limit=top_k)`` returned directly (the pre-CM-4
+    behaviour; zero change).
     """
 
     async def memory_recall_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -198,6 +252,7 @@ def make_memory_recall_node(
         mode = await _resolve_memory_recall_mode(
             tenant_id=tenant_id, tenant_config_store=tenant_config_store
         )
+        recall_limit = max(top_k, _MEMORY_RERANK_RECALL_LIMIT) if reranker is not None else top_k
         try:
             vectors = await token.run_cancellable(embedder.embed([task], tenant_id=tenant_id))
             memories = await memory_store.retrieve(
@@ -205,8 +260,17 @@ def make_memory_recall_node(
                 user_id=user_id,
                 query_embedding=vectors[0],
                 query_text=task if mode == "hybrid" else None,
-                limit=top_k,
+                limit=recall_limit,
             )
+            if reranker is not None and memories:
+                memories = await _rerank_memories(
+                    reranker=reranker,
+                    query=task,
+                    candidates=memories,
+                    top_k=top_k,
+                    tenant_id=tenant_id,
+                    token=token,
+                )
         except RunCancelledError:
             raise
         except Exception:

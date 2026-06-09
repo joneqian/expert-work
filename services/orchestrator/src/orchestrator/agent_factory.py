@@ -105,6 +105,7 @@ from orchestrator.multimodal import ImageResolver
 from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
 from orchestrator.tools.file_ops import SandboxWorkspaceWriter
+from orchestrator.tools.knowledge import Reranker
 from orchestrator.tools.registry import ToolContext
 from orchestrator.tools.sandbox import SupervisorClient
 from orchestrator.tools.skill_authoring import (
@@ -187,6 +188,12 @@ class MemoryEnv:
     #: ``None`` defaults to hybrid (the platform default) so test
     #: fixtures that omit the tenant_config store still benefit.
     tenant_config_store: TenantConfigStore | None = None
+    #: Stream CM-4 — optional cross-encoder reranker for long-term memory
+    #: recall. When wired, ``memory_recall_node`` recalls a wider candidate
+    #: set and reorders it down to ``retrieve_top_k``. The control-plane
+    #: passes the same ``DynamicResolvingReranker`` it builds for the
+    #: knowledge tool; ``None`` keeps the pre-CM-4 RRF order (no rerank).
+    reranker: Reranker | None = None
 
 
 @dataclass(frozen=True)
@@ -1181,6 +1188,7 @@ def _build_memory_nodes(
         embedder=env.embedder,
         top_k=long_term.retrieve_top_k,
         tenant_config_store=env.tenant_config_store,
+        reranker=env.reranker,  # Stream CM-4 — None → no rerank (pre-CM-4 behaviour)
     )
     writeback = (
         make_memory_writeback_node(
