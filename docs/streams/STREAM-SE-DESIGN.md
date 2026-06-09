@@ -433,26 +433,74 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 
 ---
 
-## 9sexies. SE-12 — 分层带源回链失败报告（借鉴 agentic-harness-engineering Agent Debugger）
+## 10. agentic-harness-engineering 借鉴增强(SE-10 ~ SE-15)
 
-把"内容/执行二分 + 单 fail"升级为**两层可读叙述 + 证据回链**:overview 根因聚类 + detail 逐任务 narrative + `evidence_refs`(trajectory_key + message_index 可下钻)。
+深度对照外部研究仓 `agentic-harness-engineering`(Terminal-Bench 2.0 #3,「模型冻结、进化 7 正交 harness 组件」)后,提炼 6 个增量子项。三原则:**泛化复用现有验证门、不新建并行子系统、守代码进化红线**(工具实现/中间件/子agent 代码不进化,强制人审)。完整设计见各子项小节;对账见 `docs/research/2026-06-08-hermes-vs-stream-l-harness-reconciliation.md`。
 
-- **加层不替换(SE-A20)**:归因仍出 `FailureKind` 当门控信号;报告出人读叙述 + 回链当**输入信号/审阅证据**,**绝不进 `decide_grounding`**(守 SE-A0 + 14.2% 步级不可信)。
-- **成本(SE-A21)**:**程序化预聚类零 token**——按 `(attribution_kind, exit_phase, 首 tool_error/timeout marker)` 分桶;每桶**一次** aux 命名(取 N exemplar);规则桶(环境错 by_rule)**跳 LLM** 走模板。token 随桶数非 case 数。
-- **PII(SE-A22)**:命名 prompt type-level + 落地前 abstraction guard(含 UUID/长数字→降级模板)+ snippet 长度 cap(240)。
-- **消费(SE-A23)**:overview 的 `suggested_guard`+`summary` 喂蒸馏/co-evolve 当高信噪输入;治理 UI 下钻证据。
-- **实现**:`failure_report.py` `FailureReportBuilder`(`SkillAttributor` + 注入 `ReportSummarizer`,CI fake)+ pydantic DTO(`FailureReport`/`RootCauseCluster`/`FailureReportDetail`/`EvidenceRef`,**control-plane 内部、序列化为 ObjectStore JSON blob,非 protocol 跨服务契约故不动 protocol/__init__**)。6 单测。
-- **scope 边界(诚实)**:报告**引擎**(聚类+命名+回链+abstraction+JSON round-trip)完整可测;**SE-12b 跟进 = 投递面**——ObjectStore blob writer/reader(key `failure_reports/{tenant}/...`)+ `GET /v1/skill-evolution/skills/{id}/failure-reports` API + admin-ui `FailureReportPanel`(i18n 双语 + Storybook + Playwright)+ 把 overview 信号喂进 `_TrajectoryEvidenceProvider`(消费侧 wiring),归 integration/前端 PR(前端 Storybook/Playwright 重,单列以免与引擎混)。
+| 子项 | 借鉴点 | 状态 |
+|---|---|---|
+| SE-10 | 进化对象从「仅 skill」扩到文本类组件(system_prompt 增量 / tool 描述 / 长期记忆),复用同一重放门 | ✅ 已落 |
+| SE-11 | 变更「预测—自动证伪」纪律(predicted_impact → verdict),叠加不替代回滚 | ✅ 已落 |
+| SE-12 | 分层 + 带源回链失败报告(Agent Debugger 式 overview/detail) | ✅ 引擎已落(投递面 SE-12b) |
+| SE-13 | 进化前领域预研(冷启动 + KB/web → DRAFT 先验) | ✅ 已落(wiring 跟进) |
+| SE-14 | Best-of-N 候选多样性(策略 hint 分流 + winner 选举) | ✅ substrate 已落(编排 SE-14b) |
+| SE-15 | harness 规范 + linter + profile 对账 | ✅ 已落 |
 
-## 10. Mini-ADR 索引
+### SE-10 — 文本类 harness 组件进化扩展(Mini-ADR SE-A15 / A16 / A17)
+
+把 SE 进化对象从「仅 skill」扩到三类**无执行风险文本组件**(C1 system_prompt 增量 · C2 tool_description 补充 · C3 memory_entry),全部复用同一 `SkillVersion` 载体 + with-vs-without 重放门 + 治理门。代码类组件**不进化**(红线)。
+
+- **SE-A15 数据模型**:`skill` 加 `component_type`(CHECK 四值)+ `target_tool_name`(⇔ `tool_description`),迁移 `0069_skill_component_type` 纯增量无新表/RLS;`Skill` DTO + `ComponentType` Literal + 互斥校验。泛化 `SkillVersion` 不新建表(复用单一重放门)。
+- **SE-A16 装配渲染**:三类注册为 skill ref,replay 注入维度(`spec.skills`)不变,`GraphReplayTaskRunner` 零改;`_load_skills` 按 `result.skill.component_type` 分流渲染为 `<behavior-patch>`/`<tool-note>`/`<long-term-memory>` advisory 系统提示块(同 J-23 §15.6(c) 红线,**不改 ToolSpec**);文本组件不带 tools/不进 skill_view,但入 `resolved_versions` 供 SE-7 回滚;resolver 无 `skill` 回退 `skill`(向后兼容)。
+- **SE-A17 治理无需改 `decide_promotion`**:读码证实 agent_private→tenant 的可见性提升本走独立 `skill_promote_request` 人审流,C1 跨租户永人审已被现有两段式治理满足;auto-active 仅作用该 agent 自身 run。
+- in-session 3 builtin `note_behavior_patch`/`clarify_tool_usage`/`remember`(复用 AuthorSkill 全纪律,恒非高危)。**SE-10b 跟进**:Layer B 蒸馏产文本组件 + SE-9 eval component 场景。验证:`test_skill_component_evolution.py`(6 测)。
+
+### SE-11 — 进化变更「预测—自动证伪」纪律(Mini-ADR SE-A18 / A19)
+
+闭合「promote 时重放预测 → 上线后证伪」环,**叠加不替代**回滚。
+- **SE-A18**:replay-derived 预测**就是** `skill_eval_result` 行(baseline_score→skill_score),无冗余预测表(generator 自陈源推迟 SE-11b);迁移 `0070_skill_pred_verdict` 单表;`SkillPredictionVerdict` DTO + `PredictionVerdict` Literal。纯逻辑 `decide_prediction_verdict`:`realized_fraction` 版本级带判定(effective/partially/ineffective/mixed/harmful/insufficient)。
+- **SE-A19**:verdict 并入 `RollbackMonitor` sweep 同窗口同输入,与 `decide_rollback` 各产各的(rollback 决定 archive,verdict 只诊断 best-effort 不阻塞)——守不信 LLM 自评当下线门。验证:`test_skill_prediction_verdict.py`(6 纯逻辑 + 3 集成)。
+
+### SE-12 — 分层带源回链失败报告(Mini-ADR SE-A20 / A21 / A22 / A23)
+
+借鉴 Agent Debugger:两层根因聚类 + 证据回链,作生成器输入信号 + 审阅证据,**加层不替换归因、绝不进门控**(SE-A20/A23)。
+- **SE-A21**:程序化预聚类零 token(按 attribution_kind/exit_phase/marker 分桶)+ 每桶一次 aux 命名(规则/环境桶跳 LLM,token 随桶数非 case 数)。
+- **SE-A22**:PII type-level prompt + abstraction guard 降级 + snippet cap(240)。
+- **实现**:`failure_report.py` `FailureReportBuilder`(`SkillAttributor` + 注入 `ReportSummarizer`,CI fake)+ pydantic DTO(control-plane 内部 JSON blob,非 protocol)。**SE-12b 跟进**:ObjectStore blob + API + admin-ui FailureReportPanel(i18n+Storybook+Playwright)+ 喂 `_TrajectoryEvidenceProvider`。验证:`test_failure_report.py`(6 测)。
+
+### SE-13 — 进化前领域预研(Mini-ADR SE-A24 / A25 / A26 / A27 / A28)
+
+借鉴 explore-agent:进化前研究领域(本租户 KB + 可选公网)产 DRAFT 先验喂生成器。
+- **SE-A24** 冷启动 + TTL(纯逻辑 `needs_research`);**SE-A25** 产物=DRAFT agent_private 先验(origin=distilled,**绝不自动 active** 守 SE-A0);**SE-A26/27** 输入=本租户 KB(+可选 web,默认 off)只读本租户、不用平台 key;**SE-A28** 成本:冷启动+TTL+web 默认 off+abstraction guard。
+- **实现**:`domain_research.py` `DomainResearcher`(KB/web/summary 三 Protocol 注入,CI fake)+ settings(默认 off)。**SE-13 wiring 跟进**:worker lifespan 注入真 KnowledgeRetriever/WebSearchTool/aux + 先验喂 distill(integration,同 SE-6d)。验证:`test_domain_research.py`(9 测)。
+
+### SE-14 — Best-of-N 候选多样性(Mini-ADR SE-A31 / A32 / A33)
+
+co-evolve 拓宽为 N 角度并行选 winner(拓宽 × co-evolve 加深,正交叠加)。
+- **SE-A31** `DistillHint`(prompt/tools/anchored)经 `distill(hint_text=)` 注入,仅引导侧重不放宽两道 guard;**SE-A32** 纯逻辑 `pick_winner` 只选 pass、确定排序键 + name 兜底、无 orchestrator 依赖;**SE-A33** `BestOfNConfig.hints=()` 默认 OFF(opt-in)。
+- **scope**:本 PR 交付 substrate(`skill_best_of_n.py` + distiller hint,10 测);**SE-14b 跟进 = processor fan-out 编排**(N 独立 DRAFT→各 replay→pick_winner→落选 archive→winner 进 evolve;需扩 ReplayOutcome + 重构已重测的 `__call__`)。
+
+### SE-F(SE-15)— harness 规范 + linter(Mini-ADR SE-A34 / A35 / A36 / A37)
+
+helix 是**声明式 harness**(`AgentSpec` manifest 装配成 `BuiltAgent`),非外部那种文件树式工作区。SE-15 把外部 HARNESS.md v1.0 的 7 组件**映射到 AgentSpec 字段**(规范 `docs/HARNESS-COMPLIANCE.md`),并补一个可执行校验器,覆盖 `model_validator` 表达不了的跨组件 / 命名 / 合规规则。
+
+- **SE-A34 映射而非照搬**:7 组件 ↔ AgentSpec(system_prompt+dynamic_context / tools / 工具注册 / middleware / skills / subagents / memory.long_term);不复制外部目录结构(声明式 vs 文件树是不同形态)。
+- **SE-A35 linter 只补 validator 覆盖不到的**:R1 schema 合规(error)/ R2 builtin∈KNOWN_BUILTINS(error)/ R3 启用的 HIGH_RISK_TOOLS ⊆ approval_required_tools(error,manifest 层映射 SE 高危永人审)/ R4 名 kebab(warn)/ R5 system_prompt 不嵌代码(warn,正交性)/ R6 vision 与视觉模型互斥(warn)/ R-prof profile 推荐块(warn)。误杀缓解:启发式归 warn,硬规则才 error。
+- **SE-A36 纯静态接 CI lint job**:`tools/harness/check_harness_compliance.py`(stdlib+pydantic+pyyaml),扫 `manifests/**` 的 `kind: Agent`。R2 需 orchestrator 取 `KNOWN_BUILTINS`,不可导入时**打印 notice 跳过**(不静默放过;CI 必装全量 workspace 故必跑)。不接 mypy/pytest scope。
+- **SE-A37 profile 复用思想不照搬工具**:`tools/harness/helix_profile.yaml`(对标外部 hermes/codex/openclaw profile 的「不同形态不同必填」思想);外部 `validate_harness.py`(文件树审计器)与 manifest 形态不符,**不进 CI**。
+
+验证:`tools/harness/test_harness_compliance.py`(15 测,各规则正/反例 + canonical manifest 合规自检,CI 自检证非误杀)。
+
+---
+
+## 11. Mini-ADR 索引
 
 | ID | 决策 | 章节 |
 |---|---|---|
-| SE-A20 | 失败报告加层不替换归因;当输入信号/审阅证据,绝不进 decide_grounding | § 9sexies |
-| SE-A21 | 程序化预聚类零 token + 每桶一次 aux 命名;规则桶跳 LLM(token 随桶数) | § 9sexies |
-| SE-A22 | PII:type-level prompt + abstraction guard 降级 + snippet cap | § 9sexies |
-| SE-A23 | 消费=喂生成器输入信号 + 治理 UI 下钻;DTO control-plane 内部 JSON blob 非 protocol | § 9sexies |
 | SE-A0 | 验证门单一收口:自动 active 必须有 pass 证据 | § 2 |
+| SE-A15 | SE-10 进化对象扩展=泛化 SkillVersion + `component_type`,不新建表(复用单一重放门) | §10 SE-10 |
+| SE-A16 | 三类文本组件渲染为 advisory 系统提示块(behavior-patch/tool-note/long-term-memory),不改 ToolSpec;replay 维度不变 | §10 SE-10 |
+| SE-A17 | C1 治理无需改 decide_promotion:跨租户人审已由现有 promote_request 流满足;auto-active 仅限 agent_private | §10 SE-10 |
 | SE-A1 | 数据模型纯增量 + NULL-tenant RLS | § 4 |
 | SE-A2 | `skill_eval_result` 作 grounding 可溯账 | § 4.3 |
 | SE-A3 | SkillStore 演化 API + visibility 过滤 + §15.7 权限矩阵 | SE-2 |
@@ -471,6 +519,23 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 | SE-A13c | 持久 kill-switch 专表 `skill_evolution_kill_switch`(scope global/tenant;补 in-process breaker 持久化缺口;喂 `decide_promotion` 作 halt 输入);与 archive(停单 skill)正交 | SE-8 |
 | SE-A13d | 前端不新建页/不加导航:丰富 Skills 列表(live vs latest + 可见性/来源/verdict/待审,筛"仅待审"=队列)+ SkillDetail 展开全貌 + 列表头 kill-switch 开关 | SE-8 |
 | SE-A14 | self-evolution 基准 + SLO 合并门 | SE-9 |
+| SE-A34 | harness 规范 = AgentSpec 的 7 组件映射,不照搬外部文件树目录 | SE-15 |
+| SE-A35 | linter 只补 model_validator 覆盖不到的跨组件/命名/合规规则(R1-R6+R-prof) | SE-15 |
+| SE-A36 | 纯静态脚本接 CI lint job;R2 缺 orchestrator 时打印 notice 跳过不静默 | SE-15 |
+| SE-A37 | profile 复用「不同形态不同必填」思想;外部 validate_harness.py 不进 CI | SE-15 |
+| SE-A18 | 预测—证伪:replay 预测=eval 行(无冗余表),单 verdict 表;realized_fraction 版本级带判定;generator 自陈源推迟 SE-11b | §10 SE-11 |
+| SE-A19 | verdict 并入 rollback sweep 同窗口同输入,叠加不替代(只诊断+反哺,下线仍由 decide_rollback) | §10 SE-11 |
+| SE-A20 | 失败报告加层不替换归因;当输入信号/审阅证据,绝不进 decide_grounding | §10 SE-12 |
+| SE-A21 | 程序化预聚类零 token + 每桶一次 aux 命名;规则桶跳 LLM(token 随桶数) | §10 SE-12 |
+| SE-A22 | 失败报告 PII:type-level prompt + abstraction guard 降级 + snippet cap | §10 SE-12 |
+| SE-A23 | 失败报告消费=喂生成器输入信号 + UI 下钻;DTO control-plane 内部 JSON blob 非 protocol | §10 SE-12 |
+| SE-A24 | 领域预研触发=冷启动+TTL(非每轮);纯逻辑 needs_research | §10 SE-13 |
+| SE-A25 | 预研产物=DRAFT agent_private 先验,绝不自动 active(守 SE-A0) | §10 SE-13 |
+| SE-A26/27 | 预研输入=本租户 KB(+可选 web,默认 off);只读本租户不跨租户不用平台 key | §10 SE-13 |
+| SE-A28 | 预研成本:冷启动+TTL+web 默认 off+结果上限+abstraction guard | §10 SE-13 |
+| SE-A31 | Best-of-N hint(prompt/tools/anchored)仅引导侧重,不放宽 distiller 两道 guard | §10 SE-14 |
+| SE-A32 | winner 纯逻辑 pick_winner:只选 pass,确定排序键+name 兜底,无 orchestrator 依赖 | §10 SE-14 |
+| SE-A33 | BestOfNConfig.hints=() 默认 OFF(opt-in);fan-out 编排=SE-14b | §10 SE-14 |
 
 ---
 

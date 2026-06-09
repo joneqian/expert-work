@@ -1075,13 +1075,13 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 > **Stream SE 整体收官** — SE-0 设计 / SE-1~7 自著+蒸馏+重放验证+归因+co-evolve+全自动护栏 / SE-8 admin API+UI / SE-9 基准+SLO 合并门。自进化 skill 从"人写静态启用"升级为"agent 自生成、被重放证据验证、有界自动演化、可治理可回滚可熔断"的一等能力。
 
-> **SE-10 ~ SE-15 借鉴增强（2026-06-08 起，源自 agentic-harness-engineering 对照）** — 6 子项设计见 [STREAM-SE-DESIGN](./streams/STREAM-SE-DESIGN.md)。三原则：泛化复用现有验证门 / 不新建并行子系统 / 守代码进化红线。
-- [x] **SE-12 分层带源回链失败报告 引擎**（本次，SE-A20~A23）：`failure_report.py` `FailureReportBuilder`（`SkillAttributor`+注入 `ReportSummarizer`，CI fake）——程序化预聚类零 token（按 attribution_kind/exit_phase/marker 分桶）+ 每桶一次 aux 命名（规则桶跳 LLM）+ 逐任务 narrative + `evidence_refs`(trajectory_key+message_index 回链)+ abstraction guard 降级 + snippet cap；pydantic DTO（control-plane 内部 JSON blob，非 protocol）。加层不替换归因，绝不进 decide_grounding。6 单测。**SE-12b 跟进 = 投递面**：ObjectStore blob writer/reader + `GET .../failure-reports` API + admin-ui FailureReportPanel（i18n+Storybook+Playwright）+ 喂 `_TrajectoryEvidenceProvider`（消费 wiring），归前端/integration PR。
-- [x] **SE-13 进化前领域预研**（独立分支，SE-A24~A28；wiring 跟进=真 KB/web/aux + 喂 distill）
-- [x] **SE-14 Best-of-N 候选多样性 substrate**（独立分支，SE-A31~A33；fan-out 编排=SE-14b）
-- [x] **SE-11 进化变更预测—自动证伪纪律**（独立分支，SE-A18/A19）
-- [x] **SE-10 文本类 harness 组件进化扩展**（独立分支，SE-A15~A17）
-- [x] **SE-15 harness 规范 + linter + profile 对账**（独立分支，SE-A34~A37）
+> **SE-10 ~ SE-15 借鉴增强（2026-06-08 起，源自 agentic-harness-engineering 对照）** — 6 个增量子项，设计见 [STREAM-SE-DESIGN](./streams/STREAM-SE-DESIGN.md)。三原则：泛化复用现有验证门 / 不新建并行子系统 / 守代码进化红线。
+- [x] **SE-10 文本类 harness 组件进化扩展**（SE-A15~A17）：进化对象从「仅 skill」扩到三类无执行风险文本组件——C1 system_prompt 增量 / C2 tool_description 补充 / C3 memory_entry。`skill` 加 `component_type`+`target_tool_name`（迁移 0069 纯增量，无新表/RLS）；`Skill` DTO + `ComponentType` Literal + 互斥校验；3 store create_skill 透传。装配：`_load_skills` 按 component_type 分流渲染为 `<behavior-patch>`/`<tool-note>`/`<long-term-memory>` advisory 系统提示块（不改 ToolSpec，replay 维度不变，`GraphReplayTaskRunner` 零改）；文本组件入 resolved_versions 供回滚覆盖。in-session 3 builtin。**跟进 SE-10b**：Layer B 蒸馏产文本组件 + SE-9 eval component 场景。
+- [x] **SE-11 进化变更预测—自动证伪纪律**（SE-A18/A19）：replay 预测=`skill_eval_result` 行（无冗余表）；迁移 0070 单表 `skill_prediction_verdict`（栈在 0069 上）；纯逻辑 `decide_prediction_verdict`（realized_fraction 版本级带）并入 RollbackMonitor sweep，叠加不替代 decide_rollback。**跟进 SE-11b**：generator 自陈预测源 + co-evolve 反哺。
+- [x] **SE-12 分层带源失败报告 引擎**（SE-A20~A23）：`FailureReportBuilder` 程序化预聚类零 token + 每桶一次 aux 命名（规则桶跳 LLM）+ evidence 回链 + abstraction guard；DTO control-plane 内部 JSON blob。**跟进 SE-12b**：blob/API/admin-ui FailureReportPanel + 喂 distill。
+- [x] **SE-13 进化前领域预研**（SE-A24~A28）：`DomainResearcher`（KB/web/summary 三 Protocol 注入）；冷启动+TTL；产 DRAFT agent_private 先验绝不自动 active；settings 默认 off。**跟进 SE-13 wiring**：真 KB/web/aux + 喂 distill。
+- [x] **SE-14 Best-of-N 候选多样性 substrate**（SE-A31~A33）：`skill_best_of_n.py`（DistillHint + BestOfNConfig 默认 OFF + 纯逻辑 pick_winner）+ distiller hint。**跟进 SE-14b**：processor fan-out 编排。
+- [x] **SE-15 harness 规范 + linter + profile 对账**（SE-A34~A37）：`docs/HARNESS-COMPLIANCE.md` + `tools/harness/check_harness_compliance.py` 接 CI lint + helix_profile + hermes 对账文档。
 
 ---
 
