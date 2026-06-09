@@ -8,7 +8,7 @@
 >
 > **零债收尾规则**（[memory:zero-tech-debt]）：每条交付收尾 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 >
-> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）详设已锁定；CM-3…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
+> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）详设已锁定；CM-4…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
 
 ---
 
@@ -21,7 +21,7 @@
 | **CM-0** | C0 + N1 | 状态内化、无文件投影；workspace 卷已有但状态不可见、不可手改 | 状态↔workspace 文件投影 + 单向错时双流 + recitation 复诵 | **先行** | CM-A1…A8（本文详设） |
 | CM-1 | A1 | 运行时主循环工具失败无 grounded 恢复建议（SE-12 是离线 skill 进化，L-4 只覆盖文件 mutation） | 通用工具失败→结构化恢复 advisory 注入主循环 | P0 | CM-B1…B6（§3 详设） |
 | CM-2 | A2 | 无"保留最近 N 轮"廉价前置闸，轻溢出每次走 LLM 摘要 | `agent_node` compressor 前加滑窗截断（保 ToolCall↔ToolResult 配对） | P0 | CM-C1…C6（§4 详设） |
-| CM-3 | A3 | compressor 丢弃中段前无 flush，`memory_writeback` 只在 run 末 | 压缩前回调 → 复用 writeback 通道中途落盘 | P1 | 待细化 |
+| CM-3 | A3 | compressor 丢弃中段前无 flush，`memory_writeback` 只在 run 末 | 压缩前回调 → 复用 writeback 通道中途落盘 | P1 | CM-D1…D6（§5 详设） |
 | CM-4 | B5 | rerank_provider/model 配置预留但检索路径无 rerank 调用 | memory recall Hybrid 召回后接 cross-encoder rerank | P1 | 待细化 |
 | CM-5 | B6 | 超大工具结果 char-cap 截断丢弃，不可找回 | 超限结果存 artifact + 虚拟引用 + read 类豁免（"可恢复压缩"通用原则） | P1 | 待细化 |
 | CM-6 | B4 | 对称 RRF，无 MMR 去冗余、无时间衰减 | `memory/sql.py:retrieve()` RRF 后加 MMR + 时间衰减 | P1 | 待细化 |
@@ -474,7 +474,109 @@ agent_node 入口： messages = list(state["messages"])
 
 ---
 
-## 5. 与既有 Stream 的衔接
+## 5. CM-3 详细设计 —— 压缩前 flush（中段被摘要吞掉前抢救进长期记忆）
+
+> **目标**：compressor 把对话中段 LLM 摘要后**丢弃**前，先把中段的耐久要点 flush 进长期记忆（`memory_item`），让长任务跨多次压缩不丢关键决策。映射框架报告 A3（deer-flow `summarization_hook` 压缩前 flush + Anthropic structured note-taking + OpenClaw pre-compaction memory flush，已是标准范式）。
+>
+> **核心策略**：**复用 `memory_writeback` 的抽取管道**——不新造记忆写入逻辑，而是把 writeback 节点内联的"render→LLM 抽取→parse→embed→write + blocked/DLQ 处理"抽成共享函数，run-末 writeback 与压缩前 flush 都调它；compressor 暴露一个 `on_pre_compaction(middle)` 回调，在 `_compress_once` 丢弃中段前 await 它。
+
+### 5.1 关键约束（接缝核准结论，已源码核准）
+
+| 约束 | 事实 | file:line |
+|---|---|---|
+| **中段被摘要后即丢弃，无 flush** | `_compress_once` 把 `split.middle` 交摘要 LLM → 换成单条 `<context-summary>` SystemMessage，中段原文不再进上下文、也不落盘 | `context/compressor.py:274-293`（`_compress_once`） |
+| **summary 是 in-context 易逝、非耐久** | 摘要只在本次 prompt，后续轮可能被再压缩；不进 `memory_item`、不可跨 run 检索 → 中段关键决策无耐久副本 | `context/compressor.py:288-293` |
+| **writeback 只在 run 末触发，且抽取的是压缩后的 state** | run 末 `memory_writeback_node` 从 `state["messages"]` 抽取——此时中段已是 summary（原文已丢），故 run-末抽取**抓不到**被压缩吞掉的中段细节 | `graph_builder/memory.py:240-319`；compress 只改局部 prompt 不改 checkpoint，但中段一旦被摘要替换，后续 state 即不含原文 |
+| **writeback 抽取管道可复用** | `memory_writeback_node` 内联：`_render_trajectory` → `llm_caller` 抽取 → `parse_extracted_memories` → `embedder.embed` → `memory_store.write`，含 `MemoryInjectionBlockedError`/DLQ/best-effort 处理 | `graph_builder/memory.py:250-319`、`:58-125`（_render/parse 辅助） |
+| **compress 在 agent_node 内调用，有 token+config** | `agent_node` 行 256 取 `token=cancellation_token(config)`，行 317-318 调 `compress`；tenant/user/thread 可经 `configurable_uuid(config, ...)` 解析（flush 回调内部解析，免 reorder） | `graph_builder/builder.py:256/317-318`、`graph_builder/_config.py:50`（`cancellation_token`）、`memory.py:244-248`（config→uuid） |
+| **flush 与 writeback 同 gate（per-user + memory 启用）** | 两者都仅在 `memory.long_term` 启用 + `MemoryEnv` 有 store+embedder + 运行带 `user_id` 时有意义；factory `_build_memory_nodes` 已是此 gate | `agent_factory.py:1151-1189`；writeback no-op when no user_id（`memory.py:246-247`） |
+
+> **结论**：CM-3 = 抽 `flush_messages_to_memory` 共享函数（行为保持地从 writeback 节点提取）+ compressor `compress(on_pre_compaction=...)` 回调；factory 在 memory 启用时构造一个 config-bound flush 回调传 `build_react_graph`，agent_node 调 compress 时绑定该回调。flush 抽取的是**即将丢弃的中段** `split.middle`（run-末 writeback 抓不到的内容）。
+
+### 5.2 设计：共享抽取核心 + compressor 回调（两段）
+
+```
+context/compressor.py  ContextCompressor.compress(messages, on_pre_compaction=None)
+  └─ _compress_once：split → 若有 on_pre_compaction：await on_pre_compaction(split.middle)   ← 丢弃前 flush
+                     → 摘要中段 → 换成 <context-summary> → 返回（中段原文此刻才丢）
+
+graph_builder/memory.py  flush_messages_to_memory(messages, *, store, embedder, llm_caller,
+                                                   tenant_id, user_id, thread_id, token, dlq) -> int
+  └─ render→LLM 抽取→parse→embed→write + blocked/DLQ/best-effort（从 writeback 节点抽出，二者共用）
+  memory_writeback_node：解析 config → 调 flush_messages_to_memory → 返回 {}（变薄，行为不变）
+
+agent_factory  _build_memory_nodes：memory 启用 + cc_policy.flush_before_compaction 时，
+  构造 pre_compaction_flush 回调（绑 store/embedder/llm/dlq）→ build_react_graph(pre_compaction_flush=...)
+
+graph_builder/builder.py  agent_node：调 compress 时若 pre_compaction_flush 非空，
+  绑 async _flush(mid)=pre_compaction_flush(mid, config, token) 传 compress(on_pre_compaction=_flush)
+  + 发 helix_cm_precompaction_flush_total{outcome} / helix_cm_precompaction_flush_memories
+```
+
+不变量：① flush 在中段**丢弃前**（即便后续摘要 LLM 失败抛 `ContextOverflowError`，要点已落盘）；② flush **best-effort**——`flush_messages_to_memory` 吞非 cancel 异常返 0，绝不阻断压缩或 run（沿用 writeback 语义）；③ 抽取**中段** `split.middle`（run-末 writeback 抓压缩后 state、抓不到原文，二者互补不重复）；④ 仅 memory 启用 + per-user 才动（gate 与 writeback 一致）。
+
+### 5.3 与 writeback 的复用收敛（零债，不留并行抽取逻辑）
+
+- `memory_writeback_node` 内联的 render→抽取→embed→write + `MemoryInjectionBlockedError`/DLQ/best-effort，**抽成模块级 `flush_messages_to_memory`**（参数化 messages/tenant/user/thread/token/store/embedder/llm/dlq，返回写入条数）。
+- `memory_writeback_node` 变薄：解析 config→调共享函数→`return {}`，**行为完全保持**（现有 writeback 测试不改即过）。
+- 压缩前 flush 复用同一函数，仅传入 `split.middle` 而非全 trajectory，且 tenant/user/thread 由 agent_node 的 config 解析。
+- 共享函数内部 warning 日志措辞泛化（`memory.flush_blocked`/`memory.flush_failed`），summary 行（count）由各 caller 用自己 label 记（`memory.writeback`/`memory.precompaction_flush`），区分两路来源。
+
+### 5.4 数据/协议变更
+
+1. **`graph_builder/memory.py`**：新增模块级 `async def flush_messages_to_memory(...) -> int`（抽取核心）；`memory_writeback_node` 改调它。无新 import 之外的依赖。
+2. **`context/compressor.py`**：`ContextCompressor.compress` + `_compress_once` 增可选 `on_pre_compaction: Callable[[Sequence[BaseMessage]], Awaitable[None]] | None = None`（默认 None ⇒ 与 CM-3 前完全一致）。`ContextCompressor` 本身**不持** store/embedder（保持 context 层纯净、不反向依赖 memory 层）——回调由上层注入。
+3. **`build_react_graph`**：新参数 `pre_compaction_flush: PreCompactionFlush | None = None`（`PreCompactionFlush = Callable[[Sequence[BaseMessage], RunnableConfig, CancellationToken], Awaitable[int]]`）。agent_node 调 compress 时绑定 config+token。
+4. **`ContextCompressionPolicy`**（`agent_spec.py`）增 `flush_before_compaction: bool = True`——memory 启用时默认开（A3 是 P1 默认能力）；memory 未启用则 factory 不构造回调，字段无副作用。
+5. **factory `_build_memory_nodes`**：memory 启用 + `flush_before_compaction` 时构造 `pre_compaction_flush` 回调（绑 env.store/embedder/llm/dlq），随返回值传到 `build_react_graph`。
+6. **不改 `AgentState`/`MemoryItem`/`MemoryStore` 契约**——flush 写的就是普通 `MemoryItem`（`source_thread_id` 标来源），与 writeback 同构。
+
+### 5.5 边界情况
+
+| 场景 | 处理 |
+|---|---|
+| memory 未启用 / 无 user_id | factory 不构造回调（或回调内 config 解析 user_id=None 即 no-op）→ 压缩照常，零 flush |
+| 中段为空（head+tail 覆盖全部） | `_compress_once` 此前已抛 `ContextOverflowError`；flush 在 split 后、空中段不调回调（无内容可抽） |
+| 摘要 LLM 失败 | flush 在摘要**前**已完成 → 要点已落盘；摘要失败照常抛 `ContextOverflowError` |
+| flush 自身失败（抽取/embed/write 异常） | `flush_messages_to_memory` 吞非 cancel 异常返 0 + DLQ（有则入队）→ 压缩与 run 不受影响 |
+| 抽取被 strict scanner 拒（`MemoryInjectionBlockedError`） | 共享函数捕获 → log + 返 0（与 writeback 一致，run 不受影响） |
+| 多 pass 压缩 | 每个 `_compress_once` 丢弃各自中段前 flush（各 pass 中段不同，无重复）；上限 `max_passes` |
+| 取消（RunCancelledError） | 共享函数 re-raise，沿 token 正常取消（不吞） |
+
+### 5.6 可观测（零债"可观测齐全"）
+
+- `helix_cm_precompaction_flush_total{outcome}`（counter）—— `outcome=flushed/empty/failed`，看压缩前 flush 触发与成败。
+- `helix_cm_precompaction_flush_memories`（gauge）—— 最近一次压缩前 flush 写入的记忆条数。
+- 共享函数内 warning（blocked/failed）+ 各 caller 的 count info 日志（`memory.precompaction_flush count=N` / `memory.writeback count=N`）区分来源。
+- 复用现有 memory write 路径的 audit（`MemoryItem` 写入照常触发既有审计），不新增 audit。
+
+### 5.7 测试 & 验收（CM-3 Exit）
+
+- **unit（≥85%）**：`flush_messages_to_memory` 抽取核心（抽取→embed→write / 空抽取→0 / blocked→0 / 异常→DLQ 或 0 / 取消 re-raise）；`memory_writeback_node` 重构后行为保持（现有 writeback 测试不改即过）；compressor `on_pre_compaction` 在丢弃中段**前**被调、入参是 `split.middle`、回调失败不阻断压缩、None 回调与旧行为一致。
+- **integration（真 graph）**：scripted LLM + 构造超阈值长 history → 触发 compaction → fake store 收到中段抽取的 `MemoryItem`；memory 未启用时零 flush（`pre_compaction_flush=None` 原路径）；`flush_before_compaction=False` 关闭。
+- **零债 6 条**：无 TODO；§5 与实现一致；metric+log 齐全（无新增 audit）；CI 8/8 + CodeQL 无新增 high；writeback 行为不回归（共享重构后现有测试全过）。
+
+### 5.8 Mini-ADR（CM-3 锁定）
+
+| ID | 决策 |
+|---|---|
+| **CM-D1** | **复用 writeback 抽取管道**：抽 `flush_messages_to_memory` 共享函数，run-末 writeback 与压缩前 flush 共用；不新造第二套记忆写入逻辑（零债，writeback 行为保持） |
+| **CM-D2** | flush 抽取**即将丢弃的中段** `split.middle`（run-末 writeback 抓压缩后 state、抓不到原文，二者互补不重复） |
+| **CM-D3** | flush 在中段**丢弃前** + 摘要 LLM **前**（要点先落盘，摘要失败也不丢）；**best-effort**（吞非 cancel 异常，绝不阻断压缩/run） |
+| **CM-D4** | compressor **不反向依赖 memory 层**：`ContextCompressor` 仅暴露 `on_pre_compaction` 回调，store/embedder 由上层（factory→agent_node）注入，保 context 层纯净 |
+| **CM-D5** | flush gate 与 writeback 一致（memory 启用 + per-user）；`ContextCompressionPolicy.flush_before_compaction` 默认 True（memory 启用时即生效），memory 未启用则无副作用 |
+| **CM-D6** | tenant/user/thread 由 flush 回调**内部从 config 解析**（agent_node 免在 compress 前 reorder tenant 解析）；写入即普通 `MemoryItem`（`source_thread_id` 标来源），不改 `MemoryItem`/`MemoryStore` 契约 |
+
+### 5.9 PR 切分（CM-3）
+
+1. **CM-3 PR1 — 共享抽取核心 + compressor 回调（CI 全测）**：`graph_builder/memory.py` 抽 `flush_messages_to_memory`（行为保持地从 `memory_writeback_node` 提取，节点变薄）；`context/compressor.py` `compress`/`_compress_once` 增 `on_pre_compaction` 回调（丢弃中段前 await）+ unit（抽取核心各路径 / writeback 重构不回归 / compressor 回调时序+入参+失败不阻断+None 等价）。**不接 factory、不动 policy**（pure-core 先行，对齐 CM-1/CM-2 PR1）。
+2. **CM-3 PR2 — 接线（端到端）**：`ContextCompressionPolicy.flush_before_compaction`；factory `_build_memory_nodes` memory 启用时构造 `pre_compaction_flush` 回调传 `build_react_graph`；agent_node 调 compress 时绑定 config+token；`helix_cm_precompaction_flush_total{outcome}` + `helix_cm_precompaction_flush_memories`；集成测（compaction 触发 flush 到 fake store + memory 未启用零 flush + 开关关闭）+ 文档标 done + ITERATION-PLAN 回填。
+
+> 每个 PR 在本 §5 基础上局部细化；ITERATION-PLAN 增 CM-3 backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
+
+---
+
+## 6. 与既有 Stream 的衔接
 
 - **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8 pause→ingest 时机）、`update_plan`（K.8）。
 - **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）共存；recitation 放非 system 区不破 L-1。**L-4 mutation advisory 被 CM-1 收敛**（`failed_mutations`→`tool_failures`、`<mutation-advisory>`→`<recovery-advisory>`，mutation 校验作为 `mutation_not_landed` 一类保留），非并行；L-5 退款语义不动（失败工具调用照常计步）。
