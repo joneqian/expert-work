@@ -1,0 +1,211 @@
+"""Stream CM-1 — :mod:`orchestrator.graph_builder.error_classifier` unit tests.
+
+Pins the pure-core contract: each failure signal maps to the right
+:data:`ToolErrorClass`, ``retryable`` honours the tool's capability
+(CM-B5), and a batch renders into a ``<recovery-advisory>`` block. No
+graph, no state — PR1 is classification + rendering only.
+"""
+
+from __future__ import annotations
+
+from orchestrator.graph_builder.error_classifier import (
+    ClassifiedToolError,
+    classify_tool_error,
+    render_recovery_advisory,
+)
+from orchestrator.tools.registry import ToolNotFoundError, ToolSpec
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+
+def _spec(*, idempotent: bool = False, read_only: bool = False) -> ToolSpec:
+    return ToolSpec(
+        name="t",
+        description="d",
+        is_read_only=read_only,
+        idempotent=idempotent,
+    )
+
+
+# ---------------------------------------------------------------------------
+# classification: control-flow signals
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_tool_from_tool_not_found() -> None:
+    err = classify_tool_error(tool_name="nope", error=ToolNotFoundError("nope"))
+    assert err.error_class == "unknown_tool"
+    assert err.retryable is False
+    assert "does not exist" in err.advice
+
+
+def test_blocked_takes_precedence_over_exception_type() -> None:
+    # A middleware block is a control-flow signal; even a ValueError body
+    # must classify as blocked, not invalid_arguments.
+    err = classify_tool_error(
+        tool_name="send_email", error=ValueError("invalid recipient"), blocked=True
+    )
+    assert err.error_class == "blocked_by_policy"
+    assert err.retryable is False
+    assert "approval" in err.advice
+
+
+# ---------------------------------------------------------------------------
+# classification: exception type beats text
+# ---------------------------------------------------------------------------
+
+
+def test_timeout_error_type_is_transient() -> None:
+    err = classify_tool_error(tool_name="fetch", error=TimeoutError("boom"))
+    assert err.error_class == "transient"
+
+
+def test_permission_error_type_is_permission_denied() -> None:
+    err = classify_tool_error(tool_name="read", error=PermissionError("nope"))
+    assert err.error_class == "permission_denied"
+
+
+def test_file_not_found_type_is_resource_not_found() -> None:
+    err = classify_tool_error(tool_name="read", error=FileNotFoundError("/x"))
+    assert err.error_class == "resource_not_found"
+
+
+# ---------------------------------------------------------------------------
+# classification: text fallback
+# ---------------------------------------------------------------------------
+
+
+def test_text_timeout_is_transient() -> None:
+    err = classify_tool_error(tool_name="api", error=RuntimeError("upstream timed out"))
+    assert err.error_class == "transient"
+
+
+def test_text_503_is_transient() -> None:
+    err = classify_tool_error(tool_name="api", error=RuntimeError("HTTP 503 overloaded"))
+    assert err.error_class == "transient"
+
+
+def test_text_unauthorized_is_permission_denied() -> None:
+    err = classify_tool_error(tool_name="api", error=RuntimeError("401 Unauthorized"))
+    assert err.error_class == "permission_denied"
+
+
+def test_text_not_found_is_resource_not_found() -> None:
+    err = classify_tool_error(tool_name="db", error=RuntimeError("row not found"))
+    assert err.error_class == "resource_not_found"
+
+
+def test_text_invalid_is_invalid_arguments() -> None:
+    err = classify_tool_error(tool_name="t", error=RuntimeError("field is required"))
+    assert err.error_class == "invalid_arguments"
+    assert "Fix the arguments" in err.advice
+
+
+def test_unrecognised_is_unknown_and_not_retryable() -> None:
+    err = classify_tool_error(tool_name="t", error=RuntimeError("weird"))
+    assert err.error_class == "unknown"
+    assert err.retryable is False
+
+
+# ---------------------------------------------------------------------------
+# CM-B5: retry is capability-bounded
+# ---------------------------------------------------------------------------
+
+
+def test_transient_read_only_is_retryable() -> None:
+    err = classify_tool_error(tool_name="t", error=TimeoutError("x"), spec=_spec(read_only=True))
+    assert err.retryable is True
+    assert "safe to retry" in err.advice
+
+
+def test_transient_idempotent_is_retryable() -> None:
+    err = classify_tool_error(tool_name="t", error=TimeoutError("x"), spec=_spec(idempotent=True))
+    assert err.retryable is True
+
+
+def test_transient_non_idempotent_is_not_retryable() -> None:
+    err = classify_tool_error(
+        tool_name="send", error=TimeoutError("x"), spec=_spec(idempotent=False)
+    )
+    assert err.retryable is False
+    assert "verify the current state" in err.advice.lower()
+
+
+def test_transient_without_spec_is_not_retryable() -> None:
+    # No spec → cannot prove the replay is safe → conservative.
+    err = classify_tool_error(tool_name="t", error=TimeoutError("x"))
+    assert err.retryable is False
+
+
+def test_non_transient_never_retryable_even_if_read_only() -> None:
+    err = classify_tool_error(
+        tool_name="t", error=FileNotFoundError("/x"), spec=_spec(read_only=True)
+    )
+    assert err.retryable is False
+
+
+# ---------------------------------------------------------------------------
+# summary truncation
+# ---------------------------------------------------------------------------
+
+
+def test_long_summary_is_truncated() -> None:
+    err = classify_tool_error(tool_name="t", error=RuntimeError("x" * 400))
+    assert err.summary.endswith("...[truncated]")
+    assert len(err.summary) < 400
+
+
+def test_empty_message_falls_back_to_type_name() -> None:
+    err = classify_tool_error(tool_name="t", error=ValueError())
+    assert err.summary == "ValueError"
+
+
+# ---------------------------------------------------------------------------
+# render_recovery_advisory
+# ---------------------------------------------------------------------------
+
+
+def test_render_empty_is_blank() -> None:
+    assert render_recovery_advisory([]) == ""
+
+
+def test_render_wraps_and_lists_each_failure() -> None:
+    failures = [
+        ClassifiedToolError(
+            tool_name="read_file",
+            error_class="resource_not_found",
+            summary="no such file",
+            retryable=False,
+            advice="Verify it exists.",
+        ),
+        ClassifiedToolError(
+            tool_name="fetch",
+            error_class="transient",
+            summary="timed out",
+            retryable=True,
+            advice="Safe to retry once.",
+        ),
+    ]
+    out = render_recovery_advisory(failures)
+    assert out.startswith("<recovery-advisory>")
+    assert out.rstrip().endswith("</recovery-advisory>")
+    assert "- read_file [resource_not_found]: no such file → Verify it exists." in out
+    assert "- fetch [transient]: timed out → Safe to retry once." in out
+
+
+def test_render_single_failure_one_line() -> None:
+    out = render_recovery_advisory(
+        [
+            ClassifiedToolError(
+                tool_name="t",
+                error_class="unknown_tool",
+                summary="nope",
+                retryable=False,
+                advice="Pick a real tool.",
+            )
+        ]
+    )
+    body = [ln for ln in out.splitlines() if ln.startswith("- ")]
+    assert len(body) == 1
