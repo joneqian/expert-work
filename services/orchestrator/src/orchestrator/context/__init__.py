@@ -20,6 +20,15 @@ from orchestrator.context.compressor import (
 from orchestrator.context.compressor import (
     estimate_tokens as estimate_tokens,
 )
+from orchestrator.context.working_window import (
+    TrimResult as TrimResult,
+)
+from orchestrator.context.working_window import (
+    WorkingWindow as WorkingWindow,
+)
+from orchestrator.context.working_window import (
+    trim_to_recent_turns as trim_to_recent_turns,
+)
 from orchestrator.context.workspace_projection import (
     ProjectionResult as ProjectionResult,
 )
@@ -52,6 +61,8 @@ __all__ = [
     "ContextCompressor",
     "ContextOverflowError",
     "ProjectionResult",
+    "TrimResult",
+    "WorkingWindow",
     "WorkspaceFileReader",
     "WorkspaceFileWriter",
     "WorkspaceIngester",
@@ -61,4 +72,5 @@ __all__ = [
     "render_memory_md",
     "render_plan_md",
     "render_todo_md",
+    "trim_to_recent_turns",
 ]
