@@ -308,6 +308,56 @@ class SkillRunUsageRow(Base):
     )
 
 
+class SkillPredictionVerdictRow(Base):
+    """One row of ``skill_prediction_verdict`` — Stream SE (SE-11, SE-A18/A19).
+
+    Predict→falsify ledger: the replay predicted a lift from ``baseline_score``
+    to ``skill_score``; production gave ``observed_rate``; this records how much
+    held (``realized_fraction``) + the label. Diagnostic only — never gates
+    archive (``decide_rollback`` does). NULL-tenant + ENABLE-only RLS mirrors
+    ``skill_eval_result``; the rollback sweep writes cross-tenant as owner.
+    """
+
+    __tablename__ = "skill_prediction_verdict"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    skill_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("skill.id", ondelete="CASCADE", name="skill_pred_verdict_skill_id_fk"),
+        nullable=False,
+    )
+    skill_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)
+    predicted_delta: Mapped[float] = mapped_column(Float, nullable=False)
+    realized_delta: Mapped[float] = mapped_column(Float, nullable=False)
+    realized_fraction: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_score: Mapped[float] = mapped_column(Float, nullable=False)
+    skill_score: Mapped[float] = mapped_column(Float, nullable=False)
+    observed_rate: Mapped[float] = mapped_column(Float, nullable=False)
+    n_window: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        CheckConstraint("skill_version >= 1", name="skill_pred_verdict_version_positive"),
+        CheckConstraint("n_window >= 0", name="skill_pred_verdict_n_window_nonneg"),
+        CheckConstraint(
+            "verdict IN ('effective', 'partially_effective', 'ineffective', 'mixed', 'harmful')",
+            name="skill_pred_verdict_verdict_check",
+        ),
+        Index("ix_skill_pred_verdict_tenant_id", "tenant_id"),
+        Index(
+            "ix_skill_pred_verdict_version",
+            "tenant_id",
+            "skill_id",
+            "skill_version",
+            "created_at",
+        ),
+    )
+
+
 class SkillPromoteRequestRow(Base):
     """One row of ``skill_promote_request`` — Stream SE (SE-8, Mini-ADR SE-A13b).
 

@@ -26,6 +26,7 @@ from helix_agent.protocol import (
     PromoteRequestStatus,
     Skill,
     SkillEvalResult,
+    SkillPredictionVerdict,
     SkillPromoteRequest,
     SkillRunUsage,
     SkillStatus,
@@ -99,6 +100,7 @@ class InMemorySkillStore(SkillStore):
         self._versions: list[SkillVersion] = []
         self._eval_results: list[SkillEvalResult] = []  # Stream SE (SE-A2)
         self._run_usage: list[SkillRunUsage] = []  # Stream SE (SE-A11, SE-7d-1)
+        self._prediction_verdicts: list[SkillPredictionVerdict] = []  # Stream SE (SE-11)
         self._promote_requests: dict[UUID, SkillPromoteRequest] = {}  # SE-8 (SE-A13b)
         self._kill_switches: list[KillSwitch] = []  # SE-8 (SE-A13c)
 
@@ -419,6 +421,25 @@ class InMemorySkillStore(SkillStore):
         ]
         rows.sort(key=lambda r: r.created_at)
         return [r.outcome for r in rows]
+
+    # ----------------------------------- prediction-falsify ledger (SE-11)
+
+    async def record_prediction_verdict(
+        self, *, verdict: SkillPredictionVerdict
+    ) -> SkillPredictionVerdict:
+        self._prediction_verdicts.append(verdict)
+        return verdict
+
+    async def list_prediction_verdicts(
+        self, *, skill_id: UUID, tenant_id: UUID | None
+    ) -> list[SkillPredictionVerdict]:
+        rows = [
+            v
+            for v in self._prediction_verdicts
+            if v.skill_id == skill_id and v.tenant_id == tenant_id
+        ]
+        rows.sort(key=lambda v: v.created_at, reverse=True)
+        return rows
 
     # ----------------------------------- promote approval flow (SE-8, SE-A13b)
 

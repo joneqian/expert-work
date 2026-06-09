@@ -31,6 +31,7 @@ from helix_agent.protocol import (
     PromoteRequestStatus,
     Skill,
     SkillEvalResult,
+    SkillPredictionVerdict,
     SkillPromoteRequest,
     SkillRunUsage,
     SkillStatus,
@@ -385,6 +386,27 @@ class SkillStore(abc.ABC):
         rollback never连坐 the next (possibly human-fixed) version.
         ``tenant_id=None`` for a platform skill (caller inside
         ``bypass_rls_session()``)."""
+
+    # ----------------------------------- prediction-falsify ledger (SE-11)
+
+    @abc.abstractmethod
+    async def record_prediction_verdict(
+        self, *, verdict: SkillPredictionVerdict
+    ) -> SkillPredictionVerdict:
+        """Append one ``skill_prediction_verdict`` row (Mini-ADR SE-A18/A19).
+
+        Diagnostic record of how much of a promoted version's replay-predicted
+        gain held in production. Written by the rollback monitor's sweep, in the
+        same pass as ``decide_rollback`` (叠加不替代 — never gates archive).
+        ``verdict.tenant_id is None`` = platform skill (caller inside
+        ``bypass_rls_session()``)."""
+
+    @abc.abstractmethod
+    async def list_prediction_verdicts(
+        self, *, skill_id: UUID, tenant_id: UUID | None
+    ) -> list[SkillPredictionVerdict]:
+        """All prediction verdicts for a skill, newest first. ``tenant_id=None``
+        for a platform skill (caller inside ``bypass_rls_session()``)."""
 
     # ----------------------------------- promote approval flow (SE-8, SE-A13b)
 

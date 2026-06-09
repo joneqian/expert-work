@@ -30,12 +30,14 @@ __all__ = [
     "EvolutionOrigin",
     "KillSwitch",
     "KillSwitchScope",
+    "PredictionVerdict",
     "PromoteRequestStatus",
     "ReplaySource",
     "Skill",
     "SkillAuthoredBy",
     "SkillEvalResult",
     "SkillPackageLayoutError",
+    "SkillPredictionVerdict",
     "SkillPromoteRequest",
     "SkillRef",
     "SkillRunUsage",
@@ -132,6 +134,10 @@ PromoteRequestStatus = Literal["pending", "approved", "rejected", "superseded"]
 # SE-8(Mini-ADR SE-A13c)紧急停 kill-switch 的作用域:``global`` = 全平台
 # 自动通道(tenant_id NULL);``tenant`` = 单租户(tenant_id 非空)。
 KillSwitchScope = Literal["global", "tenant"]
+# SE-11(Mini-ADR SE-A18/A19)预测—证伪 verdict:promote 时的重放预测(eval delta)
+# 在上线后兑现了多少。``insufficient`` 不落库(窗口不足时跳过),故持久化 Literal
+# 仅含五个终态。
+PredictionVerdict = Literal["effective", "partially_effective", "ineffective", "mixed", "harmful"]
 
 
 class SkillVersion(BaseModel):
@@ -381,6 +387,39 @@ class KillSwitch(BaseModel):
     released_by_user_id: UUID | None = None
     released_at: datetime | None = None
     updated_at: datetime
+
+
+class SkillPredictionVerdict(BaseModel):
+    """One row of ``skill_prediction_verdict`` — Stream SE (SE-11, Mini-ADR SE-A18/A19).
+
+    The predict→falsify discipline borrowed from agentic-harness-engineering's
+    Change Manifest. The replay (``skill_eval_result``) predicted a lift from
+    ``baseline_score`` (no skill) to ``skill_score`` (with skill). After
+    promotion, the rollback monitor's rolling outcome window gives
+    ``observed_rate``; this row records how much of the predicted gain held
+    (``realized_fraction``) and the resulting label.
+
+    Diagnostic only (SE-A19): the verdict NEVER decides archive — that stays
+    with the binomial ``decide_rollback``. ``tenant_id is None`` = platform
+    skill (sweep runs under owner bypass; the row is NULL-tenant like
+    ``skill_eval_result``). One row per sweep that judged the version.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tenant_id: UUID | None
+    skill_id: UUID
+    skill_version: int = Field(ge=1)
+    verdict: PredictionVerdict
+    predicted_delta: float  # skill_score - baseline_score (the replay prediction)
+    realized_delta: float  # observed_rate - baseline_score
+    realized_fraction: float
+    baseline_score: float
+    skill_score: float
+    observed_rate: float
+    n_window: int = Field(ge=0)
+    created_at: datetime
 
 
 class SkillRef(BaseModel):

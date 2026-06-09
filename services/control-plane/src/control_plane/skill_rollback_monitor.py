@@ -26,12 +26,18 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
+from control_plane.skill_prediction_verdict import (
+    PredictionVerdictAction,
+    decide_prediction_verdict,
+)
 from control_plane.skill_rollback import RollbackAction
 from control_plane.skill_rollback_gate import RollbackGate
 from helix_agent.common.observability import helix_counter
 from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
 from helix_agent.persistence.skill.base import SkillStore
+from helix_agent.protocol import SkillEvalResult, SkillPredictionVerdict
 from helix_agent.protocol.skill import SkillStatus
 
 logger = logging.getLogger(__name__)
@@ -67,6 +73,9 @@ def _bypass_rls() -> Iterator[None]:
 class RollbackMonitorConfig:
     window: timedelta = timedelta(days=7)  # rolling outcome window per version
     page_size: int = 100  # cross-tenant enumeration page
+    # SE-11 (Mini-ADR SE-A19) — record a predict→falsify verdict per judged
+    # version in the same sweep (diagnostic; never gates archive). Default on.
+    record_prediction_verdicts: bool = True
 
 
 @dataclass(frozen=True)
@@ -105,13 +114,13 @@ class RollbackMonitor:
                 if target is None:
                     skipped += 1
                     continue
-                version, agent_name, baseline = target
+                version, agent_name, eval_result = target
                 decision = await self.gate.maybe_rollback(
                     skill_id=skill.id,
                     skill_version=version,
                     tenant_id=skill.tenant_id,  # type: ignore[arg-type] — non-None (resolve_target guards)
                     agent_name=agent_name,
-                    promote_baseline=baseline,
+                    promote_baseline=eval_result.skill_score,
                     since=since,
                     now=now,
                 )
@@ -122,6 +131,15 @@ class RollbackMonitor:
                     kept += 1
                 else:
                     insufficient += 1
+
+                # SE-11 — predict→falsify verdict, computed from the SAME window
+                # the rollback judged (叠加不替代; diagnostic only). Skipped when
+                # the rollback found the window insufficient.
+                if (
+                    self.config.record_prediction_verdicts
+                    and decision.action is not RollbackAction.INSUFFICIENT
+                ):
+                    await self._record_verdict(skill, version, eval_result, decision, now)
 
         return RollbackTally(
             scanned=scanned,
@@ -142,9 +160,11 @@ class RollbackMonitor:
             if cursor is None:
                 return
 
-    async def _resolve_target(self, skill) -> tuple[int, str, float] | None:
-        """Return ``(version, agent_name, promote_baseline)`` for a rollback-
-        eligible ACTIVE distilled version, or ``None`` to skip."""
+    async def _resolve_target(self, skill) -> tuple[int, str, SkillEvalResult] | None:
+        """Return ``(version, agent_name, pass_eval)`` for a rollback-eligible
+        ACTIVE distilled version, or ``None`` to skip. The pass eval carries
+        both the promote baseline (``skill_score``) and the replay prediction
+        (``baseline_score`` → ``skill_score``) the SE-11 verdict needs."""
         if skill.tenant_id is None or skill.created_by_agent_name is None:
             return None  # platform / human skill — never an auto-promote target
         version_row = await self.skill_store.get_version_by_number(
@@ -152,17 +172,50 @@ class RollbackMonitor:
         )
         if version_row is None or version_row.evolution_origin != "distilled":
             return None
-        baseline = await self._promote_baseline(skill.id, skill.tenant_id, skill.latest_version)
-        if baseline is None:
+        pass_eval = await self._promote_eval(skill.id, skill.tenant_id, skill.latest_version)
+        if pass_eval is None:
             return None  # no pass evidence → nothing to compare against
-        return skill.latest_version, skill.created_by_agent_name, baseline
+        return skill.latest_version, skill.created_by_agent_name, pass_eval
 
-    async def _promote_baseline(self, skill_id, tenant_id, version) -> float | None:
+    async def _promote_eval(self, skill_id, tenant_id, version) -> SkillEvalResult | None:
         results = await self.skill_store.list_eval_results(skill_id=skill_id, tenant_id=tenant_id)
         for r in results:  # newest first
             if r.verdict == "pass" and r.skill_version == version:
-                return r.skill_score
+                return r
         return None
+
+    async def _record_verdict(self, skill, version, eval_result, decision, now) -> None:
+        """SE-11 — judge how much of the replay-predicted gain held in
+        production, and persist a diagnostic verdict. Best-effort: never let a
+        verdict write break the rollback sweep."""
+        result = decide_prediction_verdict(
+            baseline_score=eval_result.baseline_score,
+            skill_score=eval_result.skill_score,
+            observed_rate=decision.observed_rate,
+            n_window=decision.n_cases,
+        )
+        if result.action is PredictionVerdictAction.INSUFFICIENT:
+            return
+        try:
+            await self.skill_store.record_prediction_verdict(
+                verdict=SkillPredictionVerdict(
+                    id=uuid4(),
+                    tenant_id=skill.tenant_id,
+                    skill_id=skill.id,
+                    skill_version=version,
+                    verdict=result.action.value,  # type: ignore[arg-type]
+                    predicted_delta=result.predicted_delta,
+                    realized_delta=result.realized_delta,
+                    realized_fraction=result.realized_fraction,
+                    baseline_score=eval_result.baseline_score,
+                    skill_score=eval_result.skill_score,
+                    observed_rate=decision.observed_rate,
+                    n_window=decision.n_cases,
+                    created_at=now,
+                )
+            )
+        except Exception:
+            logger.exception("skill_rollback_monitor.verdict_write_failed")
 
     # -------------------------------------------------- periodic loop (real path)
 

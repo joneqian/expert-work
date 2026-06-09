@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from helix_agent.persistence.models import (
     SkillEvalResultRow,
     SkillEvolutionKillSwitchRow,
+    SkillPredictionVerdictRow,
     SkillPromoteRequestRow,
     SkillRow,
     SkillRunUsageRow,
@@ -33,6 +34,7 @@ from helix_agent.protocol import (
     PromoteRequestStatus,
     Skill,
     SkillEvalResult,
+    SkillPredictionVerdict,
     SkillPromoteRequest,
     SkillRunUsage,
     SkillStatus,
@@ -129,6 +131,24 @@ def _run_usage_row_to_dto(row: SkillRunUsageRow) -> SkillRunUsage:
         thread_id=row.thread_id,
         agent_name=row.agent_name,
         outcome=row.outcome,  # type: ignore[arg-type]
+        created_at=row.created_at,
+    )
+
+
+def _prediction_verdict_row_to_dto(row: SkillPredictionVerdictRow) -> SkillPredictionVerdict:
+    return SkillPredictionVerdict(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        skill_id=row.skill_id,
+        skill_version=row.skill_version,
+        verdict=row.verdict,  # type: ignore[arg-type]
+        predicted_delta=row.predicted_delta,
+        realized_delta=row.realized_delta,
+        realized_fraction=row.realized_fraction,
+        baseline_score=row.baseline_score,
+        skill_score=row.skill_score,
+        observed_rate=row.observed_rate,
+        n_window=row.n_window,
         created_at=row.created_at,
     )
 
@@ -568,6 +588,49 @@ class SqlSkillStore(SkillStore):
             )
             rows = (await session.execute(stmt)).scalars().all()
         return [_run_usage_row_to_dto(r).outcome for r in rows]
+
+    # ----------------------------------- prediction-falsify ledger (SE-11)
+
+    async def record_prediction_verdict(
+        self, *, verdict: SkillPredictionVerdict
+    ) -> SkillPredictionVerdict:
+        async with self._sf() as session:
+            row = SkillPredictionVerdictRow(
+                id=verdict.id,
+                tenant_id=verdict.tenant_id,
+                skill_id=verdict.skill_id,
+                skill_version=verdict.skill_version,
+                verdict=verdict.verdict,
+                predicted_delta=verdict.predicted_delta,
+                realized_delta=verdict.realized_delta,
+                realized_fraction=verdict.realized_fraction,
+                baseline_score=verdict.baseline_score,
+                skill_score=verdict.skill_score,
+                observed_rate=verdict.observed_rate,
+                n_window=verdict.n_window,
+                created_at=verdict.created_at,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            return _prediction_verdict_row_to_dto(row)
+
+    async def list_prediction_verdicts(
+        self, *, skill_id: UUID, tenant_id: UUID | None
+    ) -> list[SkillPredictionVerdict]:
+        async with self._sf() as session:
+            stmt = (
+                select(SkillPredictionVerdictRow)
+                .where(SkillPredictionVerdictRow.skill_id == skill_id)
+                .order_by(SkillPredictionVerdictRow.created_at.desc())
+            )
+            stmt = (
+                stmt.where(SkillPredictionVerdictRow.tenant_id == tenant_id)
+                if tenant_id is not None
+                else stmt.where(SkillPredictionVerdictRow.tenant_id.is_(None))
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_prediction_verdict_row_to_dto(r) for r in rows]
 
     # ----------------------------------- promote approval flow (SE-8, SE-A13b)
 
