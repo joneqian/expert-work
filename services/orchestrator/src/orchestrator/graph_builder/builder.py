@@ -55,7 +55,7 @@ import asyncio
 import itertools
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -73,6 +73,7 @@ from helix_agent.runtime.middleware import (
 )
 from orchestrator.context import (
     ContextCompressor,
+    PreCompactionHook,
     ProjectionResult,
     WorkingWindow,
     WorkspaceFileWriter,
@@ -85,7 +86,7 @@ from orchestrator.graph_builder._approval import (
     find_approval_target,
 )
 from orchestrator.graph_builder._config import audit_logger_from_config, cancellation_token
-from orchestrator.graph_builder.memory import MemoryNode
+from orchestrator.graph_builder.memory import MemoryNode, PreCompactionFlush
 from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
 from orchestrator.llm import LLMCaller
@@ -188,6 +189,19 @@ _cm_working_window_dropped_turns = helix_gauge(
     "helix_cm_working_window_dropped_turns",
     "User turns dropped by the most recent working-memory window trim (Stream CM-2).",
 )
+#: Stream CM-3 — pre-compaction flush passes by outcome. ``flushed`` =
+#: memories written from the discarded middle; ``empty`` = nothing
+#: extracted (or a swallowed best-effort failure — see memory.flush logs).
+_cm_precompaction_flush_total = helix_counter(
+    "helix_cm_precompaction_flush_total",
+    "Pre-compaction memory flushes before a compressor pass (Stream CM-3).",
+    ("outcome",),
+)
+#: Stream CM-3 — memories written by the most recent pre-compaction flush.
+_cm_precompaction_flush_memories = helix_gauge(
+    "helix_cm_precompaction_flush_memories",
+    "Memories written by the most recent pre-compaction flush (Stream CM-3).",
+)
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
 #: dumping multi-MB tracebacks into messages. Per-tool truncation
@@ -218,6 +232,11 @@ def build_react_graph(
     # gate run before the compressor at the agent_node entry. ``None`` →
     # no pre-compressor trimming (the default; unchanged from pre-CM-2).
     working_window: WorkingWindow | None = None,
+    # Stream CM-3 — pre-compaction flush: when set, agent_node hands the
+    # compressor a callback that flushes the about-to-be-discarded middle
+    # to long-term memory before each pass summarises it away. ``None`` →
+    # no flush (the default; unchanged from pre-CM-3).
+    pre_compaction_flush: PreCompactionFlush | None = None,
     # Stream CM-0 — builds a per-turn ``WorkspaceFileWriter`` bound to the
     # run's ToolContext (the real one rides the warm sandbox). ``None`` →
     # no state projection (the default; the unit-test / no-sandbox path).
@@ -348,7 +367,25 @@ def build_react_graph(
         # as a run failure (no silent fallback) so the orchestrator
         # can write a clean RUN_FAILED audit row.
         if context_compressor is not None and context_compressor.should_compress(messages):
-            messages = await context_compressor.compress(messages)
+            # Stream CM-3 — bind a config-scoped flush so the compressor can
+            # hand the middle to long-term memory before discarding it. The
+            # callback is best-effort (the flusher swallows its own non-cancel
+            # failures); cancellation still propagates out and aborts the run.
+            on_pre_compaction: PreCompactionHook | None = None
+            if pre_compaction_flush is not None:
+                flush_cb = pre_compaction_flush
+
+                async def _on_pre_compaction(middle: Sequence[BaseMessage]) -> None:
+                    written = await flush_cb(middle, config, token)
+                    _cm_precompaction_flush_total.labels(
+                        outcome="flushed" if written else "empty"
+                    ).inc()
+                    _cm_precompaction_flush_memories.set(written)
+
+                on_pre_compaction = _on_pre_compaction
+            messages = await context_compressor.compress(
+                messages, on_pre_compaction=on_pre_compaction
+            )
         configurable = config.get("configurable") or {}
         tenant_id = _parse_uuid(configurable.get("tenant_id"))
 

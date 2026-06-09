@@ -569,8 +569,8 @@ graph_builder/builder.py  agent_node：调 compress 时若 pre_compaction_flush 
 
 ### 5.9 PR 切分（CM-3）
 
-1. **CM-3 PR1 — 共享抽取核心 + compressor 回调（CI 全测）**：`graph_builder/memory.py` 抽 `flush_messages_to_memory`（行为保持地从 `memory_writeback_node` 提取，节点变薄）；`context/compressor.py` `compress`/`_compress_once` 增 `on_pre_compaction` 回调（丢弃中段前 await）+ unit（抽取核心各路径 / writeback 重构不回归 / compressor 回调时序+入参+失败不阻断+None 等价）。**不接 factory、不动 policy**（pure-core 先行，对齐 CM-1/CM-2 PR1）。
-2. **CM-3 PR2 — 接线（端到端）**：`ContextCompressionPolicy.flush_before_compaction`；factory `_build_memory_nodes` memory 启用时构造 `pre_compaction_flush` 回调传 `build_react_graph`；agent_node 调 compress 时绑定 config+token；`helix_cm_precompaction_flush_total{outcome}` + `helix_cm_precompaction_flush_memories`；集成测（compaction 触发 flush 到 fake store + memory 未启用零 flush + 开关关闭）+ 文档标 done + ITERATION-PLAN 回填。
+1. **CM-3 PR1 — 共享抽取核心 + compressor 回调（CI 全测）**（已实现）：`graph_builder/memory.py` 抽 `flush_messages_to_memory`（行为保持地从 `memory_writeback_node` 提取，节点变薄；`log_label` 区分两路来源、writeback 日志串字节不变）；`context/compressor.py` `compress`/`_compress_once` 增 `on_pre_compaction` 回调（丢弃中段前且摘要前 await）+ 导出 `PreCompactionHook` + 7 unit（抽取核心各路径 / writeback 重构不回归 / compressor 回调时序+入参+None 等价）。**不接 factory、不动 policy**（pure-core 先行，对齐 CM-1/CM-2 PR1）。
+2. **CM-3 PR2 — 接线（端到端）**（已实现）：`ContextCompressionPolicy.flush_before_compaction`（默认 True）；`memory.py` `make_pre_compaction_flush`（config-bound 回调，no-user no-op）；factory `_build_memory_nodes` 返 3 元、write_back ∧ flush_before_compaction 时构造回调传 `build_react_graph`；agent_node 调 compress 时绑定 config+token 的 `on_pre_compaction`（`outcome=flushed/empty` 计数 + memories gauge）；`helix_cm_precompaction_flush_total{outcome}` + `helix_cm_precompaction_flush_memories`；2 集成测（compaction 触发 flush 到 fake store + memory 未启用零 flush）+ 3 protocol policy 测（默认/关闭/extra-forbid）。1000 orchestrator + 78 protocol 回归绿。**→ CM-3 完成**。
 
 > 每个 PR 在本 §5 基础上局部细化；ITERATION-PLAN 增 CM-3 backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
 

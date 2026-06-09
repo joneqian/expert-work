@@ -635,3 +635,29 @@ def test_working_memory_forbids_extra() -> None:
     doc["spec"]["policies"] = {"working_memory": {"bogus": 1}}
     with pytest.raises(ValidationError):
         AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
+# policies.context_compression.flush_before_compaction — CM-3
+# ---------------------------------------------------------------------------
+
+
+def test_flush_before_compaction_defaults_true() -> None:
+    """CM-3 — memory-enabled agents flush the discarded middle to long-term
+    memory by default; the knob lives on the compression policy."""
+    spec = AgentSpec.model_validate(_doc())
+    assert spec.spec.policies.context_compression.flush_before_compaction is True
+
+
+def test_flush_before_compaction_can_disable() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {"context_compression": {"flush_before_compaction": False}}
+    cc = AgentSpec.model_validate(doc).spec.policies.context_compression
+    assert cc.flush_before_compaction is False
+
+
+def test_context_compression_still_forbids_extra() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {"context_compression": {"bogus": 1}}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)

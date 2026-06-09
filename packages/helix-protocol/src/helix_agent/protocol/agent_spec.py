@@ -436,6 +436,12 @@ class ContextCompressionPolicy(BaseModel):
     threshold_pct: float = Field(default=0.7, gt=0.0, le=1.0)
     head_keep: int = Field(default=4, ge=0)
     tail_keep: int = Field(default=6, ge=0)
+    #: Stream CM-3 — flush the about-to-be-discarded middle to long-term
+    #: memory before each compaction pass summarises it away. Only active
+    #: when long-term memory write-back is enabled (the flush reuses the
+    #: write-back extraction path); a no-op otherwise. Default ``True`` so
+    #: memory-enabled agents keep key decisions across multiple compactions.
+    flush_before_compaction: bool = True
     max_passes: int = Field(default=3, ge=1)
     #: Coarse trim caps that pre-date L2's summarising compressor —
     #: the existing :class:`DynamicContextMiddleware` (Stream E.3)

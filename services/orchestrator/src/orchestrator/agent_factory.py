@@ -72,10 +72,12 @@ from orchestrator.errors import (
 )
 from orchestrator.graph_builder import (
     MemoryNode,
+    PreCompactionFlush,
     build_react_graph,
     make_memory_recall_node,
     make_memory_writeback_node,
     make_planner_node,
+    make_pre_compaction_flush,
     make_reflect_node,
     make_workspace_ingest_node,
 )
@@ -468,7 +470,7 @@ async def build_agent(
     )
     # Stream J.3 — long-term memory recall / write-back nodes when the
     # manifest declares ``memory.long_term``.
-    memory_recall_node, memory_writeback_node = _build_memory_nodes(
+    memory_recall_node, memory_writeback_node, pre_compaction_flush = _build_memory_nodes(
         spec, memory_env=memory_env, llm_caller=routers.default
     )
     # Stream L.L2 — context compressor preflight + summariser. The
@@ -608,6 +610,7 @@ async def build_agent(
         before_tool_dispatch_chain=chains.before_tool_dispatch,
         context_compressor=context_compressor,
         working_window=working_window,
+        pre_compaction_flush=pre_compaction_flush,
         workspace_writer_factory=workspace_writer_factory,
         workspace_ingest_node=workspace_ingest_node,
         # Stream J.8 (Mini-ADR J-24) — declarative approval gate.
@@ -1153,17 +1156,20 @@ def _build_memory_nodes(
     *,
     memory_env: MemoryEnv | None,
     llm_caller: LLMCaller,
-) -> tuple[MemoryNode | None, MemoryNode | None]:
-    """Build the ``(memory_recall, memory_writeback)`` nodes — Stream J.3.
+) -> tuple[MemoryNode | None, MemoryNode | None, PreCompactionFlush | None]:
+    """Build ``(memory_recall, memory_writeback, pre_compaction_flush)`` — Stream J.3 / CM-3.
 
-    ``(None, None)`` unless the manifest declares ``memory.long_term``.
+    ``(None, None, None)`` unless the manifest declares ``memory.long_term``.
     A declared block with no :class:`MemoryEnv` store / embedder raises
-    :class:`AgentFactoryError`.
+    :class:`AgentFactoryError`. The CM-3 ``pre_compaction_flush`` is built
+    only when write-back is enabled (it reuses the write-back extraction
+    path) and ``policies.context_compression.flush_before_compaction`` is
+    set; ``None`` keeps the pre-CM-3 behaviour (no flush before compaction).
     """
     memory = spec.spec.memory
     long_term = memory.long_term if memory is not None else None
     if long_term is None:
-        return None, None
+        return None, None, None
     env = memory_env or MemoryEnv()
     if env.store is None or env.embedder is None:
         raise AgentFactoryError(
@@ -1186,7 +1192,17 @@ def _build_memory_nodes(
         if long_term.write_back
         else None
     )
-    return recall, writeback
+    pre_compaction_flush = (
+        make_pre_compaction_flush(
+            memory_store=env.store,
+            embedder=env.embedder,
+            llm_caller=llm_caller,
+            dlq=env.dlq,
+        )
+        if long_term.write_back and spec.spec.policies.context_compression.flush_before_compaction
+        else None
+    )
+    return recall, writeback, pre_compaction_flush
 
 
 def _flatten_chain(model: ModelSpec) -> list[ModelSpec]:

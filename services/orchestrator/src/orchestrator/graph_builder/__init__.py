@@ -3,10 +3,16 @@
 from orchestrator.graph_builder.builder import build_react_graph as build_react_graph
 from orchestrator.graph_builder.memory import MemoryNode as MemoryNode
 from orchestrator.graph_builder.memory import (
+    PreCompactionFlush as PreCompactionFlush,
+)
+from orchestrator.graph_builder.memory import (
     make_memory_recall_node as make_memory_recall_node,
 )
 from orchestrator.graph_builder.memory import (
     make_memory_writeback_node as make_memory_writeback_node,
+)
+from orchestrator.graph_builder.memory import (
+    make_pre_compaction_flush as make_pre_compaction_flush,
 )
 from orchestrator.graph_builder.planner import PlannerNode as PlannerNode
 from orchestrator.graph_builder.planner import make_planner_node as make_planner_node
@@ -21,11 +27,13 @@ from orchestrator.graph_builder.workspace_ingest import (
 __all__ = [
     "MemoryNode",
     "PlannerNode",
+    "PreCompactionFlush",
     "ReflectNode",
     "build_react_graph",
     "make_memory_recall_node",
     "make_memory_writeback_node",
     "make_planner_node",
+    "make_pre_compaction_flush",
     "make_reflect_node",
     "make_workspace_ingest_node",
     "parse_plan",

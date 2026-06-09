@@ -325,6 +325,58 @@ async def flush_messages_to_memory(
     return len(items)
 
 
+#: Stream CM-3 — a config-bound pre-compaction flush callback. Awaited by
+#: ``agent_node`` with the middle slice the compressor is about to discard,
+#: the run's ``config`` (for tenant/user/thread scope) and its
+#: ``CancellationToken``; returns the number of memories written.
+PreCompactionFlush = Callable[
+    [Sequence[BaseMessage], RunnableConfig, CancellationToken], Awaitable[int]
+]
+
+
+def make_pre_compaction_flush(
+    *,
+    memory_store: MemoryStore,
+    embedder: Embedder,
+    llm_caller: LLMCaller,
+    dlq: MemoryWritebackDLQ | None = None,
+) -> PreCompactionFlush:
+    """Build the Stream CM-3 pre-compaction flush callback.
+
+    Resolves the run's per-user scope from ``config`` (no-op returning 0
+    when absent — long-term memory is per-user) and hands the about-to-be-
+    discarded middle slice to :func:`flush_messages_to_memory`, tagged as a
+    ``memory.precompaction_flush`` so logs distinguish it from the run-end
+    write-back. Shares the same store / embedder / DLQ as the write-back
+    node, so flushed memories are indistinguishable downstream.
+    """
+
+    async def flush(
+        messages: Sequence[BaseMessage],
+        config: RunnableConfig,
+        token: CancellationToken,
+    ) -> int:
+        tenant_id = configurable_uuid(config, "tenant_id")
+        user_id = configurable_uuid(config, "user_id")
+        if tenant_id is None or user_id is None:
+            return 0
+        thread_id = configurable_uuid(config, "thread_id")
+        return await flush_messages_to_memory(
+            messages,
+            memory_store=memory_store,
+            embedder=embedder,
+            llm_caller=llm_caller,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            thread_id=thread_id,
+            token=token,
+            dlq=dlq,
+            log_label="memory.precompaction_flush",
+        )
+
+    return flush
+
+
 def make_memory_writeback_node(
     *,
     memory_store: MemoryStore,
