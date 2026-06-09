@@ -136,6 +136,14 @@ class AgentState(TypedDict):
     the run and never mutates the cached registry. Absent (treated as ``[]``)
     until ``find_tools`` first promotes — zero behaviour change when no
     tool is deferred.
+
+    ``last_projection_hash`` (Stream CM-0 / Mini-ADR CM-A3) is the content
+    digest of the most recent ``DB → /workspace`` projection (PLAN.md /
+    TODO.md / MEMORY.md). ``tools_node`` passes it to the
+    :class:`~orchestrator.context.WorkspaceProjector` as the only-if-changed
+    baseline and writes the new digest back, so an unchanged turn skips the
+    sandbox round-trip. Absent until the first projection; ``None`` means
+    nothing has been projected yet.
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -151,3 +159,4 @@ class AgentState(TypedDict):
     approval_resume: NotRequired[dict[str, Any] | None]
     approval_outcome: NotRequired[str | None]
     promoted_tools: NotRequired[Annotated[list[str], _merge_promoted]]
+    last_projection_hash: NotRequired[str | None]

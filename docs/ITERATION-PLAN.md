@@ -1394,10 +1394,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 > 关键架构约束（已源码核准）：orchestrator/supervisor **无 docker 卷写权**，投影 DB→file 必须经 warm sandbox `file_ops`；ingest 经 `read_volume_file` 只读读 + orchestrator DB 事务写（与 artifact"内容在卷/元数据在 DB"范式一致）。
 
-- [x] **CM-0 设计先行**（本次，PR #TBD）：STREAM-CM-DESIGN 全文——总体范围表（CM-0…CM-9/CM-N 映射框架报告 A/B/C/N）+ CM-0（文件投影 + 单向错时双流 + N1 recitation）详设（接缝核准 file:line / 同步模型 / 投影什么 / 挂钩点 / 数据协议变更 / 冲突校验 / 边界 / 可观测 / 测试 / 8 条 Mini-ADR CM-A1~A8 / 3 PR 切分）
-- **CM-0 实现**（地基，先行）：拆 3 PR
-  - **CM-0 PR1 投影骨架**：`orchestrator/context/workspace_projection.py`（render + WorkspaceProjector）+ `PlanStep.status`（CM-A5）+ `tools_node` 投影钩子（only-if-changed）+ MEMORY.md run 末投影 + `AuditAction.STATE_PROJECTED`（双处 Literal）+ metrics + unit
-  - **CM-0 PR2 受控 ingest**：WorkspaceIngester（`read_volume_file` 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `AgentState.last_projection_hash` + `STATE_INGESTED` + 漂移裁决（DB 权威）+ integration（真沙盒往返 + 人改回灌）
+- [x] **CM-0 设计先行**（PR #489）：STREAM-CM-DESIGN 全文——总体范围表（CM-0…CM-9/CM-N 映射框架报告 A/B/C/N）+ CM-0（文件投影 + 单向错时双流 + N1 recitation）详设（接缝核准 file:line / 同步模型 / 投影什么 / 挂钩点 / 数据协议变更 / 冲突校验 / 边界 / 可观测 / 测试 / 8 条 Mini-ADR CM-A1~A8 / PR 切分）
+- **CM-0 实现**（地基，先行）：
+  - [x] **CM-0 PR1 投影纯核心**（PR #490）：`orchestrator/context/workspace_projection.py`（render 纯函数 + `WorkspaceProjector` + `WorkspaceFileWriter` seam + only-if-changed）+ `PlanStep.status`（CM-A5）+ 结构化日志可观测 + 11 unit。**不接图**（pure-core 先行）。CodeQL `py/ineffectual-statement`（Protocol 体 `...`）改 docstring 押 review-thread
+  - [x] **CM-0 PR2a 投影接线**（本次）：真 `SandboxWorkspaceWriter`（`tools/file_ops.py`，包 `build_write_wrapper`/`run_in_sandbox`）+ `build_react_graph` 可选 `workspace_writer_factory`（per-turn 绑 ctx）+ `tools_node` best-effort 投影钩子（`_project_workspace_state`）+ `AgentState.last_projection_hash` 游标 + `AuditAction.STATE_PROJECTED` 发射（resource_type=`user_workspace`；单源 StrEnum 无镜像）+ `helix_cm_projection_total{outcome}` + agent_factory gate（persistent_workspace∧supervisor_client）。MEMORY.md 由 tools_node 钩子覆盖（only-if-changed 只写一次）。5 unit（SandboxWorkspaceWriter 真 snippet 往返 + graph wiring）+ test_state 键集 +1；932 orchestrator + 307 protocol 回归绿
+  - **CM-0 PR2b 受控 ingest**：WorkspaceIngester（`read_volume_file` 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `STATE_INGESTED` + 漂移裁决（DB 权威）+ integration（真沙盒往返 + 人改回灌）
   - **CM-0 PR3 N1 recitation**：`agent_node` 尾部 plan/todo 摘要注入 + 去重（vs `_inject_plan`）+ token gauge + unit
 - **CM-1（A1）运行时 error-as-guidance** P0：通用工具失败→grounded 恢复 advisory 注入主循环（泛化 L-4 `<mutation-advisory>`；注入须源自真实工具/执行信号）
 - **CM-2（A2）working memory 滑窗** P0：`agent_node` compressor 前廉价轮次截断（保 ToolCall↔ToolResult 配对）

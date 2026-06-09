@@ -196,8 +196,9 @@ run 结束（memory_writeback 后）
 ### 2.12 PR 切分（CM-0）
 
 1. **CM-0 PR1 — 投影纯核心（CI 全测）**：`context/workspace_projection.py`（render 纯函数 + `WorkspaceProjector` + `WorkspaceFileWriter` Protocol seam + only-if-changed，projector 收 `last_digest` 参数）+ `PlanStep.status`（CM-A5）+ 结构化日志可观测（与 compressor 同款，非 in-module Prometheus）+ unit。**不接图、不引未发射枚举、不加未读写的状态字段**（pure-core-先行，对齐 SE-4a/SE-5a）。
-2. **CM-0 PR2 — 接线 + 受控 ingest（integration）**：真 `SandboxWorkspaceWriter`（包 `WriteFileTool`/`run_in_sandbox`）+ `tools_node` 投影钩子（best-effort）+ `AgentState.last_projection_hash`（投影游标，此处才有读写方）+ MEMORY.md run 末投影 + `AuditAction.STATE_PROJECTED` 发射；WorkspaceIngester（`read_volume_file` 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `STATE_INGESTED` + 漂移裁决 + integration（真沙盒往返 + 人改回灌）。
-3. **CM-0 PR3 — N1 recitation**：`agent_node` 尾部摘要注入 + 去重 + token gauge + unit。
+2. **CM-0 PR2a — 投影接线**（已实现）：真 `SandboxWorkspaceWriter`（在 `tools/file_ops.py`，包 `build_write_wrapper`/`run_in_sandbox`，结构化满足 `WorkspaceFileWriter`）+ `build_react_graph` 新增可选 `workspace_writer_factory`（per-turn 绑 ctx）+ `tools_node` return 前 best-effort 投影钩子（`_project_workspace_state`）+ `AgentState.last_projection_hash`（投影游标）+ `AuditAction.STATE_PROJECTED` 发射（`_emit_state_projected_audit`，resource_type=`user_workspace`）+ `helix_cm_projection_total{outcome}` + agent_factory gate（persistent_workspace ∧ supervisor_client）。**MEMORY.md 无需单独 run 末投影**——`recalled_memories` 在 state、tools_node 每 turn 投影、only-if-changed 保证只写一次。单测：SandboxWorkspaceWriter（RecordingSupervisorClient 真 snippet 往返）+ graph wiring（fake writer 驱动 build_react_graph）。
+3. **CM-0 PR2b — 受控 ingest**：WorkspaceIngester（`read_volume_file` 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `AuditAction.STATE_INGESTED` + 漂移裁决（DB 权威）+ integration（真沙盒往返 + 人改回灌）。
+4. **CM-0 PR3 — N1 recitation**：`agent_node` 尾部摘要注入 + 去重 + token gauge + unit。
 
 > 每个 PR 在本 §2 基础上局部细化；ITERATION-PLAN 增 Stream CM backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
 

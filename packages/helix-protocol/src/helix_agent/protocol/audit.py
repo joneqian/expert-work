@@ -103,6 +103,10 @@ class AuditAction(StrEnum):
     WORKSPACE_ARCHIVE = "workspace:archive"
     # workspace (Stream J.15-补强-2 — Mini-ADR J-29 第 2 项 backup pipeline)
     WORKSPACE_BACKUP = "workspace:backup"
+    # workspace state projection (Stream CM-0 — Mini-ADR CM-A6); DB→file
+    # projection of agent state (PLAN.md / TODO.md / MEMORY.md). resource_type
+    # reuses ``user_workspace``.
+    STATE_PROJECTED = "state:projected"
     # image upload (Stream J.6.补强-2 — Mini-ADR J-31)
     IMAGE_UPLOAD = "image:upload"
     # skill (Stream J.7a — Mini-ADR J-23)

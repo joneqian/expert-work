@@ -8,8 +8,11 @@ and the digest does not advance so the next turn retries).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from uuid import uuid4
+
+import pytest
 
 from helix_agent.protocol import MemoryItem, Plan, PlanStep
 from orchestrator.context import (
@@ -18,6 +21,9 @@ from orchestrator.context import (
     render_plan_md,
     render_todo_md,
 )
+from orchestrator.tools.file_ops import FileOpError, SandboxWorkspaceWriter
+from orchestrator.tools.registry import ToolContext
+from orchestrator.tools.sandbox import RecordingSupervisorClient, SandboxOutcome
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -178,3 +184,47 @@ async def test_project_best_effort_swallows_writer_failure() -> None:
     assert "TODO.md" not in result.written
     # Digest does NOT advance past a partial failure → next turn retries.
     assert result.digest is None
+
+
+# ---------------------------------------------------------------------------
+# SandboxWorkspaceWriter (real writer over the warm-sandbox snippet)
+# ---------------------------------------------------------------------------
+
+
+def _ctx() -> ToolContext:
+    return ToolContext(tenant_id=uuid4(), run_id=uuid4(), user_id=uuid4())
+
+
+def _ok_envelope(path: str) -> SandboxOutcome:
+    return SandboxOutcome(
+        stdout=json.dumps({"ok": True, "content_hash": "h", "size": 3, "path": path}),
+        stderr="",
+        exit_code=0,
+        timed_out=False,
+    )
+
+
+async def test_sandbox_writer_writes_through_warm_sandbox() -> None:
+    client = RecordingSupervisorClient(outcome=_ok_envelope("PLAN.md"))
+    writer = SandboxWorkspaceWriter(client=client, ctx=_ctx(), persistent_workspace=True)
+    await writer.write(rel="PLAN.md", content="abc")
+    assert len(client.execs) == 1
+    code = client.execs[0][1]
+    assert "PLAN.md" in code  # path carried into the write snippet
+    assert "abc" in code  # content carried via the json params
+    assert client.released  # sandbox released after the write
+
+
+async def test_sandbox_writer_raises_on_sandbox_failure() -> None:
+    client = RecordingSupervisorClient(
+        outcome=SandboxOutcome(
+            stdout=json.dumps({"ok": False, "error": "io_error", "detail": "disk full"}),
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+        )
+    )
+    writer = SandboxWorkspaceWriter(client=client, ctx=_ctx(), persistent_workspace=True)
+    # The projector swallows this best-effort; the writer itself raises.
+    with pytest.raises(FileOpError):
+        await writer.write(rel="PLAN.md", content="abc")

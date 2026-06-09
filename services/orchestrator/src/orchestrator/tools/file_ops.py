@@ -755,6 +755,40 @@ class EditFileTool:
         )
 
 
+@dataclass(frozen=True)
+class SandboxWorkspaceWriter:
+    """Stream CM-0 — the real ``WorkspaceFileWriter`` for state projection.
+
+    Writes a projected file (``PLAN.md`` / ``TODO.md`` / ``MEMORY.md``) into
+    the agent's ``/workspace`` through the warm-sandbox ``write_file`` snippet
+    — the only channel with workspace-volume write access (Mini-ADR CM-A1).
+    Bound to one run's :class:`ToolContext`; the graph rebuilds it per turn.
+    Structurally satisfies ``orchestrator.context.WorkspaceFileWriter``.
+    """
+
+    client: SupervisorClient
+    ctx: ToolContext
+    persistent_workspace: bool
+    image_variant: str | None = None
+
+    async def write(self, *, rel: str, content: str) -> None:
+        """Atomically write ``content`` to workspace-relative ``rel``. Raises
+        :class:`FileOpError` / :class:`ToolBlockedError` on failure — the
+        projector swallows those best-effort (Mini-ADR CM-A8)."""
+        outcome = await run_in_sandbox(
+            self.client,
+            code=build_write_wrapper(rel, content),
+            timeout_s=None,
+            ctx=self.ctx,
+            persistent_workspace=self.persistent_workspace,
+            tool_label="workspace_projection",
+            fallback_thread_id="workspace_projection",
+            image_variant=self.image_variant,
+        )
+        env = parse_envelope(outcome, tool="workspace_projection")
+        _raise_for_error(env, tool="workspace_projection")
+
+
 def _format_entries(rel: str, entries: list[Mapping[str, Any]], *, truncated: bool) -> str:
     """Human-readable directory listing for the LLM."""
     if not entries:

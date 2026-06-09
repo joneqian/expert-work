@@ -61,7 +61,7 @@ from helix_agent.protocol import (
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
-from orchestrator.context import ContextCompressor
+from orchestrator.context import ContextCompressor, WorkspaceFileWriter
 from orchestrator.errors import (
     AgentFactoryError,
     SkillConflictError,
@@ -101,6 +101,9 @@ from orchestrator.middleware_assembly import MiddlewareEnv, build_middleware_cha
 from orchestrator.multimodal import ImageResolver
 from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
+from orchestrator.tools.file_ops import SandboxWorkspaceWriter
+from orchestrator.tools.registry import ToolContext
+from orchestrator.tools.sandbox import SupervisorClient
 from orchestrator.tools.skill_authoring import (
     SKILL_AUTHORING_BUILTINS,
     build_skill_authoring_tools,
@@ -108,6 +111,24 @@ from orchestrator.tools.skill_authoring import (
 from orchestrator.tools.update_plan import UpdatePlanTool
 
 logger = logging.getLogger("helix.orchestrator.agent_factory")
+
+
+def _make_workspace_writer_factory(
+    client: SupervisorClient, image_variant: str | None
+) -> Callable[[ToolContext], WorkspaceFileWriter]:
+    """Stream CM-0 — a per-turn :class:`WorkspaceFileWriter` factory bound to
+    a run's ToolContext. The graph rebuilds the writer each turn (ctx is
+    per-invocation); the supervisor client + image variant are run-stable."""
+
+    def factory(ctx: ToolContext) -> WorkspaceFileWriter:
+        return SandboxWorkspaceWriter(
+            client=client,
+            ctx=ctx,
+            persistent_workspace=True,
+            image_variant=image_variant,
+        )
+
+    return factory
 
 
 @dataclass(frozen=True)
@@ -543,6 +564,16 @@ async def build_agent(
     long_term = spec.spec.memory.long_term if spec.spec.memory is not None else None
     memory_recall_mode = long_term.recall_mode if long_term is not None else "per_session"
 
+    # Stream CM-0 — turn-end DB→/workspace state projection. Scoped to the
+    # per-user persistent-workspace form (the projection target) with a wired
+    # supervisor client. A plain react agent with no plan / memory projects
+    # nothing (the projector no-ops), so this is effectively active only for
+    # plan_execute / long-term-memory agents.
+    workspace_writer_factory: Callable[[ToolContext], WorkspaceFileWriter] | None = None
+    if spec.spec.sandbox.filesystem.persistent_workspace and env.supervisor_client is not None:
+        workspace_writer_factory = _make_workspace_writer_factory(
+            env.supervisor_client, spec.spec.sandbox.image_variant
+        )
     graph = build_react_graph(
         llm_caller=routers.default,
         tool_registry=registry,
@@ -554,6 +585,7 @@ async def build_agent(
         after_llm_chain=chains.after_llm_call,
         before_tool_dispatch_chain=chains.before_tool_dispatch,
         context_compressor=context_compressor,
+        workspace_writer_factory=workspace_writer_factory,
         # Stream J.8 (Mini-ADR J-24) — declarative approval gate.
         approval_required_tools=frozenset(spec.spec.policies.approval_required_tools),
         approval_timeout_s=spec.spec.policies.approval_timeout_s,

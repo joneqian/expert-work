@@ -55,7 +55,7 @@ import asyncio
 import itertools
 import logging
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -71,7 +71,12 @@ from helix_agent.runtime.middleware import (
     MiddlewareChain,
     MiddlewareContext,
 )
-from orchestrator.context import ContextCompressor
+from orchestrator.context import (
+    ContextCompressor,
+    ProjectionResult,
+    WorkspaceFileWriter,
+    WorkspaceProjector,
+)
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.graph_builder._approval import (
     apply_resume_decision,
@@ -136,6 +141,13 @@ _tool_latency_seconds = helix_histogram(
     ("tool",),
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
 )
+#: Stream CM-0 — DB→/workspace projections per turn, by outcome
+#: (projected = files written / skipped = unchanged / error = best-effort fail).
+_cm_projection_total = helix_counter(
+    "helix_cm_projection_total",
+    "Workspace state projections at the turn boundary (Stream CM-0).",
+    ("outcome",),
+)
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
 #: dumping multi-MB tracebacks into messages. Per-tool truncation
@@ -160,6 +172,10 @@ def build_react_graph(
     after_llm_chain: MiddlewareChain | None = None,
     before_tool_dispatch_chain: MiddlewareChain | None = None,
     context_compressor: ContextCompressor | None = None,
+    # Stream CM-0 — builds a per-turn ``WorkspaceFileWriter`` bound to the
+    # run's ToolContext (the real one rides the warm sandbox). ``None`` →
+    # no state projection (the default; the unit-test / no-sandbox path).
+    workspace_writer_factory: Callable[[ToolContext], WorkspaceFileWriter] | None = None,
     approval_required_tools: frozenset[str] = frozenset(),
     approval_timeout_s: int = 86400,
     # Capability Uplift Sprint #8 — Mini-ADR U-8.
@@ -504,6 +520,14 @@ def build_react_graph(
         # turn does not re-apply the stale verdict.
         if approval_resume is not None:
             result_dict["approval_resume"] = None
+        # Stream CM-0 — turn-end DB→/workspace projection (best-effort).
+        # Only-if-changed: an unchanged turn skips the sandbox round-trip and
+        # leaves ``last_projection_hash`` untouched.
+        projection = await _project_workspace_state(
+            workspace_writer_factory, state, ctx_obj, audit_logger
+        )
+        if projection is not None and not projection.skipped:
+            result_dict["last_projection_hash"] = projection.digest
         return result_dict
 
     graph: StateGraph[AgentState, None, AgentState, AgentState] = StateGraph(AgentState)
@@ -935,6 +959,66 @@ async def _emit_tool_audit(
         )
     except Exception:
         logger.exception("tools.audit_failed name=%s call_id=%s", name, call_id)
+
+
+async def _emit_state_projected_audit(
+    audit_logger: AuditLogger | None, ctx: ToolContext, *, written: tuple[str, ...]
+) -> None:
+    """Audit one ``DB→/workspace`` projection (Stream CM-0). Best-effort —
+    a failed audit must not break the run. ``resource_type`` reuses the
+    existing ``user_workspace`` (Mini-ADR CM-A6)."""
+    if audit_logger is None or ctx.tenant_id is None:
+        return
+    try:
+        details: dict[str, Any] = {"written": list(written)}
+        if ctx.run_id is not None:
+            details["run_id"] = str(ctx.run_id)
+        await audit_logger.write(
+            AuditEntry(
+                tenant_id=ctx.tenant_id,
+                actor_type="agent",
+                actor_id=str(ctx.run_id) if ctx.run_id is not None else "agent",
+                action=AuditAction.STATE_PROJECTED,
+                resource_type="user_workspace",
+                result=AuditResult.SUCCESS,
+                details=details,
+            )
+        )
+    except Exception:
+        logger.exception("workspace_projection.audit_failed")
+
+
+async def _project_workspace_state(
+    factory: Callable[[ToolContext], WorkspaceFileWriter] | None,
+    state: AgentState,
+    ctx: ToolContext,
+    audit_logger: AuditLogger | None,
+) -> ProjectionResult | None:
+    """Best-effort turn-end ``DB→/workspace`` projection (Stream CM-0).
+
+    Renders ``AgentState.plan`` + recalled memories into PLAN.md / TODO.md /
+    MEMORY.md and writes them through a per-turn :class:`WorkspaceFileWriter`
+    (built from ``factory``), skipping when content is unchanged since
+    ``last_projection_hash``. Never raises — projection must not break a run
+    (Mini-ADR CM-A8) — returning ``None`` when disabled or on error."""
+    if factory is None:
+        return None
+    try:
+        result = await WorkspaceProjector(writer=factory(ctx)).project(
+            plan=state.get("plan"),
+            memories=state.get("recalled_memories") or [],
+            last_digest=state.get("last_projection_hash"),
+        )
+    except Exception:
+        logger.exception("workspace_projection.turn_failed")
+        _cm_projection_total.labels(outcome="error").inc()
+        return None
+    if result.skipped:
+        _cm_projection_total.labels(outcome="skipped").inc()
+    elif result.written:
+        _cm_projection_total.labels(outcome="projected").inc()
+        await _emit_state_projected_audit(audit_logger, ctx, written=result.written)
+    return result
 
 
 def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> ToolContext:
