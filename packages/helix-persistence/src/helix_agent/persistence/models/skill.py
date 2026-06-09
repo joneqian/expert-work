@@ -80,6 +80,14 @@ class SkillRow(Base):
     created_by_user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     created_by_agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     forked_from: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # Stream SE — SE-10 (Mini-ADR SE-A15), migration 0069. ``component_type``
+    # widens the evolution target from skill-only to three text-class harness
+    # components; ``target_tool_name`` names the tool a ``tool_description``
+    # component supplements (NULL for every other component_type).
+    component_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'skill'")
+    )
+    target_tool_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -100,6 +108,15 @@ class SkillRow(Base):
         CheckConstraint(
             "visibility IN ('agent_private', 'tenant')",
             name="skill_visibility_check",
+        ),
+        CheckConstraint(
+            "component_type IN ('skill', 'system_prompt', 'tool_description', 'memory_entry')",
+            name="skill_component_type_check",
+        ),
+        # SE-10: target_tool_name ⇔ component_type='tool_description'.
+        CheckConstraint(
+            "(component_type = 'tool_description') = (target_tool_name IS NOT NULL)",
+            name="skill_target_tool_name_check",
         ),
         # The (tenant_id, name) uniqueness is enforced by the COALESCE
         # unique index ``skill_tenant_name_uniq`` declared in migration

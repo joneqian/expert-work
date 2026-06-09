@@ -49,6 +49,9 @@ jobs:
       - name: audit-write path lint (STREAM-D-DESIGN § 6)
         run: uv run python tools/persistence/check_audit_insert_path.py
 
+      - name: harness compliance lint (STREAM-SE-DESIGN § SE-F)
+        run: uv run python tools/harness/check_harness_compliance.py
+
   typecheck:
     name: Typecheck (mypy)
     runs-on: ubuntu-latest

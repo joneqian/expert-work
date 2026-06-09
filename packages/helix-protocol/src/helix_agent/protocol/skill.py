@@ -19,13 +19,14 @@ from enum import StrEnum
 from typing import Final, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from helix_agent.protocol.eval_dataset import TrajectoryOutcome
 from helix_agent.protocol.tenant_config import TenantPlan
 
 __all__ = [
     "HIGH_RISK_TOOLS",
+    "ComponentType",
     "EvalVerdict",
     "EvolutionOrigin",
     "KillSwitch",
@@ -132,6 +133,13 @@ PromoteRequestStatus = Literal["pending", "approved", "rejected", "superseded"]
 # SE-8(Mini-ADR SE-A13c)紧急停 kill-switch 的作用域:``global`` = 全平台
 # 自动通道(tenant_id NULL);``tenant`` = 单租户(tenant_id 非空)。
 KillSwitchScope = Literal["global", "tenant"]
+# SE-10(Mini-ADR SE-A15)进化对象的组件类型。``skill`` = 历史/默认(prompt
+# 片段 + tool 子集的可复用技能);其余三类是 SE-10 扩展的**无执行风险文本组件**,
+# 复用同一套 SkillVersion 载体 + with-vs-without 重放验证门:``system_prompt`` =
+# agent 级行为补丁片段;``tool_description`` = 对某个已绑定工具的用法澄清(纯文本,
+# 不改实现/参数,补充对象记在 ``Skill.target_tool_name``);``memory_entry`` =
+# 可复用的长期记忆事实/偏好。代码类组件(工具实现/中间件/子agent)**不进化**。
+ComponentType = Literal["skill", "system_prompt", "tool_description", "memory_entry"]
 
 
 class SkillVersion(BaseModel):
@@ -264,8 +272,30 @@ class Skill(BaseModel):
     created_by_user_id: UUID | None = None
     created_by_agent_name: str | None = None
     forked_from: UUID | None = None
+    # ── Stream SE — SE-10 进化对象扩展(Mini-ADR SE-A15)。 ──
+    # ``component_type`` 区分这是一个普通 skill 还是三类文本 harness 组件之一;
+    # 默认 ``skill`` 保持全部历史行为不变。``target_tool_name`` 仅
+    # ``component_type='tool_description'`` 时非空,记被补充说明的工具名(装配期
+    # 把片段追加到该工具的 description,见 agent_factory)。
+    component_type: ComponentType = "skill"
+    target_tool_name: str | None = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def _check_component_type(self) -> Skill:
+        """``target_tool_name`` 与 ``component_type='tool_description'`` 互为充要。"""
+        if self.component_type == "tool_description":
+            if not self.target_tool_name:
+                msg = "tool_description component requires a non-empty target_tool_name"
+                raise ValueError(msg)
+        elif self.target_tool_name is not None:
+            msg = (
+                f"target_tool_name is only valid for component_type "
+                f"'tool_description', not {self.component_type!r}"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class SkillEvalResult(BaseModel):

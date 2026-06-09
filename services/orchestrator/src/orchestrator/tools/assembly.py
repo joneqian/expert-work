@@ -80,6 +80,10 @@ KNOWN_BUILTINS = frozenset(
         "refine_skill",
         "fork_skill",
         "propose_skill_to_tenant",
+        # Stream SE (SE-10) — in-session text-class harness component authoring.
+        "note_behavior_patch",
+        "clarify_tool_usage",
+        "remember",
     }
 )
 

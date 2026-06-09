@@ -20,6 +20,7 @@ from helix_agent.persistence.skill.base import (
     SkillStore,
 )
 from helix_agent.protocol import (
+    ComponentType,
     EvolutionOrigin,
     KillSwitch,
     KillSwitchScope,
@@ -117,6 +118,8 @@ class InMemorySkillStore(SkillStore):
         created_by_user_id: UUID | None = None,
         created_by_agent_name: str | None = None,
         forked_from: UUID | None = None,
+        component_type: ComponentType = "skill",
+        target_tool_name: str | None = None,
     ) -> Skill:
         return await self._create_skill_row(
             skill_id=skill_id,
@@ -129,6 +132,8 @@ class InMemorySkillStore(SkillStore):
             created_by_user_id=created_by_user_id,
             created_by_agent_name=created_by_agent_name,
             forked_from=forked_from,
+            component_type=component_type,
+            target_tool_name=target_tool_name,
         )
 
     async def _create_skill_row(
@@ -144,6 +149,8 @@ class InMemorySkillStore(SkillStore):
         created_by_user_id: UUID | None = None,
         created_by_agent_name: str | None = None,
         forked_from: UUID | None = None,
+        component_type: ComponentType = "skill",
+        target_tool_name: str | None = None,
     ) -> Skill:
         for existing in self._skills.values():
             if existing.tenant_id == tenant_id and existing.name == name:
@@ -162,6 +169,8 @@ class InMemorySkillStore(SkillStore):
             created_by_user_id=created_by_user_id,
             created_by_agent_name=created_by_agent_name,
             forked_from=forked_from,
+            component_type=component_type,
+            target_tool_name=target_tool_name,
             # Sprint #4 — match the SQL ``server_default=text("now()")``
             # so the in-memory and Postgres backends emit the same
             # DTO shape on first read.

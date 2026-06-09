@@ -25,6 +25,7 @@ from typing import Any
 from uuid import UUID
 
 from helix_agent.protocol import (
+    ComponentType,
     EvolutionOrigin,
     KillSwitch,
     KillSwitchScope,
@@ -113,6 +114,11 @@ class SkillStore(abc.ABC):
         created_by_user_id: UUID | None = None,
         created_by_agent_name: str | None = None,
         forked_from: UUID | None = None,
+        # Stream SE — SE-10 (Mini-ADR SE-A15). Default ``skill`` preserves
+        # every historical caller; the three text-class components pass their
+        # ``component_type`` (and ``target_tool_name`` for ``tool_description``).
+        component_type: ComponentType = "skill",
+        target_tool_name: str | None = None,
     ) -> Skill:
         """Insert a new skill row (status=draft, latest_version=0).
 
