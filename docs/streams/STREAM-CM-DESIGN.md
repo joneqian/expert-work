@@ -189,14 +189,14 @@ run 结束（memory_writeback 后）
 | **CM-A3** | 投影 only-if-changed（plan hash 比对，存 `AgentState.last_projection_hash`），避免每 turn 无谓 sandbox 往返 |
 | **CM-A4** | ingest 默认仅 run 始 + resume-from-pause（人机协同是 approval-pause 驱动）；每-turn ingest 推迟，自测后再定 |
 | **CM-A5** | `PlanStep` 加 `status`（pending/in_progress/completed，默认 pending），支撑 TODO.md 勾选；无迁移（plan 在 checkpointer 非 DB 表） |
-| **CM-A6** | `AuditAction` 加 `STATE_PROJECTED`/`STATE_INGESTED`，protocol + control-plane 两处 Literal 同步（防 audit-literal-drift） |
+| **CM-A6** | `AuditAction` 加 `STATE_PROJECTED`/`STATE_INGESTED` —— 核准后 `AuditAction` 是**单源 StrEnum**（仅 protocol，无 control-plane 镜像；drift 只适用 `ResourceType` 这个双处 Literal）；投影 `resource_type` 复用现成 `user_workspace`，**不新增 ResourceType**。按项目纪律枚举成员随**发射 PR**加（STATE_PROJECTED→PR2 接线、STATE_INGESTED→PR2 ingest），避免"定义即未用" |
 | **CM-A7** | recitation 注入 plan 尾部摘要、与 `_inject_plan` 去重；非 system 区保 L-1 cache prefix |
 | **CM-A8** | 投影/ingest best-effort：无沙盒/冷启动/解析失败均不阻塞 run，记 metric+log；DB 始终权威，人的编辑校验不过则保留原文 + warn 不静默丢 |
 
 ### 2.12 PR 切分（CM-0）
 
-1. **CM-0 PR1 — 投影骨架**：`workspace_projection.py`（render + WorkspaceProjector）+ `PlanStep.status`（CM-A5）+ `tools_node` 投影钩子（only-if-changed）+ MEMORY.md run 末投影 + audit STATE_PROJECTED + metrics + unit。
-2. **CM-0 PR2 — 受控 ingest**：WorkspaceIngester（read_volume_file 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `last_projection_hash` + audit STATE_INGESTED + 漂移裁决 + integration（真沙盒往返 + 人改回灌）。
+1. **CM-0 PR1 — 投影纯核心（CI 全测）**：`context/workspace_projection.py`（render 纯函数 + `WorkspaceProjector` + `WorkspaceFileWriter` Protocol seam + only-if-changed，projector 收 `last_digest` 参数）+ `PlanStep.status`（CM-A5）+ 结构化日志可观测（与 compressor 同款，非 in-module Prometheus）+ unit。**不接图、不引未发射枚举、不加未读写的状态字段**（pure-core-先行，对齐 SE-4a/SE-5a）。
+2. **CM-0 PR2 — 接线 + 受控 ingest（integration）**：真 `SandboxWorkspaceWriter`（包 `WriteFileTool`/`run_in_sandbox`）+ `tools_node` 投影钩子（best-effort）+ `AgentState.last_projection_hash`（投影游标，此处才有读写方）+ MEMORY.md run 末投影 + `AuditAction.STATE_PROJECTED` 发射；WorkspaceIngester（`read_volume_file` 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `STATE_INGESTED` + 漂移裁决 + integration（真沙盒往返 + 人改回灌）。
 3. **CM-0 PR3 — N1 recitation**：`agent_node` 尾部摘要注入 + 去重 + token gauge + unit。
 
 > 每个 PR 在本 §2 基础上局部细化；ITERATION-PLAN 增 Stream CM backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。

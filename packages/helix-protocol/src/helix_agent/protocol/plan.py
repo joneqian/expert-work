@@ -9,7 +9,14 @@ system context so each ReAct step executes against it.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+#: Stream CM-0 (Mini-ADR CM-A5) — lifecycle of one plan step, surfaced as a
+#: ``TODO.md`` checkbox by the workspace projection. Defaults to ``pending``
+#: so existing planner output (which never set a status) is unaffected.
+PlanStepStatus = Literal["pending", "in_progress", "completed"]
 
 
 class PlanStep(BaseModel):
@@ -19,6 +26,10 @@ class PlanStep(BaseModel):
 
     id: str = Field(description="stable step identifier, e.g. '1'")
     description: str = Field(description="what this step accomplishes")
+    status: PlanStepStatus = Field(
+        default="pending",
+        description="Stream CM-0 — execution state, projected to TODO.md.",
+    )
 
 
 class Plan(BaseModel):

@@ -20,9 +20,33 @@ from orchestrator.context.compressor import (
 from orchestrator.context.compressor import (
     estimate_tokens as estimate_tokens,
 )
+from orchestrator.context.workspace_projection import (
+    ProjectionResult as ProjectionResult,
+)
+from orchestrator.context.workspace_projection import (
+    WorkspaceFileWriter as WorkspaceFileWriter,
+)
+from orchestrator.context.workspace_projection import (
+    WorkspaceProjector as WorkspaceProjector,
+)
+from orchestrator.context.workspace_projection import (
+    render_memory_md as render_memory_md,
+)
+from orchestrator.context.workspace_projection import (
+    render_plan_md as render_plan_md,
+)
+from orchestrator.context.workspace_projection import (
+    render_todo_md as render_todo_md,
+)
 
 __all__ = [
     "ContextCompressor",
     "ContextOverflowError",
+    "ProjectionResult",
+    "WorkspaceFileWriter",
+    "WorkspaceProjector",
     "estimate_tokens",
+    "render_memory_md",
+    "render_plan_md",
+    "render_todo_md",
 ]
