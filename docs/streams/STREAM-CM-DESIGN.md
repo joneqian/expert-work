@@ -8,7 +8,7 @@
 >
 > **零债收尾规则**（[memory:zero-tech-debt]）：每条交付收尾 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 >
-> **本文件状态**：CM-0（地基）详设已锁定；CM-1…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
+> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）详设已锁定；CM-2…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
 
 ---
 
@@ -19,7 +19,7 @@
 | ID | 框架条目 | Gap | 交付 | 优先级 | Mini-ADR |
 |----|---------|-----|------|--------|---------|
 | **CM-0** | C0 + N1 | 状态内化、无文件投影；workspace 卷已有但状态不可见、不可手改 | 状态↔workspace 文件投影 + 单向错时双流 + recitation 复诵 | **先行** | CM-A1…A8（本文详设） |
-| CM-1 | A1 | 运行时主循环工具失败无 grounded 恢复建议（SE-12 是离线 skill 进化，L-4 只覆盖文件 mutation） | 通用工具失败→结构化恢复 advisory 注入主循环 | P0 | 待细化 |
+| CM-1 | A1 | 运行时主循环工具失败无 grounded 恢复建议（SE-12 是离线 skill 进化，L-4 只覆盖文件 mutation） | 通用工具失败→结构化恢复 advisory 注入主循环 | P0 | CM-B1…B6（§3 详设） |
 | CM-2 | A2 | 无"保留最近 N 轮"廉价前置闸，轻溢出每次走 LLM 摘要 | `agent_node` compressor 前加滑窗截断（保 ToolCall↔ToolResult 配对） | P0 | 待细化 |
 | CM-3 | A3 | compressor 丢弃中段前无 flush，`memory_writeback` 只在 run 末 | 压缩前回调 → 复用 writeback 通道中途落盘 | P1 | 待细化 |
 | CM-4 | B5 | rerank_provider/model 配置预留但检索路径无 rerank 调用 | memory recall Hybrid 召回后接 cross-encoder rerank | P1 | 待细化 |
@@ -214,9 +214,146 @@ run 结束（memory_writeback 后）
 
 ---
 
-## 3. 与既有 Stream 的衔接
+## 3. CM-1 详细设计 —— 运行时 Error-as-Guidance（工具失败→grounded 恢复 advisory）
+
+> **目标**：ReAct 主循环里任一工具失败时，按错误类型 + 工具能力，向模型注入一条**结构化、有倾向性、grounded 于真实执行信号**的恢复建议，对抗模型"瞎猜路径已生效 / 原样重试同一失败调用"。映射框架报告 A1（实证：结构化错误恢复率 >85% vs 模糊信号 17%）。
+>
+> **核心策略**：**泛化已有的 L-4 mutation advisory 机制**——不新造注入管道，而是把 L-4"仅 save_artifact 落盘校验 → `failed_mutations` 通道 → 下一 turn `<mutation-advisory>` 尾部注入 → 注入后 reset"这套**已验证的范式**，泛化到**所有工具的失败**，并把 L-4 的"mutation 未落盘"收敛为新分类器的一个错误类（零债，不留并行机制）。
+
+### 3.1 关键约束（接缝核准结论，已源码核准）
+
+| 约束 | 事实 | file:line |
+|---|---|---|
+| **工具失败已被三层 catch 转 ToolMessage** | `_invoke_tool` catch 工具自身异常、`_dispatch_tool` catch `ToolNotFoundError`(未知工具) 与 middleware block，全部 → `ToolMessage(content=_format_error(exc), status="error")`，**无分类、所有异常等价** | `graph_builder/builder.py:1090-1108`(`_invoke_tool`)、`:823-880`(`_dispatch_tool`)、`:1116-1120`(`_format_error`：`[tool error] {Type}: {summary≤500}`) |
+| **L-4 注入范式（待泛化）** | `classify_mutation`(仅 `save_artifact`) → tools_node 收集 `failed_mutations` 进 state → 下一 agent_node `_build_mutation_advisory` 拼 `<mutation-advisory>` `HumanMessage` 注入**尾部**(保 L-1 cache prefix) → 持久化后 `failed_mutations:[]` reset | `tools/mutation_classifier.py:41-91`；`builder.py:508-525`(收集)、`:277-289`(注入)、`:347-354`(持久化+reset)、`:670-694`(`_build_mutation_advisory`) |
+| **ToolSpec 带能力元数据** | `idempotent: bool`、`side_effect: "read_only"/"reversible"/"irreversible"`(`resolved_side_effect`)、`is_read_only` —— 让"是否建议重试"grounded（幂等/只读才安全重试，不可逆非幂等需先核实状态） | `tools/registry.py:40`(`SideEffectLevel`)、`:119/:128`(`side_effect`/`resolved_side_effect`)、`:113`(`idempotent`) |
+| **dispatch 三种失败 outcome** | `_record_tool_metrics` 已区分 `ok/error/blocked`：`error`=工具/未知工具异常，`blocked`=middleware(approval/guardrail)拦截 | `builder.py:823`(blocked)、`:1093`(error)；`_tool_call_total{tool,outcome}` |
+| **ToolResult 无 error 字段** | 错误走异常路径(非 ToolResult)；`ToolResult{content,meta,state_updates,refund_iterations}` 无 error/is_error —— CM-1 不改 ToolResult 契约，在 catch 点(有 `exc` 真类型)分类 | `tools/registry.py:197-238` |
+| **失败仍计 1 步（不退款）** | catch 路径返回 `refund_inc=0`：失败的工具调用仍是 user-visible 尝试，照常消耗 iteration（与 L-5 退款语义一致，不动） | `builder.py:1100-1108`(error 返回 `0`) |
+| **运行时无错误分类体系** | `errors.py` 仅 factory 期异常(`AgentFactoryError`/`SkillNotFoundError`)，主循环无任何 `ClassifiedError`/recovery —— CM-1 从零建（参考 Hermes 结构，不抄其 API-层 taxonomy） | `orchestrator/errors.py` |
+
+> **结论**：CM-1 = 在 catch 点（`exc` 真类型在手，信号最丰富）做**确定性分类** → 产出 `ClassifiedToolError` → 经统一 `tool_failures` 通道（泛化 `failed_mutations`）→ 下一 turn `_build_recovery_advisory` 拼 `<recovery-advisory>` 尾部注入。L-4 的 mutation 校验作为"未落盘"一类收敛进来。
+
+### 3.2 设计：分类 → 通道 → 注入（泛化 L-4，三段）
+
+```
+tools_node（每个失败的工具调用）
+  ├─ 错误路径(status="error")：在 _invoke_tool/_dispatch_tool catch 处，
+  │    classify_tool_error(tool_name, args, exc, spec) → ClassifiedToolError
+  └─ 成功但语义未落地：classify_mutation 现逻辑 → ClassifiedToolError(class="mutation_not_landed")
+  ⇒ 聚合进 state["tool_failures"]: list[ClassifiedToolError]   ← 泛化 failed_mutations
+
+下一个 agent_node 入口
+  └─ 若 tool_failures 非空：_build_recovery_advisory(tool_failures) → HumanMessage
+       注入 messages 尾部（非 system，保 L-1 cache prefix；与 N1 recitation 同区错开拼接）
+  └─ 持久化该 advisory + response；返回 {"tool_failures": []} reset（单次注入，不重复）
+```
+
+不变量沿用 L-4：① 注入在**尾部 HumanMessage**（不污染 system，保 prompt-cache）；② **单次注入即 reset**（下一步无残留）；③ 失败信号在 state 上跨节点传递（tools_node 产、agent_node 消费）。
+
+### 3.3 工具错误 taxonomy（grounded、确定性，无 LLM）
+
+分类**纯由真实信号推导**（异常类型名 + 错误文本模式 + `ToolSpec` 能力），不调模型、不靠内省——直接落实框架报告修订①"注入须源自真实工具/执行信号"。
+
+| `error_class` | grounded 信号 | 恢复倾向（advice 模板核心） | retryable |
+|---|---|---|:---:|
+| `unknown_tool` | `ToolNotFoundError` | 该工具不存在；从可用工具里选，**勿原样重试** | 否 |
+| `invalid_arguments` | `ValueError`/校验类异常 + args 被拒文本 | 参数被拒(附 why)；**修正参数**再调，勿重复同一调用 | 否（改参后可） |
+| `blocked_by_policy` | dispatch outcome=`blocked`（middleware/approval/guardrail） | 被策略/审批拦截；**等待审批或上报用户**，勿绕过重试 | 否 |
+| `resource_not_found` | `FileNotFoundError`/"not found"/404 类文本 | 目标(路径/id)不存在；**先核实存在性**再操作 | 否（核实后可） |
+| `permission_denied` | `PermissionError`/auth/403 类文本 | 权限不足；**勿暴力重试**，上报 | 否 |
+| `transient` | `TimeoutError`/连接/沙盒不可用/5xx 类文本 | 暂时性失败；**幂等/只读可重试一次**(读 `spec`)，仍失败则上报 | 是（受 spec 约束） |
+| `mutation_not_landed` | L-4 现逻辑：成功态但写未落地 | 路径**未**含所请求内容，勿假定已生效；重试或上报（沿用 L-4 文案） | 是 |
+| `unknown` | 兜底（不可分类） | 原因不明；检视错误、**考虑替代手段**，避免原样重试 | 否（保守） |
+
+分类实现 = 异常类型名优先 + 错误文本小写模式匹配兜底（确定性 if/elif 链，无正则灾难）。新增类只在此表扩。
+
+### 3.4 恢复建议构造（grounded 约束）
+
+- **retryable 受 `ToolSpec` 约束**：即便 `transient`，也仅当 `spec.idempotent` 或 `resolved_side_effect=="read_only"` 才建议"可安全重试"；不可逆非幂等工具一律"重试前先核实状态"。这让"建议重试"不会诱导模型对不可逆副作用工具盲目重放。
+- **advice 是模板化结构文本**（错误类 → 固定话术 + 注入工具名/参数摘要/错误摘要），非自由生成；保证可预测、可测、token 受控。
+- **不含 fingerprint 升档**：同工具同参连续失败的"停止重试/换路"升档属 **CM-9 N4（loop 指纹去重）**，CM-1 advice 文案仅以"勿原样重试"软提示，不引入 per-thread 指纹存储（避免越界，保 surgical）。
+
+### 3.5 与 L-4 收敛（零债，不留并行机制）
+
+框架报告写明 CM-1"**泛化 L-4**"。落地为**收敛而非并行**：
+
+- `MutationOutcome{tool_name,path,landed,error}` 的失败语义 → 映射为 `ClassifiedToolError(error_class="mutation_not_landed", tool_name, summary=error, path)`。
+- `failed_mutations` 状态键 → 由统一 `tool_failures: list[ClassifiedToolError]` 取代；`classify_mutation` 现逻辑保留为"未落盘"这一类的**贡献者**（成功路径专用：status 非 error 但写未落地，这是 CM-1 错误路径覆盖不到的语义失败，必须保留）。
+- `_build_mutation_advisory` 的 `<mutation-advisory>` 文案 → 并入 `_build_recovery_advisory` 的 `<recovery-advisory>` 块，mutation 类保留原措辞（行为不回归，L-4 测试相应更新）。
+- 因是 checkpointer 内 transient 每-step 状态（非 DB 表、每 agent step reset），**无迁移**；旧 checkpoint 的 `failed_mutations` 键由 reducer 默认 `[]` 兜底。
+
+### 3.6 数据/协议变更
+
+1. **新模块 `orchestrator/graph_builder/error_classifier.py`**（与 `mutation_classifier.py` 同层）：
+   ```python
+   ToolErrorClass = Literal[
+       "unknown_tool", "invalid_arguments", "blocked_by_policy",
+       "resource_not_found", "permission_denied", "transient",
+       "mutation_not_landed", "unknown",
+   ]
+   @dataclass(frozen=True)
+   class ClassifiedToolError:
+       tool_name: str
+       error_class: ToolErrorClass
+       summary: str               # 错误摘要（≤cap）
+       retryable: bool
+       advice: str                # 模板化恢复建议（注入 advisory 的正文）
+       path: str | None = None    # mutation 类沿用
+   def classify_tool_error(tool_name, args, exc_or_message, spec) -> ClassifiedToolError: ...
+   def render_recovery_advisory(failures: list[ClassifiedToolError]) -> str: ...  # 纯函数，拼 <recovery-advisory>
+   ```
+2. **`AgentState` 通道泛化**（`orchestrator/state.py`）：`failed_mutations: NotRequired[list[MutationOutcome]]` → `tool_failures: NotRequired[list[ClassifiedToolError]]`（覆写 reducer，每 agent step reset；docstring 更新 L-4→CM-1 由 L-4 泛化）。
+3. **不改 `ToolResult`/`ToolSpec`/`Tool` 协议**——分类在 catch 点用 `exc`+`spec`，零契约变更。
+4. **无 `AuditAction`/`ResourceType` 变更**——advisory 是 in-context 引导，非审计事件（失败已由 `_tool_call_total{outcome}` + tool audit 记录）。
+
+### 3.7 边界情况
+
+| 场景 | 处理 |
+|---|---|
+| 一个 tool batch 多个失败 | 全部分类，`_build_recovery_advisory` 合并为单个 `<recovery-advisory>` 多行块 |
+| 失败 + 成功混合 | 仅失败项进 advisory；成功项正常 ToolMessage |
+| 分类不出明确类 | 落 `unknown`，给保守 advice（检视+勿原样重试），retryable=False |
+| advisory 过长（多失败） | 每条 summary 截断（沿用 `_format_error` 的 500 cap 思路），整块 char gauge 观测 |
+| `mutation_not_landed`（成功态语义失败） | 沿用 L-4 校验逻辑产出，文案不变 |
+| 非 plan_execute / 无 plan | 与 plan 无关，照常工作（CM-1 不依赖 plan） |
+
+### 3.8 可观测（零债"可观测齐全"）
+
+- `helix_cm_tool_error_total{error_class, tool}`（counter）—— 按类 × 工具计失败，看哪些工具/错误类高频。
+- `helix_cm_recovery_advisory_chars`（gauge）—— 每次注入 advisory 字符数，防膨胀（与 N1 `helix_cm_recitation_chars` 同款）。
+- 复用现有 `helix_tool_call_total{tool,outcome}`（raw 失败计数，不重复造）。
+- 每次注入 emit log（tenant/user/thread + error_class 列表）；失败本身已有 tool audit，不新增 audit。
+
+### 3.9 测试 & 验收（CM-1 Exit）
+
+- **unit（≥85%）**：每种异常类型/文本 → 正确 `error_class`+`retryable`+advice；`transient` × (idempotent/read_only/irreversible) → retry 建议差异；`blocked` outcome → `blocked_by_policy` 不建议重试；`mutation_not_landed` 收敛正确（沿用 L-4 用例语义）；`render_recovery_advisory` 多失败合并/截断；空失败 → 无 advisory；注入后 reset。
+- **integration（关键路径，真 graph）**：scripted LLM + 一个会 raise 的工具 → 下一 agent turn 尾部含 `<recovery-advisory>` 且含正确 class/advice；与 L-4 e2e 等价迁移（save_artifact 失败仍产出 advisory）。
+- **零债 6 条**：无 TODO/FIXME；§3 与实现一致；metric+log 齐全（无新增 audit 因失败已记）；CI 8/8 + CodeQL 无新增 high；L-4 行为不回归。
+
+### 3.10 Mini-ADR（CM-1 锁定）
+
+| ID | 决策 |
+|---|---|
+| **CM-B1** | 分类**确定性、无 LLM**：纯由异常类型名 + 错误文本模式 + `ToolSpec` 能力推导（grounded，落实框架报告修订①"注入须源自真实执行信号"，不靠模型内省） |
+| **CM-B2** | **泛化而非并行 L-4**：统一 `tool_failures` 通道取代 `failed_mutations`；`<recovery-advisory>` 块取代 `<mutation-advisory>`；mutation 校验作为 `mutation_not_landed` 一类收敛进来（成功路径语义失败专用，保留） |
+| **CM-B3** | 分类在 **catch 点**做（`exc` 真类型在手，信号最丰富），不在 tools_node 事后从 ToolMessage 文本反推 |
+| **CM-B4** | 注入沿用 L-4 不变量：尾部 `HumanMessage`（保 L-1 cache prefix）+ 单次注入即 reset；不改 `ToolResult`/`ToolSpec`/`Tool` 契约 |
+| **CM-B5** | retry 建议**受 `ToolSpec.idempotent`/`side_effect` 约束**：仅幂等/只读才建议"安全重试"，不可逆非幂等→"重试前核实状态"，防诱导对副作用工具盲目重放 |
+| **CM-B6** | fingerprint 升档（同工具同参连续失败→强制停/换路）**不在 CM-1**，归 CM-9 N4；CM-1 advice 仅以"勿原样重试"软提示，不引入 per-thread 指纹存储（保 surgical） |
+
+### 3.11 PR 切分（CM-1）
+
+1. **CM-1 PR1 — 分类器纯核心（CI 全测）**：`graph_builder/error_classifier.py`（`ToolErrorClass` taxonomy + `ClassifiedToolError` + `classify_tool_error` 纯函数 + `render_recovery_advisory` 纯函数 + retry 受 spec 约束逻辑）+ unit（每类分类 / retry×spec 矩阵 / advisory 渲染合并截断）。**不接图、不动 state、不碰 L-4**（pure-core-先行，对齐 CM-0 PR1 / SE-4a 节奏）。
+2. **CM-1 PR2 — 接线 + L-4 收敛（端到端）**：catch 点(`_invoke_tool`/`_dispatch_tool`)调 `classify_tool_error` → 聚合进 `tool_failures`；`AgentState` `failed_mutations`→`tool_failures` 泛化；`classify_mutation` 现逻辑改产 `ClassifiedToolError(mutation_not_landed)`；agent_node `_build_recovery_advisory` 取代 `_build_mutation_advisory`（`<recovery-advisory>`，mutation 文案保留）+ 注入/reset 不变；`helix_cm_tool_error_total` + `helix_cm_recovery_advisory_chars` + 注入 log；迁移 L-4 测试 + 新增 e2e（raise 工具 → 下一 turn advisory）。**→ CM-1 完成**。
+
+> 每个 PR 在本 §3 基础上局部细化；ITERATION-PLAN 增 CM-1 backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
+
+---
+
+## 4. 与既有 Stream 的衔接
 
 - **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8 pause→ingest 时机）、`update_plan`（K.8）。
-- **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）、L-4 mutation advisory（CM-1 泛化它）共存；recitation 放非 system 区不破 L-1。
+- **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）共存；recitation 放非 system 区不破 L-1。**L-4 mutation advisory 被 CM-1 收敛**（`failed_mutations`→`tool_failures`、`<mutation-advisory>`→`<recovery-advisory>`，mutation 校验作为 `mutation_not_landed` 一类保留），非并行；L-5 退款语义不动（失败工具调用照常计步）。
 - **Stream SE**：CM-1（运行时 error-as-guidance）与 SE-12（离线 skill 进化失败归因）是**两个层面**——SE 学习离线进化、CM-1 运行时即时恢复，不重叠。
 - **Stream H（admin-ui）**：CM-8 文件投影 + UI 双通道依赖 CM-0 的 ingest 路径。
