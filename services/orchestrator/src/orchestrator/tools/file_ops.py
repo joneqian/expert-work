@@ -789,6 +789,39 @@ class SandboxWorkspaceWriter:
         _raise_for_error(env, tool="workspace_projection")
 
 
+@dataclass(frozen=True)
+class SandboxWorkspaceReader:
+    """Stream CM-0 PR2b — the real ``WorkspaceFileReader`` for state ingest.
+
+    Reads a projected file back from ``/workspace`` through the warm-sandbox
+    ``read_file`` snippet (the inverse of :class:`SandboxWorkspaceWriter`).
+    Returns ``None`` when the file is absent so the ingester treats it as "no
+    edit"; other failures raise (the ingester swallows them best-effort).
+    Structurally satisfies ``orchestrator.context.WorkspaceFileReader``."""
+
+    client: SupervisorClient
+    ctx: ToolContext
+    persistent_workspace: bool
+    image_variant: str | None = None
+
+    async def read(self, rel: str) -> str | None:
+        outcome = await run_in_sandbox(
+            self.client,
+            code=build_read_wrapper(rel, cap=DEFAULT_OUTPUT_CHAR_CAP),
+            timeout_s=None,
+            ctx=self.ctx,
+            persistent_workspace=self.persistent_workspace,
+            tool_label="workspace_ingest",
+            fallback_thread_id="workspace_ingest",
+            image_variant=self.image_variant,
+        )
+        env = parse_envelope(outcome, tool="workspace_ingest")
+        if not env.get("ok") and env.get("error") == "not_found":
+            return None
+        _raise_for_error(env, tool="workspace_ingest")
+        return str(env.get("content", ""))
+
+
 def _format_entries(rel: str, entries: list[Mapping[str, Any]], *, truncated: bool) -> str:
     """Human-readable directory listing for the LLM."""
     if not entries:

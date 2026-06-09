@@ -14,6 +14,9 @@ from orchestrator.graph_builder.planner import parse_plan as parse_plan
 from orchestrator.graph_builder.planner import render_plan as render_plan
 from orchestrator.graph_builder.reflect import ReflectNode as ReflectNode
 from orchestrator.graph_builder.reflect import make_reflect_node as make_reflect_node
+from orchestrator.graph_builder.workspace_ingest import (
+    make_workspace_ingest_node as make_workspace_ingest_node,
+)
 
 __all__ = [
     "MemoryNode",
@@ -24,6 +27,7 @@ __all__ = [
     "make_memory_writeback_node",
     "make_planner_node",
     "make_reflect_node",
+    "make_workspace_ingest_node",
     "parse_plan",
     "render_plan",
 ]

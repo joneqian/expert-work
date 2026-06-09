@@ -77,6 +77,7 @@ from orchestrator.graph_builder import (
     make_memory_writeback_node,
     make_planner_node,
     make_reflect_node,
+    make_workspace_ingest_node,
 )
 from orchestrator.llm import (
     AnthropicProvider,
@@ -570,9 +571,17 @@ async def build_agent(
     # nothing (the projector no-ops), so this is effectively active only for
     # plan_execute / long-term-memory agents.
     workspace_writer_factory: Callable[[ToolContext], WorkspaceFileWriter] | None = None
+    workspace_ingest_node = None
     if spec.spec.sandbox.filesystem.persistent_workspace and env.supervisor_client is not None:
         workspace_writer_factory = _make_workspace_writer_factory(
             env.supervisor_client, spec.spec.sandbox.image_variant
+        )
+        # Stream CM-0 PR2b — the file→DB counterpart: ingest a human-edited
+        # PLAN.md at run start. Same gate as the projection writer.
+        workspace_ingest_node = make_workspace_ingest_node(
+            client=env.supervisor_client,
+            persistent_workspace=True,
+            image_variant=spec.spec.sandbox.image_variant,
         )
     graph = build_react_graph(
         llm_caller=routers.default,
@@ -586,6 +595,7 @@ async def build_agent(
         before_tool_dispatch_chain=chains.before_tool_dispatch,
         context_compressor=context_compressor,
         workspace_writer_factory=workspace_writer_factory,
+        workspace_ingest_node=workspace_ingest_node,
         # Stream J.8 (Mini-ADR J-24) — declarative approval gate.
         approval_required_tools=frozenset(spec.spec.policies.approval_required_tools),
         approval_timeout_s=spec.spec.policies.approval_timeout_s,

@@ -107,6 +107,9 @@ class AuditAction(StrEnum):
     # projection of agent state (PLAN.md / TODO.md / MEMORY.md). resource_type
     # reuses ``user_workspace``.
     STATE_PROJECTED = "state:projected"
+    # workspace state ingest (Stream CM-0 PR2b — Mini-ADR CM-A6); file→DB:
+    # a human-edited PLAN.md applied back to AgentState.plan at run start.
+    STATE_INGESTED = "state:ingested"
     # image upload (Stream J.6.补强-2 — Mini-ADR J-31)
     IMAGE_UPLOAD = "image:upload"
     # skill (Stream J.7a — Mini-ADR J-23)

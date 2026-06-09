@@ -168,6 +168,8 @@ def build_react_graph(
     reflect_node: ReflectNode | None = None,
     memory_recall_node: MemoryNode | None = None,
     memory_writeback_node: MemoryNode | None = None,
+    # Stream CM-0 PR2b — run-start file→DB ingest of a human-edited PLAN.md.
+    workspace_ingest_node: MemoryNode | None = None,
     before_llm_chain: MiddlewareChain | None = None,
     after_llm_chain: MiddlewareChain | None = None,
     before_tool_dispatch_chain: MiddlewareChain | None = None,
@@ -545,6 +547,12 @@ def build_react_graph(
     if planner_node is not None:
         graph.add_node("planner", planner_node)  # type: ignore[arg-type]
         entry.append("planner")
+    # Stream CM-0 — file→DB ingest, placed last in the entry chain (after the
+    # planner) so a human's PLAN.md edit overrides a (re)generated plan, and so
+    # it fires exactly once per ainvoke (run start / resume), not per turn.
+    if workspace_ingest_node is not None:
+        graph.add_node("workspace_ingest", workspace_ingest_node)  # type: ignore[arg-type]
+        entry.append("workspace_ingest")
     for src, dst in itertools.pairwise(entry):
         graph.add_edge(src, dst)
     graph.add_edge(entry[-1], "agent")

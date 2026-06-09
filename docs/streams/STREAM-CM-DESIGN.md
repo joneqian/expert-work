@@ -116,12 +116,12 @@ run 结束（memory_writeback 后）
 
 | 钩子 | 位置 | 频率 | 可访问 |
 |---|---|---|---|
-| ingest（file→DB） | `agent_node` 入口、消息合成前（`builder.py:236` 前），仅 run 首 turn / resume | run 始一次 | state, config（tenant/user/thread），可改 messages/plan via 返回 dict |
+| ingest（file→DB） | **entry-chain `workspace_ingest` 节点**（planner 后、agent 前），实现为独立节点而非 agent_node 入口判断——entry chain 每 ainvoke 跑一次 = run 始/resume，天然满足"一次"语义 | run 始一次 | state, config（tenant/user/run），返回 `{"plan": ...}` 回灌 |
 | recitation（N1） | `agent_node` 内、plan 注入处附近（`builder.py:239-241`） | 每 turn | 当前 plan/todo，注入 messages 尾部 |
 | 投影（DB→file） | `tools_node` 返回前（`builder.py:507`），only-if plan 变更 | 每 turn（条件触发） | state + accumulated_state（含本 turn plan 变更） |
-| MEMORY.md 投影 | `memory_writeback` 节点内/后（`memory.py:240-319`） | run 末一次 | 完整轨迹 + 已写记忆 |
+| MEMORY.md 投影 | 同 tools_node 投影钩子（`recalled_memories` 在 state，only-if-changed 只写一次） | 随投影 | — |
 
-投影/ingest 逻辑封装到 **新模块 `orchestrator/context/workspace_projection.py`**（`WorkspaceProjector` / `WorkspaceIngester`），builder.py 仅在钩子点调用，保持节点函数瘦。
+投影/ingest 纯逻辑封装到 **`orchestrator/context/workspace_projection.py`**（`WorkspaceProjector` / `WorkspaceIngester`）；真沙盒读写适配（`SandboxWorkspaceWriter`/`SandboxWorkspaceReader`）在 `tools/file_ops.py`；ingest 节点在 `graph_builder/workspace_ingest.py`（`make_workspace_ingest_node`）。builder.py 仅在钩子点/entry chain 调用，保持节点函数瘦。
 
 ### 2.5 数据/协议变更
 
@@ -201,7 +201,7 @@ run 结束（memory_writeback 后）
 1. **CM-0 PR1 — 投影纯核心（CI 全测）**：`context/workspace_projection.py`（render 纯函数 + `WorkspaceProjector` + `WorkspaceFileWriter` Protocol seam + only-if-changed，projector 收 `last_digest` 参数）+ `PlanStep.status`（CM-A5）+ 结构化日志可观测（与 compressor 同款，非 in-module Prometheus）+ unit。**不接图、不引未发射枚举、不加未读写的状态字段**（pure-core-先行，对齐 SE-4a/SE-5a）。
 2. **CM-0 PR2a — 投影接线**（已实现）：真 `SandboxWorkspaceWriter`（在 `tools/file_ops.py`，包 `build_write_wrapper`/`run_in_sandbox`，结构化满足 `WorkspaceFileWriter`）+ `build_react_graph` 新增可选 `workspace_writer_factory`（per-turn 绑 ctx）+ `tools_node` return 前 best-effort 投影钩子（`_project_workspace_state`）+ `AgentState.last_projection_hash`（投影游标）+ `AuditAction.STATE_PROJECTED` 发射（`_emit_state_projected_audit`，resource_type=`user_workspace`）+ `helix_cm_projection_total{outcome}` + agent_factory gate（persistent_workspace ∧ supervisor_client）。**MEMORY.md 无需单独 run 末投影**——`recalled_memories` 在 state、tools_node 每 turn 投影、only-if-changed 保证只写一次。单测：SandboxWorkspaceWriter（RecordingSupervisorClient 真 snippet 往返）+ graph wiring（fake writer 驱动 build_react_graph）。
 3. **CM-0 PR2b-i — ingest 纯核心（CI 全测）**（已实现）：`render_plan_md` 改带 status checkbox 使 PLAN.md round-trippable + `parse_plan_md`（render 的精确逆）+ `WorkspaceFileReader` Protocol seam + `WorkspaceIngester.ingest_plan`（读 PLAN.md→parse→仅当 ≠ current 才返回候选；read 失败/parse 失败/无变更均 no-op，永不 raise）+ TODO.md/MEMORY.md 转只读（CM-A5b）+ unit（round-trip / 勾选编辑 / 无 goal 或无 step→None / 无变更 no-op）。**不接图**。
-4. **CM-0 PR2b-ii — ingest 接线**：`SandboxWorkspaceReader`（`tools/file_ops.py`，包 `build_read_wrapper`/`run_in_sandbox`，not_found→None）+ entry-chain `workspace_ingest_node`（planner 后、agent 前，每 ainvoke 一次=run 始/resume）+ 注入扫描校验（`scan_for_threats` strict）+ `AuditAction.STATE_INGESTED` 发射 + 漂移裁决（DB 权威，校验不过保留原文 + warn）+ agent_factory gate + integration（真沙盒往返 + 人改 PLAN.md→resume→回灌）。
+4. **CM-0 PR2b-ii — ingest 接线**（已实现）：`SandboxWorkspaceReader`（`tools/file_ops.py`，包 `build_read_wrapper`/`run_in_sandbox`，not_found→None）+ `graph_builder/workspace_ingest.py:make_workspace_ingest_node`（entry-chain，planner 后 agent 前，每 ainvoke 一次=run 始/resume）+ `build_react_graph` 可选 `workspace_ingest_node` 参 + 注入扫描校验（`scan_for_threats(scope="strict")` 扫 goal+步骤描述，命中即拒、DB 权威）+ `AuditAction.STATE_INGESTED` 发射 + `helix_cm_ingest_total{outcome}` + agent_factory gate（同投影）。6 unit（SandboxWorkspaceReader 真 snippet 往返/not_found/io_error + graph wiring：人改回灌 / 无变更 no-op / 注入拒绝）。真 live-sandbox e2e 归 integration/手动（CI 无沙盒凭证，同 PR2a 边界）。
 5. **CM-0 PR3 — N1 recitation**：`agent_node` 尾部摘要注入 + 去重 + token gauge + unit。
 
 > 每个 PR 在本 §2 基础上局部细化；ITERATION-PLAN 增 Stream CM backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。

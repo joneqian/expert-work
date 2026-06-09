@@ -9,7 +9,11 @@ genuine edit.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from uuid import uuid4
+
+import pytest
 
 from helix_agent.protocol import Plan, PlanStep
 from orchestrator.context import (
@@ -17,6 +21,9 @@ from orchestrator.context import (
     parse_plan_md,
     render_plan_md,
 )
+from orchestrator.tools.file_ops import FileOpError, SandboxWorkspaceReader
+from orchestrator.tools.registry import ToolContext
+from orchestrator.tools.sandbox import RecordingSupervisorClient, SandboxOutcome
 
 
 @dataclass
@@ -124,3 +131,57 @@ async def test_ingest_swallows_reader_failure() -> None:
     reader = _StubReader(contents={}, raise_on_read=True)
     # A read failure must not raise — projection/ingest never breaks a run.
     assert await WorkspaceIngester(reader=reader).ingest_plan(current=_plan()) is None
+
+
+# ---------------------------------------------------------------------------
+# SandboxWorkspaceReader (real reader over the warm-sandbox snippet)
+# ---------------------------------------------------------------------------
+
+
+def _reader_ctx() -> ToolContext:
+    return ToolContext(tenant_id=uuid4(), run_id=uuid4(), user_id=uuid4())
+
+
+def _read_envelope(content: str) -> SandboxOutcome:
+    return SandboxOutcome(
+        stdout=json.dumps(
+            {"ok": True, "content": content, "content_hash": "h", "size": len(content)}
+        ),
+        stderr="",
+        exit_code=0,
+        timed_out=False,
+    )
+
+
+async def test_sandbox_reader_returns_content() -> None:
+    client = RecordingSupervisorClient(outcome=_read_envelope("# Plan\n"))
+    reader = SandboxWorkspaceReader(client=client, ctx=_reader_ctx(), persistent_workspace=True)
+    assert await reader.read("PLAN.md") == "# Plan\n"
+    assert client.execs and "PLAN.md" in client.execs[0][1]
+
+
+async def test_sandbox_reader_returns_none_when_absent() -> None:
+    client = RecordingSupervisorClient(
+        outcome=SandboxOutcome(
+            stdout=json.dumps({"ok": False, "error": "not_found"}),
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+        )
+    )
+    reader = SandboxWorkspaceReader(client=client, ctx=_reader_ctx(), persistent_workspace=True)
+    assert await reader.read("PLAN.md") is None
+
+
+async def test_sandbox_reader_raises_on_io_error() -> None:
+    client = RecordingSupervisorClient(
+        outcome=SandboxOutcome(
+            stdout=json.dumps({"ok": False, "error": "io_error", "detail": "x"}),
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+        )
+    )
+    reader = SandboxWorkspaceReader(client=client, ctx=_reader_ctx(), persistent_workspace=True)
+    with pytest.raises(FileOpError):
+        await reader.read("PLAN.md")
