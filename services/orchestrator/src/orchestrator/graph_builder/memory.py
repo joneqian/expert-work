@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -41,7 +41,7 @@ from helix_agent.persistence.memory import MemoryWritebackDLQ
 from helix_agent.persistence.memory.base import MemoryInjectionBlockedError
 from helix_agent.persistence.tenant_config import TenantConfigStore
 from helix_agent.protocol import MemoryItem, MemoryRecallMode
-from helix_agent.runtime.cancellation import RunCancelledError
+from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
 from orchestrator.graph_builder._config import cancellation_token, configurable_uuid
 from orchestrator.llm import Embedder, LLMCaller
 from orchestrator.state import AgentState
@@ -221,6 +221,110 @@ def make_memory_recall_node(
     return memory_recall_node
 
 
+async def flush_messages_to_memory(
+    messages: Sequence[BaseMessage],
+    *,
+    memory_store: MemoryStore,
+    embedder: Embedder,
+    llm_caller: LLMCaller,
+    tenant_id: UUID,
+    user_id: UUID,
+    thread_id: UUID | None,
+    token: CancellationToken,
+    dlq: MemoryWritebackDLQ | None = None,
+    log_label: str = "memory.writeback",
+) -> int:
+    """Extract durable memories from ``messages``, embed, and persist them.
+
+    The shared extraction core behind both the run-end ``memory_writeback``
+    node and the Stream CM-3 pre-compaction flush. Makes one LLM extraction
+    call, embeds the produced pairs, and writes :class:`MemoryItem`\\s tagged
+    with ``source_thread_id``. Returns the number of memories written
+    (``0`` on empty extraction / blocked content / any handled failure).
+
+    Best-effort, mirroring the original write-back contract:
+
+    * ``RunCancelledError`` propagates (cancellation is never swallowed).
+    * ``MemoryInjectionBlockedError`` (strict scanner) → log + return 0;
+      the store has already emitted the block audit.
+    * Any other failure after a non-empty extraction → enqueue the pairs
+      to ``dlq`` (Stream K.K7) when wired, else log-and-drop; return 0.
+
+    ``log_label`` distinguishes the two call sites in logs
+    (``memory.writeback`` vs ``memory.precompaction_flush``) while keeping
+    the run-end node's log strings byte-identical.
+    """
+    prompt = [
+        SystemMessage(content=_EXTRACT_SYSTEM),
+        HumanMessage(content=_render_trajectory(list(messages))),
+    ]
+    extracted: list[tuple[Literal["fact", "episodic"], str]] = []
+    try:
+        response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
+        extracted = parse_extracted_memories(_message_text(response))
+        if not extracted:
+            return 0
+        vectors = await token.run_cancellable(
+            embedder.embed([content for _, content in extracted], tenant_id=tenant_id)
+        )
+        items = [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                kind=kind,
+                content=content,
+                embedding=vector,
+                source_thread_id=str(thread_id) if thread_id is not None else None,
+            )
+            for (kind, content), vector in zip(extracted, vectors, strict=True)
+        ]
+        await memory_store.write(items)
+    except RunCancelledError:
+        raise
+    except MemoryInjectionBlockedError as exc:
+        # Capability Uplift Sprint #2 — LLM extracted something the strict
+        # scanner caught. The content is deterministic, so retrying will
+        # fail identically; drop the batch + log. The store has emitted
+        # MEMORY_INJECTION_BLOCKED audit(s) by the time we land here. Run
+        # is not affected.
+        logger.warning(
+            "%s_blocked count=%d — content rejected by strict scanner",
+            log_label,
+            len(exc.blocked),
+        )
+        return 0
+    except Exception as exc:
+        # Stream K.K7 — don't lose the work the LLM already did. If the
+        # extraction produced pairs, hand them to the DLQ for a retry
+        # sweep; otherwise (parse / cancel-shaped failures below the
+        # extraction line) log and drop as before.
+        if dlq is not None and extracted:
+            try:
+                # DLQ enqueue takes ``Sequence[tuple[str, str]]``; widen the
+                # Literal kind so mypy accepts the tuple element.
+                await dlq.enqueue(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    source_thread_id=str(thread_id) if thread_id is not None else None,
+                    extracted=[(str(k), c) for k, c in extracted],
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                logger.warning(
+                    "%s_failed — enqueued %d pair(s) to DLQ",
+                    log_label,
+                    len(extracted),
+                    exc_info=True,
+                )
+            except Exception:
+                logger.error("%s_dlq_enqueue_failed — pairs lost", log_label, exc_info=True)
+        else:
+            logger.warning("%s_failed — run unaffected", log_label, exc_info=True)
+        return 0
+    logger.info("%s count=%d", log_label, len(items))
+    return len(items)
+
+
 def make_memory_writeback_node(
     *,
     memory_store: MemoryStore,
@@ -235,6 +339,10 @@ def make_memory_writeback_node(
     pairs so a retry worker can re-do the embed + write later. Without
     a DLQ the previous best-effort log-and-drop behaviour is kept so
     unit tests that don't wire a queue still work.
+
+    Stream CM-3 — the extraction core now lives in the shared
+    :func:`flush_messages_to_memory`; this node is the thin run-end
+    adapter (resolve config scope → flush the full trajectory).
     """
 
     async def memory_writeback_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -247,75 +355,18 @@ def make_memory_writeback_node(
             return {}
         thread_id = configurable_uuid(config, "thread_id")
 
-        prompt = [
-            SystemMessage(content=_EXTRACT_SYSTEM),
-            HumanMessage(content=_render_trajectory(list(state["messages"]))),
-        ]
-        extracted: list[tuple[Literal["fact", "episodic"], str]] = []
-        try:
-            response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
-            extracted = parse_extracted_memories(_message_text(response))
-            if not extracted:
-                return {}
-            vectors = await token.run_cancellable(
-                embedder.embed([content for _, content in extracted], tenant_id=tenant_id)
-            )
-            items = [
-                MemoryItem(
-                    id=uuid4(),
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    kind=kind,
-                    content=content,
-                    embedding=vector,
-                    source_thread_id=str(thread_id) if thread_id is not None else None,
-                )
-                for (kind, content), vector in zip(extracted, vectors, strict=True)
-            ]
-            await memory_store.write(items)
-        except RunCancelledError:
-            raise
-        except MemoryInjectionBlockedError as exc:
-            # Capability Uplift Sprint #2 — LLM extracted something the
-            # strict scanner caught. The content is deterministic, so
-            # retrying will fail identically; drop the batch + log. The
-            # store has emitted MEMORY_INJECTION_BLOCKED audit(s) by the
-            # time we land here. Run is not affected.
-            logger.warning(
-                "memory.writeback_blocked count=%d — content rejected by strict scanner",
-                len(exc.blocked),
-            )
-            return {}
-        except Exception as exc:
-            # Stream K.K7 — don't lose the work the LLM already did. If
-            # the extraction produced pairs, hand them to the DLQ for a
-            # retry sweep; otherwise (parse / cancel-shaped failures
-            # below the extraction line) log and drop as before.
-            if dlq is not None and extracted:
-                try:
-                    # DLQ enqueue takes ``Sequence[tuple[str, str]]``; widen
-                    # the Literal kind so mypy accepts the tuple element.
-                    await dlq.enqueue(
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        source_thread_id=str(thread_id) if thread_id is not None else None,
-                        extracted=[(str(k), c) for k, c in extracted],
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
-                    logger.warning(
-                        "memory.writeback_failed — enqueued %d pair(s) to DLQ",
-                        len(extracted),
-                        exc_info=True,
-                    )
-                except Exception:
-                    logger.error(
-                        "memory.writeback_dlq_enqueue_failed — pairs lost",
-                        exc_info=True,
-                    )
-            else:
-                logger.warning("memory.writeback_failed — run unaffected", exc_info=True)
-            return {}
-        logger.info("memory.writeback count=%d", len(items))
+        await flush_messages_to_memory(
+            list(state["messages"]),
+            memory_store=memory_store,
+            embedder=embedder,
+            llm_caller=llm_caller,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            thread_id=thread_id,
+            token=token,
+            dlq=dlq,
+            log_label="memory.writeback",
+        )
         return {}
 
     return memory_writeback_node

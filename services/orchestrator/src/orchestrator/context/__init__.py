@@ -18,6 +18,9 @@ from orchestrator.context.compressor import (
     ContextOverflowError as ContextOverflowError,
 )
 from orchestrator.context.compressor import (
+    PreCompactionHook as PreCompactionHook,
+)
+from orchestrator.context.compressor import (
     estimate_tokens as estimate_tokens,
 )
 from orchestrator.context.working_window import (
@@ -60,6 +63,7 @@ from orchestrator.context.workspace_projection import (
 __all__ = [
     "ContextCompressor",
     "ContextOverflowError",
+    "PreCompactionHook",
     "ProjectionResult",
     "TrimResult",
     "WorkingWindow",

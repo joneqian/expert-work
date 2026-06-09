@@ -40,7 +40,7 @@ Mini-ADR L-2 highlights:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -48,6 +48,12 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from orchestrator.llm.caller import LLMCaller
 
 logger = logging.getLogger(__name__)
+
+#: Stream CM-3 — pre-compaction hook. Awaited with the middle slice that is
+#: about to be summarised away, *before* it is discarded, so an upper layer
+#: can flush its salient points to durable storage (long-term memory). The
+#: compressor stays pure — it owns no store/embedder; the hook is injected.
+PreCompactionHook = Callable[[Sequence[BaseMessage]], Awaitable[None]]
 
 
 #: Stream L.L2 — chars-per-token rule of thumb. The summariser prompt
@@ -230,12 +236,23 @@ class ContextCompressor:
         size meets or exceeds the threshold."""
         return estimate_tokens(messages) >= self.threshold_tokens
 
-    async def compress(self, messages: Sequence[BaseMessage]) -> list[BaseMessage]:
+    async def compress(
+        self,
+        messages: Sequence[BaseMessage],
+        *,
+        on_pre_compaction: PreCompactionHook | None = None,
+    ) -> list[BaseMessage]:
         """Compress the message list until it fits under the threshold.
 
         Returns a new list — never mutates the input. Raises
         :class:`ContextOverflowError` if ``max_passes`` attempts
         cannot bring the estimate below threshold.
+
+        Stream CM-3 — ``on_pre_compaction`` (when supplied) is awaited with
+        the middle slice each pass is about to discard, *before* it is
+        summarised away, so the caller can flush it to durable memory. It
+        is best-effort by contract: the caller must swallow its own
+        failures (the compressor does not guard the await).
         """
         current: list[BaseMessage] = list(messages)
         for pass_idx in range(self.max_passes):
@@ -248,7 +265,7 @@ class ContextCompressor:
                     )
                 return current
             try:
-                current = await self._compress_once(current)
+                current = await self._compress_once(current, on_pre_compaction=on_pre_compaction)
             except ContextOverflowError:
                 raise
             except Exception as exc:  # pragma: no cover — defensive
@@ -271,7 +288,12 @@ class ContextCompressor:
             )
         return current
 
-    async def _compress_once(self, messages: list[BaseMessage]) -> list[BaseMessage]:
+    async def _compress_once(
+        self,
+        messages: list[BaseMessage],
+        *,
+        on_pre_compaction: PreCompactionHook | None = None,
+    ) -> list[BaseMessage]:
         """One summarise-the-middle pass."""
         split = _split(messages, head_keep=self.head_keep, tail_keep=self.tail_keep)
         if not split.middle:
@@ -285,6 +307,11 @@ class ContextCompressor:
                 threshold=self.threshold_tokens,
                 passes=0,
             )
+        # Stream CM-3 — flush the middle to durable memory BEFORE it is
+        # summarised away (and before the summariser LLM call, so the
+        # salient points survive even if summarisation then fails).
+        if on_pre_compaction is not None:
+            await on_pre_compaction(split.middle)
         transcript = _format_middle_for_summary(split.middle)
         summary_text = await self._summarise(transcript)
         wrapped = SystemMessage(
