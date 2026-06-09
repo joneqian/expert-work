@@ -1388,6 +1388,30 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ---
 
+## Stream CM — 上下文与记忆管理强化（2026-06-09 起）— 设计 [STREAM-CM-DESIGN](./streams/STREAM-CM-DESIGN.md)
+
+把"上下文与记忆管理"从现状（检索层已强、运行时上下文控制偏薄、error-as-guidance 运行时版空白）补齐。**总基调（已拍板）**：② 混合——DB 真相源 + workspace 文件投影，**单向错时双流**（turn 末 DB→file 投影 / run 始 file→DB 受控 ingest），拒对称双向同步。依据：对比报告 [docs/research/2026-06-09-context-memory-management-comparison.md] + 改进框架 v2（含 2024–2026 外部证据）[docs/research/2026-06-09-helix-context-memory-improvement-framework.md]。
+
+> 关键架构约束（已源码核准）：orchestrator/supervisor **无 docker 卷写权**，投影 DB→file 必须经 warm sandbox `file_ops`；ingest 经 `read_volume_file` 只读读 + orchestrator DB 事务写（与 artifact"内容在卷/元数据在 DB"范式一致）。
+
+- [x] **CM-0 设计先行**（本次，PR #TBD）：STREAM-CM-DESIGN 全文——总体范围表（CM-0…CM-9/CM-N 映射框架报告 A/B/C/N）+ CM-0（文件投影 + 单向错时双流 + N1 recitation）详设（接缝核准 file:line / 同步模型 / 投影什么 / 挂钩点 / 数据协议变更 / 冲突校验 / 边界 / 可观测 / 测试 / 8 条 Mini-ADR CM-A1~A8 / 3 PR 切分）
+- **CM-0 实现**（地基，先行）：拆 3 PR
+  - **CM-0 PR1 投影骨架**：`orchestrator/context/workspace_projection.py`（render + WorkspaceProjector）+ `PlanStep.status`（CM-A5）+ `tools_node` 投影钩子（only-if-changed）+ MEMORY.md run 末投影 + `AuditAction.STATE_PROJECTED`（双处 Literal）+ metrics + unit
+  - **CM-0 PR2 受控 ingest**：WorkspaceIngester（`read_volume_file` 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `AgentState.last_projection_hash` + `STATE_INGESTED` + 漂移裁决（DB 权威）+ integration（真沙盒往返 + 人改回灌）
+  - **CM-0 PR3 N1 recitation**：`agent_node` 尾部 plan/todo 摘要注入 + 去重（vs `_inject_plan`）+ token gauge + unit
+- **CM-1（A1）运行时 error-as-guidance** P0：通用工具失败→grounded 恢复 advisory 注入主循环（泛化 L-4 `<mutation-advisory>`；注入须源自真实工具/执行信号）
+- **CM-2（A2）working memory 滑窗** P0：`agent_node` compressor 前廉价轮次截断（保 ToolCall↔ToolResult 配对）
+- **CM-3（A3）压缩前 flush** P1：compressor 压缩前回调 → 复用 `memory_writeback` 中途落盘
+- **CM-4（B5）reranker 接通** P1：memory recall Hybrid 后接 cross-encoder rerank（配置已预留 migration 0051）
+- **CM-5（B6）可恢复压缩** P1：超大工具结果存 artifact + 虚拟引用 + read 类豁免
+- **CM-6（B4）MMR + 时间衰减** P1：`memory/sql.py:retrieve()` RRF 后加 MMR + 时间衰减（叠加增益自测）
+- **CM-7（B7）结构化 note** P2：摘要"背景非指令"语义 + 显式更新操作（A-MEM/Mem0）
+- **CM-8（C8）文件投影 + UI 双通道** P2：依赖 CM-0 ingest + admin UI plan/todo 可编辑（补 J.8 modify UX）
+- **CM-9（C9 + N4）plan mode + effort + loop 去重** P2：plan mode 开关 + adaptive thinking `effort` 档位 + iteration budget 真实现 + 调用指纹去重
+- **CM-N5 评测基线** 贯穿：LongMemEval + LoCoMo 自测纳入 eval（验 CM-4/6/7）
+
+---
+
 ## 计划使用建议
 
 1. **作为活文档维护**：每完成一个 Stream，在对应 checklist 打勾；遇到偏差修订估时与依赖
