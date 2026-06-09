@@ -104,9 +104,11 @@ run 结束（memory_writeback 后）
 
 | 文件 | 来源（DB 真相源） | 方向 | 备注 |
 |---|---|---|---|
-| `/workspace/PLAN.md` | `AgentState.plan`（goal + steps） | 双向（投影 + ingest） | 人可改步骤 → ingest 回灌 |
-| `/workspace/TODO.md` | plan steps + **新增 step status** | 双向 | 勾选态需 `PlanStep.status`（CM-A5） |
+| `/workspace/PLAN.md` | `AgentState.plan`（goal + steps + status checkbox） | **双向（投影 + ingest）—— 唯一 ingest 源** | round-trippable：`render_plan_md`↔`parse_plan_md` 互逆；人改 goal/步骤/勾选 → ingest 回灌（CM-A5/A5b） |
+| `/workspace/TODO.md` | plan steps + status | **单向只读投影** | 编辑被忽略（要改去改 PLAN.md）；保留为人友好的扁平 checklist 视图 |
 | `/workspace/MEMORY.md` | `memory_item`（consolidated + top recalled） | **单向只读投影** | 不 ingest（记忆有独立写路径 memory_writeback + consolidator） |
+
+> **设计细化（CM-A5b，对 §2.3 原"TODO.md 双向"的修正）**：原设计 PLAN.md + TODO.md 都可 ingest，双源回灌易冲突（人同时改两处谁赢）。收敛为 **PLAN.md 单一 ingest 源**——它带 status checkbox 可精确 round-trip，是唯一可编辑回灌的文件；TODO.md/MEMORY.md 只读。这消除双源歧义，且 parse 失败永远丢弃文件改动、DB 保持权威（CM-A8 安全）。
 
 不变量：① **path-addressable**——固定路径，内容可随时从 DB 重建；② **compaction-stable**——投影文件不进 LLM 上下文（只 recitation 摘要进），故不受 compaction 影响、丢失可重建。
 
@@ -188,7 +190,8 @@ run 结束（memory_writeback 后）
 | **CM-A2** | 单向错时双流：turn 末 DB→file 投影 / run 始 file→DB 受控 ingest；拒对称双向同步 |
 | **CM-A3** | 投影 only-if-changed（plan hash 比对，存 `AgentState.last_projection_hash`），避免每 turn 无谓 sandbox 往返 |
 | **CM-A4** | ingest 默认仅 run 始 + resume-from-pause（人机协同是 approval-pause 驱动）；每-turn ingest 推迟，自测后再定 |
-| **CM-A5** | `PlanStep` 加 `status`（pending/in_progress/completed，默认 pending），支撑 TODO.md 勾选；无迁移（plan 在 checkpointer 非 DB 表） |
+| **CM-A5** | `PlanStep` 加 `status`（pending/in_progress/completed，默认 pending），支撑勾选；无迁移（plan 在 checkpointer 非 DB 表） |
+| **CM-A5b** | **PLAN.md 单一 ingest 源**：带 status checkbox 可精确 round-trip（`render_plan_md`↔`parse_plan_md` 互逆），是唯一可编辑回灌的文件；TODO.md/MEMORY.md 只读。消除双源回灌冲突；parse 失败→丢弃文件改动、DB 权威（修正 §2.3 原"TODO.md 双向"） |
 | **CM-A6** | `AuditAction` 加 `STATE_PROJECTED`/`STATE_INGESTED` —— 核准后 `AuditAction` 是**单源 StrEnum**（仅 protocol，无 control-plane 镜像；drift 只适用 `ResourceType` 这个双处 Literal）；投影 `resource_type` 复用现成 `user_workspace`，**不新增 ResourceType**。按项目纪律枚举成员随**发射 PR**加（STATE_PROJECTED→PR2 接线、STATE_INGESTED→PR2 ingest），避免"定义即未用" |
 | **CM-A7** | recitation 注入 plan 尾部摘要、与 `_inject_plan` 去重；非 system 区保 L-1 cache prefix |
 | **CM-A8** | 投影/ingest best-effort：无沙盒/冷启动/解析失败均不阻塞 run，记 metric+log；DB 始终权威，人的编辑校验不过则保留原文 + warn 不静默丢 |
@@ -197,8 +200,9 @@ run 结束（memory_writeback 后）
 
 1. **CM-0 PR1 — 投影纯核心（CI 全测）**：`context/workspace_projection.py`（render 纯函数 + `WorkspaceProjector` + `WorkspaceFileWriter` Protocol seam + only-if-changed，projector 收 `last_digest` 参数）+ `PlanStep.status`（CM-A5）+ 结构化日志可观测（与 compressor 同款，非 in-module Prometheus）+ unit。**不接图、不引未发射枚举、不加未读写的状态字段**（pure-core-先行，对齐 SE-4a/SE-5a）。
 2. **CM-0 PR2a — 投影接线**（已实现）：真 `SandboxWorkspaceWriter`（在 `tools/file_ops.py`，包 `build_write_wrapper`/`run_in_sandbox`，结构化满足 `WorkspaceFileWriter`）+ `build_react_graph` 新增可选 `workspace_writer_factory`（per-turn 绑 ctx）+ `tools_node` return 前 best-effort 投影钩子（`_project_workspace_state`）+ `AgentState.last_projection_hash`（投影游标）+ `AuditAction.STATE_PROJECTED` 发射（`_emit_state_projected_audit`，resource_type=`user_workspace`）+ `helix_cm_projection_total{outcome}` + agent_factory gate（persistent_workspace ∧ supervisor_client）。**MEMORY.md 无需单独 run 末投影**——`recalled_memories` 在 state、tools_node 每 turn 投影、only-if-changed 保证只写一次。单测：SandboxWorkspaceWriter（RecordingSupervisorClient 真 snippet 往返）+ graph wiring（fake writer 驱动 build_react_graph）。
-3. **CM-0 PR2b — 受控 ingest**：WorkspaceIngester（`read_volume_file` 读 + 解析 + 校验 + DB 事务回灌）+ `agent_node` run 始钩子 + `AuditAction.STATE_INGESTED` + 漂移裁决（DB 权威）+ integration（真沙盒往返 + 人改回灌）。
-4. **CM-0 PR3 — N1 recitation**：`agent_node` 尾部摘要注入 + 去重 + token gauge + unit。
+3. **CM-0 PR2b-i — ingest 纯核心（CI 全测）**（已实现）：`render_plan_md` 改带 status checkbox 使 PLAN.md round-trippable + `parse_plan_md`（render 的精确逆）+ `WorkspaceFileReader` Protocol seam + `WorkspaceIngester.ingest_plan`（读 PLAN.md→parse→仅当 ≠ current 才返回候选；read 失败/parse 失败/无变更均 no-op，永不 raise）+ TODO.md/MEMORY.md 转只读（CM-A5b）+ unit（round-trip / 勾选编辑 / 无 goal 或无 step→None / 无变更 no-op）。**不接图**。
+4. **CM-0 PR2b-ii — ingest 接线**：`SandboxWorkspaceReader`（`tools/file_ops.py`，包 `build_read_wrapper`/`run_in_sandbox`，not_found→None）+ entry-chain `workspace_ingest_node`（planner 后、agent 前，每 ainvoke 一次=run 始/resume）+ 注入扫描校验（`scan_for_threats` strict）+ `AuditAction.STATE_INGESTED` 发射 + 漂移裁决（DB 权威，校验不过保留原文 + warn）+ agent_factory gate + integration（真沙盒往返 + 人改 PLAN.md→resume→回灌）。
+5. **CM-0 PR3 — N1 recitation**：`agent_node` 尾部摘要注入 + 去重 + token gauge + unit。
 
 > 每个 PR 在本 §2 基础上局部细化；ITERATION-PLAN 增 Stream CM backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
 

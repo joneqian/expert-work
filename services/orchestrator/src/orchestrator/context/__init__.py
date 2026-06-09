@@ -24,10 +24,19 @@ from orchestrator.context.workspace_projection import (
     ProjectionResult as ProjectionResult,
 )
 from orchestrator.context.workspace_projection import (
+    WorkspaceFileReader as WorkspaceFileReader,
+)
+from orchestrator.context.workspace_projection import (
     WorkspaceFileWriter as WorkspaceFileWriter,
 )
 from orchestrator.context.workspace_projection import (
+    WorkspaceIngester as WorkspaceIngester,
+)
+from orchestrator.context.workspace_projection import (
     WorkspaceProjector as WorkspaceProjector,
+)
+from orchestrator.context.workspace_projection import (
+    parse_plan_md as parse_plan_md,
 )
 from orchestrator.context.workspace_projection import (
     render_memory_md as render_memory_md,
@@ -43,9 +52,12 @@ __all__ = [
     "ContextCompressor",
     "ContextOverflowError",
     "ProjectionResult",
+    "WorkspaceFileReader",
     "WorkspaceFileWriter",
+    "WorkspaceIngester",
     "WorkspaceProjector",
     "estimate_tokens",
+    "parse_plan_md",
     "render_memory_md",
     "render_plan_md",
     "render_todo_md",

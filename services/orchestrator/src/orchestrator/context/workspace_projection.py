@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from helix_agent.protocol import MemoryItem, Plan
+from helix_agent.protocol import MemoryItem, Plan, PlanStep
+from helix_agent.protocol.plan import PlanStepStatus
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +38,28 @@ PLAN_FILE = "PLAN.md"
 TODO_FILE = "TODO.md"
 MEMORY_FILE = "MEMORY.md"
 
-_PROJECTION_NOTE = (
-    "<!-- Projected from agent state (DB is the source of truth). "
-    "Edits here are ingested at the next run start. -->"
+#: PLAN.md is the single canonical, round-trippable ingest source (Mini-ADR
+#: CM-A5b): edit it to steer the agent. TODO.md / MEMORY.md are read-only
+#: views — edits there are ignored.
+_PLAN_NOTE = (
+    "<!-- Edit this file to steer the agent: change the goal, add/remove/"
+    "reorder steps, or flip a checkbox ([ ] todo / [~] in progress / [x] "
+    "done). Changes are ingested at the next run start; the database stays "
+    "the source of truth. -->"
 )
-_MEMORY_NOTE = "<!-- Read-only projection of long-term memory. -->"
+_READONLY_NOTE = (
+    "<!-- Read-only projection (the database is the source of truth). Edits "
+    "here are NOT ingested — edit PLAN.md to steer the agent. -->"
+)
+
+#: Status ↔ checkbox marker. PLAN.md round-trips through these (render ↔ parse).
+_STATUS_BOX: dict[PlanStepStatus, str] = {"pending": " ", "in_progress": "~", "completed": "x"}
+_BOX_STATUS: dict[str, PlanStepStatus] = {" ": "pending", "~": "in_progress", "x": "completed"}
+
+#: One PLAN.md step line, e.g. ``- [x] 1. write tests``. ``id`` is non-greedy
+#: up to the first ``. `` so dotted ids (``1.2``) parse correctly.
+_PLAN_STEP_RE = re.compile(r"^- \[(.)\] (\S+?)\.\s+(.*)$", re.MULTILINE)
+_PLAN_GOAL_RE = re.compile(r"^\*\*Goal:\*\*\s*(.+)$", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
@@ -49,22 +68,25 @@ _MEMORY_NOTE = "<!-- Read-only projection of long-term memory. -->"
 
 
 def render_plan_md(plan: Plan | None) -> str:
-    """Render ``PLAN.md`` (goal + ordered steps). ``None`` → empty string
-    (no plan to project, e.g. a plain ReAct run)."""
+    """Render ``PLAN.md`` — the canonical, round-trippable plan view (goal +
+    ordered steps with a status checkbox). :func:`parse_plan_md` is its exact
+    inverse. ``None`` → empty string (no plan, e.g. a plain ReAct run)."""
     if plan is None:
         return ""
-    lines = [_PROJECTION_NOTE, "", "# Plan", "", plan.goal, "", "## Steps", ""]
-    lines.extend(f"{step.id}. {step.description}" for step in plan.steps)
+    lines = [_PLAN_NOTE, "", "# Plan", "", f"**Goal:** {plan.goal}", "", "## Steps", ""]
+    lines.extend(
+        f"- [{_STATUS_BOX.get(step.status, ' ')}] {step.id}. {step.description}"
+        for step in plan.steps
+    )
     return "\n".join(lines) + "\n"
 
 
 def render_todo_md(plan: Plan | None) -> str:
-    """Render ``TODO.md`` as a checkbox list driven by each step's status:
-    ``completed`` → ``[x]``; ``in_progress`` → ``[ ]`` with an explicit
-    marker; ``pending`` → ``[ ]``. ``None`` → empty string."""
+    """Render ``TODO.md`` — a read-only flat checklist: ``completed`` → ``[x]``,
+    ``in_progress`` → ``[ ]`` + marker, ``pending`` → ``[ ]``. ``None`` → ``""``."""
     if plan is None:
         return ""
-    lines = [_PROJECTION_NOTE, "", "# TODO", ""]
+    lines = [_READONLY_NOTE, "", "# TODO", ""]
     for step in plan.steps:
         box = "x" if step.status == "completed" else " "
         suffix = " — in progress" if step.status == "in_progress" else ""
@@ -77,9 +99,27 @@ def render_memory_md(memories: Sequence[MemoryItem]) -> str:
     long-term memories. Empty sequence → empty string."""
     if not memories:
         return ""
-    lines = [_MEMORY_NOTE, "", "# Memory", ""]
+    lines = [_READONLY_NOTE, "", "# Memory", ""]
     lines.extend(f"- ({item.kind}) {item.content}" for item in memories)
     return "\n".join(lines) + "\n"
+
+
+def parse_plan_md(text: str) -> Plan | None:
+    """Parse a (possibly human-edited) ``PLAN.md`` back into a :class:`Plan` —
+    the exact inverse of :func:`render_plan_md`. Tolerant of surrounding prose
+    and the HTML-comment header. Returns ``None`` when the text is not a valid
+    plan (no ``**Goal:**`` line or no step lines) so the caller keeps the DB
+    authoritative rather than ingesting garbage (Mini-ADR CM-A8)."""
+    goal_match = _PLAN_GOAL_RE.search(text)
+    if goal_match is None:
+        return None
+    steps: list[PlanStep] = []
+    for box, step_id, description in _PLAN_STEP_RE.findall(text):
+        status = _BOX_STATUS.get(box, "pending")
+        steps.append(PlanStep(id=step_id, description=description.strip(), status=status))
+    if not steps:
+        return None
+    return Plan(goal=goal_match.group(1).strip(), steps=tuple(steps))
 
 
 # ---------------------------------------------------------------------------
@@ -178,3 +218,48 @@ class WorkspaceProjector:
             extra={"written": written, "all_ok": all_ok},
         )
         return ProjectionResult(written=tuple(written), skipped=False, digest=out_digest)
+
+
+# ---------------------------------------------------------------------------
+# Ingester (file → DB candidate)
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceFileReader(Protocol):
+    """Reads one workspace file, returning its text or ``None`` when absent.
+    The real implementation rides the warm-sandbox ``read_file`` snippet;
+    tests inject a fake."""
+
+    async def read(self, rel: str) -> str | None:
+        """Return the text of workspace-relative ``rel``, or ``None`` if absent."""
+
+
+@dataclass(frozen=True)
+class WorkspaceIngester:
+    """Reads the human-/agent-editable ``PLAN.md`` back into a candidate
+    :class:`Plan` (Mini-ADR CM-A2, the ``file → DB`` direction). The caller
+    validates + applies it under DB authority; this layer only reads + parses.
+    """
+
+    reader: WorkspaceFileReader
+
+    async def ingest_plan(self, *, current: Plan | None) -> Plan | None:
+        """Read + parse ``PLAN.md``. Returns the parsed plan **only** when it
+        differs from ``current`` (a genuine edit); returns ``None`` when the
+        file is absent, unparseable, or unchanged. Never raises — projection /
+        ingest must not break a run (Mini-ADR CM-A8); a read failure is logged
+        and treated as "no edit"."""
+        try:
+            text = await self.reader.read(PLAN_FILE)
+        except Exception:
+            logger.warning("workspace_ingest.read_failed", exc_info=True)
+            return None
+        if not text:
+            return None
+        parsed = parse_plan_md(text)
+        if parsed is None:
+            logger.warning("workspace_ingest.parse_failed")
+            return None
+        if parsed == current:
+            return None
+        return parsed
