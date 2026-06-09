@@ -56,7 +56,16 @@ _SKILL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 #: registers the matching tool objects (it alone has ``agent_name`` + the
 #: ``SkillStore``); ``assembly._register_builtin`` treats them as no-ops.
 SKILL_AUTHORING_BUILTINS: frozenset[str] = frozenset(
-    {"author_skill", "refine_skill", "fork_skill", "propose_skill_to_tenant"}
+    {
+        "author_skill",
+        "refine_skill",
+        "fork_skill",
+        "propose_skill_to_tenant",
+        # Stream SE — SE-10 text-class harness component authoring.
+        "note_behavior_patch",
+        "clarify_tool_usage",
+        "remember",
+    }
 )
 
 
@@ -521,7 +530,252 @@ class ProposeSkillToTenantTool:
         )
 
 
-_AuthoringTool = AuthorSkillTool | RefineSkillTool | ForkSkillTool | ProposeSkillToTenantTool
+# ── Stream SE — SE-10 text-class harness components (Mini-ADR SE-A15) ──────
+# Three builtins author the no-execution-risk text components, reusing the
+# AuthorSkillTool discipline (threat scan / DRAFT / agent_private / provenance
+# / audit). They carry no tools, so they are never high-risk. ``component_type``
+# is set on the parent skill; activation later still flows through the same
+# replay-validation + governance gate as a plain skill (SE-A0 unchanged).
+
+
+async def _author_text_component(
+    *,
+    store: SkillStore,
+    agent_name: str,
+    audit_logger: AuditLogger | None,
+    ctx: ToolContext,
+    name: str,
+    description: str,
+    prompt_fragment: str,
+    component_type: str,
+    target_tool_name: str | None,
+    noun: str,
+) -> ToolResult:
+    """Shared create-path for the three text-component authoring builtins."""
+    tenant_id, user_id = _require(ctx)
+    if not _SKILL_NAME_RE.match(name):
+        raise ValueError(f"invalid name {name!r}: must match ^[a-z][a-z0-9_-]{{0,63}}$")
+    if not prompt_fragment.strip():
+        raise ValueError("prompt_fragment must not be empty")
+
+    blocked = _block_if_threat(prompt_fragment)
+    if blocked is not None:
+        return blocked
+
+    skill_id = uuid4()
+    try:
+        await store.create_skill(
+            skill_id=skill_id,
+            tenant_id=tenant_id,
+            name=name,
+            description=description or name,
+            visibility="agent_private",
+            created_by_user_id=user_id,
+            created_by_agent_name=agent_name,
+            component_type=component_type,  # type: ignore[arg-type]
+            target_tool_name=target_tool_name,
+        )
+    except DuplicateSkillError:
+        return ToolResult(
+            content=f"[A skill/component named {name!r} already exists. Pick another name.]",
+            meta={"result": "duplicate", "is_error": True},
+        )
+    version = await store.add_version(
+        version_id=uuid4(),
+        skill_id=skill_id,
+        tenant_id=tenant_id,
+        prompt_fragment=prompt_fragment,
+        tool_names=(),
+        description=description or name,
+        authored_by="agent",
+        content_hash=compute_content_hash(prompt_fragment, None),
+        high_risk=False,
+        evolution_origin="in_session",
+    )
+    await _emit(
+        audit_logger,
+        ctx,
+        action=AuditAction.SKILL_AUTHORED_BY_AGENT,
+        tenant_id=tenant_id,
+        skill_id=skill_id,
+        details={"version": version.version, "component_type": component_type},
+    )
+    return ToolResult(
+        content=(
+            f"Saved {noun} {name!r} as v{version.version} (DRAFT, agent_private). "
+            f"It will not be used until validated + activated."
+        ),
+        meta={
+            "result": "ok",
+            "skill_name": name,
+            "skill_id": str(skill_id),
+            "version": version.version,
+            "component_type": component_type,
+        },
+    )
+
+
+@dataclass(frozen=True)
+class NoteBehaviorPatchTool:
+    """``note_behavior_patch`` — author an agent-level behavior refinement."""
+
+    store: SkillStore
+    agent_name: str
+    audit_logger: AuditLogger | None = None
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="note_behavior_patch",
+            description=(
+                "Record a reusable behavior refinement for yourself (e.g. 'for "
+                "reconciliation tasks, list the verification checklist first'). "
+                "Saved as a DRAFT private behavior patch; it does not affect any "
+                "run until validated and activated."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "slug, ^[a-z][a-z0-9_-]{0,63}$"},
+                    "description": {"type": "string", "description": "one-line summary (optional)"},
+                    "prompt_fragment": {
+                        "type": "string",
+                        "description": "the behavior refinement (markdown)",
+                    },
+                },
+                "required": ["name", "prompt_fragment"],
+            },
+            is_read_only=False,
+            side_effect="reversible",
+        )
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        return await _author_text_component(
+            store=self.store,
+            agent_name=self.agent_name,
+            audit_logger=self.audit_logger,
+            ctx=ctx,
+            name=str(args.get("name", "")).strip(),
+            description=str(args.get("description", "")).strip(),
+            prompt_fragment=str(args.get("prompt_fragment", "")),
+            component_type="system_prompt",
+            target_tool_name=None,
+            noun="behavior patch",
+        )
+
+
+@dataclass(frozen=True)
+class ClarifyToolUsageTool:
+    """``clarify_tool_usage`` — author a usage note for an already-bound tool."""
+
+    store: SkillStore
+    agent_name: str
+    audit_logger: AuditLogger | None = None
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="clarify_tool_usage",
+            description=(
+                "Record a usage clarification for one of your tools (e.g. a "
+                "caveat or example). Text only — it never changes the tool's "
+                "parameters or behavior. Saved as a DRAFT private note."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "slug, ^[a-z][a-z0-9_-]{0,63}$"},
+                    "target_tool_name": {
+                        "type": "string",
+                        "description": "the tool this note clarifies",
+                    },
+                    "description": {"type": "string", "description": "one-line summary (optional)"},
+                    "prompt_fragment": {
+                        "type": "string",
+                        "description": "the usage clarification (markdown)",
+                    },
+                },
+                "required": ["name", "target_tool_name", "prompt_fragment"],
+            },
+            is_read_only=False,
+            side_effect="reversible",
+        )
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        target = str(args.get("target_tool_name", "")).strip()
+        if not target:
+            raise ValueError("target_tool_name must not be empty")
+        return await _author_text_component(
+            store=self.store,
+            agent_name=self.agent_name,
+            audit_logger=self.audit_logger,
+            ctx=ctx,
+            name=str(args.get("name", "")).strip(),
+            description=str(args.get("description", "")).strip(),
+            prompt_fragment=str(args.get("prompt_fragment", "")),
+            component_type="tool_description",
+            target_tool_name=target,
+            noun="tool note",
+        )
+
+
+@dataclass(frozen=True)
+class RememberTool:
+    """``remember`` — author a reusable long-term memory entry."""
+
+    store: SkillStore
+    agent_name: str
+    audit_logger: AuditLogger | None = None
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="remember",
+            description=(
+                "Record a durable fact or preference to carry across sessions "
+                "(e.g. 'this user's reports use calendar-month periods'). Saved "
+                "as a DRAFT private memory entry; activated after validation."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "slug, ^[a-z][a-z0-9_-]{0,63}$"},
+                    "description": {"type": "string", "description": "one-line summary (optional)"},
+                    "prompt_fragment": {
+                        "type": "string",
+                        "description": "the fact/preference to remember (markdown)",
+                    },
+                },
+                "required": ["name", "prompt_fragment"],
+            },
+            is_read_only=False,
+            side_effect="reversible",
+        )
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        return await _author_text_component(
+            store=self.store,
+            agent_name=self.agent_name,
+            audit_logger=self.audit_logger,
+            ctx=ctx,
+            name=str(args.get("name", "")).strip(),
+            description=str(args.get("description", "")).strip(),
+            prompt_fragment=str(args.get("prompt_fragment", "")),
+            component_type="memory_entry",
+            target_tool_name=None,
+            noun="memory entry",
+        )
+
+
+_AuthoringTool = (
+    AuthorSkillTool
+    | RefineSkillTool
+    | ForkSkillTool
+    | ProposeSkillToTenantTool
+    | NoteBehaviorPatchTool
+    | ClarifyToolUsageTool
+    | RememberTool
+)
 
 
 def build_skill_authoring_tools(
@@ -548,4 +802,14 @@ def build_skill_authoring_tools(
         tools.append(
             ProposeSkillToTenantTool(store=store, agent_name=agent_name, audit_logger=audit_logger)
         )
+    if "note_behavior_patch" in wanted:
+        tools.append(
+            NoteBehaviorPatchTool(store=store, agent_name=agent_name, audit_logger=audit_logger)
+        )
+    if "clarify_tool_usage" in wanted:
+        tools.append(
+            ClarifyToolUsageTool(store=store, agent_name=agent_name, audit_logger=audit_logger)
+        )
+    if "remember" in wanted:
+        tools.append(RememberTool(store=store, agent_name=agent_name, audit_logger=audit_logger))
     return tools

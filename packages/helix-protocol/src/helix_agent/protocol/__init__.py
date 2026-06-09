@@ -150,6 +150,7 @@ from helix_agent.protocol.service_account import (
 )
 from helix_agent.protocol.skill import (
     SKILL_REF_PATTERN,
+    ComponentType,
     EvalVerdict,
     EvolutionOrigin,
     KillSwitch,
@@ -250,6 +251,7 @@ __all__ = [
     "CheckResult",
     "CodePackageSpec",
     "CommitRequest",
+    "ComponentType",
     "CredentialsMode",
     "CurationCandidateRecord",
     "CurationSignal",
