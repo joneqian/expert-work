@@ -433,10 +433,23 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 
 ---
 
+## 9ter. SE-11 — 进化变更的「预测—自动证伪」纪律（借鉴 agentic-harness-engineering Change Manifest）
+
+闭合「改动前预测 → 上线后证伪」环:promote 时的重放预测在生产中兑现了多少。**叠加不替代**回滚——verdict 只诊断 + 反哺,绝不单独下线(下线仍由 `decide_rollback` 二项检验裁决,守不信自评红线)。
+
+- **预测来源(SE-A18)**:replay-derived 预测**就是** `skill_eval_result` 行(baseline_score→skill_score),无需冗余预测表;LLM-generator 自陈预测推迟 SE-11b(replay 证据更硬)。
+- **数据模型**:迁移 `0070_skill_pred_verdict` 单新表 `skill_prediction_verdict`(verdict 5 值 + predicted/realized_delta + realized_fraction + baseline/skill/observed + n_window)。`SkillPredictionVerdict` DTO + `PredictionVerdict` Literal。NULL-tenant RLS ENABLE-only,同 0065/0067。
+- **判定(纯逻辑 `skill_prediction_verdict.py`)**:`realized_fraction =(observed_rate - baseline_score)/(skill_score - baseline_score)`——预测增益在生产兑现的比例;按带分 EFFECTIVE(≥0.8)/PARTIALLY(≥0.3)/INEFFECTIVE(≥-0.2,≈无技能)/MIXED(低于无技能但高于地板)/HARMFUL(<absolute_floor)/INSUFFICIENT(n<n_min 不落库)。**版本级**净效应判定(诚实:无 per-scenario 分类器,不 fake 步级精度,与 SE-A8 粗粒度一致)。
+- **证伪归宿(SE-A19)**:并入 `RollbackMonitor` sweep——它已枚举 ACTIVE distilled + 算 observed_rate/n_cases;verdict 复用同窗口同输入(`_resolve_target` 改返 pass eval 取 baseline/skill_score),与 `decide_rollback` 同 pass 计算、各产各的(rollback 决定 archive,verdict 只记录),best-effort 不阻塞 sweep。
+- **scope 边界(诚实)**:verdict 已持久化 + 可 `list_prediction_verdicts` 查询(治理 UI / co-evolve 反哺的 substrate);**SE-11b 跟进**:generator-LLM 自陈预测源 + co-evolve `revise` 步消费 verdict 反哺 + HARMFUL 调严 rollback theta(当前 verdict 与 rollback 同 sweep 独立计算即已叠加)。
+- 验证:`test_skill_prediction_verdict.py`(6 纯逻辑带 + 3 monitor 集成:effective 不 archive / harmful 与 rollback 并存 / 窗口不足跳过)。
+
 ## 10. Mini-ADR 索引
 
 | ID | 决策 | 章节 |
 |---|---|---|
+| SE-A18 | 预测—证伪:replay 预测=eval 行(无冗余表),单 verdict 表;realized_fraction 版本级带判定;generator 自陈源推迟 SE-11b | § 9ter |
+| SE-A19 | verdict 并入 rollback sweep 同窗口同输入,叠加不替代(只诊断+反哺,下线仍由 decide_rollback) | § 9ter |
 | SE-A0 | 验证门单一收口:自动 active 必须有 pass 证据 | § 2 |
 | SE-A1 | 数据模型纯增量 + NULL-tenant RLS | § 4 |
 | SE-A2 | `skill_eval_result` 作 grounding 可溯账 | § 4.3 |
