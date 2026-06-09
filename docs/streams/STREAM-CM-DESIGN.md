@@ -8,7 +8,7 @@
 >
 > **零债收尾规则**（[memory:zero-tech-debt]）：每条交付收尾 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 >
-> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）详设已锁定；CM-2…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
+> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）详设已锁定；CM-3…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
 
 ---
 
@@ -20,7 +20,7 @@
 |----|---------|-----|------|--------|---------|
 | **CM-0** | C0 + N1 | 状态内化、无文件投影；workspace 卷已有但状态不可见、不可手改 | 状态↔workspace 文件投影 + 单向错时双流 + recitation 复诵 | **先行** | CM-A1…A8（本文详设） |
 | CM-1 | A1 | 运行时主循环工具失败无 grounded 恢复建议（SE-12 是离线 skill 进化，L-4 只覆盖文件 mutation） | 通用工具失败→结构化恢复 advisory 注入主循环 | P0 | CM-B1…B6（§3 详设） |
-| CM-2 | A2 | 无"保留最近 N 轮"廉价前置闸，轻溢出每次走 LLM 摘要 | `agent_node` compressor 前加滑窗截断（保 ToolCall↔ToolResult 配对） | P0 | 待细化 |
+| CM-2 | A2 | 无"保留最近 N 轮"廉价前置闸，轻溢出每次走 LLM 摘要 | `agent_node` compressor 前加滑窗截断（保 ToolCall↔ToolResult 配对） | P0 | CM-C1…C6（§4 详设） |
 | CM-3 | A3 | compressor 丢弃中段前无 flush，`memory_writeback` 只在 run 末 | 压缩前回调 → 复用 writeback 通道中途落盘 | P1 | 待细化 |
 | CM-4 | B5 | rerank_provider/model 配置预留但检索路径无 rerank 调用 | memory recall Hybrid 召回后接 cross-encoder rerank | P1 | 待细化 |
 | CM-5 | B6 | 超大工具结果 char-cap 截断丢弃，不可找回 | 超限结果存 artifact + 虚拟引用 + read 类豁免（"可恢复压缩"通用原则） | P1 | 待细化 |
@@ -351,7 +351,130 @@ tools_node（每个失败的工具调用）
 
 ---
 
-## 4. 与既有 Stream 的衔接
+## 4. CM-2 详细设计 —— Working Memory 滑动窗口（compressor 前的廉价前置闸）
+
+> **目标**：在 `agent_node` 入口、compressor preflight **之前**，加一道**按用户轮次裁剪、廉价、无 LLM**的滑动窗口闸。轻溢出场景直接裁到"最近 N 轮"即可压回阈值下，**省掉 compressor 的 LLM 摘要调用**；compressor 退为只处理裁剪后仍重溢出的第二道闸。映射框架报告 A2（OpenClaw `limitHistoryTurns`，生产 bug #1084 验证配对完整性是硬约束）。
+>
+> **核心策略**：**token-gate 的轮次裁剪**——仅当估算 prompt 超阈值才裁，未溢出**完全 no-op（零行为变更）**；裁剪只在 **HumanMessage 边界**切，天然保 ToolCall↔ToolResult 配对；**保首轮（初始任务）+ 最近 N 轮**，对抗"裁掉原始目标"。
+
+### 4.1 关键约束（接缝核准结论，已源码核准）
+
+| 约束 | 事实 | file:line |
+|---|---|---|
+| **compressor 是唯一现有压缩闸，且是 LLM 重武器** | `agent_node` 仅在所有注入后调 `context_compressor.should_compress` → `compress`（调摘要 LLM）；无任何"保留最近 N 轮"的廉价前置裁剪 | `graph_builder/builder.py:317-318`、`context/compressor.py:228-272` |
+| **裁剪只作用当次 prompt，不改 checkpoint** | `agent_node` return 只 append `response`（`{"messages":[response]}`），从不重写 history；compressor 对 `messages` 的裁剪只影响本次 LLM 调用，checkpoint 里完整 history 保留 → **window 裁掉的中间轮在 checkpoint 无永久丢失**，下一 turn 从 checkpoint 重新加载再裁 | `builder.py:363-380`（return 只 append）、`:317-318`（compress 只改局部 `messages`） |
+| **leading SystemMessage 必须冻结（L1 不变量）** | compressor `_split` 把 leading `SystemMessage` 排除在 head/tail 之外原样保留；window 必须沿用同一不变量，永不裁系统前缀 | `context/compressor.py:146-159` |
+| **复用估算器，不另造** | `estimate_tokens(messages)=total_chars//4` 已是 compressor 的 preflight 估算；window 的 token-gate 复用同一函数，保口径一致 | `context/compressor.py:94-105` |
+| **注入块在 window 之后加** | plan(J.1)/memory(J.3)/recovery-advisory(CM-1) 注入都在 `messages=list(state["messages"])` 之后；window 放在**注入之前**，只裁原始 history，绝不裁当前 turn 的引导块 | `builder.py:279`（取 history）、`:282-308`（注入） |
+| **compressor 同款配置范式** | `ContextCompressionPolicy` 经 `PolicySpec.context_compression` → factory 构造 `ContextCompressor` 传 `build_react_graph`；window 镜像此范式（新 `WorkingMemoryPolicy` → `WorkingWindow` → 新参数） | `agent_spec.py:420-449`、`agent_factory.py:478-488`、`builder.py:201` |
+
+> **结论**：CM-2 = 新增 `context/working_window.py`（与 compressor 同层），在 `agent_node` 取 history 后、注入前插一道 token-gate 轮次裁剪。因裁剪不改 checkpoint，**无永久信息损失**，与 CM-3（压缩前 flush）解耦——CM-3 是为 compressor 的有损摘要服务，window 本身不需要它兜底。
+
+### 4.2 设计：token-gate → 轮次裁剪 → compressor 兜底（三段）
+
+```
+agent_node 入口： messages = list(state["messages"])
+  │
+  ├─ CM-2 working_window.apply(messages)        ← 新增第一道闸（本设计）
+  │     ├─ should_trim? estimate_tokens >= threshold_tokens     （未溢出 → 原样返回，零行为变更）
+  │     └─ 溢出 → trim_to_recent_turns：
+  │           leading systems（冻结）
+  │           + [首轮 first turn]（keep_first_turn，含初始任务目标）
+  │           + 最近 max_recent_turns 个用户轮（HumanMessage 边界切）
+  │           丢弃中间老轮（仅本次 prompt 视图；checkpoint 完整）
+  │
+  ├─ 注入 plan / memory / recovery-advisory（不受 window 影响）
+  │
+  └─ compressor.should_compress(messages)?      ← 退为第二道闸
+        裁剪后仍 >= compressor 阈值（如最近 N 轮里有超大 tool result）→ LLM 摘要中段
+        裁剪后 < 阈值 → should_compress=False，省掉 LLM 调用 ✓
+```
+
+两闸协同：window 与 compressor 默认同 `threshold_pct`（0.7）。window 先跑（注入前），多数轻溢出裁完即 < 阈值 → compressor 跳过。仅"最近 N 轮自身仍超窗"的重溢出才落到 compressor。
+
+### 4.3 ToolCall↔ToolResult 配对保证（OpenClaw #1084 硬约束）
+
+裁剪点**恒为 HumanMessage 索引**。论证：良构 ReAct history 中，`AIMessage(tool_calls)` 后紧跟对应 `ToolMessage`，一个 `HumanMessage` 永远是新一轮的开始、**绝不出现在 tool_use↔tool_result 之间**。因此：
+
+- 保留"从某 HumanMessage 起的后缀"→ 后缀内所有 tool 对完整。
+- 首轮片段 `remainder[首个HumanMessage : 第二个HumanMessage]` 以 HumanMessage 始、HumanMessage 前止 → 完整。
+
+退化与去重：① 无 HumanMessage（纯系统/AI 序列，无法定义轮次）→ no-op 全留；② 用户轮总数 ≤ `max_recent_turns`(+首轮)→ no-op；③ 首轮片段与最近 N 轮窗重叠 → 不重复拼首轮，直接返回 `leading + remainder[窗起:]`。三种边界均有单测。
+
+### 4.4 数据/协议变更
+
+1. **新模块 `orchestrator/context/working_window.py`**（与 `compressor.py` 同层 `context/`，复用其 `estimate_tokens` + leading-system 分离逻辑，无环）：
+   ```python
+   @dataclass(frozen=True)
+   class TrimResult:
+       messages: list[BaseMessage]
+       dropped_turns: int          # 裁掉的用户轮数（0 = no-op）
+
+   def trim_to_recent_turns(
+       messages: Sequence[BaseMessage], *, max_recent_turns: int, keep_first_turn: bool
+   ) -> TrimResult: ...            # 纯函数、token-unaware、按 HumanMessage 边界切
+
+   @dataclass(frozen=True)
+   class WorkingWindow:
+       context_window: int
+       threshold_pct: float = 0.7
+       max_recent_turns: int = 20
+       keep_first_turn: bool = True
+       @property
+       def threshold_tokens(self) -> int: ...
+       def should_trim(self, messages) -> bool: ...     # token-gate（复用 estimate_tokens）
+       def apply(self, messages) -> TrimResult: ...      # gate 通过才 trim，否则原样
+   ```
+2. **新 `WorkingMemoryPolicy`**（`agent_spec.py`）挂 `PolicySpec.working_memory`（`extra="forbid"`，与 `context_compression` 并列）：`enabled: bool=True` / `threshold_pct: float=0.7(gt 0, le 1)` / `max_recent_turns: int=20(gt 0)` / `keep_first_turn: bool=True`。默认值保守：典型对话 ≤20 轮或未溢出 → no-op，**对现有 manifest 零行为变更**。
+3. **factory 接线**（`agent_factory.py`）：`wm_policy = spec.spec.policies.working_memory`；`enabled` 则构造 `WorkingWindow(context_window=spec.spec.model.context_window, ...)` 传 `build_react_graph(working_window=...)`。
+4. **builder 接线**（`graph_builder/builder.py`）：新参数 `working_window: WorkingWindow | None = None`；`agent_node` 在 `messages = list(state["messages"])` 后、plan 注入前：`if working_window is not None: result = working_window.apply(messages); messages = result.messages` + emit metric。
+5. **不改 `AgentState` / `ToolResult` / `ToolSpec`**——window 是纯 prompt 视图裁剪，无状态通道、无 checkpoint 变更、无迁移。
+
+### 4.5 边界情况
+
+| 场景 | 处理 |
+|---|---|
+| 未溢出（estimate < 阈值） | `should_trim=False` → 原样返回，`dropped_turns=0`，零行为变更 |
+| 无 HumanMessage（纯系统/AI 序列） | 无法定义轮次 → no-op 全留（安全退化） |
+| 用户轮 ≤ max_recent_turns(+首轮) | no-op，全留 |
+| 含 tool_calls 的轮被裁 | 切点恒在 HumanMessage 边界 → 保留部分无悬空 tool_use/tool_result（单测覆盖） |
+| 首轮片段与最近 N 轮窗重叠 | 去重，直接 `leading + remainder[窗起:]`，不重复拼首轮 |
+| disabled | factory 不构造 WorkingWindow，`build_react_graph(working_window=None)` → 与 CM-2 前完全一致 |
+| window 裁后仍超 compressor 阈值 | compressor 第二道闸接手摘要中段（协同，非互斥） |
+
+### 4.6 可观测（零债"可观测齐全"）
+
+- `helix_cm_working_window_trim_total{outcome}`（counter）—— `outcome=trimmed/noop`，看 window 实际触发率（高 trimmed 率 ⇒ 省了多少 compressor LLM 调用）。
+- `helix_cm_working_window_dropped_turns`（gauge）—— 最近一次裁掉的用户轮数，观测裁剪深度。
+- 复用 compressor 既有 `estimate_tokens`，不新造估算 metric；compressor 自身的压缩日志不动 → 通过"trim 触发但 compressor 未触发"的差值即可读出 LLM 节省量。
+
+### 4.7 测试 & 验收（CM-2 Exit）
+
+- **unit（≥85%，纯核心）**：token-gate（未溢出 no-op / 溢出触发）；轮次裁剪保留首轮 + 最近 N 轮；HumanMessage 边界切**不破 tool_use↔tool_result 对**（含 tool_calls 轮被裁）；leading SystemMessage 冻结；无 HumanMessage / 轮数不足 / 首轮与窗重叠三种边界 no-op 或去重；`dropped_turns` 计数正确。
+- **integration（真 graph）**：scripted LLM + 构造一段长 history（>N 轮且超阈值）→ 发给 LLM 的 prompt 只含 首轮+最近 N 轮 且 tool 对完整；checkpoint 仍含完整 history（下一 turn 可重新加载）；与 compressor 协同（裁后 < 阈值 → compressor 不触发）。
+- **零债 6 条**：无 TODO/FIXME；§4 与实现一致；metric 齐全；CI 8/8 + CodeQL 无新增 high；现有 compressor / agent_node 行为不回归（disabled + 未溢出双路 no-op 验证）。
+
+### 4.8 Mini-ADR（CM-2 锁定）
+
+| ID | 决策 |
+|---|---|
+| **CM-C1** | **token-gate 轮次裁剪**：仅当 `estimate_tokens >= threshold` 才裁，未溢出完全 no-op（零行为变更）；不做无条件裁剪，避免改变未溢出对话的 prompt |
+| **CM-C2** | 裁剪点**恒为 HumanMessage 边界**，天然保 ToolCall↔ToolResult 配对（OpenClaw #1084），不引入 tool-pair 修复逻辑（在正确的边界切就无需修复） |
+| **CM-C3** | **保首轮 + 最近 N 轮**：呼应 compressor head/tail 哲学，对抗"裁掉初始任务目标"；首轮是廉价的目标锚（与 CM-0 recitation 互补，不依赖其开启） |
+| **CM-C4** | **只裁当次 prompt 视图，不改 checkpoint**（沿用 compressor 同款语义）：被裁的中间轮无永久丢失，与 CM-3 压缩前 flush 解耦（CM-3 服务 compressor 的有损摘要，window 不需要它兜底） |
+| **CM-C5** | window 与 compressor **协同非互斥**：window 第一道（注入前、廉价）、compressor 第二道（注入后、LLM），默认同阈值，多数轻溢出由 window 解决省 LLM，重溢出 compressor 兜底 |
+| **CM-C6** | 复用 `compressor.estimate_tokens` + leading-system 分离逻辑（DRY，口径一致），不另造估算；window 不改 `AgentState`/`ToolResult`/`ToolSpec`，无迁移 |
+
+### 4.9 PR 切分（CM-2）
+
+1. **CM-2 PR1 — 滑窗纯核心（CI 全测）**：`context/working_window.py`（`TrimResult` + `trim_to_recent_turns` 纯函数 + `WorkingWindow` dataclass + token-gate，复用 `compressor.estimate_tokens`）+ unit（token-gate / 保首轮 / 配对完整 / leading 冻结 / 三种边界 / dropped_turns）。**不接图、不动 protocol**（pure-core-先行，对齐 CM-0 PR1 / CM-1 PR1 节奏）。
+2. **CM-2 PR2 — 接线（端到端）**：`WorkingMemoryPolicy` → `PolicySpec.working_memory`；factory 构造 `WorkingWindow` 传 `build_react_graph`；`agent_node` 注入前插 `working_window.apply`；`helix_cm_working_window_trim_total{outcome}` + `helix_cm_working_window_dropped_turns`；集成测（长 history 裁剪 + checkpoint 完整 + compressor 协同）+ 文档标 done + ITERATION-PLAN 回填。
+
+> 每个 PR 在本 §4 基础上局部细化；ITERATION-PLAN 增 CM-2 backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
+
+---
+
+## 5. 与既有 Stream 的衔接
 
 - **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8 pause→ingest 时机）、`update_plan`（K.8）。
 - **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）共存；recitation 放非 system 区不破 L-1。**L-4 mutation advisory 被 CM-1 收敛**（`failed_mutations`→`tool_failures`、`<mutation-advisory>`→`<recovery-advisory>`，mutation 校验作为 `mutation_not_landed` 一类保留），非并行；L-5 退款语义不动（失败工具调用照常计步）。
