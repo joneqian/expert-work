@@ -11,7 +11,7 @@ from orchestrator.state import _merge_promoted
 def test_required_keys_present() -> None:
     """E.6 ``step_count`` / ``max_steps`` on top of E.1 ``messages``;
     J.1 ``plan``, J.2 ``reflections``, J.3 ``recalled_memories``,
-    L.5 ``step_count_refund_pending``, L.4 ``failed_mutations``,
+    L.5 ``step_count_refund_pending``, CM-1 ``tool_failures``,
     J.4-补强-2 ``subagent_invocations``, J.8 ``pending_approval`` /
     ``approval_resume`` / ``approval_outcome``, TE-6 ``promoted_tools``,
     CM-0 ``last_projection_hash`` (last eleven ``NotRequired``)."""
@@ -24,7 +24,7 @@ def test_required_keys_present() -> None:
         "reflections",
         "recalled_memories",
         "step_count_refund_pending",
-        "failed_mutations",
+        "tool_failures",
         "subagent_invocations",
         "pending_approval",
         "approval_resume",

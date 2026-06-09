@@ -1,15 +1,15 @@
-"""Stream CM-1 — :mod:`orchestrator.graph_builder.error_classifier` unit tests.
+"""Stream CM-1 — :mod:`orchestrator.tools.error_classifier` unit tests.
 
-Pins the pure-core contract: each failure signal maps to the right
+Pins the classifier contract: each failure signal maps to the right
 :data:`ToolErrorClass`, ``retryable`` honours the tool's capability
-(CM-B5), and a batch renders into a ``<recovery-advisory>`` block. No
-graph, no state — PR1 is classification + rendering only.
+(CM-B5), and a batch renders into a ``<recovery-advisory>`` block.
 """
 
 from __future__ import annotations
 
-from orchestrator.graph_builder.error_classifier import (
+from orchestrator.tools.error_classifier import (
     ClassifiedToolError,
+    classified_mutation_not_landed,
     classify_tool_error,
     render_recovery_advisory,
 )
@@ -163,6 +163,22 @@ def test_empty_message_falls_back_to_type_name() -> None:
 
 
 # ---------------------------------------------------------------------------
+# CM-B2: mutation_not_landed factory (L-4 convergence, success-path)
+# ---------------------------------------------------------------------------
+
+
+def test_mutation_not_landed_factory() -> None:
+    err = classified_mutation_not_landed(
+        tool_name="save_artifact", summary="disk full", path="report.md"
+    )
+    assert err.error_class == "mutation_not_landed"
+    assert err.retryable is True
+    assert err.path == "report.md"
+    assert err.summary == "disk full"
+    assert "did NOT land" in err.advice
+
+
+# ---------------------------------------------------------------------------
 # render_recovery_advisory
 # ---------------------------------------------------------------------------
 
@@ -193,6 +209,24 @@ def test_render_wraps_and_lists_each_failure() -> None:
     assert out.rstrip().endswith("</recovery-advisory>")
     assert "- read_file [resource_not_found]: no such file → Verify it exists." in out
     assert "- fetch [transient]: timed out → Safe to retry once." in out
+
+
+def test_render_includes_path_when_present() -> None:
+    out = render_recovery_advisory(
+        [
+            ClassifiedToolError(
+                tool_name="save_artifact",
+                error_class="mutation_not_landed",
+                summary="disk full",
+                retryable=True,
+                advice="Retry or surface.",
+                path="report.md",
+            )
+        ]
+    )
+    assert (
+        "- save_artifact [mutation_not_landed] path=report.md: disk full → Retry or surface." in out
+    )
 
 
 def test_render_single_failure_one_line() -> None:

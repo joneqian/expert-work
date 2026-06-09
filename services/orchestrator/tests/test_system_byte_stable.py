@@ -271,13 +271,13 @@ async def test_system_message_byte_stable_with_mutation_advisory() -> None:
     advisory_in_second = any(
         isinstance(m, HumanMessage)
         and isinstance(m.content, str)
-        and "<mutation-advisory>" in m.content
+        and "<recovery-advisory>" in m.content
         for m in llm.calls[1]
     )
     assert advisory_in_second
     # And it never landed in the system block.
     assert all(
-        "<mutation-advisory>" not in str(m.content)
+        "<recovery-advisory>" not in str(m.content)
         for call in llm.calls
         for m in call
         if isinstance(m, SystemMessage)

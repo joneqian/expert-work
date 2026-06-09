@@ -285,7 +285,7 @@ tools_node（每个失败的工具调用）
 
 ### 3.6 数据/协议变更
 
-1. **新模块 `orchestrator/graph_builder/error_classifier.py`**（与 `mutation_classifier.py` 同层）：
+1. **新模块 `orchestrator/tools/error_classifier.py`**（与 `mutation_classifier.py` 真同层 = `tools/`；PR1 误放 `graph_builder/`，PR2 接线时发现 `AgentState` 运行时需 `get_type_hints` 解析 `ClassifiedToolError`，从 `graph_builder/` 运行时导入会触发 `state→graph_builder→builder→state` 环，故 PR2 `git mv` 到 `tools/` 下层根治）：
    ```python
    ToolErrorClass = Literal[
        "unknown_tool", "invalid_arguments", "blocked_by_policy",
@@ -304,7 +304,7 @@ tools_node（每个失败的工具调用）
    def render_recovery_advisory(failures: list[ClassifiedToolError]) -> str: ...  # 纯函数，拼 <recovery-advisory>
    ```
 2. **`AgentState` 通道泛化**（`orchestrator/state.py`）：`failed_mutations: NotRequired[list[MutationOutcome]]` → `tool_failures: NotRequired[list[ClassifiedToolError]]`（覆写 reducer，每 agent step reset；docstring 更新 L-4→CM-1 由 L-4 泛化）。
-3. **不改 `ToolResult`/`ToolSpec`/`Tool` 协议**——分类在 catch 点用 `exc`+`spec`，零契约变更。
+3. **不改 `ToolResult`/`ToolSpec`/`Tool` 公共协议**——分类在 catch 点用 `exc`+`spec`。`_dispatch_tool`/`_invoke_tool` 的**内部**返回元组从 3 元扩到 4 元（追加 `ClassifiedToolError | None`，成功路径为 `None`），随之更新 `_run_call`/`_bounded`/`results` 标注与 `test_tool_audit` 的解构（机械）。
 4. **无 `AuditAction`/`ResourceType` 变更**——advisory 是 in-context 引导，非审计事件（失败已由 `_tool_call_total{outcome}` + tool audit 记录）。
 
 ### 3.7 边界情况
@@ -315,7 +315,7 @@ tools_node（每个失败的工具调用）
 | 失败 + 成功混合 | 仅失败项进 advisory；成功项正常 ToolMessage |
 | 分类不出明确类 | 落 `unknown`，给保守 advice（检视+勿原样重试），retryable=False |
 | advisory 过长（多失败） | 每条 summary 截断（沿用 `_format_error` 的 500 cap 思路），整块 char gauge 观测 |
-| `mutation_not_landed`（成功态语义失败） | 沿用 L-4 校验逻辑产出，文案不变 |
+| `mutation_not_landed`（mutation 工具失败） | `_classify_tool_failure` **优先**跑 L-4 mutation 校验：已知 mutation 工具（save_artifact）无论 raise 还是成功态未落地，都归 `mutation_not_landed`（带 path，比泛型 error 更可操作）；非 mutation 工具才回落 catch 点的 `classified` |
 | 非 plan_execute / 无 plan | 与 plan 无关，照常工作（CM-1 不依赖 plan） |
 
 ### 3.8 可观测（零债"可观测齐全"）
@@ -345,7 +345,7 @@ tools_node（每个失败的工具调用）
 ### 3.11 PR 切分（CM-1）
 
 1. **CM-1 PR1 — 分类器纯核心（CI 全测）**：`graph_builder/error_classifier.py`（`ToolErrorClass` taxonomy + `ClassifiedToolError` + `classify_tool_error` 纯函数 + `render_recovery_advisory` 纯函数 + retry 受 spec 约束逻辑）+ unit（每类分类 / retry×spec 矩阵 / advisory 渲染合并截断）。**不接图、不动 state、不碰 L-4**（pure-core-先行，对齐 CM-0 PR1 / SE-4a 节奏）。
-2. **CM-1 PR2 — 接线 + L-4 收敛（端到端）**：catch 点(`_invoke_tool`/`_dispatch_tool`)调 `classify_tool_error` → 聚合进 `tool_failures`；`AgentState` `failed_mutations`→`tool_failures` 泛化；`classify_mutation` 现逻辑改产 `ClassifiedToolError(mutation_not_landed)`；agent_node `_build_recovery_advisory` 取代 `_build_mutation_advisory`（`<recovery-advisory>`，mutation 文案保留）+ 注入/reset 不变；`helix_cm_tool_error_total` + `helix_cm_recovery_advisory_chars` + 注入 log；迁移 L-4 测试 + 新增 e2e（raise 工具 → 下一 turn advisory）。**→ CM-1 完成**。
+2. **CM-1 PR2 — 接线 + L-4 收敛（端到端）**（已实现）：模块 `git mv` graph_builder/→tools/（破 import 环）；catch 点(`_invoke_tool`/`_dispatch_tool`)调 `classify_tool_error` → 4 元元组带出 `ClassifiedToolError`；`_classify_tool_failure` 优先 mutation 校验、回落 catch 分类 → 聚合进 `tool_failures`；`AgentState` `failed_mutations`→`tool_failures` 泛化；agent_node `_build_recovery_advisory`/`render_recovery_advisory` 取代 `_build_mutation_advisory`（`<recovery-advisory>`，path 保留）+ 注入/reset 不变；`helix_cm_tool_error_total{error_class,tool}` + `helix_cm_recovery_advisory_chars`；迁移 L-4 测试（test_mutation_advisory→test_recovery_advisory，含"失败只读工具现在也 advise"的 CM-1 增量用例）+ test_state/test_system_byte_stable/test_tool_audit 更新。977 orchestrator 回归绿。**→ CM-1 完成**。
 
 > 每个 PR 在本 §3 基础上局部细化；ITERATION-PLAN 增 CM-1 backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
 

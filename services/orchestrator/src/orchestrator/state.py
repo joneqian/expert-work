@@ -31,7 +31,12 @@ from helix_agent.protocol import (
     Reflection,
     SubAgentInvocation,
 )
-from orchestrator.tools.mutation_classifier import MutationOutcome
+
+# CM-1 — the channel's element type lives in the ``tools`` layer (same
+# layer as the L-4 ``mutation_classifier`` this generalises), so a normal
+# runtime import is cycle-free and lets ``get_type_hints(AgentState)``
+# resolve the annotation when LangGraph introspects the state schema.
+from orchestrator.tools.error_classifier import ClassifiedToolError
 
 #: Default ReAct hard limit — see Mini-ADR E-6 in the design doc + the
 #: "ReAct 无限循环" risk row. Manifest may override per-agent.
@@ -88,14 +93,16 @@ class AgentState(TypedDict):
     observable and auditable instead of letting tools rewrite
     ``step_count`` directly.
 
-    ``failed_mutations`` (Stream L.L4 / Mini-ADR L-4) accumulates
-    :class:`~orchestrator.tools.mutation_classifier.MutationOutcome`
-    rows for file-mutation tool calls that did NOT land in the most
-    recent ``tools`` batch. The next ``agent_node`` reads the list,
-    emits an ``<mutation-advisory>`` ``HumanMessage`` so the model
-    cannot claim success on those paths, and resets the channel to
-    ``[]``. Defaults to empty; tools_node only writes when at least
-    one mutation failed.
+    ``tool_failures`` (Stream CM-1, generalising L.L4) accumulates
+    :class:`~orchestrator.tools.error_classifier.ClassifiedToolError`
+    rows for tool calls that failed in the most recent ``tools`` batch —
+    both error-path failures (classified at the catch site from the real
+    exception) and the success-path ``mutation_not_landed`` case folded
+    in from L-4's mutation classifier. The next ``agent_node`` reads the
+    list, emits a ``<recovery-advisory>`` ``HumanMessage`` with grounded
+    per-tool recovery guidance, and resets the channel to ``[]``.
+    Defaults to empty; tools_node only writes when at least one tool
+    failed.
 
     ``subagent_invocations`` (Stream J.4-补强-2 / Mini-ADR J-40)
     accumulates one
@@ -153,7 +160,7 @@ class AgentState(TypedDict):
     reflections: NotRequired[Annotated[list[Reflection], add]]
     recalled_memories: NotRequired[list[MemoryItem]]
     step_count_refund_pending: NotRequired[int]
-    failed_mutations: NotRequired[list[MutationOutcome]]
+    tool_failures: NotRequired[list[ClassifiedToolError]]
     subagent_invocations: NotRequired[Annotated[list[SubAgentInvocation], add]]
     pending_approval: NotRequired[ApprovalRequest | None]
     approval_resume: NotRequired[dict[str, Any] | None]

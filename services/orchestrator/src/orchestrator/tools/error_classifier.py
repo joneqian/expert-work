@@ -9,12 +9,15 @@ verbatim, change tack, or surface the failure — and it frequently
 guesses wrong (the framework report's A1 evidence: structured error
 recovery lands >85% of the time vs ~17% for fuzzy signals).
 
-This module is the *pure core* of CM-1: it maps a failed tool call to a
-:class:`ClassifiedToolError` carrying an error class, a ``retryable``
-hint and a templated, grounded recovery ``advice`` string, and renders a
-batch of failures into a ``<recovery-advisory>`` block for tail
-injection. It does **not** touch the graph, ``AgentState`` or the L-4
-mutation advisory — that wiring lands in CM-1 PR2.
+This module maps a failed tool call to a :class:`ClassifiedToolError`
+carrying an error class, a ``retryable`` hint and a templated, grounded
+recovery ``advice`` string, and renders a batch of failures into a
+``<recovery-advisory>`` block for tail injection. It lives in the
+``tools`` layer beside L-4's :mod:`~orchestrator.tools.mutation_classifier`
+(a lower layer than ``graph_builder``) so the ``AgentState`` channel can
+import :class:`ClassifiedToolError` at runtime without an import cycle.
+``builder.py`` wires it at the tool catch sites + the agent-node advisory
+injection.
 
 Design anchors (STREAM-CM-DESIGN §3):
 
@@ -31,12 +34,11 @@ Design anchors (STREAM-CM-DESIGN §3):
   idempotent; an irreversible non-idempotent tool is told to verify
   state first, never to blindly replay.
 
-``mutation_not_landed`` is part of the taxonomy (L-4's "the write said
-OK but didn't land" case) but is *not* produced here — it is a
-success-path signal contributed by
-:mod:`orchestrator.tools.mutation_classifier`, folded into the unified
-channel in PR2. Keeping the member in the Literal lets the renderer and
-the state channel speak one vocabulary.
+``mutation_not_landed`` is the taxonomy's L-4 case ("the write said OK
+but didn't land") — a success-path signal contributed by
+:mod:`orchestrator.tools.mutation_classifier` and built via
+:func:`classified_mutation_not_landed` rather than from an exception, so
+every error class speaks through this one module's vocabulary.
 """
 
 from __future__ import annotations
@@ -108,6 +110,29 @@ def classify_tool_error(
     if isinstance(error, ToolNotFoundError):
         return _make("unknown_tool", tool_name, summary, spec)
     return _make(_classify_by_signal(error), tool_name, summary, spec)
+
+
+def classified_mutation_not_landed(
+    *, tool_name: str, summary: str, path: str | None
+) -> ClassifiedToolError:
+    """Build the ``mutation_not_landed`` classification (L-4 convergence).
+
+    This is the *success-path* failure — the tool returned a non-error
+    ``ToolMessage`` but the write did not take effect (detected by
+    :func:`orchestrator.tools.mutation_classifier.classify`). It can't go
+    through :func:`classify_tool_error` because there is no exception;
+    this factory keeps the ``mutation_not_landed`` advice owned here so
+    every error class speaks through one module. Retryable (retry or
+    surface), mirroring the original L-4 advisory's intent.
+    """
+    return ClassifiedToolError(
+        tool_name=tool_name,
+        error_class="mutation_not_landed",
+        summary=summary,
+        retryable=True,
+        advice=_ADVICE["mutation_not_landed"],
+        path=path,
+    )
 
 
 def _classify_by_signal(error: BaseException) -> ToolErrorClass:
@@ -255,13 +280,19 @@ def render_recovery_advisory(failures: list[ClassifiedToolError]) -> str:
     """Render a batch of failures into a ``<recovery-advisory>`` block.
 
     Returns an empty string for an empty batch so the caller can skip
-    injection. Each line is ``- {tool} [{class}]: {summary} → {advice}``.
+    injection. Each line is
+    ``- {tool} [{class}]{ path=…}: {summary} → {advice}`` — the
+    ``path=`` segment appears only for failures that carry one (the
+    ``mutation_not_landed`` case), preserving L-4's path visibility.
     """
     if not failures:
         return ""
     lines = ["<recovery-advisory>", _ADVISORY_PREAMBLE]
     for f in failures:
-        lines.append(f"- {f.tool_name} [{f.error_class}]: {f.summary} → {f.advice}")
+        head = f"- {f.tool_name} [{f.error_class}]"
+        if f.path:
+            head += f" path={f.path}"
+        lines.append(f"{head}: {f.summary} → {f.advice}")
     lines.append("</recovery-advisory>")
     return "\n".join(lines)
 

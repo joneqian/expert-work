@@ -1,12 +1,16 @@
-"""Stream L.L4 — file-mutation advisory footer integration tests.
+"""Stream CM-1 — recovery-advisory integration tests (generalises L.L4).
 
-Drives the full ``tools_node`` → ``AgentState.failed_mutations`` →
-``agent_node`` round-trip through the compiled graph: a failing
-``save_artifact`` call surfaces a ``<mutation-advisory>``
-HumanMessage on the next agent step, the advisory persists in
-conversation history, the channel resets so a second turn doesn't
-re-inject, and (Mini-ADR L-4 invariant) the advisory never lands in
-a ``SystemMessage``.
+Drives the full ``tools_node`` → ``AgentState.tool_failures`` →
+``agent_node`` round-trip through the compiled graph: a failing tool
+call surfaces a ``<recovery-advisory>`` HumanMessage on the next agent
+step, the advisory persists in conversation history, the channel resets
+so a second turn doesn't re-inject, and (Mini-ADR CM-B4 / L-1 invariant)
+the advisory never lands in a ``SystemMessage``.
+
+CM-1 generalises L-4 beyond file mutations: a failing read-only tool now
+also advises (it used to be mutation-only). The two ``save_artifact``
+cases exercise the folded-in ``mutation_not_landed`` class; the
+``web_search`` case exercises the error-path classifier.
 """
 
 from __future__ import annotations
@@ -84,7 +88,7 @@ class _ScriptedSaveArtifact:
                 "required": ["name"],
             },
             # L6 path_args lets multiple saves to different paths
-            # parallelise; not exercised by L4 tests but kept for parity.
+            # parallelise; not exercised by these tests but kept for parity.
             path_args=("name",),
         )
 
@@ -124,21 +128,21 @@ def _find_advisory(messages: Sequence[BaseMessage]) -> HumanMessage | None:
     for msg in messages:
         if isinstance(msg, HumanMessage):
             content = msg.content if isinstance(msg.content, str) else ""
-            if "<mutation-advisory>" in content:
+            if "<recovery-advisory>" in content:
                 return msg
     return None
 
 
 # ---------------------------------------------------------------------------
-# tools_node → failed_mutations channel
+# tools_node → tool_failures channel (mutation_not_landed case)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_failing_save_artifact_populates_failed_mutations_channel() -> None:
-    """A failing ``save_artifact`` produces a ``MutationOutcome`` row
-    in ``AgentState.failed_mutations`` so the next agent step can see
-    the failure aggregated across the batch."""
+async def test_failing_save_artifact_populates_tool_failures_channel() -> None:
+    """A failing ``save_artifact`` surfaces a ``mutation_not_landed``
+    classification in the advisory the next agent step sees; the channel
+    is consumed (reset to ``[]``) by the time the run ends."""
     prompts: list[list[BaseMessage]] = []
     llm = _ScriptedLLM(
         responses=[
@@ -155,22 +159,22 @@ async def test_failing_save_artifact_populates_failed_mutations_channel() -> Non
 
     state = await _run(llm, registry)
 
-    # Pulled from the final state — the agent step consumed the channel
-    # so it should be empty by the time we read it back.
-    assert state.get("failed_mutations", []) == []
-    # But the second LLM call (call index 1) DID see the advisory in
-    # its prompt.
+    # Consumed by the agent step → empty in the final state.
+    assert state.get("tool_failures", []) == []
+    # The second LLM call DID see the advisory, with the path preserved.
     second_prompt = prompts[1]
     advisory = _find_advisory(second_prompt)
     assert advisory is not None
-    assert "report.md" in (advisory.content if isinstance(advisory.content, str) else "")
+    content = advisory.content if isinstance(advisory.content, str) else ""
+    assert "report.md" in content
+    assert "mutation_not_landed" in content
 
 
 @pytest.mark.asyncio
 async def test_successful_save_artifact_does_not_inject_advisory() -> None:
-    """Happy path: no failed mutations → no advisory in any future
-    prompt. The L1 cache-prefix invariant cares that we don't
-    spuriously inject HumanMessages when the agent is healthy."""
+    """Happy path: no failures → no advisory in any future prompt. The
+    L1 cache-prefix invariant cares that we don't spuriously inject
+    HumanMessages when the agent is healthy."""
     prompts: list[list[BaseMessage]] = []
     llm = _ScriptedLLM(
         responses=[
@@ -198,7 +202,7 @@ async def test_successful_save_artifact_does_not_inject_advisory() -> None:
 
 @pytest.mark.asyncio
 async def test_advisory_lives_in_human_message_not_system() -> None:
-    """Mini-ADR L-1 / L-4: the advisory must NOT live in a
+    """Mini-ADR L-1 / CM-B4: the advisory must NOT live in a
     ``SystemMessage`` (would invalidate the prompt-cache prefix)."""
     prompts: list[list[BaseMessage]] = []
     llm = _ScriptedLLM(
@@ -217,18 +221,17 @@ async def test_advisory_lives_in_human_message_not_system() -> None:
     await _run(llm, registry)
 
     second_prompt = prompts[1]
-    # No SystemMessage in the second prompt should contain the tag.
     for msg in second_prompt:
         if isinstance(msg, SystemMessage):
             content = msg.content if isinstance(msg.content, str) else ""
-            assert "<mutation-advisory>" not in content
+            assert "<recovery-advisory>" not in content
 
 
 @pytest.mark.asyncio
 async def test_advisory_persists_in_conversation_history() -> None:
-    """The advisory is part of the agent step's return dict so it
-    lands in ``state["messages"]`` via the ``add_messages`` reducer
-    — the next checkpoint resume sees the same history."""
+    """The advisory is part of the agent step's return dict so it lands
+    in ``state["messages"]`` via the ``add_messages`` reducer — the next
+    checkpoint resume sees the same history."""
     prompts: list[list[BaseMessage]] = []
     llm = _ScriptedLLM(
         responses=[
@@ -245,15 +248,14 @@ async def test_advisory_persists_in_conversation_history() -> None:
 
     state = await _run(llm, registry)
 
-    # The full conversation log includes the advisory line.
     assert _find_advisory(state["messages"]) is not None
 
 
 @pytest.mark.asyncio
 async def test_advisory_does_not_double_inject_on_followup_turn() -> None:
-    """After consumption ``failed_mutations`` resets to ``[]``; a
-    follow-up agent step (no further failures) must NOT re-inject the
-    same advisory text."""
+    """After consumption ``tool_failures`` resets to ``[]``; a follow-up
+    agent step (no further failures) must NOT re-inject the same advisory
+    text."""
     prompts: list[list[BaseMessage]] = []
     llm = _ScriptedLLM(
         responses=[
@@ -262,9 +264,8 @@ async def test_advisory_does_not_double_inject_on_followup_turn() -> None:
                 content="",
                 tool_calls=[_tc("save_artifact", {"name": "x.md"}, "tc-1")],
             ),
-            # Turn 2: ack the advisory, call no tools.
+            # Turn 2: ack the advisory, call no tools → run ends.
             AIMessage(content="I understand the save failed"),
-            # Turn 3 won't fire — run ends at turn 2 (no tool_calls).
         ],
         seen_prompts=prompts,
     )
@@ -273,29 +274,26 @@ async def test_advisory_does_not_double_inject_on_followup_turn() -> None:
 
     state = await _run(llm, registry)
 
-    # Exactly one advisory in the persisted history — not duplicated.
     advisories = [
         m
         for m in state["messages"]
         if isinstance(m, HumanMessage)
         and isinstance(m.content, str)
-        and "<mutation-advisory>" in m.content
+        and "<recovery-advisory>" in m.content
     ]
     assert len(advisories) == 1
 
 
 # ---------------------------------------------------------------------------
-# Multiple failing mutations aggregate into one advisory
+# Multiple failures aggregate into one advisory
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_multiple_failures_aggregate_into_single_advisory() -> None:
-    """Two failing ``save_artifact`` calls in one batch produce a
-    single advisory listing both paths — Hermes's "footer aggregates
-    cross-tool failures" guarantee. (Same-path saves get serialised
-    into separate stages by L6, but we exercise two different paths
-    so they share one stage.)"""
+    """Two failing ``save_artifact`` calls in one batch produce a single
+    advisory listing both paths — the "footer aggregates cross-tool
+    failures" guarantee. (Different paths share one L6 stage.)"""
     prompts: list[list[BaseMessage]] = []
     llm = _ScriptedLLM(
         responses=[
@@ -324,10 +322,9 @@ async def test_multiple_failures_aggregate_into_single_advisory() -> None:
 
 
 @pytest.mark.asyncio
-async def test_only_failing_mutation_tool_appears_in_advisory() -> None:
-    """A failing ``save_artifact`` alongside a successful read-only
-    tool surfaces only the mutation. The advisory is scoped to
-    mutations, not generic tool errors."""
+async def test_only_failing_tool_appears_in_advisory() -> None:
+    """A failing ``save_artifact`` alongside a *successful* read-only tool
+    surfaces only the failure — successful calls never appear."""
 
     @dataclass
     class _ReadTool:
@@ -367,20 +364,19 @@ async def test_only_failing_mutation_tool_appears_in_advisory() -> None:
     advisory = _find_advisory(second_prompt)
     assert advisory is not None
     content = advisory.content if isinstance(advisory.content, str) else ""
-    # Only save_artifact appears in the advisory — web_search is not
-    # tracked by the classifier.
     assert "save_artifact" in content
+    # web_search succeeded → not a failure → not in the advisory.
     assert "web_search" not in content
 
 
 @pytest.mark.asyncio
-async def test_tool_dispatch_error_unrelated_to_mutation_does_not_advise() -> None:
-    """A failing read-only tool produces a normal error ToolMessage
-    but no mutation advisory — the LLM already saw the error in the
-    inline ToolMessage and L4 is mutation-specific."""
+async def test_failing_read_only_tool_now_advises() -> None:
+    """CM-1 generalisation: a failing read-only tool now produces a
+    recovery advisory (under L-4 this was mutation-only and stayed
+    silent). The transient class on a read-only tool is retryable."""
 
     @dataclass
-    class _FailingRead:
+    class _TimingOutSearch:
         @property
         def spec(self) -> ToolSpec:
             return ToolSpec(
@@ -391,8 +387,8 @@ async def test_tool_dispatch_error_unrelated_to_mutation_does_not_advise() -> No
 
         async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
             del args, ctx
-            msg = "rate limit"
-            raise RuntimeError(msg)
+            msg = "upstream timed out"
+            raise TimeoutError(msg)
 
     prompts: list[list[BaseMessage]] = []
     llm = _ScriptedLLM(
@@ -406,13 +402,17 @@ async def test_tool_dispatch_error_unrelated_to_mutation_does_not_advise() -> No
         seen_prompts=prompts,
     )
     registry = ToolRegistry()
-    registry.register(_FailingRead())
+    registry.register(_TimingOutSearch())
 
     state = await _run(llm, registry)
 
-    # The error ToolMessage is in history (the LLM saw it inline).
+    # The error ToolMessage is still inline in history.
     tool_msgs = [m for m in state["messages"] if isinstance(m, ToolMessage)]
     assert len(tool_msgs) == 1
     assert tool_msgs[0].status == "error"
-    # But no advisory — mutation-specific guard.
-    assert _find_advisory(state["messages"]) is None
+    # And — the CM-1 delta — a recovery advisory now fires for it.
+    advisory = _find_advisory(state["messages"])
+    assert advisory is not None
+    content = advisory.content if isinstance(advisory.content, str) else ""
+    assert "web_search" in content
+    assert "transient" in content

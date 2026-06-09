@@ -89,7 +89,12 @@ from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState
-from orchestrator.tools.mutation_classifier import MutationOutcome
+from orchestrator.tools.error_classifier import (
+    ClassifiedToolError,
+    classified_mutation_not_landed,
+    classify_tool_error,
+    render_recovery_advisory,
+)
 from orchestrator.tools.mutation_classifier import classify as classify_mutation
 from orchestrator.tools.registry import (
     TOOL_ALLOWED_STATE_KEYS,
@@ -153,6 +158,20 @@ _cm_projection_total = helix_counter(
 _cm_recitation_chars = helix_gauge(
     "helix_cm_recitation_chars",
     "Characters of the plan recitation injected into the prompt tail (Stream CM-0 N1).",
+)
+#: Stream CM-1 — failed tool calls by error class and tool name, fed into
+#: the ``<recovery-advisory>`` channel. Raw success/error counts stay on
+#: ``helix_tool_call_total{outcome}``; this adds the recovery taxonomy.
+_cm_tool_error_total = helix_counter(
+    "helix_cm_tool_error_total",
+    "Classified tool failures routed into the recovery advisory (Stream CM-1).",
+    ("error_class", "tool"),
+)
+#: Stream CM-1 — size (chars) of the most recent recovery advisory
+#: injected into the prompt tail. Watches for advisory bloat.
+_cm_recovery_advisory_chars = helix_gauge(
+    "helix_cm_recovery_advisory_chars",
+    "Characters of the recovery advisory injected into the prompt tail (Stream CM-1).",
 )
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
@@ -274,19 +293,20 @@ def build_react_graph(
         if memories:
             messages = _inject_memories(messages, memories, mode=memory_recall_mode)
             record_memory_inject_mode(mode=memory_recall_mode)
-        # Stream L.L4 — inject a ``<mutation-advisory>`` HumanMessage
-        # listing file mutations that did NOT land in the previous
-        # tools batch. Mini-ADR L-4: the advisory is part of the
-        # conversation history (persists across turns) and lives in a
-        # HumanMessage, NOT the system block, so the L1 prompt-cache
-        # prefix invariant stays intact. Append once per failure batch
-        # — the channel is reset to ``[]`` in this node's return dict
-        # so a follow-on agent step does not double-inject.
-        failed_mutations = list(state.get("failed_mutations", []))
+        # Stream CM-1 (generalising L.L4) — inject a ``<recovery-advisory>``
+        # HumanMessage listing every tool call that failed in the previous
+        # tools batch, with grounded per-tool recovery guidance. Mini-ADR
+        # CM-B4: the advisory is part of the conversation history (persists
+        # across turns) and lives in a HumanMessage, NOT the system block,
+        # so the L1 prompt-cache prefix invariant stays intact. Append once
+        # per failure batch — the channel is reset to ``[]`` in this node's
+        # return dict so a follow-on agent step does not double-inject.
+        tool_failures = list(state.get("tool_failures", []))
         advisory_message: HumanMessage | None = None
-        if failed_mutations:
-            advisory_message = _build_mutation_advisory(failed_mutations)
+        if tool_failures:
+            advisory_message = _build_recovery_advisory(tool_failures)
             messages = [*messages, advisory_message]
+            _cm_recovery_advisory_chars.set(len(str(advisory_message.content)))
         # Stream L.L2 — token preflight + summarise-the-middle. When
         # the prompt would exceed the model's configured threshold the
         # compressor swaps the conversation's middle for a
@@ -332,7 +352,7 @@ def build_react_graph(
             )
             await after_llm_chain.invoke(ctx, _noop)
             new_messages = _extract_post_llm_messages(ctx, original=after_messages)
-            # Stream L.L4 — persist the advisory into history so the
+            # Stream CM-1 — persist the advisory into history so the
             # next agent step sees it even after this dict's reducer
             # appends. The middleware path's ``new_messages`` is the
             # full post-LLM delta; prepend the advisory in case the
@@ -344,10 +364,10 @@ def build_react_graph(
                 "messages": persisted_messages,
                 "step_count": step_count + 1,
                 "step_count_refund_pending": 0,
-                "failed_mutations": [],
+                "tool_failures": [],
             }
 
-        # Stream L.L4 — persist the advisory in conversation history
+        # Stream CM-1 — persist the advisory in conversation history
         # alongside the LLM response so the next agent step sees it.
         emit_messages: list[BaseMessage] = (
             [advisory_message, response] if advisory_message is not None else [response]
@@ -356,7 +376,7 @@ def build_react_graph(
             "messages": emit_messages,
             "step_count": step_count + 1,
             "step_count_refund_pending": 0,
-            "failed_mutations": [],
+            "tool_failures": [],
         }
 
     async def tools_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -423,7 +443,9 @@ def build_react_graph(
         # Equals ``specs()`` when nothing is deferred.
         specs_by_name = {spec.name: spec for spec in tool_registry.all_specs()}
         stages = plan_stages(tool_calls, specs_by_name)
-        results: dict[int, tuple[ToolMessage, Mapping[str, Any], int]] = {}
+        results: dict[
+            int, tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]
+        ] = {}
         # Stream K.K8 — collect per-tool state writes for promotion to
         # the AgentState update dict. Order follows the LLM's original
         # tool_call sequence: a later call's update wins. L6 preserves
@@ -438,7 +460,7 @@ def build_react_graph(
 
         async def _run_call(
             tc: dict[str, Any],
-        ) -> tuple[ToolMessage, Mapping[str, Any], int]:
+        ) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
             # Per-call cancel check + ``run_cancellable`` mirror the M0
             # sequential path so cancellation semantics stay identical:
             # a cancel mid-batch interrupts every in-flight tool via
@@ -456,7 +478,9 @@ def build_react_graph(
 
         semaphore = asyncio.Semaphore(MAX_TOOL_WORKERS)
 
-        async def _bounded(tc: dict[str, Any]) -> tuple[ToolMessage, Mapping[str, Any], int]:
+        async def _bounded(
+            tc: dict[str, Any],
+        ) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
             async with semaphore:
                 return await _run_call(tc)
 
@@ -477,13 +501,17 @@ def build_react_graph(
         # Re-assemble in original tool_call order. L5 / K8 invariants
         # require a stable iteration order downstream.
         new_messages: list[BaseMessage] = []
-        # Stream L.L4 — collect mutations that did NOT land so the next
-        # agent step can inject the advisory footer. The check runs in
-        # original order so the advisory lists failures the LLM would
-        # see in the same sequence the ToolMessages appear.
-        failed_mutations: list[MutationOutcome] = []
+        # Stream CM-1 (generalising L.L4) — collect classified tool
+        # failures so the next agent step injects the recovery advisory.
+        # Two sources, in original tool_call order so the advisory lists
+        # failures in the sequence the ToolMessages appear:
+        #   1. error path — ``_dispatch_tool`` already classified from the
+        #      real exception (4th tuple element).
+        #   2. success-but-didn't-land — L-4's mutation classifier on a
+        #      non-error ToolMessage, folded into ``mutation_not_landed``.
+        tool_failures: list[ClassifiedToolError] = []
         for idx in range(len(tool_calls)):
-            tool_message, tool_state, refund_inc = results[idx]
+            tool_message, tool_state, refund_inc, classified = results[idx]
             new_messages.append(tool_message)
             for key, value in tool_state.items():
                 if key not in TOOL_ALLOWED_STATE_KEYS:
@@ -505,13 +533,12 @@ def build_react_graph(
                 else:
                     accumulated_state[key] = value
             refund_total += refund_inc
-            outcome = classify_mutation(
-                str(tool_calls[idx].get("name", "")),
-                tool_calls[idx].get("args") or {},
-                tool_message,
-            )
-            if outcome is not None and not outcome.landed:
-                failed_mutations.append(outcome)
+            failure = _classify_tool_failure(tool_calls[idx], tool_message, classified)
+            if failure is not None:
+                tool_failures.append(failure)
+                _cm_tool_error_total.labels(
+                    error_class=failure.error_class, tool=failure.tool_name
+                ).inc()
 
         result_dict: dict[str, Any] = {
             "messages": new_messages,
@@ -519,10 +546,10 @@ def build_react_graph(
             **accumulated_state,
         }
         # Only write the channel when there are failures — the absent
-        # case keeps the agent_node's ``state.get("failed_mutations", [])``
+        # case keeps the agent_node's ``state.get("tool_failures", [])``
         # default fast-path active.
-        if failed_mutations:
-            result_dict["failed_mutations"] = failed_mutations
+        if tool_failures:
+            result_dict["tool_failures"] = tool_failures
         # Stream J.8 — when this batch ran on an approve / modify resume,
         # clear the transient ``approval_resume`` channel so a follow-on
         # turn does not re-apply the stale verdict.
@@ -667,31 +694,48 @@ def _inject_memories(
     return [messages[0], block, *messages[1:]]
 
 
-def _build_mutation_advisory(failed: list[MutationOutcome]) -> HumanMessage:
-    """Stream L.L4 — render a ``<mutation-advisory>`` HumanMessage from
-    the list of file mutations that did NOT land in the previous tools
-    batch (Mini-ADR L-4).
+def _classify_tool_failure(
+    tool_call: dict[str, Any],
+    tool_message: ToolMessage,
+    classified: ClassifiedToolError | None,
+) -> ClassifiedToolError | None:
+    """Resolve a single tool call's failure into a classification, if any.
 
-    The wire shape matches Hermes ``conversation_loop.py:3916-3939``:
-    a single bracketed advisory listing tool name + path + error, so
-    the model cannot claim success on those paths in the next response.
-    Lives as a HumanMessage (not SystemMessage) so the L1 prompt-cache
-    prefix invariant — ``system`` is build-once / replay-verbatim —
-    stays intact.
+    L-4's mutation classifier wins first (CM-B2): for a known mutation
+    tool it carries the more actionable "the write did NOT land — don't
+    assume the path has content" guidance + the path, whether the tool
+    raised (error-path ``ToolMessage(status="error")``) or returned a
+    success-looking message that didn't actually land. Any other failure
+    falls back to the error-path ``classified`` from the catch site.
+    Returns ``None`` for a genuine success (no mutation gap, no error).
     """
-    preamble = (
-        "The following file mutations from the previous tool batch did NOT land. "
-        "DO NOT assume these paths have the requested content; retry or surface "
-        "the failure to the user."
+    outcome = classify_mutation(
+        str(tool_call.get("name", "")),
+        tool_call.get("args") or {},
+        tool_message,
     )
-    lines = ["<mutation-advisory>", preamble]
-    for outcome in failed:
-        line = f"- {outcome.tool_name} path={outcome.path}"
-        if outcome.error:
-            line += f": {outcome.error}"
-        lines.append(line)
-    lines.append("</mutation-advisory>")
-    return HumanMessage(content="\n".join(lines))
+    if outcome is not None and not outcome.landed:
+        return classified_mutation_not_landed(
+            tool_name=outcome.tool_name,
+            summary=outcome.error or "mutation did not land",
+            path=outcome.path,
+        )
+    return classified
+
+
+def _build_recovery_advisory(failures: list[ClassifiedToolError]) -> HumanMessage:
+    """Stream CM-1 (generalising L.L4) — render a ``<recovery-advisory>``
+    HumanMessage from the classified tool failures of the previous tools
+    batch (Mini-ADR CM-B2/CM-B4).
+
+    Generalises L-4's ``<mutation-advisory>`` to every tool failure: each
+    line carries the error class + summary + grounded recovery guidance,
+    so the model neither claims success on failed calls nor retries them
+    blindly. Lives as a HumanMessage (not SystemMessage) so the L1
+    prompt-cache prefix invariant — ``system`` is build-once /
+    replay-verbatim — stays intact.
+    """
+    return HumanMessage(content=render_recovery_advisory(failures))
 
 
 def _should_continue(state: AgentState) -> Literal["tools", "__end__"]:
@@ -770,17 +814,19 @@ async def _dispatch_tool(
     *,
     before_tool_dispatch_chain: MiddlewareChain | None,
     audit_logger: AuditLogger | None = None,
-) -> tuple[ToolMessage, Mapping[str, Any], int]:
+) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
     """Dispatch one tool call.
 
-    Returns ``(tool_message, state_updates, refund_iterations)`` so the
-    surrounding tools node can promote allowlisted ``state_updates``
-    keys (Stream K.K8) into the ``AgentState`` update dict and
-    accumulate ``refund_iterations`` (Stream L.L5) for the next agent
-    node to consume. ``state_updates`` is empty and refund is ``0``
-    for every code path that does not produce a successful
-    :class:`~orchestrator.tools.registry.ToolResult` (errors, blocks,
-    unknown tools).
+    Returns ``(tool_message, state_updates, refund_iterations,
+    classified_error)`` so the surrounding tools node can promote
+    allowlisted ``state_updates`` keys (Stream K.K8) into the
+    ``AgentState`` update dict, accumulate ``refund_iterations`` (Stream
+    L.L5), and route ``classified_error`` into the CM-1
+    ``<recovery-advisory>`` channel. ``state_updates`` is empty and
+    refund is ``0`` for every code path that does not produce a
+    successful :class:`~orchestrator.tools.registry.ToolResult` (errors,
+    blocks, unknown tools); ``classified_error`` is ``None`` on the
+    success path and set on every failure path.
 
     Stream TE-2 — each dispatch emits one ``TOOL_CALL`` audit row
     (``result=ERROR`` when the tool returns an error) or, when a
@@ -844,6 +890,7 @@ async def _dispatch_tool(
             ),
             {},
             0,
+            classify_tool_error(tool_name=name, error=exc, spec=None),
         )
     except Exception as exc:
         # E.10 sandbox_audit and any other pre-dispatch middleware raise
@@ -877,6 +924,7 @@ async def _dispatch_tool(
             ),
             {},
             0,
+            classify_tool_error(tool_name=name, error=exc, blocked=True),
         )
 
 
@@ -1087,7 +1135,7 @@ async def _invoke_tool(
     args: dict[str, Any],
     call_id: str,
     ctx: ToolContext,
-) -> tuple[ToolMessage, Mapping[str, Any], int]:
+) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
     try:
         result = await tool.call(args, ctx=ctx)
     except Exception as exc:
@@ -1097,6 +1145,10 @@ async def _invoke_tool(
             call_id,
             type(exc).__name__,
         )
+        # CM-1 / CM-B3 — classify here, where the real exception (and the
+        # tool's capability spec) are in hand, rather than re-parsing the
+        # formatted ToolMessage downstream.
+        classified = classify_tool_error(tool_name=tool.spec.name, error=exc, spec=tool.spec)
         return (
             ToolMessage(
                 content=_format_error(exc),
@@ -1105,11 +1157,13 @@ async def _invoke_tool(
             ),
             {},
             0,
+            classified,
         )
     return (
         ToolMessage(content=result.content, tool_call_id=call_id),
         result.state_updates,
         result.refund_iterations,
+        None,
     )
 
 

@@ -140,7 +140,7 @@ async def test_tool_error_emits_result_error() -> None:
 async def test_middleware_block_emits_tool_blocked_denied() -> None:
     tool = _EchoTool(ToolSpec(name="reader", description="d"))
     audit = _RecordingAuditLogger()
-    msg, _, _ = await _dispatch_tool(
+    msg, _, _, _ = await _dispatch_tool(
         _call("reader", {}),
         _registry(tool),
         _ctx(),
@@ -200,7 +200,7 @@ async def test_details_record_keys_and_paths_never_raw_values() -> None:
 
 async def test_no_audit_logger_does_not_crash() -> None:
     tool = _EchoTool(ToolSpec(name="reader", description="d"))
-    msg, _, _ = await _dispatch_tool(
+    msg, _, _, _ = await _dispatch_tool(
         _call("reader", {}),
         _registry(tool),
         _ctx(),
@@ -225,7 +225,7 @@ async def test_missing_tenant_id_skips_emit() -> None:
 
 async def test_audit_write_failure_is_swallowed() -> None:
     tool = _EchoTool(ToolSpec(name="reader", description="d"))
-    msg, _, _ = await _dispatch_tool(
+    msg, _, _, _ = await _dispatch_tool(
         _call("reader", {}),
         _registry(tool),
         _ctx(),
@@ -247,7 +247,7 @@ async def test_audit_details_build_failure_does_not_reclassify_success() -> None
 
     tool = _EchoTool(ToolSpec(name="writer", description="d", path_args=("path",)))
     audit = _RecordingAuditLogger()
-    msg, _, _ = await _dispatch_tool(
+    msg, _, _, _ = await _dispatch_tool(
         _call("writer", {"path": _Unstringable()}),
         _registry(tool),
         _ctx(),
