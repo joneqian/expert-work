@@ -1075,6 +1075,14 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 > **Stream SE 整体收官** — SE-0 设计 / SE-1~7 自著+蒸馏+重放验证+归因+co-evolve+全自动护栏 / SE-8 admin API+UI / SE-9 基准+SLO 合并门。自进化 skill 从"人写静态启用"升级为"agent 自生成、被重放证据验证、有界自动演化、可治理可回滚可熔断"的一等能力。
 
+> **SE-10 ~ SE-15 借鉴增强（2026-06-08 起，源自 agentic-harness-engineering 对照）** — 6 子项设计见 [STREAM-SE-DESIGN](./streams/STREAM-SE-DESIGN.md)。三原则：泛化复用现有验证门 / 不新建并行子系统 / 守代码进化红线。
+- [x] **SE-12 分层带源回链失败报告 引擎**（本次，SE-A20~A23）：`failure_report.py` `FailureReportBuilder`（`SkillAttributor`+注入 `ReportSummarizer`，CI fake）——程序化预聚类零 token（按 attribution_kind/exit_phase/marker 分桶）+ 每桶一次 aux 命名（规则桶跳 LLM）+ 逐任务 narrative + `evidence_refs`(trajectory_key+message_index 回链)+ abstraction guard 降级 + snippet cap；pydantic DTO（control-plane 内部 JSON blob，非 protocol）。加层不替换归因，绝不进 decide_grounding。6 单测。**SE-12b 跟进 = 投递面**：ObjectStore blob writer/reader + `GET .../failure-reports` API + admin-ui FailureReportPanel（i18n+Storybook+Playwright）+ 喂 `_TrajectoryEvidenceProvider`（消费 wiring），归前端/integration PR。
+- [x] **SE-13 进化前领域预研**（独立分支，SE-A24~A28；wiring 跟进=真 KB/web/aux + 喂 distill）
+- [x] **SE-14 Best-of-N 候选多样性 substrate**（独立分支，SE-A31~A33；fan-out 编排=SE-14b）
+- [x] **SE-11 进化变更预测—自动证伪纪律**（独立分支，SE-A18/A19）
+- [x] **SE-10 文本类 harness 组件进化扩展**（独立分支，SE-A15~A17）
+- [x] **SE-15 harness 规范 + linter + profile 对账**（独立分支，SE-A34~A37）
+
 ---
 
 ## Phase M1 — 生产化（6-8 个月）

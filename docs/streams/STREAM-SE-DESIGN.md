@@ -433,10 +433,25 @@ SE-0(本设计) ─► SE-1(数据模型) ─► SE-2(store) ─┬─► SE-3(L
 
 ---
 
+## 9sexies. SE-12 — 分层带源回链失败报告（借鉴 agentic-harness-engineering Agent Debugger）
+
+把"内容/执行二分 + 单 fail"升级为**两层可读叙述 + 证据回链**:overview 根因聚类 + detail 逐任务 narrative + `evidence_refs`(trajectory_key + message_index 可下钻)。
+
+- **加层不替换(SE-A20)**:归因仍出 `FailureKind` 当门控信号;报告出人读叙述 + 回链当**输入信号/审阅证据**,**绝不进 `decide_grounding`**(守 SE-A0 + 14.2% 步级不可信)。
+- **成本(SE-A21)**:**程序化预聚类零 token**——按 `(attribution_kind, exit_phase, 首 tool_error/timeout marker)` 分桶;每桶**一次** aux 命名(取 N exemplar);规则桶(环境错 by_rule)**跳 LLM** 走模板。token 随桶数非 case 数。
+- **PII(SE-A22)**:命名 prompt type-level + 落地前 abstraction guard(含 UUID/长数字→降级模板)+ snippet 长度 cap(240)。
+- **消费(SE-A23)**:overview 的 `suggested_guard`+`summary` 喂蒸馏/co-evolve 当高信噪输入;治理 UI 下钻证据。
+- **实现**:`failure_report.py` `FailureReportBuilder`(`SkillAttributor` + 注入 `ReportSummarizer`,CI fake)+ pydantic DTO(`FailureReport`/`RootCauseCluster`/`FailureReportDetail`/`EvidenceRef`,**control-plane 内部、序列化为 ObjectStore JSON blob,非 protocol 跨服务契约故不动 protocol/__init__**)。6 单测。
+- **scope 边界(诚实)**:报告**引擎**(聚类+命名+回链+abstraction+JSON round-trip)完整可测;**SE-12b 跟进 = 投递面**——ObjectStore blob writer/reader(key `failure_reports/{tenant}/...`)+ `GET /v1/skill-evolution/skills/{id}/failure-reports` API + admin-ui `FailureReportPanel`(i18n 双语 + Storybook + Playwright)+ 把 overview 信号喂进 `_TrajectoryEvidenceProvider`(消费侧 wiring),归 integration/前端 PR(前端 Storybook/Playwright 重,单列以免与引擎混)。
+
 ## 10. Mini-ADR 索引
 
 | ID | 决策 | 章节 |
 |---|---|---|
+| SE-A20 | 失败报告加层不替换归因;当输入信号/审阅证据,绝不进 decide_grounding | § 9sexies |
+| SE-A21 | 程序化预聚类零 token + 每桶一次 aux 命名;规则桶跳 LLM(token 随桶数) | § 9sexies |
+| SE-A22 | PII:type-level prompt + abstraction guard 降级 + snippet cap | § 9sexies |
+| SE-A23 | 消费=喂生成器输入信号 + 治理 UI 下钻;DTO control-plane 内部 JSON blob 非 protocol | § 9sexies |
 | SE-A0 | 验证门单一收口:自动 active 必须有 pass 证据 | § 2 |
 | SE-A1 | 数据模型纯增量 + NULL-tenant RLS | § 4 |
 | SE-A2 | `skill_eval_result` 作 grounding 可溯账 | § 4.3 |
