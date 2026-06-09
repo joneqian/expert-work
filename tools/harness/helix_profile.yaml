@@ -1,0 +1,22 @@
+# helix harness compliance profile (Stream SE — Mini-ADR SE-A37).
+#
+# Profiles adapt the harness-compliance lint to an agent *form factor*,
+# the same idea as the external agentic-harness-engineering profiles
+# (hermes / codex / openclaw) — different forms require different
+# components. helix has one form factor today: the declarative
+# AgentSpec-backed agent.
+#
+# `required` is documentary: these blocks are already enforced as
+# required fields by AgentSpec itself (the lint's R1 schema check covers
+# them). `recommend` drives the advisory R-prof warning — optional
+# blocks a production agent is encouraged to declare explicitly.
+name: helix-agent
+
+required:
+  - model
+  - system_prompt
+  - sandbox
+  - tenant_config
+
+recommend:
+  - observability

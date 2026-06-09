@@ -28,6 +28,7 @@ from helix_agent.persistence.skill.base import (
     SkillStore,
 )
 from helix_agent.protocol import (
+    ComponentType,
     EvolutionOrigin,
     KillSwitch,
     KillSwitchScope,
@@ -69,6 +70,10 @@ def _skill_row_to_dto(row: SkillRow) -> Skill:
         created_by_user_id=row.created_by_user_id,
         created_by_agent_name=row.created_by_agent_name,
         forked_from=row.forked_from,
+        # Stream SE (SE-10) — component type. Existing rows carry the
+        # migration 0069 default (component_type='skill', NULL target).
+        component_type=row.component_type,  # type: ignore[arg-type]
+        target_tool_name=row.target_tool_name,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -206,6 +211,8 @@ class SqlSkillStore(SkillStore):
         created_by_user_id: UUID | None = None,
         created_by_agent_name: str | None = None,
         forked_from: UUID | None = None,
+        component_type: ComponentType = "skill",
+        target_tool_name: str | None = None,
     ) -> Skill:
         return await self._create_skill_row(
             skill_id=skill_id,
@@ -218,6 +225,8 @@ class SqlSkillStore(SkillStore):
             created_by_user_id=created_by_user_id,
             created_by_agent_name=created_by_agent_name,
             forked_from=forked_from,
+            component_type=component_type,
+            target_tool_name=target_tool_name,
         )
 
     async def _create_skill_row(
@@ -233,6 +242,8 @@ class SqlSkillStore(SkillStore):
         created_by_user_id: UUID | None = None,
         created_by_agent_name: str | None = None,
         forked_from: UUID | None = None,
+        component_type: ComponentType = "skill",
+        target_tool_name: str | None = None,
     ) -> Skill:
         now = datetime.now(UTC)
         async with self._sf() as session:
@@ -249,6 +260,8 @@ class SqlSkillStore(SkillStore):
                 created_by_user_id=created_by_user_id,
                 created_by_agent_name=created_by_agent_name,
                 forked_from=forked_from,
+                component_type=component_type,
+                target_tool_name=target_tool_name,
                 created_at=now,
                 updated_at=now,
             )
