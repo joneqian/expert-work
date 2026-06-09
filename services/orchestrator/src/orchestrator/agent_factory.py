@@ -61,7 +61,7 @@ from helix_agent.protocol import (
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
-from orchestrator.context import ContextCompressor, WorkspaceFileWriter
+from orchestrator.context import ContextCompressor, WorkingWindow, WorkspaceFileWriter
 from orchestrator.errors import (
     AgentFactoryError,
     SkillConflictError,
@@ -486,6 +486,19 @@ async def build_agent(
             tail_keep=cc_policy.tail_keep,
             max_passes=cc_policy.max_passes,
         )
+    # Stream CM-2 — working-memory sliding window: the cheap LLM-free gate
+    # that runs before the compressor in agent_node. Conservative defaults
+    # ⇒ no-op under threshold / within max_recent_turns (zero behaviour
+    # change for existing manifests).
+    wm_policy = spec.spec.policies.working_memory
+    working_window: WorkingWindow | None = None
+    if wm_policy.enabled:
+        working_window = WorkingWindow(
+            context_window=spec.spec.model.context_window,
+            threshold_pct=wm_policy.threshold_pct,
+            max_recent_turns=wm_policy.max_recent_turns,
+            keep_first_turn=wm_policy.keep_first_turn,
+        )
     # Stream J.7a (Mini-ADR J-23) — load + merge skills declared in
     # ``spec.skills``. Skill prompt fragments concatenate after the
     # base system prompt; skill-bound tools register into the same
@@ -594,6 +607,7 @@ async def build_agent(
         after_llm_chain=chains.after_llm_call,
         before_tool_dispatch_chain=chains.before_tool_dispatch,
         context_compressor=context_compressor,
+        working_window=working_window,
         workspace_writer_factory=workspace_writer_factory,
         workspace_ingest_node=workspace_ingest_node,
         # Stream J.8 (Mini-ADR J-24) — declarative approval gate.

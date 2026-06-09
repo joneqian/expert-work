@@ -449,6 +449,33 @@ class ContextCompressionPolicy(BaseModel):
     max_tokens: int = Field(default=8000, gt=0)
 
 
+class WorkingMemoryPolicy(BaseModel):
+    """Stream CM-2 — working-memory sliding-window knobs.
+
+    Drives :class:`~orchestrator.context.working_window.WorkingWindow`, the
+    cheap LLM-free gate that runs *before* the L.L2 compressor: when the
+    estimated prompt is at/over ``context_window * threshold_pct`` the
+    window trims the conversation to the first turn plus the most-recent
+    ``max_recent_turns`` user turns (cutting only on ``HumanMessage``
+    boundaries so no ToolCall↔ToolResult pair is split). Most light
+    overflows are resolved here, sparing the summariser LLM call; the
+    compressor only runs on what is still too large afterward.
+
+    Defaults are conservative so existing manifests see **zero behaviour
+    change**: a conversation under threshold or at/under
+    ``max_recent_turns`` turns is left untouched. Independent of
+    :class:`ContextCompressionPolicy` — the two gates compose (window
+    first, compressor second) and share the same ``threshold_pct`` shape.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    threshold_pct: float = Field(default=0.7, gt=0.0, le=1.0)
+    max_recent_turns: int = Field(default=20, gt=0)
+    keep_first_turn: bool = True
+
+
 class MemoryConsolidationPolicy(BaseModel):
     """Stream Uplift Sprint #7 (Mini-ADR U-39) — per-agent
     MemoryConsolidator knobs.
@@ -488,6 +515,10 @@ class PolicySpec(BaseModel):
     pii: dict[str, Any] = Field(default_factory=dict)
     safety: dict[str, Any] = Field(default_factory=dict)
     context_compression: ContextCompressionPolicy = Field(default_factory=ContextCompressionPolicy)
+    # Stream CM-2 — working-memory sliding window (cheap pre-compressor
+    # gate). Conservative defaults ⇒ zero behaviour change for existing
+    # manifests (no-op under threshold / within max_recent_turns).
+    working_memory: WorkingMemoryPolicy = Field(default_factory=WorkingMemoryPolicy)
     # Capability Uplift Sprint #7 (Mini-ADR U-39) — per-agent
     # MemoryConsolidator knobs. Defaults are equivalent to "use platform
     # defaults" so existing manifests load unchanged.

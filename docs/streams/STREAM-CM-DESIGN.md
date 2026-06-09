@@ -467,8 +467,8 @@ agent_node 入口： messages = list(state["messages"])
 
 ### 4.9 PR 切分（CM-2）
 
-1. **CM-2 PR1 — 滑窗纯核心（CI 全测）**：`context/working_window.py`（`TrimResult` + `trim_to_recent_turns` 纯函数 + `WorkingWindow` dataclass + token-gate，复用 `compressor.estimate_tokens`）+ unit（token-gate / 保首轮 / 配对完整 / leading 冻结 / 三种边界 / dropped_turns）。**不接图、不动 protocol**（pure-core-先行，对齐 CM-0 PR1 / CM-1 PR1 节奏）。
-2. **CM-2 PR2 — 接线（端到端）**：`WorkingMemoryPolicy` → `PolicySpec.working_memory`；factory 构造 `WorkingWindow` 传 `build_react_graph`；`agent_node` 注入前插 `working_window.apply`；`helix_cm_working_window_trim_total{outcome}` + `helix_cm_working_window_dropped_turns`；集成测（长 history 裁剪 + checkpoint 完整 + compressor 协同）+ 文档标 done + ITERATION-PLAN 回填。
+1. **CM-2 PR1 — 滑窗纯核心（CI 全测）**（已实现）：`context/working_window.py`（`TrimResult` + `trim_to_recent_turns` 纯函数 + `WorkingWindow` dataclass + token-gate，复用 `compressor.estimate_tokens`）+ 13 unit（token-gate / 保首轮 / 配对完整 / leading 冻结 / 三种边界 / dropped_turns / 不可变）。**不接图、不动 protocol**（pure-core-先行，对齐 CM-0 PR1 / CM-1 PR1 节奏）。
+2. **CM-2 PR2 — 接线（端到端）**（已实现）：`WorkingMemoryPolicy` → `PolicySpec.working_memory`（保守默认 ⇒ 现有 manifest 零行为变更）；factory 构造 `WorkingWindow` 传 `build_react_graph`（新 `working_window` 参）；`agent_node` 取 history 后、注入前插 `working_window.apply`（`outcome=trimmed/noop` 计数 + dropped_turns gauge）；`helix_cm_working_window_trim_total{outcome}` + `helix_cm_working_window_dropped_turns`；3 集成测（长 history 裁剪 + checkpoint 完整 + 未溢出 no-op + working_window=None 原路径）+ 4 protocol policy 测（默认/自定义/边界拒绝/extra-forbid）。991 orchestrator + 311 protocol 回归绿。**→ CM-2 完成**。
 
 > 每个 PR 在本 §4 基础上局部细化；ITERATION-PLAN 增 CM-2 backlog，ship 后回填 `[x]`+PR 号（[memory:iteration-plan-sync]）。
 

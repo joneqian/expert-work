@@ -74,6 +74,7 @@ from helix_agent.runtime.middleware import (
 from orchestrator.context import (
     ContextCompressor,
     ProjectionResult,
+    WorkingWindow,
     WorkspaceFileWriter,
     WorkspaceProjector,
 )
@@ -173,6 +174,20 @@ _cm_recovery_advisory_chars = helix_gauge(
     "helix_cm_recovery_advisory_chars",
     "Characters of the recovery advisory injected into the prompt tail (Stream CM-1).",
 )
+#: Stream CM-2 — working-memory sliding window passes by outcome. A high
+#: ``trimmed`` rate vs ``noop`` shows how many compressor (LLM) calls the
+#: cheap gate spared. ``noop`` covers under-threshold + nothing-to-cut.
+_cm_working_window_total = helix_counter(
+    "helix_cm_working_window_trim_total",
+    "Working-memory sliding-window passes at the agent_node entry (Stream CM-2).",
+    ("outcome",),
+)
+#: Stream CM-2 — user turns dropped by the most recent window trim (0 when
+#: the pass was a no-op). Watches trim depth on long conversations.
+_cm_working_window_dropped_turns = helix_gauge(
+    "helix_cm_working_window_dropped_turns",
+    "User turns dropped by the most recent working-memory window trim (Stream CM-2).",
+)
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
 #: dumping multi-MB tracebacks into messages. Per-tool truncation
@@ -199,6 +214,10 @@ def build_react_graph(
     after_llm_chain: MiddlewareChain | None = None,
     before_tool_dispatch_chain: MiddlewareChain | None = None,
     context_compressor: ContextCompressor | None = None,
+    # Stream CM-2 — working-memory sliding window: cheap LLM-free turn-trim
+    # gate run before the compressor at the agent_node entry. ``None`` →
+    # no pre-compressor trimming (the default; unchanged from pre-CM-2).
+    working_window: WorkingWindow | None = None,
     # Stream CM-0 — builds a per-turn ``WorkspaceFileWriter`` bound to the
     # run's ToolContext (the real one rides the warm sandbox). ``None`` →
     # no state projection (the default; the unit-test / no-sandbox path).
@@ -277,6 +296,20 @@ def build_react_graph(
         promoted = state.get("promoted_tools") or []
         tools = [*tool_registry.specs(), *tool_registry.deferred_specs(promoted)]
         messages = list(state["messages"])
+        # Stream CM-2 — working-memory sliding window: cheap LLM-free first
+        # gate. Trims the raw history to first turn + most-recent N turns
+        # when over threshold (on HumanMessage boundaries, so tool-call
+        # pairs stay intact), BEFORE plan/memory/advisory injection (those
+        # are this turn's guidance and must always reach the LLM) and the
+        # compressor preflight (the second, LLM-backed gate). Trims only
+        # this prompt view — the checkpointed history is never rewritten.
+        if working_window is not None:
+            trim = working_window.apply(messages)
+            messages = trim.messages
+            _cm_working_window_total.labels(
+                outcome="trimmed" if trim.dropped_turns else "noop"
+            ).inc()
+            _cm_working_window_dropped_turns.set(trim.dropped_turns)
         # Stream J.1 — render the plan into the system context so every
         # ReAct step executes against it. No-op for plain ReAct graphs.
         plan = state.get("plan")

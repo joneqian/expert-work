@@ -586,3 +586,52 @@ def test_mcp_tool_spec_backward_compatible_without_servers() -> None:
 def test_mcp_tool_spec_still_forbids_extra() -> None:
     with pytest.raises(ValidationError):
         MCPToolSpec.model_validate({"type": "mcp", "bogus": 1})
+
+
+# ---------------------------------------------------------------------------
+# policies.working_memory — CM-2 (sliding window)
+# ---------------------------------------------------------------------------
+
+
+def test_working_memory_defaults_are_conservative() -> None:
+    """CM-2 — defaults must be a no-op for existing manifests: enabled
+    with a 0.7 threshold and a generous 20-turn window keeping the first
+    turn, so a typical conversation is left untouched."""
+    spec = AgentSpec.model_validate(_doc())
+    wm = spec.spec.policies.working_memory
+    assert wm.enabled is True
+    assert wm.threshold_pct == 0.7
+    assert wm.max_recent_turns == 20
+    assert wm.keep_first_turn is True
+
+
+def test_working_memory_custom_values_accepted() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {
+        "working_memory": {
+            "enabled": False,
+            "threshold_pct": 0.5,
+            "max_recent_turns": 6,
+            "keep_first_turn": False,
+        }
+    }
+    wm = AgentSpec.model_validate(doc).spec.policies.working_memory
+    assert wm.enabled is False
+    assert wm.threshold_pct == 0.5
+    assert wm.max_recent_turns == 6
+    assert wm.keep_first_turn is False
+
+
+def test_working_memory_rejects_invalid_bounds() -> None:
+    for bad in ({"threshold_pct": 0}, {"threshold_pct": 1.5}, {"max_recent_turns": 0}):
+        doc = _doc()
+        doc["spec"]["policies"] = {"working_memory": bad}
+        with pytest.raises(ValidationError):
+            AgentSpec.model_validate(doc)
+
+
+def test_working_memory_forbids_extra() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {"working_memory": {"bogus": 1}}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
