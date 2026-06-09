@@ -106,8 +106,13 @@ _INSTRUCTIONS = (
 )
 
 
-def _build_prompt(successes: Sequence[str], failures: Sequence[str]) -> str:
-    parts = [_INSTRUCTIONS, "\n=== SUCCESSFUL RUNS ==="]
+def _build_prompt(successes: Sequence[str], failures: Sequence[str], hint_text: str = "") -> str:
+    parts = [_INSTRUCTIONS]
+    # Stream SE — SE-14: a Best-of-N strategy hint steers emphasis only; it
+    # never relaxes the hard guards (allowed_tools cap + _looks_too_specific).
+    if hint_text:
+        parts.append(hint_text)
+    parts.append("\n=== SUCCESSFUL RUNS ===")
     parts.extend(f"--- success {i + 1} ---\n{text}" for i, text in enumerate(successes))
     if failures:
         parts.append("\n=== FAILED RUNS (for contrast) ===")
@@ -145,18 +150,20 @@ class SkillDistiller:
         successes: Sequence[str],
         failures: Sequence[str] = (),
         allowed_tools: frozenset[str] | None = None,
+        hint_text: str = "",
     ) -> SkillDraft | None:
         """Distil a draft, or return ``None`` if the traces yield nothing usable.
 
         ``successes`` / ``failures`` are pre-rendered trajectory texts (use
         :func:`render_trajectory`). At least one success is required (posterior
         only). ``allowed_tools`` (when given) caps ``tool_names`` to the agent's
-        real tools.
+        real tools. ``hint_text`` (Stream SE — SE-14) is a Best-of-N strategy
+        angle appended to the prompt; emphasis only, never relaxes the guards.
         """
         if not successes:
             return None
 
-        prompt = _build_prompt(successes, failures)
+        prompt = _build_prompt(successes, failures, hint_text)
         raw = await self.model(prompt=prompt, tenant_id=tenant_id, model=self.model_name)
         obj = _parse_object(raw)
         if obj is None:
