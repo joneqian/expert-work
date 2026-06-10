@@ -20,7 +20,6 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 ENV_FILE="${HELIX_EVAL_ENV:-$HOME/.helix-eval.env}"
-CONCURRENCY="${HELIX_EVAL_CONCURRENCY:-8}"
 MODE="${1:-full}"
 RUN="uv run python tools/eval/run_longmem.py"
 
@@ -32,6 +31,9 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
+# Resolved AFTER sourcing so HELIX_EVAL_CONCURRENCY can live in the env
+# file. Precedence: env file > shell-exported value > default 8.
+CONCURRENCY="${HELIX_EVAL_CONCURRENCY:-8}"
 for var in HELIX_EVAL_EMBED_API_KEY HELIX_EVAL_EMBED_MODEL HELIX_EVAL_LLM_API_KEY HELIX_EVAL_LLM_MODEL; do
     if [[ -z "${!var:-}" ]]; then
         echo "ERROR: $var missing in $ENV_FILE" >&2

@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from longmem.adapter import load_longmemeval
@@ -193,3 +194,63 @@ async def test_cache_truncates_oversized_inputs(tmp_path: Path) -> None:
     again = await cached.embed(["x" * 5000], tenant_id=uuid4())
     assert again[0] == vectors[0]
     assert len(seen) == 2  # no new backend traffic
+
+
+def _throttle_error() -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "http://example.invalid/v1/embeddings")
+    response = httpx.Response(
+        400,
+        text='{"error":{"message":"Too many requests. throttled","type":"ServiceUnavailable"}}',
+        request=request,
+    )
+    return httpx.HTTPStatusError("400", request=request, response=response)
+
+
+@pytest.mark.asyncio
+async def test_cache_retries_throttle_shaped_400(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DashScope reports capacity throttling as HTTP 400 — must self-heal."""
+    import asyncio
+
+    sleeps: list[float] = []
+
+    async def _fast_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    # asyncio is a singleton module — patching it here patches the
+    # CachedEmbedder retry loop's view of it too.
+    monkeypatch.setattr(asyncio, "sleep", _fast_sleep)
+
+    class _FlakyBackend(_CountingBackend):
+        failures = 2
+
+        async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
+            if type(self).failures > 0:
+                type(self).failures -= 1
+                raise _throttle_error()
+            return await super().embed(texts, tenant_id=tenant_id)
+
+    cached = CachedEmbedder(_FlakyBackend(), model_key="m1", db_path=tmp_path / "emb.sqlite")
+    vectors = await cached.embed(["hello"], tenant_id=uuid4())
+    assert len(vectors) == 1
+    assert sleeps == [2.0, 4.0]
+
+
+@pytest.mark.asyncio
+async def test_cache_does_not_retry_genuine_400(tmp_path: Path) -> None:
+    request = httpx.Request("POST", "http://example.invalid/v1/embeddings")
+    response = httpx.Response(400, text='{"error":{"message":"invalid input"}}', request=request)
+    error = httpx.HTTPStatusError("400", request=request, response=response)
+
+    class _BadInputBackend(_CountingBackend):
+        attempts = 0
+
+        async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
+            type(self).attempts += 1
+            raise error
+
+    cached = CachedEmbedder(_BadInputBackend(), model_key="m1", db_path=tmp_path / "emb.sqlite")
+    with pytest.raises(httpx.HTTPStatusError):
+        await cached.embed(["hello"], tenant_id=uuid4())
+    assert _BadInputBackend.attempts == 1  # no retry on genuine 400
