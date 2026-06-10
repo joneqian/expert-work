@@ -489,10 +489,20 @@ def build_react_graph(
         #    end-and-resume model (vs LangGraph ``interrupt()``) keeps
         #    the parallel L.L6 staging below untouched.
         approval_resume = state.get("approval_resume")
+        ingest_update: dict[str, Any] = {}
         if approval_resume is not None:
+            # Stream CM-8 (Mini-ADR CM-I4) — the resume re-entry skips the
+            # entry chain (``aupdate_state(as_node="agent")`` lands the
+            # graph straight here), so run the workspace ingest now: a
+            # PLAN.md edited during the pause still flows back before the
+            # verdict executes. Best-effort + strict-scan semantics live
+            # inside the node (CM-0, unchanged).
+            if workspace_ingest_node is not None:
+                ingest_update = await workspace_ingest_node(state, config)
             resume_outcome = apply_resume_decision(tool_calls, _gated_tools, approval_resume)
             if resume_outcome.reject_messages:
                 rejected: dict[str, Any] = {
+                    **ingest_update,
                     "messages": list(resume_outcome.reject_messages),
                     "approval_resume": None,
                 }
@@ -632,7 +642,10 @@ def build_react_graph(
                     error_class=failure.error_class, tool=failure.tool_name
                 ).inc()
 
+        # CM-8 — the resume-path ingest lands first so a tool's own state
+        # write (e.g. ``update_plan`` in the resumed batch) still wins.
         result_dict: dict[str, Any] = {
+            **ingest_update,
             "messages": new_messages,
             "step_count_refund_pending": refund_total,
             **accumulated_state,
