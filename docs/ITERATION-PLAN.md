@@ -1445,6 +1445,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
   - [x] **CM-N5 PR3 P1 端到端（收尾）**（本次）：`endtoend.py`（ingestion 逐 session 经 `flush_messages_to_memory(reconcile=True)` CM-7 真路径 + session 日期 transcript 头注入 + 检索→MMR→reading→judge；**单库口径修订**：LoCoMo 双库喂同 transcript 抽取趋同只剩 2x 成本，改单 per-user 库记 fingerprint）+ `judge.py`（LongMemEval per-type 官方 prompt 5 模板 + Mem0 ACCURACY_PROMPT 逐字移植，verdict 按官方规则 substring yes / JSON label==CORRECT；judge=claude 差异标注 CM-K6）+ `anthropic_client.py`（httpx 轻传输 _judge.py 同形；temperature 按目录 sampling 能力位条件发）+ `runner.py`+`run_longmem.py` CLI（消融臂注册表 / jsonl 断点续跑撕裂行容错 / merge fresh-wins / baseline YAML 分节合并带 fingerprint）+ 23 单测（judge 模板路由/verdict 解析/管线冒烟/reconcile 降级 ADD/resume 跳过/abstention 模板/baseline 合并）；CLI fixture 实跑 4 臂消融数字可复现。tools/eval 151 全绿
   - [x] **CM-N5 PR4 真跑准备（Qwen 全栈 + 提速）**（本次）：`openai_client.py`（DashScope compatible-mode LLMCaller/TextJudge，judge 差异进 fingerprint）+ `CachedEmbedder`（sqlite content-hash 缓存防 5 臂 5x 重复 embed + batch<=10 分批并发）+ 两层 `concurrency`（共享 semaphore + gather 保序，=1 与串行等价 CI 确定性不变，jsonl 写锁）+ runner `--llm-provider/--concurrency` + 8 新测（payload 渲染/缓存命中/持久化/model 隔离/batch 上限/两层并发≡串行）。3923 回归绿
   - [ ] **基线真跑**：本地全 Qwen 全量（层 1 + 层 2），数字进 `baselines/`
+- [x] **CM-10 设计先行**（本次）：STREAM-CM-DESIGN §13 详设——立项动机（CM-9 effort/撞限升档 anthropic 专属，用户 2026-06-10 拍板即做）+ web 调研核准全 9 provider 思考深度参数（openai/azure/deepseek=reasoning_effort 多档 / qwen/doubao=thinking_budget 连续 / glm/kimi=仅开关 / 纯思考模型无控制；OpenRouter effort-budget 换算先例）+ 三形态能力位（ModelEntry.effort:bool 替换为 thinking:effort|budget|toggle|None，CM-9 刚 ship 下游可控替换优于双字段漂移）+ ModelSpec 零变更（effort/adaptive_thinking 语义升级厂商中立）+ factory `_thinking_payload` 翻译层 + `OpenAIClient.extra_body` 统一通道 + 升档梯子 per 形态（toggle 退化"开思考"一跳）+ 目录外 openai-compat 不发（与 CM-9 anthropic 原样发的差异显式记录）+ 7 条 Mini-ADR（CM-L1~L7）+ 3-PR 切分
+- **CM-10 跨厂商思考深度统一** P2：CM-9 增益从 anthropic 推广到全厂商
+  - [ ] **CM-10 PR2 能力位 + 翻译层**：thinking 三形态替换 sweep + 目录全厂商标注 + `_thinking_payload` + extra_body + 线级测试
+  - [ ] **CM-10 PR3 gate + 升档推广（收尾）**：factory gate 全形态 + `_escalated_model` 去 anthropic 短路 + toggle 一跳 + 回填
 
 ---
 
