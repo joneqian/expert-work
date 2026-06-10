@@ -25,20 +25,26 @@ from collections.abc import Hashable, Sequence
 DEFAULT_K = 60
 
 
-def rrf_fuse[T: Hashable](rankings: Sequence[Sequence[T]], *, k: int = DEFAULT_K) -> list[T]:
-    """Fuse several ranked lists by Reciprocal Rank Fusion.
+def rrf_fuse_scored[T: Hashable](
+    rankings: Sequence[Sequence[T]], *, k: int = DEFAULT_K
+) -> list[tuple[T, float]]:
+    """Fuse several ranked lists by RRF, returning ``(item, score)`` pairs.
 
     An item's fused score is the sum over all input lists of
     ``1 / (k + rank)`` (rank is 0-indexed). Items appearing high in
     multiple lists rise to the top. Items appearing in only one list
     are still kept, ranked by their position in that list.
 
+    The scored variant (Stream CM-6) exists so callers can re-weight the
+    fusion — e.g. the memory store's temporal decay — before cutting to
+    their final limit. :func:`rrf_fuse` stays the plain-items facade.
+
     ``k`` should match across callers that compare fused outputs;
     defaults to :data:`DEFAULT_K`.
 
-    Returns the fused items most-relevant first. An empty input
-    returns ``[]``. Duplicate items inside one input list are
-    collapsed to the first occurrence (the higher rank).
+    Returns ``(item, score)`` pairs most-relevant first. An empty input
+    returns ``[]``. Duplicate items inside one input list are collapsed
+    to the first occurrence (the higher rank).
     """
     if not rankings:
         return []
@@ -50,7 +56,16 @@ def rrf_fuse[T: Hashable](rankings: Sequence[Sequence[T]], *, k: int = DEFAULT_K
                 continue
             seen.add(item)
             scores[item] = scores.get(item, 0.0) + 1.0 / (k + rank + 1)
-    return sorted(scores.keys(), key=lambda t: scores[t], reverse=True)
+    return sorted(scores.items(), key=lambda pair: pair[1], reverse=True)
 
 
-__all__ = ["DEFAULT_K", "rrf_fuse"]
+def rrf_fuse[T: Hashable](rankings: Sequence[Sequence[T]], *, k: int = DEFAULT_K) -> list[T]:
+    """Fuse several ranked lists by Reciprocal Rank Fusion.
+
+    Thin facade over :func:`rrf_fuse_scored` for callers that only need
+    the fused order (J.5 knowledge retrieval); see there for semantics.
+    """
+    return [item for item, _score in rrf_fuse_scored(rankings, k=k)]
+
+
+__all__ = ["DEFAULT_K", "rrf_fuse", "rrf_fuse_scored"]

@@ -5,6 +5,20 @@ Pure algorithms with no persistence dependencies. Both the J.5
 from here so the implementation is single-sourced.
 """
 
-from helix_agent.common.search.rrf import rrf_fuse
+from helix_agent.common.search.decay import (
+    DECAY_FLOOR,
+    DEFAULT_HALF_LIFE,
+    temporal_decay_factor,
+)
+from helix_agent.common.search.mmr import DEFAULT_MMR_LAMBDA, mmr_select
+from helix_agent.common.search.rrf import rrf_fuse, rrf_fuse_scored
 
-__all__ = ["rrf_fuse"]
+__all__ = [
+    "DECAY_FLOOR",
+    "DEFAULT_HALF_LIFE",
+    "DEFAULT_MMR_LAMBDA",
+    "mmr_select",
+    "rrf_fuse",
+    "rrf_fuse_scored",
+    "temporal_decay_factor",
+]
