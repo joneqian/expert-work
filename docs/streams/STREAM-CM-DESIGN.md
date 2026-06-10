@@ -8,7 +8,7 @@
 >
 > **零债收尾规则**（[memory:zero-tech-debt]）：每条交付收尾 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 >
-> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）+ CM-5（可恢复压缩，§7）+ CM-6（时间衰减+MMR，§8）+ CM-7（结构化摘要+写入显式操作，§9）详设已锁定；CM-8…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
+> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）+ CM-5（可恢复压缩，§7）+ CM-6（时间衰减+MMR，§8）+ CM-7（结构化摘要+写入显式操作，§9）+ CM-8（plan UI 通道+resume ingest 修复，§10）详设已锁定；CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
 
 ---
 
@@ -26,7 +26,7 @@
 | CM-5 | B6 | 超大工具结果 char-cap 截断丢弃，不可找回 | 超限结果外部化 workspace 文件 + 虚拟引用 footer + read 类豁免（"可恢复压缩"通用原则） | P1 | CM-F1…F6（§7 详设） |
 | CM-6 | B4 | 对称 RRF，无 MMR 去冗余、无时间衰减 | 时间衰减进 retrieve()（两 store）+ MMR 在 orchestrator rerank 后殿后（管线顺序修正见 §8） | P1 | CM-G1…G6（§8 详设） |
 | CM-7 | B7 | `<context-summary>` 缺"背景非指令"强语义、二次压缩链式重生成、writeback 直写同义堆积矛盾不废弃 | 摘要 preamble+三段结构+增量更新 ① + run 末 writeback 显式 ADD/UPDATE/DELETE/NOOP ② | P2 | CM-H1…H6（§9 详设） |
-| CM-8 | C8 | approval `decision='modify'` 无法编辑 `proposed_args` 再提交 | 文件投影（CM-0）+ admin UI plan/todo 可视化可编辑双通道 | P2 | 待细化 |
+| CM-8 | C8 | plan 无 UI 通道（前后端全缺）+ approval resume 不经 ingest（暂停期 PLAN.md 编辑丢失）+ approval E2E 残债；~~modify UX 缺口~~ 已被早期 H.x 实现（§10 范围修正） | plan 读写 API + RunDetail PlanPanel（非 RUNNING 可写）+ resume ingest 修复 + approval E2E | P2 | CM-I1…I6（§10 详设） |
 | CM-9 | C9 + N4 | 无 plan mode 开关、无 effort 控制、iteration budget 仅概念、无 loop 去重 | plan mode 开关 + adaptive thinking `effort` 档位 + iteration budget 真实现 + 调用指纹去重 | P2 | 待细化 |
 | CM-N5 | N5 | 检索/记忆改动无回归基线 | LongMemEval + LoCoMo 自测纳入 eval（贯穿 CM-4/6/7） | 贯穿 | 待细化 |
 
@@ -978,9 +978,119 @@ flush_messages_to_memory(..., reconcile: bool = False)   ← 新参，默认关
 
 ---
 
-## 10. 与既有 Stream 的衔接
+## 10. CM-8 详细设计 —— Plan 的 UI 通道 + approval resume ingest 修复
 
-- **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8 pause→ingest 时机）、`update_plan`（K.8）。
+> **范围修正（2026-06-10 用户拍板）**：范围表原句"approval `decision='modify'` 无法编辑 `proposed_args` 再提交"经取证**已过期**——ApprovalCard 已有完整 Edit arguments → Monaco JSON → "Approve with edits" → `{decision:"modify", modified_args}` 流程，后端链路完整（DTO 验证 + `apply_resume_decision` 重写 args），6 vitest + 2 Storybook 在册。**CM-8 不重做 modify UX**。修正后范围三件事：
+> ① **plan/todo 的 UI 通道**——可视化 + 可编辑（仅非 RUNNING 可写），补齐 C8 双通道的 UI 一侧；
+> ② **修 approval resume ingest 漏洞**——resume 走 `aupdate_state(as_node="agent")` 直入 tools 不经 entry chain ⇒ CM-0 的 PLAN.md ingest 在 pause→resume 周期不跑，暂停期人改 PLAN.md 丢失（§11 衔接原"J.8 pause→ingest 时机"假设不成立，本节修复）；
+> ③ **补 approval 流程 Playwright E2E**（PR 7e 残债，`runs.spec.ts:7`）。
+
+### 10.1 关键约束（接缝核准结论，已源码核准）
+
+| 约束 | 事实 | file:line |
+|---|---|---|
+| **modify UX 已实现** | ApprovalCard：Edit arguments → Monaco JSON（invalid 禁 Approve、dirty 切 "Approve with edits"）→ `resumeRun {decision:"modify", modified_args}`；后端 `ResumeRequest` 验证 modify 必带 modified_args、`apply_resume_decision` 重写 gated call args | `ApprovalCard.tsx:122-243`、`api/runs.ts:73-89`、`control_plane/api/runs.py:93-106,638-644`、`_approval.py:189-227` |
+| **plan 前后端全缺** | 前端零 plan 字段/类型/组件；run detail 端点不含 plan；plan 只在 SSE `updates` chunk 间接出现；**无任何外部写 plan 的 API** | `RunDetail.tsx`、`runs.ts:43-53`、`control_plane/api/runs.py:446-511`、`sse.py:315` |
+| **resume 不经 entry chain** | resume `aupdate_state(..., as_node="agent")` → 图从 agent 重入直达 tools；entry chain（memory_recall→workspace_ingest→planner）只在 run 始跑 ⇒ 暂停期 PLAN.md 编辑不回灌 | `control_plane/api/runs.py:710-728`、`builder.py:670-683` |
+| **control-plane 读写 checkpoint 的两种成本** | resume 先按 spec build agent 再 `built.graph.aupdate_state`（每请求 build，一次性可接受）；checkpointer 本身在 lifespan 可得 ⇒ **读**可经 `checkpointer.aget_tuple(config)` 直读 channel_values 零 build（3s 轮询友好） | `control_plane/api/runs.py:693-728` |
+| **plan 数据形态已定** | `Plan{goal, steps[PlanStep{id, description, status}]}`，status ∈ pending/in_progress/completed（CM-0 PR3 已加）；CM-0 投影/ingest/recitation 全用它 | `protocol/plan.py`、`context/workspace_projection.py` |
+| **前端基建** | AntD v5 + CSS 变量 token + Monaco + lucide；i18n en/zh-CN；RunDetail 3s `useStatusPolling`（活跃 + tab 可见）；Storybook/vitest/Playwright 三层在册 | `apps/admin-ui/package.json`、`theme/`、`RunDetail.tsx:105-110` |
+| **接线点清单（SE-8）** | 无新页面 ⇒ router/Sidebar/CommandPalette 不动；要动 SDK + i18n 双语 + Storybook + vitest + Playwright + envelope 对账（runs.ts 既有 raw payload 风格） | [memory:SE-8 清单]、`runs.ts:58-66` |
+
+### 10.2 设计 ①：plan 读写 API + RunDetail Plan 面板
+
+```
+读（轮询友好，零 build）
+  GET /v1/sessions/{thread_id}/plan
+    → checkpointer.aget_tuple({thread_id, tenant_id}) → channel_values["plan"]
+    → 200 {goal, steps:[{id, description, status}]} / 204 无 plan
+前端
+  RunDetail 新 PlanPanel（EventStreamPanel 同级 Card）：
+    goal 标题 + 步骤列表（status 图标 ○/◐/✓）+ 完成度
+    数据接入 RunDetail 既有 3s useStatusPolling 节奏（活跃 + tab 可见）
+写（低频，复用 resume 先例）
+  PUT /v1/sessions/{thread_id}/plan   body = Plan DTO（protocol 模型验证）
+    状态机 gate：thread 最新 run 为 RUNNING → 409（运行中外部写有被
+      agent 下一 turn update_plan/投影覆盖的竞态，2026-06-10 用户拍板拒之）
+    → build agent（resume 同款）→ built.graph.aupdate_state({plan}, as_node="agent")
+    → DB 权威落定；下一 turn CM-0 投影自动同步 PLAN.md（单向流模型不变，
+      UI 通道无需独立 reconciliation——与文件通道殊途同归于 DB）
+  前端编辑：PlanPanel Edit 模式 = 结构化表单（goal 输入 + 步骤行内编辑/
+    状态选择/增删），非 raw JSON（产品级基线）；RUNNING 时 Edit 禁用 + tooltip
+```
+
+### 10.3 设计 ②：approval resume ingest 修复（orchestrator 内部）
+
+```
+tools_node 入口（builder.py resume 分支）：
+  state.approval_resume 非空 ∧ workspace_ingest_node 已接线
+    → ingest_update = await workspace_ingest_node(state, config)   ← 一次
+    → ingest_update 带 plan 候选 → 并入本批 result_dict（注入扫描/无变更
+      no-op 语义复用 CM-0 原样）
+  不动 entry chain、不动 control-plane resume 端点、不动 as_node 语义
+```
+
+暂停期两条人工干预通道就此对齐：改 PLAN.md（resume 时回灌）或 UI 编辑（PUT 直写 DB，PAUSED 非 RUNNING 可写）。
+
+### 10.4 数据/协议变更
+
+1. **control-plane `api/plan.py`（新）**：GET/PUT `/v1/sessions/{thread_id}/plan`；GET 经 checkpointer 直读（lifespan 注入）；PUT 经 build+`aupdate_state`（resume 同款 lazy import 纪律）；PUT 校验 protocol `Plan` 模型 + RUNNING→409 + tenant/user scope 同 runs 端点；响应 raw payload（对账 runs.ts 既有风格，无 envelope）。
+2. **audit**：`AuditAction.PLAN_EDITED`——**protocol 与 control-plane 两处 Literal 同步加**（[memory:audit-literal-drift]）；PUT 成功发射（resource_type=`thread`，detail 含步骤数 delta）。
+3. **orchestrator `builder.py`**：tools_node resume 分支调既有 `workspace_ingest_node`（已是 build_react_graph 参数，零新参数）；ingest 返回的 plan 并入 result_dict。
+4. **admin-ui**：`api/plan.ts`（SDK：getThreadPlan/updateThreadPlan + Plan/PlanStep 类型）；`run_detail/PlanPanel.tsx`（只读视图 + 结构化编辑模式）；i18n `plan_panel.*` en/zh-CN 双语；Storybook（只读/编辑/空 plan）+ vitest + Playwright。
+5. **无 schema/migration**；plan 仍只活在 checkpoint（DB 权威），不建新表。
+
+### 10.5 边界情况
+
+| 场景 | 处理 |
+|---|---|
+| thread 无 checkpoint / 无 plan | GET 204；PlanPanel 渲染空态（"agent 尚未制定 plan"） |
+| PUT 时 run 恰好转 RUNNING | 状态读取与 aupdate_state 间的窗口竞态——agent 写最终覆盖，可接受（外部写本就 best-effort 干预）；状态机 gate 挡住绝大多数 |
+| PUT body 步骤 id 重复/status 非法 | protocol `Plan` 模型验证 422 |
+| PUT 含注入内容 | 与 ingest 同款 strict 扫描（goal+步骤描述），命中 422 拒绝（DB 权威不染） |
+| resume 时 PLAN.md 没改 | ingest 无变更 no-op（CM-0 语义原样） |
+| resume ingest 扫描命中 | 拒绝回灌、DB 权威，approval 流程照常继续（best-effort） |
+| 非 plan_execute agent（无 planner） | plan 通常为 None → GET 204、面板空态；PUT 仍可写（plan channel 通用） |
+| RUNNING 中看面板 | 只读实时（3s 轮询）+ Edit 禁用 tooltip 说明 |
+
+### 10.6 可观测（零债"可观测齐全"）
+
+- `PLAN_EDITED` audit（control-plane 标准 audit 管道）。
+- control-plane 结构化日志 `plan.read`/`plan.edited`（无请求派生值进 extra，[memory:log-injection]）。
+- orchestrator resume ingest 复用 CM-0 `helix_cm_ingest_total{outcome}`（零新 metric）。
+
+### 10.7 测试 & 验收（CM-8 Exit）
+
+- **control-plane**：GET 有/无 plan（200/204）+ scope 隔离；PUT 校验/409 RUNNING/注入 422/audit 发射/aupdate_state 落 checkpoint（fake graph）。
+- **orchestrator**：resume 分支触发 ingest（spy ingest node）+ plan 候选并入 state + 无 ingest 接线零行为变更 + 扫描命中不回灌。
+- **admin-ui vitest**：PlanPanel 只读渲染（含空态/状态图标）/ 编辑模式增删改 / RUNNING 禁用 / PUT 提交 payload 形状；Storybook 三态；Playwright：plan 面板可见性 + approval 全流程 E2E（PR 7e 残债，fixtures 按现状细化）。
+- **零债 6 条**：无 TODO；本 §10 与实现一致；audit/日志齐全；CI 全绿；范围表 modify UX 标已实现不留幻影条目。
+
+### 10.8 Mini-ADR（CM-8 锁定）
+
+| ID | 决策 |
+|---|---|
+| **CM-I1** | **modify UX 已实现，CM-8 不重做**（范围表假设过期的显式修正记录）；残留的 approval E2E（PR 7e）并入本项收尾 |
+| **CM-I2** | **plan 读写走 thread 级端点**：GET 经 checkpointer 直读（零 build、3s 轮询友好）；PUT 经 build+`aupdate_state(as_node="agent")`（resume 同款先例，低频）；DB 权威 → 下一 turn 投影自动同步 PLAN.md——UI 通道复用 CM-0 单向流模型，无独立 reconciliation |
+| **CM-I3** | **写仅非 RUNNING**（409）——运行中外部写有被 agent 覆盖竞态（2026-06-10 用户拍板）；剩余 TOCTOU 窗口接受（agent 写终胜） |
+| **CM-I4** | **resume ingest 修复在 tools_node resume 分支**调既有 ingest 节点——不动 entry chain、不动 control-plane resume 端点、不动 as_node 语义；CM-0 扫描/no-op 语义原样 |
+| **CM-I5** | **前端结构化编辑**（goal + 步骤行内编辑/状态/增删），非 raw JSON；遵守 Admin UI 设计基线 10 条（dark-first / 非默认 AntD 堆砌） |
+| **CM-I6** | `PLAN_EDITED` audit **protocol + control-plane 双 Literal 同步**；PUT 注入扫描与 ingest 同 strict 档（DB 权威不染） |
+
+### 10.9 PR 切分（CM-8）
+
+1. **CM-8 PR1 — 后端 plan API**：control-plane GET/PUT `/v1/sessions/{thread_id}/plan` + 409 状态机 + 注入扫描 + `PLAN_EDITED` audit（双 Literal）+ tests。
+2. **CM-8 PR2 — resume ingest 修复（orchestrator）**：tools_node resume 分支调 ingest + tests。
+3. **CM-8 PR3 — 前端 PlanPanel**：SDK + 只读视图 + 结构化编辑 + i18n 双语 + Storybook + vitest。
+4. **CM-8 PR4 — E2E（收尾 CM-8）**：approval 全流程 + plan 面板 Playwright + ITERATION-PLAN 回填。
+
+> 每个 PR 在本 §10 基础上局部细化；ITERATION-PLAN 增 CM-8 backlog，ship 后回填 `[x]`+PR 号。
+
+---
+
+## 11. 与既有 Stream 的衔接
+
+- **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8——pause→resume 的 ingest 时机由 CM-8 §10.3 修复补齐）、`update_plan`（K.8）。
 - **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）共存；recitation 放非 system 区不破 L-1。**L-4 mutation advisory 被 CM-1 收敛**（`failed_mutations`→`tool_failures`、`<mutation-advisory>`→`<recovery-advisory>`，mutation 校验作为 `mutation_not_landed` 一类保留），非并行；L-5 退款语义不动（失败工具调用照常计步）。
 - **Stream SE**：CM-1（运行时 error-as-guidance）与 SE-12（离线 skill 进化失败归因）是**两个层面**——SE 学习离线进化、CM-1 运行时即时恢复，不重叠。
 - **Stream H（admin-ui）**：CM-8 文件投影 + UI 双通道依赖 CM-0 的 ingest 路径。

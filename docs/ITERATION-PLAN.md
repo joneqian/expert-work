@@ -1429,7 +1429,12 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - **CM-7（B7）结构化 note** P2：摘要"背景非指令"语义+增量更新 ① + writeback 显式操作 ②（A-MEM/Mem0）
   - [x] **CM-7 PR1 compressor 摘要强化（①）**（PR #514）：`_SUMMARY_PREAMBLE` reference-only 声明进 wrapper 内（标签/消息类型/位置全不变，L-1 零扰动）+ 三段结构 prompt（`_SUMMARY_STRUCTURE_RULES` 共享，Facts/Decisions/Pending）+ UPDATE/FRESH 双模式（`_extract_prior_summary` 取 middle 最后一条前次 summary、早者并入转录链收敛、legacy 无 preamble 可解析 → `_summarise_update` PREVIOUS SUMMARY+NEW EVENTS 增量合并）+ `context_compressor.summary mode` 日志 + 5 新 unit + 2 既有测试窗口 200→280（preamble ~33 token 头室）。1026 orchestrator 回归绿
   - [x] **CM-7 PR2 writeback 显式操作（②，收尾）**（本次）：`flush_messages_to_memory(reconcile=)`（默认 False；run 末 writeback 传 True、CM-3 flush 保持直写）+ `_reconcile_and_apply`（近邻 retrieve(limit=3)→cosine≥0.80 过滤→无近邻直 ADD 零 LLM 成本→批量 ops LLM `{"ops":[{index,op,target_id}]}`→ADD/UPDATE(update_content 重 embed)/DELETE(soft_delete 候选不存)/NOOP；解析失败/目标失踪/任何异常回落直写 ADD，cancel re-raise）+ `LongTermMemorySpec.reconcile_writes`（默认 True）+ factory 透传 + `record_memory_reconcile{op=add/update/delete/noop/degraded}`；7 reconcile unit（无近邻零 ops 调用/UPDATE 改写/NOOP/DELETE 撤销/乱 JSON 降级/未知 target 降级/reconcile=False 现状直写单 LLM 调用）+ 3 protocol（默认/关闭/extra-forbid）。1661 全链回归绿。**→ CM-7 完成（设计 + ① + ② 三 PR）**
-- **CM-8（C8）文件投影 + UI 双通道** P2：依赖 CM-0 ingest + admin UI plan/todo 可编辑（补 J.8 modify UX）
+- [x] **CM-8 设计先行**（本次）：STREAM-CM-DESIGN §10 详设——范围修正（modify UX 已被早期 H.x 实现：ApprovalCard 完整 Edit→Monaco→modify+modified_args 链路在册，CM-8 不重做，2026-06-10 用户确认）+ 真缺口取证（plan 前后端全缺：零字段/零端点/零外部写路径；approval resume `as_node="agent"` 直入 tools 不经 entry chain ⇒ CM-0 PLAN.md ingest 在 pause→resume 不跑，暂停期手改丢失）+ plan 读写 API 设计（GET checkpointer 直读零 build 轮询友好 / PUT build+aupdate_state resume 同款，仅非 RUNNING 409，注入 strict 扫描，PLAN_EDITED audit 双 Literal）+ resume ingest 修复（tools_node resume 分支调既有 ingest 节点，零新参数）+ 前端 PlanPanel（结构化编辑非 raw JSON，遵守设计基线）+ 边界 + 可观测 + 测试 + 6 条 Mini-ADR（CM-I1~I6）+ 4-PR 切分
+- **CM-8（C8）plan UI 通道 + resume ingest 修复** P2：~~modify UX~~ 已实现；plan 读写 API + PlanPanel + ingest 漏洞 + approval E2E
+  - [ ] **CM-8 PR1 后端 plan API**：GET/PUT `/v1/sessions/{thread_id}/plan` + 409 状态机 + 注入扫描 + `PLAN_EDITED` audit（protocol+control-plane 双 Literal）+ tests
+  - [ ] **CM-8 PR2 resume ingest 修复（orchestrator）**：tools_node resume 分支调 workspace_ingest_node + tests
+  - [ ] **CM-8 PR3 前端 PlanPanel**：api/plan.ts SDK + 只读视图（状态图标/空态/3s 轮询）+ 结构化编辑（RUNNING 禁用）+ i18n 双语 + Storybook + vitest
+  - [ ] **CM-8 PR4 E2E（收尾）**：approval 全流程（PR 7e 残债）+ plan 面板 Playwright + 回填
 - **CM-9（C9 + N4）plan mode + effort + loop 去重** P2：plan mode 开关 + adaptive thinking `effort` 档位 + iteration budget 真实现 + 调用指纹去重
 - **CM-N5 评测基线** 贯穿：LongMemEval + LoCoMo 自测纳入 eval（验 CM-4/6/7）
 
