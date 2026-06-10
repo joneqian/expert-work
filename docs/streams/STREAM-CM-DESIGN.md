@@ -1391,9 +1391,9 @@ OpenAIProvider 加 thinking_payload 字段（factory 构造时翻译好，comple
 
 ### 13.7 PR 切分（CM-10）
 
-1. **CM-10 PR1 — 设计**（本 §13）。
-2. **CM-10 PR2 — 能力位 + 翻译层**：thinking 三形态替换 sweep + 目录全厂商标注 + `_thinking_payload` + `OpenAIClient.extra_body` + 线级测试（默认零行为变更）。
-3. **CM-10 PR3 — gate + 升档推广（收尾 CM-10）**：factory gate 全形态 + `_escalated_model` 去 anthropic 短路 + toggle 一跳 + 集成测 + ITERATION-PLAN 回填。
+1. **CM-10 PR1 — 设计**（本 §13，已实现，PR #528）。
+2. **CM-10 PR2 — 能力位 + 翻译层**（已实现，PR #529）：thinking 三形态替换 sweep + 目录全厂商标注 + `_thinking_payload` + `OpenAIClient.extra_body` + 线级测试（默认零行为变更，翻译层未接线）。
+3. **CM-10 PR3 — gate + 升档推广（收尾 CM-10）**（已实现）：`_build_provider` 全 compat 分支接线 thinking_payload + gate 推广（厂商中立文案；toggle 档位归一 DEBUG 日志）+ `_escalated_model` 去 anthropic 短路 + toggle 一跳（实现注记：toggle 是唯一 untouched-manifest 也升档的形态——off→on 即其全部升档轴，与 anthropic untouched 默认已动态思考的语义对齐而非背离）+ ITERATION-PLAN 回填。**→ CM-10 完成**。
 
 ---
 

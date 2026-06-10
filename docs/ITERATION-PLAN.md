@@ -1447,8 +1447,8 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
   - [ ] **基线真跑**：本地全 Qwen 全量（层 1 + 层 2），数字进 `baselines/`
 - [x] **CM-10 设计先行**（本次）：STREAM-CM-DESIGN §13 详设——立项动机（CM-9 effort/撞限升档 anthropic 专属，用户 2026-06-10 拍板即做）+ web 调研核准全 9 provider 思考深度参数（openai/azure/deepseek=reasoning_effort 多档 / qwen/doubao=thinking_budget 连续 / glm/kimi=仅开关 / 纯思考模型无控制；OpenRouter effort-budget 换算先例）+ 三形态能力位（ModelEntry.effort:bool 替换为 thinking:effort|budget|toggle|None，CM-9 刚 ship 下游可控替换优于双字段漂移）+ ModelSpec 零变更（effort/adaptive_thinking 语义升级厂商中立）+ factory `_thinking_payload` 翻译层 + `OpenAIClient.extra_body` 统一通道 + 升档梯子 per 形态（toggle 退化"开思考"一跳）+ 目录外 openai-compat 不发（与 CM-9 anthropic 原样发的差异显式记录）+ 7 条 Mini-ADR（CM-L1~L7）+ 3-PR 切分
 - **CM-10 跨厂商思考深度统一** P2：CM-9 增益从 anthropic 推广到全厂商
-  - [ ] **CM-10 PR2 能力位 + 翻译层**：thinking 三形态替换 sweep + 目录全厂商标注 + `_thinking_payload` + extra_body + 线级测试
-  - [ ] **CM-10 PR3 gate + 升档推广（收尾）**：factory gate 全形态 + `_escalated_model` 去 anthropic 短路 + toggle 一跳 + 回填
+  - [x] **CM-10 PR2 能力位 + 翻译层**（PR #529）：`ModelEntry.effort: bool` 替换为 `thinking: effort|budget|toggle|None`（CM-L1 全仓 sweep：factory gate/_escalated_model/目录测试）+ 目录全厂商标注（openai gpt-5.5 系/deepseek v4=effort；qwen3 商业系/doubao seed-2.0=budget；glm/kimi k2.5+=toggle；纯思考与 haiku=None）+ `_thinking_payload` 纯函数（effort 直传 reasoning_effort / budget OpenRouter 比例换算 clamp 1024..81920 / toggle 归一 / adaptive-only per 形态 / anthropic 与目录外 None）+ `OpenAIClient.extra_body` 三处签名 + HTTP merge 顶层 + `OpenAIProvider.thinking_payload` 透传。11 新测，3934 回归绿
+  - [x] **CM-10 PR3 gate + 升档推广（收尾）**（本次）：`_build_provider` 全 compat 分支（openai/5 国产厂商/self-hosted/azure）接线 thinking_payload + gate 推广（目录内无 thinking 控制配 effort 即 build 期报错，厂商中立文案；toggle 档位归一 DEBUG）+ `_escalated_model` 去 anthropic 短路按 thinking 形态分流（effort/budget 走 CM-9 四档梯子；toggle 一跳 untouched→high 即开思考、已开无可升——untouched 升档语义注记见 §13.7）+ 7 新测（跨厂商梯子/toggle 一跳/纯思考永不升/gate fail-fast/payload 接线/目录外不发/untouched 零 payload）。**→ CM-10 完成（设计 + 翻译层 + 升档推广 三 PR）**
 
 ---
 

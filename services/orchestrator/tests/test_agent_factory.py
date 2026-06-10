@@ -918,3 +918,41 @@ def test_thinking_payload_off_catalog_compat_sends_nothing() -> None:
 
     assert _thinking_payload(_vendor_model("qwen", "custom-gateway-model", effort="max")) is None
     assert _thinking_payload(_vendor_model("deepseek", "deepseek-reasoner", effort="high")) is None
+
+
+# ---------------------------------------------------------------------------
+# Stream CM-10 PR3 — gate + thinking payload wiring for compat vendors
+# ---------------------------------------------------------------------------
+
+
+def test_compat_effort_on_unsupported_model_fails_fast() -> None:
+    # qwen3-vl-plus is in-catalog with no thinking control.
+    model = _vendor_model("qwen", "qwen3-vl-plus", effort="high")
+    with pytest.raises(AgentFactoryError, match="thinking-depth control"):
+        _build_provider(model, "k")
+
+
+def test_compat_provider_carries_translated_payload() -> None:
+    provider = _build_provider(
+        _vendor_model("qwen", "qwen3.7-max", effort="high", max_tokens=10_000), "k"
+    )
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.thinking_payload == {"enable_thinking": True, "thinking_budget": 8_000}
+    glm = _build_provider(_vendor_model("glm", "glm-5.1", effort="low"), "k")
+    assert isinstance(glm, OpenAIProvider)
+    assert glm.thinking_payload == {"thinking": {"type": "enabled"}}
+    openai = _build_provider(_vendor_model("openai", "gpt-5.5", effort="max"), "k")
+    assert isinstance(openai, OpenAIProvider)
+    assert openai.thinking_payload == {"reasoning_effort": "max"}
+
+
+def test_compat_off_catalog_not_gated_and_sends_nothing() -> None:
+    provider = _build_provider(_vendor_model("qwen", "custom-gateway-model", effort="max"), "k")
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.thinking_payload is None
+
+
+def test_compat_untouched_manifest_has_no_payload() -> None:
+    provider = _build_provider(_vendor_model("qwen", "qwen3.7-max"), "k")
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.thinking_payload is None

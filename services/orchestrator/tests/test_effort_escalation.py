@@ -177,3 +177,37 @@ def test_escalation_requires_catalog_effort_support() -> None:
     assert _escalated_model(_model(name="claude-haiku-4-5", adaptive_thinking=True)) is None
     # Off-catalog models are not escalated either (capability unknown).
     assert _escalated_model(_model(name="claude-custom-gw", effort="low")) is None
+
+
+# ---------------------------------------------------------------------------
+# CM-10 — cross-vendor escalation (Mini-ADR CM-L6)
+# ---------------------------------------------------------------------------
+
+
+def _vendor(provider: str, name: str, **overrides: Any) -> ModelSpec:
+    return ModelSpec.model_validate({"provider": provider, "name": name, **overrides})
+
+
+def test_escalation_ladder_applies_to_effort_and_budget_vendors() -> None:
+    openai = _escalated_model(_vendor("openai", "gpt-5.5", effort="low"))
+    assert openai is not None and openai.effort == "medium"
+    qwen = _escalated_model(_vendor("qwen", "qwen3.7-max", effort="high"))
+    assert qwen is not None and qwen.effort == "max"
+    doubao = _escalated_model(_vendor("doubao", "doubao-seed-2.0-pro", adaptive_thinking=True))
+    assert doubao is not None and doubao.effort == "medium"
+    # Untouched manifests on ladder vendors stay off (CM-9 conservative default).
+    assert _escalated_model(_vendor("qwen", "qwen3.7-max")) is None
+
+
+def test_toggle_vendors_escalate_by_turning_thinking_on() -> None:
+    # Untouched manifest -> one hop: enable thinking.
+    glm = _escalated_model(_vendor("glm", "glm-5.1"))
+    assert glm is not None and glm.effort == "high"
+    # Already thinking -> nowhere to go.
+    assert _escalated_model(_vendor("glm", "glm-5.1", effort="low")) is None
+    assert _escalated_model(_vendor("kimi", "kimi-k2.6", adaptive_thinking=True)) is None
+
+
+def test_no_thinking_control_models_never_escalate() -> None:
+    assert _escalated_model(_vendor("deepseek", "deepseek-reasoner", effort="low")) is None
+    assert _escalated_model(_vendor("qwen", "custom-gateway", effort="low")) is None

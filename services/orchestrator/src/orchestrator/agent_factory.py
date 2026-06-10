@@ -1118,18 +1118,32 @@ def _thinking_payload(model: ModelSpec) -> dict[str, Any] | None:
 
 
 def _escalated_model(model: ModelSpec) -> ModelSpec | None:
-    """The one-step-up ModelSpec for the CM-9 escalated caller.
+    """The one-step-up ModelSpec for the CM-9/CM-10 escalated caller.
 
-    ``None`` when escalation does not apply: compute controls untouched
-    in the manifest (conservative default-off), the model's catalog
-    entry lacks effort support, or the base level is already ``max``.
+    Keyed on the catalog ``thinking`` capability shape (Mini-ADR CM-L6):
+
+    - **effort / budget** vendors keep the CM-9 ladder
+      (``None/low→medium→high→max``; budget vendors translate the level
+      into a token budget at the adapter layer). Escalation still
+      requires the manifest to have touched a compute control —
+      conservative default-off, unchanged from CM-9.
+    - **toggle** vendors (GLM / Kimi) degrade to one hop: thinking off →
+      "high" (= turn it on; the level itself collapses at translation).
+      A manifest that already enabled thinking has nowhere to go. This
+      is the one shape where an untouched manifest DOES escalate — for
+      these vendors "off → on" is the entire escalation axis, and
+      anthropic's untouched default is already dynamic thinking, so the
+      semantics line up rather than diverge.
+    - Off-catalog models never escalate (capability unknown).
     """
-    if model.provider != "anthropic":
-        return None
-    if model.effort is None and not model.adaptive_thinking:
-        return None
     entry = catalog_entry(model.provider, model.name)
     if entry is None or entry.thinking is None:
+        return None
+    if entry.thinking == "toggle":
+        if model.effort is None and not model.adaptive_thinking:
+            return model.model_copy(update={"effort": "high"})
+        return None
+    if model.effort is None and not model.adaptive_thinking:
         return None
     next_level = _EFFORT_LADDER.get(model.effort)
     if next_level is None:
@@ -1396,12 +1410,32 @@ def _build_provider(
             effort=model.effort,
             adaptive_thinking=model.adaptive_thinking,
         )
+    # Stream CM-10 (Mini-ADR CM-L3/L5) — the same build-time gate for the
+    # OpenAI-compatible vendors, plus the pre-translated thinking payload.
+    # Off-catalog models are not gated, but unlike anthropic they also get
+    # NO payload (the thinking wire format differs per vendor — CM-L5).
+    compat_entry = catalog_entry(model.provider, model.name)
+    if model.effort is not None and compat_entry is not None and compat_entry.thinking is None:
+        raise AgentFactoryError(
+            f"model {model.name!r} does not support thinking-depth control; "
+            "remove model.effort from the manifest"
+        )
+    if compat_entry is not None and compat_entry.thinking == "toggle" and model.effort is not None:
+        # GLM / Kimi have no depth — every level collapses to "enabled".
+        logger.debug(
+            "agent_factory.thinking_toggle model=%s effort=%s collapses to enabled",
+            model.name,
+            model.effort,
+        )
+    thinking_payload = _thinking_payload(model)
+
     if provider == "openai":
         return OpenAIProvider(
             client=HTTPOpenAIClient(api_key=api_key),
             model=model.name,
             temperature=model.temperature,
             image_resolver=image_resolver,
+            thinking_payload=thinking_payload,
         )
 
     openai_compatible = {
@@ -1418,6 +1452,7 @@ def _build_provider(
             model=model.name,
             temperature=model.temperature,
             image_resolver=image_resolver,
+            thinking_payload=thinking_payload,
         )
 
     if provider == "self-hosted":
@@ -1428,6 +1463,7 @@ def _build_provider(
             model=model.name,
             temperature=model.temperature,
             image_resolver=image_resolver,
+            thinking_payload=thinking_payload,
         )
 
     if provider == "azure":
@@ -1446,6 +1482,7 @@ def _build_provider(
             model=model.name,
             temperature=model.temperature,
             image_resolver=image_resolver,
+            thinking_payload=thinking_payload,
         )
 
     raise AgentFactoryError(f"provider {provider!r} has no adapter")
