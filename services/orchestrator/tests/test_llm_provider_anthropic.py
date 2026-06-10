@@ -798,3 +798,57 @@ async def test_response_without_usage_returns_message_without_metadata() -> None
     response = await provider.complete(messages=[HumanMessage(content="ping")], tools=[])
 
     assert response.usage_metadata is None
+
+
+# ---------------------------------------------------------------------------
+# Stream CM-9 — compute-control fields (thinking / output_config / sampling)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_defaults_send_no_compute_control_fields() -> None:
+    client = RecordingAnthropicClient(response={"content": [{"type": "text", "text": "ok"}]})
+    provider = AnthropicProvider(client=client, model="claude-sonnet-4-6", cache_enabled=False)
+    await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+    assert client.calls[0]["thinking"] is None
+    assert client.calls[0]["output_config"] is None
+
+
+@pytest.mark.asyncio
+async def test_effort_and_adaptive_thinking_on_the_wire() -> None:
+    client = RecordingAnthropicClient(response={"content": [{"type": "text", "text": "ok"}]})
+    provider = AnthropicProvider(
+        client=client,
+        model="claude-opus-4-8",
+        cache_enabled=False,
+        effort="high",
+        adaptive_thinking=True,
+    )
+    await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+    assert client.calls[0]["thinking"] == {"type": "adaptive"}
+    assert client.calls[0]["output_config"] == {"effort": "high"}
+
+
+@pytest.mark.asyncio
+async def test_http_body_carries_thinking_and_effort_and_omits_temperature() -> None:
+    """Wire-level shape via MockTransport — the body the API actually sees."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "ok"}]})
+
+    http_client = HTTPAnthropicClient(api_key="k", transport=httpx.MockTransport(handler))
+    await http_client.messages(
+        model="claude-opus-4-8",
+        system=None,
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        max_tokens=64,
+        temperature=None,
+        thinking={"type": "adaptive"},
+        output_config={"effort": "max"},
+    )
+    assert captured["thinking"] == {"type": "adaptive"}
+    assert captured["output_config"] == {"effort": "max"}
+    assert "temperature" not in captured

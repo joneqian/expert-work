@@ -691,3 +691,31 @@ def test_long_term_memory_forbids_extra() -> None:
     doc["spec"]["memory"] = {"long_term": {"bogus": 1}}
     with pytest.raises(ValidationError):
         AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
+# model.effort / model.adaptive_thinking — CM-9
+# ---------------------------------------------------------------------------
+
+
+def test_model_compute_controls_default_off() -> None:
+    """CM-9 — existing manifests are byte-for-byte unchanged."""
+    spec = AgentSpec.model_validate(_doc())
+    assert spec.spec.model.effort is None
+    assert spec.spec.model.adaptive_thinking is False
+
+
+def test_model_effort_accepts_levels() -> None:
+    doc = _doc()
+    doc["spec"]["model"]["effort"] = "max"
+    doc["spec"]["model"]["adaptive_thinking"] = True
+    model = AgentSpec.model_validate(doc).spec.model
+    assert model.effort == "max"
+    assert model.adaptive_thinking is True
+
+
+def test_model_effort_rejects_unknown_level() -> None:
+    doc = _doc()
+    doc["spec"]["model"]["effort"] = "xtreme"
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)

@@ -107,7 +107,12 @@ from helix_agent.protocol.mcp_oauth_connection import (
     OAuthConnectionStatus,
 )
 from helix_agent.protocol.memory_item import MemoryItem
-from helix_agent.protocol.model_catalog import MODEL_CATALOG, ModelEntry, models_for_provider
+from helix_agent.protocol.model_catalog import (
+    MODEL_CATALOG,
+    ModelEntry,
+    catalog_entry,
+    models_for_provider,
+)
 from helix_agent.protocol.multimodal import ImageRef, parse_image_ref
 from helix_agent.protocol.plan import Plan, PlanStep
 from helix_agent.protocol.platform_secret import (
@@ -376,6 +381,7 @@ __all__ = [
     "VisionSpec",
     "WorkflowSpec",
     "apply_markup",
+    "catalog_entry",
     "models_for_provider",
     "parse_agent_ref",
     "parse_image_ref",
