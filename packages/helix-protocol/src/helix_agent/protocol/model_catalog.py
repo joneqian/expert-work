@@ -15,6 +15,8 @@ Last verified: 2026-06 against each provider's official API docs.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 from helix_agent.protocol.provider_catalog import PROVIDER_CATALOG, Provider
@@ -32,12 +34,19 @@ class ModelEntry(BaseModel):
     rerank: bool = False
     context_window: int | None = None
     deprecated: bool = False
-    # Stream CM-9 (Mini-ADR CM-J3) — compute-control capability bits.
-    # ``effort`` marks models accepting ``output_config.effort`` (Anthropic
-    # 4.6+ Opus/Sonnet; Haiku 4.5 rejects it with a 400). ``sampling``
-    # marks models still accepting ``temperature``/``top_p`` — Anthropic
-    # removed sampling params from Opus 4.7+ (sending one is a 400).
-    effort: bool = False
+    # Stream CM-9 (Mini-ADR CM-J3) / CM-10 (Mini-ADR CM-L1) — compute-control
+    # capability bits. ``thinking`` is the vendor's runtime thinking-depth
+    # control shape (vendor params verified 2026-06-10):
+    #   "effort" — native multi-level knob (Anthropic ``output_config.effort``;
+    #              OpenAI/Azure/DeepSeek ``reasoning_effort``)
+    #   "budget" — continuous thinking-token budget (Qwen ``enable_thinking`` +
+    #              ``thinking_budget``; Doubao ``thinking.budget_tokens``)
+    #   "toggle" — on/off only, no depth (GLM / Kimi K2.5+ ``thinking.type``)
+    #   None     — no runtime control (Haiku; always-thinking models like
+    #              deepseek-reasoner / kimi-k2-thinking; embeddings)
+    # ``sampling`` marks models still accepting ``temperature``/``top_p`` —
+    # Anthropic removed sampling params from Opus 4.7+ (sending one is a 400).
+    thinking: Literal["effort", "budget", "toggle"] | None = None
     sampling: bool = True
 
 
@@ -53,14 +62,14 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             name="claude-opus-4-8",
             vision=True,
             context_window=200_000,
-            effort=True,
+            thinking="effort",
             sampling=False,
         ),
         ModelEntry(
             name="claude-sonnet-4-6",
             vision=True,
             context_window=200_000,
-            effort=True,
+            thinking="effort",
         ),
         ModelEntry(name="claude-haiku-4-5", vision=True, context_window=200_000),
     ),
@@ -69,9 +78,9 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # support vision; gpt-5.4-mini stays for low-latency/cost. gpt-4o family is
     # retired from the API but kept deprecated so existing manifests resolve.
     "openai": (
-        ModelEntry(name="gpt-5.5", vision=True, context_window=128_000),
-        ModelEntry(name="gpt-5.5-pro", vision=True, context_window=128_000),
-        ModelEntry(name="gpt-5.4-mini", vision=True, context_window=128_000),
+        ModelEntry(name="gpt-5.5", vision=True, context_window=128_000, thinking="effort"),
+        ModelEntry(name="gpt-5.5-pro", vision=True, context_window=128_000, thinking="effort"),
+        ModelEntry(name="gpt-5.4-mini", vision=True, context_window=128_000, thinking="effort"),
         ModelEntry(name="text-embedding-3-large", embeddings=True),
         ModelEntry(name="gpt-4o", vision=True, context_window=128_000, deprecated=True),
         ModelEntry(name="gpt-4o-mini", vision=True, context_window=128_000, deprecated=True),
@@ -82,8 +91,12 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # retirement 2026-07-24 — kept non-deprecated until then so manifests still
     # route correctly, but operators should migrate to versioned names.
     "deepseek": (
-        ModelEntry(name="deepseek-v4-pro", vision=False, context_window=1_000_000),
-        ModelEntry(name="deepseek-v4-flash", vision=False, context_window=1_000_000),
+        ModelEntry(
+            name="deepseek-v4-pro", vision=False, context_window=1_000_000, thinking="effort"
+        ),
+        ModelEntry(
+            name="deepseek-v4-flash", vision=False, context_window=1_000_000, thinking="effort"
+        ),
         ModelEntry(name="deepseek-chat", vision=False, context_window=64_000),
         ModelEntry(name="deepseek-reasoner", vision=False, context_window=64_000),
     ),
@@ -92,8 +105,8 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # the MoonViT encoder — with a 256K context; k2.5 also accepts images. The
     # moonshot-v1 series is text-only and being phased out (kept deprecated).
     "kimi": (
-        ModelEntry(name="kimi-k2.6", vision=True, context_window=256_000),
-        ModelEntry(name="kimi-k2.5", vision=True, context_window=128_000),
+        ModelEntry(name="kimi-k2.6", vision=True, context_window=256_000, thinking="toggle"),
+        ModelEntry(name="kimi-k2.5", vision=True, context_window=128_000, thinking="toggle"),
         ModelEntry(name="moonshot-v1-128k", vision=False, context_window=128_000, deprecated=True),
         ModelEntry(name="moonshot-v1-32k", vision=False, context_window=32_000, deprecated=True),
     ),
@@ -103,9 +116,9 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # goes through glm-4.6v (128K) and glm-4.5v. The older glm-4*-plus line is
     # kept deprecated so existing manifests resolve.
     "glm": (
-        ModelEntry(name="glm-5.1", vision=False, context_window=200_000),
-        ModelEntry(name="glm-4.7", vision=False, context_window=200_000),
-        ModelEntry(name="glm-4.6", vision=False, context_window=200_000),
+        ModelEntry(name="glm-5.1", vision=False, context_window=200_000, thinking="toggle"),
+        ModelEntry(name="glm-4.7", vision=False, context_window=200_000, thinking="toggle"),
+        ModelEntry(name="glm-4.6", vision=False, context_window=200_000, thinking="toggle"),
         ModelEntry(name="glm-4.6v", vision=True, context_window=128_000),
         ModelEntry(name="glm-4.5v", vision=True),
         # Platform embedding model (Stream T, user-specified).
@@ -121,10 +134,10 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # vision tiers. Context windows left unset where not confirmed against the
     # 百炼 console. Legacy qwen-max / qwen-vl-max kept deprecated.
     "qwen": (
-        ModelEntry(name="qwen3.7-max", vision=False, context_window=1_000_000),
-        ModelEntry(name="qwen3.6-plus", vision=True, context_window=1_000_000),
-        ModelEntry(name="qwen3.5-plus", vision=True),
-        ModelEntry(name="qwen3-max", vision=False),
+        ModelEntry(name="qwen3.7-max", vision=False, context_window=1_000_000, thinking="budget"),
+        ModelEntry(name="qwen3.6-plus", vision=True, context_window=1_000_000, thinking="budget"),
+        ModelEntry(name="qwen3.5-plus", vision=True, thinking="budget"),
+        ModelEntry(name="qwen3-max", vision=False, thinking="budget"),
         ModelEntry(name="qwen3-vl-plus", vision=True),
         ModelEntry(name="qwen3-vl-flash", vision=True),
         # Platform embedding model (Stream T, user-specified).
@@ -138,8 +151,12 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # Seed 2.0 family (released 2026-02-14) is current; all tiers support vision
     # and 256K context. Older doubao-*-32k series superseded.
     "doubao": (
-        ModelEntry(name="doubao-seed-2.0-pro", vision=True, context_window=256_000),
-        ModelEntry(name="doubao-seed-2.0-lite", vision=True, context_window=256_000),
+        ModelEntry(
+            name="doubao-seed-2.0-pro", vision=True, context_window=256_000, thinking="budget"
+        ),
+        ModelEntry(
+            name="doubao-seed-2.0-lite", vision=True, context_window=256_000, thinking="budget"
+        ),
         ModelEntry(name="doubao-pro-32k", vision=False, context_window=32_000, deprecated=True),
         ModelEntry(
             name="doubao-vision-pro-32k", vision=True, context_window=32_000, deprecated=True

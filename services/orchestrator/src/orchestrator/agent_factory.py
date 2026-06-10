@@ -1050,6 +1050,72 @@ _EFFORT_LADDER: dict[str | None, str | None] = {
     "max": None,
 }
 
+#: Stream CM-10 (Mini-ADR CM-L4) — effort level → thinking-token budget,
+#: for "budget"-shaped vendors (Qwen ``thinking_budget``, Doubao
+#: ``thinking.budget_tokens``). Ratios follow the OpenRouter precedent
+#: (budget = max_tokens x ratio, clamped); 81920 is the Qwen3 documented
+#: budget ceiling — the lowest published cap among the budget vendors.
+_THINKING_BUDGET_RATIO: dict[str, float] = {
+    "low": 0.2,
+    "medium": 0.5,
+    "high": 0.8,
+    "max": 0.95,
+}
+_THINKING_BUDGET_MIN = 1024
+_THINKING_BUDGET_MAX = 81_920
+
+
+def _thinking_budget(effort: str, max_tokens: int) -> int:
+    ratio = _THINKING_BUDGET_RATIO[effort]
+    return max(_THINKING_BUDGET_MIN, min(int(max_tokens * ratio), _THINKING_BUDGET_MAX))
+
+
+def _thinking_payload(model: ModelSpec) -> dict[str, Any] | None:
+    """Stream CM-10 (Mini-ADR CM-L3/L4/L7) — vendor thinking translation.
+
+    Maps the manifest's vendor-neutral compute controls
+    (``ModelSpec.effort`` / ``adaptive_thinking``) to the OpenAI-compatible
+    vendor's native thinking fields, keyed on the catalog ``thinking``
+    capability shape. Returns ``None`` whenever nothing should be sent:
+    anthropic (CM-9's native channel), untouched manifests, or off-catalog
+    models (CM-L5 — the thinking wire format is not uniform across
+    OpenAI-compatible vendors, so sending blind risks a runtime 400;
+    anthropic off-catalog keeps CM-9's pass-through because its wire
+    format is unambiguous).
+    """
+    if model.provider == "anthropic":
+        return None
+    if model.effort is None and not model.adaptive_thinking:
+        return None
+    entry = catalog_entry(model.provider, model.name)
+    if entry is None or entry.thinking is None:
+        return None
+    if entry.thinking == "effort":
+        # OpenAI / Azure / DeepSeek — ``reasoning_effort`` shares the
+        # manifest's level names. adaptive-only → omit (vendor default
+        # is already dynamic; CM-L7).
+        return {"reasoning_effort": model.effort} if model.effort is not None else None
+    if entry.thinking == "budget":
+        if model.provider == "doubao":
+            if model.effort is None:
+                return {"thinking": {"type": "auto"}}
+            return {
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": _thinking_budget(model.effort, model.max_tokens),
+                }
+            }
+        # Qwen / DashScope.
+        if model.effort is None:
+            return {"enable_thinking": True}
+        return {
+            "enable_thinking": True,
+            "thinking_budget": _thinking_budget(model.effort, model.max_tokens),
+        }
+    # "toggle" — GLM / Kimi: on/off only; any level means "on" (the
+    # depth distinction is logged at build time, not sent).
+    return {"thinking": {"type": "enabled"}}
+
 
 def _escalated_model(model: ModelSpec) -> ModelSpec | None:
     """The one-step-up ModelSpec for the CM-9 escalated caller.
@@ -1063,7 +1129,7 @@ def _escalated_model(model: ModelSpec) -> ModelSpec | None:
     if model.effort is None and not model.adaptive_thinking:
         return None
     entry = catalog_entry(model.provider, model.name)
-    if entry is None or not entry.effort:
+    if entry is None or entry.thinking is None:
         return None
     next_level = _EFFORT_LADDER.get(model.effort)
     if next_level is None:
@@ -1304,7 +1370,7 @@ def _build_provider(
         # the catalog capability bits. Off-catalog models (custom
         # gateways) are not gated and pass through as configured.
         entry = catalog_entry(provider, model.name)
-        if model.effort is not None and entry is not None and not entry.effort:
+        if model.effort is not None and entry is not None and entry.thinking is None:
             raise AgentFactoryError(
                 f"model {model.name!r} does not support output_config.effort; "
                 "remove model.effort from the manifest"

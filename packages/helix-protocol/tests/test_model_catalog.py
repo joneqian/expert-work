@@ -60,11 +60,28 @@ def test_anthropic_capability_bits() -> None:
     opus = catalog_entry("anthropic", "claude-opus-4-8")
     sonnet = catalog_entry("anthropic", "claude-sonnet-4-6")
     haiku = catalog_entry("anthropic", "claude-haiku-4-5")
-    assert opus is not None and opus.effort and not opus.sampling
-    assert sonnet is not None and sonnet.effort and sonnet.sampling
-    assert haiku is not None and not haiku.effort and haiku.sampling
+    assert opus is not None and opus.thinking == "effort" and not opus.sampling
+    assert sonnet is not None and sonnet.thinking == "effort" and sonnet.sampling
+    assert haiku is not None and haiku.thinking is None and haiku.sampling
 
 
 def test_catalog_entry_off_catalog_returns_none() -> None:
     assert catalog_entry("anthropic", "claude-imaginary-9") is None
     assert catalog_entry("nonexistent-provider", "x") is None
+
+
+def test_cross_vendor_thinking_shapes() -> None:
+    """CM-10 (Mini-ADR CM-L1) — thinking capability shapes per vendor."""
+    assert catalog_entry("openai", "gpt-5.5").thinking == "effort"  # type: ignore[union-attr]
+    assert catalog_entry("deepseek", "deepseek-v4-pro").thinking == "effort"  # type: ignore[union-attr]
+    assert catalog_entry("qwen", "qwen3.7-max").thinking == "budget"  # type: ignore[union-attr]
+    assert catalog_entry("doubao", "doubao-seed-2.0-pro").thinking == "budget"  # type: ignore[union-attr]
+    assert catalog_entry("glm", "glm-5.1").thinking == "toggle"  # type: ignore[union-attr]
+    assert catalog_entry("kimi", "kimi-k2.6").thinking == "toggle"  # type: ignore[union-attr]
+    # Always-thinking / no-control models stay None.
+    assert catalog_entry("deepseek", "deepseek-reasoner").thinking is None  # type: ignore[union-attr]
+    assert catalog_entry("qwen", "text-embedding-v4").thinking is None  # type: ignore[union-attr]
+
+
+def test_thinking_defaults_none() -> None:
+    assert ModelEntry(name="x").thinking is None

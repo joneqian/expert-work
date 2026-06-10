@@ -839,3 +839,82 @@ def test_off_catalog_model_is_not_gated() -> None:
     provider = _build_provider(_anthropic_model(name="claude-custom-gw", effort="max"), "k")
     assert isinstance(provider, AnthropicProvider)
     assert provider.effort == "max"
+
+
+# ---------------------------------------------------------------------------
+# Stream CM-10 — vendor thinking translation (_thinking_payload)
+# ---------------------------------------------------------------------------
+
+
+def _vendor_model(provider: str, name: str, **overrides: Any) -> ModelSpec:
+    return ModelSpec.model_validate({"provider": provider, "name": name, **overrides})
+
+
+def test_thinking_payload_none_for_anthropic_and_untouched() -> None:
+    from orchestrator.agent_factory import _thinking_payload
+
+    # anthropic uses CM-9's native channel, never this layer.
+    assert _thinking_payload(_anthropic_model(effort="high")) is None
+    # Untouched manifests send nothing on any vendor.
+    assert _thinking_payload(_vendor_model("qwen", "qwen3.7-max")) is None
+    assert _thinking_payload(_vendor_model("glm", "glm-5.1")) is None
+
+
+def test_thinking_payload_effort_vendors() -> None:
+    from orchestrator.agent_factory import _thinking_payload
+
+    assert _thinking_payload(_vendor_model("openai", "gpt-5.5", effort="high")) == {
+        "reasoning_effort": "high"
+    }
+    assert _thinking_payload(_vendor_model("deepseek", "deepseek-v4-pro", effort="max")) == {
+        "reasoning_effort": "max"
+    }
+    # adaptive-only on an effort vendor: omit — the vendor default is
+    # already dynamic (Mini-ADR CM-L7).
+    assert _thinking_payload(_vendor_model("openai", "gpt-5.5", adaptive_thinking=True)) is None
+
+
+def test_thinking_payload_budget_vendors() -> None:
+    from orchestrator.agent_factory import _thinking_payload
+
+    qwen = _thinking_payload(_vendor_model("qwen", "qwen3.7-max", effort="high", max_tokens=10_000))
+    assert qwen == {"enable_thinking": True, "thinking_budget": 8_000}
+    doubao = _thinking_payload(
+        _vendor_model("doubao", "doubao-seed-2.0-pro", effort="low", max_tokens=4_096)
+    )
+    # 4096 x 0.2 = 819 → clamped up to the 1024 floor.
+    assert doubao == {"thinking": {"type": "enabled", "budget_tokens": 1024}}
+    # adaptive-only: qwen opens thinking without a budget; doubao uses auto.
+    assert _thinking_payload(_vendor_model("qwen", "qwen3.7-max", adaptive_thinking=True)) == {
+        "enable_thinking": True
+    }
+    assert _thinking_payload(
+        _vendor_model("doubao", "doubao-seed-2.0-pro", adaptive_thinking=True)
+    ) == {"thinking": {"type": "auto"}}
+
+
+def test_thinking_payload_budget_clamps_at_ceiling() -> None:
+    from orchestrator.agent_factory import _thinking_payload
+
+    payload = _thinking_payload(
+        _vendor_model("qwen", "qwen3.7-max", effort="max", max_tokens=200_000)
+    )
+    assert payload is not None and payload["thinking_budget"] == 81_920
+
+
+def test_thinking_payload_toggle_vendors_ignore_level() -> None:
+    from orchestrator.agent_factory import _thinking_payload
+
+    on = {"thinking": {"type": "enabled"}}
+    assert _thinking_payload(_vendor_model("glm", "glm-5.1", effort="low")) == on
+    assert _thinking_payload(_vendor_model("glm", "glm-5.1", effort="max")) == on
+    assert _thinking_payload(_vendor_model("kimi", "kimi-k2.6", adaptive_thinking=True)) == on
+
+
+def test_thinking_payload_off_catalog_compat_sends_nothing() -> None:
+    # CM-L5 — thinking wire formats differ per vendor, so off-catalog
+    # OpenAI-compatible models never get a blind payload.
+    from orchestrator.agent_factory import _thinking_payload
+
+    assert _thinking_payload(_vendor_model("qwen", "custom-gateway-model", effort="max")) is None
+    assert _thinking_payload(_vendor_model("deepseek", "deepseek-reasoner", effort="high")) is None

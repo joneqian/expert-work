@@ -86,8 +86,15 @@ class OpenAIClient(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        """POST ``/v1/chat/completions`` and return the parsed JSON body."""
+        """POST ``/v1/chat/completions`` and return the parsed JSON body.
+
+        ``extra_body`` (Stream CM-10, Mini-ADR CM-L3) merges vendor
+        extension fields into the top-level request body — the thinking
+        controls of the OpenAI-compatible vendors (``enable_thinking``,
+        ``thinking``, ``reasoning_effort``) are all top-level
+        non-standard fields, so one channel covers every vendor."""
 
 
 @dataclass
@@ -125,12 +132,17 @@ class HTTPOpenAIClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {"model": model, "messages": messages}
         if tools:
             body["tools"] = tools
         if temperature is not None:
             body["temperature"] = temperature
+        if extra_body:
+            # Stream CM-10 — vendor thinking controls, merged last so the
+            # translated payload is exactly what goes on the wire.
+            body.update(extra_body)
 
         try:
             async with httpx.AsyncClient(
@@ -185,6 +197,7 @@ class RecordingOpenAIClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
         temperature: float | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         self.calls.append(
             {
@@ -192,6 +205,7 @@ class RecordingOpenAIClient:
                 "messages": messages,
                 "tools": tools,
                 "temperature": temperature,
+                "extra_body": extra_body,
             }
         )
         if self.raise_with is not None:
@@ -214,6 +228,10 @@ class OpenAIProvider:
     #: Resolves ``image_ref`` content blocks to bytes at call time (J.6
     #: Path A). ``None`` → image blocks are dropped with a warning.
     image_resolver: ImageResolver | None = None
+    #: Stream CM-10 (Mini-ADR CM-L3) — pre-translated vendor thinking
+    #: payload (``_thinking_payload``), merged into the request body.
+    #: ``None`` (every untouched manifest) keeps the body byte-identical.
+    thinking_payload: dict[str, Any] | None = None
 
     async def complete(
         self,
@@ -229,6 +247,7 @@ class OpenAIProvider:
             messages=mapped,
             tools=tool_payload,
             temperature=self.temperature,
+            extra_body=self.thinking_payload,
         )
 
         return _from_openai_response(body)

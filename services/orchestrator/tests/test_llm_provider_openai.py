@@ -418,3 +418,54 @@ async def test_human_image_ref_dropped_without_resolver() -> None:
 
     # Image silently dropped → plain-text content, no crash.
     assert client.calls[0]["messages"][0]["content"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_http_extra_body_merges_into_request_body() -> None:
+    """Stream CM-10 (Mini-ADR CM-L3) — vendor thinking fields on the wire."""
+    captured: dict[str, object] = {}
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = _http_client(_handler)
+    await client.chat_completions(
+        model="qwen3.7-max",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        extra_body={"enable_thinking": True, "thinking_budget": 8_000},
+    )
+    assert captured["enable_thinking"] is True
+    assert captured["thinking_budget"] == 8_000
+
+
+@pytest.mark.asyncio
+async def test_http_no_extra_body_keeps_request_byte_identical() -> None:
+    bodies: list[bytes] = []
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        bodies.append(req.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = _http_client(_handler)
+    await _call(client)
+    await client.chat_completions(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        extra_body=None,
+    )
+    assert bodies[0] == bodies[1]
+
+
+@pytest.mark.asyncio
+async def test_provider_threads_thinking_payload() -> None:
+    recording = RecordingOpenAIClient(response={"choices": [{"message": {"content": "ok"}}]})
+    provider = OpenAIProvider(
+        client=recording,
+        model="glm-5.1",
+        thinking_payload={"thinking": {"type": "enabled"}},
+    )
+    await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+    assert recording.calls[0]["extra_body"] == {"thinking": {"type": "enabled"}}
