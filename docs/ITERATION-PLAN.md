@@ -1443,7 +1443,8 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - **CM-N5 评测基线** 贯穿：LongMemEval + LoCoMo 自测纳入 eval（验 CM-4/6/7）
   - [x] **CM-N5 PR2 P0 检索层**（本次）：`tools/eval/longmem/` 子包——download（sha256 pin 三数据集 + 流式下载 .part 原子换名 + cache env 可覆写）/adapter（双格式 locale 无关日期解析 + turn/session 双粒度 + LoCoMo cat5 默认排除 + 共享语料 tuple 防 1986x600 复制 + CM-K4 时间平移纯函数）/metrics（recall/ndcg/mrr 纯函数）/retrieval（消融矩阵 hybrid/decay/mmr/rerank 全数据-参数级零 monkeypatch；decay-off=写入不带时间戳；按共享语料分组建库省真 embedder 成本；threat-scan 预滤计数 blocked/deduped 不静默）+ CM-K7 扩两列（created_at+last_used_at 都尊重 item 值，否则 SQL decay anchor 永远 fresh）+ synthetic fixture 两份（零 license 暴露）+ 32 单测（decay tiebreak/rerank 翻转/共享建库计数断言）+ 1 integration（时间戳 passthrough+decay 排序）。3893 回归绿
   - [x] **CM-N5 PR3 P1 端到端（收尾）**（本次）：`endtoend.py`（ingestion 逐 session 经 `flush_messages_to_memory(reconcile=True)` CM-7 真路径 + session 日期 transcript 头注入 + 检索→MMR→reading→judge；**单库口径修订**：LoCoMo 双库喂同 transcript 抽取趋同只剩 2x 成本，改单 per-user 库记 fingerprint）+ `judge.py`（LongMemEval per-type 官方 prompt 5 模板 + Mem0 ACCURACY_PROMPT 逐字移植，verdict 按官方规则 substring yes / JSON label==CORRECT；judge=claude 差异标注 CM-K6）+ `anthropic_client.py`（httpx 轻传输 _judge.py 同形；temperature 按目录 sampling 能力位条件发）+ `runner.py`+`run_longmem.py` CLI（消融臂注册表 / jsonl 断点续跑撕裂行容错 / merge fresh-wins / baseline YAML 分节合并带 fingerprint）+ 23 单测（judge 模板路由/verdict 解析/管线冒烟/reconcile 降级 ADD/resume 跳过/abstention 模板/baseline 合并）；CLI fixture 实跑 4 臂消融数字可复现。tools/eval 151 全绿
-  - [ ] **基线真跑**：本地全量（层 1 真 embedder + 层 2 LLM judge），数字进 `baselines/`
+  - [x] **CM-N5 PR4 真跑准备（Qwen 全栈 + 提速）**（本次）：`openai_client.py`（DashScope compatible-mode LLMCaller/TextJudge，judge 差异进 fingerprint）+ `CachedEmbedder`（sqlite content-hash 缓存防 5 臂 5x 重复 embed + batch<=10 分批并发）+ 两层 `concurrency`（共享 semaphore + gather 保序，=1 与串行等价 CI 确定性不变，jsonl 写锁）+ runner `--llm-provider/--concurrency` + 8 新测（payload 渲染/缓存命中/持久化/model 隔离/batch 上限/两层并发≡串行）。3923 回归绿
+  - [ ] **基线真跑**：本地全 Qwen 全量（层 1 + 层 2），数字进 `baselines/`
 
 ---
 
