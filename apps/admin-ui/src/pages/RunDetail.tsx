@@ -30,6 +30,7 @@ import {
 import { useStatusPolling } from "../hooks/useStatusPolling";
 import { ApprovalCard } from "./run_detail/ApprovalCard";
 import { EventStreamPanel } from "./run_detail/EventStreamPanel";
+import { PlanPanel } from "./run_detail/PlanPanel";
 import { TraceToolbar } from "./run_detail/TraceToolbar";
 
 const { Text } = Typography;
@@ -57,6 +58,9 @@ export function RunDetail() {
   const [run, setRun] = useState<RunDetailModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // CM-8 — bumped on every poll tick so the PlanPanel re-fetches on the
+  // same cadence without owning its own timer.
+  const [pollTick, setPollTick] = useState(0);
 
   /** Silent refresh — polled by ``useStatusPolling`` so the Skeleton
    *  flicker only happens on the initial fetch and explicit user
@@ -105,6 +109,7 @@ export function RunDetail() {
   useStatusPolling({
     status: run?.status ?? null,
     onTick: () => {
+      setPollTick((n) => n + 1);
       void refreshSilent();
     },
   });
@@ -184,6 +189,8 @@ export function RunDetail() {
           <dd style={{ margin: 0 }}>{run.status}</dd>
         </dl>
       </Card>
+
+      <PlanPanel threadId={threadId} runStatus={run.status} pollTick={pollTick} />
 
       <div style={{ marginTop: 16 }}>
         <TraceToolbar traceId={run.trace_id ?? null} />
