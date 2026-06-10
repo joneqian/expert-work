@@ -51,7 +51,8 @@ _EMBED_BATCH = 64
 class Embedder(Protocol):
     """Structural mirror of the orchestrator Embedder protocol."""
 
-    async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]: ...
+    async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
+        """Return one embedding vector per input text, in input order."""
 
 
 class Reranker(Protocol):
@@ -59,7 +60,8 @@ class Reranker(Protocol):
 
     async def rerank(
         self, *, query: str, documents: Sequence[str], top_k: int, tenant_id: UUID
-    ) -> list[int]: ...
+    ) -> list[int]:
+        """Return indices of the ``top_k`` most relevant documents, best first."""
 
 
 @dataclass(frozen=True)
