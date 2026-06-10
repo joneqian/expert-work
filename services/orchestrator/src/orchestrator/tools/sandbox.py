@@ -317,28 +317,36 @@ def format_sandbox_outcome(outcome: SandboxOutcome, output_char_cap: int) -> Too
     Head-truncates stdout / stderr to ``output_char_cap`` (Mini-ADR F-9)
     and surfaces ``exit_code`` / ``timed_out`` in both the text and the
     structured ``meta``. Shared by ``exec_python`` and ``bash``.
+
+    When either stream was cut, ``full_content`` carries the complete
+    rendering so the tools node can externalize it to the workspace
+    (Stream CM-5 recoverable compression).
     """
     stdout, cut_out = _truncate(outcome.stdout, output_char_cap)
     stderr, cut_err = _truncate(outcome.stderr, output_char_cap)
 
-    parts: list[str] = []
-    if stdout:
-        parts.append(f"stdout:\n{stdout}")
-    if stderr:
-        parts.append(f"stderr:\n{stderr}")
-    if not parts:
-        parts.append("(no output)")
-    if outcome.timed_out:
-        parts.append("[execution timed out]")
-    parts.append(f"exit_code: {outcome.exit_code}")
+    def _render(out: str, err: str) -> str:
+        parts: list[str] = []
+        if out:
+            parts.append(f"stdout:\n{out}")
+        if err:
+            parts.append(f"stderr:\n{err}")
+        if not parts:
+            parts.append("(no output)")
+        if outcome.timed_out:
+            parts.append("[execution timed out]")
+        parts.append(f"exit_code: {outcome.exit_code}")
+        return "\n\n".join(parts)
 
+    truncated = cut_out or cut_err
     return ToolResult(
-        content="\n\n".join(parts),
+        content=_render(stdout, stderr),
         meta={
             "exit_code": outcome.exit_code,
             "timed_out": outcome.timed_out,
-            "truncated": cut_out or cut_err,
+            "truncated": truncated,
         },
+        full_content=_render(outcome.stdout, outcome.stderr) if truncated else None,
     )
 
 
