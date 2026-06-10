@@ -8,7 +8,7 @@
 >
 > **零债收尾规则**（[memory:zero-tech-debt]）：每条交付收尾 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 >
-> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）+ CM-5（可恢复压缩，§7）+ CM-6（时间衰减+MMR，§8）+ CM-7（结构化摘要+写入显式操作，§9）+ CM-8（plan UI 通道+resume ingest 修复，§10）+ CM-9（effort 档位+撞限升档，§11）详设已锁定；CM-N5 列入范围表，待 PR 时在本文件细化。
+> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）+ CM-5（可恢复压缩，§7）+ CM-6（时间衰减+MMR，§8）+ CM-7（结构化摘要+写入显式操作，§9）+ CM-8（plan UI 通道+resume ingest 修复，§10）+ CM-9（effort 档位+撞限升档，§11）+ CM-N5（评测基线，§12）详设已锁定。
 
 ---
 
@@ -28,7 +28,7 @@
 | CM-7 | B7 | `<context-summary>` 缺"背景非指令"强语义、二次压缩链式重生成、writeback 直写同义堆积矛盾不废弃 | 摘要 preamble+三段结构+增量更新 ① + run 末 writeback 显式 ADD/UPDATE/DELETE/NOOP ② | P2 | CM-H1…H6（§9 详设） |
 | CM-8 | C8 | plan 无 UI 通道（前后端全缺）+ approval resume 不经 ingest（暂停期 PLAN.md 编辑丢失）+ approval E2E 残债；~~modify UX 缺口~~ 已被早期 H.x 实现（§10 范围修正） | plan 读写 API + RunDetail PlanPanel（非 RUNNING 可写）+ resume ingest 修复 + approval E2E | P2 | CM-I1…I6（§10 详设） |
 | CM-9 | C9 + N4 | adapter 零 thinking/effort 支持 + 撞限无升档（opus-4-8 还有 temperature 400 隐患）；~~iteration budget~~ ~~指纹去重~~ 已实现，~~per-run plan mode~~ 砍（§11 范围修正） | `ModelSpec.effort/adaptive_thinking` + 目录能力位 + 撞限双信号升档（escalated caller） | P2 | CM-J1…J6（§11 详设） |
-| CM-N5 | N5 | 检索/记忆改动无回归基线 | LongMemEval + LoCoMo 自测纳入 eval（贯穿 CM-4/6/7） | 贯穿 | 待细化 |
+| CM-N5 | N5 | 检索/记忆改动无回归基线 | LongMemEval + LoCoMo 自测纳入 eval（贯穿 CM-4/6/7）：分层两态（检索层机械回归 + 端到端 QA 横比） | 贯穿 | CM-K1…K7（§12 详设） |
 
 ### 1.2 设计选择对比（"为什么不全抄"）
 
@@ -1200,7 +1200,103 @@ agent_node
 
 ---
 
-## 12. 与既有 Stream 的衔接
+## 12. CM-N5 详细设计 —— 评测基线（LongMemEval + LoCoMo 自测纳入 eval）
+
+> **范围拍板（2026-06-10 用户）**：**分层全做** —— P0 检索层指标（零 LLM、机械回归）+ P1 端到端 QA（LLM judge、可横比）；端到端口径取**大档全量**（LongMemEval_S 全 500 题 + LoCoMo 10 对话 cat1-4 全 1540 题），与论文口径一致可直接横比 Mem0/Zep。
+>
+> **动机**：CM-4（reranker）/ CM-6（decay+MMR）/ CM-7（reconcile 写入）全部交付时按 N5 纪律**不声称数字**（厂商自报不可横比，Zep LoCoMo 84%→独立复核 58.44%，getzep#5）。本条出 helix 自测数字作回归基线——此后任何检索/记忆改动有数可对。
+
+### 12.1 关键约束（取证结论，2026-06-10 源码 + 一手数据集核准）
+
+| 约束 | 事实 | 出处 |
+|---|---|---|
+| **eval 基建既有** | `CapabilityReport`/`load_cases`/`evaluate_set` 模式 + `ScriptedJudge`（CI）/`AnthropicHaikuJudge`（真跑，J-39 固定 haiku temp=0）双轨；`run_baseline.py` 不进 CI、`test_*.py` 进 CI | `tools/eval/_capability.py`、`_judge.py`、`run_baseline.py` |
+| **检索链可独立调用** | `MemoryStore.retrieve`（hybrid RRF+decay）→ `_rerank_memories` → `_mmr_memories`，三段脱离 graph 可组装；依赖仅 Embedder/Store/可选 Reranker | `persistence/memory/base.py:53`、`orchestrator/graph_builder/memory.py:182-250` |
+| **写入链可独立调用** | `flush_messages_to_memory(messages, *, memory_store, embedder, llm_caller, ..., reconcile)` —— CM-7 抽取+reconcile 真路径 | `graph_builder/memory.py:532` |
+| **LongMemEval** | MIT；HF `xiaowu0162/longmemeval-cleaned` 裸 JSON（S=277MB / oracle=15.4MB，各 500 题）；自带 `answer_session_ids`（session 级）+ turn 级 `has_answer` ground truth → **检索召回指标零 LLM 可算**；30 题 abstention（`_abs` 后缀）官方检索评测跳过；端到端 judge 按题型用不同 prompt（`src/evaluation/evaluate_qa.py`） | github.com/xiaowu0162/LongMemEval |
+| **LoCoMo** | **CC BY-NC 4.0（非商用）**；GitHub `data/locomo10.json` 2.8MB；10 对话 ×19-32 sessions×~588 turns；1986 QA（cat1 multi-hop 282 / cat2 temporal 321 / cat3 open-domain 96 / cat4 single-hop 841 / cat5 adversarial 446）；官方词法 F1 已被社区弃用，标准口径 = Mem0 式 LLM judge、**cat1-4 only**（cat5 计入即 Zep 84→58 争议根源） | github.com/snap-research/locomo、getzep#5 |
+| **CI 无模型凭证** | 真 LLM/embedder 只能本地手动（[memory:ci-no-model-keys]）；CI 只能跑 fake + 确定性 | 既有事实 |
+| **decay 时间不可注入** | 两 store `retrieve` 内部 `now=datetime.now(UTC)` 硬编码；但 decay 只依赖 age=now−anchor → **时间平移等价**（question_date 平移到真实 now，session 时间戳同步平移，age 不变，零协议变更） | `memory/sql.py:196`、`memory/memory.py:144` |
+| **created_at 写入路径不对称** | `MemoryItem.created_at` caller 可设；InMemory `write` 原样保留；**SQL `write` payload 静默丢弃 created_at**（server default）——PR2 补全（item 显式带值才生效，生产路径 None ⇒ 行为不变） | `memory/sql.py:119-137`、`memory/memory.py:88-100` |
+| **参考数字区间** | LoCoMo（J 口径，cat1-4）：full-context gpt-4o-mini 72.9% / Mem0 66.9% / 朴素 RAG ~61% / Zep 复核 58.4%——**低于 61% = 没跑赢朴素 RAG**；LongMemEval_S：full-context gpt-4o 60.2% / 好的检索系统 70%+ / oracle ~82% | Mem0 论文、Zep 论文、getzep#5 |
+
+### 12.2 总体架构 —— 两层四态
+
+```
+tools/eval/longmem/                       ← 新子包（体量大于单文件能力评测，不平铺）
+  download.py    数据集获取：HF resolve / GitHub raw 下载 + sha256 校验
+                 → cache tools/eval/datasets/.longmem_cache/（gitignored）
+  adapter.py     benchmark instance → helix 形态：
+                 session/turn 切块、时间平移（question_date→now，session date 同步平移）、
+                 LoCoMo per-speaker user_id（Mem0 口径）
+  retrieval.py   P0 检索层 harness：切块 → embed → store.write(created_at=平移后 session date)
+                 → retrieve(+rerank+MMR 消融开关) → 指标
+  metrics.py     Recall@k（session 级 / turn 级）、NDCG@k、MRR —— 纯函数
+  endtoend.py    P1 端到端 harness：ingestion（flush_messages_to_memory, reconcile=True）
+                 → 检索 top-k → reading prompt（带时间戳）→ LLM 回答 → judge
+  judge.py       LongMemEval per-type 官方 judge prompt 移植 + LoCoMo Mem0 ACCURACY_PROMPT 口径
+  run_longmem.py 运行器（不进 CI）：层/数据集/消融开关/采样/输出 baseline YAML
+  test_*.py      CI 单测：loader/切块/时间平移/指标/judge prompt + fake-embedder
+                 微型 synthetic fixture 全管线冒烟（确定性，不含原数据集数据）
+tools/eval/baselines/longmem_baseline.yaml  ← 基线数字落盘（git 提交）
+```
+
+**层 1（P0）检索层 —— 机械回归闸**：ground truth 用 `answer_session_ids`/`has_answer`，零 LLM。**消融开关矩阵即归因机制**：`decay on/off × MMR on/off × rerank on/off × hybrid/vector`——CM-4/6 各组件增益独立可读，不靠端到端噪声归因。backend 默认 `InMemoryMemoryStore`（镜像 SQL 行为；jieba keyword rank vs ts_rank 差异标注）；`--backend pg` 留 SQL+pgvector 真路径（integration 档，可选）。embedder 双态：fake keyword（CI 冒烟，确定性）/ 真 embedder（本地基线数字）。
+
+**层 2（P1）端到端 QA —— 横比口径**：ingestion 走 `flush_messages_to_memory(reconcile=True)`（CM-7 真路径，逐 session 喂入）；reading 拿 top-k 记忆 + 时间戳组 prompt；judge 双口径——LongMemEval 移植官方 per-type prompt（temporal 容忍 off-by-one、knowledge-update 含新值即对、abstention 判拒答），LoCoMo 用 Mem0 ACCURACY_PROMPT、cat1-4、多次运行报均值±std。judge model = claude（既有 `AnthropicHaikuJudge` 模式）——**口径如实标注 judge 差异**（官方 gpt-4o judge），数字主要用于自测纵比，横比时注明。
+
+### 12.3 数据/协议变更
+
+1. **不动任何生产协议**：时间平移使 decay 验证零协议变更；检索/写入链按现有公开签名组装。
+2. **SQL store 小补**：`write()` payload 尊重 `item.created_at`（显式设值才带，None ⇒ server default 不变）——既是 eval 需要，也是 `write(items)` 文档语义（"each item carries its own fields"）的正确性补全。
+3. **tools/eval**：新增 `longmem/` 子包 + `datasets/.longmem_cache/` gitignore 条目 + `baselines/longmem_baseline.yaml`。
+4. **依赖**：零新增 pip 依赖（裸 JSON 下载用标准库 / 已有 httpx；不引 HF datasets 库）。
+
+### 12.4 边界情况
+
+| 场景 | 处理 |
+|---|---|
+| LoCoMo license（CC BY-NC） | **不 vendor 进 repo**（商业 repo 再分发风险）；运行时下载 + cache；CI 用手工 synthetic fixture |
+| LongMemEval 体积（S=277MB） | 同样不 vendor；下载 + sha256 校验 + cache；oracle（15MB）可选作快速档 |
+| abstention 30 题 | 检索层跳过（官方口径，无 ground-truth 位置）；端到端保留（判拒答能力） |
+| LoCoMo cat5 adversarial | 端到端**排除在 overall 之外单独报**（Zep 争议教训：算进 overall 即虚高） |
+| LoCoMo cat3 answer 带 `;` 接理由 | judge 输入在 `;` 截断（官方口径） |
+| 时间平移期间 wall-clock 流逝 | 跑批数小时 vs 半衰期 30 天，age 误差 <0.5%，忽略（标注） |
+| 写入被 threat scan 拦截 | benchmark 原文可能踩 strict scan——计数上报 `blocked_writes`，不静默吞（数字旁标注损耗） |
+| 真跑中断恢复 | run 脚本按 question_id 断点续跑（结果 jsonl 追加，已答跳过）——全量 $100+ 不能一断全重 |
+| 消融开关与生产默认 | baseline 主数字 = 生产默认形态（hybrid+decay+MMR+rerank 全开）；消融行只为归因 |
+
+### 12.5 测试 & 验收（CM-N5 Exit）
+
+- **CI 单测**（确定性，无网络/无 key）：loader 解析两数据集 schema（fixture）、切块、时间平移不变量（平移前后 age 相等）、Recall/NDCG/MRR 纯函数、judge prompt 组装、LoCoMo cat 分流；fake-embedder 微型 fixture 跑通 P0 全管线（数字可复现断言）。
+- **本地真跑**（手动）：层 1 真 embedder 全量出基线；层 2 全量出 QA 数字；两者写 `longmem_baseline.yaml`（含 config 指纹：embedder/judge model、k、开关组合、dataset sha256、commit、runs 数）。
+- **回归纪律**：此后检索/记忆类 PR，本地重跑层 1（真 embedder）数字进 PR 描述对比基线；层 2 里程碑跑。
+- **零债 6 条**：无 TODO；CI 测试齐；本 §12 与实现一致；`blocked_writes` 等损耗可观测；CI 全绿；基线数字落盘。
+
+### 12.6 Mini-ADR（CM-N5 锁定）
+
+| ID | 决策 |
+|---|---|
+| **CM-K1** | **分层两态**（2026-06-10 用户拍板）：P0 检索层零 LLM 机械回归（日常闸）+ P1 端到端 LLM judge（横比口径）——检索改动归因不靠端到端噪声 |
+| **CM-K2** | **全量口径**（用户拍板大档）：LongMemEval_S 500 题 + LoCoMo 10 对话 cat1-4 全 1540 题，与论文口径一致；cat5/abstention 单独报不进 overall（Zep 争议教训） |
+| **CM-K3** | **数据集不 vendor**：LoCoMo CC BY-NC license + LongMemEval 277MB 体积；下载脚本 + sha256 + gitignored cache；CI 用 synthetic fixture（零 license 暴露） |
+| **CM-K4** | **时间平移代替 now 注入**：decay 只依赖相对 age → question_date 平移到真实 now、session 时间戳同步平移——CM-6 decay 可验且零协议变更、零 doubles sweep |
+| **CM-K5** | **消融开关矩阵 = 归因机制**：decay/MMR/rerank/hybrid 独立开关；主基线 = 生产默认全开形态 |
+| **CM-K6** | **judge = claude haiku 双口径移植**（LongMemEval per-type 官方 prompt + LoCoMo Mem0 ACCURACY_PROMPT）；judge 差异如实标注，自测纵比为主 |
+| **CM-K7** | **SQL `write()` 尊重 `item.created_at`**（显式设值才带）：eval 需要 + 文档语义正确性补全，生产路径零行为变更 |
+
+### 12.7 PR 切分（CM-N5）
+
+1. **CM-N5 PR1 — 设计**（本 §12）。
+2. **CM-N5 PR2 — P0 检索层**：download/adapter/retrieval/metrics + 时间平移 + 消融开关 + SQL created_at 补全（CM-K7）+ synthetic fixture + CI 单测。
+3. **CM-N5 PR3 — P1 端到端（收尾 CM-N5）**：endtoend/judge/run_longmem + 断点续跑 + baseline YAML 落盘机制 + ITERATION-PLAN 回填。
+4. **基线真跑**：PR3 后本地手动全量（层 1 + 层 2），数字单独 commit 进 `baselines/`。
+
+> 每个 PR 在本 §12 基础上局部细化；ITERATION-PLAN 增 CM-N5 backlog，ship 后回填 `[x]`+PR 号。
+
+---
+
+## 13. 与既有 Stream 的衔接
 
 - **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8——pause→resume 的 ingest 时机由 CM-8 §10.3 修复补齐）、`update_plan`（K.8）。
 - **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）共存；recitation 放非 system 区不破 L-1。**L-4 mutation advisory 被 CM-1 收敛**（`failed_mutations`→`tool_failures`、`<mutation-advisory>`→`<recovery-advisory>`，mutation 校验作为 `mutation_not_landed` 一类保留），非并行；L-5 退款语义不动（失败工具调用照常计步）。
