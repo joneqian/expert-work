@@ -26,6 +26,7 @@ fingerprint):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
@@ -120,30 +121,41 @@ async def _ingest_corpus(
     llm_caller: Any,
     reconcile: bool,
     token: CancellationToken,
+    sem: asyncio.Semaphore,
 ) -> int:
-    """Feed every session through the production extraction path."""
+    """Feed every session through the production extraction path.
+
+    Sessions are independent extraction calls, so they run concurrently
+    under the shared semaphore. Note: with ``reconcile=True`` concurrent
+    sessions reconcile against a moving store — same best-effort
+    semantics as production runs landing memories while others write.
+    """
     from orchestrator.graph_builder.memory import flush_messages_to_memory
 
-    written = 0
-    for timestamp, transcript in _session_transcripts(docs):
+    async def _one(timestamp: datetime | None, transcript: str) -> int:
         header = (
             f"[Conversation session dated {timestamp:%Y-%m-%d %H:%M}]"
             if timestamp is not None
             else "[Conversation session]"
         )
-        written += await flush_messages_to_memory(
-            [HumanMessage(content=f"{header}\n{transcript}")],
-            memory_store=store,
-            embedder=embedder,  # type: ignore[arg-type]
-            llm_caller=llm_caller,
-            tenant_id=EVAL_TENANT_ID,
-            user_id=EVAL_USER_ID,
-            thread_id=None,
-            token=token,
-            log_label="longmem.ingest",
-            reconcile=reconcile,
-        )
-    return written
+        async with sem:
+            return await flush_messages_to_memory(
+                [HumanMessage(content=f"{header}\n{transcript}")],
+                memory_store=store,
+                embedder=embedder,  # type: ignore[arg-type]
+                llm_caller=llm_caller,
+                tenant_id=EVAL_TENANT_ID,
+                user_id=EVAL_USER_ID,
+                thread_id=None,
+                token=token,
+                log_label="longmem.ingest",
+                reconcile=reconcile,
+            )
+
+    counts = await asyncio.gather(
+        *[_one(ts, transcript) for ts, transcript in _session_transcripts(docs)]
+    )
+    return sum(counts)
 
 
 async def _answer(
@@ -223,6 +235,7 @@ async def run_end_to_end(
     config: EndToEndConfig | None = None,
     done_ids: frozenset[str] = frozenset(),
     on_result: Callable[[QAResult], Awaitable[None]] | None = None,
+    concurrency: int = 1,
 ) -> EndToEndReport:
     """Run the full QA tier; supports checkpoint-resume.
 
@@ -231,44 +244,64 @@ async def run_end_to_end(
     runner can append incrementally — a multi-hour, $100+ full run must
     survive interruption without re-paying for finished questions. A
     corpus group whose every question is done is never ingested again.
+
+    ``concurrency`` bounds in-flight LLM work (session extractions and
+    per-question answer+judge) under one shared semaphore; ``gather``
+    keeps results input-ordered and a write lock serialises
+    ``on_result`` so concurrent verdicts never interleave a jsonl line.
     """
     cfg = config or EndToEndConfig()
     token = CancellationToken()
+    sem = asyncio.Semaphore(max(1, concurrency))
+    write_lock = asyncio.Lock()
 
     groups: dict[tuple[int, datetime], list[RetrievalInstance]] = defaultdict(list)
     for instance in instances:
         groups[(id(instance.docs), instance.question_date)].append(instance)
 
-    results: list[QAResult] = []
-    written_total = 0
-    for grouped in groups.values():
+    async def _process_question(
+        instance: RetrievalInstance, store: InMemoryMemoryStore
+    ) -> QAResult:
+        async with sem:
+            hypothesis, n_memories = await _answer(
+                instance, store=store, embedder=embedder, llm_caller=llm_caller, config=cfg
+            )
+            correct = await _judge_one(instance, hypothesis, judge=judge, benchmark=benchmark)
+        result = QAResult(
+            question_id=instance.question_id,
+            question_type=instance.question_type,
+            hypothesis=hypothesis,
+            correct=correct,
+            n_memories=n_memories,
+        )
+        if on_result is not None:
+            async with write_lock:
+                await on_result(result)
+        return result
+
+    async def _process_group(grouped: list[RetrievalInstance]) -> tuple[list[QAResult], int]:
         pending = [i for i in grouped if i.question_id not in done_ids]
         if not pending:
-            continue
+            return [], 0
         store = InMemoryMemoryStore()
-        written_total += await _ingest_corpus(
+        written = await _ingest_corpus(
             grouped[0].docs,
             store=store,
             embedder=embedder,
             llm_caller=llm_caller,
             reconcile=cfg.reconcile,
             token=token,
+            sem=sem,
         )
-        for instance in pending:
-            hypothesis, n_memories = await _answer(
-                instance, store=store, embedder=embedder, llm_caller=llm_caller, config=cfg
-            )
-            correct = await _judge_one(instance, hypothesis, judge=judge, benchmark=benchmark)
-            result = QAResult(
-                question_id=instance.question_id,
-                question_type=instance.question_type,
-                hypothesis=hypothesis,
-                correct=correct,
-                n_memories=n_memories,
-            )
-            results.append(result)
-            if on_result is not None:
-                await on_result(result)
+        rows = await asyncio.gather(*[_process_question(i, store) for i in pending])
+        return list(rows), written
+
+    group_outcomes = await asyncio.gather(*[_process_group(g) for g in groups.values()])
+    results: list[QAResult] = []
+    written_total = 0
+    for rows, written in group_outcomes:
+        results.extend(rows)
+        written_total += written
 
     by_type: dict[str, list[QAResult]] = defaultdict(list)
     for result in results:

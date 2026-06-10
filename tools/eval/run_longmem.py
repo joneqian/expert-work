@@ -101,22 +101,56 @@ def _git_commit() -> str:
         return "unknown"
 
 
+def _build_embedder(args: argparse.Namespace) -> object:
+    if args.embedder != "real":
+        return KeywordEmbedder()
+    from longmem.download import cache_dir
+
+    return build_real_embedder(
+        cache_db=cache_dir() / "embeddings.sqlite", concurrency=args.concurrency
+    )
+
+
+def _build_llm(args: argparse.Namespace) -> tuple[Any, Any]:
+    """Returns ``(llm_caller, judge)`` for the selected provider."""
+    if args.llm_provider == "openai-compat":
+        api_key = os.environ.get("HELIX_EVAL_LLM_API_KEY")
+        if not api_key:
+            raise SystemExit("--llm-provider openai-compat needs HELIX_EVAL_LLM_API_KEY")
+        from longmem.openai_client import (
+            DASHSCOPE_COMPAT_BASE_URL,
+            OpenAICompatCaller,
+            OpenAICompatTextJudge,
+        )
+
+        base_url = os.environ.get("HELIX_EVAL_LLM_BASE_URL", DASHSCOPE_COMPAT_BASE_URL)
+        return (
+            OpenAICompatCaller(api_key=api_key, model=args.llm_model, base_url=base_url),
+            OpenAICompatTextJudge(api_key=api_key, model=args.judge_model, base_url=base_url),
+        )
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise SystemExit("--llm-provider anthropic needs ANTHROPIC_API_KEY")
+    from longmem.anthropic_client import AnthropicCaller, AnthropicTextJudge
+
+    return (
+        AnthropicCaller(api_key=api_key, model=args.llm_model),
+        AnthropicTextJudge(api_key=api_key, model=args.judge_model),
+    )
+
+
 async def _run_retrieval(args: argparse.Namespace) -> None:
     instances, _family, dataset_sha = _load_benchmark(args.benchmark, include_abstention=False)
     instances = limit_instances(instances, args.limit)
-    embedder = build_real_embedder() if args.embedder == "real" else KeywordEmbedder()
+    embedder = _build_embedder(args)
 
     reranker = None
     arms = resolve_arms(args.arms)
     if any(cfg.rerank for cfg in arms.values()):
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise SystemExit("the 'rerank' arm needs ANTHROPIC_API_KEY (LLM reranker)")
-        from longmem.anthropic_client import AnthropicCaller
-
         from orchestrator.tools.knowledge import LLMReranker
 
-        reranker = LLMReranker(llm_caller=AnthropicCaller(api_key=api_key, model=args.llm_model))
+        llm_caller, _judge = _build_llm(args)
+        reranker = LLMReranker(llm_caller=llm_caller)
 
     section: dict[str, Any] = {}
     for arm_name, arm_config in arms.items():
@@ -126,6 +160,7 @@ async def _run_retrieval(args: argparse.Namespace) -> None:
             embedder=embedder,  # type: ignore[arg-type]
             config=config,
             reranker=reranker if config.rerank else None,
+            concurrency=args.concurrency,
         )
         section[arm_name] = report.to_dict()
         print(
@@ -154,16 +189,11 @@ async def _run_retrieval(args: argparse.Namespace) -> None:
 
 
 async def _run_endtoend(args: argparse.Namespace) -> None:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise SystemExit("--tier endtoend needs ANTHROPIC_API_KEY")
-    from longmem.anthropic_client import AnthropicCaller, AnthropicTextJudge
+    llm_caller, judge = _build_llm(args)
 
     instances, family, dataset_sha = _load_benchmark(args.benchmark, include_abstention=True)
     instances = limit_instances(instances, args.limit)
-    embedder = build_real_embedder() if args.embedder == "real" else KeywordEmbedder()
-    llm_caller = AnthropicCaller(api_key=api_key, model=args.llm_model)
-    judge = AnthropicTextJudge(api_key=api_key, model=args.judge_model)
+    embedder = _build_embedder(args)
 
     results_path = Path(args.results)
     prior = load_results(results_path)
@@ -180,6 +210,7 @@ async def _run_endtoend(args: argparse.Namespace) -> None:
         config=EndToEndConfig(reconcile=not args.no_reconcile),
         done_ids=done_ids,
         on_result=lambda r: asyncio.to_thread(append_result, results_path, r),
+        concurrency=args.concurrency,
     )
     merged = merge_results(prior, list(report.results))
     summary = summarise(merged)
@@ -200,9 +231,12 @@ async def _run_endtoend(args: argparse.Namespace) -> None:
                 "embedder": args.embedder
                 if args.embedder == "fake"
                 else os.environ.get("HELIX_EVAL_EMBED_MODEL", "real"),
+                "llm_provider": args.llm_provider,
                 "llm_model": args.llm_model,
                 "judge_model": args.judge_model,
-                "judge_note": "anthropic judge (upstream protocols use gpt-4o judges) — CM-K6",
+                "judge_note": (
+                    f"{args.llm_provider} judge (upstream protocols use gpt-4o judges) — CM-K6"
+                ),
                 "reconcile": not args.no_reconcile,
                 "dataset_sha256": dataset_sha,
                 "commit": _git_commit(),
@@ -213,8 +247,6 @@ async def _run_endtoend(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    from longmem.anthropic_client import DEFAULT_EVAL_MODEL
-
     parser = argparse.ArgumentParser(description="CM-N5 LongMemEval/LoCoMo runner")
     parser.add_argument("--benchmark", required=True, choices=_BENCHMARKS)
     parser.add_argument("--tier", required=True, choices=("retrieval", "endtoend"))
@@ -224,11 +256,37 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=None, help="override arm top_k")
     parser.add_argument("--results", default="eval-out/longmem_results.jsonl")
     parser.add_argument("--no-reconcile", action="store_true")
-    parser.add_argument("--llm-model", default=DEFAULT_EVAL_MODEL)
-    parser.add_argument("--judge-model", default=DEFAULT_EVAL_MODEL)
+    parser.add_argument(
+        "--llm-provider",
+        default="openai-compat",
+        choices=("openai-compat", "anthropic"),
+        help="openai-compat = HELIX_EVAL_LLM_* env (DashScope/Qwen default); "
+        "anthropic = ANTHROPIC_API_KEY",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="defaults: HELIX_EVAL_LLM_MODEL (openai-compat) / repo haiku pin (anthropic)",
+    )
+    parser.add_argument("--judge-model", default=None, help="defaults to --llm-model")
+    parser.add_argument(
+        "--concurrency", type=int, default=1, help="in-flight LLM/embedding work cap"
+    )
     parser.add_argument("--baseline-out", default=str(_DEFAULT_BASELINE))
     parser.add_argument("--update-baseline", action="store_true")
     args = parser.parse_args()
+
+    if args.llm_model is None:
+        if args.llm_provider == "openai-compat":
+            args.llm_model = os.environ.get("HELIX_EVAL_LLM_MODEL")
+            if not args.llm_model and args.tier == "endtoend":
+                raise SystemExit("set HELIX_EVAL_LLM_MODEL or pass --llm-model")
+        else:
+            from longmem.anthropic_client import DEFAULT_EVAL_MODEL
+
+            args.llm_model = DEFAULT_EVAL_MODEL
+    if args.judge_model is None:
+        args.judge_model = args.llm_model
 
     if args.tier == "retrieval":
         asyncio.run(_run_retrieval(args))

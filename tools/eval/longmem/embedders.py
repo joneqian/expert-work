@@ -7,13 +7,24 @@ test code). Real runs build the orchestrator's OpenAI-compatible
 embedder from ``HELIX_EVAL_EMBED_*`` env, mirroring how the platform
 itself talks to the embedding endpoint — so baseline numbers measure
 the production embedding space.
+
+:class:`CachedEmbedder` wraps the real embedder with a sqlite
+content-hash cache: the 5-arm ablation matrix re-embeds the identical
+corpus per arm, which without a cache multiplies a ~350k-doc
+LongMemEval_S pass by 5 in both wall-clock and yuan. Cache misses are
+fetched in small concurrent batches (DashScope's compatible-mode
+embedding endpoint caps batch size at 10 inputs).
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
+import sqlite3
+import struct
 from collections.abc import Sequence
+from pathlib import Path
 from uuid import UUID
 
 
@@ -44,16 +55,92 @@ def _tokenise(text: str) -> list[str]:
     return ascii_words + cjk_chars + cjk_bigrams
 
 
+class CachedEmbedder:
+    """Content-hash sqlite cache over any ``Embedder``-shaped backend.
+
+    Keys are ``(model, sha256(text))`` so switching embedding models
+    never serves stale vectors. Misses go to the backend in
+    ``backend_batch``-sized requests, ``concurrency`` in flight —
+    DashScope compatible-mode caps embedding batches at 10 inputs and
+    rate-limits per-second, so both knobs matter for a 350k-doc pass.
+    sqlite access is synchronous-but-cheap (single-process eval tool).
+    """
+
+    def __init__(
+        self,
+        backend: object,
+        *,
+        model_key: str,
+        db_path: Path,
+        backend_batch: int = 10,
+        concurrency: int = 4,
+    ) -> None:
+        self._backend = backend
+        self._model = model_key
+        self._batch = max(1, backend_batch)
+        self._sem = asyncio.Semaphore(max(1, concurrency))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(db_path)
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS embeddings ("
+            "model TEXT NOT NULL, hash TEXT NOT NULL, vec BLOB NOT NULL, "
+            "PRIMARY KEY (model, hash))"
+        )
+        self._db.commit()
+
+    async def embed(self, texts: Sequence[str], *, tenant_id: UUID) -> list[tuple[float, ...]]:
+        hashes = [hashlib.sha256(t.encode("utf-8")).hexdigest() for t in texts]
+        out: list[tuple[float, ...] | None] = [self._get(h) for h in hashes]
+
+        missing = [i for i, vec in enumerate(out) if vec is None]
+        if missing:
+            batches = [missing[s : s + self._batch] for s in range(0, len(missing), self._batch)]
+
+            async def _fetch(batch: list[int]) -> list[tuple[float, ...]]:
+                async with self._sem:
+                    return await self._backend.embed(  # type: ignore[attr-defined]
+                        [texts[i] for i in batch], tenant_id=tenant_id
+                    )
+
+            fetched = await asyncio.gather(*[_fetch(b) for b in batches])
+            for batch, vectors in zip(batches, fetched, strict=True):
+                for idx, vector in zip(batch, vectors, strict=True):
+                    out[idx] = tuple(vector)
+                    self._put(hashes[idx], tuple(vector))
+            self._db.commit()
+        return [vec for vec in out if vec is not None]
+
+    def _get(self, content_hash: str) -> tuple[float, ...] | None:
+        row = self._db.execute(
+            "SELECT vec FROM embeddings WHERE model = ? AND hash = ?",
+            (self._model, content_hash),
+        ).fetchone()
+        if row is None:
+            return None
+        blob = row[0]
+        return struct.unpack(f"{len(blob) // 4}f", blob)
+
+    def _put(self, content_hash: str, vector: tuple[float, ...]) -> None:
+        self._db.execute(
+            "INSERT OR REPLACE INTO embeddings (model, hash, vec) VALUES (?, ?, ?)",
+            (self._model, content_hash, struct.pack(f"{len(vector)}f", *vector)),
+        )
+
+    def close(self) -> None:
+        self._db.close()
+
+
 _EMBED_ENV = ("HELIX_EVAL_EMBED_API_KEY", "HELIX_EVAL_EMBED_MODEL")
 
 
-def build_real_embedder() -> object:
+def build_real_embedder(*, cache_db: Path | None = None, concurrency: int = 4) -> object:
     """OpenAI-compatible embedder from ``HELIX_EVAL_EMBED_*`` env.
 
     Required: ``HELIX_EVAL_EMBED_API_KEY`` + ``HELIX_EVAL_EMBED_MODEL``;
     optional ``HELIX_EVAL_EMBED_BASE_URL`` (defaults to the orchestrator
     default endpoint). Imported lazily so the fake arm never pays the
-    orchestrator import.
+    orchestrator import. With ``cache_db`` set the backend is wrapped in
+    :class:`CachedEmbedder` (multi-arm runs embed each corpus once).
     """
     missing = [name for name in _EMBED_ENV if not os.environ.get(name)]
     if missing:
@@ -69,4 +156,8 @@ def build_real_embedder() -> object:
         if base_url
         else HTTPEmbeddingClient(api_key=os.environ["HELIX_EVAL_EMBED_API_KEY"])
     )
-    return OpenAICompatibleEmbedder(client=client, model=os.environ["HELIX_EVAL_EMBED_MODEL"])
+    model = os.environ["HELIX_EVAL_EMBED_MODEL"]
+    backend = OpenAICompatibleEmbedder(client=client, model=model)
+    if cache_db is None:
+        return backend
+    return CachedEmbedder(backend, model_key=model, db_path=cache_db, concurrency=concurrency)

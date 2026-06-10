@@ -22,6 +22,7 @@ conversation once, not once per question.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
@@ -225,6 +226,7 @@ async def evaluate_retrieval(
     config: AblationConfig | None = None,
     reranker: Reranker | None = None,
     now: datetime | None = None,
+    concurrency: int = 1,
 ) -> RetrievalReport:
     """Score ``instances`` under one ablation arm.
 
@@ -232,28 +234,28 @@ async def evaluate_retrieval(
     QA of one conversation) share one store build; LongMemEval instances
     each get their own. ``now`` is taken once at entry so the CM-K4 time
     shift is consistent across the whole run.
+
+    ``concurrency`` bounds in-flight store builds / instance scorings
+    via one shared semaphore; results stay input-ordered (``gather``
+    preserves order), so ``concurrency=1`` is byte-identical to the
+    sequential path and CI keeps deterministic numbers.
     """
     cfg = config or AblationConfig()
     if cfg.rerank and reranker is None:
         raise ValueError("config.rerank=True requires a reranker instance")
     wall_now = now or datetime.now(UTC)
+    sem = asyncio.Semaphore(max(1, concurrency))
 
     groups: dict[tuple[int, datetime], list[RetrievalInstance]] = defaultdict(list)
     for instance in instances:
         groups[(id(instance.docs), instance.question_date)].append(instance)
 
-    results: list[InstanceResult] = []
-    blocked_total = 0
-    deduped_total = 0
-    for grouped in groups.values():
-        first = grouped[0]
-        delta = wall_now - first.question_date
-        store, by_uuid, blocked, deduped = await _build_store(
-            first.docs, embedder=embedder, decay=cfg.decay, delta=delta
-        )
-        blocked_total += blocked
-        deduped_total += deduped
-        for instance in grouped:
+    async def _score_instance(
+        instance: RetrievalInstance,
+        store: MemoryStore,
+        by_uuid: dict[UUID, MemoryDoc],
+    ) -> InstanceResult:
+        async with sem:
             (query_embedding,) = await embedder.embed([instance.question], tenant_id=EVAL_TENANT_ID)
             final = await _final_top_k(
                 store=store,
@@ -263,18 +265,37 @@ async def evaluate_retrieval(
                 reranker=reranker,
                 config=cfg,
             )
-            doc_ids = [d.doc_id for d in final]
-            session_ids = ordered_unique([d.session_id for d in final])
-            results.append(
-                InstanceResult(
-                    question_id=instance.question_id,
-                    question_type=instance.question_type,
-                    session_recall=recall_at_k(session_ids, instance.answer_session_ids, cfg.top_k),
-                    turn_recall=recall_at_k(doc_ids, instance.answer_doc_ids, cfg.top_k),
-                    ndcg=ndcg_at_k(doc_ids, instance.answer_doc_ids, cfg.top_k),
-                    mrr=mrr_at_k(doc_ids, instance.answer_doc_ids, cfg.top_k),
-                )
+        doc_ids = [d.doc_id for d in final]
+        session_ids = ordered_unique([d.session_id for d in final])
+        return InstanceResult(
+            question_id=instance.question_id,
+            question_type=instance.question_type,
+            session_recall=recall_at_k(session_ids, instance.answer_session_ids, cfg.top_k),
+            turn_recall=recall_at_k(doc_ids, instance.answer_doc_ids, cfg.top_k),
+            ndcg=ndcg_at_k(doc_ids, instance.answer_doc_ids, cfg.top_k),
+            mrr=mrr_at_k(doc_ids, instance.answer_doc_ids, cfg.top_k),
+        )
+
+    async def _run_group(
+        grouped: list[RetrievalInstance],
+    ) -> tuple[list[InstanceResult], int, int]:
+        first = grouped[0]
+        delta = wall_now - first.question_date
+        async with sem:
+            store, by_uuid, blocked, deduped = await _build_store(
+                first.docs, embedder=embedder, decay=cfg.decay, delta=delta
             )
+        rows = await asyncio.gather(*[_score_instance(i, store, by_uuid) for i in grouped])
+        return list(rows), blocked, deduped
+
+    group_outcomes = await asyncio.gather(*[_run_group(g) for g in groups.values()])
+    results: list[InstanceResult] = []
+    blocked_total = 0
+    deduped_total = 0
+    for rows, blocked, deduped in group_outcomes:
+        results.extend(rows)
+        blocked_total += blocked
+        deduped_total += deduped
 
     def _mean(values: list[float]) -> float:
         return sum(values) / len(values) if values else 0.0
