@@ -93,6 +93,13 @@ _memory_mmr_total = helix_counter(
     label_names=("outcome",),  # applied | degraded
 )
 
+# Stream CM-7 — Mem0-style reconciliation of run-end memory writes.
+_memory_reconcile_total = helix_counter(
+    "helix_cm_memory_reconcile_total",
+    "Run-end memory write reconciliations, partitioned by applied op.",
+    label_names=("op",),  # add | update | delete | noop | degraded
+)
+
 _anthropic_cache_anchors_total = helix_counter(
     "helix_uplift_anthropic_cache_anchors_total",
     "Total cache_control anchor markers added by upstream injectors "
@@ -342,6 +349,17 @@ def record_memory_mmr(*, outcome: str) -> None:
     selection failed (or thinned to nothing) and the input order was kept.
     """
     _memory_mmr_total.labels(outcome=outcome).inc()
+
+
+def record_memory_reconcile(*, op: str) -> None:
+    """Bump ``helix_cm_memory_reconcile_total{op}`` (Stream CM-7).
+
+    ``op`` ∈ ``{"add", "update", "delete", "noop", "degraded"}`` — the
+    operation actually applied per extracted candidate; ``degraded`` =
+    the reconcile decision failed and the candidate fell back to a
+    direct ADD (never lose a memory).
+    """
+    _memory_reconcile_total.labels(op=op).inc()
 
 
 def record_anthropic_cache_anchor() -> None:

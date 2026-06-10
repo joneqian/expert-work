@@ -1196,6 +1196,7 @@ def _build_memory_nodes(
             embedder=env.embedder,
             llm_caller=llm_caller,
             dlq=env.dlq,  # K.K7 — None keeps the previous log-and-drop behaviour
+            reconcile=long_term.reconcile_writes,  # CM-7 — Mem0-style run-end ops
         )
         if long_term.write_back
         else None

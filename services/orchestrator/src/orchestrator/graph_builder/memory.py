@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
@@ -35,6 +36,7 @@ from helix_agent.common.threat_patterns import scan_for_threats
 from helix_agent.common.uplift_metrics import (
     record_memory_drift,
     record_memory_mmr,
+    record_memory_reconcile,
     record_memory_redacted,
     record_memory_rerank,
     record_memory_retrieval,
@@ -329,6 +331,204 @@ def make_memory_recall_node(
     return memory_recall_node
 
 
+#: Stream CM-7 (Mini-ADR CM-H4) — neighbours below this cosine similarity
+#: are not "the same memory" candidates; the new item is ADDed without an
+#: LLM decision (the cheap majority path).
+_RECONCILE_SIM_THRESHOLD = 0.80
+_RECONCILE_NEIGHBOR_LIMIT = 3
+
+_RECONCILE_SYSTEM = (
+    "You reconcile newly extracted memories against similar existing "
+    "ones. For each candidate decide exactly one operation:\n"
+    '- "ADD": genuinely new information\n'
+    '- "UPDATE": supersedes or corrects ONE existing memory (set '
+    "target_id; the existing memory is rewritten to the candidate)\n"
+    '- "DELETE": the candidate retracts ONE existing memory (set '
+    "target_id; the existing memory is removed and the candidate "
+    "itself is NOT stored)\n"
+    '- "NOOP": duplicate of an existing memory; store nothing\n'
+    "Respond with ONLY a JSON object, no prose and no code fences:\n"
+    '{"ops": [{"index": <candidate index>, "op": "ADD", '
+    '"target_id": "<existing id, only for UPDATE/DELETE>"}]}'
+)
+
+
+def _reconcile_cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    if len(a) != len(b) or not a:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def parse_reconcile_ops(text: str) -> dict[int, tuple[str, str | None]]:
+    """Parse the reconcile LLM reply into ``{index: (op, target_id)}``.
+
+    Tolerant — malformed entries are simply absent, and the caller
+    treats an absent decision as a degraded direct ADD (CM-H4: never
+    lose a memory over a parse failure).
+    """
+    raw = _extract_json_object(text)
+    if raw is None:
+        return {}
+    try:
+        rows = json.loads(raw)["ops"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return {}
+    out: dict[int, tuple[str, str | None]] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        op = str(row.get("op", "")).strip().upper()
+        index = row.get("index")
+        if op not in ("ADD", "UPDATE", "DELETE", "NOOP") or not isinstance(index, int):
+            continue
+        target = row.get("target_id")
+        out[index] = (op, str(target) if target is not None else None)
+    return out
+
+
+async def _reconcile_and_apply(
+    items: list[MemoryItem],
+    *,
+    memory_store: MemoryStore,
+    llm_caller: LLMCaller,
+    token: CancellationToken,
+    log_label: str,
+) -> list[MemoryItem]:
+    """Stream CM-7 (Mini-ADR CM-H4) — Mem0-style extract→update.
+
+    Returns the items to write directly; UPDATE / DELETE are applied
+    in place against the store. Best-effort throughout: every failure
+    path degrades to keeping the candidate in the direct-write list
+    (never lose a memory), and only cancellation propagates.
+    """
+    direct: list[MemoryItem] = []
+    pending: list[tuple[MemoryItem, list[MemoryItem]]] = []
+    for item in items:
+        try:
+            neighbors = await token.run_cancellable(
+                memory_store.retrieve(
+                    tenant_id=item.tenant_id,
+                    user_id=item.user_id,
+                    query_embedding=item.embedding,
+                    limit=_RECONCILE_NEIGHBOR_LIMIT,
+                )
+            )
+        except RunCancelledError:
+            raise
+        except Exception:
+            logger.warning("%s_reconcile_recall_failed — direct add", log_label, exc_info=True)
+            record_memory_reconcile(op="degraded")
+            direct.append(item)
+            continue
+        similar = [
+            n
+            for n in neighbors
+            if _reconcile_cosine(item.embedding, n.embedding) >= _RECONCILE_SIM_THRESHOLD
+        ]
+        if similar:
+            pending.append((item, similar))
+        else:
+            record_memory_reconcile(op="add")
+            direct.append(item)
+    if not pending:
+        return direct
+
+    payload = {
+        "candidates": [
+            {
+                "index": idx,
+                "kind": item.kind,
+                "content": item.content,
+                "existing": [{"id": str(n.id), "content": n.content} for n in similar],
+            }
+            for idx, (item, similar) in enumerate(pending)
+        ]
+    }
+    ops: dict[int, tuple[str, str | None]] = {}
+    try:
+        reply = await token.run_cancellable(
+            llm_caller(
+                messages=[
+                    SystemMessage(content=_RECONCILE_SYSTEM),
+                    HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+                ],
+                tools=[],
+            )
+        )
+        ops = parse_reconcile_ops(_message_text(reply))
+    except RunCancelledError:
+        raise
+    except Exception:
+        logger.warning("%s_reconcile_llm_failed — direct add all", log_label, exc_info=True)
+
+    for idx, (item, similar) in enumerate(pending):
+        op, target_raw = ops.get(idx, ("", None))
+        valid = {str(n.id): n.id for n in similar}
+        target = valid.get(target_raw) if target_raw is not None else None
+        if op == "NOOP":
+            record_memory_reconcile(op="noop")
+        elif op == "UPDATE" and target is not None:
+            updated = await _apply_update(item, target, memory_store=memory_store, token=token)
+            record_memory_reconcile(op="update" if updated else "degraded")
+            if not updated:
+                direct.append(item)
+        elif op == "DELETE" and target is not None:
+            deleted = await _apply_delete(item, target, memory_store=memory_store, token=token)
+            # The candidate is the retraction event — not stored either way.
+            record_memory_reconcile(op="delete" if deleted else "degraded")
+        elif op == "ADD":
+            record_memory_reconcile(op="add")
+            direct.append(item)
+        else:
+            # Missing / malformed decision — never lose the memory.
+            record_memory_reconcile(op="degraded")
+            direct.append(item)
+    return direct
+
+
+async def _apply_update(
+    item: MemoryItem, target: UUID, *, memory_store: MemoryStore, token: CancellationToken
+) -> bool:
+    try:
+        updated = await token.run_cancellable(
+            memory_store.update_content(
+                tenant_id=item.tenant_id,
+                user_id=item.user_id,
+                memory_id=target,
+                content=item.content,
+                embedding=item.embedding,
+                kind=item.kind,
+            )
+        )
+    except RunCancelledError:
+        raise
+    except Exception:
+        logger.warning("memory.reconcile_update_failed id=%s", target, exc_info=True)
+        return False
+    return updated is not None
+
+
+async def _apply_delete(
+    item: MemoryItem, target: UUID, *, memory_store: MemoryStore, token: CancellationToken
+) -> bool:
+    try:
+        return await token.run_cancellable(
+            memory_store.soft_delete(
+                tenant_id=item.tenant_id, user_id=item.user_id, memory_id=target
+            )
+        )
+    except RunCancelledError:
+        raise
+    except Exception:
+        logger.warning("memory.reconcile_delete_failed id=%s", target, exc_info=True)
+        return False
+
+
 async def flush_messages_to_memory(
     messages: Sequence[BaseMessage],
     *,
@@ -341,6 +541,7 @@ async def flush_messages_to_memory(
     token: CancellationToken,
     dlq: MemoryWritebackDLQ | None = None,
     log_label: str = "memory.writeback",
+    reconcile: bool = False,
 ) -> int:
     """Extract durable memories from ``messages``, embed, and persist them.
 
@@ -361,6 +562,12 @@ async def flush_messages_to_memory(
     ``log_label`` distinguishes the two call sites in logs
     (``memory.writeback`` vs ``memory.precompaction_flush``) while keeping
     the run-end node's log strings byte-identical.
+
+    ``reconcile`` (Stream CM-7, Mini-ADR CM-H3/H4) — when set, extracted
+    items are reconciled against similar existing memories
+    (ADD / UPDATE / DELETE / NOOP) before persisting instead of written
+    blindly. Only the run-end write-back sets it; the CM-3 pre-compaction
+    flush stays a direct write (latency-sensitive, inside a turn).
     """
     prompt = [
         SystemMessage(content=_EXTRACT_SYSTEM),
@@ -387,7 +594,16 @@ async def flush_messages_to_memory(
             )
             for (kind, content), vector in zip(extracted, vectors, strict=True)
         ]
-        await memory_store.write(items)
+        if reconcile:
+            items = await _reconcile_and_apply(
+                items,
+                memory_store=memory_store,
+                llm_caller=llm_caller,
+                token=token,
+                log_label=log_label,
+            )
+        if items:
+            await memory_store.write(items)
     except RunCancelledError:
         raise
     except MemoryInjectionBlockedError as exc:
@@ -491,6 +707,7 @@ def make_memory_writeback_node(
     embedder: Embedder,
     llm_caller: LLMCaller,
     dlq: MemoryWritebackDLQ | None = None,
+    reconcile: bool = False,
 ) -> MemoryNode:
     """Build the ``memory_writeback`` node bound to the store + embedder.
 
@@ -503,6 +720,9 @@ def make_memory_writeback_node(
     Stream CM-3 — the extraction core now lives in the shared
     :func:`flush_messages_to_memory`; this node is the thin run-end
     adapter (resolve config scope → flush the full trajectory).
+
+    Stream CM-7 — ``reconcile`` forwards to the flush so run-end writes
+    go through the Mem0-style ADD / UPDATE / DELETE / NOOP decision.
     """
 
     async def memory_writeback_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -526,6 +746,7 @@ def make_memory_writeback_node(
             token=token,
             dlq=dlq,
             log_label="memory.writeback",
+            reconcile=reconcile,
         )
         return {}
 

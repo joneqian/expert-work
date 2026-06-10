@@ -286,6 +286,17 @@ class LongTermMemorySpec(BaseModel):
             "``per_session`` enables Anthropic prompt-cache anchoring"
         ),
     )
+    # Stream CM-7 (Mini-ADR CM-H3/H6) — Mem0-style extract→update at the
+    # run-end write-back: extracted memories are reconciled against
+    # similar existing ones (ADD / UPDATE / DELETE / NOOP) instead of
+    # written blindly, so paraphrased duplicates stop piling up and
+    # contradicted facts get superseded. ``False`` restores the
+    # pre-CM-7 direct write byte-for-byte. The CM-3 pre-compaction
+    # flush always writes directly (latency-sensitive, inside a turn).
+    reconcile_writes: bool = Field(
+        default=True,
+        description="reconcile run-end extracted memories against similar existing ones",
+    )
 
 
 class MemorySpec(BaseModel):

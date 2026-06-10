@@ -661,3 +661,33 @@ def test_context_compression_still_forbids_extra() -> None:
     doc["spec"]["policies"] = {"context_compression": {"bogus": 1}}
     with pytest.raises(ValidationError):
         AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
+# memory.long_term.reconcile_writes — CM-7
+# ---------------------------------------------------------------------------
+
+
+def test_reconcile_writes_defaults_true() -> None:
+    """CM-7 — run-end memory writes reconcile against similar existing
+    memories by default (Mem0-style ADD/UPDATE/DELETE/NOOP)."""
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {}}
+    memory = AgentSpec.model_validate(doc).spec.memory
+    assert memory is not None and memory.long_term is not None
+    assert memory.long_term.reconcile_writes is True
+
+
+def test_reconcile_writes_can_disable() -> None:
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {"reconcile_writes": False}}
+    memory = AgentSpec.model_validate(doc).spec.memory
+    assert memory is not None and memory.long_term is not None
+    assert memory.long_term.reconcile_writes is False
+
+
+def test_long_term_memory_forbids_extra() -> None:
+    doc = _doc()
+    doc["spec"]["memory"] = {"long_term": {"bogus": 1}}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)

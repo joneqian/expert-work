@@ -971,8 +971,8 @@ flush_messages_to_memory(..., reconcile: bool = False)   ← 新参，默认关
 
 ### 9.9 PR 切分（CM-7）
 
-1. **CM-7 PR1 — compressor 摘要强化（①）**：preamble + 三段结构 prompt + UPDATE/FRESH 双模式 + `summary.update_mode` 日志 + unit tests（含现有压缩测试不回归）。
-2. **CM-7 PR2 — writeback 显式操作（②，收尾 CM-7）**：`flush_messages_to_memory(reconcile=)` + `_reconcile_candidates`（近邻 + 批量 ops + best-effort 应用）+ `MemoryPolicy.reconcile_writes` + factory 透传 + `record_memory_reconcile` + unit/protocol tests + ITERATION-PLAN 回填。
+1. **CM-7 PR1 — compressor 摘要强化（①）**（已实现，PR #514）：preamble + 三段结构 prompt + UPDATE/FRESH 双模式 + `summary.update_mode` 日志 + unit tests（含现有压缩测试不回归）。
+2. **CM-7 PR2 — writeback 显式操作（②，收尾 CM-7）**（已实现）：`flush_messages_to_memory(reconcile=)` + `_reconcile_and_apply`（近邻 + 批量 ops + best-effort 应用；policy 字段落在 `LongTermMemorySpec.reconcile_writes`——实际类名修正，语义同 §9.4）+ factory 透传 + `record_memory_reconcile` + unit/protocol tests + ITERATION-PLAN 回填。**→ CM-7 完成**。
 
 > 每个 PR 在本 §9 基础上局部细化；ITERATION-PLAN 增 CM-7 backlog，ship 后回填 `[x]`+PR 号。
 
