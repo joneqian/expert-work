@@ -321,6 +321,8 @@ async def test_short_content_passes_through_untrimmed() -> None:
     result = await tool.call({"path": "/x"}, ctx=_CTX)
     assert result.content == "small body"
     assert result.meta["truncated"] is False
+    # Un-truncated output carries no overflow payload (Stream CM-5).
+    assert result.full_content is None
 
 
 @pytest.mark.asyncio
@@ -339,6 +341,8 @@ async def test_long_content_middle_trimmed_with_head_and_tail_visible() -> None:
     assert "chars truncated" in result.content
     # Output is roughly the cap plus the truncation marker length.
     assert len(result.content) < DEFAULT_MCP_CHAR_CAP + 200
+    # Stream CM-5: the complete payload rides along for externalization.
+    assert result.full_content == payload
 
 
 # ---------------------------------------------------------------------------

@@ -221,6 +221,10 @@ async def test_long_response_body_tail_truncated() -> None:
     assert "...[truncated]" in result.content
     # Header section + body cap + framing; well under raw + 1k.
     assert len(result.content) < DEFAULT_BODY_CHAR_CAP + 2_000
+    # Stream CM-5: the complete rendering rides along for externalization.
+    assert result.full_content is not None
+    assert huge in result.full_content
+    assert "...[truncated]" not in result.full_content
 
 
 @pytest.mark.asyncio
@@ -238,6 +242,8 @@ async def test_short_response_not_marked_truncated() -> None:
     )
     assert result.meta["truncated"] is False
     assert result.meta["headers_truncated"] is False
+    # Un-truncated response carries no overflow payload (Stream CM-5).
+    assert result.full_content is None
 
 
 @pytest.mark.asyncio

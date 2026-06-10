@@ -221,18 +221,29 @@ class HTTPTool:
 
         headers_text, headers_truncated = self._format_headers(response.headers)
 
-        rendered = (
-            f"HTTP {response.status_code} {response.reason_phrase}\n"
-            f"--- headers ---\n{headers_text}\n"
-            f"--- body ---\n{body_text}"
-        )
+        def _render(headers: str, body: str) -> str:
+            return (
+                f"HTTP {response.status_code} {response.reason_phrase}\n"
+                f"--- headers ---\n{headers}\n"
+                f"--- body ---\n{body}"
+            )
+
+        # Stream CM-5: a truncated response is otherwise unrecoverable
+        # (the request may not be replayable) — carry the full rendering
+        # so the tools node can externalize it to the workspace.
+        full_content: str | None = None
+        if body_truncated or headers_truncated:
+            full_headers = "\n".join(f"{key}: {value}" for key, value in response.headers.items())
+            full_content = _render(full_headers, response.text)
+
         return ToolResult(
-            content=rendered,
+            content=_render(headers_text, body_text),
             meta={
                 "status_code": response.status_code,
                 "truncated": body_truncated,
                 "headers_truncated": headers_truncated,
             },
+            full_content=full_content,
         )
 
     def _format_headers(self, headers: httpx.Headers) -> tuple[str, bool]:

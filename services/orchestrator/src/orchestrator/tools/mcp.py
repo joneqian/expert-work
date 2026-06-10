@@ -636,6 +636,9 @@ class MCPTool:
                 "truncated": truncated,
                 "is_error": result.is_error,
             },
+            # Stream CM-5: middle-trimmed MCP output is otherwise
+            # unrecoverable — carry the full text for externalization.
+            full_content=result.content if truncated else None,
         )
 
 

@@ -218,12 +218,22 @@ class ToolResult:
     before computing the new ``step_count`` (clamped at 0 — refund
     never produces negative). Must be ``>= 0`` — a tool can't reverse
     the polarity and *consume* budget through this channel.
+
+    ``full_content`` (Stream CM-5, Mini-ADR CM-F1/F3) carries the
+    complete un-truncated rendering when ``content`` was cut, so the
+    tools node can externalize it to the user's workspace and leave a
+    recoverable reference instead of losing the overflow forever. Only
+    tools whose output is otherwise unrecoverable may set it (bash /
+    exec_python / http / mcp); read-only tools must leave it ``None`` —
+    their sources are re-readable, and the exemption is the
+    persist→read→persist loop guard.
     """
 
     content: str
     meta: Mapping[str, Any] = field(default_factory=dict)
     state_updates: Mapping[str, Any] = field(default_factory=dict)
     refund_iterations: int = 0
+    full_content: str | None = None
 
     def __post_init__(self) -> None:
         # Frozen dataclass — direct setattr is disabled. The check runs

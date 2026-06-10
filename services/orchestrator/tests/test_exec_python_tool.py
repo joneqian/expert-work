@@ -49,6 +49,8 @@ async def test_exec_python_runs_code_and_returns_output() -> None:
     assert "42" in result.content
     assert "exit_code: 0" in result.content
     assert result.meta["exit_code"] == 0
+    # Un-truncated output carries no overflow payload (Stream CM-5).
+    assert result.full_content is None
     # acquire → exec → release, all once; a clean run never force-destroys.
     assert len(client.acquired) == 1
     assert len(client.execs) == 1
@@ -70,6 +72,11 @@ async def test_exec_python_truncates_oversized_output() -> None:
     # content = "stdout:\n" + capped-stdout + marker + exit-code line.
     assert len(result.content) < DEFAULT_OUTPUT_CHAR_CAP + 200
     assert "[truncated]" in result.content
+    # Stream CM-5: the complete rendering rides along for externalization.
+    assert result.full_content is not None
+    assert "x" * 50_000 in result.full_content
+    assert "exit_code: 0" in result.full_content
+    assert "[truncated]" not in result.full_content
 
 
 @pytest.mark.asyncio
