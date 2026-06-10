@@ -1439,7 +1439,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - **CM-9（C9 + N4）effort 档位 + 撞限升档** P2：~~plan mode 开关~~（砍）~~iteration budget~~ ~~指纹去重~~（已实现）
   - [x] **CM-9 PR1 effort 基建**（PR #522）：`ModelSpec.effort/adaptive_thinking`（默认 None/False 零行为变更，extra-forbid 校验）+ `ModelEntry.effort/sampling` 能力位（opus-4-8 effort✓sampling✗ / sonnet-4-6 双✓ / haiku effort✗）+ `catalog_entry` 单源 lookup + adapter 三处签名（Protocol/HTTP/Recording 默认参零破坏）body 条件携带 thinking/output_config + `AnthropicProvider.effort/adaptive_thinking` + factory gate（haiku+effort build 期 AgentFactoryError fail-fast；**opus-4-8 temperature 条件剔除修现存 400**；目录外不 gate）+ 测试：3 protocol + 2 catalog + 3 adapter（含 MockTransport 线级 body 断言）+ 4 factory gate。1365 回归绿
   - [x] **CM-9 PR2 撞限升档（收尾）**（本次）：factory `_escalated_model`（梯子 None/low→medium→high→max，max 封顶；启用条件=算力字段已配 ∧ 目录 effort 支持，目录外不升）+ `build_react_graph(escalated_llm_caller=)` + loop middleware 命中置 `ctx.payload["loop_detected"]` + `AgentState.escalate_next` transient 通道（loop 命中收尾 run 落 checkpoint，**下一 run 首步升档**，消费即 reset）+ agent_node 双信号切换（loop ∨ step×4≥max×3 即 75%）+ `helix_cm_effort_escalation_total{signal=loop/budget}`；测试：3 集成（预算切换/loop 跨 run 升档+reset/无 escalated 零变更）+ 4 梯子推导 + state 键集 +1。1707 回归绿。**→ CM-9 完成（设计 + effort 基建 + 升档 三 PR）**
+- [x] **CM-N5 设计先行**（本次）：STREAM-CM-DESIGN §12 详设——范围拍板（分层全做 + 端到端大档全量：LongMemEval_S 500 题 + LoCoMo cat1-4 全 1540 题，2026-06-10 用户拍板）+ 一手取证（LongMemEval MIT/answer_session_ids+has_answer 零 LLM 检索 ground truth；LoCoMo CC BY-NC 不 vendor；cat5/abstention 不进 overall——Zep 84→58 争议教训）+ 两层四态架构（P0 检索层机械回归闸：消融矩阵 decay×MMR×rerank×hybrid 归因 CM-4/6 / P1 端到端 LLM judge 横比：ingestion 走 flush_messages_to_memory reconcile=True 验 CM-7）+ 时间平移代替 now 注入（decay 可验零协议变更）+ SQL write 尊重 created_at 补全 + 断点续跑 + 基线 YAML 落盘 + 7 条 Mini-ADR（CM-K1~K7）+ 3-PR 切分 + 基线真跑
 - **CM-N5 评测基线** 贯穿：LongMemEval + LoCoMo 自测纳入 eval（验 CM-4/6/7）
+  - [ ] **CM-N5 PR2 P0 检索层**：download/adapter/retrieval/metrics + 时间平移 + 消融开关 + SQL created_at 补全 + synthetic fixture + CI 单测
+  - [ ] **CM-N5 PR3 P1 端到端（收尾）**：endtoend/judge/run_longmem + 断点续跑 + baseline 落盘 + 回填
+  - [ ] **基线真跑**：本地全量（层 1 真 embedder + 层 2 LLM judge），数字进 `baselines/`
 
 ---
 
