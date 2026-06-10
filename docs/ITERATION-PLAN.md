@@ -1417,7 +1417,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - **CM-4（B5）reranker 接通** P1：memory recall Hybrid 后接 cross-encoder rerank（配置已预留 migration 0051）
   - [x] **CM-4 PR1 记忆召回接 rerank（orchestrator）**（PR #505）：`make_memory_recall_node` 加可选 `reranker`（从 tools/knowledge 导 `Reranker`）+ 宽召回 `max(top_k,_MEMORY_RERANK_RECALL_LIMIT=20)` + `_rerank_memories`（best-effort 回落 `candidates[:top_k]`，cancel re-raise，rerank 在 redact 前）；`MemoryEnv.reranker` 字段（embedder 同款注入）；factory 透传 `env.reranker`；`record_memory_rerank{outcome=reranked/degraded}`（helix_cm_memory_rerank_total）+ 5 unit（重排+截 top_k/宽召回 limit/None 零变更/失败降级不丢记忆/空召回跳过）。1005 orchestrator + 302 common 回归绿
   - [x] **CM-4 PR2 control-plane 激活**（本次）：`app.py` `MemoryEnv(..., reranker=reranker)`（复用 `:834` 已建的 `DynamicResolvingReranker`，同一实例喂知识检索 J.5 与记忆召回 J.3 两路）+ orchestrator factory 透传测（`_build_memory_nodes` 把 `MemoryEnv.reranker` 传到 recall 节点、spy reranker 被调）。**→ CM-4 完成（设计 + orchestrator + 激活 三 PR）**
-- **CM-5（B6）可恢复压缩** P1：超大工具结果存 artifact + 虚拟引用 + read 类豁免
+- [x] **CM-5 设计先行**（本次）：STREAM-CM-DESIGN §7 详设——接缝核准 file:line（截断在 6 工具内部策略各异/meta["truncated"] 在 ToolMessage 构造丢弃 LLM 不知情/首批 4 工具完整输出在 orchestrator 内存可得/CM-0 writer 范式整体复用/恢复工具已存在）+ 框架报告假设修正（artifact 表只是元数据注册，存储基底=workspace 文件，不入 artifact 表不接 ObjectStore）+ 工具截留→中央外部化→引用 footer 三段（截断策略留工具内是职责正确非成本折中）+ read 类豁免双保险防 persist→read→persist + 数据/协议变更（ToolResult.full_content/tools/overflow.py/复用 workspace_writer_factory 零新参数）+ 边界 + 可观测 + 测试 + 6 条 Mini-ADR（CM-F1~F6）+ 2-PR 切分
+- **CM-5（B6）可恢复压缩** P1：超大工具结果外部化 workspace 文件 + 虚拟引用 + read 类豁免
+  - [ ] **CM-5 PR1 纯核心**：`ToolResult.full_content` + 4 工具（bash/exec_python/http/mcp）截断时带出全文 + `tools/overflow.py` 纯函数（rel path/footer/2M 上限）+ unit；不接图
+  - [ ] **CM-5 PR2 接线**：builder tools_node `_externalize_tool_overflow` best-effort 钩子（复用 workspace_writer_factory）+ `helix_cm_tool_overflow_total{outcome,tool}`/`helix_cm_tool_overflow_chars` + 集成测 + 回填
 - **CM-6（B4）MMR + 时间衰减** P1：`memory/sql.py:retrieve()` RRF 后加 MMR + 时间衰减（叠加增益自测）
 - **CM-7（B7）结构化 note** P2：摘要"背景非指令"语义 + 显式更新操作（A-MEM/Mem0）
 - **CM-8（C8）文件投影 + UI 双通道** P2：依赖 CM-0 ingest + admin UI plan/todo 可编辑（补 J.8 modify UX）

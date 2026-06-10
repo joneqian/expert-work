@@ -8,7 +8,7 @@
 >
 > **零债收尾规则**（[memory:zero-tech-debt]）：每条交付收尾 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 >
-> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）详设已锁定；CM-5…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
+> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）+ CM-5（可恢复压缩，§7）详设已锁定；CM-6…CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
 
 ---
 
@@ -23,7 +23,7 @@
 | CM-2 | A2 | 无"保留最近 N 轮"廉价前置闸，轻溢出每次走 LLM 摘要 | `agent_node` compressor 前加滑窗截断（保 ToolCall↔ToolResult 配对） | P0 | CM-C1…C6（§4 详设） |
 | CM-3 | A3 | compressor 丢弃中段前无 flush，`memory_writeback` 只在 run 末 | 压缩前回调 → 复用 writeback 通道中途落盘 | P1 | CM-D1…D6（§5 详设） |
 | CM-4 | B5 | rerank_provider/model 配置预留但检索路径无 rerank 调用 | memory recall Hybrid 召回后接 cross-encoder rerank | P1 | CM-E1…E6（§6 详设） |
-| CM-5 | B6 | 超大工具结果 char-cap 截断丢弃，不可找回 | 超限结果存 artifact + 虚拟引用 + read 类豁免（"可恢复压缩"通用原则） | P1 | 待细化 |
+| CM-5 | B6 | 超大工具结果 char-cap 截断丢弃，不可找回 | 超限结果外部化 workspace 文件 + 虚拟引用 footer + read 类豁免（"可恢复压缩"通用原则） | P1 | CM-F1…F6（§7 详设） |
 | CM-6 | B4 | 对称 RRF，无 MMR 去冗余、无时间衰减 | `memory/sql.py:retrieve()` RRF 后加 MMR + 时间衰减 | P1 | 待细化 |
 | CM-7 | B7 | `<context-summary>` 缺"背景非指令"强语义、无增量更新 | 结构化摘要条目 + 显式更新操作（A-MEM/Mem0 范式） | P2 | 待细化 |
 | CM-8 | C8 | approval `decision='modify'` 无法编辑 `proposed_args` 再提交 | 文件投影（CM-0）+ admin UI plan/todo 可视化可编辑双通道 | P2 | 待细化 |
@@ -39,7 +39,7 @@
 | 进程级文件锁 + PID watchdog（OpenClaw） | ❌ 不借 | helix 用 PG 事务 / advisory lock；并发已被 per-(tenant,user) 单 warm session 串行化 |
 | **DB 权威 + 单向投影 + 受控 ingest**（Deep Agents CompositeBackend 思路） | ✅ 借 | 拿到文件透明/可干预红利，不丢 DB 权威；任一时刻单向流动 |
 | **Recitation 复诵 todo 到上下文尾**（Manus/Claude Code） | ✅ 借 | 低成本抗 long-context lost-in-the-middle |
-| 可恢复压缩"留引用不丢源"（Manus / Anthropic tool-clearing） | ✅ 借（CM-5） | helix 已有 artifact+ObjectStore 基建 |
+| 可恢复压缩"留引用不丢源"（Manus / Anthropic tool-clearing） | ✅ 借（CM-5） | 存储基底=workspace 文件（取证修正：artifact 表只是元数据注册，内容基底本就是 workspace 文件；ObjectStore M0 未接 artifact 内容） |
 | Dreaming / 按日期 Episodic 编年落盘 | ❌ 不借 | 文章理想化；consolidator(transient→consolidated) 已覆盖等价价值 |
 
 ### 1.3 Out-of-scope（明确推迟）
@@ -658,7 +658,111 @@ memory_recall_node（reranker 注入，可选）
 
 ---
 
-## 7. 与既有 Stream 的衔接
+## 7. CM-5 详细设计 —— 可恢复压缩（超大工具结果外部化 + 虚拟引用）
+
+> **目标**：把工具结果截断从"永久丢弃"变为"可恢复"——完整输出落 workspace 文件，ToolMessage 保留截断内容 + 引用 footer，agent 需要时用既有读工具换回。映射框架报告 B6 + 修订 N3（Manus 法则"压缩必须可恢复——丢正文留引用"；Anthropic tool result clearing 是同方向的官方背书）。
+>
+> **框架报告假设修正（2026-06-10 用户拍板）**：报告原句"已有 artifact 表 + ObjectStore，天然适配"经源码取证不成立——artifact 表只是**元数据注册**（`ArtifactVersionRow.path_in_workspace` 指向 workspace 卷文件，内容基底本就是 workspace 文件），ObjectStore M0 未接 artifact 内容（`archived_object_key` 不填充），agent 也没有 read_artifact 工具。故 CM-5 存储基底 = **workspace 文件**（= artifact 的实际内容基底），**不入 artifact 表**（避免工具结果残片污染用户产物列表）、**不动 ObjectStore**。
+
+### 7.1 关键约束（接缝核准结论，已源码核准）
+
+| 约束 | 事实 | file:line |
+|---|---|---|
+| **截断在工具内部、策略各异（领域知识）** | bash/exec_python：`format_sandbox_outcome` head-trim 20k；http：body 20k tail + headers 4k 分离 cap；mcp：middle-trim 20k 留头尾；web_search：单条结果 4096；read_file：sandbox snippet 内 `text[:cap]`（全文不出 supervisor 线） | `tools/sandbox.py:38,314-322`、`tools/bash.py:138`、`tools/http.py:53-54,216-236`、`tools/mcp.py:63,642-660`、`tools/web_search.py:36,232`、`tools/file_ops.py:177` |
+| **截断后完整结果即丢、LLM 不知情** | `ToolResult.meta["truncated"]` 在工具内生成，但 ToolMessage 只装 `content`+`tool_call_id`，meta 提取后丢弃；完整原文不落任何地方 | `graph_builder/builder.py:584,1232-1237`、`tools/registry.py:198-227` |
+| **首批 4 工具的完整输出在 orchestrator 内存可得** | bash/exec_python：supervisor 返回**全量** `SandboxOutcome`，cap 在 orchestrator 侧 `format_sandbox_outcome`；http：`_format` 前全量 body 在内存；mcp：middle-trim 前全量在内存 | `tools/sandbox.py:314-322`、`tools/http.py:216`、`tools/mcp.py:642` |
+| **CM-0 writer 范式可整体复用** | `WorkspaceFileWriter` Protocol（`write(*, rel, content)`）+ `SandboxWorkspaceWriter`（sandbox 原子写、自动建父目录）+ `workspace_writer_factory` 已从 factory 流到 builder（gate：persistent_workspace ∧ supervisor_client）+ best-effort 钩子先例 `_project_workspace_state` | `context/workspace_projection.py:130-134`、`tools/file_ops.py:759-774`、`agent_factory.py:120,595-621`、`builder.py:243,632,1126-1156` |
+| **恢复工具已存在，不新造** | `read_file`（20k cap、无 offset——超 20k 文件用 exec_python/bash 切片/grep 是预期恢复路径，sandbox 内零网络成本）；`list_dir` 可发现 `.tool_results/` | `tools/file_ops.py:460-513` |
+| **ToolResult 可向后兼容扩展** | frozen dataclass + 默认值字段追加不破现有构造点 | `tools/registry.py:198-227` |
+
+> **结论**：CM-5 = `ToolResult` 加可选 `full_content` 字段（4 个工具截断时带出全文）+ tools_node 中央 best-effort 外部化（复用 CM-0 `workspace_writer_factory`，零新注入参数）+ ToolMessage 引用 footer。截断策略不动、无 schema 变更、无新工具。
+
+### 7.2 设计：工具截留 → 中央外部化 → 引用 footer（三段）
+
+```
+工具内（截断策略不动，一行增量）
+  按既有领域策略截断 content（head/tail/middle/分离 cap 各异）
+  截断发生时：ToolResult(content=截断版, full_content=完整渲染, meta={"truncated": True, ...})
+
+tools_node（中央，best-effort，复用 CM-0 writer）
+  _invoke_tool 返回后：
+    full_content 存在 ∧ workspace_writer_factory 存在 ∧ spec 非 read_only
+      → rel = ".tool_results/<run_id>/<call_id>-<tool>.txt"
+      → writer.write(rel=rel, content=full_content[:_OVERFLOW_MAX_CHARS])   # sandbox 原子写
+      → ToolMessage.content += "\n\n<tool-result-overflow>output truncated; full output
+         (N chars) saved to .tool_results/…; use read_file / exec_python / bash to inspect
+         </tool-result-overflow>"
+    写失败 / 无 writer / read_only → 维持现状（inline "...[truncated]" marker 仍在）
+```
+
+**职责分工（CM-F1，用户确认"不考虑成本也是最优"）**：截断**策略**是领域知识——web_search 按单条结果截、http 头/体分离 cap、skill_view 中段截留头尾、read_file 必须在 sandbox snippet 内截（否则超大文件全量过 supervisor HTTP 线）——统一 middleware 会抹掉这些语义，且 read_file 的 snippet 内截根本无法中央化。真正跨切面的只有**溢出后的处置**（外部化 + 引用），归中央一处。
+
+不变量：① 未截断 ⇒ `full_content=None` ⇒ 零行为变更；② 无 writer（无持久 workspace / 无 supervisor）⇒ 现状截断，与今日字节一致；③ 外部化 best-effort——写失败不影响 run、不吞 cancel；④ footer 仅在**写成功**后追加（绝不引用不存在的文件）；⑤ read 类豁免双保险（见 7.4）。
+
+### 7.3 数据/协议变更
+
+1. **`tools/registry.py`**：`ToolResult` 加 `full_content: str | None = None`。契约：仅当 `content` 被截断**且**工具持有完整原文时填（与 `content` 同构的未截断渲染）；read_only 工具**禁止**填。无 protocol 包变更（ToolResult 是 orchestrator 内部类型）。
+2. **首批 4 工具**（各一处增量）：`format_sandbox_outcome`（bash/exec_python 共用）截断时带出全量渲染；`HTTPTool._format` 截断时带出全量渲染（headers+body 未截版）；`MCPTool` middle-trim 时带出全量。
+3. **新模块 `tools/overflow.py`**（纯函数，与 `tools/error_classifier.py` 同层级先例）：`overflow_rel_path(run_id, call_id, tool_name) -> str`、`render_overflow_footer(rel, total_chars) -> str`、`_OVERFLOW_MAX_CHARS = 2_000_000` 上限保护（超限只写前 2M + 文件尾注记）。
+4. **`graph_builder/builder.py`**：tools_node 在 ToolMessage 构造处接外部化钩子 `_externalize_tool_overflow`（async、best-effort）；**复用既有 `workspace_writer_factory` 参数**——零新 build_react_graph 参数、gate 与 CM-0 投影完全一致。
+5. **可观测**：`helix_cm_tool_overflow_total{outcome=externalized/degraded, tool}` counter + `helix_cm_tool_overflow_chars` gauge（builder 内定义，CM-2/CM-3 同款）+ 结构化日志 `tool.overflow {tool, rel, chars}`。不发 audit（agent 自身 workspace 的运行时产物，非平台代写状态；metrics+log 足够，区别于 CM-0 投影的 STATE_PROJECTED）。
+6. **不加 policy 开关**：gate 行为 = workspace_writer_factory 存在与否（CM-0 投影同款先例）；无 manifest/policy 变更。
+
+### 7.4 Read 类豁免（防 persist→read→persist 循环，设计铁律）
+
+| 层 | 保险 |
+|---|---|
+| 工具契约 | read_only 工具（read_file/list_dir/skill_view/web_search/knowledge_search/list_artifacts…）**不填** `full_content`：web_search 单条自带 URL（Manus 式"丢正文留 URL"已天然满足）；read_file/skill_view 源文件可重读（且 read_file 全文根本不出 sandbox） |
+| 中央双保险 | tools_node 外部化前检查 `spec.resolved_side_effect == "read_only"` ⇒ 跳过（防未来工具误填；测试锁死） |
+
+循环场景推演：agent `read_file` 读回 `.tool_results/` 大文件 → read_file 是 read_only → 即使再截断也不外部化 → 无循环。
+
+### 7.5 边界情况
+
+| 场景 | 处理 |
+|---|---|
+| 未截断（绝大多数调用） | `full_content=None`，中央钩子零开销跳过 |
+| 无持久 workspace / 无 supervisor（writer factory=None） | 现状截断，字节一致 |
+| 写失败（sandbox 不可达/IO 错） | log + `outcome=degraded`，content 保持截断版（inline marker 仍在），run 不受影响 |
+| 超大全文（如 500MB stdout） | `_OVERFLOW_MAX_CHARS=2M` 截顶写入 + 文件尾注记（防巨量 payload 过 supervisor HTTP 线） |
+| 取消（RunCancelledError/CancelledError） | 外部化不吞 cancel，照常 re-raise |
+| 并行工具调用 | 路径含 `call_id` 唯一，无写冲突 |
+| `.tool_results/` 累积 | 生命周期复用 workspace 既有留存机制（每日备份 / 90 天 archive，J.15）；agent/用户可自删；**不新造清理机制**（明确 non-goal，非遗留债） |
+| 工具本身 error（ToolMessage status=error） | 错误路径不外部化（错误摘要已有 500 cap + CM-1 advisory 负责） |
+
+### 7.6 可观测（零债"可观测齐全"）
+
+- `helix_cm_tool_overflow_total{outcome,tool}`：externalized / degraded 两值。
+- `helix_cm_tool_overflow_chars`：最近一次外部化的全文字符数 gauge。
+- 结构化日志 `tool.overflow`：{tool, rel, chars}；写失败 `tool.overflow_failed` WARNING。
+
+### 7.7 测试 & 验收（CM-5 Exit）
+
+- **unit（≥85%）**：4 工具截断时 `full_content` = 未截断渲染、未截断时 None；read_only 工具不填（锁契约）；`overflow_rel_path`/`render_overflow_footer` 纯函数；`_OVERFLOW_MAX_CHARS` 截顶；中央钩子——写成功加 footer、写失败 degraded 不加、read_only 跳过、cancel re-raise。
+- **integration（真 graph + fake writer）**：超限 bash 输出 → ToolMessage 带 `<tool-result-overflow>` footer + fake writer 收到完整全文；无 writer → 与现状字节一致；checkpoint 里 ToolMessage 含 footer（被截内容可在后续 turn 经引用恢复）。
+- **零债 6 条**：无 TODO；本 §7 与实现一致；metrics/log 齐全；CI 8/8；`full_content=None` 路径零行为变更（现有工具测试不改即过）。
+
+### 7.8 Mini-ADR（CM-5 锁定）
+
+| ID | 决策 |
+|---|---|
+| **CM-F1** | **截断策略留工具内（领域知识），中央只管溢出处置**——非成本折中而是职责正确：per-result cap / 头体分离 / middle-trim / sandbox 内截各有语义，middleware 统一化会抹掉且部分（read_file）无法中央化（2026-06-10 用户确认） |
+| **CM-F2** | **存储基底 = workspace 文件** `.tool_results/<run_id>/<call_id>-<tool>.txt`；不入 artifact 表（防污染用户产物）、不接 ObjectStore（修正框架报告假设：artifact 内容基底本就是 workspace 文件） |
+| **CM-F3** | **首批 bash/exec_python/http/mcp**（截断即永久丢失的 4 类）；web_search（URL 即引用）、read_file/skill_view/list_dir（源可重读）豁免；read_only 双保险防 persist→read→persist 循环 |
+| **CM-F4** | **复用 CM-0 `workspace_writer_factory` + gate**（persistent_workspace ∧ supervisor_client），零新注入参数；无 sandbox 降级现状截断 |
+| **CM-F5** | best-effort 铁律：写失败不影响 run、cancel re-raise、`_OVERFLOW_MAX_CHARS=2M` 上限防巨量 payload 过线；footer 仅写成功后追加 |
+| **CM-F6** | **恢复路径 = 既有 read_file/exec_python/bash**（不新造 read 工具、不加 policy 开关、不发 audit）；`.tool_results/` 生命周期归 workspace 既有留存机制 |
+
+### 7.9 PR 切分（CM-5）
+
+1. **CM-5 PR1 — 纯核心（不接图）**：`ToolResult.full_content` 字段 + 4 工具截断时带出全文（bash/exec_python 经 `format_sandbox_outcome`、http、mcp）+ `tools/overflow.py` 纯函数（rel path / footer / 2M 上限）+ unit tests。
+2. **CM-5 PR2 — 接线（收尾 CM-5）**：builder tools_node `_externalize_tool_overflow` best-effort 钩子（复用 `workspace_writer_factory`）+ metrics/日志 + 集成测（真 graph + fake writer / 无 writer 字节一致）+ ITERATION-PLAN 回填。
+
+> 每个 PR 在本 §7 基础上局部细化；ITERATION-PLAN 增 CM-5 backlog，ship 后回填 `[x]`+PR 号。
+
+---
+
+## 8. 与既有 Stream 的衔接
 
 - **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8 pause→ingest 时机）、`update_plan`（K.8）。
 - **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）共存；recitation 放非 system 区不破 L-1。**L-4 mutation advisory 被 CM-1 收敛**（`failed_mutations`→`tool_failures`、`<mutation-advisory>`→`<recovery-advisory>`，mutation 校验作为 `mutation_not_landed` 一类保留），非并行；L-5 退款语义不动（失败工具调用照常计步）。
