@@ -27,6 +27,20 @@ from collections.abc import Sequence
 from pathlib import Path
 from uuid import UUID
 
+import httpx
+
+#: Throttle-shaped failures retry with exponential backoff (2s..60s);
+#: anything else re-raises immediately.
+_THROTTLE_MAX_RETRIES = 6
+_THROTTLE_MARKERS = ("ServiceUnavailable", "Too many requests", "throttl", "rate limit")
+
+
+def _is_throttle(exc: httpx.HTTPStatusError) -> bool:
+    if exc.response.status_code == 429:
+        return True
+    body = exc.response.text
+    return any(marker in body for marker in _THROTTLE_MARKERS)
+
 
 class KeywordEmbedder:
     """Deterministic keyword-overlap embedder (CJK bigrams + ASCII words)."""
@@ -107,9 +121,21 @@ class CachedEmbedder:
 
             async def _fetch(batch: list[int]) -> list[tuple[float, ...]]:
                 async with self._sem:
-                    return await self._backend.embed(  # type: ignore[attr-defined]
-                        [texts[i] for i in batch], tenant_id=tenant_id
-                    )
+                    for attempt in range(_THROTTLE_MAX_RETRIES + 1):
+                        try:
+                            return await self._backend.embed(  # type: ignore[attr-defined]
+                                [texts[i] for i in batch], tenant_id=tenant_id
+                            )
+                        except httpx.HTTPStatusError as exc:
+                            # DashScope reports capacity throttling as HTTP
+                            # 400 ("ServiceUnavailable ... Too many requests"
+                            # in the body — caught in a real baseline run,
+                            # 2026-06-10), not 429. Retry only throttle-shaped
+                            # errors; genuine content 400s re-raise at once.
+                            if not _is_throttle(exc) or attempt == _THROTTLE_MAX_RETRIES:
+                                raise
+                            await asyncio.sleep(min(2.0 * 2**attempt, 60.0))
+                    raise AssertionError("unreachable")  # pragma: no cover
 
             fetched = await asyncio.gather(*[_fetch(b) for b in batches])
             for batch, vectors in zip(batches, fetched, strict=True):
