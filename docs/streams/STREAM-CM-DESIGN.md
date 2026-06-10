@@ -8,7 +8,7 @@
 >
 > **零债收尾规则**（[memory:zero-tech-debt]）：每条交付收尾 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 >
-> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）+ CM-5（可恢复压缩，§7）+ CM-6（时间衰减+MMR，§8）+ CM-7（结构化摘要+写入显式操作，§9）+ CM-8（plan UI 通道+resume ingest 修复，§10）详设已锁定；CM-9 / CM-N 列入范围表，待各自 PR 时在本文件细化。
+> **本文件状态**：CM-0（地基，§2）+ CM-1（运行时 error-as-guidance，§3）+ CM-2（working memory 滑动窗口，§4）+ CM-3（压缩前 flush，§5）+ CM-4（reranker 接通，§6）+ CM-5（可恢复压缩，§7）+ CM-6（时间衰减+MMR，§8）+ CM-7（结构化摘要+写入显式操作，§9）+ CM-8（plan UI 通道+resume ingest 修复，§10）+ CM-9（effort 档位+撞限升档，§11）详设已锁定；CM-N5 列入范围表，待 PR 时在本文件细化。
 
 ---
 
@@ -27,7 +27,7 @@
 | CM-6 | B4 | 对称 RRF，无 MMR 去冗余、无时间衰减 | 时间衰减进 retrieve()（两 store）+ MMR 在 orchestrator rerank 后殿后（管线顺序修正见 §8） | P1 | CM-G1…G6（§8 详设） |
 | CM-7 | B7 | `<context-summary>` 缺"背景非指令"强语义、二次压缩链式重生成、writeback 直写同义堆积矛盾不废弃 | 摘要 preamble+三段结构+增量更新 ① + run 末 writeback 显式 ADD/UPDATE/DELETE/NOOP ② | P2 | CM-H1…H6（§9 详设） |
 | CM-8 | C8 | plan 无 UI 通道（前后端全缺）+ approval resume 不经 ingest（暂停期 PLAN.md 编辑丢失）+ approval E2E 残债；~~modify UX 缺口~~ 已被早期 H.x 实现（§10 范围修正） | plan 读写 API + RunDetail PlanPanel（非 RUNNING 可写）+ resume ingest 修复 + approval E2E | P2 | CM-I1…I6（§10 详设） |
-| CM-9 | C9 + N4 | 无 plan mode 开关、无 effort 控制、iteration budget 仅概念、无 loop 去重 | plan mode 开关 + adaptive thinking `effort` 档位 + iteration budget 真实现 + 调用指纹去重 | P2 | 待细化 |
+| CM-9 | C9 + N4 | adapter 零 thinking/effort 支持 + 撞限无升档（opus-4-8 还有 temperature 400 隐患）；~~iteration budget~~ ~~指纹去重~~ 已实现，~~per-run plan mode~~ 砍（§11 范围修正） | `ModelSpec.effort/adaptive_thinking` + 目录能力位 + 撞限双信号升档（escalated caller） | P2 | CM-J1…J6（§11 详设） |
 | CM-N5 | N5 | 检索/记忆改动无回归基线 | LongMemEval + LoCoMo 自测纳入 eval（贯穿 CM-4/6/7） | 贯穿 | 待细化 |
 
 ### 1.2 设计选择对比（"为什么不全抄"）
@@ -1088,7 +1088,119 @@ tools_node 入口（builder.py resume 分支）：
 
 ---
 
-## 11. 与既有 Stream 的衔接
+## 11. CM-9 详细设计 —— Effort 档位 + 撞限升档
+
+> **范围修正（2026-06-10 用户拍板）**：原范围 4 项中 2 项经取证**已实现**——iteration budget（`WorkflowSpec.max_iterations=12` + `MaxStepsExceededError` + L-5 refund，`builder.py:324`）与调用指纹去重（E.10.5 `LoopDetectionMiddleware`：标准化 args+sha256 指纹、窗口 3 连击、命中清 tool_calls + reminder，always-on，`helix-runtime/middleware/loop_detection.py`）。**per-run plan mode 开关砍掉**（显式设计决策：plan mode 能力本体已存在于 manifest 级 `workflow.type=plan_execute`；per-run 切换与"agent 即产品"形态相悖，且 build 缓存按 (tenant,name,version) 键控，per-run 变体改动面大收益边际——CM-J1 记录）。修正后两件事：
+> ② **effort 档位接通**——adapter 零 thinking 支持（2023-06 手工 httpx body 无 thinking/output_config 字段），`ModelSpec` 无 effort 字段；
+> **N4 撞限升档**——loop 命中 / 预算临近时现状只有 reminder / 直接失败，无"加算力重思路"的升档（用户拍板：双信号任一命中即升一档）。
+> 顺带修**正确性隐患**：opus-4-7/4-8 已移除 `temperature`（发即 400，claude-api skill 核准），helix adapter 无条件发 temperature 且目录含 `claude-opus-4-8` flagship——今天配 opus-4-8 的租户全量 400。
+
+### 11.1 关键约束（接缝核准结论，已源码核准 + claude-api skill 核准线格式）
+
+| 约束 | 事实 | file:line |
+|---|---|---|
+| **adapter 零 thinking 支持** | `AnthropicClient.messages()` 仅 model/system/messages/tools/max_tokens/temperature；HTTP body 同；`anthropic-version: 2023-06-01`（够用，effort/adaptive GA 无需 beta header） | `llm/providers/anthropic.py:71,99-147` |
+| **线格式（claude-api skill 核准，非记忆）** | `thinking: {"type":"adaptive"}`（自动 interleaved，无 beta header）；`output_config: {"effort":"low"\|"medium"\|"high"\|"max"}`；`budget_tokens` 弃用不碰；**haiku-4-5 发 effort 会 400**；**opus-4-7/4-8 发 temperature/top_p/top_k 会 400** | claude-api skill §Thinking & Effort |
+| **ModelSpec 无算力字段** | 仅 temperature/max_tokens/cache_enabled/context_window 等 | `protocol/agent_spec.py:74-152` |
+| **provider 构造链** | `_build_provider(model, ...)` 读 ModelSpec → `AnthropicProvider(model=, max_tokens=, temperature=, cache_enabled=)` | `agent_factory.py:1234-1313` |
+| **LLMCaller 协议窄** | `(messages, tools) -> AIMessage`，无 per-call 参数通道——升档不改协议（改 = 全仓 fakes/doubles sweep） | `llm/caller.py:20-37` |
+| **loop 检测命中点可带出信号** | `after_llm_call` 链在 agent_node 内 invoke，`ctx.payload` 双向——middleware 可置 payload 标志，agent_node 链后读取写 state | `builder.py`（after_llm_call 调用处）、`loop_detection.py:165-175` |
+| **预算信号本地可得** | agent_node 已有 step_count/max_steps | `builder.py:324` |
+| **模型目录单源** | `ModelEntry(name, vision, context_window)` 已有 capability 字段先例（vision）——加 effort/sampling 能力同范式 | `protocol/model_catalog.py:40-46` |
+| **prompt cache 不受档位影响** | thinking/effort 是请求参数不在 prompt 字节里（invalidation hierarchy：thinking 开关不破 tools/system 缓存）——升档零 cache 代价 | claude-api skill §Invalidation hierarchy |
+
+### 11.2 设计 ②：effort 档位接通（manifest → provider → wire）
+
+```
+ModelSpec 新字段（默认全 None/False ⇒ 零行为变更）
+  effort: "low"|"medium"|"high"|"max"|None = None     ← None 不发（API 默认）
+  adaptive_thinking: bool = False                      ← True 发 thinking:{"type":"adaptive"}
+
+model_catalog ModelEntry 加能力位（单源）
+  supports_effort:   opus-4-8 ✓ / sonnet-4-6 ✓ / haiku-4-5 ✗
+  supports_sampling: opus-4-8 ✗（4.7+ 移除）/ sonnet-4-6 ✓ / haiku-4-5 ✓
+
+factory _build_provider gate
+  effort 设置 ∧ 模型不支持 → AgentFactoryError（fail-fast 于 build，不让 400 漏到运行时）
+  模型不支持 sampling → provider 不发 temperature（修 opus-4-8 现存 400 隐患）
+  目录外模型（自定义 base_url 等）→ 不 gate，按配置原样发（兼容自托管网关）
+
+adapter
+  AnthropicClient.messages() 加 thinking/output_config 可选参；HTTP body 条件携带；
+  temperature 改条件携带（send_sampling gate）
+```
+
+### 11.3 设计 N4：撞限升档（escalated caller，零协议变更）
+
+```
+factory：base effort 可升（< max ∧ 模型支持 effort ∧ adaptive_thinking 或 effort 已配）
+  → 额外构造 escalated_llm_caller（同 model，effort 升一档：None/low→medium→high→max）
+  → build_react_graph 新可选参 escalated_llm_caller
+
+信号（用户拍板双信号，任一命中该 turn 切 escalated caller）
+  ① loop 命中：LoopDetectionMiddleware 命中时置 ctx.payload["loop_detected"]=True；
+     agent_node 在 after_llm_call 链后读取 → 写 AgentState.escalate_next=True；
+     下一 turn agent_node 消费并 reset（同一动作连发 3 次 = 模型在瞪睖，加算力重思路）
+  ② 预算临近：step_count ≥ ceil(0.75 × max_steps)（预算将尽，深思一次比多试几次便宜）
+
+agent_node
+  escalation = state.escalate_next ∨ step_count ≥ 0.75·max_steps
+  caller = escalated_llm_caller if escalation ∧ escalated_llm_caller else llm_caller
+  + helix_cm_effort_escalation_total{signal=loop/budget}
+```
+
+不变量：① 升档只影响该 turn 的 LLM 调用参数，prompt 字节不变（cache 零代价）；② 无 escalated caller（模型不支持/已是 max/未配 effort 基建）⇒ 现状；③ LLMCaller 协议零变更（fakes/doubles 零 sweep）；④ loop reminder 注入语义不变（升档是叠加不是替代）。
+
+### 11.4 数据/协议变更
+
+1. **protocol**：`ModelSpec.effort` + `ModelSpec.adaptive_thinking`（extra=forbid 下新字段，默认零行为变更）；`ModelEntry.supports_effort/supports_sampling` 能力位。
+2. **orchestrator adapter**：`AnthropicClient` Protocol + `HTTPAnthropicClient` + fake 加 thinking/output_config 可选参（[memory:protocol-sweep]：全仓扫 doubles，含 tools/eval）；`AnthropicProvider` 构造参数 + body 条件字段；temperature 条件化。
+3. **factory**：`_build_provider` 能力 gate + escalated caller 构造；`build_react_graph` 新可选参 `escalated_llm_caller`。
+4. **runtime loop_detection**：命中时 `ctx.payload["loop_detected"]=True`（一行）。
+5. **state**：`AgentState.escalate_next: NotRequired[bool]`（transient 通道，消费即 reset）。
+6. **可观测**：`helix_cm_effort_escalation_total{signal}` + 结构化日志 `llm.effort_escalated`。
+
+### 11.5 边界情况
+
+| 场景 | 处理 |
+|---|---|
+| manifest 未配 effort/adaptive_thinking | 全部不发（现状字节一致）；escalated caller 不构造，升档信号空转 |
+| haiku 配 effort | build 期 AgentFactoryError（fail-fast，不漏运行时 400） |
+| opus-4-8 配 temperature | 不发 temperature（修复现存 400；日志 INFO 提示被忽略） |
+| base effort=max | 无可升，escalated caller 不构造 |
+| fallback 链（多 ModelSpec） | 每段 provider 按各自 spec/能力独立 gate；escalated caller 只对主 caller 构造（fallback 本身已是降级路径） |
+| loop 命中 + 预算临近同 turn | 同一升档（一档封顶，不叠加） |
+| 自定义 base_url 网关模型不在目录 | 不 gate 原样发（运营自负），日志 DEBUG |
+
+### 11.6 测试 & 验收（CM-9 Exit）
+
+- **protocol**：effort/adaptive_thinking 默认与取值校验、extra-forbid；catalog 能力位。
+- **adapter unit**：body 含/不含 thinking、output_config、temperature 的全组合；fake client 记录断言。
+- **factory**：haiku+effort 报错；opus-4-8 不发 temperature；escalated caller 档位推导（None→medium、low→medium、high→max、max→不构造）。
+- **graph 集成**：loop 命中 → payload 标志 → escalate_next → 下 turn 用 escalated caller（spy caller 断言）+ reset；step 预算 75% 切换；无 escalated caller 零行为变更；metrics。
+- **零债 6 条**：无 TODO；本 §11 与实现一致；可观测齐全；CI 全绿；效果数字不声称（升档收益自测留 CM-N5 范畴）。
+
+### 11.7 Mini-ADR（CM-9 锁定）
+
+| ID | 决策 |
+|---|---|
+| **CM-J1** | **per-run plan mode 开关砍掉**（显式决策非能力缺口：能力本体在 manifest `workflow.type`；per-run 切换与 agent-即-产品形态相悖 + build 缓存键控成本，2026-06-10 用户拍板）；iteration budget 与指纹去重标已实现 |
+| **CM-J2** | **effort 走 `output_config.effort`、thinking 走 `adaptive`**（claude-api skill 核准线格式；budget_tokens 弃用不引入）；`ModelSpec.effort/adaptive_thinking` 默认 None/False 零行为变更 |
+| **CM-J3** | **模型能力位进 model_catalog 单源**（supports_effort/supports_sampling）；build 期 fail-fast gate；**opus-4-8 不发 temperature**（修现存 400 隐患）；目录外模型不 gate |
+| **CM-J4** | **升档 = escalated caller 切换**（factory 预构造高一档 caller，agent_node 按信号选用）——零 LLMCaller 协议变更、零 doubles sweep、prompt cache 零代价 |
+| **CM-J5** | **双信号**（2026-06-10 用户拍板）：loop 命中（middleware payload 标志 → `escalate_next` transient 通道）∨ step_count ≥ 75% max_steps；一档封顶不叠加 |
+| **CM-J6** | 升档只对主 caller（fallback 链已是降级路径不升档）；效果数字不声称，自测留 CM-N5 |
+
+### 11.8 PR 切分（CM-9）
+
+1. **CM-9 PR1 — effort 基建**：protocol 字段 + catalog 能力位 + adapter thinking/output_config/sampling 条件化 + factory gate + tests（含 opus-4-8 temperature 修复）。
+2. **CM-9 PR2 — 撞限升档（收尾 CM-9）**：escalated caller 构造 + loop payload 标志 + `escalate_next` 通道 + agent_node 切换 + metrics + 集成测 + ITERATION-PLAN 回填。
+
+> 每个 PR 在本 §11 基础上局部细化；ITERATION-PLAN 增 CM-9 backlog，ship 后回填 `[x]`+PR 号。
+
+---
+
+## 12. 与既有 Stream 的衔接
 
 - **Stream J**：复用 `user_workspace`（J.15 卷）、`memory_item`（J.3）、approval（J.8——pause→resume 的 ingest 时机由 CM-8 §10.3 修复补齐）、`update_plan`（K.8）。
 - **Stream L**：投影钩子在 agent_node/tools_node，与 L-1 cache prefix（system 冻结）、L-2 compressor（CM-2/3 在此之上）共存；recitation 放非 system 区不破 L-1。**L-4 mutation advisory 被 CM-1 收敛**（`failed_mutations`→`tool_failures`、`<mutation-advisory>`→`<recovery-advisory>`，mutation 校验作为 `mutation_not_landed` 一类保留），非并行；L-5 退款语义不动（失败工具调用照常计步）。

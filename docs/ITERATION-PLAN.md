@@ -1435,7 +1435,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
   - [x] **CM-8 PR2 resume ingest 修复（orchestrator）**（PR #518）：tools_node resume 分支调 workspace_ingest_node 一次（approve/modify 并入 result_dict 放最前、工具自身 plan 写仍胜；reject 早返回同样携带——人工编辑不因否决作废）+ 3 集成测（approve 回灌/reject 回灌不派发/无接线零变更）。1036 回归绿
   - [x] **CM-8 PR3 前端 PlanPanel**（PR #519）：`api/plan.ts` SDK（raw payload 对账 runs.ts 风格，204→null）+ `run_detail/PlanPanel.tsx`（只读视图：goal+步骤 ○/◐/✓ 色形字三重+完成度+空态；结构化编辑：goal/步骤行内/状态 Select/增删+草稿校验；live 时 Edit 禁用+tooltip；DI 缝 fetchPlan/savePlan 供 Storybook）+ RunDetail 接入（pollTick 复用 3s 轮询节奏）+ i18n plan_panel.* en/zh-CN 双语 + 3 Storybook（ReadView/Empty/Locked）+ 6 vitest（读/空/锁/编辑提交 payload/增删校验/取消零写）。279 前端测试 + tsc 全绿
   - [x] **CM-8 PR4 E2E（收尾）**（本次）：`e2e/run_detail.spec.ts` 5 测——approval 卡渲染+approve 决议 POST（PR 7e 残债闭）/reject 决议/plan 面板读+编辑 PUT 往返/live 锁 Edit/approval+plan 同屏 axe；mock 路由叠加 fixtures 范式 + 条件 dev-login toggle（本地 VITE_OIDC 与 CI 双兼容）。本地 5/5 过。**→ CM-8 完成（设计 + 后端 API + resume ingest 修复 + 前端 PlanPanel + E2E 五 PR）**
-- **CM-9（C9 + N4）plan mode + effort + loop 去重** P2：plan mode 开关 + adaptive thinking `effort` 档位 + iteration budget 真实现 + 调用指纹去重
+- [x] **CM-9 设计先行**（本次）：STREAM-CM-DESIGN §11 详设——范围修正（iteration budget 与调用指纹去重已实现：max_iterations+MaxStepsExceededError+L-5 refund / E.10.5 LoopDetectionMiddleware 指纹窗口 3；per-run plan mode 开关砍掉，显式决策记录 CM-J1，2026-06-10 用户拍板）+ 线格式 claude-api skill 核准（thinking adaptive + output_config.effort GA 无 beta header；budget_tokens 弃用；haiku 发 effort 400；**opus-4-7/4-8 发 temperature 400——helix 现存隐患**）+ ②effort 接通（ModelSpec.effort/adaptive_thinking 默认零行为变更 + 目录能力位 supports_effort/supports_sampling + build 期 fail-fast gate + temperature 条件化修 400）+ N4 撞限升档（escalated caller 零 LLMCaller 协议变更；双信号：loop 命中经 middleware payload→escalate_next 通道 ∨ step≥75% max_steps，一档封顶，2026-06-10 用户拍板）+ 边界 + 可观测 + 测试 + 6 条 Mini-ADR（CM-J1~J6）+ 2-PR 切分
+- **CM-9（C9 + N4）effort 档位 + 撞限升档** P2：~~plan mode 开关~~（砍）~~iteration budget~~ ~~指纹去重~~（已实现）
+  - [ ] **CM-9 PR1 effort 基建**：protocol 字段 + catalog 能力位 + adapter thinking/output_config/sampling 条件化 + factory gate + opus-4-8 temperature 修复 + tests
+  - [ ] **CM-9 PR2 撞限升档（收尾）**：escalated caller + loop payload 标志 + `escalate_next` 通道 + agent_node 切换 + `helix_cm_effort_escalation_total{signal}` + 集成测 + 回填
 - **CM-N5 评测基线** 贯穿：LongMemEval + LoCoMo 自测纳入 eval（验 CM-4/6/7）
 
 ---
