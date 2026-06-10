@@ -8,7 +8,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
-from helix_agent.common.search.rrf import rrf_fuse
+from helix_agent.common.search.decay import temporal_decay_factor
+from helix_agent.common.search.rrf import rrf_fuse_scored
 from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
 from helix_agent.persistence.knowledge.text_search import tokenize_for_search
 from helix_agent.persistence.memory.base import MemoryInjectionBlockedError, MemoryStore
@@ -54,6 +55,20 @@ def _with_drift_flag(item: MemoryItem) -> MemoryItem:
     if hash_content(item.content) == stored:
         return item
     return item.model_copy(update={"drift": True})
+
+
+def _decay_for(item: MemoryItem, *, now: datetime) -> float:
+    """Stream CM-6 (Mini-ADR CM-G2/G3) — recency weight, mirrors the SQL store.
+
+    Anchored on ``last_used_at`` (use keeps a memory fresh), falling back
+    to ``created_at``; no timestamp at all decays nothing.
+    """
+    anchor = item.last_used_at or item.created_at
+    if anchor is None:
+        return 1.0
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=UTC)
+    return temporal_decay_factor(age=now - anchor)
 
 
 def _cosine_distance(a: Sequence[float], b: Sequence[float]) -> float:
@@ -124,14 +139,31 @@ class InMemoryMemoryStore(MemoryStore):
         )
 
         # Capability Uplift Sprint #6 (Mini-ADR U-5) — hybrid path.
+        # Stream CM-6 (Mini-ADR CM-G2) — temporal decay re-ranks inside the
+        # recall window on both paths, mirroring the SQL store.
+        now = datetime.now(UTC)
         if query_text is not None and query_text.strip():
             keyword_hits = _keyword_rank(candidates, query_text=query_text)
-            fused = rrf_fuse(
+            scored = rrf_fuse_scored(
                 [vector_hits[:_HYBRID_RECALL_LIMIT], keyword_hits[:_HYBRID_RECALL_LIMIT]]
             )
-            return [_with_drift_flag(row) for row in fused[:limit]]
+            weighted = sorted(
+                ((row, score * _decay_for(row, now=now)) for row, score in scored),
+                key=lambda pair: pair[1],
+                reverse=True,
+            )
+            return [_with_drift_flag(row) for row, _score in weighted[:limit]]
 
-        return [_with_drift_flag(row) for row in vector_hits[:limit]]
+        window = vector_hits[:limit]
+        reweighted = sorted(
+            window,
+            key=lambda row: (
+                (1.0 - _cosine_distance(query_embedding, row.embedding) / 2.0)
+                * _decay_for(row, now=now)
+            ),
+            reverse=True,
+        )
+        return [_with_drift_flag(row) for row in reweighted]
 
     async def list_for_user(
         self,

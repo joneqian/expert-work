@@ -1,9 +1,11 @@
 """Stream CM-4 — reranker wired into long-term memory recall.
 
-When a reranker is injected, ``memory_recall_node`` recalls a wider
-candidate set and reorders it down to ``top_k`` before redaction; without
-one it is byte-for-byte the pre-CM-4 path. Rerank is best-effort — a failing
-reranker degrades to the RRF order rather than dropping recall.
+When a reranker is injected, ``memory_recall_node`` reorders the wide
+candidate set (full reorder — the CM-6 MMR stage makes the final ``top_k``
+cut). Rerank is best-effort — a failing reranker degrades to the RRF order
+rather than dropping recall. Candidates here carry zero embeddings so the
+MMR stage is order-preserving and these tests stay rerank-focused
+(diversity behaviour lives in test_memory_recall_mmr).
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from helix_agent.protocol import MemoryItem
-from orchestrator.graph_builder.memory import _MEMORY_RERANK_RECALL_LIMIT, make_memory_recall_node
+from orchestrator.graph_builder.memory import _MEMORY_RECALL_WIDE_LIMIT, make_memory_recall_node
 from orchestrator.llm import FakeEmbedder
 
 _DIM = 16
@@ -116,12 +118,12 @@ async def test_reranker_widens_recall_limit() -> None:
         reranker=_OrderReranker(order=[0]),  # type: ignore[arg-type]
     )
     await _run(node, tenant, user)
-    # With a reranker, recall fetches max(top_k, _MEMORY_RERANK_RECALL_LIMIT).
-    assert store.limits == [max(5, _MEMORY_RERANK_RECALL_LIMIT)]
+    # Recall always fetches max(top_k, _MEMORY_RECALL_WIDE_LIMIT) — CM-G5.
+    assert store.limits == [max(5, _MEMORY_RECALL_WIDE_LIMIT)]
 
 
 @pytest.mark.asyncio
-async def test_no_reranker_keeps_top_k_recall_and_order() -> None:
+async def test_no_reranker_keeps_store_order_and_wide_recall() -> None:
     tenant, user = uuid4(), uuid4()
     items = [_mem(f"m{i}", tenant, user) for i in range(3)]
     store = _ListStore(items=items)
@@ -131,8 +133,9 @@ async def test_no_reranker_keeps_top_k_recall_and_order() -> None:
         top_k=5,
     )
     recalled = await _run(node, tenant, user)
-    # No reranker → narrow recall (top_k) and the store's order preserved.
-    assert store.limits == [5]
+    # CM-6: recall is always wide (the stores fetch that many fusion
+    # candidates anyway); the store's order is preserved end-to-end.
+    assert store.limits == [max(5, _MEMORY_RECALL_WIDE_LIMIT)]
     assert [m.content for m in recalled] == ["m0", "m1", "m2"]
 
 

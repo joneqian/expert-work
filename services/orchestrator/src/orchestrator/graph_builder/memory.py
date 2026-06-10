@@ -30,9 +30,11 @@ from uuid import UUID, uuid4
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from helix_agent.common.search import mmr_select
 from helix_agent.common.threat_patterns import scan_for_threats
 from helix_agent.common.uplift_metrics import (
     record_memory_drift,
+    record_memory_mmr,
     record_memory_redacted,
     record_memory_rerank,
     record_memory_retrieval,
@@ -53,10 +55,12 @@ logger = logging.getLogger(__name__)
 #: A memory graph node: takes state + config, returns state updates.
 MemoryNode = Callable[[AgentState, RunnableConfig], Awaitable[dict[str, Any]]]
 
-#: Stream CM-4 — candidate depth recalled before reranking, wider than the
-#: final top-k so the cross-encoder has alternatives to reorder. Mirrors the
-#: knowledge retriever's recall limit. Only used when a reranker is wired.
-_MEMORY_RERANK_RECALL_LIMIT = 20
+#: Stream CM-4/CM-6 — candidate depth recalled before the re-ranking stages
+#: (cross-encoder rerank, then MMR diversity selection), wider than the
+#: final top-k so both have alternatives to choose from. Mirrors the
+#: knowledge retriever's recall limit; always applied since CM-6 (the
+#: stores fetch this many fusion candidates anyway — Mini-ADR CM-G5).
+_MEMORY_RECALL_WIDE_LIMIT = 20
 
 #: Per-message cap when rendering the trajectory for the extraction prompt.
 _TRAJECTORY_CHAR_CAP = 1000
@@ -213,6 +217,37 @@ async def _rerank_memories(
     return reranked[:top_k]
 
 
+def _mmr_memories(
+    *,
+    query_embedding: Sequence[float],
+    candidates: list[MemoryItem],
+    top_k: int,
+) -> list[MemoryItem]:
+    """Stream CM-6 — MMR diversity selection, the recall pipeline's last stage.
+
+    Selects the final ``top_k`` from the (rerank- or RRF-ordered) wide
+    candidate set, trading relevance against redundancy (λ=0.7). Best-effort
+    mirror of the rerank contract (Mini-ADR CM-G6): any failure — or a
+    selection thinned to nothing by dimension mismatches — degrades to the
+    input order truncated to ``top_k``, never dropping recall entirely.
+    """
+    try:
+        selected = mmr_select(
+            query_embedding=query_embedding,
+            candidates=[(m, m.embedding) for m in candidates],
+            k=top_k,
+        )
+    except Exception:
+        logger.warning("memory.mmr_failed — using input order", exc_info=True)
+        record_memory_mmr(outcome="degraded")
+        return candidates[:top_k]
+    if not selected:
+        record_memory_mmr(outcome="degraded")
+        return candidates[:top_k]
+    record_memory_mmr(outcome="applied")
+    return selected
+
+
 def make_memory_recall_node(
     *,
     memory_store: MemoryStore,
@@ -231,11 +266,11 @@ def make_memory_recall_node(
     pre-Sprint-#6 pure-pgvector path. No store wired → default hybrid
     (so test fixtures that omit the store still get the improved recall).
 
-    Stream CM-4: when ``reranker`` is wired, recall fetches a wider
-    candidate set (``max(top_k, _MEMORY_RERANK_RECALL_LIMIT)``) and the
-    cross-encoder reorders it down to ``top_k`` before redaction. ``None``
-    → no rerank, ``retrieve(limit=top_k)`` returned directly (the pre-CM-4
-    behaviour; zero change).
+    Stream CM-4/CM-6 — the recall pipeline: wide recall
+    (``max(top_k, _MEMORY_RECALL_WIDE_LIMIT)``, always — Mini-ADR CM-G5)
+    → cross-encoder rerank when ``reranker`` is wired (full reorder, no
+    cut, so the diversity stage still sees the whole pool) → MMR selects
+    the final ``top_k`` (Mini-ADR CM-G1/G4) → redaction.
     """
 
     async def memory_recall_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -252,7 +287,7 @@ def make_memory_recall_node(
         mode = await _resolve_memory_recall_mode(
             tenant_id=tenant_id, tenant_config_store=tenant_config_store
         )
-        recall_limit = max(top_k, _MEMORY_RERANK_RECALL_LIMIT) if reranker is not None else top_k
+        recall_limit = max(top_k, _MEMORY_RECALL_WIDE_LIMIT)
         try:
             vectors = await token.run_cancellable(embedder.embed([task], tenant_id=tenant_id))
             memories = await memory_store.retrieve(
@@ -263,13 +298,22 @@ def make_memory_recall_node(
                 limit=recall_limit,
             )
             if reranker is not None and memories:
+                # Full reorder (top_k = pool size) — the MMR stage below
+                # makes the final cut, so diversity can still swap in
+                # candidates the relevance cut would have dropped.
                 memories = await _rerank_memories(
                     reranker=reranker,
                     query=task,
                     candidates=memories,
-                    top_k=top_k,
+                    top_k=len(memories),
                     tenant_id=tenant_id,
                     token=token,
+                )
+            if memories:
+                memories = _mmr_memories(
+                    query_embedding=vectors[0],
+                    candidates=memories,
+                    top_k=top_k,
                 )
         except RunCancelledError:
             raise

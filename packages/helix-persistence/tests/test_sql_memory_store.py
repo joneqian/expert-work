@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from testcontainers.postgres import PostgresContainer
 
@@ -339,5 +340,43 @@ async def test_hybrid_empty_query_text_degrades_to_vector(sql_store: SqlStoreFix
             limit=2,
         )
         assert hits[0].content == "east"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_decay_prefers_recently_used_on_same_relevance(sql_store: SqlStoreFixture) -> None:
+    """Stream CM-6 (Mini-ADR CM-G2) — temporal decay re-ranks the window."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        stale = _item(tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="stale")
+        fresh = _item(tenant=tenant, user=user, embedding=_vec(1.0, 0.0), content="fresh")
+        await store.write([stale, fresh])
+        # Age the stale row 120 days back (write() stamps both rows "now").
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE memory_item SET last_used_at = now() - interval '120 days', "
+                    "created_at = now() - interval '120 days' WHERE id = :id"
+                ),
+                {"id": stale.id},
+            )
+
+        # Hybrid path: identical relevance — decay breaks the tie.
+        hits = await store.retrieve(
+            tenant_id=tenant,
+            user_id=user,
+            query_embedding=_vec(1.0, 0.0),
+            query_text="stale fresh",
+            limit=2,
+        )
+        assert [h.content for h in hits] == ["fresh", "stale"]
+
+        # Pure-vector path decays the same way.
+        hits = await store.retrieve(
+            tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0), limit=2
+        )
+        assert [h.content for h in hits] == ["fresh", "stale"]
     finally:
         await engine.dispose()

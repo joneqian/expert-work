@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -11,7 +12,8 @@ from sqlalchemy import ColumnElement, and_, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.common.search.rrf import rrf_fuse
+from helix_agent.common.search.decay import temporal_decay_factor
+from helix_agent.common.search.rrf import rrf_fuse_scored
 from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
 from helix_agent.persistence.knowledge.text_search import tokenize_for_search
 from helix_agent.persistence.memory.base import MemoryInjectionBlockedError, MemoryStore
@@ -25,6 +27,31 @@ _TS_CONFIG = "simple"
 
 #: Per-side recall depth fetched before RRF fusion — mirrors J.5.
 _HYBRID_RECALL_LIMIT = 20
+
+
+def _cosine_distance_value(a: Sequence[float], b: Sequence[float]) -> float:
+    dot = sum(float(x) * float(y) for x, y in zip(a, b, strict=False))
+    norm_a = math.sqrt(sum(float(x) * float(x) for x in a))
+    norm_b = math.sqrt(sum(float(y) * float(y) for y in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 1.0
+    return 1.0 - dot / (norm_a * norm_b)
+
+
+def _decay_for(
+    last_used_at: datetime | None, created_at: datetime | None, *, now: datetime
+) -> float:
+    """Stream CM-6 (Mini-ADR CM-G2/G3) — recency weight for one row.
+
+    Anchored on ``last_used_at`` (use keeps a memory fresh), falling back
+    to ``created_at``; no timestamp at all decays nothing.
+    """
+    anchor = last_used_at or created_at
+    if anchor is None:
+        return 1.0
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=UTC)
+    return temporal_decay_factor(age=now - anchor)
 
 
 def _row_to_item(row: MemoryItemRow) -> MemoryItem:
@@ -163,7 +190,19 @@ class SqlMemoryStore(MemoryStore):
         )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
-        return [_row_to_item(row) for row in rows]
+        # Stream CM-6 (Mini-ADR CM-G2) — temporal decay re-ranks inside the
+        # recall window: similarity (1 - distance/2 ∈ [0,1]) weighted by
+        # recency of use. The window itself is unchanged.
+        now = datetime.now(UTC)
+        weighted = sorted(
+            rows,
+            key=lambda row: (
+                (1.0 - _cosine_distance_value(query_embedding, row.embedding) / 2.0)
+                * _decay_for(row.last_used_at, row.created_at, now=now)
+            ),
+            reverse=True,
+        )
+        return [_row_to_item(row) for row in weighted]
 
     async def _hybrid_retrieve(
         self,
@@ -213,9 +252,21 @@ class SqlMemoryStore(MemoryStore):
             vector_rows = (await session.execute(vector_stmt)).scalars().all()
             keyword_rows = (await session.execute(keyword_stmt)).scalars().all()
         # RRF on the row IDs (hashable); resolve back to rows after fusion.
+        # Stream CM-6 (Mini-ADR CM-G2) — temporal decay re-weights the
+        # fused scores before the final cut so recently-used memories win
+        # same-relevance ties inside the recall window.
         by_id = {row.id: row for row in list(vector_rows) + list(keyword_rows)}
-        fused_ids = rrf_fuse([[r.id for r in vector_rows], [r.id for r in keyword_rows]])
-        return [_row_to_item(by_id[mid]) for mid in fused_ids[:limit]]
+        scored = rrf_fuse_scored([[r.id for r in vector_rows], [r.id for r in keyword_rows]])
+        now = datetime.now(UTC)
+        weighted = sorted(
+            (
+                (mid, score * _decay_for(by_id[mid].last_used_at, by_id[mid].created_at, now=now))
+                for mid, score in scored
+            ),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        return [_row_to_item(by_id[mid]) for mid, _score in weighted[:limit]]
 
     async def list_for_user(
         self,

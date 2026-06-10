@@ -86,6 +86,13 @@ _memory_rerank_total = helix_counter(
     label_names=("outcome",),  # reranked | degraded
 )
 
+# Stream CM-6 — MMR diversity selection at the end of the recall pipeline.
+_memory_mmr_total = helix_counter(
+    "helix_cm_memory_mmr_total",
+    "Long-term memory recall MMR selections, partitioned by outcome.",
+    label_names=("outcome",),  # applied | degraded
+)
+
 _anthropic_cache_anchors_total = helix_counter(
     "helix_uplift_anthropic_cache_anchors_total",
     "Total cache_control anchor markers added by upstream injectors "
@@ -325,6 +332,16 @@ def record_memory_rerank(*, outcome: str) -> None:
     absence).
     """
     _memory_rerank_total.labels(outcome=outcome).inc()
+
+
+def record_memory_mmr(*, outcome: str) -> None:
+    """Bump ``helix_cm_memory_mmr_total{outcome}`` (Stream CM-6).
+
+    ``outcome`` ∈ ``{"applied", "degraded"}`` — ``applied`` = MMR selected
+    the final top-k from the recall candidates; ``degraded`` = the
+    selection failed (or thinned to nothing) and the input order was kept.
+    """
+    _memory_mmr_total.labels(outcome=outcome).inc()
 
 
 def record_anthropic_cache_anchor() -> None:

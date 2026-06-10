@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -372,3 +373,108 @@ async def test_hybrid_preserves_drift_flag() -> None:
     )
     assert len(hybrid) == 1
     assert hybrid[0].drift is True
+
+
+# ---------------------------------------------------------------------------
+# Stream CM-6 — temporal decay (Mini-ADR CM-G2/G3)
+# ---------------------------------------------------------------------------
+
+
+def _aged_item(
+    *,
+    tenant: object,
+    user: object,
+    embedding: tuple[float, ...],
+    content: str,
+    used_days_ago: int,
+) -> MemoryItem:
+    now = datetime.now(UTC)
+    return MemoryItem(
+        id=uuid4(),
+        tenant_id=tenant,  # type: ignore[arg-type]
+        user_id=user,  # type: ignore[arg-type]
+        kind="fact",
+        content=content,
+        embedding=embedding,
+        created_at=now - timedelta(days=used_days_ago),
+        last_used_at=now - timedelta(days=used_days_ago),
+    )
+
+
+@pytest.mark.asyncio
+async def test_decay_breaks_same_relevance_tie_toward_recent() -> None:
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await store.write(
+        [
+            _aged_item(
+                tenant=tenant, user=user, embedding=(1.0, 0.0), content="stale", used_days_ago=120
+            ),
+            _aged_item(
+                tenant=tenant, user=user, embedding=(1.0, 0.0), content="fresh", used_days_ago=0
+            ),
+        ]
+    )
+    hits = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0), limit=2)
+    assert [h.content for h in hits] == ["fresh", "stale"]
+
+
+@pytest.mark.asyncio
+async def test_decay_floor_keeps_relevant_old_memory_above_irrelevant_new() -> None:
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await store.write(
+        [
+            _aged_item(
+                tenant=tenant,
+                user=user,
+                embedding=(1.0, 0.0),
+                content="old-canonical",
+                used_days_ago=365,
+            ),
+            _aged_item(
+                tenant=tenant,
+                user=user,
+                embedding=(-1.0, 0.0),
+                content="new-irrelevant",
+                used_days_ago=0,
+            ),
+        ]
+    )
+    hits = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=(1.0, 0.0), limit=2)
+    # Floor 0.5: a year-old exact match keeps ≈0.5 weighted score and
+    # beats a fresh opposite-direction memory (similarity 0) — decay
+    # re-ranks, it never buries canonical facts (CM-G3).
+    assert hits[0].content == "old-canonical"
+
+
+@pytest.mark.asyncio
+async def test_decay_applies_on_hybrid_path() -> None:
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await store.write(
+        [
+            _aged_item(
+                tenant=tenant,
+                user=user,
+                embedding=(1.0, 0.0),
+                content="likes dark roast coffee",
+                used_days_ago=120,
+            ),
+            _aged_item(
+                tenant=tenant,
+                user=user,
+                embedding=(1.0, 0.0),
+                content="likes light roast coffee",
+                used_days_ago=0,
+            ),
+        ]
+    )
+    hits = await store.retrieve(
+        tenant_id=tenant,
+        user_id=user,
+        query_embedding=(1.0, 0.0),
+        query_text="coffee roast",
+        limit=2,
+    )
+    assert hits[0].content == "likes light roast coffee"

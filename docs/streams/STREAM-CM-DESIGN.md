@@ -797,7 +797,9 @@ decay_factor(age) = 0.5 + 0.5 * 2^(-age_days / 30)        # ∈ (0.5, 1]
   180 天即衰到 1.6%，会制造"平台失忆"）
 
 memory_recall_node（orchestrator，CM-4 结构上加一段）
-  retrieve(limit=宽召回 20) → rerank（可选，CM-4 不动）
+  retrieve(limit=宽召回 20) → rerank（可选；改为全序输出 top_k=len(候选)，
+    不再截断——否则 MMR 只能在已截集合内重排，无法从宽池换入多样候选，
+    去冗形同虚设；最终截断职责移交 MMR 段，PR2 局部细化）
   → mmr_select(query_embedding, candidates, k=top_k, λ=0.7)   ← 新增，殿后
   → redact → recalled_memories
 ```
@@ -851,8 +853,8 @@ memory_recall_node（orchestrator，CM-4 结构上加一段）
 
 ### 8.8 PR 切分（CM-6）
 
-1. **CM-6 PR1 — 纯核心（helix-common，不接任何调用方）**：`rrf_fuse_scored`（`rrf_fuse` 薄包装化）+ `search/decay.py` + `search/mmr.py` + unit tests。
-2. **CM-6 PR2 — 接线（收尾 CM-6）**：两 store retrieve() 接衰减（hybrid+纯向量）+ orchestrator recall 节点 `_mmr_memories`（rerank 后、redact 前）+ 恒宽召回 + `record_memory_mmr` + persistence/orchestrator tests + ITERATION-PLAN 回填。
+1. **CM-6 PR1 — 纯核心（helix-common，不接任何调用方）**（已实现，PR #511）：`rrf_fuse_scored`（`rrf_fuse` 薄包装化）+ `search/decay.py` + `search/mmr.py` + unit tests。
+2. **CM-6 PR2 — 接线（收尾 CM-6）**（已实现）：两 store retrieve() 接衰减（hybrid+纯向量）+ orchestrator recall 节点 `_mmr_memories`（rerank 后、redact 前；rerank 改全序输出由 MMR 殿后截断，见 §8.2）+ 恒宽召回 + `record_memory_mmr` + persistence/orchestrator tests + ITERATION-PLAN 回填。**→ CM-6 完成**。
 
 > 每个 PR 在本 §8 基础上局部细化；ITERATION-PLAN 增 CM-6 backlog，ship 后回填 `[x]`+PR 号。
 
