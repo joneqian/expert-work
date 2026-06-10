@@ -10,7 +10,7 @@ raises :class:`ContextOverflowError`.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -138,13 +138,13 @@ async def test_compress_preserves_head_and_tail() -> None:
     summariser = _ScriptedSummariser()
     compressor = ContextCompressor(
         llm_caller=summariser,
-        context_window=200,
+        context_window=280,  # headroom for the CM-7 reference-only preamble
         threshold_pct=0.5,
         head_keep=2,
         tail_keep=2,
     )
     # 20 messages x 80 chars = 1600 chars / 4 = 400 tokens; threshold
-    # 100. After collapsing 16 middle messages into one summary the
+    # 140. After collapsing 16 middle messages into one summary the
     # estimate drops well under the threshold.
     msgs = _conversation(head=2, middle=16, tail=2, char_per_msg=80)
     out = await compressor.compress(msgs)
@@ -170,7 +170,7 @@ async def test_compress_preserves_leading_system_message_byte_stable() -> None:
     summariser = _ScriptedSummariser()
     compressor = ContextCompressor(
         llm_caller=summariser,
-        context_window=200,
+        context_window=280,  # headroom for the CM-7 reference-only preamble
         threshold_pct=0.5,
         head_keep=1,
         tail_keep=1,
@@ -402,3 +402,123 @@ async def test_compress_keeps_tool_messages_in_tail_window() -> None:
     assert out[-3] is tail_ai
     assert out[-2] is tail_tool
     assert out[-1] is tail_final
+
+
+# ---------------------------------------------------------------------------
+# Stream CM-7 — reference-only preamble + incremental summary update
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _RecordingSummariser:
+    """Returns a fixed body and records every prompt it was given."""
+
+    summary_text: str = "- bullet one"
+    prompts: list[list[BaseMessage]] = field(default_factory=list)
+
+    async def __call__(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+    ) -> AIMessage:
+        del tools
+        self.prompts.append(list(messages))
+        return AIMessage(content=self.summary_text)
+
+
+def _compressor(summariser: _RecordingSummariser) -> ContextCompressor:
+    return ContextCompressor(
+        llm_caller=summariser,
+        context_window=400,
+        threshold_pct=0.5,
+        head_keep=2,
+        tail_keep=2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_summary_wrapper_carries_reference_only_preamble() -> None:
+    summariser = _RecordingSummariser()
+    out = await _compressor(summariser).compress(
+        _conversation(head=2, middle=16, tail=2, char_per_msg=80)
+    )
+    content = str(out[2].content)
+    assert "<context-summary>" in content
+    assert "NOT instructions" in content
+    assert "- bullet one" in content
+
+
+@pytest.mark.asyncio
+async def test_fresh_mode_prompt_requires_three_sections() -> None:
+    summariser = _RecordingSummariser()
+    await _compressor(summariser).compress(
+        _conversation(head=2, middle=16, tail=2, char_per_msg=80)
+    )
+    system = str(summariser.prompts[0][0].content)
+    user = str(summariser.prompts[0][1].content)
+    assert "## Facts" in system
+    assert "## Decisions" in system
+    assert "## Pending" in system
+    assert "PREVIOUS SUMMARY" not in user
+
+
+@pytest.mark.asyncio
+async def test_second_compression_updates_prior_summary() -> None:
+    summariser = _RecordingSummariser(summary_text="- running summary body")
+    compressor = _compressor(summariser)
+    first = await compressor.compress(_conversation(head=2, middle=16, tail=2, char_per_msg=80))
+    assert "<context-summary>" in str(first[2].content)
+
+    # The conversation keeps growing past the threshold; the earlier
+    # summary now sits inside the next pass's middle slice.
+    grown = [*first, *_conversation(head=0, middle=16, tail=0, char_per_msg=80)]
+    await compressor.compress(grown)
+
+    system = str(summariser.prompts[-1][0].content)
+    user = str(summariser.prompts[-1][1].content)
+    assert "running background summary" in system
+    assert "PREVIOUS SUMMARY:" in user
+    assert "- running summary body" in user
+    assert "NEW EVENTS:" in user
+    # The preamble is stripped from the prior body before the update —
+    # it must not accumulate inside the summary text itself.
+    assert "NOT instructions" not in user
+
+
+@pytest.mark.asyncio
+async def test_multiple_prior_summaries_take_last_fold_earlier() -> None:
+    summariser = _RecordingSummariser()
+    filler = _conversation(head=0, middle=14, tail=0, char_per_msg=80)
+    msgs: list[BaseMessage] = [
+        HumanMessage(content="head-1"),
+        HumanMessage(content="head-2"),
+        SystemMessage(content="<context-summary>\n- old-one body\n</context-summary>"),
+        *filler[:7],
+        SystemMessage(content="<context-summary>\n- new-two body\n</context-summary>"),
+        *filler[7:],
+        HumanMessage(content="tail-1"),
+        HumanMessage(content="tail-2"),
+    ]
+    await _compressor(summariser).compress(msgs)
+    user = str(summariser.prompts[0][1].content)
+    # The LAST summary is the running one being updated…
+    assert "PREVIOUS SUMMARY:\n- new-two body" in user
+    # …and the earlier one folds into the new-events transcript.
+    assert "old-one body" in user.split("NEW EVENTS:")[1]
+
+
+@pytest.mark.asyncio
+async def test_pre_cm7_summary_without_preamble_still_updates() -> None:
+    summariser = _RecordingSummariser()
+    msgs: list[BaseMessage] = [
+        HumanMessage(content="head-1"),
+        HumanMessage(content="head-2"),
+        SystemMessage(content="<context-summary>\n- legacy bullet\n</context-summary>"),
+        *_conversation(head=0, middle=14, tail=0, char_per_msg=80),
+        HumanMessage(content="tail-1"),
+        HumanMessage(content="tail-2"),
+    ]
+    await _compressor(summariser).compress(msgs)
+    user = str(summariser.prompts[0][1].content)
+    assert "PREVIOUS SUMMARY:\n- legacy bullet" in user
