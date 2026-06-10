@@ -62,12 +62,18 @@ run_retrieval() {
 }
 
 run_endtoend() {
-    for benchmark in locomo longmemeval_s; do
-        log "endtoend: $benchmark (resumable — rerun this script to continue)"
-        $RUN --benchmark "$benchmark" --tier endtoend \
-            --embedder real --concurrency "$CONCURRENCY" \
-            --results "eval-out/${benchmark}_endtoend.jsonl" --update-baseline
-    done
+    log "endtoend: locomo full (resumable — rerun this script to continue)"
+    $RUN --benchmark locomo --tier endtoend \
+        --embedder real --concurrency "$CONCURRENCY" \
+        --results eval-out/locomo_endtoend.jsonl --update-baseline
+    # S re-scoped to a 150-question stratified sample (2026-06-10 user
+    # decision): ingestion LLM cost dominates; locomo full covers the
+    # cross-vendor comparison. Full-S stays available for milestone runs
+    # (drop --sample).
+    log "endtoend: longmemeval_s sample=150 (resumable)"
+    $RUN --benchmark longmemeval_s --tier endtoend --sample 150 \
+        --embedder real --concurrency "$CONCURRENCY" \
+        --results eval-out/longmemeval_s_endtoend.jsonl --update-baseline
 }
 
 case "$MODE" in

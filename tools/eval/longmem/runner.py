@@ -8,6 +8,7 @@ network path.
 from __future__ import annotations
 
 import json
+import random
 from collections import defaultdict
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -150,6 +151,35 @@ def update_baseline(
 def limit_instances(instances: list[Any], limit: int) -> list[Any]:
     """Head-cap for smoke runs; ``0`` = the full set (the CM-K2 default)."""
     return instances if limit <= 0 else instances[:limit]
+
+
+def stratified_sample(instances: list[Any], n: int, *, seed: int = 42) -> list[Any]:
+    """Deterministic stratified sample by ``question_type``.
+
+    The S end-to-end full run was re-scoped to a 150-question sample
+    (2026-06-10 user decision — ingestion LLM cost dominates); a head
+    cap would skew the type mix, so sample proportionally per type with
+    a fixed seed (reproducible across runs — re-runs resume the same
+    questions). ``n <= 0`` or ``n >= len`` returns the full set.
+    """
+    if n <= 0 or n >= len(instances):
+        return instances
+    by_type: dict[str, list[Any]] = {}
+    for instance in instances:
+        by_type.setdefault(instance.question_type, []).append(instance)
+    rng = random.Random(seed)  # noqa: S311 — sampling reproducibility, not crypto
+    picked: list[Any] = []
+    # Largest-remainder allocation keeps every type represented.
+    quotas = {
+        qtype: max(1, round(n * len(rows) / len(instances))) for qtype, rows in by_type.items()
+    }
+    for qtype, rows in sorted(by_type.items()):
+        shuffled = rows[:]
+        rng.shuffle(shuffled)
+        picked.extend(shuffled[: quotas[qtype]])
+    # Quota rounding can land a few off target — trim deterministically.
+    rng.shuffle(picked)
+    return picked[:n]
 
 
 def with_top_k(config: AblationConfig, top_k: int | None) -> AblationConfig:
