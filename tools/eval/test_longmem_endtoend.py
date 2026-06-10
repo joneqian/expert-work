@@ -239,3 +239,52 @@ def test_update_baseline_merges_sections(tmp_path: Path) -> None:
     assert data["endtoend"]["fixture_longmemeval"]["accuracy"] == 1.0
     assert data["meta"]["fingerprints"]["retrieval/fixture_longmemeval"]["embedder"] == "fake"
     assert "updated_at" in data["meta"]
+
+
+def test_stratified_sample_deterministic_and_covers_types() -> None:
+    """S end-to-end re-scoped to a 150-question stratified sample
+    (2026-06-10) — type coverage and reproducibility are the contract."""
+    from longmem.runner import stratified_sample
+
+    # QAResult doubles as a cheap carrier with a question_type field.
+    population = []
+    for i in range(60):
+        population.append(
+            QAResult(
+                question_id=f"a{i}",
+                question_type="alpha",
+                hypothesis="",
+                correct=True,
+                n_memories=0,
+            )
+        )
+    for i in range(30):
+        population.append(
+            QAResult(
+                question_id=f"b{i}", question_type="beta", hypothesis="", correct=True, n_memories=0
+            )
+        )
+    for i in range(10):
+        population.append(
+            QAResult(
+                question_id=f"c{i}",
+                question_type="gamma",
+                hypothesis="",
+                correct=True,
+                n_memories=0,
+            )
+        )
+    sample = stratified_sample(population, 20)
+    assert len(sample) == 20
+    types = {r.question_type for r in sample}
+    assert types == {"alpha", "beta", "gamma"}  # every type represented
+    # Proportions roughly preserved (60/30/10 -> ~12/6/2).
+    from collections import Counter
+
+    counts = Counter(r.question_type for r in sample)
+    assert counts["alpha"] > counts["beta"] > counts["gamma"] >= 1
+    # Deterministic across calls.
+    again = stratified_sample(population, 20)
+    assert [r.question_id for r in again] == [r.question_id for r in sample]
+    # n >= len passes through untouched.
+    assert stratified_sample(population, 200) is population

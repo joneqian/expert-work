@@ -42,6 +42,7 @@ from longmem.runner import (
     load_results,
     merge_results,
     resolve_arms,
+    stratified_sample,
     summarise,
     update_baseline,
     with_top_k,
@@ -193,6 +194,7 @@ async def _run_endtoend(args: argparse.Namespace) -> None:
 
     instances, family, dataset_sha = _load_benchmark(args.benchmark, include_abstention=True)
     instances = limit_instances(instances, args.limit)
+    instances = stratified_sample(list(instances), args.sample)
     embedder = _build_embedder(args)
 
     results_path = Path(args.results)
@@ -241,6 +243,7 @@ async def _run_endtoend(args: argparse.Namespace) -> None:
                 "dataset_sha256": dataset_sha,
                 "commit": _git_commit(),
                 "limit": args.limit,
+                "sample": args.sample,
             },
         )
         print(f"baseline updated: {args.baseline_out}")
@@ -253,6 +256,12 @@ def main() -> None:
     parser.add_argument("--arms", default="default", help="retrieval arms: comma list or 'all'")
     parser.add_argument("--embedder", default="fake", choices=("fake", "real"))
     parser.add_argument("--limit", type=int, default=0, help="instance cap; 0 = full set")
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=0,
+        help="endtoend: deterministic stratified sample by question type; 0 = full set",
+    )
     parser.add_argument("--top-k", type=int, default=None, help="override arm top_k")
     parser.add_argument("--results", default="eval-out/longmem_results.jsonl")
     parser.add_argument("--no-reconcile", action="store_true")
