@@ -218,6 +218,14 @@ _cm_tool_overflow_chars = helix_gauge(
     "helix_cm_tool_overflow_chars",
     "Characters of the most recent externalized tool-result overflow (Stream CM-5).",
 )
+#: Stream CM-9 — limit-hit effort escalations by signal (loop = the
+#: loop-detection middleware tripped last turn; budget = step_count
+#: crossed 75% of max_steps).
+_cm_effort_escalation_total = helix_counter(
+    "helix_cm_effort_escalation_total",
+    "Turns served by the escalated higher-effort caller (Stream CM-9).",
+    ("signal",),
+)
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
 #: dumping multi-MB tracebacks into messages. Per-tool truncation
@@ -240,6 +248,7 @@ def build_react_graph(
     memory_writeback_node: MemoryNode | None = None,
     # Stream CM-0 PR2b — run-start file→DB ingest of a human-edited PLAN.md.
     workspace_ingest_node: MemoryNode | None = None,
+    escalated_llm_caller: LLMCaller | None = None,
     before_llm_chain: MiddlewareChain | None = None,
     after_llm_chain: MiddlewareChain | None = None,
     before_tool_dispatch_chain: MiddlewareChain | None = None,
@@ -417,13 +426,28 @@ def build_react_graph(
             if isinstance(hit, AIMessage):
                 cache_hit_response = hit
 
+        # Stream CM-9 (Mini-ADR CM-J5) — limit-hit escalation: serve this
+        # turn from the higher-effort caller when the loop-detection
+        # middleware tripped last turn, or the step budget is nearly
+        # spent (one deliberate deep think beats more shallow retries).
+        # Request params only — the prompt bytes are unchanged, so the
+        # provider prompt cache is unaffected.
+        loop_signal = bool(state.get("escalate_next"))
+        budget_signal = max_steps > 0 and step_count * 4 >= max_steps * 3
+        active_caller = llm_caller
+        if escalated_llm_caller is not None and (loop_signal or budget_signal):
+            active_caller = escalated_llm_caller
+            signal = "loop" if loop_signal else "budget"
+            _cm_effort_escalation_total.labels(signal=signal).inc()
+            logger.info("llm.effort_escalated signal=%s step=%d/%d", signal, step_count, max_steps)
+
         # ``messages`` is now the exact prompt — the E.13 cache key input.
         if cache_hit_response is not None:
             response: AIMessage = cache_hit_response
         else:
             # Wrap the LLM call so a cancel mid-call interrupts the
             # in-flight await rather than waiting it out (E.15).
-            response = await token.run_cancellable(llm_caller(messages=messages, tools=tools))
+            response = await token.run_cancellable(active_caller(messages=messages, tools=tools))
 
         if after_llm_chain is not None:
             after_messages: list[BaseMessage] = [*messages, response]
@@ -451,6 +475,10 @@ def build_react_graph(
                 "step_count": step_count + 1,
                 "step_count_refund_pending": 0,
                 "tool_failures": [],
+                # CM-9 — arm escalation for the next step when the loop
+                # middleware tripped on THIS response; otherwise reset
+                # the consumed signal.
+                "escalate_next": bool(ctx.payload.get("loop_detected")),
             }
 
         # Stream CM-1 — persist the advisory in conversation history
@@ -463,6 +491,7 @@ def build_react_graph(
             "step_count": step_count + 1,
             "step_count_refund_pending": 0,
             "tool_failures": [],
+            "escalate_next": False,  # CM-9 — no middleware chain, reset
         }
 
     async def tools_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:

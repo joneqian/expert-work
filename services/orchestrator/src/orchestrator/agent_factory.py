@@ -416,6 +416,23 @@ async def build_agent(
         # (LLM spend must go through platform-metered credentials).
         ignore_api_key_ref=True,
     )
+    # Stream CM-9 (Mini-ADR CM-J4) — pre-build the one-step-up effort
+    # caller for limit-hit escalation. Only the primary caller escalates
+    # (the fallback chain is itself a degradation path, CM-J6).
+    escalated_llm_caller: LLMCaller | None = None
+    escalated_spec = _escalated_model(spec.spec.model)
+    if escalated_spec is not None:
+        escalated_llm_caller = await build_llm_router(
+            escalated_spec,
+            secret_store=secret_store,
+            around_llm_chain=chains.around_llm_call,
+            image_resolver=env.image_resolver,
+            stream_deadline_s=(
+                float(spec.spec.stream_deadline_s) if spec.spec.stream_deadline_s > 0 else None
+            ),
+            provider_key_resolver=provider_key_resolver,
+            ignore_api_key_ref=True,
+        )
     # Stream J.6 Path B — build the VL router when a ``vision:`` block is
     # declared; ``ask_image`` will route through it. Stream L.L3 — the VL
     # router shares the agent's wall-clock cap so a hung VL provider doesn't
@@ -608,6 +625,7 @@ async def build_agent(
         )
     graph = build_react_graph(
         llm_caller=routers.default,
+        escalated_llm_caller=escalated_llm_caller,  # CM-9 — None → no escalation
         tool_registry=registry,
         planner_node=planner_node,
         reflect_node=reflect_node,
@@ -1019,6 +1037,38 @@ def detect_subagent_cycle(
 #: ``mcp_allowlist_provider``). Raising surfaces as ``AgentFactoryError`` —
 #: the control-plane closure translates ``CredentialsResolverError``.
 ProviderKeyResolver = Callable[[str], Awaitable[str]]
+
+
+#: Stream CM-9 (Mini-ADR CM-J4/J5) — one-step effort ladder for the
+#: escalated caller. ``max`` has nowhere to go; ``None`` (API default,
+#: documented as high-equivalent) steps to a deliberate explicit bump.
+_EFFORT_LADDER: dict[str | None, str | None] = {
+    None: "medium",
+    "low": "medium",
+    "medium": "high",
+    "high": "max",
+    "max": None,
+}
+
+
+def _escalated_model(model: ModelSpec) -> ModelSpec | None:
+    """The one-step-up ModelSpec for the CM-9 escalated caller.
+
+    ``None`` when escalation does not apply: compute controls untouched
+    in the manifest (conservative default-off), the model's catalog
+    entry lacks effort support, or the base level is already ``max``.
+    """
+    if model.provider != "anthropic":
+        return None
+    if model.effort is None and not model.adaptive_thinking:
+        return None
+    entry = catalog_entry(model.provider, model.name)
+    if entry is None or not entry.effort:
+        return None
+    next_level = _EFFORT_LADDER.get(model.effort)
+    if next_level is None:
+        return None
+    return model.model_copy(update={"effort": next_level})
 
 
 async def build_llm_router(

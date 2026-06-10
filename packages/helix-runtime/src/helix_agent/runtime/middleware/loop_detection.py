@@ -173,6 +173,9 @@ class LoopDetectionMiddleware:
         # Same-id ``cleaned`` → replace in-place via add_messages; the
         # reminder has a fresh auto-id → append.
         ctx.payload["messages"] = [cleaned, reminder]
+        # Stream CM-9 (Mini-ADR CM-J5) — flag the trip for the caller so
+        # the next agent step can escalate to the higher-effort caller.
+        ctx.payload["loop_detected"] = True
 
     def _recent_ai_with_tool_calls(
         self,

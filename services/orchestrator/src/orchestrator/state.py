@@ -160,6 +160,11 @@ class AgentState(TypedDict):
     reflections: NotRequired[Annotated[list[Reflection], add]]
     recalled_memories: NotRequired[list[MemoryItem]]
     step_count_refund_pending: NotRequired[int]
+    #: Stream CM-9 (Mini-ADR CM-J5) — transient escalation signal. Set by
+    #: agent_node when the loop-detection middleware flags a repeat
+    #: (``ctx.payload["loop_detected"]``); the NEXT agent step consumes it
+    #: (one turn on the escalated, higher-effort caller) and resets it.
+    escalate_next: NotRequired[bool]
     tool_failures: NotRequired[list[ClassifiedToolError]]
     subagent_invocations: NotRequired[Annotated[list[SubAgentInvocation], add]]
     pending_approval: NotRequired[ApprovalRequest | None]

@@ -24,6 +24,7 @@ def test_required_keys_present() -> None:
         "reflections",
         "recalled_memories",
         "step_count_refund_pending",
+        "escalate_next",
         "tool_failures",
         "subagent_invocations",
         "pending_approval",

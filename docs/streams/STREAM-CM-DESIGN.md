@@ -1193,8 +1193,8 @@ agent_node
 
 ### 11.8 PR 切分（CM-9）
 
-1. **CM-9 PR1 — effort 基建**：protocol 字段 + catalog 能力位 + adapter thinking/output_config/sampling 条件化 + factory gate + tests（含 opus-4-8 temperature 修复）。
-2. **CM-9 PR2 — 撞限升档（收尾 CM-9）**：escalated caller 构造 + loop payload 标志 + `escalate_next` 通道 + agent_node 切换 + metrics + 集成测 + ITERATION-PLAN 回填。
+1. **CM-9 PR1 — effort 基建**（已实现，PR #522）：protocol 字段 + catalog 能力位 + adapter thinking/output_config/sampling 条件化 + factory gate + tests（含 opus-4-8 temperature 修复）。
+2. **CM-9 PR2 — 撞限升档（收尾 CM-9）**（已实现）：escalated caller 构造 + loop payload 标志 + `escalate_next` 通道 + agent_node 切换 + metrics + 集成测 + ITERATION-PLAN 回填。实现细化：loop 命中即收尾当前 run（middleware 清 tool_calls），`escalate_next` 落 checkpoint 由**下一 run 首步**消费——跨 run 升档语义（人再推一把时 agent 加力重试）。**→ CM-9 完成**。
 
 > 每个 PR 在本 §11 基础上局部细化；ITERATION-PLAN 增 CM-9 backlog，ship 后回填 `[x]`+PR 号。
 
