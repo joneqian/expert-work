@@ -1079,10 +1079,10 @@ tools_node 入口（builder.py resume 分支）：
 
 ### 10.9 PR 切分（CM-8）
 
-1. **CM-8 PR1 — 后端 plan API**：control-plane GET/PUT `/v1/sessions/{thread_id}/plan` + 409 状态机 + 注入扫描 + `PLAN_EDITED` audit（双 Literal）+ tests。
-2. **CM-8 PR2 — resume ingest 修复（orchestrator）**：tools_node resume 分支调 ingest + tests。
-3. **CM-8 PR3 — 前端 PlanPanel**：SDK + 只读视图 + 结构化编辑 + i18n 双语 + Storybook + vitest。
-4. **CM-8 PR4 — E2E（收尾 CM-8）**：approval 全流程 + plan 面板 Playwright + ITERATION-PLAN 回填。
+1. **CM-8 PR1 — 后端 plan API**（已实现，PR #517）：control-plane GET/PUT `/v1/sessions/{thread_id}/plan` + 409 状态机 + 注入扫描 + `PLAN_EDITED` audit（实情为单源 StrEnum，无双 Literal 镜像；resource_type 复用 `session`）+ tests。
+2. **CM-8 PR2 — resume ingest 修复（orchestrator）**（已实现，PR #518）：tools_node resume 分支调 ingest + tests。
+3. **CM-8 PR3 — 前端 PlanPanel**（已实现，PR #519）：SDK + 只读视图 + 结构化编辑 + i18n 双语 + Storybook + vitest。
+4. **CM-8 PR4 — E2E（收尾 CM-8）**（已实现）：approval 全流程 + plan 面板 Playwright + ITERATION-PLAN 回填。**→ CM-8 完成**。
 
 > 每个 PR 在本 §10 基础上局部细化；ITERATION-PLAN 增 CM-8 backlog，ship 后回填 `[x]`+PR 号。
 

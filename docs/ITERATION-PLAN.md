@@ -1433,8 +1433,8 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - **CM-8（C8）plan UI 通道 + resume ingest 修复** P2：~~modify UX~~ 已实现；plan 读写 API + PlanPanel + ingest 漏洞 + approval E2E
   - [x] **CM-8 PR1 后端 plan API**（PR #517）：`api/plan.py` GET（AgentRuntime 缓存 build + aget_state，轮询零重建）/PUT（仅非 PENDING/RUNNING 409 + strict 注入扫描 422 + aupdate_state——有历史 as_node="agent"、fresh thread "__start__" 防空 messages 条件边炸）+ `AuditAction.PLAN_EDITED`（单源 StrEnum，实情优于设计的双 Literal 假设；resource_type 复用 session）+ 7 API 测试。1503 回归绿
   - [x] **CM-8 PR2 resume ingest 修复（orchestrator）**（PR #518）：tools_node resume 分支调 workspace_ingest_node 一次（approve/modify 并入 result_dict 放最前、工具自身 plan 写仍胜；reject 早返回同样携带——人工编辑不因否决作废）+ 3 集成测（approve 回灌/reject 回灌不派发/无接线零变更）。1036 回归绿
-  - [x] **CM-8 PR3 前端 PlanPanel**（本次）：`api/plan.ts` SDK（raw payload 对账 runs.ts 风格，204→null）+ `run_detail/PlanPanel.tsx`（只读视图：goal+步骤 ○/◐/✓ 色形字三重+完成度+空态；结构化编辑：goal/步骤行内/状态 Select/增删+草稿校验；live 时 Edit 禁用+tooltip；DI 缝 fetchPlan/savePlan 供 Storybook）+ RunDetail 接入（pollTick 复用 3s 轮询节奏）+ i18n plan_panel.* en/zh-CN 双语 + 3 Storybook（ReadView/Empty/Locked）+ 6 vitest（读/空/锁/编辑提交 payload/增删校验/取消零写）。279 前端测试 + tsc 全绿
-  - [ ] **CM-8 PR4 E2E（收尾）**：approval 全流程（PR 7e 残债）+ plan 面板 Playwright + 回填
+  - [x] **CM-8 PR3 前端 PlanPanel**（PR #519）：`api/plan.ts` SDK（raw payload 对账 runs.ts 风格，204→null）+ `run_detail/PlanPanel.tsx`（只读视图：goal+步骤 ○/◐/✓ 色形字三重+完成度+空态；结构化编辑：goal/步骤行内/状态 Select/增删+草稿校验；live 时 Edit 禁用+tooltip；DI 缝 fetchPlan/savePlan 供 Storybook）+ RunDetail 接入（pollTick 复用 3s 轮询节奏）+ i18n plan_panel.* en/zh-CN 双语 + 3 Storybook（ReadView/Empty/Locked）+ 6 vitest（读/空/锁/编辑提交 payload/增删校验/取消零写）。279 前端测试 + tsc 全绿
+  - [x] **CM-8 PR4 E2E（收尾）**（本次）：`e2e/run_detail.spec.ts` 5 测——approval 卡渲染+approve 决议 POST（PR 7e 残债闭）/reject 决议/plan 面板读+编辑 PUT 往返/live 锁 Edit/approval+plan 同屏 axe；mock 路由叠加 fixtures 范式 + 条件 dev-login toggle（本地 VITE_OIDC 与 CI 双兼容）。本地 5/5 过。**→ CM-8 完成（设计 + 后端 API + resume ingest 修复 + 前端 PlanPanel + E2E 五 PR）**
 - **CM-9（C9 + N4）plan mode + effort + loop 去重** P2：plan mode 开关 + adaptive thinking `effort` 档位 + iteration budget 真实现 + 调用指纹去重
 - **CM-N5 评测基线** 贯穿：LongMemEval + LoCoMo 自测纳入 eval（验 CM-4/6/7）
 
