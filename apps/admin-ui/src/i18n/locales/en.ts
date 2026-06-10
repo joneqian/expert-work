@@ -185,6 +185,23 @@ export interface TranslationKeys {
     json_parse_error: string;
     json_must_be_object: string;
   };
+  plan_panel: {
+    title: string;
+    progress: string;
+    edit: string;
+    cancel: string;
+    save: string;
+    saved: string;
+    locked_while_running: string;
+    goal_placeholder: string;
+    step_placeholder: string;
+    add_step: string;
+    remove_step: string;
+    no_plan: string;
+    status_pending: string;
+    status_in_progress: string;
+    status_completed: string;
+  };
   run_detail: {
     failed_to_load: string;
     thread_label: string;
@@ -1289,6 +1306,23 @@ const en: TranslationKeys = {
     rejected: "Rejected — run cancelled.",
     json_parse_error: "Invalid JSON",
     json_must_be_object: "Top-level value must be a JSON object",
+  },
+  plan_panel: {
+    title: "Plan",
+    progress: "{{done}}/{{total}} completed",
+    edit: "Edit plan",
+    cancel: "Cancel",
+    save: "Save plan",
+    saved: "Plan saved — the workspace PLAN.md syncs on the next turn.",
+    locked_while_running: "The agent owns the plan while a run is live.",
+    goal_placeholder: "Goal — one sentence",
+    step_placeholder: "Step description",
+    add_step: "Add step",
+    remove_step: "Remove step",
+    no_plan: "The agent has not made a plan yet.",
+    status_pending: "pending",
+    status_in_progress: "in progress",
+    status_completed: "completed",
   },
   run_detail: {
     failed_to_load: "Failed to load run",
