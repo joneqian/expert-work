@@ -26,6 +26,7 @@ from orchestrator import (
     build_llm_router,
     build_step_routers,
 )
+from orchestrator.agent_factory import _build_provider
 from orchestrator.llm import FakeEmbedder, RateLimitedProvider
 from orchestrator.tools import KnowledgeRetriever, RecordingTavilyClient
 
@@ -798,3 +799,43 @@ async def test_build_llm_router_default_honors_api_key_ref_internal_plumbing() -
     assert isinstance(inner, AnthropicProvider)
     # The manifest-pinned anthropic ref resolved through the store, unchanged.
     assert inner.client.api_key == "sk-ant-test"  # type: ignore[union-attr]
+
+
+# ---------------------------------------------------------------------------
+# Stream CM-9 — compute-control capability gates in _build_provider
+# ---------------------------------------------------------------------------
+
+
+def _anthropic_model(**overrides: Any) -> ModelSpec:
+    return ModelSpec.model_validate(
+        {"provider": "anthropic", "name": "claude-sonnet-4-6", **overrides}
+    )
+
+
+def test_effort_on_unsupported_model_fails_fast() -> None:
+    # haiku-4-5 rejects output_config.effort with a 400 — the factory
+    # refuses at build instead (Mini-ADR CM-J3).
+    model = _anthropic_model(name="claude-haiku-4-5", effort="high")
+    with pytest.raises(AgentFactoryError, match=r"does not support output_config\.effort"):
+        _build_provider(model, "k")
+
+
+def test_opus_4_8_drops_temperature() -> None:
+    # Opus 4.7+ removed sampling params — sending temperature is a 400.
+    provider = _build_provider(_anthropic_model(name="claude-opus-4-8"), "k")
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.temperature is None
+
+
+def test_supported_model_passes_effort_and_thinking_through() -> None:
+    provider = _build_provider(_anthropic_model(effort="medium", adaptive_thinking=True), "k")
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.effort == "medium"
+    assert provider.adaptive_thinking is True
+    assert provider.temperature is not None  # sonnet-4-6 keeps sampling
+
+
+def test_off_catalog_model_is_not_gated() -> None:
+    provider = _build_provider(_anthropic_model(name="claude-custom-gw", effort="max"), "k")
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.effort == "max"

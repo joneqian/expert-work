@@ -150,6 +150,20 @@ class ModelSpec(BaseModel):
     #: L-2). Default 200_000 matches Claude 3.5 / Sonnet 4 long-context;
     #: agents pinned to smaller-window models should override here.
     context_window: int = Field(default=200_000, gt=0)
+    # Stream CM-9 (Mini-ADR CM-J2) — compute-control knobs. ``effort``
+    # maps to Anthropic ``output_config.effort`` (None → omitted, API
+    # default applies); ``adaptive_thinking`` sends
+    # ``thinking: {"type": "adaptive"}`` (4.6+ — interleaved thinking is
+    # implied, no beta header). Both default off so existing manifests
+    # are byte-for-byte unchanged. The factory rejects ``effort`` on
+    # models whose catalog entry lacks the capability (fail-fast at
+    # build instead of a runtime 400).
+    effort: Literal["low", "medium", "high", "max"] | None = Field(
+        default=None, description="Anthropic output_config.effort level"
+    )
+    adaptive_thinking: bool = Field(
+        default=False, description="send thinking: {type: adaptive} (Anthropic 4.6+)"
+    )
 
 
 # ---------------------------------------------------------------------------

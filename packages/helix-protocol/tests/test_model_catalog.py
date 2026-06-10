@@ -3,6 +3,7 @@
 from helix_agent.protocol import (
     MODEL_CATALOG,
     ModelEntry,
+    catalog_entry,
     models_for_provider,
 )
 from helix_agent.protocol.provider_catalog import PROVIDER_CATALOG
@@ -48,3 +49,22 @@ def test_required_embedding_and_rerank_models_present() -> None:
 def test_model_entry_has_rerank_flag_defaulting_false() -> None:
     e = ModelEntry(name="x")
     assert e.rerank is False
+
+
+# ---------------------------------------------------------------------------
+# CM-9 — compute-control capability bits + catalog_entry lookup
+# ---------------------------------------------------------------------------
+
+
+def test_anthropic_capability_bits() -> None:
+    opus = catalog_entry("anthropic", "claude-opus-4-8")
+    sonnet = catalog_entry("anthropic", "claude-sonnet-4-6")
+    haiku = catalog_entry("anthropic", "claude-haiku-4-5")
+    assert opus is not None and opus.effort and not opus.sampling
+    assert sonnet is not None and sonnet.effort and sonnet.sampling
+    assert haiku is not None and not haiku.effort and haiku.sampling
+
+
+def test_catalog_entry_off_catalog_returns_none() -> None:
+    assert catalog_entry("anthropic", "claude-imaginary-9") is None
+    assert catalog_entry("nonexistent-provider", "x") is None

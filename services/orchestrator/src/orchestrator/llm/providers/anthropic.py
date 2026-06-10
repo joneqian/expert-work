@@ -105,6 +105,8 @@ class AnthropicClient(Protocol):
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
         temperature: float | None = None,
+        thinking: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         """POST ``/v1/messages`` and return the parsed JSON body."""
 
@@ -133,6 +135,8 @@ class HTTPAnthropicClient:
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
         temperature: float | None = None,
+        thinking: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {
             "model": model,
@@ -145,6 +149,11 @@ class HTTPAnthropicClient:
             body["tools"] = tools
         if temperature is not None:
             body["temperature"] = temperature
+        # Stream CM-9 — compute-control fields (both GA, no beta header).
+        if thinking is not None:
+            body["thinking"] = thinking
+        if output_config is not None:
+            body["output_config"] = output_config
 
         try:
             async with httpx.AsyncClient(
@@ -203,6 +212,8 @@ class RecordingAnthropicClient:
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
         temperature: float | None = None,
+        thinking: dict[str, Any] | None = None,
+        output_config: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         self.calls.append(
             {
@@ -212,6 +223,8 @@ class RecordingAnthropicClient:
                 "tools": tools,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "thinking": thinking,
+                "output_config": output_config,
             }
         )
         if self.raise_with is not None:
@@ -248,6 +261,12 @@ class AnthropicProvider:
     #: stable. The agent factory wires this from
     #: :attr:`ModelSpec.cache_enabled`.
     cache_enabled: bool = True
+    #: Stream CM-9 (Mini-ADR CM-J2) — ``output_config.effort`` level.
+    #: ``None`` omits the field (API default). The factory gates this on
+    #: the model catalog's ``effort`` capability bit.
+    effort: str | None = None
+    #: Stream CM-9 — send ``thinking: {"type": "adaptive"}`` (4.6+).
+    adaptive_thinking: bool = False
 
     async def complete(
         self,
@@ -284,6 +303,8 @@ class AnthropicProvider:
             tools=tool_payload,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
+            thinking={"type": "adaptive"} if self.adaptive_thinking else None,
+            output_config={"effort": self.effort} if self.effort is not None else None,
         )
 
         return _from_anthropic_response(body)

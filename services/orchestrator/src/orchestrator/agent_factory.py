@@ -58,6 +58,7 @@ from helix_agent.protocol import (
     parse_agent_ref,
     parse_skill_ref,
 )
+from helix_agent.protocol.model_catalog import catalog_entry
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
@@ -1249,14 +1250,35 @@ def _build_provider(
     # trailing "unsupported" raise reachable to mypy.
     provider: str = model.provider
     if provider == "anthropic":
+        # Stream CM-9 (Mini-ADR CM-J3) — gate compute-control params on
+        # the catalog capability bits. Off-catalog models (custom
+        # gateways) are not gated and pass through as configured.
+        entry = catalog_entry(provider, model.name)
+        if model.effort is not None and entry is not None and not entry.effort:
+            raise AgentFactoryError(
+                f"model {model.name!r} does not support output_config.effort; "
+                "remove model.effort from the manifest"
+            )
+        temperature: float | None = model.temperature
+        if entry is not None and not entry.sampling:
+            # Opus 4.7+ removed sampling params — sending one is a 400.
+            if temperature is not None:
+                logger.info(
+                    "agent_factory.sampling_unsupported model=%s — temperature omitted",
+                    model.name,
+                )
+            temperature = None
         return AnthropicProvider(
             client=HTTPAnthropicClient(api_key=api_key),
             model=model.name,
             max_tokens=model.max_tokens,
-            temperature=model.temperature,
+            temperature=temperature,
             image_resolver=image_resolver,
             # Stream L.L1 — propagate the manifest's per-model cache flag.
             cache_enabled=model.cache_enabled,
+            # Stream CM-9 — compute-control knobs.
+            effort=model.effort,
+            adaptive_thinking=model.adaptive_thinking,
         )
     if provider == "openai":
         return OpenAIProvider(

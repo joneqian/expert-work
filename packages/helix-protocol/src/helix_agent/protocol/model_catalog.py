@@ -32,6 +32,13 @@ class ModelEntry(BaseModel):
     rerank: bool = False
     context_window: int | None = None
     deprecated: bool = False
+    # Stream CM-9 (Mini-ADR CM-J3) — compute-control capability bits.
+    # ``effort`` marks models accepting ``output_config.effort`` (Anthropic
+    # 4.6+ Opus/Sonnet; Haiku 4.5 rejects it with a 400). ``sampling``
+    # marks models still accepting ``temperature``/``top_p`` — Anthropic
+    # removed sampling params from Opus 4.7+ (sending one is a 400).
+    effort: bool = False
+    sampling: bool = True
 
 
 #: Provider → its models. Verify names/capabilities against official docs when
@@ -40,8 +47,21 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # Anthropic — docs.anthropic.com/en/docs/about-claude/models/overview (2026-06)
     # IDs use dateless format since 4.6 generation. claude-opus-4-8 is flagship.
     "anthropic": (
-        ModelEntry(name="claude-opus-4-8", vision=True, context_window=200_000),
-        ModelEntry(name="claude-sonnet-4-6", vision=True, context_window=200_000),
+        # CM-9: opus-4-8 dropped sampling params (4.7+ removal); haiku has
+        # no effort support — verified against the Anthropic docs 2026-06.
+        ModelEntry(
+            name="claude-opus-4-8",
+            vision=True,
+            context_window=200_000,
+            effort=True,
+            sampling=False,
+        ),
+        ModelEntry(
+            name="claude-sonnet-4-6",
+            vision=True,
+            context_window=200_000,
+            effort=True,
+        ),
         ModelEntry(name="claude-haiku-4-5", vision=True, context_window=200_000),
     ),
     # OpenAI — platform.openai.com/docs/models (2026-06)
@@ -126,6 +146,20 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
         ),
     ),
 }
+
+
+def catalog_entry(provider: str, name: str) -> ModelEntry | None:
+    """Exact-name catalog lookup — ``None`` for off-catalog models.
+
+    Stream CM-9 — the agent factory gates compute-control parameters
+    (``effort`` / sampling) on these capability bits; an off-catalog
+    model (custom gateway / self-hosted) is not gated.
+    """
+    entries: tuple[ModelEntry, ...] = MODEL_CATALOG.get(provider, ())  # type: ignore[call-overload]
+    for entry in entries:
+        if entry.name == name:
+            return entry
+    return None
 
 
 def models_for_provider(provider: str) -> tuple[ModelEntry, ...]:
