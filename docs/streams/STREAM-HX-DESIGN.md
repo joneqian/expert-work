@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：HX-1（真 tokenizer + 长上下文阈值参数化，§2）+ HX-2（用户反馈→学习闭环，§3）详设已锁定。HX-3/4 与 Wave 2 各条开工时追加章节。
+> **本文件状态**：HX-1（真 tokenizer + 长上下文阈值参数化，§2）+ HX-2（用户反馈→学习闭环，§3）+ HX-3（run 级瞬态故障自动重试，§4）详设已锁定。HX-4 与 Wave 2 各条开工时追加章节。
 
 ---
 
@@ -18,7 +18,7 @@
 |----|---------|-----|------|------|
 | **HX-1** | ③ 上下文工程 | `len//4` 估算漂移（CJK 严重低估）+ `context_window` 不随目录解析 + E.3 遗留 8K 默认裁剪 | TokenEstimator 协议 + tiktoken 默认实现 + 目录解析 + 遗留默认值退役 | §2（本文） |
 | HX-2 | ⑦ 学习闭环 | 👎 无学习消费者（断点精确化见 §3.1） | rollback gate 接 👎 + 记忆 review 标记 + feedback consumer worker | §3（本文） |
-| HX-3 | ⑧ 容错 | run 级瞬态故障无自动重试 | 瞬态分类 ∧ 零 irreversible 调用 → 重试 1 次 | 开工时追加 |
+| HX-3 | ⑧ 容错 | run 级瞬态故障无自动重试 | 瞬态分类 ∧ replay-safe 守卫 → 重试 1 次 | §4（本文） |
 | HX-4 | ⑨ 可观测 | 工具延迟/成功率/approval 队列指标缺 | 直方图 + counter + gauge + 日志字段统一 | 开工时追加 |
 | HX-12/13 | ② 工具面 | 工具披露 2.0（应用层 + 厂商原生档） | 见 ITERATION-PLAN Wave 2 定义 | 开工时追加 |
 
@@ -214,3 +214,77 @@ def default_estimator() -> TokenEstimator:   # 进程级单例（vocab 只加载
 | PR0（本设计） | §3 + ITERATION-PLAN tick | 纯 docs，CI |
 | PR1 | skill 侧：store (thread_id, outcome) + FeedbackStore 批量 👎 + rollback gate join demote | §3.5-PR1；全链回归 |
 | PR2（收尾） | memory 侧 + worker：两迁移 + review_flagged_at 通路 + consolidator 第二候选源 + FeedbackConsumerWorker + 接线 + 指标 | §3.5-PR2；全链回归；零债 6 条 |
+
+---
+
+## 4. HX-3 — run 级瞬态故障自动重试
+
+### 4.1 现状取证（2026-06-11，main@3a59b22）
+
+| 事实 | 证据 | 判定 |
+|------|------|:----:|
+| run 级零重试：`run_agent` worker 单次 `graph.astream`，任何逃逸异常 → `set_status(ERROR, error=str(exc))` + trajectory outcome=failed | `sse.py:219-495`（catch-all :458-481） | 真 gap |
+| **工具异常不逃逸 tools_node**（Mini-ADR E-12）：含沙盒 acquire 失败在内全部变 error ToolMessage 喂回 LLM 自愈（+ CM-1 `tool_failures` advisory） | `builder.py:23-25`、`_dispatch_tool:1004-1062` | **取证修正 ①**：评估"沙盒 acquire 失败"不是 run 级故障类——该层已自愈，HX-3 不接管 |
+| run 级瞬态故障的主类 = LLM fallback 链耗尽：`AllProvidersExhaustedError`（仅由瞬态族 `LLMError`——5xx/ratelimit/network——耗尽触发；4xx `LLMClientError` 不进 fallback 直接 raise） | `llm/router.py:130-145,172-210` | 类型可判定，零文本嗅探 |
+| 工具级已有 capability-bounded retryable 规则（CM-B5）：`transient` ∧ (`read_only` ∨ `idempotent`) 才可重放 | `error_classifier.py:203-214`、`ToolSpec.side_effect/idempotent`（`registry.py:54-141`） | 规则可上移 run 级复用 |
+| 续跑先例（Mini-ADR J-24）：approval resume = 同 thread checkpoint + `graph_input=None` 再 invoke；checkpoint 按 super-step 提交，失败 step 不落盘 | `api/runs.py:605-789`、`sse.py:304`（`graph.astream(graph_input, effective_config, ...)`） | 重试机制直接复用 |
+| `RunCancelledError` / `MaxStepsExceededError` 各有独立终态路径（INTERRUPTED / ERROR+max_steps trajectory） | `sse.py:394,423` | 语义性终态，不属瞬态 |
+
+**取证修正 ②——"run 零 irreversible 工具调用"守卫精确化**：评估给的守卫（全 run 无 irreversible 调用）既过保守又不精确。checkpoint 按 super-step 提交意味着：**已提交历史在续跑时绝不重放**（committed ToolMessage 不会再执行）；唯一重放窗口 = 失败那个未提交 super-step。重放内容由 checkpoint **尾部状态**完全决定——尾部是 dangling `AIMessage.tool_calls`（agent step 已提交、tools step 失败）→ 续跑重放**恰好这一批**工具调用；尾部无 dangling → 重放的是 agent_node 纯 LLM 调用，零副作用。守卫因此收敛为"尾部 dangling 批次全部 read_only ∨ idempotent"（CM-B5 同款规则），而非全 run 标记。又因取证修正 ①（工具异常不逃逸），实际逃逸到 run 级的瞬态故障几乎总是 agent_node 起源（LLM 链耗尽）——此时尾部无 dangling，重放天然安全；守卫主要防御的是"agent step 提交后、tools step 执行中进程级故障"的少数路径。
+
+### 4.2 设计
+
+**① 瞬态分类（注册表式，类型判定）**
+
+- `_TRANSIENT_RUN_ERRORS: tuple[type[BaseException], ...] = (AllProvidersExhaustedError,)`——初始集只收 LLM 链耗尽（其构造保证瞬态族）。未知 `Exception` 默认**永久**：重试一个确定性 bug 没有收益预期，只有双倍成本。
+- 显式不进集：`LLMClientError`（4xx 永久）、`RunCancelledError` / `MaxStepsExceededError`（语义性终态）、DB/checkpointer 故障（连接池已有一层韧性，需求出现再加 needle——注册表扩展即可，分类器不用动）。
+
+**② replay-safety 守卫（checkpoint 尾部判定）**
+
+- 重试前 `graph.aget_state(effective_config)` 取已提交尾部：最后一条消息是带 `tool_calls` 的 `AIMessage` 且无对应 `ToolMessage` → dangling 批次逐个 resolve `ToolSpec`：全部 `resolved_side_effect == "read_only"` ∨ `idempotent` 才放行；任一 irreversible/reversible-非幂等、或 spec 缺失（unknown name 防御）→ 不重试。
+- 尾部无 dangling → 直接放行（重放 = 纯 LLM 调用）。
+- `aget_state` 本身失败 → 不重试（守卫失效时保守；与 pause 检查的 graceful-degradation 同款姿态但方向相反——那边 fail-open 是多花 token，这边放行的代价可能是重复副作用，必须 fail-closed）。
+
+**③ 重试机制（in-worker，同 run_id）**
+
+- `run_agent` 的 stream 调用包进 `for attempt in range(2)` 循环：首轮 `graph_input` 原值；捕获瞬态 ∧ 守卫过 ∧ `attempt == 0` → emit `retry` SSE 事件（`{attempt, error_class, backoff_s}`，照常 `_persist_event` 进 run_event——历史真相公理）→ backoff 等待（用 `abort_event` 感知的 wait，abort 期间立即退出走 INTERRUPTED）→ 第二轮 `graph.astream(None, effective_config, ...)`（J-24 续跑语义）。
+- 二轮再失败 / 守卫不过 / 非瞬态 → 走既有 ERROR 路径，行为逐字节不变。
+- status 全程 RUNNING（重试不是新 run：SSE 流连续、RunManager 零改动、trajectory 单记录）；trajectory `metadata["retried"] = 1`（重试过的 run 可在轨迹集里筛）。
+- `step_count` 不重置——MaxSteps 语义不被重试绕开（checkpoint 里的计数自然延续）。
+
+**④ 配置（公理 ③ 防御解析）**
+
+- env：`HELIX_RUN_TRANSIENT_RETRY`（默认 on）、`HELIX_RUN_RETRY_BACKOFF_S`（默认 10，clamp [1, 120]，解析失败回默认不 raise）。重试次数固定 1（常量不开配置面——多次重试的退避策略面是另一个需求）。
+
+### 4.3 边界（不做）
+
+- 工具级故障零接触——E-12 自愈分层不动，HX-3 只接管逃逸到 run 级的故障。
+- 不做多次重试 / 指数退避策略面（1 次重试覆盖"独立瞬态故障"假设；连续两次失败大概率不是瞬态）。
+- 不做 TIMEOUT 重试（run 超时是 deliberate bound，重试 = 双倍超时预算，语义错）。
+- 不做跨进程重试（worker 进程死亡的 run 恢复是 durable-resume 范畴，K.K10 已有 TTFT 计量缝，需求成熟单独立项）。
+- DB/checkpointer 瞬态故障不进初始集（见 §4.2-①；注册表一行可扩）。
+
+### 4.4 可观测
+
+- `helix_orchestrator_run_retry_total{outcome="recovered"|"failed_again"}` counter（recovered = 重试后到达 SUCCESS/PAUSED；failed_again = 二轮仍失败）。守卫拒绝不发 counter（拒绝即走既有 ERROR 路径，error 字段已可观测）——但 log 一条 `run_retry.guard_rejected`（含 dangling 批次工具名）。
+- `retry` SSE 事件持久化进 run_event（replay 端点可见，审计链完整）。
+
+### 4.5 测试
+
+- 分类器矩阵：`AllProvidersExhaustedError` → 瞬态；`LLMClientError` / 裸 `Exception` / `MaxStepsExceededError` → 永久。
+- 守卫矩阵：尾部 HumanMessage/ToolMessage → 放行；dangling 批次全 read_only → 放行；含 irreversible → 拒；含 reversible 非幂等 → 拒；spec 缺失 → 拒；`aget_state` 抛错 → 拒。
+- run_agent 端到端（fake graph）：一次瞬态失败后成功 → 终态 SUCCESS + `retry` 事件持久化 + counter recovered + trajectory metadata.retried；两次失败 → ERROR + failed_again + error 字段为二轮异常；非瞬态 → 零重试零事件（现状逐字节）；env off → 零重试；backoff 期间 abort → INTERRUPTED 不进二轮。
+
+### 4.6 Mini-ADR
+
+- **HX-C1 瞬态集 = 类型注册表，初始仅 `AllProvidersExhaustedError`**：类型判定零文本嗅探（router 已在 4xx/5xx 分流处做过判定，HX-3 不重复造分类器）；未知异常默认永久。扩展 = 注册表加一行。
+- **HX-C2 replay-safety 守卫 = checkpoint 尾部判定**：committed 历史不重放 → 全 run irreversible 标记既过保守（committed 的 irreversible 无重放风险）又非必要；唯一风险窗口 = 尾部 dangling 批次，CM-B5 capability-bounded 规则上移复用。守卫路径 fail-closed（与 fail-open 公理不冲突：公理上限是"多花 token"，重复副作用越界）。
+- **HX-C3 in-worker 同 run_id 重试**：非新 run——SSE 流连续、trajectory 单记录、RunManager/审计零改动；`retry` 事件进 event log 保历史真相。与 J-24 resume（新 run_id）语义区分：resume 是用户动作产生的新执行段，retry 是同一执行段的故障恢复。
+- **HX-C4 取证修正入档**：评估 ⑧ 的两个具体案例修正——沙盒 acquire 失败已被 E-12 在工具层自愈（非 run 级故障）；"run 零 irreversible 调用"守卫精确化为尾部 dangling 判定。
+
+### 4.7 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §4 + ITERATION-PLAN tick | 纯 docs，CI |
+| PR1（收尾） | 瞬态注册表 + 尾部守卫 + run_agent 重试循环 + retry 事件 + counter + env 配置 + 测试 | §4.5；全链回归；零债 6 条 |
