@@ -522,3 +522,38 @@ async def test_pre_cm7_summary_without_preamble_still_updates() -> None:
     await _compressor(summariser).compress(msgs)
     user = str(summariser.prompts[0][1].content)
     assert "PREVIOUS SUMMARY:\n- legacy bullet" in user
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-1 — injected estimator replaces the chars//4 heuristic
+# ---------------------------------------------------------------------------
+
+
+class _OnePerCharEstimator:
+    def count(self, text: str) -> int:
+        return len(text)
+
+
+def test_estimate_tokens_uses_injected_estimator() -> None:
+    msgs = [HumanMessage(content="abcdefgh")]
+    assert estimate_tokens(msgs) == 2  # legacy: 8 chars // 4
+    assert estimate_tokens(msgs, estimator=_OnePerCharEstimator()) == 8
+
+
+def test_should_compress_respects_injected_estimator() -> None:
+    """With a 1-token-per-char estimator the same prompt crosses the
+    threshold the chars//4 heuristic stays 4x under."""
+    legacy = ContextCompressor(
+        llm_caller=_ScriptedSummariser(),
+        context_window=100,
+        threshold_pct=0.5,
+    )
+    injected = ContextCompressor(
+        llm_caller=_ScriptedSummariser(),
+        context_window=100,
+        threshold_pct=0.5,
+        estimator=_OnePerCharEstimator(),
+    )
+    msgs = [HumanMessage(content="x" * 60)]  # 15 legacy tokens vs 60 injected
+    assert legacy.should_compress(msgs) is False
+    assert injected.should_compress(msgs) is True

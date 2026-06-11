@@ -956,3 +956,32 @@ def test_compat_untouched_manifest_has_no_payload() -> None:
     provider = _build_provider(_vendor_model("qwen", "qwen3.7-max"), "k")
     assert isinstance(provider, OpenAIProvider)
     assert provider.thinking_payload is None
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-1 — the factory resolves one shared token estimator per build
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_agent_resolves_shared_token_estimator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The build path asks :func:`default_estimator` for the shared
+    tiktoken-backed estimator (threaded into the context gates + the
+    drift counter); the patch proves the seam is exercised without
+    loading a real BPE vocabulary in unit tests."""
+    from helix_agent.runtime.tokens import CharTokenEstimator
+
+    calls: list[int] = []
+    fake = CharTokenEstimator()
+
+    def _fake_default() -> CharTokenEstimator:
+        calls.append(1)
+        return fake
+
+    monkeypatch.setattr("orchestrator.agent_factory.default_estimator", _fake_default)
+    async with make_checkpointer("memory") as cp:
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert isinstance(built, BuiltAgent)
+    assert calls == [1]

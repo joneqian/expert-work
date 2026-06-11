@@ -42,6 +42,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from helix_agent.runtime.tokens import TokenEstimator
 from orchestrator.context.compressor import estimate_tokens
 
 
@@ -137,6 +138,11 @@ class WorkingWindow:
     threshold_pct: float = 0.7
     max_recent_turns: int = 20
     keep_first_turn: bool = True
+    #: Stream HX-1 (Mini-ADR HX-A1) — injected token estimator. ``None``
+    #: keeps the legacy ``chars // 4`` heuristic; the factory injects the
+    #: shared tiktoken-backed estimator (same instance as the compressor
+    #: so the two gates keep one estimation basis — CM-C6).
+    estimator: TokenEstimator | None = None
 
     @property
     def threshold_tokens(self) -> int:
@@ -146,8 +152,8 @@ class WorkingWindow:
 
     def should_trim(self, messages: Sequence[BaseMessage]) -> bool:
         """Cheap preflight — ``True`` when the estimate meets/exceeds the
-        threshold. Reuses the compressor's char-based estimator (CM-C6)."""
-        return estimate_tokens(messages) >= self.threshold_tokens
+        threshold. Reuses the compressor's estimator basis (CM-C6)."""
+        return estimate_tokens(messages, estimator=self.estimator) >= self.threshold_tokens
 
     def apply(self, messages: Sequence[BaseMessage]) -> TrimResult:
         """Trim to the recent window when over threshold, else no-op.

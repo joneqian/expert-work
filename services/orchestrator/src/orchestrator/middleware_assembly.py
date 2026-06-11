@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from langchain_core.messages import BaseMessage
+
 from helix_agent.persistence.token_usage_store import TokenUsageStore
 from helix_agent.protocol import AgentSpec
 from helix_agent.runtime.llm.cache import LLMResponseCache
@@ -38,6 +40,7 @@ from helix_agent.runtime.middleware import (
     SandboxAuditMiddleware,
     TokenUsageMiddleware,
 )
+from helix_agent.runtime.tokens import TokenEstimator, flatten_message
 
 #: Mirror of :class:`DynamicContextMiddleware`'s constructor defaults —
 #: used when the manifest's ``policies.context_compression`` block omits
@@ -84,12 +87,18 @@ def build_middleware_chains(
     spec: AgentSpec,
     *,
     env: MiddlewareEnv | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> MiddlewareChains:
-    """Build the anchor chains for ``spec`` (Mini-ADR E-15)."""
+    """Build the anchor chains for ``spec`` (Mini-ADR E-15).
+
+    ``estimator`` (Stream HX-1, Mini-ADR HX-A1) threads the shared token
+    estimator into the dynamic-context trim and the token-usage drift
+    metric; ``None`` keeps the legacy ``chars // 4`` heuristic.
+    """
     env = env or MiddlewareEnv()
     model = spec.spec.model
     middlewares: list[Middleware] = [
-        _dynamic_context(spec),
+        _dynamic_context(spec, estimator=estimator),
         LLMErrorHandlingMiddleware(breaker_registry=env.breaker_registry or BreakerRegistry()),
         LoopDetectionMiddleware(),
         SandboxAuditMiddleware(),
@@ -129,6 +138,7 @@ def build_middleware_chains(
                 agent_version=spec.metadata.version,
                 model=model.name,
                 provider=model.provider,
+                estimator=estimator,
             )
         )
 
@@ -140,18 +150,38 @@ def build_middleware_chains(
     )
 
 
-def _dynamic_context(spec: AgentSpec) -> DynamicContextMiddleware:
+def _dynamic_context(
+    spec: AgentSpec,
+    *,
+    estimator: TokenEstimator | None = None,
+) -> DynamicContextMiddleware:
     """Build the context middleware, reading ``max_turns`` / ``max_tokens``
     from the manifest's ``policies.context_compression`` block.
 
     Stream L.L2 — ``context_compression`` is now the
     :class:`ContextCompressionPolicy` model, not a permissive dict; the
     legacy ``max_turns`` / ``max_tokens`` keys preserved as typed
-    fields so existing manifests keep loading."""
+    fields so existing manifests keep loading.
+
+    Stream HX-1 — ``estimator`` (when injected) replaces the middleware's
+    default ``chars // 4`` per-message heuristic through its existing
+    ``token_estimator`` seam, so all three context gates share one
+    estimation basis."""
     cc = spec.spec.policies.context_compression
+    if estimator is None:
+        return DynamicContextMiddleware(
+            max_turns=cc.max_turns,
+            max_tokens=cc.max_tokens,
+        )
+    shared = estimator
+
+    def _per_message(msg: BaseMessage) -> int:
+        return shared.count(flatten_message(msg))
+
     return DynamicContextMiddleware(
         max_turns=cc.max_turns,
         max_tokens=cc.max_tokens,
+        token_estimator=_per_message,
     )
 
 
