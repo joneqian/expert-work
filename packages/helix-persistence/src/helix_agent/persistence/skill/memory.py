@@ -33,7 +33,6 @@ from helix_agent.protocol import (
     SkillStatus,
     SkillVersion,
     SkillVisibility,
-    TrajectoryOutcome,
 )
 from helix_agent.protocol.tenant_config import TenantPlan
 
@@ -412,14 +411,14 @@ class InMemorySkillStore(SkillStore):
         self._run_usage.append(usage)
         return usage
 
-    async def skill_run_outcomes(
+    async def skill_run_usage_window(
         self,
         *,
         skill_id: UUID,
         skill_version: int,
         tenant_id: UUID | None,
         since: datetime,
-    ) -> list[TrajectoryOutcome]:
+    ) -> list[SkillRunUsage]:
         rows = [
             r
             for r in self._run_usage
@@ -429,7 +428,7 @@ class InMemorySkillStore(SkillStore):
             and r.created_at >= since
         ]
         rows.sort(key=lambda r: r.created_at)
-        return [r.outcome for r in rows]
+        return rows
 
     # ----------------------------------- prediction-falsify ledger (SE-11)
 

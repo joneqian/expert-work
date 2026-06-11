@@ -21,6 +21,8 @@ run-end emission both live in SE-7d-3b (real path, integration-validated).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -32,8 +34,14 @@ from control_plane.skill_rollback import (
     decide_rollback,
     should_rollback,
 )
+from helix_agent.persistence.feedback_store import FeedbackStore
+from helix_agent.persistence.rls import (
+    bypass_rls_var,
+    current_tenant_id_var,
+    current_user_id_var,
+)
 from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
+from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, TrajectoryOutcome
 from helix_agent.protocol.skill import SkillStatus
 from helix_agent.runtime.audit.logger import AuditLogger
 
@@ -44,6 +52,27 @@ def _scope_key(tenant_id: UUID, agent_name: str) -> str:
     return f"{tenant_id}:{agent_name}"
 
 
+@contextmanager
+def _tenant_scope(tenant_id: UUID) -> Iterator[None]:
+    """Tenant-scoped RLS context for the feedback join (Stream HX-2).
+
+    The SE-7d-3b monitor runs the whole sweep under an owner RLS bypass,
+    but ``feedback`` is a FORCE-RLS table — an owner bypass reads zero
+    rows *silently*. The monitor only rolls back tenant skills
+    (``_resolve_target`` guards ``tenant_id`` non-None), so a plain
+    per-tenant scope is always available here.
+    """
+    tenant = current_tenant_id_var.set(tenant_id)
+    bypass = bypass_rls_var.set(False)
+    user = current_user_id_var.set(None)
+    try:
+        yield
+    finally:
+        current_user_id_var.reset(user)
+        bypass_rls_var.reset(bypass)
+        current_tenant_id_var.reset(tenant)
+
+
 @dataclass
 class RollbackGate:
     """Applies the rollback judge + side effects to one live skill version."""
@@ -52,6 +81,10 @@ class RollbackGate:
     breaker: CircuitBreaker
     audit_logger: AuditLogger | None = None
     config: RollbackConfig | None = None
+    #: Stream HX-2 (Mini-ADR HX-B2) — when wired, user 👎 on a window
+    #: thread demotes that sample to ``failed`` before scoring. ``None``
+    #: keeps the machine-outcome-only behaviour.
+    feedback_store: FeedbackStore | None = None
 
     async def maybe_rollback(
         self,
@@ -65,19 +98,35 @@ class RollbackGate:
         now: datetime,
     ) -> RollbackDecision:
         """Decide + (if ROLLBACK) archive the version, feed the breaker, audit."""
-        outcomes = await self.skill_store.skill_run_outcomes(
+        usages = await self.skill_store.skill_run_usage_window(
             skill_id=skill_id,
             skill_version=skill_version,
             tenant_id=tenant_id,
             since=since,
         )
+        outcomes: list[TrajectoryOutcome] = [u.outcome for u in usages]
+        disapproved = 0
+        if self.feedback_store is not None and usages:
+            with _tenant_scope(tenant_id):
+                down = await self.feedback_store.down_rated_threads(
+                    thread_ids=[u.thread_id for u in usages]
+                )
+            if down:
+                # A user 👎 overrides the machine verdict for that sample —
+                # the run "succeeded" but failed the user. ``cancelled``
+                # stays cancelled (still excluded by the judge).
+                outcomes = [
+                    "failed" if u.thread_id in down and u.outcome == "success" else u.outcome
+                    for u in usages
+                ]
+                disapproved = sum(1 for u in usages if u.thread_id in down)
         decision = decide_rollback(outcomes, promote_baseline=promote_baseline, config=self.config)
         if should_rollback(decision):
             await self.skill_store.set_status(
                 skill_id=skill_id, tenant_id=tenant_id, status=SkillStatus.ARCHIVED
             )
             self.breaker.record(_scope_key(tenant_id, agent_name), ok=False, now=now)
-            await self._audit(tenant_id, skill_id, skill_version, agent_name, decision)
+            await self._audit(tenant_id, skill_id, skill_version, agent_name, decision, disapproved)
         return decision
 
     async def _audit(
@@ -87,6 +136,7 @@ class RollbackGate:
         skill_version: int,
         agent_name: str,
         decision: RollbackDecision,
+        disapproved: int,
     ) -> None:
         if self.audit_logger is None:
             return
@@ -107,6 +157,7 @@ class RollbackGate:
                     "drop": round(decision.drop, 4),
                     "p_value": round(decision.p_value, 6),
                     "n_cases": decision.n_cases,
+                    "disapproved_n": disapproved,
                     "reason": decision.reason,
                 },
             )

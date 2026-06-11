@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import abc
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import UUID
@@ -54,6 +55,18 @@ class FeedbackStore(abc.ABC):
         check (test #64).
         """
 
+    @abc.abstractmethod
+    async def down_rated_threads(self, *, thread_ids: Sequence[UUID]) -> set[UUID]:
+        """The subset of ``thread_ids`` that carry at least one 👎 row.
+
+        Stream HX-2 (Mini-ADR HX-B2) — the rollback gate joins user
+        disapproval into the per-version outcome window by thread.
+        Tenant scoping is the caller's RLS context, same as
+        :meth:`list_for_thread` (the ``feedback`` table is FORCE-RLS, so
+        the caller must hold a tenant scope — an owner bypass reads zero
+        rows silently).
+        """
+
 
 class InMemoryFeedbackStore(FeedbackStore):
     """In-memory :class:`FeedbackStore` — dev / unit tests."""
@@ -70,6 +83,10 @@ class InMemoryFeedbackStore(FeedbackStore):
     async def list_for_thread(self, *, thread_id: UUID) -> list[FeedbackRecord]:
         rows = [r for r in self._rows if r.thread_id == thread_id]
         return sorted(rows, key=lambda r: r.id or 0, reverse=True)
+
+    async def down_rated_threads(self, *, thread_ids: Sequence[UUID]) -> set[UUID]:
+        wanted = set(thread_ids)
+        return {r.thread_id for r in self._rows if r.thread_id in wanted and r.rating == "down"}
 
 
 class DbFeedbackStore(FeedbackStore):
@@ -111,6 +128,18 @@ class DbFeedbackStore(FeedbackStore):
                 .order_by(FeedbackRow.id.desc())
             )
             return [_row_to_record(row) for row in result.scalars().all()]
+
+    async def down_rated_threads(self, *, thread_ids: Sequence[UUID]) -> set[UUID]:
+        if not thread_ids:
+            return set()
+        async with self._sf() as session:
+            result = await session.execute(
+                select(FeedbackRow.thread_id)
+                .where(FeedbackRow.thread_id.in_(list(thread_ids)))
+                .where(FeedbackRow.rating == "down")
+                .distinct()
+            )
+            return set(result.scalars().all())
 
 
 def _row_to_record(row: FeedbackRow) -> FeedbackRecord:

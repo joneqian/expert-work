@@ -294,6 +294,38 @@ async def test_feedback_tenants_cannot_see_each_other(
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_feedback_down_rated_threads_rls_scoped(
+    feedback_rls_store: tuple[DbFeedbackStore, AsyncEngine],
+) -> None:
+    """Stream HX-2 (Mini-ADR HX-B2) — the rollback gate's 👎 join is
+    tenant-scoped by RLS: tenant B's 👎 on the same thread id never
+    bleeds into tenant A's window, and an up-only thread never matches."""
+    store, engine = feedback_rls_store
+    try:
+        tenant_a, tenant_b = uuid4(), uuid4()
+        shared, up_only = uuid4(), uuid4()
+
+        current_tenant_id_var.set(tenant_a)
+        await store.insert(
+            FeedbackRecord(tenant_id=tenant_a, thread_id=up_only, rating="up", actor_id="user-a")
+        )
+
+        current_tenant_id_var.set(tenant_b)
+        await store.insert(
+            FeedbackRecord(tenant_id=tenant_b, thread_id=shared, rating="down", actor_id="user-b")
+        )
+
+        current_tenant_id_var.set(tenant_a)
+        assert await store.down_rated_threads(thread_ids=[shared, up_only]) == set()
+
+        current_tenant_id_var.set(tenant_b)
+        assert await store.down_rated_threads(thread_ids=[shared, up_only]) == {shared}
+        assert await store.down_rated_threads(thread_ids=[]) == set()
+    finally:
+        await engine.dispose()
+
+
 # ---------------------------------------------------------------------------
 # tenant_user table — Stream J.14
 # ---------------------------------------------------------------------------

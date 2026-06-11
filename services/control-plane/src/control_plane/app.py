@@ -1072,6 +1072,9 @@ def create_app(
                         skill_store=resolved_skill_store,
                         breaker=skill_evo_breaker,
                         audit_logger=resolved_audit,
+                        # Stream HX-2 (Mini-ADR HX-B2) — user 👎 joins the
+                        # rollback window as a demoted sample.
+                        feedback_store=resolved_feedback,
                     ),
                     config=RollbackMonitorConfig(
                         window=timedelta(days=resolved_settings.skill_rollback_window_days)

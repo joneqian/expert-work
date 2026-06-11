@@ -41,7 +41,6 @@ from helix_agent.protocol import (
     SkillStatus,
     SkillVersion,
     SkillVisibility,
-    TrajectoryOutcome,
 )
 from helix_agent.protocol.skill import SkillSupportingFile
 from helix_agent.protocol.tenant_config import TenantPlan
@@ -576,14 +575,14 @@ class SqlSkillStore(SkillStore):
             await session.refresh(row)
             return _run_usage_row_to_dto(row)
 
-    async def skill_run_outcomes(
+    async def skill_run_usage_window(
         self,
         *,
         skill_id: UUID,
         skill_version: int,
         tenant_id: UUID | None,
         since: datetime,
-    ) -> list[TrajectoryOutcome]:
+    ) -> list[SkillRunUsage]:
         async with self._sf() as session:
             stmt = (
                 select(SkillRunUsageRow)
@@ -600,7 +599,7 @@ class SqlSkillStore(SkillStore):
                 else stmt.where(SkillRunUsageRow.tenant_id.is_(None))
             )
             rows = (await session.execute(stmt)).scalars().all()
-        return [_run_usage_row_to_dto(r).outcome for r in rows]
+        return [_run_usage_row_to_dto(r) for r in rows]
 
     # ----------------------------------- prediction-falsify ledger (SE-11)
 
