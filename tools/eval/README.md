@@ -78,3 +78,22 @@ report shape lives in [`_capability.py`](./_capability.py). LLM-judge
 defaults (Mini-ADR J-39) are `claude-haiku-4-5-20251001` at
 `temperature=0.0` with N=3 reruns, but no J.13a-1 capability uses the
 judge — J.1 plan_execute is the only consumer and ships in J.13a-2.
+
+## Offline prompt A/B (`prompt_ab.py`) — Stream HX-5
+
+Compare two manifest variants' `system_prompt` over one eval set
+(paired verdicts; the report gives a pass-rate delta + McNemar
+discordant counts, no built-in winner threshold):
+
+```bash
+python tools/eval/prompt_ab.py \
+  --eval-set tools/eval/datasets/example.yaml \
+  --spec-a variant_a.yaml --spec-b variant_b.yaml \
+  --provider env --llm-model qwen3.5-plus   # HELIX_EVAL_LLM_API_KEY / _BASE_URL
+```
+
+Variants are manifest YAML files — export a revision snapshot via
+`GET /v1/agents/{name}/{version}/revisions/{n}` or the AgentDetail
+History tab. `--provider mock` (default) runs the deterministic mock
+pipeline (CI exercises that path; real-LLM comparisons are manual).
+The JSON artifact lands in `eval-out/prompt_ab_<eval-set>.json`.
