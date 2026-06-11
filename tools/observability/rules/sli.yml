@@ -68,3 +68,47 @@ groups:
             0.95,
             sum by (le) (rate(helix_session_duration_seconds_bucket{outcome="success"}[5m]))
           )
+
+      # --- Stream HX-4 — query-layer rules over already-emitted metrics ---
+
+      # Run success ratio (Mini-ADR HX-D1): the outcome-labelled duration
+      # histogram's _count is the per-terminal run counter — no separate
+      # counter exists by design. interrupted/cancelled excluded from the
+      # denominator: a user abort is not a platform failure.
+      - record: helix:sli:run_success:ratio1h
+        expr: |
+          sum(rate(helix_session_duration_seconds_count{outcome="success"}[1h]))
+          /
+          sum(rate(helix_session_duration_seconds_count{outcome=~"success|error|max_steps"}[1h]))
+
+      # Run transient-retry recovery ratio (Stream HX-3): of runs that
+      # took the in-worker retry, how many recovered. NaN when no retries
+      # fired in the window — acceptable (no-data beats a fake 100%).
+      - record: helix:sli:run_retry_recovery:ratio1h
+        expr: |
+          sum(rate(helix_orchestrator_run_retry_total{outcome="recovered"}[1h]))
+          /
+          sum(rate(helix_orchestrator_run_retry_total[1h]))
+
+      # Token-estimate drift ratio (Stream HX-1): tiktoken estimate vs
+      # provider-reported prompt tokens. Healthy ~1.0; chars//4 fallback
+      # shows ~0.3-0.4 on CJK-heavy traffic.
+      - record: helix:sli:token_estimate_drift:ratio1h
+        expr: |
+          sum(rate(helix_hx_token_estimated_total[1h]))
+          /
+          sum(rate(helix_llm_token_usage_total{type=~"input|cache_creation|cache_read"}[1h]))
+
+      # Checkpoint IO P95 (Stream HX-4): per-step persistence latency by
+      # operation (aput / aput_writes / aget_tuple).
+      - record: helix:sli:checkpoint_op:p95_5m
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, op) (rate(helix_checkpoint_op_seconds_bucket[5m]))
+          )
+
+      # Pending approvals (Stream HX-4): instant gauge, re-recorded for
+      # uniform helix:sli:* dashboards; alert on sustained growth.
+      - record: helix:sli:approvals_pending:current
+        expr: helix_control_plane_approvals_pending

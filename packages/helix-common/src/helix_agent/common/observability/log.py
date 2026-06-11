@@ -37,6 +37,7 @@ from datetime import UTC, datetime
 from typing import IO, Any
 
 from helix_agent.common.context import (
+    get_current_run_id,
     get_current_tenant,
     get_current_trace_id,
 )
@@ -57,6 +58,7 @@ _MANDATORY_FIELDS = (
     "tenant",
     "trace_id",
     "span_id",
+    "run_id",
 )
 
 # stdlib LogRecord attrs that the formatter consumes directly; everything
@@ -139,6 +141,9 @@ class HelixJsonFormatter(logging.Formatter):
         # and a bare unit test cleanly.
         trace_id = current_trace_id_hex() or get_current_trace_id()
         span_id = current_span_id_hex()
+        # Stream HX-4 (Mini-ADR HX-D4) — run-worker scope; null outside
+        # a run (HTTP handlers, background sweeps), same as trace_id.
+        run_id = get_current_run_id()
 
         payload: dict[str, Any] = {
             "timestamp": timestamp,
@@ -150,6 +155,7 @@ class HelixJsonFormatter(logging.Formatter):
             "tenant": str(tenant) if tenant is not None else None,
             "trace_id": trace_id,
             "span_id": span_id,
+            "run_id": str(run_id) if run_id is not None else None,
         }
 
         extras = self._collect_extras(record)

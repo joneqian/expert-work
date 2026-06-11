@@ -14,8 +14,12 @@ from helix_agent.runtime.checkpointer import make_checkpointer
 
 @pytest.mark.asyncio
 async def test_memory_backend_yields_in_memory_saver() -> None:
+    # Stream HX-4 — the factory wraps every backend in the timing proxy.
+    from helix_agent.runtime.checkpointer.timing import TimingCheckpointSaver
+
     async with make_checkpointer("memory") as cp:
-        assert isinstance(cp, InMemorySaver)
+        assert isinstance(cp, TimingCheckpointSaver)
+        assert isinstance(cp._inner, InMemorySaver)
 
 
 @pytest.mark.asyncio

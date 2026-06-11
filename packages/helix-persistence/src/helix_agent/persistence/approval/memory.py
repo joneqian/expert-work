@@ -41,6 +41,9 @@ class InMemoryApprovalStore(ApprovalStore):
         rows.sort(key=lambda r: r.timeout_at)
         return rows[:limit]
 
+    async def count_pending(self) -> int:
+        return sum(1 for r in self._rows.values() if r.status == ApprovalStatus.PENDING)
+
     async def mark_decided(
         self,
         *,

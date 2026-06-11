@@ -76,6 +76,7 @@ from control_plane.api import (
     build_webhooks_router,
 )
 from control_plane.api.model_catalog import PlatformConfiguredProviders
+from control_plane.approval_metrics import ApprovalGaugeWorker
 from control_plane.audit import TenantConfigPiiResolver, build_default_audit_logger
 from control_plane.auth import (
     ApiKeyVerifier,
@@ -696,6 +697,7 @@ def create_app(
             skill_evolution_worker: SkillEvolutionWorker | None = None
             skill_rollback_monitor: RollbackMonitor | None = None
             feedback_consumer: FeedbackConsumerWorker | None = None
+            approval_gauge_worker: ApprovalGaugeWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
                     if not resolved_settings.checkpointer_dsn:
@@ -1098,6 +1100,11 @@ def create_app(
                 )
                 feedback_consumer.start()
                 _app.state.feedback_consumer = feedback_consumer
+            # Stream HX-4 (Mini-ADR HX-D2) — pending-approvals gauge.
+            # Always-on: one COUNT(*) a minute, no settings knob.
+            approval_gauge_worker = ApprovalGaugeWorker(approval_store=resolved_approval_store)
+            approval_gauge_worker.start()
+            _app.state.approval_gauge_worker = approval_gauge_worker
             resolved_lifecycle.mark_ready()
             logger.info(
                 "control_plane.lifespan.ready",
@@ -1124,6 +1131,8 @@ def create_app(
                     await skill_rollback_monitor.stop()
                 if feedback_consumer is not None:
                     await feedback_consumer.stop()
+                if approval_gauge_worker is not None:
+                    await approval_gauge_worker.stop()
                 ingestion_runner: KnowledgeIngestionRunner | None = getattr(
                     _app.state, "knowledge_ingestion_runner", None
                 )

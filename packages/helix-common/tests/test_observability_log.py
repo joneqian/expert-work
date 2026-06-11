@@ -207,3 +207,27 @@ def test_span_id_populated_inside_helix_span(stream: io.StringIO) -> None:
     assert len(record["trace_id"]) == 32
     assert isinstance(record["span_id"], str)
     assert len(record["span_id"]) == 16
+
+
+def test_run_id_null_outside_run_worker(stream: io.StringIO, initialized: None) -> None:
+    """Stream HX-4 — ``run_id`` is a mandatory schema field, null outside
+    a run worker (HTTP handlers, background sweeps)."""
+    get_logger("helix.test").info("evt")
+    assert _last_record(stream)["run_id"] is None
+
+
+def test_run_id_injected_from_contextvar(stream: io.StringIO, initialized: None) -> None:
+    from helix_agent.common.context import reset_current_run_id, set_current_run_id
+
+    run_id = UUID("00000000-0000-0000-0000-0000000000aa")
+    token = set_current_run_id(run_id)
+    try:
+        get_logger("helix.test").info("evt")
+    finally:
+        reset_current_run_id(token)
+
+    record = _last_record(stream)
+    assert record["run_id"] == str(run_id)
+    # An extra cannot shadow it (mandatory-field precedence).
+    get_logger("helix.test").info("evt2", extra={"run_id": "EVIL"})
+    assert _last_record(stream)["run_id"] is None

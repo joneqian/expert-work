@@ -1033,3 +1033,40 @@ async def test_run_agent_guard_allows_safe_dangling_batch(fast_backoff: None) ->
 
     assert rm.get(record.run_id).status is RunStatus.SUCCESS
     assert graph.inputs == [{"messages": []}, None]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_binds_run_id_contextvar(fast_backoff: None) -> None:
+    """Stream HX-4 — the worker binds ``current_run_id`` for its whole
+    body (log formatter scope) and resets it on exit."""
+    from helix_agent.common.context import get_current_run_id
+
+    seen: list[Any] = []
+
+    @dataclass
+    class _ProbeGraph:
+        async def astream(
+            self, input: Any, config: Any = None, *, stream_mode: Any = None
+        ) -> AsyncIterator[Any]:
+            del input, config, stream_mode
+            seen.append(get_current_run_id())
+            yield {"agent": {"step_count": 1}}
+
+        async def aget_state(self, config: Any) -> Any:
+            del config
+            return SimpleNamespace(values={})
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_ProbeGraph(),
+        graph_input={"messages": []},
+        config={},
+    )
+
+    assert seen == [record.run_id]
+    assert get_current_run_id() is None  # reset after the worker exits

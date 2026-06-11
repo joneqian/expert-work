@@ -58,12 +58,17 @@ async def make_checkpointer(
     # Widen to ``str`` so the trailing "unknown backend" path is reachable to
     # both mypy and runtime (type-erased callers, e.g. config strings, are
     # the typical source of bad values).
+    # Stream HX-4 (Mini-ADR HX-D3) — both backends leave the factory
+    # wrapped in the timing proxy so the IO histogram exists on every
+    # deployment shape (and tests exercise the same call path as prod).
+    from helix_agent.runtime.checkpointer.timing import TimingCheckpointSaver
+
     bk: str = backend
     if bk == "memory":
         from langgraph.checkpoint.memory import InMemorySaver
 
         logger.info("checkpointer.memory.init")
-        yield InMemorySaver()
+        yield TimingCheckpointSaver(InMemorySaver())
         return
 
     if bk == "postgres":
@@ -76,7 +81,7 @@ async def make_checkpointer(
         async with AsyncPostgresSaver.from_conn_string(dsn) as saver:
             await saver.setup()
             logger.info("checkpointer.postgres.ready")
-            yield saver
+            yield TimingCheckpointSaver(saver)
         return
 
     msg = f"unknown checkpointer backend: {bk!r}"

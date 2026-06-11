@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.approval.base import ApprovalStore
@@ -101,6 +101,15 @@ class SqlApprovalStore(ApprovalStore):
                 .all()
             )
         return [_row_to_dto(r) for r in rows]
+
+    async def count_pending(self) -> int:
+        async with self._sf() as session:
+            result = await session.execute(
+                select(func.count())
+                .select_from(AgentApprovalRow)
+                .where(AgentApprovalRow.status == ApprovalStatus.PENDING.value)
+            )
+            return int(result.scalar_one())
 
     async def mark_decided(
         self,

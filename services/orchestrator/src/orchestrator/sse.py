@@ -45,6 +45,7 @@ from uuid import UUID, uuid4
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
+from helix_agent.common.context import reset_current_run_id, set_current_run_id
 from helix_agent.common.observability import helix_counter, helix_histogram
 from helix_agent.common.skill_run_usage import SkillRunUsageRecorder
 from helix_agent.persistence import ApprovalStore
@@ -263,6 +264,11 @@ async def run_agent(
     logged and swallowed — they never fail the run.
     """
     run_id = record.run_id
+    # Stream HX-4 (Mini-ADR HX-D4) — bind the run id for the structured
+    # log formatter; every log line from this worker (and tasks it
+    # spawns) carries ``run_id`` without manual threading. Reset in the
+    # ``finally`` below.
+    run_id_token = set_current_run_id(run_id)
     # Bind a cancellation token to the run's abort_event and thread it
     # to graph nodes via config["configurable"] (E.15). RunManager.cancel
     # sets abort_event → the token reports cancelled → nodes surface
@@ -583,6 +589,7 @@ async def run_agent(
         cleanup_task = asyncio.create_task(bridge.cleanup(run_id, delay=_CLEANUP_DELAY_S))
         _BACKGROUND_CLEANUP_TASKS.add(cleanup_task)
         cleanup_task.add_done_callback(_BACKGROUND_CLEANUP_TASKS.discard)
+        reset_current_run_id(run_id_token)
 
 
 #: Strong refs to in-flight cleanup tasks — without this the event loop

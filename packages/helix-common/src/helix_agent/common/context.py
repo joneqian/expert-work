@@ -31,6 +31,10 @@ _current_trace_id: Final[ContextVar[str | None]] = ContextVar(
     "helix_agent_current_trace_id",
     default=None,
 )
+_current_run_id: Final[ContextVar[UUID | None]] = ContextVar(
+    "helix_agent_current_run_id",
+    default=None,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -92,3 +96,24 @@ def reset_current_trace_id(token: Token[str | None]) -> None:
 def get_current_trace_id() -> str | None:
     """Return the bound trace id, or ``None`` when unset."""
     return _current_trace_id.get()
+
+
+# ---------------------------------------------------------------------------
+# run_id — Stream HX-4 (Mini-ADR HX-D4)
+# ---------------------------------------------------------------------------
+
+
+def set_current_run_id(run_id: UUID) -> Token[UUID | None]:
+    """Bind ``run_id`` to the current async task (the run worker binds at
+    its entry; child tasks inherit). Return a reset token."""
+    return _current_run_id.set(run_id)
+
+
+def reset_current_run_id(token: Token[UUID | None]) -> None:
+    """Restore the previous run_id captured by ``token``."""
+    _current_run_id.reset(token)
+
+
+def get_current_run_id() -> UUID | None:
+    """Return the bound run id, or ``None`` outside a run worker."""
+    return _current_run_id.get()

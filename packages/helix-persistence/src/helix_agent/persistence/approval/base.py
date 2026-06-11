@@ -55,6 +55,17 @@ class ApprovalStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def count_pending(self) -> int:
+        """Number of ``pending`` rows across all tenants — Stream HX-4.
+
+        Feeds the ``helix_control_plane_approvals_pending`` gauge (one
+        platform-wide number; per-tenant counts come from the API, not
+        a metric label). Like :meth:`list_expired`, the SQL read relies
+        on the owner's exemption under ENABLE-only RLS — callers run it
+        under a bypass scope (no tenant GUC).
+        """
+
+    @abc.abstractmethod
     async def mark_decided(
         self,
         *,
