@@ -1476,7 +1476,8 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ### Wave 2 — 中体量（2 sprint，Wave 1 收完启动）
 
-- [ ] **HX-5 prompt 版本管理 + 离线 A/B**（评估 ①，3-4 PR）：`prompt_version` 表（diff/回滚/audit）+ 离线 variant 对比（复用 CM-N5 评测基建出数字）；online A/B 留 Wave 3
+- [ ] **HX-5 prompt 版本管理 + 离线 A/B**（评估 ①，设计 + 3 PR）：`agent_spec_revision` 不可变修订史（diff/回滚/audit）+ 离线 variant 对比 harness；online A/B 留 Wave 3
+  - [x] **HX-5 设计先行**（本次）：[STREAM-HX-DESIGN](./streams/STREAM-HX-DESIGN.md) §6 详设——范围界定（prompt 是多源组合：manifest template + skill fragments + 动态注入；skill 已有 SE-7 版本系统、动态注入是运行期行为，唯一无版本可控源 = manifest → 版本实体定为 **manifest 整体修订史**而非单拆 prompt 字段表，兑现 `agent_spec/sql.py:141` "M1 row history table" 既定意图）+ `agent_spec_revision` 不可变 append-only（create→rev 1 / update 事务内 append N+1 / no-op 不增 / 行永不改删）+ 回滚=前进到旧内容产生新 revision（skill 先例 + 历史真相公理）+ diff 读取侧 Monaco 渲染不落库 + admin UI History tab（SE-8 接线点全过）+ `tools/eval/prompt_ab.py` 离线对比 harness（复用 helix_eval 断言式判分，报通过率 Δ + McNemar 不对称计数不内置胜负阈值；真 LLM 手动跑 CI 只验 fake provider 全链；artifact 落 eval-out 不建库表）+ 5 条 Mini-ADR（HX-E1~E5）+ 4-PR 切分
 - [ ] **HX-6 sandbox 热池 + 资源限额粒度**（评估 ⑤，2-3 PR）：预热池替代每 acquire 冷启动（M1 既定项提前）；per-call CPU/mem cgroup 限额
 - [ ] **HX-7 trace 生产接线 + approval 队列页**（评估 ⑨，2-3 PR）：Langfuse Recording stub → SDK adapter（ADR-0005）；admin UI 独立待批列表页（跨 run 聚合 + 批量操作）
 - [ ] **HX-8 多租户薄点**（评估 ⑩，2 PR）：平台 provider/tool 凭证按租户隔离（与 Stream Y 计量路线衔接）+ 跨租户查询可配 block（现仅 audit）

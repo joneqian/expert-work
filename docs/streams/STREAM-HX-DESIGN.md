@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：HX-1（真 tokenizer + 长上下文阈值参数化，§2）+ HX-2（用户反馈→学习闭环，§3）+ HX-3（run 级瞬态故障自动重试，§4）+ HX-4（可观测补强，§5）详设已锁定。Wave 2 各条开工时追加章节。
+> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2 启动（2026-06-11）：HX-5（prompt 版本管理 + 离线 A/B，§6）详设已锁定；其余各条开工时追加章节。
 
 ---
 
@@ -20,6 +20,7 @@
 | HX-2 | ⑦ 学习闭环 | 👎 无学习消费者（断点精确化见 §3.1） | rollback gate 接 👎 + 记忆 review 标记 + feedback consumer worker | §3（本文） |
 | HX-3 | ⑧ 容错 | run 级瞬态故障无自动重试 | 瞬态分类 ∧ replay-safe 守卫 → 重试 1 次 | §4（本文） |
 | HX-4 | ⑨ 可观测 | approval 队列 gauge / checkpoint 延迟 / run_id 结构化贯穿缺（工具延迟与 run 成功率判定过期，见 §5.1） | gauge + checkpoint 计时 wrapper + run_id contextvar + recording rules 同步 | §5（本文） |
+| HX-5 | ① prompt 工程 | manifest 覆盖式更新无历史/diff/回滚；无离线 variant 对比 | `agent_spec_revision` 不可变历史 + 回滚 + diff API/UI + 离线 A/B harness | §6（本文） |
 | HX-12/13 | ② 工具面 | 工具披露 2.0（应用层 + 厂商原生档） | 见 ITERATION-PLAN Wave 2 定义 | 开工时追加 |
 
 Wave 1 顺序：HX-1 → HX-2 → HX-3 → HX-4（HX-1 的 estimator 是 HX-12 阈值逃生门的前置件；HX-4 的指标骨架吃 HX-1 的 drift 数据）。
@@ -358,3 +359,79 @@ gauge helper 已在（`helix_gauge`，`metrics.py:121-132`）且有先例：skil
 |----|------|------|
 | PR0（本设计） | §5 + ITERATION-PLAN tick | 纯 docs，CI |
 | PR1（收尾） | count_pending + gauge 任务 + TimingCheckpointSaver + run_id contextvar/formatter + sli.yml/slo.md 同步 + 测试 | §5.4；全链回归；零债 6 条 |
+
+---
+
+## 6. HX-5 — prompt 版本管理 + 离线 A/B
+
+### 6.1 现状取证（2026-06-11，main@c509722）
+
+| 事实 | 证据 | 判定 |
+|------|------|:----:|
+| 最终 system prompt = 多源实时组合：manifest `system_prompt.template` + skill fragments（prompt_fragment/behavior_patches/tool_notes）+ 动态注入（reminders/记忆/日期） | `agent_spec.py:746`、`agent_factory._assemble_system_prompt:925-996` | "prompt"的唯一可控源 = manifest |
+| `agent_spec` 按 `(tenant, name, version)` 存储，`update_spec` **原地覆盖** `spec_json`，零历史；version 是用户起的文本标签非递增序 | `agent_spec/sql.py:129-162` | 真 gap ①：误编辑不可回滚、不可 diff |
+| 行内注释已有既定意图："M1 introduces a row history table" | `agent_spec/sql.py:141` | HX-5 = 兑现该意图 |
+| audit 仅记 `MANIFEST_WRITE` + 新 `spec_sha256`，无 old/new 对照，update 路径不读旧值 | `api/agents.py:428-436` | 真 gap ②：变更不可审计回放 |
+| skill 版本系统是成熟先例：整数递增、行不可变 append-only、promote/rollback、eval 回归门 | `models/skill.py:146-230`、SE-7 | 抄此先例 |
+| `helix_eval.run_eval(eval_set, complete)` 轻量 harness 在：YAML EvalSet（cases+assertions）→ per-case 判定 → EvalReport；judge 是断言式非 LLM | `tools/eval/helix_eval.py:145-157`、`datasets/example.yaml` | 离线对比的三件套有两件（任务集+运行器），缺 variant 对比层 |
+| run 创建在 `graph_input["messages"][0] = SystemMessage(built.system_prompt)` 单点固定，`configurable` 可扩展 | `api/runs.py:371-401` | online A/B 接缝在但不做（HX-11） |
+| admin UI 有 Monaco YAML 编辑器（ManifestEditor），无版本历史/diff/回滚界面 | `AgentDetail.tsx`/`ManifestEditor.tsx` | UI 面要补 |
+
+**范围界定**：评估 ① 说"prompt 无版本管理"。prompt 是多源组合，但 skill fragments 已有自己的版本系统（SE-7），动态注入是运行期行为——唯一无版本的可控源就是 manifest。所以 HX-5 的版本实体 = **manifest 整体修订史**（system_prompt 是其中最高频变更字段），而非单拆一个 prompt 字段表：单字段表覆盖不了"改了 policies 想回滚"的同型需求，且与 sql.py:141 的既定意图一致。
+
+### 6.2 设计
+
+**① `agent_spec_revision` 不可变修订史（PR1）**
+
+- 新表：`agent_spec_revision(id, tenant_id, agent_name, agent_version, revision INT 递增, spec_json JSONB, spec_sha256, actor_id, created_at)`；唯一约束 `(tenant_id, agent_name, agent_version, revision)`；RLS 与 agent_spec 同形（tenant-scoped ENABLE）。
+- `create_spec` 写 revision 1；`update_spec` 读旧行→append revision N+1→覆盖主行（事务内）；行永不 UPDATE/DELETE（历史真相公理）。sha 未变的 no-op update 不产生新 revision。
+- audit `MANIFEST_WRITE` details 增 `revision` + `prev_sha256`（固定字段，不 log 请求派生值）。
+- store 抽象 + 双实现：`list_revisions(tenant, name, version, limit/offset)`、`get_revision(..., revision)`。
+
+**② 回滚 + diff API + admin UI（PR2）**
+
+- `POST /v1/agents/{name}/{version}/revisions/{n}/rollback`：取 revision n 的 spec_json → 走既有 update_spec 校验管线 → 产生新 revision N+1（回滚=前进到旧内容，不删历史；skill 先例同语义）。审计 `MANIFEST_WRITE` + details `rolled_back_to`。
+- `GET .../revisions` / `GET .../revisions/{n}`：返回快照；**diff 不在服务端算**——返回两份快照由 UI Monaco diff 渲染（存 diff/算 diff 都是可派生冗余）。
+- admin UI（SE-8 接线点清单全过）：AgentDetail 增 History tab——revision 列表（actor/时间/sha 短码）+ 任意两版 Monaco diff view + 单版回滚按钮（确认对话框）；i18n 双语；Playwright + Storybook。Monaco diff 组件用 `@monaco-editor/react` DiffEditor（testid 包 wrapper div——[memory:monaco-data-testid]）。
+
+**③ 离线 variant 对比 harness（PR3，收尾）**
+
+- `tools/eval/prompt_ab.py` CLI：输入 = agent spec 文件（或 name+revision 两个引用）×2 + EvalSet YAML + provider 配置；对每个 variant 用其 system_prompt 组装 CompletionFn（复用 helix_eval 既有 provider 适配），跑同一 eval set，输出对比报告（per-case A/B passed 矩阵 + 通过率 Δ + McNemar 不对称计数——n 小用精确二项，不编 p 值阈值，报数让人判断）。
+- 真 LLM 路径**不进 CI**（[memory:ci-no-model-keys]）：CI 只测 harness 本身（fake CompletionFn 双 variant 全链）。
+- 输出落 `eval-out/`（与 run_longmem 同款 artifact 形态），不建库表——离线对比是工具不是平台状态；结果要留档时由用户 commit baselines（CM-N5 同模式）。
+
+### 6.3 边界（不做）
+
+- online A/B（流量分桶、variant 路由）= HX-11（Wave 3，依赖本条）；本条只留接缝事实（§6.1 末行），不动 runs.py。
+- 不做 LLM judge（helix_eval 是断言式；M1 J.13a-2 既定项，另立）。
+- 不做 revision 自动裁剪/保留策略（manifest 编辑频率低，JSONB 快照成本可忽略；爆炸了再立项）。
+- 不版本化 skill fragments / 动态注入（各有体系）。
+- 不做 revision 间自动语义分析（"这次改动影响了什么"）——diff 视图足够。
+
+### 6.4 可观测
+
+- audit 已覆盖（MANIFEST_WRITE 增强字段）；revision 写失败 = update_spec 事务失败，既有错误路径。
+- 不加新指标（manifest 编辑是低频管理操作，audit 即可观测）。
+
+### 6.5 测试
+
+- **PR1**：双 store revision 生命周期（create→1 / update→2,3 / no-op 不增 / 唯一约束）；事务性（revision append 与主行覆盖同生死，真 PG 集成测）；audit 字段断言；RLS 隔离（跨租户 list_revisions 零行）。
+- **PR2**：rollback 端点（产生新 revision/校验管线拒坏 spec/404 矩阵）；revisions API envelope 对账（[memory:envelope-vs-raw]）；UI——History tab 渲染/diff 视图/回滚流（vitest + Playwright）。
+- **PR3**：harness fake-provider 全链（两 variant 出对比报告）；报告格式快照测试；CLI 参数防御解析。
+
+### 6.6 Mini-ADR
+
+- **HX-E1 版本实体 = manifest 修订史**：prompt 是多源组合，唯一无版本的可控源是 manifest；单拆 prompt 字段表覆盖不了同型需求（policies/model 误编辑），且兑现 sql.py:141 既定意图。
+- **HX-E2 revision 不可变 + 回滚=前进**：append-only，回滚产生新 revision 而非删除——skill 先例 + 历史真相公理。
+- **HX-E3 diff 读取侧渲染**：服务端只存/返快照，diff 是派生数据不落库不算两遍。
+- **HX-E4 离线 A/B = 工具不是平台状态**：harness 进 tools/eval，artifact 落 eval-out；真 LLM 手动跑，CI 只验 harness 本身（fake provider）。
+- **HX-E5 报数不报结论**：对比报告给通过率 Δ + 不对称计数，不内置显著性阈值拍"谁赢"——150 case 量级的离线对比由人判断。
+
+### 6.7 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §6 + ITERATION-PLAN tick | 纯 docs，CI |
+| PR1 | `agent_spec_revision` 迁移 + 双 store + create/update 接线 + audit 增强 | §6.5-PR1；全链回归 |
+| PR2 | rollback/revisions API + admin UI History tab（diff + 回滚） | §6.5-PR2；前端全链 |
+| PR3（收尾） | `prompt_ab.py` 离线对比 harness + 文档 | §6.5-PR3；零债 6 条 |
