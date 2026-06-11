@@ -109,6 +109,11 @@ def _provision_app_role(sync_dsn: str) -> None:
             conn.execute(
                 text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE}")
             )
+            # Membership lets the app role ``SET LOCAL ROLE audit_reader``
+            # for cross-tenant scans (Stream HX-2 feedback worker) — the
+            # per-deployment grant 0061 documents, mirrored here for the
+            # test role (same as test_billing_ledger_rls_integration).
+            conn.execute(text(f"GRANT audit_reader TO {APP_ROLE}"))
     finally:
         admin_engine.dispose()
 
