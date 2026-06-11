@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：HX-1（真 tokenizer + 长上下文阈值参数化，§2）+ HX-2（用户反馈→学习闭环，§3）+ HX-3（run 级瞬态故障自动重试，§4）详设已锁定。HX-4 与 Wave 2 各条开工时追加章节。
+> **本文件状态**：HX-1（真 tokenizer + 长上下文阈值参数化，§2）+ HX-2（用户反馈→学习闭环，§3）+ HX-3（run 级瞬态故障自动重试，§4）+ HX-4（可观测补强，§5）详设已锁定。Wave 2 各条开工时追加章节。
 
 ---
 
@@ -19,7 +19,7 @@
 | **HX-1** | ③ 上下文工程 | `len//4` 估算漂移（CJK 严重低估）+ `context_window` 不随目录解析 + E.3 遗留 8K 默认裁剪 | TokenEstimator 协议 + tiktoken 默认实现 + 目录解析 + 遗留默认值退役 | §2（本文） |
 | HX-2 | ⑦ 学习闭环 | 👎 无学习消费者（断点精确化见 §3.1） | rollback gate 接 👎 + 记忆 review 标记 + feedback consumer worker | §3（本文） |
 | HX-3 | ⑧ 容错 | run 级瞬态故障无自动重试 | 瞬态分类 ∧ replay-safe 守卫 → 重试 1 次 | §4（本文） |
-| HX-4 | ⑨ 可观测 | 工具延迟/成功率/approval 队列指标缺 | 直方图 + counter + gauge + 日志字段统一 | 开工时追加 |
+| HX-4 | ⑨ 可观测 | approval 队列 gauge / checkpoint 延迟 / run_id 结构化贯穿缺（工具延迟与 run 成功率判定过期，见 §5.1） | gauge + checkpoint 计时 wrapper + run_id contextvar + recording rules 同步 | §5（本文） |
 | HX-12/13 | ② 工具面 | 工具披露 2.0（应用层 + 厂商原生档） | 见 ITERATION-PLAN Wave 2 定义 | 开工时追加 |
 
 Wave 1 顺序：HX-1 → HX-2 → HX-3 → HX-4（HX-1 的 estimator 是 HX-12 阈值逃生门的前置件；HX-4 的指标骨架吃 HX-1 的 drift 数据）。
@@ -288,3 +288,73 @@ def default_estimator() -> TokenEstimator:   # 进程级单例（vocab 只加载
 |----|------|------|
 | PR0（本设计） | §4 + ITERATION-PLAN tick | 纯 docs，CI |
 | PR1（收尾） | 瞬态注册表 + 尾部守卫 + run_agent 重试循环 + retry 事件 + counter + env 配置 + 测试 | §4.5；全链回归；零债 6 条 |
+
+---
+
+## 5. HX-4 — 可观测补强
+
+### 5.1 现状取证（2026-06-11，main@147a313）
+
+| 评估断言 | 实况 | 证据 | 判定 |
+|---------|------|------|:----:|
+| "工具延迟直方图缺" | `helix_tool_latency_seconds{tool}`（桶 0.01-60s）+ `helix_tool_call_total{tool,outcome}` 已在，TOOL_CALL audit 还带 `duration_ms` | `builder.py:142-153,1087-1098,1139` | **取证修正 ①：已在** |
+| "run 成功率 counter 缺" | `helix_session_duration_seconds{outcome}` 五种 outcome（success/error/max_steps/interrupted/cancelled）每终态恰好一次 observe——histogram `_count` 即按 outcome 的 run 计数，成功率 PromQL 直接推导 | `sse.py:116-121,577` | **取证修正 ②：可推导，不加冗余 counter**（缺的是 recording rule） |
+| "approval 队列 gauge 缺" | timeout sweep **已在** retention-cleanup-job（J.8-step3b：`list_expired`→`mark_decided(TIMEOUT)`），但 pending 数无 gauge；retention job 是短命 cron，gauge 必须住常驻进程 | `retention_cleanup_job/job.py:153-181`、`approval/base.py:45-51` | 真 gap ①（gauge），sweep 不缺 |
+| "checkpoint 持久化延迟缺" | checkpointer = langgraph 原生 saver（dev InMemory / prod AsyncPostgresSaver），factory 裸返回，零计时 | `checkpointer/factory.py:44-83`、`runner.py:58-60` | 真 gap ② |
+| "结构化日志 run_id/trace_id 贯穿缺" | JSON formatter + trace_id **已完整贯穿**（W3C header→OTel→contextvar→formatter→feedback 表）；run_id 只有 `%s` 字符串拼接，无 contextvar、JSON 无独立字段 | `log.py:100-168`、`middleware/observability.py:76-106`、`common/context.py:26-95` | 半过期：只缺 run_id 轴 |
+| —（取证新发现） | `docs/runbooks/slo.md` 7 条 SLO + `tools/observability/rules/sli.yml` recording rule 框架在；HX-1 drift / HX-3 retry / 本节新指标均未进 rules 与 SLO 文档 | `slo.md:9-49` | 真 gap ③（资产同步） |
+
+gauge helper 已在（`helix_gauge`，`metrics.py:121-132`）且有先例：skill_curator 周期 worker 每 cycle `set_curator_pinned_skills(n)`（`skill_curator.py:195`）。
+
+### 5.2 设计
+
+**① approval pending gauge（gap ①）**
+
+- `ApprovalStore.count_pending() -> int` 抽象 + 双实现（SQL：`COUNT(*) WHERE status='pending'`）。`agent_approval` 表跨租户计数的 RLS 形态实施期核实：tenant-scoped 表则按 ledger 先例处理（FORCE-RLS → SET ROLE / ENABLE-only → owner 豁免），单 gauge 不分租户标签（防 label 基数爆炸；per-tenant 数从 audit/API 查）。
+- control-plane lifespan 内轻量周期任务（curator 同款骨架，interval 60s，复用现有 worker 节奏不新开配置面）：`helix_control_plane_approvals_pending` gauge `.set(n)`。读失败 log + 跳过本 cycle（fail-open：可观测故障绝不影响业务路径）。
+
+**② checkpoint 计时 wrapper（gap ②）**
+
+- `helix-runtime/checkpointer/timing.py`：`TimingCheckpointSaver` 代理 `BaseCheckpointSaver` 四个 IO 方法（`aput`/`aput_writes`/`aget_tuple`/`alist`），`helix_checkpoint_op_seconds{op}` histogram（桶对齐 0.005-10s 量级；`alist` 流式则计首批返回时延或不计——实施期按基类签名定）。计时层 never-fail：观测代码异常吞掉照常透传调用（fail-open）。
+- `make_checkpointer` 统一包两种实现（backend 不进 label——dev InMemory 数据没人看，统一包保测试路径同形）。`GraphRunner` 零改动。
+
+**③ run_id 结构化贯穿（gap ③ 半轴）**
+
+- `common/context.py` 增 `current_run_id` contextvar（trace_id 同款三函数面）；`HelixJsonFormatter` 输出增 `run_id` 字段（未设 = null，与 trace_id 同语义）。
+- 绑定点 = `run_agent` 入口 set / `finally` reset（worker task 是 run 的执行边界，三个 spawn 点零改动）；既有 `run_id=%s` 消息文本不动（surgical——消息可读性照旧，结构字段管检索）。
+- trace_id 已贯穿，零改动。
+
+**④ recording rules + SLO 文档同步（gap ③）**
+
+- `tools/observability/rules/sli.yml` 增：run 成功率（`sum(rate(helix_session_duration_seconds_count{outcome="success"})) / sum(rate(..._count))`）、HX-3 retry 恢复率、HX-1 token 估算漂移比、approvals pending、checkpoint op P95。
+- `docs/runbooks/slo.md` 增对应 SLI 行（目标值留 TBD——基线数据未到不拍数字，公理：不编造验收线）。
+
+### 5.3 边界（不做）
+
+- Grafana dashboard JSON 不在本条（provisioning 目录全仓为空，是独立 infra 工作项；recording rules 已让数据可查可告警）。
+- retention job 的 `approvals_timed_out` 不发 Prometheus 指标（短命 cron 与 pull 模型不合，audit + 日志已记录；上 pushgateway 是过度工程）。
+- 不做 per-tenant 指标标签（基数纪律）。
+- 不动既有任何指标命名/标签（零迁移成本）。
+- OTel span 覆盖面扩展（tool span / checkpoint span）不在本条——trace 体系另议，本条只补 metrics + 日志轴。
+
+### 5.4 测试
+
+- `count_pending` 双实现 + gauge 周期任务（fake store 计数 → gauge 值断言；store 抛错 → cycle 不死）。
+- `TimingCheckpointSaver`：包 fake saver，四方法透传语义不变 + histogram 样本落账 + 观测层异常不影响透传（fail-open 断言）。
+- run_id contextvar：formatter 输出含/不含 run_id 两态；run_agent 运行期内 contextvar 已设、终态后已清。
+- sli.yml 语法校验（promtool 不在 CI 则 YAML parse 冒烟）。
+
+### 5.5 Mini-ADR
+
+- **HX-D1 不加冗余 run 成功率 counter**：histogram `_count` 已是按 outcome 的精确计数，加 counter 违反单一真相源；缺口在查询层（recording rule），不在 emit 层。
+- **HX-D2 approval gauge 住常驻进程、周期 set**：retention cron 短命与 pull 模型不合；curator gauge 先例同款。单 gauge 不分租户。
+- **HX-D3 checkpoint 计时 = 代理 wrapper**：langgraph saver 无观测缝，factory 处包一层是唯一不侵入点；观测 never-fail。
+- **HX-D4 run_id 走 contextvar + formatter 字段**：与 trace_id 同构；绑定在 run_agent 任务边界，spawn 点零接触。
+- **HX-D5 取证修正入档**：评估 ⑨ 五项里两项过期（工具延迟已在、成功率可推导）、一项半过期（trace_id 已贯穿）；真缺口收敛为 gauge + checkpoint 计时 + run_id 轴 + 查询层资产。
+
+### 5.6 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §5 + ITERATION-PLAN tick | 纯 docs，CI |
+| PR1（收尾） | count_pending + gauge 任务 + TimingCheckpointSaver + run_id contextvar/formatter + sli.yml/slo.md 同步 + 测试 | §5.4；全链回归；零债 6 条 |
