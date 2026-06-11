@@ -1460,6 +1460,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 ### Wave 1 — 高 ROI 小改动（1 sprint，全部立项）
 
 - [ ] **HX-1 真 tokenizer + 长上下文阈值参数化**（评估 ③，2 PR）：`len//4`（±15% 漂移）→ 真分词计数（estimator 注入点：`dynamic_context.py`/`compressor.py`/`working_window.py`）；压缩/滑窗阈值按 `ModelSpec.context_window` 参数化（1M 模型不再用 200K 同套参数）
+  - [x] **HX-1 设计先行**（本次）：[STREAM-HX-DESIGN](./streams/STREAM-HX-DESIGN.md) §2 详设——范围修正（阈值参数化机制已在：compressor/working_window 均 `context_window×threshold_pct`，真 gap=`ModelSpec.context_window` 默认 200K 不随目录解析）+ 新发现 gap ②（always-on DynamicContextMiddleware 默认 20 条/8000 token 每调裁剪 LLM 视图——E.3 M0 遗留默认值静默架空五层级联，所有模型实际每调只见 ~8K）+ tokenizer 选型五方案对比（tiktoken `o200k_base` 统一近似 + fail-open chars//4 + bounded LRU，不做 per-provider/不做 count API）+ `TokenEstimator` 协议三消费点统一注入 + context_window 目录解析（None=catalog_entry→200K 兜底）+ E.3 默认裁剪退役（双 None 不注册、显式配置 opt-in 保留）+ drift 可观测 `helix_hx_token_estimate_ratio` + 行为变更三条显式清单 + 6 条 Mini-ADR（HX-A1~A6）+ 2-PR 切分
 - [ ] **HX-2 用户反馈→学习闭环**（评估 ⑦ 断链，2-3 PR）：feedback consumer worker（复用 DLQ worker 骨架）——👎 关联该 run 绑定的 skill 版本（SE-8 归因通道已在）进 SE 修订队列；关联记忆条目打 review 标记进 consolidator 队列
 - [ ] **HX-3 run 级瞬态故障自动重试**（评估 ⑧，1-2 PR）：错误分类为瞬态（LLM 5xx 耗尽 fallback / 沙盒 acquire 失败）∧ run 零 irreversible 工具调用（`side_effect` 元数据已在）→ 自动重试 1 次
 - [ ] **HX-4 可观测补强**（评估 ⑨，1-2 PR）：工具延迟直方图 + run 成功率 counter + approval 队列 gauge + checkpoint 持久化延迟；结构化日志统一 `run_id`/`trace_id` 字段贯穿
