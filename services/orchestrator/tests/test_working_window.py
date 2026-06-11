@@ -174,3 +174,21 @@ def test_apply_returns_new_list_does_not_mutate_input() -> None:
     original = list(msgs)
     window.apply(msgs)
     assert msgs == original  # input untouched
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-1 — injected estimator replaces the chars//4 heuristic
+# ---------------------------------------------------------------------------
+
+
+class _OnePerCharEstimator:
+    def count(self, text: str) -> int:
+        return len(text)
+
+
+def test_should_trim_respects_injected_estimator() -> None:
+    # threshold = 700 tokens; 1000 chars = 250 legacy tokens (no trim)
+    # but 1000 injected tokens (trim).
+    msgs = [HumanMessage(content="x" * 1000)]
+    assert _window().should_trim(msgs) is False
+    assert _window(estimator=_OnePerCharEstimator()).should_trim(msgs) is True

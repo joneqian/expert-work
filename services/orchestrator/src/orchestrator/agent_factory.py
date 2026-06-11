@@ -62,6 +62,7 @@ from helix_agent.protocol.model_catalog import catalog_entry
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
+from helix_agent.runtime.tokens import default_estimator
 from orchestrator.context import ContextCompressor, WorkingWindow, WorkspaceFileWriter
 from orchestrator.errors import (
     AgentFactoryError,
@@ -400,7 +401,11 @@ async def build_agent(
             "manifest declares 'vision' block but model.supports_vision is true; "
             "Path A (content blocks) and Path B (ask_image) are mutually exclusive"
         )
-    chains = build_middleware_chains(spec, env=middleware_env)
+    # Stream HX-1 (Mini-ADR HX-A1) — one shared tiktoken-backed estimator
+    # for every context gate (dynamic-context trim, working window,
+    # compressor) plus the token-usage drift counter.
+    estimator = default_estimator()
+    chains = build_middleware_chains(spec, env=middleware_env, estimator=estimator)
     # Stream J.11 — resolve the LLM router for each step class; the
     # planner / reflect nodes may route to a different model than the
     # agent loop. Stream J.6 — the image resolver threads into every
@@ -512,6 +517,7 @@ async def build_agent(
             head_keep=cc_policy.head_keep,
             tail_keep=cc_policy.tail_keep,
             max_passes=cc_policy.max_passes,
+            estimator=estimator,
         )
     # Stream CM-2 — working-memory sliding window: the cheap LLM-free gate
     # that runs before the compressor in agent_node. Conservative defaults
@@ -525,6 +531,7 @@ async def build_agent(
             threshold_pct=wm_policy.threshold_pct,
             max_recent_turns=wm_policy.max_recent_turns,
             keep_first_turn=wm_policy.keep_first_turn,
+            estimator=estimator,
         )
     # Stream J.7a (Mini-ADR J-23) — load + merge skills declared in
     # ``spec.skills``. Skill prompt fragments concatenate after the

@@ -48,6 +48,7 @@ from helix_agent.persistence.token_usage_store import (
     TokenUsageStore,
 )
 from helix_agent.runtime.middleware.base import CallNext, MiddlewareContext
+from helix_agent.runtime.tokens import TokenEstimator, estimate_messages
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,19 @@ _llm_token_usage_total = helix_counter(
     "helix_llm_token_usage_total",
     "Tokens consumed per LLM call, split by type (Stream G.9).",
     ("tenant_id", "agent_name", "model", "type"),
+)
+
+#: Stream HX-1 (Mini-ADR HX-A6) — estimated prompt tokens, accumulated
+#: alongside the actual counts above so dashboards can derive the
+#: estimator drift ratio in PromQL:
+#: ``rate(helix_hx_token_estimated_total) /
+#: rate(helix_llm_token_usage_total{type=~"input|cache_.*"})``.
+#: A counter pair instead of a ratio histogram because the repo metric
+#: convention reserves histograms for durations (``_seconds``).
+_hx_token_estimated_total = helix_counter(
+    "helix_hx_token_estimated_total",
+    "Estimated prompt tokens per LLM call (Stream HX-1 drift numerator).",
+    ("tenant_id", "agent_name", "model"),
 )
 
 
@@ -85,6 +99,10 @@ class TokenUsageMiddleware:
     # Stream Y-3 — the ModelSpec provider, baked in at construction so Y4 can
     # price by ``(provider, model)``. ``None`` when the caller can't supply it.
     provider: str | None = None
+    # Stream HX-1 (Mini-ADR HX-A6) — when injected, the estimator re-counts
+    # the prompt that was actually sent (``payload["prompt_messages"]``) so
+    # the drift counter accumulates next to the provider-reported truth.
+    estimator: TokenEstimator | None = None
 
     name: str = "token_usage"
     anchor: str = "after_llm_call"
@@ -147,6 +165,29 @@ class TokenUsageMiddleware:
                 self.model,
                 exc_info=True,
             )
+
+        # Stream HX-1 — drift numerator. Skipped on local-cache hits
+        # (no upstream tokens were spent, the denominator stays 0) and
+        # when the prompt view is unavailable. Same never-fail contract
+        # as the counters above.
+        if self.estimator is not None and not ctx.payload.get("cache_hit"):
+            prompt = ctx.payload.get("prompt_messages")
+            if isinstance(prompt, list) and prompt:
+                try:
+                    estimated = estimate_messages(prompt, self.estimator)
+                    _hx_token_estimated_total.labels(
+                        tenant_id=tenant_label,
+                        agent_name=self.agent_name,
+                        model=self.model,
+                    ).inc(estimated)
+                except Exception:
+                    logger.warning(
+                        "token_usage.estimate_failed tenant=%s agent=%s model=%s",
+                        tenant_label,
+                        self.agent_name,
+                        self.model,
+                        exc_info=True,
+                    )
 
         try:
             await self.store.insert(

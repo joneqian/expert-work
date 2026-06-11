@@ -83,7 +83,7 @@ def default_estimator() -> TokenEstimator:   # 进程级单例（vocab 只加载
 2. `DynamicContextMiddleware`：用现成 `token_estimator` 缝（`dynamic_context.py:72`），`middleware_assembly._dynamic_context` 增 estimator 参数，factory 传入（适配 `flatten_message` + `count`）。
 3. `helix-runtime` pyproject 增 `tiktoken>=0.8,<1`（与 control-plane 同约束；注意 uv.lock 漂移）。
 
-**可观测（零债项）**：`TokenUsageMiddleware`（after_llm_call，usage_metadata 真值已在手）增 estimator 注入，发 `helix_hx_token_estimate_ratio` histogram（estimated ÷ actual prompt tokens）——既是 HX-1 的验收数字（上线后看 ratio 分布是否从 ~0.4（CJK 低估）收敛到 ~1.0），也是 §2.2-E 未来校准的数据源，并入 HX-4 指标族。
+**可观测（零债项）**：`TokenUsageMiddleware`（after_llm_call，usage_metadata 真值已在手，`prompt_messages` 已在 payload）增 estimator 注入，发 `helix_hx_token_estimated_total` counter（估算 prompt token 累计；本地 cache hit 跳过）。漂移比在 PromQL 侧求：`rate(helix_hx_token_estimated_total) / rate(helix_llm_token_usage_total{type=~"input|cache_.*"})`——既是 HX-1 的验收数字（上线后看比值是否从 ~0.4（CJK 低估）收敛到 ~1.0），也是 §2.2-E 未来校准的数据源，并入 HX-4 指标族。**实施期修正**：原设计为 ratio histogram，仓内指标公约（`helix_histogram` 强制 `_seconds` 后缀）保留直方图给时长类，改 counter 对零公约破坏。
 
 ### 2.4 PR2 详设 — 长上下文阈值参数化（含遗留默认值退役）
 
@@ -130,7 +130,7 @@ def default_estimator() -> TokenEstimator:   # 进程级单例（vocab 只加载
 - **HX-A3 bounded memo**：估算进热路径（每 turn 多次 × 全消息列表），LRU maxsize=4096 按 text 哈希；append-only 消息前缀天然高命中。
 - **HX-A4 context_window 目录解析**：`ModelSpec.context_window` 默认 `None` = build 期 `catalog_entry` 解析，200K 兜底；显式值永远优先。manifest 与目录的单一真相源关系与 CM-9/10 能力位同构。
 - **HX-A5 E.3 默认裁剪退役**：`max_turns/max_tokens` 默认 `None` 即不注册 middleware；显式配置完整保留（opt-in）。视图级裁剪不再默认架空五层级联。
-- **HX-A6 drift 可观测**：`helix_hx_token_estimate_ratio`（estimated÷actual）histogram 进 TokenUsageMiddleware；验收数字 + 未来校准数据源，归 HX-4 指标族。
+- **HX-A6 drift 可观测**：`helix_hx_token_estimated_total` counter（估算 prompt token 累计）进 TokenUsageMiddleware，与既有 `helix_llm_token_usage_total{type=input/cache_*}` 真值在 PromQL 求漂移比；验收数字 + 未来校准数据源，归 HX-4 指标族。（实施期修正：原 ratio histogram 违反"直方图仅时长"公约，改 counter 对。）
 
 ### 2.9 PR 切分
 

@@ -1230,6 +1230,7 @@ dependencies = [
     { name = "langgraph-checkpoint" },
     { name = "langgraph-checkpoint-postgres" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "tiktoken" },
 ]
 
 [package.metadata]
@@ -1241,6 +1242,7 @@ requires-dist = [
     { name = "langgraph-checkpoint", specifier = ">=4.0.0" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=2.0.20" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.30,<3" },
+    { name = "tiktoken", specifier = ">=0.8,<1" },
 ]
 
 [[package]]

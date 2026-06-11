@@ -9,7 +9,7 @@ from uuid import UUID
 from helix_agent.persistence.token_usage_store import InMemoryTokenUsageStore
 from helix_agent.protocol import AgentSpec
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
-from helix_agent.runtime.middleware import RecordingLangfuseClient
+from helix_agent.runtime.middleware import RecordingLangfuseClient, TokenUsageMiddleware
 from orchestrator import MiddlewareEnv, build_middleware_chains
 from orchestrator.middleware_assembly import _dynamic_context
 
@@ -173,3 +173,42 @@ def test_dynamic_context_defaults_when_unconfigured() -> None:
     mw = _dynamic_context(_spec())
     assert mw.max_turns == 20
     assert mw.max_tokens == 8000
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-1 — shared token estimator threads into the chains
+# ---------------------------------------------------------------------------
+
+
+class _OnePerCharEstimator:
+    def count(self, text: str) -> int:
+        return len(text)
+
+
+def test_estimator_threads_into_dynamic_context() -> None:
+    from langchain_core.messages import HumanMessage
+
+    mw = _dynamic_context(_spec(), estimator=_OnePerCharEstimator())
+    # 8 chars → 8 tokens through the injected estimator (default chars//4
+    # heuristic would report 2).
+    assert mw.token_estimator(HumanMessage(content="abcdefgh")) == 8
+
+
+def test_estimator_absent_keeps_legacy_heuristic() -> None:
+    from langchain_core.messages import HumanMessage
+
+    mw = _dynamic_context(_spec())
+    assert mw.token_estimator(HumanMessage(content="abcdefgh")) == 2
+
+
+def test_estimator_threads_into_token_usage_middleware() -> None:
+    estimator = _OnePerCharEstimator()
+    chains = build_middleware_chains(
+        _spec(),
+        env=MiddlewareEnv(token_usage_store=InMemoryTokenUsageStore()),
+        estimator=estimator,
+    )
+    assert chains.after_llm_call is not None
+    token_usage = next(m for m in chains.after_llm_call._ordered if m.name == "token_usage")
+    assert isinstance(token_usage, TokenUsageMiddleware)
+    assert token_usage.estimator is estimator

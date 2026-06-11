@@ -45,6 +45,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
+from helix_agent.runtime.tokens import TokenEstimator, estimate_messages, flatten_message
 from orchestrator.llm.caller import LLMCaller
 
 logger = logging.getLogger(__name__)
@@ -124,45 +125,33 @@ class ContextOverflowError(Exception):
         self.passes = passes
 
 
-def estimate_tokens(messages: Sequence[BaseMessage]) -> int:
-    """Rough token estimate — ``total_chars // 4``.
+def estimate_tokens(
+    messages: Sequence[BaseMessage],
+    *,
+    estimator: TokenEstimator | None = None,
+) -> int:
+    """Token estimate for ``messages``.
 
-    Matches Hermes ``estimate_request_tokens_rough``. Cheap, no
-    external dependency, slightly conservative for English and code,
-    slightly aggressive for CJK. Adequate for triggering compression;
-    upstream still authoritative on the actual count.
+    Without an ``estimator`` this is the legacy rough estimate —
+    ``total_chars // 4`` (matches Hermes ``estimate_request_tokens_rough``;
+    cheap, no dependency, a heavy underestimate for CJK). With one
+    (Stream HX-1 — the factory injects the tiktoken-backed
+    :func:`~helix_agent.runtime.tokens.default_estimator`) it is a
+    per-message real count. Upstream stays authoritative on the actual
+    number either way.
     """
+    if estimator is not None:
+        return estimate_messages(messages, estimator)
     total = 0
     for msg in messages:
         total += len(_message_to_text(msg))
     return total // _CHARS_PER_TOKEN
 
 
-def _message_to_text(msg: BaseMessage) -> str:
-    """Flatten a message to a single text representation.
-
-    Block-list content (J.6 multimodal, L1 cache_control wrappers) is
-    folded by concatenating each block's ``text`` field; non-text
-    blocks (images, tool_use) contribute their string representation
-    so they still count toward the token estimate.
-    """
-    content = msg.content
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    for block in content:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict):
-            text = block.get("text")
-            if isinstance(text, str):
-                parts.append(text)
-            else:
-                # Tool-use / image / other → coarse repr keeps the
-                # estimate honest even when the actual bytes are
-                # downstream-owned (base64 etc.).
-                parts.append(str(block))
-    return "".join(parts)
+#: Stream HX-1 — the flattening moved to ``helix_agent.runtime.tokens``
+#: (shared with the middleware layer); the local name stays because the
+#: summary formatting below uses it too.
+_message_to_text = flatten_message
 
 
 @dataclass(frozen=True)
@@ -281,6 +270,11 @@ class ContextCompressor:
     head_keep: int = 4
     tail_keep: int = 6
     max_passes: int = 3
+    #: Stream HX-1 (Mini-ADR HX-A1) — injected token estimator. ``None``
+    #: keeps the legacy ``chars // 4`` heuristic (direct construction /
+    #: unit tests stay network-free); the factory injects the shared
+    #: tiktoken-backed estimator.
+    estimator: TokenEstimator | None = None
 
     @property
     def threshold_tokens(self) -> int:
@@ -289,10 +283,13 @@ class ContextCompressor:
         value to decide whether to call :meth:`compress`."""
         return int(self.context_window * self.threshold_pct)
 
+    def _estimate(self, messages: Sequence[BaseMessage]) -> int:
+        return estimate_tokens(messages, estimator=self.estimator)
+
     def should_compress(self, messages: Sequence[BaseMessage]) -> bool:
         """Cheap preflight — returns ``True`` if the estimated prompt
         size meets or exceeds the threshold."""
-        return estimate_tokens(messages) >= self.threshold_tokens
+        return self._estimate(messages) >= self.threshold_tokens
 
     async def compress(
         self,
@@ -314,12 +311,12 @@ class ContextCompressor:
         """
         current: list[BaseMessage] = list(messages)
         for pass_idx in range(self.max_passes):
-            if estimate_tokens(current) < self.threshold_tokens:
+            if self._estimate(current) < self.threshold_tokens:
                 if pass_idx > 0:
                     logger.info(
                         "context_compressor.compressed passes=%d final_tokens=%d",
                         pass_idx,
-                        estimate_tokens(current),
+                        self._estimate(current),
                     )
                 return current
             try:
@@ -334,13 +331,13 @@ class ContextCompressor:
                 # clean failure.
                 logger.exception("context_compressor.summariser_failed")
                 raise ContextOverflowError(
-                    estimated_tokens=estimate_tokens(current),
+                    estimated_tokens=self._estimate(current),
                     threshold=self.threshold_tokens,
                     passes=pass_idx,
                 ) from exc
-        if estimate_tokens(current) >= self.threshold_tokens:
+        if self._estimate(current) >= self.threshold_tokens:
             raise ContextOverflowError(
-                estimated_tokens=estimate_tokens(current),
+                estimated_tokens=self._estimate(current),
                 threshold=self.threshold_tokens,
                 passes=self.max_passes,
             )
@@ -361,7 +358,7 @@ class ContextCompressor:
             # head/tail-keep counts (manifest-level) or a bigger
             # window.
             raise ContextOverflowError(
-                estimated_tokens=estimate_tokens(messages),
+                estimated_tokens=self._estimate(messages),
                 threshold=self.threshold_tokens,
                 passes=0,
             )

@@ -19,6 +19,9 @@ dependencies = [
     "langgraph-checkpoint-postgres>=2.0.20",
     # Stream A.5 — S3-compatible object storage (MinIO / Aliyun OSS / AWS S3).
     "aiobotocore>=2.13.0",
+    # Stream HX-1 — real token estimation (o200k_base) for the context
+    # gates; same version constraint as control-plane's chunking use.
+    "tiktoken>=0.8,<1",
 ]
 
 [build-system]
