@@ -47,30 +47,30 @@ async def test_record_and_aggregate_window_outcomes() -> None:
     await store.record_skill_run_usage(usage=_usage(tid, sid, outcome="success"))
     await store.record_skill_run_usage(usage=_usage(tid, sid, outcome="failed"))
 
-    outcomes = await store.skill_run_outcomes(
+    rows = await store.skill_run_usage_window(
         skill_id=sid, skill_version=1, tenant_id=tid, since=_T0 - timedelta(hours=1)
     )
-    assert Counter(outcomes) == Counter({"success": 2, "failed": 1})
+    assert Counter(r.outcome for r in rows) == Counter({"success": 2, "failed": 1})
 
 
-async def test_skill_run_outcomes_filters_by_version() -> None:
+async def test_skill_run_usage_window_filters_by_version() -> None:
     store = InMemorySkillStore()
     tid, sid = uuid4(), uuid4()
     await store.record_skill_run_usage(usage=_usage(tid, sid, version=1, outcome="failed"))
     await store.record_skill_run_usage(usage=_usage(tid, sid, version=2, outcome="success"))
 
     # promote is per-version → rollback judges per-version, never连坐 the next one.
-    v1 = await store.skill_run_outcomes(
+    v1 = await store.skill_run_usage_window(
         skill_id=sid, skill_version=1, tenant_id=tid, since=_T0 - timedelta(hours=1)
     )
-    v2 = await store.skill_run_outcomes(
+    v2 = await store.skill_run_usage_window(
         skill_id=sid, skill_version=2, tenant_id=tid, since=_T0 - timedelta(hours=1)
     )
-    assert v1 == ["failed"]
-    assert v2 == ["success"]
+    assert [r.outcome for r in v1] == ["failed"]
+    assert [r.outcome for r in v2] == ["success"]
 
 
-async def test_skill_run_outcomes_excludes_rows_before_window() -> None:
+async def test_skill_run_usage_window_excludes_rows_before_window() -> None:
     store = InMemorySkillStore()
     tid, sid = uuid4(), uuid4()
     await store.record_skill_run_usage(usage=_usage(tid, sid, outcome="success", at=_T0))
@@ -78,20 +78,20 @@ async def test_skill_run_outcomes_excludes_rows_before_window() -> None:
         usage=_usage(tid, sid, outcome="failed", at=_T0 - timedelta(days=30))
     )
 
-    recent = await store.skill_run_outcomes(
+    recent = await store.skill_run_usage_window(
         skill_id=sid, skill_version=1, tenant_id=tid, since=_T0 - timedelta(days=1)
     )
-    assert recent == ["success"]  # the 30-day-old row is outside the window
+    assert [r.outcome for r in recent] == ["success"]  # the 30-day-old row is outside the window
 
 
-async def test_skill_run_outcomes_isolates_tenant_and_skill() -> None:
+async def test_skill_run_usage_window_isolates_tenant_and_skill() -> None:
     store = InMemorySkillStore()
     tid_a, tid_b, sid = uuid4(), uuid4(), uuid4()
     await store.record_skill_run_usage(usage=_usage(tid_a, sid, outcome="success"))
     await store.record_skill_run_usage(usage=_usage(tid_b, sid, outcome="failed"))
     await store.record_skill_run_usage(usage=_usage(tid_a, uuid4(), outcome="failed"))
 
-    rows = await store.skill_run_outcomes(
+    rows = await store.skill_run_usage_window(
         skill_id=sid, skill_version=1, tenant_id=tid_a, since=_T0 - timedelta(hours=1)
     )
-    assert rows == ["success"]  # only tenant_a's run of this skill
+    assert [r.outcome for r in rows] == ["success"]  # only tenant_a's run of this skill

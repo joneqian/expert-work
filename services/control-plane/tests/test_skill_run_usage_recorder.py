@@ -32,10 +32,10 @@ async def test_record_writes_row() -> None:
         outcome="failed",
     )
 
-    outcomes = await store.skill_run_outcomes(
+    rows = await store.skill_run_usage_window(
         skill_id=sid, skill_version=2, tenant_id=_TENANT, since=_NOW - timedelta(hours=1)
     )
-    assert outcomes == ["failed"]
+    assert [r.outcome for r in rows] == ["failed"]
 
 
 async def test_record_swallows_store_errors() -> None:

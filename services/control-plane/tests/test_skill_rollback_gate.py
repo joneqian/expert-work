@@ -2,7 +2,7 @@
 
 The symmetric counterpart of SE-7c's ``PromotionGate``: given a live skill
 version + its promote-time baseline, it aggregates the post-promotion outcome
-window (SE-7d-1 ``skill_run_outcomes``), runs the SE-7d-2 judge
+window (SE-7d-1 ``skill_run_usage_window``), runs the SE-7d-2 judge
 (``decide_rollback``), and on a ROLLBACK verdict archives the skill, feeds the
 breaker (a rolled-back promote is a failed promote), and audits. The cross-
 tenant enumeration loop + the run-end emission live in SE-7d-3b (real path).
@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 from control_plane.skill_evolution_limits import CircuitBreaker
 from control_plane.skill_rollback import RollbackAction
 from control_plane.skill_rollback_gate import RollbackGate
+from helix_agent.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
 from helix_agent.persistence.skill.memory import InMemorySkillStore
 from helix_agent.protocol import SkillRunUsage, TrajectoryOutcome
 from helix_agent.protocol.skill import SkillStatus
@@ -164,3 +165,111 @@ async def test_no_audit_when_kept() -> None:
 
     await _rollback(_gate(store, audit=FakeAudit()), skill_id, version, baseline=0.9)
     assert written == []
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-2 (Mini-ADR HX-B2) — user 👎 joins the window as demoted samples
+# ---------------------------------------------------------------------------
+
+
+async def _seed_thread(
+    store: InMemorySkillStore,
+    skill_id: UUID,
+    version: int,
+    *,
+    outcome: TrajectoryOutcome = "success",
+) -> UUID:
+    thread_id = uuid4()
+    await store.record_skill_run_usage(
+        usage=SkillRunUsage(
+            id=uuid4(),
+            tenant_id=_TENANT,
+            skill_id=skill_id,
+            skill_version=version,
+            thread_id=thread_id,
+            agent_name="assistant",
+            outcome=outcome,
+            created_at=_NOW,
+        )
+    )
+    return thread_id
+
+
+async def _down(feedback: InMemoryFeedbackStore, thread_id: UUID) -> None:
+    await feedback.insert(
+        FeedbackRecord(tenant_id=_TENANT, thread_id=thread_id, rating="down", actor_id="user-1")
+    )
+
+
+async def test_disapproved_threads_demote_to_failed_and_trigger_rollback() -> None:
+    """12 successes / 8 of them 👎 → observed 0.4 vs baseline 0.9 → rollback.
+    Without the feedback join the same window is all-success and keeps."""
+    store = InMemorySkillStore()
+    feedback = InMemoryFeedbackStore()
+    skill_id, version = await _active_skill(store)
+    threads = [await _seed_thread(store, skill_id, version) for _ in range(20)]
+    for t in threads[:12]:
+        await _down(feedback, t)
+
+    gate = RollbackGate(
+        skill_store=store,
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
+        feedback_store=feedback,
+    )
+    decision = await _rollback(gate, skill_id, version, baseline=0.9)
+
+    assert decision.action is RollbackAction.ROLLBACK
+    assert await _status(store, skill_id) is SkillStatus.ARCHIVED
+
+
+async def test_without_feedback_store_machine_outcomes_only() -> None:
+    store = InMemorySkillStore()
+    feedback = InMemoryFeedbackStore()
+    skill_id, version = await _active_skill(store)
+    threads = [await _seed_thread(store, skill_id, version) for _ in range(20)]
+    for t in threads[:12]:
+        await _down(feedback, t)  # 👎 exists but the gate is not wired to it
+
+    decision = await _rollback(_gate(store), skill_id, version, baseline=0.9)
+
+    assert decision.action is RollbackAction.KEEP
+
+
+async def test_disapproved_cancelled_runs_stay_excluded() -> None:
+    """👎 on a cancelled run must not turn it into a failed sample —
+    cancellation is not the skill's fault (SE-7d-2 exclusion holds)."""
+    store = InMemorySkillStore()
+    feedback = InMemoryFeedbackStore()
+    skill_id, version = await _active_skill(store)
+    cancelled = await _seed_thread(store, skill_id, version, outcome="cancelled")
+    await _down(feedback, cancelled)
+    for _ in range(3):
+        await _seed_thread(store, skill_id, version)
+
+    gate = RollbackGate(
+        skill_store=store,
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
+        feedback_store=feedback,
+    )
+    decision = await _rollback(gate, skill_id, version, baseline=0.9)
+
+    # 3 effective samples (< n_min=6): the cancelled+👎 row did not join.
+    assert decision.action is RollbackAction.INSUFFICIENT
+    assert decision.n_cases == 3
+
+
+async def test_few_disapprovals_within_tolerance_keep() -> None:
+    store = InMemorySkillStore()
+    feedback = InMemoryFeedbackStore()
+    skill_id, version = await _active_skill(store)
+    threads = [await _seed_thread(store, skill_id, version) for _ in range(20)]
+    await _down(feedback, threads[0])  # one 👎 in twenty
+
+    gate = RollbackGate(
+        skill_store=store,
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
+        feedback_store=feedback,
+    )
+    decision = await _rollback(gate, skill_id, version, baseline=0.9)
+
+    assert decision.action is RollbackAction.KEEP

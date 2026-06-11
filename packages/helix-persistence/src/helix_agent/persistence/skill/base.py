@@ -38,7 +38,6 @@ from helix_agent.protocol import (
     SkillStatus,
     SkillVersion,
     SkillVisibility,
-    TrajectoryOutcome,
 )
 from helix_agent.protocol.skill import supporting_files_to_jsonable
 from helix_agent.protocol.tenant_config import TenantPlan
@@ -378,20 +377,24 @@ class SkillStore(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def skill_run_outcomes(
+    async def skill_run_usage_window(
         self,
         *,
         skill_id: UUID,
         skill_version: int,
         tenant_id: UUID | None,
         since: datetime,
-    ) -> list[TrajectoryOutcome]:
-        """Outcomes of runs that used ``(skill_id, skill_version)`` with
-        ``created_at >= since`` — the rolling-window signal the regression-
+    ) -> list[SkillRunUsage]:
+        """Usage rows of runs that used ``(skill_id, skill_version)`` with
+        ``created_at >= since`` — the rolling-window sample the regression-
         rollback judge (SE-7d-2) scores. Filtered **per version** so a
         rollback never连坐 the next (possibly human-fixed) version.
         ``tenant_id=None`` for a platform skill (caller inside
-        ``bypass_rls_session()``)."""
+        ``bypass_rls_session()``).
+
+        Returns full rows (not bare outcomes) so the rollback gate can
+        join user feedback by ``thread_id`` (Stream HX-2, Mini-ADR
+        HX-B2) before scoring."""
 
     # ----------------------------------- prediction-falsify ledger (SE-11)
 
