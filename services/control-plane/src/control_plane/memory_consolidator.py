@@ -556,6 +556,35 @@ class MemoryConsolidator:
                 )
                 summary.errors += 1
 
+        # SUB-PASS 2a (Stream HX-2, Mini-ADR HX-B3): user-👎-flagged items
+        # go through the same U-37 single-item review, regardless of age /
+        # retrieval history and regardless of ``purge_enabled`` — a user
+        # explicitly disputing a memory is not background noise sweeping,
+        # so the tenant's purge opt-out does not silence it. ``mark_reviewed``
+        # (durable verdict) clears the flag; soft-delete (noise) removes the
+        # row outright.
+        flagged = await self._memory.list_review_flagged(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            limit=_MAX_PURGE_PER_USER,
+        )
+        for item in flagged:
+            try:
+                await self._review_lone_item(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    item=item,
+                    summary=summary,
+                )
+            except Exception:
+                logger.exception(
+                    "memory_consolidator.flagged_review_failed tenant=%s user=%s id=%s",
+                    tenant_id,
+                    user_id,
+                    item.id,
+                )
+                summary.errors += 1
+
         # SUB-PASS 2: lone-item noise purge
         if cfg.purge_enabled:
             candidates = await self._memory.list_purge_candidates(

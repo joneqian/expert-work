@@ -235,3 +235,64 @@ async def test_retrieve_skips_consolidated_into_and_archived() -> None:
     assert "consolidated" in contents
     assert "raw_linked" not in contents
     assert "archived" not in contents
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-2 (Mini-ADR HX-B3) — review flag lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_flag_for_review_targets_thread_transients_only() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    thread = "thread-a"
+    hit = _item(tenant=t, user=u, content="from thread a").model_copy(
+        update={"source_thread_id": thread}
+    )
+    consolidated = _item(tenant=t, user=u, content="parent", status="consolidated").model_copy(
+        update={"source_thread_id": thread}
+    )
+    other = _item(tenant=t, user=u, content="other thread").model_copy(
+        update={"source_thread_id": "thread-b"}
+    )
+    await store.write([hit, consolidated, other])
+
+    flagged = await store.flag_for_review(tenant_id=t, user_id=u, source_thread_id=thread)
+
+    assert flagged == 1  # consolidated parent + other thread untouched
+    listed = await store.list_review_flagged(tenant_id=t, user_id=u, limit=10)
+    assert [i.id for i in listed] == [hit.id]
+
+
+@pytest.mark.asyncio
+async def test_flag_reopens_previously_reviewed_item() -> None:
+    """A user 👎 re-opens even an item the consolidator already deemed
+    durable — unlike purge candidates, flagged listing ignores
+    ``last_reviewed_at``."""
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    item = _item(tenant=t, user=u, content="reviewed durable", last_reviewed_at=_NOW).model_copy(
+        update={"source_thread_id": "thread-x"}
+    )
+    await store.write([item])
+
+    assert await store.flag_for_review(tenant_id=t, user_id=u, source_thread_id="thread-x") == 1
+    listed = await store.list_review_flagged(tenant_id=t, user_id=u, limit=10)
+    assert [i.id for i in listed] == [item.id]
+
+
+@pytest.mark.asyncio
+async def test_mark_reviewed_clears_review_flag() -> None:
+    store = InMemoryMemoryStore()
+    t, u = uuid4(), uuid4()
+    item = _item(tenant=t, user=u, content="flagged").model_copy(
+        update={"source_thread_id": "thread-y"}
+    )
+    await store.write([item])
+    await store.flag_for_review(tenant_id=t, user_id=u, source_thread_id="thread-y")
+
+    ok = await store.mark_reviewed(tenant_id=t, user_id=u, memory_id=item.id)
+
+    assert ok is True
+    assert await store.list_review_flagged(tenant_id=t, user_id=u, limit=10) == []

@@ -17,6 +17,7 @@ verifies that:
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 from uuid import UUID, uuid4
@@ -108,6 +109,11 @@ def _provision_app_role(sync_dsn: str) -> None:
             conn.execute(
                 text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {APP_ROLE}")
             )
+            # Membership lets the app role ``SET LOCAL ROLE audit_reader``
+            # for cross-tenant scans (Stream HX-2 feedback worker) — the
+            # per-deployment grant 0061 documents, mirrored here for the
+            # test role (same as test_billing_ledger_rls_integration).
+            conn.execute(text(f"GRANT audit_reader TO {APP_ROLE}"))
     finally:
         admin_engine.dispose()
 
@@ -322,6 +328,66 @@ async def test_feedback_down_rated_threads_rls_scoped(
         current_tenant_id_var.set(tenant_b)
         assert await store.down_rated_threads(thread_ids=[shared, up_only]) == {shared}
         assert await store.down_rated_threads(thread_ids=[]) == set()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_feedback_worker_scan_and_stamp_lifecycle(
+    feedback_rls_store: tuple[DbFeedbackStore, AsyncEngine],
+) -> None:
+    """Stream HX-2 (Mini-ADR HX-B1) — the FeedbackConsumerWorker's SQL
+    mechanics against real FORCE-RLS:
+
+    * the cross-tenant unprocessed-👎 scan sees BOTH tenants' rows
+      (``SET LOCAL ROLE audit_reader`` inside the store; a bare bypass
+      would read zero rows silently),
+    * ``mark_processed`` is a tenant-scoped write — and the stamped row
+      drops out of the next scan.
+    """
+    store, engine = feedback_rls_store
+    try:
+        tenant_a, tenant_b = uuid4(), uuid4()
+        thread_a, thread_b = uuid4(), uuid4()
+
+        current_tenant_id_var.set(tenant_a)
+        row_a = await store.insert(
+            FeedbackRecord(tenant_id=tenant_a, thread_id=thread_a, rating="down", actor_id="a")
+        )
+        current_tenant_id_var.set(tenant_b)
+        await store.insert(
+            FeedbackRecord(tenant_id=tenant_b, thread_id=thread_b, rating="down", actor_id="b")
+        )
+        await store.insert(
+            FeedbackRecord(tenant_id=tenant_b, thread_id=thread_b, rating="up", actor_id="b")
+        )
+
+        # Cross-tenant enumeration under a bypass scope (no tenant GUC).
+        # The session-scoped container carries unprocessed 👎 rows from
+        # earlier tests — filter to this test's tenants before asserting.
+        current_tenant_id_var.set(None)
+        bypass_token = bypass_rls_var.set(True)
+        try:
+            rows = await store.list_unprocessed_down_all_tenants(limit=50)
+        finally:
+            bypass_rls_var.reset(bypass_token)
+        ours = [r for r in rows if r.tenant_id in {tenant_a, tenant_b}]
+        assert {r.tenant_id for r in ours} == {tenant_a, tenant_b}
+        assert all(r.rating == "down" for r in rows)
+
+        # Stamp tenant A's row under its own scope; next scan excludes it.
+        current_tenant_id_var.set(tenant_a)
+        assert row_a.id is not None
+        assert await store.mark_processed(feedback_id=row_a.id, processed_at=datetime.now(UTC))
+
+        current_tenant_id_var.set(None)
+        bypass_token = bypass_rls_var.set(True)
+        try:
+            remaining = await store.list_unprocessed_down_all_tenants(limit=50)
+        finally:
+            bypass_rls_var.reset(bypass_token)
+        ours = [r for r in remaining if r.tenant_id in {tenant_a, tenant_b}]
+        assert {r.tenant_id for r in ours} == {tenant_b}
     finally:
         await engine.dispose()
 

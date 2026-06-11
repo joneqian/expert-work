@@ -18,10 +18,14 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models.feedback import FeedbackRow
+
+#: Stream HX-2 — cross-tenant scan role (ledger/audit precedent).
+#: ``SET LOCAL`` lifts on commit/rollback; the role is SELECT-only.
+_SET_AUDIT_READER_ROLE = text("SET LOCAL ROLE audit_reader")
 
 
 @dataclass(frozen=True)
@@ -37,6 +41,8 @@ class FeedbackRecord:
     comment: str | None = None
     id: int | None = None
     created_at: datetime | None = None
+    #: Stream HX-2 (Mini-ADR HX-B1) -- FeedbackConsumerWorker stamp.
+    processed_at: datetime | None = None
 
 
 class FeedbackStore(abc.ABC):
@@ -67,6 +73,26 @@ class FeedbackStore(abc.ABC):
         rows silently).
         """
 
+    @abc.abstractmethod
+    async def list_unprocessed_down_all_tenants(self, *, limit: int) -> list[FeedbackRecord]:
+        """Cross-tenant scan: 👎 rows not yet consumed, oldest first.
+
+        Stream HX-2 (Mini-ADR HX-B1) — the FeedbackConsumerWorker's
+        enumeration. ``feedback`` is FORCE-RLS, so the SQL implementation
+        assumes the ``audit_reader`` BYPASSRLS role for this read (the
+        ledger / audit cross-tenant precedent); the caller must be inside
+        a ``bypass`` scope so no tenant GUC is emitted.
+        """
+
+    @abc.abstractmethod
+    async def mark_processed(self, *, feedback_id: int, processed_at: datetime) -> bool:
+        """Stamp ``processed_at`` on one row; ``False`` if missing.
+
+        A *write* — must run under the row's own tenant RLS scope (the
+        BYPASSRLS role is read-only by grant). Idempotent: re-stamping a
+        processed row just overwrites the timestamp.
+        """
+
 
 class InMemoryFeedbackStore(FeedbackStore):
     """In-memory :class:`FeedbackStore` — dev / unit tests."""
@@ -87,6 +113,17 @@ class InMemoryFeedbackStore(FeedbackStore):
     async def down_rated_threads(self, *, thread_ids: Sequence[UUID]) -> set[UUID]:
         wanted = set(thread_ids)
         return {r.thread_id for r in self._rows if r.thread_id in wanted and r.rating == "down"}
+
+    async def list_unprocessed_down_all_tenants(self, *, limit: int) -> list[FeedbackRecord]:
+        rows = [r for r in self._rows if r.rating == "down" and r.processed_at is None]
+        return sorted(rows, key=lambda r: r.id or 0)[:limit]
+
+    async def mark_processed(self, *, feedback_id: int, processed_at: datetime) -> bool:
+        for i, r in enumerate(self._rows):
+            if r.id == feedback_id:
+                self._rows[i] = replace(r, processed_at=processed_at)
+                return True
+        return False
 
 
 class DbFeedbackStore(FeedbackStore):
@@ -141,6 +178,33 @@ class DbFeedbackStore(FeedbackStore):
             )
             return set(result.scalars().all())
 
+    async def list_unprocessed_down_all_tenants(self, *, limit: int) -> list[FeedbackRecord]:
+        stmt = (
+            select(FeedbackRow)
+            .where(FeedbackRow.rating == "down", FeedbackRow.processed_at.is_(None))
+            .order_by(FeedbackRow.id.asc())
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            # First statement: opens the txn AND assumes the BYPASSRLS role
+            # (``SET LOCAL`` lifts on commit/rollback). Without it the
+            # FORCE-RLS policy collapses to ``tenant_id = NULL`` → zero rows.
+            await session.execute(_SET_AUDIT_READER_ROLE)
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_record(row) for row in rows]
+
+    async def mark_processed(self, *, feedback_id: int, processed_at: datetime) -> bool:
+        stmt = (
+            update(FeedbackRow)
+            .where(FeedbackRow.id == feedback_id)
+            .values(processed_at=processed_at)
+            .returning(FeedbackRow.id)
+        )
+        async with self._sf() as session:
+            updated = (await session.execute(stmt)).scalars().all()
+            await session.commit()
+        return bool(updated)
+
 
 def _row_to_record(row: FeedbackRow) -> FeedbackRecord:
     return FeedbackRecord(
@@ -153,4 +217,5 @@ def _row_to_record(row: FeedbackRow) -> FeedbackRecord:
         comment=row.comment,
         actor_id=row.actor_id,
         created_at=row.created_at,
+        processed_at=row.processed_at,
     )

@@ -429,3 +429,30 @@ async def test_write_honours_caller_supplied_timestamps(sql_store: SqlStoreFixtu
         assert [h.content for h in hits] == ["fresh row", "aged row"]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_review_flag_lifecycle(sql_store: SqlStoreFixture) -> None:
+    """Stream HX-2 (Mini-ADR HX-B3) — flag → list → mark_reviewed clears."""
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        thread = str(uuid4())
+        hit = _item(tenant=tenant, user=user, embedding=_vec(1.0), content="disputed")
+        hit = hit.model_copy(update={"source_thread_id": thread})
+        other = _item(tenant=tenant, user=user, embedding=_vec(0.5), content="elsewhere")
+        await store.write([hit, other])
+
+        flagged = await store.flag_for_review(
+            tenant_id=tenant, user_id=user, source_thread_id=thread
+        )
+        assert flagged == 1
+
+        listed = await store.list_review_flagged(tenant_id=tenant, user_id=user, limit=10)
+        assert [i.id for i in listed] == [hit.id]
+        assert listed[0].review_flagged_at is not None
+
+        assert await store.mark_reviewed(tenant_id=tenant, user_id=user, memory_id=hit.id)
+        assert await store.list_review_flagged(tenant_id=tenant, user_id=user, limit=10) == []
+    finally:
+        await engine.dispose()

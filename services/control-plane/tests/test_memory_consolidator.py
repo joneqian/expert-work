@@ -362,3 +362,52 @@ async def test_purge_disabled_by_tenant_config_skips_sub_pass_2() -> None:
     # SUB-PASS 2 skipped entirely; aux not called.
     assert aux.calls == []
     assert summary.purged == 0
+
+
+# ─── Stream HX-2 (Mini-ADR HX-B3) — SUB-PASS 2a: 👎-flagged review ──────
+
+
+@pytest.mark.asyncio
+async def test_flagged_item_reviewed_regardless_of_age_and_purge_config() -> None:
+    """A fresh, retrieved, previously-reviewed item — none of the U-37
+    purge filters match — still gets reviewed once flagged, even with
+    tenant purge disabled. Durable verdict clears the flag."""
+    worker, store, _aux, _audit = await _build_worker(
+        aux_replies=['{"is_noise": false, "category": "durable"}']
+    )
+    # Tenant opts out of background purging — the flagged path must not care.
+    await worker._tenant_config.upsert(
+        tenant_id=_TENANT,
+        patch=TenantConfigPatch(memory_purge_enabled=False),
+        actor_id="seed",
+    )
+    _seed_transient(store, contents=["fresh fact the user disputed"], created_at=_NOW)
+    store._rows[0] = store._rows[0].model_copy(
+        update={"source_thread_id": "thread-q", "last_reviewed_at": _NOW}
+    )
+    flagged = await store.flag_for_review(
+        tenant_id=_TENANT, user_id=_USER, source_thread_id="thread-q"
+    )
+
+    summary = await worker.run_once()
+
+    assert flagged == 1
+    assert summary.reviewed_durable == 1
+    assert store._rows[0].review_flagged_at is None  # flag consumed
+    assert store._rows[0].last_reviewed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_flagged_noise_item_is_soft_deleted() -> None:
+    worker, store, _aux, _audit = await _build_worker(
+        aux_replies=['{"is_noise": true, "category": "one_off_narrative"}']
+    )
+    _seed_transient(store, contents=["wrong fact the user disputed"], created_at=_NOW)
+    item = store._rows[0]
+    store._rows[0] = item.model_copy(update={"source_thread_id": "thread-z"})
+    await store.flag_for_review(tenant_id=_TENANT, user_id=_USER, source_thread_id="thread-z")
+
+    summary = await worker.run_once()
+
+    assert summary.purged == 1
+    assert store._rows[0].deleted_at is not None

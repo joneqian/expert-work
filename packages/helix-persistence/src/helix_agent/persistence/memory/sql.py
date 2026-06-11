@@ -72,6 +72,7 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
         consolidated_into=row.consolidated_into,
         consolidated_from=tuple(UUID(str(uid)) for uid in row.consolidated_from),
         last_reviewed_at=row.last_reviewed_at,
+        review_flagged_at=row.review_flagged_at,
     )
     # Capability Uplift Sprint #2 (Mini-ADR U-4) — drift detection.
     if row.content_hash and hash_content(row.content) != row.content_hash:
@@ -581,12 +582,60 @@ class SqlMemoryStore(MemoryStore):
                 MemoryItemRow.user_id == user_id,
                 MemoryItemRow.deleted_at.is_(None),
             )
-            .values(last_reviewed_at=now)
+            .values(last_reviewed_at=now, review_flagged_at=None)
         )
         async with self._sf() as session:
             result = await session.execute(stmt)
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def flag_for_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        source_thread_id: str,
+    ) -> int:
+        now = datetime.now(UTC)
+        stmt = (
+            update(MemoryItemRow)
+            .where(
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.source_thread_id == source_thread_id,
+                MemoryItemRow.deleted_at.is_(None),
+                MemoryItemRow.status == "transient",
+            )
+            .values(review_flagged_at=now)
+            .returning(MemoryItemRow.id)
+        )
+        async with self._sf() as session:
+            flagged = (await session.execute(stmt)).scalars().all()
+            await session.commit()
+        return len(flagged)
+
+    async def list_review_flagged(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int,
+    ) -> list[MemoryItem]:
+        stmt = (
+            select(MemoryItemRow)
+            .where(
+                MemoryItemRow.tenant_id == tenant_id,
+                MemoryItemRow.user_id == user_id,
+                MemoryItemRow.deleted_at.is_(None),
+                MemoryItemRow.status == "transient",
+                MemoryItemRow.review_flagged_at.is_not(None),
+            )
+            .order_by(MemoryItemRow.review_flagged_at.asc(), MemoryItemRow.id.asc())
+            .limit(limit)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_item(r) for r in rows]
 
     async def archive(
         self,

@@ -395,9 +395,51 @@ class InMemoryMemoryStore(MemoryStore):
                 and row.user_id == user_id
                 and row.deleted_at is None
             ):
-                self._rows[idx] = row.model_copy(update={"last_reviewed_at": datetime.now(UTC)})
+                self._rows[idx] = row.model_copy(
+                    update={"last_reviewed_at": datetime.now(UTC), "review_flagged_at": None}
+                )
                 return True
         return False
+
+    async def flag_for_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        source_thread_id: str,
+    ) -> int:
+        now = datetime.now(UTC)
+        flagged = 0
+        for idx, row in enumerate(self._rows):
+            if (
+                row.tenant_id == tenant_id
+                and row.user_id == user_id
+                and row.source_thread_id == source_thread_id
+                and row.deleted_at is None
+                and row.status == "transient"
+            ):
+                self._rows[idx] = row.model_copy(update={"review_flagged_at": now})
+                flagged += 1
+        return flagged
+
+    async def list_review_flagged(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int,
+    ) -> list[MemoryItem]:
+        rows = [
+            r
+            for r in self._rows
+            if r.tenant_id == tenant_id
+            and r.user_id == user_id
+            and r.deleted_at is None
+            and r.status == "transient"
+            and r.review_flagged_at is not None
+        ]
+        rows.sort(key=lambda r: (r.review_flagged_at, r.id))
+        return rows[:limit]
 
     async def archive(
         self,

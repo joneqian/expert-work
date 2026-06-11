@@ -248,6 +248,9 @@ class AuditAction(StrEnum):
     ROLE_BINDING_READ = "role_binding:read"
     # feedback (Stream G.6)
     FEEDBACK_CREATE = "feedback:create"
+    #: Stream HX-2 — FeedbackConsumerWorker processed one 👎 row into the
+    #: learning loop (memory review flags; skill side is gate-pull).
+    FEEDBACK_CONSUMED = "feedback:consumed"
     # audit (meta)
     AUDIT_READ = "audit:read"
     AUDIT_EXPORT = "audit:export"

@@ -238,8 +238,40 @@ class MemoryStore(abc.ABC):
         memory_id: UUID,
     ) -> bool:
         """Sprint #7 SUB-PASS 2 commit — stamp ``last_reviewed_at`` so
-        future ticks skip this item. Returns ``False`` for unknown id /
-        wrong tenant / wrong user."""
+        future ticks skip this item, and clear ``review_flagged_at``
+        (Stream HX-2 — a reviewed flag is a consumed flag). Returns
+        ``False`` for unknown id / wrong tenant / wrong user."""
+
+    @abc.abstractmethod
+    async def flag_for_review(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        source_thread_id: str,
+    ) -> int:
+        """Stream HX-2 (Mini-ADR HX-B3) — stamp ``review_flagged_at`` on
+        every live transient item extracted from ``source_thread_id``.
+
+        Returns the number of items flagged. Idempotent: re-flagging
+        refreshes the timestamp. Consolidated parents are not touched
+        (their transient sources are; cascade re-review is out of scope).
+        """
+
+    @abc.abstractmethod
+    async def list_review_flagged(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        limit: int,
+    ) -> list[MemoryItem]:
+        """Stream HX-2 — live transient items with ``review_flagged_at``
+        set, oldest flag first, capped at ``limit``. Unlike
+        :meth:`list_purge_candidates` there is no age / retrieval / prior
+        review filter — a user 👎 re-opens even a previously-reviewed
+        item.
+        """
 
     @abc.abstractmethod
     async def archive(

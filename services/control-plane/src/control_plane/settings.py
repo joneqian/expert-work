@@ -357,6 +357,12 @@ class Settings(BaseSettings):
     skill_rollback_monitor_interval_s: int = Field(default=3600, gt=0)
     #: Rolling outcome window (days) per version for the regression test.
     skill_rollback_window_days: int = Field(default=7, gt=0)
+    #: Stream HX-2 — FeedbackConsumerWorker (user 👎 → memory review flags).
+    #: DB-only (no LLM); enabled by default so the learning loop's human
+    #: signal is live out of the box.
+    enable_feedback_consumer: bool = Field(default=True)
+    #: 👎 volume is low; 10 minutes keeps the loop responsive without noise.
+    feedback_consumer_interval_s: int = Field(default=600, gt=0)
 
     #: SE-13 pre-evolution domain research (gated OFF by default). On cold start
     #: of an agent's evolution, research the tenant KB (+ optionally public web)

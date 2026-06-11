@@ -34,6 +34,9 @@ class FeedbackRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    #: Stream HX-2 (Mini-ADR HX-B1) -- FeedbackConsumerWorker stamp.
+    #: NULL = a row not yet consumed by the learning loop.
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("feedback_tenant_thread_idx", "tenant_id", "thread_id"),

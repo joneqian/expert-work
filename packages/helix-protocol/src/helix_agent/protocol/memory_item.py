@@ -93,3 +93,11 @@ class MemoryItem(BaseModel):
         "reviewed; non-NULL ↔ skip re-review (prevents borderline-fact "
         "thrash where repeated LLM rolls could eventually flag-and-purge).",
     )
+    review_flagged_at: datetime | None = Field(
+        default=None,
+        description="Stream HX-2 (Mini-ADR HX-B3) — set by the "
+        "FeedbackConsumerWorker when a user 👎 lands on this item's "
+        "source thread. The MemoryConsolidator's SUB-PASS 2 reviews "
+        "flagged items regardless of age and clears the flag via "
+        "mark_reviewed; soft-deleted noise clears implicitly.",
+    )

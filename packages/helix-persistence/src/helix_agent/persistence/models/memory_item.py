@@ -87,5 +87,12 @@ class MemoryItemRow(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    #: Stream HX-2 (Mini-ADR HX-B3) -- set when a user 👎 flags this
+    #: item's source thread; consolidator SUB-PASS 2 reviews flagged
+    #: items regardless of age and clears the flag via mark_reviewed.
+    review_flagged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     __table_args__ = (Index("memory_item_tenant_user_idx", "tenant_id", "user_id"),)

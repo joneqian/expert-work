@@ -91,6 +91,7 @@ from control_plane.encrypted_secret_store import (
     SqlEncryptedSecretStore,
     build_kek_from_b64,
 )
+from control_plane.feedback_consumer import FeedbackConsumerWorker
 from control_plane.keycloak import (
     FakeKeycloakAdminClient,
     HttpKeycloakAdminClient,
@@ -694,6 +695,7 @@ def create_app(
             curation_worker: CurationWorker | None = None
             skill_evolution_worker: SkillEvolutionWorker | None = None
             skill_rollback_monitor: RollbackMonitor | None = None
+            feedback_consumer: FeedbackConsumerWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
                     if not resolved_settings.checkpointer_dsn:
@@ -1083,6 +1085,19 @@ def create_app(
                 )
                 skill_rollback_monitor.start()
                 _app.state.skill_rollback_monitor = skill_rollback_monitor
+
+            # Stream HX-2 — feedback consumer (user 👎 → memory review
+            # flags). DB-only, no LLM/provider gate.
+            if resolved_settings.enable_feedback_consumer:
+                feedback_consumer = FeedbackConsumerWorker(
+                    feedback_store=resolved_feedback,
+                    thread_meta_store=resolved_threads,
+                    memory_store=resolved_memory_store,
+                    audit_logger=resolved_audit,
+                    interval_s=resolved_settings.feedback_consumer_interval_s,
+                )
+                feedback_consumer.start()
+                _app.state.feedback_consumer = feedback_consumer
             resolved_lifecycle.mark_ready()
             logger.info(
                 "control_plane.lifespan.ready",
@@ -1107,6 +1122,8 @@ def create_app(
                     await skill_evolution_worker.stop()
                 if skill_rollback_monitor is not None:
                     await skill_rollback_monitor.stop()
+                if feedback_consumer is not None:
+                    await feedback_consumer.stop()
                 ingestion_runner: KnowledgeIngestionRunner | None = getattr(
                     _app.state, "knowledge_ingestion_runner", None
                 )
