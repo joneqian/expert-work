@@ -25,6 +25,11 @@ dependencies = [
     # async leaky bucket so over-limit calls await instead of bursting
     # into 429s and tripping the E.4 breaker.
     "aiolimiter>=1.1,<2",
+    # HX-12 ranked deferred-tool retrieval (Mini-ADR HX-I1): BM25 over the
+    # deferred pool + CJK-aware tokenization (jieba precedent: J.5 keyword
+    # search in helix-persistence).
+    "rank-bm25>=0.2,<1",
+    "jieba>=0.42,<1",
 ]
 
 [build-system]

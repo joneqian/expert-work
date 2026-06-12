@@ -144,6 +144,10 @@ module = "jieba.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = "rank_bm25.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = "croniter.*"
 ignore_missing_imports = true
 
