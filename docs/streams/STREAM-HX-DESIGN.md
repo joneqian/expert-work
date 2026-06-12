@@ -24,7 +24,8 @@
 | HX-6 | ⑤ 沙盒 | 首触冷启动（J.15 暖会话已在）+ 池路径限额配对 | READY 池 + replenisher + claim 时 docker update + 镜像预拉 | §7（本文） |
 | HX-7 | ⑨ 可观测 / 治理 | Langfuse 停在 Recording stub（OTel 链已通，见 §8.1）；approval 无队列视图/批量 | LangfuseSdkClient + settings/factory 接线 + approval list API + 批量 decide + /approvals 队列页 | §8（本文） |
 | HX-8 | ⑩ 多租户 | 平台 provider/tool 凭证全租户共享一把上游 key（爆炸半径/成本归因/限流隔离全缺）；跨租户查询零开关（仅 audit） | per-tenant 凭证 override（平台管理，非 BYOK）+ 部署级跨租户 block 开关 | §9（本文） |
-| HX-12/13 | ② 工具面 | 工具披露 2.0（应用层 + 厂商原生档） | 见 ITERATION-PLAN Wave 2 定义 | 开工时追加 |
+| HX-12 | ② 工具面 | find_tools 检索无 ranked/中文分词；MCP always-defer 无逃生门；deferred 直调裸报错；promotion 永不退场 | BM25+jieba ranked 检索 + 防呆包 + 阈值逃生门 + call-through + 退场 | §10（本文） |
+| HX-13 | ② 工具面 | 厂商原生档（anthropic defer_loading / openai allowed_tools）未接 | ModelEntry.tool_disclosure 能力位 + 两家接线（前置 HX-12） | 开工时追加 |
 
 Wave 1 顺序：HX-1 → HX-2 → HX-3 → HX-4（HX-1 的 estimator 是 HX-12 阈值逃生门的前置件；HX-4 的指标骨架吃 HX-1 的 drift 数据）。
 
@@ -712,3 +713,98 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 | PR1 | 迁移 0073 + tenant secret store + service 租户合并视图 + resolver tenant getter + runtime 接线 + overrides gauge | §9.5-PR1 |
 | PR2 | 管理 API 5 端点 + 4 audit action + SettingsPlatformConfig 抽屉 + SE-8 接线 | §9.5-PR2 |
 | PR3（收尾） | settings 开关 + ensure_tenant_scope block + SYSTEM_CROSS_TENANT_BLOCKED + 14 调用点 sweep + 文档同步 | §9.5-PR3；零债 6 条 |
+
+---
+
+## 10. HX-12 — 工具披露 2.0·应用层
+
+> 源头：[Hermes Tool Search 源码分析](../research/2026-06-11-hermes-tool-search-source-analysis.md) + 业界调研，2026-06-11 拍板（应用层 B 先行——唯一覆盖全部 9 provider 的层；HX-13 厂商原生档紧随）。横切公理：**不存在 drop core tool 代码路径**；**fail-open（故障 = 多花 token，绝非少能力）**；config 防御解析。
+
+### 10.1 现状取证（2026-06-12，main@588d6fa）
+
+1. **检索**：`registry.search`（`orchestrator/tools/registry.py:369`）三语法（`select:a,b` 精确 / `+kw rest` AND 过滤 / 其余 regex→substring 降级），**只搜 deferred 池**，无 ranked、无中文分词、无相关性排序——多工具命中时顺序无意义。
+2. **MCP always-defer 硬编码**（TE-6b）：三个 MCP 池（平台/租户/用户 OAuth）在 `tools/assembly.py:489/517/539` 全部 `deferred=True`，**无"总量小就直接 active"逃生门**——一个只挂 3 个 MCP 工具的 agent 也要付 find_tools 间接层成本。
+3. **find_tools**（`tools/find_tools.py:28`）：描述未截断（超长 MCP description 全文进上下文）；零命中返回 `"(no matching tools found)"` 无任何引导；promote 经 `state_updates={"promoted_tools": names}`。
+4. **dispatch**（`graph_builder/builder.py:661`）：LLM 直调未 promote 的 deferred 名 → `ToolNotFoundError` → `"[tool error] unknown tool: ..."`——**工具明明在 registry 里却报 unknown**，无建议、无自动 promote，模型只能盲试 find_tools。
+5. **promoted_tools reducer append-only**（`state.py:46` `_merge_promoted`）：union-dedupe，**永不删除**——长会话里 promote 过的工具 schema 永久占上下文，无退场。
+6. **HX-1 资产可用**：`TokenEstimator` 协议 + `TiktokenEstimator`（`helix-runtime/tokens.py`，`default_estimator()` 单例）已落地；`context_window` 解析（manifest override → MODEL_CATALOG）在 agent_factory。阈值逃生门可直接用真 tokenizer（ITERATION-PLAN 原文"chars/4，HX-1 落地后换"已过期——直接上真分词）。
+7. **jieba 已是仓内依赖**（helix-persistence，J.5 `knowledge/text_search.py` app-side CJK 分词先例）；无 BM25 实现/依赖。
+8. **指标**：`helix_tool_call_total{tool,outcome}` + `helix_tool_latency_seconds{tool}` 已在（builder.py:143）；promotion 域零指标。
+
+### 10.2 设计
+
+#### 10.2.1 ① ranked 检索内核（registry.search 自然语言模式）
+
+- **三语法保留**（`select:` / `+kw` / regex 先试——既有调用语义零破坏）；非语法命中的自然语言 query 走 **BM25 ranked top-K（K=8）**。
+- 语料：每个 deferred 工具 = 名字拆词（`_`/`-`/camelCase 切分）+ description + 顶层参数名；**jieba 分词**（J.5 同款 app-side 先例，中文 query/描述都正确切词）。
+- 索引：注册期增量建（`register`/un-defer 时失效重建 lazy），工具量级几百，内存倒排足够。
+- **零 IDF 兜底**：query 与语料零重叠（BM25 全零分）→ 退回现 substring 路径——检索永不比现状差（fail-open）。
+- **向量接缝**：检索内核收在独立函数 `rank_tools(query, corpus) -> list[(name, score)]`，签名不含 BM25 概念——将来换 embedding 检索是函数替换，不动 search 外壳。不建 Protocol（单实现不抽象）。
+- 依赖：`rank-bm25`（纯 Python，PyPI 成熟）+ `jieba` 进 orchestrator。
+
+#### 10.2.2 find_tools 防呆包
+
+- 结果行带 **source 标注**：registry.register 加可选 `source: str | None`（assembly 注册时传 `mcp:<server>` / skill 路径传 `skill`；缺省 builtin）——模型看得见工具来路。
+- **描述截 400 字符**（Hermes 同款）：超长 MCP description 截断 + `…`，全文留 registry 内部（dispatch 校验不受影响）。
+- **教学式错误**：零命中返回改为含三语法用法 + "try a broader natural-language query" 的引导文案（不再是裸 `(no matching tools found)`）。
+- **docstring 过期修正**：find_tools spec.description 重写——补自然语言 ranked 模式说明。
+- 零命中打 `helix_tool_promotion_total{event="miss"}`（治理信号，将来喂 HX-2 学习闭环）。
+
+#### 10.2.3 ② 阈值逃生门（assembly 注册期）
+
+- `register_mcp_tools` 注册完三池后（或注册时聚合）：用 `default_estimator()` 估算**全部 MCP 工具 schema**（name+description+parameters JSON）token 总量；总量 < **min(context_window × 10%, 20k)** → 全部重注册为 active（`registry.register(tool)` 覆盖即 un-defer，现成语义），find_tools 自然不再注册（`has_deferred()` 为假）。
+- `context_window` 由 agent_factory 既有解析传入 assembly（加参数）。
+- 防御：estimator 异常 → 维持 always-defer 现状（fail-open 到行为不变侧）。
+- 阈值不开配置面（常量 + 注释），有真实需求再参数化。
+
+#### 10.2.4 ③ call-through（dispatch 拦截）
+
+- `tools_node` 捕 `ToolNotFoundError` 前先查：名字**在 deferred 池** → 自动 promote（state_updates 合并 `promoted_tools`）+ **本 turn 直接执行**（registry.get 本就能拿到 deferred 工具，dispatch 零额外成本）+ `helix_tool_promotion_total{event="call_through"}`——模型记得工具名就不必付 find_tools 往返。
+- 名字**不在任何池** → 错误信息附 **ranked top-3 建议**（复用 10.2.1 内核检索错误名）：`"unknown tool: 'x'. Did you mean: a, b, c? Use find_tools to search."`。
+- 公理兑现：两分支都只多花 token，不可能比现状（裸报错）差。
+
+#### 10.2.5 ④ promotion 退场 + 指标
+
+- state 新增 `promoted_tool_last_used: dict[str, int]`（name → step_count，reducer 按 key 取 max）；tools_node 每次成功 dispatch promoted 工具时打点。
+- **compressor 触发时**（既有 should_compress 判定点）：`step_count - last_used > N`（N=12 常量）的 promoted 工具降级——`promoted_tools` reducer 升级为**带删除语义**：new 值支持 `{"add": [...], "remove": [...]}` dict 形态（list 形态保持现 add 语义零破坏，dict 由降级路径专用）。
+- 降级 = 从 promoted 列表移除（下 turn bind 不含其 schema）；工具仍在 deferred 池，find_tools / call-through 随时可再召回——**退场永不丢能力，只省上下文**。
+- 指标：`helix_tool_promotion_total{event}`，event ∈ {promote, call_through, demote, miss}；现有 `helix_tool_call_total` 不动。
+
+### 10.3 边界（不做）
+
+- **向量检索**：接缝已留（10.2.1），embedding 索引另立项。
+- **厂商原生档**（anthropic defer_loading / openai allowed_tools）：HX-13（前置本项）。
+- **core tool 裁剪**：任何 manifest 声明的 active 工具不进退场范围——降级只作用于 promoted-from-deferred 集合（公理）。
+- **退场 N 的自适应**：常量起步，有命中率数据再谈（HX-6 EWMA 同款纪律）。
+- **find_tools 结果分页**：top-K=8 截断 + 教学文案足够。
+
+### 10.4 可观测
+
+- `helix_tool_promotion_total{event=promote|call_through|demote|miss}`（10.2.5）。
+- 既有 `helix_tool_call_total{tool,outcome}` / `helix_tool_latency_seconds` 不动；call-through 的执行打点走既有 outcome 维度。
+- 阈值逃生门触发：assembly INFO 日志（一次性，启动期）。
+
+### 10.5 测试
+
+- **PR1**：rank_tools 单测（中文/英文/混合 query 排序、零 IDF 兜底、名字拆词）+ search 三语法回归零变 + find_tools 防呆（截断/教学错误/source 标注/miss counter）。
+- **PR2**：逃生门矩阵（总量小→全 active + find_tools 不注册 / 超阈值→维持 defer / estimator 异常→维持 defer / context_window 传递）。
+- **PR3**：call-through（deferred 名直调→promote+执行+counter / 未知名→top-3 建议文案 / active 工具路径零变）。
+- **PR4**：退场（last_used 打点 / N turn 未用→demote+counter / reducer dict 删除语义 + list 兼容 / demote 后 find_tools 可再召回 / core tool 永不进退场）。
+
+### 10.6 Mini-ADR
+
+- **HX-I1 BM25 + jieba 进 orchestrator，不自研检索**：rank-bm25 纯 Python 成熟库；jieba 已是仓内依赖（J.5 先例）；工具语料量级几百，内存索引零运维。
+- **HX-I2 检索内核留函数级向量接缝，不建 Protocol**：单实现不抽象（CLAUDE.md 简单优先）；`rank_tools` 签名与 BM25 解耦即可替换。
+- **HX-I3 逃生门用真 tokenizer（HX-1 资产），阈值 min(10% ctx, 20k) 常量**：估算失败 fail-open 到 always-defer 现状侧。
+- **HX-I4 call-through 本 turn 执行**：registry.get 对 deferred 工具本就可 dispatch（TE-6 设计如此），拦截只是把"报错"换成"promote+执行"——零新攻击面（工具本身已过 manifest/许可注册）。
+- **HX-I5 reducer 删除语义 = dict 形态扩展**：list 值保持 append-only 旧语义（全部既有写点零改动）；`{"add","remove"}` dict 仅退场路径使用；demote 不出 deferred 池，能力永不丢失。
+
+### 10.7 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §10 + ITERATION-PLAN 细化 | 纯 docs，CI |
+| PR1 | ranked 检索内核（BM25+jieba）+ find_tools 防呆包 + miss counter | §10.5-PR1 |
+| PR2 | 阈值逃生门（assembly + estimator + context_window 传入） | §10.5-PR2 |
+| PR3 | call-through + ranked 错误建议 | §10.5-PR3 |
+| PR4（收尾） | promotion 退场（last_used + reducer 删除语义 + demote）+ 指标收口 | §10.5-PR4；零债 6 条 |
