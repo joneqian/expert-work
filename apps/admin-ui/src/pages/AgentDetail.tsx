@@ -8,11 +8,10 @@
  * (Mini-ADR B-3 keeps ``name + version`` as the agent's natural key —
  * the row UUID is internal).
  *
- * Wired tabs: ``overview`` / ``manifest`` / ``playground``. The
- * remaining per-agent sub-views (Runs / Skills / Triggers / Memory)
- * land in Stream H.3 / H.4 — they need separate list-filter parameters
- * the backend list endpoints don't accept yet (eg. ``GET /v1/runs?
- * agent_name=…``).
+ * All tabs are wired: ``overview`` / ``manifest`` / ``history`` /
+ * ``playground`` plus the per-agent sub-views (Runs / Skills /
+ * Triggers / Memory, Stream H.6 PR 2 — backed by the agent list
+ * filters from H.6 PR 1).
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -36,7 +35,11 @@ import { ApiError } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
 import { HistoryTab } from "./agent_detail/HistoryTab";
 import { ManifestTab } from "./agent_detail/ManifestTab";
+import { MemoryTab } from "./agent_detail/MemoryTab";
 import { PlaygroundTab } from "./agent_detail/PlaygroundTab";
+import { RunsTab } from "./agent_detail/RunsTab";
+import { SkillsTab } from "./agent_detail/SkillsTab";
+import { TriggersTab } from "./agent_detail/TriggersTab";
 
 const { Text } = Typography;
 
@@ -156,7 +159,20 @@ export function AgentDetail() {
       {activeTab === "manifest" && <ManifestTab detail={detail} onSaved={refresh} />}
       {activeTab === "history" && <HistoryTab detail={detail} onRolledBack={refresh} />}
       {activeTab === "playground" && <PlaygroundTab detail={detail} />}
-      {!["overview", "manifest", "history", "playground"].includes(activeTab) && (
+      {activeTab === "runs" && <RunsTab detail={detail} />}
+      {activeTab === "skills" && <SkillsTab detail={detail} />}
+      {activeTab === "triggers" && <TriggersTab detail={detail} />}
+      {activeTab === "memory" && <MemoryTab />}
+      {![
+        "overview",
+        "manifest",
+        "history",
+        "playground",
+        "runs",
+        "skills",
+        "triggers",
+        "memory",
+      ].includes(activeTab) && (
         <Empty
           description={t("agent_detail.tab_coming_soon", { tab: activeTab })}
           style={{ marginTop: 64 }}

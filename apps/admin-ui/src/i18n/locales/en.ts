@@ -102,6 +102,44 @@ export interface TranslationKeys {
     diff_label: string;
     diff_loading: string;
   };
+  runs_tab: {
+    title: string;
+    window_capped: string;
+    empty: string;
+  };
+  skills_tab: {
+    title: string;
+    authored_hint: string;
+    col_name: string;
+    col_status: string;
+    col_visibility: string;
+    col_version: string;
+    col_created: string;
+    empty: string;
+  };
+  triggers_tab: {
+    title: string;
+    manage_hint: string;
+    col_name: string;
+    col_kind: string;
+    col_enabled: string;
+    col_source: string;
+    col_created: string;
+    enabled: string;
+    disabled: string;
+    empty: string;
+  };
+  memory_tab: {
+    title: string;
+    user_scope_note: string;
+    filter_kind: string;
+    filter_kind_all: string;
+    col_kind: string;
+    col_content: string;
+    col_user: string;
+    col_created: string;
+    empty: string;
+  };
   manifest_tab: {
     read_only_hint: string;
     edit_hint: string;
@@ -1285,6 +1323,46 @@ const en: TranslationKeys = {
       "This appends a new revision with the old content — history is never rewritten.",
     diff_label: "Diff: #{{older}} → #{{newer}}",
     diff_loading: "Loading diff…",
+  },
+  runs_tab: {
+    title: "Runs of this agent",
+    window_capped:
+      "This agent has more threads than the server window — runs from older threads are not shown.",
+    empty: "No runs for this agent yet.",
+  },
+  skills_tab: {
+    title: "Skills authored by this agent",
+    authored_hint: "Skills created by {{agent}} (all versions)",
+    col_name: "Name",
+    col_status: "Status",
+    col_visibility: "Visibility",
+    col_version: "Latest",
+    col_created: "Created",
+    empty: "This agent has not authored any skills yet.",
+  },
+  triggers_tab: {
+    title: "Triggers bound to this version",
+    manage_hint: "Create / enable / disable on the Triggers page",
+    col_name: "Name",
+    col_kind: "Kind",
+    col_enabled: "State",
+    col_source: "Source",
+    col_created: "Created",
+    enabled: "enabled",
+    disabled: "disabled",
+    empty: "No triggers bound to this agent version.",
+  },
+  memory_tab: {
+    title: "Long-term memory",
+    user_scope_note:
+      "Memory is a per-user asset — these are the per-user items this agent reads; there is no per-agent partition. Governance actions live on the Memory page.",
+    filter_kind: "Filter by kind",
+    filter_kind_all: "All kinds",
+    col_kind: "Kind",
+    col_content: "Content",
+    col_user: "User",
+    col_created: "Created",
+    empty: "No memory items yet.",
   },
   manifest_tab: {
     read_only_hint: "Read-only — click Edit to modify the spec.",

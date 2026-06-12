@@ -112,11 +112,19 @@ export interface RunList {
   items: RunListItem[];
   total: number;
   cross_tenant: boolean;
+  /** Stream H.6 (Mini-ADR H-10) — true when the agent filter's thread
+   *  window hit the server cap (older threads' runs not included).
+   *  Optional so pre-H.6 mocks stay valid. */
+  thread_window_capped?: boolean;
 }
 
 export interface ListRunsParams {
   tenantScope?: TenantScope;
   status?: RunStatus;
+  /** Stream H.6 — narrow to one agent's runs (AgentDetail Runs tab).
+   *  ``agentVersion`` requires ``agentName`` (backend 422s otherwise). */
+  agentName?: string;
+  agentVersion?: string;
   limit?: number;
   offset?: number;
 }
@@ -125,8 +133,11 @@ export interface ListRunsParams {
  *  agents-list shape (``"*"`` for cross-tenant, UUID for explicit, or
  *  ``undefined`` for the caller's home tenant). */
 export async function listRuns(params: ListRunsParams = {}): Promise<RunList> {
-  const { tenantScope, status, limit, offset } = params;
-  const query = withTenantScope({ status, limit, offset }, tenantScope);
+  const { tenantScope, status, agentName, agentVersion, limit, offset } = params;
+  const query = withTenantScope(
+    { status, agent_name: agentName, agent_version: agentVersion, limit, offset },
+    tenantScope,
+  );
   return getJson<RunList>("/v1/runs", { params: query });
 }
 
