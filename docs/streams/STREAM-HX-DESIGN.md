@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（sandbox 热池 + 资源限额粒度，§7）详设已锁定；其余各条开工时追加章节。
+> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）详设已锁定（Wave 3 首项）；其余各条开工时追加章节。
 
 ---
 
@@ -24,6 +24,7 @@
 | HX-6 | ⑤ 沙盒 | 首触冷启动（J.15 暖会话已在）+ 池路径限额配对 | READY 池 + replenisher + claim 时 docker update + 镜像预拉 | §7（本文） |
 | HX-7 | ⑨ 可观测 / 治理 | Langfuse 停在 Recording stub（OTel 链已通，见 §8.1）；approval 无队列视图/批量 | LangfuseSdkClient + settings/factory 接线 + approval list API + 批量 decide + /approvals 队列页 | §8（本文） |
 | HX-8 | ⑩ 多租户 | 平台 provider/tool 凭证全租户共享一把上游 key（爆炸半径/成本归因/限流隔离全缺）；跨租户查询零开关（仅 audit） | per-tenant 凭证 override（平台管理，非 BYOK）+ 部署级跨租户 block 开关 | §9（本文） |
+| HX-10 | ⑤ 沙盒 | misconfig 无测试钉死（实证 LLM 100% 逃逸类）；无 seccomp（吃宿主 Docker 默认）；gVisor 一键可切但从没真跑过验证；CI 零镜像 CVE 扫描 | misconfig 断言 + 仓库自管 pinned seccomp profile + gVisor 可配置+CI 真验证 + Trivy 分镜像门禁+周扫（实证驱动，[research](../research/2026-06-12-sandbox-isolation-defense-in-depth.md)） | §12（本文） |
 | HX-12 | ② 工具面 | find_tools 检索无 ranked/中文分词；MCP always-defer 无逃生门；deferred 直调裸报错；promotion 永不退场 | BM25+jieba ranked 检索 + 防呆包 + 阈值逃生门 + call-through + 退场 | §10（本文） |
 | HX-13 | ② 工具面 | 厂商原生档（anthropic defer_loading / openai allowed_tools）未接；caller 链路无 deferred 可见性 | `tool_disclosure` 能力位 + `ToolSpec.defer_loading` 单标记 + 两家接线（前置 HX-12） | §11（本文） |
 
@@ -886,3 +887,113 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 | PR1 | ModelEntry.tool_disclosure + catalog 标注 + ToolSpec.defer_loading + 档位解析至 build_react_graph | §11.5-PR1 |
 | PR2 | anthropic：agent_node native 档分支 + adapter defer_loading/beta header + fail-open 降级 | §11.5-PR2 |
 | PR3（收尾） | openai/azure：allowed_tools 子集 + compat 核实结论入册 + 降级 + 文档 | §11.5-PR3；零债 6 条 |
+
+---
+
+## 12. HX-10 — sandbox 安全纵深：misconfig 钉死 + seccomp + gVisor + Trivy
+
+> 评估维度 ⑤（沙盒）。定位：**多租户共享宿主下 agent 执行 LLM 生成代码的隔离纵深**。
+>
+> **实证驱动设计**：本章方向经四角业界调研锁定，依据全文落 [`docs/research/2026-06-12-sandbox-isolation-defense-in-depth.md`](../research/2026-06-12-sandbox-isolation-defense-in-depth.md)。核心实证：① 业界共识隔离强度匹配信任画像，多租户 untrusted 代码 → gVisor/microVM；② gVisor「2-3x 损失」被夸大（CPU-bound Python <3%，Tencent 百万级 agentic-RL 沙箱生产验证兼容问题 1.7%）；③ systrap 平台无需 KVM，国内云标准 ECS 可跑（阿里云 OpenSandbox / 腾讯云生产已用）；④ **SANDBOXESCAPEBENCH（ICML 2026）**：前沿 LLM 对容器逃逸——misconfig 类 100% 成功，内核 CVE 类 hardened 下 ~40%。
+>
+> **威胁模型（实证修正，写入横切公理脚注）**：内部可信 vs 对外开放，逃逸**能力相同**，差的只是入口向量 + 攻击者迭代次数。多租户共享宿主下逃逸 = **跨租户数据泄露**。**所需隔离强度由跨租户爆炸半径决定，不由用户信任决定**——信任只降概率不改影响。决策（2026-06-12，方案 1）：gVisor 当期纳入（可配置 + CI 验证），不缓做。
+>
+> 横切公理边界澄清：fail-open 公理（基础设施抖动只多花 token 不减能力）的例外是**安全配置事故**——seccomp profile 配了却加载不了、misconfig 断言失败，必须 fail-closed（拒启动 / 拒 merge）。这不是抖动，是配置错误，静默放过等于无防护。
+
+### 12.1 现状取证（2026-06-12，main@aa58e4a）
+
+| 事实 | 证据 | 判定 |
+|------|------|:----:|
+| runtime hardening 全集中一处：read-only / cap-drop ALL / no-new-privileges / pids/mem/cpu / --internal 网络 | `runtime_provider.py:82-105` | seccomp 加 `--security-opt seccomp=` 一行即落位 |
+| docker.sock 挂在 **supervisor** 不在 sandbox；sandbox cap-drop ALL + read-only + no-new-privileges + tmpfs 工作区 | `Dockerfile`、`runtime_provider.py:88-93,109-122`、`docker-compose.yml` | **三个 100%-逃逸 misconfig 类（socket/特权/可写宿主挂载）应都不中**——但无测试钉死（gap ⓪） |
+| **无任何 `--security-opt seccomp` 参数** → runc 下吃宿主 Docker 默认 profile（随版本漂移） | `runtime_provider.py` 全文 grep 无 seccomp | 真 gap ①：隔离强度由宿主 Docker 版本决定 |
+| runc↔runsc 一键可切，但**从没在 runsc 下真跑过测试**；集成测试 4 处硬编码 `oci_runtime="runc"` | `runtime_provider.py:103-104`、`test_supervisor_integration.py:205/207/528/530` | 真 gap ②：「切 gVisor 照常工作」未验证；Gate #6 timing / #7 CVE-2019-5736 ⏳ 卡在「需真 runsc」 |
+| CI 零镜像扫描：office 有构建+推送 workflow 不扫；minimal 连 CI 构建都无 | `.github/workflows/sandbox-image-office.yml`、`docker-compose.yml:313` | 真 gap ③：基础镜像 CVE 全程无感 |
+| 两镜像基底：minimal=alpine、office=debian-slim+LibreOffice/CJK（CVE 面大） | 两 Dockerfile | office 卡 HIGH 会恒红（§调研3） |
+
+### 12.2 设计
+
+#### 12.2.0 ⓪ misconfig 断言（PR1，最高优先级、零成本）
+
+实证里前沿 LLM 对三类 misconfig **100% 逃逸成功**——这是比任何 runtime 升级都重要的防线，且是 config 属性非运行时开销。我们取证三项都不中，但**必须钉死防回归**：
+
+- `runtime_provider` 单测断言 docker run argv：**不含** `-v /var/run/docker.sock`（任意形式）/ `--privileged` / `--cap-add`；**含** `--cap-drop ALL` + `--read-only` + `--security-opt no-new-privileges`。
+- 工作区挂载断言：tmpfs 或 named volume，**绝不**宿主路径 bind mount（`-v /host/path:...`）。J.15 持久卷是 docker named volume（`workspace_volume:/workspace`），非宿主路径，合规。
+- 任一断言失败 = 测试红 = 阻 merge（fail-closed）。
+
+#### 12.2.1 ① seccomp pinned profile（PR1）
+
+- **profile 入仓** `infra/sandbox-image/seccomp-profile.json`：以 Docker 官方 default profile 为基线，显式收紧高危族移出 allowlist：`io_uring_setup`/`io_uring_enter`/`io_uring_register`、`userfaultfd`、`keyctl`/`add_key`/`request_key`、`bpf`、`perf_event_open` 之外的内核调试族。每条带注释（CVE/利用类别）。
+- **实证修正（不收紧的）**：
+  - **`clone3` 保留允许**——Docker default 本就允许；显式 `ERRNO` 会让新版 glibc/Python（用 clone3 建线程）崩溃。default profile 对未知 syscall 返 `ENOSYS` 让 glibc 回退 clone，profile 必须保持此 default 动作。
+  - **`perf_event_open` 移出强制收紧**——禁它使 py-spy/cProfile 等 profiling 失效，安全收益边际；保留允许，仅注释标注。
+  - **`io_uring*` 保留禁用但文档标注兼容代价**——禁它砍掉逃逸重灾区（安全收益实打实），但用 io_uring 的新 async 库会收 ENOSYS 回退 epoll（Claude Code #27230 Bun 实例）；`infra/sandbox-image/README` 标注「沙箱内 io_uring 不可用」。
+- **传载**：`SandboxRuntimeProvider` 增 `seccomp_profile_path: str | None`（None = 不加参数 = 现状）；非 None 时 argv 插 `--security-opt seccomp=<path>`（紧邻 no-new-privileges）。runsc 下同传（gVisor 对宿主侧 Sentry 进程仍受益，两轨叠加）。
+- **fail-closed 校验**：supervisor lifespan 启动时——配了 profile 路径但文件缺/JSON 非法 → 拒启动（明确异常）。安全配置事故非抖动（横切公理脚注）。
+- **settings**：`seccomp_profile_path: str | None = None`，env `HELIX_SANDBOX_SECCOMP_PROFILE_PATH`；默认 None 保 dev/单测零变更，environments yaml 显式开。docker-out-of-docker：路径是**宿主可见路径**（compose volume / 宿主预置），不是 supervisor 容器内路径。
+
+#### 12.2.2 ② gVisor 可配置 + CI 验证（PR2）
+
+实证消除了缓做理由（代价小 + 国内云可跑 + 关闭 40%-可利用残差），故当期纳入，形态 = **可配置 + CI 验证**，非全局无脑强制。
+
+- **部署策略（写入 environments 文档）**：生产多租户同宿主**推荐 runsc**（`HELIX_SANDBOX_OCI_RUNTIME=runsc`）；dev/macOS runc（gVisor Linux-only）。能力代码（runc↔runsc）本就在，本 PR 只补**验证**。
+- **新 workflow** `.github/workflows/sandbox-gvisor.yml`：路径过滤触发（`runtime/sandbox/**`、`sandbox-supervisor/**`、`infra/sandbox-image/**`、本 workflow）+ `workflow_dispatch`。
+- **步骤**：ubuntu runner → 下载 runsc 二进制（官方源 sha512 校验，版本 pin；**部署注记**：生产经 OSS/ACR 转存分发不依赖 Google 直连，CI 海外直连无碍，systrap 平台无需 KVM）→ 注册 dockerd → 构建 minimal 镜像 → runsc 下跑 sandbox 集成测试。
+- **集成测试 runtime 参数化**（PR2 配套）：4 处硬编码 `oci_runtime="runc"` → 读 env `HELIX_TEST_SANDBOX_RUNTIME`（默认 runc，本地/既有 job 零变更）；gVisor workflow 设 runsc。
+- **runtime 真起断言**（防静默回落）：容器起后 `docker inspect --format '{{.HostConfig.Runtime}}'` 断言 = 期望值；runsc 期望下实际是 runc 则 fail（daemon 注册失败会静默回落，否则「验证」名存实亡）。
+- **兼容坑断言（按 Tencent/调研踩坑清单）**：runsc job 内补——io_uring 在沙箱内返 ENOSYS（确认 seccomp/gVisor 双重不可用且优雅）、`/proc/sys/net` 访问不崩、典型 Python import + numpy 计算跑通。
+- **逃逸 PoC 用例（Gate #7 自动化起点）**：CVE-2019-5736 类逃逸「应失败」（runc skip——本就可能受影响；runsc 断言被挡）。timing side-channel（#6）环境敏感留 staging。
+- **Gate 收益**：M0→M1 Gate 的 gVisor 验证从一次性人工活动变持续自动验证。
+
+#### 12.2.3 ③ Trivy 镜像 CVE 扫描（PR3，收尾）
+
+实证修正：分镜像差异化门禁 + 全部 `--ignore-unfixed`，否则 office(LibreOffice) 卡 HIGH 恒红失效。
+
+- **minimal 镜像补 CI 构建**：新 workflow `sandbox-image.yml`（对齐 office build pattern：buildx + gha cache + SHA-pinned actions），PR build+scan，推送目标随生产部署定。
+- **分镜像门禁**（PR 阻断）：
+  - minimal(alpine) / debian 基底：`--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`。
+  - office(LibreOffice)：`--severity CRITICAL --ignore-unfixed --exit-code 1`（HIGH 降 weekly 报告——大依赖镜像卡 HIGH 恒红失效，且沙箱真隔离由 gVisor 提供，镜像内用户态库 CVE 优先级正当下调，理由入决策记录防质疑）。
+- **豁免通道**：`.trivyignore`（带过期日期，强制复审禁永久 mute）入仓走 review。
+- **周扫**：`schedule: cron`（weekly）对两镜像跑全量 Trivy（含 HIGH），fail → 开 issue / workflow 可见（基础镜像新爆 CVE 不等代码改动）。
+- **SARIF 上传**：`github/codeql-action/upload-sarif` 进 Security tab 看趋势，不替代 exit-code 门禁。
+
+### 12.3 边界（不做）
+
+- **microVM（Firecracker/Kata）/ Sysbox**：M2/M3 升级路线。**Sysbox**（Daytona 用，唯一为「强隔离 + 保留 DooD 兼容」设计）作为 gVisor 的 DooD 友好对照候选记在册，对外开放不可信用户里程碑时与 Kata 一并评估（`02-sandbox-isolation.md` + 本 research）。HX-10 不改隔离范式。
+- **gVisor 全局强制**：可配置（生产推荐 runsc / dev runc），不在代码里写死。
+- **白名单极简 seccomp**：Python/glibc syscall 面大随版本变，误杀风险高维护贵；default+收紧档安全收益已足（调研3 + 决策）。
+- **timing side-channel（Gate #6）CI 化**：环境敏感，CI runner 噪声大，留 staging。
+- **prompt injection 本身的应用层防御**：lethal trifecta 切割（HX-2 反馈闭环 / approval gate 已部分覆盖外泄动作）属另一战线；HX-10 只管隔离爆炸半径，不假装解决注入根因。
+- **运行时 seccomp 探测 / 动态 profile**：静态安全资产声明式入仓。
+
+### 12.4 可观测
+
+- misconfig + seccomp：无新增运行时指标——断言/校验是 build-time（测试红）+ 启动期（fail-closed），比指标更强。supervisor 启动日志记 seccomp profile 路径 + 加载结果 + 实际 oci_runtime。
+- gVisor CI：workflow 成功/失败即信号；runtime 断言失败 = 明确测试失败。
+- Trivy：CI exit-code 门禁 + weekly workflow 状态；CVE 列表进 job log / SARIF。
+
+### 12.5 测试
+
+- **PR1**：misconfig 断言（argv 无 socket/特权/cap-add/宿主 bind mount + 有 cap-drop/read-only/no-new-priv）；seccomp argv（None 无参数回归 / 非 None 含 `--security-opt seccomp=<path>` 位置正确）；profile JSON 解析断言高危 syscall 移出 allowlist（io_uring/userfaultfd/keyctl/bpf）**且 clone3 仍在 allowlist**（防误删回归）；supervisor 启动 fail-closed（配路径文件缺 → 拒启动）。
+- **PR2**：集成测试 runtime env 参数化（默认 runc 回归）；runtime 真起断言（runc job 断言 runc / gvisor job 断言 runsc）；兼容坑断言（io_uring ENOSYS / proc-sys-net 不崩 / numpy 跑通）；CVE-2019-5736 PoC（runsc 挡 / runc skip）。gVisor workflow = 端到端验证。
+- **PR3**：Trivy workflow——故意引入已知 CVE 包验 fail（或 dry-run 验配置）；`.trivyignore` 生效；分镜像 severity 差异；周扫 cron lint。
+
+### 12.6 Mini-ADR
+
+- **HX-K0 misconfig 断言是最高优先级、零成本防线**：实证前沿 LLM 对 docker-socket/特权/可写宿主挂载 100% 逃逸；config 属性非运行时开销；钉死防回归。fail-closed（断言红阻 merge）。
+- **HX-K1 seccomp = 仓库自管 pinned profile（default 基线 + 显式收紧）**：隔离强度由代码版本决定不由宿主 Docker 版本；JSON diff 可审计。**实证修正 clone3 保留允许（禁了崩新 glibc）/ perf_event_open 移出强制 / io_uring 禁用但标兼容代价**。
+- **HX-K2 安全配置事故 fail-closed（例外于 fail-open 公理）**：seccomp 配了加载不了 / misconfig 断言失败 = 配置错误非抖动，必须拒。语义边界入横切公理脚注。
+- **HX-K3 gVisor 当期纳入（可配置 + CI 验证），不缓做**：实证消除缓做的成本顾虑（CPU-bound <3% / systrap 国内云可跑 / Tencent 百万级生产验证）；威胁模型修正——爆炸半径由跨租户决定不由信任决定，残差（hardened 下 40%-可利用内核 CVE 逃逸）影响跨租户，非平凡。生产推荐 runsc / dev runc / CI 持续验证。
+- **HX-K4 runsc 二进制 OSS/ACR 转存分发**：国内生产主机直连 Google 源不可达；CI（海外）下载+校验后转存。systrap 平台无需 KVM/嵌套虚拟化，标准 ECS 可跑。seccomp 是内核特性无网络依赖。
+- **HX-K5 Trivy 分镜像差异化 + `--ignore-unfixed` + 周扫**：实证修正——office(LibreOffice) 卡 HIGH 恒红失效，降 CRITICAL+周扫；minimal/debian 卡 CRITICAL+HIGH；全部 ignore-unfixed（门禁只卡可行动项）；沙箱真隔离由 gVisor 提供故镜像内用户态库 CVE 优先级正当下调。
+- **HX-K6 集成测试 runtime env 参数化（默认 runc）**：单测试集两 runtime 复用，默认 runc 保本地/既有 job 零变更，gVisor job 切 runsc + runtime 真起断言防静默回落。
+- **HX-K7 Sysbox 记为 DooD 友好对照候选**：实证发现 Daytona 用的 Sysbox 是唯一为「强隔离 + 保留 Docker 兼容」专门设计，比 Kata 更贴我们 DooD；对外开放里程碑时与 Kata 一并评估，不在 HX-10 选型。
+
+### 12.7 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §12 + research 文档 + ITERATION-PLAN HX-10 细化 | 纯 docs，CI |
+| PR1 | misconfig 断言 + seccomp pinned profile（删 clone3 收紧）+ runtime_provider `--security-opt` + settings + supervisor fail-closed | §12.5-PR1 |
+| PR2 | gVisor CI workflow（runsc 装载 + runtime 真起断言 + 兼容坑/逃逸 PoC 用例）+ 集成测试 env 参数化 + environments 部署策略文档 | §12.5-PR2；workflow 端到端 |
+| PR3（收尾） | minimal 镜像 CI 构建 + 两镜像 Trivy 分镜像门禁 + `.trivyignore` + 周扫 + SARIF | §12.5-PR3；零债 6 条 |

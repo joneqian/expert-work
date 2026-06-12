@@ -1511,7 +1511,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 ### Wave 3 — 架构级（设计先行重点评审）
 
 - [ ] **HX-9 租户级 hook 扩展点**（评估 ④ 架构级缺口，4+ PR）：manifest 声明式 hook（webhook 回调式起步，非任意代码）——设计 PR 与中心化治理路线统一评审后再实现
-- [ ] **HX-10 sandbox 安全纵深**（评估 ⑤，2-3 PR）：seccomp profile 叠加 gVisor + 镜像 CVE 扫描进 CI——**对外开放租户自定义代码执行前的硬前提**
+- [ ] **HX-10 sandbox 安全纵深**（评估 ⑤，设计 + 3 PR，进行中）：**多租户共享宿主下 agent 执行 LLM 生成代码的隔离纵深**。**实证驱动**（四角业界调研落 [research](./research/2026-06-12-sandbox-isolation-defense-in-depth.md)），方案 1 拍板（2026-06-12，gVisor 当期纳入不缓做）：⓪ **misconfig 断言**（最高优先级、零成本——实证 SANDBOXESCAPEBENCH 前沿 LLM 对 docker-socket/特权/可写宿主挂载 100% 逃逸；钉死防回归）；① seccomp = 仓库自管 pinned profile（Docker default 基线 + 收紧 io_uring/userfaultfd/keyctl/bpf；**实证修正：clone3 保留允许防崩新 glibc / perf_event_open 移出强制 / io_uring 禁用标兼容代价**）；② gVisor **可配置 + CI 真验证**（生产多租户推荐 runsc/dev runc；workflow 装 runsc systrap + env 参数化 + runtime 真起断言 + 兼容坑断言按 Tencent 清单 + CVE-2019-5736 PoC）；③ Trivy **分镜像门禁 + `--ignore-unfixed`**（minimal/debian 卡 CRITICAL+HIGH；office LibreOffice 卡 CRITICAL+周扫——卡 HIGH 恒红失效）。威胁模型修正：爆炸半径由跨租户决定不由信任决定。详设 §12（8 条 Mini-ADR HX-K0~K7）
+  - [ ] **HX-10 设计先行**（本次）：§12 详设 + research 文档（四角实证）——取证 + 实证驱动三档修正 + 威胁模型修正（信任只降概率不改影响）+ 横切公理脚注（安全配置事故 fail-closed）+ 3-PR 切分；Sysbox 记为 DooD 友好对照候选（HX-K7，对外开放里程碑评估）
+  - [ ] **HX-10 PR1**：misconfig 断言（argv 无 socket/特权/cap-add/宿主 bind mount + 有 cap-drop/read-only/no-new-priv）+ seccomp pinned profile 入仓（`infra/sandbox-image/seccomp-profile.json`，clone3 保留 + 高危收紧）+ `runtime_provider` `--security-opt seccomp` + settings `seccomp_profile_path` + supervisor fail-closed 校验
+  - [ ] **HX-10 PR2**：gVisor CI workflow（`sandbox-gvisor.yml`，路径过滤+dispatch，runsc systrap 装载+注册 dockerd）+ 集成测试 `HELIX_TEST_SANDBOX_RUNTIME` 参数化（默认 runc）+ runtime 真起断言 + 兼容坑断言（io_uring ENOSYS/proc-sys-net/numpy）+ CVE-2019-5736 PoC（runsc 挡/runc skip）+ environments 部署策略文档
+  - [ ] **HX-10 PR3**（收尾）：minimal 镜像 CI 构建 + 两镜像 Trivy 分镜像门禁（CRITICAL+HIGH / office CRITICAL）+ `--ignore-unfixed` + `.trivyignore` 带过期日期 + weekly 周扫 + SARIF 上传；零债 6 条
 - [ ] **HX-11 online A/B + 自动 prompt 优化**（评估 ⑦ 远期，依赖 HX-5）：流量分桶 + 评测数字回流
 
 ### 显式不做（理由在册，需求出现随时重议）
