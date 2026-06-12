@@ -113,6 +113,12 @@ from orchestrator.tools.scheduling import MAX_TOOL_WORKERS, plan_stages
 
 logger = logging.getLogger(__name__)
 
+#: Stream HX-12 (Mini-ADR HX-I5) — a promoted tool unused for this many
+#: ReAct steps is dropped from the bind when the compressor fires. Constant
+#: by design (the HX-6 EWMA discipline: parameterize when hit-rate data
+#: demands it); a demoted tool stays re-promotable from the deferred pool.
+_PROMOTED_STALE_STEPS = 12
+
 # Stream L.L6 — counters for the adaptive tool scheduler. ``stages_total``
 # counts every stage execution; ``dispatched_total`` counts the underlying
 # tool calls. The ratio dispatched / stages gives the average per-stage
@@ -392,6 +398,7 @@ def build_react_graph(
         # intact. Mini-ADR L-2: a ContextOverflowError here surfaces
         # as a run failure (no silent fallback) so the orchestrator
         # can write a clean RUN_FAILED audit row.
+        demoted_tools: list[str] = []
         if context_compressor is not None and context_compressor.should_compress(messages):
             # Stream CM-3 — bind a config-scoped flush so the compressor can
             # hand the middle to long-term memory before discarding it. The
@@ -412,6 +419,26 @@ def build_react_graph(
             messages = await context_compressor.compress(
                 messages, on_pre_compaction=on_pre_compaction
             )
+            # Stream HX-12 (Mini-ADR HX-I5) — promotion demotion rides the
+            # same pressure signal: the context is being squeezed, so
+            # promoted tools unused for N turns leave the next turn's bind.
+            # They stay in the deferred pool — find_tools / a direct
+            # call-through re-promotes any of them at any time, so this
+            # only slims the bind, never loses a capability. Manifest
+            # (core/active) tools are structurally out of scope: demotion
+            # touches only the promoted-from-deferred list.
+            last_used = state.get("promoted_tool_last_used") or {}
+            demoted_tools = [
+                name
+                for name in promoted
+                # No stamp = freshly promoted this very turn; never stale.
+                if step_count - last_used.get(name, step_count) > _PROMOTED_STALE_STEPS
+            ]
+            if demoted_tools:
+                promotion_events.labels(event="demote").inc(len(demoted_tools))
+                logger.info(
+                    "tools.promotion_demoted count=%d step=%d", len(demoted_tools), step_count
+                )
         configurable = config.get("configurable") or {}
         tenant_id = _parse_uuid(configurable.get("tenant_id"))
 
@@ -471,7 +498,7 @@ def build_react_graph(
             persisted_messages: list[BaseMessage] = list(new_messages)
             if advisory_message is not None and advisory_message not in persisted_messages:
                 persisted_messages = [advisory_message, *persisted_messages]
-            return {
+            update_mw: dict[str, Any] = {
                 "messages": persisted_messages,
                 "step_count": step_count + 1,
                 "step_count_refund_pending": 0,
@@ -481,19 +508,25 @@ def build_react_graph(
                 # the consumed signal.
                 "escalate_next": bool(ctx.payload.get("loop_detected")),
             }
+            if demoted_tools:
+                update_mw["promoted_tools"] = {"remove": demoted_tools}
+            return update_mw
 
         # Stream CM-1 — persist the advisory in conversation history
         # alongside the LLM response so the next agent step sees it.
         emit_messages: list[BaseMessage] = (
             [advisory_message, response] if advisory_message is not None else [response]
         )
-        return {
+        update_plain: dict[str, Any] = {
             "messages": emit_messages,
             "step_count": step_count + 1,
             "step_count_refund_pending": 0,
             "tool_failures": [],
             "escalate_next": False,  # CM-9 — no middleware chain, reset
         }
+        if demoted_tools:
+            update_plain["promoted_tools"] = {"remove": demoted_tools}
+        return update_plain
 
     async def tools_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         token = cancellation_token(config)
@@ -672,6 +705,26 @@ def build_react_graph(
                     error_class=failure.error_class, tool=failure.tool_name
                 ).inc()
 
+        # Stream HX-12 — stamp ``promoted_tool_last_used`` for the demotion
+        # gate: every already-promoted tool that dispatched in this batch
+        # refreshes its stamp; every name freshly promoted in this batch
+        # (find_tools result or a call-through) gets its baseline. Tools
+        # without a stamp would otherwise be un-ageable.
+        current_step = int(state.get("step_count", 0))
+        already_promoted = set(state.get("promoted_tools") or [])
+        batch_promoted = accumulated_state.get("promoted_tools")
+        freshly_promoted = set(batch_promoted) if isinstance(batch_promoted, list) else set()
+        used_stamps: dict[str, int] = dict.fromkeys(
+            (
+                name
+                for name in (str(call.get("name", "")) for call in tool_calls)
+                if name in already_promoted
+            ),
+            current_step,
+        )
+        for name in freshly_promoted:
+            used_stamps.setdefault(name, current_step)
+
         # CM-8 — the resume-path ingest lands first so a tool's own state
         # write (e.g. ``update_plan`` in the resumed batch) still wins.
         result_dict: dict[str, Any] = {
@@ -680,6 +733,8 @@ def build_react_graph(
             "step_count_refund_pending": refund_total,
             **accumulated_state,
         }
+        if used_stamps:
+            result_dict["promoted_tool_last_used"] = used_stamps
         # Only write the channel when there are failures — the absent
         # case keeps the agent_node's ``state.get("tool_failures", [])``
         # default fast-path active.

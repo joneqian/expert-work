@@ -43,8 +43,8 @@ from orchestrator.tools.error_classifier import ClassifiedToolError
 DEFAULT_MAX_STEPS = 20
 
 
-def _merge_promoted(existing: list[str] | None, new: list[str]) -> list[str]:
-    """Reducer for :attr:`AgentState.promoted_tools` — Stream TE-6.
+def _merge_promoted(existing: list[str] | None, new: list[str] | dict[str, list[str]]) -> list[str]:
+    """Reducer for :attr:`AgentState.promoted_tools` — Stream TE-6 / HX-12.
 
     ``find_tools`` writes the names of deferred tools it just retrieved; this
     reducer unions them into the run's accumulated set, deduplicating while
@@ -52,13 +52,40 @@ def _merge_promoted(existing: list[str] | None, new: list[str]) -> list[str]:
     already present). Accumulating across turns means a tool stays promoted
     once retrieved. The state lives on the LangGraph channel — per-thread,
     checkpointed — so promotion never leaks into the cached registry.
+
+    Stream HX-12 (Mini-ADR HX-I5) adds a removal shape for the demotion
+    path: ``new`` may be ``{"add": [...], "remove": [...]}``. The plain
+    ``list`` shape keeps the original add-only semantics so every existing
+    write site is untouched; removal never deletes the tool from the
+    registry's deferred pool — a demoted tool is re-promotable any time.
     """
-    out: list[str] = list(existing or [])
+    if isinstance(new, dict):
+        to_add = list(new.get("add", []))
+        to_remove = set(new.get("remove", []))
+    else:
+        to_add = list(new)
+        to_remove = set()
+    out: list[str] = [name for name in (existing or []) if name not in to_remove]
     seen = set(out)
-    for name in new:
-        if name not in seen:
+    for name in to_add:
+        if name not in seen and name not in to_remove:
             out.append(name)
             seen.add(name)
+    return out
+
+
+def _merge_last_used(existing: dict[str, int] | None, new: dict[str, int]) -> dict[str, int]:
+    """Reducer for :attr:`AgentState.promoted_tool_last_used` — Stream HX-12.
+
+    Per-key max merge: ``tools_node`` stamps the current ``step_count`` for
+    every promoted tool that dispatched (and for names freshly promoted in
+    the batch, so each entry has a baseline). The demotion gate compares
+    these stamps against the current step to find stale promotions.
+    """
+    out = dict(existing or {})
+    for name, step in new.items():
+        if step > out.get(name, -1):
+            out[name] = step
     return out
 
 
@@ -171,4 +198,10 @@ class AgentState(TypedDict):
     approval_resume: NotRequired[dict[str, Any] | None]
     approval_outcome: NotRequired[str | None]
     promoted_tools: NotRequired[Annotated[list[str], _merge_promoted]]
+    #: Stream HX-12 — step_count stamp of each promoted tool's last dispatch
+    #: (baseline = the step it was promoted). Feeds the demotion gate: a
+    #: promoted tool unused for N turns is dropped from ``promoted_tools``
+    #: when the compressor fires (it stays in the deferred pool — only the
+    #: per-turn bind slims down).
+    promoted_tool_last_used: NotRequired[Annotated[dict[str, int], _merge_last_used]]
     last_projection_hash: NotRequired[str | None]

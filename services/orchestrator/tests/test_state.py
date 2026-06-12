@@ -14,7 +14,8 @@ def test_required_keys_present() -> None:
     L.5 ``step_count_refund_pending``, CM-1 ``tool_failures``,
     J.4-补强-2 ``subagent_invocations``, J.8 ``pending_approval`` /
     ``approval_resume`` / ``approval_outcome``, TE-6 ``promoted_tools``,
-    CM-0 ``last_projection_hash`` (last eleven ``NotRequired``)."""
+    HX-12 ``promoted_tool_last_used``, CM-0 ``last_projection_hash``
+    (last twelve ``NotRequired``)."""
     annotations = inspect.get_annotations(AgentState)
     assert set(annotations) == {
         "messages",
@@ -31,6 +32,7 @@ def test_required_keys_present() -> None:
         "approval_resume",
         "approval_outcome",
         "promoted_tools",
+        "promoted_tool_last_used",
         "last_projection_hash",
     }
 

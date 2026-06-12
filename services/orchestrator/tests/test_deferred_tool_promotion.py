@@ -277,3 +277,161 @@ async def test_unknown_name_error_carries_ranked_suggestions() -> None:
     assert "github_create_issue" in str(error_msg.content)
     # Nothing was promoted — the call never routed.
     assert not state.get("promoted_tools")
+
+
+# --- Stream HX-12 — promotion demotion (PR4) --------------------------------
+
+
+def test_merge_promoted_list_keeps_add_only_semantics() -> None:
+    from orchestrator.state import _merge_promoted
+
+    assert _merge_promoted(["a"], ["b", "a"]) == ["a", "b"]
+    assert _merge_promoted(None, ["x"]) == ["x"]
+
+
+def test_merge_promoted_dict_removes_and_adds() -> None:
+    from orchestrator.state import _merge_promoted
+
+    assert _merge_promoted(["a", "b", "c"], {"remove": ["b"]}) == ["a", "c"]
+    assert _merge_promoted(["a"], {"add": ["b"], "remove": ["a"]}) == ["b"]
+    # Removing an absent name is a no-op; add wins dedupe.
+    assert _merge_promoted(["a"], {"add": ["a"], "remove": ["zz"]}) == ["a"]
+
+
+def test_merge_last_used_takes_per_key_max() -> None:
+    from orchestrator.state import _merge_last_used
+
+    assert _merge_last_used({"a": 3, "b": 5}, {"a": 7, "c": 1}) == {"a": 7, "b": 5, "c": 1}
+    assert _merge_last_used(None, {"a": 2}) == {"a": 2}
+    # A stale (lower) stamp never regresses an entry.
+    assert _merge_last_used({"a": 9}, {"a": 4}) == {"a": 9}
+
+
+@dataclass
+class _AlwaysCompress:
+    """Duck-typed stand-in for ContextCompressor: always fires, identity."""
+
+    async def compress(self, messages: Sequence[BaseMessage], **kwargs: Any) -> list[BaseMessage]:
+        return list(messages)
+
+    def should_compress(self, messages: Sequence[BaseMessage]) -> bool:
+        del messages
+        return True
+
+
+@pytest.mark.asyncio
+async def test_stale_promotion_demoted_on_compress_and_repromotable() -> None:
+    """HX-12 PR4: a promoted tool unused past the stale window leaves the
+    bind when the compressor fires; it stays in the deferred pool and a
+    later find_tools call re-promotes it."""
+    registry = ToolRegistry()
+    registry.register(FindToolsTool(registry=registry))
+    registry.register(_ScriptedTool(name="github_issue", result="x"), deferred=True)
+
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(content="done"),
+        ]
+    )
+
+    async with make_checkpointer("memory") as cp:
+        runner = GraphRunner(checkpointer=cp)
+        compiled = runner.compile(
+            build_react_graph(
+                llm_caller=llm,
+                tool_registry=registry,
+                context_compressor=_AlwaysCompress(),  # type: ignore[arg-type]
+            )
+        )
+        cfg: RunnableConfig = {"configurable": {"thread_id": "hx12-demote"}}
+        # Seed: tool was promoted at step 0 and never used since; the run
+        # is now at step 20 — far past the stale window.
+        state: AgentState = await compiled.ainvoke(
+            {
+                "messages": [HumanMessage(content="hi")],
+                "step_count": 20,
+                "max_steps": 40,
+                "promoted_tools": ["github_issue"],
+                "promoted_tool_last_used": {"github_issue": 0},
+            },
+            config=cfg,
+        )
+
+    # Demoted: out of promoted_tools, and the (single-turn) bind that the
+    # LLM saw still carried it this turn — demotion applies to the NEXT bind.
+    assert state.get("promoted_tools") == []
+    # Still in the deferred pool — re-promotable any time.
+    assert "github_issue" in {s.name for s in registry.all_specs()}
+    found = registry.search("github issue")
+    assert [s.name for s in found] == ["github_issue"]
+
+
+@pytest.mark.asyncio
+async def test_fresh_promotion_survives_compress() -> None:
+    """A tool promoted/used within the stale window is NOT demoted."""
+    registry = ToolRegistry()
+    registry.register(FindToolsTool(registry=registry))
+    registry.register(_ScriptedTool(name="github_issue", result="x"), deferred=True)
+
+    llm = _ScriptedLLM(responses=[AIMessage(content="done")])
+
+    async with make_checkpointer("memory") as cp:
+        runner = GraphRunner(checkpointer=cp)
+        compiled = runner.compile(
+            build_react_graph(
+                llm_caller=llm,
+                tool_registry=registry,
+                context_compressor=_AlwaysCompress(),  # type: ignore[arg-type]
+            )
+        )
+        cfg: RunnableConfig = {"configurable": {"thread_id": "hx12-fresh"}}
+        state: AgentState = await compiled.ainvoke(
+            {
+                "messages": [HumanMessage(content="hi")],
+                "step_count": 20,
+                "max_steps": 40,
+                "promoted_tools": ["github_issue"],
+                "promoted_tool_last_used": {"github_issue": 15},  # 5 steps ago
+            },
+            config=cfg,
+        )
+
+    assert state.get("promoted_tools") == ["github_issue"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_refreshes_last_used_stamp() -> None:
+    """tools_node stamps promoted tools on dispatch (and fresh promotions
+    get a baseline), feeding the demotion gate."""
+    registry = ToolRegistry()
+    registry.register(FindToolsTool(registry=registry))
+    registry.register(_ScriptedTool(name="github_issue", result="ok"), deferred=True)
+
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[_tool_call("github_issue", {}, "tc-1")],
+            ),
+            AIMessage(content="done"),
+        ]
+    )
+
+    async with make_checkpointer("memory") as cp:
+        runner = GraphRunner(checkpointer=cp)
+        compiled = runner.compile(build_react_graph(llm_caller=llm, tool_registry=registry))
+        cfg: RunnableConfig = {"configurable": {"thread_id": "hx12-stamp"}}
+        state: AgentState = await compiled.ainvoke(
+            {
+                "messages": [HumanMessage(content="hi")],
+                "step_count": 7,
+                "max_steps": 20,
+            },
+            config=cfg,
+        )
+
+    # Call-through promoted the tool and stamped its baseline at the
+    # dispatching step (step_count was 8 after the agent bump).
+    stamps = state.get("promoted_tool_last_used") or {}
+    assert "github_issue" in stamps
+    assert stamps["github_issue"] >= 7
