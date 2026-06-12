@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from helix_agent.common.observability import helix_counter
+from helix_agent.common.observability import helix_counter, helix_gauge
 from helix_agent.runtime.sandbox import SandboxRuntimeProvider
 from sandbox_supervisor.docker_client import DockerClient, DockerError
 from sandbox_supervisor.domain import SandboxRecord, SandboxState, container_name
@@ -53,7 +53,8 @@ DESTROY_REASON_POOL_CLAIM_FAILED = "pool_claim_failed"
 # path (miss = pool enabled but empty for the variant); ``replenish`` /
 # ``replenish_failed`` are the background top-up; ``update_failed`` is a
 # claim whose limit pairing failed (fail-closed → cold start);
-# ``claim_raced`` is the defensive CAS-lost branch.
+# ``claim_raced`` is the defensive CAS-lost branch; ``prepull`` /
+# ``prepull_failed`` are the startup image prefetch (PR2).
 _pool_events = helix_counter(
     "helix_sandbox_pool_total",
     "Warm sandbox pool flow events (Stream HX-6).",
@@ -64,6 +65,17 @@ _pool_events = helix_counter(
 def observe_pool_event(event: str) -> None:
     """Count one pool flow event — shared by the pool and the supervisor."""
     _pool_events.labels(event=event).inc()
+
+
+# Stream HX-6 PR2 — current READY inventory per image variant. Two fixed
+# label values (minimal / office), re-set by the replenisher every tick
+# (the ApprovalGaugeWorker periodic-set precedent); SLO #4's M1
+# acceptance reads hit ratio + this gauge together.
+_pool_ready = helix_gauge(
+    "helix_sandbox_pool_ready",
+    "READY warm-pool containers currently held, per image variant.",
+    ("variant",),
+)
 
 
 @dataclass(frozen=True)
@@ -150,16 +162,20 @@ class PoolReplenisher:
         self._docker = docker
         self._runtime = runtime_provider
         self._settings = settings
-        #: Per-variant targets resolved once — image ref → READY count.
-        self._targets: dict[str, int] = {
-            settings.sandbox_image: settings.pool_size_minimal,
-            settings.sandbox_image_office: settings.pool_size_office,
-        }
+        #: Per-variant targets resolved once — (variant, image ref,
+        #: READY count). A tuple list (not an image-keyed dict) so two
+        #: variants configured onto the same image cannot shadow each
+        #: other's target.
+        self._targets: tuple[tuple[str, str, int], ...] = (
+            ("minimal", settings.sandbox_image, settings.pool_size_minimal),
+            ("office", settings.sandbox_image_office, settings.pool_size_office),
+        )
 
     async def run_once(self) -> None:
-        """Reconcile every variant: shrink past target, then top up to it."""
-        for image_ref, target in self._targets.items():
+        """Reconcile every variant, then re-set the READY gauge (PR2)."""
+        for variant, image_ref, target in self._targets:
             await self._reconcile(image_ref, target)
+            _pool_ready.labels(variant=variant).set(self._pool.size(image_ref))
 
     async def _reconcile(self, image_ref: str, target: int) -> None:
         while self._pool.size(image_ref) > target:
@@ -225,3 +241,31 @@ class PoolReplenisher:
                 logger.exception("pool.replenish_sweep_failed")
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=self._settings.reaper_interval_s)
+
+
+async def prefetch_images(docker: DockerClient, settings: SandboxSupervisorSettings) -> None:
+    """Pull both variant images when missing locally (Mini-ADR HX-F4).
+
+    The one warm-path piece that helps *every* acquire shape — including
+    the persistent-workspace first touch the pool cannot serve — by
+    cutting the multi-second registry pull off a rebuilt node's first
+    cold start. Best-effort + fail-open: a failed probe or pull is
+    logged and counted; ``docker run`` pulls on demand anyway. Runs as a
+    background lifespan task so service readiness never waits on a
+    registry.
+    """
+    for image in dict.fromkeys((settings.sandbox_image, settings.sandbox_image_office)):
+        try:
+            present = await docker.image_exists(image)
+        except OSError:
+            present = False  # probe failed — attempt the pull anyway
+        if present:
+            continue
+        try:
+            await docker.pull_image(image)
+        except (DockerError, OSError) as exc:
+            observe_pool_event("prepull_failed")
+            logger.warning("pool.prepull_failed image=%s reason=%s", image, exc)
+            continue
+        observe_pool_event("prepull")
+        logger.info("pool.prepulled image=%s", image)

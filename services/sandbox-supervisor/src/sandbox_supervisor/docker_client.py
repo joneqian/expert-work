@@ -92,6 +92,20 @@ class DockerClient(Protocol):
         (fail-closed: limits are a security surface).
         """
 
+    async def image_exists(self, image: str) -> bool:
+        """Whether ``image`` is present locally (``docker image inspect``).
+
+        Stream HX-6 (Mini-ADR HX-F4) — the startup prefetch probe.
+        """
+
+    async def pull_image(self, image: str) -> None:
+        """Pull ``image`` from its registry (``docker pull``).
+
+        Stream HX-6 (Mini-ADR HX-F4) — backs the startup image prefetch.
+        Raises :class:`DockerError` on failure; the prefetch task logs
+        and moves on (fail-open: ``docker run`` pulls on demand anyway).
+        """
+
 
 class CliDockerClient:
     """:class:`DockerClient` backed by the ``docker`` CLI via asyncio subprocess."""
@@ -321,6 +335,19 @@ class CliDockerClient:
         if code != 0:
             detail = stderr.strip() or "non-zero exit"
             msg = f"docker update failed for {container_name!r}: {detail}"
+            raise DockerError(msg)
+
+    async def image_exists(self, image: str) -> bool:
+        """Probe the local image cache — non-zero exit means missing."""
+        _, _, code = await self._exec(["docker", "image", "inspect", image])
+        return code == 0
+
+    async def pull_image(self, image: str) -> None:
+        """Pull ``image``; raise :class:`DockerError` on failure (HX-6)."""
+        _, stderr, code = await self._exec(["docker", "pull", image])
+        if code != 0:
+            detail = stderr.strip() or "non-zero exit"
+            msg = f"docker pull failed for {image!r}: {detail}"
             raise DockerError(msg)
 
     @staticmethod
