@@ -22,6 +22,7 @@
 | HX-4 | ⑨ 可观测 | approval 队列 gauge / checkpoint 延迟 / run_id 结构化贯穿缺（工具延迟与 run 成功率判定过期，见 §5.1） | gauge + checkpoint 计时 wrapper + run_id contextvar + recording rules 同步 | §5（本文） |
 | HX-5 | ① prompt 工程 | manifest 覆盖式更新无历史/diff/回滚；无离线 variant 对比 | `agent_spec_revision` 不可变历史 + 回滚 + diff API/UI + 离线 A/B harness | §6（本文） |
 | HX-6 | ⑤ 沙盒 | 首触冷启动（J.15 暖会话已在）+ 池路径限额配对 | READY 池 + replenisher + claim 时 docker update + 镜像预拉 | §7（本文） |
+| HX-7 | ⑨ 可观测 / 治理 | Langfuse 停在 Recording stub（OTel 链已通，见 §8.1）；approval 无队列视图/批量 | LangfuseSdkClient + settings/factory 接线 + approval list API + 批量 decide + /approvals 队列页 | §8（本文） |
 | HX-12/13 | ② 工具面 | 工具披露 2.0（应用层 + 厂商原生档） | 见 ITERATION-PLAN Wave 2 定义 | 开工时追加 |
 
 Wave 1 顺序：HX-1 → HX-2 → HX-3 → HX-4（HX-1 的 estimator 是 HX-12 阈值逃生门的前置件；HX-4 的指标骨架吃 HX-1 的 drift 数据）。
@@ -511,3 +512,79 @@ gauge helper 已在（`helix_gauge`，`metrics.py:121-132`）且有先例：skil
 | PR0（本设计） | §7 + ITERATION-PLAN tick | 纯 docs，CI |
 | PR1 | READY 状态 + 池 + replenisher + claim/update 限额 + settings | §7.4-PR1；全链回归 |
 | PR2（收尾） | 镜像预拉 + 指标/SLO 同步 + 文档 | §7.4-PR2；零债 6 条 |
+
+---
+
+## 8. HX-7 — trace 生产接线 + approval 队列页
+
+### 8.1 现状取证（2026-06-12，main@8dcdf06）
+
+| 评估断言 | 实况 | 证据 | 判定 |
+|---------|------|------|:----:|
+| "trace 无生产后端" | **OTel 链已全通**：W3C traceparent 提取 → contextvar → `X-Helix-Trace-Id` 回送 + 日志贯穿（HX-4 又加 run_id 轴）；`otlp_traces_endpoint` settings 已在 | `middleware/observability.py:84-106`、`context.py:30-36`、`settings.py:66` | 半过期：基础设施 trace（Tempo 路线）只差部署；**真缺口 = Langfuse 档** |
+| "Langfuse 接线缺" | Protocol（`LangfuseClient`/`LangfuseSpan`）+ `RecordingLangfuseClient` stub + middleware 全在且 fail-soft 全包；**SDK adapter 不存在**（E.5 自注 "follow-up PR"——本子项兑现既定意图）；`langfuse` 依赖未加；settings 无 langfuse 项；`runtime.py:43` 硬编码 Recording | `middleware/langfuse.py:10-17,116-122`、`runtime.py:43`、全仓 pyproject grep | 准确 |
+| "approval 无队列视图" | 模型/store/单 run API（GET run + POST resume）/RunDetail 内嵌 ApprovalCard 全在；**缺独立 list API、队列页、批量操作**；Badge 轮询 `/v1/runs?status=paused` 间接计数 | `runs.py:448-510,607-793`、`ApprovalCard.tsx`、`ApprovalPendingBadge.tsx:28-92`、router.tsx 无 /approvals | 准确 |
+| —（取证修正） | approval **24h 超时自动 TIMEOUT 已在**：retention-cleanup-job 每轮扫 `list_expired` → `mark_decided(TIMEOUT, decided_by="system")` | `retention_cleanup_job/job.py:169-180` | 子代理初判"缺超时 worker"有误，已核实在案 |
+| —（架构事实） | resume 的 continuation worker 是 detached task，SSE 流只是消费端（断开不影响 run 完成）；`mark_decided` 自带 CAS（lost race → False → 409） | `runs.py:756-773,670-673` | **批量 decide 可做非流式端点**——worker/流解耦是现成前提 |
+
+### 8.2 设计
+
+**① Langfuse SDK adapter（HX-7a，PR1）**
+
+- `LangfuseSdkClient` 实现既有 `LangfuseClient` Protocol，新模块 `packages/helix-runtime/src/helix_agent/runtime/middleware/langfuse_sdk.py`；middleware 一行不动（缝就是 Protocol——Mini-ADR HX-G1）。
+- 依赖：`langfuse>=3,<4` 进 helix-runtime（v3 SDK 基于 OTel，与现有 `opentelemetry-sdk>=1.27` 同源——Langfuse span 自动挂进活跃 OTel trace，ADR-0005 "trace_id 共享、Langfuse↔Tempo 互跳" 数据流**零额外代码兑现**）。import 失败防御降级 Recording（损坏安装不杀服务）。
+- 语义映射（实施期以 SDK 文档核准确切方法名，不臆测）：`start_span(name,input,metadata)` → SDK generation（LLM 语义，token/cost 统计入账）；`record_output` → update(output)；`record_usage` → update(usage_details)；`record_error` → update(level=ERROR,status_message)；`end` → end()。
+- flush 语义：SDK 内部 bounded queue + 后台线程（Protocol 注释的预设形态）；control-plane lifespan teardown 调 `flush()`/`shutdown()` 有界等待。
+
+**② settings + runtime 接线（PR1）**
+
+- control-plane settings 增 `langfuse_host` / `langfuse_public_key` / `langfuse_secret_key`（env `HELIX_CONTROL_PLANE_LANGFUSE_*`；secret 仅 env 注入，不进代码/compose 明文——object_store keys 先例）。
+- `runtime.py` 改 factory：三项齐全 → `LangfuseSdkClient`；缺任一 → `RecordingLangfuseClient` + info log。**配置缺省 = Recording 是合法生产形态**（fail-open；CI/dev 无凭证纪律——真实例验证走手动/SE-9，CI 用 fake 测 adapter 映射）。
+- 不起 dev compose Langfuse 实例：v3 自托管栈重（ClickHouse+PG+Redis+MinIO），接线指向外部实例，部署属 infra 项（§8.3）。
+
+**③ approval list API（HX-7b，PR2）**
+
+- store：`ApprovalStore.list_by_status(status, limit, offset) -> tuple[list[ApprovalRecord], int]`（含 total；SQL `ORDER BY requested_at ASC`——队列语义最老优先）。RLS tenant-scoped 自然隔离；system_admin 跨租户沿用 Stream N `tenant_id=⋆` 既有模式。
+- API：`GET /v1/approvals?status=pending&limit&offset`（status 默认 pending，支持全部终态查历史）→ `{items, total}`。
+- 列表项 = ApprovalRecord 自足字段（action_summary/reason_kind/requested_at/timeout_at/run_id/thread_id/user_id），**不 join agent_name**：详情语境跳 RunDetail 已有全上下文，列表 join 跨表换一列展示不值（业务价值/工作量都不立）。
+
+**④ 批量 decide（PR2）**
+
+- 从 resume 端点提取共享内核 `_apply_decision(...)`（verdict CAS → audit → aupdate_state → spawn detached worker），resume 端点改调内核 + 保留 SSE 返回（语义零变）。
+- 新端点 `POST /v1/approvals:decide`：body `{decisions: [{thread_id, run_id, decision, modified_args?, reason?}]}`，**上限 20/批**（每项 approve 即 spawn 一个 LLM continuation run——资源面要有界）；非流式 JSON 返回 per-item `{run_id, ok, error?}`。
+- 部分失败语义：逐项独立——单项 409（already-decided/timeout 赛跑）/404 不中断其余；worker 与 SSE 已解耦故批量 approve 的 N 个 continuation 自然后台跑，操作员在 RunDetail 看各自进度。
+
+**⑤ admin UI 队列页（PR3，收尾）**
+
+- `/approvals` 路由 + Sidebar 独立 "Approvals" 导航项（`ApprovalPendingBadge` 从 Runs 迁挂此项，数据源改 `GET /v1/approvals?status=pending&limit=1` 的 total——比 `runs?status=paused` 语义更准）+ CommandPalette + SDK（`listApprovals`/`decideApprovals`）+ i18n 双语 + Storybook + Playwright（SE-8 接线点清单全量）。
+- 列表（requested_at 最老优先）：reason_kind Tag / action_summary / 等待时长 / timeout 倒计时 / run 链接（跳 RunDetail 看完整上下文 + proposed_args 编辑）；行内 approve/reject + 多选批量——**单条与批量统一走 `:decide` 端点**（size=1），UI 不维护两套决策路径；带 modify 的精修仍引导去 RunDetail ApprovalCard（队列页不重复 JSON 编辑器）。
+
+### 8.3 边界（不做）
+
+- **Langfuse 实例部署**（compose/Helm/运维 runbook）：infra 项另立；本子项交付接线能力 + Recording 缺省。
+- trace 查看 UI（嵌入/外链）：STREAM-H §H.3 已有设计归属，不在此扩展。
+- 审批通知（webhook/邮件/IM 提醒审批人）：通知通道是独立能力面（M2 评估）。
+- approval 队列的 system_admin 专属跨租户聚合 UI：TenantScope 既有机制已覆盖切换查看。
+
+### 8.4 测试
+
+- **PR1**：adapter 单测（fake SDK 对象注入——五方法映射 / usage 字典透传 / error 字符串化 / flush 委托 / import 失败降级 Recording）；factory 三态（齐全→SDK / 缺项→Recording / import 错→Recording）；middleware 既有测试零改动即回归。
+- **PR2**：list API（status 过滤 / 分页 + total / 默认 pending / RLS 隔离 / 空窗）；批量（混合 verdict / 单项 409 不中断 / 上限 21 → 422 / 空列表 422 / 复用内核后单 resume 全量回归）。
+- **PR3**：队列页组件测（列表渲染 / 多选批量调 SDK / Badge 新数据源）+ Storybook + Playwright 冒烟。
+
+### 8.5 Mini-ADR
+
+- **HX-G1 adapter 实现既有 Protocol，middleware 零改动**：E.5 把缝留在 `LangfuseClient`，本子项只是把 stub 换成可配置的真实现——架构无新决策面。
+- **HX-G2 `langfuse` 依赖进 helix-runtime + import 防御降级**：observability 是平台默认能力，不做 extra 可选安装位；损坏的 SDK 安装降级 Recording 而非启动失败。
+- **HX-G3 配置缺省 = Recording（fail-open）**：无凭证的部署/CI/dev 保持现行为字节不变；trace 故障域永不进 LLM 主路径（middleware fail-soft 已兜）。
+- **HX-G4 批量 decide = 共享内核 + 非流式端点**：worker/SSE 解耦是现成架构事实；上限 20 防 continuation 风暴；逐项独立失败。
+- **HX-G5 队列页单/批统一走 `:decide`，modify 留在 RunDetail**：UI 一套决策路径；JSON 精修是单 run 语境操作，队列页不复制编辑器。
+
+### 8.6 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §8 + ITERATION-PLAN 登记 | 纯 docs，CI |
+| PR1 | LangfuseSdkClient + 依赖 + settings + runtime factory + teardown flush | §8.4-PR1 |
+| PR2 | list_by_status store/API + `:decide` 批量端点（resume 内核提取） | §8.4-PR2；resume 全量回归 |
+| PR3（收尾） | /approvals 队列页 + Badge 迁移 + SE-8 全接线 | §8.4-PR3；零债 6 条 |
