@@ -36,6 +36,7 @@ export interface TranslationKeys {
     curation: string;
     memory: string;
     artifacts: string;
+    knowledge: string;
     skills: string;
     triggers: string;
     tenants: string;
@@ -140,6 +141,37 @@ export interface TranslationKeys {
     col_user: string;
     col_created: string;
     empty: string;
+  };
+  knowledge_page: {
+    page_title: string;
+    subtitle: string;
+    home_scope_note: string;
+    failed_to_load: string;
+    bases_title: string;
+    bases_empty: string;
+    create_base: string;
+    create_duplicate: string;
+    field_name: string;
+    field_chunk_max: string;
+    field_chunk_overlap: string;
+    field_chunk_hint: string;
+    col_base_name: string;
+    col_chunking: string;
+    delete: string;
+    delete_base_confirm_title: string;
+    delete_base_confirm_body: string;
+    documents_title: string;
+    documents_unselected: string;
+    documents_empty: string;
+    select_hint: string;
+    upload: string;
+    unsupported_type: string;
+    embedder_missing: string;
+    col_filename: string;
+    col_status: string;
+    col_chunks: string;
+    col_updated: string;
+    delete_doc_confirm_title: string;
   };
   artifacts_page: {
     page_title: string;
@@ -1198,6 +1230,7 @@ export interface TranslationKeys {
     label_curation: string;
     label_memory: string;
     label_artifacts: string;
+    label_knowledge: string;
     label_skills: string;
     label_triggers: string;
     label_settings_api_keys: string;
@@ -1284,6 +1317,7 @@ const en: TranslationKeys = {
     curation: "Curation+Eval",
     memory: "Memory",
     artifacts: "Artifacts",
+    knowledge: "Knowledge",
     skills: "Skills",
     triggers: "Triggers",
     tenants: "Tenants",
@@ -1394,6 +1428,40 @@ const en: TranslationKeys = {
     col_user: "User",
     col_created: "Created",
     empty: "No memory items yet.",
+  },
+  knowledge_page: {
+    page_title: "Knowledge",
+    subtitle: "Tenant-shared knowledge bases feeding agent retrieval.",
+    home_scope_note:
+      "Knowledge bases follow your signed-in tenant only — this page does not switch with the global tenant scope (no cross-tenant backend support).",
+    failed_to_load: "Failed to load knowledge bases",
+    bases_title: "Bases",
+    bases_empty: "No knowledge bases yet.",
+    create_base: "New base",
+    create_duplicate: "A knowledge base with this name already exists.",
+    field_name: "Name",
+    field_chunk_max: "Chunk max tokens (optional)",
+    field_chunk_overlap: "Chunk overlap tokens (optional)",
+    field_chunk_hint: "Defaults apply when left empty; overlap must be less than max.",
+    col_base_name: "Name",
+    col_chunking: "Chunk max/overlap",
+    delete: "Delete",
+    delete_base_confirm_title: "Delete base {{name}}?",
+    delete_base_confirm_body:
+      "This removes the base together with all its documents and vectors.",
+    documents_title: "Documents in {{name}}",
+    documents_unselected: "Documents",
+    documents_empty: "No documents in this base yet.",
+    select_hint: "Select a base on the left to manage its documents.",
+    upload: "Upload",
+    unsupported_type: "Unsupported document type: {{name}}",
+    embedder_missing:
+      "Document ingestion is unavailable — no embedding model is configured on the platform.",
+    col_filename: "Filename",
+    col_status: "Status",
+    col_chunks: "Chunks",
+    col_updated: "Updated",
+    delete_doc_confirm_title: "Delete document {{name}}?",
   },
   artifacts_page: {
     page_title: "Artifacts",
@@ -2498,6 +2566,7 @@ const en: TranslationKeys = {
     label_curation: "Curation review",
     label_memory: "Memory",
     label_artifacts: "Artifacts",
+    label_knowledge: "Knowledge",
     label_skills: "Skills",
     label_triggers: "Triggers",
     label_settings_api_keys: "Settings · API Keys",

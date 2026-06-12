@@ -7,6 +7,7 @@ import {
   ListChecks,
   CheckSquare,
   Brain,
+  BookOpen,
   FileText,
   Clock,
   Key,
@@ -42,6 +43,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "curation", labelKey: "nav.curation", icon: <CheckSquare size={16} strokeWidth={1.5} />, path: "/curation" },
   { key: "memory", labelKey: "nav.memory", icon: <Brain size={16} strokeWidth={1.5} />, path: "/memory" },
   { key: "artifacts", labelKey: "nav.artifacts", icon: <Package size={16} strokeWidth={1.5} />, path: "/artifacts" },
+  { key: "knowledge", labelKey: "nav.knowledge", icon: <BookOpen size={16} strokeWidth={1.5} />, path: "/knowledge" },
   { key: "skills", labelKey: "nav.skills", icon: <FileText size={16} strokeWidth={1.5} />, path: "/skills" },
   { key: "triggers", labelKey: "nav.triggers", icon: <Clock size={16} strokeWidth={1.5} />, path: "/triggers" },
 ];

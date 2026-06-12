@@ -18,10 +18,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  App,
   Button,
   Drawer,
   Empty,
-  message,
   Popconfirm,
   Select,
   Space,
@@ -70,6 +70,7 @@ function errMessage(err: unknown): string {
 
 export function ArtifactsList() {
   const { t } = useTranslation();
+  const { message } = App.useApp();
   const { scope, apiTenantScope } = useTenantScope();
   const [data, setData] = useState<ArtifactList | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,7 +110,7 @@ export function ArtifactsList() {
         setBusyName(null);
       }
     },
-    [t],
+    [t, message],
   );
 
   const handleDelete = useCallback(
@@ -125,7 +126,7 @@ export function ArtifactsList() {
         setBusyName(null);
       }
     },
-    [t, refresh],
+    [t, message, refresh],
   );
 
   const handleKindChange = useCallback(
@@ -142,7 +143,7 @@ export function ArtifactsList() {
         setBusyName(null);
       }
     },
-    [refresh],
+    [message, refresh],
   );
 
   const openVersions = useCallback(async (name: string) => {
@@ -157,7 +158,7 @@ export function ArtifactsList() {
     } finally {
       setVersionsLoading(false);
     }
-  }, []);
+  }, [message]);
 
   const columns: TableColumnsType<ArtifactListItem> = useMemo(() => {
     const base: TableColumnsType<ArtifactListItem> = [
