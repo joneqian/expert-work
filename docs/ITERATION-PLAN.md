@@ -350,7 +350,9 @@
   - [x] **H.8 设计先行**（#584）：§ 6.8 详设——取证 9 条 file:line + Mini-ADR H-14~H-16 + 纯前端 2-PR
   - [x] **H.8 PR1（实现，收尾）**：SDK artifacts.ts（5 方法全 raw + `filenameFromDisposition` RFC 5987 解析）+ ArtifactsList 双态（home=我的产物全功能 / cross-tenant=只读聚合带 tenant/user 列无行动作，H-14）+ versions 抽屉（NULL digest 显 "—"）+ download（axios blob+objectURL，H-15）/delete（软删 Popconfirm）/patch（kind 内联 Select，同值不发请求 H-16）+ router `/artifacts` + Sidebar + CommandPalette（g f）+ i18n 双语 + Storybook 3 stories + vitest 9 测 + Playwright 冒烟
   - [ ] **H.8-F1 follow-up（后端能力，另立项）**：租户 admin 代管他人产物（需新端点 + 权限模型，超出前端债范围）
-- [ ] **H.9 Rate Card 计价管理面（system_admin）** — 后端 `/v1/platform/rate-card`（CRUD，`rate_card.py:74`）已发，前端无 SDK、无页面；与平台计量加价大方向（[memory:platform_centralized_governance]）相关。M1+。
+- [ ] **H.9 Rate Card 计价管理面（system_admin）** — 后端 `/v1/platform/rate-card`（CRUD，`rate_card.py:76`，全 envelope + 双门权限）已发，前端无 SDK、无页面；与平台计量加价大方向（[memory:platform_centralized_governance]）相关。详设 [STREAM-H-DESIGN § 6.10](./streams/STREAM-H-DESIGN.md)：Patch 不可变身份字段（重定价=插新行，H-20）+ micros 原值输入（H-21）+ 前端门控=UX 非安全边界（H-22）。M1+。
+  - [x] **H.9 设计先行**：§ 6.10 详设——取证 8 条 file:line + Mini-ADR H-20~H-22 + 纯前端 2-PR
+  - [ ] **H.9 PR1（实现，收尾）**：SDK rate_card.ts（envelope）+ SettingsRateCard（列表+过滤+include_expired / create modal 换算提示 / 编辑抽屉灰显身份字段 / delete）+ router/Sidebar/i18n/Storybook/vitest/Playwright；零债 6 条
 
 > **依赖**：H.1b+ 任何代码 PR 上线**前提 = Stream N 合入**（系统管理员跨租户能力)。H.1a 设计基线 PR 与 H.1b UI scaffold 可与 Stream N 并行开工。
 

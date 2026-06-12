@@ -1480,6 +1480,57 @@ SDK 增参:`ListRunsParams + agentName/agentVersion`、`ListSkillsParams + creat
 
 ---
 
+## 6.10 H.9 详细设计 — Rate Card 计价管理面(system_admin)
+
+> 2026-06-12 设计先行(前端债末项)。后端 `/v1/platform/rate-card`(`rate_card.py`,Stream Y/Z 计费)已全发;
+> H.9 = 纯前端消费,后端零改。与平台计量加价大方向([memory:platform-centralized-governance])直接相关。
+
+### 6.10.1 现状取证(2026-06-12,file:line)
+
+| 事实 | 位置 | 影响 |
+|---|---|---|
+| 5 端点全 **envelope**(`{success,data,error}`) | `rate_card.py:76-209` | SDK 走 `getJson`/`postJson`/`patchJson`(与 H.7/H.8 的 raw 相反) |
+| 权限:`require("billing", read/write/delete)` + `principal.is_system_admin` 双门 | 各端点 | 前端 isSystemAdmin 门控(SettingsTenants 同款);**前端门控是 UX 非安全边界**(H-22) |
+| `ModelRateCardRecord`:id/tenant_id(NULL=platform-global,唯一现状)/provider/model/4×`*_token_micros`/markup_bps/plan_tier/effective_from/effective_until | `protocol/billing.py:110-132` | 列表列 + 表单字段 |
+| **Patch 不可变身份**:provider/model/plan_tier/effective_from 创建后不可改——"Reprice by inserting a new row, never by mutating" | `billing.py:168-174` docstring | 编辑面只开放 5 价格字段 + effective_until;重定价引导新建(H-20) |
+| Upsert 校验:provider/model 结构校验 + `effective_until > effective_from` | `billing.py:160-165` | 表单前端预校验 + 422 映射 |
+| list query:`provider` / `model` / `include_expired`(默认 false) | `rate_card.py:107-122` | 过滤条 + 过期开关 |
+| 价格单位 = **micro-USD per token**(`*_token_micros`)+ `markup_bps`(基点) | 字段名 | 输入原值;只读换算提示 $/1M tokens(H-21) |
+| DELETE 204 | `:176-209` | 行删 Popconfirm |
+
+### 6.10.2 设计
+
+**SDK `src/api/rate_card.ts`(新,全 envelope)**:`RateCardRecord` / `listRateCards({provider?, model?, includeExpired?})` / `createRateCard(upsert)` / `getRateCard(id)` / `patchRateCard(id, patch)` / `deleteRateCard(id)`。
+
+**页面 `/settings/rate-card`(`SettingsRateCard.tsx`,Settings 子页)**:
+- isSystemAdmin 门控:非 system_admin 显说明 Empty(SettingsTenants 同款),fetch 不发。
+- 列表:provider / model / plan_tier(NULL 显 "all plans")/ input / output / cache(creation/read 合并列 tooltip)/ markup_bps / effective_from / effective_until(NULL 显 "open-ended")/ 过期行灰显。过滤:provider/model 输入 + include_expired Switch。
+- Create modal:全字段;micros 字段旁只读换算($/1M tokens = micros × 1e6 ÷ 1e6 微美元换算提示);`effective_until > effective_from` 前端预校验。
+- 编辑抽屉(H-20):**只开放** 4×micros + markup_bps + effective_until;provider/model/plan_tier/effective_from 灰显展示 + 文案"重定价请新建一行(身份字段不可变)"。
+- Delete:Popconfirm;提示已生效区间的删除影响计费回溯(谨慎文案)。
+
+**接线**:router `/settings/rate-card`;Sidebar SETTINGS_ITEMS(billing-chargeback 旁,`Banknote` icon);i18n zh/en `rate_card_page.*` + `nav.rate_card`;Storybook(列表/非 admin 2 stories);vitest;Playwright 冒烟。
+
+### 6.10.3 Mini-ADR
+
+- **H-20 编辑面 = Patch 可变字段集,镜像后端时间身份语义**:provider/model/plan_tier/effective_from 是行的 temporal+specificity 身份,后端拒改;UI 灰显 + "重定价新建行"引导,不给可编辑假象。
+- **H-21 micros 原值输入,换算只读提示**:隐式单位转换(用户输 $/1M 前端换 micros)是计费数字的静默放大器;输入框收原始 micros,旁挂只读 $/1M 换算核对。
+- **H-22 前端 isSystemAdmin 门控 = UX 非安全边界**:真边界是后端 `require("billing",·)` + `is_system_admin` 双门;前端门控只省一次 403 往返 + 不渲染无权 UI。
+
+### 6.10.4 测试
+
+- vitest:非 admin 门控(说明页 + 不发 fetch)/ 列表渲染 + include_expired 开关传参 / create 调 SDK(含换算提示渲染)/ 编辑抽屉不可变字段灰显 + patch 只发可变字段 / delete 确认。
+- Storybook 2;Playwright:system_admin 登录 → /settings/rate-card 渲染冒烟。
+
+### 6.10.5 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0(本设计) | § 6.10 + ITERATION-PLAN H.9 细化 | 纯 docs,CI |
+| PR1(实现,收尾) | SDK + SettingsRateCard(列表/create/编辑抽屉/delete + isSystemAdmin 门控)+ 全接线 + i18n + Storybook + vitest + Playwright | § 6.10.4;零债 6 条 |
+
+---
+
 ## 6. PR 链(预估)
 
 | PR | 内容 | 估时 |
@@ -1546,6 +1597,7 @@ SDK 增参:`ListRunsParams + agentName/agentVersion`、`ListSkillsParams + creat
 | 2026-05-26 | v1.7 | **H.3 收尾**:6 个 PR 全部合入 main(#289–#294);新增 § 6.5.18 H.3 收尾摘要 — 决议 A–F 全部兑现、设计文档 § 6.5.13 漏交的 2 个 story(EventStreamPanel + ApprovalCard)在收尾 PR 补齐;遗留待办全部归类到 M0 dogfood / H.4 收尾(approval 完整 E2E、RunsList mockup、ApprovalCard 编辑态 mockup) |
 | 2026-05-26 | v1.8 | **H.4 设计基线**:加 § 6.6 H.4 详细设计(18 子章节,复刻 § 6.5 范式)— 范围 7 子面(Curation+Eval / Memory / Skills / Triggers / Audit / Settings IAM / Settings Ops)+ Audit backend endpoint 新建 + 跨租户 RBAC matrix + 错误边界矩阵(12 条)+ i18n 8 namespace ~130 keys + 测试计划(backend 10 测 + frontend 45 单测 + 33 stories + E2E 7 happy-path)。锁定 4 个 spike 结果:(1) Trigger webhook secret 回包 schema 已有 — PR6 backend 不需改;(2) ResourceType Literal 双份漂移 — PR3 必须改 `protocol/audit.py:146` + `control-plane/audit.py:111` 两处;(3) audit_logger fixture pattern = 每测试自建,不走 conftest — PR3 遵循同型;(4) RoleBinding self-elevation 已被 DTO + caller 双重保护 — PR7 backend 不需改。PR 链拆 PR8-12(原 5 个 H.4 PR)为 PR8-17(10 个 PR:1 设计 + 8 实施 + 1 收尾),总估时 14-18 天。|
 | 2026-06-12 | v2.0 | **H.6 详细设计**(前端债回填,用户拍板 H.6 起手,H.7–H.9 顺序后定):加 § 6.7 — AgentDetail 4 tab 真实现;现状取证 12 条 file:line(含 envelope-vs-raw 逐端点核实:runs/memory=envelope、skills/triggers=raw);后端过滤前置 = thread_ids 两段式(H-10,不做 SQL JOIN——InMemoryRunStore 无 thread_meta 视野,protocol 两 impl 同义优先)+ skills agent-authored 语义(H-11,created_by_agent_name 列已在)+ triggers 补 version + Memory 不造 agent 维度(H-13,per-user 资产语义事实);2-PR 切分(backend 过滤 / frontend 4 tab 收尾) |
+| 2026-06-12 | v2.6 | **H.9 详细设计**(前端债末项):加 § 6.10 — Rate Card 计价管理面;取证 8 条(5 端点全 **envelope**(与 H.7/H.8 raw 相反)/ 双门权限 / **Patch 不可变身份字段**——后端 docstring 明示重定价=插新行);Mini-ADR H-20 编辑面=Patch 可变字段集+灰显身份字段 / H-21 micros 原值输入+换算只读提示(不做隐式单位转换) / H-22 前端门控=UX 非安全边界;纯前端 2-PR |
 | 2026-06-12 | v2.5 | **H.7 收尾**:PR1 全交付——SDK `knowledge.ts`(6 方法全 raw + `SUPPORTED_DOCUMENT_EXTENSIONS`/`isSupportedDocument`)+ KnowledgeAdmin 单页 master-detail(H-17)+ Upload 白名单预校验 + 503 embedder 文案 + ingest 条件轮询(H-18:未终态 5s/全终态停)+ H-19 scope note + 全接线 + Storybook 2 + vitest 6 + Playwright `knowledge.spec.ts`。实现期修正:antd 静态 `message` 在测试环境不渲染 → KnowledgeAdmin/ArtifactsList 统一 `App.useApp()` 注入(house style,MemoryAdmin 同款);`userEvent.upload` 默认尊重 `accept` 需 `applyAccept:false` 才能测 beforeUpload 预校验。设计 § 6.9 全兑现无偏差;H.7-F1 留 follow-up |
 | 2026-06-12 | v2.4 | **H.7 详细设计**(前端债第 3 项):加 § 6.9 — Knowledge 治理面;取证 9 条(6 端点全 raw / bases 租户级共享 / **router 不读 tenant_id query——TenantScope 对此页无效**);Mini-ADR H-17 单页 master-detail / H-18 ingest 条件轮询(202+无推送,不造假 SSE)/ H-19 如实声明单租户边界(scope=`*` 静默映射 home = 冒充全平台,记 H.7-F1 follow-up);纯前端 2-PR |
 | 2026-06-12 | v2.3 | **H.8 收尾**:PR1 全交付——SDK `artifacts.ts`(5 方法全 raw + `filenameFromDisposition` RFC 5987)+ ArtifactsList 双态(H-14 兑现:cross-tenant 无行动作、kind 退化 Tag)+ versions 抽屉(NULL digest "—" + 懒回填 tooltip)+ download blob(H-15)/软删/kind 内联 Select(H-16 前端拦 no-op)+ 全接线(router/Sidebar/CommandPalette `g f`/i18n 双语)+ Storybook 3 + vitest 9(页面 5 + disposition 解析 4)+ Playwright `artifacts.spec.ts`。设计 § 6.8 全兑现无偏差;H.8-F1(租户 admin 代管)留 follow-up |
