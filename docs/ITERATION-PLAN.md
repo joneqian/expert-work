@@ -116,16 +116,16 @@
 - [ ] **决策 5：LangGraph 训练时间窗** — 软推迟，边干边读；如需集中补课再开 2-3 天
 
 **0.2 Monorepo 与工具链**（参考 [architecture/03-MONOREPO-LAYOUT](./architecture/03-MONOREPO-LAYOUT.md)）
-- [ ] 按文档 03 的目录树创建空骨架（`packages/`、`services/`、`tools/`、`tests/`、`infra/`）
-- [ ] 根 `pyproject.toml` + uv workspace 配置（成员分别有自己的 pyproject.toml）
-- [ ] 工具链固化：ruff + mypy + pytest + pytest-asyncio + pre-commit
-- [ ] 把 `src/helix_agent/__init__.py` 占位删掉，转 `packages/helix-runtime/` 真正的包
+- [x] 按文档 03 的目录树创建空骨架（`packages/`、`services/`、`tools/`、`tests/`、`infra/`）（对账 2026-06-12：早已落地）
+- [x] 根 `pyproject.toml` + uv workspace 配置（成员分别有自己的 pyproject.toml）（对账 2026-06-12）
+- [x] 工具链固化：ruff + mypy + pytest + pytest-asyncio + pre-commit（对账 2026-06-12）
+- [x] 把 `src/helix_agent/__init__.py` 占位删掉，转 `packages/helix-runtime/` 真正的包（对账 2026-06-12：src/ 已不存在）
 
 **0.3 CI/CD pipeline**（落实 P0 #30、#31）
-- [ ] CI 工作流升级：lint + mypy + test + 镜像构建 + Trivy 扫描
-- [ ] 三环境配置框架：`environments/{dev,staging,prod}.yaml`
-- [ ] CodeQL 已生效（保留），追加 `pip-audit`、`pre-commit-ci`
-- [ ] 加 `dependabot.yml` 的 pip ecosystem（等 `pyproject.toml` 落地后）
+- [x] CI 工作流升级：lint + mypy + test + 镜像构建（对账 2026-06-12：除 Trivy 外全在——CI 8 检 + sandbox-image workflow；**Trivy 镜像扫描仍缺，已并入 HX-10 范围**）
+- [x] 三环境配置框架：`environments/{dev,staging,prod}.yaml`（对账 2026-06-12：三文件在）
+- [x] CodeQL 已生效（保留），追加 `pip-audit`、`pre-commit-ci`（对账 2026-06-12：CI Security/pip-audit + Pre-commit job 均在）
+- [x] 加 `dependabot.yml` 的 pip ecosystem（对账 2026-06-12：以 `uv` ecosystem 形式落地——repo 用 uv 不用 pip，等效兑现）
 
 **0.4 ADR Backlog**（在 `docs/adr/` 增补）
 - [x] ADR-0002：状态层 schema（event_log + audit_log 分表）
@@ -558,11 +558,11 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [ ] 24 项 P0 全部勾选完成（参考 [architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §"Gap 严重性矩阵"）
 - [x] **Stream K（Capability Hardening Sprint）15 子项完成** —— 13 条 (c) 类弱版全部补到生产级（[STREAM-K-DESIGN](./streams/STREAM-K-DESIGN.md)）；零债 6 条核验 ✅，PR #172 + #182–#196 全部 squash 合入 main（2026-05-20）
 - [x] **Stream L（Hermes-derived 单 turn 能力强化）8 子项完成** —— L1-L8 全部补到生产级（[STREAM-L-DESIGN](./streams/STREAM-L-DESIGN.md)）；零债 6 条核验 ✅，PRs #198–#206 全部 squash 合入 main（2026-05-20）
-- [ ] **Stream J（Agent Harness 能力补全）15 子项完成** —— 26 维能力矩阵无缺口
+- [x] **Stream J（Agent Harness 能力补全）15 子项完成** —— 26 维能力矩阵无缺口（对账 2026-06-12：J.1-J.15 全勾；后续 HX 评估的补强亦已收官）
 - [ ] canonical 能力 agent 跑通 + staging 冒烟（便宜模型端到端真实 run）
 - [ ] 测试金字塔达标：unit ≥ 85%、integration ≥ 70% 关键路径、E2E 5-10 场景
 - [ ] 7 条沙盒安全验证用例全部通过
-- [ ] SLO 第一个版本写入文档；P0 告警全部接入
+- [x] SLO 第一个版本写入文档；P0 告警全部接入（对账 2026-06-12：`docs/runbooks/slo.md` 13 条 SLO + `tools/observability/rules/` sli/alerts/uplift 三文件在册）
 - [x] **control-plane 状态持久化（SQL store 切换）** — `store_backend` setting（`memory` / `sql`），`create_app` 在 `sql` 时建 async engine + `build_rls_sessionmaker` 包装的 sessionmaker，把全部 10 个 `Sql*Store` / `DbFeedbackStore` 注入，lifespan `finally` dispose engine；`infra/docker-compose.yml` 的 `control-plane` 设 `HELIX_AGENT_STORE_BACKEND=sql`。设计：[STREAM-B-DESIGN](./streams/STREAM-B-DESIGN.md) Mini-ADR B-6。同 PR 补齐 `SqlAgentSpecStore` + 3 个 auth SQL store 此前缺失的集成测试。已知项：`/v1/quota/*` mTLS 跨租户路径在 RLS `FORCE` 下的写入待 Stream C 深化时处理（M0 进程内单体不走该 HTTP 路径）。
 
 ---
@@ -731,18 +731,18 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 >
 > **范围纪律**（simplicity first）：显式不做 — mock-LLM 服务、HITL 正则、凭证轮换/版本化、诊断页、批量导入、manifest JSON Schema/dry-run/文件上传 UI、跨租户凭证共享、租户级 tool/skill allowlist、独立 Artifacts UI 页。Phase 7 单列。
 
-- [ ] **P.1 建租户：不加主表，POST = 显式写第一行 tenant_config（PR C/D）** — **Mini-ADR P-1**
-- [ ] **P.2 建租户权限 = is_system_admin inline，不加 RBAC `tenant` Resource（PR D）** — **Mini-ADR P-2**
-- [ ] **P.3 `TenantConfigStore.create` + `TenantConfigAlreadyExistsError`（已存在 409，不复用 upsert）（PR C）** — **Mini-ADR P-3**
-- [ ] **P.4 建租户只建 tenant_config 一行（不连带 quota/binding/user）（PR D）** — **Mini-ADR P-4**
-- [ ] **P.5 tenant_id 默认服务端 uuid4，也接受客户端传（PR D）** — **Mini-ADR P-5**
-- [ ] **P.6 bootstrap CLI `python -m control_plane.bootstrap_admin`（复用 Settings/Store/bypass_rls，幂等，不建 platform 租户）+ runbook（PR B）** — **Mini-ADR P-6**
-- [ ] **P.7 平台凭证存储 = DB 行覆盖 env seed、DB 优先（env 仍 fallback，未写 DB 行为不变）（PR F/G）** — **Mini-ADR P-7**
-- [ ] **P.8 平台凭证只存 ref（secret://、kms://），拒绝明文（validator）（PR F）** — **Mini-ADR P-8**
-- [ ] **P.9 `PlatformCredentialsService`（TTL 缓存 merged 视图）+ resolver getter（additive）+ 写端点 invalidate（PR F/G）** — **Mini-ADR P-9**
-- [ ] **P.10 boot `_validate_platform_catalog` 对 env 字段语义不变（仍 fail-fast），不加新 fatal boot check（PR G）** — **Mini-ADR P-10**
-- [ ] **P.11 平台端点 is_system_admin inline 门控 + handler 在 bypass_rls_session 内（PR H）** — **Mini-ADR P-11**
-- [ ] **P.12 删除受被引用检查门控（agent 在用/env 定义则 409），enabled=false 软停用永远可用（PR H）** — **Mini-ADR P-12**
+- [x] **P.1 建租户：不加主表，POST = 显式写第一行 tenant_config（PR C/D）** — **Mini-ADR P-1**
+- [x] **P.2 建租户权限 = is_system_admin inline，不加 RBAC `tenant` Resource（PR D）** — **Mini-ADR P-2**
+- [x] **P.3 `TenantConfigStore.create` + `TenantConfigAlreadyExistsError`（已存在 409，不复用 upsert）（PR C）** — **Mini-ADR P-3**
+- [x] **P.4 建租户只建 tenant_config 一行（不连带 quota/binding/user）（PR D）** — **Mini-ADR P-4**
+- [x] **P.5 tenant_id 默认服务端 uuid4，也接受客户端传（PR D）** — **Mini-ADR P-5**
+- [x] **P.6 bootstrap CLI `python -m control_plane.bootstrap_admin`（复用 Settings/Store/bypass_rls，幂等，不建 platform 租户）+ runbook（PR B）** — **Mini-ADR P-6**
+- [x] **P.7 平台凭证存储 = DB 行覆盖 env seed、DB 优先（env 仍 fallback，未写 DB 行为不变）（PR F/G）** — **Mini-ADR P-7**
+- [x] **P.8 平台凭证只存 ref（secret://、kms://），拒绝明文（validator）（PR F）** — **Mini-ADR P-8**
+- [x] **P.9 `PlatformCredentialsService`（TTL 缓存 merged 视图）+ resolver getter（additive）+ 写端点 invalidate（PR F/G）** — **Mini-ADR P-9**
+- [x] **P.10 boot `_validate_platform_catalog` 对 env 字段语义不变（仍 fail-fast），不加新 fatal boot check（PR G）** — **Mini-ADR P-10**
+- [x] **P.11 平台端点 is_system_admin inline 门控 + handler 在 bypass_rls_session 内（PR H）** — **Mini-ADR P-11**
+- [x] **P.12 删除受被引用检查门控（agent 在用/env 定义则 409），enabled=false 软停用永远可用（PR H）** — **Mini-ADR P-12**
 - [x] **P.13 平台配置 Admin UI `SettingsPlatformConfig.tsx`（非 tenant-scoped + isSystemAdmin 门控）+ 建租户 UI `SettingsCreateTenant.tsx`（PR E/I）** ✅ shipped
 - [x] **P.14 canonical manifest 入仓（用 `approval_required_tools` + `supports_vision`）（PR J）** ✅ `manifests/canonical-agent/v1.0.0.yaml` + CI guard `test_canonical_manifest.py`
 - [x] **P.15 dev 真实 turn 用真 LLM key：local_dev SecretStore 文件（非进程 env）+ compose 挂载 `infra/dev-keys` + `.example` 模板 + 文档（不入仓明文）（PR J）** — **Mini-ADR P-13** ✅ 修正了 PR B 把 key 走 `ANTHROPIC_API_KEY` 进程 env 的失效 recipe
@@ -820,10 +820,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **W4 — dev Keycloak 接通（收尾补丁,实跑 E2E 前置）**
 > 实跑准备时发现:W1–W3 代码 ship 且用 Fake 客户端单测覆盖,但**在 dev 真让员工浏览器登录**的环境管线没接通(`keycloak_enabled` 默认关、admin-client-secret 无种入金库路径、realm 无 SMTP、admin-ui redirectUris 端口漂移)。调查确认**两条 provision 路径已先写账号+binding 再发邮件且容错邮件失败**(`member_ops.py:147`/`first_admin.py:147`)→ 无 SMTP 时 invite/建租户仍 201,控制台手设密码即可。**纯环境接线 + 文档 + UI 暴露,零 product 代码改动。**
-- [ ] **R-13 compose 加 `HELIX_AGENT_KEYCLOAK_ENABLED`(默认 false→CI integration 不受影响;dev 在 infra/.env 开 true)；realm admin-ui `:3000`→`:5173` 端口对齐** — **Mini-ADR R-13**
-- [ ] **R-14 seed CLI `control_plane.seed_keycloak_secret`(镜像 bootstrap_admin;把 admin-client-secret put 进金库;value 走 `--value`/env,不进容器运行时 env)+ 单测** — **Mini-ADR R-14**
-- [ ] **R-15 建租户 UI 暴露 first_admin(`SettingsCreateTenant` 加 email/display_name 字段+成功回显 first_admin;api 类型+i18n+e2e)→ 建公司+首管全程浏览器** — **Mini-ADR R-15**
-- [ ] **R-16 `getting-started.md` 重写成真实 Stream R 闭环 + 修 `bootstrap-admin.md`(subject-id 改服务账号 Admin API,绕开已禁 password grant;`control-plane`→`control-plane-blue`)** — 文档同步
+- [x] **R-13 compose 加 `HELIX_AGENT_KEYCLOAK_ENABLED`(默认 false→CI integration 不受影响;dev 在 infra/.env 开 true)；realm admin-ui `:3000`→`:5173` 端口对齐** — **Mini-ADR R-13**
+- [x] **R-14 seed CLI `control_plane.seed_keycloak_secret`(镜像 bootstrap_admin;把 admin-client-secret put 进金库;value 走 `--value`/env,不进容器运行时 env)+ 单测** — **Mini-ADR R-14**
+- [x] **R-15 建租户 UI 暴露 first_admin(`SettingsCreateTenant` 加 email/display_name 字段+成功回显 first_admin;api 类型+i18n+e2e)→ 建公司+首管全程浏览器** — **Mini-ADR R-15**
+- [x] **R-16 `getting-started.md` 重写成真实 Stream R 闭环 + 修 `bootstrap-admin.md`(subject-id 改服务账号 Admin API,绕开已禁 password grant;`control-plane`→`control-plane-blue`)** — 文档同步
 
 **Stream R Verification**：单测 Keycloak client(token 过期重取/409 映射/unavailable)+`TenantMemberStore`(状态机+幂等键+kc 反查)+`resolve_tenant_roles`(merge/隔离)+`ensure_member_active` 幂等 + session 默认 agent 解析;集成(FakeKeycloak)W1 建租户+first_admin 全链+各失败点补偿/W2 invite/resend/revoke;**端到端**:建公司(填首admin email)→ admin 邀请员工(operator)→ 员工收 Keycloak 邮件设密码登录 → 员工 Playground 真实回话(全程 web,人只在网页填过 email)。每 PR 零债 6 条。email 用普通 str 校验(不引 email-validator)。
 
@@ -875,10 +875,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 **锁定决策**：① 列表 + 切进去都做；② 改 display_name/plan 复用现有租户配置页（不重复）；③ **停用要做**（删除=follow-up）；④ 后台设密码 = **管理员输临时密码**（temporary=true 首登强改）；⑤ 停用 enforcement 单一卡口在 auth middleware（被停租户成员 403，system_admin 不受影响）。
 
-- [ ] **U-A 设计先行**（STREAM-U-DESIGN + 本 backlog）— **Mini-ADR U-1~U-8**
-- [ ] **U-B 列表后端**：`tenant_config` store `list()`（sql+memory）+ `GET /v1/tenants`（system_admin、分页）+ SDK `listTenants()` + 测试
-- [ ] **U-C 切进租户**：`TenantSwitcher` system_admin 填充具体租户 + 切进设 `TenantScope`（解死结，现有租户作用域页生效）+ 单测/e2e
-- [ ] **U-D 租户管理页**：`/settings/tenants` 列表/管理页（显示名/套餐/状态/id/创建时间 + 「管理」切进去）+ 导航「租户」+ i18n + storybook/e2e/axe
+- [x] **U-A 设计先行**（STREAM-U-DESIGN + 本 backlog）— **Mini-ADR U-1~U-8**
+- [x] **U-B 列表后端**：`tenant_config` store `list()`（sql+memory）+ `GET /v1/tenants`（system_admin、分页）+ SDK `listTenants()` + 测试
+- [x] **U-C 切进租户**：`TenantSwitcher` system_admin 填充具体租户 + 切进设 `TenantScope`（解死结，现有租户作用域页生效）+ 单测/e2e
+- [x] **U-D 租户管理页**：`/settings/tenants` 列表/管理页（显示名/套餐/状态/id/创建时间 + 「管理」切进去）+ 导航「租户」+ i18n + storybook/e2e/axe
 - [x] **U-E 停用/恢复**：migration `0053_tenant_status`（status 列）+ model/protocol + `POST /v1/tenants/{id}/deactivate`·`/activate` + middleware 403 `TENANT_SUSPENDED` enforcement（`TenantStatusService` 30s TTL 缓存，system_admin 不受影响）+ runs 防御 + 审计（`AuditAction` 单一 StrEnum，非双 Literal）+ 列表页状态徽章&停用/恢复操作（PR E）
 - [x] **U-F 后台设密码**：Keycloak `reset_password`（temporary=true）+ `POST /v1/members/{id}/reset-password`（SecretStr 不落日志、审计无值、`require("user","write")`）+ SDK + 成员页「设密码」modal（Input.Password）+ i18n + 测试（PR F）
 - [x] **U-G IA 收口**：创建租户折进 `/settings/tenants` 抽屉（`CreateTenantDrawer`，保留 tenant_id UUID 校验）+ 删独立创建页/路由/「创建租户」菜单（PR G）
@@ -954,7 +954,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 平台发布精选 skill 库（`tenant_id NULL`，可 premium），租户继续自建；manifest 同时可绑平台/租户 skill。复用 W 的 `tier_satisfies`、Stream U 的 moderation/curator。**关键发现**：skill resolver 当前**未接入 agent build**（Stream U 遗留缺口，app.py:972 TODO）→ 租户 skill 运行时也未生效；X3 首次接线（租户+平台），属行为变更。
 
-- [ ] **X0 设计先行**（STREAM-X-DESIGN + Mini-ADR W… X-1~X-9）
+- [x] **X0 设计先行**（STREAM-X-DESIGN + Mini-ADR W… X-1~X-9）（对账 2026-06-12：设计文档在仓，X1-X9 已全部交付）
 - [x] **X1 协议**（PR #399）：`Skill.required_tier`（纯 additive，default FREE）。`tenant_id: UUID|None` 的放宽**移到 X2**（它会 ripple 进 store/curator/orchestrator，须与迁移同 PR 处理，避免悬空类型变更）
 - [x] **X2 持久化 + 迁移**（PR #400）：协议 `Skill/SkillVersion.tenant_id → UUID|None` + 迁移 `0057_platform_skill`（skill/skill_version tenant_id 改 NULLABLE + RLS 严格相等→`IS NOT DISTINCT FROM` + COALESCE 唯一索引 + `required_tier` 列）+ store/curator/orchestrator 的 `UUID|None` ripple（memory store set、`SkillActivityRecorder.record`、`_load_skills`）+ curator `WHERE tenant_id IS NOT NULL`；**RLS 回归测 + 迁移安全测**（最高风险=已有数据表换 RLS）
 - [x] **X3 resolver 接线 + 双查 + 门控**（PR #401）：`make_skill_resolver`（租户优先 + 平台 bypass 兜底 + `tier_satisfies` not_entitled）+ **首次线程穿 `make_agent_builder`/`make_child_agent_builder`/`build_agent`/子 agent + `SkillViewTool` + activity recorder**（补 Stream U 运行时接线）
@@ -1002,7 +1002,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **TE-1 工具元数据**（PR #416）：`ToolSpec` 加 `side_effect: SideEffectLevel|None`（None→由 `is_read_only` 保守派生 read_only/reversible）+ `idempotent` + `resolved_side_effect` 属性。纯增量、零行为变更（无消费者）
 - [x] **TE-2 工具级审计 emit**（PR #417）：`builder.py:_dispatch_tool` emit `TOOL_CALL`/`TOOL_BLOCKED`（运行时经 `config["configurable"]` 注入 audit_logger，不碰 build_agent）；脱敏 arg 名+path 值（绝不记原始值）；`ResourceType` 加 `"tool"`（双 Literal）
 - [x] **TE-3 可观测补全**（PR #418）：per-tool Prometheus `helix_tool_call_total{tool,outcome}` + `helix_tool_latency_seconds{tool}`（`_error_total` 由 outcome label 取代）；MCP 名归一 `mcp:<server>` 控基数。**Langfuse span + trajectory 富化拆为 TE-3b（按价值延后）**
-- [ ] **TE-3b Langfuse tool span + trajectory 富化**（延后）：Langfuse 当前无生产 sink（仅内存桩）→ 并入未来 Langfuse SDK 适配器 PR；trajectory 的 exit_code/读写集 无数据源 → 并入 TE-5/TE-7（届时 bash/文件原语产生）
+- [ ] **TE-3b Langfuse tool span + trajectory 富化**（延后；**前提已半兑现**——对账 2026-06-12：Langfuse 生产 sink 已由 HX-7 交付（LangfuseSdkClient #558），剩余=LLM span 之外的 tool span 富化；trajectory 的 exit_code/读写集仍无数据源 → 并入 TE-5/TE-7）
 - [x] **TE-4 side_effect 门控**（PR #419）：扩 `scheduling.py` `irreversible`→强制串行（检查前置）；build 期把 irreversible 工具名并入 `_gated_tools`→自动审批门控（运行时 `_approval.py` 本无硬编码集，gating 经集合并集）。零当前行为变更（彼时无 irreversible 工具）
 - [x] **TE-5 bash 工具**（PR #420）：经 sandbox-supervisor 复用 exec 通道（subprocess wrapper，零 supervisor 改动）；`side_effect="irreversible"`→首个被 TE-4 自动串行+门控的工具；信号退出码映射 shell 惯例。抽取 `run_in_sandbox`/`format_sandbox_outcome` 与 exec_python 共用
 - [x] **TE-6 deferred registry + find_tools**（PR #421）：`ToolRegistry` `register(deferred=)` + `specs()`/`all_specs()`/`deferred_specs()`/`search()`（select:/+keyword/regex）；`find_tools` 元工具 + `AgentState.promoted_tools` 通道（per-run 隔离，非 ContextVar）。**机制层默认休眠**。bind 经 `specs()` 过滤（无需 middleware）。顺带修好 `subagent_invocations` 并行 fan-out 丢行潜伏 bug
@@ -1098,7 +1098,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 > **M1 排序遵循自下而上**：先做基础设施硬化（沙盒池化、数据生命周期、凭证代理）和可观测核心，再做依赖这些底座的高阶能力（多租户深化、Sub-Agent、Python 插槽），最后是灰度/UI/dogfood。
 
 #### M1-A Sandbox 池化 + 镜像供应链（~4 周）
-- [ ] Sandbox warm pool（目标 P95 < 500ms）
+- [x] Sandbox warm pool（目标 P95 < 500ms）（对账 2026-06-12：HX-6 已交付——READY 池 + replenisher + 镜像预拉，#554-556；池命中率 SLO #13 在册）
 - [ ] 镜像 build cache + 内部 registry
 - [ ] Trivy/Grype 扫描 CI gate（落实 P1 镜像扫描）
 - [ ] cosign 签名 manifest + image（落实 P1 supply chain）
