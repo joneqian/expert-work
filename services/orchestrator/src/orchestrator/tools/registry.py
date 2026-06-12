@@ -23,6 +23,7 @@ from uuid import UUID
 
 from helix_agent.protocol import Plan
 from helix_agent.runtime.cancellation import CancellationToken
+from orchestrator.tools.ranking import build_document, rank_tools
 
 #: Stream TE-1 — a tool's effect on the world. Descriptive metadata only in
 #: TE-1; intended to drive the side-effect-aware scheduler / approval gate
@@ -302,8 +303,15 @@ class ToolRegistry:
         #: surfaced only via :meth:`search` / ``find_tools``. They stay
         #: dispatchable through :meth:`get` once promoted.
         self._deferred: set[str] = set()
+        #: Stream HX-12 — tool provenance ("builtin" / "skill" /
+        #: "mcp:<server>"), shown in find_tools results so the model can
+        #: tell where a capability comes from.
+        self._sources: dict[str, str] = {}
+        #: Stream HX-12 — lazily-built BM25 corpus over the deferred pool;
+        #: invalidated on every register (cheap: rebuilt on next search).
+        self._ranking_corpus: list[tuple[str, list[str]]] | None = None
 
-    def register(self, tool: Tool, *, deferred: bool = False) -> None:
+    def register(self, tool: Tool, *, deferred: bool = False, source: str | None = None) -> None:
         """Register a tool by its spec ``name``. Re-registering replaces.
 
         Stream TE-6 — ``deferred=True`` marks the tool as *latent*: it is
@@ -312,6 +320,9 @@ class ToolRegistry:
         remains fully dispatchable via :meth:`get` / :meth:`get_required`
         so a promoted call still routes. Default ``False`` keeps every
         existing tool active — zero behaviour change.
+
+        Stream HX-12 — ``source`` records provenance for find_tools result
+        labelling (``"mcp:<server>"`` / ``"skill"``; default ``"builtin"``).
         """
         name = tool.spec.name
         self._tools[name] = tool
@@ -320,6 +331,13 @@ class ToolRegistry:
         else:
             # Re-registering a previously-deferred name as active un-defers it.
             self._deferred.discard(name)
+        if source is not None:
+            self._sources[name] = source
+        self._ranking_corpus = None
+
+    def source_of(self, name: str) -> str:
+        """Provenance label for find_tools listings (Stream HX-12)."""
+        return self._sources.get(name, "builtin")
 
     def get(self, name: str) -> Tool | None:
         return self._tools.get(name)
@@ -371,13 +389,15 @@ class ToolRegistry:
 
         Active tools are never returned — they're already in the bind, so
         there's nothing to retrieve. The query syntax mirrors deer-flow's
-        ``tool_search``:
+        ``tool_search``, with HX-12 adding a ranked natural-language mode:
 
         - ``select:a,b,c`` — exact name match (comma-separated).
         - ``+keyword rest...`` — require ``keyword`` (case-insensitive) in the
           name or description, then further filter by every remaining word.
-        - otherwise — treat the whole query as a regex over name/description
-          (case-insensitive); an invalid pattern degrades to a substring match.
+        - otherwise — BM25-ranked retrieval over names / descriptions /
+          parameter names (CJK-aware, best match first; Stream HX-12). A
+          zero-overlap query falls back to the pre-HX-12 regex / substring
+          path, so retrieval is never worse than before.
         """
         # Iterate ``_tools`` (registration-ordered) so results are
         # deterministic; ``_deferred`` is an unordered set.
@@ -401,6 +421,13 @@ class ToolRegistry:
                 if all(term in _haystack(spec) for term in lowered_terms)
             ]
 
+        # Stream HX-12 — ranked natural-language retrieval first; an empty
+        # result (zero lexical overlap) drops to the legacy path below.
+        ranked_names = rank_tools(stripped, self._ranking_documents())
+        if ranked_names:
+            by_name = {spec.name: spec for spec in candidates}
+            return [by_name[name] for name in ranked_names if name in by_name]
+
         # Stream TE-6 — the query is model-derived; an over-long pattern is the
         # ReDoS surface (catastrophic backtracking). Cap it: anything past the
         # limit degrades to a plain substring match (never compiled as a regex).
@@ -417,6 +444,23 @@ class ToolRegistry:
             for spec in candidates
             if pattern.search(spec.name) or pattern.search(spec.description)
         ]
+
+    def _ranking_documents(self) -> list[tuple[str, list[str]]]:
+        """Lazily (re)build the BM25 corpus over the deferred pool (HX-12)."""
+        if self._ranking_corpus is None:
+            self._ranking_corpus = [
+                (
+                    name,
+                    build_document(
+                        name,
+                        tool.spec.description,
+                        list((tool.spec.parameters or {}).get("properties", {}) or {}),
+                    ),
+                )
+                for name, tool in self._tools.items()
+                if name in self._deferred
+            ]
+        return self._ranking_corpus
 
     def has_deferred(self) -> bool:
         """Whether any tool is registered deferred (Stream TE-6).

@@ -759,7 +759,7 @@ async def register_mcp_tools(
             server_name=server_name,
             content_char_cap=content_char_cap,
         )
-        registry.register(helix_tool, deferred=deferred)
+        registry.register(helix_tool, deferred=deferred, source=f"mcp:{server_name}")
         registered.append(helix_tool.spec.name)
     logger.info("mcp.registered server=%s tools=%s", server_name, registered)
     return registered

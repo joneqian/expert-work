@@ -1,4 +1,4 @@
-"""``find_tools`` — the tool-RAG meta-tool (Stream TE-6).
+"""``find_tools`` — the tool-RAG meta-tool (Stream TE-6, HX-12 ranked).
 
 Treats Context Bloat: tools registered as *deferred* (see
 :meth:`ToolRegistry.register`) are kept out of every turn's LLM ``tools``
@@ -10,10 +10,10 @@ directly callable.
 
 Promotion lives on the LangGraph ``AgentState`` channel — per-thread and
 checkpointed — so it never mutates the agent-lifetime-cached registry
-(per-run isolation). This module is the dormant mechanism only: no tool is
-deferred by default, so with the stock registry ``find_tools`` simply finds
-nothing. Auto-deferral of large tool surfaces (e.g. MCP over a threshold)
-is Stream TE-6b.
+(per-run isolation). Stream HX-12 upgrades retrieval to BM25-ranked
+natural language (see :mod:`orchestrator.tools.ranking`), truncates
+listing descriptions, labels each result with its provenance, and turns
+the zero-hit answer into guidance instead of a dead end.
 """
 
 from __future__ import annotations
@@ -22,7 +22,36 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from helix_agent.common.observability import helix_counter
 from orchestrator.tools.registry import ToolContext, ToolRegistry, ToolResult, ToolSpec
+
+#: Stream HX-12 — promotion-domain events. ``miss`` = a find_tools query
+#: that matched nothing (a governance signal: the model wanted a
+#: capability the deferred pool doesn't cover, or phrased it badly).
+promotion_events = helix_counter(
+    "helix_tool_promotion_total",
+    "Deferred-tool promotion lifecycle events (Stream HX-12).",
+    ("event",),
+)
+
+#: Stream HX-12 — cap per-result description length in the find_tools
+#: listing (Hermes parity). Full descriptions stay in the registry and
+#: in the per-turn bind once promoted; only the listing is truncated.
+_LISTING_DESCRIPTION_MAX = 400
+
+_NO_MATCH_GUIDANCE = (
+    "No matching tools found. Try a broader natural-language query "
+    "describing the capability you need (e.g. 'create a calendar event'), "
+    "or one of the precise forms: 'select:name1,name2' for exact names, "
+    "'+keyword extra words' to require a keyword. If nothing matches, the "
+    "capability is not available — proceed without it or tell the user."
+)
+
+
+def _truncate(text: str) -> str:
+    if len(text) <= _LISTING_DESCRIPTION_MAX:
+        return text
+    return text[: _LISTING_DESCRIPTION_MAX - 1] + "…"
 
 
 @dataclass
@@ -44,13 +73,13 @@ class FindToolsTool:
                 "Search for and load tools that are not currently available to "
                 "you, then they become directly callable on your next step. Use "
                 "this when you need a capability you don't see in your tool list "
-                "(e.g. a specific integration). The 'query' supports three forms: "
-                "'select:name1,name2' loads tools by exact name; '+keyword extra "
-                "words' requires 'keyword' and filters by the remaining words; "
-                "any other text is matched as a substring or regular expression "
-                "against tool names and descriptions. The result lists the loaded "
-                "tools; call them directly afterwards — do not call find_tools "
-                "again for the same tool."
+                "(e.g. a specific integration). Describe what you need in plain "
+                "language (English or Chinese) — results are relevance-ranked, "
+                "best match first. Two precise forms are also supported: "
+                "'select:name1,name2' loads tools by exact name, and '+keyword "
+                "extra words' requires 'keyword' and filters by the remaining "
+                "words. The result lists the loaded tools; call them directly "
+                "afterwards — do not call find_tools again for the same tool."
             ),
             parameters={
                 "type": "object",
@@ -58,8 +87,9 @@ class FindToolsTool:
                     "query": {
                         "type": "string",
                         "description": (
-                            "What you're looking for: 'select:a,b', '+keyword ...', "
-                            "or a substring/regex over tool names and descriptions."
+                            "The capability you're looking for, in plain language "
+                            "(relevance-ranked); or 'select:a,b' / '+keyword ...' "
+                            "for precise matching."
                         ),
                     },
                 },
@@ -80,8 +110,14 @@ class FindToolsTool:
         matches = self.registry.search(raw)
         names = [spec.name for spec in matches]
         if not matches:
-            content = "(no matching tools found)"
+            promotion_events.labels(event="miss").inc()
+            content = _NO_MATCH_GUIDANCE
         else:
-            listing = "\n".join(f"- {spec.name}: {spec.description}" for spec in matches)
+            promotion_events.labels(event="promote").inc()
+            listing = "\n".join(
+                f"- {spec.name} [{self.registry.source_of(spec.name)}]: "
+                f"{_truncate(spec.description)}"
+                for spec in matches
+            )
             content = f"Loaded the following tools — you can call them directly now:\n{listing}"
         return ToolResult(content=content, state_updates={"promoted_tools": names})

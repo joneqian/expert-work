@@ -83,7 +83,9 @@ async def test_build_defers_mcp_tools_and_autoregisters_find_tools() -> None:
 
     # find_tools can surface the deferred MCP tools.
     found = registry.search("read_file")
-    assert {s.name for s in found} == {"mcp:fs.read_file"}
+    # HX-12 ranked retrieval: best match first; sibling tools sharing a
+    # token (e.g. "file") may follow.
+    assert found and found[0].name == "mcp:fs.read_file"
 
 
 @pytest.mark.asyncio

@@ -201,9 +201,14 @@ def test_search_substring_and_regex_fallback() -> None:
     assert [s.name for s in registry.search("redis")] == ["redis_get"]
     # Valid regex.
     assert sorted(s.name for s in registry.search("post.*query")) == ["postgres_query"]
-    # Invalid regex (unbalanced paren) degrades to a literal substring match
-    # against the description "(read)" — no crash, still finds the tool.
-    assert [s.name for s in registry.search("(read")] == ["postgres_query"]
+    # HX-12: an invalid regex like "(read" now hits the ranked path first —
+    # the token "read" appears in both descriptions, so both come back
+    # (relevance-ranked) instead of the old literal-substring single hit.
+    assert {s.name for s in registry.search("(read")} == {"postgres_query", "redis_get"}
+    # True substring fallback: the query shares no *token* with any document
+    # (BM25 returns nothing) but is a literal substring of a description.
+    registry.register(_make_described("blob_store", "handles abcdef payloads"), deferred=True)
+    assert [s.name for s in registry.search("bcde")] == ["blob_store"]
 
 
 def test_search_returns_empty_when_no_deferred_match() -> None:
