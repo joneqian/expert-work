@@ -755,6 +755,7 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 - `register_mcp_tools` 注册完三池后（或注册时聚合）：用 `default_estimator()` 估算**全部 MCP 工具 schema**（name+description+parameters JSON）token 总量；总量 < **min(context_window × 10%, 20k)** → 全部重注册为 active（`registry.register(tool)` 覆盖即 un-defer，现成语义），find_tools 自然不再注册（`has_deferred()` 为假）。
 - `context_window` 由 agent_factory 既有解析传入 assembly（加参数）。
 - 防御：estimator 异常 → 维持 always-defer 现状（fail-open 到行为不变侧）。
+- **实施注记（PR2）**：`context_window=None`（未传参的 legacy 调用点/测试）同样**不启用**逃生门——TE-6b 行为字节不变；唯一生产调用点 agent_factory 显式传 `_resolved_context_window` 启用。
 - 阈值不开配置面（常量 + 注释），有真实需求再参数化。
 
 #### 10.2.4 ③ call-through（dispatch 拦截）

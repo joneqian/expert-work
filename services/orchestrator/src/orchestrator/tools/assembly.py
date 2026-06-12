@@ -15,6 +15,7 @@ so the failure surfaces at build time, not on the first tool call.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ from helix_agent.protocol import (
     ToolSpecEntry,
     VisionSpec,
 )
+from helix_agent.runtime.tokens import default_estimator
 from orchestrator.errors import AgentFactoryError
 from orchestrator.multimodal import ImageResolver
 from orchestrator.tools.approval import AskForApprovalTool
@@ -168,6 +170,7 @@ async def build_tool_registry(
     knowledge: KnowledgeSpec | None = None,
     vision: VisionSpec | None = None,
     vl_caller: LLMCaller | None = None,
+    context_window: int | None = None,
 ) -> ToolRegistry:
     """Build a :class:`ToolRegistry` from a manifest's ``tools:`` entries.
 
@@ -193,6 +196,10 @@ async def build_tool_registry(
     its presence activates the ``ask_image`` tool, which routes to the
     declared VL model via ``vl_caller``.
 
+    ``context_window`` (Stream HX-12) feeds the small-pool escape hatch:
+    when the deferred (MCP) pool's total schema size fits comfortably in
+    context, defer is pointless overhead and every tool registers active.
+
     :raises AgentFactoryError: an entry names an unknown builtin, declares
         a tool whose ``ToolEnv`` dependency is not configured, declares
         ``subagents`` with no ``ToolEnv.child_agent_builder``, declares
@@ -210,6 +217,10 @@ async def build_tool_registry(
     _register_subagents(registry, subagents, tool_env, subagent_depth)
     _register_knowledge_search(registry, knowledge, tool_env)
     _register_ask_image(registry, vision, tool_env, vl_caller)
+    # Stream HX-12 (Mini-ADR HX-I3) — small-pool escape hatch: when the
+    # whole deferred pool fits comfortably in context, defer is pure
+    # overhead (a find_tools round-trip per capability); activate it all.
+    _maybe_activate_small_deferred_pool(registry, context_window)
     # Stream TE-6b — MCP tools register deferred (deer-flow's always-defer-MCP
     # policy, the Context-Bloat fix). Add the ``find_tools`` meta-tool so the
     # model can retrieve them on demand — but only when there IS something
@@ -219,6 +230,63 @@ async def build_tool_registry(
     if registry.has_deferred():
         registry.register(FindToolsTool(registry=registry))
     return registry
+
+
+#: Stream HX-12 — absolute ceiling for the escape hatch, independent of the
+#: context window (10% of a 1M-window model would still be 100k tokens of
+#: schemas — far past "comfortable"). Constant by design; parameterize only
+#: when a real deployment needs it.
+_ESCAPE_HATCH_TOKEN_CAP = 20_000
+_ESCAPE_HATCH_WINDOW_FRACTION = 0.10
+
+
+def _maybe_activate_small_deferred_pool(registry: ToolRegistry, context_window: int | None) -> None:
+    """Un-defer the whole pool when its schemas fit comfortably in context.
+
+    Threshold: ``min(context_window x 10%, 20k)`` tokens, measured with the
+    HX-1 estimator over each tool's name + description + parameter schema.
+    Any failure keeps the always-defer status quo (fail-open to the
+    behaviour-unchanged side).
+    """
+    if context_window is None:
+        # No window means the caller didn't opt in (legacy call sites,
+        # tests) — keep the TE-6b always-defer behaviour byte-identical.
+        return
+    names = registry.deferred_names()
+    if not names:
+        return
+    threshold = min(_ESCAPE_HATCH_TOKEN_CAP, int(context_window * _ESCAPE_HATCH_WINDOW_FRACTION))
+    try:
+        estimator = default_estimator()
+        total = 0
+        for name in names:
+            tool = registry.get(name)
+            if tool is None:  # pragma: no cover - names came from the registry
+                return
+            payload = json.dumps(
+                {
+                    "name": tool.spec.name,
+                    "description": tool.spec.description,
+                    "parameters": dict(tool.spec.parameters),
+                },
+                ensure_ascii=False,
+            )
+            total += estimator.count(payload)
+            if total >= threshold:
+                return  # over budget — keep the deferred pool as is
+    except Exception:
+        logger.warning("tool_escape_hatch.estimate_failed", exc_info=True)
+        return
+    for name in names:
+        tool = registry.get(name)
+        if tool is not None:
+            registry.register(tool)  # re-register active (un-defers; source kept)
+    logger.info(
+        "tool_escape_hatch.activated tools=%d tokens=%d threshold=%d",
+        len(names),
+        total,
+        threshold,
+    )
 
 
 def _register_knowledge_search(

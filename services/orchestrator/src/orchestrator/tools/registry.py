@@ -469,6 +469,14 @@ class ToolRegistry:
         there is something to discover (TE-6b)."""
         return bool(self._deferred)
 
+    def deferred_names(self) -> list[str]:
+        """Names of every deferred tool, in registration order (Stream HX-12).
+
+        The assembler's small-pool escape hatch iterates these to estimate
+        the pool's schema size and, under the threshold, re-register each
+        tool active."""
+        return [name for name in self._tools if name in self._deferred]
+
     def __contains__(self, name: object) -> bool:
         return isinstance(name, str) and name in self._tools
 

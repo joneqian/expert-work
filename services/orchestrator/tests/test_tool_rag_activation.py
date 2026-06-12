@@ -97,3 +97,65 @@ async def test_find_tools_not_added_without_deferred_tools() -> None:
     assert registry.has_deferred() is False
     assert "find_tools" not in _all(registry)
     assert _active(registry) == {"web_search"}
+
+
+# --- Stream HX-12 — small-pool escape hatch ---------------------------------
+
+
+async def _registry_with_mcp_and_window(context_window: int | None) -> ToolRegistry:
+    pool = MCPServerPool()
+    await pool.add("fs", RecordingMCPClient(tools=(_tool_def("read_file"), _tool_def("list_dir"))))
+    env = ToolEnv(mcp_pool=pool)
+    return await build_tool_registry(
+        [MCPToolSpec()], tool_env=env, context_window=context_window
+    )
+
+
+@pytest.mark.asyncio
+async def test_small_pool_activates_under_threshold() -> None:
+    # Two tiny MCP schemas against a 200k window → far under
+    # min(10% ctx, 20k); everything registers active, no find_tools.
+    registry = await _registry_with_mcp_and_window(200_000)
+    assert "mcp:fs.read_file" in _active(registry)
+    assert "mcp:fs.list_dir" in _active(registry)
+    assert not registry.has_deferred()
+    assert "find_tools" not in _all(registry)
+
+
+@pytest.mark.asyncio
+async def test_small_pool_stays_deferred_over_threshold() -> None:
+    # A tiny context window shrinks the threshold below even two small
+    # schemas → defer stays, find_tools registers.
+    registry = await _registry_with_mcp_and_window(100)
+    assert "mcp:fs.read_file" not in _active(registry)
+    assert registry.has_deferred()
+    assert "find_tools" in _active(registry)
+
+
+@pytest.mark.asyncio
+async def test_no_window_keeps_always_defer() -> None:
+    # Legacy call sites (no context_window) keep TE-6b byte-identical.
+    registry = await _registry_with_mcp_and_window(None)
+    assert "mcp:fs.read_file" not in _active(registry)
+    assert registry.has_deferred()
+    assert "find_tools" in _active(registry)
+
+
+@pytest.mark.asyncio
+async def test_escape_hatch_estimator_failure_keeps_defer(monkeypatch: pytest.MonkeyPatch) -> None:
+    from orchestrator.tools import assembly as assembly_mod
+
+    def _boom() -> object:
+        raise RuntimeError("tokenizer unavailable")
+
+    monkeypatch.setattr(assembly_mod, "default_estimator", _boom)
+    registry = await _registry_with_mcp_and_window(200_000)
+    # Fail-open to the behaviour-unchanged side: pool stays deferred.
+    assert registry.has_deferred()
+    assert "find_tools" in _active(registry)
+
+
+@pytest.mark.asyncio
+async def test_escape_hatch_keeps_source_labels() -> None:
+    registry = await _registry_with_mcp_and_window(200_000)
+    assert registry.source_of("mcp:fs.read_file") == "mcp:fs"

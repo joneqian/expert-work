@@ -491,6 +491,8 @@ async def build_agent(
         # Stream J.6 Path B — a ``vision:`` block activates the ask_image tool.
         vision=spec.spec.vision,
         vl_caller=vl_caller,
+        # Stream HX-12 — feeds the small-deferred-pool escape hatch.
+        context_window=_resolved_context_window(spec.spec.model),
     )
     # Stream J.1 — a ``plan_execute`` manifest front-loads a planner node
     # that decomposes the task before the ReAct loop runs.
