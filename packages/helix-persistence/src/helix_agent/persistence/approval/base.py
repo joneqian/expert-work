@@ -55,6 +55,38 @@ class ApprovalStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: ApprovalStatus,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[ApprovalRecord], int]:
+        """One tenant's approval rows in ``status`` + the total count.
+
+        Stream HX-7 — backs ``GET /v1/approvals`` (the admin queue
+        page). Ordered ``requested_at ASC`` — queue semantics, oldest
+        waiting first.
+        """
+
+    @abc.abstractmethod
+    async def list_all_tenants(
+        self,
+        *,
+        status: ApprovalStatus,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[ApprovalRecord], int]:
+        """Cross-tenant rows in ``status`` + total (Stream HX-7).
+
+        The system_admin ``tenant_id=*`` scope (Stream N). Like
+        :meth:`count_pending`, the SQL read relies on the owner's
+        exemption under ENABLE-only RLS — callers run it under a
+        bypass scope. Ordered ``requested_at ASC``.
+        """
+
+    @abc.abstractmethod
     async def count_pending(self) -> int:
         """Number of ``pending`` rows across all tenants — Stream HX-4.
 

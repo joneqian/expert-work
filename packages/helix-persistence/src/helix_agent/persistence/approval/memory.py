@@ -41,6 +41,29 @@ class InMemoryApprovalStore(ApprovalStore):
         rows.sort(key=lambda r: r.timeout_at)
         return rows[:limit]
 
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: ApprovalStatus,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[ApprovalRecord], int]:
+        rows = [r for r in self._rows.values() if r.tenant_id == tenant_id and r.status == status]
+        rows.sort(key=lambda r: r.requested_at)
+        return rows[offset : offset + limit], len(rows)
+
+    async def list_all_tenants(
+        self,
+        *,
+        status: ApprovalStatus,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[ApprovalRecord], int]:
+        rows = [r for r in self._rows.values() if r.status == status]
+        rows.sort(key=lambda r: r.requested_at)
+        return rows[offset : offset + limit], len(rows)
+
     async def count_pending(self) -> int:
         return sum(1 for r in self._rows.values() if r.status == ApprovalStatus.PENDING)
 

@@ -102,6 +102,64 @@ class SqlApprovalStore(ApprovalStore):
             )
         return [_row_to_dto(r) for r in rows]
 
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: ApprovalStatus,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[ApprovalRecord], int]:
+        async with self._sf() as session:
+            base = select(AgentApprovalRow).where(
+                AgentApprovalRow.tenant_id == tenant_id,
+                AgentApprovalRow.status == status.value,
+            )
+            total = int(
+                (
+                    await session.execute(select(func.count()).select_from(base.subquery()))
+                ).scalar_one()
+            )
+            rows = (
+                (
+                    await session.execute(
+                        base.order_by(AgentApprovalRow.requested_at.asc())
+                        .limit(limit)
+                        .offset(offset)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_dto(r) for r in rows], total
+
+    async def list_all_tenants(
+        self,
+        *,
+        status: ApprovalStatus,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[ApprovalRecord], int]:
+        async with self._sf() as session:
+            base = select(AgentApprovalRow).where(AgentApprovalRow.status == status.value)
+            total = int(
+                (
+                    await session.execute(select(func.count()).select_from(base.subquery()))
+                ).scalar_one()
+            )
+            rows = (
+                (
+                    await session.execute(
+                        base.order_by(AgentApprovalRow.requested_at.asc())
+                        .limit(limit)
+                        .offset(offset)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [_row_to_dto(r) for r in rows], total
+
     async def count_pending(self) -> int:
         async with self._sf() as session:
             result = await session.execute(

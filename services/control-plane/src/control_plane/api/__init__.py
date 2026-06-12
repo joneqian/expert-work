@@ -3,6 +3,7 @@
 from control_plane.api.agent_schema import build_agent_schema_router
 from control_plane.api.agents import build_agents_router
 from control_plane.api.api_keys import build_api_keys_router
+from control_plane.api.approvals import build_approvals_router
 from control_plane.api.artifacts import build_artifacts_router
 from control_plane.api.audit import build_audit_router
 from control_plane.api.billing_admin import build_billing_admin_router
@@ -44,6 +45,7 @@ __all__ = [
     "build_agent_schema_router",
     "build_agents_router",
     "build_api_keys_router",
+    "build_approvals_router",
     "build_artifacts_router",
     "build_audit_router",
     "build_billing_admin_router",

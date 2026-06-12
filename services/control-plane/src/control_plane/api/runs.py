@@ -218,6 +218,183 @@ def _get_run_event_store(request: Request) -> RunEventStore | None:
     return store
 
 
+async def apply_approval_decision(
+    *,
+    request: Request,
+    thread_id: UUID,
+    run_id: UUID,
+    decision: Literal["approve", "reject", "modify"],
+    modified_args: dict[str, Any] | None,
+    reason: str | None,
+    threads: Any,
+    users: TenantUserStore,
+    audit: AuditLogger,
+    agent_repo: AgentSpecStore,
+    runtime: AgentRuntime,
+    approvals: ApprovalStore,
+) -> tuple[Any, UUID]:
+    """Apply one human verdict + spawn the continuation worker (J.8 core).
+
+    Stream HX-7 — extracted from the resume endpoint so the batch
+    ``POST /v1/approvals:decide`` shares the exact same path: verdict
+    validation, the ``mark_decided`` CAS, the APPROVAL_DECIDED audit,
+    the checkpoint ``aupdate_state``, and the detached worker spawn.
+    The worker is independent of any SSE consumer — the resume endpoint
+    streams it, the batch endpoint just returns its ``run_id``.
+
+    Returns ``(run_record, continuation_run_id)``. Raises
+    :class:`HTTPException` (404 / 409 / 422) — the batch caller maps
+    those onto per-item results.
+    """
+    tenant_id: UUID = request.state.tenant_id
+    actor_id: str = request.state.actor_id
+    trace_id = current_trace_id_hex()
+
+    meta = await threads.get(thread_id, tenant_id=tenant_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    caller_user_id = await resolve_caller_user_id(request, users)
+    if not caller_owns_thread(
+        meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+    ):
+        raise HTTPException(status_code=404, detail="session not found")
+    # ``modify`` carries replacement args; the other verdicts must not.
+    if decision == "modify" and modified_args is None:
+        raise HTTPException(status_code=422, detail="decision 'modify' requires modified_args")
+    if decision != "modify" and modified_args is not None:
+        raise HTTPException(
+            status_code=422, detail="modified_args is only valid with decision 'modify'"
+        )
+
+    approval = await approvals.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if approval.status is not ApprovalStatus.PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"approval already decided ({approval.status.value})",
+        )
+
+    _status_for = {
+        "approve": ApprovalStatus.APPROVED,
+        "reject": ApprovalStatus.REJECTED,
+        "modify": ApprovalStatus.MODIFIED,
+    }
+    decided = await approvals.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=_status_for[decision],
+        decided_by=actor_id,
+        decided_at=datetime.now(UTC),
+        modified_args=modified_args,
+    )
+    # ``mark_decided`` returns False on a lost race — another resume
+    # (or the timeout job) decided it between our get + update.
+    if not decided:
+        raise HTTPException(status_code=409, detail="approval already decided")
+
+    await emit(
+        audit,
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        action=AuditAction.APPROVAL_DECIDED,
+        resource_type="approval",
+        resource_id=str(run_id),
+        trace_id=trace_id,
+        details={
+            "thread_id": str(thread_id),
+            "decision": decision,
+            "request_id": approval.request_id,
+        },
+    )
+
+    if meta.agent_name is None or meta.agent_version is None:
+        raise HTTPException(status_code=409, detail="session is not bound to an agent")
+    spec_record = await agent_repo.get(
+        tenant_id=tenant_id, name=meta.agent_name, version=meta.agent_version
+    )
+    if spec_record is None:
+        raise HTTPException(status_code=404, detail="agent not found")
+    try:
+        built = await runtime.get_agent(
+            tenant_id=tenant_id,
+            name=meta.agent_name,
+            version=meta.agent_version,
+            spec=spec_record.spec,
+            # Stream MCP-OAUTH (OA-3b) — per-user OAuth MCP pool key.
+            user_id=request.state.principal.subject_id,
+        )
+    except AgentFactoryError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"agent manifest cannot be built: {exc}"
+        ) from exc
+
+    # Write the verdict into the paused thread's checkpoint. ``as_node=
+    # "agent"`` re-positions the graph as if the agent had just run,
+    # so the next step evaluates the agent's conditional edge — the
+    # last message still carries the gated tool_calls → routes to
+    # ``tools``, where ``approval_resume`` is applied.
+    checkpoint_config: RunnableConfig = {
+        "configurable": {"thread_id": str(thread_id), "tenant_id": str(tenant_id)}
+    }
+    await built.graph.aupdate_state(  # type: ignore[attr-defined]
+        checkpoint_config,
+        {
+            "pending_approval": None,
+            "approval_resume": {
+                "decision": decision,
+                "modified_args": modified_args,
+                "reason": reason,
+            },
+        },
+        as_node="agent",
+    )
+
+    # Spawn a continuation worker. Fresh run_id — RunManager tracks
+    # it as a new run; the checkpoint (keyed by thread_id) is the
+    # continuity. ``graph_input=None`` resumes from the checkpoint.
+    continuation_run_id = uuid4()
+    run_record = await runtime.run_manager.create(
+        run_id=continuation_run_id,
+        thread_id=thread_id,
+        tenant_id=tenant_id,
+        user_id=caller_user_id,
+        is_resume=True,
+        trace_id=trace_id,  # Mini-ADR H-9.5
+    )
+    # SE-7d-3b-ii — carry build-time distilled skills to the terminal hook.
+    run_record.bound_distilled_skills = built.bound_distilled_skills
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": str(thread_id),
+            "tenant_id": str(tenant_id),
+            "run_id": str(continuation_run_id),
+        }
+    }
+    if caller_user_id is not None:
+        config["configurable"]["user_id"] = str(caller_user_id)  # type: ignore[index]
+        current_user_id_var.set(caller_user_id)
+    worker = asyncio.create_task(
+        run_agent(
+            bridge=runtime.stream_bridge,
+            run_manager=runtime.run_manager,
+            record=run_record,
+            graph=built.graph,  # type: ignore[arg-type]
+            graph_input=None,
+            config=config,
+            audit_logger=audit,
+            approval_store=approvals,
+            # Stream H.3 PR 3 — durable SSE mirror.
+            event_store=runtime.run_event_store,
+            skill_run_usage_recorder=runtime.skill_run_usage_recorder,
+            # Stream HX-3 — replay-safety resolver for transient retry.
+            tool_replay_safe=built.tool_replay_safe,
+        )
+    )
+    await runtime.run_manager.attach_task(continuation_run_id, worker)
+    return run_record, continuation_run_id
+
+
 def build_runs_router() -> APIRouter:
     router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -625,152 +802,20 @@ def build_runs_router() -> APIRouter:
         gets a fresh ``run_id``; the original paused ``run_id`` is what
         the ``agent_approval`` row + APPROVAL_DECIDED audit reference.
         """
-        tenant_id: UUID = request.state.tenant_id
-        actor_id: str = request.state.actor_id
-        trace_id = current_trace_id_hex()
-
-        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
-        if meta is None:
-            raise HTTPException(status_code=404, detail="session not found")
-        caller_user_id = await resolve_caller_user_id(request, users)
-        if not caller_owns_thread(
-            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
-        ):
-            raise HTTPException(status_code=404, detail="session not found")
-        # ``modify`` carries replacement args; the other verdicts must not.
-        if payload.decision == "modify" and payload.modified_args is None:
-            raise HTTPException(status_code=422, detail="decision 'modify' requires modified_args")
-        if payload.decision != "modify" and payload.modified_args is not None:
-            raise HTTPException(
-                status_code=422, detail="modified_args is only valid with decision 'modify'"
-            )
-
-        approval = await approvals.get_by_run(run_id=run_id, tenant_id=tenant_id)
-        if approval is None:
-            raise HTTPException(status_code=404, detail="run not found")
-        if approval.status is not ApprovalStatus.PENDING:
-            raise HTTPException(
-                status_code=409,
-                detail=f"approval already decided ({approval.status.value})",
-            )
-
-        _status_for = {
-            "approve": ApprovalStatus.APPROVED,
-            "reject": ApprovalStatus.REJECTED,
-            "modify": ApprovalStatus.MODIFIED,
-        }
-        decided = await approvals.mark_decided(
-            run_id=run_id,
-            tenant_id=tenant_id,
-            status=_status_for[payload.decision],
-            decided_by=actor_id,
-            decided_at=datetime.now(UTC),
-            modified_args=payload.modified_args,
-        )
-        # ``mark_decided`` returns False on a lost race — another resume
-        # (or the timeout job) decided it between our get + update.
-        if not decided:
-            raise HTTPException(status_code=409, detail="approval already decided")
-
-        await emit(
-            audit,
-            tenant_id=tenant_id,
-            actor_id=actor_id,
-            action=AuditAction.APPROVAL_DECIDED,
-            resource_type="approval",
-            resource_id=str(run_id),
-            trace_id=trace_id,
-            details={
-                "thread_id": str(thread_id),
-                "decision": payload.decision,
-                "request_id": approval.request_id,
-            },
-        )
-
-        if meta.agent_name is None or meta.agent_version is None:
-            raise HTTPException(status_code=409, detail="session is not bound to an agent")
-        spec_record = await agent_repo.get(
-            tenant_id=tenant_id, name=meta.agent_name, version=meta.agent_version
-        )
-        if spec_record is None:
-            raise HTTPException(status_code=404, detail="agent not found")
-        try:
-            built = await runtime.get_agent(
-                tenant_id=tenant_id,
-                name=meta.agent_name,
-                version=meta.agent_version,
-                spec=spec_record.spec,
-                # Stream MCP-OAUTH (OA-3b) — per-user OAuth MCP pool key.
-                user_id=request.state.principal.subject_id,
-            )
-        except AgentFactoryError as exc:
-            raise HTTPException(
-                status_code=422, detail=f"agent manifest cannot be built: {exc}"
-            ) from exc
-
-        # Write the verdict into the paused thread's checkpoint. ``as_node=
-        # "agent"`` re-positions the graph as if the agent had just run,
-        # so the next step evaluates the agent's conditional edge — the
-        # last message still carries the gated tool_calls → routes to
-        # ``tools``, where ``approval_resume`` is applied.
-        checkpoint_config: RunnableConfig = {
-            "configurable": {"thread_id": str(thread_id), "tenant_id": str(tenant_id)}
-        }
-        await built.graph.aupdate_state(  # type: ignore[attr-defined]
-            checkpoint_config,
-            {
-                "pending_approval": None,
-                "approval_resume": {
-                    "decision": payload.decision,
-                    "modified_args": payload.modified_args,
-                    "reason": payload.reason,
-                },
-            },
-            as_node="agent",
-        )
-
-        # Spawn a continuation worker. Fresh run_id — RunManager tracks
-        # it as a new run; the checkpoint (keyed by thread_id) is the
-        # continuity. ``graph_input=None`` resumes from the checkpoint.
-        continuation_run_id = uuid4()
-        run_record = await runtime.run_manager.create(
-            run_id=continuation_run_id,
+        run_record, continuation_run_id = await apply_approval_decision(
+            request=request,
             thread_id=thread_id,
-            tenant_id=tenant_id,
-            user_id=caller_user_id,
-            is_resume=True,
-            trace_id=trace_id,  # Mini-ADR H-9.5
+            run_id=run_id,
+            decision=payload.decision,
+            modified_args=payload.modified_args,
+            reason=payload.reason,
+            threads=threads,
+            users=users,
+            audit=audit,
+            agent_repo=agent_repo,
+            runtime=runtime,
+            approvals=approvals,
         )
-        # SE-7d-3b-ii — carry build-time distilled skills to the terminal hook.
-        run_record.bound_distilled_skills = built.bound_distilled_skills
-        config: RunnableConfig = {
-            "configurable": {
-                "thread_id": str(thread_id),
-                "tenant_id": str(tenant_id),
-                "run_id": str(continuation_run_id),
-            }
-        }
-        if caller_user_id is not None:
-            config["configurable"]["user_id"] = str(caller_user_id)  # type: ignore[index]
-            current_user_id_var.set(caller_user_id)
-        worker = asyncio.create_task(
-            run_agent(
-                bridge=runtime.stream_bridge,
-                run_manager=runtime.run_manager,
-                record=run_record,
-                graph=built.graph,  # type: ignore[arg-type]
-                graph_input=None,
-                config=config,
-                audit_logger=audit,
-                approval_store=approvals,
-                # Stream H.3 PR 3 — durable SSE mirror.
-                event_store=runtime.run_event_store,
-                skill_run_usage_recorder=runtime.skill_run_usage_recorder,
-                # Stream HX-3 — replay-safety resolver for transient retry.
-                tool_replay_safe=built.tool_replay_safe,
-            )
-        )
-        await runtime.run_manager.attach_task(continuation_run_id, worker)
         # Log only ``continuation_run_id`` — it is server-generated
         # (``uuid4()``). The paused ``run_id`` is a request path param;
         # CodeQL py/log-injection taints it even though FastAPI has

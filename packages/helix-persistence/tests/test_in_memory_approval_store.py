@@ -159,3 +159,72 @@ async def test_mark_decided_modified_carries_args() -> None:
     fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
     assert fetched is not None
     assert fetched.modified_args == {"to": "safe@example.com"}
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-7 — queue listing (list_for_tenant / list_all_tenants)
+# ---------------------------------------------------------------------------
+
+
+def _record_at(tenant_id: object, *, minutes: int) -> ApprovalRecord:
+    base = datetime(2026, 6, 12, 9, 0, 0, tzinfo=UTC)
+    rec = _record(tenant_id=tenant_id)
+    return rec.model_copy(update={"requested_at": base + timedelta(minutes=minutes)})
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_orders_oldest_first_with_total() -> None:
+    store = InMemoryApprovalStore()
+    tenant = uuid4()
+    newer = _record_at(tenant, minutes=30)
+    older = _record_at(tenant, minutes=0)
+    await store.create(newer)
+    await store.create(older)
+    await store.create(_record_at(uuid4(), minutes=5))  # another tenant
+
+    items, total = await store.list_for_tenant(tenant_id=tenant, status=ApprovalStatus.PENDING)
+
+    assert total == 2
+    assert [r.run_id for r in items] == [older.run_id, newer.run_id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_filters_status_and_paginates() -> None:
+    store = InMemoryApprovalStore()
+    tenant = uuid4()
+    rows = [_record_at(tenant, minutes=i) for i in range(3)]
+    for row in rows:
+        await store.create(row)
+    await store.mark_decided(
+        run_id=rows[0].run_id,
+        tenant_id=tenant,
+        status=ApprovalStatus.REJECTED,
+        decided_by="op",
+        decided_at=datetime(2026, 6, 12, 10, 0, 0, tzinfo=UTC),
+    )
+
+    pending, total = await store.list_for_tenant(
+        tenant_id=tenant, status=ApprovalStatus.PENDING, limit=1, offset=1
+    )
+    assert total == 2
+    assert [r.run_id for r in pending] == [rows[2].run_id]
+
+    rejected, rejected_total = await store.list_for_tenant(
+        tenant_id=tenant, status=ApprovalStatus.REJECTED
+    )
+    assert rejected_total == 1
+    assert rejected[0].run_id == rows[0].run_id
+
+
+@pytest.mark.asyncio
+async def test_list_all_tenants_spans_tenants() -> None:
+    store = InMemoryApprovalStore()
+    a = _record_at(uuid4(), minutes=10)
+    b = _record_at(uuid4(), minutes=0)
+    await store.create(a)
+    await store.create(b)
+
+    items, total = await store.list_all_tenants(status=ApprovalStatus.PENDING)
+
+    assert total == 2
+    assert [r.run_id for r in items] == [b.run_id, a.run_id]
