@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2 启动（2026-06-11）：HX-5（prompt 版本管理 + 离线 A/B，§6）详设已锁定；其余各条开工时追加章节。
+> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（sandbox 热池 + 资源限额粒度，§7）详设已锁定；其余各条开工时追加章节。
 
 ---
 
@@ -21,6 +21,7 @@
 | HX-3 | ⑧ 容错 | run 级瞬态故障无自动重试 | 瞬态分类 ∧ replay-safe 守卫 → 重试 1 次 | §4（本文） |
 | HX-4 | ⑨ 可观测 | approval 队列 gauge / checkpoint 延迟 / run_id 结构化贯穿缺（工具延迟与 run 成功率判定过期，见 §5.1） | gauge + checkpoint 计时 wrapper + run_id contextvar + recording rules 同步 | §5（本文） |
 | HX-5 | ① prompt 工程 | manifest 覆盖式更新无历史/diff/回滚；无离线 variant 对比 | `agent_spec_revision` 不可变历史 + 回滚 + diff API/UI + 离线 A/B harness | §6（本文） |
+| HX-6 | ⑤ 沙盒 | 首触冷启动（J.15 暖会话已在）+ 池路径限额配对 | READY 池 + replenisher + claim 时 docker update + 镜像预拉 | §7（本文） |
 | HX-12/13 | ② 工具面 | 工具披露 2.0（应用层 + 厂商原生档） | 见 ITERATION-PLAN Wave 2 定义 | 开工时追加 |
 
 Wave 1 顺序：HX-1 → HX-2 → HX-3 → HX-4（HX-1 的 estimator 是 HX-12 阈值逃生门的前置件；HX-4 的指标骨架吃 HX-1 的 drift 数据）。
@@ -435,3 +436,78 @@ gauge helper 已在（`helix_gauge`，`metrics.py:121-132`）且有先例：skil
 | PR1 | `agent_spec_revision` 迁移 + 双 store + create/update 接线 + audit 增强 | §6.5-PR1；全链回归 |
 | PR2 | rollback/revisions API + admin UI History tab（diff + 回滚） | §6.5-PR2；前端全链 |
 | PR3（收尾） | `prompt_ab.py` 离线对比 harness + 文档 | §6.5-PR3；零债 6 条 |
+
+---
+
+## 7. HX-6 — sandbox 热池 + 资源限额粒度
+
+### 7.1 现状取证（2026-06-11，main@2894952）
+
+| 评估断言 | 实况 | 证据 | 判定 |
+|---------|------|------|:----:|
+| "每 acquire 冷启动" | **J.15 per-user 暖会话已在**：`(tenant, user)` → sandbox 复用，release = keep-alive no-op，15min idle reaper；同用户后续 acquire 是暖路径（`cold_start=false`） | `supervisor.py:123-126,408-450`、`reaper.py` | 半过期：冷的只剩**首触**（用户第一次 / variant 切换 / TTL 后） |
+| "per-call CPU/mem cgroup 限额缺" | cpu/memory_mb/pids_limit **已是 per-acquire 字段**，经 `docker run --cpus/--memory/--pids-limit` 容器级生效；exec 级无重设 | `schemas.py:31-35`、`runtime_provider.py:61-106` | 半过期：acquire 粒度已在；真 gap = 池路径的限额配对（§7.2-③）；per-exec 动态限额不做（§7.3） |
+| —（架构事实） | M0 Mini-ADR F-4 显式不做 pool；`SandboxState` 无 READY；`sandbox_instance` 表注释"为 M1 warm pool 铺路"；SLO #4 "<500ms (M1 warm pool)" | `STREAM-F-DESIGN §1.2`、`domain.py:16-26`、`slo.md:16` | HX-6 = 兑现 M1-A 既定项 |
+| —（取证新发现，**关键约束**） | persistent workspace = per-user named volume，`docker run -v` **创建时挂载**；预启动的池容器无法事后挂用户卷 | `supervisor.py:158-171`、docker 挂载语义 | **持久工作区用户的首触 acquire 在 docker 范式下不可池化** |
+| —（容量事实） | per-tenant 配额 50（CREATING+IN_USE 计数，429 拒绝）；supervisor 无全局并发上限 | `settings.py:54-59`、`supervisor.py:460-474` | 池容器不占租户配额（中性资源，未绑租户） |
+
+**范围界定（关键 trade-off，过堂点）**：暖路径矩阵——
+
+| acquire 形态 | 现状 | HX-6 后 |
+|--------------|------|---------|
+| 同用户复购（J.15 会话活着） | 暖 ✅ | 暖（不动） |
+| 临时沙盒（无 user_id：trigger 一次性 / eval / playground 匿名） | 冷 | **池命中 → <500ms** |
+| 持久用户首触 / TTL 后 / variant 切换 | 冷 | 仍冷（镜像预拉砍掉拉镜像尾巴）；数据面方案（卷内容迁移 / microVM snapshot）= M2 另立项 |
+
+业界对照：E2B/Modal 的全形态 warm 靠 microVM snapshot/restore，docker 范式池化普遍只覆盖 stateless 沙盒。诚实交付：池覆盖临时沙盒 + 镜像预拉保底全形态，**不把"首触仍冷"包装成已解决**（[memory:no-design-choice-disguise]——这里是真技术约束非能力降级，证据在案）。
+
+### 7.2 设计
+
+**① READY 池 + replenisher（PR1 核心）**
+
+- `SandboxState` 增 `READY`（池中预启动，未绑租户/用户）；`SandboxRecord.tenant_id` 池容器期间用平台哨兵值（实施期定：nullable 迁移 vs 哨兵 UUID，倾向哨兵零 schema 变更）。
+- 池 per image variant：`pool_size_minimal` / `pool_size_office` settings（默认 minimal=2 / office=0，**0=关**——dev/CI 不预启动；config 防御解析 clamp [0, 16]）。
+- `PoolReplenisher` 后台任务（reaper 同款骨架，interval 复用 reaper 节奏）：count(READY per variant) < target → `docker run`（tmpfs workspace、默认限额）补齐；超额（settings 调小后）销毁多余。补齐失败 log + counter，下轮重试（fail-open：池故障 = 退回冷启动，绝不影响 acquire 正确性）。
+- acquire 路径插在 J.15 会话查找之后：无 user_id（或 user 无持久卷需求）∧ 池有 READY → claim（状态 READY→IN_USE，绑定 tenant，CAS 防双取）→ **`docker update --cpus --memory --pids-limit`** 套请求限额 → 返回 `cold_start=false`。claim 失败/池空 → 现状冷启动路径，行为逐字节不变。
+
+**② 限额配对（PR1，"per-call 限额"的真形态）**
+
+- 池容器预启动用默认限额；claim 时 `docker update` 到请求值（CliDockerClient 增 `update_limits`；`--pids-limit` docker update 支持，实施期核 CLI 版本面）。update 失败 → 销毁该容器走冷启动（fail-closed：限额是安全面，宁可慢不可错）。
+- per-exec 动态限额**不做**（§7.3）。
+
+**③ 镜像预拉（PR2）**
+
+- supervisor lifespan 启动时对两个 variant 镜像 `docker image inspect`，缺失则 `docker pull`（后台 task，不阻塞 ready；失败 warn + counter，acquire 时 docker run 自己会拉——fail-open）。覆盖"节点重建后首个冷启动拖 30s+ 拉镜像"的尾巴，全 acquire 形态受益。
+
+**④ 可观测（PR2）**
+
+- `helix_sandbox_pool_ready` gauge（per variant）+ `helix_sandbox_pool_total{event=hit/miss/replenish/replenish_failed/claim_raced}` counter。
+- `helix_sandbox_cold_start_seconds` 语义不变（池命中不计入，同 J.15 暖路径）；SLO #4 M1 行的验收数字 = 池命中率 + 命中路径延迟（claim+update 应 <500ms）。
+
+### 7.3 边界（不做）
+
+- **per-exec 动态限额**：manifest 资源声明是 agent 级，单沙盒内逐 exec 变限额无业务方需求；每 exec 前后 `docker update` 往返加延迟。acquire 粒度（已在）+ 池 claim 配对（本条）覆盖真实需求面。需求出现再议。
+- **持久工作区首触池化**：docker 挂载约束（§7.1）；卷数据迁移 / CRIU / microVM = M2 量级另立项。
+- 镜像 layer cache / registry push（M1-A 另一半）、EWMA 自适应池伸缩（先固定 size 拿数据）、ulimit/disk quota 扩展（独立安全面）。
+- 池容器不计租户配额；claim 时才进 `count_active_for_tenant`（配额语义不变）。
+
+### 7.4 测试
+
+- **PR1**：池生命周期（replenish 到 target / settings=0 不起 / 调小销毁多余）；claim 矩阵（命中→update+绑定+IN_USE / 池空→冷启动 / update 失败→销毁+冷启动 / 双并发 claim 一胜一冷 / 有 user_id 持久卷请求绕过池）；J.15 会话优先于池；配额计数不含 READY。全部 RecordingDockerClient/InMemoryStore 单测 + 1 条真 docker integration（池起→claim→exec→release）。
+- **PR2**：预拉（缺镜像触发 pull / 已在跳过 / 失败不阻塞 lifespan）；指标断言。
+
+### 7.5 Mini-ADR
+
+- **HX-F1 池 = per-variant READY 容器 + 固定 size replenisher**：EWMA 伸缩留到有命中率数据后；0=关，fail-open（池故障退冷启动）。
+- **HX-F2 池只服务无持久卷 acquire**：docker named volume 创建时挂载是硬约束；持久用户暖靠 J.15（已在），首触冷留 M2 数据面方案。诚实边界，不包装。
+- **HX-F3 claim 时 docker update 配对限额**："per-call 限额"的可行真形态；update 失败 fail-closed（销毁走冷启动）——限额是安全面。
+- **HX-F4 镜像预拉 = 全形态保底**：唯一对持久用户首触也有效的加速件；后台 best-effort。
+- **HX-F5 取证修正入档**：评估 ⑤ 两断言各半过期（J.15 暖会话已在 / 限额已 per-acquire）；真缺口 = 首触池化（受限做）+ 池路径限额配对 + 镜像预拉。
+
+### 7.6 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §7 + ITERATION-PLAN tick | 纯 docs，CI |
+| PR1 | READY 状态 + 池 + replenisher + claim/update 限额 + settings | §7.4-PR1；全链回归 |
+| PR2（收尾） | 镜像预拉 + 指标/SLO 同步 + 文档 | §7.4-PR2；零债 6 条 |
