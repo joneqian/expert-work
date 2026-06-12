@@ -49,13 +49,19 @@ export interface TriggerList {
 export interface ListTriggersParams {
   tenantScope?: TenantScope;
   agentName?: string;
+  /** Stream H.6 — narrow to one agent version (AgentDetail Triggers
+   *  tab). Requires ``agentName`` (backend 422s otherwise). */
+  agentVersion?: string;
 }
 
 export async function listTriggers(
   params: ListTriggersParams = {},
 ): Promise<TriggerList> {
-  const { tenantScope, agentName } = params;
-  const query = withTenantScope({ agent_name: agentName }, tenantScope);
+  const { tenantScope, agentName, agentVersion } = params;
+  const query = withTenantScope(
+    { agent_name: agentName, agent_version: agentVersion },
+    tenantScope,
+  );
   const response = await apiClient.get<TriggerList>("/v1/triggers", { params: query });
   return response.data;
 }

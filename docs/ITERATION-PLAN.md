@@ -338,10 +338,10 @@
 - [x] **H.5 docker-compose dev.yml 单机一键启** — 已经在 I.1 `--profile full` 落地
 
 > **前端覆盖债 backlog（2026-06-08 SE-8 评估期前端覆盖度全量对账发现；登记不实现，与 SE-8 自进化治理面无关，归 Stream H 后续）**：control-plane 仍有 4 处 operator-facing 能力后端已发但前端无/半可视化（已逐文件核实，非按 router 名猜；其余 `quota`/`sandboxes`/`feedback`/`first_admin`/`mcp_oauth`/`metrics`/`health` 等是 runtime 内部/终端用户/机器端点，正确地不做 admin UI，不计债）。这些缺口**不并入 SE-8**（保 SE-8 范围聚焦自进化治理，符合零技术债收尾不混 scope）。
-- [ ] **H.6 AgentDetail 4 个 tab 真实现（Runs / Skills / Triggers / Memory）** — 现状 `AgentDetail.tsx:159` 仅渲染 `agent_detail.tab_coming_soon` 占位，只有 Overview / Manifest / History / Playground 真实现。**前置依赖**：后端过滤参数（详设 [STREAM-H-DESIGN § 6.7](./streams/STREAM-H-DESIGN.md)：runs=thread_ids 两段式 H-10 / skills=created_by_agent_name H-11 / triggers 补 version / memory 不造 agent 维度 H-13）。M1。
-  - [x] **H.6 设计先行**：STREAM-H-DESIGN § 6.7 详设——现状取证 12 条 file:line（envelope-vs-raw 逐端点核实）+ 4 条 Mini-ADR（H-10~H-13）+ 2-PR 切分
-  - [ ] **H.6 PR1（backend）**：ThreadMetaStore agent 过滤 + RunStore thread_ids + SkillStore created_by_agent_name + TriggerStore agent_version + 3 端点 query params + `thread_window_capped` + 测试
-  - [ ] **H.6 PR2（frontend，收尾）**：SDK 增参 + RunsTab/SkillsTab/TriggersTab/MemoryTab + AgentDetail 接线 + i18n 双语 + Storybook + vitest + Playwright；零债 6 条
+- [x] **H.6 AgentDetail 4 个 tab 真实现（Runs / Skills / Triggers / Memory）** — **已交付**（2026-06-12，#581 设计 / #582 PR1 / PR2）。占位 `tab_coming_soon` 仅余 unknown-tab fallback；8 个 tab 全真实现。详设 [STREAM-H-DESIGN § 6.7](./streams/STREAM-H-DESIGN.md)。
+  - [x] **H.6 设计先行**（#581）：STREAM-H-DESIGN § 6.7 详设——现状取证 12 条 file:line（envelope-vs-raw 逐端点核实）+ 4 条 Mini-ADR（H-10~H-13）+ 2-PR 切分
+  - [x] **H.6 PR1（backend，#582）**：ThreadMetaStore agent 过滤 + RunStore thread_ids（空集≠None）+ SkillStore created_by_agent_name + TriggerStore agent_version + 3 端点 query params + `thread_window_capped` 信号 + version 单给 422 + 测试 +15
+  - [x] **H.6 PR2（frontend，收尾）**：SDK 增参（listRuns agentName/agentVersion / listSkills createdByAgentName / listTriggers agentVersion + RunList.thread_window_capped）+ RunsTab（status 过滤+cap Alert+行跳 run detail）/ SkillsTab（agent-authored+行跳 skill detail）/ TriggersTab（version-bound+enabled Badge）/ MemoryTab（kind 过滤+user-scope 明示 H-13）+ AgentDetail 接线去占位 + i18n 双语 4 namespace + Storybook 5 stories + vitest 7 测 + Playwright tab 冒烟；零债 6 条
 - [ ] **H.7 Knowledge 知识库治理面** — 后端 `/v1/knowledge`（`bases` + `documents` 全 CRUD，`knowledge.py:90`）已发，前端无 SDK、无页面。M1+。
 - [ ] **H.8 Artifacts 运行产物治理面** — 后端 `/v1/artifacts`（list/download/delete/patch/versions，`artifacts.py:100`）已发，前端无 SDK、无页面（J.15 收尾时即标"前端 inline preview → H.4 admin UI"，至今未落）。M1+。
 - [ ] **H.9 Rate Card 计价管理面（system_admin）** — 后端 `/v1/platform/rate-card`（CRUD，`rate_card.py:74`）已发，前端无 SDK、无页面；与平台计量加价大方向（[memory:platform_centralized_governance]）相关。M1+。

@@ -132,12 +132,24 @@ export interface ListSkillsParams {
   /** Stream SE (SE-8) — filter to the agent-self-authored slice. */
   visibility?: SkillVisibility;
   createdByUserId?: string;
+  /** Stream H.6 (Mini-ADR H-11) — skills authored by this agent
+   *  (AgentDetail Skills tab). */
+  createdByAgentName?: string;
 }
 
 export async function listSkills(
   params: ListSkillsParams = {},
 ): Promise<SkillList> {
-  const { tenantScope, status, category, cursor, limit, visibility, createdByUserId } = params;
+  const {
+    tenantScope,
+    status,
+    category,
+    cursor,
+    limit,
+    visibility,
+    createdByUserId,
+    createdByAgentName,
+  } = params;
   const query = withTenantScope(
     {
       status,
@@ -146,6 +158,7 @@ export async function listSkills(
       limit,
       visibility,
       created_by_user_id: createdByUserId,
+      created_by_agent_name: createdByAgentName,
     },
     tenantScope,
   );
