@@ -50,6 +50,7 @@ from control_plane.tenant_scope import (
     CrossTenant,
     applied_scope,
     bypass_rls_session,
+    cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
 from helix_agent.common.observability import current_trace_id_hex
@@ -851,6 +852,7 @@ def build_skills_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/skills",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         # Stream X (X-6) merged view — the tenant's own skills ("items")
         # plus the platform-curated NULL-tenant library it can see

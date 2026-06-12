@@ -33,6 +33,7 @@ from control_plane.manifest import (
 from control_plane.tenant_scope import (
     CrossTenant,
     applied_scope,
+    cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
 from helix_agent.common.observability import current_trace_id_hex
@@ -358,6 +359,7 @@ def build_agents_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/agents",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):

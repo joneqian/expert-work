@@ -257,6 +257,9 @@ class AuditAction(StrEnum):
     # system / cross-tenant (Stream N — Mini-ADR N-5)
     SYSTEM_CROSS_TENANT_QUERY = "system:cross_tenant_query"
     SYSTEM_TENANT_SWITCH = "system:tenant_switch"
+    # cross-tenant access attempt rejected by the deployment-level
+    # ``cross_tenant_query_enabled`` switch — Stream HX-8 (Mini-ADR HX-H4).
+    SYSTEM_CROSS_TENANT_BLOCKED = "system:cross_tenant_blocked"
 
     # platform credentials (the runtime DB overlay) — Stream P Mini-ADR P-11.
     # system_admin-only writes to the platform provider/tool secret-ref tables.
