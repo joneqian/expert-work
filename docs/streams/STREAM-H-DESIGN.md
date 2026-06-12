@@ -1296,6 +1296,86 @@ PR9 补 `04-run-trace.html` 加 ApprovalCard 编辑态 section。
 
 ---
 
+## 6.7 H.6 详细设计 — AgentDetail 4 tab 真实现(Runs / Skills / Triggers / Memory)
+
+> 2026-06-12 设计先行。H.6 是 Stream H 收官后回填的前端债(对账 #320 后列入 ITERATION-PLAN § Stream H 前端债 H.6–H.9)。
+> 目标:AgentDetail 占位 tab(`AgentDetail.tsx:159` 渲染 `tab_coming_soon`)换成真实现,agent-中心 IA 兑现
+> ([philosophy.md § 4](../design/admin-ui-philosophy.md))——看一个 agent 的 detail 页即可回答"它最近跑了什么 /
+> 它创作了哪些 skill / 谁在触发它 / 它记住了什么"。
+
+### 6.7.1 现状取证(2026-06-12,file:line)
+
+| 事实 | 位置 | 影响 |
+|---|---|---|
+| 4 tab 已在 Tabs items 声明,占位渲染 | `AgentDetail.tsx:148-151` / `:159-165` | 前端只缺 tab 组件本体 |
+| 4 个 list SDK 都已存在 | `api/runs.ts:127` / `api/skills.ts:137` / `api/triggers.ts:54` / `api/memory.ts:45` | SDK 只缺过滤参数 |
+| `GET /v1/runs` **envelope** 响应,无 agent 过滤;display 层 N+1 JOIN thread_meta 取 agent_name/version(注释明示 "M0 = N+1; M1 = SQL JOIN") | `runs.py:921-1020` | 过滤参数是 H.6 前置 |
+| `agent_run` 表**无** agent 列;归属在 `thread_meta.agent_name/agent_version` | `models/agent_run.py:29-43` / `models/thread_meta.py:30-31` | runs 过滤必须经 thread 维度 |
+| `RunStore.list_for_tenant/list_all_tenants` 无 thread/agent 过滤 | `runtime/runs/store.py:77/92` | 要加 `thread_ids` 过滤 |
+| `ThreadMetaStore.list_by_tenant` 有 status/user_id 过滤,无 agent 过滤 | `thread_meta/base.py:67` | 要加 agent_name/version 过滤 |
+| skill 表已有 `created_by_agent_name`(Stream SE agent-authored) | `models/skill.py:81` | Skills tab 语义现成,store/端点缺过滤 |
+| `GET /v1/skills` **raw** 响应(items+next_cursor+platform_items),store `list_skills` 有 created_by_user_id 无 created_by_agent_name | `skills.py:835` / `skill/base.py:145` | 加对称过滤参数 |
+| `GET /v1/triggers` **raw** 响应,store/端点已有 `agent_name`,无 `agent_version` | `triggers.py:323` / `trigger/base.py:47` | 补 version 过滤(trigger 表本就有 agent_version 列) |
+| `GET /v1/memory` **envelope** 响应,per-user scope(kind/limit),无 agent 维度 | `memory.py:166` | 见 Mini-ADR H-13 |
+| 参照范式现成 | `RunsList.tsx` / `SkillsList.tsx` / `TriggersList.tsx` / `MemoryAdmin.tsx` | 4 tab 各有最近模板 |
+
+envelope-vs-raw 对账([memory:envelope-vs-raw-contract-check]):runs/memory=envelope(SDK `getJson`),skills/triggers=raw(SDK `apiClient.get`)——现 SDK 已逐个对上,本次只加参数不动形态。
+
+### 6.7.2 后端过滤(PR1)
+
+**① Runs by agent — thread_ids 两段式(Mini-ADR H-10)**
+- `ThreadMetaStore.list_by_tenant` / `list_all_tenants` 加 `agent_name: str | None = None` + `agent_version: str | None = None`(SQL where + in-memory filter;默认 None 全兼容)。
+- `RunStore.list_for_tenant` / `list_all_tenants` 加 `thread_ids: Collection[UUID] | None = None`(SQL `WHERE thread_id IN`、in-memory filter——两 impl 语义精确同义,protocol 不破)。
+- API `GET /v1/runs?agent_name=&agent_version=`:有 agent_name 时先 `threads.list_by_tenant(agent_name=…, limit=MAX_LIST_LIMIT)` 取 thread_ids(newest-first,cap 500),空 → 空页;非空 → `runs.list_*(thread_ids=…)`。response `data` 加 `thread_window_capped: bool`(thread 数撞 cap 时 true——诚实信号,老客户端忽略新字段无害)。`agent_version` 单给(无 agent_name)= 422。
+- display 层 N+1 JOIN 不动(本就有);**不做 SQL JOIN**(见 H-10 理由)。
+
+**② Skills by agent(Mini-ADR H-11)**
+- `SkillStore.list_skills` 加 `created_by_agent_name: str | None = None`(SQL where + memory filter;`list_skills_all_tenants` 同加)。
+- 端点 `GET /v1/skills?created_by_agent_name=`(与既有 `created_by_user_id` 对称)。
+
+**③ Triggers 补 version**
+- `TriggerStore.list_by_tenant` / `list_all_tenants` 加 `agent_version: str | None = None`;端点 `GET /v1/triggers?agent_version=`(单给无 agent_name = 422,与 runs 同规)。
+
+**④ Memory 不改**(Mini-ADR H-13)。
+
+协议签名 sweep:三个 store protocol 加 default kwargs——全仓 grep doubles(**含 tools/eval**,[memory:protocol-sweep-includes-tools-eval]);加默认值参数 doubles 兼容,但 sweep 仍跑确认无显式重写旧签名处。
+
+### 6.7.3 前端 4 tab(PR2)
+
+全部进 `apps/admin-ui/src/pages/agent_detail/`,AgentDetail.tsx 去占位接线(`:159` 的 fallback Empty 保留给未知 tab):
+
+| Tab | 组件 | 数据 | 模板 | 备注 |
+|---|---|---|---|---|
+| Runs | `RunsTab.tsx` | `listRuns({agentName, agentVersion, status, limit, offset})` | RunsList | status 过滤 + 分页;行点击 → `/runs/:runId`;`thread_window_capped` 显 Alert 条 |
+| Skills | `SkillsTab.tsx` | `listSkills({createdByAgentName})` | SkillsList | agent-authored 语义副标题;行点击 → skill detail;空态文案"该 agent 尚未创作 skill" |
+| Triggers | `TriggersTab.tsx` | `listTriggers({agentName, agentVersion})` | TriggersList | enabled Badge;行点击 → trigger detail/编辑沿用 TriggersList 既有交互 |
+| Memory | `MemoryTab.tsx` | `listMemories({kind, limit})` | MemoryAdmin | kind 过滤;**顶部 Alert 明示 user-scope 语义**(H-13);只读列表,治理操作留 MemoryAdmin 全局页 |
+
+SDK 增参:`ListRunsParams + agentName/agentVersion`、`ListSkillsParams + createdByAgentName`、`ListTriggersParams + agentVersion`(`RunList` 类型 + `thread_window_capped?: boolean`)。
+
+接线点(SE-8 清单适用子集):i18n zh-CN+en 双语(4 tab 各 ~8 key:列头/空态/过滤/cap 提示)、Storybook 4 stories、vitest 组件测(渲染+过滤调 SDK 参数断言+空态)、Playwright(`agent-detail-tabs.spec.ts`:4 tab 切换渲染冒烟)。无 Sidebar/CommandPalette 变更(tab 非顶级路由)。
+
+### 6.7.4 Mini-ADR
+
+- **H-10 runs agent 过滤 = thread_ids 两段式,不做 SQL JOIN**:`agent_run` 无 agent 列,归属在 thread_meta;SQL JOIN 只有 SqlRunStore 能实现,InMemoryRunStore 无 thread_meta 视野——protocol 方法必须两 impl 语义同义,`thread_ids` 集合过滤两边都精确可实现。两段式与 display 层既有 "M0 = N+1; M1 = SQL JOIN" 同精神;thread cap 500 + `thread_window_capped` 信号诚实暴露窗口截断。SQL JOIN 列 M2 优化路径(单查询 + 无 cap),接缝已留(store 参数化后 JOIN 只动 SqlRunStore 内部)。
+- **H-11 Skills tab 语义 = agent-authored(created_by_agent_name)**:列已在(Stream SE);"agent 可用的 skills"= 整租户 active 池(skill curator 管理),那是 SkillsList 全局页的语义,塞进 per-agent tab 反而误导归属。不绑 agent_version(skill 不带版本归属)。
+- **H-12 triggers/runs 的 `agent_version` 单给报 422**:version 无 name 无意义;fail-fast 防 SDK 误用。
+- **H-13 Memory tab 不造 agent 维度**:memory 是 per-user 资产(K6),无 agent_name 列;per-user 持久 agent 产品形态下([memory:target-product-form])用户的 memory 即其 agent 实例的 memory——tab 复用现 per-user 数据路径 + UI 明示 user-scope,**不加假列不硬造过滤**([memory:no-design-choice-disguise]:这是语义事实,非能力缩水;跨 agent 共享 memory 是产品形态决定,改动属产品级需求变更)。
+
+### 6.7.5 测试
+
+- **PR1**:store 单测(thread_meta agent 过滤 × {name only, name+version, 不存在} / run store thread_ids × {空集, 子集, None 回归} / skill created_by_agent_name / trigger agent_version);端点集成(runs agent 过滤 happy + 422 + cap 信号 + 跨租户;skills/triggers 同型);全量回归(无新参数路径逐字节不变)。
+- **PR2**:vitest 4 tab(渲染 / SDK 参数断言 / 空态 / cap Alert);Storybook 4;Playwright tab 切换冒烟;`tab_coming_soon` 占位 testid 断言移除后 e2e 同步更新。
+
+### 6.7.6 PR 切分
+
+| PR | 内容 | 验证 |
+|---|---|---|
+| PR1(backend) | 3 store 过滤参数 + doubles sweep + 3 端点 query params + `thread_window_capped` + 测试 | § 6.7.5-PR1 |
+| PR2(frontend,收尾) | SDK 增参 + 4 tab 组件 + AgentDetail 接线 + i18n 双语 + Storybook + vitest + Playwright | § 6.7.5-PR2;零债 6 条 |
+
+---
+
 ## 6. PR 链(预估)
 
 | PR | 内容 | 估时 |
@@ -1361,4 +1441,5 @@ PR9 补 `04-run-trace.html` 加 ApprovalCard 编辑态 section。
 | 2026-05-26 | v1.6 | 实现期发现 PR 2 (trace_id) 必须先落、PR 3 (run_event) 后落,但原设计文档 migration 编号是反过来的 (PR 2=0038, PR 3=0037)。修正为 PR 2=0037, PR 3=0038 与 Alembic linear chain (down_revision 链)对齐。无功能变更。 |
 | 2026-05-26 | v1.7 | **H.3 收尾**:6 个 PR 全部合入 main(#289–#294);新增 § 6.5.18 H.3 收尾摘要 — 决议 A–F 全部兑现、设计文档 § 6.5.13 漏交的 2 个 story(EventStreamPanel + ApprovalCard)在收尾 PR 补齐;遗留待办全部归类到 M0 dogfood / H.4 收尾(approval 完整 E2E、RunsList mockup、ApprovalCard 编辑态 mockup) |
 | 2026-05-26 | v1.8 | **H.4 设计基线**:加 § 6.6 H.4 详细设计(18 子章节,复刻 § 6.5 范式)— 范围 7 子面(Curation+Eval / Memory / Skills / Triggers / Audit / Settings IAM / Settings Ops)+ Audit backend endpoint 新建 + 跨租户 RBAC matrix + 错误边界矩阵(12 条)+ i18n 8 namespace ~130 keys + 测试计划(backend 10 测 + frontend 45 单测 + 33 stories + E2E 7 happy-path)。锁定 4 个 spike 结果:(1) Trigger webhook secret 回包 schema 已有 — PR6 backend 不需改;(2) ResourceType Literal 双份漂移 — PR3 必须改 `protocol/audit.py:146` + `control-plane/audit.py:111` 两处;(3) audit_logger fixture pattern = 每测试自建,不走 conftest — PR3 遵循同型;(4) RoleBinding self-elevation 已被 DTO + caller 双重保护 — PR7 backend 不需改。PR 链拆 PR8-12(原 5 个 H.4 PR)为 PR8-17(10 个 PR:1 设计 + 8 实施 + 1 收尾),总估时 14-18 天。|
+| 2026-06-12 | v2.0 | **H.6 详细设计**(前端债回填,用户拍板 H.6 起手,H.7–H.9 顺序后定):加 § 6.7 — AgentDetail 4 tab 真实现;现状取证 12 条 file:line(含 envelope-vs-raw 逐端点核实:runs/memory=envelope、skills/triggers=raw);后端过滤前置 = thread_ids 两段式(H-10,不做 SQL JOIN——InMemoryRunStore 无 thread_meta 视野,protocol 两 impl 同义优先)+ skills agent-authored 语义(H-11,created_by_agent_name 列已在)+ triggers 补 version + Memory 不造 agent 维度(H-13,per-user 资产语义事实);2-PR 切分(backend 过滤 / frontend 4 tab 收尾) |
 | 2026-05-26 | v1.9 | **H.4 收尾 + Stream H 整体收官**:9 个 H.4 PR 全部合入 main(#296–#304),共 ~+9,500 行;§ 6.6.18 H.4 收尾摘要落地(决议核验 / 零债 6 条 / 留给后续 stream 的债务清单 / capability gap 声明);PR0 spike 简化兑现:(spike 2) `AUDIT_READ` enum + `"audit"` ResourceType 已存在 — 取消"新增 AUDIT_QUERY enum / 双份 Literal drift 修复"两条原计划改动;(spike 1/3/4) backend 不需改;实施期发现 3 个 latent SDK envelope-vs-raw bug 全部修复(`listCandidates` PR1 + `listSkills` PR5 + `listTriggers` PR6),根因写入新 memory `feedback_envelope_vs_raw_contract_check`;Stream H 整体验收(§ 7)全部 ✅(7 条全勾);ITERATION-PLAN Stream H 收官归档;Playwright `e2e/governance.spec.ts` 7 happy-path 冒烟;补 mockup `04-run-trace.html` ApprovalCard 编辑态截图(H.3 留账兑现)|
