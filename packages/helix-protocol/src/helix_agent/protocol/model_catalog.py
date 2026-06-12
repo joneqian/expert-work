@@ -48,6 +48,20 @@ class ModelEntry(BaseModel):
     # Anthropic removed sampling params from Opus 4.7+ (sending one is a 400).
     thinking: Literal["effort", "budget", "toggle"] | None = None
     sampling: bool = True
+    # Stream HX-13 (Mini-ADR HX-J5) — vendor-native tool-disclosure tier:
+    #   "native_search"  — Anthropic tool-search beta: deferred tools go to
+    #                      the API with ``defer_loading: true`` (server-side
+    #                      retrieval; beta header tool-search-tool-2025-10-19).
+    #   "allowed_tools"  — OpenAI/Azure ``tool_choice.allowed_tools``: the
+    #                      full schema set is frozen on the wire (prompt-cache
+    #                      friendly) and promotion drives the allowed SUBSET.
+    #   None             — application tier (HX-12 find_tools RAG), the
+    #                      semantic floor every provider gets.
+    # Declarative (CM-L5): the catalog is the truth, no runtime probing.
+    # OpenAI-compatible vendors (kimi/glm/deepseek/qwen/doubao/self-hosted)
+    # stay None until their allowed_tools passthrough is individually
+    # verified against official docs.
+    tool_disclosure: Literal["native_search", "allowed_tools"] | None = None
 
 
 #: Provider → its models. Verify names/capabilities against official docs when
@@ -64,12 +78,14 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             context_window=200_000,
             thinking="effort",
             sampling=False,
+            tool_disclosure="native_search",
         ),
         ModelEntry(
             name="claude-sonnet-4-6",
             vision=True,
             context_window=200_000,
             thinking="effort",
+            tool_disclosure="native_search",
         ),
         ModelEntry(name="claude-haiku-4-5", vision=True, context_window=200_000),
     ),
@@ -78,9 +94,27 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # support vision; gpt-5.4-mini stays for low-latency/cost. gpt-4o family is
     # retired from the API but kept deprecated so existing manifests resolve.
     "openai": (
-        ModelEntry(name="gpt-5.5", vision=True, context_window=128_000, thinking="effort"),
-        ModelEntry(name="gpt-5.5-pro", vision=True, context_window=128_000, thinking="effort"),
-        ModelEntry(name="gpt-5.4-mini", vision=True, context_window=128_000, thinking="effort"),
+        ModelEntry(
+            name="gpt-5.5",
+            vision=True,
+            context_window=128_000,
+            thinking="effort",
+            tool_disclosure="allowed_tools",
+        ),
+        ModelEntry(
+            name="gpt-5.5-pro",
+            vision=True,
+            context_window=128_000,
+            thinking="effort",
+            tool_disclosure="allowed_tools",
+        ),
+        ModelEntry(
+            name="gpt-5.4-mini",
+            vision=True,
+            context_window=128_000,
+            thinking="effort",
+            tool_disclosure="allowed_tools",
+        ),
         ModelEntry(name="text-embedding-3-large", embeddings=True),
         ModelEntry(name="gpt-4o", vision=True, context_window=128_000, deprecated=True),
         ModelEntry(name="gpt-4o-mini", vision=True, context_window=128_000, deprecated=True),

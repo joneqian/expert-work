@@ -85,3 +85,28 @@ def test_cross_vendor_thinking_shapes() -> None:
 
 def test_thinking_defaults_none() -> None:
     assert ModelEntry(name="x").thinking is None
+
+
+# --- Stream HX-13 — tool_disclosure capability bit --------------------------
+
+
+def test_tool_disclosure_defaults_to_none() -> None:
+    assert ModelEntry(name="x").tool_disclosure is None
+
+
+def test_tool_disclosure_catalog_annotations() -> None:
+    """HX-13 tier annotations: anthropic mainline → native_search; OpenAI
+    current chat models → allowed_tools; haiku / embeddings / deprecated /
+    compat vendors stay None (the HX-12 application tier)."""
+    from helix_agent.protocol.model_catalog import MODEL_CATALOG, catalog_entry
+
+    assert catalog_entry("anthropic", "claude-opus-4-8").tool_disclosure == "native_search"
+    assert catalog_entry("anthropic", "claude-sonnet-4-6").tool_disclosure == "native_search"
+    assert catalog_entry("anthropic", "claude-haiku-4-5").tool_disclosure is None
+    assert catalog_entry("openai", "gpt-5.5").tool_disclosure == "allowed_tools"
+    assert catalog_entry("openai", "text-embedding-3-large").tool_disclosure is None
+    assert catalog_entry("openai", "gpt-4o").tool_disclosure is None
+    # Compat vendors are unverified → None across the board (CM-L5).
+    for provider in ("kimi", "glm", "deepseek", "qwen", "doubao"):
+        for entry in MODEL_CATALOG[provider]:
+            assert entry.tool_disclosure is None, (provider, entry.name)

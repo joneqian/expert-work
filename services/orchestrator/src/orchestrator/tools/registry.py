@@ -124,6 +124,14 @@ class ToolSpec:
     #: "append" or "send" is not. Conservative default ``False``. Reserved
     #: for retry/self-correction logic; not yet consumed in TE-1.
     idempotent: bool = False
+    #: Stream HX-13 (Mini-ADR HX-J2) — vendor-native disclosure marker, set
+    #: per-bind by ``agent_node`` (via ``dataclasses.replace`` copies, never
+    #: on the registry's own specs). One flag serves both vendor tiers:
+    #: Anthropic sends marked tools with ``defer_loading: true`` (server-side
+    #: tool search); OpenAI/Azure excludes marked tools from the
+    #: ``tool_choice.allowed_tools`` subset (full schema stays on the wire).
+    #: Default ``False`` — the application tier (HX-12) never sets it.
+    defer_loading: bool = False
 
     @property
     def resolved_side_effect(self) -> SideEffectLevel:

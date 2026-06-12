@@ -216,3 +216,10 @@ def test_search_returns_empty_when_no_deferred_match() -> None:
     registry.register(_make("active"))
     assert registry.search("active") == []
     assert registry.search("anything") == []
+
+
+def test_tool_spec_defer_loading_defaults_false() -> None:
+    """HX-13 (Mini-ADR HX-J2) — the vendor-disclosure marker defaults off;
+    only agent_node's per-bind replace() copies ever set it."""
+    spec = ToolSpec(name="x", description="y")
+    assert spec.defer_loading is False
