@@ -32,7 +32,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    cross_tenant_query_enabled,
+    ensure_tenant_scope,
+)
 from helix_agent.common.observability import (
     current_trace_id_hex,
     helix_counter,
@@ -135,6 +140,7 @@ def build_audit_router() -> APIRouter:
             audit,
             trace_id=trace_id,
             endpoint="GET /v1/audit",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         tenant_scope_label = (
             "cross"

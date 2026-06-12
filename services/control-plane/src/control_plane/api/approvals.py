@@ -34,7 +34,12 @@ from control_plane.api.runs import (
     apply_approval_decision,
 )
 from control_plane.runtime import AgentRuntime
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    cross_tenant_query_enabled,
+    ensure_tenant_scope,
+)
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import ApprovalStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
@@ -109,6 +114,7 @@ def build_approvals_router() -> APIRouter:
             audit,
             trace_id=trace_id,
             endpoint="GET /v1/approvals",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):

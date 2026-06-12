@@ -37,7 +37,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from control_plane.api._authz import require
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    cross_tenant_query_enabled,
+    ensure_tenant_scope,
+)
 from control_plane.uplift.threat_metrics import (
     record_memory_blocked,
     record_threat_pattern_hits,
@@ -175,6 +180,7 @@ def build_memory_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/memory",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):

@@ -11,7 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from control_plane.api._authz import require
 from control_plane.audit import emit
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    cross_tenant_query_enabled,
+    ensure_tenant_scope,
+)
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.auth import (
     DuplicateServiceAccountError,
@@ -84,6 +89,7 @@ def build_service_accounts_router() -> APIRouter:
 
     @router.get("")
     async def list_service_accounts(
+        request: Request,
         principal: Annotated[Principal, Depends(require("service_account", "read"))],
         repo: Annotated[ServiceAccountStore, Depends(_get_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
@@ -97,6 +103,7 @@ def build_service_accounts_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/service_accounts",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):

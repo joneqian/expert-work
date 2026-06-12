@@ -42,6 +42,7 @@ from control_plane.tenant_scope import (
     SingleTenant,
     applied_scope,
     bypass_rls_session,
+    cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
 from helix_agent.common.observability import current_trace_id_hex
@@ -167,6 +168,7 @@ def build_skill_evolution_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/skill-evolution/promote-requests",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):
@@ -510,6 +512,7 @@ async def _single_scope(
         audit,
         trace_id=current_trace_id_hex(),
         endpoint=endpoint,
+        cross_tenant_enabled=cross_tenant_query_enabled(request),
     )
     if isinstance(scope, CrossTenant):  # pragma: no cover — query type excludes "*"
         raise HTTPException(status_code=400, detail="tenant_id=* is not valid for this endpoint")

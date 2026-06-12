@@ -214,3 +214,90 @@ async def test_bypass_rls_session_resets_pre_existing_tenant() -> None:
         assert bypass_rls_var.get() is False
     finally:
         current_tenant_id_var.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# cross_tenant_enabled=False — the HX-8 deployment switch (Mini-ADR HX-H4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_switch_off_blocks_aggregate_with_audit() -> None:
+    store = InMemoryAuditLogStore()
+    audit = _audit_for(store)
+    principal = _system_admin()
+
+    with pytest.raises(HTTPException) as exc:
+        await ensure_tenant_scope(
+            principal,
+            "*",
+            audit,
+            endpoint="GET /v1/agents",
+            cross_tenant_enabled=False,
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "CROSS_TENANT_DISABLED"  # type: ignore[index]
+
+    rows = list(store._rows.values())
+    assert len(rows) == 1
+    assert rows[0].action == AuditAction.SYSTEM_CROSS_TENANT_BLOCKED
+    assert rows[0].details["mode"] == "aggregate"
+    assert rows[0].tenant_id == principal.tenant_id  # home-tenant attribution
+
+
+@pytest.mark.asyncio
+async def test_switch_off_blocks_explicit_tenant_switch_with_audit() -> None:
+    store = InMemoryAuditLogStore()
+    audit = _audit_for(store)
+    principal = _system_admin()
+    other = uuid4()
+
+    with pytest.raises(HTTPException) as exc:
+        await ensure_tenant_scope(
+            principal,
+            other,
+            audit,
+            endpoint="GET /v1/sessions",
+            cross_tenant_enabled=False,
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "CROSS_TENANT_DISABLED"  # type: ignore[index]
+
+    rows = list(store._rows.values())
+    assert len(rows) == 1
+    assert rows[0].action == AuditAction.SYSTEM_CROSS_TENANT_BLOCKED
+    assert rows[0].details["mode"] == "switch"
+    assert rows[0].details["target_tenant"] == str(other)
+
+
+@pytest.mark.asyncio
+async def test_switch_off_home_tenant_access_unaffected() -> None:
+    audit = _audit_for(InMemoryAuditLogStore())
+    principal = _system_admin()
+
+    result = await ensure_tenant_scope(
+        principal,
+        principal.tenant_id,
+        audit,
+        cross_tenant_enabled=False,
+    )
+    assert isinstance(result, SingleTenant)
+    assert result.tenant_id == principal.tenant_id
+
+
+@pytest.mark.asyncio
+async def test_switch_off_plain_user_allowed_tenants_untouched() -> None:
+    # A non-system-admin whose allowed_tenants spans two tenants (the mTLS
+    # shape) keeps that access — the switch only confines system_admin.
+    audit = _audit_for(InMemoryAuditLogStore())
+    home, other = uuid4(), uuid4()
+    principal = _tenant_user(tenant=home, allowed=(home, other))
+
+    result = await ensure_tenant_scope(
+        principal,
+        other,
+        audit,
+        cross_tenant_enabled=False,
+    )
+    assert isinstance(result, SingleTenant)
+    assert result.tenant_id == other

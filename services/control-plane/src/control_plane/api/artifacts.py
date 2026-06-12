@@ -37,7 +37,12 @@ from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit as audit_emit
 from control_plane.quota.base import QuotaService
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    cross_tenant_query_enabled,
+    ensure_tenant_scope,
+)
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import ArtifactStore
 from helix_agent.persistence.rls import current_user_id_var
@@ -113,6 +118,7 @@ def build_artifacts_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/artifacts",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):

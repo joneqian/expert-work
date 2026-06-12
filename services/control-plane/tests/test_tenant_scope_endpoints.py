@@ -519,3 +519,52 @@ async def test_system_admin_platform_scope_list_returns_platform_rows(
     assert items[0]["platform_scope"] is True
     assert items[0]["tenant_id"] is None
     assert items[0]["role"] == "system_admin"
+
+
+# ---------------------------------------------------------------------------
+# HX-8 — deployment-level cross-tenant block switch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cross_tenant_disabled_blocks_star_and_switch_end_to_end() -> None:
+    """`cross_tenant_query_enabled=False` confines system_admin to home:
+    both the `*` aggregate and an explicit other-tenant switch 403 with
+    CROSS_TENANT_DISABLED, while home-tenant listing keeps working."""
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+        cross_tenant_query_enabled=False,
+    )
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    sys_admin_id = uuid4()
+    await app.state.role_binding_repo.create(
+        subject_type="user",
+        subject_id=sys_admin_id,
+        tenant_id=None,
+        role=Role.SYSTEM_ADMIN,
+        platform_scope=True,
+        granted_by="seed",
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        headers = {"Authorization": f"Bearer {_system_admin_token(sys_admin_id)}"}
+
+        star = await client.get("/v1/agents?tenant_id=*", headers=headers)
+        assert star.status_code == 403, star.text
+        assert star.json()["detail"]["code"] == "CROSS_TENANT_DISABLED"
+
+        switch = await client.get(f"/v1/agents?tenant_id={_TENANT_B}", headers=headers)
+        assert switch.status_code == 403, switch.text
+        assert switch.json()["detail"]["code"] == "CROSS_TENANT_DISABLED"
+
+        home = await client.get(f"/v1/agents?tenant_id={_TENANT_A}", headers=headers)
+        assert home.status_code == 200, home.text

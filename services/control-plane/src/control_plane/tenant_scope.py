@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from control_plane.audit import emit
 from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
@@ -43,6 +43,48 @@ from helix_agent.protocol import AuditAction, Principal
 from helix_agent.runtime.audit.logger import AuditLogger
 
 logger = logging.getLogger("helix.control_plane.tenant_scope")
+
+
+def cross_tenant_query_enabled(request: Request) -> bool:
+    """Read the deployment-level cross-tenant switch off app settings.
+
+    Stream HX-8 (Mini-ADR HX-H4). Defaults to ``True`` (the Stream N
+    behaviour) when settings are absent — e.g. minimal test apps.
+    """
+    settings = getattr(request.app.state, "settings", None)
+    if settings is None:
+        return True
+    return bool(getattr(settings, "cross_tenant_query_enabled", True))
+
+
+async def _emit_blocked(
+    audit: AuditLogger,
+    principal: Principal,
+    *,
+    mode: str,
+    trace_id: str | None,
+    endpoint: str | None,
+    target_tenant: str | None = None,
+) -> None:
+    details: dict[str, object] = {"mode": mode}
+    if endpoint:
+        details["endpoint"] = endpoint
+    if target_tenant is not None:
+        details["target_tenant"] = target_tenant
+    await emit(
+        audit,
+        tenant_id=principal.tenant_id,  # home tenant — audit attribution
+        actor_id=principal.subject_id,
+        action=AuditAction.SYSTEM_CROSS_TENANT_BLOCKED,
+        resource_type="system",
+        resource_id=endpoint,
+        trace_id=trace_id,
+        details=details,
+    )
+    logger.info(
+        "tenant_scope.cross_tenant_blocked",
+        extra={"actor_id": principal.subject_id, "endpoint": endpoint, "mode": mode},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +119,7 @@ async def ensure_tenant_scope(
     *,
     trace_id: str | None = None,
     endpoint: str | None = None,
+    cross_tenant_enabled: bool = True,
 ) -> TenantScopeResolution:
     """Resolve ``?tenant_id=`` against the caller's scope.
 
@@ -99,6 +142,14 @@ async def ensure_tenant_scope(
 
     All ``"*"`` queries and all explicit tenant switches (where the
     target differs from the principal's home tenant) emit an audit row.
+
+    ``cross_tenant_enabled=False`` (the HX-8 deployment switch, Mini-ADR
+    HX-H4) confines system_admin to their home tenant: both the ``"*"``
+    aggregate and explicit switches to another tenant raise 403
+    ``CROSS_TENANT_DISABLED`` and emit ``SYSTEM_CROSS_TENANT_BLOCKED``.
+    Plain tenant users are untouched (their non-home access is already
+    governed by ``allowed_tenants``). Callers pass
+    ``cross_tenant_enabled=cross_tenant_query_enabled(request)``.
     """
     # --- cross-tenant aggregate path ---------------------------------
     if requested_tenant_id == "*":
@@ -108,6 +159,17 @@ async def ensure_tenant_scope(
                 detail={
                     "code": "CROSS_TENANT_FORBIDDEN",
                     "message": "cross-tenant query (tenant_id=*) requires system_admin",
+                },
+            )
+        if not cross_tenant_enabled:
+            await _emit_blocked(
+                audit, principal, mode="aggregate", trace_id=trace_id, endpoint=endpoint
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "CROSS_TENANT_DISABLED",
+                    "message": "cross-tenant queries are disabled on this deployment",
                 },
             )
         await emit(
@@ -136,6 +198,28 @@ async def ensure_tenant_scope(
             detail={
                 "code": "TENANT_NOT_ALLOWED",
                 "message": "the caller is not authorized for this tenant",
+            },
+        )
+
+    # HX-8 deployment switch: with cross-tenant access disabled, a
+    # system_admin may not switch out of their home tenant either —
+    # blocking only the "*" aggregate would leave a per-tenant walk
+    # as a loophole (Mini-ADR HX-H4). Plain tenant users are governed
+    # by allowed_tenants above and are untouched.
+    if target != principal.tenant_id and principal.is_system_admin and not cross_tenant_enabled:
+        await _emit_blocked(
+            audit,
+            principal,
+            mode="switch",
+            trace_id=trace_id,
+            endpoint=endpoint,
+            target_tenant=str(target),
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "CROSS_TENANT_DISABLED",
+                "message": "cross-tenant access is disabled on this deployment",
             },
         )
 

@@ -27,7 +27,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from control_plane.audit import emit
 from control_plane.settings import Settings
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    cross_tenant_query_enabled,
+    ensure_tenant_scope,
+)
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence.curation import CurationCandidateStore, EvalDatasetStore
 from helix_agent.protocol import (
@@ -169,6 +174,7 @@ def build_curation_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/curation/candidates",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):
@@ -361,6 +367,7 @@ def build_eval_dataset_router() -> APIRouter:
             audit,
             trace_id=current_trace_id_hex(),
             endpoint="GET /v1/eval-datasets",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
         async with applied_scope(scope):
             if isinstance(scope, CrossTenant):

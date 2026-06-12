@@ -47,7 +47,12 @@ from control_plane.audit import emit
 from control_plane.quota.base import QuotaService
 from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
-from control_plane.tenant_scope import CrossTenant, applied_scope, ensure_tenant_scope
+from control_plane.tenant_scope import (
+    CrossTenant,
+    applied_scope,
+    cross_tenant_query_enabled,
+    ensure_tenant_scope,
+)
 from helix_agent.common.observability import (
     current_trace_id_hex,
     helix_counter,
@@ -933,6 +938,7 @@ def build_runs_list_router() -> APIRouter:
             audit,
             trace_id=trace_id,
             endpoint="GET /v1/runs",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
 
         async with applied_scope(scope):
