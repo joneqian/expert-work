@@ -961,8 +961,9 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 - **周扫**：`schedule: cron`（weekly）对两镜像跑全量 Trivy（含 HIGH），fail → 开 issue / workflow 可见（基础镜像新爆 CVE 不等代码改动）。
 - **SARIF 上传**：`github/codeql-action/upload-sarif` 进 Security tab 看趋势，不替代 exit-code 门禁。
 
-> **实施注记（PR3 #579）**：
-> - **门禁实现 = 单次 Trivy 跑**：`format: sarif` + `exit-code: 1` 同步 —— Trivy 先把 SARIF 写盘再判 exit-code，故 upload 步 `if: always()` 在门禁失败时仍上传（不需双跑两份扫描）。trivy-action `v0.36.0` / upload-sarif `v4.36.2` 均 SHA-pin。
+> **实施注记（PR3 #579 + 修复 #580）**：
+> - **门禁实现 = 双步 Trivy（report + gate）**。⚠️ **订正（#580）**：#579 最初的「单次 `format: sarif` + `severity` + `exit-code: 1`」是错的——trivy-action 在 `format: sarif` 下生成**全严重度** SARIF，且 `severity` 输入**不约束 exit-code**（[aquasecurity/trivy-action#95](https://github.com/aquasecurity/trivy-action/issues/95)），故单步门禁会对**所有**严重度判 fail，而非设计的 floor。实测：office `severity: CRITICAL` 门禁却被 HIGH 的 `pdfminer.six` 触发 fail。正解 = 两步：① **report**（`format: sarif` / `exit-code: 0`，全严重度，永不 fail）→ upload SARIF 进 Security tab；② **gate**（`format: table` / `severity` floor / `exit-code: 1`——table 格式下 `severity` 才真正约束 exit-code）。gate 带 `skip-db-update: true` 复用 report 已下的 DB。trivy-action `v0.36.0` / upload-sarif `v4.36.2` 均 SHA-pin。
+> - **build context 修正（#580）**：minimal workflow build `context` 必须是 `infra/sandbox-image`（其 Dockerfile `COPY runner.py` 相对自身目录），#579 误抄 office 的 `context: infra`（office 是 `COPY sandbox-image/runner.py`）导致 minimal build 直接失败。两镜像 context 不同：office=`infra/` / minimal=`infra/sandbox-image`。
 > - **「debian 基底」澄清**：实际只两镜像——minimal=alpine 卡 `CRITICAL,HIGH`，office=debian-slim+LibreOffice 卡 `CRITICAL`。设计原文「minimal/debian 卡 CRITICAL+HIGH」指「alpine minimal 与任何裸 debian 基底同档」，office 因 LibreOffice 用户态库面大单独降档，非第三个镜像。
 > - **周扫不应用 `.trivyignore`（关键不变量）**：`sandbox-image-cve-weekly.yml` 故意省略 `trivyignores`，使被 PR 门禁 mute 的 CVE 仍现于周扫 SARIF/审计面——这正是 `.trivyignore` header 承诺的「mute 只对 PR 门禁生效、永不对审计面生效」的落地点，防止过期/遗忘的 mute 静默变盲。
 > - **minimal 补 smoke test**：`infra/sandbox-image/smoke_test.py` + `smoke_payload.py`（stdlib-only，镜像 office smoke 驱动），验基底确实跑 Python 3.12 + baked runner.py 加载——build 不只「能构建」还「能运行」。

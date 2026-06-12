@@ -72,24 +72,25 @@ jobs:
       - name: Smoke test (office libs + CJK)
         run: python infra/sandbox-image-office/smoke_test.py helix-sandbox-office:ci
 
-      # CRITICAL-only gate (not CRITICAL,HIGH like the minimal image): the
-      # LibreOffice + CJK Debian base carries a large user-space library
+      # Two Trivy steps (see sandbox-image.yml for why a single sarif+exit-code
+      # step gates on all severities): report (sarif, all severities, exit 0)
+      # then gate (table, severity floor, exit 1).
+      #
+      # The gate is CRITICAL-only (not CRITICAL,HIGH like the minimal image):
+      # the LibreOffice + CJK Debian base carries a large user-space library
       # surface that keeps a HIGH count perpetually red and would defeat the
       # gate (design HX-K5). The sandbox's real isolation boundary is gVisor,
       # so user-space-lib CVEs here are defense-in-depth; HIGH is still tracked
-      # by the weekly full scan. --ignore-unfixed → only actionable CVEs block.
-      # Trivy writes the SARIF before evaluating exit-code, so the upload below
-      # (if: always()) still runs when the gate fails.
-      - name: Trivy scan (gate CRITICAL)
+      # by the SARIF report above + the weekly full scan. --ignore-unfixed →
+      # only actionable CVEs block.
+      - name: Trivy report (SARIF, all severities)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: helix-sandbox-office:ci
           format: sarif
           output: trivy-office.sarif
-          severity: CRITICAL
           ignore-unfixed: true
-          trivyignores: .trivyignore
-          exit-code: "1"
+          exit-code: "0"
 
       - name: Upload Trivy SARIF
         if: always()
@@ -97,6 +98,17 @@ jobs:
         with:
           sarif_file: trivy-office.sarif
           category: trivy-sandbox-office
+
+      - name: Trivy gate (CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: helix-sandbox-office:ci
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "1"
+          skip-db-update: true # report step above already fetched the DB
 
       # ---- push (main / manual only, and only when the registry is configured)
       - name: Log in to Aliyun ACR
