@@ -120,3 +120,78 @@ def test_factory_builds_provider_for_valid_runtime() -> None:
 def test_factory_rejects_unknown_runtime() -> None:
     with pytest.raises(ValueError, match="unknown sandbox OCI runtime"):
         make_sandbox_runtime_provider("firecracker")
+
+
+def test_factory_forwards_seccomp_profile_path() -> None:
+    provider = make_sandbox_runtime_provider("runc", seccomp_profile_path="/etc/seccomp.json")
+    assert provider.seccomp_profile_path == "/etc/seccomp.json"
+
+
+# ---------- Stream HX-10 — seccomp pinned profile ----------
+
+
+def test_no_seccomp_opt_when_unset() -> None:
+    # Default None → no --security-opt seccomp (host Docker default profile).
+    argv = _runc_provider().docker_run_argv(image="img", container_name="sb-1")
+    assert "seccomp" not in " ".join(argv)
+
+
+def test_seccomp_opt_emitted_when_path_set() -> None:
+    provider = SandboxRuntimeProvider(oci_runtime="runc", seccomp_profile_path="/etc/sb.json")
+    argv = provider.docker_run_argv(image="img", container_name="sb-1")
+    # --security-opt appears twice now (no-new-privileges + seccomp); the
+    # seccomp value carries the pinned profile path.
+    opts = [argv[i + 1] for i, tok in enumerate(argv) if tok == "--security-opt"]
+    assert "no-new-privileges" in opts
+    assert "seccomp=/etc/sb.json" in opts
+
+
+def test_seccomp_opt_under_runsc_too() -> None:
+    # gVisor still honours seccomp on the host sentry — the two layers stack.
+    provider = SandboxRuntimeProvider(oci_runtime="runsc", seccomp_profile_path="/etc/sb.json")
+    argv = provider.docker_run_argv(image="img", container_name="sb-1")
+    assert "seccomp=/etc/sb.json" in argv
+    assert _flag_value(argv, "--runtime") == "runsc"
+
+
+# ---------- Stream HX-10 — misconfig assertions (SANDBOXESCAPEBENCH 100%-escape classes) ----------
+
+
+def test_argv_never_mounts_docker_socket() -> None:
+    # Exposed docker.sock is the #1 100%-escape misconfig — it must never
+    # reach a sandbox container under any workspace shape.
+    for vol in (None, "helix-ws-abc"):
+        argv = _runc_provider().docker_run_argv(
+            image="img", container_name="sb-1", workspace_volume=vol
+        )
+        assert "/var/run/docker.sock" not in " ".join(argv)
+        assert "docker.sock" not in " ".join(argv)
+
+
+def test_argv_never_privileged_or_cap_add() -> None:
+    argv = _runc_provider().docker_run_argv(image="img", container_name="sb-1")
+    assert "--privileged" not in argv
+    assert "--cap-add" not in argv
+
+
+def test_argv_never_host_path_bind_mount() -> None:
+    # The only --volume we ever emit is a docker *named* volume (J.15);
+    # a host-path bind mount (source starting with '/') is forbidden.
+    argv = _runc_provider().docker_run_argv(
+        image="img", container_name="sb-1", workspace_volume="helix-ws-abc"
+    )
+    volumes = [argv[i + 1] for i, tok in enumerate(argv) if tok == "--volume"]
+    for spec in volumes:
+        assert not spec.startswith("/"), f"host-path bind mount: {spec}"
+
+
+def test_argv_keeps_core_hardening_under_all_shapes() -> None:
+    for vol in (None, "helix-ws-abc"):
+        argv = _runc_provider().docker_run_argv(
+            image="img", container_name="sb-1", workspace_volume=vol
+        )
+        assert _flag_value(argv, "--cap-drop") == "ALL"
+        assert "--read-only" in argv
+        assert "no-new-privileges" in [
+            argv[i + 1] for i, tok in enumerate(argv) if tok == "--security-opt"
+        ]

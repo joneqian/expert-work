@@ -384,6 +384,14 @@ services:
       # docker daemon (sandboxes launch via the mounted socket) must be able
       # to pull it — `docker login` to the registry or pre-pull the image.
       HELIX_SANDBOX_SANDBOX_IMAGE_OFFICE: ${HELIX_SANDBOX_IMAGE_OFFICE:-helix-sandbox-office:dev}
+      # Stream HX-10 — pinned seccomp profile. Unset here: dev rides the host
+      # Docker default profile. To enable (prod / staging): pre-place
+      # infra/sandbox-image/seccomp-profile.json at a host path, bind-mount it
+      # into THIS container at the SAME path (docker-out-of-docker: the host
+      # daemon resolves the --security-opt seccomp= path, while startup
+      # validates the same path inside this container — they must match), and
+      # set HELIX_SANDBOX_SECCOMP_PROFILE_PATH to it. A configured-but-missing
+      # profile fails startup closed (HX-K2).
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:

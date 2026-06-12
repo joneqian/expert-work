@@ -57,6 +57,15 @@ class SandboxRuntimeProvider:
 
     oci_runtime: SandboxOciRuntime
     egress_network: str = DEFAULT_EGRESS_NETWORK
+    #: Stream HX-10 — host-visible path to a pinned seccomp profile JSON.
+    #: ``None`` emits no ``--security-opt seccomp`` flag (the container then
+    #: rides the host Docker daemon's built-in default profile — fine for
+    #: dev, but version-drifting). A path pins our own profile
+    #: (``infra/sandbox-image/seccomp-profile.json``) so the syscall floor is
+    #: decided by our repo, not the host's Docker version. The provider only
+    #: forwards the path; existence / JSON validity is validated fail-closed
+    #: at supervisor startup (it stays pure / Docker-free).
+    seccomp_profile_path: str | None = None
 
     def docker_run_argv(
         self,
@@ -91,6 +100,7 @@ class SandboxRuntimeProvider:
             "ALL",
             "--security-opt",
             "no-new-privileges",
+            *self._seccomp_opt(),
             "--pids-limit",
             str(limits.pids_limit),
             "--memory",
@@ -104,6 +114,17 @@ class SandboxRuntimeProvider:
             argv += ["--runtime", "runsc"]
         argv.append(image)
         return argv
+
+    def _seccomp_opt(self) -> list[str]:
+        """The ``--security-opt seccomp=`` flag, or empty when unset.
+
+        ``None`` → no flag (host Docker default profile). A path → pin our
+        own profile. Applies under both runc and runsc: gVisor still honours
+        seccomp on the host-side sentry process, so the two layers stack.
+        """
+        if self.seccomp_profile_path is None:
+            return []
+        return ["--security-opt", f"seccomp={self.seccomp_profile_path}"]
 
     @staticmethod
     def _workspace_mount(limits: SandboxResourceLimits, workspace_volume: str | None) -> list[str]:
@@ -126,6 +147,7 @@ def make_sandbox_runtime_provider(
     oci_runtime: str,
     *,
     egress_network: str = DEFAULT_EGRESS_NETWORK,
+    seccomp_profile_path: str | None = None,
 ) -> SandboxRuntimeProvider:
     """Build a :class:`SandboxRuntimeProvider`, validating ``oci_runtime``.
 
@@ -133,6 +155,10 @@ def make_sandbox_runtime_provider(
     because it arrives from ``environments/{env}.yaml`` — an arbitrary
     runtime string. An unrecognised value raises :class:`ValueError`,
     mirroring :func:`~helix_agent.runtime.secret_store.make_secret_store`.
+
+    ``seccomp_profile_path`` is forwarded verbatim — the caller
+    (supervisor startup) is responsible for the fail-closed existence /
+    JSON-validity check, keeping this factory pure.
     """
     valid: tuple[str, ...] = get_args(SandboxOciRuntime)
     if oci_runtime not in valid:
@@ -141,4 +167,5 @@ def make_sandbox_runtime_provider(
     return SandboxRuntimeProvider(
         oci_runtime=oci_runtime,  # type: ignore[arg-type]  # validated above
         egress_network=egress_network,
+        seccomp_profile_path=seccomp_profile_path,
     )

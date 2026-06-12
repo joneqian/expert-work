@@ -1,0 +1,130 @@
+"""Tests for the fail-closed seccomp profile validation — Stream HX-10."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from sandbox_supervisor.seccomp import SeccompProfileError, validate_seccomp_profile
+
+#: The pinned profile shipped in the repo — its content contract is asserted
+#: below so a regression (e.g. someone adding io_uring to the allowlist) is
+#: caught by the unit suite, not in production.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_PINNED_PROFILE = _REPO_ROOT / "infra" / "sandbox-image" / "seccomp-profile.json"
+
+
+# ---------- fail-closed validation ----------
+
+
+def test_none_is_noop() -> None:
+    # No configured profile → host Docker default; validation is a no-op.
+    validate_seccomp_profile(None)
+
+
+def test_valid_profile_passes(tmp_path: Path) -> None:
+    profile = tmp_path / "p.json"
+    profile.write_text(json.dumps({"defaultAction": "SCMP_ACT_ERRNO"}))
+    validate_seccomp_profile(str(profile))
+
+
+def test_missing_file_fails_closed(tmp_path: Path) -> None:
+    with pytest.raises(SeccompProfileError, match="not found"):
+        validate_seccomp_profile(str(tmp_path / "absent.json"))
+
+
+def test_invalid_json_fails_closed(tmp_path: Path) -> None:
+    profile = tmp_path / "bad.json"
+    profile.write_text("{not json")
+    with pytest.raises(SeccompProfileError, match="not valid JSON"):
+        validate_seccomp_profile(str(profile))
+
+
+def test_missing_default_action_fails_closed(tmp_path: Path) -> None:
+    profile = tmp_path / "incomplete.json"
+    profile.write_text(json.dumps({"syscalls": []}))
+    with pytest.raises(SeccompProfileError, match="defaultAction"):
+        validate_seccomp_profile(str(profile))
+
+
+# ---------- pinned profile content contract ----------
+
+
+def _load_pinned() -> dict:
+    return json.loads(_PINNED_PROFILE.read_text(encoding="utf-8"))
+
+
+def test_pinned_profile_is_valid() -> None:
+    validate_seccomp_profile(str(_PINNED_PROFILE))
+
+
+def test_pinned_profile_denies_by_default() -> None:
+    assert _load_pinned()["defaultAction"] == "SCMP_ACT_ERRNO"
+
+
+def _unconditional_allow(profile: dict) -> set[str]:
+    """syscalls allowed with no capability gate (i.e. allowed under cap-drop ALL)."""
+    names: set[str] = set()
+    for grp in profile["syscalls"]:
+        caps = grp.get("includes", {}).get("caps")
+        if grp["action"] == "SCMP_ACT_ALLOW" and not caps:
+            names.update(grp["names"])
+    return names
+
+
+def _cap_gated_allow(profile: dict) -> set[str]:
+    names: set[str] = set()
+    for grp in profile["syscalls"]:
+        caps = grp.get("includes", {}).get("caps")
+        if grp["action"] == "SCMP_ACT_ALLOW" and caps:
+            names.update(grp["names"])
+    return names
+
+
+@pytest.mark.parametrize(
+    "syscall",
+    [
+        "io_uring_setup",
+        "io_uring_enter",
+        "io_uring_register",
+        "userfaultfd",
+        "keyctl",
+        "add_key",
+        "request_key",
+    ],
+)
+def test_high_risk_syscalls_not_in_allowlist(syscall: str) -> None:
+    # These are escape-prone and never appear in the allowlist → the
+    # SCMP_ACT_ERRNO default denies them. Pinning the profile keeps that true
+    # regardless of the host Docker version (old hosts still allow io_uring).
+    assert syscall not in _unconditional_allow(_load_pinned())
+
+
+@pytest.mark.parametrize("syscall", ["bpf", "perf_event_open", "mount", "unshare", "setns"])
+def test_privileged_syscalls_only_cap_gated(syscall: str) -> None:
+    # Allowed only behind a CAP_* the sandbox drops (cap-drop ALL) → denied.
+    profile = _load_pinned()
+    assert syscall not in _unconditional_allow(profile)
+    assert syscall in _cap_gated_allow(profile)
+
+
+def test_clone3_keeps_enosys_fallback() -> None:
+    # clone3 must return ENOSYS(38) without CAP_SYS_ADMIN so glibc falls back
+    # to clone — NOT EPERM, which would crash modern glibc/Python. This is the
+    # upstream default behaviour and must be preserved verbatim.
+    clone3 = [
+        grp
+        for grp in _load_pinned()["syscalls"]
+        if "clone3" in grp["names"] and grp["action"] == "SCMP_ACT_ERRNO"
+    ]
+    assert clone3, "clone3 ENOSYS entry missing"
+    assert clone3[0]["errnoRet"] == 38
+
+
+def test_pinned_profile_allows_core_runtime_syscalls() -> None:
+    # Smoke check the allowlist did not get truncated — the runner needs these.
+    allow = _unconditional_allow(_load_pinned())
+    for needed in ("read", "write", "openat", "mmap", "futex", "execve", "clone"):
+        assert needed in allow, f"core syscall {needed} missing from allowlist"

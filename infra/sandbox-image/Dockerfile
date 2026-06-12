@@ -7,6 +7,14 @@
 # SandboxRuntimeProvider — keeping them out of the image so one image works
 # under both the dev (runc) and prod (runsc / gVisor) runtimes.
 #
+# Stream HX-10: the pinned seccomp profile lives beside this Dockerfile as
+# `seccomp-profile.json` (a vendored, version-pinned moby v27 default — its
+# syscall floor no longer drifts with the host's Docker version). It is NOT
+# baked into the image: docker-out-of-docker means the host daemon launches
+# the sandbox, so the profile is a *host-visible* path passed to `docker run`
+# via `--security-opt seccomp=`. Production pre-places it on the host and sets
+# HELIX_SANDBOX_SECCOMP_PROFILE_PATH; dev leaves it unset (host default).
+#
 # Base = alpine, not slim (Mini-ADR F-13): the sandbox runs pure-stdlib
 # Python with no package-install path (Mini-ADR F-2), so the ~150 MB Debian
 # userland in `python:3.12-slim` is dead weight — alpine is ~50 MB.

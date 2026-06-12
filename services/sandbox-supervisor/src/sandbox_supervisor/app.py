@@ -57,6 +57,7 @@ from sandbox_supervisor.schemas import (
     ReapRequest,
     ReapResponse,
 )
+from sandbox_supervisor.seccomp import validate_seccomp_profile
 from sandbox_supervisor.settings import SandboxSupervisorSettings
 from sandbox_supervisor.store import DbSandboxStore
 from sandbox_supervisor.supervisor import SandboxSupervisor
@@ -123,7 +124,13 @@ def create_app(
         # starts when a variant has a non-zero target. Pool containers
         # do not survive a supervisor restart — the held pipe dies with
         # the process and ``sweep_orphans`` above reclaims leftovers.
-        runtime_provider = make_sandbox_runtime_provider(resolved_settings.oci_runtime)
+        # Stream HX-10 — fail-closed seccomp validation before any sandbox
+        # can launch: a configured-but-unloadable profile aborts startup.
+        validate_seccomp_profile(resolved_settings.seccomp_profile_path)
+        runtime_provider = make_sandbox_runtime_provider(
+            resolved_settings.oci_runtime,
+            seccomp_profile_path=resolved_settings.seccomp_profile_path,
+        )
         pool = SandboxPool()
         live = SandboxSupervisor(
             store=store,

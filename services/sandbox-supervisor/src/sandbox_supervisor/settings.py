@@ -38,6 +38,13 @@ class SandboxSupervisorSettings(BaseSettings):
     sandbox_image_office: str = "helix-sandbox-office:dev"
     #: OCI runtime — `runc` for dev / macOS, `runsc` (gVisor) for Linux prod.
     oci_runtime: Literal["runc", "runsc"] = "runc"
+    #: Stream HX-10 — host-visible path to a pinned seccomp profile JSON
+    #: (``infra/sandbox-image/seccomp-profile.json``, mounted into the host
+    #: at deploy time). ``None`` rides the host Docker default profile (dev).
+    #: When set, startup validates the file fail-closed (exists + valid JSON)
+    #: — a configured-but-unloadable profile is a security misconfig, not a
+    #: transient fault, so the supervisor refuses to start.
+    seccomp_profile_path: str | None = None
     #: Host identifier recorded on each sandbox_instance row. M0 single-node.
     node_name: str = "local"
 
