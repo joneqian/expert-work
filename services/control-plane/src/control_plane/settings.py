@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ otel
     otlp_traces_endpoint: str | None = None
 
+    # -------------------------------------------------------- langfuse (HX-7)
+    #: Self-hosted Langfuse instance for agent-level traces (ADR-0005).
+    #: All three present -> the SDK-backed client; anything missing keeps
+    #: the M0 RecordingLangfuseClient (Mini-ADR HX-G3 fail-open). The two
+    #: keys are injected via env only (HELIX_CONTROL_PLANE_LANGFUSE_*) --
+    #: never committed to compose files or code.
+    langfuse_host: str | None = None
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+
     # ------------------------------------------------------------------ runtime guards
     # ADR B-1: in-process rate-limiter assumes a single replica. Override
     # to ``False`` only after C.6 ships the Redis backend.

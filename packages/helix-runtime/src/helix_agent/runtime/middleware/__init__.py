@@ -54,6 +54,12 @@ from helix_agent.runtime.middleware.langfuse import (
 from helix_agent.runtime.middleware.langfuse import (
     RecordingLangfuseClient as RecordingLangfuseClient,
 )
+from helix_agent.runtime.middleware.langfuse_sdk import (
+    LangfuseSdkClient as LangfuseSdkClient,
+)
+from helix_agent.runtime.middleware.langfuse_sdk import (
+    make_langfuse_client as make_langfuse_client,
+)
 from helix_agent.runtime.middleware.llm_cache import (
     LLMCacheLookupMiddleware as LLMCacheLookupMiddleware,
 )
@@ -158,6 +164,7 @@ __all__ = [
     "LLMUnauthorizedError",
     "LangfuseClient",
     "LangfuseMiddleware",
+    "LangfuseSdkClient",
     "LangfuseSpan",
     "LoopDetectionMiddleware",
     "Middleware",
@@ -175,5 +182,6 @@ __all__ = [
     "clone_ai_message_with_tool_calls",
     "default_token_estimator",
     "fingerprint_tool_calls",
+    "make_langfuse_client",
     "normalize_args",
 ]

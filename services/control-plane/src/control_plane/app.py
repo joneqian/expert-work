@@ -316,6 +316,7 @@ from helix_agent.persistence.trigger import (
 from helix_agent.protocol import PROVIDER_CATALOG
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.checkpointer import make_checkpointer
+from helix_agent.runtime.middleware import make_langfuse_client
 from helix_agent.runtime.runs import (
     InMemoryRunEventStore,
     InMemoryRunStore,
@@ -861,8 +862,17 @@ def create_app(
                         else None
                     ),
                 )
+                # Stream HX-7 — resolve the Langfuse client once: the
+                # SDK adapter when the deployment configures an instance,
+                # the M0 recording stub otherwise (Mini-ADR HX-G3).
+                langfuse_client = make_langfuse_client(
+                    host=resolved_settings.langfuse_host,
+                    public_key=resolved_settings.langfuse_public_key,
+                    secret_key=resolved_settings.langfuse_secret_key,
+                )
                 middleware_env = build_middleware_env(
                     token_usage_store=resolved_token_usage,
+                    langfuse_client=langfuse_client,
                 )
                 memory_env = MemoryEnv(
                     store=resolved_memory_store,
@@ -1133,6 +1143,12 @@ def create_app(
                     await feedback_consumer.stop()
                 if approval_gauge_worker is not None:
                     await approval_gauge_worker.stop()
+                # Stream HX-7 — drain the Langfuse SDK's background queue
+                # before the process exits; the recording stub has no
+                # shutdown, hence the duck-typed lookup.
+                langfuse_shutdown = getattr(langfuse_client, "shutdown", None)
+                if callable(langfuse_shutdown):
+                    langfuse_shutdown()
                 ingestion_runner: KnowledgeIngestionRunner | None = getattr(
                     _app.state, "knowledge_ingestion_runner", None
                 )

@@ -1,0 +1,128 @@
+"""Langfuse SDK adapter — Stream HX-7 (STREAM-HX-DESIGN § 8.2-①).
+
+Implements the E.5 :class:`LangfuseClient` protocol over the real
+``langfuse`` v3 SDK, replacing the M0 ``RecordingLangfuseClient`` when
+the deployment configures a Langfuse instance (ADR-0005). The
+middleware is untouched — the protocol is the seam (Mini-ADR HX-G1).
+
+v3 is OTel-based: SDK spans join the active OpenTelemetry context, so
+they share the trace id our ``helix_span`` / W3C-propagation layer
+already carries — the ADR-0005 "trace_id 共享、Langfuse ↔ Tempo 互跳"
+data flow needs no extra code.
+
+Each LLM call maps to a Langfuse *generation* (the LLM-typed
+observation, so token usage and model cost land in Langfuse's
+accounting) — created un-nested via ``start_generation``; submission is
+the SDK's own bounded background queue, matching the protocol's
+"must not block" contract. Failures are already fail-soft at the
+middleware layer; this module adds no second try/except blanket.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+
+from helix_agent.runtime.middleware.langfuse import LangfuseClient, RecordingLangfuseClient
+
+if TYPE_CHECKING:  # pragma: no cover — typing only, avoids a hard import
+    from langfuse._client.span import LangfuseGeneration
+
+logger = logging.getLogger(__name__)
+
+
+class _SdkSpan:
+    """One LLM call's generation handle — the :class:`LangfuseSpan` shape."""
+
+    def __init__(self, generation: LangfuseGeneration) -> None:
+        self._generation = generation
+
+    def record_output(self, output: Any) -> None:
+        self._generation.update(output=output)
+
+    def record_usage(self, usage: Mapping[str, int]) -> None:
+        # Langfuse v3 takes usage as ``usage_details`` (str → int); our
+        # middleware already passes that shape (input_tokens / output_tokens
+        # / cache_read_input_tokens ...).
+        self._generation.update(usage_details={k: int(v) for k, v in usage.items()})
+
+    def record_error(self, exception: BaseException) -> None:
+        self._generation.update(
+            level="ERROR",
+            status_message=f"{type(exception).__name__}: {exception}",
+        )
+
+    def end(self) -> None:
+        self._generation.end()
+
+
+class LangfuseSdkClient:
+    """:class:`LangfuseClient` over the ``langfuse`` v3 SDK.
+
+    ``sdk_client`` is the constructed ``langfuse.Langfuse`` instance —
+    injected so tests substitute a fake without monkeypatching the SDK.
+    """
+
+    def __init__(self, sdk_client: Any) -> None:
+        self._sdk = sdk_client
+
+    def start_span(
+        self,
+        *,
+        name: str,
+        input: Any,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> _SdkSpan:
+        meta = dict(metadata or {})
+        model = meta.get("model")
+        generation = self._sdk.start_generation(
+            name=name,
+            input=input,
+            metadata=meta,
+            model=str(model) if model is not None else None,
+        )
+        return _SdkSpan(generation)
+
+    def flush(self) -> None:
+        """Drain the SDK's background queue — call at lifespan teardown."""
+        self._sdk.flush()
+
+    def shutdown(self) -> None:
+        """Flush + stop the SDK's background workers."""
+        self._sdk.shutdown()
+
+
+def make_langfuse_client(
+    *,
+    host: str | None,
+    public_key: str | None,
+    secret_key: str | None,
+) -> LangfuseClient:
+    """Resolve the deployment's Langfuse client (Mini-ADR HX-G3).
+
+    All three settings present → the SDK-backed client. Anything
+    missing — including an SDK import failure on a broken install —
+    degrades to :class:`RecordingLangfuseClient`: tracing config must
+    never take the service down, and the no-credential deployment
+    (dev / CI) keeps the M0 behaviour byte-identical.
+    """
+    if not (host and public_key and secret_key):
+        logger.info("langfuse.disabled — settings incomplete, using the recording client")
+        return RecordingLangfuseClient()
+    try:
+        from langfuse import Langfuse
+    except ImportError:
+        logger.warning(
+            "langfuse.sdk_import_failed — falling back to the recording client",
+            exc_info=True,
+        )
+        return RecordingLangfuseClient()
+    sdk = Langfuse(
+        public_key=public_key,
+        secret_key=secret_key,
+        host=host,
+        tracing_enabled=True,
+    )
+    logger.info("langfuse.enabled host=%s", host)
+    return LangfuseSdkClient(sdk)

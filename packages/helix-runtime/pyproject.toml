@@ -22,6 +22,10 @@ dependencies = [
     # Stream HX-1 — real token estimation (o200k_base) for the context
     # gates; same version constraint as control-plane's chunking use.
     "tiktoken>=0.8,<1",
+    # Stream HX-7 — Langfuse SDK adapter behind the E.5 LangfuseClient
+    # protocol (ADR-0005). v3 is OTel-based, sharing the existing
+    # TracerProvider so trace ids line up across Langfuse and Tempo.
+    "langfuse>=3,<4",
 ]
 
 [build-system]

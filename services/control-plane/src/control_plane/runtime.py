@@ -40,7 +40,7 @@ from helix_agent.protocol import AgentSpec, ModelSpec, Provider, TenantPlan, Too
 from helix_agent.runtime.audit import DefaultSecretRedactor
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
-from helix_agent.runtime.middleware import RecordingLangfuseClient
+from helix_agent.runtime.middleware import LangfuseClient, RecordingLangfuseClient
 from helix_agent.runtime.runs import RunEventStore, RunManager, RunStore
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from helix_agent.runtime.storage import ObjectStore, ObjectStoreBackend, S3CompatibleConfig
@@ -934,15 +934,19 @@ def make_image_resolver(store: ObjectStore) -> ImageResolver:
 def build_middleware_env(
     *,
     token_usage_store: TokenUsageStore | None = None,
+    langfuse_client: LangfuseClient | None = None,
 ) -> MiddlewareEnv:
     """Assemble the M0 :class:`MiddlewareEnv`.
 
-    Single-instance defaults: an in-process response cache, the
-    span-recording Langfuse client (the SDK-backed Langfuse adapter is
-    M1), and the global-pattern secret redactor for the E.5 PII
-    middleware. Per-tenant ``pii_fields`` mask only dict-shaped audit
-    details (D.2); free-text LLM messages use the global patterns, so
-    ``redact_text`` is a plain sync call — no per-tenant lookup.
+    Single-instance defaults: an in-process response cache, the Langfuse
+    client (Stream HX-7 — ``app.py`` passes ``make_langfuse_client``'s
+    resolution: the SDK-backed adapter when the deployment configures a
+    Langfuse instance, the span-recording stub otherwise; ``None`` here
+    keeps the stub for tests), and the global-pattern secret redactor
+    for the E.5 PII middleware. Per-tenant ``pii_fields`` mask only
+    dict-shaped audit details (D.2); free-text LLM messages use the
+    global patterns, so ``redact_text`` is a plain sync call — no
+    per-tenant lookup.
 
     Stream G.9 — when ``token_usage_store`` is supplied,
     :class:`TokenUsageMiddleware` lands on the ``after_llm_call`` chain
@@ -956,7 +960,9 @@ def build_middleware_env(
 
     return MiddlewareEnv(
         response_cache=LLMResponseCache(redis=InMemoryRedisCache()),
-        langfuse_client=RecordingLangfuseClient(),
+        langfuse_client=(
+            langfuse_client if langfuse_client is not None else RecordingLangfuseClient()
+        ),
         redact_text=_redact_text,
         token_usage_store=token_usage_store,
     )
