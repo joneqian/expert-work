@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from uuid import UUID
 
 from helix_agent.persistence.platform_secrets.base import PlatformSecretStore
 from helix_agent.protocol import (
     PlatformProviderSecretRecord,
     PlatformToolSecretRecord,
     Provider,
+    TenantProviderSecretRecord,
+    TenantToolSecretRecord,
     Tool,
 )
 
@@ -24,6 +27,8 @@ class InMemoryPlatformSecretStore(PlatformSecretStore):
     def __init__(self) -> None:
         self._providers: dict[Provider, PlatformProviderSecretRecord] = {}
         self._tools: dict[Tool, PlatformToolSecretRecord] = {}
+        self._tenant_providers: dict[tuple[UUID, Provider], TenantProviderSecretRecord] = {}
+        self._tenant_tools: dict[tuple[UUID, Tool], TenantToolSecretRecord] = {}
         self._lock = asyncio.Lock()
 
     async def list_providers(self) -> list[PlatformProviderSecretRecord]:
@@ -95,3 +100,83 @@ class InMemoryPlatformSecretStore(PlatformSecretStore):
     async def delete_tool(self, tool: Tool) -> bool:
         async with self._lock:
             return self._tools.pop(tool, None) is not None
+
+    # --- per-tenant overrides (Stream HX-8) ---------------------------
+
+    async def list_tenant_providers(
+        self, tenant_id: UUID | None = None
+    ) -> list[TenantProviderSecretRecord]:
+        async with self._lock:
+            return [
+                r
+                for r in self._tenant_providers.values()
+                if tenant_id is None or r.tenant_id == tenant_id
+            ]
+
+    async def upsert_tenant_provider(
+        self,
+        *,
+        tenant_id: UUID,
+        provider: Provider,
+        secret_ref: str,
+        enabled: bool,
+        actor_id: str,
+    ) -> TenantProviderSecretRecord:
+        now = _now()
+        async with self._lock:
+            existing = self._tenant_providers.get((tenant_id, provider))
+            created_at = existing.created_at if existing is not None else now
+            record = TenantProviderSecretRecord(
+                tenant_id=tenant_id,
+                provider=provider,
+                secret_ref=secret_ref,
+                enabled=enabled,
+                created_at=created_at,
+                updated_at=now,
+                updated_by=actor_id,
+            )
+            self._tenant_providers[(tenant_id, provider)] = record
+            return record
+
+    async def delete_tenant_provider(self, *, tenant_id: UUID, provider: Provider) -> bool:
+        async with self._lock:
+            return self._tenant_providers.pop((tenant_id, provider), None) is not None
+
+    async def list_tenant_tools(
+        self, tenant_id: UUID | None = None
+    ) -> list[TenantToolSecretRecord]:
+        async with self._lock:
+            return [
+                r
+                for r in self._tenant_tools.values()
+                if tenant_id is None or r.tenant_id == tenant_id
+            ]
+
+    async def upsert_tenant_tool(
+        self,
+        *,
+        tenant_id: UUID,
+        tool: Tool,
+        secret_ref: str,
+        enabled: bool,
+        actor_id: str,
+    ) -> TenantToolSecretRecord:
+        now = _now()
+        async with self._lock:
+            existing = self._tenant_tools.get((tenant_id, tool))
+            created_at = existing.created_at if existing is not None else now
+            record = TenantToolSecretRecord(
+                tenant_id=tenant_id,
+                tool=tool,
+                secret_ref=secret_ref,
+                enabled=enabled,
+                created_at=created_at,
+                updated_at=now,
+                updated_by=actor_id,
+            )
+            self._tenant_tools[(tenant_id, tool)] = record
+            return record
+
+    async def delete_tenant_tool(self, *, tenant_id: UUID, tool: Tool) -> bool:
+        async with self._lock:
+            return self._tenant_tools.pop((tenant_id, tool), None) is not None

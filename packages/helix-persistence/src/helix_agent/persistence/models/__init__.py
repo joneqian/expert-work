@@ -34,6 +34,8 @@ from helix_agent.persistence.models.platform_embedding_config import (
 from helix_agent.persistence.models.platform_secret import (
     PlatformProviderSecretRow,
     PlatformToolSecretRow,
+    TenantProviderSecretRow,
+    TenantToolSecretRow,
 )
 from helix_agent.persistence.models.role_binding import RoleBindingRow
 from helix_agent.persistence.models.run_event import RunEventRow
@@ -106,7 +108,9 @@ __all__ = [
     "TenantConfigRow",
     "TenantMcpServerRow",
     "TenantMemberRow",
+    "TenantProviderSecretRow",
     "TenantQuotaRow",
+    "TenantToolSecretRow",
     "TenantUserRow",
     "ThreadMetaRow",
     "TokenBudgetLedgerRow",

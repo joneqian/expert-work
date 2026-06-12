@@ -120,6 +120,8 @@ from helix_agent.protocol.platform_secret import (
     PlatformProviderSecretRecord,
     PlatformSecretUpsert,
     PlatformToolSecretRecord,
+    TenantProviderSecretRecord,
+    TenantToolSecretRecord,
     validate_secret_ref,
 )
 from helix_agent.protocol.provider_catalog import (
@@ -362,9 +364,11 @@ __all__ = [
     "TenantMcpServerRecord",
     "TenantMember",
     "TenantPlan",
+    "TenantProviderSecretRecord",
     "TenantQuotaPatch",
     "TenantQuotaRecord",
     "TenantStatus",
+    "TenantToolSecretRecord",
     "TenantUser",
     "ThreadMeta",
     "ThreadStatus",

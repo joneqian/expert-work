@@ -163,6 +163,7 @@ from control_plane.skill_run_usage_recorder import StoreSkillRunUsageRecorder
 from control_plane.subagent_runtime import make_child_agent_builder
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolService
+from control_plane.tenant_secret_overlay import TenantOverlayCredentialsResolver
 from control_plane.tenant_status import TenantStatusService
 from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolService
 from control_plane.workspace_lock import PgWorkspaceLock
@@ -714,8 +715,16 @@ def create_app(
                 # Stream O Mini-ADR O-9/O-10 — one CredentialsResolver over
                 # the effective (legacy-derived) catalog. The web_search /
                 # embedder / reranker callers and the consolidator aux model
-                # all resolve per-tenant credentials through it.
-                credentials_resolver = CredentialsResolver(
+                # all resolve per-tenant credentials through it. Stream HX-8:
+                # the overlay subclass resolves through the tenant-effective
+                # view (per-tenant override rows win, disabled rows suppress).
+                credentials_resolver: CredentialsResolver = TenantOverlayCredentialsResolver(
+                    tenant_provider_view=(
+                        resolved_platform_secrets_service.effective_provider_credentials_for
+                    ),
+                    tenant_tool_view=(
+                        resolved_platform_secrets_service.effective_tool_credentials_for
+                    ),
                     platform_provider_credentials=(
                         resolved_settings.effective_platform_provider_credentials
                     ),

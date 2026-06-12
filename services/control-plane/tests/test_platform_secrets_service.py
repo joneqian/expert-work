@@ -1,12 +1,21 @@
-"""Tests for :class:`PlatformSecretsService` merge logic — Stream P (P-7/P-9)."""
+"""Tests for :class:`PlatformSecretsService` merge logic — Stream P (P-7/P-9).
+
+Stream HX-8 adds the tenant-effective view tests (per-tenant override rows
+on top of the platform merge; disabled rows suppress — Mini-ADR HX-H2).
+"""
 
 from __future__ import annotations
+
+from uuid import UUID
 
 import pytest
 
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.settings import Settings
 from helix_agent.persistence.platform_secrets import InMemoryPlatformSecretStore
+
+_TENANT_A = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+_TENANT_B = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 
 
 def _settings(**overrides: object) -> Settings:
@@ -74,3 +83,75 @@ async def test_tool_merge_independent() -> None:
     svc = PlatformSecretsService(store=store, settings=_settings())
     assert (await svc.effective_tool_credentials()).get("web_search") == "kms://db/tavily"
     assert await svc.effective_provider_credentials() == {}
+
+
+# ─── tenant-effective view (Stream HX-8) ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_wins_over_platform_row() -> None:
+    store = InMemoryPlatformSecretStore()
+    await store.upsert_provider(
+        provider="anthropic", secret_ref="kms://platform/anthropic", enabled=True, actor_id="a"
+    )
+    await store.upsert_tenant_provider(
+        tenant_id=_TENANT_A,
+        provider="anthropic",
+        secret_ref="kms://tenant-a/anthropic",
+        enabled=True,
+        actor_id="a",
+    )
+    svc = PlatformSecretsService(store=store, settings=_settings())
+
+    view_a = await svc.effective_provider_credentials_for(_TENANT_A)
+    assert view_a.get("anthropic") == "kms://tenant-a/anthropic"
+    # Another tenant (no rows) falls through to the platform view untouched.
+    view_b = await svc.effective_provider_credentials_for(_TENANT_B)
+    assert view_b.get("anthropic") == "kms://platform/anthropic"
+    # The platform-global view never sees tenant rows.
+    assert (await svc.effective_provider_credentials()).get(
+        "anthropic"
+    ) == "kms://platform/anthropic"
+
+
+@pytest.mark.asyncio
+async def test_disabled_tenant_row_suppresses_without_fallback() -> None:
+    store = InMemoryPlatformSecretStore()
+    await store.upsert_provider(
+        provider="openai", secret_ref="kms://platform/openai", enabled=True, actor_id="a"
+    )
+    await store.upsert_tenant_provider(
+        tenant_id=_TENANT_A,
+        provider="openai",
+        secret_ref="kms://tenant-a/openai",
+        enabled=False,
+        actor_id="a",
+    )
+    svc = PlatformSecretsService(store=store, settings=_settings())
+
+    # HX-H2: disabled row = suppress for the tenant, NOT fall back.
+    assert "openai" not in await svc.effective_provider_credentials_for(_TENANT_A)
+    assert (await svc.effective_provider_credentials_for(_TENANT_B)).get(
+        "openai"
+    ) == "kms://platform/openai"
+
+
+@pytest.mark.asyncio
+async def test_tenant_tool_override_and_invalidate() -> None:
+    store = InMemoryPlatformSecretStore()
+    svc = PlatformSecretsService(store=store, settings=_settings())
+    assert await svc.effective_tool_credentials_for(_TENANT_A) == {}
+
+    await store.upsert_tenant_tool(
+        tenant_id=_TENANT_A,
+        tool="web_search",
+        secret_ref="kms://tenant-a/tavily",
+        enabled=True,
+        actor_id="a",
+    )
+    # TTL cache still holds the old view until invalidated.
+    assert await svc.effective_tool_credentials_for(_TENANT_A) == {}
+    svc.invalidate()
+    assert (await svc.effective_tool_credentials_for(_TENANT_A)).get(
+        "web_search"
+    ) == "kms://tenant-a/tavily"

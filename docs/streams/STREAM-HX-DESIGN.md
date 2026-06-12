@@ -646,6 +646,8 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 
 `resolve_provider/resolve_tool`：tenant getter 存在 → 直接取其返回的**最终合并视图**（合并逻辑全收在 service，HX-H3）；不存在 → 现路径字节不变。control-plane lifespan 把 `platform_secrets_service.effective_*_credentials_for` 接进来。现有 doubles（含 tools/eval）不传新参即不受影响——按协议 sweep 纪律全仓 grep 验证。
 
+> **实施修订（PR1，2026-06-12）**：`helix-common/credentials` 路径为 harness 禁写区，"resolver 加可选 kwargs" 不可实施。等价替代：control-plane 新模块 `tenant_secret_overlay.py` 的 **`TenantOverlayCredentialsResolver(CredentialsResolver)` 子类**——override `resolve_provider/resolve_tool` 直查 tenant-effective 视图（错误契约与基类 platform 路径逐字段一致：`mode="platform"` + kind + key），`app.py` 构造点换子类。helix-common 零接触，合并逻辑仍全收 service——HX-H3 语义不变且更纯。
+
 #### 9.2.4 管理 API — `/v1/platform/credentials/tenants/*`（system_admin only）
 
 | 方法 | 路径 | 行为 |

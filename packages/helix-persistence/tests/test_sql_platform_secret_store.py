@@ -103,3 +103,54 @@ async def test_tool_round_trip(
         assert await store.get_tool("web_search") is None
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_round_trip(
+    platform_secret_store: tuple[SqlPlatformSecretStore, AsyncEngine],
+) -> None:
+    """Stream HX-8: tenant override CRUD against real PG (owner connection —
+    ENABLE-only RLS exempts the owner, mirroring the service bypass path)."""
+    from uuid import UUID
+
+    tenant_a = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    tenant_b = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    store, engine = platform_secret_store
+    try:
+        created = await store.upsert_tenant_provider(
+            tenant_id=tenant_a,
+            provider="anthropic",
+            secret_ref="kms://tenant-a/anthropic",
+            enabled=True,
+            actor_id="admin",
+        )
+        assert created.tenant_id == tenant_a
+
+        # Upsert preserves created_at; can disable (HX-H2 suppress marker).
+        updated = await store.upsert_tenant_provider(
+            tenant_id=tenant_a,
+            provider="anthropic",
+            secret_ref="kms://tenant-a/rotated",
+            enabled=False,
+            actor_id="admin2",
+        )
+        assert updated.created_at == created.created_at
+        assert updated.enabled is False
+
+        await store.upsert_tenant_tool(
+            tenant_id=tenant_b,
+            tool="web_search",
+            secret_ref="kms://tenant-b/tavily",
+            enabled=True,
+            actor_id="admin",
+        )
+        # All-tenants load (service cache) vs per-tenant filter.
+        assert len(await store.list_tenant_providers()) == 1
+        assert await store.list_tenant_providers(tenant_b) == []
+        assert len(await store.list_tenant_tools(tenant_b)) == 1
+
+        assert await store.delete_tenant_provider(tenant_id=tenant_a, provider="anthropic") is True
+        assert await store.delete_tenant_provider(tenant_id=tenant_a, provider="anthropic") is False
+        assert await store.delete_tenant_tool(tenant_id=tenant_b, tool="web_search") is True
+    finally:
+        await engine.dispose()

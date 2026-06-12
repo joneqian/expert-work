@@ -12,6 +12,7 @@ rather than the design's ``platform_credential`` — same surface.
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -49,6 +50,48 @@ class PlatformToolSecretRecord(BaseModel):
     """A platform-managed external-tool credential (secret ref), as stored."""
 
     model_config = ConfigDict(extra="forbid")
+    tool: Tool
+    secret_ref: str
+    enabled: bool = True
+    created_at: datetime
+    updated_at: datetime
+    updated_by: str
+
+    @field_validator("secret_ref")
+    @classmethod
+    def _check_ref(cls, value: str) -> str:
+        return validate_secret_ref(value)
+
+
+class TenantProviderSecretRecord(BaseModel):
+    """A per-tenant provider credential override (secret ref) — Stream HX-8.
+
+    Platform-managed (system_admin writes; tenants cannot see or self-serve
+    these — Stream Y-1 BYOK removal stands). Row exists = this tenant resolves
+    the provider through its own ref; ``enabled=False`` suppresses the key for
+    the tenant entirely (mirrors the platform-row P-12 semantics — no fallback).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    tenant_id: UUID
+    provider: Provider
+    secret_ref: str
+    enabled: bool = True
+    created_at: datetime
+    updated_at: datetime
+    updated_by: str
+
+    @field_validator("secret_ref")
+    @classmethod
+    def _check_ref(cls, value: str) -> str:
+        return validate_secret_ref(value)
+
+
+class TenantToolSecretRecord(BaseModel):
+    """A per-tenant external-tool credential override (secret ref) — Stream HX-8."""
+
+    model_config = ConfigDict(extra="forbid")
+    tenant_id: UUID
     tool: Tool
     secret_ref: str
     enabled: bool = True
