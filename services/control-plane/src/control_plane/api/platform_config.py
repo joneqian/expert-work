@@ -18,7 +18,9 @@ paths); the HTTP surface keeps the design's ``/v1/platform/credentials`` path.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Annotated, cast
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator, model_validator
@@ -32,6 +34,7 @@ from control_plane.api.tenant_config import (
 )
 from control_plane.audit import emit
 from control_plane.platform_secrets import PlatformSecretsService
+from control_plane.tenancy import TenantConfigNotConfiguredError
 from control_plane.tenant_scope import bypass_rls_session
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.persistence import PlatformSecretStore
@@ -133,6 +136,20 @@ def _require_system_admin(principal: Principal) -> None:
         )
 
 
+async def _require_tenant(request: Request, tenant_id: UUID) -> None:
+    """404 unless the tenant exists (Stream HX-8 tenant override endpoints)."""
+    service = getattr(request.app.state, "tenant_config_service", None)
+    if service is None:
+        return
+    try:
+        await service.get(tenant_id=tenant_id)
+    except TenantConfigNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "TENANT_NOT_FOUND", "message": f"tenant {tenant_id} not found"},
+        ) from exc
+
+
 def _env_provider_refs(request: Request) -> dict[Provider, str]:
     settings = getattr(request.app.state, "settings", None)
     if settings is None:
@@ -167,6 +184,10 @@ def build_platform_config_router() -> APIRouter:
         async with bypass_rls_session():
             db_provs = {row.provider: row for row in await store.list_providers()}
             db_tools = {row.tool: row for row in await store.list_tools()}
+            tenant_prov_counts = Counter(
+                row.provider for row in await store.list_tenant_providers()
+            )
+            tenant_tool_counts = Counter(row.tool for row in await store.list_tenant_tools())
             specs = (
                 await agent_store.list_all_tenants(status=None, limit=1000)
                 if agent_store is not None
@@ -189,6 +210,7 @@ def build_platform_config_router() -> APIRouter:
                     db_provs[provider].enabled if provider in db_provs else provider in env_provs
                 ),
                 "used_by_agents": prov_counts.get(provider, 0),
+                "tenant_override_count": tenant_prov_counts.get(provider, 0),
             }
             for provider in PROVIDER_CATALOG
         ]
@@ -201,6 +223,7 @@ def build_platform_config_router() -> APIRouter:
                 ),
                 "enabled": db_tools[tool].enabled if tool in db_tools else tool in env_tools,
                 "used_by_agents": tool_counts.get(tool, 0),
+                "tenant_override_count": tenant_tool_counts.get(tool, 0),
             }
             for tool in TOOL_CATALOG
         ]
@@ -378,6 +401,220 @@ def build_platform_config_router() -> APIRouter:
             action=AuditAction.PLATFORM_TOOL_CREDENTIAL_DELETE,
             key=tool,
             details={},
+        )
+
+    # --- per-tenant overrides (Stream HX-8) ---------------------------
+
+    @router.get("/tenants/{tenant_id}")
+    async def get_tenant_overrides(
+        tenant_id: UUID,
+        principal: Annotated[Principal, Depends(_principal)],
+        store: Annotated[PlatformSecretStore, Depends(_get_store)],
+        request: Request,
+    ) -> dict[str, object]:
+        """Per-tenant override view: every catalog key with its override row
+        (if any) and the tenant-effective source (tenant / suppressed /
+        db / env / unset). Refs + flags only — no secret values."""
+        _require_system_admin(principal)
+        await _require_tenant(request, tenant_id)
+        env_provs = _env_provider_refs(request)
+        env_tools = _env_tool_refs(request)
+        async with bypass_rls_session():
+            db_provs = {row.provider: row for row in await store.list_providers()}
+            db_tools = {row.tool: row for row in await store.list_tools()}
+            t_provs = {row.provider: row for row in await store.list_tenant_providers(tenant_id)}
+            t_tools = {row.tool: row for row in await store.list_tenant_tools(tenant_id)}
+
+        def _provider_entry(provider: Provider) -> dict[str, object]:
+            override = t_provs.get(provider)
+            if override is not None:
+                source = "tenant" if override.enabled else "suppressed"
+                effective = override.secret_ref if override.enabled else None
+            elif provider in db_provs and db_provs[provider].enabled:
+                source, effective = "db", db_provs[provider].secret_ref
+            elif provider in db_provs:
+                source, effective = "suppressed", None
+            elif provider in env_provs:
+                source, effective = "env", env_provs[provider]
+            else:
+                source, effective = "unset", None
+            return {
+                "provider": provider,
+                "override": override.model_dump(mode="json") if override is not None else None,
+                "effective_source": source,
+                "effective_ref": effective,
+            }
+
+        def _tool_entry(tool: Tool) -> dict[str, object]:
+            override = t_tools.get(tool)
+            if override is not None:
+                source = "tenant" if override.enabled else "suppressed"
+                effective = override.secret_ref if override.enabled else None
+            elif tool in db_tools and db_tools[tool].enabled:
+                source, effective = "db", db_tools[tool].secret_ref
+            elif tool in db_tools:
+                source, effective = "suppressed", None
+            elif tool in env_tools:
+                source, effective = "env", env_tools[tool]
+            else:
+                source, effective = "unset", None
+            return {
+                "tool": tool,
+                "override": override.model_dump(mode="json") if override is not None else None,
+                "effective_source": source,
+                "effective_ref": effective,
+            }
+
+        return {
+            "success": True,
+            "data": {
+                "tenant_id": str(tenant_id),
+                "providers": [_provider_entry(p) for p in PROVIDER_CATALOG],
+                "tools": [_tool_entry(t) for t in TOOL_CATALOG],
+            },
+            "error": None,
+        }
+
+    @router.put("/tenants/{tenant_id}/providers/{provider}")
+    async def upsert_tenant_provider(
+        tenant_id: UUID,
+        provider: str,
+        payload: PlatformSecretWrite,
+        principal: Annotated[Principal, Depends(_principal)],
+        store: Annotated[PlatformSecretStore, Depends(_get_store)],
+        service: Annotated[PlatformSecretsService, Depends(_get_service)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
+        request: Request,
+    ) -> dict[str, object]:
+        _require_system_admin(principal)
+        if provider not in PROVIDER_CATALOG:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "UNKNOWN_PROVIDER",
+                    "message": f"provider {provider!r} not in catalog",
+                },
+            )
+        await _require_tenant(request, tenant_id)
+        secret_ref = await _resolve_write_ref(
+            payload, secret_store, name=f"helix-agent/platform/tenant/{tenant_id}/llm/{provider}"
+        )
+        async with bypass_rls_session():
+            row = await store.upsert_tenant_provider(
+                tenant_id=tenant_id,
+                provider=cast(Provider, provider),
+                secret_ref=secret_ref,
+                enabled=payload.enabled,
+                actor_id=principal.subject_id,
+            )
+        service.invalidate()
+        await _emit_platform_audit(
+            audit,
+            principal=principal,
+            action=AuditAction.PLATFORM_PROVIDER_CREDENTIAL_TENANT_UPSERT,
+            key=provider,
+            details={
+                "tenant_id": str(tenant_id),
+                "enabled": payload.enabled,
+                "secret_ref": secret_ref,
+            },
+        )
+        return {"success": True, "data": row.model_dump(mode="json"), "error": None}
+
+    @router.put("/tenants/{tenant_id}/tools/{tool}")
+    async def upsert_tenant_tool(
+        tenant_id: UUID,
+        tool: str,
+        payload: PlatformSecretWrite,
+        principal: Annotated[Principal, Depends(_principal)],
+        store: Annotated[PlatformSecretStore, Depends(_get_store)],
+        service: Annotated[PlatformSecretsService, Depends(_get_service)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
+        request: Request,
+    ) -> dict[str, object]:
+        _require_system_admin(principal)
+        if tool not in TOOL_CATALOG:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "UNKNOWN_TOOL", "message": f"tool {tool!r} not in catalog"},
+            )
+        await _require_tenant(request, tenant_id)
+        secret_ref = await _resolve_write_ref(
+            payload, secret_store, name=f"helix-agent/platform/tenant/{tenant_id}/tool/{tool}"
+        )
+        async with bypass_rls_session():
+            row = await store.upsert_tenant_tool(
+                tenant_id=tenant_id,
+                tool=cast(Tool, tool),
+                secret_ref=secret_ref,
+                enabled=payload.enabled,
+                actor_id=principal.subject_id,
+            )
+        service.invalidate()
+        await _emit_platform_audit(
+            audit,
+            principal=principal,
+            action=AuditAction.PLATFORM_TOOL_CREDENTIAL_TENANT_UPSERT,
+            key=tool,
+            details={
+                "tenant_id": str(tenant_id),
+                "enabled": payload.enabled,
+                "secret_ref": secret_ref,
+            },
+        )
+        return {"success": True, "data": row.model_dump(mode="json"), "error": None}
+
+    @router.delete("/tenants/{tenant_id}/providers/{provider}", status_code=204)
+    async def delete_tenant_provider(
+        tenant_id: UUID,
+        provider: str,
+        principal: Annotated[Principal, Depends(_principal)],
+        store: Annotated[PlatformSecretStore, Depends(_get_store)],
+        service: Annotated[PlatformSecretsService, Depends(_get_service)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> None:
+        # Deleting an override just falls the tenant back to the platform
+        # view — never an outage by itself, so no in-use guard (unlike the
+        # platform-row delete above).
+        _require_system_admin(principal)
+        async with bypass_rls_session():
+            deleted = await store.delete_tenant_provider(
+                tenant_id=tenant_id, provider=cast(Provider, provider)
+            )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="tenant provider override not found")
+        service.invalidate()
+        await _emit_platform_audit(
+            audit,
+            principal=principal,
+            action=AuditAction.PLATFORM_PROVIDER_CREDENTIAL_TENANT_DELETE,
+            key=provider,
+            details={"tenant_id": str(tenant_id)},
+        )
+
+    @router.delete("/tenants/{tenant_id}/tools/{tool}", status_code=204)
+    async def delete_tenant_tool(
+        tenant_id: UUID,
+        tool: str,
+        principal: Annotated[Principal, Depends(_principal)],
+        store: Annotated[PlatformSecretStore, Depends(_get_store)],
+        service: Annotated[PlatformSecretsService, Depends(_get_service)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> None:
+        _require_system_admin(principal)
+        async with bypass_rls_session():
+            deleted = await store.delete_tenant_tool(tenant_id=tenant_id, tool=cast(Tool, tool))
+        if not deleted:
+            raise HTTPException(status_code=404, detail="tenant tool override not found")
+        service.invalidate()
+        await _emit_platform_audit(
+            audit,
+            principal=principal,
+            action=AuditAction.PLATFORM_TOOL_CREDENTIAL_TENANT_DELETE,
+            key=tool,
+            details={"tenant_id": str(tenant_id)},
         )
 
     return router

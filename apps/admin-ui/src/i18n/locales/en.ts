@@ -570,6 +570,21 @@ export interface TranslationKeys {
     saved: string;
     deleted: string;
     unset_ref: string;
+    col_tenant_overrides: string;
+    tenant_overrides_btn: string;
+    tenant_drawer_title: string;
+    tenant_drawer_hint: string;
+    tenant_select_label: string;
+    tenant_select_placeholder: string;
+    col_effective: string;
+    tenant_source_tenant: string;
+    tenant_source_suppressed: string;
+    tenant_source_db: string;
+    tenant_source_env: string;
+    tenant_source_unset: string;
+    override_btn: string;
+    delete_override_confirm: string;
+    edit_override_modal_title: string;
     embedding_heading: string;
     embedding_current: string;
     embedding_unconfigured: string;
@@ -1754,6 +1769,22 @@ const en: TranslationKeys = {
     saved: "Credential saved.",
     deleted: "Credential deleted.",
     unset_ref: "not set",
+    col_tenant_overrides: "Tenant overrides",
+    tenant_overrides_btn: "Tenant overrides",
+    tenant_drawer_title: "Per-tenant credential overrides",
+    tenant_drawer_hint:
+      "Overrides are platform-procured and platform-managed; tenants never see them. A disabled override suppresses the key for the tenant (no fallback).",
+    tenant_select_label: "Tenant",
+    tenant_select_placeholder: "Select a tenant…",
+    col_effective: "Effective",
+    tenant_source_tenant: "override",
+    tenant_source_suppressed: "suppressed",
+    tenant_source_db: "platform (db)",
+    tenant_source_env: "platform (env)",
+    tenant_source_unset: "unset",
+    override_btn: "Override",
+    delete_override_confirm: "Remove this override? The tenant falls back to the platform credential.",
+    edit_override_modal_title: "Edit tenant override for {{key}}",
     embedding_heading: "Embedding & Rerank",
     embedding_current: "Current",
     embedding_unconfigured:
