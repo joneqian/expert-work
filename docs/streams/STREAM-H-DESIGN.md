@@ -1428,6 +1428,58 @@ SDK 增参:`ListRunsParams + agentName/agentVersion`、`ListSkillsParams + creat
 
 ---
 
+## 6.9 H.7 详细设计 — Knowledge 知识库治理面
+
+> 2026-06-12 设计先行(前端债第 3 项,顺序 H.8→H.7→H.9)。后端 `/v1/knowledge`(`knowledge.py`,Stream J.5)
+> 已全发——bases + documents CRUD + 异步 ingest;H.7 = 纯前端消费,后端零改。
+
+### 6.9.1 现状取证(2026-06-12,file:line)
+
+| 事实 | 位置 | 影响 |
+|---|---|---|
+| 6 端点全 **raw** | `knowledge.py:92-201` | SDK 走 `apiClient`,不走 `getJson` |
+| bases **租户级共享**(非 per-user)——docstring 明示 "tenant-scoped (shared, not per-user)" | `:3` | 治理面无 H.8 的 per-user 约束,租户 admin 全功能 |
+| **router 不读 `tenant_id` query**,全部直接 `request.state.tenant_id`(JWT home 租户);无 Stream N 跨租户支持 | `:98/:126/:136/:149/:184/:196` | 前端 TenantScope 切换对此页**无效**——必须如实处理(H-19),不能让 `*` 视图静默显示 home 数据冒充全平台 |
+| POST /bases:201;409 重名;400 `overlap >= max`;chunk 参数缺省走 DEFAULT_* | `:92-119` | create modal 两个可选数字字段 + 错误映射 |
+| base dict:id/name/chunk_max_tokens/chunk_overlap_tokens/created_at | `:60-67` | 列表列 |
+| POST documents:multipart `file`;**202 异步**——记 pending 交 IngestionRunner,调用方轮询;400 无文件名/扩展名不在白名单;**503 无 embedder** | `:141-176` | Upload 组件 + 轮询 + 503 文案(指向平台 embedder 配置) |
+| 扩展白名单:`.pdf .docx .pptx .xlsx .md .markdown .txt .html .htm .csv` | `parsing.py:21-23` | Upload `accept` + 前端预校验 |
+| document dict:id/filename/**status**(pending/ingesting/ready/failed)/error/chunk_count/created_at/updated_at | `:70-79` / `protocol/knowledge.py:31-34` | status Tag 色板 + failed 行 error tooltip |
+| DELETE base/document:204;document 404 | `:130-139/:189-201` | Popconfirm(删库提示连带文档) |
+
+### 6.9.2 设计
+
+**SDK `src/api/knowledge.ts`(新,全 raw)**:`KnowledgeBase` / `KnowledgeDocument` / `DocumentStatus` / `listBases()` / `createBase({name, chunkMaxTokens?, chunkOverlapTokens?})` / `deleteBase(name)` / `uploadDocument(baseName, file)`(FormData)/ `listDocuments(baseName)` / `deleteDocument(baseName, documentId)`。
+
+**页面 `/knowledge`(`KnowledgeAdmin.tsx`,单页 master-detail,H-17)**:
+- 左:bases 表(name / chunk 参数 / created_at——列表端点无文档计数,不造假列)+ Create modal(name 必填 + 两个可选数字,400/409 错误映射)+ Delete Popconfirm(明示连带删除文档与向量)。
+- 右(选中 base):documents 表(filename / status Tag:pending=default、ingesting=processing、ready=success、failed=error / chunk_count / updated_at / failed 行 error tooltip + 行删除)+ Upload(antd Upload,`accept` 白名单,beforeUpload 前端预校验,202 后立即入列表)。
+- **轮询(H-18)**:选中 base 的 documents 含 pending/ingesting 时 5s 间隔刷新,全终态停;切 base/卸载清 timer。
+- **租户语义(H-19)**:页面不传 TenantScope;副标题明示"知识库按当前登录租户";全局 scope=`*` 或他租户时顶部 info Alert 提示本页不随 scope 切换,操作仍指向 home 租户。
+- 错误映射:409(重名)/ 400(overlap/扩展名)/ 503(embedder 未配置——指向平台配置)/ 404。
+
+**接线(SE-8 清单)**:router `/knowledge`;Sidebar 主区 artifacts 后(`BookOpen` icon);CommandPalette(`g k`);i18n zh/en `knowledge_page.*` + `nav.knowledge` + `cmdk.label_knowledge`;Storybook 3 stories;vitest;Playwright 冒烟。
+
+### 6.9.3 Mini-ADR
+
+- **H-17 单页 master-detail,不设 base detail 路由**:base 本体仅 5 字段,核心信息是其 documents;两层路由对 5 字段实体是过度结构。
+- **H-18 ingest 进度 = 条件轮询**:后端 202 + 无推送通道;有未终态文档才轮询(5s),全终态停——不常驻轮询、不造假 SSE。
+- **H-19 如实声明单租户边界**:后端 router 无 `tenant_id` query 支持,前端把 scope=`*` 静默映射到 home 数据 = 冒充全平台视图。页面脱离 TenantScope + 明示语义;跨租户 knowledge 治理需后端支持,记 **H.7-F1 follow-up**(与 H.8-F1 同性质:后端能力变更另立项)。
+
+### 6.9.4 测试
+
+- vitest:bases 渲染 + create modal(成功/409 文案)+ delete 确认;documents 渲染(4 态 Tag + failed error tooltip)+ upload 调 SDK + 非白名单扩展前端拦截;轮询(未终态启动/全终态停,fake timers);scope Alert(`*` 时现身)。
+- Storybook 3;Playwright:登录 → /knowledge 渲染冒烟。
+
+### 6.9.5 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0(本设计) | § 6.9 + ITERATION-PLAN H.7 细化 | 纯 docs,CI |
+| PR1(实现,收尾) | SDK + KnowledgeAdmin(master-detail + upload + 轮询)+ 全接线 + i18n + Storybook + vitest + Playwright | § 6.9.4;零债 6 条 |
+
+---
+
 ## 6. PR 链(预估)
 
 | PR | 内容 | 估时 |
@@ -1494,6 +1546,7 @@ SDK 增参:`ListRunsParams + agentName/agentVersion`、`ListSkillsParams + creat
 | 2026-05-26 | v1.7 | **H.3 收尾**:6 个 PR 全部合入 main(#289–#294);新增 § 6.5.18 H.3 收尾摘要 — 决议 A–F 全部兑现、设计文档 § 6.5.13 漏交的 2 个 story(EventStreamPanel + ApprovalCard)在收尾 PR 补齐;遗留待办全部归类到 M0 dogfood / H.4 收尾(approval 完整 E2E、RunsList mockup、ApprovalCard 编辑态 mockup) |
 | 2026-05-26 | v1.8 | **H.4 设计基线**:加 § 6.6 H.4 详细设计(18 子章节,复刻 § 6.5 范式)— 范围 7 子面(Curation+Eval / Memory / Skills / Triggers / Audit / Settings IAM / Settings Ops)+ Audit backend endpoint 新建 + 跨租户 RBAC matrix + 错误边界矩阵(12 条)+ i18n 8 namespace ~130 keys + 测试计划(backend 10 测 + frontend 45 单测 + 33 stories + E2E 7 happy-path)。锁定 4 个 spike 结果:(1) Trigger webhook secret 回包 schema 已有 — PR6 backend 不需改;(2) ResourceType Literal 双份漂移 — PR3 必须改 `protocol/audit.py:146` + `control-plane/audit.py:111` 两处;(3) audit_logger fixture pattern = 每测试自建,不走 conftest — PR3 遵循同型;(4) RoleBinding self-elevation 已被 DTO + caller 双重保护 — PR7 backend 不需改。PR 链拆 PR8-12(原 5 个 H.4 PR)为 PR8-17(10 个 PR:1 设计 + 8 实施 + 1 收尾),总估时 14-18 天。|
 | 2026-06-12 | v2.0 | **H.6 详细设计**(前端债回填,用户拍板 H.6 起手,H.7–H.9 顺序后定):加 § 6.7 — AgentDetail 4 tab 真实现;现状取证 12 条 file:line(含 envelope-vs-raw 逐端点核实:runs/memory=envelope、skills/triggers=raw);后端过滤前置 = thread_ids 两段式(H-10,不做 SQL JOIN——InMemoryRunStore 无 thread_meta 视野,protocol 两 impl 同义优先)+ skills agent-authored 语义(H-11,created_by_agent_name 列已在)+ triggers 补 version + Memory 不造 agent 维度(H-13,per-user 资产语义事实);2-PR 切分(backend 过滤 / frontend 4 tab 收尾) |
+| 2026-06-12 | v2.4 | **H.7 详细设计**(前端债第 3 项):加 § 6.9 — Knowledge 治理面;取证 9 条(6 端点全 raw / bases 租户级共享 / **router 不读 tenant_id query——TenantScope 对此页无效**);Mini-ADR H-17 单页 master-detail / H-18 ingest 条件轮询(202+无推送,不造假 SSE)/ H-19 如实声明单租户边界(scope=`*` 静默映射 home = 冒充全平台,记 H.7-F1 follow-up);纯前端 2-PR |
 | 2026-06-12 | v2.3 | **H.8 收尾**:PR1 全交付——SDK `artifacts.ts`(5 方法全 raw + `filenameFromDisposition` RFC 5987)+ ArtifactsList 双态(H-14 兑现:cross-tenant 无行动作、kind 退化 Tag)+ versions 抽屉(NULL digest "—" + 懒回填 tooltip)+ download blob(H-15)/软删/kind 内联 Select(H-16 前端拦 no-op)+ 全接线(router/Sidebar/CommandPalette `g f`/i18n 双语)+ Storybook 3 + vitest 9(页面 5 + disposition 解析 4)+ Playwright `artifacts.spec.ts`。设计 § 6.8 全兑现无偏差;H.8-F1(租户 admin 代管)留 follow-up |
 | 2026-06-12 | v2.2 | **H.8 详细设计**(前端债第 2 项,顺序 H.8→H.7→H.9):加 § 6.8 — Artifacts 治理面;现状取证 9 条(5 端点全 raw / **全端点 caller-user-scoped + 404 隐藏**是 J-25 契约事实);Mini-ADR H-14 如实双态(home=我的产物全功能 / cross-tenant=只读聚合无行动作),"租户 admin 代管他人产物"记 H.8-F1 follow-up 不混入;H-15 download=axios blob(Bearer header 约束);H-16 kind 内联 Select 前端拦 no-op;纯前端 2-PR(设计 + 实现收尾) |
 | 2026-06-12 | v2.1 | **H.6 收尾**:PR1(#582)backend 过滤全交付(三 store 过滤 + thread_ids 空集≠None 语义 + 3 端点 + `thread_window_capped` + 422 防呆 + 测试 +15);PR2 frontend 全交付(SDK 增参 + RunsTab/SkillsTab/TriggersTab/MemoryTab + AgentDetail 去占位接线 + i18n zh/en 4 namespace + Storybook 5 stories + vitest 7 测 + Playwright `agent-detail-tabs.spec.ts`)。占位 Empty 仅余 unknown-tab fallback。设计 § 6.7 全兑现无偏差;遗留:H-10 SQL JOIN 仍是 M2 优化接缝(cap 500 生效中) |

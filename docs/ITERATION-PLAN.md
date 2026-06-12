@@ -342,7 +342,10 @@
   - [x] **H.6 设计先行**（#581）：STREAM-H-DESIGN § 6.7 详设——现状取证 12 条 file:line（envelope-vs-raw 逐端点核实）+ 4 条 Mini-ADR（H-10~H-13）+ 2-PR 切分
   - [x] **H.6 PR1（backend，#582）**：ThreadMetaStore agent 过滤 + RunStore thread_ids（空集≠None）+ SkillStore created_by_agent_name + TriggerStore agent_version + 3 端点 query params + `thread_window_capped` 信号 + version 单给 422 + 测试 +15
   - [x] **H.6 PR2（frontend，收尾）**：SDK 增参（listRuns agentName/agentVersion / listSkills createdByAgentName / listTriggers agentVersion + RunList.thread_window_capped）+ RunsTab（status 过滤+cap Alert+行跳 run detail）/ SkillsTab（agent-authored+行跳 skill detail）/ TriggersTab（version-bound+enabled Badge）/ MemoryTab（kind 过滤+user-scope 明示 H-13）+ AgentDetail 接线去占位 + i18n 双语 4 namespace + Storybook 5 stories + vitest 7 测 + Playwright tab 冒烟；零债 6 条
-- [ ] **H.7 Knowledge 知识库治理面** — 后端 `/v1/knowledge`（`bases` + `documents` 全 CRUD，`knowledge.py:90`）已发，前端无 SDK、无页面。M1+。
+- [ ] **H.7 Knowledge 知识库治理面** — 后端 `/v1/knowledge`（bases+documents CRUD+异步 ingest，`knowledge.py:92`）已发，前端无 SDK、无页面。详设 [STREAM-H-DESIGN § 6.9](./streams/STREAM-H-DESIGN.md)：单页 master-detail（H-17）+ ingest 条件轮询（H-18)+ 单租户边界如实声明（H-19，router 无跨租户支持）。M1+。
+  - [x] **H.7 设计先行**：§ 6.9 详设——取证 9 条 file:line + Mini-ADR H-17~H-19 + 纯前端 2-PR
+  - [ ] **H.7 PR1（实现，收尾）**：SDK knowledge.ts + KnowledgeAdmin（bases master + documents detail + Upload 白名单 + 4 态轮询）+ router/Sidebar/CommandPalette/i18n/Storybook/vitest/Playwright；零债 6 条
+  - [ ] **H.7-F1 follow-up（后端能力，另立项）**：knowledge 跨租户治理（router 加 tenant_id query + Stream N 接线）
 - [x] **H.8 Artifacts 运行产物治理面** — **已交付**（2026-06-12，#584 设计 / PR1）。后端 `/v1/artifacts` 零改，纯前端消费。详设 [STREAM-H-DESIGN § 6.8](./streams/STREAM-H-DESIGN.md)。
   - [x] **H.8 设计先行**（#584）：§ 6.8 详设——取证 9 条 file:line + Mini-ADR H-14~H-16 + 纯前端 2-PR
   - [x] **H.8 PR1（实现，收尾）**：SDK artifacts.ts（5 方法全 raw + `filenameFromDisposition` RFC 5987 解析）+ ArtifactsList 双态（home=我的产物全功能 / cross-tenant=只读聚合带 tenant/user 列无行动作，H-14）+ versions 抽屉（NULL digest 显 "—"）+ download（axios blob+objectURL，H-15）/delete（软删 Popconfirm）/patch（kind 内联 Select，同值不发请求 H-16）+ router `/artifacts` + Sidebar + CommandPalette（g f）+ i18n 双语 + Storybook 3 stories + vitest 9 测 + Playwright 冒烟
