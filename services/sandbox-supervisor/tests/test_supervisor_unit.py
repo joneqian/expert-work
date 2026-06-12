@@ -43,6 +43,7 @@ from sandbox_supervisor.pool import (
     POOL_TENANT_ID,
     PoolReplenisher,
     SandboxPool,
+    prefetch_images,
 )
 from sandbox_supervisor.quota_enforcer import QuotaEnforcer
 from sandbox_supervisor.reaper import SandboxReaper
@@ -102,6 +103,8 @@ class RecordingDockerClient:
         measured_size: int = 0,
         measure_error: DockerError | None = None,
         update_error: DockerError | None = None,
+        existing_images: set[str] | None = None,
+        pull_error: DockerError | None = None,
     ) -> None:
         self.launches: list[list[str]] = []
         self.removed: list[str] = []
@@ -117,6 +120,9 @@ class RecordingDockerClient:
         self.measure_calls: list[tuple[str, str]] = []
         self._update_error = update_error
         self.limit_updates: list[tuple[str, float, int, int]] = []
+        self._existing_images = existing_images if existing_images is not None else set()
+        self._pull_error = pull_error
+        self.pulled: list[str] = []
 
     async def launch(self, argv: list[str]) -> FakeRunnerLink:
         self.launches.append(argv)
@@ -157,6 +163,15 @@ class RecordingDockerClient:
         self.limit_updates.append((container_name, cpus, memory_mb, pids_limit))
         if self._update_error is not None:
             raise self._update_error
+
+    async def image_exists(self, image: str) -> bool:
+        return image in self._existing_images
+
+    async def pull_image(self, image: str) -> None:
+        if self._pull_error is not None:
+            raise self._pull_error
+        self.pulled.append(image)
+        self._existing_images.add(image)
 
 
 class InMemorySandboxStore:
@@ -1357,3 +1372,60 @@ async def test_released_pooled_claim_is_destroyed_like_any_ephemeral() -> None:
     row = h.store.rows[response.sandbox_id]
     assert row.state is SandboxState.DESTROYED
     assert row.destroy_reason == "release"
+
+
+# ---------------------------------------------------------------------------
+# Stream HX-6 PR2 — image prefetch + READY gauge
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_prefetch_pulls_missing_images() -> None:
+    docker = RecordingDockerClient()
+    settings = SandboxSupervisorSettings(
+        sandbox_image="helix-sandbox:dev", sandbox_image_office="helix-sandbox-office:dev"
+    )
+
+    await prefetch_images(docker, settings)
+
+    assert docker.pulled == ["helix-sandbox:dev", "helix-sandbox-office:dev"]
+
+
+@pytest.mark.asyncio
+async def test_prefetch_skips_present_images() -> None:
+    docker = RecordingDockerClient(
+        existing_images={"helix-sandbox:dev", "helix-sandbox-office:dev"}
+    )
+
+    await prefetch_images(docker, SandboxSupervisorSettings())
+
+    assert docker.pulled == []
+
+
+@pytest.mark.asyncio
+async def test_prefetch_pull_failure_is_fail_open() -> None:
+    # A registry failure must not raise out of the prefetch task — the
+    # other image is still attempted and docker run pulls on demand.
+    docker = RecordingDockerClient(pull_error=DockerError("registry unreachable"))
+
+    await prefetch_images(docker, SandboxSupervisorSettings())
+
+    assert docker.pulled == []
+
+
+@pytest.mark.asyncio
+async def test_replenisher_sets_ready_gauge_per_variant() -> None:
+    from sandbox_supervisor.pool import _pool_ready
+
+    pool = SandboxPool()
+    h = _harness(pool=pool)
+    await _replenisher(h, pool, pool_size_minimal=2, pool_size_office=0).run_once()
+
+    assert float(_pool_ready.labels(variant="minimal")._value.get()) == 2.0  # type: ignore[attr-defined]
+    assert float(_pool_ready.labels(variant="office")._value.get()) == 0.0  # type: ignore[attr-defined]
+
+    # A claim drains one; the next sweep re-records the lower level
+    # (target raced down to 1 keeps the claimed one out of the pool).
+    await h.supervisor.acquire(_acquire_request())
+    await _replenisher(h, pool, pool_size_minimal=1, pool_size_office=0).run_once()
+    assert float(_pool_ready.labels(variant="minimal")._value.get()) == 1.0  # type: ignore[attr-defined]

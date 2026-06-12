@@ -112,3 +112,14 @@ groups:
       # uniform helix:sli:* dashboards; alert on sustained growth.
       - record: helix:sli:approvals_pending:current
         expr: helix_control_plane_approvals_pending
+
+      # Sandbox warm-pool hit ratio (Stream HX-6, SLO #13): of ephemeral
+      # acquires that consulted the pool, how many claimed a READY
+      # container. NaN when the pool saw no traffic in the window.
+      # SLO #4's M1 acceptance reads this together with
+      # helix_sandbox_pool_ready and the cold-start P95.
+      - record: helix:sli:sandbox_pool_hit:ratio1h
+        expr: |
+          sum(rate(helix_sandbox_pool_total{event="hit"}[1h]))
+          /
+          sum(rate(helix_sandbox_pool_total{event=~"hit|miss"}[1h]))

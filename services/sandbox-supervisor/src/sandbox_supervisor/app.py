@@ -44,7 +44,7 @@ from sandbox_supervisor.domain import (
     WorkspaceQuotaExceededError,
 )
 from sandbox_supervisor.lifecycle import VolumeLifecycleManager
-from sandbox_supervisor.pool import PoolReplenisher, SandboxPool
+from sandbox_supervisor.pool import PoolReplenisher, SandboxPool, prefetch_images
 from sandbox_supervisor.quota_enforcer import QuotaEnforcer
 from sandbox_supervisor.reaper import SandboxReaper
 from sandbox_supervisor.schemas import (
@@ -181,6 +181,13 @@ def create_app(
                     settings=resolved_settings,
                 )
                 tasks.append(asyncio.create_task(replenisher.run_forever(stop)))
+            # Stream HX-6 PR2 (Mini-ADR HX-F4) — startup image prefetch.
+            # A background task so readiness never waits on a registry;
+            # best-effort (docker run pulls on demand anyway). Runs even
+            # with the pool off — it is the one warm-path piece that
+            # also helps the persistent-workspace first touch.
+            prefetch_task = asyncio.create_task(prefetch_images(docker, resolved_settings))
+            tasks.append(prefetch_task)
             logger.info(
                 "sandbox_supervisor.start reaper=%s lifecycle=%s backup_hour=%d "
                 "pool_minimal=%d pool_office=%d",
@@ -194,6 +201,9 @@ def create_app(
                 yield
             finally:
                 stop.set()
+                # An in-flight docker pull can run for minutes — cancel
+                # rather than wait; the next boot's prefetch retries.
+                prefetch_task.cancel()
                 if tasks:
                     # gather (not a bare ``await``) so CodeQL does not
                     # misread the awaits as ineffectual statements.

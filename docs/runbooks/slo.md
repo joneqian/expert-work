@@ -13,7 +13,7 @@
 | 1 | 控制平面 API 可用性 | ≥ 99.9% | 30d | `helix_control_plane_http_requests_total` | ✅ 指标已 emit |
 | 2 | 控制平面 API P99 延迟 | < 200ms | 30d | `helix_control_plane_http_request_duration_seconds` | ✅ 指标已 emit |
 | 3 | Session TTFT P95 | < 1.5s | 30d | `helix_session_ttft_seconds` | ✅ 指标已 emit（K10） |
-| 4 | Sandbox 冷启动 P95 | < 3s（M0）/ < 500ms（M1 warm pool） | 30d | `helix_sandbox_cold_start_seconds` | ✅ 指标已 emit（K10） |
+| 4 | Sandbox 冷启动 P95 | < 3s（M0）/ < 500ms（M1 warm pool，临时沙盒池命中路径） | 30d | `helix_sandbox_cold_start_seconds`；M1 验收并读池命中率 `helix:sli:sandbox_pool_hit:ratio1h` + `helix_sandbox_pool_ready` | ✅ 指标已 emit（K10）；池指标已 emit（HX-6） |
 | 5 | Durable resume P95 | < 1.5s | 30d | `helix_durable_resume_seconds` | ✅ 指标已 emit（K10）|
 | 6 | Memory recall@5（zh+en） | ≥ 0.7（M1 against real embedder） | 单测 | `tools/eval/memory_recall.py` | ✅ 框架 + seed set 已 ship（K12）|
 | 7 | Session end-to-end P95（outcome=success）| < 30s（M0 Gate）| 30d | `helix_session_duration_seconds{outcome="success"}` | ✅ 指标已 emit（Stream M Gate follow-up）|
@@ -22,6 +22,7 @@
 | 10 | Token 估算漂移比 | ~1.0 ± 0.15（观察性，非告警线） | 7d | `helix_hx_token_estimated_total` / `helix_llm_token_usage_total{type=~"input\|cache_.*"}` | ✅ 指标已 emit（HX-1），rule 已落（HX-4） |
 | 11 | Checkpoint IO P95（per op） | TBD | 30d | `helix_checkpoint_op_seconds{op}` | ✅ 指标已 emit（HX-4） |
 | 12 | Pending approvals 积压 | 告警线 TBD（持续增长告警，M1 Alertmanager） | 即时 | `helix_control_plane_approvals_pending` gauge | ✅ 指标已 emit（HX-4） |
+| 13 | Sandbox 池命中率（临时沙盒） | TBD（基线数据未到；池仅覆盖无 user_id acquire——持久用户首触不可池化，Mini-ADR HX-F2） | 30d | `helix_sandbox_pool_total{event=hit/miss}` → `helix:sli:sandbox_pool_hit:ratio1h` | ✅ 指标已 emit（HX-6），rule 已落 |
 
 > ⏳ 的三条 SLO 在 M0 已**定义**，但对应指标尚未在 M0 代码路径 emit（orchestrator session 指标、sandbox 冷启动指标、durable resume 指标分属后续 Stream）。
 > 其 recording rule 随指标落地补入 `tools/observability/rules/sli.yml` —— 本阶段不写引用空指标的惰性规则。
