@@ -19,12 +19,14 @@ on:
     paths:
       - "infra/sandbox-image-office/**"
       - "infra/sandbox-image/runner.py" # shared, baked into the office image
+      - ".trivyignore"
       - ".github/workflows/sandbox-image-office.yml"
   pull_request:
     branches: [main]
     paths:
       - "infra/sandbox-image-office/**"
       - "infra/sandbox-image/runner.py"
+      - ".trivyignore"
       - ".github/workflows/sandbox-image-office.yml"
   workflow_dispatch:
 
@@ -33,9 +35,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Least privilege: this job builds an attacker-controllable Dockerfile on PRs.
-# Registry login uses secrets.* directly, not GITHUB_TOKEN.
+# security-events:write lets the Trivy SARIF land in the Security tab; the
+# registry login uses secrets.* directly, not GITHUB_TOKEN.
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   build:
@@ -67,6 +71,32 @@ jobs:
 
       - name: Smoke test (office libs + CJK)
         run: python infra/sandbox-image-office/smoke_test.py helix-sandbox-office:ci
+
+      # CRITICAL-only gate (not CRITICAL,HIGH like the minimal image): the
+      # LibreOffice + CJK Debian base carries a large user-space library
+      # surface that keeps a HIGH count perpetually red and would defeat the
+      # gate (design HX-K5). The sandbox's real isolation boundary is gVisor,
+      # so user-space-lib CVEs here are defense-in-depth; HIGH is still tracked
+      # by the weekly full scan. --ignore-unfixed → only actionable CVEs block.
+      # Trivy writes the SARIF before evaluating exit-code, so the upload below
+      # (if: always()) still runs when the gate fails.
+      - name: Trivy scan (gate CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: helix-sandbox-office:ci
+          format: sarif
+          output: trivy-office.sarif
+          severity: CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "1"
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: trivy-office.sarif
+          category: trivy-sandbox-office
 
       # ---- push (main / manual only, and only when the registry is configured)
       - name: Log in to Aliyun ACR

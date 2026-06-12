@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）详设已锁定（Wave 3 首项）；其余各条开工时追加章节。
+> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）已交付（Wave 3 首项，#576/#577/#578/#579；F1/F2 为 gVisor 生产上线前置 follow-up）；其余各条开工时追加章节。
 
 ---
 
@@ -961,6 +961,13 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 - **周扫**：`schedule: cron`（weekly）对两镜像跑全量 Trivy（含 HIGH），fail → 开 issue / workflow 可见（基础镜像新爆 CVE 不等代码改动）。
 - **SARIF 上传**：`github/codeql-action/upload-sarif` 进 Security tab 看趋势，不替代 exit-code 门禁。
 
+> **实施注记（PR3 #579）**：
+> - **门禁实现 = 单次 Trivy 跑**：`format: sarif` + `exit-code: 1` 同步 —— Trivy 先把 SARIF 写盘再判 exit-code，故 upload 步 `if: always()` 在门禁失败时仍上传（不需双跑两份扫描）。trivy-action `v0.36.0` / upload-sarif `v4.36.2` 均 SHA-pin。
+> - **「debian 基底」澄清**：实际只两镜像——minimal=alpine 卡 `CRITICAL,HIGH`，office=debian-slim+LibreOffice 卡 `CRITICAL`。设计原文「minimal/debian 卡 CRITICAL+HIGH」指「alpine minimal 与任何裸 debian 基底同档」，office 因 LibreOffice 用户态库面大单独降档，非第三个镜像。
+> - **周扫不应用 `.trivyignore`（关键不变量）**：`sandbox-image-cve-weekly.yml` 故意省略 `trivyignores`，使被 PR 门禁 mute 的 CVE 仍现于周扫 SARIF/审计面——这正是 `.trivyignore` header 承诺的「mute 只对 PR 门禁生效、永不对审计面生效」的落地点，防止过期/遗忘的 mute 静默变盲。
+> - **minimal 补 smoke test**：`infra/sandbox-image/smoke_test.py` + `smoke_payload.py`（stdlib-only，镜像 office smoke 驱动），验基底确实跑 Python 3.12 + baked runner.py 加载——build 不只「能构建」还「能运行」。
+> - **退场说明**：「故意引入已知 CVE 包验 fail」未实现为常驻单测——在 CI 里常驻一个真漏洞包既是噪声又随 DB 更新漂移；门禁的正确性由 workflow 配置（severity/ignore-unfixed/exit-code/trivyignores 连线）+ 真扫描在真 base 上的行为保证。`.trivyignore` 当前无条目（纯纪律 header）。
+
 ### 12.3 边界（不做）
 
 - **microVM（Firecracker/Kata）/ Sysbox**：M2/M3 升级路线。**Sysbox**（Daytona 用，唯一为「强隔离 + 保留 DooD 兼容」设计）作为 gVisor 的 DooD 友好对照候选记在册，对外开放不可信用户里程碑时与 Kata 一并评估（`02-sandbox-isolation.md` + 本 research）。HX-10 不改隔离范式。
@@ -980,7 +987,7 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 
 - **PR1**：misconfig 断言（argv 无 socket/特权/cap-add/宿主 bind mount + 有 cap-drop/read-only/no-new-priv）；seccomp argv（None 无参数回归 / 非 None 含 `--security-opt seccomp=<path>` 位置正确）；profile JSON 解析断言高危 syscall 移出 allowlist（io_uring/userfaultfd/keyctl/bpf）**且 clone3 仍在 allowlist**（防误删回归）；supervisor 启动 fail-closed（配路径文件缺 → 拒启动）。
 - **PR2**：集成测试 runtime env 参数化（默认 runc 回归）；runtime 真起断言（runc job 断言 runc / gvisor job 断言 runsc）；兼容坑断言（io_uring ENOSYS / proc-sys-net 不崩 / numpy 跑通）；CVE-2019-5736 PoC（runsc 挡 / runc skip）。gVisor workflow = 端到端验证。
-- **PR3**：Trivy workflow——故意引入已知 CVE 包验 fail（或 dry-run 验配置）；`.trivyignore` 生效；分镜像 severity 差异；周扫 cron lint。
+- **PR3**：actionlint/yaml 验三 workflow 配置（minimal build+smoke+Trivy / office 加 Trivy 步 / weekly 矩阵）；分镜像 severity 差异（minimal `CRITICAL,HIGH` vs office `CRITICAL`）；周扫不带 `trivyignores`（审计面不被 mute）；minimal smoke test 真跑（build→docker run→OK）。**退场**：「故意引入 CVE 包验 fail」改为靠门禁配置正确性 + 真扫描行为保证（见 §12.2.3 实施注记）。
 
 ### 12.6 Mini-ADR
 
@@ -1000,4 +1007,4 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 | PR0（本设计） | §12 + research 文档 + ITERATION-PLAN HX-10 细化 | 纯 docs，CI |
 | PR1 | misconfig 断言 + seccomp pinned profile（删 clone3 收紧）+ runtime_provider `--security-opt` + settings + supervisor fail-closed | §12.5-PR1 |
 | PR2 | gVisor CI workflow（runsc 装载 + runtime 真起断言 + 兼容坑/逃逸 PoC 用例）+ 集成测试 env 参数化 + environments 部署策略文档 | §12.5-PR2；workflow 端到端 |
-| PR3（收尾） | minimal 镜像 CI 构建 + 两镜像 Trivy 分镜像门禁 + `.trivyignore` + 周扫 + SARIF | §12.5-PR3；零债 6 条 |
+| PR3（收尾，#579） | minimal 镜像 CI 构建（`sandbox-image.yml` build+smoke+scan）+ office 加 Trivy 步 + 两镜像分镜像门禁（minimal `CRITICAL,HIGH` / office `CRITICAL`，全 `--ignore-unfixed`）+ `.trivyignore` 纪律 header + `sandbox-image-cve-weekly.yml` 周扫（不应用 trivyignore）+ SARIF 上传 | §12.5-PR3；零债 6 条 |

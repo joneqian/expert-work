@@ -1,0 +1,115 @@
+name: Sandbox Image (minimal)
+
+# Builds + CVE-scans the "minimal" sandbox variant (infra/sandbox-image) —
+# alpine + pure-stdlib Python 3.12, the default exec_python runner image
+# (Stream F / Mini-ADR F-13). On PRs it builds, smoke-tests and Trivy-scans
+# (no registry creds needed); on main / manual dispatch it also pushes to
+# Aliyun ACR when configured.
+#
+# Stream HX-10 PR3: the Trivy gate fails the build on CRITICAL/HIGH OS-package
+# CVEs that have an upstream fix (--ignore-unfixed → only actionable findings
+# block). office uses a looser CRITICAL-only gate (large LibreOffice base, see
+# sandbox-image-office.yml); the weekly full scan covers HIGH for both
+# (sandbox-image-cve-weekly.yml).
+#
+# Registry wiring mirrors the office image (repo Settings → Secrets/variables):
+#   vars.ALIYUN_ACR_REGISTRY / vars.ALIYUN_ACR_NAMESPACE
+#   secrets.ALIYUN_ACR_USERNAME / secrets.ALIYUN_ACR_PASSWORD
+# Then: HELIX_SANDBOX_SANDBOX_IMAGE=<registry>/<namespace>/helix-sandbox:latest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/sandbox-image/**"
+      - ".trivyignore"
+      - ".github/workflows/sandbox-image.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/sandbox-image/**"
+      - ".trivyignore"
+      - ".github/workflows/sandbox-image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: this job builds an attacker-controllable Dockerfile on PRs.
+# security-events:write lets the Trivy SARIF land in the Security tab; the
+# registry push uses secrets.* directly, not GITHUB_TOKEN.
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  build:
+    name: Build + smoke + Trivy (+ push on main)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Actions are SHA-pinned (a mutable tag could be re-pointed at malicious
+      # code in this credential-holding workflow); the trailing comment tracks
+      # the human-readable version.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      # Build into the local daemon so the smoke test + Trivy can use it.
+      # Build context is infra/ (Dockerfile COPYs sandbox-image/runner.py).
+      - name: Build (load local)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: infra
+          file: infra/sandbox-image/Dockerfile
+          load: true
+          tags: helix-sandbox:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test (stdlib runner)
+        run: python infra/sandbox-image/smoke_test.py helix-sandbox:ci
+
+      # Trivy writes the SARIF report before evaluating exit-code, so the
+      # upload below (if: always()) still runs when the gate fails.
+      - name: Trivy scan (gate CRITICAL,HIGH)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: helix-sandbox:ci
+          format: sarif
+          output: trivy-minimal.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "1"
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: trivy-minimal.sarif
+          category: trivy-sandbox-minimal
+
+      # ---- push (main / manual only, and only when the registry is configured)
+      - name: Log in to Aliyun ACR
+        if: github.event_name != 'pull_request' && vars.ALIYUN_ACR_REGISTRY != ''
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ vars.ALIYUN_ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+
+      - name: Build + push to ACR
+        if: github.event_name != 'pull_request' && vars.ALIYUN_ACR_REGISTRY != ''
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: infra
+          file: infra/sandbox-image/Dockerfile
+          push: true
+          tags: |
+            ${{ vars.ALIYUN_ACR_REGISTRY }}/${{ vars.ALIYUN_ACR_NAMESPACE }}/helix-sandbox:${{ github.sha }}
+            ${{ vars.ALIYUN_ACR_REGISTRY }}/${{ vars.ALIYUN_ACR_NAMESPACE }}/helix-sandbox:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

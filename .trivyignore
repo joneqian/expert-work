@@ -1,0 +1,23 @@
+# Trivy ignore list — sandbox image CVE scan exemptions (Stream HX-10 PR3).
+#
+# This file mutes specific CVEs in the sandbox-image / sandbox-image-office
+# Trivy gates (.github/workflows/sandbox-image*.yml). It is intentionally a
+# REVIEWED escape hatch, not a silent kill-switch:
+#
+#   * One entry per line: `CVE-YYYY-NNNNN` (optionally a trailing comment).
+#   * EVERY entry MUST carry an `expires:YYYY-MM-DD` comment and a one-line
+#     justification. Permanent mutes are forbidden — an exemption past its
+#     expiry date is a review failure, not a free pass. When the date lands,
+#     re-assess: the upstream fix may have shipped (drop the line) or the risk
+#     re-justified (bump the date in a fresh PR with rationale).
+#   * The weekly full scan (sandbox-image-cve-weekly.yml) still reports muted
+#     CVEs via SARIF to the Security tab, so an exemption hides a CVE from the
+#     PR gate but never from the audit surface.
+#
+# Rationale for the discipline (design HX-K5): the sandbox's real isolation
+# boundary is gVisor/runsc, so user-space library CVEs inside the image are
+# defense-in-depth, not the last line — but "lower priority" must never decay
+# into "muted forever". The expiry date forces that re-litigation.
+#
+# Format example (keep commented until a real exemption is needed):
+#   CVE-2025-00000  # expires:2026-09-12 — <why safe here> — <owner>
