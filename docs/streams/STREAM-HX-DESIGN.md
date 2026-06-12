@@ -23,6 +23,7 @@
 | HX-5 | ① prompt 工程 | manifest 覆盖式更新无历史/diff/回滚；无离线 variant 对比 | `agent_spec_revision` 不可变历史 + 回滚 + diff API/UI + 离线 A/B harness | §6（本文） |
 | HX-6 | ⑤ 沙盒 | 首触冷启动（J.15 暖会话已在）+ 池路径限额配对 | READY 池 + replenisher + claim 时 docker update + 镜像预拉 | §7（本文） |
 | HX-7 | ⑨ 可观测 / 治理 | Langfuse 停在 Recording stub（OTel 链已通，见 §8.1）；approval 无队列视图/批量 | LangfuseSdkClient + settings/factory 接线 + approval list API + 批量 decide + /approvals 队列页 | §8（本文） |
+| HX-8 | ⑩ 多租户 | 平台 provider/tool 凭证全租户共享一把上游 key（爆炸半径/成本归因/限流隔离全缺）；跨租户查询零开关（仅 audit） | per-tenant 凭证 override（平台管理，非 BYOK）+ 部署级跨租户 block 开关 | §9（本文） |
 | HX-12/13 | ② 工具面 | 工具披露 2.0（应用层 + 厂商原生档） | 见 ITERATION-PLAN Wave 2 定义 | 开工时追加 |
 
 Wave 1 顺序：HX-1 → HX-2 → HX-3 → HX-4（HX-1 的 estimator 是 HX-12 阈值逃生门的前置件；HX-4 的指标骨架吃 HX-1 的 drift 数据）。
@@ -588,3 +589,124 @@ gauge helper 已在（`helix_gauge`，`metrics.py:121-132`）且有先例：skil
 | PR1 | LangfuseSdkClient + 依赖 + settings + runtime factory + teardown flush | §8.4-PR1 |
 | PR2 | list_by_status store/API + `:decide` 批量端点（resume 内核提取） | §8.4-PR2；resume 全量回归 |
 | PR3（收尾） | /approvals 队列页 + Badge 迁移 + SE-8 全接线 | §8.4-PR3；零债 6 条 |
+
+---
+
+## 9. HX-8 — 多租户薄点：per-tenant 凭证 override + 跨租户 block 开关
+
+> 2026-06-12 拍板（用户确认）：HX-8a 形态 = **per-tenant override（平台管理，非 BYOK）**；HX-8b 层级 = **部署级 settings 开关**。per-tenant opt-out 与租户自助 key 均不在范围。
+
+### 9.1 现状取证（2026-06-12，main@0312e0d）
+
+1. **平台凭证管理面已完整存在**（Stream P/Q），HX-8a 不是从零建凭证面，是给既有 overlay 加租户维度：
+   - 存储：`platform_provider_secret` / `platform_tool_secret`（迁移 0049，PK 单列 `provider`/`tool`，**无 tenant_id 列、无 RLS**，tenant-less 平台全局）。
+   - 视图：`PlatformSecretsService`（`control_plane/platform_secrets.py`）——env seed + DB overlay 合并，**DB wins / disabled 行 suppress**（P-12），TTL 30s 缓存 + 写端点 `invalidate()`。
+   - API：`/v1/platform/credentials` system_admin CRUD（`api/platform_config.py`）——`value` 写穿 SecretStore 生成 `secret://` ref 或运营直给 `secret_ref`（二选一互斥校验），**真值永不进 catalog/audit**（Q-4/Q-7）。
+   - UI：`SettingsPlatformConfig.tsx`。
+2. **resolver 的租户接缝已在签名里**：`CredentialsResolver.resolve_provider/resolve_tool`（`helix-common/credentials/resolver.py:101`）已收 `tenant_id` 参数，但现仅做租户存在性验证（Y-1）——凭证查询 100% 平台级。embedder/reranker/web_search/agent 主模型 key 全走此路径（`control_plane/runtime.py:455-618`）。
+3. **Y-1 边界不动摇**：BYOK 已移除（`CredentialsMode = Literal["platform"]`，0058 冻结 tenant_config 凭证字段，`SettingsTenantCredentials` 削成只读）。HX-8a 的 override key 仍是**平台采购、平台管理、system_admin 配置**，租户不可见不可自配——爆炸半径隔离 + 上游成本归因（Stream Y 计量衔接），非 BYOK 回潮。
+4. **rate_card（0059）示范了 NULL-tenant 单表双态模式**，但其前提是建表时就预留了 nullable `tenant_id`；`platform_*_secret` 两表 PK 是单列文本、无预留——改 PK 属破坏式迁移（见 Mini-ADR HX-H1）。
+5. **跨租户查询单一决策点**：`ensure_tenant_scope`（`control_plane/tenant_scope.py:73`）覆盖全部 14 个 list 端点（含 HX-7 新加的 `GET /v1/approvals`）。现行为：`"*"` + system_admin → 直接 `CrossTenant` + `SYSTEM_CROSS_TENANT_QUERY` audit；system_admin 显式 switch 非 home 租户 → 放行 + `SYSTEM_TENANT_SWITCH` audit。**零 block 条件、无任何开关**。`AuditAction` 为 protocol 单份 StrEnum（加值时仍按惯例全仓 grep 防双份漂移）。
+
+### 9.2 设计
+
+#### 9.2.1 HX-8a 存储 — 姊妹表 `tenant_provider_secret` / `tenant_tool_secret`（迁移 0073）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `tenant_id` | UUID NOT NULL | 复合 PK 首列 |
+| `provider` / `tool` | TEXT NOT NULL | 复合 PK 次列；值域同平台表 |
+| `secret_ref` | TEXT NOT NULL | `secret://` / `kms://` ref，沿用 `validate_secret_ref` |
+| `enabled` | BOOL NOT NULL DEFAULT true | 语义见 HX-H2 |
+| `created_at` / `updated_at` / `updated_by` | 同平台表 | 运营审计三件套 |
+
+- RLS：**ENABLE + 标准 tenant policy**（纵深防御——即便误用租户上下文直查也只见己行，行内只有 ref 无真值）；平台域读写一律 `bypass_rls_session()`（与 service 现行读法一致）。
+- 行语义：**行存在 = 该租户该 key 有 override**；删行 = 回 fallback 平台视图。
+
+#### 9.2.2 service 合并视图 — `PlatformSecretsService` 扩展
+
+新增 `effective_provider_credentials_for(tenant_id)` / `effective_tool_credentials_for(tenant_id)`，合并序：
+
+```
+env seed → platform DB rows（DB wins；disabled→suppress，P-12 现状）
+        → tenant rows（enabled→override 该 key；disabled→suppress 该租户该 key；无行→平台视图原样）
+```
+
+- 缓存：`_reload()` 同轮全量加载租户行为 `dict[tenant_id, dict[key, row]]`（行数 = O(租户 × override)，运营手工配置量级，全量缓存无压力）；TTL 30s 与 `invalidate()` 与现缓存共用。
+- 平台无租户行为不变：`effective_*_credentials()`（无租户参数）保留原语义，现调用零改动。
+
+#### 9.2.3 resolver 接线 — 可选 tenant-aware getter（零签名破坏）
+
+`CredentialsResolver` 构造新增可选 kwargs：
+
+```python
+tenant_provider_getter: Callable[[UUID], Awaitable[dict[Provider, str]]] | None = None
+tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
+```
+
+`resolve_provider/resolve_tool`：tenant getter 存在 → 直接取其返回的**最终合并视图**（合并逻辑全收在 service，HX-H3）；不存在 → 现路径字节不变。control-plane lifespan 把 `platform_secrets_service.effective_*_credentials_for` 接进来。现有 doubles（含 tools/eval）不传新参即不受影响——按协议 sweep 纪律全仓 grep 验证。
+
+#### 9.2.4 管理 API — `/v1/platform/credentials/tenants/*`（system_admin only）
+
+| 方法 | 路径 | 行为 |
+|------|------|------|
+| GET | `/v1/platform/credentials/tenants/{tenant_id}` | 该租户 override 清单 + 每 key effective 来源标注（tenant/platform/env/unset） |
+| PUT | `.../tenants/{tenant_id}/providers/{provider}`、`.../tools/{tool}` | upsert override：复用 `PlatformSecretWrite`（`value` 写穿 SecretStore → `secret://tenant-{tenant_id}-{kind}-{name}` 命名空间 ref；或直给 `secret_ref`）+ `enabled` |
+| DELETE | 同 PUT 路径 | 删 override，回 fallback（204） |
+
+- 复用 `_authz` system_admin 门 + `_emit_platform_audit` 同族新 action（`PLATFORM_PROVIDER_CREDENTIAL_TENANT_UPSERT/DELETE`、`PLATFORM_TOOL_CREDENTIAL_TENANT_UPSERT/DELETE`，details 带 `tenant_id`，真值不进 audit）+ 写后 `invalidate()`。
+- 总目录 `GET /v1/platform/credentials` 每 key 附 `tenant_override_count`（轻量计数，不展开行）。
+- 校验：`tenant_id` 必须是存在的租户（404 否则）；provider/tool 值域校验同平台端点。
+
+#### 9.2.5 UI — `SettingsPlatformConfig` 行级抽屉
+
+每 provider/tool 行加「租户 override」入口（计数徽标 → 抽屉）：抽屉内列该 key 的全部租户 override（租户名 + ref 来源 + enabled），支持增（选租户 + 粘贴 value/ref）/改/删。system_admin only（页面已是）；跨租户 scope 语义不适用（平台域页面）。i18n 双语 + Storybook + vitest 照 SE-8 清单。**不复活 `SettingsTenantCredentials` 编辑面**（HX-H5）。
+
+#### 9.2.6 HX-8b — 部署级跨租户 block 开关
+
+- settings：`cross_tenant_query_enabled: bool = True`（`HELIX_CONTROL_PLANE_CROSS_TENANT_QUERY_ENABLED`，default 保现状）。
+- `ensure_tenant_scope` 新增可选 kw `cross_tenant_enabled: bool = True`；14 个调用点机械 sweep 传 `settings.cross_tenant_query_enabled`（settings 经既有 `request.app.state.settings` 惯例获取）。
+- `false` 时（开关语义 = **system_admin 不得越出 home tenant**，HX-H4）：
+  - `tenant_id="*"` → 403 `{"code": "CROSS_TENANT_DISABLED"}` + audit `SYSTEM_CROSS_TENANT_BLOCKED`；
+  - system_admin 显式 switch 非 home 租户 → 同样 403 + 同 audit（details 区分 `mode: aggregate|switch`）；
+  - 普通租户单租户路径零接触。
+- 新 `AuditAction.SYSTEM_CROSS_TENANT_BLOCKED = "system:cross_tenant_blocked"`（protocol 单处 + 全仓 grep 双份漂移点）。
+- admin UI 不做开关感知适配：403 错误信息已清晰，部署级开关由运营掌控（边界 §9.3）。
+
+### 9.3 边界（不做）
+
+- **per-tenant opt-out**（租户声明数据不参与跨租户聚合）：需 14 端点查询层全量加排除过滤，数据主权需求出现再立项；本次只做部署级。
+- **租户自助 BYOK**：Y-1 已否决，不回潮——override 的配置主体永远是平台 system_admin。
+- **上游 key 自动分配/轮换**：override 是手动运营操作；按用量自动开专用 key 属 Stream Y 计量后续。
+- **跨 replica 缓存失效**：沿用 `PlatformSecretsService` TTL 30s 边界（M0/M1 单实例可接受，注释已在册）。
+- **admin UI 对 block 开关的感知**（隐藏 `⋆` scope 选项等）：部署级开关场景下 403 即足；UI 适配等真实需求。
+
+### 9.4 可观测
+
+- 管理操作：4 个新 audit action（§9.2.4）全覆盖增删改，details 带 `tenant_id`/`enabled`/ref 来源（无真值）。
+- blocked 尝试：`SYSTEM_CROSS_TENANT_BLOCKED` audit + `tenant_scope.cross_tenant_blocked` 结构化日志。
+- `helix_platform_credentials_tenant_overrides` gauge（service `_reload()` 时 set，租户 override 总行数）——运营一眼看 override 面有多大。
+- resolve 热路径不加新指标：缓存命中路径，治理可观测由 audit 承担。
+
+### 9.5 测试
+
+- **PR1**：迁移 + store CRUD + RLS 隔离（真 PG integration：租户上下文只见己行/bypass 见全量）+ service 合并矩阵（env/platform/tenant × enabled/disabled/无行 fallback，含 tenant disabled suppress 不回落）+ resolver tenant getter 命中/缺省两路 + 现有 doubles 全量回归（grep sweep 含 tools/eval）。
+- **PR2**：API（upsert value 写穿 ref 形态/直给 ref 校验/delete 回 fallback/租户 404/非 sysadmin 403/audit 断言含 tenant_id 无真值/invalidate 即时生效）+ UI vitest（抽屉增删改）+ Storybook + Playwright 冒烟。
+- **PR3**：`ensure_tenant_scope` 单元矩阵（开关 off × {"*", switch, home, 普通用户} 四象限）+ 端点集成抽测（off 时 403 + blocked audit；on 时全量回归零变）。
+
+### 9.6 Mini-ADR
+
+- **HX-H1 姊妹表而非改现表 PK**：`platform_*_secret` PK 单列文本、无预留 tenant_id；改 PK = 破坏式迁移 + 全 store/service 适配 + NULL 复合唯一坑（PG 默认 NULLS DISTINCT）。姊妹表零迁移风险、行语义自明（行存在 = override），rate_card 的"预留列"路线对已存在的表不成立。
+- **HX-H2 disabled 租户行 = suppress（镜像 P-12）**：fallback 仅在"无租户行"时发生；`enabled=false` 是显式治理动作（关停某租户某 key），不是"暂时回平台"——语义与平台行 disabled suppress 完全对齐，admin 心智模型一套。顺带兑现租户级禁用粒度，零额外结构。
+- **HX-H3 合并逻辑收在 service，resolver 只换 getter**：resolver 保持纯解析器（Y-1 后它已不含策略）；可选 kwargs 零签名破坏，doubles 不强制 sweep；getter 返回最终视图，resolver 不知道"override"概念。
+- **HX-H4 block 开关语义 = system_admin 不得越出 home tenant**：只拦 `"*"` 聚合会留显式逐租户 switch 后门，合规意图（私有部署禁用平台越权读）即落空；default `true` 保现状，关闭是显式部署决策。
+- **HX-H5 UI 挂 `SettingsPlatformConfig`**：override 是平台运营操作，归平台凭证页；`SettingsTenantCredentials` 是租户视角只读视图（Y-1 削减结果），复活其编辑面 = 视觉上的 BYOK 回潮，语义不回退。
+
+### 9.7 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §9 + ITERATION-PLAN 细化（2 PR → 3 PR 修正） | 纯 docs，CI |
+| PR1 | 迁移 0073 + tenant secret store + service 租户合并视图 + resolver tenant getter + runtime 接线 + overrides gauge | §9.5-PR1 |
+| PR2 | 管理 API 5 端点 + 4 audit action + SettingsPlatformConfig 抽屉 + SE-8 接线 | §9.5-PR2 |
+| PR3（收尾） | settings 开关 + ensure_tenant_scope block + SYSTEM_CROSS_TENANT_BLOCKED + 14 调用点 sweep + 文档同步 | §9.5-PR3；零债 6 条 |
