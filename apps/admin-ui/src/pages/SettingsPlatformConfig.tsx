@@ -14,11 +14,13 @@ import {
   Alert,
   App,
   Button,
+  Drawer,
   Form,
   Input,
   Modal,
   Popconfirm,
   Segmented,
+  Select,
   Space,
   Switch,
   Table,
@@ -27,22 +29,32 @@ import {
   Typography,
 } from "antd";
 import type { TableColumnsType } from "antd";
-import { KeyRound, RefreshCw } from "lucide-react";
+import { Building2, KeyRound, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { PageHeader } from "../components/PageHeader";
 import {
   deletePlatformProvider,
   deletePlatformTool,
+  deleteTenantProviderOverride,
+  deleteTenantToolOverride,
   getPlatformCredentials,
+  getTenantCredentials,
   upsertPlatformProvider,
   upsertPlatformTool,
+  upsertTenantProviderOverride,
+  upsertTenantToolOverride,
   type PlatformCredentialsView,
   type PlatformProviderRow,
   type PlatformSecretSource,
   type PlatformSecretUpsertBody,
   type PlatformToolRow,
+  type TenantCredentialsView,
+  type TenantEffectiveSource,
+  type TenantProviderEntry,
+  type TenantToolEntry,
 } from "../api/platform_config";
+import { listTenants, type TenantSummary } from "../api/tenants";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { PlatformEmbeddingSection } from "./settings_platform/PlatformEmbeddingSection";
@@ -55,6 +67,8 @@ interface EditTarget {
   kind: Kind;
   key: string;
   secret_ref: string;
+  /** Set when editing a per-tenant override (Stream HX-8) rather than the platform row. */
+  tenantId?: string;
 }
 
 function sourceTag(source: PlatformSecretSource, t: (k: string) => string) {
@@ -76,6 +90,13 @@ export function SettingsPlatformConfig() {
   const [editMode, setEditMode] = useState<"value" | "ref">("value");
   const [saving, setSaving] = useState(false);
 
+  // Per-tenant override drawer (Stream HX-8).
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  const [tenantId, setTenantId] = useState<string | null>(null);
+  const [tenantView, setTenantView] = useState<TenantCredentialsView | null>(null);
+  const [tenantLoading, setTenantLoading] = useState(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -87,6 +108,34 @@ export function SettingsPlatformConfig() {
       setLoading(false);
     }
   }, []);
+
+  const refreshTenantView = useCallback(async (tid: string) => {
+    setTenantLoading(true);
+    try {
+      setTenantView(await getTenantCredentials(tid));
+    } catch {
+      setTenantView(null);
+    } finally {
+      setTenantLoading(false);
+    }
+  }, []);
+
+  const openDrawer = useCallback(async () => {
+    setDrawerOpen(true);
+    try {
+      setTenants(await listTenants(200));
+    } catch {
+      setTenants([]);
+    }
+  }, []);
+
+  const onPickTenant = useCallback(
+    (tid: string) => {
+      setTenantId(tid);
+      refreshTenantView(tid);
+    },
+    [refreshTenantView],
+  );
 
   useEffect(() => {
     if (isSystemAdmin) {
@@ -101,14 +150,38 @@ export function SettingsPlatformConfig() {
   );
 
   const doUpsert = useCallback(
-    async (kind: Kind, key: string, body: PlatformSecretUpsertBody) => {
-      if (kind === "provider") {
+    async (kind: Kind, key: string, body: PlatformSecretUpsertBody, tid?: string) => {
+      if (tid !== undefined) {
+        if (kind === "provider") {
+          await upsertTenantProviderOverride(tid, key, body);
+        } else {
+          await upsertTenantToolOverride(tid, key, body);
+        }
+      } else if (kind === "provider") {
         await upsertPlatformProvider(key, body);
       } else {
         await upsertPlatformTool(key, body);
       }
     },
     [],
+  );
+
+  const onDeleteOverride = useCallback(
+    async (kind: Kind, key: string, tid: string) => {
+      try {
+        if (kind === "provider") {
+          await deleteTenantProviderOverride(tid, key);
+        } else {
+          await deleteTenantToolOverride(tid, key);
+        }
+        message.success(t("settings_platform.deleted"));
+        refreshTenantView(tid);
+        refresh();
+      } catch (err) {
+        message.error(errText(err));
+      }
+    },
+    [errText, message, refresh, refreshTenantView, t],
   );
 
   const onToggle = useCallback(
@@ -156,16 +229,20 @@ export function SettingsPlatformConfig() {
         : { secret_ref: values.secret_ref, enabled: values.enabled };
     setSaving(true);
     try {
-      await doUpsert(edit.kind, edit.key, body);
+      await doUpsert(edit.kind, edit.key, body, edit.tenantId);
       message.success(t("settings_platform.saved"));
+      const editedTenant = edit.tenantId;
       setEdit(null);
       refresh();
+      if (editedTenant !== undefined) {
+        refreshTenantView(editedTenant);
+      }
     } catch (err) {
       message.error(errText(err));
     } finally {
       setSaving(false);
     }
-  }, [edit, editMode, editForm, doUpsert, errText, message, refresh, t]);
+  }, [edit, editMode, editForm, doUpsert, errText, message, refresh, refreshTenantView, t]);
 
   const makeColumns = useCallback(
     (kind: Kind): TableColumnsType<PlatformProviderRow | PlatformToolRow> => [
@@ -227,6 +304,14 @@ export function SettingsPlatformConfig() {
         render: (n: number) => <Text>{n}</Text>,
       },
       {
+        title: t("settings_platform.col_tenant_overrides"),
+        dataIndex: "tenant_override_count",
+        key: "tenant_override_count",
+        width: 130,
+        render: (n: number | undefined) =>
+          n ? <Tag color="purple">{n}</Tag> : <Text type="secondary">0</Text>,
+      },
+      {
         title: t("settings_platform.col_actions"),
         key: "actions",
         width: 180,
@@ -267,6 +352,105 @@ export function SettingsPlatformConfig() {
   const providerColumns = useMemo(() => makeColumns("provider"), [makeColumns]);
   const toolColumns = useMemo(() => makeColumns("tool"), [makeColumns]);
 
+  const effectiveSourceTag = useCallback(
+    (source: TenantEffectiveSource) => {
+      const color =
+        source === "tenant"
+          ? "purple"
+          : source === "suppressed"
+            ? "red"
+            : source === "db"
+              ? "cyan"
+              : undefined;
+      return <Tag color={color}>{t(`settings_platform.tenant_source_${source}`)}</Tag>;
+    },
+    [t],
+  );
+
+  const makeOverrideColumns = useCallback(
+    (kind: Kind): TableColumnsType<TenantProviderEntry | TenantToolEntry> => [
+      {
+        title: t("settings_platform.col_name"),
+        key: "name",
+        render: (_v, row) => (
+          <Text strong>
+            {"provider" in row ? row.provider : (row as TenantToolEntry).tool}
+          </Text>
+        ),
+      },
+      {
+        title: t("settings_platform.col_effective"),
+        key: "effective",
+        width: 120,
+        render: (_v, row) => effectiveSourceTag(row.effective_source),
+      },
+      {
+        title: t("settings_platform.col_secret_ref"),
+        key: "ref",
+        render: (_v, row) =>
+          row.effective_ref ? (
+            <Tooltip title={row.effective_ref}>
+              <Text code style={{ fontSize: 11 }}>
+                {row.effective_ref}
+              </Text>
+            </Tooltip>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t("settings_platform.unset_ref")}
+            </Text>
+          ),
+      },
+      {
+        title: t("settings_platform.col_actions"),
+        key: "actions",
+        width: 180,
+        render: (_v, row) => {
+          const key = "provider" in row ? row.provider : (row as TenantToolEntry).tool;
+          return (
+            <Space size={6}>
+              <Button
+                size="small"
+                onClick={() =>
+                  setEdit({
+                    kind,
+                    key,
+                    secret_ref: row.override?.secret_ref ?? "",
+                    tenantId: tenantId ?? undefined,
+                  })
+                }
+                data-testid={`pc-tenant-edit-${key}`}
+              >
+                {row.override !== null
+                  ? t("settings_platform.edit_btn")
+                  : t("settings_platform.override_btn")}
+              </Button>
+              {row.override !== null && tenantId !== null && (
+                <Popconfirm
+                  title={t("settings_platform.delete_override_confirm")}
+                  okType="danger"
+                  okText={t("common.delete")}
+                  cancelText={t("common.cancel")}
+                  onConfirm={() => onDeleteOverride(kind, key, tenantId)}
+                >
+                  <Button size="small" danger data-testid={`pc-tenant-delete-${key}`}>
+                    {t("common.delete")}
+                  </Button>
+                </Popconfirm>
+              )}
+            </Space>
+          );
+        },
+      },
+    ],
+    [t, effectiveSourceTag, onDeleteOverride, tenantId],
+  );
+
+  const overrideProviderColumns = useMemo(
+    () => makeOverrideColumns("provider"),
+    [makeOverrideColumns],
+  );
+  const overrideToolColumns = useMemo(() => makeOverrideColumns("tool"), [makeOverrideColumns]);
+
   useEffect(() => {
     if (edit !== null) {
       // Default to the paste-a-key flow; clear any prior pasted value.
@@ -283,9 +467,18 @@ export function SettingsPlatformConfig() {
         subtitle={t("settings_platform.subtitle")}
         actions={
           isSystemAdmin && (
-            <Button onClick={refresh} loading={loading} icon={<RefreshCw size={14} strokeWidth={1.5} />}>
-              {t("common.refresh")}
-            </Button>
+            <Space>
+              <Button
+                onClick={openDrawer}
+                icon={<Building2 size={14} strokeWidth={1.5} />}
+                data-testid="pc-tenant-overrides-btn"
+              >
+                {t("settings_platform.tenant_overrides_btn")}
+              </Button>
+              <Button onClick={refresh} loading={loading} icon={<RefreshCw size={14} strokeWidth={1.5} />}>
+                {t("common.refresh")}
+              </Button>
+            </Space>
           )
         }
       />
@@ -338,8 +531,70 @@ export function SettingsPlatformConfig() {
         </>
       )}
 
+      <Drawer
+        title={t("settings_platform.tenant_drawer_title")}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        width={720}
+        data-testid="pc-tenant-drawer"
+      >
+        <Form.Item label={t("settings_platform.tenant_select_label")}>
+          <Select
+            showSearch
+            optionFilterProp="label"
+            placeholder={t("settings_platform.tenant_select_placeholder")}
+            value={tenantId}
+            onChange={onPickTenant}
+            options={tenants.map((tn) => ({
+              value: tn.tenant_id,
+              label: `${tn.display_name} (${tn.tenant_id.slice(0, 8)}…)`,
+            }))}
+            style={{ width: "100%" }}
+            data-testid="pc-tenant-select"
+          />
+        </Form.Item>
+        {tenantId !== null && (
+          <>
+            <Alert
+              type="info"
+              showIcon
+              message={t("settings_platform.tenant_drawer_hint")}
+              style={{ marginBottom: 12 }}
+            />
+            <h3 style={{ fontSize: 14, margin: "8px 0" }}>
+              {t("settings_platform.providers_heading")}
+            </h3>
+            <Table<TenantProviderEntry>
+              columns={overrideProviderColumns as TableColumnsType<TenantProviderEntry>}
+              dataSource={tenantView?.providers ?? []}
+              rowKey={(r) => r.provider}
+              loading={tenantLoading}
+              pagination={false}
+              size="small"
+              data-testid="pc-tenant-providers-table"
+            />
+            <h3 style={{ fontSize: 14, margin: "16px 0 8px" }}>
+              {t("settings_platform.tools_heading")}
+            </h3>
+            <Table<TenantToolEntry>
+              columns={overrideToolColumns as TableColumnsType<TenantToolEntry>}
+              dataSource={tenantView?.tools ?? []}
+              rowKey={(r) => r.tool}
+              loading={tenantLoading}
+              pagination={false}
+              size="small"
+              data-testid="pc-tenant-tools-table"
+            />
+          </>
+        )}
+      </Drawer>
+
       <Modal
-        title={t("settings_platform.edit_modal_title", { key: edit?.key ?? "" })}
+        title={
+          edit?.tenantId !== undefined
+            ? t("settings_platform.edit_override_modal_title", { key: edit?.key ?? "" })
+            : t("settings_platform.edit_modal_title", { key: edit?.key ?? "" })
+        }
         open={edit !== null}
         onCancel={() => setEdit(null)}
         onOk={onSaveEdit}

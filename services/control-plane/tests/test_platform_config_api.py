@@ -200,3 +200,171 @@ async def test_delete_env_defined_provider_409(
         )
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "PLATFORM_CREDENTIAL_IN_USE"
+
+
+# ─── per-tenant overrides (Stream HX-8) ────────────────────────────────
+
+
+async def _seed_tenant(app: object) -> UUID:
+    tenant_id = uuid4()
+    await app.state.tenant_config_repo.create(  # type: ignore[attr-defined]
+        tenant_id=tenant_id, display_name="T", actor_id="seed"
+    )
+    return tenant_id
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_put_get_delete_round_trip(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        # Upsert with a pasted value → encrypted, tenant-namespaced ref.
+        put = await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            json={"value": "sk-ant-TENANT-KEY", "enabled": True},
+            headers=_headers(admin),
+        )
+        assert put.status_code == 200, put.text
+        ref = put.json()["data"]["secret_ref"]
+        assert ref == f"secret://helix-agent/platform/tenant/{tenant_id}/llm/anthropic"
+        assert "sk-ant-TENANT-KEY" not in put.text
+
+        # Tenant view: override row present, effective source = tenant.
+        view = await client.get(
+            f"/v1/platform/credentials/tenants/{tenant_id}", headers=_headers(admin)
+        )
+        assert view.status_code == 200, view.text
+        provs = {p["provider"]: p for p in view.json()["data"]["providers"]}
+        assert provs["anthropic"]["effective_source"] == "tenant"
+        assert provs["anthropic"]["effective_ref"] == ref
+        assert provs["anthropic"]["override"]["enabled"] is True
+
+        # Catalog GET counts the override.
+        catalog = await client.get("/v1/platform/credentials", headers=_headers(admin))
+        cat_provs = {p["provider"]: p for p in catalog.json()["data"]["providers"]}
+        assert cat_provs["anthropic"]["tenant_override_count"] == 1
+
+        # Delete → fallback; 404 on the second delete.
+        deleted = await client.delete(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            headers=_headers(admin),
+        )
+        assert deleted.status_code == 204
+        again = await client.delete(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            headers=_headers(admin),
+        )
+        assert again.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_disabled_shows_suppressed(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        # Platform row first, then a disabled tenant override on top.
+        await client.put(
+            "/v1/platform/credentials/tools/web_search",
+            json={"secret_ref": "kms://platform/tavily", "enabled": True},
+            headers=_headers(admin),
+        )
+        put = await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/tools/web_search",
+            json={"secret_ref": "kms://tenant/tavily", "enabled": False},
+            headers=_headers(admin),
+        )
+        assert put.status_code == 200, put.text
+
+        view = await client.get(
+            f"/v1/platform/credentials/tenants/{tenant_id}", headers=_headers(admin)
+        )
+        tools = {t["tool"]: t for t in view.json()["data"]["tools"]}
+        # HX-H2: disabled override suppresses — no fallback to the platform ref.
+        assert tools["web_search"]["effective_source"] == "suppressed"
+        assert tools["web_search"]["effective_ref"] is None
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_unknown_tenant_404(
+    admin_client: tuple[AsyncClient, UUID],
+) -> None:
+    client, admin = admin_client
+    resp = await client.put(
+        f"/v1/platform/credentials/tenants/{uuid4()}/providers/anthropic",
+        json={"secret_ref": "kms://x", "enabled": True},
+        headers=_headers(admin),
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "TENANT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_unknown_provider_422_and_non_admin_403(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        bad = await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/not-a-provider",
+            json={"secret_ref": "kms://x", "enabled": True},
+            headers=_headers(admin),
+        )
+        assert bad.status_code == 422
+        assert bad.json()["detail"]["code"] == "UNKNOWN_PROVIDER"
+
+        forbidden = await client.get(
+            f"/v1/platform/credentials/tenants/{tenant_id}", headers=_headers(uuid4())
+        )
+        assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_takes_effect_in_service_view(
+    settings: Settings,
+    lifecycle: Lifecycle,
+    jwt_verifier: JWTVerifier,
+) -> None:
+    """End-to-end within the app: PUT override → invalidate → the app's
+    PlatformSecretsService tenant-effective view reflects it immediately.
+    (The resolver hop on top of this view is covered by the overlay unit
+    tests; ``credentials_resolver`` itself is lifespan-only state.)"""
+    app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
+    admin = await _seed_admin(app)
+    tenant_id = await _seed_tenant(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        await client.put(
+            "/v1/platform/credentials/providers/anthropic",
+            json={"secret_ref": "kms://platform/anthropic", "enabled": True},
+            headers=_headers(admin),
+        )
+        await client.put(
+            f"/v1/platform/credentials/tenants/{tenant_id}/providers/anthropic",
+            json={"secret_ref": "kms://tenant/anthropic", "enabled": True},
+            headers=_headers(admin),
+        )
+        service = app.state.platform_secrets_service  # type: ignore[attr-defined]
+        view = await service.effective_provider_credentials_for(tenant_id)
+        assert view.get("anthropic") == "kms://tenant/anthropic"
+
+        # Another (existing) tenant still sees the platform ref.
+        other = await _seed_tenant(app)
+        view_other = await service.effective_provider_credentials_for(other)
+        assert view_other.get("anthropic") == "kms://platform/anthropic"

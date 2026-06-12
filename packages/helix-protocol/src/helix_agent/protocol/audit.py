@@ -264,6 +264,12 @@ class AuditAction(StrEnum):
     PLATFORM_PROVIDER_CREDENTIAL_DELETE = "platform_credential:provider_delete"
     PLATFORM_TOOL_CREDENTIAL_UPSERT = "platform_credential:tool_upsert"
     PLATFORM_TOOL_CREDENTIAL_DELETE = "platform_credential:tool_delete"
+    # per-tenant credential overrides — Stream HX-8 (system_admin-only writes
+    # to the tenant_provider_secret / tenant_tool_secret sister tables).
+    PLATFORM_PROVIDER_CREDENTIAL_TENANT_UPSERT = "platform_credential:tenant_provider_upsert"
+    PLATFORM_PROVIDER_CREDENTIAL_TENANT_DELETE = "platform_credential:tenant_provider_delete"
+    PLATFORM_TOOL_CREDENTIAL_TENANT_UPSERT = "platform_credential:tenant_tool_upsert"
+    PLATFORM_TOOL_CREDENTIAL_TENANT_DELETE = "platform_credential:tenant_tool_delete"
     # platform embedding/rerank config (the runtime DB overlay) — Stream T PR C.
     # system_admin-only write to the platform embedding-config row.
     PLATFORM_EMBEDDING_CONFIG_UPDATED = "platform_embedding_config:updated"
