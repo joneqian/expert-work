@@ -11,6 +11,9 @@ import pytest
 
 from control_plane.webhook_delivery_worker import WebhookDeliveryWorker
 from helix_agent.persistence import (
+    InMemoryApprovalStore,
+    InMemoryArtifactStore,
+    InMemoryThreadMetaStore,
     InMemoryWebhookDeliveryStore,
     InMemoryWebhookEndpointStore,
 )
@@ -19,6 +22,8 @@ from helix_agent.protocol import (
     WebhookDeliveryStatus,
     WebhookEndpointRecord,
 )
+from helix_agent.runtime.runs import InMemoryRunStore, RunInfo, RunStatus
+from helix_agent.runtime.runs.schemas import DisconnectMode
 
 _NOW = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
 _SECRET = "topsecret-value"
@@ -112,10 +117,16 @@ async def _seed(
 
 
 def _worker(endpoints, deliveries, secrets_store, post, **kwargs) -> WebhookDeliveryWorker:
+    # Delivery-only tests pass empty source stores; the enqueue scan over
+    # them is a no-op (the deliveries under test are seeded directly).
     return WebhookDeliveryWorker(
         delivery_store=deliveries,
         endpoint_store=endpoints,
         secret_store=secrets_store,
+        run_store=InMemoryRunStore(),
+        approval_store=InMemoryApprovalStore(),
+        artifact_store=InMemoryArtifactStore(),
+        thread_meta_store=InMemoryThreadMetaStore(),
         http_post=post,
         **kwargs,
     )
@@ -220,3 +231,106 @@ async def test_circuit_breaker_opens_after_threshold() -> None:
     # Breaker threshold 3 → at most 3 endpoints attempted before it trips;
     # the remaining are skipped, so far fewer than 7 POSTs happen.
     assert len(post.calls) <= 3
+
+
+# --------------------------------------------------------------- enqueue
+
+
+async def _enqueue_fixture(*, endpoint_agent: str | None, thread_agent: str | None):
+    """Seed a terminal run + its thread + one endpoint; return the worker
+    and stores so a test can call ``enqueue_once`` and inspect the queue."""
+    endpoints = InMemoryWebhookEndpointStore()
+    deliveries = InMemoryWebhookDeliveryStore()
+    runs = InMemoryRunStore()
+    threads = InMemoryThreadMetaStore()
+    secrets_store = _FakeSecretStore()
+    await secrets_store.put("webhook-endpoint/x", _SECRET)
+    tenant = uuid4()
+    thread_id = uuid4()
+    run_id = uuid4()
+    await threads.create(
+        thread_id=thread_id,
+        tenant_id=tenant,
+        created_by="u1",
+        agent_name=thread_agent,
+    )
+    await runs.create(
+        RunInfo(
+            run_id=run_id,
+            tenant_id=tenant,
+            thread_id=thread_id,
+            user_id=None,
+            status=RunStatus.SUCCESS,
+            on_disconnect=DisconnectMode.CONTINUE,
+            is_resume=False,
+            error=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+            finished_at=_NOW,
+        )
+    )
+    await endpoints.create(
+        WebhookEndpointRecord(
+            id=uuid4(),
+            tenant_id=tenant,
+            name="ops",
+            url="https://hooks.example.com/x",
+            event_types=("run.completed",),
+            agent_name=endpoint_agent,
+            secret_ref="webhook-endpoint/x",
+            enabled=True,
+            source="api",
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+    worker = WebhookDeliveryWorker(
+        delivery_store=deliveries,
+        endpoint_store=endpoints,
+        secret_store=secrets_store,
+        run_store=runs,
+        approval_store=InMemoryApprovalStore(),
+        artifact_store=InMemoryArtifactStore(),
+        thread_meta_store=threads,
+        http_post=_RecordingPost(status=200),
+    )
+    return worker, deliveries, tenant, run_id
+
+
+@pytest.mark.asyncio
+async def test_enqueue_run_terminal_fans_out_and_is_idempotent() -> None:
+    worker, deliveries, _tenant, run_id = await _enqueue_fixture(
+        endpoint_agent=None, thread_agent="reporter"
+    )
+    assert await worker.enqueue_once() == 1
+    rows = [r async for r in _aiter(deliveries)]
+    assert len(rows) == 1
+    assert rows[0].event_id == f"run:{run_id}"
+    assert rows[0].event_type == "run.completed"
+    # Re-scanning the same terminal run does not double-enqueue.
+    assert await worker.enqueue_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_enqueue_respects_agent_scope() -> None:
+    # Endpoint scoped to "other"; the run's thread is agent "reporter" → no match.
+    worker, _deliveries, _tenant, _run_id = await _enqueue_fixture(
+        endpoint_agent="other", thread_agent="reporter"
+    )
+    assert await worker.enqueue_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_enqueue_then_deliver_end_to_end() -> None:
+    worker, _deliveries, _tenant, _run_id = await _enqueue_fixture(
+        endpoint_agent="reporter", thread_agent="reporter"
+    )
+    assert await worker.enqueue_once() == 1
+    delivered, retried, dead = await worker.run_once()
+    assert (delivered, retried, dead) == (1, 0, 0)
+
+
+async def _aiter(store: InMemoryWebhookDeliveryStore):
+    """Yield every delivery row in the in-memory store (test helper)."""
+    for row in store._rows.values():
+        yield row

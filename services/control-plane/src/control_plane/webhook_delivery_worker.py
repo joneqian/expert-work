@@ -30,17 +30,32 @@ import contextlib
 import hmac
 import json
 import logging
+from collections import defaultdict
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
 from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import WebhookDeliveryStore, WebhookEndpointStore
+from helix_agent.persistence import (
+    ApprovalStore,
+    ArtifactStore,
+    ThreadMetaStore,
+    WebhookDeliveryStore,
+    WebhookEndpointStore,
+)
 from helix_agent.persistence.rls import bypass_rls_var
-from helix_agent.protocol import WebhookDeliveryRecord, WebhookDeliveryStatus
+from helix_agent.protocol import (
+    ApprovalStatus,
+    WebhookDeliveryRecord,
+    WebhookDeliveryStatus,
+    WebhookEndpointRecord,
+    WebhookEventType,
+)
+from helix_agent.runtime.runs import RunStatus, RunStore
+from helix_agent.runtime.runs.schemas import TERMINAL_RUN_STATUSES
 from helix_agent.runtime.secret_store import SecretNotFoundError, SecretStore
 
 logger = logging.getLogger("helix.control_plane.webhook_delivery_worker")
@@ -53,6 +68,10 @@ _BACKOFF_SCHEDULE: tuple[int, ...] = (60, 5 * 60, 30 * 60, 2 * 3600, 6 * 3600)
 _BREAKER_THRESHOLD: int = 5
 #: How long a tripped breaker stays open before a probe is allowed again.
 _BREAKER_COOLDOWN_S: int = 300
+#: Per-source rows scanned per enqueue cycle (newest-first). Idempotent
+#: enqueue (UNIQUE(endpoint_id,event_id)) makes a bounded window safe — a
+#: row beyond the window was already enqueued in an earlier cycle.
+_SCAN_LIMIT: int = 500
 #: HMAC signature header (mirrors GitHub's ``X-Hub-Signature-256``).
 _SIGNATURE_HEADER = "X-Helix-Signature-256"
 
@@ -80,6 +99,10 @@ _breaker_skips = helix_counter(
 _cycle_errors = helix_counter(
     "helix_webhook_delivery_cycle_errors_total",
     "Delivery worker cycles that ended in a caught exception.",
+)
+_enqueued = helix_counter(
+    "helix_webhook_deliveries_enqueued_total",
+    "Webhook deliveries enqueued from the 3 source tables (run / approval / artifact).",
 )
 
 
@@ -113,12 +136,17 @@ class WebhookDeliveryWorker:
         delivery_store: WebhookDeliveryStore,
         endpoint_store: WebhookEndpointStore,
         secret_store: SecretStore,
+        run_store: RunStore,
+        approval_store: ApprovalStore,
+        artifact_store: ArtifactStore,
+        thread_meta_store: ThreadMetaStore,
         interval_s: int = 15,
         batch_size: int = _BATCH_SIZE,
         max_attempts: int = _MAX_ATTEMPTS,
         per_tenant_concurrency: int = 4,
         breaker_threshold: int = _BREAKER_THRESHOLD,
         breaker_cooldown_s: int = _BREAKER_COOLDOWN_S,
+        scan_limit: int = _SCAN_LIMIT,
         http_post: HttpPost | None = None,
     ) -> None:
         for name, value in (
@@ -133,6 +161,11 @@ class WebhookDeliveryWorker:
         self._deliveries = delivery_store
         self._endpoints = endpoint_store
         self._secrets = secret_store
+        self._runs = run_store
+        self._approvals = approval_store
+        self._artifacts = artifact_store
+        self._threads = thread_meta_store
+        self._scan_limit = scan_limit
         self._interval_s = interval_s
         self._batch_size = batch_size
         self._max_attempts = max_attempts
@@ -170,6 +203,7 @@ class WebhookDeliveryWorker:
     async def _loop(self) -> None:
         while not self._stop.is_set():
             try:
+                await self.enqueue_once()
                 await self.run_once()
             except Exception:
                 _cycle_errors.inc()
@@ -180,6 +214,161 @@ class WebhookDeliveryWorker:
                 continue
             else:
                 break
+
+    async def enqueue_once(self) -> int:
+        """Scan the 3 source tables and fan out new events into the delivery
+        queue. Returns the number of deliveries enqueued this cycle.
+
+        Idempotent: ``UNIQUE(endpoint_id, event_id)`` plus an
+        :meth:`exists_for_event` pre-check means re-scanning a bounded
+        recent window never double-enqueues (Mini-ADR HX-J1). Agent scope
+        is resolved via ``thread_meta`` (runs / approvals carry a thread);
+        artifacts have no thread on the parent row, so artifact events only
+        match all-agents endpoints (``agent_name = None``) — a documented
+        M0 limitation, not a silent drop.
+        """
+        with _bypass_rls():
+            endpoints = await self._endpoints.list_enabled_all_tenants()
+        if not endpoints:
+            return 0
+        by_tenant: dict[UUID, list[WebhookEndpointRecord]] = defaultdict(list)
+        for ep in endpoints:
+            by_tenant[ep.tenant_id].append(ep)
+
+        now = datetime.now(UTC)
+        agent_cache: dict[UUID, str | None] = {}
+        enqueued = 0
+
+        # run.completed / run.failed — one scan per terminal status.
+        for status in TERMINAL_RUN_STATUSES:
+            event_type: WebhookEventType = (
+                "run.completed" if status is RunStatus.SUCCESS else "run.failed"
+            )
+            with _bypass_rls():
+                runs = await self._runs.list_all_tenants(status=status, limit=self._scan_limit)
+            for run in runs:
+                if not by_tenant.get(run.tenant_id):
+                    continue
+                agent = await self._resolve_agent(run.thread_id, run.tenant_id, cache=agent_cache)
+                enqueued += await self._fan_out(
+                    by_tenant[run.tenant_id],
+                    tenant_id=run.tenant_id,
+                    event_type=event_type,
+                    event_id=f"run:{run.run_id}",
+                    run_id=run.run_id,
+                    agent_name=agent,
+                    payload={
+                        "run_id": str(run.run_id),
+                        "thread_id": str(run.thread_id),
+                        "status": run.status.value,
+                    },
+                    now=now,
+                )
+
+        # approval.requested — pending approvals awaiting a decision.
+        with _bypass_rls():
+            approvals, _total = await self._approvals.list_all_tenants(
+                status=ApprovalStatus.PENDING, limit=self._scan_limit
+            )
+        for ap in approvals:
+            if not by_tenant.get(ap.tenant_id):
+                continue
+            agent = await self._resolve_agent(ap.thread_id, ap.tenant_id, cache=agent_cache)
+            enqueued += await self._fan_out(
+                by_tenant[ap.tenant_id],
+                tenant_id=ap.tenant_id,
+                event_type="approval.requested",
+                event_id=f"approval:{ap.id}",
+                run_id=ap.run_id,
+                agent_name=agent,
+                payload={
+                    "approval_id": str(ap.id),
+                    "run_id": str(ap.run_id),
+                    "thread_id": str(ap.thread_id),
+                    "request_id": ap.request_id,
+                },
+                now=now,
+            )
+
+        # artifact.saved — one event per (artifact, latest version). The
+        # parent row has no thread, so only all-agents endpoints match.
+        with _bypass_rls():
+            artifacts = await self._artifacts.list_all_tenants()
+        for art in artifacts:
+            if art.deleted_at is not None or not by_tenant.get(art.tenant_id):
+                continue
+            enqueued += await self._fan_out(
+                by_tenant[art.tenant_id],
+                tenant_id=art.tenant_id,
+                event_type="artifact.saved",
+                event_id=f"artifact:{art.id}:v{art.latest_version}",
+                run_id=None,
+                agent_name=None,  # no thread on the parent → all-agents only
+                payload={
+                    "artifact_id": str(art.id),
+                    "name": art.name,
+                    "kind": str(art.kind),
+                    "version": art.latest_version,
+                },
+                now=now,
+            )
+
+        if enqueued:
+            logger.info("webhook_delivery.enqueued count=%d", enqueued)
+        return enqueued
+
+    async def _resolve_agent(
+        self, thread_id: UUID, tenant_id: UUID, *, cache: dict[UUID, str | None]
+    ) -> str | None:
+        """Resolve a thread's ``agent_name`` (cached per enqueue cycle)."""
+        if thread_id in cache:
+            return cache[thread_id]
+        with _bypass_rls():
+            meta = await self._threads.get(thread_id, tenant_id=tenant_id)
+        agent = meta.agent_name if meta is not None else None
+        cache[thread_id] = agent
+        return agent
+
+    async def _fan_out(
+        self,
+        endpoints: list[WebhookEndpointRecord],
+        *,
+        tenant_id: UUID,
+        event_type: WebhookEventType,
+        event_id: str,
+        run_id: UUID | None,
+        agent_name: str | None,
+        payload: dict[str, object],
+        now: datetime,
+    ) -> int:
+        """Enqueue one event to every matching endpoint; return how many."""
+        count = 0
+        for ep in endpoints:
+            if event_type not in ep.event_types:
+                continue
+            if ep.agent_name is not None and ep.agent_name != agent_name:
+                continue
+            with _bypass_rls():
+                if await self._deliveries.exists_for_event(endpoint_id=ep.id, event_id=event_id):
+                    continue
+                await self._deliveries.create(
+                    WebhookDeliveryRecord(
+                        id=uuid4(),
+                        tenant_id=tenant_id,
+                        endpoint_id=ep.id,
+                        event_id=event_id,
+                        event_type=event_type,
+                        run_id=run_id,
+                        payload=payload,
+                        status=WebhookDeliveryStatus.PENDING,
+                        attempt=0,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            count += 1
+            _enqueued.inc()
+        return count
 
     async def run_once(self) -> tuple[int, int, int]:
         """Drain one batch. Returns ``(delivered, retried, dead_lettered)``."""

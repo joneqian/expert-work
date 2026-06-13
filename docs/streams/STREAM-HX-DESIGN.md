@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）已交付（Wave 3 首项，#576/#577/#578/#579）——gVisor 生产上线前置 follow-up 均已决：F1（沙箱→proxy 寻址）方案=`/etc/hosts` 固定 IP（§12.2.5，接缝 #592 + CI 双 runtime 转正 gate_49 + compose 落静态 IP，剩纯运维选私网段），F2（fork-bomb 语义）方案 A「沙箱阵亡+重建」（§12.2.4，gate_56 转正）；其余各条开工时追加章节。
+> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）已交付（Wave 3 首项，#576/#577/#578/#579）——gVisor 生产上线前置 follow-up 均已决：F1（沙箱→proxy 寻址）方案=`/etc/hosts` 固定 IP（§12.2.5，接缝 #592 + CI 双 runtime 转正 gate_49 + compose 落静态 IP，剩纯运维选私网段），F2（fork-bomb 语义）方案 A「沙箱阵亡+重建」（§12.2.4，gate_56 转正）；HX-9（租户级出站 webhook hook，§13）已全交付（#595 设计 / #596 数据模型 / #597 API+admin-ui / #598 投递引擎 / #待填 入队扫描收尾）。其余各条开工时追加章节。
 
 ---
 
@@ -1137,6 +1137,6 @@ hook URL 是**运维配置资产**非 agent 行为——改 URL 不该弹 agent 
 | PR1 | 迁移 `webhook_endpoint`+`webhook_delivery` 两表 + RLS + 部分索引 + DTO/ORM/Store 三层 + ResourceType 双镜像（AuditAction 推迟到 PR2 emit）。**纯数据模型，零 orchestrator 改动（方案 b）** | §13.5-PR1；迁移真 PG |
 | PR2 | `api/webhook_endpoints.py` 5 端点 CRUD + authz + 跨租户 + AuditAction WEBHOOK_* + secret show-once + 配额 + SSRF + admin-ui（SDK/页面/tab/i18n/接线） | §13.5-PR2 |
 | PR3a | 投递引擎：`WebhookDeliveryWorker` 消费 `webhook_delivery`（`list_ready`→SSRF 复检+HMAC-SHA256 签名 POST→2xx/4xx/5xx 状态机+退避/DLQ+per-endpoint 断路器+per-tenant 并发）+ lifespan 接线 + 计量 + 可观测 | §13.5-PR3；自足于 webhook_delivery store |
-| PR3b（收尾） | 入队扫描：3 源表（agent_run 终态/agent_approval/artifact）加跨租户 list-since + worker 入队阶段（匹配 enabled endpoint → 幂等入队）→ 端到端闭环 | §13.5-PR3；零债 6 条 |
+| PR3b（收尾） | 入队扫描：`enqueue_once` 扫 3 源表（**复用现成 `list_all_tenants`，零新增 store 方法**）→ agent 范围经 thread_meta 反解 → 幂等入队 → 端到端闭环 | §13.5-PR3；零债 6 条 |
 
-> **PR3 拆分（2026-06-13）**：投递引擎（PR3a，自足于 webhook_delivery store）与入队扫描（PR3b，需 3 源表新增 list-since 方法）拆两 PR，各自独立 review+CI 绿。幂等去重（`UNIQUE(endpoint_id,event_id)`）保证无论游标精度都不重复投递，故 PR3b 的 since 方法是扫描量优化非正确性必需。PR3a 单独 merge 时无人入队（非端到端），PR3b 闭环。
+> **PR3 拆分 + PR3b 实现注记（2026-06-13）**：投递引擎（PR3a，自足于 webhook_delivery store）与入队扫描（PR3b）拆两 PR，各自独立 review+CI 绿。**PR3b 复用 3 源表现成 `list_all_tenants`（run/approval/artifact），不新增 list-since 方法**——`UNIQUE(endpoint_id,event_id)` + `exists_for_event` 预检使 bounded 窗口重扫（scan_limit=500/源/cycle）幂等安全，故游标精度只影响扫描量非正确性。agent 范围匹配经 `thread_meta.get(thread_id)` 反解（run/approval 携 thread_id）；**artifact 父行无 thread → artifact.saved 仅匹配 all-agents endpoint（agent_name=None），文档化 M0 限制非静默丢**（artifacts 本是 user-scoped 资源）。PR3a 单独 merge 时无人入队（非端到端），PR3b 闭环。

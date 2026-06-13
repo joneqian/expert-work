@@ -1146,6 +1146,10 @@ def create_app(
                     delivery_store=resolved_webhook_delivery_store,
                     endpoint_store=resolved_webhook_endpoint_store,
                     secret_store=resolved_secret_store,
+                    run_store=resolved_run_store,
+                    approval_store=resolved_approval_store,
+                    artifact_store=resolved_artifact_store,
+                    thread_meta_store=resolved_threads,
                     interval_s=resolved_settings.webhook_delivery_interval_s,
                     per_tenant_concurrency=(
                         resolved_settings.webhook_delivery_per_tenant_concurrency
