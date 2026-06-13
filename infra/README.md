@@ -62,6 +62,10 @@ gated behind compose profiles (Stream I.1 — [STREAM-I-DESIGN](../docs/streams/
 Langfuse (agent trace 调试) 起停 + 接线 + PII 脱敏自检见
 [docs/runbooks/langfuse.md](../docs/runbooks/langfuse.md).
 
+**便捷封装**:`make dev-up`（见 [`Makefile`](./Makefile)）一把起全量 dev 栈
+（full+auth+observability 必需服务，排除会撞 8001 的 `control-plane-green`），
+`make dev-info` 打印各 web 地址 + dev 登录凭据，`make help` 看全部目标。
+
 ```bash
 # Pre-build the sandbox execution image first (see "Sandbox image" below).
 docker build -f infra/sandbox-image/Dockerfile -t helix-sandbox:dev infra/sandbox-image
