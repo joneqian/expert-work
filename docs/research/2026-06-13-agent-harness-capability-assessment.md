@@ -157,17 +157,23 @@
 | 10.5 趋势监控/SLO | ★★★☆☆ ⚠️ | `subsystems/20 §5.4 SLO`、§5.6 dashboard | 设计全，**M0 仅 3 dashboard，burn rate recording rule 未在 infra/ 落地** |
 | 10.6 OTel/Langfuse | ★★★★★ | ADR-0005、`langfuse_middleware.py`、OBS-L1 PII mask | Langfuse v3+OTel三件套，trace_id 共享跳转 |
 
-## 域 11. 评测 / Eval harness — 均分 2.86（全量重核下调）
+## 域 11. 评测 / Eval harness — 均分 2.86（含 S2 运行期验证）
+
+> **2026-06-13 S2 运行期验证（全表唯一 runtime-verified 域）**：真跑 `tools/eval/run_baseline.py`
+> → 15 capability 全 PASS；longmem+harness 31 单测过。**厘清：引擎强 / ops 层缺**——
+> **capability eval 引擎**（11.1/11.2/11.7）运行期确认 ★4-5；**eval 平台/ops 层**（11.3/11.4/11.5/11.6）
+> 运行期确认真缺（baseline 无 session 指标、无常驻 worker、`eval_run` 表不存在、无对抗集）。
+> 这是全表**唯一靠「跑」而非「读」得出的评分**，可信度最高。S2 建 ops 层，详见 `..-p1-s2-eval-platform-design.md`。
 
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
-| 11.1 确定性 eval | ★★★★★ | `tools/eval/helix_eval.py` EvalSet YAML+4 assertion、mock_provider | 无 LLM CI 可跑 |
-| 11.2 LLM-judge | ★★★★★ | `tools/eval/_judge.py:ScriptedJudge+AnthropicHaikuJudge` (J-39) | CI mock / 周跑真 Haiku |
-| 11.3 会话级指标 | ★☆☆☆☆ | grep `resolution_rate`/`goal_completion` **全空**；`_capability.py` 仅 pass/fail | **全量重核手动下调 3→1**：原靠 subsystems/26 设计文档，代码未编码会话级指标 |
-| 11.4 Trace-based eval | ★☆☆☆☆ | — | trace 基础设施在但 eval 框架无 trace 重放/根因关联设计 |
-| 11.5 对抗 prompt 数据集 | ★☆☆☆☆ | `tools/eval/datasets/` **无 adversarial 目录** | **全量重核手动下调 2→1**：原靠 subsystems/26，injection/jailbreak 数据集不存在 |
-| 11.6 生产 eval 异步 | ★★☆☆☆ | `subsystems/26 §2` EvalRun CRUD、本地 run_baseline.py | CI 集成设计在，**生产 eval worker/scheduler 未实装** |
-| 11.7 标准 benchmark | ★★★★★ | `tools/eval/longmem/` LoCoMo+LongMemEval_S，download sha256-pin、recall/NDCG/MRR (CM-N5) | P0 retrieval + P1 e2e 两层 |
+| 11.1 确定性 eval | ★★★★★ | **运行确认**：`run_baseline.py` 15 cap 全 PASS；`helix_eval.py` mock_provider | 无 LLM CI 真跑通 |
+| 11.2 LLM-judge | ★★★★★ | **运行确认**：`_judge.py:ScriptedJudge`(CI)+`AnthropicHaikuJudge`(周跑) | baseline judge_mean 出数 |
+| 11.3 会话级指标 | ★☆☆☆☆ | **运行确认缺**：baseline 只出 per-capability，无 resolution_rate/goal_completion | 重核+运行双确认 ★1（S2.2 建） |
+| 11.4 Trace-based eval | ★☆☆☆☆ | **运行确认缺**：只评终态不评 10.1 span 树 | 10.1 已交付可消费（S2.4 建） |
+| 11.5 对抗 prompt 数据集 | ★☆☆☆☆ | **运行确认缺**：`tools/eval/datasets/` 无 adversarial 目录 | 重核+运行双确认 ★1（S2.3 建） |
+| 11.6 生产 eval 异步 | ★★☆☆☆ | **运行确认**：`run_baseline.py` 本地 CLI 真跑通，但**无常驻 worker**、`eval_run` 表不存在 | 引擎在，缺调度/持久化 ops 层（S2.1 建表+worker） |
+| 11.7 标准 benchmark | ★★★★★ | **运行确认**：`tools/eval/longmem/` harness + 31 单测过；LoCoMo+LongMemEval_S, recall/NDCG/MRR | P0 retrieval + P1 e2e 两层 |
 
 ## 域 12. 成本 / Token / 计量 / 配额 — 均分 4.50
 
