@@ -27,6 +27,7 @@ import { SettingsBillingChargeback } from "./pages/SettingsBillingChargeback";
 import { SkillDetail } from "./pages/SkillDetail";
 import { SkillsList } from "./pages/SkillsList";
 import { TriggersList } from "./pages/TriggersList";
+import { WebhooksList } from "./pages/WebhooksList";
 import { ComingSoon } from "./pages/ComingSoon";
 
 export function AppRouter() {
@@ -46,6 +47,7 @@ export function AppRouter() {
       <Route path="/skills" element={<SkillsList />} />
       <Route path="/skills/:skillId" element={<SkillDetail />} />
       <Route path="/triggers" element={<TriggersList />} />
+      <Route path="/webhooks" element={<WebhooksList />} />
       <Route path="/settings/api-keys" element={<SettingsApiKeys />} />
       <Route path="/settings/service-accounts" element={<SettingsServiceAccounts />} />
       <Route path="/settings/role-bindings" element={<SettingsRoleBindings />} />

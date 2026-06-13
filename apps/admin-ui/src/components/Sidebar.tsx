@@ -23,6 +23,7 @@ import {
   Users,
   Building,
   Shield,
+  Webhook,
 } from "lucide-react";
 import { BrandGlyph } from "../icons/BrandGlyph";
 import { ApprovalPendingBadge } from "./ApprovalPendingBadge";
@@ -47,6 +48,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "knowledge", labelKey: "nav.knowledge", icon: <BookOpen size={16} strokeWidth={1.5} />, path: "/knowledge" },
   { key: "skills", labelKey: "nav.skills", icon: <FileText size={16} strokeWidth={1.5} />, path: "/skills" },
   { key: "triggers", labelKey: "nav.triggers", icon: <Clock size={16} strokeWidth={1.5} />, path: "/triggers" },
+  { key: "webhooks", labelKey: "nav.webhooks", icon: <Webhook size={16} strokeWidth={1.5} />, path: "/webhooks" },
 ];
 
 const SETTINGS_ITEMS: NavItem[] = [

@@ -343,6 +343,9 @@ class Settings(BaseSettings):
     #: Stream J.10 (Mini-ADR J-26 (2)) — max cron triggers a tenant may
     #: register. Caps the scheduler's per-sweep work + a runaway client.
     max_cron_triggers_per_tenant: int = Field(default=100, gt=0)
+    #: HX-9 (STREAM-HX § 13) — max outbound webhook endpoints a tenant may
+    #: register. Caps the delivery worker's per-event fan-out + a runaway client.
+    max_webhook_endpoints_per_tenant: int = Field(default=50, gt=0)
 
     # ------------------------------------------------------------------ curation worker (J.12)
     #: Stream J.12 — how often the curation worker scans the L7 trajectory

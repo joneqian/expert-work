@@ -41,6 +41,7 @@ import {
   Plus,
   ArrowRight,
   Cog,
+  Webhook,
 } from "lucide-react";
 
 import { listAgents, type AgentRecord } from "../api/agents";
@@ -171,6 +172,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
       { key: "go-knowledge", label: t("cmdk.label_knowledge"), path: "/knowledge", icon: <BookOpen size={16} strokeWidth={1.5} />, sc: ["g", "k"] },
       { key: "go-skills", label: t("cmdk.label_skills"), path: "/skills", icon: <FileText size={16} strokeWidth={1.5} />, sc: ["g", "s"] },
       { key: "go-triggers", label: t("cmdk.label_triggers"), path: "/triggers", icon: <Clock size={16} strokeWidth={1.5} />, sc: ["g", "t"] },
+      { key: "go-webhooks", label: t("cmdk.label_webhooks"), path: "/webhooks", icon: <Webhook size={16} strokeWidth={1.5} />, sc: ["g", "w"] },
       { key: "go-api-keys", label: t("cmdk.label_settings_api_keys"), path: "/settings/api-keys", icon: <Key size={16} strokeWidth={1.5} />, sc: [] as string[] },
     ];
     jumpItems.forEach((g) => {

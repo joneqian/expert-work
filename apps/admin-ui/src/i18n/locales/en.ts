@@ -39,6 +39,7 @@ export interface TranslationKeys {
     knowledge: string;
     skills: string;
     triggers: string;
+    webhooks: string;
     tenants: string;
     platform_credentials: string;
     api_keys: string;
@@ -887,6 +888,48 @@ export interface TranslationKeys {
     delete_confirm_title: string;
     delete_confirm_body: string;
   };
+  webhooks: {
+    page_title: string;
+    subtitle: string;
+    cross_tenant_banner: string;
+    failed_to_load: string;
+    empty: string;
+    empty_cross: string;
+    all_agents: string;
+    col_name: string;
+    col_url: string;
+    col_events: string;
+    col_agent: string;
+    col_enabled: string;
+    col_actions: string;
+    create: string;
+    create_submit: string;
+    create_title: string;
+    field_name: string;
+    field_url: string;
+    url_hint: string;
+    field_events: string;
+    events_placeholder: string;
+    field_agent_name: string;
+    agent_name_hint: string;
+    name_required: string;
+    url_required: string;
+    events_required: string;
+    secret_drawer_title: string;
+    secret_warn_title: string;
+    secret_warn_body: string;
+    secret_endpoint_name: string;
+    secret_label: string;
+    secret_copy: string;
+    secret_copied: string;
+    secret_copy_failed: string;
+    secret_acknowledged: string;
+    toggled: string;
+    created: string;
+    deleted: string;
+    delete_confirm_title: string;
+    delete_confirm_body: string;
+  };
   skills: {
     page_title: string;
     subtitle: string;
@@ -1271,6 +1314,7 @@ export interface TranslationKeys {
     label_knowledge: string;
     label_skills: string;
     label_triggers: string;
+    label_webhooks: string;
     label_settings_api_keys: string;
     action_create_agent: string;
     action_create_api_key: string;
@@ -1358,6 +1402,7 @@ const en: TranslationKeys = {
     knowledge: "Knowledge",
     skills: "Skills",
     triggers: "Triggers",
+    webhooks: "Webhooks",
     tenants: "Tenants",
     platform_credentials: "Platform Credentials",
     api_keys: "API Keys",
@@ -2252,6 +2297,50 @@ const en: TranslationKeys = {
     delete_confirm_body:
       "The cron schedule / webhook endpoint will stop firing immediately. Cannot be undone.",
   },
+  webhooks: {
+    page_title: "Webhooks",
+    subtitle:
+      "Outbound webhook endpoints — the platform signs and POSTs agent-lifecycle events (run completed / failed, approval requested, artifact saved) to your URL.",
+    cross_tenant_banner: "Cross-tenant view",
+    failed_to_load: "Failed to load webhook endpoints",
+    empty: "No webhook endpoints yet. Create one to receive signed event deliveries.",
+    empty_cross: "No webhook endpoints across any tenant.",
+    all_agents: "All agents",
+    col_name: "Name",
+    col_url: "URL",
+    col_events: "Events",
+    col_agent: "Agent",
+    col_enabled: "Enabled",
+    col_actions: "Actions",
+    create: "New endpoint",
+    create_submit: "Create",
+    create_title: "New webhook endpoint",
+    field_name: "Name",
+    field_url: "Delivery URL",
+    url_hint: "HTTPS endpoint the platform POSTs to. Private / metadata addresses are rejected.",
+    field_events: "Event types",
+    events_placeholder: "Select one or more events",
+    field_agent_name: "Agent scope (optional)",
+    agent_name_hint: "Leave blank to receive events from every agent in the tenant.",
+    name_required: "Name is required",
+    url_required: "URL is required",
+    events_required: "Select at least one event type",
+    secret_drawer_title: "Signing secret — shown once",
+    secret_warn_title: "Copy this secret now",
+    secret_warn_body:
+      "This HMAC signing secret is shown only once and never again. Verify the X-Helix-Signature-256 header with it. Rotation = delete + re-create.",
+    secret_endpoint_name: "Endpoint",
+    secret_label: "Signing secret",
+    secret_copy: "Copy",
+    secret_copied: "Secret copied to clipboard",
+    secret_copy_failed: "Copy failed — select the text manually",
+    secret_acknowledged: "I've saved it",
+    toggled: "Endpoint updated",
+    created: "Webhook endpoint created",
+    deleted: "Webhook endpoint deleted",
+    delete_confirm_title: "Delete this webhook endpoint?",
+    delete_confirm_body: "Deliveries to this endpoint stop immediately. Cannot be undone.",
+  },
   skills: {
     page_title: "Skills",
     subtitle:
@@ -2647,6 +2736,7 @@ const en: TranslationKeys = {
     label_knowledge: "Knowledge",
     label_skills: "Skills",
     label_triggers: "Triggers",
+    label_webhooks: "Webhooks",
     label_settings_api_keys: "Settings · API Keys",
     action_create_agent: "Create new Agent…",
     action_create_api_key: "Create new API Key…",

@@ -74,6 +74,7 @@ from control_plane.api import (
     build_triggers_router,
     build_uploads_router,
     build_usage_router,
+    build_webhook_endpoints_router,
     build_webhooks_router,
 )
 from control_plane.api.model_catalog import PlatformConfiguredProviders
@@ -315,6 +316,14 @@ from helix_agent.persistence.trigger import (
     TriggerRunStore,
     TriggerStore,
 )
+from helix_agent.persistence.webhook import (
+    InMemoryWebhookDeliveryStore,
+    InMemoryWebhookEndpointStore,
+    SqlWebhookDeliveryStore,
+    SqlWebhookEndpointStore,
+    WebhookDeliveryStore,
+    WebhookEndpointStore,
+)
 from helix_agent.protocol import PROVIDER_CATALOG
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.checkpointer import make_checkpointer
@@ -359,6 +368,8 @@ def create_app(
     run_event_repo: RunEventStore | None = None,
     trigger_repo: TriggerStore | None = None,
     trigger_run_repo: TriggerRunStore | None = None,
+    webhook_endpoint_repo: WebhookEndpointStore | None = None,
+    webhook_delivery_repo: WebhookDeliveryStore | None = None,
     skill_repo: SkillStore | None = None,
     knowledge_ingestion_runner: KnowledgeIngestionRunner | None = None,
     audit_logger: AuditLogger | None = None,
@@ -478,6 +489,13 @@ def create_app(
     )
     resolved_trigger_run_store: TriggerRunStore = trigger_run_repo or (
         sql_stores.trigger_run if sql_stores else InMemoryTriggerRunStore()
+    )
+    # HX-9 (STREAM-HX § 13) — outbound webhook hook registry + delivery queue.
+    resolved_webhook_endpoint_store: WebhookEndpointStore = webhook_endpoint_repo or (
+        sql_stores.webhook_endpoint if sql_stores else InMemoryWebhookEndpointStore()
+    )
+    resolved_webhook_delivery_store: WebhookDeliveryStore = webhook_delivery_repo or (
+        sql_stores.webhook_delivery if sql_stores else InMemoryWebhookDeliveryStore()
     )
     # Stream J.12 (Mini-ADR J-43) — curation candidate + eval-dataset registries.
     resolved_curation_candidate_store: CurationCandidateStore = curation_candidate_repo or (
@@ -1195,6 +1213,8 @@ def create_app(
     app.state.run_event_store = resolved_run_event_store
     app.state.trigger_store = resolved_trigger_store
     app.state.trigger_run_store = resolved_trigger_run_store
+    app.state.webhook_endpoint_store = resolved_webhook_endpoint_store
+    app.state.webhook_delivery_store = resolved_webhook_delivery_store
     app.state.curation_candidate_store = resolved_curation_candidate_store
     app.state.eval_dataset_store = resolved_eval_dataset_store
     app.state.knowledge_store = resolved_knowledge_store
@@ -1361,6 +1381,7 @@ def create_app(
     app.include_router(build_tenant_config_router())
     app.include_router(build_triggers_router())
     app.include_router(build_webhooks_router())
+    app.include_router(build_webhook_endpoints_router())
     app.include_router(build_audit_router())
     app.include_router(build_curation_router())
     app.include_router(build_eval_dataset_router())
@@ -1394,6 +1415,8 @@ class _SqlStores:
     run_event: RunEventStore  # Stream H.3 PR 3 (Mini-ADR H-7)
     trigger: TriggerStore  # Stream J.10 (Mini-ADR J-26 / J-42)
     trigger_run: TriggerRunStore  # Stream J.10
+    webhook_endpoint: WebhookEndpointStore  # HX-9 (STREAM-HX § 13)
+    webhook_delivery: WebhookDeliveryStore  # HX-9
     curation_candidate: CurationCandidateStore  # Stream J.12 (Mini-ADR J-43)
     eval_dataset: EvalDatasetStore  # Stream J.12 (Mini-ADR J-43)
     service_account: ServiceAccountStore
@@ -1606,6 +1629,8 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         run_event=SqlRunEventStore(session_factory),
         trigger=SqlTriggerStore(session_factory),
         trigger_run=SqlTriggerRunStore(session_factory),
+        webhook_endpoint=SqlWebhookEndpointStore(session_factory),
+        webhook_delivery=SqlWebhookDeliveryStore(session_factory),
         curation_candidate=SqlCurationCandidateStore(session_factory),
         eval_dataset=SqlEvalDatasetStore(session_factory),
         service_account=SqlServiceAccountStore(session_factory),

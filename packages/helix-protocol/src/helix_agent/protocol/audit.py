@@ -194,6 +194,10 @@ class AuditAction(StrEnum):
     # triggers — Capability Uplift Sprint #1 (Mini-ADR U-2)
     TRIGGER_PROMPT_INJECTION_BLOCKED = "trigger:prompt_injection_blocked"
     TRIGGER_PROMPT_INJECTION_WARN = "trigger:prompt_injection_warn"
+    # outbound webhook hook (HX-9 — STREAM-HX § 13)
+    WEBHOOK_ENDPOINT_CREATE = "webhook_endpoint:create"
+    WEBHOOK_ENDPOINT_UPDATE = "webhook_endpoint:update"
+    WEBHOOK_ENDPOINT_DELETE = "webhook_endpoint:delete"
     # curation / eval-dataset (Stream J.12 — Mini-ADR J-43)
     EVAL_DATASET_CREATE = "eval_dataset:create"
     EVAL_DATASET_UPDATE = "eval_dataset:update"
