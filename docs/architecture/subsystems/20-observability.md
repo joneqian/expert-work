@@ -163,46 +163,176 @@ helix.orchestrator.session_run
 
 ### 5.2 关键 metric
 
-> ⚠️ 本节为**设计期目标清单**，部分指标名与实现已漂移（如实际为 `helix_llm_token_usage_total` 而非 `helix_llm_tokens_total`），且含 `helix_subagent_*` / `helix_hitl_*` / `helix_eval_*` 等 **M1 目标但 M0 未实现**项。**as-built 完整 catalog = A.9 follow-up**（待定 doc shape：标注 M0-shipped vs M1-target，或独立 as-built 参考）。指标命名的**强制真值源**是 `helix-common/observability/metrics.py` 的 validator（`helix_*` 前缀 + label cardinality 拦截）。
+本节分两块：**§5.2.1 as-built（M0 已 emit）**= 全仓实测 102 个 `helix_*` 指标（A.9，据 `helix_counter`/`helix_histogram`/`helix_gauge` 定义点逐个核），**§5.2.2 M1-target**= 设计期规划但 M0 未实现的指标。**强制真值源** = `helix-common/observability/metrics.py` 的 validator（`helix_*` 前缀 + label cardinality 拦截）；新增/改名指标先过它。
 
-**业务指标**
+> 全部指标为模块级单例，经三个 builder 定义。`helix_uplift_*` 几乎全在 `helix-common/uplift_metrics.py`；`helix_control_plane_*` 散在各 worker / middleware；orchestrator 指标在 `sse.py` / `graph_builder/builder.py`。
 
-```
-helix_session_duration_seconds{tenant,agent,version,outcome}        histogram
-   # outcome = success / failed / cancelled / timeout
-helix_session_ttft_seconds{tenant,agent}                            histogram
-helix_llm_tokens_total{tenant,agent,provider,model,direction}       counter
-   # direction = input | output | cache_creation | cache_read
-helix_llm_latency_seconds{tenant,provider,model}                    histogram
-helix_tool_call_duration_seconds{tenant,tool_type,outcome}          histogram
-   # tool_type = builtin | http | mcp | sandbox | subagent
-helix_subagent_total{tenant,parent_agent,status}                    counter   # 24
-helix_subagent_depth{tenant,parent_agent}                           histogram # 24
-helix_quota_exceeded_total{tenant,dimension,reason}                 counter   # 16；统一用 _exceeded_，含 reason label
-helix_auth_decisions_total{result,reason}                           counter
-   # result = grant | deny
-helix_hitl_pending_total{tenant,agent}                              gauge     # 25
-helix_hitl_decision_duration_seconds{tenant,outcome}                histogram # 25
-helix_eval_gate_decision_total{tenant,suite,decision}               counter   # 26
-helix_eval_regression_total{tenant,suite}                           counter   # 26
-```
+#### 5.2.1 as-built（M0 已 emit，102 项）
 
-**基础设施指标**
+**`helix_control_plane_*`（25）**
 
-```
-helix_sandbox_cold_start_seconds{image,runtime}                     histogram
-helix_sandbox_pool_size{image,state}                                gauge     # 14
-helix_sandbox_acquire_latency_seconds{result}                       histogram # 14；result=ok|cold_miss|timeout
-helix_checkpoint_write_duration_seconds{tenant,result}              histogram
-helix_event_log_append_duration_seconds                             histogram # 标准化命名（替代 audit_write_latency_seconds）
-helix_resume_total{tenant,outcome}                                  counter   # 19；outcome=ok|version_mismatch|force|rejected
-helix_pg_connection_pool_in_use{db}                                 gauge     # 23 共用同一命名
-helix_redis_command_duration_seconds{cmd}                           histogram # 13/16 调 Redis 时 emit
-helix_network_egress_meta_attempt_total{tenant}                     counter   # 21；安全 P0 信号，任何 > 0 都告警
-helix_dr_backup_age_seconds{asset_type}                             gauge     # 22；核心 RPO SLI
-```
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_control_plane_http_requests_total` | counter | `method,route,status_code` | 控制面 HTTP 请求计数 |
+| `helix_control_plane_http_request_duration_seconds` | histogram | `method,route,status_code` | 控制面 HTTP handler 时延 |
+| `helix_control_plane_rate_limit_decisions_total` | counter | `dimension,decision` | gateway 限流决策 |
+| `helix_control_plane_tenant_rate_limit_decisions_total` | counter | `decision` | 租户 tier 限流决策 |
+| `helix_control_plane_audit_query_total` | counter | `tenant_scope,result` | GET /v1/audit 调用 |
+| `helix_control_plane_audit_query_seconds` | histogram | `tenant_scope` | GET /v1/audit 时延（含自审计 emit） |
+| `helix_control_plane_run_list_total` | counter | `tenant_scope` | GET /v1/runs 调用 |
+| `helix_control_plane_run_list_seconds` | histogram | `tenant_scope` | GET /v1/runs 时延 |
+| `helix_control_plane_approvals_pending` | gauge | `()` | 平台范围待审批行数（HX-4） |
+| `helix_control_plane_approval_gauge_cycle_errors_total` | counter | `()` | ApprovalGaugeWorker 周期异常 |
+| `helix_control_plane_feedback_consumed_total` | counter | `action` | 👎 反馈被学习闭环消费（HX-2） |
+| `helix_control_plane_feedback_consumer_cycle_errors_total` | counter | `()` | FeedbackConsumerWorker 周期异常 |
+| `helix_control_plane_triggers_fired_total` | counter | `()` | 触发器启动 run |
+| `helix_control_plane_trigger_scheduler_cycle_errors_total` | counter | `()` | trigger 调度器周期异常 |
+| `helix_control_plane_trigger_dead_letters_total` | counter | `()` | trigger 耗尽重试预算入 DLQ |
+| `helix_control_plane_curation_candidates_detected_total` | counter | `()` | 新标记的策划候选轨迹 |
+| `helix_control_plane_curation_worker_cycle_errors_total` | counter | `()` | 策划 worker 周期异常 |
+| `helix_control_plane_skill_evolution_grounded_total` | counter | `()` | 产出 grounded DRAFT skill 的候选 |
+| `helix_control_plane_skill_evolution_cycle_errors_total` | counter | `()` | skill 进化 worker 周期异常 |
+| `helix_control_plane_skill_rollback_total` | counter | `()` | rollback monitor 自动归档的 ACTIVE skill |
+| `helix_control_plane_skill_rollback_cycle_errors_total` | counter | `()` | rollback monitor 周期异常 |
+| `helix_control_plane_memory_dlq_dead_letters_total` | counter | `()` | memory DLQ 超重试上限弃置 |
+| `helix_control_plane_memory_dlq_retries_succeeded_total` | counter | `()` | memory DLQ 重试成功出队 |
+| `helix_control_plane_memory_dlq_cycle_errors_total` | counter | `()` | memory DLQ worker 周期异常 |
+| `helix_control_plane_quota_reaper_cycle_errors_total` | counter | `()` | 配额预留 reaper 周期异常 |
 
-**关键决策**：**label cardinality 严格管控**——`agent` 是 enum（manifest name），`session_id` / `trace_id` 不进 label（高基数会爆 Prometheus）。session_id 留在 trace 与 log。
+**`helix_llm_*`（5）**
+
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_llm_token_usage_total` | counter | `tenant_id,agent_name,model,type` | 每次 LLM 调用 token 消耗，按 type 分（G.9） |
+| `helix_llm_billed_cost_micros` | gauge | `tenant,model` | rollup 计算的计费成本（µUSD）/租户·模型·月 |
+| `helix_llm_stream_stale_total` | counter | `provider_key` | provider 超 `stream_deadline_s`（L.L3） |
+| `helix_llm_auth_refresh_total` | counter | `provider_key,result` | OAuth provider 401 触发的凭证刷新（L.L8） |
+| `helix_llm_tool_disclosure_fallback_total` | counter | `provider` | 厂商原生工具披露档被拒、回落 HX-12 档 |
+
+**`helix_sandbox_*` / `helix_session_*` / `helix_tool*`（10）**
+
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_sandbox_cold_start_seconds` | histogram | `()` | 启动决策到 `wait_ready` 成功的秒数 |
+| `helix_sandbox_pool_total` | counter | `event` | 暖池流转事件（HX-6） |
+| `helix_sandbox_pool_ready` | gauge | `variant` | 当前 READY 暖池容器数/镜像变体 |
+| `helix_session_ttft_seconds` | histogram | `()` | RUNNING 到首个 agent chunk 的秒数 |
+| `helix_session_duration_seconds` | histogram | `outcome` | RUNNING 到终态的秒数，按 run 结局 |
+| `helix_tool_call_total` | counter | `tool,outcome` | 工具分派计数（ok/error/blocked） |
+| `helix_tool_latency_seconds` | histogram | `tool` | 每次工具分派 wall-clock |
+| `helix_tool_promotion_total` | counter | `event` | deferred-tool promotion 生命周期（HX-12） |
+| `helix_tools_stages_total` | counter | `()` | 执行的工具调用 stage 数（L.L6） |
+| `helix_tools_dispatched_total` | counter | `()` | L6 stage 内分派的工具调用数（÷stages=均并发） |
+
+**`helix_cm_*` 上下文管理（15）**
+
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_cm_ingest_total` | counter | `outcome` | run 起始工作区状态 ingest（CM-0） |
+| `helix_cm_projection_total` | counter | `outcome` | turn 边界工作区状态投影（CM-0） |
+| `helix_cm_recitation_chars` | gauge | `()` | 注入 prompt 尾的 plan 复述字符数（CM-0 N1） |
+| `helix_cm_tool_error_total` | counter | `error_class,tool` | 分类后入恢复 advisory 的工具失败（CM-1） |
+| `helix_cm_recovery_advisory_chars` | gauge | `()` | 注入 prompt 尾的恢复 advisory 字符数（CM-1） |
+| `helix_cm_working_window_trim_total` | counter | `outcome` | agent_node 入口工作记忆滑窗（CM-2） |
+| `helix_cm_working_window_dropped_turns` | gauge | `()` | 最近滑窗 trim 丢弃的 user turn 数（CM-2） |
+| `helix_cm_precompaction_flush_total` | counter | `outcome` | 压缩前记忆 flush（CM-3） |
+| `helix_cm_precompaction_flush_memories` | gauge | `()` | 最近 pre-compaction flush 写入的记忆数（CM-3） |
+| `helix_cm_tool_overflow_total` | counter | `outcome,tool` | 工具结果溢出外置（CM-5） |
+| `helix_cm_tool_overflow_chars` | gauge | `()` | 最近外置工具结果溢出字符数（CM-5） |
+| `helix_cm_effort_escalation_total` | counter | `signal` | 升档高 effort caller 服务的 turn（CM-9） |
+| `helix_cm_memory_rerank_total` | counter | `outcome` | 长期记忆召回 rerank（CM-4） |
+| `helix_cm_memory_mmr_total` | counter | `outcome` | 长期记忆召回 MMR 选择（CM-6） |
+| `helix_cm_memory_reconcile_total` | counter | `op` | run-end 记忆写回对账（CM-7） |
+
+**`helix_uplift_*` skills/memory/mcp/curator/threat/credentials（30）**
+
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_uplift_threat_scan_total` | counter | `scope,result,variant` | 威胁扫描调用 |
+| `helix_uplift_threat_pattern_hit_total` | counter | `pattern_id,scope,variant` | 每 pattern 命中数（调参） |
+| `helix_uplift_triggers_blocked_total` | counter | `phase` | 被注入扫描器拒的触发器 |
+| `helix_uplift_memory_writes_blocked_total` | counter | `source` | 被严格注入扫描器拒的记忆写 |
+| `helix_uplift_memory_recalls_redacted_total` | counter | `()` | 召回时被 `[BLOCKED:<cat>]` 替换的记忆 |
+| `helix_uplift_memory_drift_total` | counter | `()` | content_hash 与存储不符的记忆行 |
+| `helix_uplift_memory_retrieval_total` | counter | `mode,result` | 记忆召回调用（hybrid/vector） |
+| `helix_uplift_memory_recall_inject_mode_total` | counter | `mode` | agent_node 召回注入模式（per_session/per_turn） |
+| `helix_uplift_anthropic_cache_anchors_total` | counter | `()` | 上游注入的 cache_control anchor |
+| `helix_uplift_mcp_call_total` | counter | `transport,server,result` | MCP 工具调用尝试 |
+| `helix_uplift_mcp_circuit_state_total` | counter | `server,state` | MCP per-server 断路器转换（U-13） |
+| `helix_uplift_skill_view_total` | counter | `result` | skill_view 调用（ok/not_found/truncated） |
+| `helix_uplift_skill_zip_reject_total` | counter | `reason` | skill ZIP 导入边界拒绝 |
+| `helix_uplift_skill_blocked_total` | counter | `phase` | 被威胁扫描器拒的 skill 内容（U-21） |
+| `helix_uplift_skill_drift_total` | counter | `()` | content_hash 漂移的 skill 行（U-21） |
+| `helix_uplift_skill_redacted_total` | counter | `()` | 读时被 `[BLOCKED]` 替换的 skill_view（U-21） |
+| `helix_uplift_skill_high_risk_event_total` | counter | `event` | 高风险 skill 发布门事件（U-24） |
+| `helix_uplift_skill_view_archived_blocked_total` | counter | `()` | skill_view 命中已归档 skill 冷路径（U-29） |
+| `helix_uplift_curator_transition_total` | counter | `from_state,to_state` | skill 生命周期转换（U-26/U-29） |
+| `helix_uplift_curator_pinned_skills` | gauge | `()` | 全租户 pinned skill 总数（U-25） |
+| `helix_uplift_memory_cluster_candidates_total` | counter | `()` | consolidator embedding 预筛簇候选（U-35） |
+| `helix_uplift_memory_cluster_rejected_total` | counter | `reason` | consolidator LLM 拒簇，按防误学原因 |
+| `helix_uplift_memory_consolidated_total` | counter | `()` | consolidator 写入的合并长期记忆 |
+| `helix_uplift_memory_purged_total` | counter | `category` | noise-purge 软删的孤项瞬态记忆（U-37） |
+| `helix_uplift_memory_reviewed_durable_total` | counter | `()` | 复核后保留的孤项瞬态记忆（U-37） |
+| `helix_uplift_consolidator_llm_tokens_total` | counter | `model,kind` | MemoryConsolidator aux 模型 token |
+| `helix_uplift_consolidator_runs_total` | counter | `outcome` | consolidator worker 扫描完成 |
+| `helix_uplift_credentials_resolve_total` | counter | `mode,role,key,result` | CredentialsResolver 查找（O-8） |
+| `helix_uplift_manifest_provider_rejected_total` | counter | `provider` | manifest 发布因不支持 provider 被拒 |
+| `helix_uplift_legacy_credentials_fallback_total` | counter | `role` | Stream O 回落：读弃用 `*_api_key_ref` 字段 |
+
+**`helix_webhook_*`（6，HX-9）**
+
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_webhook_deliveries_enqueued_total` | counter | `()` | 从 3 源表入队的投递（run/approval/artifact） |
+| `helix_webhook_deliveries_succeeded_total` | counter | `()` | 收到 2xx 的投递 |
+| `helix_webhook_deliveries_retried_total` | counter | `()` | 排定退避重试的投递 |
+| `helix_webhook_deliveries_dead_lettered_total` | counter | `()` | 弃置投递（4xx 配置错或重试耗尽） |
+| `helix_webhook_breaker_skips_total` | counter | `()` | 因 endpoint 断路器打开而跳过的投递 |
+| `helix_webhook_delivery_cycle_errors_total` | counter | `()` | 投递 worker 周期异常 |
+
+**`helix_billing_*` / `helix_platform_*`（3）**
+
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_billing_rollup_unpriced_rows_total` | counter | `()` | rollup 无法定价的 token_usage 行 |
+| `helix_billing_rollup_unpriced_buckets_total` | counter | `()` | 写入 priced=false 的 ledger bucket |
+| `helix_platform_credentials_tenant_overrides` | gauge | `()` | 配置的 per-tenant 凭证 override 行数（HX-8） |
+
+**其他 / Misc（8）**
+
+| metric | type | labels | 用途 |
+|---|---|---|---|
+| `helix_orchestrator_run_retry_total` | counter | `outcome` | run 级瞬态重试，按最终结局（HX-3） |
+| `helix_durable_resume_seconds` | histogram | `()` | resumed run 从 RUNNING 到首 chunk 秒数 |
+| `helix_run_event_persist_total` | counter | `event_name` | run_agent 双写中 RunEventStore.append 成功 |
+| `helix_run_event_persist_errors_total` | counter | `event_name` | run_agent 双写中 RunEventStore.append 失败 |
+| `helix_trajectory_recorded_total` | counter | `outcome` | 成功写 ObjectStore 的轨迹（L.L7） |
+| `helix_trajectory_record_errors_total` | counter | `outcome,reason` | 轨迹写失败（吞掉以保终态路径干净） |
+| `helix_hx_token_estimated_total` | counter | `tenant_id,agent_name,model` | 每次 LLM 调用估算 prompt token（HX-1 drift 分子） |
+| `helix_checkpoint_op_seconds` | histogram | `op` | checkpointer 每次 IO 调用 wall-clock |
+
+> 计：counter ~80 / histogram 9 / gauge ~13；共 102。
+
+#### 5.2.2 M1-target（设计规划，M0 未实现）
+
+下列指标在早期设计列出但 M0 **未** emit；按子系统上线时补，命名先过 validator：
+
+| metric | type | 归属 | 备注 |
+|---|---|---|---|
+| `helix_llm_latency_seconds` | histogram | 10 | LLM 调用时延（现仅 token/cost，无独立 latency） |
+| `helix_subagent_total` / `helix_subagent_depth` | counter/histogram | 24 | 子 agent spawn/深度（Stream 24 上线时补） |
+| `helix_quota_exceeded_total` | counter | 16 | 配额拒绝（现以 `rate_limit_decisions_total` 近似，语义不同） |
+| `helix_auth_decisions_total` | counter | C | 认证授权决策 |
+| `helix_hitl_decision_duration_seconds` | histogram | 25 | 审批决策时长（现仅 `approvals_pending` gauge） |
+| `helix_eval_gate_decision_total` / `helix_eval_regression_total` | counter | 26 | eval gate / 回归（Stream 26） |
+| `helix_sandbox_acquire_latency_seconds` | histogram | 14 | 沙箱获取时延（现仅 cold_start + pool gauge） |
+| `helix_event_log_append_duration_seconds` | histogram | A.4 | event_log 追加时延 |
+| `helix_pg_connection_pool_in_use` | gauge | 23 | PG 连接池占用 |
+| `helix_redis_command_duration_seconds` | histogram | 13/16 | Redis 命令时延 |
+| `helix_network_egress_meta_attempt_total` | counter | 21 | 元数据端点 egress 尝试（安全 P0，>0 即告警） |
+| `helix_dr_backup_age_seconds` | gauge | 22 | 备份年龄（RPO SLI） |
+
+**关键决策**：**label cardinality 严格管控**——`agent` 是 enum（manifest name），`session_id` / `trace_id` 不进 label（高基数会爆 Prometheus），validator 在定义时拦截高基数 label。session_id 留在 trace 与 log。
 
 ### 5.3 日志必填字段
 
@@ -236,7 +366,7 @@ helix_dr_backup_age_seconds{asset_type}                             gauge     # 
 | SLO | 目标 | 测量 |
 |-----|------|------|
 | 控制平面 API 可用性 | 99.9% / 30d | `1 - rate(http_5xx) / rate(http_total)` |
-| 控制平面 API P99 延迟 | < 200ms | `helix_http_request_duration_seconds_bucket` |
+| 控制平面 API P99 延迟 | < 200ms | `helix_control_plane_http_request_duration_seconds_bucket` |
 | Session TTFT P95 | < 1.5s | `helix_session_ttft_seconds` |
 | Sandbox 冷启动 P95 | < 3s (M0) / < 500ms (M1 warm pool) | `helix_sandbox_cold_start_seconds` |
 | Durable resume 成功率 | > 99% | `helix_resume_total{outcome="ok"} / total` |
