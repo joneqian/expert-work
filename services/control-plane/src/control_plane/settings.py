@@ -68,9 +68,10 @@ class Settings(BaseSettings):
     # -------------------------------------------------------- langfuse (HX-7)
     #: Self-hosted Langfuse instance for agent-level traces (ADR-0005).
     #: All three present -> the SDK-backed client; anything missing keeps
-    #: the M0 RecordingLangfuseClient (Mini-ADR HX-G3 fail-open). The two
-    #: keys are injected via env only (HELIX_CONTROL_PLANE_LANGFUSE_*) --
-    #: never committed to compose files or code.
+    #: the M0 RecordingLangfuseClient (Mini-ADR HX-G3 fail-open). Injected
+    #: via env using this class's ``HELIX_AGENT_`` prefix --
+    #: HELIX_AGENT_LANGFUSE_{HOST,PUBLIC_KEY,SECRET_KEY} -- never committed
+    #: to compose files or code (compose only passes the ${...} through).
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None

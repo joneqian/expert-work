@@ -27,6 +27,14 @@ x-control-plane-base: &control-plane-base
     # Trace export (A.8) — reached only when the observability profile
     # is also up; the SDK buffers + drops gracefully when it is not.
     HELIX_AGENT_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+    # Mini-ADR OBS-L1 — Langfuse agent traces. Empty by default → the
+    # control plane keeps the M0 recording stub (no push). Set all three in
+    # infra/.env to activate; langfuse-web is reachable in-compose by name.
+    # PII masking defaults on (fail-safe); set false only to debug raw prompts.
+    HELIX_AGENT_LANGFUSE_HOST: ${HELIX_AGENT_LANGFUSE_HOST:-}
+    HELIX_AGENT_LANGFUSE_PUBLIC_KEY: ${HELIX_AGENT_LANGFUSE_PUBLIC_KEY:-}
+    HELIX_AGENT_LANGFUSE_SECRET_KEY: ${HELIX_AGENT_LANGFUSE_SECRET_KEY:-}
+    HELIX_AGENT_LANGFUSE_PII_MASKING_ENABLED: ${HELIX_AGENT_LANGFUSE_PII_MASKING_ENABLED:-true}
     # Stream P (Mini-ADR P-13) — local_dev SecretStore seed. Resolves the
     # canonical agent's `secret://helix-agent/dev/llm/...` api_key_ref to the
     # real key a dev pastes into infra/dev-keys/dev-llm-keys.local (git-
