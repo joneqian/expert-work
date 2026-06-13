@@ -193,7 +193,7 @@
 - [x] **A.9 指标体系**（落实 P0 #12）— Prometheus + 业务指标 + 技术指标 schema。`helix_*` validator（前缀 + label cardinality 拦截）已锁。**as-built catalog 成文**于 20-observability §5.2.1（102 实测指标据定义点逐个核，按子系统分组 + type + labels）+ §5.2.2 M1-target（subagent/hitl/eval 等未实现项）；消除原设计期清单漂移（`helix_llm_tokens_total`→`helix_llm_token_usage_total`、`tool_call_duration`→`tool_call_total`+`tool_latency` 等）。§5.4 SLO http 指标名同步校准
 
 **网络与可靠性基础**（统一设计：28-reliability-primitives）
-- [~] **A.10 全链路 TLS**（落实 P0 #9 in-transit）— Stream B 暴露 endpoint 前必须生效；mTLS 前提。应用层 mTLS (MTLSVerifier + XFCC) 已有；docker-compose nginx TLS 终止待补
+- [x] **A.10 全链路 TLS**（落实 P0 #9 in-transit）— 应用层 mTLS (MTLSVerifier + XFCC) + nginx 8443 TLS 终止 (`infra/nginx/nginx.conf` ssl_verify_client) + dev PKI (`tools/dev-certs/generate.py`：ca 5y/server·client 1y，gitignored) + compose `./dev-certs:/etc/nginx/certs` 挂载，全在。证书运维（生成/轮换/到期诊断）成文 [runbooks/tls-certs.md](./runbooks/tls-certs.md)；到期 metric `helix_tls_cert_expiry_seconds` 标 M1（20-observability §5.2.2）
 - [x] **A.11 Health checks**（落实 P0 #22）— liveness/readiness/startup probe + 依赖健康（DB/Redis/Vault）
 - [x] **A.12 Graceful shutdown**（落实 P0 #23）— SIGTERM、completer-in-flight、超时强制（FastAPI `lifespan` + `Lifecycle`）
 - [x] **A.13 超时分层**（落实 P0 #24）— request > session > tool > LLM 级联（cancellation_token 全链路 + K9 reflect deadline + L3 stream deadline）

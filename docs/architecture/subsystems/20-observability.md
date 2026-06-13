@@ -331,6 +331,7 @@ helix.orchestrator.session_run
 | `helix_redis_command_duration_seconds` | histogram | 13/16 | Redis 命令时延 |
 | `helix_network_egress_meta_attempt_total` | counter | 21 | 元数据端点 egress 尝试（安全 P0，>0 即告警） |
 | `helix_dr_backup_age_seconds` | gauge | 22 | 备份年龄（RPO SLI） |
+| `helix_tls_cert_expiry_seconds` | gauge | A.10 | TLS/mTLS 证书剩余有效期，30 天阈值告警（现靠 [runbooks/tls-certs.md](../../runbooks/tls-certs.md) 人工核） |
 
 **关键决策**：**label cardinality 严格管控**——`agent` 是 enum（manifest name），`session_id` / `trace_id` 不进 label（高基数会爆 Prometheus），validator 在定义时拦截高基数 label。session_id 留在 trace 与 log。
 

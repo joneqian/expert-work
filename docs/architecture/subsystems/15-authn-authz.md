@@ -243,7 +243,7 @@ aforge_pat_<tenant_short>_<32 字符随机>
 
 ### 5.6 Service-to-service 认证
 
-- M0：内网调用走共享 secret（环境变量），不走 JWT
+- M0：nginx 8443 mTLS 终止 + XFCC → `MTLSVerifier` Subject 白名单（A.10/C.2 已交付）；证书运维（生成 / 轮换 / 到期诊断）见 [runbooks/tls-certs.md](../../runbooks/tls-certs.md)
 - M1：服务间 JWT（service account, sub_type=service_account）+ mTLS（service mesh）
 - M2：SPIFFE/SPIRE workload identity，零信任
 
