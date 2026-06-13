@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from uuid import UUID
 
 import pytest
+from opentelemetry import trace
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
@@ -132,3 +133,28 @@ def test_reinit_attaches_new_processor_to_existing_provider(
 
     assert len(exporter.get_finished_spans()) == 1
     assert len(second_exporter.get_finished_spans()) == 1
+
+
+def test_helix_span_attaches_links(exporter: InMemorySpanExporter) -> None:
+    """``links=`` attaches OTel Span Links so a span can relate to a span
+    in a *different* trace (10.1 — subagent / durable-resume linkage)."""
+    with helix_span(HelixComponent.SESSION, "run") as parent:
+        parent_ctx = parent.get_span_context()
+
+    with helix_span(HelixComponent.SUBAGENT, "run", links=[trace.Link(parent_ctx)]):
+        pass
+
+    spans = {s.name: s for s in exporter.get_finished_spans()}
+    child = spans["helix.subagent.run"]
+    assert len(child.links) == 1
+    assert child.links[0].context.trace_id == parent_ctx.trace_id
+
+
+def test_helix_span_without_links_has_none(exporter: InMemorySpanExporter) -> None:
+    """The default path attaches no links (regression guard for the new
+    optional parameter)."""
+    with helix_span(HelixComponent.ORCHESTRATOR, "llm_call"):
+        pass
+
+    [span] = list(exporter.get_finished_spans())
+    assert not span.links

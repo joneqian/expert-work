@@ -46,7 +46,12 @@ from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
 from helix_agent.common.context import reset_current_run_id, set_current_run_id
-from helix_agent.common.observability import helix_counter, helix_histogram
+from helix_agent.common.observability import (
+    HelixComponent,
+    helix_counter,
+    helix_histogram,
+    helix_span,
+)
 from helix_agent.common.skill_run_usage import SkillRunUsageRecorder
 from helix_agent.persistence import ApprovalStore
 from helix_agent.protocol import (
@@ -326,72 +331,84 @@ async def run_agent(
         # resumes from the committed checkpoint (``graph_input=None`` —
         # the J-24 continuation semantics) after the replay-safety guard
         # inspects the checkpoint tail.
-        while True:
-            try:
-                async for chunk in graph.astream(
-                    graph_input, effective_config, stream_mode=stream_mode
-                ):
-                    if record.abort_event.is_set():
-                        logger.info("run_agent.abort_requested run_id=%s", run_id)
-                        break
-                    if not first_chunk_seen:
-                        ttft = time.monotonic() - ttft_started
-                        _session_ttft_seconds.observe(ttft)
-                        if getattr(record, "is_resume", False):
-                            _durable_resume_seconds.observe(ttft)
-                        first_chunk_seen = True
-                    jsonable_chunk = _to_jsonable(chunk)
-                    await bridge.publish(run_id, stream_mode, jsonable_chunk)
+        # Stream A.8 / 10.1 — the session root span. One ``helix.session.run``
+        # per run wraps the whole streaming loop (retries included), so every
+        # LLM / tool / subagent child span created inside ``graph.astream``
+        # attaches under it and a run becomes one connected trace.
+        with helix_span(
+            HelixComponent.SESSION,
+            "run",
+            attributes={
+                "run_id": str(run_id),
+                "thread_id": str(record.thread_id),
+            },
+        ):
+            while True:
+                try:
+                    async for chunk in graph.astream(
+                        graph_input, effective_config, stream_mode=stream_mode
+                    ):
+                        if record.abort_event.is_set():
+                            logger.info("run_agent.abort_requested run_id=%s", run_id)
+                            break
+                        if not first_chunk_seen:
+                            ttft = time.monotonic() - ttft_started
+                            _session_ttft_seconds.observe(ttft)
+                            if getattr(record, "is_resume", False):
+                                _durable_resume_seconds.observe(ttft)
+                            first_chunk_seen = True
+                        jsonable_chunk = _to_jsonable(chunk)
+                        await bridge.publish(run_id, stream_mode, jsonable_chunk)
+                        await _persist_event(
+                            event_store,
+                            run_id=run_id,
+                            seq=event_seq,
+                            event_name=stream_mode,
+                            data=jsonable_chunk,
+                        )
+                        event_seq += 1
+                except Exception as exc:
+                    if (
+                        retry_attempts >= MAX_RUN_RETRIES
+                        or record.abort_event.is_set()
+                        or not retry_enabled()
+                        or not is_transient_run_error(exc)
+                        or not await replay_is_safe(graph, effective_config, tool_replay_safe)
+                    ):
+                        raise
+                    retry_attempts += 1
+                    backoff_s = retry_backoff_s()
+                    logger.warning(
+                        "run_agent.transient_retry run_id=%s attempt=%d backoff_s=%s error=%s",
+                        run_id,
+                        retry_attempts,
+                        backoff_s,
+                        exc,
+                    )
+                    retry_payload = {
+                        "attempt": retry_attempts,
+                        "error_class": type(exc).__name__,
+                        "backoff_s": backoff_s,
+                    }
+                    await bridge.publish(run_id, "retry", retry_payload)
                     await _persist_event(
                         event_store,
                         run_id=run_id,
                         seq=event_seq,
-                        event_name=stream_mode,
-                        data=jsonable_chunk,
+                        event_name="retry",
+                        data=retry_payload,
                     )
                     event_seq += 1
-            except Exception as exc:
-                if (
-                    retry_attempts >= MAX_RUN_RETRIES
-                    or record.abort_event.is_set()
-                    or not retry_enabled()
-                    or not is_transient_run_error(exc)
-                    or not await replay_is_safe(graph, effective_config, tool_replay_safe)
-                ):
-                    raise
-                retry_attempts += 1
-                backoff_s = retry_backoff_s()
-                logger.warning(
-                    "run_agent.transient_retry run_id=%s attempt=%d backoff_s=%s error=%s",
-                    run_id,
-                    retry_attempts,
-                    backoff_s,
-                    exc,
-                )
-                retry_payload = {
-                    "attempt": retry_attempts,
-                    "error_class": type(exc).__name__,
-                    "backoff_s": backoff_s,
-                }
-                await bridge.publish(run_id, "retry", retry_payload)
-                await _persist_event(
-                    event_store,
-                    run_id=run_id,
-                    seq=event_seq,
-                    event_name="retry",
-                    data=retry_payload,
-                )
-                event_seq += 1
-                # Abort-aware backoff: a timeout means the backoff simply
-                # elapsed; a cancel during the wait exits immediately and
-                # takes the INTERRUPTED path below.
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(record.abort_event.wait(), timeout=backoff_s)
-                if record.abort_event.is_set():
+                    # Abort-aware backoff: a timeout means the backoff simply
+                    # elapsed; a cancel during the wait exits immediately and
+                    # takes the INTERRUPTED path below.
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(record.abort_event.wait(), timeout=backoff_s)
+                    if record.abort_event.is_set():
+                        break
+                    graph_input = None
+                else:
                     break
-                graph_input = None
-            else:
-                break
 
         # Stream J.8 (Mini-ADR J-24) — a run that streamed to its natural
         # end with ``pending_approval`` set did not finish: it paused at

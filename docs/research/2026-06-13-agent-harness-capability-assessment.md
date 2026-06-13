@@ -26,16 +26,21 @@
 > 核心未实装（原评分被设计文档误导，高估 2 档）。
 > **13.1 会话隔离由 4★ 升至 5★**：核心 thread_id namespace 隔离已落地且测试覆盖，W0 补
 > 两条并发隔离测试（`test_runner_unit.py`）后坐实。
+>
+> **2026-06-13 S0（P1 启动核实）修订**：勘探 P1 代码又揪两项被低估——
+> **1.3 五大编排模式 3★→4★**：Evaluator-Optimizer 其实已实现（`reflect.py` accept/revise loop），
+> 原"缺"判断有误。**4.4 程序记忆 3★→4★**：M0 agent 已能自写 skill（`skill_authoring.py` 7 builtin），
+> 原"M0 不能自写"有误；缺的仅*自动*演化（M1）。详见 `2026-06-13-p1-self-improving-flywheel-design.md`。
 
 ---
 
-## 域 1. Agent 控制循环 / 编排 — 均分 4.67
+## 域 1. Agent 控制循环 / 编排 — 均分 4.83
 
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
 | 1.1 基础 loop | ★★★★★ | `orchestrator/graph_builder/builder.py:build_react_graph()`、`state.py:DEFAULT_MAX_STEPS=20` | ReAct 闭环 + max_steps 硬限终止 |
 | 1.2 workflow vs agent | ★★★★★ | `protocol/agent_spec.py:WorkflowSpec` (react/plan_execute/custom) | manifest 声明类型，图工厂分支 |
-| 1.3 五大编排模式 | ★★★☆☆ | Routing `llm/router.py`；Parallelization `builder.py:asyncio.gather`；planner 链 | Chaining/Routing/Parallelization 全；Orchestrator-Worker 基础；**Evaluator-Optimizer 缺** |
+| 1.3 五大编排模式 | ★★★★☆ | Routing `llm/router.py`；Parallelization `builder.py:asyncio.gather`；**Evaluator-Optimizer `reflect.py`** | **S0 核实升档 3→4**：Evaluator-Optimizer 其实已实现(reflect.py accept/revise loop)；剩 Orchestrator-Worker 仅基础 + 评判用同一模型 |
 | 1.4 图/状态机 | ★★★★★ | `runner.py:GraphRunner`、LangGraph `StateGraph` | node+conditional edge 显式，支持子图 |
 | 1.5 规划 | ★★★★★ | `graph_builder/planner.py:make_planner_node()`、`state.AgentState.plan` | 分解→注入→replan 全周期 |
 | 1.6 可追溯 | ★★★★★ | `event_log/`、`sse.py`、`trajectory/` | 事件日志+SSE+轨迹三层可回放 |
@@ -61,14 +66,14 @@
 | 3.3 Context awareness | ★★★☆☆ | agent_node preflight + threshold 触发压缩 | 有阈值检测，**无"剩余 N token"显式反馈给模型** |
 | 3.4 Token 预算 | ★★★★★ | `model_catalog.context_window`、`runtime/tokens.py`、`token_usage` 表 | 声明+计数+存储+成本 |
 
-## 域 4. 记忆系统 — 均分 4.43
+## 域 4. 记忆系统 — 均分 4.57
 
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
 | 4.1 工作记忆 | ★★★☆☆ | `context/compressor.py`、`WorkingMemoryPolicy` | 有 LLM 摘要，**缺廉价滑窗截断**（全走重武器，见 research framework A2） |
 | 4.2 语义记忆 | ★★★★★ | `persistence/memory/sql.py:SqlMemoryStore` (kind=fact)、migration 0013/17/24/25 | pgvector+RLS+dedup+soft-delete，turn recall/writeback |
 | 4.3 情景记忆 | ★★★★★ | `memory/base.py` (kind=episodic)、`trajectory/recorder.py` | episodic 平行 fact，trajectory 落 S3 |
-| 4.4 程序记忆 | ★★★☆☆ | `persistence/skill/base.py:SkillStore` 三态、`skill_evolution_worker.py` | skill 生命周期有，但 **M0 agent 不能自写 skill**（J.7b-1 在 M1） |
+| 4.4 程序记忆 | ★★★★☆ | `tools/skill_authoring.py` 7 builtin(author/refine/fork/propose...) + `SkillStore` 三态 | **S0 核实升档 3→4**：M0 agent 已能自写 skill(DRAFT+agent_private+SE-8 审核)；缺的仅*自动*演化(`skill_evolution.py` M1) |
 | 4.5 向量检索 | ★★★★★ | `llm/embedder.py`、`memory/sql.py` pgvector cosine+RRF+temporal decay | OpenAI 兼容 embedder + 混合检索 |
 | 4.6 记忆管线 | ★★★★★ | `control-plane/memory_consolidator.py`、`memory/dlq.py` 5级backoff | extraction→consolidation(LLM聚类)→retrieval 全链 |
 | 4.7 持久跨会话 | ★★★★★ | migration 0013+、`runner.py:PostgresSaver`、event_log | Postgres+RLS+DLQ 最终一致 |
@@ -201,10 +206,10 @@
 
 | 域 | 项数 | 均分(/5) | 星 | 短板 |
 |---|---|---|---|---|
-| 1 控制循环 | 6 | 4.67 | ★★★★★ | Evaluator-Optimizer 缺 |
+| 1 控制循环 | 6 | 4.83 | ★★★★★ | Orchestrator-Worker 仅基础(1.3) |
 | 2 工具系统 | 7 | 5.00 | ★★★★★ | — |
 | 3 上下文工程 | 4 | 4.50 | ★★★★★ | context awareness 不反馈模型 |
-| 4 记忆 | 7 | 4.43 | ★★★★☆ | 廉价滑窗缺 / agent 不能自写 skill |
+| 4 记忆 | 7 | 4.57 | ★★★★★ | 廉价滑窗缺(4.1) / skill 自动演化缺(4.4) |
 | 5 模型抽象 | 4 | 5.00 | ★★★★★ | — |
 | 6 多 Agent | 4 | 5.00 | ★★★★★ | — |
 | 7 沙箱安全 | 8 | 3.63 | ★★★★☆ | M0 默认 runc / 无 DLP / 无 IDS |
@@ -217,7 +222,7 @@
 | 14 扩展性 | 5 | 4.60 | ★★★★★ | MCP 不独立沙箱 |
 | 15 流式中断 | 3 | 5.00 | ★★★★★ | — |
 | 16 部署运维 | 5 | 4.20 | ★★★★☆ | 无基础设施级自愈 |
-| **合计** | **86** | **4.37** | **★★★★☆** | 总分 376/430 (87.4%)；含 W0 修订 10.1↓2 / 13.1↑1 |
+| **合计** | **86** | **4.40** | **★★★★☆** | 总分 378/430 (87.9%)；含 W0(10.1↓2/13.1↑1) + S0(1.3↑1/4.4↑1) 修订 |
 
 各域项数核对：6+7+4+7+4+4+8+5+6+6+7+4+5+5+3+5 = **86 项**。
 

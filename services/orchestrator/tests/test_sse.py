@@ -17,7 +17,12 @@ from uuid import uuid4
 
 import pytest
 from langchain_core.messages import AIMessage
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 
+from helix_agent.common.observability import init_tracing
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
 from helix_agent.runtime.runs import DisconnectMode, RunManager, RunRecord, RunStatus
 from helix_agent.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
@@ -1070,3 +1075,37 @@ async def test_run_agent_binds_run_id_contextvar(fast_backoff: None) -> None:
 
     assert seen == [record.run_id]
     assert get_current_run_id() is None  # reset after the worker exits
+
+
+@pytest.mark.asyncio
+async def test_run_agent_emits_session_root_span() -> None:
+    """10.1 — one ``helix.session.run`` root span wraps the whole run,
+    carrying ``run_id`` / ``thread_id`` so a run becomes one connected trace."""
+    exporter = InMemorySpanExporter()
+    init_tracing(
+        service_name="test-sse-tracing",
+        env="test",
+        span_processor=SimpleSpanProcessor(exporter),
+    )
+    exporter.clear()
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    graph = _ScriptedGraph(chunks=[{"agent": {"step_count": 1}}])
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={"messages": []},
+        config={},
+    )
+
+    roots = [s for s in exporter.get_finished_spans() if s.name == "helix.session.run"]
+    assert len(roots) == 1
+    assert roots[0].attributes is not None
+    assert roots[0].attributes["run_id"] == str(record.run_id)
+    assert roots[0].attributes["thread_id"] == str(record.thread_id)
+    exporter.clear()

@@ -64,7 +64,13 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from helix_agent.common.observability import helix_counter, helix_gauge, helix_histogram
+from helix_agent.common.observability import (
+    HelixComponent,
+    helix_counter,
+    helix_gauge,
+    helix_histogram,
+    helix_span,
+)
 from helix_agent.common.uplift_metrics import record_memory_inject_mode
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, MemoryItem, Plan
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -544,7 +550,12 @@ def build_react_graph(
         else:
             # Wrap the LLM call so a cancel mid-call interrupts the
             # in-flight await rather than waiting it out (E.15).
-            response = await token.run_cancellable(active_caller(messages=messages, tools=tools))
+            # 10.1 — one ``helix.orchestrator.llm_call`` child span per
+            # provider call, attached under the session root span.
+            with helix_span(HelixComponent.ORCHESTRATOR, "llm_call"):
+                response = await token.run_cancellable(
+                    active_caller(messages=messages, tools=tools)
+                )
 
         if after_llm_chain is not None:
             after_messages: list[BaseMessage] = [*messages, response]
@@ -1113,7 +1124,10 @@ async def _dispatch_tool(
             args = mw_ctx.payload.get("tool_args", args) or {}
 
         tool = registry.get_required(name)
-        outcome = await _invoke_tool(tool, args, call_id, ctx, overflow_writer=overflow_writer)
+        # 10.1 — one ``helix.orchestrator.tool_call`` child span per tool
+        # dispatch, attached under the session root span.
+        with helix_span(HelixComponent.ORCHESTRATOR, "tool_call", attributes={"tool": name}):
+            outcome = await _invoke_tool(tool, args, call_id, ctx, overflow_writer=overflow_writer)
         ok = outcome[0].status != "error"
         # Stream HX-12 (Mini-ADR HX-I4) — call-through: the model called a
         # deferred name directly (it remembered the tool without a

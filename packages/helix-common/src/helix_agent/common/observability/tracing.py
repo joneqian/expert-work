@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from enum import StrEnum
 from typing import Any, Final
@@ -157,11 +157,17 @@ def helix_span(
     action: str,
     *,
     attributes: Mapping[str, Any] | None = None,
+    links: Sequence[trace.Link] | None = None,
 ) -> AbstractContextManager[Span]:
     """Open a span named ``helix.{component}.{action}``.
 
     Auto-injects ``tenant``, ``service``, ``env`` from contextvars + init
     parameters. Caller-supplied ``attributes`` win on key collision.
+
+    ``links`` attaches OTel Span Links to the new span — used to relate a
+    span to a *different* trace (subsystems/20 § 5.5): a subagent's root
+    span links back to its parent run, a durable-resume span links to the
+    checkpoint it resumed from. Linked spans keep their own trace id.
 
     The context manager sets the span status to ``ERROR`` automatically
     if the wrapped block raises — matching subsystems/20 § 5.5 (root
@@ -173,7 +179,7 @@ def helix_span(
         on the constructor).
     """
     comp_value = _validate_component(component)
-    return _helix_span_cm(comp_value, action, attributes)
+    return _helix_span_cm(comp_value, action, attributes, links)
 
 
 @contextmanager
@@ -181,6 +187,7 @@ def _helix_span_cm(
     comp_value: str,
     action: str,
     attributes: Mapping[str, Any] | None,
+    links: Sequence[trace.Link] | None = None,
 ) -> Iterator[Span]:
     span_name = f"helix.{comp_value}.{action}"
 
@@ -196,7 +203,9 @@ def _helix_span_cm(
         attrs.update(attributes)
 
     tracer = get_tracer()
-    with tracer.start_as_current_span(span_name, attributes=attrs) as span:
+    with tracer.start_as_current_span(
+        span_name, attributes=attrs, links=list(links) if links else None
+    ) as span:
         try:
             yield span
         except BaseException as exc:
