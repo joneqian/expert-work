@@ -18,11 +18,13 @@ Under runsc the suite additionally asserts the live container's runtime
 (guarding against a silent fall-back to runc) and a gVisor isolation
 invariant (io_uring unavailable). Two gates change shape under runsc
 because gVisor alters their behaviour by design:
-#49 (egress) relies on docker embedded DNS, which gVisor netstack does not
-support (google/gvisor#7469) — still ``xfail`` pending the HX-10-F1
-fixed-IP addressing rollout. #56 (fork bomb) panics the sentry rather than
-returning EAGAIN (google/gvisor#2490): the runc graceful-containment test
-is ``skip``ped under runsc and replaced by an explicit method-A assertion
+#49 (egress) cannot rely on docker embedded DNS, which gVisor netstack does
+not support (google/gvisor#7469) — so the probe resolves the proxy via an
+``/etc/hosts`` fixed-IP entry (``--add-host``), the production addressing
+path (HX-10-F1). That works under both runtimes, so the gate runs (no
+longer ``xfail``). #56 (fork bomb) panics the sentry rather than returning
+EAGAIN (google/gvisor#2490): the runc graceful-containment test is
+``skip``ped under runsc and replaced by an explicit method-A assertion
 (HX-10-F2) — the fork bomb kills its own sandbox, the supervisor survives,
 and a fresh sandbox rebuilds. gVisor delegates resource-exhaustion defense
 to the host cgroup, so sandbox-death + rebuild is the accepted semantic.
@@ -81,6 +83,21 @@ _IMAGE = "helix-sandbox:itest"
 #: Egress network — created ``--internal`` (no NAT / default route) so a
 #: sandbox on it can reach only same-network peers (Mini-ADR F-14).
 _NETWORK = "helix-sandbox-egress"
+#: Stream HX-10-F1 — the egress network is created with a fixed subnet and
+#: the stub proxy pinned to a static IP, so the sandbox can reach it via an
+#: ``/etc/hosts`` entry (``--add-host``) rather than docker embedded DNS.
+#: This exercises the *production* addressing path: gVisor's netstack does
+#: not implement embedded DNS (google/gvisor#7469), so the real sandbox →
+#: credential-proxy hop must resolve a hostname to a fixed IP from
+#: ``/etc/hosts`` (a gofer file read gVisor handles natively). Verifying it
+#: here under *both* runtimes guards the mechanism end to end, not just the
+#: runsc-only failure mode. ``172.30`` avoids docker's default 172.17-29
+#: pools and any compose 172.18+ networks.
+_EGRESS_SUBNET = "172.30.0.0/24"
+_PROXY_IP = "172.30.0.10"
+#: Hostname the sandbox uses to reach the proxy — mapped to ``_PROXY_IP``
+#: via ``--add-host`` (mirrors the prod ``credential-proxy.internal`` name).
+_PROXY_HOSTNAME = "credential-proxy.internal"
 #: Stub HTTP listener standing in for the credential-proxy — the one
 #: endpoint a sandbox IS allowed to reach (the real proxy lands in F.10).
 _STUB_PROXY = "helix-test-proxy"
@@ -147,7 +164,7 @@ def _docker_env() -> Iterator[None]:
     _sweep_sandbox_containers()
     _docker("rm", "--force", _STUB_PROXY)
     _docker("network", "rm", _NETWORK)
-    created = _docker("network", "create", "--internal", _NETWORK)
+    created = _docker("network", "create", "--internal", "--subnet", _EGRESS_SUBNET, _NETWORK)
     if created.returncode != 0:
         pytest.skip(f"egress network create failed: {created.stderr[-200:]}")
     stub = _docker(
@@ -157,6 +174,8 @@ def _docker_env() -> Iterator[None]:
         _STUB_PROXY,
         "--network",
         _NETWORK,
+        "--ip",
+        _PROXY_IP,
         "--entrypoint",
         "python",
         _STUB_IMAGE,
@@ -235,7 +254,14 @@ def helix() -> _Harness:
         store=store,  # type: ignore[arg-type]  # structural SandboxStore
         docker=CliDockerClient(),
         audit=_NullAudit(),  # type: ignore[arg-type]  # structural AuditSink
-        runtime_provider=SandboxRuntimeProvider(oci_runtime=_OCI_RUNTIME, egress_network=_NETWORK),
+        runtime_provider=SandboxRuntimeProvider(
+            oci_runtime=_OCI_RUNTIME,
+            egress_network=_NETWORK,
+            # HX-10-F1: resolve the proxy via /etc/hosts (the production
+            # addressing path), not docker embedded DNS — works under both
+            # runc and runsc (gVisor netstack has no embedded DNS).
+            extra_hosts=((_PROXY_HOSTNAME, _PROXY_IP),),
+        ),
         workspace_store=InMemoryUserWorkspaceStore(),
         settings=SandboxSupervisorSettings(sandbox_image=_IMAGE, oci_runtime=_OCI_RUNTIME),
     )
@@ -396,25 +422,19 @@ _EGRESS_PROBE = (
     "        return 'FAIL:' + type(exc).__name__\n"
     "    finally:\n"
     "        s.close()\n"
-    "print('proxy', reach('helix-test-proxy', 8080))\n"
+    f"print('proxy', reach('{_PROXY_HOSTNAME}', 8080))\n"
     "print('metadata', reach('169.254.169.254', 80))\n"
     "print('internet', reach('8.8.8.8', 53))\n"
 )
 
 
-@pytest.mark.xfail(
-    condition=_OCI_RUNTIME == "runsc",
-    reason=(
-        "gVisor netstack does not support docker embedded DNS (127.0.0.11 is the "
-        "sentry's own loopback, not where dockerd listens) — google/gvisor#7469. "
-        "The probe resolves the proxy by container name, which fails under runsc "
-        "(isolation still holds: public/metadata stay unreachable). Production must "
-        "address sandbox->credential-proxy via /etc/hosts / fixed IP. HX-10 follow-up."
-    ),
-    strict=False,
-)
 @pytest.mark.asyncio
 async def test_gate_49_network_egress_isolation(helix: _Harness) -> None:
+    # HX-10-F1: the probe reaches the proxy by hostname resolved from
+    # /etc/hosts (a --add-host fixed-IP entry), not docker embedded DNS.
+    # This is the production addressing path and works under both runc and
+    # runsc — gVisor's netstack has no embedded DNS (google/gvisor#7469), so
+    # the earlier container-name probe was runc-only and xfail'd under runsc.
     box = await helix.supervisor.acquire(_acquire_request("t-49"))
     result = await helix.supervisor.exec(box.sandbox_id, code=_EGRESS_PROBE)
     await helix.supervisor.release(box.sandbox_id)

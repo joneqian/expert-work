@@ -100,6 +100,29 @@
 
 **落点（方案 A）**：宿主 cgroup 限总量（爆炸半径锁死沙箱）+ ephemeral 容器 + warm pool（HX-6 已在）+ reaper 重建（已在）= A 标准件齐全，**零生产代码改动**。workspace volume 持久（J.15）→ fork bomb 只丢 in-flight exec，用户数据零损失。否决 B（guest 内 cgroupfs `pids.max`）：逆 gVisor 设计、gVisor cgroupfs 是模拟实现不保证 `pids.max` 写穿、真 runsc 实测周期长且可能直接判不可行。gate_56 由 `xfail` 转正为显式 A 语义断言（沙箱阵亡 + supervisor 存活 + 重建成功）。
 
+## 7. HX-10-F1 补充实证（2026-06-13）：gVisor 下 sandbox→proxy 寻址的业界做法
+
+> gVisor CI 首跑暴露 gate_49：runsc netstack 不支持 docker embedded DNS（127.0.0.11 是 sentry 自身 loopback，dockerd 不在那监听，google/gvisor#7469），沙箱靠容器名找 credential-proxy 在 runsc 必失败。决策前检索：**别人怎么解？** 结论——**三层解法全部业界背书，我们选的 `/etc/hosts` 固定 IP 是官方钦定的裸 Docker 解**。
+
+**① gVisor 官方钦定 4 个 workaround**（[FAQ](https://gvisor.dev/docs/user_guide/faq/) + [#7523](https://github.com/google/gvisor/issues/7523)）：
+
+| workaround | 我们能否用 |
+|---|---|
+| 默认 bridge + `--link`（默认桥不用 embedded DNS） | ✗ 默认桥非 `--internal`，沙箱直连公网破 egress 管控 |
+| `--network=host`（官方自标 less secure） | ✗ 用宿主网络栈=放弃隔离 |
+| **用 IP 代替容器名** | ✓ **= 我们 `--add-host` 固定 IP** |
+| 上 Kubernetes | ✓ 见 ②，规模化真答案 |
+
+**② 规模化玩家上 K8s，问题直接消失**：生产跑 gVisor 的（GKE Sandbox / Ant / Tencent）全在 K8s/containerd，服务发现走 CoreDNS/kube-dns **不经 docker embedded DNS 那条路**——官方原话「container name lookup works fine in Kubernetes」。**这坑是裸 docker-compose 单机部署的特有产物**；我们 M0 单节点 DooD 才撞，M1+ 上编排层后 `/etc/hosts` 一手自然退役（与既定 K8s 方向一致）。
+
+**③ egress-proxy 角色：静态 IP 网关是行业常态甚至产品化功能**：
+- **Cloudflare Outbound Workers**：网络层注入凭证的 egress proxy，token 永不进沙箱（同构 Mini-ADR F-2）。
+- **Blaxel**：dedicated egress gateways with **static IPs** 直接作托管功能卖。
+- **iron-proxy**（开源）：MITM egress proxy **自带 DNS server**（另一条路：proxy 自己解析不依赖 docker DNS）。
+- **E2B**：self-hosted IP tunneling through a **gateway VM**。
+
+**落点（方案=`/etc/hosts` 固定 IP）**：短期 `--add-host` 固定 IP = gVisor FAQ「use IPs」官方解（`--network=host` 破隔离 / `--link` 破 egress 管控均否决，无更好短期解）；proxy 静态 IP = egress 网关行业常态（Blaxel 产品化同款）；长期 K8s CoreDNS = 规模化真答案、亦我们 M1 既定方向。接缝 #592 已交付（`runtime_provider.extra_hosts`→`--add-host`→`/etc/hosts` + `HELIX_SANDBOX_EXTRA_HOSTS` fail-closed + supervisor 接线）；本轮（#待填）CI 在真 runc+runsc 端到端验证该路径（egress 网络固定 subnet + proxy 静态 IP + 沙箱经 `credential-proxy.internal` 主机名打 proxy），gate_49 由 xfail 转正；compose 落静态 IP 默认（`172.30.0.10`）。生产剩纯运维：选不撞的私网段 + 配 `HELIX_SANDBOX_EXTRA_HOSTS`。
+
 ## Sources
 
 **沙箱架构**：[OpenAI 逆向](https://ryan.govost.es/2025/openai-code-interpreter/) · [Anthropic containment](https://www.anthropic.com/engineering/how-we-contain-claude) · [Anthropic Claude Code sandboxing](https://www.anthropic.com/engineering/claude-code-sandboxing) · [E2B/Manus](https://e2b.dev/blog/how-manus-uses-e2b-to-provide-agents-with-virtual-computers) · [Modal](https://modal.com/resources/best-sandbox-infrastructure-multi-tenant-ai-apps) · [Cloudflare Dynamic Workers](https://blog.cloudflare.com/dynamic-workers/) · [Fly.io Firecracker](https://fly.io/learn/firecracker-vm/) · [Daytona/Sysbox](https://www.daytona.io/docs/en/security-exhibit/) · [Northflank Kata vs gVisor](https://northflank.com/blog/kata-containers-vs-gvisor) · [GKE Agent Sandbox](https://cloud.google.com/blog/products/containers-kubernetes/bringing-you-agent-sandbox-on-gke-and-agent-substrate) · [信任分级 framing](https://www.shayon.dev/post/2026/52/lets-discuss-sandbox-isolation/) · [Docker untrusted workloads](https://www.docker.com/blog/untrusted-autonomous-workload-ai-sandboxes/)
@@ -107,6 +130,8 @@
 **gVisor 代价**：[HotCloud'19 True Cost](https://www.usenix.org/system/files/hotcloud19-paper-young.pdf) · [官方 Performance Guide](https://gvisor.dev/docs/architecture_guide/performance/) · [Systrap release](https://gvisor.dev/blog/2023/04/28/systrap-release/) · [Platform Guide](https://gvisor.dev/docs/architecture_guide/platforms/) · [Ant 生产规模](https://gvisor.dev/blog/2021/12/02/running-gvisor-in-production-at-scale-in-ant/) · [Tencent 百万级 agentic-RL](https://gvisor.dev/blog/2026/04/23/scaling-agentic-rl-sandboxes-to-the-millions-with-gvisor-at-tencent/) · [DirectFS](https://opensource.googleblog.com/2023/06/optimizing-gvisor-filesystems-with-directfs.html) · [syscall 兼容表](https://gvisor.dev/docs/user_guide/compatibility/linux/amd64/) · [Claude Code io_uring #27230](https://github.com/anthropics/claude-code/issues/27230) · [KubeBlocks benchmark](https://kubeblocks.io/blog/does-containerization-affect-the-performance-of-databases) · [阿里云 OpenSandbox](https://northflank.com/blog/alibaba-opensandbox-architecture-use-cases)
 
 **CVE 扫描**：[Trivy CI/CD](https://trivy.dev/docs/latest/ecosystem/cicd/) · [trivy-action](https://github.com/aquasecurity/trivy-action) · [ignore-unfixed](https://trivy.dev/docs/latest/scanner/vulnerability/) · [Filtering/.trivyignore](https://trivy.dev/docs/latest/configuration/filtering/) · [VEX](https://trivy.dev/docs/latest/supply-chain/vex/repo/) · [oneuptime severity](https://oneuptime.com/blog/post/2026-01-28-trivy-severity-filtering/view) · [Wiz 误报来源](https://www.wiz.io/academy/container-security/container-security-scanning) · [VEX 成熟度 arxiv 2503.14388](https://arxiv.org/pdf/2503.14388) · [libreoffice 镜像 issue #54](https://github.com/shelfio/libreoffice-lambda-base-image/issues/54)
+
+**HX-10-F1 sandbox→proxy 寻址（2026-06-13 补）**：[gVisor FAQ — DNS workarounds](https://gvisor.dev/docs/user_guide/faq/) · [gVisor #7523 — DNS on non-default networks](https://github.com/google/gvisor/issues/7523) · [gVisor #7469 — embedded DNS](https://github.com/google/gvisor/issues/7469) · [gVisor #3301 — DNS on netstack/EKS](https://github.com/google/gvisor/issues/3301) · [gVisor Networking guide](https://gvisor.dev/docs/user_guide/networking/) · [Cloudflare Sandbox auth — egress cred injection](https://blog.cloudflare.com/sandbox-auth/) · [Blaxel — static-IP egress gateways](https://blaxel.ai/blog/e2b-alternatives-sandbox-environments) · [iron-proxy — egress firewall w/ DNS](https://github.com/ironsh/iron-proxy)
 
 **HX-10-F2 fork-bomb 处置（2026-06-13 补）**：[gVisor #2490 fork bomb panic](https://github.com/google/gvisor/issues/2490) · [gVisor #2489 pids.limit not working](https://github.com/google/gvisor/issues/2489) · [gVisor #3942 runsc thread explosion](https://github.com/google/gvisor/issues/3942) · [gVisor Security Model](https://gvisor.dev/docs/architecture_guide/security/) · [gVisor Resource Model](https://gvisor.dev/docs/architecture_guide/resources/) · [Modal untrusted code](https://modal.com/resources/run-untrusted-code-safely) · [GKE Sandbox gVisor](https://oneuptime.com/blog/post/2026-02-09-gke-sandbox-gvisor-workload-isolation/view) · [Datadog cgroups fundamentals](https://securitylabs.datadoghq.com/articles/container-security-fundamentals-part-4/)
 

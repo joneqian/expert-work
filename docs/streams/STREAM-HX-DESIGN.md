@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）已交付（Wave 3 首项，#576/#577/#578/#579）——gVisor 生产上线前置 follow-up：F1（沙箱→proxy 固定 IP 寻址）接缝已交付（#592，剩生产 IP 分配 + runsc 验证），F2（fork-bomb 语义）已决方案 A「沙箱阵亡+重建」（§12.2.4，gate_56 转正）；其余各条开工时追加章节。
+> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）已交付（Wave 3 首项，#576/#577/#578/#579）——gVisor 生产上线前置 follow-up 均已决：F1（沙箱→proxy 寻址）方案=`/etc/hosts` 固定 IP（§12.2.5，接缝 #592 + CI 双 runtime 转正 gate_49 + compose 落静态 IP，剩纯运维选私网段），F2（fork-bomb 语义）方案 A「沙箱阵亡+重建」（§12.2.4，gate_56 转正）；其余各条开工时追加章节。
 
 ---
 
@@ -946,7 +946,7 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
   - **实施注记（PR2 #578）**：CVE-2019-5736 真 PoC（覆写宿主 runc 二进制）**降级 staging 渗透**——在共享 CI runner 上跑真容器逃逸利用既不安全（真去破坏宿主）又脆弱（依赖具体 runc 版本/时序）。CI 改以**良性 gVisor 不变量**覆盖：io_uring 在 runsc 下返 -1/ENOSYS（gVisor 不实现，正是 #27230 兼容坑 + 逃逸面收窄证据）+ 其余 gate 验收测试在 runsc 通过（exec/文件/进程/取消隔离），gate_49 网络 + gate_56 fork-bomb 因 gVisor 架构差异 runsc 下 xfail（见下「首跑注记」）。`/proc/sys/net` 与 numpy 项不单测（minimal 镜像 pure-stdlib 无 numpy；gate 测试已覆盖 import/exec 路径），保留 io_uring 这条最高信号不变量。Gate #6/#7 真 PoC 与 timing 同档留 staging（[memory:no-design-choice-disguise] 正面用法——CI 不可安全跑真逃逸是真约束，非弱能力包装）。
 - **Gate 收益**：M0→M1 Gate 的 gVisor 验证从一次性人工活动变持续自动验证。
 - **首跑注记（PR2 #578，实证驱动）**：gVisor workflow 首跑即暴露 2 个 gVisor 多年 open issue 的架构行为（非测试 bug，调研落 [research](../research/2026-06-12-sandbox-isolation-defense-in-depth.md) + google/gvisor#7469 / #2490）——这正是 gVisor CI 的价值（上线前暴露而非上线后炸）。两者 runsc 下 `xfail(strict=False)` 记录，其余 gate 保留回归保护（不卡 PR、可见、记账，方案 Y）：
-  - **gate_49 网络隔离**：gVisor netstack 不支持 docker embedded DNS（127.0.0.11 是 sentry 自身 loopback，dockerd 不在那监听）；容器名解析在 runsc 必失败。隔离本身更强（公网/metadata 全不可达），但**生产沙箱亦靠主机名 `credential-proxy.internal` 找 proxy** → **gVisor 生产上线前置：沙箱→proxy 寻址改 /etc/hosts + 固定 IP（`--add-host`，gofer 文件 gVisor 天然工作）**。follow-up：HX-10-F1。
+  - **gate_49 网络隔离**：gVisor netstack 不支持 docker embedded DNS（127.0.0.11 是 sentry 自身 loopback，dockerd 不在那监听）；容器名解析在 runsc 必失败。隔离本身更强（公网/metadata 全不可达），但**生产沙箱亦靠主机名 `credential-proxy.internal` 找 proxy** → **gVisor 生产上线前置：沙箱→proxy 寻址改 /etc/hosts + 固定 IP（`--add-host`，gofer 文件 gVisor 天然工作）**。**已决：方案=`/etc/hosts` 固定 IP（见下 §12.2.5），CI 已转正。**
   - **gate_56 fork bomb**：`--pids-limit` 在 gVisor 下限 sentry 宿主线程非 guest 进程；fork bomb → Go runtime 建线程失败 → sentry panic → 沙箱（含 runner）整体死（gVisor 从不声称防 fork bomb，资源耗尽防御委托宿主 cgroup）。隔离没破（爆炸半径=沙箱）但语义异于 runc。**gVisor 生产上线前置：接受沙箱阵亡+重建语义 或 guest 内 cgroupfs pids.max + `--memory` 上限**。**已决：方案 A（见下 §12.2.4）。**
 
 ##### 12.2.4 HX-10-F2 决策：接受「沙箱阵亡 + 重建」语义（方案 A，2026-06-13）
@@ -965,7 +965,22 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 
 **与我们架构契合**：宿主 cgroup 限总量（爆炸半径锁死沙箱）+ ephemeral 容器 + warm pool（HX-6 已在）+ reaper 重建（已在）= 方案 A 标准件齐全，**零生产代码改动**。用户数据零损失：workspace volume 持久（J.15），fork bomb 只丢一次 in-flight exec。A 唯一让步——恶意用户能 fork bomb 主动弄死自己沙箱触发重建，但那是自残（不放大、不影响邻租户、warm pool 补位）。
 
-**落地（仅测试层固化语义）**：`test_supervisor_integration.py` gate_56——runc 保留「优雅 EAGAIN 遏制」断言（runsc skip）；新增 runsc 专属 `test_gate_56_fork_bomb_sandbox_death_then_rebuild` 断言方案 A：fork bomb 弄死自身沙箱（exec 抛 `SupervisorError`），supervisor 存活 + 全新沙箱重建并执行成功（爆炸半径遏制 + 宿主不受影响）。**gate_56 由 `xfail` 转正为显式 A 语义断言**。gate_49（F1）仍 `xfail`，待 F1 固定 IP 上线。
+**落地（仅测试层固化语义）**：`test_supervisor_integration.py` gate_56——runc 保留「优雅 EAGAIN 遏制」断言（runsc skip）；新增 runsc 专属 `test_gate_56_fork_bomb_sandbox_death_then_rebuild` 断言方案 A：fork bomb 弄死自身沙箱（exec 抛 `SupervisorError`），supervisor 存活 + 全新沙箱重建并执行成功（爆炸半径遏制 + 宿主不受影响）。**gate_56 由 `xfail` 转正为显式 A 语义断言**。gate_49（F1）见 §12.2.5。
+
+##### 12.2.5 HX-10-F1 决策：`/etc/hosts` 固定 IP 寻址（2026-06-13）
+
+> sandbox→credential-proxy 寻址在 runsc 下不能靠 docker embedded DNS。决策前检索业界做法（实证全文落 [research §7](../research/2026-06-12-sandbox-isolation-defense-in-depth.md)）。
+
+**三层解法全部业界背书，我们选的 `/etc/hosts` 固定 IP 是 gVisor 官方钦定的裸 Docker 解**：
+1. **gVisor 官方 FAQ 4 个 workaround**：`--network=host`（破隔离）/ `--link`（默认桥破 egress 管控）均否决；**「用 IP 代替容器名」= 我们 `--add-host` 固定 IP**；「上 K8s」见 ③。
+2. **规模化玩家上 K8s 问题直接消失**：GKE Sandbox / Ant / Tencent 全在 K8s/containerd，服务发现走 CoreDNS 不经 docker embedded DNS——**这坑是裸 docker-compose 单机特有产物**。我们 M0 单节点 DooD 才撞，M1+ 上编排层后 `/etc/hosts` 一手自然退役（与既定 K8s 方向一致，非永久债）。
+3. **egress-proxy 静态 IP 是行业常态**：Cloudflare Outbound Workers（网络层注入凭证，同构 F-2）/ Blaxel（static-IP egress gateway 产品化）/ iron-proxy（proxy 自带 DNS）/ E2B（gateway VM IP tunneling）。
+
+**落地**：
+- **接缝（#592 已交付）**：`runtime_provider.extra_hosts`→`--add-host hostname:ip` argv（顺序保持）+ `HELIX_SANDBOX_EXTRA_HOSTS`（`name=ip,…`，格式错启动期 fail-closed 同 seccomp）+ supervisor app 接线（`make_sandbox_runtime_provider(extra_hosts=parsed_extra_hosts)`）。
+- **本轮 CI 转正**：`test_supervisor_integration.py` egress 网络建固定 subnet（`172.30.0.0/24`）+ stub proxy 钉静态 IP（`172.30.0.10`）+ harness 传 `extra_hosts={credential-proxy.internal: 172.30.0.10}` + `_EGRESS_PROBE` 经**主机名** `credential-proxy.internal` 打 proxy。**runc + runsc 双 runtime 跑同一 `/etc/hosts` 路径**（比旧的 runc-only embedded-DNS 覆盖更强），**gate_49 由 `xfail` 转正**。
+- **compose 落默认**：`helix-sandbox-egress` 加 `ipam` subnet + credential-proxy 钉 `ipv4_address: 172.30.0.10` + supervisor 注释给出 runsc 下应配的 `HELIX_SANDBOX_EXTRA_HOSTS` 具体值。dev/runc 仍留 unset（embedded DNS 正常）。
+- **剩纯运维**：生产选不撞的私网段（避开 VPN/VPC/其他 docker 网络）+ runsc 环境配 `HELIX_SANDBOX_EXTRA_HOSTS`。无代码债。
 
 #### 12.2.3 ③ Trivy 镜像 CVE 扫描（PR3，收尾）
 

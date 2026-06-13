@@ -283,8 +283,13 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - helix-sandbox-egress
-      - default
+      # HX-10-F1: pin a static IP on the sandbox-facing network so a runsc
+      # sandbox can resolve the proxy from /etc/hosts (set
+      # HELIX_SANDBOX_EXTRA_HOSTS=credential-proxy.internal=172.30.0.10 on
+      # the supervisor). On the default network the IP stays dynamic.
+      helix-sandbox-egress:
+        ipv4_address: 172.30.0.10
+      default: {}
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import socket,sys; s=socket.socket(); s.settimeout(2); sys.exit(s.connect_ex(('127.0.0.1',8080)))\""]
       interval: 3s
@@ -400,12 +405,15 @@ services:
       #
       # HX-10-F1 (gVisor prod prerequisite): runsc's netstack has no Docker
       # embedded DNS (google/gvisor#7469), so under runsc the sandbox cannot
-      # resolve the credential proxy by container name. Pin the proxy to a
-      # static IP on the egress network and set
-      #   HELIX_SANDBOX_EXTRA_HOSTS=credential-proxy.internal=<fixed-ip>
+      # resolve the credential proxy by container name. The proxy is pinned
+      # to 172.30.0.10 on helix-sandbox-egress (see networks: below); under
+      # runsc set
+      #   HELIX_SANDBOX_EXTRA_HOSTS=credential-proxy.internal=172.30.0.10
       # (comma-separated for more entries). dockerd writes /etc/hosts before
       # start — a gofer file read gVisor handles natively. Malformed values
-      # fail startup closed. Dev/runc leaves this unset (embedded DNS works).
+      # fail startup closed. Dev/runc leaves this unset (embedded DNS works);
+      # the sandbox-supervisor CI workflow verifies the /etc/hosts path under
+      # both runtimes (test_gate_49_network_egress_isolation).
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -556,6 +564,15 @@ networks:
   # default route, so a sandbox attached to it can reach only same-network
   # peers (the credential-proxy). Sandboxes join it by name at docker-run
   # time (SandboxRuntimeProvider). Explicit ``name`` keeps it un-prefixed.
+  #
+  # HX-10-F1: a fixed subnet lets the credential-proxy hold a static IP
+  # (172.30.0.10 below), so under gVisor — whose netstack has no docker
+  # embedded DNS (google/gvisor#7469) — the sandbox can still reach the
+  # proxy via an /etc/hosts entry (HELIX_SANDBOX_EXTRA_HOSTS). ``172.30``
+  # avoids docker's default 172.17-29 pools.
   helix-sandbox-egress:
     name: helix-sandbox-egress
     internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
