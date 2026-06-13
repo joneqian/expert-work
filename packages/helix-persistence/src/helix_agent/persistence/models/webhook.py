@@ -45,7 +45,7 @@ class WebhookEndpointRow(Base):
     )
     # NULL ``agent_name`` = subscribe to events from every agent in the tenant.
     agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    secret_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secret_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'api'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

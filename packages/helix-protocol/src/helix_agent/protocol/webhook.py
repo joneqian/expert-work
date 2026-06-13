@@ -70,9 +70,12 @@ class WebhookEndpointSpec(BaseModel):
 class WebhookEndpointRecord(BaseModel):
     """One row of ``webhook_endpoint`` — a registered delivery target.
 
-    ``secret_hash`` is never the plaintext HMAC secret; the secret is
-    shown once at creation (Mini-ADR HX-J5). The signing scheme is
-    HMAC-SHA256 over the request body.
+    ``secret_ref`` points into the :class:`SecretStore` where the HMAC
+    signing secret lives (encrypted at rest) — the delivery worker reads
+    it back to sign outbound requests (HMAC-SHA256 over the body). It is
+    **not** a one-way hash: outbound signing needs the plaintext, unlike
+    the J.10 inbound-trigger path which only verifies a hash. The secret
+    plaintext is shown once at creation (Mini-ADR HX-J5).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -84,7 +87,7 @@ class WebhookEndpointRecord(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     event_types: tuple[WebhookEventType, ...] = Field(min_length=1)
     agent_name: str | None = None
-    secret_hash: str | None = None
+    secret_ref: str | None = None
     enabled: bool = True
     source: WebhookEndpointSource = "api"
     created_at: datetime

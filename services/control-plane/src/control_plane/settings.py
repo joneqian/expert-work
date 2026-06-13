@@ -376,6 +376,14 @@ class Settings(BaseSettings):
     enable_feedback_consumer: bool = Field(default=True)
     #: 👎 volume is low; 10 minutes keeps the loop responsive without noise.
     feedback_consumer_interval_s: int = Field(default=600, gt=0)
+    #: HX-9 (STREAM-HX § 13) — outbound webhook delivery worker. Drains the
+    #: ``webhook_delivery`` queue (sign + POST). Enabled by default; the
+    #: enqueue side (PR3b) is what actually populates the queue.
+    enable_webhook_delivery: bool = Field(default=True)
+    webhook_delivery_interval_s: int = Field(default=15, gt=0)
+    #: Per-tenant in-flight delivery cap — a slow tenant endpoint cannot
+    #: starve others (Mini-ADR HX-J4).
+    webhook_delivery_per_tenant_concurrency: int = Field(default=4, gt=0)
 
     #: SE-13 pre-evolution domain research (gated OFF by default). On cold start
     #: of an agent's evolution, research the tenant KB (+ optionally public web)

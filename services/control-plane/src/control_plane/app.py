@@ -167,6 +167,7 @@ from control_plane.tenant_mcp_pool import TenantMcpPoolService
 from control_plane.tenant_secret_overlay import TenantOverlayCredentialsResolver
 from control_plane.tenant_status import TenantStatusService
 from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolService
+from control_plane.webhook_delivery_worker import WebhookDeliveryWorker
 from control_plane.workspace_lock import PgWorkspaceLock
 from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.common.health import DefaultHealthProvider
@@ -718,6 +719,7 @@ def create_app(
             skill_evolution_worker: SkillEvolutionWorker | None = None
             skill_rollback_monitor: RollbackMonitor | None = None
             feedback_consumer: FeedbackConsumerWorker | None = None
+            webhook_delivery_worker: WebhookDeliveryWorker | None = None
             approval_gauge_worker: ApprovalGaugeWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
@@ -1138,6 +1140,19 @@ def create_app(
                 )
                 feedback_consumer.start()
                 _app.state.feedback_consumer = feedback_consumer
+            # HX-9 (STREAM-HX § 13) — outbound webhook delivery worker.
+            if resolved_settings.enable_webhook_delivery:
+                webhook_delivery_worker = WebhookDeliveryWorker(
+                    delivery_store=resolved_webhook_delivery_store,
+                    endpoint_store=resolved_webhook_endpoint_store,
+                    secret_store=resolved_secret_store,
+                    interval_s=resolved_settings.webhook_delivery_interval_s,
+                    per_tenant_concurrency=(
+                        resolved_settings.webhook_delivery_per_tenant_concurrency
+                    ),
+                )
+                webhook_delivery_worker.start()
+                _app.state.webhook_delivery_worker = webhook_delivery_worker
             # Stream HX-4 (Mini-ADR HX-D2) — pending-approvals gauge.
             # Always-on: one COUNT(*) a minute, no settings knob.
             approval_gauge_worker = ApprovalGaugeWorker(approval_store=resolved_approval_store)
@@ -1169,6 +1184,8 @@ def create_app(
                     await skill_rollback_monitor.stop()
                 if feedback_consumer is not None:
                     await feedback_consumer.stop()
+                if webhook_delivery_worker is not None:
+                    await webhook_delivery_worker.stop()
                 if approval_gauge_worker is not None:
                     await approval_gauge_worker.stop()
                 # Stream HX-7 — drain the Langfuse SDK's background queue

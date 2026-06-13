@@ -37,7 +37,7 @@ def _endpoint(
         url="https://hooks.example.com/ingest",
         event_types=event_types,
         agent_name=agent_name,
-        secret_hash="sha256:deadbeef",
+        secret_ref="webhook-endpoint/abc",
         enabled=enabled,
         source="api",
         created_at=_BASE,

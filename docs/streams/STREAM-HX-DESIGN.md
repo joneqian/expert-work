@@ -1136,4 +1136,7 @@ hook URL 是**运维配置资产**非 agent 行为——改 URL 不该弹 agent 
 | PR0（本设计） | §13 + research 文档 + ITERATION-PLAN HX-9 细化 | 纯 docs，CI |
 | PR1 | 迁移 `webhook_endpoint`+`webhook_delivery` 两表 + RLS + 部分索引 + DTO/ORM/Store 三层 + ResourceType 双镜像（AuditAction 推迟到 PR2 emit）。**纯数据模型，零 orchestrator 改动（方案 b）** | §13.5-PR1；迁移真 PG |
 | PR2 | `api/webhook_endpoints.py` 5 端点 CRUD + authz + 跨租户 + AuditAction WEBHOOK_* + secret show-once + 配额 + SSRF + admin-ui（SDK/页面/tab/i18n/接线） | §13.5-PR2 |
-| PR3（收尾） | `WebhookDeliveryWorker`（扫 3 源表 agent_run/agent_approval/artifact → 入队 → 投递；退避/DLQ/断路器/per-tenant 并发）+ HMAC 签名 + lifespan 接线 + 计量 + 可观测 | §13.5-PR3；零债 6 条 |
+| PR3a | 投递引擎：`WebhookDeliveryWorker` 消费 `webhook_delivery`（`list_ready`→SSRF 复检+HMAC-SHA256 签名 POST→2xx/4xx/5xx 状态机+退避/DLQ+per-endpoint 断路器+per-tenant 并发）+ lifespan 接线 + 计量 + 可观测 | §13.5-PR3；自足于 webhook_delivery store |
+| PR3b（收尾） | 入队扫描：3 源表（agent_run 终态/agent_approval/artifact）加跨租户 list-since + worker 入队阶段（匹配 enabled endpoint → 幂等入队）→ 端到端闭环 | §13.5-PR3；零债 6 条 |
+
+> **PR3 拆分（2026-06-13）**：投递引擎（PR3a，自足于 webhook_delivery store）与入队扫描（PR3b，需 3 源表新增 list-since 方法）拆两 PR，各自独立 review+CI 绿。幂等去重（`UNIQUE(endpoint_id,event_id)`）保证无论游标精度都不重复投递，故 PR3b 的 since 方法是扫描量优化非正确性必需。PR3a 单独 merge 时无人入队（非端到端），PR3b 闭环。

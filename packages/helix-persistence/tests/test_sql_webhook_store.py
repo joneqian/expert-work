@@ -73,7 +73,7 @@ def _endpoint(
         url="https://hooks.example.com/ingest",
         event_types=event_types,
         agent_name=agent_name,
-        secret_hash="sha256:abc",
+        secret_ref="webhook-endpoint/abc",
         enabled=enabled,
         source="api",
         created_at=_BASE,
@@ -122,7 +122,7 @@ async def test_endpoint_round_trips(
     assert fetched is not None
     assert fetched.event_types == ("run.completed", "run.failed")
     assert fetched.agent_name == "reporter"
-    assert fetched.secret_hash == "sha256:abc"
+    assert fetched.secret_ref == "webhook-endpoint/abc"
 
 
 @pytest.mark.asyncio

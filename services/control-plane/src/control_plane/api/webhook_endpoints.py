@@ -13,7 +13,6 @@ worker later sends never carries platform credentials (Mini-ADR HX-J5).
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -37,6 +36,7 @@ from helix_agent.common.url_validation import RemoteURLError, validate_remote_ur
 from helix_agent.persistence import WebhookEndpointStore
 from helix_agent.protocol import AuditAction, WebhookEndpointRecord, WebhookEventType
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.secret_store import SecretStore
 
 #: Allowed subscription event types — must match ``WebhookEventType``.
 _EVENT_TYPES: frozenset[str] = frozenset(
@@ -44,9 +44,9 @@ _EVENT_TYPES: frozenset[str] = frozenset(
 )
 
 
-def _hash_secret(secret: str) -> str:
-    """SHA-256 of a webhook signing secret — the token is high-entropy random."""
-    return hashlib.sha256(secret.encode()).hexdigest()
+def _secret_ref(endpoint_id: UUID) -> str:
+    """SecretStore key for an endpoint's HMAC signing secret."""
+    return f"webhook-endpoint/{endpoint_id}"
 
 
 def _endpoint_dict(record: WebhookEndpointRecord, *, secret: str | None = None) -> dict[str, Any]:
@@ -122,6 +122,10 @@ def _get_settings(request: Request) -> Settings:
     return request.app.state.settings  # type: ignore[no-any-return]
 
 
+def _get_secret_store(request: Request) -> SecretStore:
+    return request.app.state.secret_store  # type: ignore[no-any-return]
+
+
 def build_webhook_endpoints_router() -> APIRouter:
     """HX-9 — authenticated outbound webhook endpoint CRUD."""
     router = APIRouter(prefix="/v1/webhook-endpoints", tags=["webhook-endpoints"])
@@ -133,6 +137,7 @@ def build_webhook_endpoints_router() -> APIRouter:
         store: Annotated[WebhookEndpointStore, Depends(_get_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         settings: Annotated[Settings, Depends(_get_settings)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
     ) -> JSONResponse:
         tenant_id: UUID = request.state.tenant_id
         actor_id: str = request.state.actor_id
@@ -149,17 +154,24 @@ def build_webhook_endpoints_router() -> APIRouter:
                 ),
             )
 
+        # HMAC signing secret: stored in the SecretStore (encrypted at rest);
+        # the row holds only a ref. The plaintext is returned once here and
+        # never again (Mini-ADR HX-J5). The delivery worker resolves the ref
+        # to sign outbound requests.
+        endpoint_id = uuid4()
         secret = secrets.token_urlsafe(32)
+        secret_ref = _secret_ref(endpoint_id)
+        await secret_store.put(secret_ref, secret)
         now = datetime.now(UTC)
         record = WebhookEndpointRecord(
-            id=uuid4(),
+            id=endpoint_id,
             tenant_id=tenant_id,
             user_id=None,
             name=body.name,
             url=body.url,
             event_types=event_types,
             agent_name=body.agent_name,
-            secret_hash=_hash_secret(secret),
+            secret_ref=secret_ref,
             enabled=True,
             source="api",
             created_at=now,
