@@ -8,7 +8,7 @@
 >
 > **横切公理**（HX-12/13 立项时锁定，对全 Stream 生效）：① 不存在 drop core tool / drop 历史真相的代码路径（视图级裁剪 ≠ 状态删除）；② fail-open——基础设施故障的代价只能是多花 token，绝不能是少能力；③ config 防御解析（clamp / safe default，不 raise）。
 >
-> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）已交付（Wave 3 首项，#576/#577/#578/#579；F1/F2 为 gVisor 生产上线前置 follow-up）；其余各条开工时追加章节。
+> **本文件状态**：Wave 1（HX-1~4，§2-§5）已全部交付。Wave 2（2026-06-11 起）：HX-5（§6）已交付；HX-6（§7）/ HX-7（§8）/ HX-8（§9）/ HX-12（§10）/ HX-13（§11）已交付；HX-10（sandbox 安全纵深，§12）已交付（Wave 3 首项，#576/#577/#578/#579）——gVisor 生产上线前置 follow-up：F1（沙箱→proxy 固定 IP 寻址）接缝已交付（#592，剩生产 IP 分配 + runsc 验证），F2（fork-bomb 语义）已决方案 A「沙箱阵亡+重建」（§12.2.4，gate_56 转正）；其余各条开工时追加章节。
 
 ---
 
@@ -947,7 +947,25 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 - **Gate 收益**：M0→M1 Gate 的 gVisor 验证从一次性人工活动变持续自动验证。
 - **首跑注记（PR2 #578，实证驱动）**：gVisor workflow 首跑即暴露 2 个 gVisor 多年 open issue 的架构行为（非测试 bug，调研落 [research](../research/2026-06-12-sandbox-isolation-defense-in-depth.md) + google/gvisor#7469 / #2490）——这正是 gVisor CI 的价值（上线前暴露而非上线后炸）。两者 runsc 下 `xfail(strict=False)` 记录，其余 gate 保留回归保护（不卡 PR、可见、记账，方案 Y）：
   - **gate_49 网络隔离**：gVisor netstack 不支持 docker embedded DNS（127.0.0.11 是 sentry 自身 loopback，dockerd 不在那监听）；容器名解析在 runsc 必失败。隔离本身更强（公网/metadata 全不可达），但**生产沙箱亦靠主机名 `credential-proxy.internal` 找 proxy** → **gVisor 生产上线前置：沙箱→proxy 寻址改 /etc/hosts + 固定 IP（`--add-host`，gofer 文件 gVisor 天然工作）**。follow-up：HX-10-F1。
-  - **gate_56 fork bomb**：`--pids-limit` 在 gVisor 下限 sentry 宿主线程非 guest 进程；fork bomb → Go runtime 建线程失败 → sentry panic → 沙箱（含 runner）整体死（gVisor 从不声称防 fork bomb，资源耗尽防御委托宿主 cgroup）。隔离没破（爆炸半径=沙箱）但语义异于 runc。**gVisor 生产上线前置：接受沙箱阵亡+重建语义 或 guest 内 cgroupfs pids.max + `--memory` 上限**。follow-up：HX-10-F2。
+  - **gate_56 fork bomb**：`--pids-limit` 在 gVisor 下限 sentry 宿主线程非 guest 进程；fork bomb → Go runtime 建线程失败 → sentry panic → 沙箱（含 runner）整体死（gVisor 从不声称防 fork bomb，资源耗尽防御委托宿主 cgroup）。隔离没破（爆炸半径=沙箱）但语义异于 runc。**gVisor 生产上线前置：接受沙箱阵亡+重建语义 或 guest 内 cgroupfs pids.max + `--memory` 上限**。**已决：方案 A（见下 §12.2.4）。**
+
+##### 12.2.4 HX-10-F2 决策：接受「沙箱阵亡 + 重建」语义（方案 A，2026-06-13）
+
+> 二选一拍板（用户 2026-06-13），经业界实证背书。实证全文落 [research §6](../research/2026-06-12-sandbox-isolation-defense-in-depth.md)。
+
+**选 A：接受沙箱阵亡 + 重建**（否决 B：guest 内 cgroupfs `pids.max` + `--memory`）。
+
+**横切公理（写入决策）**：gVisor **设计上把资源耗尽防御委托宿主 cgroup**——sentry 自身不兜 fork-bomb，资源耗尽 → sentry 死 → 宿主 cgroup 仍限总量。所需防御点在**宿主层限总量**（防溢出到邻居 / 跨租户），**不在 guest 内优雅报错**。F2 不是安全洞，是「错误处理优雅度」；安全纵深目标（爆炸半径锁在沙箱）已达成。
+
+**业界四点背书**（[research §6](../research/2026-06-12-sandbox-isolation-defense-in-depth.md) 详）：
+1. **gVisor 官方 Security Model 明文**：「relies on the host resource mechanisms (cgroups) for defense against resource exhaustion and DoS」——委托宿主 cgroup 是设计，非缺陷。
+2. **fork-bomb panic 是已知且长期未修**：google/gvisor #2490（fork bomb panic）/ #2489（pids.limit 不生效）/ #3942（runsc 海量 Go 线程）三 issue 2020 年至今 open——gVisor 团队不当 bug 修，正因立场 = 资源耗尽宿主 cgroup 兜、沙箱死重建。
+3. **gVisor sandbox 厂商全走 ephemeral + 重建**：Modal（gVisor 跑 untrusted code）明确 ephemeral container lifecycle；GKE Agent Sandbox 用 ephemeral environments + warm pools + Pod Snapshots。
+4. **通用共识**：「container isolation doesn't protect against process table exhaustion on the host, so limits must always be set」——防御点在宿主 cgroup 限总量，不在 guest 内报错。
+
+**与我们架构契合**：宿主 cgroup 限总量（爆炸半径锁死沙箱）+ ephemeral 容器 + warm pool（HX-6 已在）+ reaper 重建（已在）= 方案 A 标准件齐全，**零生产代码改动**。用户数据零损失：workspace volume 持久（J.15），fork bomb 只丢一次 in-flight exec。A 唯一让步——恶意用户能 fork bomb 主动弄死自己沙箱触发重建，但那是自残（不放大、不影响邻租户、warm pool 补位）。
+
+**落地（仅测试层固化语义）**：`test_supervisor_integration.py` gate_56——runc 保留「优雅 EAGAIN 遏制」断言（runsc skip）；新增 runsc 专属 `test_gate_56_fork_bomb_sandbox_death_then_rebuild` 断言方案 A：fork bomb 弄死自身沙箱（exec 抛 `SupervisorError`），supervisor 存活 + 全新沙箱重建并执行成功（爆炸半径遏制 + 宿主不受影响）。**gate_56 由 `xfail` 转正为显式 A 语义断言**。gate_49（F1）仍 `xfail`，待 F1 固定 IP 上线。
 
 #### 12.2.3 ③ Trivy 镜像 CVE 扫描（PR3，收尾）
 

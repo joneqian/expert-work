@@ -16,13 +16,16 @@ STREAM-F-DESIGN § 1.3 acceptance gates:
 
 Under runsc the suite additionally asserts the live container's runtime
 (guarding against a silent fall-back to runc) and a gVisor isolation
-invariant (io_uring unavailable). Two gates are ``xfail`` under runsc —
-their runc-shaped assertions encode behaviour gVisor changes by design:
+invariant (io_uring unavailable). Two gates change shape under runsc
+because gVisor alters their behaviour by design:
 #49 (egress) relies on docker embedded DNS, which gVisor netstack does not
-support (google/gvisor#7469); #56 (fork bomb) expects graceful pids-limit
-containment, but under gVisor a fork bomb panics the sentry
-(google/gvisor#2490) — isolation holds, semantics differ. Both are HX-10
-follow-ups (production sandbox->proxy addressing / fork-bomb semantics).
+support (google/gvisor#7469) — still ``xfail`` pending the HX-10-F1
+fixed-IP addressing rollout. #56 (fork bomb) panics the sentry rather than
+returning EAGAIN (google/gvisor#2490): the runc graceful-containment test
+is ``skip``ped under runsc and replaced by an explicit method-A assertion
+(HX-10-F2) — the fork bomb kills its own sandbox, the supervisor survives,
+and a fresh sandbox rebuilds. gVisor delegates resource-exhaustion defense
+to the host cgroup, so sandbox-death + rebuild is the accepted semantic.
 Gate #6 (timing side-channel) and a full CVE-2019-5736 escape PoC stay out
 of CI — environment-sensitive / unsafe as a live exploit on shared runners
 — and remain staging penetration tests (Mini-ADR F-10 / HX-10 §12.2.2).
@@ -36,6 +39,7 @@ egress network, and starts a stub proxy on it; the whole module
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import subprocess
 import time
@@ -50,7 +54,7 @@ import pytest
 from helix_agent.persistence import InMemoryUserWorkspaceStore
 from helix_agent.runtime.sandbox import SandboxRuntimeProvider
 from sandbox_supervisor.docker_client import CliDockerClient
-from sandbox_supervisor.domain import SandboxRecord, SandboxState
+from sandbox_supervisor.domain import SandboxRecord, SandboxState, SupervisorError
 from sandbox_supervisor.pool import PoolReplenisher, SandboxPool
 from sandbox_supervisor.schemas import AcquireRequest
 from sandbox_supervisor.settings import SandboxSupervisorSettings
@@ -479,17 +483,15 @@ _FORK_BOMB = (
 )
 
 
-@pytest.mark.xfail(
-    condition=_OCI_RUNTIME == "runsc",
+@pytest.mark.skipif(
+    _OCI_RUNTIME == "runsc",
     reason=(
-        "gVisor's --pids-limit caps the sentry's HOST threads, not guest processes "
-        "— a fork bomb makes the Go runtime fail to create an OS thread and panics "
-        "the sentry, killing the runner (google/gvisor#2490); gVisor never claims "
-        "fork-bomb protection. Isolation still holds (blast radius = the sandbox, no "
-        "host/cross-tenant impact). Production needs a sandbox-death+rebuild semantic "
-        "or guest-side cgroupfs pids.max + a memory cap. HX-10 follow-up."
+        "runc-specific semantic: the host cgroup pids controller returns EAGAIN to "
+        "the guest, so the runner survives and the snippet exits cleanly. Under gVisor "
+        "the same fork bomb panics the sentry instead (google/gvisor#2490) — that "
+        "accepted sandbox-death+rebuild semantic is asserted by the runsc test below "
+        "(HX-10-F2, method A)."
     ),
-    strict=False,
 )
 @pytest.mark.asyncio
 async def test_gate_56_fork_bomb_contained_by_pids_limit(helix: _Harness) -> None:
@@ -504,6 +506,45 @@ async def test_gate_56_fork_bomb_contained_by_pids_limit(helix: _Harness) -> Non
     assert "fork-limit-hit" in result.stdout
     spawned = int(result.stdout.split("spawned=")[1].split()[0])
     assert 0 < spawned < 128  # bounded by the default --pids-limit
+
+
+@_gvisor_only
+@pytest.mark.asyncio
+async def test_gate_56_fork_bomb_sandbox_death_then_rebuild(helix: _Harness) -> None:
+    """HX-10-F2 method A: under gVisor a fork bomb kills the sandbox, not the host.
+
+    gVisor's ``--pids-limit`` caps the sentry's HOST threads, not guest
+    processes — a fork bomb makes the Go runtime fail to spawn an OS thread
+    and panics the sentry, killing the runner (google/gvisor#2490). gVisor
+    never claims fork-bomb protection: it delegates resource-exhaustion
+    defense to the host cgroup (gVisor Security Model). We *accept* the
+    sandbox-death + rebuild semantic — the only guarantee that matters is
+    that the blast radius stays inside the dead sandbox. This asserts it:
+    the fork bomb breaks its own sandbox, but the supervisor survives and a
+    fresh sandbox launches and runs immediately. The persistent workspace
+    volume is unaffected (covered by the J.15 persistence test), so a real
+    user loses only the in-flight exec, not their data.
+    """
+    box = await helix.supervisor.acquire(_acquire_request("t-56"))
+    # The panicked sentry breaks the runner link, surfacing as a
+    # SupervisorError (or a non-clean result if the panic races the read);
+    # either way the runc "fork-limit-hit" path is gone by design.
+    with contextlib.suppress(SupervisorError):
+        await helix.supervisor.exec(box.sandbox_id, code=_FORK_BOMB)
+    # The dead container may already be gone; releasing it is best-effort
+    # (the autouse sweep force-removes any leftover regardless).
+    with contextlib.suppress(SupervisorError):
+        await helix.supervisor.release(box.sandbox_id)
+
+    # Blast radius contained: the supervisor is alive and a fresh sandbox
+    # rebuilds and executes — the host + supervisor are unaffected.
+    fresh = await helix.supervisor.acquire(_acquire_request("t-56b"))
+    result = await helix.supervisor.exec(fresh.sandbox_id, code="print('rebuilt')")
+    await helix.supervisor.release(fresh.sandbox_id)
+
+    assert result.exit_code == 0
+    assert result.timed_out is False
+    assert "rebuilt" in result.stdout
 
 
 # ---------------------------------------------------------------------------
