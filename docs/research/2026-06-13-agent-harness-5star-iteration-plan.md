@@ -32,8 +32,8 @@
 | 11.4 trace-based eval | 1 | H | H | **P1** | L |
 | 11.6 生产 eval worker/scheduler | 2 | H | H | **P1** | M |
 | 11.3 会话级结果指标 | 3 | H | M | **P1** | M |
-| 4.4 agent 自写 skill (J.7b-1) | 3 | H | H | **P1** | L |
-| 1.3 Evaluator-Optimizer 编排 | 3 | M | H | **P1** | M |
+| 4.4 agent 自写 skill (J.7b-1) | 3→4* | H | H | **P1** | S(仅自动演化) |
+| 1.3 Evaluator-Optimizer 编排 | 3→4* | M | H | **P1** | S(仅独立evaluator) |
 | 11.5 对抗/injection eval 集 | 2 | M | H | **P1** | M |
 | 10.1 连接式 trace 实装(11.4前置) | 2 | M | M | **P1** | L |
 | 9.4 自动 failover | 2 | H | H | **P2** | XL |
@@ -59,6 +59,10 @@
 - **gVisor（7.2）：成本口径快赢 → P3**。仍重要（企业门槛），但非 agent 能力，价值口径降为中。
 - **SLO/backpressure（10.5/16.3）：→ P5 末位**。纯运维，商业/能力价值最低。
 - **变现 chargeback（12.4）：BV 高但用户拍板后置 → P5 末位**。
+
+> `*` 2026-06-13 S0 核实：1.3/4.4 经读码上调 3→4★（reflect.py 已是 Evaluator-Optimizer；
+> skill_authoring.py M0 已能自写 skill），P1 这两项从"新建"降为"小补"。详见
+> `2026-06-13-p1-self-improving-flywheel-design.md`。
 
 ---
 
