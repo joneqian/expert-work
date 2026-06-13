@@ -1042,3 +1042,92 @@ tenant_tool_getter: Callable[[UUID], Awaitable[dict[Tool, str]]] | None = None
 | PR1 | misconfig 断言 + seccomp pinned profile（删 clone3 收紧）+ runtime_provider `--security-opt` + settings + supervisor fail-closed | §12.5-PR1 |
 | PR2 | gVisor CI workflow（runsc 装载 + runtime 真起断言 + 兼容坑/逃逸 PoC 用例）+ 集成测试 env 参数化 + environments 部署策略文档 | §12.5-PR2；workflow 端到端 |
 | PR3（收尾，#579） | minimal 镜像 CI 构建（`sandbox-image.yml` build+smoke+scan）+ office 加 Trivy 步 + 两镜像分镜像门禁（minimal `CRITICAL,HIGH` / office `CRITICAL`，全 `--ignore-unfixed`）+ `.trivyignore` 纪律 header + `sandbox-image-cve-weekly.yml` 周扫（不应用 trivyignore）+ SARIF 上传 | §12.5-PR3；零债 6 条 |
+
+## 13. HX-9 — 租户级出站 webhook hook（Wave 3 架构级）
+
+> 方向级决策已对比讨论 + 拍板（2026-06-13），实证对比落 [research](../research/2026-06-13-tenant-hook-extension-patterns.md)。本节为拍板后的 STREAM 级详设。
+
+### 13.1 问题 + 现状取证（2026-06-13，main@2871f91）
+
+租户要在 agent 生命周期关键点挂自己的逻辑（run 完成通知内部系统 / 审批请求转发到自家 IM / 产物生成触发下游 ETL），今天只能轮询 API 或消费 SSE——**无平台主动推送的扩展点**。HX-9 = 平台在事件发生时签名 POST 到租户注册的 URL（webhook 回调式，Stripe/GitHub/Svix 范式）。
+
+| 接缝 | 位置 | 复用方式 |
+|---|---|---|
+| manifest `hooks: dict[str,str]`（占位零消费方） | `protocol/agent_spec.py:811` | **转 deprecated**（注册改 API CRUD，见 ①） |
+| triggers CRUD 全套（J.10） | `api/triggers.py` / `persistence/trigger/{base,memory,sql}.py` / `models/agent_trigger.py` | webhook_endpoint CRUD/Store/ORM 模板 |
+| run_event 表 + RunEventStore + SSE | `runs/event_store.py` / H.3 | 事件主轴（但仅 run 终态在轴上，见 ②） |
+| DLQ worker + 退避表 | `memory/dlq_worker.py:76`（`_BACKOFF_SCHEDULE`/`_MAX_ATTEMPTS`）/ `feedback_consumer.py:104` | 投递 worker 形态 |
+| SSRF | `helix-common/url_validation.py:44` / `api/mcp_servers.py:52` host-pivot 字符黑名单 | URL 注册双段校验 |
+| RLS bypass 跨租户扫 | `persistence/rls.py:92` `bypass_rls_var` | worker cross-tenant 扫描 |
+| audit + token_usage 计量 | G.9 / Stream K | 投递可记账可审计 |
+
+### 13.2 设计
+
+**架构（单事件主轴 → 投递 worker）**：
+
+```
+run_event 主轴（单一事件源，seq 单调）
+  ├─ run 终态（现成: orchestrator/sse.py:423 SUCCESS / 504+546 ERROR）
+  ├─ 审批请求（新 emit: orchestrator/sse.py:439 _register_pending_approval）
+  └─ artifact 产出（新 emit: orchestrator/tools/artifact.py SaveArtifact dispatch）
+        │
+        ▼
+WebhookDeliveryWorker（control-plane lifespan，照 MemoryDLQWorker）
+  cross-tenant 扫 run_event 新帧 → 匹配租户已注册 endpoint 的 event_type
+  → 入 webhook_delivery 队列表（per-delivery 行）
+  → SSRF 双段校验 + HMAC-SHA256 签名 → POST 租户 URL
+  → 2xx=delivered / 5xx·timeout=指数退避 / 4xx=不重试直接 dead_letter
+  → per-endpoint 断路器 + per-tenant 并发上限
+```
+
+#### 13.2.1 ① 注册面 = 平台 API CRUD（PR2）
+
+hook URL 是**运维配置资产**非 agent 行为——改 URL 不该弹 agent 版本。照 triggers 模板：`webhook_endpoint` 表（`tenant_id`/`agent_name`/`agent_version` scope + `url` + `event_types`（订阅哪几类）+ `secret_hash` + `enabled` + `source`）；5 端点 CRUD；HMAC secret show-once（创建响应返一次明文，存 hash）；per-tenant endpoint 配额。manifest `hooks` 字段标 deprecated（docstring + 不接线），未来若要 manifest 引用走「转引用 endpoint id」而非内联 URL。
+
+#### 13.2.2 ② 起步事件集 = 三类 via 方案 (a)（PR1）
+
+`run.completed` / `run.failed`（run 终态，run_event 现成）+ `approval.requested` + `artifact.saved`。**关键**：审批/artifact 当前不写 run_event（分别在 `agent_approval` 表 + audit / `artifact` 表）。选三类 = **补 2 个 emit 帧写进 run_event 主轴**（方案 a），换取单事件源 + seq 统一去重，优于 worker 读三个源（游标分裂）。emit 复用现成 `_persist_event` 容错通道——**失败不阻塞 run**（fail-open）。
+
+#### 13.2.3 ③ 投递基建 = 自建薄版（PR3）
+
+`WebhookDeliveryWorker` 照 `MemoryDLQWorker`/`FeedbackConsumerWorker` 形态（`start/stop/run_once` + lifespan flag + 优雅 stop）。`webhook_delivery` 队列表（照 `trigger_run`/`memory_writeback_dlq`：`status`(pending/delivered/failed/retrying/dead_letter) + `attempt` + `next_retry_at` + `error` + 部分索引）。指数退避 `(60s,5m,30m,2h,6h)` + max 5 attempts + DLQ；**4xx 不重试**（配置错误非瞬态）；per-endpoint 断路器（连续失败熔断，慢端点不反压邻租户）；per-tenant 并发上限。不引 Svix（为通用平台设计、复杂度过剩，引第三方与「多租户数据不出平台」冲突，事件集窄 PG 队列表足够）。
+
+#### 13.2.4 ④ 仅出站通知（边界）
+
+同步阻塞改写回调（pre-run 校验等）把租户端点拉进 run 关键路径 = 延迟 + 可用性耦合，违 fail-open 公理——**不做**，改写类需求归 M1-F 中间件评审。HX-9 纯出站异步通知。
+
+**事件 payload**：`{event_id, event_type, occurred_at, tenant_id, seq, payload}`；at-least-once，消费方按 `(tenant_id, seq)` 幂等。**签名**：HMAC-SHA256 per-endpoint secret（header `X-Helix-Signature-256`），**请求绝不携带平台凭证**。**SSRF**：注册时 `validate_remote_url`（私网/metadata 阻断）+ host-pivot 字符黑名单；投递前解析后 IP 再校验（防 DNS rebinding）。
+
+### 13.3 边界（不做）
+
+- 进程内租户代码（middleware/plugin 模式 B/C）——边界「非任意代码」，M1-F2 另有归属。
+- 同步阻塞改写回调（④）——可用性耦合违 fail-open，归 M1-F。
+- 消息中间件（Kafka 等）——per-run 个位数事件量，PG 队列表足够，M2 再议。
+
+### 13.4 可观测
+
+投递成功率 / DLQ 深度 / per-endpoint 断路器状态 / 投递延迟指标；投递次数+失败率进 token_usage 同款计量面（chargeback 可定价，[memory:billing-meter]）。
+
+### 13.5 测试
+
+- **PR1**：Store 三层 round-trip + RLS 隔离；两个新 run_event emit 帧（approval/artifact）+ 失败不阻塞 run（fail-open）；迁移真 PG（RLS + 部分索引）。
+- **PR2**：5 端点 CRUD + tenant scope + 跨租户（Stream N）+ audit emit + secret show-once + 配额 429；SSRF 拒私网/host-pivot；admin-ui vitest + Playwright（CI）。
+- **PR3**：worker 退避/DLQ/断路器状态机；HMAC 签名正确性 + 验签；4xx 不重试 / 5xx 退避 / 耗尽 DLQ；per-tenant 并发；e2e（注册→触发三类事件→stub 收签名 POST + 幂等去重）。
+
+### 13.6 Mini-ADR
+
+- **HX-J0 注册面 = API CRUD 非 manifest**：hook URL 是运维配置非 agent 行为，改 URL 不弹版本；triggers 已证 API 路线治理面够；manifest `hooks` 转 deprecated。
+- **HX-J1 单事件主轴（补 2 emit 帧）非多源读**：审批/artifact 补写 run_event 换 seq 统一去重 + 单游标；emit 走 `_persist_event` fail-open 不阻塞 run。诚实记：三类事件非零成本复用，是 +2 emit 点。
+- **HX-J2 自建薄版非 Svix**：三套 worker 模板同构，Svix 复杂度过剩 + 引第三方违数据不出平台；事件集窄 PG 队列足够。
+- **HX-J3 仅出站异步（fail-open 公理）**：投递故障绝不影响 run；同步改写回调拉租户端点进关键路径 = 可用性耦合，归 M1-F。
+- **HX-J4 爆炸半径由跨租户决定（同 HX-10 公理）**：per-tenant 队列 + per-endpoint 断路器，慢/坏端点不反压邻租户。
+- **HX-J5 hook 请求不带平台凭证**：纯通知 + HMAC 签名；SSRF 双段校验（注册时 + 解析后 IP）防 rebinding。
+
+### 13.7 PR 切分
+
+| PR | 内容 | 验证 |
+|----|------|------|
+| PR0（本设计） | §13 + research 文档 + ITERATION-PLAN HX-9 细化 | 纯 docs，CI |
+| PR1 | 迁移 `webhook_endpoint`+`webhook_delivery` 两表 + RLS + 部分索引 + DTO/ORM/Store 三层 + ResourceType/AuditAction 双镜像 + 2 个 run_event emit 帧 | §13.5-PR1；迁移真 PG |
+| PR2 | `api/webhook_endpoints.py` 5 端点 CRUD + authz + 跨租户 + audit + secret show-once + 配额 + SSRF + admin-ui（SDK/页面/tab/i18n/接线） | §13.5-PR2 |
+| PR3（收尾） | `WebhookDeliveryWorker`（退避/DLQ/断路器/per-tenant 并发）+ HMAC 签名 + lifespan 接线 + 计量 + 可观测 | §13.5-PR3；零债 6 条 |

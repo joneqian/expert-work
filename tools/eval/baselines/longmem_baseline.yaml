@@ -1,0 +1,626 @@
+endtoend:
+  locomo:
+    accuracy: 0.2305194805194805
+    by_question_type:
+      locomo-multi-hop:
+        accuracy: 0.36879432624113473
+        n: 282.0
+      locomo-open-domain:
+        accuracy: 0.21875
+        n: 96.0
+      locomo-single-hop:
+        accuracy: 0.21521997621878716
+        n: 841.0
+      locomo-temporal:
+        accuracy: 0.1526479750778816
+        n: 321.0
+    n_instances: 1540
+meta:
+  fingerprints:
+    endtoend/locomo:
+      commit: b9f4779
+      dataset_sha256: 79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4
+      embedder: text-embedding-v4
+      judge_model: qwen3.7-max
+      judge_note: openai-compat judge (upstream protocols use gpt-4o judges) — CM-K6
+      limit: 0
+      llm_model: qwen3.7-max
+      llm_provider: openai-compat
+      reconcile: true
+      sample: 0
+    retrieval/locomo:
+      commit: 2df867e
+      dataset_sha256: 79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4
+      embedder: text-embedding-v4
+      limit: 0
+    retrieval/longmemeval_oracle:
+      commit: 2df867e
+      dataset_sha256: 821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c
+      embedder: text-embedding-v4
+      limit: 0
+    retrieval/longmemeval_s:
+      commit: 2df867e
+      dataset_sha256: d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442
+      embedder: text-embedding-v4
+      limit: 0
+  updated_at: '2026-06-11T06:25:35+00:00'
+retrieval:
+  locomo:
+    default:
+      blocked_writes: 2
+      by_question_type:
+        locomo-multi-hop:
+          mrr: 0.3725768321513002
+          n: 282.0
+          ndcg: 0.26001525123732416
+          session_recall: 0.5036474164133738
+          turn_recall: 0.2803576410939233
+        locomo-open-domain:
+          mrr: 0.30277777777777776
+          n: 96.0
+          ndcg: 0.29412152995642754
+          session_recall: 0.5863095238095238
+          turn_recall: 0.3671875
+        locomo-single-hop:
+          mrr: 0.4813119302417757
+          n: 841.0
+          ndcg: 0.514101948312278
+          session_recall: 0.8608799048751486
+          turn_recall: 0.6298057867617914
+        locomo-temporal:
+          mrr: 0.5780893042575286
+          n: 321.0
+          ndcg: 0.5851958343552397
+          session_recall: 0.8151609553478713
+          turn_recall: 0.6765316718587746
+      config:
+        decay: true
+        hybrid: true
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 2
+      mean_mrr: 0.47044372294372294
+      mean_ndcg: 0.46868023966454553
+      mean_session_recall: 0.7688188002473717
+      mean_turn_recall: 0.5591845377414414
+      n_instances: 1540
+    no_decay:
+      blocked_writes: 2
+      by_question_type:
+        locomo-multi-hop:
+          mrr: 0.38652482269503546
+          n: 282.0
+          ndcg: 0.26901872714933456
+          session_recall: 0.5275498142519419
+          turn_recall: 0.2892566616950716
+        locomo-open-domain:
+          mrr: 0.32916666666666666
+          n: 96.0
+          ndcg: 0.32505152490315153
+          session_recall: 0.6192956349206349
+          turn_recall: 0.4192708333333333
+        locomo-single-hop:
+          mrr: 0.4924692826000793
+          n: 841.0
+          ndcg: 0.5279047778531446
+          session_recall: 0.8715814506539834
+          turn_recall: 0.6559651208878319
+        locomo-temporal:
+          mrr: 0.5845275181723779
+          n: 321.0
+          ndcg: 0.5931381607017873
+          session_recall: 0.8322949117341641
+          turn_recall: 0.6889927310488058
+      config:
+        decay: false
+        hybrid: true
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 2
+      mean_mrr: 0.48207792207792205
+      mean_ndcg: 0.48145032156271633
+      mean_session_recall: 0.7846675943104515
+      mean_turn_recall: 0.5809439687865867
+      n_instances: 1540
+    no_mmr:
+      blocked_writes: 2
+      by_question_type:
+        locomo-multi-hop:
+          mrr: 0.25738770685579193
+          n: 282.0
+          ndcg: 0.17674468490003536
+          session_recall: 0.37282731059326807
+          turn_recall: 0.1932576646322447
+        locomo-open-domain:
+          mrr: 0.20086805555555556
+          n: 96.0
+          ndcg: 0.19056209371369057
+          session_recall: 0.4168526785714286
+          turn_recall: 0.2230902777777778
+        locomo-single-hop:
+          mrr: 0.3530519223147047
+          n: 841.0
+          ndcg: 0.3889971032590676
+          session_recall: 0.7711058263971462
+          turn_recall: 0.5091161315893777
+        locomo-temporal:
+          mrr: 0.4301142263759086
+          n: 321.0
+          ndcg: 0.4608638105066829
+          session_recall: 0.745067497403946
+          turn_recall: 0.5916407061266874
+      config:
+        decay: true
+        hybrid: true
+        mmr: false
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 2
+      mean_mrr: 0.34211038961038964
+      mean_ndcg: 0.35274013581288655
+      mean_session_recall: 0.6706635229849516
+      mean_turn_recall: 0.4506484814456448
+      n_instances: 1540
+    vector:
+      blocked_writes: 2
+      by_question_type:
+        locomo-multi-hop:
+          mrr: 0.39219858156028364
+          n: 282.0
+          ndcg: 0.27496486330837955
+          session_recall: 0.5441911516379601
+          turn_recall: 0.29980208553836774
+        locomo-open-domain:
+          mrr: 0.3248263888888889
+          n: 96.0
+          ndcg: 0.3233273864275629
+          session_recall: 0.6297123015873015
+          turn_recall: 0.4192708333333333
+        locomo-single-hop:
+          mrr: 0.4935592548553309
+          n: 841.0
+          ndcg: 0.52850794480612
+          session_recall: 0.8787158145065398
+          turn_recall: 0.6553705905667855
+        locomo-temporal:
+          mrr: 0.581827622014538
+          n: 321.0
+          ndcg: 0.5883145778615804
+          session_recall: 0.8411214953271028
+          turn_recall: 0.6806853582554517
+      config:
+        decay: true
+        hybrid: false
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 2
+      mean_mrr: 0.48287878787878785
+      mean_ndcg: 0.4817556374191709
+      mean_session_recall: 0.794100185528757
+      mean_turn_recall: 0.5808187368756405
+      n_instances: 1540
+  longmemeval_oracle:
+    default:
+      blocked_writes: 13
+      by_question_type:
+        knowledge-update:
+          mrr: 0.712962962962963
+          n: 72.0
+          ndcg: 0.6727579249914216
+          session_recall: 0.9861111111111112
+          turn_recall: 0.7893518518518519
+        multi-session:
+          mrr: 0.7636363636363637
+          n: 121.0
+          ndcg: 0.6517190899795403
+          session_recall: 0.9268595041322315
+          turn_recall: 0.7205234159779614
+        single-session-assistant:
+          mrr: 0.5642857142857143
+          n: 56.0
+          ndcg: 0.6384899014079811
+          session_recall: 1.0
+          turn_recall: 0.8571428571428571
+        single-session-preference:
+          mrr: 0.7611111111111111
+          n: 30.0
+          ndcg: 0.7951933268088742
+          session_recall: 1.0
+          turn_recall: 0.961111111111111
+        single-session-user:
+          mrr: 0.8390625
+          n: 64.0
+          ndcg: 0.8726911085648823
+          session_recall: 1.0
+          turn_recall: 0.9921875
+        temporal-reasoning:
+          mrr: 0.7099737532808399
+          n: 127.0
+          ndcg: 0.6684584597707959
+          session_recall: 0.9366141732283465
+          turn_recall: 0.758267716535433
+      config:
+        decay: true
+        hybrid: true
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 15
+      mean_mrr: 0.7277304964539008
+      mean_ndcg: 0.697136744912901
+      mean_session_recall: 0.9619148936170213
+      mean_turn_recall: 0.8098936170212766
+      n_instances: 470
+    no_decay:
+      blocked_writes: 13
+      by_question_type:
+        knowledge-update:
+          mrr: 0.712962962962963
+          n: 72.0
+          ndcg: 0.6727579249914216
+          session_recall: 0.9861111111111112
+          turn_recall: 0.7893518518518519
+        multi-session:
+          mrr: 0.7636363636363637
+          n: 121.0
+          ndcg: 0.6517190899795403
+          session_recall: 0.9289256198347108
+          turn_recall: 0.7205234159779614
+        single-session-assistant:
+          mrr: 0.5642857142857143
+          n: 56.0
+          ndcg: 0.6384899014079811
+          session_recall: 1.0
+          turn_recall: 0.8571428571428571
+        single-session-preference:
+          mrr: 0.7611111111111111
+          n: 30.0
+          ndcg: 0.7951933268088742
+          session_recall: 1.0
+          turn_recall: 0.961111111111111
+        single-session-user:
+          mrr: 0.8390625
+          n: 64.0
+          ndcg: 0.8726911085648823
+          session_recall: 1.0
+          turn_recall: 0.9921875
+        temporal-reasoning:
+          mrr: 0.7076115485564304
+          n: 127.0
+          ndcg: 0.6651388951499662
+          session_recall: 0.939763779527559
+          turn_recall: 0.7543307086614173
+      config:
+        decay: false
+        hybrid: true
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 15
+      mean_mrr: 0.7270921985815603
+      mean_ndcg: 0.6962397561749321
+      mean_session_recall: 0.9632978723404255
+      mean_turn_recall: 0.8088297872340425
+      n_instances: 470
+    no_mmr:
+      blocked_writes: 13
+      by_question_type:
+        knowledge-update:
+          mrr: 0.7069444444444444
+          n: 72.0
+          ndcg: 0.5499845832277436
+          session_recall: 0.7083333333333334
+          turn_recall: 0.5972222222222222
+        multi-session:
+          mrr: 0.6283746556473829
+          n: 121.0
+          ndcg: 0.5228498094126568
+          session_recall: 0.8888429752066116
+          turn_recall: 0.6024793388429752
+        single-session-assistant:
+          mrr: 0.6651785714285714
+          n: 56.0
+          ndcg: 0.7236705824145842
+          session_recall: 1.0
+          turn_recall: 0.8928571428571429
+        single-session-preference:
+          mrr: 0.7355555555555555
+          n: 30.0
+          ndcg: 0.7367076367735429
+          session_recall: 1.0
+          turn_recall: 0.9
+        single-session-user:
+          mrr: 0.7979166666666667
+          n: 64.0
+          ndcg: 0.8347902141488195
+          session_recall: 1.0
+          turn_recall: 0.9609375
+        temporal-reasoning:
+          mrr: 0.6855643044619423
+          n: 127.0
+          ndcg: 0.6071949985547572
+          session_recall: 0.8551181102362204
+          turn_recall: 0.689763779527559
+      config:
+        decay: true
+        hybrid: true
+        mmr: false
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 15
+      mean_mrr: 0.690177304964539
+      mean_ndcg: 0.6298528450462354
+      mean_session_recall: 0.8875531914893616
+      mean_turn_recall: 0.7276595744680852
+      n_instances: 470
+    vector:
+      blocked_writes: 13
+      by_question_type:
+        knowledge-update:
+          mrr: 0.712962962962963
+          n: 72.0
+          ndcg: 0.6694635123140703
+          session_recall: 0.9861111111111112
+          turn_recall: 0.7824074074074074
+        multi-session:
+          mrr: 0.7636363636363637
+          n: 121.0
+          ndcg: 0.6529262664245213
+          session_recall: 0.9358126721763086
+          turn_recall: 0.721900826446281
+        single-session-assistant:
+          mrr: 0.5642857142857143
+          n: 56.0
+          ndcg: 0.6384899014079811
+          session_recall: 1.0
+          turn_recall: 0.8571428571428571
+        single-session-preference:
+          mrr: 0.7611111111111111
+          n: 30.0
+          ndcg: 0.7951933268088742
+          session_recall: 1.0
+          turn_recall: 0.961111111111111
+        single-session-user:
+          mrr: 0.8390625
+          n: 64.0
+          ndcg: 0.8726911085648823
+          session_recall: 1.0
+          turn_recall: 0.9921875
+        temporal-reasoning:
+          mrr: 0.7062992125984252
+          n: 127.0
+          ndcg: 0.664535672132107
+          session_recall: 0.9400262467191601
+          turn_recall: 0.7543307086614173
+      config:
+        decay: true
+        hybrid: false
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 15
+      mean_mrr: 0.7267375886524823
+      mean_ndcg: 0.6958828653532412
+      mean_session_recall: 0.9651418439716313
+      mean_turn_recall: 0.8081205673758866
+      n_instances: 470
+  longmemeval_s:
+    default:
+      blocked_writes: 550
+      by_question_type:
+        knowledge-update:
+          mrr: 0.6895833333333333
+          n: 72.0
+          ndcg: 0.6273930947872787
+          session_recall: 0.9583333333333334
+          turn_recall: 0.7199074074074074
+        multi-session:
+          mrr: 0.7198347107438016
+          n: 121.0
+          ndcg: 0.5755006662433941
+          session_recall: 0.8502754820936639
+          turn_recall: 0.6287878787878788
+        single-session-assistant:
+          mrr: 0.5517857142857142
+          n: 56.0
+          ndcg: 0.6203152128221597
+          session_recall: 1.0
+          turn_recall: 0.8214285714285714
+        single-session-preference:
+          mrr: 0.5983333333333333
+          n: 30.0
+          ndcg: 0.6082691855653998
+          session_recall: 0.9333333333333333
+          turn_recall: 0.7222222222222222
+        single-session-user:
+          mrr: 0.8166666666666667
+          n: 64.0
+          ndcg: 0.8516050615520601
+          session_recall: 0.984375
+          turn_recall: 0.9765625
+        temporal-reasoning:
+          mrr: 0.6274278215223097
+          n: 127.0
+          ndcg: 0.5667489067061701
+          session_recall: 0.8421259842519685
+          turn_recall: 0.6293963254593176
+      config:
+        decay: true
+        hybrid: true
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 882
+      mean_mrr: 0.6756382978723404
+      mean_ndcg: 0.6261137149279855
+      mean_session_recall: 0.9060283687943262
+      mean_turn_recall: 0.7191843971631205
+      n_instances: 470
+    no_decay:
+      blocked_writes: 550
+      by_question_type:
+        knowledge-update:
+          mrr: 0.6988425925925926
+          n: 72.0
+          ndcg: 0.6441374776511334
+          session_recall: 0.9652777777777778
+          turn_recall: 0.7476851851851852
+        multi-session:
+          mrr: 0.7214876033057851
+          n: 121.0
+          ndcg: 0.5716813195917608
+          session_recall: 0.8475206611570247
+          turn_recall: 0.6232782369146006
+        single-session-assistant:
+          mrr: 0.5526785714285715
+          n: 56.0
+          ndcg: 0.621097779801425
+          session_recall: 1.0
+          turn_recall: 0.8214285714285714
+        single-session-preference:
+          mrr: 0.615
+          n: 30.0
+          ndcg: 0.6293001773511151
+          session_recall: 0.9333333333333333
+          turn_recall: 0.7555555555555556
+        single-session-user:
+          mrr: 0.8166666666666667
+          n: 64.0
+          ndcg: 0.8516050615520601
+          session_recall: 0.984375
+          turn_recall: 0.9765625
+        temporal-reasoning:
+          mrr: 0.6246719160104987
+          n: 127.0
+          ndcg: 0.5597535878529635
+          session_recall: 0.8374015748031496
+          turn_recall: 0.6175853018372703
+      config:
+        decay: false
+        hybrid: true
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 882
+      mean_mrr: 0.6779078014184398
+      mean_ndcg: 0.6272409545692683
+      mean_session_recall: 0.9051063829787234
+      mean_turn_recall: 0.7209574468085107
+      n_instances: 470
+    no_mmr:
+      blocked_writes: 550
+      by_question_type:
+        knowledge-update:
+          mrr: 0.643287037037037
+          n: 72.0
+          ndcg: 0.5977749353802145
+          session_recall: 0.9097222222222222
+          turn_recall: 0.7199074074074074
+        multi-session:
+          mrr: 0.5132231404958678
+          n: 121.0
+          ndcg: 0.41417811134025423
+          session_recall: 0.7856749311294765
+          turn_recall: 0.4983471074380165
+        single-session-assistant:
+          mrr: 0.6541666666666667
+          n: 56.0
+          ndcg: 0.6997611738612847
+          session_recall: 0.9821428571428571
+          turn_recall: 0.8392857142857143
+        single-session-preference:
+          mrr: 0.33
+          n: 30.0
+          ndcg: 0.3379608187962522
+          session_recall: 0.7333333333333333
+          turn_recall: 0.5111111111111112
+        single-session-user:
+          mrr: 0.6903645833333333
+          n: 64.0
+          ndcg: 0.7339769755219955
+          session_recall: 0.953125
+          turn_recall: 0.8828125
+        temporal-reasoning:
+          mrr: 0.6022309711286089
+          n: 127.0
+          ndcg: 0.5405663065127018
+          session_recall: 0.8072178477690288
+          turn_recall: 0.6388451443569554
+      config:
+        decay: true
+        hybrid: true
+        mmr: false
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 882
+      mean_mrr: 0.586418439716312
+      mean_ndcg: 0.5491643499578438
+      mean_session_recall: 0.8533687943262411
+      mean_turn_recall: 0.6640425531914894
+      n_instances: 470
+    vector:
+      blocked_writes: 550
+      by_question_type:
+        knowledge-update:
+          mrr: 0.6981481481481482
+          n: 72.0
+          ndcg: 0.6404698648376252
+          session_recall: 0.9652777777777778
+          turn_recall: 0.7407407407407408
+        multi-session:
+          mrr: 0.7150137741046831
+          n: 121.0
+          ndcg: 0.5615079366468929
+          session_recall: 0.8341597796143251
+          turn_recall: 0.6049586776859505
+        single-session-assistant:
+          mrr: 0.5488095238095239
+          n: 56.0
+          ndcg: 0.6179771815083838
+          session_recall: 1.0
+          turn_recall: 0.8214285714285714
+        single-session-preference:
+          mrr: 0.5983333333333333
+          n: 30.0
+          ndcg: 0.6082691855653998
+          session_recall: 0.9333333333333333
+          turn_recall: 0.7222222222222222
+        single-session-user:
+          mrr: 0.8104166666666667
+          n: 64.0
+          ndcg: 0.8395159113259807
+          session_recall: 0.984375
+          turn_recall: 0.9453125
+        temporal-reasoning:
+          mrr: 0.6227034120734908
+          n: 127.0
+          ndcg: 0.5553160676054143
+          session_recall: 0.8275590551181102
+          turn_recall: 0.6097112860892389
+      config:
+        decay: true
+        hybrid: false
+        mmr: true
+        rerank: false
+        top_k: 5
+        wide_limit: 20
+      deduped_writes: 882
+      mean_mrr: 0.67322695035461
+      mean_ndcg: 0.6195005260526913
+      mean_session_recall: 0.8990070921985817
+      mean_turn_recall: 0.7066666666666667
+      n_instances: 470
