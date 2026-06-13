@@ -218,7 +218,7 @@
 
 参考：[architecture/07-INFRASTRUCTURE-GAPS](./architecture/07-INFRASTRUCTURE-GAPS.md) §2、§7
 
-- [~] **C.1 OIDC + JWT** 认证（落实 P0 #1）— Keycloak 本地 dev 环境。`JWTVerifier` + `HTTPJWKSProvider` 代码已有；docker-compose Keycloak service + dev realm 配置待补
+- [x] **C.1 OIDC + JWT** 认证（落实 P0 #1）— `JWTVerifier` + `HTTPJWKSProvider`（`auth/jwt_verifier.py`）+ app.py `_build_default_jwt_verifier`（issuer/jwks 取 `settings.oidc_issuer`/`resolve_jwks_uri`）+ auth middleware Bearer 路径全接线；compose Keycloak 25.0 service（`--profile auth`）+ dev realm（`infra/keycloak/realm-helix-agent.json`：clients/roles/dev 用户）全在。端到端验证（起 Keycloak → 取 token → `/v1/me` Bearer → `is_system_admin`）成文 [runbooks/bootstrap-admin.md](./runbooks/bootstrap-admin.md)。`--profile auth` e2e CI 测 = staging 手动（CI 无 Keycloak，同 gVisor 7/7 staging-manual）
 - [x] **C.2 mTLS 服务间认证**（落实 P0 #2）— Control Plane ↔ Orchestrator ↔ Sandbox-Supervisor（基于 A.10 全链路 TLS）
 - [x] **C.3 API Key 管理**（落实 P0 #3）— 创建/吊销/轮换/限流（K1 PR #186 补 rotation + grace window + audit）
 - [x] **C.4 会话授权完整化**（落实 P0 #4）+ Postgres RLS（`build_rls_sessionmaker` + `RLSContextMiddleware`）

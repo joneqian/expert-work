@@ -7,6 +7,9 @@
 > 本 runbook 用 `python -m control_plane.bootstrap_admin` **直插 DB 一条 platform binding**
 > 打破死锁。它没有 HTTP/JWT 入口,只靠 DB 直连权限(ops 控制),**每个部署跑一次**;
 > 之后所有授权走审计化的 `POST /v1/role_bindings`,不再需要本脚本。
+>
+> **本 runbook 的 §1（起 Keycloak `--profile auth` → 取 token）+ §3（`/v1/me` Bearer 验证）
+> 即 Stream C.1 OIDC + JWT 的端到端验收路径**（OIDC 登录 → JWKS 验签 → 受保护端点鉴权）。
 
 ---
 
