@@ -192,6 +192,13 @@ class AgentState(TypedDict):
     #: (``ctx.payload["loop_detected"]``); the NEXT agent step consumes it
     #: (one turn on the escalated, higher-effort caller) and resets it.
     escalate_next: NotRequired[bool]
+    #: Stream CM-11 — the plan goal as of the previous agent turn. agent_node
+    #: sets it each turn to the current ``plan.goal`` (``None`` for react
+    #: graphs). A change versus the live plan goal — a re-plan, or a human
+    #: PLAN.md edit ingested via CM-0 — fires one escalated "re-calibrate"
+    #: turn (Mini-ADR CM-M1). Absent on the first plan turn, so the initial
+    #: decomposition (already deep-thought by the planner) never re-fires.
+    last_plan_goal: NotRequired[str | None]
     tool_failures: NotRequired[list[ClassifiedToolError]]
     subagent_invocations: NotRequired[Annotated[list[SubAgentInvocation], add]]
     pending_approval: NotRequired[ApprovalRequest | None]

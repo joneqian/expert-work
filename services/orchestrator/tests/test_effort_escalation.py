@@ -17,11 +17,12 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import ModelSpec
+from helix_agent.protocol import ModelSpec, Plan
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.middleware import LoopDetectionMiddleware, MiddlewareChain
 from orchestrator import AgentState, GraphRunner, ToolRegistry, build_react_graph
 from orchestrator.agent_factory import _escalated_model
+from orchestrator.tools.error_classifier import ClassifiedToolError
 from orchestrator.tools.registry import ToolContext, ToolResult, ToolSpec
 
 
@@ -145,6 +146,125 @@ async def test_no_escalated_caller_keeps_base_path() -> None:
     )
     assert base.calls == 1
     assert str(state["messages"][-1].content) == "done"
+
+
+# ---------------------------------------------------------------------------
+# CM-11 — event-driven escalation: tool error (micro) + plan goal change
+# (macro). Dynamic compute allocation — a deep think on a real anomaly or a
+# strategy shift, base caller on deterministic steps.
+# ---------------------------------------------------------------------------
+
+
+def _failure(error_class: str, *, tool_name: str = "edit_file") -> ClassifiedToolError:
+    return ClassifiedToolError(
+        tool_name=tool_name,
+        error_class=error_class,  # type: ignore[arg-type]
+        summary="boom",
+        retryable=error_class == "transient",
+        advice="recover",
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_transient_tool_error_escalates_this_turn() -> None:
+    base = _CountingLLM(responses=[AIMessage(content="base done")])
+    escalated = _CountingLLM(responses=[AIMessage(content="escalated done")], label="esc")
+    graph = build_react_graph(
+        llm_caller=base,
+        escalated_llm_caller=escalated,
+        tool_registry=ToolRegistry(),
+    )
+    # A non-transient failure from the previous batch → reason deeply about
+    # it this very turn (the recovery advisory lands this turn too).
+    state = await _invoke(
+        graph,
+        {
+            "messages": [HumanMessage(content="go")],
+            "step_count": 0,
+            "max_steps": 20,
+            "tool_failures": [_failure("resource_not_found")],
+        },
+        "esc-tool-error",
+    )
+    assert escalated.calls == 1
+    assert base.calls == 0
+    assert str(state["messages"][-1].content) == "escalated done"
+
+
+@pytest.mark.asyncio
+async def test_transient_tool_error_keeps_base_path() -> None:
+    base = _CountingLLM(responses=[AIMessage(content="base done")])
+    escalated = _CountingLLM(responses=[AIMessage(content="escalated done")], label="esc")
+    graph = build_react_graph(
+        llm_caller=base,
+        escalated_llm_caller=escalated,
+        tool_registry=ToolRegistry(),
+    )
+    # ``transient`` is retryable jitter, not worth a deep think.
+    await _invoke(
+        graph,
+        {
+            "messages": [HumanMessage(content="go")],
+            "step_count": 0,
+            "max_steps": 20,
+            "tool_failures": [_failure("transient", tool_name="bash")],
+        },
+        "esc-tool-transient",
+    )
+    assert base.calls == 1
+    assert escalated.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_goal_change_escalates_and_rebaselines() -> None:
+    base = _CountingLLM(responses=[AIMessage(content="base done")])
+    escalated = _CountingLLM(responses=[AIMessage(content="escalated done")], label="esc")
+    graph = build_react_graph(
+        llm_caller=base,
+        escalated_llm_caller=escalated,
+        tool_registry=ToolRegistry(),
+    )
+    state = await _invoke(
+        graph,
+        {
+            "messages": [HumanMessage(content="go")],
+            "step_count": 0,
+            "max_steps": 20,
+            "plan": Plan(goal="rewrite in Rust", steps=()),
+            "last_plan_goal": "rewrite in Go",
+        },
+        "esc-goal-change",
+    )
+    assert escalated.calls == 1
+    assert base.calls == 0
+    # The new goal becomes the baseline so the next turn does not re-fire.
+    assert state.get("last_plan_goal") == "rewrite in Rust"
+
+
+@pytest.mark.asyncio
+async def test_initial_plan_does_not_escalate() -> None:
+    base = _CountingLLM(responses=[AIMessage(content="base done")])
+    escalated = _CountingLLM(responses=[AIMessage(content="escalated done")], label="esc")
+    graph = build_react_graph(
+        llm_caller=base,
+        escalated_llm_caller=escalated,
+        tool_registry=ToolRegistry(),
+    )
+    # First plan turn: no prior goal to diff against → the planner already
+    # did the deep decomposition, so the base caller serves.
+    state = await _invoke(
+        graph,
+        {
+            "messages": [HumanMessage(content="go")],
+            "step_count": 0,
+            "max_steps": 20,
+            "plan": Plan(goal="rewrite in Go", steps=()),
+        },
+        "esc-initial-plan",
+    )
+    assert base.calls == 1
+    assert escalated.calls == 0
+    assert state.get("last_plan_goal") == "rewrite in Go"
 
 
 # ---------------------------------------------------------------------------

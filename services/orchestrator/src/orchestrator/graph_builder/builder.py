@@ -504,10 +504,37 @@ def build_react_graph(
         # provider prompt cache is unaffected.
         loop_signal = bool(state.get("escalate_next"))
         budget_signal = max_steps > 0 and step_count * 4 >= max_steps * 3
+        # Stream CM-11 (Mini-ADR CM-M1) — event-driven escalation, the second
+        # of the two dynamic-compute triggers:
+        #  * micro: a non-transient tool failure in the previous batch is a
+        #    real anomaly to reason through (``transient`` is retryable
+        #    jitter, not worth a deep think). The recovery advisory for these
+        #    failures lands this same turn, so escalate the turn that reacts.
+        #  * macro: the live plan goal changed since the previous turn (a
+        #    re-plan, or a human PLAN.md edit ingested via CM-0) — one deep
+        #    think to re-calibrate the execution strategy. The initial plan is
+        #    NOT a change (the planner already decomposed it deeply), so a
+        #    prior goal must exist to diff against.
+        error_signal = any(f.error_class != "transient" for f in tool_failures)
+        current_goal = plan.goal if plan is not None else None
+        prior_goal = state.get("last_plan_goal")
+        goal_signal = (
+            current_goal is not None and prior_goal is not None and current_goal != prior_goal
+        )
         active_caller = llm_caller
-        if escalated_llm_caller is not None and (loop_signal or budget_signal):
+        if escalated_llm_caller is not None and (
+            loop_signal or budget_signal or error_signal or goal_signal
+        ):
             active_caller = escalated_llm_caller
-            signal = "loop" if loop_signal else "budget"
+            signal = (
+                "loop"
+                if loop_signal
+                else "budget"
+                if budget_signal
+                else "error"
+                if error_signal
+                else "goal"
+            )
             _cm_effort_escalation_total.labels(signal=signal).inc()
             logger.info("llm.effort_escalated signal=%s step=%d/%d", signal, step_count, max_steps)
 
@@ -549,6 +576,9 @@ def build_react_graph(
                 # middleware tripped on THIS response; otherwise reset
                 # the consumed signal.
                 "escalate_next": bool(ctx.payload.get("loop_detected")),
+                # CM-11 — rebaseline the goal so a one-off change escalates
+                # exactly one turn (next turn diffs against this value).
+                "last_plan_goal": current_goal,
             }
             if demoted_tools:
                 update_mw["promoted_tools"] = {"remove": demoted_tools}
@@ -565,6 +595,7 @@ def build_react_graph(
             "step_count_refund_pending": 0,
             "tool_failures": [],
             "escalate_next": False,  # CM-9 — no middleware chain, reset
+            "last_plan_goal": current_goal,  # CM-11 — rebaseline the goal
         }
         if demoted_tools:
             update_plain["promoted_tools"] = {"remove": demoted_tools}

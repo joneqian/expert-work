@@ -239,7 +239,7 @@ helix.orchestrator.session_run
 | `helix_cm_precompaction_flush_memories` | gauge | `()` | 最近 pre-compaction flush 写入的记忆数（CM-3） |
 | `helix_cm_tool_overflow_total` | counter | `outcome,tool` | 工具结果溢出外置（CM-5） |
 | `helix_cm_tool_overflow_chars` | gauge | `()` | 最近外置工具结果溢出字符数（CM-5） |
-| `helix_cm_effort_escalation_total` | counter | `signal` | 升档高 effort caller 服务的 turn（CM-9） |
+| `helix_cm_effort_escalation_total` | counter | `signal` | 升档高 effort caller 服务的 turn（CM-9 撞限 `loop`/`budget`；CM-11 事件 `error`/`goal`） |
 | `helix_cm_memory_rerank_total` | counter | `outcome` | 长期记忆召回 rerank（CM-4） |
 | `helix_cm_memory_mmr_total` | counter | `outcome` | 长期记忆召回 MMR 选择（CM-6） |
 | `helix_cm_memory_reconcile_total` | counter | `op` | run-end 记忆写回对账（CM-7） |
