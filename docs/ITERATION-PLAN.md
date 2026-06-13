@@ -251,6 +251,7 @@
 - [x] **E.3 `dynamic_context_middleware`**（**API 成本影响 10x，绝不能省**）
 - [x] **E.4 `llm_error_handling_middleware`**（断路器 + 自动重试；防开发期被 LLM 限流爆）
 - [x] **E.5 Langfuse middleware**（落实 P0 #15）— M0 用 span-recording 客户端；SDK 适配器 M1
+  - [x] **OBS-L1**（Mini-ADR，[ADR-0005 §6](./adr/0005-observability-stack.md)）— Langfuse 激活：dev compose 栈（`observability` profile）+ **入库前 PII 脱敏**（SDK `mask=`，secrets+对话 PII，默认全开）；runbook [docs/runbooks/langfuse.md](./runbooks/langfuse.md)；生产部署押 M1
 - [x] **D.2 PII redactor middleware 注册**（与 D 跨流；#93 接 `DefaultSecretRedactor` 全局模式）
 
 **业务流程实现**
