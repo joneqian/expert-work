@@ -57,7 +57,7 @@ async def test_set_status_stamps_timestamps_and_summary() -> None:
     assert running.status is EvalRunStatus.RUNNING
     assert running.started_at is not None and running.finished_at is None
 
-    summary = {"pass_count": 15, "total": 15}
+    summary: dict[str, object] = {"pass_count": 15, "total": 15}
     assert await store.set_status(
         run_id=run.id, tenant_id=tenant, status=EvalRunStatus.PASSED, summary=summary
     )
