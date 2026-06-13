@@ -13,6 +13,7 @@ from helix_agent.runtime.audit import (
     DefaultSecretRedactor,
     TenantAwareRedactor,
 )
+from helix_agent.runtime.audit.redactor import DEFAULT_PATTERNS, PII_PATTERNS
 
 _T = uuid4()
 
@@ -285,3 +286,87 @@ async def test_tenant_aware_does_not_mutate_input() -> None:
     await redactor.redact(tenant_id=_T, details=original)
 
     assert original == {"ssn": "123-45-6789", "nested": {"ssn": "X"}}
+
+
+# ---------- PII_PATTERNS (conversational PII — Mini-ADR OBS-L1) ----------
+#
+# Separate from DEFAULT_PATTERNS (secrets): only the Langfuse mask uses the
+# union; the audit path stays secrets-only (surgical). These patterns are
+# regex heuristics — the decision-2 "regex 扩展起步" tier, not NER.
+
+_PII_REDACTOR = DefaultSecretRedactor(patterns={**DEFAULT_PATTERNS, **PII_PATTERNS})
+
+
+def test_pii_patterns_are_separate_from_default_secret_patterns() -> None:
+    """A bare DefaultSecretRedactor (audit path) must NOT mask conversational
+    PII — that behaviour is opt-in via the PII_PATTERNS union only."""
+    audit = DefaultSecretRedactor()
+    assert audit.redact_text("reach me at alice@example.com") == "reach me at alice@example.com"
+
+
+def test_pii_mask_email() -> None:
+    out = _PII_REDACTOR.redact_text("reach me at alice@example.com please")
+    assert "alice@example.com" not in out
+    assert REPLACEMENT in out
+
+
+def test_pii_mask_cn_mobile() -> None:
+    out = _PII_REDACTOR.redact_text("我的手机是 13812345678 打我")
+    assert "13812345678" not in out
+    assert REPLACEMENT in out
+
+
+def test_pii_mask_cn_id_card() -> None:
+    out = _PII_REDACTOR.redact_text("身份证 11010119900307123X 登记")
+    assert "11010119900307123X" not in out
+    assert REPLACEMENT in out
+
+
+def test_pii_mask_credit_card() -> None:
+    out = _PII_REDACTOR.redact_text("card 4111 1111 1111 1111 expires soon")
+    assert "4111 1111 1111 1111" not in out
+    assert REPLACEMENT in out
+
+
+def test_pii_mask_leaves_clean_text_untouched() -> None:
+    text = "the agent planned three steps and finished"
+    assert _PII_REDACTOR.redact_text(text) == text
+
+
+# ---------- redact_tree (structured recursion — the Langfuse mask seam) ----------
+
+
+def test_redact_tree_walks_nested_messages() -> None:
+    """redact_tree generalises redact_text to the nested input/output shapes
+    Langfuse passes (a list of message dicts)."""
+    data = {
+        "messages": [
+            {"role": "user", "content": "email alice@example.com about it"},
+            {"role": "assistant", "content": "sure, no PII here"},
+        ],
+        "model": "qwen-max",
+    }
+    out = _PII_REDACTOR.redact_tree(data)
+
+    assert "alice@example.com" not in out["messages"][0]["content"]
+    assert REPLACEMENT in out["messages"][0]["content"]
+    # Clean leaves + non-string leaves pass through untouched.
+    assert out["messages"][1]["content"] == "sure, no PII here"
+    assert out["model"] == "qwen-max"
+
+
+def test_redact_tree_handles_bare_string() -> None:
+    out = _PII_REDACTOR.redact_tree("completion mentioning 13812345678")
+    assert "13812345678" not in out
+    assert REPLACEMENT in out
+
+
+def test_redact_tree_does_not_mutate_input() -> None:
+    original = {"content": "id 11010119900307123X"}
+    _PII_REDACTOR.redact_tree(original)
+    assert original == {"content": "id 11010119900307123X"}
+
+
+def test_redact_tree_passes_non_string_leaves() -> None:
+    data = {"tokens": 42, "ok": True, "ratio": 0.5, "none": None}
+    assert _PII_REDACTOR.redact_tree(data) == data

@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None
+    #: Mini-ADR OBS-L1 — scrub secrets + conversational PII out of every
+    #: prompt/completion before it lands in Langfuse/ClickHouse. Default on
+    #: for both dev and prod (fail-safe: a mis-config over-redacts, never
+    #: leaks PII). The escape hatch is an explicit env override to false.
+    langfuse_pii_masking_enabled: bool = True
 
     # ------------------------------------------------------------------ runtime guards
     # ADR B-1: in-process rate-limiter assumes a single replica. Override

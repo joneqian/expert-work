@@ -21,15 +21,38 @@ middleware layer; this module adds no second try/except blanket.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
+from helix_agent.runtime.audit.redactor import (
+    DEFAULT_PATTERNS,
+    PII_PATTERNS,
+    DefaultSecretRedactor,
+)
 from helix_agent.runtime.middleware.langfuse import LangfuseClient, RecordingLangfuseClient
 
 if TYPE_CHECKING:  # pragma: no cover — typing only, avoids a hard import
     from langfuse._client.span import LangfuseGeneration
 
 logger = logging.getLogger(__name__)
+
+
+def _build_pii_mask() -> Callable[..., Any]:
+    """The Langfuse ``mask`` callable — Mini-ADR OBS-L1.
+
+    Runs the ``{**DEFAULT_PATTERNS, **PII_PATTERNS}`` union (secrets +
+    conversational PII) over every string leaf of the input/output/metadata
+    Langfuse ingests, BEFORE it lands in ClickHouse. ``mask`` is called by
+    the SDK as ``mask(data=...)`` and must return JSON-serialisable data.
+    """
+    redactor = DefaultSecretRedactor(patterns={**DEFAULT_PATTERNS, **PII_PATTERNS})
+
+    def mask(data: Any = None, **_kwargs: Any) -> Any:
+        # Accept positional or keyword ``data`` — the SDK calls ``mask(data=...)``
+        # but stay robust to either convention.
+        return redactor.redact_tree(data)
+
+    return mask
 
 
 class _SdkSpan:
@@ -98,14 +121,21 @@ def make_langfuse_client(
     host: str | None,
     public_key: str | None,
     secret_key: str | None,
+    pii_masking_enabled: bool = True,
 ) -> LangfuseClient:
-    """Resolve the deployment's Langfuse client (Mini-ADR HX-G3).
+    """Resolve the deployment's Langfuse client (Mini-ADR HX-G3 / OBS-L1).
 
     All three settings present → the SDK-backed client. Anything
     missing — including an SDK import failure on a broken install —
     degrades to :class:`RecordingLangfuseClient`: tracing config must
     never take the service down, and the no-credential deployment
     (dev / CI) keeps the M0 behaviour byte-identical.
+
+    ``pii_masking_enabled`` (default ``True``, Mini-ADR OBS-L1 decision 4)
+    installs the SDK ``mask`` callback so prompts/completions are scrubbed
+    of secrets + conversational PII at ingestion, before ClickHouse. The
+    default-on stance is fail-safe: a mis-config never leaks PII, it only
+    over-redacts. The escape hatch is an explicit ``False``.
     """
     if not (host and public_key and secret_key):
         logger.info("langfuse.disabled — settings incomplete, using the recording client")
@@ -118,11 +148,14 @@ def make_langfuse_client(
             exc_info=True,
         )
         return RecordingLangfuseClient()
-    sdk = Langfuse(
-        public_key=public_key,
-        secret_key=secret_key,
-        host=host,
-        tracing_enabled=True,
-    )
-    logger.info("langfuse.enabled host=%s", host)
+    kwargs: dict[str, Any] = {
+        "public_key": public_key,
+        "secret_key": secret_key,
+        "host": host,
+        "tracing_enabled": True,
+    }
+    if pii_masking_enabled:
+        kwargs["mask"] = _build_pii_mask()
+    sdk = Langfuse(**kwargs)
+    logger.info("langfuse.enabled host=%s pii_masking=%s", host, pii_masking_enabled)
     return LangfuseSdkClient(sdk)

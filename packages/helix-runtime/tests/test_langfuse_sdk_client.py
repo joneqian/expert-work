@@ -175,11 +175,73 @@ def test_factory_complete_settings_build_sdk_client(
     client = make_langfuse_client(host="https://langfuse.local", public_key="pk", secret_key="sk")
 
     assert isinstance(client, LangfuseSdkClient)
-    assert constructed == [
-        {
-            "public_key": "pk",
-            "secret_key": "sk",
-            "host": "https://langfuse.local",
-            "tracing_enabled": True,
+    assert len(constructed) == 1
+    kwargs = constructed[0]
+    # PII masking defaults on (Mini-ADR OBS-L1, decision 4 — fail-safe).
+    mask = kwargs.pop("mask")
+    assert callable(mask)
+    assert kwargs == {
+        "public_key": "pk",
+        "secret_key": "sk",
+        "host": "https://langfuse.local",
+        "tracing_enabled": True,
+    }
+
+
+def _capture_langfuse_kwargs(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Install a fake ``langfuse.Langfuse`` that records its constructor kwargs."""
+    constructed: list[dict[str, Any]] = []
+
+    class _FakeLangfuse:
+        def __init__(self, **kwargs: Any) -> None:
+            constructed.append(kwargs)
+
+    import types
+
+    fake_module = types.ModuleType("langfuse")
+    fake_module.Langfuse = _FakeLangfuse  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langfuse", fake_module)
+    return constructed
+
+
+def test_factory_default_mask_redacts_pii_in_nested_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default mask (Mini-ADR OBS-L1) must scrub conversational PII out of
+    the nested message shapes Langfuse ingests — before they hit ClickHouse."""
+    constructed = _capture_langfuse_kwargs(monkeypatch)
+    make_langfuse_client(host="https://langfuse.local", public_key="pk", secret_key="sk")
+
+    mask = constructed[0]["mask"]
+    masked = mask(
+        data={
+            "messages": [{"role": "user", "content": "email me at alice@example.com"}],
+            "model": "qwen-max",
         }
-    ]
+    )
+    assert "alice@example.com" not in masked["messages"][0]["content"]
+    assert masked["model"] == "qwen-max"  # clean leaf untouched
+
+
+def test_factory_default_mask_redacts_secrets_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constructed = _capture_langfuse_kwargs(monkeypatch)
+    make_langfuse_client(host="https://langfuse.local", public_key="pk", secret_key="sk")
+
+    mask = constructed[0]["mask"]
+    assert "sk-ABCDEFGHIJKLMNOPQRSTUVWX" not in mask(data="key sk-ABCDEFGHIJKLMNOPQRSTUVWX")
+
+
+def test_factory_masking_disabled_passes_no_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The escape hatch: explicit opt-out drops the mask kwarg entirely."""
+    constructed = _capture_langfuse_kwargs(monkeypatch)
+    make_langfuse_client(
+        host="https://langfuse.local",
+        public_key="pk",
+        secret_key="sk",
+        pii_masking_enabled=False,
+    )
+    assert "mask" not in constructed[0]
