@@ -56,6 +56,22 @@ DEFAULT_PATTERNS: dict[str, re.Pattern[str]] = {
     "pem_private_key": re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),
 }
 
+# Conversational PII — the "regex 扩展起步" tier of Mini-ADR OBS-L1. Kept
+# SEPARATE from DEFAULT_PATTERNS on purpose: only the Langfuse mask runs the
+# ``{**DEFAULT_PATTERNS, **PII_PATTERNS}`` union (free-text prompts/completions
+# are where conversational PII lives), while the audit path stays secrets-only
+# so A.7 behaviour is unchanged. These are heuristics, not NER — names and
+# free-form addresses are out of scope until a Presidio-class follow-up.
+PII_PATTERNS: dict[str, re.Pattern[str]] = {
+    "email": re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),
+    # Mainland China mobile: 11 digits starting 13x to 19x.
+    "phone_cn": re.compile(r"\b1[3-9]\d{9}\b"),
+    # Mainland China resident ID: 17 digits + checksum (digit or X).
+    "id_card_cn": re.compile(r"\b\d{17}[\dXx]\b"),
+    # 16-digit payment card, optionally grouped in 4s by space/hyphen.
+    "credit_card": re.compile(r"\b\d{4}(?:[ -]?\d{4}){3}\b"),
+}
+
 
 @dataclass(frozen=True)
 class RedactionResult:
@@ -140,6 +156,18 @@ class DefaultSecretRedactor:
         """
         hits: dict[str, int] = {}
         return self._redact_str(text, hits)
+
+    def redact_tree(self, data: Any) -> Any:
+        """Recursively redact every string leaf in an arbitrary JSON-native tree.
+
+        The structured generalisation of :meth:`redact_text` — Mappings,
+        lists and tuples are walked; string leaves are pattern-redacted;
+        every other leaf (numbers, bools, ``None``, opaque objects) passes
+        through unchanged. Hit counts are dropped to match the Langfuse
+        ``mask`` callable contract (``data → data``, Mini-ADR OBS-L1). The
+        input is never mutated — a fresh structure is returned.
+        """
+        return self._walk(data, {})
 
     def _walk(self, node: Any, hits: dict[str, int]) -> Any:
         if isinstance(node, Mapping):

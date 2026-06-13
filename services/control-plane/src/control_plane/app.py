@@ -899,6 +899,8 @@ def create_app(
                     host=resolved_settings.langfuse_host,
                     public_key=resolved_settings.langfuse_public_key,
                     secret_key=resolved_settings.langfuse_secret_key,
+                    # Mini-ADR OBS-L1 — PII masking on by default (fail-safe).
+                    pii_masking_enabled=resolved_settings.langfuse_pii_masking_enabled,
                 )
                 middleware_env = build_middleware_env(
                     token_usage_store=resolved_token_usage,

@@ -57,6 +57,10 @@ gated behind compose profiles (Stream I.1 — [STREAM-I-DESIGN](../docs/streams/
 | `auth`      | Keycloak IdP                                                  |
 | `sandbox`   | `credential-proxy` (standalone)                               |
 | `full`      | `migrate` / `control-plane` / `sandbox-supervisor` / `credential-proxy` |
+| `observability` | Prometheus / Tempo / Loki / Grafana / Alertmanager + **Langfuse** (web/worker/clickhouse/postgres/redis) |
+
+Langfuse (agent trace 调试) 起停 + 接线 + PII 脱敏自检见
+[docs/runbooks/langfuse.md](../docs/runbooks/langfuse.md).
 
 ```bash
 # Pre-build the sandbox execution image first (see "Sandbox image" below).

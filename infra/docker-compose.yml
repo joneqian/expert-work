@@ -27,6 +27,14 @@ x-control-plane-base: &control-plane-base
     # Trace export (A.8) — reached only when the observability profile
     # is also up; the SDK buffers + drops gracefully when it is not.
     HELIX_AGENT_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+    # Mini-ADR OBS-L1 — Langfuse agent traces. Empty by default → the
+    # control plane keeps the M0 recording stub (no push). Set all three in
+    # infra/.env to activate; langfuse-web is reachable in-compose by name.
+    # PII masking defaults on (fail-safe); set false only to debug raw prompts.
+    HELIX_AGENT_LANGFUSE_HOST: ${HELIX_AGENT_LANGFUSE_HOST:-}
+    HELIX_AGENT_LANGFUSE_PUBLIC_KEY: ${HELIX_AGENT_LANGFUSE_PUBLIC_KEY:-}
+    HELIX_AGENT_LANGFUSE_SECRET_KEY: ${HELIX_AGENT_LANGFUSE_SECRET_KEY:-}
+    HELIX_AGENT_LANGFUSE_PII_MASKING_ENABLED: ${HELIX_AGENT_LANGFUSE_PII_MASKING_ENABLED:-true}
     # Stream P (Mini-ADR P-13) — local_dev SecretStore seed. Resolves the
     # canonical agent's `secret://helix-agent/dev/llm/...` api_key_ref to the
     # real key a dev pastes into infra/dev-keys/dev-llm-keys.local (git-
@@ -551,6 +559,135 @@ services:
     ports:
       - "9093:9093"
 
+  # ----------------------------------------------------------------- Langfuse
+  # Self-hosted Langfuse v3 — agent-level LLM trace UI (ADR-0005 / Mini-ADR
+  # OBS-L1). DEV-ONLY stack: profile-gated so a plain ``docker compose up``
+  # never starts it; bring it up with ``--profile observability``. PII is
+  # scrubbed app-side BEFORE ingestion (langfuse_sdk ``mask=``, default on),
+  # so prompts/completions reaching ClickHouse are already redacted.
+  #
+  # SECURITY: every secret below carries a clearly-dev default. Production
+  # deploys (K8s/Helm, out of scope here) MUST override SALT / ENCRYPTION_KEY
+  # / NEXTAUTH_SECRET / passwords via real env. Langfuse runs on its own
+  # Postgres + ClickHouse + Redis (isolated failure domain; Langfuse's Redis
+  # needs ``noeviction`` which conflicts with the LRU quota Redis), and
+  # reuses the existing MinIO for blob storage (separate ``langfuse`` bucket).
+  langfuse-postgres:
+    profiles: ["observability"]
+    image: postgres:16-alpine
+    container_name: helix-langfuse-postgres
+    environment:
+      POSTGRES_USER: ${HELIX_LANGFUSE_DB_USER:-langfuse}
+      POSTGRES_PASSWORD: ${HELIX_LANGFUSE_DB_PASSWORD:-langfuse_dev}
+      POSTGRES_DB: ${HELIX_LANGFUSE_DB_NAME:-langfuse}
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HELIX_LANGFUSE_DB_USER:-langfuse}"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  langfuse-clickhouse:
+    profiles: ["observability"]
+    image: clickhouse/clickhouse-server:24.12-alpine
+    container_name: helix-langfuse-clickhouse
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${HELIX_LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${HELIX_LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse_dev}
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    volumes:
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  langfuse-redis:
+    profiles: ["observability"]
+    # Dedicated Redis — Langfuse's queue requires ``noeviction`` (dropping
+    # queued events would silently lose traces), incompatible with the
+    # quota Redis's ``allkeys-lru``.
+    image: redis:7-alpine
+    container_name: helix-langfuse-redis
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  langfuse-minio-init:
+    profiles: ["observability"]
+    # One-shot: ensure the ``langfuse`` bucket exists in the shared MinIO.
+    image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    container_name: helix-langfuse-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - >
+        mc alias set m http://minio:9000
+        ${HELIX_MINIO_ROOT_USER:-helix_agent} ${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio} &&
+        mc mb --ignore-existing m/langfuse && echo "langfuse bucket ready"
+    restart: "no"
+
+  langfuse-worker:
+    profiles: ["observability"]
+    image: langfuse/langfuse-worker:3
+    container_name: helix-langfuse-worker
+    depends_on:
+      langfuse-postgres: { condition: service_healthy }
+      langfuse-clickhouse: { condition: service_healthy }
+      langfuse-redis: { condition: service_healthy }
+    environment: &langfuse-backend-env
+      DATABASE_URL: postgresql://${HELIX_LANGFUSE_DB_USER:-langfuse}:${HELIX_LANGFUSE_DB_PASSWORD:-langfuse_dev}@langfuse-postgres:5432/${HELIX_LANGFUSE_DB_NAME:-langfuse}
+      SALT: ${HELIX_LANGFUSE_SALT:-helix_langfuse_dev_salt}
+      ENCRYPTION_KEY: ${HELIX_LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: ${HELIX_LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${HELIX_LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse_dev}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_CONNECTION_STRING: redis://langfuse-redis:6379
+      LANGFUSE_S3_EVENT_UPLOAD_ENABLED: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${HELIX_MINIO_ROOT_USER:-helix_agent}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      TELEMETRY_ENABLED: "false"
+
+  langfuse-web:
+    profiles: ["observability"]
+    image: langfuse/langfuse:3
+    container_name: helix-langfuse-web
+    depends_on:
+      langfuse-worker: { condition: service_started }
+      langfuse-minio-init: { condition: service_completed_successfully }
+    environment:
+      <<: *langfuse-backend-env
+      NEXTAUTH_SECRET: ${HELIX_LANGFUSE_NEXTAUTH_SECRET:-helix_langfuse_dev_nextauth}
+      NEXTAUTH_URL: http://localhost:3001
+      # Turnkey dev: auto-provision an org + project + fixed API keys so the
+      # control plane can point at them without clicking through the UI.
+      # Override the keys in any shared environment.
+      LANGFUSE_INIT_ORG_ID: helix
+      LANGFUSE_INIT_PROJECT_ID: helix-dev
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${HELIX_LANGFUSE_PUBLIC_KEY:-pk-lf-helix-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${HELIX_LANGFUSE_SECRET_KEY:-sk-lf-helix-dev}
+      LANGFUSE_INIT_USER_EMAIL: ${HELIX_LANGFUSE_INIT_EMAIL:-dev@helix.local}
+      LANGFUSE_INIT_USER_PASSWORD: ${HELIX_LANGFUSE_INIT_PASSWORD:-helix_langfuse_dev}
+      LANGFUSE_INIT_USER_NAME: helix-dev
+    ports:
+      - "3001:3000"
+
 volumes:
   postgres-data:
   minio-data:
@@ -558,6 +695,8 @@ volumes:
   tempo-data:
   loki-data:
   grafana-data:
+  langfuse-postgres-data:
+  langfuse-clickhouse-data:
 
 networks:
   # Sandbox egress network — created --internal (Mini-ADR F-14): no NAT /
