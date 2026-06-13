@@ -30,6 +30,7 @@ from uuid import UUID
 
 import httpx
 
+from helix_agent.common.observability import inject_context
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,20 @@ class SandboxOutcome:
     stderr: str
     exit_code: int
     timed_out: bool
+
+
+def _traced_headers() -> dict[str, str]:
+    """Outbound headers carrying the active W3C trace context (A.8).
+
+    ``inject_context`` writes ``traceparent`` from the current OTel span so
+    the sandbox-supervisor continues the same trace. The supervisor is the
+    one trusted internal HTTP hop (see 20-observability § 5.8); external
+    egress (``http``/``mcp``/LLM tools) deliberately does *not* propagate.
+    No active span (OTel uninitialized, e.g. tests) → nothing is written.
+    """
+    headers: dict[str, str] = {}
+    inject_context(headers)
+    return headers
 
 
 class SandboxSupervisorError(RuntimeError):
@@ -114,6 +129,13 @@ class HTTPSupervisorClient:
 
     base_url: str
     timeout_s: float = _DEFAULT_TIMEOUT_S
+    #: Test seam — inject ``httpx.MockTransport`` / ``ASGITransport`` to
+    #: exercise the wire layer (e.g. the A.8 traceparent round-trip).
+    #: Production leaves it ``None`` (real network transport).
+    transport: httpx.AsyncBaseTransport | None = None
+
+    def _make_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=self.timeout_s, transport=self.transport)
 
     async def acquire(
         self,
@@ -159,9 +181,9 @@ class HTTPSupervisorClient:
 
     async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
         url = f"{self.base_url}/v1/workspaces/{tenant_id}/{user_id}/file"
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+        async with self._make_client() as client:
             try:
-                response = await client.get(url, params={"path": path})
+                response = await client.get(url, params={"path": path}, headers=_traced_headers())
             except httpx.HTTPError as exc:
                 msg = f"sandbox supervisor unreachable ({url}): {exc}"
                 raise SandboxSupervisorError(msg) from exc
@@ -179,9 +201,11 @@ class HTTPSupervisorClient:
         json: Mapping[str, Any] | None,
         expect_body: bool = True,
     ) -> Mapping[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+        async with self._make_client() as client:
             try:
-                response = await client.post(f"{self.base_url}{path}", json=json)
+                response = await client.post(
+                    f"{self.base_url}{path}", json=json, headers=_traced_headers()
+                )
             except httpx.HTTPError as exc:
                 msg = f"sandbox supervisor unreachable ({path}): {exc}"
                 raise SandboxSupervisorError(msg) from exc

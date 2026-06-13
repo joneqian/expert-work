@@ -61,6 +61,7 @@ from sandbox_supervisor.seccomp import validate_seccomp_profile
 from sandbox_supervisor.settings import SandboxSupervisorSettings
 from sandbox_supervisor.store import DbSandboxStore
 from sandbox_supervisor.supervisor import SandboxSupervisor
+from sandbox_supervisor.trace_middleware import TraceContextMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,7 @@ def create_app(
                 logger.info("sandbox_supervisor.stop")
 
     app = FastAPI(title="Helix Sandbox Supervisor", lifespan=lifespan)
+    app.add_middleware(TraceContextMiddleware)
     _register_routes(app)
     _register_exception_handlers(app)
     return app

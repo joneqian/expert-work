@@ -347,6 +347,42 @@ GET /v1/sessions/{session_id}/trace-tree
 
 每个告警必须有 runbook 链接（`docs/runbooks/{alert_name}.md`）。
 
+### 5.8 跨服务 trace 传播实现纪律（A.8 收尾）
+
+> §6 的"trace 丢失 parent span"缓解项落地。原语（`observability/propagation.py` 的 `extract_context` / `inject_context`，OTel textmap facade）+ 入站提取（control-plane `middleware/observability.py`）已就位；本节锁**注入边界**、**提取边界**、**测试契约**三条纪律，闭合调用链断裂风险。
+
+**进程拓扑前提**：`orchestrator` 是 `control-plane` 进程内库（无独立服务入口），二者同进程靠 OTel contextvars 自动传播，**不需要 header 注入**。真正的跨进程 HTTP hop 只有信任面内的：
+
+```
+control-plane / orchestrator ──HTTP──> sandbox-supervisor   ← 唯一需手动 inject 的内部 hop
+            （HTTPSupervisorClient, tools/sandbox.py）
+```
+
+**纪律 1 — 注入边界 = 仅信任内部 hop，外部 egress 绝不注**
+
+| 出站点 | 是否注 traceparent | 理由 |
+|--------|:--:|------|
+| `HTTPSupervisorClient`（→ sandbox-supervisor） | ✅ | 信任面内部 hop，续接 trace |
+| `http` 工具 / `mcp` / `web_search` | ❌ | 租户指定的**第三方** URL；注入会把内部 trace_id 泄给外部，且对方不消费 |
+| LLM provider（anthropic/openai/…） | ❌ | 外部 SaaS，同上 |
+| sandbox → `credential-proxy` egress | ❌（出 scope） | proxy 只接**非信任** sandbox 的 egress；我方 traceparent 不进沙箱，故 proxy 入站无我方 trace 可续。proxy 自身仍 emit `helix.credential_proxy.*` component span（§5.1），但不参与跨进程 parent 续接 |
+
+> 安全公理：traceparent 仅在**信任边界内**传播。跨信任边界（→ 第三方 / → 沙箱）一律不带，避免内部拓扑信息外泄。
+
+**纪律 2 — 提取边界 = supervisor 入站补 middleware**
+
+`sandbox-supervisor/app.py` 当前**无**入站 trace 提取——注了也续不上。补一个镜像 control-plane `middleware/observability.py` 的 ASGI middleware：以 incoming `traceparent` 为 parent 续 server span（无 header 则起新 root span，向后兼容直接调用 supervisor 的运维/测试场景）。
+
+**纪律 3 — 测试契约 = 跨服务 round-trip（ASGI in-process）**
+
+supervisor 是独立服务，但验证传播**无需真起两进程**——用 `httpx.ASGITransport` 直打 supervisor app：
+
+1. orchestrator 侧：`HTTPSupervisorClient` 发请求时，断言 outbound headers 含 `traceparent` 且其 trace_id == 当前活跃 span 的 trace_id。
+2. supervisor 侧：入站 middleware 提取后，断言 server-side 活跃 span 的 trace_id == client trace_id（parent 续接成立）。
+3. 无活跃 span（OTel 未 init）时：inject 不写 header / 写无效 traceparent，supervisor 起新 root span——两端都不报错（向后兼容）。
+
+**显式不做（本期）**：baggage 传播（租户路由依赖时再做，M2，见 propagation.py 注释）；tracestate 透传（仅 traceparent，W3C 必需项足够）。
+
 ---
 
 ## 6. 失败模式 & 缓解
@@ -358,7 +394,7 @@ GET /v1/sessions/{session_id}/trace-tree
 | Loki 写入失败 | 日志丢失 | sidecar 保留磁盘缓冲 24h；超出按 FIFO 丢 |
 | 高基数 label 爆 Prometheus | 查询慢 / OOM | label cardinality 检查 CI gate（regex 检查 metric definition） |
 | 日志泄漏 PII | 合规违规 | redactor 中间件强制；CI 跑 PII detector 扫描 fixture log；定期审计 |
-| trace 丢失 parent span（context 不传播） | 调用链断 | 跨服务调用强制 `traceparent` header；CI 集成测试覆盖 |
+| trace 丢失 parent span（context 不传播） | 调用链断 | 内部 hop 强制 `traceparent` header（注入/提取/测试纪律见 §5.8）；CI 集成测试覆盖 |
 | 告警风暴 | oncall 疲劳 | Alertmanager group_by + inhibit + silence；每周回顾删掉低价值告警 |
 | dashboard 慢查询 | 查询超时 | 大 panel 用 recording rule 预聚合；不直接查原始 metric |
 | dev 环境告警被生产看到 | 噪音 | 强制 `env` label；告警路由按 env 分组 |

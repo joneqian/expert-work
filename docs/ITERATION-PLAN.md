@@ -189,7 +189,7 @@
 
 **可观测三件套**（日志 + trace + 指标必须同步建，否则后续代码 metric emit 缺失；统一设计：20-observability）
 - [~] **A.7 结构化日志规范**（落实 P0 #10）— 字段标准 + redaction 中间层。`ObservabilityMiddleware` 骨架在；字段规范文档化待 M0 收尾补
-- [~] **A.8 W3C Trace Context 规范**（落实 P0 #11）+ OpenTelemetry SDK 接入。OTel SDK 接入有；W3C header 传播 + cross-service 验证待补
+- [~] **A.8 W3C Trace Context 规范**（落实 P0 #11）+ OpenTelemetry SDK 接入。OTel SDK 接入 + propagation 原语 + control-plane 入站提取已有；**待补**（设计见 20-observability §5.8）：`HTTPSupervisorClient` 出站注入 + sandbox-supervisor 入站提取 + 跨服务 e2e 测。注入纪律=仅信任内部 hop（→supervisor），外部 egress/沙箱边界不注
 - [~] **A.9 指标体系**（落实 P0 #12）— Prometheus + 业务指标 + 技术指标 schema。`helix_*` counter/histogram validator 已锁；metrics schema 文档化待 M0 收尾补
 
 **网络与可靠性基础**（统一设计：28-reliability-primitives）
