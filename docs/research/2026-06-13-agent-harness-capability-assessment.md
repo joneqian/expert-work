@@ -14,7 +14,10 @@
 | ★★☆☆☆ | 2 | 仅雏形 / 重缺口 |
 | ★☆☆☆☆ | 1 | 缺失 |
 
-**总评：86 项 · 总分 376 / 430 · 均分 4.37 / 5（87.4%）**
+**总评：86 项 · 总分 375 / 430 · 均分 4.36 / 5（87.2%）**（含 W0/S0/全量重核修订）
+
+> 注：均分 ~4.36 是「静态读码估计」，对「是否真接线/emit」类项**不可全信**（见下「评分可靠性元结论」）；
+> 真值需运行期验证。聚合分稳定，价值在逐项与计划排序。
 
 诚实校准：⚠️ 标记项证据来自 `docs/architecture/subsystems/*.md` 设计文档而非纯运行代码，
 已相应降一档。结合已知事实（observability M0 #600-604、token_usage G.9、RLS/OIDC 已落地）
@@ -31,6 +34,19 @@
 > **1.3 五大编排模式 3★→4★**：Evaluator-Optimizer 其实已实现（`reflect.py` accept/revise loop），
 > 原"缺"判断有误。**4.4 程序记忆 3★→4★**：M0 agent 已能自写 skill（`skill_authoring.py` 7 builtin），
 > 原"M0 不能自写"有误；缺的仅*自动*演化（M1）。详见 `2026-06-13-p1-self-improving-flywheel-design.md`。
+
+> **⚠️ 2026-06-13 全量重核 — 评分可靠性元结论（必读）**：
+> 因深核的 4/4 项全评错，做了全量逐项重核（6 agent 读码）。**重核暴露了更深的问题：静态读码评分
+> 本身不可靠。** 三轮静态评分（初版 / 重核 agent A / 重核 agent B）互相矛盾：一组把域 3/5/6/15 几乎
+> 全升 ★5（过度慷慨），另一组把 Langfuse/token-metric/多维配额/chargeback 误判为缺失（漏找实现，
+> 经我**手动读码逐一推翻**：`langfuse_sdk.py`、`token_usage.py:helix_llm_token_usage_total`、
+> `redis_quota.py:_scope_matches(agent,user)`、`billing-rollup-job/` 均真实存在）。
+> **教训**：「capability 是否真接线 / metric 是否真 emit」这类，光读代码看不准，必须**跑起来**
+> （起栈、scrape /metrics、看真 trace）才有 ground truth。
+> **据此本表只做「手动代码核实确认」的修订，不采信矛盾的 agent 重核**：唯一坐实的真 gap 在
+> **域 11 Eval**（恰是 design-doc 撑的"假 done"高发区）——`resolution_rate`/对抗集 grep 全空确属
+> 未编码，下调（见域 11）。其余维持，待**运行期验证**（建议：每项开建前 just-in-time 跑起来核，
+> W0/S0/本次均证明此法 100% 抓错且零损失）再逐项坐实。
 
 ---
 
@@ -141,15 +157,15 @@
 | 10.5 趋势监控/SLO | ★★★☆☆ ⚠️ | `subsystems/20 §5.4 SLO`、§5.6 dashboard | 设计全，**M0 仅 3 dashboard，burn rate recording rule 未在 infra/ 落地** |
 | 10.6 OTel/Langfuse | ★★★★★ | ADR-0005、`langfuse_middleware.py`、OBS-L1 PII mask | Langfuse v3+OTel三件套，trace_id 共享跳转 |
 
-## 域 11. 评测 / Eval harness — 均分 3.29
+## 域 11. 评测 / Eval harness — 均分 2.86（全量重核下调）
 
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
 | 11.1 确定性 eval | ★★★★★ | `tools/eval/helix_eval.py` EvalSet YAML+4 assertion、mock_provider | 无 LLM CI 可跑 |
 | 11.2 LLM-judge | ★★★★★ | `tools/eval/_judge.py:ScriptedJudge+AnthropicHaikuJudge` (J-39) | CI mock / 周跑真 Haiku |
-| 11.3 会话级指标 | ★★★☆☆ | `subsystems/26-eval-framework.md`、`_capability.py:CapabilityReport` | pass/fail 有，**resolution rate/goal completion 高层指标未定义** |
+| 11.3 会话级指标 | ★☆☆☆☆ | grep `resolution_rate`/`goal_completion` **全空**；`_capability.py` 仅 pass/fail | **全量重核手动下调 3→1**：原靠 subsystems/26 设计文档，代码未编码会话级指标 |
 | 11.4 Trace-based eval | ★☆☆☆☆ | — | trace 基础设施在但 eval 框架无 trace 重放/根因关联设计 |
-| 11.5 对抗 prompt 数据集 | ★★☆☆☆ | `subsystems/26 §3.1` difficulty+judge_hint、longmem fixture | 难度分级有，**injection/jailbreak 对抗集未见** |
+| 11.5 对抗 prompt 数据集 | ★☆☆☆☆ | `tools/eval/datasets/` **无 adversarial 目录** | **全量重核手动下调 2→1**：原靠 subsystems/26，injection/jailbreak 数据集不存在 |
 | 11.6 生产 eval 异步 | ★★☆☆☆ | `subsystems/26 §2` EvalRun CRUD、本地 run_baseline.py | CI 集成设计在，**生产 eval worker/scheduler 未实装** |
 | 11.7 标准 benchmark | ★★★★★ | `tools/eval/longmem/` LoCoMo+LongMemEval_S，download sha256-pin、recall/NDCG/MRR (CM-N5) | P0 retrieval + P1 e2e 两层 |
 
@@ -216,13 +232,13 @@
 | 8 权限 HITL | 5 | 4.60 | ★★★★★ | 缺细粒度 RBAC |
 | 9 持久化 | 6 | 4.00 | ★★★★☆ | 无自动 failover / 无分布式队列 |
 | 10 可观测性 | 6 | 4.17 | ★★★★☆ | 连接式 trace 核心未实装(10.1★2) / SLO burn rate 待落地 |
-| 11 Eval | 7 | 3.29 | ★★★☆☆ | trace-based eval 缺 / 生产 worker 缺 |
+| 11 Eval | 7 | 2.86 | ★★☆☆☆ | **重核下调**：resolution_rate/对抗集/trace-eval/生产worker 多缺(design-doc 假done) |
 | 12 成本计量 | 4 | 4.50 | ★★★★★ | chargeback 业务层未实装 |
 | 13 多租户 | 5 | 4.60 | ★★★★★ | 并发 resume race 未详述(13.2) |
 | 14 扩展性 | 5 | 4.60 | ★★★★★ | MCP 不独立沙箱 |
 | 15 流式中断 | 3 | 5.00 | ★★★★★ | — |
 | 16 部署运维 | 5 | 4.20 | ★★★★☆ | 无基础设施级自愈 |
-| **合计** | **86** | **4.40** | **★★★★☆** | 总分 378/430 (87.9%)；含 W0(10.1↓2/13.1↑1) + S0(1.3↑1/4.4↑1) 修订 |
+| **合计** | **86** | **4.36** | **★★★★☆** | 总分 375/430 (87.2%)；W0(10.1↓2/13.1↑1)+S0(1.3↑1/4.4↑1)+全量重核(11.3↓2/11.5↓1) |
 
 各域项数核对：6+7+4+7+4+4+8+5+6+6+7+4+5+5+3+5 = **86 项**。
 
