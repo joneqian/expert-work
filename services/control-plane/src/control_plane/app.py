@@ -43,6 +43,7 @@ from control_plane.api import (
     build_billing_admin_router,
     build_curation_router,
     build_eval_dataset_router,
+    build_eval_runs_router,
     build_feedback_router,
     build_health_router,
     build_knowledge_router,
@@ -222,6 +223,11 @@ from helix_agent.persistence.database import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
+from helix_agent.persistence.eval import (
+    EvalRunStore,
+    InMemoryEvalRunStore,
+    SqlEvalRunStore,
+)
 from helix_agent.persistence.feedback_store import (
     DbFeedbackStore,
     FeedbackStore,
@@ -361,6 +367,7 @@ def create_app(
     token_usage_repo: TokenUsageStore | None = None,
     curation_candidate_repo: CurationCandidateStore | None = None,
     eval_dataset_repo: EvalDatasetStore | None = None,
+    eval_run_repo: EvalRunStore | None = None,
     artifact_repo: ArtifactStore | None = None,
     knowledge_repo: KnowledgeStore | None = None,
     image_upload_repo: ImageUploadStore | None = None,
@@ -504,6 +511,10 @@ def create_app(
     )
     resolved_eval_dataset_store: EvalDatasetStore = eval_dataset_repo or (
         sql_stores.eval_dataset if sql_stores else InMemoryEvalDatasetStore()
+    )
+    # P1-S2.1d — eval-run registry (eval platform ops layer).
+    resolved_eval_run_store: EvalRunStore = eval_run_repo or (
+        SqlEvalRunStore(sql_stores.session_factory) if sql_stores else InMemoryEvalRunStore()
     )
     # Stream J.7a (Mini-ADR J-23) — skill registry.
     resolved_skill_store: SkillStore = skill_repo or (
@@ -1240,6 +1251,7 @@ def create_app(
     app.state.webhook_delivery_store = resolved_webhook_delivery_store
     app.state.curation_candidate_store = resolved_curation_candidate_store
     app.state.eval_dataset_store = resolved_eval_dataset_store
+    app.state.eval_run_store = resolved_eval_run_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
     app.state.skill_store = resolved_skill_store
@@ -1408,6 +1420,7 @@ def create_app(
     app.include_router(build_audit_router())
     app.include_router(build_curation_router())
     app.include_router(build_eval_dataset_router())
+    app.include_router(build_eval_runs_router())
 
     return app
 
