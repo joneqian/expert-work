@@ -4,6 +4,8 @@ import { ApprovalsList } from "./pages/ApprovalsList";
 import { AgentDetail } from "./pages/AgentDetail";
 import { ArtifactsList } from "./pages/ArtifactsList";
 import { Curation } from "./pages/Curation";
+import { EvalRunDetail } from "./pages/EvalRunDetail";
+import { EvalRunsList } from "./pages/EvalRunsList";
 import { KnowledgeAdmin } from "./pages/KnowledgeAdmin";
 import { MemoryAdmin } from "./pages/MemoryAdmin";
 import { RunDetail } from "./pages/RunDetail";
@@ -41,6 +43,8 @@ export function AppRouter() {
       <Route path="/approvals" element={<ApprovalsList />} />
       <Route path="/runs/:threadId/:runId" element={<RunDetail />} />
       <Route path="/curation" element={<Curation />} />
+      <Route path="/eval-runs" element={<EvalRunsList />} />
+      <Route path="/eval-runs/:runId" element={<EvalRunDetail />} />
       <Route path="/memory" element={<MemoryAdmin />} />
       <Route path="/artifacts" element={<ArtifactsList />} />
       <Route path="/knowledge" element={<KnowledgeAdmin />} />

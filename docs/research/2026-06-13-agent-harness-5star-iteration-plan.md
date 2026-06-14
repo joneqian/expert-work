@@ -82,10 +82,10 @@
 | 项 | 前端 | 交付 / 说明 |
 |---|---|---|
 | 10.1 连接式 trace | ✅ | `RunDetail` 已有 `TraceToolbar` 按 trace_id deep-link Langfuse/Tempo |
-| **11.6 eval worker** | ❌ | **缺 Eval 页**（runs 列表+触发）；`src/api` 无 eval client |
-| **11.3 会话级指标** | ❌ | resolution_rate 等显示在 Eval run 详情 |
-| **11.4 trace-based eval** | ❌ | trace 断言结果显示在 Eval 页 |
-| **11.5 对抗集** | ❌ | 对抗 run 结果显示在 Eval 页 |
+| **11.6 eval worker** | ✅ | **Eval 页已建**（list+detail+触发，PR #620 worker / #622 list API / S2.5-FE）；`src/api/eval_runs.ts` client + nav `eval` |
+| **11.3 会话级指标** | ⬜ | Eval run 详情已留 `session_metrics` 预留列；后端 S2.2 落值后即显 |
+| **11.4 trace-based eval** | ⬜ | 同上，后端 S2.4 落值后填 |
+| **11.5 对抗集** | ⬜ | 同上，后端 S2.3 落值后填 |
 | 1.3 evaluator-optimizer | 🔶 | reflection verdict 可加进 RunDetail |
 | 4.4 自写 skill | 🔶 | Skills 页已有；加「agent 自写」badge/筛选 |
 | 9.4 failover / 9.5 分布式队列 | ⬜ | ops/Grafana |

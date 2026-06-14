@@ -100,6 +100,23 @@ const RUNS_RESPONSE = {
   error: null,
 };
 
+// P1-S2.5 — eval-runs list is raw ``{ items, total }`` (no envelope).
+const EVAL_RUNS_RESPONSE = {
+  items: [
+    {
+      id: "99999999-9999-9999-9999-999999999999",
+      suite: "m0_baseline",
+      status: "passed",
+      triggered_by: "manual",
+      summary: { pass_count: 15, total: 15 },
+      created_at: "2026-06-14T08:00:00Z",
+      started_at: "2026-06-14T08:00:05Z",
+      finished_at: "2026-06-14T08:02:30Z",
+    },
+  ],
+  total: 1,
+};
+
 /** Raw (un-enveloped) list shape used by curation / skills / triggers
  *  / audit endpoints — see H.4 PR 1 / PR 5 / PR 6 SDK rewrites. */
 const RAW_EMPTY_LIST = { items: [], total: 0, cross_tenant: false };
@@ -163,6 +180,11 @@ export async function installControlPlaneStub(page: Page): Promise<void> {
   });
   await page.route("**/v1/runs*", async (route) => {
     await route.fulfill({ json: RUNS_RESPONSE });
+  });
+  // P1-S2.5 — eval runs (raw, un-enveloped). One passed run so the
+  // /eval-runs E2E has a row to assert.
+  await page.route("**/v1/eval-runs*", async (route) => {
+    await route.fulfill({ json: EVAL_RUNS_RESPONSE });
   });
   // Stream HX-7 — the approval queue (enveloped). One pending row so
   // the /approvals page + nav badge have something to render.

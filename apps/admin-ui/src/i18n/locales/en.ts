@@ -34,6 +34,7 @@ export interface TranslationKeys {
     runs: string;
     approvals: string;
     curation: string;
+    eval: string;
     memory: string;
     artifacts: string;
     knowledge: string;
@@ -1252,6 +1253,42 @@ export interface TranslationKeys {
     detail_hint: string;
     detail_hint_link: string;
   };
+  eval_runs_page: {
+    page_title: string;
+    subtitle: string;
+    failed_to_load: string;
+    empty: string;
+    column_run_id: string;
+    column_status: string;
+    column_suite: string;
+    column_summary: string;
+    column_created: string;
+    filter_status: string;
+    filter_status_all: string;
+    enqueue: string;
+    enqueue_success: string;
+  };
+  eval_run_detail: {
+    failed_to_load: string;
+    not_found: string;
+    run_metadata: string;
+    run_id: string;
+    suite: string;
+    status: string;
+    triggered_by: string;
+    created_at: string;
+    started_at: string;
+    finished_at: string;
+    summary: string;
+    cases_title: string;
+    cases_empty: string;
+    col_case_id: string;
+    col_capability: string;
+    col_result: string;
+    col_scores: string;
+    result_passed: string;
+    result_failed: string;
+  };
   usage: {
     page_title: string;
     subtitle: string;
@@ -1309,6 +1346,7 @@ export interface TranslationKeys {
     label_runs: string;
     label_approvals: string;
     label_curation: string;
+    label_eval: string;
     label_memory: string;
     label_artifacts: string;
     label_knowledge: string;
@@ -1397,6 +1435,7 @@ const en: TranslationKeys = {
     runs: "Runs",
     approvals: "Approvals",
     curation: "Curation+Eval",
+    eval: "Eval",
     memory: "Memory",
     artifacts: "Artifacts",
     knowledge: "Knowledge",
@@ -2673,6 +2712,42 @@ const en: TranslationKeys = {
     detail_hint: "Need to start a new run?",
     detail_hint_link: "Open the Playground tab on an agent.",
   },
+  eval_runs_page: {
+    page_title: "Eval Runs",
+    subtitle: "Trigger and monitor capability evaluation runs.",
+    failed_to_load: "Failed to load eval runs",
+    empty: "No eval runs yet. Enqueue the baseline suite to start.",
+    column_run_id: "Run ID",
+    column_status: "Status",
+    column_suite: "Suite",
+    column_summary: "Summary",
+    column_created: "Created",
+    filter_status: "Status filter",
+    filter_status_all: "All statuses",
+    enqueue: "Enqueue baseline",
+    enqueue_success: "Queued an m0_baseline run.",
+  },
+  eval_run_detail: {
+    failed_to_load: "Failed to load eval run",
+    not_found: "eval run not found",
+    run_metadata: "Run metadata",
+    run_id: "Run ID",
+    suite: "Suite",
+    status: "Status",
+    triggered_by: "Triggered by",
+    created_at: "Created",
+    started_at: "Started",
+    finished_at: "Finished",
+    summary: "Summary",
+    cases_title: "Case results",
+    cases_empty: "No case results recorded yet.",
+    col_case_id: "Case",
+    col_capability: "Capability",
+    col_result: "Result",
+    col_scores: "Scores",
+    result_passed: "passed",
+    result_failed: "failed",
+  },
   usage: {
     page_title: "Usage",
     subtitle: "Billed cost and token usage for your tenant this month.",
@@ -2731,6 +2806,7 @@ const en: TranslationKeys = {
     label_runs: "Runs (across agents)",
     label_approvals: "Approvals (queue)",
     label_curation: "Curation review",
+    label_eval: "Eval runs",
     label_memory: "Memory",
     label_artifacts: "Artifacts",
     label_knowledge: "Knowledge",
