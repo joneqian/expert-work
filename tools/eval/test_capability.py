@@ -12,6 +12,7 @@ if str(_EVAL_DIR) not in sys.path:
 from _capability import (  # noqa: E402
     CapabilityCaseResult,
     CapabilityReport,
+    session_metrics_from_cases,
 )
 
 
@@ -36,3 +37,33 @@ def test_case_result_defaults_are_immutable() -> None:
     r = CapabilityCaseResult(case_id="x", passed=True)
     assert r.scores == {}
     assert r.notes == ()
+
+
+def test_session_metrics_goal_completion_is_pass_fraction() -> None:
+    """``goal_completion`` is the fraction of cases (sessions) that passed."""
+    cases = [
+        CapabilityCaseResult(case_id="a", passed=True),
+        CapabilityCaseResult(case_id="b", passed=True),
+        CapabilityCaseResult(case_id="c", passed=False),
+    ]
+    metrics = session_metrics_from_cases(cases)
+    assert metrics["goal_completion"] == 2 / 3
+    # No escalation signal on the cases → the metric is omitted, not zeroed.
+    assert "escalation_rate" not in metrics
+
+
+def test_session_metrics_empty_when_no_cases() -> None:
+    """No per-case rows → empty rollup (persisted column stays null)."""
+    assert session_metrics_from_cases([]) == {}
+
+
+def test_session_metrics_escalation_only_when_signalled() -> None:
+    """``escalation_rate`` is averaged only over cases carrying the signal."""
+    cases = [
+        CapabilityCaseResult(case_id="a", passed=True, scores={"escalated": 1.0}),
+        CapabilityCaseResult(case_id="b", passed=True, scores={"escalated": 0.0}),
+        CapabilityCaseResult(case_id="c", passed=False),  # no signal — excluded
+    ]
+    metrics = session_metrics_from_cases(cases)
+    assert metrics["goal_completion"] == 2 / 3
+    assert metrics["escalation_rate"] == 0.5

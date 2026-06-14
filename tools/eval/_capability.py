@@ -14,7 +14,7 @@ common rollup unit each module produces.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -64,6 +64,10 @@ class CapabilityReport:
     aggregate_score: Mapping[str, float]
     status: EvalStatus
     per_case: tuple[CapabilityCaseResult, ...] = field(default_factory=tuple)
+    #: P1-S2.2 (11.3) — session-level rollup over ``per_case`` (each case is
+    #: a full agent session). Empty when the capability emits no per-case
+    #: rows. See :func:`session_metrics_from_cases`.
+    session_metrics: Mapping[str, float] = field(default_factory=dict)
     deferred_reason: str = ""
 
     @staticmethod
@@ -87,9 +91,37 @@ class CapabilityReport:
         )
 
 
+def session_metrics_from_cases(
+    per_case: Sequence[CapabilityCaseResult],
+) -> dict[str, float]:
+    """Roll per-case results up to session-level metrics — P1-S2.2 (11.3).
+
+    Each capability case runs a full agent session, so the fraction of
+    cases whose goal was met (``goal_completion``) is a genuine
+    session-outcome metric — distinct from the per-axis ``aggregate_score``
+    (recall@5, judge mean). Returns ``{}`` when the capability emits no
+    per-case rows (nothing to roll up → the persisted column stays null).
+
+    ``escalation_rate`` is emitted **only** when cases carry an
+    ``escalated`` score signal; it is never zero-filled, so a capability
+    that does not track escalation simply omits the metric (no fake zero).
+    """
+    if not per_case:
+        return {}
+    n = len(per_case)
+    metrics: dict[str, float] = {
+        "goal_completion": sum(1 for c in per_case if c.passed) / n,
+    }
+    escalated = [float(c.scores["escalated"]) for c in per_case if "escalated" in c.scores]
+    if escalated:
+        metrics["escalation_rate"] = sum(escalated) / len(escalated)
+    return metrics
+
+
 __all__ = [
     "CapabilityCaseResult",
     "CapabilityReport",
     "EvalStatus",
     "JudgeCompletionFn",
+    "session_metrics_from_cases",
 ]

@@ -36,12 +36,19 @@ class _ReportLike(Protocol):
     def aggregate_score(self) -> Mapping[str, float]:
         """Per-metric aggregate scores."""
 
+    @property
+    def session_metrics(self) -> Mapping[str, float]:
+        """P1-S2.2 (11.3) session-level rollup; empty when not applicable."""
+
 
 def reports_to_outcomes(reports: Mapping[str, _ReportLike]) -> list[EvalCaseOutcome]:
     """Map ``capability -> CapabilityReport`` onto one outcome per capability.
 
     A report's ``PASS`` status becomes ``passed``; ``FAIL`` / ``DEFERRED``
-    become not-passed (a deferred capability is not a green gate).
+    become not-passed (a deferred capability is not a green gate). The
+    report's session-level rollup (S2.2) rides along as
+    ``session_metrics`` — ``None`` when the capability emits none, so the
+    persisted column stays null rather than ``{}``.
     """
     return [
         EvalCaseOutcome(
@@ -49,6 +56,9 @@ def reports_to_outcomes(reports: Mapping[str, _ReportLike]) -> list[EvalCaseOutc
             case_id=capability,
             passed=report.status == "PASS",
             scores={k: float(v) for k, v in dict(report.aggregate_score).items()},
+            session_metrics=(
+                {k: float(v) for k, v in dict(report.session_metrics).items()} or None
+            ),
         )
         for capability, report in reports.items()
     ]
