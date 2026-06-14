@@ -73,11 +73,21 @@ failed/error。lifespan 接线进 `control-plane/app.py`（仿 memory_consolidat
 新建 `tools/eval/datasets/adversarial/{injection,jailbreak}/m0_baseline.yaml`（EvalCase 加
 `adversarial_type`/`expected_refusal` 字段）+ `_judge` 加 safety 判定（拒答=pass）。接 S2.1 worker。1→5。
 
-### S2.4 — trace-based eval（11.4，消费 10.1 span 树）
+### S2.4 — trace-based eval（11.4，消费 10.1 span 树）✅ 已交付
 
-新 `tools/eval/trace_eval.py`：用 `InMemorySpanExporter`（同 `test_react_graph_tracing.py` 范式）
-捕获一次 run 的 `helix.session.run` 根 span + llm_call/tool_call child span，断言调用链
-（如「期望工具被调用」「LLM 调用次数 ≤ N」「无错误 span」）。依赖 10.1（✅已交付）。1→5。
+新 `tools/eval/trace_eval.py`：纯断言引擎 + 捕获 harness，断言调用链而非仅终态。
+- `TraceExpectation`（expected_tools / forbidden_tools / max_llm_calls / require_span_suffixes /
+  forbid_error_spans）+ `evaluate_trace(spans, expectation) -> TraceCaseResult`（纯，仅依赖 otel，
+  span 名按后缀 `.llm_call`/`.tool_call`/`.run` 匹配，与 HelixComponent 前缀无关）。
+- `capture_spans()` 上下文管理器（`InMemorySpanExporter` + `SimpleSpanProcessor`，同
+  `test_react_graph_tracing` 范式）。
+- `report_from_cases()` 聚合成 `CapabilityReport`，slot 进既有 eval 协议。
+- **测试 = 能力实跑**：脚本化 LLM 驱动真 react 图（无 model key → **CI 可跑**，区别于 model 依赖能力），
+  全流程 capture→assert：happy / 缺期望工具 / LLM 超预算 / 禁用工具 + 纯引擎 fake-span（error span /
+  require suffix）+ report 聚合。7 测全过。
+- **未接 run_baseline `_RUNNERS`**（有意）：避免动 checked-in `m0_gate_baseline.yaml` + worker 耦合；
+  trace-eval 作为可复用模块 + 已验证 harness 交付，suite 集成是 additive follow-up。
+- 依赖 10.1（✅已交付）。1→5。
 
 ### S2.5 — Eval admin-ui 页（前端，别漏）
 
