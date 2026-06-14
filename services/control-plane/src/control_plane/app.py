@@ -95,6 +95,8 @@ from control_plane.encrypted_secret_store import (
     SqlEncryptedSecretStore,
     build_kek_from_b64,
 )
+from control_plane.eval_engine import RunBaselineEvalEngine
+from control_plane.eval_worker import EvalWorker
 from control_plane.feedback_consumer import FeedbackConsumerWorker
 from control_plane.keycloak import (
     FakeKeycloakAdminClient,
@@ -731,6 +733,7 @@ def create_app(
             skill_rollback_monitor: RollbackMonitor | None = None
             feedback_consumer: FeedbackConsumerWorker | None = None
             webhook_delivery_worker: WebhookDeliveryWorker | None = None
+            eval_worker: EvalWorker | None = None
             approval_gauge_worker: ApprovalGaugeWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
@@ -1170,6 +1173,17 @@ def create_app(
                 )
                 webhook_delivery_worker.start()
                 _app.state.webhook_delivery_worker = webhook_delivery_worker
+            # P1-S2.1d — eval platform drain worker. Gated OFF by default: it
+            # needs the ``tools/eval`` harness on the path (a per-run error
+            # otherwise). The enqueue API populates the queue regardless.
+            if resolved_settings.enable_eval_worker:
+                eval_worker = EvalWorker(
+                    store=resolved_eval_run_store,
+                    engine=RunBaselineEvalEngine(),
+                    interval_s=resolved_settings.eval_worker_interval_s,
+                )
+                eval_worker.start()
+                _app.state.eval_worker = eval_worker
             # Stream HX-4 (Mini-ADR HX-D2) — pending-approvals gauge.
             # Always-on: one COUNT(*) a minute, no settings knob.
             approval_gauge_worker = ApprovalGaugeWorker(approval_store=resolved_approval_store)
@@ -1203,6 +1217,8 @@ def create_app(
                     await feedback_consumer.stop()
                 if webhook_delivery_worker is not None:
                     await webhook_delivery_worker.stop()
+                if eval_worker is not None:
+                    await eval_worker.stop()
                 if approval_gauge_worker is not None:
                     await approval_gauge_worker.stop()
                 # Stream HX-7 — drain the Langfuse SDK's background queue

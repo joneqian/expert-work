@@ -390,6 +390,12 @@ class Settings(BaseSettings):
     #: Per-tenant in-flight delivery cap — a slow tenant endpoint cannot
     #: starve others (Mini-ADR HX-J4).
     webhook_delivery_per_tenant_concurrency: int = Field(default=4, gt=0)
+    #: P1-S2.1d — eval platform drain worker. Claims queued ``eval_run`` rows
+    #: and runs the suite through the capability-eval engine. Gated OFF by
+    #: default: it depends on the ``tools/eval`` harness being on the path, so
+    #: only ops/eval deployments that have it arm the loop.
+    enable_eval_worker: bool = Field(default=False)
+    eval_worker_interval_s: int = Field(default=300, gt=0)
 
     #: SE-13 pre-evolution domain research (gated OFF by default). On cold start
     #: of an agent's evolution, research the tenant KB (+ optionally public web)
