@@ -11,7 +11,7 @@
 
 **23 个待提升项**（现分→目标 5）：
 1.3(3) 3.3(3) 4.1(3) 4.4(3) 7.2(2) 7.3(2) 7.4(3) 7.6(2) 8.5(3) 9.4(2) 9.5(2)
-10.1(✅5) 10.5(3) 11.3(1) 11.4(1) 11.5(1) 11.6(2) 12.4(3) 13.1(✅) 13.2(3) 14.4(3) 16.3(3) 16.4(3)
+10.1(✅5) 10.5(3) 11.3(✅5) 11.4(✅4) 11.5(✅4) 11.6(✅5) 12.4(3) 13.1(✅) 13.2(3) 14.4(3) 16.3(3) 16.4(3)
 
 ---
 
@@ -83,9 +83,9 @@
 |---|---|---|
 | 10.1 连接式 trace | ✅ | `RunDetail` 已有 `TraceToolbar` 按 trace_id deep-link Langfuse/Tempo |
 | **11.6 eval worker** | ✅ | **Eval 页已建**（list+detail+触发，PR #620 worker / #622 list API / S2.5-FE）；`src/api/eval_runs.ts` client + nav `eval` |
-| **11.3 会话级指标** | ⬜ | Eval run 详情已留 `session_metrics` 预留列；后端 S2.2 落值后即显 |
-| **11.4 trace-based eval** | ⬜ | 同上，后端 S2.4 落值后填 |
-| **11.5 对抗集** | ⬜ | 同上，后端 S2.3 落值后填 |
+| **11.3 会话级指标** | ✅ | 端到端（#624）：`session_metrics` 经 worker→API→Eval run 详情列显示 |
+| **11.4 trace-based eval** | ⬜ | 模块已交付（#625）未接 worker suite，FE 暂无数据源；接线后经 detail 列显示 |
+| **11.5 对抗集** | ⬜ | 模块已交付（#626）未接 worker suite，FE 暂无数据源；接线后经 detail 列显示 |
 | 1.3 evaluator-optimizer | 🔶 | reflection verdict 可加进 RunDetail |
 | 4.4 自写 skill | 🔶 | Skills 页已有；加「agent 自写」badge/筛选 |
 | 9.4 failover / 9.5 分布式队列 | ⬜ | ops/Grafana |
@@ -130,10 +130,10 @@
 - **10.1 连接式 trace 实装（飞轮地基 / 11.4 前置）**：`run_agent()` 包 `helix.session.run`
   根 span；agent_node/tools_node 加 LLM/tool child span；`helix_span()` 扩 `links=`，
   subagent/durable-resume 接 Span Link。补完整 run trace 集成测试。2→5。
-- **11.6 生产 eval worker**：本地 `run_baseline.py` 升常驻 scheduler（复用 `memory_consolidator.py`/`webhook_delivery_worker.py` worker 模式），周跑趋势入库、不阻塞 merge。2→5。
-- **11.3 会话级结果指标**：`_capability.py` 加 resolution_rate/goal_completion/escalation，写 `eval_case_result`。3→5。
-- **11.4 trace-based eval**：基于 10.1 的 trace 树做调用链断言/版本 diff/根因关联。1→5。**依赖 10.1**。
-- **11.5 对抗集**：injection/jailbreak 数据集 + golden set，接 11.6 周跑。2→5。
+- **11.6 生产 eval worker** ✅ **(2→5, #618/#620/#622 + FE #623)**：`eval_run`/`eval_case_result` 表 + 常驻 `EvalWorker`（lifespan 门控）+ enqueue/read API + admin-ui Eval 页。端到端。
+- **11.3 会话级结果指标** ✅ **(1→5, #624)**：`session_metrics_from_cases` 出 `goal_completion`，端到端 plumb 引擎→worker→API→FE；escalation 仅信号时出不零填。
+- **11.4 trace-based eval** ✅ **(1→4, #625)**：`trace_eval.py` 纯断言引擎 + capture harness，断言调用链；脚本图 CI 实跑。★4=未接 worker suite（需 model-backed responder）。
+- **11.5 对抗集** ✅ **(1→4, #626)**：`adversarial.py` + `datasets/adversarial/`，injection canary 不泄/jailbreak 拒答，硬门 safe_rate=1.0。★4=未接 worker suite。
 - **1.3 Evaluator-Optimizer**：reflection 节点 + judge 组 evaluate→optimize 回环，agent 自我纠错，补 Anthropic 第五模式。3→5。
 - **4.4 agent 自写 skill（J.7b-1）**：agent 运行中提案 skill→审核→active，程序记忆自增长。3→5。
 - 验证：**飞轮闭环**——真实 run 产 trace → eval 打分 → 低分进对抗集 → evaluator-optimizer 重跑改善；自写 skill e2e。

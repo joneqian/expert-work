@@ -14,10 +14,11 @@
 | ★★☆☆☆ | 2 | 仅雏形 / 重缺口 |
 | ★☆☆☆☆ | 1 | 缺失 |
 
-**总评：86 项 · 总分 375 / 430 · 均分 4.36 / 5（87.2%）**（含 W0/S0/全量重核修订）
+**总评：86 项 · 总分 388 / 430 · 均分 4.51 / 5（90.2%）**（含 W0/S0/全量重核 + 2026-06-14 S2 交付修订）
 
-> 注：均分 ~4.36 是「静态读码估计」，对「是否真接线/emit」类项**不可全信**（见下「评分可靠性元结论」）；
-> 真值需运行期验证。聚合分稳定，价值在逐项与计划排序。
+> 注：聚合分 4.51 含 S2 eval 平台交付（域 11 20→33）。「静态读码估计」对「是否真接线/emit」类项
+> **不可全信**（见下「评分可靠性元结论」）；域 11 的 ★4-5 是**运行期+已交付双确认**（真跑 + merged PR），
+> 可信度最高。
 
 诚实校准：⚠️ 标记项证据来自 `docs/architecture/subsystems/*.md` 设计文档而非纯运行代码，
 已相应降一档。结合已知事实（observability M0 #600-604、token_usage G.9、RLS/OIDC 已落地）
@@ -157,22 +158,23 @@
 | 10.5 趋势监控/SLO | ★★★☆☆ ⚠️ | `subsystems/20 §5.4 SLO`、§5.6 dashboard | 设计全，**M0 仅 3 dashboard，burn rate recording rule 未在 infra/ 落地** |
 | 10.6 OTel/Langfuse | ★★★★★ | ADR-0005、`langfuse_middleware.py`、OBS-L1 PII mask | Langfuse v3+OTel三件套，trace_id 共享跳转 |
 
-## 域 11. 评测 / Eval harness — 均分 2.86（含 S2 运行期验证）
+## 域 11. 评测 / Eval harness — 均分 4.71（S2 平台层全交付）
 
-> **2026-06-13 S2 运行期验证（全表唯一 runtime-verified 域）**：真跑 `tools/eval/run_baseline.py`
-> → 15 capability 全 PASS；longmem+harness 31 单测过。**厘清：引擎强 / ops 层缺**——
-> **capability eval 引擎**（11.1/11.2/11.7）运行期确认 ★4-5；**eval 平台/ops 层**（11.3/11.4/11.5/11.6）
-> 运行期确认真缺（baseline 无 session 指标、无常驻 worker、`eval_run` 表不存在、无对抗集）。
-> 这是全表**唯一靠「跑」而非「读」得出的评分**，可信度最高。S2 建 ops 层，详见 `..-p1-s2-eval-platform-design.md`。
+> **2026-06-13 S2 运行期验证**：真跑 `tools/eval/run_baseline.py` → 15 capability 全 PASS。厘清
+> 「引擎强 / ops 层缺」。**2026-06-14 S2 交付收口**：ops 层四项全建并 merged——11.6 生产 worker
+> （#618/#620/#622 + FE #623）、11.3 会话级指标（#624，端到端）、11.4 trace-based eval（#625，
+> 模块+测试）、11.5 对抗集（#626，模块+dataset+测试）。11.4/11.5 为 ★4：能力+测试齐但**未接
+> worker suite**（需 model-backed responder，CI 无 key），production 接线是到 ★5 的唯一 gap。
+> 详见 `..-p1-s2-eval-platform-design.md`。
 
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
 | 11.1 确定性 eval | ★★★★★ | **运行确认**：`run_baseline.py` 15 cap 全 PASS；`helix_eval.py` mock_provider | 无 LLM CI 真跑通 |
 | 11.2 LLM-judge | ★★★★★ | **运行确认**：`_judge.py:ScriptedJudge`(CI)+`AnthropicHaikuJudge`(周跑) | baseline judge_mean 出数 |
-| 11.3 会话级指标 | ★☆☆☆☆ | **运行确认缺**：baseline 只出 per-capability，无 resolution_rate/goal_completion | 重核+运行双确认 ★1（S2.2 建） |
-| 11.4 Trace-based eval | ★☆☆☆☆ | **运行确认缺**：只评终态不评 10.1 span 树 | 10.1 已交付可消费（S2.4 建） |
-| 11.5 对抗 prompt 数据集 | ★☆☆☆☆ | **运行确认缺**：`tools/eval/datasets/` 无 adversarial 目录 | 重核+运行双确认 ★1（S2.3 建） |
-| 11.6 生产 eval 异步 | ★★☆☆☆ | **运行确认**：`run_baseline.py` 本地 CLI 真跑通，但**无常驻 worker**、`eval_run` 表不存在 | 引擎在，缺调度/持久化 ops 层（S2.1 建表+worker） |
+| 11.3 会话级指标 | ★★★★★ | **已交付**（S2.2 #624）：`session_metrics_from_cases` 出 `goal_completion`，端到端 plumb 引擎→worker→API→FE 详情页显示 | 端到端生效；escalation 仅信号时出不零填 |
+| 11.4 Trace-based eval | ★★★★☆ | **已交付**（S2.4 #625）：`trace_eval.py` 纯断言引擎 + capture harness，断言调用链；脚本图 CI 实跑 7 测 | 模块+测试齐，**未接 worker suite**（差 production 接线 → ★4） |
+| 11.5 对抗 prompt 数据集 | ★★★★☆ | **已交付**（S2.3 #626）：`adversarial.py` + `datasets/adversarial/`，injection canary 不泄 / jailbreak 拒答，硬门 safe_rate=1.0，9 测 | 模块+dataset+测试齐，**未接 worker suite**（差 production 接线 → ★4） |
+| 11.6 生产 eval 异步 | ★★★★★ | **已交付**（S2.1 #618/#620/#622 + S2.5 #623）：`eval_run`/`eval_case_result` 表 + 常驻 `EvalWorker`（lifespan 门控）+ enqueue/read API + admin-ui Eval 页 | 端到端：触发→drain→结果→可视化 |
 | 11.7 标准 benchmark | ★★★★★ | **运行确认**：`tools/eval/longmem/` harness + 31 单测过；LoCoMo+LongMemEval_S, recall/NDCG/MRR | P0 retrieval + P1 e2e 两层 |
 
 ## 域 12. 成本 / Token / 计量 / 配额 — 均分 4.50
@@ -238,27 +240,28 @@
 | 8 权限 HITL | 5 | 4.60 | ★★★★★ | 缺细粒度 RBAC |
 | 9 持久化 | 6 | 4.00 | ★★★★☆ | 无自动 failover / 无分布式队列 |
 | 10 可观测性 | 6 | 4.17 | ★★★★☆ | 连接式 trace 核心未实装(10.1★2) / SLO burn rate 待落地 |
-| 11 Eval | 7 | 2.86 | ★★☆☆☆ | **重核下调**：resolution_rate/对抗集/trace-eval/生产worker 多缺(design-doc 假done) |
+| 11 Eval | 7 | 4.71 | ★★★★★ | **S2 全交付**：11.6/11.3 ★5 端到端；11.4/11.5 ★4(模块+测试，未接 worker suite) |
 | 12 成本计量 | 4 | 4.50 | ★★★★★ | chargeback 业务层未实装 |
 | 13 多租户 | 5 | 4.60 | ★★★★★ | 并发 resume race 未详述(13.2) |
 | 14 扩展性 | 5 | 4.60 | ★★★★★ | MCP 不独立沙箱 |
 | 15 流式中断 | 3 | 5.00 | ★★★★★ | — |
 | 16 部署运维 | 5 | 4.20 | ★★★★☆ | 无基础设施级自愈 |
-| **合计** | **86** | **4.36** | **★★★★☆** | 总分 375/430 (87.2%)；W0(10.1↓2/13.1↑1)+S0(1.3↑1/4.4↑1)+全量重核(11.3↓2/11.5↓1) |
+| **合计** | **86** | **4.51** | **★★★★★** | 总分 388/430 (90.2%)；W0(10.1↓2/13.1↑1)+S0(1.3↑1/4.4↑1)+全量重核(11.3↓2/11.5↓1)+S2交付(11.3↑4/11.4↑3/11.5↑3/11.6↑3=域11 20→33) |
 
 各域项数核对：6+7+4+7+4+4+8+5+6+6+7+4+5+5+3+5 = **86 项**。
 
 ## 主要 Gap（按价值排序，低分项优先）
 
-1. **Eval 闭环（域 11，均分 3.29）** — 有 LoCoMo/LongMemEval + LLM-judge，但 trace-based
-   eval（★1）、对抗集（★2）、生产 eval scheduler（★2）、会话级 resolution rate（★3）均弱。
-2. **沙箱隔离强度（域 7，均分 3.63）** — 多租户共宿主跑 untrusted code，M0 仅 runc+seccomp
+> 2026-06-14 更新：**Eval 闭环已从首要 gap 退出**——S2 平台层四项全交付（域 11 2.86→4.71）。
+> 剩余唯一 eval gap = 11.4/11.5 接 worker suite（★4→★5，需 model-backed responder）。
+
+1. **沙箱隔离强度（域 7，均分 3.63）** — 多租户共宿主跑 untrusted code，M0 仅 runc+seccomp
    （分级隔离★2/输入校验★2/攻击监控★2）。内核 CVE 类逃逸真实风险（SANDBOXESCAPEBENCH ~40%）。
-3. **持久化分布式化（9.4/9.5 均 ★2）** — M0 单 worker，崩溃需 human resume，无分布式队列。
+2. **持久化分布式化（9.4/9.5 均 ★2）** — M0 单 worker，崩溃需 human resume，无分布式队列。
    长任务 HA 核心缺口，Celery/failover 推 M1。
-4. **编排模式补全（1.3 ★3）** — Evaluator-Optimizer 缺（已有 reflection 节点可作底座）。
-5. **权限细粒度（8.5 ★3）** — 停在工具名/镜像/quota，无资源 URI 级 / RBAC-ABAC。
-6. **输出 DLP（7.4 ★3）** — 有 PII redaction，无内容分类驱动的条件输出。
+3. **权限细粒度（8.5 ★3）** — 停在工具名/镜像/quota，无资源 URI 级 / RBAC-ABAC。
+4. **输出 DLP（7.4 ★3）** — 有 PII redaction，无内容分类驱动的条件输出。
+5. **trace/对抗接 worker suite（11.4/11.5 ★4）** — 模块+测试已交付，未接生产 worker（需 model-backed responder，CI 无 key）。
 
 ## helix 的相对强项（满分域）
 
@@ -270,10 +273,10 @@
 
 ## 一句话评价
 
-helix 是**设计扎实、诚实标注 gap 的企业级 agent platform**，均分 4.38/5。核心 agent 循环 /
-工具 / 记忆 / 多租户 / 可观测性已生产级。最低分集中在 **Eval 闭环（3.29）/ 沙箱隔离强度
-（3.63）/ 运行时分布式化（HA）**——多已明确论证并排期 M1，是"M0 优先度 > 该能力强度"的诚实
-取舍，而非能力缺失伪装成设计选择。
+helix 是**设计扎实、诚实标注 gap 的企业级 agent platform**，均分 4.51/5。核心 agent 循环 /
+工具 / 记忆 / 多租户 / 可观测性 / **Eval 闭环（S2 交付后 4.71）** 已生产级。最低分集中在
+**沙箱隔离强度（3.63）/ 运行时分布式化（HA）**——已明确论证并排期 M1，是"M0 优先度 > 该
+能力强度"的诚实取舍，而非能力缺失伪装成设计选择。
 
 ---
 
