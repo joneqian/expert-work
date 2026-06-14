@@ -54,11 +54,19 @@ failed/error。lifespan 接线进 `control-plane/app.py`（仿 memory_consolidat
 > 复用点：执行核 = `tools/eval/run_baseline.py` 的 capability runners + `_judge`/`_capability`；
 > worker 只做「调度 + 持久化 + 状态机」，不重写 eval 逻辑。
 
-### S2.2 — 会话级指标（11.3，小，扩 _capability）
+### S2.2 — 会话级指标（11.3）✅ 已交付
 
-`tools/eval/_capability.py`：`CapabilityCaseResult` 加 `session_id: str|None`；`CapabilityReport`
-加 `session_metrics: Mapping[str,float]`（resolution_rate/goal_completion/escalation）。
-runner 按 session 聚合 per_case → 写 eval_case_result.session_metrics。1→5。
+**实交付（对真实引擎核对后的诚实裁剪）**：
+- `_capability.py`：`CapabilityReport` 加 `session_metrics: Mapping[str,float]` + 纯函数
+  `session_metrics_from_cases(per_case)`。
+- 诚实指标：`goal_completion` = per_case 通过率（每 case 跑一个完整 agent session，故 = 会话目标
+  达成率，与 per-axis `aggregate_score` 不同视角），**多数能力已填 per_case 故真实可算**。
+  `escalation_rate` 仅当 case `scores` 带 `escalated` 信号才出，**绝不零填**（守 no-design-choice-disguise）。
+- `run_baseline` 中心化附 session_metrics（不碰 15 个 runner）；baseline YAML 加 `session_metrics` 键。
+- `eval_engine.reports_to_outcomes` 透传 → `EvalCaseOutcome.session_metrics`（空则 None）→ worker 持久化
+  → API → FE 详情页预留列已显示。
+- **偏离设计**：原写 `CapabilityCaseResult 加 session_id`——**已弃**。worker 持久化是 per-capability
+  粒度（一能力一行，非一 session 一行），无单 session_id 可映射；加了是死字段（违零债）。
 
 ### S2.3 — 对抗集（11.5，数据+判定）
 

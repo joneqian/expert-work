@@ -28,7 +28,7 @@ import logging
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -60,6 +60,7 @@ import sub_agent as _sa  # type: ignore[import-not-found]  # noqa: E402
 import trigger as _trigger  # type: ignore[import-not-found]  # noqa: E402
 from _capability import (  # type: ignore[import-not-found]  # noqa: E402
     CapabilityReport,
+    session_metrics_from_cases,
 )
 
 logger = logging.getLogger(__name__)
@@ -363,7 +364,13 @@ async def run_baseline(*, out_path: Path = _DEFAULT_OUT) -> dict[str, Capability
             )
             continue
         logger.info("baseline: running %s", runner.capability)
-        reports[runner.capability] = await runner.runner_fn()
+        report = await runner.runner_fn()
+        # P1-S2.2 (11.3) — attach the session-level rollup centrally so every
+        # capability that emits per-case rows gets goal_completion without
+        # touching each runner.
+        if report.per_case:
+            report = replace(report, session_metrics=session_metrics_from_cases(report.per_case))
+        reports[runner.capability] = report
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(_render_yaml(reports), encoding="utf-8")
@@ -389,6 +396,8 @@ def _render_yaml(reports: Mapping[str, CapabilityReport]) -> str:
             "score": dict(report.aggregate_score),
             "status": report.status,
         }
+        if report.session_metrics:
+            entry["session_metrics"] = dict(report.session_metrics)
         if report.status == "DEFERRED" and report.deferred_reason:
             entry["deferred_reason"] = report.deferred_reason
         capabilities[cap] = entry
