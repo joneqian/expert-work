@@ -55,6 +55,21 @@ class EvalRunStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: EvalRunStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[EvalRunRecord], int]:
+        """Per-tenant page of runs (``created_at`` DESC), plus the total count
+        *before* pagination. Backs the operator list page (S2.5). Single-tenant
+        only — a cross-tenant aggregate over this FORCE-RLS table needs the
+        ``audit_reader`` role and is intentionally not offered here.
+        """
+
+    @abc.abstractmethod
     async def append_case_result(self, record: EvalCaseResultRecord) -> EvalCaseResultRecord:
         """Persist one case result; return it with the assigned ``id``."""
 

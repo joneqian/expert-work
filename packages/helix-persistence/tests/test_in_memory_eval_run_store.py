@@ -22,14 +22,19 @@ from helix_agent.protocol import (
 )
 
 
-def _run(tenant_id: object, *, status: EvalRunStatus = EvalRunStatus.QUEUED) -> EvalRunRecord:
+def _run(
+    tenant_id: object,
+    *,
+    status: EvalRunStatus = EvalRunStatus.QUEUED,
+    created_at: datetime | None = None,
+) -> EvalRunRecord:
     return EvalRunRecord(
         id=uuid4(),
         tenant_id=tenant_id,  # type: ignore[arg-type]
         suite="m0_baseline",
         status=status,
         triggered_by=EvalTriggeredBy.MANUAL,
-        created_at=datetime.now(UTC),
+        created_at=created_at if created_at is not None else datetime.now(UTC),
     )
 
 
@@ -92,6 +97,49 @@ async def test_list_by_status_all_tenants_spans_tenants_oldest_first() -> None:
     assert [r.id for r in queued] == [r1.id]
     running = await store.list_by_status_all_tenants(EvalRunStatus.RUNNING)
     assert [r.id for r in running] == [r2.id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_isolates_tenant_and_sorts_desc() -> None:
+    store = InMemoryEvalRunStore()
+    a, b = uuid4(), uuid4()
+    base = datetime(2026, 6, 14, 8, 0, tzinfo=UTC)
+    older = await store.create_run(_run(a, created_at=base))
+    newer = await store.create_run(_run(a, created_at=base.replace(hour=9)))
+    await store.create_run(_run(b, created_at=base.replace(hour=10)))  # other tenant
+
+    items, total = await store.list_for_tenant(tenant_id=a)
+    # Only tenant a's runs, newest first.
+    assert [r.id for r in items] == [newer.id, older.id]
+    assert total == 2
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_filters_by_status() -> None:
+    store = InMemoryEvalRunStore()
+    a = uuid4()
+    queued = await store.create_run(_run(a, status=EvalRunStatus.QUEUED))
+    await store.create_run(_run(a, status=EvalRunStatus.PASSED))
+
+    items, total = await store.list_for_tenant(tenant_id=a, status=EvalRunStatus.QUEUED)
+    assert [r.id for r in items] == [queued.id]
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_list_for_tenant_paginates_with_full_total() -> None:
+    store = InMemoryEvalRunStore()
+    a = uuid4()
+    base = datetime(2026, 6, 14, 8, 0, tzinfo=UTC)
+    for i in range(5):
+        await store.create_run(_run(a, created_at=base.replace(minute=i)))
+
+    page, total = await store.list_for_tenant(tenant_id=a, limit=2, offset=0)
+    assert len(page) == 2
+    # total is the pre-pagination count, not the page size.
+    assert total == 5
+    page2, _ = await store.list_for_tenant(tenant_id=a, limit=2, offset=4)
+    assert len(page2) == 1  # tail page
 
 
 @pytest.mark.asyncio

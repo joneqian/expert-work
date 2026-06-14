@@ -64,6 +64,22 @@ class InMemoryEvalRunStore(EvalRunStore):
         rows.sort(key=lambda r: r.created_at)
         return rows
 
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: EvalRunStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[EvalRunRecord], int]:
+        rows = [
+            r
+            for r in self._runs.values()
+            if r.tenant_id == tenant_id and (status is None or r.status is status)
+        ]
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[offset : offset + limit], len(rows)
+
     async def append_case_result(self, record: EvalCaseResultRecord) -> EvalCaseResultRecord:
         stored = record.model_copy(update={"id": next(self._ids)})
         self._results.append(stored)

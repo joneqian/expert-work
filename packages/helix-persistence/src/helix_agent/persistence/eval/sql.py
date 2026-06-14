@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.eval.base import EvalRunStore
@@ -128,6 +128,36 @@ class SqlEvalRunStore(EvalRunStore):
                 .all()
             )
             return [_run_to_dto(r) for r in rows]
+
+    async def list_for_tenant(
+        self,
+        *,
+        tenant_id: UUID,
+        status: EvalRunStatus | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[EvalRunRecord], int]:
+        async with self._sf() as session:
+            where = [EvalRunRow.tenant_id == tenant_id]
+            if status is not None:
+                where.append(EvalRunRow.status == status.value)
+            total = (
+                await session.execute(select(func.count()).select_from(EvalRunRow).where(*where))
+            ).scalar_one()
+            rows = (
+                (
+                    await session.execute(
+                        select(EvalRunRow)
+                        .where(*where)
+                        .order_by(EvalRunRow.created_at.desc())
+                        .limit(limit)
+                        .offset(offset)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [_run_to_dto(r) for r in rows], int(total)
 
     async def append_case_result(self, record: EvalCaseResultRecord) -> EvalCaseResultRecord:
         async with self._sf() as session:

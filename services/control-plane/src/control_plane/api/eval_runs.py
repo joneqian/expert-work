@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -71,6 +71,25 @@ class _EnqueueBody(BaseModel):
 def build_eval_runs_router() -> APIRouter:
     """Enqueue + read eval runs."""
     router = APIRouter(prefix="/v1/eval-runs", tags=["eval"])
+
+    @router.get("", response_model=None)
+    async def list_runs(
+        request: Request,
+        store: Annotated[EvalRunStore, Depends(_get_eval_run_store)],
+        status: Annotated[EvalRunStatus | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> JSONResponse:
+        # Home-tenant scope only — the caller's tenant (RLS GUC already set by
+        # the request middleware). A cross-tenant aggregate over this FORCE-RLS
+        # table needs the ``audit_reader`` role and is a follow-up.
+        tenant_id: UUID = request.state.tenant_id
+        items, total = await store.list_for_tenant(
+            tenant_id=tenant_id, status=status, limit=limit, offset=offset
+        )
+        return JSONResponse(
+            content={"items": [_run_dict(r) for r in items], "total": total},
+        )
 
     @router.post("", response_model=None)
     async def enqueue_run(
