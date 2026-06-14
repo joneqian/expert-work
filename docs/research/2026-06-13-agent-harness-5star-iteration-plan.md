@@ -71,6 +71,44 @@
 
 ---
 
+## 前端对接审计（admin-ui，2026-06-14）
+
+> **教训**：迭代项不能只做后端。`apps/admin-ui` 惯例 = 每个 operator 能力配页面
+> （`Xxx.tsx` + `.stories.tsx` + `src/api/xxx.ts` SDK + Sidebar/router/CommandPalette，见 SE-8 接线点）。
+> 但 ops/基础设施/安全后台项是 **Grafana/外部面**，不该塞进 admin-ui。逐项审一遍：
+
+图例：✅已有 · ❌需建 admin-ui · 🔶可选增强 · ⬜无需(ops/Grafana)
+
+| 项 | 前端 | 交付 / 说明 |
+|---|---|---|
+| 10.1 连接式 trace | ✅ | `RunDetail` 已有 `TraceToolbar` 按 trace_id deep-link Langfuse/Tempo |
+| **11.6 eval worker** | ❌ | **缺 Eval 页**（runs 列表+触发）；`src/api` 无 eval client |
+| **11.3 会话级指标** | ❌ | resolution_rate 等显示在 Eval run 详情 |
+| **11.4 trace-based eval** | ❌ | trace 断言结果显示在 Eval 页 |
+| **11.5 对抗集** | ❌ | 对抗 run 结果显示在 Eval 页 |
+| 1.3 evaluator-optimizer | 🔶 | reflection verdict 可加进 RunDetail |
+| 4.4 自写 skill | 🔶 | Skills 页已有；加「agent 自写」badge/筛选 |
+| 9.4 failover / 9.5 分布式队列 | ⬜ | ops/Grafana |
+| 4.1 滑窗 / 3.3 context awareness | 🔶 | context 用量% 可加进 RunDetail |
+| 7.2 gVisor | ⬜ | sandbox runtime = ops 配置 |
+| **8.5 资源级 RBAC-ABAC** | ❌ | 扩 `SettingsIam`/`SettingsRoleBindings`（资源 URI 级权限 UI） |
+| 7.3 injection 扫描 | 🔶 | 安全事件可进 audit 视图 |
+| 7.4 DLP / 7.6 IDS | 🔶 | 安全告警面（多为 Grafana） |
+| 14.4 MCP 隔离 | 🔶 | `SettingsMcpServers` 已存；加隔离状态 |
+| 13.2 并发 resume | ⬜ | 后端 |
+| 16.4 自愈 / 16.3 backpressure / 10.5 SLO | ⬜ | **Grafana 非 admin-ui** |
+| 12.4 chargeback | ✅ | `SettingsBillingChargeback`+`RateCard`+`Usage` 已有 |
+| 13.1 隔离 ✅ | ⬜ | 仅测试 |
+
+**真前端 gap 只有 2 个**：
+1. **Eval 平台页**（一页覆盖 11.3/11.4/11.5/11.6）—— P1-S2 的前端交付，backend(S2.1a–d ✅) 落完即做。
+   按 admin-ui 设计基线 + SE-8 接线点全套（router/Sidebar/CommandPalette/SDK/i18n 双语/Storybook/Playwright/TenantScope/envelope 对账）。
+2. **8.5 RBAC 资源级**扩 IAM 页 —— 到 P3 随后端一起做。
+
+其余：3 项已有前端（10.1/12.4/4.4 基础）、几项可选增强、约一半是 ops/Grafana 无需 admin-ui。
+
+---
+
 ## W0 — 验证落地（已执行 2026-06-13）
 
 ⚠️ 项证据靠设计文档，先核实把分坐实。**核实结果：一升一降，揭出原评分高估。**
