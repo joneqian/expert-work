@@ -71,6 +71,7 @@ from helix_agent.common.observability import (
     helix_histogram,
     helix_span,
 )
+from helix_agent.common.spotlight import spotlight_untrusted
 from helix_agent.common.uplift_metrics import record_memory_inject_mode
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, MemoryItem, Plan
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -291,6 +292,10 @@ def build_react_graph(
     tool_disclosure: Literal["native_search", "allowed_tools"] | None = None,
     # Capability Uplift Sprint #8 — Mini-ADR U-8.
     memory_recall_mode: Literal["per_session", "per_turn"] = "per_session",
+    # Stream PI-1b — when set, untrusted channels (recalled memory, tool
+    # results) are spotlighted (datamarked + nonce-fenced) before the model
+    # sees them. ``None`` (default) keeps the pre-PI behaviour byte-identical.
+    spotlight_nonce: str | None = None,
 ) -> StateGraph[AgentState, None, AgentState, AgentState]:
     """Assemble the ReAct ``StateGraph`` and return it uncompiled.
 
@@ -423,7 +428,9 @@ def build_react_graph(
         # the J.3 tail-injection behavior as a legacy escape hatch.
         memories = state.get("recalled_memories")
         if memories:
-            messages = _inject_memories(messages, memories, mode=memory_recall_mode)
+            messages = _inject_memories(
+                messages, memories, mode=memory_recall_mode, spotlight_nonce=spotlight_nonce
+            )
             record_memory_inject_mode(mode=memory_recall_mode)
         # Stream CM-1 (generalising L.L4) — inject a ``<recovery-advisory>``
         # HumanMessage listing every tool call that failed in the previous
@@ -722,6 +729,7 @@ def build_react_graph(
                     before_tool_dispatch_chain=before_tool_dispatch_chain,
                     audit_logger=audit_logger,
                     overflow_writer=overflow_writer,
+                    spotlight_nonce=spotlight_nonce,
                 )
             )
 
@@ -929,6 +937,7 @@ def _inject_memories(
     memories: list[MemoryItem],
     *,
     mode: Literal["per_session", "per_turn"] = "per_session",
+    spotlight_nonce: str | None = None,
 ) -> list[BaseMessage]:
     """Render recalled long-term memories (J.3) into the prompt.
 
@@ -946,9 +955,14 @@ def _inject_memories(
     turn of the session — long sessions stop paying full price for the
     memory block on every step.
     """
-    lines = ["## Relevant memories from past sessions"]
-    lines.extend(f"- ({item.kind}) {item.content}" for item in memories)
-    body = "\n".join(lines)
+    # Stream PI-1b — recalled memory is untrusted (an injection can be written
+    # into a memory in an earlier session and recalled here). Spotlight the
+    # item block (the helix-owned header stays trusted) so the model treats it
+    # as data, not instructions.
+    items = "\n".join(f"- ({item.kind}) {item.content}" for item in memories)
+    if spotlight_nonce:
+        items = spotlight_untrusted(items, nonce=spotlight_nonce)
+    body = "## Relevant memories from past sessions\n" + items
 
     if mode == "per_turn":
         return _append_tail_human_message(messages, body)
@@ -1089,6 +1103,7 @@ async def _dispatch_tool(
     before_tool_dispatch_chain: MiddlewareChain | None,
     audit_logger: AuditLogger | None = None,
     overflow_writer: WorkspaceFileWriter | None = None,
+    spotlight_nonce: str | None = None,
 ) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
     """Dispatch one tool call.
 
@@ -1127,7 +1142,14 @@ async def _dispatch_tool(
         # 10.1 — one ``helix.orchestrator.tool_call`` child span per tool
         # dispatch, attached under the session root span.
         with helix_span(HelixComponent.ORCHESTRATOR, "tool_call", attributes={"tool": name}):
-            outcome = await _invoke_tool(tool, args, call_id, ctx, overflow_writer=overflow_writer)
+            outcome = await _invoke_tool(
+                tool,
+                args,
+                call_id,
+                ctx,
+                overflow_writer=overflow_writer,
+                spotlight_nonce=spotlight_nonce,
+            )
         ok = outcome[0].status != "error"
         # Stream HX-12 (Mini-ADR HX-I4) — call-through: the model called a
         # deferred name directly (it remembered the tool without a
@@ -1445,6 +1467,7 @@ async def _invoke_tool(
     ctx: ToolContext,
     *,
     overflow_writer: WorkspaceFileWriter | None = None,
+    spotlight_nonce: str | None = None,
 ) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
     try:
         result = await tool.call(args, ctx=ctx)
@@ -1473,7 +1496,16 @@ async def _invoke_tool(
     # output and carried the full rendering, save it to the workspace and
     # let the LLM see a recoverable reference instead of a dead end.
     footer = await _externalize_tool_overflow(result, tool, call_id, ctx, overflow_writer)
-    content = result.content + footer if footer is not None else result.content
+    # Stream PI-1b — a tool's output is untrusted (web pages, MCP servers, files
+    # an attacker can control = the classic indirect-injection vector). Spotlight
+    # it so embedded instructions read as data. The helix-owned overflow footer
+    # stays trusted (outside the fence).
+    tool_content = (
+        spotlight_untrusted(result.content, nonce=spotlight_nonce)
+        if spotlight_nonce
+        else result.content
+    )
+    content = tool_content + footer if footer is not None else tool_content
     return (
         ToolMessage(content=content, tool_call_id=call_id),
         result.state_updates,

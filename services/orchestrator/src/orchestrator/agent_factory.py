@@ -35,7 +35,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
     from orchestrator.tools.skill_view import SkillResolution
@@ -652,6 +652,13 @@ async def build_agent(
             persistent_workspace=True,
             image_variant=spec.spec.sandbox.image_variant,
         )
+    # Stream PI-1b — one unguessable nonce per build (stable across the
+    # session so the spotlighted memory block stays prompt-cache friendly;
+    # the untrusted content's author never sees it, so it can't forge the
+    # closing fence). ``None`` when spotlighting is off → no wrapping.
+    spotlight_nonce = (
+        uuid4().hex[:12] if spec.spec.defenses.prompt_injection == "spotlight" else None
+    )
     graph = build_react_graph(
         llm_caller=routers.default,
         escalated_llm_caller=escalated_llm_caller,  # CM-9 — None → no escalation
@@ -672,6 +679,7 @@ async def build_agent(
         approval_required_tools=frozenset(spec.spec.policies.approval_required_tools),
         approval_timeout_s=spec.spec.policies.approval_timeout_s,
         memory_recall_mode=memory_recall_mode,
+        spotlight_nonce=spotlight_nonce,
         # Stream HX-13 — vendor-native tool-disclosure tier (catalog bit;
         # off-catalog / unannotated models stay on the HX-12 tier).
         tool_disclosure=_resolved_tool_disclosure(spec.spec.model),
