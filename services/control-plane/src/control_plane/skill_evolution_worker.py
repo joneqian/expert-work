@@ -18,6 +18,7 @@ import logging
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from control_plane.skill_evolution import EvolutionResult
@@ -131,30 +132,40 @@ class SkillEvolutionWorker:
             self._task = None
 
     async def run_once(self) -> EvolutionTally:
-        """Scan pending evolvable candidates and process a batch of them."""
+        """Scan un-evolved evolvable candidates and process a batch of them."""
         with _bypass_rls():
+            # 4.4 #5 — only candidates not yet evolved, so the worker doesn't
+            # re-distil the same trajectory every interval (a cost runaway the
+            # single-shot unit tests never exercised).
             candidates = await self._candidates.list_for_review_all_tenants(
-                status=CandidateStatus.PENDING
+                status=CandidateStatus.PENDING, unevolved_only=True
             )
         todo = [c for c in candidates if c.signal in EVOLVE_SIGNALS][: self._batch_size]
 
         counts = {"grounded": 0, "rejected": 0, "exhausted": 0, "no_draft": 0}
         failed = 0
+        now = datetime.now(UTC)
         for candidate in todo:
-            try:
-                with _tenant_scope(candidate.tenant_id):
+            with _tenant_scope(candidate.tenant_id):
+                try:
                     result = await self._processor(candidate)
-            except Exception:
-                # Isolate a per-candidate failure (e.g. a tenant whose aux
-                # credential isn't resolvable) so one bad candidate doesn't
-                # abort the whole batch — it stays PENDING for a later retry.
-                # Mirrors the eval worker isolating a failed run to its own row.
-                failed += 1
-                logger.warning("skill_evolution.candidate_failed candidate_id=%s", candidate.id)
-                continue
-            counts[result.outcome] += 1
-            if result.outcome == "grounded":
-                _grounded.inc()
+                except Exception:
+                    # Isolate a per-candidate failure (e.g. a tenant whose aux
+                    # credential isn't resolvable) so one bad candidate doesn't
+                    # abort the whole batch.
+                    failed += 1
+                    logger.warning("skill_evolution.candidate_failed candidate_id=%s", candidate.id)
+                else:
+                    counts[result.outcome] += 1
+                    if result.outcome == "grounded":
+                        _grounded.inc()
+                # Mark evolved regardless of outcome so the candidate is not
+                # re-processed every interval (4.4 #5). A failed candidate is
+                # not retried — a retry policy is a follow-up; stopping the
+                # cost-runaway loop is the fix here.
+                await self._candidates.mark_evolved(
+                    candidate_id=candidate.id, tenant_id=candidate.tenant_id, at=now
+                )
 
         return EvolutionTally(
             scanned=len(candidates),

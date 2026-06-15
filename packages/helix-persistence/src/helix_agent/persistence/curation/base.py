@@ -21,6 +21,7 @@ Implementations:
 from __future__ import annotations
 
 import abc
+from datetime import datetime
 from uuid import UUID
 
 from helix_agent.protocol import (
@@ -114,11 +115,22 @@ class CurationCandidateStore(abc.ABC):
         agent_name: str | None = None,
         status: CandidateStatus | None = None,
         signal: CurationSignal | None = None,
+        unevolved_only: bool = False,
     ) -> list[CurationCandidateRecord]:
         """Cross-tenant review list — Stream N (Mini-ADR N-4).
 
-        Caller MUST be inside ``bypass_rls_session()``.
+        Caller MUST be inside ``bypass_rls_session()``. ``unevolved_only`` (4.4
+        #5) filters to candidates the SE-6 evolution worker hasn't yet processed
+        (``evolved_at IS NULL``); the worker passes ``True`` so it doesn't
+        re-distil the same trajectory every interval, while the human-review
+        surface keeps the default (sees all candidates).
         """
+
+    @abc.abstractmethod
+    async def mark_evolved(self, *, candidate_id: UUID, tenant_id: UUID, at: datetime) -> bool:
+        """Stamp ``evolved_at`` so the SE-6 worker won't re-process this
+        candidate (4.4 #5). Idempotent; returns whether a row was matched.
+        Orthogonal to ``update`` (which carries the J.12 review verdict)."""
 
     @abc.abstractmethod
     async def update(self, record: CurationCandidateRecord) -> bool:

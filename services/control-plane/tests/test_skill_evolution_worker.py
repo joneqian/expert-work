@@ -175,3 +175,30 @@ async def test_run_once_isolates_a_failing_candidate() -> None:
     assert tally.scanned == 2
     assert tally.processed == 1
     assert tally.grounded == 1
+
+
+@pytest.mark.asyncio
+async def test_run_once_marks_evolved_and_does_not_reprocess() -> None:
+    # 4.4 #5 — a processed candidate is marked evolved so the next sweep skips
+    # it (the live loop previously re-distilled the same trajectory forever).
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(
+        store,
+        [
+            _candidate(signal="positive_feedback", tenant=tenant),
+            _candidate(signal="positive_feedback", tenant=tenant),
+        ],
+    )
+    proc = RecordingProcessor("no_draft")
+    worker = SkillEvolutionWorker(candidate_store=store, processor=proc, interval_s=60)
+
+    first = await worker.run_once()
+    assert first.processed == 2
+    assert len(proc.seen) == 2
+
+    # Second sweep: all candidates now evolved → nothing to process.
+    second = await worker.run_once()
+    assert second.scanned == 0
+    assert second.processed == 0
+    assert len(proc.seen) == 2  # processor not called again

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import cast
 from uuid import UUID
 
@@ -184,6 +185,7 @@ def _candidate_row_to_dto(row: CurationCandidateRow) -> CurationCandidateRecord:
         eval_dataset_id=row.eval_dataset_id,
         detected_at=row.detected_at,
         reviewed_at=row.reviewed_at,
+        evolved_at=row.evolved_at,
     )
 
 
@@ -262,11 +264,29 @@ class SqlCurationCandidateStore(CurationCandidateStore):
         agent_name: str | None = None,
         status: CandidateStatus | None = None,
         signal: CurationSignal | None = None,
+        unevolved_only: bool = False,
     ) -> list[CurationCandidateRecord]:
         # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
         return await self._list_for_review(
-            tenant_id=None, agent_name=agent_name, status=status, signal=signal
+            tenant_id=None,
+            agent_name=agent_name,
+            status=status,
+            signal=signal,
+            unevolved_only=unevolved_only,
         )
+
+    async def mark_evolved(self, *, candidate_id: UUID, tenant_id: UUID, at: datetime) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                sa_update(CurationCandidateRow)
+                .where(
+                    CurationCandidateRow.id == candidate_id,
+                    CurationCandidateRow.tenant_id == tenant_id,
+                )
+                .values(evolved_at=at)
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
 
     async def _list_for_review(
         self,
@@ -275,6 +295,7 @@ class SqlCurationCandidateStore(CurationCandidateStore):
         agent_name: str | None,
         status: CandidateStatus | None,
         signal: CurationSignal | None,
+        unevolved_only: bool = False,
     ) -> list[CurationCandidateRecord]:
         stmt = select(CurationCandidateRow)
         if tenant_id is not None:
@@ -285,6 +306,8 @@ class SqlCurationCandidateStore(CurationCandidateStore):
             stmt = stmt.where(CurationCandidateRow.status == status.value)
         if signal is not None:
             stmt = stmt.where(CurationCandidateRow.signal == signal)
+        if unevolved_only:
+            stmt = stmt.where(CurationCandidateRow.evolved_at.is_(None))
         stmt = stmt.order_by(CurationCandidateRow.detected_at.desc())
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()

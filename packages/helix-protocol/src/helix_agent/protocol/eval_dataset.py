@@ -89,6 +89,10 @@ class CurationCandidateRecord(BaseModel):
     eval_dataset_id: UUID | None = None
     detected_at: datetime
     reviewed_at: datetime | None = None
+    #: 4.4 (#5) — SE-6 evolution marker, orthogonal to ``status`` (the J.12
+    #: human-review verdict). Set once the evolution worker has distilled +
+    #: replayed this candidate, so it is not re-processed every interval.
+    evolved_at: datetime | None = None
 
     @model_validator(mode="after")
     def _check_review_state(self) -> CurationCandidateRecord:

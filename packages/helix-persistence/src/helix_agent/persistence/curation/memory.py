@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from helix_agent.persistence.curation.base import CurationCandidateStore, EvalDatasetStore
@@ -125,6 +126,7 @@ class InMemoryCurationCandidateStore(CurationCandidateStore):
         agent_name: str | None = None,
         status: CandidateStatus | None = None,
         signal: CurationSignal | None = None,
+        unevolved_only: bool = False,
     ) -> list[CurationCandidateRecord]:
         # Stream N — no tenant filter.
         rows = [
@@ -133,9 +135,17 @@ class InMemoryCurationCandidateStore(CurationCandidateStore):
             if (agent_name is None or r.agent_name == agent_name)
             and (status is None or r.status is status)
             and (signal is None or r.signal == signal)
+            and (not unevolved_only or r.evolved_at is None)
         ]
         rows.sort(key=lambda r: r.detected_at, reverse=True)
         return rows
+
+    async def mark_evolved(self, *, candidate_id: UUID, tenant_id: UUID, at: datetime) -> bool:
+        existing = self._rows.get(candidate_id)
+        if existing is None or existing.tenant_id != tenant_id:
+            return False
+        self._rows[candidate_id] = existing.model_copy(update={"evolved_at": at})
+        return True
 
     async def update(self, record: CurationCandidateRecord) -> bool:
         existing = self._rows.get(record.id)

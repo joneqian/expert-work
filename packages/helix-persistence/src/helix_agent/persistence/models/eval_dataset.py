@@ -86,6 +86,11 @@ class CurationCandidateRow(Base):
     eval_dataset_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: 4.4 (#5) — SE-6 skill-evolution marker, orthogonal to ``status`` (the
+    #: J.12 human-review verdict). Set once the evolution worker has processed
+    #: this candidate so it isn't re-distilled every interval. NULL = not yet
+    #: evolved (the worker's scan filter).
+    evolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(f"outcome IN {_OUTCOME_VALUES}", name="curation_candidate_outcome_valid"),
