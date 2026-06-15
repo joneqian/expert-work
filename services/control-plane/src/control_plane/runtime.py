@@ -47,8 +47,10 @@ from helix_agent.runtime.storage import ObjectStore, ObjectStoreBackend, S3Compa
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
 from orchestrator import (
     BuiltAgent,
+    LLMOutputJudge,
     MemoryEnv,
     MiddlewareEnv,
+    OutputJudge,
     ToolEnv,
     build_agent,
     build_llm_router,
@@ -305,6 +307,34 @@ def _declares_long_term(spec: AgentSpec) -> bool:
     return memory is not None and memory.long_term is not None
 
 
+async def _make_output_judge(
+    spec: AgentSpec,
+    *,
+    tenant_id: UUID,
+    credentials_resolver: CredentialsResolver,
+    secret_store: SecretStore,
+) -> OutputJudge | None:
+    """Stream PI-2b-3 — build the model-backed output judge when the manifest
+    opts in (``defenses.output_judge == "block"``).
+
+    The judge runs the agent's own primary model over the alignment rubric —
+    a separate, injection-free call, so it reuses the platform credential
+    already configured for that provider with no new judge-model settings.
+    Returns ``None`` when the judge is off; a resolve failure propagates so
+    the build fails loudly rather than silently shipping an agent that opted
+    into a judge it didn't get.
+    """
+    if spec.spec.defenses.output_judge != "block":
+        return None
+    model = spec.spec.model
+    secret_ref = await credentials_resolver.resolve_provider(
+        tenant_id=tenant_id, provider=model.provider
+    )
+    judge_spec = ModelSpec(provider=model.provider, name=model.name, api_key_ref=secret_ref)
+    router = await build_llm_router(judge_spec, secret_store=secret_store)
+    return LLMOutputJudge(caller=router)
+
+
 def make_agent_builder(
     secret_store: SecretStore,
     checkpointer: BaseCheckpointSaver[Any],
@@ -418,6 +448,19 @@ def make_agent_builder(
             and tenant_id is not None
             else None
         )
+        # Stream PI-2b-3 — model-backed output judge, when the manifest opts in
+        # and the tenant credential path is wired (preview/validation builds
+        # without a resolver get no judge, same as the agent's own model).
+        output_judge = (
+            await _make_output_judge(
+                spec,
+                tenant_id=tenant_id,
+                credentials_resolver=credentials_resolver,
+                secret_store=secret_store,
+            )
+            if credentials_resolver is not None and tenant_id is not None
+            else None
+        )
         return await build_agent(
             spec,
             secret_store=secret_store,
@@ -432,6 +475,8 @@ def make_agent_builder(
             # Stream SE (SE-3b) — raw store + audit for in-session authoring.
             skill_store=skill_store,
             audit_logger=audit_logger,
+            # Stream PI-2b-3 — gated model-backed output judge.
+            output_judge=output_judge,
         )
 
     return _build

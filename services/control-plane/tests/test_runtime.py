@@ -13,6 +13,7 @@ from control_plane.runtime import (
     AgentRuntime,
     ResolvingEmbedder,
     ResolvingReranker,
+    _make_output_judge,
     make_agent_builder,
     make_image_resolver,
     make_knowledge_retriever,
@@ -435,3 +436,46 @@ async def test_make_agent_builder_skills_manifest_without_tenant_errors() -> Non
     )
     with pytest.raises(AgentFactoryError, match="no platform credential"):
         await builder(_spec_with_skills(["foo"]), tenant_id=None)
+
+
+# ---------------------------------------------------------------------------
+# Stream PI-2b-3 — _make_output_judge gating + construction
+# ---------------------------------------------------------------------------
+
+
+def _spec_with_judge(mode: str) -> AgentSpec:
+    manifest = dict(_MINIMAL_MANIFEST)
+    manifest["spec"] = dict(
+        manifest["spec"],
+        model={
+            "provider": "anthropic",
+            "name": "claude-haiku-4-5",
+            "api_key_ref": f"secret://{_ANTHROPIC_KEY_NAME}",
+        },
+        defenses={"output_judge": mode},
+    )
+    return AgentSpec.model_validate(manifest)
+
+
+@pytest.mark.asyncio
+async def test_make_output_judge_off_returns_none() -> None:
+    judge = await _make_output_judge(
+        _spec_with_judge("off"),
+        tenant_id=uuid4(),
+        credentials_resolver=_anthropic_credentials_resolver(),
+        secret_store=LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+    )
+    assert judge is None
+
+
+@pytest.mark.asyncio
+async def test_make_output_judge_block_builds_llm_judge() -> None:
+    from orchestrator import LLMOutputJudge
+
+    judge = await _make_output_judge(
+        _spec_with_judge("block"),
+        tenant_id=uuid4(),
+        credentials_resolver=_anthropic_credentials_resolver(),
+        secret_store=LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+    )
+    assert isinstance(judge, LLMOutputJudge)
