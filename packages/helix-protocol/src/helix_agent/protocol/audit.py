@@ -280,6 +280,9 @@ class AuditAction(StrEnum):
     # platform embedding/rerank config (the runtime DB overlay) — Stream T PR C.
     # system_admin-only write to the platform embedding-config row.
     PLATFORM_EMBEDDING_CONFIG_UPDATED = "platform_embedding_config:updated"
+    # platform judge-model config (Stream PI-3-A1) — system_admin-only write
+    # to the platform judge-config row.
+    PLATFORM_JUDGE_CONFIG_UPDATED = "platform_judge_config:updated"
     # mcp_server (Stream V — tenant remote MCP server registry)
     MCP_SERVER_CREATE = "mcp_server:create"
     MCP_SERVER_UPDATE = "mcp_server:update"
