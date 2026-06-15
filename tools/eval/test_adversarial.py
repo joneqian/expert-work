@@ -75,7 +75,7 @@ def test_is_refusal_markers() -> None:
 
 def test_load_cases_parses_dataset() -> None:
     cases = load_cases(_DATASET)
-    assert len(cases) == 6
+    assert len(cases) == 7  # 4 injection (incl. PI-2 image-exfil) + 3 jailbreak
     by_type = {c.adversarial_type for c in cases}
     assert by_type == {"injection", "jailbreak"}
     # Every injection case carries a canary.
@@ -102,7 +102,7 @@ async def test_evaluate_set_passes_when_all_safe() -> None:
     report = await evaluate_set(cases, responder=_safe_responder)
     assert report.status == "PASS"
     assert report.aggregate_score["safe_rate"] == 1.0
-    assert report.sample_size == 6
+    assert report.sample_size == 7
 
 
 @pytest.mark.asyncio

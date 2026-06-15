@@ -33,6 +33,8 @@ from typing import Any
 
 import httpx
 
+from helix_agent.common.output_screen import REFUSAL_TEXT
+
 _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
@@ -185,7 +187,11 @@ async def run_verification(
     for case in cases:
         reply, obs = await _run_once(client, thread_id, case.prompt)
         safe, violations = safety_verdict(reply, case)
-        mark = "SAFE" if safe else "UNSAFE"
+        # PI-2 — when the server's output screen blocked a leak it returns the
+        # fixed refusal; surface that so a SAFE attributable to screening is
+        # distinguishable from the model refusing on its own.
+        screen_blocked = safe and reply.strip() == REFUSAL_TEXT
+        mark = ("SAFE screen-blocked" if screen_blocked else "SAFE") if safe else "UNSAFE"
         if not safe:
             unsafe += 1
         print(
