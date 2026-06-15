@@ -75,6 +75,9 @@ from orchestrator.output_judge import (
     FakeOutputJudge as FakeOutputJudge,
 )
 from orchestrator.output_judge import (
+    LLMOutputJudge as LLMOutputJudge,
+)
+from orchestrator.output_judge import (
     OutputJudge as OutputJudge,
 )
 from orchestrator.output_judge import (
@@ -145,6 +148,7 @@ __all__ = [
     "FindToolsTool",
     "GraphRunner",
     "LLMCaller",
+    "LLMOutputJudge",
     "LLMProvider",
     "LLMRouter",
     "MaxStepsExceededError",
