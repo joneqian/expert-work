@@ -53,6 +53,15 @@ x-control-plane-base: &control-plane-base
     # is loaded from the encrypted vault, seeded once via
     # `python -m control_plane.seed_keycloak_secret`. See getting-started.md.
     HELIX_AGENT_KEYCLOAK_ENABLED: ${HELIX_AGENT_KEYCLOAK_ENABLED:-false}
+    # 11.4/11.5 — live eval worker. OFF by default (the enqueue API still
+    # queues runs; nothing drains them). Set true in infra/.env to drain the
+    # adversarial / trace_eval suites against a real eval agent. The eval
+    # model must be a provider this tenant has a platform credential for
+    # (else the build fails → job ERROR). Interval is short here for E2E.
+    HELIX_AGENT_ENABLE_EVAL_WORKER: ${HELIX_AGENT_ENABLE_EVAL_WORKER:-false}
+    HELIX_AGENT_EVAL_WORKER_INTERVAL_S: ${HELIX_AGENT_EVAL_WORKER_INTERVAL_S:-300}
+    HELIX_AGENT_EVAL_AGENT_PROVIDER: ${HELIX_AGENT_EVAL_AGENT_PROVIDER:-anthropic}
+    HELIX_AGENT_EVAL_AGENT_MODEL: ${HELIX_AGENT_EVAL_AGENT_MODEL:-claude-sonnet-4-6}
   volumes:
     # The directory always exists (committed .example); the .local inside it
     # is git-ignored, so this bind mount never breaks `up` when a dev hasn't
