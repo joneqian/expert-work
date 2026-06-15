@@ -37,14 +37,17 @@
 
 > T0 全清：2.2 + 4.1 + 11.4 + 11.5 已 ★5。11.4/11.5 用户拍板走 **B（真 agent eval in worker，非廉价 A 确定性 runner）**，
 > 见 `2026-06-15-1145-live-eval-worker-design.md` §8 E2E 实证；代码 #649/#652 已合，本机真栈（deepseek eval agent）
-> trace passed 3/3 / adversarial 5/6（机制证实，1 真防御观测非假阴）。**均分 4.60→4.63（+2★，398/430）**。
+> trace passed 3/3 / adversarial 5/6（机制证实，1 真防御观测非假阴）。
+>
+> **累计进度（T0+T1 收割后）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（★3→★5，+2，400）→ 4.4（+1，**401/430**）。
+> **均分 4.60→4.66（93.3%），共 +5★。** T1 剩 1.3（先重 scope）。
 
 ### T1 — Agent 能力护城河（★4/★3→★5，高 CAP）
 
 | 项 | 现 | 内容 | BV·CAP |
 |---|---|---|---|
 | **1.3 Evaluator-Optimizer** | ★4 | 补 Orchestrator-Worker 完整模式（独立协调者，非同模型链式） | M·H |
-| ~~4.4 agent 自写 skill~~ | ✅★5 | **B 路径已交付+E2E 实证**（#655-658）：飞轮 end-to-end 真模型跑通（轨迹→curation→distill 真调 deepseek→replay→判决）。**E2E 逮 5 坑**（整条 L7 轨迹录制没接 live run / candidate 无限重蒸 / 启动闸用错凭证源等）—— 远非「代码完整只需 ungate」；评估过度乐观。剩 happy-path(造可蒸出 skill 的场景) follow-up。见 `2026-06-15-44-skill-evolution-enable-design.md` | H·H |
+| ~~4.4 agent 自写 skill~~ | ✅★5 | **B 路径已交付+E2E 实证**（#655-658）：飞轮 end-to-end 真模型跑通（轨迹→curation→distill 真调 deepseek→replay→判决）。**E2E 逮 5 坑**（整条 L7 轨迹录制没接 live run / candidate 无限重蒸 / 启动闸用错凭证源等，#656-658）—— 远非「代码完整只需 ungate」；评估过度乐观。**happy-path 已证**：真模型 E2E agent 自演化出有收益 skill（delta=0.667 → grounded → **AUTO_PROMOTE → ACTIVE**）。见 `2026-06-15-44-skill-evolution-enable-design.md` | H·H |
 | ~~3.3 context-pressure 反馈~~ | ✅★5 | **已交付**：`ContextPressureMiddleware` 量 prompt vs 解析 context_window，usage≥0.75 向末条消息注模型可见预算提示（保前缀缓存），agent 据此收敛。默认 ON 阈值门控。确定性，单测+装配测全证（无需真模型 E2E）。设计见 `2026-06-15-33-context-pressure-feedback-design.md` | M·M |
 
 ### T2 — 企业信任 + 安全纵深收尾（多已部分升档，补到 ★5）
