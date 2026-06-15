@@ -58,6 +58,7 @@ from control_plane.api import (
     build_plan_router,
     build_platform_config_router,
     build_platform_embedding_config_router,
+    build_platform_judge_config_router,
     build_platform_skills_router,
     build_quota_router,
     build_rate_card_router,
@@ -127,6 +128,7 @@ from control_plane.middleware import (
     TenantRateLimitMiddleware,
 )
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
+from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.quota import (
     InMemoryQuotaService,
@@ -267,6 +269,11 @@ from helix_agent.persistence.platform_embedding_config import (
     InMemoryPlatformEmbeddingConfigStore,
     PlatformEmbeddingConfigStore,
     SqlPlatformEmbeddingConfigStore,
+)
+from helix_agent.persistence.platform_judge_config import (
+    InMemoryPlatformJudgeConfigStore,
+    PlatformJudgeConfigStore,
+    SqlPlatformJudgeConfigStore,
 )
 from helix_agent.persistence.platform_secrets import (
     InMemoryPlatformSecretStore,
@@ -645,6 +652,13 @@ def create_app(
     resolved_platform_embedding_config_service = PlatformEmbeddingConfigService(
         store=resolved_platform_embedding_config_store,
         settings=resolved_settings,
+        ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
+    )
+    resolved_platform_judge_config_store: PlatformJudgeConfigStore = (
+        sql_stores.platform_judge_config if sql_stores else InMemoryPlatformJudgeConfigStore()
+    )
+    resolved_platform_judge_config_service = PlatformJudgeConfigService(
+        store=resolved_platform_judge_config_store,
         ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
     )
     # Complete the D.2 cycle: TenantAwareRedactor → resolver → service.
@@ -1274,6 +1288,7 @@ def create_app(
     # Stream T (PR B) — PR C's write endpoint resolves the config service off
     # app.state to upsert the row + invalidate the cache for immediate effect.
     app.state.platform_embedding_config_service = resolved_platform_embedding_config_service
+    app.state.platform_judge_config_service = resolved_platform_judge_config_service
     # Capability Uplift Sprint #4 — exposed on app.state for callers that
     # need it directly. Stream X (Mini-ADR X-4) wires it through
     # ``make_agent_builder`` / ``make_child_agent_builder`` into
@@ -1428,6 +1443,7 @@ def create_app(
     app.include_router(build_sandboxes_router())
     app.include_router(build_platform_config_router())
     app.include_router(build_platform_embedding_config_router())
+    app.include_router(build_platform_judge_config_router())
     app.include_router(build_tenant_quotas_router())
     app.include_router(build_tenant_config_router())
     app.include_router(build_triggers_router())
@@ -1476,6 +1492,7 @@ class _SqlStores:
     role_binding: RoleBindingStore
     platform_secret: PlatformSecretStore
     platform_embedding_config: PlatformEmbeddingConfigStore  # Stream T (PR B)
+    platform_judge_config: PlatformJudgeConfigStore  # Stream PI-3-A1
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
@@ -1692,6 +1709,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         token_reservation=SqlTokenReservationStore(session_factory),
         platform_secret=SqlPlatformSecretStore(session_factory),
         platform_embedding_config=SqlPlatformEmbeddingConfigStore(session_factory),
+        platform_judge_config=SqlPlatformJudgeConfigStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),

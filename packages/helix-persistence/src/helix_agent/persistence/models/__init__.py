@@ -32,6 +32,9 @@ from helix_agent.persistence.models.model_rate_card import ModelRateCardRow
 from helix_agent.persistence.models.platform_embedding_config import (
     PlatformEmbeddingConfigRow,
 )
+from helix_agent.persistence.models.platform_judge_config import (
+    PlatformJudgeConfigRow,
+)
 from helix_agent.persistence.models.platform_secret import (
     PlatformProviderSecretRow,
     PlatformToolSecretRow,
@@ -94,6 +97,7 @@ __all__ = [
     "MemoryWritebackDLQRow",
     "ModelRateCardRow",
     "PlatformEmbeddingConfigRow",
+    "PlatformJudgeConfigRow",
     "PlatformProviderSecretRow",
     "PlatformToolSecretRow",
     "RoleBindingRow",

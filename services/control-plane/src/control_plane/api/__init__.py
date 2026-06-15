@@ -25,6 +25,9 @@ from control_plane.api.platform_config import build_platform_config_router
 from control_plane.api.platform_embedding_config import (
     build_platform_embedding_config_router,
 )
+from control_plane.api.platform_judge_config import (
+    build_platform_judge_config_router,
+)
 from control_plane.api.platform_skills import build_platform_skills_router
 from control_plane.api.quota import build_quota_router
 from control_plane.api.rate_card import build_rate_card_router
@@ -68,6 +71,7 @@ __all__ = [
     "build_plan_router",
     "build_platform_config_router",
     "build_platform_embedding_config_router",
+    "build_platform_judge_config_router",
     "build_platform_skills_router",
     "build_quota_router",
     "build_rate_card_router",
