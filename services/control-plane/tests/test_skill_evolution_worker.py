@@ -140,3 +140,38 @@ async def test_start_stop_lifecycle() -> None:
     worker.start()  # idempotent
     await worker.stop()
     assert worker.is_running is False
+
+
+class _RaisingProcessor:
+    """Raises on the first candidate, succeeds on the rest — exercises the
+    per-candidate isolation (one bad candidate must not abort the batch)."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def __call__(self, candidate: CurationCandidateRecord) -> EvolutionResult:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("aux credential unresolvable for this tenant")
+        return _result("grounded")
+
+
+@pytest.mark.asyncio
+async def test_run_once_isolates_a_failing_candidate() -> None:
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(
+        store,
+        [
+            _candidate(signal="positive_feedback", tenant=tenant),
+            _candidate(signal="positive_feedback", tenant=tenant),
+        ],
+    )
+    worker = SkillEvolutionWorker(
+        candidate_store=store, processor=_RaisingProcessor(), interval_s=60
+    )
+    tally = await worker.run_once()
+    # First candidate raised → isolated; second still processed (not aborted).
+    assert tally.scanned == 2
+    assert tally.processed == 1
+    assert tally.grounded == 1

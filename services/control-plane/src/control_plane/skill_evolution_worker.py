@@ -139,16 +139,26 @@ class SkillEvolutionWorker:
         todo = [c for c in candidates if c.signal in EVOLVE_SIGNALS][: self._batch_size]
 
         counts = {"grounded": 0, "rejected": 0, "exhausted": 0, "no_draft": 0}
+        failed = 0
         for candidate in todo:
-            with _tenant_scope(candidate.tenant_id):
-                result = await self._processor(candidate)
+            try:
+                with _tenant_scope(candidate.tenant_id):
+                    result = await self._processor(candidate)
+            except Exception:
+                # Isolate a per-candidate failure (e.g. a tenant whose aux
+                # credential isn't resolvable) so one bad candidate doesn't
+                # abort the whole batch — it stays PENDING for a later retry.
+                # Mirrors the eval worker isolating a failed run to its own row.
+                failed += 1
+                logger.warning("skill_evolution.candidate_failed candidate_id=%s", candidate.id)
+                continue
             counts[result.outcome] += 1
             if result.outcome == "grounded":
                 _grounded.inc()
 
         return EvolutionTally(
             scanned=len(candidates),
-            processed=len(todo),
+            processed=len(todo) - failed,
             grounded=counts["grounded"],
             rejected=counts["rejected"],
             exhausted=counts["exhausted"],

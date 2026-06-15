@@ -1129,32 +1129,38 @@ def create_app(
             if resolved_settings.enable_skill_evolution_worker:
                 from control_plane.skill_evolution_wiring import build_evolution_worker
 
+                # The aux model (distil / attribute / judge) resolves its key
+                # per-candidate via ``resolve_provider(tenant_id=…)`` — the same
+                # vault path the eval agent + embedder use (web-pasted platform
+                # credentials, Stream Q). So the worker starts whenever the
+                # feature is enabled and skips a candidate whose tenant has no
+                # resolvable aux credential (mirroring the eval worker, which
+                # has no startup gate). The previous gate on the env-level
+                # ``effective_platform_provider_credentials`` dict was stale: it
+                # blocked startup even when the aux was resolvable from the
+                # vault, so a deployment that pastes its key in the UI (the
+                # canonical path) never ran the flywheel.
                 se_provider = resolved_settings.memory_consolidator_default_aux_provider
-                if se_provider in resolved_settings.effective_platform_provider_credentials:
-                    skill_evolution_worker = build_evolution_worker(
-                        aux_model=make_llm_router_aux_model(
-                            resolver=credentials_resolver,
-                            secret_store=resolved_secret_store,
-                            default_provider=se_provider,
-                            default_model=resolved_settings.memory_consolidator_default_aux_model,
-                        ),
-                        aux_default_model=resolved_settings.memory_consolidator_default_aux_model,
-                        candidate_store=resolved_curation_candidate_store,
-                        skill_store=resolved_skill_store,
-                        eval_store=resolved_eval_dataset_store,
-                        agent_spec_store=resolved_repo,
-                        trajectory_reader=TrajectoryReader(object_store=object_store),
-                        agent_builder=resolved_agent_runtime.agent_builder,
-                        interval_s=resolved_settings.skill_evolution_worker_interval_s,
-                        audit_logger=resolved_audit,
-                        breaker=skill_evo_breaker,
-                    )
-                    skill_evolution_worker.start()
-                    _app.state.skill_evolution_worker = skill_evolution_worker
-                else:
-                    logger.warning(
-                        "skill_evolution_worker.aux_model.unavailable provider=%s", se_provider
-                    )
+                skill_evolution_worker = build_evolution_worker(
+                    aux_model=make_llm_router_aux_model(
+                        resolver=credentials_resolver,
+                        secret_store=resolved_secret_store,
+                        default_provider=se_provider,
+                        default_model=resolved_settings.memory_consolidator_default_aux_model,
+                    ),
+                    aux_default_model=resolved_settings.memory_consolidator_default_aux_model,
+                    candidate_store=resolved_curation_candidate_store,
+                    skill_store=resolved_skill_store,
+                    eval_store=resolved_eval_dataset_store,
+                    agent_spec_store=resolved_repo,
+                    trajectory_reader=TrajectoryReader(object_store=object_store),
+                    agent_builder=resolved_agent_runtime.agent_builder,
+                    interval_s=resolved_settings.skill_evolution_worker_interval_s,
+                    audit_logger=resolved_audit,
+                    breaker=skill_evo_breaker,
+                )
+                skill_evolution_worker.start()
+                _app.state.skill_evolution_worker = skill_evolution_worker
 
             # Stream SE (SE-7d-3b-i) — regression-rollback monitor. DB-only (no
             # LLM/graph), so no provider gate; shares the auto-promote breaker.
