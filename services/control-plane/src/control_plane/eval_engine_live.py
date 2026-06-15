@@ -46,12 +46,24 @@ logger = logging.getLogger(__name__)
 ADVERSARIAL_SUITE = "adversarial"
 TRACE_EVAL_SUITE = "trace_eval"
 
-#: Default dataset locations (repo ``tools/eval/datasets``). Resolved lazily
-#: so a control-plane that never runs a live eval needn't ship the harness.
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_DATASETS = _REPO_ROOT / "tools" / "eval" / "datasets"
-_ADVERSARIAL_DATASET = _DATASETS / "adversarial" / "m0_baseline.yaml"
-_TRACE_DATASET = _DATASETS / "trace" / "m0_baseline.yaml"
+
+def _dataset_dir() -> Path:
+    """Locate ``tools/eval/datasets`` relative to the *imported* ``tools.eval``
+    package, not this file.
+
+    The control-plane runs from an installed wheel (``site-packages/control_plane``),
+    so a repo-relative ``parents[N]`` walk points at the venv, not the repo. The
+    eval harness (``tools.eval``) is shipped onto ``PYTHONPATH`` separately (see
+    the control-plane Dockerfile); resolving from its module location works in
+    both the repo checkout and the container image. Imported lazily so a
+    deployment that never runs a live eval needn't ship the harness.
+    """
+    # Resolve via a concrete submodule: ``tools.eval`` is a namespace package
+    # (no __init__), so its ``__file__`` is None — ``adversarial`` is a real file.
+    from tools.eval import adversarial
+
+    return Path(adversarial.__file__).resolve().parent / "datasets"
+
 
 #: Adversarial cases the **tool-less, text-only** eval agent cannot host:
 #: an image-exfil case has no image channel and a tool-exfil case has no
@@ -88,7 +100,7 @@ class AdversarialEvalEngine:
 
     def __init__(self, harness: EvalAgentHarness, *, dataset_path: Path | None = None) -> None:
         self._harness = harness
-        self._dataset_path = dataset_path or _ADVERSARIAL_DATASET
+        self._dataset_path = dataset_path
 
     async def run(self, suite: str) -> Sequence[EvalCaseOutcome]:
         del suite  # the dispatcher already selected this engine by suite
@@ -97,7 +109,8 @@ class AdversarialEvalEngine:
         # import-time one (mirrors RunBaselineEvalEngine).
         from tools.eval.adversarial import CAPABILITY, load_cases, safety_verdict
 
-        cases = load_cases(self._dataset_path)
+        path = self._dataset_path or _dataset_dir() / "adversarial" / "m0_baseline.yaml"
+        cases = load_cases(path)
         runnable = [c for c in cases if c.case_id not in _UNHOSTABLE_ADVERSARIAL_CASES]
         skipped = [c.case_id for c in cases if c.case_id in _UNHOSTABLE_ADVERSARIAL_CASES]
         if skipped:
@@ -127,14 +140,15 @@ class TraceEvalEngine:
 
     def __init__(self, harness: EvalAgentHarness, *, dataset_path: Path | None = None) -> None:
         self._harness = harness
-        self._dataset_path = dataset_path or _TRACE_DATASET
+        self._dataset_path = dataset_path
 
     async def run(self, suite: str) -> Sequence[EvalCaseOutcome]:
         del suite
         tenant_id = _require_tenant()
         from tools.eval.trace_eval import evaluate_trace
 
-        cases = _load_trace_cases(self._dataset_path)
+        path = self._dataset_path or _dataset_dir() / "trace" / "m0_baseline.yaml"
+        cases = _load_trace_cases(path)
         outcomes: list[EvalCaseOutcome] = []
         for case in cases:
             spans = await self._harness.respond_traced(case.prompt, tenant_id=tenant_id)

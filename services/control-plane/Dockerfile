@@ -45,6 +45,14 @@ COPY --from=builder --chown=helix:helix /app/.venv /app/.venv
 COPY --chown=helix:helix packages/helix-persistence/alembic.ini /app/alembic/alembic.ini
 COPY --chown=helix:helix packages/helix-persistence/migrations /app/alembic/migrations
 
+# Eval harness (``tools/eval``) for the optional eval worker — the M0
+# baseline suite + the 11.4/11.5 live adversarial/trace suites. It lives
+# outside the package ``src/`` tree (the ``--no-editable`` wheel doesn't
+# carry it), so ship it onto PYTHONPATH; the worker's lazy
+# ``from tools.eval...`` imports + dataset loads then resolve in-container.
+COPY --chown=helix:helix tools/eval /app/tools/eval
+ENV PYTHONPATH=/app
+
 USER helix
 EXPOSE 8000
 ENTRYPOINT ["uvicorn", "control_plane.main:app", "--host", "0.0.0.0", "--port", "8000"]
