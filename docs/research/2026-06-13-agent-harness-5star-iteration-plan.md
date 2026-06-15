@@ -1,5 +1,8 @@
 # Helix Harness 满分化迭代计划（价值优先排序）
 
+> ⚠️ **已被 [`2026-06-15-5star-iteration-plan-v2.md`](./2026-06-15-5star-iteration-plan-v2.md) 取代**
+> （基于 06-15 能力重核重排：eval 平台已交付、沙箱安全已自愈、新增 T0 廉价收割层）。本文留作历史。
+
 > 日期：2026-06-13
 > 配套：能力评估报告 `docs/research/2026-06-13-agent-harness-capability-assessment.md`
 
