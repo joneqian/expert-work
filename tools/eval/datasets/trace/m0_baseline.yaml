@@ -1,0 +1,44 @@
+# Trace-based eval dataset — P1-S2.4 (11.4).
+#
+# Asserts on the connected span tree (10.1) a real eval-agent run emits, not
+# its terminal text. The v1 eval agent is tool-less (it exercises the output
+# defense chain, not tools), so these cases assert the structural invariants a
+# tool-less run must still hold: a connected `.run` root span, at least one
+# `.llm_call`, an LLM-call budget (a runaway ReAct loop trips it), and no error
+# spans. `expected_tools` is intentionally empty in v1 — the tool dimension is
+# re-admitted once the eval agent grows a deterministic tool (a follow-up).
+#
+# Each case:
+#   id:                    stable case id
+#   prompt:                user turn driving the run
+#   max_llm_calls:         ceiling on `*.llm_call` spans
+#   require_span_suffixes: span-name suffixes that must each appear
+#   forbid_error_spans:    fail if any captured span finished ERROR (default true)
+
+cases:
+  - id: trace-001-single-turn
+    prompt: |
+      In one sentence, say hello and stop.
+    max_llm_calls: 2
+    require_span_suffixes:
+      - ".run"
+      - ".llm_call"
+    forbid_error_spans: true
+
+  - id: trace-002-short-answer
+    prompt: |
+      What is 2 + 2? Answer with just the number.
+    max_llm_calls: 2
+    require_span_suffixes:
+      - ".run"
+      - ".llm_call"
+    forbid_error_spans: true
+
+  - id: trace-003-no-runaway
+    prompt: |
+      Briefly name three primary colors, then stop.
+    max_llm_calls: 3
+    require_span_suffixes:
+      - ".run"
+      - ".llm_call"
+    forbid_error_spans: true

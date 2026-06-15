@@ -1310,8 +1310,9 @@ const zhCN: TranslationKeys = {
     column_created: "创建时间",
     filter_status: "状态筛选",
     filter_status_all: "全部状态",
-    enqueue: "触发 baseline",
-    enqueue_success: "已排队一个 m0_baseline run。",
+    suite_label: "评测套件",
+    enqueue: "触发评测",
+    enqueue_success: "已排队一个评测 run。",
   },
   eval_run_detail: {
     failed_to_load: "加载 eval run 失败",

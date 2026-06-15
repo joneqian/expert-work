@@ -45,6 +45,12 @@ const STATUS_COLOR: Record<EvalRunStatus, string> = {
 
 const STATUS_OPTIONS: EvalRunStatus[] = ["queued", "running", "passed", "failed", "error"];
 
+// Suites an operator may enqueue — mirrors the backend ``_ALLOWED_SUITES``.
+// ``m0_baseline`` is the deterministic capability gate; ``adversarial`` /
+// ``trace_eval`` drive a real eval agent (11.4/11.5).
+const SUITE_OPTIONS = ["m0_baseline", "adversarial", "trace_eval"] as const;
+type EvalSuite = (typeof SUITE_OPTIONS)[number];
+
 function summaryLabel(summary: Record<string, unknown> | null): string {
   if (summary === null) return "—";
   const pass = summary.pass_count;
@@ -64,6 +70,7 @@ export function EvalRunsList() {
   const [enqueuing, setEnqueuing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<EvalRunStatus | undefined>(undefined);
+  const [suiteToEnqueue, setSuiteToEnqueue] = useState<EvalSuite>("m0_baseline");
 
   const toMessage = (err: unknown): string =>
     err instanceof ApiError
@@ -107,7 +114,7 @@ export function EvalRunsList() {
   const onEnqueue = useCallback(async () => {
     setEnqueuing(true);
     try {
-      await enqueueEvalRun("m0_baseline");
+      await enqueueEvalRun(suiteToEnqueue);
       message.success(t("eval_runs_page.enqueue_success"));
       setStatusFilter(undefined);
       await load(true);
@@ -116,7 +123,7 @@ export function EvalRunsList() {
     } finally {
       setEnqueuing(false);
     }
-  }, [load, message, t]);
+  }, [load, message, suiteToEnqueue, t]);
 
   const columns: TableColumnsType<EvalRunRecord> = useMemo(
     () => [
@@ -190,6 +197,14 @@ export function EvalRunsList() {
                 { value: "all", label: t("eval_runs_page.filter_status_all") },
                 ...STATUS_OPTIONS.map((s) => ({ value: s, label: s })),
               ]}
+            />
+            <Select<EvalSuite>
+              value={suiteToEnqueue}
+              onChange={(v) => setSuiteToEnqueue(v)}
+              style={{ width: 150 }}
+              aria-label={t("eval_runs_page.suite_label")}
+              data-testid="eval-suite-select"
+              options={SUITE_OPTIONS.map((s) => ({ value: s, label: s }))}
             />
             <button
               type="button"

@@ -20,6 +20,9 @@ test("/eval-runs shows the stubbed eval run after login", async ({ page }) => {
   await expect(page.getByTestId("eval-table")).toBeVisible();
   await expect(page.getByText("passed")).toBeVisible();
   await expect(page.getByText("15/15")).toBeVisible();
+  // 11.4/11.5 — operator can pick which suite to enqueue (m0_baseline /
+  // adversarial / trace_eval), not just the hard-coded baseline.
+  await expect(page.getByTestId("eval-suite-select")).toBeVisible();
 });
 
 test("/eval-runs passes axe (serious + critical)", async ({ page }) => {

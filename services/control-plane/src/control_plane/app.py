@@ -96,7 +96,15 @@ from control_plane.encrypted_secret_store import (
     SqlEncryptedSecretStore,
     build_kek_from_b64,
 )
-from control_plane.eval_engine import RunBaselineEvalEngine
+from control_plane.eval_engine import M0_BASELINE_SUITE, RunBaselineEvalEngine
+from control_plane.eval_engine_live import (
+    ADVERSARIAL_SUITE,
+    TRACE_EVAL_SUITE,
+    AdversarialEvalEngine,
+    DispatchEvalEngine,
+    LiveEvalHarness,
+    TraceEvalEngine,
+)
 from control_plane.eval_worker import EvalWorker
 from control_plane.feedback_consumer import FeedbackConsumerWorker
 from control_plane.keycloak import (
@@ -1194,9 +1202,25 @@ def create_app(
             # needs the ``tools/eval`` harness on the path (a per-run error
             # otherwise). The enqueue API populates the queue regardless.
             if resolved_settings.enable_eval_worker:
+                # 11.4/11.5 — the live suites drive a real eval agent against a
+                # real model via the same AgentBuilder sessions use; the M0
+                # baseline stays deterministic. DispatchEvalEngine routes by
+                # suite so the worker / persistence / status machine are
+                # untouched.
+                live_eval_harness = LiveEvalHarness(
+                    resolved_agent_runtime.agent_builder,
+                    provider=resolved_settings.eval_agent_provider,
+                    model_name=resolved_settings.eval_agent_model,
+                )
                 eval_worker = EvalWorker(
                     store=resolved_eval_run_store,
-                    engine=RunBaselineEvalEngine(),
+                    engine=DispatchEvalEngine(
+                        {
+                            M0_BASELINE_SUITE: RunBaselineEvalEngine(),
+                            ADVERSARIAL_SUITE: AdversarialEvalEngine(live_eval_harness),
+                            TRACE_EVAL_SUITE: TraceEvalEngine(live_eval_harness),
+                        }
+                    ),
                     interval_s=resolved_settings.eval_worker_interval_s,
                 )
                 eval_worker.start()

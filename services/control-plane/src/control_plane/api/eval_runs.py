@@ -30,7 +30,7 @@ logger = logging.getLogger("helix.control_plane.eval_runs")
 
 #: Suites an operator may enqueue. Kept to a fixed set so a typo can't
 #: queue a run the worker will only ever fail.
-_ALLOWED_SUITES = frozenset({"m0_baseline"})
+_ALLOWED_SUITES = frozenset({"m0_baseline", "adversarial", "trace_eval"})
 
 
 def _run_dict(record: EvalRunRecord) -> dict[str, Any]:

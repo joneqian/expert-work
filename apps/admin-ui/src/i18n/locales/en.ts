@@ -1278,6 +1278,7 @@ export interface TranslationKeys {
     column_created: string;
     filter_status: string;
     filter_status_all: string;
+    suite_label: string;
     enqueue: string;
     enqueue_success: string;
   };
@@ -2752,8 +2753,9 @@ const en: TranslationKeys = {
     column_created: "Created",
     filter_status: "Status filter",
     filter_status_all: "All statuses",
-    enqueue: "Enqueue baseline",
-    enqueue_success: "Queued an m0_baseline run.",
+    suite_label: "Suite to run",
+    enqueue: "Enqueue run",
+    enqueue_success: "Queued an eval run.",
   },
   eval_run_detail: {
     failed_to_load: "Failed to load eval run",

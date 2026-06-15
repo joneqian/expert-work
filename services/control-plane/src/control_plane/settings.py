@@ -396,6 +396,13 @@ class Settings(BaseSettings):
     #: only ops/eval deployments that have it arm the loop.
     enable_eval_worker: bool = Field(default=False)
     eval_worker_interval_s: int = Field(default=300, gt=0)
+    #: 11.4/11.5 — the model the live eval agent (adversarial / trace suites)
+    #: runs under. It resolves the tenant's *platform-configured* credential
+    #: (Y-2), so this provider must be one the tenant has a key for; a missing
+    #: credential fails the build → job ERROR (never a fake fallback). Set to
+    #: match your platform-configured provider before enqueuing those suites.
+    eval_agent_provider: str = Field(default="anthropic")
+    eval_agent_model: str = Field(default="claude-sonnet-4-6")
 
     #: SE-13 pre-evolution domain research (gated OFF by default). On cold start
     #: of an agent's evolution, research the tenant KB (+ optionally public web)
