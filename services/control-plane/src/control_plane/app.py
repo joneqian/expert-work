@@ -990,6 +990,9 @@ def create_app(
                     # the effective config and rejects a memory.long_term
                     # manifest when platform embedding is unconfigured.
                     platform_embedding_config_service=(resolved_platform_embedding_config_service),
+                    # Stream PI-3-A2 — judges prefer the platform judge model
+                    # (else fall back to each agent's own model).
+                    platform_judge_config_service=resolved_platform_judge_config_service,
                     # Stream V (Mini-ADR V-4) — tenant's own remote MCP pool.
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
                     # Stream MCP-OAUTH (OA-3b) — caller's per-user OAuth MCP pool.

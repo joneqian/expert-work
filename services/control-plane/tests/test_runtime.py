@@ -21,7 +21,7 @@ from control_plane.runtime import (
     resolve_object_store_config,
     resolve_reranker,
 )
-from helix_agent.common.credentials import CredentialsResolver
+from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
 from helix_agent.persistence import InMemoryKnowledgeStore
 from helix_agent.persistence.skill import InMemorySkillStore
 from helix_agent.protocol import AgentSpec, SkillStatus, TenantConfigRecord, TenantPlan
@@ -479,3 +479,44 @@ async def test_make_output_judge_block_builds_llm_judge() -> None:
         secret_store=LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
     )
     assert isinstance(judge, LLMOutputJudge)
+
+
+class _FakeJudgeConfig:
+    """Stub PlatformJudgeConfigService — returns a fixed (provider, model)."""
+
+    def __init__(self, pair: tuple[str, str] | None) -> None:
+        self._pair = pair
+
+    async def effective_judge_config(self) -> tuple[str, str] | None:
+        return self._pair
+
+
+@pytest.mark.asyncio
+async def test_make_output_judge_falls_back_to_agent_model_when_config_unset() -> None:
+    from orchestrator import LLMOutputJudge
+
+    # Platform config unset → uses the agent's own (anthropic) model, which has
+    # a credential → builds fine.
+    judge = await _make_output_judge(
+        _spec_with_judge("block"),
+        tenant_id=uuid4(),
+        credentials_resolver=_anthropic_credentials_resolver(),
+        secret_store=LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+        judge_config_service=_FakeJudgeConfig(None),  # type: ignore[arg-type]
+    )
+    assert isinstance(judge, LLMOutputJudge)
+
+
+@pytest.mark.asyncio
+async def test_make_output_judge_uses_platform_config_provider() -> None:
+    # Platform config points the judge at a provider WITHOUT a credential, so
+    # the resolve fails — proving the platform provider (not the agent's
+    # credentialed one) was used.
+    with pytest.raises(CredentialsResolverError):
+        await _make_output_judge(
+            _spec_with_judge("block"),
+            tenant_id=uuid4(),
+            credentials_resolver=_anthropic_credentials_resolver(),
+            secret_store=LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+            judge_config_service=_FakeJudgeConfig(("openai", "gpt-4o")),  # type: ignore[arg-type]
+        )

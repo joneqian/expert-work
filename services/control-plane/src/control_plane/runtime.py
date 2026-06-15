@@ -25,6 +25,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
+from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
 from control_plane.tenant_scope import bypass_rls_session
@@ -47,6 +48,7 @@ from helix_agent.runtime.storage import ObjectStore, ObjectStoreBackend, S3Compa
 from helix_agent.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
 from orchestrator import (
     BuiltAgent,
+    LLMCaller,
     LLMOutputJudge,
     MemoryEnv,
     MiddlewareEnv,
@@ -307,32 +309,54 @@ def _declares_long_term(spec: AgentSpec) -> bool:
     return memory is not None and memory.long_term is not None
 
 
+async def _build_judge_caller(
+    spec: AgentSpec,
+    *,
+    tenant_id: UUID,
+    credentials_resolver: CredentialsResolver,
+    secret_store: SecretStore,
+    judge_config_service: PlatformJudgeConfigService | None,
+) -> LLMCaller:
+    """Stream PI-3-A2 — the LLM caller backing the output/action judges.
+
+    Model selection: the **platform judge config** wins when set; otherwise the
+    judge runs the **agent's own primary model** (PI-2b-3 behaviour — a
+    separate, injection-free call reusing the provider's platform credential).
+    A resolve failure propagates so a misconfigured judge fails the build loudly
+    rather than silently shipping an agent that opted into a judge it didn't get.
+    """
+    provider = spec.spec.model.provider
+    name = spec.spec.model.name
+    if judge_config_service is not None:
+        configured = await judge_config_service.effective_judge_config()
+        if configured is not None:
+            provider, name = cast(Provider, configured[0]), configured[1]
+    secret_ref = await credentials_resolver.resolve_provider(tenant_id=tenant_id, provider=provider)
+    judge_spec = ModelSpec(provider=provider, name=name, api_key_ref=secret_ref)
+    return await build_llm_router(judge_spec, secret_store=secret_store)
+
+
 async def _make_output_judge(
     spec: AgentSpec,
     *,
     tenant_id: UUID,
     credentials_resolver: CredentialsResolver,
     secret_store: SecretStore,
+    judge_config_service: PlatformJudgeConfigService | None = None,
 ) -> OutputJudge | None:
-    """Stream PI-2b-3 — build the model-backed output judge when the manifest
-    opts in (``defenses.output_judge == "block"``).
-
-    The judge runs the agent's own primary model over the alignment rubric —
-    a separate, injection-free call, so it reuses the platform credential
-    already configured for that provider with no new judge-model settings.
-    Returns ``None`` when the judge is off; a resolve failure propagates so
-    the build fails loudly rather than silently shipping an agent that opted
-    into a judge it didn't get.
-    """
+    """Stream PI-2b-3 / PI-3-A2 — build the output judge when the manifest opts
+    in (``defenses.output_judge == "block"``), over the platform judge model
+    (or the agent's own — see :func:`_build_judge_caller`)."""
     if spec.spec.defenses.output_judge != "block":
         return None
-    model = spec.spec.model
-    secret_ref = await credentials_resolver.resolve_provider(
-        tenant_id=tenant_id, provider=model.provider
+    caller = await _build_judge_caller(
+        spec,
+        tenant_id=tenant_id,
+        credentials_resolver=credentials_resolver,
+        secret_store=secret_store,
+        judge_config_service=judge_config_service,
     )
-    judge_spec = ModelSpec(provider=model.provider, name=model.name, api_key_ref=secret_ref)
-    router = await build_llm_router(judge_spec, secret_store=secret_store)
-    return LLMOutputJudge(caller=router)
+    return LLMOutputJudge(caller=caller)
 
 
 def make_agent_builder(
@@ -348,6 +372,7 @@ def make_agent_builder(
     user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     platform_embedding_config_service: PlatformEmbeddingConfigService | None = None,
+    platform_judge_config_service: PlatformJudgeConfigService | None = None,
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
@@ -457,6 +482,7 @@ def make_agent_builder(
                 tenant_id=tenant_id,
                 credentials_resolver=credentials_resolver,
                 secret_store=secret_store,
+                judge_config_service=platform_judge_config_service,
             )
             if credentials_resolver is not None and tenant_id is not None
             else None
