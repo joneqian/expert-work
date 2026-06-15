@@ -71,6 +71,15 @@ from orchestrator.middleware_assembly import (
 from orchestrator.middleware_assembly import (
     build_middleware_chains as build_middleware_chains,
 )
+from orchestrator.output_judge import (
+    FakeOutputJudge as FakeOutputJudge,
+)
+from orchestrator.output_judge import (
+    OutputJudge as OutputJudge,
+)
+from orchestrator.output_judge import (
+    OutputJudgeVerdict as OutputJudgeVerdict,
+)
 from orchestrator.resume import (
     PLACEHOLDER_CONTENT as PLACEHOLDER_CONTENT,
 )
@@ -132,6 +141,7 @@ __all__ = [
     "AllProvidersExhaustedError",
     "AnthropicProvider",
     "BuiltAgent",
+    "FakeOutputJudge",
     "FindToolsTool",
     "GraphRunner",
     "LLMCaller",
@@ -143,6 +153,8 @@ __all__ = [
     "MiddlewareEnv",
     "OpenAIProvider",
     "OrchestratorError",
+    "OutputJudge",
+    "OutputJudgeVerdict",
     "ProviderHandle",
     "StepRouters",
     "StreamableGraph",

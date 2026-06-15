@@ -105,6 +105,7 @@ from orchestrator.llm import (
 )
 from orchestrator.middleware_assembly import MiddlewareEnv, build_middleware_chains
 from orchestrator.multimodal import ImageResolver
+from orchestrator.output_judge import OutputJudge
 from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
 from orchestrator.tools.file_ops import SandboxWorkspaceWriter
@@ -385,6 +386,10 @@ async def build_agent(
     # builtin raises :class:`AgentFactoryError` (dep not wired).
     skill_store: SkillStore | None = None,
     audit_logger: AuditLogger | None = None,
+    # Stream PI-2b — the model-backed output judge. Activated only when the
+    # manifest opts in (``defenses.output_judge == "block"``); ``None`` (the
+    # default) leaves the judge tier inert (the real impl is PI-2b-2).
+    output_judge: OutputJudge | None = None,
 ) -> BuiltAgent:
     """Assemble a :class:`BuiltAgent` from a validated :class:`AgentSpec`.
 
@@ -682,6 +687,9 @@ async def build_agent(
         spotlight_nonce=spotlight_nonce,
         # Stream PI-2 — output screening backstop for inline injection.
         output_screen=spec.spec.defenses.output_screen == "block",
+        # Stream PI-2b — model-backed judge escalation; gated by the manifest.
+        output_judge=(output_judge if spec.spec.defenses.output_judge == "block" else None),
+        output_judge_on_error=spec.spec.defenses.output_judge_on_error,
         # Stream HX-13 — vendor-native tool-disclosure tier (catalog bit;
         # off-catalog / unannotated models stay on the HX-12 tier).
         tool_disclosure=_resolved_tool_disclosure(spec.spec.model),

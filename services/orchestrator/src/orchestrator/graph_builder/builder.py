@@ -76,7 +76,7 @@ from helix_agent.common.spotlight import spotlight_untrusted
 from helix_agent.common.uplift_metrics import record_memory_inject_mode
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, MemoryItem, Plan
 from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.cancellation import RunCancelledError
+from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
 from helix_agent.runtime.middleware import (
     MiddlewareChain,
     MiddlewareContext,
@@ -100,6 +100,7 @@ from orchestrator.graph_builder.memory import MemoryNode, PreCompactionFlush
 from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
 from orchestrator.llm import LLMCaller
+from orchestrator.output_judge import OutputJudge
 from orchestrator.state import AgentState
 from orchestrator.tools.error_classifier import (
     ClassifiedToolError,
@@ -250,6 +251,14 @@ _output_screen_blocked_total = helix_counter(
     "Model responses blocked by PI-2 output screening, by violation category.",
     ("category",),
 )
+# Stream PI-2b — output-judge rulings by verdict (``aligned`` / ``misaligned``
+# / ``leak`` / ``error``). ``misaligned`` + ``leak`` are blocks; ``error`` is a
+# judge failure routed through the configured fail-open / fail-closed policy.
+_output_judge_total = helix_counter(
+    "helix_output_judge_total",
+    "PI-2b output-judge rulings by verdict (aligned/misaligned/leak/error).",
+    ("verdict",),
+)
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
 #: dumping multi-MB tracebacks into messages. Per-tool truncation
@@ -309,6 +318,13 @@ def build_react_graph(
     # leaks / data-exfil forms and a hit is replaced with a refusal (the
     # inline-injection backstop). ``False`` (default) keeps the path unchanged.
     output_screen: bool = False,
+    # Stream PI-2b — the model-backed judge escalation above the rule screen.
+    # When set, terminal responses the rules didn't already block are judged for
+    # alignment / leakage and a block is replaced with a refusal. ``None``
+    # (default) keeps the judge tier inert. ``output_judge_on_error`` picks the
+    # fail-open (default) vs fail-closed degradation when the judge call fails.
+    output_judge: OutputJudge | None = None,
+    output_judge_on_error: Literal["open", "closed"] = "open",
 ) -> StateGraph[AgentState, None, AgentState, AgentState]:
     """Assemble the ReAct ``StateGraph`` and return it uncompiled.
 
@@ -580,8 +596,22 @@ def build_react_graph(
         # Stream PI-2 — output screening backstop. Catch a credential leak /
         # exfil form the model emitted (e.g. driven by an inline injection
         # spotlighting can't wrap) before it reaches the user or a tool.
+        rule_blocked = False
         if output_screen:
-            response = _screen_model_response(response)
+            screened = _screen_model_response(response)
+            rule_blocked = screened is not response
+            response = screened
+        # Stream PI-2b — model-backed judge escalation. Skip when the rules
+        # already blocked (save the call) and run only on a terminal response
+        # (no tool_calls) — the judge is a per-response LLM call.
+        if output_judge is not None and not rule_blocked and not _extract_tool_calls(response):
+            response = await _judge_model_response(
+                response,
+                messages,
+                judge=output_judge,
+                on_error=output_judge_on_error,
+                token=token,
+            )
 
         if after_llm_chain is not None:
             after_messages: list[BaseMessage] = [*messages, response]
@@ -1100,6 +1130,53 @@ def _screen_model_response(response: AIMessage) -> AIMessage:
         _output_screen_blocked_total.labels(category=category).inc()
     logger.warning("output_screen.blocked categories=%s", ",".join(verdict.categories))
     return AIMessage(content=REFUSAL_TEXT)
+
+
+def _latest_human_text(messages: Sequence[BaseMessage]) -> str:
+    """The most recent user-message text — the judge's alignment baseline."""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            return str(msg.content)
+    return ""
+
+
+async def _judge_model_response(
+    response: AIMessage,
+    messages: Sequence[BaseMessage],
+    *,
+    judge: OutputJudge,
+    on_error: Literal["open", "closed"],
+    token: CancellationToken,
+) -> AIMessage:
+    """Stream PI-2b — judge a terminal response for alignment / leakage.
+
+    Returns ``response`` when the judge clears it, else a refusal. A judge
+    failure (timeout / outage) routes through ``on_error``: ``"open"`` lets the
+    response through (best-effort backstop), ``"closed"`` blocks. The reason is
+    logged at category level only — never the response text or any secret.
+    """
+    try:
+        verdict = await token.run_cancellable(
+            judge.judge(
+                user_request=_latest_human_text(messages),
+                response=str(response.content),
+                context_hint=None,
+            )
+        )
+    except Exception:
+        _output_judge_total.labels(verdict="error").inc()
+        if on_error == "closed":
+            logger.warning("output_judge.failed policy=fail-closed -> blocking")
+            return AIMessage(content=REFUSAL_TEXT)
+        logger.warning("output_judge.failed policy=fail-open -> allowing")
+        return response
+    if verdict.blocked:
+        label = "leak" if verdict.leak_suspected else "misaligned"
+        _output_judge_total.labels(verdict=label).inc()
+        logger.warning("output_judge.blocked verdict=%s reason=%s", label, verdict.reason)
+        return AIMessage(content=REFUSAL_TEXT)
+    _output_judge_total.labels(verdict="aligned").inc()
+    return response
 
 
 def _extract_post_llm_messages(

@@ -748,6 +748,19 @@ class DefenseSpec(BaseModel):
     #: ``"off"`` disables it. Rule-based, model-agnostic, on by default.
     output_screen: Literal["block", "off"] = "block"
 
+    #: Output judge (Stream PI-2b) — the model-backed escalation above the
+    #: rule screen, catching bare-token / semantic injection leaks the rules
+    #: can't shape-match. ``"block"`` runs the judge on each terminal response;
+    #: ``"off"`` disables it. A per-response LLM call → off by default
+    #: (cost/latency); high-sensitivity agents opt in.
+    output_judge: Literal["block", "off"] = "off"
+
+    #: Degradation when the judge call fails (timeout / outage). ``"open"``
+    #: (default) lets the response through — the judge is a best-effort
+    #: backstop and a hiccup shouldn't drop every reply; ``"closed"`` blocks on
+    #: failure for high-security agents.
+    output_judge_on_error: Literal["open", "closed"] = "open"
+
 
 class AgentSpecBody(BaseModel):
     """The ``spec:`` block. ``tools`` is a ``type``-discriminated union
