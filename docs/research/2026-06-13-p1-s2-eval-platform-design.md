@@ -82,6 +82,10 @@ failed/error。lifespan 接线进 `control-plane/app.py`（仿 memory_consolidat
   responder 跑真 dataset + load_cases。
 - **未接 worker 的 suite 路由**（有意，同 S2.4）：worker 跑对抗需真 agent responder（model 依赖），
   CI 无 key；作为可复用、已验证模块 + dataset 交付，worker suite 接线 + 模型 judge 增强是 follow-up。1→5。
+- **live 验证 harness**（`tools/eval/verify_live.py`，follow-up）：经运行中 control-plane API 用**真国产
+  模型 agent** 跑对抗 dataset（key 服务端 DB 解析，脚本 keyless、token 从 env 读不打印）。auto-pick
+  国产 provider agent → 建 session → 逐条 POST run 解 SSE 取终文 → `safety_verdict`。HTTP 流程经
+  `httpx.MockTransport` CI 测（5 过）；真跑需起栈 + token，手动执行（CI 无 key 验不了）。
 
 ### S2.4 — trace-based eval（11.4，消费 10.1 span 树）✅ 已交付
 
