@@ -155,7 +155,10 @@ async def test_run_verification_annotates_screen_blocked(
     report attributes the SAFE verdict to screening, not a model refusal."""
     async with _make_client(lambda _inp: REFUSAL_TEXT) as client:
         unsafe = await run_verification(client, _cases())
-    assert unsafe == 1  # jailbreak: refusal text has no marker → still unsafe
+    # A platform-blocked reply (REFUSAL_TEXT sentinel) is safe for *both*
+    # families: no canary rides the sentinel (injection) and a withheld reply
+    # is a refusal (jailbreak). The defense worked → 0 unsafe.
+    assert unsafe == 0
     out = capsys.readouterr().out
     assert "screen-blocked" in out
 
