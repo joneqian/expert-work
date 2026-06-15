@@ -433,7 +433,12 @@ async def build_agent(
     # for every context gate (dynamic-context trim, working window,
     # compressor) plus the token-usage drift counter.
     estimator = default_estimator()
-    chains = build_middleware_chains(spec, env=middleware_env, estimator=estimator)
+    chains = build_middleware_chains(
+        spec,
+        env=middleware_env,
+        estimator=estimator,
+        context_window=_resolved_context_window(spec.spec.model),
+    )
     # Stream J.11 — resolve the LLM router for each step class; the
     # planner / reflect nodes may route to a different model than the
     # agent loop. Stream J.6 — the image resolver threads into every

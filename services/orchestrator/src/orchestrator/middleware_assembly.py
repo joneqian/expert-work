@@ -27,6 +27,7 @@ from helix_agent.protocol import AgentSpec
 from helix_agent.runtime.llm.cache import LLMResponseCache
 from helix_agent.runtime.middleware import (
     BreakerRegistry,
+    ContextPressureMiddleware,
     DynamicContextMiddleware,
     LangfuseClient,
     LangfuseMiddleware,
@@ -83,12 +84,18 @@ def build_middleware_chains(
     *,
     env: MiddlewareEnv | None = None,
     estimator: TokenEstimator | None = None,
+    context_window: int | None = None,
 ) -> MiddlewareChains:
     """Build the anchor chains for ``spec`` (Mini-ADR E-15).
 
     ``estimator`` (Stream HX-1, Mini-ADR HX-A1) threads the shared token
     estimator into the dynamic-context trim and the token-usage drift
     metric; ``None`` keeps the legacy ``chars // 4`` heuristic.
+
+    ``context_window`` (3.3) is the model's resolved window, the denominator
+    the context-pressure middleware measures usage against. The control-plane
+    passes ``_resolved_context_window``; ``None`` skips the pressure note
+    (no window → no ratio).
     """
     env = env or MiddlewareEnv()
     model = spec.spec.model
@@ -102,6 +109,13 @@ def build_middleware_chains(
     dynamic_context = _dynamic_context(spec, estimator=estimator)
     if dynamic_context is not None:
         middlewares.insert(0, dynamic_context)
+
+    # 3.3 — context-pressure feedback. Default ON + threshold-gated; needs a
+    # resolved window to compute usage. Runs after dynamic_context (declared
+    # ``after``) so it measures the real post-trim view.
+    pressure = _context_pressure(spec, context_window=context_window, estimator=estimator)
+    if pressure is not None:
+        middlewares.append(pressure)
 
     if env.redact_text is not None:
         middlewares.append(PIIRedactorMiddleware(redact_text=env.redact_text))
@@ -185,6 +199,38 @@ def _dynamic_context(
 
         kwargs["token_estimator"] = _per_message
     return DynamicContextMiddleware(**kwargs)
+
+
+def _context_pressure(
+    spec: AgentSpec,
+    *,
+    context_window: int | None,
+    estimator: TokenEstimator | None = None,
+) -> ContextPressureMiddleware | None:
+    """Build the 3.3 context-pressure middleware — or ``None`` when the
+    manifest opts out or no resolved window is available.
+
+    Default ON (``policies.context_compression.pressure_feedback``); the
+    note itself is threshold-gated inside the middleware, so a conversation
+    below ``pressure_warn_pct`` is untouched. ``estimator`` shares the same
+    tiktoken basis as the trim / drift metric via the ``token_estimator``
+    seam; ``context_window`` is the usage denominator (skip when unknown).
+    """
+    cc = spec.spec.policies.context_compression
+    if not cc.pressure_feedback or context_window is None:
+        return None
+    kwargs: dict[str, Any] = {
+        "context_window": context_window,
+        "warn_pct": cc.pressure_warn_pct,
+    }
+    if estimator is not None:
+        shared = estimator
+
+        def _per_message(msg: BaseMessage) -> int:
+            return shared.count(flatten_message(msg))
+
+        kwargs["token_estimator"] = _per_message
+    return ContextPressureMiddleware(**kwargs)
 
 
 def _chain(anchor: str, middlewares: list[Middleware]) -> MiddlewareChain | None:

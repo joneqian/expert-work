@@ -232,3 +232,35 @@ def test_estimator_threads_into_token_usage_middleware() -> None:
     token_usage = next(m for m in chains.after_llm_call._ordered if m.name == "token_usage")
     assert isinstance(token_usage, TokenUsageMiddleware)
     assert token_usage.estimator is estimator
+
+
+# ---------------------------------------------------------------------------
+# 3.3 — context-pressure feedback
+# ---------------------------------------------------------------------------
+
+
+def test_context_pressure_default_on_with_window() -> None:
+    chains = build_middleware_chains(_spec(), env=MiddlewareEnv(), context_window=200_000)
+    assert chains.before_llm_call is not None
+    assert "context_pressure" in chains.before_llm_call.ordered_names
+
+
+def test_context_pressure_skipped_without_window() -> None:
+    # No resolved window → no ratio → middleware not built (default callers).
+    chains = build_middleware_chains(_spec(), env=MiddlewareEnv())
+    assert chains.before_llm_call is None
+
+
+def test_context_pressure_opt_out() -> None:
+    spec = _spec(context_compression={"pressure_feedback": False})
+    chains = build_middleware_chains(spec, env=MiddlewareEnv(), context_window=200_000)
+    assert chains.before_llm_call is None
+
+
+def test_context_pressure_warn_pct_threaded() -> None:
+    spec = _spec(context_compression={"pressure_warn_pct": 0.6})
+    chains = build_middleware_chains(spec, env=MiddlewareEnv(), context_window=200_000)
+    assert chains.before_llm_call is not None
+    mw = next(m for m in chains.before_llm_call._ordered if m.name == "context_pressure")
+    assert mw.warn_pct == 0.6
+    assert mw.context_window == 200_000

@@ -21,6 +21,9 @@ from helix_agent.runtime.middleware.base import (
 from helix_agent.runtime.middleware.chain import (
     MiddlewareChain as MiddlewareChain,
 )
+from helix_agent.runtime.middleware.context_pressure import (
+    ContextPressureMiddleware as ContextPressureMiddleware,
+)
 from helix_agent.runtime.middleware.dynamic_context import (
     DynamicContextMiddleware as DynamicContextMiddleware,
 )
@@ -149,6 +152,7 @@ __all__ = [
     "ChainCycleError",
     "CircuitBreaker",
     "CircuitOpenError",
+    "ContextPressureMiddleware",
     "DuplicateMiddlewareError",
     "DynamicContextMiddleware",
     "LLMAuthError",

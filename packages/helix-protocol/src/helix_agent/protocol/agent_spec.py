@@ -481,6 +481,15 @@ class ContextCompressionPolicy(BaseModel):
     #: uses the middleware's own default).
     max_turns: int | None = Field(default=None, gt=0)
     max_tokens: int | None = Field(default=None, gt=0)
+    #: 3.3 — context-pressure feedback. When the about-to-be-sent prompt
+    #: reaches ``context_window * pressure_warn_pct`` the runtime appends a
+    #: model-visible budget note to the last message (never the leading
+    #: system prompt, so the prefix cache is intact) so the agent can
+    #: converge on its own. Default ON + threshold-gated: a conversation
+    #: below the threshold is untouched, so existing manifests see no change
+    #: until they are genuinely near the limit.
+    pressure_feedback: bool = True
+    pressure_warn_pct: float = Field(default=0.75, gt=0.0, le=1.0)
 
 
 class WorkingMemoryPolicy(BaseModel):
