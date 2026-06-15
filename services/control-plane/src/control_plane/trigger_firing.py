@@ -251,6 +251,8 @@ async def fire_trigger(
             # Stream H.3 PR 3 — durable SSE mirror.
             event_store=runtime.run_event_store,
             skill_run_usage_recorder=runtime.skill_run_usage_recorder,
+            # Stream L.L7 — record the trajectory (curation / eval-gate source).
+            trajectory_recorder=runtime.trajectory_recorder,
             # Stream HX-3 — replay-safety resolver for transient retry.
             tool_replay_safe=built.tool_replay_safe,
         )

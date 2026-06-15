@@ -87,6 +87,7 @@ from orchestrator.tools import (
     TavilyClient,
     WorkspaceLock,
 )
+from orchestrator.trajectory.recorder import TrajectoryRecorder
 
 
 #: Builds a runnable agent from a manifest. The production builder
@@ -145,6 +146,11 @@ class AgentRuntime:
     #: hook (one row per distilled skill bound), feeding the rollback monitor.
     #: ``None`` disables emission (the monitor then stays a safe no-op).
     skill_run_usage_recorder: SkillRunUsageRecorder | None = None
+    #: Stream L.L7 — records each finished run's trajectory to the ObjectStore
+    #: (the source the curation worker scans → the skill-evolution flywheel's
+    #: fuel, and the J.13 eval gate's input). Set in the app lifespan once the
+    #: ObjectStore is open; ``None`` keeps trajectory recording off (no store).
+    trajectory_recorder: TrajectoryRecorder | None = None
     _cache: dict[_CacheKey, BuiltAgent] = field(default_factory=dict, repr=False)
     #: Extra per-tenant cache invalidators fanned out by ``invalidate_tenant``
     #: — the sub-agent builder registers its own cache here (Stream V-D, audit

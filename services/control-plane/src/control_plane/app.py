@@ -867,6 +867,17 @@ def create_app(
                     )
                 )
                 _app.state.object_store = object_store
+                # Stream L.L7 — record each finished run's trajectory to the
+                # ObjectStore now that it is open. This is the source the
+                # curation worker scans (→ the skill-evolution flywheel) and the
+                # J.13 eval gate reads; without it the run path wrote nothing and
+                # the flywheel had no fuel. The run_agent call sites pass
+                # ``runtime.trajectory_recorder``.
+                from orchestrator.trajectory.recorder import TrajectoryRecorder
+
+                resolved_agent_runtime.trajectory_recorder = TrajectoryRecorder(
+                    object_store=object_store
+                )
                 # Stream J.12 — the curation worker reads the L7
                 # trajectory ObjectStore, so it is constructed here
                 # where the store exists (mirrors MemoryDLQWorker).
