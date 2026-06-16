@@ -2,6 +2,7 @@
 
 from control_plane.auth.middleware import AuthMiddleware
 from control_plane.middleware.audit_context import AuditContextMiddleware
+from control_plane.middleware.backpressure import BackpressureMiddleware
 from control_plane.middleware.cancellation import CancellationMiddleware
 from control_plane.middleware.deadline import DeadlineMiddleware
 from control_plane.middleware.lifecycle import InFlightMiddleware
@@ -13,6 +14,7 @@ from control_plane.tenancy import RLSContextMiddleware
 __all__ = [
     "AuditContextMiddleware",
     "AuthMiddleware",
+    "BackpressureMiddleware",
     "CancellationMiddleware",
     "DeadlineMiddleware",
     "InFlightMiddleware",

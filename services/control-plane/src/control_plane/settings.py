@@ -88,6 +88,16 @@ class Settings(BaseSettings):
 
     health_check_timeout_s: float = Field(default=5.0, gt=0)
 
+    # Stream 16.3 — application-layer backpressure (overload guard). Sheds new
+    # requests with 503 + Retry-After once this many are already in flight in
+    # the heavy inner chain, so a request flood bounds memory / event-loop load
+    # instead of collapsing the replica. Default-on with a generous cap that a
+    # healthy single replica never reaches under normal load; tune per deploy.
+    # ``0`` disables the guard. Distinct from the per-tenant rate limit (B.2 /
+    # C.6, which is fairness, 429) — this is global overload protection (503).
+    backpressure_max_in_flight: int = Field(default=512, ge=0)
+    backpressure_retry_after_s: int = Field(default=1, gt=0)
+
     # ------------------------------------------------------------------ rate limit (B.2)
     # Gateway-tier limiter (subsystems/16 § 5.1, layer 1). Per-tenant
     # (layer 2, C.6) and per-provider (layer 3, E.6) tiers stack on top.

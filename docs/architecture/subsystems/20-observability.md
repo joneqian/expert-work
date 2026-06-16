@@ -163,19 +163,20 @@ helix.orchestrator.session_run
 
 ### 5.2 关键 metric
 
-本节分两块：**§5.2.1 as-built（M0 已 emit）**= 全仓实测 102 个 `helix_*` 指标（A.9，据 `helix_counter`/`helix_histogram`/`helix_gauge` 定义点逐个核），**§5.2.2 M1-target**= 设计期规划但 M0 未实现的指标。**强制真值源** = `helix-common/observability/metrics.py` 的 validator（`helix_*` 前缀 + label cardinality 拦截）；新增/改名指标先过它。
+本节分两块：**§5.2.1 as-built（M0 已 emit）**= 全仓实测 103 个 `helix_*` 指标（A.9，据 `helix_counter`/`helix_histogram`/`helix_gauge` 定义点逐个核），**§5.2.2 M1-target**= 设计期规划但 M0 未实现的指标。**强制真值源** = `helix-common/observability/metrics.py` 的 validator（`helix_*` 前缀 + label cardinality 拦截）；新增/改名指标先过它。
 
 > 全部指标为模块级单例，经三个 builder 定义。`helix_uplift_*` 几乎全在 `helix-common/uplift_metrics.py`；`helix_control_plane_*` 散在各 worker / middleware；orchestrator 指标在 `sse.py` / `graph_builder/builder.py`。
 
-#### 5.2.1 as-built（M0 已 emit，102 项）
+#### 5.2.1 as-built（M0 已 emit，103 项）
 
-**`helix_control_plane_*`（25）**
+**`helix_control_plane_*`（26）**
 
 | metric | type | labels | 用途 |
 |---|---|---|---|
 | `helix_control_plane_http_requests_total` | counter | `method,route,status_code` | 控制面 HTTP 请求计数 |
 | `helix_control_plane_http_request_duration_seconds` | histogram | `method,route,status_code` | 控制面 HTTP handler 时延 |
 | `helix_control_plane_rate_limit_decisions_total` | counter | `dimension,decision` | gateway 限流决策 |
+| `helix_control_plane_backpressure_shed_total` | counter | — | 过载守卫甩负（in-flight 深度超阈值 503，16.3） |
 | `helix_control_plane_tenant_rate_limit_decisions_total` | counter | `decision` | 租户 tier 限流决策 |
 | `helix_control_plane_audit_query_total` | counter | `tenant_scope,result` | GET /v1/audit 调用 |
 | `helix_control_plane_audit_query_seconds` | histogram | `tenant_scope` | GET /v1/audit 时延（含自审计 emit） |
@@ -311,7 +312,7 @@ helix.orchestrator.session_run
 | `helix_hx_token_estimated_total` | counter | `tenant_id,agent_name,model` | 每次 LLM 调用估算 prompt token（HX-1 drift 分子） |
 | `helix_checkpoint_op_seconds` | histogram | `op` | checkpointer 每次 IO 调用 wall-clock |
 
-> 计：counter ~80 / histogram 9 / gauge ~13；共 102。
+> 计：counter ~81 / histogram 9 / gauge ~13；共 103。
 
 #### 5.2.2 M1-target（设计规划，M0 未实现）
 

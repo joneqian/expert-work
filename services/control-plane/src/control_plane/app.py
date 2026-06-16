@@ -132,6 +132,7 @@ from control_plane.memory_consolidator import (
 from control_plane.middleware import (
     AuditContextMiddleware,
     AuthMiddleware,
+    BackpressureMiddleware,
     CancellationMiddleware,
     DeadlineMiddleware,
     InFlightMiddleware,
@@ -1498,6 +1499,7 @@ def create_app(
     #
     # Effective execution order (outermost → innermost):
     #   1. ObservabilityMiddleware  — open span, record timing
+    #   1b. BackpressureMiddleware  — overload guard, 503 shed (16.3)
     #   2. AuthMiddleware           — verify JWT → request.state.principal (C.1)
     #   3. TenantRateLimitMiddleware — per-tenant bucket (C.6)
     #   4. RLSContextMiddleware     — project principal.tenant_id → RLS ctxvar (C.4)
@@ -1545,6 +1547,15 @@ def create_app(
         role_binding_store=resolved_role_bindings,
         # Stream U (PR E) — 403 a suspended tenant's members (never system_admin).
         tenant_status=resolved_tenant_status_service,
+    )
+    # Stream 16.3 — overload guard. Outside auth so a shed request never reaches
+    # JWT verify / DB; inside Observability so sheds are still traced + timed.
+    app.add_middleware(
+        BackpressureMiddleware,
+        lifecycle=resolved_lifecycle,
+        max_in_flight=resolved_settings.backpressure_max_in_flight,
+        retry_after_s=resolved_settings.backpressure_retry_after_s,
+        exempt_path_prefixes=tuple(resolved_settings.auth_exempt_path_prefixes),
     )
     app.add_middleware(ObservabilityMiddleware)
 

@@ -17,10 +17,10 @@
 
 → 优先级重心从「补沙箱安全」转向「**收割廉价 ★4→★5 + agent 能力项**」。
 
-## 当前非满分项（9 项；2.2/4.1/11.4/11.5/3.3/4.4/1.3/7.3/7.4/8.5/13.2/14.4/9.4 已收为 ★5）
+## 当前非满分项（8 项；2.2/4.1/11.4/11.5/3.3/4.4/1.3/7.3/7.4/8.5/13.2/14.4/9.4/16.3 已收为 ★5）
 
 ★4（一步之遥，多为低成本）：10.1（TX 终态，不推）（~~1.3~~ 已 ★5 #666/#667；~~7.3~~~~7.4~~ 已 ★5 #669）
-★3（真 gap）：7.2 · 7.6 · 16.4 · 16.3 · 10.5 · 12.4（~~8.5~~ #671 / ~~13.2~~ #673 / ~~14.4~~ #675 已 ★5）
+★3（真 gap）：7.2 · 7.6 · 16.4 · 10.5 · 12.4（~~8.5~~ #671 / ~~13.2~~ #673 / ~~14.4~~ #675 / ~~16.3~~ backpressure 已 ★5）
 ★2（M1 大件）：9.5（~~9.4~~ 已 ★5 live #677+#678）
 ✅ 已收（本轮 T0）：2.2（#647）· 4.1（确认）
 
@@ -86,7 +86,7 @@
 | ~~13.2 并发 resume 幂等~~ | ✅★5 | **已交付+真 PG 集成实证（#673）**：核代码发现 `mark_decided` 原子条件 UPDATE 已 exactly-once（「补悲观锁」实为次优，CAS 更优）；补 `idempotency_key` 确定性恢复（随 CAS 原子存 `continuation_run_id`，重试同 key 幂等返同续跑非 409）+ 真 PG 16 并发证 DB 行锁 + 全流程 seam 测（真赢家存→replay→spawn-once）|
 | 15.3 跨递归 cancel 测试 | ★5* | (重核维持★5)补跨递归/resume token 消毒测试——测试债非降分 |
 | 16.4 基础设施自愈 | ★3 | k8s HPA/failover（基础设施层） |
-| 16.3 应用层 backpressure | ★3 | 队列深度 fast-fail 429 |
+| ~~16.3 应用层 backpressure~~ | ✅★5 | **已交付+单测+全 app 集成（#待）**：`BackpressureMiddleware` 过载守卫——in-flight 深度（复用 `Lifecycle.in_flight`）超阈值 503+Retry-After fast-fail,置 Observability 内/Auth 外（shed 被 trace 但不进 JWT/DB）,免 health/metrics,默认开 cap 512。区别于 per-tenant rate-limit（429 公平）——这是全局过载（503 服务端）。补足「无应用层 backpressure/fast-fail 代码」gap |
 | 10.5 SLO burn-rate | ★3 | recording rule 落 infra/ |
 | 12.4 chargeback 计费 | ★3 | 定价引擎/发票（**用户拍板后置**） |
 
