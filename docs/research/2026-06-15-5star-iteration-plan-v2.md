@@ -17,10 +17,10 @@
 
 → 优先级重心从「补沙箱安全」转向「**收割廉价 ★4→★5 + agent 能力项**」。
 
-## 当前非满分项（8 项；2.2/4.1/11.4/11.5/3.3/4.4/1.3/7.3/7.4/8.5/13.2/14.4/9.4/16.3 已收为 ★5）
+## 当前非满分项（6 项；2.2/4.1/11.4/11.5/3.3/4.4/1.3/7.3/7.4/8.5/13.2/14.4/9.4/16.3/10.5 已收为 ★5）
 
 ★4（一步之遥，多为低成本）：10.1（TX 终态，不推）（~~1.3~~ 已 ★5 #666/#667；~~7.3~~~~7.4~~ 已 ★5 #669）
-★3（真 gap）：7.2 · 7.6 · 16.4 · 10.5 · 12.4（~~8.5~~ #671 / ~~13.2~~ #673 / ~~14.4~~ #675 / ~~16.3~~ backpressure 已 ★5）
+★3（真 gap）：7.2 · 7.6 · 16.4 · 12.4（~~8.5~~ #671 / ~~13.2~~ #673 / ~~14.4~~ #675 / ~~16.3~~ backpressure / ~~10.5~~ 烧录率 #680 已 ★5）
 ★2（M1 大件）：9.5（~~9.4~~ 已 ★5 live #677+#678）
 ✅ 已收（本轮 T0）：2.2（#647）· 4.1（确认）
 
@@ -39,8 +39,9 @@
 > 见 `2026-06-15-1145-live-eval-worker-design.md` §8 E2E 实证；代码 #649/#652 已合，本机真栈（deepseek eval agent）
 > trace passed 3/3 / adversarial 5/6（机制证实，1 真防御观测非假阴）。
 >
-> **累计进度（T0+T1+T2+T4 收割）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（+2，400）→ 4.4（+1，401）→ 1.3（+1，402）→ 7.3/7.4（+2，404）→ 8.5（+2，406）→ 13.2（+2，408）→ 14.4（★3→★5，+2，410）→ **9.4（★2→★5 live，+3，413/430）**。
-> **均分 4.60→4.80（96.0%），共 +17★。T1 全清；首个 M1 大件 9.4 提前 live 收口。** 1.3 见 `2026-06-16-1.3-orchestration-patterns-design.md`。
+> **累计进度（T0+T1+T2+T4 收割）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（+2，400）→ 4.4（+1，401）→ 1.3（+1，402）→ 7.3/7.4（+2，404）→ 8.5（+2，406）→ 13.2（+2，408）→ 14.4（+2，410）→ 9.4（★2→★5 live，+3，413）→ 16.3（+2，415）→ **10.5（★3→★5，+2，417/430）**（+15.3 测试债清，★5 不改分）。
+> **均分 4.60→4.85（97.0%），共 +21★。T1 全清；M1 大件 9.4 提前 live 收口；运维韧性三连（16.3/10.5/15.3，#679-681）。** 1.3 见 `2026-06-16-1.3-orchestration-patterns-design.md`。
+> 16.3/10.5/15.3 见 `2026-06-15-capability-reassessment.md` §3「运维韧性三连」：16.3 应用层 backpressure 过载守卫（503 甩负）/ 10.5 SLO 多窗烧录率（Google SRE，promtool 双验）/ 15.3 sanitize 纯函数直接单测（含跨递归位置）。
 > 9.4 见 `2026-06-16-9.4-9.5-ha-failover-design.md` §7（#677+#678）：Postgres 租约+孤儿 sweep+自动热接力,蓝绿双实例真栈 kill blue mid-run→green 续跑到 success(5 项断言全绿);live 暴露 failover 硬依赖 postgres checkpointer + 续跑 seq 撞键(已修)。
 > 14.4 见 `2026-06-16-14.4-mcp-defense-audit-design.md`（#675）：核代码发现「无流量审计」部分过期，补 MCP 专属流量审计（server/response_chars/is_error）+ in-process 隔离威胁评估 + 前端流量徽章。
 > 7.3/7.4 见 `2026-06-16-7.3-7.4-input-dlp-harvest-design.md`（#669）：7.3 PI-1c 结构化 `untrusted_content` 通道治内联注入根，**live 实证**通道把 001/003 内联注入从 LEAK 翻 SAFE（负对照排除假阳性）；7.4 出站 DLP 条件输出 redact PII。
@@ -84,10 +85,10 @@
 | 项 | 现 | 内容 |
 |---|---|---|
 | ~~13.2 并发 resume 幂等~~ | ✅★5 | **已交付+真 PG 集成实证（#673）**：核代码发现 `mark_decided` 原子条件 UPDATE 已 exactly-once（「补悲观锁」实为次优，CAS 更优）；补 `idempotency_key` 确定性恢复（随 CAS 原子存 `continuation_run_id`，重试同 key 幂等返同续跑非 409）+ 真 PG 16 并发证 DB 行锁 + 全流程 seam 测（真赢家存→replay→spawn-once）|
-| 15.3 跨递归 cancel 测试 | ★5* | (重核维持★5)补跨递归/resume token 消毒测试——测试债非降分 |
+| ~~15.3 跨递归 cancel 测试~~ | ✅★5 | **测试债清（#681）**：`sanitize_dangling_tool_calls` 此前无直接单测,补纯函数边缘 9 例（含跨递归多 AIMessage 位置——cancel 深陷 subagent 递归→多处悬挂全修）+ `GraphRunner.sanitize_thread` fake-graph 3 例。subagent cancel 传播已由 `test_subagent` 覆盖（「跨递归 cancel 薄」部分过期）。★5 维持不改分 |
 | 16.4 基础设施自愈 | ★3 | k8s HPA/failover（基础设施层） |
-| ~~16.3 应用层 backpressure~~ | ✅★5 | **已交付+单测+全 app 集成（#待）**：`BackpressureMiddleware` 过载守卫——in-flight 深度（复用 `Lifecycle.in_flight`）超阈值 503+Retry-After fast-fail,置 Observability 内/Auth 外（shed 被 trace 但不进 JWT/DB）,免 health/metrics,默认开 cap 512。区别于 per-tenant rate-limit（429 公平）——这是全局过载（503 服务端）。补足「无应用层 backpressure/fast-fail 代码」gap |
-| 10.5 SLO burn-rate | ★3 | recording rule 落 infra/ |
+| ~~16.3 应用层 backpressure~~ | ✅★5 | **已交付+单测+全 app 集成（#679）**：`BackpressureMiddleware` 过载守卫——in-flight 深度（复用 `Lifecycle.in_flight`）超阈值 503+Retry-After fast-fail,置 Observability 内/Auth 外（shed 被 trace 但不进 JWT/DB）,免 health/metrics,默认开 cap 512。区别于 per-tenant rate-limit（429 公平）——这是全局过载（503 服务端）。补足「无应用层 backpressure/fast-fail 代码」gap |
+| ~~10.5 SLO burn-rate~~ | ✅★5 | **已交付+promtool 双验（#680）**：`burn_rate.yml` Google SRE 多窗多烧录率——record `helix_slo_burn_rate{slo,window}`（可用性 SLO,5m/30m/1h/2h/6h/24h）+ 长窗确认/短窗加速告警（1h&5m>14.4 P0 / 6h&30m>6 P1 / 24h&2h>3 P2,`and ignoring(window)`）;`promtool check rules`+`test rules` 双 SUCCESS。关掉 sli.yml「Burn-rate rules are M1」deferral |
 | 12.4 chargeback 计费 | ★3 | 定价引擎/发票（**用户拍板后置**） |
 
 ## 与 v1 的关键差异
