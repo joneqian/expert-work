@@ -108,6 +108,11 @@ ignore = []
 # BaseHTTPRequestHandler's dispatch methods (do_GET / do_POST) are a stdlib
 # API contract — the uppercase names are required, not a style choice.
 "infra/mock-upstream/echo_server.py" = ["N802"]
+# Live HA-failover verify script (Stream 9.4) — an ops harness, not app code:
+# it shells out to docker/psql (S603/S607), reads run lease rows with
+# UUID-interpolated SQL against the dev DB (S608), streams a run with no overall
+# timeout (S113), and swallows the transport error from killing blue (S110).
+"tools/ha/verify_failover.py" = ["S110", "S113", "S603", "S607", "S608"]
 
 [tool.ruff.format]
 quote-style = "double"
