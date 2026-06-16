@@ -67,7 +67,6 @@ from helix_agent.runtime.cancellation import (
     CancellationToken,
     RunCancelledError,
 )
-from orchestrator.tools.spawn_worker import WorkerSpawnBudget
 from helix_agent.runtime.runs import (
     RunEventStore,
     RunManager,
@@ -90,6 +89,7 @@ from orchestrator.run_retry import (
     retry_enabled,
     run_retry_total,
 )
+from orchestrator.tools.spawn_worker import WorkerSpawnBudget
 from orchestrator.trajectory import (
     TrajectoryOutcome,
     TrajectoryRecord,
