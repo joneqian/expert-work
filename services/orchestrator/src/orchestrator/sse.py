@@ -634,10 +634,11 @@ async def run_agent(
         # candidate regardless of the now-stale lease.
         if heartbeat_task is not None:
             heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                # ``_ =`` so CodeQL doesn't read the bounded teardown await as an
-                # ineffectual statement (py/ineffectual-statement).
-                _ = await heartbeat_task
+            # ``gather(return_exceptions=True)`` awaits the cancelled task to
+            # completion and swallows its ``CancelledError``. Awaiting a call
+            # expression (not a bare ``await name``) also keeps CodeQL from
+            # reading the teardown as an ineffectual statement.
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         # Stream M Gate — emit on every terminal path. Always synchronous
         # so the ``asyncio.CancelledError`` teardown path (no await) still
         # counts the session in the histogram.
