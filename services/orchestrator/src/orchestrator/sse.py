@@ -635,7 +635,9 @@ async def run_agent(
         if heartbeat_task is not None:
             heartbeat_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
+                # ``_ =`` so CodeQL doesn't read the bounded teardown await as an
+                # ineffectual statement (py/ineffectual-statement).
+                _ = await heartbeat_task
         # Stream M Gate — emit on every terminal path. Always synchronous
         # so the ``asyncio.CancelledError`` teardown path (no await) still
         # counts the session in the histogram.

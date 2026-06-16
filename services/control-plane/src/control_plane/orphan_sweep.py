@@ -147,7 +147,9 @@ class OrphanSweep:
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval_s)
             except TimeoutError:
-                pass
+                # Interval elapsed with no stop signal — fall through to the next
+                # sweep cycle. (A real stop wakes the wait early and exits the loop.)
+                continue
 
     async def run_once(self) -> int:
         """Scan + handle one batch of orphans. Returns how many were handled."""
