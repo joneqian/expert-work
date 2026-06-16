@@ -138,8 +138,11 @@ async def _start_run_bg(base_url: str, token: str, thread_id: str) -> None:
             ) as resp,
         ):
             async for _line in resp.aiter_lines():
+                # Drain the stream; killing blue mid-run tears it down (expected).
                 pass
     except Exception:
+        # Blue's death (docker kill) breaks the stream connection — that is the
+        # whole point of this fire-and-forget task, so every error is expected.
         pass
 
 
