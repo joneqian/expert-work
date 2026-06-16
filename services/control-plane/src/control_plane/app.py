@@ -122,7 +122,6 @@ from control_plane.memory_consolidator import (
     ConsolidatorAuxModel,
     MemoryConsolidator,
     make_consolidator_embedder,
-    make_null_consolidator_aux_model,
 )
 from control_plane.middleware import (
     AuditContextMiddleware,
@@ -1075,34 +1074,33 @@ def create_app(
             # (the always-present dynamic embedder embeds the consolidated
             # summary text — see the always-on note above).
             #
-            # Stream O Mini-ADR O-6 — the aux model now flows through
-            # the production :class:`LLMRouterAuxModelAdapter`, which
-            # resolves credentials per-tenant via
-            # :class:`CredentialsResolver` (platform / tenant mode).
-            # The deployment falls back to the null adapter when the
-            # default provider has no platform credential and no tenant
-            # has opted into tenant mode for it (operator deploys with
-            # supported_providers but no platform secret → can't reach
-            # the LLM yet → ship the worker idle rather than crash).
+            # Stream O Mini-ADR O-6 — the aux model flows through the
+            # production :class:`LLMRouterAuxModelAdapter`, which resolves
+            # credentials per-tenant via :class:`CredentialsResolver`
+            # (platform / tenant mode) at call time.
             memory_consolidator: MemoryConsolidator | None = None
             if enable_scheduler:
                 default_provider = resolved_settings.memory_consolidator_default_aux_provider
-                # Reuse the CredentialsResolver built above (Mini-ADR O-9).
-                aux_model: ConsolidatorAuxModel
-                if default_provider in resolved_settings.effective_platform_provider_credentials:
-                    aux_model = make_llm_router_aux_model(
-                        resolver=credentials_resolver,
-                        secret_store=resolved_secret_store,
-                        default_provider=default_provider,
-                        default_model=(resolved_settings.memory_consolidator_default_aux_model),
-                    )
-                else:
-                    logger.warning(
-                        "memory_consolidator.aux_model.fallback_to_null reason="
-                        "platform_credential_missing provider=%s",
-                        default_provider,
-                    )
-                    aux_model = make_null_consolidator_aux_model()
+                # The aux model (cluster verify / summarise / lone-item review)
+                # resolves its key per-tenant via ``resolve_provider(tenant_id=…)``
+                # — the same vault path the eval agent + embedder + skill-evolution
+                # worker use (web-pasted platform credentials, Stream Q). So the
+                # consolidator always uses the production router adapter and skips a
+                # tenant whose credential is unresolvable (each cluster / lone-item
+                # call is wrapped in try/except → summary.errors, bounded + logged),
+                # mirroring the eval worker which has no startup gate. The previous
+                # gate on the env-level ``effective_platform_provider_credentials``
+                # dict was the same stale-gate bug as the skill-evolution worker
+                # (#656): it fell back to the null adapter even when the aux was
+                # resolvable from the vault, so a deployment that pastes its key in
+                # the UI (the canonical path) silently ran the consolidator idle
+                # (null adapter → zero consolidations / purges).
+                aux_model: ConsolidatorAuxModel = make_llm_router_aux_model(
+                    resolver=credentials_resolver,
+                    secret_store=resolved_secret_store,
+                    default_provider=default_provider,
+                    default_model=(resolved_settings.memory_consolidator_default_aux_model),
+                )
                 memory_consolidator = MemoryConsolidator(
                     memory_store=resolved_memory_store,
                     tenant_config_service=resolved_tenant_config_service,
