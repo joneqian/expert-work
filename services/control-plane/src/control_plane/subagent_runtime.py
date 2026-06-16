@@ -48,9 +48,7 @@ def _worker_system_prompt(role: str | None) -> str:
     )
 
 
-def _filter_worker_tools(
-    tools: list[ToolSpecEntry], allowed: list[str]
-) -> list[ToolSpecEntry]:
+def _filter_worker_tools(tools: list[ToolSpecEntry], allowed: list[str]) -> list[ToolSpecEntry]:
     """A worker inherits its parent's tools, optionally narrowed by the
     platform allowlist. Empty allowlist = inherit verbatim (still a subset
     of what the parent itself had). A non-empty allowlist keeps only entries
@@ -100,9 +98,7 @@ def synthesize_worker_spec(
             ),
         }
     )
-    worker_meta = parent.metadata.model_copy(
-        update={"name": f"{parent.metadata.name}-worker"}
-    )
+    worker_meta = parent.metadata.model_copy(update={"name": f"{parent.metadata.name}-worker"})
     return parent.model_copy(update={"metadata": worker_meta, "spec": worker_body})
 
 

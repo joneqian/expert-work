@@ -335,9 +335,7 @@ def _final_answer(messages: Sequence[BaseMessage]) -> str | None:
     return None
 
 
-def _child_config(
-    ctx: ToolContext, *, sub_thread_id: UUID, sub_run_id: UUID
-) -> RunnableConfig:
+def _child_config(ctx: ToolContext, *, sub_thread_id: UUID, sub_run_id: UUID) -> RunnableConfig:
     """Build the child run's ``RunnableConfig`` — shares the parent's
     cancellation token + deadline so a parent cancel reaches every child
     node and the whole delegation tree honours one wall-clock cap."""
