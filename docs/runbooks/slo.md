@@ -66,5 +66,8 @@ burn_rate(24h) > 3     → P2
 错误预算耗尽 → CI 自动冻结新 manifest 发布 24h
 ```
 
-M0 **不实现**燃烧率自动计算与冻结（Mini-ADR G-1）—— recording rule 已预聚合 SLI，
-M1-E 在其上加 burn-rate recording rule + Alertmanager 路由 + 发布冻结。
+燃烧率 recording + 多窗告警已落地（Stream 10.5，`tools/observability/rules/burn_rate.yml`）：
+record `helix_slo_burn_rate{slo,window}`（窗口 5m/30m/1h/2h/6h/24h），多窗告警 Google SRE 模式
+（长窗确认 + 短窗加速：1h&5m>14.4 P0 / 6h&30m>6 P1 / 24h&2h>3 P2），promtool 规则单测覆盖
+（`burn_rate_test.yml`）。**仍 M1**：错误预算耗尽 → CI 自动冻结新 manifest 发布（Alertmanager
+路由 + 发布冻结钩子，Mini-ADR G-1）。

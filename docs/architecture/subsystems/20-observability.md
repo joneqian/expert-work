@@ -386,6 +386,12 @@ burn_rate(24h) > 3     → P2 告警
 错误预算耗尽 → CI 自动冻结新 manifest 发布 24h（写 audit）
 ```
 
+**as-built（Stream 10.5）**：可用性 SLO 的多窗烧录率 recording + 告警已落
+`tools/observability/rules/burn_rate.yml`——record `helix_slo_burn_rate{slo,window}`
+（窗口 5m/30m/1h/2h/6h/24h），Google SRE 多窗模式（长窗确认 + 短窗加速）落
+`HelixSLOAvailability{Fast,Medium,Slow}Burn`（P0/P1/P2，阈值同上），promtool 规则单测
+（`burn_rate_test.yml`）证算术 + 告警。**仍 M1**：错误预算耗尽 → 发布冻结钩子。
+
 ### 5.5 Agent 生命周期完整追踪（E3）
 
 > 解决"业务方想从 session_id 拉完整时间线 / 长会话 + subagent + HITL 全可见"的端到端追踪需求。

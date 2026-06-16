@@ -5,7 +5,8 @@
 #
 # Only the two SLIs whose metric is emitted in M0 are recorded here;
 # TTFT / sandbox-cold-start / durable-resume rules land when their
-# metrics are emitted (slo.md SLO #3-#5). Burn-rate rules are M1.
+# metrics are emitted (slo.md SLO #3-#5). Error-budget burn-rate rules
+# (multi-window) live in burn_rate.yml (Stream 10.5).
 
 groups:
   - name: helix_sli
