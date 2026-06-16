@@ -174,6 +174,29 @@ async def _await_running(pg_container: str, thread_id: str, timeout_s: float) ->
     raise SystemExit("timed out waiting for the run to reach running+claimed on blue")
 
 
+async def _await_checkpoint(pg_container: str, thread_id: str, timeout_s: float) -> None:
+    """Poll until a durable LangGraph checkpoint exists for the thread.
+
+    A committed checkpoint is the exact precondition for failover resume: green
+    can only continue blue's run from shared durable state. Killing blue before
+    any checkpoint commits leaves nothing to resume (the run truly made zero
+    durable progress) — so the test waits for one to make the proof meaningful.
+    Requires the Postgres checkpointer (``checkpointer_backend=postgres``).
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        out = _psql(
+            pg_container,
+            f"SELECT count(*) FROM checkpoints WHERE thread_id = '{thread_id}'",
+        )
+        if out.isdigit() and int(out) >= 1:
+            return
+        await asyncio.sleep(0.5)
+    raise SystemExit(
+        "timed out waiting for a durable checkpoint — is checkpointer_backend=postgres?"
+    )
+
+
 async def _await_terminal(pg_container: str, thread_id: str, timeout_s: float) -> dict[str, str]:
     """Poll until the run leaves ``running`` (failover resolved it)."""
     deadline = time.monotonic() + timeout_s
@@ -246,6 +269,10 @@ async def _amain(args: argparse.Namespace) -> int:
     run_id = running["run_id"]
     blue_owner = running["claimed_by"]
     print(f"run {run_id} RUNNING on blue (owner={blue_owner[:24]}…)")
+
+    # Wait for a durable checkpoint so the reclaimed run has state to resume.
+    await _await_checkpoint(args.pg_container, thread_id, timeout_s=30.0)
+    print("durable checkpoint committed — run has resumable state")
 
     # --- crash blue mid-run --------------------------------------------
     print(f"killing {args.blue_container} …")

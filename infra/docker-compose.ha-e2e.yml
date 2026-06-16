@@ -1,21 +1,52 @@
-# Stream 9.4 HA-failover live E2E — second control-plane instance (green).
+# Stream 9.4 HA-failover live E2E — second control-plane instance (green) +
+# durable Postgres checkpointer on both colours.
 #
-# ``make dev-up`` deliberately EXCLUDES green because its default host port 8001
-# collides with the sandbox supervisor. The failover test needs a *second* live
-# control-plane sharing the same Postgres so green's OrphanSweep can reclaim a
-# run orphaned by killing blue. This overlay remaps green off the contended port
-# (8000-base + 2) so it can run alongside the rest of the full stack.
+# Two things this overlay sets up that the default dev stack does not:
+#
+# 1. A *second* live control-plane (green). ``make dev-up`` excludes green
+#    because its default host port 8001 collides with the sandbox supervisor;
+#    here green is remapped to 8002 so it runs alongside the full stack.
+#
+# 2. ``checkpointer_backend=postgres`` on BOTH colours. The dev stack defaults
+#    to the in-memory LangGraph checkpointer (``memory`` — fine for single-process
+#    dev), but failover RESUME is fundamentally cross-process: green can only
+#    resume a run blue was executing if the run's LangGraph checkpoint is in a
+#    store both processes share. With the in-memory saver each process has its
+#    own state, so a reclaimed run has nothing to resume from and dies with
+#    ``EmptyInputError``. Durable failover therefore REQUIRES the Postgres
+#    checkpointer — this overlay is what makes the live proof meaningful.
+#
+# The DSN uses the sync-driver scheme and points straight at Postgres (not
+# PgBouncer): AsyncPostgresSaver manages its own async pool and uses prepared
+# statements, which PgBouncer transaction pooling does not support.
 #
 # Usage (after ``make dev-up`` has built the image + migrated):
 #
 #   docker compose -f infra/docker-compose.yml -f infra/docker-compose.ha-e2e.yml \
-#       --profile full up -d --no-deps control-plane-green
+#       --profile full up -d --no-deps control-plane-blue control-plane-green
 #   uv run python tools/ha/verify_failover.py
-#
-# The verify script reaches green only via ``docker exec`` (metrics over the
-# container loopback) + Postgres, so the 8002 mapping is a convenience, not a
-# dependency.
+x-ha-env: &ha-env
+  HELIX_AGENT_CHECKPOINTER_BACKEND: postgres
+  HELIX_AGENT_CHECKPOINTER_DSN: postgresql://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+  # Dev OIDC config (docs/runbooks/getting-started.md). The control-plane reads
+  # OIDC settings from env only; ``make dev-up`` injects these via the operator's
+  # infra/.env, but bringing a colour up directly with this overlay does not
+  # inherit that file, so the dev ID token (iss=localhost, aud=admin-ui) would be
+  # rejected. Pin the documented dev values here: issuer matches the token's
+  # ``iss``; JWKS is fetched from Keycloak over the internal compose hostname
+  # (the localhost issuer is not reachable inside the container); both dev client
+  # audiences are accepted.
+  HELIX_AGENT_OIDC_ISSUER: http://localhost:8080/realms/helix-agent
+  HELIX_AGENT_OIDC_JWKS_URI: http://keycloak:8080/realms/helix-agent/protocol/openid-connect/certs
+  HELIX_AGENT_OIDC_AUDIENCE: '["helix-agent-api-internal","helix-agent-admin-ui"]'
+
 services:
+  control-plane-blue:
+    environment:
+      <<: *ha-env
+
   control-plane-green:
     ports: !override
       - "8002:8000"
+    environment:
+      <<: *ha-env
