@@ -12,7 +12,10 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-        exclude: ^deploy/k8s/.*helm.*\.yaml$
+        # helm templates carry Go ``{{ }}`` and the HA-failover compose overlay
+        # uses docker-compose's ``!override`` merge tag — both are valid for their
+        # tooling but PyYAML's safe_load (check-yaml) can't parse them.
+        exclude: ^(deploy/k8s/.*helm.*\.yaml|infra/docker-compose\.ha-e2e\.yml)$
       - id: check-toml
       - id: check-added-large-files
         args: ['--maxkb=500']
