@@ -81,7 +81,13 @@ from control_plane.api import (
 )
 from control_plane.api.model_catalog import PlatformConfiguredProviders
 from control_plane.approval_metrics import ApprovalGaugeWorker
-from control_plane.audit import TenantConfigPiiResolver, build_default_audit_logger
+from control_plane.audit import (
+    TenantConfigPiiResolver,
+    build_default_audit_logger,
+)
+from control_plane.audit import (
+    emit as audit_emit,
+)
 from control_plane.auth import (
     ApiKeyVerifier,
     HTTPJWKSProvider,
@@ -184,7 +190,7 @@ from control_plane.workspace_lock import PgWorkspaceLock
 from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.common.observability import init_logging, init_tracing
+from helix_agent.common.observability import current_trace_id_hex, init_logging, init_tracing
 from helix_agent.common.uplift_metrics import record_legacy_credentials_fallback
 from helix_agent.persistence.agent_spec import (
     AgentSpecStore,
@@ -347,7 +353,12 @@ from helix_agent.persistence.webhook import (
     WebhookDeliveryStore,
     WebhookEndpointStore,
 )
-from helix_agent.protocol import PROVIDER_CATALOG
+from helix_agent.protocol import (
+    PROVIDER_CATALOG,
+    AuditAction,
+    AuditResult,
+    TokenReservationRecord,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.middleware import make_langfuse_client
@@ -670,12 +681,37 @@ def create_app(
     )
     # Complete the D.2 cycle: TenantAwareRedactor → resolver → service.
     pii_resolver.bind(resolved_tenant_config_service)
+
+    async def _on_reservation_expired(row: TokenReservationRecord) -> None:
+        """Audit a stale reservation the reaper transitioned to EXPIRED.
+
+        The reaper invokes this inside the row's tenant RLS context (it has
+        already SET the tenant + cleared bypass), so the audit write lands
+        under the owning tenant. Errors are caught by the reaper's own
+        ``on_expire`` guard, so a failed audit never blocks the release."""
+        await audit_emit(
+            resolved_audit,
+            tenant_id=row.tenant_id,
+            actor_id="quota_reaper",
+            action=AuditAction.QUOTA_RESERVATION_EXPIRED,
+            resource_type="quota",
+            resource_id=str(row.id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={
+                "agent_name": row.agent_name,
+                "thread_id": str(row.thread_id),
+                "estimated": row.estimated,
+            },
+        )
+
     reaper: ReservationReaper | None = (
         ReservationReaper(
             reservation_store=resolved_reservations,
             max_age_s=resolved_settings.quota_reservation_max_age_s,
             interval_s=resolved_settings.quota_reaper_interval_s,
             batch_size=resolved_settings.quota_reaper_batch_size,
+            on_expire=_on_reservation_expired,
         )
         if enable_reaper
         else None

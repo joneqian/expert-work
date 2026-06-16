@@ -59,6 +59,19 @@
 skill_curator（🟡）选做：若上面 agent 绑了 skill，顺带验 `last_used_at` 被 bump + curator
 active→stale 转移。
 
+## live-smoke 执行结果（2026-06-16，真栈 deepseek + qwen embedder）
+
+🔴🟠🟡 四项全部起真栈 live 验证通过：
+
+| 项 | 结果 | 实证 |
+|---|---|---|
+| **scheduler** | ✅ live-proven | cron `* * * * *` → scheduler 60s 扫到 → `trigger:fire` 审计 `result:success` `details.run_id` + `last_fired_at` stamp + 真起 run |
+| **skill_curator** | ✅ live-proven | trigger 触发的 run **真 build 绑 skill 的 agent → `_record_skill_activity` → `bump_last_used_at` 真落 DB**（`None→01:30:29`）。**正是被我静态降级那条链，实测才证它真接通** |
+| **memory_consolidator** | ✅ live-proven（#661） | 配 qwen embedder → 4 run 写 5 条相似 transient 记忆 → 短 interval 重启 → sweep `candidates=1 consolidated=1 errors=0` → 调 deepseek aux（金库路径）→ 真 summary `"User wants all answers formatted as bullet point lists."` + consolidated 行（src_cnt=4）+ `memory:consolidated` 审计。**null adapter 会出 consolidated=0；真出 1 = #661 aux 金库解析活的** |
+| **reaper** | ✅ live-proven | reserve 不 commit → 缩 max_age → reaper run_once `quota.reaper.expired released_count=1` → state `reserved→expired` + closed_at。**顺手修了 live-smoke 暴露的 gap：`quota:reservation_expired` 审计当时 0 行 —— app.py 构造 reaper 时没传 `on_expire`（回调机制 reaper.py 早在，只是没接）。已补 on_expire 回调 emit 审计 + 单测（`test_reaper_invokes_on_expire_per_row`）** |
+
+**最深发现（比 #661 更进一层）**：deepseek **无 embedding 能力**（catalog embedding 模型只属 openai/zhipu/qwen）。`只有 deepseek key` 的部署里平台 embedder 配不了 → 长期记忆**存不进** → **consolidator 整个子系统休眠，与 #661 的 aux 闸正交**。#661 修 aux 是必要非充分；embedder 是另一必要条件。配 qwen `text-embedding-v4` 后才跑通。
+
 ## 诚实交代
 
 - 本审计是**静态布线核 + E2E 历史**，非全部 live 实测。🔴🟠 项的「需 live-smoke」是
