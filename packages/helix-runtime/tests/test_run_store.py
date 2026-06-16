@@ -462,3 +462,126 @@ async def test_list_all_tenants_thread_ids_filter() -> None:
     assert [r.thread_id for r in subset] == [thread_a]
     assert await store.list_all_tenants(thread_ids=set()) == []
     assert len(await store.list_all_tenants()) == 2
+
+
+# --- Stream 9.4 (HA failover) — ownership lease ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claim_then_heartbeat_renews_lease() -> None:
+    store = InMemoryRunStore()
+    run_id, tenant = uuid4(), uuid4()
+    await store.create(_info(run_id=run_id, tenant_id=tenant, status=RunStatus.RUNNING))
+    t0 = _BASE
+    assert await store.claim(
+        run_id=run_id,
+        tenant_id=tenant,
+        claimed_by="inst-a",
+        lease_until=t0 + timedelta(seconds=30),
+        heartbeat_at=t0,
+    )
+    # owner renews
+    t1 = t0 + timedelta(seconds=10)
+    assert await store.heartbeat(
+        run_id=run_id,
+        claimed_by="inst-a",
+        lease_until=t1 + timedelta(seconds=30),
+        heartbeat_at=t1,
+    )
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.claimed_by == "inst-a"
+    assert row.lease_until == t1 + timedelta(seconds=30)
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_fails_for_non_owner() -> None:
+    store = InMemoryRunStore()
+    run_id, tenant = uuid4(), uuid4()
+    await store.create(_info(run_id=run_id, tenant_id=tenant, status=RunStatus.RUNNING))
+    await store.claim(
+        run_id=run_id,
+        tenant_id=tenant,
+        claimed_by="inst-a",
+        lease_until=_BASE + timedelta(seconds=30),
+        heartbeat_at=_BASE,
+    )
+    # A different instance cannot renew (it doesn't own the run).
+    assert not await store.heartbeat(
+        run_id=run_id,
+        claimed_by="inst-b",
+        lease_until=_BASE + timedelta(seconds=60),
+        heartbeat_at=_BASE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_orphans_only_expired_running() -> None:
+    store = InMemoryRunStore()
+    tenant = uuid4()
+    now = _BASE + timedelta(minutes=5)
+    # expired-lease running → orphan
+    orphan = uuid4()
+    await store.create(_info(run_id=orphan, tenant_id=tenant, status=RunStatus.RUNNING))
+    await store.claim(
+        run_id=orphan,
+        tenant_id=tenant,
+        claimed_by="dead",
+        lease_until=now - timedelta(seconds=1),
+        heartbeat_at=_BASE,
+    )
+    # fresh-lease running → not orphan
+    live = uuid4()
+    await store.create(_info(run_id=live, tenant_id=tenant, status=RunStatus.RUNNING))
+    await store.claim(
+        run_id=live,
+        tenant_id=tenant,
+        claimed_by="alive",
+        lease_until=now + timedelta(seconds=30),
+        heartbeat_at=now,
+    )
+    # terminal with stale lease → never an orphan
+    done = uuid4()
+    await store.create(_info(run_id=done, tenant_id=tenant, status=RunStatus.SUCCESS))
+    await store.claim(
+        run_id=done,
+        tenant_id=tenant,
+        claimed_by="dead",
+        lease_until=now - timedelta(minutes=1),
+        heartbeat_at=_BASE,
+    )
+
+    orphans = await store.list_orphans(now=now, limit=10)
+    assert [o.run_id for o in orphans] == [orphan]
+
+
+@pytest.mark.asyncio
+async def test_reclaim_cas_one_winner() -> None:
+    store = InMemoryRunStore()
+    run_id, tenant = uuid4(), uuid4()
+    now = _BASE + timedelta(minutes=5)
+    await store.create(_info(run_id=run_id, tenant_id=tenant, status=RunStatus.RUNNING))
+    await store.claim(
+        run_id=run_id,
+        tenant_id=tenant,
+        claimed_by="dead",
+        lease_until=now - timedelta(seconds=1),
+        heartbeat_at=_BASE,
+    )
+    # first reclaim wins
+    assert await store.reclaim(
+        run_id=run_id,
+        new_owner="inst-b",
+        lease_until=now + timedelta(seconds=30),
+        heartbeat_at=now,
+        now=now,
+    )
+    # second reclaim loses — lease is fresh now (no longer < now)
+    assert not await store.reclaim(
+        run_id=run_id,
+        new_owner="inst-c",
+        lease_until=now + timedelta(seconds=30),
+        heartbeat_at=now,
+        now=now,
+    )
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.claimed_by == "inst-b"

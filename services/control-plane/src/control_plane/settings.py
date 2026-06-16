@@ -346,6 +346,21 @@ class Settings(BaseSettings):
     #: Max triggers fired per scheduler sweep — caps a single cycle's work.
     trigger_scheduler_batch_size: int = Field(default=100, gt=0)
 
+    # --- Stream 9.4 (HA failover) — orphaned-run sweep ----------------------
+    #: Master switch for the orphaned-run recovery sweep.
+    enable_orphan_sweep: bool = Field(default=True)
+    #: How often the sweep scans for runs whose ownership lease expired. Should
+    #: be a few times the run lease TTL so a brief GC pause never trips it.
+    orphan_sweep_interval_s: int = Field(default=15, gt=0)
+    #: Max orphans handled per sweep cycle.
+    orphan_sweep_batch_size: int = Field(default=20, gt=0)
+    #: When ``True`` an orphan is reclaimed + resumed from its checkpoint (hot
+    #: handoff). ``False`` marks it errored (conservative — human/client sees it).
+    ha_auto_reclaim: bool = Field(default=True)
+    #: A run reclaimed this many times is marked errored instead of respawned —
+    #: stops a run that crashes its owner every time (OOM) from looping forever.
+    orphan_max_reclaims: int = Field(default=3, gt=0)
+
     #: Stream J.10 (Mini-ADR J-26 (2)) — max cron triggers a tenant may
     #: register. Caps the scheduler's per-sweep work + a runaway client.
     max_cron_triggers_per_tenant: int = Field(default=100, gt=0)

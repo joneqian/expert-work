@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import socket
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 from helix_agent.common.skill_run_usage import BoundDistilledSkill
 from helix_agent.runtime.runs.schemas import (
@@ -93,6 +95,17 @@ def _record_to_info(record: RunRecord) -> RunInfo:
     )
 
 
+def _default_instance_id() -> str:
+    """Stream 9.4 — a stable-per-process control-plane instance id.
+
+    ``hostname-pid-<rand>``: the hostname + pid identify the process; the random
+    suffix disambiguates a fast restart that reused the pid. Stamped as
+    ``agent_run.claimed_by`` so the orphan sweep attributes a run to the
+    instance executing it.
+    """
+    return f"{socket.gethostname()}-{os.getpid()}-{uuid4().hex[:8]}"
+
+
 class RunManager:
     """Per-process registry of active runs.
 
@@ -102,13 +115,35 @@ class RunManager:
     a run's status outlives the in-memory record's 5-minute TTL.
     """
 
-    def __init__(self, store: RunStore | None = None) -> None:
+    def __init__(
+        self,
+        store: RunStore | None = None,
+        *,
+        instance_id: str | None = None,
+        lease_ttl_s: float = 30.0,
+    ) -> None:
         self._runs: dict[UUID, RunRecord] = {}
         self._lock = asyncio.Lock()
         #: Durable mirror (Mini-ADR J-41). ``None`` keeps the registry
         #: purely in-memory — unit tests + the default app before the
         #: SQL backend is wired.
         self._store = store
+        #: Stream 9.4 (HA failover) — this control-plane instance's stable id.
+        #: Stamped as ``agent_run.claimed_by`` on the → RUNNING transition so a
+        #: peer's orphan sweep can tell a crashed owner's runs from live ones.
+        self._instance_id = instance_id or _default_instance_id()
+        #: How long a lease is valid; the worker renews it every
+        #: ``lease_ttl_s / 3`` via :meth:`heartbeat`, so two missed heartbeats
+        #: still leave margin before a peer reclaims.
+        self._lease_ttl_s = lease_ttl_s
+
+    @property
+    def instance_id(self) -> str:
+        return self._instance_id
+
+    @property
+    def lease_ttl_s(self) -> float:
+        return self._lease_ttl_s
 
     async def create(
         self,
@@ -193,8 +228,74 @@ class RunManager:
                     error=error,
                     finished_at=finished_at,
                 )
+                # Stream 9.4 — claim the ownership lease when execution begins.
+                # No explicit release at terminal status: the sweep + index both
+                # gate on ``status='running'``, so a finished run is never an
+                # orphan regardless of its (now stale) lease_until.
+                if status is RunStatus.RUNNING:
+                    await self._store.claim(
+                        run_id=run_id,
+                        tenant_id=record.tenant_id,
+                        claimed_by=self._instance_id,
+                        lease_until=now + timedelta(seconds=self._lease_ttl_s),
+                        heartbeat_at=now,
+                    )
             logger.info("run.status_change id=%s status=%s", run_id, status)
             return True
+
+    async def adopt(
+        self,
+        *,
+        run_id: UUID,
+        thread_id: UUID,
+        tenant_id: UUID,
+        user_id: UUID | None = None,
+    ) -> RunRecord:
+        """Stream 9.4 — register an already-durable run this instance reclaimed.
+
+        Unlike :meth:`create`, it does NOT write the store (the orphan row
+        already exists; the sweep's reclaim CAS just took ownership of it). It
+        only builds the in-memory :class:`RunRecord` (status RUNNING) so the
+        re-spawned worker's heartbeat + terminal status writes route through the
+        usual path. ``is_resume=True`` so the worker observes the durable-resume
+        timing on its first chunk from the checkpoint.
+        """
+        async with self._lock:
+            if run_id in self._runs:
+                return self._runs[run_id]
+            record = RunRecord(
+                run_id=run_id,
+                thread_id=thread_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                status=RunStatus.RUNNING,
+                on_disconnect=DisconnectMode.CONTINUE,
+                is_resume=True,
+            )
+            self._runs[run_id] = record
+            logger.info("run.adopt id=%s thread=%s by=%s", run_id, thread_id, self._instance_id)
+            return record
+
+    async def heartbeat(self, run_id: UUID) -> bool:
+        """Stream 9.4 — renew the run's lease; ``True`` iff this instance still owns it.
+
+        The worker calls this periodically while executing. A ``False`` return
+        means a peer reclaimed the run (this instance's lease lapsed, e.g. after
+        a long GC pause) — the caller should stop to avoid double execution.
+        No-op (returns ``True``) when no durable store is wired (unit tests).
+        """
+        if self._store is None:
+            return True
+        record = self._runs.get(run_id)
+        if record is None:
+            return False
+        now = datetime.now(UTC)
+        return await self._store.heartbeat(
+            run_id=run_id,
+            claimed_by=self._instance_id,
+            lease_until=now + timedelta(seconds=self._lease_ttl_s),
+            heartbeat_at=now,
+        )
 
     async def attach_task(self, run_id: UUID, task: asyncio.Task[None]) -> bool:
         """Bind the live orchestrator task to its run record."""

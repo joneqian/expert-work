@@ -289,3 +289,95 @@ async def test_list_for_tenant_thread_ids_filter_sql(run_store: SqlRunStore) -> 
     assert await run_store.list_for_tenant(tenant_id=tenant_id, thread_ids=[]) == []
     # None regression — unfiltered list unchanged.
     assert len(await run_store.list_for_tenant(tenant_id=tenant_id)) == 3
+
+
+# --- Stream 9.4 (HA failover) — ownership lease on real Postgres -------------
+
+
+@pytest.mark.asyncio
+async def test_claim_heartbeat_and_orphan_lease_round_trip(run_store: SqlRunStore) -> None:
+    run_id, tenant = uuid4(), uuid4()
+    await run_store.create(_info(run_id=run_id, tenant_id=tenant, status=RunStatus.RUNNING))
+    t0 = datetime.now(UTC)
+    assert await run_store.claim(
+        run_id=run_id,
+        tenant_id=tenant,
+        claimed_by="inst-a",
+        lease_until=t0 + timedelta(seconds=30),
+        heartbeat_at=t0,
+    )
+    # owner renews; a non-owner cannot
+    t1 = t0 + timedelta(seconds=10)
+    assert await run_store.heartbeat(
+        run_id=run_id,
+        claimed_by="inst-a",
+        lease_until=t1 + timedelta(seconds=30),
+        heartbeat_at=t1,
+    )
+    assert not await run_store.heartbeat(
+        run_id=run_id,
+        claimed_by="inst-b",
+        lease_until=t1 + timedelta(seconds=60),
+        heartbeat_at=t1,
+    )
+    row = await run_store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.claimed_by == "inst-a" and row.reclaim_count == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reclaim_exactly_one_winner(run_store: SqlRunStore) -> None:
+    """True DB concurrency — the reclaim CAS row-lock serialises sweepers."""
+    import asyncio
+
+    run_id, tenant = uuid4(), uuid4()
+    await run_store.create(_info(run_id=run_id, tenant_id=tenant, status=RunStatus.RUNNING))
+    now = datetime.now(UTC)
+    # expired lease → orphan
+    await run_store.claim(
+        run_id=run_id,
+        tenant_id=tenant,
+        claimed_by="dead",
+        lease_until=now - timedelta(seconds=1),
+        heartbeat_at=now,
+    )
+
+    async def _reclaim(n: int) -> bool:
+        return await run_store.reclaim(
+            run_id=run_id,
+            new_owner=f"sweeper-{n}",
+            lease_until=now + timedelta(seconds=30),
+            heartbeat_at=now,
+            now=now,
+        )
+
+    results = await asyncio.gather(*(_reclaim(i) for i in range(8)))
+    assert sum(1 for r in results if r) == 1  # exactly one sweeper wins
+    row = await run_store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.reclaim_count == 1  # incremented exactly once
+
+
+@pytest.mark.asyncio
+async def test_list_orphans_finds_only_expired_running(run_store: SqlRunStore) -> None:
+    tenant = uuid4()
+    now = datetime.now(UTC)
+    orphan = uuid4()
+    await run_store.create(_info(run_id=orphan, tenant_id=tenant, status=RunStatus.RUNNING))
+    await run_store.claim(
+        run_id=orphan,
+        tenant_id=tenant,
+        claimed_by="dead",
+        lease_until=now - timedelta(seconds=1),
+        heartbeat_at=now,
+    )
+    live = uuid4()
+    await run_store.create(_info(run_id=live, tenant_id=tenant, status=RunStatus.RUNNING))
+    await run_store.claim(
+        run_id=live,
+        tenant_id=tenant,
+        claimed_by="alive",
+        lease_until=now + timedelta(seconds=30),
+        heartbeat_at=now,
+    )
+    found = await run_store.list_orphans(now=now, limit=10)
+    assert orphan in [o.run_id for o in found]
+    assert live not in [o.run_id for o in found]

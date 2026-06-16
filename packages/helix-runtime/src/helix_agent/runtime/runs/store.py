@@ -127,6 +127,68 @@ class RunStore(abc.ABC):
         ``False`` so callers can hide existence.
         """
 
+    # --- Stream 9.4 (HA failover) — ownership lease ------------------------
+
+    @abc.abstractmethod
+    async def claim(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        claimed_by: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> bool:
+        """Stamp the run-ownership lease (at the → RUNNING transition).
+
+        Sets ``claimed_by`` / ``lease_until`` / ``heartbeat_at`` so the orphan
+        sweep can tell a live owner from a crashed one. Returns ``True`` iff the
+        row exists.
+        """
+
+    @abc.abstractmethod
+    async def heartbeat(
+        self,
+        *,
+        run_id: UUID,
+        claimed_by: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> bool:
+        """Renew the lease — only when ``claimed_by`` still owns the running run.
+
+        CAS on ``(status='running' AND claimed_by=<owner>)`` so a worker whose
+        run was reclaimed by a peer (its lease lapsed) sees ``False`` and stops.
+        Returns ``True`` iff this owner still holds the running run.
+        """
+
+    @abc.abstractmethod
+    async def list_orphans(self, *, now: datetime, limit: int) -> list[RunInfo]:
+        """Cross-tenant running runs whose lease expired — the orphan candidates.
+
+        ``status='running' AND lease_until < now``. Caller MUST wrap in
+        ``bypass_rls_session()`` (cross-tenant sweep). The reclaim CAS
+        (:meth:`reclaim`) is the authoritative guard against two sweepers
+        racing on one orphan; this scan only nominates candidates.
+        """
+
+    @abc.abstractmethod
+    async def reclaim(
+        self,
+        *,
+        run_id: UUID,
+        new_owner: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+        now: datetime,
+    ) -> bool:
+        """Atomically take over an expired-lease running run; ``True`` iff won.
+
+        CAS on ``(status='running' AND lease_until < now)`` so exactly one
+        sweeper wins when several race on the same orphan (the others get
+        ``False`` — rowcount 0). Caller wraps in ``bypass_rls_session()``.
+        """
+
 
 #: Stream H.3 PR 1 — Mini-ADR H-7 (D) hard cap so a single page can never
 #: return more than this many rows. Callers passing a larger ``limit``
@@ -242,6 +304,73 @@ class InMemoryRunStore(RunStore):
         self._rows[run_id] = replace(row, trace_id=trace_id)
         return True
 
+    async def claim(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        claimed_by: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> bool:
+        row = self._rows.get(run_id)
+        if row is None or row.tenant_id != tenant_id:
+            return False
+        self._rows[run_id] = replace(
+            row, claimed_by=claimed_by, lease_until=lease_until, heartbeat_at=heartbeat_at
+        )
+        return True
+
+    async def heartbeat(
+        self,
+        *,
+        run_id: UUID,
+        claimed_by: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> bool:
+        row = self._rows.get(run_id)
+        if row is None or row.status is not RunStatus.RUNNING or row.claimed_by != claimed_by:
+            return False
+        self._rows[run_id] = replace(row, lease_until=lease_until, heartbeat_at=heartbeat_at)
+        return True
+
+    async def list_orphans(self, *, now: datetime, limit: int) -> list[RunInfo]:
+        rows = [
+            r
+            for r in self._rows.values()
+            if r.status is RunStatus.RUNNING and r.lease_until is not None and r.lease_until < now
+        ]
+        rows.sort(key=lambda r: r.lease_until or r.created_at)
+        return rows[: max(1, limit)]
+
+    async def reclaim(
+        self,
+        *,
+        run_id: UUID,
+        new_owner: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+        now: datetime,
+    ) -> bool:
+        row = self._rows.get(run_id)
+        # CAS — only an expired-lease running run can be taken over.
+        if (
+            row is None
+            or row.status is not RunStatus.RUNNING
+            or row.lease_until is None
+            or row.lease_until >= now
+        ):
+            return False
+        self._rows[run_id] = replace(
+            row,
+            claimed_by=new_owner,
+            lease_until=lease_until,
+            heartbeat_at=heartbeat_at,
+            reclaim_count=row.reclaim_count + 1,
+        )
+        return True
+
 
 def _row_to_dto(row: AgentRunRow) -> RunInfo:
     return RunInfo(
@@ -257,6 +386,10 @@ def _row_to_dto(row: AgentRunRow) -> RunInfo:
         updated_at=row.updated_at,
         finished_at=row.finished_at,
         trace_id=row.trace_id,
+        claimed_by=row.claimed_by,
+        lease_until=row.lease_until,
+        heartbeat_at=row.heartbeat_at,
+        reclaim_count=row.reclaim_count,
     )
 
 
@@ -282,6 +415,10 @@ class SqlRunStore(RunStore):
                     updated_at=info.updated_at,
                     finished_at=info.finished_at,
                     trace_id=info.trace_id,
+                    claimed_by=info.claimed_by,
+                    lease_until=info.lease_until,
+                    heartbeat_at=info.heartbeat_at,
+                    reclaim_count=info.reclaim_count,
                 )
             )
             await session.commit()
@@ -405,6 +542,92 @@ class SqlRunStore(RunStore):
                 update(AgentRunRow)
                 .where(AgentRunRow.id == run_id, AgentRunRow.tenant_id == tenant_id)
                 .values({"trace_id": trace_id})
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def claim(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        claimed_by: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                update(AgentRunRow)
+                .where(AgentRunRow.id == run_id, AgentRunRow.tenant_id == tenant_id)
+                .values(claimed_by=claimed_by, lease_until=lease_until, heartbeat_at=heartbeat_at)
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def heartbeat(
+        self,
+        *,
+        run_id: UUID,
+        claimed_by: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                update(AgentRunRow)
+                .where(
+                    AgentRunRow.id == run_id,
+                    AgentRunRow.claimed_by == claimed_by,
+                    AgentRunRow.status == RunStatus.RUNNING.value,
+                )
+                .values(lease_until=lease_until, heartbeat_at=heartbeat_at)
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def list_orphans(self, *, now: datetime, limit: int) -> list[RunInfo]:
+        # Cross-tenant: no tenant filter — caller wraps in bypass_rls_session().
+        stmt = (
+            select(AgentRunRow)
+            .where(
+                AgentRunRow.status == RunStatus.RUNNING.value,
+                AgentRunRow.lease_until.is_not(None),
+                AgentRunRow.lease_until < now,
+            )
+            .order_by(AgentRunRow.lease_until.asc())
+            .limit(max(1, limit))
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
+    async def reclaim(
+        self,
+        *,
+        run_id: UUID,
+        new_owner: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+        now: datetime,
+    ) -> bool:
+        # Atomic CAS — exactly one sweeper wins the orphan. The
+        # ``status='running' AND lease_until < now`` predicate is the guard;
+        # the loser's UPDATE matches zero rows (lease already renewed).
+        async with self._sf() as session:
+            result = await session.execute(
+                update(AgentRunRow)
+                .where(
+                    AgentRunRow.id == run_id,
+                    AgentRunRow.status == RunStatus.RUNNING.value,
+                    AgentRunRow.lease_until.is_not(None),
+                    AgentRunRow.lease_until < now,
+                )
+                .values(
+                    claimed_by=new_owner,
+                    lease_until=lease_until,
+                    heartbeat_at=heartbeat_at,
+                    reclaim_count=AgentRunRow.reclaim_count + 1,
+                )
             )
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0

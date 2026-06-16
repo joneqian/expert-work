@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -217,3 +218,54 @@ async def test_cleanup_keeps_durable_row() -> None:
     persisted = await store.get(run_id=run_id, tenant_id=tenant_id)
     assert persisted is not None  # durable row survives the TTL sweep
     assert persisted.status is RunStatus.SUCCESS
+
+
+# --- Stream 9.4 (HA failover) — lease claim + heartbeat ----------------------
+
+
+@pytest.mark.asyncio
+async def test_running_transition_claims_lease() -> None:
+    store = InMemoryRunStore()
+    mgr = RunManager(store, instance_id="inst-a", lease_ttl_s=30.0)
+    run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id)
+    await mgr.set_status(run_id, RunStatus.RUNNING)
+    row = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert row is not None
+    assert row.claimed_by == "inst-a"
+    assert row.lease_until is not None  # leased
+    assert row.heartbeat_at is not None
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_renews_for_owner_only() -> None:
+    store = InMemoryRunStore()
+    mgr = RunManager(store, instance_id="inst-a", lease_ttl_s=30.0)
+    run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id)
+    await mgr.set_status(run_id, RunStatus.RUNNING)
+    assert await mgr.heartbeat(run_id) is True
+    # A peer reclaims (changes claimed_by) → the original owner's heartbeat fails.
+    now = datetime.now(UTC)
+    await store.reclaim(
+        run_id=run_id,
+        new_owner="inst-b",
+        lease_until=now + timedelta(seconds=30),
+        heartbeat_at=now,
+        now=now + timedelta(hours=1),  # force the stale-lease CAS to pass
+    )
+    assert await mgr.heartbeat(run_id) is False
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_noop_without_store() -> None:
+    mgr = RunManager()  # no store
+    run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()
+    await mgr.create(run_id=run_id, thread_id=thread_id, tenant_id=tenant_id)
+    assert await mgr.heartbeat(run_id) is True  # no-op true
+
+
+def test_instance_id_is_stable_and_unique() -> None:
+    a, b = RunManager(), RunManager()
+    assert a.instance_id and b.instance_id
+    assert a.instance_id != b.instance_id  # random suffix disambiguates

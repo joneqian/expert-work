@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +41,18 @@ class AgentRunRow(Base):
     # chars (16 bytes hex). NULL for legacy rows + auto-triggered runs
     # (scheduler / trigger worker that explicitly pass ``trace_id=None``).
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Stream 9.4 (HA failover) — run-ownership lease. ``claimed_by`` is the
+    # executing control-plane instance id; ``lease_until`` is the deadline the
+    # owner must renew (via ``heartbeat_at`` touches) or the run is an orphan a
+    # peer instance reclaims. All NULL for a run no instance has claimed yet
+    # (pending) and for legacy rows.
+    claimed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Stream 9.4 — how many times the orphan sweep has reclaimed this run. The
+    # sweep gives up (marks the run errored) past a cap so a run that crashes
+    # its owner process every time (OOM / segfault) can't respawn forever.
+    reclaim_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     __table_args__ = (
         CheckConstraint(f"status IN {_STATUS_VALUES}", name="agent_run_status_valid"),
@@ -54,5 +66,11 @@ class AgentRunRow(Base):
             "thread_id",
             "status",
             postgresql_where=text("status IN ('pending', 'running')"),
+        ),
+        # Stream 9.4 — the orphan sweep scans running runs by lease deadline.
+        Index(
+            "ix_agent_run_lease_sweep",
+            "lease_until",
+            postgresql_where=text("status = 'running'"),
         ),
     )

@@ -232,6 +232,28 @@ async def _persist_event(
         )
 
 
+async def _heartbeat_loop(run_manager: RunManager, run_id: UUID, record: Any) -> None:
+    """Stream 9.4 — renew the run's ownership lease until cancelled.
+
+    Touches the lease every ``lease_ttl_s / 3`` (two missed renewals still leave
+    margin before a peer reclaims). If :meth:`RunManager.heartbeat` returns
+    ``False`` the run was reclaimed by a peer (this owner's lease lapsed, e.g.
+    a long GC pause) — we set ``abort_event`` so this stale worker stops rather
+    than double-executing alongside the peer's continuation.
+    """
+    interval = max(1.0, run_manager.lease_ttl_s / 3.0)
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            still_owner = await run_manager.heartbeat(run_id)
+            if not still_owner:
+                logger.warning("run_agent.lease_lost run_id=%s peer_reclaimed", run_id)
+                record.abort_event.set()
+                return
+    except asyncio.CancelledError:
+        return
+
+
 async def run_agent(
     *,
     bridge: StreamBridge,
@@ -313,8 +335,15 @@ async def run_agent(
     # internal counter; the two are independent (replay endpoint emits
     # SSE id from the persisted ``created_at_ms`` + ``seq``).
     event_seq = 0
+    # Stream 9.4 (HA failover) — renew the ownership lease while executing so a
+    # peer's orphan sweep can tell this live run from a crashed owner's. Spawned
+    # after the → RUNNING claim; cancelled in ``finally``.
+    heartbeat_task: asyncio.Task[None] | None = None
     try:
         await run_manager.set_status(run_id, RunStatus.RUNNING)
+        heartbeat_task = asyncio.create_task(
+            _heartbeat_loop(run_manager, run_id, record), name=f"run-heartbeat-{run_id}"
+        )
         metadata_payload = {"run_id": str(run_id), "thread_id": str(record.thread_id)}
         await bridge.publish(run_id, "metadata", metadata_payload)
         await _persist_event(
@@ -600,6 +629,16 @@ async def run_agent(
         )
         _dispatch_skill_run_usage(skill_run_usage_recorder, record, outcome="failed")
     finally:
+        # Stream 9.4 — stop renewing the lease; the terminal status write
+        # already moved the run out of ``running`` so it's no longer an orphan
+        # candidate regardless of the now-stale lease.
+        if heartbeat_task is not None:
+            heartbeat_task.cancel()
+            # ``gather(return_exceptions=True)`` awaits the cancelled task to
+            # completion and swallows its ``CancelledError``. Awaiting a call
+            # expression (not a bare ``await name``) also keeps CodeQL from
+            # reading the teardown as an ineffectual statement.
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         # Stream M Gate — emit on every terminal path. Always synchronous
         # so the ``asyncio.CancelledError`` teardown path (no await) still
         # counts the session in the histogram.

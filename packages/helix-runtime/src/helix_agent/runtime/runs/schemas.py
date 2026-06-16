@@ -81,3 +81,13 @@ class RunInfo:
     #: via ``current_trace_id_hex()``; ``None`` for auto-triggered runs
     #: that don't propagate a caller-bound trace (Mini-ADR H-9.5).
     trace_id: str | None = None
+    #: Stream 9.4 (HA failover) — the run-ownership lease. ``claimed_by`` is the
+    #: executing instance id; ``lease_until`` is the renew-or-orphan deadline;
+    #: ``heartbeat_at`` is the last liveness touch. All ``None`` until an
+    #: instance claims the run (at the → RUNNING transition).
+    claimed_by: str | None = None
+    lease_until: datetime | None = None
+    heartbeat_at: datetime | None = None
+    #: Stream 9.4 — orphan-sweep reclaim counter; the sweep stops respawning a
+    #: run past a cap (a run that crashes its owner every time).
+    reclaim_count: int = 0

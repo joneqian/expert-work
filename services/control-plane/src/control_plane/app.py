@@ -140,6 +140,7 @@ from control_plane.middleware import (
     RLSContextMiddleware,
     TenantRateLimitMiddleware,
 )
+from control_plane.orphan_sweep import OrphanSweep
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_secrets import PlatformSecretsService
@@ -736,6 +737,25 @@ def create_app(
         if enable_scheduler
         else None
     )
+    # Stream 9.4 (HA failover) — orphaned-run recovery sweep. Unlike the
+    # single-replica scheduler/curator, EVERY instance runs this: the reclaim
+    # CAS serialises competing sweepers so exactly one takes over each orphan.
+    orphan_sweep: OrphanSweep | None = (
+        OrphanSweep(
+            run_store=resolved_run_store,
+            thread_store=resolved_threads,
+            agent_spec_store=resolved_repo,
+            runtime=resolved_agent_runtime,
+            audit_logger=resolved_audit,
+            approval_store=resolved_approval_store,
+            interval_s=resolved_settings.orphan_sweep_interval_s,
+            batch_size=resolved_settings.orphan_sweep_batch_size,
+            max_reclaims=resolved_settings.orphan_max_reclaims,
+            auto_reclaim=resolved_settings.ha_auto_reclaim,
+        )
+        if resolved_settings.enable_orphan_sweep
+        else None
+    )
     # Capability Uplift Sprint #4 (Mini-ADRs U-26 / U-27) — Curator
     # sweep + activity recorder. Curator is single-replica (same
     # rationale as the trigger scheduler); the recorder is process-
@@ -1123,6 +1143,9 @@ def create_app(
             if scheduler is not None:
                 scheduler.start()
                 _app.state.trigger_scheduler = scheduler
+            if orphan_sweep is not None:
+                orphan_sweep.start()
+                _app.state.orphan_sweep = orphan_sweep
             if skill_curator is not None:
                 skill_curator.start()
                 _app.state.skill_curator = skill_curator
@@ -1334,6 +1357,8 @@ def create_app(
                     await reaper.stop()
                 if scheduler is not None:
                     await scheduler.stop()
+                if orphan_sweep is not None:
+                    await orphan_sweep.stop()
                 if skill_curator is not None:
                     await skill_curator.stop()
                 if curation_worker is not None:

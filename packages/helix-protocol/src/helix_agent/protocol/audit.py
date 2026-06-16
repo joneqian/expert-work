@@ -46,6 +46,9 @@ class AuditAction(StrEnum):
     RUN_FAILED = "run:failed"
     # H.3 PR 1 — emitted by ``GET /v1/runs`` cross-thread index (Stream H Mini-ADR H-6)
     RUN_LIST_READ = "run:list_read"
+    # Stream 9.4 (HA failover) — emitted by the orphan sweep when it reclaims +
+    # resumes a crashed-owner run, or marks it errored past the reclaim cap.
+    RUN_FAILOVER = "run:failover"
     # secret
     SECRET_READ = "secret:read"
     SECRET_WRITE = "secret:write"

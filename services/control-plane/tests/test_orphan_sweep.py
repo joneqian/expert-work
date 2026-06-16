@@ -1,0 +1,192 @@
+"""Stream 9.4 (HA failover) — OrphanSweep recovery + hot-handoff.
+
+Drives the real :class:`OrphanSweep` over a real :class:`InMemoryRunStore`
+seeded with an expired-lease running run (a crashed owner). ``run_agent`` is
+monkeypatched to a recording no-op so no real graph/streaming is needed — the
+seam under test is detect → reclaim CAS → adopt → respawn (or, past the cap /
+with auto-reclaim off, mark errored), which is model-agnostic.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+
+from control_plane import orphan_sweep as sweep_module
+from control_plane.audit import build_default_audit_logger
+from control_plane.orphan_sweep import OrphanSweep
+from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from helix_agent.runtime.runs import InMemoryRunStore, RunInfo, RunManager, RunStatus
+from helix_agent.runtime.runs.schemas import DisconnectMode
+
+
+def _run_info(*, run_id, tenant, thread, status=RunStatus.RUNNING) -> RunInfo:
+    now = datetime.now(UTC)
+    return RunInfo(
+        run_id=run_id,
+        tenant_id=tenant,
+        thread_id=thread,
+        user_id=None,
+        status=status,
+        on_disconnect=DisconnectMode.CANCEL,
+        is_resume=False,
+        error=None,
+        created_at=now,
+        updated_at=now,
+        finished_at=None,
+    )
+
+
+class _FakeThreads:
+    def __init__(self, *, has_agent: bool = True) -> None:
+        self._has_agent = has_agent
+
+    async def get(self, _thread_id, *, tenant_id):
+        del tenant_id
+        if not self._has_agent:
+            return SimpleNamespace(agent_name=None, agent_version=None, user_id=None)
+        return SimpleNamespace(agent_name="a", agent_version="1.0.0", user_id=None)
+
+
+class _FakeAgents:
+    async def get(self, *, tenant_id, name, version):
+        del tenant_id, name, version
+        return SimpleNamespace(spec=SimpleNamespace())
+
+
+class _FakeRuntime:
+    """Minimal AgentRuntime surface the sweep touches."""
+
+    def __init__(self, run_store: InMemoryRunStore) -> None:
+        self.run_manager = RunManager(run_store, instance_id="sweeper", lease_ttl_s=30.0)
+        self.stream_bridge = object()
+        self.run_event_store = None
+        self.skill_run_usage_recorder = None
+        self.trajectory_recorder = None
+
+    async def get_agent(self, **_kw):
+        return SimpleNamespace(
+            graph=object(), bound_distilled_skills=(), tool_replay_safe=None, run_deadline_s=0
+        )
+
+    def new_worker_spawn_budget(self):
+        return None
+
+
+async def _seed_orphan(store: InMemoryRunStore, *, expired: bool):
+    run_id, tenant, thread = uuid4(), uuid4(), uuid4()
+    await store.create(_run_info(run_id=run_id, tenant=tenant, thread=thread))
+    now = datetime.now(UTC)
+    lease = now - timedelta(seconds=5) if expired else now + timedelta(seconds=60)
+    await store.claim(
+        run_id=run_id,
+        tenant_id=tenant,
+        claimed_by="dead-instance",
+        lease_until=lease,
+        heartbeat_at=now - timedelta(seconds=40),
+    )
+    return run_id, tenant
+
+
+def _sweep(store, runtime, **kw) -> OrphanSweep:
+    return OrphanSweep(
+        run_store=store,
+        thread_store=kw.pop("threads", _FakeThreads()),
+        agent_spec_store=_FakeAgents(),
+        runtime=runtime,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        approval_store=object(),
+        **kw,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reclaims_and_respawns_expired_orphan(monkeypatch: pytest.MonkeyPatch) -> None:
+    spawns: list[object] = []
+
+    async def _fake_run_agent(**kw):
+        spawns.append(kw)
+
+    monkeypatch.setattr(sweep_module, "run_agent", _fake_run_agent)
+
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _seed_orphan(store, expired=True)
+
+    handled = await _sweep(store, runtime).run_once()
+    await asyncio.sleep(0)  # let the spawned task body run
+
+    assert handled == 1
+    assert len(spawns) == 1  # respawned exactly once
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.claimed_by == "sweeper"  # reclaimed by this instance
+    assert row.reclaim_count == 1
+    assert row.status is RunStatus.RUNNING  # still running (resumed)
+
+
+@pytest.mark.asyncio
+async def test_skips_fresh_lease_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    spawns: list[object] = []
+    monkeypatch.setattr(sweep_module, "run_agent", lambda **kw: spawns.append(kw))
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    await _seed_orphan(store, expired=False)  # lease still valid → not an orphan
+    handled = await _sweep(store, runtime).run_once()
+    assert handled == 0
+    assert spawns == []
+
+
+@pytest.mark.asyncio
+async def test_marks_errored_past_reclaim_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sweep_module, "run_agent", lambda **kw: None)
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _seed_orphan(store, expired=True)
+    # Burn the reclaim budget (reclaim_count starts 0; cap=2 → already at cap).
+    for _ in range(2):
+        await store.reclaim(
+            run_id=run_id,
+            new_owner="x",
+            lease_until=datetime.now(UTC) - timedelta(seconds=1),
+            heartbeat_at=datetime.now(UTC),
+            now=datetime.now(UTC),
+        )
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.reclaim_count == 2
+
+    await _sweep(store, runtime, max_reclaims=2).run_once()
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.ERROR  # not respawned — errored
+
+
+@pytest.mark.asyncio
+async def test_conservative_mode_marks_errored(monkeypatch: pytest.MonkeyPatch) -> None:
+    spawns: list[object] = []
+    monkeypatch.setattr(sweep_module, "run_agent", lambda **kw: spawns.append(kw))
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _seed_orphan(store, expired=True)
+    await _sweep(store, runtime, auto_reclaim=False).run_once()
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.ERROR
+    assert spawns == []  # never respawned in conservative mode
+
+
+@pytest.mark.asyncio
+async def test_no_agent_meta_marks_errored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sweep_module, "run_agent", lambda **kw: None)
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _seed_orphan(store, expired=True)
+    sweep = _sweep(store, runtime, threads=_FakeThreads(has_agent=False))
+    await sweep.run_once()
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.ERROR  # reclaimed then errored (unrecoverable)
