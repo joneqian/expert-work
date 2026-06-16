@@ -19,7 +19,7 @@
 
 ## 当前非满分项（15 项；2.2/4.1/11.4/11.5/3.3/4.4 已收为 ★5）
 
-★4（一步之遥，多为低成本）：1.3 · 7.3 · 7.4 · 10.1
+★4（一步之遥，多为低成本）：7.3 · 7.4 · 10.1（~~1.3~~ 已 ★5，#666/#667）
 ★3（真 gap）：7.2 · 8.5 · 7.6 · 14.4 · 13.2 · 16.4 · 16.3 · 10.5 · 12.4
 ★2（M1 大件）：9.4 · 9.5
 ✅ 已收（本轮 T0）：2.2（#647）· 4.1（确认）
@@ -39,14 +39,14 @@
 > 见 `2026-06-15-1145-live-eval-worker-design.md` §8 E2E 实证；代码 #649/#652 已合，本机真栈（deepseek eval agent）
 > trace passed 3/3 / adversarial 5/6（机制证实，1 真防御观测非假阴）。
 >
-> **累计进度（T0+T1 收割后）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（★3→★5，+2，400）→ 4.4（+1，**401/430**）。
-> **均分 4.60→4.66（93.3%），共 +5★。** T1 剩 1.3（先重 scope）。
+> **累计进度（T0+T1 全收割）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（★3→★5，+2，400）→ 4.4（+1，401）→ 1.3（★4→★5，+1，**402/430**）。
+> **均分 4.60→4.67（93.5%），共 +6★。T1 全清。** 1.3 见 `2026-06-16-1.3-orchestration-patterns-design.md`：gap-① 独立评判者是 staleness（J.11 routing 早具备，#666 补 UX 控件）+ gap-② 动态 worker spawn（#667，live 实证父 spawn 3 worker→指标 3→父综合）。
 
 ### T1 — Agent 能力护城河（★4/★3→★5，高 CAP）
 
 | 项 | 现 | 内容 | BV·CAP |
 |---|---|---|---|
-| **1.3 Evaluator-Optimizer** | ★4 | 补 Orchestrator-Worker 完整模式（独立协调者，非同模型链式） | M·H |
+| ~~1.3 五大编排模式~~ | ✅★5 | **已交付+live 实证**（#666/#667）：gap-① 独立评判者是 staleness（J.11 routing 早支持 reflection 路由独立模型，#666 只补 manifest 编辑器友好控件）；gap-② Orchestrator-Worker「仅基础」→ **动态 worker spawn**（`spawn_worker` 工具，父现场建临时 worker 跑完即弃，复用 SubAgentTool child-run 核 + 沙箱/配额/深度隔离，#667）。**live E2E**：父真 spawn 3 worker→`spawned_total=3`→父综合。**明确不做** 630 行独立 coordinator（父本就是 orchestrator）。设计见 `2026-06-16-1.3-orchestration-patterns-design.md` | M·H |
 | ~~4.4 agent 自写 skill~~ | ✅★5 | **B 路径已交付+E2E 实证**（#655-658）：飞轮 end-to-end 真模型跑通（轨迹→curation→distill 真调 deepseek→replay→判决）。**E2E 逮 5 坑**（整条 L7 轨迹录制没接 live run / candidate 无限重蒸 / 启动闸用错凭证源等，#656-658）—— 远非「代码完整只需 ungate」；评估过度乐观。**happy-path 已证**：真模型 E2E agent 自演化出有收益 skill（delta=0.667 → grounded → **AUTO_PROMOTE → ACTIVE**）。见 `2026-06-15-44-skill-evolution-enable-design.md` | H·H |
 | ~~3.3 context-pressure 反馈~~ | ✅★5 | **已交付**：`ContextPressureMiddleware` 量 prompt vs 解析 context_window，usage≥0.75 向末条消息注模型可见预算提示（保前缀缓存），agent 据此收敛。默认 ON 阈值门控。确定性，单测+装配测全证（无需真模型 E2E）。设计见 `2026-06-15-33-context-pressure-feedback-design.md` | M·M |
 
