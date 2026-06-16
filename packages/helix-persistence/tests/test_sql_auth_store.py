@@ -33,7 +33,7 @@ from helix_agent.persistence.auth.base import (
     DuplicateRoleBindingError,
     DuplicateServiceAccountError,
 )
-from helix_agent.protocol import ApiKeyScope, Role
+from helix_agent.protocol import ApiKeyScope, BindingConditions, Role
 
 pytestmark = pytest.mark.integration
 
@@ -248,6 +248,48 @@ async def test_role_binding_create_and_list(auth_stores: AuthStores) -> None:
 
         for_tenant = await rb_store.list_for_tenant(tenant_id=tenant)
         assert [b.id for b in for_tenant] == [created.id]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_role_binding_conditions_round_trip(auth_stores: AuthStores) -> None:
+    """Stream 8.5 — a tenant binding's ABAC conditions persist + reload as JSONB.
+
+    Also guards the ``none_as_null`` invariant: an unconditioned binding stores
+    SQL NULL (not JSONB ``null``), so the platform-scope CHECK is satisfiable and
+    the reload yields ``conditions is None``.
+    """
+    _, _, rb_store, engine = auth_stores
+    try:
+        tenant, subject = uuid4(), uuid4()
+        conditions = BindingConditions(
+            resource_ids=("agent-foo",), labels={"team": "支持"}, owner_only=True
+        )
+        created = await rb_store.create(
+            subject_type="user",
+            subject_id=subject,
+            tenant_id=tenant,
+            role=Role.OPERATOR,
+            granted_by="root",
+            conditions=conditions,
+        )
+        assert created.conditions == conditions
+        reloaded = await rb_store.list_for_subject(
+            subject_type="user", subject_id=subject, tenant_id=tenant
+        )
+        assert reloaded[0].conditions == conditions
+
+        # An unconditioned binding stores SQL NULL → reloads as None.
+        plain = await rb_store.create(
+            subject_type="user",
+            subject_id=uuid4(),
+            tenant_id=tenant,
+            role=Role.VIEWER,
+            granted_by="root",
+        )
+        assert plain.conditions is None
     finally:
         await engine.dispose()
 

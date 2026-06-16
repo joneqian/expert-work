@@ -794,8 +794,18 @@ export interface TranslationKeys {
     col_subject_id: string;
     col_role: string;
     col_tenant: string;
+    col_conditions: string;
     col_granted_at: string;
     col_actions: string;
+    conditions_none: string;
+    section_conditions: string;
+    conditions_hint: string;
+    field_resource_ids: string;
+    resource_ids_hint: string;
+    resource_ids_placeholder: string;
+    field_labels: string;
+    labels_hint: string;
+    field_owner_only: string;
     field_name: string;
     field_description: string;
     field_subject_type: string;
@@ -2251,8 +2261,19 @@ const en: TranslationKeys = {
     col_subject_id: "Subject ID",
     col_role: "Role",
     col_tenant: "Tenant",
+    col_conditions: "Conditions",
     col_granted_at: "Granted at",
     col_actions: "Actions",
+    conditions_none: "type-wide",
+    section_conditions: "ABAC conditions (optional)",
+    conditions_hint:
+      "Narrow this grant to matching resource instances. Leave empty for type-wide access.",
+    field_resource_ids: "Resource IDs",
+    resource_ids_hint: "Agent names this role may act on. Empty = any.",
+    resource_ids_placeholder: "agent-foo, agent-bar",
+    field_labels: "Labels",
+    labels_hint: "Match resources whose metadata.labels superset these (k=v, comma-separated).",
+    field_owner_only: "Owner only (resources created by this subject)",
     field_name: "Name",
     field_description: "Description",
     field_subject_type: "Subject type",

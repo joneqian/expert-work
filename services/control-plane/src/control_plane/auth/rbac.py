@@ -136,6 +136,16 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
     }
 
 
+def grants_for(role: Role) -> dict[Resource, set[Action]]:
+    """Public accessor for one role's (resource → actions) grant map.
+
+    Stream 8.5 — the ABAC layer (:mod:`control_plane.auth.abac`) needs the same
+    per-role grant table to decide whether a conditioned binding's role covers
+    a ``(resource, action)`` before checking its conditions.
+    """
+    return _grants(role)
+
+
 def _collect_roles(principal: Principal) -> set[Role]:
     """Translate principal-level role hints into the typed :class:`Role`."""
     out: set[Role] = set()

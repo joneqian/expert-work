@@ -22,7 +22,7 @@ from helix_agent.persistence.auth import (
     DuplicateRoleBindingError,
     RoleBindingStore,
 )
-from helix_agent.protocol import AuditAction, Principal, Role
+from helix_agent.protocol import AuditAction, BindingConditions, Principal, Role
 from helix_agent.runtime.audit.logger import AuditLogger
 
 logger = logging.getLogger("helix.control_plane.api.role_bindings")
@@ -37,6 +37,9 @@ class CreateRoleBindingRequest(BaseModel):
     # must be ``SYSTEM_ADMIN``). Only ``is_system_admin`` callers may
     # set this; the endpoint enforces that check before persisting.
     platform_scope: bool = False
+    # Stream 8.5 — optional ABAC conditions narrowing the grant to matching
+    # resource instances. Tenant-scope only (platform-scope must be None).
+    conditions: BindingConditions | None = None
 
     @model_validator(mode="after")
     def _check_scope_role_consistency(self) -> CreateRoleBindingRequest:
@@ -44,6 +47,8 @@ class CreateRoleBindingRequest(BaseModel):
             raise ValueError("platform_scope=true requires role=system_admin")
         if not self.platform_scope and self.role is Role.SYSTEM_ADMIN:
             raise ValueError("role=system_admin requires platform_scope=true")
+        if self.platform_scope and self.conditions is not None:
+            raise ValueError("platform_scope bindings must not carry conditions")
         return self
 
 
@@ -84,6 +89,7 @@ def build_role_bindings_router() -> APIRouter:
                 role=payload.role,
                 granted_by=principal.subject_id,
                 platform_scope=payload.platform_scope,
+                conditions=payload.conditions,
             )
         except DuplicateRoleBindingError as exc:
             raise HTTPException(

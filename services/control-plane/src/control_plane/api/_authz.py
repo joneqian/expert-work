@@ -10,13 +10,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 
 from control_plane.audit import emit
+from control_plane.auth.abac import ResourceAttrs, authorize_resource
 from control_plane.auth.rbac import Action, Resource, collect_roles_for_audit, is_allowed
 from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.protocol import AuditAction, AuditResult, Principal
+from helix_agent.persistence.auth import RoleBindingStore
+from helix_agent.protocol import AuditAction, AuditResult, Principal, RoleBinding
 from helix_agent.runtime.audit.logger import AuditLogger
 
 logger = logging.getLogger("helix.control_plane.api.authz")
@@ -71,3 +74,79 @@ def require(resource: Resource, action: Action) -> Callable[..., Awaitable[Princ
         )
 
     return _dep
+
+
+async def _conditioned_bindings(request: Request, principal: Principal) -> list[RoleBinding]:
+    """The principal's conditioned tenant bindings (slow-path ABAC source).
+
+    Returns ``[]`` when no binding store is wired, the subject is not a user,
+    or the tenant / subject id is unusable — the caller then denies (the RBAC
+    fast path already failed).
+    """
+    store: RoleBindingStore | None = getattr(request.app.state, "role_binding_repo", None)
+    if store is None or principal.subject_type != "user" or principal.tenant_id is None:
+        return []
+    try:
+        subject_uuid = UUID(principal.subject_id)
+    except (ValueError, AttributeError):
+        return []
+    bindings = await store.list_for_subject(
+        subject_type="user", subject_id=subject_uuid, tenant_id=principal.tenant_id
+    )
+    return [b for b in bindings if b.has_conditions]
+
+
+async def ensure_resource_access(
+    request: Request,
+    *,
+    resource: Resource,
+    action: Action,
+    attrs: ResourceAttrs,
+) -> Principal:
+    """Stream 8.5 — instance-level (RBAC + ABAC) authorization for one resource.
+
+    Call this from a handler AFTER it has loaded the resource, passing the
+    instance :class:`ResourceAttrs`. Decision (additive / most-permissive):
+
+    1. ``is_allowed`` — an unconditioned grant (JWT realm role, system_admin, or
+       an unconditioned binding) authorises any instance → return.
+    2. otherwise, a conditioned binding whose role grants ``(resource, action)``
+       AND whose conditions match ``attrs`` authorises this instance → return.
+    3. otherwise 403 (with a denial audit row, like :func:`require`).
+    """
+    principal = _principal(request)
+    if is_allowed(principal, resource=resource, action=action):
+        return principal
+
+    bindings = await _conditioned_bindings(request, principal)
+    if authorize_resource(
+        resource=resource, action=action, attrs=attrs, conditioned_bindings=bindings
+    ):
+        return principal
+
+    audit = _get_audit(request)
+    try:
+        await emit(
+            audit,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.subject_id,
+            action=AuditAction.AUTH_LOGIN_FAILED,
+            resource_type="user",
+            resource_id=f"{resource}:{action}",
+            result=AuditResult.DENIED,
+            reason="ABAC_FORBIDDEN",
+            trace_id=current_trace_id_hex(),
+            details={
+                "resource": resource,
+                "action": action,
+                "resource_id": attrs.resource_id,
+                "roles": list(collect_roles_for_audit(principal)),
+                "subject_type": principal.subject_type,
+            },
+        )
+    except Exception:
+        logger.exception("authz.deny_audit_emit_failed")
+    raise HTTPException(
+        status_code=403,
+        detail={"code": "FORBIDDEN", "message": "principal lacks access to this resource"},
+    )

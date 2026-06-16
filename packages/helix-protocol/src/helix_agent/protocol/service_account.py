@@ -161,6 +161,38 @@ PLATFORM_SCOPE_ROLES: frozenset[Role] = frozenset({Role.SYSTEM_ADMIN})
 TENANT_SCOPE_ROLES: frozenset[Role] = frozenset({Role.ADMIN, Role.OPERATOR, Role.VIEWER})
 
 
+class BindingConditions(BaseModel):
+    """Stream 8.5 — attribute conditions narrowing a tenant-scope role binding.
+
+    A binding with ``conditions=None`` grants its role **type-wide** (today's
+    behaviour). When conditions are present, the grant applies only to resource
+    instances whose attributes satisfy ALL of:
+
+    * ``resource_ids`` (URI-level) — the resource id / name is in this allowlist
+      (empty ⇒ any instance).
+    * ``labels`` (ABAC) — the resource's ``metadata.labels`` is a superset of
+      this map: every ``(k, v)`` here must equal the resource's ``labels[k]``
+      (empty ⇒ any).
+    * ``owner_only`` (ABAC) — the resource's owner equals the binding's subject.
+
+    All three combine with AND; an all-empty conditions object matches every
+    instance (treated the same as ``None``). The model is intentionally a small
+    fixed set of deterministic predicates — NOT an expression language (no
+    Cedar/OPA; see design doc §6).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    resource_ids: tuple[str, ...] = ()
+    labels: dict[str, str] = Field(default_factory=dict)
+    owner_only: bool = False
+
+    @property
+    def is_empty(self) -> bool:
+        """``True`` when no predicate is set — equivalent to ``conditions=None``."""
+        return not self.resource_ids and not self.labels and not self.owner_only
+
+
 class RoleBinding(BaseModel):
     """Maps a subject (user / service_account) to a role.
 
@@ -171,6 +203,10 @@ class RoleBinding(BaseModel):
     * **Platform scope** (``platform_scope=True``) — ``tenant_id`` MUST
       be ``None``; ``role`` ∈ {SYSTEM_ADMIN}. Grants cross-tenant
       capabilities (see :mod:`control_plane.tenant_scope`).
+
+    Stream 8.5 — a tenant-scope binding MAY carry :class:`BindingConditions`
+    that narrow the grant to matching resource instances (ABAC). Platform-scope
+    bindings MUST NOT (cross-tenant admin is unconditional by design).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -181,6 +217,7 @@ class RoleBinding(BaseModel):
     tenant_id: UUID | None = None  # None iff platform_scope is True
     role: Role
     platform_scope: bool = False  # Stream N
+    conditions: BindingConditions | None = None  # Stream 8.5 — ABAC narrowing
     granted_by: str
     granted_at: datetime
 
@@ -194,6 +231,8 @@ class RoleBinding(BaseModel):
                 raise ValueError(
                     f"platform_scope binding requires role in {allowed}; got {self.role.value!r}"
                 )
+            if self.conditions is not None:
+                raise ValueError("platform_scope binding must not carry conditions")
         else:
             if self.tenant_id is None:
                 raise ValueError("tenant-scoped binding requires tenant_id to be set")
@@ -203,3 +242,8 @@ class RoleBinding(BaseModel):
                     f"tenant-scoped binding requires role in {allowed}; got {self.role.value!r}"
                 )
         return self
+
+    @property
+    def has_conditions(self) -> bool:
+        """``True`` iff this binding carries non-empty ABAC conditions."""
+        return self.conditions is not None and not self.conditions.is_empty

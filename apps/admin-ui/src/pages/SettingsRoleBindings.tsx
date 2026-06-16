@@ -34,6 +34,7 @@ import {
   createRoleBinding,
   deleteRoleBinding,
   listRoleBindings,
+  type BindingConditions,
   type CreateRoleBindingBody,
   type RoleBindingList,
   type RoleBindingRecord,
@@ -61,6 +62,54 @@ interface CreateForm {
   role: RoleName;
   platform_scope: boolean;
   confirm: string;
+  // Stream 8.5 — ABAC conditions (tenant-scope only).
+  resource_ids?: string[];
+  labels_raw?: string;
+  owner_only?: boolean;
+}
+
+/** Parse a ``k=v, k2=v2`` string into a labels map (blank ⇒ ``{}``). */
+export function parseLabels(raw: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of (raw ?? "").split(",")) {
+    const idx = pair.indexOf("=");
+    if (idx <= 0) continue;
+    const key = pair.slice(0, idx).trim();
+    const value = pair.slice(idx + 1).trim();
+    if (key) out[key] = value;
+  }
+  return out;
+}
+
+/** Build conditions from form values; ``undefined`` when no predicate is set. */
+export function buildConditions(values: {
+  resource_ids?: string[];
+  labels_raw?: string;
+  owner_only?: boolean;
+}): BindingConditions | undefined {
+  const resourceIds = (values.resource_ids ?? []).filter((s) => s.trim() !== "");
+  const labels = parseLabels(values.labels_raw);
+  const ownerOnly = values.owner_only ?? false;
+  if (resourceIds.length === 0 && Object.keys(labels).length === 0 && !ownerOnly) {
+    return undefined;
+  }
+  return {
+    ...(resourceIds.length > 0 ? { resource_ids: resourceIds } : {}),
+    ...(Object.keys(labels).length > 0 ? { labels } : {}),
+    ...(ownerOnly ? { owner_only: true } : {}),
+  };
+}
+
+/** Compact one-line summary of a binding's conditions for the table. */
+export function summariseConditions(c: BindingConditions | null | undefined): string | null {
+  if (!c) return null;
+  const parts: string[] = [];
+  if (c.resource_ids && c.resource_ids.length > 0) parts.push(`ids:${c.resource_ids.length}`);
+  if (c.labels && Object.keys(c.labels).length > 0) {
+    parts.push(Object.entries(c.labels).map(([k, v]) => `${k}=${v}`).join(" "));
+  }
+  if (c.owner_only) parts.push("owner");
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export function SettingsRoleBindings() {
@@ -118,6 +167,8 @@ export function SettingsRoleBindings() {
       subject_id: values.subject_id,
       role: values.role,
       platform_scope: values.platform_scope,
+      // Stream 8.5 — conditions only apply to tenant-scope bindings.
+      ...(values.platform_scope ? {} : { conditions: buildConditions(values) ?? null }),
     };
     setCreateSubmitting(true);
     try {
@@ -192,6 +243,23 @@ export function SettingsRoleBindings() {
           <Text code style={{ fontSize: 11 }}>{tid.slice(0, 8)}…</Text>
         )
       ),
+    },
+    {
+      title: t("settings_iam.col_conditions"),
+      key: "conditions",
+      width: 200,
+      render: (_, record) => {
+        const summary = summariseConditions(record.conditions);
+        return summary === null ? (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("settings_iam.conditions_none")}
+          </Text>
+        ) : (
+          <Tag color="cyan" data-testid={`rb-conditions-${record.id}`}>
+            <Text code style={{ fontSize: 11 }}>{summary}</Text>
+          </Tag>
+        );
+      },
     },
     {
       title: t("settings_iam.col_granted_at"),
@@ -402,6 +470,41 @@ export function SettingsRoleBindings() {
               showIcon
               message={t("settings_iam.role_requires_platform_scope")}
             />
+          )}
+          {!platformScopeChecked && (
+            <div data-testid="rb-conditions-section">
+              <Text strong style={{ display: "block", marginBottom: 8 }}>
+                {t("settings_iam.section_conditions")}
+              </Text>
+              <Text type="secondary" style={{ display: "block", marginBottom: 12, fontSize: 12 }}>
+                {t("settings_iam.conditions_hint")}
+              </Text>
+              <Form.Item
+                name="resource_ids"
+                label={t("settings_iam.field_resource_ids")}
+                extra={t("settings_iam.resource_ids_hint")}
+              >
+                <Select<string[]>
+                  mode="tags"
+                  open={false}
+                  data-testid="rb-resource-ids-select"
+                  placeholder={t("settings_iam.resource_ids_placeholder")}
+                  tokenSeparators={[",", " "]}
+                />
+              </Form.Item>
+              <Form.Item
+                name="labels_raw"
+                label={t("settings_iam.field_labels")}
+                extra={t("settings_iam.labels_hint")}
+              >
+                <Input data-testid="rb-labels-input" placeholder="team=支持, env=dev" />
+              </Form.Item>
+              <Form.Item name="owner_only" valuePropName="checked">
+                <Checkbox data-testid="rb-owner-only-checkbox">
+                  {t("settings_iam.field_owner_only")}
+                </Checkbox>
+              </Form.Item>
+            </div>
           )}
         </Form>
       </Drawer>

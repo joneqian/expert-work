@@ -66,7 +66,13 @@ async def resolve_tenant_roles(
     )
     # list_for_subject(tenant_id=...) returns only tenant-scope rows for that
     # tenant; platform-scope rows are handled separately by resolve_system_admin.
-    granted = {b.role.value for b in bindings}
+    #
+    # Stream 8.5 — only UNCONDITIONED bindings grant a type-wide role here.
+    # A conditioned binding must NOT widen ``principal.roles`` (that would make
+    # ``is_allowed`` return True for every instance, bypassing its conditions);
+    # it is evaluated instance-by-instance at the route layer via
+    # ``_authz.require_resource`` / ``abac.authorize_resource`` instead.
+    granted = {b.role.value for b in bindings if not b.has_conditions}
     if not granted:
         return principal
 

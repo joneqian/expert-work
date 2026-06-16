@@ -18,6 +18,7 @@ from helix_agent.persistence.auth import (
 from helix_agent.protocol import (
     PLATFORM_SCOPE_ROLES,
     TENANT_SCOPE_ROLES,
+    BindingConditions,
     Role,
     RoleBinding,
 )
@@ -151,6 +152,45 @@ async def test_inmem_create_platform_scope_binding() -> None:
     assert binding.platform_scope is True
     assert binding.tenant_id is None
     assert binding.role is Role.SYSTEM_ADMIN
+
+
+@pytest.mark.asyncio
+async def test_inmem_tenant_binding_conditions_round_trip() -> None:
+    """Stream 8.5 — a tenant-scope binding persists + reloads its ABAC conditions."""
+    store = InMemoryRoleBindingStore()
+    subject = uuid4()
+    tenant = uuid4()
+    conditions = BindingConditions(
+        resource_ids=("agent-foo",), labels={"team": "支持"}, owner_only=True
+    )
+    created = await store.create(
+        subject_type="user",
+        subject_id=subject,
+        tenant_id=tenant,
+        role=Role.OPERATOR,
+        granted_by="admin",
+        conditions=conditions,
+    )
+    assert created.conditions == conditions
+    assert created.has_conditions is True
+    rows = await store.list_for_subject(subject_type="user", subject_id=subject, tenant_id=tenant)
+    assert rows[0].conditions == conditions
+
+
+@pytest.mark.asyncio
+async def test_inmem_unconditioned_binding_defaults_none() -> None:
+    store = InMemoryRoleBindingStore()
+    subject = uuid4()
+    tenant = uuid4()
+    created = await store.create(
+        subject_type="user",
+        subject_id=subject,
+        tenant_id=tenant,
+        role=Role.OPERATOR,
+        granted_by="admin",
+    )
+    assert created.conditions is None
+    assert created.has_conditions is False
 
 
 @pytest.mark.asyncio

@@ -200,6 +200,53 @@ describe("SettingsRoleBindings", () => {
     expect(screen.queryByTestId("rb-platform-scope-filter")).toBeNull();
   });
 
+  it("renders an ABAC conditions summary on a conditioned binding", async () => {
+    const conditioned = {
+      ...rbRow,
+      id: "rb-9",
+      conditions: { resource_ids: ["agent-foo", "agent-bar"], labels: { team: "支持" } },
+    };
+    installAdapter([
+      {
+        match: (u) => u === "/v1/role_bindings",
+        respond: () => ({
+          success: true,
+          data: { items: [conditioned], total: 1, cross_tenant: false },
+          error: null,
+        }),
+      },
+    ]);
+    renderRBs(false);
+    await waitFor(() =>
+      expect(screen.getByTestId("rb-conditions-rb-9")).toBeInTheDocument(),
+    );
+    // ids count + label summarised compactly.
+    expect(screen.getByTestId("rb-conditions-rb-9").textContent).toContain("ids:2");
+    expect(screen.getByTestId("rb-conditions-rb-9").textContent).toContain("team=支持");
+  });
+
+  it("Create drawer shows the ABAC conditions editor for tenant bindings", async () => {
+    installAdapter([
+      {
+        match: (u) => u === "/v1/role_bindings",
+        respond: () => ({
+          success: true,
+          data: { items: [], total: 0, cross_tenant: false },
+          error: null,
+        }),
+      },
+    ]);
+    const user = userEvent.setup();
+    renderRBs(false);
+    await waitFor(() => expect(screen.getByTestId("rb-create-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("rb-create-btn"));
+    await waitFor(() =>
+      expect(screen.getByTestId("rb-conditions-section")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("rb-labels-input")).toBeInTheDocument();
+    expect(screen.getByTestId("rb-owner-only-checkbox")).toBeInTheDocument();
+  });
+
   it("Create platform-scope binding requires the type-to-confirm phrase", async () => {
     installAdapter([
       {

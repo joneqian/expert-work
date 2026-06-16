@@ -15,7 +15,14 @@ from helix_agent.persistence.auth.base import (
     RoleBindingStore,
     ServiceAccountStore,
 )
-from helix_agent.protocol import ApiKey, ApiKeyScope, Role, RoleBinding, ServiceAccount
+from helix_agent.protocol import (
+    ApiKey,
+    ApiKeyScope,
+    BindingConditions,
+    Role,
+    RoleBinding,
+    ServiceAccount,
+)
 
 
 def _now() -> datetime:
@@ -269,6 +276,7 @@ class InMemoryRoleBindingStore(RoleBindingStore):
         role: Role,
         granted_by: str,
         platform_scope: bool = False,
+        conditions: BindingConditions | None = None,
     ) -> RoleBinding:
         async with self._lock:
             for row in self._rows.values():
@@ -309,6 +317,7 @@ class InMemoryRoleBindingStore(RoleBindingStore):
                 tenant_id=tenant_id,
                 role=role,
                 platform_scope=platform_scope,
+                conditions=conditions,
                 granted_by=granted_by,
                 granted_at=_now(),
             )

@@ -14,9 +14,11 @@ CHECK constraint (see migration ``0035_role_binding_platform_scope``).
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, Text, UniqueConstraint, func, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,6 +50,16 @@ class RoleBindingRow(Base):
         nullable=False,
         server_default=text("false"),
     )
+    # Stream 8.5 — ABAC narrowing conditions (resource_ids / labels /
+    # owner_only) serialized as JSONB. NULL ⇒ unconditioned (type-wide grant).
+    # Only valid on tenant-scope rows; the CHECK below enforces NULL for
+    # platform-scope bindings. ``none_as_null=True`` is REQUIRED: without it
+    # SQLAlchemy stores Python ``None`` as a JSONB ``null`` value (not SQL
+    # NULL), so ``conditions IS NULL`` is false and the platform-scope CHECK
+    # rejects every conditionless platform binding.
+    conditions: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
     granted_by: Mapped[str] = mapped_column(Text, nullable=False)
     granted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -74,6 +86,11 @@ class RoleBindingRow(Base):
             "(platform_scope = true AND tenant_id IS NULL"
             " AND role = 'system_admin')",
             name="role_binding_scope_triple_ck",
+        ),
+        # Stream 8.5 — ABAC conditions only on tenant-scope bindings.
+        CheckConstraint(
+            "platform_scope = false OR conditions IS NULL",
+            name="role_binding_platform_no_conditions_ck",
         ),
         Index("role_binding_subject_idx", "subject_type", "subject_id"),
         Index("role_binding_tenant_idx", "tenant_id"),

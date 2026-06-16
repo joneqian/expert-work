@@ -22,7 +22,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from control_plane.api._authz import ensure_resource_access
 from control_plane.audit import emit
+from control_plane.auth.abac import ResourceAttrs
 from control_plane.manifest import (
     ManifestError,
     ManifestLoader,
@@ -58,6 +60,24 @@ class ManifestPayload(BaseModel):
 
     manifest_yaml: str = Field(min_length=1)
     template_vars: dict[str, Any] | None = None
+
+
+def _record_attrs(record: AgentSpecRecord) -> ResourceAttrs:
+    """Stream 8.5 — ABAC attributes for a stored manifest instance."""
+    return ResourceAttrs(
+        resource_id=record.name,
+        labels=record.spec.metadata.labels,
+        owner_id=record.created_by,
+    )
+
+
+def _spec_attrs(spec: AgentSpec, *, owner_id: str) -> ResourceAttrs:
+    """Stream 8.5 — ABAC attributes for a manifest being created (no record yet)."""
+    return ResourceAttrs(
+        resource_id=spec.metadata.name,
+        labels=spec.metadata.labels,
+        owner_id=owner_id,
+    )
 
 
 class AgentDetail(BaseModel):
@@ -256,6 +276,16 @@ def build_agents_router() -> APIRouter:
             )
             return _manifest_error_to_response(exc)
 
+        # Stream 8.5 — instance-level RBAC + ABAC on the create. A conditioned
+        # binding (e.g. operator restricted to resource_ids / a label) may only
+        # create matching manifests; the creator is the owner for owner_only.
+        await ensure_resource_access(
+            request,
+            resource="manifest",
+            action="write",
+            attrs=_spec_attrs(spec, owner_id=actor_id),
+        )
+
         # Stream O Mini-ADR O-4 — manifest publish provider whitelist gate.
         # Reject if the spec references a provider the platform does not
         # support. Runtime LLMRouter would also reject (build_llm_router
@@ -406,6 +436,11 @@ def build_agents_router() -> APIRouter:
         record = await repo.get(tenant_id=tenant_id, name=name, version=version)
         if record is None:
             raise HTTPException(status_code=404, detail="agent not found")
+        # Stream 8.5 — instance-level RBAC + ABAC (conditioned bindings may
+        # restrict a member to specific agents by id / label / ownership).
+        await ensure_resource_access(
+            request, resource="manifest", action="read", attrs=_record_attrs(record)
+        )
         await emit(
             audit,
             tenant_id=tenant_id,
@@ -444,6 +479,15 @@ def build_agents_router() -> APIRouter:
                 f"{spec.metadata.name}/{spec.metadata.version}",
                 422,
             )
+
+        # Stream 8.5 — authorize against the EXISTING instance's attributes
+        # (owner / labels) before mutating it. 404 stays 404 for unknown names.
+        existing = await repo.get(tenant_id=tenant_id, name=name, version=version)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        await ensure_resource_access(
+            request, resource="manifest", action="write", attrs=_record_attrs(existing)
+        )
 
         result = await repo.update_spec(
             tenant_id=tenant_id,
@@ -597,6 +641,13 @@ def build_agents_router() -> APIRouter:
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> JSONResponse:
         tenant_id = request.state.tenant_id
+        # Stream 8.5 — authorize against the existing instance before deleting.
+        existing = await repo.get(tenant_id=tenant_id, name=name, version=version)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="agent not found")
+        await ensure_resource_access(
+            request, resource="manifest", action="delete", attrs=_record_attrs(existing)
+        )
         record = await repo.update_status(
             tenant_id=tenant_id,
             name=name,

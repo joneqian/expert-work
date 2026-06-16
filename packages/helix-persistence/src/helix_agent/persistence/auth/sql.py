@@ -19,7 +19,14 @@ from helix_agent.persistence.auth.base import (
     ServiceAccountStore,
 )
 from helix_agent.persistence.models import ApiKeyRow, RoleBindingRow, ServiceAccountRow
-from helix_agent.protocol import ApiKey, ApiKeyScope, Role, RoleBinding, ServiceAccount
+from helix_agent.protocol import (
+    ApiKey,
+    ApiKeyScope,
+    BindingConditions,
+    Role,
+    RoleBinding,
+    ServiceAccount,
+)
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -64,6 +71,10 @@ def _row_to_role_binding(row: RoleBindingRow) -> RoleBinding:
         tenant_id=row.tenant_id,
         role=Role(row.role),
         platform_scope=row.platform_scope,
+        # Stream 8.5 — rehydrate ABAC conditions from JSONB (NULL ⇒ None).
+        conditions=(
+            BindingConditions.model_validate(row.conditions) if row.conditions is not None else None
+        ),
         granted_by=row.granted_by,
         granted_at=row.granted_at,
     )
@@ -337,6 +348,7 @@ class SqlRoleBindingStore(RoleBindingStore):
         role: Role,
         granted_by: str,
         platform_scope: bool = False,
+        conditions: BindingConditions | None = None,
     ) -> RoleBinding:
         row = RoleBindingRow(
             subject_type=subject_type,
@@ -344,6 +356,7 @@ class SqlRoleBindingStore(RoleBindingStore):
             tenant_id=tenant_id,
             role=role.value,
             platform_scope=platform_scope,
+            conditions=(conditions.model_dump(mode="json") if conditions is not None else None),
             granted_by=granted_by,
         )
         async with self._sf() as session:

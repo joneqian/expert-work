@@ -14,7 +14,14 @@ from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
-from helix_agent.protocol import ApiKey, ApiKeyScope, Role, RoleBinding, ServiceAccount
+from helix_agent.protocol import (
+    ApiKey,
+    ApiKeyScope,
+    BindingConditions,
+    Role,
+    RoleBinding,
+    ServiceAccount,
+)
 
 
 class DuplicateServiceAccountError(Exception):
@@ -224,6 +231,7 @@ class RoleBindingStore(abc.ABC):
         role: Role,
         granted_by: str,
         platform_scope: bool = False,
+        conditions: BindingConditions | None = None,
     ) -> RoleBinding:
         """Create a binding.
 
@@ -231,6 +239,9 @@ class RoleBindingStore(abc.ABC):
         ``{ADMIN, OPERATOR, VIEWER}``. For platform-scope bindings (Stream N),
         pass ``platform_scope=True``, ``tenant_id=None``, and ``role=SYSTEM_ADMIN``.
         The DTO and DB CHECK constraint enforce the triple invariant.
+
+        Stream 8.5 — ``conditions`` (tenant-scope only) narrows the grant to
+        matching resource instances; ``None`` ⇒ unconditioned (type-wide).
 
         Raises :class:`DuplicateRoleBindingError` on conflict.
         """
