@@ -281,3 +281,63 @@ async def test_audit_logger_from_config_returns_real_logger() -> None:
     )
     config = {"configurable": {AUDIT_LOGGER_KEY: real}}
     assert audit_logger_from_config(config) is real
+
+
+# --- Stream 14.4 — MCP traffic audit ----------------------------------------
+
+from orchestrator.graph_builder.builder import _mcp_audit_details  # noqa: E402
+
+
+def test_mcp_audit_details_parses_server_and_volume() -> None:
+    d = _mcp_audit_details("mcp:github.search_issues", content="hello world")
+    assert d == {
+        "mcp_server": "github",
+        "mcp_tool": "search_issues",
+        "mcp_is_error": False,
+        "response_chars": len("hello world"),
+    }
+
+
+def test_mcp_audit_details_none_for_non_mcp_tool() -> None:
+    assert _mcp_audit_details("reader", content="x") is None
+
+
+def test_mcp_audit_details_omits_volume_without_content() -> None:
+    d = _mcp_audit_details("mcp:fs.read", is_error=True)
+    assert d == {"mcp_server": "fs", "mcp_tool": "read", "mcp_is_error": True}
+    assert "response_chars" not in d
+
+
+async def test_mcp_tool_call_audit_carries_traffic_dimensions() -> None:
+    tool = _EchoTool(ToolSpec(name="mcp:github.search", description="d"))
+    audit = _RecordingAuditLogger()
+    await _dispatch_tool(
+        _call("mcp:github.search", {"q": "bug"}),
+        _registry(tool),
+        _ctx(),
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    entry = audit.entries[0]
+    assert entry.action.value == "tool:call"
+    assert entry.resource_id == "mcp:github.search"
+    # MCP traffic dimensions present + structured.
+    assert entry.details["mcp_server"] == "github"
+    assert entry.details["mcp_tool"] == "search"
+    assert entry.details["mcp_is_error"] is False
+    assert entry.details["response_chars"] > 0
+    # Privacy — the response CONTENT itself is never recorded, only its length.
+    assert "ok:" not in str(entry.details)
+
+
+async def test_non_mcp_tool_audit_has_no_mcp_fields() -> None:
+    tool = _EchoTool(ToolSpec(name="reader", description="d"))
+    audit = _RecordingAuditLogger()
+    await _dispatch_tool(
+        _call("reader", {"q": "hi"}),
+        _registry(tool),
+        _ctx(),
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    assert "mcp_server" not in audit.entries[0].details

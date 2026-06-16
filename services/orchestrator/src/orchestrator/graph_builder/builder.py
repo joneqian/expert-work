@@ -1430,6 +1430,10 @@ async def _dispatch_tool(
             result=AuditResult.SUCCESS if ok else AuditResult.ERROR,
             reason=None if ok else "tool_error",
             duration_ms=_elapsed_ms(started),
+            # Stream 14.4 — MCP traffic audit: server + response volume.
+            extra_details=_mcp_audit_details(
+                name, content=str(outcome[0].content), is_error=not ok
+            ),
         )
         return outcome
     except ToolNotFoundError as exc:
@@ -1447,6 +1451,7 @@ async def _dispatch_tool(
             result=AuditResult.ERROR,
             reason="unknown_tool",
             duration_ms=_elapsed_ms(started),
+            extra_details=_mcp_audit_details(name, is_error=True),
         )
         # Stream HX-12 — a truly unknown name gets ranked suggestions from
         # the deferred pool instead of a dead-end error (fail-open: worst
@@ -1494,6 +1499,7 @@ async def _dispatch_tool(
             result=AuditResult.DENIED,
             reason=type(exc).__name__,
             duration_ms=_elapsed_ms(started),
+            extra_details=_mcp_audit_details(name, is_error=True),
         )
         return (
             ToolMessage(
@@ -1542,6 +1548,27 @@ def _record_tool_metrics(name: str, started: float, outcome: str) -> None:
     _tool_latency_seconds.labels(tool=label).observe(time.monotonic() - started)
 
 
+def _mcp_audit_details(
+    name: str, *, content: str | None = None, is_error: bool = False
+) -> dict[str, Any] | None:
+    """Stream 14.4 — structured MCP traffic dimensions for the audit row.
+
+    Returns ``None`` for non-MCP tools (the generic ``tool:call`` audit is
+    unchanged). For an ``mcp:<server>.<tool>`` name it returns the server +
+    bare tool as structured fields (so operators filter MCP traffic without
+    parsing the name) plus, on the success path, ``response_chars`` — the size
+    of the textified MCP response, a data-volume / exfil signal. The response
+    CONTENT is never recorded (privacy / clear-text-logging), only its length.
+    """
+    if not name.startswith("mcp:"):
+        return None
+    server, _, tool = name[len("mcp:") :].partition(".")
+    details: dict[str, Any] = {"mcp_server": server, "mcp_tool": tool, "mcp_is_error": is_error}
+    if content is not None:
+        details["response_chars"] = len(content)
+    return details
+
+
 async def _emit_tool_audit(
     audit_logger: AuditLogger | None,
     ctx: ToolContext,
@@ -1555,6 +1582,7 @@ async def _emit_tool_audit(
     result: AuditResult,
     reason: str | None,
     duration_ms: int,
+    extra_details: Mapping[str, Any] | None = None,
 ) -> None:
     """Write one per-tool-call audit row (Stream TE-2).
 
@@ -1588,6 +1616,10 @@ async def _emit_tool_audit(
             details["from_skill"] = from_skill
         if ctx.run_id is not None:
             details["run_id"] = str(ctx.run_id)
+        # Stream 14.4 — MCP traffic dimensions (server / response volume), merged
+        # last so the structured fields sit alongside the generic tool details.
+        if extra_details:
+            details.update(extra_details)
         await audit_logger.write(
             AuditEntry(
                 tenant_id=ctx.tenant_id,
