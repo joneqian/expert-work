@@ -66,6 +66,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
+from helix_agent.common.dlp import scan_and_redact
 from helix_agent.common.observability import (
     HelixComponent,
     helix_counter,
@@ -271,6 +272,14 @@ _action_screen_total = helix_counter(
     "PI-3b action-judge rulings on tool calls (aligned/misaligned/error).",
     ("verdict",),
 )
+# Stream 7.4 — outbound DLP redactions on terminal responses, by PII category
+# (``email`` / ``phone_cn`` / ``id_card_cn`` / ``credit_card``). Conditional
+# output: the reply is redacted in place, not blocked.
+_output_dlp_redacted_total = helix_counter(
+    "helix_output_dlp_redacted_total",
+    "Outbound DLP redactions on terminal responses, by PII category.",
+    ("category",),
+)
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
 #: dumping multi-MB tracebacks into messages. Per-tool truncation
@@ -344,6 +353,11 @@ def build_react_graph(
     action_judge: ActionJudge | None = None,
     action_screen: Literal["off", "block", "approval"] = "off",
     action_screen_on_error: Literal["open", "closed"] = "open",
+    # Stream 7.4 — when True, each terminal response (no tool_calls) is scanned
+    # for PII (email / phone / national id / payment card) and matches are
+    # redacted in place before the reply leaves. ``False`` (default) keeps the
+    # path unchanged. Conditional output: redacts, never blocks.
+    output_dlp: bool = False,
 ) -> StateGraph[AgentState, None, AgentState, AgentState]:
     """Assemble the ReAct ``StateGraph`` and return it uncompiled.
 
@@ -631,6 +645,12 @@ def build_react_graph(
                 on_error=output_judge_on_error,
                 token=token,
             )
+        # Stream 7.4 — outbound DLP. Redact PII the model emitted in a terminal
+        # response before it leaves. Skip when the rules already blocked (the
+        # refusal carries no PII) and only on a terminal turn (a tool-call turn's
+        # args route through the action screen, not here).
+        if output_dlp and not rule_blocked and not _extract_tool_calls(response):
+            response = _dlp_redact_response(response)
 
         if after_llm_chain is not None:
             after_messages: list[BaseMessage] = [*messages, response]
@@ -1190,6 +1210,26 @@ def _screen_model_response(response: AIMessage) -> AIMessage:
         _output_screen_blocked_total.labels(category=category).inc()
     logger.warning("output_screen.blocked categories=%s", ",".join(verdict.categories))
     return AIMessage(content=REFUSAL_TEXT)
+
+
+def _dlp_redact_response(response: AIMessage) -> AIMessage:
+    """Stream 7.4 — redact PII in a terminal response (conditional output).
+
+    Returns ``response`` unchanged when no PII matched, else a copy with the
+    matched spans replaced by ``[redacted]``. Only string content is scanned
+    (multimodal content blocks pass through, M2/M3 scope). The matched value is
+    never logged — only the category that fired.
+    """
+    content = response.content
+    if not isinstance(content, str):
+        return response
+    result = scan_and_redact(content)
+    if not result.changed:
+        return response
+    for category in result.categories:
+        _output_dlp_redacted_total.labels(category=category).inc()
+    logger.info("output_dlp.redacted categories=%s", ",".join(result.categories))
+    return response.model_copy(update={"content": result.redacted})
 
 
 def _latest_human_text(messages: Sequence[BaseMessage]) -> str:

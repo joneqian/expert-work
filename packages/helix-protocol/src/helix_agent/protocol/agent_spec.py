@@ -810,6 +810,15 @@ class DefenseSpec(BaseModel):
     #: the call; ``"closed"`` denies it. Mirrors ``output_judge_on_error``.
     action_screen_on_error: Literal["open", "closed"] = "open"
 
+    #: Outbound DLP (Stream 7.4) — conditional output that **redacts** PII
+    #: (email / phone / national id / payment card) the model emitted before
+    #: the terminal response reaches the user or a downstream tool. Unlike
+    #: ``output_screen`` (which blocks credential/exfil leaks), this transforms
+    #: the reply in place. Rule-based, model-agnostic. ``"off"`` by default —
+    #: outbound redaction can alter a legitimate answer (e.g. echoing the
+    #: user's own email), so high-sensitivity agents opt in.
+    output_dlp: Literal["redact", "off"] = "off"
+
 
 class AgentSpecBody(BaseModel):
     """The ``spec:`` block. ``tools`` is a ``type``-discriminated union

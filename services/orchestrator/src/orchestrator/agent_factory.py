@@ -170,6 +170,12 @@ class BuiltAgent:
     #: (CM-B5 rule: ``read_only`` or ``idempotent``). Closes over this
     #: build's tool registry; unknown names resolve unsafe (fail-closed).
     tool_replay_safe: Callable[[str], bool] | None = None
+    #: Stream PI-1c — the per-build spotlight nonce (same value the graph
+    #: uses to fence tool/RAG/memory). ``None`` when spotlighting is off.
+    #: The control-plane run assembler reuses it to fence structured
+    #: ``untrusted_content`` seed input with the matching marker, so inline
+    #: data shares one provenance fence with the model-side channels.
+    spotlight_nonce: str | None = None
 
 
 def _tool_replay_safe(registry: ToolRegistry) -> Callable[[str], bool]:
@@ -707,6 +713,8 @@ async def build_agent(
         action_judge=(action_judge if spec.spec.defenses.action_screen != "off" else None),
         action_screen=spec.spec.defenses.action_screen,
         action_screen_on_error=spec.spec.defenses.action_screen_on_error,
+        # Stream 7.4 — outbound DLP redaction; gated by the manifest.
+        output_dlp=spec.spec.defenses.output_dlp == "redact",
         # Stream HX-13 — vendor-native tool-disclosure tier (catalog bit;
         # off-catalog / unannotated models stay on the HX-12 tier).
         tool_disclosure=_resolved_tool_disclosure(spec.spec.model),
@@ -722,6 +730,9 @@ async def build_agent(
             loaded_skills.resolved_versions, agent_name=spec.metadata.name
         ),
         tool_replay_safe=_tool_replay_safe(registry),
+        # Stream PI-1c — expose the build nonce so the control-plane seed
+        # assembler can fence structured untrusted_content with it.
+        spotlight_nonce=spotlight_nonce,
     )
 
 

@@ -440,6 +440,55 @@ async def test_make_agent_builder_skills_manifest_without_tenant_errors() -> Non
 
 
 # ---------------------------------------------------------------------------
+# Stream PI-1c — BuiltAgent.spotlight_nonce is exposed so the control-plane
+# seed assembler can fence structured untrusted_content with the build nonce.
+# ---------------------------------------------------------------------------
+
+
+def _spec_with_defenses(defenses: dict[str, str]) -> AgentSpec:
+    manifest = dict(_MINIMAL_MANIFEST)
+    manifest["spec"] = dict(
+        manifest["spec"],
+        model={
+            "provider": "anthropic",
+            "name": "claude-haiku-4-5",
+            "api_key_ref": f"secret://{_ANTHROPIC_KEY_NAME}",
+        },
+        defenses=defenses,
+    )
+    return AgentSpec.model_validate(manifest)
+
+
+def _spotlight_builder() -> Any:
+    return make_agent_builder(
+        LocalDevSecretStore.from_mapping({_ANTHROPIC_KEY_NAME: "sk-ant-test"}),
+        InMemorySaver(),
+        skill_store=InMemorySkillStore(),
+        tenant_config_service=_StubTenantConfig(),  # type: ignore[arg-type]
+        credentials_resolver=_anthropic_credentials_resolver(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_built_agent_exposes_spotlight_nonce_when_on() -> None:
+    """Spotlighting on (default) → a non-empty build nonce is exposed for the
+    PI-1c untrusted_content seed fence."""
+    built = await _spotlight_builder()(
+        _spec_with_defenses({"prompt_injection": "spotlight"}), tenant_id=uuid4()
+    )
+    assert built.spotlight_nonce
+    assert len(built.spotlight_nonce) == 12
+
+
+@pytest.mark.asyncio
+async def test_built_agent_spotlight_nonce_none_when_off() -> None:
+    built = await _spotlight_builder()(
+        _spec_with_defenses({"prompt_injection": "off"}), tenant_id=uuid4()
+    )
+    assert built.spotlight_nonce is None
+
+
+# ---------------------------------------------------------------------------
 # Stream PI-2b-3 — _make_output_judge gating + construction
 # ---------------------------------------------------------------------------
 

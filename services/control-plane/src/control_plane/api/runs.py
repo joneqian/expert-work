@@ -58,6 +58,7 @@ from helix_agent.common.observability import (
     helix_counter,
     helix_histogram,
 )
+from helix_agent.common.spotlight import spotlight_untrusted
 from helix_agent.persistence import ApprovalStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.rls import current_user_id_var
@@ -86,6 +87,23 @@ class RunRequest(BaseModel):
 
     input: str | None = Field(default=None, max_length=8192)
     image_refs: list[str] = Field(default_factory=list, max_length=64)
+    #: Stream PI-1c — structured untrusted input. A business system passes
+    #: the data to act on (a ticket / email / document) here instead of
+    #: concatenating it into ``input``, so helix knows which span is
+    #: attacker-controllable and fences it with spotlighting before the
+    #: model sees it. The matching system-prompt clause tells the model to
+    #: treat fenced content as DATA, never instructions — the root fix for
+    #: inline prompt injection. Empty / omitted → today's behaviour.
+    untrusted_content: list[str] = Field(default_factory=list, max_length=16)
+
+    @field_validator("untrusted_content")
+    @classmethod
+    def _bound_untrusted_blocks(cls, value: list[str]) -> list[str]:
+        for block in value:
+            if len(block) > 8192:
+                msg = "each untrusted_content block must be <= 8192 chars"
+                raise ValueError(msg)
+        return value
 
     @field_validator("image_refs")
     @classmethod
@@ -159,8 +177,30 @@ def _validate_image_refs(
             raise HTTPException(status_code=404, detail="image ref not found")
 
 
+def _fence_untrusted(blocks: list[str], *, spotlight_nonce: str | None) -> str:
+    """Render structured ``untrusted_content`` as a trailing text section.
+
+    Stream PI-1c — each block is fenced with :func:`spotlight_untrusted`
+    using the build's nonce (shared with the model-side tool/RAG channels)
+    so the model treats it as DATA per the spotlight system clause. When
+    the agent has spotlighting off (``spotlight_nonce is None``) the blocks
+    are appended verbatim under a plain marker — degrades to today's
+    behaviour, with the 7.4 output screen as the backstop.
+    """
+    if spotlight_nonce:
+        fenced = [spotlight_untrusted(b, nonce=spotlight_nonce) for b in blocks]
+    else:
+        fenced = [f"[untrusted content]\n{b}" for b in blocks]
+    return "\n\n".join(fenced)
+
+
 def _build_human_message(
-    *, input_text: str | None, image_refs: list[str], supports_vision: bool
+    *,
+    input_text: str | None,
+    image_refs: list[str],
+    supports_vision: bool,
+    untrusted_content: list[str] | None = None,
+    spotlight_nonce: str | None = None,
 ) -> HumanMessage:
     """Assemble the ``HumanMessage`` for a J.6 multimodal run input.
 
@@ -174,20 +214,33 @@ def _build_human_message(
     refs to call it.
 
     No-images case — emit plain text unchanged.
+
+    Stream PI-1c — when ``untrusted_content`` is supplied, the fenced
+    blocks are appended after the trusted instruction text (as a trailing
+    text segment in both the content-block and plain paths) so the model
+    can separate the user's instruction from attacker-controllable data.
     """
     text = input_text or ""
+    untrusted = (
+        _fence_untrusted(untrusted_content, spotlight_nonce=spotlight_nonce)
+        if untrusted_content
+        else ""
+    )
     if not image_refs:
-        return HumanMessage(content=text)
+        body = f"{text}\n\n{untrusted}" if untrusted and text else (untrusted or text)
+        return HumanMessage(content=body)
     if supports_vision:
         content: list[dict[str, Any]] = []
         if text:
             content.append({"type": "text", "text": text})
         for ref in image_refs:
             content.append(image_ref_block(ref))
+        if untrusted:
+            content.append({"type": "text", "text": untrusted})
         return HumanMessage(content=content)
     mentions = "\n".join(f"[image attached: {ref}]" for ref in image_refs)
-    body = f"{text}\n\n{mentions}" if text else mentions
-    return HumanMessage(content=body)
+    parts = [p for p in (text, mentions, untrusted) if p]
+    return HumanMessage(content="\n\n".join(parts))
 
 
 def _get_audit(request: Request) -> AuditLogger:
@@ -560,6 +613,8 @@ def build_runs_router() -> APIRouter:
                     input_text=payload.input,
                     image_refs=payload.image_refs,
                     supports_vision=built.supports_vision,
+                    untrusted_content=payload.untrusted_content,
+                    spotlight_nonce=built.spotlight_nonce,
                 ),
             ],
             "step_count": 0,

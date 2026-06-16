@@ -44,6 +44,12 @@ export async function createSession(payload: CreateSessionRequest): Promise<Thre
 export interface RunRequest {
   input?: string | null;
   image_refs?: string[];
+  /** Stream PI-1c — structured untrusted input. Data to act on (a ticket,
+   *  email, or document) passed here instead of concatenated into
+   *  ``input`` is fenced with spotlighting before the model sees it, so an
+   *  instruction embedded in it is treated as data — the root fix for
+   *  inline prompt injection. Omitted → today's behaviour. */
+  untrusted_content?: string[];
 }
 
 /** A single SSE frame as parsed from the network stream. ``data`` is
