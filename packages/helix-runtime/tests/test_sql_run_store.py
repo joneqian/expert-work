@@ -381,3 +381,46 @@ async def test_list_orphans_finds_only_expired_running(run_store: SqlRunStore) -
     found = await run_store.list_orphans(now=now, limit=10)
     assert orphan in [o.run_id for o in found]
     assert live not in [o.run_id for o in found]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_claim_queued_exactly_one_winner(run_store: SqlRunStore) -> None:
+    """True DB concurrency — the claim CAS row-lock serialises queue workers."""
+    import asyncio
+    from dataclasses import replace
+
+    run_id, tenant = uuid4(), uuid4()
+    info = _info(run_id=run_id, tenant_id=tenant, status=RunStatus.QUEUED)
+    await run_store.create(replace(info, enqueued_input={"input": "go", "image_refs": []}))
+    now = datetime.now(UTC)
+
+    async def _claim(n: int):
+        return await run_store.claim_queued(
+            run_id=run_id,
+            new_owner=f"worker-{n}",
+            lease_until=now + timedelta(seconds=30),
+            heartbeat_at=now,
+        )
+
+    results = await asyncio.gather(*(_claim(i) for i in range(16)))
+    winners = [r for r in results if r is not None]
+    assert len(winners) == 1  # exactly one worker claims the queued run
+    assert winners[0].enqueued_input == {"input": "go", "image_refs": []}
+    row = await run_store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.status is RunStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_list_queued_round_trips_enqueued_input(run_store: SqlRunStore) -> None:
+    from dataclasses import replace
+
+    tenant, run_id = uuid4(), uuid4()
+    info = _info(run_id=run_id, tenant_id=tenant, status=RunStatus.QUEUED)
+    await run_store.create(
+        replace(info, enqueued_input={"input": "hi", "untrusted_content": ["x"]})
+    )
+
+    queued = await run_store.list_queued(limit=10)
+    assert any(q.run_id == run_id for q in queued)
+    match = next(q for q in queued if q.run_id == run_id)
+    assert match.enqueued_input == {"input": "hi", "untrusted_content": ["x"]}

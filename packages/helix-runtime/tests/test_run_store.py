@@ -585,3 +585,74 @@ async def test_reclaim_cas_one_winner() -> None:
     )
     row = await store.get(run_id=run_id, tenant_id=tenant)
     assert row is not None and row.claimed_by == "inst-b"
+
+
+# --------------------------------------------------------------------------
+# Stream 9.5 — distributed run queue
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_queued_returns_queued_fifo() -> None:
+    store = InMemoryRunStore()
+    tenant = uuid4()
+    old = uuid4()
+    new = uuid4()
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    await store.create(
+        _info(run_id=old, tenant_id=tenant, status=RunStatus.QUEUED, created_at=base)
+    )
+    await store.create(
+        _info(
+            run_id=new,
+            tenant_id=tenant,
+            status=RunStatus.QUEUED,
+            created_at=base + timedelta(minutes=5),
+        )
+    )
+    # A non-queued run must not appear.
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant, status=RunStatus.RUNNING))
+
+    queued = await store.list_queued(limit=10)
+    assert [q.run_id for q in queued] == [old, new]  # oldest first
+
+
+@pytest.mark.asyncio
+async def test_claim_queued_cas_one_winner() -> None:
+    store = InMemoryRunStore()
+    tenant, run_id = uuid4(), uuid4()
+    await store.create(_info(run_id=run_id, tenant_id=tenant, status=RunStatus.QUEUED))
+    now = datetime.now(UTC)
+    lease = now + timedelta(seconds=30)
+
+    won = await store.claim_queued(
+        run_id=run_id, new_owner="worker-a", lease_until=lease, heartbeat_at=now
+    )
+    assert won is not None
+    assert won.status is RunStatus.RUNNING
+    assert won.claimed_by == "worker-a"
+    assert won.enqueued_input is None or isinstance(won.enqueued_input, dict)
+
+    # Second claim loses — the run is no longer queued.
+    lost = await store.claim_queued(
+        run_id=run_id, new_owner="worker-b", lease_until=lease, heartbeat_at=now
+    )
+    assert lost is None
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.claimed_by == "worker-a"
+
+
+@pytest.mark.asyncio
+async def test_claim_queued_carries_enqueued_input() -> None:
+    store = InMemoryRunStore()
+    tenant, run_id = uuid4(), uuid4()
+    info = _info(run_id=run_id, tenant_id=tenant, status=RunStatus.QUEUED)
+    from dataclasses import replace
+
+    await store.create(replace(info, enqueued_input={"input": "hi", "image_refs": []}))
+    now = datetime.now(UTC)
+    claimed = await store.claim_queued(
+        run_id=run_id, new_owner="w", lease_until=now + timedelta(seconds=30), heartbeat_at=now
+    )
+    assert claimed is not None
+    assert claimed.enqueued_input == {"input": "hi", "image_refs": []}

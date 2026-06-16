@@ -910,3 +910,20 @@ async def test_list_runs_bare_agent_version_is_422(runs_client: AsyncClient) -> 
     """Mini-ADR H-12 — ``agent_version`` without ``agent_name`` fails fast."""
     resp = await runs_client.get("/v1/runs", params={"agent_version": "1.0.0"})
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_run_queue_mode_returns_202(runs_client: AsyncClient) -> None:
+    """Stream 9.5 — ``mode=queue`` enqueues + returns 202 (non-streaming)."""
+    thread_id = await _create_session(runs_client)
+    response = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs",
+        json={"input": "do it async", "mode": "queue"},
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "queued"
+    assert body["thread_id"] == thread_id
+    assert "run_id" in body
+    # Not an SSE stream — a plain JSON envelope.
+    assert response.headers["content-type"].startswith("application/json")

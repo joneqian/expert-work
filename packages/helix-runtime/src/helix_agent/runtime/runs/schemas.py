@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 
@@ -21,6 +22,12 @@ class RunStatus(StrEnum):
     """Lifecycle status of a single run."""
 
     PENDING = "pending"
+    #: Stream 9.5 — enqueued for the distributed run queue: the run is durable
+    #: but belongs to no process yet. A ``RunQueueWorker`` on any instance
+    #: CAS-claims it (``status='queued'`` → ``running``) and executes it from
+    #: the persisted ``enqueued_input``. Distinct from ``PENDING`` (a transient
+    #: in-process create → RUNNING step on the synchronous SSE path).
+    QUEUED = "queued"
     RUNNING = "running"
     SUCCESS = "success"
     ERROR = "error"
@@ -91,3 +98,9 @@ class RunInfo:
     #: Stream 9.4 — orphan-sweep reclaim counter; the sweep stops respawning a
     #: run past a cap (a run that crashes its owner every time).
     reclaim_count: int = 0
+    #: Stream 9.5 — the persisted run input for a ``QUEUED`` run, so a worker on
+    #: another instance can rebuild ``graph_input`` and execute it. Shape:
+    #: ``{"input": str, "image_refs": [...], "untrusted_content": [...]}``.
+    #: ``None`` for synchronous (SSE) runs and after a queued run is claimed
+    #: (nulled out — the input then lives in the checkpoint / event log).
+    enqueued_input: dict[str, Any] | None = None

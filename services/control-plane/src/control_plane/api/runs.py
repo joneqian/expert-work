@@ -86,6 +86,12 @@ class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     input: str | None = Field(default=None, max_length=8192)
+    #: Stream 9.5 — execution mode. ``stream`` (default) runs the agent inside
+    #: this request and streams the result (SSE) — unchanged behaviour. ``queue``
+    #: enqueues the run for the distributed run queue and returns ``202`` with
+    #: the ``run_id`` immediately; a ``RunQueueWorker`` on any instance executes
+    #: it, and the client reads the output over ``GET .../runs/{id}/events``.
+    mode: Literal["stream", "queue"] = "stream"
     image_refs: list[str] = Field(default_factory=list, max_length=64)
     #: Stream PI-1c — structured untrusted input. A business system passes
     #: the data to act on (a ticket / email / document) here instead of
@@ -246,6 +252,37 @@ def _build_human_message(
     mentions = "\n".join(f"[image attached: {ref}]" for ref in image_refs)
     parts = [p for p in (text, mentions, untrusted) if p]
     return HumanMessage(content="\n\n".join(parts))
+
+
+def build_run_graph_input(
+    built: Any,
+    *,
+    input_text: str | None,
+    image_refs: list[str],
+    untrusted_content: list[str] | None,
+) -> dict[str, Any]:
+    """Assemble the graph input for a run from a built agent + user input.
+
+    Stream 9.5 — the single source both the synchronous POST handler and the
+    distributed-queue worker (``RunQueueWorker``) use, so an enqueued run is
+    executed byte-for-byte the same as a streamed one. ``built.*`` is rebuilt
+    by the worker via ``runtime.get_agent`` (like the orphan-sweep respawn);
+    only the user input is carried through the persisted ``enqueued_input``.
+    """
+    return {
+        "messages": [
+            SystemMessage(content=built.system_prompt),
+            _build_human_message(
+                input_text=input_text,
+                image_refs=image_refs,
+                supports_vision=built.supports_vision,
+                untrusted_content=untrusted_content,
+                spotlight_nonce=built.spotlight_nonce,
+            ),
+        ],
+        "step_count": 0,
+        "max_steps": built.max_steps,
+    }
 
 
 def _get_audit(request: Request) -> AuditLogger:
@@ -634,6 +671,32 @@ def build_runs_router() -> APIRouter:
         # a resume?").
         run_id = uuid4()
         prior_runs = await runtime.run_manager.list_by_thread(thread_id, tenant_id=tenant_id)
+
+        # Stream 9.5 — queue mode: persist the run as ``queued`` and return
+        # 202 immediately. A RunQueueWorker on any instance claims + executes
+        # it; the client reads the output over GET .../runs/{id}/events. The
+        # agent was already built above (fail-fast manifest + image-ref check),
+        # but execution is deferred — the worker rebuilds (cache-hit) + runs.
+        if payload.mode == "queue":
+            await runtime.run_manager.enqueue(
+                run_id=run_id,
+                thread_id=thread_id,
+                tenant_id=tenant_id,
+                user_id=caller_user_id,
+                enqueued_input={
+                    "input": payload.input,
+                    "image_refs": payload.image_refs,
+                    "untrusted_content": payload.untrusted_content,
+                },
+                is_resume=bool(prior_runs),
+                trace_id=trace_id,
+            )
+            logger.info("control_plane.run.enqueued run_id=%s", run_id)
+            return JSONResponse(
+                status_code=202,
+                content={"run_id": str(run_id), "thread_id": str(thread_id), "status": "queued"},
+            )
+
         # Mini-ADR H-9.5 — capture the API-side OTel trace id at run start
         # so RunDetail can deep-link to Langfuse / Tempo even after the
         # in-memory RunManager TTL expires.
@@ -648,20 +711,12 @@ def build_runs_router() -> APIRouter:
         # SE-7d-3b-ii — carry the build-time distilled skills to the run's
         # terminal hook so it can emit skill_run_usage for the rollback monitor.
         run_record.bound_distilled_skills = built.bound_distilled_skills
-        graph_input = {
-            "messages": [
-                SystemMessage(content=built.system_prompt),
-                _build_human_message(
-                    input_text=payload.input,
-                    image_refs=payload.image_refs,
-                    supports_vision=built.supports_vision,
-                    untrusted_content=payload.untrusted_content,
-                    spotlight_nonce=built.spotlight_nonce,
-                ),
-            ],
-            "step_count": 0,
-            "max_steps": built.max_steps,
-        }
+        graph_input = build_run_graph_input(
+            built,
+            input_text=payload.input,
+            image_refs=payload.image_refs,
+            untrusted_content=payload.untrusted_content,
+        )
         configurable: dict[str, Any] = {
             "thread_id": str(thread_id),
             "tenant_id": str(tenant_id),

@@ -1,0 +1,175 @@
+"""Stream 9.5 — RunQueueWorker drains the distributed run queue.
+
+Drives the real :class:`RunQueueWorker` over a real :class:`InMemoryRunStore`
+seeded with a ``queued`` run (via ``RunManager.enqueue``). ``run_agent`` is
+monkeypatched to a recording no-op — the seam under test is
+scan → claim CAS (exactly-once) → rebuild input → adopt → start, which is
+model-agnostic.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+
+from control_plane import run_queue_worker as worker_module
+from control_plane.audit import build_default_audit_logger
+from control_plane.run_queue_worker import RunQueueWorker
+from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from helix_agent.runtime.runs import InMemoryRunStore, RunManager, RunStatus
+
+
+class _FakeThreads:
+    def __init__(self, *, has_agent: bool = True) -> None:
+        self._has_agent = has_agent
+
+    async def get(self, _thread_id, *, tenant_id):
+        del tenant_id
+        if not self._has_agent:
+            return SimpleNamespace(agent_name=None, agent_version=None, user_id=None)
+        return SimpleNamespace(agent_name="a", agent_version="1.0.0", user_id=None)
+
+
+class _FakeAgents:
+    async def get(self, *, tenant_id, name, version):
+        del tenant_id, name, version
+        return SimpleNamespace(spec=SimpleNamespace())
+
+
+class _FakeRuntime:
+    def __init__(self, run_store: InMemoryRunStore, *, instance_id: str = "worker-1") -> None:
+        self.run_manager = RunManager(run_store, instance_id=instance_id, lease_ttl_s=30.0)
+        self.stream_bridge = object()
+        self.run_event_store = None
+        self.skill_run_usage_recorder = None
+        self.trajectory_recorder = None
+
+    async def get_agent(self, **_kw):
+        return SimpleNamespace(
+            graph=object(),
+            bound_distilled_skills=(),
+            tool_replay_safe=None,
+            run_deadline_s=0,
+            system_prompt="you are a test agent",
+            supports_vision=False,
+            spotlight_nonce=None,
+            max_steps=8,
+        )
+
+    def new_worker_spawn_budget(self):
+        return None
+
+
+def _worker(store, runtime, **kw) -> RunQueueWorker:
+    return RunQueueWorker(
+        run_store=store,
+        thread_store=kw.pop("threads", _FakeThreads()),
+        agent_spec_store=_FakeAgents(),
+        runtime=runtime,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        approval_store=object(),
+        **kw,
+    )
+
+
+async def _enqueue(mgr: RunManager, *, text: str = "hello") -> tuple:
+    run_id, tenant, thread = uuid4(), uuid4(), uuid4()
+    await mgr.enqueue(
+        run_id=run_id,
+        thread_id=thread,
+        tenant_id=tenant,
+        enqueued_input={"input": text, "image_refs": [], "untrusted_content": []},
+    )
+    return run_id, tenant
+
+
+@pytest.mark.asyncio
+async def test_claims_and_starts_queued_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    spawns: list[dict] = []
+
+    async def _fake_run_agent(**kw):
+        spawns.append(kw)
+
+    monkeypatch.setattr(worker_module, "run_agent", _fake_run_agent)
+
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _enqueue(runtime.run_manager, text="do the thing")
+
+    started = await _worker(store, runtime).run_once()
+    await asyncio.sleep(0)  # let the spawned task body run
+
+    assert started == 1
+    assert len(spawns) == 1
+    # graph_input was rebuilt from the persisted input (not None).
+    assert spawns[0]["graph_input"]["messages"][1].content == "do the thing"
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.RUNNING
+    assert row.claimed_by == "worker-1"
+
+
+@pytest.mark.asyncio
+async def test_exactly_one_worker_claims(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_run_agent(**kw):
+        return None
+
+    monkeypatch.setattr(worker_module, "run_agent", _fake_run_agent)
+
+    store = InMemoryRunStore()
+    runtime_a = _FakeRuntime(store, instance_id="worker-a")
+    runtime_b = _FakeRuntime(store, instance_id="worker-b")
+    run_id, tenant = await _enqueue(runtime_a.run_manager)
+
+    # Two workers race the same queued run; the claim CAS lets exactly one win.
+    started_a, started_b = await asyncio.gather(
+        _worker(store, runtime_a).run_once(),
+        _worker(store, runtime_b).run_once(),
+    )
+
+    assert started_a + started_b == 1
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.RUNNING
+    assert row.claimed_by in {"worker-a", "worker-b"}
+
+
+@pytest.mark.asyncio
+async def test_skips_already_claimed_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    spawns: list[dict] = []
+    monkeypatch.setattr(worker_module, "run_agent", lambda **kw: spawns.append(kw))
+
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, _tenant = await _enqueue(runtime.run_manager)
+    # A peer already claimed it (status flipped out of queued).
+    await store.claim_queued(
+        run_id=run_id,
+        new_owner="peer",
+        lease_until=datetime.now(UTC) + timedelta(seconds=30),
+        heartbeat_at=datetime.now(UTC),
+    )
+
+    started = await _worker(store, runtime).run_once()
+    assert started == 0
+    assert spawns == []
+
+
+@pytest.mark.asyncio
+async def test_no_agent_meta_marks_errored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(worker_module, "run_agent", lambda **kw: None)
+
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _enqueue(runtime.run_manager)
+
+    worker = _worker(store, runtime, threads=_FakeThreads(has_agent=False))
+    await worker.run_once()
+
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.ERROR  # claimed then errored (unrecoverable)

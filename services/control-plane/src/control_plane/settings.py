@@ -371,6 +371,16 @@ class Settings(BaseSettings):
     #: stops a run that crashes its owner every time (OOM) from looping forever.
     orphan_max_reclaims: int = Field(default=3, gt=0)
 
+    # --- Stream 9.5 (distributed run queue) ---------------------------------
+    #: Master switch for the run-queue worker (drains ``status='queued'`` runs
+    #: submitted via ``POST /runs mode=queue``). Every instance runs it; the
+    #: claim CAS makes it exactly-once across the pool.
+    enable_run_queue_worker: bool = Field(default=True)
+    #: How often the worker scans for queued runs (short — queue latency).
+    run_queue_interval_s: float = Field(default=2.0, gt=0)
+    #: Max queued runs claimed + started per cycle.
+    run_queue_batch_size: int = Field(default=10, gt=0)
+
     #: Stream J.10 (Mini-ADR J-26 (2)) — max cron triggers a tenant may
     #: register. Caps the scheduler's per-sweep work + a runaway client.
     max_cron_triggers_per_tenant: int = Field(default=100, gt=0)

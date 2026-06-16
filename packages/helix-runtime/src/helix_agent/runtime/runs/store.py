@@ -189,6 +189,34 @@ class RunStore(abc.ABC):
         ``False`` — rowcount 0). Caller wraps in ``bypass_rls_session()``.
         """
 
+    @abc.abstractmethod
+    async def list_queued(self, *, limit: int) -> list[RunInfo]:
+        """Cross-tenant ``status='queued'`` runs, oldest first (FIFO).
+
+        Stream 9.5 — the run-queue worker's scan. Caller MUST wrap in
+        ``bypass_rls_session()`` (cross-tenant). The claim CAS
+        (:meth:`claim_queued`) is the authoritative exactly-once guard;
+        this scan only nominates candidates.
+        """
+
+    @abc.abstractmethod
+    async def claim_queued(
+        self,
+        *,
+        run_id: UUID,
+        new_owner: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> RunInfo | None:
+        """Atomically claim a queued run for execution; the run iff won.
+
+        Stream 9.5 — CAS on ``status='queued'`` (→ ``running`` + stamp the
+        ownership lease) so exactly one worker wins when several race on the
+        same queued run. Returns the claimed :class:`RunInfo` (carrying the
+        ``enqueued_input`` the worker needs) on a win, ``None`` on a loss
+        (rowcount 0). Caller wraps in ``bypass_rls_session()``.
+        """
+
 
 #: Stream H.3 PR 1 — Mini-ADR H-7 (D) hard cap so a single page can never
 #: return more than this many rows. Callers passing a larger ``limit``
@@ -371,6 +399,32 @@ class InMemoryRunStore(RunStore):
         )
         return True
 
+    async def list_queued(self, *, limit: int) -> list[RunInfo]:
+        rows = [r for r in self._rows.values() if r.status is RunStatus.QUEUED]
+        rows.sort(key=lambda r: r.created_at)
+        return rows[: max(1, limit)]
+
+    async def claim_queued(
+        self,
+        *,
+        run_id: UUID,
+        new_owner: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> RunInfo | None:
+        row = self._rows.get(run_id)
+        if row is None or row.status is not RunStatus.QUEUED:
+            return None
+        claimed = replace(
+            row,
+            status=RunStatus.RUNNING,
+            claimed_by=new_owner,
+            lease_until=lease_until,
+            heartbeat_at=heartbeat_at,
+        )
+        self._rows[run_id] = claimed
+        return claimed
+
 
 def _row_to_dto(row: AgentRunRow) -> RunInfo:
     return RunInfo(
@@ -390,6 +444,7 @@ def _row_to_dto(row: AgentRunRow) -> RunInfo:
         lease_until=row.lease_until,
         heartbeat_at=row.heartbeat_at,
         reclaim_count=row.reclaim_count,
+        enqueued_input=row.enqueued_input,
     )
 
 
@@ -419,6 +474,7 @@ class SqlRunStore(RunStore):
                     lease_until=info.lease_until,
                     heartbeat_at=info.heartbeat_at,
                     reclaim_count=info.reclaim_count,
+                    enqueued_input=info.enqueued_input,
                 )
             )
             await session.commit()
@@ -631,3 +687,45 @@ class SqlRunStore(RunStore):
             )
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def list_queued(self, *, limit: int) -> list[RunInfo]:
+        # Cross-tenant: no tenant filter — caller wraps in bypass_rls_session().
+        stmt = (
+            select(AgentRunRow)
+            .where(AgentRunRow.status == RunStatus.QUEUED.value)
+            .order_by(AgentRunRow.created_at.asc())
+            .limit(max(1, limit))
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
+    async def claim_queued(
+        self,
+        *,
+        run_id: UUID,
+        new_owner: str,
+        lease_until: datetime,
+        heartbeat_at: datetime,
+    ) -> RunInfo | None:
+        # Atomic CAS — exactly one worker wins the queued run. ``RETURNING``
+        # hands back the claimed row (with ``enqueued_input``) in one round
+        # trip; the loser's UPDATE matches zero rows and returns ``None``.
+        async with self._sf() as session:
+            result = await session.execute(
+                update(AgentRunRow)
+                .where(
+                    AgentRunRow.id == run_id,
+                    AgentRunRow.status == RunStatus.QUEUED.value,
+                )
+                .values(
+                    status=RunStatus.RUNNING.value,
+                    claimed_by=new_owner,
+                    lease_until=lease_until,
+                    heartbeat_at=heartbeat_at,
+                )
+                .returning(AgentRunRow)
+            )
+            row = result.scalars().first()
+            await session.commit()
+        return _row_to_dto(row) if row is not None else None

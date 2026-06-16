@@ -12,12 +12,15 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, Integer, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from helix_agent.persistence.base import Base
 
-_STATUS_VALUES = "('pending', 'running', 'success', 'error', 'timeout', 'interrupted', 'paused')"
+_STATUS_VALUES = (
+    "('pending', 'queued', 'running', 'success', 'error', 'timeout', 'interrupted', 'paused')"
+)
 _DISCONNECT_VALUES = "('cancel', 'continue')"
 
 
@@ -53,6 +56,11 @@ class AgentRunRow(Base):
     # sweep gives up (marks the run errored) past a cap so a run that crashes
     # its owner process every time (OOM / segfault) can't respawn forever.
     reclaim_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # Stream 9.5 (distributed run queue) — persisted run input for a ``queued``
+    # run, so a ``RunQueueWorker`` on any instance can rebuild ``graph_input``
+    # and execute it. NULL for synchronous (SSE) runs and once a queued run is
+    # claimed (the input then lives in the checkpoint / event log).
+    enqueued_input: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         CheckConstraint(f"status IN {_STATUS_VALUES}", name="agent_run_status_valid"),
@@ -72,5 +80,11 @@ class AgentRunRow(Base):
             "ix_agent_run_lease_sweep",
             "lease_until",
             postgresql_where=text("status = 'running'"),
+        ),
+        # Stream 9.5 — the run-queue worker scans queued runs by arrival order.
+        Index(
+            "ix_agent_run_queue_scan",
+            "created_at",
+            postgresql_where=text("status = 'queued'"),
         ),
     )

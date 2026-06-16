@@ -24,6 +24,7 @@ import os
 import socket
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4
 
 from helix_agent.common.skill_run_usage import BoundDistilledSkill
@@ -188,6 +189,47 @@ class RunManager:
             self._runs[run_id] = record
             logger.info("run.create id=%s thread=%s tenant=%s", run_id, thread_id, tenant_id)
             return record
+
+    async def enqueue(
+        self,
+        *,
+        run_id: UUID,
+        thread_id: UUID,
+        tenant_id: UUID,
+        enqueued_input: dict[str, Any],
+        user_id: UUID | None = None,
+        is_resume: bool = False,
+        trace_id: str | None = None,
+    ) -> None:
+        """Persist a ``QUEUED`` run for the distributed queue (Stream 9.5).
+
+        Unlike :meth:`create`, this writes only the durable row — the run
+        belongs to no process yet, so there is no in-memory record and no
+        ``asyncio.Task``. A :class:`RunQueueWorker` on any instance later
+        CAS-claims it (``status='queued'`` → ``running``), adopts it, and
+        executes it from ``enqueued_input``. Requires a durable store.
+        """
+        if self._store is None:
+            msg = "enqueue requires a durable RunStore"
+            raise RuntimeError(msg)
+        now = datetime.now(UTC)
+        info = RunInfo(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            status=RunStatus.QUEUED,
+            on_disconnect=DisconnectMode.CONTINUE,
+            is_resume=is_resume,
+            error=None,
+            created_at=now,
+            updated_at=now,
+            finished_at=None,
+            trace_id=trace_id,
+            enqueued_input=enqueued_input,
+        )
+        await self._store.create(info)
+        logger.info("run.enqueue id=%s thread=%s tenant=%s", run_id, thread_id, tenant_id)
 
     def get(self, run_id: UUID) -> RunRecord | None:
         """Snapshot lookup; safe outside the lock since dict reads are atomic."""

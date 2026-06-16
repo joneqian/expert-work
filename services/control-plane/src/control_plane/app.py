@@ -156,6 +156,7 @@ from control_plane.ratelimit import (
     RateLimiter,
     RedisTokenBucketLimiter,
 )
+from control_plane.run_queue_worker import RunQueueWorker
 from control_plane.runtime import (
     AgentRuntime,
     DynamicResolvingEmbedder,
@@ -757,6 +758,22 @@ def create_app(
         if resolved_settings.enable_orphan_sweep
         else None
     )
+    # Stream 9.5 — distributed run-queue worker. Drains ``status='queued'``
+    # runs (POST /runs mode=queue) across instances; CAS-claim → exactly-once.
+    run_queue_worker: RunQueueWorker | None = (
+        RunQueueWorker(
+            run_store=resolved_run_store,
+            thread_store=resolved_threads,
+            agent_spec_store=resolved_repo,
+            runtime=resolved_agent_runtime,
+            audit_logger=resolved_audit,
+            approval_store=resolved_approval_store,
+            interval_s=resolved_settings.run_queue_interval_s,
+            batch_size=resolved_settings.run_queue_batch_size,
+        )
+        if resolved_settings.enable_run_queue_worker
+        else None
+    )
     # Capability Uplift Sprint #4 (Mini-ADRs U-26 / U-27) — Curator
     # sweep + activity recorder. Curator is single-replica (same
     # rationale as the trigger scheduler); the recorder is process-
@@ -1147,6 +1164,9 @@ def create_app(
             if orphan_sweep is not None:
                 orphan_sweep.start()
                 _app.state.orphan_sweep = orphan_sweep
+            if run_queue_worker is not None:
+                run_queue_worker.start()
+                _app.state.run_queue_worker = run_queue_worker
             if skill_curator is not None:
                 skill_curator.start()
                 _app.state.skill_curator = skill_curator
@@ -1360,6 +1380,8 @@ def create_app(
                     await scheduler.stop()
                 if orphan_sweep is not None:
                     await orphan_sweep.stop()
+                if run_queue_worker is not None:
+                    await run_queue_worker.stop()
                 if skill_curator is not None:
                     await skill_curator.stop()
                 if curation_worker is not None:
