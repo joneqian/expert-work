@@ -17,10 +17,10 @@
 
 → 优先级重心从「补沙箱安全」转向「**收割廉价 ★4→★5 + agent 能力项**」。
 
-## 当前非满分项（13 项；2.2/4.1/11.4/11.5/3.3/4.4/1.3/7.3/7.4 已收为 ★5）
+## 当前非满分项（12 项；2.2/4.1/11.4/11.5/3.3/4.4/1.3/7.3/7.4/8.5 已收为 ★5）
 
 ★4（一步之遥，多为低成本）：10.1（TX 终态，不推）（~~1.3~~ 已 ★5 #666/#667；~~7.3~~~~7.4~~ 已 ★5 #669）
-★3（真 gap）：7.2 · 8.5 · 7.6 · 14.4 · 13.2 · 16.4 · 16.3 · 10.5 · 12.4
+★3（真 gap）：7.2 · 7.6 · 14.4 · 13.2 · 16.4 · 16.3 · 10.5 · 12.4（~~8.5~~ 已 ★5 #671）
 ★2（M1 大件）：9.4 · 9.5
 ✅ 已收（本轮 T0）：2.2（#647）· 4.1（确认）
 
@@ -39,9 +39,10 @@
 > 见 `2026-06-15-1145-live-eval-worker-design.md` §8 E2E 实证；代码 #649/#652 已合，本机真栈（deepseek eval agent）
 > trace passed 3/3 / adversarial 5/6（机制证实，1 真防御观测非假阴）。
 >
-> **累计进度（T0+T1+T2 收割）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（★3→★5，+2，400）→ 4.4（+1，401）→ 1.3（★4→★5，+1，402）→ **7.3/7.4（★4→★5，+2，404/430）**。
-> **均分 4.60→4.70（93.95%），共 +8★。T1 全清，T2 廉价收割开张。** 1.3 见 `2026-06-16-1.3-orchestration-patterns-design.md`。
+> **累计进度（T0+T1+T2 收割）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（★3→★5，+2，400）→ 4.4（+1，401）→ 1.3（★4→★5，+1，402）→ 7.3/7.4（★4→★5，+2，404）→ **8.5（★3→★5，+2，406/430）**。
+> **均分 4.60→4.72（94.4%），共 +10★。T1 全清，T2 收割进行中。** 1.3 见 `2026-06-16-1.3-orchestration-patterns-design.md`。
 > 7.3/7.4 见 `2026-06-16-7.3-7.4-input-dlp-harvest-design.md`（#669）：7.3 PI-1c 结构化 `untrusted_content` 通道治内联注入根，**live 实证**通道把 001/003 内联注入从 LEAK 翻 SAFE（负对照排除假阳性）；7.4 出站 DLP 条件输出 redact PII。
+> 8.5 见 `2026-06-16-8.5-rbac-abac-design.md`（#671）：细粒度 RBAC-ABAC（RoleBinding conditions=resource_ids/labels/owner_only，agents 路由实例级授权，集成实证条件 operator allow/deny）。
 
 ### T1 — Agent 能力护城河（★4/★3→★5，高 CAP）
 
@@ -58,7 +59,7 @@
 | ~~7.3 输入校验~~ | ✅★5 | **已交付+live 实证（#669）**：PI-1c 结构化 `untrusted_content` 通道——业务系统结构化传待处理数据，helix 用 build nonce spotlight 包裹治内联注入根。live：通道把 001/003 内联注入从 LEAK 翻 SAFE，负对照排除假阳性 |
 | ~~7.4 DLP 输出~~ | ✅★5 | **已交付（#669）**：出站 DLP 条件输出——`common/dlp.py:scan_and_redact` 分类+脱敏 model 响应 PII（email/手机/身份证/卡号），`DefenseSpec.output_dlp` 开关 opt-in，确定性单测+装配测+指标 |
 | 7.2 gVisor | ★3 | 生产强制 + `isolation_level` 真实现（运维 + 代码） |
-| 8.5 RBAC-ABAC | ★3 | 资源 URI 级 / ABAC（扩 IAM 页，后端+admin-ui） |
+| ~~8.5 RBAC-ABAC~~ | ✅★5 | **已交付+集成实证（#671）**：RoleBinding `conditions`（resource_ids URI 级 / labels 属性 / owner_only 归属）+ `authorize_resource` 加性语义 + agents 路由实例级采用 + IAM 页条件编辑器；关键修正=有条件 binding 不并入 `principal.roles` 防绕过；none_as_null JSONB 修 platform CHECK |
 | 7.6 IDS | ★3 | Falco/Tetragon runtime IDS（运维） |
 | 14.4 MCP 审计 | ★3 | MCP 流量审计日志 + in-process 隔离评估 |
 
