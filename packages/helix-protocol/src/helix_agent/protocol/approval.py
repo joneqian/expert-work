@@ -165,3 +165,10 @@ class ApprovalRecord(BaseModel):
     decided_by: str | None = None
     decided_at: datetime | None = None
     modified_args: dict[str, object] | None = None
+    # Stream 13.2 — written atomically with the decision (the ``mark_decided``
+    # CAS). A retry / concurrent decide carrying the same ``idempotency_key``
+    # reads back ``continuation_run_id`` and replays it instead of 409'ing, so
+    # resume is deterministically recoverable. Both ``None`` for an
+    # unconditioned (keyless) decide and for still-pending rows.
+    idempotency_key: str | None = None
+    continuation_run_id: UUID | None = None

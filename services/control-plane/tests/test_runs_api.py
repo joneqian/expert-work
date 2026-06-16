@@ -478,6 +478,8 @@ async def _seed_pending_approval(
     thread_id: str,
     *,
     status: str = "pending",
+    idempotency_key: str | None = None,
+    continuation_run_id: UUID | None = None,
 ) -> UUID:
     """Seed an ``agent_approval`` row directly into the in-memory store."""
     from datetime import UTC, datetime, timedelta
@@ -501,6 +503,8 @@ async def _seed_pending_approval(
         requested_at=now,
         timeout_at=now + timedelta(hours=24),
         status=ApprovalStatus(status),
+        idempotency_key=idempotency_key,
+        continuation_run_id=continuation_run_id,
     )
     await app.state.approval_store.create(rec)
     return run_id
@@ -522,6 +526,72 @@ async def test_resume_unknown_run_returns_404(runs_client: AsyncClient) -> None:
 async def test_resume_already_decided_returns_409(runs_client: AsyncClient) -> None:
     thread_id = await _create_session(runs_client)
     run_id = await _seed_pending_approval(runs_client, thread_id, status="approved")
+    resp = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/resume",
+        json={"decision": "approve"},
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_resume_idempotent_replay_returns_continuation(runs_client: AsyncClient) -> None:
+    """Stream 13.2 — a retry with the original key replays the same continuation
+    run (200 JSON) instead of 409'ing — no agent build / worker spawn needed."""
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    continuation = uuid4()
+    run_id = await _seed_pending_approval(
+        runs_client,
+        thread_id,
+        status="approved",
+        idempotency_key="resume-key-1",
+        continuation_run_id=continuation,
+    )
+    resp = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/resume",
+        json={"decision": "approve", "idempotency_key": "resume-key-1"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["data"]["run_id"] == str(continuation)
+    assert body["data"]["idempotent_replay"] is True
+    assert resp.headers["X-Helix-Run-Id"] == str(continuation)
+
+
+@pytest.mark.asyncio
+async def test_resume_decided_different_key_returns_409(runs_client: AsyncClient) -> None:
+    """A mismatched idempotency key on a decided approval is a real conflict."""
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    run_id = await _seed_pending_approval(
+        runs_client,
+        thread_id,
+        status="approved",
+        idempotency_key="resume-key-1",
+        continuation_run_id=uuid4(),
+    )
+    resp = await runs_client.post(
+        f"/v1/sessions/{thread_id}/runs/{run_id}/resume",
+        json={"decision": "approve", "idempotency_key": "different-key"},
+    )
+    assert resp.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_resume_decided_no_key_still_409(runs_client: AsyncClient) -> None:
+    """Backward compat — a keyless retry on a decided approval stays 409."""
+    from uuid import uuid4
+
+    thread_id = await _create_session(runs_client)
+    run_id = await _seed_pending_approval(
+        runs_client,
+        thread_id,
+        status="approved",
+        idempotency_key="resume-key-1",
+        continuation_run_id=uuid4(),
+    )
     resp = await runs_client.post(
         f"/v1/sessions/{thread_id}/runs/{run_id}/resume",
         json={"decision": "approve"},

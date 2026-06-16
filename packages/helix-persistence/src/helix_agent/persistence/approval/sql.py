@@ -32,6 +32,8 @@ def _row_to_dto(row: AgentApprovalRow) -> ApprovalRecord:
         decided_by=row.decided_by,
         decided_at=row.decided_at,
         modified_args=dict(row.modified_args) if row.modified_args is not None else None,
+        idempotency_key=row.idempotency_key,
+        continuation_run_id=row.continuation_run_id,
     )
 
 
@@ -178,6 +180,8 @@ class SqlApprovalStore(ApprovalStore):
         decided_by: str,
         decided_at: datetime,
         modified_args: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+        continuation_run_id: UUID | None = None,
     ) -> bool:
         async with self._sf() as session:
             result = await session.execute(
@@ -192,6 +196,9 @@ class SqlApprovalStore(ApprovalStore):
                     decided_by=decided_by,
                     decided_at=decided_at,
                     modified_args=modified_args,
+                    # Stream 13.2 — bound atomically to the winning CAS.
+                    idempotency_key=idempotency_key,
+                    continuation_run_id=continuation_run_id,
                 )
             )
             await session.commit()

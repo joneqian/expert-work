@@ -127,6 +127,11 @@ class ResumeRequest(BaseModel):
     decision: Literal["approve", "reject", "modify"]
     modified_args: dict[str, Any] | None = None
     reason: str | None = Field(default=None, max_length=2048)
+    # Stream 13.2 — optional client-supplied key for deterministic recovery. A
+    # retry / concurrent decide carrying the same key replays the same
+    # continuation run instead of 409'ing. Omitted → today's exactly-once
+    # behaviour (a duplicate decide 409s).
+    idempotency_key: str | None = Field(default=None, max_length=255)
 
 
 def _get_thread_repo(request: Request) -> ThreadMetaStore:
@@ -276,6 +281,24 @@ def _get_run_event_store(request: Request) -> RunEventStore | None:
     return store
 
 
+def _idempotent_continuation(
+    approval: Any | None, idempotency_key: str | None
+) -> UUID | None:
+    """Stream 13.2 — the continuation to replay for an idempotent retry, or None.
+
+    Returns the stored ``continuation_run_id`` only when the caller supplied a
+    non-empty ``idempotency_key`` that matches the one persisted with the
+    original decision AND a continuation was recorded. Any mismatch (no key,
+    different key, keyless original, no continuation) → ``None`` ⇒ the caller
+    raises 409. Keyless decisions never replay — exactly-once stays the default.
+    """
+    if not idempotency_key or approval is None:
+        return None
+    if approval.idempotency_key != idempotency_key:
+        return None
+    return approval.continuation_run_id
+
+
 async def apply_approval_decision(
     *,
     request: Request,
@@ -290,7 +313,8 @@ async def apply_approval_decision(
     agent_repo: AgentSpecStore,
     runtime: AgentRuntime,
     approvals: ApprovalStore,
-) -> tuple[Any, UUID]:
+    idempotency_key: str | None = None,
+) -> tuple[Any, UUID, bool]:
     """Apply one human verdict + spawn the continuation worker (J.8 core).
 
     Stream HX-7 — extracted from the resume endpoint so the batch
@@ -300,9 +324,11 @@ async def apply_approval_decision(
     The worker is independent of any SSE consumer — the resume endpoint
     streams it, the batch endpoint just returns its ``run_id``.
 
-    Returns ``(run_record, continuation_run_id)``. Raises
-    :class:`HTTPException` (404 / 409 / 422) — the batch caller maps
-    those onto per-item results.
+    Returns ``(run_record, continuation_run_id, replayed)``. ``replayed`` is
+    ``True`` when an idempotent key matched an already-decided approval — the
+    caller returns the stored ``continuation_run_id`` WITHOUT spawning a worker
+    (``run_record`` is ``None`` then). Raises :class:`HTTPException`
+    (404 / 409 / 422) — the batch caller maps those onto per-item results.
     """
     tenant_id: UUID = request.state.tenant_id
     actor_id: str = request.state.actor_id
@@ -328,11 +354,21 @@ async def apply_approval_decision(
     if approval is None:
         raise HTTPException(status_code=404, detail="run not found")
     if approval.status is not ApprovalStatus.PENDING:
+        # Stream 13.2 — already decided. Replay idempotently iff the caller's
+        # key matches the one stored with the original decision; otherwise it
+        # is a genuine conflict (409).
+        replay = _idempotent_continuation(approval, idempotency_key)
+        if replay is not None:
+            return None, replay, True
         raise HTTPException(
             status_code=409,
             detail=f"approval already decided ({approval.status.value})",
         )
 
+    # Stream 13.2 — generate the continuation id BEFORE the CAS so it is bound
+    # atomically to the winning decision; a retry / lost-race caller reads it
+    # back to replay the same continuation.
+    continuation_run_id = uuid4()
     _status_for = {
         "approve": ApprovalStatus.APPROVED,
         "reject": ApprovalStatus.REJECTED,
@@ -345,10 +381,18 @@ async def apply_approval_decision(
         decided_by=actor_id,
         decided_at=datetime.now(UTC),
         modified_args=modified_args,
+        idempotency_key=idempotency_key,
+        continuation_run_id=continuation_run_id,
     )
     # ``mark_decided`` returns False on a lost race — another resume
     # (or the timeout job) decided it between our get + update.
     if not decided:
+        # Stream 13.2 — re-read the winner's row; if it carries our key, replay
+        # its continuation (idempotent). Otherwise it is a real conflict (409).
+        loser = await approvals.get_by_run(run_id=run_id, tenant_id=tenant_id)
+        replay = _idempotent_continuation(loser, idempotency_key)
+        if replay is not None:
+            return None, replay, True
         raise HTTPException(status_code=409, detail="approval already decided")
 
     await emit(
@@ -408,10 +452,10 @@ async def apply_approval_decision(
         as_node="agent",
     )
 
-    # Spawn a continuation worker. Fresh run_id — RunManager tracks
-    # it as a new run; the checkpoint (keyed by thread_id) is the
+    # Spawn a continuation worker for the CAS winner. ``continuation_run_id``
+    # was generated + stored atomically with the decision above. RunManager
+    # tracks it as a new run; the checkpoint (keyed by thread_id) is the
     # continuity. ``graph_input=None`` resumes from the checkpoint.
-    continuation_run_id = uuid4()
     run_record = await runtime.run_manager.create(
         run_id=continuation_run_id,
         thread_id=thread_id,
@@ -453,7 +497,7 @@ async def apply_approval_decision(
         )
     )
     await runtime.run_manager.attach_task(continuation_run_id, worker)
-    return run_record, continuation_run_id
+    return run_record, continuation_run_id, False
 
 
 def build_runs_router() -> APIRouter:
@@ -868,7 +912,7 @@ def build_runs_router() -> APIRouter:
         gets a fresh ``run_id``; the original paused ``run_id`` is what
         the ``agent_approval`` row + APPROVAL_DECIDED audit reference.
         """
-        run_record, continuation_run_id = await apply_approval_decision(
+        run_record, continuation_run_id, replayed = await apply_approval_decision(
             request=request,
             thread_id=thread_id,
             run_id=run_id,
@@ -881,12 +925,26 @@ def build_runs_router() -> APIRouter:
             agent_repo=agent_repo,
             runtime=runtime,
             approvals=approvals,
+            idempotency_key=payload.idempotency_key,
         )
         # Log only ``continuation_run_id`` — it is server-generated
         # (``uuid4()``). The paused ``run_id`` is a request path param;
         # CodeQL py/log-injection taints it even though FastAPI has
         # already validated it as a UUID. Same rule as ``trigger_run``.
         logger.info("control_plane.run.resumed continuation=%s", continuation_run_id)
+        # Stream 13.2 — idempotent replay: the continuation already exists (it
+        # may have finished), so there is no live worker to stream. Return its
+        # id; the client re-attaches via GET .../runs/{id}/events (H.3 durable
+        # mirror). Keep ``X-Helix-Run-Id`` so both paths surface it uniformly.
+        if replayed:
+            return JSONResponse(
+                {
+                    "success": True,
+                    "data": {"run_id": str(continuation_run_id), "idempotent_replay": True},
+                    "error": None,
+                },
+                headers={"X-Helix-Run-Id": str(continuation_run_id)},
+            )
         return StreamingResponse(
             sse_consumer(
                 bridge=runtime.stream_bridge,

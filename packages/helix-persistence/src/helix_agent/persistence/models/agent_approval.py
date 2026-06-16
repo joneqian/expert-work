@@ -44,6 +44,11 @@ class AgentApprovalRow(Base):
     decided_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     modified_args: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    # Stream 13.2 — idempotent resume. Written atomically with the decision
+    # (the mark_decided CAS); a retry with a matching key reads back the
+    # continuation run instead of conflicting. NULL for keyless / pending rows.
+    idempotency_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    continuation_run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(f"status IN {_STATUS_VALUES}", name="agent_approval_status_valid"),

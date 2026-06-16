@@ -64,6 +64,8 @@ class DecisionItem(BaseModel):
     decision: Literal["approve", "reject", "modify"]
     modified_args: dict[str, Any] | None = None
     reason: str | None = Field(default=None, max_length=2048)
+    # Stream 13.2 — per-item idempotency key for deterministic retry.
+    idempotency_key: str | None = Field(default=None, max_length=255)
 
 
 class DecideBatchRequest(BaseModel):
@@ -159,7 +161,7 @@ def build_approvals_router() -> APIRouter:
         results: list[dict[str, Any]] = []
         for item in payload.decisions:
             try:
-                _, continuation_run_id = await apply_approval_decision(
+                _, continuation_run_id, _replayed = await apply_approval_decision(
                     request=request,
                     thread_id=item.thread_id,
                     run_id=item.run_id,
@@ -172,6 +174,7 @@ def build_approvals_router() -> APIRouter:
                     agent_repo=agent_repo,
                     runtime=runtime,
                     approvals=approvals,
+                    idempotency_key=item.idempotency_key,
                 )
             except HTTPException as exc:
                 results.append(

@@ -107,6 +107,8 @@ class ApprovalStore(abc.ABC):
         decided_by: str,
         decided_at: datetime,
         modified_args: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+        continuation_run_id: UUID | None = None,
     ) -> bool:
         """Flip a ``pending`` row to a terminal verdict; return ``True`` on hit.
 
@@ -114,4 +116,9 @@ class ApprovalStore(abc.ABC):
         tenant, or already decided (callers treat that as a 404 /
         409 — the verdict is idempotent-once). ``status`` must be one
         of the terminal :class:`ApprovalStatus` values.
+
+        Stream 13.2 — ``idempotency_key`` + ``continuation_run_id`` are written
+        atomically with the same conditional UPDATE, so the CAS winner records
+        the continuation it spawned. A later retry / lost-race caller re-reads
+        them to replay the same continuation instead of conflicting.
         """

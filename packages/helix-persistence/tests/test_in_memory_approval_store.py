@@ -129,6 +129,53 @@ async def test_mark_decided_flips_status_once() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mark_decided_persists_idempotency_fields() -> None:
+    """Stream 13.2 — the CAS writes idempotency_key + continuation_run_id atomically."""
+    store = InMemoryApprovalStore()
+    tenant_id, run_id, continuation = uuid4(), uuid4(), uuid4()
+    await store.create(_record(tenant_id=tenant_id, run_id=run_id))
+    hit = await store.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=ApprovalStatus.APPROVED,
+        decided_by="user-a",
+        decided_at=datetime.now(UTC),
+        idempotency_key="k1",
+        continuation_run_id=continuation,
+    )
+    assert hit is True
+    fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.idempotency_key == "k1"
+    assert fetched.continuation_run_id == continuation
+
+
+@pytest.mark.asyncio
+async def test_mark_decided_concurrent_exactly_once() -> None:
+    """Stream 13.2 — N concurrent decides on one run → exactly one CAS winner."""
+    import asyncio
+
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(_record(tenant_id=tenant_id, run_id=run_id))
+    now = datetime.now(UTC)
+
+    async def _decide(n: int) -> bool:
+        return await store.mark_decided(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            status=ApprovalStatus.APPROVED,
+            decided_by=f"user-{n}",
+            decided_at=now,
+            idempotency_key=f"key-{n}",
+            continuation_run_id=uuid4(),
+        )
+
+    results = await asyncio.gather(*(_decide(i) for i in range(16)))
+    assert sum(1 for r in results if r) == 1  # exactly one winner
+
+
+@pytest.mark.asyncio
 async def test_mark_decided_cross_tenant_misses() -> None:
     store = InMemoryApprovalStore()
     tenant_id, run_id = uuid4(), uuid4()

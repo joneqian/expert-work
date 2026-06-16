@@ -76,7 +76,11 @@ class InMemoryApprovalStore(ApprovalStore):
         decided_by: str,
         decided_at: datetime,
         modified_args: dict[str, object] | None = None,
+        idempotency_key: str | None = None,
+        continuation_run_id: UUID | None = None,
     ) -> bool:
+        # check-then-set with no ``await`` between → atomic under asyncio's
+        # cooperative scheduling (mirrors the SQL conditional-UPDATE CAS).
         row = self._rows.get(run_id)
         if row is None or row.tenant_id != tenant_id or row.status != ApprovalStatus.PENDING:
             return False
@@ -86,6 +90,8 @@ class InMemoryApprovalStore(ApprovalStore):
                 "decided_by": decided_by,
                 "decided_at": decided_at,
                 "modified_args": modified_args,
+                "idempotency_key": idempotency_key,
+                "continuation_run_id": continuation_run_id,
             }
         )
         return True
