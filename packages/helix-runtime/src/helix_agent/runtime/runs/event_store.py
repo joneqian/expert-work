@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models.run_event import RunEventRow
@@ -94,6 +94,28 @@ class RunEventStore(abc.ABC):
         policy joins ``agent_run.tenant_id = current_setting('app.tenant_id')``),
         so a cross-tenant probe returns an empty list rather than raising.
         """
+
+    async def next_seq(self, *, run_id: UUID) -> int:
+        """The next free seq for ``run_id`` — ``max(seq) + 1``, or 0 if none.
+
+        Stream 9.4 (HA failover) — when a peer instance resumes a reclaimed run
+        it re-enters ``run_agent`` with a fresh seq counter. Restarting at 0
+        would collide with the original owner's already-persisted frames on the
+        ``(run_id, seq)`` primary key. Seeding the counter past the durable tail
+        keeps the resumed run's events append-only and gap-free. Default pages
+        through :meth:`list`; SQL overrides with a single ``MAX`` query.
+        """
+        last = -1
+        since: int | None = None
+        while True:
+            batch = await self.list(run_id=run_id, since_seq=since, limit=MAX_LIST_LIMIT)
+            if not batch:
+                break
+            last = batch[-1].seq
+            if len(batch) < MAX_LIST_LIMIT:
+                break
+            since = last
+        return last + 1
 
 
 class InMemoryRunEventStore(RunEventStore):
@@ -170,6 +192,14 @@ class SqlRunEventStore(RunEventStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_record(r) for r in rows]
+
+    async def next_seq(self, *, run_id: UUID) -> int:
+        """``max(seq) + 1`` for ``run_id`` in one query (0 if none)."""
+        stmt = select(func.coalesce(func.max(RunEventRow.seq) + 1, 0)).where(
+            RunEventRow.run_id == run_id
+        )
+        async with self._sf() as session:
+            return int((await session.execute(stmt)).scalar_one())
 
 
 def _row_to_record(row: RunEventRow) -> RunEventRecord:

@@ -334,7 +334,12 @@ async def run_agent(
     # durable row matches its insertion order. The bridge has its own
     # internal counter; the two are independent (replay endpoint emits
     # SSE id from the persisted ``created_at_ms`` + ``seq``).
+    # Stream 9.4 (HA failover) — a peer that resumed a reclaimed run re-enters
+    # here; seed past the prior owner's durable frames so the resumed run's
+    # events stay append-only (a fresh 0 would collide on ``(run_id, seq)``).
     event_seq = 0
+    if event_store is not None and getattr(record, "is_resume", False):
+        event_seq = await event_store.next_seq(run_id=run_id)
     # Stream 9.4 (HA failover) — renew the ownership lease while executing so a
     # peer's orphan sweep can tell this live run from a crashed owner's. Spawned
     # after the → RUNNING claim; cancelled in ``finally``.

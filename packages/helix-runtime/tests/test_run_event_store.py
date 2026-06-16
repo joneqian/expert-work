@@ -116,3 +116,40 @@ async def test_list_unknown_run_returns_empty() -> None:
     store = InMemoryRunEventStore()
     listed = await store.list(run_id=uuid4())
     assert listed == []
+
+
+@pytest.mark.asyncio
+async def test_next_seq_empty_is_zero() -> None:
+    """No events yet → the first free seq is 0 (Stream 9.4 resume seed)."""
+    store = InMemoryRunEventStore()
+    assert await store.next_seq(run_id=uuid4()) == 0
+
+
+@pytest.mark.asyncio
+async def test_next_seq_continues_past_durable_tail() -> None:
+    """``next_seq`` seeds a resumed run past the prior owner's frames so the
+    resumed events stay append-only on the ``(run_id, seq)`` key (Stream 9.4)."""
+    store = InMemoryRunEventStore()
+    run_id = uuid4()
+    for seq in range(3):
+        await store.append(
+            make_event_record(run_id=run_id, seq=seq, event_name="updates", data={"s": seq})
+        )
+    assert await store.next_seq(run_id=run_id) == 3
+    # Appending at the seeded seq must not collide.
+    await store.append(make_event_record(run_id=run_id, seq=3, event_name="updates", data={}))
+    assert await store.next_seq(run_id=run_id) == 4
+
+
+@pytest.mark.asyncio
+async def test_next_seq_pages_beyond_list_limit() -> None:
+    """The default paging implementation finds the true max even when the run
+    has more frames than ``MAX_LIST_LIMIT`` (single ``list`` call can't)."""
+    store = InMemoryRunEventStore()
+    run_id = uuid4()
+    total = MAX_LIST_LIMIT + 7
+    for seq in range(total):
+        await store.append(
+            make_event_record(run_id=run_id, seq=seq, event_name="updates", data={})
+        )
+    assert await store.next_seq(run_id=run_id) == total
