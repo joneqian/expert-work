@@ -116,7 +116,7 @@ async def test_exempt_path_never_shed() -> None:
         assert health_resp.status_code == 200
 
         release.set()
-        await held
+        _ = await held  # drain the held request (assign so CodeQL sees an effect)
 
 
 @pytest.mark.asyncio
