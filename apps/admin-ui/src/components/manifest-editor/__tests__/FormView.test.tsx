@@ -43,7 +43,31 @@ describe("FormView", () => {
     expect(screen.getByTestId("af-model")).toBeInTheDocument();
     expect(screen.getByTestId("af-prompt")).toBeInTheDocument();
     expect(screen.getByTestId("af-memory")).toBeInTheDocument();
+    expect(screen.getByTestId("af-reflection-evaluator")).toBeInTheDocument();
     expect(screen.getByTestId("af-tools")).toBeInTheDocument();
+  });
+
+  it("hides the evaluator clear button until an independent evaluator is set", () => {
+    render(<FormView formData={SEED} onChange={vi.fn()} />);
+    expect(screen.queryByTestId("af-reflection-evaluator-clear")).not.toBeInTheDocument();
+  });
+
+  it("shows the clear button and removes the routing rule when cleared", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const withEvaluator: AgentManifest = {
+      ...SEED,
+      spec: {
+        ...SEED.spec,
+        routing: { rules: [{ when: "reflection", model: { provider: "openai", name: "gpt-4o" } }] },
+      },
+    };
+    render(<FormView formData={withEvaluator} onChange={onChange} />);
+    const clear = screen.getByTestId("af-reflection-evaluator-clear");
+    expect(clear).toBeInTheDocument();
+    await user.click(clear);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.routing).toBeUndefined();
   });
 
   it("typing the name emits a merged manifest preserving non-curated fields", async () => {

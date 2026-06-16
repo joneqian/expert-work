@@ -7,7 +7,7 @@
  * models) is loaded once and handed to ModelSelect.
  */
 import { useEffect, useState } from "react";
-import { Checkbox, Input, InputNumber, Switch, Typography } from "antd";
+import { Button, Checkbox, Input, InputNumber, Switch, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { ModelCatalog } from "../../api/model_catalog";
@@ -18,6 +18,8 @@ import {
   readMemoryOn,
   readModel,
   readName,
+  readReflectionEvaluator,
+  readReflectionEvaluatorOn,
   readSystemPrompt,
   readTools,
   readTopK,
@@ -27,6 +29,7 @@ import {
   setMemoryOn,
   setModel,
   setName,
+  setReflectionEvaluator,
   setSystemPrompt,
   setTool,
   setTopK,
@@ -138,6 +141,29 @@ export function FormView({ formData, onChange }: FormViewProps) {
               onChange={(v) => onChange(setTopK(formData, v ?? 5))}
             />
           </div>
+        )}
+      </section>
+
+      <section data-testid="af-reflection-evaluator" style={SECTION}>
+        <Heading>{t("agent_form.section_reflection_evaluator")}</Heading>
+        <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+          {t("agent_form.reflection_evaluator_hint")}
+        </Text>
+        <ModelSelect
+          value={readReflectionEvaluator(formData) ?? {}}
+          catalog={catalog}
+          onChange={(mdl) => onChange(setReflectionEvaluator(formData, mdl))}
+        />
+        {readReflectionEvaluatorOn(formData) && (
+          <Button
+            type="link"
+            size="small"
+            data-testid="af-reflection-evaluator-clear"
+            style={{ paddingLeft: 0 }}
+            onClick={() => onChange(setReflectionEvaluator(formData, null))}
+          >
+            {t("agent_form.reflection_evaluator_clear")}
+          </Button>
         )}
       </section>
 

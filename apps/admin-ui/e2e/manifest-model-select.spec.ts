@@ -107,25 +107,38 @@ test("pick a provider + model via the form turns vision on", async ({ page }) =>
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("create-agent-drawer")).toBeVisible();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
-  await expect(page.getByTestId("model-select-field")).toBeVisible();
+  // The reflection-evaluator section reuses <ModelSelect>, so the form now has
+  // two ``model-select-*`` instances — scope to the agent model section.
+  const model = page.getByTestId("af-model");
+  await expect(model.getByTestId("model-select-field")).toBeVisible();
 
   // Open the provider Select and choose "openai".
-  await page.getByTestId("model-select-provider").locator(".ant-select").click();
+  await model.getByTestId("model-select-provider").locator(".ant-select").click();
   await page
     .locator(".ant-select-item-option-content", { hasText: "openai" })
     .click();
 
   // Open the model Select and choose "gpt-5.5" (the vision-capable model).
-  await page.getByTestId("model-select-name").locator(".ant-select").click();
+  await model.getByTestId("model-select-name").locator(".ant-select").click();
   await page
     .locator(".ant-select-item-option-content", { hasText: "gpt-5.5" })
     .click();
 
   // Vision indicator flips to the supported state (zh-CN "视觉：支持" or
   // en "Vision: supported" — lenient on locale, strict that it's supported).
-  await expect(page.getByTestId("model-select-vision")).toContainText(
+  await expect(model.getByTestId("model-select-vision")).toContainText(
     /视觉：支持|Vision: supported/,
   );
+});
+
+test("the reflection-evaluator section exposes its own model picker", async ({ page }) => {
+  await page.getByTestId("agents-create").click();
+  await expect(page.getByTestId("manifest-form-view")).toBeVisible();
+  const evaluator = page.getByTestId("af-reflection-evaluator");
+  await expect(evaluator).toBeVisible();
+  // Empty by default (reflection reuses the agent's own model) — no clear link.
+  await expect(evaluator.getByTestId("model-select-field")).toBeVisible();
+  await expect(page.getByTestId("af-reflection-evaluator-clear")).toHaveCount(0);
 });
 
 test("create drawer with model picker passes axe (serious + critical)", async ({
@@ -133,6 +146,6 @@ test("create drawer with model picker passes axe (serious + critical)", async ({
 }) => {
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-editor-create")).toBeVisible();
-  await expect(page.getByTestId("model-select-field")).toBeVisible();
+  await expect(page.getByTestId("af-model").getByTestId("model-select-field")).toBeVisible();
   await expectNoA11yViolations(page, "create-agent-drawer");
 });

@@ -4,6 +4,8 @@ import {
   readMemoryOn,
   readModel,
   readName,
+  readReflectionEvaluator,
+  readReflectionEvaluatorOn,
   readSystemPrompt,
   readTools,
   readTopK,
@@ -13,6 +15,7 @@ import {
   setMemoryOn,
   setModel,
   setName,
+  setReflectionEvaluator,
   setSystemPrompt,
   setTool,
   setTopK,
@@ -160,5 +163,55 @@ describe("form_model preserve chain + immutability", () => {
   it("does not mutate the input manifest", () => {
     setName(seed, "mutated");
     expect(seed.metadata.name).toBe("my-agent");
+  });
+});
+
+describe("reflection evaluator (routing when=reflection projection)", () => {
+  it("reads undefined when no routing rule", () => {
+    expect(readReflectionEvaluator(seed)).toBeUndefined();
+    expect(readReflectionEvaluatorOn(seed)).toBe(false);
+  });
+
+  it("writes a when=reflection route rule and reads it back", () => {
+    const m = setReflectionEvaluator(seed, { provider: "openai", name: "gpt-4o-mini" });
+    expect(m.spec?.routing?.rules).toEqual([
+      { when: "reflection", model: { provider: "openai", name: "gpt-4o-mini" } },
+    ]);
+    expect(readReflectionEvaluator(m)?.name).toBe("gpt-4o-mini");
+    expect(readReflectionEvaluatorOn(m)).toBe(true);
+  });
+
+  it("keeps a partial pick (provider only) so the picker doesn't lose state", () => {
+    const m = setReflectionEvaluator(seed, { provider: "openai" });
+    expect(readReflectionEvaluator(m)).toEqual({ provider: "openai" });
+  });
+
+  it("clearing removes the rule and drops empty routing", () => {
+    const withRule = setReflectionEvaluator(seed, { provider: "openai", name: "gpt-4o-mini" });
+    const cleared = setReflectionEvaluator(withRule, null);
+    expect(readReflectionEvaluator(cleared)).toBeUndefined();
+    expect(cleared.spec?.routing).toBeUndefined();
+  });
+
+  it("preserves a sibling planning rule when setting/clearing reflection", () => {
+    const base = {
+      ...seed,
+      spec: {
+        ...seed.spec,
+        routing: { rules: [{ when: "planning", model: { provider: "anthropic", name: "claude-opus-4-8" } }] },
+      },
+    };
+    const set = setReflectionEvaluator(base, { provider: "openai", name: "gpt-4o-mini" });
+    expect(set.spec?.routing?.rules).toHaveLength(2);
+    const cleared = setReflectionEvaluator(set, null);
+    // planning survives; only reflection removed; routing stays (still has planning).
+    expect(cleared.spec?.routing?.rules).toEqual([
+      { when: "planning", model: { provider: "anthropic", name: "claude-opus-4-8" } },
+    ]);
+  });
+
+  it("does not mutate the input manifest", () => {
+    setReflectionEvaluator(seed, { provider: "openai", name: "gpt-4o-mini" });
+    expect((seed.spec as { routing?: unknown }).routing).toBeUndefined();
   });
 });

@@ -301,6 +301,10 @@ const zhCN: TranslationKeys = {
     mcp_tools_unreachable: "工具加载失败",
     mcp_servers_loading: "加载服务器中…",
     mcp_servers_load_failed: "服务器加载失败",
+    section_reflection_evaluator: "反思评判者（可选）",
+    reflection_evaluator_hint:
+      "反思（reflection）启用时，由谁来评判任务是否真正完成。留空 = 用 agent 自己的模型。建议选一个不同的模型——不必更强，关键是独立视角能破除模型偏爱自己输出、覆盖共同盲点（研究表明同模型自审会过早判定完成、漏掉自身错误）。深度推理任务可选更强模型。",
+    reflection_evaluator_clear: "清除（改用 agent 自己的模型）",
   },
   playground: {
     session_label: "会话",

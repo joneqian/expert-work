@@ -20,7 +20,7 @@ import { FormView } from "./FormView";
 import { apiClient, setStoredToken } from "../../api/client";
 import "../../i18n";
 import type { AgentManifest } from "./form_model";
-import { setTool } from "./form_model";
+import { setReflectionEvaluator, setTool } from "./form_model";
 
 // ── JWT helper ────────────────────────────────────────────────────────────
 
@@ -113,6 +113,14 @@ const MCP_ON_MANIFEST: AgentManifest = (() => {
   return { ...withMcp, metadata: { name: "mcp-agent" } };
 })();
 
+const EVALUATOR_ON_MANIFEST: AgentManifest = (() => {
+  const withEval = setReflectionEvaluator(BLANK_MANIFEST, {
+    provider: "openai",
+    name: "gpt-4o",
+  });
+  return { ...withEval, metadata: { name: "evaluator-agent" } };
+})();
+
 // ── Meta ──────────────────────────────────────────────────────────────────
 
 const meta: Meta<typeof FormView> = {
@@ -146,6 +154,19 @@ export const WithMcpPicker: Story = {
   decorators: [withMcpFixture],
   args: {
     formData: MCP_ON_MANIFEST,
+    onChange: () => {},
+  },
+};
+
+/**
+ * An independent reflection evaluator is set (openai/gpt-4o) via a
+ * ``routing[when=reflection]`` rule — the curated control shows the picked
+ * model plus the "clear (use the agent's own model)" affordance.
+ */
+export const WithReflectionEvaluator: Story = {
+  decorators: [withMcpFixture],
+  args: {
+    formData: EVALUATOR_ON_MANIFEST,
     onChange: () => {},
   },
 };

@@ -294,6 +294,9 @@ export interface TranslationKeys {
     mcp_tools_unreachable: string;
     mcp_servers_loading: string;
     mcp_servers_load_failed: string;
+    section_reflection_evaluator: string;
+    reflection_evaluator_hint: string;
+    reflection_evaluator_clear: string;
   };
   playground: {
     session_label: string;
@@ -1723,6 +1726,10 @@ const en: TranslationKeys = {
     mcp_tools_unreachable: "Could not load tools",
     mcp_servers_loading: "Loading servers…",
     mcp_servers_load_failed: "Could not load servers",
+    section_reflection_evaluator: "Reflection evaluator (optional)",
+    reflection_evaluator_hint:
+      "When reflection is enabled, which model judges whether the task is done. Leave empty to reuse the agent's own model. Prefer a different model — not necessarily stronger; an independent vantage counters the model's bias toward its own output and covers shared blind spots (same-model self-critique tends to declare 'done' early and miss its own errors). Pick a stronger model for deep-reasoning tasks.",
+    reflection_evaluator_clear: "Clear (use the agent's own model)",
   },
   playground: {
     session_label: "Session",

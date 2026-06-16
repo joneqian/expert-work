@@ -12,6 +12,15 @@ export interface LongTermFields {
   write_back?: boolean;
   recall_mode?: string;
 }
+export interface RouteRuleFields {
+  when?: string;
+  model?: ModelFields;
+  [k: string]: unknown;
+}
+export interface RoutingFields {
+  rules?: RouteRuleFields[];
+  [k: string]: unknown;
+}
 export type ToolEntry = {
   type: string;
   name?: string;
@@ -30,6 +39,7 @@ export interface AgentManifest {
     system_prompt?: { template?: string; [k: string]: unknown };
     memory?: { long_term?: LongTermFields | null; [k: string]: unknown } | null;
     tools?: ToolEntry[];
+    routing?: RoutingFields | null;
     [k: string]: unknown;
   };
   [k: string]: unknown;
@@ -54,6 +64,17 @@ export const readSystemPrompt = (m: unknown): string => specOf(m).system_prompt?
 export const readMemoryOn = (m: unknown): boolean => (specOf(m).memory?.long_term ?? null) !== null;
 export const readTopK = (m: unknown): number | undefined =>
   specOf(m).memory?.long_term?.retrieve_top_k;
+
+// ---- reflection evaluator (Stream J.11 routing — the `when=reflection` rule) ----
+// The "reflection evaluator model" friendly control is a curated view over the
+// existing ``routing`` block: an independent evaluator is just a route rule that
+// sends the reflection step to its own model. Empty = no rule = reflection reuses
+// the agent's own model (the safe default).
+export const readReflectionEvaluator = (m: unknown): ModelFields | undefined =>
+  (specOf(m).routing?.rules ?? []).find((r) => r.when === "reflection")?.model;
+
+export const readReflectionEvaluatorOn = (m: unknown): boolean =>
+  readReflectionEvaluator(m) !== undefined;
 
 export interface ToolFlags {
   webSearch: boolean;
@@ -103,6 +124,21 @@ export function setTopK(m: unknown, k: number): AgentManifest {
   const lt = specOf(m).memory?.long_term ?? { write_back: true, recall_mode: "per_session" };
   return patchSpec(m, { memory: { ...memory, long_term: { ...lt, retrieve_top_k: k } } });
 }
+export function setReflectionEvaluator(m: unknown, model: ModelFields | null): AgentManifest {
+  const routing = specOf(m).routing ?? {};
+  // Preserve any other route rules (e.g. a planning rule); only touch reflection.
+  const others = (routing.rules ?? []).filter((r) => r.when !== "reflection");
+  const keep = model !== null && (model.provider !== undefined || model.name !== undefined);
+  const rules = keep ? [...others, { when: "reflection", model }] : others;
+  if (rules.length === 0) {
+    // Drop ``rules`` entirely; if routing then has no other keys, drop routing
+    // so the manifest stays clean (js-yaml omits ``undefined``).
+    const { rules: _dropped, ...rest } = routing;
+    return patchSpec(m, { routing: Object.keys(rest).length > 0 ? rest : undefined });
+  }
+  return patchSpec(m, { routing: { ...routing, rules } });
+}
+
 export function setTool(m: unknown, kind: "webSearch" | "http" | "mcp", on: boolean): AgentManifest {
   const tools = specOf(m).tools ?? [];
   const without = (pred: (t: ToolEntry) => boolean): ToolEntry[] => tools.filter((t) => !pred(t));
