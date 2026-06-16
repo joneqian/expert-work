@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -156,35 +156,90 @@ class SqlTokenReservationStore(TokenReservationStore):
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._sf = session_factory
 
-    async def _ensure_budget_session(
+    async def _bump_reserved(
         self,
         session: AsyncSession,
+        *,
         tenant_id: UUID,
         month: date,
-    ) -> TokenBudgetLedgerRow:
-        existing = (
-            await session.execute(
-                select(TokenBudgetLedgerRow).where(
-                    and_(
-                        TokenBudgetLedgerRow.tenant_id == tenant_id,
-                        TokenBudgetLedgerRow.month == month,
-                    )
+        delta: int,
+        now: datetime,
+    ) -> None:
+        """Atomically add ``delta`` to ``reserved_total`` (upsert-then-increment).
+
+        The arithmetic runs in SQL (``reserved_total = reserved_total + :delta``)
+        so concurrent transactions on the same ``(tenant_id, month)`` ledger row
+        serialise at the row lock instead of losing each other's read-modify-write.
+        """
+        await session.execute(
+            pg_insert(TokenBudgetLedgerRow)
+            .values(
+                tenant_id=tenant_id,
+                month=month,
+                budget_total=0,
+                used_total=0,
+                reserved_total=max(0, delta),
+                updated_at=now,
+            )
+            .on_conflict_do_update(
+                constraint="token_budget_ledger_tenant_month_uniq",
+                set_={
+                    "reserved_total": func.greatest(0, TokenBudgetLedgerRow.reserved_total + delta),
+                    "updated_at": now,
+                },
+            )
+        )
+
+    async def _apply_commit_ledger(
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: UUID,
+        month: date,
+        used_delta: int,
+        reserved_delta: int,
+        now: datetime,
+    ) -> None:
+        """Atomically apply a commit's ``used += / reserved -=`` to the ledger.
+
+        The ledger row always exists by commit time (``reserve`` created it), so
+        a plain row-locked UPDATE suffices — no upsert.
+        """
+        await session.execute(
+            update(TokenBudgetLedgerRow)
+            .where(
+                and_(
+                    TokenBudgetLedgerRow.tenant_id == tenant_id,
+                    TokenBudgetLedgerRow.month == month,
                 )
             )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return existing
-        row = TokenBudgetLedgerRow(
-            tenant_id=tenant_id,
-            month=month,
-            budget_total=0,
-            used_total=0,
-            reserved_total=0,
-            updated_at=_utc_now(),
+            .values(
+                used_total=TokenBudgetLedgerRow.used_total + used_delta,
+                reserved_total=func.greatest(
+                    0, TokenBudgetLedgerRow.reserved_total + reserved_delta
+                ),
+                updated_at=now,
+            )
         )
-        session.add(row)
-        await session.flush()
-        return row
+
+    async def _lock_reservation(
+        self, session: AsyncSession, *, reservation_id: UUID, tenant_id: UUID
+    ) -> TokenReservationRow | None:
+        """``SELECT … FOR UPDATE`` the reservation so its state transition is
+        serialised — a concurrent commit/release/expire blocks until we commit,
+        then re-reads the already-closed state and no-ops (exactly-once refund)."""
+        return (
+            await session.execute(
+                select(TokenReservationRow)
+                .where(
+                    and_(
+                        TokenReservationRow.id == reservation_id,
+                        TokenReservationRow.tenant_id == tenant_id,
+                    )
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
 
     async def reserve(
         self,
@@ -211,9 +266,9 @@ class SqlTokenReservationStore(TokenReservationStore):
                 closed_at=None,
             )
             session.add(row)
-            budget = await self._ensure_budget_session(session, tenant_id, _month_of(now))
-            budget.reserved_total += estimated
-            budget.updated_at = now
+            await self._bump_reserved(
+                session, tenant_id=tenant_id, month=_month_of(now), delta=estimated, now=now
+            )
             await session.commit()
             await session.refresh(row)
             return _row_to_reservation(row)
@@ -226,8 +281,10 @@ class SqlTokenReservationStore(TokenReservationStore):
         actual_tokens: int,
     ) -> TokenReservationRecord:
         async with self._sf() as session:
-            row = await session.get(TokenReservationRow, reservation_id)
-            if row is None or row.tenant_id != tenant_id:
+            row = await self._lock_reservation(
+                session, reservation_id=reservation_id, tenant_id=tenant_id
+            )
+            if row is None:
                 raise ReservationNotFoundError(reservation_id=reservation_id)
             if row.state != ReservationState.RESERVED.value:
                 return _row_to_reservation(row)
@@ -235,12 +292,14 @@ class SqlTokenReservationStore(TokenReservationStore):
             row.actual = actual_tokens
             row.state = ReservationState.COMMITTED.value
             row.closed_at = now
-            budget = await self._ensure_budget_session(
-                session, tenant_id, _month_of(row.reserved_at)
+            await self._apply_commit_ledger(
+                session,
+                tenant_id=tenant_id,
+                month=_month_of(row.reserved_at),
+                used_delta=actual_tokens,
+                reserved_delta=-row.estimated,
+                now=now,
             )
-            budget.used_total += actual_tokens
-            budget.reserved_total = max(0, budget.reserved_total - row.estimated)
-            budget.updated_at = now
             await session.commit()
             await session.refresh(row)
             return _row_to_reservation(row)
@@ -256,22 +315,54 @@ class SqlTokenReservationStore(TokenReservationStore):
             msg = f"release new_state must be RELEASED or EXPIRED, got {new_state.value}"
             raise ValueError(msg)
         async with self._sf() as session:
-            row = await session.get(TokenReservationRow, reservation_id)
-            if row is None or row.tenant_id != tenant_id:
+            row = await self._lock_reservation(
+                session, reservation_id=reservation_id, tenant_id=tenant_id
+            )
+            if row is None:
                 raise ReservationNotFoundError(reservation_id=reservation_id)
             if row.state != ReservationState.RESERVED.value:
                 return _row_to_reservation(row)
             now = _utc_now()
             row.state = new_state.value
             row.closed_at = now
-            budget = await self._ensure_budget_session(
-                session, tenant_id, _month_of(row.reserved_at)
+            await self._bump_reserved(
+                session,
+                tenant_id=tenant_id,
+                month=_month_of(row.reserved_at),
+                delta=-row.estimated,
+                now=now,
             )
-            budget.reserved_total = max(0, budget.reserved_total - row.estimated)
-            budget.updated_at = now
             await session.commit()
             await session.refresh(row)
             return _row_to_reservation(row)
+
+    async def expire_reserved(self, *, reservation_id: UUID, tenant_id: UUID) -> bool:
+        """Atomically transition ``RESERVED → EXPIRED`` + refund; ``True`` iff won.
+
+        Stream 9.5 — the reaper runs on every instance. ``SELECT … FOR UPDATE``
+        serialises competing reapers (and a racing client commit/release) so
+        exactly one performs the EXPIRED transition + ledger refund. The loser
+        sees the already-closed state and returns ``False`` → its caller skips
+        the ``on_expire`` side effect and the expiry count. A missing/cross-tenant
+        row also returns ``False`` (already gone — nothing to expire)."""
+        async with self._sf() as session:
+            row = await self._lock_reservation(
+                session, reservation_id=reservation_id, tenant_id=tenant_id
+            )
+            if row is None or row.state != ReservationState.RESERVED.value:
+                return False
+            now = _utc_now()
+            row.state = ReservationState.EXPIRED.value
+            row.closed_at = now
+            await self._bump_reserved(
+                session,
+                tenant_id=tenant_id,
+                month=_month_of(row.reserved_at),
+                delta=-row.estimated,
+                now=now,
+            )
+            await session.commit()
+            return True
 
     async def list_expired(
         self,
@@ -321,8 +412,21 @@ class SqlTokenReservationStore(TokenReservationStore):
         budget_total: int,
     ) -> None:
         """Admin helper — set the month's budget cap. Not on the abstract Protocol."""
+        now = _utc_now()
         async with self._sf() as session:
-            existing = await self._ensure_budget_session(session, tenant_id, month)
-            existing.budget_total = budget_total
-            existing.updated_at = _utc_now()
+            await session.execute(
+                pg_insert(TokenBudgetLedgerRow)
+                .values(
+                    tenant_id=tenant_id,
+                    month=month,
+                    budget_total=budget_total,
+                    used_total=0,
+                    reserved_total=0,
+                    updated_at=now,
+                )
+                .on_conflict_do_update(
+                    constraint="token_budget_ledger_tenant_month_uniq",
+                    set_={"budget_total": budget_total, "updated_at": now},
+                )
+            )
             await session.commit()

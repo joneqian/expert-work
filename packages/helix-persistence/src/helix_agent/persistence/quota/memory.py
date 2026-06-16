@@ -237,6 +237,29 @@ class InMemoryTokenReservationStore(TokenReservationStore):
             )
             return updated
 
+    async def expire_reserved(self, *, reservation_id: UUID, tenant_id: UUID) -> bool:
+        async with self._lock:
+            row = self._reservations.get(reservation_id)
+            if row is None or row.tenant_id != tenant_id:
+                return False
+            if row.state is not ReservationState.RESERVED:
+                # Already closed by a peer — loser, no refund, no hook.
+                return False
+            now = _now()
+            self._reservations[reservation_id] = row.model_copy(
+                update={"state": ReservationState.EXPIRED, "closed_at": now}
+            )
+            budget = await self._ensure_budget_locked(
+                tenant_id, row.reserved_at.date().replace(day=1)
+            )
+            self._ledger[(tenant_id, budget.month)] = budget.model_copy(
+                update={
+                    "reserved_total": max(0, budget.reserved_total - row.estimated),
+                    "updated_at": now,
+                }
+            )
+            return True
+
     async def list_expired(
         self,
         *,

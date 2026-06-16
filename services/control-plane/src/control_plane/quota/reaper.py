@@ -22,15 +22,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from uuid import UUID
 
 from helix_agent.common.observability import helix_counter
-from helix_agent.persistence.quota import (
-    ReservationNotFoundError,
-    TokenReservationStore,
-)
+from helix_agent.persistence.quota import TokenReservationStore
 from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.protocol import ReservationState, TokenReservationRecord
+from helix_agent.protocol import TokenReservationRecord
 
 logger = logging.getLogger("helix.control_plane.quota.reaper")
 
@@ -125,7 +121,21 @@ class ReservationReaper:
             token_tenant_release = current_tenant_id_var.set(row.tenant_id)
             token_bypass_release = bypass_rls_var.set(False)
             try:
-                await self._release_one(row.id, row.tenant_id)
+                # Stream 9.5 — the reaper runs on every instance. ``expire_reserved``
+                # is an atomic CAS (FOR UPDATE + ledger refund) that returns True
+                # only for the instance that actually performed the transition, so
+                # the refund, the ``on_expire`` side effect, and the count all fire
+                # exactly once even when peers race the same stale row.
+                won = await self._store.expire_reserved(
+                    reservation_id=row.id, tenant_id=row.tenant_id
+                )
+                if not won:
+                    # A peer reaper / a client commit-release closed it first.
+                    logger.info(
+                        "quota.reaper.reservation_already_closed",
+                        extra={"reservation_id": str(row.id)},
+                    )
+                    continue
                 if self._on_expire is not None:
                     try:
                         await self._on_expire(row)
@@ -139,21 +149,6 @@ class ReservationReaper:
                 current_tenant_id_var.reset(token_tenant_release)
                 bypass_rls_var.reset(token_bypass_release)
         return released
-
-    async def _release_one(self, reservation_id: UUID, tenant_id: UUID) -> None:
-        try:
-            await self._store.release(
-                reservation_id=reservation_id,
-                tenant_id=tenant_id,
-                new_state=ReservationState.EXPIRED,
-            )
-        except ReservationNotFoundError:
-            # Raced with a commit / release that landed first. Safe to
-            # ignore — the row already left RESERVED state.
-            logger.info(
-                "quota.reaper.reservation_already_closed",
-                extra={"reservation_id": str(reservation_id)},
-            )
 
     async def _loop(self) -> None:
         while not self._stop.is_set():

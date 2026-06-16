@@ -343,6 +343,87 @@ async def test_reaper_invokes_on_expire_per_row() -> None:
 
 
 @pytest.mark.asyncio
+async def test_expire_reserved_is_exactly_once() -> None:
+    """Stream 9.5 — two reapers racing the same stale row: only the first
+    ``expire_reserved`` wins (True) + refunds; the loser gets False and the
+    ledger is refunded exactly once (not driven negative)."""
+    tenant = _tenant()
+    store = InMemoryTokenReservationStore()
+    row = await store.reserve(
+        tenant_id=tenant,
+        agent_name="alpha",
+        thread_id=uuid4(),
+        estimated=100,
+    )
+
+    first = await store.expire_reserved(reservation_id=row.id, tenant_id=tenant)
+    second = await store.expire_reserved(reservation_id=row.id, tenant_id=tenant)
+    assert first is True
+    assert second is False
+
+    final = await store.get(reservation_id=row.id, tenant_id=tenant)
+    assert final is not None
+    assert final.state is ReservationState.EXPIRED
+
+    month = datetime.now(tz=UTC).date().replace(day=1)
+    budget = await store.get_budget(tenant_id=tenant, month=month)
+    assert budget is not None
+    assert budget.reserved_total == 0  # refunded once — not -100
+
+
+@pytest.mark.asyncio
+async def test_expire_reserved_false_for_missing_or_cross_tenant() -> None:
+    tenant = _tenant()
+    store = InMemoryTokenReservationStore()
+    row = await store.reserve(tenant_id=tenant, agent_name="alpha", thread_id=uuid4(), estimated=50)
+    # Unknown id, and right id but wrong tenant → both no-op False.
+    assert await store.expire_reserved(reservation_id=uuid4(), tenant_id=tenant) is False
+    assert await store.expire_reserved(reservation_id=row.id, tenant_id=_tenant()) is False
+
+
+@pytest.mark.asyncio
+async def test_reaper_skips_hook_when_peer_won() -> None:
+    """When ``expire_reserved`` returns False (a peer reaper / client closed the
+    row first), the reaper must NOT fire ``on_expire`` and must NOT count it."""
+    from datetime import timedelta
+
+    from control_plane.quota import ReservationReaper
+    from helix_agent.protocol import TokenReservationRecord
+
+    tenant = _tenant()
+    real = InMemoryTokenReservationStore()
+    row = await real.reserve(tenant_id=tenant, agent_name="alpha", thread_id=uuid4(), estimated=100)
+    stale = row.model_copy(update={"reserved_at": row.reserved_at - timedelta(hours=1)})
+
+    class _PeerWonStore:
+        """Surfaces the stale row but reports every expire as already-lost."""
+
+        async def list_expired(
+            self, *, max_age_seconds: int, limit: int = 100
+        ) -> list[TokenReservationRecord]:
+            return [stale]
+
+        async def expire_reserved(self, *, reservation_id: UUID, tenant_id: UUID) -> bool:
+            return False
+
+    seen: list[TokenReservationRecord] = []
+
+    async def _record(r: TokenReservationRecord) -> None:
+        seen.append(r)
+
+    reaper = ReservationReaper(
+        reservation_store=_PeerWonStore(),  # type: ignore[arg-type]
+        max_age_s=600,
+        interval_s=60,
+        on_expire=_record,
+    )
+    released = await reaper.run_once()
+
+    assert released == 0
+    assert seen == []
+
+
+@pytest.mark.asyncio
 async def test_reaper_cycle_error_increments_metric() -> None:
     """A failing cycle bumps ``helix_control_plane_quota_reaper_cycle_errors_total``."""
     import asyncio

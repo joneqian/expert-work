@@ -114,6 +114,17 @@ class TokenReservationStore(abc.ABC):
         """Transition ``RESERVED → RELEASED`` (or ``EXPIRED``); refund reserved_total."""
 
     @abc.abstractmethod
+    async def expire_reserved(self, *, reservation_id: UUID, tenant_id: UUID) -> bool:
+        """Atomically expire a stale ``RESERVED`` row; ``True`` iff this call won.
+
+        Stream 9.5 — the every-instance reaper uses this instead of ``release``
+        so the EXPIRED transition + ledger refund happen exactly once when
+        several reapers (or a racing client commit/release) hit the same row.
+        The loser (already-closed / missing row) gets ``False`` and skips its
+        ``on_expire`` side effect + expiry count.
+        """
+
+    @abc.abstractmethod
     async def list_expired(
         self,
         *,

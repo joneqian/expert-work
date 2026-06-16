@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -277,5 +278,120 @@ async def test_list_expired_finds_stale_reservations(
         expired = await reservation_store.list_expired(max_age_seconds=600)
         assert len(expired) == 1
         assert expired[0].id == row.id
+    finally:
+        await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Stream 9.5 — exactly-once under real concurrency (FOR UPDATE + atomic ledger)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_concurrent_expire_reserved_wins_exactly_once(
+    quota_stores: tuple[SqlTenantQuotaStore, SqlTokenReservationStore, AsyncEngine],
+) -> None:
+    """16 reapers race one stale reservation — the ``FOR UPDATE`` lock lets
+    exactly one ``expire_reserved`` win, and the ledger is refunded once
+    (``reserved_total`` lands on 0, never negative)."""
+    _, reservation_store, engine = quota_stores
+    try:
+        tenant = uuid4()
+        current_tenant_id_var.set(tenant)
+        row = await reservation_store.reserve(
+            tenant_id=tenant,
+            agent_name="alpha",
+            thread_id=uuid4(),
+            estimated=100,
+        )
+
+        async def _expire() -> bool:
+            return await reservation_store.expire_reserved(reservation_id=row.id, tenant_id=tenant)
+
+        results = await asyncio.gather(*[_expire() for _ in range(16)])
+        assert sum(1 for won in results if won) == 1
+
+        final = await reservation_store.get(reservation_id=row.id, tenant_id=tenant)
+        assert final is not None
+        assert final.state is ReservationState.EXPIRED
+
+        month = datetime.now(tz=UTC).date().replace(day=1)
+        budget = await reservation_store.get_budget(tenant_id=tenant, month=month)
+        assert budget is not None
+        assert budget.reserved_total == 0  # refunded exactly once
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reserve_no_lost_update(
+    quota_stores: tuple[SqlTenantQuotaStore, SqlTokenReservationStore, AsyncEngine],
+) -> None:
+    """N concurrent reserves on the same ``(tenant, month)`` ledger row — the
+    atomic SQL increment means none of the ``+= estimated`` updates is lost."""
+    _, reservation_store, engine = quota_stores
+    try:
+        tenant = uuid4()
+        current_tenant_id_var.set(tenant)
+
+        async def _reserve() -> None:
+            await reservation_store.reserve(
+                tenant_id=tenant,
+                agent_name="alpha",
+                thread_id=uuid4(),
+                estimated=10,
+            )
+
+        await asyncio.gather(*[_reserve() for _ in range(16)])
+
+        month = datetime.now(tz=UTC).date().replace(day=1)
+        budget = await reservation_store.get_budget(tenant_id=tenant, month=month)
+        assert budget is not None
+        assert budget.reserved_total == 160  # 16 * 10 — no lost increment
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_commit_release_refunds_once(
+    quota_stores: tuple[SqlTenantQuotaStore, SqlTokenReservationStore, AsyncEngine],
+) -> None:
+    """A client commit racing the reaper's release on one reservation — the
+    row lock serialises them so exactly one transition lands and the reserved
+    budget is refunded once (never double-decremented)."""
+    _, reservation_store, engine = quota_stores
+    try:
+        tenant = uuid4()
+        current_tenant_id_var.set(tenant)
+        row = await reservation_store.reserve(
+            tenant_id=tenant,
+            agent_name="alpha",
+            thread_id=uuid4(),
+            estimated=200,
+        )
+
+        async def _commit() -> str:
+            r = await reservation_store.commit(
+                reservation_id=row.id, tenant_id=tenant, actual_tokens=200
+            )
+            return r.state.value
+
+        async def _release() -> str:
+            r = await reservation_store.release(reservation_id=row.id, tenant_id=tenant)
+            return r.state.value
+
+        await asyncio.gather(_commit(), _release())
+
+        final = await reservation_store.get(reservation_id=row.id, tenant_id=tenant)
+        assert final is not None
+        # Whichever won, the row is terminal and reserved is refunded once.
+        assert final.state in (ReservationState.COMMITTED, ReservationState.RELEASED)
+
+        month = datetime.now(tz=UTC).date().replace(day=1)
+        budget = await reservation_store.get_budget(tenant_id=tenant, month=month)
+        assert budget is not None
+        assert budget.reserved_total == 0  # refunded once, not -200
+        # used_total is 200 iff commit won, else 0 — never double-counted.
+        assert budget.used_total in (0, 200)
     finally:
         await engine.dispose()
