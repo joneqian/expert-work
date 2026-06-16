@@ -29,8 +29,8 @@ dependencies = [
     # Stream C.1 — OIDC + RS256 JWT verification.
     # ``>=2.13.0`` 跳过 PYSEC-2026-175/177/178/179（pip-audit 已要求）。
     "pyjwt[crypto]>=2.13.0,<3",
-    # ``>=46.0.7`` 跳过 CVE-2026-26007 / 34073 / 39892（pip-audit 已要求）。
-    "cryptography>=46.0.7,<47",
+    # ``>=48.0.1`` 跳过 CVE-2026-26007 / 34073 / 39892 + GHSA-537c-gmf6-5ccf（pip-audit 已要求）。
+    "cryptography>=48.0.1,<49",
     "httpx>=0.27,<1",
     # Stream C.3 — Argon2id hashing for API key secrets (OWASP-recommended).
     "argon2-cffi>=23.1,<26",
