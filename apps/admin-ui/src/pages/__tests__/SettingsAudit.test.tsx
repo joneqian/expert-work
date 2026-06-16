@@ -188,6 +188,50 @@ describe("SettingsAudit", () => {
     await waitFor(() => expect(lastParams.action).toBe("memory:update"));
   });
 
+  it("surfaces an MCP traffic badge with server + response size (Stream 14.4)", async () => {
+    const mcpEntry = {
+      ...baseEntry,
+      id: 7,
+      action: "tool:call",
+      resource_type: "tool",
+      resource_id: "mcp:github.search",
+      details: { mcp_server: "github", mcp_tool: "search", response_chars: 2400, mcp_is_error: false },
+    };
+    installAdapter([
+      {
+        match: (u) => u === "/v1/audit",
+        respond: () => ({
+          items: [mcpEntry],
+          next_cursor: null,
+          has_more: false,
+          applied_scope: "t1",
+        }),
+      },
+    ]);
+    renderAudit();
+    await waitFor(() => expect(screen.getByTestId("audit-mcp-7")).toBeInTheDocument());
+    // Server name + compact response size visible inline (no drawer needed).
+    expect(screen.getByTestId("audit-mcp-7").textContent).toContain("github");
+    expect(screen.getByTestId("audit-mcp-7").textContent).toContain("2.4k");
+  });
+
+  it("shows no MCP badge for a non-MCP audit row", async () => {
+    installAdapter([
+      {
+        match: (u) => u === "/v1/audit",
+        respond: () => ({
+          items: [baseEntry],
+          next_cursor: null,
+          has_more: false,
+          applied_scope: "t1",
+        }),
+      },
+    ]);
+    renderAudit();
+    await waitFor(() => expect(screen.getByText("memory:update")).toBeInTheDocument());
+    expect(screen.queryByTestId("audit-mcp-1")).toBeNull();
+  });
+
   it("surfaces backend errors via Alert", async () => {
     apiClient.defaults.adapter = (config) =>
       Promise.reject({

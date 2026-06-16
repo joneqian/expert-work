@@ -458,6 +458,7 @@ const zhCN: TranslationKeys = {
     detail_payload: "载荷(details)",
     detail_payload_hint:
       "写入时已被脱敏器清洗 — 敏感字段呈 [REDACTED]。",
+    mcp_traffic_hint: "到 {{server}} 的 MCP 流量 — 服务器 · 响应体积",
   },
   settings_ops: {
     quotas_page_title: "租户配额",

@@ -447,6 +447,7 @@ export interface TranslationKeys {
     detail_ip: string;
     detail_payload: string;
     detail_payload_hint: string;
+    mcp_traffic_hint: string;
   };
   settings_ops: {
     quotas_page_title: string;
@@ -1893,6 +1894,7 @@ const en: TranslationKeys = {
     detail_payload: "Payload (details)",
     detail_payload_hint:
       "Already redactor-cleaned at write time — sensitive fields surface as [REDACTED].",
+    mcp_traffic_hint: "MCP traffic to {{server}} — server · response size",
   },
   settings_ops: {
     quotas_page_title: "Tenant Quotas",

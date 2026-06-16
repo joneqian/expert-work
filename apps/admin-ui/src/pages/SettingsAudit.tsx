@@ -33,6 +33,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Globe2,
+  Network,
   ShieldAlert,
   ShieldOff,
 } from "lucide-react";
@@ -51,6 +52,35 @@ import { useTenantScope } from "../tenant/TenantScopeContext";
 const { Text } = Typography;
 
 const RESULT_OPTIONS: AuditResult[] = ["success", "denied", "error"];
+
+/** Above this response size an MCP call is highlighted as a possible
+ *  data-volume / exfil anomaly (Stream 14.4). */
+const MCP_LARGE_RESPONSE_CHARS = 100_000;
+
+interface McpTraffic {
+  server: string;
+  responseChars: number | null;
+  isError: boolean;
+}
+
+/** Stream 14.4 — surface MCP traffic dimensions the orchestrator wrote into
+ *  ``details`` (``mcp_server`` / ``response_chars`` / ``mcp_is_error``) so an
+ *  operator scans MCP volume in the timeline instead of opening every drawer.
+ *  Returns ``null`` for non-MCP rows. */
+function mcpTraffic(entry: AuditEntry): McpTraffic | null {
+  if (entry.resource_id === null || !entry.resource_id.startsWith("mcp:")) return null;
+  const d = entry.details ?? {};
+  const server = typeof d.mcp_server === "string" ? d.mcp_server : entry.resource_id.slice(4).split(".")[0];
+  const responseChars = typeof d.response_chars === "number" ? d.response_chars : null;
+  return { server, responseChars, isError: d.mcp_is_error === true };
+}
+
+/** Compact char count, e.g. ``1.2k`` / ``3.4M``. */
+function formatChars(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
 
 function ResultTag({ result }: { result: AuditResult }) {
   if (result === "success") {
@@ -294,6 +324,23 @@ export function SettingsAudit() {
                     ({entry.resource_id.length > 18 ? `${entry.resource_id.slice(0, 18)}…` : entry.resource_id})
                   </Text>
                 )}
+                {(() => {
+                  const mcp = mcpTraffic(entry);
+                  if (mcp === null) return null;
+                  const large =
+                    mcp.responseChars !== null && mcp.responseChars >= MCP_LARGE_RESPONSE_CHARS;
+                  return (
+                    <Tag
+                      color={large ? "warning" : "cyan"}
+                      icon={<Network size={10} strokeWidth={1.75} />}
+                      data-testid={`audit-mcp-${entry.id ?? "x"}`}
+                      title={t("audit.mcp_traffic_hint", { server: mcp.server })}
+                    >
+                      {mcp.server}
+                      {mcp.responseChars !== null && ` · ${formatChars(mcp.responseChars)}`}
+                    </Tag>
+                  );
+                })()}
               </Space>
               <ResultTag result={entry.result} />
             </div>
