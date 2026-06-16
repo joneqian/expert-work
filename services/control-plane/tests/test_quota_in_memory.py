@@ -302,6 +302,47 @@ async def test_reaper_runs_once_releases_stale_rows() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reaper_invokes_on_expire_per_row() -> None:
+    """The ``on_expire`` hook fires once per expired reservation with the
+    row — this is what app.py wires to emit the
+    ``quota:reservation_expired`` audit."""
+    from datetime import timedelta
+
+    from control_plane.quota import ReservationReaper
+    from helix_agent.protocol import TokenReservationRecord
+
+    tenant = _tenant()
+    store = InMemoryTokenReservationStore()
+    row = await store.reserve(
+        tenant_id=tenant,
+        agent_name="alpha",
+        thread_id=uuid4(),
+        estimated=100,
+    )
+    store._reservations[row.id] = row.model_copy(  # type: ignore[attr-defined]
+        update={"reserved_at": row.reserved_at - timedelta(hours=1)}
+    )
+
+    seen: list[TokenReservationRecord] = []
+
+    async def _record(r: TokenReservationRecord) -> None:
+        seen.append(r)
+
+    reaper = ReservationReaper(
+        reservation_store=store,
+        max_age_s=600,
+        interval_s=60,
+        on_expire=_record,
+    )
+    released = await reaper.run_once()
+
+    assert released == 1
+    assert len(seen) == 1
+    assert seen[0].id == row.id
+    assert seen[0].tenant_id == tenant
+
+
+@pytest.mark.asyncio
 async def test_reaper_cycle_error_increments_metric() -> None:
     """A failing cycle bumps ``helix_control_plane_quota_reaper_cycle_errors_total``."""
     import asyncio
