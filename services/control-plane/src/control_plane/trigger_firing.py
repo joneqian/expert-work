@@ -151,6 +151,7 @@ async def fire_trigger(
     approval_store: ApprovalStore,
     trigger_store: TriggerStore,
     tenant_config_store: TenantConfigStore | None = None,
+    stamp_last_fired: bool = True,
 ) -> UUID | None:
     """Start a run for ``trigger``; return the new ``run_id``, or ``None``.
 
@@ -158,6 +159,11 @@ async def fire_trigger(
     failure (agent gone / un-buildable) logs and returns ``None`` — no
     thread or run is created. The caller records the ``trigger_run``
     row from the returned ``run_id``.
+
+    Stream 9.5 — ``stamp_last_fired`` controls the ``last_fired_at`` write.
+    The cron scheduler already stamps it via ``claim_cron_fire`` (the CAS that
+    serialises competing instances), so it passes ``False`` to avoid a
+    redundant second write; the webhook ingest + DLQ retry paths keep ``True``.
     """
     record = await agent_spec_store.get(
         tenant_id=trigger.tenant_id,
@@ -260,7 +266,8 @@ async def fire_trigger(
     )
     await runtime.run_manager.attach_task(run_id, worker)
 
-    await trigger_store.update(trigger.model_copy(update={"last_fired_at": now}))
+    if stamp_last_fired:
+        await trigger_store.update(trigger.model_copy(update={"last_fired_at": now}))
     await emit(
         audit_logger,
         tenant_id=trigger.tenant_id,

@@ -78,6 +78,25 @@ class InMemoryTriggerStore(TriggerStore):
         self._rows[record.id] = record
         return True
 
+    async def claim_cron_fire(
+        self,
+        *,
+        trigger_id: UUID,
+        tenant_id: UUID,
+        expected_last_fired_at: datetime | None,
+        new_last_fired_at: datetime,
+    ) -> bool:
+        row = self._rows.get(trigger_id)
+        if row is None or row.tenant_id != tenant_id:
+            return False
+        if row.last_fired_at != expected_last_fired_at:
+            # A peer already claimed this slot — loser, no fire.
+            return False
+        self._rows[trigger_id] = row.model_copy(
+            update={"last_fired_at": new_last_fired_at, "updated_at": new_last_fired_at}
+        )
+        return True
+
     async def delete(self, *, trigger_id: UUID, tenant_id: UUID) -> bool:
         row = self._rows.get(trigger_id)
         if row is None or row.tenant_id != tenant_id:
@@ -116,6 +135,18 @@ class InMemoryTriggerRunStore(TriggerRunStore):
         if existing is None or existing.tenant_id != record.tenant_id:
             return False
         self._rows[record.id] = record
+        return True
+
+    async def claim_retry(self, *, trigger_run_id: UUID, tenant_id: UUID) -> bool:
+        row = self._rows.get(trigger_run_id)
+        if row is None or row.tenant_id != tenant_id:
+            return False
+        if row.status is not TriggerRunStatus.RETRYING:
+            # A peer already claimed this retry — loser, no re-fire.
+            return False
+        self._rows[trigger_run_id] = row.model_copy(
+            update={"status": TriggerRunStatus.FIRED, "next_retry_at": None}
+        )
         return True
 
     async def list_by_trigger(self, *, trigger_id: UUID, tenant_id: UUID) -> list[TriggerRunRecord]:

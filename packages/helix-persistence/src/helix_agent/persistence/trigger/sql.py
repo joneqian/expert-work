@@ -178,6 +178,31 @@ class SqlTriggerStore(TriggerStore):
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
 
+    async def claim_cron_fire(
+        self,
+        *,
+        trigger_id: UUID,
+        tenant_id: UUID,
+        expected_last_fired_at: datetime | None,
+        new_last_fired_at: datetime,
+    ) -> bool:
+        # CAS on the cron slot — stamp ``last_fired_at`` only while it still
+        # equals what the caller read. ``IS NOT DISTINCT FROM`` makes a
+        # never-fired trigger (NULL) match ``expected=None``. Exactly one
+        # instance's UPDATE matches a row; the loser gets rowcount 0.
+        async with self._sf() as session:
+            result = await session.execute(
+                sa_update(AgentTriggerRow)
+                .where(
+                    AgentTriggerRow.id == trigger_id,
+                    AgentTriggerRow.tenant_id == tenant_id,
+                    AgentTriggerRow.last_fired_at.is_not_distinct_from(expected_last_fired_at),
+                )
+                .values(last_fired_at=new_last_fired_at, updated_at=new_last_fired_at)
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
     async def delete(self, *, trigger_id: UUID, tenant_id: UUID) -> bool:
         async with self._sf() as session:
             result = await session.execute(
@@ -277,6 +302,22 @@ class SqlTriggerRunStore(TriggerRunStore):
                     next_retry_at=record.next_retry_at,
                     error=record.error,
                 )
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def claim_retry(self, *, trigger_run_id: UUID, tenant_id: UUID) -> bool:
+        # CAS ``retrying`` → ``fired`` (clear the backoff) so exactly one
+        # instance re-fires this firing; the loser's UPDATE matches no row.
+        async with self._sf() as session:
+            result = await session.execute(
+                sa_update(TriggerRunRow)
+                .where(
+                    TriggerRunRow.id == trigger_run_id,
+                    TriggerRunRow.tenant_id == tenant_id,
+                    TriggerRunRow.status == TriggerRunStatus.RETRYING.value,
+                )
+                .values(status=TriggerRunStatus.FIRED.value, next_retry_at=None)
             )
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0

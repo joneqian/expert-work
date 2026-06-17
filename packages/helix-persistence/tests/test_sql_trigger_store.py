@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -321,3 +322,55 @@ async def test_run_store_list_due_retries(trigger_run_store: SqlTriggerRunStore)
     ids = {r.id for r in listed}
     assert due.id in ids
     assert not_due.id not in ids
+
+
+# --- Stream 9.5 — CAS claim exactly-once under real concurrency -----------
+
+
+@pytest.mark.asyncio
+async def test_claim_cron_fire_concurrent_wins_exactly_one(
+    trigger_store: SqlTriggerStore,
+) -> None:
+    """16 schedulers race the same due cron slot — the CAS on ``last_fired_at``
+    (IS NOT DISTINCT FROM the read value) lets exactly one win."""
+    tid, tenant = uuid4(), uuid4()
+    await trigger_store.create(_record(trigger_id=tid, tenant_id=tenant))  # last_fired_at=None
+    fire_at = _BASE + timedelta(hours=1)
+
+    async def _claim() -> bool:
+        return await trigger_store.claim_cron_fire(
+            trigger_id=tid,
+            tenant_id=tenant,
+            expected_last_fired_at=None,
+            new_last_fired_at=fire_at,
+        )
+
+    results = await asyncio.gather(*[_claim() for _ in range(16)])
+    assert sum(1 for won in results if won) == 1
+
+    row = await trigger_store.get(trigger_id=tid, tenant_id=tenant)
+    assert row is not None
+    assert row.last_fired_at == fire_at
+
+
+@pytest.mark.asyncio
+async def test_claim_retry_concurrent_wins_exactly_one(
+    trigger_run_store: SqlTriggerRunStore,
+) -> None:
+    """16 schedulers race the same retrying firing — the CAS ``retrying`` →
+    ``fired`` lets exactly one re-fire."""
+    rid, tenant = uuid4(), uuid4()
+    await trigger_run_store.create(
+        _run_record(run_record_id=rid, tenant_id=tenant, status=TriggerRunStatus.RETRYING)
+    )
+
+    async def _claim() -> bool:
+        return await trigger_run_store.claim_retry(trigger_run_id=rid, tenant_id=tenant)
+
+    results = await asyncio.gather(*[_claim() for _ in range(16)])
+    assert sum(1 for won in results if won) == 1
+
+    row = await trigger_run_store.get(trigger_run_id=rid, tenant_id=tenant)
+    assert row is not None
+    assert row.status is TriggerRunStatus.FIRED
+    assert row.next_retry_at is None

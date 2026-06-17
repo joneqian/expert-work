@@ -15,6 +15,17 @@ Mini-ADR J-42: the ``agent_trigger`` table is the single source of
 truth (no APScheduler jobstore). Restart-safe — a long outage fires a
 due trigger once, not once per missed slot.
 
+Stream 9.5 — the two run-spawning passes are CAS-guarded so the scheduler
+is safe to run on more than one instance: ``_fire_due_cron`` claims the due
+slot via ``TriggerStore.claim_cron_fire`` (CAS on ``last_fired_at``) and
+``_retry_due`` claims a retrying firing via ``TriggerRunStore.claim_retry``
+(CAS ``retrying`` → ``fired``) — exactly one instance wins each, so blue+green
+never double-spawn. The reconcile pass is idempotent (both instances derive the
+same terminal status from the same run outcome). (Deployment still single-
+replicas the scheduler today because the co-located ``SkillCurator`` shares the
+``enable_scheduler`` gate and is not yet CAS-hardened; the guards here remove the
+scheduler's own double-fire hazard and are the prerequisite for going wider.)
+
 Wiring (in :func:`control_plane.app.create_app`): started from the
 FastAPI ``lifespan`` ``yield``, stopped via :meth:`stop` from the
 ``finally`` branch — the same shape as :class:`ReservationReaper`.
@@ -212,7 +223,19 @@ class TriggerScheduler:
 
     async def _fire_cron(self, trigger: TriggerRecord, *, now: datetime) -> bool:
         with _tenant_scope(trigger.tenant_id, trigger.user_id):
-            run_id = await self._fire(trigger, now=now)
+            # Stream 9.5 — CAS-claim the due slot before firing so blue+green
+            # don't both spawn a run for the same tick. The claim stamps
+            # ``last_fired_at`` (== exactly-once guard); the loser skips.
+            won = await self._triggers.claim_cron_fire(
+                trigger_id=trigger.id,
+                tenant_id=trigger.tenant_id,
+                expected_last_fired_at=trigger.last_fired_at,
+                new_last_fired_at=now,
+            )
+            if not won:
+                return False
+            # The claim already stamped ``last_fired_at`` — don't double-write.
+            run_id = await self._fire(trigger, now=now, stamp_last_fired=False)
             if run_id is None:
                 return False
             await self._trigger_runs.create(
@@ -228,7 +251,9 @@ class TriggerScheduler:
             )
             return True
 
-    async def _fire(self, trigger: TriggerRecord, *, now: datetime) -> UUID | None:
+    async def _fire(
+        self, trigger: TriggerRecord, *, now: datetime, stamp_last_fired: bool = True
+    ) -> UUID | None:
         """Spawn a run for ``trigger`` — caller already set the tenant scope."""
         return await fire_trigger(
             trigger,
@@ -240,6 +265,7 @@ class TriggerScheduler:
             approval_store=self._approvals,
             trigger_store=self._triggers,
             tenant_config_store=self._tenant_config_store,
+            stamp_last_fired=stamp_last_fired,
         )
 
     # -- pass 2: reconcile fired firings against their run outcome -------
@@ -317,6 +343,13 @@ class TriggerScheduler:
 
     async def _retry_one(self, row: TriggerRunRecord, *, now: datetime) -> bool:
         with _tenant_scope(row.tenant_id):
+            # Stream 9.5 — CAS-claim the retry (retrying → fired) so only one
+            # instance re-fires it; a peer that won already flipped it out of
+            # ``retrying`` and our claim returns False → skip (no duplicate run).
+            if not await self._trigger_runs.claim_retry(
+                trigger_run_id=row.id, tenant_id=row.tenant_id
+            ):
+                return False
             trigger = await self._triggers.get(trigger_id=row.trigger_id, tenant_id=row.tenant_id)
         if trigger is None or not trigger.enabled:
             # Trigger deleted / disabled while retrying — abandon it.

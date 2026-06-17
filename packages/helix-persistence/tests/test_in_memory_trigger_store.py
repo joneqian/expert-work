@@ -337,3 +337,73 @@ async def test_list_by_tenant_agent_version_filter() -> None:
     assert len(await store.list_by_tenant(tenant_id=tenant)) == 2
     cross = await store.list_all_tenants(agent_name="reporter", agent_version="2.0.0")
     assert [t.name for t in cross] == ["t2"]
+
+
+# --- Stream 9.5 — CAS claim (multi-replica exactly-once) -------------------
+
+
+@pytest.mark.asyncio
+async def test_claim_cron_fire_wins_once_then_stale_loses() -> None:
+    store = InMemoryTriggerStore()
+    tid, tenant = uuid4(), uuid4()
+    await store.create(_record(trigger_id=tid, tenant_id=tenant))  # last_fired_at=None
+    fire_at = _BASE + timedelta(hours=1)
+
+    # First instance claims the slot (expected=None matches a never-fired row).
+    won = await store.claim_cron_fire(
+        trigger_id=tid, tenant_id=tenant, expected_last_fired_at=None, new_last_fired_at=fire_at
+    )
+    assert won is True
+    # A peer that still thinks last_fired_at is None loses — slot already taken.
+    lost = await store.claim_cron_fire(
+        trigger_id=tid, tenant_id=tenant, expected_last_fired_at=None, new_last_fired_at=fire_at
+    )
+    assert lost is False
+    row = await store.get(trigger_id=tid, tenant_id=tenant)
+    assert row is not None and row.last_fired_at == fire_at
+
+
+@pytest.mark.asyncio
+async def test_claim_cron_fire_cross_tenant_is_false() -> None:
+    store = InMemoryTriggerStore()
+    tid, tenant = uuid4(), uuid4()
+    await store.create(_record(trigger_id=tid, tenant_id=tenant))
+    assert (
+        await store.claim_cron_fire(
+            trigger_id=tid,
+            tenant_id=uuid4(),
+            expected_last_fired_at=None,
+            new_last_fired_at=_BASE,
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_claim_retry_wins_once_then_loses() -> None:
+    store = InMemoryTriggerRunStore()
+    rid, tenant = uuid4(), uuid4()
+    await store.create(
+        _run_record(run_record_id=rid, tenant_id=tenant, status=TriggerRunStatus.RETRYING)
+    )
+
+    first = await store.claim_retry(trigger_run_id=rid, tenant_id=tenant)
+    second = await store.claim_retry(trigger_run_id=rid, tenant_id=tenant)
+    assert first is True
+    assert second is False  # already flipped out of retrying
+    row = await store.get(trigger_run_id=rid, tenant_id=tenant)
+    assert row is not None
+    assert row.status is TriggerRunStatus.FIRED
+    assert row.next_retry_at is None
+
+
+@pytest.mark.asyncio
+async def test_claim_retry_false_when_not_retrying_or_cross_tenant() -> None:
+    store = InMemoryTriggerRunStore()
+    rid, tenant = uuid4(), uuid4()
+    await store.create(
+        _run_record(run_record_id=rid, tenant_id=tenant, status=TriggerRunStatus.FIRED)
+    )
+    # Not in retrying → no claim; right row wrong tenant → no claim.
+    assert await store.claim_retry(trigger_run_id=rid, tenant_id=tenant) is False
+    assert await store.claim_retry(trigger_run_id=rid, tenant_id=uuid4()) is False

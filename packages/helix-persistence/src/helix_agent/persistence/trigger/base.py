@@ -89,6 +89,27 @@ class TriggerStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def claim_cron_fire(
+        self,
+        *,
+        trigger_id: UUID,
+        tenant_id: UUID,
+        expected_last_fired_at: datetime | None,
+        new_last_fired_at: datetime,
+    ) -> bool:
+        """Atomically claim a due cron slot; ``True`` iff this caller won.
+
+        Stream 9.5 — the scheduler runs on every instance. The CAS stamps
+        ``last_fired_at = new`` only while it still equals ``expected`` (the
+        value the caller read when it judged the trigger due), using
+        ``IS NOT DISTINCT FROM`` so a never-fired trigger (``expected=None``)
+        matches. Exactly one instance wins the slot and goes on to fire; the
+        loser's UPDATE matches zero rows → it skips, so blue+green don't both
+        spawn a run for the same tick. Without this two schedulers both
+        ``list``-then-fire the same due trigger → duplicate runs.
+        """
+
+    @abc.abstractmethod
     async def delete(self, *, trigger_id: UUID, tenant_id: UUID) -> bool:
         """Delete a trigger row; return ``True`` iff it existed."""
 
@@ -126,6 +147,17 @@ class TriggerRunStore(abc.ABC):
     @abc.abstractmethod
     async def update(self, record: TriggerRunRecord) -> bool:
         """Replace a firing row (matched by ``id`` + ``tenant_id``); return hit."""
+
+    @abc.abstractmethod
+    async def claim_retry(self, *, trigger_run_id: UUID, tenant_id: UUID) -> bool:
+        """Atomically claim a due ``retrying`` firing for re-fire; ``True`` iff won.
+
+        Stream 9.5 — CAS ``status='retrying'`` → ``fired`` (clearing
+        ``next_retry_at``) so when several instances scan
+        :meth:`list_due_retries` only one re-fires the run. The loser sees
+        ``False`` and skips. Without this two schedulers both re-fire the same
+        retrying firing → duplicate runs.
+        """
 
     @abc.abstractmethod
     async def list_by_trigger(self, *, trigger_id: UUID, tenant_id: UUID) -> list[TriggerRunRecord]:

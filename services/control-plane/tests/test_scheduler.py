@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
@@ -362,3 +363,77 @@ async def test_retry_skips_not_due_row() -> None:
 
     fired = await scheduler._retry_due(datetime.now(UTC))
     assert fired == 0
+
+
+# --- Stream 9.5 — two-instance exactly-once (CAS guards) ------------------
+
+
+async def _drain(run_id: UUID, *runtimes: AgentRuntime) -> None:
+    """Await the spawned run worker wherever it landed (winner's runtime)."""
+    for rt in runtimes:
+        record = rt.run_manager.get(run_id)
+        if record is not None and record.task is not None:
+            await record.task
+            return
+
+
+@pytest.mark.asyncio
+async def test_two_instances_fire_due_cron_exactly_once() -> None:
+    """Blue + green both scan the same due cron trigger; the claim_cron_fire CAS
+    lets exactly one fire — no duplicate run / trigger_run."""
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    runs = InMemoryRunStore()
+    trig = await triggers.create(
+        _trigger(expr="0 9 * * *", created_at=datetime(2026, 5, 1, 9, 0, tzinfo=UTC))
+    )
+    blue, blue_rt = await _build_scheduler(
+        trigger_store=triggers, trigger_run_store=trigger_runs, run_store=runs
+    )
+    green, green_rt = await _build_scheduler(
+        trigger_store=triggers, trigger_run_store=trigger_runs, run_store=runs
+    )
+
+    counts = await asyncio.gather(blue.run_once(), green.run_once())
+    assert sum(counts) == 1  # exactly one instance fired
+
+    fired_rows = await trigger_runs.list_by_trigger(trigger_id=trig.id, tenant_id=_TENANT)
+    assert len(fired_rows) == 1  # exactly one trigger_run — no double-fire
+    await _drain(fired_rows[0].run_id, blue_rt, green_rt)
+
+
+@pytest.mark.asyncio
+async def test_two_instances_retry_exactly_once() -> None:
+    """Two instances both sweep the same due retrying firing; the claim_retry CAS
+    lets exactly one re-fire — attempt advances by one, not two."""
+    triggers = InMemoryTriggerStore()
+    trigger_runs = InMemoryTriggerRunStore()
+    runs = InMemoryRunStore()
+    trig = await triggers.create(_trigger(last_fired_at=datetime.now(UTC)))
+    retrying = TriggerRunRecord(
+        id=uuid4(),
+        tenant_id=_TENANT,
+        trigger_id=trig.id,
+        run_id=uuid4(),
+        status=TriggerRunStatus.RETRYING,
+        attempt=1,
+        next_retry_at=datetime.now(UTC) - timedelta(minutes=1),
+        triggered_at=_BASE,
+    )
+    await trigger_runs.create(retrying)
+    blue, blue_rt = await _build_scheduler(
+        trigger_store=triggers, trigger_run_store=trigger_runs, run_store=runs
+    )
+    green, green_rt = await _build_scheduler(
+        trigger_store=triggers, trigger_run_store=trigger_runs, run_store=runs
+    )
+
+    now = datetime.now(UTC)
+    counts = await asyncio.gather(blue._retry_due(now), green._retry_due(now))
+    assert sum(counts) == 1  # exactly one instance re-fired
+
+    row = await trigger_runs.get(trigger_run_id=retrying.id, tenant_id=_TENANT)
+    assert row is not None
+    assert row.status is TriggerRunStatus.FIRED
+    assert row.attempt == 2  # advanced once, not twice
+    await _drain(row.run_id, blue_rt, green_rt)
