@@ -270,26 +270,26 @@ async def test_refresh_implementation_raising_is_treated_as_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_non_oauth_provider_401_passes_through_unchanged() -> None:
-    """A non-OAuth provider's 401 must re-raise as ``LLMUnauthorizedError``
-    (an ``LLMClientError`` subclass) — existing 4xx semantics: no
-    refresh, no fallback. Bad Anthropic API key shouldn't ping-pong to
-    OpenAI on the same broken credentials."""
+async def test_non_oauth_provider_401_is_key_level_falls_to_next_handle() -> None:
+    """Stream Y-MK — a non-OAuth provider's 401 (revoked static key) is now
+    *key-level*: the router tries the next handle (a sibling key first, or the
+    next provider when no sibling remains) rather than dying. A revoked
+    Anthropic key with no sibling falls through to the next provider, whose
+    credentials are independent — so a single dead key no longer locks the run.
+    No OAuth refresh happens (static provider)."""
     primary = _StaticProvider(responses=[LLMUnauthorizedError("anthropic 401: bad key")])
-    fallback = _StaticProvider(responses=[AIMessage(content="should not be reached")])
+    fallback = _StaticProvider(responses=[AIMessage(content="next provider answers")])
     router = LLMRouter(
         providers=[
-            ProviderHandle(provider=primary, key="static:primary"),
-            ProviderHandle(provider=fallback, key="static:fallback"),
+            ProviderHandle(provider=primary, key="anthropic:claude#1", group="anthropic:claude"),
+            ProviderHandle(provider=fallback, key="openai:gpt#1", group="openai:gpt"),
         ]
     )
 
-    with pytest.raises(LLMUnauthorizedError, match="bad key"):
-        await router(messages=_msgs(), tools=[])
+    result = await router(messages=_msgs(), tools=[])
 
-    # LLMUnauthorizedError IS-A LLMClientError; the router's existing
-    # client-error branch short-circuits.
-    assert fallback.calls == 0
+    assert result.content == "next provider answers"
+    assert fallback.calls == 1
 
 
 def test_unauthorized_error_is_client_error_subclass() -> None:

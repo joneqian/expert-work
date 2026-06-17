@@ -16,10 +16,12 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from helix_agent.runtime.middleware import (
     CircuitOpenError,
     LLMClientError,
+    LLMKeyUnavailableError,
     LLMNetworkError,
     LLMRateLimitError,
     LLMServerError,
     LLMStreamStaleError,
+    LLMUnauthorizedError,
 )
 from orchestrator.llm import (
     AllProvidersExhaustedError,
@@ -415,3 +417,153 @@ async def test_stream_stale_emits_counter() -> None:
 
     after = REGISTRY.get_sample_value(metric, labels=labels) or 0.0
     assert after == before + 1
+
+
+# ---------------------------------------------------------------------------
+# Stream Y-MK — per-provider multi-key, two-level failover
+#
+# ProviderHandle.group identifies sibling keys of the same provider/model.
+# Key-level errors (rate-limit / account-dead / revoked key / circuit-open)
+# advance to the next sibling key; provider-level errors (5xx / network /
+# timeout) skip the remaining siblings and jump to the next provider.
+# ---------------------------------------------------------------------------
+
+
+def _kh(
+    provider: _ScriptedProvider, key: str, group: str
+) -> ProviderHandle:
+    return ProviderHandle(provider=provider, key=key, group=group)
+
+
+@pytest.mark.asyncio
+async def test_mk1_rate_limit_tries_sibling_key_not_next_provider() -> None:
+    k1 = _ScriptedProvider(raise_with=LLMRateLimitError("p:m 429"))
+    k2 = _ScriptedProvider(response=AIMessage(content="from sibling key"))
+    other = _ScriptedProvider(response=AIMessage(content="should not be called"))
+    router = LLMRouter(
+        providers=[
+            _kh(k1, "p:m#1", "p:m"),
+            _kh(k2, "p:m#2", "p:m"),
+            _kh(other, "q:m#1", "q:m"),
+        ]
+    )
+    result = await router(messages=_msgs(), tools=[])
+    assert result.content == "from sibling key"
+    assert len(k1.calls) == 1
+    assert len(k2.calls) == 1
+    assert other.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mk2_account_dead_tries_sibling_key() -> None:
+    k1 = _ScriptedProvider(raise_with=LLMKeyUnavailableError("deepseek 402"))
+    k2 = _ScriptedProvider(response=AIMessage(content="paid sibling"))
+    router = LLMRouter(
+        providers=[_kh(k1, "p:m#1", "p:m"), _kh(k2, "p:m#2", "p:m")]
+    )
+    result = await router(messages=_msgs(), tools=[])
+    assert result.content == "paid sibling"
+    assert len(k1.calls) == 1
+    assert len(k2.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_mk2b_revoked_key_tries_sibling_then_next_provider() -> None:
+    """Non-OAuth 401 is now key-level (Y-MK): try sibling, then next provider."""
+    k1 = _ScriptedProvider(raise_with=LLMUnauthorizedError("anthropic 401 revoked"))
+    k2 = _ScriptedProvider(raise_with=LLMUnauthorizedError("anthropic 401 also revoked"))
+    other = _ScriptedProvider(response=AIMessage(content="other provider"))
+    router = LLMRouter(
+        providers=[
+            _kh(k1, "a:m#1", "a:m"),
+            _kh(k2, "a:m#2", "a:m"),
+            _kh(other, "b:m#1", "b:m"),
+        ]
+    )
+    result = await router(messages=_msgs(), tools=[])
+    assert result.content == "other provider"
+    assert len(k1.calls) == 1
+    assert len(k2.calls) == 1
+    assert len(other.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_mk3_all_keys_dead_then_next_provider() -> None:
+    a1 = _ScriptedProvider(raise_with=LLMKeyUnavailableError("a 402"))
+    a2 = _ScriptedProvider(raise_with=LLMRateLimitError("a 429"))
+    b1 = _ScriptedProvider(response=AIMessage(content="provider b"))
+    router = LLMRouter(
+        providers=[
+            _kh(a1, "a:m#1", "a:m"),
+            _kh(a2, "a:m#2", "a:m"),
+            _kh(b1, "b:m#1", "b:m"),
+        ]
+    )
+    result = await router(messages=_msgs(), tools=[])
+    assert result.content == "provider b"
+    assert len(a1.calls) == 1
+    assert len(a2.calls) == 1
+    assert len(b1.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_mk4_malformed_400_fails_fast_no_sibling_no_fallback() -> None:
+    """400 malformed stays fail-fast (E.11 #21): no sibling, no provider switch."""
+    a1 = _ScriptedProvider(raise_with=LLMClientError("a 400 bad tool schema"))
+    a2 = _ScriptedProvider(response=AIMessage(content="sibling not tried"))
+    b1 = _ScriptedProvider(response=AIMessage(content="provider not tried"))
+    router = LLMRouter(
+        providers=[
+            _kh(a1, "a:m#1", "a:m"),
+            _kh(a2, "a:m#2", "a:m"),
+            _kh(b1, "b:m#1", "b:m"),
+        ]
+    )
+    with pytest.raises(LLMClientError, match="400 bad tool schema"):
+        await router(messages=_msgs(), tools=[])
+    assert len(a1.calls) == 1
+    assert a2.calls == []
+    assert b1.calls == []
+
+
+@pytest.mark.asyncio
+async def test_mk5_provider_5xx_skips_siblings_jumps_to_next_provider() -> None:
+    a1 = _ScriptedProvider(raise_with=LLMServerError("a 503"))
+    a2 = _ScriptedProvider(response=AIMessage(content="sibling not tried"))
+    b1 = _ScriptedProvider(response=AIMessage(content="provider b"))
+    router = LLMRouter(
+        providers=[
+            _kh(a1, "a:m#1", "a:m"),
+            _kh(a2, "a:m#2", "a:m"),
+            _kh(b1, "b:m#1", "b:m"),
+        ]
+    )
+    result = await router(messages=_msgs(), tools=[])
+    assert result.content == "provider b"
+    assert len(a1.calls) == 1
+    assert a2.calls == [], "5xx is provider-level → skip sibling keys"
+    assert len(b1.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_mk6_all_keys_all_providers_dead_raises_exhausted() -> None:
+    last = LLMRateLimitError("b 429 final")
+    a1 = _ScriptedProvider(raise_with=LLMKeyUnavailableError("a 402"))
+    b1 = _ScriptedProvider(raise_with=last)
+    router = LLMRouter(
+        providers=[_kh(a1, "a:m#1", "a:m"), _kh(b1, "b:m#1", "b:m")]
+    )
+    with pytest.raises(AllProvidersExhaustedError) as exc_info:
+        await router(messages=_msgs(), tools=[])
+    assert exc_info.value.last_exc is last
+
+
+@pytest.mark.asyncio
+async def test_mk7_single_key_default_group_regression() -> None:
+    """No group set (legacy single-key handle) → key-level error has no
+    sibling, so the chain exhausts exactly as before."""
+    k1 = _ScriptedProvider(raise_with=LLMRateLimitError("only 429"))
+    router = LLMRouter(providers=[_handle(k1, "solo")])
+    with pytest.raises(AllProvidersExhaustedError):
+        await router(messages=_msgs(), tools=[])
+    assert len(k1.calls) == 1

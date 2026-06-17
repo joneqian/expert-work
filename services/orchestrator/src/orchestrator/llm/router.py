@@ -48,9 +48,12 @@ from langchain_core.messages import AIMessage, BaseMessage
 
 from helix_agent.common.observability import helix_counter
 from helix_agent.runtime.middleware import (
+    CircuitOpenError,
     LLMAuthError,
     LLMClientError,
     LLMError,
+    LLMKeyUnavailableError,
+    LLMRateLimitError,
     LLMStreamStaleError,
     LLMUnauthorizedError,
     MiddlewareChain,
@@ -114,17 +117,52 @@ class ProviderHandle:
     """One node in the router's fallback chain.
 
     ``key`` identifies the upstream rate-limit bucket — typically
-    ``"<provider>:<role>"`` (e.g. ``"anthropic:primary"``,
-    ``"openai:fallback"``). It is passed downstream as the
+    ``"<provider>:<model>#<key_id>"`` (e.g. ``"anthropic:claude#1"``,
+    ``"anthropic:claude#2"``). It is passed downstream as the
     ``provider_key`` payload field so E.4's
     :class:`~helix_agent.runtime.middleware.BreakerRegistry` builds
     per-key circuit breakers (Mini-ADR E-4: breakers are per upstream
     key, not per provider, because one tenant can hold multiple keys
     for the same vendor and they must fail in isolation).
+
+    ``group`` (Stream Y-MK) ties together *sibling keys* of the same
+    provider/model — typically ``"<provider>:<model>"``. The router's
+    two-level fallback advances within a group on key-level failures
+    (rate-limit / dead account / revoked key / open breaker) and skips
+    the rest of a group on provider-level failures (5xx / network /
+    timeout). Defaults to empty, in which case :func:`_group_of` falls
+    back to ``key`` so a legacy single-key handle is its own singleton
+    group — preserving the pre-Y-MK flat-chain behaviour exactly.
     """
 
     provider: LLMProvider
     key: str
+    group: str = ""
+
+
+# Stream Y-MK — key/account-level failures. The router advances to the next
+# *sibling key* of the same provider/model on these before falling through to
+# the next provider. ``LLMUnauthorizedError`` reaches ``__call__`` only as a
+# non-OAuth revoked static key (``_call_one``'s OAuth refresh path has already
+# run for OAuth providers), so a revoked key tries a sibling too.
+# ``CircuitOpenError`` is per-key (E.4 breaker), so an open breaker on one key
+# should try a sibling, not abandon the whole provider.
+_KEY_LEVEL_ERRORS: tuple[type[LLMError], ...] = (
+    LLMRateLimitError,
+    LLMKeyUnavailableError,
+    LLMUnauthorizedError,
+    CircuitOpenError,
+)
+
+
+def _group_of(handle: ProviderHandle) -> str:
+    """The sibling-key group for a handle (Stream Y-MK).
+
+    Falls back to ``key`` when ``group`` is empty so a legacy single-key
+    handle forms its own singleton group — the pre-Y-MK flat chain behaves
+    identically (skipping "the rest of the group" skips only itself).
+    """
+    return handle.group or handle.key
 
 
 class AllProvidersExhaustedError(LLMError):
@@ -175,36 +213,55 @@ class LLMRouter:
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
     ) -> AIMessage:
-        if not self.providers:
+        handles = self.providers
+        if not handles:
             raise AllProvidersExhaustedError(
                 RuntimeError("LLMRouter constructed with empty provider chain")
             )
 
+        # Stream Y-MK — two-level walk over a flat handle list:
+        #   * key-level error  → next handle (sibling key first; once a
+        #     provider's siblings are exhausted the index naturally reaches
+        #     the next provider's group).
+        #   * 400 malformed    → re-raise, no fallback (E.11 #21 unchanged).
+        #   * provider-level   → skip the rest of THIS group's sibling keys
+        #     and jump to the next provider (a 5xx/network/timeout hits every
+        #     sibling key identically, so trying them wastes wall-clock).
         last_exc: LLMError | None = None
-        for idx, handle in enumerate(self.providers):
+        n = len(handles)
+        i = 0
+        while i < n:
+            handle = handles[i]
             try:
                 return await self._call_one(handle, messages=messages, tools=tools)
+            except _KEY_LEVEL_ERRORS as exc:
+                last_exc = exc
+                logger.warning(
+                    "llm_router.key_failed idx=%d key=%s err=%s",
+                    i,
+                    handle.key,
+                    type(exc).__name__,
+                )
+                i += 1
             except LLMClientError:
                 logger.warning(
                     "llm_router.client_error_no_fallback idx=%d key=%s",
-                    idx,
+                    i,
                     handle.key,
                 )
                 raise
             except LLMError as exc:
                 last_exc = exc
-                next_idx = idx + 1
-                has_next = next_idx < len(self.providers)
+                group = _group_of(handle)
                 logger.warning(
-                    "llm_router.provider_failed idx=%d key=%s err=%s fallback=%s",
-                    idx,
+                    "llm_router.provider_failed idx=%d key=%s err=%s",
+                    i,
                     handle.key,
                     type(exc).__name__,
-                    self.providers[next_idx].key if has_next else "<none>",
                 )
-                if has_next:
-                    continue
-                break
+                i += 1
+                while i < n and _group_of(handles[i]) == group:
+                    i += 1
 
         assert last_exc is not None  # noqa: S101 - loop invariant
         raise AllProvidersExhaustedError(last_exc)
