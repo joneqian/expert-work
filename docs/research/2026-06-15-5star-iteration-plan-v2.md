@@ -21,7 +21,7 @@
 
 ★4（一步之遥，多为低成本）：10.1（TX 终态，不推）（~~1.3~~ 已 ★5 #666/#667；~~7.3~~~~7.4~~ 已 ★5 #669）
 ★3（真 gap）：7.2 · 7.6 · 16.4 · 12.4（~~8.5~~ #671 / ~~13.2~~ #673 / ~~14.4~~ #675 / ~~16.3~~ backpressure / ~~10.5~~ 烧录率 #680 已 ★5）
-★2（M1 大件）：—（~~9.4~~ 已 ★5 live #677+#678；~~9.5~~ 已 ★5 live #683+#684+#685）
+★2（M1 大件）：—（~~9.4~~ 已 ★5 live #677+#678；~~9.5~~ 全收官 ★5 live #683–#687，T3 HA 层全清）
 ✅ 已收（本轮 T0）：2.2（#647）· 4.1（确认）
 
 ## 重排后的层级
@@ -41,6 +41,7 @@
 >
 > **累计进度（T0+T1+T2+T4 收割）**：重核 396 → 11.4/11.5（+2，398）→ 3.3（+2，400）→ 4.4（+1，401）→ 1.3（+1，402）→ 7.3/7.4（+2，404）→ 8.5（+2，406）→ 13.2（+2，408）→ 14.4（+2，410）→ 9.4（★2→★5 live，+3，413）→ 16.3（+2，415）→ 10.5（★3→★5，+2，417）→ **9.5（★2→★5 live，+3，420/430）**（+15.3 测试债清，★5 不改分）。
 > **均分 4.60→4.88（97.7%），共 +24★。T1 全清；M1 大件 9.4+9.5 双双 live 收口；运维韧性三连（16.3/10.5/15.3，#679-681）。** 1.3 见 `2026-06-16-1.3-orchestration-patterns-design.md`。
+> **9.5 worker 多副本完备（#686 TriggerScheduler cron+retry CAS / #687 approval timeout sweep）** 是已 ★5 范围内的加固，不改分——让所有 9.5 后台 worker（reaper/scheduler/queue/eval/approval）多副本 exactly-once，并补平 J.8 审批超时从没接线的缺失功能；设计见 `2026-06-16-9.5-distributed-run-queue-design.md` §2.2c/§2.2d。
 > 16.3/10.5/15.3 见 `2026-06-15-capability-reassessment.md` §3「运维韧性三连」：16.3 应用层 backpressure 过载守卫（503 甩负）/ 10.5 SLO 多窗烧录率（Google SRE，promtool 双验）/ 15.3 sanitize 纯函数直接单测（含跨递归位置）。
 > 9.4 见 `2026-06-16-9.4-9.5-ha-failover-design.md` §7（#677+#678）：Postgres 租约+孤儿 sweep+自动热接力,蓝绿双实例真栈 kill blue mid-run→green 续跑到 success(5 项断言全绿);live 暴露 failover 硬依赖 postgres checkpointer + 续跑 seq 撞键(已修)。
 > 14.4 见 `2026-06-16-14.4-mcp-defense-audit-design.md`（#675）：核代码发现「无流量审计」部分过期，补 MCP 专属流量审计（server/response_chars/is_error）+ in-process 隔离威胁评估 + 前端流量徽章。
@@ -73,12 +74,12 @@
 |---|---|---|
 | **10.1 连接式 trace** | ★4 | 内部跨服务 trace（orchestrator→sandbox）已全链 + root/业务 span 齐；剩余「★5」gap 仅"外部 egress 不注 traceparent"——这是**故意的安全决议**（防 trace_id 泄露给外部），推 ★5 = 安全反目标。**接受 ★4 为终态**，不列工作项。 |
 
-### T3 — 长程可靠 HA（★2，M1 大件，per-user 持久 agent 核心）
+### T3 — 长程可靠 HA（✅ 全清 ★5，per-user 持久 agent 核心）
 
 | 项 | 现 | 内容 | 工作量 |
 |---|---|---|---|
 | ~~9.4 自动 failover~~ | ✅★5 | **已交付+live 实证（#677+#678）**：Postgres 租约（`claimed_by`/`lease_until`/`heartbeat_at`）+ 孤儿 sweep（reclaim CAS 恰一赢家）+ 自动热接力（`adopt`+`run_agent(graph_input=None)` 从 durable checkpoint 续跑）。蓝绿双实例真栈 kill blue mid-run→green 续跑到 `status=success`，5 项断言全绿。house 风格（Postgres-first，零 Celery/broker）。live 暴露真依赖：failover 硬要 `checkpointer_backend=postgres`（dev 默认 memory→`EmptyInputError`）+ 续跑 seq 撞键（已修 `RunEventStore.next_seq`） |
-| ~~9.5 分布式任务队列~~ | ✅★5 | **已交付+live 实证（#683+#684+#685）**：house 风格分布式 run 队列（零 Celery/broker），`RunStatus.QUEUED`+`enqueued_input` 持久化 + `POST /runs mode=queue`（202 入队）+ 每实例 `RunQueueWorker` CAS-claim（`claim_queued` UPDATE…WHERE status='queued' RETURNING → 恰一赢家），与同步 SSE `mode=stream` 并行共存。Phase 2a EvalWorker claim CAS；Phase 2b 核代码发现真 gap 比 assessment 严重——`reserve`/`commit`/`release` 本身无行锁 read-check-write（READ COMMITTED ledger 双退款/丢失更新），reaper 每实例跑当前即真 bug，修 `FOR UPDATE` 串行化+`ON CONFLICT greatest` 原子算术+`expire_reserved` 返回赢家布尔（真 PG 16 并发证）。live：blue `mode=queue` 入队→kill blue→green RunQueueWorker 认领执行到 `success`，owner=green/`reclaim_count=0`/dequeued 0→1，4 项全绿 | XL |
+| ~~9.5 分布式任务队列~~ | ✅★5 | **全收官+live 实证（#683–#687）**：house 风格分布式 run 队列（零 Celery/broker），`RunStatus.QUEUED`+`enqueued_input` 持久化 + `POST /runs mode=queue`（202 入队）+ 每实例 `RunQueueWorker` CAS-claim（`claim_queued` UPDATE…WHERE status='queued' RETURNING → 恰一赢家），与同步 SSE `mode=stream` 并行共存。**五段全交付**：① Phase 1 队列（#683）② 2a EvalWorker claim CAS（#683）③ **2b reaper/ledger exactly-once（#684）**——核代码发现真 gap 比 assessment 严重：`reserve`/`commit`/`release` 本身无行锁 read-check-write（READ COMMITTED ledger 双退款/丢失更新），reaper 每实例跑当前即真 bug，修 `FOR UPDATE` 串行化+`ON CONFLICT greatest` 原子算术+`expire_reserved` 返回赢家布尔（真 PG 16 并发证）④ **2c TriggerScheduler cron+retry CAS（#686）**——`claim_cron_fire`（CAS `last_fired_at IS NOT DISTINCT FROM`）+`claim_retry`（CAS retrying→fired），消多副本双触发⑤ **2d approval timeout sweep（#687）**——核出 `list_expired` 全仓无消费者=「24h 超时」从没接线（run 永不自动解，缺失功能非加固），抽 `resolve_approval_decision` request-free 核 + `ApprovalTimeoutSweep` worker（每实例，`mark_decided` CAS 保 exactly-once）。**live（#685）**：blue `mode=queue` 入队→kill blue→green RunQueueWorker 认领执行到 `success`，owner=green/`reclaim_count=0`/dequeued 0→1，4 项全绿。所有 9.5 后台 worker 多副本安全（reaper/scheduler/queue/eval/approval），单副本闸仅余 SkillCurator | XL |
 
 ### T4 — 测试债 + 运维韧性 + 变现（价值最低 / 用户后置，最后）
 
@@ -96,11 +97,11 @@
 1. **旧 P1 eval 平台已交付**（11.3/11.6 ★5）→ 移出优先攻坚；剩 11.4/11.5 仅"接线"降为 T0 廉价收割。
 2. **旧 P3/P4 沙箱安全已自愈**（7.2/3/4/6 全升档）→ 从「攻坚区」降为「补到满分的收尾」。
 3. **新增 T0 廉价收割层**：4 项 ★4→★5 全 ≤1 天，最高 ROI，旧 v1 没单列。
-4. **HA：9.4 自动 failover 已提前 ★5 live 收口**（#677+#678，Postgres 租约+热接力，非 XL 大件——house 风格复用现成 checkpoint+CAS）；剩 9.5 分布式队列规模化仍 M1。
+4. **HA：9.4+9.5 双双 ★5 live 收口**（9.4 failover #677+#678；9.5 分布式队列 #683–#687，含全 worker 多副本 CAS 加固 + approval 超时 sweep 补缺）——均 house 风格复用现成 checkpoint+CAS，非传统 XL 大件。**T3 HA 层全清**。
 5. **变现 12.4 仍用户后置**，T4 末位。
 
 ## 建议执行序
 
-**T0 立即清**（4 项 ≤1 天，无依赖，均分快升）→ **T1 agent 能力**（护城河）→ T2 安全收尾 / T3 HA（看 M1 时间窗）→ T4 收尾。
+**T0 立即清**（4 项 ≤1 天，无依赖，均分快升）→ **T1 agent 能力**（护城河）→ T2 安全收尾 / ~~T3 HA~~（已全清 ★5）→ T4 收尾。
 
 满分化路径：21 项中 T0+T1 共 7 项是「近满分 + 高 ROI」，清完均分约 4.59→~4.75；剩 T2-T4 多为 M1/运维/业务层大件，按 M0→M1 gate 节奏推。
