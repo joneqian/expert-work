@@ -32,7 +32,7 @@ from control_plane.auth.api_key_verifier import ApiKeyVerifier, is_api_key_beare
 from control_plane.auth.errors import AuthError, MissingCredentialsError
 from control_plane.auth.jwt_verifier import JWTVerifier
 from control_plane.auth.mtls import MTLSVerifier
-from control_plane.auth.system_admin import resolve_system_admin
+from control_plane.auth.system_admin import maybe_bootstrap_system_admin, resolve_system_admin
 from control_plane.auth.tenant_roles import resolve_tenant_roles
 from control_plane.tenant_status import TenantStatusService
 from helix_agent.common.observability import current_trace_id_hex
@@ -66,6 +66,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         api_key_verifier: ApiKeyVerifier | None = None,
         role_binding_store: RoleBindingStore | None = None,
         tenant_status: TenantStatusService | None = None,
+        bootstrap_admin_email: str | None = None,
     ) -> None:
         super().__init__(app)
         self._verifier = verifier
@@ -82,6 +83,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # internal service principals are not platform admins
         # (they already carry ``allowed_tenants=(system_tenant_id,)``).
         self._role_binding_store = role_binding_store
+        # Stream ACCT — when set, the first login of this (verified) email
+        # auto-grants platform system_admin while the system has zero admins.
+        self._bootstrap_admin_email = bootstrap_admin_email
         # Stream U (PR E) — when set, a SUSPENDED tenant's members are 403'd.
         # system_admin principals carry the system tenant_id, which is never
         # suspended, so they pass through and can reactivate the tenant.
@@ -114,6 +118,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             principal = Principal.from_jwt_claims(claims)
             # Stream N — augment with platform-admin status if applicable.
             principal = await resolve_system_admin(principal, self._role_binding_store)
+            # Stream ACCT — first-login bootstrap of the first platform admin.
+            # No-op once any admin exists or when no bootstrap email is set.
+            if not principal.is_system_admin and self._bootstrap_admin_email:
+                principal = await maybe_bootstrap_system_admin(
+                    principal,
+                    self._role_binding_store,
+                    bootstrap_email=self._bootstrap_admin_email,
+                )
             # Stream R — merge tenant-scope role-binding roles so the
             # authorization layer (auth.rbac) sees roles granted via the
             # invite flow / role_bindings API, not only the JWT claim.

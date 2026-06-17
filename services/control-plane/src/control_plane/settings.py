@@ -274,6 +274,15 @@ class Settings(BaseSettings):
     #: link sent on member invite. Default 24h.
     keycloak_email_action_lifespan_s: int = Field(default=86400, gt=0)
 
+    #: Stream ACCT — email of the first platform ``system_admin`` to auto-grant
+    #: on first login. When set, the user whose verified JWT email matches gets
+    #: a platform-scope ``system_admin`` binding the first time they log in,
+    #: **only while the system holds zero platform admins** (zero-admin gate).
+    #: This replaces the manual ``python -m control_plane.bootstrap_admin`` step
+    #: on a fresh deployment; the script stays as a break-glass fallback.
+    #: ``None`` (default) disables the auto-grant entirely.
+    bootstrap_admin_email: str | None = None
+
     #: Path-prefix exemption list. Health + metrics are always allowed
     #: through; ``/v1/webhooks`` is exempt because an external webhook
     #: caller has no helix principal — that endpoint authenticates with

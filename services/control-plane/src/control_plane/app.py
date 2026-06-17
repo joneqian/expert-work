@@ -1607,6 +1607,8 @@ def create_app(
         role_binding_store=resolved_role_bindings,
         # Stream U (PR E) — 403 a suspended tenant's members (never system_admin).
         tenant_status=resolved_tenant_status_service,
+        # Stream ACCT — first-login auto-grant of the first platform admin.
+        bootstrap_admin_email=resolved_settings.bootstrap_admin_email,
     )
     # Stream 16.3 — overload guard. Outside auth so a shed request never reaches
     # JWT verify / DB; inside Observability so sheds are still traced + timed.

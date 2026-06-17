@@ -42,6 +42,10 @@ class JWTClaims(BaseModel):
     roles: tuple[str, ...] = ()
     scopes: tuple[str, ...] = ()
     allowed_tenants: tuple[UUID, ...] = ()
+    # Stream ACCT — OIDC email claims; used by the first-login bootstrap of
+    # the first platform system_admin. ``email_verified`` gates the auto-grant.
+    email: str | None = None
+    email_verified: bool = False
 
 
 #: Stream N — sentinel for ``Principal.allowed_tenants`` indicating
@@ -79,6 +83,10 @@ class Principal(BaseModel):
     allowed_tenants: tuple[UUID, ...] | Literal["*"] = ()
     is_system_admin: bool = False  # Stream N
     jti: str | None = Field(default=None, description="JWT id — None for non-JWT methods")
+    # Stream ACCT — OIDC email (JWT only); drives the first-login system_admin
+    # bootstrap. None for API-key / mTLS principals.
+    email: str | None = None
+    email_verified: bool = False
 
     @classmethod
     def from_jwt_claims(cls, claims: JWTClaims) -> Self:
@@ -95,6 +103,8 @@ class Principal(BaseModel):
             allowed_tenants=claims.allowed_tenants or (claims.tenant_id,),
             is_system_admin=False,
             jti=claims.jti,
+            email=claims.email,
+            email_verified=claims.email_verified,
         )
 
     def as_system_admin(self) -> Self:

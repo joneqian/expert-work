@@ -263,6 +263,10 @@ def _claims_from_payload(payload: dict[str, Any]) -> JWTClaims:
     jti_raw = payload.get("jti")
     jti = str(jti_raw) if isinstance(jti_raw, str) else None
 
+    email_raw = payload.get("email")
+    email = email_raw if isinstance(email_raw, str) and email_raw else None
+    email_verified = payload.get("email_verified") is True
+
     return JWTClaims(
         iss=str(payload["iss"]),
         sub=str(payload["sub"]),
@@ -275,6 +279,8 @@ def _claims_from_payload(payload: dict[str, Any]) -> JWTClaims:
         roles=roles,
         scopes=scopes,
         allowed_tenants=allowed_tenants,
+        email=email,
+        email_verified=email_verified,
     )
 
 

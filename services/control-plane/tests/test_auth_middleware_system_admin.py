@@ -42,12 +42,17 @@ async def _echo_principal(request: Request) -> JSONResponse:
     )
 
 
-def _build_app(role_binding_store: InMemoryRoleBindingStore | None) -> Starlette:
+def _build_app(
+    role_binding_store: InMemoryRoleBindingStore | None,
+    *,
+    bootstrap_admin_email: str | None = None,
+) -> Starlette:
     app = Starlette(routes=[Route("/echo", _echo_principal)])
     app.add_middleware(
         AuthMiddleware,
         verifier=build_test_jwt_verifier(),
         role_binding_store=role_binding_store,
+        bootstrap_admin_email=bootstrap_admin_email,
     )
     return app
 
@@ -137,6 +142,42 @@ async def test_non_uuid_subject_id_skips_lookup_safely(
     assert r.status_code == 200
     body = r.json()
     assert body["is_system_admin"] is False
+
+
+@pytest.mark.asyncio
+async def test_first_login_bootstraps_first_platform_admin() -> None:
+    """Stream ACCT — verified bootstrap email + empty table → auto-grant on login."""
+    store = InMemoryRoleBindingStore()
+    app = _build_app(store, bootstrap_admin_email="founder@corp.com")
+    transport = ASGITransport(app=app)
+    user_id = uuid4()
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        token = make_test_jwt(
+            tenant_id=uuid4(),
+            subject=str(user_id),
+            extra_claims={"email": "Founder@Corp.com", "email_verified": True},
+        )
+        r = await c.get("/echo", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+        assert r.json()["is_system_admin"] is True
+    bindings = await store.list_platform_scope()
+    assert [b.subject_id for b in bindings] == [user_id]
+
+
+@pytest.mark.asyncio
+async def test_first_login_bootstrap_skipped_when_email_unverified() -> None:
+    store = InMemoryRoleBindingStore()
+    app = _build_app(store, bootstrap_admin_email="founder@corp.com")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        token = make_test_jwt(
+            tenant_id=uuid4(),
+            subject=str(uuid4()),
+            extra_claims={"email": "founder@corp.com", "email_verified": False},
+        )
+        r = await c.get("/echo", headers={"Authorization": f"Bearer {token}"})
+        assert r.json()["is_system_admin"] is False
+    assert await store.list_platform_scope() == []
 
 
 @pytest.mark.asyncio

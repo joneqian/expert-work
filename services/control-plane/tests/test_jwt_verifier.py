@@ -152,3 +152,25 @@ async def test_scope_space_separated_string_is_parsed() -> None:
     )
     claims = await _verifier().verify(token)
     assert set(claims.scopes) == {"manifest:read", "manifest:write"}
+
+
+@pytest.mark.asyncio
+async def test_email_and_verified_flag_parsed() -> None:
+    """Stream ACCT — email + email_verified flow through for first-login bootstrap."""
+    tenant = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    token = make_test_jwt(
+        tenant_id=tenant,
+        extra_claims={"email": "Admin@Corp.com", "email_verified": True},
+    )
+    claims = await _verifier().verify(token)
+    assert claims.email == "Admin@Corp.com"
+    assert claims.email_verified is True
+
+
+@pytest.mark.asyncio
+async def test_email_absent_defaults_to_none_and_unverified() -> None:
+    tenant = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    token = make_test_jwt(tenant_id=tenant)
+    claims = await _verifier().verify(token)
+    assert claims.email is None
+    assert claims.email_verified is False
