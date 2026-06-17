@@ -20,10 +20,24 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
+from helix_agent.persistence.platform_billing_config import (
+    SqlPlatformBillingConfigStore,
+)
 from helix_agent.persistence.rls import build_rls_sessionmaker
 from helix_agent.persistence.token_usage_store import DbTokenUsageStore
 
 logger = logging.getLogger(__name__)
+
+
+def rollup_is_enabled(config: object | None) -> bool:
+    """Whether to run, given the platform billing config row (or None).
+
+    Stream 12.4 — an absent row means "default" → enabled; otherwise honour the
+    operator's ``rollup_enabled`` toggle. Pure so the gate is unit-testable.
+    """
+    if config is None:
+        return True
+    return bool(getattr(config, "rollup_enabled", True))
 
 
 async def _amain() -> None:
@@ -36,6 +50,19 @@ async def _amain() -> None:
     # RLS-wrapped: token_usage reads + ledger writes ride the per-tenant GUC the
     # job sets via _tenant_scope; rate_card reads ride bypass via _bypass_rls.
     session_factory = build_rls_sessionmaker(create_async_session_factory(engine))
+
+    # Stream 12.4 — the platform billing toggle (admin-ui controlled). When the
+    # operator has disabled rollup, skip the run without touching the k8s cron.
+    # An absent config row means "default" → enabled. ``platform_billing_config``
+    # is a tenant-less no-RLS table, so no bypass scope is needed.
+    billing_config = await SqlPlatformBillingConfigStore(session_factory).get()
+    if not rollup_is_enabled(billing_config):
+        logger.info(
+            "billing_rollup_job.skipped month=%s reason=rollup_disabled",
+            settings.target_month.isoformat(),
+        )
+        await engine.dispose()
+        return
 
     job = BillingRollupJob(
         tenant_config_store=SqlTenantConfigStore(session_factory),

@@ -286,6 +286,9 @@ class AuditAction(StrEnum):
     # platform judge-model config (Stream PI-3-A1) — system_admin-only write
     # to the platform judge-config row.
     PLATFORM_JUDGE_CONFIG_UPDATED = "platform_judge_config:updated"
+    # platform billing config (Stream 12.4) — system_admin-only write to the
+    # platform billing-rollup enable flag.
+    PLATFORM_BILLING_CONFIG_UPDATED = "platform_billing_config:updated"
     # mcp_server (Stream V — tenant remote MCP server registry)
     MCP_SERVER_CREATE = "mcp_server:create"
     MCP_SERVER_UPDATE = "mcp_server:update"

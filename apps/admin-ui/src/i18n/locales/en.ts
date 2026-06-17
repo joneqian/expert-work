@@ -756,6 +756,15 @@ export interface TranslationKeys {
     judge_err_INVALID_JUDGE_PAIR: string;
     judge_err_JUDGE_PROVIDER_KEY_MISSING: string;
     judge_err_INVALID_JUDGE_MODEL: string;
+    billing_heading: string;
+    billing_help_title: string;
+    billing_help_body: string;
+    billing_title: string;
+    billing_enabled: string;
+    billing_disabled: string;
+    billing_hint: string;
+    billing_saved: string;
+    billing_save_failed: string;
   };
   settings_iam: {
     sa_page_title: string;
@@ -1518,7 +1527,7 @@ const en: TranslationKeys = {
     tab_triggers: "Triggers",
     tab_memory: "Memory",
     tab_history: "History",
-    tab_coming_soon: "Tab \"{{tab}}\" lands in Stream H.2.",
+    tab_coming_soon: 'Tab "{{tab}}" lands in Stream H.2.',
     config_summary: "Configuration",
     field_id: "Record ID",
     field_tenant: "Tenant",
@@ -1595,7 +1604,8 @@ const en: TranslationKeys = {
     field_name: "Name",
     field_chunk_max: "Chunk max tokens (optional)",
     field_chunk_overlap: "Chunk overlap tokens (optional)",
-    field_chunk_hint: "Defaults apply when left empty; overlap must be less than max.",
+    field_chunk_hint:
+      "Defaults apply when left empty; overlap must be less than max.",
     col_base_name: "Name",
     col_chunking: "Chunk max/overlap",
     delete: "Delete",
@@ -1618,8 +1628,10 @@ const en: TranslationKeys = {
   },
   rate_card_page: {
     page_title: "Rate Card",
-    subtitle: "Platform model pricing — micro-USD per token, plus a basis-point markup.",
-    system_admin_only: "Rate-card management is platform-admin (system_admin) only.",
+    subtitle:
+      "Platform model pricing — micro-USD per token, plus a basis-point markup.",
+    system_admin_only:
+      "Rate-card management is platform-admin (system_admin) only.",
     failed_to_load: "Failed to load rate cards",
     empty: "No rate-card rows yet.",
     filter_provider: "Provider",
@@ -1659,7 +1671,8 @@ const en: TranslationKeys = {
     page_title: "Artifacts",
     subtitle_home:
       "Your run artifacts — artifacts are per-user assets; this account only sees and manages its own.",
-    subtitle_cross: "Platform-wide read-only aggregate across every tenant and user.",
+    subtitle_cross:
+      "Platform-wide read-only aggregate across every tenant and user.",
     cross_tenant_banner: "All tenants",
     failed_to_load: "Failed to load artifacts",
     col_name: "Name",
@@ -1687,7 +1700,8 @@ const en: TranslationKeys = {
   },
   manifest_tab: {
     read_only_hint: "Read-only — click Edit to modify the spec.",
-    edit_hint: "Editing — Save writes through PUT /v1/agents, Cancel discards changes.",
+    edit_hint:
+      "Editing — Save writes through PUT /v1/agents, Cancel discards changes.",
     edit: "Edit",
     save: "Save",
     cancel: "Cancel",
@@ -1730,11 +1744,13 @@ const en: TranslationKeys = {
     tool_mcp: "MCP tools",
     mcp_servers_label: "MCP servers this agent can use",
     mcp_servers_hint: "Leave all unchecked to allow every available server",
-    mcp_no_servers: "No MCP servers available. Register one under Settings → MCP Servers.",
+    mcp_no_servers:
+      "No MCP servers available. Register one under Settings → MCP Servers.",
     mcp_source_platform: "platform",
     mcp_source_tenant: "tenant",
     mcp_tools_label: "Tools",
-    mcp_tools_hint: "Leave all unchecked to allow every tool from the selected servers",
+    mcp_tools_hint:
+      "Leave all unchecked to allow every tool from the selected servers",
     mcp_tools_loading: "Loading tools…",
     mcp_tools_unreachable: "Could not load tools",
     mcp_servers_loading: "Loading servers…",
@@ -1750,7 +1766,8 @@ const en: TranslationKeys = {
     session_failed: "Failed to create session",
     thread_id: "thread",
     loading_thread: "Creating thread…",
-    input_placeholder: "Type a prompt to send to the agent. The full SSE event stream lands on the right.",
+    input_placeholder:
+      "Type a prompt to send to the agent. The full SSE event stream lands on the right.",
     run: "Run",
     running: "Running…",
     stop: "Stop",
@@ -1839,7 +1856,8 @@ const en: TranslationKeys = {
   },
   curation: {
     page_title: "Curation+Eval",
-    subtitle: "Review candidate runs surfaced by the curation worker and promote them to golden eval datasets.",
+    subtitle:
+      "Review candidate runs surfaced by the curation worker and promote them to golden eval datasets.",
     tab_candidates: "Candidates",
     tab_datasets: "Eval Datasets",
     cross_tenant_banner: "cross-tenant view",
@@ -1859,13 +1877,15 @@ const en: TranslationKeys = {
     detail_signal: "Signal",
     detail_outcome: "Outcome",
     detail_trajectory: "Trajectory",
-    trajectory_missing: "Trajectory artifact missing — promote / dismiss still allowed.",
+    trajectory_missing:
+      "Trajectory artifact missing — promote / dismiss still allowed.",
     promote: "Promote",
     dismiss: "Dismiss",
     promote_modal_title: "Promote candidate to eval dataset",
     promote_dataset_name: "Eval dataset name",
     promote_name_required: "Name is required",
-    promote_hint: "Trajectory input + expected output are copied from the candidate. Edit later via the Eval Datasets tab.",
+    promote_hint:
+      "Trajectory input + expected output are copied from the candidate. Edit later via the Eval Datasets tab.",
     promoted: "Candidate promoted to eval dataset.",
     dismissed: "Candidate dismissed.",
   },
@@ -1930,7 +1950,8 @@ const en: TranslationKeys = {
     field_dimension: "Dimension",
     field_limit_value: "Limit value",
     field_burst: "Burst (optional)",
-    burst_hint: "Token-bucket burst capacity. Defaults to platform setting when empty.",
+    burst_hint:
+      "Token-bucket burst capacity. Defaults to platform setting when empty.",
     dimension_required: "Dimension is required",
     limit_required: "Limit value is required",
     display_name: "Display name",
@@ -1973,7 +1994,8 @@ const en: TranslationKeys = {
     subtitle:
       "All tenants on the platform. Click Manage to switch into a tenant and edit its config, quotas, and credentials.",
     not_admin_title: "System admin only",
-    not_admin_body: "Listing all tenants is a platform-level action available to system admins.",
+    not_admin_body:
+      "Listing all tenants is a platform-level action available to system admins.",
     col_display_name: "Display name",
     col_plan: "Plan",
     col_tenant_id: "Tenant id",
@@ -1984,7 +2006,8 @@ const en: TranslationKeys = {
     st_suspended: "Suspended",
     deactivate: "Deactivate",
     activate: "Activate",
-    deactivate_confirm: "Suspend this tenant? Its members will be blocked until reactivated.",
+    deactivate_confirm:
+      "Suspend this tenant? Its members will be blocked until reactivated.",
     status_change_failed: "Failed to change tenant status",
     status_changed: "Tenant status updated.",
     manage: "Manage",
@@ -1997,14 +2020,17 @@ const en: TranslationKeys = {
     subtitle:
       "Provision a new tenant. Platform-level action — system admins only. The new tenant id is shown on success so you can configure it.",
     not_admin_title: "System admin only",
-    not_admin_body: "Creating tenants is a platform-level operation. Ask a system admin to provision one.",
+    not_admin_body:
+      "Creating tenants is a platform-level operation. Ask a system admin to provision one.",
     field_display_name: "Display name",
     display_name_required: "Display name is required",
     field_plan: "Plan",
     field_tenant_id: "Tenant id (optional)",
-    tenant_id_hint: "Leave empty to let the server generate a UUID. Supply one only for idempotent provisioning.",
+    tenant_id_hint:
+      "Leave empty to let the server generate a UUID. Supply one only for idempotent provisioning.",
     tenant_id_placeholder: "auto-generated",
-    tenant_id_invalid: "Must be a valid UUID (e.g. 123e4567-e89b-12d3-a456-426614174000), or leave empty to auto-generate.",
+    tenant_id_invalid:
+      "Must be a valid UUID (e.g. 123e4567-e89b-12d3-a456-426614174000), or leave empty to auto-generate.",
     create_btn: "Create tenant",
     created: "Tenant created.",
     created_detail: "New tenant id:",
@@ -2037,7 +2063,8 @@ const en: TranslationKeys = {
     tools_loading: "Loading tools…",
     no_tools: "No tools advertised",
     empty_title: "No MCP servers yet",
-    empty_hint: "MCP servers let your agents call external tools like GitHub or Linear.",
+    empty_hint:
+      "MCP servers let your agents call external tools like GitHub or Linear.",
     delete_confirm: "Delete server {{name}}?",
     failed_to_load: "Failed to load MCP servers",
   },
@@ -2051,7 +2078,8 @@ const en: TranslationKeys = {
     field_token: "Bearer token",
     field_timeout: "Timeout (seconds)",
     token_hint_create: "Pasted once, stored encrypted — never shown again",
-    token_hint_edit: "Leave blank to keep the current token; enter a new value to rotate",
+    token_hint_edit:
+      "Leave blank to keep the current token; enter a new value to rotate",
     test_connection: "Test connection",
     test_ok: "Connected · {{count}} tools",
     test_failed: "Connection failed",
@@ -2061,14 +2089,17 @@ const en: TranslationKeys = {
     token_required: "Token is required for bearer auth",
     submit_add: "Add",
     submit_save: "Save",
-    custom_disabled: "Custom servers are disabled by your platform admin; use the catalog.",
+    custom_disabled:
+      "Custom servers are disabled by your platform admin; use the catalog.",
   },
   mcp_catalog: {
     page_title: "MCP Catalog",
-    subtitle: "Curate the MCP connector types tenants can add. Platform-level, system admins only.",
+    subtitle:
+      "Curate the MCP connector types tenants can add. Platform-level, system admins only.",
     add: "New connector",
     not_admin_title: "System admin only",
-    not_admin_body: "The MCP connector catalog is managed by system admins. Ask one to add connectors.",
+    not_admin_body:
+      "The MCP connector catalog is managed by system admins. Ask one to add connectors.",
     failed_to_load: "Failed to load the MCP catalog",
     col_name: "Connector",
     col_category: "Category",
@@ -2077,7 +2108,8 @@ const en: TranslationKeys = {
     col_enabled: "Enabled",
     col_actions: "Actions",
     empty_title: "No connectors yet",
-    empty_hint: "Add connector types so tenants can wire up GitHub, Linear and other MCP servers in a few clicks.",
+    empty_hint:
+      "Add connector types so tenants can wire up GitHub, Linear and other MCP servers in a few clicks.",
     delete_confirm: "Delete connector {{name}}?",
     delete_in_use: "In use by tenants — cannot delete. Disable it instead.",
     deleted: "Connector deleted",
@@ -2098,11 +2130,13 @@ const en: TranslationKeys = {
     field_icon: "Icon",
     field_transport: "Transport",
     field_url_template: "URL template",
-    url_template_hint: "Use {param} placeholders — they are filled from the param fields at instantiation.",
+    url_template_hint:
+      "Use {param} placeholders — they are filled from the param fields at instantiation.",
     field_auth: "Auth type",
     field_required_tier: "Required plan",
     field_auth_schema: "Auth schema fields",
-    auth_schema_hint: "Fields the tenant fills in when adding this connector. Secrets are stored encrypted; params fill the URL template.",
+    auth_schema_hint:
+      "Fields the tenant fills in when adding this connector. Secrets are stored encrypted; params fill the URL template.",
     field_enabled: "Enabled",
     name_required: "A valid lowercase slug is required",
     display_name_required: "Display name is required",
@@ -2127,15 +2161,18 @@ const en: TranslationKeys = {
     advanced_custom: "Advanced — add a custom server",
     instantiate_title: "Add {{name}}",
     instance_name: "Instance name (optional)",
-    instance_name_hint: "Defaults to the connector name; override to add more than one.",
+    instance_name_hint:
+      "Defaults to the connector name; override to add more than one.",
     field_value_required: "{{label}} is required",
     back: "Back",
     create: "Create",
-    err_tier_required: "Your plan does not include this connector. Upgrade to add it.",
+    err_tier_required:
+      "Your plan does not include this connector. Upgrade to add it.",
     err_field_missing: "A required field is missing.",
     err_field_unknown: "An unexpected field was supplied.",
     err_param_invalid: "A parameter value is invalid.",
-    err_url_template: "The connector URL template could not be filled — check your params.",
+    err_url_template:
+      "The connector URL template could not be filled — check your params.",
     err_invalid_url: "The resulting server URL is invalid.",
     err_duplicate: "A server with this name already exists.",
     err_not_found: "This connector no longer exists.",
@@ -2145,7 +2182,8 @@ const en: TranslationKeys = {
     subtitle:
       "Platform-level provider & tool credential refs (the runtime overlay over env config). System admins only. DB rows win over env; disable to turn one off without deleting.",
     not_admin_title: "System admin only",
-    not_admin_body: "Platform credentials are managed by system admins. Ask one to configure providers/tools.",
+    not_admin_body:
+      "Platform credentials are managed by system admins. Ask one to configure providers/tools.",
     failed_to_load: "Failed to load platform credentials.",
     providers_heading: "Providers",
     tools_heading: "Tools",
@@ -2159,15 +2197,18 @@ const en: TranslationKeys = {
     source_db: "db",
     source_unset: "unset",
     edit_btn: "Edit",
-    delete_confirm: "Delete this DB-managed credential? (env fallback, if any, applies again.)",
+    delete_confirm:
+      "Delete this DB-managed credential? (env fallback, if any, applies again.)",
     edit_modal_title: "Edit {{key}} credential",
     secret_ref_label: "Secret reference (KMS / secret URI)",
-    secret_ref_hint: "A secret manager reference (e.g. kms://platform/anthropic-key) — never a plaintext key.",
+    secret_ref_hint:
+      "A secret manager reference (e.g. kms://platform/anthropic-key) — never a plaintext key.",
     mode_label: "Credential source",
     mode_value: "Paste a key",
     mode_ref: "Reference (URI)",
     value_label: "API key",
-    value_hint: "Pasted once and encrypted at rest — it is never shown again or stored in plaintext.",
+    value_hint:
+      "Pasted once and encrypted at rest — it is never shown again or stored in plaintext.",
     value_required: "Paste a key, or switch to Reference.",
     enabled_label: "Enabled",
     saved: "Credential saved.",
@@ -2187,7 +2228,8 @@ const en: TranslationKeys = {
     tenant_source_env: "platform (env)",
     tenant_source_unset: "unset",
     override_btn: "Override",
-    delete_override_confirm: "Remove this override? The tenant falls back to the platform credential.",
+    delete_override_confirm:
+      "Remove this override? The tenant falls back to the platform credential.",
     edit_override_modal_title: "Edit tenant override for {{key}}",
     embedding_heading: "Embedding & Rerank",
     embedding_current: "Current",
@@ -2202,9 +2244,12 @@ const en: TranslationKeys = {
     embedding_saved: "Embedding configuration saved.",
     embedding_err_EMBEDDING_PROVIDER_KEY_MISSING:
       "This provider has no configured key — add it under Providers above first.",
-    embedding_err_INVALID_EMBEDDING_MODEL: "That model can't be used for embeddings.",
-    embedding_err_INVALID_RERANK_PAIR: "Set both rerank provider and model, or neither.",
-    embedding_err_RERANK_PROVIDER_KEY_MISSING: "The rerank provider has no configured key.",
+    embedding_err_INVALID_EMBEDDING_MODEL:
+      "That model can't be used for embeddings.",
+    embedding_err_INVALID_RERANK_PAIR:
+      "Set both rerank provider and model, or neither.",
+    embedding_err_RERANK_PROVIDER_KEY_MISSING:
+      "The rerank provider has no configured key.",
     embedding_err_INVALID_RERANK_MODEL: "That model can't be used for rerank.",
     judge_heading: "Output Judge",
     judge_help_title: "What is the judge model?",
@@ -2217,10 +2262,23 @@ const en: TranslationKeys = {
     judge_save: "Save",
     judge_saved: "Judge configuration saved.",
     judge_clear: "Clear (use agent's own model)",
-    judge_err_INVALID_JUDGE_PAIR: "Set both judge provider and model, or neither to clear.",
+    judge_err_INVALID_JUDGE_PAIR:
+      "Set both judge provider and model, or neither to clear.",
     judge_err_JUDGE_PROVIDER_KEY_MISSING:
       "This provider has no configured key — add it under Providers above first.",
-    judge_err_INVALID_JUDGE_MODEL: "That model can't be used as a judge (pick a chat model).",
+    judge_err_INVALID_JUDGE_MODEL:
+      "That model can't be used as a judge (pick a chat model).",
+    billing_heading: "Cost rollup",
+    billing_help_title: "What is cost rollup?",
+    billing_help_body:
+      "An offline job prices each tenant's token usage with the rate cards and writes the monthly cost ledger that powers the chargeback view. It runs on a schedule. Turn it off to pause cost computation platform-wide (the schedule keeps firing but each run skips); turn it back on to resume.",
+    billing_title: "Cost rollup",
+    billing_enabled: "Cost rollup enabled",
+    billing_disabled: "Cost rollup paused",
+    billing_hint:
+      "While paused, the chargeback / usage cost figures stop updating; raw token metering is unaffected.",
+    billing_saved: "Cost rollup setting saved.",
+    billing_save_failed: "Failed to save cost rollup setting",
   },
   settings_iam: {
     sa_page_title: "Service Accounts",
@@ -2276,7 +2334,8 @@ const en: TranslationKeys = {
     resource_ids_hint: "Agent names this role may act on. Empty = any.",
     resource_ids_placeholder: "agent-foo, agent-bar",
     field_labels: "Labels",
-    labels_hint: "Match resources whose metadata.labels superset these (k=v, comma-separated).",
+    labels_hint:
+      "Match resources whose metadata.labels superset these (k=v, comma-separated).",
     field_owner_only: "Owner only (resources created by this subject)",
     field_name: "Name",
     field_description: "Description",
@@ -2376,7 +2435,7 @@ const en: TranslationKeys = {
     agent_required: "Agent name is required",
     agent_version_required: "Agent version is required",
     cron_required: "Cron expression is required",
-    cron_hint: "Standard 5-field cron, e.g. \"0 9 * * *\" runs at 09:00 daily.",
+    cron_hint: 'Standard 5-field cron, e.g. "0 9 * * *" runs at 09:00 daily.',
     webhook_secret_info_title: "Webhook secret will be generated server-side",
     webhook_secret_info_body:
       "After creation a one-time secret will be shown. Save it now — there is no way to retrieve it later (rotation = delete + re-create in M0).",
@@ -2403,7 +2462,8 @@ const en: TranslationKeys = {
       "Outbound webhook endpoints — the platform signs and POSTs agent-lifecycle events (run completed / failed, approval requested, artifact saved) to your URL.",
     cross_tenant_banner: "Cross-tenant view",
     failed_to_load: "Failed to load webhook endpoints",
-    empty: "No webhook endpoints yet. Create one to receive signed event deliveries.",
+    empty:
+      "No webhook endpoints yet. Create one to receive signed event deliveries.",
     empty_cross: "No webhook endpoints across any tenant.",
     all_agents: "All agents",
     col_name: "Name",
@@ -2417,11 +2477,13 @@ const en: TranslationKeys = {
     create_title: "New webhook endpoint",
     field_name: "Name",
     field_url: "Delivery URL",
-    url_hint: "HTTPS endpoint the platform POSTs to. Private / metadata addresses are rejected.",
+    url_hint:
+      "HTTPS endpoint the platform POSTs to. Private / metadata addresses are rejected.",
     field_events: "Event types",
     events_placeholder: "Select one or more events",
     field_agent_name: "Agent scope (optional)",
-    agent_name_hint: "Leave blank to receive events from every agent in the tenant.",
+    agent_name_hint:
+      "Leave blank to receive events from every agent in the tenant.",
     name_required: "Name is required",
     url_required: "URL is required",
     events_required: "Select at least one event type",
@@ -2439,7 +2501,8 @@ const en: TranslationKeys = {
     created: "Webhook endpoint created",
     deleted: "Webhook endpoint deleted",
     delete_confirm_title: "Delete this webhook endpoint?",
-    delete_confirm_body: "Deliveries to this endpoint stop immediately. Cannot be undone.",
+    delete_confirm_body:
+      "Deliveries to this endpoint stop immediately. Cannot be undone.",
   },
   skills: {
     page_title: "Skills",
@@ -2473,7 +2536,8 @@ const en: TranslationKeys = {
     name_required: "Name is required",
     category_required: "Category is required",
     description_required: "Description is required",
-    create_hint: "Empty draft — add a version (prompt fragment + tool names) via API or ZIP import to make it usable.",
+    create_hint:
+      "Empty draft — add a version (prompt fragment + tool names) via API or ZIP import to make it usable.",
     created: "Skill created.",
     imported: "Imported {{name}} v{{version}}.",
     status_changed: "Status changed to {{status}}.",
@@ -2485,20 +2549,27 @@ const en: TranslationKeys = {
     detail_files_title: "Files",
     detail_editor_title: "Editor",
     detail_no_file_selected: "Select a file from the tree to view or edit it.",
-    detail_select_file_hint: "All edits create a new immutable version — the prior version stays intact for rollback.",
+    detail_select_file_hint:
+      "All edits create a new immutable version — the prior version stays intact for rollback.",
     detail_skill_md_pinned: "SKILL.md (main body)",
     detail_supporting_files_section: "Supporting files",
-    detail_no_supporting_files: "No supporting files. Use + Add to upload reference docs, prompts, or scripts.",
+    detail_no_supporting_files:
+      "No supporting files. Use + Add to upload reference docs, prompts, or scripts.",
     detail_version_picker_label: "Version",
     detail_active_version_marker: "(latest)",
     detail_lazy_badge: "Lazy",
-    detail_lazy_tooltip: "Body fetched on-demand via the skill_view tool — only the summary is in the system prompt.",
-    detail_eager_tooltip: "Body eager-loaded into the system prompt at agent build time.",
+    detail_lazy_tooltip:
+      "Body fetched on-demand via the skill_view tool — only the summary is in the system prompt.",
+    detail_eager_tooltip:
+      "Body eager-loaded into the system prompt at agent build time.",
     detail_high_risk_badge: "High-risk",
-    detail_high_risk_tooltip: "Declares exec_python / exec_shell / http, or carries scripts/* files — Activate requires admin role.",
-    detail_high_risk_warning: "This version is high-risk. Review the supporting files + tool list carefully before activating.",
+    detail_high_risk_tooltip:
+      "Declares exec_python / exec_shell / http, or carries scripts/* files — Activate requires admin role.",
+    detail_high_risk_warning:
+      "This version is high-risk. Review the supporting files + tool list carefully before activating.",
     detail_admin_required_tooltip: "Contact a tenant admin to activate.",
-    detail_unsaved_changes_warning: "You have unsaved changes. Save or cancel before switching files.",
+    detail_unsaved_changes_warning:
+      "You have unsaved changes. Save or cancel before switching files.",
     detail_diff_toggle: "Show diff vs. server",
     detail_diff_original_label: "Server",
     detail_diff_draft_label: "Draft",
@@ -2508,7 +2579,8 @@ const en: TranslationKeys = {
     file_add_path_placeholder: "e.g. reference/error_codes.md",
     file_add_content_label: "Content (text)",
     file_add_upload_label: "Or upload a file",
-    file_add_upload_hint: "Max 1 MB per file, 5 MB per skill total. Path / extension validated server-side.",
+    file_add_upload_hint:
+      "Max 1 MB per file, 5 MB per skill total. Path / extension validated server-side.",
     file_add_submit: "Add",
     file_action_edit: "Edit",
     file_action_delete: "Delete",
@@ -2519,17 +2591,20 @@ const en: TranslationKeys = {
     file_saved: "Saved as v{{version}}.",
     file_deleted: "Deleted — new v{{version}} created.",
     file_delete_confirm_title: "Delete {{path}}?",
-    file_delete_confirm_body: "A new SkillVersion will be created without this file. The prior version stays intact.",
+    file_delete_confirm_body:
+      "A new SkillVersion will be created without this file. The prior version stays intact.",
     file_delete_confirm_input_hint: "Type the file path to confirm",
     file_rename_modal_title: "Rename {{path}}",
     file_rename_new_path_label: "New relative path",
     file_rename_submit: "Rename",
     file_renamed: "Renamed — new v{{version}} created.",
-    file_binary_placeholder: "[BINARY: {{size}} bytes, mime={{mime}}] — preview disabled. Export the ZIP to inspect.",
+    file_binary_placeholder:
+      "[BINARY: {{size}} bytes, mime={{mime}}] — preview disabled. Export the ZIP to inspect.",
     file_size_label: "Size",
     file_mime_label: "MIME",
     file_load_failed: "Failed to load file",
-    detail_skill_md_readonly_hint: "SKILL.md represents the version's prompt fragment + frontmatter. Edit through ZIP import or the JSON-API to create a new version.",
+    detail_skill_md_readonly_hint:
+      "SKILL.md represents the version's prompt fragment + frontmatter. Edit through ZIP import or the JSON-API to create a new version.",
     pin: "Pin",
     unpin: "Unpin",
     pinned_toast: "Pinned — Curator will skip this skill at every stage.",
@@ -2604,7 +2679,8 @@ const en: TranslationKeys = {
   },
   memory: {
     page_title: "Memory",
-    subtitle: "Per-user long-term memories used for recall during agent runs. Edit / delete here is destructive; vector embeddings re-compute on PATCH.",
+    subtitle:
+      "Per-user long-term memories used for recall during agent runs. Edit / delete here is destructive; vector embeddings re-compute on PATCH.",
     cross_tenant_banner: "cross-tenant view",
     failed_to_load: "Failed to load memories",
     empty_home: "No memories in this tenant yet.",
@@ -2622,13 +2698,16 @@ const en: TranslationKeys = {
     edit_meta_kind: "Kind",
     edit_content_label: "Content",
     save_dirty: "Save (edited)",
-    embedder_note: "PATCH re-computes the embedding so vector recall stays consistent with the new content.",
-    embedder_unconfigured: "Backend has no embedder configured — memory PATCH refused (HELIX_AGENT_EMBEDDING_API_KEY_REF + MODEL required).",
+    embedder_note:
+      "PATCH re-computes the embedding so vector recall stays consistent with the new content.",
+    embedder_unconfigured:
+      "Backend has no embedder configured — memory PATCH refused (HELIX_AGENT_EMBEDDING_API_KEY_REF + MODEL required).",
     empty_content: "Content cannot be empty.",
     updated: "Memory updated.",
     deleted: "Memory deleted.",
     delete_confirm_title: "Delete this memory?",
-    delete_confirm_body: "Soft-delete; row recoverable for 30 days then gone permanently.",
+    delete_confirm_body:
+      "Soft-delete; row recoverable for 30 days then gone permanently.",
   },
   eval_datasets: {
     failed_to_load: "Failed to load eval datasets",
@@ -2653,7 +2732,8 @@ const en: TranslationKeys = {
     updated: "Eval dataset updated.",
     deleted: "Eval dataset deleted.",
     delete_confirm_title: "Delete this eval dataset?",
-    delete_confirm_body: "This row will be removed from the golden suite. Cannot be undone.",
+    delete_confirm_body:
+      "This row will be removed from the golden suite. Cannot be undone.",
   },
   api_keys: {
     page_title: "API Keys",
@@ -2661,8 +2741,7 @@ const en: TranslationKeys = {
       "Service-account access keys. Each key carries scopes (read / write / admin). Supports rotation (double-active grace) and immediate revocation.",
     create: "Create API Key",
     failed_to_load: "Failed to load API keys",
-    empty:
-      "No API keys yet. Create one bound to a service account to start.",
+    empty: "No API keys yet. Create one bound to a service account to start.",
     never: "never",
     rotation_banner: "{{count}} keys in rotation grace window",
     rotation_help:
@@ -2676,7 +2755,8 @@ const en: TranslationKeys = {
     rotate: "Rotate",
     revoke: "Revoke",
     revoke_confirm: "Revoke this key immediately?",
-    rotated: "API key rotated. Old key remains valid until the grace window expires.",
+    rotated:
+      "API key rotated. Old key remains valid until the grace window expires.",
     revoked: "API key revoked.",
     service_account_label: "Service Account",
     service_account_required: "Pick a service account",
@@ -2686,12 +2766,9 @@ const en: TranslationKeys = {
     dangerous: "dangerous",
     show_once_title: "API Key created",
     show_once_ack: "I saved the key, close",
-    show_once_help_prefix:
-      "Copy this key immediately and store it securely — ",
-    show_once_help_emphasis:
-      "you will not be able to view the full key again",
-    show_once_prefix_note:
-      "Only the prefix is retained on the list:",
+    show_once_help_prefix: "Copy this key immediately and store it securely — ",
+    show_once_help_emphasis: "you will not be able to view the full key again",
+    show_once_prefix_note: "Only the prefix is retained on the list:",
     copy: "Copy",
     copied: "Copied to clipboard",
   },
@@ -2748,13 +2825,15 @@ const en: TranslationKeys = {
     confirm_batch_reject: "Reject {{count}} selected actions?",
     selected_count: "{{count}} selected",
     decide_ok: "{{count}} decision(s) applied",
-    decide_partial: "{{ok}} applied, {{failed}} failed (already decided or gone) — list refreshed",
+    decide_partial:
+      "{{ok}} applied, {{failed}} failed (already decided or gone) — list refreshed",
     decide_failed: "Decision request failed: {{error}}",
     select_row: "Select approval: {{summary}}",
     select_all: "Select all approvals on this page",
     waiting_minutes: "{{count}} min",
     waiting_hours: "{{count}} h",
-    modify_hint: "To approve with edited arguments, open the run and use the approval card there.",
+    modify_hint:
+      "To approve with edited arguments, open the run and use the approval card there.",
   },
   runs_page: {
     page_title: "Runs",
@@ -2826,15 +2905,18 @@ const en: TranslationKeys = {
     unpriced: "Unpriced",
     tokens_heading: "Token usage",
     realtime: "Realtime",
-    realtime_note: "Live current-month counters; billed cost above lags by up to an hour.",
+    realtime_note:
+      "Live current-month counters; billed cost above lags by up to an hour.",
     empty: "No usage recorded for this month.",
     failed_to_load: "Failed to load usage",
   },
   chargeback: {
     page_title: "Chargeback",
-    subtitle: "Cross-tenant cost split — base, markup, billed and margin per tenant.",
+    subtitle:
+      "Cross-tenant cost split — base, markup, billed and margin per tenant.",
     not_admin_title: "system_admin only",
-    not_admin_body: "The chargeback report is restricted to platform administrators.",
+    not_admin_body:
+      "The chargeback report is restricted to platform administrators.",
     tenant_filter: "Filter by tenant ID",
     as_of: "As of",
     total_base: "Total base cost",
@@ -2855,8 +2937,7 @@ const en: TranslationKeys = {
   },
   coming_soon: {
     title_prefix: "This page is being implemented",
-    body:
-      "Demo only shows the 4 core pages: Agents list / Agent detail (with Playground) / Run+Approval / Settings API Keys.",
+    body: "Demo only shows the 4 core pages: Agents list / Agent detail (with Playground) / Run+Approval / Settings API Keys.",
     other_pages_prefix: "Other pages",
     other_pages_suffix: "will land in Stream H.",
   },

@@ -195,7 +195,8 @@ const zhCN: TranslationKeys = {
     edit_title: "编辑 {{provider}} / {{model}}",
     delete: "删除",
     delete_confirm_title: "删除此计价行？",
-    delete_confirm_body: "已按此行计价的用量保留历史成本；后续用量回退到下一条匹配行。",
+    delete_confirm_body:
+      "已按此行计价的用量保留历史成本；后续用量回退到下一条匹配行。",
     col_provider: "厂商",
     col_model: "模型",
     col_plan: "套餐",
@@ -312,7 +313,8 @@ const zhCN: TranslationKeys = {
     session_failed: "创建会话失败",
     thread_id: "thread",
     loading_thread: "正在创建 thread…",
-    input_placeholder: "输入要发给智能体的提示词。完整的 SSE 事件流会显示在右侧。",
+    input_placeholder:
+      "输入要发给智能体的提示词。完整的 SSE 事件流会显示在右侧。",
     run: "运行",
     running: "运行中…",
     stop: "停止",
@@ -427,7 +429,8 @@ const zhCN: TranslationKeys = {
     promote_modal_title: "提升候选为评测数据集",
     promote_dataset_name: "评测数据集名称",
     promote_name_required: "名称必填",
-    promote_hint: "轨迹的输入 + 期望输出会从候选自动复制。后续可在「评测数据集」标签页修改。",
+    promote_hint:
+      "轨迹的输入 + 期望输出会从候选自动复制。后续可在「评测数据集」标签页修改。",
     promoted: "候选已提升为评测数据集。",
     dismissed: "候选已忽略。",
   },
@@ -456,8 +459,7 @@ const zhCN: TranslationKeys = {
     detail_trace_id: "Trace ID",
     detail_ip: "IP",
     detail_payload: "载荷(details)",
-    detail_payload_hint:
-      "写入时已被脱敏器清洗 — 敏感字段呈 [REDACTED]。",
+    detail_payload_hint: "写入时已被脱敏器清洗 — 敏感字段呈 [REDACTED]。",
     mcp_traffic_hint: "到 {{server}} 的 MCP 流量 — 服务器 · 响应体积",
   },
   settings_ops: {
@@ -516,7 +518,8 @@ const zhCN: TranslationKeys = {
     failed_to_load: "加载凭证失败",
     mode_label: "凭证模式",
     mode_platform: "平台",
-    mode_help_platform: "所有 LLM / 工具调用使用平台凭证。凭证在平台层统一管理。",
+    mode_help_platform:
+      "所有 LLM / 工具调用使用平台凭证。凭证在平台层统一管理。",
     providers_heading: "提供方凭证",
     tools_heading: "工具凭证",
     col_provider: "提供方",
@@ -529,7 +532,8 @@ const zhCN: TranslationKeys = {
   },
   settings_tenants: {
     page_title: "租户",
-    subtitle: "平台上的所有租户。点「管理」切进某个租户，编辑其配置、配额与凭证。",
+    subtitle:
+      "平台上的所有租户。点「管理」切进某个租户，编辑其配置、配额与凭证。",
     not_admin_title: "仅系统管理员",
     not_admin_body: "列出所有租户是平台级操作，仅系统管理员可用。",
     col_display_name: "显示名",
@@ -560,9 +564,11 @@ const zhCN: TranslationKeys = {
     display_name_required: "显示名必填",
     field_plan: "套餐",
     field_tenant_id: "租户 id(可选)",
-    tenant_id_hint: "留空则由服务端生成 UUID。仅在需要上游幂等 provisioning 时手动指定。",
+    tenant_id_hint:
+      "留空则由服务端生成 UUID。仅在需要上游幂等 provisioning 时手动指定。",
     tenant_id_placeholder: "自动生成",
-    tenant_id_invalid: "必须是合法 UUID(如 123e4567-e89b-12d3-a456-426614174000),或留空自动生成。",
+    tenant_id_invalid:
+      "必须是合法 UUID(如 123e4567-e89b-12d3-a456-426614174000),或留空自动生成。",
     create_btn: "创建租户",
     created: "租户已创建。",
     created_detail: "新租户 id:",
@@ -626,7 +632,8 @@ const zhCN: TranslationKeys = {
     subtitle: "管理租户可添加的 MCP 连接器类型。平台级，仅系统管理员可用。",
     add: "新建连接器",
     not_admin_title: "仅系统管理员",
-    not_admin_body: "MCP 连接器目录由系统管理员管理，请联系系统管理员添加连接器。",
+    not_admin_body:
+      "MCP 连接器目录由系统管理员管理，请联系系统管理员添加连接器。",
     failed_to_load: "加载 MCP 目录失败",
     col_name: "连接器",
     col_category: "分类",
@@ -635,7 +642,8 @@ const zhCN: TranslationKeys = {
     col_enabled: "启用",
     col_actions: "操作",
     empty_title: "还没有连接器",
-    empty_hint: "添加连接器类型，让租户几步就能接入 GitHub、Linear 等 MCP server。",
+    empty_hint:
+      "添加连接器类型，让租户几步就能接入 GitHub、Linear 等 MCP server。",
     delete_confirm: "删除连接器 {{name}}？",
     delete_in_use: "已被租户使用，无法删除。请改为停用。",
     deleted: "连接器已删除",
@@ -660,7 +668,8 @@ const zhCN: TranslationKeys = {
     field_auth: "认证类型",
     field_required_tier: "所需套餐",
     field_auth_schema: "认证 schema 字段",
-    auth_schema_hint: "租户添加此连接器时需填写的字段。secret 加密存储；param 用于填充 URL 模板。",
+    auth_schema_hint:
+      "租户添加此连接器时需填写的字段。secret 加密存储；param 用于填充 URL 模板。",
     field_enabled: "启用",
     name_required: "需填写合法的小写 slug",
     display_name_required: "显示名称必填",
@@ -703,7 +712,8 @@ const zhCN: TranslationKeys = {
     subtitle:
       "平台级模型提供方 / 工具的凭证引用(覆盖在环境变量配置之上的运行时配置)。仅系统管理员可用。数据库中的配置优先于环境变量;停用可在不删除的情况下关掉某项。",
     not_admin_title: "仅系统管理员",
-    not_admin_body: "平台凭证由系统管理员管理。请联系系统管理员配置提供方 / 工具。",
+    not_admin_body:
+      "平台凭证由系统管理员管理。请联系系统管理员配置提供方 / 工具。",
     failed_to_load: "加载平台凭证失败。",
     providers_heading: "模型提供方",
     tools_heading: "工具",
@@ -726,7 +736,8 @@ const zhCN: TranslationKeys = {
     value_hint: "粘贴一次即加密落库 —— 不再回显、绝不以明文存储。",
     value_required: "请粘贴密钥,或切换到「引用」。",
     secret_ref_label: "密钥引用(KMS / secret URI)",
-    secret_ref_hint: "密钥管理器引用(如 kms://platform/anthropic-key)—— 绝不是明文密钥。",
+    secret_ref_hint:
+      "密钥管理器引用(如 kms://platform/anthropic-key)—— 绝不是明文密钥。",
     enabled_label: "启用",
     saved: "凭证已保存。",
     deleted: "凭证已删除。",
@@ -757,9 +768,11 @@ const zhCN: TranslationKeys = {
     rerank_model_label: "重排模型",
     embedding_save: "保存",
     embedding_saved: "向量配置已保存。",
-    embedding_err_EMBEDDING_PROVIDER_KEY_MISSING: "该提供方未配置密钥 —— 请先在上方「提供方」中添加。",
+    embedding_err_EMBEDDING_PROVIDER_KEY_MISSING:
+      "该提供方未配置密钥 —— 请先在上方「提供方」中添加。",
     embedding_err_INVALID_EMBEDDING_MODEL: "该模型不能用于向量（embedding）。",
-    embedding_err_INVALID_RERANK_PAIR: "重排的提供方与模型要么都填，要么都不填。",
+    embedding_err_INVALID_RERANK_PAIR:
+      "重排的提供方与模型要么都填，要么都不填。",
     embedding_err_RERANK_PROVIDER_KEY_MISSING: "重排提供方未配置密钥。",
     embedding_err_INVALID_RERANK_MODEL: "该模型不能用于重排（rerank）。",
     judge_heading: "输出审查（Judge）",
@@ -774,8 +787,20 @@ const zhCN: TranslationKeys = {
     judge_saved: "Judge 配置已保存。",
     judge_clear: "清空（复用 agent 自己的模型）",
     judge_err_INVALID_JUDGE_PAIR: "提供方和模型要同时填，或同时留空以清除。",
-    judge_err_JUDGE_PROVIDER_KEY_MISSING: "该提供方还没配置密钥——请先在上方 Providers 添加。",
+    judge_err_JUDGE_PROVIDER_KEY_MISSING:
+      "该提供方还没配置密钥——请先在上方 Providers 添加。",
     judge_err_INVALID_JUDGE_MODEL: "该模型不能用作 judge（请选一个对话模型）。",
+    billing_heading: "成本归集（Rollup）",
+    billing_help_title: "成本归集是做什么的？",
+    billing_help_body:
+      "一个离线任务，用费率卡给每个租户的 token 用量计价，写入月度成本台账——成本分摊（chargeback）视图的数据来源。它按计划定时运行。关闭后可在平台范围暂停成本计算（定时仍触发，但每次跳过执行）；重新打开即恢复。",
+    billing_title: "成本归集",
+    billing_enabled: "成本归集已启用",
+    billing_disabled: "成本归集已暂停",
+    billing_hint:
+      "暂停期间，chargeback / 用量成本数字停止更新；原始 token 计量不受影响。",
+    billing_saved: "成本归集设置已保存。",
+    billing_save_failed: "保存成本归集设置失败",
   },
   settings_iam: {
     sa_page_title: "服务账号",
@@ -926,7 +951,7 @@ const zhCN: TranslationKeys = {
     agent_required: "智能体名称必填",
     agent_version_required: "智能体版本必填",
     cron_required: "Cron 表达式必填",
-    cron_hint: "标准 5 字段 cron,如 \"0 9 * * *\" 每天 09:00 触发。",
+    cron_hint: '标准 5 字段 cron,如 "0 9 * * *" 每天 09:00 触发。',
     webhook_secret_info_title: "Webhook 密钥由服务端生成",
     webhook_secret_info_body:
       "创建后会一次性显示密钥,请立即保存 — 之后无法再查看(M0 阶段轮换 = 删除 + 重建)。",
@@ -1022,7 +1047,8 @@ const zhCN: TranslationKeys = {
     name_required: "名称必填",
     category_required: "分类必填",
     description_required: "描述必填",
-    create_hint: "空草稿 — 通过 API 或 ZIP 导入加版本(提示词片段 + 工具名)才可用。",
+    create_hint:
+      "空草稿 — 通过 API 或 ZIP 导入加版本(提示词片段 + 工具名)才可用。",
     created: "技能已创建。",
     imported: "已导入 {{name}} v{{version}}。",
     status_changed: "状态已切到 {{status}}。",
@@ -1034,20 +1060,26 @@ const zhCN: TranslationKeys = {
     detail_files_title: "文件",
     detail_editor_title: "编辑器",
     detail_no_file_selected: "从左侧选一个文件查看或编辑。",
-    detail_select_file_hint: "所有改动都会生成新的不可变版本,旧版本保留以便回滚。",
+    detail_select_file_hint:
+      "所有改动都会生成新的不可变版本,旧版本保留以便回滚。",
     detail_skill_md_pinned: "SKILL.md(主体)",
     detail_supporting_files_section: "附属文件",
-    detail_no_supporting_files: "没有附属文件。用 + 添加 上传参考文档 / 提示 / 脚本。",
+    detail_no_supporting_files:
+      "没有附属文件。用 + 添加 上传参考文档 / 提示 / 脚本。",
     detail_version_picker_label: "版本",
     detail_active_version_marker: "(最新)",
     detail_lazy_badge: "Lazy",
-    detail_lazy_tooltip: "主体通过 skill_view 工具按需拉取 — system prompt 里只有摘要。",
+    detail_lazy_tooltip:
+      "主体通过 skill_view 工具按需拉取 — system prompt 里只有摘要。",
     detail_eager_tooltip: "build 时主体直接注入到 system prompt。",
     detail_high_risk_badge: "高危",
-    detail_high_risk_tooltip: "声明了 exec_python / exec_shell / http,或带 scripts/* 文件 — 激活需要管理员角色。",
-    detail_high_risk_warning: "本版本为高危。激活前请仔细审查附属文件和工具列表。",
+    detail_high_risk_tooltip:
+      "声明了 exec_python / exec_shell / http,或带 scripts/* 文件 — 激活需要管理员角色。",
+    detail_high_risk_warning:
+      "本版本为高危。激活前请仔细审查附属文件和工具列表。",
     detail_admin_required_tooltip: "联系租户管理员来激活。",
-    detail_unsaved_changes_warning: "存在未保存的改动。切换文件前请保存或取消。",
+    detail_unsaved_changes_warning:
+      "存在未保存的改动。切换文件前请保存或取消。",
     detail_diff_toggle: "对比服务端显示 diff",
     detail_diff_original_label: "服务端",
     detail_diff_draft_label: "草稿",
@@ -1057,7 +1089,8 @@ const zhCN: TranslationKeys = {
     file_add_path_placeholder: "例如 reference/error_codes.md",
     file_add_content_label: "内容(文本)",
     file_add_upload_label: "或上传文件",
-    file_add_upload_hint: "单文件 ≤ 1 MB,单技能总 ≤ 5 MB。路径 / 扩展名由服务端校验。",
+    file_add_upload_hint:
+      "单文件 ≤ 1 MB,单技能总 ≤ 5 MB。路径 / 扩展名由服务端校验。",
     file_add_submit: "添加",
     file_action_edit: "编辑",
     file_action_delete: "删除",
@@ -1074,11 +1107,13 @@ const zhCN: TranslationKeys = {
     file_rename_new_path_label: "新相对路径",
     file_rename_submit: "重命名",
     file_renamed: "已重命名 — 生成新 v{{version}}。",
-    file_binary_placeholder: "[BINARY: {{size}} 字节, mime={{mime}}] — 预览不可用。请导出 ZIP 查看。",
+    file_binary_placeholder:
+      "[BINARY: {{size}} 字节, mime={{mime}}] — 预览不可用。请导出 ZIP 查看。",
     file_size_label: "大小",
     file_mime_label: "MIME",
     file_load_failed: "文件加载失败",
-    detail_skill_md_readonly_hint: "SKILL.md 表示版本的提示词片段 + frontmatter。通过 ZIP 导入或 JSON-API 创建新版本来编辑。",
+    detail_skill_md_readonly_hint:
+      "SKILL.md 表示版本的提示词片段 + frontmatter。通过 ZIP 导入或 JSON-API 创建新版本来编辑。",
     pin: "固定",
     unpin: "取消固定",
     pinned_toast: "已固定 — 评审器不会再触碰此技能。",
@@ -1090,7 +1125,8 @@ const zhCN: TranslationKeys = {
     source_platform: "平台",
     source_tenant: "自建",
     requires_tier: "需 {{tier}}",
-    requires_tier_tooltip: "当前套餐不包含此 skill —— 升级到 {{tier}} 即可使用。",
+    requires_tier_tooltip:
+      "当前套餐不包含此 skill —— 升级到 {{tier}} 即可使用。",
   },
   platform_skills: {
     page_title: "平台技能",
@@ -1109,7 +1145,8 @@ const zhCN: TranslationKeys = {
     col_version: "版本",
     col_actions: "操作",
     empty_title: "还没有平台技能",
-    empty_hint: "添加精选技能，让每个租户都能直接绑定成熟能力，无需重复造轮子。",
+    empty_hint:
+      "添加精选技能，让每个租户都能直接绑定成熟能力，无需重复造轮子。",
     tier_free: "免费版",
     tier_pro: "专业版",
     tier_enterprise: "企业版",
@@ -1148,7 +1185,8 @@ const zhCN: TranslationKeys = {
   },
   memory: {
     page_title: "记忆",
-    subtitle: "用户级长期记忆,智能体运行时 recall 使用。在此编辑/删除会立即影响 recall;PATCH 会重算 embedding。",
+    subtitle:
+      "用户级长期记忆,智能体运行时 recall 使用。在此编辑/删除会立即影响 recall;PATCH 会重算 embedding。",
     cross_tenant_banner: "跨租户视图",
     failed_to_load: "记忆列表加载失败",
     empty_home: "当前租户还没有记忆。",
@@ -1167,7 +1205,8 @@ const zhCN: TranslationKeys = {
     edit_content_label: "内容",
     save_dirty: "保存(已修改)",
     embedder_note: "PATCH 会重算 embedding,保持向量 recall 与新内容一致。",
-    embedder_unconfigured: "后端未配 embedder — 记忆 PATCH 被拒(需 HELIX_AGENT_EMBEDDING_API_KEY_REF + MODEL)。",
+    embedder_unconfigured:
+      "后端未配 embedder — 记忆 PATCH 被拒(需 HELIX_AGENT_EMBEDDING_API_KEY_REF + MODEL)。",
     empty_content: "内容不能为空。",
     updated: "记忆已保存。",
     deleted: "记忆已删除。",
@@ -1288,7 +1327,8 @@ const zhCN: TranslationKeys = {
     confirm_batch_reject: "拒绝所选 {{count}} 项操作?",
     selected_count: "已选 {{count}} 项",
     decide_ok: "已应用 {{count}} 项决策",
-    decide_partial: "{{ok}} 项已应用,{{failed}} 项失败(已被决策或不存在)——列表已刷新",
+    decide_partial:
+      "{{ok}} 项已应用,{{failed}} 项失败(已被决策或不存在)——列表已刷新",
     decide_failed: "决策请求失败:{{error}}",
     select_row: "选择审批项:{{summary}}",
     select_all: "全选本页审批项",

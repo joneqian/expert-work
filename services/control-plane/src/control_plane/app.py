@@ -56,6 +56,7 @@ from control_plane.api import (
     build_metrics_router,
     build_model_catalog_router,
     build_plan_router,
+    build_platform_billing_config_router,
     build_platform_config_router,
     build_platform_embedding_config_router,
     build_platform_judge_config_router,
@@ -281,6 +282,11 @@ from helix_agent.persistence.memory import (
     MemoryWritebackDLQ,
     SqlMemoryStore,
     SqlMemoryWritebackDLQ,
+)
+from helix_agent.persistence.platform_billing_config import (
+    InMemoryPlatformBillingConfigStore,
+    PlatformBillingConfigStore,
+    SqlPlatformBillingConfigStore,
 )
 from helix_agent.persistence.platform_embedding_config import (
     InMemoryPlatformEmbeddingConfigStore,
@@ -678,6 +684,10 @@ def create_app(
     )
     resolved_platform_judge_config_store: PlatformJudgeConfigStore = (
         sql_stores.platform_judge_config if sql_stores else InMemoryPlatformJudgeConfigStore()
+    )
+    # Stream 12.4 — platform billing-rollup toggle, read by the offline rollup job.
+    resolved_platform_billing_config_store: PlatformBillingConfigStore = (
+        sql_stores.platform_billing_config if sql_stores else InMemoryPlatformBillingConfigStore()
     )
     resolved_platform_judge_config_service = PlatformJudgeConfigService(
         store=resolved_platform_judge_config_store,
@@ -1474,6 +1484,7 @@ def create_app(
     # app.state to upsert the row + invalidate the cache for immediate effect.
     app.state.platform_embedding_config_service = resolved_platform_embedding_config_service
     app.state.platform_judge_config_service = resolved_platform_judge_config_service
+    app.state.platform_billing_config_store = resolved_platform_billing_config_store
     # Capability Uplift Sprint #4 — exposed on app.state for callers that
     # need it directly. Stream X (Mini-ADR X-4) wires it through
     # ``make_agent_builder`` / ``make_child_agent_builder`` into
@@ -1639,6 +1650,7 @@ def create_app(
     app.include_router(build_platform_config_router())
     app.include_router(build_platform_embedding_config_router())
     app.include_router(build_platform_judge_config_router())
+    app.include_router(build_platform_billing_config_router())
     app.include_router(build_tenant_quotas_router())
     app.include_router(build_tenant_config_router())
     app.include_router(build_triggers_router())
@@ -1688,6 +1700,7 @@ class _SqlStores:
     platform_secret: PlatformSecretStore
     platform_embedding_config: PlatformEmbeddingConfigStore  # Stream T (PR B)
     platform_judge_config: PlatformJudgeConfigStore  # Stream PI-3-A1
+    platform_billing_config: PlatformBillingConfigStore  # Stream 12.4
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
@@ -1905,6 +1918,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         platform_secret=SqlPlatformSecretStore(session_factory),
         platform_embedding_config=SqlPlatformEmbeddingConfigStore(session_factory),
         platform_judge_config=SqlPlatformJudgeConfigStore(session_factory),
+        platform_billing_config=SqlPlatformBillingConfigStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),

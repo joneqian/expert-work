@@ -57,6 +57,7 @@ import {
 import { listTenants, type TenantSummary } from "../api/tenants";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { PlatformBillingSection } from "./settings_platform/PlatformBillingSection";
 import { PlatformEmbeddingSection } from "./settings_platform/PlatformEmbeddingSection";
 import { PlatformJudgeSection } from "./settings_platform/PlatformJudgeSection";
 
@@ -73,7 +74,8 @@ interface EditTarget {
 }
 
 function sourceTag(source: PlatformSecretSource, t: (k: string) => string) {
-  const color = source === "db" ? "cyan" : source === "env" ? "default" : undefined;
+  const color =
+    source === "db" ? "cyan" : source === "env" ? "default" : undefined;
   return <Tag color={color}>{t(`settings_platform.source_${source}`)}</Tag>;
 }
 
@@ -87,7 +89,11 @@ export function SettingsPlatformConfig() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<EditTarget | null>(null);
-  const [editForm] = Form.useForm<{ secret_ref?: string; value?: string; enabled: boolean }>();
+  const [editForm] = Form.useForm<{
+    secret_ref?: string;
+    value?: string;
+    enabled: boolean;
+  }>();
   const [editMode, setEditMode] = useState<"value" | "ref">("value");
   const [saving, setSaving] = useState(false);
 
@@ -95,7 +101,9 @@ export function SettingsPlatformConfig() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [tenantId, setTenantId] = useState<string | null>(null);
-  const [tenantView, setTenantView] = useState<TenantCredentialsView | null>(null);
+  const [tenantView, setTenantView] = useState<TenantCredentialsView | null>(
+    null,
+  );
   const [tenantLoading, setTenantLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -146,12 +154,21 @@ export function SettingsPlatformConfig() {
 
   const errText = useCallback(
     (err: unknown): string =>
-      err instanceof ApiError ? `${err.code}: ${err.message}` : err instanceof Error ? err.message : "failed",
+      err instanceof ApiError
+        ? `${err.code}: ${err.message}`
+        : err instanceof Error
+          ? err.message
+          : "failed",
     [],
   );
 
   const doUpsert = useCallback(
-    async (kind: Kind, key: string, body: PlatformSecretUpsertBody, tid?: string) => {
+    async (
+      kind: Kind,
+      key: string,
+      body: PlatformSecretUpsertBody,
+      tid?: string,
+    ) => {
       if (tid !== undefined) {
         if (kind === "provider") {
           await upsertTenantProviderOverride(tid, key, body);
@@ -186,7 +203,12 @@ export function SettingsPlatformConfig() {
   );
 
   const onToggle = useCallback(
-    async (kind: Kind, key: string, secret_ref: string | null, enabled: boolean) => {
+    async (
+      kind: Kind,
+      key: string,
+      secret_ref: string | null,
+      enabled: boolean,
+    ) => {
       if (secret_ref === null) {
         return;
       }
@@ -243,7 +265,17 @@ export function SettingsPlatformConfig() {
     } finally {
       setSaving(false);
     }
-  }, [edit, editMode, editForm, doUpsert, errText, message, refresh, refreshTenantView, t]);
+  }, [
+    edit,
+    editMode,
+    editForm,
+    doUpsert,
+    errText,
+    message,
+    refresh,
+    refreshTenantView,
+    t,
+  ]);
 
   const makeColumns = useCallback(
     (kind: Kind): TableColumnsType<PlatformProviderRow | PlatformToolRow> => [
@@ -251,7 +283,9 @@ export function SettingsPlatformConfig() {
         title: t("settings_platform.col_name"),
         key: "name",
         render: (_v, row) => (
-          <Text strong>{"provider" in row ? row.provider : (row as PlatformToolRow).tool}</Text>
+          <Text strong>
+            {"provider" in row ? row.provider : (row as PlatformToolRow).tool}
+          </Text>
         ),
       },
       {
@@ -284,13 +318,16 @@ export function SettingsPlatformConfig() {
         key: "enabled",
         width: 100,
         render: (enabled: boolean, row) => {
-          const key = "provider" in row ? row.provider : (row as PlatformToolRow).tool;
+          const key =
+            "provider" in row ? row.provider : (row as PlatformToolRow).tool;
           return (
             <Switch
               size="small"
               checked={enabled}
               disabled={row.secret_ref === null}
-              onChange={(checked) => onToggle(kind, key, row.secret_ref, checked)}
+              onChange={(checked) =>
+                onToggle(kind, key, row.secret_ref, checked)
+              }
               aria-label={`${key} ${t("settings_platform.col_enabled")}`}
               data-testid={`pc-toggle-${key}`}
             />
@@ -317,7 +354,8 @@ export function SettingsPlatformConfig() {
         key: "actions",
         width: 180,
         render: (_v, row) => {
-          const key = "provider" in row ? row.provider : (row as PlatformToolRow).tool;
+          const key =
+            "provider" in row ? row.provider : (row as PlatformToolRow).tool;
           return (
             <Space size={6}>
               <Button
@@ -363,7 +401,11 @@ export function SettingsPlatformConfig() {
             : source === "db"
               ? "cyan"
               : undefined;
-      return <Tag color={color}>{t(`settings_platform.tenant_source_${source}`)}</Tag>;
+      return (
+        <Tag color={color}>
+          {t(`settings_platform.tenant_source_${source}`)}
+        </Tag>
+      );
     },
     [t],
   );
@@ -406,7 +448,8 @@ export function SettingsPlatformConfig() {
         key: "actions",
         width: 180,
         render: (_v, row) => {
-          const key = "provider" in row ? row.provider : (row as TenantToolEntry).tool;
+          const key =
+            "provider" in row ? row.provider : (row as TenantToolEntry).tool;
           return (
             <Space size={6}>
               <Button
@@ -433,7 +476,11 @@ export function SettingsPlatformConfig() {
                   cancelText={t("common.cancel")}
                   onConfirm={() => onDeleteOverride(kind, key, tenantId)}
                 >
-                  <Button size="small" danger data-testid={`pc-tenant-delete-${key}`}>
+                  <Button
+                    size="small"
+                    danger
+                    data-testid={`pc-tenant-delete-${key}`}
+                  >
                     {t("common.delete")}
                   </Button>
                 </Popconfirm>
@@ -450,13 +497,20 @@ export function SettingsPlatformConfig() {
     () => makeOverrideColumns("provider"),
     [makeOverrideColumns],
   );
-  const overrideToolColumns = useMemo(() => makeOverrideColumns("tool"), [makeOverrideColumns]);
+  const overrideToolColumns = useMemo(
+    () => makeOverrideColumns("tool"),
+    [makeOverrideColumns],
+  );
 
   useEffect(() => {
     if (edit !== null) {
       // Default to the paste-a-key flow; clear any prior pasted value.
       setEditMode("value");
-      editForm.setFieldsValue({ secret_ref: edit.secret_ref, value: "", enabled: true });
+      editForm.setFieldsValue({
+        secret_ref: edit.secret_ref,
+        value: "",
+        enabled: true,
+      });
     }
   }, [edit, editForm]);
 
@@ -476,7 +530,11 @@ export function SettingsPlatformConfig() {
               >
                 {t("settings_platform.tenant_overrides_btn")}
               </Button>
-              <Button onClick={refresh} loading={loading} icon={<RefreshCw size={14} strokeWidth={1.5} />}>
+              <Button
+                onClick={refresh}
+                loading={loading}
+                icon={<RefreshCw size={14} strokeWidth={1.5} />}
+              >
                 {t("common.refresh")}
               </Button>
             </Space>
@@ -504,7 +562,9 @@ export function SettingsPlatformConfig() {
               data-testid="pc-error"
             />
           )}
-          <h2 style={{ fontSize: 15, margin: "8px 0" }}>{t("settings_platform.providers_heading")}</h2>
+          <h2 style={{ fontSize: 15, margin: "8px 0" }}>
+            {t("settings_platform.providers_heading")}
+          </h2>
           <Table<PlatformProviderRow>
             columns={providerColumns as TableColumnsType<PlatformProviderRow>}
             dataSource={view?.providers ?? []}
@@ -514,7 +574,9 @@ export function SettingsPlatformConfig() {
             size="small"
             data-testid="pc-providers-table"
           />
-          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>{t("settings_platform.tools_heading")}</h2>
+          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
+            {t("settings_platform.tools_heading")}
+          </h2>
           <Table<PlatformToolRow>
             columns={toolColumns as TableColumnsType<PlatformToolRow>}
             dataSource={view?.tools ?? []}
@@ -534,6 +596,11 @@ export function SettingsPlatformConfig() {
             {t("settings_platform.judge_heading")}
           </h2>
           <PlatformJudgeSection />
+
+          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
+            {t("settings_platform.billing_heading")}
+          </h2>
+          <PlatformBillingSection />
         </>
       )}
 
@@ -571,7 +638,9 @@ export function SettingsPlatformConfig() {
               {t("settings_platform.providers_heading")}
             </h3>
             <Table<TenantProviderEntry>
-              columns={overrideProviderColumns as TableColumnsType<TenantProviderEntry>}
+              columns={
+                overrideProviderColumns as TableColumnsType<TenantProviderEntry>
+              }
               dataSource={tenantView?.providers ?? []}
               rowKey={(r) => r.provider}
               loading={tenantLoading}
@@ -598,7 +667,9 @@ export function SettingsPlatformConfig() {
       <Modal
         title={
           edit?.tenantId !== undefined
-            ? t("settings_platform.edit_override_modal_title", { key: edit?.key ?? "" })
+            ? t("settings_platform.edit_override_modal_title", {
+                key: edit?.key ?? "",
+              })
             : t("settings_platform.edit_modal_title", { key: edit?.key ?? "" })
         }
         open={edit !== null}
@@ -632,7 +703,9 @@ export function SettingsPlatformConfig() {
                   validator: (_r, value: string) =>
                     typeof value === "string" && value.length > 0
                       ? Promise.resolve()
-                      : Promise.reject(new Error(t("settings_platform.value_required"))),
+                      : Promise.reject(
+                          new Error(t("settings_platform.value_required")),
+                        ),
                 },
               ]}
             >
@@ -650,17 +723,30 @@ export function SettingsPlatformConfig() {
               rules={[
                 {
                   validator: (_r, value: string) =>
-                    typeof value === "string" && /^(secret|kms):\/\//.test(value)
+                    typeof value === "string" &&
+                    /^(secret|kms):\/\//.test(value)
                       ? Promise.resolve()
-                      : Promise.reject(new Error(t("settings_platform.secret_ref_hint"))),
+                      : Promise.reject(
+                          new Error(t("settings_platform.secret_ref_hint")),
+                        ),
                 },
               ]}
             >
-              <Input placeholder="kms://platform/anthropic-key" data-testid="pc-edit-ref" />
+              <Input
+                placeholder="kms://platform/anthropic-key"
+                data-testid="pc-edit-ref"
+              />
             </Form.Item>
           )}
-          <Form.Item name="enabled" label={t("settings_platform.enabled_label")} valuePropName="checked">
-            <Switch aria-label={t("settings_platform.enabled_label")} data-testid="pc-edit-enabled" />
+          <Form.Item
+            name="enabled"
+            label={t("settings_platform.enabled_label")}
+            valuePropName="checked"
+          >
+            <Switch
+              aria-label={t("settings_platform.enabled_label")}
+              data-testid="pc-edit-enabled"
+            />
           </Form.Item>
         </Form>
       </Modal>
