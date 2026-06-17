@@ -777,6 +777,36 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - **PR J**（manifest+key）：canonical manifest + dev key 注入 + 登录 recipe
 - **PR N**（capstone）：E2E SOP 全面重写（Phase 0–6 + Phase 7 单列）
 
+---
+
+### Stream ACCT — 账号自助化（bootstrap 平滑 + 平台账号管理 UI）— ✅ 完成 2026-06-17
+
+> 延伸 Stream P/N/R。起因:评估 SSO 是否过度设计 —— 结论 **架构本身不过度**
+> (Keycloak OIDC 单 IdP + helix `role_binding` 双层权限是标准多租户形态),但暴露两处
+> 运维摩擦:①生产无平台管理账号要手跑脚本;②平台级账号/角色管理无 UI。本 Stream 消除
+> 这两处摩擦,不改 IdP 架构。详设 [STREAM-ACCT-DESIGN](./streams/STREAM-ACCT-DESIGN.md)。
+
+- [x] **ACCT.1 邮箱首登自动升 system_admin（P1）** — **Mini-ADR ACCT-1**：`JWTClaims`/`Principal`
+  接入 `email`+`email_verified`(OIDC claim);`settings.bootstrap_admin_email`(env
+  `HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL`);`maybe_bootstrap_system_admin` 零-admin 门控 +
+  `email_verified` 必检 + 大小写不敏感匹配,复用 `bootstrap_system_admin` 幂等写
+  (bypass_rls);AuthMiddleware JWT 路径接线 + app.py 注入。脚本退为 break-glass。
+  单测五条件矩阵 + middleware 端到端。
+- [x] **ACCT.2 平台管理员管理页（P2）** — `apps/admin-ui` `SettingsPlatformUsers.tsx`
+  (`/settings/platform-users`):system_admin 门控,接已有 `/v1/role_bindings` SDK
+  列/授予(UUID 校验 + Keycloak `sub` 提示)/撤销(Popconfirm+自撤警告);SE-8 全接线
+  (router/Sidebar/CommandPalette/i18n 双语/stories/vitest/e2e)。
+- [x] **ACCT.3 跨租户成员只读视图（P3）** — `TenantMemberStore.list_all_tenants`
+  (sql 用 `SET LOCAL ROLE audit_reader` 跨 FORCE-RLS,migration **0085** GRANT SELECT);
+  `GET /v1/members?tenant_id=*` is_system_admin 门控;admin-ui `scope=*` 跨租户只读视图
+  (加 `tenant_id` 列、隐藏写操作)。真 PG 集成测实证 SET ROLE 跨租户。
+
+**Stream ACCT Verification**:`HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL` 首登升格仅在零-admin 时
+触发且 `email_verified` 必检;存在 admin 后永不再触发(无事后提权);`/settings/platform-users`
+非 admin 见通知;`?tenant_id=*` 仅 system_admin、否则 403;跨租户成员读经 audit_reader 真 PG 验。
+零债 6 条核验通过(后端 protocol 329 / persistence 44 / control-plane auth 204 / 集成 1 全绿;
+前端 typecheck 净 + vitest 366/366)。
+
 > **关键路径**：A → B + C/D → J 先让链走通；F→G→H→I / K / L / M 并行；N 收口（等 feature 齐）。
 
 **后续（不在本迭代）**：

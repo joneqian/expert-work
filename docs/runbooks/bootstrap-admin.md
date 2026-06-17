@@ -1,5 +1,14 @@
 # Bootstrap 第一个平台管理员(system_admin)
 
+> **生产推荐:邮箱首登自动升(Stream ACCT)。** 部署时设 env
+> `HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL=<运维负责人邮箱>`。该邮箱用户**首次**用
+> 已验证(`email_verified=true`)的 Keycloak JWT 登录、且系统**当前零 platform admin**
+> 时,自动获 `system_admin` 绑定 —— 无需跑下文脚本。**安全闸**:一旦系统存在任一
+> platform admin(脚本或 API 授的),此自动升永久不再触发,不能用于事后提权。
+> 之后用 admin-ui「平台管理员」页(`/settings/platform-users`)自助增删 admin。
+> 本脚本(`python -m control_plane.bootstrap_admin`)退为 **break-glass** 兜底
+> (env 不便 / 邮箱不可用 / 需指定非邮箱主体时)。
+
 > **本地 dev 已自动化**:`infra/Makefile` 的 `make dev-up` 末尾自动跑 `make dev-bootstrap-admin`
 > (幂等),把 dev 用户提权为 system_admin —— 本 runbook §1–2 的手动步骤已封装进该 target
 > (查 dev 用户 id → 容器内跑 `bootstrap_admin`)。单独补跑:`cd infra && make dev-bootstrap-admin`。
