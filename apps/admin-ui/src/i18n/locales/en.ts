@@ -1348,6 +1348,7 @@ export interface TranslationKeys {
     total_billed: string;
     total_margin: string;
     col_tenant: string;
+    col_agent: string;
     col_input_tokens: string;
     col_output_tokens: string;
     col_base: string;
@@ -1356,6 +1357,7 @@ export interface TranslationKeys {
     col_margin: string;
     col_unpriced: string;
     empty: string;
+    agents_empty: string;
     failed_to_load: string;
   };
   coming_soon: {
@@ -2839,6 +2841,7 @@ const en: TranslationKeys = {
     total_billed: "Total billed",
     total_margin: "Total margin",
     col_tenant: "Tenant",
+    col_agent: "Agent",
     col_input_tokens: "Input tokens",
     col_output_tokens: "Output tokens",
     col_base: "Base cost",
@@ -2847,6 +2850,7 @@ const en: TranslationKeys = {
     col_margin: "Margin",
     col_unpriced: "Unpriced buckets",
     empty: "No chargeback data for this month.",
+    agents_empty: "No per-agent cost for this tenant this month.",
     failed_to_load: "Failed to load chargeback",
   },
   coming_soon: {

@@ -20,6 +20,19 @@ export interface ChargebackTenantRow extends TokenCounts {
   unpriced_buckets: number;
 }
 
+/**
+ * Per-agent chargeback row — same full split, one agent within a tenant.
+ * Stream 12.4: only present when the request was scoped to a single tenant.
+ */
+export interface ChargebackAgentRow extends TokenCounts {
+  agent_name: string;
+  base_cost_micros: number;
+  markup_cost_micros: number;
+  billed_cost_micros: number;
+  margin_micros: number;
+  unpriced_buckets: number;
+}
+
 export interface Chargeback {
   month: string;
   as_of: string;
@@ -27,6 +40,8 @@ export interface Chargeback {
   total_billed_cost_micros: number;
   total_margin_micros: number;
   tenants: ChargebackTenantRow[];
+  /** Per-agent split — present only when ``tenantId`` was supplied. */
+  agents?: ChargebackAgentRow[];
 }
 
 export interface GetChargebackParams {
@@ -37,7 +52,9 @@ export interface GetChargebackParams {
 }
 
 /** ``GET /v1/admin/billing/chargeback`` — cross-tenant cost split. */
-export async function getChargeback(params: GetChargebackParams = {}): Promise<Chargeback> {
+export async function getChargeback(
+  params: GetChargebackParams = {},
+): Promise<Chargeback> {
   const query: Record<string, string> = {};
   if (params.month) query.month = params.month;
   if (params.tenantId) query.tenant_id = params.tenantId;

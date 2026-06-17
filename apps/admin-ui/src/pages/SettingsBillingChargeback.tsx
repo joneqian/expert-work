@@ -30,6 +30,7 @@ import { useAuth } from "../auth/AuthContext";
 import {
   getChargeback,
   type Chargeback,
+  type ChargebackAgentRow,
   type ChargebackTenantRow,
 } from "../api/billing-admin";
 import { formatMicros } from "../utils/money";
@@ -56,6 +57,12 @@ export function SettingsBillingChargeback() {
   const [data, setData] = useState<Chargeback | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Stream 12.4 — per-tenant agent drill-down, fetched lazily on row expand and
+  // cached by tenant_id so re-expanding never refetches.
+  const [agentsByTenant, setAgentsByTenant] = useState<
+    Record<string, ChargebackAgentRow[]>
+  >({});
+  const [agentLoading, setAgentLoading] = useState<Record<string, boolean>>({});
 
   // Fetch the whole month's chargeback (all tenants); the ``tenantFilter`` is
   // applied client-side below. This avoids one API call per keystroke (a UUID
@@ -64,6 +71,9 @@ export function SettingsBillingChargeback() {
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // A new month invalidates the per-tenant agent drill-down cache.
+    setAgentsByTenant({});
+    setAgentLoading({});
     try {
       setData(await getChargeback({ month: month.format(MONTH_FMT) }));
     } catch (err) {
@@ -72,6 +82,31 @@ export function SettingsBillingChargeback() {
       setLoading(false);
     }
   }, [month]);
+
+  // Lazily load one tenant's per-agent split when its row is expanded.
+  const loadAgents = useCallback(
+    async (tenantId: string) => {
+      if (agentsByTenant[tenantId] != null || agentLoading[tenantId]) {
+        return;
+      }
+      setAgentLoading((prev) => ({ ...prev, [tenantId]: true }));
+      try {
+        const detail = await getChargeback({
+          month: month.format(MONTH_FMT),
+          tenantId,
+        });
+        setAgentsByTenant((prev) => ({
+          ...prev,
+          [tenantId]: detail.agents ?? [],
+        }));
+      } catch (err) {
+        setError(errText(err));
+      } finally {
+        setAgentLoading((prev) => ({ ...prev, [tenantId]: false }));
+      }
+    },
+    [month, agentsByTenant, agentLoading],
+  );
 
   useEffect(() => {
     if (isSystemAdmin) {
@@ -91,7 +126,9 @@ export function SettingsBillingChargeback() {
 
   const moneyCol = useCallback(
     (v: number) => (
-      <Text style={{ fontFamily: "var(--hx-font-mono)" }}>{formatMicros(v)}</Text>
+      <Text style={{ fontFamily: "var(--hx-font-mono)" }}>
+        {formatMicros(v)}
+      </Text>
     ),
     [],
   );
@@ -166,6 +203,89 @@ export function SettingsBillingChargeback() {
       },
     ],
     [t, moneyCol],
+  );
+
+  // Per-agent columns for the drill-down inner table (Stream 12.4).
+  const agentColumns: TableColumnsType<ChargebackAgentRow> = useMemo(
+    () => [
+      {
+        title: t("chargeback.col_agent"),
+        dataIndex: "agent_name",
+        key: "agent_name",
+        render: (name: string) => <Text strong>{name}</Text>,
+      },
+      {
+        title: t("chargeback.col_input_tokens"),
+        dataIndex: "input_tokens",
+        key: "input_tokens",
+        width: 130,
+        align: "right",
+        render: (v: number) => v.toLocaleString(),
+      },
+      {
+        title: t("chargeback.col_output_tokens"),
+        dataIndex: "output_tokens",
+        key: "output_tokens",
+        width: 130,
+        align: "right",
+        render: (v: number) => v.toLocaleString(),
+      },
+      {
+        title: t("chargeback.col_base"),
+        dataIndex: "base_cost_micros",
+        key: "base_cost_micros",
+        width: 130,
+        align: "right",
+        render: moneyCol,
+      },
+      {
+        title: t("chargeback.col_markup"),
+        dataIndex: "markup_cost_micros",
+        key: "markup_cost_micros",
+        width: 130,
+        align: "right",
+        render: moneyCol,
+      },
+      {
+        title: t("chargeback.col_billed"),
+        dataIndex: "billed_cost_micros",
+        key: "billed_cost_micros",
+        width: 130,
+        align: "right",
+        render: moneyCol,
+      },
+      {
+        title: t("chargeback.col_margin"),
+        dataIndex: "margin_micros",
+        key: "margin_micros",
+        width: 130,
+        align: "right",
+        render: moneyCol,
+      },
+    ],
+    [t, moneyCol],
+  );
+
+  const renderAgents = useCallback(
+    (row: ChargebackTenantRow) => {
+      const agents = agentsByTenant[row.tenant_id];
+      if (agents == null) {
+        return <Skeleton active paragraph={{ rows: 2 }} />;
+      }
+      return (
+        <Table<ChargebackAgentRow>
+          columns={agentColumns}
+          dataSource={agents}
+          rowKey={(a) => a.agent_name}
+          pagination={false}
+          size="small"
+          locale={{ emptyText: t("chargeback.agents_empty") }}
+          scroll={{ x: "max-content" }}
+          data-testid={`chargeback-agents-${row.tenant_id}`}
+        />
+      );
+    },
+    [agentsByTenant, agentColumns, t],
   );
 
   return (
@@ -268,6 +388,15 @@ export function SettingsBillingChargeback() {
                 locale={{ emptyText: t("chargeback.empty") }}
                 scroll={{ x: "max-content" }}
                 data-testid="chargeback-table"
+                expandable={{
+                  expandedRowRender: renderAgents,
+                  rowExpandable: (r) => r.unpriced_buckets >= 0,
+                  onExpand: (expanded, r) => {
+                    if (expanded) {
+                      void loadAgents(r.tenant_id);
+                    }
+                  },
+                }}
               />
             </>
           )}

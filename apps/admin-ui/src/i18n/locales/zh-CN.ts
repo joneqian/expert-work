@@ -1381,6 +1381,7 @@ const zhCN: TranslationKeys = {
     total_billed: "计费合计",
     total_margin: "利润合计",
     col_tenant: "租户",
+    col_agent: "智能体",
     col_input_tokens: "输入 token",
     col_output_tokens: "输出 token",
     col_base: "成本",
@@ -1389,6 +1390,7 @@ const zhCN: TranslationKeys = {
     col_margin: "利润",
     col_unpriced: "未计价分桶",
     empty: "本月暂无成本分摊数据。",
+    agents_empty: "该租户本月暂无按智能体的成本数据。",
     failed_to_load: "加载成本分摊失败",
   },
   coming_soon: {

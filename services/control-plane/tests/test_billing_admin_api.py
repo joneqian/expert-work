@@ -43,7 +43,9 @@ def _settings() -> Settings:
     )
 
 
-def _row(*, tenant_id: UUID, base: int, markup: int) -> TenantBillingLedgerRecord:
+def _row(
+    *, tenant_id: UUID, base: int, markup: int, agent_name: str = "a1"
+) -> TenantBillingLedgerRecord:
     now = datetime.now(tz=UTC)
     return TenantBillingLedgerRecord(
         id=uuid4(),
@@ -51,7 +53,7 @@ def _row(*, tenant_id: UUID, base: int, markup: int) -> TenantBillingLedgerRecor
         month=_MONTH,
         provider="anthropic",
         model="claude-opus-4-8",
-        agent_name="a1",
+        agent_name=agent_name,
         input_tokens=100,
         output_tokens=50,
         cache_creation_tokens=0,
@@ -141,6 +143,37 @@ async def test_chargeback_tenant_filter(ctx: _Ctx) -> None:
     data = resp.json()["data"]
     assert {t["tenant_id"] for t in data["tenants"]} == {str(t1)}
     assert data["total_billed_cost_micros"] == 120
+
+
+@pytest.mark.asyncio
+async def test_chargeback_per_agent_breakdown_when_tenant_scoped(ctx: _Ctx) -> None:
+    """Stream 12.4 — scoping to one tenant adds a per-agent token+cost split."""
+    t1, t2 = uuid4(), uuid4()
+    await ctx.ledger.upsert(_row(tenant_id=t1, base=100, markup=20, agent_name="alpha"))
+    await ctx.ledger.upsert(_row(tenant_id=t1, base=40, markup=10, agent_name="beta"))
+    await ctx.ledger.upsert(_row(tenant_id=t2, base=300, markup=60, agent_name="alpha"))
+
+    resp = await ctx.client.get(
+        f"/v1/admin/billing/chargeback?tenant_id={t1}", headers=ctx.admin_headers
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    by_agent = {a["agent_name"]: a for a in data["agents"]}
+    assert set(by_agent) == {"alpha", "beta"}  # t2's alpha excluded (different tenant)
+    assert by_agent["alpha"]["base_cost_micros"] == 100
+    assert by_agent["alpha"]["billed_cost_micros"] == 120
+    assert by_agent["alpha"]["margin_micros"] == 20
+    assert by_agent["alpha"]["input_tokens"] == 100
+    assert by_agent["beta"]["billed_cost_micros"] == 50
+
+
+@pytest.mark.asyncio
+async def test_chargeback_omits_agents_without_tenant_filter(ctx: _Ctx) -> None:
+    """Cross-tenant view stays lean — no per-agent split (back-compat)."""
+    await ctx.ledger.upsert(_row(tenant_id=uuid4(), base=100, markup=20))
+    resp = await ctx.client.get("/v1/admin/billing/chargeback", headers=ctx.admin_headers)
+    assert resp.status_code == 200, resp.text
+    assert "agents" not in resp.json()["data"]
 
 
 @pytest.mark.asyncio

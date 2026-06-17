@@ -10,7 +10,7 @@ import { MemoryRouter } from "react-router-dom";
 import { App } from "antd";
 
 import { SettingsBillingChargeback } from "./SettingsBillingChargeback";
-import type { Chargeback } from "../api/billing-admin";
+import type { Chargeback, ChargebackAgentRow } from "../api/billing-admin";
 import { AuthProvider } from "../auth/AuthContext";
 import { apiClient, setStoredToken } from "../api/client";
 import "../i18n";
@@ -49,17 +49,54 @@ const CHARGEBACK: Chargeback = {
   ],
 };
 
+// Per-agent split returned only for a tenant-scoped request (Stream 12.4).
+const AGENTS: ChargebackAgentRow[] = [
+  {
+    agent_name: "research-bot",
+    input_tokens: 3_000_000,
+    output_tokens: 600_000,
+    cache_creation_tokens: 80_000,
+    cache_read_tokens: 1_200_000,
+    base_cost_micros: 6_000_000,
+    markup_cost_micros: 3_000_000,
+    billed_cost_micros: 9_000_000,
+    margin_micros: 3_000_000,
+    unpriced_buckets: 0,
+  },
+  {
+    agent_name: "support-agent",
+    input_tokens: 1_204_500,
+    output_tokens: 320_100,
+    cache_creation_tokens: 0,
+    cache_read_tokens: 780_000,
+    base_cost_micros: 2_400_000,
+    markup_cost_micros: 1_200_000,
+    billed_cost_micros: 3_600_000,
+    margin_micros: 1_200_000,
+    unpriced_buckets: 0,
+  },
+];
+
 function makeJwt(payload: Record<string, unknown>): string {
   const header = btoa(JSON.stringify({ alg: "none", typ: "JWT" }));
   const body = btoa(JSON.stringify(payload));
   return `${header}.${body}.`;
 }
 
-function withFixture(roles: string[], isSystemAdmin: boolean, data: Chargeback) {
+function withFixture(
+  roles: string[],
+  isSystemAdmin: boolean,
+  data: Chargeback,
+) {
   return (Story: ComponentType) => {
     setStoredToken(makeJwt({ sub: "u1", tenant_id: "t1", roles }));
     apiClient.defaults.adapter = (config) => {
       const url = config.url ?? "";
+      // A tenant-scoped chargeback request (drill-down) also carries the
+      // per-agent split; the cross-tenant request omits it.
+      const tenantScoped =
+        (config.params as { tenant_id?: string } | undefined)?.tenant_id !=
+        null;
       const body = url.endsWith("/me")
         ? {
             success: true,
@@ -75,7 +112,11 @@ function withFixture(roles: string[], isSystemAdmin: boolean, data: Chargeback) 
             },
             error: null,
           }
-        : { success: true, data, error: null };
+        : {
+            success: true,
+            data: tenantScoped ? { ...data, agents: AGENTS } : data,
+            error: null,
+          };
       return Promise.resolve({
         data: body,
         status: 200,
@@ -113,7 +154,9 @@ export const SystemAdmin: Story = {
 
 /** system_admin, no chargeback data for the month. */
 export const Empty: Story = {
-  decorators: [withFixture(["system_admin"], true, { ...CHARGEBACK, tenants: [] })],
+  decorators: [
+    withFixture(["system_admin"], true, { ...CHARGEBACK, tenants: [] }),
+  ],
 };
 
 /** Non-admin — system-admin-only notice. */

@@ -60,6 +60,27 @@ class _TenantCharge:
     unpriced_buckets: int = 0
 
 
+@dataclass
+class _AgentCharge:
+    """One agent's month rollup within a tenant — admin view, FULL split.
+
+    Stream 12.4 — the ``tenant_billing_ledger`` is already bucketed by
+    ``agent_name``; this surfaces that dimension so the platform can see
+    per-agent token + cost when drilling into one tenant.
+    """
+
+    agent_name: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    base_cost_micros: int = 0
+    markup_cost_micros: int = 0
+    billed_cost_micros: int = 0
+    margin_micros: int = 0
+    unpriced_buckets: int = 0
+
+
 def build_billing_admin_router() -> APIRouter:
     router = APIRouter(prefix="/v1/admin/billing", tags=["billing_admin"])
 
@@ -94,17 +115,36 @@ def build_billing_admin_router() -> APIRouter:
                 c.unpriced_buckets += 1
 
         tenants = sorted(charges.values(), key=lambda c: c.tenant_id)
-        return {
-            "success": True,
-            "data": {
-                "month": target.strftime("%Y-%m"),
-                "as_of": datetime.now(tz=UTC).isoformat(),
-                "total_base_cost_micros": sum(c.base_cost_micros for c in tenants),
-                "total_billed_cost_micros": sum(c.billed_cost_micros for c in tenants),
-                "total_margin_micros": sum(c.margin_micros for c in tenants),
-                "tenants": [asdict(c) for c in tenants],
-            },
-            "error": None,
+        data: dict[str, object] = {
+            "month": target.strftime("%Y-%m"),
+            "as_of": datetime.now(tz=UTC).isoformat(),
+            "total_base_cost_micros": sum(c.base_cost_micros for c in tenants),
+            "total_billed_cost_micros": sum(c.billed_cost_micros for c in tenants),
+            "total_margin_micros": sum(c.margin_micros for c in tenants),
+            "tenants": [asdict(c) for c in tenants],
         }
+        # Stream 12.4 — when scoped to one tenant, also surface the per-agent
+        # split (the ledger already buckets by agent_name). Drives the admin-ui
+        # drill-down; omitted for the cross-tenant view to keep it lean.
+        if tenant_id is not None:
+            agents: dict[str, _AgentCharge] = defaultdict(lambda: _AgentCharge(agent_name=""))
+            for r in rows:
+                if r.tenant_id != tenant_id:
+                    continue
+                a = agents[r.agent_name]
+                a.agent_name = r.agent_name
+                a.input_tokens += r.input_tokens
+                a.output_tokens += r.output_tokens
+                a.cache_creation_tokens += r.cache_creation_tokens
+                a.cache_read_tokens += r.cache_read_tokens
+                a.base_cost_micros += r.base_cost_micros
+                a.markup_cost_micros += r.markup_cost_micros
+                a.billed_cost_micros += r.billed_cost_micros
+                a.margin_micros += r.markup_cost_micros
+                if not r.priced:
+                    a.unpriced_buckets += 1
+            ordered = sorted(agents.values(), key=lambda a: a.agent_name)
+            data["agents"] = [asdict(a) for a in ordered]
+        return {"success": True, "data": data, "error": None}
 
     return router
