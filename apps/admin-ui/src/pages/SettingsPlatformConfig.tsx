@@ -17,6 +17,7 @@ import {
   Drawer,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Segmented,
@@ -35,16 +36,19 @@ import { useTranslation } from "react-i18next";
 import { PageHeader } from "../components/PageHeader";
 import {
   deletePlatformProvider,
+  deletePlatformProviderKey,
   deletePlatformTool,
   deleteTenantProviderOverride,
   deleteTenantToolOverride,
   getPlatformCredentials,
   getTenantCredentials,
   upsertPlatformProvider,
+  upsertPlatformProviderKey,
   upsertPlatformTool,
   upsertTenantProviderOverride,
   upsertTenantToolOverride,
   type PlatformCredentialsView,
+  type PlatformProviderKey,
   type PlatformProviderRow,
   type PlatformSecretSource,
   type PlatformSecretUpsertBody,
@@ -71,6 +75,12 @@ interface EditTarget {
   secret_ref: string;
   /** Set when editing a per-tenant override (Stream HX-8) rather than the platform row. */
   tenantId?: string;
+  /** Stream Y-MK — set when editing/adding a specific provider key. */
+  keyId?: string;
+  /** Stream Y-MK — failover priority for the key being edited (default 100). */
+  priority?: number;
+  /** Stream Y-MK — true when adding a brand-new key (key_id is editable). */
+  isNewKey?: boolean;
 }
 
 function sourceTag(source: PlatformSecretSource, t: (k: string) => string) {
@@ -93,6 +103,8 @@ export function SettingsPlatformConfig() {
     secret_ref?: string;
     value?: string;
     enabled: boolean;
+    key_id?: string;
+    priority?: number;
   }>();
   const [editMode, setEditMode] = useState<"value" | "ref">("value");
   const [saving, setSaving] = useState(false);
@@ -241,6 +253,38 @@ export function SettingsPlatformConfig() {
     [errText, message, refresh, t],
   );
 
+  // Stream Y-MK — toggle one provider key's enabled flag (re-upsert its ref).
+  const onToggleKey = useCallback(
+    async (provider: string, key: PlatformProviderKey, enabled: boolean) => {
+      try {
+        await upsertPlatformProviderKey(provider, key.key_id, {
+          secret_ref: key.secret_ref,
+          enabled,
+          priority: key.priority,
+        });
+        message.success(t("settings_platform.saved"));
+        refresh();
+      } catch (err) {
+        message.error(errText(err));
+      }
+    },
+    [errText, message, refresh, t],
+  );
+
+  // Stream Y-MK — delete one provider key (sibling failover keys remain).
+  const onDeleteKey = useCallback(
+    async (provider: string, keyId: string) => {
+      try {
+        await deletePlatformProviderKey(provider, keyId);
+        message.success(t("settings_platform.deleted"));
+        refresh();
+      } catch (err) {
+        message.error(errText(err));
+      }
+    },
+    [errText, message, refresh, t],
+  );
+
   const onSaveEdit = useCallback(async () => {
     if (edit === null) {
       return;
@@ -250,9 +294,22 @@ export function SettingsPlatformConfig() {
       editMode === "value"
         ? { value: values.value, enabled: values.enabled }
         : { secret_ref: values.secret_ref, enabled: values.enabled };
+    // Stream Y-MK — provider key edits carry priority + a key_id route.
+    if (edit.kind === "provider" && edit.tenantId === undefined) {
+      body.priority = values.priority ?? 100;
+    }
     setSaving(true);
     try {
-      await doUpsert(edit.kind, edit.key, body, edit.tenantId);
+      if (
+        edit.kind === "provider" &&
+        edit.keyId !== undefined &&
+        edit.tenantId === undefined
+      ) {
+        const keyId = edit.isNewKey ? (values.key_id ?? "").trim() : edit.keyId;
+        await upsertPlatformProviderKey(edit.key, keyId, body);
+      } else {
+        await doUpsert(edit.kind, edit.key, body, edit.tenantId);
+      }
       message.success(t("settings_platform.saved"));
       const editedTenant = edit.tenantId;
       setEdit(null);
@@ -388,8 +445,188 @@ export function SettingsPlatformConfig() {
     [t, onToggle, onDelete],
   );
 
-  const providerColumns = useMemo(() => makeColumns("provider"), [makeColumns]);
   const toolColumns = useMemo(() => makeColumns("tool"), [makeColumns]);
+
+  // Stream Y-MK — nested per-key table shown when a provider row is expanded.
+  const keyColumns = useCallback(
+    (provider: string): TableColumnsType<PlatformProviderKey> => [
+      {
+        title: t("settings_platform.col_key_id"),
+        dataIndex: "key_id",
+        key: "key_id",
+        width: 140,
+        render: (keyId: string) => (
+          <Tag color={keyId === "default" ? "blue" : "geekblue"}>{keyId}</Tag>
+        ),
+      },
+      {
+        title: t("settings_platform.col_priority"),
+        dataIndex: "priority",
+        key: "priority",
+        width: 90,
+        render: (p: number) => <Text>{p}</Text>,
+      },
+      {
+        title: t("settings_platform.col_secret_ref"),
+        dataIndex: "secret_ref",
+        key: "secret_ref",
+        render: (ref: string) => (
+          <Tooltip title={ref}>
+            <Text code style={{ fontSize: 11 }}>
+              {ref}
+            </Text>
+          </Tooltip>
+        ),
+      },
+      {
+        title: t("settings_platform.col_enabled"),
+        dataIndex: "enabled",
+        key: "enabled",
+        width: 90,
+        render: (enabled: boolean, k) => (
+          <Switch
+            size="small"
+            checked={enabled}
+            onChange={(checked) => onToggleKey(provider, k, checked)}
+            aria-label={`${provider} ${k.key_id} ${t("settings_platform.col_enabled")}`}
+            data-testid={`pc-key-toggle-${provider}-${k.key_id}`}
+          />
+        ),
+      },
+      {
+        title: t("settings_platform.col_actions"),
+        key: "actions",
+        width: 170,
+        render: (_v, k) => (
+          <Space size={6}>
+            <Button
+              size="small"
+              onClick={() =>
+                setEdit({
+                  kind: "provider",
+                  key: provider,
+                  secret_ref: k.secret_ref,
+                  keyId: k.key_id,
+                  priority: k.priority,
+                })
+              }
+              data-testid={`pc-key-edit-${provider}-${k.key_id}`}
+            >
+              {t("settings_platform.edit_btn")}
+            </Button>
+            <Popconfirm
+              title={t("settings_platform.delete_key_confirm")}
+              okType="danger"
+              okText={t("common.delete")}
+              cancelText={t("common.cancel")}
+              onConfirm={() => onDeleteKey(provider, k.key_id)}
+            >
+              <Button
+                size="small"
+                danger
+                data-testid={`pc-key-delete-${provider}-${k.key_id}`}
+              >
+                {t("common.delete")}
+              </Button>
+            </Popconfirm>
+          </Space>
+        ),
+      },
+    ],
+    [t, onToggleKey, onDeleteKey],
+  );
+
+  const providerColumns = useMemo<TableColumnsType<PlatformProviderRow>>(
+    () => [
+      {
+        title: t("settings_platform.col_name"),
+        key: "name",
+        render: (_v, row) => <Text strong>{row.provider}</Text>,
+      },
+      {
+        title: t("settings_platform.col_source"),
+        dataIndex: "source",
+        key: "source",
+        width: 110,
+        render: (s: PlatformSecretSource) => sourceTag(s, t),
+      },
+      {
+        title: t("settings_platform.col_secret_ref"),
+        dataIndex: "secret_ref",
+        key: "secret_ref",
+        render: (ref: string | null) =>
+          ref ? (
+            <Tooltip title={ref}>
+              <Text code style={{ fontSize: 11 }}>
+                {ref}
+              </Text>
+            </Tooltip>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t("settings_platform.unset_ref")}
+            </Text>
+          ),
+      },
+      {
+        title: t("settings_platform.col_keys"),
+        key: "keys",
+        width: 110,
+        render: (_v, row) => {
+          const total = row.keys.length;
+          if (total === 0) {
+            return <Text type="secondary">—</Text>;
+          }
+          const on = row.keys.filter((k) => k.enabled).length;
+          return (
+            <Tag color={on > 0 ? "cyan" : "red"}>
+              {t("settings_platform.keys_summary", { on, total })}
+            </Tag>
+          );
+        },
+      },
+      {
+        title: t("settings_platform.col_used_by"),
+        dataIndex: "used_by_agents",
+        key: "used_by_agents",
+        width: 100,
+        render: (n: number) => <Text>{n}</Text>,
+      },
+      {
+        title: t("settings_platform.col_tenant_overrides"),
+        dataIndex: "tenant_override_count",
+        key: "tenant_override_count",
+        width: 120,
+        render: (n: number | undefined) =>
+          n ? <Tag color="purple">{n}</Tag> : <Text type="secondary">0</Text>,
+      },
+      {
+        title: t("settings_platform.col_actions"),
+        key: "actions",
+        width: 140,
+        render: (_v, row) => (
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            onClick={() =>
+              setEdit({
+                kind: "provider",
+                key: row.provider,
+                secret_ref: "",
+                keyId: "",
+                priority: 100,
+                isNewKey: true,
+              })
+            }
+            data-testid={`pc-add-key-${row.provider}`}
+          >
+            {t("settings_platform.add_key_btn")}
+          </Button>
+        ),
+      },
+    ],
+    [t],
+  );
 
   const effectiveSourceTag = useCallback(
     (source: TenantEffectiveSource) => {
@@ -510,6 +747,8 @@ export function SettingsPlatformConfig() {
         secret_ref: edit.secret_ref,
         value: "",
         enabled: true,
+        key_id: edit.isNewKey ? "" : edit.keyId,
+        priority: edit.priority ?? 100,
       });
     }
   }, [edit, editForm]);
@@ -566,12 +805,25 @@ export function SettingsPlatformConfig() {
             {t("settings_platform.providers_heading")}
           </h2>
           <Table<PlatformProviderRow>
-            columns={providerColumns as TableColumnsType<PlatformProviderRow>}
+            columns={providerColumns}
             dataSource={view?.providers ?? []}
             rowKey={(r) => r.provider}
             loading={loading}
             pagination={false}
             size="small"
+            expandable={{
+              rowExpandable: (r) => r.keys.length > 0,
+              expandedRowRender: (r) => (
+                <Table<PlatformProviderKey>
+                  columns={keyColumns(r.provider)}
+                  dataSource={r.keys}
+                  rowKey={(k) => k.key_id}
+                  pagination={false}
+                  size="small"
+                  data-testid={`pc-keys-table-${r.provider}`}
+                />
+              ),
+            }}
             data-testid="pc-providers-table"
           />
           <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
@@ -670,7 +922,13 @@ export function SettingsPlatformConfig() {
             ? t("settings_platform.edit_override_modal_title", {
                 key: edit?.key ?? "",
               })
-            : t("settings_platform.edit_modal_title", { key: edit?.key ?? "" })
+            : edit?.isNewKey
+              ? t("settings_platform.add_key_modal_title", {
+                  key: edit?.key ?? "",
+                })
+              : t("settings_platform.edit_modal_title", {
+                  key: edit?.key ?? "",
+                })
         }
         open={edit !== null}
         onCancel={() => setEdit(null)}
@@ -738,6 +996,46 @@ export function SettingsPlatformConfig() {
               />
             </Form.Item>
           )}
+          {edit?.kind === "provider" &&
+            edit?.tenantId === undefined &&
+            edit?.keyId !== undefined && (
+              <>
+                {edit?.isNewKey && (
+                  <Form.Item
+                    name="key_id"
+                    label={t("settings_platform.key_id_label")}
+                    extra={t("settings_platform.key_id_hint")}
+                    rules={[
+                      {
+                        validator: (_r, value: string) =>
+                          typeof value === "string" &&
+                          /^[a-zA-Z0-9._-]+$/.test(value)
+                            ? Promise.resolve()
+                            : Promise.reject(
+                                new Error(
+                                  t("settings_platform.key_id_invalid"),
+                                ),
+                              ),
+                      },
+                    ]}
+                  >
+                    <Input placeholder="acct-b" data-testid="pc-edit-key-id" />
+                  </Form.Item>
+                )}
+                <Form.Item
+                  name="priority"
+                  label={t("settings_platform.priority_label")}
+                  extra={t("settings_platform.priority_hint")}
+                >
+                  <InputNumber
+                    min={0}
+                    max={9999}
+                    style={{ width: 160 }}
+                    data-testid="pc-edit-priority"
+                  />
+                </Form.Item>
+              </>
+            )}
           <Form.Item
             name="enabled"
             label={t("settings_platform.enabled_label")}

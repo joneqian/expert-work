@@ -27,10 +27,41 @@ const VIEW = {
   success: true,
   data: {
     providers: [
-      { provider: "anthropic", source: "db", secret_ref: "kms://platform/anthropic", enabled: true, used_by_agents: 3 },
-      { provider: "qwen", source: "unset", secret_ref: null, enabled: false, used_by_agents: 0 },
+      {
+        provider: "anthropic",
+        source: "db",
+        secret_ref: "kms://platform/anthropic",
+        enabled: true,
+        keys: [
+          {
+            key_id: "default",
+            secret_ref: "kms://platform/anthropic",
+            enabled: true,
+            priority: 100,
+          },
+        ],
+        used_by_agents: 3,
+        tenant_override_count: 0,
+      },
+      {
+        provider: "qwen",
+        source: "unset",
+        secret_ref: null,
+        enabled: false,
+        keys: [],
+        used_by_agents: 0,
+        tenant_override_count: 0,
+      },
     ],
-    tools: [{ tool: "web_search", source: "env", secret_ref: "secret://tavily", enabled: true, used_by_agents: 1 }],
+    tools: [
+      {
+        tool: "web_search",
+        source: "env",
+        secret_ref: "secret://tavily",
+        enabled: true,
+        used_by_agents: 1,
+      },
+    ],
   },
   error: null,
 };
@@ -42,7 +73,9 @@ async function login(page: import("@playwright/test").Page): Promise<void> {
   await expect(page).toHaveURL(/\/agents$/);
 }
 
-test("system_admin sees platform credential tables + passes axe", async ({ page }) => {
+test("system_admin sees platform credential tables + passes axe", async ({
+  page,
+}) => {
   await page.route("**/v1/me", async (route) => {
     await route.fulfill({ json: SYS_ADMIN_ME });
   });
@@ -58,7 +91,7 @@ test("system_admin sees platform credential tables + passes axe", async ({ page 
   await expectNoA11yViolations(page, "/settings/platform");
 });
 
-test("system_admin pastes a raw key — PUT carries value, not a ref (Stream Q)", async ({
+test("system_admin adds a key — PUT to the key endpoint carries value + priority (Y-MK)", async ({
   page,
 }) => {
   await page.route("**/v1/me", async (route) => {
@@ -67,46 +100,54 @@ test("system_admin pastes a raw key — PUT carries value, not a ref (Stream Q)"
   await page.route("**/v1/platform/credentials", async (route) => {
     await route.fulfill({ json: VIEW });
   });
-  await page.route("**/v1/platform/credentials/providers/anthropic", async (route) => {
-    await route.fulfill({
-      json: {
-        success: true,
-        data: {
-          provider: "anthropic",
-          source: "db",
-          secret_ref: "secret://helix-agent/platform/llm/anthropic",
-          enabled: true,
-          used_by_agents: 3,
+  await page.route(
+    "**/v1/platform/credentials/providers/anthropic/keys/acct-2",
+    async (route) => {
+      await route.fulfill({
+        json: {
+          success: true,
+          data: {
+            key_id: "acct-2",
+            secret_ref: "secret://helix-agent/platform/llm/anthropic/acct-2",
+            enabled: true,
+            priority: 100,
+          },
+          error: null,
         },
-        error: null,
-      },
-    });
-  });
+      });
+    },
+  );
   await login(page);
   await page.goto("/settings/platform");
 
-  await page.getByTestId("pc-edit-anthropic").click();
+  await page.getByTestId("pc-add-key-anthropic").click();
   // The mode toggle confirms the modal opened (antd keeps a hidden Modal-root
   // wrapper in the DOM, so don't assert on the root's visibility).
   await expect(page.getByTestId("pc-edit-mode")).toBeVisible();
+  await page.getByTestId("pc-edit-key-id").fill("acct-2");
   // Default mode is "paste a key" — a password input (not echoed). antd
   // Input.Password forwards data-testid to the input element itself.
   const valueInput = page.getByTestId("pc-edit-value");
   await expect(valueInput).toBeVisible();
   await expect(valueInput).toHaveAttribute("type", "password");
   await valueInput.fill("sk-ant-REAL-KEY");
-  await expectNoA11yViolations(page, "/settings/platform (paste modal)");
+  await expectNoA11yViolations(page, "/settings/platform (add-key modal)");
 
   const [req] = await Promise.all([
-    page.waitForRequest("**/v1/platform/credentials/providers/anthropic"),
+    page.waitForRequest(
+      "**/v1/platform/credentials/providers/anthropic/keys/acct-2",
+    ),
     page.getByRole("button", { name: "Save" }).click(),
   ]);
   const body = req.postDataJSON();
   expect(body.value).toBe("sk-ant-REAL-KEY");
+  expect(body.priority).toBe(100);
   expect(body.secret_ref).toBeUndefined();
 });
 
-test("non-admin sees system-admin-only notice + passes axe", async ({ page }) => {
+test("non-admin sees system-admin-only notice + passes axe", async ({
+  page,
+}) => {
   await login(page);
   await page.goto("/settings/platform");
 

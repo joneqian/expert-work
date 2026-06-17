@@ -713,6 +713,18 @@ export interface TranslationKeys {
     saved: string;
     deleted: string;
     unset_ref: string;
+    col_keys: string;
+    col_key_id: string;
+    col_priority: string;
+    keys_summary: string;
+    add_key_btn: string;
+    add_key_modal_title: string;
+    key_id_label: string;
+    key_id_hint: string;
+    key_id_invalid: string;
+    priority_label: string;
+    priority_hint: string;
+    delete_key_confirm: string;
     col_tenant_overrides: string;
     tenant_overrides_btn: string;
     tenant_drawer_title: string;
@@ -2214,6 +2226,21 @@ const en: TranslationKeys = {
     saved: "Credential saved.",
     deleted: "Credential deleted.",
     unset_ref: "not set",
+    col_keys: "Keys",
+    col_key_id: "Key ID",
+    col_priority: "Priority",
+    keys_summary: "{{on}}/{{total}} on",
+    add_key_btn: "Add key",
+    add_key_modal_title: "Add a key to {{key}}",
+    key_id_label: "Key ID",
+    key_id_hint:
+      "Distinguishes sibling keys of one provider (e.g. acct-b); 'default' is the primary.",
+    key_id_invalid: "Letters, digits, dot, underscore, hyphen only.",
+    priority_label: "Priority",
+    priority_hint:
+      "Lower is tried first; on rate-limit / out-of-balance / revoked the next key takes over.",
+    delete_key_confirm:
+      "Delete this key? (Sibling keys of the same provider still fail over.)",
     col_tenant_overrides: "Tenant overrides",
     tenant_overrides_btn: "Tenant overrides",
     tenant_drawer_title: "Per-tenant credential overrides",

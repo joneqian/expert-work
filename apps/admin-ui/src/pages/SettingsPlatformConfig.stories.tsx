@@ -11,12 +11,56 @@ import "../i18n";
 
 const VIEW: PlatformCredentialsView = {
   providers: [
-    { provider: "anthropic", source: "db", secret_ref: "kms://platform/anthropic", enabled: true, used_by_agents: 3, tenant_override_count: 2 },
-    { provider: "openai", source: "env", secret_ref: "secret://openai-env", enabled: true, used_by_agents: 1, tenant_override_count: 0 },
-    { provider: "qwen", source: "unset", secret_ref: null, enabled: false, used_by_agents: 0, tenant_override_count: 0 },
+    {
+      provider: "anthropic",
+      source: "db",
+      secret_ref: "kms://platform/anthropic",
+      enabled: true,
+      keys: [
+        {
+          key_id: "default",
+          secret_ref: "kms://platform/anthropic",
+          enabled: true,
+          priority: 100,
+        },
+        {
+          key_id: "acct-b",
+          secret_ref: "kms://platform/anthropic-b",
+          enabled: true,
+          priority: 10,
+        },
+      ],
+      used_by_agents: 3,
+      tenant_override_count: 2,
+    },
+    {
+      provider: "openai",
+      source: "env",
+      secret_ref: "secret://openai-env",
+      enabled: true,
+      keys: [],
+      used_by_agents: 1,
+      tenant_override_count: 0,
+    },
+    {
+      provider: "qwen",
+      source: "unset",
+      secret_ref: null,
+      enabled: false,
+      keys: [],
+      used_by_agents: 0,
+      tenant_override_count: 0,
+    },
   ],
   tools: [
-    { tool: "web_search", source: "db", secret_ref: "kms://tavily", enabled: true, used_by_agents: 2, tenant_override_count: 1 },
+    {
+      tool: "web_search",
+      source: "db",
+      secret_ref: "kms://tavily",
+      enabled: true,
+      used_by_agents: 2,
+      tenant_override_count: 1,
+    },
   ],
 };
 

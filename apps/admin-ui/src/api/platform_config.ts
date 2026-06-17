@@ -12,11 +12,23 @@ import { apiClient, getJson, putJson } from "./client";
 
 export type PlatformSecretSource = "env" | "db" | "unset";
 
+/** Stream Y-MK — one credential key within a provider (multi-key failover). */
+export interface PlatformProviderKey {
+  key_id: string;
+  secret_ref: string;
+  enabled: boolean;
+  priority: number;
+}
+
 export interface PlatformProviderRow {
   provider: string;
   source: PlatformSecretSource;
+  /** Primary (default/best) key's ref — backward-compat scalar. */
   secret_ref: string | null;
+  /** Primary key's enabled flag — backward-compat scalar. */
   enabled: boolean;
+  /** Stream Y-MK — all keys, priority-sorted (best first). Empty for env/unset. */
+  keys: PlatformProviderKey[];
   used_by_agents: number;
   tenant_override_count: number;
 }
@@ -45,6 +57,8 @@ export interface PlatformSecretUpsertBody {
   secret_ref?: string;
   value?: string;
   enabled: boolean;
+  /** Stream Y-MK — failover order within a provider (lower tried first). */
+  priority?: number;
 }
 
 export async function getPlatformCredentials(): Promise<PlatformCredentialsView> {
@@ -72,11 +86,41 @@ export async function upsertPlatformTool(
 }
 
 export async function deletePlatformProvider(provider: string): Promise<void> {
-  await apiClient.delete(`/v1/platform/credentials/providers/${encodeURIComponent(provider)}`);
+  await apiClient.delete(
+    `/v1/platform/credentials/providers/${encodeURIComponent(provider)}`,
+  );
+}
+
+/**
+ * Stream Y-MK — upsert one named key of a provider for multi-key failover.
+ * ``key_id="default"`` is the primary; extra keys (separate billing accounts /
+ * rate-limit pools) are tried in ``priority`` order when the primary is rate-
+ * limited / out of balance / revoked.
+ */
+export async function upsertPlatformProviderKey(
+  provider: string,
+  keyId: string,
+  body: PlatformSecretUpsertBody,
+): Promise<PlatformProviderKey> {
+  return putJson<PlatformProviderKey>(
+    `/v1/platform/credentials/providers/${encodeURIComponent(provider)}/keys/${encodeURIComponent(keyId)}`,
+    body,
+  );
+}
+
+export async function deletePlatformProviderKey(
+  provider: string,
+  keyId: string,
+): Promise<void> {
+  await apiClient.delete(
+    `/v1/platform/credentials/providers/${encodeURIComponent(provider)}/keys/${encodeURIComponent(keyId)}`,
+  );
 }
 
 export async function deletePlatformTool(tool: string): Promise<void> {
-  await apiClient.delete(`/v1/platform/credentials/tools/${encodeURIComponent(tool)}`);
+  await apiClient.delete(
+    `/v1/platform/credentials/tools/${encodeURIComponent(tool)}`,
+  );
 }
 
 /**
@@ -85,7 +129,12 @@ export async function deletePlatformTool(tool: string): Promise<void> {
  * routes the tenant through its own platform-procured ref, a disabled row
  * suppresses the key for the tenant entirely (no fallback).
  */
-export type TenantEffectiveSource = "tenant" | "suppressed" | "db" | "env" | "unset";
+export type TenantEffectiveSource =
+  | "tenant"
+  | "suppressed"
+  | "db"
+  | "env"
+  | "unset";
 
 export interface TenantOverrideRow {
   tenant_id: string;
@@ -116,7 +165,9 @@ export interface TenantCredentialsView {
   tools: TenantToolEntry[];
 }
 
-export async function getTenantCredentials(tenantId: string): Promise<TenantCredentialsView> {
+export async function getTenantCredentials(
+  tenantId: string,
+): Promise<TenantCredentialsView> {
   return getJson<TenantCredentialsView>(
     `/v1/platform/credentials/tenants/${encodeURIComponent(tenantId)}`,
   );
@@ -153,7 +204,10 @@ export async function deleteTenantProviderOverride(
   );
 }
 
-export async function deleteTenantToolOverride(tenantId: string, tool: string): Promise<void> {
+export async function deleteTenantToolOverride(
+  tenantId: string,
+  tool: string,
+): Promise<void> {
   await apiClient.delete(
     `/v1/platform/credentials/tenants/${encodeURIComponent(tenantId)}/tools/${encodeURIComponent(tool)}`,
   );

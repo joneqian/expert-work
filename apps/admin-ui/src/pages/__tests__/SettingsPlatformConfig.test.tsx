@@ -32,6 +32,14 @@ const VIEW: PlatformCredentialsView = {
       source: "db",
       secret_ref: "kms://platform/anthropic",
       enabled: true,
+      keys: [
+        {
+          key_id: "default",
+          secret_ref: "kms://platform/anthropic",
+          enabled: true,
+          priority: 100,
+        },
+      ],
       used_by_agents: 3,
       tenant_override_count: 1,
     },
@@ -83,7 +91,9 @@ function makeJwt(payload: Record<string, unknown>): string {
 }
 
 function renderPage() {
-  setStoredToken(makeJwt({ sub: "u1", tenant_id: TENANT, roles: ["system_admin"] }));
+  setStoredToken(
+    makeJwt({ sub: "u1", tenant_id: TENANT, roles: ["system_admin"] }),
+  );
   vi.spyOn(sdk, "getPlatformCredentials").mockResolvedValue(VIEW);
   vi.spyOn(tenantsSdk, "listTenants").mockResolvedValue([
     {
@@ -106,15 +116,23 @@ function renderPage() {
   );
 }
 
-async function openDrawerAndPickTenant(user: ReturnType<typeof userEvent.setup>) {
+async function openDrawerAndPickTenant(
+  user: ReturnType<typeof userEvent.setup>,
+) {
   await user.click(screen.getByTestId("pc-tenant-overrides-btn"));
   await screen.findByTestId("pc-tenant-drawer");
-  await user.click(within(screen.getByTestId("pc-tenant-select")).getByRole("combobox"));
+  await user.click(
+    within(screen.getByTestId("pc-tenant-select")).getByRole("combobox"),
+  );
   const opts = await screen.findAllByText(/Acme/);
   const visible =
-    opts.find((el) => el.className?.includes("ant-select-item-option-content")) ?? opts[0];
+    opts.find((el) =>
+      el.className?.includes("ant-select-item-option-content"),
+    ) ?? opts[0];
   await user.click(visible);
-  await waitFor(() => expect(sdk.getTenantCredentials).toHaveBeenCalledWith(TENANT));
+  await waitFor(() =>
+    expect(sdk.getTenantCredentials).toHaveBeenCalledWith(TENANT),
+  );
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -123,7 +141,9 @@ describe("SettingsPlatformConfig — tenant overrides (HX-8)", () => {
   it("renders the tenant override count column", async () => {
     renderPage();
     const table = await screen.findByTestId("pc-providers-table");
-    await waitFor(() => expect(within(table).getByText("1")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(table).getByText("1")).toBeInTheDocument(),
+    );
   });
 
   it("drawer loads the tenant-effective view after picking a tenant", async () => {
@@ -132,7 +152,9 @@ describe("SettingsPlatformConfig — tenant overrides (HX-8)", () => {
     await screen.findByTestId("pc-providers-table");
     await openDrawerAndPickTenant(user);
     const providers = await screen.findByTestId("pc-tenant-providers-table");
-    expect(within(providers).getByText("kms://tenant/anthropic")).toBeInTheDocument();
+    expect(
+      within(providers).getByText("kms://tenant/anthropic"),
+    ).toBeInTheDocument();
   });
 
   it("creates an override through the tenant API", async () => {
@@ -159,7 +181,9 @@ describe("SettingsPlatformConfig — tenant overrides (HX-8)", () => {
 
   it("deletes an override back to fallback", async () => {
     const user = userEvent.setup();
-    const del = vi.spyOn(sdk, "deleteTenantProviderOverride").mockResolvedValue(undefined);
+    const del = vi
+      .spyOn(sdk, "deleteTenantProviderOverride")
+      .mockResolvedValue(undefined);
     renderPage();
     await screen.findByTestId("pc-providers-table");
     await openDrawerAndPickTenant(user);
@@ -167,8 +191,51 @@ describe("SettingsPlatformConfig — tenant overrides (HX-8)", () => {
     await user.click(screen.getByTestId("pc-tenant-delete-anthropic"));
     // Popconfirm's confirm button shares the row button's "Delete" label;
     // the popover mounts last in the document body.
-    const deleteButtons = await screen.findAllByRole("button", { name: "Delete" });
+    const deleteButtons = await screen.findAllByRole("button", {
+      name: "Delete",
+    });
     await user.click(deleteButtons[deleteButtons.length - 1]);
     await waitFor(() => expect(del).toHaveBeenCalledWith(TENANT, "anthropic"));
+  });
+});
+
+describe("SettingsPlatformConfig — per-provider multi-key (Y-MK)", () => {
+  it("expands a provider to its key list", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const table = await screen.findByTestId("pc-providers-table");
+    // Row expander toggles the nested keys table.
+    await user.click(
+      within(table).getByRole("button", { name: /expand|展开/i }),
+    );
+    expect(
+      await screen.findByTestId("pc-keys-table-anthropic"),
+    ).toBeInTheDocument();
+  });
+
+  it("adds a new key through the key API", async () => {
+    const user = userEvent.setup();
+    const upsertKey = vi
+      .spyOn(sdk, "upsertPlatformProviderKey")
+      .mockResolvedValue({
+        key_id: "acct-b",
+        secret_ref: "secret://x",
+        enabled: true,
+        priority: 10,
+      });
+    renderPage();
+    await screen.findByTestId("pc-providers-table");
+    await user.click(screen.getByTestId("pc-add-key-anthropic"));
+    await screen.findByTestId("pc-edit-modal");
+    await user.type(screen.getByTestId("pc-edit-key-id"), "acct-b");
+    await user.type(screen.getByTestId("pc-edit-value"), "sk-ant-REAL");
+    await user.click(screen.getByText("Save"));
+    await waitFor(() =>
+      expect(upsertKey).toHaveBeenCalledWith(
+        "anthropic",
+        "acct-b",
+        expect.objectContaining({ value: "sk-ant-REAL", priority: 100 }),
+      ),
+    );
   });
 });
