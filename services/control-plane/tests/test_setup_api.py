@@ -133,6 +133,31 @@ async def test_second_run_conflicts_after_initialized(
 
 
 @pytest.mark.asyncio
+async def test_keycloak_admin_secret_missing_returns_clean_502(
+    settings: Settings, lifecycle: Lifecycle, jwt_verifier: JWTVerifier
+) -> None:
+    """Missing KC admin secret (deploy prerequisite) → 502, not a bare 500."""
+    from helix_agent.runtime.secret_store.base import SecretNotFoundError
+
+    class _NoSecretKeycloak(FakeKeycloakAdminClient):
+        async def create_user(self, **_kwargs: object) -> object:  # type: ignore[override]
+            raise SecretNotFoundError("helix-agent/platform/keycloak/admin-client-secret")
+
+    kc = _NoSecretKeycloak()
+    app = create_app(
+        settings=settings.model_copy(update={"setup_token": SETUP_TOKEN}),
+        lifecycle=lifecycle,
+        jwt_verifier=jwt_verifier,
+        keycloak_admin_client=kc,
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        r = await client.post("/v1/setup", json=_body(), headers={"X-Setup-Token": SETUP_TOKEN})
+    assert r.status_code == 502, r.text
+    assert r.json()["detail"]["code"] == "KEYCLOAK_ADMIN_SECRET_MISSING"
+
+
+@pytest.mark.asyncio
 async def test_setup_disabled_when_token_unset(
     settings: Settings, lifecycle: Lifecycle, jwt_verifier: JWTVerifier
 ) -> None:

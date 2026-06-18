@@ -25,7 +25,7 @@ WAIT_SERVICES := $(DEV_DATA) $(DEV_APP) $(DEV_LANGFUSE)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-up dev-down dev-clean dev-ps dev-logs dev-build dev-bootstrap-admin dev-reset-admin langfuse-reset dev-info
+.PHONY: help dev-up dev-down dev-clean dev-ps dev-logs dev-build dev-bootstrap-admin dev-reset-admin dev-seed-keycloak langfuse-reset dev-info
 
 help: ## 列出可用目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -40,6 +40,9 @@ dev-up: dev-build ## 起全量 dev 栈(full+auth+observability,排除 green)
 	# keycloak 单独起、不 --wait:它的 healthcheck 4s 超时会误报 unhealthy
 	# (实际可用),--wait 会卡死。约 30s 后 :8080 就绪。
 	$(COMPOSE) $(PROFILES) up -d keycloak
+	# seed Keycloak admin client secret 进金库:/setup 向导 + 邀请流建真账号时
+	# 要用它取 KC admin token(prod 走 KMS)。幂等;非致命。
+	@$(MAKE) -s dev-seed-keycloak || echo "⚠ seed-keycloak 失败,栈仍可用;就绪后手动: make dev-seed-keycloak"
 	# 与生产一致:不自动建管理员。首个 system_admin 走 /setup 向导
 	# (见 dev-info);要快路径仍可 `make dev-bootstrap-admin`(提权 dev 用户)。
 	@echo ""
@@ -69,6 +72,10 @@ dev-bootstrap-admin: ## 提权 dev 用户为 system_admin(快路径;首选 /setu
 # 只删平台 system_admin 绑定 → 回到零-admin,让 /setup 向导重新可用。
 # 不动 LLM key(密钥库)/租户/agent/记忆/审计 —— 仅清授权,数据保留。
 # role_binding 是 FORCE-RLS;容器内 postgres 超级用户直删可绕 RLS。
+dev-seed-keycloak: ## seed Keycloak admin client secret 进金库(幂等;/setup + 邀请流需要)
+	$(COMPOSE) $(PROFILES) exec -T control-plane-blue \
+	  python -m control_plane.seed_keycloak_secret --value dev-internal-secret-rotate-me
+
 dev-reset-admin: ## 清平台管理员绑定(保留其它数据;还原 /setup 向导)
 	$(COMPOSE) $(PROFILES) exec -T postgres \
 	  sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "DELETE FROM role_binding WHERE platform_scope = true;"'

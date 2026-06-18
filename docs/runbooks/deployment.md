@@ -123,12 +123,15 @@ cd ../apps/admin-ui && pnpm install && pnpm dev   # http://localhost:5173
 4. 跑迁移:`docker compose run --rm migrate`(= `alembic upgrade head`,纯 expand,见 §10)。
 5. 蓝绿起 control-plane:首次直接 `docker compose --profile full --profile proxy up -d control-plane-blue nginx`;之后版本走 `deploy.py`(§8)。
 6. 起 `sandbox-supervisor` / `credential-proxy`。
-7. **创建第一个平台管理员**:见 §7。
-8. 验证:见 §11。
+7. **provision Keycloak admin client secret**(前置,见下):首装向导/邀请流建真账号时,后端要从密钥库取该 secret 才能调 KC Admin API。**漏这步 /setup 会 502 `KEYCLOAK_ADMIN_SECRET_MISSING`**。prod 把真实 KC confidential-client secret 放进 KMS,名 `helix-agent/platform/keycloak/admin-client-secret`(对应 `settings.keycloak_admin_secret_name`)。也可经 `python -m control_plane.seed_keycloak_secret --value <secret>` 写入当前金库。
+8. **创建第一个平台管理员**:见 §7。
+9. 验证:见 §11。
 
 ## 7. 创建第一个平台管理员(首装向导)
 
 全新部署 `role_binding` 表为空 —— 没人能经 API 授第一个 `system_admin`(鸡蛋问题)。三条路径,**推荐首装向导**(运维不碰 Keycloak 控制台):
+
+> **前置**:向导会建真 Keycloak 账号,需金库里有 KC admin client secret(§6 步骤 7)。漏了向导返 502 `KEYCLOAK_ADMIN_SECRET_MISSING`。dev `make dev-up` 已自动 seed。
 
 ### 路径 A — 首装向导(推荐,Stream ACCT)
 

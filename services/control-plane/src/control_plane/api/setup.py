@@ -41,6 +41,7 @@ from helix_agent.persistence.auth import RoleBindingStore
 from helix_agent.persistence.tenant_config.base import TenantConfigStore
 from helix_agent.protocol import AuditAction
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.secret_store.base import SecretNotFoundError
 
 logger = logging.getLogger("helix.control_plane.setup")
 
@@ -198,6 +199,21 @@ async def provision_platform_admin(
         raise HTTPException(
             status_code=502,
             detail={"code": "KEYCLOAK_UNAVAILABLE", "message": "identity provider unreachable"},
+        ) from exc
+    except SecretNotFoundError as exc:
+        # The Keycloak Admin client needs its confidential-client secret from the
+        # vault to mint an admin token. Missing it is a deploy prerequisite, not a
+        # user error — surface it cleanly instead of a bare 500.
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "KEYCLOAK_ADMIN_SECRET_MISSING",
+                "message": (
+                    "the Keycloak admin client secret is not provisioned in the secret "
+                    "store (helix-agent/platform/keycloak/admin-client-secret); seed it "
+                    "before running setup"
+                ),
+            },
         ) from exc
 
     try:
