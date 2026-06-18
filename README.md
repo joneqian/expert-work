@@ -9,7 +9,7 @@ memory, and persistent workspace — running on the Anthropic **Brain · Hands �
 paradigm: a stateless harness loop (LangGraph), an isolated execution sandbox
 (Docker / gVisor), and an append-only Postgres event log as the single source of truth.
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-3776AB.svg)](pyproject.toml)
 [![Frontend](https://img.shields.io/badge/admin--ui-React%2019%20%2B%20TS-61DAFB.svg)](apps/admin-ui)
 [![Status](https://img.shields.io/badge/status-M0%20complete%20%E2%86%92%20M1-success.svg)](docs/ITERATION-PLAN.md)
@@ -170,4 +170,6 @@ for workspace conventions.
 
 ## License
 
-Apache-2.0
+[GNU AGPL-3.0](LICENSE) — copyleft with a network clause: if you run a modified
+Helix as a network service, you must offer users that service's source under the
+same license.

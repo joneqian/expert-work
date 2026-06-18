@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "Helix-Agent cost rollup → tenant_billing_ledger derivation job (Stream Y.4)."
 readme = "README.md"
 requires-python = ">=3.12"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 authors = [
     { name = "joneqian", email = "qian.qing0926@gmail.com" },
 ]
