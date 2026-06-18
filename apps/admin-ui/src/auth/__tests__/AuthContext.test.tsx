@@ -139,6 +139,7 @@ describe("identityFromMe projector", () => {
         subject_id: "sa-001",
         subject_type: "service_account",
         tenant_id: "t1",
+        email: null,
         auth_method: "api_key",
         roles: [],
         scopes: ["read"],
@@ -158,6 +159,7 @@ describe("identityFromMe projector", () => {
         subject_id: "user-001",
         subject_type: "user",
         tenant_id: "t1",
+        email: "founder@corp.com",
         auth_method: "jwt",
         // Roles do not contain ``system_admin`` — the augmentation is
         // server-side and Stream N carries it via ``is_system_admin``.
@@ -170,5 +172,23 @@ describe("identityFromMe projector", () => {
     );
     expect(identity.isSystemAdmin).toBe(true);
     expect(identity.kind).toBe("jwt");
+  });
+
+  it("uses email as the display name for JWT users (not the bare UUID)", () => {
+    const identity = _identityFromMeForTests(
+      {
+        subject_id: "a0d23cd9-4bee-49fb-8290-2a161c04f14d",
+        subject_type: "user",
+        tenant_id: "t1",
+        email: "founder@corp.com",
+        auth_method: "jwt",
+        roles: ["operator"],
+        scopes: [],
+        is_system_admin: false,
+        allowed_tenants: ["t1"],
+      },
+      "eyJ.test.token",
+    );
+    expect(identity.displayName).toBe("founder@corp.com");
   });
 });

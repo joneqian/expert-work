@@ -17,6 +17,8 @@ export interface MeResponse {
   /** Caller's *home* tenant. Stream N system_admins still carry one;
    *  cross-tenant capability is carried by ``allowed_tenants==="*"``. */
   tenant_id: string;
+  /** OIDC email for the user menu (JWT only; null for API key / mTLS). */
+  email: string | null;
   auth_method: "jwt" | "api_key" | "mtls";
   roles: string[];
   scopes: string[];

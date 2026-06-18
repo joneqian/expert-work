@@ -129,6 +129,10 @@ function optimisticIdentityFromToken(token: string): AuthIdentity {
   const subjectType: AuthIdentity["subjectType"] = isSubjectType(rawSubType)
     ? rawSubType
     : "user";
+  const human =
+    asString(payload.email) ??
+    asString(payload.preferred_username) ??
+    asString(payload.name);
   return {
     kind: "jwt",
     subject,
@@ -136,7 +140,7 @@ function optimisticIdentityFromToken(token: string): AuthIdentity {
     homeTenantId: asString(payload.tenant_id),
     roles,
     isSystemAdmin: roles.includes("system_admin"),
-    displayName: subject.length > 12 ? `${subject.slice(0, 8)}…` : subject,
+    displayName: human ?? (subject.length > 12 ? `${subject.slice(0, 8)}…` : subject),
     serverResolved: false,
   };
 }
@@ -152,9 +156,8 @@ function identityFromMe(me: MeResponse, token: string): AuthIdentity {
       : "jwt";
   const displayName = isApiKey
     ? `${token.slice(0, 12)}…`
-    : me.subject_id.length > 12
-      ? `${me.subject_id.slice(0, 8)}…`
-      : me.subject_id;
+    : (me.email ??
+      (me.subject_id.length > 12 ? `${me.subject_id.slice(0, 8)}…` : me.subject_id));
   return {
     kind,
     subject: me.subject_id,

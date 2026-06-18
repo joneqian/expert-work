@@ -56,6 +56,9 @@ class MeResponse(BaseModel):
     subject_id: str
     subject_type: Literal["user", "service_account", "service"]
     tenant_id: UUID
+    # Stream ACCT — OIDC email for the user menu (JWT only; None for API key /
+    # mTLS). The UI shows this instead of the bare subject UUID.
+    email: str | None
     auth_method: Literal["jwt", "api_key", "mtls"]
     roles: tuple[str, ...]
     scopes: tuple[str, ...]
@@ -72,6 +75,7 @@ class MeResponse(BaseModel):
             subject_id=principal.subject_id,
             subject_type=principal.subject_type,
             tenant_id=principal.tenant_id,
+            email=principal.email,
             auth_method=principal.auth_method,
             roles=principal.roles,
             scopes=principal.scopes,
