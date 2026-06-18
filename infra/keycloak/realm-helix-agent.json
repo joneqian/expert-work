@@ -73,6 +73,17 @@
             "access.token.claim": "true",
             "userinfo.token.claim": "false"
           }
+        },
+        {
+          "name": "audience-helix-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "helix-agent-api-internal",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ]
     },

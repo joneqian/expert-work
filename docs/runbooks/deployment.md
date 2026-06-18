@@ -123,7 +123,12 @@ cd ../apps/admin-ui && pnpm install && pnpm dev   # http://localhost:5173
 4. 跑迁移:`docker compose run --rm migrate`(= `alembic upgrade head`,纯 expand,见 §10)。
 5. 蓝绿起 control-plane:首次直接 `docker compose --profile full --profile proxy up -d control-plane-blue nginx`;之后版本走 `deploy.py`(§8)。
 6. 起 `sandbox-supervisor` / `credential-proxy`。
-7. **provision Keycloak admin client secret**(前置,见下):首装向导/邀请流建真账号时,后端要从密钥库取该 secret 才能调 KC Admin API。**漏这步 /setup 会 502 `KEYCLOAK_ADMIN_SECRET_MISSING`**。prod 把真实 KC confidential-client secret 放进 KMS,名 `helix-agent/platform/keycloak/admin-client-secret`(对应 `settings.keycloak_admin_secret_name`)。也可经 `python -m control_plane.seed_keycloak_secret --value <secret>` 写入当前金库。
+7. **Keycloak realm 前置**(两项,漏了首装向导会失败):
+   - **provision admin client secret**:首装向导/邀请流建真账号时,后端要从密钥库取该 secret 才能调 KC Admin API。**漏 → /setup 502 `KEYCLOAK_ADMIN_SECRET_MISSING`**。prod 把真实 KC confidential-client secret 放进 KMS,名 `helix-agent/platform/keycloak/admin-client-secret`(对应 `settings.keycloak_admin_secret_name`);也可 `python -m control_plane.seed_keycloak_secret --value <secret>` 写入当前金库。
+   - **开 realm `unmanagedAttributePolicy=ENABLED`**:否则 KC 25 默认丢弃 Admin API 建用户的自定义属性 `tenant_id` → 该用户 JWT 缺 tenant_id → **登录后 /v1/me 401、前端跳回 /login**。realm import **不**还原 user-profile,须用 kcadm 后置设(dev `make dev-keycloak-config` 已封装):
+     ```sh
+     kcadm.sh update users/profile -r helix-agent -s unmanagedAttributePolicy=ENABLED
+     ```
 8. **创建第一个平台管理员**:见 §7。
 9. 验证:见 §11。
 
@@ -241,3 +246,4 @@ python tools/deploy/rollback.py --to-tag v1.2.2  # 兜底路径
 - **改了 realm 的 loginTheme 不生效** —— `--import-realm` 仅首 boot 导入;重建 keycloak 容器才重导(改 CSS 则 start-dev 热加载)。
 - **沙箱镜像没预构建** —— supervisor `docker run` 找不到镜像;部署前先 build。
 - **prod 密钥落 `.env` / 进仓库** —— 禁;只走 KMS。
+- **登录成功却跳回 /login(/v1/me 401)** —— 多半是 realm 没开 `unmanagedAttributePolicy=ENABLED`,Admin API 建的用户丢了 `tenant_id` 属性 → JWT 缺 tenant_id 被后端拒。见 §6 步骤 7;dev `make dev-keycloak-config` 修。(admin-ui 用 **id_token** 作 Bearer,其 aud=client_id 已在 allowlist,故 audience 一般不是病根。)

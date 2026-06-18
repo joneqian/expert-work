@@ -25,7 +25,7 @@ WAIT_SERVICES := $(DEV_DATA) $(DEV_APP) $(DEV_LANGFUSE)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-up dev-down dev-clean dev-ps dev-logs dev-build dev-bootstrap-admin dev-reset-admin dev-seed-keycloak langfuse-reset dev-info
+.PHONY: help dev-up dev-down dev-clean dev-ps dev-logs dev-build dev-bootstrap-admin dev-reset-admin dev-seed-keycloak dev-keycloak-config langfuse-reset dev-info
 
 help: ## 列出可用目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -40,6 +40,10 @@ dev-up: dev-build ## 起全量 dev 栈(full+auth+observability,排除 green)
 	# keycloak 单独起、不 --wait:它的 healthcheck 4s 超时会误报 unhealthy
 	# (实际可用),--wait 会卡死。约 30s 后 :8080 就绪。
 	$(COMPOSE) $(PROFILES) up -d keycloak
+	# realm 运行期配置:开 unmanagedAttributePolicy,否则 Admin API 建的用户
+	# (/setup 向导 + 邀请流)自定义属性 tenant_id 被静默丢弃 → 登录 401。
+	# realm import 不还原 user-profile,故用 kcadm 后置设置。幂等;非致命。
+	@$(MAKE) -s dev-keycloak-config || echo "⚠ keycloak-config 失败,栈仍可用;就绪后手动: make dev-keycloak-config"
 	# seed Keycloak admin client secret 进金库:/setup 向导 + 邀请流建真账号时
 	# 要用它取 KC admin token(prod 走 KMS)。幂等;非致命。
 	@$(MAKE) -s dev-seed-keycloak || echo "⚠ seed-keycloak 失败,栈仍可用;就绪后手动: make dev-seed-keycloak"
@@ -72,6 +76,15 @@ dev-bootstrap-admin: ## 提权 dev 用户为 system_admin(快路径;首选 /setu
 # 只删平台 system_admin 绑定 → 回到零-admin,让 /setup 向导重新可用。
 # 不动 LLM key(密钥库)/租户/agent/记忆/审计 —— 仅清授权,数据保留。
 # role_binding 是 FORCE-RLS;容器内 postgres 超级用户直删可绕 RLS。
+dev-keycloak-config: ## 配 realm unmanagedAttributePolicy=ENABLED(Admin API 建的用户才留 tenant_id)
+	@$(COMPOSE) $(PROFILES) exec -T keycloak sh -c '\
+	  K=/opt/keycloak/bin/kcadm.sh; \
+	  for i in $$(seq 1 30); do $$K config credentials --server http://localhost:8080 --realm master \
+	    --user "$${KEYCLOAK_ADMIN:-admin}" --password "$${KEYCLOAK_ADMIN_PASSWORD:-admin_dev}" >/dev/null 2>&1 && break; \
+	    sleep 2; done; \
+	  $$K update users/profile -r helix-agent -s unmanagedAttributePolicy=ENABLED'
+	@echo "keycloak realm: unmanagedAttributePolicy=ENABLED"
+
 dev-seed-keycloak: ## seed Keycloak admin client secret 进金库(幂等;/setup + 邀请流需要)
 	$(COMPOSE) $(PROFILES) exec -T control-plane-blue \
 	  python -m control_plane.seed_keycloak_secret --value dev-internal-secret-rotate-me
