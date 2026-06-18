@@ -168,11 +168,29 @@ docker compose exec control-plane-blue \
 
 ## 4. Bootstrap 第一个平台管理员 + 登录
 
-平台第一个 `system_admin` 有"鸡生蛋"问题(授权本身需要 system_admin),用 infra 级
-CLI 破环。完整说明见 [`bootstrap-admin.md`](./bootstrap-admin.md)。
+平台第一个 `system_admin` 有"鸡生蛋"问题(授权本身需要 system_admin)。dev **与生产
+一致**:`make dev-up` 不自动建管理员,走 `/setup` 向导。
 
-dev 的 `helix-agent-admin-ui` 是 PKCE 公有客户端(已禁用 password grant),所以用
-**服务账号 Admin API** 查 dev 用户的 subject id(而不是 password grant):
+### 路径 A — /setup 向导(推荐,与生产一致)
+
+1. host 起前端(`cd apps/admin-ui && pnpm dev`)→ 开 `http://localhost:5173`。
+2. 未初始化会自动跳 `/setup`。填:平台名 / 管理员邮箱 / 密码 / Setup Token。
+   - **Setup Token** = `infra/.env` 的 `HELIX_AGENT_SETUP_TOKEN`(dev 默认 `dev-setup-token`)。
+   - 邮箱**用新地址**(如 `founder@corp.com`),别用 `dev@helix.local`(Keycloak 已占 → 409)。
+3. 提交 → 后端建平台租户 + Keycloak 账号(已验证 + 该密码)+ `system_admin` → 跳登录,用刚设的邮箱密码登入。
+
+> 安全:`/v1/setup` 无需登录,靠 Setup Token + 零-admin 不变量双重门控,建好后自动失效。
+
+### 路径 B — CLI 快路径(跳向导 / break-glass)
+
+直接提权预置的 `dev` 用户。`helix-agent-admin-ui` 是 PKCE 公有客户端(禁了 password
+grant),所以用**服务账号 Admin API** 查 dev 用户 subject id:
+
+```sh
+cd infra && make dev-bootstrap-admin   # 封装了下面三步,幂等
+```
+
+或手动:
 
 ```sh
 # 1. 服务账号 token(client_credentials,带 manage-users)
@@ -187,9 +205,10 @@ SUB=$(curl -sS "http://localhost:8080/admin/realms/helix-agent/users?username=de
 echo "dev subject-id=$SUB"
 
 # 3. 一次性授 system_admin(幂等)
-cd infra
 docker compose exec control-plane-blue python -m control_plane.bootstrap_admin --subject-id "$SUB"
 ```
+
+完整 CLI 说明见 [`bootstrap-admin.md`](./bootstrap-admin.md)。
 
 **Admin UI 登录**:host 上起前端 → 浏览器登录:
 

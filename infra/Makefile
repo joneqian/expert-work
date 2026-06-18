@@ -40,17 +40,17 @@ dev-up: dev-build ## 起全量 dev 栈(full+auth+observability,排除 green)
 	# keycloak 单独起、不 --wait:它的 healthcheck 4s 超时会误报 unhealthy
 	# (实际可用),--wait 会卡死。约 30s 后 :8080 就绪。
 	$(COMPOSE) $(PROFILES) up -d keycloak
-	# 自动提权 dev 用户为 system_admin(P-6 破鸡生蛋)。非致命:Keycloak
-	# 抖动时打印告警但不挡起栈,可事后手动 make dev-bootstrap-admin。
-	@$(MAKE) -s dev-bootstrap-admin || echo "⚠ bootstrap-admin 失败,栈仍可用;就绪后手动: make dev-bootstrap-admin"
+	# 与生产一致:不自动建管理员。首个 system_admin 走 /setup 向导
+	# (见 dev-info);要快路径仍可 `make dev-bootstrap-admin`(提权 dev 用户)。
 	@echo ""
 	@$(MAKE) -s dev-info
 
 # dev 用户的 Keycloak id 在 realm 导入时随机生成(realm json 未固定),所以
 # 查一次而非硬编码。client_credentials 用 api-internal 服务账号(带 view-users)。
 # bootstrap_admin 在容器内跑:用容器的 HELIX_AGENT_DB_DSN(pgbouncer)+ 已装包,
-# 免 host 的 uv/DB 端口依赖。幂等(重复跑 OK),所以可安全挂进 dev-up。
-dev-bootstrap-admin: ## 提权 dev 用户为 system_admin(幂等;P-6 破鸡生蛋)
+# 免 host 的 uv/DB 端口依赖。幂等(重复跑 OK)。dev-up 不再自动调它(与生产
+# 一致走 /setup 向导);这是想跳过向导时的快路径 / break-glass。
+dev-bootstrap-admin: ## 提权 dev 用户为 system_admin(快路径;首选 /setup 向导)
 	@echo "bootstrap-admin: 等 Keycloak 就绪 + 取 dev 用户 id..."
 	@SUB=""; for i in $$(seq 1 30); do \
 	  SA=$$(curl -sf http://localhost:8080/realms/helix-agent/protocol/openid-connect/token \
@@ -98,7 +98,11 @@ dev-info: ## 打印各 web 地址 + dev 登录凭据
 	@echo "  Langfuse      http://localhost:3001   (trace 调试)"
 	@echo "  Keycloak      http://localhost:8080   (IdP;约 30s 就绪)"
 	@echo "  MinIO         http://localhost:9001   (对象存储控制台)"
-	@echo "── dev 登录 ──────────────────────────────────────"
-	@echo "  admin-ui SSO  用户 dev / 密码 devpass  (realm-helix-agent.json 预置)"
+	@echo "── 首次:建第一个平台管理员(与生产一致)────────────"
+	@echo "  开 admin-ui → 自动进 /setup 向导 → 填邮箱/密码 + Setup Token"
+	@echo "  Setup Token   infra/.env 的 HELIX_AGENT_SETUP_TOKEN(默认 dev-setup-token)"
+	@echo "  邮箱用新地址(别用 dev@helix.local,Keycloak 已占)"
+	@echo "  快路径(跳向导): make dev-bootstrap-admin  (提权 dev 用户)"
+	@echo "── 其它登录 ──────────────────────────────────────"
 	@echo "  Keycloak 管理 admin / admin_dev"
 	@echo "  Langfuse      见 LANGFUSE_INIT_USER_* / .env"

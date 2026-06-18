@@ -102,16 +102,16 @@
 # 1. 配 infra/.env(从 .env.example 复制;git-ignored)
 cd infra && cp .env.example .env   # 填 Anthropic key 等
 
-# 2. 一键起全量 dev 栈(full + auth + observability;自动迁移 + 提权 dev 用户)
+# 2. 一键起全量 dev 栈(full + auth + observability;自动迁移)
 make dev-up
 
 # 3. 前端单独起(host 上)
 cd ../apps/admin-ui && pnpm install && pnpm dev   # http://localhost:5173
 ```
 
-`make dev-up` 会:构建 control-plane 镜像 → 起数据层/后端/Keycloak/可观测 → 跑迁移 → 自动 `dev-bootstrap-admin`(幂等提权 dev 用户)→ 打印地址(`make dev-info`)。
+`make dev-up` 会:构建 control-plane 镜像 → 起数据层/后端/Keycloak/可观测 → 跑迁移 → 打印地址(`make dev-info`)。**与生产一致,不自动建管理员** —— 第一个 `system_admin` 走 `/setup` 向导(见 §7),dev 默认 Setup Token = `dev-setup-token`(可在 `infra/.env` 覆盖)。想跳过向导用快路径 `make dev-bootstrap-admin`(提权 dev 用户)。
 
-**地址 / 登录**:admin-ui `:5173`(SSO,dev/devpass)· control-plane `:8000` · Keycloak `:8080`(admin/admin_dev)· Langfuse `:3001` · MinIO `:9001` · Grafana `:3000`。
+**地址**:admin-ui `:5173`(SSO)· control-plane `:8000` · Keycloak `:8080`(admin/admin_dev)· Langfuse `:3001` · MinIO `:9001` · Grafana `:3000`。
 
 常用:`make dev-ps` / `make dev-logs SVC=control-plane-blue` / `make dev-down`(留卷)/ `make dev-clean`。
 

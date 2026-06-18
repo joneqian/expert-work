@@ -53,6 +53,14 @@ x-control-plane-base: &control-plane-base
     # is loaded from the encrypted vault, seeded once via
     # `python -m control_plane.seed_keycloak_secret`. See getting-started.md.
     HELIX_AGENT_KEYCLOAK_ENABLED: ${HELIX_AGENT_KEYCLOAK_ENABLED:-false}
+    # Stream ACCT — first-run setup wizard (POST /v1/setup) + email-first-login.
+    # dev parity with prod: no auto-bootstrap; the first system_admin is created
+    # via the /setup wizard. The token gates that unauthenticated endpoint — dev
+    # ships a known fallback so `make dev-up` → /setup works zero-config; override
+    # in infra/.env for a real one. BOOTSTRAP_ADMIN_EMAIL is the alt path
+    # (email-first-login auto-promote); empty = off.
+    HELIX_AGENT_SETUP_TOKEN: ${HELIX_AGENT_SETUP_TOKEN:-dev-setup-token}
+    HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL: ${HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL:-}
     # 11.4/11.5 — live eval worker. OFF by default (the enqueue API still
     # queues runs; nothing drains them). Set true in infra/.env to drain the
     # adversarial / trace_eval suites against a real eval agent. The eval
