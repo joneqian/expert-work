@@ -29,58 +29,100 @@ import {
 } from "lucide-react";
 import { BrandGlyph } from "../icons/BrandGlyph";
 import { ApprovalPendingBadge } from "./ApprovalPendingBadge";
+import { useAuth } from "../auth/AuthContext";
+import { useTenantScope } from "../tenant/TenantScopeContext";
+import {
+  ALL_NAV_ENTRIES,
+  PLATFORM_ITEMS,
+  TENANT_SETTINGS_ITEMS,
+  WORKSPACE_ITEMS,
+  visibleGroups,
+  type NavEntry,
+  type NavGroup,
+} from "./navModel";
 
-interface NavItem {
-  key: string;
-  /** i18n key under ``nav.*`` for the menu label. */
-  labelKey: string;
-  icon: React.ReactNode;
-  path: string;
-  /** Wrap the label in the pending-approval badge (Runs only). */
-  badge?: boolean;
-}
+/** Icon per nav key — kept out of the shared model so it stays a pure
+ *  data module (no JSX). */
+const ICONS: Record<string, React.ReactNode> = {
+  agents: <Bot size={16} strokeWidth={1.5} />,
+  runs: <Activity size={16} strokeWidth={1.5} />,
+  approvals: <ListChecks size={16} strokeWidth={1.5} />,
+  curation: <CheckSquare size={16} strokeWidth={1.5} />,
+  eval: <FlaskConical size={16} strokeWidth={1.5} />,
+  memory: <Brain size={16} strokeWidth={1.5} />,
+  artifacts: <Package size={16} strokeWidth={1.5} />,
+  knowledge: <BookOpen size={16} strokeWidth={1.5} />,
+  skills: <FileText size={16} strokeWidth={1.5} />,
+  triggers: <Clock size={16} strokeWidth={1.5} />,
+  webhooks: <Webhook size={16} strokeWidth={1.5} />,
+  "settings-members": <Users size={16} strokeWidth={1.5} />,
+  "settings-credentials": <KeyRound size={16} strokeWidth={1.5} />,
+  "settings-api-keys": <Key size={16} strokeWidth={1.5} />,
+  "settings-service-accounts": <UserCircle2 size={16} strokeWidth={1.5} />,
+  "settings-mcp-servers": <Plug size={16} strokeWidth={1.5} />,
+  "settings-audit": <Shield size={16} strokeWidth={1.5} />,
+  "settings-usage": <Gauge size={16} strokeWidth={1.5} />,
+  "settings-tenants": <Building size={16} strokeWidth={1.5} />,
+  "settings-platform-users": <ShieldCheck size={16} strokeWidth={1.5} />,
+  "settings-platform": <KeyRound size={16} strokeWidth={1.5} />,
+  "settings-mcp-catalog": <Boxes size={16} strokeWidth={1.5} />,
+  "settings-platform-skills": <Sparkles size={16} strokeWidth={1.5} />,
+  "settings-rate-card": <Banknote size={16} strokeWidth={1.5} />,
+  "settings-chargeback": <Receipt size={16} strokeWidth={1.5} />,
+  "platform-members-all": <Users size={16} strokeWidth={1.5} />,
+};
 
-const NAV_ITEMS: NavItem[] = [
-  { key: "agents", labelKey: "nav.agents", icon: <Bot size={16} strokeWidth={1.5} />, path: "/agents" },
-  { key: "runs", labelKey: "nav.runs", icon: <Activity size={16} strokeWidth={1.5} />, path: "/runs" },
-  { key: "approvals", labelKey: "nav.approvals", icon: <ListChecks size={16} strokeWidth={1.5} />, path: "/approvals", badge: true },
-  { key: "curation", labelKey: "nav.curation", icon: <CheckSquare size={16} strokeWidth={1.5} />, path: "/curation" },
-  { key: "eval", labelKey: "nav.eval", icon: <FlaskConical size={16} strokeWidth={1.5} />, path: "/eval-runs" },
-  { key: "memory", labelKey: "nav.memory", icon: <Brain size={16} strokeWidth={1.5} />, path: "/memory" },
-  { key: "artifacts", labelKey: "nav.artifacts", icon: <Package size={16} strokeWidth={1.5} />, path: "/artifacts" },
-  { key: "knowledge", labelKey: "nav.knowledge", icon: <BookOpen size={16} strokeWidth={1.5} />, path: "/knowledge" },
-  { key: "skills", labelKey: "nav.skills", icon: <FileText size={16} strokeWidth={1.5} />, path: "/skills" },
-  { key: "triggers", labelKey: "nav.triggers", icon: <Clock size={16} strokeWidth={1.5} />, path: "/triggers" },
-  { key: "webhooks", labelKey: "nav.webhooks", icon: <Webhook size={16} strokeWidth={1.5} />, path: "/webhooks" },
-];
+const GROUP_TITLE_KEY: Record<NavGroup, string> = {
+  workspace: "nav.group_workspace",
+  "tenant-settings": "nav.group_tenant_settings",
+  platform: "nav.group_platform",
+};
 
-const SETTINGS_ITEMS: NavItem[] = [
-  { key: "settings-tenants", labelKey: "nav.tenants", icon: <Building size={16} strokeWidth={1.5} />, path: "/settings/tenants" },
-  { key: "settings-platform", labelKey: "nav.platform_credentials", icon: <KeyRound size={16} strokeWidth={1.5} />, path: "/settings/platform" },
-  { key: "settings-platform-users", labelKey: "nav.platform_users", icon: <ShieldCheck size={16} strokeWidth={1.5} />, path: "/settings/platform-users" },
-  { key: "settings-mcp-catalog", labelKey: "nav.mcp_catalog", icon: <Boxes size={16} strokeWidth={1.5} />, path: "/settings/mcp-catalog" },
-  { key: "settings-platform-skills", labelKey: "nav.platform_skills", icon: <Sparkles size={16} strokeWidth={1.5} />, path: "/settings/platform-skills" },
-  { key: "settings-api-keys", labelKey: "nav.api_keys", icon: <Key size={16} strokeWidth={1.5} />, path: "/settings/api-keys" },
-  { key: "settings-credentials", labelKey: "nav.credentials", icon: <KeyRound size={16} strokeWidth={1.5} />, path: "/settings/credentials" },
-  { key: "settings-service-accounts", labelKey: "nav.service_accounts", icon: <UserCircle2 size={16} strokeWidth={1.5} />, path: "/settings/service-accounts" },
-  { key: "settings-members", labelKey: "nav.members", icon: <Users size={16} strokeWidth={1.5} />, path: "/settings/members" },
-  { key: "settings-audit", labelKey: "nav.audit", icon: <Shield size={16} strokeWidth={1.5} />, path: "/settings/audit" },
-  { key: "settings-mcp-servers", labelKey: "nav.mcp_servers", icon: <Plug size={16} strokeWidth={1.5} />, path: "/settings/mcp-servers" },
-  { key: "settings-usage", labelKey: "nav.usage", icon: <Gauge size={16} strokeWidth={1.5} />, path: "/settings/usage" },
-  { key: "settings-chargeback", labelKey: "nav.chargeback", icon: <Receipt size={16} strokeWidth={1.5} />, path: "/settings/billing-chargeback" },
-  { key: "settings-rate-card", labelKey: "nav.rate_card", icon: <Banknote size={16} strokeWidth={1.5} />, path: "/settings/rate-card" },
-];
+const GROUP_ITEMS: Record<NavGroup, readonly NavEntry[]> = {
+  workspace: WORKSPACE_ITEMS,
+  "tenant-settings": TENANT_SETTINGS_ITEMS,
+  platform: PLATFORM_ITEMS,
+};
 
 export function Sidebar() {
   const nav = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const { identity } = useAuth();
+  const { scope } = useTenantScope();
+
+  const isSystemAdmin = identity?.isSystemAdmin ?? false;
+  const groups = visibleGroups(scope, isSystemAdmin);
+  const shownEntries = groups.flatMap((g) => GROUP_ITEMS[g]);
 
   const selectedKey = (() => {
     const path = location.pathname;
-    const top = [...NAV_ITEMS, ...SETTINGS_ITEMS].find((i) => path.startsWith(i.path));
-    return top?.key ?? "agents";
+    const top = shownEntries.find((i) => path === i.path || path.startsWith(`${i.path}/`));
+    return top?.key ?? shownEntries[0]?.key ?? "agents";
   })();
+
+  const labelFor = (entry: NavEntry) =>
+    entry.badge ? (
+      <ApprovalPendingBadge>{t(entry.labelKey)}</ApprovalPendingBadge>
+    ) : (
+      t(entry.labelKey)
+    );
+
+  const menuItems = groups.flatMap((g, gi) => {
+    const groupItems = GROUP_ITEMS[g].map((entry) => ({
+      key: entry.key,
+      label: labelFor(entry),
+      icon: ICONS[entry.key],
+    }));
+    const groupNode = {
+      key: `${g}-group`,
+      label: t(GROUP_TITLE_KEY[g]),
+      type: "group" as const,
+      children: groupItems,
+    };
+    // Divider between groups (but not before the first).
+    return gi === 0 ? [groupNode] : [{ type: "divider" as const }, groupNode];
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -111,8 +153,7 @@ export function Sidebar() {
         mode="inline"
         selectedKeys={[selectedKey]}
         onClick={({ key }) => {
-          const all = [...NAV_ITEMS, ...SETTINGS_ITEMS];
-          const item = all.find((i) => i.key === key);
+          const item = ALL_NAV_ENTRIES.find((i) => i.key === key);
           if (item) nav(item.path);
         }}
         style={{
@@ -121,28 +162,7 @@ export function Sidebar() {
           borderRight: "none",
           padding: "12px 8px",
         }}
-        items={[
-          ...NAV_ITEMS.map((i) => ({
-            key: i.key,
-            label: i.badge ? (
-              <ApprovalPendingBadge>{t(i.labelKey)}</ApprovalPendingBadge>
-            ) : (
-              t(i.labelKey)
-            ),
-            icon: i.icon,
-          })),
-          { type: "divider" as const },
-          {
-            key: "settings-group",
-            label: t("nav.settings_group"),
-            type: "group" as const,
-            children: SETTINGS_ITEMS.map((i) => ({
-              key: i.key,
-              label: t(i.labelKey),
-              icon: i.icon,
-            })),
-          },
-        ]}
+        items={menuItems}
       />
     </div>
   );

@@ -30,6 +30,10 @@ export interface TranslationKeys {
   };
   nav: {
     settings_group: string;
+    group_workspace: string;
+    group_tenant_settings: string;
+    group_platform: string;
+    members_all_tenants: string;
     agents: string;
     runs: string;
     approvals: string;
@@ -1540,6 +1544,10 @@ const en: TranslationKeys = {
   },
   nav: {
     settings_group: "Settings",
+    group_workspace: "Workspace",
+    group_tenant_settings: "Tenant settings",
+    group_platform: "Platform",
+    members_all_tenants: "Members (all tenants)",
     agents: "Agents",
     runs: "Runs",
     approvals: "Approvals",

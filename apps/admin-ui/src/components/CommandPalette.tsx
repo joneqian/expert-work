@@ -49,6 +49,7 @@ import {
 import { listAgents, type AgentRecord } from "../api/agents";
 import { useAuth } from "../auth/AuthContext";
 import { useTenantScope } from "../tenant/TenantScopeContext";
+import { groupForPath, visibleGroups } from "./navModel";
 
 interface CmdItem {
   group: string;
@@ -81,8 +82,9 @@ const AGENT_TTL_MS = 60_000;
 
 export function CommandPaletteProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
-  const { status } = useAuth();
-  const { apiTenantScope } = useTenantScope();
+  const { status, identity } = useAuth();
+  const { scope, apiTenantScope } = useTenantScope();
+  const isSystemAdmin = identity?.isSystemAdmin ?? false;
 
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -179,7 +181,16 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
       { key: "go-api-keys", label: t("cmdk.label_settings_api_keys"), path: "/settings/api-keys", icon: <Key size={16} strokeWidth={1.5} />, sc: [] as string[] },
       { key: "go-platform-users", label: t("cmdk.label_settings_platform_users"), path: "/settings/platform-users", icon: <ShieldCheck size={16} strokeWidth={1.5} />, sc: [] as string[] },
     ];
-    jumpItems.forEach((g) => {
+    // Same gating as the sidebar (shared ``navModel`` helpers): platform
+    // jumps only at the platform level for system_admins, tenant jumps
+    // only at a tenant level. Items not in a nav group (none today) stay.
+    const visible = visibleGroups(scope, isSystemAdmin);
+    jumpItems
+      .filter((g) => {
+        const group = groupForPath(g.path);
+        return group === null || visible.includes(group);
+      })
+      .forEach((g) => {
       items.push({
         group: t("cmdk.group_jump"),
         key: g.key,
@@ -230,7 +241,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
     });
 
     return items;
-  }, [agents, nav, close, t]);
+  }, [agents, nav, close, t, scope, isSystemAdmin]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

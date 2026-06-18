@@ -32,6 +32,10 @@ const zhCN: TranslationKeys = {
   },
   nav: {
     settings_group: "设置",
+    group_workspace: "工作区",
+    group_tenant_settings: "租户设置",
+    group_platform: "平台治理",
+    members_all_tenants: "成员(全部租户)",
     agents: "智能体",
     runs: "运行记录",
     approvals: "审批",
