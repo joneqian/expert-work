@@ -3,40 +3,48 @@ import { Layout } from "antd";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
-import { useTenantScope } from "../tenant/TenantScopeContext";
-import {
-  PLATFORM_LANDING,
-  TENANT_LANDING,
-  groupForPath,
-  isPlatformScope,
-} from "./navModel";
+import { useAuth } from "../auth/AuthContext";
+import { SCOPE_ALL, SCOPE_HOME, useTenantScope } from "../tenant/TenantScopeContext";
+import { TENANT_LANDING, groupForPath, isPlatformScope } from "./navModel";
 
 const { Sider, Header, Content } = Layout;
 
 /**
- * Keep the active route in a group the current scope can see (§4).
+ * Keep scope and route aligned, deep-link friendly (§4).
  *
- *   - switching up to the platform level while on a tenant route →
- *     redirect to the platform landing page.
- *   - switching back to a tenant while on a platform route → redirect to
- *     the workspace landing page.
+ * The route's group implies an operating level; rather than bouncing the
+ * user off a deep-linked page, we *align the scope* to the page:
  *
- * Routes already in a group the scope owns are left alone (no churn).
+ *   - platform route + system_admin not yet at platform level → switch up
+ *     to ``"*"`` and stay on the page (so a bookmark / direct link to a
+ *     platform page just works).
+ *   - platform route + non-admin → redirect to the workspace landing (no
+ *     access; the page also gates server-side).
+ *   - tenant route while at platform level → drop back to the home tenant
+ *     and stay on the page.
+ *
+ * Routes whose scope already matches are left alone (no churn / no loop:
+ * each branch makes the next render a no-op).
  */
 function useScopeRedirect(): void {
-  const { scope } = useTenantScope();
+  const { scope, setScope } = useTenantScope();
+  const isSystemAdmin = useAuth().identity?.isSystemAdmin ?? false;
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     const group = groupForPath(location.pathname);
     if (group === null) return; // not a grouped nav route — leave it be.
-    if (isPlatformScope(scope)) {
-      if (group !== "platform") navigate(PLATFORM_LANDING, { replace: true });
-    } else if (group === "platform") {
-      navigate(TENANT_LANDING, { replace: true });
+    if (group === "platform") {
+      if (!isSystemAdmin) {
+        navigate(TENANT_LANDING, { replace: true });
+      } else if (!isPlatformScope(scope)) {
+        setScope(SCOPE_ALL); // deep-link into a platform page → enter platform level
+      }
+    } else if (isPlatformScope(scope)) {
+      setScope(SCOPE_HOME); // tenant page while at platform level → enter a tenant
     }
-  }, [scope, location.pathname, navigate]);
+  }, [scope, isSystemAdmin, location.pathname, navigate, setScope]);
 }
 
 export function Shell({ children }: { children: ReactNode }) {

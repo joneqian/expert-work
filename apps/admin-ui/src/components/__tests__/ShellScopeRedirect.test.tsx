@@ -1,14 +1,14 @@
 /**
- * Scope-switch redirect tests — admin-ui-nav-ia §4.
+ * Scope-alignment tests — admin-ui-nav-ia §4 (deep-link friendly).
  *
- * When the operator changes the tenant scope while sitting on a route
- * the new scope can't see, the Shell redirects to the matching landing
- * page so they never stall on a forbidden/empty page:
+ * The route's group implies an operating level; the Shell *aligns the
+ * scope to the page* instead of bouncing the user off a deep link:
  *
- *   - on a tenant route + switch to "*"  → /settings/tenants
- *   - on a platform route + switch to a tenant → /agents
- *
- * Routes already in a group the scope owns are left untouched.
+ *   - platform route + system_admin not at platform level → setScope("*"),
+ *     stay on the page.
+ *   - platform route + non-admin → redirect to /agents (no access).
+ *   - tenant route while at platform level → setScope("home"), stay.
+ *   - already-aligned routes → no scope change, no redirect.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
@@ -16,15 +16,20 @@ import { render, screen } from "@testing-library/react";
 
 import { Shell } from "../Shell";
 
-// Mock the heavy children — we only exercise the redirect effect.
 vi.mock("../Sidebar", () => ({ Sidebar: () => <div /> }));
 vi.mock("../Topbar", () => ({ Topbar: () => <div /> }));
 
 let mockScope: string;
+const setScope = vi.fn();
 vi.mock("../../tenant/TenantScopeContext", () => ({
   SCOPE_ALL: "*",
   SCOPE_HOME: "home",
-  useTenantScope: () => ({ scope: mockScope }),
+  useTenantScope: () => ({ scope: mockScope, setScope }),
+}));
+
+let mockIsSystemAdmin: boolean;
+vi.mock("../../auth/AuthContext", () => ({
+  useAuth: () => ({ identity: { isSystemAdmin: mockIsSystemAdmin } }),
 }));
 
 function LocationProbe() {
@@ -45,31 +50,47 @@ function renderAt(initialPath: string) {
 }
 
 afterEach(() => {
-  vi.clearAllMocks();
+  setScope.mockClear();
 });
 
-describe("Shell — scope-switch redirect", () => {
-  it("switching to platform scope on a tenant route lands on /settings/tenants", () => {
-    mockScope = "*";
-    renderAt("/agents");
+describe("Shell — scope alignment", () => {
+  it("system_admin deep-linking a platform page enters platform scope, stays put", () => {
+    mockScope = "home";
+    mockIsSystemAdmin = true;
+    renderAt("/settings/tenants");
+    expect(setScope).toHaveBeenCalledWith("*");
     expect(screen.getByTestId("pathname").textContent).toBe("/settings/tenants");
   });
 
-  it("switching to a tenant scope on a platform route lands on /agents", () => {
+  it("non-admin on a platform route is redirected to /agents", () => {
     mockScope = "home";
+    mockIsSystemAdmin = false;
     renderAt("/settings/tenants");
+    expect(setScope).not.toHaveBeenCalled();
     expect(screen.getByTestId("pathname").textContent).toBe("/agents");
   });
 
-  it("leaves a tenant route untouched while on a tenant scope", () => {
-    mockScope = "home";
+  it("a tenant route while at platform level drops back to the home tenant, stays put", () => {
+    mockScope = "*";
+    mockIsSystemAdmin = true;
     renderAt("/runs");
+    expect(setScope).toHaveBeenCalledWith("home");
     expect(screen.getByTestId("pathname").textContent).toBe("/runs");
   });
 
-  it("leaves a platform route untouched while on the platform scope", () => {
+  it("leaves an already-aligned tenant route untouched", () => {
+    mockScope = "home";
+    mockIsSystemAdmin = true;
+    renderAt("/runs");
+    expect(setScope).not.toHaveBeenCalled();
+    expect(screen.getByTestId("pathname").textContent).toBe("/runs");
+  });
+
+  it("leaves an already-aligned platform route untouched", () => {
     mockScope = "*";
+    mockIsSystemAdmin = true;
     renderAt("/settings/rate-card");
+    expect(setScope).not.toHaveBeenCalled();
     expect(screen.getByTestId("pathname").textContent).toBe("/settings/rate-card");
   });
 });
