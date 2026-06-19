@@ -23,6 +23,11 @@ export interface MeResponse {
   roles: string[];
   scopes: string[];
   is_system_admin: boolean;
+  /** ``true`` when the home tenant is the synthetic platform tenant (the
+   *  storage home for /setup-provisioned system_admins, not a real customer
+   *  tenant). The TenantSwitcher hides this tenant — the platform level is
+   *  the ``"*"`` scope, not a peer row. (Stream ACCT.) */
+  home_is_platform: boolean;
   allowed_tenants: string[] | typeof ALL_TENANTS;
 }
 

@@ -62,13 +62,20 @@ export function TenantSwitcher() {
     ? `${t("tenant.home_label_prefix")} · ${identity.homeTenantId.slice(0, 8)}…`
     : t("tenant.home_tenant");
 
-  const options: ScopeOption[] = [
-    {
-      value: SCOPE_HOME,
-      label: homeLabel,
-      hint: t("tenant.your_tenant"),
-    },
-  ];
+  // Hide the home tenant when it's the synthetic platform tenant: it has no
+  // workspace, and the platform level is the "*" scope, not a peer row
+  // (Stream ACCT). A dual-role admin homes to a real tenant ⇒ home stays.
+  const hideHome = identity?.homeIsPlatform ?? false;
+
+  const options: ScopeOption[] = hideHome
+    ? []
+    : [
+        {
+          value: SCOPE_HOME,
+          label: homeLabel,
+          hint: t("tenant.your_tenant"),
+        },
+      ];
   if (isSystemAdmin) {
     options.push({
       value: SCOPE_ALL,

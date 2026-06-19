@@ -83,6 +83,8 @@ async def test_me_tenant_admin_jwt_projects_principal(
     assert data["tenant_id"] == str(_HOME_TENANT)
     assert data["auth_method"] == "jwt"
     assert data["is_system_admin"] is False
+    # A real tenant home is not the synthetic platform tenant.
+    assert data["home_is_platform"] is False
     # tenant_admin's allowed_tenants defaults to (home,)
     assert data["allowed_tenants"] == [str(_HOME_TENANT)]
     assert "admin" in data["roles"]
@@ -105,6 +107,31 @@ async def test_me_system_admin_jwt_advertises_cross_tenant(
     assert data["is_system_admin"] is True
     assert data["allowed_tenants"] == "*"
     assert data["tenant_id"] == str(_HOME_TENANT)
+    # This system_admin homes to a random (non-platform) tenant ⇒ False.
+    assert data["home_is_platform"] is False
+
+
+@pytest.mark.asyncio
+async def test_me_home_is_platform_when_homed_to_platform_tenant(
+    app_state: tuple[AsyncClient, UUID],
+) -> None:
+    """A /setup-provisioned admin homes to the synthetic platform tenant.
+
+    ``home_is_platform`` flags that so the UI can hide the empty platform
+    tenant from the TenantSwitcher (Stream ACCT). The default
+    ``Settings.platform_tenant_id`` is the well-known ``1111…`` UUID.
+    """
+    client, sys_admin_id = app_state
+    platform_tenant = UUID("11111111-1111-1111-1111-111111111111")
+    token = make_test_jwt(tenant_id=platform_tenant, subject=str(sys_admin_id))
+    response = await client.get(
+        "/v1/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["tenant_id"] == str(platform_tenant)
+    assert data["home_is_platform"] is True
 
 
 @pytest.mark.asyncio
