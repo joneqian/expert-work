@@ -1148,6 +1148,9 @@ export interface TranslationKeys {
     page_title: string;
     subtitle: string;
     add: string;
+    import_zip: string;
+    imported: string;
+    import_noop: string;
     manage: string;
     pin: string;
     unpin: string;
@@ -2787,6 +2790,9 @@ const en: TranslationKeys = {
     subtitle:
       "Curate reusable skills tenants can bind to their agents. Platform-level, system admins only.",
     add: "New skill",
+    import_zip: "Import .skill",
+    imported: 'Imported "{{name}}" v{{version}}.',
+    import_noop: 'No change to "{{name}}" — already the latest version.',
     manage: "Manage",
     pin: "Pin",
     unpin: "Unpin",

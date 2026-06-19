@@ -14,14 +14,15 @@
  * Mirrors ``SettingsMcpCatalog`` gating + layout (PageHeader + admin gate
  * + antd Table + ``ApiError`` → ``${code}: ${message}`` toasts).
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableColumnsType } from "antd";
-import { Pin, RefreshCw, Sparkles } from "lucide-react";
+import { Pin, RefreshCw, Sparkles, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { PageHeader } from "../components/PageHeader";
 import {
+  importPlatformSkill,
   listPlatformSkills,
   patchPlatformSkill,
   type PlatformSkill,
@@ -59,6 +60,7 @@ export function SettingsPlatformSkills() {
   const [createOpen, setCreateOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [managing, setManaging] = useState<PlatformSkill | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const errText = useCallback(
     (err: unknown): string =>
@@ -95,6 +97,32 @@ export function SettingsPlatformSkills() {
   }, [isSystemAdmin, refresh]);
 
   const openCreate = useCallback(() => setCreateOpen(true), []);
+
+  const onImportClick = useCallback(() => fileInputRef.current?.click(), []);
+
+  const onImportFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const result = await importPlatformSkill(file);
+        message.success(
+          result.created
+            ? t("platform_skills.imported", {
+                name: result.skill.name,
+                version: result.version.version,
+              })
+            : t("platform_skills.import_noop", { name: result.skill.name }),
+        );
+        void refresh();
+      } catch (err) {
+        message.error(errText(err));
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [errText, message, refresh, t],
+  );
 
   const openManage = useCallback((row: PlatformSkill) => {
     setManaging(row);
@@ -216,6 +244,14 @@ export function SettingsPlatformSkills() {
 
   return (
     <div data-testid="ps-root">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".zip,.skill,application/zip"
+        style={{ display: "none" }}
+        onChange={onImportFile}
+        data-testid="ps-import-input"
+      />
       <PageHeader
         icon={<Sparkles size={18} strokeWidth={1.5} />}
         title={t("platform_skills.page_title")}
@@ -229,6 +265,13 @@ export function SettingsPlatformSkills() {
                 icon={<RefreshCw size={14} strokeWidth={1.5} />}
               >
                 {t("common.refresh")}
+              </Button>
+              <Button
+                onClick={onImportClick}
+                icon={<Upload size={14} strokeWidth={1.75} />}
+                data-testid="ps-import-btn"
+              >
+                {t("platform_skills.import_zip")}
               </Button>
               <Button type="primary" onClick={openCreate} data-testid="ps-add">
                 {t("platform_skills.add")}

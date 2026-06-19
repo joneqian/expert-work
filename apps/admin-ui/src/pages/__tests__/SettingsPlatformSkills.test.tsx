@@ -2,9 +2,15 @@
  * Platform Skills UI tests — Stream X (X5).
  *
  * Covers the platform skill page (admin gate + table + empty/error
- * states) and the create / add-version / status-change / pin flows.
- * Backend ``/v1/platform/skills`` is enveloped, so the adapter mock
- * returns ``{success, data, error}``.
+ * states) and the create / add-version / status-change / pin / import
+ * flows.
+ *
+ * Backend ``/v1/platform/skills`` returns *raw* ``JSONResponse`` payloads
+ * (NOT the ``{success, data, error}`` envelope), so the adapter mock
+ * returns the raw object. An earlier version of this mock wrongly
+ * enveloped the responses, which masked the SDK's envelope-vs-raw bug
+ * (the page threw ``request failed`` against the real backend). Keep the
+ * mock raw so it matches production.
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -86,8 +92,10 @@ const VERSION = {
   created_at: "2026-05-20T10:00:00Z",
 };
 
-function env(data: unknown) {
-  return { success: true, data, error: null };
+/** The backend returns the payload raw (no ``{success, data, error}``
+ *  envelope); the mock mirrors that exactly. */
+function raw<T>(data: T): T {
+  return data;
 }
 
 function renderPage(roles: string[]) {
@@ -112,7 +120,7 @@ describe("SettingsPlatformSkills page", () => {
     installAdapter([
       {
         match: (u) => u.endsWith("/platform/skills"),
-        respond: () => env({ items: [], next_cursor: null }),
+        respond: () => raw({ items: [], next_cursor: null }),
       },
     ]);
     renderPage(["admin"]);
@@ -124,7 +132,7 @@ describe("SettingsPlatformSkills page", () => {
     installAdapter([
       {
         match: (u) => u.endsWith("/platform/skills"),
-        respond: () => env({ items: [SKILL], next_cursor: null }),
+        respond: () => raw({ items: [SKILL], next_cursor: null }),
       },
     ]);
     renderPage(["system_admin"]);
@@ -138,7 +146,7 @@ describe("SettingsPlatformSkills page", () => {
     installAdapter([
       {
         match: (u) => u.endsWith("/platform/skills"),
-        respond: () => env({ items: [], next_cursor: null }),
+        respond: () => raw({ items: [], next_cursor: null }),
       },
     ]);
     renderPage(["system_admin"]);
@@ -164,13 +172,13 @@ describe("SettingsPlatformSkills page", () => {
         match: (u, m) => u.endsWith("/platform/skills") && m === "post",
         respond: ({ data }) => {
           postBody = data;
-          return env({ ...SKILL, id: "psk-new", name: "translate" });
+          return raw({ ...SKILL, id: "psk-new", name: "translate" });
         },
         status: 201,
       },
       {
         match: (u, m) => u.endsWith("/platform/skills") && m === "get",
-        respond: () => env({ items: [], next_cursor: null }),
+        respond: () => raw({ items: [], next_cursor: null }),
       },
     ]);
     const user = userEvent.setup();
@@ -186,23 +194,59 @@ describe("SettingsPlatformSkills page", () => {
     expect(parsed.required_tier).toBe("free");
   });
 
+  it("import flow uploads a .skill ZIP and refreshes the list", async () => {
+    let importPosted = false;
+    let listCalls = 0;
+    installAdapter([
+      {
+        match: (u, m) => u.endsWith("/platform/skills/import") && m === "post",
+        respond: () => {
+          importPosted = true;
+          return raw({ skill: SKILL, version: VERSION, created: true });
+        },
+        status: 201,
+      },
+      {
+        match: (u, m) => u.endsWith("/platform/skills") && m === "get",
+        respond: () => {
+          listCalls += 1;
+          // First load empty; after import the refreshed list has the skill.
+          return raw({ items: importPosted ? [SKILL] : [], next_cursor: null });
+        },
+      },
+    ]);
+    const user = userEvent.setup();
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-import-btn")).toBeInTheDocument());
+
+    const file = new File(["PK"], "web_search.skill", {
+      type: "application/zip",
+    });
+    await user.upload(screen.getByTestId<HTMLInputElement>("ps-import-input"), file);
+
+    await waitFor(() => expect(importPosted).toBe(true));
+    // The import handler triggers a refresh ⇒ a second GET, now non-empty.
+    await waitFor(() => expect(screen.getByText("web_search")).toBeInTheDocument());
+    expect(listCalls).toBeGreaterThanOrEqual(2);
+  });
+
   it("manage drawer adds a version, changes status, and toggles pin", async () => {
     let versionBody: unknown = null;
     const patchBodies: unknown[] = [];
     installAdapter([
       {
         match: (u, m) => u.endsWith("/platform/skills") && m === "get",
-        respond: () => env({ items: [SKILL], next_cursor: null }),
+        respond: () => raw({ items: [SKILL], next_cursor: null }),
       },
       {
         match: (u, m) => u.endsWith("/platform/skills/psk-1/versions") && m === "get",
-        respond: () => env({ items: [VERSION] }),
+        respond: () => raw({ items: [VERSION] }),
       },
       {
         match: (u, m) => u.endsWith("/platform/skills/psk-1/versions") && m === "post",
         respond: ({ data }) => {
           versionBody = data;
-          return env({ ...VERSION, version: 2 });
+          return raw({ ...VERSION, version: 2 });
         },
         status: 201,
       },
@@ -210,7 +254,7 @@ describe("SettingsPlatformSkills page", () => {
         match: (u, m) => u.endsWith("/platform/skills/psk-1") && m === "patch",
         respond: ({ data }) => {
           patchBodies.push(data);
-          return env({ ...SKILL });
+          return raw({ ...SKILL });
         },
       },
     ]);
