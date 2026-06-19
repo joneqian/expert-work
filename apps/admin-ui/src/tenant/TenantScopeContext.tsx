@@ -77,6 +77,23 @@ export function TenantScopeProvider({ children }: { children: ReactNode }) {
     }
   }, [identity, scope]);
 
+  // Promote a platform-homed system_admin off the (hidden) home scope. Their
+  // home is the synthetic platform tenant, which the TenantSwitcher omits — so
+  // ``"home"`` would leave the switcher showing a value that isn't an option.
+  // The platform level is the ``"*"`` scope; land there. Gate on
+  // ``serverResolved``: ``homeIsPlatform`` is only authoritative post-/v1/me.
+  useEffect(() => {
+    if (
+      identity?.serverResolved &&
+      identity.isSystemAdmin &&
+      identity.homeIsPlatform &&
+      scope === SCOPE_HOME
+    ) {
+      setScopeState(SCOPE_ALL);
+      writeStored(SCOPE_ALL);
+    }
+  }, [identity, scope]);
+
   const setScope = useCallback(
     (next: TenantScopeValue) => {
       if (next === SCOPE_ALL && !isSystemAdmin) {

@@ -44,6 +44,11 @@ export interface AuthIdentity {
   homeTenantId: string | null;
   roles: readonly string[];
   isSystemAdmin: boolean;
+  /** ``true`` when the home tenant is the synthetic platform tenant — the
+   *  TenantSwitcher hides it (platform level is the ``"*"`` scope, not a peer
+   *  row). Only authoritative once ``serverResolved``; the optimistic decode
+   *  cannot know it, so it reports ``false``. (Stream ACCT.) */
+  homeIsPlatform: boolean;
   /** Short string for the user menu — JWT subject head or API key prefix. */
   displayName: string;
   /** ``true`` once :func:`getMe` has replaced the optimistic identity
@@ -106,6 +111,7 @@ function optimisticIdentityFromToken(token: string): AuthIdentity {
       homeTenantId: null,
       roles: [],
       isSystemAdmin: false,
+      homeIsPlatform: false,
       displayName: `${token.slice(0, 12)}…`,
       serverResolved: false,
     };
@@ -119,6 +125,7 @@ function optimisticIdentityFromToken(token: string): AuthIdentity {
       homeTenantId: null,
       roles: [],
       isSystemAdmin: false,
+      homeIsPlatform: false,
       displayName: "anonymous",
       serverResolved: false,
     };
@@ -140,6 +147,7 @@ function optimisticIdentityFromToken(token: string): AuthIdentity {
     homeTenantId: asString(payload.tenant_id),
     roles,
     isSystemAdmin: roles.includes("system_admin"),
+    homeIsPlatform: false,
     displayName: human ?? (subject.length > 12 ? `${subject.slice(0, 8)}…` : subject),
     serverResolved: false,
   };
@@ -165,6 +173,7 @@ function identityFromMe(me: MeResponse, token: string): AuthIdentity {
     homeTenantId: me.tenant_id,
     roles: me.roles,
     isSystemAdmin: me.is_system_admin,
+    homeIsPlatform: me.home_is_platform,
     displayName,
     serverResolved: true,
   };
