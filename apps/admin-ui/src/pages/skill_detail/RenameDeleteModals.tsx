@@ -10,18 +10,15 @@ import { Alert, App, Button, Form, Input, Modal, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
-import {
-  deleteSupportingFile,
-  getSupportingFile,
-  renameSupportingFile,
-  type SkillVersion,
-} from "../../api/skills";
+import { type SkillVersion } from "../../api/skills";
+import { type SkillApi } from "../../api/skillApi";
 
 const { Text } = Typography;
 
 // ─── Rename ──────────────────────────────────────────────────────────
 
 interface RenameModalProps {
+  api: SkillApi;
   open: boolean;
   skillId: string;
   versionNumber: number;
@@ -31,6 +28,7 @@ interface RenameModalProps {
 }
 
 export function RenameModal({
+  api,
   open,
   skillId,
   versionNumber,
@@ -66,8 +64,8 @@ export function RenameModal({
 
     setSubmitting(true);
     try {
-      const original = await getSupportingFile(skillId, versionNumber, oldPath);
-      const newVersion = await renameSupportingFile(
+      const original = await api.getSupportingFile(skillId, versionNumber, oldPath);
+      const newVersion = await api.renameSupportingFile(
         skillId,
         versionNumber,
         oldPath,
@@ -89,6 +87,7 @@ export function RenameModal({
       setSubmitting(false);
     }
   }, [
+    api,
     form,
     handleClose,
     message,
@@ -150,6 +149,7 @@ export function RenameModal({
 // ─── Delete ──────────────────────────────────────────────────────────
 
 interface DeleteConfirmModalProps {
+  api: SkillApi;
   open: boolean;
   skillId: string;
   versionNumber: number;
@@ -159,6 +159,7 @@ interface DeleteConfirmModalProps {
 }
 
 export function DeleteConfirmModal({
+  api,
   open,
   skillId,
   versionNumber,
@@ -185,7 +186,7 @@ export function DeleteConfirmModal({
     setSubmitting(true);
     setError(null);
     try {
-      const newVersion = await deleteSupportingFile(skillId, versionNumber, path);
+      const newVersion = await api.deleteSupportingFile(skillId, versionNumber, path);
       message.success(t("skills.file_deleted", { version: newVersion.version }));
       onDeleted(newVersion);
       handleClose();
@@ -201,6 +202,7 @@ export function DeleteConfirmModal({
       setSubmitting(false);
     }
   }, [
+    api,
     canDelete,
     handleClose,
     message,

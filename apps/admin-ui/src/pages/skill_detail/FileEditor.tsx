@@ -41,16 +41,16 @@ import { ApiError } from "../../api/client";
 import {
   decodeBase64Utf8,
   encodeUtf8Base64,
-  getSupportingFile,
-  putSupportingFile,
   type SkillVersion,
   type SupportingFileBody,
 } from "../../api/skills";
+import { type SkillApi } from "../../api/skillApi";
 import { SKILL_MD_PATH } from "./FileTree";
 
 const { Text } = Typography;
 
 interface FileEditorProps {
+  api: SkillApi;
   skillId: string;
   version: SkillVersion;
   /** Path of the file currently selected in the tree, or ``null`` when
@@ -106,6 +106,7 @@ interface LoadedFile {
 }
 
 export function FileEditor({
+  api,
   skillId,
   version,
   selectedPath,
@@ -149,7 +150,7 @@ export function FileEditor({
     let cancelled = false;
     void (async () => {
       try {
-        const body = await getSupportingFile(skillId, version.version, selectedPath);
+        const body = await api.getSupportingFile(skillId, version.version, selectedPath);
         if (cancelled) return;
         const text = decodeBase64Utf8(body.content);
         setLoaded({ path: selectedPath, body, text });
@@ -172,7 +173,7 @@ export function FileEditor({
     return () => {
       cancelled = true;
     };
-  }, [skillId, selectedPath, version.version, version.prompt_fragment, onDirtyChange]);
+  }, [api, skillId, selectedPath, version.version, version.prompt_fragment, onDirtyChange]);
 
   const isSkillMd = selectedPath === SKILL_MD_PATH;
   const isBinary = loaded !== null && loaded.text === null;
@@ -207,7 +208,7 @@ export function FileEditor({
     setSaveError(null);
     try {
       const utf8 = new TextEncoder().encode(buffer);
-      const newVersion = await putSupportingFile(skillId, version.version, selectedPath, {
+      const newVersion = await api.putSupportingFile(skillId, version.version, selectedPath, {
         content: encodeUtf8Base64(buffer),
         size: utf8.byteLength,
         mime: loaded.body.mime || "text/plain",
@@ -228,6 +229,7 @@ export function FileEditor({
       setSaving(false);
     }
   }, [
+    api,
     buffer,
     loaded,
     message,

@@ -49,14 +49,11 @@ import { useTranslation } from "react-i18next";
 import { ApiError } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
 import {
-  exportSkillVersion,
-  getSkill,
-  listSkillVersions,
-  patchSkillStatus,
   type SkillRecord,
   type SkillStatus,
   type SkillVersion,
 } from "../api/skills";
+import { type SkillApi, tenantSkillApi } from "../api/skillApi";
 import { useAuth } from "../auth/AuthContext";
 import { AddFileModal } from "./skill_detail/AddFileModal";
 import { FileEditor } from "./skill_detail/FileEditor";
@@ -85,7 +82,7 @@ const STATUS_COLOR: Record<SkillStatus, string> = {
  *  backend (per [memory:cross-tenant-admin]). */
 const ADMIN_ROLES = new Set(["admin", "system_admin"]);
 
-export function SkillDetail() {
+export function SkillDetail({ api = tenantSkillApi }: { api?: SkillApi } = {}) {
   const { t } = useTranslation();
   const { message, modal } = App.useApp();
   const { skillId } = useParams<{ skillId: string }>();
@@ -117,8 +114,8 @@ export function SkillDetail() {
     setError(null);
     try {
       const [skillResult, versionsResult] = await Promise.all([
-        getSkill(skillId),
-        listSkillVersions(skillId),
+        api.getSkill(skillId),
+        api.listVersions(skillId),
       ]);
       setSkill(skillResult);
       setVersions(versionsResult.items);
@@ -141,7 +138,7 @@ export function SkillDetail() {
     } finally {
       setLoading(false);
     }
-  }, [skillId]);
+  }, [skillId, api]);
 
   useEffect(() => {
     void refresh();
@@ -164,7 +161,7 @@ export function SkillDetail() {
       if (skill === null) return;
       setStatusSubmitting(true);
       try {
-        const updated = await patchSkillStatus(skill.id, { status: next });
+        const updated = await api.patchStatus(skill.id, { status: next });
         setSkill(updated);
         message.success(t("skills.status_changed", { status: next }));
       } catch (err) {
@@ -179,7 +176,7 @@ export function SkillDetail() {
         setStatusSubmitting(false);
       }
     },
-    [skill, message, t],
+    [skill, message, t, api],
   );
 
   // Sprint #4 (Mini-ADR U-30) — pin / unpin. Same admin gate as
@@ -193,7 +190,7 @@ export function SkillDetail() {
     const next = !skill.pinned;
     setStatusSubmitting(true);
     try {
-      const updated = await patchSkillStatus(skill.id, { pinned: next });
+      const updated = await api.patchStatus(skill.id, { pinned: next });
       setSkill(updated);
       message.success(
         next ? t("skills.pinned_toast") : t("skills.unpinned_toast"),
@@ -209,12 +206,12 @@ export function SkillDetail() {
     } finally {
       setStatusSubmitting(false);
     }
-  }, [skill, message, t]);
+  }, [skill, message, t, api]);
 
   const onExport = useCallback(async () => {
     if (skill === null || selectedVersion === null) return;
     try {
-      const blob = await exportSkillVersion(skill.id, selectedVersion.version);
+      const blob = await api.exportVersion(skill.id, selectedVersion.version);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -227,7 +224,7 @@ export function SkillDetail() {
       const msg = err instanceof Error ? err.message : "export failed";
       message.error(msg);
     }
-  }, [skill, selectedVersion, message]);
+  }, [skill, selectedVersion, message, api]);
 
   const selectFileSafely = useCallback(
     (path: string) => {
@@ -516,6 +513,7 @@ export function SkillDetail() {
           </Card>
 
           <FileEditor
+            api={api}
             skillId={skill.id}
             version={selectedVersion}
             selectedPath={selectedPath}
@@ -530,6 +528,7 @@ export function SkillDetail() {
       {selectedVersion !== null && (
         <>
           <AddFileModal
+            api={api}
             open={addOpen}
             skillId={skill.id}
             versionNumber={selectedVersion.version}
@@ -538,6 +537,7 @@ export function SkillDetail() {
           />
           {renamePath !== null && (
             <RenameModal
+              api={api}
               open
               skillId={skill.id}
               versionNumber={selectedVersion.version}
@@ -548,6 +548,7 @@ export function SkillDetail() {
           )}
           {deletePath !== null && (
             <DeleteConfirmModal
+              api={api}
               open
               skillId={skill.id}
               versionNumber={selectedVersion.version}

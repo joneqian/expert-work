@@ -29,15 +29,13 @@ import { Upload as UploadIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
-import {
-  encodeUtf8Base64,
-  putSupportingFile,
-  type SkillVersion,
-} from "../../api/skills";
+import { encodeUtf8Base64, type SkillVersion } from "../../api/skills";
+import { type SkillApi } from "../../api/skillApi";
 
 const { Text } = Typography;
 
 interface AddFileModalProps {
+  api: SkillApi;
   open: boolean;
   skillId: string;
   versionNumber: number;
@@ -76,6 +74,7 @@ async function fileToBase64(file: RcFile): Promise<{
 }
 
 export function AddFileModal({
+  api,
   open,
   skillId,
   versionNumber,
@@ -125,7 +124,7 @@ export function AddFileModal({
           mime: path.endsWith(".md") ? "text/markdown" : "text/plain",
         };
       }
-      const newVersion = await putSupportingFile(skillId, versionNumber, path, body);
+      const newVersion = await api.putSupportingFile(skillId, versionNumber, path, body);
       message.success(t("skills.file_saved", { version: newVersion.version }));
       onAdded(newVersion, path);
       handleClose();
@@ -140,7 +139,7 @@ export function AddFileModal({
     } finally {
       setSubmitting(false);
     }
-  }, [form, handleClose, message, onAdded, skillId, t, uploaded, versionNumber]);
+  }, [api, form, handleClose, message, onAdded, skillId, t, uploaded, versionNumber]);
 
   return (
     <Modal
