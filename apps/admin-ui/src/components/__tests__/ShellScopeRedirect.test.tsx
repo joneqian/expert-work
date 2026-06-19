@@ -1,14 +1,10 @@
 /**
- * Scope-alignment tests — admin-ui-nav-ia §4 (deep-link friendly).
+ * Scope-alignment tests — admin-ui-nav-ia §4 (minimal, deep-link friendly).
  *
- * The route's group implies an operating level; the Shell *aligns the
- * scope to the page* instead of bouncing the user off a deep link:
- *
- *   - platform route + system_admin not at platform level → setScope("*"),
- *     stay on the page.
- *   - platform route + non-admin → redirect to /agents (no access).
- *   - tenant route while at platform level → setScope("home"), stay.
- *   - already-aligned routes → no scope change, no redirect.
+ * Only one alignment: a system_admin deep-linking a platform page enters
+ * platform scope and stays put. Everything else is left to the pages
+ * (non-admins get the page's own notice; scope-adaptive pages keep their
+ * scope) — no bounce, no tenant-route force-switch.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
@@ -62,28 +58,21 @@ describe("Shell — scope alignment", () => {
     expect(screen.getByTestId("pathname").textContent).toBe("/settings/tenants");
   });
 
-  it("non-admin on a platform route is redirected to /agents", () => {
+  it("non-admin on a platform route is NOT bounced (page shows its own notice)", () => {
     mockScope = "home";
     mockIsSystemAdmin = false;
     renderAt("/settings/tenants");
     expect(setScope).not.toHaveBeenCalled();
-    expect(screen.getByTestId("pathname").textContent).toBe("/agents");
+    expect(screen.getByTestId("pathname").textContent).toBe("/settings/tenants");
   });
 
-  it("a tenant route while at platform level drops back to the home tenant, stays put", () => {
+  it("does not force-switch on a tenant route (scope-adaptive pages keep scope)", () => {
+    // e.g. cross-tenant Members at "*" stays "*"; /settings/members is a tenant route.
     mockScope = "*";
     mockIsSystemAdmin = true;
-    renderAt("/runs");
-    expect(setScope).toHaveBeenCalledWith("home");
-    expect(screen.getByTestId("pathname").textContent).toBe("/runs");
-  });
-
-  it("leaves an already-aligned tenant route untouched", () => {
-    mockScope = "home";
-    mockIsSystemAdmin = true;
-    renderAt("/runs");
+    renderAt("/settings/members");
     expect(setScope).not.toHaveBeenCalled();
-    expect(screen.getByTestId("pathname").textContent).toBe("/runs");
+    expect(screen.getByTestId("pathname").textContent).toBe("/settings/members");
   });
 
   it("leaves an already-aligned platform route untouched", () => {

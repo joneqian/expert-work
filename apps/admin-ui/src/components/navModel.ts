@@ -79,9 +79,6 @@ export const ALL_NAV_ENTRIES: readonly NavEntry[] = [
   ...PLATFORM_ITEMS,
 ];
 
-/** Workspace landing page for a non-admin redirected off a platform route. */
-export const TENANT_LANDING = "/agents";
-
 /** ``true`` when the caller is operating at the platform level. */
 export function isPlatformScope(scope: TenantScopeValue): boolean {
   return scope === SCOPE_ALL;

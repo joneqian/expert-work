@@ -1,50 +1,41 @@
 import { useEffect, type ReactNode } from "react";
 import { Layout } from "antd";
-import { useLocation, useNavigate } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { SCOPE_ALL, SCOPE_HOME, useTenantScope } from "../tenant/TenantScopeContext";
-import { TENANT_LANDING, groupForPath, isPlatformScope } from "./navModel";
+import { SCOPE_ALL, useTenantScope } from "../tenant/TenantScopeContext";
+import { groupForPath, isPlatformScope } from "./navModel";
 
 const { Sider, Header, Content } = Layout;
 
 /**
- * Keep scope and route aligned, deep-link friendly (§4).
- *
- * The route's group implies an operating level; rather than bouncing the
- * user off a deep-linked page, we *align the scope* to the page:
+ * Enter the platform level when a system_admin deep-links a platform page
+ * (§4, deep-link friendly). Minimal on purpose:
  *
  *   - platform route + system_admin not yet at platform level → switch up
- *     to ``"*"`` and stay on the page (so a bookmark / direct link to a
- *     platform page just works).
- *   - platform route + non-admin → redirect to the workspace landing (no
- *     access; the page also gates server-side).
- *   - tenant route while at platform level → drop back to the home tenant
- *     and stay on the page.
+ *     to ``"*"`` and stay on the page (bookmark / direct link just works,
+ *     and the sidebar swaps to the platform group).
  *
- * Routes whose scope already matches are left alone (no churn / no loop:
- * each branch makes the next render a no-op).
+ * Everything else is left to the pages themselves: non-admins on a platform
+ * route get the page's own system-admin-only notice (no bounce); pages that
+ * adapt to scope (e.g. cross-tenant Members at ``"*"``) keep whatever scope
+ * the switcher set. No tenant-route force-switch — it would clobber those.
  */
 function useScopeRedirect(): void {
   const { scope, setScope } = useTenantScope();
   const isSystemAdmin = useAuth().identity?.isSystemAdmin ?? false;
   const location = useLocation();
-  const navigate = useNavigate();
 
   useEffect(() => {
-    const group = groupForPath(location.pathname);
-    if (group === null) return; // not a grouped nav route — leave it be.
-    if (group === "platform") {
-      if (!isSystemAdmin) {
-        navigate(TENANT_LANDING, { replace: true });
-      } else if (!isPlatformScope(scope)) {
-        setScope(SCOPE_ALL); // deep-link into a platform page → enter platform level
-      }
-    } else if (isPlatformScope(scope)) {
-      setScope(SCOPE_HOME); // tenant page while at platform level → enter a tenant
+    if (
+      groupForPath(location.pathname) === "platform" &&
+      isSystemAdmin &&
+      !isPlatformScope(scope)
+    ) {
+      setScope(SCOPE_ALL);
     }
-  }, [scope, isSystemAdmin, location.pathname, navigate, setScope]);
+  }, [scope, isSystemAdmin, location.pathname, setScope]);
 }
 
 export function Shell({ children }: { children: ReactNode }) {
