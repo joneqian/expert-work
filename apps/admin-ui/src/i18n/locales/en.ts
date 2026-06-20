@@ -1167,6 +1167,16 @@ export interface TranslationKeys {
     subtitle: string;
     add: string;
     import_zip: string;
+    import_github: string;
+    github_modal_title: string;
+    github_hint: string;
+    github_source_label: string;
+    github_source_ph: string;
+    github_skill_label: string;
+    github_skill_ph: string;
+    github_ref_label: string;
+    github_ref_ph: string;
+    github_submit: string;
     imported: string;
     import_noop: string;
     manage: string;
@@ -2830,6 +2840,17 @@ const en: TranslationKeys = {
       "Curate reusable skills tenants can bind to their agents. Platform-level, system admins only.",
     add: "New skill",
     import_zip: "Import .skill",
+    import_github: "Import from GitHub",
+    github_modal_title: "Import skill from GitHub",
+    github_hint:
+      "Pull a skill from a public GitHub repo. Accepts owner/repo, a github.com URL, or a skills.sh URL. For a repo with many skills, name which one.",
+    github_source_label: "Source",
+    github_source_ph: "vercel-labs/skills  ·  github.com/…  ·  skills.sh/…",
+    github_skill_label: "Skill",
+    github_skill_ph: "find-skills (optional — required if the repo has many)",
+    github_ref_label: "Ref",
+    github_ref_ph: "branch / tag / SHA (optional, default branch)",
+    github_submit: "Import",
     imported: 'Imported "{{name}}" v{{version}}.',
     import_noop: 'No change to "{{name}}" — already the latest version.',
     manage: "Manage",

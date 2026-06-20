@@ -15,15 +15,27 @@
  * + antd Table + ``ApiError`` → ``${code}: ${message}`` toasts).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Space, Table, Tag, Tooltip, Typography } from "antd";
+import {
+  Alert,
+  App,
+  Button,
+  Input,
+  Modal,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+} from "antd";
 import type { TableColumnsType } from "antd";
-import { Pin, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { GitBranch, Pin, RefreshCw, Sparkles, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { PageHeader } from "../components/PageHeader";
 import {
   importPlatformSkill,
+  importPlatformSkillFromGithub,
   listPlatformSkills,
   patchPlatformSkill,
   type PlatformSkill,
@@ -58,6 +70,13 @@ export function SettingsPlatformSkills() {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // GitHub import modal (方案 A).
+  const [ghOpen, setGhOpen] = useState(false);
+  const [ghSource, setGhSource] = useState("");
+  const [ghSkill, setGhSkill] = useState("");
+  const [ghRef, setGhRef] = useState("");
+  const [ghBusy, setGhBusy] = useState(false);
 
   const errText = useCallback(
     (err: unknown): string =>
@@ -113,6 +132,38 @@ export function SettingsPlatformSkills() {
     },
     [errText, message, refresh, t],
   );
+
+  const onGithubImport = useCallback(async () => {
+    const source = ghSource.trim();
+    if (!source) return;
+    setGhBusy(true);
+    try {
+      const result = await importPlatformSkillFromGithub({
+        source,
+        skill: ghSkill.trim() || undefined,
+        ref: ghRef.trim() || undefined,
+      });
+      message.success(
+        result.created
+          ? t("platform_skills.imported", {
+              name: result.skill.name,
+              version: result.version.version,
+            })
+          : t("platform_skills.import_noop", { name: result.skill.name }),
+      );
+      setGhOpen(false);
+      setGhSource("");
+      setGhSkill("");
+      setGhRef("");
+      void refresh();
+    } catch (err) {
+      // The backend's 400 for a multi-skill repo lists candidate names in the
+      // message — surface it verbatim so the operator can fill in "skill".
+      message.error(errText(err));
+    } finally {
+      setGhBusy(false);
+    }
+  }, [errText, ghRef, ghSkill, ghSource, message, refresh, t]);
 
   // Phase C: "Manage" opens the full detail page (version editor + lifecycle
   // + supporting files), replacing the old in-place drawer.
@@ -264,6 +315,13 @@ export function SettingsPlatformSkills() {
                 {t("common.refresh")}
               </Button>
               <Button
+                onClick={() => setGhOpen(true)}
+                icon={<GitBranch size={14} strokeWidth={1.5} />}
+                data-testid="ps-import-github-btn"
+              >
+                {t("platform_skills.import_github")}
+              </Button>
+              <Button
                 type="primary"
                 onClick={onImportClick}
                 icon={<Upload size={14} strokeWidth={1.75} />}
@@ -275,6 +333,60 @@ export function SettingsPlatformSkills() {
           )
         }
       />
+
+      <Modal
+        open={ghOpen}
+        title={t("platform_skills.github_modal_title")}
+        okText={t("platform_skills.github_submit")}
+        onOk={() => void onGithubImport()}
+        confirmLoading={ghBusy}
+        okButtonProps={{
+          disabled: ghSource.trim().length === 0,
+          "data-testid": "ps-github-submit",
+        }}
+        onCancel={() => setGhOpen(false)}
+        destroyOnHidden
+        data-testid="ps-github-modal"
+      >
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {t("platform_skills.github_hint")}
+        </Text>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>
+              {t("platform_skills.github_source_label")}
+            </Text>
+            <Input
+              value={ghSource}
+              onChange={(e) => setGhSource(e.target.value)}
+              placeholder={t("platform_skills.github_source_ph")}
+              data-testid="ps-github-source"
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>
+              {t("platform_skills.github_skill_label")}
+            </Text>
+            <Input
+              value={ghSkill}
+              onChange={(e) => setGhSkill(e.target.value)}
+              placeholder={t("platform_skills.github_skill_ph")}
+              data-testid="ps-github-skill"
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>
+              {t("platform_skills.github_ref_label")}
+            </Text>
+            <Input
+              value={ghRef}
+              onChange={(e) => setGhRef(e.target.value)}
+              placeholder={t("platform_skills.github_ref_ph")}
+              data-testid="ps-github-ref"
+            />
+          </label>
+        </div>
+      </Modal>
 
       {!isSystemAdmin ? (
         <Alert
