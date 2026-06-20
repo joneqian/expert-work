@@ -17,7 +17,7 @@ Standard frontmatter (other Claude clients only read these):
 
 helix-specific extensions live under the ``helix:`` namespace key so
 non-helix clients silently ignore them (Mini-ADR U-14):
-- ``version`` (required for helix, int ≥ 1)
+- ``version`` (optional, int ≥ 1, default 1 — DB owns version numbering)
 - ``category`` (optional, str)
 - ``required_models`` (optional, list[str])
 - ``tool_names`` (optional, list[str])
