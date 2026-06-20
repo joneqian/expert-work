@@ -226,6 +226,18 @@ from helix_agent.persistence.tenant_member import (
 from helix_agent.persistence.tenant_member import (
     TenantMemberStore as TenantMemberStore,
 )
+from helix_agent.persistence.tenant_skill_subscription import (
+    InMemoryTenantSkillSubscriptionStore as InMemoryTenantSkillSubscriptionStore,
+)
+from helix_agent.persistence.tenant_skill_subscription import (
+    SqlTenantSkillSubscriptionStore as SqlTenantSkillSubscriptionStore,
+)
+from helix_agent.persistence.tenant_skill_subscription import (
+    TenantSkillSubscriptionNotFoundError as TenantSkillSubscriptionNotFoundError,
+)
+from helix_agent.persistence.tenant_skill_subscription import (
+    TenantSkillSubscriptionStore as TenantSkillSubscriptionStore,
+)
 from helix_agent.persistence.tenant_user import (
     InMemoryTenantUserStore as InMemoryTenantUserStore,
 )
@@ -326,6 +338,7 @@ __all__ = [
     "InMemoryTenantMcpServerStore",
     "InMemoryTenantMemberStore",
     "InMemoryTenantQuotaStore",
+    "InMemoryTenantSkillSubscriptionStore",
     "InMemoryTenantUserStore",
     "InMemoryThreadMetaStore",
     "InMemoryTokenReservationStore",
@@ -370,6 +383,7 @@ __all__ = [
     "SqlTenantMcpServerStore",
     "SqlTenantMemberStore",
     "SqlTenantQuotaStore",
+    "SqlTenantSkillSubscriptionStore",
     "SqlTenantUserStore",
     "SqlThreadMetaStore",
     "SqlTokenReservationStore",
@@ -388,6 +402,8 @@ __all__ = [
     "TenantMemberRow",
     "TenantMemberStore",
     "TenantQuotaStore",
+    "TenantSkillSubscriptionNotFoundError",
+    "TenantSkillSubscriptionStore",
     "TenantUserRow",
     "TenantUserStore",
     "ThreadMetaRow",

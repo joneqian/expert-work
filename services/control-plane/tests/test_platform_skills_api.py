@@ -752,3 +752,72 @@ async def test_platform_put_prompt_threat_404_and_forbidden(ctx: _Ctx) -> None:
         headers=ctx.tenant_headers,
     )
     assert forbidden.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Skill Marketplace Phase 1 — subscribe / unsubscribe
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_subscribe_then_unsubscribe_round_trip_and_audit(ctx: _Ctx) -> None:
+    sid = await _seed_platform_skill(ctx.skill_store, name="plat", required_tier=TenantPlan.FREE)
+
+    sub = await ctx.client.post(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+    assert sub.status_code == 200, sub.text
+    body = sub.json()
+    assert body["platform_skill_id"] == str(sid)
+    assert body["enabled"] is True
+
+    # Cancel = soft-stop (enabled=false), row preserved.
+    cancel = await ctx.client.delete(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+    assert cancel.status_code == 200, cancel.text
+    assert cancel.json()["enabled"] is False
+
+    page = await ctx.audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
+    actions = {r.action for r in page.entries}
+    assert AuditAction.SKILL_SUBSCRIBED in actions
+    assert AuditAction.SKILL_UNSUBSCRIBED in actions
+
+
+@pytest.mark.asyncio
+async def test_subscribe_is_idempotent_reenable(ctx: _Ctx) -> None:
+    sid = await _seed_platform_skill(ctx.skill_store, name="plat", required_tier=TenantPlan.FREE)
+    first = await ctx.client.post(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+    assert first.status_code == 200
+    await ctx.client.delete(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+    again = await ctx.client.post(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+    assert again.status_code == 200
+    assert again.json()["enabled"] is True
+    assert again.json()["id"] == first.json()["id"]  # same row re-enabled
+
+
+@pytest.mark.asyncio
+async def test_subscribe_unknown_or_inactive_skill_404(ctx: _Ctx) -> None:
+    # Unknown platform skill id.
+    unknown = await ctx.client.post(f"/v1/skills/{uuid4()}/subscribe", headers=ctx.tenant_headers)
+    assert unknown.status_code == 404
+
+    # DRAFT (not yet activated) platform skill is not bindable → 404.
+    async with bypass_rls_session():
+        draft = await ctx.skill_store.create_platform_skill(
+            skill_id=uuid4(), name="draft", required_tier=TenantPlan.FREE
+        )
+    inactive = await ctx.client.post(f"/v1/skills/{draft.id}/subscribe", headers=ctx.tenant_headers)
+    assert inactive.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_unsubscribe_absent_subscription_404(ctx: _Ctx) -> None:
+    sid = await _seed_platform_skill(ctx.skill_store, name="plat", required_tier=TenantPlan.FREE)
+    resp = await ctx.client.delete(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_subscribe_viewer_role_forbidden(ctx: _Ctx) -> None:
+    sid = await _seed_platform_skill(ctx.skill_store, name="plat", required_tier=TenantPlan.FREE)
+    viewer_jwt = make_test_jwt(tenant_id=_TENANT, subject="viewer-a", roles=("viewer",))
+    viewer_headers = {"Authorization": f"Bearer {viewer_jwt}"}
+    resp = await ctx.client.post(f"/v1/skills/{sid}/subscribe", headers=viewer_headers)
+    assert resp.status_code == 403

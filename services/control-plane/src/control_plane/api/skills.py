@@ -64,6 +64,8 @@ from helix_agent.persistence import (
     DuplicateSkillError,
     SkillNotFoundError,
     SkillStore,
+    TenantSkillSubscriptionNotFoundError,
+    TenantSkillSubscriptionStore,
 )
 from helix_agent.protocol import (
     SKILL_REF_PATTERN,
@@ -75,6 +77,7 @@ from helix_agent.protocol import (
     SkillVersion,
     SkillVisibility,
     TenantPlan,
+    TenantSkillSubscriptionRecord,
     tier_satisfies,
 )
 from helix_agent.protocol.skill import (
@@ -222,6 +225,11 @@ def _get_skill_store(request: Request) -> SkillStore:
     return request.app.state.skill_store  # type: ignore[no-any-return]
 
 
+def _get_skill_subscription_store(request: Request) -> TenantSkillSubscriptionStore:
+    # Skill Marketplace Phase 1 — subscribe/unsubscribe markers (semantic A).
+    return request.app.state.skill_subscription_store  # type: ignore[no-any-return]
+
+
 def _get_audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
 
@@ -259,6 +267,18 @@ def _skill_dict(skill: Skill) -> dict[str, Any]:
         "forked_from": str(skill.forked_from) if skill.forked_from is not None else None,
         "created_at": skill.created_at.isoformat(),
         "updated_at": skill.updated_at.isoformat(),
+    }
+
+
+def _subscription_dict(record: TenantSkillSubscriptionRecord) -> dict[str, Any]:
+    # Skill Marketplace Phase 1 — raw response (skills router is all-raw, no
+    # success/data envelope).
+    return {
+        "id": str(record.id),
+        "platform_skill_id": str(record.platform_skill_id),
+        "enabled": record.enabled,
+        "created_at": record.created_at.isoformat(),
+        "created_by": record.created_by,
     }
 
 
@@ -1036,6 +1056,91 @@ def build_skills_router() -> APIRouter:
                 "cross_tenant": isinstance(scope, CrossTenant),
             },
         )
+
+    def _require_subscribe_role(request: Request) -> None:
+        # Skill Marketplace Phase 1 — selecting a platform skill is a tenant
+        # configuration action (admin / operator / system_admin). Inline role
+        # gate follows the skills.py convention (no require() / rbac.py matrix).
+        principal = getattr(request.state, "principal", None)
+        roles = _collect_roles(principal) if principal is not None else set()
+        if not ({Role.ADMIN, Role.OPERATOR, Role.SYSTEM_ADMIN} & roles):
+            raise HTTPException(
+                status_code=403,
+                detail="subscribing to a platform skill requires admin or operator role",
+            )
+
+    @router.post("/{platform_skill_id}/subscribe", response_model=None)
+    async def subscribe_skill(
+        platform_skill_id: UUID,
+        request: Request,
+        store: Annotated[SkillStore, Depends(_get_skill_store)],
+        sub_store: Annotated[TenantSkillSubscriptionStore, Depends(_get_skill_subscription_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Subscribe the tenant to a platform skill (semantic A: accounting/UX
+        marker, does NOT gate the runtime resolver). Idempotent — re-subscribing
+        a soft-cancelled row re-enables it."""
+        tenant_id: UUID = request.state.tenant_id
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+        _require_subscribe_role(request)
+
+        # Target must be an ACTIVE platform (NULL-tenant) skill. Platform rows
+        # are invisible under tenant RLS, so read inside a bypass session.
+        async with bypass_rls_session():
+            target = await store.get_platform_skill(skill_id=platform_skill_id)
+        if target is None or target.status != SkillStatus.ACTIVE:
+            raise HTTPException(status_code=404, detail="platform skill not found or not active")
+
+        record = await sub_store.subscribe(
+            tenant_id=tenant_id,
+            platform_skill_id=platform_skill_id,
+            created_by=actor_id,
+        )
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.SKILL_SUBSCRIBED,
+            resource_type="skill",
+            resource_id=str(platform_skill_id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={"name": target.name},
+        )
+        return JSONResponse(status_code=200, content=_subscription_dict(record))
+
+    @router.delete("/{platform_skill_id}/subscribe", response_model=None)
+    async def unsubscribe_skill(
+        platform_skill_id: UUID,
+        request: Request,
+        sub_store: Annotated[TenantSkillSubscriptionStore, Depends(_get_skill_subscription_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Cancel a subscription via soft-stop (``enabled=false``) — the row is
+        kept for the audit trail; re-subscribing flips it back on."""
+        tenant_id: UUID = request.state.tenant_id
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+        _require_subscribe_role(request)
+
+        try:
+            record = await sub_store.set_enabled(
+                tenant_id=tenant_id,
+                platform_skill_id=platform_skill_id,
+                enabled=False,
+            )
+        except TenantSkillSubscriptionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="subscription not found") from exc
+        await audit_emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.SKILL_UNSUBSCRIBED,
+            resource_type="skill",
+            resource_id=str(platform_skill_id),
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+        )
+        return JSONResponse(status_code=200, content=_subscription_dict(record))
 
     @router.get("/{skill_id}", response_model=None)
     async def get_skill(

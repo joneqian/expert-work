@@ -333,6 +333,11 @@ from helix_agent.persistence.tenant_member import (
     SqlTenantMemberStore,
     TenantMemberStore,
 )
+from helix_agent.persistence.tenant_skill_subscription import (
+    InMemoryTenantSkillSubscriptionStore,
+    SqlTenantSkillSubscriptionStore,
+    TenantSkillSubscriptionStore,
+)
 from helix_agent.persistence.tenant_user import (
     InMemoryTenantUserStore,
     SqlTenantUserStore,
@@ -643,6 +648,13 @@ def create_app(
     # Stream MCP-OAUTH — per-user OAuth connections to hosted MCP connectors.
     resolved_mcp_oauth_connection_store = (
         sql_stores.mcp_oauth_connection if sql_stores else InMemoryMcpOAuthConnectionStore()
+    )
+    # Skill Marketplace Phase 1 — tenant→platform-skill subscription markers
+    # (semantic A: accounting/UX only, never gates the runtime resolver).
+    resolved_tenant_skill_subscription_store = (
+        sql_stores.tenant_skill_subscription
+        if sql_stores
+        else InMemoryTenantSkillSubscriptionStore()
     )
     # Stream Y (Y-3) — platform-curated model rate card (NULL-tenant rows).
     resolved_model_rate_card_store = (
@@ -1486,6 +1498,9 @@ def create_app(
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
     app.state.skill_store = resolved_skill_store
+    # Skill Marketplace Phase 1 — subscribe/unsubscribe endpoints in the skills
+    # router resolve this off app.state (semantic A; runtime path untouched).
+    app.state.skill_subscription_store = resolved_tenant_skill_subscription_store
     # Stream T (PR B) — PR C's write endpoint resolves the config service off
     # app.state to upsert the row + invalidate the cache for immediate effect.
     app.state.platform_embedding_config_service = resolved_platform_embedding_config_service
@@ -1715,6 +1730,7 @@ class _SqlStores:
     tenant_config: TenantConfigStore
     tenant_member: TenantMemberStore  # Stream R
     tenant_mcp_server: TenantMcpServerStore  # Stream V
+    tenant_skill_subscription: TenantSkillSubscriptionStore  # Skill Marketplace
     mcp_connector_catalog: McpConnectorCatalogStore  # Stream W
     mcp_oauth_connection: McpOAuthConnectionStore  # Stream MCP-OAUTH
     model_rate_card: ModelRateCardStore  # Stream Y (Y-3)
@@ -1931,6 +1947,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         tenant_config=SqlTenantConfigStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
+        tenant_skill_subscription=SqlTenantSkillSubscriptionStore(session_factory),
         mcp_connector_catalog=SqlMcpConnectorCatalogStore(session_factory),
         mcp_oauth_connection=SqlMcpOAuthConnectionStore(session_factory),
         model_rate_card=DbModelRateCardStore(session_factory),

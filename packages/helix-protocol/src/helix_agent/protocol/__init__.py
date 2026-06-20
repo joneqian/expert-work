@@ -213,6 +213,9 @@ from helix_agent.protocol.tenant_member import (
     MemberStatus,
     TenantMember,
 )
+from helix_agent.protocol.tenant_skill_subscription import (
+    TenantSkillSubscriptionRecord,
+)
 from helix_agent.protocol.tenant_user import TenantUser
 from helix_agent.protocol.thread_meta import ThreadMeta, ThreadStatus
 from helix_agent.protocol.trigger import (
@@ -391,6 +394,7 @@ __all__ = [
     "TenantProviderSecretRecord",
     "TenantQuotaPatch",
     "TenantQuotaRecord",
+    "TenantSkillSubscriptionRecord",
     "TenantStatus",
     "TenantToolSecretRecord",
     "TenantUser",

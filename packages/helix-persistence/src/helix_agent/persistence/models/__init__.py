@@ -62,6 +62,9 @@ from helix_agent.persistence.models.tenant_config import TenantConfigRow
 from helix_agent.persistence.models.tenant_mcp_server import TenantMcpServerRow
 from helix_agent.persistence.models.tenant_member import TenantMemberRow
 from helix_agent.persistence.models.tenant_quota import TenantQuotaRow
+from helix_agent.persistence.models.tenant_skill_subscription import (
+    TenantSkillSubscriptionRow,
+)
 from helix_agent.persistence.models.tenant_user import TenantUserRow
 from helix_agent.persistence.models.thread_meta import ThreadMetaRow
 from helix_agent.persistence.models.token_budget_ledger import TokenBudgetLedgerRow
@@ -122,6 +125,7 @@ __all__ = [
     "TenantMemberRow",
     "TenantProviderSecretRow",
     "TenantQuotaRow",
+    "TenantSkillSubscriptionRow",
     "TenantToolSecretRow",
     "TenantUserRow",
     "ThreadMetaRow",

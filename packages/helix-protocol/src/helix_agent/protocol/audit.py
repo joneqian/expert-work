@@ -181,6 +181,11 @@ class AuditAction(StrEnum):
     # the in-process SE-7b CircuitBreaker (automatic) with a durable manual override.
     SKILL_EVOLUTION_KILL_SWITCH_ENGAGED = "skill:evolution_kill_switch_engaged"
     SKILL_EVOLUTION_KILL_SWITCH_RELEASED = "skill:evolution_kill_switch_released"
+    # skill — Skill Marketplace Phase 1. A tenant subscribes to / cancels a
+    # platform skill (semantic A: accounting/UX marker, never gates the runtime
+    # resolver). Cancel is a soft-stop (enabled=false), so it's still an action.
+    SKILL_SUBSCRIBED = "skill:subscribed"
+    SKILL_UNSUBSCRIBED = "skill:unsubscribed"
     # artifact (Stream J.9-step3 — Mini-ADR J-25). ``ARTIFACT_SAVE`` is
     # reserved for the orchestrator-side save-artifact tool emit; that
     # wiring lands when ToolEnv gains an :class:`AuditLogger` handle.
