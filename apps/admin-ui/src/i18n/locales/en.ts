@@ -1128,7 +1128,6 @@ export interface TranslationKeys {
     file_size_label: string;
     file_mime_label: string;
     file_load_failed: string;
-    detail_skill_md_readonly_hint: string;
     detail_skill_md_edit_hint: string;
     // Sprint #4 — Curator pin + ETA hint.
     pin: string;
@@ -2770,8 +2769,6 @@ const en: TranslationKeys = {
     file_size_label: "Size",
     file_mime_label: "MIME",
     file_load_failed: "Failed to load file",
-    detail_skill_md_readonly_hint:
-      "SKILL.md represents the version's prompt fragment + frontmatter. Edit through ZIP import or the JSON-API to create a new version.",
     detail_skill_md_edit_hint:
       "SKILL.md is the skill's core prompt. Saving an edit creates a new version and keeps all supporting files.",
     pin: "Pin",

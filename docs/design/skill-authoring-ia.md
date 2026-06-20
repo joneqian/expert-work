@@ -99,14 +99,16 @@ interface SkillApi {
 - 平台:`PlatformSkillCreateDrawer` + `PlatformSkillManageDrawer` 的 add-version 表单(lifecycle/pin 迁详情页);相关 SDK `createPlatformSkill`/`addPlatformSkillVersion(表单用法)` 视情清理。
 - i18n:清理 `*.create_*` / add-version 表单相关死键(en+zh 同步,避免类型漂移)。
 
-## 6. 分期
+## 6. 分期(已全部交付,2026-06-20)
 
-1. **Phase 0 — 本 ADR 评审 + #709 合入**(envelope 修复 + 平台导入按钮,已开 PR;导入按钮届时提为 primary)。
-2. **Phase A — 后端**:平台 4 端点 + SDK(`platformSkillApi` 补齐)。单测可验。
-3. **Phase B — 前端解耦**:抽 `SkillApi`,`SkillDetail`/子组件改注入式;租户回归不变。
-4. **Phase C — 平台详情页 + 接线**:平台详情路由,退场 Manage 抽屉,lifecycle/pin/tier 迁入详情。
-5. **Phase D — D3 SKILL.md 可编** + **D1/D2 删手建 + 导入提 primary + 空态改写**(两页)。
-6. **Phase E — i18n 清理 + 文档同步 + e2e**。
+1. ✅ **Phase 0 — ADR 评审 + #709**(envelope-vs-raw 修复 + 平台导入按钮)。#710/#711 ADR 合入。
+2. ✅ **Phase A — 后端**(#712):平台 4 端点(supporting-file GET/PUT/DELETE + export)+ SDK。
+3. ✅ **Phase B — 前端解耦**(#713):抽 `SkillApi`(tenant/platform 两实现),`SkillDetail`+子组件改注入式;租户回归不变。
+4. ✅ **Phase C — 平台详情页**(#714):路由 `/settings/platform-skills/:skillId`,退场 Manage 抽屉,`variant=platform` 隐藏飞轮面板/去 stale/显示 tier。
+5. ✅ **Phase D — 删手建 + SKILL.md 可编**:D-1(#715)删两页手建空壳 + 导入提 primary + 空态 CTA;D-2(#717)SKILL.md 可编(后端继承端点 `PUT .../versions/{v}/prompt` 杜绝丢 supporting_files)。
+6. ✅ **Phase E — 收尾**:删 rename 配对孤儿键 `detail_skill_md_readonly_hint`;ADR/分期状态同步;e2e 已随各 Phase 增量落地。**已知 cosmetic 债**:create-flow / 抽屉相关 i18n 键(`skills.create*` / `platform_skills.add*` / `*_required` 等,grep 验证零引用)暂留 —— 与活键交错、短名跨 namespace 共享,逐键删 churn 大且无 i18n-unused 门禁,延后批量清理。
+
+> 旁注:dep-bump #716(langsmith/pydantic-settings/vcrpy 解 3 CVE)在 Phase D 期间解 pip-audit backlog 阻塞。
 
 ## 7. 风险
 

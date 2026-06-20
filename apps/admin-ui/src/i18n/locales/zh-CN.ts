@@ -1189,8 +1189,6 @@ const zhCN: TranslationKeys = {
     file_size_label: "大小",
     file_mime_label: "MIME",
     file_load_failed: "文件加载失败",
-    detail_skill_md_readonly_hint:
-      "SKILL.md 表示版本的提示词片段 + frontmatter。通过 ZIP 导入或 JSON-API 创建新版本来编辑。",
     detail_skill_md_edit_hint:
       "SKILL.md 是技能的核心提示词。编辑保存会生成新版本,并保留所有附属文件。",
     pin: "固定",
