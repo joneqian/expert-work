@@ -166,6 +166,29 @@ export async function importPlatformSkill(
   return response.data;
 }
 
+/** ``POST /v1/platform/skills/import-from-github`` request body. ``source`` =
+ *  ``owner/repo`` / a ``github.com`` URL / a ``skills.sh`` URL (the latter also
+ *  supplies ``skill``). ``skill`` picks one skill in a multi-skill repo;
+ *  ``ref`` = branch/tag/SHA (default: the repo's default branch). */
+export interface ImportFromGithubBody {
+  source: string;
+  skill?: string;
+  ref?: string;
+}
+
+/** ``POST /v1/platform/skills/import-from-github`` — fetch a skill from a public
+ *  GitHub repo → platform library, reusing the ZIP import pipeline. Same
+ *  response shape + content-hash idempotency as :func:`importPlatformSkill`. */
+export async function importPlatformSkillFromGithub(
+  body: ImportFromGithubBody,
+): Promise<ImportPlatformSkillResponse> {
+  const response = await apiClient.post<ImportPlatformSkillResponse>(
+    "/v1/platform/skills/import-from-github",
+    body,
+  );
+  return response.data;
+}
+
 /** ``PATCH /v1/platform/skills/{id}`` — set status and/or pinned. */
 export async function patchPlatformSkill(
   id: string,
