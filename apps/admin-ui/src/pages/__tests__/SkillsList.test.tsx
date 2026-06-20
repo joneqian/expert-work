@@ -278,7 +278,9 @@ describe("SkillsList", () => {
     expect(screen.queryByTestId("skill-locked-pk1")).not.toBeInTheDocument();
   });
 
-  it("opens the Create drawer + validates required fields", async () => {
+  it("creation is import-only — no hand-build drawer; empty state offers Import", async () => {
+    // Phase D: the empty-shell "New skill" drawer is removed (it was a dead
+    // end). Import .skill is the primary + empty-state CTA.
     installAdapter([
       {
         match: (u) => u === "/v1/me",
@@ -289,13 +291,13 @@ describe("SkillsList", () => {
         respond: () => ({ items: [], next_cursor: null, cross_tenant: false }),
       },
     ]);
-    const user = userEvent.setup();
     renderSkillsRouter();
-    await waitFor(() => expect(screen.getByTestId("skills-create-btn")).toBeInTheDocument());
-    await user.click(screen.getByTestId("skills-create-btn"));
-    await waitFor(() => expect(screen.getByTestId("skills-name-input")).toBeInTheDocument());
-    expect(screen.getByTestId("skills-category-input")).toBeInTheDocument();
-    expect(screen.getByTestId("skills-description-input")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("skills-import-btn")).toBeInTheDocument());
+    // No hand-build create entry points remain.
+    expect(screen.queryByTestId("skills-create-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("skills-create-drawer")).not.toBeInTheDocument();
+    // Empty-state surfaces an Import CTA.
+    expect(screen.getByTestId("skills-empty-import")).toBeInTheDocument();
   });
 });
 

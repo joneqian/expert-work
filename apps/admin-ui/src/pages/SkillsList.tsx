@@ -1,9 +1,12 @@
 /**
- * Skills list page — Stream H.4 PR 5.
+ * Skills list page — Stream H.4 PR 5 + skill-authoring-ia Phase D.
  *
- * Cursor-paginated skill library + Import ZIP + Create drawer (Monaco
- * YAML stub — the prompt fragment / tool names / required models live
- * in version rows, so Create here just makes an empty draft skill).
+ * Cursor-paginated skill library. **Creation is import-only** (a skill is a
+ * folder package — ``SKILL.md`` + scripts/references/assets — so a ``.skill``
+ * ZIP is its natural authoring unit). The old "New skill" empty-shell drawer
+ * was a dead end (no version → editor wouldn't render) and is removed; the
+ * primary action is now Import ``.skill``. Iterate an imported skill's files
+ * (and ``SKILL.md``) on its detail page.
  *
  * Cross-tenant scope inherits from ``TenantScopeContext`` (system_admin
  * can ``tenant_id=*``).
@@ -13,9 +16,7 @@ import {
   Alert,
   App,
   Button,
-  Drawer,
   Empty,
-  Form,
   Input,
   Select,
   Space,
@@ -31,7 +32,6 @@ import {
   Globe2,
   Lock,
   Pin,
-  Plus,
   RefreshCw,
   Upload,
 } from "lucide-react";
@@ -39,7 +39,6 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import {
-  createSkill,
   importSkillZip,
   listSkills,
   type SkillList,
@@ -104,9 +103,6 @@ export function SkillsList() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [createForm] = Form.useForm<{ name: string; description: string; category: string }>();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -157,22 +153,6 @@ export function SkillsList() {
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  const onCreate = useCallback(async () => {
-    const values = await createForm.validateFields();
-    setCreateSubmitting(true);
-    try {
-      const created = await createSkill(values);
-      message.success(t("skills.created"));
-      setCreateOpen(false);
-      createForm.resetFields();
-      navigate(`/skills/${encodeURIComponent(created.id)}`);
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : "failed");
-    } finally {
-      setCreateSubmitting(false);
-    }
-  }, [createForm, message, navigate, t]);
 
   const onImportClick = useCallback(() => fileInputRef.current?.click(), []);
 
@@ -379,11 +359,13 @@ export function SkillsList() {
             <Button onClick={refresh} loading={loading} icon={<RefreshCw size={14} strokeWidth={1.5} />}>
               {t("common.refresh")}
             </Button>
-            <Button onClick={onImportClick} icon={<Upload size={14} strokeWidth={1.75} />} data-testid="skills-import-btn">
+            <Button
+              type="primary"
+              onClick={onImportClick}
+              icon={<Upload size={14} strokeWidth={1.75} />}
+              data-testid="skills-import-btn"
+            >
               {t("skills.import_zip")}
-            </Button>
-            <Button type="primary" icon={<Plus size={14} strokeWidth={1.75} />} onClick={() => setCreateOpen(true)} data-testid="skills-create-btn">
-              {t("skills.create")}
             </Button>
           </>
         }
@@ -421,7 +403,20 @@ export function SkillsList() {
         }
         locale={{
           emptyText: (
-            <Empty description={scope === "*" ? t("skills.empty_cross") : t("skills.empty_home")} />
+            <Empty
+              description={scope === "*" ? t("skills.empty_cross") : t("skills.empty_home")}
+            >
+              {scope !== "*" && (
+                <Button
+                  type="primary"
+                  icon={<Upload size={14} strokeWidth={1.75} />}
+                  onClick={onImportClick}
+                  data-testid="skills-empty-import"
+                >
+                  {t("skills.import_zip")}
+                </Button>
+              )}
+            </Empty>
           ),
         }}
         data-testid="skills-table"
@@ -435,48 +430,6 @@ export function SkillsList() {
         </div>
       )}
 
-      <Drawer
-        title={t("skills.create_modal_title")}
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        width={520}
-        data-testid="skills-create-drawer"
-        extra={
-          <Space>
-            <Button onClick={() => setCreateOpen(false)}>{t("common.cancel")}</Button>
-            <Button type="primary" loading={createSubmitting} onClick={onCreate}>
-              {t("common.save")}
-            </Button>
-          </Space>
-        }
-      >
-        <Form form={createForm} layout="vertical">
-          <Form.Item
-            name="name"
-            label={t("skills.field_name")}
-            rules={[{ required: true, message: t("skills.name_required") }]}
-          >
-            <Input data-testid="skills-name-input" maxLength={64} placeholder="e.g. web_search" />
-          </Form.Item>
-          <Form.Item
-            name="category"
-            label={t("skills.field_category")}
-            rules={[{ required: true, message: t("skills.category_required") }]}
-          >
-            <Input data-testid="skills-category-input" placeholder="web" />
-          </Form.Item>
-          <Form.Item
-            name="description"
-            label={t("skills.field_description")}
-            rules={[{ required: true, message: t("skills.description_required") }]}
-          >
-            <Input.TextArea data-testid="skills-description-input" rows={4} />
-          </Form.Item>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {t("skills.create_hint")}
-          </Text>
-        </Form>
-      </Drawer>
     </div>
   );
 }

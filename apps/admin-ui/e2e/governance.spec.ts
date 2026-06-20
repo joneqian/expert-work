@@ -38,11 +38,12 @@ test("/curation page renders both tabs + passes axe", async ({ page }) => {
   await expectNoA11yViolations(page, "/curation");
 });
 
-test("/skills page renders Import + Create + passes axe", async ({ page }) => {
+test("/skills page renders Import (creation is import-only) + passes axe", async ({ page }) => {
   await login(page);
   await page.goto("/skills");
   await expect(page.getByTestId("skills-import-btn")).toBeVisible();
-  await expect(page.getByTestId("skills-create-btn")).toBeVisible();
+  // Phase D: hand-build create is removed; import is the only creation path.
+  await expect(page.getByTestId("skills-create-btn")).toHaveCount(0);
   await expectNoA11yViolations(page, "/skills");
 });
 

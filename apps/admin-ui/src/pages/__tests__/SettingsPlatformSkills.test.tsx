@@ -157,6 +157,8 @@ describe("SettingsPlatformSkills page", () => {
     ]);
     renderPage(["system_admin"]);
     await waitFor(() => expect(screen.getByTestId("ps-empty")).toBeInTheDocument());
+    // Empty state offers Import (Phase D: creation is import-only).
+    expect(screen.getByTestId("ps-empty-import")).toBeInTheDocument();
   });
 
   it("renders the error Alert when the list fails", async () => {
@@ -171,33 +173,18 @@ describe("SettingsPlatformSkills page", () => {
     await waitFor(() => expect(screen.getByTestId("ps-error")).toBeInTheDocument());
   });
 
-  it("create flow POSTs a new skill", async () => {
-    let postBody: unknown = null;
+  it("creation is import-only — no hand-build entry points (Phase D)", async () => {
     installAdapter([
       {
-        match: (u, m) => u.endsWith("/platform/skills") && m === "post",
-        respond: ({ data }) => {
-          postBody = data;
-          return raw({ ...SKILL, id: "psk-new", name: "translate" });
-        },
-        status: 201,
-      },
-      {
         match: (u, m) => u.endsWith("/platform/skills") && m === "get",
-        respond: () => raw({ items: [], next_cursor: null }),
+        respond: () => raw({ items: [SKILL], next_cursor: null }),
       },
     ]);
-    const user = userEvent.setup();
     renderPage(["system_admin"]);
-    await waitFor(() => expect(screen.getByTestId("ps-add")).toBeInTheDocument());
-    await user.click(screen.getByTestId("ps-add"));
-    await waitFor(() => expect(screen.getByTestId("psc-form")).toBeInTheDocument());
-    await user.type(screen.getByTestId("psc-name"), "translate");
-    await user.click(screen.getByTestId("psc-submit"));
-    await waitFor(() => expect(postBody).not.toBeNull());
-    const parsed = typeof postBody === "string" ? JSON.parse(postBody) : postBody;
-    expect(parsed.name).toBe("translate");
-    expect(parsed.required_tier).toBe("free");
+    await waitFor(() => expect(screen.getByTestId("ps-import-btn")).toBeInTheDocument());
+    // The "New skill" hand-build drawer is removed.
+    expect(screen.queryByTestId("ps-add")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("psc-form")).not.toBeInTheDocument();
   });
 
   it("import flow uploads a .skill ZIP and refreshes the list", async () => {

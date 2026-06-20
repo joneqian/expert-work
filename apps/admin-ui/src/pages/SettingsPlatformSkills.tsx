@@ -32,7 +32,6 @@ import {
 } from "../api/platform-skills";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { PlatformSkillCreateDrawer } from "../components/platform_skills/PlatformSkillCreateDrawer";
 
 const { Text } = Typography;
 
@@ -57,7 +56,6 @@ export function SettingsPlatformSkills() {
   const [rows, setRows] = useState<PlatformSkill[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -89,8 +87,6 @@ export function SettingsPlatformSkills() {
       void refresh();
     }
   }, [isSystemAdmin, refresh]);
-
-  const openCreate = useCallback(() => setCreateOpen(true), []);
 
   const onImportClick = useCallback(() => fileInputRef.current?.click(), []);
 
@@ -232,8 +228,13 @@ export function SettingsPlatformSkills() {
       >
         {t("platform_skills.empty_hint")}
       </div>
-      <Button type="primary" onClick={openCreate}>
-        {t("platform_skills.add")}
+      <Button
+        type="primary"
+        icon={<Upload size={14} strokeWidth={1.75} />}
+        onClick={onImportClick}
+        data-testid="ps-empty-import"
+      >
+        {t("platform_skills.import_zip")}
       </Button>
     </div>
   );
@@ -263,14 +264,12 @@ export function SettingsPlatformSkills() {
                 {t("common.refresh")}
               </Button>
               <Button
+                type="primary"
                 onClick={onImportClick}
                 icon={<Upload size={14} strokeWidth={1.75} />}
                 data-testid="ps-import-btn"
               >
                 {t("platform_skills.import_zip")}
-              </Button>
-              <Button type="primary" onClick={openCreate} data-testid="ps-add">
-                {t("platform_skills.add")}
               </Button>
             </div>
           )
@@ -308,15 +307,6 @@ export function SettingsPlatformSkills() {
           />
         </>
       )}
-
-      <PlatformSkillCreateDrawer
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => {
-          setCreateOpen(false);
-          void refresh();
-        }}
-      />
     </div>
   );
 }

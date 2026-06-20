@@ -76,9 +76,10 @@ test("system_admin sees the platform skill table + passes axe", async ({ page })
   await expect(page.getByTestId("ps-table")).toBeVisible();
   await expect(page.getByText("web_search", { exact: true })).toBeVisible();
 
-  // Open the create drawer to surface the form.
-  await page.getByTestId("ps-add").click();
-  await expect(page.getByTestId("psc-form")).toBeVisible();
+  // Phase D: creation is import-only — the Import .skill action is primary,
+  // the hand-build "New skill" drawer is gone.
+  await expect(page.getByTestId("ps-import-btn")).toBeVisible();
+  await expect(page.getByTestId("ps-add")).toHaveCount(0);
 
   await expectNoA11yViolations(page, "/settings/platform-skills");
 });
