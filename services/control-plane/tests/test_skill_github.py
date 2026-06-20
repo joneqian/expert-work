@@ -98,6 +98,18 @@ def test_resolve_rejects_injection_chars() -> None:
         resolve_github_source("owner/repo", ref="main;rm -rf")
 
 
+def test_resolve_accepts_path_form_skill() -> None:
+    # The picker / #728 disambiguation submit a relpath like "skills/<name>".
+    src = resolve_github_source("owner/repo", skill="skills/self-improving-agent")
+    assert src.skill == "skills/self-improving-agent"
+
+
+def test_resolve_rejects_skill_path_traversal() -> None:
+    for bad in ("../evil", "skills/../../etc", "/abs/path", "skills/"):
+        with pytest.raises(GithubImportError):
+            resolve_github_source("owner/repo", skill=bad)
+
+
 # ---------------------------------------------------------------------------
 # select_skill_zip
 # ---------------------------------------------------------------------------

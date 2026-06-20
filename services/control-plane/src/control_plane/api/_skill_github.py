@@ -40,7 +40,10 @@ _CODELOAD_HOST = "codeload.github.com"
 # must not carry path-traversal / scheme-smuggling characters.
 _OWNER_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
-_SKILL_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# A skill selector is a basename ("find-skills") OR a relative folder path
+# ("skills/find-skills"). Safe segments joined by "/", so no "..", no leading/
+# trailing slash, no empty segments.
+_SKILL_RE = re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
 _DEFAULT_REF = "HEAD"  # codeload resolves HEAD → the repo's default branch
 
 # Download / extraction safety caps.
@@ -124,8 +127,13 @@ def resolve_github_source(
     final_ref = resolved_ref if resolved_ref else _DEFAULT_REF
     if not _REF_RE.match(final_ref):
         raise GithubImportError("invalid ref")
-    if resolved_skill is not None and not _SKILL_RE.match(resolved_skill):
-        raise GithubImportError("invalid skill name")
+    if resolved_skill is not None:
+        # Regex charset allows '.', so '..'/'.' segments slip through — reject
+        # any dot-only segment explicitly (path traversal).
+        if not _SKILL_RE.match(resolved_skill) or any(
+            seg in {".", ".."} for seg in resolved_skill.split("/")
+        ):
+            raise GithubImportError("invalid skill name")
 
     return ResolvedGithubSource(owner=owner, repo=repo, ref=final_ref, skill=resolved_skill)
 
