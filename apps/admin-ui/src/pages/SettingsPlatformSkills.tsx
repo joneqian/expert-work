@@ -351,28 +351,40 @@ export function SettingsPlatformSkills() {
         <Text type="secondary" style={{ fontSize: 12 }}>
           {t("platform_skills.github_hint")}
         </Text>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-          <Input
-            value={ghSource}
-            onChange={(e) => setGhSource(e.target.value)}
-            placeholder={t("platform_skills.github_source_ph")}
-            addonBefore={t("platform_skills.github_source_label")}
-            data-testid="ps-github-source"
-          />
-          <Input
-            value={ghSkill}
-            onChange={(e) => setGhSkill(e.target.value)}
-            placeholder={t("platform_skills.github_skill_ph")}
-            addonBefore={t("platform_skills.github_skill_label")}
-            data-testid="ps-github-skill"
-          />
-          <Input
-            value={ghRef}
-            onChange={(e) => setGhRef(e.target.value)}
-            placeholder={t("platform_skills.github_ref_ph")}
-            addonBefore={t("platform_skills.github_ref_label")}
-            data-testid="ps-github-ref"
-          />
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>
+              {t("platform_skills.github_source_label")}
+            </Text>
+            <Input
+              value={ghSource}
+              onChange={(e) => setGhSource(e.target.value)}
+              placeholder={t("platform_skills.github_source_ph")}
+              data-testid="ps-github-source"
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>
+              {t("platform_skills.github_skill_label")}
+            </Text>
+            <Input
+              value={ghSkill}
+              onChange={(e) => setGhSkill(e.target.value)}
+              placeholder={t("platform_skills.github_skill_ph")}
+              data-testid="ps-github-skill"
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <Text style={{ fontSize: 12, fontWeight: 600 }}>
+              {t("platform_skills.github_ref_label")}
+            </Text>
+            <Input
+              value={ghRef}
+              onChange={(e) => setGhRef(e.target.value)}
+              placeholder={t("platform_skills.github_ref_ph")}
+              data-testid="ps-github-ref"
+            />
+          </label>
         </div>
       </Modal>
 

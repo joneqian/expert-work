@@ -135,8 +135,8 @@ test("system_admin imports a skill from GitHub", async ({ page }) => {
   await expect(page.getByTestId("ps-table")).toBeVisible();
   await page.getByTestId("ps-import-github-btn").click();
   await expect(page.getByTestId("ps-github-source")).toBeVisible();
-  await page.getByTestId("ps-github-source").locator("input").fill("vercel-labs/skills");
-  await page.getByTestId("ps-github-skill").locator("input").fill("find-skills");
+  await page.getByTestId("ps-github-source").fill("vercel-labs/skills");
+  await page.getByTestId("ps-github-skill").fill("find-skills");
 
   const [req] = await Promise.all([
     page.waitForRequest(
