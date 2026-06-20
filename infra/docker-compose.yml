@@ -285,6 +285,11 @@ services:
       KC_HOSTNAME_STRICT: "false"
       KC_HEALTH_ENABLED: "true"
     volumes:
+      # Persist the H2 store (lives under /opt/keycloak/data/h2) so registered
+      # users + realm survive `dev-clean`. The realm-import bind below is a
+      # deeper nested mount (data/import/…) and coexists with this volume;
+      # `--import-realm` is a no-op once the realm already exists in H2.
+      - keycloak-data:/opt/keycloak/data
       - ./keycloak/realm-helix-agent.json:/opt/keycloak/data/import/realm-helix-agent.json:ro
       # Stream ACCT — 品牌登录主题(白标)。start-dev 关主题缓存,改 CSS 即热加载。
       - ./keycloak/themes/helix:/opt/keycloak/themes/helix:ro
@@ -725,6 +730,9 @@ services:
 
 volumes:
   postgres-data:
+  # Keycloak H2 store (start-dev). Persists registered users + realm across
+  # `dev-clean` (= `docker compose down`, no -v); only `down -v` wipes it.
+  keycloak-data:
   minio-data:
   prometheus-data:
   tempo-data:
