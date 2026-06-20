@@ -52,6 +52,11 @@ export interface SkillRecord {
   entitled?: boolean;
   /** Stream X-6 — platform-skill entitlement gate. */
   required_tier?: "free" | "pro" | "enterprise";
+  /** Skill Marketplace Phase 2 — on ``platform`` rows from the merged
+   *  ``GET /v1/skills`` view, whether the tenant has an active subscription
+   *  to this platform skill. Semantic A: a UX/accounting marker only, it does
+   *  not gate runtime binding. Absent on tenant rows. */
+  subscribed?: boolean;
   /** Stream SE (SE-8) — ``agent_private`` = only the authoring agent sees
    *  it; ``tenant`` = shared tenant-wide. Optional so pre-SE mocks stay valid. */
   visibility?: SkillVisibility;

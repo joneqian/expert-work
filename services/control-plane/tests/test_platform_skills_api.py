@@ -821,3 +821,36 @@ async def test_subscribe_viewer_role_forbidden(ctx: _Ctx) -> None:
     viewer_headers = {"Authorization": f"Bearer {viewer_jwt}"}
     resp = await ctx.client.post(f"/v1/skills/{sid}/subscribe", headers=viewer_headers)
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Skill Marketplace Phase 2 — merged-view ``subscribed`` flag
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_merged_view_marks_subscribed_platform_skill(ctx: _Ctx) -> None:
+    sub_id = await _seed_platform_skill(
+        ctx.skill_store, name="picked", required_tier=TenantPlan.FREE
+    )
+    await _seed_platform_skill(ctx.skill_store, name="untouched", required_tier=TenantPlan.FREE)
+
+    await ctx.client.post(f"/v1/skills/{sub_id}/subscribe", headers=ctx.tenant_headers)
+
+    resp = await ctx.client.get("/v1/skills", headers=ctx.tenant_headers)
+    assert resp.status_code == 200
+    platform_items = {item["name"]: item for item in resp.json()["platform_items"]}
+    assert platform_items["picked"]["subscribed"] is True
+    assert platform_items["untouched"]["subscribed"] is False
+
+
+@pytest.mark.asyncio
+async def test_merged_view_soft_cancelled_is_not_subscribed(ctx: _Ctx) -> None:
+    sid = await _seed_platform_skill(ctx.skill_store, name="plat", required_tier=TenantPlan.FREE)
+    await ctx.client.post(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+    await ctx.client.delete(f"/v1/skills/{sid}/subscribe", headers=ctx.tenant_headers)
+
+    resp = await ctx.client.get("/v1/skills", headers=ctx.tenant_headers)
+    assert resp.status_code == 200
+    platform_items = {item["name"]: item for item in resp.json()["platform_items"]}
+    assert platform_items["plat"]["subscribed"] is False  # soft-cancelled → not subscribed

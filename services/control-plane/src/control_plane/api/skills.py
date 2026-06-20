@@ -960,6 +960,7 @@ def build_skills_router() -> APIRouter:
     async def list_skills(
         request: Request,
         store: Annotated[SkillStore, Depends(_get_skill_store)],
+        sub_store: Annotated[TenantSkillSubscriptionStore, Depends(_get_skill_subscription_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         status: Annotated[SkillStatus | None, Query()] = None,
         category: Annotated[str | None, Query()] = None,
@@ -1015,6 +1016,12 @@ def build_skills_router() -> APIRouter:
                     ).plan
                 except TenantConfigNotConfiguredError:
                     plan = TenantPlan.FREE
+                # Skill Marketplace Phase 2 — the tenant's active subscription
+                # set (enabled rows only) drives the merged-view ``subscribed``
+                # flag. Read in the tenant RLS scope (subscription table is
+                # tenant-scoped); semantic A, so this never affects binding.
+                subs = await sub_store.list_for_tenant(tenant_id=scope.tenant_id)
+                subscribed_ids = {s.platform_skill_id for s in subs if s.enabled}
                 # Only ACTIVE platform skills are bindable. The library is
                 # small; a single 200 cap is acceptable here.
                 async with bypass_rls_session():
@@ -1033,6 +1040,7 @@ def build_skills_router() -> APIRouter:
                     # Show both entitled and not-entitled rows (UI renders a
                     # lock badge on the latter) — do not filter by tier.
                     entry["entitled"] = tier_satisfies(plan, p.required_tier)
+                    entry["subscribed"] = p.id in subscribed_ids
                     platform_items.append(entry)
 
         items: list[dict[str, Any]] = []
