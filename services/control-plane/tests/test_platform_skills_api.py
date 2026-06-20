@@ -25,7 +25,8 @@ from uuid import UUID, uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from control_plane.api._skill_zip import parse_skill_zip
+from control_plane.api import _skill_github
+from control_plane.api._skill_zip import build_skill_zip, parse_skill_zip
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
@@ -854,3 +855,122 @@ async def test_merged_view_soft_cancelled_is_not_subscribed(ctx: _Ctx) -> None:
     assert resp.status_code == 200
     platform_items = {item["name"]: item for item in resp.json()["platform_items"]}
     assert platform_items["plat"]["subscribed"] is False  # soft-cancelled → not subscribed
+
+
+# ---------------------------------------------------------------------------
+# Import from GitHub — 方案 A (download monkeypatched; no real network)
+# ---------------------------------------------------------------------------
+
+
+def _github_archive(repo: str, ref: str, files: dict[str, str]) -> bytes:
+    """GitHub-style archive: everything nested under ``<repo>-<ref>/``."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        for path, content in files.items():
+            z.writestr(f"{repo}-{ref}/{path}", content)
+    return buf.getvalue()
+
+
+def _skill_md(name: str) -> str:
+    blob = build_skill_zip(
+        name=name,
+        description=f"{name} skill",
+        category=None,
+        required_models=(),
+        prompt_fragment="be helpful",
+        tool_names=(),
+    )
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        return z.read("SKILL.md").decode()
+
+
+@pytest.mark.asyncio
+async def test_import_from_github_creates_platform_skill(ctx: _Ctx, monkeypatch) -> None:
+    archive = _github_archive(
+        "skills",
+        "HEAD",
+        {
+            "skills/find-skills/SKILL.md": _skill_md("find-skills"),
+            "skills/other/SKILL.md": _skill_md("other"),
+        },
+    )
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github",
+        json={"source": "vercel-labs/skills", "skill": "find-skills"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["created"] is True
+    assert body["skill"]["name"] == "find-skills"
+
+    page = await ctx.audit_store.query(AuditQuery(tenant_id=ctx.admin_tenant, limit=20))
+    create_rows = [r for r in page.entries if r.action == AuditAction.SKILL_CREATE]
+    assert len(create_rows) == 1
+    assert create_rows[0].details["source"] == "github_import"
+    assert "vercel-labs/skills" in create_rows[0].details["origin"]
+
+
+@pytest.mark.asyncio
+async def test_import_from_github_skills_sh_url(ctx: _Ctx, monkeypatch) -> None:
+    archive = _github_archive(
+        "skills", "HEAD", {"skills/find-skills/SKILL.md": _skill_md("find-skills")}
+    )
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github",
+        json={"source": "https://www.skills.sh/vercel-labs/skills/find-skills"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["skill"]["name"] == "find-skills"
+
+
+@pytest.mark.asyncio
+async def test_import_from_github_missing_skill_404(ctx: _Ctx, monkeypatch) -> None:
+    archive = _github_archive(
+        "skills", "HEAD", {"skills/find-skills/SKILL.md": _skill_md("find-skills")}
+    )
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github",
+        json={"source": "vercel-labs/skills", "skill": "nope"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_import_from_github_tenant_principal_forbidden(ctx: _Ctx) -> None:
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github",
+        json={"source": "vercel-labs/skills", "skill": "find-skills"},
+        headers=ctx.tenant_headers,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_import_from_github_rejects_non_github_source(ctx: _Ctx) -> None:
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github",
+        json={"source": "https://evil.example.com/owner/repo"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 400
