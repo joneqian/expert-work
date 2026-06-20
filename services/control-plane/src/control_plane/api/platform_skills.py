@@ -37,7 +37,12 @@ from control_plane.api._skill_moderation import (
     moderate_required_models,
     moderate_tool_names,
 )
-from control_plane.api._skill_zip import SkillZipError, build_skill_zip, parse_skill_zip
+from control_plane.api._skill_zip import (
+    SkillPackageError,
+    SkillZipError,
+    build_skill_zip,
+    parse_skill_zip,
+)
 from control_plane.api.skills import (
     _MAX_SUPPORTING_FILE_SIZE,
     _SUPPORTING_FILE_TEXT_EXTS,
@@ -156,6 +161,35 @@ def _principal(request: Request) -> Principal:
     return principal
 
 
+# Maps the path-free ``_ZipRejectReason`` enum to an operator-facing hint. The
+# parse layer keeps its public message generic (Oracle defense) and hides the
+# real cause; platform import is system_admin-only, so surfacing the *reason*
+# (never the path/internal_message) turns a useless "invalid skill package" 400
+# into something an admin can act on.
+_SKILL_REJECT_HINT: dict[str, str] = {
+    "missing_skill_md": "no SKILL.md at the selected folder root (wrong folder?)",
+    "invalid_frontmatter": (
+        "SKILL.md frontmatter is missing or malformed (needs name + description)"
+    ),
+    "path_traversal": "package contains an unsafe path (.. traversal)",
+    "symlink": "package contains a symlink entry, which is not allowed",
+    "absolute_path": "package contains an absolute path, which is not allowed",
+    "invalid_chars": "a file name has illegal characters/length (only a-z A-Z 0-9 . _ -)",
+    "depth_exceeded": "folder nesting is deeper than 3 levels",
+    "extension_not_allowed": (
+        "package has a disallowed file type (allowed: .md .txt .yaml .yml .json "
+        ".py .js .ts .sh .toml .html .css .png .jpg .svg)"
+    ),
+    "file_too_large": "a single file exceeds the 1 MiB limit",
+    "total_too_large": "the package exceeds the 5 MiB total limit",
+    "too_many_entries": "the package has more than 64 files",
+    "prompt_injection": "skill content tripped the prompt-injection scanner",
+    "legacy_format": "legacy skill layout is not supported",
+    "bad_zip": "the downloaded content is not a valid zip",
+    "binary_in_text_file": "a text file contains binary content",
+}
+
+
 async def _ingest_platform_skill_blob(
     *,
     blob: bytes,
@@ -173,7 +207,38 @@ async def _ingest_platform_skill_blob(
     try:
         payload = parse_skill_zip(blob)
     except SkillZipError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # ``reason`` is the path-free reject enum; ``internal_message`` carries
+        # the offending path and stays server-side (audit only). For a bare
+        # ``SkillPackageLayoutError`` (no reason) fall back to generic.
+        reason = getattr(exc, "reason", None) if isinstance(exc, SkillPackageError) else None
+        internal = getattr(exc, "internal_message", None) if reason else None
+        await audit_emit(
+            audit,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.subject_id,
+            action=AuditAction.SKILL_PACKAGE_REJECTED,
+            resource_type="skill",
+            resource_id="unknown",
+            result=AuditResult.DENIED,
+            trace_id=current_trace_id_hex(),
+            details={
+                "scope": "platform",
+                "reason": reason or "unknown",
+                "internal": internal,
+                "source": source,
+                **({"origin": origin} if origin else {}),
+            },
+        )
+        if reason is not None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "SKILL_PACKAGE_INVALID",
+                    "reason": reason,
+                    "message": _SKILL_REJECT_HINT.get(reason, "invalid skill package"),
+                },
+            ) from exc
+        raise HTTPException(status_code=400, detail="invalid skill package") from exc
 
     if not re.fullmatch(r"^[a-z][a-z0-9_-]{0,63}$", payload.name):
         raise HTTPException(

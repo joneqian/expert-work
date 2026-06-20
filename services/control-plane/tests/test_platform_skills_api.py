@@ -529,6 +529,58 @@ async def test_platform_import_rejects_moderation_violation(ctx: _Ctx) -> None:
     assert resp.status_code == 400
 
 
+def _new_format_zip(*, extra: dict[str, bytes] | None = None) -> bytes:
+    """A SKILL.md-rooted ``.skill`` ZIP, optionally with extra files."""
+    md = "---\nname: foo\ndescription: imported skill\n---\nbe helpful\n"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("SKILL.md", md)
+        for path, raw in (extra or {}).items():
+            archive.writestr(path, raw)
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_platform_import_bad_zip_surfaces_reason(ctx: _Ctx) -> None:
+    """A non-zip blob no longer collapses into an opaque 400 — the structured
+    detail carries the path-free ``reason`` so an operator can diagnose it, and
+    a ``SKILL_PACKAGE_REJECTED`` audit row is written."""
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import",
+        files={"file": ("foo.skill", b"not a zip at all", "application/zip")},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["code"] == "SKILL_PACKAGE_INVALID"
+    assert detail["reason"] == "bad_zip"
+    assert detail["message"]  # human hint present
+
+    page = await ctx.audit_store.query(AuditQuery(tenant_id=ctx.admin_tenant, limit=50))
+    rejected = [r for r in page.entries if r.action == AuditAction.SKILL_PACKAGE_REJECTED]
+    assert len(rejected) == 1
+    assert rejected[0].details["reason"] == "bad_zip"
+    # The offending internal detail stays server-side only (Oracle defense): it
+    # is in the audit row, never echoed in the HTTP body.
+    assert "internal" in rejected[0].details
+
+
+@pytest.mark.asyncio
+async def test_platform_import_disallowed_extension_surfaces_reason(ctx: _Ctx) -> None:
+    """A disallowed file type (the common real-world GitHub-repo case) surfaces
+    ``extension_not_allowed`` instead of a generic package error."""
+    blob = _new_format_zip(extra={"data.bin": b"\x00\x01\x02"})
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import",
+        files={"file": ("foo.skill", blob, "application/zip")},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["code"] == "SKILL_PACKAGE_INVALID"
+    assert detail["reason"] == "extension_not_allowed"
+
+
 # ---------------------------------------------------------------------------
 # Supporting files + export — skill-authoring-ia Phase A
 # ---------------------------------------------------------------------------

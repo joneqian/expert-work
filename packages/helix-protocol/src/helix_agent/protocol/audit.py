@@ -123,6 +123,12 @@ class AuditAction(StrEnum):
     SKILL_CREATE = "skill:create"
     SKILL_VERSION_CREATE = "skill_version:create"
     SKILL_STATUS_CHANGE = "skill:status_change"
+    # Fires when a ``.skill`` package fails the import parse/safety gate
+    # (structural layout, charset, size, extension, frontmatter — see the
+    # ``_ZipRejectReason`` taxonomy). Records the safe path-free ``reason`` so
+    # operators can diagnose a rejected import instead of guessing at a generic
+    # 400. Distinct from PROMPT_INJECTION_BLOCKED (content threat scan).
+    SKILL_PACKAGE_REJECTED = "skill:package_rejected"
     # skill — Capability Uplift Sprint #3 supporting files (Mini-ADR U-17)
     SKILL_SUPPORTING_FILE_UPLOADED = "skill_supporting_file:uploaded"
     SKILL_SUPPORTING_FILE_REMOVED = "skill_supporting_file:removed"
