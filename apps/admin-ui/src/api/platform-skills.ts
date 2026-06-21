@@ -97,10 +97,19 @@ export interface PlatformSkillVersionList {
 /** ``POST /v1/platform/skills/import`` response — the ZIP either created a
  *  new skill (+version) or appended a version to an existing one. ``created``
  *  is ``false`` for an idempotent re-import of identical content. */
+/** skill-runtime §5.2 — advisory: can this skill's bundled scripts run in the
+ *  Python-only sandbox? ``runnable=false`` (node/browser) → steer to MCP. */
+export interface SkillRuntime {
+  kind: "knowledge" | "python" | "node" | "browser" | "unknown";
+  runnable: boolean;
+  hint: string;
+}
+
 export interface ImportPlatformSkillResponse {
   skill: PlatformSkill;
   version: PlatformSkillVersion;
   created: boolean;
+  runtime?: SkillRuntime;
 }
 
 // ── Endpoints ──────────────────────────────────────────────────────────────
@@ -206,6 +215,7 @@ export interface BatchImportResult {
   name?: string;
   version?: number;
   reason?: string;
+  runtime?: SkillRuntime;
 }
 
 export interface BatchImportFromGithubResponse {

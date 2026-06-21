@@ -44,6 +44,7 @@ import {
   type PlatformSkill,
   type PlatformSkillStatus,
   type PlatformSkillTier,
+  type SkillRuntime,
 } from "../api/platform-skills";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -122,6 +123,18 @@ export function SettingsPlatformSkills() {
     }
   }, [isSystemAdmin, refresh]);
 
+  // skill-runtime §5.2 — a node/browser skill still imports, but its bundled
+  // scripts won't run in the Python-only sandbox; warn (longer duration) so the
+  // operator knows to reach for an MCP server instead.
+  const warnIfNotRunnable = useCallback(
+    (runtime?: SkillRuntime) => {
+      if (runtime && !runtime.runnable) {
+        message.warning(runtime.hint, 8);
+      }
+    },
+    [message],
+  );
+
   const onImportClick = useCallback(() => fileInputRef.current?.click(), []);
 
   const onImportFile = useCallback(
@@ -138,6 +151,7 @@ export function SettingsPlatformSkills() {
               })
             : t("platform_skills.import_noop", { name: result.skill.name }),
         );
+        warnIfNotRunnable(result.runtime);
         void refresh();
       } catch (err) {
         message.error(errText(err));
@@ -145,7 +159,7 @@ export function SettingsPlatformSkills() {
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [errText, message, refresh, t],
+    [errText, message, refresh, t, warnIfNotRunnable],
   );
 
   const resetGhForm = useCallback(() => {
@@ -204,6 +218,7 @@ export function SettingsPlatformSkills() {
             })
           : t("platform_skills.import_noop", { name: result.skill.name }),
       );
+      warnIfNotRunnable(result.runtime);
       setGhOpen(false);
       resetGhForm();
       void refresh();
@@ -235,6 +250,7 @@ export function SettingsPlatformSkills() {
     refresh,
     resetGhForm,
     t,
+    warnIfNotRunnable,
   ]);
 
   // Phase C: "Manage" opens the full detail page (version editor + lifecycle
@@ -510,6 +526,11 @@ export function SettingsPlatformSkills() {
                       {r.reason && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           {r.reason}
+                        </Text>
+                      )}
+                      {r.runtime && !r.runtime.runnable && (
+                        <Text type="warning" style={{ fontSize: 12 }}>
+                          ⚠ {r.runtime.hint}
                         </Text>
                       )}
                     </div>

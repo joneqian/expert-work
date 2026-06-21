@@ -37,6 +37,7 @@ from control_plane.api._skill_moderation import (
     moderate_required_models,
     moderate_tool_names,
 )
+from control_plane.api._skill_runtime import classify_skill_runtime
 from control_plane.api._skill_zip import (
     SkillPackageError,
     SkillZipError,
@@ -267,6 +268,10 @@ async def _ingest_platform_skill_payload(
             detail=f"skill name {payload.name!r} fails validation",
         )
 
+    # skill-runtime §5.2 — advisory runtime classification (non-blocking) so the
+    # operator learns at import time whether bundled scripts can run here.
+    runtime = classify_skill_runtime(payload).as_dict()
+
     # Moderation gate before any DB write.
     try:
         moderate_prompt_fragment(payload.prompt_fragment)
@@ -317,6 +322,7 @@ async def _ingest_platform_skill_payload(
                     "skill": _skill_dict(existing),
                     "version": _version_dict(latest),
                     "created": False,
+                    "runtime": runtime,
                 }, 200
 
         if existing is None:
@@ -388,6 +394,7 @@ async def _ingest_platform_skill_payload(
         "skill": _skill_dict(existing),
         "version": _version_dict(version),
         "created": True,
+        "runtime": runtime,
     }, 201
 
 
@@ -706,6 +713,7 @@ def build_platform_skills_router() -> APIRouter:
                     "status": "created" if content.get("created") else "exists",
                     "name": _result_skill_name(content),
                     "version": _result_version(content),
+                    "runtime": content.get("runtime"),
                 }
             )
 

@@ -580,6 +580,26 @@ async def test_platform_import_external_format_skill_succeeds(ctx: _Ctx) -> None
     assert resp.status_code == 201, resp.text
     assert resp.json()["created"] is True
     assert resp.json()["skill"]["name"] == "foo"
+    # skill-runtime §5.2 — instruction-only skill classifies as runnable.
+    assert resp.json()["runtime"]["kind"] == "knowledge"
+    assert resp.json()["runtime"]["runnable"] is True
+
+
+@pytest.mark.asyncio
+async def test_platform_import_flags_node_skill_not_runnable(ctx: _Ctx) -> None:
+    """skill-runtime §5.2 — a Node skill imports (non-blocking) but the response
+    flags ``runnable=false`` so the UI can steer the operator to MCP."""
+    blob = _new_format_zip(extra={"index.js": b"console.log('hi')"})
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import",
+        files={"file": ("foo.skill", blob, "application/zip")},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 201, resp.text  # still imports — advisory only
+    runtime = resp.json()["runtime"]
+    assert runtime["kind"] == "node"
+    assert runtime["runnable"] is False
+    assert runtime["hint"]
 
 
 @pytest.mark.asyncio
