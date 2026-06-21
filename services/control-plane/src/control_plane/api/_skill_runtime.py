@@ -60,28 +60,34 @@ def classify_skill_runtime(payload: SkillZipPayload) -> SkillRuntime:
             ),
         )
 
-    has_node = (
-        any(n in _NODE_MANIFESTS for n in names)
-        or bool(exts & _NODE_EXTS)
-        or _NODE_BODY_RE.search(body) is not None
+    has_py = ".py" in exts
+    has_node_files = any(n in _NODE_MANIFESTS for n in names) or bool(exts & _NODE_EXTS)
+    node_hint = (
+        "This skill needs a Node.js runtime, which the helix sandbox doesn't "
+        "provide (Python-only, no runtime install). Its instructions are still "
+        "usable, but bundled Node scripts won't run."
     )
-    if has_node:
-        return SkillRuntime(
-            kind="node",
-            runnable=False,
-            hint=(
-                "This skill needs a Node.js runtime, which the helix sandbox doesn't "
-                "provide (Python-only, no runtime install). Its instructions are still "
-                "usable, but bundled Node scripts won't run."
-            ),
-        )
 
-    if ".py" in exts:
+    # A real Node project (package.json / .js / .ts) with no Python fallback.
+    if has_node_files and not has_py:
+        return SkillRuntime(kind="node", runnable=False, hint=node_hint)
+
+    # Python wins over a *mention* of Node: skills like Anthropic's ``pptx``
+    # bundle ``.py`` scripts AND describe an optional PptxGenJS/``npx`` path in
+    # prose — they run here via the Python scripts. Check ``.py`` before the
+    # body-only Node marker so a documented alternative doesn't mask a runnable
+    # Python skill (regression: live import flagged pptx as node).
+    if has_py:
         return SkillRuntime(
             kind="python",
             runnable=True,
             hint="Python skill — runs in the sandbox (use the office image for doc libs).",
         )
+
+    # Node only in prose (``npx``/``npm``) with no Python scripts — e.g. the
+    # ``npx skills`` installer skills, which have no helix substrate.
+    if _NODE_BODY_RE.search(body) is not None:
+        return SkillRuntime(kind="node", runnable=False, hint=node_hint)
 
     if not payload.supporting_files:
         return SkillRuntime(

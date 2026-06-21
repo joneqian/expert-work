@@ -46,6 +46,20 @@ def test_node_body_marker_not_runnable() -> None:
     assert rt.runnable is False
 
 
+def test_python_wins_over_node_mention_in_body() -> None:
+    # Regression: Anthropic's pptx skill ships .py scripts AND mentions an
+    # optional PptxGenJS/npx path in prose. It must classify python (runnable),
+    # not node — a live import flagged it node before this fix.
+    rt = classify_skill_runtime(
+        _payload(
+            body="Primary: python-pptx. Alternative: use PptxGenJS via `npx`.",
+            files=["scripts/html2pptx.py", "pptxgenjs.md", "scripts/office/unpack.py"],
+        )
+    )
+    assert rt.kind == "python"
+    assert rt.runnable is True
+
+
 def test_browser_marker_wins_over_node() -> None:
     rt = classify_skill_runtime(
         _payload(body="Uses Playwright to drive Chromium.", files=["index.js"])
