@@ -19,7 +19,7 @@ The API token (a **system_admin** dev-login bearer) is read from
 
 Usage (bring the dev stack up first — ``make dev-up``)::
 
-    export HELIX_API_URL=http://localhost:8080
+    export HELIX_API_URL=http://localhost:8000    # control-plane (8080 is Keycloak)
     export HELIX_API_TOKEN=<system_admin dev bearer token>
 
     # Phase 1 only (no agent needed):
