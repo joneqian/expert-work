@@ -1183,6 +1183,13 @@ export interface TranslationKeys {
     github_submit: string;
     github_pick_skill: string;
     github_pick_ph: string;
+    github_select_all: string;
+    github_clear_all: string;
+    github_batch_submit: string;
+    github_batch_done: string;
+    github_result_created: string;
+    github_result_exists: string;
+    github_result_failed: string;
     imported: string;
     import_noop: string;
     manage: string;
@@ -2861,8 +2868,15 @@ const en: TranslationKeys = {
     github_ref_label: "Ref",
     github_ref_ph: "branch / tag / SHA (optional, default branch)",
     github_submit: "Import",
-    github_pick_skill: "This repo has {{count}} skills — pick one to import.",
-    github_pick_ph: "Select a skill",
+    github_pick_skill: "This repo has {{count}} skills — pick one or more to import.",
+    github_pick_ph: "Select skills",
+    github_select_all: "Select all",
+    github_clear_all: "Clear all",
+    github_batch_submit: "Import {{count}} selected",
+    github_batch_done: "Imported {{ok}}, {{failed}} failed.",
+    github_result_created: "Created",
+    github_result_exists: "Exists",
+    github_result_failed: "Failed",
     imported: 'Imported "{{name}}" v{{version}}.',
     import_noop: 'No change to "{{name}}" — already the latest version.',
     manage: "Manage",

@@ -81,6 +81,10 @@ from helix_agent.protocol.skill import (
 )
 from helix_agent.runtime.audit.logger import AuditLogger
 
+#: Hard cap on skills imported in one batch request. Bounds the per-request DB
+#: write fan-out; a repo with more skills than this is imported in chunks.
+_MAX_BATCH_SKILLS = 100
+
 
 class _CreatePlatformSkillBody(BaseModel):
     """``POST /v1/platform/skills`` request body."""
@@ -121,6 +125,20 @@ class _ImportFromGithubBody(BaseModel):
 
     source: str = Field(min_length=1, max_length=512)
     skill: str | None = Field(default=None, max_length=128)
+    ref: str | None = Field(default=None, max_length=256)
+
+
+class _BatchImportFromGithubBody(BaseModel):
+    """``POST /v1/platform/skills/import-from-github/batch`` request body.
+
+    Like the single import but ``skills`` is a list of folder paths/basenames to
+    import in one pass. The repo archive is downloaded once; each skill is
+    ingested independently so one bad skill (failed scan / invalid frontmatter)
+    doesn't abort the batch (partial success).
+    """
+
+    source: str = Field(min_length=1, max_length=512)
+    skills: list[str] = Field(min_length=1, max_length=_MAX_BATCH_SKILLS)
     ref: str | None = Field(default=None, max_length=256)
 
 
@@ -190,7 +208,7 @@ _SKILL_REJECT_HINT: dict[str, str] = {
 }
 
 
-async def _ingest_platform_skill_blob(
+async def _ingest_platform_skill_payload(
     *,
     blob: bytes,
     store: SkillStore,
@@ -198,11 +216,13 @@ async def _ingest_platform_skill_blob(
     principal: Principal,
     source: str,
     origin: str | None = None,
-) -> JSONResponse:
-    """Shared platform-import pipeline: parse a ``.skill`` zip → name check →
+) -> tuple[dict[str, object], int]:
+    """Core platform-import pipeline: parse a ``.skill`` zip → name check →
     moderation → Mini-ADR U-21 strict threat scan → idempotent create/version
-    → audit. Both the multipart ZIP upload and the GitHub import feed this; only
-    ``source`` (audit/metric label) and ``origin`` (locator) differ.
+    → audit. Returns ``(response_body, status_code)`` (201 created / 200 already
+    present); raises :class:`HTTPException` on any validation failure. The
+    single-import wrapper turns this into a ``JSONResponse``; the batch endpoint
+    catches the ``HTTPException`` per skill to keep going (partial success).
     """
     try:
         payload = parse_skill_zip(blob)
@@ -292,14 +312,11 @@ async def _ingest_platform_skill_blob(
                 skill_id=existing.id, version=existing.latest_version
             )
             if latest is not None and latest.content_hash == payload.content_hash:
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "skill": _skill_dict(existing),
-                        "version": _version_dict(latest),
-                        "created": False,
-                    },
-                )
+                return {
+                    "skill": _skill_dict(existing),
+                    "version": _version_dict(latest),
+                    "created": False,
+                }, 200
 
         if existing is None:
             try:
@@ -366,14 +383,61 @@ async def _ingest_platform_skill_blob(
             **({"origin": origin} if origin else {}),
         },
     )
-    return JSONResponse(
-        status_code=201,
-        content={
-            "skill": _skill_dict(existing),
-            "version": _version_dict(version),
-            "created": True,
-        },
+    return {
+        "skill": _skill_dict(existing),
+        "version": _version_dict(version),
+        "created": True,
+    }, 201
+
+
+async def _ingest_platform_skill_blob(
+    *,
+    blob: bytes,
+    store: SkillStore,
+    audit: AuditLogger,
+    principal: Principal,
+    source: str,
+    origin: str | None = None,
+) -> JSONResponse:
+    """Single-import wrapper around :func:`_ingest_platform_skill_payload` —
+    used by the ZIP upload and single GitHub import."""
+    content, status = await _ingest_platform_skill_payload(
+        blob=blob,
+        store=store,
+        audit=audit,
+        principal=principal,
+        source=source,
+        origin=origin,
     )
+    return JSONResponse(status_code=status, content=content)
+
+
+def _http_detail_message(detail: object) -> str:
+    """Flatten an ``HTTPException.detail`` (str or structured dict) into a short
+    operator-facing reason for a batch result row."""
+    if isinstance(detail, dict):
+        msg = detail.get("message")
+        reason = detail.get("reason")
+        if isinstance(msg, str):
+            return f"{msg} ({reason})" if isinstance(reason, str) else msg
+        return str(detail)
+    return str(detail)
+
+
+def _result_skill_name(content: dict[str, object]) -> str | None:
+    skill = content.get("skill")
+    if isinstance(skill, dict):
+        name = skill.get("name")
+        return name if isinstance(name, str) else None
+    return None
+
+
+def _result_version(content: dict[str, object]) -> int | None:
+    version = content.get("version")
+    if isinstance(version, dict):
+        v = version.get("version")
+        return v if isinstance(v, int) else None
+    return None
 
 
 def build_platform_skills_router() -> APIRouter:
@@ -571,6 +635,82 @@ def build_platform_skills_router() -> APIRouter:
             source="github_import",
             origin=origin,
         )
+
+    @router.post("/import-from-github/batch", response_model=None)
+    async def import_platform_skills_from_github_batch(
+        body: _BatchImportFromGithubBody,
+        request: Request,
+    ) -> JSONResponse:
+        """方案 A batch: import multiple skills from one public GitHub repo.
+
+        system_admin only. Resolves + downloads the repo archive **once**, then
+        for each requested ``skills`` entry selects/repacks/ingests that folder
+        independently. Partial success: a skill that fails (select miss / scan /
+        invalid frontmatter) is reported as ``failed`` with a path-free reason
+        and the rest continue. Always returns ``200`` with a per-skill result
+        list; resolve/download failures (bad source, repo not found) are fatal
+        and surface as the usual structured error.
+        """
+        principal = _principal(request)
+        store = _get_skill_store(request)
+        audit = _get_audit(request)
+
+        # Resolve + download once. These failures are fatal for the whole batch.
+        try:
+            src = _skill_github.resolve_github_source(body.source, ref=body.ref)
+            archive = await _skill_github.download_github_archive(src)
+        except _skill_github.GithubImportError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": "GITHUB_IMPORT_ERROR", "message": exc.message},
+            ) from exc
+
+        # De-dupe while preserving order so a double-checked candidate is ingested once.
+        seen: set[str] = set()
+        requested: list[str] = []
+        for skill_name in body.skills:
+            if skill_name not in seen:
+                seen.add(skill_name)
+                requested.append(skill_name)
+
+        results: list[dict[str, object]] = []
+        for skill_path in requested:
+            origin = f"{src.owner}/{src.repo}@{src.ref}#{skill_path}"
+            try:
+                blob = _skill_github.select_skill_zip(archive, skill=skill_path)
+            except _skill_github.GithubImportError as exc:
+                results.append(
+                    {"skill": skill_path, "status": "failed", "reason": exc.message}
+                )
+                continue
+            try:
+                content, _status = await _ingest_platform_skill_payload(
+                    blob=blob,
+                    store=store,
+                    audit=audit,
+                    principal=principal,
+                    source="github_batch_import",
+                    origin=origin,
+                )
+            except HTTPException as exc:
+                results.append(
+                    {
+                        "skill": skill_path,
+                        "status": "failed",
+                        "reason": _http_detail_message(exc.detail),
+                    }
+                )
+                continue
+            results.append(
+                {
+                    "skill": skill_path,
+                    "status": "created" if content.get("created") else "exists",
+                    "name": _result_skill_name(content),
+                    "version": _result_version(content),
+                }
+            )
+
+        return JSONResponse(status_code=200, content={"results": results})
 
     @router.patch("/{skill_id}", response_model=None)
     async def patch_platform_skill(

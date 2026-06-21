@@ -37,8 +37,10 @@ import { PageHeader } from "../components/PageHeader";
 import {
   importPlatformSkill,
   importPlatformSkillFromGithub,
+  importPlatformSkillsFromGithubBatch,
   listPlatformSkills,
   patchPlatformSkill,
+  type BatchImportResult,
   type PlatformSkill,
   type PlatformSkillStatus,
   type PlatformSkillTier,
@@ -60,6 +62,12 @@ const STATUS_COLOR: Record<PlatformSkillStatus, string> = {
   archived: "warning",
 };
 
+const GH_RESULT_COLOR: Record<BatchImportResult["status"], string> = {
+  created: "success",
+  exists: "default",
+  failed: "error",
+};
+
 export function SettingsPlatformSkills() {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -79,8 +87,11 @@ export function SettingsPlatformSkills() {
   const [ghRef, setGhRef] = useState("");
   const [ghBusy, setGhBusy] = useState(false);
   // Populated when an import hits a multi-skill repo (SKILL_AMBIGUOUS) → rendered
-  // as a Select so the operator picks instead of retyping a path.
+  // as a multi-select so the operator picks one or many (batch import).
   const [ghCandidates, setGhCandidates] = useState<string[]>([]);
+  const [ghSelected, setGhSelected] = useState<string[]>([]);
+  // Per-skill outcomes of the last batch import (shown in the modal).
+  const [ghResults, setGhResults] = useState<BatchImportResult[] | null>(null);
 
   const errText = useCallback(
     (err: unknown): string =>
@@ -137,9 +148,47 @@ export function SettingsPlatformSkills() {
     [errText, message, refresh, t],
   );
 
+  const resetGhForm = useCallback(() => {
+    setGhSource("");
+    setGhSkill("");
+    setGhRef("");
+    setGhCandidates([]);
+    setGhSelected([]);
+    setGhResults(null);
+  }, []);
+
+  // Batch path: a multi-skill repo's candidates are shown, the operator picks a
+  // subset, and we import them in one request (partial success).
+  const onGithubBatchImport = useCallback(async () => {
+    const source = ghSource.trim();
+    if (!source || ghSelected.length === 0) return;
+    setGhBusy(true);
+    try {
+      const { results } = await importPlatformSkillsFromGithubBatch({
+        source,
+        skills: ghSelected,
+        ref: ghRef.trim() || undefined,
+      });
+      setGhResults(results);
+      const ok = results.filter((r) => r.status !== "failed").length;
+      const failed = results.length - ok;
+      message.success(t("platform_skills.github_batch_done", { ok, failed }));
+      void refresh();
+    } catch (err) {
+      message.error(errText(err));
+    } finally {
+      setGhBusy(false);
+    }
+  }, [errText, ghRef, ghSelected, ghSource, message, refresh, t]);
+
   const onGithubImport = useCallback(async () => {
     const source = ghSource.trim();
     if (!source) return;
+    // Once candidates are listed, the picker is multi-select → go batch.
+    if (ghCandidates.length > 0) {
+      void onGithubBatchImport();
+      return;
+    }
     setGhBusy(true);
     try {
       const result = await importPlatformSkillFromGithub({
@@ -156,27 +205,37 @@ export function SettingsPlatformSkills() {
           : t("platform_skills.import_noop", { name: result.skill.name }),
       );
       setGhOpen(false);
-      setGhSource("");
-      setGhSkill("");
-      setGhRef("");
-      setGhCandidates([]);
+      resetGhForm();
       void refresh();
     } catch (err) {
       // Multi-skill repo → the backend returns SKILL_AMBIGUOUS + a candidate
-      // list. Render it as a picker (keep the modal open) instead of a toast.
+      // list. Render it as a multi-select picker (keep the modal open).
       const candidates =
         err instanceof ApiError && err.code === "SKILL_AMBIGUOUS"
           ? err.details?.candidates
           : undefined;
       if (Array.isArray(candidates)) {
         setGhCandidates(candidates as string[]);
+        setGhSelected([]);
+        setGhResults(null);
       } else {
         message.error(errText(err));
       }
     } finally {
       setGhBusy(false);
     }
-  }, [errText, ghRef, ghSkill, ghSource, message, refresh, t]);
+  }, [
+    errText,
+    ghCandidates.length,
+    ghRef,
+    ghSkill,
+    ghSource,
+    message,
+    onGithubBatchImport,
+    refresh,
+    resetGhForm,
+    t,
+  ]);
 
   // Phase C: "Manage" opens the full detail page (version editor + lifecycle
   // + supporting files), replacing the old in-place drawer.
@@ -350,16 +409,22 @@ export function SettingsPlatformSkills() {
       <Modal
         open={ghOpen}
         title={t("platform_skills.github_modal_title")}
-        okText={t("platform_skills.github_submit")}
+        okText={
+          ghCandidates.length > 0
+            ? t("platform_skills.github_batch_submit", { count: ghSelected.length })
+            : t("platform_skills.github_submit")
+        }
         onOk={() => void onGithubImport()}
         confirmLoading={ghBusy}
         okButtonProps={{
-          disabled: ghSource.trim().length === 0,
+          disabled:
+            ghSource.trim().length === 0 ||
+            (ghCandidates.length > 0 && ghSelected.length === 0),
           "data-testid": "ps-github-submit",
         }}
         onCancel={() => {
           setGhOpen(false);
-          setGhCandidates([]);
+          resetGhForm();
         }}
         destroyOnHidden
         data-testid="ps-github-modal"
@@ -376,17 +441,38 @@ export function SettingsPlatformSkills() {
               value={ghSource}
               onChange={(e) => {
                 setGhSource(e.target.value);
-                setGhCandidates([]); // repo changed → stale candidate list
+                // repo changed → stale candidate/selection/results
+                setGhCandidates([]);
+                setGhSelected([]);
+                setGhResults(null);
               }}
               placeholder={t("platform_skills.github_source_ph")}
               data-testid="ps-github-source"
             />
           </label>
           {ghCandidates.length > 0 ? (
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <Text style={{ fontSize: 12, fontWeight: 600 }}>
-                {t("platform_skills.github_skill_label")}
-              </Text>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: 600 }}>
+                  {t("platform_skills.github_skill_label")}
+                </Text>
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() =>
+                    setGhSelected(
+                      ghSelected.length === ghCandidates.length ? [] : [...ghCandidates],
+                    )
+                  }
+                  data-testid="ps-github-select-all"
+                >
+                  {ghSelected.length === ghCandidates.length
+                    ? t("platform_skills.github_clear_all")
+                    : t("platform_skills.github_select_all")}
+                </Button>
+              </div>
               <Alert
                 type="info"
                 showIcon
@@ -397,14 +483,40 @@ export function SettingsPlatformSkills() {
                 data-testid="ps-github-candidates-hint"
               />
               <Select
+                mode="multiple"
                 showSearch
-                value={ghSkill || undefined}
-                onChange={(v) => setGhSkill(v)}
+                value={ghSelected}
+                onChange={(v) => setGhSelected(v)}
                 placeholder={t("platform_skills.github_pick_ph")}
                 options={ghCandidates.map((c) => ({ label: c, value: c }))}
                 data-testid="ps-github-skill-select"
               />
-            </label>
+              {ghResults !== null && (
+                <div
+                  style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}
+                  data-testid="ps-github-results"
+                >
+                  {ghResults.map((r) => (
+                    <div
+                      key={r.skill}
+                      style={{ display: "flex", alignItems: "center", gap: 8 }}
+                    >
+                      <Tag color={GH_RESULT_COLOR[r.status]}>
+                        {t(`platform_skills.github_result_${r.status}`)}
+                      </Tag>
+                      <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}>
+                        {r.skill}
+                      </Text>
+                      {r.reason && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {r.reason}
+                        </Text>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           ) : (
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <Text style={{ fontSize: 12, fontWeight: 600 }}>

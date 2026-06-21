@@ -1072,3 +1072,113 @@ async def test_import_from_github_rejects_non_github_source(ctx: _Ctx) -> None:
         headers=ctx.admin_headers,
     )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Batch import from GitHub — multi-select, partial success
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_batch_import_creates_multiple(ctx: _Ctx, monkeypatch) -> None:
+    archive = _github_archive(
+        "skills",
+        "HEAD",
+        {
+            "skills/find-skills/SKILL.md": _skill_md("find-skills"),
+            "skills/other/SKILL.md": _skill_md("other"),
+            "skills/third/SKILL.md": _skill_md("third"),
+        },
+    )
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github/batch",
+        json={"source": "vercel-labs/skills", "skills": ["skills/find-skills", "skills/other"]},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    results = resp.json()["results"]
+    assert {r["skill"]: r["status"] for r in results} == {
+        "skills/find-skills": "created",
+        "skills/other": "created",
+    }
+    assert {r["name"] for r in results} == {"find-skills", "other"}
+
+    page = await ctx.audit_store.query(AuditQuery(tenant_id=ctx.admin_tenant, limit=50))
+    created = [r for r in page.entries if r.action == AuditAction.SKILL_CREATE]
+    assert len(created) == 2
+    assert all(r.details["source"] == "github_batch_import" for r in created)
+
+
+@pytest.mark.asyncio
+async def test_batch_import_partial_success(ctx: _Ctx, monkeypatch) -> None:
+    """One requested skill missing from the repo → ``failed``; the rest still
+    import (partial success)."""
+    archive = _github_archive(
+        "skills", "HEAD", {"skills/find-skills/SKILL.md": _skill_md("find-skills")}
+    )
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github/batch",
+        json={"source": "vercel-labs/skills", "skills": ["skills/find-skills", "skills/ghost"]},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    by_skill = {r["skill"]: r for r in resp.json()["results"]}
+    assert by_skill["skills/find-skills"]["status"] == "created"
+    assert by_skill["skills/ghost"]["status"] == "failed"
+    assert by_skill["skills/ghost"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_batch_import_dedupes_requested(ctx: _Ctx, monkeypatch) -> None:
+    archive = _github_archive(
+        "skills", "HEAD", {"skills/find-skills/SKILL.md": _skill_md("find-skills")}
+    )
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github/batch",
+        json={
+            "source": "vercel-labs/skills",
+            "skills": ["skills/find-skills", "skills/find-skills"],
+        },
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    results = resp.json()["results"]
+    assert len(results) == 1  # de-duped
+
+
+@pytest.mark.asyncio
+async def test_batch_import_tenant_principal_forbidden(ctx: _Ctx) -> None:
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github/batch",
+        json={"source": "vercel-labs/skills", "skills": ["skills/find-skills"]},
+        headers=ctx.tenant_headers,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_batch_import_rejects_non_github_source(ctx: _Ctx) -> None:
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import-from-github/batch",
+        json={"source": "https://evil.example.com/o/r", "skills": ["x"]},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 400
