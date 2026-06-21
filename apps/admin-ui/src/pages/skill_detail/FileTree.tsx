@@ -51,60 +51,71 @@ function buildTree(paths: readonly string[], t: (k: string) => string): DataNode
     },
   ];
 
-  // Group by top-level segment: e.g. "reference/foo.md" → group "reference"
-  // with leaf "foo.md".
-  const grouped = new Map<string, string[]>();
-  const topLevel: string[] = [];
+  // Build a fully nested folder tree from the slash-delimited paths. Deep
+  // skills (e.g. anthropics/skills pptx ships
+  // ``scripts/office/schemas/ecma/fouth-edition/*.xsd``) must render as real
+  // nested subfolders, not flat full-path leaves — the old single-level
+  // grouping dumped everything below the first segment as one flat list.
+  interface MutDir {
+    dirs: Map<string, MutDir>;
+    files: string[];
+  }
+  const mutRoot: MutDir = { dirs: new Map(), files: [] };
   for (const p of paths) {
-    const slash = p.indexOf("/");
-    if (slash < 0) {
-      topLevel.push(p);
-    } else {
-      const dir = p.slice(0, slash);
-      const arr = grouped.get(dir) ?? [];
-      arr.push(p);
-      grouped.set(dir, arr);
+    const segs = p.split("/");
+    let node = mutRoot;
+    for (let i = 0; i < segs.length - 1; i++) {
+      const seg = segs[i];
+      let child = node.dirs.get(seg);
+      if (child === undefined) {
+        child = { dirs: new Map(), files: [] };
+        node.dirs.set(seg, child);
+      }
+      node = child;
     }
+    node.files.push(p);
   }
 
-  // Stable order: directories alphabetically, then top-level files.
-  for (const dir of Array.from(grouped.keys()).sort()) {
-    const children = (grouped.get(dir) ?? []).slice().sort();
-    root.push({
-      key: `dir:${dir}`,
-      title: (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <Folder size={13} strokeWidth={1.5} />
-          <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}>{dir}/</Text>
-        </span>
-      ),
-      selectable: false,
-      children: children.map((path) => ({
+  // Render recursively: folders first (alphabetical), then files
+  // (alphabetical). Folder keys carry the full path (``dir:scripts/office``)
+  // so expand state + selection never collide across same-named subfolders.
+  const toNodes = (node: MutDir, prefix: string): DataNode[] => {
+    const out: DataNode[] = [];
+    const sortedDirs = Array.from(node.dirs.entries()).sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
+    for (const [seg, child] of sortedDirs) {
+      const childPrefix = prefix ? `${prefix}/${seg}` : seg;
+      out.push({
+        key: `dir:${childPrefix}`,
+        title: (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Folder size={13} strokeWidth={1.5} />
+            <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}>{seg}/</Text>
+          </span>
+        ),
+        selectable: false,
+        children: toNodes(child, childPrefix),
+      });
+    }
+    for (const path of node.files.slice().sort()) {
+      const name = path.slice(path.lastIndexOf("/") + 1);
+      out.push({
         key: path,
         title: (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <FileCode2 size={12} strokeWidth={1.5} />
-            <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}>
-              {path.slice(dir.length + 1)}
-            </Text>
+            <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}>{name}</Text>
           </span>
         ),
         isLeaf: true,
-      })),
-    });
-  }
+      });
+    }
+    return out;
+  };
 
-  for (const path of topLevel.sort()) {
-    root.push({
-      key: path,
-      title: (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <FileCode2 size={13} strokeWidth={1.5} />
-          <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}>{path}</Text>
-        </span>
-      ),
-      isLeaf: true,
-    });
+  for (const node of toNodes(mutRoot, "")) {
+    root.push(node);
   }
 
   // Pseudo "+ Add file" leaf (sentinel key — the click handler
@@ -141,10 +152,15 @@ export function FileTree({
   const { t } = useTranslation();
   const treeData = useMemo(() => buildTree(paths, t), [paths, t]);
   const expandedKeys = useMemo(() => {
+    // Expand every ancestor directory so the full nested tree is visible.
     const dirs = new Set<string>();
     for (const p of paths) {
-      const slash = p.indexOf("/");
-      if (slash > 0) dirs.add(`dir:${p.slice(0, slash)}`);
+      const segs = p.split("/");
+      let prefix = "";
+      for (let i = 0; i < segs.length - 1; i++) {
+        prefix = prefix ? `${prefix}/${segs[i]}` : segs[i];
+        dirs.add(`dir:${prefix}`);
+      }
     }
     return Array.from(dirs);
   }, [paths]);
