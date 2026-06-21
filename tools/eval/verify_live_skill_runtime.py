@@ -168,8 +168,6 @@ async def register_agent(
 
 # ── Phase 2 — auto-mount proof ───────────────────────────────────────────────
 
-_SENTINEL = "HELIX_SEED_OK"
-
 
 async def _create_session(client: httpx.AsyncClient, name: str, version: str) -> str:
     resp = await client.post("/v1/sessions", json={"agent_name": name, "agent_version": version})
@@ -233,18 +231,22 @@ async def phase_mount(client: httpx.AsyncClient, *, agent: str, skill_name: str)
     print(f"  session: {thread_id}")
 
     target = f"/workspace/skills/{skill_name}/SKILL.md"
+    # Probe via read_file (read-only → NOT approval-gated, unlike bash/exec_python
+    # which declare side_effect=irreversible and would pause the run on approval).
+    # read_file acquires a seeded sandbox too, so a successful read proves the
+    # auto-mount. A present SKILL.md starts with the frontmatter `name: <skill>`.
     prompt = (
-        "Use the bash tool to run EXACTLY this command and report its full output "
-        f"verbatim:\n`if [ -f {target} ]; then echo {_SENTINEL}; head -3 {target}; "
-        f"else echo MISSING; ls -la /workspace/skills 2>&1; fi`"
+        f"Use the read_file tool to read the file {target} and report its content "
+        "verbatim. If the tool errors, report the exact error."
     )
+    sentinel = f"name: {skill_name}"
     tr = await _run_collect(client, thread_id, prompt)
     joined = "\n".join(tr.tool_texts)
     print(f"  sse events: {tr.events}")
-    print(f"  bash tool messages: {len(tr.tool_texts)}")
+    print(f"  tool messages: {len(tr.tool_texts)}")
 
-    if _SENTINEL in joined:
-        print(f"  PASS — {target} is present in the sandbox (auto-mount works).")
+    if sentinel in joined:
+        print(f"  PASS — {target} read back from the sandbox (auto-mount works).")
         return True
 
     print("  FAIL — seeded SKILL.md not confirmed. Diagnostics:")

@@ -14,7 +14,7 @@ apiVersion: helix.io/v1
 kind: Agent
 metadata:
   name: pptx-skill-test
-  version: '1.0.0'
+  version: '1.0.1'
   tenant: canonical
 spec:
   description: >-
@@ -37,6 +37,11 @@ spec:
       bundled files are on disk under /workspace/skills/pptx/.
 
   tools:
+    # read_file / list_dir are read-only (not side_effect=irreversible) so they
+    # are NOT approval-gated — the verify probe uses read_file. bash/exec_python
+    # ARE auto-gated (irreversible), so they'd pause the run on approval.
+    - { type: builtin, name: read_file }
+    - { type: builtin, name: list_dir }
     - { type: builtin, name: exec_python }
     - { type: builtin, name: bash }
 
