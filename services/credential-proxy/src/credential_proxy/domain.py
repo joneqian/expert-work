@@ -9,6 +9,11 @@ from uuid import UUID
 #: ``credential_proxy_audit.status`` values.
 ProxyStatus = Literal["ok", "cached", "denied", "secret_miss"]
 
+#: ``sandbox_egress_audit.verdict`` values.
+EgressVerdict = Literal[
+    "allowed", "blocked_ssrf", "blocked_allowlist", "blocked_auth", "upstream_error"
+]
+
 
 @dataclass(frozen=True)
 class ForwardRequest:
@@ -50,6 +55,24 @@ class ProxyAuditEntry:
     inject_kind: str | None = None
     error_msg: str | None = None
     duration_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class EgressAuditEntry:
+    """One row for ``sandbox_egress_audit`` — host + volume + verdict, never
+    payload (HTTPS is tunnelled; the proxy never sees plaintext)."""
+
+    tenant_id: UUID
+    target_host: str
+    target_port: int
+    verdict: EgressVerdict
+    agent_name: str | None = None
+    agent_version: str | None = None
+    sandbox_id: str | None = None
+    bytes_up: int = 0
+    bytes_down: int = 0
+    duration_ms: int | None = None
+    error_msg: str | None = None
 
 
 @dataclass(frozen=True)

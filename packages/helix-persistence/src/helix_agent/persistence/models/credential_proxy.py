@@ -69,3 +69,40 @@ class CredentialProxyAuditRow(Base):
         ),
         Index("credential_proxy_audit_session_idx", "session_id"),
     )
+
+
+class SandboxEgressAuditRow(Base):
+    """One sandbox→internet connection through the transparent egress proxy.
+
+    Records host + port + byte volumes + verdict — never payload (HTTPS is
+    tunnelled, the proxy never sees plaintext). The audit-over-blocking record
+    (sandbox-egress design §3.1).
+    """
+
+    __tablename__ = "sandbox_egress_audit"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    agent_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sandbox_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_host: Mapped[str] = mapped_column(Text, nullable=False)
+    target_port: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: allowed / blocked_ssrf / blocked_allowlist / blocked_auth / upstream_error.
+    verdict: Mapped[str] = mapped_column(Text, nullable=False)
+    bytes_up: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    bytes_down: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "sandbox_egress_audit_tenant_time_idx",
+            "tenant_id",
+            text("occurred_at DESC"),
+        ),
+        Index("sandbox_egress_audit_host_idx", "target_host"),
+    )

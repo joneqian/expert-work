@@ -40,3 +40,15 @@ class CredentialProxySettings(BaseSettings):
 
     # -------------------------------------------------------------- upstream
     upstream_timeout_s: float = Field(default=60.0, gt=0, le=600)
+
+    # ---------------------------------------------------------- egress proxy
+    #: Transparent CONNECT egress proxy (sandbox-egress design §3.1). On by
+    #: default — egress is allowed + audited, not walled (the operator-set
+    #: "audit over blocking" posture). A sandbox reaches it only when the
+    #: supervisor injects ``HTTPS_PROXY`` + a valid per-sandbox token.
+    egress_enabled: bool = True
+    egress_port: int = Field(default=8081, gt=0, le=65535)
+    #: HMAC secret shared with the supervisor (which mints the per-sandbox
+    #: egress token). Dev default; set a real value in deploy.
+    egress_token_secret: str = "dev-egress-token-secret-rotate-me"  # noqa: S105 — dev default
+    egress_connect_timeout_s: float = Field(default=10.0, gt=0, le=120)

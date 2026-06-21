@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import socket
 from urllib.parse import urlparse
 
 _LOCALHOST_NAMES = frozenset(
@@ -89,3 +90,58 @@ def validate_remote_url(
         raise RemoteURLError(msg)
 
     return url
+
+
+def resolve_and_pin_host(host: str, port: int = 443) -> str:
+    """Resolve ``host`` and return a single safe, **pinned** IP to connect to.
+
+    Unlike :func:`validate_remote_url` (static, no DNS), this is for the egress
+    proxy's connect-out: it resolves the name, rejects the connection if *any*
+    resolved address is private/loopback/link-local/metadata, and returns the
+    first allowed IP. The caller MUST connect to that returned IP (not re-resolve
+    the name) — pinning is what closes the DNS-rebind window between check and
+    connect (the gap :func:`validate_remote_url` leaves to the infra layer).
+
+    Raises :class:`RemoteURLError` on a localhost name, a non-canonical IP
+    literal, a blocked address, or an unresolvable host.
+    """
+    cleaned = host.rstrip(".")
+    if cleaned.lower() in _LOCALHOST_NAMES:
+        msg = f"localhost address {cleaned!r} not allowed"
+        raise RemoteURLError(msg)
+
+    # Reject the non-canonical IP literals ``ipaddress`` would refuse but an
+    # HTTP/socket stack may accept as a private addr (decimal/hex/octal forms).
+    if (
+        re.fullmatch(r"[0-9.]+", cleaned) or re.fullmatch(r"0[xX][0-9a-fA-F]+", cleaned)
+    ) and not _is_canonical_ip(cleaned):
+        msg = f"non-canonical IP literal {cleaned!r} not allowed"
+        raise RemoteURLError(msg)
+
+    try:
+        infos = socket.getaddrinfo(cleaned, port, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        msg = f"could not resolve host {cleaned!r}: {exc}"
+        raise RemoteURLError(msg) from exc
+
+    for info in infos:
+        addr = info[4][0]
+        ip = ipaddress.ip_address(addr)
+        if _ip_is_blocked(ip):
+            # Any blocked address among the results aborts — refuse to "pick a
+            # good one" when a name also resolves to a private target.
+            msg = f"host {cleaned!r} resolves to a blocked address {addr!r}"
+            raise RemoteURLError(msg)
+
+    if not infos:
+        msg = f"host {cleaned!r} did not resolve to any address"
+        raise RemoteURLError(msg)
+    return str(infos[0][4][0])
+
+
+def _is_canonical_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True

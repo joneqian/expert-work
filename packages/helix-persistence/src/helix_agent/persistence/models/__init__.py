@@ -10,6 +10,7 @@ from helix_agent.persistence.models.audit_log import AuditLogRow
 from helix_agent.persistence.models.backup_record import BackupRecordRow
 from helix_agent.persistence.models.credential_proxy import (
     CredentialProxyAuditRow,
+    SandboxEgressAuditRow,
     SecretAllowlistRow,
 )
 from helix_agent.persistence.models.dr_drill import DrDrillRow
@@ -109,6 +110,7 @@ __all__ = [
     "PlatformToolSecretRow",
     "RoleBindingRow",
     "RunEventRow",
+    "SandboxEgressAuditRow",
     "SandboxInstanceRow",
     "SecretAllowlistRow",
     "ServiceAccountRow",

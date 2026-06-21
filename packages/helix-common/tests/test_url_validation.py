@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
+from helix_agent.common.url_validation import (
+    RemoteURLError,
+    resolve_and_pin_host,
+    validate_remote_url,
+)
 
 
 @pytest.mark.parametrize(
@@ -79,3 +83,53 @@ def test_rejects_ssrf_bypass_variants(url: str) -> None:
 def test_accepts_public_dns_name_with_digits() -> None:
     url = "https://api2.example.com/mcp"
     assert validate_remote_url(url) == url
+
+
+# ── resolve_and_pin_host (egress proxy connect-out) ──────────────────────────
+
+
+def test_resolve_and_pin_returns_pinned_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Stub getaddrinfo so the test does no real DNS — public IP → pinned.
+    monkeypatch.setattr(
+        "helix_agent.common.url_validation.socket.getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 443))],
+    )
+    assert resolve_and_pin_host("example.com", 443) == "93.184.216.34"
+
+
+def test_resolve_and_pin_blocks_private_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A name that resolves to a private IP (DNS-rebind shape) is refused.
+    monkeypatch.setattr(
+        "helix_agent.common.url_validation.socket.getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("10.0.0.5", 443))],
+    )
+    with pytest.raises(RemoteURLError):
+        resolve_and_pin_host("rebind.example.com", 443)
+
+
+def test_resolve_and_pin_blocks_metadata_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "helix_agent.common.url_validation.socket.getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("169.254.169.254", 80))],
+    )
+    with pytest.raises(RemoteURLError):
+        resolve_and_pin_host("metadata", 80)
+
+
+def test_resolve_and_pin_blocks_localhost_name() -> None:
+    with pytest.raises(RemoteURLError):
+        resolve_and_pin_host("localhost", 443)
+
+
+def test_resolve_and_pin_blocks_noncanonical_literal() -> None:
+    with pytest.raises(RemoteURLError):
+        resolve_and_pin_host("2130706433", 443)  # decimal 127.0.0.1
+
+
+def test_resolve_and_pin_unresolvable_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _boom(*_a: object, **_k: object) -> list[object]:
+        raise OSError("nxdomain")
+
+    monkeypatch.setattr("helix_agent.common.url_validation.socket.getaddrinfo", _boom)
+    with pytest.raises(RemoteURLError):
+        resolve_and_pin_host("nope.invalid", 443)

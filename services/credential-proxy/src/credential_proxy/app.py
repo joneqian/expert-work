@@ -7,13 +7,15 @@ routes are exercised without a DB or real upstreams.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from uuid import UUID
 
 from aiohttp import ClientError, web
 
 from credential_proxy.allowlist import AllowlistStore, DbAllowlistStore
-from credential_proxy.audit import DbProxyAuditStore
+from credential_proxy.audit import DbEgressAuditStore, DbProxyAuditStore
 from credential_proxy.cache import SecretCache
 from credential_proxy.domain import (
     AllowlistDeniedError,
@@ -22,6 +24,7 @@ from credential_proxy.domain import (
     ForwardRequest,
     SecretMissingError,
 )
+from credential_proxy.egress_proxy import EgressProxyServer
 from credential_proxy.forwarder import AiohttpForwarder
 from credential_proxy.proxy import CredentialProxy
 from credential_proxy.settings import CredentialProxySettings
@@ -39,6 +42,9 @@ ALLOWLIST_KEY: web.AppKey[AllowlistStore] = web.AppKey("allowlist", AllowlistSto
 CACHE_KEY: web.AppKey[SecretCache] = web.AppKey("cache", SecretCache)
 _ENGINE_KEY: web.AppKey[object] = web.AppKey("engine", object)
 _FORWARDER_KEY: web.AppKey[AiohttpForwarder] = web.AppKey("forwarder", AiohttpForwarder)
+_EGRESS_SERVER_KEY: web.AppKey[asyncio.AbstractServer] = web.AppKey(
+    "egress_server", asyncio.AbstractServer
+)
 
 #: Hop-by-hop / body-framing response headers the proxy must not relay
 #: verbatim — aiohttp recomputes framing from the (decompressed) body.
@@ -101,10 +107,29 @@ def _make_startup(settings: CredentialProxySettings):  # type: ignore[no-untyped
         # CodeQL's clear-text-logging query taints any `secret*`-named field.
         logger.info("credential_proxy.start")
 
+        # Transparent egress proxy on its own port + asyncio listener, same
+        # event loop (sandbox-egress §3.1). Audited, on by default.
+        if settings.egress_enabled:
+            egress = EgressProxyServer(
+                token_secret=settings.egress_token_secret,
+                audit=DbEgressAuditStore(session_factory),
+                now=_wall_clock,
+                connect_timeout_s=settings.egress_connect_timeout_s,
+            )
+            app[_EGRESS_SERVER_KEY] = await egress.start(settings.host, settings.egress_port)
+
     return _startup
 
 
+def _wall_clock() -> float:
+    return time.time()
+
+
 async def _cleanup(app: web.Application) -> None:
+    egress_server = app.get(_EGRESS_SERVER_KEY)
+    if egress_server is not None:
+        egress_server.close()
+        await egress_server.wait_closed()
     await app[_FORWARDER_KEY].aclose()
     engine = app[_ENGINE_KEY]
     await engine.dispose()  # type: ignore[attr-defined]

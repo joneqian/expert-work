@@ -12,8 +12,8 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from credential_proxy.domain import ProxyAuditEntry
-from helix_agent.persistence.models import CredentialProxyAuditRow
+from credential_proxy.domain import EgressAuditEntry, ProxyAuditEntry
+from helix_agent.persistence.models import CredentialProxyAuditRow, SandboxEgressAuditRow
 
 logger = logging.getLogger(__name__)
 
@@ -59,4 +59,48 @@ class DbProxyAuditStore:
                 "credential_proxy_audit.write_failed tenant=%s status=%s",
                 entry.tenant_id,
                 entry.status,
+            )
+
+
+class EgressAuditStore(Protocol):
+    """Sink for ``sandbox_egress_audit`` rows."""
+
+    async def record(self, entry: EgressAuditEntry) -> None:
+        """Persist one egress-connection audit row."""
+
+
+class DbEgressAuditStore:
+    """SQL-backed :class:`EgressAuditStore` over ``sandbox_egress_audit``.
+
+    Best-effort, mirrors :class:`DbProxyAuditStore`: a write failure is logged,
+    never raised — an audit fault must not break the tunnel.
+    """
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._sf = session_factory
+
+    async def record(self, entry: EgressAuditEntry) -> None:
+        try:
+            async with self._sf() as session:
+                session.add(
+                    SandboxEgressAuditRow(
+                        tenant_id=entry.tenant_id,
+                        agent_name=entry.agent_name,
+                        agent_version=entry.agent_version,
+                        sandbox_id=entry.sandbox_id,
+                        target_host=entry.target_host,
+                        target_port=entry.target_port,
+                        verdict=entry.verdict,
+                        bytes_up=entry.bytes_up,
+                        bytes_down=entry.bytes_down,
+                        duration_ms=entry.duration_ms,
+                        error_msg=entry.error_msg,
+                    )
+                )
+                await session.commit()
+        except Exception:
+            logger.exception(
+                "sandbox_egress_audit.write_failed tenant=%s verdict=%s",
+                entry.tenant_id,
+                entry.verdict,
             )
