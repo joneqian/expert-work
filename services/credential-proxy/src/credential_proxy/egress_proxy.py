@@ -237,12 +237,15 @@ async def _tunnel(
                 dst.write(data)
                 await dst.drain()
         except (OSError, asyncio.CancelledError):
+            # Either side dropping the connection ends the pump — expected at
+            # tunnel teardown, nothing to recover.
             pass
         finally:
             if dst.can_write_eof():
                 try:
                     dst.write_eof()
                 except OSError:
+                    # Peer already closed its read end — best-effort EOF.
                     pass
 
     await asyncio.gather(
@@ -265,6 +268,7 @@ async def _write_raw(writer: asyncio.StreamWriter, data: bytes) -> None:
         writer.write(data)
         await writer.drain()
     except OSError:
+        # Client already gone — the status/handshake write is best-effort.
         pass
 
 
@@ -274,6 +278,7 @@ async def _close_writer(writer: asyncio.StreamWriter) -> None:
             writer.close()
         await writer.wait_closed()
     except OSError:
+        # Socket already torn down — closing is idempotent / best-effort.
         pass
 
 
