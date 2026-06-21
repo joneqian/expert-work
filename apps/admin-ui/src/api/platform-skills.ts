@@ -189,6 +189,42 @@ export async function importPlatformSkillFromGithub(
   return response.data;
 }
 
+/** ``POST /v1/platform/skills/import-from-github/batch`` request body —
+ *  ``skills`` is a list of folder paths/basenames to import in one pass. */
+export interface BatchImportFromGithubBody {
+  source: string;
+  skills: string[];
+  ref?: string;
+}
+
+/** One per-skill outcome in a batch import. ``status`` is ``created`` (new
+ *  version written), ``exists`` (idempotent no-op), or ``failed`` (with a
+ *  path-free ``reason``). */
+export interface BatchImportResult {
+  skill: string;
+  status: "created" | "exists" | "failed";
+  name?: string;
+  version?: number;
+  reason?: string;
+}
+
+export interface BatchImportFromGithubResponse {
+  results: BatchImportResult[];
+}
+
+/** ``POST /v1/platform/skills/import-from-github/batch`` — import multiple
+ *  skills from one repo. Downloads the archive once; partial success (a failed
+ *  skill doesn't abort the batch). */
+export async function importPlatformSkillsFromGithubBatch(
+  body: BatchImportFromGithubBody,
+): Promise<BatchImportFromGithubResponse> {
+  const response = await apiClient.post<BatchImportFromGithubResponse>(
+    "/v1/platform/skills/import-from-github/batch",
+    body,
+  );
+  return response.data;
+}
+
 /** ``PATCH /v1/platform/skills/{id}`` — set status and/or pinned. */
 export async function patchPlatformSkill(
   id: string,
