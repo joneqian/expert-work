@@ -185,6 +185,7 @@ class _RunTrace:
         self.assistant_text: str = ""
         self.errors: list[str] = []
         self.events: dict[str, int] = {}
+        self.raw_updates: list[str] = []
 
 
 async def _run_collect(client: httpx.AsyncClient, thread_id: str, prompt: str) -> _RunTrace:
@@ -205,6 +206,8 @@ async def _run_collect(client: httpx.AsyncClient, thread_id: str, prompt: str) -
                 if event in ("error", "run_error"):
                     tr.errors.append(raw[:300])
                     continue
+                if event == "updates":
+                    tr.raw_updates.append(raw)
                 try:
                     payload = json.loads(raw)
                 except json.JSONDecodeError:
@@ -257,6 +260,12 @@ async def phase_mount(client: httpx.AsyncClient, *, agent: str, skill_name: str)
     if tr.assistant_text:
         print("  assistant said:")
         print("    " + tr.assistant_text[:500].replace("\n", "\n    "))
+    if not tr.tool_texts and not tr.assistant_text:
+        # Parser extracted nothing — dump raw `updates` so we can see what the
+        # run actually streamed (error-in-state? different message shape?).
+        print("  raw updates (nothing parsed — shape/error dump):")
+        for raw in tr.raw_updates[:5]:
+            print("    " + raw[:500].replace("\n", "\n    "))
     return False
 
 
