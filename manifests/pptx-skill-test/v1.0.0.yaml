@@ -14,7 +14,7 @@ apiVersion: helix.io/v1
 kind: Agent
 metadata:
   name: pptx-skill-test
-  version: '1.0.1'
+  version: '1.0.2'
   tenant: canonical
 spec:
   description: >-
@@ -50,7 +50,9 @@ spec:
 
   sandbox:
     runtime: gvisor
-    image_variant: office # pptx scripts need pandas/Pillow → office image
+    # Auto-mount proof only reads the seeded SKILL.md → the minimal image is
+    # enough (and is always built by `make dev-up`). For real pptx GENERATION
+    # add `image_variant: office` (needs the office image built on the host).
     resources:
       cpu: '1.0'
       memory: 1Gi

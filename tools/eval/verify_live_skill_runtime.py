@@ -179,7 +179,7 @@ class _RunTrace:
     """What the SSE stream revealed — to tell apart 'no bash call' from a run error."""
 
     def __init__(self) -> None:
-        self.tool_texts: list[str] = []
+        self.tool_msgs: list[tuple[str, str]] = []  # (tool_name, text)
         self.assistant_text: str = ""
         self.errors: list[str] = []
         self.events: dict[str, int] = {}
@@ -213,7 +213,7 @@ async def _run_collect(client: httpx.AsyncClient, thread_id: str, prompt: str) -
                 for msg in _iter_messages(payload):
                     mtype = _message_type(msg)
                     if mtype in ("tool", "ToolMessage"):
-                        tr.tool_texts.append(_content_text(msg))
+                        tr.tool_msgs.append((str(msg.get("name") or "?"), _content_text(msg)))
                     elif mtype in ("ai", "AIMessage", "AIMessageChunk", "assistant"):
                         text = _content_text(msg)
                         if text.strip():
@@ -232,42 +232,42 @@ async def phase_mount(client: httpx.AsyncClient, *, agent: str, skill_name: str)
 
     target = f"/workspace/skills/{skill_name}/SKILL.md"
     # Probe via read_file (read-only → NOT approval-gated, unlike bash/exec_python
-    # which declare side_effect=irreversible and would pause the run on approval).
-    # read_file acquires a seeded sandbox too, so a successful read proves the
-    # auto-mount. A present SKILL.md starts with the frontmatter `name: <skill>`.
+    # which declare side_effect=irreversible and pause the run on approval).
+    # read_file acquires a SEEDED sandbox and reads off its filesystem — so a
+    # successful read is direct proof of the auto-mount. Crucially we accept ONLY
+    # a read_file/list_dir result: if the sandbox fails the agent may fall back
+    # to skill_view (which reads the DB, NOT the filesystem) — that must NOT count.
     prompt = (
-        f"Use the read_file tool to read the file {target} and report its content "
-        "verbatim. If the tool errors, report the exact error."
+        f"Use the read_file tool (NOT skill_view) to read the file {target} and "
+        "report its content verbatim. If the tool errors, report the exact error."
     )
-    sentinel = f"name: {skill_name}"
     tr = await _run_collect(client, thread_id, prompt)
-    joined = "\n".join(tr.tool_texts)
     print(f"  sse events: {tr.events}")
-    print(f"  tool messages: {len(tr.tool_texts)}")
+    print(f"  tools called: {[n for n, _ in tr.tool_msgs]}")
 
-    if sentinel in joined:
-        print(f"  PASS — {target} read back from the sandbox (auto-mount works).")
+    sandbox_reads = [
+        text
+        for tool, text in tr.tool_msgs
+        if tool in ("read_file", "list_dir") and "[tool error]" not in text
+    ]
+    if any(("name:" in t or "skill" in t.lower()) and len(t) > 40 for t in sandbox_reads):
+        print(f"  PASS — {target} read off the sandbox filesystem (auto-mount works).")
         return True
 
-    print("  FAIL — seeded SKILL.md not confirmed. Diagnostics:")
-    if tr.errors:
-        print("  run errors:")
-        for e in tr.errors:
-            print(f"    ! {e}")
-    if tr.tool_texts:
-        print("  tool output:")
-        print("    " + joined[:600].replace("\n", "\n    "))
-    else:
-        print("  <no tool calls — model didn't call bash, or the run errored before tools>")
+    print("  FAIL — couldn't read the seeded file off the sandbox filesystem. Diagnostics:")
+    for tool, text in tr.tool_msgs:
+        print(f"    [{tool}] {text[:200].replace(chr(10), ' ')}")
+    if not tr.tool_msgs:
+        print("    <no tool calls>")
     if tr.assistant_text:
         print("  assistant said:")
-        print("    " + tr.assistant_text[:500].replace("\n", "\n    "))
-    if not tr.tool_texts and not tr.assistant_text:
-        # Parser extracted nothing — dump raw `updates` so we can see what the
-        # run actually streamed (error-in-state? different message shape?).
-        print("  raw updates (nothing parsed — shape/error dump):")
-        for raw in tr.raw_updates[:5]:
-            print("    " + raw[:500].replace("\n", "\n    "))
+        print("    " + tr.assistant_text[:300].replace("\n", "\n    "))
+    print(
+        "  NOTE: a `[tool error] SandboxSupervisorError ... runner closed the "
+        "connection` means the sandbox didn't launch (office image missing or a "
+        "dev-stack sandbox/runtime issue) — not an auto-mount failure. Check the "
+        "sandbox-supervisor logs; try the minimal image (drop image_variant)."
+    )
     return False
 
 
