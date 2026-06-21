@@ -13,6 +13,8 @@ is unit-testable with fakes (test matrix #40 / #41 / #42 + exec).
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import time
 from datetime import UTC, datetime
@@ -28,6 +30,7 @@ from helix_agent.runtime.sandbox import SandboxResourceLimits, SandboxRuntimePro
 from sandbox_supervisor.docker_client import DockerClient, DockerError
 from sandbox_supervisor.domain import (
     DESTROY_REASON_RELEASE,
+    InvalidSeedFilesError,
     QuotaExceededError,
     SandboxNotFoundError,
     SandboxRecord,
@@ -46,7 +49,7 @@ from sandbox_supervisor.pool import (
 )
 from sandbox_supervisor.quota_enforcer import QuotaEnforcer
 from sandbox_supervisor.runner_link import ExecResult, RunnerLink, RunnerLinkError
-from sandbox_supervisor.schemas import AcquireRequest, AcquireResponse
+from sandbox_supervisor.schemas import AcquireRequest, AcquireResponse, SeedFile
 from sandbox_supervisor.settings import SandboxSupervisorSettings
 from sandbox_supervisor.store import SandboxStore
 
@@ -86,6 +89,12 @@ _container_name = container_name
 #: documents / code / data — small; the cap bounds the supervisor's
 #: in-memory buffer against a pathological file.
 _MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
+
+#: skill-runtime §5.1 — caps on ``seed_files`` (mirror the .skill package caps:
+#: 5 MiB total / 256 entries). The orchestrator already bounds this, but the
+#: supervisor re-checks at its trust boundary (the request round-trips untrusted).
+_MAX_SEED_TOTAL_BYTES = 5 * 1024 * 1024
+_MAX_SEED_FILES = 256
 
 
 def _validate_workspace_path(path: str) -> str:
@@ -163,6 +172,7 @@ class SandboxSupervisor:
                 request.tenant_id, request.user_id, request.image_variant
             )
             if reused is not None:
+                await self._seed_workspace(reused.container_id, request.seed_files)
                 return reused
 
         await self._enforce_quota(request.tenant_id)
@@ -176,6 +186,7 @@ class SandboxSupervisor:
         if request.user_id is None and self._pool is not None:
             claimed = await self._claim_pooled(request)
             if claimed is not None:
+                await self._seed_workspace(claimed.container_id, request.seed_files)
                 return claimed
 
         # A user-scoped acquire mounts that user's persistent workspace
@@ -233,12 +244,55 @@ class SandboxSupervisor:
                 "persistent_workspace": workspace is not None,
             },
         )
+        await self._seed_workspace(_container_name(record.id), request.seed_files)
         return AcquireResponse(
             sandbox_id=record.id,
             container_id=_container_name(record.id),
             cold_start=True,
             acquired_at=acquired_at,
         )
+
+    async def _seed_workspace(self, container_name_: str, seed_files: list[SeedFile]) -> None:
+        """Materialize ``seed_files`` into a running container's ``/workspace``
+        (skill-runtime §5.1). Validate path + caps (trust boundary; the request
+        round-trips untrusted), base64-decode, then ``docker cp``.
+
+        Bad input (unsafe path / bad base64 / over cap) → :class:`InvalidSeedFilesError`
+        (HTTP 400) — deterministic, reject the acquire. A docker-cp transport
+        failure degrades gracefully (log + continue): the skill files just aren't
+        on disk this call; ``skill_view`` still serves them as text.
+        """
+        if not seed_files:
+            return
+        if len(seed_files) > _MAX_SEED_FILES:
+            msg = f"too many seed files: {len(seed_files)} > {_MAX_SEED_FILES}"
+            raise InvalidSeedFilesError(msg)
+        decoded: list[tuple[str, bytes]] = []
+        total = 0
+        for sf in seed_files:
+            try:
+                path = _validate_workspace_path(sf.path)
+            except WorkspaceFileNotFoundError as exc:
+                raise InvalidSeedFilesError(str(exc)) from exc
+            try:
+                data = base64.b64decode(sf.content_b64, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                msg = f"seed file {sf.path!r} is not valid base64"
+                raise InvalidSeedFilesError(msg) from exc
+            total += len(data)
+            if total > _MAX_SEED_TOTAL_BYTES:
+                msg = f"seed files exceed the {_MAX_SEED_TOTAL_BYTES}-byte total cap"
+                raise InvalidSeedFilesError(msg)
+            decoded.append((path, data))
+        try:
+            await self._docker.seed_workspace(container_name_, files=decoded)
+        except DockerError as exc:
+            logger.warning(
+                "supervisor.seed_workspace_failed container=%s files=%d reason=%s",
+                container_name_,
+                len(decoded),
+                exc,
+            )
 
     async def exec(
         self, sandbox_id: UUID, *, code: str, timeout_s: int | None = None

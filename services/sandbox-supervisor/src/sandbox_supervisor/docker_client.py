@@ -12,12 +12,33 @@ stdio — the supervisor talks to the in-sandbox runner through that pipe.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import tarfile
 from typing import Protocol
 
 from sandbox_supervisor.runner_link import PipeRunnerLink, RunnerLink
 
 logger = logging.getLogger(__name__)
+
+
+def _build_seed_tar(files: list[tuple[str, bytes]]) -> bytes:
+    """Pack ``(relpath, bytes)`` pairs into an uncompressed tar for ``docker cp``.
+
+    Members are mode 0o755 (world-readable + executable) so the non-root sandbox
+    ``agent`` user can read/run them even though ``docker cp`` extracts as root.
+    Paths are relative (e.g. ``skills/pptx/SKILL.md``); ``docker cp -
+    <c>:/workspace`` extracts them under ``/workspace`` creating parent dirs.
+    """
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for path, data in files:
+            info = tarfile.TarInfo(name=path)
+            info.size = len(data)
+            info.mode = 0o755
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
 
 #: ``asyncio`` StreamReader buffer for a runner's stdout. Generous so a
 #: large (runner-capped, ~1 MiB) response line never overflows the
@@ -78,6 +99,17 @@ class DockerClient(Protocol):
         Stream J.15-补强-2 — called after a successful archive to free
         the disk. Idempotent — removing a missing volume is logged but
         does not raise.
+        """
+
+    async def seed_workspace(self, container_name: str, *, files: list[tuple[str, bytes]]) -> None:
+        """Copy ``files`` into a running container's ``/workspace`` (skill-runtime
+        §5.1 — materialize an agent's activated skill files so bundled scripts
+        run as authored).
+
+        Ephemeral ``/workspace`` is a per-container tmpfs that a side container
+        cannot mount, so this writes INTO the live container via ``docker cp -``
+        (tar on stdin). Covers all acquire paths (cold/pooled/reused) uniformly.
+        No-op for an empty list. Raises :class:`DockerError` on failure.
         """
 
     async def update_limits(
@@ -335,6 +367,26 @@ class CliDockerClient:
         if code != 0:
             detail = stderr.strip() or "non-zero exit"
             msg = f"docker update failed for {container_name!r}: {detail}"
+            raise DockerError(msg)
+
+    async def seed_workspace(self, container_name: str, *, files: list[tuple[str, bytes]]) -> None:
+        """Stream a tar of ``files`` into ``{container}:/workspace`` via ``docker cp -``."""
+        if not files:
+            return
+        tar_bytes = _build_seed_tar(files)
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "cp",
+            "-",
+            f"{container_name}:/workspace",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate(input=tar_bytes)
+        if proc.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace").strip() or "non-zero exit"
+            msg = f"workspace seed failed for {container_name!r}: {detail}"
             raise DockerError(msg)
 
     async def image_exists(self, image: str) -> bool:

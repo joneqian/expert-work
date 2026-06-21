@@ -27,6 +27,7 @@ from sandbox_supervisor.app import create_app
 from sandbox_supervisor.docker_client import DockerError
 from sandbox_supervisor.domain import (
     DESTROY_REASON_IDLE_TIMEOUT,
+    InvalidSeedFilesError,
     QuotaExceededError,
     SandboxNotFoundError,
     SandboxRecord,
@@ -48,7 +49,7 @@ from sandbox_supervisor.pool import (
 from sandbox_supervisor.quota_enforcer import QuotaEnforcer
 from sandbox_supervisor.reaper import SandboxReaper
 from sandbox_supervisor.runner_link import ExecResult, RunnerLinkError
-from sandbox_supervisor.schemas import AcquireRequest
+from sandbox_supervisor.schemas import AcquireRequest, SeedFile
 from sandbox_supervisor.settings import SandboxSupervisorSettings
 from sandbox_supervisor.supervisor import _MAX_ARTIFACT_BYTES, SandboxSupervisor
 
@@ -105,6 +106,7 @@ class RecordingDockerClient:
         update_error: DockerError | None = None,
         existing_images: set[str] | None = None,
         pull_error: DockerError | None = None,
+        seed_error: DockerError | None = None,
     ) -> None:
         self.launches: list[list[str]] = []
         self.removed: list[str] = []
@@ -123,6 +125,9 @@ class RecordingDockerClient:
         self._existing_images = existing_images if existing_images is not None else set()
         self._pull_error = pull_error
         self.pulled: list[str] = []
+        self._seed_error = seed_error
+        #: (container_name, [(path, bytes), ...]) for each seed_workspace call.
+        self.seeds: list[tuple[str, list[tuple[str, bytes]]]] = []
 
     async def launch(self, argv: list[str]) -> FakeRunnerLink:
         self.launches.append(argv)
@@ -163,6 +168,11 @@ class RecordingDockerClient:
         self.limit_updates.append((container_name, cpus, memory_mb, pids_limit))
         if self._update_error is not None:
             raise self._update_error
+
+    async def seed_workspace(self, container_name: str, *, files: list[tuple[str, bytes]]) -> None:
+        self.seeds.append((container_name, files))
+        if self._seed_error is not None:
+            raise self._seed_error
 
     async def image_exists(self, image: str) -> bool:
         return image in self._existing_images
@@ -317,12 +327,14 @@ def _acquire_request(
     *,
     user_id: UUID | None = None,
     image_variant: str | None = None,
+    seed_files: list[SeedFile] | None = None,
 ) -> AcquireRequest:
     return AcquireRequest(
         tenant_id=tenant_id or uuid4(),
         thread_id="t-1",
         user_id=user_id,
         image_variant=image_variant,
+        seed_files=seed_files or [],
     )
 
 
@@ -372,6 +384,89 @@ async def test_acquire_emits_sandbox_acquired_audit() -> None:
     entry = h.audit.entries[0]
     assert entry.action is AuditAction.SANDBOX_ACQUIRED
     assert entry.result is AuditResult.SUCCESS
+
+
+# ---------------------------------------------------------------------------
+# skill-runtime §5.1 — seed_files materialized into /workspace at acquire
+# ---------------------------------------------------------------------------
+
+
+def _seed(path: str, raw: bytes) -> SeedFile:
+    import base64
+
+    return SeedFile(path=path, content_b64=base64.b64encode(raw).decode())
+
+
+@pytest.mark.asyncio
+async def test_acquire_seeds_workspace_on_cold_start() -> None:
+    h = _harness()
+    files = [_seed("skills/pptx/SKILL.md", b"---\nname: pptx\n---\nrun it")]
+    response = await h.supervisor.acquire(_acquire_request(seed_files=files))
+
+    assert len(h.docker.seeds) == 1
+    container, seeded = h.docker.seeds[0]
+    assert container == response.container_id
+    assert seeded == [("skills/pptx/SKILL.md", b"---\nname: pptx\n---\nrun it")]
+
+
+@pytest.mark.asyncio
+async def test_acquire_no_seed_when_empty() -> None:
+    h = _harness()
+    await h.supervisor.acquire(_acquire_request())
+    assert h.docker.seeds == []  # back-compat: no seed_files → no cp
+
+
+@pytest.mark.asyncio
+async def test_acquire_seeds_reused_warm_session() -> None:
+    h = _harness()
+    tenant_id, user_id = uuid4(), uuid4()
+    # First acquire establishes a warm session for the user.
+    first = await h.supervisor.acquire(_acquire_request(tenant_id, user_id=user_id))
+    # Second acquire (same user) reuses it AND must still seed.
+    files = [_seed("skills/a/SKILL.md", b"x")]
+    second = await h.supervisor.acquire(
+        _acquire_request(tenant_id, user_id=user_id, seed_files=files)
+    )
+    assert second.sandbox_id == first.sandbox_id
+    assert second.cold_start is False
+    assert h.docker.seeds[-1] == (second.container_id, [("skills/a/SKILL.md", b"x")])
+
+
+@pytest.mark.asyncio
+async def test_acquire_rejects_seed_path_traversal() -> None:
+    h = _harness()
+    files = [_seed("../escape.py", b"x")]
+    with pytest.raises(InvalidSeedFilesError):
+        await h.supervisor.acquire(_acquire_request(seed_files=files))
+
+
+@pytest.mark.asyncio
+async def test_acquire_rejects_seed_bad_base64() -> None:
+    h = _harness()
+    bad = SeedFile(path="skills/a/x.py", content_b64="not!valid!base64!")
+    with pytest.raises(InvalidSeedFilesError):
+        await h.supervisor.acquire(_acquire_request(seed_files=[bad]))
+
+
+@pytest.mark.asyncio
+async def test_acquire_rejects_seed_over_total_cap() -> None:
+    from sandbox_supervisor.supervisor import _MAX_SEED_TOTAL_BYTES
+
+    h = _harness()
+    files = [_seed("skills/a/big.bin", b"\x00" * (_MAX_SEED_TOTAL_BYTES + 1))]
+    with pytest.raises(InvalidSeedFilesError):
+        await h.supervisor.acquire(_acquire_request(seed_files=files))
+
+
+@pytest.mark.asyncio
+async def test_acquire_degrades_when_seed_cp_fails() -> None:
+    # A docker-cp transport failure must NOT fail the acquire (skill_view is the
+    # fallback) — the sandbox still comes up.
+    h = _harness(docker=RecordingDockerClient(seed_error=DockerError("cp boom")))
+    files = [_seed("skills/a/SKILL.md", b"x")]
+    response = await h.supervisor.acquire(_acquire_request(seed_files=files))
+    assert response.sandbox_id is not None
+    assert h.store.rows[response.sandbox_id].state is SandboxState.IN_USE
 
 
 @pytest.mark.asyncio

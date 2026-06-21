@@ -13,6 +13,21 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class SeedFile(BaseModel):
+    """One file to materialize into the sandbox ``/workspace`` at acquire time.
+
+    skill-runtime §5.1 — an agent's activated skill files (SKILL.md + scripts +
+    reference) so bundled scripts run as authored. ``path`` is relative under
+    ``/workspace`` (e.g. ``skills/pptx/SKILL.md``); ``content_b64`` is the raw
+    bytes, base64-encoded.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    path: str = Field(min_length=1, max_length=256)
+    content_b64: str
+
+
 class AcquireRequest(BaseModel):
     """Request body for ``POST /v1/sandboxes:acquire``."""
 
@@ -20,6 +35,9 @@ class AcquireRequest(BaseModel):
 
     tenant_id: UUID
     thread_id: str
+    #: skill-runtime §5.1 — files to seed into ``/workspace`` before first exec.
+    #: Empty (default) → no seeding (pre-feature behaviour).
+    seed_files: list[SeedFile] = Field(default_factory=list)
     #: Owning user (Stream J.15). When set, the sandbox mounts that
     #: user's persistent workspace volume at ``/workspace``; omitted →
     #: an ephemeral tmpfs workspace (the pre-J.15 behaviour).

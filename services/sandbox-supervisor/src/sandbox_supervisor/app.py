@@ -35,6 +35,7 @@ from helix_agent.runtime.sandbox import make_sandbox_runtime_provider
 from helix_agent.runtime.storage import ObjectStore, S3CompatibleConfig, make_object_store
 from sandbox_supervisor.docker_client import CliDockerClient
 from sandbox_supervisor.domain import (
+    InvalidSeedFilesError,
     QuotaExceededError,
     SandboxNotFoundError,
     SupervisorError,
@@ -374,6 +375,10 @@ def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(WorkspaceFileTooLargeError)
     async def _file_too_large(_request: Request, exc: WorkspaceFileTooLargeError) -> JSONResponse:
         return JSONResponse(status_code=413, content={"detail": str(exc)})
+
+    @app.exception_handler(InvalidSeedFilesError)
+    async def _invalid_seed_files(_request: Request, exc: InvalidSeedFilesError) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     @app.exception_handler(SupervisorError)
     async def _supervisor_error(_request: Request, exc: SupervisorError) -> JSONResponse:

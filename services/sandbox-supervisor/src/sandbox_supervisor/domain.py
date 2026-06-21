@@ -112,6 +112,12 @@ class WorkspaceFileTooLargeError(SupervisorError):
     """A workspace file exceeds the supervisor's download size cap (J.9)."""
 
 
+class InvalidSeedFilesError(SupervisorError):
+    """The acquire's ``seed_files`` are malformed (bad base64, unsafe path, or
+    over the count/total-bytes cap). skill-runtime §5.1 — a deterministic client
+    error → HTTP 400."""
+
+
 class WorkspaceQuotaExceededError(SupervisorError):
     """The user's workspace is at its ``size_limit_bytes`` quota (J.15-补强-1).
 
