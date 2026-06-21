@@ -31,8 +31,11 @@ help: ## 列出可用目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-dev-build: ## 重建 control-plane 镜像(改了后端代码后用;缓存命中则秒级)
-	$(COMPOSE) $(PROFILES) build control-plane-blue
+dev-build: ## 重建 control-plane + sandbox-supervisor 镜像(改了后端代码后用;缓存命中则秒级)
+	# control-plane-blue 进程内 lazy-import orchestrator(含技能种文件 §5.1);
+	# sandbox-supervisor 是独立服务(docker cp 种文件)——两者都要重建,否则
+	# 后端改动(如 skill-runtime auto-mount)只半数生效。
+	$(COMPOSE) $(PROFILES) build control-plane-blue sandbox-supervisor
 
 dev-up: dev-build ## 起全量 dev 栈(full+auth+observability,排除 green)
 	# 先 --wait 起带可靠 healthcheck 的服务集。
