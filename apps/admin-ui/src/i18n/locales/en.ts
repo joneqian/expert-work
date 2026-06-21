@@ -1077,6 +1077,10 @@ export interface TranslationKeys {
     imported: string;
     status_changed: string;
     change_status: string;
+    status_draft: string;
+    status_active: string;
+    status_stale: string;
+    status_archived: string;
     metadata_title: string;
     versions_title: string;
     no_versions: string;
@@ -2739,6 +2743,10 @@ const en: TranslationKeys = {
     created: "Skill created.",
     imported: "Imported {{name}} v{{version}}.",
     status_changed: "Status changed to {{status}}.",
+    status_draft: "Draft",
+    status_active: "Active",
+    status_stale: "Stale",
+    status_archived: "Archived",
     change_status: "Change status",
     metadata_title: "Metadata",
     versions_title: "Versions",

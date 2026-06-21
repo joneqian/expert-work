@@ -189,7 +189,9 @@ test("non-admin caller has Active status option disabled (U-24 gate)", async ({ 
   await expect(page.getByTestId("skill-hero-high-risk-badge")).toBeVisible();
   // Open the status select dropdown
   await page.getByTestId("skill-status-select").click();
-  const activeOption = page.locator(".ant-select-item-option").filter({ hasText: /active/ });
+  // The blocked "active" option is the only one rendered with a 🔒 (locale-
+  // independent), so match on that rather than the now-localized label text.
+  const activeOption = page.locator(".ant-select-item-option").filter({ hasText: "🔒" });
   await expect(activeOption.first()).toBeVisible();
   await expect(activeOption.first()).toHaveClass(/ant-select-item-option-disabled/);
 });

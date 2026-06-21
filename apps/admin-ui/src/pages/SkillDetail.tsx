@@ -190,7 +190,7 @@ export function SkillDetail({
       try {
         const updated = await api.patchStatus(skill.id, { status: next });
         setSkill(updated);
-        message.success(t("skills.status_changed", { status: next }));
+        message.success(t("skills.status_changed", { status: t(`skills.status_${next}`) }));
       } catch (err) {
         const msg =
           err instanceof ApiError
@@ -312,7 +312,7 @@ export function SkillDetail({
         backTo={backLink}
         subtitle={
           <Space size={6} wrap>
-            <Tag color={STATUS_COLOR[skill.status]}>{skill.status}</Tag>
+            <Tag color={STATUS_COLOR[skill.status]}>{t(`skills.status_${skill.status}`)}</Tag>
             {isPlatform && skill.required_tier && (
               <Tag color={TIER_COLOR[skill.required_tier] ?? "default"}>
                 {t(`platform_skills.tier_${skill.required_tier}`)}
@@ -378,9 +378,6 @@ export function SkillDetail({
                 {skill.pinned ? t("skills.unpin") : t("skills.pin")}
               </Button>
             </Tooltip>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("skills.change_status")}
-            </Text>
             <Select<SkillStatus>
               value={skill.status}
               onChange={(v) => onChangeStatus(v)}
@@ -391,16 +388,17 @@ export function SkillDetail({
               data-testid="skill-status-select"
               options={statusOptions.map((s) => {
                 const isActiveBlocked = s === "active" && isLatestHighRisk && !isAdmin;
+                const label = t(`skills.status_${s}`);
                 return {
                   value: s,
                   label: isActiveBlocked ? (
                     <Tooltip title={t("skills.detail_admin_required_tooltip")}>
                       <span style={{ color: "var(--hx-text-tertiary)" }}>
-                        {s} 🔒
+                        {label} 🔒
                       </span>
                     </Tooltip>
                   ) : (
-                    s
+                    label
                   ),
                   disabled: isActiveBlocked,
                 };
