@@ -37,13 +37,14 @@ spec:
       bundled files are on disk under /workspace/skills/pptx/.
 
   tools:
-    # read_file / list_dir are read-only (not side_effect=irreversible) so they
-    # are NOT approval-gated — the verify probe uses read_file. bash/exec_python
-    # ARE auto-gated (irreversible), so they'd pause the run on approval.
+    # Only read-only file tools: the auto-mount probe uses list_dir to list the
+    # seeded skill dir off the sandbox filesystem. exec_python / bash are
+    # high-risk (side_effect=irreversible) — they'd be approval-gated AND require
+    # listing in policies.approval_required_tools (harness compliance), so this
+    # read-only test agent omits them. Add them back (+ approval list) for real
+    # pptx generation.
     - { type: builtin, name: read_file }
     - { type: builtin, name: list_dir }
-    - { type: builtin, name: exec_python }
-    - { type: builtin, name: bash }
 
   skills:
     - pptx
