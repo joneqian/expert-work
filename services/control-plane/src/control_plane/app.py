@@ -66,6 +66,7 @@ from control_plane.api import (
     build_role_bindings_router,
     build_runs_list_router,
     build_runs_router,
+    build_sandbox_egress_audit_router,
     build_sandboxes_router,
     build_service_accounts_router,
     build_sessions_router,
@@ -313,6 +314,11 @@ from helix_agent.persistence.quota import (
     TokenReservationStore,
 )
 from helix_agent.persistence.rls import build_rls_sessionmaker
+from helix_agent.persistence.sandbox_egress_audit import (
+    InMemorySandboxEgressAuditStore,
+    SandboxEgressAuditStore,
+    SqlSandboxEgressAuditStore,
+)
 from helix_agent.persistence.skill import (
     InMemorySkillStore,
     SkillStore,
@@ -562,6 +568,13 @@ def create_app(
     # Stream J.7a (Mini-ADR J-23) — skill registry.
     resolved_skill_store: SkillStore = skill_repo or (
         sql_stores.skill if sql_stores else InMemorySkillStore()
+    )
+    # sandbox-egress §3.1 Phase 3 — read side of sandbox_egress_audit (the
+    # credential-proxy writes it; the admin audit endpoint reads it).
+    resolved_egress_audit_store: SandboxEgressAuditStore = (
+        SqlSandboxEgressAuditStore(sql_stores.session_factory)
+        if sql_stores
+        else InMemorySandboxEgressAuditStore()
     )
     resolved_supervisor_client = build_supervisor_client(resolved_settings.sandbox_supervisor_url)
     resolved_feedback = feedback_repo or (
@@ -1495,6 +1508,7 @@ def create_app(
     app.state.curation_candidate_store = resolved_curation_candidate_store
     app.state.eval_dataset_store = resolved_eval_dataset_store
     app.state.eval_run_store = resolved_eval_run_store
+    app.state.sandbox_egress_audit_store = resolved_egress_audit_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
     app.state.skill_store = resolved_skill_store
@@ -1681,6 +1695,7 @@ def create_app(
     app.include_router(build_webhooks_router())
     app.include_router(build_webhook_endpoints_router())
     app.include_router(build_audit_router())
+    app.include_router(build_sandbox_egress_audit_router())
     app.include_router(build_curation_router())
     app.include_router(build_eval_dataset_router())
     app.include_router(build_eval_runs_router())
