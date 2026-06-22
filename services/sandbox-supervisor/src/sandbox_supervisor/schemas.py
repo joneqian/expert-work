@@ -54,6 +54,9 @@ class AcquireRequest(BaseModel):
     #: Agent identity bound into the egress token (audit attribution).
     agent_name: str | None = None
     agent_version: str | None = None
+    #: sandbox-egress Phase 2 — optional per-agent host allowlist embedded in
+    #: the egress token; empty → any public host (audited).
+    egress_allowlist: list[str] = Field(default_factory=list)
     #: Optional per-call resource overrides; omitted → the service defaults.
     cpu: float | None = Field(default=None, gt=0, le=16)
     memory_mb: int | None = Field(default=None, gt=0, le=65536)

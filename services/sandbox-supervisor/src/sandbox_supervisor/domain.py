@@ -81,6 +81,8 @@ class SandboxRecord:
     egress_policy: str | None = None
     agent_name: str | None = None
     agent_version: str | None = None
+    #: sandbox-egress Phase 2 — per-agent host allowlist embedded in the token.
+    egress_allowlist: tuple[str, ...] = ()
 
     def with_state(self, state: SandboxState, **changes: object) -> SandboxRecord:
         """Return a copy in ``state`` with any extra field overrides applied."""

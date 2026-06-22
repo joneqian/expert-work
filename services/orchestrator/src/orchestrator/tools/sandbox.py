@@ -70,6 +70,9 @@ class EgressContext:
     policy: str  # manifest egress: "none" | "direct" | "proxy"
     agent_name: str
     agent_version: str
+    #: Optional per-agent host allowlist (sandbox-egress Phase 2). Empty → any
+    #: public host (audited); non-empty → only these hosts pass at the proxy.
+    allowlist: tuple[str, ...] = ()
 
 
 def _traced_headers() -> dict[str, str]:
@@ -185,6 +188,8 @@ class HTTPSupervisorClient:
             payload["egress"] = egress.policy
             payload["agent_name"] = egress.agent_name
             payload["agent_version"] = egress.agent_version
+            if egress.allowlist:
+                payload["egress_allowlist"] = list(egress.allowlist)
         body = await self._post("/v1/sandboxes:acquire", json=payload)
         return UUID(str(body["sandbox_id"]))
 

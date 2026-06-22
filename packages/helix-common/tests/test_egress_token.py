@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from helix_agent.common.egress_token import (
+    host_in_allowlist,
     mint_egress_token,
     verify_egress_token,
 )
@@ -58,3 +61,34 @@ def test_malformed_tokens_return_none() -> None:
 def test_empty_secret_rejected_on_verify() -> None:
     token = _mint()
     assert verify_egress_token("", token, now=500.0) is None
+
+
+def test_allowlist_round_trips_in_token() -> None:
+    token = mint_egress_token(
+        _SECRET, expires_at=1000.0, allowlist=("api.openai.com", "files.example.com"), **_FIELDS
+    )
+    identity = verify_egress_token(_SECRET, token, now=500.0)
+    assert identity is not None
+    assert identity.allowlist == ("api.openai.com", "files.example.com")
+
+
+def test_no_allowlist_defaults_empty() -> None:
+    identity = verify_egress_token(_SECRET, _mint(), now=500.0)
+    assert identity is not None
+    assert identity.allowlist == ()
+
+
+@pytest.mark.parametrize(
+    ("host", "allowlist", "expected"),
+    [
+        ("api.openai.com", (), True),  # empty allowlist → allow all
+        ("api.openai.com", ("api.openai.com",), True),  # exact
+        ("api.openai.com", ("openai.com",), True),  # subdomain of entry
+        ("openai.com", ("openai.com",), True),  # apex
+        ("evilopenai.com", ("openai.com",), False),  # not a subdomain
+        ("api.evil.com", ("openai.com",), False),  # unrelated
+        ("API.OpenAI.com", ("openai.com",), True),  # case-insensitive
+    ],
+)
+def test_host_in_allowlist(host: str, allowlist: tuple[str, ...], expected: bool) -> None:
+    assert host_in_allowlist(host, allowlist) is expected

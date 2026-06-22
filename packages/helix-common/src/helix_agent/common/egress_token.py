@@ -37,6 +37,10 @@ class EgressIdentity:
     agent_version: str
     sandbox_id: str
     expires_at: float
+    #: Optional per-agent host allowlist (sandbox-egress §3.1 Phase 2). Empty →
+    #: any public host allowed (audited). Non-empty → only these hosts (exact or
+    #: subdomain) pass; embedded in the signed token so it can't be tampered.
+    allowlist: tuple[str, ...] = ()
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -61,22 +65,41 @@ def mint_egress_token(
     agent_version: str,
     sandbox_id: str,
     expires_at: float,
+    allowlist: tuple[str, ...] = (),
 ) -> str:
     """Mint a signed egress token. ``expires_at`` is an absolute epoch second
-    (the caller supplies the clock — keeps this pure/testable)."""
+    (the caller supplies the clock — keeps this pure/testable). ``allowlist``
+    (optional) embeds the per-agent host allowlist the proxy enforces."""
     if not secret:
         msg = "egress token secret must not be empty"
         raise ValueError(msg)
-    payload = {
+    payload: dict[str, object] = {
         "t": tenant_id,
         "a": agent_name,
         "v": agent_version,
         "s": sandbox_id,
         "exp": expires_at,
     }
+    if allowlist:
+        payload["al"] = list(allowlist)
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signing_input = f"{_VERSION}.{payload_b64}"
     return f"{signing_input}.{_sign(secret, signing_input)}"
+
+
+def host_in_allowlist(host: str, allowlist: tuple[str, ...]) -> bool:
+    """Whether ``host`` is permitted by ``allowlist`` (empty → allow all).
+
+    Matches exact host or a subdomain of an entry: ``["openai.com"]`` allows
+    ``openai.com`` and ``api.openai.com`` but not ``evilopenai.com``."""
+    if not allowlist:
+        return True
+    h = host.rstrip(".").lower()
+    for entry in allowlist:
+        e = entry.rstrip(".").lower()
+        if e and (h == e or h.endswith(f".{e}")):
+            return True
+    return False
 
 
 def verify_egress_token(secret: str, token: str, *, now: float) -> EgressIdentity | None:
@@ -97,12 +120,14 @@ def verify_egress_token(secret: str, token: str, *, now: float) -> EgressIdentit
     try:
         payload = json.loads(_b64url_decode(payload_b64))
         expires_at = float(payload["exp"])
+        raw_allowlist = payload.get("al") or []
         identity = EgressIdentity(
             tenant_id=str(payload["t"]),
             agent_name=str(payload["a"]),
             agent_version=str(payload["v"]),
             sandbox_id=str(payload["s"]),
             expires_at=expires_at,
+            allowlist=tuple(str(h) for h in raw_allowlist),
         )
     except (ValueError, KeyError, TypeError):
         return None

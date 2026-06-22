@@ -176,13 +176,21 @@ host `allowlist`); the platform does not force it.
 
 ## 5. Scope, phases, verification
 
-- **Phase 1 — egress path + wiring.** Transparent proxy (CONNECT + HTTP) in the
-  credential-proxy process, SSRF block + resolved-IP pin, per-sandbox token,
-  per-connection audit; `NetworkSpec` wired end-to-end (§3.3). A routable egress
-  network for `egress=="proxy"` sandboxes (the `internal:true` net stays for
-  `none`). Default `proxy` (§3.4).
-- **Phase 2 — optional allowlist + anomaly.** Consume `NetworkSpec.allowlist`
-  in the proxy; volume/host anomaly signal off the audit trail.
+- **Phase 1 — egress path + wiring. ✅ shipped (#745 1a / #746 1b).** Transparent
+  CONNECT proxy in the credential-proxy process, SSRF block + resolved-IP pin,
+  per-sandbox token, per-connection audit; `NetworkSpec` wired end-to-end (§3.3)
+  via a `supervisor_client` wrapper (no per-tool threading). Sandboxes stay on
+  the `internal:true` net and reach the proxy (no new network needed); the
+  supervisor injects `HTTPS_PROXY` + the token when egress is on. Default
+  `proxy` (§3.4).
+- **Phase 2 — optional allowlist. ✅ shipped.** The per-agent
+  `NetworkSpec.allowlist` is embedded in the signed egress token (tamper-proof,
+  no new store) and enforced at the proxy (exact or subdomain match) →
+  `blocked_allowlist` 403 + audit. Empty = any public host (audited). **Anomaly
+  detection is intentionally not code here** — the `sandbox_egress_audit` table
+  already carries host + byte volumes per connection, so volume/novel-host
+  anomaly is a Grafana/SQL query over that table (ops surface, per "ops →
+  Grafana not admin-ui"), not a new engine.
 - **Phase 3 — admin-ui.** Per-agent egress toggle in the manifest editor; egress
   audit view (reuse the existing traffic-audit page + MCP-badge pattern).
 

@@ -26,7 +26,11 @@ from uuid import UUID
 
 from credential_proxy.audit import EgressAuditStore
 from credential_proxy.domain import EgressAuditEntry, EgressVerdict
-from helix_agent.common.egress_token import EgressIdentity, verify_egress_token
+from helix_agent.common.egress_token import (
+    EgressIdentity,
+    host_in_allowlist,
+    verify_egress_token,
+)
 from helix_agent.common.url_validation import RemoteURLError, resolve_and_pin_host
 
 logger = logging.getLogger(__name__)
@@ -90,6 +94,13 @@ class EgressProxyServer:
         host, port = _split_hostport(target)
         if host is None:
             await _write_status(writer, 400, "Bad Request")
+            return
+
+        # sandbox-egress §3.1 Phase 2 — optional per-agent host allowlist
+        # (opt-in hardening). Empty allowlist = any public host (audited).
+        if not host_in_allowlist(host, identity.allowlist):
+            await self._record(identity, host, port, "blocked_allowlist")
+            await _write_status(writer, 403, "Forbidden")
             return
 
         try:

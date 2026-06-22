@@ -27,7 +27,7 @@ class _RecordingEgressAudit:
         self.entries.append(entry)
 
 
-def _token(*, expires_at: float = 1000.0) -> str:
+def _token(*, expires_at: float = 1000.0, allowlist: tuple[str, ...] = ()) -> str:
     return mint_egress_token(
         _SECRET,
         tenant_id=_TENANT,
@@ -35,6 +35,7 @@ def _token(*, expires_at: float = 1000.0) -> str:
         agent_version="1.0.0",
         sandbox_id="sbx-1",
         expires_at=expires_at,
+        allowlist=allowlist,
     )
 
 
@@ -172,6 +173,56 @@ async def test_ssrf_blocked_returns_403_and_audits() -> None:
         assert audit.entries[0].target_host == "metadata.internal"
     finally:
         proxy.close()
+        await proxy.wait_closed()
+
+
+async def test_allowlist_blocks_unlisted_host_and_audits() -> None:
+    audit = _RecordingEgressAudit()
+    proxy, proxy_port = await _start_proxy(audit)
+    try:
+        # Token's allowlist permits only api.openai.com; request a different host.
+        reader, writer = await _connect_request(
+            proxy_port,
+            "api.evil.com:443",
+            auth=_basic(_token(allowlist=("api.openai.com",))),
+        )
+        status = await reader.readline()
+        assert b"403" in status
+        writer.close()
+        await _wait_for_audit(audit)
+        assert audit.entries[0].verdict == "blocked_allowlist"
+        assert audit.entries[0].target_host == "api.evil.com"
+    finally:
+        proxy.close()
+        await proxy.wait_closed()
+
+
+async def test_allowlist_permits_listed_host() -> None:
+    audit = _RecordingEgressAudit()
+    echo, echo_port = await _start_echo()
+    proxy, proxy_port = await _start_proxy(audit)
+    try:
+        # The allowlist names the host being connected to → tunnel succeeds.
+        reader, writer = await _connect_request(
+            proxy_port,
+            f"api.openai.com:{echo_port}",
+            auth=_basic(_token(allowlist=("openai.com",))),  # subdomain match
+        )
+        status = await reader.readline()
+        assert b"200" in status
+        await reader.readuntil(b"\r\n")
+        writer.write(b"ok")
+        await writer.drain()
+        assert await reader.readexactly(2) == b"ok"
+        writer.write_eof()
+        await reader.read()
+        writer.close()
+        await _wait_for_audit(audit)
+        assert audit.entries[0].verdict == "allowed"
+    finally:
+        echo.close()
+        proxy.close()
+        await echo.wait_closed()
         await proxy.wait_closed()
 
 

@@ -528,6 +528,7 @@ async def build_agent(
                     policy=spec.spec.sandbox.network.egress,
                     agent_name=spec.metadata.name,
                     agent_version=spec.metadata.version,
+                    allowlist=tuple(spec.spec.sandbox.network.allowlist),
                 ),
             ),
         )

@@ -1581,6 +1581,27 @@ async def test_acquire_with_egress_injects_proxy_env_and_signed_token() -> None:
 
 
 @pytest.mark.asyncio
+async def test_acquire_egress_allowlist_embedded_in_token() -> None:
+    secret = "unit-egress-secret"
+    h = _harness(settings=SandboxSupervisorSettings(egress_token_secret=secret))
+    await h.supervisor.acquire(
+        AcquireRequest(
+            tenant_id=uuid4(),
+            thread_id="t-1",
+            egress="proxy",
+            agent_name="a",
+            agent_version="1.0.0",
+            egress_allowlist=["api.openai.com", "files.example.com"],
+        )
+    )
+    envs = _egress_envs(h.docker.launches[0])
+    token = envs["HTTPS_PROXY"].split("//", 1)[1].split(":@", 1)[0]
+    identity = verify_egress_token(secret, token, now=time.time())
+    assert identity is not None
+    assert identity.allowlist == ("api.openai.com", "files.example.com")
+
+
+@pytest.mark.asyncio
 async def test_acquire_without_egress_has_no_proxy_env() -> None:
     h = _harness()
     await h.supervisor.acquire(_acquire_request())  # egress defaults to None
