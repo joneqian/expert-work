@@ -140,8 +140,15 @@ Extensions installed:
 
 ## Reset
 
+Postgres + Keycloak data live in **host bind mounts** under `infra/.data/`
+(gitignored), not Docker-managed volumes — so `docker volume prune` /
+`docker system prune --volumes` / Docker Desktop disk reclaim can never silently
+wipe the dev DB or admin bindings. `docker compose down -v` therefore does *not*
+clear them either. To reset on purpose, delete the dirs:
+
 ```bash
-docker compose down -v   # wipes postgres-data volume
+make dev-clean                 # stop + remove containers (keeps .data/)
+rm -rf .data/postgres .data/keycloak   # explicit, deliberate wipe
 ```
 
 ## At-rest encryption (D.4)
@@ -223,7 +230,7 @@ startup (it is not launched at boot).
 ### Postgres at-rest (dev)
 
 - **macOS host**: FileVault is enough — the whole disk is encrypted; the
-  named `postgres-data` Docker volume sits on the encrypted filesystem.
+  `./.data/postgres` bind-mount dir sits on the encrypted filesystem.
   No additional setup needed.
 - **Linux host**: replace the named volume with a bind-mount onto a
   LUKS-encrypted path. Outline (one-off, host-side):

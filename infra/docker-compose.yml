@@ -128,7 +128,13 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # Host bind mount (NOT a Docker-managed volume) so `docker volume prune`
+      # / `docker system prune --volumes` / Docker Desktop disk reclaim can never
+      # wipe the dev DB. Managed volumes go *dangling* when the container is
+      # removed (recreate / `compose down`) and the next prune deletes them — that
+      # silently wiped admin + every tenant once. A bind mount is never pruned.
+      # `.data/` is gitignored; init scripts below run only on an empty dir.
+      - ./.data/postgres:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${HELIX_DB_USER:-helix_agent} -d ${HELIX_DB_NAME:-helix_agent_dev}"]
@@ -285,11 +291,12 @@ services:
       KC_HOSTNAME_STRICT: "false"
       KC_HEALTH_ENABLED: "true"
     volumes:
-      # Persist the H2 store (lives under /opt/keycloak/data/h2) so registered
-      # users + realm survive `dev-clean`. The realm-import bind below is a
-      # deeper nested mount (data/import/…) and coexists with this volume;
-      # `--import-realm` is a no-op once the realm already exists in H2.
-      - keycloak-data:/opt/keycloak/data
+      # Host bind mount (prune-proof — see the postgres rationale). The H2 store
+      # lives under .data/keycloak/h2 so registered users + realm survive
+      # `dev-clean` AND any `docker volume prune` / Desktop disk reclaim. The
+      # realm-import bind below nests on top of this mount fine; `--import-realm`
+      # is a no-op once the realm already exists in H2.
+      - ./.data/keycloak:/opt/keycloak/data
       - ./keycloak/realm-helix-agent.json:/opt/keycloak/data/import/realm-helix-agent.json:ro
       # Stream ACCT — 品牌登录主题(白标)。start-dev 关主题缓存,改 CSS 即热加载。
       - ./keycloak/themes/helix:/opt/keycloak/themes/helix:ro
@@ -745,10 +752,8 @@ services:
       - "3001:3000"
 
 volumes:
-  postgres-data:
-  # Keycloak H2 store (start-dev). Persists registered users + realm across
-  # `dev-clean` (= `docker compose down`, no -v); only `down -v` wipes it.
-  keycloak-data:
+  # postgres + keycloak moved to host bind mounts (./.data/) — prune-proof, see
+  # their service definitions. No managed volume declared for them by design.
   minio-data:
   prometheus-data:
   tempo-data:

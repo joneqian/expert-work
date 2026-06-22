@@ -70,20 +70,25 @@ dev-up: dev-build ## 起全量 dev 栈(full+auth+observability,排除 green)
 # bootstrap_admin 在容器内跑:用容器的 HELIX_AGENT_DB_DSN(pgbouncer)+ 已装包,
 # 免 host 的 uv/DB 端口依赖。幂等(重复跑 OK)。dev-up 不再自动调它(与生产
 # 一致走 /setup 向导);这是想跳过向导时的快路径 / break-glass。
-dev-bootstrap-admin: ## 提权 dev 用户为 system_admin(快路径;首选 /setup 向导)
-	@echo "bootstrap-admin: 等 Keycloak 就绪 + 取 dev 用户 id..."
-	@SUB=""; for i in $$(seq 1 30); do \
+# ADMIN=<用户名|邮箱> 指定要提权的账号(含 @ 当邮箱查,否则当用户名)。默认 dev。
+# 提权确定的账号 —— 不靠"零-admin 自动升给第一个登录者"那种非确定行为
+# (数据重置后那条会把 system_admin 给随便谁先登录,常常不是你)。
+ADMIN ?= dev
+dev-bootstrap-admin: ## 提权账号为 system_admin(ADMIN=<用户名|邮箱>,默认 dev;首选 /setup)
+	@echo "bootstrap-admin: 等 Keycloak 就绪 + 取 [$(ADMIN)] 用户 id..."
+	@case "$(ADMIN)" in *@*) Q="email=$(ADMIN)";; *) Q="username=$(ADMIN)";; esac; \
+	SUB=""; for i in $$(seq 1 30); do \
 	  SA=$$(curl -sf http://localhost:8080/realms/helix-agent/protocol/openid-connect/token \
 	    -d grant_type=client_credentials -d client_id=helix-agent-api-internal \
 	    -d client_secret=dev-internal-secret-rotate-me 2>/dev/null \
 	    | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])' 2>/dev/null) || { sleep 2; continue; }; \
-	  SUB=$$(curl -sf "http://localhost:8080/admin/realms/helix-agent/users?username=dev&exact=true" \
+	  SUB=$$(curl -sf "http://localhost:8080/admin/realms/helix-agent/users?$$Q&exact=true" \
 	    -H "Authorization: Bearer $$SA" 2>/dev/null \
 	    | python3 -c 'import sys,json; print(json.load(sys.stdin)[0]["id"])' 2>/dev/null) || { sleep 2; continue; }; \
 	  [ -n "$$SUB" ] && break; sleep 2; \
 	done; \
-	if [ -z "$$SUB" ]; then echo "FAILED: 取不到 dev 用户 id(Keycloak 未就绪?)"; exit 1; fi; \
-	echo "dev subject_id = $$SUB"; \
+	if [ -z "$$SUB" ]; then echo "FAILED: 取不到 [$(ADMIN)] 用户 id(Keycloak 未就绪 / 账号不存在?)"; exit 1; fi; \
+	echo "$(ADMIN) subject_id = $$SUB"; \
 	$(COMPOSE) $(PROFILES) exec -T control-plane-blue python -m control_plane.bootstrap_admin --subject-id $$SUB
 
 # 只删平台 system_admin 绑定 → 回到零-admin,让 /setup 向导重新可用。
