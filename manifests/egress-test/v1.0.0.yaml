@@ -1,0 +1,73 @@
+# Live egress test agent — sandbox-egress §3 (PRs #745/#746).
+#
+# Proves the per-agent egress path end-to-end: the agent uses exec_python to
+# make a real outbound HTTPS request from inside the sandbox, which is tunnelled
+# through the audited egress proxy (the supervisor injects HTTPS_PROXY + a
+# per-sandbox token). tools/eval/verify_live_egress.py drives it and then reads
+# the sandbox_egress_audit rows back via GET /v1/sandbox-egress-audit.
+#
+# Uses the MINIMAL image — the probe is stdlib ``urllib`` (no office libs). The
+# sandbox reaches only the egress proxy (internal net); the proxy relays out.
+#
+# egress: proxy (the default) — egress on, audited. allowlist empty = any public
+# host allowed (the SSRF block still refuses private/metadata IPs). A separate
+# allowlist agent would set network.allowlist to prove blocked_allowlist.
+#
+# exec_python is side_effect=irreversible → it MUST be listed in
+# policies.approval_required_tools (harness compliance); the verify script
+# approves the paused run via the resume endpoint.
+#
+# MODEL: defaults to deepseek. EDIT the model block to whatever provider you
+# pasted a key for in /settings/platform and set the matching allowlist host.
+apiVersion: helix.io/v1
+kind: Agent
+metadata:
+  name: egress-test
+  version: '1.0.0'
+  tenant: canonical
+spec:
+  description: >-
+    Live egress test agent: makes a real outbound HTTPS request from inside the
+    sandbox through the audited egress proxy, to prove egress + audit work.
+
+  tenant_config:
+    isolation_level: dedicated_sandbox
+
+  model:
+    provider: deepseek # ← change to your configured provider
+    name: deepseek-v4-pro # ← and its model name
+    temperature: 0.0
+    max_tokens: 4096
+
+  system_prompt:
+    template: |
+      You are a test agent. When asked, use the exec_python tool to run the
+      EXACT Python code given, verbatim, and report the line it prints.
+
+  tools:
+    - { type: builtin, name: exec_python }
+
+  policies:
+    approval_required_tools:
+      - exec_python
+
+  skills: []
+
+  sandbox:
+    runtime: gvisor
+    resources:
+      cpu: '1.0'
+      memory: 1Gi
+    network:
+      # egress on + audited (the default). Empty allowlist = any public host;
+      # the proxy still blocks private/loopback/link-local/metadata (SSRF).
+      egress: proxy
+      allowlist: []
+    filesystem:
+      readonly_root: true
+      writable:
+        - /tmp
+      persistent_workspace: true
+
+  observability:
+    log_level: info
