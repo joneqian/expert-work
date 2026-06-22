@@ -391,7 +391,11 @@ async def phase_generate(client: httpx.AsyncClient, *, agent: str) -> bool:
     print(f"  continuation sse events: {tr.events}")
 
     def _is_gen_ok(text: str) -> bool:
-        return "GEN_RESULT" in text and "'pdf_exists': True" in text
+        # Tool stdout is wrapped in the spotlight/UNTRUSTED fence, which rewrites
+        # spaces to ``▁`` — so a naive ``"'pdf_exists': True" in text`` misses the
+        # real ``'pdf_exists':▁True``. Compare with all spacing stripped.
+        flat = "".join(ch for ch in text if not ch.isspace() and ch != "▁")
+        return "GEN_RESULT" in flat and "'pdf_exists':True" in flat
 
     if any(_is_gen_ok(text) for _tool, text in tr.tool_msgs):
         print("  PASS — agent generated .pptx and soffice produced .pdf in the office sandbox.")
