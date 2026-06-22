@@ -341,3 +341,74 @@ async def test_non_mcp_tool_audit_has_no_mcp_fields() -> None:
         audit_logger=audit,
     )
     assert "mcp_server" not in audit.entries[0].details
+
+
+# --- sandbox executor code trace (audit over blocking) ----------------------
+
+
+async def test_exec_python_audit_records_code_and_hash() -> None:
+    import hashlib
+
+    code = "import subprocess\nsubprocess.run(['soffice', '--headless'])\n"
+    tool = _EchoTool(ToolSpec(name="exec_python", description="d"))
+    audit = _RecordingAuditLogger()
+    await _dispatch_tool(
+        _call("exec_python", {"code": code}),
+        _registry(tool),
+        _ctx(),
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    details = audit.entries[0].details
+    # The removed denylist would have blocked subprocess.run; instead the code
+    # is recorded verbatim (under the preview cap) + a full-content sha256.
+    assert details["code"] == code
+    assert details["code_sha256"] == hashlib.sha256(code.encode()).hexdigest()
+    assert details["code_bytes"] == len(code.encode())
+
+
+async def test_bash_audit_records_command() -> None:
+    tool = _EchoTool(ToolSpec(name="bash", description="d"))
+    audit = _RecordingAuditLogger()
+    await _dispatch_tool(
+        _call("bash", {"command": "soffice --headless --convert-to pdf x.pptx"}),
+        _registry(tool),
+        _ctx(),
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    details = audit.entries[0].details
+    assert details["code"] == "soffice --headless --convert-to pdf x.pptx"
+    assert "code_sha256" in details
+
+
+async def test_sandbox_code_preview_is_capped() -> None:
+    big = "x" * 9000
+    tool = _EchoTool(ToolSpec(name="exec_python", description="d"))
+    audit = _RecordingAuditLogger()
+    await _dispatch_tool(
+        _call("exec_python", {"code": big}),
+        _registry(tool),
+        _ctx(),
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    details = audit.entries[0].details
+    assert details["code"].endswith("…(truncated)")
+    assert len(details["code"]) < len(big)  # preview capped
+    assert details["code_bytes"] == 9000  # full size still recorded
+
+
+async def test_non_sandbox_tool_has_no_code_field() -> None:
+    tool = _EchoTool(ToolSpec(name="reader", description="d"))
+    audit = _RecordingAuditLogger()
+    await _dispatch_tool(
+        _call("reader", {"code": "not a sandbox tool"}),
+        _registry(tool),
+        _ctx(),
+        before_tool_dispatch_chain=None,
+        audit_logger=audit,
+    )
+    details = audit.entries[0].details
+    assert "code" not in details
+    assert "code_sha256" not in details

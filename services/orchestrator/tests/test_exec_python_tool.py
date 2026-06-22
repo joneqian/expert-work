@@ -2,9 +2,10 @@
 
 The Sandbox Supervisor is faked via :class:`RecordingSupervisorClient`,
 so these run in the plain ``pytest`` job — no Docker, no supervisor.
-The ``sandbox_audit`` wiring (#47) is verified in
-``test_middleware_assembly.py``; the middleware's blocking behaviour
-itself is covered by helix-runtime's ``test_sandbox_audit_middleware``.
+The old sandbox-exec call denylist was removed (audit over blocking — the
+gVisor sandbox is the real boundary); submitted code is now recorded into the
+tool audit (see ``_emit_tool_audit`` in ``graph_builder/builder.py`` +
+docs/design/sandbox-audit-evaluation.md).
 """
 
 from __future__ import annotations

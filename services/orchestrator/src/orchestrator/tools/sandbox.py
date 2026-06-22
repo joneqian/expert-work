@@ -9,8 +9,9 @@ speaks only the supervisor's HTTP API behind a small
 
 Output is truncated to :data:`DEFAULT_OUTPUT_CHAR_CAP` for the LLM
 (Mini-ADR F-9 / E-10) — the runner already capped it at ~1 MiB for
-transport. The ``sandbox_audit`` middleware (E.10) blocks dangerous
-code *before* this tool ever dispatches.
+transport. The gVisor sandbox (read-only rootfs / cap-drop / no-new-privileges
+/ pids-mem-cpu caps / proxy-only egress) is the security boundary; submitted
+code is recorded into the tool audit (docs/design/sandbox-audit-evaluation.md).
 
 Cancellation (F.7): E.15 races the whole tool dispatch in
 ``run_cancellable``, so a cancelled run surfaces here as

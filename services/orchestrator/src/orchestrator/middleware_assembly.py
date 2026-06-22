@@ -3,11 +3,11 @@
 STREAM-E-DESIGN Mini-ADR E-15: middleware splits into two groups.
 
 * **always-on** — :class:`DynamicContextMiddleware`,
-  :class:`LLMErrorHandlingMiddleware`, :class:`LoopDetectionMiddleware`,
-  :class:`SandboxAuditMiddleware`. No platform dependency; every agent
-  gets them (cost / stability / safety floor). ``SandboxAuditMiddleware``
-  self-filters by tool name — a no-op until an ``exec_python`` tool
-  dispatches (Stream F.4).
+  :class:`LLMErrorHandlingMiddleware`, :class:`LoopDetectionMiddleware`.
+  No platform dependency; every agent gets them (cost / stability floor).
+  The old sandbox-exec call denylist was removed (it was bypassable theater —
+  the gVisor sandbox is the real boundary); sandbox code is now recorded into
+  the tool audit instead. See docs/design/sandbox-audit-evaluation.md.
 * **env-gated** — :class:`PIIRedactorMiddleware`,
   :class:`LLMCacheLookupMiddleware` / :class:`LLMCacheStoreMiddleware`,
   :class:`LangfuseMiddleware`. Each needs a platform runtime dep
@@ -39,7 +39,6 @@ from helix_agent.runtime.middleware import (
     MiddlewareChain,
     PIIRedactorMiddleware,
     RedactText,
-    SandboxAuditMiddleware,
     TokenUsageMiddleware,
 )
 from helix_agent.runtime.tokens import TokenEstimator, flatten_message
@@ -102,7 +101,6 @@ def build_middleware_chains(
     middlewares: list[Middleware] = [
         LLMErrorHandlingMiddleware(breaker_registry=env.breaker_registry or BreakerRegistry()),
         LoopDetectionMiddleware(),
-        SandboxAuditMiddleware(),
     ]
     # Stream HX-1 (Mini-ADR HX-A5) — the E.3 view trim is opt-in: it is
     # only built when the manifest sets an explicit cap.

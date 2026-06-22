@@ -132,15 +132,6 @@ from helix_agent.runtime.middleware.pii_redact import (
 from helix_agent.runtime.middleware.pii_redact import (
     RedactText as RedactText,
 )
-from helix_agent.runtime.middleware.sandbox_audit import (
-    DEFAULT_SANDBOX_TOOL_NAMES as DEFAULT_SANDBOX_TOOL_NAMES,
-)
-from helix_agent.runtime.middleware.sandbox_audit import (
-    SandboxAuditBlockedError as SandboxAuditBlockedError,
-)
-from helix_agent.runtime.middleware.sandbox_audit import (
-    SandboxAuditMiddleware as SandboxAuditMiddleware,
-)
 from helix_agent.runtime.middleware.token_usage import (
     TokenUsageMiddleware as TokenUsageMiddleware,
 )
@@ -148,7 +139,6 @@ from helix_agent.runtime.middleware.token_usage import (
 __all__ = [
     "ANCHORS",
     "DEFAULT_REMINDER_TEXT",
-    "DEFAULT_SANDBOX_TOOL_NAMES",
     "DEFAULT_WINDOW_SIZE",
     "BreakerRegistry",
     "CallNext",
@@ -183,8 +173,6 @@ __all__ = [
     "RecordedSpan",
     "RecordingLangfuseClient",
     "RedactText",
-    "SandboxAuditBlockedError",
-    "SandboxAuditMiddleware",
     "TokenUsageMiddleware",
     "UnknownAnchorError",
     "clone_ai_message_with_tool_calls",

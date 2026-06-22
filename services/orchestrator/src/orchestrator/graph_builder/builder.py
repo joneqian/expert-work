@@ -46,12 +46,13 @@ Stream E.12.5 wires the middleware chain into both nodes. Anchor calls
   may rewrite the response or append reminder messages.
 - ``before_tool_dispatch`` chain → ``tools_node`` invokes per
   ``tool_call``. ``ctx.payload`` carries ``tool_name`` + ``tool_args``;
-  middlewares (E.10 sandbox_audit) may raise to block the dispatch.
+  a pre-dispatch middleware may raise to block the dispatch.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import itertools
 import logging
 import time
@@ -1477,9 +1478,9 @@ async def _dispatch_tool(
             classify_tool_error(tool_name=name, error=exc, spec=None),
         )
     except Exception as exc:
-        # E.10 sandbox_audit and any other pre-dispatch middleware raise
-        # to block — wrap so the LLM sees a normal error result rather
-        # than the run crashing (Mini-ADR E-12).
+        # A pre-dispatch middleware (or the tool itself) may raise to block —
+        # wrap so the LLM sees a normal error result rather than the run
+        # crashing (Mini-ADR E-12).
         logger.warning(
             "tools.before_dispatch_blocked name=%s call_id=%s err=%s",
             name,
@@ -1569,6 +1570,22 @@ def _mcp_audit_details(
     return details
 
 
+#: Sandbox executors whose submitted code/command IS recorded into the audit
+#: trail (a capped preview + a full-content sha256). This is the deliberate
+#: "audit over blocking" trade for sandbox execution: the gVisor sandbox (read-
+#: only rootfs, cap-drop, no-new-privileges, pids/mem/cpu caps, proxy-only egress)
+#: is the real boundary, so we no longer denylist calls like ``subprocess.run``
+#: (which a soffice/poppler skill legitimately needs) — instead every run is
+#: traceable. See docs/design/sandbox-audit-evaluation.md.
+_SANDBOX_CODE_ARGS: dict[str, tuple[str, ...]] = {
+    "exec_python": ("code", "script"),
+    "bash": ("command", "cmd"),
+}
+#: Cap the stored preview so an audit row stays bounded; the sha256 covers the
+#: full content for forensic matching.
+_CODE_PREVIEW_MAX = 4000
+
+
 async def _emit_tool_audit(
     audit_logger: AuditLogger | None,
     ctx: ToolContext,
@@ -1590,10 +1607,13 @@ async def _emit_tool_audit(
     ``tenant_id`` (dev / unit-test path), and any write failure is logged
     and swallowed so auditing never breaks a tool dispatch.
 
-    Privacy: ``details`` records only the **argument names** and the
-    declared path-arg **values** (filesystem paths, not secrets) — never
-    raw argument values, which may carry PII / credentials (CodeQL
-    clear-text-logging; [memory:feedback_codeql_clear_text_logging_secret_name]).
+    Privacy: ``details`` records the **argument names** and the declared
+    path-arg **values** (filesystem paths) — never other raw argument values,
+    which may carry PII / credentials (CodeQL clear-text-logging;
+    [memory:feedback_codeql_clear_text_logging_secret_name]). The one
+    exception is **sandbox executor code** (``exec_python`` / ``bash``): a
+    capped preview + full-content sha256 are recorded as the traceability
+    substitute for the removed call denylist (audit over blocking).
     """
     if audit_logger is None or ctx.tenant_id is None:
         return
@@ -1612,6 +1632,20 @@ async def _emit_tool_audit(
         }
         if path_args:
             details["paths"] = [str(args[a]) for a in path_args if a in args]
+        code_keys = _SANDBOX_CODE_ARGS.get(name)
+        if code_keys is not None:
+            for key in code_keys:
+                value = args.get(key)
+                if isinstance(value, str):
+                    raw = value.encode("utf-8", "replace")
+                    details["code_sha256"] = hashlib.sha256(raw).hexdigest()
+                    details["code_bytes"] = len(raw)
+                    details["code"] = (
+                        value
+                        if len(value) <= _CODE_PREVIEW_MAX
+                        else value[:_CODE_PREVIEW_MAX] + "…(truncated)"
+                    )
+                    break
         if from_skill is not None:
             details["from_skill"] = from_skill
         if ctx.run_id is not None:

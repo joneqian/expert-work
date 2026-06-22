@@ -61,11 +61,14 @@ def test_always_on_middlewares_wired() -> None:
     assert chains.after_llm_call.ordered_names == ("loop_detection",)
 
 
-def test_before_tool_dispatch_wires_sandbox_audit() -> None:
-    """sandbox_audit (always-on, Stream F.4) binds to the tool-dispatch anchor."""
+def test_no_sandbox_audit_denylist_wired() -> None:
+    """The sandbox-exec call denylist was removed (audit over blocking): the
+    gVisor sandbox is the real boundary and submitted code is recorded into the
+    tool audit instead, so nothing binds the before_tool_dispatch anchor."""
     chains = build_middleware_chains(_spec())
-    assert chains.before_tool_dispatch is not None
-    assert chains.before_tool_dispatch.ordered_names == ("sandbox_audit",)
+    assert chains.before_tool_dispatch is None or "sandbox_audit" not in (
+        chains.before_tool_dispatch.ordered_names
+    )
 
 
 def test_default_env_is_empty() -> None:
