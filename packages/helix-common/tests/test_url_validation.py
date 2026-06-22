@@ -85,6 +85,27 @@ def test_accepts_public_dns_name_with_digits() -> None:
     assert validate_remote_url(url) == url
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://198.18.0.1/x",  # RFC2544 benchmarking (was over-blocked via is_reserved)
+        "https://198.19.255.254/x",
+    ],
+)
+def test_accepts_reserved_but_harmless_ranges(url: str) -> None:
+    # audit-eval Phase 2 — is_reserved removed; 198.18.0.0/15 is no longer an
+    # SSRF block (a local fake-ip DNS maps public hosts here). Audited at egress.
+    assert validate_remote_url(url) == url
+
+
+def test_resolve_and_pin_allows_reserved_benchmark_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "helix_agent.common.url_validation.socket.getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("198.18.0.29", 443))],
+    )
+    assert resolve_and_pin_host("fakeip.example", 443) == "198.18.0.29"
+
+
 # ── resolve_and_pin_host (egress proxy connect-out) ──────────────────────────
 
 

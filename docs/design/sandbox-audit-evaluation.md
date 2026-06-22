@@ -70,12 +70,29 @@ governance the operator already chose**, not safety over-blocks — out of scope
 
 ## 6. Change set (phased)
 
-1. **Phase 1 (this PR):** delete the `sandbox_audit` blocking middleware (denylist
-   + dead shell branch) and its wiring/exports/tests; record sandbox exec code in
-   the tool audit (`_SANDBOX_CODE_ARGS`, preview cap + sha256). Unblocks the
-   office image (`soffice` via `subprocess`); every run stays traceable.
-2. Phase 2: narrow `_ip_is_blocked` (drop the over-broad reserved sweep).
-3. Phase 3: `strict`→`warn`+audit on user/operator-authored scan surfaces; add
-   `skill_seed` audit rows.
-4. Phase 4: close audit-trail gaps (egress 407/405, output-screen durable rows).
-5. Phase 5: remove dead code / wire-or-drop `rate_limit_override`.
+1. **Phase 1 (#754, DONE):** deleted the `sandbox_audit` blocking middleware
+   (denylist + dead shell branch) + wiring/exports/tests; record sandbox exec
+   code in the tool audit (`_SANDBOX_CODE_ARGS`, preview cap + sha256). Unblocked
+   the office image (`soffice` via `subprocess`); every run stays traceable.
+2. **Phase 2 (DONE):** narrowed `_ip_is_blocked` — replaced the broad
+   `ipaddress.is_private`/`is_reserved` predicates (which as of CPython 3.12.4+
+   sweep in 198.18.0.0/15 benchmarking + TEST-NET + 240/4) with an explicit
+   RFC1918 + IPv6-ULA block list, keeping loopback/link-local(metadata)/
+   multicast/unspecified. 198.18/15 (fake-ip DNS target) now allowed + audited.
+3. **Phase 3 (DONE):** `strict`→`warn`+audit on the **user/operator-authored**
+   write paths — memory API write (`MEMORY_INJECTION_WARN`) and trigger
+   create/patch (`TRIGGER_PROMPT_INJECTION_WARN`): the write proceeds + is
+   flagged, instead of a hard 422. **Kept blocking the real injection vectors**:
+   runtime recalled memory (model-facing) and auto-extracted memory write-back,
+   plus the trigger oversized-field guard. (`skill_seed` silent-drop audit row
+   deferred — needs a new per-file audit shape; tracked.)
+4. **Phase 4 (PARTIAL):** output-guard durable audit rows added —
+   `OUTPUT_SCREEN_BLOCKED` + `OUTPUT_DLP_REDACTED` (categories only, never the
+   value) via `_emit_output_guard_audit`. **Egress 407/405 audit DEFERRED**: a
+   bad/missing token has no trustworthy tenant identity, so it can't be written
+   to the tenant-scoped `sandbox_egress_audit` table without a nullable-tenant
+   schema change — left as a structured log; tracked.
+5. **Phase 5 (N/A):** no dead code remained after #754 removed the
+   `sandbox_audit` shell branch; `rate_limit_override` is intentionally
+   forward-compat storage consumed in M1 (already documented), not dead code —
+   nothing to change.

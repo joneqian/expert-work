@@ -632,9 +632,17 @@ def build_react_graph(
         # spotlighting can't wrap) before it reaches the user or a tool.
         rule_blocked = False
         if output_screen:
-            screened = _screen_model_response(response)
+            screened, screen_cats = _screen_model_response(response)
             rule_blocked = screened is not response
             response = screened
+            if screen_cats:
+                await _emit_output_guard_audit(
+                    audit_logger_from_config(config),
+                    tenant_id,
+                    action=AuditAction.OUTPUT_SCREEN_BLOCKED,
+                    result=AuditResult.DENIED,
+                    categories=screen_cats,
+                )
         # Stream PI-2b — model-backed judge escalation. Skip when the rules
         # already blocked (save the call) and run only on a terminal response
         # (no tool_calls) — the judge is a per-response LLM call.
@@ -651,7 +659,15 @@ def build_react_graph(
         # refusal carries no PII) and only on a terminal turn (a tool-call turn's
         # args route through the action screen, not here).
         if output_dlp and not rule_blocked and not _extract_tool_calls(response):
-            response = _dlp_redact_response(response)
+            response, dlp_cats = _dlp_redact_response(response)
+            if dlp_cats:
+                await _emit_output_guard_audit(
+                    audit_logger_from_config(config),
+                    tenant_id,
+                    action=AuditAction.OUTPUT_DLP_REDACTED,
+                    result=AuditResult.SUCCESS,
+                    categories=dlp_cats,
+                )
 
         if after_llm_chain is not None:
             after_messages: list[BaseMessage] = [*messages, response]
@@ -1196,41 +1212,43 @@ def _extract_tool_calls(message: BaseMessage) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], raw)
 
 
-def _screen_model_response(response: AIMessage) -> AIMessage:
+def _screen_model_response(response: AIMessage) -> tuple[AIMessage, tuple[str, ...]]:
     """Stream PI-2 — screen a model response; refuse a flagged one.
 
-    Returns ``response`` unchanged when clean, else a fresh refusal
-    :class:`AIMessage` carrying **no tool_calls** — a blocked response must
-    terminate the turn rather than proceed to a possibly-injected tool call.
-    The matched value is never logged (only the category that fired).
+    Returns ``(response, ())`` when clean, else ``(refusal, categories)`` where
+    the refusal is a fresh :class:`AIMessage` carrying **no tool_calls** (a
+    blocked response must terminate the turn rather than proceed to a
+    possibly-injected tool call) and ``categories`` are the fired categories for
+    the audit row (audit-eval Phase 4). The matched value is never logged.
     """
     verdict = screen_output(str(response.content))
     if not verdict.blocked:
-        return response
+        return response, ()
     for category in verdict.categories:
         _output_screen_blocked_total.labels(category=category).inc()
     logger.warning("output_screen.blocked categories=%s", ",".join(verdict.categories))
-    return AIMessage(content=REFUSAL_TEXT)
+    return AIMessage(content=REFUSAL_TEXT), tuple(verdict.categories)
 
 
-def _dlp_redact_response(response: AIMessage) -> AIMessage:
+def _dlp_redact_response(response: AIMessage) -> tuple[AIMessage, tuple[str, ...]]:
     """Stream 7.4 — redact PII in a terminal response (conditional output).
 
-    Returns ``response`` unchanged when no PII matched, else a copy with the
-    matched spans replaced by ``[redacted]``. Only string content is scanned
+    Returns ``(response, ())`` when no PII matched, else ``(copy, categories)``
+    with the matched spans replaced by ``[redacted]`` and the fired categories
+    for the audit row (audit-eval Phase 4). Only string content is scanned
     (multimodal content blocks pass through, M2/M3 scope). The matched value is
     never logged — only the category that fired.
     """
     content = response.content
     if not isinstance(content, str):
-        return response
+        return response, ()
     result = scan_and_redact(content)
     if not result.changed:
-        return response
+        return response, ()
     for category in result.categories:
         _output_dlp_redacted_total.labels(category=category).inc()
     logger.info("output_dlp.redacted categories=%s", ",".join(result.categories))
-    return response.model_copy(update={"content": result.redacted})
+    return response.model_copy(update={"content": result.redacted}), tuple(result.categories)
 
 
 def _latest_human_text(messages: Sequence[BaseMessage]) -> str:
@@ -1669,6 +1687,44 @@ async def _emit_tool_audit(
         )
     except Exception:
         logger.exception("tools.audit_failed name=%s call_id=%s", name, call_id)
+
+
+async def _emit_output_guard_audit(
+    audit_logger: AuditLogger | None,
+    tenant_id: object,
+    *,
+    action: AuditAction,
+    result: AuditResult,
+    categories: tuple[str, ...],
+) -> None:
+    """Durable audit row for an output-guard event (audit-eval Phase 4).
+
+    PI-2 output screen blocks + 7.4 DLP redactions were previously metric-only;
+    this records a per-event row (only the fired *categories*, never the matched
+    value). Best-effort: no logger / no tenant / write failure never breaks the
+    run. ``tenant_id`` is accepted loosely (str | UUID) and coerced.
+    """
+    if audit_logger is None or tenant_id is None:
+        return
+    try:
+        tid = tenant_id if isinstance(tenant_id, UUID) else UUID(str(tenant_id))
+    except (TypeError, ValueError):
+        return
+    try:
+        await audit_logger.write(
+            AuditEntry(
+                tenant_id=tid,
+                actor_type="agent",
+                actor_id="agent",
+                action=action,
+                resource_type="run",
+                resource_id="agent",
+                result=result,
+                details={"categories": list(categories)},
+            )
+        )
+    except Exception:
+        logger.exception("output_guard.audit_failed action=%s", action)
 
 
 async def _emit_state_projected_audit(

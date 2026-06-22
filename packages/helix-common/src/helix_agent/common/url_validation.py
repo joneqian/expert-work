@@ -31,15 +31,29 @@ class RemoteURLError(ValueError):
     """A URL fails remote-endpoint validation (unsupported scheme or SSRF risk)."""
 
 
+#: Explicit private/internal ranges that are a genuine SSRF / infra threat
+#: (RFC1918 + IPv6 unique-local). We do NOT use ``ipaddress.is_private`` here:
+#: as of CPython 3.12.4+ it also returns True for RFC2544 benchmarking
+#: (198.18.0.0/15), TEST-NET docs ranges, and 240.0.0.0/4 — none of which are an
+#: infra threat, and 198.18/15 is exactly what a local fake-ip DNS maps public
+#: hosts into, so blanket ``is_private`` over-blocks (audit-eval Phase 2). These
+#: harmless reserved ranges are non-routable / synthetic → allowed + audited at
+#: egress. See docs/design/sandbox-audit-evaluation.md.
+_BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("fc00::/7"),  # IPv6 unique-local
+)
+
+
 def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local  # includes 169.254.0.0/16 (cloud metadata)
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified  # 0.0.0.0 / ::
-    )
+    # Precise, version-stable predicates for the always-dangerous ranges...
+    if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+        # is_link_local includes 169.254.0.0/16 (cloud metadata 169.254.169.254).
+        return True
+    # ...plus the explicit private/internal networks above.
+    return any(ip in net for net in _BLOCKED_NETWORKS if ip.version == net.version)
 
 
 def validate_remote_url(

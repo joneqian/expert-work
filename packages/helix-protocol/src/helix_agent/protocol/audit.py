@@ -221,6 +221,11 @@ class AuditAction(StrEnum):
     # tools (Stream E.6 + E.8 + onwards)
     TOOL_CALL = "tool:call"
     TOOL_BLOCKED = "tool:blocked"
+    # output guards — audit-eval Phase 4. PI-2 output screen blocks a terminal
+    # response (credential/exfil shape) → refusal; 7.4 DLP redacts PII in a
+    # terminal response. Previously metric-only; now also a durable audit row.
+    OUTPUT_SCREEN_BLOCKED = "output:screen_blocked"
+    OUTPUT_DLP_REDACTED = "output:dlp_redacted"
     # llm (Stream E.11 + E.13)
     LLM_CIRCUIT_OPENED = "llm:circuit_opened"
     LLM_FALLBACK_TRIGGERED = "llm:fallback_triggered"
@@ -235,6 +240,12 @@ class AuditAction(StrEnum):
     # memory — Capability Uplift Sprint #2 (Mini-ADR U-3 / U-4)
     MEMORY_INJECTION_BLOCKED = "memory:injection_blocked"
     MEMORY_INJECTION_REDACTED = "memory:injection_redacted"
+    # audit-eval Phase 3 — a strict-scope scan hit on USER-authored memory no
+    # longer hard-blocks the write (over-blocked legit devops/security notes);
+    # the write proceeds and is flagged here for traceability (audit over
+    # blocking). The runtime injection vectors (recall, auto-extracted write-
+    # back) still block — see docs/design/sandbox-audit-evaluation.md.
+    MEMORY_INJECTION_WARN = "memory:injection_warn"
     MEMORY_DRIFT_DETECTED = "memory:drift_detected"
     # memory — Capability Uplift Sprint #7 MemoryConsolidator (Mini-ADRs
     # U-34 / U-36 / U-37 / U-40 / U-42). Mirrors the control-plane
