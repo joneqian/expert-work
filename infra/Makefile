@@ -25,7 +25,7 @@ WAIT_SERVICES := $(DEV_DATA) $(DEV_APP) $(DEV_LANGFUSE)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-up dev-down dev-clean dev-ps dev-logs dev-build build-sandbox-office dev-bootstrap-admin dev-reset-admin dev-seed-keycloak dev-keycloak-config langfuse-reset dev-info
+.PHONY: help dev-up dev-down dev-clean dev-ps dev-logs dev-build build-sandbox build-sandbox-office rebuild-sandbox dev-bootstrap-admin dev-reset-admin dev-seed-keycloak dev-keycloak-config langfuse-reset dev-info
 
 help: ## 列出可用目标
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -38,14 +38,25 @@ dev-build: ## 重建 control-plane + sandbox-supervisor 镜像(改了后端代�
 	$(COMPOSE) $(PROFILES) build control-plane-blue sandbox-supervisor
 
 # 沙箱执行镜像不是 compose 服务,由 supervisor 运行时 docker run。minimal
-# (alpine 纯 stdlib)够轻,见 README 一行命令;office 变体重(LibreOffice
+# (alpine 纯 stdlib)够轻,`make build-sandbox`;office 变体重(LibreOffice
 # headless ~1.3GB),故单列、不进 dev-up。host daemon build 一次即可
 # (supervisor 经挂载 socket 用同一 daemon)。context=父目录 infra/(office
 # Dockerfile COPY 共享 sandbox-image/runner.py)。tag 对上 settings 默认值,
 # 或用 HELIX_SANDBOX_IMAGE_OFFICE 覆盖。
+build-sandbox: ## build minimal 沙箱镜像(alpine 纯 stdlib;含 egress urllib shim)
+	docker build -f sandbox-image/Dockerfile -t helix-sandbox:dev sandbox-image
+	@echo "✓ helix-sandbox:dev built"
+
 build-sandbox-office: ## build office 沙箱镜像(soffice/poppler/ffmpeg ~1.3GB;office agent 需先建一次)
 	docker build -f sandbox-image-office/Dockerfile -t helix-sandbox-office:dev .
 	@echo "✓ helix-sandbox-office:dev built — image_variant: office 的 agent 现可跑"
+
+# 改了沙箱镜像内容(runner.py / sitecustomize.py / Dockerfile / requirements)后
+# 一键:重建两个变体镜像 + 重启 supervisor 丢弃预热池(否则池里残留旧镜像容器)。
+# 不改后端代码就不用跑 dev-up。office 重(~1.3GB),只想要 minimal 用 build-sandbox。
+rebuild-sandbox: build-sandbox build-sandbox-office ## 改沙箱镜像后一键:重建 minimal+office + 重启 supervisor 清池
+	$(COMPOSE) $(PROFILES) up -d --force-recreate sandbox-supervisor
+	@echo "✓ 沙箱镜像已重建,supervisor 已重启(预热池已清,下次 acquire 用新镜像)"
 
 dev-up: dev-build ## 起全量 dev 栈(full+auth+observability,排除 green)
 	# 先 --wait 起带可靠 healthcheck 的服务集。
