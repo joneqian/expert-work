@@ -198,6 +198,7 @@ export function SettingsEgressAudit() {
       >
         <Select<EgressVerdict>
           placeholder={t("egress_audit.filter_verdict")}
+          aria-label={t("egress_audit.filter_verdict")}
           value={verdictFilter}
           onChange={(v) => setVerdictFilter(v)}
           style={{ width: 200 }}
@@ -207,6 +208,7 @@ export function SettingsEgressAudit() {
         />
         <Input
           placeholder={t("egress_audit.filter_host")}
+          aria-label={t("egress_audit.filter_host")}
           value={hostFilter}
           onChange={(e) => setHostFilter(e.target.value)}
           style={{ width: 220 }}
@@ -215,6 +217,7 @@ export function SettingsEgressAudit() {
         />
         <Input
           placeholder={t("egress_audit.filter_agent")}
+          aria-label={t("egress_audit.filter_agent")}
           value={agentFilter}
           onChange={(e) => setAgentFilter(e.target.value)}
           style={{ width: 200 }}
