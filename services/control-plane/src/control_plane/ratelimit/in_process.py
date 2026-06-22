@@ -57,19 +57,27 @@ class InProcessTokenBucketLimiter:
         self._buckets: dict[tuple[str, str], _TokenBucket] = {}
         self._lock = asyncio.Lock()
 
-    async def acquire(self, *, dimension: str, key: str) -> RateLimitDecision:
+    async def acquire(
+        self,
+        *,
+        dimension: str,
+        key: str,
+        capacity: int | None = None,
+        refill_per_sec: float | None = None,
+    ) -> RateLimitDecision:
+        # Per-call override (Stream C.6 rate_limit_override) falls back to the
+        # limiter's configured defaults.
+        cap = float(capacity) if capacity is not None else self._capacity
+        refill = refill_per_sec if refill_per_sec is not None else self._refill_per_sec
         async with self._lock:
             now_ms = self._clock()
             bucket = self._buckets.get((dimension, key))
             if bucket is None:
-                bucket = _TokenBucket(tokens=self._capacity, last_refill_ms=now_ms)
+                bucket = _TokenBucket(tokens=cap, last_refill_ms=now_ms)
                 self._buckets[(dimension, key)] = bucket
 
             elapsed_s = max(0, now_ms - bucket.last_refill_ms) / 1000.0
-            bucket.tokens = min(
-                self._capacity,
-                bucket.tokens + elapsed_s * self._refill_per_sec,
-            )
+            bucket.tokens = min(cap, bucket.tokens + elapsed_s * refill)
             bucket.last_refill_ms = now_ms
 
             if bucket.tokens >= 1.0:
@@ -81,7 +89,7 @@ class InProcessTokenBucketLimiter:
                 )
 
             deficit = 1.0 - bucket.tokens
-            retry_after_s = deficit / self._refill_per_sec
+            retry_after_s = deficit / refill
             return RateLimitDecision(
                 allowed=False,
                 retry_after_s=retry_after_s,

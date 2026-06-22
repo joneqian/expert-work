@@ -80,6 +80,14 @@ function recordToPatchJson(record: TenantConfigRecord): string {
   return JSON.stringify(patch, null, 2);
 }
 
+/** Stream C.6 — render the per-tenant rate_limit_override for the read view. */
+function formatRateLimitOverride(ov: Record<string, unknown>): string {
+  const rpm = ov["requests_per_minute"];
+  if (typeof rpm !== "number") return "—";
+  const burst = ov["burst"];
+  return typeof burst === "number" ? `${rpm} req/min (burst ${burst})` : `${rpm} req/min`;
+}
+
 export function SettingsTenantConfig() {
   const { t } = useTranslation();
   const { message } = App.useApp();
@@ -268,6 +276,14 @@ export function SettingsTenantConfig() {
             <dd style={{ margin: 0 }}>{record.audit_retention_days}</dd>
             <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.event_log_retention_days")}</dt>
             <dd style={{ margin: 0 }}>{record.event_log_retention_days}</dd>
+            {/* Stream C.6 — per-tenant rate limit. Read-only here; edit via the
+                JSON editor: "rate_limit_override": {"requests_per_minute": N}. */}
+            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.rate_limit_override")}</dt>
+            <dd style={{ margin: 0 }} data-testid="tenant-config-rate-limit-override">
+              {record.rate_limit_override && Object.keys(record.rate_limit_override).length > 0
+                ? formatRateLimitOverride(record.rate_limit_override)
+                : t("settings_ops.rate_limit_default")}
+            </dd>
             {/* Sprint #4 (Mini-ADR U-28) — Curator thresholds.
                 Displayed read-only; edit goes through the same JSON
                 editor as the rest of tenant_config (we deliberately

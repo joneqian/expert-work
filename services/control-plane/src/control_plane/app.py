@@ -1623,6 +1623,8 @@ def create_app(
         enabled=resolved_settings.tenant_rate_limit_enabled,
         exempt_path_prefixes=tuple(resolved_settings.auth_exempt_path_prefixes),
         audit_sample_every=resolved_settings.tenant_rate_limit_audit_sample_every,
+        # Stream C.6 — per-tenant rate_limit_override (cached, own-tenant RLS read).
+        tenant_config_store=resolved_tenant_config_repo,
     )
     app.add_middleware(
         AuthMiddleware,

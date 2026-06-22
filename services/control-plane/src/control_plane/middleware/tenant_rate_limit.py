@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from collections.abc import Awaitable, Callable, Iterable
+from uuid import UUID
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -37,8 +39,10 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
 from control_plane.audit import emit
-from control_plane.ratelimit import RateLimiter
+from control_plane.ratelimit import RateLimiter, RateLimitOverride, parse_rate_limit_override
 from helix_agent.common.observability import current_trace_id_hex, helix_counter
+from helix_agent.persistence.rls import current_tenant_id_var
+from helix_agent.persistence.tenant_config import TenantConfigStore
 from helix_agent.protocol import AuditAction, AuditResult, Principal
 from helix_agent.runtime.audit.logger import AuditLogger
 
@@ -72,6 +76,8 @@ class TenantRateLimitMiddleware(BaseHTTPMiddleware):
         enabled: bool = True,
         exempt_path_prefixes: Iterable[str] = ("/healthz", "/metrics"),
         audit_sample_every: int = 100,
+        tenant_config_store: TenantConfigStore | None = None,
+        override_ttl_s: float = 30.0,
     ) -> None:
         super().__init__(app)
         self._limiter = limiter
@@ -81,6 +87,13 @@ class TenantRateLimitMiddleware(BaseHTTPMiddleware):
         # Per subsystems/16 § 8: sample 429 audits to bound log volume.
         self._audit_sample_every = max(1, audit_sample_every)
         self._denial_counter: dict[str, int] = {}
+        # Stream C.6 per-tenant rate_limit_override. Resolving it per request
+        # would hit the DB on every call, so cache (tenant_id → override) with a
+        # short TTL; a config change takes effect within ``override_ttl_s``.
+        # ``None`` store (dev / tests without config) → no overrides, defaults.
+        self._tenant_config_store = tenant_config_store
+        self._override_ttl_s = override_ttl_s
+        self._override_cache: dict[str, tuple[float, RateLimitOverride | None]] = {}
 
     async def dispatch(
         self,
@@ -99,7 +112,13 @@ class TenantRateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         tenant_key = str(principal.tenant_id)
-        decision = await self._limiter.acquire(dimension="tenant", key=tenant_key)
+        override = await self._resolve_override(principal.tenant_id)
+        decision = await self._limiter.acquire(
+            dimension="tenant",
+            key=tenant_key,
+            capacity=override.capacity if override else None,
+            refill_per_sec=override.refill_per_sec if override else None,
+        )
         outcome = "allowed" if decision.allowed else "denied"
         _decisions.labels(decision=outcome).inc()
 
@@ -129,6 +148,37 @@ class TenantRateLimitMiddleware(BaseHTTPMiddleware):
                 },
             },
         )
+
+    async def _resolve_override(self, tenant_id: UUID) -> RateLimitOverride | None:
+        """The tenant's ``rate_limit_override`` (cached, TTL). ``None`` → defaults.
+
+        Reads under the tenant's own RLS context (this middleware runs before
+        ``RLSContextMiddleware``, so set the ContextVar for the lookup — a tenant
+        reading its OWN config is permitted by the RLS self-policy). Best-effort:
+        any read/parse error falls back to ``None`` (the configured defaults)."""
+        if self._tenant_config_store is None:
+            return None
+        key = str(tenant_id)
+        now = time.monotonic()
+        cached = self._override_cache.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+
+        override: RateLimitOverride | None = None
+        ctx_token = current_tenant_id_var.set(tenant_id)
+        try:
+            record = await self._tenant_config_store.get(tenant_id=tenant_id)
+            if record is not None:
+                override = parse_rate_limit_override(record.rate_limit_override)
+        except Exception:
+            # Never let a config read break rate limiting — fall back to defaults.
+            logger.warning("tenant_rate_limit.override_lookup_failed", exc_info=True)
+            override = None
+        finally:
+            current_tenant_id_var.reset(ctx_token)
+
+        self._override_cache[key] = (now + self._override_ttl_s, override)
+        return override
 
     def _is_exempt(self, path: str) -> bool:
         path_clean = path.rstrip("/")

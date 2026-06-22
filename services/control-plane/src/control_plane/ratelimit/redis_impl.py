@@ -96,12 +96,25 @@ class RedisTokenBucketLimiter:
         self._cost_milli = 1000  # 1 token per acquire
         self._lua_sha: str | None = None
 
-    async def acquire(self, *, dimension: str, key: str) -> RateLimitDecision:
+    async def acquire(
+        self,
+        *,
+        dimension: str,
+        key: str,
+        capacity: int | None = None,
+        refill_per_sec: float | None = None,
+    ) -> RateLimitDecision:
         bucket_key = f"{_KEY_PREFIX}{dimension}:{key}"
         now_ms = self._now_ms()
+        # Per-call override (Stream C.6 rate_limit_override) → fall back to the
+        # limiter's configured caps. Scaled by 1000 like the defaults.
+        cap_milli = int(capacity * 1000) if capacity is not None else self._capacity_milli
+        refill_milli = (
+            int(refill_per_sec * 1000) if refill_per_sec is not None else self._refill_milli
+        )
         argv = [
-            str(self._capacity_milli),
-            str(self._refill_milli),
+            str(cap_milli),
+            str(refill_milli),
             str(now_ms),
             str(self._cost_milli),
             str(_BUCKET_TTL_MS),

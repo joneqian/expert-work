@@ -549,6 +549,9 @@ export interface TranslationKeys {
     plan: string;
     audit_retention_days: string;
     event_log_retention_days: string;
+    // Stream C.6 — per-tenant rate limit override.
+    rate_limit_override: string;
+    rate_limit_default: string;
     // Sprint #4 (Mini-ADR U-28) — Curator thresholds.
     skill_stale_days: string;
     skill_archive_days: string;
@@ -2180,6 +2183,8 @@ const en: TranslationKeys = {
     plan: "Plan",
     audit_retention_days: "Audit retention (days)",
     event_log_retention_days: "Event log retention (days)",
+    rate_limit_override: "Per-tenant rate limit",
+    rate_limit_default: "Platform default",
     skill_stale_days: "Skill stale threshold (days)",
     skill_archive_days: "Skill archive threshold (days)",
     mcp_allowlist: "MCP allowlist",

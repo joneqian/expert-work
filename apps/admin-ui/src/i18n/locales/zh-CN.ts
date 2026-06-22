@@ -566,6 +566,8 @@ const zhCN: TranslationKeys = {
     plan: "套餐",
     audit_retention_days: "审计保留(天)",
     event_log_retention_days: "事件日志保留(天)",
+    rate_limit_override: "租户限流覆盖",
+    rate_limit_default: "平台默认",
     skill_stale_days: "技能转 stale 阈值(天)",
     skill_archive_days: "技能转 archived 阈值(天)",
     mcp_allowlist: "MCP 白名单",

@@ -37,5 +37,18 @@ class RateLimitDecision:
 class RateLimiter(Protocol):
     """Take one token off the ``(dimension, key)`` bucket."""
 
-    async def acquire(self, *, dimension: str, key: str) -> RateLimitDecision:
-        """Return :class:`RateLimitDecision`; never raises on bucket miss."""
+    async def acquire(
+        self,
+        *,
+        dimension: str,
+        key: str,
+        capacity: int | None = None,
+        refill_per_sec: float | None = None,
+    ) -> RateLimitDecision:
+        """Return :class:`RateLimitDecision`; never raises on bucket miss.
+
+        ``capacity`` / ``refill_per_sec`` override the limiter's configured
+        defaults for THIS bucket (Stream C.6 per-tenant ``rate_limit_override``);
+        ``None`` uses the limiter's own caps. Callers that don't do per-key
+        tuning (gateway / provider tiers) simply omit them.
+        """

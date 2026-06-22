@@ -21,6 +21,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from control_plane.api._authz import require
+from control_plane.ratelimit import parse_rate_limit_override
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.protocol import (
@@ -178,6 +179,20 @@ def build_tenant_config_router() -> APIRouter:
         request: Request,
     ) -> dict[str, object]:
         _ensure_tenant_match(principal, tenant_id)
+        # Stream C.6 — validate the rate_limit_override shape at write time so a
+        # bad config (typo / wrong unit) is rejected here, never silently
+        # ignored by the limiter at runtime.
+        if payload.rate_limit_override is not None:
+            try:
+                parse_rate_limit_override(payload.rate_limit_override)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "TENANT_CONFIG_INVALID_RATE_LIMIT_OVERRIDE",
+                        "message": str(exc),
+                    },
+                ) from exc
         # Stream Y-1 — LLM credentials are platform-exclusive. ``credentials_mode``
         # is a ``Literal["platform"]``, so Pydantic rejects any other value in the
         # request body with 422 before reaching this handler; no switch gate needed.

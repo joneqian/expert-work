@@ -94,7 +94,11 @@ governance the operator already chose**, not safety over-blocks — out of scope
    platform anomaly (`tenant_id=NULL`, visible only in the cross-tenant view).
    The 405 (plain-HTTP) path stays unrecorded — it is the separate plain-HTTP
    egress capability gap, not an injection/auth event.
-5. **Phase 5 (N/A):** no dead code remained after #754 removed the
-   `sandbox_audit` shell branch; `rate_limit_override` is intentionally
-   forward-compat storage consumed in M1 (already documented), not dead code —
-   nothing to change.
+5. **Phase 5 (DONE):** no dead code remained after #754. The dormant
+   `rate_limit_override` (stored but unconsumed) was **wired through** instead of
+   left for M1: `RateLimiter.acquire` gained optional `capacity`/`refill_per_sec`
+   overrides (in-process + redis), a `parse_rate_limit_override` validator
+   (`requests_per_minute` + optional `burst`, validated at PUT-time → 422 on bad
+   shape), and `TenantRateLimitMiddleware` resolves the per-tenant override
+   (cached, TTL, own-tenant RLS read) and applies it. admin-ui shows the current
+   override in the tenant-config read view (edit via the JSON surface).

@@ -124,6 +124,33 @@ async def test_put_rejects_tenant_credentials_mode(tc_client: AsyncClient) -> No
 
 
 @pytest.mark.asyncio
+async def test_put_accepts_valid_rate_limit_override(tc_client: AsyncClient) -> None:
+    # Stream C.6 — a well-formed override is stored.
+    token = _admin_token()
+    resp = await tc_client.put(
+        f"/v1/tenants/{_TENANT}/config",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"display_name": "ACME", "rate_limit_override": {"requests_per_minute": 600}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["rate_limit_override"] == {"requests_per_minute": 600}
+
+
+@pytest.mark.asyncio
+async def test_put_rejects_bad_rate_limit_override(tc_client: AsyncClient) -> None:
+    # Stream C.6 — a malformed override is rejected at write time (422), never
+    # silently ignored by the limiter at runtime.
+    token = _admin_token()
+    resp = await tc_client.put(
+        f"/v1/tenants/{_TENANT}/config",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"display_name": "ACME", "rate_limit_override": {"requests_per_minute": 0}},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "TENANT_CONFIG_INVALID_RATE_LIMIT_OVERRIDE"
+
+
+@pytest.mark.asyncio
 async def test_first_put_requires_display_name(tc_client: AsyncClient) -> None:
     token = _admin_token()
     resp = await tc_client.put(

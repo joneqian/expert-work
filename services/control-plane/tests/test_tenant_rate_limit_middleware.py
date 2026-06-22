@@ -176,3 +176,40 @@ async def test_tenant_buckets_are_isolated(audit_store: InMemoryAuditLogStore) -
         # Tenant B still has a full bucket.
         first_b = await client.get("/v1/agents", headers={"Authorization": f"Bearer {token_b}"})
         assert first_b.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_tenant_override_tightens_limit(audit_store: InMemoryAuditLogStore) -> None:
+    """Stream C.6 — a per-tenant rate_limit_override caps a wide-open limiter.
+
+    Default tenant tier is wide (10k), but the seeded tenant config overrides to
+    burst=1, so the second request in quick succession is 429'd.
+    """
+    from helix_agent.persistence.tenant_config import InMemoryTenantConfigStore
+    from helix_agent.protocol.tenant_config import TenantConfigPatch
+
+    repo = InMemoryTenantConfigStore()
+    await repo.upsert(
+        tenant_id=_TENANT,
+        patch=TenantConfigPatch(
+            display_name="T",
+            rate_limit_override={"requests_per_minute": 60, "burst": 1},
+        ),
+        actor_id="seed",
+    )
+    limiter = InProcessTokenBucketLimiter(capacity=10_000, refill_per_sec=10_000.0)
+    app = create_app(
+        settings=_settings(),
+        audit_logger=build_default_audit_logger(audit_store),
+        jwt_verifier=build_test_jwt_verifier(),
+        tenant_rate_limiter=limiter,
+        tenant_config_repo=repo,
+        enable_reaper=False,
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as client:
+        headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=_TENANT)}"}
+        r1 = await client.get("/v1/agents", headers=headers)
+        r2 = await client.get("/v1/agents", headers=headers)
+        assert r1.status_code == 200  # override burst=1 → first allowed
+        assert r2.status_code == 429  # ...second drained the 1-token override bucket

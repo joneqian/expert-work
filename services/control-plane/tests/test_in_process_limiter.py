@@ -101,3 +101,32 @@ def test_rejects_non_positive_capacity() -> None:
 def test_rejects_non_positive_refill_rate() -> None:
     with pytest.raises(ValueError):
         InProcessTokenBucketLimiter(capacity=1, refill_per_sec=0)
+
+
+@pytest.mark.asyncio
+async def test_per_call_override_tightens_below_default() -> None:
+    # Stream C.6 — a per-call capacity override caps a generous limiter to a
+    # small bucket for THIS key (rate_limit_override applied per tenant).
+    limiter, _ = _build(capacity=100, refill_per_sec=0.001)
+    d1 = await limiter.acquire(dimension="tenant", key="t1", capacity=1, refill_per_sec=0.001)
+    d2 = await limiter.acquire(dimension="tenant", key="t1", capacity=1, refill_per_sec=0.001)
+    assert d1.allowed is True  # bucket starts at the override capacity (1)
+    assert d2.allowed is False  # second call drained the 1-token override bucket
+
+
+@pytest.mark.asyncio
+async def test_per_call_override_loosens_above_default() -> None:
+    # A bigger override capacity lets more through than the limiter's default.
+    limiter, _ = _build(capacity=1, refill_per_sec=0.001)
+    allowed = 0
+    for _ in range(5):
+        d = await limiter.acquire(dimension="tenant", key="t2", capacity=5, refill_per_sec=0.001)
+        allowed += 1 if d.allowed else 0
+    assert allowed == 5  # override raised the burst from 1 → 5
+
+
+@pytest.mark.asyncio
+async def test_omitting_override_uses_configured_defaults() -> None:
+    limiter, _ = _build(capacity=2, refill_per_sec=0.001)
+    results = [(await limiter.acquire(dimension="tenant", key="t3")).allowed for _ in range(3)]
+    assert results == [True, True, False]  # default capacity=2
