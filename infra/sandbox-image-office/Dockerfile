@@ -87,6 +87,10 @@ WORKDIR /workspace
 
 # Single source of truth — shared with the minimal image (build context = infra/).
 COPY sandbox-image/runner.py /opt/runner.py
+# Egress urllib shim (sandbox-egress §3.5) — shared with the minimal image; into
+# the GLOBAL site-packages so `python -I -c` auto-imports it. No-op without
+# HELIX_EGRESS_PROXY_AUTH. See sandbox-image/sitecustomize.py.
+COPY sandbox-image/sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
 
 USER agent
 

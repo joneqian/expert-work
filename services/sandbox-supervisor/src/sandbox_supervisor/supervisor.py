@@ -717,6 +717,11 @@ class SandboxSupervisor:
         proxy_url = f"http://{token}:@{s.egress_proxy_host}:{s.egress_proxy_port}"
         # NO_PROXY keeps the credential-proxy /forward call + loopback direct.
         no_proxy = f"{s.egress_proxy_host},localhost,127.0.0.1"
+        # stdlib urllib drops the proxy URL's userinfo on HTTPS CONNECT
+        # (sandbox-egress §3.5), unlike requests/httpx. Hand the sitecustomize
+        # shim baked into the image the exact Basic-auth bytes (base64 of
+        # "<token>:") so it can add Proxy-Authorization to urllib's CONNECT.
+        proxy_auth = base64.b64encode(f"{token}:".encode()).decode("ascii")
         return (
             ("HTTPS_PROXY", proxy_url),
             ("HTTP_PROXY", proxy_url),
@@ -724,6 +729,7 @@ class SandboxSupervisor:
             ("http_proxy", proxy_url),
             ("NO_PROXY", no_proxy),
             ("no_proxy", no_proxy),
+            ("HELIX_EGRESS_PROXY_AUTH", proxy_auth),
         )
 
     async def _emit_audit(

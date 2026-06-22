@@ -4,7 +4,8 @@ Closes the "code green ≠ it actually reaches the internet" gap for the egress
 proxy (PRs #745/#746/#747/#748). Against a running dev stack it:
 
 * **Phase 1 — egress allowed + audited.** Drives a real agent whose sandbox is
-  egress-enabled to ``urllib.request.urlopen("https://example.com")`` from
+  egress-enabled to ``urllib.request.urlopen("https://1.1.1.1")`` (a public IP
+  literal — DNS-independent, so a local fake-ip/WARP resolver can't mask it) from
   inside the sandbox (tunnelled through the audited egress proxy). Asserts the
   request succeeds AND a ``sandbox_egress_audit`` row with ``verdict=allowed``
   for that host shows up via ``GET /v1/sandbox-egress-audit``.
@@ -247,24 +248,58 @@ async def _find_audit_row(
 
 # ── phases ────────────────────────────────────────────────────────────────────
 
-_ALLOWED_HOST = "example.com"
+# A public IP *literal*, not a hostname: the probe must not depend on whatever
+# the proxy host's resolver returns. Some local setups (Cloudflare WARP, a
+# Clash/mihomo "fake-ip" DNS, corporate split-DNS) map every public hostname to
+# a synthetic reserved range (e.g. 198.18.0.0/15) — which the SSRF guard then
+# *correctly* refuses, masking the allowed path. 1.1.1.1 (Cloudflare) serves a
+# TLS cert with the IP in its SANs, so HTTPS verifies, and the egress proxy still
+# resolves+pins it (a literal resolves to itself) and connects out via NAT.
+_ALLOWED_HOST = "1.1.1.1"
+# Two deliberate tricks here, both forced by live findings:
+#
+# 1. The target is base64-encoded. The probe is run by an LLM via exec_python;
+#    given a bare ``https://1.1.1.1`` the model relays it but the IP literal is
+#    what we need on the wire (no DNS → a local fake-ip resolver can't remap it
+#    into a reserved range the SSRF guard then refuses). Opaque base64 keeps the
+#    model from touching it. ``...L2Nkbi1jZ2kvdHJhY2U=`` == the URL below.
+# 2. ``https://1.1.1.1`` 301-redirects to ``https://one.one.one.one`` — and
+#    following that redirect goes back through DNS (fake-ip → blocked). So we hit
+#    ``/cdn-cgi/trace`` (a 200, no redirect) AND disable redirect-following: any
+#    HTTP response received over the tunnel proves egress reached Cloudflare,
+#    redirect or not. The CONNECT target stays the literal ``1.1.1.1``.
 _ALLOWED_CODE = """\
-import urllib.request
-url = "https://example.com"
+import base64, urllib.request, urllib.error
+url = base64.b64decode("aHR0cHM6Ly8xLjEuMS4xL2Nkbi1jZ2kvdHJhY2U=").decode()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+opener = urllib.request.build_opener(_NoRedirect)
 try:
     req = urllib.request.Request(url, headers={"User-Agent": "helix-egress-verify"})
-    with urllib.request.urlopen(req, timeout=25) as r:
+    with opener.open(req, timeout=25) as r:
         body = r.read(200)
         print("EGRESS_RESULT", {"ok": True, "status": r.status, "bytes": len(body)})
+except urllib.error.HTTPError as e:
+    # A 3xx we refused to follow still means the CONNECT + TLS + HTTP round-trip
+    # reached Cloudflare over the audited tunnel — egress worked.
+    print("EGRESS_RESULT", {"ok": True, "status": e.code, "note": "non-2xx but reached"})
 except Exception as e:
     print("EGRESS_RESULT", {"ok": False, "err": type(e).__name__ + ": " + str(e)[:200]})
 """
 
 _SSRF_HOST = "169.254.169.254"
+# base64 for the same reason as the allowed probe — keep the model from rewriting
+# the literal. ``aHR0cHM6Ly8xNjkuMjU0LjE2OS4yNTQv`` == "https://169.254.169.254/".
 _SSRF_CODE = """\
-import urllib.request
+import base64, urllib.request
+url = base64.b64decode("aHR0cHM6Ly8xNjkuMjU0LjE2OS4yNTQv").decode()
 try:
-    with urllib.request.urlopen("https://169.254.169.254/", timeout=10) as r:
+    with urllib.request.urlopen(url, timeout=10) as r:
         print("SSRF_RESULT", {"reached": True, "status": r.status})
 except Exception as e:
     print("SSRF_RESULT", {"reached": False, "err": type(e).__name__ + ": " + str(e)[:200]})
@@ -279,8 +314,18 @@ def _exec_prompt(code: str) -> str:
     )
 
 
+def _strip_ws(s: str) -> str:
+    """Drop all whitespace and the spotlight space marker (U+2581).
+
+    Tool output is wrapped in the spotlight/UNTRUSTED fence (PI defense), which
+    rewrites spaces to ``▁``. A naive ``"'ok': True" in text`` then misses the
+    real ``'ok':▁True``. Comparing with all spacing removed dodges the encoding
+    without the verifier needing to know the fence format."""
+    return "".join(ch for ch in s if not ch.isspace() and ch != "▁")
+
+
 def _tool_text_has(tr: _RunTrace, *needles: str) -> bool:
-    return any(all(n in text for n in needles) for _t, text in tr.tool_msgs)
+    return any(all(_strip_ws(n) in _strip_ws(text) for n in needles) for _t, text in tr.tool_msgs)
 
 
 async def phase_allowed(client: httpx.AsyncClient, *, name: str, version: str) -> bool:

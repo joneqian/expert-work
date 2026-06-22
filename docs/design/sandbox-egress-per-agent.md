@@ -162,6 +162,39 @@ identity + full audit + volume-anomaly detection — rather than by walling egre
 off. An operator who wants a tighter posture sets `egress: none` per agent (or a
 host `allowlist`); the platform does not force it.
 
+### 3.5 stdlib `urllib` CONNECT auth — the sitecustomize shim (live finding)
+
+§3.2 assumes "standard HTTP clients send the proxy token automatically." The
+live e2e (`verify_live_egress.py`) proved that is **not** universally true:
+
+| client | sends `Proxy-Authorization` on the `CONNECT`? |
+| --- | --- |
+| `requests` / `httpx` / `urllib3` | yes (from the proxy URL userinfo) |
+| stdlib `urllib.request` | **no** — the HTTPS `CONNECT` carries only `Host:` |
+
+So an egress-enabled sandbox whose skill uses bare `urllib` (the zero-dependency
+baseline; Anthropic's own catalog code uses it) loses the token → the proxy
+returns `407` → egress silently fails. CI could never catch this — only a real
+`CONNECT` over the wire shows the missing header.
+
+Fix, transparent to skill code (capability must not weaken):
+
+1. The supervisor also injects `HELIX_EGRESS_PROXY_AUTH = base64("<token>:")`
+   (the exact bytes a `Basic` proxy-auth header would carry) alongside
+   `HTTPS_PROXY`.
+2. A `sitecustomize.py` baked into the sandbox images monkeypatches
+   `http.client.HTTPConnection.set_tunnel` to add `Proxy-Authorization: Basic
+   <HELIX_EGRESS_PROXY_AUTH>` to every `CONNECT` when that env is present. Python
+   auto-imports `sitecustomize` from the **global** site-packages at interpreter
+   startup — and crucially this still fires under the runner's `python -I -c`
+   (isolated mode is `-E -s`, *not* `-S`, so `site` still runs; `-E` ignores only
+   `PYTHON*` env, so the auth env is still read). `requests`/`httpx`/`urllib3`
+   already work and are unaffected (the patch only fills a header they already set).
+
+No skill change, no proxy change (the proxy already validates the standard
+`Proxy-Authorization`); the shim only makes urllib behave like every other
+client. Plain-HTTP egress is still out of scope (the proxy is CONNECT-only).
+
 ## 4. Security accounting (necessary vs. dropped)
 
 | Control | Keep? | Why |

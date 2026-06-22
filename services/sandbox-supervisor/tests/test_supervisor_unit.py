@@ -13,6 +13,7 @@ Plus HTTP-route smoke tests over an injected supervisor.
 
 from __future__ import annotations
 
+import base64
 import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -1578,6 +1579,11 @@ async def test_acquire_with_egress_injects_proxy_env_and_signed_token() -> None:
     assert identity.agent_name == "pptx-agent"
     assert identity.agent_version == "1.2.0"
     assert identity.sandbox_id == str(response.sandbox_id)
+
+    # §3.5 — the urllib CONNECT shim auth: base64("<token>:"), the exact bytes a
+    # Basic proxy-auth header carries. The sitecustomize shim baked into the image
+    # adds this to urllib's CONNECT (which otherwise drops the proxy userinfo).
+    assert envs["HELIX_EGRESS_PROXY_AUTH"] == base64.b64encode(f"{token}:".encode()).decode("ascii")
 
 
 @pytest.mark.asyncio
