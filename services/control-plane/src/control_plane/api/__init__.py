@@ -36,6 +36,7 @@ from control_plane.api.quota import build_quota_router
 from control_plane.api.rate_card import build_rate_card_router
 from control_plane.api.role_bindings import build_role_bindings_router
 from control_plane.api.runs import build_runs_list_router, build_runs_router
+from control_plane.api.sandbox_egress_audit import build_sandbox_egress_audit_router
 from control_plane.api.sandboxes import build_sandboxes_router
 from control_plane.api.service_accounts import build_service_accounts_router
 from control_plane.api.sessions import build_sessions_router
@@ -83,6 +84,7 @@ __all__ = [
     "build_role_bindings_router",
     "build_runs_list_router",
     "build_runs_router",
+    "build_sandbox_egress_audit_router",
     "build_sandboxes_router",
     "build_service_accounts_router",
     "build_sessions_router",
