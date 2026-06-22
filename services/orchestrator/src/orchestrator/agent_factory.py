@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
 
@@ -111,7 +111,7 @@ from orchestrator.tools import ToolEnv, build_tool_registry
 from orchestrator.tools.file_ops import SandboxWorkspaceWriter
 from orchestrator.tools.knowledge import Reranker
 from orchestrator.tools.registry import ToolContext, ToolRegistry
-from orchestrator.tools.sandbox import SupervisorClient
+from orchestrator.tools.sandbox import EgressContext, SupervisorClient, bind_egress
 from orchestrator.tools.skill_authoring import (
     SKILL_AUTHORING_BUILTINS,
     build_skill_authoring_tools,
@@ -513,6 +513,24 @@ async def build_agent(
     skill_seed_files = build_skill_seed_files(
         loaded_skills.resolved_versions, loaded_skills.activated_skill_names
     )
+
+    # sandbox-egress §3.3 — bind the agent's egress policy + identity onto the
+    # supervisor client so EVERY sandbox acquire (exec_python/bash/file_ops/
+    # workspace-ingest) carries it, without threading through each tool. The
+    # supervisor mints a per-sandbox token + injects HTTPS_PROXY when the policy
+    # is not "none" (default "proxy" — egress on, audited).
+    if env.supervisor_client is not None:
+        env = replace(
+            env,
+            supervisor_client=bind_egress(
+                env.supervisor_client,
+                EgressContext(
+                    policy=spec.spec.sandbox.network.egress,
+                    agent_name=spec.metadata.name,
+                    agent_version=spec.metadata.version,
+                ),
+            ),
+        )
 
     registry = await build_tool_registry(
         spec.spec.tools,

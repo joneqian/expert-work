@@ -85,6 +85,7 @@ class SandboxRuntimeProvider:
         container_name: str,
         limits: SandboxResourceLimits = DEFAULT_RESOURCE_LIMITS,
         workspace_volume: str | None = None,
+        env: tuple[tuple[str, str], ...] = (),
     ) -> list[str]:
         """Return the full ``docker run`` argv for the sandbox.
 
@@ -98,6 +99,9 @@ class SandboxRuntimeProvider:
         → an ephemeral tmpfs (destroyed with the container); a volume
         name → a docker named volume that persists across containers
         (Stream J.15 — the per-user persistent workspace).
+
+        ``env`` emits ``-e KEY=VALUE`` flags (sandbox-egress §3.3 injects
+        ``HTTPS_PROXY``/``HTTP_PROXY``/``NO_PROXY`` here when egress is on).
         """
         argv = [
             "docker",
@@ -121,6 +125,8 @@ class SandboxRuntimeProvider:
             "--network",
             self.egress_network,
         ]
+        for key, value in env:
+            argv += ["--env", f"{key}={value}"]
         for hostname, ip in self.extra_hosts:
             argv += ["--add-host", f"{hostname}:{ip}"]
         if self.oci_runtime == "runsc":

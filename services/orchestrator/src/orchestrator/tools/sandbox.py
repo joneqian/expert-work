@@ -57,6 +57,21 @@ class SandboxOutcome:
     timed_out: bool
 
 
+@dataclass(frozen=True)
+class EgressContext:
+    """Per-agent sandbox egress binding (sandbox-egress §3.3).
+
+    Carries the manifest's ``sandbox.network.egress`` policy plus the agent
+    identity the supervisor needs to mint the per-sandbox egress token. Bound
+    once per build and injected into every ``acquire`` by
+    :class:`_EgressBindingClient` — so no per-tool threading is needed.
+    """
+
+    policy: str  # manifest egress: "none" | "direct" | "proxy"
+    agent_name: str
+    agent_version: str
+
+
 def _traced_headers() -> dict[str, str]:
     """Outbound headers carrying the active W3C trace context (A.8).
 
@@ -92,6 +107,7 @@ class SupervisorClient(Protocol):
         user_id: UUID | None = None,
         image_variant: str | None = None,
         seed_files: tuple[tuple[str, bytes], ...] = (),
+        egress: EgressContext | None = None,
     ) -> UUID:
         """Launch a sandbox for the tenant; return its id.
 
@@ -102,6 +118,9 @@ class SupervisorClient(Protocol):
         ``seed_files`` (skill-runtime §5.1) are ``(relpath, bytes)`` pairs the
         supervisor materializes under ``/workspace`` before first exec — the
         agent's activated skill files.
+        ``egress`` (sandbox-egress §3.3) carries the agent's egress policy +
+        identity; normally injected by :class:`_EgressBindingClient`, so
+        callers (``run_in_sandbox``) leave it ``None``.
         """
 
     async def exec(self, *, sandbox_id: UUID, code: str, timeout_s: int | None) -> SandboxOutcome:
@@ -150,6 +169,7 @@ class HTTPSupervisorClient:
         user_id: UUID | None = None,
         image_variant: str | None = None,
         seed_files: tuple[tuple[str, bytes], ...] = (),
+        egress: EgressContext | None = None,
     ) -> UUID:
         payload: dict[str, Any] = {"tenant_id": str(tenant_id), "thread_id": thread_id}
         if user_id is not None:
@@ -161,6 +181,10 @@ class HTTPSupervisorClient:
                 {"path": path, "content_b64": base64.b64encode(data).decode("ascii")}
                 for path, data in seed_files
             ]
+        if egress is not None:
+            payload["egress"] = egress.policy
+            payload["agent_name"] = egress.agent_name
+            payload["agent_version"] = egress.agent_version
         body = await self._post("/v1/sandboxes:acquire", json=payload)
         return UUID(str(body["sandbox_id"]))
 
@@ -252,6 +276,9 @@ class RecordingSupervisorClient:
     acquired: list[tuple[UUID, str, UUID | None, str | None, tuple[tuple[str, bytes], ...]]] = (
         field(default_factory=list)
     )
+    #: sandbox-egress §3.3 — the ``EgressContext`` passed to each acquire (kept
+    #: out of the ``acquired`` 5-tuple so existing tests stay unchanged).
+    egress_calls: list[EgressContext | None] = field(default_factory=list)
     execs: list[tuple[UUID, str]] = field(default_factory=list)
     released: list[UUID] = field(default_factory=list)
     destroyed: list[tuple[UUID, str]] = field(default_factory=list)
@@ -268,8 +295,10 @@ class RecordingSupervisorClient:
         user_id: UUID | None = None,
         image_variant: str | None = None,
         seed_files: tuple[tuple[str, bytes], ...] = (),
+        egress: EgressContext | None = None,
     ) -> UUID:
         self.acquired.append((tenant_id, thread_id, user_id, image_variant, seed_files))
+        self.egress_calls.append(egress)
         self._next_id += 1
         return UUID(int=self._next_id)
 
@@ -297,6 +326,63 @@ class RecordingSupervisorClient:
     async def reap(self, *, force: bool) -> int:
         self.reaped.append(force)
         return self.reap_count
+
+
+@dataclass
+class _EgressBindingClient:
+    """Wraps a :class:`SupervisorClient`, injecting a fixed :class:`EgressContext`
+    into every ``acquire`` (sandbox-egress §3.3).
+
+    Bound once per agent build (``agent_factory``) around the shared supervisor
+    client, so all sandbox tools get the agent's egress policy + identity on the
+    wire without threading it through each tool. Every other call delegates
+    unchanged.
+    """
+
+    inner: SupervisorClient
+    egress: EgressContext
+
+    async def acquire(
+        self,
+        *,
+        tenant_id: UUID,
+        thread_id: str,
+        user_id: UUID | None = None,
+        image_variant: str | None = None,
+        seed_files: tuple[tuple[str, bytes], ...] = (),
+        egress: EgressContext | None = None,
+    ) -> UUID:
+        # The bound context wins — callers don't supply egress themselves.
+        return await self.inner.acquire(
+            tenant_id=tenant_id,
+            thread_id=thread_id,
+            user_id=user_id,
+            image_variant=image_variant,
+            seed_files=seed_files,
+            egress=self.egress,
+        )
+
+    async def exec(self, *, sandbox_id: UUID, code: str, timeout_s: int | None) -> SandboxOutcome:
+        return await self.inner.exec(sandbox_id=sandbox_id, code=code, timeout_s=timeout_s)
+
+    async def release(self, *, sandbox_id: UUID) -> None:
+        await self.inner.release(sandbox_id=sandbox_id)
+
+    async def destroy(self, *, sandbox_id: UUID, reason: str) -> None:
+        await self.inner.destroy(sandbox_id=sandbox_id, reason=reason)
+
+    async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
+        return await self.inner.read_workspace_file(tenant_id=tenant_id, user_id=user_id, path=path)
+
+    async def reap(self, *, force: bool) -> int:
+        return await self.inner.reap(force=force)
+
+
+def bind_egress(client: SupervisorClient, egress: EgressContext | None) -> SupervisorClient:
+    """Wrap ``client`` so every acquire carries ``egress`` (no-op if ``None``)."""
+    if egress is None:
+        return client
+    return _EgressBindingClient(inner=client, egress=egress)
 
 
 async def run_in_sandbox(

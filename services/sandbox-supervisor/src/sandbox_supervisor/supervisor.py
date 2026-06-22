@@ -22,6 +22,7 @@ from pathlib import PurePosixPath
 from typing import Literal, Protocol
 from uuid import UUID, uuid4
 
+from helix_agent.common.egress_token import mint_egress_token
 from helix_agent.common.observability import helix_histogram
 from helix_agent.persistence import UserWorkspaceStore, workspace_volume_name
 from helix_agent.protocol import AuditEntry, UserWorkspace
@@ -183,7 +184,13 @@ class SandboxSupervisor:
         # the user's named volume mounts at ``docker run`` time
         # (Mini-ADR HX-F2). Claim failure of any kind falls through to
         # the unchanged cold-start path below.
-        if request.user_id is None and self._pool is not None:
+        #
+        # sandbox-egress §3.3 — an egress-enabled acquire also bypasses the
+        # pool: the per-sandbox proxy token is baked into the container env at
+        # ``docker run``, but pooled containers are pre-warmed generically with
+        # no token, so they can't carry this agent's egress. Cold-start instead.
+        egress_off = request.egress in (None, "none")
+        if request.user_id is None and self._pool is not None and egress_off:
             claimed = await self._claim_pooled(request)
             if claimed is not None:
                 await self._seed_workspace(claimed.container_id, request.seed_files)
@@ -660,6 +667,9 @@ class SandboxSupervisor:
             ),
             timeout_s=request.timeout_s if request.timeout_s is not None else s.default_timeout_s,
             created_at=datetime.now(UTC),
+            egress_policy=request.egress,
+            agent_name=request.agent_name,
+            agent_version=request.agent_version,
         )
 
     def _run_argv(self, record: SandboxRecord, *, workspace_volume: str | None) -> list[str]:
@@ -680,6 +690,38 @@ class SandboxSupervisor:
                 pids_limit=record.pids_limit,
             ),
             workspace_volume=workspace_volume,
+            env=self._egress_env(record),
+        )
+
+    def _egress_env(self, record: SandboxRecord) -> tuple[tuple[str, str], ...]:
+        """``HTTPS_PROXY``/``HTTP_PROXY``/``NO_PROXY`` env for the sandbox when
+        its agent's egress policy is on (sandbox-egress §3.3).
+
+        Mints a per-sandbox token bound to ``(tenant, agent, version, sandbox)``
+        and embeds it as the proxy URL's username so the sandbox's HTTP clients
+        authenticate to the egress proxy via standard Basic proxy auth. ``none``/
+        unset → no env (the sandbox stays proxy-only / isolated)."""
+        if record.egress_policy in (None, "none"):
+            return ()
+        s = self._settings
+        token = mint_egress_token(
+            s.egress_token_secret,
+            tenant_id=str(record.tenant_id),
+            agent_name=record.agent_name or "",
+            agent_version=record.agent_version or "",
+            sandbox_id=str(record.id),
+            expires_at=time.time() + s.egress_token_ttl_s,
+        )
+        proxy_url = f"http://{token}:@{s.egress_proxy_host}:{s.egress_proxy_port}"
+        # NO_PROXY keeps the credential-proxy /forward call + loopback direct.
+        no_proxy = f"{s.egress_proxy_host},localhost,127.0.0.1"
+        return (
+            ("HTTPS_PROXY", proxy_url),
+            ("HTTP_PROXY", proxy_url),
+            ("https_proxy", proxy_url),
+            ("http_proxy", proxy_url),
+            ("NO_PROXY", no_proxy),
+            ("no_proxy", no_proxy),
         )
 
     async def _emit_audit(

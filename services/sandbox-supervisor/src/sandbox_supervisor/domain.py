@@ -75,6 +75,12 @@ class SandboxRecord:
     released_at: datetime | None = None
     destroyed_at: datetime | None = None
     destroy_reason: str | None = None
+    #: sandbox-egress §3.3 — the agent's egress policy + identity. Drives the
+    #: ``HTTPS_PROXY`` env + per-sandbox token injection; ``None``/``"none"`` →
+    #: no egress (proxy-only/isolated). Kept on the record so reuse can match.
+    egress_policy: str | None = None
+    agent_name: str | None = None
+    agent_version: str | None = None
 
     def with_state(self, state: SandboxState, **changes: object) -> SandboxRecord:
         """Return a copy in ``state`` with any extra field overrides applied."""

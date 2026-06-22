@@ -46,6 +46,14 @@ class AcquireRequest(BaseModel):
     #: "office"). Omitted / unknown → the default (minimal) image. The
     #: supervisor maps it to a configured image name via ``_select_image``.
     image_variant: str | None = None
+    #: sandbox-egress §3.3 — the agent's egress policy. ``"proxy"``/``"direct"``
+    #: → the sandbox is given ``HTTPS_PROXY`` + a per-sandbox token so its code
+    #: can reach the public internet through the audited egress proxy.
+    #: ``"none"`` / omitted → no egress env (sandbox stays proxy-only/isolated).
+    egress: str | None = None
+    #: Agent identity bound into the egress token (audit attribution).
+    agent_name: str | None = None
+    agent_version: str | None = None
     #: Optional per-call resource overrides; omitted → the service defaults.
     cpu: float | None = Field(default=None, gt=0, le=16)
     memory_mb: int | None = Field(default=None, gt=0, le=65536)

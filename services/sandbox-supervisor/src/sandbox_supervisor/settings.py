@@ -55,6 +55,18 @@ class SandboxSupervisorSettings(BaseSettings):
     #: transient fault: silently skipping it would strand the sandbox with
     #: no proxy route under runsc.
     extra_hosts: str = ""
+    #: sandbox-egress §3.3 — the transparent egress proxy the sandbox routes
+    #: outbound through when its agent's egress policy is not "none". The proxy
+    #: runs in the credential-proxy process (port below) and is reached over the
+    #: ``credential-proxy.internal`` host already in ``extra_hosts``.
+    egress_proxy_host: str = "credential-proxy.internal"
+    egress_proxy_port: int = Field(default=8081, gt=0, le=65535)
+    #: HMAC secret shared with the credential-proxy (which verifies the token).
+    #: Dev default; set a real value in deploy (must match the proxy's).
+    egress_token_secret: str = "dev-egress-token-secret-rotate-me"  # noqa: S105 — dev default
+    #: Per-sandbox egress token TTL. Generous vs the idle reap TTL so a reused
+    #: sandbox's baked token never expires mid-life.
+    egress_token_ttl_s: int = Field(default=24 * 60 * 60, gt=0, le=7 * 24 * 60 * 60)
     #: Host identifier recorded on each sandbox_instance row. M0 single-node.
     node_name: str = "local"
 

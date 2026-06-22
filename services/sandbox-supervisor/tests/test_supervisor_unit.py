@@ -13,6 +13,7 @@ Plus HTTP-route smoke tests over an injected supervisor.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from helix_agent.common.egress_token import verify_egress_token
 from helix_agent.persistence import InMemoryUserWorkspaceStore, workspace_volume_name
 from helix_agent.protocol.audit import AuditAction, AuditResult
 from helix_agent.runtime.sandbox import SandboxRuntimeProvider
@@ -1524,3 +1526,94 @@ async def test_replenisher_sets_ready_gauge_per_variant() -> None:
     await h.supervisor.acquire(_acquire_request())
     await _replenisher(h, pool, pool_size_minimal=1, pool_size_office=0).run_once()
     assert float(_pool_ready.labels(variant="minimal")._value.get()) == 1.0  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# sandbox-egress §3.3 — per-sandbox egress proxy env + token injection
+# ---------------------------------------------------------------------------
+
+
+def _egress_envs(argv: list[str]) -> dict[str, str]:
+    """Pull the ``--env KEY=VALUE`` flags out of a docker run argv."""
+    out: dict[str, str] = {}
+    for i, flag in enumerate(argv):
+        if flag == "--env":
+            key, _, value = argv[i + 1].partition("=")
+            out[key] = value
+    return out
+
+
+@pytest.mark.asyncio
+async def test_acquire_with_egress_injects_proxy_env_and_signed_token() -> None:
+    secret = "unit-egress-secret"
+    h = _harness(
+        settings=SandboxSupervisorSettings(
+            egress_token_secret=secret,
+            egress_proxy_host="credential-proxy.internal",
+            egress_proxy_port=8081,
+        )
+    )
+    tenant = uuid4()
+    response = await h.supervisor.acquire(
+        AcquireRequest(
+            tenant_id=tenant,
+            thread_id="t-1",
+            egress="proxy",
+            agent_name="pptx-agent",
+            agent_version="1.2.0",
+        )
+    )
+    envs = _egress_envs(h.docker.launches[0])
+    assert envs["HTTPS_PROXY"] == envs["HTTP_PROXY"]
+    assert envs["HTTPS_PROXY"].startswith("http://")
+    assert envs["NO_PROXY"].startswith("credential-proxy.internal")
+
+    # http://<token>:@credential-proxy.internal:8081 — pull the token back out
+    # and verify it is a real, signed, agent-bound egress token.
+    token = envs["HTTPS_PROXY"].split("//", 1)[1].split(":@", 1)[0]
+    assert "credential-proxy.internal:8081" in envs["HTTPS_PROXY"]
+    identity = verify_egress_token(secret, token, now=time.time())
+    assert identity is not None
+    assert identity.tenant_id == str(tenant)
+    assert identity.agent_name == "pptx-agent"
+    assert identity.agent_version == "1.2.0"
+    assert identity.sandbox_id == str(response.sandbox_id)
+
+
+@pytest.mark.asyncio
+async def test_acquire_without_egress_has_no_proxy_env() -> None:
+    h = _harness()
+    await h.supervisor.acquire(_acquire_request())  # egress defaults to None
+    assert _egress_envs(h.docker.launches[0]) == {}
+
+
+@pytest.mark.asyncio
+async def test_acquire_egress_none_has_no_proxy_env() -> None:
+    h = _harness()
+    await h.supervisor.acquire(AcquireRequest(tenant_id=uuid4(), thread_id="t-1", egress="none"))
+    assert _egress_envs(h.docker.launches[0]) == {}
+
+
+@pytest.mark.asyncio
+async def test_egress_acquire_bypasses_pool() -> None:
+    # A ready pooled container exists, but an egress acquire must cold-start
+    # (the pooled container has no per-sandbox token baked in).
+    pool = SandboxPool()
+    h = _harness(pool=pool)
+    await _replenisher(h, pool, pool_size_minimal=1).run_once()
+    launches_after_fill = len(h.docker.launches)
+    settings = SandboxSupervisorSettings()
+    assert pool.size(settings.sandbox_image) == 1
+
+    await h.supervisor.acquire(
+        AcquireRequest(
+            tenant_id=uuid4(),
+            thread_id="t-1",
+            egress="proxy",
+            agent_name="a",
+            agent_version="1.0.0",
+        )
+    )
+    # A NEW cold launch happened and the pooled container was NOT claimed.
+    assert len(h.docker.launches) == launches_after_fill + 1
+    assert pool.size(settings.sandbox_image) == 1
