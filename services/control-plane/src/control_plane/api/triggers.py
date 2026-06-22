@@ -117,9 +117,6 @@ def _validate_config(kind: TriggerKind, name: str, config: dict[str, Any]) -> No
 
 
 # Capability Uplift Sprint #1 (Mini-ADR U-2 Layer A) — strict scan.
-# Module-private generic 422 message: oracle-safe; the matched
-# ``pattern_id`` lives in the audit row, never in the response body.
-_INJECTION_BLOCK_DETAIL = "prompt blocked by injection scanner; see audit log for details"
 
 
 async def _scan_trigger_strict(
@@ -130,11 +127,13 @@ async def _scan_trigger_strict(
     actor_id: str,
     audit: AuditLogger,
 ) -> None:
-    """Strict-scope scan; raise ``HTTPException(422)`` on hit.
+    """Strict-scope scan of operator-authored trigger config — flag + audit, do
+    NOT block on a pattern hit (audit-eval Phase 3); only an oversized,
+    unscannable field still raises ``HTTPException(422)``.
 
-    Emits ``TRIGGER_PROMPT_INJECTION_BLOCKED`` audit + bumps Prometheus
-    counters before raising. Log lines deliberately omit the matched
-    pattern_id to avoid log poisoning.
+    A pattern hit emits ``TRIGGER_PROMPT_INJECTION_WARN`` + bumps Prometheus
+    counters and lets the create/patch proceed. Log lines deliberately omit the
+    matched pattern_id to avoid log poisoning.
     """
     try:
         result = scan_payload_strict(name=name, config=config)
@@ -151,9 +150,13 @@ async def _scan_trigger_strict(
         record_threat_scan(scope="strict", result="clean")
         return
     field_path, findings = result
-    record_threat_scan(scope="strict", result="blocked")
+    # audit-eval Phase 3 — an operator authoring a trigger in their own tenant
+    # should not have it rejected because a strict pattern appears in legit
+    # config; flag + audit, do not block. (The oversized-field guard above still
+    # blocks — an unscannable field is a different concern.) The fire-time scan
+    # already defaults to warn; this aligns the create path.
+    record_threat_scan(scope="strict", result="warn")
     record_threat_pattern_hits(findings, scope="strict")
-    record_trigger_blocked(phase="create")
     # The audit row carries tenant_id / field / pattern_count / findings —
     # a parallel ``logger.warning`` would inject user-controlled values
     # into structured log fields (CodeQL py/log-injection).  Skip it; the
@@ -162,7 +165,7 @@ async def _scan_trigger_strict(
         audit,
         tenant_id=tenant_id,
         actor_id=actor_id,
-        action=AuditAction.TRIGGER_PROMPT_INJECTION_BLOCKED,
+        action=AuditAction.TRIGGER_PROMPT_INJECTION_WARN,
         resource_type="trigger",
         trace_id=current_trace_id_hex(),
         details={
@@ -172,7 +175,6 @@ async def _scan_trigger_strict(
             "findings": [_finding_to_dict(f) for f in findings],
         },
     )
-    raise HTTPException(status_code=422, detail=_INJECTION_BLOCK_DETAIL)
 
 
 def _finding_to_dict(f: ThreatFinding) -> dict[str, Any]:

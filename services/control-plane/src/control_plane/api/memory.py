@@ -44,7 +44,6 @@ from control_plane.tenant_scope import (
     ensure_tenant_scope,
 )
 from control_plane.uplift.threat_metrics import (
-    record_memory_blocked,
     record_threat_pattern_hits,
     record_threat_scan,
 )
@@ -97,11 +96,6 @@ def _finding_to_dict(f: ThreatFinding) -> dict[str, Any]:
 
 
 # Capability Uplift Sprint #2 (Mini-ADR U-3 Layer A) — strict pre-scan.
-# Module-private generic 422 message: oracle-safe; matched pattern_id
-# only lives in the audit row, never in the response body.
-_INJECTION_BLOCK_DETAIL = "memory blocked by injection scanner; see audit log for details"
-
-
 async def _scan_memory_strict(
     *,
     content: str,
@@ -110,23 +104,26 @@ async def _scan_memory_strict(
     actor_id: str,
     audit: AuditLogger,
 ) -> None:
-    """Strict-scope scan of ``content``; raise ``HTTPException(422)`` on hit.
+    """Strict-scope scan of USER-authored ``content`` — flag + audit, do NOT
+    block (audit-eval Phase 3).
 
-    Emits ``MEMORY_INJECTION_BLOCKED`` audit + bumps Prometheus counters
-    before raising. Response body is intentionally generic — see
-    ``docs/runbooks/threat-scanner-tuning.md`` § 4 (oracle defense)."""
+    A human authoring their own tenant's memory should not have a write
+    silently rejected because a strict pattern (e.g. ``cat .env``,
+    ``authorized_keys``) appears in legitimate devops/security notes. The write
+    proceeds; the hit is recorded as ``MEMORY_INJECTION_WARN`` for traceability.
+    The runtime injection vectors still block — recalled memory (model-facing)
+    and auto-extracted write-back. See docs/design/sandbox-audit-evaluation.md."""
     findings = scan_for_threats(content, scope="strict")
     if not findings:
         record_threat_scan(scope="strict", result="clean")
         return
-    record_threat_scan(scope="strict", result="blocked")
+    record_threat_scan(scope="strict", result="warn")
     record_threat_pattern_hits(findings, scope="strict")
-    record_memory_blocked(source="api")
     await emit(
         audit,
         tenant_id=tenant_id,
         actor_id=actor_id,
-        action=AuditAction.MEMORY_INJECTION_BLOCKED,
+        action=AuditAction.MEMORY_INJECTION_WARN,
         resource_type="memory_item",
         resource_id=str(memory_id),
         trace_id=current_trace_id_hex(),
@@ -137,7 +134,6 @@ async def _scan_memory_strict(
             "findings": [_finding_to_dict(f) for f in findings],
         },
     )
-    raise HTTPException(status_code=422, detail=_INJECTION_BLOCK_DETAIL)
 
 
 async def _require_caller_user(request: Request, users: TenantUserStore) -> tuple[UUID, UUID]:
