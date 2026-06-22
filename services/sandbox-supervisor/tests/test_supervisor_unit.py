@@ -573,7 +573,9 @@ async def test_acquire_with_user_mounts_persistent_volume() -> None:
 
     argv = h.docker.launches[0]
     assert f"{workspace_volume_name(tenant, user)}:/workspace" in argv
-    assert "--tmpfs" not in argv
+    # /workspace is a named volume (not a tmpfs); the scratch /tmp tmpfs stays.
+    tmpfs_targets = [argv[i + 1] for i, t in enumerate(argv) if t == "--tmpfs"]
+    assert tmpfs_targets == ["/tmp:rw,size=256m,mode=1777"]  # noqa: S108 — mount spec literal
 
     row = h.store.rows[response.sandbox_id]
     assert row.user_id == user

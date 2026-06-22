@@ -100,13 +100,26 @@ def test_default_workspace_is_ephemeral_tmpfs() -> None:
 
 
 def test_persistent_workspace_mounts_named_volume() -> None:
-    # Stream J.15 — a workspace_volume mounts a docker named volume and
-    # drops the tmpfs entirely.
+    # Stream J.15 — a workspace_volume mounts a docker named volume for
+    # /workspace (no /workspace tmpfs), but the scratch /tmp tmpfs stays.
     argv = _runc_provider().docker_run_argv(
         image="img", container_name="sb-1", workspace_volume="helix-ws-abc"
     )
     assert _flag_value(argv, "--volume") == "helix-ws-abc:/workspace"
-    assert "--tmpfs" not in argv
+    # /workspace is a volume, not a tmpfs; the only tmpfs is the scratch /tmp.
+    tmpfs_targets = [argv[i + 1] for i, t in enumerate(argv) if t == "--tmpfs"]
+    assert tmpfs_targets == ["/tmp:rw,size=256m,mode=1777"]  # noqa: S108 — mount spec literal
+
+
+def test_argv_always_mounts_scratch_tmp() -> None:
+    # Read-only rootfs needs a writable /tmp (soffice named pipe etc.); always
+    # an ephemeral tmpfs, both for tmpfs- and volume-backed /workspace.
+    for vol in (None, "helix-ws-abc"):
+        argv = _runc_provider().docker_run_argv(
+            image="img", container_name="sb-1", workspace_volume=vol
+        )
+        tmpfs = [argv[i + 1] for i, t in enumerate(argv) if t == "--tmpfs"]
+        assert "/tmp:rw,size=256m,mode=1777" in tmpfs  # noqa: S108 — mount spec literal
 
 
 # ---------- factory ----------

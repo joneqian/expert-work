@@ -40,6 +40,12 @@ class SandboxResourceLimits:
     memory_mb: int = 512
     pids_limit: int = 128
     workspace_size_mb: int = 64
+    #: Scratch ``/tmp`` tmpfs size. The rootfs is read-only, so without a
+    #: writable ``/tmp`` any tool that needs scratch space there fails — most
+    #: notably ``soffice`` (LibreOffice headless), which puts its named pipe /
+    #: socket under ``/tmp`` and dies with "no valid pipe path found" otherwise
+    #: (route ① office image). Ephemeral, destroyed with the container.
+    tmp_size_mb: int = 256
 
 
 #: Default caps — a module-level singleton so it can be an argument
@@ -90,8 +96,9 @@ class SandboxRuntimeProvider:
         """Return the full ``docker run`` argv for the sandbox.
 
         The argv carries the Mini-ADR F-5 runtime hardening: read-only
-        rootfs, a single writable ``/workspace`` mount, all capabilities
-        dropped, ``no-new-privileges``, and PID / memory / CPU caps.
+        rootfs, a writable ``/workspace`` mount + an ephemeral scratch
+        ``/tmp`` tmpfs, all capabilities dropped, ``no-new-privileges``,
+        and PID / memory / CPU caps.
         ``--interactive`` keeps stdin open for the runner's line-JSON
         protocol; the image is the final argument.
 
@@ -111,6 +118,11 @@ class SandboxRuntimeProvider:
             "--interactive",
             "--read-only",
             *self._workspace_mount(limits, workspace_volume),
+            # Scratch /tmp — always an ephemeral tmpfs. The rootfs is read-only,
+            # and many tools (soffice/poppler, tempfile-heavy libs) need a
+            # writable /tmp; mode=1777 so the non-root agent user can write.
+            "--tmpfs",
+            f"/tmp:rw,size={limits.tmp_size_mb}m,mode=1777",  # noqa: S108 — docker tmpfs mount spec, not a temp-file path
             "--cap-drop",
             "ALL",
             "--security-opt",
