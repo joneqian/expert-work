@@ -12,6 +12,7 @@ import { RunDetail } from "./pages/RunDetail";
 import { RunsList } from "./pages/RunsList";
 import { SettingsApiKeys } from "./pages/SettingsApiKeys";
 import { SettingsAudit } from "./pages/SettingsAudit";
+import { SettingsEgressAudit } from "./pages/SettingsEgressAudit";
 import { SettingsMembers } from "./pages/SettingsMembers";
 import { SettingsPlatformConfig } from "./pages/SettingsPlatformConfig";
 import { SettingsPlatformUsers } from "./pages/SettingsPlatformUsers";
@@ -73,6 +74,7 @@ export function AppRouter() {
         element={<SettingsPlatformSkillDetail />}
       />
       <Route path="/settings/audit" element={<SettingsAudit />} />
+      <Route path="/settings/egress-audit" element={<SettingsEgressAudit />} />
       <Route path="/settings/mcp-servers" element={<SettingsMcpServers />} />
       <Route path="/settings/usage" element={<SettingsUsage />} />
       <Route path="/settings/billing-chargeback" element={<SettingsBillingChargeback />} />

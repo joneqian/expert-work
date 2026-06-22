@@ -27,7 +27,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { Bot } from "lucide-react";
+import { Bot, Network, ShieldOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { getAgent, type AgentDetailResponse } from "../api/agents";
@@ -183,9 +183,24 @@ export function AgentDetail() {
   );
 }
 
+/** Read ``sandbox.network`` out of the loosely-typed manifest spec
+ *  (sandbox-egress §3.3). Egress defaults to ``"proxy"`` (manifest default). */
+function readEgress(spec: Record<string, unknown>): { egress: string; allowlist: string[] } {
+  const sandbox = spec.sandbox as Record<string, unknown> | undefined;
+  const network = sandbox?.network as Record<string, unknown> | undefined;
+  const egressRaw = network?.egress;
+  const egress = typeof egressRaw === "string" ? egressRaw : "proxy";
+  const allowlistRaw = network?.allowlist;
+  const allowlist = Array.isArray(allowlistRaw)
+    ? allowlistRaw.filter((h): h is string => typeof h === "string")
+    : [];
+  return { egress, allowlist };
+}
+
 function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
   const { t } = useTranslation();
   const r = detail.record;
+  const egress = readEgress(r.spec);
   return (
     <Row gutter={16}>
       <Col span={24}>
@@ -220,6 +235,55 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
             </dd>
             <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_updated")}</dt>
             <dd style={{ margin: 0 }}>{new Date(r.updated_at).toLocaleString()}</dd>
+          </dl>
+        </Card>
+      </Col>
+      <Col span={24} style={{ marginTop: 16 }}>
+        <Card title={t("agent_detail.egress_title")} data-testid="agent-egress-card">
+          <dl
+            style={{
+              display: "grid",
+              gridTemplateColumns: "160px 1fr",
+              rowGap: 8,
+              columnGap: 16,
+              margin: 0,
+              fontSize: 13,
+            }}
+          >
+            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+              {t("agent_detail.egress_policy")}
+            </dt>
+            <dd style={{ margin: 0 }}>
+              {egress.egress === "none" ? (
+                <Tag icon={<ShieldOff size={11} strokeWidth={1.75} />}>
+                  {t("agent_detail.egress_isolated")}
+                </Tag>
+              ) : (
+                <Tag color="cyan" icon={<Network size={11} strokeWidth={1.75} />}>
+                  {t("agent_detail.egress_proxied")}
+                </Tag>
+              )}
+            </dd>
+            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+              {t("agent_detail.egress_allowlist")}
+            </dt>
+            <dd style={{ margin: 0 }}>
+              {egress.egress === "none" ? (
+                <span style={{ color: "var(--hx-text-tertiary)" }}>—</span>
+              ) : egress.allowlist.length === 0 ? (
+                <span style={{ color: "var(--hx-text-tertiary)" }}>
+                  {t("agent_detail.egress_allow_all")}
+                </span>
+              ) : (
+                <Space size={[4, 4]} wrap>
+                  {egress.allowlist.map((host) => (
+                    <Tag key={host} className="mono">
+                      {host}
+                    </Tag>
+                  ))}
+                </Space>
+              )}
+            </dd>
           </dl>
         </Card>
       </Col>

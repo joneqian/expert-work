@@ -57,6 +57,7 @@ export const TENANT_SETTINGS_ITEMS: readonly NavEntry[] = [
   { key: "settings-service-accounts", labelKey: "nav.service_accounts", path: "/settings/service-accounts", group: "tenant-settings" },
   { key: "settings-mcp-servers", labelKey: "nav.mcp_servers", path: "/settings/mcp-servers", group: "tenant-settings" },
   { key: "settings-audit", labelKey: "nav.audit", path: "/settings/audit", group: "tenant-settings" },
+  { key: "settings-egress-audit", labelKey: "nav.egress_audit", path: "/settings/egress-audit", group: "tenant-settings" },
   { key: "settings-usage", labelKey: "nav.usage", path: "/settings/usage", group: "tenant-settings" },
 ];
 

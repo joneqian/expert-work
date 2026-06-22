@@ -54,6 +54,7 @@ export interface TranslationKeys {
     service_accounts: string;
     members: string;
     audit: string;
+    egress_audit: string;
     mcp_servers: string;
     mcp_catalog: string;
     platform_skills: string;
@@ -130,6 +131,12 @@ export interface TranslationKeys {
     field_status: string;
     field_created: string;
     field_updated: string;
+    egress_title: string;
+    egress_policy: string;
+    egress_allowlist: string;
+    egress_isolated: string;
+    egress_proxied: string;
+    egress_allow_all: string;
   };
   history_tab: {
     title: string;
@@ -486,6 +493,27 @@ export interface TranslationKeys {
     detail_payload: string;
     detail_payload_hint: string;
     mcp_traffic_hint: string;
+  };
+  egress_audit: {
+    page_title: string;
+    subtitle: string;
+    cross_tenant_banner: string;
+    load_error: string;
+    empty: string;
+    filter_verdict: string;
+    filter_host: string;
+    filter_agent: string;
+    load_more: string;
+    detail_title: string;
+    col_verdict: string;
+    col_host: string;
+    col_agent: string;
+    col_bytes_up: string;
+    col_bytes_down: string;
+    col_duration: string;
+    col_sandbox: string;
+    col_error: string;
+    col_time: string;
   };
   settings_ops: {
     quotas_page_title: string;
@@ -1613,6 +1641,7 @@ const en: TranslationKeys = {
     service_accounts: "Service Accounts",
     members: "Members",
     audit: "Audit",
+    egress_audit: "Egress audit",
     mcp_servers: "MCP Servers",
     mcp_catalog: "MCP Catalog",
     platform_skills: "Platform Skills",
@@ -1700,6 +1729,12 @@ const en: TranslationKeys = {
     field_status: "Status",
     field_created: "Created",
     field_updated: "Updated",
+    egress_title: "Egress policy",
+    egress_policy: "Policy",
+    egress_allowlist: "Host allowlist",
+    egress_isolated: "isolated (no egress)",
+    egress_proxied: "proxied (audited)",
+    egress_allow_all: "any public host (audited)",
   },
   history_tab: {
     title: "Revision history",
@@ -2082,6 +2117,28 @@ const en: TranslationKeys = {
     detail_payload_hint:
       "Already redactor-cleaned at write time — sensitive fields surface as [REDACTED].",
     mcp_traffic_hint: "MCP traffic to {{server}} — server · response size",
+  },
+  egress_audit: {
+    page_title: "Egress audit",
+    subtitle:
+      "Every sandbox→internet connection through the audited egress proxy — host, port, byte volumes, verdict. Payloads are never recorded (HTTPS is tunnelled). Cross-tenant view requires system_admin.",
+    cross_tenant_banner: "cross-tenant view",
+    load_error: "Failed to load egress audit",
+    empty: "No egress connections match these filters.",
+    filter_verdict: "Verdict",
+    filter_host: "Target host",
+    filter_agent: "Agent name",
+    load_more: "Load more",
+    detail_title: "Egress connection detail",
+    col_verdict: "Verdict",
+    col_host: "Target",
+    col_agent: "Agent",
+    col_bytes_up: "Bytes up",
+    col_bytes_down: "Bytes down",
+    col_duration: "Duration",
+    col_sandbox: "Sandbox",
+    col_error: "Error",
+    col_time: "Occurred at",
   },
   settings_ops: {
     quotas_page_title: "Tenant Quotas",

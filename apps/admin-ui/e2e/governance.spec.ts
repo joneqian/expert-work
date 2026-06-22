@@ -62,6 +62,13 @@ test("/settings/audit page renders filter row + passes axe", async ({ page }) =>
   await expectNoA11yViolations(page, "/settings/audit");
 });
 
+test("/settings/egress-audit page renders filter row + passes axe", async ({ page }) => {
+  await login(page);
+  await page.goto("/settings/egress-audit");
+  await expect(page.getByTestId("egress-audit-filters")).toBeVisible();
+  await expectNoA11yViolations(page, "/settings/egress-audit");
+});
+
 test("/settings/service-accounts page renders Create button + passes axe", async ({ page }) => {
   await login(page);
   await page.goto("/settings/service-accounts");
