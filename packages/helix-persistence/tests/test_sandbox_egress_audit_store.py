@@ -22,7 +22,7 @@ _T2 = UUID("22222222-2222-2222-2222-222222222222")
 def _rec(
     row_id: int,
     *,
-    tenant_id: UUID = _T1,
+    tenant_id: UUID | None = _T1,
     agent_name: str = "a",
     verdict: str = "allowed",
     host: str = "api.openai.com",
@@ -66,6 +66,21 @@ async def test_query_cross_tenant_wildcard_spans_all() -> None:
     store.records = [_rec(1, tenant_id=_T1), _rec(2, tenant_id=_T2)]
     page = await store.query(EgressAuditQuery(tenant_id="*"))
     assert {r.id for r in page.entries} == {1, 2}
+
+
+async def test_null_tenant_blocked_auth_only_in_cross_tenant_view() -> None:
+    # audit-eval Phase 4 — a blocked_auth row has tenant_id=None (no trustworthy
+    # tenant); it shows only in the cross-tenant ("*") view, never in a
+    # specific-tenant query.
+    store = InMemorySandboxEgressAuditStore()
+    store.records = [
+        _rec(1, tenant_id=None, verdict="blocked_auth"),
+        _rec(2, tenant_id=_T1),
+    ]
+    specific = await store.query(EgressAuditQuery(tenant_id=_T1))
+    assert [r.id for r in specific.entries] == [2]
+    cross = await store.query(EgressAuditQuery(tenant_id="*"))
+    assert {r.id for r in cross.entries} == {1, 2}
 
 
 async def test_query_filters_verdict_and_host() -> None:

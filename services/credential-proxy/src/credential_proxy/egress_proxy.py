@@ -83,6 +83,11 @@ class EgressProxyServer:
 
         identity = self._authenticate(headers)
         if identity is None:
+            # audit-eval Phase 4 — a missing/invalid/expired token has no
+            # trustworthy tenant; record it as a platform-level anomaly
+            # (tenant_id=None) so the rejection is still traceable.
+            auth_host, auth_port = _split_hostport(target)
+            await self._record_unauthenticated(auth_host or target, auth_port or 0)
             await _write_status(
                 writer,
                 407,
@@ -170,6 +175,24 @@ class EgressProxyServer:
                 error_msg=error,
             )
         )
+
+    async def _record_unauthenticated(self, host: str, port: int) -> None:
+        """Record a ``blocked_auth`` row for a pre-identity rejection (407).
+
+        No token ⇒ no tenant; ``tenant_id=None`` makes it a platform anomaly
+        (cross-tenant view only). Best-effort — never let auditing break the
+        rejection path."""
+        try:
+            await self._audit.record(
+                EgressAuditEntry(
+                    tenant_id=None,
+                    target_host=host,
+                    target_port=port,
+                    verdict="blocked_auth",
+                )
+            )
+        except Exception:
+            logger.exception("egress_proxy.audit_failed verdict=blocked_auth")
 
 
 # ── wire helpers ──────────────────────────────────────────────────────────────

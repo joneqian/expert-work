@@ -125,7 +125,9 @@ async def test_connect_tunnels_and_audits_allowed() -> None:
         await proxy.wait_closed()
 
 
-async def test_missing_token_returns_407() -> None:
+async def test_missing_token_returns_407_and_audits_blocked_auth() -> None:
+    # audit-eval Phase 4 — a pre-identity rejection is still traceable, recorded
+    # as a platform anomaly (tenant_id=None), not attributed to any tenant.
     audit = _RecordingEgressAudit()
     proxy, proxy_port = await _start_proxy(audit)
     try:
@@ -133,13 +135,19 @@ async def test_missing_token_returns_407() -> None:
         status = await reader.readline()
         assert b"407" in status
         writer.close()
-        assert audit.entries == []  # unauthenticated → not attributed/audited
+        await _wait_for_audit(audit)
+        assert len(audit.entries) == 1
+        entry = audit.entries[0]
+        assert entry.verdict == "blocked_auth"
+        assert entry.tenant_id is None
+        assert entry.target_host == "example.com"
+        assert entry.target_port == 443
     finally:
         proxy.close()
         await proxy.wait_closed()
 
 
-async def test_bad_token_returns_407() -> None:
+async def test_bad_token_returns_407_and_audits_blocked_auth() -> None:
     audit = _RecordingEgressAudit()
     proxy, proxy_port = await _start_proxy(audit)
     try:
@@ -149,6 +157,9 @@ async def test_bad_token_returns_407() -> None:
         status = await reader.readline()
         assert b"407" in status
         writer.close()
+        await _wait_for_audit(audit)
+        assert audit.entries[0].verdict == "blocked_auth"
+        assert audit.entries[0].tenant_id is None
     finally:
         proxy.close()
         await proxy.wait_closed()

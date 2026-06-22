@@ -28,7 +28,8 @@ export const EGRESS_VERDICTS: EgressVerdict[] = [
 
 export interface EgressAuditEntry {
   id: number;
-  tenant_id: string;
+  // null for a pre-identity blocked_auth row (audit-eval Phase 4).
+  tenant_id: string | null;
   agent_name: string | null;
   agent_version: string | null;
   sandbox_id: string | null;

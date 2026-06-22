@@ -60,9 +60,14 @@ class ProxyAuditEntry:
 @dataclass(frozen=True)
 class EgressAuditEntry:
     """One row for ``sandbox_egress_audit`` — host + volume + verdict, never
-    payload (HTTPS is tunnelled; the proxy never sees plaintext)."""
+    payload (HTTPS is tunnelled; the proxy never sees plaintext).
 
-    tenant_id: UUID
+    ``tenant_id`` is ``None`` only for a pre-identity rejection (a missing /
+    invalid / expired proxy token → ``blocked_auth``): there is no trustworthy
+    tenant to attribute it to, so it is recorded as a platform-level anomaly
+    visible in the cross-tenant audit view (audit-eval Phase 4)."""
+
+    tenant_id: UUID | None
     target_host: str
     target_port: int
     verdict: EgressVerdict

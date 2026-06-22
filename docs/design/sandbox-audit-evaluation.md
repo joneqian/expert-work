@@ -86,12 +86,14 @@ governance the operator already chose**, not safety over-blocks — out of scope
    runtime recalled memory (model-facing) and auto-extracted memory write-back,
    plus the trigger oversized-field guard. (`skill_seed` silent-drop audit row
    deferred — needs a new per-file audit shape; tracked.)
-4. **Phase 4 (PARTIAL):** output-guard durable audit rows added —
-   `OUTPUT_SCREEN_BLOCKED` + `OUTPUT_DLP_REDACTED` (categories only, never the
-   value) via `_emit_output_guard_audit`. **Egress 407/405 audit DEFERRED**: a
-   bad/missing token has no trustworthy tenant identity, so it can't be written
-   to the tenant-scoped `sandbox_egress_audit` table without a nullable-tenant
-   schema change — left as a structured log; tracked.
+4. **Phase 4 (DONE):** output-guard durable audit rows — `OUTPUT_SCREEN_BLOCKED`
+   + `OUTPUT_DLP_REDACTED` (categories only, never the value) via
+   `_emit_output_guard_audit`. **Egress 407 audit now recorded too**: migration
+   0088 makes `sandbox_egress_audit.tenant_id` nullable, so a pre-identity
+   rejection (missing/invalid/expired token) is written as a `blocked_auth`
+   platform anomaly (`tenant_id=NULL`, visible only in the cross-tenant view).
+   The 405 (plain-HTTP) path stays unrecorded — it is the separate plain-HTTP
+   egress capability gap, not an injection/auth event.
 5. **Phase 5 (N/A):** no dead code remained after #754 removed the
    `sandbox_audit` shell branch; `rate_limit_override` is intentionally
    forward-compat storage consumed in M1 (already documented), not dead code —

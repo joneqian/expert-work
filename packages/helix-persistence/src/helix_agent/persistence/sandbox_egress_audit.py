@@ -52,7 +52,8 @@ class EgressAuditRecord:
     """One ``sandbox_egress_audit`` row, as the read API returns it."""
 
     id: int
-    tenant_id: UUID
+    #: None for a pre-identity rejection (blocked_auth) — audit-eval Phase 4.
+    tenant_id: UUID | None
     agent_name: str | None
     agent_version: str | None
     sandbox_id: str | None

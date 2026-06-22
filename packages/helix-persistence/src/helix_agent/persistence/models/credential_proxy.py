@@ -82,7 +82,9 @@ class SandboxEgressAuditRow(Base):
     __tablename__ = "sandbox_egress_audit"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # Nullable only for pre-identity rejections (blocked_auth: missing/invalid
+    # token → no trustworthy tenant); audit-eval Phase 4.
+    tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     sandbox_id: Mapped[str | None] = mapped_column(Text, nullable=True)

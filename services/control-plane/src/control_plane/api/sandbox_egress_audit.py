@@ -51,7 +51,8 @@ def _get_audit(request: Request) -> AuditLogger:
 def _record_dict(r: EgressAuditRecord) -> dict[str, object]:
     return {
         "id": r.id,
-        "tenant_id": str(r.tenant_id),
+        # None for a pre-identity blocked_auth row (audit-eval Phase 4).
+        "tenant_id": str(r.tenant_id) if r.tenant_id is not None else None,
         "agent_name": r.agent_name,
         "agent_version": r.agent_version,
         "sandbox_id": r.sandbox_id,
