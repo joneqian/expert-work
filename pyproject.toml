@@ -117,12 +117,12 @@ ignore = []
 # posture: shells out to docker/psql (S603/S607) and reads the agent_run row
 # with a UUID-interpolated query against the dev DB (S608).
 "tools/ha/verify_queue.py" = ["S603", "S607", "S608"]
-# Office-image smoke payload runs INSIDE the sandbox: it shells out to the
-# bundled `soffice` binary (S603/S607) to prove the route-① conversion path. The
-# pinned ruff version narrows S603 to tainted input, but the older pre-commit
-# ruff flags every subprocess.run — ignore both rules by config so inline noqa
-# doesn't drift between the two versions.
-"infra/sandbox-image-office/smoke_payload.py" = ["S603", "S607"]
+# Sandbox-image smoke payload runs INSIDE the sandbox: it shells out to the
+# bundled `soffice` / `node` binaries (S603/S607) to prove the conversion + JS
+# paths. The pinned ruff version narrows S603 to tainted input, but the older
+# pre-commit ruff flags every subprocess.run — ignore both rules by config so
+# inline noqa doesn't drift between the two versions.
+"infra/sandbox-image/smoke_payload.py" = ["S603", "S607"]
 
 [tool.ruff.format]
 quote-style = "double"

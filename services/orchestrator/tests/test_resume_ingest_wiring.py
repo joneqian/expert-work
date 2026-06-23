@@ -113,9 +113,7 @@ async def _pause_edit_resume(
         ]
     )
     client = RecordingSupervisorClient(outcome=_read_envelope(render_plan_md(_db_plan())))
-    node = (
-        make_workspace_ingest_node(client=client) if wire_ingest else None
-    )
+    node = make_workspace_ingest_node(client=client) if wire_ingest else None
     async with make_checkpointer("memory") as cp:
         compiled = GraphRunner(checkpointer=cp).compile(
             build_react_graph(

@@ -1461,9 +1461,7 @@ async def test_prefetch_pulls_missing_images() -> None:
 
 @pytest.mark.asyncio
 async def test_prefetch_skips_present_images() -> None:
-    docker = RecordingDockerClient(
-        existing_images={SandboxSupervisorSettings().sandbox_image}
-    )
+    docker = RecordingDockerClient(existing_images={SandboxSupervisorSettings().sandbox_image})
 
     await prefetch_images(docker, SandboxSupervisorSettings())
 
