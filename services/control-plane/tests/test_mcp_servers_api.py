@@ -634,3 +634,105 @@ async def test_tools_success_sets_health_ok(monkeypatch: pytest.MonkeyPatch) -> 
         row = next(r for r in listed.json()["data"] if r["name"] == "github")
         assert row["last_probe_status"] == "ok"
         assert row["last_probe_error"] is None
+
+
+# ---------------------------------------------------------------------------
+# Custom HTTP headers (M1)
+# ---------------------------------------------------------------------------
+
+
+async def _capturing_probe(captured: dict[str, object]):
+    async def _probe(**kwargs: object) -> list[MCPToolDef]:
+        captured.update(kwargs)
+        return [MCPToolDef(name="t", description="", input_schema={})]
+
+    return _probe
+
+
+@pytest.mark.asyncio
+async def test_post_custom_headers_encrypted_and_names_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Custom headers: values land encrypted in the secret store as one blob,
+    only the (non-secret) names surface in the API; ref is masked."""
+    app, admin_headers, tenant_id = await _make_app_with_admin()
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "control_plane.api.mcp_servers.probe_remote_mcp", await _capturing_probe(captured)
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "svc",
+                "transport": "streamable_http",
+                "url": "https://mcp.example.com/mcp",
+                "auth_type": "none",
+                "custom_headers": {"X-API-Key": "SECRET-KEY", "X-Org": "acme"},
+                "sse_read_timeout_s": 120.0,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert sorted(body["data"]["custom_header_names"]) == ["X-API-Key", "X-Org"]
+        assert body["data"]["sse_read_timeout_s"] == 120.0
+        # secret value never echoed; ref masked
+        assert "SECRET-KEY" not in resp.text
+        assert "custom_headers_ref" not in body["data"]
+        # probe received the unwrapped headers
+        assert captured["custom_headers"] == {"X-API-Key": "SECRET-KEY", "X-Org": "acme"}
+        # blob resolvable, contains the values
+        ref_name = f"helix-agent/tenant/{tenant_id}/mcp/svc/headers"
+        import json as _json
+
+        blob = await app.state.secret_store.get(ref_name)  # type: ignore[attr-defined]
+        assert _json.loads(blob)["X-API-Key"] == "SECRET-KEY"
+
+
+@pytest.mark.asyncio
+async def test_post_bearer_with_custom_authorization_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A custom Authorization header alongside bearer → 422 (would be shadowed)."""
+    app, admin_headers, _ = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "svc",
+                "transport": "streamable_http",
+                "url": "https://mcp.example.com/mcp",
+                "auth_type": "bearer",
+                "token": "ghp_X",
+                "custom_headers": {"Authorization": "Bearer sneaky"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "MCP_SERVER_HEADER_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_post_invalid_header_name_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A header name with a forbidden char (CRLF/colon/space) → 422."""
+    app, admin_headers, _ = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            "/v1/mcp-servers",
+            json={
+                "name": "svc",
+                "transport": "streamable_http",
+                "url": "https://mcp.example.com/mcp",
+                "auth_type": "none",
+                "custom_headers": {"Bad Header": "v"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"]["code"] == "MCP_SERVER_HEADERS_INVALID"

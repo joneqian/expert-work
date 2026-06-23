@@ -64,6 +64,8 @@ async def probe_remote_mcp(
     url: str,
     bearer_token: str | None,
     timeout_s: float,
+    custom_headers: Mapping[str, str] | None = None,
+    sse_read_timeout_s: float | None = None,
     client_factory: ProbeClientFactory = _default_client_factory,
 ) -> Sequence[MCPToolDef]:
     """Connect to a remote MCP server and return its advertised tools.
@@ -71,6 +73,10 @@ async def probe_remote_mcp(
     Raises :class:`McpProbeError` (with ``code`` in
     ``{MCP_SERVER_INVALID_URL, MCP_SERVER_PROBE_FAILED}``) on SSRF rejection,
     connect failure, timeout, or list_tools error. Never logs the token.
+
+    ``custom_headers`` (M1) are merged in BEFORE the bearer ``Authorization`` so
+    the probe exercises the exact header set the runtime will send, with bearer
+    always winning — matching ``_build_mcp_client``.
 
     Each phase (start, list_tools) gets the full timeout_s; total wall time is
     at most 2x timeout_s.
@@ -81,6 +87,8 @@ async def probe_remote_mcp(
         raise McpProbeError("MCP_SERVER_INVALID_URL", str(exc)) from exc
 
     headers: dict[str, str] = {}
+    if custom_headers:
+        headers.update({str(k): str(v) for k, v in custom_headers.items()})
     if bearer_token is not None:
         headers["Authorization"] = f"Bearer {bearer_token}"
 
@@ -96,6 +104,7 @@ async def probe_remote_mcp(
         auth_type="bearer" if bearer_token is not None else "none",
         auth_config={"token_ref": "secret://probe"} if bearer_token is not None else {},
         timeout_s=timeout_s,
+        sse_read_timeout_s=sse_read_timeout_s,
     )
     client: _ProbeClient = client_factory(config, headers)
     try:
