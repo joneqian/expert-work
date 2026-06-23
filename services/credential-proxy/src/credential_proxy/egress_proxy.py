@@ -383,6 +383,8 @@ async def _relay_http(
                 up_writer.write(data)
                 await up_writer.drain()
         except (OSError, asyncio.CancelledError):
+            # Client closed its send side, or this pump was cancelled once the
+            # response finished — expected at teardown, nothing to recover.
             pass
 
     up_task = asyncio.create_task(_pump_up())
@@ -402,6 +404,7 @@ async def _relay_http(
         try:
             await up_task
         except asyncio.CancelledError:
+            # Expected — we just cancelled it; awaiting surfaces the cancellation.
             pass
         await _close_writer(up_writer)
     return counters[0], counters[1]
