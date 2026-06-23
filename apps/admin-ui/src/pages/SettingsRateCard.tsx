@@ -1,25 +1,21 @@
 /**
- * Rate Card page — Stream H.9 PR 1 (design § 6.10).
+ * Model Pricing page — 模型定价简化.
  *
- * Platform pricing governance over ``/v1/platform/rate-card``
- * (system_admin only; the frontend gate is UX — the real boundary is
- * the backend's ``require("billing",·)`` + ``is_system_admin`` double
- * gate, Mini-ADR H-22).
+ * Platform model pricing over ``/v1/platform/rate-card`` (system_admin only; the
+ * frontend gate is UX — the real boundary is the backend's ``require("billing",·)``
+ * + ``is_system_admin`` double gate).
  *
- * Edit surface mirrors the backend's temporal-identity semantics
- * (Mini-ADR H-20): provider / model / plan_tier / effective_from are
- * immutable post-create — the edit drawer greys them out and the copy
- * points at "insert a new row" for repricing.
- *
- * Prices are raw micro-USD-per-token inputs with a read-only $/1M
- * conversion hint (Mini-ADR H-21) — no implicit unit conversion.
+ * One price per ``(provider, model)``. Provider + model are picked from the
+ * model catalog (``/v1/model-catalog`` — already intersected with configured
+ * credentials) and are immutable post-create; repricing edits the row in place.
+ * Prices are entered in 元 / 百万 tokens (decimals allowed) and converted to the
+ * integer micro-元/百万token storage unit — no implicit unit drift.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   App,
   Button,
-  DatePicker,
   Drawer,
   Empty,
   Form,
@@ -29,34 +25,30 @@ import {
   Popconfirm,
   Select,
   Space,
-  Switch,
   Table,
-  Tag,
-  Tooltip,
   Typography,
 } from "antd";
 import type { TableColumnsType } from "antd";
-import dayjs, { type Dayjs } from "dayjs";
 import { Banknote, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
   createRateCard,
+  cnyToMtokMicros,
   deleteRateCard,
   listRateCards,
-  microsPerTokenToUsdPerMillion,
+  mtokMicrosToCny,
   patchRateCard,
-  type PlanTier,
   type RateCardPatch,
   type RateCardRecord,
+  type RateCardUpsert,
 } from "../api/rate_card";
+import { fetchModelCatalog, type ProviderModels } from "../api/model_catalog";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { PageHeader } from "../components/PageHeader";
 
 const { Text } = Typography;
-
-const PLAN_OPTIONS: (PlanTier | "all")[] = ["all", "free", "pro", "enterprise"];
 
 function errMessage(err: unknown): string {
   return err instanceof ApiError
@@ -66,51 +58,34 @@ function errMessage(err: unknown): string {
       : "unknown error";
 }
 
+/** Form values are in 元 / 百万 tokens (display unit). */
 interface CreateFormValues {
   provider: string;
   model: string;
-  input_token_micros: number;
-  output_token_micros: number;
-  cache_creation_token_micros?: number;
-  cache_read_token_micros?: number;
-  markup_bps?: number;
-  plan_tier?: PlanTier | "all";
-  effective_from: Dayjs;
-  effective_until?: Dayjs | null;
+  input_cny: number;
+  output_cny: number;
+  cache_creation_cny?: number;
+  cache_read_cny?: number;
 }
 
 interface EditFormValues {
-  input_token_micros: number;
-  output_token_micros: number;
-  cache_creation_token_micros: number;
-  cache_read_token_micros: number;
-  markup_bps: number;
-  effective_until?: Dayjs | null;
+  input_cny: number;
+  output_cny: number;
+  cache_creation_cny: number;
+  cache_read_cny: number;
 }
 
-/** Micros InputNumber with the H-21 read-only $/1M hint. */
-function MicrosField({ name, label }: { name: string; label: string }) {
+/** Price InputNumber in 元 / 百万 tokens (decimals allowed). */
+function CnyField({ name, label, required }: { name: string; label: string; required?: boolean }) {
   return (
-    <Form.Item noStyle shouldUpdate>
-      {({ getFieldValue }) => {
-        const value: number | undefined = getFieldValue(name);
-        return (
-          <Form.Item
-            name={name}
-            label={label}
-            rules={[{ required: name.startsWith("input") || name.startsWith("output") }]}
-            extra={
-              typeof value === "number" ? (
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  ≈ {microsPerTokenToUsdPerMillion(value)}
-                </Text>
-              ) : undefined
-            }
-          >
-            <InputNumber min={0} style={{ width: "100%" }} data-testid={`rc-${name}`} />
-          </Form.Item>
-        );
-      }}
+    <Form.Item name={name} label={label} rules={[{ required: required ?? false }]}>
+      <InputNumber
+        min={0}
+        step={0.1}
+        style={{ width: "100%" }}
+        aria-label={label}
+        data-testid={`rc-${name}`}
+      />
     </Form.Item>
   );
 }
@@ -122,11 +97,11 @@ export function SettingsRateCard() {
   const isSystemAdmin = auth.identity?.isSystemAdmin ?? false;
 
   const [items, setItems] = useState<RateCardRecord[]>([]);
+  const [catalog, setCatalog] = useState<ProviderModels[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState("");
   const [modelFilter, setModelFilter] = useState("");
-  const [includeExpired, setIncludeExpired] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<RateCardRecord | null>(null);
@@ -141,7 +116,6 @@ export function SettingsRateCard() {
       const result = await listRateCards({
         provider: providerFilter || undefined,
         model: modelFilter || undefined,
-        includeExpired,
       });
       setItems(result);
     } catch (err) {
@@ -149,7 +123,7 @@ export function SettingsRateCard() {
     } finally {
       setLoading(false);
     }
-  }, [providerFilter, modelFilter, includeExpired]);
+  }, [providerFilter, modelFilter]);
 
   useEffect(() => {
     if (isSystemAdmin) {
@@ -157,25 +131,37 @@ export function SettingsRateCard() {
     }
   }, [isSystemAdmin, refresh]);
 
+  // Load the model catalog once for the create dropdowns.
+  useEffect(() => {
+    if (!isSystemAdmin) return;
+    void fetchModelCatalog()
+      .then((c) => setCatalog(c.providers))
+      .catch(() => setCatalog([]));
+  }, [isSystemAdmin]);
+
+  const providerOptions = useMemo(
+    () => catalog.map((p) => ({ value: p.provider, label: p.provider })),
+    [catalog],
+  );
+  const modelsByProvider = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const p of catalog) map.set(p.provider, p.models.map((m) => m.name));
+    return map;
+  }, [catalog]);
+
   const handleCreate = useCallback(
     async (values: CreateFormValues) => {
       setCreating(true);
       try {
-        await createRateCard({
+        const body: RateCardUpsert = {
           provider: values.provider,
           model: values.model,
-          input_token_micros: values.input_token_micros,
-          output_token_micros: values.output_token_micros,
-          cache_creation_token_micros: values.cache_creation_token_micros,
-          cache_read_token_micros: values.cache_read_token_micros,
-          markup_bps: values.markup_bps,
-          plan_tier:
-            values.plan_tier === "all" || values.plan_tier === undefined
-              ? null
-              : values.plan_tier,
-          effective_from: values.effective_from.toISOString(),
-          effective_until: values.effective_until?.toISOString() ?? null,
-        });
+          input_per_mtok_micros: cnyToMtokMicros(values.input_cny),
+          output_per_mtok_micros: cnyToMtokMicros(values.output_cny),
+          cache_creation_per_mtok_micros: cnyToMtokMicros(values.cache_creation_cny ?? 0),
+          cache_read_per_mtok_micros: cnyToMtokMicros(values.cache_read_cny ?? 0),
+        };
+        await createRateCard(body);
         setCreateOpen(false);
         createForm.resetFields();
         await refresh();
@@ -192,12 +178,10 @@ export function SettingsRateCard() {
     (record: RateCardRecord) => {
       setEditing(record);
       editForm.setFieldsValue({
-        input_token_micros: record.input_token_micros,
-        output_token_micros: record.output_token_micros,
-        cache_creation_token_micros: record.cache_creation_token_micros,
-        cache_read_token_micros: record.cache_read_token_micros,
-        markup_bps: record.markup_bps,
-        effective_until: record.effective_until ? dayjs(record.effective_until) : null,
+        input_cny: mtokMicrosToCny(record.input_per_mtok_micros),
+        output_cny: mtokMicrosToCny(record.output_per_mtok_micros),
+        cache_creation_cny: mtokMicrosToCny(record.cache_creation_per_mtok_micros),
+        cache_read_cny: mtokMicrosToCny(record.cache_read_per_mtok_micros),
       });
     },
     [editForm],
@@ -209,12 +193,10 @@ export function SettingsRateCard() {
       setSaving(true);
       try {
         const patch: RateCardPatch = {
-          input_token_micros: values.input_token_micros,
-          output_token_micros: values.output_token_micros,
-          cache_creation_token_micros: values.cache_creation_token_micros,
-          cache_read_token_micros: values.cache_read_token_micros,
-          markup_bps: values.markup_bps,
-          effective_until: values.effective_until?.toISOString() ?? null,
+          input_per_mtok_micros: cnyToMtokMicros(values.input_cny),
+          output_per_mtok_micros: cnyToMtokMicros(values.output_cny),
+          cache_creation_per_mtok_micros: cnyToMtokMicros(values.cache_creation_cny),
+          cache_read_per_mtok_micros: cnyToMtokMicros(values.cache_read_cny),
         };
         await patchRateCard(editing.id, patch);
         setEditing(null);
@@ -240,6 +222,17 @@ export function SettingsRateCard() {
     [message, refresh],
   );
 
+  const priceColumn = useCallback(
+    (titleKey: string, field: keyof RateCardRecord) => ({
+      title: t(titleKey),
+      dataIndex: field,
+      key: field,
+      width: 150,
+      render: (v: number) => <Text className="mono">¥{mtokMicrosToCny(v)}</Text>,
+    }),
+    [t],
+  );
+
   const columns: TableColumnsType<RateCardRecord> = useMemo(
     () => [
       {
@@ -255,62 +248,10 @@ export function SettingsRateCard() {
         key: "model",
         render: (model: string) => <Text className="mono">{model}</Text>,
       },
-      {
-        title: t("rate_card_page.col_plan"),
-        dataIndex: "plan_tier",
-        key: "plan_tier",
-        width: 110,
-        render: (tier: PlanTier | null) =>
-          tier === null ? (
-            <Tag bordered={false}>{t("rate_card_page.all_plans")}</Tag>
-          ) : (
-            <Tag color="blue" bordered={false}>
-              {tier}
-            </Tag>
-          ),
-      },
-      {
-        title: t("rate_card_page.col_input"),
-        dataIndex: "input_token_micros",
-        key: "input",
-        width: 110,
-        render: (v: number) => (
-          <Tooltip title={microsPerTokenToUsdPerMillion(v)}>
-            <Text className="mono">{v}</Text>
-          </Tooltip>
-        ),
-      },
-      {
-        title: t("rate_card_page.col_output"),
-        dataIndex: "output_token_micros",
-        key: "output",
-        width: 110,
-        render: (v: number) => (
-          <Tooltip title={microsPerTokenToUsdPerMillion(v)}>
-            <Text className="mono">{v}</Text>
-          </Tooltip>
-        ),
-      },
-      {
-        title: t("rate_card_page.col_markup"),
-        dataIndex: "markup_bps",
-        key: "markup",
-        width: 100,
-        render: (bps: number) => <Text className="mono">{bps} bps</Text>,
-      },
-      {
-        title: t("rate_card_page.col_effective"),
-        key: "effective",
-        width: 230,
-        render: (_: unknown, record) => (
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {new Date(record.effective_from).toLocaleDateString()} →{" "}
-            {record.effective_until
-              ? new Date(record.effective_until).toLocaleDateString()
-              : t("rate_card_page.open_ended")}
-          </Text>
-        ),
-      },
+      priceColumn("rate_card_page.col_input", "input_per_mtok_micros"),
+      priceColumn("rate_card_page.col_output", "output_per_mtok_micros"),
+      priceColumn("rate_card_page.col_cache_creation", "cache_creation_per_mtok_micros"),
+      priceColumn("rate_card_page.col_cache_read", "cache_read_per_mtok_micros"),
       {
         title: "",
         key: "actions",
@@ -344,7 +285,7 @@ export function SettingsRateCard() {
         ),
       },
     ],
-    [t, openEdit, handleDelete],
+    [t, priceColumn, openEdit, handleDelete],
   );
 
   if (!isSystemAdmin) {
@@ -377,6 +318,7 @@ export function SettingsRateCard() {
           <Space size={10}>
             <Input
               placeholder={t("rate_card_page.filter_provider")}
+              aria-label={t("rate_card_page.filter_provider")}
               value={providerFilter}
               onChange={(e) => setProviderFilter(e.target.value)}
               style={{ width: 140 }}
@@ -386,6 +328,7 @@ export function SettingsRateCard() {
             />
             <Input
               placeholder={t("rate_card_page.filter_model")}
+              aria-label={t("rate_card_page.filter_model")}
               value={modelFilter}
               onChange={(e) => setModelFilter(e.target.value)}
               style={{ width: 160 }}
@@ -393,18 +336,6 @@ export function SettingsRateCard() {
               allowClear
               data-testid="rc-filter-model"
             />
-            <Space size={6}>
-              <Switch
-                size="small"
-                checked={includeExpired}
-                onChange={setIncludeExpired}
-                aria-label={t("rate_card_page.include_expired")}
-                data-testid="rc-include-expired"
-              />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t("rate_card_page.include_expired")}
-              </Text>
-            </Space>
             <Button
               type="primary"
               size="small"
@@ -455,60 +386,39 @@ export function SettingsRateCard() {
             label={t("rate_card_page.field_provider")}
             rules={[{ required: true }]}
           >
-            <Input data-testid="rc-create-provider" />
-          </Form.Item>
-          <Form.Item
-            name="model"
-            label={t("rate_card_page.field_model")}
-            rules={[{ required: true }]}
-          >
-            <Input data-testid="rc-create-model" />
-          </Form.Item>
-          <MicrosField name="input_token_micros" label={t("rate_card_page.field_input")} />
-          <MicrosField name="output_token_micros" label={t("rate_card_page.field_output")} />
-          <MicrosField
-            name="cache_creation_token_micros"
-            label={t("rate_card_page.field_cache_creation")}
-          />
-          <MicrosField
-            name="cache_read_token_micros"
-            label={t("rate_card_page.field_cache_read")}
-          />
-          <Form.Item name="markup_bps" label={t("rate_card_page.field_markup")}>
-            <InputNumber min={0} style={{ width: "100%" }} data-testid="rc-markup_bps" />
-          </Form.Item>
-          <Form.Item name="plan_tier" label={t("rate_card_page.field_plan")}>
             <Select
-              options={PLAN_OPTIONS.map((p) => ({
-                value: p,
-                label: p === "all" ? t("rate_card_page.all_plans") : p,
-              }))}
-              allowClear
+              options={providerOptions}
+              placeholder={t("rate_card_page.field_provider")}
+              aria-label={t("rate_card_page.field_provider")}
+              onChange={() => createForm.setFieldsValue({ model: undefined })}
+              data-testid="rc-create-provider"
             />
           </Form.Item>
-          <Form.Item
-            name="effective_from"
-            label={t("rate_card_page.field_effective_from")}
-            rules={[{ required: true }]}
-          >
-            <DatePicker showTime style={{ width: "100%" }} />
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) => {
+              const provider: string | undefined = getFieldValue("provider");
+              const models = provider ? (modelsByProvider.get(provider) ?? []) : [];
+              return (
+                <Form.Item
+                  name="model"
+                  label={t("rate_card_page.field_model")}
+                  rules={[{ required: true }]}
+                >
+                  <Select
+                    options={models.map((m) => ({ value: m, label: m }))}
+                    placeholder={t("rate_card_page.field_model")}
+                    aria-label={t("rate_card_page.field_model")}
+                    disabled={!provider}
+                    data-testid="rc-create-model"
+                  />
+                </Form.Item>
+              );
+            }}
           </Form.Item>
-          <Form.Item
-            name="effective_until"
-            label={t("rate_card_page.field_effective_until")}
-            dependencies={["effective_from"]}
-            rules={[
-              ({ getFieldValue }) => ({
-                validator(_, value: Dayjs | null | undefined) {
-                  const from: Dayjs | undefined = getFieldValue("effective_from");
-                  if (!value || !from || value.isAfter(from)) return Promise.resolve();
-                  return Promise.reject(new Error(t("rate_card_page.until_after_from")));
-                },
-              }),
-            ]}
-          >
-            <DatePicker showTime style={{ width: "100%" }} />
-          </Form.Item>
+          <CnyField name="input_cny" label={t("rate_card_page.field_input")} required />
+          <CnyField name="output_cny" label={t("rate_card_page.field_output")} required />
+          <CnyField name="cache_creation_cny" label={t("rate_card_page.field_cache_creation")} />
+          <CnyField name="cache_read_cny" label={t("rate_card_page.field_cache_read")} />
         </Form>
       </Modal>
 
@@ -533,7 +443,6 @@ export function SettingsRateCard() {
       >
         {editing !== null && (
           <>
-            {/* Mini-ADR H-20 — immutable identity fields shown read-only. */}
             <Alert
               type="info"
               showIcon
@@ -560,42 +469,15 @@ export function SettingsRateCard() {
               <dd style={{ margin: 0 }} className="mono">
                 {editing.model}
               </dd>
-              <dt style={{ color: "var(--hx-text-tertiary)" }}>
-                {t("rate_card_page.field_plan")}
-              </dt>
-              <dd style={{ margin: 0 }}>
-                {editing.plan_tier ?? t("rate_card_page.all_plans")}
-              </dd>
-              <dt style={{ color: "var(--hx-text-tertiary)" }}>
-                {t("rate_card_page.field_effective_from")}
-              </dt>
-              <dd style={{ margin: 0 }}>
-                {new Date(editing.effective_from).toLocaleString()}
-              </dd>
             </dl>
             <Form<EditFormValues> form={editForm} layout="vertical" onFinish={handleEdit}>
-              <MicrosField name="input_token_micros" label={t("rate_card_page.field_input")} />
-              <MicrosField
-                name="output_token_micros"
-                label={t("rate_card_page.field_output")}
-              />
-              <MicrosField
-                name="cache_creation_token_micros"
+              <CnyField name="input_cny" label={t("rate_card_page.field_input")} required />
+              <CnyField name="output_cny" label={t("rate_card_page.field_output")} required />
+              <CnyField
+                name="cache_creation_cny"
                 label={t("rate_card_page.field_cache_creation")}
               />
-              <MicrosField
-                name="cache_read_token_micros"
-                label={t("rate_card_page.field_cache_read")}
-              />
-              <Form.Item name="markup_bps" label={t("rate_card_page.field_markup")}>
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item
-                name="effective_until"
-                label={t("rate_card_page.field_effective_until")}
-              >
-                <DatePicker showTime style={{ width: "100%" }} />
-              </Form.Item>
+              <CnyField name="cache_read_cny" label={t("rate_card_page.field_cache_read")} />
             </Form>
           </>
         )}

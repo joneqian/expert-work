@@ -1,24 +1,21 @@
-"""``model_rate_card`` records — Stream Y (Mini-ADR Y-3).
+"""``model_rate_card`` records — Stream Y (Mini-ADR Y-3) / 模型定价简化.
 
-A **platform-curated** model rate card: per-``(provider, model)`` token prices
-(in integer **micro-USD**) plus a platform markup (basis points), with an
-optional per-``plan_tier`` override and temporal versioning. Stream Y4 derives
-per-tenant cost from the G.9 ``token_usage`` meter by resolving the rate that
-was in effect when each usage row was observed.
+A **platform-curated** model pricing table: one **cost price** per
+``(provider, model)``. Stream Y4 derives per-tenant cost from the G.9
+``token_usage`` meter by pricing each usage row against the current rate.
 
-Locked design (STREAM-Y-DESIGN § Y-3):
+Locked design (docs/design/rate-card-simplify-cny.md):
 
-* **Markup = per-model-row + tier override.** A row is keyed by
-  ``(provider, model, plan_tier)`` where ``plan_tier`` is nullable (NULL =
-  generic, applies to any tier). Resolution is most-specific-wins:
-  ``(provider, model, <tenant's tier>)`` beats ``(provider, model, NULL)``.
-* **Integer micro-USD only — NO floats anywhere.** ``markup_bps`` is basis
-  points (2000 = +20 %).
-* **Temporal versioning.** ``effective_from`` (required) + ``effective_until``
-  (nullable = open-ended). A price applies to a usage row observed at time ``t``
-  iff ``effective_from <= t < effective_until`` (or ``effective_until`` is
-  ``None``). Repricing never mutates a past row — insert a new row with a new
-  ``effective_from``.
+* **One row per ``(provider, model)``.** No plan-tier split, no temporal
+  versioning — repricing edits the row in place (the rollup recomputes the
+  month against the current price).
+* **Integer micro-元 / 百万 tokens — NO floats anywhere.** A price field is
+  micro-CNY per *million* tokens (UI shows 元/百万tokens, supports decimals;
+  ``store = round(元 * 1_000_000)``). The rollup divides by 1_000_000 to reach
+  the ledger's per-token micro-元 cost.
+* **No markup here.** ``model_rate_card`` is the platform *cost* price only;
+  the per-tenant sales markup lives at tenant scope (separate PR). ``billed``
+  currently equals ``base``.
 
 The table is platform-global (``tenant_id`` is ``None`` for now; the column is
 kept so future per-tenant private rate cards are a non-migration change,
@@ -33,7 +30,6 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from helix_agent.protocol.model_catalog import MODEL_CATALOG
-from helix_agent.protocol.tenant_config import TenantPlan
 
 __all__ = [
     "ModelRateCardPatch",
@@ -80,10 +76,13 @@ def provider_for_model(model: str) -> str | None:
 
 
 def apply_markup(base_micros: int, markup_bps: int) -> int:
-    """Apply a basis-point markup to a base micro-USD amount.
+    """Apply a basis-point markup to a base micro-元 amount.
 
     Integer math only — floor division is the documented convention (no float,
     no banker's rounding). ``markup_bps`` is basis points: 2000 = +20 %.
+
+    Retained for the per-tenant sales-markup PR; ``model_rate_card`` itself no
+    longer carries a markup, so the rollup currently calls this with ``0``.
 
     >>> apply_markup(1_000_000, 2000)
     1200000
@@ -122,22 +121,17 @@ class ModelRateCardRecord(BaseModel):
     tenant_id: UUID | None = None
     provider: str
     model: str
-    input_token_micros: int = Field(ge=0)
-    output_token_micros: int = Field(ge=0)
-    cache_creation_token_micros: int = Field(ge=0)
-    cache_read_token_micros: int = Field(ge=0)
-    markup_bps: int = Field(ge=0)
-    plan_tier: TenantPlan | None = None
-    effective_from: datetime
-    effective_until: datetime | None = None
+    # micro-元 per *million* tokens (integer; UI shows 元/百万tokens).
+    input_per_mtok_micros: int = Field(ge=0)
+    output_per_mtok_micros: int = Field(ge=0)
+    cache_creation_per_mtok_micros: int = Field(ge=0)
+    cache_read_per_mtok_micros: int = Field(ge=0)
     created_at: datetime
     updated_at: datetime
 
     @model_validator(mode="after")
     def _validate(self) -> ModelRateCardRecord:
         _validate_provider_model(self.provider, self.model)
-        if self.effective_until is not None and self.effective_until <= self.effective_from:
-            raise ValueError("effective_until must be > effective_from")
         return self
 
 
@@ -148,39 +142,31 @@ class ModelRateCardUpsert(BaseModel):
 
     provider: str
     model: str
-    input_token_micros: int = Field(ge=0)
-    output_token_micros: int = Field(ge=0)
-    cache_creation_token_micros: int = Field(default=0, ge=0)
-    cache_read_token_micros: int = Field(default=0, ge=0)
-    markup_bps: int = Field(default=0, ge=0)
-    plan_tier: TenantPlan | None = None
-    effective_from: datetime
-    effective_until: datetime | None = None
+    input_per_mtok_micros: int = Field(ge=0)
+    output_per_mtok_micros: int = Field(ge=0)
+    cache_creation_per_mtok_micros: int = Field(default=0, ge=0)
+    cache_read_per_mtok_micros: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _validate(self) -> ModelRateCardUpsert:
         _validate_provider_model(self.provider, self.model)
-        if self.effective_until is not None and self.effective_until <= self.effective_from:
-            raise ValueError("effective_until must be > effective_from")
         return self
 
 
 class ModelRateCardPatch(BaseModel):
     """Partial update payload (``PATCH``). ``None`` = leave unchanged.
 
-    ``provider`` / ``model`` / ``plan_tier`` / ``effective_from`` are immutable
-    post-create — they form the row's temporal+specificity identity. Reprice by
-    inserting a new row (a new ``effective_from``), never by mutating these.
+    ``provider`` / ``model`` are immutable post-create — they are the row's
+    identity (one row per ``(provider, model)``). Reprice by editing the price
+    fields in place.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    input_token_micros: int | None = Field(default=None, ge=0)
-    output_token_micros: int | None = Field(default=None, ge=0)
-    cache_creation_token_micros: int | None = Field(default=None, ge=0)
-    cache_read_token_micros: int | None = Field(default=None, ge=0)
-    markup_bps: int | None = Field(default=None, ge=0)
-    effective_until: datetime | None = None
+    input_per_mtok_micros: int | None = Field(default=None, ge=0)
+    output_per_mtok_micros: int | None = Field(default=None, ge=0)
+    cache_creation_per_mtok_micros: int | None = Field(default=None, ge=0)
+    cache_read_per_mtok_micros: int | None = Field(default=None, ge=0)
 
 
 class TenantBillingLedgerRecord(BaseModel):
@@ -193,10 +179,11 @@ class TenantBillingLedgerRecord(BaseModel):
     rather than double-counting.
 
     Cost is stored as the ``base`` / ``markup`` / ``billed`` split (integer
-    micro-USD): tenants see only ``billed_cost_micros`` (Stream Z exposure
+    micro-元): tenants see only ``billed_cost_micros`` (Stream Z exposure
     control), while ``base``/``markup`` are retained internally for system_admin
     chargeback (transparency decision 2). ``markup_cost_micros`` is always
-    ``billed - base`` — never recomputed by division.
+    ``billed - base`` — never recomputed by division. Markup is currently 0
+    (the per-tenant sales markup is a separate PR), so ``billed == base``.
 
     ``priced`` is ``False`` when the provider could not be derived (unknown /
     ambiguous model) or no rate matched; the token sums are still recorded but

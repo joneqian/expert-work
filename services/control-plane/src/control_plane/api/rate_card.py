@@ -9,8 +9,8 @@ system_admin-only CRUD over the platform-curated model rate card. Every handler:
 * drives every store call inside ``bypass_rls_session()`` because the rate-card
   rows are tenant-less and the RLS policy would otherwise hide them from a
   normally-scoped session;
-* audits ``provider``/``model``/``plan_tier``/prices — these are platform pricing
-  facts, not tenant secrets (per [memory:billing-meter-and-entitlement]).
+* audits ``provider``/``model``/prices — these are platform pricing facts, not
+  tenant secrets (per [memory:billing-meter-and-entitlement]).
 """
 
 from __future__ import annotations
@@ -63,10 +63,8 @@ def _price_details(record: ModelRateCardRecord) -> dict[str, object]:
     return {
         "provider": record.provider,
         "model": record.model,
-        "plan_tier": (record.plan_tier.value if record.plan_tier is not None else None),
-        "input_token_micros": record.input_token_micros,
-        "output_token_micros": record.output_token_micros,
-        "markup_bps": record.markup_bps,
+        "input_per_mtok_micros": record.input_per_mtok_micros,
+        "output_per_mtok_micros": record.output_per_mtok_micros,
     }
 
 
@@ -89,7 +87,7 @@ def build_rate_card_router() -> APIRouter:
                 status_code=409,
                 detail={
                     "code": "RATE_CARD_DUPLICATE",
-                    "message": "a rate already exists for this provider/model/tier/effective_from",
+                    "message": "a price already exists for this provider/model",
                 },
             ) from exc
         await emit(
@@ -110,11 +108,10 @@ def build_rate_card_router() -> APIRouter:
         store: Annotated[ModelRateCardStore, Depends(_get_rate_card_store)],
         provider: Annotated[str | None, Query()] = None,
         model: Annotated[str | None, Query()] = None,
-        include_expired: Annotated[bool, Query()] = False,
     ) -> dict[str, object]:
         _require_system_admin(principal)
         async with bypass_rls_session():
-            rows = await store.list(provider=provider, model=model, include_expired=include_expired)
+            rows = await store.list(provider=provider, model=model)
         return {
             "success": True,
             "data": [r.model_dump(mode="json") for r in rows],
@@ -155,8 +152,8 @@ def build_rate_card_router() -> APIRouter:
                 detail={"code": "RATE_CARD_NOT_FOUND", "message": "not found"},
             ) from exc
         except ValueError as exc:
-            # The merged record violated a cross-field invariant (e.g. the
-            # effective-window rule) — the record validator raised on re-validation.
+            # The merged record failed re-validation (the record validator
+            # re-checks provider/model membership in MODEL_CATALOG).
             raise HTTPException(
                 status_code=422,
                 detail={"code": "RATE_CARD_INVALID", "message": str(exc)},

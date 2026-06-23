@@ -1,9 +1,9 @@
 """Unit tests for :class:`BillingRollupJob` — Stream Y4 cost derivation.
 
-Covers: basic pricing (billed = base * (1 + bps/1e4), integer), idempotency
-(re-run does not double-count), temporal versioning (each row priced by the rate
-active at its observed_at), provider derivation (NULL provider resolved via
-MODEL_CATALOG; unknown model → unpriced), and missing-rate → unpriced.
+Covers: basic pricing (billed == base, markup 0), idempotency (re-run does not
+double-count), decimal per-million-token price precision, provider derivation
+(NULL provider resolved via MODEL_CATALOG; unknown model → unpriced), and
+missing-rate → unpriced.
 
 All in-memory stores; the RLS contextvars the job sets are no-ops for them.
 """
@@ -109,21 +109,16 @@ async def _add_rate(
     model: str,
     input_micros: int,
     output_micros: int = 0,
-    markup_bps: int = 0,
-    effective_from: datetime,
-    effective_until: datetime | None = None,
-    plan_tier: TenantPlan | None = None,
 ) -> None:
+    # ``input_micros`` is the legacy per-token micro figure; prices are now stored
+    # per *million* tokens, so *1e6 keeps the rollup's base math identical (it
+    # divides by 1e6). billed == base (markup moved to tenant scope).
     await rates.create(
         upsert=ModelRateCardUpsert(
             provider=provider,
             model=model,
-            input_token_micros=input_micros,
-            output_token_micros=output_micros,
-            markup_bps=markup_bps,
-            plan_tier=plan_tier,
-            effective_from=effective_from,
-            effective_until=effective_until,
+            input_per_mtok_micros=input_micros * 1_000_000,
+            output_per_mtok_micros=output_micros * 1_000_000,
         ),
         actor_id="test",
     )
@@ -155,7 +150,7 @@ def test_month_bounds_december_rolls_year() -> None:
 async def test_basic_pricing(tenants, usage, rates, ledger) -> None:
     tenant = await _add_tenant(tenants, plan=TenantPlan.PRO)
     at = datetime(2026, 6, 10, tzinfo=UTC)
-    # base = 1000*15 + 500*75 = 15000 + 37500 = 52500; billed = 52500 * 1.2 = 63000
+    # base = 1000*15 + 500*75 = 15000 + 37500 = 52500; billed = base (markup 0)
     await _add_usage(
         usage,
         tenant_id=tenant,
@@ -171,8 +166,6 @@ async def test_basic_pricing(tenants, usage, rates, ledger) -> None:
         model="claude-opus-4-8",
         input_micros=15,
         output_micros=75,
-        markup_bps=2000,
-        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     report = await _job(tenants, usage, rates, ledger).run_once(month=MONTH)
@@ -184,8 +177,8 @@ async def test_basic_pricing(tenants, usage, rates, ledger) -> None:
     bucket = rows[0]
     assert bucket.priced is True
     assert bucket.base_cost_micros == 52_500
-    assert bucket.billed_cost_micros == 63_000
-    assert bucket.markup_cost_micros == 63_000 - 52_500  # = billed - base
+    assert bucket.billed_cost_micros == 52_500  # billed == base (markup 0)
+    assert bucket.markup_cost_micros == 0
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +203,6 @@ async def test_idempotent_rerun_does_not_double_count(tenants, usage, rates, led
         provider="anthropic",
         model="claude-opus-4-8",
         input_micros=10,
-        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
     job = _job(tenants, usage, rates, ledger)
 
@@ -223,52 +215,35 @@ async def test_idempotent_rerun_does_not_double_count(tenants, usage, rates, led
 
 
 # ---------------------------------------------------------------------------
-# (c) temporal versioning
+# (c) decimal price precision (per-million-tokens granularity)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_temporal_each_row_priced_by_active_rate(tenants, usage, rates, ledger) -> None:
+async def test_decimal_price_per_mtok(tenants, usage, rates, ledger) -> None:
     tenant = await _add_tenant(tenants, plan=TenantPlan.PRO)
-    # Two rate rows: old (until June 15) and new (from June 15).
-    await _add_rate(
-        rates,
-        provider="anthropic",
-        model="claude-opus-4-8",
-        input_micros=10,
-        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
-        effective_until=datetime(2026, 6, 15, tzinfo=UTC),
+    # ¥0.5 / 百万tokens = 500_000 micro-元/百万token. 1000 tokens →
+    # 1000 * 500_000 // 1e6 = 500 micro-元 = ¥0.0005.
+    await rates.create(
+        upsert=ModelRateCardUpsert(
+            provider="anthropic",
+            model="claude-opus-4-8",
+            input_per_mtok_micros=500_000,
+            output_per_mtok_micros=0,
+        ),
+        actor_id="test",
     )
-    await _add_rate(
-        rates,
-        provider="anthropic",
-        model="claude-opus-4-8",
-        input_micros=20,
-        effective_from=datetime(2026, 6, 15, tzinfo=UTC),
-    )
-    # Row before cutover → priced at 10; row after → priced at 20.
     await _add_usage(
         usage,
         tenant_id=tenant,
         model="claude-opus-4-8",
         provider="anthropic",
         observed_at=datetime(2026, 6, 10, tzinfo=UTC),
-        input_tokens=100,
+        input_tokens=1000,
     )
-    await _add_usage(
-        usage,
-        tenant_id=tenant,
-        model="claude-opus-4-8",
-        provider="anthropic",
-        observed_at=datetime(2026, 6, 20, tzinfo=UTC),
-        input_tokens=100,
-    )
-
     await _job(tenants, usage, rates, ledger).run_once(month=MONTH)
     rows = await ledger.list_for_tenant(tenant_id=tenant, month=MONTH)
-    assert len(rows) == 1  # same (provider, model, agent) bucket
-    # 100*10 + 100*20 = 1000 + 2000 = 3000
-    assert rows[0].base_cost_micros == 3000
+    assert rows[0].base_cost_micros == 500
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +268,6 @@ async def test_provider_derived_from_model_when_null(tenants, usage, rates, ledg
         provider="anthropic",
         model="claude-opus-4-8",
         input_micros=10,
-        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
     report = await _job(tenants, usage, rates, ledger).run_once(month=MONTH)
     assert report.usage_rows_priced == 1
@@ -386,7 +360,6 @@ async def test_priced_and_unpriced_rows_separate_buckets(tenants, usage, rates, 
         provider="anthropic",
         model="claude-opus-4-8",
         input_micros=10,
-        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
     # one priced (anthropic) + one unpriced (unknown model)
     await _add_usage(
@@ -421,7 +394,6 @@ async def test_excludes_rows_outside_month(tenants, usage, rates, ledger) -> Non
         provider="anthropic",
         model="claude-opus-4-8",
         input_micros=10,
-        effective_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
     # In June (counted) + in July (excluded for a June rollup).
     await _add_usage(

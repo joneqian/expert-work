@@ -48,19 +48,13 @@ def _valid_rate(
     *,
     provider: str = "anthropic",
     model: str = "claude-opus-4-8",
-    plan_tier: str | None = None,
 ) -> dict[str, object]:
-    body: dict[str, object] = {
+    return {
         "provider": provider,
         "model": model,
-        "input_token_micros": 15,
-        "output_token_micros": 75,
-        "markup_bps": 2000,
-        "effective_from": "2026-01-01T00:00:00Z",
+        "input_per_mtok_micros": 15_000_000,
+        "output_per_mtok_micros": 75_000_000,
     }
-    if plan_tier is not None:
-        body["plan_tier"] = plan_tier
-    return body
 
 
 class _Ctx:
@@ -120,12 +114,12 @@ async def test_create_get_list_patch_delete(ctx: _Ctx) -> None:
     body = create.json()
     assert body["success"] is True
     assert body["data"]["provider"] == "anthropic"
-    assert body["data"]["markup_bps"] == 2000
+    assert body["data"]["input_per_mtok_micros"] == 15_000_000
     rate_id = body["data"]["id"]
 
     got = await ctx.client.get(f"/v1/platform/rate-card/{rate_id}", headers=ctx.admin_headers)
     assert got.status_code == 200
-    assert got.json()["data"]["input_token_micros"] == 15
+    assert got.json()["data"]["input_per_mtok_micros"] == 15_000_000
 
     lst = await ctx.client.get("/v1/platform/rate-card", headers=ctx.admin_headers)
     assert lst.status_code == 200
@@ -134,12 +128,11 @@ async def test_create_get_list_patch_delete(ctx: _Ctx) -> None:
 
     patch = await ctx.client.patch(
         f"/v1/platform/rate-card/{rate_id}",
-        json={"markup_bps": 3000, "input_token_micros": 20},
+        json={"input_per_mtok_micros": 20_000_000},
         headers=ctx.admin_headers,
     )
     assert patch.status_code == 200, patch.text
-    assert patch.json()["data"]["markup_bps"] == 3000
-    assert patch.json()["data"]["input_token_micros"] == 20
+    assert patch.json()["data"]["input_per_mtok_micros"] == 20_000_000
 
     delete = await ctx.client.delete(f"/v1/platform/rate-card/{rate_id}", headers=ctx.admin_headers)
     assert delete.status_code == 204
@@ -187,7 +180,9 @@ async def test_get_patch_delete_missing_404(ctx: _Ctx) -> None:
     g = await ctx.client.get(f"/v1/platform/rate-card/{missing}", headers=ctx.admin_headers)
     assert g.status_code == 404
     p = await ctx.client.patch(
-        f"/v1/platform/rate-card/{missing}", json={"markup_bps": 1}, headers=ctx.admin_headers
+        f"/v1/platform/rate-card/{missing}",
+        json={"input_per_mtok_micros": 1},
+        headers=ctx.admin_headers,
     )
     assert p.status_code == 404
     d = await ctx.client.delete(f"/v1/platform/rate-card/{missing}", headers=ctx.admin_headers)
@@ -213,7 +208,7 @@ async def test_create_unknown_provider_model_422(ctx: _Ctx) -> None:
 @pytest.mark.asyncio
 async def test_create_negative_micros_422(ctx: _Ctx) -> None:
     bad = _valid_rate()
-    bad["input_token_micros"] = -1
+    bad["input_per_mtok_micros"] = -1
     resp = await ctx.client.post("/v1/platform/rate-card", json=bad, headers=ctx.admin_headers)
     assert resp.status_code == 422
 
@@ -231,7 +226,7 @@ async def test_tenant_admin_forbidden_on_every_endpoint(ctx: _Ctx) -> None:
     listed = await ctx.client.get("/v1/platform/rate-card", headers=h)
     got = await ctx.client.get(f"/v1/platform/rate-card/{some_id}", headers=h)
     patched = await ctx.client.patch(
-        f"/v1/platform/rate-card/{some_id}", json={"markup_bps": 1}, headers=h
+        f"/v1/platform/rate-card/{some_id}", json={"input_per_mtok_micros": 1}, headers=h
     )
     deleted = await ctx.client.delete(f"/v1/platform/rate-card/{some_id}", headers=h)
     assert created.status_code == 403

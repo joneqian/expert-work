@@ -59,7 +59,7 @@ describe("Sidebar — scope-driven groups", () => {
     expect(screen.getByText("Members")).toBeInTheDocument();
     // No platform-only item leaks in.
     expect(screen.queryByText("Tenants")).toBeNull();
-    expect(screen.queryByText("Rate Card")).toBeNull();
+    expect(screen.queryByText("Model Pricing")).toBeNull();
   });
 
   it("platform scope (system_admin) shows Platform only", () => {
@@ -72,7 +72,7 @@ describe("Sidebar — scope-driven groups", () => {
     expect(screen.queryByText("Tenant settings")).toBeNull();
     // Platform governance items present.
     expect(screen.getByText("Tenants")).toBeInTheDocument();
-    expect(screen.getByText("Rate Card")).toBeInTheDocument();
+    expect(screen.getByText("Model Pricing")).toBeInTheDocument();
     expect(screen.getByText("Members (all tenants)")).toBeInTheDocument();
     // No workspace item leaks in.
     expect(screen.queryByText("Agents")).toBeNull();

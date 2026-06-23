@@ -1,14 +1,14 @@
-"""Platform model rate-card store — Stream Y (Mini-ADR Y-3).
+"""Platform model rate-card store — Stream Y (Mini-ADR Y-3) / 模型定价简化.
 
-CRUD + temporal/most-specific resolution over the platform-curated model rate
-card. Every row is platform-global (``tenant_id`` is NULL), so SQL callers MUST
-be inside ``bypass_rls_session()`` — there is no per-tenant RLS scope to satisfy,
-exactly like :class:`SqlMcpConnectorCatalogStore` / :class:`SqlPlatformSecretStore`.
-The store layer itself is transparent: it does not import bypass; the
-control-plane caller applies it.
+CRUD + resolution over the platform-curated model pricing table. Every row is
+platform-global (``tenant_id`` is NULL), so SQL callers MUST be inside
+``bypass_rls_session()`` — there is no per-tenant RLS scope to satisfy, exactly
+like :class:`SqlMcpConnectorCatalogStore` / :class:`SqlPlatformSecretStore`. The
+store layer itself is transparent: it does not import bypass; the control-plane
+caller applies it.
 
-``resolve`` is pure selection logic (most-specific tier + temporal window) and
-is unit-tested directly.
+One price per ``(provider, model)`` — ``resolve`` is a plain lookup (no plan
+tier, no temporal window). Repricing edits the row in place.
 """
 
 from __future__ import annotations
@@ -29,28 +29,19 @@ from helix_agent.protocol import (
     ModelRateCardPatch,
     ModelRateCardRecord,
     ModelRateCardUpsert,
-    TenantPlan,
 )
 
 
 class ModelRateCardConflictError(Exception):
-    """A platform rate-card row already exists for the natural key.
+    """A platform pricing row already exists for ``(provider, model)``.
 
-    Natural key: ``(provider, model, plan_tier, effective_from)`` among platform
-    (NULL-tenant) rows. Surfaced as a 409 by the control-plane POST handler.
+    Surfaced as a 409 by the control-plane POST handler.
     """
 
-    def __init__(
-        self, *, provider: str, model: str, plan_tier: TenantPlan | None, effective_from: datetime
-    ) -> None:
-        super().__init__(
-            f"model_rate_card already exists: provider={provider!r} model={model!r} "
-            f"plan_tier={plan_tier} effective_from={effective_from.isoformat()}"
-        )
+    def __init__(self, *, provider: str, model: str) -> None:
+        super().__init__(f"model_rate_card already exists: provider={provider!r} model={model!r}")
         self.provider = provider
         self.model = model
-        self.plan_tier = plan_tier
-        self.effective_from = effective_from
 
 
 class ModelRateCardNotFoundError(Exception):
@@ -70,39 +61,13 @@ def _resolve(
     *,
     provider: str,
     model: str,
-    plan_tier: TenantPlan | None,
-    at: datetime,
 ) -> ModelRateCardRecord | None:
-    """Pure most-specific + temporal selection over candidate rows.
-
-    Selection rules (see STREAM-Y-DESIGN § Y-3):
-
-    * Only rows for the given ``(provider, model)`` whose temporal window
-      ``[effective_from, effective_until)`` contains ``at`` (open-ended when
-      ``effective_until is None``) are eligible.
-    * A row matching the given ``plan_tier`` beats a generic
-      (``plan_tier is None``) row.
-    * Among rows of equal specificity, the latest ``effective_from`` wins.
-    """
-
-    def _in_window(r: ModelRateCardRecord) -> bool:
-        if at < r.effective_from:
-            return False
-        return r.effective_until is None or at < r.effective_until
-
-    eligible = [r for r in rows if r.provider == provider and r.model == model and _in_window(r)]
-    # Prefer tier-specific rows; fall back to generic (plan_tier is None) only
-    # when no tier-specific row matches.
-    tier_specific = [r for r in eligible if r.plan_tier == plan_tier]
-    generic = [r for r in eligible if r.plan_tier is None]
-    pool = tier_specific or generic
-    if not pool:
-        return None
-    return max(pool, key=lambda r: r.effective_from)
+    """Return the single price row for ``(provider, model)``, or ``None``."""
+    return next((r for r in rows if r.provider == provider and r.model == model), None)
 
 
 class ModelRateCardStore(abc.ABC):
-    """CRUD + resolution for the platform-curated model rate card.
+    """CRUD + resolution for the platform-curated model pricing table.
 
     Platform table: every row is NULL-tenant, so SQL callers MUST drive these
     methods inside ``bypass_rls_session()``.
@@ -110,8 +75,8 @@ class ModelRateCardStore(abc.ABC):
 
     @abc.abstractmethod
     async def create(self, *, upsert: ModelRateCardUpsert, actor_id: str) -> ModelRateCardRecord:
-        """Insert a new platform (NULL-tenant) rate-card row. Raises
-        :class:`ModelRateCardConflictError` on a duplicate natural key."""
+        """Insert a new platform (NULL-tenant) pricing row. Raises
+        :class:`ModelRateCardConflictError` on a duplicate ``(provider, model)``."""
 
     @abc.abstractmethod
     async def get(self, rate_card_id: UUID) -> ModelRateCardRecord | None:
@@ -123,13 +88,8 @@ class ModelRateCardStore(abc.ABC):
         *,
         provider: str | None = None,
         model: str | None = None,
-        include_expired: bool = False,
     ) -> list[ModelRateCardRecord]:
-        """Return rows ordered by ``(provider, model, effective_from desc)``.
-
-        ``include_expired=False`` (the default) drops rows whose
-        ``effective_until`` is in the past relative to now.
-        """
+        """Return rows ordered by ``(provider, model)``."""
 
     @abc.abstractmethod
     async def patch(self, *, rate_card_id: UUID, patch: ModelRateCardPatch) -> ModelRateCardRecord:
@@ -142,16 +102,8 @@ class ModelRateCardStore(abc.ABC):
         :class:`ModelRateCardNotFoundError` if absent."""
 
     @abc.abstractmethod
-    async def resolve(
-        self,
-        *,
-        provider: str,
-        model: str,
-        plan_tier: TenantPlan | None,
-        at: datetime,
-    ) -> ModelRateCardRecord | None:
-        """Resolve the most-specific in-effect rate for ``(provider, model)`` at
-        ``at``. Tier-specific beats generic; latest ``effective_from`` wins."""
+    async def resolve(self, *, provider: str, model: str) -> ModelRateCardRecord | None:
+        """Resolve the current price for ``(provider, model)``, or ``None``."""
 
 
 class InMemoryModelRateCardStore(ModelRateCardStore):
@@ -164,32 +116,20 @@ class InMemoryModelRateCardStore(ModelRateCardStore):
     async def create(self, *, upsert: ModelRateCardUpsert, actor_id: str) -> ModelRateCardRecord:
         async with self._lock:
             if any(
-                r.provider == upsert.provider
-                and r.model == upsert.model
-                and r.plan_tier == upsert.plan_tier
-                and r.effective_from == upsert.effective_from
+                r.provider == upsert.provider and r.model == upsert.model
                 for r in self._rows.values()
             ):
-                raise ModelRateCardConflictError(
-                    provider=upsert.provider,
-                    model=upsert.model,
-                    plan_tier=upsert.plan_tier,
-                    effective_from=upsert.effective_from,
-                )
+                raise ModelRateCardConflictError(provider=upsert.provider, model=upsert.model)
             now = _utc_now()
             record = ModelRateCardRecord(
                 id=uuid4(),
                 tenant_id=None,
                 provider=upsert.provider,
                 model=upsert.model,
-                input_token_micros=upsert.input_token_micros,
-                output_token_micros=upsert.output_token_micros,
-                cache_creation_token_micros=upsert.cache_creation_token_micros,
-                cache_read_token_micros=upsert.cache_read_token_micros,
-                markup_bps=upsert.markup_bps,
-                plan_tier=upsert.plan_tier,
-                effective_from=upsert.effective_from,
-                effective_until=upsert.effective_until,
+                input_per_mtok_micros=upsert.input_per_mtok_micros,
+                output_per_mtok_micros=upsert.output_per_mtok_micros,
+                cache_creation_per_mtok_micros=upsert.cache_creation_per_mtok_micros,
+                cache_read_per_mtok_micros=upsert.cache_read_per_mtok_micros,
                 created_at=now,
                 updated_at=now,
             )
@@ -205,20 +145,14 @@ class InMemoryModelRateCardStore(ModelRateCardStore):
         *,
         provider: str | None = None,
         model: str | None = None,
-        include_expired: bool = False,
     ) -> list[ModelRateCardRecord]:
-        now = _utc_now()
         async with self._lock:
             rows = [
                 r
                 for r in self._rows.values()
                 if (provider is None or r.provider == provider)
                 and (model is None or r.model == model)
-                and (include_expired or r.effective_until is None or r.effective_until > now)
             ]
-        # (provider, model) ascending, effective_from DESCENDING (newest first)
-        # — matches the base docstring + the SQL store. Stable two-pass sort.
-        rows.sort(key=lambda r: r.effective_from, reverse=True)
         rows.sort(key=lambda r: (r.provider, r.model))
         return rows
 
@@ -227,24 +161,17 @@ class InMemoryModelRateCardStore(ModelRateCardStore):
             existing = self._rows.get(rate_card_id)
             if existing is None:
                 raise ModelRateCardNotFoundError(rate_card_id=rate_card_id)
-            # patch field == None means "leave unchanged"; provider/model/
-            # plan_tier/effective_from are immutable post-create (reprice by
-            # inserting a new row). effective_until is the exception: a sentinel
-            # would be needed to distinguish "leave" from "set open-ended", so we
-            # follow the protocol patch shape and treat None as "leave unchanged".
+            # patch field == None means "leave unchanged"; provider/model are
+            # immutable identity (reprice edits prices in place).
             changes: dict[str, object] = {"updated_at": _utc_now()}
-            if patch.input_token_micros is not None:
-                changes["input_token_micros"] = patch.input_token_micros
-            if patch.output_token_micros is not None:
-                changes["output_token_micros"] = patch.output_token_micros
-            if patch.cache_creation_token_micros is not None:
-                changes["cache_creation_token_micros"] = patch.cache_creation_token_micros
-            if patch.cache_read_token_micros is not None:
-                changes["cache_read_token_micros"] = patch.cache_read_token_micros
-            if patch.markup_bps is not None:
-                changes["markup_bps"] = patch.markup_bps
-            if patch.effective_until is not None:
-                changes["effective_until"] = patch.effective_until
+            if patch.input_per_mtok_micros is not None:
+                changes["input_per_mtok_micros"] = patch.input_per_mtok_micros
+            if patch.output_per_mtok_micros is not None:
+                changes["output_per_mtok_micros"] = patch.output_per_mtok_micros
+            if patch.cache_creation_per_mtok_micros is not None:
+                changes["cache_creation_per_mtok_micros"] = patch.cache_creation_per_mtok_micros
+            if patch.cache_read_per_mtok_micros is not None:
+                changes["cache_read_per_mtok_micros"] = patch.cache_read_per_mtok_micros
             # Re-validate the merged row (model_copy doesn't run validators) so a
             # patch can't slip a cross-field-invalid record (parity with SQL).
             updated = ModelRateCardRecord.model_validate(
@@ -259,17 +186,10 @@ class InMemoryModelRateCardStore(ModelRateCardStore):
                 raise ModelRateCardNotFoundError(rate_card_id=rate_card_id)
             del self._rows[rate_card_id]
 
-    async def resolve(
-        self,
-        *,
-        provider: str,
-        model: str,
-        plan_tier: TenantPlan | None,
-        at: datetime,
-    ) -> ModelRateCardRecord | None:
+    async def resolve(self, *, provider: str, model: str) -> ModelRateCardRecord | None:
         async with self._lock:
             rows = list(self._rows.values())
-        return _resolve(rows, provider=provider, model=model, plan_tier=plan_tier, at=at)
+        return _resolve(rows, provider=provider, model=model)
 
 
 def _row_to_record(row: ModelRateCardRow) -> ModelRateCardRecord:
@@ -278,21 +198,17 @@ def _row_to_record(row: ModelRateCardRow) -> ModelRateCardRecord:
         tenant_id=row.tenant_id,
         provider=row.provider,
         model=row.model,
-        input_token_micros=row.input_token_micros,
-        output_token_micros=row.output_token_micros,
-        cache_creation_token_micros=row.cache_creation_token_micros,
-        cache_read_token_micros=row.cache_read_token_micros,
-        markup_bps=row.markup_bps,
-        plan_tier=TenantPlan(row.plan_tier) if row.plan_tier is not None else None,
-        effective_from=row.effective_from,
-        effective_until=row.effective_until,
+        input_per_mtok_micros=row.input_per_mtok_micros,
+        output_per_mtok_micros=row.output_per_mtok_micros,
+        cache_creation_per_mtok_micros=row.cache_creation_per_mtok_micros,
+        cache_read_per_mtok_micros=row.cache_read_per_mtok_micros,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
 
 
 class DbModelRateCardStore(ModelRateCardStore):
-    """Postgres-backed platform model rate card (bypass-RLS sessions)."""
+    """Postgres-backed platform model pricing table (bypass-RLS sessions)."""
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._sf = session_factory
@@ -305,14 +221,10 @@ class DbModelRateCardStore(ModelRateCardStore):
                 tenant_id=None,
                 provider=upsert.provider,
                 model=upsert.model,
-                input_token_micros=upsert.input_token_micros,
-                output_token_micros=upsert.output_token_micros,
-                cache_creation_token_micros=upsert.cache_creation_token_micros,
-                cache_read_token_micros=upsert.cache_read_token_micros,
-                markup_bps=upsert.markup_bps,
-                plan_tier=upsert.plan_tier.value if upsert.plan_tier is not None else None,
-                effective_from=upsert.effective_from,
-                effective_until=upsert.effective_until,
+                input_per_mtok_micros=upsert.input_per_mtok_micros,
+                output_per_mtok_micros=upsert.output_per_mtok_micros,
+                cache_creation_per_mtok_micros=upsert.cache_creation_per_mtok_micros,
+                cache_read_per_mtok_micros=upsert.cache_read_per_mtok_micros,
                 created_at=now,
                 updated_at=now,
             )
@@ -325,10 +237,7 @@ class DbModelRateCardStore(ModelRateCardStore):
             except IntegrityError as exc:
                 await session.rollback()
                 raise ModelRateCardConflictError(
-                    provider=upsert.provider,
-                    model=upsert.model,
-                    plan_tier=upsert.plan_tier,
-                    effective_from=upsert.effective_from,
+                    provider=upsert.provider, model=upsert.model
                 ) from exc
             await session.refresh(row)
             return _row_to_record(row)
@@ -343,22 +252,15 @@ class DbModelRateCardStore(ModelRateCardStore):
         *,
         provider: str | None = None,
         model: str | None = None,
-        include_expired: bool = False,
     ) -> list[ModelRateCardRecord]:
         stmt = select(ModelRateCardRow).order_by(
             ModelRateCardRow.provider,
             ModelRateCardRow.model,
-            ModelRateCardRow.effective_from.desc(),
         )
         if provider is not None:
             stmt = stmt.where(ModelRateCardRow.provider == provider)
         if model is not None:
             stmt = stmt.where(ModelRateCardRow.model == model)
-        if not include_expired:
-            stmt = stmt.where(
-                (ModelRateCardRow.effective_until.is_(None))
-                | (ModelRateCardRow.effective_until > _utc_now())
-            )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_record(r) for r in rows]
@@ -368,22 +270,18 @@ class DbModelRateCardStore(ModelRateCardStore):
             existing = await session.get(ModelRateCardRow, rate_card_id)
             if existing is None:
                 raise ModelRateCardNotFoundError(rate_card_id=rate_card_id)
-            if patch.input_token_micros is not None:
-                existing.input_token_micros = patch.input_token_micros
-            if patch.output_token_micros is not None:
-                existing.output_token_micros = patch.output_token_micros
-            if patch.cache_creation_token_micros is not None:
-                existing.cache_creation_token_micros = patch.cache_creation_token_micros
-            if patch.cache_read_token_micros is not None:
-                existing.cache_read_token_micros = patch.cache_read_token_micros
-            if patch.markup_bps is not None:
-                existing.markup_bps = patch.markup_bps
-            if patch.effective_until is not None:
-                existing.effective_until = patch.effective_until
+            if patch.input_per_mtok_micros is not None:
+                existing.input_per_mtok_micros = patch.input_per_mtok_micros
+            if patch.output_per_mtok_micros is not None:
+                existing.output_per_mtok_micros = patch.output_per_mtok_micros
+            if patch.cache_creation_per_mtok_micros is not None:
+                existing.cache_creation_per_mtok_micros = patch.cache_creation_per_mtok_micros
+            if patch.cache_read_per_mtok_micros is not None:
+                existing.cache_read_per_mtok_micros = patch.cache_read_per_mtok_micros
             existing.updated_at = _utc_now()
             # Validate the prospective record BEFORE commit: if the merged row
-            # violates a cross-field invariant, _row_to_record raises and the
-            # context manager rolls back — no corrupt row is persisted.
+            # violates an invariant, _row_to_record raises and the context
+            # manager rolls back — no corrupt row is persisted.
             record = _row_to_record(existing)
             await session.commit()
             return record
@@ -401,14 +299,7 @@ class DbModelRateCardStore(ModelRateCardStore):
                 raise ModelRateCardNotFoundError(rate_card_id=rate_card_id)
             await session.commit()
 
-    async def resolve(
-        self,
-        *,
-        provider: str,
-        model: str,
-        plan_tier: TenantPlan | None,
-        at: datetime,
-    ) -> ModelRateCardRecord | None:
+    async def resolve(self, *, provider: str, model: str) -> ModelRateCardRecord | None:
         stmt = select(ModelRateCardRow).where(
             ModelRateCardRow.provider == provider,
             ModelRateCardRow.model == model,
@@ -416,4 +307,4 @@ class DbModelRateCardStore(ModelRateCardStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         records = [_row_to_record(r) for r in rows]
-        return _resolve(records, provider=provider, model=model, plan_tier=plan_tier, at=at)
+        return _resolve(records, provider=provider, model=model)

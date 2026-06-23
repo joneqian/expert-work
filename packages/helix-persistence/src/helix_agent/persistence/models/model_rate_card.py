@@ -1,11 +1,10 @@
-"""``model_rate_card`` ORM model — Stream Y (Mini-ADR Y-3).
+"""``model_rate_card`` ORM model — Stream Y (Mini-ADR Y-3) / 模型定价简化.
 
-Platform-curated model rate card (per-``(provider, model, plan_tier)`` token
-prices in integer micro-USD + a basis-point markup, temporally versioned). RLS
-(NULL-tenant isolation), CHECK constraints, and the partial unique index are
-declared in migration ``0059_model_rate_card``, not here — the model is purely
-structural (mirrors ``mcp_connector_catalog``). ``tenant_id`` is NULLABLE:
-NULL = platform-global (the only shape today).
+Platform-curated model pricing: one **cost price** per ``(provider, model)``,
+in integer micro-元 / 百万 tokens. RLS (NULL-tenant isolation), CHECK
+constraints, and the unique index are declared in the migrations, not here —
+the model is purely structural (mirrors ``mcp_connector_catalog``).
+``tenant_id`` is NULLABLE: NULL = platform-global (the only shape today).
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, Integer, Text, func, text
+from sqlalchemy import BigInteger, DateTime, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,7 +20,7 @@ from helix_agent.persistence.base import Base
 
 
 class ModelRateCardRow(Base):
-    """One platform-curated rate-card row (a price valid over a time window)."""
+    """One platform-curated pricing row (one current price per provider+model)."""
 
     __tablename__ = "model_rate_card"
 
@@ -35,19 +34,15 @@ class ModelRateCardRow(Base):
     tenant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(Text, nullable=False)
-    input_token_micros: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    output_token_micros: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    cache_creation_token_micros: Mapped[int] = mapped_column(
+    # micro-元 per *million* tokens.
+    input_per_mtok_micros: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    output_per_mtok_micros: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cache_creation_per_mtok_micros: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
-    cache_read_token_micros: Mapped[int] = mapped_column(
+    cache_read_per_mtok_micros: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
-    markup_bps: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    # NULL = generic (applies to any tier); a tier-specific row beats it.
-    plan_tier: Mapped[str | None] = mapped_column(Text, nullable=True)
-    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    effective_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

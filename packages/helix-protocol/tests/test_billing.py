@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 from helix_agent.protocol import (
     ModelRateCardPatch,
-    ModelRateCardRecord,
     ModelRateCardUpsert,
     TenantBillingLedgerRecord,
     apply_markup,
@@ -18,19 +17,14 @@ from helix_agent.protocol import (
 )
 from helix_agent.protocol.billing import _build_model_provider_index
 from helix_agent.protocol.model_catalog import ModelEntry
-from helix_agent.protocol.tenant_config import TenantPlan
-
-_FROM = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def _upsert(**over: object) -> ModelRateCardUpsert:
     kwargs: dict[str, object] = {
         "provider": "anthropic",
         "model": "claude-opus-4-8",
-        "input_token_micros": 15,
-        "output_token_micros": 75,
-        "markup_bps": 2000,
-        "effective_from": _FROM,
+        "input_per_mtok_micros": 15_000_000,
+        "output_per_mtok_micros": 75_000_000,
     }
     kwargs.update(over)
     return ModelRateCardUpsert(**kwargs)  # type: ignore[arg-type]
@@ -62,7 +56,7 @@ def test_apply_markup_floor_division() -> None:
 def test_valid_upsert() -> None:
     row = _upsert()
     assert row.provider == "anthropic"
-    assert row.cache_creation_token_micros == 0
+    assert row.cache_creation_per_mtok_micros == 0
 
 
 def test_deprecated_model_allowed() -> None:
@@ -83,53 +77,7 @@ def test_unknown_model_rejected() -> None:
 
 def test_negative_micros_rejected() -> None:
     with pytest.raises(ValidationError):
-        _upsert(input_token_micros=-1)
-
-
-def test_negative_markup_rejected() -> None:
-    with pytest.raises(ValidationError):
-        _upsert(markup_bps=-1)
-
-
-def test_effective_until_must_exceed_from() -> None:
-    with pytest.raises(ValidationError):
-        _upsert(effective_until=_FROM)
-    with pytest.raises(ValidationError):
-        _upsert(effective_until=_FROM - timedelta(days=1))
-
-
-def test_effective_until_open_ended_ok() -> None:
-    row = _upsert(effective_until=None)
-    assert row.effective_until is None
-
-
-def test_plan_tier_override() -> None:
-    row = _upsert(plan_tier=TenantPlan.ENTERPRISE)
-    assert row.plan_tier is TenantPlan.ENTERPRISE
-
-
-# ---------------------------------------------------------------------------
-# Record validation (read model — same cross-field rules)
-# ---------------------------------------------------------------------------
-
-
-def test_record_rejects_bad_window() -> None:
-    now = datetime.now(UTC)
-    with pytest.raises(ValidationError):
-        ModelRateCardRecord(
-            id="00000000-0000-0000-0000-000000000001",  # type: ignore[arg-type]
-            provider="anthropic",
-            model="claude-opus-4-8",
-            input_token_micros=1,
-            output_token_micros=1,
-            cache_creation_token_micros=0,
-            cache_read_token_micros=0,
-            markup_bps=0,
-            effective_from=_FROM,
-            effective_until=_FROM,
-            created_at=now,
-            updated_at=now,
-        )
+        _upsert(input_per_mtok_micros=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -139,13 +87,13 @@ def test_record_rejects_bad_window() -> None:
 
 def test_patch_negative_rejected() -> None:
     with pytest.raises(ValidationError):
-        ModelRateCardPatch(input_token_micros=-1)
+        ModelRateCardPatch(input_per_mtok_micros=-1)
 
 
 def test_patch_partial_ok() -> None:
-    patch = ModelRateCardPatch(markup_bps=3000)
-    assert patch.markup_bps == 3000
-    assert patch.input_token_micros is None
+    patch = ModelRateCardPatch(input_per_mtok_micros=500_000)
+    assert patch.input_per_mtok_micros == 500_000
+    assert patch.output_per_mtok_micros is None
 
 
 # ---------------------------------------------------------------------------

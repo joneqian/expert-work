@@ -72,12 +72,12 @@ _unpriced_buckets = helix_counter(
     "helix_billing_rollup_unpriced_buckets_total",
     "Ledger buckets written with priced=false.",
 )
-#: Stream Z-2 — rollup-computed billed cost (micro-USD) per (tenant, model) for
+#: Stream Z-2 — rollup-computed billed cost (micro-元) per (tenant, model) for
 #: the processed month. A gauge (SET each run) not a counter: the rollup
 #: recomputes the whole month, so set-overwrite is idempotent across re-runs.
 _billed_cost = helix_gauge(
     "helix_llm_billed_cost_micros",
-    "Rollup-computed billed LLM cost (micro-USD) per tenant+model for the month.",
+    "Rollup-computed billed LLM cost (micro-元) per tenant+model for the month.",
     ("tenant", "model"),
 )
 
@@ -196,11 +196,10 @@ class BillingRollupJob:
         unpriced_buckets = 0
         by_tenant: dict[str, int] = {}
 
-        async for tenant_id, plan in self._iter_tenants():
+        async for tenant_id, _plan in self._iter_tenants():
             tenants_scanned += 1
             buckets, p, u = await self._rollup_tenant(
                 tenant_id=tenant_id,
-                plan=plan,
                 month=first_of_month,
                 start=start,
                 end=end,
@@ -241,7 +240,6 @@ class BillingRollupJob:
         self,
         *,
         tenant_id: UUID,
-        plan: TenantPlan,
         month: date,
         start: datetime,
         end: datetime,
@@ -264,12 +262,7 @@ class BillingRollupJob:
             rate = None
             if provider is not None:
                 with _bypass_rls():
-                    rate = await self._rates.resolve(
-                        provider=provider,
-                        model=row.model,
-                        plan_tier=plan,
-                        at=row.observed_at,
-                    )
+                    rate = await self._rates.resolve(provider=provider, model=row.model)
 
             if provider is None or rate is None:
                 unpriced_rows += 1
@@ -297,13 +290,16 @@ class BillingRollupJob:
                 continue
 
             priced_rows += 1
+            # Prices are micro-元 / 百万 tokens; divide once at the end to reach
+            # the ledger's per-token micro-元 (floor, matching apply_markup).
             base_micros = (
-                row.input_tokens * rate.input_token_micros
-                + row.output_tokens * rate.output_token_micros
-                + row.cache_creation_tokens * rate.cache_creation_token_micros
-                + row.cache_read_tokens * rate.cache_read_token_micros
-            )
-            billed_micros = apply_markup(base_micros, rate.markup_bps)
+                row.input_tokens * rate.input_per_mtok_micros
+                + row.output_tokens * rate.output_per_mtok_micros
+                + row.cache_creation_tokens * rate.cache_creation_per_mtok_micros
+                + row.cache_read_tokens * rate.cache_read_per_mtok_micros
+            ) // 1_000_000
+            # Markup moved to tenant scope (separate PR); 0 here → billed == base.
+            billed_micros = apply_markup(base_micros, 0)
             markup_micros = billed_micros - base_micros
 
             key = (provider, row.model, row.agent_name)
