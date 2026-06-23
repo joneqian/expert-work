@@ -173,6 +173,46 @@ test("(d) advanced custom path → 测试连接 shows success", async ({ page })
   await expect(page.getByTestId("cms-test-result")).toBeVisible();
 });
 
+test("(f) custom headers tab → header reaches the test request", async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto("/settings/mcp-servers");
+  await expect(page.getByTestId("ms-table")).toBeVisible();
+
+  // Capture the body of the test-connection probe.
+  let testBody: Record<string, unknown> | null = null;
+  await page.route("**/v1/mcp-servers/test", async (route) => {
+    if (route.request().method() === "POST") {
+      testBody = route.request().postDataJSON();
+      await route.fulfill({ json: TEST_CONNECTION_OK });
+      return;
+    }
+    await route.fallback();
+  });
+
+  await page.getByTestId("ms-add").click();
+  await page.getByTestId("amsd-custom").click();
+  await expect(page.getByTestId("cms-form")).toBeVisible();
+
+  await page.getByTestId("cms-name").fill("hdr-server");
+  await page.getByTestId("cms-url").fill("https://mcp.example.com/mcp");
+
+  // Switch to the headers tab, add one header.
+  await page.getByRole("tab", { name: /请求头|Headers/ }).click();
+  await page.getByTestId("cms-header-add").click();
+  await page.getByTestId("cms-header-key-0").fill("X-API-Key");
+  await page.getByTestId("cms-header-value-0").fill("KEY-123");
+
+  // Back to the basic tab and run the connection test.
+  await page.getByRole("tab", { name: /认证|Auth/ }).click();
+  await page.getByTestId("cms-test").click();
+  await expect(page.getByTestId("cms-test-result")).toBeVisible();
+
+  expect(testBody).not.toBeNull();
+  expect(testBody!.custom_headers).toEqual({ "X-API-Key": "KEY-123" });
+});
+
 test("(e) settings/mcp-servers passes axe", async ({ page }) => {
   await login(page);
   await page.goto("/settings/mcp-servers");

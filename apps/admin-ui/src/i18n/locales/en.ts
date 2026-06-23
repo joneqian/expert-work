@@ -663,6 +663,18 @@ export interface TranslationKeys {
     submit_add: string;
     submit_save: string;
     custom_disabled: string;
+    tab_basic: string;
+    tab_headers: string;
+    tab_config: string;
+    headers_hint: string;
+    headers_hint_edit: string;
+    header_name: string;
+    header_value: string;
+    header_value_keep: string;
+    header_add: string;
+    header_name_invalid: string;
+    field_sse_read_timeout: string;
+    sse_read_timeout_hint: string;
   };
   mcp_catalog: {
     page_title: string;
@@ -1839,9 +1851,9 @@ const en: TranslationKeys = {
   },
   rate_card_page: {
     page_title: "Model Pricing",
-    subtitle: "Platform model pricing — CNY per million tokens (decimals allowed).",
-    system_admin_only:
-      "Model pricing is platform-admin (system_admin) only.",
+    subtitle:
+      "Platform model pricing — CNY per million tokens (decimals allowed).",
+    system_admin_only: "Model pricing is platform-admin (system_admin) only.",
     failed_to_load: "Failed to load pricing",
     empty: "No pricing rows yet.",
     filter_provider: "Provider",
@@ -2316,6 +2328,20 @@ const en: TranslationKeys = {
     submit_save: "Save",
     custom_disabled:
       "Custom servers are disabled by your platform admin; use the catalog.",
+    tab_basic: "Auth",
+    tab_headers: "Headers",
+    tab_config: "Config",
+    headers_hint: "Extra HTTP headers sent to the MCP server (e.g. X-API-Key).",
+    headers_hint_edit:
+      "Header values are write-only — re-enter a value to change a header; leave blank to keep all current values.",
+    header_name: "Header name",
+    header_value: "Header value",
+    header_value_keep: "Leave blank to keep",
+    header_add: "Add header",
+    header_name_invalid: "Header name may use letters, digits and hyphens only",
+    field_sse_read_timeout: "SSE read timeout (seconds)",
+    sse_read_timeout_hint:
+      "Per-read wait for SSE streams. Leave blank for the default (300s).",
   },
   mcp_catalog: {
     page_title: "MCP Catalog",
@@ -2881,7 +2907,8 @@ const en: TranslationKeys = {
     pin: "Lock",
     unpin: "Unlock",
     pinned_toast: "Locked — auto-cleanup won't mark this skill stale/archived.",
-    unpinned_toast: "Unlocked — auto lifecycle resumes (long-unused skills age out).",
+    unpinned_toast:
+      "Unlocked — auto lifecycle resumes (long-unused skills age out).",
     pin_tooltip_on:
       "Locked — auto-cleanup never marks this skill stale/archived, no matter how long it goes unused.",
     pin_tooltip_off:
@@ -2930,7 +2957,8 @@ const en: TranslationKeys = {
     github_ref_label: "Ref",
     github_ref_ph: "branch / tag / SHA (optional, default branch)",
     github_submit: "Import",
-    github_pick_skill: "This repo has {{count}} skills — pick one or more to import.",
+    github_pick_skill:
+      "This repo has {{count}} skills — pick one or more to import.",
     github_pick_ph: "Select skills",
     github_select_all: "Select all",
     github_clear_all: "Clear all",

@@ -86,7 +86,8 @@ const zhCN: TranslationKeys = {
   },
   setup: {
     title: "初始化 helix",
-    paragraph: "平台还没有任何管理员。创建第一个 system admin 以完成 helix 安装。",
+    paragraph:
+      "平台还没有任何管理员。创建第一个 system admin 以完成 helix 安装。",
     platform_name_label: "平台名称",
     admin_email_label: "管理员邮箱",
     admin_email_required: "邮箱必填",
@@ -228,7 +229,8 @@ const zhCN: TranslationKeys = {
   },
   rate_card_page: {
     page_title: "模型定价",
-    subtitle: "平台模型定价——单位 元 / 百万 tokens（每百万 tokens 的人民币单价，可填小数）。",
+    subtitle:
+      "平台模型定价——单位 元 / 百万 tokens（每百万 tokens 的人民币单价，可填小数）。",
     system_admin_only: "模型定价管理仅限平台管理员（system_admin）。",
     failed_to_load: "定价加载失败",
     empty: "暂无定价行。",
@@ -684,6 +686,19 @@ const zhCN: TranslationKeys = {
     submit_add: "添加",
     submit_save: "保存",
     custom_disabled: "平台管理员已禁用自定义 server，请改用目录添加。",
+    tab_basic: "认证",
+    tab_headers: "请求头",
+    tab_config: "配置",
+    headers_hint: "发送到 MCP server 的额外 HTTP 请求头（如 X-API-Key）。",
+    headers_hint_edit:
+      "请求头的值只写不读 —— 要改某个值就重新输入；全部留空则保留当前所有值。",
+    header_name: "请求头名称",
+    header_value: "请求头值",
+    header_value_keep: "留空保留",
+    header_add: "添加请求头",
+    header_name_invalid: "请求头名称只能用字母、数字和连字符",
+    field_sse_read_timeout: "SSE 读取超时（秒）",
+    sse_read_timeout_hint: "SSE 流的单次读取等待。留空用默认值（300 秒）。",
   },
   mcp_catalog: {
     page_title: "MCP 目录",
@@ -1220,7 +1235,8 @@ const zhCN: TranslationKeys = {
     unpin: "取消锁定",
     pinned_toast: "已锁定 — 自动清理不再把此技能转为已过期/已归档。",
     unpinned_toast: "已取消锁定 — 恢复自动生命周期(久未使用会自动过期/归档)。",
-    pin_tooltip_on: "已锁定 — 无论多久未使用,自动清理都不会把它转为已过期/已归档。",
+    pin_tooltip_on:
+      "已锁定 — 无论多久未使用,自动清理都不会把它转为已过期/已归档。",
     pin_tooltip_off:
       "锁定:让自动清理永不把此技能转为已过期/已归档(默认久未使用会自动过期再归档)。",
     eta_days_to_stale: "{{days}} 天后 stale",
@@ -1237,7 +1253,8 @@ const zhCN: TranslationKeys = {
     failed_to_load: "加载技能市场失败",
     empty: "暂无可用的平台技能。",
     cross_tenant_title: "请选择一个租户",
-    cross_tenant_hint: "技能市场按租户隔离。请从「全部租户」切换到具体租户后再浏览和启用技能。",
+    cross_tenant_hint:
+      "技能市场按租户隔离。请从「全部租户」切换到具体租户后再浏览和启用技能。",
     tier_free: "免费",
     tier_pro: "专业版",
     tier_enterprise: "企业版",

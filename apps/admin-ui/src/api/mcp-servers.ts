@@ -26,6 +26,10 @@ export interface McpServer {
   enabled: boolean;
   created_at: string;
   updated_at: string;
+  /** Names of configured custom HTTP headers (values stay encrypted server-side). */
+  custom_header_names?: string[] | null;
+  /** SSE read-timeout override in seconds; null = SDK default. */
+  sse_read_timeout_s?: number | null;
 }
 
 export interface CreateMcpServerBody {
@@ -35,6 +39,10 @@ export interface CreateMcpServerBody {
   auth_type: McpAuthType;
   /** Raw token — stored encrypted.  Required when ``auth_type="bearer"``. */
   token?: string;
+  /** Custom HTTP headers (name → value); values stored encrypted as one blob. */
+  custom_headers?: Record<string, string>;
+  /** SSE read-timeout override in seconds. */
+  sse_read_timeout_s?: number;
   timeout_s?: number;
 }
 
@@ -45,6 +53,9 @@ export interface UpdateMcpServerBody {
    * token; supply a non-empty string to replace it.
    */
   token?: string;
+  /** Replace the custom-header set (omit to keep; clearing is delete+recreate). */
+  custom_headers?: Record<string, string>;
+  sse_read_timeout_s?: number;
   timeout_s?: number;
   enabled?: boolean;
 }
@@ -71,6 +82,9 @@ export interface TestConnectionBody {
   auth_type: McpAuthType;
   /** Required when ``auth_type="bearer"``. */
   token?: string;
+  /** Custom HTTP headers (name → value) to send during the probe. */
+  custom_headers?: Record<string, string>;
+  sse_read_timeout_s?: number;
   timeout_s?: number;
 }
 
@@ -80,13 +94,21 @@ export async function listMcpServers(): Promise<McpServer[]> {
 }
 
 /** ``POST /v1/mcp-servers`` — register a new MCP server. */
-export async function createMcpServer(body: CreateMcpServerBody): Promise<McpServer> {
+export async function createMcpServer(
+  body: CreateMcpServerBody,
+): Promise<McpServer> {
   return postJson<McpServer>("/v1/mcp-servers", body);
 }
 
 /** ``PATCH /v1/mcp-servers/{name}`` — update URL / token / timeout / enabled. */
-export async function updateMcpServer(name: string, body: UpdateMcpServerBody): Promise<McpServer> {
-  return patchJson<McpServer>(`/v1/mcp-servers/${encodeURIComponent(name)}`, body);
+export async function updateMcpServer(
+  name: string,
+  body: UpdateMcpServerBody,
+): Promise<McpServer> {
+  return patchJson<McpServer>(
+    `/v1/mcp-servers/${encodeURIComponent(name)}`,
+    body,
+  );
 }
 
 /** ``DELETE /v1/mcp-servers/{name}`` — remove an MCP server. */
@@ -98,7 +120,9 @@ export async function deleteMcpServer(name: string): Promise<void> {
  * ``POST /v1/mcp-servers/test`` — probe-only connection test; nothing is
  * persisted.  Returns the number of tools advertised by the server.
  */
-export async function testMcpConnection(body: TestConnectionBody): Promise<{ tool_count: number }> {
+export async function testMcpConnection(
+  body: TestConnectionBody,
+): Promise<{ tool_count: number }> {
   return postJson<{ tool_count: number }>("/v1/mcp-servers/test", body);
 }
 
@@ -108,7 +132,9 @@ export async function testMcpConnection(body: TestConnectionBody): Promise<{ too
  * should treat that as ``unreachable``.
  */
 export async function listMcpServerTools(name: string): Promise<McpTool[]> {
-  return getJson<McpTool[]>(`/v1/mcp-servers/${encodeURIComponent(name)}/tools`);
+  return getJson<McpTool[]>(
+    `/v1/mcp-servers/${encodeURIComponent(name)}/tools`,
+  );
 }
 
 /**
