@@ -282,3 +282,26 @@ async def test_disconnect_unknown_returns_404() -> None:
         resp = await client.delete(f"/v1/mcp-oauth/connections/{uuid4()}", headers=headers)
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "MCP_OAUTH_CONNECTION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_operator_can_initiate_own_oauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The per-user scenario: a regular employee (operator role, not admin)
+    must be able to authorize their own OAuth connection. Guards the new
+    ``mcp_oauth`` RBAC resource (operator gets read/write/delete on own)."""
+    app, _admin_headers, tenant_id, _ = await _make_app()
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.discover_oauth_metadata", _fake_discover)
+    cat_id = await _seed_oauth2_entry(app)
+    # An operator-role JWT (the regular logged-in employee), NOT admin.
+    op_token = make_test_jwt(tenant_id=tenant_id, subject=str(uuid4()), roles=("operator",))
+    op_headers = {"Authorization": f"Bearer {op_token}"}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            f"/v1/mcp-servers/catalog/{cat_id}/oauth/initiate", headers=op_headers
+        )
+        assert resp.status_code == 201, resp.text
+        # And can list their own connections.
+        lst = await client.get("/v1/mcp-oauth/connections", headers=op_headers)
+        assert lst.status_code == 200
+        assert len(lst.json()["items"]) == 1

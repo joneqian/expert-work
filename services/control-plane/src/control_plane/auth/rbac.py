@@ -42,6 +42,7 @@ Resource = Literal[
     "memory",  # Stream K.K6 — long-term memory CRUD
     "mcp_server",  # Stream V — tenant remote MCP server registry
     "mcp_catalog",  # Stream W — platform MCP connector catalog (system_admin)
+    "mcp_oauth",  # Stream MCP-OAUTH — per-user OAuth connections (own-scoped)
     "billing",  # Stream Y — platform model rate card (system_admin)
 ]
 
@@ -88,6 +89,10 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             # Stream W — platform MCP connector catalog (system_admin auto-gets
             # ADMIN via is_allowed; the endpoint also re-checks is_system_admin).
             "mcp_catalog": {"read", "write", "delete"},
+            # Stream MCP-OAUTH — per-user OAuth connections. Own-scoped: every
+            # endpoint filters by principal.subject_id, so write/delete only
+            # ever touch the caller's own connection.
+            "mcp_oauth": {"read", "write", "delete"},
             # Stream Y — platform model rate card (system_admin auto-gets ADMIN
             # via is_allowed; the endpoint also re-checks is_system_admin).
             "billing": {"read", "write", "delete"},
@@ -114,6 +119,9 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             "mcp_server": {"read"},
             # Stream W — platform MCP connector catalog
             "mcp_catalog": {"read"},
+            # Stream MCP-OAUTH — a regular user connects/manages their OWN OAuth
+            # connections (the per-user agent scenario); endpoint is subject-scoped.
+            "mcp_oauth": {"read", "write", "delete"},
             # Stream Y — platform model rate card
             "billing": {"read"},
         }
@@ -131,6 +139,8 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
         "mcp_server": {"read"},
         # Stream W — platform MCP connector catalog
         "mcp_catalog": {"read"},
+        # Stream MCP-OAUTH — viewers can see their own connection list only.
+        "mcp_oauth": {"read"},
         # Stream Y — platform model rate card
         "billing": {"read"},
     }
