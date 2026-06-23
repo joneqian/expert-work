@@ -64,8 +64,10 @@
 - 价格输入「元/百万tokens」支持小数(InputNumber step/precision),提交 ×1e6;展示 ÷1e6 + ¥。删 `microsPerTokenToUsdPerMillion`。
 - i18n 双文件重写;路径不变。
 
-## 5. 另开 PR(不在本 PR)
+## 5. 另开 PR — 租户级加价(**推迟到 M1**)
 **租户级加价**:per-tenant `markup_bps` 配置(表/字段 + API + admin-ui 租户页)+ rollup 改用 `base × (1 + tenant.markup)`。复用现有 `apply_markup`、ledger base/markup/billed 三件套。
+
+> 状态(2026-06-23 用户拍板):**推迟到 M1**,不在当前 sprint 做。过渡期 rollup `billed = base`(平台毛利 0)。`apply_markup` 已保留待复用。
 
 ## 6. 测试计划
 - protocol:字段/校验/重命名单测。
