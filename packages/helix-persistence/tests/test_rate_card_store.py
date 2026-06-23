@@ -90,9 +90,7 @@ async def test_patch_updates_price() -> None:
 async def test_patch_missing_raises() -> None:
     store = InMemoryModelRateCardStore()
     with pytest.raises(ModelRateCardNotFoundError):
-        await store.patch(
-            rate_card_id=uuid4(), patch=ModelRateCardPatch(input_per_mtok_micros=1)
-        )
+        await store.patch(rate_card_id=uuid4(), patch=ModelRateCardPatch(input_per_mtok_micros=1))
 
 
 @pytest.mark.asyncio

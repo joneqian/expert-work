@@ -80,9 +80,7 @@ def downgrade() -> None:
         _TABLE,
         sa.Column("markup_bps", sa.Integer(), nullable=False, server_default=sa.text("0")),
     )
-    op.create_check_constraint(
-        "model_rate_card_markup_bps_check", _TABLE, "markup_bps >= 0"
-    )
+    op.create_check_constraint("model_rate_card_markup_bps_check", _TABLE, "markup_bps >= 0")
     op.create_check_constraint(
         "model_rate_card_plan_tier_check",
         _TABLE,
