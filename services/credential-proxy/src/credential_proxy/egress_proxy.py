@@ -12,8 +12,16 @@ the proxy:
   the byte volumes, never payload;
 * writes one ``sandbox_egress_audit`` row per connection (audit over blocking).
 
-Only ``CONNECT`` (HTTPS) is handled here — it covers effectively every real
-external API. Plain-HTTP absolute-form proxying is a follow-up.
+Two methods are handled, both behind the **same** auth + allowlist + SSRF-pin
+gate (:meth:`EgressProxyServer._secure_connect`):
+
+* ``CONNECT`` (HTTPS) — opaque byte tunnel, the proxy never sees plaintext.
+* plain HTTP absolute-form (``GET http://host/path``) — the proxy rewrites the
+  request line to origin-form, strips proxy/hop-by-hop headers, forces
+  ``Connection: close`` (one request per connection, so a pipelined second
+  request can't smuggle past the per-request host check) and relays the body
+  and response. For plain HTTP it *does* see the bytes — there is no TLS — but
+  it neither inspects nor logs the payload (only host/port + byte volumes).
 """
 
 from __future__ import annotations
@@ -22,6 +30,7 @@ import asyncio
 import base64
 import logging
 from collections.abc import Awaitable, Callable
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from credential_proxy.audit import EgressAuditStore
@@ -40,7 +49,7 @@ _PIPE_CHUNK = 65536
 
 
 class EgressProxyServer:
-    """A CONNECT-only forward proxy with token auth + SSRF block + audit."""
+    """A forward proxy (CONNECT + plain-HTTP) with token auth + SSRF block + audit."""
 
     def __init__(
         self,
@@ -75,45 +84,54 @@ class EgressProxyServer:
         head = await _read_head(reader)
         if head is None:
             return  # client hung up / headers too large
-        method, target, headers = _parse_request(head)
+        head_bytes, rest = head
+        method, target, headers = _parse_request(head_bytes)
 
-        if method != "CONNECT":
-            await _write_status(writer, 405, "Method Not Allowed")
-            return
+        if method == "CONNECT":
+            await self._handle_connect(reader, writer, target, headers)
+        else:
+            # Anything else is treated as a plain-HTTP absolute-form proxy
+            # request (``GET http://host/path``); a non-URL target → 400.
+            await self._handle_http(reader, writer, method, target, headers, rest)
 
+    async def _secure_connect(
+        self,
+        writer: asyncio.StreamWriter,
+        headers: dict[str, str],
+        host: str,
+        port: int,
+    ) -> tuple[EgressIdentity, asyncio.StreamReader, asyncio.StreamWriter] | None:
+        """Auth + allowlist + SSRF-pin + open the upstream connection — the gate
+        shared by both the CONNECT and plain-HTTP paths. On any rejection it
+        writes the status line + an audit row and returns ``None``; on success
+        it returns ``(identity, up_reader, up_writer)``."""
         identity = self._authenticate(headers)
         if identity is None:
             # audit-eval Phase 4 — a missing/invalid/expired token has no
             # trustworthy tenant; record it as a platform-level anomaly
             # (tenant_id=None) so the rejection is still traceable.
-            auth_host, auth_port = _split_hostport(target)
-            await self._record_unauthenticated(auth_host or target, auth_port or 0)
+            await self._record_unauthenticated(host, port)
             await _write_status(
                 writer,
                 407,
                 "Proxy Authentication Required",
                 extra=('Proxy-Authenticate: Basic realm="helix-egress"',),
             )
-            return
-
-        host, port = _split_hostport(target)
-        if host is None:
-            await _write_status(writer, 400, "Bad Request")
-            return
+            return None
 
         # sandbox-egress §3.1 Phase 2 — optional per-agent host allowlist
         # (opt-in hardening). Empty allowlist = any public host (audited).
         if not host_in_allowlist(host, identity.allowlist):
             await self._record(identity, host, port, "blocked_allowlist")
             await _write_status(writer, 403, "Forbidden")
-            return
+            return None
 
         try:
             pinned_ip = self._resolve(host, port)
         except RemoteURLError as exc:
             await self._record(identity, host, port, "blocked_ssrf", error=str(exc))
             await _write_status(writer, 403, "Forbidden")
-            return
+            return None
 
         try:
             up_reader, up_writer = await asyncio.wait_for(
@@ -122,11 +140,61 @@ class EgressProxyServer:
         except (TimeoutError, OSError) as exc:
             await self._record(identity, host, port, "upstream_error", error=str(exc))
             await _write_status(writer, 502, "Bad Gateway")
-            return
+            return None
 
+        return identity, up_reader, up_writer
+
+    async def _handle_connect(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        target: str,
+        headers: dict[str, str],
+    ) -> None:
+        host, port = _split_hostport(target)
+        if host is None:
+            await _write_status(writer, 400, "Bad Request")
+            return
+        conn = await self._secure_connect(writer, headers, host, port)
+        if conn is None:
+            return
+        identity, up_reader, up_writer = conn
         await _write_raw(writer, b"HTTP/1.1 200 Connection Established\r\n\r\n")
         started = self._now()
         bytes_up, bytes_down = await _tunnel(reader, writer, up_reader, up_writer)
+        await self._record(
+            identity,
+            host,
+            port,
+            "allowed",
+            bytes_up=bytes_up,
+            bytes_down=bytes_down,
+            duration_ms=int((self._now() - started) * 1000),
+        )
+
+    async def _handle_http(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        method: str,
+        target: str,
+        headers: dict[str, str],
+        rest: bytes,
+    ) -> None:
+        parsed = _parse_http_target(target)
+        if parsed is None:
+            await _write_status(writer, 400, "Bad Request")
+            return
+        host, port, path = parsed
+        conn = await self._secure_connect(writer, headers, host, port)
+        if conn is None:
+            return
+        identity, up_reader, up_writer = conn
+        forward_head = _build_forward_head(method, path, host, port, headers)
+        started = self._now()
+        bytes_up, bytes_down = await _relay_http(
+            reader, writer, up_reader, up_writer, head=forward_head, rest=rest
+        )
         await self._record(
             identity,
             host,
@@ -198,7 +266,10 @@ class EgressProxyServer:
 # ── wire helpers ──────────────────────────────────────────────────────────────
 
 
-async def _read_head(reader: asyncio.StreamReader) -> bytes | None:
+async def _read_head(reader: asyncio.StreamReader) -> tuple[bytes, bytes] | None:
+    """Read up to the end of the request headers; return ``(head, rest)`` where
+    ``rest`` is any already-buffered bytes past the blank line (the start of a
+    plain-HTTP request body — CONNECT has none and ignores it)."""
     data = b""
     while b"\r\n\r\n" not in data:
         chunk = await reader.read(1024)
@@ -207,7 +278,8 @@ async def _read_head(reader: asyncio.StreamReader) -> bytes | None:
         data += chunk
         if len(data) > _MAX_HEAD_BYTES:
             return None
-    return data.split(b"\r\n\r\n", 1)[0]
+    head, _, rest = data.partition(b"\r\n\r\n")
+    return head, rest
 
 
 def _parse_request(head: bytes) -> tuple[str, str, dict[str, str]]:
@@ -232,6 +304,107 @@ def _split_hostport(target: str) -> tuple[str | None, int]:
         return host, int(port_raw)
     except ValueError:
         return None, 0
+
+
+def _parse_http_target(target: str) -> tuple[str, int, str] | None:
+    """Parse a plain-HTTP absolute-form target (``http://host[:port]/path?q``)
+    into ``(host, port, origin_form_path)``. Returns ``None`` for a non-``http``
+    scheme or a host-less target (origin-form / garbage) → caller 400s."""
+    parsed = urlsplit(target)
+    if parsed.scheme.lower() != "http" or not parsed.hostname:
+        return None
+    host = parsed.hostname
+    try:
+        port = parsed.port or 80
+    except ValueError:
+        return None  # malformed port in the authority
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return host, port, path
+
+
+#: Request headers the proxy must not forward verbatim: the proxy-auth token
+#: (consumed here), proxy/connection hop-by-hop controls, and ``host`` (rebuilt
+#: from the URL authority so it can't disagree with the pinned target).
+_DROP_FORWARD_HEADERS = frozenset({"proxy-authorization", "proxy-connection", "connection", "host"})
+
+
+def _header_title(key: str) -> str:
+    """Re-title a lower-cased header name (``content-type`` → ``Content-Type``).
+    Header names are case-insensitive; this only restores conventional casing."""
+    return "-".join(part.capitalize() for part in key.split("-"))
+
+
+def _build_forward_head(
+    method: str, path: str, host: str, port: int, headers: dict[str, str]
+) -> bytes:
+    """Rewrite the request to origin-form for the upstream: ``METHOD path
+    HTTP/1.1`` + a URL-derived ``Host`` + the client headers minus proxy/
+    connection controls, with ``Connection: close`` forced (one request per
+    connection)."""
+    authority = host if port == 80 else f"{host}:{port}"
+    lines = [f"{method} {path} HTTP/1.1", f"Host: {authority}"]
+    for key, value in headers.items():
+        if key in _DROP_FORWARD_HEADERS:
+            continue
+        lines.append(f"{_header_title(key)}: {value}")
+    lines.append("Connection: close")
+    lines.extend(["", ""])
+    return "\r\n".join(lines).encode("latin-1")
+
+
+async def _relay_http(
+    client_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+    up_reader: asyncio.StreamReader,
+    up_writer: asyncio.StreamWriter,
+    *,
+    head: bytes,
+    rest: bytes,
+) -> tuple[int, int]:
+    """Send the rewritten request head (+ any already-buffered body ``rest``) to
+    upstream, then relay the request body up and the response down. The response
+    completing (upstream EOF, guaranteed by the forced ``Connection: close``)
+    tears the connection down. Returns ``(bytes_up, bytes_down)``."""
+    up_writer.write(head)
+    if rest:
+        up_writer.write(rest)
+    await up_writer.drain()
+    counters = [len(head) + len(rest), 0]  # [bytes_up, bytes_down]
+
+    async def _pump_up() -> None:
+        try:
+            while True:
+                data = await client_reader.read(_PIPE_CHUNK)
+                if not data:
+                    break
+                counters[0] += len(data)
+                up_writer.write(data)
+                await up_writer.drain()
+        except (OSError, asyncio.CancelledError):
+            pass
+
+    up_task = asyncio.create_task(_pump_up())
+    try:
+        while True:
+            data = await up_reader.read(_PIPE_CHUNK)
+            if not data:
+                break
+            counters[1] += len(data)
+            client_writer.write(data)
+            await client_writer.drain()
+    except OSError:
+        # Either side dropped mid-response — expected at teardown.
+        pass
+    finally:
+        up_task.cancel()
+        try:
+            await up_task
+        except asyncio.CancelledError:
+            pass
+        await _close_writer(up_writer)
+    return counters[0], counters[1]
 
 
 def _extract_token(auth_header: str | None) -> str | None:

@@ -193,7 +193,21 @@ Fix, transparent to skill code (capability must not weaken):
 
 No skill change, no proxy change (the proxy already validates the standard
 `Proxy-Authorization`); the shim only makes urllib behave like every other
-client. Plain-HTTP egress is still out of scope (the proxy is CONNECT-only).
+client.
+
+### 3.6 Plain-HTTP egress (`http://`) — shipped
+
+The proxy now handles plain-HTTP absolute-form requests (`GET http://host/path`)
+in addition to `CONNECT`, behind the **same** auth + allowlist + SSRF-pin gate
+(`_secure_connect`). Per request it rewrites the request line to origin-form,
+drops the proxy/connection hop-by-hop headers, rebuilds `Host` from the URL
+authority (so it can't disagree with the pinned target), forces `Connection:
+close` — **one request per connection**, so a pipelined second request can't
+smuggle past the per-request host check — and relays the body + response, one
+audit row per request. For `http://` the proxy does see the bytes (no TLS), but
+it neither inspects nor logs the payload (host/port + volumes only, as for
+HTTPS). `HTTP_PROXY` was already injected into the sandbox, so no supervisor
+change was needed.
 
 ## 4. Security accounting (necessary vs. dropped)
 

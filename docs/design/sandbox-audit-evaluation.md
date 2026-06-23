@@ -94,8 +94,8 @@ governance the operator already chose**, not safety over-blocks — out of scope
    0088 makes `sandbox_egress_audit.tenant_id` nullable, so a pre-identity
    rejection (missing/invalid/expired token) is written as a `blocked_auth`
    platform anomaly (`tenant_id=NULL`, visible only in the cross-tenant view).
-   The 405 (plain-HTTP) path stays unrecorded — it is the separate plain-HTTP
-   egress capability gap, not an injection/auth event.
+   (The former 405 plain-HTTP rejection no longer exists — plain-HTTP egress is
+   now a first-class proxied + audited path; see sandbox-egress §3.6.)
 5. **Phase 5 (DONE):** no dead code remained after #754. The dormant
    `rate_limit_override` (stored but unconsumed) was **wired through** instead of
    left for M1: `RateLimiter.acquire` gained optional `capacity`/`refill_per_sec`
