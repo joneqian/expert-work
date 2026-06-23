@@ -115,6 +115,14 @@ test("system_admin imports a skill from GitHub", async ({ page }) => {
   await page.route("**/v1/me", async (route) => {
     await route.fulfill({ json: SYS_ADMIN_ME });
   });
+  // Listing fails (e.g. unreachable source) → the dialog falls back to the
+  // manual skill-path input, and a single import still works.
+  await page.route("**/v1/platform/skills/list-github-skills", async (route) => {
+    await route.fulfill({
+      status: 400,
+      json: { detail: { code: "GITHUB_IMPORT_ERROR", message: "cannot reach source" } },
+    });
+  });
   await page.route("**/v1/platform/skills/import-from-github", async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({ status: 201, json: IMPORTED });
@@ -136,6 +144,8 @@ test("system_admin imports a skill from GitHub", async ({ page }) => {
   await page.getByTestId("ps-import-github-btn").click();
   await expect(page.getByTestId("ps-github-source")).toBeVisible();
   await page.getByTestId("ps-github-source").fill("vercel-labs/skills");
+  // Listing failed → manual skill-path input is shown.
+  await expect(page.getByTestId("ps-github-skill")).toBeVisible();
   await page.getByTestId("ps-github-skill").fill("find-skills");
 
   const [req] = await Promise.all([
@@ -149,16 +159,23 @@ test("system_admin imports a skill from GitHub", async ({ page }) => {
   const body = req.postDataJSON();
   expect(body.source).toBe("vercel-labs/skills");
   expect(body.skill).toBe("find-skills");
+  // Full success → the dialog auto-closes.
+  await expect(page.getByTestId("ps-github-modal")).toBeHidden();
 });
 
-test("GitHub multi-skill repo → multi-select + batch import with results", async ({
+test("GitHub multi-skill repo → auto-listed picker + batch import with results", async ({
   page,
 }) => {
   await page.route("**/v1/me", async (route) => {
     await route.fulfill({ json: SYS_ADMIN_ME });
   });
-  // Batch route registered first; the LIFO single route below shadows the bare
-  // ``import-from-github`` path but not ``/batch``.
+  // Entering a source auto-lists its skills (no discover-click).
+  await page.route("**/v1/platform/skills/list-github-skills", async (route) => {
+    await route.fulfill({
+      status: 200,
+      json: { candidates: ["skills/find-skills", "skills/other"] },
+    });
+  });
   await page.route("**/v1/platform/skills/import-from-github/batch", async (route) => {
     await route.fulfill({
       status: 200,
@@ -167,19 +184,6 @@ test("GitHub multi-skill repo → multi-select + batch import with results", asy
           { skill: "skills/find-skills", status: "created", name: "find-skills", version: 1 },
           { skill: "skills/other", status: "failed", reason: "invalid skill content" },
         ],
-      },
-    });
-  });
-  await page.route("**/v1/platform/skills/import-from-github", async (route) => {
-    // No selector → structured ambiguous 400 with the candidate list.
-    await route.fulfill({
-      status: 400,
-      json: {
-        detail: {
-          code: "SKILL_AMBIGUOUS",
-          message: "repository contains multiple skills; pick one.",
-          candidates: ["skills/find-skills", "skills/other"],
-        },
       },
     });
   });
@@ -195,8 +199,7 @@ test("GitHub multi-skill repo → multi-select + batch import with results", asy
 
   await page.getByTestId("ps-import-github-btn").click();
   await page.getByTestId("ps-github-source").fill("vercel-labs/skills");
-  // First submit (no skill) → multi-select picker appears.
-  await page.getByTestId("ps-github-submit").click();
+  // Candidates auto-appear from the listing — no "click import to discover".
   await expect(page.getByTestId("ps-github-candidates-hint")).toBeVisible();
   await expect(page.getByTestId("ps-github-skill-select")).toBeVisible();
 
@@ -213,9 +216,57 @@ test("GitHub multi-skill repo → multi-select + batch import with results", asy
   const body = req.postDataJSON() as { skills: string[] };
   expect(body.skills.sort()).toEqual(["skills/find-skills", "skills/other"]);
 
-  // Per-skill results render (one created, one failed).
+  // Partial failure → per-skill results render and the dialog stays open.
   const results = page.getByTestId("ps-github-results");
   await expect(results).toBeVisible();
   await expect(results.getByText("skills/find-skills")).toBeVisible();
   await expect(results.getByText("invalid skill content")).toBeVisible();
+});
+
+test("GitHub batch import auto-closes the dialog on full success", async ({ page }) => {
+  await page.route("**/v1/me", async (route) => {
+    await route.fulfill({ json: SYS_ADMIN_ME });
+  });
+  await page.route("**/v1/platform/skills/list-github-skills", async (route) => {
+    await route.fulfill({
+      status: 200,
+      json: { candidates: ["skills/a", "skills/b"] },
+    });
+  });
+  await page.route("**/v1/platform/skills/import-from-github/batch", async (route) => {
+    await route.fulfill({
+      status: 200,
+      json: {
+        results: [
+          { skill: "skills/a", status: "created", name: "a", version: 1 },
+          { skill: "skills/b", status: "created", name: "b", version: 1 },
+        ],
+      },
+    });
+  });
+  await page.route("**/v1/platform/skills*", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: SKILLS });
+      return;
+    }
+    await route.fallback();
+  });
+  await login(page);
+  await page.goto("/settings/platform-skills");
+
+  await page.getByTestId("ps-import-github-btn").click();
+  await page.getByTestId("ps-github-source").fill("owner/repo");
+  await expect(page.getByTestId("ps-github-skill-select")).toBeVisible();
+  await page.getByTestId("ps-github-select-all").click();
+  await Promise.all([
+    page.waitForRequest(
+      (r) =>
+        r.url().includes("/v1/platform/skills/import-from-github/batch") &&
+        r.method() === "POST",
+    ),
+    page.getByTestId("ps-github-submit").click(),
+  ]);
+
+  // Full success → the dialog auto-closes (no leftover results panel).
+  await expect(page.getByTestId("ps-github-modal")).toBeHidden();
 });

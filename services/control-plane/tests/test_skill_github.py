@@ -9,6 +9,7 @@ import pytest
 
 from control_plane.api._skill_github import (
     GithubImportError,
+    list_skill_candidates,
     resolve_github_source,
     select_skill_zip,
 )
@@ -156,6 +157,30 @@ def test_select_multi_skill_without_selector_errors_with_candidates() -> None:
         select_skill_zip(archive, skill=None)
     assert ei.value.status == 400
     assert ei.value.candidates == ["skills/a", "skills/b"]
+
+
+def test_list_candidates_multi_skill() -> None:
+    archive = _github_archive(
+        "repo",
+        "main",
+        {
+            "skills/b/SKILL.md": _skill_md("b"),
+            "skills/a/SKILL.md": _skill_md("a"),
+        },
+    )
+    assert list_skill_candidates(archive) == ["skills/a", "skills/b"]
+
+
+def test_list_candidates_single_skill() -> None:
+    archive = _github_archive("repo", "main", {"my-skill/SKILL.md": _skill_md("my-skill")})
+    assert list_skill_candidates(archive) == ["my-skill"]
+
+
+def test_list_candidates_no_skill_md_404() -> None:
+    archive = _github_archive("repo", "main", {"README.md": "nothing"})
+    with pytest.raises(GithubImportError) as ei:
+        list_skill_candidates(archive)
+    assert ei.value.status == 404
 
 
 def test_select_missing_skill_404() -> None:

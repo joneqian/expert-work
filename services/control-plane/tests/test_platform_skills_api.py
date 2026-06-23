@@ -1075,6 +1075,59 @@ async def test_import_from_github_multi_skill_returns_candidates(ctx: _Ctx, monk
 
 
 @pytest.mark.asyncio
+async def test_list_github_skills_returns_candidates(ctx: _Ctx, monkeypatch) -> None:
+    archive = _github_archive(
+        "skills",
+        "HEAD",
+        {
+            "skills/find-skills/SKILL.md": _skill_md("find-skills"),
+            "skills/other/SKILL.md": _skill_md("other"),
+        },
+    )
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+
+    # Discovery without import — the dialog populates its picker from this.
+    resp = await ctx.client.post(
+        "/v1/platform/skills/list-github-skills",
+        json={"source": "vercel-labs/skills"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["candidates"] == ["skills/find-skills", "skills/other"]
+
+
+@pytest.mark.asyncio
+async def test_list_github_skills_single(ctx: _Ctx, monkeypatch) -> None:
+    archive = _github_archive("repo", "HEAD", {"my-skill/SKILL.md": _skill_md("my-skill")})
+
+    async def _fake_download(src, *, client=None):
+        return archive
+
+    monkeypatch.setattr(_skill_github, "download_github_archive", _fake_download)
+    resp = await ctx.client.post(
+        "/v1/platform/skills/list-github-skills",
+        json={"source": "owner/repo"},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["candidates"] == ["my-skill"]
+
+
+@pytest.mark.asyncio
+async def test_list_github_skills_tenant_principal_forbidden(ctx: _Ctx) -> None:
+    resp = await ctx.client.post(
+        "/v1/platform/skills/list-github-skills",
+        json={"source": "vercel-labs/skills"},
+        headers=ctx.tenant_headers,
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_import_from_github_tenant_principal_forbidden(ctx: _Ctx) -> None:
     resp = await ctx.client.post(
         "/v1/platform/skills/import-from-github",

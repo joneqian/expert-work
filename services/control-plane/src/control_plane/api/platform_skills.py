@@ -129,6 +129,19 @@ class _ImportFromGithubBody(BaseModel):
     ref: str | None = Field(default=None, max_length=256)
 
 
+class _ListGithubSkillsBody(BaseModel):
+    """``POST /v1/platform/skills/list-github-skills`` request body.
+
+    Discover what skills a source contains WITHOUT importing — drives the
+    import dialog's picker so the operator sees the available skills as soon as
+    a source is entered (no import-to-discover round-trip). Same ``source`` /
+    ``ref`` semantics as the import endpoint; no ``skill`` selector.
+    """
+
+    source: str = Field(min_length=1, max_length=512)
+    ref: str | None = Field(default=None, max_length=256)
+
+
 class _BatchImportFromGithubBody(BaseModel):
     """``POST /v1/platform/skills/import-from-github/batch`` request body.
 
@@ -643,6 +656,32 @@ def build_platform_skills_router() -> APIRouter:
             source="github_import",
             origin=origin,
         )
+
+    @router.post("/list-github-skills", response_model=None)
+    async def list_github_skills(
+        body: _ListGithubSkillsBody,
+        request: Request,
+    ) -> JSONResponse:
+        """List the importable skill folders in a GitHub source — no import.
+
+        system_admin only. Resolves + downloads the repo archive (same fixed
+        ``codeload.github.com`` host as import) and returns the candidate skill
+        paths so the UI can populate its picker before the operator commits to
+        an import. A single-skill repo returns one candidate; a multi-skill repo
+        returns all.
+        """
+        _principal(request)
+        try:
+            src = _skill_github.resolve_github_source(body.source, ref=body.ref)
+            archive = await _skill_github.download_github_archive(src)
+            candidates = _skill_github.list_skill_candidates(archive)
+        except _skill_github.GithubImportError as exc:
+            raise HTTPException(
+                status_code=exc.status,
+                detail={"code": "GITHUB_IMPORT_ERROR", "message": exc.message},
+            ) from exc
+        # Raw (non-enveloped) body — matches the import endpoints' convention.
+        return JSONResponse(content={"candidates": candidates})
 
     @router.post("/import-from-github/batch", response_model=None)
     async def import_platform_skills_from_github_batch(

@@ -208,6 +208,22 @@ def _skill_entries(archive: zipfile.ZipFile) -> list[_SkillEntry]:
     return entries
 
 
+def list_skill_candidates(archive_bytes: bytes) -> list[str]:
+    """Every importable skill folder in the archive, as sorted relpaths
+    (``skills/find-skills``; ``"."`` for a repo-root skill). Powers the UI's
+    "list before import" picker — discover what a source contains without
+    importing. Mirrors :func:`select_skill_zip`'s candidate listing."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
+    except zipfile.BadZipFile as exc:
+        raise GithubImportError("downloaded archive is not a valid zip") from exc
+    with archive:
+        entries = _skill_entries(archive)
+        if not entries:
+            raise GithubImportError("no SKILL.md found in the repository", status=404)
+        return sorted(e.relpath or "." for e in entries)
+
+
 def select_skill_zip(archive_bytes: bytes, *, skill: str | None) -> bytes:
     """Scan the GitHub archive, pick the requested skill folder, and repack it
     as a root-anchored ``.skill`` zip (``SKILL.md`` + supporting files at root).

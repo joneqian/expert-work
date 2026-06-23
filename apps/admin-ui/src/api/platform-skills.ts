@@ -198,6 +198,30 @@ export async function importPlatformSkillFromGithub(
   return response.data;
 }
 
+/** ``POST /v1/platform/skills/list-github-skills`` request body — discover what
+ *  skills a source contains without importing. */
+export interface ListGithubSkillsBody {
+  source: string;
+  ref?: string;
+}
+
+export interface ListGithubSkillsResponse {
+  candidates: string[];
+}
+
+/** ``POST /v1/platform/skills/list-github-skills`` — list the importable skill
+ *  folders in a source so the picker can populate before the operator commits
+ *  to an import. A single-skill repo returns one candidate. */
+export async function listGithubSkills(
+  body: ListGithubSkillsBody,
+): Promise<ListGithubSkillsResponse> {
+  const response = await apiClient.post<ListGithubSkillsResponse>(
+    "/v1/platform/skills/list-github-skills",
+    body,
+  );
+  return response.data;
+}
+
 /** ``POST /v1/platform/skills/import-from-github/batch`` request body —
  *  ``skills`` is a list of folder paths/basenames to import in one pass. */
 export interface BatchImportFromGithubBody {

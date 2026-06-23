@@ -38,6 +38,7 @@ import {
   importPlatformSkill,
   importPlatformSkillFromGithub,
   importPlatformSkillsFromGithubBatch,
+  listGithubSkills,
   listPlatformSkills,
   patchPlatformSkill,
   type BatchImportResult,
@@ -87,10 +88,15 @@ export function SettingsPlatformSkills() {
   const [ghSkill, setGhSkill] = useState("");
   const [ghRef, setGhRef] = useState("");
   const [ghBusy, setGhBusy] = useState(false);
-  // Populated when an import hits a multi-skill repo (SKILL_AMBIGUOUS) → rendered
-  // as a multi-select so the operator picks one or many (batch import).
+  // Auto-populated (debounced) as soon as a source is entered, via the
+  // list-github-skills probe — the operator picks from the multi-select without
+  // an import-to-discover round-trip. A single-skill repo lists one candidate
+  // (pre-selected). ``ghListing`` drives the picker's loading state; the ref
+  // discards stale responses when the source changes mid-flight.
   const [ghCandidates, setGhCandidates] = useState<string[]>([]);
   const [ghSelected, setGhSelected] = useState<string[]>([]);
+  const [ghListing, setGhListing] = useState(false);
+  const ghListReqId = useRef(0);
   // Per-skill outcomes of the last batch import (shown in the modal).
   const [ghResults, setGhResults] = useState<BatchImportResult[] | null>(null);
 
@@ -169,7 +175,43 @@ export function SettingsPlatformSkills() {
     setGhCandidates([]);
     setGhSelected([]);
     setGhResults(null);
+    ghListReqId.current += 1; // cancel any in-flight listing
   }, []);
+
+  // Bug fix — list the source's skills as soon as it's entered (debounced), so
+  // the picker is populated without clicking "import" first. A single candidate
+  // is pre-selected; failure falls back to the manual skill-path input.
+  useEffect(() => {
+    const source = ghSource.trim();
+    if (!ghOpen || source.length === 0) {
+      setGhListing(false);
+      return;
+    }
+    const reqId = (ghListReqId.current += 1);
+    setGhListing(true);
+    const handle = setTimeout(() => {
+      void (async () => {
+        try {
+          const { candidates } = await listGithubSkills({
+            source,
+            ref: ghRef.trim() || undefined,
+          });
+          if (reqId !== ghListReqId.current) return; // stale — a newer source won
+          setGhCandidates(candidates);
+          setGhSelected(candidates.length === 1 ? candidates : []);
+          setGhResults(null);
+        } catch {
+          if (reqId !== ghListReqId.current) return;
+          // Listing failed (bad source / private repo) → fall back to the
+          // manual skill-path input; the import attempt surfaces the real error.
+          setGhCandidates([]);
+        } finally {
+          if (reqId === ghListReqId.current) setGhListing(false);
+        }
+      })();
+    }, 500);
+    return () => clearTimeout(handle);
+  }, [ghOpen, ghSource, ghRef]);
 
   // Batch path: a multi-skill repo's candidates are shown, the operator picks a
   // subset, and we import them in one request (partial success).
@@ -183,17 +225,24 @@ export function SettingsPlatformSkills() {
         skills: ghSelected,
         ref: ghRef.trim() || undefined,
       });
-      setGhResults(results);
       const ok = results.filter((r) => r.status !== "failed").length;
       const failed = results.length - ok;
       message.success(t("platform_skills.github_batch_done", { ok, failed }));
       void refresh();
+      if (failed === 0) {
+        // Bug fix — auto-close on full success. On partial failure keep the
+        // modal open + show per-skill results so the operator can retry.
+        setGhOpen(false);
+        resetGhForm();
+      } else {
+        setGhResults(results);
+      }
     } catch (err) {
       message.error(errText(err));
     } finally {
       setGhBusy(false);
     }
-  }, [errText, ghRef, ghSelected, ghSource, message, refresh, t]);
+  }, [errText, ghRef, ghSelected, ghSource, message, refresh, resetGhForm, t]);
 
   const onGithubImport = useCallback(async () => {
     const source = ghSource.trim();
@@ -501,6 +550,7 @@ export function SettingsPlatformSkills() {
               <Select
                 mode="multiple"
                 showSearch
+                loading={ghListing}
                 value={ghSelected}
                 onChange={(v) => setGhSelected(v)}
                 placeholder={t("platform_skills.github_pick_ph")}
