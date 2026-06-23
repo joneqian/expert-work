@@ -168,6 +168,29 @@ class _PatchPlatformSkillBody(BaseModel):
     pinned: bool | None = None
 
 
+class _BatchFilter(BaseModel):
+    """Selector for "apply to ALL matching" bulk edits (server-side, across
+    pages). Same fields as the list query; AND-combined."""
+
+    status: SkillStatus | None = None
+    category: str | None = Field(default=None, max_length=128)
+    q: str | None = Field(default=None, max_length=200)
+
+
+class _BatchPlatformSkillsBody(BaseModel):
+    """``POST /v1/platform/skills/batch`` request body.
+
+    The patch (``set_status`` and/or ``set_pinned``) is applied to exactly one
+    selector: ``ids`` (the page's checkbox selection) OR ``filter`` (every
+    NULL-tenant skill matching it). Validated in the handler.
+    """
+
+    set_status: SkillStatus | None = None
+    set_pinned: bool | None = None
+    ids: list[UUID] | None = Field(default=None, max_length=_MAX_BATCH_SKILLS)
+    filter: _BatchFilter | None = None
+
+
 def _require_system_admin(principal: Principal) -> None:
     if not principal.is_system_admin:
         raise HTTPException(
@@ -826,22 +849,73 @@ def build_platform_skills_router() -> APIRouter:
         request: Request,
         status: Annotated[SkillStatus | None, Query()] = None,
         category: Annotated[str | None, Query()] = None,
-        cursor: Annotated[UUID | None, Query()] = None,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ) -> JSONResponse:
         _principal(request)
         store = _get_skill_store(request)
         async with bypass_rls_session():
-            rows, next_cursor = await store.list_platform_skills(
-                status=status, category=category, cursor=cursor, limit=limit
+            rows, total = await store.list_platform_skills(
+                status=status, category=category, q=q, offset=offset, limit=limit
             )
         return JSONResponse(
             status_code=200,
-            content={
-                "items": [_skill_dict(r) for r in rows],
-                "next_cursor": str(next_cursor) if next_cursor is not None else None,
+            content={"items": [_skill_dict(r) for r in rows], "total": total},
+        )
+
+    @router.post("/batch", response_model=None)
+    async def batch_update_platform_skills(
+        body: _BatchPlatformSkillsBody,
+        request: Request,
+    ) -> JSONResponse:
+        """Bulk lock/unlock/archive/activate platform skills (system_admin).
+
+        Applies the patch to either an explicit ``ids`` list (a page's selection)
+        or to every skill matching ``filter`` (the "select all N matching" path).
+        Returns ``{updated}`` — the affected row count — and writes a single
+        audit row (no per-row spam)."""
+        principal = _principal(request)
+        store = _get_skill_store(request)
+        audit = _get_audit(request)
+        if body.set_status is None and body.set_pinned is None:
+            raise HTTPException(
+                status_code=422,
+                detail="batch body must set at least one of: set_status, set_pinned",
+            )
+        has_ids = body.ids is not None
+        has_filter = body.filter is not None
+        if has_ids == has_filter:
+            raise HTTPException(
+                status_code=422, detail="batch body requires exactly one of: ids, filter"
+            )
+        async with bypass_rls_session():
+            updated = await store.bulk_update_platform_skills(
+                ids=body.ids,
+                filter_status=body.filter.status if body.filter else None,
+                filter_category=body.filter.category if body.filter else None,
+                filter_q=body.filter.q if body.filter else None,
+                set_status=body.set_status,
+                set_pinned=body.set_pinned,
+            )
+        await audit_emit(
+            audit,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.subject_id,
+            action=AuditAction.SKILL_STATUS_CHANGE,
+            resource_type="skill",
+            resource_id="batch",
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={
+                "scope": "platform",
+                "mode": "ids" if has_ids else "filter",
+                "updated": updated,
+                "set_status": body.set_status.value if body.set_status else None,
+                "set_pinned": body.set_pinned,
             },
         )
+        return JSONResponse(status_code=200, content={"updated": updated})
 
     @router.get("/{skill_id}", response_model=None)
     async def get_platform_skill(

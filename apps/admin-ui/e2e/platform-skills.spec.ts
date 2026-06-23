@@ -44,7 +44,7 @@ const SKILLS = {
       updated_at: "2026-05-26T10:00:00Z",
     },
   ],
-  next_cursor: null,
+  total: 1,
 };
 
 async function login(page: import("@playwright/test").Page): Promise<void> {
@@ -271,27 +271,29 @@ test("GitHub batch import auto-closes the dialog on full success", async ({ page
   await expect(page.getByTestId("ps-github-modal")).toBeHidden();
 });
 
-test("system_admin batch-locks selected skills from the toolbar", async ({ page }) => {
+test("system_admin batch-locks selected skills via the server-side batch endpoint", async ({
+  page,
+}) => {
   const TWO = {
-    items: [
-      SKILLS.items[0],
-      { ...SKILLS.items[0], id: "psk-2", name: "code_search" },
-    ],
-    next_cursor: null,
+    items: [SKILLS.items[0], { ...SKILLS.items[0], id: "psk-2", name: "code_search" }],
+    total: 2,
   };
   await page.route("**/v1/me", async (route) => {
     await route.fulfill({ json: SYS_ADMIN_ME });
   });
-  await page.route("**/v1/platform/skills/*", async (route) => {
-    if (route.request().method() === "PATCH") {
-      await route.fulfill({ status: 200, json: { ...SKILLS.items[0], pinned: true } });
+  // Routes are LIFO — register the list (broad) first, then the batch route so
+  // the more specific ``/batch`` handler wins for the POST.
+  await page.route("**/v1/platform/skills*", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: TWO });
       return;
     }
     await route.fallback();
   });
-  await page.route("**/v1/platform/skills", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({ json: TWO });
+  // One atomic batch call instead of a PATCH per row.
+  await page.route("**/v1/platform/skills/batch", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ status: 200, json: { updated: 2 } });
       return;
     }
     await route.fallback();
@@ -306,14 +308,55 @@ test("system_admin batch-locks selected skills from the toolbar", async ({ page 
   // Guard: labels must resolve, not show raw i18n keys (regression #769).
   await expect(page.getByTestId("ps-batch-lock")).not.toContainText("platform_skills");
 
-  const patched: string[] = [];
-  page.on("request", (r) => {
-    if (r.method() === "PATCH" && r.url().includes("/v1/platform/skills/")) {
-      patched.push(r.url());
-    }
-  });
-  await page.getByTestId("ps-batch-lock").click();
-  // Batch completes → selection clears → toolbar hides; one PATCH per row.
+  const [req] = await Promise.all([
+    page.waitForRequest(
+      (r) =>
+        r.url().includes("/v1/platform/skills/batch") && r.method() === "POST",
+    ),
+    page.getByTestId("ps-batch-lock").click(),
+  ]);
+  const body = req.postDataJSON() as { set_pinned?: boolean; ids?: string[] };
+  // Page selection → ``ids`` scope; lock sets pinned=true.
+  expect(body.set_pinned).toBe(true);
+  expect(body.ids?.sort()).toEqual(["psk-1", "psk-2"]);
+  // Batch completes → selection clears → toolbar hides.
   await expect(page.getByTestId("ps-batch-toolbar")).toBeHidden();
-  expect(patched.length).toBe(2);
+});
+
+test("search narrows the platform skill list (server-side q)", async ({ page }) => {
+  const TWO = {
+    items: [SKILLS.items[0], { ...SKILLS.items[0], id: "psk-2", name: "code_search" }],
+    total: 2,
+  };
+  const FILTERED = { items: [SKILLS.items[0]], total: 1 };
+  await page.route("**/v1/me", async (route) => {
+    await route.fulfill({ json: SYS_ADMIN_ME });
+  });
+  await page.route("**/v1/platform/skills*", async (route) => {
+    if (route.request().method() === "GET") {
+      const url = new URL(route.request().url());
+      const q = url.searchParams.get("q");
+      await route.fulfill({ json: q ? FILTERED : TWO });
+      return;
+    }
+    await route.fallback();
+  });
+  await login(page);
+  await page.goto("/settings/platform-skills");
+  await expect(page.getByTestId("ps-table")).toBeVisible();
+  await expect(page.getByText("code_search", { exact: true })).toBeVisible();
+
+  // Typing a query refetches with ``q`` → the backend returns the narrowed set.
+  const [req] = await Promise.all([
+    page.waitForRequest(
+      (r) =>
+        r.url().includes("/v1/platform/skills") &&
+        r.method() === "GET" &&
+        new URL(r.url()).searchParams.get("q") === "web",
+    ),
+    page.getByTestId("ps-search").fill("web"),
+  ]);
+  expect(new URL(req.url()).searchParams.get("q")).toBe("web");
+  await expect(page.getByText("code_search", { exact: true })).toBeHidden();
+  await expect(page.getByText("web_search", { exact: true })).toBeVisible();
 });

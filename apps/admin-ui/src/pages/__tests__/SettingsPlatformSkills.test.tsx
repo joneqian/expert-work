@@ -33,7 +33,12 @@ function makeJwt(payload: Record<string, unknown>): string {
 
 interface RouteHandler {
   match: (url: string, method: string) => boolean;
-  respond: (config: { data?: unknown; url: string; method: string }) => unknown;
+  respond: (config: {
+    data?: unknown;
+    url: string;
+    method: string;
+    params?: Record<string, unknown>;
+  }) => unknown;
   status?: number;
 }
 
@@ -51,7 +56,13 @@ function installAdapter(handlers: RouteHandler[]) {
       });
     }
     return Promise.resolve({
-      data: handler.respond({ data: config.data, url, method }) ?? {},
+      data:
+        handler.respond({
+          data: config.data,
+          url,
+          method,
+          params: config.params as Record<string, unknown> | undefined,
+        }) ?? {},
       status: handler.status ?? 200,
       statusText: "OK",
       headers: {},
@@ -128,7 +139,7 @@ describe("SettingsPlatformSkills page", () => {
     installAdapter([
       {
         match: (u) => u.endsWith("/platform/skills"),
-        respond: () => raw({ items: [], next_cursor: null }),
+        respond: () => raw({ items: [], total: 0 }),
       },
     ]);
     renderPage(["admin"]);
@@ -140,7 +151,7 @@ describe("SettingsPlatformSkills page", () => {
     installAdapter([
       {
         match: (u) => u.endsWith("/platform/skills"),
-        respond: () => raw({ items: [SKILL], next_cursor: null }),
+        respond: () => raw({ items: [SKILL], total: 1 }),
       },
     ]);
     renderPage(["system_admin"]);
@@ -150,19 +161,19 @@ describe("SettingsPlatformSkills page", () => {
     expect(screen.getByTestId("ps-pin-toggle-psk-1")).toBeInTheDocument();
   });
 
-  it("batch-locks the selected skills from the toolbar", async () => {
-    const patched: Array<Record<string, unknown>> = [];
+  it("batch-locks the selected skills via the server-side batch endpoint", async () => {
+    const batched: Array<Record<string, unknown>> = [];
     installAdapter([
       {
-        match: (u, m) => u.includes("/platform/skills/") && m === "patch",
+        match: (u, m) => u.endsWith("/platform/skills/batch") && m === "post",
         respond: ({ data }) => {
-          patched.push(typeof data === "string" ? JSON.parse(data) : (data as object));
-          return raw({ ...SKILL, pinned: true });
+          batched.push(typeof data === "string" ? JSON.parse(data) : (data as object));
+          return raw({ updated: 2 });
         },
       },
       {
         match: (u) => u.endsWith("/platform/skills"),
-        respond: () => raw({ items: [SKILL, SKILL2], next_cursor: null }),
+        respond: () => raw({ items: [SKILL, SKILL2], total: 2 }),
       },
     ]);
     renderPage(["system_admin"]);
@@ -172,23 +183,113 @@ describe("SettingsPlatformSkills page", () => {
     const checkboxes = screen.getAllByRole("checkbox");
     await userEvent.click(checkboxes[0]);
     await waitFor(() => expect(screen.getByTestId("ps-batch-toolbar")).toBeInTheDocument());
-    // Labels must resolve, not render raw i18n keys (regression #769).
+    // GUARD: labels must resolve, not render raw i18n keys (regression #769).
     expect(screen.getByTestId("ps-batch-lock").textContent).not.toContain("platform_skills");
 
     await userEvent.click(screen.getByTestId("ps-batch-lock"));
-    await waitFor(() => expect(patched.length).toBe(2));
-    expect(patched.every((b) => b.pinned === true)).toBe(true);
+    // One server-side batch call carrying the page selection as ``ids``.
+    await waitFor(() => expect(batched.length).toBe(1));
+    expect(batched[0].set_pinned).toBe(true);
+    expect(batched[0].ids).toEqual(["psk-1", "psk-2"]);
+    expect(batched[0].filter).toBeUndefined();
     // Toolbar clears after the batch completes.
     await waitFor(() =>
       expect(screen.queryByTestId("ps-batch-toolbar")).not.toBeInTheDocument(),
     );
   });
 
+  it("search input refetches the list with the q param (debounced)", async () => {
+    const listParams: Array<Record<string, unknown>> = [];
+    installAdapter([
+      {
+        match: (u, m) => u.endsWith("/platform/skills") && m === "get",
+        respond: ({ params }) => {
+          listParams.push(params ?? {});
+          return raw({ items: [SKILL], total: 1 });
+        },
+      },
+    ]);
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+    listParams.length = 0; // ignore the initial load
+
+    // antd ``Input.Search`` forwards data-testid to the underlying input.
+    await userEvent.type(screen.getByTestId("ps-search"), "web");
+    await waitFor(() => expect(listParams.some((p) => p.q === "web")).toBe(true));
+  });
+
+  it("pagination change refetches with the new offset", async () => {
+    const listParams: Array<Record<string, unknown>> = [];
+    const many = Array.from({ length: 20 }, (_, i) => ({
+      ...SKILL,
+      id: `psk-${i}`,
+      name: `skill_${i}`,
+    }));
+    installAdapter([
+      {
+        match: (u, m) => u.endsWith("/platform/skills") && m === "get",
+        respond: ({ params }) => {
+          listParams.push(params ?? {});
+          return raw({ items: many, total: 45 });
+        },
+      },
+    ]);
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+    listParams.length = 0;
+
+    // Page 2 (default pageSize 20) → offset 20.
+    await userEvent.click(screen.getByTitle("2"));
+    await waitFor(() => expect(listParams.some((p) => p.offset === 20)).toBe(true));
+  });
+
+  it("'apply to all matching' posts a filter (not ids) to the batch endpoint", async () => {
+    const batched: Array<Record<string, unknown>> = [];
+    // total (5) > rows on page (2) AND a search is active → "all matching" shows.
+    installAdapter([
+      {
+        match: (u, m) => u.endsWith("/platform/skills/batch") && m === "post",
+        respond: ({ data }) => {
+          batched.push(typeof data === "string" ? JSON.parse(data) : (data as object));
+          return raw({ updated: 5 });
+        },
+      },
+      {
+        match: (u, m) => u.endsWith("/platform/skills") && m === "get",
+        respond: () => raw({ items: [SKILL, SKILL2], total: 5 }),
+      },
+    ]);
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+
+    // Activate a search so the "all matching" scope becomes available.
+    await userEvent.type(screen.getByTestId("ps-search"), "web");
+
+    // Select the page rows → toolbar appears.
+    const checkboxes = screen.getAllByRole("checkbox");
+    await userEvent.click(checkboxes[0]);
+    await waitFor(() =>
+      expect(screen.getByTestId("ps-batch-all-matching")).toBeInTheDocument(),
+    );
+
+    // Toggle "apply to all N matching" (antd forwards data-testid onto the
+    // checkbox <input> itself), then archive.
+    const allMatchingBox = screen.getByTestId("ps-batch-all-matching");
+    await userEvent.click(allMatchingBox);
+    await waitFor(() => expect(allMatchingBox).toBeChecked());
+    await userEvent.click(screen.getByTestId("ps-batch-archive"));
+
+    await waitFor(() => expect(batched.length).toBe(1));
+    expect(batched[0].set_status).toBe("archived");
+    expect(batched[0].ids).toBeUndefined();
+    expect(batched[0].filter).toMatchObject({ q: "web" });
+  });
+
   it("shows the guided empty state for an admin with no skills", async () => {
     installAdapter([
       {
         match: (u) => u.endsWith("/platform/skills"),
-        respond: () => raw({ items: [], next_cursor: null }),
+        respond: () => raw({ items: [], total: 0 }),
       },
     ]);
     renderPage(["system_admin"]);
@@ -213,7 +314,7 @@ describe("SettingsPlatformSkills page", () => {
     installAdapter([
       {
         match: (u, m) => u.endsWith("/platform/skills") && m === "get",
-        respond: () => raw({ items: [SKILL], next_cursor: null }),
+        respond: () => raw({ items: [SKILL], total: 1 }),
       },
     ]);
     renderPage(["system_admin"]);
@@ -240,7 +341,7 @@ describe("SettingsPlatformSkills page", () => {
         respond: () => {
           listCalls += 1;
           // First load empty; after import the refreshed list has the skill.
-          return raw({ items: importPosted ? [SKILL] : [], next_cursor: null });
+          return raw({ items: importPosted ? [SKILL] : [], total: importPosted ? 1 : 0 });
         },
       },
     ]);
@@ -265,7 +366,7 @@ describe("SettingsPlatformSkills page", () => {
     installAdapter([
       {
         match: (u, m) => u.endsWith("/platform/skills") && m === "get",
-        respond: () => raw({ items: [SKILL], next_cursor: null }),
+        respond: () => raw({ items: [SKILL], total: 1 }),
       },
     ]);
     setStoredToken(makeJwt({ sub: "u1", tenant_id: TENANT, roles: ["system_admin"] }));

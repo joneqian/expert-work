@@ -692,11 +692,69 @@ class InMemorySkillStore(SkillStore):
         *,
         status: SkillStatus | None = None,
         category: str | None = None,
-        cursor: UUID | None = None,
+        q: str | None = None,
+        offset: int = 0,
         limit: int = 50,
-    ) -> tuple[list[Skill], UUID | None]:
+    ) -> tuple[list[Skill], int]:
+        rows = self._platform_matches(
+            status=status, category=category, q=q
+        )
+        # created_at DESC, id ASC (mirror the SQL ordering).
+        rows.sort(key=lambda r: str(r.id))
+        rows.sort(key=lambda r: r.created_at, reverse=True)
+        return rows[offset : offset + limit], len(rows)
+
+    def _platform_matches(
+        self, *, status: SkillStatus | None, category: str | None, q: str | None
+    ) -> list[Skill]:
         rows = [r for r in self._skills.values() if r.tenant_id is None]
-        return _paginate_skills(rows, status=status, category=category, cursor=cursor, limit=limit)
+        if status is not None:
+            rows = [r for r in rows if r.status == status]
+        if category is not None:
+            rows = [r for r in rows if r.category == category]
+        if q:
+            ql = q.lower()
+            rows = [
+                r
+                for r in rows
+                if ql in (r.name or "").lower() or ql in (r.description or "").lower()
+            ]
+        return rows
+
+    async def bulk_update_platform_skills(
+        self,
+        *,
+        ids: Sequence[UUID] | None = None,
+        filter_status: SkillStatus | None = None,
+        filter_category: str | None = None,
+        filter_q: str | None = None,
+        set_status: SkillStatus | None = None,
+        set_pinned: bool | None = None,
+    ) -> int:
+        if ids is None and filter_status is None and filter_category is None and filter_q is None:
+            raise ValueError("bulk_update_platform_skills requires ids or a filter")
+        if set_status is None and set_pinned is None:
+            raise ValueError("bulk_update_platform_skills requires set_status or set_pinned")
+        if ids is not None:
+            targets = [
+                self._skills[i]
+                for i in ids
+                if i in self._skills and self._skills[i].tenant_id is None
+            ]
+        else:
+            targets = self._platform_matches(
+                status=filter_status, category=filter_category, q=filter_q
+            )
+        now = datetime.now(UTC)
+        update: dict[str, Any] = {"updated_at": now}
+        if set_status is not None:
+            update["status"] = set_status
+            update["state_changed_at"] = now
+        if set_pinned is not None:
+            update["pinned"] = set_pinned
+        for row in targets:
+            self._skills[row.id] = row.model_copy(update=update)
+        return len(targets)
 
     async def add_platform_version(
         self,

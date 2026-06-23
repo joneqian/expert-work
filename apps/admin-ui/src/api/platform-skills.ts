@@ -60,13 +60,17 @@ export interface PlatformSkillVersion {
 export interface ListPlatformSkillsParams {
   status?: PlatformSkillStatus;
   category?: string;
-  cursor?: string | null;
+  /** Case-insensitive substring over name + description. */
+  q?: string;
+  /** Offset-based pagination (server-side). */
+  offset?: number;
   limit?: number;
 }
 
 export interface PlatformSkillList {
   items: PlatformSkill[];
-  next_cursor: string | null;
+  /** Total rows matching the filter (drives the table's page count). */
+  total: number;
 }
 
 export interface CreatePlatformSkillBody {
@@ -118,13 +122,13 @@ export interface ImportPlatformSkillResponse {
 // envelope these routes); see the module header. HTTP errors are turned into
 // ``ApiError`` by the shared response interceptor.
 
-/** ``GET /v1/platform/skills`` — cursor-paginated platform skill list. */
+/** ``GET /v1/platform/skills`` — offset-paginated platform skill list. */
 export async function listPlatformSkills(
   params: ListPlatformSkillsParams = {},
 ): Promise<PlatformSkillList> {
-  const { status, category, cursor, limit } = params;
+  const { status, category, q, offset, limit } = params;
   const response = await apiClient.get<PlatformSkillList>("/v1/platform/skills", {
-    params: { status, category, cursor: cursor ?? undefined, limit },
+    params: { status, category, q: q || undefined, offset, limit },
   });
   return response.data;
 }
@@ -266,6 +270,35 @@ export async function patchPlatformSkill(
 ): Promise<PlatformSkill> {
   const response = await apiClient.patch<PlatformSkill>(
     `/v1/platform/skills/${encodeURIComponent(id)}`,
+    body,
+  );
+  return response.data;
+}
+
+/** Selector for the "apply to ALL matching" bulk path (across pages). */
+export interface BulkPlatformSkillsFilter {
+  status?: PlatformSkillStatus;
+  category?: string;
+  q?: string;
+}
+
+/** ``POST /v1/platform/skills/batch`` body — patch (set_status / set_pinned)
+ *  over exactly one selector: ``ids`` (page selection) or ``filter`` (all
+ *  matching). */
+export interface BulkUpdatePlatformSkillsBody {
+  set_status?: PlatformSkillStatus;
+  set_pinned?: boolean;
+  ids?: string[];
+  filter?: BulkPlatformSkillsFilter;
+}
+
+/** ``POST /v1/platform/skills/batch`` — bulk lock/unlock/archive/activate.
+ *  Returns the affected row count. */
+export async function bulkUpdatePlatformSkills(
+  body: BulkUpdatePlatformSkillsBody,
+): Promise<{ updated: number }> {
+  const response = await apiClient.post<{ updated: number }>(
+    "/v1/platform/skills/batch",
     body,
   );
   return response.data;

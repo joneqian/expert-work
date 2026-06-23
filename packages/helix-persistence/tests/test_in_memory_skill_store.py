@@ -417,3 +417,80 @@ async def test_list_skills_filters_by_created_by_agent_name() -> None:
     # Cross-tenant variant honours the same filter.
     cross, _ = await store.list_skills_all_tenants(created_by_agent_name="scribe")
     assert [s.name for s in cross] == ["authored-by-scribe"]
+
+
+# ---------------------------------------------------------------------------
+# platform list — offset pagination + search (C+)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_platform(store: InMemorySkillStore, name: str, **kw: object) -> UUID:
+    sid = uuid4()
+    await store.create_platform_skill(skill_id=sid, name=name, **kw)  # type: ignore[arg-type]
+    return sid
+
+
+@pytest.mark.asyncio
+async def test_platform_list_offset_pagination_and_total() -> None:
+    store = InMemorySkillStore()
+    for i in range(5):
+        await _seed_platform(store, f"plat-{i}")
+    page1, total = await store.list_platform_skills(offset=0, limit=2)
+    page2, total2 = await store.list_platform_skills(offset=2, limit=2)
+    assert total == 5 and total2 == 5
+    assert len(page1) == 2 and len(page2) == 2
+    # Distinct pages, no overlap.
+    assert {s.id for s in page1}.isdisjoint({s.id for s in page2})
+
+
+@pytest.mark.asyncio
+async def test_platform_list_q_searches_name_and_description() -> None:
+    store = InMemorySkillStore()
+    await _seed_platform(store, "pptx-maker", description="build slides")
+    await _seed_platform(store, "docx-tool", description="generate PPTX decks too")
+    await _seed_platform(store, "unrelated", description="nothing")
+    rows, total = await store.list_platform_skills(q="pptx")
+    # Matches the name of one and the description of the other (case-insensitive).
+    assert total == 2
+    assert {s.name for s in rows} == {"pptx-maker", "docx-tool"}
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_by_ids_sets_pinned() -> None:
+    store = InMemorySkillStore()
+    a = await _seed_platform(store, "a")
+    b = await _seed_platform(store, "b")
+    c = await _seed_platform(store, "c")
+    n = await store.bulk_update_platform_skills(ids=[a, b], set_pinned=True)
+    assert n == 2
+    rows, _ = await store.list_platform_skills()
+    pinned = {s.id for s in rows if s.pinned}
+    assert pinned == {a, b} and c not in pinned
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_by_filter_sets_status_and_bumps_state_changed() -> None:
+    store = InMemorySkillStore()
+    keep = await _seed_platform(store, "report-weekly")
+    other = await _seed_platform(store, "misc")
+    before = await store.get_platform_skill(skill_id=keep)
+    assert before is not None
+    n = await store.bulk_update_platform_skills(
+        filter_q="report", set_status=SkillStatus.ARCHIVED
+    )
+    assert n == 1
+    after = await store.get_platform_skill(skill_id=keep)
+    assert after is not None and after.status == SkillStatus.ARCHIVED
+    assert after.state_changed_at >= before.state_changed_at
+    # The non-matching skill is untouched.
+    untouched = await store.get_platform_skill(skill_id=other)
+    assert untouched is not None and untouched.status != SkillStatus.ARCHIVED
+
+
+@pytest.mark.asyncio
+async def test_bulk_update_requires_selector_and_patch() -> None:
+    store = InMemorySkillStore()
+    with pytest.raises(ValueError):
+        await store.bulk_update_platform_skills(set_pinned=True)  # no selector
+    with pytest.raises(ValueError):
+        await store.bulk_update_platform_skills(ids=[uuid4()])  # no patch

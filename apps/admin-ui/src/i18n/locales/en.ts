@@ -1237,6 +1237,12 @@ export interface TranslationKeys {
     batch_clear: string;
     batch_done: string;
     batch_partial: string;
+    batch_all_matching: string;
+    batch_scope_all: string;
+    search_ph: string;
+    search_aria: string;
+    status_filter_aria: string;
+    status_filter_all: string;
     not_admin_title: string;
     not_admin_body: string;
     failed_to_load: string;
@@ -2968,6 +2974,12 @@ const en: TranslationKeys = {
     batch_clear: "Clear",
     batch_done: "Done: {{ok}} updated",
     batch_partial: "Done: {{ok}} updated, {{failed}} failed",
+    batch_all_matching: "Apply to all {{count}} matching",
+    batch_scope_all: "All {{count}} matching",
+    search_ph: "Search name or description",
+    search_aria: "Search platform skills",
+    status_filter_aria: "Filter by status",
+    status_filter_all: "All statuses",
     not_admin_title: "System admin only",
     not_admin_body:
       "The platform skill catalog is managed by system admins. Ask one to add skills.",

@@ -595,13 +595,37 @@ class SkillStore(abc.ABC):
         *,
         status: SkillStatus | None = None,
         category: str | None = None,
-        cursor: UUID | None = None,
+        q: str | None = None,
+        offset: int = 0,
         limit: int = 50,
-    ) -> tuple[list[Skill], UUID | None]:
-        """Page through platform (NULL-tenant) skills.
+    ) -> tuple[list[Skill], int]:
+        """Offset-page through platform (NULL-tenant) skills.
 
-        Same shape as :meth:`list_skills` but filters ``tenant_id IS NULL``.
-        Caller MUST be inside ``bypass_rls_session()``.
+        Returns ``(page_items, total_matching)`` — ``total`` counts all rows
+        matching the filters (drives the admin table's page count); the page is
+        ``ORDER BY created_at DESC, id`` sliced by ``offset``/``limit``. ``q`` is
+        a case-insensitive substring over ``name`` + ``description``; ``status``
+        / ``category`` AND with it. Caller MUST be inside ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def bulk_update_platform_skills(
+        self,
+        *,
+        ids: Sequence[UUID] | None = None,
+        filter_status: SkillStatus | None = None,
+        filter_category: str | None = None,
+        filter_q: str | None = None,
+        set_status: SkillStatus | None = None,
+        set_pinned: bool | None = None,
+    ) -> int:
+        """Atomically patch many platform skills; returns the affected count.
+
+        Exactly one selector: ``ids`` (an explicit list) OR the
+        ``filter_*`` predicate (every NULL-tenant skill matching it — the
+        "select all N matching" path). At least one of ``set_status`` /
+        ``set_pinned`` must be given. ``state_changed_at`` is bumped only when
+        ``set_status`` is provided. Caller MUST be inside ``bypass_rls_session()``.
         """
 
     @abc.abstractmethod

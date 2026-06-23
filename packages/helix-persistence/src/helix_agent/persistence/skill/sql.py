@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -963,41 +963,85 @@ class SqlSkillStore(SkillStore):
             ).scalar_one_or_none()
         return _skill_row_to_dto(row) if row is not None else None
 
+    def _platform_filters(
+        self, status: SkillStatus | None, category: str | None, q: str | None
+    ) -> list[Any]:
+        """Shared WHERE predicate for the platform (NULL-tenant) list + bulk."""
+        preds: list[Any] = [SkillRow.tenant_id.is_(None)]
+        if status is not None:
+            preds.append(SkillRow.status == status.value)
+        if category is not None:
+            preds.append(SkillRow.category == category)
+        if q:
+            like = f"%{q}%"
+            preds.append(or_(SkillRow.name.ilike(like), SkillRow.description.ilike(like)))
+        return preds
+
     async def list_platform_skills(
         self,
         *,
         status: SkillStatus | None = None,
         category: str | None = None,
-        cursor: UUID | None = None,
+        q: str | None = None,
+        offset: int = 0,
         limit: int = 50,
-    ) -> tuple[list[Skill], UUID | None]:
+    ) -> tuple[list[Skill], int]:
+        preds = self._platform_filters(status, category, q)
         async with self._sf() as session:
-            stmt = (
-                select(SkillRow)
-                .where(SkillRow.tenant_id.is_(None))
-                .order_by(SkillRow.created_at.desc(), SkillRow.id)
-            )
-            if status is not None:
-                stmt = stmt.where(SkillRow.status == status.value)
-            if category is not None:
-                stmt = stmt.where(SkillRow.category == category)
-            if cursor is not None:
-                cur_row = (
+            total = (
+                await session.execute(select(func.count()).select_from(SkillRow).where(*preds))
+            ).scalar_one()
+            rows = (
+                (
                     await session.execute(
-                        select(SkillRow).where(SkillRow.id == cursor, SkillRow.tenant_id.is_(None))
+                        select(SkillRow)
+                        .where(*preds)
+                        .order_by(SkillRow.created_at.desc(), SkillRow.id)
+                        .offset(offset)
+                        .limit(limit)
                     )
-                ).scalar_one_or_none()
-                if cur_row is not None:
-                    stmt = stmt.where(
-                        (SkillRow.created_at < cur_row.created_at)
-                        | ((SkillRow.created_at == cur_row.created_at) & (SkillRow.id > cur_row.id))
-                    )
-            stmt = stmt.limit(limit + 1)
-            rows = (await session.execute(stmt)).scalars().all()
-        items = [_skill_row_to_dto(r) for r in rows]
-        if len(items) > limit:
-            return items[:limit], items[limit - 1].id
-        return items, None
+                )
+                .scalars()
+                .all()
+            )
+        return [_skill_row_to_dto(r) for r in rows], int(total)
+
+    async def bulk_update_platform_skills(
+        self,
+        *,
+        ids: Sequence[UUID] | None = None,
+        filter_status: SkillStatus | None = None,
+        filter_category: str | None = None,
+        filter_q: str | None = None,
+        set_status: SkillStatus | None = None,
+        set_pinned: bool | None = None,
+    ) -> int:
+        if ids is None and filter_status is None and filter_category is None and filter_q is None:
+            raise ValueError("bulk_update_platform_skills requires ids or a filter")
+        if set_status is None and set_pinned is None:
+            raise ValueError("bulk_update_platform_skills requires set_status or set_pinned")
+
+        now = datetime.now(UTC)
+        values: dict[str, Any] = {"updated_at": now}
+        if set_status is not None:
+            values["status"] = set_status.value
+            values["state_changed_at"] = now
+        if set_pinned is not None:
+            values["pinned"] = set_pinned
+
+        if ids is not None:
+            id_list = list(ids)
+            if not id_list:
+                return 0
+            where = [SkillRow.tenant_id.is_(None), SkillRow.id.in_(id_list)]
+        else:
+            where = self._platform_filters(filter_status, filter_category, filter_q)
+
+        async with self._sf() as session:
+            result = await session.execute(update(SkillRow).where(*where).values(**values))
+            await session.commit()
+        # CursorResult.rowcount — the affected count for an UPDATE.
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def add_platform_version(
         self,

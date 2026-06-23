@@ -1255,3 +1255,85 @@ async def test_batch_import_rejects_non_github_source(ctx: _Ctx) -> None:
         headers=ctx.admin_headers,
     )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# C+ — server-side list (q / offset / total) + bulk /batch
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_q_offset_total(ctx: _Ctx) -> None:
+    for n in ("alpha-one", "alpha-two", "beta-three"):
+        await _seed_platform_skill(ctx.skill_store, name=n, required_tier=TenantPlan.FREE)
+    resp = await ctx.client.get(
+        "/v1/platform/skills", params={"q": "alpha", "limit": 1, "offset": 0},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2  # two alphas match, beta excluded
+    assert len(body["items"]) == 1  # limit=1 page
+    assert "next_cursor" not in body
+
+
+@pytest.mark.asyncio
+async def test_batch_by_ids_sets_pinned(ctx: _Ctx) -> None:
+    a = await _seed_platform_skill(ctx.skill_store, name="ba", required_tier=TenantPlan.FREE)
+    b = await _seed_platform_skill(ctx.skill_store, name="bb", required_tier=TenantPlan.FREE)
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"set_pinned": True, "ids": [str(a), str(b)]},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_by_filter_sets_status(ctx: _Ctx) -> None:
+    await _seed_platform_skill(ctx.skill_store, name="report-x", required_tier=TenantPlan.FREE)
+    await _seed_platform_skill(ctx.skill_store, name="misc-y", required_tier=TenantPlan.FREE)
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"set_status": "archived", "filter": {"q": "report"}},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_validation(ctx: _Ctx) -> None:
+    sid = await _seed_platform_skill(ctx.skill_store, name="v1", required_tier=TenantPlan.FREE)
+    # both selectors → 422
+    r1 = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"set_pinned": True, "ids": [str(sid)], "filter": {"q": "v"}},
+        headers=ctx.admin_headers,
+    )
+    assert r1.status_code == 422
+    # neither selector → 422
+    r2 = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"set_pinned": True},
+        headers=ctx.admin_headers,
+    )
+    assert r2.status_code == 422
+    # empty patch → 422
+    r3 = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"ids": [str(sid)]},
+        headers=ctx.admin_headers,
+    )
+    assert r3.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_batch_tenant_principal_forbidden(ctx: _Ctx) -> None:
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"set_pinned": True, "filter": {"q": "x"}},
+        headers=ctx.tenant_headers,
+    )
+    assert resp.status_code == 403

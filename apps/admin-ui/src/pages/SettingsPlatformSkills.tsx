@@ -20,6 +20,7 @@ import {
   Alert,
   App,
   Button,
+  Checkbox,
   Input,
   Modal,
   Select,
@@ -36,6 +37,7 @@ import { useNavigate } from "react-router-dom";
 
 import { PageHeader } from "../components/PageHeader";
 import {
+  bulkUpdatePlatformSkills,
   importPlatformSkill,
   importPlatformSkillFromGithub,
   importPlatformSkillsFromGithubBatch,
@@ -43,7 +45,7 @@ import {
   listPlatformSkills,
   patchPlatformSkill,
   type BatchImportResult,
-  type PatchPlatformSkillBody,
+  type BulkUpdatePlatformSkillsBody,
   type PlatformSkill,
   type PlatformSkillStatus,
   type PlatformSkillTier,
@@ -79,10 +81,33 @@ export function SettingsPlatformSkills() {
   const isSystemAdmin = auth.identity?.isSystemAdmin ?? false;
 
   const [rows, setRows] = useState<PlatformSkill[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // Server-side pagination + search + status filter. The list is fetched per
+  // page (offset/limit) so a >50-skill library is fully reachable; ``q`` is
+  // debounced (300ms) before it drives a refetch.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [q, setQ] = useState("");
+  const [qDebounced, setQDebounced] = useState("");
+  const [statusFilter, setStatusFilter] = useState<PlatformSkillStatus | undefined>(
+    undefined,
+  );
+
+  useEffect(() => {
+    const handle = setTimeout(() => setQDebounced(q), 300);
+    return () => clearTimeout(handle);
+  }, [q]);
+
+  // Changing the search text or status filter resets to page 1 (the old offset
+  // would otherwise overshoot the narrowed result set).
+  useEffect(() => {
+    setPage(1);
+  }, [qDebounced, statusFilter]);
 
   // GitHub import modal (方案 A).
   const [ghOpen, setGhOpen] = useState(false);
@@ -116,14 +141,20 @@ export function SettingsPlatformSkills() {
     setLoading(true);
     setError(null);
     try {
-      const result = await listPlatformSkills();
+      const result = await listPlatformSkills({
+        q: qDebounced || undefined,
+        status: statusFilter,
+        offset: (page - 1) * pageSize,
+        limit: pageSize,
+      });
       setRows(result.items);
+      setTotal(result.total);
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown error");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [qDebounced, statusFilter, page, pageSize]);
 
   useEffect(() => {
     if (isSystemAdmin) {
@@ -323,34 +354,56 @@ export function SettingsPlatformSkills() {
     [errText, message, refresh],
   );
 
-  // Bulk actions over the table's row selection — lock/unlock + archive/activate.
-  // No batch endpoint: patch each selected skill client-side (platform skill
-  // counts are small); partial failures are surfaced, not silently dropped.
+  // Bulk actions over the table's row selection — lock/unlock + archive/activate
+  // via the server-side ``POST /v1/platform/skills/batch`` endpoint (one atomic
+  // UPDATE, returns the affected count). Two scopes:
+  //   • default — the rows selected on this page (``ids``);
+  //   • "apply to all N matching" — everything matching the current
+  //     search/status filter across pages (``filter``), surfaced as a checkbox
+  //     only when a filter is active AND the match set spills past this page.
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [batchBusy, setBatchBusy] = useState(false);
+  const [applyToAllMatching, setApplyToAllMatching] = useState(false);
+
+  const filterActive = qDebounced.length > 0 || statusFilter !== undefined;
+  const canApplyToAll = filterActive && total > rows.length;
+  const scopeIsAll = canApplyToAll && applyToAllMatching;
+
   const runBatch = useCallback(
-    async (patch: PatchPlatformSkillBody) => {
+    async (patch: Pick<BulkUpdatePlatformSkillsBody, "set_status" | "set_pinned">) => {
       const ids = selectedRowKeys.map(String);
-      if (ids.length === 0) return;
+      const useFilter = canApplyToAll && applyToAllMatching;
+      if (!useFilter && ids.length === 0) return;
       setBatchBusy(true);
       try {
-        const outcomes = await Promise.allSettled(
-          ids.map((id) => patchPlatformSkill(id, patch)),
-        );
-        const failed = outcomes.filter((o) => o.status === "rejected").length;
-        const ok = outcomes.length - failed;
-        if (failed > 0) {
-          message.warning(t("platform_skills.batch_partial", { ok, failed }));
-        } else {
-          message.success(t("platform_skills.batch_done", { ok }));
-        }
+        const body: BulkUpdatePlatformSkillsBody = useFilter
+          ? {
+              ...patch,
+              filter: { q: qDebounced || undefined, status: statusFilter },
+            }
+          : { ...patch, ids };
+        const { updated } = await bulkUpdatePlatformSkills(body);
+        message.success(t("platform_skills.batch_done", { ok: updated }));
         setSelectedRowKeys([]);
+        setApplyToAllMatching(false);
         void refresh();
+      } catch (err) {
+        message.error(errText(err));
       } finally {
         setBatchBusy(false);
       }
     },
-    [selectedRowKeys, message, refresh, t],
+    [
+      selectedRowKeys,
+      canApplyToAll,
+      applyToAllMatching,
+      qDebounced,
+      statusFilter,
+      message,
+      refresh,
+      errText,
+      t,
+    ],
   );
 
   const columns: TableColumnsType<PlatformSkill> = useMemo(
@@ -667,6 +720,34 @@ export function SettingsPlatformSkills() {
               data-testid="ps-error"
             />
           )}
+          <Space
+            style={{ marginBottom: 12 }}
+            wrap
+            data-testid="ps-filter-bar"
+          >
+            <Input.Search
+              allowClear
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={t("platform_skills.search_ph")}
+              aria-label={t("platform_skills.search_aria")}
+              style={{ width: 280 }}
+              data-testid="ps-search"
+            />
+            <Select<PlatformSkillStatus | "all">
+              value={statusFilter ?? "all"}
+              onChange={(v) => setStatusFilter(v === "all" ? undefined : v)}
+              aria-label={t("platform_skills.status_filter_aria")}
+              style={{ width: 160 }}
+              data-testid="ps-status-filter"
+              options={[
+                { label: t("platform_skills.status_filter_all"), value: "all" },
+                { label: t("platform_skills.status_draft"), value: "draft" },
+                { label: t("platform_skills.status_active"), value: "active" },
+                { label: t("platform_skills.status_archived"), value: "archived" },
+              ]}
+            />
+          </Space>
           {selectedRowKeys.length > 0 && (
             <Space
               style={{ marginBottom: 12 }}
@@ -675,12 +756,14 @@ export function SettingsPlatformSkills() {
               aria-label={t("platform_skills.batch_toolbar_aria")}
             >
               <Text type="secondary" style={{ fontSize: 12 }}>
-                {t("platform_skills.batch_selected", { count: selectedRowKeys.length })}
+                {scopeIsAll
+                  ? t("platform_skills.batch_scope_all", { count: total })
+                  : t("platform_skills.batch_selected", { count: selectedRowKeys.length })}
               </Text>
               <Button
                 size="small"
                 loading={batchBusy}
-                onClick={() => void runBatch({ pinned: true })}
+                onClick={() => void runBatch({ set_pinned: true })}
                 data-testid="ps-batch-lock"
               >
                 {t("platform_skills.batch_lock")}
@@ -688,7 +771,7 @@ export function SettingsPlatformSkills() {
               <Button
                 size="small"
                 loading={batchBusy}
-                onClick={() => void runBatch({ pinned: false })}
+                onClick={() => void runBatch({ set_pinned: false })}
                 data-testid="ps-batch-unlock"
               >
                 {t("platform_skills.batch_unlock")}
@@ -696,7 +779,7 @@ export function SettingsPlatformSkills() {
               <Button
                 size="small"
                 loading={batchBusy}
-                onClick={() => void runBatch({ status: "archived" })}
+                onClick={() => void runBatch({ set_status: "archived" })}
                 data-testid="ps-batch-archive"
               >
                 {t("platform_skills.batch_archive")}
@@ -704,15 +787,27 @@ export function SettingsPlatformSkills() {
               <Button
                 size="small"
                 loading={batchBusy}
-                onClick={() => void runBatch({ status: "active" })}
+                onClick={() => void runBatch({ set_status: "active" })}
                 data-testid="ps-batch-activate"
               >
                 {t("platform_skills.batch_activate")}
               </Button>
+              {canApplyToAll && (
+                <Checkbox
+                  checked={applyToAllMatching}
+                  onChange={(e) => setApplyToAllMatching(e.target.checked)}
+                  data-testid="ps-batch-all-matching"
+                >
+                  {t("platform_skills.batch_all_matching", { count: total })}
+                </Checkbox>
+              )}
               <Button
                 size="small"
                 type="link"
-                onClick={() => setSelectedRowKeys([])}
+                onClick={() => {
+                  setSelectedRowKeys([]);
+                  setApplyToAllMatching(false);
+                }}
                 data-testid="ps-batch-clear"
               >
                 {t("platform_skills.batch_clear")}
@@ -724,7 +819,16 @@ export function SettingsPlatformSkills() {
             dataSource={rows}
             rowKey={(r) => r.id}
             loading={loading}
-            pagination={false}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              showSizeChanger: true,
+              onChange: (p, ps) => {
+                setPage(p);
+                setPageSize(ps);
+              },
+            }}
             locale={{ emptyText }}
             rowSelection={{
               selectedRowKeys,
