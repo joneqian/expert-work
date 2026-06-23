@@ -480,9 +480,7 @@ async def test_get_supporting_file_deep_nested_path(setup: Setup) -> None:
     r1 = await client.get(f"{base}/scripts/office/helpers/__init__.py")
     assert r1.status_code == 200
     assert base64.b64decode(r1.json()["content"]) == deep_py
-    r2 = await client.get(
-        f"{base}/scripts/office/schemas/ecma/fouth-edition/opc-contentTypes.xsd"
-    )
+    r2 = await client.get(f"{base}/scripts/office/schemas/ecma/fouth-edition/opc-contentTypes.xsd")
     assert r2.status_code == 200
     assert base64.b64decode(r2.json()["content"]) == deep_xsd
 
