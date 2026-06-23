@@ -203,3 +203,47 @@ async def test_create_with_catalog_id_round_trips() -> None:
     assert created.catalog_id == catalog_id
     fetched = await store.get(tenant_id=tid, name="github")
     assert fetched is not None and fetched.catalog_id == catalog_id
+
+
+@pytest.mark.asyncio
+async def test_create_with_custom_headers_round_trips() -> None:
+    """M1: header ref + names + sse_read_timeout persist and read back."""
+    store = InMemoryTenantMcpServerStore()
+    tid = uuid4()
+    created = await _make(
+        store,
+        tid,
+        custom_headers_ref="secret://helix-agent/tenant/x/mcp/github/headers",
+        custom_header_names=["X-API-Key", "X-Org"],
+        sse_read_timeout_s=120.0,
+    )
+    assert created.custom_header_names == ["X-API-Key", "X-Org"]
+    assert created.sse_read_timeout_s == 120.0
+    fetched = await store.get(tenant_id=tid, name="github")
+    assert fetched is not None
+    assert fetched.custom_headers_ref == "secret://helix-agent/tenant/x/mcp/github/headers"
+    assert fetched.custom_header_names == ["X-API-Key", "X-Org"]
+
+
+@pytest.mark.asyncio
+async def test_update_replaces_custom_headers() -> None:
+    """M1: patching both ref+names replaces the header set; sse timeout updates."""
+    store = InMemoryTenantMcpServerStore()
+    tid = uuid4()
+    await _make(
+        store,
+        tid,
+        custom_headers_ref="secret://helix-agent/tenant/x/mcp/github/headers",
+        custom_header_names=["X-Old"],
+    )
+    updated = await store.update(
+        tenant_id=tid,
+        name="github",
+        patch=TenantMcpServerPatch(
+            custom_headers_ref="secret://helix-agent/tenant/x/mcp/github/headers",
+            custom_header_names=["X-New", "X-API-Key"],
+            sse_read_timeout_s=90.0,
+        ),
+    )
+    assert updated.custom_header_names == ["X-New", "X-API-Key"]
+    assert updated.sse_read_timeout_s == 90.0

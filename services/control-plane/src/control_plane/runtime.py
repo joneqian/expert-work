@@ -923,6 +923,21 @@ async def _build_mcp_client(
         raise MCPOAuthNotImplementedError(msg)
 
     resolved_headers = dict(config.headers)
+    # Custom headers (M1): resolve the encrypted {name: value} blob and merge it
+    # in BEFORE bearer so a bearer ``Authorization`` always wins (the API layer
+    # also rejects a custom Authorization header when auth_type=bearer).
+    headers_ref = config.auth_config.get("headers_ref")
+    if headers_ref:
+        if secret_store is None:
+            msg = (
+                f"mcp server {config.name!r}: custom headers need a "
+                "SecretStore but none was provided to build_mcp_pool"
+            )
+            raise RuntimeError(msg)
+        blob = await secret_store.get(parse_secret_ref(headers_ref))
+        custom = json.loads(blob)
+        if isinstance(custom, dict):
+            resolved_headers.update({str(k): str(v) for k, v in custom.items()})
     if config.auth_type == "bearer":
         if secret_store is None:
             msg = (

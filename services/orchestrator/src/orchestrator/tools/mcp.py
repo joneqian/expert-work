@@ -142,6 +142,10 @@ class MCPServerConfig:
     # failure handling (Mini-ADR U-13)
     timeout_s: float = DEFAULT_TIMEOUT_S
     retry_max: int = DEFAULT_RETRY_MAX
+    # SSE read timeout — long-lived SSE streams idle between events; this caps
+    # the per-read wait independently of ``timeout_s`` (the connect/call cap).
+    # ``None`` keeps the SDK default (300s). Only meaningful for the sse transport.
+    sse_read_timeout_s: float | None = None
 
     def __post_init__(self) -> None:
         if self.transport == "stdio":
@@ -525,13 +529,14 @@ class SseMCPClient(_RemoteMCPClientBase):
         if not self.config.url:  # pragma: no cover — guarded by post_init
             msg = "sse transport requires url"
             raise RuntimeError(msg)
-        read, write = await stack.enter_async_context(
-            sse_client(
-                url=self.config.url,
-                headers=dict(self.resolved_headers) or None,
-                timeout=self.config.timeout_s,
-            )
-        )
+        sse_kwargs: dict[str, Any] = {
+            "url": self.config.url,
+            "headers": dict(self.resolved_headers) or None,
+            "timeout": self.config.timeout_s,
+        }
+        if self.config.sse_read_timeout_s is not None:
+            sse_kwargs["sse_read_timeout"] = self.config.sse_read_timeout_s
+        read, write = await stack.enter_async_context(sse_client(**sse_kwargs))
         return read, write
 
 

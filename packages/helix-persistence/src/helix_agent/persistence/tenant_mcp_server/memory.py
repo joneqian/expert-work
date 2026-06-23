@@ -43,6 +43,9 @@ class InMemoryTenantMcpServerStore(TenantMcpServerStore):
         timeout_s: float,
         created_by: str,
         catalog_id: UUID | None = None,
+        custom_headers_ref: str | None = None,
+        custom_header_names: list[str] | None = None,
+        sse_read_timeout_s: float | None = None,
     ) -> TenantMcpServerRecord:
         async with self._lock:
             key = (tenant_id, name)
@@ -57,6 +60,9 @@ class InMemoryTenantMcpServerStore(TenantMcpServerStore):
                 url=url,
                 auth_type=auth_type,
                 token_secret_ref=token_secret_ref,
+                custom_headers_ref=custom_headers_ref,
+                custom_header_names=custom_header_names,
+                sse_read_timeout_s=sse_read_timeout_s,
                 catalog_id=catalog_id,
                 timeout_s=timeout_s,
                 enabled=True,
@@ -91,6 +97,11 @@ class InMemoryTenantMcpServerStore(TenantMcpServerStore):
                 changes["url"] = patch.url
             if patch.token_secret_ref is not None:
                 changes["token_secret_ref"] = patch.token_secret_ref
+            if patch.custom_headers_ref is not None:
+                changes["custom_headers_ref"] = patch.custom_headers_ref
+                changes["custom_header_names"] = patch.custom_header_names
+            if patch.sse_read_timeout_s is not None:
+                changes["sse_read_timeout_s"] = patch.sse_read_timeout_s
             if patch.timeout_s is not None:
                 changes["timeout_s"] = patch.timeout_s
             if patch.enabled is not None:

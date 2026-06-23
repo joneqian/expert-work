@@ -49,6 +49,9 @@ class TenantMcpServerStore(abc.ABC):
         timeout_s: float,
         created_by: str,
         catalog_id: UUID | None = None,
+        custom_headers_ref: str | None = None,
+        custom_header_names: list[str] | None = None,
+        sse_read_timeout_s: float | None = None,
     ) -> TenantMcpServerRecord:
         """Insert a new server row. Raises
         :class:`TenantMcpServerAlreadyExistsError` on (tenant, name) conflict.

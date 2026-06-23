@@ -39,6 +39,9 @@ def _row_to_record(row: TenantMcpServerRow) -> TenantMcpServerRecord:
         url=row.url,
         auth_type=row.auth_type,  # type: ignore[arg-type]
         token_secret_ref=row.token_secret_ref,
+        custom_headers_ref=row.custom_headers_ref,
+        custom_header_names=row.custom_header_names,
+        sse_read_timeout_s=row.sse_read_timeout_s,
         catalog_id=row.catalog_id,
         timeout_s=row.timeout_s,
         enabled=row.enabled,
@@ -69,6 +72,9 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
         timeout_s: float,
         created_by: str,
         catalog_id: UUID | None = None,
+        custom_headers_ref: str | None = None,
+        custom_header_names: list[str] | None = None,
+        sse_read_timeout_s: float | None = None,
     ) -> TenantMcpServerRecord:
         now = _utc_now()
         stmt = (
@@ -80,6 +86,9 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
                 url=url,
                 auth_type=auth_type,
                 token_secret_ref=token_secret_ref,
+                custom_headers_ref=custom_headers_ref,
+                custom_header_names=custom_header_names,
+                sse_read_timeout_s=sse_read_timeout_s,
                 catalog_id=catalog_id,
                 timeout_s=timeout_s,
                 enabled=True,
@@ -133,6 +142,11 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
                 existing.url = patch.url
             if patch.token_secret_ref is not None:
                 existing.token_secret_ref = patch.token_secret_ref
+            if patch.custom_headers_ref is not None:
+                existing.custom_headers_ref = patch.custom_headers_ref
+                existing.custom_header_names = patch.custom_header_names
+            if patch.sse_read_timeout_s is not None:
+                existing.sse_read_timeout_s = patch.sse_read_timeout_s
             if patch.timeout_s is not None:
                 existing.timeout_s = patch.timeout_s
             if patch.enabled is not None:

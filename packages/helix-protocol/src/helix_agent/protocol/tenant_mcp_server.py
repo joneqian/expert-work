@@ -51,6 +51,14 @@ class TenantMcpServerRecord(BaseModel):
     url: str = Field(min_length=1)
     auth_type: McpServerAuthType = "none"
     token_secret_ref: str | None = None
+    # Custom HTTP headers (M1). Values may be secrets, so the {name: value} map
+    # lives in the SecretStore and the row holds only the ``secret://`` ref; the
+    # header names are kept for display. ``custom_header_names`` is the only one
+    # surfaced to the API (the ref is internal — resolved at connect-out).
+    custom_headers_ref: str | None = None
+    custom_header_names: list[str] | None = None
+    # SSE read timeout override (M1) — None keeps the SDK default (300s).
+    sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
     timeout_s: float = Field(default=30.0, gt=0, le=300)
     enabled: bool = True
     # Stream W (Mini-ADR W-2). NULL = off-catalog custom server (every
@@ -68,7 +76,7 @@ class TenantMcpServerRecord(BaseModel):
     last_probe_status: McpServerProbeStatus | None = None
     last_probe_error: str | None = None
 
-    @field_validator("token_secret_ref")
+    @field_validator("token_secret_ref", "custom_headers_ref")
     @classmethod
     def _check_token_ref(cls, value: str | None) -> str | None:
         if value:  # non-None and non-empty: must be a valid ref
@@ -87,6 +95,10 @@ class TenantMcpServerRecord(BaseModel):
             raise ValueError("bearer auth requires token_secret_ref")
         if self.auth_type == "none" and self.token_secret_ref is not None:
             raise ValueError("token_secret_ref must be empty when auth_type='none'")
+        if bool(self.custom_headers_ref) != bool(self.custom_header_names):
+            raise ValueError(
+                "custom_headers_ref and custom_header_names must both be set or both empty"
+            )
         return self
 
 
@@ -101,10 +113,15 @@ class TenantMcpServerPatch(BaseModel):
 
     url: str | None = Field(default=None, min_length=1)
     token_secret_ref: str | None = None
+    # Custom headers (M1): set both together to replace the header set; both
+    # None = leave unchanged (clearing is via delete+recreate, like auth-type).
+    custom_headers_ref: str | None = None
+    custom_header_names: list[str] | None = None
+    sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
     timeout_s: float | None = Field(default=None, gt=0, le=300)
     enabled: bool | None = None
 
-    @field_validator("token_secret_ref")
+    @field_validator("token_secret_ref", "custom_headers_ref")
     @classmethod
     def _check_token_ref(cls, value: str | None) -> str | None:
         if value:  # non-None and non-empty: must be a valid ref

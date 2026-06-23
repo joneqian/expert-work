@@ -167,6 +167,63 @@ async def test_build_client_bearer_resolves_token_via_secret_store(
 
 
 @pytest.mark.asyncio
+async def test_build_client_resolves_custom_headers_via_secret_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M1: a ``headers_ref`` blob is decrypted and merged into resolved
+    headers (so a server can require e.g. ``X-API-Key``)."""
+    store = InMemorySecretStore()
+    await store.put("mcp/svc/headers", json.dumps({"X-API-Key": "KEY-123"}))
+    cfg = MCPServerConfig(
+        name="svc",
+        transport="streamable_http",
+        url="https://api.example.com/mcp",
+        auth_type="none",
+        auth_config={"headers_ref": "secret://mcp/svc/headers"},
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_start(self: Any) -> None:
+        captured["resolved_headers"] = dict(self.resolved_headers)
+
+    monkeypatch.setattr(StreamableHttpMCPClient, "start", fake_start)
+    await _build_mcp_client(cfg, secret_store=store)
+    assert captured["resolved_headers"]["X-API-Key"] == "KEY-123"
+
+
+@pytest.mark.asyncio
+async def test_build_client_bearer_overrides_custom_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M1 coexistence: bearer is merged AFTER custom headers, so a stray
+    custom ``Authorization`` can never shadow the bearer token (defence in
+    depth — the API layer also rejects this combination)."""
+    store = InMemorySecretStore()
+    await store.put("mcp/svc/headers", json.dumps({"Authorization": "Bearer SNEAKY"}))
+    await store.put("mcp/svc/token", "REAL-TOKEN")
+    cfg = MCPServerConfig(
+        name="svc",
+        transport="streamable_http",
+        url="https://api.example.com/mcp",
+        auth_type="bearer",
+        auth_config={
+            "headers_ref": "secret://mcp/svc/headers",
+            "token_ref": "secret://mcp/svc/token",
+        },
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_start(self: Any) -> None:
+        captured["resolved_headers"] = dict(self.resolved_headers)
+
+    monkeypatch.setattr(StreamableHttpMCPClient, "start", fake_start)
+    await _build_mcp_client(cfg, secret_store=store)
+    assert captured["resolved_headers"]["Authorization"] == "Bearer REAL-TOKEN"
+
+
+@pytest.mark.asyncio
 async def test_build_client_bearer_without_secret_store_raises() -> None:
     cfg = MCPServerConfig(
         name="github",

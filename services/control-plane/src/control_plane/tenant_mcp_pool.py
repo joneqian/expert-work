@@ -48,6 +48,10 @@ def _record_to_config(record: TenantMcpServerRecord) -> MCPServerConfig:
     auth_config: dict[str, str] = {}
     if record.auth_type == "bearer" and record.token_secret_ref is not None:
         auth_config["token_ref"] = record.token_secret_ref
+    # Custom headers ride alongside auth (Mini-ADR U-11 pattern): the secret ref
+    # is carried on the config and resolved at connect-out, never the values.
+    if record.custom_headers_ref is not None:
+        auth_config["headers_ref"] = record.custom_headers_ref
     return MCPServerConfig(
         name=record.name,
         transport=record.transport,
@@ -55,6 +59,7 @@ def _record_to_config(record: TenantMcpServerRecord) -> MCPServerConfig:
         auth_type=record.auth_type,
         auth_config=auth_config,
         timeout_s=record.timeout_s,
+        sse_read_timeout_s=record.sse_read_timeout_s,
     )
 
 
