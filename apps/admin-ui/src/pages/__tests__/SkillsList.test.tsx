@@ -448,7 +448,10 @@ describe("SkillDetail (PR C)", () => {
     const user = userEvent.setup();
     renderSkillsRouter(["/skills/sk1"]);
     const tree = await screen.findByTestId("skill-file-tree");
-    // Expand reference/ folder (default expanded) + click notes.md
+    // Folders are collapsed by default — expand reference/ to reveal notes.md.
+    for (const sw of tree.querySelectorAll(".ant-tree-switcher_close")) {
+      await user.click(sw as HTMLElement);
+    }
     await user.click(within(tree).getByText("notes.md"));
     // ``skill-editor-monaco`` is the wrapper div; the mocked Monaco
     // textarea inside it carries ``monaco-stub`` (default mock testid).
@@ -534,6 +537,10 @@ describe("SkillDetail (PR C)", () => {
     const user = userEvent.setup();
     renderSkillsRouter(["/skills/sk1"]);
     const tree = await screen.findByTestId("skill-file-tree");
+    // Folders are collapsed by default — expand to reveal notes.md.
+    for (const sw of tree.querySelectorAll(".ant-tree-switcher_close")) {
+      await user.click(sw as HTMLElement);
+    }
     await user.click(within(tree).getByText("notes.md"));
     await waitFor(() =>
       expect(screen.getByTestId("skill-editor-delete-btn")).toBeInTheDocument(),

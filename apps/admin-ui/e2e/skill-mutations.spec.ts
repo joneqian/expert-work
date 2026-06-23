@@ -15,9 +15,26 @@
  *   - Edit + Save round-trips through PUT supporting-files
  *   - Delete confirmation requires typing the file path
  */
+import type { Page } from "@playwright/test";
 import { test, expect, SAMPLE_JWT } from "./fixtures";
 
 const SKILL_ID = "sk-1";
+
+/** Folders default to collapsed (GitHub-style) — expand every level so a
+ * supporting file nested under a folder is clickable. */
+async function expandFileTree(page: Page): Promise<void> {
+  const tree = page.getByTestId("skill-file-tree");
+  // Wait for the tree to render before querying switchers.
+  await tree.getByText("SKILL.md").waitFor();
+  // Re-query + click the FIRST collapsed switcher each pass: clicking one
+  // re-renders the tree, so a snapshotted ``.all()`` handle would go stale
+  // (clicking ``.nth(1)`` then hangs). Loop until none remain.
+  const closed = tree.locator(".ant-tree-switcher_close");
+  for (let i = 0; i < 30; i += 1) {
+    if ((await closed.count()) === 0) break;
+    await closed.first().click();
+  }
+}
 
 const SKILL_ROW = {
   id: SKILL_ID,
@@ -211,6 +228,7 @@ test("Edit mode toggles + Save button appears (PUT round-trip covered by vitest)
   await login(page);
   await page.goto(`/skills/${SKILL_ID}`);
 
+  await expandFileTree(page);
   await page.getByTestId("skill-file-tree").getByText("error_codes.md").click();
   await expect(page.getByTestId("skill-editor-pane")).toBeVisible();
   await expect(page.getByTestId("skill-editor-monaco")).toBeVisible();
@@ -238,6 +256,7 @@ test("Delete supporting file requires typing the path to confirm", async ({ page
   });
   await login(page);
   await page.goto(`/skills/${SKILL_ID}`);
+  await expandFileTree(page);
   await page.getByTestId("skill-file-tree").getByText("error_codes.md").click();
   await expect(page.getByTestId("skill-editor-delete-btn")).toBeVisible();
   await page.getByTestId("skill-editor-delete-btn").click();

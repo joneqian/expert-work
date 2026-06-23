@@ -118,3 +118,24 @@ a:hover { color: var(--hx-text-link-hover); }
 
 /* mono utility */
 .mono { font-family: var(--hx-font-mono); }
+
+/* Skill file tree (skill_detail/FileTree) — GitHub-like compact tree:
+   tighter per-level indent + a smaller switcher gutter than antd's default. */
+.skill-file-tree .ant-tree .ant-tree-indent-unit {
+  width: 12px;
+}
+.skill-file-tree .ant-tree .ant-tree-switcher {
+  width: 16px;
+}
+/* Let a long file/dir name truncate (text-overflow: ellipsis) instead of
+   overflowing the panel: the node content wrapper + title must be allowed to
+   shrink below their content width (min-width: 0) and clip. */
+.skill-file-tree .ant-tree .ant-tree-node-content-wrapper {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.skill-file-tree .ant-tree .ant-tree-node-content-wrapper .ant-tree-title {
+  display: block;
+  overflow: hidden;
+}
