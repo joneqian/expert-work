@@ -76,6 +76,8 @@ const SKILL = {
   updated_at: "2026-05-26T10:00:00Z",
 };
 
+const SKILL2 = { ...SKILL, id: "psk-2", name: "code_search" };
+
 const VERSION = {
   id: "v1",
   skill_id: "psk-1",
@@ -146,6 +148,38 @@ describe("SettingsPlatformSkills page", () => {
     expect(screen.getByText("web_search")).toBeInTheDocument();
     expect(screen.getByTestId("ps-manage-psk-1")).toBeInTheDocument();
     expect(screen.getByTestId("ps-pin-toggle-psk-1")).toBeInTheDocument();
+  });
+
+  it("batch-locks the selected skills from the toolbar", async () => {
+    const patched: Array<Record<string, unknown>> = [];
+    installAdapter([
+      {
+        match: (u, m) => u.includes("/platform/skills/") && m === "patch",
+        respond: ({ data }) => {
+          patched.push(typeof data === "string" ? JSON.parse(data) : (data as object));
+          return raw({ ...SKILL, pinned: true });
+        },
+      },
+      {
+        match: (u) => u.endsWith("/platform/skills"),
+        respond: () => raw({ items: [SKILL, SKILL2], next_cursor: null }),
+      },
+    ]);
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+
+    // The header checkbox selects all rows → the batch toolbar appears.
+    const checkboxes = screen.getAllByRole("checkbox");
+    await userEvent.click(checkboxes[0]);
+    await waitFor(() => expect(screen.getByTestId("ps-batch-toolbar")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId("ps-batch-lock"));
+    await waitFor(() => expect(patched.length).toBe(2));
+    expect(patched.every((b) => b.pinned === true)).toBe(true);
+    // Toolbar clears after the batch completes.
+    await waitFor(() =>
+      expect(screen.queryByTestId("ps-batch-toolbar")).not.toBeInTheDocument(),
+    );
   });
 
   it("shows the guided empty state for an admin with no skills", async () => {

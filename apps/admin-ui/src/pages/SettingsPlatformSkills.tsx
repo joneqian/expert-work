@@ -15,6 +15,7 @@
  * + antd Table + ``ApiError`` → ``${code}: ${message}`` toasts).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Key } from "react";
 import {
   Alert,
   App,
@@ -42,6 +43,7 @@ import {
   listPlatformSkills,
   patchPlatformSkill,
   type BatchImportResult,
+  type PatchPlatformSkillBody,
   type PlatformSkill,
   type PlatformSkillStatus,
   type PlatformSkillTier,
@@ -319,6 +321,36 @@ export function SettingsPlatformSkills() {
       }
     },
     [errText, message, refresh],
+  );
+
+  // Bulk actions over the table's row selection — lock/unlock + archive/activate.
+  // No batch endpoint: patch each selected skill client-side (platform skill
+  // counts are small); partial failures are surfaced, not silently dropped.
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const runBatch = useCallback(
+    async (patch: PatchPlatformSkillBody) => {
+      const ids = selectedRowKeys.map(String);
+      if (ids.length === 0) return;
+      setBatchBusy(true);
+      try {
+        const outcomes = await Promise.allSettled(
+          ids.map((id) => patchPlatformSkill(id, patch)),
+        );
+        const failed = outcomes.filter((o) => o.status === "rejected").length;
+        const ok = outcomes.length - failed;
+        if (failed > 0) {
+          message.warning(t("platform_skills.batch_partial", { ok, failed }));
+        } else {
+          message.success(t("platform_skills.batch_done", { ok }));
+        }
+        setSelectedRowKeys([]);
+        void refresh();
+      } finally {
+        setBatchBusy(false);
+      }
+    },
+    [selectedRowKeys, message, refresh, t],
   );
 
   const columns: TableColumnsType<PlatformSkill> = useMemo(
@@ -635,6 +667,58 @@ export function SettingsPlatformSkills() {
               data-testid="ps-error"
             />
           )}
+          {selectedRowKeys.length > 0 && (
+            <Space
+              style={{ marginBottom: 12 }}
+              wrap
+              data-testid="ps-batch-toolbar"
+              aria-label={t("platform_skills.batch_toolbar_aria")}
+            >
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {t("platform_skills.batch_selected", { count: selectedRowKeys.length })}
+              </Text>
+              <Button
+                size="small"
+                loading={batchBusy}
+                onClick={() => void runBatch({ pinned: true })}
+                data-testid="ps-batch-lock"
+              >
+                {t("platform_skills.batch_lock")}
+              </Button>
+              <Button
+                size="small"
+                loading={batchBusy}
+                onClick={() => void runBatch({ pinned: false })}
+                data-testid="ps-batch-unlock"
+              >
+                {t("platform_skills.batch_unlock")}
+              </Button>
+              <Button
+                size="small"
+                loading={batchBusy}
+                onClick={() => void runBatch({ status: "archived" })}
+                data-testid="ps-batch-archive"
+              >
+                {t("platform_skills.batch_archive")}
+              </Button>
+              <Button
+                size="small"
+                loading={batchBusy}
+                onClick={() => void runBatch({ status: "active" })}
+                data-testid="ps-batch-activate"
+              >
+                {t("platform_skills.batch_activate")}
+              </Button>
+              <Button
+                size="small"
+                type="link"
+                onClick={() => setSelectedRowKeys([])}
+                data-testid="ps-batch-clear"
+              >
+                {t("platform_skills.batch_clear")}
+              </Button>
+            </Space>
+          )}
           <Table<PlatformSkill>
             columns={columns}
             dataSource={rows}
@@ -642,6 +726,18 @@ export function SettingsPlatformSkills() {
             loading={loading}
             pagination={false}
             locale={{ emptyText }}
+            rowSelection={{
+              selectedRowKeys,
+              onChange: (keys) => setSelectedRowKeys(keys),
+              // aria-labels keep the bare checkboxes axe-clean (label rule).
+              getCheckboxProps: (record) => ({
+                disabled: batchBusy,
+                "aria-label": t("platform_skills.batch_select_row", { name: record.name }),
+              }),
+              columnTitle: (originNode) => (
+                <span aria-label={t("platform_skills.batch_select_all")}>{originNode}</span>
+              ),
+            }}
             data-testid="ps-table"
           />
         </>

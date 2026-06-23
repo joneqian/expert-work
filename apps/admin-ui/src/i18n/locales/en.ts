@@ -1172,6 +1172,17 @@ export interface TranslationKeys {
     unpinned_toast: string;
     pin_tooltip_on: string;
     pin_tooltip_off: string;
+    batch_toolbar_aria: string;
+    batch_select_row: string;
+    batch_select_all: string;
+    batch_selected: string;
+    batch_lock: string;
+    batch_unlock: string;
+    batch_archive: string;
+    batch_activate: string;
+    batch_clear: string;
+    batch_done: string;
+    batch_partial: string;
     eta_days_to_stale: string;
     eta_due_soon: string;
     // Stream X-6 — merged tenant/platform library badges.
@@ -2880,12 +2891,25 @@ const en: TranslationKeys = {
     file_load_failed: "Failed to load file",
     detail_skill_md_edit_hint:
       "SKILL.md is the skill's core prompt. Saving an edit creates a new version and keeps all supporting files.",
-    pin: "Pin",
-    unpin: "Unpin",
-    pinned_toast: "Pinned — Curator will skip this skill at every stage.",
-    unpinned_toast: "Unpinned — Curator will treat this skill normally.",
-    pin_tooltip_on: "Pinned. Curator skips this skill at every transition.",
-    pin_tooltip_off: "Pin to exempt this skill from auto-stale / auto-archive.",
+    pin: "Lock",
+    unpin: "Unlock",
+    pinned_toast: "Locked — auto-cleanup won't mark this skill stale/archived.",
+    unpinned_toast: "Unlocked — auto lifecycle resumes (long-unused skills age out).",
+    pin_tooltip_on:
+      "Locked — auto-cleanup never marks this skill stale/archived, no matter how long it goes unused.",
+    pin_tooltip_off:
+      "Lock: stop auto-cleanup from ever marking this skill stale/archived (by default a long-unused skill goes stale, then archived).",
+    batch_toolbar_aria: "Bulk-edit the selected skills",
+    batch_select_row: "Select skill {{name}}",
+    batch_select_all: "Select all skills on this page",
+    batch_selected: "{{count}} selected",
+    batch_lock: "Lock",
+    batch_unlock: "Unlock",
+    batch_archive: "Archive",
+    batch_activate: "Activate",
+    batch_clear: "Clear",
+    batch_done: "Done: {{ok}} updated",
+    batch_partial: "Done: {{ok}} updated, {{failed}} failed",
     eta_days_to_stale: "{{days}}d to stale",
     eta_due_soon: "stale soon",
     source_platform: "Platform",
@@ -2942,8 +2966,8 @@ const en: TranslationKeys = {
     imported: 'Imported "{{name}}" v{{version}}.',
     import_noop: 'No change to "{{name}}" — already the latest version.',
     manage: "Manage",
-    pin: "Pin",
-    unpin: "Unpin",
+    pin: "Lock",
+    unpin: "Unlock",
     not_admin_title: "System admin only",
     not_admin_body:
       "The platform skill catalog is managed by system admins. Ask one to add skills.",
@@ -2989,8 +3013,8 @@ const en: TranslationKeys = {
     no_versions: "No versions yet — add one above to make this skill usable.",
     version_added: "Added v{{version}}.",
     status_changed: "Status changed to {{status}}.",
-    pinned: "Pinned",
-    unpinned: "Unpinned",
+    pinned: "Locked",
+    unpinned: "Unlocked",
     high_risk: "High-risk",
     lazy: "Lazy",
   },

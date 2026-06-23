@@ -270,3 +270,48 @@ test("GitHub batch import auto-closes the dialog on full success", async ({ page
   // Full success → the dialog auto-closes (no leftover results panel).
   await expect(page.getByTestId("ps-github-modal")).toBeHidden();
 });
+
+test("system_admin batch-locks selected skills from the toolbar", async ({ page }) => {
+  const TWO = {
+    items: [
+      SKILLS.items[0],
+      { ...SKILLS.items[0], id: "psk-2", name: "code_search" },
+    ],
+    next_cursor: null,
+  };
+  await page.route("**/v1/me", async (route) => {
+    await route.fulfill({ json: SYS_ADMIN_ME });
+  });
+  await page.route("**/v1/platform/skills/*", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await route.fulfill({ status: 200, json: { ...SKILLS.items[0], pinned: true } });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.route("**/v1/platform/skills", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: TWO });
+      return;
+    }
+    await route.fallback();
+  });
+  await login(page);
+  await page.goto("/settings/platform-skills");
+  await expect(page.getByTestId("ps-table")).toBeVisible();
+
+  // Header checkbox selects all rows → the batch toolbar appears.
+  await page.getByRole("checkbox").first().check();
+  await expect(page.getByTestId("ps-batch-toolbar")).toBeVisible();
+
+  const patched: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "PATCH" && r.url().includes("/v1/platform/skills/")) {
+      patched.push(r.url());
+    }
+  });
+  await page.getByTestId("ps-batch-lock").click();
+  // Batch completes → selection clears → toolbar hides; one PATCH per row.
+  await expect(page.getByTestId("ps-batch-toolbar")).toBeHidden();
+  expect(patched.length).toBe(2);
+});
