@@ -475,12 +475,11 @@ async def test_bulk_update_by_filter_sets_status_and_bumps_state_changed() -> No
     other = await _seed_platform(store, "misc")
     before = await store.get_platform_skill(skill_id=keep)
     assert before is not None
-    n = await store.bulk_update_platform_skills(
-        filter_q="report", set_status=SkillStatus.ARCHIVED
-    )
+    n = await store.bulk_update_platform_skills(filter_q="report", set_status=SkillStatus.ARCHIVED)
     assert n == 1
     after = await store.get_platform_skill(skill_id=keep)
     assert after is not None and after.status == SkillStatus.ARCHIVED
+    assert after.state_changed_at is not None and before.state_changed_at is not None
     assert after.state_changed_at >= before.state_changed_at
     # The non-matching skill is untouched.
     untouched = await store.get_platform_skill(skill_id=other)

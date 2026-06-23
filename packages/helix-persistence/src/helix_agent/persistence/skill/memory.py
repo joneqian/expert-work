@@ -696,9 +696,7 @@ class InMemorySkillStore(SkillStore):
         offset: int = 0,
         limit: int = 50,
     ) -> tuple[list[Skill], int]:
-        rows = self._platform_matches(
-            status=status, category=category, q=q
-        )
+        rows = self._platform_matches(status=status, category=category, q=q)
         # created_at DESC, id ASC (mirror the SQL ordering).
         rows.sort(key=lambda r: str(r.id))
         rows.sort(key=lambda r: r.created_at, reverse=True)

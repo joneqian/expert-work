@@ -1267,7 +1267,8 @@ async def test_list_q_offset_total(ctx: _Ctx) -> None:
     for n in ("alpha-one", "alpha-two", "beta-three"):
         await _seed_platform_skill(ctx.skill_store, name=n, required_tier=TenantPlan.FREE)
     resp = await ctx.client.get(
-        "/v1/platform/skills", params={"q": "alpha", "limit": 1, "offset": 0},
+        "/v1/platform/skills",
+        params={"q": "alpha", "limit": 1, "offset": 0},
         headers=ctx.admin_headers,
     )
     assert resp.status_code == 200
