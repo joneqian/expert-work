@@ -814,3 +814,33 @@ async def test_enable_unknown_catalog_404() -> None:
         resp = await client.post(f"/v1/mcp-servers/catalog/{uuid4()}/enable", headers=headers)
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "MCP_CATALOG_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_enable_disable_emit_audit() -> None:
+    from control_plane.audit import build_default_audit_logger
+    from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+    from helix_agent.protocol import AuditQuery
+
+    lifecycle = Lifecycle()
+    lifecycle.mark_ready()
+    audit_store = InMemoryAuditLogStore()
+    app = create_app(
+        settings=_build_settings(),
+        lifecycle=lifecycle,
+        jwt_verifier=build_test_jwt_verifier(),
+        audit_logger=build_default_audit_logger(audit_store),
+    )
+    tenant_id = uuid4()
+    token = make_test_jwt(tenant_id=tenant_id, subject=str(uuid4()), roles=("admin",))
+    headers = {"Authorization": f"Bearer {token}"}
+    await _configure_tenant(app, tenant_id)
+    cat_id = await _seed_platform_none(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        await client.post(f"/v1/mcp-servers/catalog/{cat_id}/enable", headers=headers)
+        await client.delete(f"/v1/mcp-servers/catalog/{cat_id}/enable", headers=headers)
+    page = await audit_store.query(AuditQuery(tenant_id=tenant_id))
+    actions = {r.action.value for r in page.entries}
+    assert "mcp_catalog:enable" in actions
+    assert "mcp_catalog:disable" in actions

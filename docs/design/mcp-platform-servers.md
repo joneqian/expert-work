@@ -133,6 +133,11 @@ MCP server
   - ✅ **P1b-1**(#787):`platform_mcp_pool.py` 池服务(构建器)— catalog `none`/`bearer` 行 → 进程级 `MCPServerPool`,懒建 + 代际失效。
   - ✅ **P1b-2**:装配 — `ToolEnv.platform_mcp_pool`(assembly 与文件池同层、走 `mcp_allowlist` 闸、文件池胜命名冲突)+ 三处 builder(顶层/子 agent/worker)接 provider + `AgentRuntime.invalidate_all` + catalog API create/patch/delete 钩失效(池 + 全 agent 缓存)。**真栈 live 验待**(catalog 现空,需先 P3 配 server)。
 - **P2 后端 — 租户 enable**:`mcp_allowlist` 读写端点 + tier 闸;删/废 instantiate 填字段流;**B 的 initiate 前加「租户已启用」校验**(名字在 allowlist 才许授权)。
+  - **opt-in 语义(P1b-2 interim 反转)**:assembly 中 **DB 平台目录池改为 opt-in** —— server 名必须在 `mcp_allowlist` 才注册,空 allowlist = 零目录 server(不再「空=全可见」)。文件池(operator 静态、D3 定为 DB-only 不并存→实际空)保留 Stream O 语义(空=全),故复用同一 `mcp_allowlist` 无双闸冲突。决策 #4「先启用才可见」由此落地。
+  - **enable/disable 端点(#789 + audit followup)**:`POST /v1/mcp-servers/catalog/{id}/enable` + `DELETE /v1/mcp-servers/catalog/{id}/enable`(disable)—— 解析目录项取 `name`,读 `tenant_config` → 增删 `mcp_allowlist` 名 → `_invalidate_tenant_mcp`(重建以重新过闸)。enable 带 tier 闸(`tier_satisfies`)+ 仅 `enabled` 目录项可选;两者幂等。RBAC = tenant admin(`mcp_server` write,同 instantiate)。审计 `mcp_catalog:enable`/`mcp_catalog:disable`(resource=`mcp_connector_catalog`,仅实际变更时)。无 `tenant_config` 行 → enable 返 409 `TENANT_NOT_CONFIGURED`(allowlist 落 tenant_config 首写需 display_name);disable 对无 config 幂等 no-op。
+  - **`GET /catalog`**:每项加 `tenant_enabled`(name ∈ 租户 allowlist)供前端开关态(`enabled` 字段已被目录项自身的平台启用标志占用)。
+  - **oauth `initiate` 闸**:`entry.name ∈ 租户 allowlist` 否则 403 `MCP_CATALOG_NOT_ENABLED`(A/B 统一租户启用,B 再叠 per-user 授权)。
+  - **`instantiate_catalog_entry` 退场推迟到 P4**:#789 **未动** instantiate(仍为旧 auth_schema 填字段流);删除与前端 `InstantiateCatalogForm` 退场(P4)同步,避免中间态破坏。
 - **P3 前端 — 平台配 server 表单**:`CatalogEntryDrawer` tab 重写 + 去 AuthSchemaBuilder + 修重复按钮。
 - **P4 前端 — 租户选择使用**:`CatalogBrowser` A 开关 + B 授权;退场 `InstantiateCatalogForm`。
 - **P5 收尾**:i18n/stories/e2e、文档(本设计 + runbook)、`auth_schema`/`AuthSchemaBuilder` 退场清理。

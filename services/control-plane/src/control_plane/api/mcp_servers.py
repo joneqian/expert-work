@@ -573,6 +573,7 @@ def build_mcp_servers_router() -> APIRouter:
         tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
         pool_service: Annotated[object, Depends(_get_tenant_mcp_pool_service)],
         agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> dict[str, object]:
         """Tenant opts into a platform shared server (adds it to mcp_allowlist).
 
@@ -624,6 +625,16 @@ def build_mcp_servers_router() -> APIRouter:
                 actor_id=principal.subject_id,
             )
             await _invalidate_tenant_mcp(pool_service, agent_runtime, tenant_id)
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=principal.subject_id,
+                action=AuditAction.MCP_CATALOG_ENABLE,
+                resource_type="mcp_connector_catalog",
+                resource_id=entry.name,
+                trace_id=current_trace_id_hex(),
+                details={"name": entry.name},
+            )
         return {
             "success": True,
             "data": {"name": entry.name, "tenant_enabled": True},
@@ -638,6 +649,7 @@ def build_mcp_servers_router() -> APIRouter:
         tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
         pool_service: Annotated[object, Depends(_get_tenant_mcp_pool_service)],
         agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> dict[str, object]:
         """Tenant opts out of a platform shared server (removes it from
         mcp_allowlist). Idempotent — a name already absent is a no-op."""
@@ -662,6 +674,16 @@ def build_mcp_servers_router() -> APIRouter:
                 actor_id=principal.subject_id,
             )
             await _invalidate_tenant_mcp(pool_service, agent_runtime, tenant_id)
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=principal.subject_id,
+                action=AuditAction.MCP_CATALOG_DISABLE,
+                resource_type="mcp_connector_catalog",
+                resource_id=entry.name,
+                trace_id=current_trace_id_hex(),
+                details={"name": entry.name},
+            )
         return {
             "success": True,
             "data": {"name": entry.name, "tenant_enabled": False},

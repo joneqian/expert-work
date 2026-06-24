@@ -319,6 +319,11 @@ class AuditAction(StrEnum):
     MCP_CATALOG_CREATE = "mcp_catalog:create"
     MCP_CATALOG_UPDATE = "mcp_catalog:update"
     MCP_CATALOG_DELETE = "mcp_catalog:delete"
+    # mcp_catalog tenant enable/disable (Stream MCP platform-servers, P2) —
+    # tenant admin opts a platform catalog server into / out of the tenant's
+    # ``mcp_allowlist`` (the tenant-side "选择使用" action).
+    MCP_CATALOG_ENABLE = "mcp_catalog:enable"
+    MCP_CATALOG_DISABLE = "mcp_catalog:disable"
     # rate_card (Stream Y — platform model rate card, system_admin)
     RATE_CARD_CREATE = "rate_card:create"
     RATE_CARD_UPDATE = "rate_card:update"
