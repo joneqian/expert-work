@@ -34,18 +34,37 @@ from helix_agent.persistence import (
 from helix_agent.protocol import (
     AuditAction,
     McpConnectorCatalogPatch,
+    McpConnectorCatalogRecord,
     McpConnectorCatalogUpsert,
     Principal,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.secret_store import SecretStore
 
 
 def _get_catalog_store(request: Request) -> McpConnectorCatalogStore:
     return request.app.state.mcp_connector_catalog_store  # type: ignore[no-any-return]
 
 
+def _get_secret_store(request: Request) -> SecretStore:
+    return request.app.state.secret_store  # type: ignore[no-any-return]
+
+
 def _get_audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
+
+
+def _bearer_secret_name(name: str) -> str:
+    """SecretStore key for a platform connector's shared bearer token (slug=name)."""
+    return f"helix-agent/platform/mcp/{name}/token"
+
+
+def _public(record: McpConnectorCatalogRecord) -> dict[str, object]:
+    """Response projection — never leak the ``secret://`` ref; expose only a flag."""
+    data = record.model_dump(mode="json")
+    data.pop("bearer_token_ref", None)
+    data["has_bearer_token"] = record.bearer_token_ref is not None
+    return data
 
 
 def _require_system_admin(principal: Principal) -> None:
@@ -67,12 +86,22 @@ def build_mcp_catalog_router() -> APIRouter:
         payload: McpConnectorCatalogUpsert,
         principal: Annotated[Principal, Depends(require("mcp_catalog", "write"))],
         store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> dict[str, object]:
         _require_system_admin(principal)
+        upsert = payload
+        if payload.bearer_token is not None:
+            # Platform shared bearer (A): write the token to the SecretStore and
+            # persist only the ref; the plaintext never reaches the DB / logs.
+            sname = _bearer_secret_name(payload.name)
+            await secret_store.put(sname, payload.bearer_token.get_secret_value())
+            upsert = payload.model_copy(
+                update={"bearer_token_ref": f"secret://{sname}", "bearer_token": None}
+            )
         try:
             async with bypass_rls_session():
-                record = await store.create(upsert=payload, actor_id=principal.subject_id)
+                record = await store.create(upsert=upsert, actor_id=principal.subject_id)
         except McpConnectorCatalogAlreadyExistsError as exc:
             raise HTTPException(
                 status_code=409,
@@ -93,7 +122,7 @@ def build_mcp_catalog_router() -> APIRouter:
                 "transport": record.transport,
             },  # NEVER include any secret value
         )
-        return {"success": True, "data": record.model_dump(mode="json"), "error": None}
+        return {"success": True, "data": _public(record), "error": None}
 
     @router.get("")
     async def list_catalog_entries(
@@ -106,7 +135,7 @@ def build_mcp_catalog_router() -> APIRouter:
             rows = await store.list(category=category)
         return {
             "success": True,
-            "data": [r.model_dump(mode="json") for r in rows],
+            "data": [_public(r) for r in rows],
             "error": None,
         }
 
@@ -124,7 +153,7 @@ def build_mcp_catalog_router() -> APIRouter:
                 status_code=404,
                 detail={"code": "CATALOG_NOT_FOUND", "message": "not found"},
             )
-        return {"success": True, "data": record.model_dump(mode="json"), "error": None}
+        return {"success": True, "data": _public(record), "error": None}
 
     @router.patch("/{catalog_id}")
     async def update_catalog_entry(
@@ -132,12 +161,29 @@ def build_mcp_catalog_router() -> APIRouter:
         payload: McpConnectorCatalogPatch,
         principal: Annotated[Principal, Depends(require("mcp_catalog", "write"))],
         store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
+        secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> dict[str, object]:
         _require_system_admin(principal)
+        patch = payload
+        if payload.bearer_token is not None:
+            # Re-paste the platform shared token: resolve the entry's stable name
+            # for the secret path, write the new value, persist only the ref.
+            async with bypass_rls_session():
+                existing = await store.get_by_id(catalog_id)
+            if existing is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"code": "CATALOG_NOT_FOUND", "message": "not found"},
+                )
+            sname = _bearer_secret_name(existing.name)
+            await secret_store.put(sname, payload.bearer_token.get_secret_value())
+            patch = payload.model_copy(
+                update={"bearer_token_ref": f"secret://{sname}", "bearer_token": None}
+            )
         try:
             async with bypass_rls_session():
-                record = await store.update(catalog_id=catalog_id, patch=payload)
+                record = await store.update(catalog_id=catalog_id, patch=patch)
         except McpConnectorCatalogNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
@@ -165,7 +211,7 @@ def build_mcp_catalog_router() -> APIRouter:
                 "enabled": record.enabled,
             },
         )
-        return {"success": True, "data": record.model_dump(mode="json"), "error": None}
+        return {"success": True, "data": _public(record), "error": None}
 
     @router.delete("/{catalog_id}", status_code=204)
     async def delete_catalog_entry(

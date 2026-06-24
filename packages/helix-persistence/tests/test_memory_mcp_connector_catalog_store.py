@@ -205,3 +205,37 @@ async def test_update_rejecting_cross_field_invalid_patch_persists_nothing() -> 
     after = await store.get_by_id(created.id)
     assert after is not None
     assert [f.key for f in after.auth_schema.fields] == ["token", "org"]
+
+
+@pytest.mark.asyncio
+async def test_platform_bearer_token_ref_round_trips() -> None:
+    """A platform shared-bearer entry persists ``bearer_token_ref`` (no secret
+    field) and round-trips through get/list; patch can re-set the ref."""
+    store = InMemoryMcpConnectorCatalogStore()
+    created = await store.create(
+        upsert=McpConnectorCatalogUpsert(
+            name="shared",
+            display_name="Shared",
+            transport="streamable_http",
+            url_template="https://mcp.example.com/mcp",
+            auth_type="bearer",
+            bearer_token_ref="secret://helix-agent/platform/mcp/shared/token",
+            required_tier=TenantPlan.FREE,
+        ),
+        actor_id="sysadmin",
+    )
+    assert created.bearer_token_ref == "secret://helix-agent/platform/mcp/shared/token"
+    assert created.auth_schema.secret_fields() == []
+
+    got = await store.get_by_id(created.id)
+    assert got is not None
+    assert got.bearer_token_ref == created.bearer_token_ref
+
+    updated = await store.update(
+        catalog_id=created.id,
+        patch=McpConnectorCatalogPatch(
+            bearer_token_ref="secret://helix-agent/platform/mcp/shared/token-v2"
+        ),
+    )
+    assert updated.bearer_token_ref is not None
+    assert updated.bearer_token_ref.endswith("token-v2")

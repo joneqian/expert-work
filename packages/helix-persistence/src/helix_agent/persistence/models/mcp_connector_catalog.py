@@ -48,6 +48,9 @@ class McpConnectorCatalogRow(Base):
     # (NULL for none/bearer). ``oauth_scopes`` is space-separated.
     oauth_client_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     oauth_scopes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Platform-supplied bearer token for a shared (A) server — ``secret://`` ref
+    # only, never the value (migration 0092). NULL for none/oauth2 / legacy bearer.
+    bearer_token_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     required_tier: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(
