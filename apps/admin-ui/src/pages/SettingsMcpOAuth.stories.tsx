@@ -33,6 +33,7 @@ const CATALOG: TenantCatalogEntry[] = [
     required_tier: "pro",
     enabled: true,
     entitled: true,
+    tenant_enabled: true,
     created_at: "2026-05-01T10:00:00Z",
     updated_at: "2026-05-01T10:00:00Z",
     updated_by: "u1",
