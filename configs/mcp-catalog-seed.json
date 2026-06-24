@@ -1,5 +1,18 @@
 [
   {
+    "name": "github",
+    "display_name": "GitHub",
+    "description": "GitHub repositories, issues and pull requests (per-user OAuth).",
+    "category": "dev-tools",
+    "transport": "streamable_http",
+    "url_template": "https://api.githubcopilot.com/mcp/",
+    "auth_type": "oauth2",
+    "oauth_client_id": "${MCP_OAUTH_GITHUB_CLIENT_ID}",
+    "oauth_scopes": "",
+    "required_tier": "free",
+    "enabled": true
+  },
+  {
     "name": "linear",
     "display_name": "Linear",
     "description": "Linear issue tracking and project management (per-user OAuth).",

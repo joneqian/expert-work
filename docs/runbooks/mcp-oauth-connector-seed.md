@@ -46,7 +46,19 @@ the next start.
    `GET /v1/platform/mcp-catalog` (system_admin) — the entry should be present.
 
 Env var names follow `MCP_OAUTH_<NAME>_CLIENT_ID`, upper-cased from each entry's
-`name`. The shipped template covers `linear`, `notion`, `sentry`, `atlassian`.
+`name`. The shipped template covers (W6):
+
+| Connector | Tier | env var |
+|---|---|---|
+| `github` | free | `MCP_OAUTH_GITHUB_CLIENT_ID` |
+| `linear` | pro | `MCP_OAUTH_LINEAR_CLIENT_ID` |
+| `notion` | pro | `MCP_OAUTH_NOTION_CLIENT_ID` |
+| `sentry` | pro | `MCP_OAUTH_SENTRY_CLIENT_ID` |
+| `atlassian` | pro | `MCP_OAUTH_ATLASSIAN_CLIENT_ID` |
+
+`github` ships at the **free** tier so every tenant has a usable connector
+out-of-the-box; adjust any tier via the catalog admin UI. Each connector is only
+created once its client-ID env var is set (others stay skipped until then).
 
 ## Adding a new connector
 
