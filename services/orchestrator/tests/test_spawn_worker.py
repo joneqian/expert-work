@@ -44,8 +44,17 @@ class _RecordingWorkerBuilder:
     raises: BaseException | None = None
     calls: list[dict[str, Any]] = field(default_factory=list)
 
-    async def __call__(self, *, tenant_id: UUID, role: str | None, depth: int) -> BuiltAgent:
-        self.calls.append({"tenant_id": tenant_id, "role": role, "depth": depth})
+    async def __call__(
+        self,
+        *,
+        tenant_id: UUID,
+        role: str | None,
+        depth: int,
+        oauth_user_id: str | None = None,
+    ) -> BuiltAgent:
+        self.calls.append(
+            {"tenant_id": tenant_id, "role": role, "depth": depth, "oauth_user_id": oauth_user_id}
+        )
         if self.raises is not None:
             raise self.raises
         assert self.built is not None
@@ -233,7 +242,12 @@ _PARENT = AgentSpec.model_validate(
 
 
 async def _fake_wbf(
-    parent_spec: AgentSpec, *, tenant_id: UUID, role: str | None, depth: int
+    parent_spec: AgentSpec,
+    *,
+    tenant_id: UUID,
+    role: str | None,
+    depth: int,
+    oauth_user_id: str | None = None,
 ) -> Any:
     return _built(_answer_graph("ok"))
 

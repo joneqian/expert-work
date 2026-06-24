@@ -20,6 +20,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from control_plane.runtime import make_provider_key_resolver, make_skill_resolver
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
+from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolProvider
 from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.common.skill_activity import SkillActivityRecorder
 from helix_agent.persistence.agent_spec import AgentSpecStore
@@ -31,6 +32,10 @@ from orchestrator.tools import ChildAgentBuilder
 from orchestrator.tools.spawn_worker import WorkerBuildFn
 
 logger = logging.getLogger(__name__)
+
+# Child-agent cache key: (tenant, name, version, depth); a 5th OAuth-subject
+# element is appended only for users with a connected OAuth pool (see _build).
+_ChildKey = tuple[UUID, str, str, int] | tuple[UUID, str, str, int, str]
 
 
 def _worker_system_prompt(role: str | None) -> str:
@@ -130,6 +135,7 @@ def make_child_agent_builder(
     memory_env: MemoryEnv | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
+    user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
@@ -152,10 +158,26 @@ def make_child_agent_builder(
     unresolvable ``agent_ref`` — the orchestrator turns that into a tool
     error rather than crashing the parent run.
     """
-    cache: dict[tuple[UUID, str, str, int], BuiltAgent] = {}
+    # Key: (tenant, name, version, depth), extended with the OAuth subject ONLY
+    # when that user has ≥1 connected OAuth connector (mirrors the top-level
+    # AgentRuntime cache) — so the common no-OAuth child stays shared and only
+    # OAuth users get a per-user child build (never cross-user pool sharing).
+    cache: dict[_ChildKey, BuiltAgent] = {}
 
-    async def _build(*, tenant_id: UUID, name: str, version: str, depth: int) -> BuiltAgent:
-        key = (tenant_id, name, version, depth)
+    async def _build(
+        *, tenant_id: UUID, name: str, version: str, depth: int, oauth_user_id: str | None = None
+    ) -> BuiltAgent:
+        # Resolve the caller's OAuth pool up front so the cache key can reflect it.
+        user_pool = None
+        if user_mcp_oauth_pool_provider is not None and oauth_user_id is not None:
+            candidate = await user_mcp_oauth_pool_provider(tenant_id, oauth_user_id)
+            if candidate.names():
+                user_pool = candidate
+        key: _ChildKey = (
+            (tenant_id, name, version, depth, oauth_user_id)
+            if user_pool is not None and oauth_user_id is not None
+            else (tenant_id, name, version, depth)
+        )
         cached = cache.get(key)
         if cached is not None:
             return cached
@@ -180,7 +202,12 @@ def make_child_agent_builder(
         if tenant_mcp_pool_provider is not None:
             tenant_pool = await tenant_mcp_pool_provider(tenant_id)
             if tenant_pool.names():
-                call_tool_env = replace(child_tool_env, tenant_mcp_pool=tenant_pool)
+                call_tool_env = replace(call_tool_env, tenant_mcp_pool=tenant_pool)
+        # MCP-OAUTH (OA-3b-后续) — inject the caller's per-user OAuth pool so the
+        # delegated child resolves the SAME OAuth-connected MCP servers as the
+        # parent (resolved above for the cache key).
+        if user_pool is not None:
+            call_tool_env = replace(call_tool_env, user_mcp_oauth_pool=user_pool)
         built = await build_agent(
             record.spec,
             secret_store=secret_store,
@@ -234,6 +261,7 @@ def make_worker_build_fn(
     memory_env: MemoryEnv | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
+    user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
@@ -255,6 +283,7 @@ def make_worker_build_fn(
         tenant_id: UUID,
         role: str | None,
         depth: int,
+        oauth_user_id: str | None = None,
     ) -> BuiltAgent:
         worker_spec = synthesize_worker_spec(
             parent_spec,
@@ -276,7 +305,13 @@ def make_worker_build_fn(
         if tenant_mcp_pool_provider is not None:
             tenant_pool = await tenant_mcp_pool_provider(tenant_id)
             if tenant_pool.names():
-                call_tool_env = replace(worker_tool_env, tenant_mcp_pool=tenant_pool)
+                call_tool_env = replace(call_tool_env, tenant_mcp_pool=tenant_pool)
+        # MCP-OAUTH (OA-3b-后续) — the worker inherits the caller's per-user OAuth
+        # pool (workers aren't cached, so resolve + inject inline).
+        if user_mcp_oauth_pool_provider is not None and oauth_user_id is not None:
+            user_pool = await user_mcp_oauth_pool_provider(tenant_id, oauth_user_id)
+            if user_pool.names():
+                call_tool_env = replace(call_tool_env, user_mcp_oauth_pool=user_pool)
         built = await build_agent(
             worker_spec,
             secret_store=secret_store,

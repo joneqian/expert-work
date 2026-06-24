@@ -85,8 +85,12 @@ class WorkerAgentBuilder(Protocol):
         tenant_id: UUID,
         role: str | None,
         depth: int,
+        oauth_user_id: str | None = None,
     ) -> BuiltAgent:
-        """Build an ephemeral worker for ``tenant_id`` at ``depth``."""
+        """Build an ephemeral worker for ``tenant_id`` at ``depth``.
+
+        ``oauth_user_id`` (MCP-OAUTH OA-3b-后续) lets the worker inherit the
+        caller's per-user OAuth pool; ``None`` = tenant pool only."""
 
 
 @runtime_checkable
@@ -109,6 +113,7 @@ class WorkerBuildFn(Protocol):
         tenant_id: UUID,
         role: str | None,
         depth: int,
+        oauth_user_id: str | None = None,
     ) -> BuiltAgent:
         """Synthesize a worker spec from ``parent_spec`` + ``role`` and build it."""
 
@@ -180,7 +185,12 @@ class SpawnWorkerTool:
                 meta={"spawn_worker_blocked": True, "reason": "per_run_budget"},
             )
 
-        child = await self.builder(tenant_id=ctx.tenant_id, role=role, depth=self.child_depth)
+        child = await self.builder(
+            tenant_id=ctx.tenant_id,
+            role=role,
+            depth=self.child_depth,
+            oauth_user_id=ctx.oauth_user_id,
+        )
         _workers_spawned.inc()
         async with _maybe_concurrency(budget):
             return await run_child_to_result(

@@ -348,6 +348,10 @@ def _child_config(ctx: ToolContext, *, sub_thread_id: UUID, sub_run_id: UUID) ->
     }
     if ctx.user_id is not None:
         configurable["user_id"] = str(ctx.user_id)
+    # MCP-OAUTH (OA-3b-后续): carry the caller's OAuth subject so the child's
+    # tool context resolves the same per-user OAuth pool as the parent.
+    if ctx.oauth_user_id is not None:
+        configurable["oauth_user_id"] = ctx.oauth_user_id
     if ctx.deadline_at is not None:
         configurable["deadline_at"] = ctx.deadline_at
     return {"configurable": configurable}

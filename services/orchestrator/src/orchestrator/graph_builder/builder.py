@@ -1814,10 +1814,16 @@ def _build_tool_context(config: RunnableConfig, *, plan: Plan | None = None) -> 
     # ``sse.run_agent`` and lives in config["configurable"]; ``None`` when the
     # feature is unwired. Read verbatim (mirrors cancellation_token).
     worker_spawn_budget = configurable.get("worker_spawn_budget")
+    # MCP-OAUTH (OA-3b-后续) — the caller's OAuth subject id (a string), kept
+    # distinct from user_id so a child run can resolve the same per-user OAuth
+    # pool. ``None`` when absent (no OAuth identity).
+    oauth_raw = configurable.get("oauth_user_id")
+    oauth_user_id = oauth_raw if isinstance(oauth_raw, str) and oauth_raw else None
     return ToolContext(
         tenant_id=tenant_id,
         run_id=run_id,
         user_id=user_id,
+        oauth_user_id=oauth_user_id,
         cancellation_token=cancellation_token(config),
         plan=plan,
         deadline_at=deadline_at,

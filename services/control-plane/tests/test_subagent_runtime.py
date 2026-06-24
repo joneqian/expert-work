@@ -280,3 +280,112 @@ async def test_child_builder_skips_empty_tenant_pool(
     assert len(build_calls) == 1
     tool_env = build_calls[0]["tool_env"]
     assert tool_env.tenant_mcp_pool is None
+
+
+# ---------------------------------------------------------------------------
+# MCP-OAUTH (OA-3b-后续) — user_mcp_oauth_pool_provider passthrough
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_child_builder_injects_user_oauth_pool(
+    build_calls: list[dict[str, Any]],
+) -> None:
+    """A delegated child inherits the caller's per-user OAuth pool when an
+    oauth_user_id + provider are supplied (OA-3b-后续)."""
+    from orchestrator.tools import MCPServerPool, RecordingMCPClient
+
+    user_pool = MCPServerPool()
+    await user_pool.add("linear", RecordingMCPClient())
+
+    seen: list[tuple[object, str]] = []
+
+    async def _user_provider(tid: object, uid: str) -> MCPServerPool:
+        seen.append((tid, uid))
+        return user_pool
+
+    tenant = uuid4()
+    store = InMemoryAgentSpecStore()
+    await store.create(
+        tenant_id=tenant, spec=_spec("researcher"), spec_sha256=_SHA, created_by="test"
+    )
+    builder = make_child_agent_builder(
+        spec_store=store,
+        secret_store=InMemorySecretStore(),
+        checkpointer=InMemorySaver(),
+        base_tool_env=ToolEnv(),
+        user_mcp_oauth_pool_provider=_user_provider,
+    )
+
+    await builder(
+        tenant_id=tenant, name="researcher", version="1.0.0", depth=1, oauth_user_id="kc-user-a"
+    )
+
+    assert seen == [(tenant, "kc-user-a")]
+    assert len(build_calls) == 1
+    assert build_calls[0]["tool_env"].user_mcp_oauth_pool is user_pool
+
+
+@pytest.mark.asyncio
+async def test_child_builder_oauth_pool_not_shared_across_users(
+    build_calls: list[dict[str, Any]],
+) -> None:
+    """The cache key includes the OAuth subject, so user B never gets user A's
+    cached child build (no cross-user OAuth pool leak)."""
+    from orchestrator.tools import MCPServerPool, RecordingMCPClient
+
+    pools: dict[str, MCPServerPool] = {}
+
+    async def _user_provider(tid: object, uid: str) -> MCPServerPool:
+        if uid not in pools:
+            p = MCPServerPool()
+            # one server so the pool is non-empty (extends the cache key)
+            await p.add(f"srv-{uid}", RecordingMCPClient())
+            pools[uid] = p
+        return pools[uid]
+
+    tenant = uuid4()
+    store = InMemoryAgentSpecStore()
+    await store.create(
+        tenant_id=tenant, spec=_spec("researcher"), spec_sha256=_SHA, created_by="test"
+    )
+    builder = make_child_agent_builder(
+        spec_store=store,
+        secret_store=InMemorySecretStore(),
+        checkpointer=InMemorySaver(),
+        base_tool_env=ToolEnv(),
+        user_mcp_oauth_pool_provider=_user_provider,
+    )
+
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1, oauth_user_id="A")
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1, oauth_user_id="B")
+
+    # Two distinct builds (not one shared) with each user's own pool.
+    assert len(build_calls) == 2
+    assert build_calls[0]["tool_env"].user_mcp_oauth_pool is pools["A"]
+    assert build_calls[1]["tool_env"].user_mcp_oauth_pool is pools["B"]
+
+
+@pytest.mark.asyncio
+async def test_child_builder_no_oauth_id_shares_cache(
+    build_calls: list[dict[str, Any]],
+) -> None:
+    """Without an oauth_user_id the child build is shared (no per-user key) and
+    carries no user OAuth pool — the common no-OAuth path is unchanged."""
+    tenant = uuid4()
+    store = InMemoryAgentSpecStore()
+    await store.create(
+        tenant_id=tenant, spec=_spec("researcher"), spec_sha256=_SHA, created_by="test"
+    )
+    builder = make_child_agent_builder(
+        spec_store=store,
+        secret_store=InMemorySecretStore(),
+        checkpointer=InMemorySaver(),
+        base_tool_env=ToolEnv(),
+    )
+
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+
+    assert len(build_calls) == 1  # cached, shared
+    assert build_calls[0]["tool_env"].user_mcp_oauth_pool is None

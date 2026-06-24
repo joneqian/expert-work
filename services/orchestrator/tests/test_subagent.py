@@ -74,9 +74,16 @@ class _RecordingBuilder:
         name: str,
         version: str,
         depth: int,
+        oauth_user_id: str | None = None,
     ) -> BuiltAgent:
         self.calls.append(
-            {"tenant_id": tenant_id, "name": name, "version": version, "depth": depth}
+            {
+                "tenant_id": tenant_id,
+                "name": name,
+                "version": version,
+                "depth": depth,
+                "oauth_user_id": oauth_user_id,
+            }
         )
         if self.raises is not None:
             raise self.raises
@@ -167,7 +174,13 @@ async def test_call_returns_child_final_answer() -> None:
     assert result.meta["subagent"] == "researcher"
     # agent_ref resolved + child depth handed to the builder verbatim.
     assert builder.calls == [
-        {"tenant_id": ctx.tenant_id, "name": "deep-researcher", "version": "1.0.0", "depth": 2}
+        {
+            "tenant_id": ctx.tenant_id,
+            "name": "deep-researcher",
+            "version": "1.0.0",
+            "depth": 2,
+            "oauth_user_id": ctx.oauth_user_id,
+        }
     ]
 
 
@@ -201,7 +214,12 @@ async def test_child_run_shares_parent_cancellation_token() -> None:
 
     await tool.call(
         {"task": "x"},
-        ctx=ToolContext(tenant_id=tenant, user_id=user, cancellation_token=token),
+        ctx=ToolContext(
+            tenant_id=tenant,
+            user_id=user,
+            oauth_user_id="kc-subject-x",
+            cancellation_token=token,
+        ),
     )
 
     _state, config = graph.calls[0]
@@ -210,6 +228,9 @@ async def test_child_run_shares_parent_cancellation_token() -> None:
     assert configurable[CANCELLATION_TOKEN_KEY] is token
     assert configurable["tenant_id"] == str(tenant)
     assert configurable["user_id"] == str(user)
+    # MCP-OAUTH (OA-3b-后续) — OAuth subject threads into the child config so the
+    # child resolves the same per-user OAuth pool.
+    assert configurable["oauth_user_id"] == "kc-subject-x"
     # Fresh child thread / run — delegation is one-shot.
     assert configurable["thread_id"] != configurable["run_id"]
 

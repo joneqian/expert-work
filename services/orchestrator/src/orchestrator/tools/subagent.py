@@ -74,8 +74,13 @@ class ChildAgentBuilder(Protocol):
         name: str,
         version: str,
         depth: int,
+        oauth_user_id: str | None = None,
     ) -> BuiltAgent:
-        """Build the sub-agent ``name@version`` for ``tenant_id`` at ``depth``."""
+        """Build the sub-agent ``name@version`` for ``tenant_id`` at ``depth``.
+
+        ``oauth_user_id`` (MCP-OAUTH OA-3b-后续) is the caller's OAuth subject
+        so the child inherits the same per-user OAuth pool; ``None`` = no OAuth
+        pool injected (the child still gets the tenant pool)."""
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,7 @@ class SubAgentTool:
             name=name,
             version=version,
             depth=self.child_depth,
+            oauth_user_id=ctx.oauth_user_id,
         )
         return await run_child_to_result(
             child=child,

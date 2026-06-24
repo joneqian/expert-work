@@ -567,6 +567,10 @@ async def resolve_approval_decision(
     if caller_user_id is not None:
         config["configurable"]["user_id"] = str(caller_user_id)  # type: ignore[index]
         current_user_id_var.set(caller_user_id)
+    # MCP-OAUTH (OA-3b-后续) — carry the OAuth subject so a delegated sub-agent /
+    # worker can resolve the same per-user OAuth pool (distinct from user_id).
+    if oauth_user_id is not None:
+        config["configurable"]["oauth_user_id"] = oauth_user_id  # type: ignore[index]
     worker = asyncio.create_task(
         run_agent(
             bridge=runtime.stream_bridge,
@@ -785,6 +789,10 @@ def build_runs_router() -> APIRouter:
             # applies. The background task inherits this ContextVar at
             # creation, exactly as it inherits the tenant id.
             current_user_id_var.set(caller_user_id)
+        # MCP-OAUTH (OA-3b-后续) — carry the OAuth subject (= the per-user OAuth
+        # pool key, distinct from caller_user_id) so a delegated sub-agent /
+        # worker resolves the same OAuth-connected MCP servers as this run.
+        configurable["oauth_user_id"] = request.state.principal.subject_id
         # Mini-ADR J-40 — when the manifest declares
         # ``policies.run_deadline_s > 0`` the worker pins a wall-clock
         # absolute deadline on config; SubAgentTool propagates it to

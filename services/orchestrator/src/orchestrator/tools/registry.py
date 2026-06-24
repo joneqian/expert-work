@@ -167,6 +167,13 @@ class ToolContext:
     tenant_id: UUID | None = None
     run_id: UUID | None = None
     user_id: UUID | None = None
+    #: Stream MCP-OAUTH (OA-3b-后续) — the caller's OAuth subject id (the JWT
+    #: ``sub`` / ``mcp_oauth_connection.user_id``), distinct from ``user_id``
+    #: (the ``tenant_user.id`` UUID). Carried so a ``SubAgentTool`` /
+    #: ``spawn_worker`` child can resolve the SAME per-user OAuth pool as the
+    #: parent — the child build keys its OAuth pool on this, not ``user_id``.
+    #: ``None`` when the caller has no OAuth identity (service principals).
+    oauth_user_id: str | None = None
     cancellation_token: CancellationToken | None = None
     #: Stream K.K8 — current plan (when ``workflow.type == "plan_execute"``).
     #: ``update_plan`` reads ``plan.goal`` so the agent's revised plan keeps

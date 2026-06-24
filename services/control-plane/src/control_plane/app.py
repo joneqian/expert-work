@@ -1125,6 +1125,9 @@ def create_app(
                     credentials_resolver=credentials_resolver,
                     # Stream V (Mini-ADR V-4) — tenant's own remote MCP pool.
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
+                    # MCP-OAUTH (OA-3b-后续) — delegated sub-agents inherit the
+                    # caller's per-user OAuth pool (keyed on the run's oauth_user_id).
+                    user_mcp_oauth_pool_provider=_user_mcp_oauth_pool_provider,
                     # Stream X (Mini-ADR X-4) — sub-agents resolve skills too.
                     skill_store=resolved_skill_store,
                     skill_activity_recorder=skill_activity_recorder,
@@ -1147,6 +1150,8 @@ def create_app(
                         memory_env=memory_env,
                         credentials_resolver=credentials_resolver,
                         tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
+                        # MCP-OAUTH (OA-3b-后续) — workers inherit caller OAuth pool.
+                        user_mcp_oauth_pool_provider=_user_mcp_oauth_pool_provider,
                         skill_store=resolved_skill_store,
                         skill_activity_recorder=skill_activity_recorder,
                         tenant_config_service=resolved_tenant_config_service,
