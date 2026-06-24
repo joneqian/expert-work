@@ -36,7 +36,11 @@ const CATALOG = {
       transport: "sse",
       url_template: "https://mcp.github.com/sse",
       auth_type: "bearer",
-      auth_schema: { fields: [{ key: "token", label: "Token", kind: "secret", required: true }] },
+      auth_schema: {
+        fields: [
+          { key: "token", label: "Token", kind: "secret", required: true },
+        ],
+      },
       required_tier: "pro",
       enabled: true,
       created_at: "2026-05-01T10:00:00Z",
@@ -59,7 +63,9 @@ async function login(page: import("@playwright/test").Page): Promise<void> {
   await expect(page).toHaveURL(/\/agents$/);
 }
 
-test("system_admin sees the connector catalog table + passes axe", async ({ page }) => {
+test("system_admin sees the connector catalog table + passes axe", async ({
+  page,
+}) => {
   await page.route("**/v1/me", async (route) => {
     await route.fulfill({ json: SYS_ADMIN_ME });
   });
@@ -76,15 +82,20 @@ test("system_admin sees the connector catalog table + passes axe", async ({ page
   await expect(page.getByTestId("cat-table")).toBeVisible();
   await expect(page.getByText("GitHub", { exact: true })).toBeVisible();
 
-  // Open the create drawer to surface the field builder.
+  // Open the create drawer to surface the tabbed platform-server form (P3).
+  // The Basic tab is active by default — assert its fields (Auth tab fields
+  // are force-rendered but hidden, so not toBeVisible).
   await page.getByTestId("cat-add").click();
   await expect(page.getByTestId("cce-form")).toBeVisible();
-  await expect(page.getByTestId("asb-add")).toBeVisible();
+  await expect(page.getByTestId("cce-name")).toBeVisible();
+  await expect(page.getByTestId("cce-url-template")).toBeVisible();
 
   await expectNoA11yViolations(page, "/settings/mcp-catalog");
 });
 
-test("non-admin sees system-admin-only notice + passes axe", async ({ page }) => {
+test("non-admin sees system-admin-only notice + passes axe", async ({
+  page,
+}) => {
   await login(page);
   await page.goto("/settings/mcp-catalog");
 

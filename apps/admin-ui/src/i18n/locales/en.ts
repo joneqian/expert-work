@@ -700,6 +700,21 @@ export interface TranslationKeys {
     tier_enterprise: string;
     auth_none: string;
     auth_bearer: string;
+    auth_bearer_shared: string;
+    auth_oauth2: string;
+    tab_basic: string;
+    tab_auth: string;
+    tab_advanced: string;
+    field_url: string;
+    url_hint: string;
+    field_bearer_token: string;
+    bearer_token_required: string;
+    bearer_token_keep_hint: string;
+    shared_bearer_warning: string;
+    field_oauth_client_id: string;
+    oauth_client_id_required: string;
+    field_oauth_scopes: string;
+    oauth_hint: string;
     add_title: string;
     edit_title: string;
     submit_add: string;
@@ -2405,6 +2420,23 @@ const en: TranslationKeys = {
     tier_enterprise: "Enterprise",
     auth_none: "None",
     auth_bearer: "Bearer token",
+    auth_bearer_shared: "Bearer (shared)",
+    auth_oauth2: "OAuth (per-user)",
+    tab_basic: "Basic",
+    tab_auth: "Auth",
+    tab_advanced: "Advanced",
+    field_url: "Server URL",
+    url_hint: "The concrete MCP server endpoint URL.",
+    field_bearer_token: "Platform bearer token",
+    bearer_token_required: "A bearer token is required for shared bearer auth",
+    bearer_token_keep_hint: "Leave blank to keep the stored token",
+    shared_bearer_warning:
+      "Shared identity: every enabling tenant/user uses this one token. Use only for tools without per-user/tenant data isolation — for GitHub, business systems, etc. use OAuth.",
+    field_oauth_client_id: "OAuth client ID",
+    oauth_client_id_required: "OAuth client ID is required",
+    field_oauth_scopes: "OAuth scopes",
+    oauth_hint:
+      "Each user authorizes their own account; register an OAuth app and supply its client ID.",
     add_title: "New connector",
     edit_title: "Edit connector",
     submit_add: "Create",

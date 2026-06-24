@@ -1,15 +1,20 @@
 /**
- * Create / Edit catalog connector drawer — Stream W (system_admin).
+ * Create / Edit platform MCP server drawer — Stream MCP platform-servers (P3).
  *
- * Opened from ``/settings/mcp-catalog``. Create submits
- * ``POST /v1/platform/mcp-catalog``; edit submits
- * ``PATCH /v1/platform/mcp-catalog/{id}`` with only the mutable subset
- * (``name`` and ``transport`` are immutable and disabled in edit mode).
+ * A platform admin configures a fully usable **shared** MCP server (the
+ * platform-server model replaced the old template + auth_schema flow):
  *
- * Mirrors ``CreateMcpServerDrawer`` (Drawer 560 px, ``Form.useForm``,
- * ``layout="vertical"``, footer Cancel / Submit, ``ApiError`` →
- * ``${err.code}: ${err.message}`` message, reset-on-close) and embeds the
- * ``AuthSchemaBuilder`` for the field list.
+ * - **None** — a public, unauthenticated server.
+ * - **Bearer (shared)** — the platform supplies one token; all enabling
+ *   tenants share that identity (only for tools without per-user data
+ *   isolation — a warning says so). The token is write-only: blank on edit
+ *   keeps the stored one.
+ * - **OAuth (per-user)** — the platform registers an OAuth app (client id +
+ *   scopes); each user authorizes their own account.
+ *
+ * Create → ``POST /v1/platform/mcp-catalog``; edit → ``PATCH .../{id}`` with
+ * the mutable subset (``name`` / ``transport`` / ``auth_type`` immutable).
+ * Tabs: 基本 / 认证 / 高级 (mirrors ``CreateMcpServerDrawer``).
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -21,6 +26,7 @@ import {
   Input,
   Select,
   Switch,
+  Tabs,
 } from "antd";
 import { useTranslation } from "react-i18next";
 
@@ -34,12 +40,6 @@ import {
 } from "../../api/mcp-catalog";
 import type { McpAuthType, McpTransport } from "../../api/mcp-servers";
 import { ApiError } from "../../api/client";
-import {
-  AuthSchemaBuilder,
-  stripAuthFieldUids,
-  type AuthSchemaBuilderField,
-} from "./AuthSchemaBuilder";
-import { validateAuthSchemaSecrets } from "./validation";
 
 interface CatalogEntryForm {
   name: string;
@@ -50,6 +50,9 @@ interface CatalogEntryForm {
   transport: McpTransport;
   url_template: string;
   auth_type: McpAuthType;
+  bearer_token?: string;
+  oauth_client_id?: string;
+  oauth_scopes?: string;
   required_tier: McpRequiredTier;
   enabled: boolean;
 }
@@ -68,7 +71,8 @@ const TRANSPORT_OPTIONS: { value: McpTransport; label: string }[] = [
 
 const AUTH_OPTIONS: { value: McpAuthType; labelKey: string }[] = [
   { value: "none", labelKey: "mcp_catalog.auth_none" },
-  { value: "bearer", labelKey: "mcp_catalog.auth_bearer" },
+  { value: "bearer", labelKey: "mcp_catalog.auth_bearer_shared" },
+  { value: "oauth2", labelKey: "mcp_catalog.auth_oauth2" },
 ];
 
 const TIER_OPTIONS: { value: McpRequiredTier; labelKey: string }[] = [
@@ -90,15 +94,15 @@ export function CatalogEntryDrawer({
 
   const [form] = Form.useForm<CatalogEntryForm>();
   const [submitting, setSubmitting] = useState(false);
-  const [fields, setFields] = useState<AuthSchemaBuilderField[]>([]);
-  const [guardError, setGuardError] = useState<string | null>(null);
+  const authType = Form.useWatch("auth_type", form);
 
   const isEditing = editing !== null && editing !== undefined;
+  const effectiveAuth: McpAuthType = isEditing
+    ? editing.auth_type
+    : (authType ?? "none");
 
   const reset = useCallback(() => {
     form.resetFields();
-    setFields([]);
-    setGuardError(null);
   }, [form]);
 
   useEffect(() => {
@@ -116,10 +120,11 @@ export function CatalogEntryDrawer({
         transport: editing.transport,
         url_template: editing.url_template,
         auth_type: editing.auth_type,
+        oauth_client_id: editing.oauth_client_id ?? undefined,
+        oauth_scopes: editing.oauth_scopes ?? undefined,
         required_tier: editing.required_tier,
         enabled: editing.enabled,
       });
-      setFields(editing.auth_schema?.fields ?? []);
     } else {
       form.setFieldsValue({
         transport: "sse",
@@ -127,9 +132,7 @@ export function CatalogEntryDrawer({
         required_tier: "free",
         enabled: true,
       });
-      setFields([]);
     }
-    setGuardError(null);
   }, [open, editing, form, reset]);
 
   const handleCancel = useCallback(() => {
@@ -144,21 +147,6 @@ export function CatalogEntryDrawer({
     } catch {
       return;
     }
-    // Client-side guard mirrors the backend bearer/none secret rule.
-    // auth_type is immutable post-create, so in edit mode the effective
-    // value is the existing entry's auth_type (the Select is disabled).
-    const effectiveAuthType = editing ? editing.auth_type : values.auth_type;
-    const guard = validateAuthSchemaSecrets(effectiveAuthType, fields);
-    if (guard !== null) {
-      setGuardError(t(guard));
-      return;
-    }
-    setGuardError(null);
-
-    // Strip the internal-only ``_uid`` React key — the backend
-    // ``McpConnectorAuthField`` is ``extra="forbid"`` and would 422 on it.
-    const cleanFields = stripAuthFieldUids(fields);
-
     setSubmitting(true);
     try {
       if (editing) {
@@ -168,10 +156,13 @@ export function CatalogEntryDrawer({
           category: values.category ?? "",
           icon: values.icon ?? "",
           url_template: values.url_template,
-          auth_schema: { fields: cleanFields },
           required_tier: values.required_tier,
           enabled: values.enabled,
         };
+        // Write-only: only send the token when the admin typed a new one.
+        if (editing.auth_type === "bearer" && values.bearer_token) {
+          body.bearer_token = values.bearer_token;
+        }
         await updatePlatformCatalogEntry(editing.id, body);
       } else {
         const body: CatalogUpsertBody = {
@@ -183,10 +174,16 @@ export function CatalogEntryDrawer({
           transport: values.transport,
           url_template: values.url_template,
           auth_type: values.auth_type,
-          auth_schema: { fields: cleanFields },
           required_tier: values.required_tier,
           enabled: values.enabled,
         };
+        if (values.auth_type === "bearer") {
+          body.bearer_token = values.bearer_token;
+        }
+        if (values.auth_type === "oauth2") {
+          body.oauth_client_id = values.oauth_client_id;
+          body.oauth_scopes = values.oauth_scopes ?? "";
+        }
         await createPlatformCatalogEntry(body);
       }
       onSaved();
@@ -203,18 +200,217 @@ export function CatalogEntryDrawer({
     } finally {
       setSubmitting(false);
     }
-  }, [form, fields, editing, message, onSaved, onClose, reset, t]);
+  }, [form, editing, message, onSaved, onClose, reset]);
+
+  const basicTab = (
+    <>
+      <Form.Item
+        name="name"
+        label={t("mcp_catalog.field_name")}
+        extra={t("mcp_catalog.field_name_hint")}
+        rules={[
+          { required: true, message: t("mcp_catalog.name_required") },
+          { pattern: NAME_PATTERN, message: t("mcp_catalog.name_required") },
+        ]}
+      >
+        <Input
+          data-testid="cce-name"
+          disabled={isEditing}
+          maxLength={64}
+          placeholder="github"
+        />
+      </Form.Item>
+      <Form.Item
+        name="display_name"
+        label={t("mcp_catalog.field_display_name")}
+        rules={[
+          { required: true, message: t("mcp_catalog.display_name_required") },
+        ]}
+      >
+        <Input
+          data-testid="cce-display-name"
+          maxLength={128}
+          placeholder="GitHub"
+        />
+      </Form.Item>
+      <Form.Item name="description" label={t("mcp_catalog.field_description")}>
+        <Input.TextArea
+          data-testid="cce-description"
+          maxLength={512}
+          rows={2}
+        />
+      </Form.Item>
+      <Form.Item name="category" label={t("mcp_catalog.field_category")}>
+        <Input
+          data-testid="cce-category"
+          maxLength={64}
+          placeholder="dev-tools"
+        />
+      </Form.Item>
+      <Form.Item name="icon" label={t("mcp_catalog.field_icon")}>
+        <Input
+          data-testid="cce-icon"
+          maxLength={256}
+          placeholder="https://… or emoji"
+        />
+      </Form.Item>
+      <Form.Item name="transport" label={t("mcp_catalog.field_transport")}>
+        <Select<McpTransport>
+          data-testid="cce-transport"
+          aria-label={t("mcp_catalog.field_transport")}
+          options={TRANSPORT_OPTIONS}
+          disabled={isEditing}
+        />
+      </Form.Item>
+      <Form.Item
+        name="url_template"
+        label={t("mcp_catalog.field_url")}
+        extra={t("mcp_catalog.url_hint")}
+        rules={[
+          { required: true, message: t("mcp_catalog.url_template_required") },
+        ]}
+      >
+        <Input
+          data-testid="cce-url-template"
+          maxLength={2048}
+          placeholder="https://mcp.example.com/mcp"
+        />
+      </Form.Item>
+    </>
+  );
+
+  const authTab = (
+    <>
+      <Form.Item name="auth_type" label={t("mcp_catalog.field_auth")}>
+        <Select<McpAuthType>
+          data-testid="cce-auth"
+          aria-label={t("mcp_catalog.field_auth")}
+          options={AUTH_OPTIONS.map((o) => ({
+            value: o.value,
+            label: t(o.labelKey),
+          }))}
+          disabled={isEditing}
+        />
+      </Form.Item>
+      {effectiveAuth === "bearer" && (
+        <>
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            data-testid="cce-shared-warning"
+            message={t("mcp_catalog.shared_bearer_warning")}
+          />
+          <Form.Item
+            name="bearer_token"
+            label={t("mcp_catalog.field_bearer_token")}
+            extra={
+              isEditing ? t("mcp_catalog.bearer_token_keep_hint") : undefined
+            }
+            rules={
+              isEditing
+                ? []
+                : [
+                    {
+                      required: true,
+                      message: t("mcp_catalog.bearer_token_required"),
+                    },
+                  ]
+            }
+          >
+            <Input.Password
+              data-testid="cce-bearer-token"
+              maxLength={4096}
+              autoComplete="off"
+              placeholder={isEditing ? "••••••••" : ""}
+            />
+          </Form.Item>
+        </>
+      )}
+      {effectiveAuth === "oauth2" && (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={t("mcp_catalog.oauth_hint")}
+          />
+          <Form.Item
+            name="oauth_client_id"
+            label={t("mcp_catalog.field_oauth_client_id")}
+            rules={[
+              {
+                required: true,
+                message: t("mcp_catalog.oauth_client_id_required"),
+              },
+            ]}
+          >
+            <Input
+              data-testid="cce-oauth-client-id"
+              maxLength={256}
+              disabled={isEditing}
+            />
+          </Form.Item>
+          <Form.Item
+            name="oauth_scopes"
+            label={t("mcp_catalog.field_oauth_scopes")}
+          >
+            <Input
+              data-testid="cce-oauth-scopes"
+              maxLength={512}
+              disabled={isEditing}
+              placeholder="read write"
+            />
+          </Form.Item>
+        </>
+      )}
+    </>
+  );
+
+  const advancedTab = (
+    <>
+      <Form.Item
+        name="required_tier"
+        label={t("mcp_catalog.field_required_tier")}
+      >
+        <Select<McpRequiredTier>
+          data-testid="cce-tier"
+          aria-label={t("mcp_catalog.field_required_tier")}
+          options={TIER_OPTIONS.map((o) => ({
+            value: o.value,
+            label: t(o.labelKey),
+          }))}
+        />
+      </Form.Item>
+      <Form.Item
+        name="enabled"
+        label={t("mcp_catalog.field_enabled")}
+        valuePropName="checked"
+      >
+        <Switch
+          aria-label={t("mcp_catalog.field_enabled")}
+          data-testid="cce-enabled"
+        />
+      </Form.Item>
+    </>
+  );
 
   return (
     <Drawer
       open={open}
       onClose={handleCancel}
-      title={isEditing ? t("mcp_catalog.edit_title") : t("mcp_catalog.add_title")}
+      title={
+        isEditing ? t("mcp_catalog.edit_title") : t("mcp_catalog.add_title")
+      }
       width={560}
       destroyOnHidden
       footer={
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button onClick={handleCancel} disabled={submitting} data-testid="cce-cancel">
+          <Button
+            onClick={handleCancel}
+            disabled={submitting}
+            data-testid="cce-cancel"
+          >
             {t("common.cancel")}
           </Button>
           <Button
@@ -223,98 +419,37 @@ export function CatalogEntryDrawer({
             onClick={handleSubmit}
             data-testid="cce-submit"
           >
-            {isEditing ? t("mcp_catalog.submit_save") : t("mcp_catalog.submit_add")}
+            {isEditing
+              ? t("mcp_catalog.submit_save")
+              : t("mcp_catalog.submit_add")}
           </Button>
         </div>
       }
     >
       <Form form={form} layout="vertical" data-testid="cce-form">
-        <Form.Item
-          name="name"
-          label={t("mcp_catalog.field_name")}
-          extra={t("mcp_catalog.field_name_hint")}
-          rules={[
-            { required: true, message: t("mcp_catalog.name_required") },
-            { pattern: NAME_PATTERN, message: t("mcp_catalog.name_required") },
+        <Tabs
+          defaultActiveKey="basic"
+          items={[
+            {
+              key: "basic",
+              label: t("mcp_catalog.tab_basic"),
+              children: basicTab,
+              forceRender: true,
+            },
+            {
+              key: "auth",
+              label: t("mcp_catalog.tab_auth"),
+              children: authTab,
+              forceRender: true,
+            },
+            {
+              key: "advanced",
+              label: t("mcp_catalog.tab_advanced"),
+              children: advancedTab,
+              forceRender: true,
+            },
           ]}
-        >
-          <Input data-testid="cce-name" disabled={isEditing} maxLength={64} placeholder="github" />
-        </Form.Item>
-
-        <Form.Item
-          name="display_name"
-          label={t("mcp_catalog.field_display_name")}
-          rules={[{ required: true, message: t("mcp_catalog.display_name_required") }]}
-        >
-          <Input data-testid="cce-display-name" maxLength={128} placeholder="GitHub" />
-        </Form.Item>
-
-        <Form.Item name="description" label={t("mcp_catalog.field_description")}>
-          <Input.TextArea data-testid="cce-description" maxLength={512} rows={2} />
-        </Form.Item>
-
-        <Form.Item name="category" label={t("mcp_catalog.field_category")}>
-          <Input data-testid="cce-category" maxLength={64} placeholder="dev-tools" />
-        </Form.Item>
-
-        <Form.Item name="icon" label={t("mcp_catalog.field_icon")}>
-          <Input data-testid="cce-icon" maxLength={256} placeholder="https://… or emoji" />
-        </Form.Item>
-
-        <Form.Item name="transport" label={t("mcp_catalog.field_transport")}>
-          <Select<McpTransport>
-            data-testid="cce-transport"
-            options={TRANSPORT_OPTIONS}
-            disabled={isEditing}
-          />
-        </Form.Item>
-
-        <Form.Item
-          name="url_template"
-          label={t("mcp_catalog.field_url_template")}
-          extra={t("mcp_catalog.url_template_hint")}
-          rules={[{ required: true, message: t("mcp_catalog.url_template_required") }]}
-        >
-          <Input
-            data-testid="cce-url-template"
-            maxLength={2048}
-            placeholder="https://mcp.example.com/{workspace}/sse"
-          />
-        </Form.Item>
-
-        <Form.Item name="auth_type" label={t("mcp_catalog.field_auth")}>
-          <Select<McpAuthType>
-            data-testid="cce-auth"
-            options={AUTH_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-            disabled={isEditing}
-            onChange={() => setGuardError(null)}
-          />
-        </Form.Item>
-
-        <Form.Item name="required_tier" label={t("mcp_catalog.field_required_tier")}>
-          <Select<McpRequiredTier>
-            data-testid="cce-tier"
-            options={TIER_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-          />
-        </Form.Item>
-
-        <Form.Item label={t("mcp_catalog.field_auth_schema")} extra={t("mcp_catalog.auth_schema_hint")}>
-          <AuthSchemaBuilder value={fields} onChange={setFields} />
-        </Form.Item>
-
-        {guardError !== null && (
-          <Alert
-            type="error"
-            showIcon
-            data-testid="cce-guard-error"
-            message={guardError}
-            style={{ marginBottom: 16 }}
-          />
-        )}
-
-        <Form.Item name="enabled" label={t("mcp_catalog.field_enabled")} valuePropName="checked">
-          <Switch aria-label={t("mcp_catalog.field_enabled")} data-testid="cce-enabled" />
-        </Form.Item>
+        />
       </Form>
     </Drawer>
   );

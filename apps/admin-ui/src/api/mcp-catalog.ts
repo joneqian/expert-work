@@ -41,9 +41,17 @@ export interface McpCatalogEntry {
   category: string;
   icon: string;
   transport: McpTransport;
+  /** Concrete server URL (the platform-server model dropped the {param}
+   *  template + auth_schema fields). */
   url_template: string;
   auth_type: McpAuthType;
   auth_schema: McpCatalogAuthSchema;
+  /** oauth2 entries: the platform-registered OAuth app. */
+  oauth_client_id?: string | null;
+  oauth_scopes?: string | null;
+  /** bearer (shared A) entries: whether a platform token is stored (the ref
+   *  itself is never exposed). */
+  has_bearer_token?: boolean;
   required_tier: McpRequiredTier;
   enabled: boolean;
   created_at: string;
@@ -65,21 +73,28 @@ export interface CatalogUpsertBody {
   category?: string;
   icon?: string;
   transport: McpTransport;
+  /** Concrete server URL. */
   url_template: string;
   auth_type?: McpAuthType;
-  auth_schema?: McpCatalogAuthSchema;
+  /** bearer (shared A): write-only platform token; stored in the SecretStore,
+   *  only a ref is persisted. */
+  bearer_token?: string;
+  /** oauth2 (B): platform-registered OAuth app + space-separated scopes. */
+  oauth_client_id?: string;
+  oauth_scopes?: string;
   required_tier?: McpRequiredTier;
   enabled?: boolean;
 }
 
-/** Patch body — ``name`` / ``transport`` are immutable and excluded. */
+/** Patch body — ``name`` / ``transport`` / ``auth_type`` are immutable. */
 export interface CatalogPatchBody {
   display_name?: string;
   description?: string;
   category?: string;
   icon?: string;
   url_template?: string;
-  auth_schema?: McpCatalogAuthSchema;
+  /** Re-paste the platform bearer token (write-only); omit to keep existing. */
+  bearer_token?: string;
   required_tier?: McpRequiredTier;
   enabled?: boolean;
 }
@@ -109,8 +124,12 @@ export async function createPlatformCatalogEntry(
 }
 
 /** ``GET /v1/platform/mcp-catalog/{id}`` — single connector type. */
-export async function getPlatformCatalogEntry(id: string): Promise<McpCatalogEntry> {
-  return getJson<McpCatalogEntry>(`/v1/platform/mcp-catalog/${encodeURIComponent(id)}`);
+export async function getPlatformCatalogEntry(
+  id: string,
+): Promise<McpCatalogEntry> {
+  return getJson<McpCatalogEntry>(
+    `/v1/platform/mcp-catalog/${encodeURIComponent(id)}`,
+  );
 }
 
 /** ``PATCH /v1/platform/mcp-catalog/{id}`` — update a mutable subset. */

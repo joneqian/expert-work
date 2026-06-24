@@ -21,7 +21,10 @@ import { AuthSchemaBuilder } from "../../components/mcp_catalog/AuthSchemaBuilde
 import { validateAuthSchemaSecrets } from "../../components/mcp_catalog/validation";
 import { AuthProvider } from "../../auth/AuthContext";
 import { apiClient, setStoredToken } from "../../api/client";
-import type { McpCatalogAuthField, TenantCatalogEntry } from "../../api/mcp-catalog";
+import type {
+  McpCatalogAuthField,
+  TenantCatalogEntry,
+} from "../../api/mcp-catalog";
 
 const TENANT = "00000000-0000-0000-0000-00000000acme";
 
@@ -63,7 +66,11 @@ const ENTRY = {
   transport: "sse" as const,
   url_template: "https://mcp.github.com/sse",
   auth_type: "bearer" as const,
-  auth_schema: { fields: [{ key: "token", label: "Token", kind: "secret" as const, required: true }] },
+  auth_schema: {
+    fields: [
+      { key: "token", label: "Token", kind: "secret" as const, required: true },
+    ],
+  },
   required_tier: "pro" as const,
   enabled: true,
   created_at: "2026-05-01T10:00:00Z",
@@ -91,10 +98,15 @@ beforeEach(() => {
 describe("SettingsMcpCatalog page", () => {
   it("non-system-admin sees the admin-only notice, no table", async () => {
     installAdapter([
-      { match: (u) => u.endsWith("/mcp-catalog"), respond: () => ({ success: true, data: [], error: null }) },
+      {
+        match: (u) => u.endsWith("/mcp-catalog"),
+        respond: () => ({ success: true, data: [], error: null }),
+      },
     ]);
     renderCatalog(["admin"]);
-    await waitFor(() => expect(screen.getByTestId("cat-not-admin")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("cat-not-admin")).toBeInTheDocument(),
+    );
     expect(screen.queryByTestId("cat-table")).not.toBeInTheDocument();
   });
 
@@ -106,22 +118,33 @@ describe("SettingsMcpCatalog page", () => {
       },
     ]);
     renderCatalog(["system_admin"]);
-    await waitFor(() => expect(screen.getByTestId("cat-table")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("cat-table")).toBeInTheDocument(),
+    );
     expect(screen.getByText("GitHub")).toBeInTheDocument();
     expect(screen.getByTestId("cat-toggle-github")).toBeInTheDocument();
     expect(screen.getByTestId("cat-edit-github")).toBeInTheDocument();
   });
 
-  it("opening New connector reveals the field builder + form", async () => {
+  it("opening New connector reveals the tabbed form", async () => {
     installAdapter([
-      { match: (u) => u.endsWith("/mcp-catalog"), respond: () => ({ success: true, data: [], error: null }) },
+      {
+        match: (u) => u.endsWith("/mcp-catalog"),
+        respond: () => ({ success: true, data: [], error: null }),
+      },
     ]);
     const user = userEvent.setup();
     renderCatalog(["system_admin"]);
-    await waitFor(() => expect(screen.getByTestId("cat-add")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("cat-add")).toBeInTheDocument(),
+    );
     await user.click(screen.getByTestId("cat-add"));
-    await waitFor(() => expect(screen.getByTestId("cce-form")).toBeInTheDocument());
-    expect(screen.getByTestId("asb-add")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
+    );
+    // Tabs force-render: basic (name/url) + auth (auth_type) fields are present.
+    expect(screen.getByTestId("cce-name")).toBeInTheDocument();
+    expect(screen.getByTestId("cce-auth")).toBeInTheDocument();
   });
 });
 
@@ -129,10 +152,17 @@ describe("CatalogEntryDrawer edit mode", () => {
   it("disables the immutable name/transport/auth_type selects when editing", async () => {
     render(
       <App>
-        <CatalogEntryDrawer open onClose={() => {}} onSaved={() => {}} editing={ENTRY} />
+        <CatalogEntryDrawer
+          open
+          onClose={() => {}}
+          onSaved={() => {}}
+          editing={ENTRY}
+        />
       </App>,
     );
-    await waitFor(() => expect(screen.getByTestId("cce-form")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
+    );
     // auth_type Select is immutable post-create (backend patch omits it).
     const authSelect = screen.getByTestId("cce-auth");
     expect(authSelect.className).toContain("ant-select-disabled");
@@ -142,7 +172,7 @@ describe("CatalogEntryDrawer edit mode", () => {
     expect(transportSelect.className).toContain("ant-select-disabled");
   });
 
-  it("does not send auth_type or _uid in the PATCH body", async () => {
+  it("PATCH body omits immutable auth_type / auth_schema / name; keeps token blank", async () => {
     let captured: { method?: string; body?: unknown } = {};
     apiClient.defaults.adapter = (config) => {
       captured = { method: config.method, body: config.data };
@@ -159,28 +189,28 @@ describe("CatalogEntryDrawer edit mode", () => {
     const user = userEvent.setup();
     render(
       <App>
-        <CatalogEntryDrawer open onClose={() => {}} onSaved={onSaved} editing={ENTRY} />
+        <CatalogEntryDrawer
+          open
+          onClose={() => {}}
+          onSaved={onSaved}
+          editing={ENTRY}
+        />
       </App>,
     );
-    await waitFor(() => expect(screen.getByTestId("cce-form")).toBeInTheDocument());
-    // Append a brand-new builder row (gets an internal _uid) then fill it so
-    // the bearer-one-secret guard still passes (ENTRY already has one secret;
-    // make the new one a param).
-    await user.click(screen.getByTestId("asb-add"));
-    await waitFor(() => expect(screen.getByTestId("asb-row-1")).toBeInTheDocument());
-    fireEvent.change(screen.getByTestId("asb-key-1"), { target: { value: "workspace" } });
-    fireEvent.change(screen.getByTestId("asb-label-1"), { target: { value: "Workspace" } });
+    await waitFor(() =>
+      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
+    );
+    // Submit without re-pasting the bearer token (blank = keep stored one).
     await user.click(screen.getByTestId("cce-submit"));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(captured.method).toBe("patch");
-    const body = JSON.parse(captured.body as string) as {
-      auth_type?: unknown;
-      auth_schema: { fields: Record<string, unknown>[] };
-    };
+    const body = JSON.parse(captured.body as string) as Record<string, unknown>;
+    // Immutable / dropped fields never appear in the patch.
     expect(body.auth_type).toBeUndefined();
-    for (const field of body.auth_schema.fields) {
-      expect(field).not.toHaveProperty("_uid");
-    }
+    expect(body.auth_schema).toBeUndefined();
+    expect(body.name).toBeUndefined();
+    // Token not re-pasted → not sent (write-only, blank-to-keep).
+    expect(body.bearer_token).toBeUndefined();
   });
 });
 
@@ -207,7 +237,14 @@ describe("CatalogBrowser entitlement lock", () => {
     render(
       <App>
         <CatalogBrowser
-          entries={[makeEntry({ id: "e2", name: "locked", entitled: false, required_tier: "enterprise" })]}
+          entries={[
+            makeEntry({
+              id: "e2",
+              name: "locked",
+              entitled: false,
+              required_tier: "enterprise",
+            }),
+          ]}
           loading={false}
           error={null}
           onSelect={() => {}}
@@ -234,10 +271,14 @@ describe("AuthSchemaBuilder", () => {
       </App>,
     );
     await user.click(screen.getByTestId("asb-add"));
-    await waitFor(() => expect(screen.getByTestId("asb-row-0")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("asb-row-0")).toBeInTheDocument(),
+    );
     expect(current).toHaveLength(1);
     await user.click(screen.getByTestId("asb-remove-0"));
-    await waitFor(() => expect(screen.queryByTestId("asb-row-0")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByTestId("asb-row-0")).not.toBeInTheDocument(),
+    );
     expect(current).toHaveLength(0);
   });
 
@@ -253,7 +294,9 @@ describe("AuthSchemaBuilder", () => {
         <AuthSchemaBuilder value={current} onChange={onChange} />
       </App>,
     );
-    fireEvent.change(screen.getByTestId("asb-key-0"), { target: { value: "workspace" } });
+    fireEvent.change(screen.getByTestId("asb-key-0"), {
+      target: { value: "workspace" },
+    });
     expect(onChange).toHaveBeenCalled();
     expect(current[0].key).toBe("workspace");
   });
@@ -274,7 +317,11 @@ describe("InstantiateCatalogForm", () => {
   it("renders an input per auth_schema field (param=text, secret=password)", () => {
     render(
       <App>
-        <InstantiateCatalogForm entry={entry} onCreated={() => {}} onBack={() => {}} />
+        <InstantiateCatalogForm
+          entry={entry}
+          onCreated={() => {}}
+          onBack={() => {}}
+        />
       </App>,
     );
     expect(screen.getByTestId("icf-field-workspace")).toBeInTheDocument();
@@ -287,7 +334,11 @@ describe("InstantiateCatalogForm", () => {
     apiClient.defaults.adapter = (config) => {
       captured = { url: config.url, body: config.data };
       return Promise.resolve({
-        data: { success: true, data: { ...ENTRY, name: "github", url: "https://x" }, error: null },
+        data: {
+          success: true,
+          data: { ...ENTRY, name: "github", url: "https://x" },
+          error: null,
+        },
         status: 201,
         statusText: "Created",
         headers: {},
@@ -299,7 +350,11 @@ describe("InstantiateCatalogForm", () => {
     const user = userEvent.setup();
     render(
       <App>
-        <InstantiateCatalogForm entry={entry} onCreated={onCreated} onBack={() => {}} />
+        <InstantiateCatalogForm
+          entry={entry}
+          onCreated={onCreated}
+          onBack={() => {}}
+        />
       </App>,
     );
     await user.type(screen.getByTestId("icf-field-workspace"), "acme");
@@ -321,7 +376,12 @@ describe("InstantiateCatalogForm", () => {
       entitled: true,
       auth_schema: {
         fields: [
-          { key: "workspace", label: "Workspace", kind: "param", required: false },
+          {
+            key: "workspace",
+            label: "Workspace",
+            kind: "param",
+            required: false,
+          },
           { key: "token", label: "API Token", kind: "secret", required: true },
         ],
       },
@@ -330,7 +390,11 @@ describe("InstantiateCatalogForm", () => {
     apiClient.defaults.adapter = (config) => {
       captured = { body: config.data };
       return Promise.resolve({
-        data: { success: true, data: { ...ENTRY, name: "github", url: "https://x" }, error: null },
+        data: {
+          success: true,
+          data: { ...ENTRY, name: "github", url: "https://x" },
+          error: null,
+        },
         status: 201,
         statusText: "Created",
         headers: {},
@@ -342,7 +406,11 @@ describe("InstantiateCatalogForm", () => {
     const user = userEvent.setup();
     render(
       <App>
-        <InstantiateCatalogForm entry={optionalEntry} onCreated={onCreated} onBack={() => {}} />
+        <InstantiateCatalogForm
+          entry={optionalEntry}
+          onCreated={onCreated}
+          onBack={() => {}}
+        />
       </App>,
     );
     // Leave the optional "workspace" param blank; only fill the secret.
@@ -360,7 +428,9 @@ describe("InstantiateCatalogForm", () => {
 
 describe("validateAuthSchemaSecrets guard", () => {
   it("bearer requires exactly one secret", () => {
-    expect(validateAuthSchemaSecrets("bearer", [])).toBe("mcp_catalog.guard_bearer_one_secret");
+    expect(validateAuthSchemaSecrets("bearer", [])).toBe(
+      "mcp_catalog.guard_bearer_one_secret",
+    );
     expect(
       validateAuthSchemaSecrets("bearer", [
         { key: "a", label: "A", kind: "secret", required: true },
@@ -368,16 +438,22 @@ describe("validateAuthSchemaSecrets guard", () => {
       ]),
     ).toBe("mcp_catalog.guard_bearer_one_secret");
     expect(
-      validateAuthSchemaSecrets("bearer", [{ key: "a", label: "A", kind: "secret", required: true }]),
+      validateAuthSchemaSecrets("bearer", [
+        { key: "a", label: "A", kind: "secret", required: true },
+      ]),
     ).toBeNull();
   });
 
   it("none forbids any secret", () => {
     expect(
-      validateAuthSchemaSecrets("none", [{ key: "a", label: "A", kind: "secret", required: true }]),
+      validateAuthSchemaSecrets("none", [
+        { key: "a", label: "A", kind: "secret", required: true },
+      ]),
     ).toBe("mcp_catalog.guard_none_zero_secret");
     expect(
-      validateAuthSchemaSecrets("none", [{ key: "a", label: "A", kind: "param", required: true }]),
+      validateAuthSchemaSecrets("none", [
+        { key: "a", label: "A", kind: "param", required: true },
+      ]),
     ).toBeNull();
   });
 });
