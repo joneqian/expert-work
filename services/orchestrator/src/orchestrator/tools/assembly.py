@@ -129,6 +129,13 @@ class ToolEnv:
     #: caller's own and never gated by the allowlist; ``None`` → the user has no
     #: connected OAuth connectors.
     user_mcp_oauth_pool: MCPServerPool | None = None
+    #: Stream MCP platform-servers (P1b) — the platform-curated SHARED MCP
+    #: servers (``none``/``bearer`` catalog rows, a ``bearer`` row carrying the
+    #: platform's own token), built process-globally by the control plane from
+    #: ``mcp_connector_catalog``. Like ``mcp_pool`` (the operator file pool) it
+    #: is a platform pool gated per-tenant by ``mcp_allowlist``; ``None`` → no
+    #: shared catalog servers configured.
+    platform_mcp_pool: MCPServerPool | None = None
     #: Sandbox Supervisor client backing the ``exec_python`` builtin (F.4).
     supervisor_client: SupervisorClient | None = None
     #: Artifact registry backing the ``save_artifact`` / ``list_artifacts``
@@ -575,10 +582,16 @@ def _register_http(registry: ToolRegistry, env: ToolEnv) -> None:
 
 
 async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv) -> None:
-    if env.mcp_pool is None and env.tenant_mcp_pool is None and env.user_mcp_oauth_pool is None:
+    if (
+        env.mcp_pool is None
+        and env.platform_mcp_pool is None
+        and env.tenant_mcp_pool is None
+        and env.user_mcp_oauth_pool is None
+    ):
         raise AgentFactoryError(
             "'mcp' tool declared but no MCP server pool is configured "
-            "(ToolEnv.mcp_pool / ToolEnv.tenant_mcp_pool / ToolEnv.user_mcp_oauth_pool)"
+            "(ToolEnv.mcp_pool / ToolEnv.platform_mcp_pool / ToolEnv.tenant_mcp_pool / "
+            "ToolEnv.user_mcp_oauth_pool)"
         )
     allow = set(entry.allow_tools) or None
     server_select = set(entry.servers) or None  # None = no per-agent restriction
@@ -607,6 +620,32 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
             # can't shadow a platform server by crafting allow_tools.
             # Server-level dedup is sufficient because tools are namespaced
             # mcp:<server>.<tool>.
+            registered_servers.add(server_name)
+
+    # Platform shared catalog pool (P1b) — the platform-curated SHARED servers,
+    # gated by the same per-tenant allowlist as the operator file pool. A name
+    # already reserved by the file pool wins (skip the duplicate). Reserves the
+    # server NAME unconditionally so a tenant can't shadow it via allow_tools.
+    if env.platform_mcp_pool is not None:
+        server_allow = set(env.mcp_allowlist) or None
+        for server_name in env.platform_mcp_pool.names():
+            if server_name in registered_servers:
+                logger.info("platform_mcp.server_shadowed_by_file_pool")
+                continue
+            if server_allow is not None and server_name not in server_allow:
+                continue
+            if server_select is not None and server_name not in server_select:
+                continue
+            client = env.platform_mcp_pool.get(server_name)
+            if client is None:  # pragma: no cover - name came from names()
+                continue
+            await register_mcp_tools(
+                server_name=server_name,
+                client=client,
+                registry=registry,
+                allow_tools=allow,
+                deferred=True,
+            )
             registered_servers.add(server_name)
 
     # Tenant pool — the tenant's own remote servers; never gated by the

@@ -257,6 +257,62 @@ async def test_invalidate_tenant_fans_out_to_registered_hooks() -> None:
 
 
 # ---------------------------------------------------------------------------
+# AgentRuntime.invalidate_all (Stream MCP platform-servers, P1b)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_invalidate_all_drops_every_tenants_cached_agents() -> None:
+    """invalidate_all() drops the whole cache — a platform-pool change feeds
+    every tenant, so every cached build must rebuild."""
+    builds: list[UUID | None] = []
+
+    async def _builder(
+        spec: AgentSpec, *, tenant_id: UUID | None = None, user_id: str | None = None
+    ) -> object:
+        builds.append(tenant_id)
+        return object()
+
+    runtime = AgentRuntime(
+        run_manager=RunManager(store=None),  # type: ignore[arg-type]
+        stream_bridge=InMemoryStreamBridge(),
+        agent_builder=_builder,  # type: ignore[arg-type]
+    )
+    a, b = uuid4(), uuid4()
+    spec = _make_spec(name="x", version="1")
+    await runtime.get_agent(tenant_id=a, name="x", version="1", spec=spec)
+    await runtime.get_agent(tenant_id=b, name="x", version="1", spec=spec)
+    assert len(builds) == 2
+
+    runtime.invalidate_all()
+
+    # both tenants rebuild
+    await runtime.get_agent(tenant_id=a, name="x", version="1", spec=spec)
+    await runtime.get_agent(tenant_id=b, name="x", version="1", spec=spec)
+    assert len(builds) == 4
+
+
+@pytest.mark.asyncio
+async def test_invalidate_all_fans_out_to_registered_clear_hooks() -> None:
+    """invalidate_all fans out to clear-all hooks (the sub-agent builder cache)."""
+
+    async def _builder(
+        spec: AgentSpec, *, tenant_id: UUID | None = None, user_id: str | None = None
+    ) -> object:
+        return object()
+
+    runtime = AgentRuntime(
+        run_manager=RunManager(store=None),  # type: ignore[arg-type]
+        stream_bridge=InMemoryStreamBridge(),
+        agent_builder=_builder,  # type: ignore[arg-type]
+    )
+    cleared: list[bool] = []
+    runtime.register_invalidation_all(lambda: cleared.append(True))
+    runtime.invalidate_all()
+    assert cleared == [True]
+
+
+# ---------------------------------------------------------------------------
 # Stream MCP-OAUTH (OA-3b) — per-user build keying via user_oauth_pool_provider
 # ---------------------------------------------------------------------------
 

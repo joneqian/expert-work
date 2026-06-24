@@ -283,6 +283,106 @@ async def test_child_builder_skips_empty_tenant_pool(
 
 
 # ---------------------------------------------------------------------------
+# Stream MCP platform-servers (P1b) — platform_mcp_pool_provider in children
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_child_builder_sets_platform_mcp_pool_from_provider(
+    build_calls: list[dict[str, Any]],
+) -> None:
+    """A non-empty platform_mcp_pool_provider reaches build_agent via
+    tool_env.platform_mcp_pool, so delegated children see shared catalog servers."""
+    from orchestrator.tools import MCPServerPool, RecordingMCPClient
+
+    platform_pool = MCPServerPool()
+    await platform_pool.add("weather", RecordingMCPClient())
+
+    async def _provider() -> MCPServerPool:
+        return platform_pool
+
+    tenant = uuid4()
+    store = InMemoryAgentSpecStore()
+    await store.create(
+        tenant_id=tenant, spec=_spec("researcher"), spec_sha256=_SHA, created_by="test"
+    )
+    builder = make_child_agent_builder(
+        spec_store=store,
+        secret_store=InMemorySecretStore(),
+        checkpointer=InMemorySaver(),
+        base_tool_env=ToolEnv(),
+        platform_mcp_pool_provider=_provider,
+    )
+
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+
+    assert len(build_calls) == 1
+    assert build_calls[0]["tool_env"].platform_mcp_pool is platform_pool
+
+
+@pytest.mark.asyncio
+async def test_child_builder_skips_empty_platform_pool(
+    build_calls: list[dict[str, Any]],
+) -> None:
+    """An empty platform pool leaves platform_mcp_pool None in the child ToolEnv."""
+    from orchestrator.tools import MCPServerPool
+
+    async def _provider() -> MCPServerPool:
+        return MCPServerPool()  # no servers
+
+    tenant = uuid4()
+    store = InMemoryAgentSpecStore()
+    await store.create(
+        tenant_id=tenant, spec=_spec("researcher"), spec_sha256=_SHA, created_by="test"
+    )
+    builder = make_child_agent_builder(
+        spec_store=store,
+        secret_store=InMemorySecretStore(),
+        checkpointer=InMemorySaver(),
+        base_tool_env=ToolEnv(),
+        platform_mcp_pool_provider=_provider,
+    )
+
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+
+    assert len(build_calls) == 1
+    assert build_calls[0]["tool_env"].platform_mcp_pool is None
+
+
+@pytest.mark.asyncio
+async def test_register_invalidation_all_clears_subagent_cache(
+    build_calls: list[dict[str, Any]],
+) -> None:
+    """The clear-all hook (fired on a platform-pool change) drops every cached
+    sub-agent across tenants, mirroring the top-level cache."""
+    clear_alls: list[Any] = []
+    tenant = uuid4()
+    store = InMemoryAgentSpecStore()
+    await store.create(
+        tenant_id=tenant, spec=_spec("researcher"), spec_sha256=_SHA, created_by="test"
+    )
+    builder = make_child_agent_builder(
+        spec_store=store,
+        secret_store=InMemorySecretStore(),
+        checkpointer=InMemorySaver(),
+        base_tool_env=ToolEnv(),
+        register_invalidation_all=clear_alls.append,
+    )
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+    assert len(build_calls) == 1
+
+    # Cached — no rebuild.
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+    assert len(build_calls) == 1
+
+    # Fire the registered clear-all → next build rebuilds.
+    assert len(clear_alls) == 1
+    clear_alls[0]()
+    await builder(tenant_id=tenant, name="researcher", version="1.0.0", depth=1)
+    assert len(build_calls) == 2
+
+
+# ---------------------------------------------------------------------------
 # MCP-OAUTH (OA-3b-后续) — user_mcp_oauth_pool_provider passthrough
 # ---------------------------------------------------------------------------
 

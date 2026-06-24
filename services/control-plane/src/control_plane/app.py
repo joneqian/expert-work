@@ -149,6 +149,7 @@ from control_plane.middleware import (
 from control_plane.orphan_sweep import OrphanSweep
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_judge_config import PlatformJudgeConfigService
+from control_plane.platform_mcp_pool import PlatformMcpPoolService
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.quota import (
     InMemoryQuotaService,
@@ -961,6 +962,20 @@ def create_app(
                 async def _tenant_mcp_pool_provider(tenant_id):  # type: ignore[no-untyped-def]
                     return await tenant_mcp_pool_service.get_or_build(tenant_id)
 
+                # Stream MCP platform-servers (P1b) — process-global pool of the
+                # platform-curated SHARED catalog servers (none/bearer). Built
+                # lazily, cached, invalidated on catalog change (mcp_catalog API),
+                # closed at shutdown. Reuses the tenant client factory.
+                platform_mcp_pool_service = PlatformMcpPoolService(
+                    store=resolved_mcp_connector_catalog_store,
+                    client_factory=_tenant_mcp_client_factory,
+                )
+                stack.push_async_callback(platform_mcp_pool_service.close_all)
+                _app.state.platform_mcp_pool_service = platform_mcp_pool_service
+
+                async def _platform_mcp_pool_provider():  # type: ignore[no-untyped-def]
+                    return await platform_mcp_pool_service.get_or_build()
+
                 # Stream MCP-OAUTH (OA-3b) — per-(tenant,user) OAuth MCP pool;
                 # OA-6 refresher lazily renews near-expiry access tokens at build.
                 mcp_oauth_refresher = McpOAuthRefresher(
@@ -1134,6 +1149,8 @@ def create_app(
                     credentials_resolver=credentials_resolver,
                     # Stream V (Mini-ADR V-4) — tenant's own remote MCP pool.
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
+                    # Stream MCP platform-servers (P1b) — shared catalog pool.
+                    platform_mcp_pool_provider=_platform_mcp_pool_provider,
                     # MCP-OAUTH (OA-3b-后续) — delegated sub-agents inherit the
                     # caller's per-user OAuth pool (keyed on the run's oauth_user_id).
                     user_mcp_oauth_pool_provider=_user_mcp_oauth_pool_provider,
@@ -1144,6 +1161,9 @@ def create_app(
                     # Stream V-D (audit #1) — evict cached sub-agents when a
                     # tenant's MCP registry changes, like the top-level cache.
                     register_invalidation=resolved_agent_runtime.register_invalidation_hook,
+                    # Stream MCP platform-servers (P1b) — evict ALL cached
+                    # sub-agents when the process-global catalog pool changes.
+                    register_invalidation_all=resolved_agent_runtime.register_invalidation_all,
                 )
                 # 1.3 Orchestrator-Worker — the spawn_worker builder (synthesizes
                 # ephemeral workers from the parent). ``None`` when the platform
@@ -1159,6 +1179,8 @@ def create_app(
                         memory_env=memory_env,
                         credentials_resolver=credentials_resolver,
                         tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
+                        # Stream MCP platform-servers (P1b) — shared catalog pool.
+                        platform_mcp_pool_provider=_platform_mcp_pool_provider,
                         # MCP-OAUTH (OA-3b-后续) — workers inherit caller OAuth pool.
                         user_mcp_oauth_pool_provider=_user_mcp_oauth_pool_provider,
                         skill_store=resolved_skill_store,
@@ -1196,6 +1218,8 @@ def create_app(
                     platform_judge_config_service=resolved_platform_judge_config_service,
                     # Stream V (Mini-ADR V-4) — tenant's own remote MCP pool.
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
+                    # Stream MCP platform-servers (P1b) — platform shared catalog pool.
+                    platform_mcp_pool_provider=_platform_mcp_pool_provider,
                     # Stream MCP-OAUTH (OA-3b) — caller's per-user OAuth MCP pool.
                     user_mcp_oauth_pool_provider=_user_mcp_oauth_pool_provider,
                     # Stream X (Mini-ADR X-4) — first wiring of skill resolution
@@ -1573,6 +1597,7 @@ def create_app(
     app.state.model_rate_card_store = resolved_model_rate_card_store
     app.state.tenant_billing_ledger_store = resolved_tenant_billing_ledger_store
     app.state.tenant_mcp_pool_service = None
+    app.state.platform_mcp_pool_service = None
     app.state.platform_secret_store = resolved_platform_secret_store
     app.state.platform_secrets_service = resolved_platform_secrets_service
     # Stream S (Mini-ADR S-4) — model catalog reads only usable providers

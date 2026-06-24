@@ -26,6 +26,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_judge_config import PlatformJudgeConfigService
+from control_plane.platform_mcp_pool import PlatformMcpPoolProvider
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
 from control_plane.tenant_scope import bypass_rls_session
@@ -163,6 +164,10 @@ class AgentRuntime:
     #: — the sub-agent builder registers its own cache here (Stream V-D, audit
     #: #1) since it caches built agents independently of ``_cache``.
     _invalidation_hooks: list[Callable[[UUID], None]] = field(default_factory=list, repr=False)
+    #: Stream MCP platform-servers (P1b) — clear-everything invalidators fanned
+    #: out by ``invalidate_all`` when a process-global pool (the platform shared
+    #: catalog) changes, which affects every tenant's build.
+    _invalidate_all_hooks: list[Callable[[], None]] = field(default_factory=list, repr=False)
 
     def new_worker_spawn_budget(self) -> Any:
         """A fresh per-run :class:`WorkerSpawnBudget`, or ``None`` when dynamic
@@ -215,6 +220,28 @@ class AgentRuntime:
         the top-level cache when a tenant's MCP registry changes.
         """
         self._invalidation_hooks.append(hook)
+
+    def register_invalidation_all(self, hook: Callable[[], None]) -> None:
+        """Register an extra clear-everything invalidator (P1b).
+
+        The sub-agent builder caches built agents independently of ``_cache``;
+        registering its clear here keeps the delegation path coherent with the
+        top-level cache when a process-global pool (the platform shared catalog)
+        changes.
+        """
+        self._invalidate_all_hooks.append(hook)
+
+    def invalidate_all(self) -> None:
+        """Drop every cached built-agent, across all tenants.
+
+        Called when the process-global platform shared MCP pool changes (a
+        catalog create/update/delete) so the next run of any agent rebuilds
+        against the refreshed pool. Registered clear-all hooks (e.g. the
+        sub-agent builder cache) are fanned out too.
+        """
+        self._cache.clear()
+        for hook in self._invalidate_all_hooks:
+            hook()
 
     def invalidate_tenant(self, tenant_id: UUID) -> None:
         """Drop every cached built-agent for ``tenant_id``.
@@ -439,6 +466,7 @@ def make_agent_builder(
     subagent_spec_resolver: SubagentSpecResolver | None = None,
     mcp_allowlist_provider: Callable[[UUID], Awaitable[Sequence[str]]] | None = None,
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
+    platform_mcp_pool_provider: PlatformMcpPoolProvider | None = None,
     user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     platform_embedding_config_service: PlatformEmbeddingConfigService | None = None,
@@ -494,18 +522,30 @@ def make_agent_builder(
                 )
         if subagent_spec_resolver is not None and spec.spec.subagents:
             detect_subagent_cycle(spec, resolve=subagent_spec_resolver)
-        # Stream O (Mini-ADR O-14) — apply the tenant's MCP server allowlist
-        # to a per-build ToolEnv. Empty / unconfigured → no restriction.
         build_tool_env = tool_env
+        # Stream MCP platform-servers (P1b) — attach the platform-curated shared
+        # catalog pool (process-global, gated by the allowlist below, like the
+        # operator file pool). Only for real builds (a tenant); preview /
+        # validation builds (tenant_id None) get no runnable pool.
+        if platform_mcp_pool_provider is not None and tenant_id is not None:
+            platform_pool = await platform_mcp_pool_provider()
+            if platform_pool.names():
+                base_env = build_tool_env if build_tool_env is not None else ToolEnv()
+                build_tool_env = replace(base_env, platform_mcp_pool=platform_pool)
+        # Stream O (Mini-ADR O-14) — apply the tenant's MCP server allowlist to
+        # the per-build ToolEnv. Gates both platform pools (file ``mcp_pool`` +
+        # DB ``platform_mcp_pool``); empty / unconfigured → no restriction.
         if (
             mcp_allowlist_provider is not None
             and tenant_id is not None
-            and tool_env is not None
-            and tool_env.mcp_pool is not None
+            and build_tool_env is not None
+            and (
+                build_tool_env.mcp_pool is not None or build_tool_env.platform_mcp_pool is not None
+            )
         ):
             allowlist = await mcp_allowlist_provider(tenant_id)
             if allowlist:
-                build_tool_env = replace(tool_env, mcp_allowlist=tuple(allowlist))
+                build_tool_env = replace(build_tool_env, mcp_allowlist=tuple(allowlist))
         # Stream V (Mini-ADR V-4) — attach the tenant's own remote MCP pool.
         if tenant_mcp_pool_provider is not None and tenant_id is not None:
             tenant_pool = await tenant_mcp_pool_provider(tenant_id)

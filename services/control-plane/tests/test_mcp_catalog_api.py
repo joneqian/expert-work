@@ -401,3 +401,52 @@ async def test_none_with_bearer_token_rejected(ctx: _Ctx) -> None:
     bad["auth_type"] = "none"
     resp = await ctx.client.post("/v1/platform/mcp-catalog", json=bad, headers=ctx.admin_headers)
     assert resp.status_code == 422, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Stream MCP platform-servers (P1b) — catalog mutations invalidate the shared
+# pool + every cached agent (the pool feeds all tenants' builds).
+# ---------------------------------------------------------------------------
+
+
+class _SpyPoolService:
+    def __init__(self) -> None:
+        self.invalidated = 0
+
+    async def invalidate(self) -> None:
+        self.invalidated += 1
+
+
+class _SpyRuntime:
+    def __init__(self) -> None:
+        self.invalidated_all = 0
+
+    def invalidate_all(self) -> None:
+        self.invalidated_all += 1
+
+
+@pytest.mark.asyncio
+async def test_create_patch_delete_invalidate_platform_pool(ctx: _Ctx) -> None:
+    pool = _SpyPoolService()
+    runtime = _SpyRuntime()
+    ctx.app.state.platform_mcp_pool_service = pool  # type: ignore[attr-defined]
+    ctx.app.state.agent_runtime = runtime  # type: ignore[attr-defined]
+
+    create = await ctx.client.post(
+        "/v1/platform/mcp-catalog", json=_valid_entry(), headers=ctx.admin_headers
+    )
+    assert create.status_code == 201, create.text
+    assert (pool.invalidated, runtime.invalidated_all) == (1, 1)
+
+    cid = create.json()["data"]["id"]
+    patch = await ctx.client.patch(
+        f"/v1/platform/mcp-catalog/{cid}",
+        json={"display_name": "GitHub 2"},
+        headers=ctx.admin_headers,
+    )
+    assert patch.status_code == 200, patch.text
+    assert (pool.invalidated, runtime.invalidated_all) == (2, 2)
+
+    delete = await ctx.client.delete(f"/v1/platform/mcp-catalog/{cid}", headers=ctx.admin_headers)
+    assert delete.status_code == 204, delete.text
+    assert (pool.invalidated, runtime.invalidated_all) == (3, 3)

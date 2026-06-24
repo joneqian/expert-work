@@ -54,6 +54,28 @@ def _get_audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
 
 
+def _get_platform_mcp_pool_service(request: Request) -> object:  # type: ignore[no-untyped-def]
+    return getattr(request.app.state, "platform_mcp_pool_service", None)
+
+
+def _get_agent_runtime(request: Request) -> object:  # type: ignore[no-untyped-def]
+    return getattr(request.app.state, "agent_runtime", None)
+
+
+async def _invalidate_platform_mcp(pool_service: object, agent_runtime: object) -> None:
+    """Rebuild the platform shared pool + evict every cached agent (P1b).
+
+    A catalog create / update / delete changes the process-global platform
+    shared MCP pool, which feeds every tenant's build — so the pool is dropped
+    (next build rebuilds from the catalog) and every cached built-agent is
+    invalidated across all tenants.
+    """
+    if pool_service is not None:
+        await pool_service.invalidate()  # type: ignore[attr-defined]
+    if agent_runtime is not None:
+        agent_runtime.invalidate_all()  # type: ignore[attr-defined]
+
+
 def _bearer_secret_name(name: str) -> str:
     """SecretStore key for a platform connector's shared bearer token (slug=name)."""
     return f"helix-agent/platform/mcp/{name}/token"
@@ -88,6 +110,8 @@ def build_mcp_catalog_router() -> APIRouter:
         store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
         secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        pool_service: Annotated[object, Depends(_get_platform_mcp_pool_service)],
+        agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
     ) -> dict[str, object]:
         _require_system_admin(principal)
         upsert = payload
@@ -122,6 +146,7 @@ def build_mcp_catalog_router() -> APIRouter:
                 "transport": record.transport,
             },  # NEVER include any secret value
         )
+        await _invalidate_platform_mcp(pool_service, agent_runtime)
         return {"success": True, "data": _public(record), "error": None}
 
     @router.get("")
@@ -163,6 +188,8 @@ def build_mcp_catalog_router() -> APIRouter:
         store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
         secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        pool_service: Annotated[object, Depends(_get_platform_mcp_pool_service)],
+        agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
     ) -> dict[str, object]:
         _require_system_admin(principal)
         patch = payload
@@ -211,6 +238,7 @@ def build_mcp_catalog_router() -> APIRouter:
                 "enabled": record.enabled,
             },
         )
+        await _invalidate_platform_mcp(pool_service, agent_runtime)
         return {"success": True, "data": _public(record), "error": None}
 
     @router.delete("/{catalog_id}", status_code=204)
@@ -219,6 +247,8 @@ def build_mcp_catalog_router() -> APIRouter:
         principal: Annotated[Principal, Depends(require("mcp_catalog", "delete"))],
         store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        pool_service: Annotated[object, Depends(_get_platform_mcp_pool_service)],
+        agent_runtime: Annotated[object, Depends(_get_agent_runtime)],
     ) -> None:
         _require_system_admin(principal)
         # Resolve the row first so the audit record carries the stable name.
@@ -255,5 +285,6 @@ def build_mcp_catalog_router() -> APIRouter:
             trace_id=current_trace_id_hex(),
             details={"name": existing.name},
         )
+        await _invalidate_platform_mcp(pool_service, agent_runtime)
 
     return router

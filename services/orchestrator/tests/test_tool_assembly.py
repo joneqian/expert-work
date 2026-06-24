@@ -490,6 +490,91 @@ async def test_name_collision_platform_wins() -> None:
     assert registry.get("mcp:github.from_tenant") is None
 
 
+# ---------------------------------------------------------------------------
+# platform_mcp_pool — Stream MCP platform-servers (P1b) shared catalog pool
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_platform_db_pool_tools_registered() -> None:
+    catalog = MCPServerPool()
+    await catalog.add(
+        "weather",
+        RecordingMCPClient(tools=(MCPToolDef(name="forecast", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry(
+        [MCPToolSpec()], tool_env=ToolEnv(platform_mcp_pool=catalog)
+    )
+    assert registry.get("mcp:weather.forecast") is not None
+
+
+@pytest.mark.asyncio
+async def test_platform_db_pool_gated_by_allowlist() -> None:
+    # Like the operator file pool, the shared catalog pool is gated by the
+    # per-tenant allowlist: an unlisted server is hidden.
+    catalog = MCPServerPool()
+    await catalog.add(
+        "weather",
+        RecordingMCPClient(tools=(MCPToolDef(name="forecast", description="", input_schema={}),)),
+    )
+    await catalog.add(
+        "secret",
+        RecordingMCPClient(tools=(MCPToolDef(name="leak", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry(
+        [MCPToolSpec()],
+        tool_env=ToolEnv(platform_mcp_pool=catalog, mcp_allowlist=("weather",)),
+    )
+    assert registry.get("mcp:weather.forecast") is not None
+    assert registry.get("mcp:secret.leak") is None
+
+
+@pytest.mark.asyncio
+async def test_platform_db_pool_empty_allowlist_sees_all() -> None:
+    catalog = MCPServerPool()
+    await catalog.add(
+        "weather",
+        RecordingMCPClient(tools=(MCPToolDef(name="forecast", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry(
+        [MCPToolSpec()], tool_env=ToolEnv(platform_mcp_pool=catalog)
+    )
+    assert registry.get("mcp:weather.forecast") is not None
+
+
+@pytest.mark.asyncio
+async def test_file_pool_wins_collision_over_db_pool() -> None:
+    file_pool = MCPServerPool()
+    await file_pool.add(
+        "shared",
+        RecordingMCPClient(tools=(MCPToolDef(name="from_file", description="", input_schema={}),)),
+    )
+    db_pool = MCPServerPool()
+    await db_pool.add(
+        "shared",
+        RecordingMCPClient(tools=(MCPToolDef(name="from_db", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry(
+        [MCPToolSpec()], tool_env=ToolEnv(mcp_pool=file_pool, platform_mcp_pool=db_pool)
+    )
+    # file pool registered first; the colliding DB server is skipped.
+    assert registry.get("mcp:shared.from_file") is not None
+    assert registry.get("mcp:shared.from_db") is None
+
+
+@pytest.mark.asyncio
+async def test_platform_db_pool_only_no_file_pool_ok() -> None:
+    catalog = MCPServerPool()
+    await catalog.add(
+        "weather",
+        RecordingMCPClient(tools=(MCPToolDef(name="forecast", description="", input_schema={}),)),
+    )
+    registry = await build_tool_registry(
+        [MCPToolSpec()], tool_env=ToolEnv(platform_mcp_pool=catalog)
+    )
+    assert registry.get("mcp:weather.forecast") is not None
+
+
 @pytest.mark.asyncio
 async def test_mcp_declared_but_no_pools_raises() -> None:
     with pytest.raises(AgentFactoryError, match="MCP server pool"):

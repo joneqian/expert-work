@@ -17,6 +17,7 @@ from uuid import UUID
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from control_plane.platform_mcp_pool import PlatformMcpPoolProvider
 from control_plane.runtime import make_provider_key_resolver, make_skill_resolver
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
@@ -135,11 +136,13 @@ def make_child_agent_builder(
     memory_env: MemoryEnv | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
+    platform_mcp_pool_provider: PlatformMcpPoolProvider | None = None,
     user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
     register_invalidation: Callable[[Callable[[UUID], None]], None] | None = None,
+    register_invalidation_all: Callable[[Callable[[], None]], None] | None = None,
 ) -> ChildAgentBuilder:
     """Build the :class:`ChildAgentBuilder` the orchestrator's ``ToolEnv`` carries.
 
@@ -199,6 +202,12 @@ def make_child_agent_builder(
         # Stream V (Mini-ADR V-4) — attach the tenant's own remote MCP pool
         # per-call so delegated sub-agents can also use tenant MCP servers.
         call_tool_env = child_tool_env
+        # Stream MCP platform-servers (P1b) — delegated sub-agents see the same
+        # platform-curated shared catalog servers as the parent.
+        if platform_mcp_pool_provider is not None:
+            platform_pool = await platform_mcp_pool_provider()
+            if platform_pool.names():
+                call_tool_env = replace(call_tool_env, platform_mcp_pool=platform_pool)
         if tenant_mcp_pool_provider is not None:
             tenant_pool = await tenant_mcp_pool_provider(tenant_id)
             if tenant_pool.names():
@@ -240,8 +249,19 @@ def make_child_agent_builder(
         for key in [k for k in cache if k[0] == tenant_id]:
             del cache[key]
 
+    def _invalidate_all() -> None:
+        """Drop every cached sub-agent (P1b).
+
+        Registered with the :class:`AgentRuntime` so a process-global pool
+        change (the platform shared catalog) evicts stale delegated sub-agents
+        across all tenants, mirroring the top-level cache.
+        """
+        cache.clear()
+
     if register_invalidation is not None:
         register_invalidation(_invalidate_tenant)
+    if register_invalidation_all is not None:
+        register_invalidation_all(_invalidate_all)
 
     # The sub-agent's ToolEnv carries _build itself so a child can in turn
     # delegate to a grandchild. Assigned after _build is defined; the
@@ -261,6 +281,7 @@ def make_worker_build_fn(
     memory_env: MemoryEnv | None = None,
     credentials_resolver: CredentialsResolver | None = None,
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
+    platform_mcp_pool_provider: PlatformMcpPoolProvider | None = None,
     user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
@@ -302,6 +323,12 @@ def make_worker_build_fn(
             else None
         )
         call_tool_env = worker_tool_env
+        # Stream MCP platform-servers (P1b) — workers see the platform-curated
+        # shared catalog servers too.
+        if platform_mcp_pool_provider is not None:
+            platform_pool = await platform_mcp_pool_provider()
+            if platform_pool.names():
+                call_tool_env = replace(call_tool_env, platform_mcp_pool=platform_pool)
         if tenant_mcp_pool_provider is not None:
             tenant_pool = await tenant_mcp_pool_provider(tenant_id)
             if tenant_pool.names():

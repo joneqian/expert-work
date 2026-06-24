@@ -129,6 +129,9 @@ MCP server
 ## 9. 分期(迭代计划,待评审后细化)
 
 - **P1 后端 — 平台 A 类共享 server**:迁移加 `bearer_token_ref` + protocol/persistence/api 改造(去 auth_schema 依赖,收平台 token)+ DB 平台池运行期 + 失效。**B 已建无需动核心**。
+  - ✅ **P1a**(#786):迁移 + protocol/persistence/api 存平台 token(`bearer_token_ref`)。
+  - ✅ **P1b-1**(#787):`platform_mcp_pool.py` 池服务(构建器)— catalog `none`/`bearer` 行 → 进程级 `MCPServerPool`,懒建 + 代际失效。
+  - ✅ **P1b-2**:装配 — `ToolEnv.platform_mcp_pool`(assembly 与文件池同层、走 `mcp_allowlist` 闸、文件池胜命名冲突)+ 三处 builder(顶层/子 agent/worker)接 provider + `AgentRuntime.invalidate_all` + catalog API create/patch/delete 钩失效(池 + 全 agent 缓存)。**真栈 live 验待**(catalog 现空,需先 P3 配 server)。
 - **P2 后端 — 租户 enable**:`mcp_allowlist` 读写端点 + tier 闸;删/废 instantiate 填字段流;**B 的 initiate 前加「租户已启用」校验**(名字在 allowlist 才许授权)。
 - **P3 前端 — 平台配 server 表单**:`CatalogEntryDrawer` tab 重写 + 去 AuthSchemaBuilder + 修重复按钮。
 - **P4 前端 — 租户选择使用**:`CatalogBrowser` A 开关 + B 授权;退场 `InstantiateCatalogForm`。
