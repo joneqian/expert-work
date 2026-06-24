@@ -726,47 +726,21 @@ export interface TranslationKeys {
     field_category: string;
     field_icon: string;
     field_transport: string;
-    field_url_template: string;
-    url_template_hint: string;
     field_auth: string;
     field_required_tier: string;
-    field_auth_schema: string;
-    auth_schema_hint: string;
     field_enabled: string;
     name_required: string;
     display_name_required: string;
     url_template_required: string;
-    guard_bearer_one_secret: string;
-    guard_none_zero_secret: string;
-    field_builder_empty: string;
-    field_key_placeholder: string;
-    field_label_placeholder: string;
-    field_kind_param: string;
-    field_kind_secret: string;
-    field_required: string;
-    field_remove: string;
-    field_add: string;
     browser_title: string;
     browser_empty: string;
     browser_failed: string;
-    select: string;
     locked_ribbon: string;
     requires_tier: string;
     advanced_hint: string;
     advanced_custom: string;
-    instantiate_title: string;
-    instance_name: string;
-    instance_name_hint: string;
-    field_value_required: string;
     back: string;
-    create: string;
     err_tier_required: string;
-    err_field_missing: string;
-    err_field_unknown: string;
-    err_param_invalid: string;
-    err_url_template: string;
-    err_invalid_url: string;
-    err_duplicate: string;
     err_not_found: string;
     oauth_badge: string;
     enable: string;
@@ -2453,52 +2427,22 @@ const en: TranslationKeys = {
     field_category: "Category",
     field_icon: "Icon",
     field_transport: "Transport",
-    field_url_template: "URL template",
-    url_template_hint:
-      "Use {param} placeholders — they are filled from the param fields at instantiation.",
     field_auth: "Auth type",
     field_required_tier: "Required plan",
-    field_auth_schema: "Auth schema fields",
-    auth_schema_hint:
-      "Fields the tenant fills in when adding this connector. Secrets are stored encrypted; params fill the URL template.",
     field_enabled: "Enabled",
     name_required: "A valid lowercase slug is required",
     display_name_required: "Display name is required",
     url_template_required: "URL template is required",
-    guard_bearer_one_secret: "Bearer auth requires exactly one secret field.",
-    guard_none_zero_secret: "Auth type None must have no secret fields.",
-    field_builder_empty: "No fields yet — add one below.",
-    field_key_placeholder: "key",
-    field_label_placeholder: "Label",
-    field_kind_param: "Param",
-    field_kind_secret: "Secret",
-    field_required: "Required",
-    field_remove: "Remove field",
-    field_add: "Add field",
     browser_title: "Add MCP server",
     browser_empty: "No connectors are available for your plan yet.",
     browser_failed: "Failed to load the catalog",
-    select: "Add",
     locked_ribbon: "Locked",
     requires_tier: "Requires {{tier}} plan",
     advanced_hint: "Need something not in the catalog?",
     advanced_custom: "Advanced — add a custom server",
-    instantiate_title: "Add {{name}}",
-    instance_name: "Instance name (optional)",
-    instance_name_hint:
-      "Defaults to the connector name; override to add more than one.",
-    field_value_required: "{{label}} is required",
     back: "Back",
-    create: "Create",
     err_tier_required:
       "Your plan does not include this connector. Upgrade to add it.",
-    err_field_missing: "A required field is missing.",
-    err_field_unknown: "An unexpected field was supplied.",
-    err_param_invalid: "A parameter value is invalid.",
-    err_url_template:
-      "The connector URL template could not be filled — check your params.",
-    err_invalid_url: "The resulting server URL is invalid.",
-    err_duplicate: "A server with this name already exists.",
     err_not_found: "This connector no longer exists.",
     oauth_badge: "OAuth",
     enable: "Enable",

@@ -29,7 +29,6 @@ const CATALOG: TenantCatalogEntry[] = [
     transport: "sse",
     url_template: "https://mcp.linear.app/sse",
     auth_type: "oauth2",
-    auth_schema: { fields: [] },
     required_tier: "pro",
     enabled: true,
     entitled: true,

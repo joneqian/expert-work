@@ -27,7 +27,6 @@ const ENTRIES: TenantCatalogEntry[] = [
     transport: "sse",
     url_template: "https://mcp.github.com/sse",
     auth_type: "bearer",
-    auth_schema: { fields: [{ key: "token", label: "Personal access token", kind: "secret", required: true }] },
     required_tier: "free",
     enabled: true,
     created_at: "2026-05-01T10:00:00Z",
@@ -46,12 +45,6 @@ const ENTRIES: TenantCatalogEntry[] = [
     transport: "streamable_http",
     url_template: "https://mcp.linear.app/{workspace}/mcp",
     auth_type: "bearer",
-    auth_schema: {
-      fields: [
-        { key: "workspace", label: "Workspace", kind: "param", required: true },
-        { key: "token", label: "API key", kind: "secret", required: true },
-      ],
-    },
     required_tier: "enterprise",
     enabled: true,
     created_at: "2026-05-10T08:00:00Z",
