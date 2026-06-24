@@ -192,3 +192,56 @@ def test_patch_partial_leaves_unset() -> None:
 def test_patch_rejects_unknown_field() -> None:
     with pytest.raises(ValidationError):
         McpConnectorCatalogPatch(name="cannot-rename")  # type: ignore[call-arg]
+
+
+# ---------------------------------------------------------------------------
+# Platform shared-bearer (P1 — mcp-platform-servers)
+# ---------------------------------------------------------------------------
+
+
+def _platform_bearer_upsert(**overrides: object) -> McpConnectorCatalogUpsert:
+    base: dict[str, object] = {
+        "name": "shared",
+        "display_name": "Shared",
+        "transport": "streamable_http",
+        "url_template": "https://mcp.example.com/mcp",
+        "auth_type": "bearer",
+        "bearer_token": "tok",
+        "required_tier": TenantPlan.FREE,
+    }
+    base.update(overrides)
+    return McpConnectorCatalogUpsert(**base)  # type: ignore[arg-type]
+
+
+def test_platform_bearer_token_is_valid_without_secret_field() -> None:
+    upsert = _platform_bearer_upsert()
+    assert upsert.bearer_token is not None
+    assert upsert.auth_schema.secret_fields() == []
+
+
+def test_bearer_token_with_secret_field_rejected() -> None:
+    with pytest.raises(ValidationError, match="cannot combine"):
+        _platform_bearer_upsert(auth_schema=_bearer_schema())
+
+
+def test_none_with_bearer_token_rejected() -> None:
+    with pytest.raises(ValidationError, match="must not carry a bearer token"):
+        _platform_bearer_upsert(auth_type="none")
+
+
+def test_record_with_bearer_token_ref_is_valid() -> None:
+    rec = McpConnectorCatalogRecord(
+        id=uuid4(),
+        name="shared",
+        display_name="Shared",
+        transport="streamable_http",
+        url_template="https://mcp.example.com/mcp",
+        auth_type="bearer",
+        bearer_token_ref="secret://helix-agent/platform/mcp/shared/token",
+        required_tier=TenantPlan.FREE,
+        created_at=datetime.now(tz=UTC),
+        updated_at=datetime.now(tz=UTC),
+        updated_by="admin",
+    )
+    assert rec.bearer_token_ref is not None
+    assert rec.auth_schema.secret_fields() == []

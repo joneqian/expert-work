@@ -321,3 +321,83 @@ async def test_create_and_delete_emit_audit(ctx: _Ctx) -> None:
     # No secret value ever lands in audit details.
     for r in page.entries:
         assert "ghp_" not in str(r.details)
+
+
+# ---------------------------------------------------------------------------
+# Platform shared-bearer server (P1 — mcp-platform-servers)
+# ---------------------------------------------------------------------------
+
+
+def _platform_bearer_entry(name: str = "sharedbearer") -> dict[str, object]:
+    """A platform-configured shared-bearer (A) server — platform supplies the
+    token (no tenant-filled auth_schema secret field)."""
+    return {
+        "name": name,
+        "display_name": "Shared Bearer",
+        "category": "tools",
+        "transport": "streamable_http",
+        "url_template": "https://mcp.example.com/mcp",
+        "auth_type": "bearer",
+        "bearer_token": "platform-secret-token",
+        "required_tier": "free",
+    }
+
+
+@pytest.mark.asyncio
+async def test_create_platform_bearer_stores_token_as_ref(ctx: _Ctx) -> None:
+    resp = await ctx.client.post(
+        "/v1/platform/mcp-catalog", json=_platform_bearer_entry(), headers=ctx.admin_headers
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()["data"]
+    # The response exposes a flag, never the ref or the plaintext.
+    assert data["has_bearer_token"] is True
+    assert "bearer_token_ref" not in data
+    assert "bearer_token" not in data
+    # The token landed in the SecretStore under the platform path; only the ref
+    # is persisted on the row.
+    stored = await ctx.app.state.secret_store.get(  # type: ignore[attr-defined]
+        "helix-agent/platform/mcp/sharedbearer/token"
+    )
+    assert stored == "platform-secret-token"
+    # A subsequent GET still reports the flag (ref persisted).
+    cid = data["id"]
+    got = await ctx.client.get(f"/v1/platform/mcp-catalog/{cid}", headers=ctx.admin_headers)
+    assert got.json()["data"]["has_bearer_token"] is True
+
+
+@pytest.mark.asyncio
+async def test_repaste_platform_bearer_via_patch(ctx: _Ctx) -> None:
+    create = await ctx.client.post(
+        "/v1/platform/mcp-catalog", json=_platform_bearer_entry(), headers=ctx.admin_headers
+    )
+    cid = create.json()["data"]["id"]
+    patch = await ctx.client.patch(
+        f"/v1/platform/mcp-catalog/{cid}",
+        json={"bearer_token": "rotated-token"},
+        headers=ctx.admin_headers,
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["data"]["has_bearer_token"] is True
+    stored = await ctx.app.state.secret_store.get(  # type: ignore[attr-defined]
+        "helix-agent/platform/mcp/sharedbearer/token"
+    )
+    assert stored == "rotated-token"
+
+
+@pytest.mark.asyncio
+async def test_bearer_token_plus_secret_field_rejected(ctx: _Ctx) -> None:
+    bad = _platform_bearer_entry()
+    bad["auth_schema"] = {
+        "fields": [{"key": "t", "label": "T", "kind": "secret", "required": True}]
+    }
+    resp = await ctx.client.post("/v1/platform/mcp-catalog", json=bad, headers=ctx.admin_headers)
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_none_with_bearer_token_rejected(ctx: _Ctx) -> None:
+    bad = _platform_bearer_entry()
+    bad["auth_type"] = "none"
+    resp = await ctx.client.post("/v1/platform/mcp-catalog", json=bad, headers=ctx.admin_headers)
+    assert resp.status_code == 422, resp.text
