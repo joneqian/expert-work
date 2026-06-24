@@ -81,6 +81,21 @@ x-control-plane-base: &control-plane-base
     HELIX_AGENT_CURATION_WORKER_INTERVAL_S: ${HELIX_AGENT_CURATION_WORKER_INTERVAL_S:-300}
     HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER: ${HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER:-anthropic}
     HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL: ${HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL:-claude-sonnet-4-6}
+    # Stream MCP-OAUTH — per-user OAuth connectors. The redirect URI must point
+    # at the admin-ui (or independent client) callback page, not the backend
+    # endpoint; unset → the initiate endpoint returns 503. The catalog seed file
+    # (shipped in the image at /app/configs) env-templates oauth2 connector
+    # client IDs; unset → no seeding. The allowlist is a JSON array for
+    # independent (non-loopback) clients; loopback redirects are allowed by
+    # default. The MCP_OAUTH_*_CLIENT_ID vars (no HELIX_AGENT_ prefix) resolve
+    # the seed file's ${...} placeholders — set per connector in infra/.env.
+    # The allowlist is a JSON array (pydantic decodes list[str] env as JSON, as
+    # with OIDC_AUDIENCE); the ``[]`` default is the empty array — an empty
+    # string would fail JSON decode and crash startup.
+    HELIX_AGENT_MCP_OAUTH_REDIRECT_URI: ${HELIX_AGENT_MCP_OAUTH_REDIRECT_URI:-}
+    HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST: ${HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST:-[]}
+    HELIX_AGENT_MCP_CATALOG_SEED_FILE: ${HELIX_AGENT_MCP_CATALOG_SEED_FILE:-}
+    MCP_OAUTH_GITHUB_CLIENT_ID: ${MCP_OAUTH_GITHUB_CLIENT_ID:-}
   volumes:
     # The directory always exists (committed .example); the .local inside it
     # is git-ignored, so this bind mount never breaks `up` when a dev hasn't

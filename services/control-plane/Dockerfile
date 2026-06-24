@@ -53,6 +53,12 @@ COPY --chown=helix:helix packages/helix-persistence/migrations /app/alembic/migr
 COPY --chown=helix:helix tools/eval /app/tools/eval
 ENV PYTHONPATH=/app
 
+# MCP connector catalog seed template (Stream MCP-OAUTH OA-5). Lives outside
+# the package ``src/`` tree, so the ``--no-editable`` wheel doesn't carry it.
+# Ship it so ``mcp_catalog_seed_file=configs/mcp-catalog-seed.json`` (relative
+# to WORKDIR /app) resolves at startup; unset → seeding is a no-op.
+COPY --chown=helix:helix configs /app/configs
+
 USER helix
 EXPOSE 8000
 ENTRYPOINT ["uvicorn", "control_plane.main:app", "--host", "0.0.0.0", "--port", "8000"]
