@@ -169,8 +169,16 @@ class _ScriptedGraph:
 class _ScriptedBuilder:
     built: BuiltAgent
 
-    async def __call__(self, *, tenant_id: UUID, name: str, version: str, depth: int) -> BuiltAgent:
-        del tenant_id, name, version, depth
+    async def __call__(
+        self,
+        *,
+        tenant_id: UUID,
+        name: str,
+        version: str,
+        depth: int,
+        oauth_user_id: str | None = None,
+    ) -> BuiltAgent:
+        del tenant_id, name, version, depth, oauth_user_id
         return self.built
 
 

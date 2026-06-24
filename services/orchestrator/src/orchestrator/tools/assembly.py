@@ -411,8 +411,16 @@ def _register_spawn_worker(
     build_fn = env.worker_build_fn
     child_depth = subagent_depth + 1
 
-    async def _builder(*, tenant_id: UUID, role: str | None, depth: int) -> BuiltAgent:
-        return await build_fn(parent_spec, tenant_id=tenant_id, role=role, depth=depth)
+    async def _builder(
+        *, tenant_id: UUID, role: str | None, depth: int, oauth_user_id: str | None = None
+    ) -> BuiltAgent:
+        return await build_fn(
+            parent_spec,
+            tenant_id=tenant_id,
+            role=role,
+            depth=depth,
+            oauth_user_id=oauth_user_id,
+        )
 
     registry.register(
         SpawnWorkerTool(

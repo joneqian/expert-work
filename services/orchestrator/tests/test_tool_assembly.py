@@ -53,7 +53,15 @@ class _StubChildBuilder:
     """Conforms to ``ChildAgentBuilder``. Assembly only *registers*
     SubAgentTools — it never invokes the builder — so the body is unused."""
 
-    async def __call__(self, *, tenant_id: Any, name: str, version: str, depth: int) -> Any:
+    async def __call__(
+        self,
+        *,
+        tenant_id: Any,
+        name: str,
+        version: str,
+        depth: int,
+        oauth_user_id: str | None = None,
+    ) -> Any:
         raise AssertionError("child builder must not be called during assembly")
 
 
