@@ -133,7 +133,7 @@ def build_mcp_oauth_router() -> APIRouter:
     @router.post("/v1/mcp-servers/catalog/{catalog_id}/oauth/initiate", response_model=None)
     async def initiate(
         catalog_id: Annotated[UUID, Path()],
-        principal: Annotated[Principal, Depends(require("mcp_server", "write"))],
+        principal: Annotated[Principal, Depends(require("mcp_oauth", "write"))],
         request: Request,
     ) -> JSONResponse:
         tenant_id = principal.tenant_id
@@ -219,7 +219,7 @@ def build_mcp_oauth_router() -> APIRouter:
 
     @router.get("/v1/mcp-oauth/callback", response_model=None)
     async def callback(
-        principal: Annotated[Principal, Depends(require("mcp_server", "write"))],
+        principal: Annotated[Principal, Depends(require("mcp_oauth", "write"))],
         request: Request,
         state: Annotated[str, Query()],
         code: Annotated[str, Query()],
@@ -319,7 +319,7 @@ def build_mcp_oauth_router() -> APIRouter:
 
     @router.get("/v1/mcp-oauth/connections", response_model=None)
     async def list_connections(
-        principal: Annotated[Principal, Depends(require("mcp_server", "read"))],
+        principal: Annotated[Principal, Depends(require("mcp_oauth", "read"))],
         request: Request,
     ) -> JSONResponse:
         """OA-4 — the caller's own OAuth connections (status / scopes / expiry /
@@ -332,7 +332,7 @@ def build_mcp_oauth_router() -> APIRouter:
     @router.delete("/v1/mcp-oauth/connections/{connection_id}", response_model=None)
     async def disconnect(
         connection_id: Annotated[UUID, Path()],
-        principal: Annotated[Principal, Depends(require("mcp_server", "write"))],
+        principal: Annotated[Principal, Depends(require("mcp_oauth", "delete"))],
         request: Request,
     ) -> JSONResponse:
         """OA-4 — disconnect: revoke the stored tokens (best-effort overwrite —

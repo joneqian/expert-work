@@ -675,8 +675,12 @@ class Settings(BaseSettings):
     cross_tenant_query_enabled: bool = True
 
     #: Public redirect URI for the per-user MCP OAuth callback (Stream MCP-OAUTH).
-    #: Must be reachable by the user's browser and registered in each connector's
-    #: OAuth app allowlist, e.g. ``https://app.example.com/v1/mcp-oauth/callback``.
+    #: Must point at the **admin-ui callback page** (not the backend endpoint):
+    #: ``https://app.example.com/settings/mcp-oauth/callback``. The OAuth provider
+    #: redirects the browser there (a plain navigation that carries no auth
+    #: header); that SPA page then calls ``GET /v1/mcp-oauth/callback?state&code``
+    #: with the logged-in user's bearer token so the request is authenticated.
+    #: The value must also be registered in each connector's OAuth app allowlist.
     #: ``None`` (default) makes the OAuth initiate endpoint return 503.
     mcp_oauth_redirect_uri: str | None = None
 

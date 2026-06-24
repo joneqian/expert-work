@@ -21,9 +21,12 @@ the next start.
 
 ## One-time platform setup
 
-1. **Set the callback URL.** Configure `mcp_oauth_redirect_uri`, e.g.
-   `https://app.example.com/v1/mcp-oauth/callback`. Until set, the initiate
-   endpoint returns `503`.
+1. **Set the callback URL.** Configure `mcp_oauth_redirect_uri` to the **admin-ui
+   callback page** — `https://app.example.com/settings/mcp-oauth/callback` — *not*
+   the backend endpoint. The OAuth provider redirects the browser there (a plain
+   navigation with no auth header); that page then calls
+   `GET /v1/mcp-oauth/callback?state&code` with the logged-in user's bearer token.
+   Until set, the initiate endpoint returns `503`.
 2. **Point at the seed file.** Set `mcp_catalog_seed_file=configs/mcp-catalog-seed.json`
    (or your own copy). Unset (default) seeds nothing.
 
