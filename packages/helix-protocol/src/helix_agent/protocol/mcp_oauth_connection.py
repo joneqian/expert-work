@@ -52,6 +52,9 @@ class McpOAuthConnectionRecord(BaseModel):
     status: OAuthConnectionStatus = "pending"
     resolved_url: str = Field(min_length=1)
     scopes: str = ""
+    # Per-initiate redirect URI (multi-client OAuth). None = global default was
+    # used. Reused at callback for the token exchange.
+    redirect_uri: str | None = None
     access_token_ref: str | None = None
     refresh_token_ref: str | None = None
     token_expires_at: datetime | None = None

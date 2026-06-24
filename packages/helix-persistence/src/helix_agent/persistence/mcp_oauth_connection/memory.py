@@ -36,6 +36,7 @@ class InMemoryMcpOAuthConnectionStore(McpOAuthConnectionStore):
         scopes: str = "",
         oauth_state: str | None = None,
         pkce_verifier: str | None = None,
+        redirect_uri: str | None = None,
     ) -> McpOAuthConnectionRecord:
         async with self._lock:
             for r in self._rows.values():
@@ -55,6 +56,7 @@ class InMemoryMcpOAuthConnectionStore(McpOAuthConnectionStore):
                 scopes=scopes,
                 oauth_state=oauth_state,
                 pkce_verifier=pkce_verifier,
+                redirect_uri=redirect_uri,
                 created_at=now,
                 updated_at=now,
             )

@@ -34,6 +34,7 @@ def _row_to_record(row: McpOAuthConnectionRow) -> McpOAuthConnectionRecord:
         status=row.status,  # type: ignore[arg-type]
         resolved_url=row.resolved_url,
         scopes=row.scopes,
+        redirect_uri=row.redirect_uri,
         access_token_ref=row.access_token_ref,
         refresh_token_ref=row.refresh_token_ref,
         token_expires_at=row.token_expires_at,
@@ -63,6 +64,7 @@ class SqlMcpOAuthConnectionStore(McpOAuthConnectionStore):
         scopes: str = "",
         oauth_state: str | None = None,
         pkce_verifier: str | None = None,
+        redirect_uri: str | None = None,
     ) -> McpOAuthConnectionRecord:
         now = _utc_now()
         stmt = (
@@ -77,6 +79,7 @@ class SqlMcpOAuthConnectionStore(McpOAuthConnectionStore):
                 scopes=scopes,
                 oauth_state=oauth_state,
                 pkce_verifier=pkce_verifier,
+                redirect_uri=redirect_uri,
                 created_at=now,
                 updated_at=now,
             )

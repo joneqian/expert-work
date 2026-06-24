@@ -20,6 +20,7 @@ from control_plane.mcp_oauth import (
     generate_pkce,
     generate_state,
     refresh_token,
+    validate_oauth_redirect,
 )
 
 _MCP_URL = "https://mcp.test/sse"
@@ -245,3 +246,70 @@ async def test_access_token_not_in_repr() -> None:
             http=http,
         )
     assert "AT" not in repr(tok)
+
+
+# --- validate_oauth_redirect (multi-client) --------------------------------
+
+_ALLOW = ["https://app.example.com/settings/mcp-oauth/callback", "myapp://callback"]
+
+
+def test_redirect_global_default_implicitly_allowed() -> None:
+    g = "https://admin.example.com/cb"
+    assert validate_oauth_redirect(g, allowlist=[], default=g) == g
+
+
+def test_redirect_exact_allowlisted_web() -> None:
+    uri = "https://app.example.com/settings/mcp-oauth/callback"
+    assert validate_oauth_redirect(uri, allowlist=_ALLOW) == uri
+
+
+def test_redirect_path_prefix_under_allowed_origin() -> None:
+    # An allowlist entry with a path allows deeper paths under it.
+    uri = "https://app.example.com/settings/mcp-oauth/callback/extra"
+    assert validate_oauth_redirect(uri, allowlist=_ALLOW) == uri
+
+
+def test_redirect_loopback_any_port_allowed() -> None:
+    uri = "http://127.0.0.1:49152/cb"
+    assert validate_oauth_redirect(uri, allowlist=[], allow_loopback=True) == uri
+    assert (
+        validate_oauth_redirect("http://localhost:8080/x", allowlist=[])
+        == "http://localhost:8080/x"
+    )
+
+
+def test_redirect_loopback_rejected_when_disabled() -> None:
+    with pytest.raises(McpOAuthError) as exc:
+        validate_oauth_redirect("http://127.0.0.1:5000/cb", allowlist=[], allow_loopback=False)
+    assert exc.value.code == "MCP_OAUTH_REDIRECT_NOT_ALLOWED"
+
+
+def test_redirect_custom_scheme_allowed() -> None:
+    assert validate_oauth_redirect("myapp://callback", allowlist=_ALLOW) == "myapp://callback"
+
+
+def test_redirect_host_swap_rejected() -> None:
+    # Suffix-host attack must not pass an origin check.
+    with pytest.raises(McpOAuthError):
+        validate_oauth_redirect(
+            "https://app.example.com.evil.com/settings/mcp-oauth/callback", allowlist=_ALLOW
+        )
+
+
+def test_redirect_non_allowlisted_rejected() -> None:
+    with pytest.raises(McpOAuthError) as exc:
+        validate_oauth_redirect("https://evil.test/steal", allowlist=_ALLOW)
+    assert exc.value.code == "MCP_OAUTH_REDIRECT_NOT_ALLOWED"
+
+
+def test_redirect_scheme_mismatch_rejected() -> None:
+    # http where the allowlist only permits https for that origin.
+    with pytest.raises(McpOAuthError):
+        validate_oauth_redirect(
+            "http://app.example.com/settings/mcp-oauth/callback", allowlist=_ALLOW
+        )
+
+
+def test_redirect_relative_rejected() -> None:
+    with pytest.raises(McpOAuthError):
+        validate_oauth_redirect("/settings/mcp-oauth/callback", allowlist=_ALLOW)

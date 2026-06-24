@@ -39,6 +39,11 @@ class McpOAuthConnectionRow(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
     resolved_url: Mapped[str] = mapped_column(Text, nullable=False)
     scopes: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # Per-initiate redirect URI (multi-client OAuth). NULL = used the global
+    # ``mcp_oauth_redirect_uri`` default. Reused verbatim at callback for the
+    # token exchange (OAuth requires authorize/exchange redirect to match).
+    # Migration 0091.
+    redirect_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
     access_token_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     refresh_token_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_expires_at: Mapped[datetime | None] = mapped_column(

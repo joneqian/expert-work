@@ -22,9 +22,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import secrets
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import ParseResult, urlencode, urlparse
 
 import httpx
 
@@ -52,6 +53,62 @@ class McpOAuthError(Exception):
         self.code = code
         self.message = message
         self.oauth_error = oauth_error
+
+
+# RFC 8252 loopback hosts — native apps bind an ephemeral port on one of these.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _redirect_matches(cand: ParseResult, entry: str) -> bool:
+    """Whether ``cand`` (a parsed redirect) is covered by allowlist ``entry``."""
+    try:
+        e = urlparse(entry)
+    except ValueError:
+        return False
+    if cand.scheme != e.scheme:
+        return False
+    if cand.scheme not in ("http", "https"):
+        # Custom (private-use) scheme: match scheme, plus host/path prefix when
+        # the entry pins them.
+        if e.netloc and cand.netloc != e.netloc:
+            return False
+        return cand.path.startswith(e.path)
+    # Web: same origin (scheme already equal) + host + port, then path prefix.
+    try:
+        if (cand.hostname or "") != (e.hostname or "") or cand.port != e.port:
+            return False
+    except ValueError:  # out-of-range port in either URI
+        return False
+    return cand.path.startswith(e.path)
+
+
+def validate_oauth_redirect(
+    redirect_uri: str,
+    *,
+    allowlist: Sequence[str],
+    allow_loopback: bool = True,
+    default: str | None = None,
+) -> str:
+    """Validate a client-supplied OAuth ``redirect_uri`` (mcp-oauth-multi-client).
+
+    Returns it unchanged when allowed; raises
+    :class:`McpOAuthError` ``MCP_OAUTH_REDIRECT_NOT_ALLOWED`` otherwise. The
+    redirect is never fetched server-side — this guards open-redirect /
+    authorization-code exfiltration, not SSRF. Allowed when it is the configured
+    ``default``, an RFC 8252 loopback (``http`` + 127.0.0.1/localhost/[::1], any
+    port) with ``allow_loopback``, or origin+path-prefix matches an allowlist
+    entry.
+    """
+    if default is not None and redirect_uri == default:
+        return redirect_uri  # the global default is implicitly allowed
+    cand = urlparse(redirect_uri)
+    if not cand.scheme:
+        raise McpOAuthError("MCP_OAUTH_REDIRECT_NOT_ALLOWED", "redirect_uri must be absolute")
+    if allow_loopback and cand.scheme == "http" and (cand.hostname or "") in _LOOPBACK_HOSTS:
+        return redirect_uri
+    if any(_redirect_matches(cand, entry) for entry in allowlist):
+        return redirect_uri
+    raise McpOAuthError("MCP_OAUTH_REDIRECT_NOT_ALLOWED", "redirect_uri is not allowlisted")
 
 
 @dataclass(frozen=True)

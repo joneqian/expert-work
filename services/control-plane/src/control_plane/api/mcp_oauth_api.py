@@ -21,8 +21,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from control_plane.api._authz import require
 from control_plane.audit import emit as audit_emit
@@ -34,6 +35,7 @@ from control_plane.mcp_oauth import (
     exchange_code,
     generate_pkce,
     generate_state,
+    validate_oauth_redirect,
 )
 from control_plane.tenancy import TenantConfigNotConfiguredError
 from control_plane.tenant_scope import bypass_rls_session
@@ -74,17 +76,47 @@ def _audit(request: Request) -> AuditLogger:
     return request.app.state.audit_logger  # type: ignore[no-any-return]
 
 
-def _redirect_uri(request: Request) -> str:
-    uri: str | None = getattr(request.app.state.settings, "mcp_oauth_redirect_uri", None)
-    if not uri:
+class InitiateOAuthRequest(BaseModel):
+    """Optional initiate body (multi-client OAuth). A client (web / native /
+    embedded) supplies its OWN ``redirect_uri`` so the provider returns the
+    browser to that client; omitted → the global default."""
+
+    model_config = ConfigDict(extra="forbid")
+    redirect_uri: str | None = None
+
+
+def _global_redirect(request: Request) -> str | None:
+    return getattr(request.app.state.settings, "mcp_oauth_redirect_uri", None)  # type: ignore[no-any-return]
+
+
+def _resolve_redirect_uri(request: Request, client_redirect: str | None) -> str:
+    """Resolve + validate the effective redirect URI for an initiate.
+
+    Prefers the client-supplied ``redirect_uri`` (validated against the
+    allowlist), else the global default. Raises 503 when neither is available,
+    422 when the client value is not allowlisted (open-redirect guard)."""
+    settings = request.app.state.settings
+    global_uri = _global_redirect(request)
+    effective = client_redirect or global_uri
+    if not effective:
         raise HTTPException(
             status_code=503,
             detail={
                 "code": "MCP_OAUTH_NOT_CONFIGURED",
-                "message": "mcp_oauth_redirect_uri is not configured on this deployment",
+                "message": "no redirect_uri supplied and mcp_oauth_redirect_uri is not configured",
             },
         )
-    return uri
+    try:
+        return validate_oauth_redirect(
+            effective,
+            allowlist=getattr(settings, "mcp_oauth_redirect_allowlist", []),
+            allow_loopback=getattr(settings, "mcp_oauth_allow_loopback_redirect", True),
+            default=global_uri,
+        )
+    except McpOAuthError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": exc.code, "message": exc.message}
+        ) from exc
 
 
 async def _resolve_plan(request: Request, tenant_id: UUID) -> TenantPlan:
@@ -135,11 +167,16 @@ def build_mcp_oauth_router() -> APIRouter:
         catalog_id: Annotated[UUID, Path()],
         principal: Annotated[Principal, Depends(require("mcp_oauth", "write"))],
         request: Request,
+        payload: Annotated[InitiateOAuthRequest | None, Body()] = None,
     ) -> JSONResponse:
         tenant_id = principal.tenant_id
         user_id = principal.subject_id
         catalog_store = _catalog_store(request)
         conn_store = _conn_store(request)
+        # Multi-client OAuth: the client may supply its own redirect_uri.
+        redirect_uri = _resolve_redirect_uri(
+            request, payload.redirect_uri if payload is not None else None
+        )
 
         async with bypass_rls_session():
             entry = await catalog_store.get_by_id(catalog_id)
@@ -166,7 +203,6 @@ def build_mcp_oauth_router() -> APIRouter:
                 },
             )
 
-        redirect_uri = _redirect_uri(request)
         # oauth2 entries carry the MCP server URL directly in url_template.
         mcp_url = entry.url_template
         async with default_http_client() as http:
@@ -194,6 +230,7 @@ def build_mcp_oauth_router() -> APIRouter:
                 name=entry.name,
                 resolved_url=mcp_url,
                 scopes=entry.oauth_scopes or "",
+                redirect_uri=redirect_uri,
                 oauth_state=state,
                 pkce_verifier=pkce.verifier,
             )
@@ -247,7 +284,18 @@ def build_mcp_oauth_router() -> APIRouter:
                 detail={"code": "MCP_CATALOG_NOT_FOUND", "message": "catalog entry not found"},
             )
 
-        redirect_uri = _redirect_uri(request)
+        # OAuth requires the token-exchange redirect_uri to match the one used at
+        # authorize — reuse the value stored on the connection at initiate (falls
+        # back to the global default for pre-multi-client rows).
+        redirect_uri = connection.redirect_uri or _global_redirect(request)
+        if not redirect_uri:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "MCP_OAUTH_NOT_CONFIGURED",
+                    "message": "connection has no redirect_uri and no global default is configured",
+                },
+            )
         async with default_http_client() as http:
             try:
                 metadata = await discover_oauth_metadata(mcp_url=connection.resolved_url, http=http)

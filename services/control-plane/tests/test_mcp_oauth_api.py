@@ -32,7 +32,9 @@ _META = OAuthServerMetadata(
 )
 
 
-def _settings(*, redirect_uri: str | None = _REDIRECT) -> Settings:
+def _settings(
+    *, redirect_uri: str | None = _REDIRECT, allowlist: list[str] | None = None
+) -> Settings:
     return Settings(
         service_name="control_plane_test",
         env="dev",
@@ -43,16 +45,17 @@ def _settings(*, redirect_uri: str | None = _REDIRECT) -> Settings:
         oidc_issuer=TEST_ISSUER,
         oidc_audience=[TEST_AUDIENCE],
         mcp_oauth_redirect_uri=redirect_uri,
+        mcp_oauth_redirect_allowlist=allowlist or [],
     )
 
 
 async def _make_app(
-    *, redirect_uri: str | None = _REDIRECT
+    *, redirect_uri: str | None = _REDIRECT, allowlist: list[str] | None = None
 ) -> tuple[object, dict[str, str], UUID, str]:
     lifecycle = Lifecycle()
     lifecycle.mark_ready()
     app = create_app(
-        settings=_settings(redirect_uri=redirect_uri),
+        settings=_settings(redirect_uri=redirect_uri, allowlist=allowlist),
         lifecycle=lifecycle,
         jwt_verifier=build_test_jwt_verifier(),
     )
@@ -305,3 +308,65 @@ async def test_operator_can_initiate_own_oauth(monkeypatch: pytest.MonkeyPatch) 
         lst = await client.get("/v1/mcp-oauth/connections", headers=op_headers)
         assert lst.status_code == 200
         assert len(lst.json()["items"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_initiate_with_client_redirect_stores_and_uses_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Multi-client OAuth: a client-supplied (allowlisted) redirect_uri is used
+    in the authorize URL and persisted on the connection for the callback."""
+    client_redirect = "https://client.app/oauth/cb"
+    app, headers, tenant_id, user_id = await _make_app(allowlist=[client_redirect])
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.discover_oauth_metadata", _fake_discover)
+    cat_id = await _seed_oauth2_entry(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            f"/v1/mcp-servers/catalog/{cat_id}/oauth/initiate",
+            headers=headers,
+            json={"redirect_uri": client_redirect},
+        )
+    assert resp.status_code == 201, resp.text
+    from urllib.parse import quote
+
+    assert quote(client_redirect, safe="") in resp.json()["authorize_url"]
+    conn = await app.state.mcp_oauth_connection_store.get_for_connector(  # type: ignore[attr-defined]
+        tenant_id=tenant_id, user_id=user_id, catalog_id=cat_id
+    )
+    assert conn is not None and conn.redirect_uri == client_redirect
+
+
+@pytest.mark.asyncio
+async def test_initiate_rejects_non_allowlisted_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client redirect not on the allowlist → 422 (open-redirect guard)."""
+    app, headers, _, _ = await _make_app(allowlist=["https://client.app/cb"])
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.discover_oauth_metadata", _fake_discover)
+    cat_id = await _seed_oauth2_entry(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            f"/v1/mcp-servers/catalog/{cat_id}/oauth/initiate",
+            headers=headers,
+            json={"redirect_uri": "https://evil.test/steal"},
+        )
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "MCP_OAUTH_REDIRECT_NOT_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_initiate_loopback_redirect_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RFC 8252 native client: a loopback redirect is accepted (any port)."""
+    app, headers, _, _ = await _make_app(allowlist=[])
+    monkeypatch.setattr("control_plane.api.mcp_oauth_api.discover_oauth_metadata", _fake_discover)
+    cat_id = await _seed_oauth2_entry(app)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        resp = await client.post(
+            f"/v1/mcp-servers/catalog/{cat_id}/oauth/initiate",
+            headers=headers,
+            json={"redirect_uri": "http://127.0.0.1:53122/cb"},
+        )
+    assert resp.status_code == 201, resp.text

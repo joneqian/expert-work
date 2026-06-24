@@ -684,6 +684,21 @@ class Settings(BaseSettings):
     #: ``None`` (default) makes the OAuth initiate endpoint return 503.
     mcp_oauth_redirect_uri: str | None = None
 
+    #: Multi-client redirect allowlist (Stream MCP-OAUTH, mcp-oauth-multi-client).
+    #: A client (web app / native desktop-CLI / embedded) may supply its OWN
+    #: ``redirect_uri`` at ``initiate`` so the provider returns the browser to
+    #: that client. Each entry is a permitted redirect **prefix**; a candidate
+    #: must origin-match (scheme+host+port for web; scheme for custom schemes)
+    #: AND path-prefix-match an entry, else ``422 MCP_OAUTH_REDIRECT_NOT_ALLOWED``.
+    #: ``mcp_oauth_redirect_uri`` (when set) is implicitly allowed. The redirect
+    #: is never fetched server-side — this guards open-redirect, not SSRF.
+    mcp_oauth_redirect_allowlist: list[str] = Field(default_factory=list)
+
+    #: Allow RFC 8252 native-app loopback redirects (``http://127.0.0.1:<port>``
+    #: / ``localhost`` / ``[::1]``, any port). Loopback is localhost-only, never
+    #: remotely reachable, so it is safe to accept for desktop / CLI clients.
+    mcp_oauth_allow_loopback_redirect: bool = True
+
     #: Path to the MCP connector catalog env-seed template (Stream MCP-OAUTH
     #: OA-5), e.g. ``configs/mcp-catalog-seed.json``. On startup each entry whose
     #: ``${VAR}`` placeholders all resolve from the environment is created (idem-

@@ -49,9 +49,13 @@ class McpOAuthConnectionStore(abc.ABC):
         scopes: str = "",
         oauth_state: str | None = None,
         pkce_verifier: str | None = None,
+        redirect_uri: str | None = None,
     ) -> McpOAuthConnectionRecord:
         """Insert a new ``pending`` connection. Raises
-        :class:`McpOAuthConnectionAlreadyExistsError` on (tenant, user, catalog)."""
+        :class:`McpOAuthConnectionAlreadyExistsError` on (tenant, user, catalog).
+
+        ``redirect_uri`` (multi-client OAuth) is the per-initiate redirect a
+        client supplied; ``None`` = the global default was used."""
 
     @abc.abstractmethod
     async def get(
