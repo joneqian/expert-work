@@ -24,6 +24,8 @@ import { SettingsTenantQuotas } from "./pages/SettingsTenantQuotas";
 import { SettingsTenants } from "./pages/SettingsTenants";
 import { SettingsMcpServers } from "./pages/SettingsMcpServers";
 import { SettingsMcpCatalog } from "./pages/SettingsMcpCatalog";
+import { SettingsMcpOAuth } from "./pages/SettingsMcpOAuth";
+import { McpOAuthCallback } from "./pages/McpOAuthCallback";
 import { SettingsPlatformSkills } from "./pages/SettingsPlatformSkills";
 import { SettingsPlatformSkillDetail } from "./pages/SettingsPlatformSkillDetail";
 import { SettingsRateCard } from "./pages/SettingsRateCard";
@@ -58,17 +60,38 @@ export function AppRouter() {
       <Route path="/triggers" element={<TriggersList />} />
       <Route path="/webhooks" element={<WebhooksList />} />
       <Route path="/settings/api-keys" element={<SettingsApiKeys />} />
-      <Route path="/settings/service-accounts" element={<SettingsServiceAccounts />} />
-      <Route path="/settings/role-bindings" element={<SettingsRoleBindings />} />
+      <Route
+        path="/settings/service-accounts"
+        element={<SettingsServiceAccounts />}
+      />
+      <Route
+        path="/settings/role-bindings"
+        element={<SettingsRoleBindings />}
+      />
       <Route path="/settings/members" element={<SettingsMembers />} />
-      <Route path="/settings/tenant-quotas" element={<SettingsTenantQuotas />} />
-      <Route path="/settings/tenant-config" element={<SettingsTenantConfig />} />
+      <Route
+        path="/settings/tenant-quotas"
+        element={<SettingsTenantQuotas />}
+      />
+      <Route
+        path="/settings/tenant-config"
+        element={<SettingsTenantConfig />}
+      />
       <Route path="/settings/tenants" element={<SettingsTenants />} />
-      <Route path="/settings/credentials" element={<SettingsTenantCredentials />} />
+      <Route
+        path="/settings/credentials"
+        element={<SettingsTenantCredentials />}
+      />
       <Route path="/settings/platform" element={<SettingsPlatformConfig />} />
-      <Route path="/settings/platform-users" element={<SettingsPlatformUsers />} />
+      <Route
+        path="/settings/platform-users"
+        element={<SettingsPlatformUsers />}
+      />
       <Route path="/settings/mcp-catalog" element={<SettingsMcpCatalog />} />
-      <Route path="/settings/platform-skills" element={<SettingsPlatformSkills />} />
+      <Route
+        path="/settings/platform-skills"
+        element={<SettingsPlatformSkills />}
+      />
       <Route
         path="/settings/platform-skills/:skillId"
         element={<SettingsPlatformSkillDetail />}
@@ -76,8 +99,16 @@ export function AppRouter() {
       <Route path="/settings/audit" element={<SettingsAudit />} />
       <Route path="/settings/egress-audit" element={<SettingsEgressAudit />} />
       <Route path="/settings/mcp-servers" element={<SettingsMcpServers />} />
+      <Route path="/settings/mcp-oauth" element={<SettingsMcpOAuth />} />
+      <Route
+        path="/settings/mcp-oauth/callback"
+        element={<McpOAuthCallback />}
+      />
       <Route path="/settings/usage" element={<SettingsUsage />} />
-      <Route path="/settings/billing-chargeback" element={<SettingsBillingChargeback />} />
+      <Route
+        path="/settings/billing-chargeback"
+        element={<SettingsBillingChargeback />}
+      />
       <Route path="/settings/rate-card" element={<SettingsRateCard />} />
       <Route path="/settings/*" element={<ComingSoon title="Settings" />} />
       <Route path="*" element={<ComingSoon title="404" />} />

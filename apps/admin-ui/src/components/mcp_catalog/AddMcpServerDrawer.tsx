@@ -14,9 +14,13 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Divider, Drawer, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
-import { listTenantCatalog, type TenantCatalogEntry } from "../../api/mcp-catalog";
+import {
+  listTenantCatalog,
+  type TenantCatalogEntry,
+} from "../../api/mcp-catalog";
 import { CatalogBrowser } from "./CatalogBrowser";
 import { InstantiateCatalogForm } from "./InstantiateCatalogForm";
+import { OAuthConnectForm } from "./OAuthConnectForm";
 import { CreateMcpServerDrawer } from "../CreateMcpServerDrawer";
 
 export interface AddMcpServerDrawerProps {
@@ -27,9 +31,15 @@ export interface AddMcpServerDrawerProps {
   onSaved: () => void;
 }
 
-type Step = { kind: "browse" } | { kind: "instantiate"; entry: TenantCatalogEntry };
+type Step =
+  | { kind: "browse" }
+  | { kind: "instantiate"; entry: TenantCatalogEntry };
 
-export function AddMcpServerDrawer({ open, onClose, onSaved }: AddMcpServerDrawerProps) {
+export function AddMcpServerDrawer({
+  open,
+  onClose,
+  onSaved,
+}: AddMcpServerDrawerProps) {
   const { t } = useTranslation();
 
   const [step, setStep] = useState<Step>({ kind: "browse" });
@@ -76,7 +86,9 @@ export function AddMcpServerDrawer({ open, onClose, onSaved }: AddMcpServerDrawe
         title={
           step.kind === "browse"
             ? t("mcp_catalog.browser_title")
-            : t("mcp_catalog.instantiate_title", { name: step.entry.display_name })
+            : t("mcp_catalog.instantiate_title", {
+                name: step.entry.display_name,
+              })
         }
         width={560}
         destroyOnHidden
@@ -96,12 +108,20 @@ export function AddMcpServerDrawer({ open, onClose, onSaved }: AddMcpServerDrawe
                 {t("mcp_catalog.advanced_hint")}
               </Typography.Text>
               <div style={{ marginTop: 8 }}>
-                <Button data-testid="amsd-custom" onClick={() => setCustomOpen(true)}>
+                <Button
+                  data-testid="amsd-custom"
+                  onClick={() => setCustomOpen(true)}
+                >
                   {t("mcp_catalog.advanced_custom")}
                 </Button>
               </div>
             </div>
           </>
+        ) : step.entry.auth_type === "oauth2" ? (
+          <OAuthConnectForm
+            entry={step.entry}
+            onBack={() => setStep({ kind: "browse" })}
+          />
         ) : (
           <InstantiateCatalogForm
             entry={step.entry}

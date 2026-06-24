@@ -11,7 +11,10 @@ import { Alert, Badge, Button, Card, Empty, Spin, Tag, Typography } from "antd";
 import { Lock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import type { McpRequiredTier, TenantCatalogEntry } from "../../api/mcp-catalog";
+import type {
+  McpRequiredTier,
+  TenantCatalogEntry,
+} from "../../api/mcp-catalog";
 
 const { Text, Paragraph } = Typography;
 
@@ -28,12 +31,20 @@ export interface CatalogBrowserProps {
   onSelect: (entry: TenantCatalogEntry) => void;
 }
 
-export function CatalogBrowser({ entries, loading, error, onSelect }: CatalogBrowserProps) {
+export function CatalogBrowser({
+  entries,
+  loading,
+  error,
+  onSelect,
+}: CatalogBrowserProps) {
   const { t } = useTranslation();
 
   if (loading) {
     return (
-      <div style={{ textAlign: "center", padding: "32px 0" }} data-testid="cb-loading">
+      <div
+        style={{ textAlign: "center", padding: "32px 0" }}
+        data-testid="cb-loading"
+      >
         <Spin />
       </div>
     );
@@ -53,12 +64,18 @@ export function CatalogBrowser({ entries, loading, error, onSelect }: CatalogBro
 
   if (entries.length === 0) {
     return (
-      <Empty description={t("mcp_catalog.browser_empty")} data-testid="cb-empty" />
+      <Empty
+        description={t("mcp_catalog.browser_empty")}
+        data-testid="cb-empty"
+      />
     );
   }
 
   return (
-    <div data-testid="cb-root" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div
+      data-testid="cb-root"
+      style={{ display: "flex", flexDirection: "column", gap: 12 }}
+    >
       {entries.map((entry) => {
         const locked = !entry.entitled;
         const card = (
@@ -70,15 +87,33 @@ export function CatalogBrowser({ entries, loading, error, onSelect }: CatalogBro
             style={locked ? { opacity: 0.6 } : undefined}
             styles={{ body: { padding: 14 } }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
               <div style={{ minWidth: 0 }}>
                 <Text strong>{entry.display_name}</Text>
                 {entry.category && (
                   <Tag style={{ marginLeft: 8 }}>{entry.category}</Tag>
                 )}
-                <Tag color={TIER_COLOR[entry.required_tier]} style={{ marginLeft: 4 }}>
+                <Tag
+                  color={TIER_COLOR[entry.required_tier]}
+                  style={{ marginLeft: 4 }}
+                >
                   {t(`mcp_catalog.tier_${entry.required_tier}`)}
                 </Tag>
+                {entry.auth_type === "oauth2" && (
+                  <Tag
+                    color="geekblue"
+                    style={{ marginLeft: 4 }}
+                    data-testid={`cb-oauth-${entry.name}`}
+                  >
+                    {t("mcp_catalog.oauth_badge")}
+                  </Tag>
+                )}
                 {entry.description && (
                   <Paragraph
                     type="secondary"

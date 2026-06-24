@@ -56,6 +56,7 @@ export interface TranslationKeys {
     audit: string;
     egress_audit: string;
     mcp_servers: string;
+    mcp_oauth: string;
     mcp_catalog: string;
     platform_skills: string;
     usage: string;
@@ -752,6 +753,40 @@ export interface TranslationKeys {
     err_invalid_url: string;
     err_duplicate: string;
     err_not_found: string;
+    oauth_badge: string;
+  };
+  mcp_oauth: {
+    page_title: string;
+    page_subtitle: string;
+    failed_to_load: string;
+    empty: string;
+    col_connector: string;
+    col_status: string;
+    col_scopes: string;
+    col_expires: string;
+    col_actions: string;
+    status_pending: string;
+    status_connected: string;
+    status_expired: string;
+    status_revoked: string;
+    status_error: string;
+    has_error: string;
+    reauthorize: string;
+    reauthorize_failed: string;
+    disconnect: string;
+    disconnect_confirm: string;
+    disconnect_failed: string;
+    disconnected: string;
+    connect_title: string;
+    connect_hint: string;
+    authorize: string;
+    err_not_oauth: string;
+    err_not_configured: string;
+    callback_title: string;
+    callback_exchanging: string;
+    callback_failed: string;
+    callback_back: string;
+    callback_missing_params: string;
   };
   settings_platform: {
     page_title: string;
@@ -1666,6 +1701,7 @@ const en: TranslationKeys = {
     audit: "Audit",
     egress_audit: "Egress audit",
     mcp_servers: "MCP Servers",
+    mcp_oauth: "My MCP Connections",
     mcp_catalog: "MCP Catalog",
     platform_skills: "Platform Skills",
     usage: "Usage",
@@ -2427,6 +2463,44 @@ const en: TranslationKeys = {
     err_invalid_url: "The resulting server URL is invalid.",
     err_duplicate: "A server with this name already exists.",
     err_not_found: "This connector no longer exists.",
+    oauth_badge: "OAuth",
+  },
+  mcp_oauth: {
+    page_title: "My MCP Connections",
+    page_subtitle: "OAuth connectors you've authorized with your own account.",
+    failed_to_load: "Failed to load your connections",
+    empty: "You haven't connected any OAuth MCP connectors yet.",
+    col_connector: "Connector",
+    col_status: "Status",
+    col_scopes: "Scopes",
+    col_expires: "Token expires",
+    col_actions: "Actions",
+    status_pending: "Pending",
+    status_connected: "Connected",
+    status_expired: "Expired",
+    status_revoked: "Revoked",
+    status_error: "Error",
+    has_error: "error",
+    reauthorize: "Re-authorize",
+    reauthorize_failed: "Could not start re-authorization",
+    disconnect: "Disconnect",
+    disconnect_confirm:
+      "Disconnect this connector? Your stored token will be revoked.",
+    disconnect_failed: "Could not disconnect",
+    disconnected: "Disconnected",
+    connect_title: "Connect {{name}}",
+    connect_hint:
+      "You'll be redirected to sign in and authorize with your own account. The agent then accesses only your data.",
+    authorize: "Authorize",
+    err_not_oauth: "This connector is not an OAuth connector.",
+    err_not_configured:
+      "OAuth is not configured on this deployment. Contact your administrator.",
+    callback_title: "Connecting…",
+    callback_exchanging: "Finishing authorization, one moment…",
+    callback_failed: "Authorization failed",
+    callback_back: "Back to my connections",
+    callback_missing_params:
+      "The callback is missing its state or code parameter.",
   },
   settings_platform: {
     page_title: "Platform Credentials",

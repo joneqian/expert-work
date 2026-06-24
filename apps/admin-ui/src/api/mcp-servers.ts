@@ -14,7 +14,9 @@
 import { getJson, patchJson, postJson, apiClient } from "./client";
 
 export type McpTransport = "sse" | "streamable_http";
-export type McpAuthType = "none" | "bearer";
+// "oauth2" only appears on catalog entries (per-user OAuth connectors, Stream
+// MCP-OAUTH); tenant_mcp_server rows are only ever "none" | "bearer".
+export type McpAuthType = "none" | "bearer" | "oauth2";
 
 export interface McpServer {
   id: string;
