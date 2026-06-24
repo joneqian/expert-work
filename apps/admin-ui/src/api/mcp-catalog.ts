@@ -3,12 +3,11 @@
  * system_admin only) and ``/v1/mcp-servers/catalog`` (tenant admin),
  * Stream W.
  *
- * A *catalog entry* (``McpCatalogEntry``) is a connector **type** curated by
- * a platform admin: a transport + URL template + an ``auth_schema`` that
- * declares which params / secrets a tenant must supply to instantiate it.
- * Tenants browse the catalog (each entry carries an ``entitled`` flag derived
- * from their plan tier) and instantiate an entry into a concrete
- * :class:`McpServer` by POSTing params + secrets.
+ * A *catalog entry* (``McpCatalogEntry``) is a fully-configured platform MCP
+ * server curated by a platform admin (transport + concrete URL + auth: none /
+ * shared bearer / per-user oauth2). Tenants browse the catalog (each entry
+ * carries an ``entitled`` flag derived from their plan tier and a
+ * ``tenant_enabled`` opt-in flag) and enable the ones they want.
  *
  * Backend returns the standard ``{success, data, error}`` envelope; the
  * unwrapped payload is typed below.  ``getJson`` / ``postJson`` / ``patchJson``
@@ -20,19 +19,7 @@ import type { McpAuthType, McpTransport } from "./mcp-servers";
 
 // ── Domain types ─────────────────────────────────────────────────────────
 
-export type McpAuthFieldKind = "secret" | "param";
 export type McpRequiredTier = "free" | "pro" | "enterprise";
-
-export interface McpCatalogAuthField {
-  key: string;
-  label: string;
-  kind: McpAuthFieldKind;
-  required: boolean;
-}
-
-export interface McpCatalogAuthSchema {
-  fields: McpCatalogAuthField[];
-}
 
 export interface McpCatalogEntry {
   id: string;
@@ -46,7 +33,6 @@ export interface McpCatalogEntry {
    *  template + auth_schema fields). */
   url_template: string;
   auth_type: McpAuthType;
-  auth_schema: McpCatalogAuthSchema;
   /** oauth2 entries: the platform-registered OAuth app. */
   oauth_client_id?: string | null;
   oauth_scopes?: string | null;

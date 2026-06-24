@@ -1,29 +1,23 @@
 /**
  * MCP Catalog UI tests — Stream W.
  *
- * Covers the platform catalog page (admin gate + table), the catalog browser
- * entitlement lock, the auth_schema field builder (add/remove), and the
- * bearer-one-secret client guard.
+ * Covers the platform catalog page (admin gate + table), the platform-server
+ * config drawer (edit mode), and the tenant catalog browser (entitlement lock +
+ * enable toggle + oauth authorize).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "antd";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n";
 
 import { SettingsMcpCatalog } from "../SettingsMcpCatalog";
 import { CatalogBrowser } from "../../components/mcp_catalog/CatalogBrowser";
 import { CatalogEntryDrawer } from "../../components/mcp_catalog/CatalogEntryDrawer";
-import { AuthSchemaBuilder } from "../../components/mcp_catalog/AuthSchemaBuilder";
-import { validateAuthSchemaSecrets } from "../../components/mcp_catalog/validation";
 import { AuthProvider } from "../../auth/AuthContext";
 import { apiClient, setStoredToken } from "../../api/client";
-import type {
-  McpCatalogAuthField,
-  TenantCatalogEntry,
-} from "../../api/mcp-catalog";
+import type { TenantCatalogEntry } from "../../api/mcp-catalog";
 
 const TENANT = "00000000-0000-0000-0000-00000000acme";
 
@@ -65,11 +59,6 @@ const ENTRY = {
   transport: "sse" as const,
   url_template: "https://mcp.github.com/sse",
   auth_type: "bearer" as const,
-  auth_schema: {
-    fields: [
-      { key: "token", label: "Token", kind: "secret" as const, required: true },
-    ],
-  },
   required_tier: "pro" as const,
   enabled: true,
   created_at: "2026-05-01T10:00:00Z",
@@ -296,83 +285,5 @@ describe("CatalogBrowser entitlement lock", () => {
       </App>,
     );
     expect(screen.getByTestId("cb-authorize-lin")).toBeInTheDocument();
-  });
-});
-
-describe("AuthSchemaBuilder", () => {
-  it("add appends a row and remove drops it", async () => {
-    const user = userEvent.setup();
-    let current: McpCatalogAuthField[] = [];
-    function Harness() {
-      const [fields, setFields] = useState<McpCatalogAuthField[]>([]);
-      current = fields;
-      return <AuthSchemaBuilder value={fields} onChange={setFields} />;
-    }
-    render(
-      <App>
-        <Harness />
-      </App>,
-    );
-    await user.click(screen.getByTestId("asb-add"));
-    await waitFor(() =>
-      expect(screen.getByTestId("asb-row-0")).toBeInTheDocument(),
-    );
-    expect(current).toHaveLength(1);
-    await user.click(screen.getByTestId("asb-remove-0"));
-    await waitFor(() =>
-      expect(screen.queryByTestId("asb-row-0")).not.toBeInTheDocument(),
-    );
-    expect(current).toHaveLength(0);
-  });
-
-  it("editing the key field flows through onChange", async () => {
-    let current: McpCatalogAuthField[] = [
-      { key: "", label: "", kind: "param", required: true },
-    ];
-    const onChange = vi.fn((next: McpCatalogAuthField[]) => {
-      current = next;
-    });
-    render(
-      <App>
-        <AuthSchemaBuilder value={current} onChange={onChange} />
-      </App>,
-    );
-    fireEvent.change(screen.getByTestId("asb-key-0"), {
-      target: { value: "workspace" },
-    });
-    expect(onChange).toHaveBeenCalled();
-    expect(current[0].key).toBe("workspace");
-  });
-});
-
-describe("validateAuthSchemaSecrets guard", () => {
-  it("bearer requires exactly one secret", () => {
-    expect(validateAuthSchemaSecrets("bearer", [])).toBe(
-      "mcp_catalog.guard_bearer_one_secret",
-    );
-    expect(
-      validateAuthSchemaSecrets("bearer", [
-        { key: "a", label: "A", kind: "secret", required: true },
-        { key: "b", label: "B", kind: "secret", required: true },
-      ]),
-    ).toBe("mcp_catalog.guard_bearer_one_secret");
-    expect(
-      validateAuthSchemaSecrets("bearer", [
-        { key: "a", label: "A", kind: "secret", required: true },
-      ]),
-    ).toBeNull();
-  });
-
-  it("none forbids any secret", () => {
-    expect(
-      validateAuthSchemaSecrets("none", [
-        { key: "a", label: "A", kind: "secret", required: true },
-      ]),
-    ).toBe("mcp_catalog.guard_none_zero_secret");
-    expect(
-      validateAuthSchemaSecrets("none", [
-        { key: "a", label: "A", kind: "param", required: true },
-      ]),
-    ).toBeNull();
   });
 });

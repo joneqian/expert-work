@@ -107,7 +107,7 @@ MCP server
 |---|---|
 | `CatalogEntryDrawer` | 重写为 tab 版(基本/认证/高级),去 `url_template` 占位 + `AuthSchemaBuilder`;加 Bearer 平台 token 输入 + OAuth client_id;共享身份告警 |
 | `SettingsMcpCatalog` | 去重复 add 按钮;列加「认证类型」徽章(无/共享Bearer/OAuth) |
-| `AuthSchemaBuilder` / `validation.ts` | 退场(删引用;文件可留待清) |
+| `AuthSchemaBuilder` / `validation.ts` | ✅ 退场(P3 去引用,P5 删文件 + 测试) |
 | `CatalogBrowser` | A 卡片「启用」开关;B 卡片保留授权 |
 | `InstantiateCatalogForm` | 退场(A 改开关,无字段填写) |
 | `OAuthConnectForm` | 保留(B) |
@@ -140,7 +140,7 @@ MCP server
   - **`instantiate_catalog_entry` 退场推迟到 P4**:#789 **未动** instantiate(仍为旧 auth_schema 填字段流);删除与前端 `InstantiateCatalogForm` 退场(P4)同步,避免中间态破坏。
 - ✅ **P3 前端 — 平台配 server 表单**(#791):`CatalogEntryDrawer` tab 重写 + 去 AuthSchemaBuilder + 修重复按钮。
 - ✅ **P4 前端 — 租户选择使用**:`CatalogBrowser` 卡片 A/B 统一启用开关(`onToggleEnable` → enable/disable 端点,本地态即时更新),B 启用后再露「授权」按钮(走 `OAuthConnectForm`);`AddMcpServerDrawer` 去 instantiate 步骤(`Step = browse | authorize`);删 `InstantiateCatalogForm` 前端 + `instantiate_catalog_entry` 后端端点 + `InstantiateRequest`/`_DISALLOWED_PARAM_CHARS`;`TenantCatalogEntry` 加 `tenant_enabled`;`api/mcp-catalog.ts` 加 `enablePlatformServer`/`disablePlatformServer`。测试:vitest CatalogBrowser 三例(开关/锁/oauth 启用后授权)+ e2e 改 toggle / oauth authorize;`test_mcp_catalog_instantiation.py` 收敛为 list+custom 两例(instantiate 用例退场)。
-- **P5 收尾**:i18n/stories/e2e、文档(本设计 + runbook)、`auth_schema`/`AuthSchemaBuilder` 退场清理。
+- ✅ **P5 收尾**:删 `AuthSchemaBuilder.tsx` + `validation.ts`(P3 后已无引用,仅测试在用)+ 对应测试(AuthSchemaBuilder/validateAuthSchemaSecrets 两 describe);`api/mcp-catalog.ts` 去 `McpAuthFieldKind`/`McpCatalogAuthField`/`McpCatalogAuthSchema` 类型 + `McpCatalogEntry.auth_schema` 字段;清 stories(平台/租户/oauth 三处)的 `auth_schema` 字面量(e2e mock 保留——后端响应仍含 auth_schema,faithful);i18n 删 26 个孤儿键(auth_schema/builder/instantiate/err_* 系列,interface+双 locale);**真栈 live 验待 owner 跑**(catalog 现空,需先平台配 A 共享 server 调通 + B 员工各自授权)。后端 `auth_schema` 列与 protocol 按设计「留列停用」不动(list_catalog 仍 emit,无消费者)。
 
 每期独立 PR + CI 绿 + live 验(A 真起共享 server 调通 / B 已 live 验过)。
 

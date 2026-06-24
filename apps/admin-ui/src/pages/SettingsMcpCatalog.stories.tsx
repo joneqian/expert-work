@@ -27,7 +27,6 @@ const ENTRIES: McpCatalogEntry[] = [
     transport: "sse",
     url_template: "https://mcp.github.com/sse",
     auth_type: "bearer",
-    auth_schema: { fields: [{ key: "token", label: "Personal access token", kind: "secret", required: true }] },
     required_tier: "pro",
     enabled: true,
     created_at: "2026-05-01T10:00:00Z",
@@ -44,12 +43,6 @@ const ENTRIES: McpCatalogEntry[] = [
     transport: "streamable_http",
     url_template: "https://mcp.linear.app/{workspace}/mcp",
     auth_type: "bearer",
-    auth_schema: {
-      fields: [
-        { key: "workspace", label: "Workspace", kind: "param", required: true },
-        { key: "token", label: "API key", kind: "secret", required: true },
-      ],
-    },
     required_tier: "enterprise",
     enabled: true,
     created_at: "2026-05-10T08:00:00Z",
@@ -66,7 +59,6 @@ const ENTRIES: McpCatalogEntry[] = [
     transport: "sse",
     url_template: "https://mcp.internal.example.com/sse",
     auth_type: "none",
-    auth_schema: { fields: [] },
     required_tier: "free",
     enabled: false,
     created_at: "2026-04-20T12:00:00Z",
