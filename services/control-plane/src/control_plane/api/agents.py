@@ -19,11 +19,13 @@ from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from control_plane.api._authz import ensure_resource_access, require
+from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo
+from control_plane.api.runs import RunRequest, spawn_run
 from control_plane.audit import emit
 from control_plane.auth.abac import ResourceAttrs
 from control_plane.manifest import (
@@ -33,6 +35,8 @@ from control_plane.manifest import (
     ManifestTemplateError,
     ManifestValidationError,
 )
+from control_plane.quota.base import QuotaService
+from control_plane.runtime import AgentRuntime
 from control_plane.tenancy import TenantConfigNotConfiguredError
 from control_plane.tenant_scope import (
     CrossTenant,
@@ -43,6 +47,7 @@ from control_plane.tenant_scope import (
 )
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.common.uplift_metrics import record_manifest_provider_rejected
+from helix_agent.persistence import ApprovalStore
 from helix_agent.persistence.agent_instance import AgentInstanceStore
 from helix_agent.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
 from helix_agent.persistence.tenant_user import TenantUserStore
@@ -61,6 +66,7 @@ from helix_agent.protocol import (
     tier_satisfies,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
+from orchestrator import AgentFactoryError
 
 logger = logging.getLogger("helix.control_plane.agents")
 
@@ -225,6 +231,81 @@ def _get_instance_store(request: Request) -> AgentInstanceStore:
     return request.app.state.agent_instance_store  # type: ignore[no-any-return]
 
 
+def _get_runtime(request: Request) -> AgentRuntime:
+    return request.app.state.agent_runtime  # type: ignore[no-any-return]
+
+
+def _get_approvals(request: Request) -> ApprovalStore:
+    return request.app.state.approval_store  # type: ignore[no-any-return]
+
+
+def _get_quota(request: Request) -> QuotaService:
+    return request.app.state.quota_service  # type: ignore[no-any-return]
+
+
+class _SessionError(Exception):
+    """Internal control-flow signal for the external session/run helpers; the
+    endpoints convert it to an envelope error."""
+
+    def __init__(self, code: str, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+
+
+async def _resolve_session(
+    *,
+    tenant_id: UUID,
+    agent_code: str,
+    actor_id: str,
+    user_id: str,
+    session_id: UUID | None,
+    repo: AgentSpecStore,
+    threads: ThreadMetaStore,
+    users: TenantUserStore,
+    instances: AgentInstanceStore,
+) -> tuple[AgentSpecRecord, UUID, UUID]:
+    """Resolve agent_code → active record, mint the end-user, create / continue
+    the session thread, and touch the per-user instance binding. Returns
+    ``(record, thread_id, end_user_id)``. Raises :class:`_SessionError`.
+
+    Shared by the external session-bind and run endpoints (M1-5b)."""
+    active = await repo.list_by_tenant(
+        tenant_id=tenant_id, status=AgentSpecStatus.ACTIVE, name=agent_code, limit=1
+    )
+    if not active:
+        raise _SessionError(
+            "AGENT_NOT_FOUND", f"no active agent {agent_code!r} for this tenant", 404
+        )
+    record = active[0]
+
+    # Mint-on-use the end-user. The app owns its user_id namespace; subject type
+    # "user" + the app's id is unique per tenant. (Any valid tenant key may act
+    # for any of its users — network-layer hardening is a later addition; every
+    # call is audited with on_behalf_of.)
+    end_user = await users.resolve(tenant_id=tenant_id, subject_type="user", subject_id=user_id)
+
+    if session_id is not None:
+        meta = await threads.get(session_id, tenant_id=tenant_id)
+        if meta is None or meta.user_id != end_user.id or meta.agent_name != agent_code:
+            raise _SessionError("SESSION_NOT_FOUND", "session not found for this user / agent", 404)
+        thread_id = session_id
+    else:
+        thread_id = uuid4()
+        await threads.create(
+            thread_id=thread_id,
+            tenant_id=tenant_id,
+            created_by=actor_id,
+            user_id=end_user.id,
+            agent_name=agent_code,
+            agent_version=record.version,
+        )
+
+    await instances.touch(tenant_id=tenant_id, agent_code=agent_code, user_id=end_user.id)
+    return record, thread_id, end_user.id
+
+
 class BindSessionRequest(BaseModel):
     """Body for ``POST /v1/agents/{agent_code}/sessions`` — Stream Agent-Templates
     (M1-5b). An external app (tenant API-key) binds / continues a per-user session.
@@ -238,6 +319,20 @@ class BindSessionRequest(BaseModel):
 
     user_id: str = Field(min_length=1, max_length=255)
     session_id: UUID | None = None
+
+
+class ExternalRunRequest(BaseModel):
+    """Body for ``POST /v1/agents/{agent_code}/runs`` — Stream Agent-Templates
+    (M1-5b-2). Binds / continues a per-user session and runs in one call."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    user_id: str = Field(min_length=1, max_length=255)
+    session_id: UUID | None = None
+    input: str | None = Field(default=None, max_length=8192)
+    mode: Literal["stream", "queue"] = "stream"
+    image_refs: list[str] = Field(default_factory=list, max_length=64)
+    untrusted_content: list[str] = Field(default_factory=list, max_length=16)
 
 
 async def _load_manifest(
@@ -562,46 +657,20 @@ def build_agents_router() -> APIRouter:
         tenant_id = request.state.tenant_id
         actor_id = request.state.actor_id
         trace_id = current_trace_id_hex()
-
-        # 1. Resolve agent_code → latest ACTIVE version (newest-first list).
-        active = await repo.list_by_tenant(
-            tenant_id=tenant_id, status=AgentSpecStatus.ACTIVE, name=agent_code, limit=1
-        )
-        if not active:
-            return _envelope_error(
-                "AGENT_NOT_FOUND", f"no active agent {agent_code!r} for this tenant", 404
-            )
-        agent_version = active[0].version
-
-        # 2. Mint-on-use the end-user. The app owns its user_id namespace; subject
-        #    type "user" + the app's id is unique per tenant. (Any valid tenant key
-        #    may act for any of its users — network-layer hardening, e.g. an IP
-        #    allowlist, is a later addition; every bind is audited with on_behalf_of.)
-        end_user = await users.resolve(
-            tenant_id=tenant_id, subject_type="user", subject_id=payload.user_id
-        )
-
-        # 3. Resolve or create the session (thread).
-        if payload.session_id is not None:
-            meta = await threads.get(payload.session_id, tenant_id=tenant_id)
-            if meta is None or meta.user_id != end_user.id or meta.agent_name != agent_code:
-                return _envelope_error(
-                    "SESSION_NOT_FOUND", "session not found for this user / agent", 404
-                )
-            thread_id = payload.session_id
-        else:
-            thread_id = uuid4()
-            await threads.create(
-                thread_id=thread_id,
+        try:
+            record, thread_id, end_user_id = await _resolve_session(
                 tenant_id=tenant_id,
-                created_by=actor_id,
-                user_id=end_user.id,
-                agent_name=agent_code,
-                agent_version=agent_version,
+                agent_code=agent_code,
+                actor_id=actor_id,
+                user_id=payload.user_id,
+                session_id=payload.session_id,
+                repo=repo,
+                threads=threads,
+                users=users,
+                instances=instances,
             )
-
-        # 4. Upsert the per-user instance binding (anchor + last-active).
-        await instances.touch(tenant_id=tenant_id, agent_code=agent_code, user_id=end_user.id)
+        except _SessionError as exc:
+            return _envelope_error(exc.code, exc.message, exc.status_code)
 
         await emit(
             audit,
@@ -611,8 +680,8 @@ def build_agents_router() -> APIRouter:
             resource_type="session",
             resource_id=str(thread_id),
             trace_id=trace_id,
-            details={"agent_code": agent_code, "agent_version": agent_version},
-            on_behalf_of=str(end_user.id),
+            details={"agent_code": agent_code, "agent_version": record.version},
+            on_behalf_of=str(end_user_id),
         )
         return JSONResponse(
             status_code=201,
@@ -621,10 +690,103 @@ def build_agents_router() -> APIRouter:
                 "data": {
                     "session_id": str(thread_id),
                     "agent_code": agent_code,
-                    "agent_version": agent_version,
-                    "user_id": str(end_user.id),
+                    "agent_version": record.version,
+                    "user_id": str(end_user_id),
                 },
             },
+        )
+
+    @router.post("/{agent_code}/runs", response_model=None)
+    async def run_agent_for_user(
+        agent_code: str,
+        payload: ExternalRunRequest,
+        request: Request,
+        principal: Annotated[Principal, Depends(require("session", "write"))],
+        repo: Annotated[AgentSpecStore, Depends(_get_repo)],
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        instances: Annotated[AgentInstanceStore, Depends(_get_instance_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        runtime: Annotated[AgentRuntime, Depends(_get_runtime)],
+        approvals: Annotated[ApprovalStore, Depends(_get_approvals)],
+        quota: Annotated[QuotaService, Depends(_get_quota)],
+    ) -> StreamingResponse | JSONResponse:
+        """Run an agent on behalf of an external-app end-user (M1-5b-2).
+
+        One call: mints the end-user, resolves ``agent_code``, binds / continues a
+        session, then spawns the run **scoped to the end-user** — long-term memory,
+        the workspace volume, and per-user token cost all key on the minted user, not
+        the API-key caller. Returns the SSE stream (``X-Helix-Session-Id`` header) or
+        202 for queue mode. The agent definition is shared across the tenant's users;
+        per-user isolation is the user-scoped state.
+        """
+        tenant_id = request.state.tenant_id
+        actor_id = request.state.actor_id
+        trace_id = current_trace_id_hex()
+        try:
+            record, thread_id, end_user_id = await _resolve_session(
+                tenant_id=tenant_id,
+                agent_code=agent_code,
+                actor_id=actor_id,
+                user_id=payload.user_id,
+                session_id=payload.session_id,
+                repo=repo,
+                threads=threads,
+                users=users,
+                instances=instances,
+            )
+        except _SessionError as exc:
+            return _envelope_error(exc.code, exc.message, exc.status_code)
+
+        # Admission (Stream C.5b) — bucket the run against the agent.
+        denial = await check_admission(
+            quota=quota,
+            audit=audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            agent=agent_code,
+            resource_kind="run",
+        )
+        if denial is not None:
+            return denial
+
+        # Build (cache-hit) the agent. The end-user has no OAuth subject of its
+        # own (minted, not a Keycloak login), so the OAuth pool keys on its id and
+        # resolves empty — the build stays shared.
+        try:
+            built = await runtime.get_agent(
+                tenant_id=tenant_id,
+                name=agent_code,
+                version=record.version,
+                spec=record.spec,
+                user_id=str(end_user_id),
+            )
+        except AgentFactoryError as exc:
+            return _envelope_error("AGENT_BUILD_FAILED", f"agent cannot be built: {exc}", 422)
+
+        run_payload = RunRequest(
+            input=payload.input,
+            mode=payload.mode,
+            image_refs=payload.image_refs,
+            untrusted_content=payload.untrusted_content,
+        )
+        return await spawn_run(
+            runtime=runtime,
+            audit=audit,
+            approvals=approvals,
+            request=request,
+            settings=request.app.state.settings,
+            built=built,
+            record_spec=record.spec,
+            thread_id=thread_id,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            effective_user_id=end_user_id,
+            oauth_subject=str(end_user_id),
+            payload=run_payload,
+            trace_id=trace_id,
+            extra_headers={"X-Helix-Session-Id": str(thread_id)},
+            on_behalf_of=str(end_user_id),
         )
 
     @router.get("")

@@ -64,14 +64,20 @@ from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.persistence.thread_meta import ThreadMetaStore
-from helix_agent.protocol import ApprovalStatus, AuditAction, AuditResult, ThreadStatus
+from helix_agent.protocol import (
+    AgentSpec,
+    ApprovalStatus,
+    AuditAction,
+    AuditResult,
+    ThreadStatus,
+)
 from helix_agent.protocol.multimodal import parse_image_ref
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.runs import RunEventStore, RunStore
 from helix_agent.runtime.runs.schemas import TERMINAL_RUN_STATUSES, RunStatus
 from helix_agent.runtime.runs.store import MAX_LIST_LIMIT, _clamp_limit
 from helix_agent.runtime.stream_bridge import END_SENTINEL, HEARTBEAT_SENTINEL
-from orchestrator import AgentFactoryError, run_agent, sse_consumer
+from orchestrator import AgentFactoryError, BuiltAgent, run_agent, sse_consumer
 from orchestrator.multimodal import image_ref_block
 from orchestrator.sse import format_sse
 
@@ -595,6 +601,151 @@ async def resolve_approval_decision(
     return run_record, continuation_run_id, False
 
 
+async def spawn_run(
+    *,
+    runtime: AgentRuntime,
+    audit: AuditLogger,
+    approvals: ApprovalStore,
+    request: Request,
+    settings: Settings,
+    built: BuiltAgent,
+    record_spec: AgentSpec,
+    thread_id: UUID,
+    tenant_id: UUID,
+    actor_id: str,
+    effective_user_id: UUID | None,
+    oauth_subject: str,
+    payload: RunRequest,
+    trace_id: str,
+    extra_headers: dict[str, str] | None = None,
+    on_behalf_of: str | None = None,
+) -> StreamingResponse | JSONResponse:
+    """Register + spawn one run, returning the SSE stream (or 202 for queue mode).
+
+    Extracted from ``trigger_run`` so both the per-session run endpoint and the
+    external per-user run endpoint (Stream Agent-Templates M1-5b) share the exact
+    spawn / SSE / queue logic. ``effective_user_id`` is the user the run is scoped
+    to — the long-term-memory RLS, the workspace volume, and per-user token
+    accounting all key on it (the caller for a normal session run; the minted
+    end-user for an on-behalf-of external run). ``oauth_subject`` keys the per-user
+    OAuth MCP pool. ``on_behalf_of`` records the end-user when a machine principal
+    acts for one."""
+    # Stream J.6 — enforce image-ref invariants before any side effects.
+    _validate_image_refs(
+        payload.image_refs,
+        tenant_id=tenant_id,
+        thread_id=thread_id,
+        supports_vision=built.supports_vision,
+        has_vision_block=record_spec.spec.vision is not None,
+        max_per_run=settings.multimodal_max_images_per_run,
+    )
+
+    await emit(
+        audit,
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        action=AuditAction.SESSION_WRITE,
+        resource_type="session",
+        resource_id=str(thread_id),
+        trace_id=trace_id,
+        details={"stage": "run.start", "input_len": len(payload.input or "")},
+        on_behalf_of=on_behalf_of,
+    )
+
+    run_id = uuid4()
+    prior_runs = await runtime.run_manager.list_by_thread(thread_id, tenant_id=tenant_id)
+
+    # Stream 9.5 — queue mode: persist as ``queued`` + return 202.
+    if payload.mode == "queue":
+        await runtime.run_manager.enqueue(
+            run_id=run_id,
+            thread_id=thread_id,
+            tenant_id=tenant_id,
+            user_id=effective_user_id,
+            enqueued_input={
+                "input": payload.input,
+                "image_refs": payload.image_refs,
+                "untrusted_content": payload.untrusted_content,
+            },
+            is_resume=bool(prior_runs),
+            trace_id=trace_id,
+        )
+        logger.info("control_plane.run.enqueued run_id=%s", run_id)
+        return JSONResponse(
+            status_code=202,
+            content={"run_id": str(run_id), "thread_id": str(thread_id), "status": "queued"},
+        )
+
+    run_record = await runtime.run_manager.create(
+        run_id=run_id,
+        thread_id=thread_id,
+        tenant_id=tenant_id,
+        user_id=effective_user_id,
+        is_resume=bool(prior_runs),
+        trace_id=trace_id,
+    )
+    run_record.bound_distilled_skills = built.bound_distilled_skills
+    graph_input = build_run_graph_input(
+        built,
+        input_text=payload.input,
+        image_refs=payload.image_refs,
+        untrusted_content=payload.untrusted_content,
+    )
+    configurable: dict[str, Any] = {
+        "thread_id": str(thread_id),
+        "tenant_id": str(tenant_id),
+        "run_id": str(run_id),
+    }
+    if effective_user_id is not None:
+        configurable["user_id"] = str(effective_user_id)
+        # Stream J.3 — carry the user scope into the worker's context so the
+        # long-term-memory store's user-level RLS applies (inherited by the task).
+        current_user_id_var.set(effective_user_id)
+    # MCP-OAUTH (OA-3b-后续) — the OAuth subject (per-user OAuth pool key).
+    configurable["oauth_user_id"] = oauth_subject
+    if built.run_deadline_s > 0:
+        configurable["deadline_at"] = time.monotonic() + float(built.run_deadline_s)
+    config: RunnableConfig = {"configurable": configurable}
+    worker = asyncio.create_task(
+        run_agent(
+            bridge=runtime.stream_bridge,
+            run_manager=runtime.run_manager,
+            record=run_record,
+            graph=built.graph,  # type: ignore[arg-type]
+            graph_input=graph_input,
+            config=config,
+            audit_logger=audit,
+            approval_store=approvals,
+            event_store=runtime.run_event_store,
+            skill_run_usage_recorder=runtime.skill_run_usage_recorder,
+            trajectory_recorder=runtime.trajectory_recorder,
+            worker_spawn_budget=runtime.new_worker_spawn_budget(),
+            tool_replay_safe=built.tool_replay_safe,
+        )
+    )
+    await runtime.run_manager.attach_task(run_id, worker)
+    logger.info("control_plane.run.started run_id=%s", run_id)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "X-Helix-Run-Id": str(run_id),
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    return StreamingResponse(
+        sse_consumer(
+            bridge=runtime.stream_bridge,
+            record=run_record,
+            run_manager=runtime.run_manager,
+            is_disconnected=request.is_disconnected,
+            last_event_id=request.headers.get("Last-Event-ID"),
+        ),
+        media_type="text/event-stream",
+        headers=headers,
+    )
+
+
 def build_runs_router() -> APIRouter:
     router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 
@@ -697,156 +848,24 @@ def build_runs_router() -> APIRouter:
                 status_code=422, detail=f"agent manifest cannot be built: {exc}"
             ) from exc
 
-        # Stream J.6 — enforce image-ref invariants before any side effects.
-        _validate_image_refs(
-            payload.image_refs,
-            tenant_id=tenant_id,
+        # Stream Agent-Templates (M1-5b-2) — the spawn / SSE / queue logic is
+        # shared with the external per-user run endpoint. A normal session run is
+        # scoped to its caller; the OAuth subject keys the per-user OAuth pool.
+        return await spawn_run(
+            runtime=runtime,
+            audit=audit,
+            approvals=approvals,
+            request=request,
+            settings=settings,
+            built=built,
+            record_spec=record.spec,
             thread_id=thread_id,
-            supports_vision=built.supports_vision,
-            has_vision_block=record.spec.spec.vision is not None,
-            max_per_run=settings.multimodal_max_images_per_run,
-        )
-
-        await emit(
-            audit,
             tenant_id=tenant_id,
             actor_id=actor_id,
-            action=AuditAction.SESSION_WRITE,
-            resource_type="session",
-            resource_id=str(thread_id),
+            effective_user_id=caller_user_id,
+            oauth_subject=request.state.principal.subject_id,
+            payload=payload,
             trace_id=trace_id,
-            details={"stage": "run.start", "input_len": len(payload.input or "")},
-        )
-
-        # Register the run + spawn the background worker. The worker
-        # streams graph events into the bridge; sse_consumer drains them.
-        #
-        # Stream K.K10 — the SSE worker observes the durable-resume
-        # histogram only on runs that resumed an existing checkpoint.
-        # Per-thread prior runs in the manager are an in-process proxy
-        # for that signal — first run on a thread is cold, second+ is
-        # a resume. A truly checkpoint-aware probe would inspect the
-        # PostgresSaver state, but the prior-runs check is cheap and
-        # correct for the SLO #5 question ("did the user wait through
-        # a resume?").
-        run_id = uuid4()
-        prior_runs = await runtime.run_manager.list_by_thread(thread_id, tenant_id=tenant_id)
-
-        # Stream 9.5 — queue mode: persist the run as ``queued`` and return
-        # 202 immediately. A RunQueueWorker on any instance claims + executes
-        # it; the client reads the output over GET .../runs/{id}/events. The
-        # agent was already built above (fail-fast manifest + image-ref check),
-        # but execution is deferred — the worker rebuilds (cache-hit) + runs.
-        if payload.mode == "queue":
-            await runtime.run_manager.enqueue(
-                run_id=run_id,
-                thread_id=thread_id,
-                tenant_id=tenant_id,
-                user_id=caller_user_id,
-                enqueued_input={
-                    "input": payload.input,
-                    "image_refs": payload.image_refs,
-                    "untrusted_content": payload.untrusted_content,
-                },
-                is_resume=bool(prior_runs),
-                trace_id=trace_id,
-            )
-            logger.info("control_plane.run.enqueued run_id=%s", run_id)
-            return JSONResponse(
-                status_code=202,
-                content={"run_id": str(run_id), "thread_id": str(thread_id), "status": "queued"},
-            )
-
-        # Mini-ADR H-9.5 — capture the API-side OTel trace id at run start
-        # so RunDetail can deep-link to Langfuse / Tempo even after the
-        # in-memory RunManager TTL expires.
-        run_record = await runtime.run_manager.create(
-            run_id=run_id,
-            thread_id=thread_id,
-            tenant_id=tenant_id,
-            user_id=caller_user_id,
-            is_resume=bool(prior_runs),
-            trace_id=trace_id,
-        )
-        # SE-7d-3b-ii — carry the build-time distilled skills to the run's
-        # terminal hook so it can emit skill_run_usage for the rollback monitor.
-        run_record.bound_distilled_skills = built.bound_distilled_skills
-        graph_input = build_run_graph_input(
-            built,
-            input_text=payload.input,
-            image_refs=payload.image_refs,
-            untrusted_content=payload.untrusted_content,
-        )
-        configurable: dict[str, Any] = {
-            "thread_id": str(thread_id),
-            "tenant_id": str(tenant_id),
-            "run_id": str(run_id),
-        }
-        if caller_user_id is not None:
-            configurable["user_id"] = str(caller_user_id)
-            # Stream J.3 — carry the user scope into the run worker's
-            # context so the long-term-memory store's user-level RLS
-            # applies. The background task inherits this ContextVar at
-            # creation, exactly as it inherits the tenant id.
-            current_user_id_var.set(caller_user_id)
-        # MCP-OAUTH (OA-3b-后续) — carry the OAuth subject (= the per-user OAuth
-        # pool key, distinct from caller_user_id) so a delegated sub-agent /
-        # worker resolves the same OAuth-connected MCP servers as this run.
-        configurable["oauth_user_id"] = request.state.principal.subject_id
-        # Mini-ADR J-40 — when the manifest declares
-        # ``policies.run_deadline_s > 0`` the worker pins a wall-clock
-        # absolute deadline on config; SubAgentTool propagates it to
-        # every child config unchanged so the whole delegation tree
-        # honours the single budget.
-        if built.run_deadline_s > 0:
-            configurable["deadline_at"] = time.monotonic() + float(built.run_deadline_s)
-        config: RunnableConfig = {"configurable": configurable}
-        worker = asyncio.create_task(
-            run_agent(
-                bridge=runtime.stream_bridge,
-                run_manager=runtime.run_manager,
-                record=run_record,
-                # CompiledStateGraph structurally satisfies the
-                # StreamableGraph Protocol at runtime (its astream is
-                # overloaded, which mypy can't match to the Protocol's
-                # single signature) — proven by test_sse.py.
-                graph=built.graph,  # type: ignore[arg-type]
-                graph_input=graph_input,
-                config=config,
-                audit_logger=audit,
-                approval_store=approvals,
-                # Stream H.3 PR 3 — durable SSE mirror.
-                event_store=runtime.run_event_store,
-                skill_run_usage_recorder=runtime.skill_run_usage_recorder,
-                # Stream L.L7 — record the trajectory (curation / eval-gate source).
-                trajectory_recorder=runtime.trajectory_recorder,
-                worker_spawn_budget=runtime.new_worker_spawn_budget(),
-                # Stream HX-3 — replay-safety resolver for transient retry.
-                tool_replay_safe=built.tool_replay_safe,
-            )
-        )
-        await runtime.run_manager.attach_task(run_id, worker)
-        # Log only ``run_id`` — it is server-generated (``uuid4()``) and
-        # uniquely identifies the run. ``thread_id`` (a request path
-        # param) and the agent name / version (user-supplied) are
-        # request-derived; CodeQL py/log-injection taints them, so they
-        # are kept out of the log. Recover them from the run record.
-        logger.info("control_plane.run.started run_id=%s", run_id)
-
-        return StreamingResponse(
-            sse_consumer(
-                bridge=runtime.stream_bridge,
-                record=run_record,
-                run_manager=runtime.run_manager,
-                is_disconnected=request.is_disconnected,
-                last_event_id=request.headers.get("Last-Event-ID"),
-            ),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "X-Helix-Run-Id": str(run_id),
-            },
         )
 
     @router.get("/{thread_id}/runs/{run_id}", response_model=None)
