@@ -182,12 +182,14 @@ async def emit(
     reason: str | None = None,
     trace_id: str | None = None,
     details: dict[str, object] | None = None,
+    on_behalf_of: str | None = None,
 ) -> None:
     """One-shot helper: build :class:`AuditEntry` + write.
 
     Defaults ``actor_type="user"`` because the dev-mode middleware does
     not yet distinguish service accounts; Stream C.1 will override per
-    JWT principal.
+    JWT principal. ``on_behalf_of`` records the end-user a service-account
+    caller acted for (Stream Agent-Templates M1-5b — the external run model).
     """
     entry = AuditEntry(
         tenant_id=tenant_id,
@@ -200,5 +202,6 @@ async def emit(
         reason=reason,
         trace_id=trace_id,
         details=details or {},
+        on_behalf_of=on_behalf_of,
     )
     await logger.write(entry)

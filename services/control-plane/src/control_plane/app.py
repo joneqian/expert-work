@@ -203,6 +203,11 @@ from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
 from helix_agent.common.observability import current_trace_id_hex, init_logging, init_tracing
 from helix_agent.common.uplift_metrics import record_legacy_credentials_fallback
+from helix_agent.persistence.agent_instance import (
+    AgentInstanceStore,
+    InMemoryAgentInstanceStore,
+    SqlAgentInstanceStore,
+)
 from helix_agent.persistence.agent_spec import (
     AgentSpecStore,
     InMemoryAgentSpecStore,
@@ -672,6 +677,10 @@ def create_app(
     # Stream Agent-Templates — platform-curated Agent templates (NULL-tenant rows).
     resolved_platform_agent_template_store = (
         sql_stores.platform_agent_template if sql_stores else InMemoryPlatformAgentTemplateStore()
+    )
+    # Stream Agent-Templates (M1-5b) — per-user agent-instance bindings.
+    resolved_agent_instance_store = (
+        sql_stores.agent_instance if sql_stores else InMemoryAgentInstanceStore()
     )
     # Stream MCP-OAUTH — per-user OAuth connections to hosted MCP connectors.
     resolved_mcp_oauth_connection_store = (
@@ -1627,6 +1636,7 @@ def create_app(
     app.state.tenant_mcp_server_store = resolved_tenant_mcp_server_store
     app.state.mcp_connector_catalog_store = resolved_mcp_connector_catalog_store
     app.state.platform_agent_template_store = resolved_platform_agent_template_store
+    app.state.agent_instance_store = resolved_agent_instance_store
     app.state.mcp_oauth_connection_store = resolved_mcp_oauth_connection_store
     app.state.model_rate_card_store = resolved_model_rate_card_store
     app.state.tenant_billing_ledger_store = resolved_tenant_billing_ledger_store
@@ -1824,6 +1834,7 @@ class _SqlStores:
     tenant_skill_subscription: TenantSkillSubscriptionStore  # Skill Marketplace
     mcp_connector_catalog: McpConnectorCatalogStore  # Stream W
     platform_agent_template: PlatformAgentTemplateStore  # Stream Agent-Templates
+    agent_instance: AgentInstanceStore  # Stream Agent-Templates (M1-5b)
     mcp_oauth_connection: McpOAuthConnectionStore  # Stream MCP-OAUTH
     model_rate_card: ModelRateCardStore  # Stream Y (Y-3)
     tenant_billing_ledger: TenantBillingLedgerStore  # Stream Y (Y-4)
@@ -2042,6 +2053,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         tenant_skill_subscription=SqlTenantSkillSubscriptionStore(session_factory),
         mcp_connector_catalog=SqlMcpConnectorCatalogStore(session_factory),
         platform_agent_template=SqlPlatformAgentTemplateStore(session_factory),
+        agent_instance=SqlAgentInstanceStore(session_factory),
         mcp_oauth_connection=SqlMcpOAuthConnectionStore(session_factory),
         model_rate_card=DbModelRateCardStore(session_factory),
         tenant_billing_ledger=DbTenantBillingLedgerStore(session_factory),
