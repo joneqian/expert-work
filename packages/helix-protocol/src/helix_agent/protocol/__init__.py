@@ -36,6 +36,13 @@ from helix_agent.protocol.agent_spec import (
     WorkflowSpec,
     parse_agent_ref,
 )
+from helix_agent.protocol.agent_template_resolve import (
+    FIELD_TIERS,
+    FieldTier,
+    enforce_security_floor,
+    parse_extends_ref,
+    resolve_extends,
+)
 from helix_agent.protocol.approval import (
     ApprovalDecision,
     ApprovalReasonKind,
@@ -247,6 +254,7 @@ __all__ = [
     "API_KEY_STORED_PREFIX_LEN",
     "DEFAULT_CHUNK_MAX_TOKENS",
     "DEFAULT_CHUNK_OVERLAP_TOKENS",
+    "FIELD_TIERS",
     "MAX_RESULT_EXCERPT_CHARS",
     "MODEL_CATALOG",
     "PLATFORM_SCOPE_ROLES",
@@ -311,6 +319,7 @@ __all__ = [
     "EventType",
     "EvolutionOrigin",
     "FeedbackRating",
+    "FieldTier",
     "FilesystemSpec",
     "HTTPToolSpec",
     "ImageRef",
@@ -432,11 +441,14 @@ __all__ = [
     "WorkflowSpec",
     "apply_markup",
     "catalog_entry",
+    "enforce_security_floor",
     "models_for_provider",
     "parse_agent_ref",
+    "parse_extends_ref",
     "parse_image_ref",
     "parse_skill_ref",
     "provider_for_model",
+    "resolve_extends",
     "tier_satisfies",
     "validate_secret_ref",
 ]
