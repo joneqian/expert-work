@@ -160,6 +160,53 @@ async def test_create_get_list_patch_delete(ctx: _Ctx) -> None:
 
 
 @pytest.mark.asyncio
+async def test_timeouts_round_trip_and_default_null(ctx: _Ctx) -> None:
+    tuned = await ctx.client.post(
+        "/v1/platform/mcp-catalog",
+        json={
+            "name": "tuned",
+            "display_name": "Tuned",
+            "transport": "sse",
+            "url_template": "https://mcp.example.com/sse",
+            "auth_type": "none",
+            "timeout_s": 12,
+            "sse_read_timeout_s": 600,
+        },
+        headers=ctx.admin_headers,
+    )
+    assert tuned.status_code == 201, tuned.text
+    data = tuned.json()["data"]
+    assert data["timeout_s"] == 12
+    assert data["sse_read_timeout_s"] == 600
+
+    # patch raises only timeout_s; sse_read_timeout_s is left unchanged.
+    patch = await ctx.client.patch(
+        f"/v1/platform/mcp-catalog/{data['id']}",
+        json={"timeout_s": 45},
+        headers=ctx.admin_headers,
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["data"]["timeout_s"] == 45
+    assert patch.json()["data"]["sse_read_timeout_s"] == 600
+
+    # Omitted on create → NULL (orchestrator defaults apply at runtime).
+    plain = await ctx.client.post(
+        "/v1/platform/mcp-catalog",
+        json={
+            "name": "plain",
+            "display_name": "Plain",
+            "transport": "sse",
+            "url_template": "https://mcp.example.com/x",
+            "auth_type": "none",
+        },
+        headers=ctx.admin_headers,
+    )
+    assert plain.status_code == 201, plain.text
+    assert plain.json()["data"]["timeout_s"] is None
+    assert plain.json()["data"]["sse_read_timeout_s"] is None
+
+
+@pytest.mark.asyncio
 async def test_list_category_filter(ctx: _Ctx) -> None:
     await ctx.client.post(
         "/v1/platform/mcp-catalog",

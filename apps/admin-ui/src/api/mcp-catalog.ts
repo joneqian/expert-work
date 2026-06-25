@@ -39,6 +39,11 @@ export interface McpCatalogEntry {
   /** bearer (shared A) entries: whether a platform token is stored (the ref
    *  itself is never exposed). */
   has_bearer_token?: boolean;
+  /** Runtime tuning (null = orchestrator defaults). ``timeout_s`` caps the
+   *  connect/call round-trip; ``sse_read_timeout_s`` is the per-read idle wait
+   *  between streamed events. */
+  timeout_s?: number | null;
+  sse_read_timeout_s?: number | null;
   required_tier: McpRequiredTier;
   enabled: boolean;
   created_at: string;
@@ -80,6 +85,9 @@ export interface CatalogUpsertBody {
   /** oauth2 (B): platform-registered OAuth app + space-separated scopes. */
   oauth_client_id?: string;
   oauth_scopes?: string;
+  /** Runtime tuning (omit = orchestrator defaults). */
+  timeout_s?: number;
+  sse_read_timeout_s?: number;
   required_tier?: McpRequiredTier;
   enabled?: boolean;
 }
@@ -93,6 +101,8 @@ export interface CatalogPatchBody {
   url_template?: string;
   /** Re-paste the platform bearer token (write-only); omit to keep existing. */
   bearer_token?: string;
+  timeout_s?: number;
+  sse_read_timeout_s?: number;
   required_tier?: McpRequiredTier;
   enabled?: boolean;
 }

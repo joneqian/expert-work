@@ -11,7 +11,12 @@ from helix_agent.protocol import (
     McpConnectorAuthSchema,
     McpConnectorCatalogUpsert,
 )
-from orchestrator.tools.mcp import MCPServerConfig, MCPToolDef, RecordingMCPClient
+from orchestrator.tools.mcp import (
+    DEFAULT_TIMEOUT_S,
+    MCPServerConfig,
+    MCPToolDef,
+    RecordingMCPClient,
+)
 
 
 def _factory_spy(configs: list[MCPServerConfig]) -> McpClientFactory:
@@ -31,6 +36,8 @@ async def _add(
     bearer_token_ref: str | None = None,
     oauth_client_id: str | None = None,
     auth_schema: McpConnectorAuthSchema | None = None,
+    timeout_s: float | None = None,
+    sse_read_timeout_s: float | None = None,
 ) -> None:
     await store.create(
         upsert=McpConnectorCatalogUpsert(
@@ -43,9 +50,29 @@ async def _add(
             bearer_token_ref=bearer_token_ref,
             oauth_client_id=oauth_client_id,
             auth_schema=auth_schema or McpConnectorAuthSchema(),
+            timeout_s=timeout_s,
+            sse_read_timeout_s=sse_read_timeout_s,
         ),
         actor_id="sysadmin",
     )
+
+
+@pytest.mark.asyncio
+async def test_timeouts_map_to_config_else_defaults() -> None:
+    store = InMemoryMcpConnectorCatalogStore()
+    await _add(store, name="tuned", timeout_s=12.0, sse_read_timeout_s=600.0)
+    await _add(store, name="default")  # NULL timeouts → orchestrator defaults
+    configs: list[MCPServerConfig] = []
+    svc = PlatformMcpPoolService(store=store, client_factory=_factory_spy(configs))
+
+    await svc.get_or_build()
+
+    by_name = {c.name: c for c in configs}
+    assert by_name["tuned"].timeout_s == 12.0
+    assert by_name["tuned"].sse_read_timeout_s == 600.0
+    # NULL row keeps the MCPServerConfig defaults (don't override timeout_s).
+    assert by_name["default"].timeout_s == DEFAULT_TIMEOUT_S
+    assert by_name["default"].sse_read_timeout_s is None
 
 
 @pytest.mark.asyncio

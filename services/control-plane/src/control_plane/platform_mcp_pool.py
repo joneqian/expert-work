@@ -57,12 +57,19 @@ def _record_to_config(record: McpConnectorCatalogRecord) -> MCPServerConfig:
     auth_config: dict[str, str] = {}
     if record.auth_type == "bearer" and record.bearer_token_ref is not None:
         auth_config["token_ref"] = record.bearer_token_ref
+    # Runtime tuning (NULL = orchestrator defaults). Only override timeout_s when
+    # the row carries one, so MCPServerConfig's own default still applies.
+    extra: dict[str, float] = {}
+    if record.timeout_s is not None:
+        extra["timeout_s"] = record.timeout_s
     return MCPServerConfig(
         name=record.name,
         transport=record.transport,
         url=record.url_template,
         auth_type=record.auth_type,
         auth_config=auth_config,
+        sse_read_timeout_s=record.sse_read_timeout_s,
+        **extra,
     )
 
 

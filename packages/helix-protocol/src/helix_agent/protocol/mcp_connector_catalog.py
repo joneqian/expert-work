@@ -156,6 +156,11 @@ class McpConnectorCatalogRecord(BaseModel):
     oauth_scopes: str | None = None
     # Platform-supplied bearer token (shared server A) — ``secret://`` ref only.
     bearer_token_ref: str | None = None
+    # Runtime tuning (NULL = orchestrator defaults). ``timeout_s`` caps the
+    # connect/call round-trip; ``sse_read_timeout_s`` is the per-read idle wait
+    # between streamed events, independent of ``timeout_s`` (see MCPServerConfig).
+    timeout_s: float | None = Field(default=None, gt=0, le=300)
+    sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
     required_tier: TenantPlan = TenantPlan.FREE
     enabled: bool = True
     created_at: datetime
@@ -199,6 +204,8 @@ class McpConnectorCatalogUpsert(BaseModel):
     # layer reads only the ref, never this value. ``model_dump`` masks it.
     bearer_token: SecretStr | None = None
     bearer_token_ref: str | None = None
+    timeout_s: float | None = Field(default=None, gt=0, le=300)
+    sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
     required_tier: TenantPlan = TenantPlan.FREE
     enabled: bool = True
 
@@ -238,5 +245,7 @@ class McpConnectorCatalogPatch(BaseModel):
     # the existing one. The API writes it and sets ``bearer_token_ref``.
     bearer_token: SecretStr | None = None
     bearer_token_ref: str | None = None
+    timeout_s: float | None = Field(default=None, gt=0, le=300)
+    sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
     required_tier: TenantPlan | None = None
     enabled: bool | None = None

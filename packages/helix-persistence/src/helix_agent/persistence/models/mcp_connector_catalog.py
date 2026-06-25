@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, Text, func, text
+from sqlalchemy import Boolean, DateTime, Float, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -51,6 +51,11 @@ class McpConnectorCatalogRow(Base):
     # Platform-supplied bearer token for a shared (A) server — ``secret://`` ref
     # only, never the value (migration 0092). NULL for none/oauth2 / legacy bearer.
     bearer_token_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Runtime tuning (NULL = orchestrator defaults; migration 0093). timeout_s
+    # caps the connect/call round-trip; sse_read_timeout_s is the per-read idle
+    # wait between streamed events.
+    timeout_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sse_read_timeout_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     required_tier: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(

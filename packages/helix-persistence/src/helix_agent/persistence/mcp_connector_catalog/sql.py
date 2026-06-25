@@ -51,6 +51,8 @@ def _row_to_record(row: McpConnectorCatalogRow) -> McpConnectorCatalogRecord:
         oauth_client_id=row.oauth_client_id,
         oauth_scopes=row.oauth_scopes,
         bearer_token_ref=row.bearer_token_ref,
+        timeout_s=row.timeout_s,
+        sse_read_timeout_s=row.sse_read_timeout_s,
         required_tier=TenantPlan(row.required_tier),
         enabled=row.enabled,
         created_at=row.created_at,
@@ -85,6 +87,8 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 oauth_client_id=upsert.oauth_client_id,
                 oauth_scopes=upsert.oauth_scopes,
                 bearer_token_ref=upsert.bearer_token_ref,
+                timeout_s=upsert.timeout_s,
+                sse_read_timeout_s=upsert.sse_read_timeout_s,
                 required_tier=upsert.required_tier.value,
                 enabled=upsert.enabled,
                 created_at=now,
@@ -143,6 +147,10 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 existing.auth_schema = patch.auth_schema.model_dump()
             if patch.bearer_token_ref is not None:
                 existing.bearer_token_ref = patch.bearer_token_ref
+            if patch.timeout_s is not None:
+                existing.timeout_s = patch.timeout_s
+            if patch.sse_read_timeout_s is not None:
+                existing.sse_read_timeout_s = patch.sse_read_timeout_s
             if patch.required_tier is not None:
                 existing.required_tier = patch.required_tier.value
             if patch.enabled is not None:

@@ -51,6 +51,8 @@ class InMemoryMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 oauth_client_id=upsert.oauth_client_id,
                 oauth_scopes=upsert.oauth_scopes,
                 bearer_token_ref=upsert.bearer_token_ref,
+                timeout_s=upsert.timeout_s,
+                sse_read_timeout_s=upsert.sse_read_timeout_s,
                 required_tier=upsert.required_tier,
                 enabled=upsert.enabled,
                 created_at=now,
@@ -97,6 +99,10 @@ class InMemoryMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 changes["auth_schema"] = patch.auth_schema
             if patch.bearer_token_ref is not None:
                 changes["bearer_token_ref"] = patch.bearer_token_ref
+            if patch.timeout_s is not None:
+                changes["timeout_s"] = patch.timeout_s
+            if patch.sse_read_timeout_s is not None:
+                changes["sse_read_timeout_s"] = patch.sse_read_timeout_s
             if patch.required_tier is not None:
                 changes["required_tier"] = patch.required_tier
             if patch.enabled is not None:

@@ -24,10 +24,14 @@ import {
   Drawer,
   Form,
   Input,
+  InputNumber,
   Select,
+  Space,
   Switch,
   Tabs,
+  Upload,
 } from "antd";
+import { ImagePlus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -53,6 +57,8 @@ interface CatalogEntryForm {
   bearer_token?: string;
   oauth_client_id?: string;
   oauth_scopes?: string;
+  timeout_s?: number;
+  sse_read_timeout_s?: number;
   required_tier: McpRequiredTier;
   enabled: boolean;
 }
@@ -81,7 +87,23 @@ const TIER_OPTIONS: { value: McpRequiredTier; labelKey: string }[] = [
   { value: "enterprise", labelKey: "mcp_catalog.tier_enterprise" },
 ];
 
+// Preset connector categories (stored as the stable slug, displayed via i18n).
+const CATEGORY_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "search", labelKey: "mcp_catalog.cat_search" },
+  { value: "database", labelKey: "mcp_catalog.cat_database" },
+  { value: "payment", labelKey: "mcp_catalog.cat_payment" },
+  { value: "location", labelKey: "mcp_catalog.cat_location" },
+  { value: "social", labelKey: "mcp_catalog.cat_social" },
+  { value: "design", labelKey: "mcp_catalog.cat_design" },
+  { value: "document", labelKey: "mcp_catalog.cat_document" },
+  { value: "browser-automation", labelKey: "mcp_catalog.cat_browser" },
+  { value: "scraping", labelKey: "mcp_catalog.cat_scraping" },
+  { value: "dev-tools", labelKey: "mcp_catalog.cat_dev_tools" },
+  { value: "other", labelKey: "mcp_catalog.cat_other" },
+];
+
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const ICON_MAX_BYTES = 32 * 1024;
 
 export function CatalogEntryDrawer({
   open,
@@ -95,6 +117,7 @@ export function CatalogEntryDrawer({
   const [form] = Form.useForm<CatalogEntryForm>();
   const [submitting, setSubmitting] = useState(false);
   const authType = Form.useWatch("auth_type", form);
+  const iconValue = Form.useWatch("icon", form);
 
   const isEditing = editing !== null && editing !== undefined;
   const effectiveAuth: McpAuthType = isEditing
@@ -116,12 +139,14 @@ export function CatalogEntryDrawer({
         display_name: editing.display_name,
         description: editing.description,
         category: editing.category,
-        icon: editing.icon,
+        icon: editing.icon ?? undefined,
         transport: editing.transport,
         url_template: editing.url_template,
         auth_type: editing.auth_type,
         oauth_client_id: editing.oauth_client_id ?? undefined,
         oauth_scopes: editing.oauth_scopes ?? undefined,
+        timeout_s: editing.timeout_s ?? undefined,
+        sse_read_timeout_s: editing.sse_read_timeout_s ?? undefined,
         required_tier: editing.required_tier,
         enabled: editing.enabled,
       });
@@ -139,6 +164,28 @@ export function CatalogEntryDrawer({
     reset();
     onClose();
   }, [reset, onClose]);
+
+  // Read a chosen image into a base64 data URI and store it on the form. Returns
+  // false from beforeUpload so antd never performs a real upload.
+  const handleIconSelect = useCallback(
+    (file: File): boolean => {
+      if (!file.type.startsWith("image/")) {
+        message.error(t("mcp_catalog.icon_type_error"));
+        return false;
+      }
+      if (file.size > ICON_MAX_BYTES) {
+        message.error(t("mcp_catalog.icon_too_large"));
+        return false;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        form.setFieldValue("icon", reader.result as string);
+      };
+      reader.readAsDataURL(file);
+      return false;
+    },
+    [form, message, t],
+  );
 
   const handleSubmit = useCallback(async () => {
     let values: CatalogEntryForm;
@@ -159,6 +206,12 @@ export function CatalogEntryDrawer({
           required_tier: values.required_tier,
           enabled: values.enabled,
         };
+        if (typeof values.timeout_s === "number") {
+          body.timeout_s = values.timeout_s;
+        }
+        if (typeof values.sse_read_timeout_s === "number") {
+          body.sse_read_timeout_s = values.sse_read_timeout_s;
+        }
         // Write-only: only send the token when the admin typed a new one.
         if (editing.auth_type === "bearer" && values.bearer_token) {
           body.bearer_token = values.bearer_token;
@@ -177,6 +230,12 @@ export function CatalogEntryDrawer({
           required_tier: values.required_tier,
           enabled: values.enabled,
         };
+        if (typeof values.timeout_s === "number") {
+          body.timeout_s = values.timeout_s;
+        }
+        if (typeof values.sse_read_timeout_s === "number") {
+          body.sse_read_timeout_s = values.sse_read_timeout_s;
+        }
         if (values.auth_type === "bearer") {
           body.bearer_token = values.bearer_token;
         }
@@ -206,7 +265,7 @@ export function CatalogEntryDrawer({
     <>
       <Form.Item
         name="name"
-        label={t("mcp_catalog.field_name")}
+        label={t("mcp_catalog.field_identifier")}
         extra={t("mcp_catalog.field_name_hint")}
         rules={[
           { required: true, message: t("mcp_catalog.name_required") },
@@ -217,7 +276,7 @@ export function CatalogEntryDrawer({
           data-testid="cce-name"
           disabled={isEditing}
           maxLength={64}
-          placeholder="github"
+          placeholder="github-prod"
         />
       </Form.Item>
       <Form.Item
@@ -241,18 +300,56 @@ export function CatalogEntryDrawer({
         />
       </Form.Item>
       <Form.Item name="category" label={t("mcp_catalog.field_category")}>
-        <Input
+        <Select
           data-testid="cce-category"
-          maxLength={64}
-          placeholder="dev-tools"
+          aria-label={t("mcp_catalog.field_category")}
+          allowClear
+          placeholder={t("mcp_catalog.category_placeholder")}
+          options={CATEGORY_OPTIONS.map((o) => ({
+            value: o.value,
+            label: t(o.labelKey),
+          }))}
         />
       </Form.Item>
-      <Form.Item name="icon" label={t("mcp_catalog.field_icon")}>
-        <Input
-          data-testid="cce-icon"
-          maxLength={256}
-          placeholder="https://… or emoji"
-        />
+      <Form.Item label={t("mcp_catalog.field_icon")} extra={t("mcp_catalog.icon_hint")}>
+        <Space align="center">
+          {iconValue && (
+            <img
+              src={iconValue}
+              alt=""
+              width={32}
+              height={32}
+              style={{ borderRadius: 6, objectFit: "cover" }}
+              data-testid="cce-icon-preview"
+            />
+          )}
+          <Upload
+            accept="image/*"
+            showUploadList={false}
+            maxCount={1}
+            beforeUpload={handleIconSelect}
+          >
+            <Button
+              icon={<ImagePlus size={14} strokeWidth={1.6} />}
+              data-testid="cce-icon-upload"
+            >
+              {t("mcp_catalog.icon_upload")}
+            </Button>
+          </Upload>
+          {iconValue && (
+            <Button
+              type="text"
+              danger
+              icon={<Trash2 size={14} strokeWidth={1.6} />}
+              onClick={() => form.setFieldValue("icon", undefined)}
+              data-testid="cce-icon-clear"
+              aria-label={t("mcp_catalog.icon_clear")}
+            />
+          )}
+        </Space>
+      </Form.Item>
+      <Form.Item name="icon" hidden>
+        <Input />
       </Form.Item>
       <Form.Item name="transport" label={t("mcp_catalog.field_transport")}>
         <Select<McpTransport>
@@ -369,6 +466,34 @@ export function CatalogEntryDrawer({
 
   const advancedTab = (
     <>
+      <Form.Item
+        name="timeout_s"
+        label={t("mcp_catalog.field_timeout")}
+        extra={t("mcp_catalog.timeout_hint")}
+      >
+        <InputNumber
+          data-testid="cce-timeout"
+          aria-label={t("mcp_catalog.field_timeout")}
+          min={1}
+          max={300}
+          style={{ width: "100%" }}
+          placeholder="30"
+        />
+      </Form.Item>
+      <Form.Item
+        name="sse_read_timeout_s"
+        label={t("mcp_catalog.field_sse_timeout")}
+        extra={t("mcp_catalog.sse_timeout_hint")}
+      >
+        <InputNumber
+          data-testid="cce-sse-timeout"
+          aria-label={t("mcp_catalog.field_sse_timeout")}
+          min={1}
+          max={3600}
+          style={{ width: "100%" }}
+          placeholder="300"
+        />
+      </Form.Item>
       <Form.Item
         name="required_tier"
         label={t("mcp_catalog.field_required_tier")}

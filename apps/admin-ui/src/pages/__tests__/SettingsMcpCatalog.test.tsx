@@ -200,6 +200,27 @@ describe("CatalogEntryDrawer edit mode", () => {
     // Token not re-pasted → not sent (write-only, blank-to-keep).
     expect(body.bearer_token).toBeUndefined();
   });
+
+  it("create mode renders category select, icon upload, and timeout fields", async () => {
+    render(
+      <App>
+        <CatalogEntryDrawer
+          open
+          onClose={() => {}}
+          onSaved={() => {}}
+          editing={null}
+        />
+      </App>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
+    );
+    // #2 category dropdown / #3 icon upload / #4 timeout + SSE-read timeout.
+    expect(screen.getByTestId("cce-category")).toBeInTheDocument();
+    expect(screen.getByTestId("cce-icon-upload")).toBeInTheDocument();
+    expect(screen.getByTestId("cce-timeout")).toBeInTheDocument();
+    expect(screen.getByTestId("cce-sse-timeout")).toBeInTheDocument();
+  });
 });
 
 describe("CatalogBrowser entitlement lock", () => {

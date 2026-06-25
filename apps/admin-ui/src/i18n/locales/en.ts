@@ -719,14 +719,35 @@ export interface TranslationKeys {
     edit_title: string;
     submit_add: string;
     submit_save: string;
-    field_name: string;
+    field_identifier: string;
     field_name_hint: string;
     field_display_name: string;
     field_description: string;
     field_category: string;
+    category_placeholder: string;
+    cat_search: string;
+    cat_database: string;
+    cat_payment: string;
+    cat_location: string;
+    cat_social: string;
+    cat_design: string;
+    cat_document: string;
+    cat_browser: string;
+    cat_scraping: string;
+    cat_dev_tools: string;
+    cat_other: string;
     field_icon: string;
+    icon_hint: string;
+    icon_upload: string;
+    icon_clear: string;
+    icon_type_error: string;
+    icon_too_large: string;
     field_transport: string;
     field_auth: string;
+    field_timeout: string;
+    timeout_hint: string;
+    field_sse_timeout: string;
+    sse_timeout_hint: string;
     field_required_tier: string;
     field_enabled: string;
     name_required: string;
@@ -2420,14 +2441,37 @@ const en: TranslationKeys = {
     edit_title: "Edit connector",
     submit_add: "Create",
     submit_save: "Save",
-    field_name: "Name (slug)",
+    field_identifier: "Identifier",
     field_name_hint: "Lowercase identifier, immutable after creation",
     field_display_name: "Display name",
     field_description: "Description",
     field_category: "Category",
+    category_placeholder: "Select a category…",
+    cat_search: "Search & Retrieval",
+    cat_database: "Database & Files",
+    cat_payment: "Payment & Transactions",
+    cat_location: "Location Services",
+    cat_social: "Social Media",
+    cat_design: "Design & Creative",
+    cat_document: "Document Tools",
+    cat_browser: "Browser Automation",
+    cat_scraping: "Web Scraping",
+    cat_dev_tools: "Developer Tools",
+    cat_other: "Other",
     field_icon: "Icon",
+    icon_hint: "Upload a square image (PNG/SVG/JPG), up to 32 KB.",
+    icon_upload: "Upload icon",
+    icon_clear: "Remove icon",
+    icon_type_error: "Please choose an image file.",
+    icon_too_large: "Icon must be 32 KB or smaller.",
     field_transport: "Transport",
     field_auth: "Auth type",
+    field_timeout: "Timeout (seconds)",
+    timeout_hint:
+      "Connect/call cap — fail fast when the server is unreachable. Leave blank for the default (30s).",
+    field_sse_timeout: "SSE read timeout (seconds)",
+    sse_timeout_hint:
+      "Max idle wait between streamed events — tolerate long-running tool calls. Leave blank for the default (300s).",
     field_required_tier: "Required plan",
     field_enabled: "Enabled",
     name_required: "A valid lowercase slug is required",
