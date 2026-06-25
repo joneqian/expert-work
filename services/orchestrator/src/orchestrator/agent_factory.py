@@ -1502,6 +1502,7 @@ def _build_memory_nodes(
             dlq=env.dlq,  # K.K7 — None keeps the previous log-and-drop behaviour
             reconcile=long_term.reconcile_writes,  # CM-7 — Mem0-style run-end ops
             agent_name=agent_name,
+            write_min_importance=long_term.write_min_importance,  # M-2 write-filter
         )
         if long_term.write_back
         else None
@@ -1513,6 +1514,7 @@ def _build_memory_nodes(
             llm_caller=llm_caller,
             dlq=env.dlq,
             agent_name=agent_name,
+            write_min_importance=long_term.write_min_importance,  # M-2 write-filter
         )
         if long_term.write_back and spec.spec.policies.context_compression.flush_before_compaction
         else None

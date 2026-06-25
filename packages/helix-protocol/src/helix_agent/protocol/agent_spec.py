@@ -317,6 +317,17 @@ class LongTermMemorySpec(BaseModel):
         default=True,
         description="reconcile run-end extracted memories against similar existing ones",
     )
+    # Stream Memory-Enhance (M-2) — importance write-filter. The extraction LLM
+    # rates each memory's ``importance`` (0-1); write-back drops items below
+    # this floor so trivial chatter never reaches the store. 0.3 = drop clearly
+    # trivial while keeping the library broad; 0.0 disables the filter (every
+    # extracted memory is written, byte-for-byte pre-M-2 behaviour).
+    write_min_importance: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="drop run-end extracted memories scoring below this importance",
+    )
 
 
 class MemorySpec(BaseModel):

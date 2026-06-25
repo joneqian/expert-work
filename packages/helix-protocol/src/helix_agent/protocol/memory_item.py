@@ -48,6 +48,26 @@ class MemoryItem(BaseModel):
     embedding: tuple[float, ...] = Field(
         repr=False, description="semantic embedding vector of ``content``"
     )
+    # Stream Memory-Enhance (M-2) — importance/confidence scoring.
+    # ``importance`` = how reusable this memory is likely to be in future
+    # sessions (rare stable user facts high; one-off chatter low). The
+    # writeback path drops items below ``LongTermMemorySpec.write_min_importance``.
+    # ``confidence`` = how sure the extraction is (explicit statements high;
+    # inferred / hedged low). Both 0-1, default 0.5 (neutral) so legacy rows
+    # and callers that omit them are unaffected. A user self-correction
+    # (M-4) sets ``confidence`` to 1.0 (user-asserted truth).
+    importance: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="future-reuse value of this memory, 0-1 (write-filter input)",
+    )
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="extraction confidence, 0-1 (1.0 = user-asserted via correction)",
+    )
     source_thread_id: str | None = Field(
         default=None, description="the thread this memory was extracted from"
     )

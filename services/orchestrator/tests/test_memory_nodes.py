@@ -65,10 +65,31 @@ async def _seed(store: InMemoryMemoryStore, *, tenant: object, user: object, con
 
 def test_parse_extracted_memories_clean() -> None:
     out = parse_extracted_memories(
-        '{"memories": [{"kind": "fact", "content": "likes Python"}, '
-        '{"kind": "episodic", "content": "fixed the bug"}]}'
+        '{"memories": [{"kind": "fact", "content": "likes Python", '
+        '"importance": 0.9, "confidence": 0.8}, '
+        '{"kind": "episodic", "content": "fixed the bug", '
+        '"importance": 0.4, "confidence": 0.6}]}'
     )
-    assert out == [("fact", "likes Python"), ("episodic", "fixed the bug")]
+    assert [(m.kind, m.content) for m in out] == [
+        ("fact", "likes Python"),
+        ("episodic", "fixed the bug"),
+    ]
+    assert out[0].importance == 0.9
+    assert out[0].confidence == 0.8
+    assert out[1].importance == 0.4
+
+
+def test_parse_extracted_memories_defaults_missing_scores() -> None:
+    # Stream Memory-Enhance (M-2) — missing / non-numeric scores default to 0.5
+    # (a missing score must never drop an otherwise-valid memory).
+    out = parse_extracted_memories(
+        '{"memories": [{"kind": "fact", "content": "a"}, '
+        '{"kind": "fact", "content": "b", "importance": "oops", "confidence": 9}]}'
+    )
+    assert out[0].importance == 0.5
+    assert out[0].confidence == 0.5
+    # Out-of-range numeric clamps into [0, 1].
+    assert out[1].confidence == 1.0
 
 
 def test_parse_extracted_memories_drops_bad_kind_and_dedups() -> None:
@@ -77,7 +98,7 @@ def test_parse_extracted_memories_drops_bad_kind_and_dedups() -> None:
         '{"kind": "bogus", "content": "b"}, '
         '{"kind": "fact", "content": "a"}]}'
     )
-    assert out == [("fact", "a")]
+    assert [(m.kind, m.content) for m in out] == [("fact", "a")]
 
 
 @pytest.mark.parametrize(
@@ -372,6 +393,65 @@ async def test_memory_writeback_node_extracts_and_persists() -> None:
         tenant_id=tenant, user_id=user, query_embedding=(0.0,) * _DIM, limit=10
     )
     assert [m.content for m in stored] == ["likes tea"]
+
+
+@pytest.mark.asyncio
+async def test_memory_writeback_persists_extraction_scores() -> None:
+    # Stream Memory-Enhance (M-2) — importance / confidence round-trip from the
+    # extraction reply through to the stored item.
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    llm = _RecordingLLM(
+        responses=[
+            AIMessage(
+                content='{"memories": [{"kind": "fact", "content": "likes tea", '
+                '"importance": 0.9, "confidence": 0.7}]}'
+            )
+        ]
+    )
+    node = make_memory_writeback_node(
+        memory_store=store, embedder=FakeEmbedder(dim=_DIM), llm_caller=llm
+    )
+    await node(  # type: ignore[arg-type]
+        _state("done"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    [stored] = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(0.0,) * _DIM, limit=10
+    )
+    assert stored.importance == 0.9
+    assert stored.confidence == 0.7
+
+
+@pytest.mark.asyncio
+async def test_memory_writeback_write_filter_drops_low_importance() -> None:
+    # Stream Memory-Enhance (M-2) — items below ``write_min_importance`` are
+    # dropped before persisting; those at / above the floor survive.
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    llm = _RecordingLLM(
+        responses=[
+            AIMessage(
+                content='{"memories": ['
+                '{"kind": "fact", "content": "keep me", "importance": 0.8}, '
+                '{"kind": "episodic", "content": "drop me", "importance": 0.1}]}'
+            )
+        ]
+    )
+    node = make_memory_writeback_node(
+        memory_store=store,
+        embedder=FakeEmbedder(dim=_DIM),
+        llm_caller=llm,
+        write_min_importance=0.3,
+    )
+    await node(  # type: ignore[arg-type]
+        _state("done"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    stored = await store.retrieve(
+        tenant_id=tenant, user_id=user, query_embedding=(0.0,) * _DIM, limit=10
+    )
+    assert [m.content for m in stored] == ["keep me"]
 
 
 @pytest.mark.asyncio

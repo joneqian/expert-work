@@ -64,6 +64,9 @@ def _row_to_item(row: MemoryItemRow) -> MemoryItem:
         content=row.content,
         content_hash=row.content_hash,
         embedding=tuple(float(value) for value in row.embedding),
+        # Stream Memory-Enhance (M-2) — write-filter / correction scores.
+        importance=float(row.importance),
+        confidence=float(row.confidence),
         source_thread_id=row.source_thread_id,
         created_at=row.created_at,
         last_used_at=row.last_used_at,
@@ -130,6 +133,9 @@ class SqlMemoryStore(MemoryStore):
                 "content": item.content,
                 "content_hash": item.content_hash or hash_content(item.content),
                 "embedding": list(item.embedding),
+                # Stream Memory-Enhance (M-2) — persist the write-filter scores.
+                "importance": item.importance,
+                "confidence": item.confidence,
                 "source_thread_id": item.source_thread_id,
                 # Capability Uplift Sprint #6 — populate the tsvector
                 # column from jieba-segmented content. ``func.to_tsvector``

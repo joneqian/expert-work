@@ -11,7 +11,7 @@ from datetime import datetime
 from uuid import UUID
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import CHAR, DateTime, Index, String, Text, func, text
+from sqlalchemy import CHAR, DateTime, Float, Index, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -48,6 +48,13 @@ class MemoryItemRow(Base):
     # backs ON CONFLICT DO NOTHING dedup.
     content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
     source_thread_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stream Memory-Enhance (M-2) — importance/confidence scoring (migration
+    # 0099). ``importance`` feeds the writeback write-filter; ``confidence``
+    # records extraction certainty (1.0 = user-asserted via the M-4 correction
+    # API). Both default 0.5 (neutral) so backfilled legacy rows are unbiased.
+    # CHECK ``memory_item_score_check`` keeps both in [0, 1].
+    importance: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.5"))
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default=text("0.5"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

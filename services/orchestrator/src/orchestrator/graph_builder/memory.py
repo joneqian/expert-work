@@ -25,6 +25,7 @@ import json
 import logging
 import math
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
@@ -72,10 +73,14 @@ _EXTRACT_SYSTEM = (
     "durable, reusable memories worth recalling in future sessions — "
     'stable user facts or preferences ("fact"), and concise summaries of '
     'what was done or decided ("episodic"). Extract nothing trivial or '
-    "ephemeral. Respond with ONLY a JSON object, no prose and no code "
+    "ephemeral. For each memory also rate two scores in [0, 1]: "
+    '"importance" (how reusable it is in future sessions — rare stable '
+    'user facts high, one-off chatter low) and "confidence" (how sure '
+    "you are it is true — explicit statements high, inferred or hedged "
+    "low). Respond with ONLY a JSON object, no prose and no code "
     "fences:\n"
     '{"memories": [{"kind": "fact" | "episodic", "content": "<one concise '
-    'sentence>"}]}\n'
+    'sentence>", "importance": <0-1>, "confidence": <0-1>}]}\n'
     'If there is nothing worth remembering, return {"memories": []}.'
 )
 
@@ -110,11 +115,38 @@ def _extract_json_object(text: str) -> str | None:
     return text[start : end + 1]
 
 
-def parse_extracted_memories(text: str) -> list[tuple[Literal["fact", "episodic"], str]]:
-    """Parse the extraction LLM reply into ``(kind, content)`` pairs.
+@dataclass(frozen=True)
+class ExtractedMemory:
+    """One memory parsed from the extraction LLM reply — Stream Memory-Enhance
+    (M-2). ``importance`` feeds the write-filter; ``confidence`` is persisted
+    for downstream ranking / correction. Both default 0.5 when the model omits
+    or malforms them (write-back is best-effort — a missing score never drops
+    an otherwise-valid memory)."""
+
+    kind: Literal["fact", "episodic"]
+    content: str
+    importance: float = 0.5
+    confidence: float = 0.5
+
+
+def _clamp_score(value: object) -> float:
+    """Parse a model-supplied score into [0, 1], falling back to 0.5 (neutral)
+    on anything non-numeric or out of range-ish."""
+    try:
+        score = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.5
+    if math.isnan(score):
+        return 0.5
+    return min(1.0, max(0.0, score))
+
+
+def parse_extracted_memories(text: str) -> list[ExtractedMemory]:
+    """Parse the extraction LLM reply into :class:`ExtractedMemory` items.
 
     Tolerant — any malformed reply yields ``[]`` (write-back is
-    best-effort). Duplicate contents within the batch are dropped.
+    best-effort). Duplicate contents within the batch are dropped. A missing
+    or invalid ``importance`` / ``confidence`` defaults to 0.5 (neutral).
     """
     raw = _extract_json_object(text)
     if raw is None:
@@ -124,7 +156,7 @@ def parse_extracted_memories(text: str) -> list[tuple[Literal["fact", "episodic"
         rows = data["memories"]
     except (json.JSONDecodeError, KeyError, TypeError):
         return []
-    out: list[tuple[Literal["fact", "episodic"], str]] = []
+    out: list[ExtractedMemory] = []
     seen: set[str] = set()
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict):
@@ -133,7 +165,14 @@ def parse_extracted_memories(text: str) -> list[tuple[Literal["fact", "episodic"
         content = str(row.get("content", "")).strip()
         if kind in ("fact", "episodic") and content and content not in seen:
             seen.add(content)
-            out.append((cast(Literal["fact", "episodic"], kind), content))
+            out.append(
+                ExtractedMemory(
+                    kind=cast(Literal["fact", "episodic"], kind),
+                    content=content,
+                    importance=_clamp_score(row.get("importance")),
+                    confidence=_clamp_score(row.get("confidence")),
+                )
+            )
     return out
 
 
@@ -547,6 +586,7 @@ async def flush_messages_to_memory(
     log_label: str = "memory.writeback",
     reconcile: bool = False,
     agent_name: str | None = None,
+    write_min_importance: float = 0.0,
 ) -> int:
     """Extract durable memories from ``messages``, embed, and persist them.
 
@@ -578,29 +618,46 @@ async def flush_messages_to_memory(
         SystemMessage(content=_EXTRACT_SYSTEM),
         HumanMessage(content=_render_trajectory(list(messages))),
     ]
-    extracted: list[tuple[Literal["fact", "episodic"], str]] = []
+    extracted: list[ExtractedMemory] = []
     try:
         response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
         extracted = parse_extracted_memories(_message_text(response))
+        # Stream Memory-Enhance (M-2) — write-filter: drop low-value memories
+        # before embedding (saves embed cost on dropped items). Applied here,
+        # not in the store, so the threshold is a per-agent manifest knob.
+        if write_min_importance > 0.0:
+            kept = [m for m in extracted if m.importance >= write_min_importance]
+            if len(kept) != len(extracted):
+                logger.debug(
+                    "%s_write_filter dropped=%d kept=%d min_importance=%.2f",
+                    log_label,
+                    len(extracted) - len(kept),
+                    len(kept),
+                    write_min_importance,
+                )
+            extracted = kept
         if not extracted:
             return 0
         vectors = await token.run_cancellable(
-            embedder.embed([content for _, content in extracted], tenant_id=tenant_id)
+            embedder.embed([m.content for m in extracted], tenant_id=tenant_id)
         )
         items = [
             MemoryItem(
                 id=uuid4(),
                 tenant_id=tenant_id,
                 user_id=user_id,
-                kind=kind,
+                kind=mem.kind,
                 # Stream Agent-Templates (M1-5c) — tag episodic with the owning
                 # agent (per-agent isolation); facts stay shared (agent_name None).
-                agent_name=agent_name if kind == "episodic" else None,
-                content=content,
+                agent_name=agent_name if mem.kind == "episodic" else None,
+                content=mem.content,
                 embedding=vector,
+                # Stream Memory-Enhance (M-2) — carry the extraction scores.
+                importance=mem.importance,
+                confidence=mem.confidence,
                 source_thread_id=str(thread_id) if thread_id is not None else None,
             )
-            for (kind, content), vector in zip(extracted, vectors, strict=True)
+            for mem, vector in zip(extracted, vectors, strict=True)
         ]
         if reconcile:
             items = await _reconcile_and_apply(
@@ -639,7 +696,7 @@ async def flush_messages_to_memory(
                     tenant_id=tenant_id,
                     user_id=user_id,
                     source_thread_id=str(thread_id) if thread_id is not None else None,
-                    extracted=[(str(k), c) for k, c in extracted],
+                    extracted=[(str(m.kind), m.content) for m in extracted],
                     error=f"{type(exc).__name__}: {exc}",
                 )
                 logger.warning(
@@ -673,6 +730,7 @@ def make_pre_compaction_flush(
     llm_caller: LLMCaller,
     dlq: MemoryWritebackDLQ | None = None,
     agent_name: str | None = None,
+    write_min_importance: float = 0.0,
 ) -> PreCompactionFlush:
     """Build the Stream CM-3 pre-compaction flush callback.
 
@@ -706,6 +764,7 @@ def make_pre_compaction_flush(
             dlq=dlq,
             log_label="memory.precompaction_flush",
             agent_name=agent_name,
+            write_min_importance=write_min_importance,
         )
 
     return flush
@@ -719,6 +778,7 @@ def make_memory_writeback_node(
     dlq: MemoryWritebackDLQ | None = None,
     reconcile: bool = False,
     agent_name: str | None = None,
+    write_min_importance: float = 0.0,
 ) -> MemoryNode:
     """Build the ``memory_writeback`` node bound to the store + embedder.
 
@@ -759,6 +819,7 @@ def make_memory_writeback_node(
             log_label="memory.writeback",
             reconcile=reconcile,
             agent_name=agent_name,
+            write_min_importance=write_min_importance,
         )
         return {}
 

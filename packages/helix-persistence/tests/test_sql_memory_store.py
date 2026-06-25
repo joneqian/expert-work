@@ -47,7 +47,14 @@ def _vec(*head: float) -> tuple[float, ...]:
 
 
 def _item(
-    *, tenant: object, user: object, embedding: tuple[float, ...], kind: str = "fact", content: str
+    *,
+    tenant: object,
+    user: object,
+    embedding: tuple[float, ...],
+    kind: str = "fact",
+    content: str,
+    importance: float = 0.5,
+    confidence: float = 0.5,
 ) -> MemoryItem:
     return MemoryItem(
         id=uuid4(),
@@ -56,6 +63,8 @@ def _item(
         kind=kind,  # type: ignore[arg-type]
         content=content,
         embedding=embedding,
+        importance=importance,
+        confidence=confidence,
     )
 
 
@@ -88,6 +97,31 @@ async def test_write_and_retrieve_orders_by_cosine(sql_store: SqlStoreFixture) -
         assert [h.content for h in hits] == ["east", "ne", "north"]
         # The embedding round-trips at full width.
         assert len(hits[0].embedding) == EMBEDDING_DIM
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_importance_confidence_round_trip(sql_store: SqlStoreFixture) -> None:
+    # Stream Memory-Enhance (M-2) — the score columns persist and read back.
+    store, engine = sql_store
+    try:
+        tenant, user = uuid4(), uuid4()
+        await store.write(
+            [
+                _item(
+                    tenant=tenant,
+                    user=user,
+                    embedding=_vec(1.0, 0.0),
+                    content="scored",
+                    importance=0.9,
+                    confidence=0.2,
+                ),
+            ]
+        )
+        [hit] = await store.retrieve(tenant_id=tenant, user_id=user, query_embedding=_vec(1.0, 0.0))
+        assert hit.importance == 0.9
+        assert hit.confidence == 0.2
     finally:
         await engine.dispose()
 
