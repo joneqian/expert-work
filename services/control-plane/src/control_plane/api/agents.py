@@ -16,13 +16,14 @@ import hashlib
 import logging
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from control_plane.api._authz import ensure_resource_access
+from control_plane.api._authz import ensure_resource_access, require
+from control_plane.api._user_scope import get_user_repo
 from control_plane.audit import emit
 from control_plane.auth.abac import ResourceAttrs
 from control_plane.manifest import (
@@ -42,7 +43,10 @@ from control_plane.tenant_scope import (
 )
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.common.uplift_metrics import record_manifest_provider_rejected
+from helix_agent.persistence.agent_instance import AgentInstanceStore
 from helix_agent.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
+from helix_agent.persistence.tenant_user import TenantUserStore
+from helix_agent.persistence.thread_meta import ThreadMetaStore
 from helix_agent.protocol import (
     AgentSpec,
     AgentSpecRecord,
@@ -51,6 +55,7 @@ from helix_agent.protocol import (
     AuditAction,
     AuditResult,
     PlatformAgentTemplateStatus,
+    Principal,
     Provider,
     TenantPlan,
     tier_satisfies,
@@ -210,6 +215,29 @@ async def _resolve_plan(tenant_config_service: object, tenant_id: UUID) -> Tenan
     except TenantConfigNotConfiguredError:
         return TenantPlan.FREE
     return cfg.plan  # type: ignore[no-any-return]
+
+
+def _get_thread_repo(request: Request) -> ThreadMetaStore:
+    return request.app.state.thread_meta_repo  # type: ignore[no-any-return]
+
+
+def _get_instance_store(request: Request) -> AgentInstanceStore:
+    return request.app.state.agent_instance_store  # type: ignore[no-any-return]
+
+
+class BindSessionRequest(BaseModel):
+    """Body for ``POST /v1/agents/{agent_code}/sessions`` — Stream Agent-Templates
+    (M1-5b). An external app (tenant API-key) binds / continues a per-user session.
+
+    ``user_id`` is the app's own identifier for its end-user; it is minted into a
+    ``tenant_user`` on first use (the app does not pre-onboard users). ``session_id``
+    continues an existing conversation; omit it to start a new one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    user_id: str = Field(min_length=1, max_length=255)
+    session_id: UUID | None = None
 
 
 async def _load_manifest(
@@ -508,6 +536,95 @@ def build_agents_router() -> APIRouter:
         return JSONResponse(
             status_code=201,
             content={"success": True, "data": AgentDetail(record=record).model_dump(mode="json")},
+        )
+
+    @router.post("/{agent_code}/sessions", status_code=201)
+    async def bind_session(
+        agent_code: str,
+        payload: BindSessionRequest,
+        request: Request,
+        principal: Annotated[Principal, Depends(require("session", "write"))],
+        repo: Annotated[AgentSpecStore, Depends(_get_repo)],
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        instances: Annotated[AgentInstanceStore, Depends(_get_instance_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Bind / continue a per-user session for an external-app end-user (M1-5b).
+
+        Mints the end-user (``tenant_user``) from the app's ``user_id`` on first
+        use, resolves ``agent_code`` to its latest active version, and creates a
+        new conversation thread (or continues ``session_id``). Records the per-user
+        ``agent_instance`` binding + an ``on_behalf_of`` audit. The agent
+        *definition* is shared; per-user memory / workspace / threads provide
+        isolation. (The run itself is M1-5b-2.)
+        """
+        tenant_id = request.state.tenant_id
+        actor_id = request.state.actor_id
+        trace_id = current_trace_id_hex()
+
+        # 1. Resolve agent_code → latest ACTIVE version (newest-first list).
+        active = await repo.list_by_tenant(
+            tenant_id=tenant_id, status=AgentSpecStatus.ACTIVE, name=agent_code, limit=1
+        )
+        if not active:
+            return _envelope_error(
+                "AGENT_NOT_FOUND", f"no active agent {agent_code!r} for this tenant", 404
+            )
+        agent_version = active[0].version
+
+        # 2. Mint-on-use the end-user. The app owns its user_id namespace; subject
+        #    type "user" + the app's id is unique per tenant. (Any valid tenant key
+        #    may act for any of its users — network-layer hardening, e.g. an IP
+        #    allowlist, is a later addition; every bind is audited with on_behalf_of.)
+        end_user = await users.resolve(
+            tenant_id=tenant_id, subject_type="user", subject_id=payload.user_id
+        )
+
+        # 3. Resolve or create the session (thread).
+        if payload.session_id is not None:
+            meta = await threads.get(payload.session_id, tenant_id=tenant_id)
+            if meta is None or meta.user_id != end_user.id or meta.agent_name != agent_code:
+                return _envelope_error(
+                    "SESSION_NOT_FOUND", "session not found for this user / agent", 404
+                )
+            thread_id = payload.session_id
+        else:
+            thread_id = uuid4()
+            await threads.create(
+                thread_id=thread_id,
+                tenant_id=tenant_id,
+                created_by=actor_id,
+                user_id=end_user.id,
+                agent_name=agent_code,
+                agent_version=agent_version,
+            )
+
+        # 4. Upsert the per-user instance binding (anchor + last-active).
+        await instances.touch(tenant_id=tenant_id, agent_code=agent_code, user_id=end_user.id)
+
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.SESSION_WRITE,
+            resource_type="session",
+            resource_id=str(thread_id),
+            trace_id=trace_id,
+            details={"agent_code": agent_code, "agent_version": agent_version},
+            on_behalf_of=str(end_user.id),
+        )
+        return JSONResponse(
+            status_code=201,
+            content={
+                "success": True,
+                "data": {
+                    "session_id": str(thread_id),
+                    "agent_code": agent_code,
+                    "agent_version": agent_version,
+                    "user_id": str(end_user.id),
+                },
+            },
         )
 
     @router.get("")

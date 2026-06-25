@@ -1,5 +1,6 @@
 """Helix-Agent cross-service Pydantic schemas."""
 
+from helix_agent.protocol.agent_instance import AgentInstanceRecord
 from helix_agent.protocol.agent_spec import (
     AgentMetadata,
     AgentSpec,
@@ -263,6 +264,7 @@ __all__ = [
     "TENANT_SCOPE_ROLES",
     "TIER_ORDER",
     "TOOL_CATALOG",
+    "AgentInstanceRecord",
     "AgentMetadata",
     "AgentSpec",
     "AgentSpecBody",
