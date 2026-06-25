@@ -345,6 +345,83 @@ async def test_patch_with_unconfigured_embedding_returns_503() -> None:
 
 
 # ---------------------------------------------------------------------------
+# POST /v1/memory/{id}/correct (Stream Memory-Enhance M-4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_correct_rewrite_sets_confidence_and_audits(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    client, store, user_id, mem_id, audit_store = setup
+    resp = await client.post(
+        f"/v1/memory/{mem_id}/correct",
+        json={"action": "rewrite", "content": "Actually prefers tea"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()["data"]
+    assert body["content"] == "Actually prefers tea"
+    # A user correction asserts the rewrite as truth → confidence 1.0.
+    assert body["confidence"] == 1.0
+    items = await store.list_for_user(tenant_id=_TENANT, user_id=user_id)
+    updated = next(i for i in items if i.id == mem_id)
+    assert updated.content == "Actually prefers tea"
+    assert updated.confidence == 1.0
+    # Audited as MEMORY_CORRECT (distinct from admin MEMORY_UPDATE).
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    assert any(r.action is AuditAction.MEMORY_CORRECT for r in page.entries)
+
+
+@pytest.mark.asyncio
+async def test_correct_forget_soft_deletes_and_audits(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    client, store, user_id, mem_id, audit_store = setup
+    resp = await client.post(f"/v1/memory/{mem_id}/correct", json={"action": "forget"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"] is None
+    items = await store.list_for_user(tenant_id=_TENANT, user_id=user_id)
+    assert all(i.id != mem_id for i in items)
+    page = await audit_store.query(AuditQuery(tenant_id=_TENANT))
+    assert any(r.action is AuditAction.MEMORY_CORRECT for r in page.entries)
+
+
+@pytest.mark.asyncio
+async def test_correct_rewrite_without_content_returns_422(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    client, _, _, mem_id, _ = setup
+    resp = await client.post(f"/v1/memory/{mem_id}/correct", json={"action": "rewrite"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_correct_other_users_memory_returns_404(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    client, store, _, _, _ = setup
+    bob_user_id = uuid4()
+    bob_mem_id = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=bob_mem_id,
+                tenant_id=_TENANT,
+                user_id=bob_user_id,
+                kind="fact",
+                content="bob's note",
+                embedding=(0.0, 0.0, 0.0),
+            )
+        ]
+    )
+    resp = await client.post(
+        f"/v1/memory/{bob_mem_id}/correct",
+        json={"action": "rewrite", "content": "hijack"},
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # DELETE /v1/memory/{id} (forget — soft delete)
 # ---------------------------------------------------------------------------
 

@@ -34,6 +34,7 @@ import { Brain, Globe2, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
+  correctMemory,
   deleteMemory,
   listMemories,
   updateMemory,
@@ -68,6 +69,9 @@ export function MemoryAdmin() {
   const [editing, setEditing] = useState<MemoryItem | null>(null);
   const [editBuf, setEditBuf] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Stream Memory-Enhance (M-4) — "correct" routes Save through the user
+  // self-correction endpoint (confidence → 1.0); "edit" keeps the admin PATCH.
+  const [mode, setMode] = useState<"edit" | "correct">("edit");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -93,6 +97,13 @@ export function MemoryAdmin() {
   }, [refresh]);
 
   const openEdit = useCallback((item: MemoryItem) => {
+    setMode("edit");
+    setEditing(item);
+    setEditBuf(item.content);
+  }, []);
+
+  const openCorrect = useCallback((item: MemoryItem) => {
+    setMode("correct");
     setEditing(item);
     setEditBuf(item.content);
   }, []);
@@ -110,8 +121,13 @@ export function MemoryAdmin() {
     }
     setSubmitting(true);
     try {
-      await updateMemory(editing.id, { content: editBuf });
-      message.success(t("memory.updated"));
+      if (mode === "correct") {
+        await correctMemory(editing.id, { action: "rewrite", content: editBuf });
+        message.success(t("memory.corrected"));
+      } else {
+        await updateMemory(editing.id, { content: editBuf });
+        message.success(t("memory.updated"));
+      }
       setEditing(null);
       refresh();
     } catch (err) {
@@ -122,7 +138,7 @@ export function MemoryAdmin() {
     } finally {
       setSubmitting(false);
     }
-  }, [editing, editBuf, message, refresh, t]);
+  }, [editing, editBuf, mode, message, refresh, t]);
 
   const onDelete = useCallback(async (id: string) => {
     try {
@@ -162,6 +178,25 @@ export function MemoryAdmin() {
       ),
     },
     {
+      title: t("memory.col_score"),
+      key: "score",
+      width: 150,
+      render: (_, record) => (
+        <Space size={4}>
+          <Tooltip title={t("memory.importance_tip")}>
+            <Tag color="geekblue" style={{ fontSize: 11 }}>
+              {t("memory.importance_abbr")} {record.importance.toFixed(2)}
+            </Tag>
+          </Tooltip>
+          <Tooltip title={t("memory.confidence_tip")}>
+            <Tag color={record.confidence >= 1 ? "green" : "default"} style={{ fontSize: 11 }}>
+              {t("memory.confidence_abbr")} {record.confidence.toFixed(2)}
+            </Tag>
+          </Tooltip>
+        </Space>
+      ),
+    },
+    {
       title: t("memory.col_user"),
       dataIndex: "user_id",
       key: "user_id",
@@ -188,6 +223,13 @@ export function MemoryAdmin() {
           <Button size="small" onClick={() => openEdit(record)} data-testid={`memory-edit-${record.id}`}>
             {t("common.edit")}
           </Button>
+          <Button
+            size="small"
+            onClick={() => openCorrect(record)}
+            data-testid={`memory-correct-${record.id}`}
+          >
+            {t("memory.correct")}
+          </Button>
           <Popconfirm
             title={t("memory.delete_confirm_title")}
             description={t("memory.delete_confirm_body")}
@@ -203,7 +245,7 @@ export function MemoryAdmin() {
         </Space>
       ),
     },
-  ], [t, openEdit, onDelete]);
+  ], [t, openEdit, openCorrect, onDelete]);
 
   const isCrossTenant = data?.cross_tenant ?? false;
 
@@ -265,7 +307,13 @@ export function MemoryAdmin() {
       />
 
       <Drawer
-        title={editing !== null ? t("memory.edit_title") : ""}
+        title={
+          editing !== null
+            ? mode === "correct"
+              ? t("memory.correct_title")
+              : t("memory.edit_title")
+            : ""
+        }
         open={editing !== null}
         onClose={() => setEditing(null)}
         width={680}

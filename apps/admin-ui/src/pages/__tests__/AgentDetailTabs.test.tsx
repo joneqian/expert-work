@@ -202,6 +202,8 @@ describe("MemoryTab", () => {
           kind: "fact",
           content: "prefers terse answers",
           created_at: "2026-06-12T00:00:00Z",
+          importance: 0.5,
+          confidence: 0.5,
         },
       ],
       total: 1,

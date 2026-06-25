@@ -1431,13 +1431,21 @@ export interface TranslationKeys {
     empty_cross: string;
     col_kind: string;
     col_content: string;
+    col_score: string;
     col_user: string;
     col_created: string;
     col_actions: string;
+    importance_abbr: string;
+    confidence_abbr: string;
+    importance_tip: string;
+    confidence_tip: string;
     filter_kind: string;
     filter_kind_all: string;
     search_placeholder: string;
     edit_title: string;
+    correct: string;
+    correct_title: string;
+    corrected: string;
     edit_meta_user: string;
     edit_meta_kind: string;
     edit_content_label: string;
@@ -3316,13 +3324,21 @@ const en: TranslationKeys = {
     empty_cross: "No memories across all tenants yet.",
     col_kind: "Kind",
     col_content: "Content",
+    col_score: "Scores",
     col_user: "User",
     col_created: "Created",
     col_actions: "Actions",
+    importance_abbr: "Imp",
+    confidence_abbr: "Conf",
+    importance_tip: "Importance (0–1) — how reusable this memory is; the write-filter drops low scores.",
+    confidence_tip: "Confidence (0–1) — extraction certainty; 1.0 after a user correction.",
     filter_kind: "Kind filter",
     filter_kind_all: "All kinds",
     search_placeholder: "Filter by content (client-side)",
     edit_title: "Edit memory",
+    correct: "Correct",
+    correct_title: "Correct memory",
+    corrected: "Memory corrected.",
     edit_meta_user: "User",
     edit_meta_kind: "Kind",
     edit_content_label: "Content",

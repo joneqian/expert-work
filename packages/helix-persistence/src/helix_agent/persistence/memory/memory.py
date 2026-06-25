@@ -218,6 +218,7 @@ class InMemoryMemoryStore(MemoryStore):
         content: str,
         embedding: Sequence[float],
         kind: Literal["fact", "episodic"] | None = None,
+        confidence: float | None = None,
     ) -> MemoryItem | None:
         for idx, row in enumerate(self._rows):
             if (
@@ -233,6 +234,9 @@ class InMemoryMemoryStore(MemoryStore):
                         "content_hash": hash_content(content),
                         "embedding": tuple(float(v) for v in embedding),
                         "kind": kind if kind is not None else row.kind,
+                        # Stream Memory-Enhance (M-4) — user correction asserts
+                        # the rewrite as truth (confidence 1.0).
+                        "confidence": confidence if confidence is not None else row.confidence,
                     }
                 )
                 self._rows[idx] = updated

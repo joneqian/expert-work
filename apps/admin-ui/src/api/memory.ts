@@ -15,6 +15,7 @@ import {
   apiClient,
   getJson,
   patchJson,
+  postJson,
   withTenantScope,
   type TenantScope,
 } from "./client";
@@ -28,6 +29,10 @@ export interface MemoryItem {
   kind: MemoryKind;
   content: string;
   created_at: string;
+  /** Stream Memory-Enhance (M-2) — 0–1 scores. ``importance`` feeds the
+   *  write-filter; ``confidence`` is 1.0 after a user correction (M-4). */
+  importance: number;
+  confidence: number;
 }
 
 export interface MemoryList {
@@ -70,4 +75,23 @@ export async function updateMemory(
 /** DELETE returns 204 No Content — no body. */
 export async function deleteMemory(memoryId: string): Promise<void> {
   await apiClient.delete(`/v1/memory/${encodeURIComponent(memoryId)}`);
+}
+
+/** Stream Memory-Enhance (M-4) — an end-user's authoritative self-correction:
+ *  ``rewrite`` replaces the content (sets confidence to 1.0) or ``forget``
+ *  marks it wrong (soft-delete). Audited as ``MEMORY_CORRECT``. */
+export interface CorrectMemoryBody {
+  action: "rewrite" | "forget";
+  /** Required for ``rewrite``. */
+  content?: string;
+}
+
+export async function correctMemory(
+  memoryId: string,
+  body: CorrectMemoryBody,
+): Promise<MemoryItem | null> {
+  return postJson<MemoryItem | null>(
+    `/v1/memory/${encodeURIComponent(memoryId)}/correct`,
+    body,
+  );
 }

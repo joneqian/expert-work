@@ -119,13 +119,17 @@ class MemoryStore(abc.ABC):
         content: str,
         embedding: Sequence[float],
         kind: Literal["fact", "episodic"] | None = None,
+        confidence: float | None = None,
     ) -> MemoryItem | None:
         """Stream K.K6 — rewrite a live memory's content / kind.
 
         The caller must re-embed before calling — the store does not
         own an embedder. Soft-deleted rows are not updatable; returns
         ``None`` for unknown id / wrong tenant / wrong user / already
-        soft-deleted."""
+        soft-deleted.
+
+        Stream Memory-Enhance (M-4) — ``confidence`` (when given) overwrites the
+        row's confidence; the user-correction endpoint sets it to 1.0."""
 
     @abc.abstractmethod
     async def soft_delete(

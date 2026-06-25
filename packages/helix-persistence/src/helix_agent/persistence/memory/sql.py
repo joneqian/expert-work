@@ -352,6 +352,7 @@ class SqlMemoryStore(MemoryStore):
         content: str,
         embedding: Sequence[float],
         kind: Literal["fact", "episodic"] | None = None,
+        confidence: float | None = None,
     ) -> MemoryItem | None:
         async with self._sf() as session:
             row = (
@@ -374,6 +375,10 @@ class SqlMemoryStore(MemoryStore):
             row.embedding = list(embedding)
             if kind is not None:
                 row.kind = kind
+            # Stream Memory-Enhance (M-4) — a user correction asserts the new
+            # content as truth, so the caller bumps confidence to 1.0.
+            if confidence is not None:
+                row.confidence = confidence
             await session.commit()
             await session.refresh(row)
             return _row_to_item(row)

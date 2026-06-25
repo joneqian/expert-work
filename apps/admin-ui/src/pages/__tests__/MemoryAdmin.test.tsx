@@ -89,6 +89,8 @@ const memRow = {
   kind: "fact" as const,
   content: "User prefers brevity in answers.",
   created_at: "2026-05-26T10:00:00Z",
+  importance: 0.8,
+  confidence: 0.6,
 };
 
 const memRow2 = {
@@ -193,5 +195,63 @@ describe("MemoryAdmin", () => {
     await user.click(screen.getByTestId("memory-save-btn"));
     // List was called once on mount; PATCH 503 means refresh doesn't trigger again.
     await waitFor(() => expect(listCount).toBe(1));
+  });
+
+  it("renders importance / confidence score badges", async () => {
+    installAdapter([
+      {
+        match: (u) => u.startsWith("/v1/memory"),
+        respond: () => ({
+          success: true,
+          data: { items: [memRow], total: 1, cross_tenant: false },
+          error: null,
+        }),
+      },
+    ]);
+    renderMemory();
+    await waitFor(() => expect(screen.getByText(/User prefers/)).toBeInTheDocument());
+    // memRow has importance 0.80 / confidence 0.60.
+    expect(screen.getByText(/0\.80/)).toBeInTheDocument();
+    expect(screen.getByText(/0\.60/)).toBeInTheDocument();
+  });
+
+  it("Correct routes Save through the self-correction endpoint", async () => {
+    let correctBody: unknown = null;
+    installAdapter([
+      {
+        match: (u, m) => u.startsWith("/v1/memory") && m === "get",
+        respond: () => ({
+          success: true,
+          data: { items: [memRow], total: 1, cross_tenant: false },
+          error: null,
+        }),
+      },
+      {
+        match: (u, m) => u === "/v1/memory/m1/correct" && m === "post",
+        respond: () => ({
+          success: true,
+          data: { ...memRow, content: "fixed", confidence: 1.0 },
+          error: null,
+        }),
+      },
+    ]);
+    // Capture the POST body via the adapter.
+    const baseAdapter = apiClient.defaults.adapter;
+    apiClient.defaults.adapter = (config) => {
+      if ((config.url ?? "").endsWith("/correct") && config.data) {
+        correctBody = JSON.parse(config.data as string);
+      }
+      return (baseAdapter as (c: typeof config) => Promise<unknown>)(config) as never;
+    };
+    const user = userEvent.setup();
+    renderMemory();
+    await waitFor(() => expect(screen.getByText(/User prefers/)).toBeInTheDocument());
+    await user.click(screen.getByTestId(`memory-correct-${memRow.id}`));
+    await waitFor(() => expect(screen.getByTestId("memory-content-editor")).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId("memory-content-editor"), { target: { value: "fixed" } });
+    await user.click(screen.getByTestId("memory-save-btn"));
+    await waitFor(() =>
+      expect(correctBody).toEqual({ action: "rewrite", content: "fixed" }),
+    );
   });
 });

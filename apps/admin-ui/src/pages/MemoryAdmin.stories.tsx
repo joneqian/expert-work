@@ -60,6 +60,8 @@ const sample = (idx: number, kind: "fact" | "episodic", content: string) => ({
   kind,
   content,
   created_at: "2026-05-26T10:00:00Z",
+  importance: 0.7,
+  confidence: 0.5,
 });
 
 export const Empty: Story = {

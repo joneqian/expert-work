@@ -237,6 +237,11 @@ class AuditAction(StrEnum):
     # memory (Stream K.K6)
     MEMORY_UPDATE = "memory:update"
     MEMORY_FORGET = "memory:forget"
+    # memory — Stream Memory-Enhance (M-4): a user's authoritative self-correction
+    # (rewrite → confidence 1.0, or forget-as-wrong). Distinct from the
+    # admin-facing MEMORY_UPDATE / MEMORY_FORGET so corrections are auditable
+    # as end-user actions.
+    MEMORY_CORRECT = "memory:correct"
     # memory — Capability Uplift Sprint #2 (Mini-ADR U-3 / U-4)
     MEMORY_INJECTION_BLOCKED = "memory:injection_blocked"
     MEMORY_INJECTION_REDACTED = "memory:injection_redacted"

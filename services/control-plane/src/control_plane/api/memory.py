@@ -71,6 +71,20 @@ class UpdateMemoryRequest(BaseModel):
     kind: Literal["fact", "episodic"] | None = None
 
 
+class CorrectMemoryRequest(BaseModel):
+    """Body for ``POST /v1/memory/{id}/correct`` — Stream Memory-Enhance (M-4).
+
+    An end-user's authoritative correction of their own memory:
+    ``action="rewrite"`` replaces the content (and asserts it as truth →
+    confidence 1.0); ``action="forget"`` soft-deletes it as wrong. ``content``
+    is required for (and only used by) ``rewrite``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["rewrite", "forget"]
+    content: str | None = Field(default=None, max_length=_PATCH_CONTENT_MAX_CHARS)
+
+
 def _get_memory_repo(request: Request) -> MemoryStore:
     return request.app.state.memory_repo  # type: ignore[no-any-return]
 
@@ -286,5 +300,95 @@ def build_memory_router() -> APIRouter:
             resource_id=str(memory_id),
             trace_id=current_trace_id_hex(),
         )
+
+    @router.post("/{memory_id}/correct")
+    async def correct_memory(
+        memory_id: UUID,
+        payload: CorrectMemoryRequest,
+        request: Request,
+        principal: Annotated[Principal, Depends(require("memory", "write"))],
+        store: Annotated[MemoryStore, Depends(_get_memory_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> dict[str, Any]:
+        """End-user self-correction of their own memory — Stream Memory-Enhance (M-4).
+
+        ``rewrite`` replaces the content (re-embedded for honest recall) and
+        asserts it as truth (confidence → 1.0); ``forget`` soft-deletes it as
+        wrong. Per-user scoped (machine principals 403) and audited as
+        ``MEMORY_CORRECT`` so a correction is distinguishable from an admin edit.
+        """
+        tenant_id, user_id = await _require_caller_user(request, users)
+
+        if payload.action == "forget":
+            ok = await store.soft_delete(tenant_id=tenant_id, user_id=user_id, memory_id=memory_id)
+            if not ok:
+                raise HTTPException(status_code=404, detail="memory not found")
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=principal.subject_id,
+                action=AuditAction.MEMORY_CORRECT,
+                resource_type="memory_item",
+                resource_id=str(memory_id),
+                trace_id=current_trace_id_hex(),
+                details={"action": "forget"},
+            )
+            return {"success": True, "data": None, "error": None}
+
+        # action == "rewrite" — content is required.
+        content = (payload.content or "").strip()
+        if not content:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "CONTENT_REQUIRED",
+                    "message": "rewrite corrections require non-empty content",
+                },
+            )
+        await _scan_memory_strict(
+            content=content,
+            memory_id=memory_id,
+            tenant_id=tenant_id,
+            actor_id=principal.subject_id,
+            audit=audit,
+        )
+        embedder = request.app.state.embedder
+        try:
+            vectors = await embedder.embed([content], tenant_id=tenant_id)
+        except AgentFactoryError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "EMBEDDER_UNCONFIGURED",
+                    "message": (
+                        "memory correction requires an embedder — set "
+                        "HELIX_AGENT_EMBEDDING_API_KEY_REF + HELIX_AGENT_EMBEDDING_MODEL"
+                    ),
+                },
+            ) from exc
+
+        # A user correction asserts the rewrite as truth → confidence 1.0.
+        updated = await store.update_content(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            memory_id=memory_id,
+            content=content,
+            embedding=vectors[0],
+            confidence=1.0,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="memory not found")
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=principal.subject_id,
+            action=AuditAction.MEMORY_CORRECT,
+            resource_type="memory_item",
+            resource_id=str(memory_id),
+            trace_id=current_trace_id_hex(),
+            details={"action": "rewrite", "content_len": len(content)},
+        )
+        return {"success": True, "data": _serialise(updated), "error": None}
 
     return router
