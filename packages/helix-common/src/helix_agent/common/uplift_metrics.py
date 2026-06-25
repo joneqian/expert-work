@@ -93,6 +93,13 @@ _memory_mmr_total = helix_counter(
     label_names=("outcome",),  # applied | degraded
 )
 
+# Stream Memory-Enhance (M-3) — read-time verification of recall candidates.
+_memory_verify_total = helix_counter(
+    "helix_memory_verify_total",
+    "Long-term memory read-time verifications, partitioned by outcome.",
+    label_names=("outcome",),  # verified | degraded
+)
+
 # Stream CM-7 — Mem0-style reconciliation of run-end memory writes.
 _memory_reconcile_total = helix_counter(
     "helix_cm_memory_reconcile_total",
@@ -349,6 +356,18 @@ def record_memory_mmr(*, outcome: str) -> None:
     selection failed (or thinned to nothing) and the input order was kept.
     """
     _memory_mmr_total.labels(outcome=outcome).inc()
+
+
+def record_memory_verify(*, outcome: str) -> None:
+    """Bump ``helix_memory_verify_total{outcome}`` (Stream Memory-Enhance M-3).
+
+    ``outcome`` ∈ ``{"verified", "degraded"}`` — ``verified`` = the read-time
+    verifier ran and the kept set was applied (may have dropped some);
+    ``degraded`` = verification failed and ALL candidates were kept (fail-open,
+    memory recall never breaks the turn). Only emitted when verification is
+    enabled and there were candidates to check.
+    """
+    _memory_verify_total.labels(outcome=outcome).inc()
 
 
 def record_memory_reconcile(*, op: str) -> None:

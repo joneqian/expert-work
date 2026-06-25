@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from helix_agent.persistence import InMemoryMemoryStore
 from helix_agent.protocol import MemoryItem
+from helix_agent.runtime.cancellation import CancellationToken
 from helix_agent.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     GraphRunner,
@@ -19,7 +20,11 @@ from orchestrator import (
     make_memory_recall_node,
     make_memory_writeback_node,
 )
-from orchestrator.graph_builder.memory import parse_extracted_memories
+from orchestrator.graph_builder.memory import (
+    _verify_memories,
+    parse_extracted_memories,
+    parse_verify_kept,
+)
 from orchestrator.llm import FakeEmbedder
 from orchestrator.tools.registry import ToolSpec
 
@@ -106,6 +111,116 @@ def test_parse_extracted_memories_drops_bad_kind_and_dedups() -> None:
 )
 def test_parse_extracted_memories_tolerates_garbage(text: str) -> None:
     assert parse_extracted_memories(text) == []
+
+
+# ---------------------------------------------------------------------------
+# Stream Memory-Enhance (M-3) — read-time verification
+# ---------------------------------------------------------------------------
+
+
+def test_parse_verify_kept_clean() -> None:
+    assert parse_verify_kept('{"keep": [0, 2]}', count=3) == {0, 2}
+
+
+def test_parse_verify_kept_empty_is_drop_all_not_none() -> None:
+    # An explicit empty keep-set is a valid "drop everything" verdict, distinct
+    # from an unparseable reply (None → caller keeps all, fail-open).
+    assert parse_verify_kept('{"keep": []}', count=3) == set()
+
+
+def test_parse_verify_kept_drops_out_of_range_and_nonints() -> None:
+    assert parse_verify_kept('{"keep": [0, 9, "x", 1]}', count=2) == {0, 1}
+
+
+@pytest.mark.parametrize("text", ["no json", '{"keep": "nope"}', "{ bad }", '{"other": []}'])
+def test_parse_verify_kept_unparseable_is_none(text: str) -> None:
+    assert parse_verify_kept(text, count=3) is None
+
+
+async def _make_item(content: str) -> MemoryItem:
+    [vec] = await FakeEmbedder(dim=_DIM).embed([content], tenant_id=uuid4())  # type: ignore[arg-type]
+    return MemoryItem(
+        id=uuid4(), tenant_id=uuid4(), user_id=uuid4(), kind="fact", content=content, embedding=vec
+    )
+
+
+@pytest.mark.asyncio
+async def test_verify_memories_drops_rejected() -> None:
+    items = [await _make_item("keep this"), await _make_item("drop this")]
+    llm = _RecordingLLM(responses=[AIMessage(content='{"keep": [0]}')])
+    out = await _verify_memories(
+        llm_caller=llm, query="q", candidates=items, token=CancellationToken()
+    )
+    assert [m.content for m in out] == ["keep this"]
+
+
+@pytest.mark.asyncio
+async def test_verify_memories_fail_open_on_error() -> None:
+    # A verifier failure must keep ALL candidates (recall never empties on a
+    # transient verification error).
+    async def _boom(*, messages: Sequence[BaseMessage], tools: Sequence[ToolSpec]) -> AIMessage:
+        del messages, tools
+        raise RuntimeError("verifier exploded")
+
+    items = [await _make_item("a"), await _make_item("b")]
+    out = await _verify_memories(
+        llm_caller=_boom, query="q", candidates=items, token=CancellationToken()
+    )
+    assert [m.content for m in out] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_verify_memories_unparseable_keeps_all() -> None:
+    items = [await _make_item("a"), await _make_item("b")]
+    llm = _RecordingLLM(responses=[AIMessage(content="not json")])
+    out = await _verify_memories(
+        llm_caller=llm, query="q", candidates=items, token=CancellationToken()
+    )
+    assert [m.content for m in out] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_recall_node_skips_verification_when_disabled() -> None:
+    # verify_reads=False → the verifier is never called even when wired.
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await _seed(store, tenant=tenant, user=user, content="user prefers metric units")
+    verifier = _RecordingLLM(responses=[])  # must not be called
+    node = make_memory_recall_node(
+        memory_store=store,
+        embedder=FakeEmbedder(dim=_DIM),
+        top_k=5,
+        verifier=verifier,
+        verify_reads=False,
+    )
+    out = await node(  # type: ignore[arg-type]
+        _state("distance?"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert [m.content for m in out["recalled_memories"]] == ["user prefers metric units"]
+    assert verifier.calls == []
+
+
+@pytest.mark.asyncio
+async def test_recall_node_runs_verification_when_enabled() -> None:
+    store = InMemoryMemoryStore()
+    tenant, user = uuid4(), uuid4()
+    await _seed(store, tenant=tenant, user=user, content="user prefers metric units")
+    # Verifier drops everything → recall returns no memories.
+    verifier = _RecordingLLM(responses=[AIMessage(content='{"keep": []}')])
+    node = make_memory_recall_node(
+        memory_store=store,
+        embedder=FakeEmbedder(dim=_DIM),
+        top_k=5,
+        verifier=verifier,
+        verify_reads=True,
+    )
+    out = await node(  # type: ignore[arg-type]
+        _state("distance?"),
+        {"configurable": {"tenant_id": str(tenant), "user_id": str(user)}},
+    )
+    assert out["recalled_memories"] == []
+    assert len(verifier.calls) == 1
 
 
 # ---------------------------------------------------------------------------

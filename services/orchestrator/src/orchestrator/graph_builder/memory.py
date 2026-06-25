@@ -41,6 +41,7 @@ from helix_agent.common.uplift_metrics import (
     record_memory_redacted,
     record_memory_rerank,
     record_memory_retrieval,
+    record_memory_verify,
 )
 from helix_agent.persistence import MemoryStore
 from helix_agent.persistence.memory import MemoryWritebackDLQ
@@ -289,6 +290,88 @@ def _mmr_memories(
     return selected
 
 
+# Stream Memory-Enhance (M-3) — read-time verification.
+_VERIFY_SYSTEM = (
+    "You are a memory relevance filter. Given the user's CURRENT request and a "
+    "numbered list of candidate memories recalled from past sessions, return "
+    "ONLY the indices of memories that are RELEVANT to the request and not "
+    "stale or self-contradictory. Drop anything clearly irrelevant, outdated, "
+    "or contradictory. A memory the agent could plausibly use should be kept — "
+    "when unsure, keep it. Respond with ONLY a JSON object, no prose and no "
+    'code fences:\n{"keep": [<indices to keep>]}'
+)
+
+
+def parse_verify_kept(text: str, count: int) -> set[int] | None:
+    """Parse the verifier reply into the set of kept indices, or ``None`` when
+    the reply is unparseable (the caller then keeps all — fail-open).
+
+    An empty ``{"keep": []}`` is a *valid* "drop everything" verdict and returns
+    ``set()`` (distinct from ``None``). Out-of-range indices are ignored.
+    """
+    raw = _extract_json_object(text)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+        rows = data["keep"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+    if not isinstance(rows, list):
+        return None
+    kept: set[int] = set()
+    for value in rows:
+        try:
+            idx = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < count:
+            kept.add(idx)
+    return kept
+
+
+async def _verify_memories(
+    *,
+    llm_caller: LLMCaller,
+    query: str,
+    candidates: list[MemoryItem],
+    token: CancellationToken,
+) -> list[MemoryItem]:
+    """Stream Memory-Enhance (M-3) — drop recall candidates the verifier judges
+    irrelevant / stale for the current ``query``.
+
+    One batched LLM call over the whole candidate list (cost is +1 call per
+    recall, not per item). **Fail-open**: any error, or an unparseable reply,
+    keeps ALL candidates — read-time verification must never break a turn or
+    silently empty recall. Cancellation propagates. Operates on raw content;
+    redaction happens on the surviving set.
+    """
+    numbered = "\n".join(f"[{i}] {m.content}" for i, m in enumerate(candidates))
+    prompt = [
+        SystemMessage(content=_VERIFY_SYSTEM),
+        HumanMessage(content=f"CURRENT REQUEST:\n{query}\n\nCANDIDATE MEMORIES:\n{numbered}"),
+    ]
+    try:
+        response = await token.run_cancellable(llm_caller(messages=prompt, tools=[]))
+        kept = parse_verify_kept(_message_text(response), len(candidates))
+    except RunCancelledError:
+        raise
+    except Exception:
+        logger.warning("memory.verify_failed — keeping all candidates", exc_info=True)
+        record_memory_verify(outcome="degraded")
+        return candidates
+    if kept is None:
+        record_memory_verify(outcome="degraded")
+        return candidates
+    record_memory_verify(outcome="verified")
+    survivors = [m for i, m in enumerate(candidates) if i in kept]
+    if len(survivors) != len(candidates):
+        logger.debug(
+            "memory.verify dropped=%d kept=%d", len(candidates) - len(survivors), len(survivors)
+        )
+    return survivors
+
+
 def make_memory_recall_node(
     *,
     memory_store: MemoryStore,
@@ -297,6 +380,8 @@ def make_memory_recall_node(
     tenant_config_store: TenantConfigStore | None = None,
     reranker: Reranker | None = None,
     agent_name: str | None = None,
+    verifier: LLMCaller | None = None,
+    verify_reads: bool = False,
 ) -> MemoryNode:
     """Build the ``memory_recall`` node bound to the store + embedder.
 
@@ -312,7 +397,14 @@ def make_memory_recall_node(
     (``max(top_k, _MEMORY_RECALL_WIDE_LIMIT)``, always — Mini-ADR CM-G5)
     → cross-encoder rerank when ``reranker`` is wired (full reorder, no
     cut, so the diversity stage still sees the whole pool) → MMR selects
-    the final ``top_k`` (Mini-ADR CM-G1/G4) → redaction.
+    the final ``top_k`` (Mini-ADR CM-G1/G4) → read-time verification
+    (Stream Memory-Enhance M-3, when ``verify_reads`` + ``verifier``) →
+    redaction.
+
+    Stream Memory-Enhance (M-3) — ``verify_reads`` adds one batched LLM call
+    (via ``verifier``) that drops candidates judged irrelevant / stale for the
+    current request before injection. Fail-open: a verifier error keeps all
+    candidates so recall never empties on a transient failure.
     """
 
     async def memory_recall_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -359,6 +451,18 @@ def make_memory_recall_node(
                     query_embedding=vectors[0],
                     candidates=memories,
                     top_k=top_k,
+                )
+            # Stream Memory-Enhance (M-3) — read-time verification on the final
+            # set (raw content, pre-redaction). Fail-open inside its own helper,
+            # so a verifier error keeps all candidates rather than emptying
+            # recall. Runs after MMR so it only judges the items that would
+            # actually be injected (one batched call over the final top_k).
+            if verify_reads and verifier is not None and memories:
+                memories = await _verify_memories(
+                    llm_caller=verifier,
+                    query=task,
+                    candidates=memories,
+                    token=token,
                 )
         except RunCancelledError:
             raise

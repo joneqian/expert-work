@@ -1493,6 +1493,10 @@ def _build_memory_nodes(
         tenant_config_store=env.tenant_config_store,
         reranker=env.reranker,  # Stream CM-4 — None → no rerank (pre-CM-4 behaviour)
         agent_name=agent_name,
+        # Stream Memory-Enhance (M-3) — read-time verification uses the agent's
+        # own chat model (no platform credential); fail-open inside the node.
+        verifier=llm_caller,
+        verify_reads=long_term.verify_reads,
     )
     writeback = (
         make_memory_writeback_node(

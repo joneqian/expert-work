@@ -328,6 +328,16 @@ class LongTermMemorySpec(BaseModel):
         le=1.0,
         description="drop run-end extracted memories scoring below this importance",
     )
+    # Stream Memory-Enhance (M-3) — read-time verification. After recall (rerank
+    # + MMR), one batched LLM call judges each candidate against the current
+    # request and drops irrelevant / stale / contradictory memories before they
+    # are injected. Default on (the strongest anti-poisoning guard per Mem0); it
+    # adds one LLM call per recall and is fail-open (a verifier error keeps all
+    # candidates). ``False`` restores the pre-M-3 inject-all behaviour.
+    verify_reads: bool = Field(
+        default=True,
+        description="verify recalled memories against the request before injecting them",
+    )
 
 
 class MemorySpec(BaseModel):
