@@ -82,7 +82,7 @@ test("system_admin sees the connector catalog table + passes axe", async ({
   await expect(page.getByTestId("cat-table")).toBeVisible();
   await expect(page.getByText("GitHub", { exact: true })).toBeVisible();
 
-  // Open the create drawer to surface the tabbed platform-server form (P3).
+  // Open the create Modal to surface the tabbed platform-server form.
   // The Basic tab is active by default — assert its fields (Auth tab fields
   // are force-rendered but hidden, so not toBeVisible).
   await page.getByTestId("cat-add").click();

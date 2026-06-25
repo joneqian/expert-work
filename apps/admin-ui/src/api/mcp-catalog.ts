@@ -67,6 +67,9 @@ export interface McpCatalogEntry {
    *  between streamed events. */
   timeout_s?: number | null;
   sse_read_timeout_s?: number | null;
+  /** Platform-curated tool denylist — bare tool names filtered from list_tools
+   *  at runtime. Empty = every advertised tool is exposed. */
+  disabled_tools?: string[];
   required_tier: McpRequiredTier;
   enabled: boolean;
   created_at: string;
@@ -126,6 +129,8 @@ export interface CatalogPatchBody {
   bearer_token?: string;
   timeout_s?: number;
   sse_read_timeout_s?: number;
+  /** Platform-curated tool denylist; ``[]`` re-enables every tool. */
+  disabled_tools?: string[];
   required_tier?: McpRequiredTier;
   enabled?: boolean;
 }
@@ -174,6 +179,10 @@ export async function deletePlatformCatalogEntry(id: string): Promise<void> {
 export interface McpCatalogTool {
   name: string;
   description: string;
+  /** JSON Schema for the tool's arguments (object with properties/required). */
+  input_schema?: Record<string, unknown>;
+  /** Whether this tool is in the platform-curated denylist. */
+  disabled?: boolean;
 }
 
 /** Result of live-probing a configured platform server.
