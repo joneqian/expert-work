@@ -265,7 +265,10 @@ async def test_tools_endpoint_ok_unreachable_and_oauth(
     ok = await ctx.client.post(f"/v1/platform/mcp-catalog/{cid}/tools", headers=ctx.admin_headers)
     assert ok.status_code == 200, ok.text
     assert ok.json()["data"]["status"] == "ok"
-    assert ok.json()["data"]["tools"][0]["name"] == "list_issues"
+    tool = ok.json()["data"]["tools"][0]
+    assert tool["name"] == "list_issues"
+    assert "input_schema" in tool
+    assert tool["disabled"] is False
 
     # unreachable — probe raises → status unreachable (still 200, with error code).
     async def _probe_fail(**_kwargs: object) -> list[MCPToolDef]:
@@ -293,6 +296,45 @@ async def test_tools_endpoint_ok_unreachable_and_oauth(
     oid = oauth.json()["data"]["id"]
     na = await ctx.client.post(f"/v1/platform/mcp-catalog/{oid}/tools", headers=ctx.admin_headers)
     assert na.json()["data"]["status"] == "not_probeable"
+
+
+@pytest.mark.asyncio
+async def test_patch_disabled_tools_round_trip(ctx: _Ctx) -> None:
+    created = await ctx.client.post(
+        "/v1/platform/mcp-catalog",
+        json={
+            "name": "maps",
+            "display_name": "Maps",
+            "transport": "sse",
+            "url_template": "https://mcp.example.com/maps",
+            "auth_type": "none",
+        },
+        headers=ctx.admin_headers,
+    )
+    assert created.json()["data"]["disabled_tools"] == []
+    cid = created.json()["data"]["id"]
+
+    patch = await ctx.client.patch(
+        f"/v1/platform/mcp-catalog/{cid}",
+        json={"disabled_tools": ["drive", "transit"]},
+        headers=ctx.admin_headers,
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["data"]["disabled_tools"] == ["drive", "transit"]
+
+    # The tools endpoint flags the disabled ones.
+    tools = await ctx.client.post(
+        f"/v1/platform/mcp-catalog/{cid}/tools", headers=ctx.admin_headers
+    )
+    assert tools.json()["data"]["status"] == "ok"
+
+    # Re-enable all by sending an empty list.
+    cleared = await ctx.client.patch(
+        f"/v1/platform/mcp-catalog/{cid}",
+        json={"disabled_tools": []},
+        headers=ctx.admin_headers,
+    )
+    assert cleared.json()["data"]["disabled_tools"] == []
 
 
 @pytest.mark.asyncio

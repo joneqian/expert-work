@@ -23,16 +23,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from control_plane.tenant_scope import bypass_rls_session
 from helix_agent.persistence import McpConnectorCatalogStore
 from helix_agent.protocol import McpConnectorCatalogRecord
 from orchestrator.tools.mcp import (
+    MCPCallResult,
     MCPClient,
     MCPServerConfig,
     MCPServerPool,
     MCPServerPoolLimitError,
+    MCPToolDef,
 )
 
 logger = logging.getLogger("helix.control_plane.platform_mcp_pool")
@@ -45,6 +49,28 @@ PlatformMcpPoolProvider = Callable[[], Awaitable[MCPServerPool]]
 
 # Factory so tests can inject a RecordingMCPClient instead of real transports.
 McpClientFactory = Callable[[MCPServerConfig], Awaitable[MCPClient]]
+
+
+@dataclass
+class _ToolFilteringClient:
+    """Wraps an :class:`MCPClient`, dropping platform-disabled tools from
+    ``list_tools`` so they are never registered / exposed to a tenant agent.
+
+    Satisfies the runtime-checkable ``MCPClient`` protocol; ``call_tool`` /
+    ``close`` pass straight through to the wrapped transport.
+    """
+
+    inner: MCPClient
+    disabled: frozenset[str]
+
+    async def list_tools(self) -> Sequence[MCPToolDef]:
+        return [t for t in await self.inner.list_tools() if t.name not in self.disabled]
+
+    async def call_tool(self, name: str, args: Mapping[str, Any]) -> MCPCallResult:
+        return await self.inner.call_tool(name, args)
+
+    async def close(self) -> None:
+        await self.inner.close()
 
 
 def _record_to_config(record: McpConnectorCatalogRecord) -> MCPServerConfig:
@@ -133,6 +159,12 @@ class PlatformMcpPoolService:
                         continue
                     try:
                         client = await self._client_factory(_record_to_config(record))
+                        if record.disabled_tools:
+                            # Platform-curated tool denylist — drop disabled tools
+                            # from list_tools so no tenant agent ever registers them.
+                            client = _ToolFilteringClient(
+                                inner=client, disabled=frozenset(record.disabled_tools)
+                            )
                         await pool.add(record.name, client)
                     except MCPServerPoolLimitError:
                         try:

@@ -161,6 +161,10 @@ class McpConnectorCatalogRecord(BaseModel):
     # between streamed events, independent of ``timeout_s`` (see MCPServerConfig).
     timeout_s: float | None = Field(default=None, gt=0, le=300)
     sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
+    # Platform-curated tool denylist (form polish): bare tool names the server
+    # advertises but the platform admin disabled — filtered from list_tools at
+    # runtime so no tenant agent ever sees them. Empty = every advertised tool.
+    disabled_tools: list[str] = Field(default_factory=list)
     required_tier: TenantPlan = TenantPlan.FREE
     enabled: bool = True
     created_at: datetime
@@ -206,6 +210,7 @@ class McpConnectorCatalogUpsert(BaseModel):
     bearer_token_ref: str | None = None
     timeout_s: float | None = Field(default=None, gt=0, le=300)
     sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
+    disabled_tools: list[str] = Field(default_factory=list)
     required_tier: TenantPlan = TenantPlan.FREE
     enabled: bool = True
 
@@ -247,5 +252,7 @@ class McpConnectorCatalogPatch(BaseModel):
     bearer_token_ref: str | None = None
     timeout_s: float | None = Field(default=None, gt=0, le=300)
     sse_read_timeout_s: float | None = Field(default=None, gt=0, le=3600)
+    # ``None`` = leave unchanged; ``[]`` = re-enable every tool.
+    disabled_tools: list[str] | None = None
     required_tier: TenantPlan | None = None
     enabled: bool | None = None

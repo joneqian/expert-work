@@ -56,6 +56,11 @@ class McpConnectorCatalogRow(Base):
     # wait between streamed events.
     timeout_s: Mapped[float | None] = mapped_column(Float, nullable=True)
     sse_read_timeout_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Platform-curated tool denylist (bare tool names; migration 0094). Empty =
+    # every advertised tool is exposed.
+    disabled_tools: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     required_tier: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'free'"))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(

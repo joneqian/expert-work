@@ -289,7 +289,17 @@ def build_mcp_catalog_router() -> APIRouter:
             "data": {
                 "status": "ok",
                 "tool_count": len(tools),
-                "tools": [{"name": t.name, "description": t.description} for t in tools],
+                "tools": [
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "input_schema": t.input_schema,
+                        # The platform-curated denylist state, so the edit page can
+                        # render each tool's enable toggle without a second call.
+                        "disabled": t.name in record.disabled_tools,
+                    }
+                    for t in tools
+                ],
                 "error": None,
             },
             "error": None,

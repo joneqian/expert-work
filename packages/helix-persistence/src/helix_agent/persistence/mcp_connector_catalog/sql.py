@@ -53,6 +53,7 @@ def _row_to_record(row: McpConnectorCatalogRow) -> McpConnectorCatalogRecord:
         bearer_token_ref=row.bearer_token_ref,
         timeout_s=row.timeout_s,
         sse_read_timeout_s=row.sse_read_timeout_s,
+        disabled_tools=list(row.disabled_tools or []),
         required_tier=TenantPlan(row.required_tier),
         enabled=row.enabled,
         created_at=row.created_at,
@@ -89,6 +90,7 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 bearer_token_ref=upsert.bearer_token_ref,
                 timeout_s=upsert.timeout_s,
                 sse_read_timeout_s=upsert.sse_read_timeout_s,
+                disabled_tools=list(upsert.disabled_tools),
                 required_tier=upsert.required_tier.value,
                 enabled=upsert.enabled,
                 created_at=now,
@@ -151,6 +153,8 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 existing.timeout_s = patch.timeout_s
             if patch.sse_read_timeout_s is not None:
                 existing.sse_read_timeout_s = patch.sse_read_timeout_s
+            if patch.disabled_tools is not None:
+                existing.disabled_tools = list(patch.disabled_tools)
             if patch.required_tier is not None:
                 existing.required_tier = patch.required_tier.value
             if patch.enabled is not None:

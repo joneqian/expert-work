@@ -38,6 +38,7 @@ async def _add(
     auth_schema: McpConnectorAuthSchema | None = None,
     timeout_s: float | None = None,
     sse_read_timeout_s: float | None = None,
+    disabled_tools: list[str] | None = None,
 ) -> None:
     await store.create(
         upsert=McpConnectorCatalogUpsert(
@@ -52,9 +53,32 @@ async def _add(
             auth_schema=auth_schema or McpConnectorAuthSchema(),
             timeout_s=timeout_s,
             sse_read_timeout_s=sse_read_timeout_s,
+            disabled_tools=disabled_tools or [],
         ),
         actor_id="sysadmin",
     )
+
+
+@pytest.mark.asyncio
+async def test_disabled_tools_filtered_from_list_tools() -> None:
+    store = InMemoryMcpConnectorCatalogStore()
+    await _add(store, name="maps", disabled_tools=["drive"])
+
+    async def _factory(_config: MCPServerConfig) -> RecordingMCPClient:
+        return RecordingMCPClient(
+            tools=(
+                MCPToolDef(name="walk", description="", input_schema={}),
+                MCPToolDef(name="drive", description="", input_schema={}),
+            )
+        )
+
+    svc = PlatformMcpPoolService(store=store, client_factory=_factory)
+    pool = await svc.get_or_build()
+    client = pool.get("maps")
+    assert client is not None
+    listed = [t.name for t in await client.list_tools()]
+    # "drive" is platform-disabled → never advertised to the agent layer.
+    assert listed == ["walk"]
 
 
 @pytest.mark.asyncio

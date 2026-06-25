@@ -53,6 +53,7 @@ class InMemoryMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 bearer_token_ref=upsert.bearer_token_ref,
                 timeout_s=upsert.timeout_s,
                 sse_read_timeout_s=upsert.sse_read_timeout_s,
+                disabled_tools=list(upsert.disabled_tools),
                 required_tier=upsert.required_tier,
                 enabled=upsert.enabled,
                 created_at=now,
@@ -103,6 +104,8 @@ class InMemoryMcpConnectorCatalogStore(McpConnectorCatalogStore):
                 changes["timeout_s"] = patch.timeout_s
             if patch.sse_read_timeout_s is not None:
                 changes["sse_read_timeout_s"] = patch.sse_read_timeout_s
+            if patch.disabled_tools is not None:
+                changes["disabled_tools"] = list(patch.disabled_tools)
             if patch.required_tier is not None:
                 changes["required_tier"] = patch.required_tier
             if patch.enabled is not None:
