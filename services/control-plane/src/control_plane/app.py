@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from control_plane.api import (
     build_agent_schema_router,
+    build_agent_templates_router,
     build_agents_router,
     build_api_keys_router,
     build_approvals_router,
@@ -191,6 +192,7 @@ from control_plane.skill_run_usage_recorder import StoreSkillRunUsageRecorder
 from control_plane.subagent_runtime import make_child_agent_builder, make_worker_build_fn
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolService
+from control_plane.tenant_scope import bypass_rls_session
 from control_plane.tenant_secret_overlay import TenantOverlayCredentialsResolver
 from control_plane.tenant_status import TenantStatusService
 from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolService
@@ -384,8 +386,10 @@ from helix_agent.persistence.webhook import (
 )
 from helix_agent.protocol import (
     PROVIDER_CATALOG,
+    AgentSpec,
     AuditAction,
     AuditResult,
+    PlatformAgentTemplateStatus,
     TokenReservationRecord,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -985,6 +989,23 @@ def create_app(
                 async def _platform_mcp_pool_provider():  # type: ignore[no-untyped-def]
                     return await platform_mcp_pool_service.get_or_build()
 
+                # Stream Agent-Templates (M1-3) — resolve a fork's ``extends`` to
+                # its platform base template so build-time floor enforcement runs.
+                # NULL-tenant rows → bypass_rls (the W-8 trap, same as the MCP
+                # platform pool). ``"latest"`` picks the newest PUBLISHED version.
+                _platform_template_store = resolved_platform_agent_template_store
+
+                async def _platform_template_resolver(name: str, version: str) -> AgentSpec | None:
+                    async with bypass_rls_session():
+                        if version == "latest":
+                            rec = await _platform_template_store.get_latest(
+                                name=name,
+                                status=PlatformAgentTemplateStatus.PUBLISHED,
+                            )
+                        else:
+                            rec = await _platform_template_store.get(name=name, version=version)
+                    return rec.spec if rec is not None else None
+
                 # Stream MCP-OAUTH (OA-3b) — per-(tenant,user) OAuth MCP pool;
                 # OA-6 refresher lazily renews near-expiry access tokens at build.
                 mcp_oauth_refresher = McpOAuthRefresher(
@@ -1229,6 +1250,9 @@ def create_app(
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
                     # Stream MCP platform-servers (P1b) — platform shared catalog pool.
                     platform_mcp_pool_provider=_platform_mcp_pool_provider,
+                    # Stream Agent-Templates (M1-3) — resolve fork extends → base
+                    # template + enforce tier① security floor at build time.
+                    platform_template_resolver=_platform_template_resolver,
                     # Stream MCP-OAUTH (OA-3b) — caller's per-user OAuth MCP pool.
                     user_mcp_oauth_pool_provider=_user_mcp_oauth_pool_provider,
                     # Stream X (Mini-ADR X-4) — first wiring of skill resolution
@@ -1724,6 +1748,7 @@ def create_app(
     app.include_router(build_service_accounts_router())
     app.include_router(build_mcp_servers_router())
     app.include_router(build_mcp_catalog_router())
+    app.include_router(build_agent_templates_router())
     app.include_router(build_mcp_oauth_router())
     app.include_router(build_rate_card_router())
     app.include_router(build_usage_router())

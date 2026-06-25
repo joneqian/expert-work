@@ -38,7 +38,16 @@ from helix_agent.common.url_validation import validate_remote_url
 from helix_agent.persistence import ArtifactStore, KnowledgeStore
 from helix_agent.persistence.skill import SkillStore
 from helix_agent.persistence.token_usage_store import TokenUsageStore
-from helix_agent.protocol import AgentSpec, ModelSpec, Provider, TenantPlan, Tool, tier_satisfies
+from helix_agent.protocol import (
+    AgentSpec,
+    ModelSpec,
+    Provider,
+    TenantPlan,
+    Tool,
+    parse_extends_ref,
+    resolve_extends,
+    tier_satisfies,
+)
 from helix_agent.runtime.audit import DefaultSecretRedactor
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
@@ -118,6 +127,13 @@ logger = logging.getLogger(__name__)
 # connectors (Stream MCP-OAUTH, OA-3b). ``k[0]`` is the tenant in both shapes,
 # so ``invalidate_tenant`` works uniformly.
 _CacheKey = tuple[UUID, str, str] | tuple[UUID, str, str, str]
+
+# Stream Agent-Templates (M1-3) — resolves a platform template ``(name, version)``
+# (``version`` may be ``"latest"``) to its base ``AgentSpec``, or ``None`` if the
+# template is absent. Bound in the app lifespan to the platform-template store
+# under ``bypass_rls_session`` (NULL-tenant rows). Lets ``_build`` merge an
+# inheriting fork's manifest against its base + enforce the tier① security floor.
+PlatformTemplateResolver = Callable[[str, str], Awaitable[AgentSpec | None]]
 
 
 @dataclass
@@ -456,6 +472,34 @@ async def _make_action_judge(
     return LLMActionJudge(caller=caller)
 
 
+async def _resolve_template_extends(
+    spec: AgentSpec, resolver: PlatformTemplateResolver | None
+) -> AgentSpec:
+    """Merge a fork manifest against its platform base template (M1-3).
+
+    Returns ``spec`` unchanged when it declares no ``extends``. Otherwise loads the
+    base via ``resolver`` and applies :func:`resolve_extends` (tier① floor + clears
+    ``extends``). **Fail-closed**: an ``extends`` manifest with no resolver wired,
+    a malformed ref, or a missing base template raises :class:`AgentFactoryError`
+    rather than building an un-floored spec (a security floor that can be skipped
+    is not a floor)."""
+    ref = spec.spec.extends
+    if ref is None:
+        return spec
+    if resolver is None:
+        raise AgentFactoryError(
+            f"manifest extends {ref!r} but template resolution is not configured"
+        )
+    try:
+        name, version = parse_extends_ref(ref)
+    except ValueError as exc:
+        raise AgentFactoryError(str(exc)) from exc
+    base = await resolver(name, version)
+    if base is None:
+        raise AgentFactoryError(f"extends target not found: {ref!r}")
+    return resolve_extends(base, spec)
+
+
 def make_agent_builder(
     secret_store: SecretStore,
     checkpointer: BaseCheckpointSaver[Any],
@@ -464,6 +508,7 @@ def make_agent_builder(
     middleware_env: MiddlewareEnv | None = None,
     memory_env: MemoryEnv | None = None,
     subagent_spec_resolver: SubagentSpecResolver | None = None,
+    platform_template_resolver: PlatformTemplateResolver | None = None,
     mcp_allowlist_provider: Callable[[UUID], Awaitable[Sequence[str]]] | None = None,
     tenant_mcp_pool_provider: TenantMcpPoolProvider | None = None,
     platform_mcp_pool_provider: PlatformMcpPoolProvider | None = None,
@@ -510,6 +555,12 @@ def make_agent_builder(
     async def _build(
         spec: AgentSpec, *, tenant_id: UUID | None = None, user_id: str | None = None
     ) -> BuiltAgent:
+        # Stream Agent-Templates (M1-3) — resolve template inheritance FIRST so all
+        # downstream gates see the merged, floored spec. A fork manifest declares
+        # ``spec.extends = "<template>@<version>"``; we load the platform base and
+        # enforce the tier① security floor (the tenant cannot weaken inherited
+        # defenses), then clear ``extends`` to a plain build-ready spec.
+        spec = await _resolve_template_extends(spec, platform_template_resolver)
         # Stream T (PR B) — build-time embedding gate. A manifest that
         # declares long-term memory needs a configured platform embedder;
         # the dynamic embedder object is always present, so we check the

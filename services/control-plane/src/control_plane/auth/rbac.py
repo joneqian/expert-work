@@ -44,6 +44,7 @@ Resource = Literal[
     "mcp_catalog",  # Stream W — platform MCP connector catalog (system_admin)
     "mcp_oauth",  # Stream MCP-OAUTH — per-user OAuth connections (own-scoped)
     "billing",  # Stream Y — platform model rate card (system_admin)
+    "agent_template",  # Stream Agent-Templates — platform Agent templates (system_admin)
 ]
 
 Action = Literal[
@@ -96,6 +97,9 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             # Stream Y — platform model rate card (system_admin auto-gets ADMIN
             # via is_allowed; the endpoint also re-checks is_system_admin).
             "billing": {"read", "write", "delete"},
+            # Stream Agent-Templates — platform Agent template catalog
+            # (system_admin auto-gets ADMIN; endpoint re-checks is_system_admin).
+            "agent_template": {"read", "write", "delete"},
         }
     if role is Role.OPERATOR:
         return {
@@ -124,6 +128,9 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
             "mcp_oauth": {"read", "write", "delete"},
             # Stream Y — platform model rate card
             "billing": {"read"},
+            # Stream Agent-Templates — tenants read the published template
+            # marketplace (system_admin re-check still gates writes).
+            "agent_template": {"read"},
         }
     # VIEWER
     return {
@@ -143,6 +150,8 @@ def _grants(role: Role) -> dict[Resource, set[Action]]:
         "mcp_oauth": {"read"},
         # Stream Y — platform model rate card
         "billing": {"read"},
+        # Stream Agent-Templates — platform Agent template marketplace (read).
+        "agent_template": {"read"},
     }
 
 

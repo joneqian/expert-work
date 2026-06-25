@@ -160,6 +160,10 @@ ResourceType = Literal[
     # Stream Y — platform model rate card (Y-3). Mirrors the protocol-side
     # ``ResourceType`` Literal per [memory:audit-literal-drift].
     "model_rate_card",
+    # Stream Agent-Templates — platform Agent template catalog (system_admin).
+    # Mirrors the protocol-side ``ResourceType`` Literal per
+    # [memory:audit-literal-drift].
+    "platform_agent_template",
     # Stream TE-2 — per-tool-call audit (TOOL_CALL / TOOL_BLOCKED). Mirrors
     # the protocol-side ``ResourceType`` Literal per [memory:audit-literal-drift].
     "tool",

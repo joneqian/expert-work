@@ -328,6 +328,10 @@ class AuditAction(StrEnum):
     RATE_CARD_CREATE = "rate_card:create"
     RATE_CARD_UPDATE = "rate_card:update"
     RATE_CARD_DELETE = "rate_card:delete"
+    # agent_template (Stream Agent-Templates — platform Agent templates, system_admin)
+    AGENT_TEMPLATE_CREATE = "agent_template:create"
+    AGENT_TEMPLATE_UPDATE = "agent_template:update"
+    AGENT_TEMPLATE_DELETE = "agent_template:delete"
 
 
 ResourceType = Literal[
@@ -376,6 +380,11 @@ ResourceType = Literal[
     "tenant_mcp_server",  # Stream V — tenant remote MCP server registry
     "mcp_connector_catalog",  # Stream W — platform MCP connector catalog
     "model_rate_card",  # Stream Y — platform model rate card (Y-3)
+    # Stream Agent-Templates — platform Agent template catalog (system_admin).
+    # Mirrors the control-plane ResourceType Literal in
+    # services/control-plane/src/control_plane/audit.py per
+    # [memory:audit-literal-drift] (both must stay in sync).
+    "platform_agent_template",
     # Stream TE-2 — per-tool-call audit (TOOL_CALL / TOOL_BLOCKED). Mirrors
     # the control-plane ResourceType Literal in
     # services/control-plane/src/control_plane/audit.py per

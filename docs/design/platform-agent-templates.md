@@ -1,5 +1,36 @@
 # 平台 Agent 模板 + 租户继承(分层 manifest)
 
+## 0. 实现修正 — 三层运行模型(2026-06-25,grounded)
+
+> 实施中与 owner 对齐了**完整使用场景**,据此把模型从初稿的「平台模板 + 租户稀疏实例」修正为**三层**。本节为权威模型;§4.2/§5 的稀疏 overlay 存储推迟到 M2(auto-propagation 才需要),M1 不做。
+
+owner 场景三步:① 平台新建 Agent;② 租户 **fork** 该 Agent 并改部分;③ 外部程序用 `agent_code + user_id` 调接口拉起一个**运行实例**。映射成三层:
+
+| 层 | 实体 | 谁拥有 | 存什么 | 数量 |
+|---|---|---|---|---|
+| **① 平台模板** | `platform_agent_template`(name@version,NULL-tenant) | 平台 | 完整基座 AgentSpec + 市场元数据 | 平台级 |
+| **② 租户 fork** | 租户 `agent_spec` 行,`spec.extends="模板@版本"` | 租户 | 租户**完整** AgentSpec(fork 时拷基座 + 租户改非安全字段) | **一份/租户/agent_code** |
+| **③ 运行实例** | `agent_instance` 轻量绑定行(新建) | 终端用户 | `(tenant, agent_code, user_id) → 解析出的 fork name@version + 复用 thread`,**不存 spec** | 一份/(租户,用户,agent_code) |
+
+要点(经代码核实):
+- **改在②fork**,整租户共享;**③实例不存 spec**,运行期按 user_id 拉 fork build。per-user 隔离今天已按 `(tenant_id, user_id=tenant_user.id)` 键记忆(`MemoryStore`)/工作区卷(`helix-ws-{tenant}-{user}`)/线程,实例层零 spec 复制。
+- `agent_code` = 租户 fork 的 `name`(租户内唯一);今天 run 解析按 `(tenant,name,version)`,需加 `agent_code → name@version` 解析。
+- **安全 gap 1**:`resolve_extends`(§5/PR M1-2)全仓未接线 → build 期未合并基座,floor 未真生效。**M1-3 接进 `runtime.make_agent_builder._build`**。
+- **安全 gap 2**:外部 API-key 调用者今天 `resolve_caller_user_id` 对 service_account 返回 `None` —— 给不了 end-user。③需新增机制让 API-key **显式传 user_id**(+ 按需 mint `tenant_user` 行),并审计「代某 user 运行」。
+- 无 per-user 绑定表(现 `thread_meta` 按 ephemeral `thread_id` 绑 (user,agent),非可复用实例)。
+
+**M1 grounded PR 拆分**(取代 §8 的初稿分期):
+- **M1-1**(#799 ✅)平台模板表 + store + 协议。
+- **M1-2**(#800 ✅)tier① floor 合并引擎 + 字段分层 SSOT(纯函数)。
+- **M1-3** 接 `resolve_extends` 进 build(floor 真生效)+ 平台模板 system_admin CRUD API。
+- **M1-4** 租户 fork API(POST 派生 manifest 带 extends)+ `agent_code` 解析。
+- **M1-5** 外部 `(agent_code,user_id)` 运行 API + `agent_instance` 绑定行 + API-key 传 user_id(+ 审计)。
+- **M1-6** 前端:平台模板市场 + 租户 fork/实例化 UI。
+
+M2 仍为 auto-propagation:把②fork 从「完整副本 + 钉版」演进到「稀疏 overlay + @latest」(§4.2/§5),平台改基座自动流入未 override 字段。
+
+---
+
 ## 1. 背景与动机
 
 平台已对 **MCP**(平台目录 + 租户启用,#785-797)和 **技能**(市场,Stream X)落地「平台策展 + 租户使用」治理。本设计把同一治理轴**延伸到 Agent**:平台维护**官方 agent 模板**,租户实例化为自己的 per-user agent。
