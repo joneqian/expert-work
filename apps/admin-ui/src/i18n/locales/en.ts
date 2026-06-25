@@ -770,10 +770,16 @@ export interface TranslationKeys {
     authorize: string;
     shared_hint: string;
     tools_title: string;
-    test_connection: string;
     tools_none: string;
     tools_unreachable: string;
     tools_oauth_note: string;
+    tab_config: string;
+    tools_refresh: string;
+    param_name: string;
+    param_type: string;
+    param_desc: string;
+    tool_enable_aria: string;
+    tool_no_params: string;
   };
   mcp_oauth: {
     page_title: string;
@@ -2500,11 +2506,17 @@ const en: TranslationKeys = {
     authorize: "Authorize",
     shared_hint: "Shared identity — all enabled users share one credential.",
     tools_title: "Tools",
-    test_connection: "Test connection",
     tools_none: "Connected, but the server exposes no tools.",
     tools_unreachable: "Could not connect to the server.",
     tools_oauth_note:
       "OAuth connectors authorize per user, so tools can't be listed from here.",
+    tab_config: "Config",
+    tools_refresh: "Refresh",
+    param_name: "Parameter",
+    param_type: "Type",
+    param_desc: "Description",
+    tool_enable_aria: "Enable tool {{name}}",
+    tool_no_params: "No parameters.",
   },
   mcp_oauth: {
     page_title: "My MCP Connections",

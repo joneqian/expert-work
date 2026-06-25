@@ -2,10 +2,11 @@
  * MCP Catalog UI tests — Stream W.
  *
  * Covers the platform catalog page (admin gate + table), the platform-server
- * config drawer (edit mode), and the tenant catalog browser (entitlement lock +
- * enable toggle + oauth authorize).
+ * config form (edit/create) + tools tab (per-tool toggle), and the tenant
+ * catalog browser (entitlement lock + enable toggle + oauth authorize).
  */
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { createRef } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { App } from "antd";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -14,7 +15,11 @@ import "../../i18n";
 
 import { SettingsMcpCatalog } from "../SettingsMcpCatalog";
 import { CatalogBrowser } from "../../components/mcp_catalog/CatalogBrowser";
-import { CatalogEntryDrawer } from "../../components/mcp_catalog/CatalogEntryDrawer";
+import {
+  CatalogConfigForm,
+  type CatalogConfigFormHandle,
+} from "../../components/mcp_catalog/CatalogConfigForm";
+import { CatalogToolsTab } from "../../components/mcp_catalog/CatalogToolsTab";
 import { AuthProvider } from "../../auth/AuthContext";
 import { apiClient, setStoredToken } from "../../api/client";
 import type { TenantCatalogEntry } from "../../api/mcp-catalog";
@@ -139,52 +144,135 @@ describe("SettingsMcpCatalog page", () => {
   });
 });
 
-describe("CatalogEntryDrawer edit mode", () => {
-  // The edit drawer probes the server on open (POST .../tools) — route it so the
-  // panel resolves without a real network call.
-  const TOOLS_OK = {
-    success: true,
-    data: { status: "ok", tool_count: 0, tools: [], error: null },
-    error: null,
-  };
-
-  it("disables the immutable name/transport/auth_type selects when editing", async () => {
-    installAdapter([
-      { match: (u) => u.endsWith("/tools"), respond: () => TOOLS_OK },
-    ]);
+describe("CatalogConfigForm", () => {
+  it("disables the immutable name/transport/auth_type when editing", async () => {
     render(
       <App>
-        <CatalogEntryDrawer
-          open
-          onClose={() => {}}
-          onSaved={() => {}}
-          editing={ENTRY}
-        />
+        <CatalogConfigForm editing={ENTRY} onSaved={() => {}} />
       </App>,
     );
     await waitFor(() =>
       expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
     );
-    // auth_type Select is immutable post-create (backend patch omits it).
-    const authSelect = screen.getByTestId("cce-auth");
-    expect(authSelect.className).toContain("ant-select-disabled");
-    // name input is disabled too (sanity: confirm we matched the right gate).
+    expect(screen.getByTestId("cce-auth").className).toContain(
+      "ant-select-disabled",
+    );
     expect(screen.getByTestId("cce-name")).toBeDisabled();
-    const transportSelect = screen.getByTestId("cce-transport");
-    expect(transportSelect.className).toContain("ant-select-disabled");
+    expect(screen.getByTestId("cce-transport").className).toContain(
+      "ant-select-disabled",
+    );
   });
 
-  it("PATCH body omits immutable auth_type / auth_schema / name; keeps token blank", async () => {
+  it("submit() PATCHes, omitting immutable auth_type / name and a blank token", async () => {
     let captured: { method?: string; body?: unknown } = {};
     apiClient.defaults.adapter = (config) => {
-      const url = config.url ?? "";
-      // Capture only the PATCH — the on-open /tools probe must not clobber it.
       if (config.method === "patch") {
         captured = { method: config.method, body: config.data };
       }
+      return Promise.resolve({
+        data: { success: true, data: { ...ENTRY }, error: null },
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config,
+        request: {},
+      });
+    };
+    const onSaved = vi.fn();
+    const ref = createRef<CatalogConfigFormHandle>();
+    render(
+      <App>
+        <CatalogConfigForm ref={ref} editing={ENTRY} onSaved={onSaved} />
+      </App>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
+    );
+    await ref.current!.submit();
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(captured.method).toBe("patch");
+    const body = JSON.parse(captured.body as string) as Record<string, unknown>;
+    expect(body.auth_type).toBeUndefined();
+    expect(body.name).toBeUndefined();
+    expect(body.bearer_token).toBeUndefined();
+  });
+
+  it("create mode renders category select, icon upload, and timeout fields", async () => {
+    render(
+      <App>
+        <CatalogConfigForm editing={null} onSaved={() => {}} />
+      </App>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("cce-category")).toBeInTheDocument();
+    expect(screen.getByTestId("cce-icon-upload")).toBeInTheDocument();
+    expect(screen.getByTestId("cce-timeout")).toBeInTheDocument();
+    expect(screen.getByTestId("cce-sse-timeout")).toBeInTheDocument();
+  });
+});
+
+describe("CatalogToolsTab", () => {
+  it("probes and lists tools with a per-tool enable toggle", async () => {
+    installAdapter([
+      {
+        match: (u) => u.endsWith("/tools"),
+        respond: () => ({
+          success: true,
+          data: {
+            status: "ok",
+            tool_count: 1,
+            tools: [
+              {
+                name: "list_issues",
+                description: "List issues",
+                input_schema: {},
+                disabled: false,
+              },
+            ],
+            error: null,
+          },
+          error: null,
+        }),
+      },
+    ]);
+    render(
+      <App>
+        <CatalogToolsTab entry={ENTRY} onUpdated={() => {}} />
+      </App>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("ct-list")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("list_issues")).toBeInTheDocument();
+    expect(screen.getByTestId("ct-toggle-list_issues")).toBeInTheDocument();
+  });
+
+  it("toggling a tool persists disabled_tools via PATCH", async () => {
+    let patched: unknown = null;
+    apiClient.defaults.adapter = (config) => {
+      const url = config.url ?? "";
+      if (config.method === "patch") patched = config.data;
       const data = url.endsWith("/tools")
-        ? TOOLS_OK
-        : { success: true, data: { ...ENTRY }, error: null };
+        ? {
+            success: true,
+            data: {
+              status: "ok",
+              tool_count: 1,
+              tools: [
+                {
+                  name: "drive",
+                  description: "",
+                  input_schema: {},
+                  disabled: false,
+                },
+              ],
+              error: null,
+            },
+            error: null,
+          }
+        : { success: true, data: { ...ENTRY, disabled_tools: ["drive"] }, error: null };
       return Promise.resolve({
         data,
         status: 200,
@@ -194,85 +282,19 @@ describe("CatalogEntryDrawer edit mode", () => {
         request: {},
       });
     };
-    const onSaved = vi.fn();
     const user = userEvent.setup();
     render(
       <App>
-        <CatalogEntryDrawer
-          open
-          onClose={() => {}}
-          onSaved={onSaved}
-          editing={ENTRY}
-        />
+        <CatalogToolsTab entry={ENTRY} onUpdated={() => {}} />
       </App>,
     );
     await waitFor(() =>
-      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
+      expect(screen.getByTestId("ct-toggle-drive")).toBeInTheDocument(),
     );
-    // Submit without re-pasting the bearer token (blank = keep stored one).
-    await user.click(screen.getByTestId("cce-submit"));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(captured.method).toBe("patch");
-    const body = JSON.parse(captured.body as string) as Record<string, unknown>;
-    // Immutable / dropped fields never appear in the patch.
-    expect(body.auth_type).toBeUndefined();
-    expect(body.auth_schema).toBeUndefined();
-    expect(body.name).toBeUndefined();
-    // Token not re-pasted → not sent (write-only, blank-to-keep).
-    expect(body.bearer_token).toBeUndefined();
-  });
-
-  it("create mode renders category select, icon upload, and timeout fields", async () => {
-    render(
-      <App>
-        <CatalogEntryDrawer
-          open
-          onClose={() => {}}
-          onSaved={() => {}}
-          editing={null}
-        />
-      </App>,
-    );
-    await waitFor(() =>
-      expect(screen.getByTestId("cce-form")).toBeInTheDocument(),
-    );
-    // #2 category dropdown / #3 icon upload / #4 timeout + SSE-read timeout.
-    expect(screen.getByTestId("cce-category")).toBeInTheDocument();
-    expect(screen.getByTestId("cce-icon-upload")).toBeInTheDocument();
-    expect(screen.getByTestId("cce-timeout")).toBeInTheDocument();
-    expect(screen.getByTestId("cce-sse-timeout")).toBeInTheDocument();
-  });
-
-  it("probes on open and shows the server's tools", async () => {
-    installAdapter([
-      {
-        match: (u) => u.endsWith("/tools"),
-        respond: () => ({
-          success: true,
-          data: {
-            status: "ok",
-            tool_count: 1,
-            tools: [{ name: "list_issues", description: "List issues" }],
-            error: null,
-          },
-          error: null,
-        }),
-      },
-    ]);
-    render(
-      <App>
-        <CatalogEntryDrawer
-          open
-          onClose={() => {}}
-          onSaved={() => {}}
-          editing={ENTRY}
-        />
-      </App>,
-    );
-    await waitFor(() =>
-      expect(screen.getByTestId("cce-tools")).toBeInTheDocument(),
-    );
-    expect(screen.getByText("list_issues")).toBeInTheDocument();
+    await user.click(screen.getByTestId("ct-toggle-drive"));
+    await waitFor(() => expect(patched).not.toBeNull());
+    const body = JSON.parse(patched as string) as { disabled_tools: string[] };
+    expect(body.disabled_tools).toContain("drive");
   });
 });
 

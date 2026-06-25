@@ -12,6 +12,7 @@
  * + antd Table + ``ApiError`` → ``${code}: ${message}`` toasts).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Alert,
   App,
@@ -37,7 +38,7 @@ import {
 } from "../api/mcp-catalog";
 import { ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { CatalogEntryDrawer } from "../components/mcp_catalog/CatalogEntryDrawer";
+import { CatalogCreateModal } from "../components/mcp_catalog/CatalogCreateModal";
 
 const { Text } = Typography;
 
@@ -53,11 +54,11 @@ export function SettingsMcpCatalog() {
   const auth = useAuth();
   const isSystemAdmin = auth.identity?.isSystemAdmin ?? false;
 
+  const navigate = useNavigate();
   const [rows, setRows] = useState<McpCatalogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editing, setEditing] = useState<McpCatalogEntry | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const errText = useCallback(
     (err: unknown): string =>
@@ -88,19 +89,15 @@ export function SettingsMcpCatalog() {
   }, [isSystemAdmin, refresh]);
 
   const openCreate = useCallback(() => {
-    setEditing(null);
-    setDrawerOpen(true);
+    setCreateOpen(true);
   }, []);
 
-  const openEdit = useCallback((row: McpCatalogEntry) => {
-    setEditing(row);
-    setDrawerOpen(true);
-  }, []);
-
-  const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
-    setEditing(null);
-  }, []);
+  const openEdit = useCallback(
+    (row: McpCatalogEntry) => {
+      navigate(`/settings/mcp-catalog/${row.id}`);
+    },
+    [navigate],
+  );
 
   const onToggle = useCallback(
     async (row: McpCatalogEntry, enabled: boolean) => {
@@ -293,14 +290,10 @@ export function SettingsMcpCatalog() {
         </>
       )}
 
-      <CatalogEntryDrawer
-        open={drawerOpen}
-        onClose={closeDrawer}
-        onSaved={() => {
-          closeDrawer();
-          void refresh();
-        }}
-        editing={editing}
+      <CatalogCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onSaved={() => void refresh()}
       />
     </div>
   );

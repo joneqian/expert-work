@@ -24,6 +24,7 @@ import { SettingsTenantQuotas } from "./pages/SettingsTenantQuotas";
 import { SettingsTenants } from "./pages/SettingsTenants";
 import { SettingsMcpServers } from "./pages/SettingsMcpServers";
 import { SettingsMcpCatalog } from "./pages/SettingsMcpCatalog";
+import { McpCatalogDetail } from "./pages/McpCatalogDetail";
 import { SettingsMcpOAuth } from "./pages/SettingsMcpOAuth";
 import { McpOAuthCallback } from "./pages/McpOAuthCallback";
 import { SettingsPlatformSkills } from "./pages/SettingsPlatformSkills";
@@ -88,6 +89,10 @@ export function AppRouter() {
         element={<SettingsPlatformUsers />}
       />
       <Route path="/settings/mcp-catalog" element={<SettingsMcpCatalog />} />
+      <Route
+        path="/settings/mcp-catalog/:catalogId"
+        element={<McpCatalogDetail />}
+      />
       <Route
         path="/settings/platform-skills"
         element={<SettingsPlatformSkills />}
