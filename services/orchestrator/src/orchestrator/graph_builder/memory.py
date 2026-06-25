@@ -136,7 +136,7 @@ def _clamp_score(value: object) -> float:
         score = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return 0.5
-    if score != score:  # NaN
+    if math.isnan(score):
         return 0.5
     return min(1.0, max(0.0, score))
 
