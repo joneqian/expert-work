@@ -44,6 +44,11 @@ from control_plane.api._user_scope import (
     resolve_caller_user_id,
 )
 from control_plane.audit import emit
+from control_plane.prompt_render import (
+    PromptRenderError,
+    render_system_prompt,
+    validate_prompt_inputs,
+)
 from control_plane.quota.base import QuotaService
 from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
@@ -107,6 +112,23 @@ class RunRequest(BaseModel):
     #: treat fenced content as DATA, never instructions — the root fix for
     #: inline prompt injection. Empty / omitted → today's behaviour.
     untrusted_content: list[str] = Field(default_factory=list, max_length=16)
+    #: Stream Dynamic-Prompt — run-time Jinja variables. Substituted into the
+    #: agent's ``system_prompt`` template (when the agent opts into jinja mode)
+    #: against its declared ``variables``. Keys not declared → 422; declared
+    #: ``required`` keys missing → 422. Empty / omitted → today's behaviour.
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("inputs")
+    @classmethod
+    def _bound_inputs(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if len(value) > 64:
+            msg = "too many input variables (max 64)"
+            raise ValueError(msg)
+        for key, val in value.items():
+            if isinstance(val, str) and len(val) > 8192:
+                msg = f"input '{key}' exceeds 8192 chars"
+                raise ValueError(msg)
+        return value
 
     @field_validator("untrusted_content")
     @classmethod
@@ -266,6 +288,7 @@ def build_run_graph_input(
     input_text: str | None,
     image_refs: list[str],
     untrusted_content: list[str] | None,
+    inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the graph input for a run from a built agent + user input.
 
@@ -274,10 +297,13 @@ def build_run_graph_input(
     executed byte-for-byte the same as a streamed one. ``built.*`` is rebuilt
     by the worker via ``runtime.get_agent`` (like the orphan-sweep respawn);
     only the user input is carried through the persisted ``enqueued_input``.
+
+    Stream Dynamic-Prompt — ``inputs`` carries the run's Jinja variables; the
+    system prompt is rendered here so stream and queue render identically.
     """
     return {
         "messages": [
-            SystemMessage(content=built.system_prompt),
+            SystemMessage(content=render_system_prompt(built, inputs or {})),
             _build_human_message(
                 input_text=input_text,
                 image_refs=image_refs,
@@ -640,6 +666,13 @@ async def spawn_run(
         max_per_run=settings.multimodal_max_images_per_run,
     )
 
+    # Stream Dynamic-Prompt — validate run inputs against the agent's declared
+    # variables BEFORE any side effect (queue mode rejects synchronously too).
+    try:
+        validate_prompt_inputs(built, payload.inputs)
+    except PromptRenderError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
     await emit(
         audit,
         tenant_id=tenant_id,
@@ -648,7 +681,19 @@ async def spawn_run(
         resource_type="session",
         resource_id=str(thread_id),
         trace_id=trace_id,
-        details={"stage": "run.start", "input_len": len(payload.input or "")},
+        details={
+            "stage": "run.start",
+            "input_len": len(payload.input or ""),
+            # Dynamic-Prompt safety net: which declared variables rendered.
+            # Names only — never values — so audit stays free of PII/secrets
+            # (CodeQL clear-text-logging) while staying reproducible from the
+            # template + the caller's own ``inputs``.
+            **(
+                {"prompt_var_names": [v.name for v in built.prompt_variables]}
+                if built.prompt_jinja
+                else {}
+            ),
+        },
         on_behalf_of=on_behalf_of,
     )
 
@@ -666,6 +711,7 @@ async def spawn_run(
                 "input": payload.input,
                 "image_refs": payload.image_refs,
                 "untrusted_content": payload.untrusted_content,
+                "inputs": payload.inputs,
             },
             is_resume=bool(prior_runs),
             trace_id=trace_id,
@@ -690,6 +736,7 @@ async def spawn_run(
         input_text=payload.input,
         image_refs=payload.image_refs,
         untrusted_content=payload.untrusted_content,
+        inputs=payload.inputs,
     )
     configurable: dict[str, Any] = {
         "thread_id": str(thread_id),

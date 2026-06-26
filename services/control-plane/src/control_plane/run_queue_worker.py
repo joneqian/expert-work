@@ -211,6 +211,7 @@ class RunQueueWorker:
                 input_text=payload.get("input"),
                 image_refs=list(payload.get("image_refs") or []),
                 untrusted_content=payload.get("untrusted_content"),
+                inputs=payload.get("inputs") or {},
             )
 
             # Adopt the durable run into THIS instance's registry (no new

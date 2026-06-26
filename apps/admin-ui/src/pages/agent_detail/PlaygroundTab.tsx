@@ -13,18 +13,31 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Space, Tag, Typography } from "antd";
-import { FileText, ImagePlus, Play, RotateCcw, Send, Square, X } from "lucide-react";
+import {
+  FileText,
+  ImagePlus,
+  Play,
+  RotateCcw,
+  Send,
+  Square,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
 import {
   createSession,
   streamRun,
+  type RunRequest,
   type SseEvent,
   type ThreadMeta,
 } from "../../api/sessions";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import type { AgentDetailResponse } from "../../api/agents";
+import {
+  readPromptJinja,
+  readPromptVariables,
+} from "../../components/manifest-editor/form_model";
 
 /** Something attached to the next turn, uploaded ahead of Run. An image
  *  rides as a lightweight ``helix://image/...`` ref (``value``) in
@@ -56,6 +69,16 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const { t } = useTranslation();
   const r = detail.record;
 
+  // Dynamic-Prompt — the agent's declared run-time variables (jinja agents
+  // only). Each gets an input field whose value rides in the run's ``inputs``.
+  const manifestLike = { spec: r.spec };
+  const promptJinja = readPromptJinja(manifestLike);
+  const promptVariables = promptJinja
+    ? readPromptVariables(manifestLike).filter(
+        (v): v is { name: string } & typeof v => Boolean(v.name),
+      )
+    : [];
+
   const [thread, setThread] = useState<ThreadMeta | null>(null);
   const [threadError, setThreadError] = useState<string | null>(null);
   const [creatingThread, setCreatingThread] = useState(false);
@@ -66,6 +89,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [varValues, setVarValues] = useState<Record<string, string>>({});
 
   const abortRef = useRef<AbortController | null>(null);
   const eventListRef = useRef<HTMLDivElement>(null);
@@ -154,24 +178,36 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     setRunning(true);
     setRunError(null);
     setEvents([]);
-    const imageRefs = attachments.filter((a) => a.kind === "image").map((a) => a.value);
-    const docPaths = attachments.filter((a) => a.kind === "document").map((a) => a.value);
+    const imageRefs = attachments
+      .filter((a) => a.kind === "image")
+      .map((a) => a.value);
+    const docPaths = attachments
+      .filter((a) => a.kind === "document")
+      .map((a) => a.value);
     // Surface uploaded document paths to the agent in the prompt so its LLM
     // knows it can read them via the read_document tool (the docs already
     // landed in the workspace; the run message just points at them).
     const docNote =
-      docPaths.length > 0 ? `${t("playground.uploaded_docs_note")}: ${docPaths.join(", ")}\n\n` : "";
+      docPaths.length > 0
+        ? `${t("playground.uploaded_docs_note")}: ${docPaths.join(", ")}\n\n`
+        : "";
     const effectiveInput = docNote + input;
+    // Dynamic-Prompt — send only declared variables that have a value; the
+    // backend validates them against the agent's schema.
+    const inputs: Record<string, string> = {};
+    for (const v of promptVariables) {
+      const val = varValues[v.name];
+      if (val !== undefined && val !== "") inputs[v.name] = val;
+    }
+    const body: RunRequest = { input: effectiveInput };
+    if (imageRefs.length > 0) body.image_refs = imageRefs;
+    if (Object.keys(inputs).length > 0) body.inputs = inputs;
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      for await (const frame of streamRun(
-        thread.thread_id,
-        imageRefs.length > 0
-          ? { input: effectiveInput, image_refs: imageRefs }
-          : { input: effectiveInput },
-        { signal: ac.signal },
-      )) {
+      for await (const frame of streamRun(thread.thread_id, body, {
+        signal: ac.signal,
+      })) {
         setEvents((prev) => [...prev, frame]);
         if (frame.event === "end") break;
       }
@@ -189,7 +225,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setRunning(false);
       abortRef.current = null;
     }
-  }, [thread, input, running, attachments, t]);
+  }, [thread, input, running, attachments, promptVariables, varValues, t]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -217,7 +253,13 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           minHeight: "calc(100vh - 360px)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <Text strong style={{ fontSize: 13 }}>
             {t("playground.session_label")}
           </Text>
@@ -242,8 +284,51 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           />
         ) : (
           <Text type="secondary" style={{ fontSize: 12 }} className="mono">
-            {thread ? `${t("playground.thread_id")}: ${thread.thread_id}` : t("playground.loading_thread")}
+            {thread
+              ? `${t("playground.thread_id")}: ${thread.thread_id}`
+              : t("playground.loading_thread")}
           </Text>
+        )}
+
+        {promptVariables.length > 0 && (
+          <div data-testid="playground-vars" style={{ marginBottom: 8 }}>
+            <Text
+              type="secondary"
+              style={{ fontSize: 12, display: "block", marginBottom: 4 }}
+            >
+              {t("playground.prompt_vars_label")}
+            </Text>
+            {promptVariables.map((v) => (
+              <div
+                key={v.name}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 4,
+                }}
+              >
+                <Text style={{ width: 140, fontSize: 12 }} className="mono">
+                  {v.name}
+                  {v.required !== false ? " *" : ""}
+                </Text>
+                <Input
+                  size="small"
+                  value={varValues[v.name] ?? ""}
+                  placeholder={v.description ?? v.name}
+                  aria-label={`${t("playground.prompt_vars_label")}: ${v.name}`}
+                  data-testid={`playground-var-${v.name}`}
+                  disabled={running || !thread}
+                  onChange={(e) =>
+                    setVarValues((prev) => ({
+                      ...prev,
+                      [v.name]: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
         )}
 
         <TextArea
@@ -290,7 +375,14 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             <Text type="secondary" style={{ fontSize: 12 }}>
               {t("playground.attachments_label")}
             </Text>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+                marginTop: 6,
+              }}
+            >
               {attachments.map((a) => (
                 <Tag
                   key={a.id}
@@ -300,7 +392,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                     handleRemoveAttachment(a.id);
                   }}
                   closeIcon={
-                    <X size={11} strokeWidth={1.75} aria-label={t("playground.remove_attachment")} />
+                    <X
+                      size={11}
+                      strokeWidth={1.75}
+                      aria-label={t("playground.remove_attachment")}
+                    />
                   }
                   bordered={false}
                   data-testid="playground-attachment"
@@ -315,7 +411,13 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         <Space size={8}>
           <Button
             type="primary"
-            icon={running ? <Play size={14} strokeWidth={1.75} /> : <Send size={14} strokeWidth={1.75} />}
+            icon={
+              running ? (
+                <Play size={14} strokeWidth={1.75} />
+              ) : (
+                <Send size={14} strokeWidth={1.75} />
+              )
+            }
             onClick={handleRun}
             loading={running}
             disabled={!thread || (!running && input.trim().length === 0)}
@@ -330,7 +432,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             disabled={!thread || running}
             data-testid="playground-attach"
           >
-            {uploading ? t("playground.uploading") : t("playground.attach_image")}
+            {uploading
+              ? t("playground.uploading")
+              : t("playground.attach_image")}
           </Button>
           <Button
             icon={<FileText size={14} strokeWidth={1.75} />}
@@ -339,7 +443,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             disabled={!thread || running}
             data-testid="playground-attach-doc"
           >
-            {uploading ? t("playground.uploading") : t("playground.attach_document")}
+            {uploading
+              ? t("playground.uploading")
+              : t("playground.attach_document")}
           </Button>
           {running && (
             <Button
@@ -379,7 +485,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             {t("playground.event_log")}
           </Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {events.length === 0 ? "" : t("playground.event_count", { n: events.length })}
+            {events.length === 0
+              ? ""
+              : t("playground.event_count", { n: events.length })}
           </Text>
         </div>
 

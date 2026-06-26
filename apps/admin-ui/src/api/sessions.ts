@@ -36,8 +36,13 @@ export interface CreateSessionRequest {
   agent_version: string;
 }
 
-export async function createSession(payload: CreateSessionRequest): Promise<ThreadMeta> {
-  const response = await apiClient.post<ApiEnvelope<ThreadMeta>>("/v1/sessions", payload);
+export async function createSession(
+  payload: CreateSessionRequest,
+): Promise<ThreadMeta> {
+  const response = await apiClient.post<ApiEnvelope<ThreadMeta>>(
+    "/v1/sessions",
+    payload,
+  );
   return unwrap(response.data);
 }
 
@@ -50,6 +55,10 @@ export interface RunRequest {
    *  instruction embedded in it is treated as data — the root fix for
    *  inline prompt injection. Omitted → today's behaviour. */
   untrusted_content?: string[];
+  /** Dynamic-Prompt — run-time Jinja variables substituted into the agent's
+   *  ``system_prompt`` template (when it opts into jinja mode), validated
+   *  against the agent's declared ``variables``. Omitted → no substitution. */
+  inputs?: Record<string, string>;
 }
 
 /** A single SSE frame as parsed from the network stream. ``data`` is
@@ -88,7 +97,9 @@ export async function* streamRun(
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
     try {
-      const body = (await response.json()) as { detail?: { code?: string; message?: string } };
+      const body = (await response.json()) as {
+        detail?: { code?: string; message?: string };
+      };
       const code = body.detail?.code ?? `HTTP_${response.status}`;
       const message = body.detail?.message ?? detail;
       detail = `${code}: ${message}`;

@@ -157,7 +157,13 @@ describe("PlaygroundTab", () => {
     uploadImageMock.mockResolvedValue("helix://image/img-1.png");
     streamRunMock.mockReturnValue(
       makeStream([
-        { id: "1", event: "end", data: "ok", rawData: "ok", receivedAt: "2026-05-25T00:00:03Z" },
+        {
+          id: "1",
+          event: "end",
+          data: "ok",
+          rawData: "ok",
+          receivedAt: "2026-05-25T00:00:03Z",
+        },
       ]),
     );
     render(<PlaygroundTab detail={sampleDetail} />);
@@ -166,7 +172,9 @@ describe("PlaygroundTab", () => {
     const file = new File(["\x89PNG"], "shot.png", { type: "image/png" });
     await user.upload(screen.getByTestId("playground-file-input"), file);
 
-    expect(await screen.findByTestId("playground-attachment")).toHaveTextContent("shot.png");
+    expect(
+      await screen.findByTestId("playground-attachment"),
+    ).toHaveTextContent("shot.png");
     expect(uploadImageMock).toHaveBeenCalledWith(sampleThread.thread_id, file);
 
     await user.type(screen.getByTestId("playground-input"), "describe this");
@@ -179,7 +187,9 @@ describe("PlaygroundTab", () => {
       expect.objectContaining({ signal: expect.anything() }),
     );
     // The turn consumed the attachment — chip is cleared afterward.
-    expect(screen.queryByTestId("playground-attachment")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("playground-attachment"),
+    ).not.toBeInTheDocument();
   });
 
   it("uploads a document and surfaces its workspace path in the run prompt", async () => {
@@ -188,17 +198,30 @@ describe("PlaygroundTab", () => {
     uploadDocumentMock.mockResolvedValue("uploads/report.pdf");
     streamRunMock.mockReturnValue(
       makeStream([
-        { id: "1", event: "end", data: "ok", rawData: "ok", receivedAt: "2026-05-25T00:00:03Z" },
+        {
+          id: "1",
+          event: "end",
+          data: "ok",
+          rawData: "ok",
+          receivedAt: "2026-05-25T00:00:03Z",
+        },
       ]),
     );
     render(<PlaygroundTab detail={sampleDetail} />);
     await screen.findByText(/33333333-3333-3333/);
 
-    const file = new File(["%PDF-1.4"], "report.pdf", { type: "application/pdf" });
+    const file = new File(["%PDF-1.4"], "report.pdf", {
+      type: "application/pdf",
+    });
     await user.upload(screen.getByTestId("playground-doc-input"), file);
 
-    expect(await screen.findByTestId("playground-attachment")).toHaveTextContent("report.pdf");
-    expect(uploadDocumentMock).toHaveBeenCalledWith(sampleThread.thread_id, file);
+    expect(
+      await screen.findByTestId("playground-attachment"),
+    ).toHaveTextContent("report.pdf");
+    expect(uploadDocumentMock).toHaveBeenCalledWith(
+      sampleThread.thread_id,
+      file,
+    );
 
     await user.type(screen.getByTestId("playground-input"), "summarize it");
     await user.click(screen.getByTestId("playground-run"));
@@ -211,10 +234,53 @@ describe("PlaygroundTab", () => {
     expect((body as { image_refs?: unknown }).image_refs).toBeUndefined();
   });
 
+  it("renders declared prompt variables and sends their values as inputs", async () => {
+    const user = userEvent.setup();
+    const jinjaDetail: AgentDetailResponse = {
+      record: {
+        ...sampleDetail.record,
+        spec: {
+          system_prompt: {
+            template: "你是 {{ persona }}",
+            jinja: true,
+            variables: [{ name: "persona", trusted: true, required: true }],
+          },
+        },
+      },
+    };
+    createSessionMock.mockResolvedValue(sampleThread);
+    streamRunMock.mockReturnValue(
+      makeStream([
+        {
+          id: "1",
+          event: "end",
+          data: "ok",
+          rawData: "ok",
+          receivedAt: "2026-05-25T00:00:03Z",
+        },
+      ]),
+    );
+    render(<PlaygroundTab detail={jinjaDetail} />);
+    await screen.findByText(/33333333-3333-3333/);
+
+    await user.type(screen.getByTestId("playground-var-persona"), "顾问");
+    await user.type(screen.getByTestId("playground-input"), "go");
+    await user.click(screen.getByTestId("playground-run"));
+    await screen.findByTestId("playground-event-end");
+
+    expect(streamRunMock).toHaveBeenCalledWith(
+      sampleThread.thread_id,
+      { input: "go", inputs: { persona: "顾问" } },
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+  });
+
   it("shows an upload-error alert and keeps Run usable when upload fails", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);
-    uploadImageMock.mockRejectedValue(new ApiError("too big", "IMAGE_TOO_LARGE", 413));
+    uploadImageMock.mockRejectedValue(
+      new ApiError("too big", "IMAGE_TOO_LARGE", 413),
+    );
     render(<PlaygroundTab detail={sampleDetail} />);
     await screen.findByText(/33333333-3333-3333/);
 
@@ -223,7 +289,9 @@ describe("PlaygroundTab", () => {
 
     const alert = await screen.findByTestId("playground-upload-error");
     expect(alert).toHaveTextContent("IMAGE_TOO_LARGE");
-    expect(screen.queryByTestId("playground-attachment")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("playground-attachment"),
+    ).not.toBeInTheDocument();
   });
 
   it("removes an attachment when its tag is closed", async () => {
@@ -238,6 +306,8 @@ describe("PlaygroundTab", () => {
     await screen.findByTestId("playground-attachment");
 
     await user.click(screen.getByLabelText("Remove attachment"));
-    expect(screen.queryByTestId("playground-attachment")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("playground-attachment"),
+    ).not.toBeInTheDocument();
   });
 });

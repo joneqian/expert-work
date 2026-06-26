@@ -754,3 +754,66 @@ def test_context_compression_trim_caps_default_none() -> None:
     cc = AgentSpec.model_validate(doc).spec.policies.context_compression
     assert cc.max_tokens == 9000
     assert cc.max_turns is None
+
+
+# ---------------------------------------------------------------------------
+# system_prompt — Jinja mode + declared variables (Dynamic-Prompt)
+# ---------------------------------------------------------------------------
+
+
+def test_system_prompt_jinja_defaults_off() -> None:
+    sp = AgentSpec.model_validate(_MINIMAL).spec.system_prompt
+    assert sp.jinja is False
+    assert sp.variables == []
+
+
+def test_system_prompt_jinja_with_variables_validates() -> None:
+    doc = _doc()
+    doc["spec"]["system_prompt"] = {
+        "template": "你是 {{ persona }},画像:{{ profile }}",
+        "jinja": True,
+        "variables": [
+            {"name": "persona"},
+            {"name": "profile", "trusted": False, "required": False},
+        ],
+    }
+    sp = AgentSpec.model_validate(doc).spec.system_prompt
+    assert sp.jinja is True
+    assert sp.variables[0].name == "persona"
+    assert sp.variables[0].trusted is True  # owner default
+    assert sp.variables[0].required is True
+    assert sp.variables[1].trusted is False
+    assert sp.variables[1].required is False
+
+
+def test_variables_without_jinja_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["system_prompt"] = {
+        "template": "hi {{ x }}",
+        "jinja": False,
+        "variables": [{"name": "x"}],
+    }
+    with pytest.raises(ValidationError, match="jinja mode is off"):
+        AgentSpec.model_validate(doc)
+
+
+def test_duplicate_variable_names_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["system_prompt"] = {
+        "template": "{{ x }}",
+        "jinja": True,
+        "variables": [{"name": "x"}, {"name": "x"}],
+    }
+    with pytest.raises(ValidationError, match="duplicate names"):
+        AgentSpec.model_validate(doc)
+
+
+def test_invalid_variable_identifier_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["system_prompt"] = {
+        "template": "{{ x }}",
+        "jinja": True,
+        "variables": [{"name": "2bad-name"}],
+    }
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)

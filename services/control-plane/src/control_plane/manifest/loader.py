@@ -38,6 +38,29 @@ from helix_agent.protocol import AgentSpec
 DEFAULT_MAX_SIZE_BYTES = 64 * 1024
 
 
+def build_sandboxed_environment() -> SandboxedEnvironment:
+    """The one SSTI-safe Jinja2 environment used for all user-supplied
+    templates (manifest load + run-time system_prompt render).
+
+    ``SandboxedEnvironment`` blocks the ``__class__.__mro__`` /
+    ``__subclasses__`` introspection chain that turns ordinary Jinja2
+    templates into a Python RCE primitive — required because the template
+    source is user-supplied (CodeQL's py/template-injection rule).
+
+    The template is YAML / plain text, not HTML. ``select_autoescape``
+    with an empty enabled-extensions list (and ``default_for_string=False``)
+    is jinja2's canonical "opt out explicitly" pattern; CodeQL's
+    py/jinja2-autoescape-false flags the literal ``False`` but accepts this
+    callable as evidence the choice was deliberate. ``StrictUndefined``
+    surfaces a typo as an error rather than a silent empty string.
+    """
+    return SandboxedEnvironment(
+        undefined=StrictUndefined,
+        autoescape=select_autoescape(enabled_extensions=(), default_for_string=False),
+        keep_trailing_newline=True,
+    )
+
+
 class ManifestLoader:
     """Reusable loader that the FastAPI handler holds on app.state."""
 
@@ -80,22 +103,7 @@ class ManifestLoader:
     # ----- internals --------------------------------------------------
 
     def _render(self, source: str, vars_: Mapping[str, Any]) -> str:
-        # Manifest is YAML, not HTML. ``select_autoescape`` with an
-        # empty enabled-extensions list (and ``default_for_string=False``)
-        # is jinja2's canonical "opt out explicitly" pattern; CodeQL's
-        # py/jinja2-autoescape-false flags the literal ``False`` but
-        # accepts this callable as evidence the choice was deliberate.
-        #
-        # ``SandboxedEnvironment`` blocks the ``__class__.__mro__`` /
-        # ``__subclasses__`` introspection chain that turns ordinary
-        # Jinja2 templates into a Python RCE primitive — required
-        # because the template source is user-supplied (CodeQL's
-        # py/template-injection rule).
-        env = SandboxedEnvironment(
-            undefined=StrictUndefined,
-            autoescape=select_autoescape(enabled_extensions=(), default_for_string=False),
-            keep_trailing_newline=True,
-        )
+        env = build_sandboxed_environment()
         try:
             template = env.from_string(source)
             return template.render(**vars_)

@@ -173,10 +173,53 @@ class ModelSpec(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class PromptVariableSpec(BaseModel):
+    """One declared Jinja variable for run-time ``system_prompt`` rendering.
+
+    The declared set is the contract: a run's ``inputs`` may only carry
+    these names, and (when ``required``) must provide them. ``trusted``
+    decides whether the value renders verbatim or is spotlight-fenced as
+    DATA before substitution — default ``True`` is an owner-set posture
+    (see ``docs/design/jinja-dynamic-prompt.md`` §4).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Must be a valid Jinja identifier so ``{{ name }}`` resolves.
+    name: str = Field(min_length=1, pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    #: ``True`` (default) → value rendered verbatim into the prompt.
+    #: ``False`` → value is spotlight-fenced (datamark + nonce) as DATA
+    #: before substitution, so the model never treats it as instructions.
+    trusted: bool = True
+    #: ``True`` (default) → a run missing this input is rejected (422).
+    #: ``False`` → a missing input renders as the empty string.
+    required: bool = True
+    description: str | None = None
+
+
 class SystemPromptSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     template: str = Field(min_length=1)
+    #: Stream Dynamic-Prompt — opt-in Jinja mode. ``False`` (default, every
+    #: existing agent) renders nothing: the prompt is byte-identical to the
+    #: stored template, prompt cache intact. ``True`` treats ``template`` as
+    #: a Jinja template rendered per-run with the request's ``inputs``.
+    jinja: bool = False
+    #: Declared run-time variables (the contract ``inputs`` is validated
+    #: against). Only meaningful when ``jinja`` is on.
+    variables: list[PromptVariableSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _variables_require_jinja(self) -> SystemPromptSpec:
+        if self.variables and not self.jinja:
+            msg = "system_prompt.variables declared but jinja mode is off"
+            raise ValueError(msg)
+        names = [v.name for v in self.variables]
+        if len(names) != len(set(names)):
+            msg = "system_prompt.variables has duplicate names"
+            raise ValueError(msg)
+        return self
 
 
 class CustomReminderSpec(BaseModel):

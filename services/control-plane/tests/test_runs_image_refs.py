@@ -235,3 +235,78 @@ def test_run_request_untrusted_content_too_many_blocks_rejected() -> None:
 
 def test_run_request_untrusted_content_defaults_empty() -> None:
     assert RunRequest(input="hi").untrusted_content == []
+
+
+# ---------------------------------------------------------------------------
+# Dynamic-Prompt — RunRequest.inputs + build_run_graph_input rendering
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from control_plane.api.runs import build_run_graph_input  # noqa: E402
+from helix_agent.protocol import PromptVariableSpec  # noqa: E402
+
+
+def test_run_request_inputs_defaults_empty() -> None:
+    assert RunRequest().inputs == {}
+
+
+def test_run_request_inputs_rejects_oversize_value() -> None:
+    with pytest.raises(ValidationError, match="exceeds 8192"):
+        RunRequest(inputs={"x": "y" * 8193})
+
+
+def test_run_request_inputs_rejects_too_many_keys() -> None:
+    with pytest.raises(ValidationError, match="too many input variables"):
+        RunRequest(inputs={f"k{i}": "v" for i in range(65)})
+
+
+def _jinja_built(
+    base: str, variables, *, suffix: str = "", nonce: str | None = "NONCE"
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        system_prompt=base + suffix,
+        prompt_jinja=True,
+        prompt_variables=tuple(variables),
+        prompt_base=base,
+        prompt_suffix=suffix,
+        spotlight_nonce=nonce,
+        supports_vision=False,
+        max_steps=5,
+    )
+
+
+def test_build_graph_input_renders_system_message() -> None:
+    built = _jinja_built(
+        "你是 {{ persona }}",
+        (PromptVariableSpec(name="persona"),),
+        suffix="\n\n# platform suffix {{ keep_literal }}",
+    )
+    gi = build_run_graph_input(
+        built,
+        input_text="hi",
+        image_refs=[],
+        untrusted_content=None,
+        inputs={"persona": "顾问"},
+    )
+    sys_msg = gi["messages"][0].content
+    assert "你是 顾问" in sys_msg
+    # Platform suffix is appended verbatim — its literal {{ }} is untouched.
+    assert "{{ keep_literal }}" in sys_msg
+
+
+def test_build_graph_input_non_jinja_unchanged() -> None:
+    built = SimpleNamespace(
+        system_prompt="static prompt {{ x }}",
+        prompt_jinja=False,
+        prompt_variables=(),
+        prompt_base="",
+        prompt_suffix="",
+        spotlight_nonce=None,
+        supports_vision=False,
+        max_steps=5,
+    )
+    gi = build_run_graph_input(
+        built, input_text="hi", image_refs=[], untrusted_content=None, inputs={}
+    )
+    assert gi["messages"][0].content == "static prompt {{ x }}"

@@ -54,6 +54,7 @@ from helix_agent.protocol import (
     AgentSpec,
     BuiltinToolSpec,
     ModelSpec,
+    PromptVariableSpec,
     Skill,
     SkillVersion,
     parse_agent_ref,
@@ -172,6 +173,16 @@ class BuiltAgent:
     #: ``untrusted_content`` seed input with the matching marker, so inline
     #: data shares one provenance fence with the model-side channels.
     spotlight_nonce: str | None = None
+    #: Stream Dynamic-Prompt — opt-in run-time Jinja rendering of the system
+    #: prompt. ``prompt_jinja`` off (default) → the control-plane uses
+    #: ``system_prompt`` verbatim (byte-identical, cache intact). On → it
+    #: renders ``prompt_base`` (the human-authored template) with the run's
+    #: ``inputs`` against ``prompt_variables`` and appends ``prompt_suffix``
+    #: (the platform-computed spotlight/skill/memory blocks) unrendered.
+    prompt_jinja: bool = False
+    prompt_variables: tuple[PromptVariableSpec, ...] = ()
+    prompt_base: str = ""
+    prompt_suffix: str = ""
 
 
 def _tool_replay_safe(registry: ToolRegistry) -> Callable[[str], bool]:
@@ -741,6 +752,7 @@ async def build_agent(
         tool_disclosure=_resolved_tool_disclosure(spec.spec.model),
     )
     compiled = GraphRunner(checkpointer=checkpointer).compile(graph)
+    base_prompt = spec.spec.system_prompt.template
     return BuiltAgent(
         graph=compiled,
         system_prompt=final_system_prompt,
@@ -754,6 +766,15 @@ async def build_agent(
         # Stream PI-1c — expose the build nonce so the control-plane seed
         # assembler can fence structured untrusted_content with it.
         spotlight_nonce=spotlight_nonce,
+        # Stream Dynamic-Prompt — run-time Jinja render inputs. ``prompt_base``
+        # is the human-authored template (only this is rendered); the
+        # platform-computed suffix is everything ``_assemble_system_prompt``
+        # appended after the base (``pieces[0] == base``), re-appended
+        # verbatim after the render. Both empty/identity when jinja is off.
+        prompt_jinja=spec.spec.system_prompt.jinja,
+        prompt_variables=tuple(spec.spec.system_prompt.variables),
+        prompt_base=base_prompt,
+        prompt_suffix=final_system_prompt[len(base_prompt) :],
     )
 
 
