@@ -153,20 +153,26 @@ export function FormView({
             onChange={(e) => onChange(setName(formData, e.target.value))}
           />
         </div>
-        <div style={FIELD} data-testid="af-description">
-          <label style={LABEL}>
-            {t("agent_form.field_description")}
-            <FieldHelp
-              text={t("agent_form.field_description_help")}
-              testId="af-description"
+        {/* When folded into another tab (``bare``) the description is dropped —
+            that tab carries its own description field (no duplicate). */}
+        {!bare && (
+          <div style={FIELD} data-testid="af-description">
+            <label style={LABEL}>
+              {t("agent_form.field_description")}
+              <FieldHelp
+                text={t("agent_form.field_description_help")}
+                testId="af-description"
+              />
+            </label>
+            <Input
+              value={readDescription(formData)}
+              aria-label={t("agent_form.field_description")}
+              onChange={(e) =>
+                onChange(setDescription(formData, e.target.value))
+              }
             />
-          </label>
-          <Input
-            value={readDescription(formData)}
-            aria-label={t("agent_form.field_description")}
-            onChange={(e) => onChange(setDescription(formData, e.target.value))}
-          />
-        </div>
+          </div>
+        )}
       </section>
     ),
 

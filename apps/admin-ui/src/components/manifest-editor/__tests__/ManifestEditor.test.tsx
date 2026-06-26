@@ -150,6 +150,9 @@ describe("ManifestEditor", () => {
     // content and the manifest's basic section.
     await screen.findByTestId("meta-form");
     expect(screen.getByTestId("af-basic")).toBeInTheDocument();
+    // ``bare`` drops the manifest description so it doesn't duplicate the
+    // leading tab's own description field.
+    expect(screen.queryByTestId("af-description")).not.toBeInTheDocument();
     // "basic" is no longer a standalone tab; the leading "meta" tab replaces it.
     expect(screen.getByTestId("manifest-tab-meta")).toBeInTheDocument();
     expect(screen.queryByTestId("manifest-tab-basic")).not.toBeInTheDocument();
