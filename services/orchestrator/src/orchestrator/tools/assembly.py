@@ -50,6 +50,7 @@ from orchestrator.tools.http import AllowlistProvider, HTTPTool
 from orchestrator.tools.knowledge import KnowledgeRetriever, KnowledgeSearchTool
 from orchestrator.tools.locks import NullWorkspaceLock, WorkspaceLock
 from orchestrator.tools.mcp import MCPServerPool, register_mcp_tools
+from orchestrator.tools.read_document import ReadDocumentTool
 from orchestrator.tools.registry import ToolRegistry
 from orchestrator.tools.sandbox import ExecPythonTool, SupervisorClient
 from orchestrator.tools.skill_authoring import SKILL_AUTHORING_BUILTINS
@@ -78,6 +79,7 @@ KNOWN_BUILTINS = frozenset(
         "write_file",
         "edit_file",
         "list_dir",
+        "read_document",
         "save_artifact",
         "list_artifacts",
         "ask_for_approval",
@@ -458,6 +460,8 @@ def _register_builtin(
         _register_bash(registry, env, skill_seed_files)
     elif entry.name in ("read_file", "write_file", "edit_file", "list_dir"):
         _register_file_op(registry, entry.name, env, skill_seed_files)
+    elif entry.name == "read_document":
+        _register_read_document(registry, env, skill_seed_files)
     elif entry.name == "save_artifact":
         registry.register(SaveArtifactTool(store=_require_artifact_store(env, "save_artifact")))
     elif entry.name == "list_artifacts":
@@ -488,6 +492,7 @@ BASE_CAPABILITY_BUILTINS: tuple[str, ...] = (
     "write_file",
     "edit_file",
     "list_dir",
+    "read_document",
     "save_artifact",
     "list_artifacts",
 )
@@ -613,6 +618,26 @@ def _register_file_op(
                 skill_seed_files=skill_seed_files,
             )
         )
+
+
+def _register_read_document(
+    registry: ToolRegistry,
+    env: ToolEnv,
+    skill_seed_files: tuple[tuple[str, bytes], ...],
+) -> None:
+    # read_document rides the same warm Sandbox Supervisor exec channel as the
+    # TE-7 file primitives — the parse runs inside the per-user sandbox.
+    if env.supervisor_client is None:
+        raise AgentFactoryError(
+            "builtin 'read_document' declared but no Sandbox Supervisor client "
+            "is configured (ToolEnv.supervisor_client)"
+        )
+    registry.register(
+        ReadDocumentTool(
+            client=env.supervisor_client,
+            skill_seed_files=skill_seed_files,
+        )
+    )
 
 
 def _require_artifact_store(env: ToolEnv, tool_name: str) -> ArtifactStore:

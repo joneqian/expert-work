@@ -120,6 +120,9 @@ from orchestrator.tools.mcp import (
 from orchestrator.tools.mcp import (
     register_mcp_tools as register_mcp_tools,
 )
+from orchestrator.tools.read_document import (
+    ReadDocumentTool as ReadDocumentTool,
+)
 from orchestrator.tools.registry import (
     Tool as Tool,
 )
@@ -227,6 +230,7 @@ __all__ = [
     "MCPTool",
     "MCPToolDef",
     "NullWorkspaceLock",
+    "ReadDocumentTool",
     "ReadFileTool",
     "RecordingMCPClient",
     "RecordingSupervisorClient",

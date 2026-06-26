@@ -35,6 +35,7 @@ from orchestrator.tools import (
     ListDirTool,
     MCPServerPool,
     MCPToolDef,
+    ReadDocumentTool,
     ReadFileTool,
     RecordingMCPClient,
     RecordingSupervisorClient,
@@ -740,7 +741,15 @@ async def test_file_op_without_supervisor_raises() -> None:
 # of a tool). See docs/design/agent-base-capabilities-and-form.md.
 # ---------------------------------------------------------------------------
 
-_BASE_SANDBOX_TOOLS = ("exec_python", "bash", "read_file", "write_file", "edit_file", "list_dir")
+_BASE_SANDBOX_TOOLS = (
+    "exec_python",
+    "bash",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "list_dir",
+    "read_document",
+)
 _BASE_ARTIFACT_TOOLS = ("save_artifact", "list_artifacts")
 
 
@@ -763,6 +772,7 @@ async def test_base_capabilities_assembled_with_no_manifest_tools() -> None:
     assert isinstance(registry.get("write_file"), WriteFileTool)
     assert isinstance(registry.get("edit_file"), EditFileTool)
     assert isinstance(registry.get("list_dir"), ListDirTool)
+    assert isinstance(registry.get("read_document"), ReadDocumentTool)
     assert isinstance(registry.get("save_artifact"), SaveArtifactTool)
     assert isinstance(registry.get("list_artifacts"), ListArtifactsTool)
 
