@@ -341,6 +341,8 @@ export interface TranslationKeys {
     mcp_selected_count: string;
     mcp_choose_tools: string;
     mcp_done: string;
+    mcp_all_tools: string;
+    mcp_tools_count: string;
     mcp_servers_hint: string;
     mcp_no_servers_available: string;
     mcp_no_servers_catalog: string;
@@ -2204,6 +2206,8 @@ const en: TranslationKeys = {
     mcp_selected_count: "{{count}} selected",
     mcp_choose_tools: "Choose tools",
     mcp_done: "Done",
+    mcp_all_tools: "All tools",
+    mcp_tools_count: "{{count}} tools selected",
     mcp_servers_hint: "Leave all unchecked to allow every available server",
     mcp_no_servers_available:
       "No MCP servers available yet. Enable one under Settings → MCP Servers → Add → enable from the catalog.",

@@ -192,11 +192,8 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   // Check the github server (= enable MCP with github selected).
   await page.getByTestId("af-mcp-server-github").click();
 
-  // Switch the tool scope to "specific" — opens the tool-selection sub-modal.
-  await page
-    .getByTestId("af-mcp-scope-github")
-    .getByText(/指定|Specific/)
-    .click();
+  // Click the gear to open the tool-selection sub-modal.
+  await page.getByTestId("af-mcp-choose-github").click();
 
   // In the sub-modal: wait for + check the create_issue tool, then close it.
   await expect(page.getByTestId("af-mcp-tool-create_issue")).toBeVisible();

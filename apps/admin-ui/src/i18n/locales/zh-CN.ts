@@ -349,6 +349,8 @@ const zhCN: TranslationKeys = {
     mcp_selected_count: "已选 {{count}}",
     mcp_choose_tools: "选择工具",
     mcp_done: "完成",
+    mcp_all_tools: "全部工具",
+    mcp_tools_count: "已选择工具 {{count}} 个",
     mcp_servers_hint: "全不选 = 允许所有可用 server",
     mcp_no_servers_available:
       "暂无可用 MCP 服务器。到 设置 → MCP 服务器 → 添加 → 从目录启用",

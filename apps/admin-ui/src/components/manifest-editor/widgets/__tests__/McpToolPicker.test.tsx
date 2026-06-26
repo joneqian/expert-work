@@ -108,7 +108,7 @@ describe("McpToolPicker", () => {
     expect(screen.queryByTestId("af-tool-mcp")).not.toBeInTheDocument();
   });
 
-  it("a checked server defaults to 'all tools'; switching to 'specific' reveals the tool list", async () => {
+  it("a checked server shows 'all tools' + a gear; the gear opens the tool modal", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     availableMock.mockResolvedValue([
@@ -125,14 +125,16 @@ describe("McpToolPicker", () => {
         onChange={onChange}
       />,
     );
-    // Scope control present; tool list hidden under "all".
-    const scope = await screen.findByTestId("af-mcp-scope-amap-maps");
-    expect(scope).toBeInTheDocument();
+    // No selection → "all tools" summary; gear present; modal closed.
+    expect(
+      await screen.findByTestId("af-mcp-choose-amap-maps"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/全部工具|All tools/)).toBeInTheDocument();
     expect(
       screen.queryByTestId("af-mcp-tools-amap-maps"),
     ).not.toBeInTheDocument();
-    // Switch to "specific" → tools load + show. (i18n may be en or zh.)
-    await user.click(screen.getByText(/指定工具|Specific/));
+    // Click the gear → modal opens with the tool list.
+    await user.click(screen.getByTestId("af-mcp-choose-amap-maps"));
     expect(
       await screen.findByTestId("af-mcp-tool-maps_geo"),
     ).toBeInTheDocument();

@@ -19,13 +19,13 @@ import {
   Checkbox,
   Input,
   Modal,
-  Segmented,
   Space,
   Spin,
   Tag,
   Tooltip,
   Typography,
 } from "antd";
+import { Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -77,9 +77,6 @@ export function McpToolPicker({
   const [toolStates, setToolStates] = useState<Record<string, ToolState>>({});
   const [serverQuery, setServerQuery] = useState("");
   const [toolQuery, setToolQuery] = useState<Record<string, string>>({});
-  const [scopeOverride, setScopeOverride] = useState<
-    Record<string, "all" | "specific">
-  >({});
   // The server whose tool-selection sub-modal is open (null = closed).
   const [modalServer, setModalServer] = useState<ServerRow | null>(null);
 
@@ -173,14 +170,6 @@ export function McpToolPicker({
     return st?.kind === "loaded" ? st.tools.map((x) => x.name) : [];
   };
 
-  // The tool scope for a server: explicit override, else derived — if any of
-  // the server's loaded tools are in allow_tools it's "specific", else "all".
-  const scopeOf = (name: string): "all" | "specific" => {
-    if (scopeOverride[name]) return scopeOverride[name];
-    const names = new Set(toolNamesOf(name));
-    return allowTools.some((a) => names.has(a)) ? "specific" : "all";
-  };
-
   // ── Mutations (always one combined onChange) ─────────────────────────────
   const toggleServer = (row: ServerRow, on: boolean): void => {
     if (on) {
@@ -192,22 +181,6 @@ export function McpToolPicker({
         servers.filter((s) => s !== row.name),
         allowTools.filter((a) => !names.has(a)),
       );
-    }
-  };
-
-  const setScope = (row: ServerRow, value: "all" | "specific"): void => {
-    setScopeOverride((prev) => ({ ...prev, [row.name]: value }));
-    if (value === "all") {
-      const names = new Set(toolNamesOf(row.name));
-      onChange(
-        servers,
-        allowTools.filter((a) => !names.has(a)),
-      );
-    } else {
-      // Switching to "specific" opens the tool-selection sub-modal so the main
-      // panel stays compact (no long inline list).
-      fetchTools(row);
-      setModalServer(row);
     }
   };
 
@@ -302,7 +275,7 @@ export function McpToolPicker({
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {visibleRows.map((row) => {
           const isChecked = checked.has(row.name);
-          const isSpecific = scopeOf(row.name) === "specific";
+          const count = selectedCountOf(row.name);
           return (
             <div key={row.name}>
               <Space size={6} align="center">
@@ -316,52 +289,30 @@ export function McpToolPicker({
                 <Tag color={row.tagColor} style={{ fontSize: 11 }}>
                   {row.tagText}
                 </Tag>
-              </Space>
 
-              {isChecked && (
-                <Space
-                  size={8}
-                  align="center"
-                  style={{ marginLeft: 24, marginTop: 4 }}
-                >
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {t("agent_form.mcp_scope_label")}
-                  </Text>
-                  <Segmented
-                    size="small"
-                    data-testid={`af-mcp-scope-${row.name}`}
-                    value={scopeOf(row.name)}
-                    onChange={(v) => setScope(row, v as "all" | "specific")}
-                    options={[
-                      { label: t("agent_form.mcp_scope_all"), value: "all" },
-                      {
-                        label: t("agent_form.mcp_scope_specific"),
-                        value: "specific",
-                      },
-                    ]}
-                  />
-                  {isSpecific && (
-                    <>
+                {isChecked && (
+                  <>
+                    <Tooltip title={t("agent_form.mcp_choose_tools")}>
                       <Button
-                        type="link"
+                        type="text"
                         size="small"
+                        icon={<Settings size={14} strokeWidth={1.75} />}
                         data-testid={`af-mcp-choose-${row.name}`}
+                        aria-label={t("agent_form.mcp_choose_tools")}
                         onClick={() => {
                           fetchTools(row);
                           setModalServer(row);
                         }}
-                      >
-                        {t("agent_form.mcp_choose_tools")}
-                      </Button>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        {t("agent_form.mcp_selected_count", {
-                          count: selectedCountOf(row.name),
-                        })}
-                      </Text>
-                    </>
-                  )}
-                </Space>
-              )}
+                      />
+                    </Tooltip>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {count === 0
+                        ? t("agent_form.mcp_all_tools")
+                        : t("agent_form.mcp_tools_count", { count })}
+                    </Text>
+                  </>
+                )}
+              </Space>
             </div>
           );
         })}
