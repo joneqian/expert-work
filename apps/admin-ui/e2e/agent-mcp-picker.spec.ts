@@ -124,7 +124,9 @@ test.beforeEach(async ({ page }) => {
 
   // Embedding-status stub — drawer renders the editor only when configured.
   await page.route("**/v1/platform/embedding-config/status", (route) =>
-    route.fulfill({ json: { success: true, data: { configured: true }, error: null } }),
+    route.fulfill({
+      json: { success: true, data: { configured: true }, error: null },
+    }),
   );
 
   // MCP available-servers list.
@@ -175,14 +177,12 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
 
   // Give the agent a name so the manifest is valid enough for the backend stub.
-  const nameInput = page
-    .getByTestId("af-name")
-    .locator("input");
+  const nameInput = page.getByTestId("af-name").locator("input");
   await nameInput.clear();
   await nameInput.fill("mcp-agent");
 
-  // Tools live under the collapsed "Advanced" panel — expand it first.
-  await page.getByTestId("af-advanced").locator(".ant-collapse-header").first().click();
+  // Tools live under the "Tools" tab now (the form is split into tabs).
+  await page.getByTestId("manifest-tab-tools").click();
 
   // Enable the MCP tool checkbox.
   await page.getByTestId("af-tool-mcp").click();
@@ -199,7 +199,11 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   await expect(page.getByTestId("af-mcp-tools-github")).toBeVisible();
 
   // Expand the github tools collapse (click its header).
-  await page.getByTestId("af-mcp-tools-github").locator(".ant-collapse-header").first().click();
+  await page
+    .getByTestId("af-mcp-tools-github")
+    .locator(".ant-collapse-header")
+    .first()
+    .click();
 
   // Wait for create_issue tool checkbox.
   await expect(page.getByTestId("af-mcp-tool-create_issue")).toBeVisible();
@@ -227,12 +231,14 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   expect(yaml).toContain("create_issue");
 });
 
-test("(b) create drawer with MCP picker passes axe (serious + critical)", async ({ page }) => {
+test("(b) create drawer with MCP picker passes axe (serious + critical)", async ({
+  page,
+}) => {
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
 
-  // Tools live under the collapsed "Advanced" panel — expand it first.
-  await page.getByTestId("af-advanced").locator(".ant-collapse-header").first().click();
+  // Tools live under the "Tools" tab now (the form is split into tabs).
+  await page.getByTestId("manifest-tab-tools").click();
 
   // Enable MCP and wait for the picker to load so axe sees the full DOM.
   await page.getByTestId("af-tool-mcp").click();

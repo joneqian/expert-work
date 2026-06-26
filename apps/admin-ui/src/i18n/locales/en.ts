@@ -290,7 +290,13 @@ export interface TranslationKeys {
     save_failed: string;
   };
   manifest_editor: {
-    tab_form: string;
+    tab_basic: string;
+    tab_model: string;
+    tab_prompt: string;
+    tab_tools: string;
+    tab_capabilities: string;
+    tab_memory: string;
+    tab_governance: string;
     tab_yaml: string;
     loading_schema: string;
     schema_load_failed: string;
@@ -320,7 +326,6 @@ export interface TranslationKeys {
     memory_hint: string;
     memory_topk: string;
     section_tools: string;
-    section_advanced: string;
     tool_web_search: string;
     tool_http: string;
     tool_mcp: string;
@@ -2136,7 +2141,13 @@ const en: TranslationKeys = {
     save_failed: "Failed to save manifest",
   },
   manifest_editor: {
-    tab_form: "Form",
+    tab_basic: "Basics",
+    tab_model: "Model",
+    tab_prompt: "Prompt",
+    tab_tools: "Tools",
+    tab_capabilities: "Knowledge & skills",
+    tab_memory: "Memory",
+    tab_governance: "Governance",
     tab_yaml: "YAML",
     loading_schema: "Loading schema…",
     schema_load_failed: "Failed to load the manifest schema",
@@ -2167,7 +2178,6 @@ const en: TranslationKeys = {
     memory_hint: "Remembers across sessions; needs a platform embedding.",
     memory_topk: "Memories recalled per run",
     section_tools: "Tools",
-    section_advanced: "Advanced (memory · reflection · tools)",
     tool_web_search: "Web search",
     tool_http: "HTTP tool",
     tool_mcp: "MCP tools",

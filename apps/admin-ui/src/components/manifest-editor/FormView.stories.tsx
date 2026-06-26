@@ -141,6 +141,7 @@ export const Default: Story = {
   args: {
     formData: BLANK_MANIFEST,
     onChange: () => {},
+    section: "basic",
   },
 };
 
@@ -155,6 +156,7 @@ export const WithMcpPicker: Story = {
   args: {
     formData: MCP_ON_MANIFEST,
     onChange: () => {},
+    section: "tools",
   },
 };
 
@@ -168,5 +170,6 @@ export const WithReflectionEvaluator: Story = {
   args: {
     formData: EVALUATOR_ON_MANIFEST,
     onChange: () => {},
+    section: "model",
   },
 };
