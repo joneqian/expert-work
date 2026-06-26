@@ -222,43 +222,44 @@ export function FormView({
           )}
         </section>
 
-        {/* Stream J.6 Path B — only when the main model can't see images itself:
-          a separate VL model handles image questions via the ask_image tool. */}
-        {readModel(formData).name !== undefined &&
-          !readMainSupportsVision(formData) && (
-            <section data-testid="af-vision" style={SECTION}>
-              <Heading>
-                {t("agent_form.section_vision")}
-                <FieldHelp
-                  text={t("agent_form.section_vision_help")}
-                  testId="af-vision"
-                />
-              </Heading>
-              <Text
-                type="secondary"
-                style={{ display: "block", marginBottom: 12 }}
-              >
-                {t("agent_form.vision_hint")}
-              </Text>
-              <ModelSelect
-                visionOnly
-                value={readVisionModel(formData) ?? {}}
-                catalog={catalog}
-                onChange={(mdl) => onChange(setVisionModel(formData, mdl))}
+        {/* Stream J.6 Path B — shown whenever the main model can't see images
+          itself (including before one is picked); a separate VL model handles
+          image questions via the ask_image tool. Hidden only when the main
+          model is itself vision-capable (no fallback needed). */}
+        {!readMainSupportsVision(formData) && (
+          <section data-testid="af-vision" style={SECTION}>
+            <Heading>
+              {t("agent_form.section_vision")}
+              <FieldHelp
+                text={t("agent_form.section_vision_help")}
+                testId="af-vision"
               />
-              {readVisionOn(formData) && (
-                <Button
-                  type="link"
-                  size="small"
-                  data-testid="af-vision-clear"
-                  style={{ paddingLeft: 0 }}
-                  onClick={() => onChange(setVisionModel(formData, null))}
-                >
-                  {t("agent_form.vision_clear")}
-                </Button>
-              )}
-            </section>
-          )}
+            </Heading>
+            <Text
+              type="secondary"
+              style={{ display: "block", marginBottom: 12 }}
+            >
+              {t("agent_form.vision_hint")}
+            </Text>
+            <ModelSelect
+              visionOnly
+              value={readVisionModel(formData) ?? {}}
+              catalog={catalog}
+              onChange={(mdl) => onChange(setVisionModel(formData, mdl))}
+            />
+            {readVisionOn(formData) && (
+              <Button
+                type="link"
+                size="small"
+                data-testid="af-vision-clear"
+                style={{ paddingLeft: 0 }}
+                onClick={() => onChange(setVisionModel(formData, null))}
+              >
+                {t("agent_form.vision_clear")}
+              </Button>
+            )}
+          </section>
+        )}
       </>
     ),
 
