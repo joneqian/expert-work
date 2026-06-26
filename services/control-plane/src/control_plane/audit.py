@@ -167,6 +167,9 @@ ResourceType = Literal[
     # Stream TE-2 — per-tool-call audit (TOOL_CALL / TOOL_BLOCKED). Mirrors
     # the protocol-side ``ResourceType`` Literal per [memory:audit-literal-drift].
     "tool",
+    # Document upload → workspace (read_document base capability). Mirrors the
+    # protocol-side ``ResourceType`` Literal per [memory:audit-literal-drift].
+    "user_workspace",
 ]
 
 

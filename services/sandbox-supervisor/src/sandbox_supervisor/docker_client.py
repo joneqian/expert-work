@@ -73,6 +73,9 @@ class DockerClient(Protocol):
     ) -> bytes:
         """Read a file from a named volume; return up to ``max_bytes + 1`` bytes."""
 
+    async def write_volume_file(self, *, volume: str, path: str, data: bytes, image: str) -> None:
+        """Write ``data`` to ``path`` in a named volume (document upload)."""
+
     async def measure_volume_size(self, *, volume: str, image: str) -> int:
         """Return the total ``/workspace`` size in bytes for a named volume.
 
@@ -232,6 +235,53 @@ class CliDockerClient:
             msg = f"workspace file read failed for {path!r}: {detail}"
             raise DockerError(msg)
         return stdout
+
+    async def write_volume_file(self, *, volume: str, path: str, data: bytes, image: str) -> None:
+        """Write ``data`` to ``path`` in a docker named volume (document upload).
+
+        Runs a throwaway ``--rm`` container — read-only rootfs, no network,
+        all capabilities dropped — that mounts ``volume`` read-WRITE at
+        ``/ws`` and pipes the bytes from stdin into ``/ws/<path>`` (creating
+        parent dirs). The mounted volume stays writable even under a
+        ``--read-only`` rootfs, so the container can touch nothing but the
+        workspace. ``path`` is the supervisor-validated relative path (no
+        ``..`` / leading ``/``). Raises :class:`DockerError` on non-zero exit.
+
+        ``--entrypoint sh`` overrides the sandbox image's runner so the
+        ``mkdir``/``cat`` script reaches busybox / coreutils.
+        """
+        argv = [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--volume",
+            f"{volume}:/ws",
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            'p="/ws/$0"; mkdir -p "$(dirname "$p")" && cat > "$p"',
+            path,
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate(input=data)
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            msg = f"workspace file write failed for {path!r}: {detail}"
+            raise DockerError(msg)
 
     async def measure_volume_size(self, *, volume: str, image: str) -> int:
         """Measure a named volume's total size in bytes (Stream J.15-补强-1).

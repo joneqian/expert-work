@@ -97,6 +97,11 @@ _MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
 _MAX_SEED_TOTAL_BYTES = 5 * 1024 * 1024
 _MAX_SEED_FILES = 256
 
+#: Document-upload write cap. A user uploads a PDF / office doc into their
+#: workspace; the supervisor re-checks the size at its trust boundary (the
+#: control-plane already bounds it, but the request round-trips untrusted).
+_MAX_WORKSPACE_WRITE_BYTES = 25 * 1024 * 1024
+
 
 def _validate_workspace_path(path: str) -> str:
     """Reject a non-relative or ``..``-bearing workspace path (J.9).
@@ -486,6 +491,34 @@ class SandboxSupervisor:
             msg = f"workspace file {path!r} exceeds the {_MAX_ARTIFACT_BYTES}-byte download cap"
             raise WorkspaceFileTooLargeError(msg)
         return data
+
+    async def write_workspace_file(
+        self, *, tenant_id: UUID, user_id: UUID, path: str, data: bytes
+    ) -> None:
+        """Write ``data`` to ``path`` in a user's persistent workspace volume.
+
+        Backs the document-upload path: a user uploads a file, the control-
+        plane proxies here, and the bytes land in the durable workspace so a
+        later run's ``read_document`` can read them. Validates the path +
+        size at this trust boundary (the request round-trips untrusted).
+        Raises :class:`WorkspaceFileTooLargeError` when over the write cap,
+        :class:`WorkspaceFileNotFoundError` for a bad path, and
+        :class:`SupervisorError` (via :class:`DockerError`) on a write failure.
+        """
+        if len(data) > _MAX_WORKSPACE_WRITE_BYTES:
+            msg = f"upload {path!r} exceeds the {_MAX_WORKSPACE_WRITE_BYTES}-byte write cap"
+            raise WorkspaceFileTooLargeError(msg)
+        safe_path = _validate_workspace_path(path)
+        volume = workspace_volume_name(tenant_id, user_id)
+        try:
+            await self._docker.write_volume_file(
+                volume=volume,
+                path=safe_path,
+                data=data,
+                image=self._settings.sandbox_image,
+            )
+        except DockerError as exc:
+            raise SupervisorError(str(exc)) from exc
 
     # ------------------------------------------------------------------
 

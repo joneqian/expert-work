@@ -54,7 +54,11 @@ from sandbox_supervisor.reaper import SandboxReaper
 from sandbox_supervisor.runner_link import ExecResult, RunnerLinkError
 from sandbox_supervisor.schemas import AcquireRequest, SeedFile
 from sandbox_supervisor.settings import SandboxSupervisorSettings
-from sandbox_supervisor.supervisor import _MAX_ARTIFACT_BYTES, SandboxSupervisor
+from sandbox_supervisor.supervisor import (
+    _MAX_ARTIFACT_BYTES,
+    _MAX_WORKSPACE_WRITE_BYTES,
+    SandboxSupervisor,
+)
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -120,6 +124,8 @@ class RecordingDockerClient:
         self._volume_file = volume_file
         self._volume_file_error = volume_file_error
         self.volume_reads: list[tuple[str, str]] = []
+        self._volume_write_error: DockerError | None = None
+        self.volume_writes: list[tuple[str, str, bytes]] = []
         self._measured_size = measured_size
         self._measure_error = measure_error
         self.measure_calls: list[tuple[str, str]] = []
@@ -158,6 +164,12 @@ class RecordingDockerClient:
         if self._volume_file_error is not None:
             raise self._volume_file_error
         return self._volume_file
+
+    async def write_volume_file(self, *, volume: str, path: str, data: bytes, image: str) -> None:
+        del image
+        self.volume_writes.append((volume, path, data))
+        if self._volume_write_error is not None:
+            raise self._volume_write_error
 
     async def measure_volume_size(self, *, volume: str, image: str) -> int:
         self.measure_calls.append((volume, image))
@@ -915,6 +927,66 @@ def test_read_workspace_file_route_404_on_missing() -> None:
     with TestClient(app) as client:
         resp = client.get(f"/v1/workspaces/{uuid4()}/{uuid4()}/file", params={"path": "gone"})
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_write_workspace_file_writes_to_volume() -> None:
+    h = _harness(docker=RecordingDockerClient())
+    await h.supervisor.write_workspace_file(
+        tenant_id=uuid4(), user_id=uuid4(), path="uploads/report.pdf", data=b"PDF BYTES"
+    )
+    assert len(h.docker.volume_writes) == 1
+    _volume, path, data = h.docker.volume_writes[0]
+    assert path == "uploads/report.pdf"
+    assert data == b"PDF BYTES"
+
+
+@pytest.mark.asyncio
+async def test_write_workspace_file_rejects_unsafe_path() -> None:
+    h = _harness(docker=RecordingDockerClient())
+    for bad in ("/etc/passwd", "../escape.txt"):
+        with pytest.raises(WorkspaceFileNotFoundError):
+            await h.supervisor.write_workspace_file(
+                tenant_id=uuid4(), user_id=uuid4(), path=bad, data=b"x"
+            )
+    assert h.docker.volume_writes == []
+
+
+@pytest.mark.asyncio
+async def test_write_workspace_file_too_large_raises() -> None:
+    h = _harness(docker=RecordingDockerClient())
+    oversize = b"\0" * (_MAX_WORKSPACE_WRITE_BYTES + 1)
+    with pytest.raises(WorkspaceFileTooLargeError):
+        await h.supervisor.write_workspace_file(
+            tenant_id=uuid4(), user_id=uuid4(), path="uploads/big.pdf", data=oversize
+        )
+    # The size gate runs before docker — nothing is written.
+    assert h.docker.volume_writes == []
+
+
+@pytest.mark.asyncio
+async def test_write_workspace_file_docker_error_maps_to_supervisor_error() -> None:
+    docker = RecordingDockerClient()
+    docker._volume_write_error = DockerError("disk full")
+    h = _harness(docker=docker)
+    with pytest.raises(SupervisorError):
+        await h.supervisor.write_workspace_file(
+            tenant_id=uuid4(), user_id=uuid4(), path="uploads/x.txt", data=b"x"
+        )
+
+
+def test_write_workspace_file_route_writes_and_204() -> None:
+    h = _harness(docker=RecordingDockerClient())
+    app = create_app(SandboxSupervisorSettings(), supervisor=h.supervisor, enable_reaper=False)
+    with TestClient(app) as client:
+        resp = client.put(
+            f"/v1/workspaces/{uuid4()}/{uuid4()}/file",
+            params={"path": "uploads/memo.docx"},
+            content=b"DOCX BYTES",
+        )
+    assert resp.status_code == 204
+    assert h.docker.volume_writes[0][1] == "uploads/memo.docx"
+    assert h.docker.volume_writes[0][2] == b"DOCX BYTES"
 
 
 def test_metrics_route_exposes_prometheus_text() -> None:

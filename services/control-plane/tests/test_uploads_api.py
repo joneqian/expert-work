@@ -117,10 +117,10 @@ async def test_upload_rejects_unsupported_content_type(setup: Setup) -> None:
     client, thread_id, _ = setup
     response = await client.post(
         f"/v1/sessions/{thread_id}/uploads",
-        files={"file": ("doc.pdf", b"%PDF-1.4", "application/pdf")},
+        files={"file": ("clip.mp4", b"\x00\x00\x00\x18ftyp", "video/mp4")},
     )
     assert response.status_code == 400
-    assert "unsupported image content type" in response.json()["detail"]
+    assert "unsupported content type" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -176,6 +176,124 @@ async def test_upload_503_when_no_object_store_configured() -> None:
             files={"file": ("photo.png", _png_bytes(), "image/png")},
         )
     assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Document upload → workspace (read_document base capability)
+# ---------------------------------------------------------------------------
+
+
+async def _doc_client(
+    **settings_overrides: object,
+) -> tuple[AsyncClient, UUID, object, object]:
+    """A booted app with a fake sandbox supervisor wired + a seeded thread."""
+    from orchestrator.tools import RecordingSupervisorClient
+
+    supervisor = RecordingSupervisorClient()
+    app = create_app(
+        settings=_settings(**settings_overrides),
+        jwt_verifier=build_test_jwt_verifier(),
+        enable_reaper=False,
+    )
+    app.state.object_store = InMemoryObjectStore()
+    app.state.supervisor_client = supervisor
+    thread_id = uuid4()
+    await app.state.thread_meta_repo.create(
+        thread_id=thread_id, tenant_id=_TENANT, created_by="user-a"
+    )
+    transport = ASGITransport(app=app)
+    client = AsyncClient(transport=transport, base_url="http://cp.test", headers=_headers())
+    return client, thread_id, supervisor, app
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_lands_in_workspace() -> None:
+    client, thread_id, supervisor, _ = await _doc_client()
+    async with client:
+        resp = await client.post(
+            f"/v1/sessions/{thread_id}/uploads",
+            files={"file": ("Q3 Report.pdf", b"%PDF-1.4 body", "application/pdf")},
+        )
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["kind"] == "document"
+    assert body["path"].startswith("uploads/")
+    assert body["path"].endswith(".pdf")
+    # The bytes were written to the caller's workspace volume.
+    assert len(supervisor.workspace_writes) == 1
+    _tenant, _user, path, data = supervisor.workspace_writes[0]
+    assert path == body["path"]
+    assert data == b"%PDF-1.4 body"
+
+
+@pytest.mark.asyncio
+async def test_upload_text_document() -> None:
+    client, thread_id, supervisor, _ = await _doc_client()
+    async with client:
+        resp = await client.post(
+            f"/v1/sessions/{thread_id}/uploads",
+            files={"file": ("notes.txt", b"hello world", "text/plain")},
+        )
+    assert resp.status_code == 201
+    assert resp.json()["path"].endswith(".txt")
+
+
+@pytest.mark.asyncio
+async def test_upload_document_extension_from_content_type_not_filename() -> None:
+    # A user-supplied filename can't forge the parser extension — it comes from
+    # the trusted content type. Path separators in the name are sanitised away.
+    client, thread_id, _supervisor, _ = await _doc_client()
+    async with client:
+        resp = await client.post(
+            f"/v1/sessions/{thread_id}/uploads",
+            files={"file": ("../../etc/passwd", b"%PDF-1.4", "application/pdf")},
+        )
+    assert resp.status_code == 201
+    path = resp.json()["path"]
+    assert path.startswith("uploads/")
+    assert ".." not in path
+    assert path.endswith(".pdf")
+
+
+@pytest.mark.asyncio
+async def test_upload_malformed_office_doc_rejected() -> None:
+    # A .docx is a ZIP container; non-zip bytes are a malformed office file.
+    client, thread_id, _supervisor, _ = await _doc_client()
+    async with client:
+        resp = await client.post(
+            f"/v1/sessions/{thread_id}/uploads",
+            files={
+                "file": (
+                    "memo.docx",
+                    b"not a zip",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+    assert resp.status_code == 400
+    assert "valid office file" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_upload_document_oversize_rejected() -> None:
+    client, thread_id, _supervisor, _ = await _doc_client(document_max_bytes=16)
+    async with client:
+        resp = await client.post(
+            f"/v1/sessions/{thread_id}/uploads",
+            files={"file": ("big.pdf", b"%PDF-" + b"x" * 100, "application/pdf")},
+        )
+    assert resp.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_upload_document_503_without_supervisor(setup: Setup) -> None:
+    # The default ``setup`` app has no supervisor_client wired → docs 503.
+    client, thread_id, _ = setup
+    resp = await client.post(
+        f"/v1/sessions/{thread_id}/uploads",
+        files={"file": ("doc.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+    assert resp.status_code == 503
 
 
 # ---------------------------------------------------------------------------

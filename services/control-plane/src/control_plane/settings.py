@@ -226,6 +226,21 @@ class Settings(BaseSettings):
         "image/webp",
         "image/gif",
     )
+    #: Per-document upload size cap (default 25 MiB) — a document lands in the
+    #: user's persistent workspace where ``read_document`` parses it. Bigger
+    #: than images: office docs / PDFs run larger.
+    document_max_bytes: int = Field(default=25 * 1024 * 1024, gt=0)
+    #: Accepted document content types for upload → workspace. The parse runs
+    #: in the sandbox (read_document); the control-plane only lands the bytes.
+    document_allowed_content_types: tuple[str, ...] = (
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+    )
 
     # ------------------------------------------------------------------ auth (C.1)
     # OIDC issuer used to validate the ``iss`` JWT claim and to derive

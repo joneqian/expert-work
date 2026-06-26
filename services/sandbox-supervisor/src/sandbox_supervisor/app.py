@@ -319,6 +319,23 @@ def _register_routes(app: FastAPI) -> None:
         data = await supervisor.read_workspace_file(tenant_id=tenant_id, user_id=user_id, path=path)
         return Response(content=data, media_type="application/octet-stream")
 
+    @app.put("/v1/workspaces/{tenant_id}/{user_id}/file", status_code=204)
+    async def write_workspace_file(
+        tenant_id: UUID,
+        user_id: UUID,
+        path: str,
+        request: Request,
+        supervisor: SupervisorDep,
+    ) -> Response:
+        # Document-upload landing — only the supervisor can write a per-user
+        # docker volume; the control-plane proxies the uploaded bytes here so
+        # a later run's ``read_document`` can read them from /workspace.
+        data = await request.body()
+        await supervisor.write_workspace_file(
+            tenant_id=tenant_id, user_id=user_id, path=path, data=data
+        )
+        return Response(status_code=204)
+
     @app.get("/v1/health")
     async def health(supervisor: SupervisorDep) -> HealthResponse:
         docker_ok = await supervisor.docker_ok()

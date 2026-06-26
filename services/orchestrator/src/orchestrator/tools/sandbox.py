@@ -136,6 +136,16 @@ class SupervisorClient(Protocol):
     async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
         """Read a file from a user's persistent workspace volume (J.9 artifact download)."""
 
+    async def write_workspace_file(
+        self, *, tenant_id: UUID, user_id: UUID, path: str, data: bytes
+    ) -> None:
+        """Write ``data`` to ``path`` in a user's persistent workspace volume.
+
+        Backs the document-upload path: a user uploads a file, the
+        control-plane proxies here, and the bytes land in the durable
+        workspace so a later run's ``read_document`` can read them. Only
+        the supervisor can write a per-user docker volume."""
+
     async def reap(self, *, force: bool) -> int:
         """Run the idle-session sweep now; return how many were reaped.
 
@@ -229,6 +239,27 @@ class HTTPSupervisorClient:
             raise SandboxSupervisorError(msg)
         return response.content
 
+    async def write_workspace_file(
+        self, *, tenant_id: UUID, user_id: UUID, path: str, data: bytes
+    ) -> None:
+        url = f"{self.base_url}/v1/workspaces/{tenant_id}/{user_id}/file"
+        async with self._make_client() as client:
+            try:
+                response = await client.put(
+                    url,
+                    params={"path": path},
+                    content=data,
+                    headers={**_traced_headers(), "content-type": "application/octet-stream"},
+                )
+            except httpx.HTTPError as exc:
+                msg = f"sandbox supervisor unreachable ({url}): {exc}"
+                raise SandboxSupervisorError(msg) from exc
+        if response.is_error:
+            msg = (
+                f"sandbox supervisor workspace write failed: {response.status_code} {response.text}"
+            )
+            raise SandboxSupervisorError(msg)
+
     async def _post(
         self,
         path: str,
@@ -283,6 +314,8 @@ class RecordingSupervisorClient:
     released: list[UUID] = field(default_factory=list)
     destroyed: list[tuple[UUID, str]] = field(default_factory=list)
     workspace_reads: list[tuple[UUID, UUID, str]] = field(default_factory=list)
+    workspace_writes: list[tuple[UUID, UUID, str, bytes]] = field(default_factory=list)
+    workspace_write_error: Exception | None = None
     reaped: list[bool] = field(default_factory=list)
     reap_count: int = 0
     _next_id: int = 0
@@ -321,6 +354,13 @@ class RecordingSupervisorClient:
         if self.workspace_file_error is not None:
             raise self.workspace_file_error
         return self.workspace_file
+
+    async def write_workspace_file(
+        self, *, tenant_id: UUID, user_id: UUID, path: str, data: bytes
+    ) -> None:
+        if self.workspace_write_error is not None:
+            raise self.workspace_write_error
+        self.workspace_writes.append((tenant_id, user_id, path, data))
 
     async def reap(self, *, force: bool) -> int:
         self.reaped.append(force)
@@ -370,6 +410,13 @@ class _EgressBindingClient:
 
     async def read_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> bytes:
         return await self.inner.read_workspace_file(tenant_id=tenant_id, user_id=user_id, path=path)
+
+    async def write_workspace_file(
+        self, *, tenant_id: UUID, user_id: UUID, path: str, data: bytes
+    ) -> None:
+        await self.inner.write_workspace_file(
+            tenant_id=tenant_id, user_id=user_id, path=path, data=data
+        )
 
     async def reap(self, *, force: bool) -> int:
         return await self.inner.reap(force=force)

@@ -84,6 +84,49 @@ async def test_workspace_get_injects_traceparent(tracing_setup: None) -> None:
     assert seen["headers"].get(TRACEPARENT_HEADER, "").split("-")[1] == active_trace_id
 
 
+async def test_workspace_put_sends_bytes_and_path(tracing_setup: None) -> None:
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.params.get("path")
+        seen["content"] = request.content
+        seen["headers"] = request.headers
+        return httpx.Response(204)
+
+    client = HTTPSupervisorClient(
+        base_url="http://supervisor", transport=httpx.MockTransport(handler)
+    )
+    with helix_span(HelixComponent.ORCHESTRATOR, "tool_call"):
+        active_trace_id = current_trace_id_hex()
+        await client.write_workspace_file(
+            tenant_id=uuid4(), user_id=uuid4(), path="uploads/x.pdf", data=b"PDF"
+        )
+
+    assert seen["method"] == "PUT"
+    assert seen["path"] == "uploads/x.pdf"
+    assert seen["content"] == b"PDF"
+    headers = seen["headers"]
+    assert isinstance(headers, httpx.Headers)
+    assert active_trace_id is not None
+    assert headers.get(TRACEPARENT_HEADER, "").split("-")[1] == active_trace_id
+
+
+async def test_workspace_put_raises_on_error_response(tracing_setup: None) -> None:
+    from orchestrator.tools.sandbox import SandboxSupervisorError
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="boom")
+
+    client = HTTPSupervisorClient(
+        base_url="http://supervisor", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(SandboxSupervisorError):
+        await client.write_workspace_file(
+            tenant_id=uuid4(), user_id=uuid4(), path="uploads/x.pdf", data=b"PDF"
+        )
+
+
 async def test_no_active_span_omits_traceparent(tracing_setup: None) -> None:
     # No surrounding span (OTel active but no span) → nothing to propagate;
     # external egress and uninstrumented call sites stay header-free.

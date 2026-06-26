@@ -119,6 +119,9 @@ class AuditAction(StrEnum):
     PLAN_EDITED = "plan:edited"
     # image upload (Stream J.6.补强-2 — Mini-ADR J-31)
     IMAGE_UPLOAD = "image:upload"
+    # document upload → workspace (read_document base capability). resource_type
+    # reuses ``user_workspace`` (the doc lands in the durable workspace volume).
+    DOCUMENT_UPLOAD = "document:upload"
     # skill (Stream J.7a — Mini-ADR J-23)
     SKILL_CREATE = "skill:create"
     SKILL_VERSION_CREATE = "skill_version:create"

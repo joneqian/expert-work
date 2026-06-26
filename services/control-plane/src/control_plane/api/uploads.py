@@ -16,6 +16,9 @@ must own the thread, and 404 hides cross-user existence.
 from __future__ import annotations
 
 import hashlib
+import io
+import re
+import zipfile
 from typing import Annotated, Final
 from uuid import UUID, uuid4
 
@@ -39,6 +42,7 @@ from helix_agent.protocol import AuditAction, AuditResult, QuotaDimension
 from helix_agent.protocol.multimodal import ImageRef
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.storage import ObjectStore
+from orchestrator.tools import SandboxSupervisorError, SupervisorClient
 
 #: File extension per accepted image content type. The reverse direction
 #: (ext → media_type) lives in the orchestrator's image resolver.
@@ -48,6 +52,138 @@ _EXT_BY_CONTENT_TYPE: Final[dict[str, str]] = {
     "image/webp": ".webp",
     "image/gif": ".gif",
 }
+
+#: Canonical file extension per accepted document content type. The extension
+#: drives the sandbox ``read_document`` parser dispatch, so it is derived from
+#: the (trusted) content type — not the user-supplied filename.
+_DOC_EXT_BY_CONTENT_TYPE: Final[dict[str, str]] = {
+    "application/pdf": ".pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "text/plain": ".txt",
+    "text/markdown": ".md",
+    "text/csv": ".csv",
+}
+
+#: Office formats that are ZIP containers — guarded against decompression bombs.
+_ZIP_DOC_EXTS: Final[frozenset[str]] = frozenset({".docx", ".xlsx", ".pptx"})
+#: Reject a ZIP doc whose declared uncompressed total exceeds this — bounds the
+#: sandbox parse memory (read from the central directory, nothing is extracted).
+_MAX_ZIP_UNCOMPRESSED_BYTES: Final[int] = 200 * 1024 * 1024
+#: Workspace subdirectory uploaded documents land in (namespaced away from
+#: agent-written files so an upload can't clobber the agent's own output).
+_UPLOAD_DIR: Final[str] = "uploads"
+_SAFE_STEM_RE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_workspace_name(filename: str, ext: str) -> str:
+    """Build a safe ``uploads/<stem><ext>`` workspace path from a user filename.
+
+    The stem is sanitised to ``[A-Za-z0-9._-]`` (path separators / NUL / ``..``
+    cannot survive); the extension comes from the trusted content type, not the
+    filename. Falls back to a uuid stem when nothing usable remains."""
+    stem = _SAFE_STEM_RE.sub("_", filename.rsplit("/", 1)[-1].rsplit(".", 1)[0]).strip("._")
+    if not stem:
+        stem = uuid4().hex
+    return f"{_UPLOAD_DIR}/{stem[:120]}{ext}"
+
+
+def _reject_zip_bomb(raw: bytes, ext: str) -> None:
+    """Raise 400/413 if a ZIP-container document is malformed or a bomb.
+
+    Reads only the central directory (``ZipInfo.file_size``) — nothing is
+    extracted — so the check itself cannot be turned into a bomb."""
+    if ext not in _ZIP_DOC_EXTS:
+        return
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            total = sum(info.file_size for info in zf.infolist())
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="document is not a valid office file") from exc
+    if total > _MAX_ZIP_UNCOMPRESSED_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"document decompresses past the {_MAX_ZIP_UNCOMPRESSED_BYTES}-byte limit",
+        )
+
+
+async def _handle_document_upload(
+    *,
+    content_type: str,
+    filename: str,
+    file: UploadFile,
+    request: Request,
+    tenant_id: UUID,
+    caller_user_id: UUID | None,
+    thread_id: UUID,
+    settings: Settings,
+    supervisor: SupervisorClient | None,
+    audit: AuditLogger,
+) -> JSONResponse:
+    """Land an uploaded document in the caller's persistent workspace.
+
+    The parse itself runs later in the sandbox (``read_document``); the
+    control-plane only validates + writes the bytes, keeping the malicious-
+    document attack surface out of this process."""
+    ext = _DOC_EXT_BY_CONTENT_TYPE.get(content_type)
+    if ext is None:
+        # Config drift: the allowlist admitted a type the extension table
+        # doesn't know. Refuse rather than land an unparseable file.
+        raise HTTPException(
+            status_code=400,
+            detail=f"no extension known for content type {content_type!r}",
+        )
+    if caller_user_id is None:
+        # A document needs a per-user workspace to land in.
+        raise HTTPException(status_code=400, detail="document upload requires a user workspace")
+    if supervisor is None:
+        raise HTTPException(status_code=503, detail="document upload unavailable: no sandbox")
+
+    max_bytes = settings.document_max_bytes
+    if file.size is not None and file.size > max_bytes:
+        raise HTTPException(status_code=413, detail=f"document exceeds {max_bytes}-byte limit")
+    raw = await file.read()
+    if len(raw) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"document exceeds {max_bytes}-byte limit")
+    if not raw:
+        raise HTTPException(status_code=400, detail="uploaded file is empty")
+    _reject_zip_bomb(raw, ext)
+
+    workspace_path = _safe_workspace_name(filename, ext)
+    try:
+        await supervisor.write_workspace_file(
+            tenant_id=tenant_id,
+            user_id=caller_user_id,
+            path=workspace_path,
+            data=raw,
+        )
+    except SandboxSupervisorError as exc:
+        raise HTTPException(status_code=502, detail=f"workspace write failed: {exc}") from exc
+
+    actor_id: str = getattr(request.state, "actor_id", "anonymous")
+    sha256_hex = hashlib.sha256(raw).hexdigest()
+    await audit_emit(
+        audit,
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        action=AuditAction.DOCUMENT_UPLOAD,
+        resource_type="user_workspace",
+        resource_id=workspace_path,
+        result=AuditResult.SUCCESS,
+        trace_id=current_trace_id_hex(),
+        details={
+            "thread_id": str(thread_id),
+            "workspace_path": workspace_path,
+            "file_size_bytes": len(raw),
+            "mime_type": content_type,
+            "sha256": sha256_hex,
+        },
+    )
+    return JSONResponse(
+        status_code=201,
+        content={"path": workspace_path, "kind": "document"},
+    )
 
 
 def _get_object_store(request: Request) -> ObjectStore | None:
@@ -76,6 +212,10 @@ def _get_image_upload_store(request: Request) -> ImageUploadStore:
     return request.app.state.image_upload_store  # type: ignore[no-any-return]
 
 
+def _get_supervisor_client(request: Request) -> SupervisorClient | None:
+    return getattr(request.app.state, "supervisor_client", None)
+
+
 def build_uploads_router() -> APIRouter:
     """One router housing the J.6 upload + lifecycle endpoints.
 
@@ -99,10 +239,8 @@ def build_uploads_router() -> APIRouter:
         quota: Annotated[QuotaService, Depends(_get_quota)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         images: Annotated[ImageUploadStore, Depends(_get_image_upload_store)],
+        supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
     ) -> JSONResponse:
-        if store is None:
-            raise HTTPException(status_code=503, detail="object store unavailable")
-
         tenant_id: UUID = request.state.tenant_id
 
         # Thread ownership — Stream J.14 (404 hides cross-user existence).
@@ -121,10 +259,30 @@ def build_uploads_router() -> APIRouter:
         if not file.filename:
             raise HTTPException(status_code=400, detail="uploaded file has no filename")
         content_type = (file.content_type or "").lower()
+
+        # Document upload → lands in the user's persistent workspace so a later
+        # run's ``read_document`` can parse it. Separate path from images: docs
+        # ride the supervisor workspace-write, not the image object store.
+        if content_type in settings.document_allowed_content_types:
+            return await _handle_document_upload(
+                content_type=content_type,
+                filename=file.filename,
+                file=file,
+                request=request,
+                tenant_id=tenant_id,
+                caller_user_id=caller_user_id,
+                thread_id=thread_id,
+                settings=settings,
+                supervisor=supervisor,
+                audit=audit,
+            )
+
+        if store is None:
+            raise HTTPException(status_code=503, detail="object store unavailable")
         if content_type not in settings.multimodal_allowed_content_types:
             raise HTTPException(
                 status_code=400,
-                detail=f"unsupported image content type: {content_type or 'missing'!r}",
+                detail=f"unsupported content type: {content_type or 'missing'!r}",
             )
         ext = _EXT_BY_CONTENT_TYPE.get(content_type)
         if ext is None:
