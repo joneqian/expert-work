@@ -26,6 +26,8 @@ import {
   readMemoryOn,
   readModel,
   readName,
+  readPromptJinja,
+  readPromptVariables,
   readReflectionEvaluator,
   readReflectionEvaluatorOn,
   readSystemPrompt,
@@ -47,6 +49,7 @@ import {
   setVisionModel,
 } from "./form_model";
 import { McpToolPicker, type McpPickerSource } from "./widgets/McpToolPicker";
+import { PromptTemplateEditor } from "./widgets/PromptTemplateEditor";
 
 const { Text } = Typography;
 
@@ -274,15 +277,23 @@ export function FormView({
             />
           </Heading>
           <div data-testid="af-prompt-input">
-            <Input.TextArea
-              rows={6}
-              value={readSystemPrompt(formData)}
-              placeholder={t("agent_form.field_prompt_placeholder")}
-              aria-label={t("agent_form.section_prompt")}
-              onChange={(e) =>
-                onChange(setSystemPrompt(formData, e.target.value))
-              }
-            />
+            {readPromptJinja(formData) ? (
+              <PromptTemplateEditor
+                value={readSystemPrompt(formData)}
+                variables={readPromptVariables(formData)}
+                onChange={(v) => onChange(setSystemPrompt(formData, v))}
+              />
+            ) : (
+              <Input.TextArea
+                rows={6}
+                value={readSystemPrompt(formData)}
+                placeholder={t("agent_form.field_prompt_placeholder")}
+                aria-label={t("agent_form.section_prompt")}
+                onChange={(e) =>
+                  onChange(setSystemPrompt(formData, e.target.value))
+                }
+              />
+            )}
           </div>
         </section>
         <PromptVariablesEditor formData={formData} onChange={onChange} />

@@ -20,7 +20,13 @@ import { FormView } from "./FormView";
 import { apiClient, setStoredToken } from "../../api/client";
 import "../../i18n";
 import type { AgentManifest } from "./form_model";
-import { setReflectionEvaluator, setTool } from "./form_model";
+import {
+  setPromptJinja,
+  setPromptVariables,
+  setReflectionEvaluator,
+  setSystemPrompt,
+  setTool,
+} from "./form_model";
 
 // ── JWT helper ────────────────────────────────────────────────────────────
 
@@ -113,6 +119,29 @@ const MCP_ON_MANIFEST: AgentManifest = (() => {
   return { ...withMcp, metadata: { name: "mcp-agent" } };
 })();
 
+const JINJA_PROMPT_MANIFEST: AgentManifest = (() => {
+  let m = setSystemPrompt(
+    BLANK_MANIFEST,
+    "You are helping {{ user_name }}.\n{% if topic %}Focus on {{ topic }}.{% endif %}",
+  ) as AgentManifest;
+  m = setPromptJinja(m, true) as AgentManifest;
+  m = setPromptVariables(m, [
+    {
+      name: "user_name",
+      trusted: true,
+      required: true,
+      description: "caller name",
+    },
+    {
+      name: "topic",
+      trusted: false,
+      required: false,
+      description: "optional focus",
+    },
+  ]) as AgentManifest;
+  return { ...m, metadata: { name: "jinja-agent" } };
+})();
+
 const EVALUATOR_ON_MANIFEST: AgentManifest = (() => {
   const withEval = setReflectionEvaluator(BLANK_MANIFEST, {
     provider: "openai",
@@ -157,6 +186,20 @@ export const WithMcpPicker: Story = {
     formData: MCP_ON_MANIFEST,
     onChange: () => {},
     section: "mcp",
+  },
+};
+
+/**
+ * Jinja mode is ON — the prompt template renders in the Monaco editor with
+ * ``{{ }}`` / ``{% %}`` highlighting; declared variables (user_name, topic)
+ * drive the autocomplete and the variable rows below.
+ */
+export const JinjaPrompt: Story = {
+  decorators: [withMcpFixture],
+  args: {
+    formData: JINJA_PROMPT_MANIFEST,
+    onChange: () => {},
+    section: "prompt",
   },
 };
 
