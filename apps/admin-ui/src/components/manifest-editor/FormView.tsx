@@ -15,7 +15,9 @@ import { FieldHelp } from "../FieldHelp";
 import { loadModelCatalog } from "./catalog";
 import { ModelSelect } from "./widgets/ModelSelect";
 import {
+  readApprovalTools,
   readDescription,
+  readDynamicWorkersOn,
   readMainSupportsVision,
   readMemoryOn,
   readModel,
@@ -27,7 +29,9 @@ import {
   readTopK,
   readVisionModel,
   readVisionOn,
+  setApprovalTools,
   setDescription,
+  setDynamicWorkersOn,
   setMcpAllowTools,
   setMcpServers,
   setMemoryOn,
@@ -51,6 +55,19 @@ interface FormViewProps {
 const SECTION: React.CSSProperties = { marginBottom: 24 };
 const FIELD: React.CSSProperties = { marginBottom: 16 };
 const LABEL: React.CSSProperties = { display: "block", marginBottom: 4 };
+
+// Tools the approval gate can require a human verdict for — the base
+// capabilities most worth gating (always-on code exec / file writes) plus the
+// opt-in network tools. The gate can't remove a capability, only pause it.
+const GATEABLE_TOOLS = [
+  "exec_python",
+  "bash",
+  "write_file",
+  "edit_file",
+  "web_search",
+  "http",
+  "mcp",
+] as const;
 
 function Heading({ children }: { children: React.ReactNode }) {
   return <h3 style={{ fontSize: 15, margin: "0 0 12px" }}>{children}</h3>;
@@ -77,6 +94,15 @@ export function FormView({ formData, onChange }: FormViewProps) {
 
   const tools = readTools(formData);
   const memoryOn = readMemoryOn(formData);
+  const approvalTools = readApprovalTools(formData);
+  const dynamicWorkersOn = readDynamicWorkersOn(formData);
+
+  const toggleApproval = (name: string, on: boolean): void => {
+    const next = on
+      ? [...approvalTools, name]
+      : approvalTools.filter((t) => t !== name);
+    onChange(setApprovalTools(formData, next));
+  };
 
   return (
     <div data-testid="manifest-form-view" style={{ maxWidth: 560 }}>
@@ -280,6 +306,48 @@ export function FormView({ formData, onChange }: FormViewProps) {
             onAllowToolsChange={(next) => onChange(setMcpAllowTools(formData, next))}
           />
         )}
+      </section>
+
+      <section data-testid="af-approval" style={SECTION}>
+        <Heading>
+          {t("agent_form.section_approval")}
+          <FieldHelp text={t("agent_form.section_approval_help")} testId="af-approval" />
+        </Heading>
+        <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+          {t("agent_form.approval_hint")}
+        </Text>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {GATEABLE_TOOLS.map((name) => (
+            <span key={name}>
+              <Checkbox
+                data-testid={`af-approval-${name}`}
+                checked={approvalTools.includes(name)}
+                onChange={(e) => toggleApproval(name, e.target.checked)}
+              >
+                {name}
+              </Checkbox>
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <section data-testid="af-dynamic-workers" style={SECTION}>
+        <Heading>
+          {t("agent_form.section_dynamic_workers")}
+          <FieldHelp
+            text={t("agent_form.section_dynamic_workers_help")}
+            testId="af-dynamic-workers"
+          />
+        </Heading>
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Switch
+            checked={dynamicWorkersOn}
+            data-testid="af-dynamic-workers-toggle"
+            aria-label={t("agent_form.section_dynamic_workers")}
+            onChange={(on) => onChange(setDynamicWorkersOn(formData, on))}
+          />
+          <Text type="secondary">{t("agent_form.dynamic_workers_hint")}</Text>
+        </label>
       </section>
               </>
             ),

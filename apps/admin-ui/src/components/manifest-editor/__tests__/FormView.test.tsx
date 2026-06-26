@@ -45,6 +45,26 @@ describe("FormView", () => {
     expect(screen.getByTestId("af-memory")).toBeInTheDocument();
     expect(screen.getByTestId("af-reflection-evaluator")).toBeInTheDocument();
     expect(screen.getByTestId("af-tools")).toBeInTheDocument();
+    expect(screen.getByTestId("af-approval")).toBeInTheDocument();
+    expect(screen.getByTestId("af-dynamic-workers")).toBeInTheDocument();
+  });
+
+  it("checking an approval tool adds it to policies.approval_required_tools", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<FormView formData={SEED} onChange={onChange} />);
+    await user.click(screen.getByTestId("af-approval-exec_python"));
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.policies?.approval_required_tools).toEqual(["exec_python"]);
+  });
+
+  it("turning dynamic workers off writes dynamic_workers.enabled=false", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<FormView formData={SEED} onChange={onChange} />);
+    await user.click(screen.getByTestId("af-dynamic-workers-toggle"));
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.dynamic_workers?.enabled).toBe(false);
   });
 
   it("shows the vision (VL fallback) section when the main model is text-only", () => {

@@ -370,6 +370,14 @@ const zhCN: TranslationKeys = {
     tool_http_help: "允许 Agent 发 HTTP 请求调外部 API(经审计代理出网)。\n示例:查天气 API、调内部服务",
     tool_mcp_help:
       "允许 Agent 调 MCP server 暴露的工具(数据库、业务系统等)。勾选后下面选具体 server 和工具。\n示例:接入公司 CRM 的 MCP",
+    section_approval: "人工审批闸",
+    section_approval_help:
+      "勾选的工具在执行前会暂停,等人工批准/拒绝后才运行。这是代码执行等基础能力「默认开、不可关」的治理对手盘 —— 能力保留,但执行前先经人把关。\n示例:对 exec_python + http 要求审批",
+    approval_hint: "勾选执行前需人工把关的工具。",
+    section_dynamic_workers: "自主 worker",
+    section_dynamic_workers_help:
+      "开启(默认)时,Agent 可在运行中临时创建短生命周期的辅助 worker 来拆解任务。需要严格单 worker 时关闭。\n示例:研究型 Agent 开,简单问答 Bot 关",
+    dynamic_workers_hint: "允许 Agent 在运行中自主创建临时 worker(默认开启)。",
   },
   playground: {
     session_label: "会话",

@@ -1,6 +1,8 @@
 import { describe, expect, it, test } from "vitest";
 import {
+  readApprovalTools,
   readDescription,
+  readDynamicWorkersOn,
   readMemoryOn,
   readModel,
   readName,
@@ -17,6 +19,8 @@ import {
   setMemoryOn,
   setModel,
   setName,
+  setApprovalTools,
+  setDynamicWorkersOn,
   setReflectionEvaluator,
   setSystemPrompt,
   setTool,
@@ -216,6 +220,63 @@ describe("reflection evaluator (routing when=reflection projection)", () => {
   it("does not mutate the input manifest", () => {
     setReflectionEvaluator(seed, { provider: "openai", name: "gpt-4o-mini" });
     expect((seed.spec as { routing?: unknown }).routing).toBeUndefined();
+  });
+});
+
+describe("approval gate (policies.approval_required_tools)", () => {
+  it("reads an empty list when no policies block", () => {
+    expect(readApprovalTools(seed)).toEqual([]);
+  });
+
+  it("writes the approval tool list and reads it back", () => {
+    const m = setApprovalTools(seed, ["exec_python", "http"]);
+    expect(m.spec?.policies?.approval_required_tools).toEqual(["exec_python", "http"]);
+    expect(readApprovalTools(m)).toEqual(["exec_python", "http"]);
+  });
+
+  it("clearing drops the key and empty policies block", () => {
+    const withGate = setApprovalTools(seed, ["bash"]);
+    const cleared = setApprovalTools(withGate, []);
+    expect(readApprovalTools(cleared)).toEqual([]);
+    expect(cleared.spec?.policies).toBeUndefined();
+  });
+
+  it("preserves sibling policy keys when clearing the gate", () => {
+    const base = {
+      ...seed,
+      spec: { ...seed.spec, policies: { approval_required_tools: ["bash"], approval_timeout_s: 3600 } },
+    };
+    const cleared = setApprovalTools(base, []);
+    expect(cleared.spec?.policies).toEqual({ approval_timeout_s: 3600 });
+  });
+
+  it("does not mutate the input manifest", () => {
+    setApprovalTools(seed, ["exec_python"]);
+    expect((seed.spec as { policies?: unknown }).policies).toBeUndefined();
+  });
+});
+
+describe("dynamic workers (spawn_worker opt-out)", () => {
+  it("defaults to ON when no dynamic_workers block (the platform default)", () => {
+    expect(readDynamicWorkersOn(seed)).toBe(true);
+  });
+
+  it("reads OFF when enabled is false", () => {
+    const off = setDynamicWorkersOn(seed, false);
+    expect(off.spec?.dynamic_workers?.enabled).toBe(false);
+    expect(readDynamicWorkersOn(off)).toBe(false);
+  });
+
+  it("turning ON drops the block so YAML stays clean (absent = on)", () => {
+    const off = setDynamicWorkersOn(seed, false);
+    const on = setDynamicWorkersOn(off, true);
+    expect(on.spec?.dynamic_workers).toBeUndefined();
+    expect(readDynamicWorkersOn(on)).toBe(true);
+  });
+
+  it("does not mutate the input manifest", () => {
+    setDynamicWorkersOn(seed, false);
+    expect((seed.spec as { dynamic_workers?: unknown }).dynamic_workers).toBeUndefined();
   });
 });
 

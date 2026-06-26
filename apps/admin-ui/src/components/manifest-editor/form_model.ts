@@ -42,6 +42,13 @@ export interface AgentManifest {
     routing?: RoutingFields | null;
     // Stream J.6 Path B — VL fallback for a text-only main model (ask_image).
     vision?: { model?: ModelFields; fallbacks?: ModelFields[]; [k: string]: unknown } | null;
+    // Declarative human-approval gate — tool names that pause the run for a
+    // human verdict before they execute (the governance counterweight to the
+    // always-on exec_python base capability).
+    policies?: { approval_required_tools?: string[]; [k: string]: unknown } | null;
+    // Orchestrator-Worker — whether the agent may spawn ephemeral workers at
+    // run time (spawn_worker). Block absent = enabled (the platform default).
+    dynamic_workers?: { enabled?: boolean; [k: string]: unknown } | null;
     [k: string]: unknown;
   };
   [k: string]: unknown;
@@ -194,4 +201,39 @@ export function setMcpServers(m: unknown, servers: string[]): AgentManifest {
     t.type === "mcp" ? { ...t, servers } : t,
   );
   return patchSpec(m, { tools });
+}
+
+// ---- approval gate (policies.approval_required_tools) ----
+// Tool names that, when the agent dispatches them, pause the run for a human
+// verdict (LangGraph interrupt). The governance counterweight to the always-on
+// exec_python / bash base capability: the capability can't be removed, but it
+// can be gated behind approval. Empty = no gate (drop the key + empty policies).
+export const readApprovalTools = (m: unknown): string[] =>
+  specOf(m).policies?.approval_required_tools ?? [];
+
+export function setApprovalTools(m: unknown, tools: string[]): AgentManifest {
+  const policies = specOf(m).policies ?? {};
+  if (tools.length === 0) {
+    const { approval_required_tools: _dropped, ...rest } = policies;
+    return patchSpec(m, { policies: Object.keys(rest).length > 0 ? rest : undefined });
+  }
+  return patchSpec(m, { policies: { ...policies, approval_required_tools: tools } });
+}
+
+// ---- dynamic workers (spawn_worker) ----
+// Whether the agent's LLM may spawn ephemeral workers at run time. The block is
+// absent by default and that means ENABLED (the platform switch governs the
+// ceiling). The form surfaces this so the autonomous-worker behaviour is
+// visible + can be opted out per agent: ``off`` writes ``{enabled:false}``;
+// ``on`` drops the block (back to the default-on state, keeping YAML clean).
+export const readDynamicWorkersOn = (m: unknown): boolean =>
+  (specOf(m).dynamic_workers?.enabled ?? true) !== false;
+
+export function setDynamicWorkersOn(m: unknown, on: boolean): AgentManifest {
+  if (on) {
+    const dw = specOf(m).dynamic_workers ?? {};
+    const { enabled: _dropped, ...rest } = dw;
+    return patchSpec(m, { dynamic_workers: Object.keys(rest).length > 0 ? rest : undefined });
+  }
+  return patchSpec(m, { dynamic_workers: { ...(specOf(m).dynamic_workers ?? {}), enabled: false } });
 }

@@ -353,6 +353,12 @@ export interface TranslationKeys {
     tool_web_search_help: string;
     tool_http_help: string;
     tool_mcp_help: string;
+    section_approval: string;
+    section_approval_help: string;
+    approval_hint: string;
+    section_dynamic_workers: string;
+    section_dynamic_workers_help: string;
+    dynamic_workers_hint: string;
   };
   playground: {
     session_label: string;
@@ -2181,6 +2187,14 @@ const en: TranslationKeys = {
       "Let the agent make HTTP requests to external APIs (through the audited egress proxy).\nExample: weather API, internal services",
     tool_mcp_help:
       "Let the agent call tools exposed by MCP servers (databases, business systems). Pick servers + tools below.\nExample: your company's CRM MCP",
+    section_approval: "Human approval gate",
+    section_approval_help:
+      "Tools that pause the run for a human approve/reject before they execute. The governance counterweight to always-on code execution — the capability stays, but a human signs off first.\nExample: require approval for exec_python + http",
+    approval_hint: "Check the tools that need a human verdict before running.",
+    section_dynamic_workers: "Autonomous workers",
+    section_dynamic_workers_help:
+      "When on (the default), the agent may spawn short-lived helper workers at run time to split up a task. Turn off for a strictly single-worker agent.\nExample: on for a research agent, off for a simple FAQ bot",
+    dynamic_workers_hint: "Allow the agent to create temporary workers at run time (on by default).",
   },
   playground: {
     session_label: "Session",
