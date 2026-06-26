@@ -1478,9 +1478,7 @@ const zhCN: TranslationKeys = {
     field_tier: "所需档位",
     field_status: "状态",
     field_enabled: "启用",
-    field_manifest: "Manifest",
     tab_basic: "基本信息",
-    tab_manifest: "Agent 配置",
     field_display_name_help: "模板在市场里显示的名字,给租户看。\n示例:智能客服",
     field_description_help:
       "模板简介,说明用途和适用场景,帮租户决定要不要 fork。\n示例:开箱即用的多轮客服 Agent",
@@ -1492,8 +1490,6 @@ const zhCN: TranslationKeys = {
       "草稿仅管理员可见;发布后租户才能在市场看到并 fork。\n示例:调试时草稿,完成后发布",
     field_enabled_help:
       "总开关。关掉则即使已发布也从市场下架(不删除)。\n示例:临时下架时关掉",
-    field_manifest_help:
-      "Agent 的完整定义(模型/提示词/工具/沙箱等)。可用上面的表单填,或切 YAML 直接写。租户 fork 后可改非安全字段。\n示例:见表单默认值",
     cat_support: "客服",
     cat_sales: "销售",
     cat_research: "研究",

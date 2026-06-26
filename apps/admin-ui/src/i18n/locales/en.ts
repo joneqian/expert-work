@@ -1383,9 +1383,7 @@ export interface TranslationKeys {
     field_tier: string;
     field_status: string;
     field_enabled: string;
-    field_manifest: string;
     tab_basic: string;
-    tab_manifest: string;
     field_display_name_help: string;
     field_description_help: string;
     field_category_help: string;
@@ -1393,7 +1391,6 @@ export interface TranslationKeys {
     field_tier_help: string;
     field_status_help: string;
     field_enabled_help: string;
-    field_manifest_help: string;
     cat_support: string;
     cat_sales: string;
     cat_research: string;
@@ -3375,9 +3372,7 @@ const en: TranslationKeys = {
     field_tier: "Required tier",
     field_status: "Status",
     field_enabled: "Enabled",
-    field_manifest: "Manifest",
     tab_basic: "Basic info",
-    tab_manifest: "Agent config",
     field_display_name_help:
       "The template's name shown to tenants in the marketplace.\nExample: Smart Support Bot",
     field_description_help:
@@ -3391,8 +3386,6 @@ const en: TranslationKeys = {
       "Draft is admin-only; Published makes it visible + forkable in the marketplace.\nExample: Draft while testing, Publish when ready",
     field_enabled_help:
       "Master switch. Off removes it from the marketplace even if published (without deleting).\nExample: turn off to temporarily delist",
-    field_manifest_help:
-      "The agent's full definition (model / prompt / tools / sandbox). Use the form above or switch to YAML. Tenants can edit non-security fields after forking.\nExample: see the form defaults",
     cat_support: "Support",
     cat_sales: "Sales",
     cat_research: "Research",
