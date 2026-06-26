@@ -36,8 +36,7 @@ import {
   setApprovalTools,
   setDescription,
   setDynamicWorkersOn,
-  setMcpAllowTools,
-  setMcpServers,
+  setMcp,
   setMemoryOn,
   setModel,
   setName,
@@ -327,36 +326,14 @@ export function FormView({
           {t("agent_form.section_mcp")}
           <FieldHelp text={t("agent_form.section_mcp_help")} testId="af-mcp" />
         </Heading>
-        <span>
-          <Checkbox
-            data-testid="af-tool-mcp"
-            checked={tools.mcp}
-            onChange={(e) =>
-              onChange(setTool(formData, "mcp", e.target.checked))
-            }
-          >
-            {t("agent_form.tool_mcp")}
-          </Checkbox>
-          <FieldHelp
-            text={t("agent_form.tool_mcp_help")}
-            testId="af-tool-mcp"
-          />
-        </span>
-        {tools.mcp && (
-          <div style={{ marginTop: 12 }}>
-            <McpToolPicker
-              source={mcpSource}
-              servers={tools.mcpServers}
-              allowTools={tools.mcpAllowTools}
-              onServersChange={(next) =>
-                onChange(setMcpServers(formData, next))
-              }
-              onAllowToolsChange={(next) =>
-                onChange(setMcpAllowTools(formData, next))
-              }
-            />
-          </div>
-        )}
+        <McpToolPicker
+          source={mcpSource}
+          servers={tools.mcpServers}
+          allowTools={tools.mcpAllowTools}
+          onChange={(nextServers, nextAllow) =>
+            onChange(setMcp(formData, nextServers, nextAllow))
+          }
+        />
       </section>
     ),
 

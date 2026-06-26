@@ -1,32 +1,24 @@
 /**
- * McpToolPicker — controlled component for selecting MCP servers + tools in
- * the agent form (Stream V-G).
+ * McpToolPicker — selects MCP servers + (optionally) per-server tools.
  *
- * Props (controlled):
- *   servers      — selected server names (MCPToolSpec.servers)
- *   allowTools   — selected tool names (MCPToolSpec.allow_tools, flat list)
- *   onServersChange    — called when the server selection changes
- *   onAllowToolsChange — called when the tool selection changes
+ * Selecting a server IS enabling MCP — there is no separate enable checkbox.
+ * Per server, the tool scope is explicit: "all tools" (default) or "specific"
+ * (then pick tools). Built for scale: a server search box, and per server a
+ * tool search + select-all/clear + a height-capped scroll list.
  *
- * Behavior:
- *   - On mount lists selectable servers per ``source`` (``available`` = the
- *     tenant's opted-in/custom servers; ``catalog`` = published platform
- *     connectors, for a platform template) → loading → list, error, or empty.
- *   - Each available server is a Checkbox (testid af-mcp-server-{name}),
- *     checked when name ∈ servers.  A source Tag (platform/tenant) is shown.
- *   - Checking/unchecking a server updates onServersChange(next).
- *   - Each CHECKED server is expandable (antd Collapse, testid
- *     af-mcp-tools-{name}): on first expand calls listMcpServerTools(name).
- *   - Tool checkboxes inside the expanded section (testid af-mcp-tool-{name}).
- *   - allow_tools is a flat list of bare tool names across servers.  Checking
- *     a tool adds its bare name; unchecking removes it.
- *   - Tools cached per server in component state after first fetch.
+ * Controlled via a single ``onChange(servers, allowTools)`` so server and tool
+ * edits land in one manifest patch (no stale-read double write).
+ *
+ *   source = "available" (default) — the tenant's opted-in/custom servers.
+ *   source = "catalog"             — published platform connectors (templates).
  */
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
+  Button,
   Checkbox,
-  Collapse,
+  Input,
+  Segmented,
   Space,
   Spin,
   Tag,
@@ -45,28 +37,17 @@ import {
   listCatalogTools,
 } from "../../../api/mcp-catalog";
 
-// ── Types ──────────────────────────────────────────────────────────────────
+const { Text } = Typography;
 
-/** Where the picker sources selectable servers from:
- *   - ``available`` (default): the tenant's opted-in + custom servers
- *     (``/v1/mcp-servers/available``). For a tenant agent that runs now.
- *   - ``catalog``: published platform connectors (``/v1/platform/mcp-catalog``,
- *     ``enabled`` only). For a platform Agent template — a blueprint that
- *     references connectors by name, so it lists the catalog directly instead
- *     of requiring a per-tenant opt-in that doesn't apply to a template. */
 export type McpPickerSource = "available" | "catalog";
 
 interface McpToolPickerProps {
   servers: string[];
   allowTools: string[];
-  onServersChange: (next: string[]) => void;
-  onAllowToolsChange: (next: string[]) => void;
+  onChange: (servers: string[], allowTools: string[]) => void;
   source?: McpPickerSource;
 }
 
-/** Normalised row shown in the list, regardless of source. ``toolKey`` is the
- * argument the tool-list endpoint needs (server name for ``available``, catalog
- * id for ``catalog``). */
 interface ServerRow {
   name: string;
   label: string;
@@ -75,37 +56,34 @@ interface ServerRow {
   toolKey: string;
 }
 
-type ServerLoadState =
+type ToolState =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "loaded"; tools: McpTool[] }
   | { kind: "error" };
 
-// ── Component ──────────────────────────────────────────────────────────────
-
 export function McpToolPicker({
   servers,
   allowTools,
-  onServersChange,
-  onAllowToolsChange,
+  onChange,
   source = "available",
 }: McpToolPickerProps) {
   const { t } = useTranslation();
 
   const [rows, setRows] = useState<ServerRow[]>([]);
-  const [serversLoading, setServersLoading] = useState(true);
-  const [serversError, setServersError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [toolStates, setToolStates] = useState<Record<string, ToolState>>({});
+  const [serverQuery, setServerQuery] = useState("");
+  const [toolQuery, setToolQuery] = useState<Record<string, string>>({});
+  const [scopeOverride, setScopeOverride] = useState<
+    Record<string, "all" | "specific">
+  >({});
 
-  // Per-server tool fetch state; keyed by server name
-  const [toolStates, setToolStates] = useState<Record<string, ServerLoadState>>(
-    {},
-  );
-
-  // ── Load selectable servers on mount (source-dependent) ──────────────────
-
+  // ── Load selectable servers (source-dependent) ───────────────────────────
   useEffect(() => {
     let alive = true;
-    setServersLoading(true);
+    setLoading(true);
     const load: Promise<ServerRow[]> =
       source === "catalog"
         ? listPlatformCatalog().then((entries) =>
@@ -135,12 +113,12 @@ export function McpToolPicker({
       (data) => {
         if (!alive) return;
         setRows(data);
-        setServersLoading(false);
+        setLoading(false);
       },
       (err: unknown) => {
         if (!alive) return;
-        setServersError(err instanceof Error ? err.message : "unknown error");
-        setServersLoading(false);
+        setError(err instanceof Error ? err.message : "unknown error");
+        setLoading(false);
       },
     );
     return () => {
@@ -148,73 +126,107 @@ export function McpToolPicker({
     };
   }, [source, t]);
 
-  // ── Fetch tools for a server on first expand ─────────────────────────────
-
+  // ── Per-server tool fetch ────────────────────────────────────────────────
   const fetchTools = useCallback(
     (row: ServerRow) => {
       const current = toolStates[row.name];
-      // Already loaded or in flight — skip.
-      if (current?.kind === "loaded" || current?.kind === "loading") {
-        return;
-      }
+      if (current?.kind === "loaded" || current?.kind === "loading") return;
       setToolStates((prev) => ({ ...prev, [row.name]: { kind: "loading" } }));
-      const fetch: Promise<McpTool[]> =
+      const req: Promise<McpTool[]> =
         source === "catalog"
           ? listCatalogTools(row.toolKey).then((res) =>
               res.status === "ok"
                 ? res.tools
-                    .filter((tool) => !tool.disabled)
-                    .map((tool) => ({
-                      name: tool.name,
-                      description: tool.description,
-                    }))
+                    .filter((x) => !x.disabled)
+                    .map((x) => ({ name: x.name, description: x.description }))
                 : Promise.reject(new Error(res.error ?? "unreachable")),
             )
           : listMcpServerTools(row.toolKey);
-      fetch.then(
-        (tools) => {
+      req.then(
+        (tools) =>
           setToolStates((prev) => ({
             ...prev,
             [row.name]: { kind: "loaded", tools },
-          }));
-        },
-        () => {
-          setToolStates((prev) => ({ ...prev, [row.name]: { kind: "error" } }));
-        },
+          })),
+        () =>
+          setToolStates((prev) => ({ ...prev, [row.name]: { kind: "error" } })),
       );
     },
     [toolStates, source],
   );
 
-  // ── Server checkbox handler ───────────────────────────────────────────────
+  // Pre-load tools for already-selected servers (from the manifest) so their
+  // scope derives correctly and the tool list is ready without a manual expand.
+  // ``fetchTools`` self-guards against duplicate loads.
+  useEffect(() => {
+    for (const row of rows) {
+      if (servers.includes(row.name)) fetchTools(row);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, servers]);
 
-  const handleServerToggle = useCallback(
-    (name: string, checked: boolean) => {
-      if (checked) {
-        onServersChange([...servers, name]);
-      } else {
-        onServersChange(servers.filter((s) => s !== name));
-      }
-    },
-    [servers, onServersChange],
-  );
+  const toolNamesOf = (name: string): string[] => {
+    const st = toolStates[name];
+    return st?.kind === "loaded" ? st.tools.map((x) => x.name) : [];
+  };
 
-  // ── Tool checkbox handler ─────────────────────────────────────────────────
+  // The tool scope for a server: explicit override, else derived — if any of
+  // the server's loaded tools are in allow_tools it's "specific", else "all".
+  const scopeOf = (name: string): "all" | "specific" => {
+    if (scopeOverride[name]) return scopeOverride[name];
+    const names = new Set(toolNamesOf(name));
+    return allowTools.some((a) => names.has(a)) ? "specific" : "all";
+  };
 
-  const handleToolToggle = useCallback(
-    (toolName: string, checked: boolean) => {
-      if (checked) {
-        onAllowToolsChange([...allowTools, toolName]);
-      } else {
-        onAllowToolsChange(allowTools.filter((t) => t !== toolName));
-      }
-    },
-    [allowTools, onAllowToolsChange],
-  );
+  // ── Mutations (always one combined onChange) ─────────────────────────────
+  const toggleServer = (row: ServerRow, on: boolean): void => {
+    if (on) {
+      onChange([...servers, row.name], allowTools);
+      fetchTools(row);
+    } else {
+      const names = new Set(toolNamesOf(row.name));
+      onChange(
+        servers.filter((s) => s !== row.name),
+        allowTools.filter((a) => !names.has(a)),
+      );
+    }
+  };
 
-  // ── Loading state ────────────────────────────────────────────────────────
+  const setScope = (row: ServerRow, value: "all" | "specific"): void => {
+    setScopeOverride((prev) => ({ ...prev, [row.name]: value }));
+    if (value === "all") {
+      const names = new Set(toolNamesOf(row.name));
+      onChange(
+        servers,
+        allowTools.filter((a) => !names.has(a)),
+      );
+    } else {
+      fetchTools(row);
+    }
+  };
 
-  if (serversLoading) {
+  const toggleTool = (toolName: string, on: boolean): void =>
+    onChange(
+      servers,
+      on ? [...allowTools, toolName] : allowTools.filter((a) => a !== toolName),
+    );
+
+  const selectAllTools = (toolList: McpTool[]): void =>
+    onChange(
+      servers,
+      Array.from(new Set([...allowTools, ...toolList.map((x) => x.name)])),
+    );
+
+  const clearTools = (toolList: McpTool[]): void => {
+    const names = new Set(toolList.map((x) => x.name));
+    onChange(
+      servers,
+      allowTools.filter((a) => !names.has(a)),
+    );
+  };
+
+  // ── Loading / error / empty ──────────────────────────────────────────────
+  if (loading) {
     return (
       <div style={{ padding: "8px 0" }}>
         <Space size={4}>
@@ -224,23 +236,17 @@ export function McpToolPicker({
       </div>
     );
   }
-
-  // ── Error state ──────────────────────────────────────────────────────────
-
-  if (serversError !== null) {
+  if (error !== null) {
     return (
       <Alert
         type="error"
         showIcon
         message={t("agent_form.mcp_servers_load_failed")}
-        description={serversError}
+        description={error}
         style={{ marginBottom: 8 }}
       />
     );
   }
-
-  // ── Empty state ──────────────────────────────────────────────────────────
-
   if (rows.length === 0) {
     return (
       <div
@@ -259,93 +265,98 @@ export function McpToolPicker({
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
-
-  const checkedServers = new Set(servers);
+  const checked = new Set(servers);
+  const q = serverQuery.trim().toLowerCase();
+  const visibleRows = q
+    ? rows.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) || r.label.toLowerCase().includes(q),
+      )
+    : rows;
 
   return (
     <div>
-      {/* Servers section */}
-      <div style={{ marginBottom: 6 }}>
-        <Typography.Text strong style={{ display: "block", marginBottom: 2 }}>
-          {t("agent_form.mcp_servers_label")}
-        </Typography.Text>
-        <Typography.Text
-          type="secondary"
-          style={{ fontSize: 12, display: "block", marginBottom: 8 }}
-        >
-          {t("agent_form.mcp_servers_hint")}
-        </Typography.Text>
+      <Text strong style={{ display: "block", marginBottom: 8 }}>
+        {t("agent_form.mcp_servers_label")}
+      </Text>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {rows.map((server) => {
-            const isChecked = checkedServers.has(server.name);
-            return (
-              <div key={server.name}>
-                {/* Server checkbox row */}
-                <Space size={6} align="center">
-                  <Checkbox
-                    data-testid={`af-mcp-server-${server.name}`}
-                    checked={isChecked}
-                    onChange={(e) =>
-                      handleServerToggle(server.name, e.target.checked)
-                    }
-                  >
-                    <span style={{ fontWeight: 500 }}>{server.label}</span>
-                  </Checkbox>
-                  <Tag color={server.tagColor} style={{ fontSize: 11 }}>
-                    {server.tagText}
-                  </Tag>
-                </Space>
+      {rows.length > 6 && (
+        <Input.Search
+          allowClear
+          size="small"
+          data-testid="af-mcp-server-search"
+          placeholder={t("agent_form.mcp_server_search")}
+          value={serverQuery}
+          onChange={(e) => setServerQuery(e.target.value)}
+          style={{ marginBottom: 8, maxWidth: 280 }}
+        />
+      )}
 
-                {/* Tools section — only shown when server is checked */}
-                {isChecked && (
-                  <div style={{ marginLeft: 24, marginTop: 4 }}>
-                    <Collapse
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {visibleRows.map((row) => {
+          const isChecked = checked.has(row.name);
+          return (
+            <div key={row.name}>
+              <Space size={6} align="center">
+                <Checkbox
+                  data-testid={`af-mcp-server-${row.name}`}
+                  checked={isChecked}
+                  onChange={(e) => toggleServer(row, e.target.checked)}
+                >
+                  <span style={{ fontWeight: 500 }}>{row.label}</span>
+                </Checkbox>
+                <Tag color={row.tagColor} style={{ fontSize: 11 }}>
+                  {row.tagText}
+                </Tag>
+              </Space>
+
+              {isChecked && (
+                <div style={{ marginLeft: 24, marginTop: 6 }}>
+                  <Space size={8} align="center" style={{ marginBottom: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t("agent_form.mcp_scope_label")}
+                    </Text>
+                    <Segmented
                       size="small"
-                      data-testid={`af-mcp-tools-${server.name}`}
-                      onChange={(keys) => {
-                        if (keys.length > 0) {
-                          fetchTools(server);
-                        }
-                      }}
-                      items={[
+                      data-testid={`af-mcp-scope-${row.name}`}
+                      value={scopeOf(row.name)}
+                      onChange={(v) => setScope(row, v as "all" | "specific")}
+                      options={[
+                        { label: t("agent_form.mcp_scope_all"), value: "all" },
                         {
-                          key: "tools",
-                          label: (
-                            <Typography.Text style={{ fontSize: 12 }}>
-                              {t("agent_form.mcp_tools_label")}
-                            </Typography.Text>
-                          ),
-                          children: renderToolsPanel(server.name),
+                          label: t("agent_form.mcp_scope_specific"),
+                          value: "specific",
                         },
                       ]}
                     />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                  </Space>
+                  {scopeOf(row.name) === "specific" && (
+                    <div data-testid={`af-mcp-tools-${row.name}`}>
+                      {renderToolPicker(row)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 
-  // ── Inner renderer for the tools Collapse panel ──────────────────────────
-
-  function renderToolsPanel(serverName: string) {
-    const state = toolStates[serverName] ?? { kind: "idle" };
-
+  // ── Per-server tool picker (specific scope) ──────────────────────────────
+  function renderToolPicker(row: ServerRow) {
+    const state = toolStates[row.name] ?? { kind: "idle" };
     if (state.kind === "idle" || state.kind === "loading") {
       return (
         <Space size={4}>
           <Spin size="small" />
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
             {t("agent_form.mcp_tools_loading")}
-          </Typography.Text>
+          </Text>
         </Space>
       );
     }
-
     if (state.kind === "error") {
       return (
         <Alert
@@ -356,25 +367,68 @@ export function McpToolPicker({
         />
       );
     }
-
-    // state.kind === "loaded"
     const tools = state.tools;
+    const tq = (toolQuery[row.name] ?? "").trim().toLowerCase();
+    const shown = tq
+      ? tools.filter((x) => x.name.toLowerCase().includes(tq))
+      : tools;
+    const selectedCount = tools.filter((x) =>
+      allowTools.includes(x.name),
+    ).length;
 
     return (
-      <div>
-        <Typography.Text
-          type="secondary"
-          style={{ fontSize: 11, display: "block", marginBottom: 6 }}
+      <div
+        style={{
+          border: "1px solid var(--hx-border, #303030)",
+          borderRadius: 6,
+          padding: 8,
+        }}
+      >
+        <Space size={8} style={{ marginBottom: 6, flexWrap: "wrap" }}>
+          <Input.Search
+            allowClear
+            size="small"
+            data-testid={`af-mcp-tool-search-${row.name}`}
+            placeholder={t("agent_form.mcp_tool_search")}
+            value={toolQuery[row.name] ?? ""}
+            onChange={(e) =>
+              setToolQuery((prev) => ({ ...prev, [row.name]: e.target.value }))
+            }
+            style={{ width: 180 }}
+          />
+          <Button
+            size="small"
+            data-testid={`af-mcp-select-all-${row.name}`}
+            onClick={() => selectAllTools(tools)}
+          >
+            {t("agent_form.mcp_select_all")}
+          </Button>
+          <Button
+            size="small"
+            data-testid={`af-mcp-clear-${row.name}`}
+            onClick={() => clearTools(tools)}
+          >
+            {t("agent_form.mcp_clear")}
+          </Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("agent_form.mcp_selected_count", { count: selectedCount })}
+          </Text>
+        </Space>
+        <div
+          style={{
+            maxHeight: 240,
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+          }}
         >
-          {t("agent_form.mcp_tools_hint")}
-        </Typography.Text>
-        {tools.length === 0 ? (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            —
-          </Typography.Text>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {tools.map((tool) => (
+          {shown.length === 0 ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              —
+            </Text>
+          ) : (
+            shown.map((tool) => (
               <Tooltip
                 key={tool.name}
                 title={tool.description || undefined}
@@ -383,18 +437,14 @@ export function McpToolPicker({
                 <Checkbox
                   data-testid={`af-mcp-tool-${tool.name}`}
                   checked={allowTools.includes(tool.name)}
-                  onChange={(e) =>
-                    handleToolToggle(tool.name, e.target.checked)
-                  }
+                  onChange={(e) => toggleTool(tool.name, e.target.checked)}
                 >
-                  <Typography.Text style={{ fontSize: 13 }}>
-                    {tool.name}
-                  </Typography.Text>
+                  <Text style={{ fontSize: 13 }}>{tool.name}</Text>
                 </Checkbox>
               </Tooltip>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
       </div>
     );
   }

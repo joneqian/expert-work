@@ -203,6 +203,8 @@ export function ManifestEditor({
         data-testid={`manifest-tab-${value}`}
         onClick={() => switchTo(value)}
         style={{
+          flex: "0 0 auto",
+          whiteSpace: "nowrap",
           padding: "4px 16px",
           border: "1px solid var(--hx-border, #303030)",
           background: active ? "var(--hx-brand, #13c2c2)" : "transparent",
@@ -247,9 +249,15 @@ export function ManifestEditor({
 
   return (
     <div data-testid={`manifest-editor-${mode}`}>
+      {/* One flat row; horizontally scrollable so a long tab set never wraps. */}
       <div
         role="tablist"
-        style={{ display: "flex", flexWrap: "wrap", marginBottom: 12 }}
+        style={{
+          display: "flex",
+          flexWrap: "nowrap",
+          overflowX: "auto",
+          marginBottom: 12,
+        }}
       >
         {leadingTabs.map((lt) => tabButton(lt.value, lt.label))}
         {MANIFEST_TABS.map((tabDef) =>

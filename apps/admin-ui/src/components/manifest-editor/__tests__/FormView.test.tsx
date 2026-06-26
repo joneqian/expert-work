@@ -7,6 +7,16 @@ import * as catalog from "../catalog";
 import { FormView, type FormSection } from "../FormView";
 import type { AgentManifest } from "../form_model";
 
+// The MCP tab mounts McpToolPicker, which loads servers on mount.
+vi.mock("../../../api/mcp-servers", () => ({
+  listAvailableMcpServers: vi.fn().mockResolvedValue([]),
+  listMcpServerTools: vi.fn().mockResolvedValue([]),
+}));
+vi.mock("../../../api/mcp-catalog", () => ({
+  listPlatformCatalog: vi.fn().mockResolvedValue([]),
+  listCatalogTools: vi.fn().mockResolvedValue({ status: "ok", tools: [] }),
+}));
+
 vi.spyOn(catalog, "loadModelCatalog").mockResolvedValue({
   providers: [
     {
@@ -66,12 +76,13 @@ describe("FormView", () => {
 
     renderSection("tools");
     expect(screen.getByTestId("af-tools")).toBeInTheDocument();
-    // MCP is its own section now, not under tools.
+    // MCP is its own section now, not under tools — and there's no longer a
+    // separate "MCP 工具" enable checkbox (selecting a server enables MCP).
     expect(screen.queryByTestId("af-tool-mcp")).not.toBeInTheDocument();
 
     renderSection("mcp");
     expect(screen.getByTestId("af-mcp")).toBeInTheDocument();
-    expect(screen.getByTestId("af-tool-mcp")).toBeInTheDocument();
+    expect(screen.queryByTestId("af-tool-mcp")).not.toBeInTheDocument();
 
     renderSection("capabilities");
     expect(screen.getByTestId("af-knowledge")).toBeInTheDocument();

@@ -181,34 +181,25 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   await nameInput.clear();
   await nameInput.fill("mcp-agent");
 
-  // MCP lives under its own "MCP" tab now.
+  // MCP lives under its own "MCP" tab now — no separate enable checkbox; the
+  // server list shows directly and selecting a server enables MCP.
   await page.getByTestId("manifest-tab-mcp").click();
 
-  // Enable the MCP tool checkbox.
-  await page.getByTestId("af-tool-mcp").click();
-
   // The McpToolPicker mounts and fetches /v1/mcp-servers/available.
-  // After the stub responds, the github checkbox should appear.
   await expect(page.getByTestId("af-mcp-server-github")).toBeVisible();
   await expect(page.getByTestId("af-mcp-server-fs")).toBeVisible();
 
-  // Check the github server.
+  // Check the github server (= enable MCP with github selected).
   await page.getByTestId("af-mcp-server-github").click();
 
-  // The tools collapse becomes visible for the checked server.
-  await expect(page.getByTestId("af-mcp-tools-github")).toBeVisible();
-
-  // Expand the github tools collapse (click its header).
+  // Switch the tool scope to "specific" to reveal github's tool list.
   await page
-    .getByTestId("af-mcp-tools-github")
-    .locator(".ant-collapse-header")
-    .first()
+    .getByTestId("af-mcp-scope-github")
+    .getByText(/指定|Specific/)
     .click();
 
-  // Wait for create_issue tool checkbox.
+  // Wait for + check the create_issue tool.
   await expect(page.getByTestId("af-mcp-tool-create_issue")).toBeVisible();
-
-  // Check create_issue.
   await page.getByTestId("af-mcp-tool-create_issue").click();
 
   // Intercept the POST and grab its body.
@@ -237,11 +228,10 @@ test("(b) create drawer with MCP picker passes axe (serious + critical)", async 
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
 
-  // MCP lives under its own "MCP" tab now.
+  // MCP lives under its own "MCP" tab now (no separate enable checkbox).
   await page.getByTestId("manifest-tab-mcp").click();
 
-  // Enable MCP and wait for the picker to load so axe sees the full DOM.
-  await page.getByTestId("af-tool-mcp").click();
+  // Wait for the picker to load so axe sees the full DOM.
   await expect(page.getByTestId("af-mcp-server-github")).toBeVisible();
 
   await expectNoA11yViolations(page, "create-agent-drawer-mcp");

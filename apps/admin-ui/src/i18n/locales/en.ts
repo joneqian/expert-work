@@ -331,6 +331,14 @@ export interface TranslationKeys {
     tool_http: string;
     tool_mcp: string;
     mcp_servers_label: string;
+    mcp_server_search: string;
+    mcp_tool_search: string;
+    mcp_scope_label: string;
+    mcp_scope_all: string;
+    mcp_scope_specific: string;
+    mcp_select_all: string;
+    mcp_clear: string;
+    mcp_selected_count: string;
     mcp_servers_hint: string;
     mcp_no_servers_available: string;
     mcp_no_servers_catalog: string;
@@ -2184,6 +2192,14 @@ const en: TranslationKeys = {
     tool_http: "HTTP tool",
     tool_mcp: "MCP tools",
     mcp_servers_label: "MCP servers this agent can use",
+    mcp_server_search: "Search servers",
+    mcp_tool_search: "Search tools",
+    mcp_scope_label: "Tools:",
+    mcp_scope_all: "All tools",
+    mcp_scope_specific: "Specific",
+    mcp_select_all: "Select all",
+    mcp_clear: "Clear",
+    mcp_selected_count: "{{count}} selected",
     mcp_servers_hint: "Leave all unchecked to allow every available server",
     mcp_no_servers_available:
       "No MCP servers available yet. Enable one under Settings → MCP Servers → Add → enable from the catalog.",
