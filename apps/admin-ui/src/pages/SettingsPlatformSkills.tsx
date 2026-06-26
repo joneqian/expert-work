@@ -36,6 +36,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { PageHeader } from "../components/PageHeader";
+import { FieldHelp } from "../components/FieldHelp";
 import {
   bulkUpdatePlatformSkills,
   importPlatformSkill,
@@ -586,6 +587,7 @@ export function SettingsPlatformSkills() {
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <Text style={{ fontSize: 12, fontWeight: 600 }}>
               {t("platform_skills.github_source_label")}
+              <FieldHelp text={t("platform_skills.github_source_help")} testId="ps-github-source" />
             </Text>
             <Input
               value={ghSource}
@@ -607,6 +609,10 @@ export function SettingsPlatformSkills() {
               >
                 <Text style={{ fontSize: 12, fontWeight: 600 }}>
                   {t("platform_skills.github_skill_label")}
+                  <FieldHelp
+                    text={t("platform_skills.github_skill_help")}
+                    testId="ps-github-skill-picker"
+                  />
                 </Text>
                 <Button
                   size="small"
@@ -677,6 +683,7 @@ export function SettingsPlatformSkills() {
             <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <Text style={{ fontSize: 12, fontWeight: 600 }}>
                 {t("platform_skills.github_skill_label")}
+                <FieldHelp text={t("platform_skills.github_skill_help")} testId="ps-github-skill" />
               </Text>
               <Input
                 value={ghSkill}
@@ -689,6 +696,7 @@ export function SettingsPlatformSkills() {
           <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <Text style={{ fontSize: 12, fontWeight: 600 }}>
               {t("platform_skills.github_ref_label")}
+              <FieldHelp text={t("platform_skills.github_ref_help")} testId="ps-github-ref" />
             </Text>
             <Input
               value={ghRef}

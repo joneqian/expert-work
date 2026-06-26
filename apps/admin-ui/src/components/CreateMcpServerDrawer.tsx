@@ -30,6 +30,8 @@ import {
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { FieldHelp } from "./FieldHelp";
+
 import {
   createMcpServer,
   testMcpConnection,
@@ -276,7 +278,12 @@ export function CreateMcpServerDrawer({
     <>
       <Form.Item
         name="name"
-        label={t("create_mcp_server.field_name")}
+        label={
+          <>
+            {t("create_mcp_server.field_name")}
+            <FieldHelp text={t("create_mcp_server.field_name_help")} testId="cms-name" />
+          </>
+        }
         rules={[
           { required: true, message: t("create_mcp_server.name_required") },
           {
@@ -296,7 +303,12 @@ export function CreateMcpServerDrawer({
 
       <Form.Item
         name="transport"
-        label={t("create_mcp_server.field_transport")}
+        label={
+          <>
+            {t("create_mcp_server.field_transport")}
+            <FieldHelp text={t("create_mcp_server.field_transport_help")} testId="cms-transport" />
+          </>
+        }
       >
         <Select<McpTransport>
           data-testid="cms-transport"
@@ -308,7 +320,12 @@ export function CreateMcpServerDrawer({
 
       <Form.Item
         name="url"
-        label={t("create_mcp_server.field_url")}
+        label={
+          <>
+            {t("create_mcp_server.field_url")}
+            <FieldHelp text={t("create_mcp_server.field_url_help")} testId="cms-url" />
+          </>
+        }
         rules={[
           { required: true, message: t("create_mcp_server.url_required") },
           {
@@ -330,7 +347,15 @@ export function CreateMcpServerDrawer({
         />
       </Form.Item>
 
-      <Form.Item name="auth_type" label={t("create_mcp_server.field_auth")}>
+      <Form.Item
+        name="auth_type"
+        label={
+          <>
+            {t("create_mcp_server.field_auth")}
+            <FieldHelp text={t("create_mcp_server.field_auth_help")} testId="cms-auth" />
+          </>
+        }
+      >
         <Select<McpAuthType>
           data-testid="cms-auth"
           aria-label={t("create_mcp_server.field_auth")}
@@ -345,7 +370,12 @@ export function CreateMcpServerDrawer({
       {authType === "bearer" && (
         <Form.Item
           name="token"
-          label={t("create_mcp_server.field_token")}
+          label={
+            <>
+              {t("create_mcp_server.field_token")}
+              <FieldHelp text={t("create_mcp_server.field_token_help")} testId="cms-token" />
+            </>
+          }
           extra={
             isEditing
               ? t("create_mcp_server.token_hint_edit")
@@ -484,7 +514,15 @@ export function CreateMcpServerDrawer({
 
   const configTab = (
     <>
-      <Form.Item name="timeout_s" label={t("create_mcp_server.field_timeout")}>
+      <Form.Item
+        name="timeout_s"
+        label={
+          <>
+            {t("create_mcp_server.field_timeout")}
+            <FieldHelp text={t("create_mcp_server.field_timeout_help")} testId="cms-timeout" />
+          </>
+        }
+      >
         <InputNumber
           data-testid="cms-timeout"
           aria-label={t("create_mcp_server.field_timeout")}
@@ -496,7 +534,15 @@ export function CreateMcpServerDrawer({
       </Form.Item>
       <Form.Item
         name="sse_read_timeout_s"
-        label={t("create_mcp_server.field_sse_read_timeout")}
+        label={
+          <>
+            {t("create_mcp_server.field_sse_read_timeout")}
+            <FieldHelp
+              text={t("create_mcp_server.field_sse_read_timeout_help")}
+              testId="cms-sse-timeout"
+            />
+          </>
+        }
         extra={t("create_mcp_server.sse_read_timeout_hint")}
       >
         <InputNumber

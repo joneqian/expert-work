@@ -181,6 +181,9 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   await nameInput.clear();
   await nameInput.fill("mcp-agent");
 
+  // Tools live under the collapsed "Advanced" panel — expand it first.
+  await page.getByTestId("af-advanced").locator(".ant-collapse-header").first().click();
+
   // Enable the MCP tool checkbox.
   await page.getByTestId("af-tool-mcp").click();
 
@@ -227,6 +230,9 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
 test("(b) create drawer with MCP picker passes axe (serious + critical)", async ({ page }) => {
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
+
+  // Tools live under the collapsed "Advanced" panel — expand it first.
+  await page.getByTestId("af-advanced").locator(".ant-collapse-header").first().click();
 
   // Enable MCP and wait for the picker to load so axe sees the full DOM.
   await page.getByTestId("af-tool-mcp").click();

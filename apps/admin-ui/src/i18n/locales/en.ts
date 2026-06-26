@@ -22,6 +22,7 @@ export interface TranslationKeys {
     notifications: string;
     user_menu: string;
     anonymous: string;
+    field_help: string;
   };
   theme: {
     switch_to_light: string;
@@ -319,6 +320,7 @@ export interface TranslationKeys {
     memory_hint: string;
     memory_topk: string;
     section_tools: string;
+    section_advanced: string;
     tool_web_search: string;
     tool_http: string;
     tool_mcp: string;
@@ -336,6 +338,17 @@ export interface TranslationKeys {
     section_reflection_evaluator: string;
     reflection_evaluator_hint: string;
     reflection_evaluator_clear: string;
+    field_name_help: string;
+    field_description_help: string;
+    section_model_help: string;
+    section_prompt_help: string;
+    section_memory_help: string;
+    memory_topk_help: string;
+    section_reflection_evaluator_help: string;
+    section_tools_help: string;
+    tool_web_search_help: string;
+    tool_http_help: string;
+    tool_mcp_help: string;
   };
   playground: {
     session_label: string;
@@ -678,6 +691,13 @@ export interface TranslationKeys {
     header_name_invalid: string;
     field_sse_read_timeout: string;
     sse_read_timeout_hint: string;
+    field_name_help: string;
+    field_transport_help: string;
+    field_url_help: string;
+    field_auth_help: string;
+    field_token_help: string;
+    field_timeout_help: string;
+    field_sse_read_timeout_help: string;
   };
   mcp_catalog: {
     page_title: string;
@@ -1320,6 +1340,16 @@ export interface TranslationKeys {
     field_status: string;
     field_enabled: string;
     field_manifest: string;
+    tab_basic: string;
+    tab_manifest: string;
+    field_display_name_help: string;
+    field_description_help: string;
+    field_category_help: string;
+    field_icon_help: string;
+    field_tier_help: string;
+    field_status_help: string;
+    field_enabled_help: string;
+    field_manifest_help: string;
     cat_support: string;
     cat_sales: string;
     cat_research: string;
@@ -1339,10 +1369,13 @@ export interface TranslationKeys {
     github_hint: string;
     github_source_label: string;
     github_source_ph: string;
+    github_source_help: string;
     github_skill_label: string;
     github_skill_ph: string;
+    github_skill_help: string;
     github_ref_label: string;
     github_ref_ph: string;
+    github_ref_help: string;
     github_submit: string;
     github_pick_skill: string;
     github_pick_ph: string;
@@ -1697,6 +1730,7 @@ export interface TranslationKeys {
     label_knowledge: string;
     label_skills: string;
     label_skill_marketplace: string;
+    label_agent_template_marketplace: string;
     label_triggers: string;
     label_webhooks: string;
     label_settings_api_keys: string;
@@ -1770,6 +1804,7 @@ const en: TranslationKeys = {
     notifications: "Notifications",
     user_menu: "User menu",
     anonymous: "anonymous",
+    field_help: "Field help",
   },
   theme: {
     switch_to_light: "Switch to Light",
@@ -2093,6 +2128,7 @@ const en: TranslationKeys = {
     memory_hint: "Remembers across sessions; needs a platform embedding.",
     memory_topk: "Memories recalled per run",
     section_tools: "Tools",
+    section_advanced: "Advanced (memory · reflection · tools)",
     tool_web_search: "Web search",
     tool_http: "HTTP tool",
     tool_mcp: "MCP tools",
@@ -2113,6 +2149,28 @@ const en: TranslationKeys = {
     reflection_evaluator_hint:
       "When reflection is enabled, which model judges whether the task is done. Leave empty to reuse the agent's own model. Prefer a different model — not necessarily stronger; an independent vantage counters the model's bias toward its own output and covers shared blind spots (same-model self-critique tends to declare 'done' early and miss its own errors). Pick a stronger model for deep-reasoning tasks.",
     reflection_evaluator_clear: "Clear (use the agent's own model)",
+    field_name_help:
+      "The agent's unique id (agent_code) external apps call by. Lowercase letters, digits, hyphens.\nExample: support-bot",
+    field_description_help:
+      "One line on what this agent does, shown to users.\nExample: Customer-support assistant for product questions",
+    section_model_help:
+      "The LLM powering the agent's main conversation. Pick provider then model; higher temperature = more creative.\nExample: anthropic / claude-sonnet-4-5, temperature 0.2",
+    section_prompt_help:
+      "System prompt — defines the agent's role, tone, and rules. The core of its persona.\nExample: You are a senior Python engineer; answer concisely with runnable code.",
+    section_memory_help:
+      "When on, the agent remembers user facts + past interactions across sessions and recalls them next time. Off = each chat starts fresh.\nExample: on, topK=5",
+    memory_topk_help:
+      "How many most-relevant memories to inject per chat. Too many crowd the context; too few miss info.\nExample: 5",
+    section_reflection_evaluator_help:
+      "Optional. An evaluator model that lets the agent self-reflect / score before replying, raising quality. Skip to disable.\nExample: leave empty, or pick claude-haiku for light evaluation",
+    section_tools_help:
+      "Check the tools the agent may use. More capability = more power but harder to control.\nExample: web search + MCP",
+    tool_web_search_help:
+      "Let the agent search the web for fresh info (via the platform's search service).\nExample: needed for 'today's news' questions",
+    tool_http_help:
+      "Let the agent make HTTP requests to external APIs (through the audited egress proxy).\nExample: weather API, internal services",
+    tool_mcp_help:
+      "Let the agent call tools exposed by MCP servers (databases, business systems). Pick servers + tools below.\nExample: your company's CRM MCP",
   },
   playground: {
     session_label: "Session",
@@ -2483,6 +2541,20 @@ const en: TranslationKeys = {
     field_sse_read_timeout: "SSE read timeout (seconds)",
     sse_read_timeout_hint:
       "Per-read wait for SSE streams. Leave blank for the default (300s).",
+    field_name_help:
+      "A unique name for this MCP server within your tenant; agents reference it by this name.\nExample: company-crm",
+    field_transport_help:
+      "How the client connects to the MCP server. SSE / streamable-http for remote servers.\nExample: sse",
+    field_url_help:
+      "The MCP server's endpoint URL. Must be reachable from the platform (private IPs are blocked).\nExample: https://mcp.example.com/sse",
+    field_auth_help:
+      "How to authenticate to the server. none = open; bearer = a static token; oauth2 = per-user login.\nExample: bearer",
+    field_token_help:
+      "The bearer token sent as Authorization. Stored encrypted; leave blank on edit to keep the existing one.\nExample: sk-xxxx (paste the real token)",
+    field_timeout_help:
+      "Max seconds to wait for a single MCP request before giving up.\nExample: 30",
+    field_sse_read_timeout_help:
+      "Max seconds to wait between chunks on an SSE stream. Leave blank for the default (300s).\nExample: 300",
   },
   mcp_catalog: {
     page_title: "MCP Catalog",
@@ -3206,6 +3278,23 @@ const en: TranslationKeys = {
     field_status: "Status",
     field_enabled: "Enabled",
     field_manifest: "Manifest",
+    tab_basic: "Basic info",
+    tab_manifest: "Agent config",
+    field_display_name_help:
+      "The template's name shown to tenants in the marketplace.\nExample: Smart Support Bot",
+    field_description_help:
+      "Short description of the template's purpose, helping tenants decide whether to fork.\nExample: Ready-to-use multi-turn support agent",
+    field_category_help:
+      "Category for marketplace filtering.\nExample: Support / Sales / Coding",
+    field_icon_help: "An emoji shown on the marketplace card.\nExample: 🤖",
+    field_tier_help:
+      "The tenant plan tier required to fork this template. Lower-tier tenants see it but can't fork.\nExample: Free / Pro / Enterprise",
+    field_status_help:
+      "Draft is admin-only; Published makes it visible + forkable in the marketplace.\nExample: Draft while testing, Publish when ready",
+    field_enabled_help:
+      "Master switch. Off removes it from the marketplace even if published (without deleting).\nExample: turn off to temporarily delist",
+    field_manifest_help:
+      "The agent's full definition (model / prompt / tools / sandbox). Use the form above or switch to YAML. Tenants can edit non-security fields after forking.\nExample: see the form defaults",
     cat_support: "Support",
     cat_sales: "Sales",
     cat_research: "Research",
@@ -3231,6 +3320,12 @@ const en: TranslationKeys = {
     github_skill_ph: "find-skills (optional — required if the repo has many)",
     github_ref_label: "Ref",
     github_ref_ph: "branch / tag / SHA (optional, default branch)",
+    github_source_help:
+      "The GitHub repo to import skills from — owner/repo or full URL.\nExample: anthropics/skills",
+    github_skill_help:
+      "Which skill folder(s) inside the repo to import. Leave a single name, or pick from the detected list.\nExample: pptx",
+    github_ref_help:
+      "Git ref to import from — branch, tag, or commit SHA. Blank = the repo's default branch.\nExample: main",
     github_submit: "Import",
     github_pick_skill:
       "This repo has {{count}} skills — pick one or more to import.",
@@ -3603,6 +3698,7 @@ const en: TranslationKeys = {
     label_knowledge: "Knowledge",
     label_skills: "Skills",
     label_skill_marketplace: "Skill Marketplace",
+    label_agent_template_marketplace: "Template Marketplace",
     label_triggers: "Triggers",
     label_webhooks: "Webhooks",
     label_settings_api_keys: "Settings · API Keys",
