@@ -1697,6 +1697,7 @@ export interface TranslationKeys {
     label_knowledge: string;
     label_skills: string;
     label_skill_marketplace: string;
+    label_agent_template_marketplace: string;
     label_triggers: string;
     label_webhooks: string;
     label_settings_api_keys: string;
@@ -3603,6 +3604,7 @@ const en: TranslationKeys = {
     label_knowledge: "Knowledge",
     label_skills: "Skills",
     label_skill_marketplace: "Skill Marketplace",
+    label_agent_template_marketplace: "Template Marketplace",
     label_triggers: "Triggers",
     label_webhooks: "Webhooks",
     label_settings_api_keys: "Settings · API Keys",

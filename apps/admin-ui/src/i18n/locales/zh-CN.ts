@@ -1773,6 +1773,7 @@ const zhCN: TranslationKeys = {
     label_knowledge: "知识库",
     label_skills: "技能",
     label_skill_marketplace: "技能市场",
+    label_agent_template_marketplace: "模板市场",
     label_triggers: "触发器",
     label_webhooks: "Webhook",
     label_settings_api_keys: "设置 · API 密钥",
