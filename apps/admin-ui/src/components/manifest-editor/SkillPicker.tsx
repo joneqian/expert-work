@@ -188,7 +188,14 @@ export function SkillPicker({ formData, onChange }: SkillPickerProps) {
                   {o.description && (
                     <Text
                       type="secondary"
-                      style={{ display: "block", fontSize: 13 }}
+                      title={o.description}
+                      style={{
+                        display: "block",
+                        fontSize: 13,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
                     >
                       {o.description}
                     </Text>
