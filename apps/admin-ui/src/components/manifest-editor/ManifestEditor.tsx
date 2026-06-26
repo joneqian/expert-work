@@ -292,15 +292,18 @@ export function ManifestEditor({
           data-testid={`manifest-leading-${lt.value}`}
           style={{ display: tab === lt.value ? "block" : "none" }}
         >
-          {lt.content}
+          {/* Folded manifest section first (e.g. agent name/description on top),
+              then the caller's own content (e.g. template marketplace fields). */}
           {lt.mergeSection && (
             <FormView
               formData={manifestObject}
               onChange={handleFormChange}
               section={lt.mergeSection}
               mcpSource={mcpSource}
+              bare
             />
           )}
+          {lt.content}
         </div>
       ))}
 

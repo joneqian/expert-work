@@ -69,6 +69,10 @@ interface FormViewProps {
   /** Where the MCP tab sources servers — ``catalog`` for a platform template,
    *  ``available`` (default) for a tenant agent. */
   mcpSource?: McpPickerSource;
+  /** Drop the section heading — used when the section is folded into another
+   *  tab (e.g. "basic" merged into a template's "basic info") so there's no
+   *  redundant sub-heading. */
+  bare?: boolean;
 }
 
 const SECTION: React.CSSProperties = { marginBottom: 24 };
@@ -97,6 +101,7 @@ export function FormView({
   onChange,
   section = "basic",
   mcpSource = "available",
+  bare = false,
 }: FormViewProps) {
   const { t } = useTranslation();
   const [catalog, setCatalog] = useState<ModelCatalog | undefined>(undefined);
@@ -131,7 +136,7 @@ export function FormView({
   const sections: Record<FormSection, ReactNode> = {
     basic: (
       <section data-testid="af-basic" style={SECTION}>
-        <Heading>{t("agent_form.section_basic")}</Heading>
+        {!bare && <Heading>{t("agent_form.section_basic")}</Heading>}
         <div style={FIELD} data-testid="af-name">
           <label style={LABEL}>
             {t("agent_form.field_name")}{" "}
