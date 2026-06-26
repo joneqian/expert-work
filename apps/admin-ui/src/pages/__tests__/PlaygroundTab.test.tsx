@@ -47,11 +47,13 @@ const sampleThread: ThreadMeta = {
 const createSessionMock = vi.spyOn(sessionsSdk, "createSession");
 const streamRunMock = vi.spyOn(sessionsSdk, "streamRun");
 const uploadImageMock = vi.spyOn(uploadsSdk, "uploadImage");
+const uploadDocumentMock = vi.spyOn(uploadsSdk, "uploadDocument");
 
 beforeEach(() => {
   createSessionMock.mockReset();
   streamRunMock.mockReset();
   uploadImageMock.mockReset();
+  uploadDocumentMock.mockReset();
 });
 
 afterEach(() => {
@@ -178,6 +180,35 @@ describe("PlaygroundTab", () => {
     );
     // The turn consumed the attachment — chip is cleared afterward.
     expect(screen.queryByTestId("playground-attachment")).not.toBeInTheDocument();
+  });
+
+  it("uploads a document and surfaces its workspace path in the run prompt", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    uploadDocumentMock.mockResolvedValue("uploads/report.pdf");
+    streamRunMock.mockReturnValue(
+      makeStream([
+        { id: "1", event: "end", data: "ok", rawData: "ok", receivedAt: "2026-05-25T00:00:03Z" },
+      ]),
+    );
+    render(<PlaygroundTab detail={sampleDetail} />);
+    await screen.findByText(/33333333-3333-3333/);
+
+    const file = new File(["%PDF-1.4"], "report.pdf", { type: "application/pdf" });
+    await user.upload(screen.getByTestId("playground-doc-input"), file);
+
+    expect(await screen.findByTestId("playground-attachment")).toHaveTextContent("report.pdf");
+    expect(uploadDocumentMock).toHaveBeenCalledWith(sampleThread.thread_id, file);
+
+    await user.type(screen.getByTestId("playground-input"), "summarize it");
+    await user.click(screen.getByTestId("playground-run"));
+    await screen.findByTestId("playground-event-end");
+
+    // The doc path is prepended to the prompt (no image_refs for a doc-only turn).
+    const [, body] = streamRunMock.mock.calls.at(-1) ?? [];
+    expect((body as { input: string }).input).toContain("uploads/report.pdf");
+    expect((body as { input: string }).input).toContain("summarize it");
+    expect((body as { image_refs?: unknown }).image_refs).toBeUndefined();
   });
 
   it("shows an upload-error alert and keeps Run usable when upload fails", async () => {

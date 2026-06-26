@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Space, Tag, Typography } from "antd";
-import { ImagePlus, Play, RotateCcw, Send, Square, X } from "lucide-react";
+import { FileText, ImagePlus, Play, RotateCcw, Send, Square, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
@@ -23,15 +23,19 @@ import {
   type SseEvent,
   type ThreadMeta,
 } from "../../api/sessions";
-import { uploadImage } from "../../api/uploads";
+import { uploadDocument, uploadImage } from "../../api/uploads";
 import type { AgentDetailResponse } from "../../api/agents";
 
-/** An image attached to the next turn — uploaded ahead of Run so the
- *  run request carries only the lightweight ``helix://image/...`` ref. */
+/** Something attached to the next turn, uploaded ahead of Run. An image
+ *  rides as a lightweight ``helix://image/...`` ref (``value``) in
+ *  ``image_refs``; a document lands in the workspace and its relative
+ *  ``value`` path is surfaced to the agent in the prompt so it can
+ *  ``read_document`` it. */
 interface Attachment {
   id: string;
   name: string;
-  ref: string;
+  kind: "image" | "document";
+  value: string;
 }
 
 const { Text } = Typography;
@@ -66,6 +70,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const abortRef = useRef<AbortController | null>(null);
   const eventListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
 
   const newThread = useCallback(async () => {
     setCreatingThread(true);
@@ -108,28 +113,35 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   }, [events]);
 
   const handleAttach = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      // Reset the input so picking the same file twice still fires onChange.
-      event.target.value = "";
-      if (!file || !thread) return;
-      setUploading(true);
-      setUploadError(null);
-      try {
-        const ref = await uploadImage(thread.thread_id, file);
-        setAttachments((prev) => [...prev, { id: ref, name: file.name, ref }]);
-      } catch (err) {
-        const message =
-          err instanceof ApiError
-            ? `${err.code}: ${err.message}`
-            : err instanceof Error
-              ? err.message
-              : "upload failed";
-        setUploadError(message);
-      } finally {
-        setUploading(false);
-      }
-    },
+    (kind: "image" | "document") =>
+      async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        // Reset the input so picking the same file twice still fires onChange.
+        event.target.value = "";
+        if (!file || !thread) return;
+        setUploading(true);
+        setUploadError(null);
+        try {
+          const value =
+            kind === "image"
+              ? await uploadImage(thread.thread_id, file)
+              : await uploadDocument(thread.thread_id, file);
+          setAttachments((prev) => [
+            ...prev,
+            { id: `${kind}:${value}`, name: file.name, kind, value },
+          ]);
+        } catch (err) {
+          const message =
+            err instanceof ApiError
+              ? `${err.code}: ${err.message}`
+              : err instanceof Error
+                ? err.message
+                : "upload failed";
+          setUploadError(message);
+        } finally {
+          setUploading(false);
+        }
+      },
     [thread],
   );
 
@@ -142,13 +154,22 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     setRunning(true);
     setRunError(null);
     setEvents([]);
-    const imageRefs = attachments.map((a) => a.ref);
+    const imageRefs = attachments.filter((a) => a.kind === "image").map((a) => a.value);
+    const docPaths = attachments.filter((a) => a.kind === "document").map((a) => a.value);
+    // Surface uploaded document paths to the agent in the prompt so its LLM
+    // knows it can read them via the read_document tool (the docs already
+    // landed in the workspace; the run message just points at them).
+    const docNote =
+      docPaths.length > 0 ? `${t("playground.uploaded_docs_note")}: ${docPaths.join(", ")}\n\n` : "";
+    const effectiveInput = docNote + input;
     const ac = new AbortController();
     abortRef.current = ac;
     try {
       for await (const frame of streamRun(
         thread.thread_id,
-        imageRefs.length > 0 ? { input, image_refs: imageRefs } : { input },
+        imageRefs.length > 0
+          ? { input: effectiveInput, image_refs: imageRefs }
+          : { input: effectiveInput },
         { signal: ac.signal },
       )) {
         setEvents((prev) => [...prev, frame]);
@@ -168,7 +189,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setRunning(false);
       abortRef.current = null;
     }
-  }, [thread, input, running, attachments]);
+  }, [thread, input, running, attachments, t]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -241,8 +262,17 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           type="file"
           accept="image/png,image/jpeg,image/webp,image/gif"
           style={{ display: "none" }}
-          onChange={handleAttach}
+          onChange={handleAttach("image")}
           data-testid="playground-file-input"
+        />
+
+        <input
+          ref={docInputRef}
+          type="file"
+          accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv"
+          style={{ display: "none" }}
+          onChange={handleAttach("document")}
+          data-testid="playground-doc-input"
         />
 
         {uploadError !== null && (
@@ -301,6 +331,15 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             data-testid="playground-attach"
           >
             {uploading ? t("playground.uploading") : t("playground.attach_image")}
+          </Button>
+          <Button
+            icon={<FileText size={14} strokeWidth={1.75} />}
+            onClick={() => docInputRef.current?.click()}
+            loading={uploading}
+            disabled={!thread || running}
+            data-testid="playground-attach-doc"
+          >
+            {uploading ? t("playground.uploading") : t("playground.attach_document")}
           </Button>
           {running && (
             <Button

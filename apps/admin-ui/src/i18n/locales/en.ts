@@ -391,6 +391,8 @@ export interface TranslationKeys {
     stream_failed: string;
     empty_log: string;
     attach_image: string;
+    attach_document: string;
+    uploaded_docs_note: string;
     attachments_label: string;
     remove_attachment: string;
     upload_failed: string;
@@ -2247,6 +2249,8 @@ const en: TranslationKeys = {
     stream_failed: "Stream failed",
     empty_log: "No events yet — click Run to start.",
     attach_image: "Attach image",
+    attach_document: "Attach document",
+    uploaded_docs_note: "[Uploaded documents — read them with read_document]",
     attachments_label: "Attachments",
     remove_attachment: "Remove attachment",
     upload_failed: "Image upload failed",

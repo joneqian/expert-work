@@ -414,6 +414,8 @@ const zhCN: TranslationKeys = {
     stream_failed: "事件流失败",
     empty_log: "暂无事件 — 点击「运行」开始。",
     attach_image: "添加图片",
+    attach_document: "添加文档",
+    uploaded_docs_note: "[已上传文档 —— 用 read_document 读取]",
     attachments_label: "附件",
     remove_attachment: "移除附件",
     upload_failed: "图片上传失败",
