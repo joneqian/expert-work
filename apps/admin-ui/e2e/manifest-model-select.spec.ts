@@ -134,6 +134,8 @@ test("pick a provider + model via the form turns vision on", async ({ page }) =>
 test("the reflection-evaluator section exposes its own model picker", async ({ page }) => {
   await page.getByTestId("agents-create").click();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
+  // The reflection-evaluator section lives under the collapsed "Advanced" panel.
+  await page.getByTestId("af-advanced").locator(".ant-collapse-header").first().click();
   const evaluator = page.getByTestId("af-reflection-evaluator");
   await expect(evaluator).toBeVisible();
   // Empty by default (reflection reuses the agent's own model) — no clear link.
