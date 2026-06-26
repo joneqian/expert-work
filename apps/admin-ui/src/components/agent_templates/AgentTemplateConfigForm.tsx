@@ -315,11 +315,15 @@ export const AgentTemplateConfigForm = forwardRef<
         mode={isEditing ? "edit" : "create"}
         initialYaml={initialYaml}
         onChange={setYaml}
+        mcpSource="catalog"
         leadingTabs={[
           {
             value: "meta",
             label: t("agent_templates.tab_basic"),
             content: metaForm,
+            // Fold the manifest's "basic" (agent name/description) into this tab
+            // so there's one "basic info" tab, not a metadata + basic split.
+            mergeSection: "basic",
           },
         ]}
       />

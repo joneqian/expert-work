@@ -27,7 +27,7 @@ export function AgentTemplateCreateModal({ open, onClose, onSaved }: Props) {
     <Modal
       open={open}
       title={t("agent_templates.create_title")}
-      width={720}
+      width={900}
       okText={t("agent_templates.create_btn")}
       cancelText={t("common.cancel")}
       confirmLoading={submitting}

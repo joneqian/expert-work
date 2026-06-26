@@ -302,6 +302,7 @@ const zhCN: TranslationKeys = {
     tab_model: "模型",
     tab_prompt: "Prompt",
     tab_tools: "工具",
+    tab_mcp: "MCP",
     tab_capabilities: "知识与技能",
     tab_memory: "记忆",
     tab_governance: "治理",
@@ -338,8 +339,23 @@ const zhCN: TranslationKeys = {
     tool_http: "HTTP 工具",
     tool_mcp: "MCP 工具",
     mcp_servers_label: "此 agent 可用的 MCP 服务器",
+    mcp_server_search: "搜索 server",
+    mcp_tool_search: "搜索工具",
+    mcp_scope_label: "工具:",
+    mcp_scope_all: "全部工具",
+    mcp_scope_specific: "指定工具",
+    mcp_select_all: "全选",
+    mcp_clear: "清空",
+    mcp_selected_count: "已选 {{count}}",
+    mcp_choose_tools: "选择工具",
+    mcp_done: "完成",
+    mcp_all_tools: "全部工具",
+    mcp_tools_count: "已选择工具 {{count}} 个",
     mcp_servers_hint: "全不选 = 允许所有可用 server",
-    mcp_no_servers: "暂无可用 MCP 服务器，请到 设置 → MCP 服务器 注册",
+    mcp_no_servers_available:
+      "暂无可用 MCP 服务器。到 设置 → MCP 服务器 → 添加 → 从目录启用",
+    mcp_no_servers_catalog:
+      "暂无已发布的 MCP 连接器。到 设置 → MCP 目录 发布连接器",
     mcp_source_platform: "平台",
     mcp_source_tenant: "租户",
     mcp_tools_label: "工具",
@@ -374,6 +390,9 @@ const zhCN: TranslationKeys = {
       "可选。配一个评估模型,让 Agent 答复前自我反思/打分,提升质量;不配则跳过。\n示例:留空(不启用),或选 claude-haiku 做轻量评估",
     section_tools_help:
       "勾选 Agent 能用的工具。给的能力越多越强,但也更难控。\n示例:勾联网搜索 + MCP",
+    section_mcp: "MCP",
+    section_mcp_help:
+      "把 Agent 接到 MCP 服务器(外部工具提供方)。选服务器,可进一步限定到具体工具。\n示例:高德地图 amap-maps 做位置查询",
     tool_web_search_help:
       "允许 Agent 联网搜索实时信息(走平台配置的搜索服务)。\n示例:问「今天的新闻」时用得上",
     tool_http_help:

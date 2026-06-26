@@ -40,12 +40,28 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     unobserve(): void {}
     disconnect(): void {}
   }
-  globalThis.ResizeObserver = ResizeObserverPolyfill as unknown as typeof ResizeObserver;
+  globalThis.ResizeObserver =
+    ResizeObserverPolyfill as unknown as typeof ResizeObserver;
+}
+
+// jsdom implements ``getComputedStyle(elt)`` but throws "Not implemented" on the
+// two-arg pseudo-element form that antd's rc-util scrollbar measurement
+// (Table / Modal scroll-lock) calls. That error is noisy and intermittently
+// tips Table-heavy tests into failure. Delegate the pseudo form to the
+// supported one so it never throws.
+if (typeof window !== "undefined") {
+  const realGetComputedStyle = window.getComputedStyle.bind(window);
+  window.getComputedStyle = ((elt: Element, _pseudo?: string | null) =>
+    realGetComputedStyle(elt)) as typeof window.getComputedStyle;
 }
 
 apiClient.defaults.adapter = (config) =>
   Promise.resolve({
-    data: { success: false, data: null, error: { code: "TEST_STUB", message: "no network in tests" } },
+    data: {
+      success: false,
+      data: null,
+      error: { code: "TEST_STUB", message: "no network in tests" },
+    },
     status: 200,
     statusText: "OK",
     headers: {},

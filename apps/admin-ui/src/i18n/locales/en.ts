@@ -294,6 +294,7 @@ export interface TranslationKeys {
     tab_model: string;
     tab_prompt: string;
     tab_tools: string;
+    tab_mcp: string;
     tab_capabilities: string;
     tab_memory: string;
     tab_governance: string;
@@ -330,8 +331,21 @@ export interface TranslationKeys {
     tool_http: string;
     tool_mcp: string;
     mcp_servers_label: string;
+    mcp_server_search: string;
+    mcp_tool_search: string;
+    mcp_scope_label: string;
+    mcp_scope_all: string;
+    mcp_scope_specific: string;
+    mcp_select_all: string;
+    mcp_clear: string;
+    mcp_selected_count: string;
+    mcp_choose_tools: string;
+    mcp_done: string;
+    mcp_all_tools: string;
+    mcp_tools_count: string;
     mcp_servers_hint: string;
-    mcp_no_servers: string;
+    mcp_no_servers_available: string;
+    mcp_no_servers_catalog: string;
     mcp_source_platform: string;
     mcp_source_tenant: string;
     mcp_tools_label: string;
@@ -355,6 +369,8 @@ export interface TranslationKeys {
     memory_topk_help: string;
     section_reflection_evaluator_help: string;
     section_tools_help: string;
+    section_mcp: string;
+    section_mcp_help: string;
     tool_web_search_help: string;
     tool_http_help: string;
     tool_mcp_help: string;
@@ -2142,6 +2158,7 @@ const en: TranslationKeys = {
     tab_model: "Model",
     tab_prompt: "Prompt",
     tab_tools: "Tools",
+    tab_mcp: "MCP",
     tab_capabilities: "Knowledge & skills",
     tab_memory: "Memory",
     tab_governance: "Governance",
@@ -2179,9 +2196,23 @@ const en: TranslationKeys = {
     tool_http: "HTTP tool",
     tool_mcp: "MCP tools",
     mcp_servers_label: "MCP servers this agent can use",
+    mcp_server_search: "Search servers",
+    mcp_tool_search: "Search tools",
+    mcp_scope_label: "Tools:",
+    mcp_scope_all: "All tools",
+    mcp_scope_specific: "Specific",
+    mcp_select_all: "Select all",
+    mcp_clear: "Clear",
+    mcp_selected_count: "{{count}} selected",
+    mcp_choose_tools: "Choose tools",
+    mcp_done: "Done",
+    mcp_all_tools: "All tools",
+    mcp_tools_count: "{{count}} tools selected",
     mcp_servers_hint: "Leave all unchecked to allow every available server",
-    mcp_no_servers:
-      "No MCP servers available. Register one under Settings → MCP Servers.",
+    mcp_no_servers_available:
+      "No MCP servers available yet. Enable one under Settings → MCP Servers → Add → enable from the catalog.",
+    mcp_no_servers_catalog:
+      "No published MCP connectors yet. Publish one under Settings → MCP Catalog.",
     mcp_source_platform: "platform",
     mcp_source_tenant: "tenant",
     mcp_tools_label: "Tools",
@@ -2217,6 +2248,9 @@ const en: TranslationKeys = {
       "Optional. An evaluator model that lets the agent self-reflect / score before replying, raising quality. Skip to disable.\nExample: leave empty, or pick claude-haiku for light evaluation",
     section_tools_help:
       "Check the tools the agent may use. More capability = more power but harder to control.\nExample: web search + MCP",
+    section_mcp: "MCP",
+    section_mcp_help:
+      "Connect the agent to MCP servers (external tool providers). Pick servers, optionally narrow to specific tools.\nExample: amap-maps for location lookups",
     tool_web_search_help:
       "Let the agent search the web for fresh info (via the platform's search service).\nExample: needed for 'today's news' questions",
     tool_http_help:

@@ -36,8 +36,7 @@ import {
   setApprovalTools,
   setDescription,
   setDynamicWorkersOn,
-  setMcpAllowTools,
-  setMcpServers,
+  setMcp,
   setMemoryOn,
   setModel,
   setName,
@@ -47,7 +46,7 @@ import {
   setTopK,
   setVisionModel,
 } from "./form_model";
-import { McpToolPicker } from "./widgets/McpToolPicker";
+import { McpToolPicker, type McpPickerSource } from "./widgets/McpToolPicker";
 
 const { Text } = Typography;
 
@@ -57,6 +56,7 @@ export type FormSection =
   | "model"
   | "prompt"
   | "tools"
+  | "mcp"
   | "capabilities"
   | "memory"
   | "governance";
@@ -66,6 +66,13 @@ interface FormViewProps {
   onChange: (data: unknown) => void;
   /** Which field group to render. Defaults to ``basic`` for stand-alone use. */
   section?: FormSection;
+  /** Where the MCP tab sources servers — ``catalog`` for a platform template,
+   *  ``available`` (default) for a tenant agent. */
+  mcpSource?: McpPickerSource;
+  /** Drop the section heading — used when the section is folded into another
+   *  tab (e.g. "basic" merged into a template's "basic info") so there's no
+   *  redundant sub-heading. */
+  bare?: boolean;
 }
 
 const SECTION: React.CSSProperties = { marginBottom: 24 };
@@ -93,6 +100,8 @@ export function FormView({
   formData,
   onChange,
   section = "basic",
+  mcpSource = "available",
+  bare = false,
 }: FormViewProps) {
   const { t } = useTranslation();
   const [catalog, setCatalog] = useState<ModelCatalog | undefined>(undefined);
@@ -127,7 +136,7 @@ export function FormView({
   const sections: Record<FormSection, ReactNode> = {
     basic: (
       <section data-testid="af-basic" style={SECTION}>
-        <Heading>{t("agent_form.section_basic")}</Heading>
+        {!bare && <Heading>{t("agent_form.section_basic")}</Heading>}
         <div style={FIELD} data-testid="af-name">
           <label style={LABEL}>
             {t("agent_form.field_name")}{" "}
@@ -144,20 +153,26 @@ export function FormView({
             onChange={(e) => onChange(setName(formData, e.target.value))}
           />
         </div>
-        <div style={FIELD} data-testid="af-description">
-          <label style={LABEL}>
-            {t("agent_form.field_description")}
-            <FieldHelp
-              text={t("agent_form.field_description_help")}
-              testId="af-description"
+        {/* When folded into another tab (``bare``) the description is dropped —
+            that tab carries its own description field (no duplicate). */}
+        {!bare && (
+          <div style={FIELD} data-testid="af-description">
+            <label style={LABEL}>
+              {t("agent_form.field_description")}
+              <FieldHelp
+                text={t("agent_form.field_description_help")}
+                testId="af-description"
+              />
+            </label>
+            <Input
+              value={readDescription(formData)}
+              aria-label={t("agent_form.field_description")}
+              onChange={(e) =>
+                onChange(setDescription(formData, e.target.value))
+              }
             />
-          </label>
-          <Input
-            value={readDescription(formData)}
-            aria-label={t("agent_form.field_description")}
-            onChange={(e) => onChange(setDescription(formData, e.target.value))}
-          />
-        </div>
+          </div>
+        )}
       </section>
     ),
 
@@ -312,32 +327,24 @@ export function FormView({
               testId="af-tool-http"
             />
           </span>
-          <span>
-            <Checkbox
-              data-testid="af-tool-mcp"
-              checked={tools.mcp}
-              onChange={(e) =>
-                onChange(setTool(formData, "mcp", e.target.checked))
-              }
-            >
-              {t("agent_form.tool_mcp")}
-            </Checkbox>
-            <FieldHelp
-              text={t("agent_form.tool_mcp_help")}
-              testId="af-tool-mcp"
-            />
-          </span>
         </div>
-        {tools.mcp && (
-          <McpToolPicker
-            servers={tools.mcpServers}
-            allowTools={tools.mcpAllowTools}
-            onServersChange={(next) => onChange(setMcpServers(formData, next))}
-            onAllowToolsChange={(next) =>
-              onChange(setMcpAllowTools(formData, next))
-            }
-          />
-        )}
+      </section>
+    ),
+
+    mcp: (
+      <section data-testid="af-mcp" style={SECTION}>
+        <Heading>
+          {t("agent_form.section_mcp")}
+          <FieldHelp text={t("agent_form.section_mcp_help")} testId="af-mcp" />
+        </Heading>
+        <McpToolPicker
+          source={mcpSource}
+          servers={tools.mcpServers}
+          allowTools={tools.mcpAllowTools}
+          onChange={(nextServers, nextAllow) =>
+            onChange(setMcp(formData, nextServers, nextAllow))
+          }
+        />
       </section>
     ),
 
@@ -439,7 +446,7 @@ export function FormView({
   };
 
   return (
-    <div data-testid="manifest-form-view" style={{ maxWidth: 560 }}>
+    <div data-testid="manifest-form-view" style={{ maxWidth: 760 }}>
       {sections[section]}
     </div>
   );

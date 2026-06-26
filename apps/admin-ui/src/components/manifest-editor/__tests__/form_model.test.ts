@@ -22,6 +22,7 @@ import {
   setPromptJinja,
   setPromptVariables,
   setMcpAllowTools,
+  setMcp,
   setMcpServers,
   setMemoryOn,
   setModel,
@@ -166,11 +167,28 @@ test("setMcpServers preserves allow_tools (merge-preserving)", () => {
   expect(readTools(m).mcpServers).toEqual(["github"]);
 });
 
-test("setMcpServers no-ops when there is no mcp tool", () => {
+test("setMcpServers creates the mcp entry when selecting a server (= enabling MCP)", () => {
   const m = setMcpServers({ apiVersion: "v1", kind: "Agent", spec: {} }, [
     "github",
   ]);
+  expect(readTools(m).mcp).toBe(true);
+  expect(readTools(m).mcpServers).toEqual(["github"]);
+});
+
+test("setMcpServers([]) drops the mcp entry (MCP off, no separate toggle)", () => {
+  const m = setMcpServers(withMcp(), []);
   expect(readTools(m).mcp).toBe(false);
+  expect((m.spec?.tools ?? []).some((t) => t.type === "mcp")).toBe(false);
+});
+
+test("setMcp writes servers + allow_tools in one patch", () => {
+  const m = setMcp(
+    { apiVersion: "v1", kind: "Agent", spec: {} },
+    ["github"],
+    ["create_issue"],
+  );
+  expect(readTools(m).mcpServers).toEqual(["github"]);
+  expect(readTools(m).mcpAllowTools).toEqual(["create_issue"]);
 });
 
 describe("form_model preserve chain + immutability", () => {

@@ -17,6 +17,7 @@ import { loadAgentSchema } from "./schema";
 import { dumpYaml, parseYaml } from "./yaml";
 import { FormView, type FormSection } from "./FormView";
 import { YamlView } from "./YamlView";
+import type { McpPickerSource } from "./widgets/McpToolPicker";
 
 // The curated manifest field groups + the YAML escape hatch, as one flat tab
 // row. ``labelKey`` is an i18n key.
@@ -28,6 +29,7 @@ const MANIFEST_TABS: ReadonlyArray<{
   { value: "model", labelKey: "manifest_editor.tab_model" },
   { value: "prompt", labelKey: "manifest_editor.tab_prompt" },
   { value: "tools", labelKey: "manifest_editor.tab_tools" },
+  { value: "mcp", labelKey: "manifest_editor.tab_mcp" },
   { value: "capabilities", labelKey: "manifest_editor.tab_capabilities" },
   { value: "memory", labelKey: "manifest_editor.tab_memory" },
   { value: "governance", labelKey: "manifest_editor.tab_governance" },
@@ -50,6 +52,10 @@ export interface LeadingTab {
   value: string;
   label: string;
   content: ReactNode;
+  /** Optionally fold one manifest section into this leading tab — that section
+   * renders below ``content`` and is removed from the manifest tab row. Used
+   * to merge a template's "basic info" with the manifest's "basic" section. */
+  mergeSection?: FormSection;
 }
 
 interface ManifestEditorProps {
@@ -57,6 +63,8 @@ interface ManifestEditorProps {
   initialYaml: string;
   onChange: (yaml: string) => void;
   leadingTabs?: ReadonlyArray<LeadingTab>;
+  /** Forwarded to the MCP tab — ``catalog`` for a platform template. */
+  mcpSource?: McpPickerSource;
 }
 
 function safeSeed(initialYaml: string): unknown {
@@ -80,6 +88,7 @@ export function ManifestEditor({
   initialYaml,
   onChange,
   leadingTabs = [],
+  mcpSource,
 }: ManifestEditorProps) {
   const { t } = useTranslation();
   const seed = useMemo(() => safeSeed(initialYaml), [initialYaml]);
@@ -198,6 +207,8 @@ export function ManifestEditor({
         data-testid={`manifest-tab-${value}`}
         onClick={() => switchTo(value)}
         style={{
+          flex: "0 0 auto",
+          whiteSpace: "nowrap",
           padding: "4px 16px",
           border: "1px solid var(--hx-border, #303030)",
           background: active ? "var(--hx-brand, #13c2c2)" : "transparent",
@@ -211,6 +222,10 @@ export function ManifestEditor({
   };
 
   const isLeadingActive = leadingTabs.some((lt) => lt.value === tab);
+  // Manifest sections folded into a leading tab — dropped from the tab row.
+  const mergedSections = new Set<string>(
+    leadingTabs.flatMap((lt) => (lt.mergeSection ? [lt.mergeSection] : [])),
+  );
 
   const manifestBody = schemaError ? (
     <Alert
@@ -234,6 +249,7 @@ export function ManifestEditor({
       formData={manifestObject}
       onChange={handleFormChange}
       section={tab}
+      mcpSource={mcpSource}
     />
   ) : (
     <YamlView value={yamlText} onChange={handleYamlChange} />
@@ -241,14 +257,20 @@ export function ManifestEditor({
 
   return (
     <div data-testid={`manifest-editor-${mode}`}>
+      {/* One flat row; horizontally scrollable so a long tab set never wraps. */}
       <div
         role="tablist"
-        style={{ display: "flex", flexWrap: "wrap", marginBottom: 12 }}
+        style={{
+          display: "flex",
+          flexWrap: "nowrap",
+          overflowX: "auto",
+          marginBottom: 12,
+        }}
       >
         {leadingTabs.map((lt) => tabButton(lt.value, lt.label))}
-        {MANIFEST_TABS.map((tabDef) =>
-          tabButton(tabDef.value, t(tabDef.labelKey)),
-        )}
+        {MANIFEST_TABS.filter(
+          (tabDef) => !mergedSections.has(tabDef.value),
+        ).map((tabDef) => tabButton(tabDef.value, t(tabDef.labelKey)))}
       </div>
 
       {switchError !== null && (
@@ -270,6 +292,17 @@ export function ManifestEditor({
           data-testid={`manifest-leading-${lt.value}`}
           style={{ display: tab === lt.value ? "block" : "none" }}
         >
+          {/* Folded manifest section first (e.g. agent name/description on top),
+              then the caller's own content (e.g. template marketplace fields). */}
+          {lt.mergeSection && (
+            <FormView
+              formData={manifestObject}
+              onChange={handleFormChange}
+              section={lt.mergeSection}
+              mcpSource={mcpSource}
+              bare
+            />
+          )}
           {lt.content}
         </div>
       ))}

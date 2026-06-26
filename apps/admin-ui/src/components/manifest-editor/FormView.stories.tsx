@@ -156,7 +156,7 @@ export const WithMcpPicker: Story = {
   args: {
     formData: MCP_ON_MANIFEST,
     onChange: () => {},
-    section: "tools",
+    section: "mcp",
   },
 };
 

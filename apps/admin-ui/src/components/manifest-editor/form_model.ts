@@ -315,11 +315,33 @@ export function setMcpAllowTools(m: unknown, allow: string[]): AgentManifest {
   );
   return patchSpec(m, { tools });
 }
+
+// Selecting servers IS enabling MCP — there is no separate enable toggle. An
+// empty selection drops the whole ``mcp`` tool entry (MCP off); a non-empty
+// selection creates the entry on first pick. ``allow_tools`` is pruned to the
+// selected servers' scope by the caller (the picker knows each server's tools).
 export function setMcpServers(m: unknown, servers: string[]): AgentManifest {
-  const tools = (specOf(m).tools ?? []).map((t) =>
-    t.type === "mcp" ? { ...t, servers } : t,
-  );
-  return patchSpec(m, { tools });
+  return setMcp(m, servers, readMcpAllowTools(m));
+}
+
+const readMcpAllowTools = (m: unknown): string[] =>
+  (specOf(m).tools ?? []).find((t) => t.type === "mcp")?.allow_tools ?? [];
+
+// Single writer for the whole ``mcp`` tool entry — both ``servers`` and
+// ``allow_tools`` in one patch, so the picker can update them together without
+// a stale-read double-patch. Empty ``servers`` ⇒ MCP off (entry dropped).
+export function setMcp(
+  m: unknown,
+  servers: string[],
+  allowTools: string[],
+): AgentManifest {
+  const withoutMcp = (specOf(m).tools ?? []).filter((t) => t.type !== "mcp");
+  if (servers.length === 0) {
+    return patchSpec(m, { tools: withoutMcp });
+  }
+  return patchSpec(m, {
+    tools: [...withoutMcp, { type: "mcp", servers, allow_tools: allowTools }],
+  });
 }
 
 // ---- approval gate (policies.approval_required_tools) ----
