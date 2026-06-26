@@ -9,6 +9,8 @@ import {
   readSubagents,
   readModel,
   readName,
+  readPromptJinja,
+  readPromptVariables,
   readReflectionEvaluator,
   readReflectionEvaluatorOn,
   readSystemPrompt,
@@ -17,6 +19,8 @@ import {
   readVisionModel,
   readVisionOn,
   setDescription,
+  setPromptJinja,
+  setPromptVariables,
   setMcpAllowTools,
   setMcpServers,
   setMemoryOn,
@@ -41,7 +45,13 @@ const seed = {
   spec: {
     model: { provider: "anthropic", name: "claude-sonnet-4-6" },
     system_prompt: { template: "You are helpful." },
-    memory: { long_term: { retrieve_top_k: 5, write_back: true, recall_mode: "per_session" } },
+    memory: {
+      long_term: {
+        retrieve_top_k: 5,
+        write_back: true,
+        recall_mode: "per_session",
+      },
+    },
     sandbox: { resources: { cpu: "1.0" } },
   },
 };
@@ -137,7 +147,8 @@ describe("form_model writers preserve siblings", () => {
   });
 });
 
-const withMcp = () => setTool({ apiVersion: "v1", kind: "Agent", spec: {} }, "mcp", true);
+const withMcp = () =>
+  setTool({ apiVersion: "v1", kind: "Agent", spec: {} }, "mcp", true);
 
 test("readTools defaults mcpServers to empty", () => {
   expect(readTools(withMcp()).mcpServers).toEqual([]);
@@ -156,7 +167,9 @@ test("setMcpServers preserves allow_tools (merge-preserving)", () => {
 });
 
 test("setMcpServers no-ops when there is no mcp tool", () => {
-  const m = setMcpServers({ apiVersion: "v1", kind: "Agent", spec: {} }, ["github"]);
+  const m = setMcpServers({ apiVersion: "v1", kind: "Agent", spec: {} }, [
+    "github",
+  ]);
   expect(readTools(m).mcp).toBe(false);
 });
 
@@ -186,9 +199,15 @@ describe("reflection evaluator (routing when=reflection projection)", () => {
   });
 
   it("writes a when=reflection route rule and reads it back", () => {
-    const m = setReflectionEvaluator(seed, { provider: "openai", name: "gpt-4o-mini" });
+    const m = setReflectionEvaluator(seed, {
+      provider: "openai",
+      name: "gpt-4o-mini",
+    });
     expect(m.spec?.routing?.rules).toEqual([
-      { when: "reflection", model: { provider: "openai", name: "gpt-4o-mini" } },
+      {
+        when: "reflection",
+        model: { provider: "openai", name: "gpt-4o-mini" },
+      },
     ]);
     expect(readReflectionEvaluator(m)?.name).toBe("gpt-4o-mini");
     expect(readReflectionEvaluatorOn(m)).toBe(true);
@@ -200,7 +219,10 @@ describe("reflection evaluator (routing when=reflection projection)", () => {
   });
 
   it("clearing removes the rule and drops empty routing", () => {
-    const withRule = setReflectionEvaluator(seed, { provider: "openai", name: "gpt-4o-mini" });
+    const withRule = setReflectionEvaluator(seed, {
+      provider: "openai",
+      name: "gpt-4o-mini",
+    });
     const cleared = setReflectionEvaluator(withRule, null);
     expect(readReflectionEvaluator(cleared)).toBeUndefined();
     expect(cleared.spec?.routing).toBeUndefined();
@@ -211,15 +233,28 @@ describe("reflection evaluator (routing when=reflection projection)", () => {
       ...seed,
       spec: {
         ...seed.spec,
-        routing: { rules: [{ when: "planning", model: { provider: "anthropic", name: "claude-opus-4-8" } }] },
+        routing: {
+          rules: [
+            {
+              when: "planning",
+              model: { provider: "anthropic", name: "claude-opus-4-8" },
+            },
+          ],
+        },
       },
     };
-    const set = setReflectionEvaluator(base, { provider: "openai", name: "gpt-4o-mini" });
+    const set = setReflectionEvaluator(base, {
+      provider: "openai",
+      name: "gpt-4o-mini",
+    });
     expect(set.spec?.routing?.rules).toHaveLength(2);
     const cleared = setReflectionEvaluator(set, null);
     // planning survives; only reflection removed; routing stays (still has planning).
     expect(cleared.spec?.routing?.rules).toEqual([
-      { when: "planning", model: { provider: "anthropic", name: "claude-opus-4-8" } },
+      {
+        when: "planning",
+        model: { provider: "anthropic", name: "claude-opus-4-8" },
+      },
     ]);
   });
 
@@ -236,7 +271,10 @@ describe("approval gate (policies.approval_required_tools)", () => {
 
   it("writes the approval tool list and reads it back", () => {
     const m = setApprovalTools(seed, ["exec_python", "http"]);
-    expect(m.spec?.policies?.approval_required_tools).toEqual(["exec_python", "http"]);
+    expect(m.spec?.policies?.approval_required_tools).toEqual([
+      "exec_python",
+      "http",
+    ]);
     expect(readApprovalTools(m)).toEqual(["exec_python", "http"]);
   });
 
@@ -250,7 +288,13 @@ describe("approval gate (policies.approval_required_tools)", () => {
   it("preserves sibling policy keys when clearing the gate", () => {
     const base = {
       ...seed,
-      spec: { ...seed.spec, policies: { approval_required_tools: ["bash"], approval_timeout_s: 3600 } },
+      spec: {
+        ...seed.spec,
+        policies: {
+          approval_required_tools: ["bash"],
+          approval_timeout_s: 3600,
+        },
+      },
     };
     const cleared = setApprovalTools(base, []);
     expect(cleared.spec?.policies).toEqual({ approval_timeout_s: 3600 });
@@ -282,7 +326,9 @@ describe("dynamic workers (spawn_worker opt-out)", () => {
 
   it("does not mutate the input manifest", () => {
     setDynamicWorkersOn(seed, false);
-    expect((seed.spec as { dynamic_workers?: unknown }).dynamic_workers).toBeUndefined();
+    expect(
+      (seed.spec as { dynamic_workers?: unknown }).dynamic_workers,
+    ).toBeUndefined();
   });
 });
 
@@ -322,7 +368,13 @@ describe("subagents (static delegation)", () => {
   });
 
   it("writes rows verbatim and clears on empty", () => {
-    const rows = [{ name: "researcher", agent_ref: "deep-researcher@1.0.0", description: "research" }];
+    const rows = [
+      {
+        name: "researcher",
+        agent_ref: "deep-researcher@1.0.0",
+        description: "research",
+      },
+    ];
     const m = setSubagents(seed, rows);
     expect(m.spec?.subagents).toEqual(rows);
     expect(readSubagents(m)).toEqual(rows);
@@ -345,13 +397,19 @@ describe("vision fallback (Stream J.6 Path B — vision block)", () => {
 
   it("writes a vision.model and reads it back", () => {
     const m = setVisionModel(seed, { provider: "qwen", name: "qwen-vl-max" });
-    expect(m.spec?.vision?.model).toEqual({ provider: "qwen", name: "qwen-vl-max" });
+    expect(m.spec?.vision?.model).toEqual({
+      provider: "qwen",
+      name: "qwen-vl-max",
+    });
     expect(readVisionModel(m)?.name).toBe("qwen-vl-max");
     expect(readVisionOn(m)).toBe(true);
   });
 
   it("clearing removes the vision block", () => {
-    const withVl = setVisionModel(seed, { provider: "qwen", name: "qwen-vl-max" });
+    const withVl = setVisionModel(seed, {
+      provider: "qwen",
+      name: "qwen-vl-max",
+    });
     const cleared = setVisionModel(withVl, null);
     expect(readVisionModel(cleared)).toBeUndefined();
     expect(cleared.spec?.vision).toBeUndefined();
@@ -368,13 +426,71 @@ describe("vision fallback (Stream J.6 Path B — vision block)", () => {
         },
       },
     };
-    const swapped = setVisionModel(base, { provider: "qwen", name: "qwen-vl-plus" });
+    const swapped = setVisionModel(base, {
+      provider: "qwen",
+      name: "qwen-vl-plus",
+    });
     expect(swapped.spec?.vision?.model?.name).toBe("qwen-vl-plus");
-    expect(swapped.spec?.vision?.fallbacks).toEqual([{ provider: "zhipu", name: "glm-4v" }]);
+    expect(swapped.spec?.vision?.fallbacks).toEqual([
+      { provider: "zhipu", name: "glm-4v" },
+    ]);
   });
 
   it("does not mutate the input manifest", () => {
     setVisionModel(seed, { provider: "qwen", name: "qwen-vl-max" });
     expect((seed.spec as { vision?: unknown }).vision).toBeUndefined();
+  });
+});
+
+describe("form_model — dynamic prompt (jinja + variables)", () => {
+  it("defaults: jinja off, no variables", () => {
+    expect(readPromptJinja(seed)).toBe(false);
+    expect(readPromptVariables(seed)).toEqual([]);
+  });
+
+  it("enabling jinja sets the flag, preserving the template", () => {
+    const m = setPromptJinja(seed, true);
+    expect(m.spec?.system_prompt?.jinja).toBe(true);
+    expect(m.spec?.system_prompt?.template).toBe("You are helpful.");
+    expect(readPromptJinja(m)).toBe(true);
+  });
+
+  it("disabling jinja drops jinja AND variables (backend requires the pairing)", () => {
+    const on = setPromptVariables(setPromptJinja(seed, true), [
+      { name: "persona" },
+    ]);
+    const off = setPromptJinja(on, false);
+    expect(off.spec?.system_prompt?.jinja).toBeUndefined();
+    expect(off.spec?.system_prompt?.variables).toBeUndefined();
+    expect(off.spec?.system_prompt?.template).toBe("You are helpful.");
+  });
+
+  it("writes variable rows verbatim and reads them back", () => {
+    const m = setPromptVariables(setPromptJinja(seed, true), [
+      { name: "persona", trusted: true, required: true },
+      {
+        name: "profile",
+        trusted: false,
+        required: false,
+        description: "客户画像",
+      },
+    ]);
+    expect(readPromptVariables(m)).toHaveLength(2);
+    expect(readPromptVariables(m)[1]).toMatchObject({
+      name: "profile",
+      trusted: false,
+    });
+  });
+
+  it("empty variable list drops the key", () => {
+    const m = setPromptVariables(setPromptJinja(seed, true), []);
+    expect(m.spec?.system_prompt?.variables).toBeUndefined();
+  });
+
+  it("does not mutate the input manifest", () => {
+    setPromptJinja(seed, true);
+    expect(
+      (seed.spec.system_prompt as { jinja?: unknown }).jinja,
+    ).toBeUndefined();
   });
 });

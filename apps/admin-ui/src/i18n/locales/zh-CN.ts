@@ -355,19 +355,24 @@ const zhCN: TranslationKeys = {
       "因为主模型是纯文本才显示这块。VL 模型在旁边回答图像问题,主模型负责编排。留空=Agent 不能读图。\n示例:qwen / qwen-vl-max",
     field_name_help:
       "Agent 的唯一标识(agent_code),外部程序按它调用。仅小写字母、数字、连字符。\n示例:support-bot",
-    field_description_help: "一句话说明这个 Agent 做什么,展示给使用者。\n示例:回答产品使用问题的客服助手",
+    field_description_help:
+      "一句话说明这个 Agent 做什么,展示给使用者。\n示例:回答产品使用问题的客服助手",
     section_model_help:
       "Agent 主对话用的大模型。先选厂商(provider)再选具体模型;温度越高回答越发散。\n示例:anthropic / claude-sonnet-4-5,温度 0.2",
     section_prompt_help:
       "系统提示词,定义 Agent 的角色、语气和行为规则,是塑造 Agent 性格的核心。\n示例:你是资深 Python 工程师,回答简洁、给可运行代码。",
     section_memory_help:
       "开启后 Agent 跨会话记住用户事实和过往交互,下次对话自动召回;关掉则每次从零开始。\n示例:开启,topK=5",
-    memory_topk_help: "每次对话注入多少条最相关的记忆。太多挤占上下文,太少漏信息。\n示例:5",
+    memory_topk_help:
+      "每次对话注入多少条最相关的记忆。太多挤占上下文,太少漏信息。\n示例:5",
     section_reflection_evaluator_help:
       "可选。配一个评估模型,让 Agent 答复前自我反思/打分,提升质量;不配则跳过。\n示例:留空(不启用),或选 claude-haiku 做轻量评估",
-    section_tools_help: "勾选 Agent 能用的工具。给的能力越多越强,但也更难控。\n示例:勾联网搜索 + MCP",
-    tool_web_search_help: "允许 Agent 联网搜索实时信息(走平台配置的搜索服务)。\n示例:问「今天的新闻」时用得上",
-    tool_http_help: "允许 Agent 发 HTTP 请求调外部 API(经审计代理出网)。\n示例:查天气 API、调内部服务",
+    section_tools_help:
+      "勾选 Agent 能用的工具。给的能力越多越强,但也更难控。\n示例:勾联网搜索 + MCP",
+    tool_web_search_help:
+      "允许 Agent 联网搜索实时信息(走平台配置的搜索服务)。\n示例:问「今天的新闻」时用得上",
+    tool_http_help:
+      "允许 Agent 发 HTTP 请求调外部 API(经审计代理出网)。\n示例:查天气 API、调内部服务",
     tool_mcp_help:
       "允许 Agent 调 MCP server 暴露的工具(数据库、业务系统等)。勾选后下面选具体 server 和工具。\n示例:接入公司 CRM 的 MCP",
     section_approval: "人工审批闸",
@@ -397,6 +402,18 @@ const zhCN: TranslationKeys = {
     subagent_description: "何时委派",
     subagent_remove: "删除",
     subagent_add: "添加子 Agent",
+    section_prompt_vars: "动态 Prompt(Jinja)",
+    section_prompt_vars_help:
+      "调用 run 接口时用请求体的 inputs 按次渲染 system prompt。在此声明每个变量,只有声明过的变量名才会被使用。「可信」关闭会把值作为数据用 spotlight 围栏包裹(用于可能携带用户输入的值)。\n示例:模板写 {{ persona }},此处声明变量 persona",
+    prompt_jinja_label: "启用 Jinja 模板",
+    prompt_jinja_hint:
+      "开启后 system prompt 是 Jinja 模板:{{ 变量名 }} 占位符按次从请求 inputs 填充。只渲染你在此编写的 prompt 正文。",
+    prompt_var_name: "变量名",
+    prompt_var_trusted: "可信",
+    prompt_var_required: "必填",
+    prompt_var_description: "说明",
+    prompt_var_remove: "删除",
+    prompt_var_add: "添加变量",
   },
   playground: {
     session_label: "会话",
@@ -756,7 +773,8 @@ const zhCN: TranslationKeys = {
     header_name_invalid: "请求头名称只能用字母、数字和连字符",
     field_sse_read_timeout: "SSE 读取超时（秒）",
     sse_read_timeout_hint: "SSE 流的单次读取等待。留空用默认值（300 秒）。",
-    field_name_help: "租户内唯一的 MCP server 名,agent 按这个名字引用。\n示例:company-crm",
+    field_name_help:
+      "租户内唯一的 MCP server 名,agent 按这个名字引用。\n示例:company-crm",
     field_transport_help:
       "客户端怎么连 MCP server。远程 server 用 SSE / streamable-http。\n示例:sse",
     field_url_help:
@@ -766,7 +784,8 @@ const zhCN: TranslationKeys = {
     field_token_help:
       "作为 Authorization 发送的 bearer 令牌,加密存储;编辑时留空保留原值。\n示例:sk-xxxx(粘真实令牌)",
     field_timeout_help: "单次 MCP 请求最多等多少秒,超时放弃。\n示例:30",
-    field_sse_read_timeout_help: "SSE 流两块数据间最多等多少秒。留空用默认(300 秒)。\n示例:300",
+    field_sse_read_timeout_help:
+      "SSE 流两块数据间最多等多少秒。留空用默认(300 秒)。\n示例:300",
   },
   mcp_catalog: {
     page_title: "MCP 目录",
@@ -1409,7 +1428,8 @@ const zhCN: TranslationKeys = {
     fork: "Fork",
     fork_title: "Fork「{{name}}」",
     fork_name_label: "新 agent 名称",
-    fork_name_hint: "将作为外部程序调用时的 agent_code。仅限小写字母、数字和连字符。",
+    fork_name_hint:
+      "将作为外部程序调用时的 agent_code。仅限小写字母、数字和连字符。",
     fork_name_required: "请填写 agent 名称",
     fork_name_invalid: "仅限小写字母、数字和连字符(须以字母或数字开头)",
     forked_ok: "已 fork 为「{{name}}」",
@@ -1456,13 +1476,16 @@ const zhCN: TranslationKeys = {
     tab_basic: "基本信息",
     tab_manifest: "Agent 配置",
     field_display_name_help: "模板在市场里显示的名字,给租户看。\n示例:智能客服",
-    field_description_help: "模板简介,说明用途和适用场景,帮租户决定要不要 fork。\n示例:开箱即用的多轮客服 Agent",
+    field_description_help:
+      "模板简介,说明用途和适用场景,帮租户决定要不要 fork。\n示例:开箱即用的多轮客服 Agent",
     field_category_help: "模板分类,用于市场筛选。\n示例:客服 / 销售 / 研发",
     field_icon_help: "市场卡片上的图标,填一个 emoji。\n示例:🤖",
     field_tier_help:
       "fork 这个模板所需的租户套餐档位。租户档位不够则看得到但不能 fork。\n示例:免费 / 专业版 / 企业版",
-    field_status_help: "草稿仅管理员可见;发布后租户才能在市场看到并 fork。\n示例:调试时草稿,完成后发布",
-    field_enabled_help: "总开关。关掉则即使已发布也从市场下架(不删除)。\n示例:临时下架时关掉",
+    field_status_help:
+      "草稿仅管理员可见;发布后租户才能在市场看到并 fork。\n示例:调试时草稿,完成后发布",
+    field_enabled_help:
+      "总开关。关掉则即使已发布也从市场下架(不删除)。\n示例:临时下架时关掉",
     field_manifest_help:
       "Agent 的完整定义(模型/提示词/工具/沙箱等)。可用上面的表单填,或切 YAML 直接写。租户 fork 后可改非安全字段。\n示例:见表单默认值",
     cat_support: "客服",
@@ -1489,9 +1512,12 @@ const zhCN: TranslationKeys = {
     github_skill_ph: "find-skills(可选 —— 一仓多技能时必填)",
     github_ref_label: "版本",
     github_ref_ph: "分支 / 标签 / SHA(可选,默认分支)",
-    github_source_help: "要导入技能的 GitHub 仓库 —— owner/repo 或完整 URL。\n示例:anthropics/skills",
-    github_skill_help: "导入仓库里哪个技能文件夹。填单个名,或从检测到的列表里选。\n示例:pptx",
-    github_ref_help: "从哪个 git ref 导入 —— 分支/标签/commit SHA。留空=仓库默认分支。\n示例:main",
+    github_source_help:
+      "要导入技能的 GitHub 仓库 —— owner/repo 或完整 URL。\n示例:anthropics/skills",
+    github_skill_help:
+      "导入仓库里哪个技能文件夹。填单个名,或从检测到的列表里选。\n示例:pptx",
+    github_ref_help:
+      "从哪个 git ref 导入 —— 分支/标签/commit SHA。留空=仓库默认分支。\n示例:main",
     github_submit: "导入",
     github_pick_skill: "该仓库有 {{count}} 个技能 —— 可多选批量导入。",
     github_pick_ph: "选择技能（可多选）",

@@ -375,6 +375,16 @@ export interface TranslationKeys {
     subagent_description: string;
     subagent_remove: string;
     subagent_add: string;
+    section_prompt_vars: string;
+    section_prompt_vars_help: string;
+    prompt_jinja_label: string;
+    prompt_jinja_hint: string;
+    prompt_var_name: string;
+    prompt_var_trusted: string;
+    prompt_var_required: string;
+    prompt_var_description: string;
+    prompt_var_remove: string;
+    prompt_var_add: string;
   };
   playground: {
     session_label: string;
@@ -2212,7 +2222,8 @@ const en: TranslationKeys = {
     section_dynamic_workers: "Autonomous workers",
     section_dynamic_workers_help:
       "When on (the default), the agent may spawn short-lived helper workers at run time to split up a task. Turn off for a strictly single-worker agent.\nExample: on for a research agent, off for a simple FAQ bot",
-    dynamic_workers_hint: "Allow the agent to create temporary workers at run time (on by default).",
+    dynamic_workers_hint:
+      "Allow the agent to create temporary workers at run time (on by default).",
     section_knowledge: "Knowledge bases (RAG)",
     section_knowledge_help:
       "Tenant knowledge bases the agent can search to ground its answers (activates a knowledge_search tool). Pick existing bases or type a name.\nExample: hr-policies, eng-handbook",
@@ -2232,6 +2243,18 @@ const en: TranslationKeys = {
     subagent_description: "When to delegate",
     subagent_remove: "Remove",
     subagent_add: "Add sub-agent",
+    section_prompt_vars: "Dynamic prompt (Jinja)",
+    section_prompt_vars_help:
+      "Render the system prompt per-run with variables passed in the run request's 'inputs'. Declare each variable here; only declared names are accepted. 'Trusted' off spotlight-fences the value as DATA (use for values that may carry user input).\nExample: {{ persona }} declared as variable 'persona'",
+    prompt_jinja_label: "Enable Jinja templating",
+    prompt_jinja_hint:
+      "When on, the system prompt is a Jinja template: {{ name }} placeholders are filled per-run from the request 'inputs'. Only the prompt you write here is rendered.",
+    prompt_var_name: "Variable name",
+    prompt_var_trusted: "Trusted",
+    prompt_var_required: "Required",
+    prompt_var_description: "Description",
+    prompt_var_remove: "Remove",
+    prompt_var_add: "Add variable",
   },
   playground: {
     session_label: "Session",
@@ -3307,7 +3330,7 @@ const en: TranslationKeys = {
     subtitle: "Platform-curated base agents that tenants fork into their own.",
     add: "New template",
     deleted: "Template deleted",
-    delete_confirm: 'Delete “{{name}}”?',
+    delete_confirm: "Delete “{{name}}”?",
     not_admin_title: "System admin only",
     not_admin_body: "Only a platform system admin can manage Agent templates.",
     failed_to_load: "Failed to load templates",
@@ -3488,8 +3511,10 @@ const en: TranslationKeys = {
     col_actions: "Actions",
     importance_abbr: "Imp",
     confidence_abbr: "Conf",
-    importance_tip: "Importance (0–1) — how reusable this memory is; the write-filter drops low scores.",
-    confidence_tip: "Confidence (0–1) — extraction certainty; 1.0 after a user correction.",
+    importance_tip:
+      "Importance (0–1) — how reusable this memory is; the write-filter drops low scores.",
+    confidence_tip:
+      "Confidence (0–1) — extraction certainty; 1.0 after a user correction.",
     filter_kind: "Kind filter",
     filter_kind_all: "All kinds",
     search_placeholder: "Filter by content (client-side)",
