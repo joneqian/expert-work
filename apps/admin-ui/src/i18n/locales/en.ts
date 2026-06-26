@@ -290,7 +290,13 @@ export interface TranslationKeys {
     save_failed: string;
   };
   manifest_editor: {
-    tab_form: string;
+    tab_basic: string;
+    tab_model: string;
+    tab_prompt: string;
+    tab_tools: string;
+    tab_capabilities: string;
+    tab_memory: string;
+    tab_governance: string;
     tab_yaml: string;
     loading_schema: string;
     schema_load_failed: string;
@@ -320,7 +326,6 @@ export interface TranslationKeys {
     memory_hint: string;
     memory_topk: string;
     section_tools: string;
-    section_advanced: string;
     tool_web_search: string;
     tool_http: string;
     tool_mcp: string;
@@ -1378,9 +1383,7 @@ export interface TranslationKeys {
     field_tier: string;
     field_status: string;
     field_enabled: string;
-    field_manifest: string;
     tab_basic: string;
-    tab_manifest: string;
     field_display_name_help: string;
     field_description_help: string;
     field_category_help: string;
@@ -1388,7 +1391,6 @@ export interface TranslationKeys {
     field_tier_help: string;
     field_status_help: string;
     field_enabled_help: string;
-    field_manifest_help: string;
     cat_support: string;
     cat_sales: string;
     cat_research: string;
@@ -2136,7 +2138,13 @@ const en: TranslationKeys = {
     save_failed: "Failed to save manifest",
   },
   manifest_editor: {
-    tab_form: "Form",
+    tab_basic: "Basics",
+    tab_model: "Model",
+    tab_prompt: "Prompt",
+    tab_tools: "Tools",
+    tab_capabilities: "Knowledge & skills",
+    tab_memory: "Memory",
+    tab_governance: "Governance",
     tab_yaml: "YAML",
     loading_schema: "Loading schema…",
     schema_load_failed: "Failed to load the manifest schema",
@@ -2167,7 +2175,6 @@ const en: TranslationKeys = {
     memory_hint: "Remembers across sessions; needs a platform embedding.",
     memory_topk: "Memories recalled per run",
     section_tools: "Tools",
-    section_advanced: "Advanced (memory · reflection · tools)",
     tool_web_search: "Web search",
     tool_http: "HTTP tool",
     tool_mcp: "MCP tools",
@@ -3365,9 +3372,7 @@ const en: TranslationKeys = {
     field_tier: "Required tier",
     field_status: "Status",
     field_enabled: "Enabled",
-    field_manifest: "Manifest",
     tab_basic: "Basic info",
-    tab_manifest: "Agent config",
     field_display_name_help:
       "The template's name shown to tenants in the marketplace.\nExample: Smart Support Bot",
     field_description_help:
@@ -3381,8 +3386,6 @@ const en: TranslationKeys = {
       "Draft is admin-only; Published makes it visible + forkable in the marketplace.\nExample: Draft while testing, Publish when ready",
     field_enabled_help:
       "Master switch. Off removes it from the marketplace even if published (without deleting).\nExample: turn off to temporarily delist",
-    field_manifest_help:
-      "The agent's full definition (model / prompt / tools / sandbox). Use the form above or switch to YAML. Tenants can edit non-security fields after forking.\nExample: see the form defaults",
     cat_support: "Support",
     cat_sales: "Sales",
     cat_research: "Research",

@@ -7,7 +7,7 @@
  * blocked with an inline error. ``onChange`` always carries the latest manifest
  * as a YAML string so the parent submits exactly what's shown.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert, Spin } from "antd";
 import validator from "@rjsf/validator-ajv8";
 import { useTranslation } from "react-i18next";
@@ -15,15 +15,48 @@ import { useTranslation } from "react-i18next";
 import type { JsonSchema } from "../../api/manifest_schema";
 import { loadAgentSchema } from "./schema";
 import { dumpYaml, parseYaml } from "./yaml";
-import { FormView } from "./FormView";
+import { FormView, type FormSection } from "./FormView";
 import { YamlView } from "./YamlView";
 
-type Tab = "form" | "yaml";
+// The curated manifest field groups + the YAML escape hatch, as one flat tab
+// row. ``labelKey`` is an i18n key.
+const MANIFEST_TABS: ReadonlyArray<{
+  value: FormSection | "yaml";
+  labelKey: string;
+}> = [
+  { value: "basic", labelKey: "manifest_editor.tab_basic" },
+  { value: "model", labelKey: "manifest_editor.tab_model" },
+  { value: "prompt", labelKey: "manifest_editor.tab_prompt" },
+  { value: "tools", labelKey: "manifest_editor.tab_tools" },
+  { value: "capabilities", labelKey: "manifest_editor.tab_capabilities" },
+  { value: "memory", labelKey: "manifest_editor.tab_memory" },
+  { value: "governance", labelKey: "manifest_editor.tab_governance" },
+  { value: "yaml", labelKey: "manifest_editor.tab_yaml" },
+];
+
+const FORM_SECTIONS: readonly string[] = MANIFEST_TABS.map(
+  (t) => t.value,
+).filter((v) => v !== "yaml");
+
+const isFormSection = (tab: string): tab is FormSection =>
+  FORM_SECTIONS.includes(tab);
+
+/** A caller-supplied tab rendered in the SAME flat row, BEFORE the manifest
+ * tabs — e.g. an Agent template's marketplace-metadata form. Its content is
+ * kept mounted (hidden when inactive) so any embedded antd Form keeps its
+ * state across tab switches. Switching to/from a leading tab never touches the
+ * manifest, so no (de)serialisation happens. */
+export interface LeadingTab {
+  value: string;
+  label: string;
+  content: ReactNode;
+}
 
 interface ManifestEditorProps {
   mode: "create" | "edit";
   initialYaml: string;
   onChange: (yaml: string) => void;
+  leadingTabs?: ReadonlyArray<LeadingTab>;
 }
 
 function safeSeed(initialYaml: string): unknown {
@@ -32,19 +65,28 @@ function safeSeed(initialYaml: string): unknown {
     // The Form view (RJSF) expects an object. A scalar/array/empty seed (e.g.
     // a stray "42") would render a broken form, so fall back to {} — the raw
     // value is still recoverable via the YAML tab.
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+      ? parsed
+      : {};
   } catch {
     return {};
   }
 }
 
-export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorProps) {
+export function ManifestEditor({
+  mode,
+  initialYaml,
+  onChange,
+  leadingTabs = [],
+}: ManifestEditorProps) {
   const { t } = useTranslation();
   const seed = useMemo(() => safeSeed(initialYaml), [initialYaml]);
 
   const [schema, setSchema] = useState<JsonSchema | null>(null);
   const [schemaError, setSchemaError] = useState(false);
-  const [tab, setTab] = useState<Tab>("form");
+  const [tab, setTab] = useState<string>(leadingTabs[0]?.value ?? "basic");
   const [manifestObject, setManifestObject] = useState<unknown>(seed);
   const [yamlText, setYamlText] = useState<string>(initialYaml);
   const [switchError, setSwitchError] = useState<string | null>(null);
@@ -76,8 +118,9 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
     onChange(text);
   }
 
-  function switchTo(next: Tab): void {
+  function switchTo(next: string): void {
     if (next === tab) return;
+    // Leaving for YAML: serialise the current curated manifest.
     if (next === "yaml") {
       const y = dumpYaml(manifestObject);
       setYamlText(y);
@@ -86,6 +129,15 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
       setTab("yaml");
       return;
     }
+    // Moving away from anything but YAML (a curated section or a leading tab)
+    // needs no (de)serialisation — they share one ``manifestObject`` (a leading
+    // tab doesn't touch the manifest at all); only the rendered panel changes.
+    if (tab !== "yaml") {
+      setSwitchError(null);
+      setTab(next);
+      return;
+    }
+    // Returning from YAML: parse + validate before adopting the edited text.
     let parsed: unknown;
     try {
       parsed = parseYaml(yamlText);
@@ -93,37 +145,53 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
       setSwitchError(t("manifest_editor.invalid_yaml_hint"));
       return;
     }
-    if (schema && validator.validateFormData(parsed, schema).errors.length > 0) {
+    if (
+      schema &&
+      validator.validateFormData(parsed, schema).errors.length > 0
+    ) {
       setSwitchError(t("manifest_editor.invalid_yaml_hint"));
       return;
     }
     setManifestObject(parsed);
     setSwitchError(null);
-    setTab("form");
+    setTab(next);
   }
 
-  if (schemaError) {
-    return (
-      <Alert
-        type="error"
-        showIcon
-        message={t("manifest_editor.schema_load_failed")}
-        data-testid="manifest-schema-error"
-      />
-    );
-  }
-  if (schema === null) {
-    return (
-      <div data-testid="manifest-schema-loading" style={{ padding: 24, textAlign: "center" }}>
-        <Spin /> <span style={{ marginLeft: 8 }}>{t("manifest_editor.loading_schema")}</span>
-      </div>
-    );
+  // Without leading tabs the editor has nothing to show until the schema
+  // resolves, so it gates the whole component (unchanged behaviour). With
+  // leading tabs (e.g. a template's metadata form) the tab row + that form
+  // stay usable while the schema loads; only the manifest body waits.
+  if (leadingTabs.length === 0) {
+    if (schemaError) {
+      return (
+        <Alert
+          type="error"
+          showIcon
+          message={t("manifest_editor.schema_load_failed")}
+          data-testid="manifest-schema-error"
+        />
+      );
+    }
+    if (schema === null) {
+      return (
+        <div
+          data-testid="manifest-schema-loading"
+          style={{ padding: 24, textAlign: "center" }}
+        >
+          <Spin />{" "}
+          <span style={{ marginLeft: 8 }}>
+            {t("manifest_editor.loading_schema")}
+          </span>
+        </div>
+      );
+    }
   }
 
-  const tabButton = (value: Tab, label: string) => {
+  const tabButton = (value: string, label: string) => {
     const active = tab === value;
     return (
       <button
+        key={value}
         type="button"
         role="tab"
         aria-selected={active}
@@ -142,11 +210,45 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
     );
   };
 
+  const isLeadingActive = leadingTabs.some((lt) => lt.value === tab);
+
+  const manifestBody = schemaError ? (
+    <Alert
+      type="error"
+      showIcon
+      message={t("manifest_editor.schema_load_failed")}
+      data-testid="manifest-schema-error"
+    />
+  ) : schema === null ? (
+    <div
+      data-testid="manifest-schema-loading"
+      style={{ padding: 24, textAlign: "center" }}
+    >
+      <Spin />{" "}
+      <span style={{ marginLeft: 8 }}>
+        {t("manifest_editor.loading_schema")}
+      </span>
+    </div>
+  ) : isFormSection(tab) ? (
+    <FormView
+      formData={manifestObject}
+      onChange={handleFormChange}
+      section={tab}
+    />
+  ) : (
+    <YamlView value={yamlText} onChange={handleYamlChange} />
+  );
+
   return (
     <div data-testid={`manifest-editor-${mode}`}>
-      <div role="tablist" style={{ display: "inline-flex", marginBottom: 12 }}>
-        {tabButton("form", t("manifest_editor.tab_form"))}
-        {tabButton("yaml", t("manifest_editor.tab_yaml"))}
+      <div
+        role="tablist"
+        style={{ display: "flex", flexWrap: "wrap", marginBottom: 12 }}
+      >
+        {leadingTabs.map((lt) => tabButton(lt.value, lt.label))}
+        {MANIFEST_TABS.map((tabDef) =>
+          tabButton(tabDef.value, t(tabDef.labelKey)),
+        )}
       </div>
 
       {switchError !== null && (
@@ -160,11 +262,19 @@ export function ManifestEditor({ mode, initialYaml, onChange }: ManifestEditorPr
         />
       )}
 
-      {tab === "form" ? (
-        <FormView formData={manifestObject} onChange={handleFormChange} />
-      ) : (
-        <YamlView value={yamlText} onChange={handleYamlChange} />
-      )}
+      {/* Leading tabs stay mounted (hidden when inactive) so an embedded antd
+          Form keeps its state across tab switches. */}
+      {leadingTabs.map((lt) => (
+        <div
+          key={lt.value}
+          data-testid={`manifest-leading-${lt.value}`}
+          style={{ display: tab === lt.value ? "block" : "none" }}
+        >
+          {lt.content}
+        </div>
+      ))}
+
+      {!isLeadingActive && manifestBody}
     </div>
   );
 }

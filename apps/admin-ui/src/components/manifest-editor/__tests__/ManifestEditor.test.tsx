@@ -36,7 +36,7 @@ const SCHEMA = {
   },
 };
 
-const SEED = 'metadata:\n  name: bot\n';
+const SEED = "metadata:\n  name: bot\n";
 
 beforeEach(() => {
   __resetSchemaCacheForTest();
@@ -46,13 +46,19 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("ManifestEditor", () => {
   it("loads the schema and shows the Form tab by default", async () => {
-    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />);
-    await waitFor(() => expect(screen.getByTestId("manifest-form-view")).toBeInTheDocument());
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("manifest-form-view")).toBeInTheDocument(),
+    );
   });
 
   it("switching to YAML shows the dumped manifest", async () => {
     const user = userEvent.setup();
-    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />);
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
     await screen.findByTestId("manifest-form-view");
     await user.click(screen.getByTestId("manifest-tab-yaml"));
     const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
@@ -61,7 +67,9 @@ describe("ManifestEditor", () => {
 
   it("blocks the YAML→Form switch when YAML is invalid against the schema", async () => {
     const user = userEvent.setup();
-    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />);
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
     await screen.findByTestId("manifest-form-view");
     await user.click(screen.getByTestId("manifest-tab-yaml"));
 
@@ -69,7 +77,7 @@ describe("ManifestEditor", () => {
     await user.clear(ta);
     await user.type(ta, "metadata:\n  notname: x");
 
-    await user.click(screen.getByTestId("manifest-tab-form"));
+    await user.click(screen.getByTestId("manifest-tab-basic"));
     expect(screen.getByTestId("manifest-switch-error")).toBeInTheDocument();
     expect(screen.queryByTestId("manifest-form-view")).not.toBeInTheDocument();
   });
@@ -77,18 +85,24 @@ describe("ManifestEditor", () => {
   it("emits the latest YAML through onChange on raw edits", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={onChange} />);
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={onChange} />,
+    );
     await screen.findByTestId("manifest-form-view");
     await user.click(screen.getByTestId("manifest-tab-yaml"));
     const ta = screen.getByTestId("monaco-stub") as HTMLTextAreaElement;
     await user.clear(ta);
     await user.type(ta, "metadata:\n  name: edited");
-    expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining("edited"));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.stringContaining("edited"),
+    );
   });
 
   it("blocks the YAML→Form switch when YAML is syntactically broken", async () => {
     const user = userEvent.setup();
-    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />);
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={vi.fn()} />,
+    );
     await screen.findByTestId("manifest-form-view");
     await user.click(screen.getByTestId("manifest-tab-yaml"));
 
@@ -98,7 +112,7 @@ describe("ManifestEditor", () => {
     // (an unterminated flow sequence) which js-yaml v4 rejects, exercising the parse-throw branch.
     await user.type(ta, "metadata: [[unterminated");
 
-    await user.click(screen.getByTestId("manifest-tab-form"));
+    await user.click(screen.getByTestId("manifest-tab-basic"));
     expect(screen.getByTestId("manifest-switch-error")).toBeInTheDocument();
     expect(screen.queryByTestId("manifest-form-view")).not.toBeInTheDocument();
   });
@@ -106,9 +120,13 @@ describe("ManifestEditor", () => {
   it("emits the dumped YAML through onChange when switching Form→YAML", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<ManifestEditor mode="create" initialYaml={SEED} onChange={onChange} />);
+    render(
+      <ManifestEditor mode="create" initialYaml={SEED} onChange={onChange} />,
+    );
     await screen.findByTestId("manifest-form-view");
     await user.click(screen.getByTestId("manifest-tab-yaml"));
-    expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining("name: bot"));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.stringContaining("name: bot"),
+    );
   });
 });
