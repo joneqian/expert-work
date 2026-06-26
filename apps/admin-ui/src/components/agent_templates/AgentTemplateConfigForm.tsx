@@ -321,6 +321,9 @@ export const AgentTemplateConfigForm = forwardRef<
             value: "meta",
             label: t("agent_templates.tab_basic"),
             content: metaForm,
+            // Fold the manifest's "basic" (agent name/description) into this tab
+            // so there's one "basic info" tab, not a metadata + basic split.
+            mergeSection: "basic",
           },
         ]}
       />

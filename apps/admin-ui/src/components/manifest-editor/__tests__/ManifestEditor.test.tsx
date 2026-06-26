@@ -129,4 +129,29 @@ describe("ManifestEditor", () => {
       expect.stringContaining("name: bot"),
     );
   });
+
+  it("a leading tab with mergeSection folds in that manifest section + drops its tab", async () => {
+    render(
+      <ManifestEditor
+        mode="create"
+        initialYaml={SEED}
+        onChange={vi.fn()}
+        leadingTabs={[
+          {
+            value: "meta",
+            label: "Basic info",
+            content: <div data-testid="meta-form">meta</div>,
+            mergeSection: "basic",
+          },
+        ]}
+      />,
+    );
+    // The merged leading tab is active by default and shows BOTH the caller's
+    // content and the manifest's basic section.
+    await screen.findByTestId("meta-form");
+    expect(screen.getByTestId("af-basic")).toBeInTheDocument();
+    // "basic" is no longer a standalone tab; the leading "meta" tab replaces it.
+    expect(screen.getByTestId("manifest-tab-meta")).toBeInTheDocument();
+    expect(screen.queryByTestId("manifest-tab-basic")).not.toBeInTheDocument();
+  });
 });

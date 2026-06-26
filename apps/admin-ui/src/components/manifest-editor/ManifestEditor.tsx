@@ -52,6 +52,10 @@ export interface LeadingTab {
   value: string;
   label: string;
   content: ReactNode;
+  /** Optionally fold one manifest section into this leading tab — that section
+   * renders below ``content`` and is removed from the manifest tab row. Used
+   * to merge a template's "basic info" with the manifest's "basic" section. */
+  mergeSection?: FormSection;
 }
 
 interface ManifestEditorProps {
@@ -218,6 +222,10 @@ export function ManifestEditor({
   };
 
   const isLeadingActive = leadingTabs.some((lt) => lt.value === tab);
+  // Manifest sections folded into a leading tab — dropped from the tab row.
+  const mergedSections = new Set<string>(
+    leadingTabs.flatMap((lt) => (lt.mergeSection ? [lt.mergeSection] : [])),
+  );
 
   const manifestBody = schemaError ? (
     <Alert
@@ -260,9 +268,9 @@ export function ManifestEditor({
         }}
       >
         {leadingTabs.map((lt) => tabButton(lt.value, lt.label))}
-        {MANIFEST_TABS.map((tabDef) =>
-          tabButton(tabDef.value, t(tabDef.labelKey)),
-        )}
+        {MANIFEST_TABS.filter(
+          (tabDef) => !mergedSections.has(tabDef.value),
+        ).map((tabDef) => tabButton(tabDef.value, t(tabDef.labelKey)))}
       </div>
 
       {switchError !== null && (
@@ -285,6 +293,14 @@ export function ManifestEditor({
           style={{ display: tab === lt.value ? "block" : "none" }}
         >
           {lt.content}
+          {lt.mergeSection && (
+            <FormView
+              formData={manifestObject}
+              onChange={handleFormChange}
+              section={lt.mergeSection}
+              mcpSource={mcpSource}
+            />
+          )}
         </div>
       ))}
 
