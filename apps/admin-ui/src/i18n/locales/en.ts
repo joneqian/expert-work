@@ -22,6 +22,7 @@ export interface TranslationKeys {
     notifications: string;
     user_menu: string;
     anonymous: string;
+    field_help: string;
   };
   theme: {
     switch_to_light: string;
@@ -336,6 +337,17 @@ export interface TranslationKeys {
     section_reflection_evaluator: string;
     reflection_evaluator_hint: string;
     reflection_evaluator_clear: string;
+    field_name_help: string;
+    field_description_help: string;
+    section_model_help: string;
+    section_prompt_help: string;
+    section_memory_help: string;
+    memory_topk_help: string;
+    section_reflection_evaluator_help: string;
+    section_tools_help: string;
+    tool_web_search_help: string;
+    tool_http_help: string;
+    tool_mcp_help: string;
   };
   playground: {
     session_label: string;
@@ -1320,6 +1332,14 @@ export interface TranslationKeys {
     field_status: string;
     field_enabled: string;
     field_manifest: string;
+    field_display_name_help: string;
+    field_description_help: string;
+    field_category_help: string;
+    field_icon_help: string;
+    field_tier_help: string;
+    field_status_help: string;
+    field_enabled_help: string;
+    field_manifest_help: string;
     cat_support: string;
     cat_sales: string;
     cat_research: string;
@@ -1771,6 +1791,7 @@ const en: TranslationKeys = {
     notifications: "Notifications",
     user_menu: "User menu",
     anonymous: "anonymous",
+    field_help: "Field help",
   },
   theme: {
     switch_to_light: "Switch to Light",
@@ -2114,6 +2135,28 @@ const en: TranslationKeys = {
     reflection_evaluator_hint:
       "When reflection is enabled, which model judges whether the task is done. Leave empty to reuse the agent's own model. Prefer a different model — not necessarily stronger; an independent vantage counters the model's bias toward its own output and covers shared blind spots (same-model self-critique tends to declare 'done' early and miss its own errors). Pick a stronger model for deep-reasoning tasks.",
     reflection_evaluator_clear: "Clear (use the agent's own model)",
+    field_name_help:
+      "The agent's unique id (agent_code) external apps call by. Lowercase letters, digits, hyphens.\nExample: support-bot",
+    field_description_help:
+      "One line on what this agent does, shown to users.\nExample: Customer-support assistant for product questions",
+    section_model_help:
+      "The LLM powering the agent's main conversation. Pick provider then model; higher temperature = more creative.\nExample: anthropic / claude-sonnet-4-5, temperature 0.2",
+    section_prompt_help:
+      "System prompt — defines the agent's role, tone, and rules. The core of its persona.\nExample: You are a senior Python engineer; answer concisely with runnable code.",
+    section_memory_help:
+      "When on, the agent remembers user facts + past interactions across sessions and recalls them next time. Off = each chat starts fresh.\nExample: on, topK=5",
+    memory_topk_help:
+      "How many most-relevant memories to inject per chat. Too many crowd the context; too few miss info.\nExample: 5",
+    section_reflection_evaluator_help:
+      "Optional. An evaluator model that lets the agent self-reflect / score before replying, raising quality. Skip to disable.\nExample: leave empty, or pick claude-haiku for light evaluation",
+    section_tools_help:
+      "Check the tools the agent may use. More capability = more power but harder to control.\nExample: web search + MCP",
+    tool_web_search_help:
+      "Let the agent search the web for fresh info (via the platform's search service).\nExample: needed for 'today's news' questions",
+    tool_http_help:
+      "Let the agent make HTTP requests to external APIs (through the audited egress proxy).\nExample: weather API, internal services",
+    tool_mcp_help:
+      "Let the agent call tools exposed by MCP servers (databases, business systems). Pick servers + tools below.\nExample: your company's CRM MCP",
   },
   playground: {
     session_label: "Session",
@@ -3207,6 +3250,21 @@ const en: TranslationKeys = {
     field_status: "Status",
     field_enabled: "Enabled",
     field_manifest: "Manifest",
+    field_display_name_help:
+      "The template's name shown to tenants in the marketplace.\nExample: Smart Support Bot",
+    field_description_help:
+      "Short description of the template's purpose, helping tenants decide whether to fork.\nExample: Ready-to-use multi-turn support agent",
+    field_category_help:
+      "Category for marketplace filtering.\nExample: Support / Sales / Coding",
+    field_icon_help: "An emoji shown on the marketplace card.\nExample: 🤖",
+    field_tier_help:
+      "The tenant plan tier required to fork this template. Lower-tier tenants see it but can't fork.\nExample: Free / Pro / Enterprise",
+    field_status_help:
+      "Draft is admin-only; Published makes it visible + forkable in the marketplace.\nExample: Draft while testing, Publish when ready",
+    field_enabled_help:
+      "Master switch. Off removes it from the marketplace even if published (without deleting).\nExample: turn off to temporarily delist",
+    field_manifest_help:
+      "The agent's full definition (model / prompt / tools / sandbox). Use the form above or switch to YAML. Tenants can edit non-security fields after forking.\nExample: see the form defaults",
     cat_support: "Support",
     cat_sales: "Sales",
     cat_research: "Research",

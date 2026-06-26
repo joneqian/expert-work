@@ -15,6 +15,7 @@ import { App, Form, Input, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ManifestEditor } from "../manifest-editor/ManifestEditor";
+import { FieldHelp } from "../FieldHelp";
 import { dumpYaml, parseYaml } from "../manifest-editor/yaml";
 import { ApiError } from "../../api/client";
 import {
@@ -75,6 +76,15 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
     const { message } = App.useApp();
     const [form] = Form.useForm<MetaFields>();
     const isEditing = editing !== null;
+
+    // Label + a "?" help affordance (meaning + example on hover), uniform with
+    // the manifest FormView's FieldHelp.
+    const lbl = (labelKey: string, helpKey: string, id: string) => (
+      <>
+        {t(labelKey)}
+        <FieldHelp text={t(helpKey)} testId={id} />
+      </>
+    );
 
     const initialYaml = useMemo(
       () => (editing ? dumpYaml(editing.spec) : _STARTER_MANIFEST),
@@ -164,7 +174,11 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
         <Form<MetaFields> form={form} layout="vertical">
           <Form.Item
             name="display_name"
-            label={t("agent_templates.field_display_name")}
+            label={lbl(
+              "agent_templates.field_display_name",
+              "agent_templates.field_display_name_help",
+              "display-name",
+            )}
             rules={[{ required: true, message: t("agent_templates.display_name_required") }]}
           >
             <Input
@@ -172,7 +186,14 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
               data-testid="atcf-display-name"
             />
           </Form.Item>
-          <Form.Item name="description" label={t("agent_templates.field_description")}>
+          <Form.Item
+            name="description"
+            label={lbl(
+              "agent_templates.field_description",
+              "agent_templates.field_description_help",
+              "description",
+            )}
+          >
             <Input.TextArea
               rows={2}
               aria-label={t("agent_templates.field_description")}
@@ -181,7 +202,11 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
           </Form.Item>
           <Form.Item
             name="category"
-            label={t("agent_templates.field_category")}
+            label={lbl(
+              "agent_templates.field_category",
+              "agent_templates.field_category_help",
+              "category",
+            )}
             rules={[{ required: true }]}
           >
             <Select
@@ -190,7 +215,10 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
               options={TEMPLATE_CATEGORIES.map((c) => ({ value: c.value, label: t(c.labelKey) }))}
             />
           </Form.Item>
-          <Form.Item name="icon" label={t("agent_templates.field_icon")}>
+          <Form.Item
+            name="icon"
+            label={lbl("agent_templates.field_icon", "agent_templates.field_icon_help", "icon")}
+          >
             <Input
               placeholder="🤖"
               aria-label={t("agent_templates.field_icon")}
@@ -199,7 +227,7 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
           </Form.Item>
           <Form.Item
             name="required_tier"
-            label={t("agent_templates.field_tier")}
+            label={lbl("agent_templates.field_tier", "agent_templates.field_tier_help", "tier")}
             rules={[{ required: true }]}
           >
             <Select
@@ -210,7 +238,7 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
           </Form.Item>
           <Form.Item
             name="status"
-            label={t("agent_templates.field_status")}
+            label={lbl("agent_templates.field_status", "agent_templates.field_status_help", "status")}
             rules={[{ required: true }]}
           >
             <Select
@@ -221,14 +249,21 @@ export const AgentTemplateConfigForm = forwardRef<AgentTemplateConfigFormHandle,
           </Form.Item>
           <Form.Item
             name="enabled"
-            label={t("agent_templates.field_enabled")}
+            label={lbl(
+              "agent_templates.field_enabled",
+              "agent_templates.field_enabled_help",
+              "enabled",
+            )}
             valuePropName="checked"
           >
             <Switch aria-label={t("agent_templates.field_enabled")} data-testid="atcf-enabled" />
           </Form.Item>
         </Form>
 
-        <div style={{ marginTop: 8, fontWeight: 600 }}>{t("agent_templates.field_manifest")}</div>
+        <div style={{ marginTop: 8, fontWeight: 600 }}>
+          {t("agent_templates.field_manifest")}
+          <FieldHelp text={t("agent_templates.field_manifest_help")} testId="manifest" />
+        </div>
         <div data-testid="atcf-manifest" style={{ marginTop: 8 }}>
           <ManifestEditor
             mode={isEditing ? "edit" : "create"}

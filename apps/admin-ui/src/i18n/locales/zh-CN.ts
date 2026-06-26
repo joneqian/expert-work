@@ -24,6 +24,7 @@ const zhCN: TranslationKeys = {
     notifications: "通知",
     user_menu: "用户菜单",
     anonymous: "匿名用户",
+    field_help: "字段说明",
   },
   theme: {
     switch_to_light: "切到 Light",
@@ -345,6 +346,23 @@ const zhCN: TranslationKeys = {
     reflection_evaluator_hint:
       "反思（reflection）启用时，由谁来评判任务是否真正完成。留空 = 用 agent 自己的模型。建议选一个不同的模型——不必更强，关键是独立视角能破除模型偏爱自己输出、覆盖共同盲点（研究表明同模型自审会过早判定完成、漏掉自身错误）。深度推理任务可选更强模型。",
     reflection_evaluator_clear: "清除（改用 agent 自己的模型）",
+    field_name_help:
+      "Agent 的唯一标识(agent_code),外部程序按它调用。仅小写字母、数字、连字符。\n示例:support-bot",
+    field_description_help: "一句话说明这个 Agent 做什么,展示给使用者。\n示例:回答产品使用问题的客服助手",
+    section_model_help:
+      "Agent 主对话用的大模型。先选厂商(provider)再选具体模型;温度越高回答越发散。\n示例:anthropic / claude-sonnet-4-5,温度 0.2",
+    section_prompt_help:
+      "系统提示词,定义 Agent 的角色、语气和行为规则,是塑造 Agent 性格的核心。\n示例:你是资深 Python 工程师,回答简洁、给可运行代码。",
+    section_memory_help:
+      "开启后 Agent 跨会话记住用户事实和过往交互,下次对话自动召回;关掉则每次从零开始。\n示例:开启,topK=5",
+    memory_topk_help: "每次对话注入多少条最相关的记忆。太多挤占上下文,太少漏信息。\n示例:5",
+    section_reflection_evaluator_help:
+      "可选。配一个评估模型,让 Agent 答复前自我反思/打分,提升质量;不配则跳过。\n示例:留空(不启用),或选 claude-haiku 做轻量评估",
+    section_tools_help: "勾选 Agent 能用的工具。给的能力越多越强,但也更难控。\n示例:勾联网搜索 + MCP",
+    tool_web_search_help: "允许 Agent 联网搜索实时信息(走平台配置的搜索服务)。\n示例:问「今天的新闻」时用得上",
+    tool_http_help: "允许 Agent 发 HTTP 请求调外部 API(经审计代理出网)。\n示例:查天气 API、调内部服务",
+    tool_mcp_help:
+      "允许 Agent 调 MCP server 暴露的工具(数据库、业务系统等)。勾选后下面选具体 server 和工具。\n示例:接入公司 CRM 的 MCP",
   },
   playground: {
     session_label: "会话",
@@ -1388,6 +1406,16 @@ const zhCN: TranslationKeys = {
     field_status: "状态",
     field_enabled: "启用",
     field_manifest: "Manifest",
+    field_display_name_help: "模板在市场里显示的名字,给租户看。\n示例:智能客服",
+    field_description_help: "模板简介,说明用途和适用场景,帮租户决定要不要 fork。\n示例:开箱即用的多轮客服 Agent",
+    field_category_help: "模板分类,用于市场筛选。\n示例:客服 / 销售 / 研发",
+    field_icon_help: "市场卡片上的图标,填一个 emoji。\n示例:🤖",
+    field_tier_help:
+      "fork 这个模板所需的租户套餐档位。租户档位不够则看得到但不能 fork。\n示例:免费 / 专业版 / 企业版",
+    field_status_help: "草稿仅管理员可见;发布后租户才能在市场看到并 fork。\n示例:调试时草稿,完成后发布",
+    field_enabled_help: "总开关。关掉则即使已发布也从市场下架(不删除)。\n示例:临时下架时关掉",
+    field_manifest_help:
+      "Agent 的完整定义(模型/提示词/工具/沙箱等)。可用上面的表单填,或切 YAML 直接写。租户 fork 后可改非安全字段。\n示例:见表单默认值",
     cat_support: "客服",
     cat_sales: "销售",
     cat_research: "研究",

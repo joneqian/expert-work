@@ -11,6 +11,7 @@ import { Button, Checkbox, Input, InputNumber, Switch, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { ModelCatalog } from "../../api/model_catalog";
+import { FieldHelp } from "../FieldHelp";
 import { loadModelCatalog } from "./catalog";
 import { ModelSelect } from "./widgets/ModelSelect";
 import {
@@ -80,6 +81,7 @@ export function FormView({ formData, onChange }: FormViewProps) {
         <div style={FIELD} data-testid="af-name">
           <label style={LABEL}>
             {t("agent_form.field_name")} <span style={{ color: "#ff4d4f" }}>*</span>
+            <FieldHelp text={t("agent_form.field_name_help")} testId="af-name" />
           </label>
           <Input
             value={readName(formData)}
@@ -89,7 +91,10 @@ export function FormView({ formData, onChange }: FormViewProps) {
           />
         </div>
         <div style={FIELD} data-testid="af-description">
-          <label style={LABEL}>{t("agent_form.field_description")}</label>
+          <label style={LABEL}>
+            {t("agent_form.field_description")}
+            <FieldHelp text={t("agent_form.field_description_help")} testId="af-description" />
+          </label>
           <Input
             value={readDescription(formData)}
             aria-label={t("agent_form.field_description")}
@@ -99,7 +104,10 @@ export function FormView({ formData, onChange }: FormViewProps) {
       </section>
 
       <section data-testid="af-model" style={SECTION}>
-        <Heading>{t("agent_form.section_model")}</Heading>
+        <Heading>
+          {t("agent_form.section_model")}
+          <FieldHelp text={t("agent_form.section_model_help")} testId="af-model" />
+        </Heading>
         <ModelSelect
           value={readModel(formData)}
           catalog={catalog}
@@ -108,7 +116,10 @@ export function FormView({ formData, onChange }: FormViewProps) {
       </section>
 
       <section data-testid="af-prompt" style={SECTION}>
-        <Heading>{t("agent_form.section_prompt")}</Heading>
+        <Heading>
+          {t("agent_form.section_prompt")}
+          <FieldHelp text={t("agent_form.section_prompt_help")} testId="af-prompt" />
+        </Heading>
         <div data-testid="af-prompt-input">
           <Input.TextArea
             rows={6}
@@ -121,7 +132,10 @@ export function FormView({ formData, onChange }: FormViewProps) {
       </section>
 
       <section data-testid="af-memory" style={SECTION}>
-        <Heading>{t("agent_form.section_memory")}</Heading>
+        <Heading>
+          {t("agent_form.section_memory")}
+          <FieldHelp text={t("agent_form.section_memory_help")} testId="af-memory" />
+        </Heading>
         <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <Switch
             checked={memoryOn}
@@ -133,7 +147,10 @@ export function FormView({ formData, onChange }: FormViewProps) {
         </label>
         {memoryOn && (
           <div style={FIELD} data-testid="af-topk">
-            <label style={LABEL}>{t("agent_form.memory_topk")}</label>
+            <label style={LABEL}>
+              {t("agent_form.memory_topk")}
+              <FieldHelp text={t("agent_form.memory_topk_help")} testId="af-topk" />
+            </label>
             <InputNumber
               min={1}
               value={readTopK(formData) ?? 5}
@@ -145,7 +162,13 @@ export function FormView({ formData, onChange }: FormViewProps) {
       </section>
 
       <section data-testid="af-reflection-evaluator" style={SECTION}>
-        <Heading>{t("agent_form.section_reflection_evaluator")}</Heading>
+        <Heading>
+          {t("agent_form.section_reflection_evaluator")}
+          <FieldHelp
+            text={t("agent_form.section_reflection_evaluator_help")}
+            testId="af-reflection-evaluator"
+          />
+        </Heading>
         <Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
           {t("agent_form.reflection_evaluator_hint")}
         </Text>
@@ -168,29 +191,41 @@ export function FormView({ formData, onChange }: FormViewProps) {
       </section>
 
       <section data-testid="af-tools" style={SECTION}>
-        <Heading>{t("agent_form.section_tools")}</Heading>
+        <Heading>
+          {t("agent_form.section_tools")}
+          <FieldHelp text={t("agent_form.section_tools_help")} testId="af-tools" />
+        </Heading>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <Checkbox
-            data-testid="af-tool-web_search"
-            checked={tools.webSearch}
-            onChange={(e) => onChange(setTool(formData, "webSearch", e.target.checked))}
-          >
-            {t("agent_form.tool_web_search")}
-          </Checkbox>
-          <Checkbox
-            data-testid="af-tool-http"
-            checked={tools.http}
-            onChange={(e) => onChange(setTool(formData, "http", e.target.checked))}
-          >
-            {t("agent_form.tool_http")}
-          </Checkbox>
-          <Checkbox
-            data-testid="af-tool-mcp"
-            checked={tools.mcp}
-            onChange={(e) => onChange(setTool(formData, "mcp", e.target.checked))}
-          >
-            {t("agent_form.tool_mcp")}
-          </Checkbox>
+          <span>
+            <Checkbox
+              data-testid="af-tool-web_search"
+              checked={tools.webSearch}
+              onChange={(e) => onChange(setTool(formData, "webSearch", e.target.checked))}
+            >
+              {t("agent_form.tool_web_search")}
+            </Checkbox>
+            <FieldHelp text={t("agent_form.tool_web_search_help")} testId="af-tool-web_search" />
+          </span>
+          <span>
+            <Checkbox
+              data-testid="af-tool-http"
+              checked={tools.http}
+              onChange={(e) => onChange(setTool(formData, "http", e.target.checked))}
+            >
+              {t("agent_form.tool_http")}
+            </Checkbox>
+            <FieldHelp text={t("agent_form.tool_http_help")} testId="af-tool-http" />
+          </span>
+          <span>
+            <Checkbox
+              data-testid="af-tool-mcp"
+              checked={tools.mcp}
+              onChange={(e) => onChange(setTool(formData, "mcp", e.target.checked))}
+            >
+              {t("agent_form.tool_mcp")}
+            </Checkbox>
+            <FieldHelp text={t("agent_form.tool_mcp_help")} testId="af-tool-mcp" />
+          </span>
         </div>
         {tools.mcp && (
           <McpToolPicker
