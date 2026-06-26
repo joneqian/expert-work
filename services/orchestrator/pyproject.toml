@@ -13,10 +13,11 @@ dependencies = [
     "helix-agent-persistence",
     "helix-agent-protocol",
     "helix-agent-runtime",
-    # Pin past CVE-2026-28277 (langgraph) + CVE-2025-64439 / 2026-27794 (langgraph-checkpoint).
+    # Pin past CVE-2026-28277 (langgraph) + CVE-2025-64439 / 2026-27794 / 2026-48775
+    # (langgraph-checkpoint) + CVE-2026-48776 (langgraph-sdk, transitive).
     # Mirrors helix-runtime; pinned directly so pip-audit catches regression.
     "langgraph>=1.0.10",
-    "langgraph-checkpoint>=4.0.0",
+    "langgraph-checkpoint>=4.1.1",
     # E.7 web_search Tavily HTTP client (also reused by future E.8 HTTP tool).
     "httpx>=0.27,<1",
     # E.9 MCP stdio adapter — Anthropic official Python SDK.

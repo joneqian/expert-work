@@ -12,10 +12,11 @@ dependencies = [
     "helix-agent-persistence",
     "helix-agent-protocol",
     "sqlalchemy[asyncio]>=2.0.30,<3",
-    # Pin past CVE-2026-28277 (langgraph) + CVE-2025-64439 / 2026-27794 (langgraph-checkpoint).
+    # Pin past CVE-2026-28277 (langgraph) + CVE-2025-64439 / 2026-27794 / 2026-48775
+    # (langgraph-checkpoint) + CVE-2026-48776 (langgraph-sdk, transitive).
     # langgraph-checkpoint is transitive but pinned directly so pip-audit + CI catch any regression.
     "langgraph>=1.0.10",
-    "langgraph-checkpoint>=4.0.0",
+    "langgraph-checkpoint>=4.1.1",
     "langgraph-checkpoint-postgres>=2.0.20",
     # Stream A.5 — S3-compatible object storage (MinIO / Aliyun OSS / AWS S3).
     "aiobotocore>=2.13.0",
