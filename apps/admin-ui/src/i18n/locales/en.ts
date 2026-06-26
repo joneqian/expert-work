@@ -320,6 +320,7 @@ export interface TranslationKeys {
     memory_hint: string;
     memory_topk: string;
     section_tools: string;
+    section_advanced: string;
     tool_web_search: string;
     tool_http: string;
     tool_mcp: string;
@@ -2127,6 +2128,7 @@ const en: TranslationKeys = {
     memory_hint: "Remembers across sessions; needs a platform embedding.",
     memory_topk: "Memories recalled per run",
     section_tools: "Tools",
+    section_advanced: "Advanced (memory · reflection · tools)",
     tool_web_search: "Web search",
     tool_http: "HTTP tool",
     tool_mcp: "MCP tools",

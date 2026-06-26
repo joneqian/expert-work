@@ -7,7 +7,7 @@
  * models) is loaded once and handed to ModelSelect.
  */
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Input, InputNumber, Switch, Typography } from "antd";
+import { Button, Checkbox, Collapse, Input, InputNumber, Switch, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { ModelCatalog } from "../../api/model_catalog";
@@ -131,6 +131,17 @@ export function FormView({ formData, onChange }: FormViewProps) {
         </div>
       </section>
 
+      <Collapse
+        ghost
+        style={{ marginTop: 4 }}
+        data-testid="af-advanced"
+        items={[
+          {
+            key: "advanced",
+            label: t("agent_form.section_advanced"),
+            forceRender: true,
+            children: (
+              <>
       <section data-testid="af-memory" style={SECTION}>
         <Heading>
           {t("agent_form.section_memory")}
@@ -236,6 +247,11 @@ export function FormView({ formData, onChange }: FormViewProps) {
           />
         )}
       </section>
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

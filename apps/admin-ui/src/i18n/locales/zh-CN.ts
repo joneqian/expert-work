@@ -328,6 +328,7 @@ const zhCN: TranslationKeys = {
     memory_hint: "跨会话记忆，需要平台已配 Embedding。",
     memory_topk: "每轮召回条数",
     section_tools: "工具",
+    section_advanced: "高级(记忆 · 反思 · 工具)",
     tool_web_search: "联网搜索",
     tool_http: "HTTP 工具",
     tool_mcp: "MCP 工具",
