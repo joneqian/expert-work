@@ -77,6 +77,61 @@ const GITHUB_TOOLS_ENVELOPE = {
   error: null,
 };
 
+// ``/v1/skills`` returns a RAW payload (no envelope) — see api/skills.ts.
+const SKILLS_RAW = {
+  items: [
+    {
+      id: "s1",
+      name: "pptx-builder",
+      status: "active",
+      latest_version: 3,
+      description: "Generate PowerPoint decks from an outline.",
+      category: "office",
+      pinned: false,
+      last_used_at: null,
+      state_changed_at: null,
+      created_at: "",
+      updated_at: "",
+      source: "tenant",
+    },
+  ],
+  platform_items: [
+    {
+      id: "s2",
+      name: "sql-analyst",
+      status: "active",
+      latest_version: 1,
+      description: "Run read-only SQL and summarise results.",
+      category: "data",
+      pinned: false,
+      last_used_at: null,
+      state_changed_at: null,
+      created_at: "",
+      updated_at: "",
+      source: "platform",
+      entitled: true,
+    },
+    {
+      id: "s3",
+      name: "premium-forecaster",
+      status: "active",
+      latest_version: 1,
+      description: "Time-series forecasting (enterprise tier).",
+      category: "ml",
+      pinned: false,
+      last_used_at: null,
+      state_changed_at: null,
+      created_at: "",
+      updated_at: "",
+      source: "platform",
+      entitled: false,
+      required_tier: "enterprise",
+    },
+  ],
+  next_cursor: null,
+  cross_tenant: false,
+};
+
 // ── Decorator factory ─────────────────────────────────────────────────────
 
 function withMcpFixture(Story: ComponentType) {
@@ -90,6 +145,8 @@ function withMcpFixture(Story: ComponentType) {
       data = GITHUB_TOOLS_ENVELOPE;
     } else if (url.match(/\/v1\/mcp-servers\/[^/]+\/tools/)) {
       data = { success: true, data: [], error: null };
+    } else if (url.includes("/v1/skills")) {
+      data = SKILLS_RAW;
     } else if (url.includes("/v1/model-catalog")) {
       data = CATALOG_ENVELOPE;
     }
@@ -200,6 +257,20 @@ export const JinjaPrompt: Story = {
     formData: JINJA_PROMPT_MANIFEST,
     onChange: () => {},
     section: "prompt",
+  },
+};
+
+/**
+ * The Skills tab — tenant + platform skills merged, each row showing
+ * description / source badge / category, with the enterprise-tier skill
+ * locked (shown but not selectable).
+ */
+export const SkillsRich: Story = {
+  decorators: [withMcpFixture],
+  args: {
+    formData: { ...BLANK_MANIFEST, metadata: { name: "skilled-agent" } },
+    onChange: () => {},
+    section: "skills",
   },
 };
 

@@ -84,9 +84,13 @@ describe("FormView", () => {
     expect(screen.getByTestId("af-mcp")).toBeInTheDocument();
     expect(screen.queryByTestId("af-tool-mcp")).not.toBeInTheDocument();
 
-    renderSection("capabilities");
+    renderSection("knowledge");
     expect(screen.getByTestId("af-knowledge")).toBeInTheDocument();
+
+    renderSection("skills");
     expect(screen.getByTestId("af-skills")).toBeInTheDocument();
+
+    renderSection("subagents");
     expect(screen.getByTestId("af-subagents")).toBeInTheDocument();
 
     renderSection("memory");

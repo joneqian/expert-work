@@ -14,7 +14,9 @@ import { useTranslation } from "react-i18next";
 
 import type { ModelCatalog } from "../../api/model_catalog";
 import { FieldHelp } from "../FieldHelp";
-import { CapabilityPickers } from "./CapabilityPickers";
+import { KnowledgePicker } from "./KnowledgePicker";
+import { SkillPicker } from "./SkillPicker";
+import { SubagentPicker } from "./SubagentPicker";
 import { PromptVariablesEditor } from "./PromptVariablesEditor";
 import { loadModelCatalog } from "./catalog";
 import { ModelSelect } from "./widgets/ModelSelect";
@@ -60,7 +62,9 @@ export type FormSection =
   | "prompt"
   | "tools"
   | "mcp"
-  | "capabilities"
+  | "knowledge"
+  | "skills"
+  | "subagents"
   | "memory"
   | "governance";
 
@@ -361,7 +365,9 @@ export function FormView({
       </section>
     ),
 
-    capabilities: <CapabilityPickers formData={formData} onChange={onChange} />,
+    knowledge: <KnowledgePicker formData={formData} onChange={onChange} />,
+    skills: <SkillPicker formData={formData} onChange={onChange} />,
+    subagents: <SubagentPicker formData={formData} onChange={onChange} />,
 
     memory: (
       <section data-testid="af-memory" style={SECTION}>

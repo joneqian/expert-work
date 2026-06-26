@@ -295,7 +295,9 @@ export interface TranslationKeys {
     tab_prompt: string;
     tab_tools: string;
     tab_mcp: string;
-    tab_capabilities: string;
+    tab_knowledge: string;
+    tab_skills: string;
+    tab_subagents: string;
     tab_memory: string;
     tab_governance: string;
     tab_yaml: string;
@@ -384,10 +386,16 @@ export interface TranslationKeys {
     section_knowledge_help: string;
     knowledge_hint: string;
     knowledge_placeholder: string;
+    knowledge_chunk_label: string;
     section_skills: string;
     section_skills_help: string;
     skills_hint: string;
-    skills_placeholder: string;
+    skills_search: string;
+    skills_empty: string;
+    skills_source_platform: string;
+    skills_source_tenant: string;
+    skills_tier_locked: string;
+    skills_tier_locked_hint: string;
     section_subagents: string;
     section_subagents_help: string;
     subagents_hint: string;
@@ -2159,7 +2167,9 @@ const en: TranslationKeys = {
     tab_prompt: "Prompt",
     tab_tools: "Tools",
     tab_mcp: "MCP",
-    tab_capabilities: "Knowledge & skills",
+    tab_knowledge: "Knowledge",
+    tab_skills: "Skills",
+    tab_subagents: "Sub-agents",
     tab_memory: "Memory",
     tab_governance: "Governance",
     tab_yaml: "YAML",
@@ -2271,11 +2281,19 @@ const en: TranslationKeys = {
       "Tenant knowledge bases the agent can search to ground its answers (activates a knowledge_search tool). Pick existing bases or type a name.\nExample: hr-policies, eng-handbook",
     knowledge_hint: "Knowledge bases this agent may search.",
     knowledge_placeholder: "Select or type knowledge base names",
+    knowledge_chunk_label: "chunk {{max}}/overlap {{overlap}}",
     section_skills: "Skills",
     section_skills_help:
       "Reusable skill packages (instructions + scripts) the agent loads. Pick from your tenant + platform skills.\nExample: pptx-builder, sql-analyst",
-    skills_hint: "Skills attached to this agent.",
-    skills_placeholder: "Select or type skill names",
+    skills_hint:
+      "Check the skills to attach to this agent. Platform skills your plan tier cannot use are not selectable.",
+    skills_search: "Search skills (name / description / category)",
+    skills_empty: "No skills available",
+    skills_source_platform: "Platform",
+    skills_source_tenant: "Tenant",
+    skills_tier_locked: "Needs {{tier}}",
+    skills_tier_locked_hint:
+      "This platform skill requires the {{tier}} plan; the current tenant is not entitled.",
     section_subagents: "Sub-agent delegation",
     section_subagents_help:
       "Named delegation targets — other deployed agents this one may hand a subtask to. The parent's LLM sees each as a tool.\nExample: tool 'researcher' → deep-researcher@1.0.0",
