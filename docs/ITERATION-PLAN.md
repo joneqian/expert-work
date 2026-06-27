@@ -355,7 +355,8 @@
   - [x] **M3-PR5 embedding 钉版 + needs_reindex + reindex 端点**（重嵌已留 chunk 文本，事务化回滚）
   - [x] **M3-PR6 durable 摄取 worker + 崩溃恢复 reaper + reingest 端点 + content BYTEA**（真 PG 并发 exactly-once + 崩溃恢复测）
   - **后端 6 PR 全交付(打包为一个后端 PR);118 unit + 18 SQL 集成全绿。**
-  - [ ] **M4-PR7~13 前端**：SDK + list/detail 拆分 + 富创建 Modal + DocumentsTab(进度/重试/拖拽) + 片段预览抽屉 + 检索测试面板 + 设置 tab + i18n/stories/e2e
+  - [x] **M4 前端**：SDK(扩类型+方法,修 ingesting→processing)+ list/detail 拆分(KnowledgeDetail tabs 文档/检索测试/设置)+ 富创建 Modal(描述+高级检索默认值)+ DocumentsTab(本地化状态+真进度轮询+重试+重摄取+Dragger 多文件)+ 片段预览抽屉 + **检索命中测试面板**(score 进度条+recall-path tag)+ 设置 tab(PATCH+embedding+重建)+ i18n 三写 + stories + vitest(KnowledgeAdmin/Detail)+ e2e+axe。tsc-b/vitest 495/build/storybook/playwright 全绿。
+  - **KB 知识库商业级补齐 = 全交付(后端 #836 + 前端);直击「做薄」屏的产品级修复。**
   - 维持推迟（backlog）：RBAC 硬化（行为变更 403 风险）/ KB 改名（refs 改按 id）/ URL·网页摄取 / 上传配额 / 去重 / OCR / 平台共享 KB / 文档级权限 / 字节下沉对象存储
 - [x] **H.8 Artifacts 运行产物治理面** — **已交付**（2026-06-12，#584 设计 / PR1）。后端 `/v1/artifacts` 零改，纯前端消费。详设 [STREAM-H-DESIGN § 6.8](./streams/STREAM-H-DESIGN.md)。
   - [x] **H.8 设计先行**（#584）：§ 6.8 详设——取证 9 条 file:line + Mini-ADR H-14~H-16 + 纯前端 2-PR

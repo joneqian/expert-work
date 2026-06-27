@@ -7,6 +7,7 @@ import { Curation } from "./pages/Curation";
 import { EvalRunDetail } from "./pages/EvalRunDetail";
 import { EvalRunsList } from "./pages/EvalRunsList";
 import { KnowledgeAdmin } from "./pages/KnowledgeAdmin";
+import { KnowledgeDetail } from "./pages/KnowledgeDetail";
 import { MemoryAdmin } from "./pages/MemoryAdmin";
 import { RunDetail } from "./pages/RunDetail";
 import { RunsList } from "./pages/RunsList";
@@ -57,6 +58,8 @@ export function AppRouter() {
       <Route path="/memory" element={<MemoryAdmin />} />
       <Route path="/artifacts" element={<ArtifactsList />} />
       <Route path="/knowledge" element={<KnowledgeAdmin />} />
+      <Route path="/knowledge/:name" element={<KnowledgeDetail />} />
+      <Route path="/knowledge/:name/:tab" element={<KnowledgeDetail />} />
       <Route path="/skills" element={<SkillsList />} />
       <Route path="/skills/:skillId" element={<SkillDetail />} />
       <Route path="/agent-template-marketplace" element={<AgentTemplateMarketplace />} />

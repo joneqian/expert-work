@@ -13,48 +13,24 @@ const BASES_RESPONSE = {
     {
       id: "11111111-1111-1111-1111-111111111111",
       name: "support-docs",
+      description: "Customer support FAQ + handbooks",
       chunk_max_tokens: 512,
       chunk_overlap_tokens: 64,
       created_at: "2026-06-12T00:00:00Z",
+      needs_reindex: false,
+      reindexing: false,
+      stats: { document_count: 12, chunk_count: 480 },
     },
     {
       id: "11111111-1111-1111-1111-111111111112",
       name: "product-manuals",
+      description: "Hardware manuals (PDF)",
       chunk_max_tokens: 1024,
       chunk_overlap_tokens: 128,
       created_at: "2026-06-10T00:00:00Z",
-    },
-  ],
-};
-
-const DOCUMENTS_RESPONSE = {
-  documents: [
-    {
-      id: "22222222-2222-2222-2222-222222222221",
-      filename: "faq.pdf",
-      status: "ready",
-      error: null,
-      chunk_count: 12,
-      created_at: "2026-06-12T00:00:00Z",
-      updated_at: "2026-06-12T00:05:00Z",
-    },
-    {
-      id: "22222222-2222-2222-2222-222222222222",
-      filename: "handbook.docx",
-      status: "ingesting",
-      error: null,
-      chunk_count: 0,
-      created_at: "2026-06-12T01:00:00Z",
-      updated_at: "2026-06-12T01:00:10Z",
-    },
-    {
-      id: "22222222-2222-2222-2222-222222222223",
-      filename: "broken.html",
-      status: "failed",
-      error: "parse error: empty document",
-      chunk_count: 0,
-      created_at: "2026-06-12T02:00:00Z",
-      updated_at: "2026-06-12T02:00:05Z",
+      needs_reindex: true,
+      reindexing: false,
+      stats: { document_count: 4, chunk_count: 96 },
     },
   ],
 };
@@ -62,18 +38,15 @@ const DOCUMENTS_RESPONSE = {
 /** All ``/v1/knowledge`` endpoints are raw — respond with bodies directly. */
 function withStubs(bases: unknown) {
   return (Story: ComponentType) => {
-    apiClient.defaults.adapter = (config) => {
-      const url = config.url ?? "";
-      const data = /\/documents$/.test(url) ? DOCUMENTS_RESPONSE : bases;
-      return Promise.resolve({
-        data,
+    apiClient.defaults.adapter = (config) =>
+      Promise.resolve({
+        data: bases,
         status: 200,
         statusText: "OK",
         headers: {},
         config,
         request: {},
       });
-    };
     return (
       <MemoryRouter>
         <TenantScopeProvider>
@@ -94,7 +67,7 @@ export default meta;
 
 type Story = StoryObj<typeof KnowledgeAdmin>;
 
-/** Bases on the left; click one to load its documents (4-state tags). */
+/** Bases list with stats + a needs-reindex tag; click a row to open detail. */
 export const Default: Story = { decorators: [withStubs(BASES_RESPONSE)] };
 
 /** No bases yet. */

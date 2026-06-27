@@ -223,6 +223,69 @@ export interface TranslationKeys {
     col_chunks: string;
     col_updated: string;
     delete_doc_confirm_title: string;
+    // ── commercial uplift ──
+    field_description: string;
+    field_description_placeholder: string;
+    advanced: string;
+    retrieval_defaults: string;
+    field_top_k: string;
+    field_top_k_hint: string;
+    field_threshold: string;
+    field_threshold_hint: string;
+    field_method: string;
+    field_method_hint: string;
+    method_vector: string;
+    method_keyword: string;
+    method_hybrid: string;
+    field_rerank: string;
+    field_rerank_hint: string;
+    col_description: string;
+    col_documents: string;
+    col_chunks_total: string;
+    needs_reindex_tag: string;
+    reindexing_tag: string;
+    status_pending: string;
+    status_processing: string;
+    status_ready: string;
+    status_failed: string;
+    failed_to_load_base: string;
+    tab_documents: string;
+    tab_test: string;
+    tab_settings: string;
+    stat_documents: string;
+    stat_chunks: string;
+    stat_embedding: string;
+    embedding_unset: string;
+    needs_reindex_banner: string;
+    reindex_button: string;
+    reindex_started: string;
+    upload_dragger_hint: string;
+    upload_dragger_sub: string;
+    col_attempts: string;
+    reingest: string;
+    reingest_started: string;
+    reingest_no_bytes: string;
+    view_chunks: string;
+    chunks_drawer_title: string;
+    chunks_empty: string;
+    chunk_label: string;
+    test_title: string;
+    test_query_placeholder: string;
+    test_run: string;
+    test_empty_hint: string;
+    test_no_results: string;
+    test_control_top_k: string;
+    test_control_method: string;
+    test_control_threshold: string;
+    test_control_rerank: string;
+    test_method_default: string;
+    recall_vector: string;
+    recall_keyword: string;
+    recall_both: string;
+    settings_title: string;
+    settings_saved: string;
+    settings_rename_note: string;
+    settings_embedding_title: string;
   };
   rate_card_page: {
     page_title: string;
@@ -2089,6 +2152,72 @@ const en: TranslationKeys = {
     col_chunks: "Chunks",
     col_updated: "Updated",
     delete_doc_confirm_title: "Delete document {{name}}?",
+    field_description: "Description",
+    field_description_placeholder: "What this knowledge base is for (optional).",
+    advanced: "Advanced",
+    retrieval_defaults: "Retrieval defaults",
+    field_top_k: "Results (top-k)",
+    field_top_k_hint: "How many chunks knowledge_search returns by default.",
+    field_threshold: "Score threshold",
+    field_threshold_hint:
+      "Drop vector hits below this similarity (0–1). Empty = no cutoff.",
+    field_method: "Retrieval method",
+    field_method_hint:
+      "Hybrid fuses vector + keyword recall; restrict to one if needed.",
+    method_vector: "Vector",
+    method_keyword: "Keyword",
+    method_hybrid: "Hybrid",
+    field_rerank: "LLM rerank",
+    field_rerank_hint: "Reorder fused results by an LLM when one is configured.",
+    col_description: "Description",
+    col_documents: "Docs",
+    col_chunks_total: "Chunks",
+    needs_reindex_tag: "Needs re-index",
+    reindexing_tag: "Re-indexing",
+    status_pending: "Pending",
+    status_processing: "Processing",
+    status_ready: "Ready",
+    status_failed: "Failed",
+    failed_to_load_base: "Failed to load knowledge base",
+    tab_documents: "Documents",
+    tab_test: "Retrieval test",
+    tab_settings: "Settings",
+    stat_documents: "Documents",
+    stat_chunks: "Chunks",
+    stat_embedding: "Embedding model",
+    embedding_unset: "Not set",
+    needs_reindex_banner:
+      "The platform embedding model changed since this base was indexed. Re-index to keep retrieval accurate.",
+    reindex_button: "Re-index",
+    reindex_started: "Re-indexing started; it runs in the background.",
+    upload_dragger_hint: "Click or drag files here to upload",
+    upload_dragger_sub: "PDF, Office, Markdown, HTML, CSV, TXT — multiple files supported.",
+    col_attempts: "Attempts",
+    reingest: "Re-ingest",
+    reingest_started: "Re-ingestion started.",
+    reingest_no_bytes:
+      "The original file was not retained for this document — please re-upload it.",
+    view_chunks: "View chunks",
+    chunks_drawer_title: "Chunks · {{name}}",
+    chunks_empty: "No chunks (the document may still be processing).",
+    chunk_label: "Chunk #{{index}}",
+    test_title: "Retrieval test",
+    test_query_placeholder: "Enter a query to see which chunks would be retrieved…",
+    test_run: "Run",
+    test_empty_hint: "Run a query to preview retrieval — ranked chunks with scores and recall path.",
+    test_no_results: "No chunks matched this query.",
+    test_control_top_k: "Top-k",
+    test_control_method: "Method",
+    test_control_threshold: "Threshold",
+    test_control_rerank: "Rerank",
+    test_method_default: "Base default",
+    recall_vector: "vector",
+    recall_keyword: "keyword",
+    recall_both: "both",
+    settings_title: "Retrieval settings",
+    settings_saved: "Settings saved.",
+    settings_rename_note: "Renaming is not supported — agents reference a base by name.",
+    settings_embedding_title: "Embedding",
   },
   rate_card_page: {
     page_title: "Model Pricing",
