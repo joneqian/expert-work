@@ -2,7 +2,7 @@
  * Agent-form MCP picker E2E — Stream V-G.
  *
  * Proves an admin can:
- *   (a) open the Create-Agent drawer, enable the MCP toggle, see the
+ *   (a) open the Create-Agent modal, enable the MCP toggle, see the
  *       server checkbox list (from ``GET /v1/mcp-servers/available``),
  *       check ``github``, expand its tool collapse
  *       (``GET /v1/mcp-servers/github/tools``), check ``create_issue``,
@@ -88,7 +88,7 @@ const GITHUB_TOOLS = {
   error: null,
 };
 
-// POST /v1/agents returns a minimal success envelope so the drawer closes.
+// POST /v1/agents returns a minimal success envelope so the modal closes.
 const CREATE_AGENT_OK = {
   success: true,
   data: {
@@ -122,7 +122,7 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ json: CATALOG_ENVELOPE });
   });
 
-  // Embedding-status stub — drawer renders the editor only when configured.
+  // Embedding-status stub — modal renders the editor only when configured.
   await page.route("**/v1/platform/embedding-config/status", (route) =>
     route.fulfill({
       json: { success: true, data: { configured: true }, error: null },
@@ -139,7 +139,7 @@ test.beforeEach(async ({ page }) => {
     await route.fulfill({ json: GITHUB_TOOLS });
   });
 
-  // POST /v1/agents — stub so the drawer can close after submit.
+  // POST /v1/agents — stub so the modal can close after submit.
   // Uses route.fallback() for non-POST requests so the fixture's broader
   // ``**/v1/agents*`` GET stub still handles the agents-list fetch.
   await page.route("**/v1/agents", async (route) => {
@@ -171,9 +171,9 @@ test.beforeEach(async ({ page }) => {
 test("(a) create-agent: enable MCP, pick server+tool, submit — POST body contains mcp entry", async ({
   page,
 }) => {
-  // Open the Create Agent drawer.
+  // Open the Create Agent modal.
   await page.getByTestId("agents-create").click();
-  await expect(page.getByTestId("create-agent-drawer")).toBeVisible();
+  await expect(page.getByTestId("create-agent-modal")).toBeVisible();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
 
   // Give the agent a name so the manifest is valid enough for the backend stub.
@@ -223,7 +223,7 @@ test("(a) create-agent: enable MCP, pick server+tool, submit — POST body conta
   expect(yaml).toContain("create_issue");
 });
 
-test("(b) create drawer with MCP picker passes axe (serious + critical)", async ({
+test("(b) create modal with MCP picker passes axe (serious + critical)", async ({
   page,
 }) => {
   await page.getByTestId("agents-create").click();
@@ -235,5 +235,5 @@ test("(b) create drawer with MCP picker passes axe (serious + critical)", async 
   // Wait for the picker to load so axe sees the full DOM.
   await expect(page.getByTestId("af-mcp-server-github")).toBeVisible();
 
-  await expectNoA11yViolations(page, "create-agent-drawer-mcp");
+  await expectNoA11yViolations(page, "create-agent-modal-mcp");
 });

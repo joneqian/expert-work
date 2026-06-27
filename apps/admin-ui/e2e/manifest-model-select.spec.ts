@@ -4,7 +4,7 @@
  * Proves an admin can pick a provider + model through the curated Form tab's
  * linked model picker (``<ModelSelect>``), that choosing a vision-capable
  * model flips the vision indicator to its supported state, and that the open
- * Create-Agent drawer (with the picker mounted) passes the axe a11y check.
+ * Create-Agent modal (with the picker mounted) passes the axe a11y check.
  *
  * The editor fetches ``GET /v1/agents/schema`` and the picker fetches
  * ``GET /v1/model-catalog`` (both enveloped) on mount, so we stub both. The
@@ -83,7 +83,7 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/v1/model-catalog", async (route) => {
     await route.fulfill({ json: CATALOG_ENVELOPE });
   });
-  // The drawer fetches the platform embedding status on open (Stream T PR E);
+  // The modal fetches the platform embedding status on open (Stream T PR E);
   // stub the configured path so the editor renders deterministically.
   await page.route("**/v1/platform/embedding-config/status", (route) =>
     route.fulfill({
@@ -109,7 +109,7 @@ test("pick a provider + model via the form turns vision on", async ({
   page,
 }) => {
   await page.getByTestId("agents-create").click();
-  await expect(page.getByTestId("create-agent-drawer")).toBeVisible();
+  await expect(page.getByTestId("create-agent-modal")).toBeVisible();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
   // The model controls live under the "Model" tab now (the form is split into
   // one tab per section). The reflection-evaluator section reuses <ModelSelect>,
@@ -156,7 +156,7 @@ test("the reflection-evaluator section exposes its own model picker", async ({
   );
 });
 
-test("create drawer with model picker passes axe (serious + critical)", async ({
+test("create modal with model picker passes axe (serious + critical)", async ({
   page,
 }) => {
   await page.getByTestId("agents-create").click();
@@ -165,5 +165,5 @@ test("create drawer with model picker passes axe (serious + critical)", async ({
   await expect(
     page.getByTestId("af-model").getByTestId("model-select-field"),
   ).toBeVisible();
-  await expectNoA11yViolations(page, "create-agent-drawer");
+  await expectNoA11yViolations(page, "create-agent-modal");
 });
