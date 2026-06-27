@@ -348,12 +348,13 @@
   - [x] **H.7 PR1（实现，收尾）**：SDK knowledge.ts（6 方法全 raw + 扩展白名单常量/校验）+ KnowledgeAdmin 单页 master-detail（H-17：bases 表+create modal 409/400 映射+删库连带提示 / documents 表 4 态 Tag+failed error tooltip+行删）+ Upload accept 白名单+beforeUpload 预校验+503 embedder 文案 + ingest 条件轮询（H-18：未终态 5s/全终态停/切 base 清 timer）+ H-19 scope note（非 home scope 顶部声明）+ router/Sidebar（BookOpen）/CommandPalette（g k）/i18n 双语 29 key + Storybook 2 stories + vitest 6 测 + Playwright 冒烟；顺手矫正 ArtifactsList/KnowledgeAdmin 用 `App.useApp()` 注入 message（house style，静态 message 不渲染于测试环境）
   - [ ] **H.7-F1 follow-up（后端能力，另立项）**：knowledge 跨租户治理（router 加 tenant_id query + Stream N 接线）
 - [ ] **KB 知识库商业级补齐** — 引擎已生产级（hybrid+RRF+rerank+引文+语义切块），补管理面 + 检索透明 + 摄取持久化。范围 A「管理面 + 检索透明」+ 四能力（命中测试 / 片段预览 / per-KB embedding 安全重建 / 文档进度+重试+重摄取）。设计见 plan `kb`。
-  - [ ] **M1-PR1 schema + DTO**：migration 0100（knowledge_base 元数据/检索配置/embedding 钉版列 + CHECK）+ 0101（knowledge_document durability + content BYTEA + 部分索引）+ ORM + protocol（RetrievalMethod/ScoredChunk/DEFAULT_RETRIEVAL_TOP_K + KnowledgeBase/Document 扩字段）+ 17 protocol 测
-  - [ ] **M1-PR2 store 层**：create/update_base + base_stats(_many) + search_scored/keyword_search_scored + list_chunks + claim_documents_for_ingest(CAS) + get_document_content + upsert_document(bytes)
-  - [ ] **M2-PR3 retriever**：per-KB 配置 + 分数 + recall_source + 阈值过滤（加性，工具路径兼容）
-  - [ ] **M2-PR4 API**：GET 单 KB+stats / PATCH / 片段预览 / 检索命中测试端点（挂 app.state retriever）
-  - [ ] **M3-PR5 embedding 钉版 + needs_reindex + reindex 端点**
-  - [ ] **M3-PR6 durable 摄取 worker + 崩溃恢复 reaper + reingest 端点**（真 PG 并发测）
+  - [x] **M1-PR1 schema + DTO**：migration 0100（knowledge_base 元数据/检索配置/embedding 钉版列 + CHECK）+ 0101（knowledge_document durability + content BYTEA + 部分索引）+ ORM + protocol（RetrievalMethod/ScoredChunk/DEFAULT_RETRIEVAL_TOP_K + KnowledgeBase/Document 扩字段）+ 17 protocol 测
+  - [x] **M1-PR2 store 层**：create/update_base + base_stats(_many) + search_scored/keyword_search_scored + list_chunks + claim_documents_for_ingest(CAS) + get_document_content + upsert_document(bytes)
+  - [x] **M2-PR3 retriever**：per-KB 配置 + 分数 + recall_source + 阈值过滤（加性，工具路径兼容）
+  - [x] **M2-PR4 API**：GET 单 KB+stats / PATCH / 片段预览 / 检索命中测试端点（挂 app.state retriever）
+  - [x] **M3-PR5 embedding 钉版 + needs_reindex + reindex 端点**（重嵌已留 chunk 文本，事务化回滚）
+  - [x] **M3-PR6 durable 摄取 worker + 崩溃恢复 reaper + reingest 端点 + content BYTEA**（真 PG 并发 exactly-once + 崩溃恢复测）
+  - **后端 6 PR 全交付(打包为一个后端 PR);118 unit + 18 SQL 集成全绿。**
   - [ ] **M4-PR7~13 前端**：SDK + list/detail 拆分 + 富创建 Modal + DocumentsTab(进度/重试/拖拽) + 片段预览抽屉 + 检索测试面板 + 设置 tab + i18n/stories/e2e
   - 维持推迟（backlog）：RBAC 硬化（行为变更 403 风险）/ KB 改名（refs 改按 id）/ URL·网页摄取 / 上传配额 / 去重 / OCR / 平台共享 KB / 文档级权限 / 字节下沉对象存储
 - [x] **H.8 Artifacts 运行产物治理面** — **已交付**（2026-06-12，#584 设计 / PR1）。后端 `/v1/artifacts` 零改，纯前端消费。详设 [STREAM-H-DESIGN § 6.8](./streams/STREAM-H-DESIGN.md)。
