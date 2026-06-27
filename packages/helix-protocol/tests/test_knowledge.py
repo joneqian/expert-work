@@ -98,7 +98,9 @@ def test_knowledge_base_accepts_retrieval_config() -> None:
 )
 def test_knowledge_base_rejects_out_of_range_retrieval(field: str, value: float) -> None:
     with pytest.raises(ValidationError):
-        KnowledgeBase(id=uuid4(), tenant_id=uuid4(), name="kb", **{field: value})
+        # Dynamic kwargs for parametrised range checks — mypy can't infer the
+        # per-field type from the spread dict, but the values are intentional.
+        KnowledgeBase(id=uuid4(), tenant_id=uuid4(), name="kb", **{field: value})  # type: ignore[arg-type]
 
 
 def test_scored_chunk_constructs() -> None:
