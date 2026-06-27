@@ -301,7 +301,6 @@ async def test_upsert_retains_bytes_and_get_content() -> None:
 
 @pytest.mark.asyncio
 async def test_claim_document_cas_and_terminal_release() -> None:
-
     store = InMemoryKnowledgeStore()
     tenant = uuid4()
     base = await store.create_base(tenant_id=tenant, name="kb")
@@ -324,9 +323,7 @@ async def test_claim_document_cas_and_terminal_release() -> None:
         is None
     )
     # Reaching a terminal state releases the lease (not re-claimed).
-    await store.mark_document_failed_terminal(
-        tenant_id=tenant, document_id=doc.id, error="boom"
-    )
+    await store.mark_document_failed_terminal(tenant_id=tenant, document_id=doc.id, error="boom")
     fetched = await store.get_document(tenant_id=tenant, document_id=doc.id)
     assert fetched is not None
     assert fetched.status is DocumentStatus.FAILED
@@ -334,7 +331,6 @@ async def test_claim_document_cas_and_terminal_release() -> None:
 
 @pytest.mark.asyncio
 async def test_claim_documents_for_ingest_batches_claimable() -> None:
-
     store = InMemoryKnowledgeStore()
     tenant = uuid4()
     base = await store.create_base(tenant_id=tenant, name="kb")

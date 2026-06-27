@@ -278,9 +278,7 @@ async def test_retriever_reads_per_base_config_defaults() -> None:
         retrieval_score_threshold=0.5,
     )
     retriever = KnowledgeRetriever(store=store, embedder=_FixedEmbedder((1.0, 0.0)))
-    results = await retriever.search(
-        tenant_id=tenant, base_names=["kb"], query="vacation", limit=5
-    )
+    results = await retriever.search(tenant_id=tenant, base_names=["kb"], query="vacation", limit=5)
     # "vacation" matches chunk 1 by keyword, but keyword recall is off and
     # chunk 1's vector similarity (~0) is below the base threshold → only
     # chunk 0 survives.

@@ -183,9 +183,7 @@ class KnowledgeStore(abc.ABC):
         """Fetch a document by id, or ``None``."""
 
     @abc.abstractmethod
-    async def get_document_content(
-        self, *, tenant_id: UUID, document_id: UUID
-    ) -> bytes | None:
+    async def get_document_content(self, *, tenant_id: UUID, document_id: UUID) -> bytes | None:
         """The document's retained original bytes, or ``None`` (legacy rows /
         unknown id)."""
 

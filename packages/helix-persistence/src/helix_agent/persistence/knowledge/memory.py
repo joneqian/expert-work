@@ -160,9 +160,7 @@ class InMemoryKnowledgeStore(KnowledgeStore):
         )
 
     async def request_reindex(self, *, tenant_id: UUID, kb_id: UUID) -> bool:
-        return await self._patch_base(
-            tenant_id, kb_id, {"reindex_requested_at": datetime.now(UTC)}
-        )
+        return await self._patch_base(tenant_id, kb_id, {"reindex_requested_at": datetime.now(UTC)})
 
     async def clear_reindex(self, *, tenant_id: UUID, kb_id: UUID) -> None:
         await self._patch_base(tenant_id, kb_id, {"reindex_requested_at": None})
@@ -241,9 +239,7 @@ class InMemoryKnowledgeStore(KnowledgeStore):
             None,
         )
 
-    async def get_document_content(
-        self, *, tenant_id: UUID, document_id: UUID
-    ) -> bytes | None:
+    async def get_document_content(self, *, tenant_id: UUID, document_id: UUID) -> bytes | None:
         doc = await self.get_document(tenant_id=tenant_id, document_id=document_id)
         return self._content.get(document_id) if doc is not None else None
 
@@ -278,9 +274,7 @@ class InMemoryKnowledgeStore(KnowledgeStore):
             return lease is None or lease < now
         return False
 
-    def _claim(
-        self, doc: KnowledgeDocument, now: datetime, lease_seconds: int
-    ) -> ClaimedIngestion:
+    def _claim(self, doc: KnowledgeDocument, now: datetime, lease_seconds: int) -> ClaimedIngestion:
         claimed = doc.model_copy(
             update={
                 "status": DocumentStatus.PROCESSING,

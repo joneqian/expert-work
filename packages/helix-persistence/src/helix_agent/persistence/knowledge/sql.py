@@ -386,9 +386,7 @@ class SqlKnowledgeStore(KnowledgeStore):
             row = (await session.execute(stmt)).scalar_one_or_none()
         return _to_document(row) if row is not None else None
 
-    async def get_document_content(
-        self, *, tenant_id: UUID, document_id: UUID
-    ) -> bytes | None:
+    async def get_document_content(self, *, tenant_id: UUID, document_id: UUID) -> bytes | None:
         stmt = select(KnowledgeDocumentRow.content).where(
             KnowledgeDocumentRow.tenant_id == tenant_id,
             KnowledgeDocumentRow.id == document_id,
@@ -408,22 +406,26 @@ class SqlKnowledgeStore(KnowledgeStore):
         lease_until = now + timedelta(seconds=lease_seconds)
         async with self._sf() as session:
             row = (
-                await session.execute(
-                    update(KnowledgeDocumentRow)
-                    .where(
-                        KnowledgeDocumentRow.tenant_id == tenant_id,
-                        KnowledgeDocumentRow.id == document_id,
-                        _claimable(now, max_attempts),
+                (
+                    await session.execute(
+                        update(KnowledgeDocumentRow)
+                        .where(
+                            KnowledgeDocumentRow.tenant_id == tenant_id,
+                            KnowledgeDocumentRow.id == document_id,
+                            _claimable(now, max_attempts),
+                        )
+                        .values(
+                            status=DocumentStatus.PROCESSING.value,
+                            claimed_at=now,
+                            lease_until=lease_until,
+                            attempts=KnowledgeDocumentRow.attempts + 1,
+                        )
+                        .returning(KnowledgeDocumentRow)
                     )
-                    .values(
-                        status=DocumentStatus.PROCESSING.value,
-                        claimed_at=now,
-                        lease_until=lease_until,
-                        attempts=KnowledgeDocumentRow.attempts + 1,
-                    )
-                    .returning(KnowledgeDocumentRow)
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if row is None:
                 await session.commit()
                 return None
@@ -437,30 +439,38 @@ class SqlKnowledgeStore(KnowledgeStore):
         lease_until = now + timedelta(seconds=lease_seconds)
         async with self._sf() as session:
             candidate_ids = (
-                await session.execute(
-                    select(KnowledgeDocumentRow.id)
-                    .where(_claimable(now, max_attempts))
-                    .order_by(KnowledgeDocumentRow.created_at.asc())
-                    .limit(limit)
-                    .with_for_update(skip_locked=True)
+                (
+                    await session.execute(
+                        select(KnowledgeDocumentRow.id)
+                        .where(_claimable(now, max_attempts))
+                        .order_by(KnowledgeDocumentRow.created_at.asc())
+                        .limit(limit)
+                        .with_for_update(skip_locked=True)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not candidate_ids:
                 await session.commit()
                 return []
             rows = (
-                await session.execute(
-                    update(KnowledgeDocumentRow)
-                    .where(KnowledgeDocumentRow.id.in_(candidate_ids))
-                    .values(
-                        status=DocumentStatus.PROCESSING.value,
-                        claimed_at=now,
-                        lease_until=lease_until,
-                        attempts=KnowledgeDocumentRow.attempts + 1,
+                (
+                    await session.execute(
+                        update(KnowledgeDocumentRow)
+                        .where(KnowledgeDocumentRow.id.in_(candidate_ids))
+                        .values(
+                            status=DocumentStatus.PROCESSING.value,
+                            claimed_at=now,
+                            lease_until=lease_until,
+                            attempts=KnowledgeDocumentRow.attempts + 1,
+                        )
+                        .returning(KnowledgeDocumentRow)
                     )
-                    .returning(KnowledgeDocumentRow)
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             claims = [await self._build_claim(session, row.tenant_id, row) for row in rows]
             await session.commit()
             return claims

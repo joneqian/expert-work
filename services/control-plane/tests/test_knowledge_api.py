@@ -345,9 +345,7 @@ async def test_patch_base_clear_vs_omit_nullable(setup: Setup) -> None:
         json={"name": "kb", "description": "orig", "retrieval_score_threshold": 0.5},
     )
     # Explicit null clears the threshold; description omitted → unchanged.
-    patched = await client.patch(
-        "/v1/knowledge/bases/kb", json={"retrieval_score_threshold": None}
-    )
+    patched = await client.patch("/v1/knowledge/bases/kb", json={"retrieval_score_threshold": None})
     assert patched.status_code == 200
     assert patched.json()["retrieval_config"]["score_threshold"] is None
     assert patched.json()["description"] == "orig"

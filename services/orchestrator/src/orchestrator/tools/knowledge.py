@@ -192,9 +192,7 @@ class KnowledgeRetriever:
                     vector = [hit for hit in vector if hit.score >= eff_threshold]
                 rankings.append([hit.chunk for hit in vector])
                 for hit in vector:
-                    vector_score[hit.chunk.id] = max(
-                        vector_score.get(hit.chunk.id, 0.0), hit.score
-                    )
+                    vector_score[hit.chunk.id] = max(vector_score.get(hit.chunk.id, 0.0), hit.score)
                     sources.setdefault(hit.chunk.id, set()).add("vector")
             if eff_method in (RetrievalMethod.HYBRID, RetrievalMethod.KEYWORD):
                 keyword = await self.store.keyword_search_scored(

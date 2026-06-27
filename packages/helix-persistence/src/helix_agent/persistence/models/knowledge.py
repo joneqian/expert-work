@@ -58,9 +58,7 @@ class KnowledgeBaseRow(Base):
     #: have no recorded creator.
     created_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: Per-base retrieval defaults — surfaced so they are not hardcoded.
-    retrieval_top_k: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("5")
-    )
+    retrieval_top_k: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("5"))
     retrieval_score_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     retrieval_method: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'hybrid'")

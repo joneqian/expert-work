@@ -290,9 +290,7 @@ class KnowledgeIngestionRunner:
             tenant_id=tenant_id, document_id=document_id, chunks=rebuilt
         )
 
-    async def _collect_chunks(
-        self, *, tenant_id: UUID, document_id: UUID
-    ) -> list[KnowledgeChunk]:
+    async def _collect_chunks(self, *, tenant_id: UUID, document_id: UUID) -> list[KnowledgeChunk]:
         collected: list[KnowledgeChunk] = []
         offset = 0
         while True:
