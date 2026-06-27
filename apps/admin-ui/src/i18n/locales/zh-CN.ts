@@ -236,7 +236,8 @@ const zhCN: TranslationKeys = {
     field_top_k: "返回条数（top-k）",
     field_top_k_hint: "knowledge_search 默认返回多少个分块。",
     field_threshold: "相似度阈值",
-    field_threshold_hint: "低于此相似度（0–1）的向量命中将被丢弃；留空表示不设阈值。",
+    field_threshold_hint:
+      "低于此相似度（0–1）的向量命中将被丢弃；默认关（留空）。想启用就用检索测试量过分数后再设（可从 0.2 起试），过高会漏召回。",
     field_method: "检索方式",
     field_method_hint: "混合 = 向量 + 关键词召回融合；必要时可限定其一。",
     method_vector: "向量",

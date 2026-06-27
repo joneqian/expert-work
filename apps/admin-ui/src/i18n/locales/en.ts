@@ -2160,7 +2160,7 @@ const en: TranslationKeys = {
     field_top_k_hint: "How many chunks knowledge_search returns by default.",
     field_threshold: "Score threshold",
     field_threshold_hint:
-      "Drop vector hits below this similarity (0–1). Empty = no cutoff.",
+      "Drop vector hits below this similarity (0–1). Off by default (empty). To enable, tune it from the retrieval test (try ~0.2 first) — too high drops relevant hits.",
     field_method: "Retrieval method",
     field_method_hint:
       "Hybrid fuses vector + keyword recall; restrict to one if needed.",
