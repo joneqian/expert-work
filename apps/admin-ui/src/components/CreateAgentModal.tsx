@@ -144,11 +144,15 @@ export function CreateAgentModal({ open, onClose, onCreated }: CreateAgentModalP
           </Button>
         </div>
       }
-      data-testid="create-agent-modal"
     >
-      <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
-        {t("create_agent.hint")}
-      </Text>
+      {/* The testid lives on a content wrapper (not the <Modal> root): antd puts
+          a forwarded data-testid on ``.ant-modal-root``, which Playwright treats
+          as hidden even when open. This inner div is visible when the modal is
+          open and unmounted (destroyOnHidden) when closed. */}
+      <div data-testid="create-agent-modal">
+        <Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+          {t("create_agent.hint")}
+        </Text>
 
       {error !== null && (
         <Alert
@@ -193,6 +197,7 @@ export function CreateAgentModal({ open, onClose, onCreated }: CreateAgentModalP
           onChange={setBuffer}
         />
       )}
+      </div>
     </Modal>
   );
 }
