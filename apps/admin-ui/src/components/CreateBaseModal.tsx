@@ -1,13 +1,13 @@
 /**
  * Create-knowledge-base modal — KB commercial uplift.
  *
- * Important-first: name + description up top, chunking + retrieval defaults
- * tucked under an Advanced ``Collapse`` (matches the manifest editor's
- * advanced-knobs pattern). A Modal (not a Drawer) to match the platform's
+ * A flat form (few fields, no Advanced collapse): name + description, then the
+ * chunking + retrieval defaults pre-filled with tuned values so a user can
+ * just name a base and save. A Modal (not a Drawer) to match the platform's
  * create-modal convention.
  */
 import { useCallback, useState } from "react";
-import { App, Collapse, Form, Input, InputNumber, Modal, Select, Switch } from "antd";
+import { App, Form, Input, InputNumber, Modal, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
@@ -82,7 +82,16 @@ export function CreateBaseModal({ open, onClose, onCreated }: CreateBaseModalPro
           form={form}
           layout="vertical"
           onFinish={handleFinish}
-          initialValues={{ retrievalMethod: "hybrid", rerankEnabled: true }}
+          // Pre-filled with the tuned defaults (chunk 512/64, top-k 5, hybrid +
+          // rerank). Threshold stays empty on purpose — "no cutoff" is the safe
+          // default; a value risks dropping relevant hits.
+          initialValues={{
+            chunkMaxTokens: 512,
+            chunkOverlapTokens: 64,
+            retrievalTopK: 5,
+            retrievalMethod: "hybrid",
+            rerankEnabled: true,
+          }}
         >
           <Form.Item
             name="name"
@@ -98,89 +107,76 @@ export function CreateBaseModal({ open, onClose, onCreated }: CreateBaseModalPro
               aria-label={t("knowledge_page.field_description")}
             />
           </Form.Item>
-          <Collapse
-            ghost
-            items={[
-              {
-                key: "advanced",
-                label: t("knowledge_page.advanced"),
-                children: (
-                  <>
-                    <Form.Item
-                      name="chunkMaxTokens"
-                      label={t("knowledge_page.field_chunk_max")}
-                      tooltip={t("knowledge_page.field_chunk_hint")}
-                    >
-                      <InputNumber
-                        min={1}
-                        style={{ width: "100%" }}
-                        aria-label={t("knowledge_page.field_chunk_max")}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      name="chunkOverlapTokens"
-                      label={t("knowledge_page.field_chunk_overlap")}
-                      tooltip={t("knowledge_page.field_chunk_hint")}
-                    >
-                      <InputNumber
-                        min={0}
-                        style={{ width: "100%" }}
-                        aria-label={t("knowledge_page.field_chunk_overlap")}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      name="retrievalTopK"
-                      label={t("knowledge_page.field_top_k")}
-                      tooltip={t("knowledge_page.field_top_k_hint")}
-                    >
-                      <InputNumber
-                        min={1}
-                        max={50}
-                        style={{ width: "100%" }}
-                        aria-label={t("knowledge_page.field_top_k")}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      name="retrievalScoreThreshold"
-                      label={t("knowledge_page.field_threshold")}
-                      tooltip={t("knowledge_page.field_threshold_hint")}
-                    >
-                      <InputNumber
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        style={{ width: "100%" }}
-                        aria-label={t("knowledge_page.field_threshold")}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      name="retrievalMethod"
-                      label={t("knowledge_page.field_method")}
-                      tooltip={t("knowledge_page.field_method_hint")}
-                    >
-                      <Select
-                        aria-label={t("knowledge_page.field_method")}
-                        data-testid="kb-create-method"
-                        options={[
-                          { value: "hybrid", label: t("knowledge_page.method_hybrid") },
-                          { value: "vector", label: t("knowledge_page.method_vector") },
-                          { value: "keyword", label: t("knowledge_page.method_keyword") },
-                        ]}
-                      />
-                    </Form.Item>
-                    <Form.Item
-                      name="rerankEnabled"
-                      label={t("knowledge_page.field_rerank")}
-                      tooltip={t("knowledge_page.field_rerank_hint")}
-                      valuePropName="checked"
-                    >
-                      <Switch aria-label={t("knowledge_page.field_rerank")} />
-                    </Form.Item>
-                  </>
-                ),
-              },
-            ]}
-          />
+          <Form.Item
+            name="chunkMaxTokens"
+            label={t("knowledge_page.field_chunk_max")}
+            tooltip={t("knowledge_page.field_chunk_hint")}
+          >
+            <InputNumber
+              min={1}
+              style={{ width: "100%" }}
+              aria-label={t("knowledge_page.field_chunk_max")}
+            />
+          </Form.Item>
+          <Form.Item
+            name="chunkOverlapTokens"
+            label={t("knowledge_page.field_chunk_overlap")}
+            tooltip={t("knowledge_page.field_chunk_hint")}
+          >
+            <InputNumber
+              min={0}
+              style={{ width: "100%" }}
+              aria-label={t("knowledge_page.field_chunk_overlap")}
+            />
+          </Form.Item>
+          <Form.Item
+            name="retrievalTopK"
+            label={t("knowledge_page.field_top_k")}
+            tooltip={t("knowledge_page.field_top_k_hint")}
+          >
+            <InputNumber
+              min={1}
+              max={50}
+              style={{ width: "100%" }}
+              aria-label={t("knowledge_page.field_top_k")}
+            />
+          </Form.Item>
+          <Form.Item
+            name="retrievalScoreThreshold"
+            label={t("knowledge_page.field_threshold")}
+            tooltip={t("knowledge_page.field_threshold_hint")}
+          >
+            <InputNumber
+              min={0}
+              max={1}
+              step={0.05}
+              style={{ width: "100%" }}
+              aria-label={t("knowledge_page.field_threshold")}
+            />
+          </Form.Item>
+          <Form.Item
+            name="retrievalMethod"
+            label={t("knowledge_page.field_method")}
+            tooltip={t("knowledge_page.field_method_hint")}
+          >
+            <Select
+              aria-label={t("knowledge_page.field_method")}
+              data-testid="kb-create-method"
+              options={[
+                { value: "hybrid", label: t("knowledge_page.method_hybrid") },
+                { value: "vector", label: t("knowledge_page.method_vector") },
+                { value: "keyword", label: t("knowledge_page.method_keyword") },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="rerankEnabled"
+            label={t("knowledge_page.field_rerank")}
+            tooltip={t("knowledge_page.field_rerank_hint")}
+            valuePropName="checked"
+          >
+            <Switch aria-label={t("knowledge_page.field_rerank")} />
+          </Form.Item>
         </Form>
       </div>
     </Modal>
