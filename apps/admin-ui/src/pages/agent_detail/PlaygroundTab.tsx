@@ -17,6 +17,7 @@
  * backend ad-hoc manifest override that doesn't exist yet).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Alert,
   AutoComplete,
@@ -25,13 +26,16 @@ import {
   Empty,
   Input,
   Segmented,
+  Select,
   Space,
   Tag,
   Typography,
 } from "antd";
 import {
+  ExternalLink,
   FileText,
   HardDrive,
+  History,
   ImagePlus,
   Play,
   RefreshCw,
@@ -45,9 +49,11 @@ import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
 import { listMembers } from "../../api/members";
+import { listRateCards, type RateCardRecord } from "../../api/rate_card";
 import {
   createSession,
   getSessionWorkspace,
+  listSessions,
   streamRun,
   type RunRequest,
   type SessionWorkspace,
@@ -60,6 +66,7 @@ import { CopyButton } from "../../components/CopyButton";
 import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
 import {
+  readModel,
   readPromptJinja,
   readPromptVariables,
 } from "../../components/manifest-editor/form_model";
@@ -144,6 +151,10 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   // Playground-Uplift D4 — workspace inspector (verify the VM started + persists).
   const [workspace, setWorkspace] = useState<SessionWorkspace | null>(null);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  // Playground-Uplift iter2 — #4 cost (agent model's rate), #6 resume history.
+  const [rate, setRate] = useState<RateCardRecord | null>(null);
+  const [pastSessions, setPastSessions] = useState<ThreadMeta[]>([]);
+  const [resumed, setResumed] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -170,9 +181,41 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     };
   }, []);
 
+  // #4 cost — fetch the agent model's rate once (per-(provider,model), no tier).
+  useEffect(() => {
+    const model = readModel({ spec: r.spec });
+    if (!model.provider || !model.name) return;
+    let cancelled = false;
+    void listRateCards({ provider: model.provider, model: model.name })
+      .then((rows) => {
+        if (!cancelled) setRate(rows[0] ?? null);
+      })
+      .catch(() => {
+        // No rate / not authorized → cost simply hidden.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [r.spec]);
+
+  // #6 resume — the caller's recent threads for THIS agent (newest first).
+  const refreshPastSessions = useCallback(async () => {
+    try {
+      const all = await listSessions({ limit: 100 });
+      setPastSessions(all.filter((s) => s.agent_name === r.name));
+    } catch {
+      // Picker is a convenience.
+    }
+  }, [r.name]);
+
+  useEffect(() => {
+    void refreshPastSessions();
+  }, [refreshPastSessions]);
+
   const newThread = useCallback(async () => {
     setCreatingThread(true);
     setThreadError(null);
+    setResumed(false);
     setTurns([]);
     setAttachments([]);
     setUploadError(null);
@@ -196,6 +239,23 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setCreatingThread(false);
     }
   }, [r.name, r.version, runAsUser]);
+
+  // #6 — resume an existing thread: switch to it + continue chatting (the
+  // backend keeps the context). Past turns aren't replayed in the transcript;
+  // a banner makes that explicit.
+  const handleResume = useCallback(
+    (threadId: string) => {
+      const picked = pastSessions.find((s) => s.thread_id === threadId);
+      if (!picked) return;
+      abortRef.current?.abort();
+      setTurns([]);
+      setAttachments([]);
+      setThreadError(null);
+      setResumed(true);
+      setThread(picked);
+    },
+    [pastSessions],
+  );
 
   // Re-bind a fresh thread when the agent or the impersonated user changes.
   useEffect(() => {
@@ -377,17 +437,44 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           <Text strong style={{ fontSize: 13 }}>
             {t("playground.session_label")}
           </Text>
-          <Button
-            size="small"
-            icon={<RotateCcw size={12} strokeWidth={1.75} />}
-            onClick={newThread}
-            loading={creatingThread}
-            disabled={running}
-            data-testid="playground-new-session"
-          >
-            {t("playground.new_session")}
-          </Button>
+          <Space size={6}>
+            <Select
+              size="small"
+              value={null}
+              placeholder={t("playground.resume_label")}
+              suffixIcon={<History size={12} strokeWidth={1.75} />}
+              disabled={running || pastSessions.length === 0}
+              popupMatchSelectWidth={false}
+              onChange={handleResume}
+              aria-label={t("playground.resume_label")}
+              data-testid="playground-resume-select"
+              options={pastSessions.map((s) => ({
+                value: s.thread_id,
+                label: `${s.thread_id.slice(0, 8)} · ${new Date(s.created_at).toLocaleString()}`,
+              }))}
+              style={{ width: 160 }}
+            />
+            <Button
+              size="small"
+              icon={<RotateCcw size={12} strokeWidth={1.75} />}
+              onClick={newThread}
+              loading={creatingThread}
+              disabled={running}
+              data-testid="playground-new-session"
+            >
+              {t("playground.new_session")}
+            </Button>
+          </Space>
         </div>
+        {resumed && (
+          <Alert
+            type="info"
+            showIcon
+            message={t("playground.resumed_notice")}
+            data-testid="playground-resumed-notice"
+            style={{ padding: "4px 8px" }}
+          />
+        )}
 
         {/* Playground-Uplift D1 — run-as user (real user picker + free-form id). */}
         <div data-testid="playground-user">
@@ -752,7 +839,13 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             />
           )}
           {turns.map((turn) => (
-            <TurnCard key={turn.id} turn={turn} eventView={eventView} />
+            <TurnCard
+              key={turn.id}
+              turn={turn}
+              eventView={eventView}
+              threadId={thread?.thread_id ?? null}
+              rate={rate}
+            />
           ))}
         </div>
       </div>
@@ -760,18 +853,43 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   );
 }
 
+function runIdOf(events: readonly SseEvent[]): string | null {
+  for (const e of events) {
+    if (e.event === "metadata" && e.data !== null && typeof e.data === "object") {
+      const rid = (e.data as Record<string, unknown>).run_id;
+      if (typeof rid === "string" && rid) return rid;
+    }
+  }
+  return null;
+}
+
 function TurnCard({
   turn,
   eventView,
+  threadId,
+  rate,
 }: {
   turn: Turn;
   eventView: "timeline" | "raw";
+  threadId: string | null;
+  rate: RateCardRecord | null;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
   const answer =
     summary.finalText ??
     (turn.status === "running" ? t("playground.turn_running") : null);
+  const runId = runIdOf(turn.events);
+  // #4 cost — non-cached input + cache_read + output, each at its per-mtok rate
+  // (micro-元 per 1M tokens). null when no usage or no rate for the model.
+  const costCny =
+    summary.usage && rate
+      ? (Math.max(0, summary.usage.inputTokens - summary.usage.cacheReadTokens) *
+          rate.input_per_mtok_micros +
+          summary.usage.cacheReadTokens * rate.cache_read_per_mtok_micros +
+          summary.usage.outputTokens * rate.output_per_mtok_micros) /
+        1e12
+      : null;
 
   return (
     <div
@@ -847,6 +965,55 @@ function TurnCard({
                 {t("playground.usage_reasoning")}:{" "}
                 {summary.usage.reasoningTokens}
               </Tag>
+            )}
+          </div>
+        )}
+
+        {/* #4 step / latency / cost + #8 run-detail link. */}
+        {(summary.stepCount !== null ||
+          summary.latencyMs !== null ||
+          costCny !== null ||
+          (runId && threadId)) && (
+          <div
+            style={{
+              marginTop: 6,
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+            data-testid="playground-turn-meta"
+          >
+            {summary.stepCount !== null && (
+              <Tag bordered={false}>
+                {t("playground.meta_steps")}: {summary.stepCount}
+              </Tag>
+            )}
+            {summary.latencyMs !== null && (
+              <Tag bordered={false}>
+                {t("playground.meta_latency")}:{" "}
+                {(summary.latencyMs / 1000).toFixed(1)}s
+              </Tag>
+            )}
+            {costCny !== null && (
+              <Tag bordered={false} color="gold" data-testid="playground-turn-cost">
+                ≈ ¥{costCny.toFixed(4)}
+              </Tag>
+            )}
+            {runId && threadId && (
+              <Link
+                to={`/runs/${threadId}/${runId}`}
+                style={{
+                  fontSize: 12,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 3,
+                }}
+                data-testid="playground-turn-run-link"
+              >
+                {t("playground.view_run")}
+                <ExternalLink size={11} strokeWidth={1.75} />
+              </Link>
             )}
           </div>
         )}

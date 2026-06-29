@@ -584,6 +584,11 @@ const zhCN: TranslationKeys = {
     workspace_deleted: "已删除",
     workspace_none: "暂无工作区 —— 写文件的运行会创建它。",
     workspace_artifacts: "产物",
+    resume_label: "继续会话…",
+    resumed_notice: "继续已有会话 —— 此前轮次不在此显示。",
+    meta_steps: "步数",
+    meta_latency: "延迟",
+    view_run: "查看运行",
   },
   event_stream: {
     title: "事件流",

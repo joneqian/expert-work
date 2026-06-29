@@ -88,6 +88,18 @@ export async function getSessionWorkspace(
   return unwrap(response.data);
 }
 
+/** Playground-Uplift #6 — list the caller's threads (user-scoped server-side),
+ *  newest first; the playground filters to the current agent for resume. */
+export async function listSessions(
+  params: { limit?: number } = {},
+): Promise<ThreadMeta[]> {
+  const response = await apiClient.get<ApiEnvelope<{ items: ThreadMeta[] }>>(
+    "/v1/sessions",
+    { params: { limit: params.limit ?? 100 } },
+  );
+  return unwrap(response.data).items;
+}
+
 export interface RunRequest {
   input?: string | null;
   image_refs?: string[];
