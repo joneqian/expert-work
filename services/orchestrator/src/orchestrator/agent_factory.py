@@ -502,12 +502,14 @@ async def build_agent(
     escalated_llm_caller: LLMCaller | None = None
     escalated_spec = _escalated_model(spec.spec.model)
     if escalated_spec is not None:
+        escalated_deadline = _chat_stream_deadline_s(spec.spec.stream_deadline_s)
         escalated_llm_caller = await build_llm_router(
             escalated_spec,
             secret_store=secret_store,
             around_llm_chain=chains.around_llm_call,
             image_resolver=env.image_resolver,
-            stream_deadline_s=_chat_stream_deadline_s(spec.spec.stream_deadline_s),
+            stream_deadline_s=escalated_deadline,
+            provider_timeout_s=escalated_deadline,
             provider_key_resolver=provider_key_resolver,
             ignore_api_key_ref=True,
         )
@@ -1534,6 +1536,12 @@ async def build_step_routers(
         around_llm_chain=around_llm_chain,
         image_resolver=image_resolver,
         stream_deadline_s=deadline,
+        # Align the provider httpx timeout to the deadline (Stream L.L3, as VL
+        # already does). Otherwise the fixed 60s client read timeout fires first
+        # on a slow time-to-first-token (e.g. a large-context prefill), raising
+        # LLMNetworkError + a wasted retry before the router deadline even
+        # applies — the real reason a big-context call "times out".
+        provider_timeout_s=deadline,
         provider_key_resolver=provider_key_resolver,
         ignore_api_key_ref=ignore_api_key_ref,
     )
@@ -1548,6 +1556,7 @@ async def build_step_routers(
                 around_llm_chain=around_llm_chain,
                 image_resolver=image_resolver,
                 stream_deadline_s=deadline,
+                provider_timeout_s=deadline,
                 provider_key_resolver=provider_key_resolver,
                 ignore_api_key_ref=ignore_api_key_ref,
             )
