@@ -32,6 +32,8 @@ import {
   Typography,
 } from "antd";
 import {
+  AlertTriangle,
+  Check,
   ExternalLink,
   FileText,
   HardDrive,
@@ -47,9 +49,15 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import {
+  decideApprovals,
+  listApprovals,
+  type ApprovalItem,
+} from "../../api/approvals";
 import { ApiError } from "../../api/client";
 import { listMembers } from "../../api/members";
 import { listRateCards, type RateCardRecord } from "../../api/rate_card";
+import { streamRunEvents } from "../../api/runs";
 import {
   createSession,
   getSessionWorkspace,
@@ -88,6 +96,8 @@ interface Turn {
   events: SseEvent[];
   status: "running" | "done" | "error";
   error: string | null;
+  /** #5 — set when the run paused at an approval gate; cleared on decision. */
+  approval: ApprovalItem | null;
 }
 
 const { Text } = Typography;
@@ -307,6 +317,33 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
+  const patchTurn = useCallback((id: string, patch: Partial<Turn>) => {
+    setTurns((prev) => prev.map((tn) => (tn.id === id ? { ...tn, ...patch } : tn)));
+  }, []);
+
+  // #5 — a paused run registers its agent_approval row just after the stream's
+  // end frame, so poll briefly (race) for a pending approval on this thread.
+  const detectApproval = useCallback(
+    async (turnId: string, threadId: string, runId: string | null) => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const list = await listApprovals({ status: "pending" });
+          const match = list.items.find(
+            (a) => a.thread_id === threadId && (runId === null || a.run_id === runId),
+          );
+          if (match) {
+            patchTurn(turnId, { approval: match });
+            return;
+          }
+        } catch {
+          // best-effort — approval surfacing never fails the turn.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    },
+    [patchTurn],
+  );
+
   const handleRun = useCallback(async () => {
     if (!thread || running) return;
     setRunning(true);
@@ -346,6 +383,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         events: [],
         status: "running",
         error: null,
+        approval: null,
       },
     ]);
     // Consume the input + attachments — the next turn starts fresh.
@@ -354,10 +392,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
 
     const ac = new AbortController();
     abortRef.current = ac;
+    const frames: SseEvent[] = [];
+    const threadId = thread.thread_id;
     try {
-      for await (const frame of streamRun(thread.thread_id, body, {
-        signal: ac.signal,
-      })) {
+      for await (const frame of streamRun(threadId, body, { signal: ac.signal })) {
+        frames.push(frame);
         setTurns((prev) =>
           prev.map((tn) =>
             tn.id === turnId ? { ...tn, events: [...tn.events, frame] } : tn,
@@ -377,7 +416,83 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setRunning(false);
       abortRef.current = null;
     }
-  }, [thread, input, running, attachments, promptVariables, varValues, turns.length, t]);
+    // #5 — a paused run yields no final answer; look for its approval gate.
+    // Fire-and-forget so the run UI (Stop button) frees immediately; a found
+    // gate patches the turn asynchronously.
+    if (frames.at(-1)?.event === "end" && summarizeTurn(frames).finalText === null) {
+      void detectApproval(turnId, threadId, runIdOf(frames));
+    }
+  }, [
+    thread,
+    input,
+    running,
+    attachments,
+    promptVariables,
+    varValues,
+    turns.length,
+    t,
+    detectApproval,
+  ]);
+
+  // #5 — decide a turn's pending approval, then stream the continuation run
+  // (the decision spawns it) into the SAME turn, then re-check for a next gate.
+  const handleDecide = useCallback(
+    async (turnId: string, approval: ApprovalItem, decision: "approve" | "reject") => {
+      if (!thread) return;
+      const threadId = thread.thread_id;
+      setRunning(true);
+      patchTurn(turnId, { approval: null, status: "running" });
+      let continuationRunId: string | null = null;
+      try {
+        const result = await decideApprovals([
+          { thread_id: threadId, run_id: approval.run_id, decision },
+        ]);
+        continuationRunId = result.results[0]?.continuation_run_id ?? null;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "decision failed";
+        patchTurn(turnId, { status: "error", error: message });
+        setRunning(false);
+        return;
+      }
+      if (continuationRunId === null) {
+        patchTurn(turnId, { status: "done" });
+        setRunning(false);
+        return;
+      }
+      const ac = new AbortController();
+      abortRef.current = ac;
+      const frames: SseEvent[] = [];
+      try {
+        for await (const frame of streamRunEvents(threadId, continuationRunId, {
+          signal: ac.signal,
+        })) {
+          frames.push(frame);
+          setTurns((prev) =>
+            prev.map((tn) =>
+              tn.id === turnId ? { ...tn, events: [...tn.events, frame] } : tn,
+            ),
+          );
+          if (frame.event === "end") break;
+        }
+        patchTurn(turnId, { status: "done" });
+      } catch (err) {
+        if (!(err instanceof Error && err.name === "AbortError")) {
+          const message = err instanceof Error ? err.message : "stream failed";
+          patchTurn(turnId, { status: "error", error: message });
+        } else {
+          patchTurn(turnId, { status: "done" });
+        }
+      } finally {
+        setRunning(false);
+        abortRef.current = null;
+      }
+      // Chained gate — re-check after the continuation, fire-and-forget.
+      if (frames.at(-1)?.event === "end" && summarizeTurn(frames).finalText === null) {
+        void detectApproval(turnId, threadId, continuationRunId);
+      }
+    },
+    [thread, patchTurn, detectApproval],
+  );
 
   const loadWorkspace = useCallback(async (threadId: string) => {
     setWorkspaceLoading(true);
@@ -845,6 +960,8 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               eventView={eventView}
               threadId={thread?.thread_id ?? null}
               rate={rate}
+              onDecide={handleDecide}
+              deciding={running}
             />
           ))}
         </div>
@@ -863,16 +980,94 @@ function runIdOf(events: readonly SseEvent[]): string | null {
   return null;
 }
 
+function ApprovalGate({
+  approval,
+  busy,
+  onDecide,
+}: {
+  approval: ApprovalItem;
+  busy: boolean;
+  onDecide: (decision: "approve" | "reject") => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="playground-approval"
+      style={{
+        border: "1px solid var(--hx-color-warning, #d4a017)",
+        borderRadius: 6,
+        padding: 10,
+        marginTop: 8,
+        background: "var(--hx-surface-raised)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <AlertTriangle size={14} strokeWidth={1.75} />
+        <Text strong style={{ fontSize: 12 }}>
+          {approval.node} — {t("playground.approval_awaiting")}
+        </Text>
+      </div>
+      <Text style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
+        {approval.action_summary}
+      </Text>
+      <pre
+        style={{
+          margin: 0,
+          fontSize: 11,
+          fontFamily: "var(--hx-font-mono)",
+          color: "var(--hx-text-secondary)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          maxHeight: 160,
+          overflow: "auto",
+          marginBottom: 8,
+        }}
+      >
+        {JSON.stringify(approval.proposed_args, null, 2)}
+      </pre>
+      <Space size={8}>
+        <Button
+          type="primary"
+          size="small"
+          icon={<Check size={13} strokeWidth={1.75} />}
+          loading={busy}
+          onClick={() => onDecide("approve")}
+          data-testid="playground-approval-approve"
+        >
+          {t("playground.approval_approve")}
+        </Button>
+        <Button
+          danger
+          size="small"
+          icon={<X size={13} strokeWidth={1.75} />}
+          loading={busy}
+          onClick={() => onDecide("reject")}
+          data-testid="playground-approval-reject"
+        >
+          {t("playground.approval_reject")}
+        </Button>
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {t("playground.approval_modify_hint")}
+        </Text>
+      </Space>
+    </div>
+  );
+}
+
 function TurnCard({
   turn,
   eventView,
   threadId,
   rate,
+  onDecide,
+  deciding,
 }: {
   turn: Turn;
   eventView: "timeline" | "raw";
   threadId: string | null;
   rate: RateCardRecord | null;
+  onDecide: (turnId: string, approval: ApprovalItem, decision: "approve" | "reject") => void;
+  deciding: boolean;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
@@ -938,6 +1133,15 @@ function TurnCard({
           <Text type="secondary" style={{ fontSize: 12 }}>
             {t("playground.turn_no_text")}
           </Text>
+        )}
+
+        {/* #5 — approval gate (run paused on an approval-required tool). */}
+        {turn.approval && threadId && (
+          <ApprovalGate
+            approval={turn.approval}
+            busy={deciding}
+            onDecide={(decision) => onDecide(turn.id, turn.approval!, decision)}
+          />
         )}
 
         {/* Per-turn usage chips */}
