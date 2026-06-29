@@ -910,7 +910,10 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           padding: 0,
           display: "flex",
           flexDirection: "column",
-          minHeight: "calc(100vh - 360px)",
+          // Definite height (not just a floor) so the transcript body below can
+          // be a bounded flex child that scrolls internally. A minHeight-only
+          // box grows with content → the cap below is ignored → no scroll.
+          height: "calc(100vh - 360px)",
           overflow: "hidden",
         }}
       >
@@ -937,10 +940,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           ref={transcriptRef}
           style={{
             flex: 1,
-            // Cap (not fixed height) so the transcript scrolls internally when
-            // tall but never forces the column past the viewport — if the offset
-            // is off it degrades to the Shell's page scroll, never a dead lock.
-            maxHeight: "calc(100vh - 400px)",
+            // ``minHeight: 0`` is the critical bit — a flex child defaults to
+            // ``min-height: auto`` (≥ its content), which beats the parent's cap
+            // when events pile up, so the list grows past the viewport and never
+            // scrolls. Zeroing it lets the bounded parent clip → overflow scrolls.
+            minHeight: 0,
             padding: 12,
             overflow: "auto",
             display: "flex",
