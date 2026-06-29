@@ -964,7 +964,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           {history.length > 0 && (
             <div
               data-testid="playground-history"
-              style={{ display: "flex", flexDirection: "column", gap: 8 }}
+              style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 }}
             >
               {history.map((m, idx) => (
                 <div
@@ -1147,6 +1147,10 @@ function TurnCard({
         border: "1px solid var(--hx-border-subtle)",
         borderRadius: 6,
         overflow: "hidden",
+        // The transcript is a flex column — without this the (single) turn
+        // shrinks to the container height and its overflow:hidden clips the
+        // events instead of letting the transcript scroll. Keep natural height.
+        flexShrink: 0,
       }}
     >
       {/* User message */}
