@@ -106,6 +106,9 @@ async def test_exec_python_reports_timeout() -> None:
 
     assert result.meta["timed_out"] is True
     assert "timed out" in result.content
+    # Actionable recovery hint so the model retries with a larger budget
+    # instead of stalling (e.g. a slow ``pip install``).
+    assert "timeout_s" in result.content
 
 
 @pytest.mark.asyncio

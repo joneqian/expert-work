@@ -41,6 +41,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_OUTPUT_CHAR_CAP = 20_000
 _TRUNCATION_MARKER = "...[truncated]"
 _DEFAULT_TIMEOUT_S = 60.0
+#: Upper bound a tool may set for a single sandbox exec (mirrors
+#: :func:`coerce_timeout`'s cap). The exec HTTP read timeout is derived from
+#: the per-call exec timeout so the orchestrator always outlasts the sandbox-
+#: side enforcement; when a caller passes no ``timeout_s`` we assume this cap so
+#: a long-but-legit command (e.g. ``pip install``) is never cut short with a
+#: misleading "supervisor unreachable" while the sandbox is still running.
+_MAX_EXEC_TIMEOUT_S = 300
+#: Slack added on top of the exec deadline for acquire / runner / network
+#: overhead before the HTTP read timeout fires.
+_EXEC_HTTP_BUFFER_S = 15.0
 #: Thread label used for ``acquire`` when the run has no id (ad-hoc call).
 _FALLBACK_THREAD_ID = "exec-python"
 #: ``destroy`` reason for a cancelled run — drives the supervisor's
@@ -215,7 +225,29 @@ class HTTPSupervisorClient:
         payload: dict[str, Any] = {"code": code}
         if timeout_s is not None:
             payload["timeout_s"] = timeout_s
-        body = await self._post(f"/v1/sandboxes/{sandbox_id}:exec", json=payload)
+        # The sandbox enforces the exec wall-clock (it SIGKILLs + returns
+        # ``timed_out``); the HTTP read timeout must OUTLAST that enforcement so
+        # the orchestrator receives the real outcome instead of giving up early
+        # with a misleading "supervisor unreachable" (and leaking a still-running
+        # exec). With the fixed 60s client a ``pip install`` granted up to 300s
+        # was cut at 60s. Derive the read timeout from the per-call deadline;
+        # assume the cap when the caller left it unset.
+        read_timeout = (
+            float(timeout_s) if timeout_s is not None else float(_MAX_EXEC_TIMEOUT_S)
+        ) + _EXEC_HTTP_BUFFER_S
+        url = f"{self.base_url}/v1/sandboxes/{sandbox_id}:exec"
+        async with httpx.AsyncClient(timeout=read_timeout, transport=self.transport) as client:
+            try:
+                response = await client.post(url, json=payload, headers=_traced_headers())
+            except httpx.HTTPError as exc:
+                msg = f"sandbox supervisor unreachable ({url}): {exc}"
+                raise SandboxSupervisorError(msg) from exc
+        if response.is_error:
+            msg = f"sandbox supervisor exec failed: {response.status_code} {response.text}"
+            raise SandboxSupervisorError(msg)
+        body = response.json()
+        if not isinstance(body, Mapping):
+            raise SandboxSupervisorError("sandbox supervisor exec returned a non-object body")
         return SandboxOutcome(
             stdout=str(body.get("stdout", "")),
             stderr=str(body.get("stderr", "")),
@@ -554,7 +586,13 @@ def format_sandbox_outcome(outcome: SandboxOutcome, output_char_cap: int) -> Too
         if not parts:
             parts.append("(no output)")
         if outcome.timed_out:
-            parts.append("[execution timed out]")
+            # Actionable so the model self-corrects instead of stalling — a
+            # missing dependency install or a slow command just needs more time.
+            parts.append(
+                "[execution timed out — if the command legitimately needs longer "
+                "(e.g. installing a package), re-run it with a larger timeout_s "
+                "(max 300)]"
+            )
         parts.append(f"exit_code: {outcome.exit_code}")
         return "\n\n".join(parts)
 
