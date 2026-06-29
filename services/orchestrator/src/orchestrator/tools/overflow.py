@@ -30,6 +30,61 @@ OVERFLOW_MAX_CHARS = 2_000_000
 
 _CLAMP_NOTE = f"\n\n[overflow file truncated at {OVERFLOW_MAX_CHARS} chars]"
 
+#: Universal per-result externalization threshold (tool-result-context-budget).
+#: A tool result whose rendered ``content`` exceeds this is externalized to the
+#: workspace and replaced in-context with a head+tail preview + reference — even
+#: when the tool itself didn't set ``full_content``. Mirrors deer-flow's
+#: ``externalize_min_chars`` (12k). Without this a tool like ``web_search`` (no
+#: ``full_content``, ~20-40k chars/call) accumulates across turns and blows the
+#: context window.
+EXTERNALIZE_MIN_CHARS = 12_000
+
+#: Preview kept in-context when a result is externalized: head + tail so the
+#: model sees the start (usually most relevant) and end without the bulk.
+PREVIEW_HEAD_CHARS = 2_000
+PREVIEW_TAIL_CHARS = 1_000
+
+#: When the workspace write is unavailable (no writer / write failed) the
+#: generalized path degrades to in-place head+tail truncation so context is
+#: still bounded — but without a file reference (there is no file).
+FALLBACK_MAX_CHARS = 30_000
+
+#: Tools exempt from generalized externalization: the fetch-back readers whose
+#: source is cheaply re-readable, so externalizing them would just create a
+#: persist→read→persist loop (the original CM-F3 guard, narrowed from "every
+#: read_only tool" to exactly these — ``web_search`` is read_only too but its
+#: results are NOT cheaply re-readable, so it must still be externalized).
+EXEMPT_TOOLS = frozenset({"read_document", "read_file", "list_dir"})
+
+
+def _elide(text: str, *, head: int, tail: int, note: str) -> str:
+    """Keep ``head`` chars from the front + ``tail`` from the back, ``note`` between."""
+    if len(text) <= head + tail:
+        return text
+    elided = len(text) - head - tail
+    marker = f"\n\n[... {note}: {elided:,} chars elided ...]\n\n"
+    return text[:head] + marker + text[len(text) - tail :]
+
+
+def make_preview(content: str) -> str:
+    """Head+tail preview of an externalized result (full copy is in the workspace)."""
+    return _elide(content, head=PREVIEW_HEAD_CHARS, tail=PREVIEW_TAIL_CHARS, note="preview")
+
+
+def fallback_truncate(content: str) -> str:
+    """In-place head+tail truncation when no workspace file could be written.
+
+    Bounds context without a file reference — the footer must NOT be appended
+    (there is nothing to point at). Keeps a larger budget than the preview since
+    this is the only copy the model gets.
+    """
+    if len(content) <= FALLBACK_MAX_CHARS:
+        return content
+    head = FALLBACK_MAX_CHARS * 2 // 3
+    tail = FALLBACK_MAX_CHARS - head
+    return _elide(content, head=head, tail=tail, note="truncated, workspace unavailable")
+
+
 #: ``call_id`` comes from the model provider and ``tool_name`` from the
 #: registry — sanitize both before they become path components so a
 #: hostile value (``../../etc``) can never steer the write target.

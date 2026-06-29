@@ -80,8 +80,26 @@ class _SpillTool:
         return ToolResult(content=_CAPPED, meta={"truncated": True}, full_content=_FULL)
 
 
+@dataclass
+class _BigResultTool:
+    """A tool whose ``content`` itself is large but sets NO ``full_content``
+    (e.g. ``web_search``) — exercises the generalized size-budget path."""
+
+    name: str = "web_search"
+    read_only: bool = True
+    content: str = _FULL
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name=self.name, description="big", is_read_only=self.read_only)
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        del args, ctx
+        return ToolResult(content=self.content, meta={})
+
+
 async def _run_one_turn(
-    *, tool: _SpillTool, writer: WorkspaceFileWriter | None, thread_id: str
+    *, tool: Any, writer: WorkspaceFileWriter | None, thread_id: str
 ) -> AgentState:
     llm = _ScriptedLLM(
         responses=[
@@ -153,12 +171,50 @@ async def test_write_failure_degrades_without_footer() -> None:
     assert str(_tool_message(state).content) == _CAPPED
 
 
-async def test_read_only_tool_is_never_externalized() -> None:
-    # Central double guard (CM-F3): even a read-only tool that wrongly
-    # sets full_content must not be persisted (loop guard).
+async def test_exempt_fetch_back_tool_is_never_externalized() -> None:
+    # CM-F3 loop guard, narrowed to the fetch-back readers (EXEMPT_TOOLS):
+    # externalizing read_document/read_file/list_dir would create a
+    # persist→read→persist loop, so they are skipped even with full_content.
     writer = _RecordingWriter()
     state = await _run_one_turn(
-        tool=_SpillTool(name="spill_ro", read_only=True), writer=writer, thread_id="ov-4"
+        tool=_SpillTool(name="read_document", read_only=True), writer=writer, thread_id="ov-4"
     )
     assert writer.writes == {}
     assert str(_tool_message(state).content) == _CAPPED
+
+
+async def test_read_only_nonexempt_tool_is_externalized() -> None:
+    # A read-only tool that is NOT a fetch-back reader (e.g. web_search) is now
+    # externalized — its results are not cheaply re-readable, and there is no
+    # loop risk. (Old policy wrongly exempted every read_only tool.)
+    writer = _RecordingWriter()
+    state = await _run_one_turn(
+        tool=_SpillTool(name="web_search", read_only=True), writer=writer, thread_id="ov-ro"
+    )
+    assert len(writer.writes) == 1
+    assert "<tool-result-overflow>" in str(_tool_message(state).content)
+
+
+async def test_large_content_without_full_content_externalized_with_preview() -> None:
+    # The generalized size-budget path: content > EXTERNALIZE_MIN_CHARS but no
+    # full_content → externalize the content, leave a head+tail preview + ref.
+    writer = _RecordingWriter()
+    state = await _run_one_turn(tool=_BigResultTool(), writer=writer, thread_id="ov-big")
+    assert len(writer.writes) == 1
+    # Full content landed in the workspace.
+    assert next(iter(writer.writes.values())) == _FULL
+    content = str(_tool_message(state).content)
+    # In-context body is a bounded preview + reference, not the 50k blob.
+    assert len(content) < len(_FULL)
+    assert "chars elided" in content
+    assert "<tool-result-overflow>" in content
+
+
+async def test_small_content_passes_through_unchanged() -> None:
+    # Under the threshold → no externalization, no preview, no write.
+    writer = _RecordingWriter()
+    state = await _run_one_turn(
+        tool=_BigResultTool(content="small result"), writer=writer, thread_id="ov-small"
+    )
+    assert writer.writes == {}
+    assert str(_tool_message(state).content) == "small result"

@@ -116,7 +116,15 @@ from orchestrator.tools.error_classifier import (
 )
 from orchestrator.tools.find_tools import promotion_events
 from orchestrator.tools.mutation_classifier import classify as classify_mutation
-from orchestrator.tools.overflow import clamp_overflow, overflow_rel_path, render_overflow_footer
+from orchestrator.tools.overflow import (
+    EXEMPT_TOOLS,
+    EXTERNALIZE_MIN_CHARS,
+    clamp_overflow,
+    fallback_truncate,
+    make_preview,
+    overflow_rel_path,
+    render_overflow_footer,
+)
 from orchestrator.tools.registry import (
     TOOL_ALLOWED_STATE_KEYS,
     Tool,
@@ -1920,19 +1928,19 @@ async def _invoke_tool(
             0,
             classified,
         )
-    # Stream CM-5 — recoverable compression: when the tool truncated its
-    # output and carried the full rendering, save it to the workspace and
-    # let the LLM see a recoverable reference instead of a dead end.
-    footer = await _externalize_tool_overflow(result, tool, call_id, ctx, overflow_writer)
+    # Stream CM-5 — recoverable compression: save an oversized result to the
+    # workspace and let the LLM see a recoverable reference (the tool's own
+    # truncated body, or a head+tail preview for tools that didn't pre-truncate)
+    # instead of a dead end or a context blowup.
+    replacement_body, footer = await _externalize_tool_overflow(
+        result, tool, call_id, ctx, overflow_writer
+    )
+    body = replacement_body if replacement_body is not None else result.content
     # Stream PI-1b — a tool's output is untrusted (web pages, MCP servers, files
     # an attacker can control = the classic indirect-injection vector). Spotlight
     # it so embedded instructions read as data. The helix-owned overflow footer
     # stays trusted (outside the fence).
-    tool_content = (
-        spotlight_untrusted(result.content, nonce=spotlight_nonce)
-        if spotlight_nonce
-        else result.content
-    )
+    tool_content = spotlight_untrusted(body, nonce=spotlight_nonce) if spotlight_nonce else body
     content = tool_content + footer if footer is not None else tool_content
     # ``artifact`` surfaces the tool's structured metadata (``ToolResult.meta``
     # — e.g. ask_image's ``image_ref`` / VL usage, truncation flags) in the raw
@@ -1956,23 +1964,51 @@ async def _externalize_tool_overflow(
     call_id: str,
     ctx: ToolContext,
     writer: WorkspaceFileWriter | None,
-) -> str | None:
-    """Write a truncated tool result's full rendering to the workspace.
+) -> tuple[str | None, str | None]:
+    """Externalize an oversized tool result to the workspace (Stream CM-5).
 
-    Best-effort (Mini-ADR CM-F5): a write failure leaves the truncated
-    content standing alone (the inline ``...[truncated]`` marker is still
-    there) and never affects the run. Returns the reference footer only
-    after the write landed — the footer must never point at a file that
-    does not exist. Read-only tools are skipped even if they ever set
-    ``full_content`` (CM-F3 — the persist→read→persist loop guard).
+    Returns ``(replacement_body, footer)``:
+
+    * ``replacement_body`` — the in-context content to use INSTEAD of
+      ``result.content`` (a head+tail preview), or ``None`` to keep
+      ``result.content`` unchanged.
+    * ``footer`` — the reference footer to append, or ``None``.
+
+    Two trigger paths:
+
+    1. **``full_content`` set** (bash / exec_python / http / mcp) — the tool
+       already truncated ``content``; save the full rendering, keep the
+       tool's truncated body, append the reference.
+    2. **Generalized size budget** (tool-result-context-budget) — the tool did
+       NOT set ``full_content`` but its ``content`` exceeds
+       ``EXTERNALIZE_MIN_CHARS`` (e.g. ``web_search``). Save the content,
+       replace the body with a head+tail preview, append the reference. This is
+       what keeps many medium results (8x web_search) from accumulating into a
+       context blowup.
+
+    Best-effort (Mini-ADR CM-F5): a write failure never affects the run — the
+    ``full_content`` path keeps the already-truncated body; the generalized path
+    degrades to in-place head+tail truncation so context is still bounded.
+    The reference footer is returned only after the write lands (it must never
+    point at a file that does not exist). The fetch-back readers
+    (:data:`EXEMPT_TOOLS`) are skipped — their source is cheaply re-readable, so
+    externalizing them would just create a persist→read→persist loop (CM-F3).
     """
-    if result.full_content is None or writer is None:
-        return None
-    if tool.spec.resolved_side_effect == "read_only":
-        return None
+    if writer is None or tool.spec.name in EXEMPT_TOOLS:
+        return None, None
+
+    if result.full_content is not None:
+        source = result.full_content
+        replacement: str | None = None  # keep the tool's already-truncated body
+    elif len(result.content) > EXTERNALIZE_MIN_CHARS:
+        source = result.content
+        replacement = make_preview(result.content)
+    else:
+        return None, None
+
     rel = overflow_rel_path(run_id=ctx.run_id, call_id=call_id, tool_name=tool.spec.name)
     try:
-        await writer.write(rel=rel, content=clamp_overflow(result.full_content))
+        await writer.write(rel=rel, content=clamp_overflow(source))
     except (asyncio.CancelledError, RunCancelledError):
         raise
     except Exception as exc:
@@ -1983,12 +2019,17 @@ async def _externalize_tool_overflow(
             type(exc).__name__,
         )
         _cm_tool_overflow_total.labels(outcome="degraded", tool=tool.spec.name).inc()
-        return None
-    total_chars = len(result.full_content)
+        # Generalized path: bound context in-place (no file to reference);
+        # full_content path: keep the tool's own truncated body as before.
+        if replacement is not None:
+            return fallback_truncate(result.content), None
+        return None, None
+
+    total_chars = len(source)
     _cm_tool_overflow_total.labels(outcome="externalized", tool=tool.spec.name).inc()
     _cm_tool_overflow_chars.set(total_chars)
     logger.info("tool.overflow tool=%s rel=%s chars=%d", tool.spec.name, rel, total_chars)
-    return render_overflow_footer(rel=rel, total_chars=total_chars)
+    return replacement, render_overflow_footer(rel=rel, total_chars=total_chars)
 
 
 def _format_error(exc: BaseException) -> str:
