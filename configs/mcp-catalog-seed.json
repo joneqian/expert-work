@@ -1,12 +1,1 @@
-[
-  {
-    "name": "tavily-web-search",
-    "display_name": "Tavily Web Search",
-    "description": "Premium web search / extract / crawl via Tavily's official remote MCP server (https://mcp.tavily.com). Opt-in upgrade over the free built-in SearXNG web_search. Platform holds one shared Tavily API key (type-A shared bearer); tenants enable it via their MCP allowlist. Skipped at boot until TAVILY_API_KEY is set.",
-    "category": "search",
-    "transport": "streamable_http",
-    "url_template": "https://mcp.tavily.com/mcp/",
-    "auth_type": "bearer",
-    "bearer_token": "${TAVILY_API_KEY}"
-  }
-]
+[]

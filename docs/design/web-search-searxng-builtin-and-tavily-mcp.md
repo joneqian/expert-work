@@ -61,7 +61,7 @@ Tavily client is configured (ToolEnv.web_search_client)
 6. **验证**:dev `make dev-up` 起 searxng;agent 声明 web_search,说「你好」不炸;真跑一次 web_search 工具拿到结果。
 
 ### M2 — Tavily 降级为平台 MCP + 删 builtin
-1. **登记说明**(docs/runbook):平台 MCP 目录加 Tavily 远程 server(`streamable_http`,`https://mcp.tavily.com/mcp/`,`auth_type: bearer`,token_ref→平台 Tavily key);租户 `mcp_allowlist` opt-in。
+1. **登记 = 走 admin-UI**(非 env-seed)。平台管理员:Settings → MCP 目录 → 新建连接器 → `transport: streamable_http`、`url: https://mcp.tavily.com/mcp/`、`auth: bearer(共享)`、**粘贴 Tavily key**(`CatalogConfigForm` 的 `Input.Password` → `POST /v1/platform/mcp-catalog` 的 `bearer_token` → 后端加密写 SecretStore 存 `bearer_token_ref`,key 不落明文/不进 env);租户 `mcp_allowlist` opt-in。**bearer 密钥绝不进 env/seed 文件**(env-templated seed 仅用于 OAuth client id 这类非密值)。该 UI/API 路径在本次前已全交付(`CatalogConfigForm` + `McpConnectorCatalogUpsert.bearer_token`),M2 无需新代码。
 2. **删 Tavily builtin 代码**:`HTTPTavilyClient`、`ResolvingTavilyClient`、`resolve_web_search_client` 的 Tavily 分支、`tavily_api_key_ref`、`platform_tool_credentials` 对 `web_search` 的 gap-fill;清相关 import/测试。`TavilyClient` Protocol 名暂留(SearXNGClient 实现它),或本轮顺手改名 `WebSearchProvider`(**二选一,评审定**)。
 3. **tests**:删 Tavily builtin 测;补「web_search builtin 后端=SearXNG 唯一」断言。
 4. **admin-ui**(若需):平台配置加 SearXNG base_url 字段(或纯 env);Tavily 不再在 tool-credentials 出现。
