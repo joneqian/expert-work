@@ -37,6 +37,9 @@ DEFAULT_CONTENT_CHAR_CAP = 4096
 _TRUNCATION_MARKER = "...[truncated]"
 _DEFAULT_BASE_URL = "https://api.tavily.com"
 _DEFAULT_TIMEOUT_S = 15.0
+#: SearXNG is internal infra (same datacenter / docker network) so a tight
+#: timeout is fine; it still has to fan out to upstream engines, hence 15s.
+_DEFAULT_SEARXNG_TIMEOUT_S = 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +129,57 @@ class RecordingTavilyClient:
         if self.raise_on_search is not None:
             raise self.raise_on_search
         return {"results": list(self.results)}
+
+
+@dataclass(frozen=True)
+class SearXNGClient:
+    """:class:`TavilyClient` over a self-hosted SearXNG JSON API.
+
+    SearXNG is a free, open-source (AGPL-3.0) metasearch engine; its
+    ``GET /search?format=json`` returns
+    ``{"results": [{"title", "url", "content", "engine", ...}]}`` which
+    maps near 1:1 onto the shape :class:`WebSearchTool` expects.
+
+    No API key — the instance is platform infrastructure reached over the
+    internal network and is NEVER exposed publicly (its JSON API is a free
+    upstream proxy; see design ``web-search-searxng-builtin-and-tavily-mcp``
+    §3.4). ``tenant_id`` is accepted for protocol conformance and ignored.
+    """
+
+    base_url: str
+    timeout_s: float = _DEFAULT_SEARXNG_TIMEOUT_S
+    transport: httpx.AsyncBaseTransport | None = None
+
+    async def search(
+        self, *, query: str, max_results: int, tenant_id: UUID | None = None
+    ) -> Mapping[str, Any]:
+        del tenant_id  # shared instance — no per-tenant credential
+        async with httpx.AsyncClient(transport=self.transport, timeout=self.timeout_s) as client:
+            response = await client.get(
+                f"{self.base_url.rstrip('/')}/search",
+                params={"q": query, "format": "json"},
+                headers={"Accept": "application/json"},
+            )
+            response.raise_for_status()
+            data = response.json()
+        if not isinstance(data, Mapping):
+            msg = f"searxng returned non-object body: {type(data).__name__}"
+            raise httpx.HTTPError(msg)
+        raw_results = data.get("results")
+        results = raw_results if isinstance(raw_results, list) else []
+        # SearXNG has no per-request result cap (it returns a full page);
+        # slice to the caller's ``max_results`` and normalise to the
+        # {title,url,content} shape ``WebSearchTool`` formats.
+        valid = [row for row in results if isinstance(row, Mapping)]
+        normalised = [
+            {
+                "title": row.get("title", ""),
+                "url": row.get("url", ""),
+                "content": row.get("content", ""),
+            }
+            for row in valid[:max_results]
+        ]
+        return {"results": normalised}
 
 
 # ---------------------------------------------------------------------------

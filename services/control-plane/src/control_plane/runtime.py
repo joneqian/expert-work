@@ -90,6 +90,7 @@ from orchestrator.tools import (
     MCPServerPool,
     NullWorkspaceLock,
     Reranker,
+    SearXNGClient,
     SseMCPClient,
     StdioMCPClient,
     StreamableHttpMCPClient,
@@ -926,11 +927,19 @@ async def resolve_web_search_client(
     resolver: CredentialsResolver,
     secret_store: SecretStore,
     supported_tools: Sequence[Tool],
+    searxng_base_url: str | None = None,
 ) -> TavilyClient | None:
-    """Build the per-tenant credential-resolving web-search client (Stream
-    E.7 + Mini-ADR O-9). ``web_search`` not in ``supported_tools`` →
-    ``None``: the deployment has no Tavily credential at all, so an agent
-    declaring ``web_search`` fails at build time (gate preserved)."""
+    """Build the web-search backend for the builtin ``web_search`` tool.
+
+    Backend selection (design ``web-search-searxng-builtin-and-tavily-mcp``
+    §3.3): a self-hosted SearXNG instance is the **free default** — if
+    ``searxng_base_url`` is set it wins, no API key needed. Otherwise fall
+    back to the legacy per-tenant credential-resolving Tavily client when
+    ``web_search`` is in ``supported_tools`` (a Tavily key is configured).
+    Neither configured → ``None`` (an agent declaring ``web_search`` then
+    fails at build time; the gate is preserved)."""
+    if searxng_base_url:
+        return SearXNGClient(base_url=searxng_base_url)
     if "web_search" not in supported_tools:
         return None
     return ResolvingTavilyClient(resolver=resolver, secret_store=secret_store)

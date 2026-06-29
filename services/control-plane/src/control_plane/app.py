@@ -960,6 +960,7 @@ def create_app(
                     resolver=credentials_resolver,
                     secret_store=resolved_secret_store,
                     supported_tools=resolved_settings.effective_supported_tools,
+                    searxng_base_url=resolved_settings.web_search_searxng_base_url,
                 )
                 mcp_pool = await stack.enter_async_context(
                     build_mcp_pool(

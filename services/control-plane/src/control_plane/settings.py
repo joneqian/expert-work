@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     #: M1 Q? after all callers migrate to :class:`CredentialsResolver`.
     tavily_api_key_ref: str | None = None
 
+    #: Base URL of the self-hosted SearXNG instance backing the builtin
+    #: ``web_search`` tool (design ``web-search-searxng-builtin-and-tavily-mcp``).
+    #: SearXNG is free + needs no API key, so setting this makes
+    #: ``web_search`` available with zero credential config — it is the
+    #: preferred default backend (wins over the legacy Tavily client).
+    #: ``None`` → no SearXNG backend (falls back to Tavily if configured).
+    #: Reached over the internal network only; never expose SearXNG publicly.
+    web_search_searxng_base_url: str | None = None
+
     #: Path to a JSON file listing the platform's MCP servers —
     #: ``[{"name", "command": [...], "env": {...}}]`` (STREAM-E-DESIGN
     #: Mini-ADR E-17). The orchestrator launches one subprocess per
@@ -660,12 +669,16 @@ class Settings(BaseSettings):
 
     @property
     def effective_supported_tools(self) -> list[Tool]:
-        """Union of explicit ``supported_tools`` and any tool the legacy
-        derivation added."""
+        """Union of explicit ``supported_tools``, any tool the legacy
+        derivation added, and ``web_search`` when a SearXNG backend is
+        configured (SearXNG needs no credential, so it cannot ride the
+        ``platform_tool_credentials`` gap-fill — gate it on the URL)."""
         derived = list(self.supported_tools)
         for tool in self.effective_platform_tool_credentials:
             if tool not in derived:
                 derived.append(tool)
+        if self.web_search_searxng_base_url and "web_search" not in derived:
+            derived.append("web_search")
         return derived
 
     # ------------------------------------------------------------------ tenant rate limit (C.6)

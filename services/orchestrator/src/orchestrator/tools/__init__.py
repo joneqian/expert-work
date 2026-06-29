@@ -190,6 +190,9 @@ from orchestrator.tools.web_search import (
     RecordingTavilyClient as RecordingTavilyClient,
 )
 from orchestrator.tools.web_search import (
+    SearXNGClient as SearXNGClient,
+)
+from orchestrator.tools.web_search import (
     TavilyClient as TavilyClient,
 )
 from orchestrator.tools.web_search import (
@@ -241,6 +244,7 @@ __all__ = [
     "SandboxOutcome",
     "SandboxSupervisorError",
     "SaveArtifactTool",
+    "SearXNGClient",
     "StdioMCPClient",
     "SubAgentTool",
     "SupervisorClient",

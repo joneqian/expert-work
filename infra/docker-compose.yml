@@ -96,6 +96,10 @@ x-control-plane-base: &control-plane-base
     HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST: ${HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST:-[]}
     HELIX_AGENT_MCP_CATALOG_SEED_FILE: ${HELIX_AGENT_MCP_CATALOG_SEED_FILE:-}
     MCP_OAUTH_GITHUB_CLIENT_ID: ${MCP_OAUTH_GITHUB_CLIENT_ID:-}
+    # web_search builtin backend — free self-hosted SearXNG (no API key).
+    # Defaults to the in-compose searxng service so web_search works OOTB;
+    # unset (or point elsewhere) to disable / use an external instance.
+    HELIX_AGENT_WEB_SEARCH_SEARXNG_BASE_URL: ${HELIX_AGENT_WEB_SEARCH_SEARXNG_BASE_URL:-http://searxng:8080}
   volumes:
     # The directory always exists (committed .example); the .local inside it
     # is git-ignored, so this bind mount never breaks `up` when a dev hasn't
@@ -106,6 +110,10 @@ x-control-plane-base: &control-plane-base
       condition: service_healthy
     redis:
       condition: service_healthy
+    searxng:
+      # Ordering only — web_search is built per-run, so a not-yet-ready
+      # SearXNG never blocks control-plane startup or a chat.
+      condition: service_started
     migrate:
       condition: service_completed_successfully
   healthcheck:
@@ -215,6 +223,27 @@ services:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 2s
       timeout: 2s
+      retries: 20
+
+  searxng:
+    # Free, open-source (AGPL-3.0) self-hosted metasearch — the default
+    # backend for the builtin ``web_search`` tool (design
+    # web-search-searxng-builtin-and-tavily-mcp). No API key needed.
+    #
+    # SECURITY: NO host port is published — the JSON API is a free proxy to
+    # upstream engines and must stay internal-only (§3.4). The control plane
+    # reaches it in-compose at http://searxng:8080.
+    profiles: ["full"]
+    image: searxng/searxng:latest
+    container_name: helix-searxng
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
       retries: 20
 
   minio:

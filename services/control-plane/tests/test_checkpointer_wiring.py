@@ -44,6 +44,7 @@ from orchestrator.tools import (
     MCPClient,
     MCPServerConfig,
     RecordingMCPClient,
+    SearXNGClient,
 )
 from tests.auth_fixtures import build_test_jwt_verifier
 
@@ -196,6 +197,32 @@ async def test_resolve_web_search_client_builds_resolving_client() -> None:
         supported_tools=["web_search"],
     )
     assert isinstance(client, ResolvingTavilyClient)
+
+
+@pytest.mark.asyncio
+async def test_resolve_web_search_client_prefers_searxng() -> None:
+    # SearXNG base_url wins over the Tavily fallback even when web_search is
+    # also "supported" via a Tavily credential.
+    client = await resolve_web_search_client(
+        resolver=_web_search_resolver(),
+        secret_store=LocalDevSecretStore.from_mapping({}),
+        supported_tools=["web_search"],
+        searxng_base_url="http://searxng:8080",
+    )
+    assert isinstance(client, SearXNGClient)
+    assert client.base_url == "http://searxng:8080"
+
+
+@pytest.mark.asyncio
+async def test_resolve_web_search_client_searxng_without_tavily_credential() -> None:
+    # SearXNG needs no credential — works with empty supported_tools.
+    client = await resolve_web_search_client(
+        resolver=_web_search_resolver(),
+        secret_store=LocalDevSecretStore.from_mapping({}),
+        supported_tools=[],
+        searxng_base_url="http://searxng:8080",
+    )
+    assert isinstance(client, SearXNGClient)
 
 
 @pytest.mark.asyncio
