@@ -130,6 +130,23 @@ logger = logging.getLogger("helix.orchestrator.agent_factory")
 #: floored here and the provider httpx timeout is aligned to it (Stream L.L3).
 _VL_STREAM_DEADLINE_FLOOR_S = 180
 
+#: Floor for the chat / worker router wall-clock deadline. A single heavy
+#: generation (a large-context step, an orchestrator-worker doing real work)
+#: routinely runs past the original 90s default — that mis-fired
+#: LLMStreamStaleError, exhausted the fallback chain, and dropped the run into a
+#: retry loop (looks "stuck"). Floored at build so EXISTING agents (whose stored
+#: spec baked the old 90s default) are bumped without a re-create; matches the
+#: protocol default. ``0`` (deadline disabled) is honoured as-is.
+_CHAT_STREAM_DEADLINE_FLOOR_S = 180
+
+
+def _chat_stream_deadline_s(manifest_deadline_s: int) -> float | None:
+    """Effective chat/worker stream deadline — floor a positive value, keep 0=off."""
+    if manifest_deadline_s <= 0:
+        return None
+    return float(max(manifest_deadline_s, _CHAT_STREAM_DEADLINE_FLOOR_S))
+
+
 #: Default provider-client httpx wall-clock timeout (matches the per-vendor
 #: factory defaults). Used when no explicit ``timeout_s`` is threaded in.
 _PROVIDER_HTTP_TIMEOUT_DEFAULT_S = 60.0
@@ -490,9 +507,7 @@ async def build_agent(
             secret_store=secret_store,
             around_llm_chain=chains.around_llm_call,
             image_resolver=env.image_resolver,
-            stream_deadline_s=(
-                float(spec.spec.stream_deadline_s) if spec.spec.stream_deadline_s > 0 else None
-            ),
+            stream_deadline_s=_chat_stream_deadline_s(spec.spec.stream_deadline_s),
             provider_key_resolver=provider_key_resolver,
             ignore_api_key_ref=True,
         )
@@ -1512,8 +1527,7 @@ async def build_step_routers(
     to every router (default + planning + reflection); a hung provider
     on any step class trips the same wall-clock cap.
     """
-    deadline_s = spec.spec.stream_deadline_s
-    deadline: float | None = float(deadline_s) if deadline_s > 0 else None
+    deadline: float | None = _chat_stream_deadline_s(spec.spec.stream_deadline_s)
     default = await build_llm_router(
         spec.spec.model,
         secret_store=secret_store,

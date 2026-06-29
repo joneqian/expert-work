@@ -26,7 +26,7 @@ from orchestrator import (
     build_llm_router,
     build_step_routers,
 )
-from orchestrator.agent_factory import _build_provider
+from orchestrator.agent_factory import _build_provider, _chat_stream_deadline_s
 from orchestrator.llm import FakeEmbedder, RateLimitedProvider
 from orchestrator.tools import KnowledgeRetriever, RecordingTavilyClient
 
@@ -106,6 +106,17 @@ async def _build(spec: AgentSpec, **kwargs: Any) -> BuiltAgent:
 # ---------------------------------------------------------------------------
 # build_llm_router
 # ---------------------------------------------------------------------------
+
+
+def test_chat_stream_deadline_floors_low_values() -> None:
+    # Existing agents baked the old 90s default into their stored spec — the
+    # build-time floor bumps them to 180 so a heavy step doesn't get killed
+    # mid-stream and drop the run into a retry loop.
+    assert _chat_stream_deadline_s(90) == 180.0
+    assert _chat_stream_deadline_s(120) == 180.0
+    # An explicit higher value is respected; 0 keeps the deadline disabled.
+    assert _chat_stream_deadline_s(240) == 240.0
+    assert _chat_stream_deadline_s(0) is None
 
 
 @pytest.mark.asyncio
