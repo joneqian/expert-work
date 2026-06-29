@@ -1,18 +1,34 @@
 /**
- * Playground tab — Stream H.2 PR 3.
+ * Playground tab — per-agent debug surface backed by real ``/v1/sessions`` +
+ * ``/v1/sessions/{thread_id}/runs`` SSE.
  *
- * Per-agent debug surface backed by real ``/v1/sessions`` + ``/v1/sessions/
- * {thread_id}/runs`` SSE. On mount the tab creates a fresh thread bound
- * to the agent; the user types a prompt, clicks Run, and the SSE frames
- * stream into the right panel in real time.
+ * Playground-Uplift:
+ *   - **user_id (D1)**: an admin may run the session as another user_id (real
+ *     tenant user picker OR free-form sandbox UUID) → verify that user's
+ *     per-user workspace / memory / episodic. Sent as ``run_as_user_id`` to
+ *     createSession; the active identity shows in the header.
+ *   - **multi-turn (D2)**: the conversation accumulates as a transcript of
+ *     turns (the thread is reused, so the backend already continues context);
+ *     each turn keeps its own event stream.
+ *   - **per-turn observability (D3)**: each turn distills token usage +
+ *     reasoning trace from its frames (the fields surfaced in #847).
  *
- * The "edit manifest snippet + re-run" affordance from the original
- * design doc is a follow-up — it depends on backend support for an
- * ad-hoc manifest override that doesn't exist yet (today the bound
- * spec is the active ``AgentSpecRecord``).
+ * The "edit manifest snippet + re-run" affordance is a follow-up (needs a
+ * backend ad-hoc manifest override that doesn't exist yet).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Empty, Input, Segmented, Space, Tag, Typography } from "antd";
+import {
+  Alert,
+  AutoComplete,
+  Button,
+  Collapse,
+  Empty,
+  Input,
+  Segmented,
+  Space,
+  Tag,
+  Typography,
+} from "antd";
 import {
   FileText,
   ImagePlus,
@@ -20,11 +36,13 @@ import {
   RotateCcw,
   Send,
   Square,
+  User,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
+import { listMembers } from "../../api/members";
 import {
   createSession,
   streamRun,
@@ -32,6 +50,7 @@ import {
   type SseEvent,
   type ThreadMeta,
 } from "../../api/sessions";
+import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import { CopyButton } from "../../components/CopyButton";
 import { ToolTimeline } from "../../components/ToolTimeline";
@@ -41,16 +60,23 @@ import {
   readPromptVariables,
 } from "../../components/manifest-editor/form_model";
 
-/** Something attached to the next turn, uploaded ahead of Run. An image
- *  rides as a lightweight ``helix://image/...`` ref (``value``) in
- *  ``image_refs``; a document lands in the workspace and its relative
- *  ``value`` path is surfaced to the agent in the prompt so it can
- *  ``read_document`` it. */
 interface Attachment {
   id: string;
   name: string;
   kind: "image" | "document";
   value: string;
+}
+
+/** One round of the conversation — the user input plus the agent's streamed
+ *  frames for that turn (the thread is reused, so the backend continues the
+ *  context across turns). */
+interface Turn {
+  id: string;
+  input: string;
+  attachments: Attachment[];
+  events: SseEvent[];
+  status: "running" | "done" | "error";
+  error: string | null;
 }
 
 const { Text } = Typography;
@@ -67,12 +93,16 @@ const EVENT_COLOR: Record<string, string> = {
   end: "green",
 };
 
+interface UserOption {
+  value: string;
+  label: string;
+}
+
 export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const { t } = useTranslation();
   const r = detail.record;
 
-  // Dynamic-Prompt — the agent's declared run-time variables (jinja agents
-  // only). Each gets an input field whose value rides in the run's ``inputs``.
+  // Dynamic-Prompt — the agent's declared run-time variables (jinja agents only).
   const manifestLike = { spec: r.spec };
   const promptJinja = readPromptJinja(manifestLike);
   const promptVariables = promptJinja
@@ -85,31 +115,53 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [threadError, setThreadError] = useState<string | null>(null);
   const [creatingThread, setCreatingThread] = useState(false);
   const [input, setInput] = useState("");
-  const [events, setEvents] = useState<SseEvent[]>([]);
+  const [turns, setTurns] = useState<Turn[]>([]);
   const [eventView, setEventView] = useState<"timeline" | "raw">("timeline");
   const [running, setRunning] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [varValues, setVarValues] = useState<Record<string, string>>({});
+  // Playground-Uplift D1 — impersonation. Empty = run as self.
+  const [runAsUser, setRunAsUser] = useState("");
+  const [userOptions, setUserOptions] = useState<UserOption[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
-  const eventListRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+
+  // Load active tenant users for the impersonation picker (subject_id == the
+  // tenant_user.id that keys the workspace/memory; only active members have one).
+  useEffect(() => {
+    let cancelled = false;
+    void listMembers({ status: "active", limit: 200 })
+      .then((page) => {
+        if (cancelled) return;
+        const opts = page.items
+          .filter((m) => m.subject_id)
+          .map((m) => ({ value: m.subject_id as string, label: m.email }));
+        setUserOptions(opts);
+      })
+      .catch(() => {
+        // Picker is a convenience — free-form entry still works on failure.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const newThread = useCallback(async () => {
     setCreatingThread(true);
     setThreadError(null);
-    setEvents([]);
-    setRunError(null);
+    setTurns([]);
     setAttachments([]);
     setUploadError(null);
     try {
       const created = await createSession({
         agent_name: r.name,
         agent_version: r.version,
+        ...(runAsUser.trim() ? { run_as_user_id: runAsUser.trim() } : {}),
       });
       setThread(created);
     } catch (err) {
@@ -124,8 +176,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     } finally {
       setCreatingThread(false);
     }
-  }, [r.name, r.version]);
+  }, [r.name, r.version, runAsUser]);
 
+  // Re-bind a fresh thread when the agent or the impersonated user changes.
   useEffect(() => {
     void newThread();
     return () => {
@@ -133,17 +186,16 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     };
   }, [newThread]);
 
-  // Auto-scroll the event log as new frames arrive.
+  // Auto-scroll the transcript as turns/frames arrive.
   useEffect(() => {
-    const node = eventListRef.current;
+    const node = transcriptRef.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [events]);
+  }, [turns]);
 
   const handleAttach = useCallback(
     (kind: "image" | "document") =>
       async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        // Reset the input so picking the same file twice still fires onChange.
         event.target.value = "";
         if (!file || !thread) return;
         setUploading(true);
@@ -179,24 +231,19 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const handleRun = useCallback(async () => {
     if (!thread || running) return;
     setRunning(true);
-    setRunError(null);
-    setEvents([]);
-    const imageRefs = attachments
+    const turnAttachments = attachments;
+    const turnInput = input;
+    const imageRefs = turnAttachments
       .filter((a) => a.kind === "image")
       .map((a) => a.value);
-    const docPaths = attachments
+    const docPaths = turnAttachments
       .filter((a) => a.kind === "document")
       .map((a) => a.value);
-    // Surface uploaded document paths to the agent in the prompt so its LLM
-    // knows it can read them via the read_document tool (the docs already
-    // landed in the workspace; the run message just points at them).
     const docNote =
       docPaths.length > 0
         ? `${t("playground.uploaded_docs_note")}: ${docPaths.join(", ")}\n\n`
         : "";
-    const effectiveInput = docNote + input;
-    // Dynamic-Prompt — send only declared variables that have a value; the
-    // backend validates them against the agent's schema.
+    const effectiveInput = docNote + turnInput;
     const inputs: Record<string, string> = {};
     for (const v of promptVariables) {
       const val = varValues[v.name];
@@ -205,34 +252,62 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     const body: RunRequest = { input: effectiveInput };
     if (imageRefs.length > 0) body.image_refs = imageRefs;
     if (Object.keys(inputs).length > 0) body.inputs = inputs;
+
+    const turnId = `${Date.now()}-${turns.length}`;
+    const updateTurn = (patch: Partial<Turn>) =>
+      setTurns((prev) =>
+        prev.map((tn) => (tn.id === turnId ? { ...tn, ...patch } : tn)),
+      );
+    setTurns((prev) => [
+      ...prev,
+      {
+        id: turnId,
+        input: turnInput,
+        attachments: turnAttachments,
+        events: [],
+        status: "running",
+        error: null,
+      },
+    ]);
+    // Consume the input + attachments — the next turn starts fresh.
+    setInput("");
+    setAttachments([]);
+
     const ac = new AbortController();
     abortRef.current = ac;
     try {
       for await (const frame of streamRun(thread.thread_id, body, {
         signal: ac.signal,
       })) {
-        setEvents((prev) => [...prev, frame]);
+        setTurns((prev) =>
+          prev.map((tn) =>
+            tn.id === turnId ? { ...tn, events: [...tn.events, frame] } : tn,
+          ),
+        );
         if (frame.event === "end") break;
       }
-      // The turn consumed the attached images — clear so the next turn
-      // starts fresh. On error we keep them so the user can retry.
-      setAttachments([]);
+      updateTurn({ status: "done" });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        // Cancelled by the user — not an error.
+        updateTurn({ status: "done" });
       } else {
         const message = err instanceof Error ? err.message : "stream failed";
-        setRunError(message);
+        updateTurn({ status: "error", error: message });
       }
     } finally {
       setRunning(false);
       abortRef.current = null;
     }
-  }, [thread, input, running, attachments, promptVariables, varValues, t]);
+  }, [thread, input, running, attachments, promptVariables, varValues, turns.length, t]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  const activeUserLabel = runAsUser.trim()
+    ? (userOptions.find((o) => o.value === runAsUser.trim())?.label ??
+      runAsUser.trim())
+    : t("playground.user_self");
 
   return (
     <div
@@ -277,6 +352,45 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             {t("playground.new_session")}
           </Button>
         </div>
+
+        {/* Playground-Uplift D1 — run-as user (real user picker + free-form id). */}
+        <div data-testid="playground-user">
+          <Text
+            type="secondary"
+            style={{ fontSize: 12, display: "block", marginBottom: 4 }}
+          >
+            {t("playground.run_as_label")}
+          </Text>
+          <AutoComplete
+            options={userOptions}
+            value={runAsUser}
+            onChange={setRunAsUser}
+            allowClear
+            disabled={running || creatingThread}
+            filterOption={(inputValue, option) =>
+              (option?.label ?? "")
+                .toString()
+                .toLowerCase()
+                .includes(inputValue.toLowerCase())
+            }
+            style={{ width: "100%" }}
+            placeholder={t("playground.run_as_placeholder")}
+            data-testid="playground-user-select"
+          >
+            <Input
+              aria-label={t("playground.run_as_label")}
+              prefix={<User size={12} strokeWidth={1.75} />}
+            />
+          </AutoComplete>
+          <Text
+            type="secondary"
+            style={{ fontSize: 11, display: "block", marginTop: 2 }}
+            data-testid="playground-active-user"
+          >
+            {t("playground.running_as", { user: activeUserLabel })}
+          </Text>
+        </div>
+
         {threadError !== null ? (
           <Alert
             type="error"
@@ -463,7 +577,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         </Space>
       </div>
 
-      {/* Right — event log */}
+      {/* Right — conversation transcript */}
       <div
         style={{
           border: "1px solid var(--hx-border-subtle)",
@@ -485,12 +599,12 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           }}
         >
           <Text strong style={{ fontSize: 13 }}>
-            {t("playground.event_log")}
+            {t("playground.transcript_label")}
           </Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {events.length === 0
+            {turns.length === 0
               ? ""
-              : t("playground.event_count", { n: events.length })}
+              : t("playground.turn_count", { n: turns.length })}
           </Text>
           <Segmented<"timeline" | "raw">
             size="small"
@@ -505,41 +619,179 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           />
         </div>
 
-        {runError !== null && (
-          <Alert
-            type="error"
-            showIcon
-            message={t("playground.stream_failed")}
-            description={runError}
-            style={{ margin: 12 }}
-            data-testid="playground-stream-error"
-          />
-        )}
-
         <div
-          ref={eventListRef}
+          ref={transcriptRef}
           style={{
             flex: 1,
             padding: 12,
             overflow: "auto",
             display: "flex",
             flexDirection: "column",
-            gap: 8,
+            gap: 12,
           }}
-          data-testid="playground-event-log"
+          data-testid="playground-transcript"
         >
-          {events.length === 0 && runError === null && (
+          {turns.length === 0 && (
             <Empty
               description={t("playground.empty_log")}
               style={{ marginTop: 64 }}
               data-testid="playground-empty-log"
             />
           )}
-          {events.length > 0 && eventView === "timeline" && <ToolTimeline events={events} />}
-          {eventView === "raw" &&
-            events.map((evt, idx) => <EventCard key={`${evt.receivedAt}-${idx}`} evt={evt} />)}
+          {turns.map((turn) => (
+            <TurnCard key={turn.id} turn={turn} eventView={eventView} />
+          ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function TurnCard({
+  turn,
+  eventView,
+}: {
+  turn: Turn;
+  eventView: "timeline" | "raw";
+}) {
+  const { t } = useTranslation();
+  const summary = summarizeTurn(turn.events);
+  const answer =
+    summary.finalText ??
+    (turn.status === "running" ? t("playground.turn_running") : null);
+
+  return (
+    <div
+      data-testid="playground-turn"
+      style={{
+        border: "1px solid var(--hx-border-subtle)",
+        borderRadius: 6,
+        overflow: "hidden",
+      }}
+    >
+      {/* User message */}
+      <div
+        style={{
+          padding: "8px 12px",
+          background: "var(--hx-surface-raised)",
+          borderBottom: "1px solid var(--hx-border-subtle)",
+        }}
+      >
+        <Text style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>
+          {turn.input}
+        </Text>
+        {turn.attachments.length > 0 && (
+          <div style={{ marginTop: 4 }}>
+            {turn.attachments.map((a) => (
+              <Tag key={a.id} bordered={false} style={{ fontSize: 11 }}>
+                {a.name}
+              </Tag>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Agent answer */}
+      <div style={{ padding: "8px 12px" }} data-testid="playground-turn-answer">
+        {turn.status === "error" ? (
+          <Alert
+            type="error"
+            showIcon
+            message={t("playground.stream_failed")}
+            description={turn.error}
+            data-testid="playground-turn-error"
+          />
+        ) : answer !== null ? (
+          <Text style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>{answer}</Text>
+        ) : (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("playground.turn_no_text")}
+          </Text>
+        )}
+
+        {/* Per-turn usage chips */}
+        {summary.usage && (
+          <div
+            style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}
+            data-testid="playground-usage"
+          >
+            <Tag bordered={false} color="geekblue">
+              {t("playground.usage_in")}: {summary.usage.inputTokens}
+            </Tag>
+            <Tag bordered={false} color="geekblue">
+              {t("playground.usage_out")}: {summary.usage.outputTokens}
+            </Tag>
+            <Tag bordered={false}>
+              {t("playground.usage_total")}: {summary.usage.totalTokens}
+            </Tag>
+            {summary.usage.cacheReadTokens > 0 && (
+              <Tag bordered={false} color="green">
+                {t("playground.usage_cache")}: {summary.usage.cacheReadTokens}
+              </Tag>
+            )}
+            {summary.usage.reasoningTokens > 0 && (
+              <Tag bordered={false} color="purple">
+                {t("playground.usage_reasoning")}:{" "}
+                {summary.usage.reasoningTokens}
+              </Tag>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Reasoning (collapsed) + events (expanded by default). */}
+      <Collapse
+        ghost
+        size="small"
+        defaultActiveKey={["events"]}
+        items={[
+          ...(summary.reasoning.length > 0
+            ? [
+                {
+                  key: "reasoning",
+                  label: t("playground.reasoning_label"),
+                  children: (
+                    <pre
+                      data-testid="playground-reasoning"
+                      style={{
+                        margin: 0,
+                        fontSize: 11,
+                        fontFamily: "var(--hx-font-mono)",
+                        color: "var(--hx-text-secondary)",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        maxHeight: 240,
+                        overflow: "auto",
+                      }}
+                    >
+                      {summary.reasoning.join("\n\n———\n\n")}
+                    </pre>
+                  ),
+                },
+              ]
+            : []),
+          {
+            key: "events",
+            label: t("playground.events_label"),
+            children:
+              turn.events.length === 0 ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t("playground.empty_log")}
+                </Text>
+              ) : eventView === "timeline" ? (
+                <ToolTimeline events={turn.events} />
+              ) : (
+                <div
+                  style={{ display: "flex", flexDirection: "column", gap: 8 }}
+                >
+                  {turn.events.map((evt, idx) => (
+                    <EventCard key={`${evt.receivedAt}-${idx}`} evt={evt} />
+                  ))}
+                </div>
+              ),
+          },
+        ]}
+      />
     </div>
   );
 }

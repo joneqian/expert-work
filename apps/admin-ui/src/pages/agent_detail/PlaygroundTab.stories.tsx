@@ -30,6 +30,38 @@ const detail: AgentDetailResponse = {
 function withStubs(Story: ComponentType) {
   apiClient.defaults.adapter = (config) => {
     const url = config.url ?? "";
+    if (url.includes("/v1/members")) {
+      return Promise.resolve({
+        data: {
+          success: true,
+          data: {
+            items: [
+              {
+                id: "m1",
+                tenant_id: "22222222-2222-2222-2222-222222222222",
+                email: "alice@acme.test",
+                display_name: "Alice",
+                role: "member",
+                status: "active",
+                keycloak_user_id: "kc-1",
+                subject_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                invited_by: "u",
+                invited_at: null,
+                activated_at: null,
+                updated_at: null,
+              },
+            ],
+            total: 1,
+          },
+          error: null,
+        },
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config,
+        request: {},
+      });
+    }
     if (url.endsWith("/uploads")) {
       return Promise.resolve({
         data: { image_ref: "helix://image/demo.png" },

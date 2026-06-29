@@ -100,6 +100,50 @@ async def test_post_creates_session_for_known_agent(
     assert any(r.action.value == "session:write" for r in page.entries)
 
 
+_TARGET_USER = "00000000-0000-0000-0000-0000000000aa"
+
+
+@pytest.mark.asyncio
+async def test_admin_can_run_session_as_another_user(
+    session_client: AsyncClient, audit_store: InMemoryAuditLogStore
+) -> None:
+    # Playground impersonation — an admin binds the thread to a target user_id
+    # so the run uses that user's workspace / memory / episodic.
+    response = await session_client.post(
+        "/v1/sessions",
+        json={
+            "agent_name": "code-reviewer",
+            "agent_version": "1.0.0",
+            "run_as_user_id": _TARGET_USER,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["data"]["user_id"] == _TARGET_USER
+    page = await audit_store.query(AuditQuery(tenant_id=_DEFAULT_TENANT))
+    assert any(
+        r.action.value == "session:write" and r.details.get("impersonated") is True
+        for r in page.entries
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_run_session_as_another_user(
+    session_client: AsyncClient,
+) -> None:
+    member_token = make_test_jwt(tenant_id=_DEFAULT_TENANT, subject="plain-user", roles=("member",))
+    response = await session_client.post(
+        "/v1/sessions",
+        json={
+            "agent_name": "code-reviewer",
+            "agent_version": "1.0.0",
+            "run_as_user_id": _TARGET_USER,
+        },
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
 @pytest.mark.asyncio
 async def test_post_rejects_unknown_agent(session_client: AsyncClient) -> None:
     response = await session_client.post(

@@ -59,7 +59,7 @@ function stripFence(content: string): string {
 }
 
 /** Flatten the messages across every node in one ``updates`` chunk. */
-function messagesOf(data: unknown): Array<Record<string, unknown>> {
+export function messagesOf(data: unknown): Array<Record<string, unknown>> {
   if (data === null || typeof data !== "object") return [];
   const out: Array<Record<string, unknown>> = [];
   for (const nodeVal of Object.values(data as Record<string, unknown>)) {

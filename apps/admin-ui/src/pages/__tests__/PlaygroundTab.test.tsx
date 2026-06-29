@@ -12,6 +12,7 @@ import "../../i18n";
 import i18n from "../../i18n";
 
 import { ApiError } from "../../api/client";
+import * as membersSdk from "../../api/members";
 import * as sessionsSdk from "../../api/sessions";
 import * as uploadsSdk from "../../api/uploads";
 import { PlaygroundTab } from "../agent_detail/PlaygroundTab";
@@ -49,12 +50,15 @@ const createSessionMock = vi.spyOn(sessionsSdk, "createSession");
 const streamRunMock = vi.spyOn(sessionsSdk, "streamRun");
 const uploadImageMock = vi.spyOn(uploadsSdk, "uploadImage");
 const uploadDocumentMock = vi.spyOn(uploadsSdk, "uploadDocument");
+const listMembersMock = vi.spyOn(membersSdk, "listMembers");
 
 beforeEach(() => {
   createSessionMock.mockReset();
   streamRunMock.mockReset();
   uploadImageMock.mockReset();
   uploadDocumentMock.mockReset();
+  listMembersMock.mockReset();
+  listMembersMock.mockResolvedValue({ items: [], total: 0 });
 });
 
 afterEach(() => {
@@ -134,7 +138,7 @@ describe("PlaygroundTab", () => {
     await screen.findByText(/33333333-3333-3333/);
     await user.type(screen.getByTestId("playground-input"), "x");
     await user.click(screen.getByTestId("playground-run"));
-    const alert = await screen.findByTestId("playground-stream-error");
+    const alert = await screen.findByTestId("playground-turn-error");
     expect(alert).toHaveTextContent("boom");
   });
 
@@ -296,6 +300,83 @@ describe("PlaygroundTab", () => {
     expect(
       screen.queryByTestId("playground-attachment"),
     ).not.toBeInTheDocument();
+  });
+
+  it("runs as another user when a user_id is entered (impersonation)", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    render(<PlaygroundTab detail={sampleDetail} />);
+    await screen.findByText(/33333333-3333-3333/);
+    createSessionMock.mockClear();
+
+    const target = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    // The AutoComplete wraps a real input; type the target user_id into it.
+    const userField = screen.getByLabelText(
+      i18n.t("playground.run_as_label"),
+    );
+    await user.type(userField, target);
+    // Changing the user re-binds a fresh thread with run_as_user_id.
+    await waitFor(() =>
+      expect(createSessionMock).toHaveBeenCalledWith({
+        agent_name: "demo-agent",
+        agent_version: "1.0.0",
+        run_as_user_id: target,
+      }),
+    );
+  });
+
+  it("accumulates turns across runs and parses per-turn token usage", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    const endFrame = (text: string, input: number): SseEvent[] => [
+      {
+        id: "u",
+        event: "updates",
+        data: {
+          agent: {
+            messages: [
+              {
+                type: "ai",
+                content: text,
+                usage_metadata: {
+                  input_tokens: input,
+                  output_tokens: 10,
+                  total_tokens: input + 10,
+                },
+              },
+            ],
+          },
+        },
+        rawData: "",
+        receivedAt: "2026-05-25T00:00:02Z",
+      },
+      {
+        id: "e",
+        event: "end",
+        data: "ok",
+        rawData: "ok",
+        receivedAt: "2026-05-25T00:00:03Z",
+      },
+    ];
+    streamRunMock.mockReturnValueOnce(makeStream(endFrame("first answer", 100)));
+    streamRunMock.mockReturnValueOnce(makeStream(endFrame("second answer", 200)));
+
+    render(<PlaygroundTab detail={sampleDetail} />);
+    await screen.findByText(/33333333-3333-3333/);
+
+    await user.type(screen.getByTestId("playground-input"), "q1");
+    await user.click(screen.getByTestId("playground-run"));
+    await screen.findByText("first answer");
+
+    await user.type(screen.getByTestId("playground-input"), "q2");
+    await user.click(screen.getByTestId("playground-run"));
+    await screen.findByText("second answer");
+
+    // Both turns persist (not wiped) + usage chips render per turn.
+    expect(screen.getAllByTestId("playground-turn")).toHaveLength(2);
+    expect(screen.getAllByTestId("playground-usage")).toHaveLength(2);
+    // The thread is reused across turns (multi-turn continuation).
+    expect(streamRunMock.mock.calls.every(([tid]) => tid === sampleThread.thread_id)).toBe(true);
   });
 
   it("removes an attachment when its tag is closed", async () => {
