@@ -134,6 +134,27 @@ async def _create_session(client: AsyncClient) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Playground resume (#6) — thread message history
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_thread_messages_404_for_unknown(runs_client: AsyncClient) -> None:
+    response = await runs_client.get("/v1/sessions/00000000-0000-0000-0000-0000000000ff/messages")
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_thread_messages_empty_for_fresh_thread(runs_client: AsyncClient) -> None:
+    # A brand-new thread has no checkpoint history (and best-effort read
+    # degrades to empty), so the endpoint returns an empty list, not an error.
+    thread_id = await _create_session(runs_client)
+    response = await runs_client.get(f"/v1/sessions/{thread_id}/messages")
+    assert response.status_code == 200
+    assert response.json()["data"]["messages"] == []
+
+
+# ---------------------------------------------------------------------------
 # happy path
 # ---------------------------------------------------------------------------
 

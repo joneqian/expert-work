@@ -60,9 +60,11 @@ import { listRateCards, type RateCardRecord } from "../../api/rate_card";
 import { streamRunEvents } from "../../api/runs";
 import {
   createSession,
+  getSessionMessages,
   getSessionWorkspace,
   listSessions,
   streamRun,
+  type HistoryMessage,
   type RunRequest,
   type SessionWorkspace,
   type SseEvent,
@@ -165,6 +167,8 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [rate, setRate] = useState<RateCardRecord | null>(null);
   const [pastSessions, setPastSessions] = useState<ThreadMeta[]>([]);
   const [resumed, setResumed] = useState(false);
+  // #6 — prior conversation loaded when resuming an existing thread.
+  const [history, setHistory] = useState<HistoryMessage[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -226,6 +230,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     setCreatingThread(true);
     setThreadError(null);
     setResumed(false);
+    setHistory([]);
     setTurns([]);
     setAttachments([]);
     setUploadError(null);
@@ -262,7 +267,12 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setAttachments([]);
       setThreadError(null);
       setResumed(true);
+      setHistory([]);
       setThread(picked);
+      // Load the thread's prior conversation from the checkpoint.
+      void getSessionMessages(threadId)
+        .then(setHistory)
+        .catch(() => setHistory([]));
     },
     [pastSessions],
   );
@@ -921,23 +931,16 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               ? ""
               : t("playground.turn_count", { n: turns.length })}
           </Text>
-          <Segmented<"timeline" | "raw">
-            size="small"
-            value={eventView}
-            onChange={setEventView}
-            options={[
-              { value: "timeline", label: t("event_stream.view_timeline") },
-              { value: "raw", label: t("event_stream.view_raw") },
-            ]}
-            style={{ marginLeft: "auto" }}
-            data-testid="playground-event-view-toggle"
-          />
         </div>
 
         <div
           ref={transcriptRef}
           style={{
             flex: 1,
+            // Cap (not fixed height) so the transcript scrolls internally when
+            // tall but never forces the column past the viewport — if the offset
+            // is off it degrades to the Shell's page scroll, never a dead lock.
+            maxHeight: "calc(100vh - 400px)",
             padding: 12,
             overflow: "auto",
             display: "flex",
@@ -946,18 +949,63 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           }}
           data-testid="playground-transcript"
         >
-          {turns.length === 0 && (
+          {turns.length === 0 && history.length === 0 && (
             <Empty
               description={t("playground.empty_log")}
               style={{ marginTop: 64 }}
               data-testid="playground-empty-log"
             />
           )}
+          {/* #6 — prior conversation (read-only) when resuming a thread. */}
+          {history.length > 0 && (
+            <div
+              data-testid="playground-history"
+              style={{ display: "flex", flexDirection: "column", gap: 8 }}
+            >
+              {history.map((m, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                    maxWidth: "85%",
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    whiteSpace: "pre-wrap",
+                    background:
+                      m.role === "user"
+                        ? "var(--hx-surface-raised)"
+                        : "transparent",
+                    border:
+                      m.role === "user"
+                        ? "1px solid var(--hx-border-subtle)"
+                        : "none",
+                    opacity: 0.75,
+                  }}
+                >
+                  {m.content}
+                </div>
+              ))}
+              <div
+                style={{
+                  textAlign: "center",
+                  fontSize: 11,
+                  color: "var(--hx-text-tertiary)",
+                  borderTop: "1px dashed var(--hx-border-subtle)",
+                  paddingTop: 6,
+                  marginTop: 2,
+                }}
+              >
+                {t("playground.history_divider")}
+              </div>
+            </div>
+          )}
           {turns.map((turn) => (
             <TurnCard
               key={turn.id}
               turn={turn}
               eventView={eventView}
+              onViewChange={setEventView}
               threadId={thread?.thread_id ?? null}
               rate={rate}
               onDecide={handleDecide}
@@ -1057,6 +1105,7 @@ function ApprovalGate({
 function TurnCard({
   turn,
   eventView,
+  onViewChange,
   threadId,
   rate,
   onDecide,
@@ -1064,6 +1113,7 @@ function TurnCard({
 }: {
   turn: Turn;
   eventView: "timeline" | "raw";
+  onViewChange: (view: "timeline" | "raw") => void;
   threadId: string | null;
   rate: RateCardRecord | null;
   onDecide: (turnId: string, approval: ApprovalItem, decision: "approve" | "reject") => void;
@@ -1256,7 +1306,35 @@ function TurnCard({
             : []),
           {
             key: "events",
-            label: t("playground.events_label"),
+            label: (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <span>{t("playground.events_label")}</span>
+                {/* Toggle lives next to the content it switches; stop the click
+                    from collapsing the panel. */}
+                <span
+                  onClick={(e) => e.stopPropagation()}
+                  role="presentation"
+                >
+                  <Segmented<"timeline" | "raw">
+                    size="small"
+                    value={eventView}
+                    onChange={onViewChange}
+                    options={[
+                      { value: "timeline", label: t("event_stream.view_timeline") },
+                      { value: "raw", label: t("event_stream.view_raw") },
+                    ]}
+                    data-testid="playground-event-view-toggle"
+                  />
+                </span>
+              </div>
+            ),
             children:
               turn.events.length === 0 ? (
                 <Text type="secondary" style={{ fontSize: 12 }}>

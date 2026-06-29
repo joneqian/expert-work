@@ -88,6 +88,23 @@ export async function getSessionWorkspace(
   return unwrap(response.data);
 }
 
+/** Playground-Uplift #6 — a resumed thread's prior conversation (from the
+ *  durable checkpoint), so resume shows what was said before. User/assistant
+ *  text turns only. */
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function getSessionMessages(
+  threadId: string,
+): Promise<HistoryMessage[]> {
+  const response = await apiClient.get<ApiEnvelope<{ messages: HistoryMessage[] }>>(
+    `/v1/sessions/${threadId}/messages`,
+  );
+  return unwrap(response.data).messages;
+}
+
 /** Playground-Uplift #6 — list the caller's threads (user-scoped server-side),
  *  newest first; the playground filters to the current agent for resume. */
 export async function listSessions(

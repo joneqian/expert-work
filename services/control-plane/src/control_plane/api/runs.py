@@ -333,6 +333,17 @@ def _get_agent_runtime(request: Request) -> AgentRuntime:
     return request.app.state.agent_runtime  # type: ignore[no-any-return]
 
 
+def _message_text(content: Any) -> str:
+    """Flatten a LangChain message ``content`` (str or block list) to text."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)
+        )
+    return ""
+
+
 def _get_approval_store(request: Request) -> ApprovalStore:
     return request.app.state.approval_store  # type: ignore[no-any-return]
 
@@ -981,6 +992,66 @@ def build_runs_router() -> APIRouter:
                 "trace_id": trace_id,
             }
         )
+
+    @router.get("/{thread_id}/messages", response_model=None)
+    async def get_thread_messages(
+        thread_id: UUID,
+        request: Request,
+        threads: Annotated[object, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        agent_repo: Annotated[AgentSpecStore, Depends(_get_agent_repo)],
+        runtime: Annotated[AgentRuntime, Depends(_get_agent_runtime)],
+    ) -> JSONResponse:
+        """Playground resume (#6) — the thread's conversation history.
+
+        Reads the durable LangGraph checkpoint (keyed by ``thread_id``) so
+        resuming a session can show what was said before. Returns only the
+        user/assistant text turns; tool/system messages are omitted. Best-effort:
+        any failure degrades to an empty list rather than erroring the page.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+
+        empty = JSONResponse({"success": True, "data": {"messages": []}})
+        if meta.agent_name is None or meta.agent_version is None:
+            return empty
+        spec_record = await agent_repo.get(
+            tenant_id=tenant_id, name=meta.agent_name, version=meta.agent_version
+        )
+        if spec_record is None:
+            return empty
+        try:
+            built = await runtime.get_agent(
+                tenant_id=tenant_id,
+                name=meta.agent_name,
+                version=meta.agent_version,
+                spec=spec_record.spec,
+                user_id=meta.user_id,
+            )
+            config: RunnableConfig = {
+                "configurable": {"thread_id": str(thread_id), "tenant_id": str(tenant_id)}
+            }
+            snapshot = await built.graph.aget_state(config)  # type: ignore[attr-defined]
+        except Exception:
+            logger.warning("thread_messages.read_failed", exc_info=True)
+            return empty
+        raw = snapshot.values.get("messages", []) if snapshot is not None else []
+        out: list[dict[str, str]] = []
+        for m in raw:
+            mtype = getattr(m, "type", None)
+            if mtype not in ("human", "ai"):
+                continue
+            text = _message_text(getattr(m, "content", ""))
+            if text.strip():
+                out.append({"role": "user" if mtype == "human" else "assistant", "content": text})
+        return JSONResponse({"success": True, "data": {"messages": out}})
 
     @router.get("/{thread_id}/runs/{run_id}/events", response_model=None)
     async def stream_run_events(

@@ -545,6 +545,7 @@ export interface TranslationKeys {
     workspace_artifacts: string;
     resume_label: string;
     resumed_notice: string;
+    history_divider: string;
     meta_steps: string;
     meta_latency: string;
     view_run: string;
@@ -2579,7 +2580,8 @@ const en: TranslationKeys = {
     workspace_none: "No workspace yet — runs that write files create it.",
     workspace_artifacts: "Artifacts",
     resume_label: "Resume…",
-    resumed_notice: "Continuing an existing thread — earlier turns aren't shown here.",
+    resumed_notice: "Continuing an existing thread — prior conversation loaded below.",
+    history_divider: "— new messages below —",
     meta_steps: "steps",
     meta_latency: "latency",
     view_run: "View run",
