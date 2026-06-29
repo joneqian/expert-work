@@ -127,6 +127,40 @@ async def test_workspace_put_raises_on_error_response(tracing_setup: None) -> No
         )
 
 
+async def test_exec_aligns_timeout_and_passes_it(tracing_setup: None) -> None:
+    # The exec read timeout is derived from the per-call deadline so a long
+    # command (e.g. ``pip install`` granted 300s) isn't cut short by the
+    # client; here we assert the deadline reaches the supervisor + a result
+    # round-trips + the trace context is still injected (the exec path no
+    # longer rides the shared ``_post`` helper).
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        seen["headers"] = request.headers
+        seen["body"] = _json.loads(request.content)
+        return httpx.Response(
+            200, json={"stdout": "ok", "stderr": "", "exit_code": 0, "timed_out": False}
+        )
+
+    client = HTTPSupervisorClient(
+        base_url="http://supervisor", transport=httpx.MockTransport(handler)
+    )
+    with helix_span(HelixComponent.ORCHESTRATOR, "tool_call"):
+        active_trace_id = current_trace_id_hex()
+        outcome = await client.exec(sandbox_id=uuid4(), code="pip install fpdf2", timeout_s=300)
+
+    assert outcome.stdout == "ok"
+    body = seen["body"]
+    assert isinstance(body, dict)
+    assert body["timeout_s"] == 300
+    headers = seen["headers"]
+    assert isinstance(headers, httpx.Headers)
+    assert active_trace_id is not None
+    assert headers.get(TRACEPARENT_HEADER, "").split("-")[1] == active_trace_id
+
+
 async def test_workspace_list_parses_files_and_traces(tracing_setup: None) -> None:
     from orchestrator.tools.sandbox import WorkspaceFileEntry
 

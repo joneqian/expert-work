@@ -971,15 +971,18 @@ class AgentSpecBody(BaseModel):
         ),
     )
     stream_deadline_s: int = Field(
-        default=90,
+        default=180,
         ge=0,
         le=3600,
         description=(
             "Stream L.L3 — wall-clock cap on a single LLM provider call. "
-            "Default 90s (matches Hermes-derived stale-stream timeout). "
-            "Hits trigger LLMStreamStaleError so the router falls back to "
-            "the next provider rather than locking the run. Set ``0`` to "
-            "disable (dev / long-batch paths)."
+            "Default 180s — a single heavy generation (a long report section, "
+            "or an orchestrator-worker doing real work) routinely runs past the "
+            "original 90s, which mis-fired LLMStreamStaleError and exhausted the "
+            "fallback chain on healthy-but-slow providers. Matches the VL "
+            "deadline floor. Hits still trigger LLMStreamStaleError so the "
+            "router falls back rather than locking the run. Set ``0`` to disable "
+            "(dev / long-batch paths)."
         ),
     )
     policies: PolicySpec = Field(default_factory=PolicySpec)
