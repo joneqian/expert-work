@@ -34,6 +34,7 @@ import {
 import {
   AlertTriangle,
   Check,
+  Download,
   ExternalLink,
   FileText,
   HardDrive,
@@ -60,8 +61,10 @@ import { listRateCards, type RateCardRecord } from "../../api/rate_card";
 import { streamRunEvents } from "../../api/runs";
 import {
   createSession,
+  downloadSessionWorkspaceFile,
   getSessionMessages,
   getSessionWorkspace,
+  getSessionWorkspaceFiles,
   listSessions,
   streamRun,
   type HistoryMessage,
@@ -69,6 +72,7 @@ import {
   type SessionWorkspace,
   type SseEvent,
   type ThreadMeta,
+  type WorkspaceFile,
 } from "../../api/sessions";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
@@ -162,7 +166,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [userOptions, setUserOptions] = useState<UserOption[]>([]);
   // Playground-Uplift D4 — workspace inspector (verify the VM started + persists).
   const [workspace, setWorkspace] = useState<SessionWorkspace | null>(null);
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
   // Playground-Uplift iter2 — #4 cost (agent model's rate), #6 resume history.
   const [rate, setRate] = useState<RateCardRecord | null>(null);
   const [pastSessions, setPastSessions] = useState<ThreadMeta[]>([]);
@@ -507,13 +513,34 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const loadWorkspace = useCallback(async (threadId: string) => {
     setWorkspaceLoading(true);
     try {
-      setWorkspace(await getSessionWorkspace(threadId));
+      const [ws, fs] = await Promise.all([
+        getSessionWorkspace(threadId),
+        getSessionWorkspaceFiles(threadId).catch(() => [] as WorkspaceFile[]),
+      ]);
+      setWorkspace(ws);
+      setWorkspaceFiles(fs);
     } catch {
       setWorkspace(null);
+      setWorkspaceFiles([]);
     } finally {
       setWorkspaceLoading(false);
     }
   }, []);
+
+  const handleDownloadFile = useCallback(
+    async (threadId: string, path: string) => {
+      setDownloadingPath(path);
+      try {
+        await downloadSessionWorkspaceFile(threadId, path);
+      } catch {
+        // Swallow — the file may have been removed between list + click; the
+        // refresh button re-syncs. A toast here would need the App message API.
+      } finally {
+        setDownloadingPath(null);
+      }
+    },
+    [],
+  );
 
   // Refresh the workspace view when the thread (re)binds and after each run —
   // a run that wrote files makes the volume appear / its size grow.
@@ -894,6 +921,58 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                     >
                       {a.name} · {a.kind} v{a.latest_version}
                     </Tag>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* Browse + download the raw files the agent wrote (#workspace). */}
+            {workspaceFiles.length > 0 && (
+              <div style={{ marginTop: 8 }} data-testid="playground-workspace-files">
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {t("playground.workspace_files")}:
+                </Text>
+                <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                  {workspaceFiles.map((f) => (
+                    <div
+                      key={f.path}
+                      data-testid="playground-workspace-file"
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        fontSize: 11,
+                      }}
+                    >
+                      <span
+                        className="mono"
+                        style={{
+                          flex: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={f.path}
+                      >
+                        {f.path}
+                      </span>
+                      <Text type="secondary" style={{ fontSize: 10 }}>
+                        {formatBytes(f.size)}
+                      </Text>
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<Download size={11} strokeWidth={1.75} />}
+                        loading={downloadingPath === f.path}
+                        disabled={!thread || downloadingPath !== null}
+                        onClick={() =>
+                          thread && void handleDownloadFile(thread.thread_id, f.path)
+                        }
+                        aria-label={t("playground.workspace_file_download", {
+                          name: f.path,
+                        })}
+                        data-testid="playground-workspace-file-download"
+                      />
+                    </div>
                   ))}
                 </div>
               </div>

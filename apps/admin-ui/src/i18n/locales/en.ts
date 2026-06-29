@@ -543,6 +543,8 @@ export interface TranslationKeys {
     workspace_deleted: string;
     workspace_none: string;
     workspace_artifacts: string;
+    workspace_files: string;
+    workspace_file_download: string;
     resume_label: string;
     resumed_notice: string;
     history_divider: string;
@@ -2579,6 +2581,8 @@ const en: TranslationKeys = {
     workspace_deleted: "deleted",
     workspace_none: "No workspace yet — runs that write files create it.",
     workspace_artifacts: "Artifacts",
+    workspace_files: "Files",
+    workspace_file_download: "Download {{name}}",
     resume_label: "Resume…",
     resumed_notice: "Continuing an existing thread — prior conversation loaded below.",
     history_divider: "— new messages below —",

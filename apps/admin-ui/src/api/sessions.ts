@@ -88,6 +88,52 @@ export async function getSessionWorkspace(
   return unwrap(response.data);
 }
 
+/** One file in the thread user's persistent workspace volume (browse). */
+export interface WorkspaceFile {
+  path: string;
+  size: number;
+}
+
+/** List the files in the thread user's persistent workspace (newest run's
+ *  output included). Empty when no volume / no supervisor. */
+export async function getSessionWorkspaceFiles(
+  threadId: string,
+): Promise<WorkspaceFile[]> {
+  const response = await apiClient.get<ApiEnvelope<{ files: WorkspaceFile[] }>>(
+    `/v1/sessions/${threadId}/workspace/files`,
+  );
+  return unwrap(response.data).files;
+}
+
+/** Download one workspace file. Uses ``fetch`` (not the axios client) so the
+ *  binary body streams to a Blob; the Bearer token is attached manually since
+ *  a plain anchor href can't carry it. Triggers a browser save. */
+export async function downloadSessionWorkspaceFile(
+  threadId: string,
+  path: string,
+): Promise<void> {
+  const token = getStoredToken();
+  const url = `/v1/sessions/${encodeURIComponent(threadId)}/workspace/file?path=${encodeURIComponent(path)}`;
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error(`workspace file download failed: HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = path.split("/").pop() || "download";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 /** Playground-Uplift #6 — a resumed thread's prior conversation (from the
  *  durable checkpoint), so resume shows what was said before. User/assistant
  *  text turns only. */

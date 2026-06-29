@@ -57,6 +57,8 @@ const uploadImageMock = vi.spyOn(uploadsSdk, "uploadImage");
 const uploadDocumentMock = vi.spyOn(uploadsSdk, "uploadDocument");
 const listMembersMock = vi.spyOn(membersSdk, "listMembers");
 const getWorkspaceMock = vi.spyOn(sessionsSdk, "getSessionWorkspace");
+const getWorkspaceFilesMock = vi.spyOn(sessionsSdk, "getSessionWorkspaceFiles");
+const downloadFileMock = vi.spyOn(sessionsSdk, "downloadSessionWorkspaceFile");
 const listSessionsMock = vi.spyOn(sessionsSdk, "listSessions");
 const getMessagesMock = vi.spyOn(sessionsSdk, "getSessionMessages");
 const listRateCardsMock = vi.spyOn(rateCardSdk, "listRateCards");
@@ -73,6 +75,10 @@ beforeEach(() => {
   listMembersMock.mockResolvedValue({ items: [], total: 0 });
   getWorkspaceMock.mockReset();
   getWorkspaceMock.mockResolvedValue({ workspace: null, artifacts: [] });
+  getWorkspaceFilesMock.mockReset();
+  getWorkspaceFilesMock.mockResolvedValue([]);
+  downloadFileMock.mockReset();
+  downloadFileMock.mockResolvedValue(undefined);
   listSessionsMock.mockReset();
   listSessionsMock.mockResolvedValue([]);
   getMessagesMock.mockReset();
@@ -561,6 +567,27 @@ describe("PlaygroundTab", () => {
     expect(
       await screen.findByTestId("playground-workspace-none"),
     ).toBeInTheDocument();
+  });
+
+  it("lists workspace files and downloads one on click", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    getWorkspaceFilesMock.mockResolvedValue([
+      { path: "report.pdf", size: 2048 },
+    ]);
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+    const files = await screen.findByTestId("playground-workspace-files");
+    expect(files).toHaveTextContent("report.pdf");
+    await user.click(
+      await screen.findByTestId("playground-workspace-file-download"),
+    );
+    await waitFor(() =>
+      expect(downloadFileMock).toHaveBeenCalledWith(
+        sampleThread.thread_id,
+        "report.pdf",
+      ),
+    );
   });
 
   it("surfaces an approval gate, approves, and streams the continuation", async () => {

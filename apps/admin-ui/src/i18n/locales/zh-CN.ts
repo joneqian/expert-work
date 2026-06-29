@@ -584,6 +584,8 @@ const zhCN: TranslationKeys = {
     workspace_deleted: "已删除",
     workspace_none: "暂无工作区 —— 写文件的运行会创建它。",
     workspace_artifacts: "产物",
+    workspace_files: "文件",
+    workspace_file_download: "下载 {{name}}",
     resume_label: "继续会话…",
     resumed_notice: "继续已有会话 —— 历史对话已载入下方。",
     history_divider: "—— 以下为本次新消息 ——",
