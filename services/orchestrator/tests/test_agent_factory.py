@@ -1004,6 +1004,69 @@ def test_compat_off_catalog_not_gated_and_sends_nothing() -> None:
     assert provider.thinking_payload is None
 
 
+# ---------------------------------------------------------------------------
+# Thinking-Toggle — tri-state thinking_enabled (force on / force off / gate)
+# ---------------------------------------------------------------------------
+
+
+def test_thinking_payload_force_off_per_vendor() -> None:
+    from orchestrator.agent_factory import _thinking_payload
+
+    # effort vendors (non-anthropic) have no off level -> degrade to "minimal".
+    assert _thinking_payload(_vendor_model("openai", "gpt-5.5", thinking_enabled=False)) == {
+        "reasoning_effort": "minimal"
+    }
+    assert _thinking_payload(
+        _vendor_model("deepseek", "deepseek-v4-pro", thinking_enabled=False)
+    ) == {"reasoning_effort": "minimal"}
+    # qwen budget -> enable_thinking false.
+    assert _thinking_payload(_vendor_model("qwen", "qwen3.7-max", thinking_enabled=False)) == {
+        "enable_thinking": False
+    }
+    # doubao budget + glm/kimi toggle share the disabled shape.
+    disabled = {"thinking": {"type": "disabled"}}
+    assert (
+        _thinking_payload(_vendor_model("doubao", "doubao-seed-2.0-pro", thinking_enabled=False))
+        == disabled
+    )
+    assert _thinking_payload(_vendor_model("glm", "glm-5.1", thinking_enabled=False)) == disabled
+
+
+def test_thinking_payload_force_on_per_vendor() -> None:
+    from orchestrator.agent_factory import _thinking_payload
+
+    # budget/toggle enable even with no effort set.
+    assert _thinking_payload(_vendor_model("qwen", "qwen3.7-max", thinking_enabled=True)) == {
+        "enable_thinking": True
+    }
+    assert _thinking_payload(_vendor_model("glm", "glm-5.1", thinking_enabled=True)) == {
+        "thinking": {"type": "enabled"}
+    }
+    # effort vendor on with no effort -> vendor default (nothing sent).
+    assert _thinking_payload(_vendor_model("openai", "gpt-5.5", thinking_enabled=True)) is None
+    # on + explicit effort -> depth honoured.
+    assert _thinking_payload(
+        _vendor_model("openai", "gpt-5.5", thinking_enabled=True, effort="high")
+    ) == {"reasoning_effort": "high"}
+
+
+def test_thinking_toggle_gate_on_no_knob_model() -> None:
+    # in-catalog model with no thinking knob rejects thinking_enabled (compat).
+    with pytest.raises(AgentFactoryError, match="no thinking toggle"):
+        _build_provider(_vendor_model("qwen", "qwen3-vl-plus", thinking_enabled=False), "k")
+    # anthropic path too (haiku has no knob).
+    with pytest.raises(AgentFactoryError, match="no thinking toggle"):
+        _build_provider(_anthropic_model(name="claude-haiku-4-5", thinking_enabled=True), "k")
+    # off-catalog is not gated.
+    ok = _build_provider(_vendor_model("qwen", "custom-gw", thinking_enabled=False), "k")
+    assert isinstance(ok, OpenAIProvider) and ok.thinking_payload is None
+
+
+def test_anthropic_provider_carries_thinking_enabled() -> None:
+    off = _build_provider(_anthropic_model(thinking_enabled=False), "k")
+    assert isinstance(off, AnthropicProvider) and off.thinking_enabled is False
+
+
 def test_compat_untouched_manifest_has_no_payload() -> None:
     provider = _build_provider(_vendor_model("qwen", "qwen3.7-max"), "k")
     assert isinstance(provider, OpenAIProvider)

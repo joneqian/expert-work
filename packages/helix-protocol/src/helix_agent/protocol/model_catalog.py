@@ -47,6 +47,15 @@ class ModelEntry(BaseModel):
     # ``sampling`` marks models still accepting ``temperature``/``top_p`` —
     # Anthropic removed sampling params from Opus 4.7+ (sending one is a 400).
     thinking: Literal["effort", "budget", "toggle"] | None = None
+    # Stream Thinking-Toggle — the model's DEFAULT thinking state, surfaced to
+    # the config UI to seed the per-agent thinking switch. Only meaningful when
+    # ``thinking`` is not None (no runtime knob → no switch). Per-model truth
+    # (verified per vendor 2026-06): every in-sale thinking-capable flagship
+    # currently defaults thinking ON; set ``False`` when a default-off model is
+    # added. ``can disable`` is NOT a field — it is derived as
+    # ``thinking == "effort" and provider != "anthropic"`` (reasoning_effort has
+    # no off level, only ``minimal``).
+    thinking_default: bool = False
     sampling: bool = True
     # Stream HX-13 (Mini-ADR HX-J5) — vendor-native tool-disclosure tier:
     #   "native_search"  — Anthropic tool-search beta: deferred tools go to
@@ -77,6 +86,7 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             vision=True,
             context_window=200_000,
             thinking="effort",
+            thinking_default=True,
             sampling=False,
             tool_disclosure="native_search",
         ),
@@ -85,6 +95,7 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             vision=True,
             context_window=200_000,
             thinking="effort",
+            thinking_default=True,
             tool_disclosure="native_search",
         ),
         ModelEntry(name="claude-haiku-4-5", vision=True, context_window=200_000),
@@ -99,6 +110,7 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             vision=True,
             context_window=128_000,
             thinking="effort",
+            thinking_default=True,
             tool_disclosure="allowed_tools",
         ),
         ModelEntry(
@@ -106,6 +118,7 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             vision=True,
             context_window=128_000,
             thinking="effort",
+            thinking_default=True,
             tool_disclosure="allowed_tools",
         ),
         ModelEntry(
@@ -113,6 +126,7 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             vision=True,
             context_window=128_000,
             thinking="effort",
+            thinking_default=True,
             tool_disclosure="allowed_tools",
         ),
         ModelEntry(name="text-embedding-3-large", embeddings=True),
@@ -126,10 +140,18 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # route correctly, but operators should migrate to versioned names.
     "deepseek": (
         ModelEntry(
-            name="deepseek-v4-pro", vision=False, context_window=1_000_000, thinking="effort"
+            name="deepseek-v4-pro",
+            vision=False,
+            context_window=1_000_000,
+            thinking="effort",
+            thinking_default=True,
         ),
         ModelEntry(
-            name="deepseek-v4-flash", vision=False, context_window=1_000_000, thinking="effort"
+            name="deepseek-v4-flash",
+            vision=False,
+            context_window=1_000_000,
+            thinking="effort",
+            thinking_default=True,
         ),
         ModelEntry(name="deepseek-chat", vision=False, context_window=64_000),
         ModelEntry(name="deepseek-reasoner", vision=False, context_window=64_000),
@@ -139,8 +161,20 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # the MoonViT encoder — with a 256K context; k2.5 also accepts images. The
     # moonshot-v1 series is text-only and being phased out (kept deprecated).
     "kimi": (
-        ModelEntry(name="kimi-k2.6", vision=True, context_window=256_000, thinking="toggle"),
-        ModelEntry(name="kimi-k2.5", vision=True, context_window=128_000, thinking="toggle"),
+        ModelEntry(
+            name="kimi-k2.6",
+            vision=True,
+            context_window=256_000,
+            thinking="toggle",
+            thinking_default=True,
+        ),
+        ModelEntry(
+            name="kimi-k2.5",
+            vision=True,
+            context_window=128_000,
+            thinking="toggle",
+            thinking_default=True,
+        ),
         ModelEntry(name="moonshot-v1-128k", vision=False, context_window=128_000, deprecated=True),
         ModelEntry(name="moonshot-v1-32k", vision=False, context_window=32_000, deprecated=True),
     ),
@@ -150,10 +184,34 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # goes through glm-4.6v (128K) and glm-4.5v. The older glm-4*-plus line is
     # kept deprecated so existing manifests resolve.
     "glm": (
-        ModelEntry(name="glm-5.2", vision=False, context_window=200_000, thinking="toggle"),
-        ModelEntry(name="glm-5.1", vision=False, context_window=200_000, thinking="toggle"),
-        ModelEntry(name="glm-4.7", vision=False, context_window=200_000, thinking="toggle"),
-        ModelEntry(name="glm-4.6", vision=False, context_window=200_000, thinking="toggle"),
+        ModelEntry(
+            name="glm-5.2",
+            vision=False,
+            context_window=200_000,
+            thinking="toggle",
+            thinking_default=True,
+        ),
+        ModelEntry(
+            name="glm-5.1",
+            vision=False,
+            context_window=200_000,
+            thinking="toggle",
+            thinking_default=True,
+        ),
+        ModelEntry(
+            name="glm-4.7",
+            vision=False,
+            context_window=200_000,
+            thinking="toggle",
+            thinking_default=True,
+        ),
+        ModelEntry(
+            name="glm-4.6",
+            vision=False,
+            context_window=200_000,
+            thinking="toggle",
+            thinking_default=True,
+        ),
         ModelEntry(name="glm-4.6v", vision=True, context_window=128_000),
         ModelEntry(name="glm-4.5v", vision=True),
         # Platform embedding model (Stream T, user-specified).
@@ -169,10 +227,22 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
     # vision tiers. Context windows left unset where not confirmed against the
     # 百炼 console. Legacy qwen-max / qwen-vl-max kept deprecated.
     "qwen": (
-        ModelEntry(name="qwen3.7-max", vision=False, context_window=1_000_000, thinking="budget"),
-        ModelEntry(name="qwen3.6-plus", vision=True, context_window=1_000_000, thinking="budget"),
-        ModelEntry(name="qwen3.5-plus", vision=True, thinking="budget"),
-        ModelEntry(name="qwen3-max", vision=False, thinking="budget"),
+        ModelEntry(
+            name="qwen3.7-max",
+            vision=False,
+            context_window=1_000_000,
+            thinking="budget",
+            thinking_default=True,
+        ),
+        ModelEntry(
+            name="qwen3.6-plus",
+            vision=True,
+            context_window=1_000_000,
+            thinking="budget",
+            thinking_default=True,
+        ),
+        ModelEntry(name="qwen3.5-plus", vision=True, thinking="budget", thinking_default=True),
+        ModelEntry(name="qwen3-max", vision=False, thinking="budget", thinking_default=True),
         ModelEntry(name="qwen3-vl-plus", vision=True),
         ModelEntry(name="qwen3-vl-flash", vision=True),
         # Platform embedding model (Stream T, user-specified).
@@ -192,12 +262,21 @@ MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]] = {
             vision=True,
             context_window=256_000,
             thinking="budget",
+            thinking_default=True,
         ),
         ModelEntry(
-            name="doubao-seed-2.0-pro", vision=True, context_window=256_000, thinking="budget"
+            name="doubao-seed-2.0-pro",
+            vision=True,
+            context_window=256_000,
+            thinking="budget",
+            thinking_default=True,
         ),
         ModelEntry(
-            name="doubao-seed-2.0-lite", vision=True, context_window=256_000, thinking="budget"
+            name="doubao-seed-2.0-lite",
+            vision=True,
+            context_window=256_000,
+            thinking="budget",
+            thinking_default=True,
         ),
         ModelEntry(name="doubao-pro-32k", vision=False, context_window=32_000, deprecated=True),
         ModelEntry(

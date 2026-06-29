@@ -385,6 +385,8 @@ const zhCN: TranslationKeys = {
     vision_off: "视觉：不支持",
     temperature: "温度",
     advanced: "高级",
+    thinking_label: "思考模式",
+    thinking_cannot_disable: "该模型仅能最小化思考，无法完全关闭。",
   },
   agent_form: {
     section_basic: "基本",

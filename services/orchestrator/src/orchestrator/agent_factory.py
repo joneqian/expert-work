@@ -60,7 +60,7 @@ from helix_agent.protocol import (
     parse_agent_ref,
     parse_skill_ref,
 )
-from helix_agent.protocol.model_catalog import catalog_entry
+from helix_agent.protocol.model_catalog import ModelEntry, catalog_entry
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
@@ -1266,30 +1266,16 @@ def _resolved_context_window(model: ModelSpec) -> int:
     return _FALLBACK_CONTEXT_WINDOW
 
 
-def _thinking_payload(model: ModelSpec) -> dict[str, Any] | None:
-    """Stream CM-10 (Mini-ADR CM-L3/L4/L7) — vendor thinking translation.
+def _thinking_enable_payload(model: ModelSpec, entry: ModelEntry) -> dict[str, Any] | None:
+    """Vendor *enable* thinking fields, keyed on the catalog ``thinking`` shape.
 
-    Maps the manifest's vendor-neutral compute controls
-    (``ModelSpec.effort`` / ``adaptive_thinking``) to the OpenAI-compatible
-    vendor's native thinking fields, keyed on the catalog ``thinking``
-    capability shape. Returns ``None`` whenever nothing should be sent:
-    anthropic (CM-9's native channel), untouched manifests, or off-catalog
-    models (CM-L5 — the thinking wire format is not uniform across
-    OpenAI-compatible vendors, so sending blind risks a runtime 400;
-    anthropic off-catalog keeps CM-9's pass-through because its wire
-    format is unambiguous).
+    Pre-condition: ``entry.thinking is not None``. For ``effort`` vendors with
+    no ``effort`` set this returns ``None`` — the vendor default is already
+    dynamic thinking (CM-L7), so "on at default depth" means sending nothing.
     """
-    if model.provider == "anthropic":
-        return None
-    if model.effort is None and not model.adaptive_thinking:
-        return None
-    entry = catalog_entry(model.provider, model.name)
-    if entry is None or entry.thinking is None:
-        return None
     if entry.thinking == "effort":
         # OpenAI / Azure / DeepSeek — ``reasoning_effort`` shares the
-        # manifest's level names. adaptive-only → omit (vendor default
-        # is already dynamic; CM-L7).
+        # manifest's level names.
         return {"reasoning_effort": model.effort} if model.effort is not None else None
     if entry.thinking == "budget":
         if model.provider == "doubao":
@@ -1308,9 +1294,55 @@ def _thinking_payload(model: ModelSpec) -> dict[str, Any] | None:
             "enable_thinking": True,
             "thinking_budget": _thinking_budget(model.effort, model.max_tokens),
         }
-    # "toggle" — GLM / Kimi: on/off only; any level means "on" (the
-    # depth distinction is logged at build time, not sent).
+    # "toggle" — GLM / Kimi: on/off only; any level means "on".
     return {"thinking": {"type": "enabled"}}
+
+
+def _thinking_disable_payload(model: ModelSpec, entry: ModelEntry) -> dict[str, Any]:
+    """Stream Thinking-Toggle — vendor *disable* thinking fields.
+
+    Pre-condition: ``entry.thinking is not None`` and ``provider != anthropic``
+    (anthropic disables via the provider's own ``thinking: {type: disabled}``).
+    ``reasoning_effort`` vendors have no off level → degrade to ``minimal``
+    (owner decision: "降最低档"); the UI flags this as not-fully-off.
+    """
+    if entry.thinking == "effort":
+        return {"reasoning_effort": "minimal"}
+    if entry.thinking == "budget" and model.provider == "qwen":
+        return {"enable_thinking": False}
+    # doubao (budget) + GLM/Kimi (toggle) share the disabled shape.
+    return {"thinking": {"type": "disabled"}}
+
+
+def _thinking_payload(model: ModelSpec) -> dict[str, Any] | None:
+    """Stream CM-10 / Thinking-Toggle — vendor thinking translation.
+
+    Maps the manifest's vendor-neutral compute controls (``thinking_enabled``
+    tri-state + ``effort`` / ``adaptive_thinking``) to the OpenAI-compatible
+    vendor's native thinking fields, keyed on the catalog ``thinking`` shape.
+    Returns ``None`` whenever nothing should be sent: anthropic (its native
+    channel), or off-catalog / no-knob models (CM-L5 — the wire format is not
+    uniform, so sending blind risks a 400).
+
+    ``thinking_enabled`` precedence:
+      * ``None`` — inherit (legacy: ``effort``/``adaptive_thinking`` drive).
+      * ``True`` — force enable.
+      * ``False`` — force disable.
+    """
+    if model.provider == "anthropic":
+        return None
+    entry = catalog_entry(model.provider, model.name)
+    if entry is None or entry.thinking is None:
+        return None
+    if model.thinking_enabled is False:
+        return _thinking_disable_payload(model, entry)
+    if model.thinking_enabled is True:
+        return _thinking_enable_payload(model, entry)
+    # Inherit — unchanged CM-10 behaviour: only an effort/adaptive-touched
+    # manifest sends anything.
+    if model.effort is None and not model.adaptive_thinking:
+        return None
+    return _thinking_enable_payload(model, entry)
 
 
 def _escalated_model(model: ModelSpec) -> ModelSpec | None:
@@ -1335,6 +1367,14 @@ def _escalated_model(model: ModelSpec) -> ModelSpec | None:
     entry = catalog_entry(model.provider, model.name)
     if entry is None or entry.thinking is None:
         return None
+    # Stream Thinking-Toggle (req #3) — a user-disabled toggle STILL escalates:
+    # the escalated caller forces thinking back ON for one turn (ephemeral, the
+    # stored manifest is untouched). "off → on at one step up."
+    if model.thinking_enabled is False:
+        if entry.thinking == "toggle":
+            return model.model_copy(update={"thinking_enabled": True, "effort": "high"})
+        next_level = _EFFORT_LADDER.get(model.effort)  # effort is typically None → "medium"
+        return model.model_copy(update={"thinking_enabled": True, "effort": next_level})
     if entry.thinking == "toggle":
         if model.effort is None and not model.adaptive_thinking:
             return model.model_copy(update={"effort": "high"})
@@ -1624,6 +1664,11 @@ def _build_provider(
                 f"model {model.name!r} does not support output_config.effort; "
                 "remove model.effort from the manifest"
             )
+        if model.thinking_enabled is not None and entry is not None and entry.thinking is None:
+            raise AgentFactoryError(
+                f"model {model.name!r} has no thinking toggle; "
+                "remove model.thinking_enabled from the manifest"
+            )
         temperature: float | None = model.temperature
         if entry is not None and not entry.sampling:
             # Opus 4.7+ removed sampling params — sending one is a 400.
@@ -1644,6 +1689,8 @@ def _build_provider(
             # Stream CM-9 — compute-control knobs.
             effort=model.effort,
             adaptive_thinking=model.adaptive_thinking,
+            # Stream Thinking-Toggle — tri-state on/off override.
+            thinking_enabled=model.thinking_enabled,
         )
     # Stream CM-10 (Mini-ADR CM-L3/L5) — the same build-time gate for the
     # OpenAI-compatible vendors, plus the pre-translated thinking payload.
@@ -1654,6 +1701,15 @@ def _build_provider(
         raise AgentFactoryError(
             f"model {model.name!r} does not support thinking-depth control; "
             "remove model.effort from the manifest"
+        )
+    if (
+        model.thinking_enabled is not None
+        and compat_entry is not None
+        and compat_entry.thinking is None
+    ):
+        raise AgentFactoryError(
+            f"model {model.name!r} has no thinking toggle; "
+            "remove model.thinking_enabled from the manifest"
         )
     if compat_entry is not None and compat_entry.thinking == "toggle" and model.effort is not None:
         # GLM / Kimi have no depth — every level collapses to "enabled".

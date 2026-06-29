@@ -166,6 +166,18 @@ class ModelSpec(BaseModel):
     adaptive_thinking: bool = Field(
         default=False, description="send thinking: {type: adaptive} (Anthropic 4.6+)"
     )
+    # Stream Thinking-Toggle — the config UI's thinking switch. Three states:
+    #   None  — inherit (legacy: ``effort``/``adaptive_thinking`` drive the
+    #           payload; both unset → vendor default). Old manifests + YAML
+    #           power-users stay byte-for-byte unchanged.
+    #   True  — force thinking ON (vendor enable form; honours ``effort`` depth).
+    #   False — force thinking OFF (vendor disable form; ``reasoning_effort``
+    #           vendors that lack an off level degrade to ``minimal``).
+    # The factory rejects a non-None value on a model whose catalog entry has
+    # no thinking knob (fail-fast, mirrors the ``effort`` gate).
+    thinking_enabled: bool | None = Field(
+        default=None, description="thinking on/off toggle (None=inherit vendor default)"
+    )
 
 
 # ---------------------------------------------------------------------------

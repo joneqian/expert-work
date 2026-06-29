@@ -331,3 +331,27 @@ def test_toggle_vendors_escalate_by_turning_thinking_on() -> None:
 def test_no_thinking_control_models_never_escalate() -> None:
     assert _escalated_model(_vendor("deepseek", "deepseek-reasoner", effort="low")) is None
     assert _escalated_model(_vendor("qwen", "custom-gateway", effort="low")) is None
+
+
+# ---------------------------------------------------------------------------
+# Thinking-Toggle (req #3) — a user-disabled toggle STILL escalates to ON
+# for one turn (ephemeral; the stored manifest is untouched).
+# ---------------------------------------------------------------------------
+
+
+def test_disabled_toggle_still_escalates_to_on() -> None:
+    # effort vendor (anthropic): off -> on, effort None -> "medium".
+    claude = _escalated_model(_model(thinking_enabled=False))
+    assert claude is not None and claude.thinking_enabled is True and claude.effort == "medium"
+    # effort vendor (compat) + budget vendor: same one-step-up enable.
+    openai = _escalated_model(_vendor("openai", "gpt-5.5", thinking_enabled=False))
+    assert openai is not None and openai.thinking_enabled is True and openai.effort == "medium"
+    qwen = _escalated_model(_vendor("qwen", "qwen3.7-max", thinking_enabled=False))
+    assert qwen is not None and qwen.thinking_enabled is True and qwen.effort == "medium"
+    # toggle vendor: off -> on ("high" collapses to enabled at translation).
+    glm = _escalated_model(_vendor("glm", "glm-5.1", thinking_enabled=False))
+    assert glm is not None and glm.thinking_enabled is True and glm.effort == "high"
+    # no-knob model never escalates, even if (invalidly) marked disabled.
+    assert (
+        _escalated_model(_vendor("deepseek", "deepseek-reasoner", thinking_enabled=False)) is None
+    )

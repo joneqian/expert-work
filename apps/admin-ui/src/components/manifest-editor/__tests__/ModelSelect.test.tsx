@@ -38,6 +38,8 @@ const CATALOG: ModelCatalog = {
           embeddings: false,
           context_window: 1000000,
           deprecated: false,
+          thinking: "effort",
+          thinking_default: true,
         },
       ],
     },
@@ -50,6 +52,8 @@ const CATALOG: ModelCatalog = {
           embeddings: false,
           context_window: 128000,
           deprecated: false,
+          thinking: "effort",
+          thinking_default: true,
         },
         {
           name: "text-embedding-3-large",
@@ -57,6 +61,20 @@ const CATALOG: ModelCatalog = {
           embeddings: true,
           context_window: null,
           deprecated: false,
+        },
+      ],
+    },
+    {
+      provider: "glm",
+      models: [
+        {
+          name: "glm-5.1",
+          vision: false,
+          embeddings: false,
+          context_window: 200000,
+          deprecated: false,
+          thinking: "toggle",
+          thinking_default: true,
         },
       ],
     },
@@ -181,6 +199,102 @@ describe("ModelSelect", () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByText(optionContent("deepseek")),
+    ).not.toBeInTheDocument();
+  });
+
+  // ---- Thinking-Toggle ----
+
+  it("renders the thinking switch for a thinking-capable model, hidden otherwise", () => {
+    const { rerender } = render(
+      <ModelSelect
+        value={{ provider: "openai", name: "gpt-5.5" }}
+        catalog={CATALOG}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("model-select-thinking")).toBeInTheDocument();
+    // embedding model has no thinking knob → no switch.
+    rerender(
+      <ModelSelect
+        value={{ provider: "openai", name: "text-embedding-3-large" }}
+        catalog={CATALOG}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("model-select-thinking"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("selecting a model seeds thinking_enabled from the catalog default", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect({ provider: "openai" }, onChange);
+    const nameSel = within(screen.getByTestId("model-select-name")).getByRole(
+      "combobox",
+    );
+    await pickOption(user, nameSel, "gpt-5.5");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "gpt-5.5", thinking_enabled: true }),
+    );
+  });
+
+  it("selecting a no-thinking model clears thinking_enabled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "openai", name: "gpt-5.5", thinking_enabled: true },
+      onChange,
+    );
+    const nameSel = within(screen.getByTestId("model-select-name")).getByRole(
+      "combobox",
+    );
+    await pickOption(user, nameSel, "text-embedding-3-large");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "text-embedding-3-large",
+        thinking_enabled: undefined,
+      }),
+    );
+  });
+
+  it("toggling the switch writes thinking_enabled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "openai", name: "gpt-5.5", thinking_enabled: true },
+      onChange,
+    );
+    await user.click(
+      within(screen.getByTestId("model-select-thinking")).getByRole("switch"),
+    );
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ thinking_enabled: false }),
+    );
+  });
+
+  it("shows the cannot-fully-disable hint only for reasoning_effort non-anthropic models", () => {
+    const { rerender } = render(
+      <ModelSelect
+        value={{ provider: "openai", name: "gpt-5.5" }}
+        catalog={CATALOG}
+        onChange={vi.fn()}
+      />,
+    );
+    // effort vendor (openai) → hint shown.
+    expect(
+      screen.getByTestId("model-select-thinking-hint"),
+    ).toBeInTheDocument();
+    // toggle vendor (glm) → fully disable-able, no hint.
+    rerender(
+      <ModelSelect
+        value={{ provider: "glm", name: "glm-5.1" }}
+        catalog={CATALOG}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByTestId("model-select-thinking-hint"),
     ).not.toBeInTheDocument();
   });
 

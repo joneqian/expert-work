@@ -67,6 +67,8 @@ const CATALOG_ENVELOPE = {
             embeddings: false,
             context_window: 128000,
             deprecated: false,
+            thinking: "effort",
+            thinking_default: true,
           },
         ],
       },
@@ -138,6 +140,13 @@ test("pick a provider + model via the form turns vision on", async ({
   await expect(model.getByTestId("model-select-vision")).toContainText(
     /视觉：支持|Vision: supported/,
   );
+
+  // Thinking-Toggle — gpt-5.5 has a thinking knob, so the switch appears; as a
+  // reasoning_effort vendor it cannot fully disable, so the hint shows too.
+  await expect(model.getByTestId("model-select-thinking")).toBeVisible();
+  await expect(
+    model.getByTestId("model-select-thinking-hint"),
+  ).toBeVisible();
 });
 
 test("the reflection-evaluator section exposes its own model picker", async ({

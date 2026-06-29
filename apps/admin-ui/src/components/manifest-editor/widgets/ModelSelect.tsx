@@ -7,7 +7,7 @@
  *
  * Refactored from the old RJSF model field — no RJSF coupling.
  */
-import { Collapse, InputNumber, Select, Slider, Tag } from "antd";
+import { Collapse, InputNumber, Select, Slider, Switch, Tag, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 
 import type { ModelCatalog } from "../../../api/model_catalog";
@@ -40,15 +40,38 @@ export function ModelSelect({
   const models = visionOnly ? allModels.filter((m) => m.vision) : allModels;
 
   function onProvider(provider: string): void {
-    onChange({ ...value, provider, name: undefined, supports_vision: false });
+    onChange({
+      ...value,
+      provider,
+      name: undefined,
+      supports_vision: false,
+      thinking_enabled: undefined,
+    });
   }
   function onModel(name: string): void {
     const entry =
       catalog && value.provider
         ? lookupModel(catalog, value.provider, name)
         : undefined;
-    onChange({ ...value, name, supports_vision: entry?.vision ?? false });
+    onChange({
+      ...value,
+      name,
+      supports_vision: entry?.vision ?? false,
+      // Thinking-Toggle — seed the switch from the model's real default; a
+      // model with no thinking knob clears the field (manifest stays clean).
+      thinking_enabled: entry?.thinking ? (entry.thinking_default ?? false) : undefined,
+    });
   }
+
+  const currentEntry =
+    catalog && value.provider && value.name
+      ? lookupModel(catalog, value.provider, value.name)
+      : undefined;
+  const hasThinkingKnob = !!currentEntry?.thinking;
+  // reasoning_effort vendors have no off level — off degrades to "minimal".
+  const cannotFullyDisable =
+    currentEntry?.thinking === "effort" && value.provider !== "anthropic";
+  const thinkingOn = value.thinking_enabled ?? currentEntry?.thinking_default ?? false;
 
   const temperature = value.temperature ?? 0.2;
 
@@ -84,6 +107,38 @@ export function ModelSelect({
             : t("model_select.vision_off")}
         </Tag>
       </div>
+      {hasThinkingKnob && (
+        <div
+          data-testid="model-select-thinking"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 8,
+          }}
+        >
+          <Switch
+            size="small"
+            checked={thinkingOn}
+            aria-label={t("model_select.thinking_label")}
+            onChange={(checked) =>
+              onChange({ ...value, thinking_enabled: checked })
+            }
+          />
+          <span>{t("model_select.thinking_label")}</span>
+          {cannotFullyDisable && (
+            <Tooltip title={t("model_select.thinking_cannot_disable")}>
+              <span
+                data-testid="model-select-thinking-hint"
+                style={{ cursor: "help", opacity: 0.6 }}
+                aria-label={t("model_select.thinking_cannot_disable")}
+              >
+                ⓘ
+              </span>
+            </Tooltip>
+          )}
+        </div>
+      )}
       <label
         data-testid="model-select-temperature"
         style={{ display: "block", marginBottom: 8 }}

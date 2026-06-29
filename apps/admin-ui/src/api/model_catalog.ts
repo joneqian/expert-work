@@ -13,6 +13,10 @@ export interface CatalogModel {
   embeddings: boolean;
   context_window: number | null;
   deprecated: boolean;
+  // Thinking-Toggle — the vendor's runtime thinking-control shape (null = no
+  // knob → no switch) + the model's default thinking state (seeds the switch).
+  thinking?: "effort" | "budget" | "toggle" | null;
+  thinking_default?: boolean;
 }
 
 export interface ProviderModels {

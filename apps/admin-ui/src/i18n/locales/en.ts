@@ -377,6 +377,8 @@ export interface TranslationKeys {
     vision_off: string;
     temperature: string;
     advanced: string;
+    thinking_label: string;
+    thinking_cannot_disable: string;
   };
   agent_form: {
     section_basic: string;
@@ -2340,6 +2342,9 @@ const en: TranslationKeys = {
     vision_off: "Vision: not supported",
     temperature: "Temperature",
     advanced: "Advanced",
+    thinking_label: "Thinking mode",
+    thinking_cannot_disable:
+      "This model can only minimise thinking, not fully disable it.",
   },
   agent_form: {
     section_basic: "Basics",

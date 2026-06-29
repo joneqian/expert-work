@@ -5,6 +5,8 @@ export interface ModelFields {
   temperature?: number;
   max_tokens?: number;
   rate_limit_rpm?: number;
+  // Thinking-Toggle — tri-state on/off (undefined = inherit vendor default).
+  thinking_enabled?: boolean;
   [k: string]: unknown;
 }
 export interface LongTermFields {

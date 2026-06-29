@@ -87,6 +87,19 @@ def test_thinking_defaults_none() -> None:
     assert ModelEntry(name="x").thinking is None
 
 
+def test_thinking_default_field() -> None:
+    # Thinking-Toggle — field defaults False; every in-sale thinking-capable
+    # model declares its real default (currently all default ON), and no-knob
+    # models keep the False default.
+    assert ModelEntry(name="x").thinking_default is False
+    for provider, models in MODEL_CATALOG.items():
+        for entry in models:
+            if entry.thinking is not None:
+                assert entry.thinking_default is True, f"{provider}/{entry.name}"
+            else:
+                assert entry.thinking_default is False, f"{provider}/{entry.name}"
+
+
 # --- Stream HX-13 — tool_disclosure capability bit --------------------------
 
 

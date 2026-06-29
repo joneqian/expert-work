@@ -274,6 +274,11 @@ class AnthropicProvider:
     effort: str | None = None
     #: Stream CM-9 — send ``thinking: {"type": "adaptive"}`` (4.6+).
     adaptive_thinking: bool = False
+    #: Stream Thinking-Toggle — tri-state on/off override. ``False`` forces
+    #: ``thinking: {"type": "disabled"}`` (and drops ``output_config.effort``);
+    #: ``True`` / ``None`` keep the CM-9 ``effort`` + ``adaptive_thinking``
+    #: behaviour (anthropic's untouched default is already dynamic thinking).
+    thinking_enabled: bool | None = None
     #: Stream HX-13 (Mini-ADR HX-J4) — set after the tool-search beta is
     #: rejected once: this provider instance falls back to the application
     #: tier (no defer markers, no beta header) for its remaining lifetime.
@@ -316,8 +321,13 @@ class AnthropicProvider:
         else:
             system_payload = system_text
 
-        thinking_payload = {"type": "adaptive"} if self.adaptive_thinking else None
-        output_config = {"effort": self.effort} if self.effort is not None else None
+        if self.thinking_enabled is False:
+            # Stream Thinking-Toggle — explicit off; effort is moot once disabled.
+            thinking_payload: dict[str, Any] | None = {"type": "disabled"}
+            output_config: dict[str, Any] | None = None
+        else:
+            thinking_payload = {"type": "adaptive"} if self.adaptive_thinking else None
+            output_config = {"effort": self.effort} if self.effort is not None else None
         try:
             body = await self.client.messages(
                 model=self.model,

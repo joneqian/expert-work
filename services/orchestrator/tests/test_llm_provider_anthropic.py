@@ -204,6 +204,39 @@ async def test_temperature_defaults_to_none() -> None:
     assert client.calls[0]["temperature"] is None
 
 
+@pytest.mark.asyncio
+async def test_thinking_enabled_false_sends_disabled_and_drops_effort() -> None:
+    # Thinking-Toggle — explicit off forces thinking:{type:disabled} and drops
+    # output_config.effort even if an effort level is also set.
+    client = RecordingAnthropicClient(response={"content": [{"type": "text", "text": "ok"}]})
+    provider = AnthropicProvider(
+        client=client, model="claude", effort="high", thinking_enabled=False
+    )
+
+    await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    assert client.calls[0]["thinking"] == {"type": "disabled"}
+    assert client.calls[0]["output_config"] is None
+
+
+@pytest.mark.asyncio
+async def test_thinking_enabled_true_keeps_effort_and_adaptive() -> None:
+    # On (or inherit) keeps the CM-9 effort + adaptive behaviour unchanged.
+    client = RecordingAnthropicClient(response={"content": [{"type": "text", "text": "ok"}]})
+    provider = AnthropicProvider(
+        client=client,
+        model="claude",
+        effort="medium",
+        adaptive_thinking=True,
+        thinking_enabled=True,
+    )
+
+    await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    assert client.calls[0]["thinking"] == {"type": "adaptive"}
+    assert client.calls[0]["output_config"] == {"effort": "medium"}
+
+
 # ---------------------------------------------------------------------------
 # Response decoding
 # ---------------------------------------------------------------------------
