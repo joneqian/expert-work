@@ -184,9 +184,6 @@ from orchestrator.tools.web_search import (
     DEFAULT_MAX_RESULTS as DEFAULT_MAX_RESULTS,
 )
 from orchestrator.tools.web_search import (
-    HTTPTavilyClient as HTTPTavilyClient,
-)
-from orchestrator.tools.web_search import (
     RecordingTavilyClient as RecordingTavilyClient,
 )
 from orchestrator.tools.web_search import (
@@ -218,7 +215,6 @@ __all__ = [
     "FileOpError",
     "FindToolsTool",
     "HTTPSupervisorClient",
-    "HTTPTavilyClient",
     "HTTPTool",
     "KnowledgeRetriever",
     "KnowledgeSearchTool",

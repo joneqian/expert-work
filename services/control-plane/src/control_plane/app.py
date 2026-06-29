@@ -956,10 +956,7 @@ def create_app(
                     ),
                 )
                 _app.state.credentials_resolver = credentials_resolver
-                web_search_client = await resolve_web_search_client(
-                    resolver=credentials_resolver,
-                    secret_store=resolved_secret_store,
-                    supported_tools=resolved_settings.effective_supported_tools,
+                web_search_client = resolve_web_search_client(
                     searxng_base_url=resolved_settings.web_search_searxng_base_url,
                 )
                 mcp_pool = await stack.enter_async_context(
@@ -1948,12 +1945,6 @@ def _signal_legacy_credentials_derivation(settings: Settings) -> None:
             settings.rerank_provider,
         )
         record_legacy_credentials_fallback(role="rerank")
-    if settings.tavily_api_key_ref and "web_search" not in settings.platform_tool_credentials:
-        logger.warning(
-            "credentials.legacy_derivation role=tavily — migrate to "
-            "platform_tool_credentials[web_search]"
-        )
-        record_legacy_credentials_fallback(role="tavily")
 
 
 async def _seed_mcp_catalog(settings: Settings, store: McpConnectorCatalogStore) -> None:

@@ -143,21 +143,13 @@ class Settings(BaseSettings):
     checkpointer_dsn: str | None = None
 
     # ------------------------------------------------------------------ tools (E.7)
-    #: ``secret://`` reference to the Tavily API key for the built-in
-    #: ``web_search`` tool. ``None`` → ``web_search`` is unavailable; an
-    #: agent that declares it fails at build time with a clear error.
-    #:
-    #: Stream O (Mini-ADR O-5) — **deprecated**: prefer
-    #: ``platform_tool_credentials["web_search"]``. Removal scheduled
-    #: M1 Q? after all callers migrate to :class:`CredentialsResolver`.
-    tavily_api_key_ref: str | None = None
-
     #: Base URL of the self-hosted SearXNG instance backing the builtin
     #: ``web_search`` tool (design ``web-search-searxng-builtin-and-tavily-mcp``).
     #: SearXNG is free + needs no API key, so setting this makes
-    #: ``web_search`` available with zero credential config — it is the
-    #: preferred default backend (wins over the legacy Tavily client).
-    #: ``None`` → no SearXNG backend (falls back to Tavily if configured).
+    #: ``web_search`` available with zero credential config. It is the only
+    #: builtin web-search backend (M2 — premium Tavily moved to the platform
+    #: MCP catalog). ``None`` → no builtin backend; an agent declaring
+    #: ``web_search`` then fails at build with a clear error.
     #: Reached over the internal network only; never expose SearXNG publicly.
     web_search_searxng_base_url: str | None = None
 
@@ -622,15 +614,15 @@ class Settings(BaseSettings):
     platform_tool_credentials: dict[Tool, str] = Field(default_factory=dict)
 
     # --- Stream O Mini-ADR O-10: legacy → effective catalog derivation ---
-    # The embedder / reranker / web_search callers migrate to
-    # CredentialsResolver in PR 2a. A deployment that has not opted into
-    # Stream O (empty ``platform_provider_credentials``) but still sets the
-    # legacy ``embedding_api_key_ref`` / ``rerank_api_key_ref`` /
-    # ``tavily_api_key_ref`` keeps working: these properties gap-fill the
-    # catalog from the legacy fields. Explicit Stream O config always wins;
-    # legacy only fills providers/tools not already present. The resolver
-    # is built from the ``effective_*`` view, the startup validator still
-    # checks only the explicit fields.
+    # The embedder / reranker callers migrate to CredentialsResolver. A
+    # deployment that has not opted into Stream O (empty
+    # ``platform_provider_credentials``) but still sets the legacy
+    # ``embedding_api_key_ref`` / ``rerank_api_key_ref`` keeps working:
+    # these properties gap-fill the catalog from the legacy fields. Explicit
+    # Stream O config always wins; legacy only fills providers not already
+    # present. The resolver is built from the ``effective_*`` view, the
+    # startup validator still checks only the explicit fields. (The legacy
+    # ``tavily_api_key_ref`` gap-fill was removed in M2 — see web_search.)
 
     @property
     def effective_platform_provider_credentials(self) -> dict[Provider, str]:
@@ -660,12 +652,10 @@ class Settings(BaseSettings):
 
     @property
     def effective_platform_tool_credentials(self) -> dict[Tool, str]:
-        """Explicit ``platform_tool_credentials`` plus the legacy Tavily
-        ref gap-filling ``web_search``."""
-        merged = dict(self.platform_tool_credentials)
-        if self.tavily_api_key_ref and "web_search" not in merged:
-            merged["web_search"] = self.tavily_api_key_ref
-        return merged
+        """The platform's per-tool secret refs. (The legacy Tavily gap-fill
+        was removed in M2 — the builtin ``web_search`` backend is now
+        keyless SearXNG; Tavily moved to the platform MCP catalog.)"""
+        return dict(self.platform_tool_credentials)
 
     @property
     def effective_supported_tools(self) -> list[Tool]:

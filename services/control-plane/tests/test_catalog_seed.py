@@ -127,11 +127,31 @@ async def test_seed_wrapper_missing_file_raises() -> None:
 def test_shipped_template_is_valid() -> None:
     """The committed configs/mcp-catalog-seed.json must parse + validate when
     every placeholder is supplied (guards the template against drift)."""
+    import re
+
     repo_root = Path(__file__).resolve().parents[3]
     raw = (repo_root / "configs" / "mcp-catalog-seed.json").read_text(encoding="utf-8")
     data = json.loads(raw)
-    env = {f"MCP_OAUTH_{e['name'].upper()}_CLIENT_ID": "cid" for e in data}
+    # Supply every ``${VAR}`` placeholder found anywhere in the template,
+    # regardless of auth style (oauth client ids, bearer tokens, …).
+    env = dict.fromkeys(re.findall(r"\$\{([A-Z0-9_]+)\}", raw), "x")
     ready, skipped = load_catalog_seed(raw, env)
     assert skipped == []
     assert len(ready) == len(data)
-    assert all(u.auth_type == "oauth2" for u in ready)
+
+
+def test_shipped_template_has_tavily_bearer_mcp() -> None:
+    """The Tavily web-search MCP entry (M2) is registered as a type-A shared
+    bearer connector and is skipped until TAVILY_API_KEY is set."""
+    repo_root = Path(__file__).resolve().parents[3]
+    raw = (repo_root / "configs" / "mcp-catalog-seed.json").read_text(encoding="utf-8")
+
+    ready, _ = load_catalog_seed(raw, {"TAVILY_API_KEY": "tvly-x"})
+    tavily = next(u for u in ready if u.name == "tavily-web-search")
+    assert tavily.auth_type == "bearer"
+    assert tavily.transport == "streamable_http"
+    assert tavily.url_template == "https://mcp.tavily.com/mcp/"
+
+    # No key → skipped (platform boots before the key is provisioned).
+    _, skipped_nokey = load_catalog_seed(raw, {})
+    assert "tavily-web-search" in skipped_nokey

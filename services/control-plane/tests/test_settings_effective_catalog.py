@@ -1,11 +1,13 @@
 """Stream O Mini-ADR O-10 — legacy → effective credentials-catalog derivation.
 
-The three platform-infra callers (embedder / reranker / web_search) migrate
-to :class:`CredentialsResolver` in PR 2a. A deployment that has NOT opted into
-Stream O (empty ``platform_provider_credentials``) but still sets the legacy
-``embedding_api_key_ref`` / ``rerank_api_key_ref`` / ``tavily_api_key_ref``
-must keep working transparently — the ``effective_*`` properties gap-fill the
-catalog from the legacy fields so platform mode resolves them.
+The platform-infra callers (embedder / reranker) migrate to
+:class:`CredentialsResolver`. A deployment that has NOT opted into Stream O
+(empty ``platform_provider_credentials``) but still sets the legacy
+``embedding_api_key_ref`` / ``rerank_api_key_ref`` must keep working
+transparently — the ``effective_*`` properties gap-fill the catalog from the
+legacy fields so platform mode resolves them. (The legacy
+``tavily_api_key_ref`` gap-fill was removed in M2 — web_search's builtin
+backend is now keyless SearXNG.)
 """
 
 from __future__ import annotations
@@ -23,7 +25,6 @@ def _settings(**overrides: object) -> Settings:
         "platform_tool_credentials": {},
         "embedding_api_key_ref": None,
         "rerank_api_key_ref": None,
-        "tavily_api_key_ref": None,
         "web_search_searxng_base_url": None,
     }
     base.update(overrides)
@@ -69,12 +70,6 @@ def test_legacy_embedding_and_rerank_distinct_providers_both_derived() -> None:
     assert set(cfg.effective_supported_providers) == {"qwen", "openai"}
 
 
-def test_legacy_tavily_ref_derives_web_search_tool_credential() -> None:
-    cfg = _settings(tavily_api_key_ref="secret://tavily")
-    assert cfg.effective_platform_tool_credentials == {"web_search": "secret://tavily"}
-    assert cfg.effective_supported_tools == ["web_search"]
-
-
 def test_searxng_base_url_makes_web_search_supported_without_credential() -> None:
     # SearXNG needs no API key, so it cannot ride the tool-credential
     # gap-fill — the URL alone gates web_search as supported.
@@ -83,11 +78,10 @@ def test_searxng_base_url_makes_web_search_supported_without_credential() -> Non
     assert cfg.effective_supported_tools == ["web_search"]
 
 
-def test_searxng_and_tavily_both_configured_lists_web_search_once() -> None:
-    cfg = _settings(
-        web_search_searxng_base_url="http://searxng:8080",
-        tavily_api_key_ref="secret://tavily",
-    )
+def test_explicit_tool_credential_still_lists_web_search() -> None:
+    # The generic platform_tool_credentials mechanism is unchanged; an
+    # explicit web_search secret_ref still marks it supported.
+    cfg = _settings(platform_tool_credentials={"web_search": "secret://x"})
     assert cfg.effective_supported_tools == ["web_search"]
 
 

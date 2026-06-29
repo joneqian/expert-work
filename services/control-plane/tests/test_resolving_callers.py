@@ -17,7 +17,6 @@ import pytest
 from control_plane.runtime import (
     ResolvingEmbedder,
     ResolvingReranker,
-    ResolvingTavilyClient,
 )
 from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
 from helix_agent.protocol import TenantConfigRecord, TenantPlan
@@ -124,32 +123,9 @@ async def test_reranker_missing_credential_degrades_to_fused_order() -> None:
     assert order == [0, 1]
 
 
-# ─── ResolvingTavilyClient ─────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_web_search_none_tenant_raises() -> None:
-    client = ResolvingTavilyClient(
-        resolver=_resolver(record=_record()),
-        secret_store=InMemorySecretStore(),
-    )
-    with pytest.raises(CredentialsResolverError):
-        await client.search(query="q", max_results=3, tenant_id=None)
-
-
-@pytest.mark.asyncio
-async def test_web_search_missing_platform_credential_raises() -> None:
-    record = _record()
-    client = ResolvingTavilyClient(
-        resolver=CredentialsResolver(
-            platform_provider_credentials={},  # type: ignore[arg-type]
-            platform_tool_credentials={},  # type: ignore[arg-type]
-            tenant_config_getter=_TenantConfig(record),
-        ),
-        secret_store=InMemorySecretStore(),
-    )
-    with pytest.raises(CredentialsResolverError):
-        await client.search(query="q", max_results=3, tenant_id=uuid4())
+# (ResolvingTavilyClient removed in M2 — the builtin web_search backend is
+# now keyless SearXNG; Tavily moved to the platform MCP catalog. The
+# credential-resolving path stays exercised by the embedder tests below.)
 
 
 # A small structural check that the wrapper actually reaches the secret

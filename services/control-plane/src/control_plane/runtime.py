@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -43,7 +43,6 @@ from helix_agent.protocol import (
     ModelSpec,
     Provider,
     TenantPlan,
-    Tool,
     parse_extends_ref,
     resolve_extends,
     tier_satisfies,
@@ -82,7 +81,6 @@ from orchestrator.multimodal import ImageResolver, ObjectStoreImageResolver
 from orchestrator.tools import (
     AllowlistProvider,
     HTTPSupervisorClient,
-    HTTPTavilyClient,
     KnowledgeRetriever,
     LLMReranker,
     MCPClient,
@@ -822,30 +820,6 @@ class DynamicResolvingReranker:
         )
 
 
-@dataclass(frozen=True)
-class ResolvingTavilyClient:
-    """Per-tenant credential-resolving :class:`TavilyClient` (Mini-ADR O-9).
-
-    A missing credential raises :class:`CredentialsResolverError` (a
-    fail-fast, mirrored to a ``ToolMessage(status="error")`` by the ReAct
-    tools node, Mini-ADR E-12) — web_search has no graceful degradation."""
-
-    resolver: CredentialsResolver
-    secret_store: SecretStore
-
-    async def search(
-        self, *, query: str, max_results: int, tenant_id: UUID | None
-    ) -> Mapping[str, Any]:
-        if tenant_id is None:
-            msg = "web_search requires a tenant context to resolve its credential"
-            raise CredentialsResolverError(msg, mode="platform", kind="tool", key="web_search")
-        secret_ref = await self.resolver.resolve_tool(tenant_id=tenant_id, tool="web_search")
-        api_key = await self.secret_store.get(parse_secret_ref(secret_ref))
-        return await HTTPTavilyClient(api_key=api_key).search(
-            query=query, max_results=max_results, tenant_id=tenant_id
-        )
-
-
 async def resolve_embedder(
     *,
     resolver: CredentialsResolver,
@@ -922,27 +896,17 @@ def make_mcp_allowlist_provider(
     return _provider
 
 
-async def resolve_web_search_client(
-    *,
-    resolver: CredentialsResolver,
-    secret_store: SecretStore,
-    supported_tools: Sequence[Tool],
-    searxng_base_url: str | None = None,
-) -> TavilyClient | None:
+def resolve_web_search_client(*, searxng_base_url: str | None) -> TavilyClient | None:
     """Build the web-search backend for the builtin ``web_search`` tool.
 
-    Backend selection (design ``web-search-searxng-builtin-and-tavily-mcp``
-    §3.3): a self-hosted SearXNG instance is the **free default** — if
-    ``searxng_base_url`` is set it wins, no API key needed. Otherwise fall
-    back to the legacy per-tenant credential-resolving Tavily client when
-    ``web_search`` is in ``supported_tools`` (a Tavily key is configured).
-    Neither configured → ``None`` (an agent declaring ``web_search`` then
-    fails at build time; the gate is preserved)."""
+    The builtin backend is a self-hosted SearXNG instance (free, no API
+    key) — design ``web-search-searxng-builtin-and-tavily-mcp`` M2. Set
+    ``searxng_base_url`` → :class:`SearXNGClient`; unset → ``None`` (an
+    agent declaring ``web_search`` then fails at build, gate preserved).
+    Premium Tavily moved to the platform MCP catalog (not a builtin)."""
     if searxng_base_url:
         return SearXNGClient(base_url=searxng_base_url)
-    if "web_search" not in supported_tools:
-        return None
-    return ResolvingTavilyClient(resolver=resolver, secret_store=secret_store)
+    return None
 
 
 #: Builds an :class:`MCPClient` from a server config. The default

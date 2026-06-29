@@ -267,9 +267,9 @@ _manifest_provider_rejected_total = helix_counter(
 _legacy_credentials_fallback_total = helix_counter(
     "helix_uplift_legacy_credentials_fallback_total",
     "Stream O transition-period fallback: callers still reading the "
-    "deprecated ``embedding_api_key_ref`` / ``rerank_api_key_ref`` / "
-    "``tavily_api_key_ref`` env fields. Should drop to zero once ops "
-    "migrate to platform_*_credentials; removal in M1 Q?.",
+    "deprecated ``embedding_api_key_ref`` / ``rerank_api_key_ref`` env "
+    "fields. Should drop to zero once ops migrate to "
+    "platform_*_credentials. (``tavily_api_key_ref`` was removed in M2.)",
     label_names=("role",),
 )
 
@@ -562,7 +562,7 @@ def record_manifest_provider_rejected(*, provider: str) -> None:
 def record_legacy_credentials_fallback(*, role: str) -> None:
     """Bump ``helix_uplift_legacy_credentials_fallback_total{role}``.
 
-    ``role`` ∈ ``{"embedding", "rerank", "tavily"}``."""
+    ``role`` ∈ ``{"embedding", "rerank"}``."""
     _legacy_credentials_fallback_total.labels(role=role).inc()
 
 

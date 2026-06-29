@@ -1,9 +1,12 @@
-"""Tavily ``web_search`` tool — Stream E.7.
+"""``web_search`` tool — Stream E.7.
 
-First concrete :class:`Tool` implementation. Wraps Tavily's REST API
-(``POST /search``) behind a small :class:`TavilyClient` Protocol so
-production deployments use :class:`HTTPTavilyClient` (httpx) while
-tests inject :class:`RecordingTavilyClient` with scripted results.
+First concrete :class:`Tool` implementation. Wraps a web-search backend
+behind a small :class:`TavilyClient` Protocol (name kept for history; the
+shipped backend is now :class:`SearXNGClient` — free, self-hosted — and a
+rename to ``WebSearchClient`` is backlog'd in design
+``web-search-searxng-builtin-and-tavily-mcp``). Tests inject
+:class:`RecordingTavilyClient` with scripted results. Tavily itself moved
+out of this builtin to the platform MCP catalog (M2).
 
 Output truncation per § 1.1 E.7 + Mini-ADR E-10 in
 [STREAM-E-DESIGN](../../../../../docs/streams/STREAM-E-DESIGN.md)
@@ -35,8 +38,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_RESULTS = 5
 DEFAULT_CONTENT_CHAR_CAP = 4096
 _TRUNCATION_MARKER = "...[truncated]"
-_DEFAULT_BASE_URL = "https://api.tavily.com"
-_DEFAULT_TIMEOUT_S = 15.0
 #: SearXNG is internal infra (same datacenter / docker network) so a tight
 #: timeout is fine; it still has to fan out to upstream engines, hence 15s.
 _DEFAULT_SEARXNG_TIMEOUT_S = 15.0
@@ -49,61 +50,23 @@ _DEFAULT_SEARXNG_TIMEOUT_S = 15.0
 
 @runtime_checkable
 class TavilyClient(Protocol):
-    """Tavily REST surface this tool depends on. Sized to the one
-    endpoint we use so tests can fake it without mocking httpx."""
+    """The web-search client surface :class:`WebSearchTool` depends on.
+
+    Named ``TavilyClient`` for history; the shipped backend is now
+    :class:`SearXNGClient` (rename to ``WebSearchClient`` is backlog'd).
+    Sized to the one endpoint we use so tests can fake it without httpx."""
 
     async def search(
         self, *, query: str, max_results: int, tenant_id: UUID | None
     ) -> Mapping[str, Any]:
-        """POST ``/search`` and return the parsed JSON body.
+        """Run the search and return the parsed JSON body.
 
         Expected shape: ``{"results": [{"title": str, "url": str, "content": str}, ...]}``.
-        Other keys (``answer``, ``response_time``) are tolerated and
-        ignored by :class:`WebSearchTool`.
+        Other keys are tolerated and ignored by :class:`WebSearchTool`.
 
-        Stream O (Mini-ADR O-9) — ``tenant_id`` lets a credential-resolving
-        client pick the per-tenant Tavily key. Fixed-key / test clients
-        accept and ignore it.
+        ``tenant_id`` lets a credential-resolving client pick a per-tenant
+        key; keyless / test clients accept and ignore it.
         """
-
-
-@dataclass
-class HTTPTavilyClient:
-    """Production :class:`TavilyClient` — calls Tavily's REST API.
-
-    Uses httpx directly rather than the ``tavily-python`` SDK to keep
-    deps minimal. Raises :class:`httpx.HTTPError` subclasses on
-    network / server failures; :class:`WebSearchTool.call` lets them
-    propagate so the ReAct ``tools`` node (E.6) wraps them into a
-    ``ToolMessage(status="error")`` per Mini-ADR E-12.
-    """
-
-    api_key: str
-    base_url: str = _DEFAULT_BASE_URL
-    timeout_s: float = _DEFAULT_TIMEOUT_S
-
-    async def search(
-        self, *, query: str, max_results: int, tenant_id: UUID | None = None
-    ) -> Mapping[str, Any]:
-        del tenant_id  # fixed-key client — credential baked into ``api_key``
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
-            response = await client.post(
-                f"{self.base_url}/search",
-                json={
-                    "api_key": self.api_key,
-                    "query": query,
-                    "max_results": max_results,
-                    "include_answer": False,
-                    "include_images": False,
-                    "include_raw_content": False,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            if not isinstance(data, Mapping):
-                msg = f"tavily returned non-object body: {type(data).__name__}"
-                raise httpx.HTTPError(msg)
-            return data
 
 
 @dataclass

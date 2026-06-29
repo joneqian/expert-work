@@ -94,8 +94,12 @@ x-control-plane-base: &control-plane-base
     # string would fail JSON decode and crash startup.
     HELIX_AGENT_MCP_OAUTH_REDIRECT_URI: ${HELIX_AGENT_MCP_OAUTH_REDIRECT_URI:-}
     HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST: ${HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST:-[]}
-    HELIX_AGENT_MCP_CATALOG_SEED_FILE: ${HELIX_AGENT_MCP_CATALOG_SEED_FILE:-}
+    HELIX_AGENT_MCP_CATALOG_SEED_FILE: ${HELIX_AGENT_MCP_CATALOG_SEED_FILE:-/app/configs/mcp-catalog-seed.json}
     MCP_OAUTH_GITHUB_CLIENT_ID: ${MCP_OAUTH_GITHUB_CLIENT_ID:-}
+    # Premium web search via Tavily's official remote MCP server (M2). The
+    # catalog seed entry registers itself only when this key is set (else it
+    # is skipped). Free built-in web_search (SearXNG) needs nothing here.
+    TAVILY_API_KEY: ${TAVILY_API_KEY:-}
     # web_search builtin backend — free self-hosted SearXNG (no API key).
     # Defaults to the in-compose searxng service so web_search works OOTB;
     # unset (or point elsewhere) to disable / use an external instance.

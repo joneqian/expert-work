@@ -20,7 +20,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 from control_plane.app import create_app
 from control_plane.runtime import (
     AgentRuntime,
-    ResolvingTavilyClient,
     _load_mcp_server_configs,
     build_mcp_pool,
     build_middleware_env,
@@ -32,7 +31,6 @@ from control_plane.runtime import (
 )
 from control_plane.settings import Settings
 from control_plane.tenancy import TenantConfigNotConfiguredError
-from helix_agent.common.credentials import CredentialsResolver
 from helix_agent.persistence import InMemoryKnowledgeStore
 from helix_agent.runtime.secret_store import LocalDevSecretStore
 from helix_agent.runtime.storage import InMemoryObjectStore
@@ -169,69 +167,19 @@ async def test_allowlist_provider_empty_when_tenant_unconfigured() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _web_search_resolver() -> CredentialsResolver:
-    # Factory test only — resolve_web_search_client never touches the
-    # tenant config, so an empty resolver suffices.
-    return CredentialsResolver(
-        platform_provider_credentials={},  # type: ignore[arg-type]
-        platform_tool_credentials={},  # type: ignore[arg-type]
-        tenant_config_getter=_FakeTenantConfigService(allowlist=[]),  # type: ignore[arg-type]
-    )
+def test_resolve_web_search_client_none_without_searxng() -> None:
+    # No SearXNG configured → no builtin backend (Tavily moved to MCP in M2).
+    assert resolve_web_search_client(searxng_base_url=None) is None
 
 
-@pytest.mark.asyncio
-async def test_resolve_web_search_client_tool_unsupported_yields_none() -> None:
-    client = await resolve_web_search_client(
-        resolver=_web_search_resolver(),
-        secret_store=LocalDevSecretStore.from_mapping({}),
-        supported_tools=[],
-    )
-    assert client is None
-
-
-@pytest.mark.asyncio
-async def test_resolve_web_search_client_builds_resolving_client() -> None:
-    client = await resolve_web_search_client(
-        resolver=_web_search_resolver(),
-        secret_store=LocalDevSecretStore.from_mapping({}),
-        supported_tools=["web_search"],
-    )
-    assert isinstance(client, ResolvingTavilyClient)
-
-
-@pytest.mark.asyncio
-async def test_resolve_web_search_client_prefers_searxng() -> None:
-    # SearXNG base_url wins over the Tavily fallback even when web_search is
-    # also "supported" via a Tavily credential.
-    client = await resolve_web_search_client(
-        resolver=_web_search_resolver(),
-        secret_store=LocalDevSecretStore.from_mapping({}),
-        supported_tools=["web_search"],
-        searxng_base_url="http://searxng:8080",
-    )
+def test_resolve_web_search_client_builds_searxng() -> None:
+    client = resolve_web_search_client(searxng_base_url="http://searxng:8080")
     assert isinstance(client, SearXNGClient)
     assert client.base_url == "http://searxng:8080"
 
 
-@pytest.mark.asyncio
-async def test_resolve_web_search_client_searxng_without_tavily_credential() -> None:
-    # SearXNG needs no credential — works with empty supported_tools.
-    client = await resolve_web_search_client(
-        resolver=_web_search_resolver(),
-        secret_store=LocalDevSecretStore.from_mapping({}),
-        supported_tools=[],
-        searxng_base_url="http://searxng:8080",
-    )
-    assert isinstance(client, SearXNGClient)
-
-
-@pytest.mark.asyncio
-async def test_build_tool_env_carries_web_search_client() -> None:
-    client = await resolve_web_search_client(
-        resolver=_web_search_resolver(),
-        secret_store=LocalDevSecretStore.from_mapping({}),
-        supported_tools=["web_search"],
-    )
+def test_build_tool_env_carries_web_search_client() -> None:
+    client = resolve_web_search_client(searxng_base_url="http://searxng:8080")
     env = build_tool_env(_FakeTenantConfigService(allowlist=[]), web_search_client=client)
     assert env.web_search_client is client
 

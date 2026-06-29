@@ -1,6 +1,6 @@
 # 设计 — web_search:SearXNG 当免费 builtin 默认 + Tavily 降级为平台 MCP
 
-状态:草案(待评审) · 2026-06-29 · 分支 `feat/web-search-searxng-builtin`(待建)
+状态:M1 入 main(#841)· M2 本分支 `feat/web-search-tavily-mcp` · 2026-06-29
 
 ## 1. 背景 / 问题
 
