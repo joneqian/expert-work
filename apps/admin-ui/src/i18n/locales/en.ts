@@ -548,6 +548,10 @@ export interface TranslationKeys {
     meta_steps: string;
     meta_latency: string;
     view_run: string;
+    approval_awaiting: string;
+    approval_approve: string;
+    approval_reject: string;
+    approval_modify_hint: string;
   };
   event_stream: {
     title: string;
@@ -2579,6 +2583,10 @@ const en: TranslationKeys = {
     meta_steps: "steps",
     meta_latency: "latency",
     view_run: "View run",
+    approval_awaiting: "awaiting approval",
+    approval_approve: "Approve",
+    approval_reject: "Reject",
+    approval_modify_hint: "Edit arguments on the run-detail page.",
   },
   event_stream: {
     title: "Event stream",

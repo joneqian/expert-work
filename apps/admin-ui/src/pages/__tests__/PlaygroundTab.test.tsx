@@ -12,13 +12,16 @@ import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
 import i18n from "../../i18n";
 
+import * as approvalsSdk from "../../api/approvals";
 import { ApiError } from "../../api/client";
 import * as membersSdk from "../../api/members";
 import * as rateCardSdk from "../../api/rate_card";
+import * as runsSdk from "../../api/runs";
 import * as sessionsSdk from "../../api/sessions";
 import * as uploadsSdk from "../../api/uploads";
 import { PlaygroundTab } from "../agent_detail/PlaygroundTab";
 import type { AgentDetailResponse } from "../../api/agents";
+import type { ApprovalItem } from "../../api/approvals";
 import type { SseEvent, ThreadMeta } from "../../api/sessions";
 
 const sampleDetail: AgentDetailResponse = {
@@ -56,6 +59,9 @@ const listMembersMock = vi.spyOn(membersSdk, "listMembers");
 const getWorkspaceMock = vi.spyOn(sessionsSdk, "getSessionWorkspace");
 const listSessionsMock = vi.spyOn(sessionsSdk, "listSessions");
 const listRateCardsMock = vi.spyOn(rateCardSdk, "listRateCards");
+const listApprovalsMock = vi.spyOn(approvalsSdk, "listApprovals");
+const decideApprovalsMock = vi.spyOn(approvalsSdk, "decideApprovals");
+const streamRunEventsMock = vi.spyOn(runsSdk, "streamRunEvents");
 
 beforeEach(() => {
   createSessionMock.mockReset();
@@ -70,6 +76,12 @@ beforeEach(() => {
   listSessionsMock.mockResolvedValue([]);
   listRateCardsMock.mockReset();
   listRateCardsMock.mockResolvedValue([]);
+  listApprovalsMock.mockReset();
+  listApprovalsMock.mockResolvedValue({ items: [], total: 0, limit: 50, offset: 0 });
+  decideApprovalsMock.mockReset();
+  decideApprovalsMock.mockResolvedValue({ results: [], succeeded: 0 });
+  streamRunEventsMock.mockReset();
+  streamRunEventsMock.mockReturnValue(makeStream([]));
 });
 
 afterEach(() => {
@@ -537,6 +549,110 @@ describe("PlaygroundTab", () => {
     expect(
       await screen.findByTestId("playground-workspace-none"),
     ).toBeInTheDocument();
+  });
+
+  it("surfaces an approval gate, approves, and streams the continuation", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    // Paused run: an AI tool_call with no final text → detectApproval polls.
+    streamRunMock.mockReturnValue(
+      makeStream([
+        {
+          id: "m",
+          event: "metadata",
+          data: { run_id: "r-pause" },
+          rawData: "",
+          receivedAt: "2026-05-25T00:00:01Z",
+        },
+        {
+          id: "u",
+          event: "updates",
+          data: {
+            agent: {
+              messages: [
+                {
+                  type: "ai",
+                  content: "",
+                  tool_calls: [
+                    { id: "tc1", name: "bash", args: { cmd: "rm -rf /" }, type: "tool_call" },
+                  ],
+                },
+              ],
+              step_count: 1,
+            },
+          },
+          rawData: "",
+          receivedAt: "2026-05-25T00:00:02Z",
+        },
+        {
+          id: "e",
+          event: "end",
+          data: "ok",
+          rawData: "ok",
+          receivedAt: "2026-05-25T00:00:03Z",
+        },
+      ]),
+    );
+    const approval: ApprovalItem = {
+      id: "ap1",
+      tenant_id: sampleThread.tenant_id,
+      user_id: null,
+      run_id: "r-pause",
+      thread_id: sampleThread.thread_id,
+      request_id: "req1",
+      node: "tools",
+      reason_kind: "policy_required",
+      action_summary: "run bash: rm -rf /",
+      proposed_args: { cmd: "rm -rf /" },
+      requested_at: "2026-05-25T00:00:03Z",
+      timeout_at: "2026-05-26T00:00:03Z",
+      status: "pending",
+      decided_by: null,
+      decided_at: null,
+    };
+    listApprovalsMock.mockResolvedValue({ items: [approval], total: 1, limit: 50, offset: 0 });
+    decideApprovalsMock.mockResolvedValue({
+      results: [{ run_id: "r-pause", ok: true, continuation_run_id: "r-cont" }],
+      succeeded: 1,
+    });
+    streamRunEventsMock.mockReturnValue(
+      makeStream([
+        {
+          id: "u2",
+          event: "updates",
+          data: { agent: { messages: [{ type: "ai", content: "done after approval" }] } },
+          rawData: "",
+          receivedAt: "2026-05-25T00:00:05Z",
+        },
+        {
+          id: "e2",
+          event: "end",
+          data: "ok",
+          rawData: "ok",
+          receivedAt: "2026-05-25T00:00:06Z",
+        },
+      ]),
+    );
+
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+    await user.type(screen.getByTestId("playground-input"), "delete everything");
+    await user.click(screen.getByTestId("playground-run"));
+
+    const card = await screen.findByTestId("playground-approval");
+    expect(card).toHaveTextContent("rm -rf /");
+
+    await user.click(screen.getByTestId("playground-approval-approve"));
+    await screen.findByText("done after approval");
+    expect(decideApprovalsMock).toHaveBeenCalledWith([
+      { thread_id: sampleThread.thread_id, run_id: "r-pause", decision: "approve" },
+    ]);
+    expect(streamRunEventsMock).toHaveBeenCalledWith(
+      sampleThread.thread_id,
+      "r-cont",
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    expect(screen.queryByTestId("playground-approval")).not.toBeInTheDocument();
   });
 
   it("removes an attachment when its tag is closed", async () => {

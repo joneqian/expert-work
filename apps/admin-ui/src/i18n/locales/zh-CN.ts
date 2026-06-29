@@ -589,6 +589,10 @@ const zhCN: TranslationKeys = {
     meta_steps: "步数",
     meta_latency: "延迟",
     view_run: "查看运行",
+    approval_awaiting: "待审批",
+    approval_approve: "批准",
+    approval_reject: "拒绝",
+    approval_modify_hint: "改参数请到运行详情页。",
   },
   event_stream: {
     title: "事件流",
