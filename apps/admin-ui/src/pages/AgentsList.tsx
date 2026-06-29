@@ -8,12 +8,39 @@
  *
  * H.2 PR 2 adds the **Create** button + ``CreateAgentModal`` (Monaco
  * YAML); on success the list refreshes and the new agent's detail page
- * loads. Cmd+K real routes + manifest upload are deferred follow-ups.
+ * loads.
+ *
+ * Product-grade pass: rows open the detail page, status is localised, the
+ * owner (``created_by``) shows, the raw tenant column appears only in the
+ * cross-tenant view, and a name search + status filter + per-row quick
+ * actions (playground / edit / runs) make the list usable at scale.
  */
-import { useCallback, useEffect, useState } from "react";
-import { Alert, Empty, Space, Table, Tag, Tooltip, Typography } from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Button,
+  Dropdown,
+  Empty,
+  Input,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+} from "antd";
 import type { TableColumnsType } from "antd";
-import { Bot, Globe2, Plus, RefreshCw, Store } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Globe2,
+  MoreHorizontal,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Store,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -32,6 +59,13 @@ const STATUS_COLOR: Record<string, string> = {
   deleted: "error",
 };
 
+//: Statuses offered in the filter — the closed set the backend assigns.
+const STATUS_OPTIONS = ["active", "draft", "archived", "deleted"] as const;
+
+function agentPath(record: AgentRecord, tab: string): string {
+  return `/agents/${encodeURIComponent(record.name)}/${encodeURIComponent(record.version)}/${tab}`;
+}
+
 export function AgentsList() {
   const { t } = useTranslation();
   const { scope, apiTenantScope } = useTenantScope();
@@ -40,12 +74,18 @@ export function AgentsList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [nameFilter, setNameFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await listAgents({ tenantScope: apiTenantScope });
+      const result = await listAgents({
+        tenantScope: apiTenantScope,
+        name: nameFilter.trim() || undefined,
+        status: statusFilter,
+      });
       setData(result);
     } catch (err) {
       const message =
@@ -58,63 +98,133 @@ export function AgentsList() {
     } finally {
       setLoading(false);
     }
-  }, [apiTenantScope]);
+  }, [apiTenantScope, nameFilter, statusFilter]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  const columns: TableColumnsType<AgentRecord> = [
-    {
-      title: t("agents_page.column_name"),
-      dataIndex: "name",
-      key: "name",
-      render: (name: string, record) => (
-        <Space size={6}>
-          <Bot size={14} strokeWidth={1.5} />
-          <strong>{name}</strong>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            v{record.version}
-          </Text>
-        </Space>
-      ),
-    },
-    {
-      title: t("agents_page.column_status"),
-      dataIndex: "status",
-      key: "status",
-      width: 120,
-      render: (status: string) => (
-        <Tag color={STATUS_COLOR[status] ?? "default"}>{status}</Tag>
-      ),
-    },
-    {
-      title: t("agents_page.column_tenant"),
-      dataIndex: "tenant_id",
-      key: "tenant_id",
-      width: 160,
-      render: (tenantId: string) => (
-        <Tooltip title={tenantId}>
-          <Text code style={{ fontSize: 12 }}>
-            {tenantId.slice(0, 8)}…
-          </Text>
-        </Tooltip>
-      ),
-    },
-    {
-      title: t("agents_page.column_created"),
-      dataIndex: "created_at",
-      key: "created_at",
-      width: 200,
-      render: (iso: string) => (
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          {new Date(iso).toLocaleString()}
-        </Text>
-      ),
-    },
-  ];
-
   const isCrossTenant = data?.cross_tenant ?? false;
+
+  const statusLabel = useCallback(
+    (status: string) => t(`agents_page.status_${status}`, { defaultValue: status }),
+    [t],
+  );
+
+  const columns: TableColumnsType<AgentRecord> = useMemo(() => {
+    const cols: TableColumnsType<AgentRecord> = [
+      {
+        title: t("agents_page.column_name"),
+        dataIndex: "name",
+        key: "name",
+        render: (name: string, record) => (
+          <Space size={6}>
+            <Bot size={14} strokeWidth={1.5} />
+            <strong>{name}</strong>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              v{record.version}
+            </Text>
+          </Space>
+        ),
+      },
+      {
+        title: t("agents_page.column_status"),
+        dataIndex: "status",
+        key: "status",
+        width: 120,
+        render: (status: string) => (
+          <Tag color={STATUS_COLOR[status] ?? "default"}>{statusLabel(status)}</Tag>
+        ),
+      },
+      {
+        title: t("agents_page.column_owner"),
+        dataIndex: "created_by",
+        key: "created_by",
+        width: 200,
+        render: (owner: string) =>
+          owner ? (
+            <Text style={{ fontSize: 13 }}>{owner}</Text>
+          ) : (
+            <Text type="secondary">—</Text>
+          ),
+      },
+    ];
+
+    // Raw tenant UUID is noise inside a single tenant (every row is the same);
+    // only a system_admin's cross-tenant aggregate needs it to tell rows apart.
+    if (isCrossTenant) {
+      cols.push({
+        title: t("agents_page.column_tenant"),
+        dataIndex: "tenant_id",
+        key: "tenant_id",
+        width: 160,
+        render: (tenantId: string) => (
+          <Tooltip title={tenantId}>
+            <Text code style={{ fontSize: 12 }}>
+              {tenantId.slice(0, 8)}…
+            </Text>
+          </Tooltip>
+        ),
+      });
+    }
+
+    cols.push(
+      {
+        title: t("agents_page.column_created"),
+        dataIndex: "created_at",
+        key: "created_at",
+        width: 190,
+        render: (iso: string) => (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {new Date(iso).toLocaleString()}
+          </Text>
+        ),
+      },
+      {
+        title: t("agents_page.column_actions"),
+        key: "actions",
+        width: 64,
+        align: "right",
+        render: (_: unknown, record) => (
+          // Stop the cell click bubbling to the row's navigate-to-overview.
+          <span onClick={(e) => e.stopPropagation()}>
+            <Dropdown
+              trigger={["click"]}
+              menu={{
+                items: [
+                  {
+                    key: "playground",
+                    icon: <Play size={14} strokeWidth={1.5} />,
+                    label: t("agents_page.action_playground"),
+                  },
+                  {
+                    key: "manifest",
+                    icon: <Pencil size={14} strokeWidth={1.5} />,
+                    label: t("agents_page.action_edit"),
+                  },
+                  {
+                    key: "runs",
+                    icon: <Activity size={14} strokeWidth={1.5} />,
+                    label: t("agents_page.action_runs"),
+                  },
+                ],
+                onClick: ({ key }) => navigate(agentPath(record, key)),
+              }}
+            >
+              <Button
+                type="text"
+                size="small"
+                aria-label={t("agents_page.column_actions")}
+                icon={<MoreHorizontal size={16} strokeWidth={1.5} />}
+              />
+            </Dropdown>
+          </span>
+        ),
+      },
+    );
+
+    return cols;
+  }, [t, statusLabel, isCrossTenant, navigate]);
 
   return (
     <div>
@@ -132,6 +242,25 @@ export function AgentsList() {
                 {t("agents_page.cross_tenant_banner")}
               </Tag>
             )}
+            <Input.Search
+              allowClear
+              placeholder={t("agents_page.search_placeholder")}
+              aria-label={t("agents_page.search_placeholder")}
+              data-testid="agents-search"
+              onSearch={(value) => setNameFilter(value)}
+              style={{ width: 200 }}
+            />
+            <Select<string>
+              value={statusFilter ?? "all"}
+              onChange={(v) => setStatusFilter(v === "all" ? undefined : v)}
+              style={{ width: 140 }}
+              aria-label={t("agents_page.filter_status")}
+              data-testid="agents-status-filter"
+              options={[
+                { value: "all", label: t("agents_page.filter_status_all") },
+                ...STATUS_OPTIONS.map((s) => ({ value: s, label: statusLabel(s) })),
+              ]}
+            />
             <button
               type="button"
               onClick={refresh}
@@ -214,6 +343,10 @@ export function AgentsList() {
         dataSource={data?.items ?? []}
         rowKey={(record) => `${record.tenant_id}/${record.id}`}
         loading={loading}
+        onRow={(record) => ({
+          onClick: () => navigate(agentPath(record, "overview")),
+          style: { cursor: "pointer" },
+        })}
         pagination={{
           total: data?.total ?? 0,
           showSizeChanger: false,

@@ -1696,8 +1696,20 @@ export interface TranslationKeys {
     empty_cross: string;
     column_name: string;
     column_status: string;
+    column_owner: string;
     column_tenant: string;
     column_created: string;
+    column_actions: string;
+    status_active: string;
+    status_draft: string;
+    status_archived: string;
+    status_deleted: string;
+    search_placeholder: string;
+    filter_status: string;
+    filter_status_all: string;
+    action_playground: string;
+    action_edit: string;
+    action_runs: string;
     create: string;
     from_template: string;
   };
@@ -3812,8 +3824,20 @@ const en: TranslationKeys = {
     empty_cross: "No agents across all tenants yet.",
     column_name: "Name",
     column_status: "Status",
+    column_owner: "Owner",
     column_tenant: "Tenant",
     column_created: "Created",
+    column_actions: "Actions",
+    status_active: "active",
+    status_draft: "draft",
+    status_archived: "archived",
+    status_deleted: "deleted",
+    search_placeholder: "Search by name",
+    filter_status: "Filter by status",
+    filter_status_all: "All statuses",
+    action_playground: "Playground",
+    action_edit: "Edit manifest",
+    action_runs: "Runs",
     create: "Create",
     from_template: "From template",
   },
