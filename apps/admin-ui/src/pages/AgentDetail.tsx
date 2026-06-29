@@ -126,7 +126,7 @@ export function AgentDetail() {
         subtitle={
           <Space size={12} align="center" wrap>
             <Tag color={STATUS_COLOR[record.status] ?? "default"} bordered={false}>
-              {record.status}
+              {t(`agents_page.status_${record.status}`, { defaultValue: record.status })}
             </Tag>
             <Text code style={{ fontSize: 12 }}>
               v{record.version}
@@ -228,7 +228,9 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
               {r.spec_sha256}
             </dd>
             <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_status")}</dt>
-            <dd style={{ margin: 0 }}>{r.status}</dd>
+            <dd style={{ margin: 0 }}>
+              {t(`agents_page.status_${r.status}`, { defaultValue: r.status })}
+            </dd>
             <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_created")}</dt>
             <dd style={{ margin: 0 }}>
               {new Date(r.created_at).toLocaleString()} · {r.created_by}

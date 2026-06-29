@@ -1,21 +1,19 @@
 /**
- * Manifest tab — Stream H.2 PR 1.
+ * Manifest tab — visual-first config (mirrors the create flow).
  *
- * Monaco YAML editor with read / edit / save flow against
- * ``PUT /v1/agents/{name}/{version}``. The backend re-runs the full
- * :class:`ManifestLoader` pipeline so we never need a client-side
- * validation pass — server errors flow back through the envelope.
- *
- * View mode is the default: the YAML is rendered read-only so casual
- * navigation through the tab never risks a stray keystroke. The user
- * has to click ``Edit`` to mutate; ``Cancel`` re-derives the buffer
- * from the latest server snapshot, dropping any in-flight edits.
+ * Renders the same schema-driven :class:`ManifestEditor` the create modal
+ * uses (Form tabs: basic / model / prompt / tools / mcp / knowledge /
+ * skills / subagents / memory / governance, plus a raw YAML escape-hatch
+ * tab). Edits accumulate in a buffer; ``Save`` writes through
+ * ``PUT /v1/agents/{name}/{version}`` (the backend re-runs the full
+ * :class:`ManifestLoader`, so server errors flow back through the
+ * envelope); ``Reset`` re-derives the buffer from the latest server
+ * snapshot by remounting the editor.
  */
 import { useCallback, useMemo, useState } from "react";
 import { Alert, Button, Card, Space, Typography } from "antd";
-import Editor from "@monaco-editor/react";
 import { dump as yamlDump } from "js-yaml";
-import { Edit3, Save, X } from "lucide-react";
+import { RotateCcw, Save } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../../api/client";
@@ -35,25 +33,19 @@ export function ManifestTab({ detail, onSaved }: ManifestTabProps) {
   const { t } = useTranslation();
   const r = detail.record;
 
-  /** Server snapshot serialised as YAML. Kept in a memo so re-renders
-   *  during ``view`` mode don't churn the editor's internal state. */
+  /** Server snapshot serialised as YAML — the editor's seed. */
   const snapshotYaml = useMemo(() => yamlDump(r.spec, { lineWidth: 120 }), [r.spec]);
 
-  const [mode, setMode] = useState<"view" | "edit">("view");
   const [buffer, setBuffer] = useState<string>(snapshotYaml);
+  // Bumped on Reset to remount the editor and re-seed it from the snapshot.
+  const [resetNonce, setResetNonce] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleEdit = useCallback(() => {
+  const handleReset = useCallback(() => {
     setBuffer(snapshotYaml);
     setError(null);
-    setMode("edit");
-  }, [snapshotYaml]);
-
-  const handleCancel = useCallback(() => {
-    setBuffer(snapshotYaml);
-    setError(null);
-    setMode("view");
+    setResetNonce((n) => n + 1);
   }, [snapshotYaml]);
 
   const handleSave = useCallback(async () => {
@@ -61,7 +53,6 @@ export function ManifestTab({ detail, onSaved }: ManifestTabProps) {
     setError(null);
     try {
       await updateAgent(r.name, r.version, { manifest_yaml: buffer });
-      setMode("view");
       onSaved();
     } catch (err) {
       const message =
@@ -87,41 +78,28 @@ export function ManifestTab({ detail, onSaved }: ManifestTabProps) {
         }}
       >
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {mode === "view" ? t("manifest_tab.read_only_hint") : t("manifest_tab.edit_hint")}
+          {t("manifest_tab.hint")}
         </Text>
         <Space size={8}>
-          {mode === "view" ? (
-            <Button
-              size="small"
-              icon={<Edit3 size={14} strokeWidth={1.75} />}
-              onClick={handleEdit}
-              data-testid="manifest-edit-btn"
-            >
-              {t("manifest_tab.edit")}
-            </Button>
-          ) : (
-            <>
-              <Button
-                size="small"
-                icon={<X size={14} strokeWidth={1.75} />}
-                onClick={handleCancel}
-                disabled={saving}
-                data-testid="manifest-cancel-btn"
-              >
-                {t("manifest_tab.cancel")}
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<Save size={14} strokeWidth={1.75} />}
-                onClick={handleSave}
-                loading={saving}
-                data-testid="manifest-save-btn"
-              >
-                {t("manifest_tab.save")}
-              </Button>
-            </>
-          )}
+          <Button
+            size="small"
+            icon={<RotateCcw size={14} strokeWidth={1.75} />}
+            onClick={handleReset}
+            disabled={saving}
+            data-testid="manifest-reset-btn"
+          >
+            {t("manifest_tab.reset")}
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<Save size={14} strokeWidth={1.75} />}
+            onClick={handleSave}
+            loading={saving}
+            data-testid="manifest-save-btn"
+          >
+            {t("manifest_tab.save")}
+          </Button>
         </Space>
       </div>
 
@@ -136,27 +114,12 @@ export function ManifestTab({ detail, onSaved }: ManifestTabProps) {
         />
       )}
 
-      {mode === "view" ? (
-        <Editor
-          language="yaml"
-          value={snapshotYaml}
-          theme="vs-dark"
-          height="calc(100vh - 360px)"
-          options={{
-            readOnly: true,
-            minimap: { enabled: false },
-            fontFamily: "var(--hx-font-mono)",
-            fontSize: 12,
-            tabSize: 2,
-            scrollBeyondLastLine: false,
-            renderWhitespace: "boundary",
-            wordWrap: "on",
-          }}
-          data-testid="manifest-editor"
-        />
-      ) : (
-        <ManifestEditor mode="edit" initialYaml={snapshotYaml} onChange={setBuffer} />
-      )}
+      <ManifestEditor
+        key={`${snapshotYaml}#${resetNonce}`}
+        mode="edit"
+        initialYaml={snapshotYaml}
+        onChange={setBuffer}
+      />
     </Card>
   );
 }

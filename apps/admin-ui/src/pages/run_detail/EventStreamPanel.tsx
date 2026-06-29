@@ -16,12 +16,13 @@
  * heavy reviewer keeps it open across page loads.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Empty, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Empty, Segmented, Space, Tag, Typography } from "antd";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { streamRunEvents } from "../../api/runs";
 import type { SseEvent } from "../../api/sessions";
+import { ToolTimeline } from "../../components/ToolTimeline";
 
 const { Text } = Typography;
 
@@ -48,6 +49,7 @@ export function EventStreamPanel({ threadId, runId }: EventStreamPanelProps) {
   const [events, setEvents] = useState<SseEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [view, setView] = useState<"timeline" | "raw">("timeline");
 
   const abortRef = useRef<AbortController | null>(null);
   const eventListRef = useRef<HTMLDivElement>(null);
@@ -147,6 +149,17 @@ export function EventStreamPanel({ threadId, runId }: EventStreamPanelProps) {
               data-testid="event-stream-error"
             />
           )}
+          <Segmented<"timeline" | "raw">
+            size="small"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "timeline", label: t("event_stream.view_timeline") },
+              { value: "raw", label: t("event_stream.view_raw") },
+            ]}
+            style={{ marginBottom: 8 }}
+            data-testid="event-stream-view-toggle"
+          />
           <div
             ref={eventListRef}
             style={{
@@ -162,9 +175,9 @@ export function EventStreamPanel({ threadId, runId }: EventStreamPanelProps) {
             {events.length === 0 && error === null && !connecting && (
               <Empty description={t("event_stream.empty")} />
             )}
-            {events.map((evt, idx) => (
-              <EventCard key={`${evt.receivedAt}-${idx}`} evt={evt} />
-            ))}
+            {events.length > 0 && view === "timeline" && <ToolTimeline events={events} />}
+            {view === "raw" &&
+              events.map((evt, idx) => <EventCard key={`${evt.receivedAt}-${idx}`} evt={evt} />)}
           </div>
         </div>
       )}

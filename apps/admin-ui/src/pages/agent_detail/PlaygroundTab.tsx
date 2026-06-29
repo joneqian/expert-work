@@ -12,7 +12,7 @@
  * spec is the active ``AgentSpecRecord``).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Empty, Input, Space, Tag, Typography } from "antd";
+import { Alert, Button, Empty, Input, Segmented, Space, Tag, Typography } from "antd";
 import {
   FileText,
   ImagePlus,
@@ -33,6 +33,7 @@ import {
   type ThreadMeta,
 } from "../../api/sessions";
 import { uploadDocument, uploadImage } from "../../api/uploads";
+import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
 import {
   readPromptJinja,
@@ -84,6 +85,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [creatingThread, setCreatingThread] = useState(false);
   const [input, setInput] = useState("");
   const [events, setEvents] = useState<SseEvent[]>([]);
+  const [eventView, setEventView] = useState<"timeline" | "raw">("timeline");
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -489,6 +491,17 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               ? ""
               : t("playground.event_count", { n: events.length })}
           </Text>
+          <Segmented<"timeline" | "raw">
+            size="small"
+            value={eventView}
+            onChange={setEventView}
+            options={[
+              { value: "timeline", label: t("event_stream.view_timeline") },
+              { value: "raw", label: t("event_stream.view_raw") },
+            ]}
+            style={{ marginLeft: "auto" }}
+            data-testid="playground-event-view-toggle"
+          />
         </div>
 
         {runError !== null && (
@@ -521,9 +534,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               data-testid="playground-empty-log"
             />
           )}
-          {events.map((evt, idx) => (
-            <EventCard key={`${evt.receivedAt}-${idx}`} evt={evt} />
-          ))}
+          {events.length > 0 && eventView === "timeline" && <ToolTimeline events={events} />}
+          {eventView === "raw" &&
+            events.map((evt, idx) => <EventCard key={`${evt.receivedAt}-${idx}`} evt={evt} />)}
         </div>
       </div>
     </div>

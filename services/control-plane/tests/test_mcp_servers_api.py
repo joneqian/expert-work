@@ -21,6 +21,7 @@ from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
 from helix_agent.common.lifecycle import Lifecycle
 from helix_agent.protocol import McpConnectorCatalogUpsert, TenantConfigPatch
+from helix_agent.runtime.secret_store import parse_secret_ref
 from orchestrator.tools.mcp import MCPToolDef
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -455,6 +456,93 @@ async def test_server_tools_unknown_404(monkeypatch: pytest.MonkeyPatch) -> None
     async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
         r = await client.get("/v1/mcp-servers/nope/tools", headers=admin_headers)
         assert r.status_code == 404
+
+
+async def _seed_catalog_entry(app: object, upsert: McpConnectorCatalogUpsert) -> None:
+    async with bypass_rls_session():
+        await app.state.mcp_connector_catalog_store.create(  # type: ignore[attr-defined]
+            upsert=upsert, actor_id="seed"
+        )
+
+
+async def _enable_for_tenant(app: object, tenant_id: UUID, name: str) -> None:
+    await app.state.tenant_config_service.upsert(  # type: ignore[attr-defined]
+        tenant_id=tenant_id,
+        patch=TenantConfigPatch(display_name="Acme", mcp_allowlist=[name]),
+        actor_id="seed",
+    )
+
+
+@pytest.mark.asyncio
+async def test_server_tools_platform_bearer_via_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A platform catalog server the tenant enabled (mcp_allowlist) is probeable —
+    the bearer is resolved from its bearer_token_ref. Regression: this path used
+    to 404 because the endpoint only looked at tenant-private servers."""
+    app, admin_headers, tenant_id = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    await app.state.secret_store.put(parse_secret_ref("secret://amap"), "tok")  # type: ignore[attr-defined]
+    await _seed_catalog_entry(
+        app,
+        McpConnectorCatalogUpsert(
+            name="amap-maps",
+            display_name="Amap",
+            transport="streamable_http",
+            url_template="https://mcp.amap.test/mcp",
+            auth_type="bearer",
+            bearer_token_ref="secret://amap",
+        ),
+    )
+    await _enable_for_tenant(app, tenant_id, "amap-maps")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        r = await client.get("/v1/mcp-servers/amap-maps/tools", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["data"][0]["name"] == "create_issue"
+
+
+@pytest.mark.asyncio
+async def test_server_tools_platform_not_enabled_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A platform catalog server NOT in the tenant's allowlist → 404 (no leak)."""
+    app, admin_headers, _ = await _make_app_with_admin()
+    monkeypatch.setattr("control_plane.api.mcp_servers.probe_remote_mcp", _fake_probe_ok)
+    await _seed_catalog_entry(
+        app,
+        McpConnectorCatalogUpsert(
+            name="amap-maps",
+            display_name="Amap",
+            transport="streamable_http",
+            url_template="https://mcp.amap.test/mcp",
+            auth_type="none",
+        ),
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        r = await client.get("/v1/mcp-servers/amap-maps/tools", headers=admin_headers)
+        assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_server_tools_platform_oauth2_409(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An enabled platform OAuth2 server can't be shared-probed → 409 (per-user)."""
+    app, admin_headers, tenant_id = await _make_app_with_admin()
+    await _seed_catalog_entry(
+        app,
+        McpConnectorCatalogUpsert(
+            name="linear",
+            display_name="Linear",
+            transport="sse",
+            url_template="https://mcp.linear.app/sse",
+            auth_type="oauth2",
+            oauth_client_id="helix-linear",
+            oauth_scopes="read",
+        ),
+    )
+    await _enable_for_tenant(app, tenant_id, "linear")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://cp.test") as client:
+        r = await client.get("/v1/mcp-servers/linear/tools", headers=admin_headers)
+        assert r.status_code == 409
+        assert r.json()["detail"]["code"] == "MCP_SERVER_OAUTH_PROBE_UNSUPPORTED"
 
 
 @pytest.mark.asyncio

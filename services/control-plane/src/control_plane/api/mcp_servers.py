@@ -757,34 +757,73 @@ def build_mcp_servers_router() -> APIRouter:
         store: Annotated[TenantMcpServerStore, Depends(_get_store)],
         secret_store: Annotated[SecretStore, Depends(_get_secret_store)],
         probe_limiter: Annotated[object, Depends(_get_mcp_probe_limiter)],
+        catalog_store: Annotated[McpConnectorCatalogStore, Depends(_get_catalog_store)],
+        tenant_config_service: Annotated[object, Depends(_get_tenant_config_service)],
     ) -> dict[str, object]:
         await _enforce_probe_rate_limit(probe_limiter, principal.tenant_id)
-        record = await store.get(tenant_id=principal.tenant_id, name=name)
-        if record is None:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "MCP_SERVER_NOT_FOUND", "message": "not found"},
-            )
-        raw: str | None = None
-        if record.auth_type == "bearer" and record.token_secret_ref is not None:
-            raw = await secret_store.get(parse_secret_ref(record.token_secret_ref))
+        tenant_id = principal.tenant_id
+
+        # The picker lists BOTH tenant-private servers and platform servers the
+        # tenant enabled (``/available`` → ``mcp_allowlist``), so tool-probe must
+        # resolve both. Tenant rows first; otherwise fall back to a platform
+        # catalog server the tenant has enabled.
+        record = await store.get(tenant_id=tenant_id, name=name)
+        if record is not None:
+            transport, url, timeout_s = record.transport, record.url, record.timeout_s
+            raw: str | None = None
+            if record.auth_type == "bearer" and record.token_secret_ref is not None:
+                raw = await secret_store.get(parse_secret_ref(record.token_secret_ref))
+            is_tenant = True
+        else:
+            allowlist = await _tenant_allowlist(tenant_config_service, tenant_id)
+            entry = None
+            if name in allowlist:
+                # Catalog rows are platform-global (NULL tenant) → bypass RLS (W-8).
+                async with bypass_rls_session():
+                    entry = await catalog_store.get_by_name(name)
+            if entry is None or not entry.enabled:
+                raise HTTPException(
+                    status_code=404,
+                    detail={"code": "MCP_SERVER_NOT_FOUND", "message": "not found"},
+                )
+            if entry.auth_type == "oauth2":
+                # Per-user OAuth servers expose tools only over a user's own
+                # connection — a shared platform probe cannot enumerate them.
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "MCP_SERVER_OAUTH_PROBE_UNSUPPORTED",
+                        "message": "connect this OAuth server to list its tools",
+                    },
+                )
+            transport = entry.transport
+            url = entry.url_template
+            timeout_s = entry.timeout_s if entry.timeout_s is not None else _DEFAULT_TIMEOUT_S
+            raw = None
+            if entry.auth_type == "bearer" and entry.bearer_token_ref is not None:
+                raw = await secret_store.get(parse_secret_ref(entry.bearer_token_ref))
+            is_tenant = False
+
         try:
             tools = await probe_remote_mcp(
-                name=record.name,
-                transport=record.transport,
-                url=record.url,
+                name=name,
+                transport=transport,
+                url=url,
                 bearer_token=raw,
-                timeout_s=record.timeout_s,
+                timeout_s=timeout_s,
             )
         except McpProbeError as exc:
-            # On-demand probe is the live-health signal — persist the failure (#2).
-            await _record_health(
-                store, tenant_id=principal.tenant_id, name=name, status="error", error=exc.code
-            )
+            # On-demand probe doubles as the live-health signal — persist the
+            # failure (#2). Only tenant rows carry per-server health.
+            if is_tenant:
+                await _record_health(
+                    store, tenant_id=tenant_id, name=name, status="error", error=exc.code
+                )
             raise HTTPException(
                 status_code=502, detail={"code": exc.code, "message": exc.message}
             ) from exc
-        await _record_health(store, tenant_id=principal.tenant_id, name=name, status="ok")
+        if is_tenant:
+            await _record_health(store, tenant_id=tenant_id, name=name, status="ok")
         return {
             "success": True,
             "data": [{"name": t.name, "description": t.description or ""} for t in tools],

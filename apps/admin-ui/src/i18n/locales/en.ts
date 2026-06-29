@@ -344,11 +344,9 @@ export interface TranslationKeys {
     empty_cross: string;
   };
   manifest_tab: {
-    read_only_hint: string;
-    edit_hint: string;
-    edit: string;
+    hint: string;
     save: string;
-    cancel: string;
+    reset: string;
     save_failed: string;
   };
   manifest_editor: {
@@ -526,6 +524,18 @@ export interface TranslationKeys {
     event_count: string;
     stream_failed: string;
     empty: string;
+    view_timeline: string;
+    view_raw: string;
+  };
+  tool_timeline: {
+    empty: string;
+    mcp_badge: string;
+    builtin_badge: string;
+    status_pending: string;
+    status_success: string;
+    status_error: string;
+    args_label: string;
+    result_label: string;
   };
   approval_card: {
     awaiting_human: string;
@@ -2294,12 +2304,9 @@ const en: TranslationKeys = {
     empty_cross: "No artifacts anywhere on the platform yet.",
   },
   manifest_tab: {
-    read_only_hint: "Read-only — click Edit to modify the spec.",
-    edit_hint:
-      "Editing — Save writes through PUT /v1/agents, Cancel discards changes.",
-    edit: "Edit",
+    hint: "Visual config — edit the fields and Save. The YAML tab is a raw escape hatch.",
     save: "Save",
-    cancel: "Cancel",
+    reset: "Reset",
     save_failed: "Failed to save manifest",
   },
   manifest_editor: {
@@ -2516,6 +2523,18 @@ const en: TranslationKeys = {
     event_count: "{{n}} events",
     stream_failed: "Stream failed",
     empty: "No events yet.",
+    view_timeline: "Tool calls",
+    view_raw: "Raw events",
+  },
+  tool_timeline: {
+    empty: "No tool calls yet.",
+    mcp_badge: "MCP",
+    builtin_badge: "builtin",
+    status_pending: "running",
+    status_success: "ok",
+    status_error: "failed",
+    args_label: "Arguments",
+    result_label: "Result",
   },
   approval_card: {
     awaiting_human: "awaiting approval",

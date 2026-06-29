@@ -1,10 +1,10 @@
 /**
  * Manifest edit-via-form E2E — Stream S PR E.
  *
- * Proves an admin can open the agent-detail "配置清单"/Manifest tab (read-only
- * by default), click ``Edit`` to swap in the visual ``<ManifestEditor>``, flip
- * to its YAML tab, and Save — firing ``PUT /v1/agents/{name}/{version}`` and
- * returning the tab to view mode. A second test runs axe over the open editor.
+ * Proves an admin can open the agent-detail "配置清单"/Manifest tab — which now
+ * renders the visual ``<ManifestEditor>`` form by default (no view/edit
+ * toggle) — flip to its YAML escape-hatch tab, and Save, firing
+ * ``PUT /v1/agents/{name}/{version}``. A second test runs axe over the editor.
  *
  * The editor fetches ``GET /v1/agents/schema`` and ``GET /v1/model-catalog``
  * (both enveloped) on mount; the shared ``installControlPlaneStub`` fixture
@@ -135,22 +135,18 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("edit a manifest via the form", async ({ page }) => {
-  // View mode by default: the tab + Edit button are visible.
+  // Visual editor mounts directly on its Form tab — no view/edit toggle.
   await expect(page.getByTestId("manifest-tab")).toBeVisible();
-  await expect(page.getByTestId("manifest-edit-btn")).toBeVisible();
-
-  // Click Edit → the visual editor mounts on its Form tab.
-  await page.getByTestId("manifest-edit-btn").click();
   await expect(page.getByTestId("manifest-editor-edit")).toBeVisible();
   await expect(page.getByTestId("manifest-form-view")).toBeVisible();
   await expect(page.getByTestId("manifest-save-btn")).toBeVisible();
-  await expect(page.getByTestId("manifest-cancel-btn")).toBeVisible();
+  await expect(page.getByTestId("manifest-reset-btn")).toBeVisible();
 
-  // Switch to the YAML tab.
+  // Switch to the raw YAML escape-hatch tab.
   await page.getByTestId("manifest-tab-yaml").click();
   await expect(page.getByTestId("manifest-yaml-view")).toBeVisible();
 
-  // Save fires the PUT and returns to view mode.
+  // Save fires the PUT; the editor stays mounted.
   const putPromise = page.waitForRequest(
     (req) =>
       req.method() === "PUT" &&
@@ -158,11 +154,10 @@ test("edit a manifest via the form", async ({ page }) => {
   );
   await page.getByTestId("manifest-save-btn").click();
   await putPromise;
-  await expect(page.getByTestId("manifest-edit-btn")).toBeVisible();
+  await expect(page.getByTestId("manifest-editor-edit")).toBeVisible();
 });
 
 test("editor passes axe (serious + critical)", async ({ page }) => {
-  await page.getByTestId("manifest-edit-btn").click();
   await expect(page.getByTestId("manifest-editor-edit")).toBeVisible();
   await expectNoA11yViolations(page, "manifest-tab");
 });

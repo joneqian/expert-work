@@ -352,11 +352,9 @@ const zhCN: TranslationKeys = {
     empty_cross: "全平台暂无产物。",
   },
   manifest_tab: {
-    read_only_hint: "只读 — 点击「编辑」修改 spec。",
-    edit_hint: "编辑中 — 「保存」会调用 PUT /v1/agents，「取消」放弃改动。",
-    edit: "编辑",
+    hint: "可视化配置 —— 改字段后点「保存」。YAML tab 是原始逃生舱。",
     save: "保存",
-    cancel: "取消",
+    reset: "重置",
     save_failed: "配置清单保存失败",
   },
   manifest_editor: {
@@ -567,6 +565,18 @@ const zhCN: TranslationKeys = {
     event_count: "共 {{n}} 条",
     stream_failed: "事件流失败",
     empty: "暂无事件。",
+    view_timeline: "工具调用",
+    view_raw: "原始事件",
+  },
+  tool_timeline: {
+    empty: "暂无工具调用。",
+    mcp_badge: "MCP",
+    builtin_badge: "内置",
+    status_pending: "进行中",
+    status_success: "成功",
+    status_error: "失败",
+    args_label: "入参",
+    result_label: "结果",
   },
   approval_card: {
     awaiting_human: "等待审批",

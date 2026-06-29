@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n";
+import i18n from "../../i18n";
 
 import { ApiError } from "../../api/client";
 import * as sessionsSdk from "../../api/sessions";
@@ -111,6 +112,9 @@ describe("PlaygroundTab", () => {
     render(<PlaygroundTab detail={sampleDetail} />);
     await screen.findByText(/33333333-3333-3333/);
     await user.type(screen.getByTestId("playground-input"), "hello");
+    // Raw-event view to assert the individual frames (default view is the
+    // tool-call timeline, which only surfaces tool calls).
+    await user.click(screen.getByText(i18n.t("event_stream.view_raw")));
     await user.click(screen.getByTestId("playground-run"));
     await screen.findByTestId("playground-event-metadata");
     await screen.findByTestId("playground-event-updates");
@@ -179,7 +183,7 @@ describe("PlaygroundTab", () => {
 
     await user.type(screen.getByTestId("playground-input"), "describe this");
     await user.click(screen.getByTestId("playground-run"));
-    await screen.findByTestId("playground-event-end");
+    await waitFor(() => expect(screen.queryByTestId("playground-stop")).not.toBeInTheDocument());
 
     expect(streamRunMock).toHaveBeenCalledWith(
       sampleThread.thread_id,
@@ -225,7 +229,7 @@ describe("PlaygroundTab", () => {
 
     await user.type(screen.getByTestId("playground-input"), "summarize it");
     await user.click(screen.getByTestId("playground-run"));
-    await screen.findByTestId("playground-event-end");
+    await waitFor(() => expect(screen.queryByTestId("playground-stop")).not.toBeInTheDocument());
 
     // The doc path is prepended to the prompt (no image_refs for a doc-only turn).
     const [, body] = streamRunMock.mock.calls.at(-1) ?? [];
@@ -266,7 +270,7 @@ describe("PlaygroundTab", () => {
     await user.type(screen.getByTestId("playground-var-persona"), "顾问");
     await user.type(screen.getByTestId("playground-input"), "go");
     await user.click(screen.getByTestId("playground-run"));
-    await screen.findByTestId("playground-event-end");
+    await waitFor(() => expect(screen.queryByTestId("playground-stop")).not.toBeInTheDocument());
 
     expect(streamRunMock).toHaveBeenCalledWith(
       sampleThread.thread_id,

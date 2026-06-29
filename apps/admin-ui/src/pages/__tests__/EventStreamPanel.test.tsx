@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n";
+import i18n from "../../i18n";
 
 import * as runsSdk from "../../api/runs";
 import { EventStreamPanel } from "../run_detail/EventStreamPanel";
@@ -67,6 +68,8 @@ describe("EventStreamPanel", () => {
 
     render(<EventStreamPanel threadId="t-1" runId="r-1" />);
     await user.click(screen.getByTestId("event-stream-toggle"));
+    // Raw-event view to assert individual frames (default is the timeline).
+    await user.click(screen.getByText(i18n.t("event_stream.view_raw")));
 
     await screen.findByTestId("event-stream-event-metadata");
     expect(screen.getByTestId("event-stream-event-updates")).toBeInTheDocument();
