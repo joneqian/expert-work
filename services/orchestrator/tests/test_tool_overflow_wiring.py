@@ -133,6 +133,13 @@ async def test_overflow_externalized_and_footer_appended() -> None:
     assert f"{len(_FULL)} chars" in content
 
 
+async def test_tool_meta_surfaced_as_tool_message_artifact() -> None:
+    # ToolResult.meta rides into ToolMessage.artifact (event stream / audit) —
+    # otherwise the tool's structured metadata is dropped from the message.
+    state = await _run_one_turn(tool=_SpillTool(), writer=None, thread_id="ov-art")
+    assert _tool_message(state).artifact == {"truncated": True}
+
+
 async def test_no_writer_keeps_truncation_byte_identical() -> None:
     state = await _run_one_turn(tool=_SpillTool(), writer=None, thread_id="ov-2")
     assert str(_tool_message(state).content) == _CAPPED

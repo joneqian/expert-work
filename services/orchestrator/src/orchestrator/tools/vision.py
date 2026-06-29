@@ -112,7 +112,13 @@ class AskImageTool:
         ]
         response = await self.vl_caller(messages=messages, tools=[])
         answer = _stringify(response.content) or "[VL model returned no text]"
-        return ToolResult(content=answer, meta={"image_ref": ref_str})
+        # Surface VL provenance in the ToolMessage artifact (event stream /
+        # audit): the image ref plus the VL call's token usage — otherwise the
+        # separate VL round-trip's cost is invisible (the tool only returns text).
+        meta: dict[str, Any] = {"image_ref": ref_str}
+        if response.usage_metadata:
+            meta["vl_usage"] = dict(response.usage_metadata)
+        return ToolResult(content=answer, meta=meta)
 
 
 def _require_string(args: Mapping[str, Any], key: str) -> str:

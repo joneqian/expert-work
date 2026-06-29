@@ -183,6 +183,69 @@ async def test_text_only_choice_yields_plain_ai_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_usage_metadata_extracted_for_metering() -> None:
+    # Event-stream + metering — body.usage maps to AIMessage.usage_metadata
+    # (TokenUsageMiddleware reads it; without it compat vendors meter zero).
+    client = RecordingOpenAIClient(
+        response={
+            "model": "doubao-seed-2-1-pro-260628",
+            "choices": [{"finish_reason": "stop", "message": {"content": "hi"}}],
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 30,
+                "total_tokens": 150,
+                "prompt_tokens_details": {"cached_tokens": 64},
+                "completion_tokens_details": {"reasoning_tokens": 18},
+            },
+        },
+    )
+    provider = OpenAIProvider(client=client, model="doubao-seed-2-1-pro-260628")
+
+    result = await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    assert result.usage_metadata == {
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "total_tokens": 150,
+        "input_token_details": {"cache_read": 64},
+        "output_token_details": {"reasoning": 18},
+    }
+    assert result.response_metadata == {
+        "finish_reason": "stop",
+        "model_name": "doubao-seed-2-1-pro-260628",
+    }
+
+
+@pytest.mark.asyncio
+async def test_reasoning_content_surfaced_in_additional_kwargs() -> None:
+    client = RecordingOpenAIClient(
+        response={
+            "choices": [{"message": {"content": "answer", "reasoning_content": "let me think..."}}],
+        },
+    )
+    provider = OpenAIProvider(client=client, model="qwen3.7-max")
+
+    result = await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    assert result.content == "answer"
+    assert result.additional_kwargs == {"reasoning_content": "let me think..."}
+
+
+@pytest.mark.asyncio
+async def test_no_usage_yields_none_metadata() -> None:
+    client = RecordingOpenAIClient(
+        response={"choices": [{"message": {"content": "hi"}}]},
+    )
+    provider = OpenAIProvider(client=client, model="gpt-4o-mini")
+
+    result = await provider.complete(messages=[HumanMessage(content="hi")], tools=[])
+
+    assert result.usage_metadata is None
+    assert result.additional_kwargs == {}
+    assert result.response_metadata == {}
+
+
+@pytest.mark.asyncio
 async def test_tool_calls_decoded_with_json_args() -> None:
     client = RecordingOpenAIClient(
         response={

@@ -1934,11 +1934,16 @@ async def _invoke_tool(
         else result.content
     )
     content = tool_content + footer if footer is not None else tool_content
+    # ``artifact`` surfaces the tool's structured metadata (``ToolResult.meta``
+    # — e.g. ask_image's ``image_ref`` / VL usage, truncation flags) in the raw
+    # event stream / audit / trace. It rides alongside ``content`` but is NOT
+    # sent back to the LLM, so it never affects the model's input.
+    artifact = dict(result.meta) if result.meta else None
     return (
         # ``name`` records which tool produced this result (for MCP tools,
         # ``mcp:server.tool``). LangChain leaves it null unless set, so the raw
         # ToolMessage, audit, and trace all lose the attribution otherwise.
-        ToolMessage(content=content, tool_call_id=call_id, name=tool.spec.name),
+        ToolMessage(content=content, tool_call_id=call_id, name=tool.spec.name, artifact=artifact),
         result.state_updates,
         result.refund_iterations,
         None,

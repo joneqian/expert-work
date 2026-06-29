@@ -444,7 +444,88 @@ def _from_openai_response(body: Mapping[str, Any]) -> AIMessage:
                 }
             )
 
-    return AIMessage(content=text, tool_calls=tool_calls)
+    # Event-stream enrichment — surface the fields the OpenAI-compatible
+    # vendors return but the M0 minimal decoder dropped:
+    #   * ``usage_metadata`` (body.usage) — REQUIRED for token metering
+    #     (TokenUsageMiddleware reads AIMessage.usage_metadata; without it
+    #     every compat-vendor turn meters zero) + langfuse cost observability.
+    #   * ``additional_kwargs.reasoning_content`` — the thinking trace
+    #     (DeepSeek / Qwen / Doubao return ``message.reasoning_content``).
+    #   * ``response_metadata`` — finish_reason / model / system_fingerprint.
+    additional_kwargs: dict[str, Any] = {}
+    reasoning = message.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning:
+        additional_kwargs["reasoning_content"] = reasoning
+
+    return AIMessage(
+        content=text,
+        tool_calls=tool_calls,
+        additional_kwargs=additional_kwargs,
+        response_metadata=_extract_response_metadata(body, first),
+        usage_metadata=_extract_usage_metadata(body),
+    )
+
+
+def _extract_usage_metadata(body: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Map OpenAI ``usage`` → the LangChain ``usage_metadata`` shape.
+
+    OpenAI returns ``prompt_tokens`` / ``completion_tokens`` / ``total_tokens``
+    plus optional ``prompt_tokens_details.cached_tokens`` and
+    ``completion_tokens_details.reasoning_tokens``. LangChain carries the
+    standard counters in ``input_tokens`` / ``output_tokens`` / ``total_tokens``
+    with cache/reasoning splits in ``input_token_details`` /
+    ``output_token_details``. Lenient: ``None`` when no usable counter is
+    present (older / streaming-only shapes).
+    """
+    usage_raw = body.get("usage")
+    if not isinstance(usage_raw, Mapping):
+        return None
+    input_tokens = _coerce_int(usage_raw.get("prompt_tokens"))
+    output_tokens = _coerce_int(usage_raw.get("completion_tokens"))
+    total = _coerce_int(usage_raw.get("total_tokens"))
+    if input_tokens is None and output_tokens is None and total is None:
+        return None
+    metadata: dict[str, Any] = {
+        "input_tokens": input_tokens or 0,
+        "output_tokens": output_tokens or 0,
+        "total_tokens": total if total is not None else (input_tokens or 0) + (output_tokens or 0),
+    }
+    prompt_details = usage_raw.get("prompt_tokens_details")
+    if isinstance(prompt_details, Mapping):
+        cached = _coerce_int(prompt_details.get("cached_tokens"))
+        if cached is not None:
+            metadata["input_token_details"] = {"cache_read": cached}
+    completion_details = usage_raw.get("completion_tokens_details")
+    if isinstance(completion_details, Mapping):
+        reasoning = _coerce_int(completion_details.get("reasoning_tokens"))
+        if reasoning is not None:
+            metadata["output_token_details"] = {"reasoning": reasoning}
+    return metadata
+
+
+def _extract_response_metadata(
+    body: Mapping[str, Any], choice: Mapping[str, Any]
+) -> dict[str, Any]:
+    """finish_reason / model / system_fingerprint, omitting absent keys."""
+    metadata: dict[str, Any] = {}
+    finish_reason = choice.get("finish_reason")
+    if isinstance(finish_reason, str) and finish_reason:
+        metadata["finish_reason"] = finish_reason
+    model = body.get("model")
+    if isinstance(model, str) and model:
+        metadata["model_name"] = model
+    fingerprint = body.get("system_fingerprint")
+    if isinstance(fingerprint, str) and fingerprint:
+        metadata["system_fingerprint"] = fingerprint
+    return metadata
+
+
+def _coerce_int(value: Any) -> int | None:
+    if isinstance(value, bool):  # bool is an int subclass — reject explicitly
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _parse_arguments(raw: Any) -> dict[str, Any]:

@@ -64,6 +64,21 @@ async def test_ask_image_happy_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ask_image_meta_carries_vl_usage_when_present() -> None:
+    # The separate VL round-trip's token usage rides in meta → ToolMessage
+    # artifact, so the VL call's cost is observable (it's otherwise invisible —
+    # the tool only returns text).
+    usage = {"input_tokens": 800, "output_tokens": 40, "total_tokens": 840}
+    vl = _FakeVLCaller(response=AIMessage(content="a desk", usage_metadata=usage))
+    tool = AskImageTool(vl_caller=vl, image_resolver=_resolver())
+    ref = _ref()
+
+    result = await tool.call({"image_ref": ref, "question": "what is this?"}, ctx=_ctx())
+
+    assert result.meta == {"image_ref": ref, "vl_usage": usage}
+
+
+@pytest.mark.asyncio
 async def test_ask_image_empty_text_response_falls_back() -> None:
     vl = _FakeVLCaller(response=AIMessage(content=""))
     tool = AskImageTool(vl_caller=vl, image_resolver=_resolver())
