@@ -24,6 +24,10 @@ export interface TurnSummary {
   reasoning: string[];
   /** Token usage summed across the turn's AI messages (null if none reported). */
   usage: TurnUsage | null;
+  /** Highest ``step_count`` seen across the turn's node updates (null if none). */
+  stepCount: number | null;
+  /** Wall-clock from the turn's first frame to its last, in ms (null if <2 frames). */
+  latencyMs: number | null;
 }
 
 function asInt(value: unknown): number {
@@ -55,6 +59,7 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
   let finalText: string | null = null;
   const reasoning: string[] = [];
   let reported = false;
+  let stepCount: number | null = null;
   const usage: TurnUsage = {
     inputTokens: 0,
     outputTokens: 0,
@@ -65,6 +70,18 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
 
   for (const evt of events) {
     if (evt.event !== "updates") continue;
+    // ``step_count`` lives at the node level (alongside ``messages``), not on a
+    // message — take the highest seen across the turn.
+    if (evt.data !== null && typeof evt.data === "object") {
+      for (const node of Object.values(evt.data as Record<string, unknown>)) {
+        if (node !== null && typeof node === "object") {
+          const sc = (node as Record<string, unknown>).step_count;
+          if (typeof sc === "number" && (stepCount === null || sc > stepCount)) {
+            stepCount = sc;
+          }
+        }
+      }
+    }
     for (const m of messagesOf(evt.data)) {
       if (m.type !== "ai") continue;
       const text = textOf(m.content);
@@ -95,5 +112,14 @@ export function summarizeTurn(events: readonly SseEvent[]): TurnSummary {
     }
   }
 
-  return { finalText, reasoning, usage: reported ? usage : null };
+  let latencyMs: number | null = null;
+  if (events.length >= 2) {
+    const first = Date.parse(events[0].receivedAt);
+    const last = Date.parse(events[events.length - 1].receivedAt);
+    if (!Number.isNaN(first) && !Number.isNaN(last) && last >= first) {
+      latencyMs = last - first;
+    }
+  }
+
+  return { finalText, reasoning, usage: reported ? usage : null, stepCount, latencyMs };
 }

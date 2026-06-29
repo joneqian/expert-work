@@ -6,13 +6,15 @@
  * from the test body. This keeps the network layer out of jsdom.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
 import i18n from "../../i18n";
 
 import { ApiError } from "../../api/client";
 import * as membersSdk from "../../api/members";
+import * as rateCardSdk from "../../api/rate_card";
 import * as sessionsSdk from "../../api/sessions";
 import * as uploadsSdk from "../../api/uploads";
 import { PlaygroundTab } from "../agent_detail/PlaygroundTab";
@@ -52,6 +54,8 @@ const uploadImageMock = vi.spyOn(uploadsSdk, "uploadImage");
 const uploadDocumentMock = vi.spyOn(uploadsSdk, "uploadDocument");
 const listMembersMock = vi.spyOn(membersSdk, "listMembers");
 const getWorkspaceMock = vi.spyOn(sessionsSdk, "getSessionWorkspace");
+const listSessionsMock = vi.spyOn(sessionsSdk, "listSessions");
+const listRateCardsMock = vi.spyOn(rateCardSdk, "listRateCards");
 
 beforeEach(() => {
   createSessionMock.mockReset();
@@ -62,6 +66,10 @@ beforeEach(() => {
   listMembersMock.mockResolvedValue({ items: [], total: 0 });
   getWorkspaceMock.mockReset();
   getWorkspaceMock.mockResolvedValue({ workspace: null, artifacts: [] });
+  listSessionsMock.mockReset();
+  listSessionsMock.mockResolvedValue([]);
+  listRateCardsMock.mockReset();
+  listRateCardsMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -74,10 +82,20 @@ function makeStream(events: SseEvent[]): AsyncGenerator<SseEvent, void, void> {
   })();
 }
 
+// The per-turn run-detail link uses react-router <Link>, so every render needs
+// a Router context.
+function renderPg(detail: AgentDetailResponse = sampleDetail) {
+  return render(
+    <MemoryRouter>
+      <PlaygroundTab detail={detail} />
+    </MemoryRouter>,
+  );
+}
+
 describe("PlaygroundTab", () => {
   it("creates a thread on mount and displays its id", async () => {
     createSessionMock.mockResolvedValue(sampleThread);
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await waitFor(() => {
       expect(createSessionMock).toHaveBeenCalledWith({
         agent_name: "demo-agent",
@@ -116,7 +134,7 @@ describe("PlaygroundTab", () => {
         },
       ]),
     );
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
     await user.type(screen.getByTestId("playground-input"), "hello");
     // Raw-event view to assert the individual frames (default view is the
@@ -137,7 +155,7 @@ describe("PlaygroundTab", () => {
         throw new Error("boom");
       })();
     });
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
     await user.type(screen.getByTestId("playground-input"), "x");
     await user.click(screen.getByTestId("playground-run"));
@@ -149,7 +167,7 @@ describe("PlaygroundTab", () => {
     createSessionMock.mockRejectedValue(
       new ApiError("agent not active", "AGENT_NOT_FOUND", 422),
     );
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     const alert = await screen.findByTestId("playground-session-error");
     expect(alert).toHaveTextContent("AGENT_NOT_FOUND");
     expect(screen.getByTestId("playground-run")).toBeDisabled();
@@ -157,7 +175,7 @@ describe("PlaygroundTab", () => {
 
   it("disables Run while the input is empty", async () => {
     createSessionMock.mockResolvedValue(sampleThread);
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
     expect(screen.getByTestId("playground-run")).toBeDisabled();
   });
@@ -177,7 +195,7 @@ describe("PlaygroundTab", () => {
         },
       ]),
     );
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
 
     const file = new File(["\x89PNG"], "shot.png", { type: "image/png" });
@@ -218,7 +236,7 @@ describe("PlaygroundTab", () => {
         },
       ]),
     );
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
 
     const file = new File(["%PDF-1.4"], "report.pdf", {
@@ -271,7 +289,7 @@ describe("PlaygroundTab", () => {
         },
       ]),
     );
-    render(<PlaygroundTab detail={jinjaDetail} />);
+    renderPg(jinjaDetail);
     await screen.findByText(/33333333-3333-3333/);
 
     await user.type(screen.getByTestId("playground-var-persona"), "顾问");
@@ -292,7 +310,7 @@ describe("PlaygroundTab", () => {
     uploadImageMock.mockRejectedValue(
       new ApiError("too big", "IMAGE_TOO_LARGE", 413),
     );
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
 
     const file = new File(["x"], "huge.png", { type: "image/png" });
@@ -308,7 +326,7 @@ describe("PlaygroundTab", () => {
   it("runs as another user when a user_id is entered (impersonation)", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
     createSessionMock.mockClear();
 
@@ -364,7 +382,7 @@ describe("PlaygroundTab", () => {
     streamRunMock.mockReturnValueOnce(makeStream(endFrame("first answer", 100)));
     streamRunMock.mockReturnValueOnce(makeStream(endFrame("second answer", 200)));
 
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
 
     await user.type(screen.getByTestId("playground-input"), "q1");
@@ -380,6 +398,103 @@ describe("PlaygroundTab", () => {
     expect(screen.getAllByTestId("playground-usage")).toHaveLength(2);
     // The thread is reused across turns (multi-turn continuation).
     expect(streamRunMock.mock.calls.every(([tid]) => tid === sampleThread.thread_id)).toBe(true);
+  });
+
+  it("shows per-turn cost + step + a run-detail link", async () => {
+    const user = userEvent.setup();
+    const costDetail: AgentDetailResponse = {
+      record: {
+        ...sampleDetail.record,
+        spec: { model: { provider: "anthropic", name: "claude-x" } },
+      },
+    };
+    createSessionMock.mockResolvedValue(sampleThread);
+    listRateCardsMock.mockResolvedValue([
+      {
+        id: "rc",
+        tenant_id: null,
+        provider: "anthropic",
+        model: "claude-x",
+        input_per_mtok_micros: 3_000_000,
+        output_per_mtok_micros: 15_000_000,
+        cache_creation_per_mtok_micros: 0,
+        cache_read_per_mtok_micros: 0,
+      },
+    ]);
+    streamRunMock.mockReturnValue(
+      makeStream([
+        {
+          id: "m",
+          event: "metadata",
+          data: { run_id: "run-77" },
+          rawData: "",
+          receivedAt: "2026-05-25T00:00:01Z",
+        },
+        {
+          id: "u",
+          event: "updates",
+          data: {
+            agent: {
+              messages: [
+                {
+                  type: "ai",
+                  content: "hi",
+                  usage_metadata: {
+                    input_tokens: 1000,
+                    output_tokens: 100,
+                    total_tokens: 1100,
+                  },
+                },
+              ],
+              step_count: 2,
+            },
+          },
+          rawData: "",
+          receivedAt: "2026-05-25T00:00:02Z",
+        },
+        {
+          id: "e",
+          event: "end",
+          data: "ok",
+          rawData: "ok",
+          receivedAt: "2026-05-25T00:00:03Z",
+        },
+      ]),
+    );
+    renderPg(costDetail);
+    await screen.findByText(/33333333-3333-3333/);
+    await user.type(screen.getByTestId("playground-input"), "q");
+    await user.click(screen.getByTestId("playground-run"));
+    await screen.findByText("hi");
+
+    expect(screen.getByTestId("playground-turn-cost")).toBeInTheDocument();
+    expect(screen.getByTestId("playground-turn-meta")).toHaveTextContent("2");
+    expect(screen.getByTestId("playground-turn-run-link")).toHaveAttribute(
+      "href",
+      `/runs/${sampleThread.thread_id}/run-77`,
+    );
+  });
+
+  it("lists past sessions for resume and shows a resumed banner", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    const past: ThreadMeta = {
+      ...sampleThread,
+      thread_id: "99999999-9999-9999-9999-999999999999",
+      created_at: "2026-05-20T00:00:00Z",
+    };
+    listSessionsMock.mockResolvedValue([past]);
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+
+    const select = within(
+      await screen.findByTestId("playground-resume-select"),
+    ).getByRole("combobox");
+    await user.click(select);
+    await user.click(await screen.findByText(/99999999/));
+    expect(
+      await screen.findByTestId("playground-resumed-notice"),
+    ).toBeInTheDocument();
   });
 
   it("shows the workspace inspector with the volume + artifacts", async () => {
@@ -407,7 +522,7 @@ describe("PlaygroundTab", () => {
         },
       ],
     });
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
     const panel = await screen.findByTestId("playground-workspace");
     expect(panel).toHaveTextContent("helix-ws-t-u");
@@ -417,7 +532,7 @@ describe("PlaygroundTab", () => {
 
   it("shows 'no workspace' when the user has none (read-only null)", async () => {
     createSessionMock.mockResolvedValue(sampleThread);
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
     expect(
       await screen.findByTestId("playground-workspace-none"),
@@ -428,7 +543,7 @@ describe("PlaygroundTab", () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);
     uploadImageMock.mockResolvedValue("helix://image/img-2.png");
-    render(<PlaygroundTab detail={sampleDetail} />);
+    renderPg();
     await screen.findByText(/33333333-3333-3333/);
 
     const file = new File(["x"], "pic.png", { type: "image/png" });

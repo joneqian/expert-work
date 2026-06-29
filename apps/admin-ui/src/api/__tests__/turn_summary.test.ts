@@ -66,6 +66,28 @@ describe("summarizeTurn", () => {
     expect(summary.finalText).toBe("hi");
   });
 
+  it("takes the highest node step_count and the frame-span latency", () => {
+    const events: SseEvent[] = [
+      {
+        id: "a",
+        event: "updates",
+        data: { agent: { messages: [{ type: "ai", content: "" }], step_count: 1 } },
+        rawData: "",
+        receivedAt: "2026-06-29T00:00:00.000Z",
+      },
+      {
+        id: "b",
+        event: "updates",
+        data: { agent: { messages: [{ type: "ai", content: "done" }], step_count: 3 } },
+        rawData: "",
+        receivedAt: "2026-06-29T00:00:02.500Z",
+      },
+    ];
+    const summary = summarizeTurn(events);
+    expect(summary.stepCount).toBe(3);
+    expect(summary.latencyMs).toBe(2500);
+  });
+
   it("ignores non-updates frames and tool messages", () => {
     const events: SseEvent[] = [
       { id: "m", event: "metadata", data: { run_id: "r" }, rawData: "", receivedAt: "t" },
