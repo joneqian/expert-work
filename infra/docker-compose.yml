@@ -31,6 +31,10 @@ x-control-plane-base: &control-plane-base
     # Override to ``memory`` in infra/.env for a throwaway single-process stack.
     HELIX_AGENT_CHECKPOINTER_BACKEND: ${HELIX_AGENT_CHECKPOINTER_BACKEND:-postgres}
     HELIX_AGENT_CHECKPOINTER_DSN: postgresql://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+    # Tool-output-budget kill switch (#859/#860/#861) — default on. Set
+    # HELIX_TOOL_OUTPUT_BUDGET=0 in infra/.env to revert the whole feature
+    # (generalized externalization + persist floor + CM-12 prune) platform-wide.
+    HELIX_TOOL_OUTPUT_BUDGET: ${HELIX_TOOL_OUTPUT_BUDGET:-1}
     HELIX_AGENT_QUOTA_REDIS_URL: redis://redis:6379/0
     HELIX_AGENT_SANDBOX_SUPERVISOR_URL: http://sandbox-supervisor:8000
     # Trace export (A.8) — reached only when the observability profile
