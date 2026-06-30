@@ -24,12 +24,23 @@ The bloat is two-dimensional:
 |---|---|---|---|
 | Oversized single result | not pre-capped; **old** results pruned to 1-liners on a threshold-triggered compaction pass (lazy) | **per-result, eager**: `> externalize_min_chars` (12k) → full to disk + head/tail preview + file ref (`tool_output_budget_middleware`) | **CM-5 externalization exists** but only fires when a tool sets `ToolResult.full_content` (bash / exec_python / http / mcp). `web_search` never sets it → not externalized |
 | Heavy research isolation | inline search; `delegate_task` only for short subtasks | lead-agent + subagents that **return summaries** (Task tool) | `spawn_worker` exists but optional (prompt-decided) |
-| Conversation-level | `context_compressor`: token-budget tail protection + prune-old-tool-results + LLM summary | `summarization_hook` | — (none) |
+| Conversation-level | `context_compressor`: token-budget tail protection + prune-old-tool-results + LLM summary | `summarization_hook` | **two gates already exist** — CM-2 `WorkingWindow` (cheap, drops whole old turns) + L.L2 `ContextCompressor` (LLM summarise-the-middle, head/tail keep, CM-7 running summary, CM-3 pre-compaction memory flush). Missing: the cheap **mechanical tool-result prune** in between |
 
-**Key finding:** helix already has deer-flow's externalization primitive (CM-5,
-`tools/overflow.py` + `builder._externalize_tool_overflow`) — it is just **opt-in
-per tool**. Generalizing it to a size threshold over *all* tool results is a small,
-surgical change that directly kills the search-bloat case.
+**Key finding (per-result):** helix already has deer-flow's externalization primitive
+(CM-5, `tools/overflow.py` + `builder._externalize_tool_overflow`) — it is just
+**opt-in per tool**. Generalizing it to a size threshold over *all* tool results is a
+small, surgical change that directly kills the search-bloat case.
+
+**Key finding (conversation-level) — corrects an earlier premise:** the
+conversation-level layer is **not absent**. helix already ships a layered cascade in
+`agent_node`: CM-2 `WorkingWindow` (LLM-free, token-gated, drops whole old turns) →
+L.L2 `ContextCompressor` (LLM summarise-the-middle, head/tail keep, CM-7 running
+summary, CM-3 flushes the discarded middle to long-term memory). Hermes' "tail
+protection" and "LLM summary" rungs therefore **already exist**. The one genuinely
+missing rung is the cheap, surgical **prune-old-tool-results** middle gate: helix
+jumps straight from *drop-whole-turn* (coarse — also loses the assistant's reasoning)
+to *LLM-summary* (an extra model call), with nothing in between that collapses only
+the bulky **tool outputs** while keeping the full turn/reasoning structure intact.
 
 **Reliability principle (decided with owner):** prompt-driven mitigations
 (method 1 "delegate research to a worker", method 2 "summarize as you go") are
@@ -91,26 +102,80 @@ output → it must stay inside the spotlight fence; the helix-owned overflow foo
 stays trusted (outside), exactly as today. The generalization must preserve this
 ordering (`spotlight_untrusted(preview) + footer`).
 
-### Phase 2 — conversation-level compaction (cumulative, fallback)
+### Phase 2 — mechanical tool-result prune gate (CM-12)
 
-When the *total* request still exceeds a budget (many medium results, long
-history) even after Phase 1, compact the message history. Mirror Hermes
-`context_compressor`:
+Phase 2 is **narrower than originally scoped**: the conversation-level cascade
+already exists (CM-2 `WorkingWindow` + L.L2 `ContextCompressor` — see the corrected
+prior-art finding above). Hermes' tail-protection and LLM-summary rungs are already
+shipped. Phase 2 adds **only the one missing rung**: a cheap, LLM-free gate that
+collapses *old* tool results to 1-line references while keeping every turn and the
+assistant's reasoning intact — the graceful step between "drop the whole turn" and
+"pay for an LLM summary".
 
-1. **Tail protection by token budget** — keep the most recent messages verbatim
-   (token-budgeted, with a small message-count floor). The model always has its
-   recent working set intact.
-2. **Cheap mechanical pre-pass** (no LLM): prune *old* tool results to per-tool
-   1-line summaries (`[web_search] "<query>" → N results`), dedup identical
-   results, truncate stale oversized tool-call args.
-3. **LLM summary fallback** — only if still over budget, summarize head/middle via
-   the existing aux model (`control_plane/aux_model_adapter`, `memory_consolidator`
-   patterns). Full history stays in the checkpoint/workspace = recoverable.
+New module `orchestrator/context/tool_result_prune.py` → `ToolResultPruner`,
+mirroring `WorkingWindow`'s shape (frozen dataclass, token-gated, prompt-view-only).
 
-Trigger = request tokens vs a percentage of the model context window
-(`threshold_percent`). Interacts with the checkpointer (compaction rewrites
-state) — design + eval carefully; **Phase 2 ships separately** after Phase 1 is
-proven.
+**Ordering — runs FIRST, before `WorkingWindow`:** it is the least-lossy and
+cheapest gate, so running it first means the later, coarser gates re-estimate against
+a smaller prompt and fire less often (often not at all). Final cascade in `agent_node`:
+
+```
+messages = state["messages"]
+→ ToolResultPruner.apply()   # CM-12 — collapse OLD tool results to references (new)
+→ WorkingWindow.apply()      # CM-2  — drop whole old turns
+→ inject plan / memory / advisory
+→ ContextCompressor.compress()  # L.L2 — LLM summarise the middle
+```
+
+**Mechanism (single pass, no LLM):**
+
+1. Token-gate exactly like the other two gates: no-op unless the estimate is
+   `>= context_window * threshold_pct` (zero behaviour change for normal runs).
+2. Protect the most-recent `recent_tool_results_kept` `ToolMessage`s (count-based,
+   so it is robust to *many tool calls in one turn* — the actual search-bloat shape —
+   which a turn-based window would miss). Collapse every older `ToolMessage`:
+   - **Phase-1-externalized result** (carries the `<tool-result-overflow>` footer):
+     replace the content with the **footer alone** — the full output is already on
+     disk under `.tool_results/`, so this is **lossless** and the model can
+     `read_file` it back. (Bonus: drops the untrusted spotlight-fenced preview,
+     improving the trust posture.)
+   - **non-externalized result** (small, no footer): replace with a short
+     `<tool-result-pruned>[tool] N chars elided (older context)</tool-result-pruned>`
+     stub — lossy, but it is old, and strictly *less* lossy than the whole-turn drop
+     `WorkingWindow` would otherwise do to the same span.
+3. Pairing-safe by construction: prune only **rewrites `ToolMessage` content**, never
+   removes a message, so no `AIMessage.tool_calls ↔ ToolMessage` pair is ever split
+   (no boundary logic needed, unlike `WorkingWindow`).
+4. **Prompt-view only** — identical contract to `WorkingWindow` (CM-C4): the gate
+   mutates the local prompt list `agent_node` sends to the LLM; the node returns only
+   the new response tail, and the `add_messages` reducer never deletes, so the
+   **checkpoint keeps full, un-pruned history**. The next turn reloads the full
+   history and prunes afresh.
+5. **Idempotent**: a content that already starts with `<tool-result-pruned>` (stub)
+   or `<tool-result-overflow>` (footer-only ⇒ already pruned) is skipped.
+
+Config (`ToolResultPrunePolicy`, per-agent, defaults zero-behaviour-change under
+threshold):
+
+| field | default | note |
+|---|---|---|
+| `enabled` | `true` | mirrors CM-2 / L.L2 — gated, so off-threshold runs are untouched |
+| `threshold_pct` | `0.7` | same basis/estimator as the other gates (CM-C6) |
+| `recent_tool_results_kept` | `4` | last N `ToolMessage`s kept full |
+
+**Synergy with Phase 1:** because #859 already lands the full output of any large
+result on disk, pruning an externalized result to its footer is *lossless*. Phase 2 is
+the reclaim half of Phase 1's externalize half. Note that after Phase 1 the acute
+single-result case rarely trips Phase 2 at all (each big result is already a ~3 KB
+preview); Phase 2's niche is the **cumulative** case — many medium results summing
+over the window.
+
+**Out of scope for this pass** (was in the original Phase 2 sketch, now redundant or
+deferred): dedup of identical results and stale-arg truncation (low value once
+tool-output bulk is collapsed); externalize-on-prune for *small* non-externalized
+results (would make the stub recoverable too, but couples the prune path to the
+workspace writer — defer until a need appears). The LLM-summary fallback is **already
+shipped** (L.L2) and unchanged.
 
 ## Decisions
 
@@ -128,6 +193,15 @@ proven.
 5. **Worker delegation (method 1) is out of scope** as a bloat fix — unreliable
    (prompt-decided) and redundant once Phase 1 lands. Remains available for
    *parallelism*, not context hygiene.
+6. **Phase 2 is the prune gate only, not a new conversation compactor.** Exploration
+   corrected the premise: CM-2 `WorkingWindow` + L.L2 `ContextCompressor` already
+   provide tail protection and LLM summary. Building a parallel Hermes-style
+   compressor would duplicate shipped code. Phase 2 adds the one missing rung
+   (mechanical tool-result prune) and runs it *first* (cheapest, least lossy).
+7. **Count-based recent protection, not turn-based.** The bloat shape is *many tool
+   calls* (possibly within one turn), which a turn-based window would not relieve;
+   protecting the last N `ToolMessage`s directly bounds how many full tool outputs
+   ride in context.
 
 ## Risks
 
@@ -146,9 +220,15 @@ proven.
 
 ## Testing / verification
 
-- **Unit**: threshold boundary (just under / over), head+tail preview shape,
+- **Unit (Phase 1)**: threshold boundary (just under / over), head+tail preview shape,
   exempt tools pass through, write-failure fallback truncation, footer idempotency,
   spotlight ordering preserved, per-tool override.
+- **Unit (Phase 2 / CM-12)**: under threshold → no-op; over threshold → old tool
+  results collapsed, last N protected full; externalized result → footer-only
+  (lossless, full content unreferenced); non-externalized → stub with char count;
+  pairing preserved (message count unchanged, every `tool_call_id` still has its
+  `ToolMessage`); idempotent (prune twice == once); non-`ToolMessage`s untouched;
+  multimodal (list) content skipped.
 - **Integration (real PG/workspace)**: large `web_search` result → file written to
   `.tool_results/`, `ToolMessage` carries preview+ref, `read_file` returns the full
   content.
@@ -160,7 +240,7 @@ proven.
 
 ## Rollout
 
-1. Phase 1 behind `tool_output_budget.enabled` (default on; flip off to revert).
+1. Phase 1 behind `tool_output_budget.enabled` (default on; flip off to revert). ✅ #859
 2. Ship + live-verify the research task.
-3. Phase 2 (conversation compaction) as a separate design iteration once Phase 1
-   is proven and eval'd.
+3. Phase 2 = CM-12 mechanical prune gate (`policies.tool_result_prune`, default on,
+   token-gated). Per-agent `enabled: false` reverts. Ships after Phase 1 is in main.
