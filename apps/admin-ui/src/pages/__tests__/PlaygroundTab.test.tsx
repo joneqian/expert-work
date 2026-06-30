@@ -328,6 +328,34 @@ describe("PlaygroundTab", () => {
     expect(screen.getByTestId("playground-workspace-file-delete")).toBeInTheDocument();
   });
 
+  it("auto-fills run-as user on resume without spawning a fresh thread", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    getMessagesMock.mockResolvedValue([]);
+    const pastThread: ThreadMeta = {
+      ...sampleThread,
+      thread_id: "44444444-4444-4444-4444-444444444444",
+      user_id: "u1",
+    };
+    listSessionsMock.mockResolvedValue([pastThread]);
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+    // The initial mount created exactly one thread.
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+
+    // Open the resume picker and select the past thread.
+    const resume = within(screen.getByTestId("playground-resume-select")).getByRole("combobox");
+    await user.click(resume);
+    await user.click(await screen.findByText(/44444444/));
+
+    // Run-as field auto-filled with the resumed thread's owner.
+    const runAs = within(screen.getByTestId("playground-user")).getByRole("combobox");
+    await waitFor(() => expect(runAs).toHaveValue("u1"));
+    // The run-as change did NOT trip the rebind effect into a fresh thread.
+    expect(createSessionMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("playground-resumed-notice")).toBeInTheDocument();
+  });
+
   it("shows a stream-failure alert when streamRun throws", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);

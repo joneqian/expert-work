@@ -188,6 +188,10 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [history, setHistory] = useState<HistoryMessage[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
+  // Resume sets ``runAsUser`` to the thread's owner; that change would otherwise
+  // trip the "user changed → fresh thread" effect and clobber the resume. This
+  // flag tells that effect to skip exactly the one rebind resume triggers.
+  const skipRebindRef = useRef(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
@@ -286,17 +290,32 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       setResumed(true);
       setHistory([]);
       setThread(picked);
+      // Continue as the thread's own user so per-user workspace / memory /
+      // episodic stay consistent — auto-fill the run-as field. Guard the
+      // user-change rebind effect so this doesn't spawn a fresh thread (only
+      // when the value actually changes, else no rebind fires anyway).
+      const nextRunAs = picked.user_id ?? "";
+      if (nextRunAs !== runAsUser) {
+        skipRebindRef.current = true;
+        setRunAsUser(nextRunAs);
+      }
       // Load the thread's prior conversation from the checkpoint.
       void getSessionMessages(threadId)
         .then(setHistory)
         .catch(() => setHistory([]));
     },
-    [pastSessions],
+    [pastSessions, runAsUser],
   );
 
-  // Re-bind a fresh thread when the agent or the impersonated user changes.
+  // Re-bind a fresh thread when the agent or the impersonated user changes —
+  // except the run-as change a resume makes (``skipRebindRef``), which must
+  // keep the resumed thread.
   useEffect(() => {
-    void newThread();
+    if (skipRebindRef.current) {
+      skipRebindRef.current = false;
+    } else {
+      void newThread();
+    }
     return () => {
       abortRef.current?.abort();
     };
