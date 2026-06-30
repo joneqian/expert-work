@@ -21,6 +21,7 @@ logged server-side.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -491,6 +492,142 @@ def build_sessions_router() -> APIRouter:
             "X-Content-Type-Options": "nosniff",
         }
         return Response(content=data, media_type=inferred.content_type, headers=headers)
+
+    @router.delete("/{thread_id}/workspace/file", response_model=None)
+    async def delete_session_workspace_file(
+        thread_id: UUID,
+        request: Request,
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
+        path: Annotated[str, Query()],
+    ) -> JSONResponse:
+        """Delete one file from the thread user's persistent workspace volume.
+
+        Playground cleanup. Same ownership gate as browse/download; the
+        supervisor refuses reserved prefixes (seeded machinery). 404 hides
+        cross-user / no-supervisor; a missing file is an idempotent no-op.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+        safe_path = _safe_workspace_relpath(path)
+        if safe_path is None:
+            raise HTTPException(status_code=400, detail="invalid workspace path")
+        if meta.user_id is None or supervisor is None:
+            raise HTTPException(status_code=404, detail="file not found")
+        try:
+            await supervisor.delete_workspace_file(
+                tenant_id=tenant_id, user_id=meta.user_id, path=safe_path
+            )
+        except SandboxSupervisorError as exc:
+            logger.warning("session_workspace.delete_failed", exc_info=True)
+            raise HTTPException(status_code=404, detail="file not found") from exc
+        return JSONResponse({"success": True, "data": {"deleted": safe_path}})
+
+    @router.get("/{thread_id}/workspace/artifacts/{name:path}/download", response_model=None)
+    async def download_session_artifact(
+        thread_id: UUID,
+        name: str,
+        request: Request,
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        artifacts: Annotated[ArtifactStore, Depends(_get_artifact_store)],
+        supervisor: Annotated[SupervisorClient | None, Depends(_get_supervisor_client)],
+    ) -> Response:
+        """Download the thread user's artifact by logical name (latest version).
+
+        Thread-scoped (the impersonated user), unlike the caller-scoped
+        ``/v1/artifacts/download``. Resolves the latest version's workspace
+        path + proxies the bytes via the supervisor. 404 hides cross-user /
+        missing / no-supervisor.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+        if meta.user_id is None or supervisor is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        version = await artifacts.get_latest_version(
+            tenant_id=tenant_id, user_id=meta.user_id, name=name
+        )
+        if version is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        try:
+            data = await supervisor.read_workspace_file(
+                tenant_id=tenant_id, user_id=meta.user_id, path=version.path_in_workspace
+            )
+        except SandboxSupervisorError as exc:
+            logger.warning("session_artifact.content_unavailable", exc_info=True)
+            raise HTTPException(status_code=404, detail="artifact content not found") from exc
+        # Path-based MIME + XSS-safe disposition (active content → attachment),
+        # same as the workspace-file download; filename is the logical name.
+        inferred = infer_content_type(kind="other", path=version.path_in_workspace)
+        headers = {
+            "Content-Disposition": content_disposition_header(
+                name, disposition=inferred.disposition
+            ),
+            "X-Content-Type-Options": "nosniff",
+        }
+        return Response(content=data, media_type=inferred.content_type, headers=headers)
+
+    @router.delete("/{thread_id}/workspace/artifacts/{name:path}", response_model=None)
+    async def delete_session_artifact(
+        thread_id: UUID,
+        name: str,
+        request: Request,
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        artifacts: Annotated[ArtifactStore, Depends(_get_artifact_store)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Soft-delete the thread user's artifact by name (playground cleanup).
+
+        Thread-scoped (the impersonated user), unlike caller-scoped
+        ``DELETE /v1/artifacts/{name}``. Metadata only — the workspace bytes
+        remain (deletable separately as a file). 404 hides cross-user /
+        already-deleted / unknown.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+        if meta.user_id is None:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        hit = await artifacts.soft_delete(
+            tenant_id=tenant_id, user_id=meta.user_id, name=name, now=datetime.now(UTC)
+        )
+        if not hit:
+            raise HTTPException(status_code=404, detail="artifact not found")
+        actor_id: str = getattr(request.state, "actor_id", "anonymous")
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.ARTIFACT_DELETE,
+            resource_type="artifact",
+            resource_id=name,
+            result=AuditResult.SUCCESS,
+            trace_id=current_trace_id_hex(),
+            details={"user_id": str(meta.user_id), "via": "playground"},
+        )
+        return JSONResponse({"success": True, "data": {"deleted": name}})
 
     @router.get("")
     async def list_sessions(

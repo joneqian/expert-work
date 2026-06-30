@@ -552,6 +552,29 @@ class SandboxSupervisor:
         except DockerError as exc:
             raise SupervisorError(str(exc)) from exc
 
+    async def delete_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> None:
+        """Delete one file from a user's persistent workspace volume.
+
+        Backs the playground workspace cleanup. Validates the path at this
+        trust boundary and refuses reserved prefixes (seeded skill packages /
+        uploads machinery) — the same set ``list_workspace_files`` hides, so a
+        client can only delete what the agent itself produced. Missing files are
+        a no-op (``rm -f``). Raises :class:`WorkspaceFileNotFoundError` for a bad
+        / reserved path and :class:`SupervisorError` on a delete failure.
+        """
+        safe_path = _validate_workspace_path(path)
+        if is_reserved_workspace_path(safe_path):
+            raise WorkspaceFileNotFoundError(f"path {path!r} is reserved and cannot be deleted")
+        volume = workspace_volume_name(tenant_id, user_id)
+        try:
+            await self._docker.delete_volume_file(
+                volume=volume,
+                path=safe_path,
+                image=self._settings.sandbox_image,
+            )
+        except DockerError as exc:
+            raise SupervisorError(str(exc)) from exc
+
     # ------------------------------------------------------------------
 
     async def _reuse_session(

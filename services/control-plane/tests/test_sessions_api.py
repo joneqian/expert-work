@@ -339,6 +339,22 @@ async def test_workspace_files_and_download_with_supervisor(
         assert "attachment" in download.headers["content-disposition"]
         assert "report.pdf" in download.headers["content-disposition"]
 
+        # Delete proxies the path through to the supervisor (thread-scoped).
+        deleted = await client.request(
+            "DELETE", f"/v1/sessions/{thread_id}/workspace/file", params={"path": "report.pdf"}
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["data"]["deleted"] == "report.pdf"
+        sup = app.state.supervisor_client
+        assert [d[2] for d in sup.workspace_deletes] == ["report.pdf"]
+
+        # A traversal path is rejected before reaching the supervisor.
+        bad = await client.request(
+            "DELETE", f"/v1/sessions/{thread_id}/workspace/file", params={"path": "../etc/passwd"}
+        )
+        assert bad.status_code == 400
+        assert [d[2] for d in sup.workspace_deletes] == ["report.pdf"]
+
 
 @pytest.mark.asyncio
 async def test_get_returns_404_for_unknown(session_client: AsyncClient) -> None:

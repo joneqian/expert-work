@@ -549,6 +549,13 @@ export interface TranslationKeys {
     workspace_artifacts: string;
     workspace_files: string;
     workspace_file_download: string;
+    artifact_download: string;
+    artifact_delete: string;
+    artifact_delete_confirm: string;
+    file_delete: string;
+    file_delete_confirm: string;
+    delete_ok: string;
+    delete_cancel: string;
     resume_label: string;
     resumed_notice: string;
     history_divider: string;
@@ -2604,6 +2611,13 @@ const en: TranslationKeys = {
     workspace_artifacts: "Artifacts",
     workspace_files: "Files",
     workspace_file_download: "Download {{name}}",
+    artifact_download: "Download artifact {{name}}",
+    artifact_delete: "Delete artifact {{name}}",
+    artifact_delete_confirm: "Delete this artifact? Unregisters it only; the underlying file stays.",
+    file_delete: "Delete file {{name}}",
+    file_delete_confirm: "Permanently delete this file? This cannot be undone.",
+    delete_ok: "Delete",
+    delete_cancel: "Cancel",
     resume_label: "Resume…",
     resumed_notice: "Continuing an existing thread — prior conversation loaded below.",
     history_divider: "— new messages below —",

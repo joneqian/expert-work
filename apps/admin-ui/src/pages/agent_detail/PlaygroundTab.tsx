@@ -25,6 +25,7 @@ import {
   Collapse,
   Empty,
   Input,
+  Popconfirm,
   Segmented,
   Select,
   Space,
@@ -45,6 +46,7 @@ import {
   RotateCcw,
   Send,
   Square,
+  Trash2,
   User,
   X,
 } from "lucide-react";
@@ -61,6 +63,9 @@ import { listRateCards, type RateCardRecord } from "../../api/rate_card";
 import { streamRunEvents } from "../../api/runs";
 import {
   createSession,
+  deleteSessionArtifact,
+  deleteSessionWorkspaceFile,
+  downloadSessionArtifact,
   downloadSessionWorkspaceFile,
   getSessionMessages,
   getSessionWorkspace,
@@ -171,6 +176,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
+  // Workspace mutation in-flight: the file path or `artifact:<name>` being
+  // downloaded/deleted — disables the row's buttons + drives the spinner.
+  const [busyWorkspaceKey, setBusyWorkspaceKey] = useState<string | null>(null);
   // Playground-Uplift iter2 — #4 cost (agent model's rate), #6 resume history.
   const [rate, setRate] = useState<RateCardRecord | null>(null);
   const [pastSessions, setPastSessions] = useState<ThreadMeta[]>([]);
@@ -595,6 +603,50 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     [],
   );
 
+  const handleDownloadArtifact = useCallback(
+    async (threadId: string, name: string) => {
+      setBusyWorkspaceKey(`artifact:${name}`);
+      try {
+        await downloadSessionArtifact(threadId, name);
+      } catch {
+        // Swallow — same rationale as the file download.
+      } finally {
+        setBusyWorkspaceKey(null);
+      }
+    },
+    [],
+  );
+
+  const handleDeleteFile = useCallback(
+    async (threadId: string, path: string) => {
+      setBusyWorkspaceKey(path);
+      try {
+        await deleteSessionWorkspaceFile(threadId, path);
+        await loadWorkspace(threadId);
+      } catch {
+        // Swallow — refresh re-syncs the listing on the next manual refresh.
+      } finally {
+        setBusyWorkspaceKey(null);
+      }
+    },
+    [loadWorkspace],
+  );
+
+  const handleDeleteArtifact = useCallback(
+    async (threadId: string, name: string) => {
+      setBusyWorkspaceKey(`artifact:${name}`);
+      try {
+        await deleteSessionArtifact(threadId, name);
+        await loadWorkspace(threadId);
+      } catch {
+        // Swallow — refresh re-syncs.
+      } finally {
+        setBusyWorkspaceKey(null);
+      }
+    },
+    [loadWorkspace],
+  );
+
   // Refresh the workspace view when the thread (re)binds and after each run —
   // a run that wrote files makes the volume appear / its size grow.
   useEffect(() => {
@@ -960,41 +1012,20 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                 {t("playground.workspace_none")}
               </Text>
             )}
+            {/* Artifacts — the agent's registered deliverables: download +
+                (soft-)delete each. A list, not chips, since they're the things
+                you actually take away. */}
             {workspace && workspace.artifacts.length > 0 && (
-              <div style={{ marginTop: 6 }}>
+              <div style={{ marginTop: 6 }} data-testid="playground-workspace-artifacts">
                 <Text type="secondary" style={{ fontSize: 11 }}>
                   {t("playground.workspace_artifacts")}:
                 </Text>
-                <div style={{ marginTop: 4 }}>
-                  {workspace.artifacts.map((a) => (
-                    <Tag
-                      key={a.name}
-                      bordered={false}
-                      style={{ fontSize: 10, marginBottom: 2 }}
-                    >
-                      {a.name} · {a.kind} v{a.latest_version}
-                    </Tag>
-                  ))}
-                </div>
-              </div>
-            )}
-            {/* Browse + download the raw files the agent wrote (#workspace). */}
-            {workspaceFiles.length > 0 && (
-              <div style={{ marginTop: 8 }} data-testid="playground-workspace-files">
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {t("playground.workspace_files")}:
-                </Text>
                 <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
-                  {workspaceFiles.map((f) => (
+                  {workspace.artifacts.map((a) => (
                     <div
-                      key={f.path}
-                      data-testid="playground-workspace-file"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        fontSize: 11,
-                      }}
+                      key={a.name}
+                      data-testid="playground-workspace-artifact"
+                      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}
                     >
                       <span
                         className="mono"
@@ -1004,29 +1035,121 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
                         }}
-                        title={f.path}
+                        title={`${a.name} · ${a.kind} v${a.latest_version}`}
                       >
-                        {f.path}
+                        {a.name}
                       </span>
                       <Text type="secondary" style={{ fontSize: 10 }}>
-                        {formatBytes(f.size)}
+                        {a.kind} v{a.latest_version}
                       </Text>
                       <Button
                         size="small"
                         type="text"
                         icon={<Download size={11} strokeWidth={1.75} />}
-                        loading={downloadingPath === f.path}
-                        disabled={!thread || downloadingPath !== null}
+                        loading={busyWorkspaceKey === `artifact:${a.name}`}
+                        disabled={!thread || busyWorkspaceKey !== null}
                         onClick={() =>
-                          thread && void handleDownloadFile(thread.thread_id, f.path)
+                          thread && void handleDownloadArtifact(thread.thread_id, a.name)
                         }
-                        aria-label={t("playground.workspace_file_download", {
-                          name: f.path,
-                        })}
-                        data-testid="playground-workspace-file-download"
+                        aria-label={t("playground.artifact_download", { name: a.name })}
+                        data-testid="playground-workspace-artifact-download"
                       />
+                      <Popconfirm
+                        title={t("playground.artifact_delete_confirm")}
+                        okText={t("playground.delete_ok")}
+                        cancelText={t("playground.delete_cancel")}
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() =>
+                          thread && void handleDeleteArtifact(thread.thread_id, a.name)
+                        }
+                      >
+                        <Button
+                          size="small"
+                          type="text"
+                          danger
+                          icon={<Trash2 size={11} strokeWidth={1.75} />}
+                          disabled={!thread || busyWorkspaceKey !== null}
+                          aria-label={t("playground.artifact_delete", { name: a.name })}
+                          data-testid="playground-workspace-artifact-delete"
+                        />
+                      </Popconfirm>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+            {/* Browse + download + delete the raw files the agent wrote. Hidden
+                files (.npm/.cache/.mplconfig …) are filtered — runtime noise. */}
+            {workspaceFiles.some((f) => !isHiddenWorkspacePath(f.path)) && (
+              <div style={{ marginTop: 8 }} data-testid="playground-workspace-files">
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {t("playground.workspace_files")}:
+                </Text>
+                <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                  {workspaceFiles
+                    .filter((f) => !isHiddenWorkspacePath(f.path))
+                    .map((f) => (
+                      <div
+                        key={f.path}
+                        data-testid="playground-workspace-file"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 11,
+                        }}
+                      >
+                        <span
+                          className="mono"
+                          style={{
+                            flex: 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={f.path}
+                        >
+                          {f.path}
+                        </span>
+                        <Text type="secondary" style={{ fontSize: 10 }}>
+                          {formatBytes(f.size)}
+                        </Text>
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<Download size={11} strokeWidth={1.75} />}
+                          loading={downloadingPath === f.path}
+                          disabled={!thread || downloadingPath !== null || busyWorkspaceKey !== null}
+                          onClick={() =>
+                            thread && void handleDownloadFile(thread.thread_id, f.path)
+                          }
+                          aria-label={t("playground.workspace_file_download", {
+                            name: f.path,
+                          })}
+                          data-testid="playground-workspace-file-download"
+                        />
+                        <Popconfirm
+                          title={t("playground.file_delete_confirm")}
+                          okText={t("playground.delete_ok")}
+                          cancelText={t("playground.delete_cancel")}
+                          okButtonProps={{ danger: true }}
+                          onConfirm={() =>
+                            thread && void handleDeleteFile(thread.thread_id, f.path)
+                          }
+                        >
+                          <Button
+                            size="small"
+                            type="text"
+                            danger
+                            icon={<Trash2 size={11} strokeWidth={1.75} />}
+                            loading={busyWorkspaceKey === f.path}
+                            disabled={!thread || busyWorkspaceKey !== null}
+                            aria-label={t("playground.file_delete", { name: f.path })}
+                            data-testid="playground-workspace-file-delete"
+                          />
+                        </Popconfirm>
+                      </div>
+                    ))}
                 </div>
               </div>
             )}
@@ -1167,6 +1290,12 @@ function downloadJson(filename: string, data: unknown): void {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+/** Hide dotfiles/dotdirs (``.npm``, ``.cache``, ``.mplconfig``, …) — runtime
+ *  scaffolding the agent didn't author, just noise in the workspace browser. */
+function isHiddenWorkspacePath(path: string): boolean {
+  return path.split("/").some((seg) => seg.startsWith("."));
 }
 
 function runIdOf(events: readonly SseEvent[]): string | null {

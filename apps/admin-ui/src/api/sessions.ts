@@ -134,6 +134,49 @@ export async function downloadSessionWorkspaceFile(
   }
 }
 
+/** Download a registered artifact (latest version) by logical name. Thread-
+ *  scoped — resolves the impersonated user server-side. Mirrors the workspace
+ *  file download (manual Bearer + Blob save). */
+export async function downloadSessionArtifact(
+  threadId: string,
+  name: string,
+): Promise<void> {
+  const token = getStoredToken();
+  const url = `/v1/sessions/${encodeURIComponent(threadId)}/workspace/artifacts/${encodeURIComponent(name)}/download`;
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error(`artifact download failed: HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = name.split("/").pop() || "download";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+/** Delete one file from the thread user's workspace volume (hard delete). */
+export async function deleteSessionWorkspaceFile(threadId: string, path: string): Promise<void> {
+  await apiClient.delete(`/v1/sessions/${encodeURIComponent(threadId)}/workspace/file`, {
+    params: { path },
+  });
+}
+
+/** Soft-delete one registered artifact (metadata only; the file remains). */
+export async function deleteSessionArtifact(threadId: string, name: string): Promise<void> {
+  await apiClient.delete(
+    `/v1/sessions/${encodeURIComponent(threadId)}/workspace/artifacts/${encodeURIComponent(name)}`,
+  );
+}
+
 /** Playground-Uplift #6 — a resumed thread's prior conversation (from the
  *  durable checkpoint), so resume shows what was said before. User/assistant
  *  text turns only. */

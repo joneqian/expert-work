@@ -214,6 +214,54 @@ describe("PlaygroundTab", () => {
     clickSpy.mockRestore();
   });
 
+  it("lists artifacts with download/delete and hides dotfiles from files", async () => {
+    createSessionMock.mockResolvedValue(sampleThread);
+    getWorkspaceMock.mockResolvedValue({
+      workspace: {
+        id: "w1",
+        tenant_id: "t1",
+        user_id: "u1",
+        volume_name: "vol-1",
+        size_bytes: 1024,
+        size_limit_bytes: 1_048_576,
+        created_at: null,
+        last_accessed_at: null,
+        deleted_at: null,
+        archived_object_key: null,
+      },
+      artifacts: [
+        {
+          name: "report.pdf",
+          kind: "document",
+          latest_version: 1,
+          created_at: null,
+          updated_at: null,
+        },
+      ],
+    });
+    getWorkspaceFilesMock.mockResolvedValue([
+      { path: "agent_report.md", size: 2048 },
+      { path: ".npm/_cacache/index", size: 99 },
+      { path: ".mplconfig/matplotlibrc", size: 10 },
+    ]);
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+
+    // Artifact renders as a list row with download + delete affordances.
+    expect(
+      await screen.findByTestId("playground-workspace-artifact-download"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("playground-workspace-artifact-delete")).toBeInTheDocument();
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+
+    // Only the agent's own file shows; the dotfiles (.npm/.mplconfig) are hidden.
+    const fileRows = screen.getAllByTestId("playground-workspace-file");
+    expect(fileRows).toHaveLength(1);
+    expect(screen.getByText("agent_report.md")).toBeInTheDocument();
+    expect(screen.queryByText(".npm/_cacache/index")).not.toBeInTheDocument();
+    expect(screen.getByTestId("playground-workspace-file-delete")).toBeInTheDocument();
+  });
+
   it("shows a stream-failure alert when streamRun throws", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);

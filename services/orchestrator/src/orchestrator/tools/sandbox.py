@@ -172,6 +172,12 @@ class SupervisorClient(Protocol):
         workspace so a later run's ``read_document`` can read them. Only
         the supervisor can write a per-user docker volume."""
 
+    async def delete_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> None:
+        """Delete one file from a user's persistent workspace volume.
+
+        Backs the playground workspace cleanup. Only the supervisor can
+        mutate a per-user docker volume; the control-plane proxies here."""
+
     async def reap(self, *, force: bool) -> int:
         """Run the idle-session sweep now; return how many were reaped.
 
@@ -331,6 +337,23 @@ class HTTPSupervisorClient:
             )
             raise SandboxSupervisorError(msg)
 
+    async def delete_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> None:
+        url = f"{self.base_url}/v1/workspaces/{tenant_id}/{user_id}/file"
+        async with self._make_client() as client:
+            try:
+                response = await client.request(
+                    "DELETE", url, params={"path": path}, headers=_traced_headers()
+                )
+            except httpx.HTTPError as exc:
+                msg = f"sandbox supervisor unreachable ({url}): {exc}"
+                raise SandboxSupervisorError(msg) from exc
+        if response.is_error:
+            msg = (
+                "sandbox supervisor workspace delete failed: "
+                f"{response.status_code} {response.text}"
+            )
+            raise SandboxSupervisorError(msg)
+
     async def _post(
         self,
         path: str,
@@ -389,6 +412,8 @@ class RecordingSupervisorClient:
     workspace_reads: list[tuple[UUID, UUID, str]] = field(default_factory=list)
     workspace_writes: list[tuple[UUID, UUID, str, bytes]] = field(default_factory=list)
     workspace_write_error: Exception | None = None
+    workspace_deletes: list[tuple[UUID, UUID, str]] = field(default_factory=list)
+    workspace_delete_error: Exception | None = None
     reaped: list[bool] = field(default_factory=list)
     reap_count: int = 0
     _next_id: int = 0
@@ -442,6 +467,11 @@ class RecordingSupervisorClient:
         if self.workspace_write_error is not None:
             raise self.workspace_write_error
         self.workspace_writes.append((tenant_id, user_id, path, data))
+
+    async def delete_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> None:
+        if self.workspace_delete_error is not None:
+            raise self.workspace_delete_error
+        self.workspace_deletes.append((tenant_id, user_id, path))
 
     async def reap(self, *, force: bool) -> int:
         self.reaped.append(force)
@@ -503,6 +533,9 @@ class _EgressBindingClient:
         await self.inner.write_workspace_file(
             tenant_id=tenant_id, user_id=user_id, path=path, data=data
         )
+
+    async def delete_workspace_file(self, *, tenant_id: UUID, user_id: UUID, path: str) -> None:
+        await self.inner.delete_workspace_file(tenant_id=tenant_id, user_id=user_id, path=path)
 
     async def reap(self, *, force: bool) -> int:
         return await self.inner.reap(force=force)

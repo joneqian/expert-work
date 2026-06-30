@@ -345,6 +345,18 @@ def _register_routes(app: FastAPI) -> None:
         )
         return Response(status_code=204)
 
+    @app.delete("/v1/workspaces/{tenant_id}/{user_id}/file", status_code=204)
+    async def delete_workspace_file(
+        tenant_id: UUID,
+        user_id: UUID,
+        path: str,
+        supervisor: SupervisorDep,
+    ) -> Response:
+        # Playground workspace cleanup — only the supervisor can mutate a
+        # per-user docker volume; the control-plane proxies the delete here.
+        await supervisor.delete_workspace_file(tenant_id=tenant_id, user_id=user_id, path=path)
+        return Response(status_code=204)
+
     @app.get("/v1/health")
     async def health(supervisor: SupervisorDep) -> HealthResponse:
         docker_ok = await supervisor.docker_ok()
