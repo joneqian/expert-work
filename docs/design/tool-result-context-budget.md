@@ -206,6 +206,49 @@ switch:
    proven mechanism). One env flip reverts the whole feature platform-wide without a
    manifest edit or redeploy.
 
+### Phase 3 — managed toggles (platform + per-agent, UI)
+
+Phase 2.1's kill switch is env-only (ops, redeploy to flip). Phase 3 makes the
+feature **manageable from admin-ui** at two grains, both controlling the **whole
+feature** (externalization + persist + prune):
+
+* **Platform toggle** — DB-backed, mirrors `PlatformJudgeConfigService` ("DB-wins
+  effective config, TTL-cached"). A single-row `platform_tool_budget_config` table
+  (`enabled BOOL`). `effective_enabled()` = the DB row if set, else the
+  `HELIX_TOOL_OUTPUT_BUDGET` env default (so the env stays the bootstrap default and
+  the ops hard-revert when no DB row exists; once an admin flips it in the UI, the DB
+  value wins). Surfaced read/write via a platform API (system_admin scope) and a
+  `Switch` on `SettingsPlatformConfig`. Flipping it takes effect on the next agent
+  build — no redeploy.
+
+* **Per-agent toggle** — a new master `policies.tool_output_budget.enabled` (default
+  `true`) gating the whole feature *for that agent*. Distinct from the existing
+  `policies.tool_result_prune.*` (which stays the prune sub-knobs: threshold, kept
+  count). Surfaced as a `Switch` in the agent config form.
+
+**Precedence — `effective = platform AND agent`.** The platform toggle is a master
+kill: off ⇒ off for every agent regardless of its flag. When platform is on, each
+agent's flag decides. Resolved once at **build time** (`build_agent` is async and
+already receives platform-resolved config like the embedder):
+
+```
+platform_on = platform_tool_budget_enabled  # service.effective_enabled(), env-default
+agent_on    = spec.policies.tool_output_budget.enabled
+effective   = platform_on and agent_on
+# pruner built only if (effective and tool_result_prune.enabled)
+# build_react_graph(tool_output_budget_enabled=effective)
+#   → threaded into _externalize_tool_overflow (replaces its direct env read)
+```
+
+`_externalize_tool_overflow` stops reading the env directly; it takes the resolved
+`budget_enabled` bool so the platform+agent decision is honoured uniformly across the
+generalized externalize + persist branches (CM-5 `full_content` still always on).
+
+**Milestones.** M1 backend: protocol flag + platform service/store/migration/API +
+factory/builder gating threaded from the resolved bool. M2 admin-ui: platform `Switch`
+on `SettingsPlatformConfig`, per-agent `Switch` on the config form, SDK + i18n +
+stories + e2e/axe.
+
 ## Decisions
 
 1. **Mechanical, not prompt.** Per-result externalization fires deterministically;
