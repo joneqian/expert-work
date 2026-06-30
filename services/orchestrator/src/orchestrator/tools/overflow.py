@@ -23,6 +23,14 @@ from uuid import UUID
 #: backup / 90-day archive) — no bespoke cleanup (Mini-ADR CM-F6).
 OVERFLOW_DIR = ".tool_results"
 
+#: Opening tag of the helix-owned reference footer appended after an
+#: externalized result (see :func:`render_overflow_footer`). The footer is
+#: appended last and stays trusted (outside the spotlight fence). Exported as
+#: a named constant so the CM-12 prune gate
+#: (``orchestrator.context.tool_result_prune``) can detect an externalized
+#: ToolMessage and slice the footer back out without string-format drift.
+OVERFLOW_FOOTER_TAG_OPEN = "<tool-result-overflow>"
+
 #: Hard cap on one externalized overflow file. The write travels through
 #: the sandbox supervisor HTTP API as a snippet parameter — an unbounded
 #: payload (e.g. a 500MB stdout) would stall the line (Mini-ADR CM-F5).
@@ -125,7 +133,7 @@ def render_overflow_footer(*, rel: str, total_chars: int) -> str:
     footer must never point at a file that does not exist).
     """
     return (
-        "\n\n<tool-result-overflow>\n"
+        f"\n\n{OVERFLOW_FOOTER_TAG_OPEN}\n"
         f"The output above was truncated. The full output ({total_chars} chars) was saved to "
         f"{rel} in your workspace. Use read_file / exec_python / bash to inspect it.\n"
         "</tool-result-overflow>"

@@ -65,7 +65,12 @@ from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
 from helix_agent.runtime.tokens import default_estimator
-from orchestrator.context import ContextCompressor, WorkingWindow, WorkspaceFileWriter
+from orchestrator.context import (
+    ContextCompressor,
+    ToolResultPruner,
+    WorkingWindow,
+    WorkspaceFileWriter,
+)
 from orchestrator.errors import (
     AgentFactoryError,
     SkillConflictError,
@@ -668,6 +673,19 @@ async def build_agent(
             keep_first_turn=wm_policy.keep_first_turn,
             estimator=estimator,
         )
+    # Stream CM-12 — mechanical tool-result prune gate: the cheapest, least-lossy
+    # gate that runs before the working window in agent_node. Conservative
+    # defaults ⇒ no-op under threshold / within recent_tool_results_kept (zero
+    # behaviour change for existing manifests).
+    trp_policy = spec.spec.policies.tool_result_prune
+    tool_result_pruner: ToolResultPruner | None = None
+    if trp_policy.enabled:
+        tool_result_pruner = ToolResultPruner(
+            context_window=_resolved_context_window(spec.spec.model),
+            threshold_pct=trp_policy.threshold_pct,
+            recent_tool_results_kept=trp_policy.recent_tool_results_kept,
+            estimator=estimator,
+        )
     # ``loaded_skills`` was resolved above (before the tool registry) so the
     # sandbox tools could be bound with the skill seed-file set.
     # Capability Uplift Sprint #3 (Mini-ADR U-17) — register the single
@@ -767,6 +785,7 @@ async def build_agent(
         before_tool_dispatch_chain=chains.before_tool_dispatch,
         context_compressor=context_compressor,
         working_window=working_window,
+        tool_result_pruner=tool_result_pruner,
         pre_compaction_flush=pre_compaction_flush,
         workspace_writer_factory=workspace_writer_factory,
         workspace_ingest_node=workspace_ingest_node,

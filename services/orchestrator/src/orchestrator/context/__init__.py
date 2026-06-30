@@ -23,6 +23,15 @@ from orchestrator.context.compressor import (
 from orchestrator.context.compressor import (
     estimate_tokens as estimate_tokens,
 )
+from orchestrator.context.tool_result_prune import (
+    PruneResult as PruneResult,
+)
+from orchestrator.context.tool_result_prune import (
+    ToolResultPruner as ToolResultPruner,
+)
+from orchestrator.context.tool_result_prune import (
+    prune_old_tool_results as prune_old_tool_results,
+)
 from orchestrator.context.working_window import (
     TrimResult as TrimResult,
 )
@@ -65,6 +74,8 @@ __all__ = [
     "ContextOverflowError",
     "PreCompactionHook",
     "ProjectionResult",
+    "PruneResult",
+    "ToolResultPruner",
     "TrimResult",
     "WorkingWindow",
     "WorkspaceFileReader",
@@ -73,6 +84,7 @@ __all__ = [
     "WorkspaceProjector",
     "estimate_tokens",
     "parse_plan_md",
+    "prune_old_tool_results",
     "render_memory_md",
     "render_plan_md",
     "render_todo_md",

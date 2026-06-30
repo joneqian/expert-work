@@ -627,6 +627,34 @@ class WorkingMemoryPolicy(BaseModel):
     keep_first_turn: bool = True
 
 
+class ToolResultPrunePolicy(BaseModel):
+    """Stream CM-12 — mechanical tool-result prune gate knobs.
+
+    Drives :class:`~orchestrator.context.tool_result_prune.ToolResultPruner`,
+    the cheapest, least-lossy gate that runs *before* the CM-2 working window:
+    when the estimated prompt is at/over ``context_window * threshold_pct`` it
+    collapses every :class:`ToolMessage` beyond the most-recent
+    ``recent_tool_results_kept`` to a 1-line reference (the Phase-1-externalized
+    ones losslessly — their full output is on disk under ``.tool_results/`` —
+    a short stub otherwise), keeping every turn and the assistant's reasoning
+    intact. It mutates only this prompt view; the checkpointed history is never
+    rewritten.
+
+    Defaults are conservative so existing manifests see **zero behaviour
+    change**: a conversation under threshold (or with at most
+    ``recent_tool_results_kept`` tool results) is left untouched. Independent of
+    :class:`WorkingMemoryPolicy` / :class:`ContextCompressionPolicy` — the three
+    gates compose (prune → window → compressor) on the same ``threshold_pct``
+    basis. See docs/design/tool-result-context-budget.md §Phase 2.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    threshold_pct: float = Field(default=0.7, gt=0.0, le=1.0)
+    recent_tool_results_kept: int = Field(default=4, ge=0)
+
+
 class MemoryConsolidationPolicy(BaseModel):
     """Stream Uplift Sprint #7 (Mini-ADR U-39) — per-agent
     MemoryConsolidator knobs.
@@ -670,6 +698,12 @@ class PolicySpec(BaseModel):
     # gate). Conservative defaults ⇒ zero behaviour change for existing
     # manifests (no-op under threshold / within max_recent_turns).
     working_memory: WorkingMemoryPolicy = Field(default_factory=WorkingMemoryPolicy)
+    # Stream CM-12 — mechanical tool-result prune gate. The cheapest, least-lossy
+    # context gate, run before the working window: collapses old tool results to
+    # 1-line references (lossless for Phase-1-externalized ones). Conservative
+    # defaults ⇒ zero behaviour change for existing manifests (no-op under
+    # threshold / within recent_tool_results_kept).
+    tool_result_prune: ToolResultPrunePolicy = Field(default_factory=ToolResultPrunePolicy)
     # Capability Uplift Sprint #7 (Mini-ADR U-39) — per-agent
     # MemoryConsolidator knobs. Defaults are equivalent to "use platform
     # defaults" so existing manifests load unchanged.

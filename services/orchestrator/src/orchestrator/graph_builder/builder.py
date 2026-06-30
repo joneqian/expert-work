@@ -89,6 +89,7 @@ from orchestrator.context import (
     ContextCompressor,
     PreCompactionHook,
     ProjectionResult,
+    ToolResultPruner,
     WorkingWindow,
     WorkspaceFileWriter,
     WorkspaceProjector,
@@ -320,6 +321,11 @@ def build_react_graph(
     # gate run before the compressor at the agent_node entry. ``None`` →
     # no pre-compressor trimming (the default; unchanged from pre-CM-2).
     working_window: WorkingWindow | None = None,
+    # Stream CM-12 — mechanical tool-result prune gate: the cheapest, least-lossy
+    # gate, run BEFORE the working window at the agent_node entry. Collapses old
+    # tool results to 1-line references (lossless for Phase-1-externalized ones).
+    # ``None`` → no prune (the default; unchanged from pre-CM-12).
+    tool_result_pruner: ToolResultPruner | None = None,
     # Stream CM-3 — pre-compaction flush: when set, agent_node hands the
     # compressor a callback that flushes the about-to-be-discarded middle
     # to long-term memory before each pass summarises it away. ``None`` →
@@ -471,6 +477,16 @@ def build_react_graph(
         else:
             tools = [*tool_registry.specs(), *tool_registry.deferred_specs(promoted)]
         messages = list(state["messages"])
+        # Stream CM-12 — mechanical tool-result prune: the cheapest, least-lossy
+        # gate, run FIRST. When over threshold it collapses OLD tool results
+        # (beyond the most-recent N) to 1-line references — lossless for
+        # Phase-1-externalized results (full output on disk under .tool_results/),
+        # a short stub otherwise — while keeping every turn + the assistant's
+        # reasoning intact. Running it before the window means the coarser gates
+        # re-estimate against a smaller prompt and fire less often. Prompt-view
+        # only — the checkpointed history is never rewritten (CM-C4).
+        if tool_result_pruner is not None:
+            messages = tool_result_pruner.apply(messages).messages
         # Stream CM-2 — working-memory sliding window: cheap LLM-free first
         # gate. Trims the raw history to first turn + most-recent N turns
         # when over threshold (on HumanMessage boundaries, so tool-call
