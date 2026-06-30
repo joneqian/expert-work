@@ -137,7 +137,12 @@ class SaveArtifactTool:
             created_in_thread=thread_id,
         )
         return ToolResult(
-            content=f"Saved artifact {name!r} (kind={kind}) as version {version.version}.",
+            content=(
+                f"Saved artifact {name!r} (kind={kind}) as version {version.version}. "
+                "The user can now download it directly from the conversation; tell them "
+                "it is ready and refer to it by name — do not fabricate a download link "
+                "or URL (the interface renders the download for them)."
+            ),
             meta={"artifact": name, "version": version.version, "kind": kind},
         )
 

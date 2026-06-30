@@ -174,3 +174,25 @@ export function parseToolCalls(
   }
   return entries;
 }
+
+/** An artifact the agent registered this turn — drives the inline per-message
+ *  download row (the agent can't emit a download URL itself; the UI renders it
+ *  from the artifact name, the same way deer-flow surfaces ``present_files``). */
+export interface TurnArtifact {
+  name: string;
+  kind: string;
+}
+
+/** Artifacts registered via a successful ``save_artifact`` call in this turn's
+ *  events, newest-wins on re-save (a re-saved name keeps one chip). */
+export function artifactsFromTools(events: readonly SseEvent[]): TurnArtifact[] {
+  const byName = new Map<string, TurnArtifact>();
+  for (const entry of parseToolCalls(events)) {
+    if (entry.toolName !== "save_artifact" || entry.status !== "success") continue;
+    const name = typeof entry.args.name === "string" ? entry.args.name.trim() : "";
+    if (name === "") continue;
+    const kind = typeof entry.args.kind === "string" ? entry.args.kind : "other";
+    byName.set(name, { name, kind });
+  }
+  return [...byName.values()];
+}

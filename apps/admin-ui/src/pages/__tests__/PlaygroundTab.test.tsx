@@ -59,6 +59,7 @@ const listMembersMock = vi.spyOn(membersSdk, "listMembers");
 const getWorkspaceMock = vi.spyOn(sessionsSdk, "getSessionWorkspace");
 const getWorkspaceFilesMock = vi.spyOn(sessionsSdk, "getSessionWorkspaceFiles");
 const downloadFileMock = vi.spyOn(sessionsSdk, "downloadSessionWorkspaceFile");
+const downloadArtifactMock = vi.spyOn(sessionsSdk, "downloadSessionArtifact");
 const listSessionsMock = vi.spyOn(sessionsSdk, "listSessions");
 const getMessagesMock = vi.spyOn(sessionsSdk, "getSessionMessages");
 const listRateCardsMock = vi.spyOn(rateCardSdk, "listRateCards");
@@ -79,6 +80,8 @@ beforeEach(() => {
   getWorkspaceFilesMock.mockResolvedValue([]);
   downloadFileMock.mockReset();
   downloadFileMock.mockResolvedValue(undefined);
+  downloadArtifactMock.mockReset();
+  downloadArtifactMock.mockResolvedValue(undefined);
   listSessionsMock.mockReset();
   listSessionsMock.mockResolvedValue([]);
   getMessagesMock.mockReset();
@@ -166,6 +169,69 @@ describe("PlaygroundTab", () => {
     await screen.findByTestId("playground-event-updates");
     await screen.findByTestId("playground-event-end");
     expect(screen.queryByTestId("playground-stop")).not.toBeInTheDocument();
+  });
+
+  it("renders an inline download for an artifact the turn registered", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    streamRunMock.mockReturnValue(
+      makeStream([
+        { id: "1", event: "metadata", data: { run_id: "r-1" }, rawData: "", receivedAt: "" },
+        {
+          id: "2",
+          event: "updates",
+          data: {
+            agent: {
+              messages: [
+                {
+                  type: "ai",
+                  content: "",
+                  tool_calls: [
+                    {
+                      id: "c1",
+                      name: "save_artifact",
+                      args: { name: "report.pdf", kind: "document" },
+                      type: "tool_call",
+                    },
+                  ],
+                },
+              ],
+            },
+          },
+          rawData: "",
+          receivedAt: "",
+        },
+        {
+          id: "3",
+          event: "updates",
+          data: {
+            tools: {
+              messages: [
+                {
+                  type: "tool",
+                  tool_call_id: "c1",
+                  name: "save_artifact",
+                  content: "Saved artifact 'report.pdf' …",
+                  status: "success",
+                },
+              ],
+            },
+          },
+          rawData: "",
+          receivedAt: "",
+        },
+        { id: "4", event: "end", data: "ok", rawData: "ok", receivedAt: "" },
+      ]),
+    );
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+    await user.type(screen.getByTestId("playground-input"), "make a pdf");
+    await user.click(screen.getByTestId("playground-run"));
+
+    const btn = await screen.findByTestId("playground-turn-artifact-download");
+    expect(btn).toHaveTextContent("report.pdf");
+    await user.click(btn);
+    expect(downloadArtifactMock).toHaveBeenCalledWith(sampleThread.thread_id, "report.pdf");
   });
 
   it("exports the turn's authoritative event stream as JSON", async () => {

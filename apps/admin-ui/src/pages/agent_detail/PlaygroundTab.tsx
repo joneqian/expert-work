@@ -16,7 +16,7 @@
  * The "edit manifest snippet + re-run" affordance is a follow-up (needs a
  * backend ad-hoc manifest override that doesn't exist yet).
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Alert,
@@ -79,6 +79,7 @@ import {
   type ThreadMeta,
   type WorkspaceFile,
 } from "../../api/sessions";
+import { artifactsFromTools } from "../../api/tool_timeline";
 import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import { CopyButton } from "../../components/CopyButton";
@@ -1266,6 +1267,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               eventView={eventView}
               onViewChange={setEventView}
               threadId={thread?.thread_id ?? null}
+              onDownloadArtifact={handleDownloadArtifact}
               rate={rate}
               onDecide={handleDecide}
               deciding={running}
@@ -1419,6 +1421,7 @@ function TurnCard({
   eventView,
   onViewChange,
   threadId,
+  onDownloadArtifact,
   rate,
   onDecide,
   deciding,
@@ -1429,6 +1432,7 @@ function TurnCard({
   eventView: "timeline" | "raw";
   onViewChange: (view: "timeline" | "raw") => void;
   threadId: string | null;
+  onDownloadArtifact: (threadId: string, name: string) => Promise<void>;
   rate: RateCardRecord | null;
   onDecide: (turnId: string, approval: ApprovalItem, decision: "approve" | "reject") => void;
   deciding: boolean;
@@ -1437,6 +1441,23 @@ function TurnCard({
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
+  // A+B — artifacts the agent registered this turn (``save_artifact``). The
+  // agent can't emit a download link itself (the endpoint is thread-scoped +
+  // auth'd), so surface them as an inline download row — deer-flow's pattern.
+  const turnArtifacts = useMemo(() => artifactsFromTools(turn.events), [turn.events]);
+  const [downloadingArtifact, setDownloadingArtifact] = useState<string | null>(null);
+  const downloadArtifact = useCallback(
+    async (name: string) => {
+      if (threadId === null) return;
+      setDownloadingArtifact(name);
+      try {
+        await onDownloadArtifact(threadId, name);
+      } finally {
+        setDownloadingArtifact(null);
+      }
+    },
+    [threadId, onDownloadArtifact],
+  );
   const answer =
     summary.finalText ??
     (turn.status === "running" ? t("playground.turn_running") : null);
@@ -1503,6 +1524,37 @@ function TurnCard({
           <Text type="secondary" style={{ fontSize: 12 }}>
             {t("playground.turn_no_text")}
           </Text>
+        )}
+
+        {/* A+B — inline download row for artifacts this turn registered. */}
+        {turnArtifacts.length > 0 && threadId && (
+          <div
+            style={{
+              marginTop: 8,
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+            data-testid="playground-turn-artifacts"
+          >
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {t("playground.workspace_artifacts")}:
+            </Text>
+            {turnArtifacts.map((a) => (
+              <Button
+                key={a.name}
+                size="small"
+                icon={<Download size={11} strokeWidth={1.75} />}
+                loading={downloadingArtifact === a.name}
+                onClick={() => void downloadArtifact(a.name)}
+                aria-label={t("playground.artifact_download", { name: a.name })}
+                data-testid="playground-turn-artifact-download"
+              >
+                {a.name}
+              </Button>
+            ))}
+          </div>
         )}
 
         {/* #5 — approval gate (run paused on an approval-required tool). */}

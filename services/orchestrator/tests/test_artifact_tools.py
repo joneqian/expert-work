@@ -42,6 +42,9 @@ async def test_save_artifact_records_version_one() -> None:
 
     assert result.meta == {"artifact": "report.md", "version": 1, "kind": "document"}
     assert "report.md" in result.content
+    # B — the result tells the model the user can download it (so it references
+    # the artifact by name instead of fabricating a link the UI renders for it).
+    assert "download" in result.content.lower()
     artifacts = await store.list_for_user(tenant_id=ctx.tenant_id, user_id=ctx.user_id)
     assert len(artifacts) == 1
     assert artifacts[0].kind == "document"

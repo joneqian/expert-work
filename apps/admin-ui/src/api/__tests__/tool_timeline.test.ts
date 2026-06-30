@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseToolCalls } from "../tool_timeline";
+import { artifactsFromTools, parseToolCalls } from "../tool_timeline";
 import type { SseEvent } from "../sessions";
 
 function evt(event: string, data: unknown): SseEvent {
@@ -109,5 +109,54 @@ describe("parseToolCalls", () => {
     expect(entry.isMcp).toBe(true);
     expect(entry.server).toBe("amap-maps");
     expect(entry.toolName).toBe("geo");
+  });
+});
+
+describe("artifactsFromTools", () => {
+  it("returns a successfully saved artifact with its name + kind", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "save_artifact", { name: "report.pdf", kind: "document" })]),
+      updates("tools", [toolResult("c1", "Saved artifact 'report.pdf' …")]),
+    ];
+    expect(artifactsFromTools(events)).toEqual([{ name: "report.pdf", kind: "document" }]);
+  });
+
+  it("defaults kind to 'other' when the call omitted it", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "save_artifact", { name: "out.bin" })]),
+      updates("tools", [toolResult("c1", "Saved …")]),
+    ];
+    expect(artifactsFromTools(events)).toEqual([{ name: "out.bin", kind: "other" }]);
+  });
+
+  it("ignores a save still pending (no result yet)", () => {
+    const events = [updates("agent", [aiCall("c1", "save_artifact", { name: "report.pdf" })])];
+    expect(artifactsFromTools(events)).toEqual([]);
+  });
+
+  it("ignores a failed save", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "save_artifact", { name: "report.pdf" })]),
+      updates("tools", [toolResult("c1", "disk full", "error")]),
+    ];
+    expect(artifactsFromTools(events)).toEqual([]);
+  });
+
+  it("dedupes a re-saved name to one chip", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "save_artifact", { name: "report.pdf", kind: "document" })]),
+      updates("tools", [toolResult("c1", "v1")]),
+      updates("agent", [aiCall("c2", "save_artifact", { name: "report.pdf", kind: "document" })]),
+      updates("tools", [toolResult("c2", "v2")]),
+    ];
+    expect(artifactsFromTools(events)).toEqual([{ name: "report.pdf", kind: "document" }]);
+  });
+
+  it("ignores non-save_artifact tools", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "web_search", { q: "hi" })]),
+      updates("tools", [toolResult("c1", "results")]),
+    ];
+    expect(artifactsFromTools(events)).toEqual([]);
   });
 });
