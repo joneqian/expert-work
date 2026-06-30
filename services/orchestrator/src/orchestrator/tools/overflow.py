@@ -15,8 +15,31 @@ write via the CM-0 ``WorkspaceFileWriter``) lives in
 
 from __future__ import annotations
 
+import os
 import re
 from uuid import UUID
+
+#: ``HELIX_TOOL_OUTPUT_BUDGET`` falsey values (mirrors ``run_retry._FALSEY``).
+_BUDGET_ENV = "HELIX_TOOL_OUTPUT_BUDGET"
+_FALSEY = frozenset({"0", "false", "no", "off"})
+
+
+def tool_output_budget_enabled() -> bool:
+    """Platform kill switch for the tool-output-budget feature.
+
+    ``HELIX_TOOL_OUTPUT_BUDGET`` — default ON; an explicit falsey value
+    (``0`` / ``false`` / ``no`` / ``off``) reverts the whole feature in one
+    place: the generalized size externalization (#859), the persist floor
+    (item 2), and the CM-12 prune gate (the factory reads this too). The
+    original CM-5 ``full_content`` externalization (bash / exec_python / http /
+    mcp overflow) is a separate, older mechanism and is **not** gated — turning
+    the budget off must not regress it.
+    """
+    raw = os.environ.get(_BUDGET_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in _FALSEY
+
 
 #: Workspace-relative directory all overflow files live under. Lifecycle
 #: is owned by the existing workspace retention machinery (J.15 daily
@@ -46,6 +69,23 @@ _CLAMP_NOTE = f"\n\n[overflow file truncated at {OVERFLOW_MAX_CHARS} chars]"
 #: ``full_content``, ~20-40k chars/call) accumulates across turns and blows the
 #: context window.
 EXTERNALIZE_MIN_CHARS = 12_000
+
+#: Persist floor (item 2 — externalize-on-prune recoverability). A result
+#: between this and ``EXTERNALIZE_MIN_CHARS`` is written to the workspace at
+#: tool time (full copy, kept full in-context — NO preview, NO footer) and its
+#: path is recorded in the ToolMessage ``artifact`` under
+#: :data:`TOOL_RESULT_PATH_ARTIFACT_KEY`. The CM-12 prune gate later collapses
+#: such a result to a lossless footer reference instead of a lossy stub. Writing
+#: at tool time (once) — not at prune time (every over-threshold turn) — keeps it
+#: write-once and the pruner pure. Results below this floor are small enough to
+#: prune to a stub without recoverability.
+PERSIST_MIN_CHARS = 4_000
+
+#: Artifact key under which the tool-time persist records the workspace path of
+#: a result's full copy. Rides ``ToolMessage.artifact`` (metadata — never sent
+#: to the LLM), so the prune gate can recover the path without an in-context
+#: footer. Underscore-prefixed to avoid clobbering a tool's own ``meta`` keys.
+TOOL_RESULT_PATH_ARTIFACT_KEY = "_tool_result_path"
 
 #: Preview kept in-context when a result is externalized: head + tail so the
 #: model sees the start (usually most relevant) and end without the bulk.

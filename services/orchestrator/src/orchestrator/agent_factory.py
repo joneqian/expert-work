@@ -116,6 +116,7 @@ from orchestrator.runner import GraphRunner
 from orchestrator.tools import ToolEnv, build_tool_registry
 from orchestrator.tools.file_ops import SandboxWorkspaceWriter
 from orchestrator.tools.knowledge import Reranker
+from orchestrator.tools.overflow import tool_output_budget_enabled
 from orchestrator.tools.registry import ToolContext, ToolRegistry
 from orchestrator.tools.sandbox import EgressContext, SupervisorClient, bind_egress
 from orchestrator.tools.skill_authoring import (
@@ -676,10 +677,11 @@ async def build_agent(
     # Stream CM-12 — mechanical tool-result prune gate: the cheapest, least-lossy
     # gate that runs before the working window in agent_node. Conservative
     # defaults ⇒ no-op under threshold / within recent_tool_results_kept (zero
-    # behaviour change for existing manifests).
+    # behaviour change for existing manifests). Gated by the platform kill switch
+    # (HELIX_TOOL_OUTPUT_BUDGET) in addition to the per-agent policy flag.
     trp_policy = spec.spec.policies.tool_result_prune
     tool_result_pruner: ToolResultPruner | None = None
-    if trp_policy.enabled:
+    if trp_policy.enabled and tool_output_budget_enabled():
         tool_result_pruner = ToolResultPruner(
             context_window=_resolved_context_window(spec.spec.model),
             threshold_pct=trp_policy.threshold_pct,

@@ -1,15 +1,18 @@
-"""Stream CM-12 — mechanical tool-result prune gate.
+"""Stream CM-12 — mechanical tool-result prune gate (+ item 1 dedup, item 2 path).
 
-The gate collapses OLD tool results (beyond the most-recent N) to 1-line
-references when the prompt is over threshold: lossless for Phase-1-externalized
-results (the ``<tool-result-overflow>`` footer points at the on-disk copy), a
-short ``<tool-result-pruned>`` stub otherwise. It only rewrites ToolMessage
-content — never removes a message — so tool-call pairing is preserved, and it is
-prompt-view only (no checkpoint rewrite, tested at the graph level elsewhere).
+The gate collapses OLD tool results (beyond the most-recent N) and exact
+DUPLICATES when the prompt is over threshold:
+- lossless when a copy is on disk — the ``<tool-result-overflow>`` footer (#859)
+  or an ``artifact`` persist path (item 2 floor);
+- a short ``<tool-result-pruned>`` stub otherwise (small result, no copy).
+It only rewrites ToolMessage content — never removes a message — so tool-call
+pairing is preserved, and it is prompt-view only (no checkpoint rewrite).
 
 All tests use the legacy ``chars // 4`` estimator (``estimator=None``) with a
 tiny ``context_window=100`` (threshold 70 tokens) so a few KB of tool content
-crosses the gate without any network call.
+crosses the gate without any network call. ``_trace`` gives each result DISTINCT
+content (``{_BIG}#i``) so the age tests don't trip the dedup path; dedup tests
+pass identical content explicitly.
 """
 
 from __future__ import annotations
@@ -17,7 +20,11 @@ from __future__ import annotations
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from orchestrator.context import PruneResult, ToolResultPruner, prune_old_tool_results
-from orchestrator.tools.overflow import OVERFLOW_FOOTER_TAG_OPEN, render_overflow_footer
+from orchestrator.tools.overflow import (
+    OVERFLOW_FOOTER_TAG_OPEN,
+    TOOL_RESULT_PATH_ARTIFACT_KEY,
+    render_overflow_footer,
+)
 
 #: ~1000 tokens via chars // 4 — one big result alone clears the 70-token gate.
 _BIG = "y" * 4000
@@ -30,17 +37,23 @@ def _ai_call(call_id: str) -> AIMessage:
     )
 
 
-def _tool(content: object, *, call_id: str, name: str = "web_search") -> ToolMessage:
-    return ToolMessage(content=content, tool_call_id=call_id, name=name)
+def _tool(
+    content: object, *, call_id: str, name: str = "web_search", artifact: dict | None = None
+) -> ToolMessage:
+    return ToolMessage(content=content, tool_call_id=call_id, name=name, artifact=artifact)
 
 
-def _trace(n_searches: int, *, content: str = _BIG) -> list[BaseMessage]:
-    """A normal ReAct trace: HumanMessage then N (AIMessage tool_call, ToolMessage)."""
+def _trace(n_searches: int, *, content: str | None = None) -> list[BaseMessage]:
+    """ReAct trace: HumanMessage then N (AIMessage tool_call, ToolMessage).
+
+    ``content=None`` ⇒ each result gets DISTINCT content (``{_BIG}#i``) so age
+    tests don't trigger dedup. Pass an explicit ``content`` for identical results.
+    """
     msgs: list[BaseMessage] = [HumanMessage(content="go")]
     for i in range(n_searches):
         cid = f"tc-{i}"
         msgs.append(_ai_call(cid))
-        msgs.append(_tool(content, call_id=cid))
+        msgs.append(_tool(f"{_BIG}#{i}" if content is None else content, call_id=cid))
     return msgs
 
 
@@ -52,8 +65,12 @@ def _tools(messages: list[BaseMessage]) -> list[ToolMessage]:
     return [m for m in messages if isinstance(m, ToolMessage)]
 
 
+def _collapsed(message: ToolMessage) -> bool:
+    body = str(message.content)
+    return "chars elided" in body or body.lstrip().startswith(OVERFLOW_FOOTER_TAG_OPEN)
+
+
 def test_under_threshold_is_noop() -> None:
-    # Tiny tool contents stay under the 70-token gate ⇒ untouched.
     msgs = _trace(6, content="small")
     res = _pruner().apply(msgs)
     assert res.pruned_count == 0
@@ -61,23 +78,17 @@ def test_under_threshold_is_noop() -> None:
 
 
 def test_over_threshold_collapses_old_keeps_recent_full() -> None:
-    msgs = _trace(6)
+    msgs = _trace(6)  # distinct content ⇒ pure age path
     res = _pruner(kept=2).apply(msgs)
     assert res.pruned_count == 4  # 6 results minus 2 protected
     tools = _tools(res.messages)
     assert len(tools) == 6  # nothing removed
-    # The most-recent 2 stay byte-identical.
-    assert tools[-1].content == _BIG
-    assert tools[-2].content == _BIG
-    # The older 4 lost the blob and carry a reference instead.
+    assert not _collapsed(tools[-1]) and not _collapsed(tools[-2])  # recent 2 full
     for tm in tools[:4]:
-        assert _BIG not in str(tm.content)
-        assert "chars elided" in str(tm.content)
+        assert _collapsed(tm) and "older context" in str(tm.content)
 
 
 def test_externalized_result_pruned_to_footer_only_lossless() -> None:
-    # A Phase-1 (CM-5) externalized ToolMessage = spotlight-fenced preview + the
-    # trusted footer. Pruning keeps the footer alone — the full output is on disk.
     rel = ".tool_results/run-abc/tc-0-web_search.txt"
     footer = render_overflow_footer(rel=rel, total_chars=50_000)
     content = ("PREVIEW-BODY " * 400) + footer
@@ -86,25 +97,71 @@ def test_externalized_result_pruned_to_footer_only_lossless() -> None:
         _ai_call("tc-0"),
         _tool(content, call_id="tc-0"),
         _ai_call("tc-1"),
-        _tool(_BIG, call_id="tc-1"),
+        _tool(f"{_BIG}#recent", call_id="tc-1"),
     ]
     res = _pruner(kept=1).apply(msgs)
     assert res.pruned_count == 1
-    pruned = _tools(res.messages)[0]
-    body = str(pruned.content)
+    body = str(_tools(res.messages)[0].content)
     assert body.startswith(OVERFLOW_FOOTER_TAG_OPEN)  # footer-only
-    assert rel in body  # still points at the on-disk full output
+    assert rel in body
     assert "PREVIEW-BODY" not in body  # untrusted preview dropped
+
+
+def test_artifact_path_pruned_to_footer_reference_lossless() -> None:
+    # Item 2 — a persisted result has NO in-context footer; the path rides the
+    # artifact. Prune renders a footer reference (lossless), not a lossy stub.
+    rel = ".tool_results/run-xyz/tc-0-web_search.txt"
+    msgs: list[BaseMessage] = [
+        HumanMessage(content="go"),
+        _ai_call("tc-0"),
+        _tool(f"{_BIG}#0", call_id="tc-0", artifact={TOOL_RESULT_PATH_ARTIFACT_KEY: rel}),
+        _ai_call("tc-1"),
+        _tool(f"{_BIG}#1", call_id="tc-1"),
+    ]
+    res = _pruner(kept=1).apply(msgs)
+    body = str(_tools(res.messages)[0].content)
+    assert body.lstrip().startswith(OVERFLOW_FOOTER_TAG_OPEN)
+    assert rel in body
+    assert "chars elided" not in body  # lossless reference, not a stub
 
 
 def test_nonexternalized_stub_carries_tool_name_and_size() -> None:
     msgs = _trace(3)
     res = _pruner(kept=1).apply(msgs)
-    oldest = _tools(res.messages)[0]
-    body = str(oldest.content)
+    body = str(_tools(res.messages)[0].content)
     assert "<tool-result-pruned>" in body
     assert "[web_search]" in body
-    assert f"{len(_BIG):,} chars" in body
+    assert "chars elided" in body
+
+
+def test_dedup_collapses_earlier_identical_keeps_latest() -> None:
+    # 4 identical results: 0,1,2 are duplicates of 3 (collapsed, even the protected
+    # one at index 2), only the latest stays full.
+    msgs = _trace(4, content=_BIG)
+    res = _pruner(kept=2).apply(msgs)
+    assert res.pruned_count == 3
+    tools = _tools(res.messages)
+    full = [t for t in tools if not _collapsed(t)]
+    assert len(full) == 1 and str(full[0].content) == _BIG  # latest copy kept
+    for t in tools[:3]:
+        assert "duplicate of a later identical result" in str(t.content)
+
+
+def test_dedup_within_recent_window() -> None:
+    # Two identical results both inside the recent window: the earlier is still
+    # collapsed as a duplicate (redundant), the later kept full.
+    msgs: list[BaseMessage] = [
+        HumanMessage(content="go"),
+        _ai_call("tc-0"),
+        _tool(_BIG, call_id="tc-0"),
+        _ai_call("tc-1"),
+        _tool(_BIG, call_id="tc-1"),
+    ]
+    res = _pruner(kept=2).apply(msgs)
+    assert res.pruned_count == 1
+    tools = _tools(res.messages)
+    assert "duplicate" in str(tools[0].content)  # earlier collapsed
+    assert str(tools[1].content) == _BIG  # latest full
 
 
 def test_tool_call_pairing_preserved() -> None:
@@ -113,8 +170,7 @@ def test_tool_call_pairing_preserved() -> None:
     assert len(res.messages) == len(msgs)
     ai_ids = {tc["id"] for m in res.messages if isinstance(m, AIMessage) for tc in m.tool_calls}
     tool_ids = {m.tool_call_id for m in _tools(res.messages)}
-    assert ai_ids == tool_ids  # every call still has its result
-    # Pruned copies keep their tool_call_id / name so the wire pairing holds.
+    assert ai_ids == tool_ids
     for tm in _tools(res.messages):
         assert tm.tool_call_id.startswith("tc-")
         assert tm.name == "web_search"
@@ -125,31 +181,28 @@ def test_idempotent() -> None:
     once = pruner.apply(_trace(6))
     twice = pruner.apply(once.messages)
     assert once.pruned_count == 4
-    assert twice.pruned_count == 0  # already-pruned + protected are skipped
+    assert twice.pruned_count == 0
     assert [str(m.content) for m in twice.messages] == [str(m.content) for m in once.messages]
 
 
 def test_at_or_under_kept_is_noop_even_over_threshold() -> None:
-    # 2 big results clear the gate, but with kept=2 there is nothing older to prune.
-    msgs = _trace(2)
+    msgs = _trace(2)  # 2 distinct big results, kept=2 ⇒ nothing older, no dups
     res = _pruner(kept=2).apply(msgs)
     assert res.pruned_count == 0
-    assert all(str(m.content) == _BIG for m in _tools(res.messages))
+    assert all(not _collapsed(t) for t in _tools(res.messages))
 
 
 def test_multimodal_list_content_skipped() -> None:
-    # A ToolMessage with list content (e.g. ask_image) is left untouched.
     msgs: list[BaseMessage] = [
         HumanMessage(content="go"),
         _ai_call("tc-0"),
         _tool([{"type": "text", "text": "x" * 4000}], call_id="tc-0", name="ask_image"),
         _ai_call("tc-1"),
-        _tool(_BIG, call_id="tc-1"),
+        _tool(f"{_BIG}#1", call_id="tc-1"),
         _ai_call("tc-2"),
-        _tool(_BIG, call_id="tc-2"),
+        _tool(f"{_BIG}#2", call_id="tc-2"),
     ]
     res = _pruner(kept=2).apply(msgs)
-    # Only the multimodal result is beyond the recent window; it is skipped.
     assert res.pruned_count == 0
     multimodal = [m for m in _tools(res.messages) if isinstance(m.content, list)]
     assert len(multimodal) == 1
@@ -158,10 +211,8 @@ def test_multimodal_list_content_skipped() -> None:
 def test_non_tool_messages_untouched() -> None:
     msgs = _trace(6)
     res = _pruner(kept=2).apply(msgs)
-    humans = [m for m in res.messages if isinstance(m, HumanMessage)]
-    ais = [m for m in res.messages if isinstance(m, AIMessage)]
-    assert len(humans) == 1
-    assert len(ais) == 6  # every AIMessage tool-call turn intact
+    assert len([m for m in res.messages if isinstance(m, HumanMessage)]) == 1
+    assert len([m for m in res.messages if isinstance(m, AIMessage)]) == 6
 
 
 def test_pure_function_returns_prune_result() -> None:

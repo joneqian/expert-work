@@ -22,14 +22,16 @@ Design anchors (docs/design/tool-result-context-budget.md §Phase 2):
 * **Pairing-safe by construction** — prune only **rewrites** ``ToolMessage``
   content, never removes a message, so no ``AIMessage.tool_calls`` ↔
   ``ToolMessage`` pair is ever split. No boundary logic needed.
-* **Lossless for externalized results** — a result Phase 1 (CM-5) externalized
-  carries the ``<tool-result-overflow>`` footer pointing at the full output on
-  disk under ``.tool_results/``; pruning it keeps just that footer, so the
-  model can ``read_file`` it back. (Bonus: drops the untrusted spotlight-fenced
-  preview, improving the trust posture.) A small non-externalized result has no
-  on-disk copy, so it collapses to a lossy ``<tool-result-pruned>`` stub —
-  still strictly less lossy than the whole-turn drop the window would otherwise
-  apply to the same span.
+* **Lossless when a copy is on disk** — a result is collapsed losslessly when
+  either (a) it carries the ``<tool-result-overflow>`` footer (#859 externalized
+  → keep just the footer; bonus: drops the untrusted spotlight-fenced preview),
+  or (b) its ``artifact`` records a persisted-copy path (item 2 persist floor →
+  render a footer reference). Only a small result below the persist floor (no
+  on-disk copy) collapses to a lossy ``<tool-result-pruned>`` stub — still
+  strictly less lossy than the whole-turn drop the window would otherwise apply.
+* **Dedup (item 1)** — a tool result whose exact content recurs later is
+  collapsed to a reference (latest copy kept), reclaiming the bulk of a repeated
+  identical search/fetch even inside the recent window.
 * **Prompt-view only** (CM-C4) — like the window, the gate shapes only the
   message list handed to *this* LLM call; ``agent_node`` returns just the new
   response tail and the ``add_messages`` reducer never deletes, so the
@@ -49,7 +51,11 @@ from langchain_core.messages import BaseMessage, ToolMessage
 
 from helix_agent.runtime.tokens import TokenEstimator
 from orchestrator.context.compressor import estimate_tokens
-from orchestrator.tools.overflow import OVERFLOW_FOOTER_TAG_OPEN
+from orchestrator.tools.overflow import (
+    OVERFLOW_FOOTER_TAG_OPEN,
+    TOOL_RESULT_PATH_ARTIFACT_KEY,
+    render_overflow_footer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,31 +86,55 @@ def _is_already_pruned(content: str) -> bool:
     return stripped.startswith(_PRUNE_TAG_OPEN) or stripped.startswith(OVERFLOW_FOOTER_TAG_OPEN)
 
 
-def _prune_tool_message(message: ToolMessage) -> ToolMessage:
-    """Collapse one old ``ToolMessage`` to a 1-line reference.
+def _artifact_path(message: ToolMessage) -> str | None:
+    """Workspace path of the full copy persisted at tool time (item 2), if any."""
+    art = message.artifact
+    if isinstance(art, dict):
+        value = art.get(TOOL_RESULT_PATH_ARTIFACT_KEY)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
-    Returns the message unchanged when it is non-string (multimodal) content or
-    already pruned, so the caller's ``pruned_count`` stays accurate.
+
+def _collapsed_content(message: ToolMessage, *, lossy_note: str) -> str | None:
+    """1-line replacement for a ``ToolMessage`` — lossless if recoverable.
+
+    Returns ``None`` when the message is non-string (multimodal) content or is
+    already collapsed (idempotent skip), so the caller's ``pruned_count`` stays
+    accurate. Recoverability ladder:
+
+    1. **In-context footer** (CM-5 / #859 externalized) — keep the trusted footer
+       alone; the full output is on disk and re-readable via ``read_file``.
+    2. **Artifact path** (item 2 persist floor) — render a footer reference to the
+       persisted copy, even though there was no in-context footer.
+    3. **Lossy stub** — only when no on-disk copy exists (small result below the
+       persist floor): a short note with the tool name + char count + reason.
     """
     content = message.content
     if not isinstance(content, str) or _is_already_pruned(content):
-        return message
+        return None
     footer_at = content.find(OVERFLOW_FOOTER_TAG_OPEN)
     if footer_at != -1:
-        # Externalized (CM-5): keep the trusted footer alone — the full output
-        # is on disk, so this is lossless and re-readable via read_file.
-        new_content = content[footer_at:].lstrip("\n")
-    else:
-        name = message.name or "tool"
-        new_content = (
-            f"{_PRUNE_TAG_OPEN}\n"
-            f"[{name}] {len(content):,} chars elided (older context, not preserved)\n"
-            f"{_PRUNE_TAG_CLOSE}"
-        )
-    # Preserve tool_call_id (REQUIRED for AIMessage pairing) + name + id. The id
-    # is carried so that, even though this prompt view is never persisted, an
-    # accidental persistence path would replace-by-id (add_messages) rather than
-    # duplicate. ``artifact`` is dropped — it never reaches the LLM.
+        return content[footer_at:].lstrip("\n")
+    path = _artifact_path(message)
+    if path is not None:
+        return render_overflow_footer(rel=path, total_chars=len(content)).lstrip("\n")
+    name = message.name or "tool"
+    return (
+        f"{_PRUNE_TAG_OPEN}\n"
+        f"[{name}] {len(content):,} chars elided ({lossy_note})\n"
+        f"{_PRUNE_TAG_CLOSE}"
+    )
+
+
+def _rebuild(message: ToolMessage, new_content: str) -> ToolMessage:
+    """A collapsed copy preserving the pairing identity.
+
+    Keeps ``tool_call_id`` (REQUIRED for AIMessage pairing) + ``name`` + ``id``
+    (so an accidental persistence path would replace-by-id under ``add_messages``
+    rather than duplicate). ``artifact`` is dropped — it never reaches the LLM,
+    and the next turn re-reads the original from the checkpoint anyway.
+    """
     return ToolMessage(
         content=new_content,
         tool_call_id=message.tool_call_id,
@@ -116,26 +146,48 @@ def _prune_tool_message(message: ToolMessage) -> ToolMessage:
 def prune_old_tool_results(
     messages: Sequence[BaseMessage], *, recent_tool_results_kept: int
 ) -> PruneResult:
-    """Collapse every ``ToolMessage`` except the most-recent N to a reference.
+    """Collapse old + duplicate tool results to 1-line references.
+
+    Two collapses, in one pass:
+
+    * **Dedup (item 1)** — a ``ToolMessage`` whose exact content recurs in a
+      *later* ``ToolMessage`` is collapsed (the latest identical copy is kept;
+      earlier ones become references). Overrides the recent-window protection,
+      since an exact duplicate is redundant even when recent.
+    * **Age** — a non-duplicate ``ToolMessage`` beyond the most-recent
+      ``recent_tool_results_kept`` is collapsed.
 
     Token-unaware: callers gate on size via :meth:`ToolResultPruner.should_prune`.
-    Returns a new list — never mutates the input. No-op (``pruned_count == 0``,
-    original list returned) when there are at most ``recent_tool_results_kept``
-    tool results to begin with.
+    Returns a new list — never mutates the input.
     """
     msgs = list(messages)
     tool_idxs = [i for i, m in enumerate(msgs) if isinstance(m, ToolMessage)]
-    if len(tool_idxs) <= recent_tool_results_kept:
-        return PruneResult(messages=msgs, pruned_count=0)
-    protected = set(tool_idxs[len(tool_idxs) - recent_tool_results_kept :])
+    # Last index each exact content appears at — anything earlier is a duplicate.
+    last_occurrence: dict[str, int] = {}
+    for i in tool_idxs:
+        content = msgs[i].content
+        if isinstance(content, str):
+            last_occurrence[content] = i
+    protected = set(tool_idxs[max(0, len(tool_idxs) - recent_tool_results_kept) :])
     out: list[BaseMessage] = []
     pruned = 0
     for i, message in enumerate(msgs):
-        if isinstance(message, ToolMessage) and i not in protected:
-            replaced = _prune_tool_message(message)
-            if replaced is not message:
-                pruned += 1
-            out.append(replaced)
+        if not isinstance(message, ToolMessage):
+            out.append(message)
+            continue
+        content = message.content
+        is_duplicate = isinstance(content, str) and last_occurrence.get(content, i) > i
+        if is_duplicate:
+            new_content = _collapsed_content(
+                message, lossy_note="duplicate of a later identical result"
+            )
+        elif i not in protected:
+            new_content = _collapsed_content(message, lossy_note="older context, not preserved")
+        else:
+            new_content = None
+        if new_content is not None and new_content != content:
+            out.append(_rebuild(message, new_content))
+            pruned += 1
         else:
             out.append(message)
     return PruneResult(messages=out, pruned_count=pruned)
@@ -170,11 +222,10 @@ class ToolResultPruner:
         return estimate_tokens(messages, estimator=self.estimator) >= self.threshold_tokens
 
     def apply(self, messages: Sequence[BaseMessage]) -> PruneResult:
-        """Prune old tool results when over threshold, else no-op.
+        """Collapse old + duplicate tool results when over threshold, else no-op.
 
-        Returns a :class:`PruneResult`; ``pruned_count == 0`` means the prompt
-        was left untouched (under threshold, or at/under
-        ``recent_tool_results_kept`` tool results).
+        Returns a :class:`PruneResult`; ``pruned_count == 0`` means the prompt was
+        left untouched (under threshold, or nothing old/duplicate to collapse).
         """
         msgs = list(messages)
         if not self.should_prune(msgs):

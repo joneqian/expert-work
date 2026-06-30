@@ -120,11 +120,14 @@ from orchestrator.tools.mutation_classifier import classify as classify_mutation
 from orchestrator.tools.overflow import (
     EXEMPT_TOOLS,
     EXTERNALIZE_MIN_CHARS,
+    PERSIST_MIN_CHARS,
+    TOOL_RESULT_PATH_ARTIFACT_KEY,
     clamp_overflow,
     fallback_truncate,
     make_preview,
     overflow_rel_path,
     render_overflow_footer,
+    tool_output_budget_enabled,
 )
 from orchestrator.tools.registry import (
     TOOL_ALLOWED_STATE_KEYS,
@@ -1948,7 +1951,7 @@ async def _invoke_tool(
     # workspace and let the LLM see a recoverable reference (the tool's own
     # truncated body, or a head+tail preview for tools that didn't pre-truncate)
     # instead of a dead end or a context blowup.
-    replacement_body, footer = await _externalize_tool_overflow(
+    replacement_body, footer, persist_path = await _externalize_tool_overflow(
         result, tool, call_id, ctx, overflow_writer
     )
     body = replacement_body if replacement_body is not None else result.content
@@ -1961,8 +1964,13 @@ async def _invoke_tool(
     # ``artifact`` surfaces the tool's structured metadata (``ToolResult.meta``
     # — e.g. ask_image's ``image_ref`` / VL usage, truncation flags) in the raw
     # event stream / audit / trace. It rides alongside ``content`` but is NOT
-    # sent back to the LLM, so it never affects the model's input.
-    artifact = dict(result.meta) if result.meta else None
+    # sent back to the LLM, so it never affects the model's input. Item 2 — when a
+    # full copy was persisted, stash its path here so the CM-12 prune gate can
+    # later collapse the result to a lossless reference.
+    meta_artifact: dict[str, Any] = dict(result.meta) if result.meta else {}
+    if persist_path is not None:
+        meta_artifact[TOOL_RESULT_PATH_ARTIFACT_KEY] = persist_path
+    artifact: dict[str, Any] | None = meta_artifact or None
     return (
         # ``name`` records which tool produced this result (for MCP tools,
         # ``mcp:server.tool``). LangChain leaves it null unless set, so the raw
@@ -1980,15 +1988,18 @@ async def _externalize_tool_overflow(
     call_id: str,
     ctx: ToolContext,
     writer: WorkspaceFileWriter | None,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, str | None]:
     """Externalize an oversized tool result to the workspace (Stream CM-5).
 
-    Returns ``(replacement_body, footer)``:
+    Returns ``(replacement_body, footer, persist_path)``:
 
     * ``replacement_body`` — the in-context content to use INSTEAD of
       ``result.content`` (a head+tail preview), or ``None`` to keep
       ``result.content`` unchanged.
     * ``footer`` — the reference footer to append, or ``None``.
+    * ``persist_path`` — the workspace path the full copy was written to (for the
+      caller to stash in ``ToolMessage.artifact`` so the CM-12 prune gate can
+      recover it), or ``None`` when nothing was written.
 
     Two trigger paths:
 
@@ -2011,16 +2022,28 @@ async def _externalize_tool_overflow(
     externalizing them would just create a persist→read→persist loop (CM-F3).
     """
     if writer is None or tool.spec.name in EXEMPT_TOOLS:
-        return None, None
+        return None, None, None
 
+    budget_on = tool_output_budget_enabled()
     if result.full_content is not None:
+        # CM-5 (always on — the kill switch does not gate this older path).
         source = result.full_content
         replacement: str | None = None  # keep the tool's already-truncated body
-    elif len(result.content) > EXTERNALIZE_MIN_CHARS:
+        footer_mode = True
+    elif budget_on and len(result.content) > EXTERNALIZE_MIN_CHARS:
+        # #859 — generalized externalization: replace bulk with a preview.
         source = result.content
         replacement = make_preview(result.content)
+        footer_mode = True
+    elif budget_on and len(result.content) > PERSIST_MIN_CHARS:
+        # Item 2 — persist floor: keep the full result in context (no preview, no
+        # footer) but write a full copy so a later CM-12 prune can collapse it to
+        # a lossless reference (path recorded in the ToolMessage artifact).
+        source = result.content
+        replacement = None
+        footer_mode = False
     else:
-        return None, None
+        return None, None, None
 
     rel = overflow_rel_path(run_id=ctx.run_id, call_id=call_id, tool_name=tool.spec.name)
     try:
@@ -2035,17 +2058,19 @@ async def _externalize_tool_overflow(
             type(exc).__name__,
         )
         _cm_tool_overflow_total.labels(outcome="degraded", tool=tool.spec.name).inc()
-        # Generalized path: bound context in-place (no file to reference);
-        # full_content path: keep the tool's own truncated body as before.
+        # Generalized path: bound context in-place (no file to reference).
+        # full_content path: keep the tool's own truncated body. Persist path:
+        # keep the full content (no path → prune falls back to a stub later).
         if replacement is not None:
-            return fallback_truncate(result.content), None
-        return None, None
+            return fallback_truncate(result.content), None, None
+        return None, None, None
 
     total_chars = len(source)
     _cm_tool_overflow_total.labels(outcome="externalized", tool=tool.spec.name).inc()
     _cm_tool_overflow_chars.set(total_chars)
     logger.info("tool.overflow tool=%s rel=%s chars=%d", tool.spec.name, rel, total_chars)
-    return replacement, render_overflow_footer(rel=rel, total_chars=total_chars)
+    footer = render_overflow_footer(rel=rel, total_chars=total_chars) if footer_mode else None
+    return replacement, footer, rel
 
 
 def _format_error(exc: BaseException) -> str:

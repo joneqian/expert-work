@@ -27,9 +27,14 @@ from orchestrator import (
     build_react_graph,
 )
 from orchestrator.context import WorkspaceFileWriter
+from orchestrator.tools.overflow import TOOL_RESULT_PATH_ARTIFACT_KEY
 
 _FULL = "x" * 50_000
 _CAPPED = _FULL[:100] + "...[truncated]"
+#: Between PERSIST_MIN_CHARS (4k) and EXTERNALIZE_MIN_CHARS (12k) — the item 2
+#: persist-floor band: written to disk + path in artifact, but kept full in
+#: context (no preview, no footer).
+_MEDIUM = "z" * 6_000
 
 
 @dataclass
@@ -92,6 +97,23 @@ class _BigResultTool:
     @property
     def spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description="big", is_read_only=self.read_only)
+
+    async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
+        del args, ctx
+        return ToolResult(content=self.content, meta={})
+
+
+@dataclass
+class _MediumResultTool:
+    """A tool whose ``content`` is in the item 2 persist-floor band (4k-12k):
+    written to disk + artifact path, but kept full in-context (no footer)."""
+
+    name: str = "web_search"
+    content: str = _MEDIUM
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(name=self.name, description="medium", is_read_only=True)
 
     async def call(self, args: Mapping[str, Any], *, ctx: ToolContext) -> ToolResult:
         del args, ctx
@@ -218,3 +240,39 @@ async def test_small_content_passes_through_unchanged() -> None:
     )
     assert writer.writes == {}
     assert str(_tool_message(state).content) == "small result"
+
+
+async def test_medium_result_persisted_with_artifact_path_no_footer() -> None:
+    # Item 2 persist floor: a 4k-12k result is written to disk and its path is
+    # recorded in the artifact, but the full body stays in context (no preview,
+    # no footer) — recoverability without changing what the model sees now.
+    writer = _RecordingWriter()
+    state = await _run_one_turn(tool=_MediumResultTool(), writer=writer, thread_id="persist-1")
+    assert len(writer.writes) == 1
+    rel = next(iter(writer.writes))
+    assert writer.writes[rel] == _MEDIUM
+    message = _tool_message(state)
+    assert str(message.content) == _MEDIUM  # full, unchanged
+    assert "<tool-result-overflow>" not in str(message.content)  # no footer
+    assert message.artifact[TOOL_RESULT_PATH_ARTIFACT_KEY] == rel
+
+
+async def test_kill_switch_disables_generalized_externalization(monkeypatch: Any) -> None:
+    # HELIX_TOOL_OUTPUT_BUDGET=0 reverts the #859 generalized path: the big
+    # web_search result is left full in context, nothing written.
+    monkeypatch.setenv("HELIX_TOOL_OUTPUT_BUDGET", "0")
+    writer = _RecordingWriter()
+    state = await _run_one_turn(tool=_BigResultTool(), writer=writer, thread_id="kill-1")
+    assert writer.writes == {}
+    assert str(_tool_message(state).content) == _FULL
+    assert "<tool-result-overflow>" not in str(_tool_message(state).content)
+
+
+async def test_kill_switch_keeps_full_content_externalization(monkeypatch: Any) -> None:
+    # The older CM-5 full_content path is NOT gated by the kill switch — a tool
+    # that truncated its own output still externalizes the full rendering.
+    monkeypatch.setenv("HELIX_TOOL_OUTPUT_BUDGET", "0")
+    writer = _RecordingWriter()
+    state = await _run_one_turn(tool=_SpillTool(), writer=writer, thread_id="kill-2")
+    assert len(writer.writes) == 1
+    assert "<tool-result-overflow>" in str(_tool_message(state).content)
