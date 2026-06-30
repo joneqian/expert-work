@@ -10,6 +10,17 @@ python-docx==1.1.2     # .docx read/write
 python-pptx==1.0.2     # .pptx read/write
 pypdf==6.12.0           # PDF read / merge / split
 pdfplumber==0.11.4     # PDF text + table extraction
+# PDF *generation* (the read libs above can't author a PDF). markdown→HTML→PDF
+# is the de-facto report path; weasyprint renders HTML+CSS → PDF and picks up
+# the baked noto-cjk fonts (needs the libpango/cairo apt libs added in the
+# Dockerfile). This closes the gap that made md→PDF tasks thrash on the missing
+# installer.
+markdown==3.7          # Markdown → HTML
+weasyprint==62.3       # HTML+CSS → PDF (report generation)
+# Pin pydyf: weasyprint 62.3 declares ``pydyf>=0.10.0`` with no upper bound, but
+# pydyf 0.12.x reworked the Stream API (``super().transform`` AttributeError at
+# write_pdf time). 0.11.0 is the newest pydyf compatible with this weasyprint.
+pydyf==0.11.0          # weasyprint PDF backend (API-pinned, see above)
 Pillow==12.2.0         # image read/write/convert
 matplotlib==3.9.2      # charts (CJK rendering via fonts-noto-cjk)
 # route ① §5.4 — Python bridges to the new apt binaries (soffice/poppler/ffmpeg).

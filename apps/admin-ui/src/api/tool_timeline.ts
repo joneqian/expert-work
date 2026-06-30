@@ -14,7 +14,7 @@
  */
 import type { SseEvent } from "./sessions";
 
-export type ToolCallStatus = "pending" | "success" | "error";
+export type ToolCallStatus = "pending" | "success" | "error" | "pending_approval";
 
 export interface ToolCallEntry {
   /** ``tool_call_id`` — links the call to its result. */
@@ -75,8 +75,19 @@ export function messagesOf(data: unknown): Array<Record<string, unknown>> {
   return out;
 }
 
-/** Reconstruct the ordered tool-call timeline from a run's SSE frames. */
-export function parseToolCalls(events: readonly SseEvent[]): ToolCallEntry[] {
+/**
+ * Reconstruct the ordered tool-call timeline from a run's SSE frames.
+ *
+ * ``awaitingApproval`` — the run paused at an approval gate (the turn carries
+ * a pending ``ApprovalItem``). The gate dispatches NOTHING for the blocked
+ * batch, so any call still ``pending`` is not executing — it is awaiting the
+ * human decision. Surface those as ``pending_approval`` rather than the
+ * generic ``pending`` (进行中), which would otherwise read as a stuck tool.
+ */
+export function parseToolCalls(
+  events: readonly SseEvent[],
+  awaitingApproval = false,
+): ToolCallEntry[] {
   const order: string[] = [];
   const byId = new Map<string, ToolCallEntry>();
 
@@ -155,5 +166,11 @@ export function parseToolCalls(events: readonly SseEvent[]): ToolCallEntry[] {
     }
   }
 
-  return order.map((id) => byId.get(id) as ToolCallEntry);
+  const entries = order.map((id) => byId.get(id) as ToolCallEntry);
+  if (awaitingApproval) {
+    for (const entry of entries) {
+      if (entry.status === "pending") entry.status = "pending_approval";
+    }
+  }
+  return entries;
 }

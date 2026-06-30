@@ -81,6 +81,9 @@ class DockerClient(Protocol):
     async def write_volume_file(self, *, volume: str, path: str, data: bytes, image: str) -> None:
         """Write ``data`` to ``path`` in a named volume (document upload)."""
 
+    async def delete_volume_file(self, *, volume: str, path: str, image: str) -> None:
+        """Delete ``path`` from a named volume (workspace cleanup)."""
+
     async def measure_volume_size(self, *, volume: str, image: str) -> int:
         """Return the total ``/workspace`` size in bytes for a named volume.
 
@@ -361,6 +364,48 @@ class CliDockerClient:
         if process.returncode != 0:
             detail = stderr.decode("utf-8", errors="replace").strip()
             msg = f"workspace file write failed for {path!r}: {detail}"
+            raise DockerError(msg)
+
+    async def delete_volume_file(self, *, volume: str, path: str, image: str) -> None:
+        """Delete ``path`` from a docker named volume (workspace cleanup).
+
+        Mirror of :meth:`write_volume_file`: a throwaway ``--rm`` container —
+        read-only rootfs, no network, all capabilities dropped — mounts
+        ``volume`` read-WRITE at ``/ws`` and ``rm -f`` the single file. ``path``
+        is the supervisor-validated relative path (no ``..`` / leading ``/``),
+        passed as ``$0`` so it is never re-parsed by the shell. ``rm -f`` makes
+        a missing file a no-op (idempotent delete). Raises :class:`DockerError`
+        on a non-zero exit (e.g. the path is a directory).
+        """
+        argv = [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--volume",
+            f"{volume}:/ws",
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            'rm -f "/ws/$0"',
+            path,
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *argv,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await process.communicate()
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            msg = f"workspace file delete failed for {path!r}: {detail}"
             raise DockerError(msg)
 
     async def measure_volume_size(self, *, volume: str, image: str) -> int:

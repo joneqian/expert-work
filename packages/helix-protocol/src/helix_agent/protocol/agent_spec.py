@@ -271,7 +271,13 @@ class NetworkSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     egress: Literal["none", "direct", "proxy"] = "proxy"
+    #: Empty → any public host allowed (SSRF/private-net still blocked, all
+    #: audited). Non-empty → strict allow-only-these mode.
     allowlist: list[str] = Field(default_factory=list)
+    #: Hosts blocked even under the default allow-all (or an allowlist) — block
+    #: a few bad destinations without enumerating every permitted one. Takes
+    #: precedence over ``allowlist``. Exact host or subdomain match.
+    denylist: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _no_wildcard(self) -> NetworkSpec:
@@ -520,7 +526,12 @@ class WorkflowSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["react", "plan_execute", "custom"] = "react"
-    max_iterations: int = Field(default=12, gt=0)
+    # ReAct loop step budget. 12 was an outlier vs comparable agents (deer-flow
+    # lead ≈50 agent turns, hermes-agent 90) and starved multi-step research +
+    # document-generation tasks (one search/synthesis/PDF run hit the wall mid-
+    # task). 30 gives headroom while the orthogonal run_deadline_s + token budget
+    # still bound cost. Per-agent override via the YAML manifest.
+    max_iterations: int = Field(default=30, gt=0)
     early_stop: dict[str, Any] = Field(default_factory=dict)
     builder: str | None = None
 
@@ -778,6 +789,21 @@ class PolicySpec(BaseModel):
             "may sit before the timeout job auto-rejects it. Default "
             "24h; an un-actioned approval otherwise pins a checkpointer "
             "slot forever (resource leak)."
+        ),
+    )
+    tool_use_enforcement: Literal["auto", "on", "off"] = Field(
+        default="auto",
+        description=(
+            "Tool-call-rate uplift — whether to append the tool-use "
+            "enforcement block to the system prompt (it tells the model it "
+            "MUST call a tool for real / current facts instead of answering "
+            "from training knowledge, act immediately rather than promise a "
+            "future action, and never fabricate tool output). ``auto`` "
+            "(default) enables it for every model EXCEPT the families that "
+            "reliably self-initiate tool calls (Claude, GPT) — a denylist, "
+            "so a newly added weaker model gets enforcement without a "
+            "manifest edit. ``on`` / ``off`` force the block regardless of "
+            "model."
         ),
     )
 

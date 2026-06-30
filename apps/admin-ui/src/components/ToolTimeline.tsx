@@ -21,6 +21,7 @@ const STATUS_COLOR: Record<ToolCallStatus, string> = {
   pending: "processing",
   success: "success",
   error: "error",
+  pending_approval: "warning",
 };
 
 function pretty(value: unknown): string {
@@ -33,11 +34,16 @@ function pretty(value: unknown): string {
 
 interface ToolTimelineProps {
   events: readonly SseEvent[];
+  /** The run paused at an approval gate — render blocked tools as 待审批. */
+  awaitingApproval?: boolean;
 }
 
-export function ToolTimeline({ events }: ToolTimelineProps) {
+export function ToolTimeline({ events, awaitingApproval = false }: ToolTimelineProps) {
   const { t } = useTranslation();
-  const entries = useMemo(() => parseToolCalls(events), [events]);
+  const entries = useMemo(
+    () => parseToolCalls(events, awaitingApproval),
+    [events, awaitingApproval],
+  );
 
   if (entries.length === 0) {
     return <Empty description={t("tool_timeline.empty")} data-testid="tool-timeline-empty" />;

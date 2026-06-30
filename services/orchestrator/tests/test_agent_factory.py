@@ -408,7 +408,7 @@ async def test_build_agent_returns_built_agent() -> None:
     assert built.system_prompt.startswith("you are a test agent")
     assert "## Untrusted content" in built.system_prompt
     # Default WorkflowSpec.max_iterations.
-    assert built.max_steps == 12
+    assert built.max_steps == 30
 
 
 @pytest.mark.asyncio
@@ -1145,6 +1145,34 @@ def test_resolved_context_window_off_catalog_fallback() -> None:
 
     model = ModelSpec(provider="self-hosted", name="my-private-model")
     assert _resolved_context_window(model) == 200_000
+
+
+# ---------------------------------------------------------------------------
+# Tool-call-rate uplift — tool-use enforcement block reaches the built system
+# prompt under the ``auto`` denylist (weak model enforced, Claude/GPT exempt).
+# Proves the build-time wiring incl. the "agent has tools" gate.
+# ---------------------------------------------------------------------------
+
+
+async def test_enforcement_block_present_for_weak_model_build() -> None:
+    # A weak-family model (qwen) WITH a tool → enforcement is injected. The
+    # block is gated on the agent actually having tools, so the spec declares
+    # web_search (satisfied by a recording client).
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["model"].update({"provider": "qwen", "name": "qwen3-max"})
+    doc["spec"]["tools"] = [{"type": "builtin", "name": "web_search"}]
+    spec = AgentSpec.model_validate(doc)
+    env = ToolEnv(web_search_client=RecordingTavilyClient())
+    async with make_checkpointer("memory") as cp:
+        built = await _build(spec, secret_store=_secret_store(), checkpointer=cp, tool_env=env)
+    assert "# Tool-use enforcement" in built.system_prompt
+
+
+async def test_enforcement_block_absent_for_claude_build() -> None:
+    # Default minimal spec is anthropic/claude → ``auto`` exempts it.
+    async with make_checkpointer("memory") as cp:
+        built = await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert "# Tool-use enforcement" not in built.system_prompt
 
 
 # ---------------------------------------------------------------------------

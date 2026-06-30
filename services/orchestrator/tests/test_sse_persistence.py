@@ -95,6 +95,55 @@ async def test_run_agent_mirrors_metadata_and_updates_to_event_store() -> None:
 
 
 @pytest.mark.asyncio
+async def test_paused_run_emits_and_persists_approval_event() -> None:
+    """A run pausing at an approval gate emits a dedicated ``approval`` event
+    (mirrored to the event store) so a client surfaces the gate deterministically
+    — no need to infer the pause by polling after the terminal ``end`` frame."""
+    from datetime import UTC, datetime, timedelta
+
+    from helix_agent.persistence import InMemoryApprovalStore
+    from helix_agent.protocol import ApprovalRequest
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    store = InMemoryRunEventStore()
+    now = datetime.now(UTC)
+    request = ApprovalRequest(
+        request_id="approval:deadbeef",
+        node="tools",
+        reason_kind="policy_gate",
+        action_summary="approval-gated tool 'bash'",
+        proposed_args={"command": "pip install reportlab"},
+        requested_at=now,
+        timeout_at=now + timedelta(hours=24),
+    )
+    graph = _ScriptedGraph(
+        chunks=[{"tools": {"step_count": 1}}],
+        final_state={"pending_approval": request.model_dump(mode="json")},
+    )
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=graph,
+        graph_input={"messages": []},
+        config={},
+        event_store=store,
+        approval_store=InMemoryApprovalStore(),
+    )
+
+    listed = await store.list(run_id=record.run_id)
+    assert [r.event_name for r in listed] == ["metadata", "updates", "approval"]
+    approval_row = listed[-1]
+    assert approval_row.data["run_id"] == str(record.run_id)
+    assert approval_row.data["thread_id"] == str(record.thread_id)
+    assert approval_row.data["action_summary"] == "approval-gated tool 'bash'"
+    assert approval_row.data["proposed_args"] == {"command": "pip install reportlab"}
+
+
+@pytest.mark.asyncio
 async def test_run_agent_mirrors_error_event_when_graph_raises() -> None:
     """A failed run still mirrors metadata + error frames to the store
     so RunDetail can replay the failure."""

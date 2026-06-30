@@ -553,8 +553,11 @@ class Settings(BaseSettings):
     #: multi-tenant backend so this is an explicit runaway safety net.
     dynamic_worker_max_per_run: int = Field(default=16, gt=0, le=256)
     #: Per-worker ReAct iteration cap (worker workflow.max_iterations is
-    #: clamped to this).
-    dynamic_worker_max_iterations: int = Field(default=8, gt=0, le=64)
+    #: clamped to this). 8 was tight vs comparable frameworks' subagent budgets
+    #: (deer-flow children 50-150, hermes-agent 45); 16 gives a delegated worker
+    #: room to research + synthesise without starving, still well under the
+    #: parent's budget and the ``le=64`` runaway ceiling.
+    dynamic_worker_max_iterations: int = Field(default=16, gt=0, le=64)
     #: Tool-name allowlist a spawned worker may inherit from its parent
     #: (intersected with the parent's tools). Empty = inherit the parent's
     #: tools verbatim (still a subset of what the parent itself had).

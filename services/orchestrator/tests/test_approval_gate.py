@@ -305,20 +305,48 @@ class _IrreversibleTool:
 
 
 @pytest.mark.asyncio
-async def test_irreversible_tool_auto_gates_without_manifest_listing() -> None:
-    """Stream TE-4 — a tool declaring ``side_effect="irreversible"`` pauses
-    for approval even when it is NOT in ``approval_required_tools``."""
+async def test_irreversible_tool_does_not_auto_gate() -> None:
+    """Approval gating is config-driven only: a tool declaring
+    ``side_effect="irreversible"`` runs normally unless it is listed in
+    ``approval_required_tools``. The platform no longer force-gates irreversible
+    tools — sandbox isolation, serial scheduling (L.L6/TE-8) and per-tool audit
+    (TE-2) remain the safety floor; the gate is the operator's opt-in."""
     llm = _ScriptedLLM(
         responses=[
-            AIMessage(content="", tool_calls=[_tool_call("bash", {"cmd": "rm -rf /"}, "tc-1")]),
+            AIMessage(
+                content="", tool_calls=[_tool_call("bash", {"cmd": "pip install x"}, "tc-1")]
+            ),
+            AIMessage(content="done"),
         ]
     )
     registry = ToolRegistry()
     danger = _IrreversibleTool(name="bash")
     registry.register(danger)
 
-    # Empty manifest gate list — gating must come purely from side_effect.
+    # Empty manifest gate list — ``irreversible`` alone must NOT pause.
     state = await _run(llm, registry, approval_required_tools=frozenset())
+
+    assert state.get("pending_approval") is None
+    assert danger.dispatched == 1  # ran without approval
+    assert state["messages"][-1].content == "done"
+
+
+@pytest.mark.asyncio
+async def test_irreversible_tool_gates_when_configured() -> None:
+    """When the irreversible tool IS listed in ``approval_required_tools`` it
+    pauses like any other declaratively-gated tool."""
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(
+                content="", tool_calls=[_tool_call("bash", {"cmd": "pip install x"}, "tc-1")]
+            ),
+        ]
+    )
+    registry = ToolRegistry()
+    danger = _IrreversibleTool(name="bash")
+    registry.register(danger)
+
+    state = await _run(llm, registry, approval_required_tools=frozenset({"bash"}))
 
     pending = state.get("pending_approval")
     assert pending is not None

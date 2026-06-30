@@ -39,6 +39,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #     surface minimal) so skill-bundled `.js` runs via the `bash` tool. Browser
 #     automation (Chromium/Playwright) is intentionally NOT here — that belongs
 #     in an MCP server, not the sandbox image.
+#   * Pango / cairo / gdk-pixbuf — weasyprint's native rendering backend (the
+#     Python wheel alone can't rasterise HTML+CSS → PDF). Pairs with the baked
+#     noto-cjk fonts so generated PDF reports render Chinese.
 # No compiler toolchain — every Python dep still installs from a wheel.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -52,6 +55,10 @@ RUN apt-get update \
         ffmpeg \
         nodejs \
         npm \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libpangoft2-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
     && sed -i 's/^# *\(zh_CN.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
     && locale-gen \
     && fc-cache -f \
@@ -75,11 +82,20 @@ RUN python -m pip install --no-cache-dir -r /tmp/requirements.txt \
 COPY mpl_cjk_rc.py /tmp/mpl_cjk_rc.py
 RUN python /tmp/mpl_cjk_rc.py && rm /tmp/mpl_cjk_rc.py
 
-# Drop pip / setuptools / wheel AFTER install: the sandbox has no runtime
-# package-install path (egress is credential-proxy-only, Mini-ADR F-2) so a
-# present installer is pure attack surface. Imports of installed packages keep
-# working — only the installer is gone.
-RUN python -m pip uninstall -y pip setuptools wheel 2>/dev/null || true
+# pip is kept (NOT uninstalled): the baked requirements cannot cover every
+# library an agent might need, so agents install the rest on demand via the
+# `bash` / `exec_python` tools. Runtime installs are bounded — outbound traffic
+# to PyPI only flows through the per-agent egress credential proxy
+# (sandbox-egress §3.5) and is audited. The earlier posture (Mini-ADR F-2)
+# removed pip as attack surface; the egress gate now bounds that risk while
+# restoring on-demand installs.
+#
+# PIP_USER=1 — the runtime rootfs is read-only, so a *global* install would fail
+# on /usr/local. Defaulting pip to --user lands packages in $HOME/.local
+# (HOME=/workspace, a writable tmpfs at runtime) and the user-site is on
+# sys.path automatically, so a bare `pip install X` just works for the agent.
+# Set AFTER the build-time requirements install above so those stay global.
+ENV PIP_USER=1
 
 # Non-root user, uid 10000 (subsystem 14 § 5.6). `-m` creates the home dir; we
 # then repoint HOME at /workspace (writable tmpfs at runtime). `nologin` shell —

@@ -168,6 +168,100 @@ describe("PlaygroundTab", () => {
     expect(screen.queryByTestId("playground-stop")).not.toBeInTheDocument();
   });
 
+  it("exports the turn's authoritative event stream as JSON", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    streamRunMock.mockReturnValue(
+      makeStream([
+        { id: "1", event: "metadata", data: { run_id: "r-1" }, rawData: "", receivedAt: "t1" },
+        { id: "2", event: "end", data: "ok", rawData: "ok", receivedAt: "t2" },
+      ]),
+    );
+    // The authoritative ``/events`` replay returns the full persisted stream —
+    // including frames the live client may never have received.
+    streamRunEventsMock.mockReturnValue(
+      makeStream([
+        { id: "1", event: "metadata", data: { run_id: "r-1" }, rawData: "", receivedAt: "t1" },
+        {
+          id: "2",
+          event: "updates",
+          data: { tools: { pending_approval: "x" } },
+          rawData: "",
+          receivedAt: "t2",
+        },
+        { id: "3", event: "end", data: "ok", rawData: "ok", receivedAt: "t3" },
+      ]),
+    );
+    const createUrl = vi.fn(() => "blob:mock");
+    (URL as unknown as { createObjectURL: () => string }).createObjectURL = createUrl;
+    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = vi.fn();
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+    await user.type(screen.getByTestId("playground-input"), "hi");
+    await user.click(screen.getByTestId("playground-run"));
+    await user.click(await screen.findByTestId("playground-export-json"));
+
+    await waitFor(() => expect(streamRunEventsMock).toHaveBeenCalled());
+    // Pulled the authoritative stream for this run, not the client frames.
+    expect(streamRunEventsMock.mock.calls[0][1]).toBe("r-1");
+    // A JSON blob was created + a download triggered.
+    expect(createUrl).toHaveBeenCalledTimes(1);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    clickSpy.mockRestore();
+  });
+
+  it("lists artifacts with download/delete and hides dotfiles from files", async () => {
+    createSessionMock.mockResolvedValue(sampleThread);
+    getWorkspaceMock.mockResolvedValue({
+      workspace: {
+        id: "w1",
+        tenant_id: "t1",
+        user_id: "u1",
+        volume_name: "vol-1",
+        size_bytes: 1024,
+        size_limit_bytes: 1_048_576,
+        created_at: null,
+        last_accessed_at: null,
+        deleted_at: null,
+        archived_object_key: null,
+      },
+      artifacts: [
+        {
+          name: "report.pdf",
+          kind: "document",
+          latest_version: 1,
+          created_at: null,
+          updated_at: null,
+        },
+      ],
+    });
+    getWorkspaceFilesMock.mockResolvedValue([
+      { path: "agent_report.md", size: 2048 },
+      { path: ".npm/_cacache/index", size: 99 },
+      { path: ".mplconfig/matplotlibrc", size: 10 },
+    ]);
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+
+    // Artifact renders as a list row with download + delete affordances.
+    expect(
+      await screen.findByTestId("playground-workspace-artifact-download"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("playground-workspace-artifact-delete")).toBeInTheDocument();
+    expect(screen.getByText("report.pdf")).toBeInTheDocument();
+
+    // Only the agent's own file shows; the dotfiles (.npm/.mplconfig) are hidden.
+    const fileRows = screen.getAllByTestId("playground-workspace-file");
+    expect(fileRows).toHaveLength(1);
+    expect(screen.getByText("agent_report.md")).toBeInTheDocument();
+    expect(screen.queryByText(".npm/_cacache/index")).not.toBeInTheDocument();
+    expect(screen.getByTestId("playground-workspace-file-delete")).toBeInTheDocument();
+  });
+
   it("shows a stream-failure alert when streamRun throws", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);

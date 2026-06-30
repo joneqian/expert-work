@@ -36,7 +36,12 @@ _MAX_LIMIT = 500
 _DEFAULT_LIMIT = 100
 
 EgressVerdict = Literal[
-    "allowed", "blocked_ssrf", "blocked_allowlist", "blocked_auth", "upstream_error"
+    "allowed",
+    "blocked_ssrf",
+    "blocked_allowlist",
+    "blocked_denylist",
+    "blocked_auth",
+    "upstream_error",
 ]
 
 

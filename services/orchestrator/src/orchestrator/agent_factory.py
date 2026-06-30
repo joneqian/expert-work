@@ -32,10 +32,13 @@ each adapter and onto the request body.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 if TYPE_CHECKING:
     from orchestrator.tools.skill_view import SkillResolution
@@ -596,6 +599,7 @@ async def build_agent(
                     agent_name=spec.metadata.name,
                     agent_version=spec.metadata.version,
                     allowlist=tuple(spec.spec.sandbox.network.allowlist),
+                    denylist=tuple(spec.spec.sandbox.network.denylist),
                 ),
             ),
         )
@@ -755,6 +759,26 @@ async def build_agent(
         ):
             registry.register(tool)
 
+    # Dynamic-context — inject today's date (day granularity, agent timezone)
+    # when the manifest opts in (default on). Computed at build time and frozen
+    # onto ``BuiltAgent.system_prompt``; stays cache-stable within a calendar
+    # day. Exact time-of-day is deferred to ``exec_python`` (see
+    # ``_current_date_block``).
+    current_date = (
+        _current_date_block(datetime.now(_resolve_agent_timezone()))
+        if spec.spec.dynamic_context.inject_current_date
+        else None
+    )
+    # Tool-call-rate uplift — only meaningful when the agent actually has tools;
+    # a pure-LLM agent gets no enforcement block. ``auto`` exempts Claude / GPT.
+    tool_use_enforcement = (
+        _TOOL_USE_ENFORCEMENT_BLOCK
+        if _tool_use_enforcement_active(
+            mode=spec.spec.policies.tool_use_enforcement, model=spec.spec.model
+        )
+        and len(registry) > 0
+        else None
+    )
     final_system_prompt = _assemble_system_prompt(
         base=spec.spec.system_prompt.template,
         skill_fragments=loaded_skills.prompt_fragments,
@@ -762,6 +786,8 @@ async def build_agent(
         behavior_patches=loaded_skills.behavior_patches,
         tool_notes=loaded_skills.tool_notes,
         memory_blocks=loaded_skills.memory_blocks,
+        current_date=current_date,
+        tool_use_enforcement=tool_use_enforcement,
         spotlight=spec.spec.defenses.prompt_injection == "spotlight",
     )
 
@@ -1096,6 +1122,112 @@ def _render_skill_summary(*, name: str, version: SkillVersion) -> str:
     )
 
 
+#: Agent wall-clock timezone for the injected "current date" line. The injected
+#: value is day-granular (see ``_current_date_block``) so the system prompt stays
+#: byte-stable across every run within one calendar day, keeping the prompt-cache
+#: prefix warm. ``HELIX_AGENT_TIMEZONE`` overrides the default (zh-CN deployment →
+#: Asia/Shanghai) so "今天几号" answers in the user's local day, not the server's
+#: UTC day.
+_DEFAULT_AGENT_TIMEZONE = "Asia/Shanghai"
+
+_WEEKDAYS_EN = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+
+
+def _resolve_agent_timezone() -> ZoneInfo:
+    """Resolve the agent wall-clock timezone, falling back to UTC.
+
+    Reads ``HELIX_AGENT_TIMEZONE`` (default ``Asia/Shanghai``). An invalid zone
+    name degrades to UTC rather than failing the build — a stale tz label is
+    recoverable, a crashed build is not.
+    """
+    name = os.environ.get("HELIX_AGENT_TIMEZONE", _DEFAULT_AGENT_TIMEZONE)
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("invalid HELIX_AGENT_TIMEZONE %r; falling back to UTC", name)
+        return ZoneInfo("UTC")
+
+
+def _current_date_block(now: datetime) -> str:
+    """Render the day-granular "current date" advisory line.
+
+    Day granularity (not wall-clock time) is deliberate: the system prompt is
+    assembled once per build and frozen onto :class:`BuiltAgent`, so a
+    minute/second timestamp would (a) bust the prompt-cache prefix on every run
+    and (b) read stale by the time the model sees it. The date changes at most
+    once per day, so it stays cache-stable; exact time-of-day is left to the
+    ``exec_python`` tool, which computes it accurately at call time.
+
+    Weekday + ISO date are formatted without ``strftime`` to avoid locale
+    dependence (``%A`` is localised).
+    """
+    weekday = _WEEKDAYS_EN[now.weekday()]
+    iso = f"{now.year:04d}-{now.month:02d}-{now.day:02d}"
+    tz_label = getattr(now.tzinfo, "key", None) or "UTC"
+    return (
+        f"The current date is {weekday}, {iso} (timezone {tz_label}). "
+        "Treat this as today's date when answering. For the exact current time "
+        "of day, call the exec_python tool rather than guessing."
+    )
+
+
+#: Tool-call-rate uplift — appended to the system prompt when enforcement is
+#: active (see ``_tool_use_enforcement_active``). Tells the model to call a tool
+#: for real / current facts instead of answering from (cutoff-bounded) training
+#: knowledge, to act in the same turn rather than promise a future action, and
+#: to never fabricate tool output. Aligns with hermes-agent's
+#: ``TOOL_USE_ENFORCEMENT`` + ``TASK_COMPLETION`` guidance.
+_TOOL_USE_ENFORCEMENT_BLOCK = (
+    "You have tools that fetch real, current information and take real actions "
+    "(web search, code execution, file and system access, and more). When the "
+    "answer depends on anything you cannot be certain of from memory — today's "
+    "date or time, recent events, prices, live or external data, the contents "
+    "of a file or system — you MUST call the relevant tool and answer from its "
+    "output. Do NOT answer from training knowledge and do NOT guess: your "
+    "training data has a cutoff, your tools do not.\n"
+    'When you say you will do something ("I\'ll search…", "let me check…"), '
+    "make the tool call in the same response — never end your turn with a "
+    "promise of future action.\n"
+    "The deliverable is a result backed by real tool output, not a description "
+    "of one. If a tool call fails, say so and try an alternative — never "
+    "fabricate output you could not actually produce."
+)
+
+#: Model families that reliably self-initiate tool calls — exempted from the
+#: ``tool_use_enforcement="auto"`` block. A DENYLIST: every other model
+#: (including any newly added one) gets enforcement, so we never chase a growing
+#: allowlist of weaker models. Matched by ``provider`` first, then by a name
+#: fragment (catches Claude-on-Bedrock / GPT-via-gateway whose provider field is
+#: a generic OpenAI-compatible one).
+_TOOL_USE_ENFORCEMENT_EXEMPT_PROVIDERS = frozenset({"anthropic", "openai", "azure"})
+_TOOL_USE_ENFORCEMENT_EXEMPT_NAME_FRAGMENTS = ("claude", "gpt")
+
+
+def _tool_use_enforcement_active(*, mode: str, model: ModelSpec) -> bool:
+    """Resolve whether the tool-use enforcement block is injected.
+
+    ``on`` / ``off`` force it; ``auto`` (default) enables it for every model
+    EXCEPT the Claude / GPT families that already call tools well — a denylist
+    so a newly added weaker model is enforced without a manifest edit.
+    """
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    if model.provider in _TOOL_USE_ENFORCEMENT_EXEMPT_PROVIDERS:
+        return False
+    name = (model.name or "").lower()
+    return not any(frag in name for frag in _TOOL_USE_ENFORCEMENT_EXEMPT_NAME_FRAGMENTS)
+
+
 def _assemble_system_prompt(
     *,
     base: str,
@@ -1104,6 +1236,8 @@ def _assemble_system_prompt(
     behavior_patches: list[str] | None = None,
     tool_notes: list[str] | None = None,
     memory_blocks: list[str] | None = None,
+    current_date: str | None = None,
+    tool_use_enforcement: str | None = None,
     spotlight: bool = False,
 ) -> str:
     """Splice base system prompt + skill summary list + ordered body
@@ -1128,11 +1262,26 @@ def _assemble_system_prompt(
         or behavior_patches
         or tool_notes
         or memory_blocks
+        or current_date
+        or tool_use_enforcement
         or spotlight
     ):
         return base
 
     pieces: list[str] = [base]
+
+    # Tool-call-rate uplift — enforcement block (``policies.tool_use_
+    # enforcement``). Placed high so the behavioural directive precedes the
+    # advisory skill / memory blocks below.
+    if tool_use_enforcement:
+        pieces.append("\n\n# Tool-use enforcement\n" + tool_use_enforcement)
+
+    # Dynamic-context — day-granular current date (``dynamic_context.
+    # inject_current_date``). Placed first after base so the model reads it as
+    # plain factual grounding; day granularity keeps the system prompt
+    # cache-stable (see ``_current_date_block``).
+    if current_date:
+        pieces.append("\n\n# Current date\n" + current_date)
 
     # Stream PI-1 — spotlighting clause: tells the model the untrusted-content
     # markers/glyph mean "data, never instructions". Wrapping of the untrusted

@@ -13,9 +13,10 @@ nodes wired by a single conditional edge:
 The **agent** node delegates the LLM call to an injected
 :class:`LLMCaller` (E.11 :class:`LLMRouter` in prod; deterministic fake
 in tests) and bumps ``step_count`` by one before returning. Entering with
-``step_count >= max_steps`` raises :class:`MaxStepsExceededError` so the
-runner can finalise the run with ``RUN_FAILED`` audit + user-facing
-"reached max_steps" message.
+``step_count >= max_steps`` does NOT fail the run: it degrades gracefully to
+one final tool-less "wrap up with what you have" turn (hermes-agent #7915),
+preserving work the run already produced. (:class:`MaxStepsExceededError`
+remains a defensive safety net consumed by the SSE runner + child-run path.)
 
 The **tools** node walks the most-recent ``AIMessage.tool_calls``,
 dispatches each through :class:`ToolRegistry`, and appends one
@@ -94,7 +95,6 @@ from orchestrator.context import (
     WorkspaceFileWriter,
     WorkspaceProjector,
 )
-from orchestrator.errors import MaxStepsExceededError
 from orchestrator.graph_builder._approval import (
     ApprovalTarget,
     apply_resume_decision,
@@ -145,6 +145,16 @@ logger = logging.getLogger(__name__)
 #: by design (the HX-6 EWMA discipline: parameterize when hit-rate data
 #: demands it); a demoted tool stays re-promotable from the deferred pool.
 _PROMOTED_STALE_STEPS = 12
+
+#: Injected as the final turn's instruction when the step budget is spent, so
+#: the run wraps up with what it has instead of hard-failing (hermes-agent
+#: #7915 — a hard stop discards finished work; a forced summary preserves it).
+_MAX_STEPS_WRAPUP_INSTRUCTION = (
+    "You have reached this task's step budget and can no longer call any tools. "
+    "Using everything you have already gathered, produced, or written so far, "
+    "write your best, complete final answer to the user's request now. "
+    "Do not ask to continue and do not attempt to call any tools."
+)
 
 # Stream L.L6 — counters for the adaptive tool scheduler. ``stages_total``
 # counts every stage execution; ``dispatched_total`` counts the underlying
@@ -409,22 +419,15 @@ def build_react_graph(
     at construction time.
     """
 
-    # Stream TE-4 — side-effect-driven approval gating. Tools that declare
-    # ``side_effect="irreversible"`` (resolved via ToolSpec) are auto-gated:
-    # union them into the manifest's ``approval_required_tools`` so the
-    # approval gate fires on them without each manifest having to list them.
-    # Computed once at build time (the registry is fixed for the agent's
-    # life). Zero behaviour change until a tool actually declares
-    # irreversible — no builtin does yet; ``bash`` (TE-5) is the first.
-    # Stream TE-6 — classify over ``all_specs()`` (active + deferred) so a
-    # deferred irreversible tool stays gated once ``find_tools`` promotes it.
-    # Equals ``specs()`` when nothing is deferred.
-    _irreversible_tools = frozenset(
-        spec.name
-        for spec in tool_registry.all_specs()
-        if spec.resolved_side_effect == "irreversible"
-    )
-    _gated_tools = approval_required_tools | _irreversible_tools
+    # Approval gating is config-driven: only tools the operator lists in the
+    # manifest's ``approval_required_tools`` pause for human approval. A tool's
+    # ``side_effect="irreversible"`` (resolved via ToolSpec) still drives serial
+    # scheduling (L.L6/TE-8) and audit (TE-2), but it no longer force-gates the
+    # tool — sandbox isolation + serialisation + audit are the safety floor, and
+    # the approval gate is the operator's explicit opt-in. (Earlier TE-4 auto-
+    # unioned irreversible tools into the gate; that forced ``bash`` to require
+    # approval regardless of config, which the governance UI could not turn off.)
+    _gated_tools = approval_required_tools
 
     async def agent_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         token = cancellation_token(config)
@@ -441,8 +444,14 @@ def build_react_graph(
         refund_pending = state.get("step_count_refund_pending", 0)
         step_count = max(0, raw_step_count - refund_pending)
         max_steps = state.get("max_steps", 0)
-        if step_count >= max_steps:
-            raise MaxStepsExceededError(step_count=step_count, max_steps=max_steps)
+        # Step budget spent. Rather than raising MaxStepsExceededError and
+        # discarding everything the run produced (a finished report, gathered
+        # research — the user loses it all), degrade gracefully: do ONE final
+        # tool-LESS LLM turn asking the model to wrap up with what it has, then
+        # end (hermes-agent #7915). ``budget_exhausted`` forces ``tools=[]`` +
+        # a wrap-up instruction just before the call below and strips any
+        # tool_calls off the response so the router ends instead of looping.
+        budget_exhausted = max_steps > 0 and step_count >= max_steps
 
         # Stream TE-6 — bind active specs plus any deferred tools the run has
         # promoted via ``find_tools`` (carried per-thread on AgentState, so the
@@ -649,6 +658,17 @@ def build_react_graph(
             _cm_effort_escalation_total.labels(signal=signal).inc()
             logger.info("llm.effort_escalated signal=%s step=%d/%d", signal, step_count, max_steps)
 
+        # Budget-exhausted final turn: no tools (so the model can only answer),
+        # append the wrap-up instruction, and bypass the response cache (a
+        # cached tool-call hit would re-enter the loop). The escalation above
+        # already routes this last turn to the higher-effort caller (the budget
+        # signal fires at >=75% spend), so the summary gets a deliberate think.
+        if budget_exhausted:
+            tools = []
+            cache_hit_response = None
+            messages = [*messages, HumanMessage(content=_MAX_STEPS_WRAPUP_INSTRUCTION)]
+            logger.warning("agent.max_steps_graceful_wrapup step=%d max=%d", step_count, max_steps)
+
         # ``messages`` is now the exact prompt — the E.13 cache key input.
         if cache_hit_response is not None:
             response: AIMessage = cache_hit_response
@@ -661,6 +681,13 @@ def build_react_graph(
                 response = await token.run_cancellable(
                     active_caller(messages=messages, tools=tools)
                 )
+
+        # Budget-exhausted turn must terminate: no tools were bound so the model
+        # shouldn't emit tool_calls, but strip any it returns anyway (defends
+        # against a provider/stub echoing them) so ``_should_continue`` routes
+        # to END rather than back into the (already-spent) loop.
+        if budget_exhausted and _extract_tool_calls(response):
+            response = response.model_copy(update={"tool_calls": [], "invalid_tool_calls": []})
 
         # Stream PI-2 — output screening backstop. Catch a credential leak /
         # exfil form the model emitted (e.g. driven by an inline injection

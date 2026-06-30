@@ -25,6 +25,7 @@ import {
   Collapse,
   Empty,
   Input,
+  Popconfirm,
   Segmented,
   Select,
   Space,
@@ -45,6 +46,7 @@ import {
   RotateCcw,
   Send,
   Square,
+  Trash2,
   User,
   X,
 } from "lucide-react";
@@ -61,6 +63,9 @@ import { listRateCards, type RateCardRecord } from "../../api/rate_card";
 import { streamRunEvents } from "../../api/runs";
 import {
   createSession,
+  deleteSessionArtifact,
+  deleteSessionWorkspaceFile,
+  downloadSessionArtifact,
   downloadSessionWorkspaceFile,
   getSessionMessages,
   getSessionWorkspace,
@@ -116,6 +121,7 @@ interface PlaygroundTabProps {
 const EVENT_COLOR: Record<string, string> = {
   metadata: "blue",
   updates: "geekblue",
+  approval: "gold",
   error: "red",
   end: "green",
 };
@@ -157,6 +163,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [eventView, setEventView] = useState<"timeline" | "raw">("timeline");
   const [running, setRunning] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -169,6 +176,9 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
+  // Workspace mutation in-flight: the file path or `artifact:<name>` being
+  // downloaded/deleted — disables the row's buttons + drives the spinner.
+  const [busyWorkspaceKey, setBusyWorkspaceKey] = useState<string | null>(null);
   // Playground-Uplift iter2 — #4 cost (agent model's rate), #6 resume history.
   const [rate, setRate] = useState<RateCardRecord | null>(null);
   const [pastSessions, setPastSessions] = useState<ThreadMeta[]>([]);
@@ -413,9 +423,19 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     try {
       for await (const frame of streamRun(threadId, body, { signal: ac.signal })) {
         frames.push(frame);
+        // #5 — a dedicated ``approval`` event surfaces the gate deterministically
+        // (no dependence on the terminal ``end`` frame or a post-stream poll).
+        const approvalFromFrame =
+          frame.event === "approval" ? approvalItemFromEvent(frame.data) : null;
         setTurns((prev) =>
           prev.map((tn) =>
-            tn.id === turnId ? { ...tn, events: [...tn.events, frame] } : tn,
+            tn.id === turnId
+              ? {
+                  ...tn,
+                  events: [...tn.events, frame],
+                  approval: approvalFromFrame ?? tn.approval,
+                }
+              : tn,
           ),
         );
         if (frame.event === "end") break;
@@ -510,6 +530,47 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     [thread, patchTurn, detectApproval],
   );
 
+  // Export a turn's full event stream as JSON for offline analysis. Prefer the
+  // authoritative persisted stream (the ``/events`` replay) — the live client
+  // may have missed frames (e.g. a paused run that never delivered ``end``);
+  // fall back to the frames this client received when there is no run_id or the
+  // fetch fails. Either way a file always downloads.
+  const handleExport = useCallback(
+    async (turn: Turn) => {
+      const threadId = thread?.thread_id ?? null;
+      const runId = runIdOf(turn.events);
+      setExportingId(turn.id);
+      let events: SseEvent[] = turn.events;
+      let source: "backend" | "client" = "client";
+      try {
+        if (threadId && runId) {
+          const collected: SseEvent[] = [];
+          for await (const frame of streamRunEvents(threadId, runId)) {
+            collected.push(frame);
+            if (frame.event === "end") break;
+          }
+          if (collected.length > 0) {
+            events = collected;
+            source = "backend";
+          }
+        }
+      } catch {
+        // Best-effort — fall back to the client-side frames already assigned.
+      } finally {
+        setExportingId(null);
+      }
+      downloadJson(`helix-events-${runId ?? turn.id}.json`, {
+        run_id: runId,
+        thread_id: threadId,
+        input: turn.input,
+        source,
+        exported_at: new Date().toISOString(),
+        events,
+      });
+    },
+    [thread],
+  );
+
   const loadWorkspace = useCallback(async (threadId: string) => {
     setWorkspaceLoading(true);
     try {
@@ -540,6 +601,50 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       }
     },
     [],
+  );
+
+  const handleDownloadArtifact = useCallback(
+    async (threadId: string, name: string) => {
+      setBusyWorkspaceKey(`artifact:${name}`);
+      try {
+        await downloadSessionArtifact(threadId, name);
+      } catch {
+        // Swallow — same rationale as the file download.
+      } finally {
+        setBusyWorkspaceKey(null);
+      }
+    },
+    [],
+  );
+
+  const handleDeleteFile = useCallback(
+    async (threadId: string, path: string) => {
+      setBusyWorkspaceKey(path);
+      try {
+        await deleteSessionWorkspaceFile(threadId, path);
+        await loadWorkspace(threadId);
+      } catch {
+        // Swallow — refresh re-syncs the listing on the next manual refresh.
+      } finally {
+        setBusyWorkspaceKey(null);
+      }
+    },
+    [loadWorkspace],
+  );
+
+  const handleDeleteArtifact = useCallback(
+    async (threadId: string, name: string) => {
+      setBusyWorkspaceKey(`artifact:${name}`);
+      try {
+        await deleteSessionArtifact(threadId, name);
+        await loadWorkspace(threadId);
+      } catch {
+        // Swallow — refresh re-syncs.
+      } finally {
+        setBusyWorkspaceKey(null);
+      }
+    },
+    [loadWorkspace],
   );
 
   // Refresh the workspace view when the thread (re)binds and after each run —
@@ -907,41 +1012,20 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                 {t("playground.workspace_none")}
               </Text>
             )}
+            {/* Artifacts — the agent's registered deliverables: download +
+                (soft-)delete each. A list, not chips, since they're the things
+                you actually take away. */}
             {workspace && workspace.artifacts.length > 0 && (
-              <div style={{ marginTop: 6 }}>
+              <div style={{ marginTop: 6 }} data-testid="playground-workspace-artifacts">
                 <Text type="secondary" style={{ fontSize: 11 }}>
                   {t("playground.workspace_artifacts")}:
                 </Text>
-                <div style={{ marginTop: 4 }}>
-                  {workspace.artifacts.map((a) => (
-                    <Tag
-                      key={a.name}
-                      bordered={false}
-                      style={{ fontSize: 10, marginBottom: 2 }}
-                    >
-                      {a.name} · {a.kind} v{a.latest_version}
-                    </Tag>
-                  ))}
-                </div>
-              </div>
-            )}
-            {/* Browse + download the raw files the agent wrote (#workspace). */}
-            {workspaceFiles.length > 0 && (
-              <div style={{ marginTop: 8 }} data-testid="playground-workspace-files">
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {t("playground.workspace_files")}:
-                </Text>
                 <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
-                  {workspaceFiles.map((f) => (
+                  {workspace.artifacts.map((a) => (
                     <div
-                      key={f.path}
-                      data-testid="playground-workspace-file"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        fontSize: 11,
-                      }}
+                      key={a.name}
+                      data-testid="playground-workspace-artifact"
+                      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}
                     >
                       <span
                         className="mono"
@@ -951,29 +1035,121 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
                         }}
-                        title={f.path}
+                        title={`${a.name} · ${a.kind} v${a.latest_version}`}
                       >
-                        {f.path}
+                        {a.name}
                       </span>
                       <Text type="secondary" style={{ fontSize: 10 }}>
-                        {formatBytes(f.size)}
+                        {a.kind} v{a.latest_version}
                       </Text>
                       <Button
                         size="small"
                         type="text"
                         icon={<Download size={11} strokeWidth={1.75} />}
-                        loading={downloadingPath === f.path}
-                        disabled={!thread || downloadingPath !== null}
+                        loading={busyWorkspaceKey === `artifact:${a.name}`}
+                        disabled={!thread || busyWorkspaceKey !== null}
                         onClick={() =>
-                          thread && void handleDownloadFile(thread.thread_id, f.path)
+                          thread && void handleDownloadArtifact(thread.thread_id, a.name)
                         }
-                        aria-label={t("playground.workspace_file_download", {
-                          name: f.path,
-                        })}
-                        data-testid="playground-workspace-file-download"
+                        aria-label={t("playground.artifact_download", { name: a.name })}
+                        data-testid="playground-workspace-artifact-download"
                       />
+                      <Popconfirm
+                        title={t("playground.artifact_delete_confirm")}
+                        okText={t("playground.delete_ok")}
+                        cancelText={t("playground.delete_cancel")}
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() =>
+                          thread && void handleDeleteArtifact(thread.thread_id, a.name)
+                        }
+                      >
+                        <Button
+                          size="small"
+                          type="text"
+                          danger
+                          icon={<Trash2 size={11} strokeWidth={1.75} />}
+                          disabled={!thread || busyWorkspaceKey !== null}
+                          aria-label={t("playground.artifact_delete", { name: a.name })}
+                          data-testid="playground-workspace-artifact-delete"
+                        />
+                      </Popconfirm>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+            {/* Browse + download + delete the raw files the agent wrote. Hidden
+                files (.npm/.cache/.mplconfig …) are filtered — runtime noise. */}
+            {workspaceFiles.some((f) => !isHiddenWorkspacePath(f.path)) && (
+              <div style={{ marginTop: 8 }} data-testid="playground-workspace-files">
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {t("playground.workspace_files")}:
+                </Text>
+                <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                  {workspaceFiles
+                    .filter((f) => !isHiddenWorkspacePath(f.path))
+                    .map((f) => (
+                      <div
+                        key={f.path}
+                        data-testid="playground-workspace-file"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontSize: 11,
+                        }}
+                      >
+                        <span
+                          className="mono"
+                          style={{
+                            flex: 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={f.path}
+                        >
+                          {f.path}
+                        </span>
+                        <Text type="secondary" style={{ fontSize: 10 }}>
+                          {formatBytes(f.size)}
+                        </Text>
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<Download size={11} strokeWidth={1.75} />}
+                          loading={downloadingPath === f.path}
+                          disabled={!thread || downloadingPath !== null || busyWorkspaceKey !== null}
+                          onClick={() =>
+                            thread && void handleDownloadFile(thread.thread_id, f.path)
+                          }
+                          aria-label={t("playground.workspace_file_download", {
+                            name: f.path,
+                          })}
+                          data-testid="playground-workspace-file-download"
+                        />
+                        <Popconfirm
+                          title={t("playground.file_delete_confirm")}
+                          okText={t("playground.delete_ok")}
+                          cancelText={t("playground.delete_cancel")}
+                          okButtonProps={{ danger: true }}
+                          onConfirm={() =>
+                            thread && void handleDeleteFile(thread.thread_id, f.path)
+                          }
+                        >
+                          <Button
+                            size="small"
+                            type="text"
+                            danger
+                            icon={<Trash2 size={11} strokeWidth={1.75} />}
+                            loading={busyWorkspaceKey === f.path}
+                            disabled={!thread || busyWorkspaceKey !== null}
+                            aria-label={t("playground.file_delete", { name: f.path })}
+                            data-testid="playground-workspace-file-delete"
+                          />
+                        </Popconfirm>
+                      </div>
+                    ))}
                 </div>
               </div>
             )}
@@ -1093,12 +1269,33 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               rate={rate}
               onDecide={handleDecide}
               deciding={running}
+              onExport={handleExport}
+              exporting={exportingId === turn.id}
             />
           ))}
         </div>
       </div>
     </div>
   );
+}
+
+/** Trigger a client-side download of ``data`` as a pretty-printed JSON file. */
+function downloadJson(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Hide dotfiles/dotdirs (``.npm``, ``.cache``, ``.mplconfig``, …) — runtime
+ *  scaffolding the agent didn't author, just noise in the workspace browser. */
+function isHiddenWorkspacePath(path: string): boolean {
+  return path.split("/").some((seg) => seg.startsWith("."));
 }
 
 function runIdOf(events: readonly SseEvent[]): string | null {
@@ -1109,6 +1306,38 @@ function runIdOf(events: readonly SseEvent[]): string | null {
     }
   }
   return null;
+}
+
+/** #5 — build an ``ApprovalItem`` from a backend ``approval`` SSE frame so the
+ *  gate renders the instant the run pauses, without waiting for the terminal
+ *  ``end`` frame + a ``/v1/approvals`` poll (which never fires when the client
+ *  misses ``end``). The decide call only needs ``thread_id`` + ``run_id``; the
+ *  rest feeds the gate card. Fields absent from the stream default safely. */
+function approvalItemFromEvent(data: unknown): ApprovalItem | null {
+  if (data === null || typeof data !== "object") return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.run_id !== "string" || typeof d.thread_id !== "string") return null;
+  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+  return {
+    id: str(d.request_id) || d.run_id,
+    tenant_id: str(d.tenant_id),
+    user_id: null,
+    run_id: d.run_id,
+    thread_id: d.thread_id,
+    request_id: str(d.request_id),
+    node: str(d.node),
+    reason_kind: str(d.reason_kind),
+    action_summary: str(d.action_summary),
+    proposed_args:
+      d.proposed_args !== null && typeof d.proposed_args === "object"
+        ? (d.proposed_args as Record<string, unknown>)
+        : {},
+    requested_at: str(d.requested_at),
+    timeout_at: str(d.timeout_at),
+    status: "pending",
+    decided_by: null,
+    decided_at: null,
+  };
 }
 
 function ApprovalGate({
@@ -1193,6 +1422,8 @@ function TurnCard({
   rate,
   onDecide,
   deciding,
+  onExport,
+  exporting,
 }: {
   turn: Turn;
   eventView: "timeline" | "raw";
@@ -1201,6 +1432,8 @@ function TurnCard({
   rate: RateCardRecord | null;
   onDecide: (turnId: string, approval: ApprovalItem, decision: "approve" | "reject") => void;
   deciding: boolean;
+  onExport: (turn: Turn) => void;
+  exporting: boolean;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
@@ -1408,6 +1641,7 @@ function TurnCard({
                 <span
                   onClick={(e) => e.stopPropagation()}
                   role="presentation"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
                 >
                   <Segmented<"timeline" | "raw">
                     size="small"
@@ -1419,6 +1653,17 @@ function TurnCard({
                     ]}
                     data-testid="playground-event-view-toggle"
                   />
+                  <Button
+                    size="small"
+                    icon={<Download size={13} strokeWidth={1.75} />}
+                    loading={exporting}
+                    onClick={() => onExport(turn)}
+                    title={t("playground.export_json_tip")}
+                    aria-label={t("playground.export_json")}
+                    data-testid="playground-export-json"
+                  >
+                    {t("playground.export_json")}
+                  </Button>
                 </span>
               </div>
             ),
@@ -1428,7 +1673,10 @@ function TurnCard({
                   {t("playground.empty_log")}
                 </Text>
               ) : eventView === "timeline" ? (
-                <ToolTimeline events={turn.events} />
+                <ToolTimeline
+                  events={turn.events}
+                  awaitingApproval={turn.approval !== null}
+                />
               ) : (
                 <div
                   style={{ display: "flex", flexDirection: "column", gap: 8 }}

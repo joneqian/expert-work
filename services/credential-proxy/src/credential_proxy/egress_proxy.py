@@ -38,6 +38,7 @@ from credential_proxy.domain import EgressAuditEntry, EgressVerdict
 from helix_agent.common.egress_token import (
     EgressIdentity,
     host_in_allowlist,
+    host_in_denylist,
     verify_egress_token,
 )
 from helix_agent.common.url_validation import RemoteURLError, resolve_and_pin_host
@@ -117,6 +118,15 @@ class EgressProxyServer:
                 "Proxy Authentication Required",
                 extra=('Proxy-Authenticate: Basic realm="helix-egress"',),
             )
+            return None
+
+        # Per-agent host denylist — checked first so a blocked host is refused
+        # even under the default allow-all (or a permissive allowlist). Lets an
+        # operator carve out a few bad destinations without enumerating every
+        # allowed one.
+        if host_in_denylist(host, identity.denylist):
+            await self._record(identity, host, port, "blocked_denylist")
+            await _write_status(writer, 403, "Forbidden")
             return None
 
         # sandbox-egress §3.1 Phase 2 — optional per-agent host allowlist

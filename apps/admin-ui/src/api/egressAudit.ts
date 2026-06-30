@@ -15,6 +15,7 @@ export type EgressVerdict =
   | "allowed"
   | "blocked_ssrf"
   | "blocked_allowlist"
+  | "blocked_denylist"
   | "blocked_auth"
   | "upstream_error";
 
@@ -22,6 +23,7 @@ export const EGRESS_VERDICTS: EgressVerdict[] = [
   "allowed",
   "blocked_ssrf",
   "blocked_allowlist",
+  "blocked_denylist",
   "blocked_auth",
   "upstream_error",
 ];

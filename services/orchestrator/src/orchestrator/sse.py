@@ -499,6 +499,25 @@ async def run_agent(
                 record=record,
                 request=pending_request,
             )
+            # Surface the gate to live SSE clients deterministically: a
+            # dedicated ``approval`` event (mirrored to the event store) so the
+            # Playground renders the pending gate without having to infer the
+            # pause by polling ``/v1/approvals`` after the terminal ``end``
+            # frame — that poll never fires when the client misses ``end``.
+            approval_payload = {
+                "run_id": str(run_id),
+                "thread_id": str(record.thread_id),
+                **pending_request.model_dump(mode="json"),
+            }
+            await bridge.publish(run_id, "approval", approval_payload)
+            await _persist_event(
+                event_store,
+                run_id=run_id,
+                seq=event_seq,
+                event_name="approval",
+                data=approval_payload,
+            )
+            event_seq += 1
         if final is not RunStatus.PAUSED:
             await _emit_run_end_audit(
                 audit_logger,

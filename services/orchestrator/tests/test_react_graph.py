@@ -20,7 +20,6 @@ from helix_agent.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     AgentState,
     GraphRunner,
-    MaxStepsExceededError,
     ToolContext,
     ToolRegistry,
     ToolResult,
@@ -151,8 +150,11 @@ async def test_three_step_loop_tool_tool_final() -> None:
 
 
 @pytest.mark.asyncio
-async def test_max_steps_raises_when_llm_keeps_calling_tools() -> None:
-    """LLM never finalises → step 4 with max_steps=3 raises MaxStepsExceededError."""
+async def test_max_steps_graceful_wrapup_when_llm_keeps_calling_tools() -> None:
+    """LLM never finalises → at the budget the loop does ONE final tool-less
+    wrap-up turn instead of raising, so the run ends cleanly without discarding
+    work (hermes-agent #7915). The wrap-up response has its tool_calls stripped
+    so the router goes to END."""
     llm = _ScriptedLLM(
         responses=[
             AIMessage(
@@ -165,12 +167,15 @@ async def test_max_steps_raises_when_llm_keeps_calling_tools() -> None:
     registry = ToolRegistry()
     registry.register(_ScriptedTool(name="search", result="r"))
 
-    with pytest.raises(MaxStepsExceededError) as excinfo:
-        await _run_graph(llm, registry, max_steps=3)
-    assert excinfo.value.max_steps == 3
-    assert excinfo.value.step_count == 3
-    # Exactly 3 LLM calls happened before the 4th-attempt guard tripped.
-    assert llm.calls == 3
+    # No exception — the run finalises gracefully.
+    state = await _run_graph(llm, registry, max_steps=3)
+    # 3 normal turns (each dispatched a tool) + 1 forced tool-less wrap-up turn.
+    assert llm.calls == 4
+    assert state["step_count"] == 4
+    # The wrap-up turn is terminal: tool_calls stripped → loop ended at END.
+    last = state["messages"][-1]
+    assert isinstance(last, AIMessage)
+    assert not last.tool_calls
 
 
 @pytest.mark.asyncio

@@ -27,7 +27,12 @@ class _RecordingEgressAudit:
         self.entries.append(entry)
 
 
-def _token(*, expires_at: float = 1000.0, allowlist: tuple[str, ...] = ()) -> str:
+def _token(
+    *,
+    expires_at: float = 1000.0,
+    allowlist: tuple[str, ...] = (),
+    denylist: tuple[str, ...] = (),
+) -> str:
     return mint_egress_token(
         _SECRET,
         tenant_id=_TENANT,
@@ -36,6 +41,7 @@ def _token(*, expires_at: float = 1000.0, allowlist: tuple[str, ...] = ()) -> st
         sandbox_id="sbx-1",
         expires_at=expires_at,
         allowlist=allowlist,
+        denylist=denylist,
     )
 
 
@@ -233,6 +239,47 @@ async def test_allowlist_blocks_unlisted_host_and_audits() -> None:
         await _wait_for_audit(audit)
         assert audit.entries[0].verdict == "blocked_allowlist"
         assert audit.entries[0].target_host == "api.evil.com"
+    finally:
+        proxy.close()
+        await proxy.wait_closed()
+
+
+async def test_denylist_blocks_host_and_audits() -> None:
+    audit = _RecordingEgressAudit()
+    proxy, proxy_port = await _start_proxy(audit)
+    try:
+        # Default allow-all (empty allowlist) but the host is on the denylist.
+        reader, writer = await _connect_request(
+            proxy_port,
+            "tracker.evil.com:443",
+            auth=_basic(_token(denylist=("evil.com",))),  # subdomain match
+        )
+        status = await reader.readline()
+        assert b"403" in status
+        writer.close()
+        await _wait_for_audit(audit)
+        assert audit.entries[0].verdict == "blocked_denylist"
+        assert audit.entries[0].target_host == "tracker.evil.com"
+    finally:
+        proxy.close()
+        await proxy.wait_closed()
+
+
+async def test_denylist_takes_precedence_over_allowlist() -> None:
+    audit = _RecordingEgressAudit()
+    proxy, proxy_port = await _start_proxy(audit)
+    try:
+        # Host is on BOTH lists — the denylist wins (block).
+        reader, writer = await _connect_request(
+            proxy_port,
+            "api.evil.com:443",
+            auth=_basic(_token(allowlist=("api.evil.com",), denylist=("api.evil.com",))),
+        )
+        status = await reader.readline()
+        assert b"403" in status
+        writer.close()
+        await _wait_for_audit(audit)
+        assert audit.entries[0].verdict == "blocked_denylist"
     finally:
         proxy.close()
         await proxy.wait_closed()

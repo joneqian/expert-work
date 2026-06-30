@@ -41,6 +41,11 @@ class EgressIdentity:
     #: any public host allowed (audited). Non-empty → only these hosts (exact or
     #: subdomain) pass; embedded in the signed token so it can't be tampered.
     allowlist: tuple[str, ...] = ()
+    #: Optional per-agent host denylist. A host matching an entry (exact or
+    #: subdomain) is blocked even when the allowlist would allow it — so an
+    #: operator can carve a few bad hosts out of the default allow-all without
+    #: enumerating every permitted host. Also embedded in the signed token.
+    denylist: tuple[str, ...] = ()
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -66,10 +71,11 @@ def mint_egress_token(
     sandbox_id: str,
     expires_at: float,
     allowlist: tuple[str, ...] = (),
+    denylist: tuple[str, ...] = (),
 ) -> str:
     """Mint a signed egress token. ``expires_at`` is an absolute epoch second
-    (the caller supplies the clock — keeps this pure/testable). ``allowlist``
-    (optional) embeds the per-agent host allowlist the proxy enforces."""
+    (the caller supplies the clock — keeps this pure/testable). ``allowlist`` /
+    ``denylist`` (optional) embed the per-agent host policy the proxy enforces."""
     if not secret:
         msg = "egress token secret must not be empty"
         raise ValueError(msg)
@@ -82,24 +88,40 @@ def mint_egress_token(
     }
     if allowlist:
         payload["al"] = list(allowlist)
+    if denylist:
+        payload["dl"] = list(denylist)
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signing_input = f"{_VERSION}.{payload_b64}"
     return f"{signing_input}.{_sign(secret, signing_input)}"
 
 
-def host_in_allowlist(host: str, allowlist: tuple[str, ...]) -> bool:
-    """Whether ``host`` is permitted by ``allowlist`` (empty → allow all).
-
-    Matches exact host or a subdomain of an entry: ``["openai.com"]`` allows
-    ``openai.com`` and ``api.openai.com`` but not ``evilopenai.com``."""
-    if not allowlist:
-        return True
+def _host_matches(host: str, entries: tuple[str, ...]) -> bool:
+    """Whether ``host`` exactly equals, or is a subdomain of, any entry.
+    ``["openai.com"]`` matches ``openai.com`` and ``api.openai.com`` but not
+    ``evilopenai.com``. Empty ``entries`` → no match."""
     h = host.rstrip(".").lower()
-    for entry in allowlist:
+    for entry in entries:
         e = entry.rstrip(".").lower()
         if e and (h == e or h.endswith(f".{e}")):
             return True
     return False
+
+
+def host_in_allowlist(host: str, allowlist: tuple[str, ...]) -> bool:
+    """Whether ``host`` is permitted by ``allowlist`` (empty → allow all)."""
+    if not allowlist:
+        return True
+    return _host_matches(host, allowlist)
+
+
+def host_in_denylist(host: str, denylist: tuple[str, ...]) -> bool:
+    """Whether ``host`` is blocked by ``denylist`` (empty → blocks nothing).
+
+    Takes precedence over the allowlist: a denied host is refused even when the
+    allowlist (or the default allow-all) would let it through."""
+    if not denylist:
+        return False
+    return _host_matches(host, denylist)
 
 
 def verify_egress_token(secret: str, token: str, *, now: float) -> EgressIdentity | None:
@@ -121,6 +143,7 @@ def verify_egress_token(secret: str, token: str, *, now: float) -> EgressIdentit
         payload = json.loads(_b64url_decode(payload_b64))
         expires_at = float(payload["exp"])
         raw_allowlist = payload.get("al") or []
+        raw_denylist = payload.get("dl") or []
         identity = EgressIdentity(
             tenant_id=str(payload["t"]),
             agent_name=str(payload["a"]),
@@ -128,6 +151,7 @@ def verify_egress_token(secret: str, token: str, *, now: float) -> EgressIdentit
             sandbox_id=str(payload["s"]),
             expires_at=expires_at,
             allowlist=tuple(str(h) for h in raw_allowlist),
+            denylist=tuple(str(h) for h in raw_denylist),
         )
     except (ValueError, KeyError, TypeError):
         return None

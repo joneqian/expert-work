@@ -83,6 +83,9 @@ class SandboxRecord:
     agent_version: str | None = None
     #: sandbox-egress Phase 2 — per-agent host allowlist embedded in the token.
     egress_allowlist: tuple[str, ...] = ()
+    #: Per-agent host denylist embedded in the token; blocks these hosts even
+    #: under the default allow-all (takes precedence over the allowlist).
+    egress_denylist: tuple[str, ...] = ()
 
     def with_state(self, state: SandboxState, **changes: object) -> SandboxRecord:
         """Return a copy in ``state`` with any extra field overrides applied."""

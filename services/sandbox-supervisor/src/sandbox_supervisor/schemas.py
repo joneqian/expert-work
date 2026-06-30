@@ -58,6 +58,9 @@ class AcquireRequest(BaseModel):
     #: sandbox-egress Phase 2 — optional per-agent host allowlist embedded in
     #: the egress token; empty → any public host (audited).
     egress_allowlist: list[str] = Field(default_factory=list)
+    #: Optional per-agent host denylist embedded in the token; blocks these
+    #: hosts even under the default allow-all (takes precedence over allowlist).
+    egress_denylist: list[str] = Field(default_factory=list)
     #: Optional per-call resource overrides; omitted → the service defaults.
     cpu: float | None = Field(default=None, gt=0, le=16)
     memory_mb: int | None = Field(default=None, gt=0, le=65536)

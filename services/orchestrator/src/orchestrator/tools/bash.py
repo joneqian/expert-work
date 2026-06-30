@@ -22,10 +22,12 @@ command's exit code propagates via ``sys.exit`` so the LLM sees the real
 shell exit code.
 
 **Governance** — ``bash`` declares ``side_effect="irreversible"``: a
-shell command can do anything (``rm -rf`` as easily as ``ls``). Via
-TE-4 that makes every bash call forced-serial (never shares a tool
-stage) and auto-approval-gated (pauses for human review without needing
-to be listed in the manifest's ``approval_required_tools``).
+shell command can do anything (``rm -rf`` as easily as ``ls``). That
+makes every bash call forced-serial (never shares a tool stage) and
+fully audited. Approval is **config-driven**: bash pauses for human
+review only when an operator lists it in the manifest's
+``approval_required_tools`` — sandbox isolation + serialisation + audit
+are the always-on safety floor, the gate is the explicit opt-in.
 """
 
 from __future__ import annotations
@@ -109,8 +111,9 @@ class BashTool:
                 "required": ["command"],
             },
             # Stream TE-5 / TE-ADR-1 — a shell command can do anything, so
-            # bash is the platform's first irreversible tool: TE-4 forces it
-            # serial + auto-approval-gates it.
+            # bash is irreversible: that forces it serial (never shares a tool
+            # stage) and audited. Approval is config-driven (``approval_required_tools``),
+            # not auto-applied to irreversible tools.
             side_effect="irreversible",
         )
 

@@ -78,6 +78,13 @@ function VerdictTag({ verdict }: { verdict: EgressVerdict }) {
       </Tag>
     );
   }
+  if (verdict === "blocked_denylist") {
+    return (
+      <Tag color="warning" icon={<ShieldOff size={11} strokeWidth={1.75} />}>
+        blocked_denylist
+      </Tag>
+    );
+  }
   if (verdict === "blocked_auth") {
     return (
       <Tag color="warning" icon={<ShieldOff size={11} strokeWidth={1.75} />}>

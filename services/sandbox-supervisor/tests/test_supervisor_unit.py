@@ -131,6 +131,8 @@ class RecordingDockerClient:
         self.volume_lists: list[str] = []
         self._volume_write_error: DockerError | None = None
         self.volume_writes: list[tuple[str, str, bytes]] = []
+        self._volume_delete_error: DockerError | None = None
+        self.volume_deletes: list[tuple[str, str]] = []
         self._measured_size = measured_size
         self._measure_error = measure_error
         self.measure_calls: list[tuple[str, str]] = []
@@ -184,6 +186,12 @@ class RecordingDockerClient:
         self.volume_writes.append((volume, path, data))
         if self._volume_write_error is not None:
             raise self._volume_write_error
+
+    async def delete_volume_file(self, *, volume: str, path: str, image: str) -> None:
+        del image
+        self.volume_deletes.append((volume, path))
+        if self._volume_delete_error is not None:
+            raise self._volume_delete_error
 
     async def measure_volume_size(self, *, volume: str, image: str) -> int:
         self.measure_calls.append((volume, image))
@@ -962,6 +970,36 @@ async def test_list_workspace_files_missing_volume_is_empty() -> None:
     h = _harness(docker=RecordingDockerClient(volume_list_error=DockerError("no such volume")))
     entries = await h.supervisor.list_workspace_files(tenant_id=uuid4(), user_id=uuid4())
     assert entries == []
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_file_delegates_to_docker() -> None:
+    h = _harness()
+    await h.supervisor.delete_workspace_file(tenant_id=uuid4(), user_id=uuid4(), path="out/old.md")
+    assert len(h.docker.volume_deletes) == 1
+    assert h.docker.volume_deletes[0][1] == "out/old.md"
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_file_rejects_unsafe_path() -> None:
+    h = _harness()
+    for bad in ("/etc/passwd", "../escape"):
+        with pytest.raises(WorkspaceFileNotFoundError):
+            await h.supervisor.delete_workspace_file(tenant_id=uuid4(), user_id=uuid4(), path=bad)
+    assert h.docker.volume_deletes == []
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_file_refuses_reserved_prefix() -> None:
+    # Seeded machinery / uploads are reserved — a client can only delete what
+    # the agent itself produced, never the skill packages or its own inputs.
+    h = _harness()
+    for reserved in ("skills/pptx/SKILL.md", "uploads/ticket.pdf"):
+        with pytest.raises(WorkspaceFileNotFoundError):
+            await h.supervisor.delete_workspace_file(
+                tenant_id=uuid4(), user_id=uuid4(), path=reserved
+            )
+    assert h.docker.volume_deletes == []
 
 
 def test_list_workspace_files_route_returns_files() -> None:

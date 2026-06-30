@@ -55,7 +55,7 @@ def test_minimal_manifest_validates() -> None:
     assert spec.spec.model.provider == "anthropic"
     # Defaults should have populated.
     assert spec.spec.workflow.type == "react"
-    assert spec.spec.workflow.max_iterations == 12
+    assert spec.spec.workflow.max_iterations == 30
     assert spec.spec.dynamic_context.inject_memory is True
 
 

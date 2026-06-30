@@ -11,7 +11,12 @@ ProxyStatus = Literal["ok", "cached", "denied", "secret_miss"]
 
 #: ``sandbox_egress_audit.verdict`` values.
 EgressVerdict = Literal[
-    "allowed", "blocked_ssrf", "blocked_allowlist", "blocked_auth", "upstream_error"
+    "allowed",
+    "blocked_ssrf",
+    "blocked_allowlist",
+    "blocked_denylist",
+    "blocked_auth",
+    "upstream_error",
 ]
 
 

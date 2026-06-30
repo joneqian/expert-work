@@ -39,7 +39,8 @@ def test_bash_spec_advertises_command_and_is_irreversible() -> None:
     assert spec.name == "bash"
     assert "command" in spec.parameters["properties"]
     assert spec.parameters["required"] == ["command"]
-    # TE-5 / TE-ADR-1 — bash is the first irreversible tool (→ TE-4 serial + gate).
+    # TE-5 / TE-ADR-1 — bash is irreversible → forced-serial scheduling + audit
+    # (the approval gate is now config-driven, not auto-applied to irreversible).
     assert spec.side_effect == "irreversible"
     assert spec.resolved_side_effect == "irreversible"
 

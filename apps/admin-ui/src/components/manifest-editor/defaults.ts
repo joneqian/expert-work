@@ -35,7 +35,8 @@ spec:
     resources: { cpu: "1.0", memory: "1Gi" }
     network:
       egress: proxy
-      allowlist: []
+      allowlist: []  # empty = allow all public hosts (SSRF blocked, audited)
+      denylist: []   # block these hosts even under allow-all (takes precedence)
     filesystem:
       readonly_root: true
       writable: ["/workspace"]

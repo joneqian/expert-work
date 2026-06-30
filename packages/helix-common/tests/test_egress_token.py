@@ -6,6 +6,7 @@ import pytest
 
 from helix_agent.common.egress_token import (
     host_in_allowlist,
+    host_in_denylist,
     mint_egress_token,
     verify_egress_token,
 )
@@ -14,7 +15,12 @@ _SECRET = "test-secret"
 _TENANT = "11111111-1111-1111-1111-111111111111"
 
 
-def _mint(*, expires_at: float = 1000.0, allowlist: tuple[str, ...] = ()) -> str:
+def _mint(
+    *,
+    expires_at: float = 1000.0,
+    allowlist: tuple[str, ...] = (),
+    denylist: tuple[str, ...] = (),
+) -> str:
     return mint_egress_token(
         _SECRET,
         tenant_id=_TENANT,
@@ -23,6 +29,7 @@ def _mint(*, expires_at: float = 1000.0, allowlist: tuple[str, ...] = ()) -> str
         sandbox_id="sbx-abc",
         expires_at=expires_at,
         allowlist=allowlist,
+        denylist=denylist,
     )
 
 
@@ -93,3 +100,31 @@ def test_no_allowlist_defaults_empty() -> None:
 )
 def test_host_in_allowlist(host: str, allowlist: tuple[str, ...], expected: bool) -> None:
     assert host_in_allowlist(host, allowlist) is expected
+
+
+def test_denylist_round_trips_in_token() -> None:
+    token = _mint(denylist=("evil.com", "tracker.example.net"))
+    identity = verify_egress_token(_SECRET, token, now=500.0)
+    assert identity is not None
+    assert identity.denylist == ("evil.com", "tracker.example.net")
+
+
+def test_no_denylist_defaults_empty() -> None:
+    identity = verify_egress_token(_SECRET, _mint(), now=500.0)
+    assert identity is not None
+    assert identity.denylist == ()
+
+
+@pytest.mark.parametrize(
+    ("host", "denylist", "expected"),
+    [
+        ("evil.com", (), False),  # empty denylist → blocks nothing
+        ("evil.com", ("evil.com",), True),  # exact
+        ("api.evil.com", ("evil.com",), True),  # subdomain of entry
+        ("notevil.com", ("evil.com",), False),  # not a subdomain
+        ("EVIL.com", ("evil.com",), True),  # case-insensitive
+        ("pypi.org", ("evil.com",), False),  # unrelated host allowed
+    ],
+)
+def test_host_in_denylist(host: str, denylist: tuple[str, ...], expected: bool) -> None:
+    assert host_in_denylist(host, denylist) is expected

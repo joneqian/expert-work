@@ -4,7 +4,8 @@ Sent as the ``code`` of one runner request (``python -I -c``) by
 ``smoke_test.py``. Asserts the single full image (sandbox-image-consolidation)
 ships a working toolchain: Python 3.12 + every office/data/media library +
 the system binaries skills shell out to (soffice/poppler/ffmpeg) + Node.js, with
-CJK rendering and pip removed.
+CJK rendering, a working markdown→PDF (weasyprint) path, and pip available for
+on-demand installs.
 
 Exit 0 + a trailing ``OK`` line == pass. Any failure raises, so the child
 process exits non-zero and the runner reports ``exit_code != 0``.
@@ -23,9 +24,11 @@ from pathlib import Path
 
 import defusedxml
 import imageio
+import markdown
 import pandas as pd
 import pdfplumber
 import pypdf
+import weasyprint
 from docx import Document
 from matplotlib import font_manager
 from matplotlib import pyplot as plt
@@ -40,10 +43,12 @@ _CJK = "中文办公能力验证 — 报表/图表"
 if sys.version_info[:2] != (3, 12):
     raise SystemExit(f"unexpected Python: {sys.version}")
 
-# pip must be gone at runtime (no install path); installed packages still
-# import — assert the hardening claim the image makes.
-if importlib.util.find_spec("pip") is not None:
-    raise RuntimeError("pip is still present in the sandbox image")
+# pip is intentionally present: the sandbox supports on-demand ``pip install``
+# into the per-user workspace (PIP_USER) so a skill can pull a missing lib at
+# runtime. Assert it stays importable — a base-image change must not silently
+# drop the install path.
+if importlib.util.find_spec("pip") is None:
+    raise RuntimeError("pip missing from the sandbox image (on-demand install path broken)")
 
 # The baked matplotlibrc must default to a CJK family with NO per-call config —
 # that is its whole point. Check the default *before* the explicit override
@@ -151,6 +156,16 @@ _node = subprocess.run(
 )
 if _node.returncode != 0 or _node.stdout.strip() != "node-ok":
     raise RuntimeError(f"node exec failed rc={_node.returncode} stderr={_node.stderr!r}")
+
+# markdown → HTML → PDF via markdown + weasyprint (the report-generation path).
+# A real render proves the weasyprint/pydyf pairing AND the pango/cairo system
+# libs are wired — a pydyf-version mismatch crashes here at render time, not at
+# import (the ``'super' object has no attribute 'transform'`` failure mode).
+_md_html = markdown.markdown(f"# {_CJK}\n\n中文 **PDF** 生成验证")
+weasyprint.HTML(string=_md_html).write_pdf("/workspace/smoke_md.pdf")
+_md_pdf = Path("/workspace/smoke_md.pdf")
+if not _md_pdf.is_file() or _md_pdf.stat().st_size == 0:
+    raise RuntimeError("weasyprint markdown→pdf produced no output")
 
 print(f"font={cjk_font}")
 print(f"node={_node.stdout.strip()}")

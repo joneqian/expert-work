@@ -55,6 +55,24 @@ describe("parseToolCalls", () => {
     expect(parseToolCalls(events)[0].status).toBe("error");
   });
 
+  it("renders a gate-blocked pending tool as pending_approval", () => {
+    // The gate dispatches nothing — bash has a call but never a result.
+    const events = [updates("agent", [aiCall("c1", "bash", { command: "pip install x" })])];
+    // Live (not yet paused): the call reads as in-progress.
+    expect(parseToolCalls(events)[0].status).toBe("pending");
+    // Paused at the gate: the blocked call is awaiting approval, not stuck.
+    expect(parseToolCalls(events, true)[0].status).toBe("pending_approval");
+  });
+
+  it("does not downgrade a resolved tool to pending_approval", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "web_search", {})]),
+      updates("tools", [toolResult("c1", "ok")]),
+    ];
+    // A completed call stays success even if a later call in the turn gated.
+    expect(parseToolCalls(events, true)[0].status).toBe("success");
+  });
+
   it("preserves call order across frames and handles multiple calls", () => {
     const events = [
       updates("agent", [aiCall("c1", "web_search", {})]),
