@@ -90,7 +90,13 @@ class SandboxSupervisorSettings(BaseSettings):
 
     # ----------------------------------------------------------- resources
     default_cpu: float = Field(default=1.0, gt=0, le=16)
-    default_memory_mb: int = Field(default=512, gt=0, le=65536)
+    # 512 MB OOM-killed (exit 137) weasyprint CJK PDF rendering: the cgroup
+    # limit counts the process RSS (~350 MB for a typical report) PLUS the
+    # tmpfs-backed /workspace + /tmp AND the page cache for the ~100-200 MB
+    # Noto CJK font files weasyprint loads to subset/embed. 1 GB gives that
+    # workload comfortable headroom; very large/image-heavy jobs can still
+    # request more via the per-acquire ``memory_mb`` override.
+    default_memory_mb: int = Field(default=1024, gt=0, le=65536)
     default_pids_limit: int = Field(default=128, gt=0, le=4096)
     default_timeout_s: int = Field(default=30, gt=0, le=300)
     #: How long ``acquire`` waits for the runner's readiness line before
