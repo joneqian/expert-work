@@ -121,7 +121,7 @@ class _MediumResultTool:
 
 
 async def _run_one_turn(
-    *, tool: Any, writer: WorkspaceFileWriter | None, thread_id: str
+    *, tool: Any, writer: WorkspaceFileWriter | None, thread_id: str, budget_enabled: bool = True
 ) -> AgentState:
     llm = _ScriptedLLM(
         responses=[
@@ -141,6 +141,7 @@ async def _run_one_turn(
                 llm_caller=llm,
                 tool_registry=registry,
                 workspace_writer_factory=factory,
+                tool_output_budget_enabled=budget_enabled,
             )
         )
         cfg: RunnableConfig = {"configurable": {"thread_id": thread_id}}
@@ -257,22 +258,25 @@ async def test_medium_result_persisted_with_artifact_path_no_footer() -> None:
     assert message.artifact[TOOL_RESULT_PATH_ARTIFACT_KEY] == rel
 
 
-async def test_kill_switch_disables_generalized_externalization(monkeypatch: Any) -> None:
-    # HELIX_TOOL_OUTPUT_BUDGET=0 reverts the #859 generalized path: the big
-    # web_search result is left full in context, nothing written.
-    monkeypatch.setenv("HELIX_TOOL_OUTPUT_BUDGET", "0")
+async def test_budget_disabled_skips_generalized_externalization() -> None:
+    # tool_output_budget_enabled=False (the resolved platform-AND-agent switch)
+    # reverts the #859 generalized path: the big web_search result is left full
+    # in context, nothing written.
     writer = _RecordingWriter()
-    state = await _run_one_turn(tool=_BigResultTool(), writer=writer, thread_id="kill-1")
+    state = await _run_one_turn(
+        tool=_BigResultTool(), writer=writer, thread_id="kill-1", budget_enabled=False
+    )
     assert writer.writes == {}
     assert str(_tool_message(state).content) == _FULL
     assert "<tool-result-overflow>" not in str(_tool_message(state).content)
 
 
-async def test_kill_switch_keeps_full_content_externalization(monkeypatch: Any) -> None:
-    # The older CM-5 full_content path is NOT gated by the kill switch — a tool
-    # that truncated its own output still externalizes the full rendering.
-    monkeypatch.setenv("HELIX_TOOL_OUTPUT_BUDGET", "0")
+async def test_budget_disabled_keeps_full_content_externalization() -> None:
+    # The older CM-5 full_content path is NOT gated by the switch — a tool that
+    # truncated its own output still externalizes the full rendering.
     writer = _RecordingWriter()
-    state = await _run_one_turn(tool=_SpillTool(), writer=writer, thread_id="kill-2")
+    state = await _run_one_turn(
+        tool=_SpillTool(), writer=writer, thread_id="kill-2", budget_enabled=False
+    )
     assert len(writer.writes) == 1
     assert "<tool-result-overflow>" in str(_tool_message(state).content)

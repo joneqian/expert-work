@@ -627,6 +627,27 @@ class WorkingMemoryPolicy(BaseModel):
     keep_first_turn: bool = True
 
 
+class ToolOutputBudgetPolicy(BaseModel):
+    """Phase 3 — per-agent master switch for the tool-output-budget feature.
+
+    Gates the WHOLE feature for this agent: the generalized externalization
+    (#859), the persist floor (item 2), and the CM-12 prune gate
+    (:class:`ToolResultPrunePolicy`, which stays the prune sub-knobs). Distinct
+    from the prune policy so an agent can keep externalization/persist while
+    tuning prune, or turn the lot off with one flag.
+
+    Resolved at build time as ``effective = platform AND agent`` — the platform
+    toggle (``PlatformToolBudgetConfigService``, DB-wins over the
+    ``HELIX_TOOL_OUTPUT_BUDGET`` env default) is a master kill that overrides
+    this flag when off. Default ``true`` ⇒ zero behaviour change. The older CM-5
+    ``full_content`` externalization is never gated.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+
 class ToolResultPrunePolicy(BaseModel):
     """Stream CM-12 — mechanical tool-result prune gate knobs.
 
@@ -704,6 +725,9 @@ class PolicySpec(BaseModel):
     # defaults ⇒ zero behaviour change for existing manifests (no-op under
     # threshold / within recent_tool_results_kept).
     tool_result_prune: ToolResultPrunePolicy = Field(default_factory=ToolResultPrunePolicy)
+    # Phase 3 — per-agent master switch for the whole tool-output-budget feature
+    # (externalization + persist + prune). effective = platform AND agent.
+    tool_output_budget: ToolOutputBudgetPolicy = Field(default_factory=ToolOutputBudgetPolicy)
     # Capability Uplift Sprint #7 (Mini-ADR U-39) — per-agent
     # MemoryConsolidator knobs. Defaults are equivalent to "use platform
     # defaults" so existing manifests load unchanged.

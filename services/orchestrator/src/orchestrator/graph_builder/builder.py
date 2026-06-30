@@ -127,7 +127,6 @@ from orchestrator.tools.overflow import (
     make_preview,
     overflow_rel_path,
     render_overflow_footer,
-    tool_output_budget_enabled,
 )
 from orchestrator.tools.registry import (
     TOOL_ALLOWED_STATE_KEYS,
@@ -329,6 +328,12 @@ def build_react_graph(
     # tool results to 1-line references (lossless for Phase-1-externalized ones).
     # ``None`` → no prune (the default; unchanged from pre-CM-12).
     tool_result_pruner: ToolResultPruner | None = None,
+    # Phase 3 — resolved (platform AND agent) master switch for the tool-output
+    # budget feature. Threaded into ``_externalize_tool_overflow`` so the
+    # generalized (#859) + persist (item 2) branches honour it; the pruner is
+    # gated by the factory using the same value. ``True`` (default) keeps the
+    # feature on (the env default is resolved upstream in the factory).
+    tool_output_budget_enabled: bool = True,
     # Stream CM-3 — pre-compaction flush: when set, agent_node hands the
     # compressor a callback that flushes the about-to-be-discarded middle
     # to long-term memory before each pass summarises it away. ``None`` →
@@ -907,6 +912,7 @@ def build_react_graph(
                     audit_logger=audit_logger,
                     overflow_writer=overflow_writer,
                     spotlight_nonce=spotlight_nonce,
+                    budget_enabled=tool_output_budget_enabled,
                 )
             )
 
@@ -1403,6 +1409,7 @@ async def _dispatch_tool(
     audit_logger: AuditLogger | None = None,
     overflow_writer: WorkspaceFileWriter | None = None,
     spotlight_nonce: str | None = None,
+    budget_enabled: bool = True,
 ) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
     """Dispatch one tool call.
 
@@ -1448,6 +1455,7 @@ async def _dispatch_tool(
                 ctx,
                 overflow_writer=overflow_writer,
                 spotlight_nonce=spotlight_nonce,
+                budget_enabled=budget_enabled,
             )
         ok = outcome[0].status != "error"
         # Stream HX-12 (Mini-ADR HX-I4) — call-through: the model called a
@@ -1909,6 +1917,7 @@ async def _invoke_tool(
     *,
     overflow_writer: WorkspaceFileWriter | None = None,
     spotlight_nonce: str | None = None,
+    budget_enabled: bool = True,
 ) -> tuple[ToolMessage, Mapping[str, Any], int, ClassifiedToolError | None]:
     schema_error = _validate_tool_args(tool, args)
     if schema_error is not None:
@@ -1952,7 +1961,7 @@ async def _invoke_tool(
     # truncated body, or a head+tail preview for tools that didn't pre-truncate)
     # instead of a dead end or a context blowup.
     replacement_body, footer, persist_path = await _externalize_tool_overflow(
-        result, tool, call_id, ctx, overflow_writer
+        result, tool, call_id, ctx, overflow_writer, budget_enabled=budget_enabled
     )
     body = replacement_body if replacement_body is not None else result.content
     # Stream PI-1b — a tool's output is untrusted (web pages, MCP servers, files
@@ -1988,6 +1997,8 @@ async def _externalize_tool_overflow(
     call_id: str,
     ctx: ToolContext,
     writer: WorkspaceFileWriter | None,
+    *,
+    budget_enabled: bool = True,
 ) -> tuple[str | None, str | None, str | None]:
     """Externalize an oversized tool result to the workspace (Stream CM-5).
 
@@ -2024,7 +2035,7 @@ async def _externalize_tool_overflow(
     if writer is None or tool.spec.name in EXEMPT_TOOLS:
         return None, None, None
 
-    budget_on = tool_output_budget_enabled()
+    budget_on = budget_enabled
     if result.full_content is not None:
         # CM-5 (always on — the kill switch does not gate this older path).
         source = result.full_content

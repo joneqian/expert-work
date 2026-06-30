@@ -442,6 +442,12 @@ async def build_agent(
     # manifest opts in (``defenses.action_screen != "off"``); ``None`` (the
     # default) leaves action screening inert (the real impl is PI-3b-2).
     action_judge: ActionJudge | None = None,
+    # Phase 3 — platform master switch for the tool-output-budget feature,
+    # resolved by the control-plane (``PlatformToolBudgetConfigService``: DB-wins
+    # over the ``HELIX_TOOL_OUTPUT_BUDGET`` env default). ``None`` (tests / no
+    # control-plane) falls back to the env default. Combined with the per-agent
+    # ``policies.tool_output_budget.enabled`` as ``effective = platform AND agent``.
+    platform_tool_budget_enabled: bool | None = None,
 ) -> BuiltAgent:
     """Assemble a :class:`BuiltAgent` from a validated :class:`AgentSpec`.
 
@@ -674,14 +680,26 @@ async def build_agent(
             keep_first_turn=wm_policy.keep_first_turn,
             estimator=estimator,
         )
+    # Phase 3 — resolve the tool-output-budget master switch:
+    # effective = platform AND agent. Platform = the control-plane-resolved value
+    # (DB-wins over the HELIX_TOOL_OUTPUT_BUDGET env default); ``None`` (tests /
+    # no control-plane) falls back to the env default. Agent = the per-agent
+    # policy flag. ``tool_budget_enabled`` gates the externalization + persist
+    # (threaded into build_react_graph) AND the prune gate below.
+    platform_budget_on = (
+        platform_tool_budget_enabled
+        if platform_tool_budget_enabled is not None
+        else tool_output_budget_enabled()
+    )
+    tool_budget_enabled = platform_budget_on and spec.spec.policies.tool_output_budget.enabled
     # Stream CM-12 — mechanical tool-result prune gate: the cheapest, least-lossy
     # gate that runs before the working window in agent_node. Conservative
     # defaults ⇒ no-op under threshold / within recent_tool_results_kept (zero
-    # behaviour change for existing manifests). Gated by the platform kill switch
-    # (HELIX_TOOL_OUTPUT_BUDGET) in addition to the per-agent policy flag.
+    # behaviour change for existing manifests). Gated by the resolved master
+    # switch in addition to the per-agent prune sub-flag.
     trp_policy = spec.spec.policies.tool_result_prune
     tool_result_pruner: ToolResultPruner | None = None
-    if trp_policy.enabled and tool_output_budget_enabled():
+    if trp_policy.enabled and tool_budget_enabled:
         tool_result_pruner = ToolResultPruner(
             context_window=_resolved_context_window(spec.spec.model),
             threshold_pct=trp_policy.threshold_pct,
@@ -788,6 +806,7 @@ async def build_agent(
         context_compressor=context_compressor,
         working_window=working_window,
         tool_result_pruner=tool_result_pruner,
+        tool_output_budget_enabled=tool_budget_enabled,
         pre_compaction_flush=pre_compaction_flush,
         workspace_writer_factory=workspace_writer_factory,
         workspace_ingest_node=workspace_ingest_node,

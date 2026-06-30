@@ -319,6 +319,9 @@ class AuditAction(StrEnum):
     # platform billing config (Stream 12.4) — system_admin-only write to the
     # platform billing-rollup enable flag.
     PLATFORM_BILLING_CONFIG_UPDATED = "platform_billing_config:updated"
+    # platform tool-output-budget config (Phase 3) — system_admin-only write to
+    # the platform tool-budget on/off flag.
+    PLATFORM_TOOL_BUDGET_UPDATED = "platform_tool_budget_config:updated"
     # mcp_server (Stream V — tenant remote MCP server registry)
     MCP_SERVER_CREATE = "mcp_server:create"
     MCP_SERVER_UPDATE = "mcp_server:update"

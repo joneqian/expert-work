@@ -638,6 +638,30 @@ def test_working_memory_forbids_extra() -> None:
 
 
 # ---------------------------------------------------------------------------
+# policies.tool_output_budget — Phase 3 (per-agent master switch)
+# ---------------------------------------------------------------------------
+
+
+def test_tool_output_budget_default_enabled() -> None:
+    """Phase 3 — default ON so existing manifests keep the feature."""
+    spec = AgentSpec.model_validate(_doc())
+    assert spec.spec.policies.tool_output_budget.enabled is True
+
+
+def test_tool_output_budget_disable_accepted() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {"tool_output_budget": {"enabled": False}}
+    assert AgentSpec.model_validate(doc).spec.policies.tool_output_budget.enabled is False
+
+
+def test_tool_output_budget_forbids_extra() -> None:
+    doc = _doc()
+    doc["spec"]["policies"] = {"tool_output_budget": {"bogus": 1}}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
+
+
+# ---------------------------------------------------------------------------
 # policies.context_compression.flush_before_compaction — CM-3
 # ---------------------------------------------------------------------------
 

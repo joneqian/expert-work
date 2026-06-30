@@ -62,6 +62,7 @@ from control_plane.api import (
     build_platform_embedding_config_router,
     build_platform_judge_config_router,
     build_platform_skills_router,
+    build_platform_tool_budget_config_router,
     build_quota_router,
     build_rate_card_router,
     build_role_bindings_router,
@@ -153,6 +154,7 @@ from control_plane.platform_embedding_config import PlatformEmbeddingConfigServi
 from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolService
 from control_plane.platform_secrets import PlatformSecretsService
+from control_plane.platform_tool_budget_config import PlatformToolBudgetConfigService
 from control_plane.quota import (
     InMemoryQuotaService,
     QuotaService,
@@ -319,6 +321,11 @@ from helix_agent.persistence.platform_secrets import (
     InMemoryPlatformSecretStore,
     PlatformSecretStore,
     SqlPlatformSecretStore,
+)
+from helix_agent.persistence.platform_tool_budget_config import (
+    InMemoryPlatformToolBudgetConfigStore,
+    PlatformToolBudgetConfigStore,
+    SqlPlatformToolBudgetConfigStore,
 )
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore,
@@ -746,12 +753,22 @@ def create_app(
     resolved_platform_judge_config_store: PlatformJudgeConfigStore = (
         sql_stores.platform_judge_config if sql_stores else InMemoryPlatformJudgeConfigStore()
     )
+    # Phase 3 — platform tool-output-budget on/off, read at agent build time.
+    resolved_platform_tool_budget_config_store: PlatformToolBudgetConfigStore = (
+        sql_stores.platform_tool_budget_config
+        if sql_stores
+        else InMemoryPlatformToolBudgetConfigStore()
+    )
     # Stream 12.4 — platform billing-rollup toggle, read by the offline rollup job.
     resolved_platform_billing_config_store: PlatformBillingConfigStore = (
         sql_stores.platform_billing_config if sql_stores else InMemoryPlatformBillingConfigStore()
     )
     resolved_platform_judge_config_service = PlatformJudgeConfigService(
         store=resolved_platform_judge_config_store,
+        ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
+    )
+    resolved_platform_tool_budget_config_service = PlatformToolBudgetConfigService(
+        store=resolved_platform_tool_budget_config_store,
         ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
     )
     # Complete the D.2 cycle: TenantAwareRedactor → resolver → service.
@@ -1267,6 +1284,10 @@ def create_app(
                     # Stream PI-3-A2 — judges prefer the platform judge model
                     # (else fall back to each agent's own model).
                     platform_judge_config_service=resolved_platform_judge_config_service,
+                    # Phase 3 — platform tool-output-budget master switch.
+                    platform_tool_budget_config_service=(
+                        resolved_platform_tool_budget_config_service
+                    ),
                     # Stream V (Mini-ADR V-4) — tenant's own remote MCP pool.
                     tenant_mcp_pool_provider=_tenant_mcp_pool_provider,
                     # Stream MCP platform-servers (P1b) — platform shared catalog pool.
@@ -1636,6 +1657,7 @@ def create_app(
     # app.state to upsert the row + invalidate the cache for immediate effect.
     app.state.platform_embedding_config_service = resolved_platform_embedding_config_service
     app.state.platform_judge_config_service = resolved_platform_judge_config_service
+    app.state.platform_tool_budget_config_service = resolved_platform_tool_budget_config_service
     app.state.platform_billing_config_store = resolved_platform_billing_config_store
     # Capability Uplift Sprint #4 — exposed on app.state for callers that
     # need it directly. Stream X (Mini-ADR X-4) wires it through
@@ -1818,6 +1840,7 @@ def create_app(
     app.include_router(build_platform_config_router())
     app.include_router(build_platform_embedding_config_router())
     app.include_router(build_platform_judge_config_router())
+    app.include_router(build_platform_tool_budget_config_router())
     app.include_router(build_platform_billing_config_router())
     app.include_router(build_tenant_quotas_router())
     app.include_router(build_tenant_config_router())
@@ -1869,6 +1892,7 @@ class _SqlStores:
     platform_secret: PlatformSecretStore
     platform_embedding_config: PlatformEmbeddingConfigStore  # Stream T (PR B)
     platform_judge_config: PlatformJudgeConfigStore  # Stream PI-3-A1
+    platform_tool_budget_config: PlatformToolBudgetConfigStore  # Phase 3
     platform_billing_config: PlatformBillingConfigStore  # Stream 12.4
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
@@ -2085,6 +2109,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         platform_secret=SqlPlatformSecretStore(session_factory),
         platform_embedding_config=SqlPlatformEmbeddingConfigStore(session_factory),
         platform_judge_config=SqlPlatformJudgeConfigStore(session_factory),
+        platform_tool_budget_config=SqlPlatformToolBudgetConfigStore(session_factory),
         platform_billing_config=SqlPlatformBillingConfigStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),

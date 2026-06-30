@@ -27,6 +27,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolProvider
+from control_plane.platform_tool_budget_config import PlatformToolBudgetConfigService
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
 from control_plane.tenant_scope import bypass_rls_session
@@ -521,6 +522,8 @@ def make_agent_builder(
     credentials_resolver: CredentialsResolver | None = None,
     platform_embedding_config_service: PlatformEmbeddingConfigService | None = None,
     platform_judge_config_service: PlatformJudgeConfigService | None = None,
+    # Phase 3 — platform tool-output-budget master switch (DB-wins over env).
+    platform_tool_budget_config_service: PlatformToolBudgetConfigService | None = None,
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
@@ -665,6 +668,14 @@ def make_agent_builder(
             if credentials_resolver is not None and tenant_id is not None
             else None
         )
+        # Phase 3 — resolve the platform tool-output-budget master switch
+        # (DB-wins over the HELIX_TOOL_OUTPUT_BUDGET env default). ``None`` lets
+        # build_agent fall back to the env default.
+        platform_tool_budget_enabled = (
+            await platform_tool_budget_config_service.effective_enabled()
+            if platform_tool_budget_config_service is not None
+            else None
+        )
         return await build_agent(
             spec,
             secret_store=secret_store,
@@ -683,6 +694,8 @@ def make_agent_builder(
             output_judge=output_judge,
             # Stream PI-3b-2 — gated model-backed action judge.
             action_judge=action_judge,
+            # Phase 3 — platform master switch (effective = platform AND agent).
+            platform_tool_budget_enabled=platform_tool_budget_enabled,
         )
 
     return _build

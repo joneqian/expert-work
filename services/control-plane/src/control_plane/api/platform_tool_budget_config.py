@@ -1,0 +1,97 @@
+"""``/v1/platform/tool-budget-config`` — platform tool-output-budget on/off (Phase 3).
+
+system_admin-only view + write of the EFFECTIVE platform on/off for the
+tool-output-budget feature (generalized externalization + persist floor + CM-12
+prune). Unset is a valid state — the service then falls back to the
+``HELIX_TOOL_OUTPUT_BUDGET`` env default.
+
+Gating mirrors :mod:`control_plane.api.platform_judge_config`: ``principal``
+arrives via the shared ``_principal`` dependency, handlers gate on
+``principal.is_system_admin``, responses use the ``{success,data,error}`` envelope.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict
+
+from control_plane.api._authz import _principal
+from control_plane.audit import emit
+from control_plane.platform_tool_budget_config import PlatformToolBudgetConfigService
+from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.protocol import AuditAction, Principal
+from helix_agent.runtime.audit.logger import AuditLogger
+
+
+class PlatformToolBudgetConfigWrite(BaseModel):
+    """Write payload — the platform tool-output-budget on/off flag."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
+
+def _require_system_admin(principal: Principal) -> None:
+    if not principal.is_system_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PLATFORM_SCOPE_FORBIDDEN",
+                "message": "only a system admin may manage the platform tool-budget config",
+            },
+        )
+
+
+def _get_service(request: Request) -> PlatformToolBudgetConfigService:
+    return request.app.state.platform_tool_budget_config_service  # type: ignore[no-any-return]
+
+
+def _get_audit(request: Request) -> AuditLogger:
+    return request.app.state.audit_logger  # type: ignore[no-any-return]
+
+
+async def _view(service: PlatformToolBudgetConfigService) -> dict[str, object]:
+    """``{enabled, effective}``: the resolved on/off + whether it is an explicit
+    platform override (``enabled`` is null ⇒ using the env default)."""
+    return {
+        "enabled": await service.configured_enabled(),
+        "effective": await service.effective_enabled(),
+    }
+
+
+def build_platform_tool_budget_config_router() -> APIRouter:
+    router = APIRouter(prefix="/v1/platform/tool-budget-config", tags=["platform_config"])
+
+    @router.get("")
+    async def get_platform_tool_budget_config(
+        principal: Annotated[Principal, Depends(_principal)],
+        service: Annotated[PlatformToolBudgetConfigService, Depends(_get_service)],
+    ) -> dict[str, object]:
+        """The platform tool-budget on/off (effective + whether overridden)."""
+        _require_system_admin(principal)
+        return {"success": True, "data": await _view(service), "error": None}
+
+    @router.put("")
+    async def put_platform_tool_budget_config(
+        payload: PlatformToolBudgetConfigWrite,
+        principal: Annotated[Principal, Depends(_principal)],
+        service: Annotated[PlatformToolBudgetConfigService, Depends(_get_service)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> dict[str, object]:
+        """Set the platform tool-budget on/off. system_admin-only."""
+        _require_system_admin(principal)
+        await service.put(enabled=payload.enabled, updated_by=principal.subject_id)
+        await emit(
+            audit,
+            tenant_id=principal.tenant_id,
+            actor_id=principal.subject_id,
+            action=AuditAction.PLATFORM_TOOL_BUDGET_UPDATED,
+            resource_type="platform_credential",
+            resource_id="tool-budget-config",
+            trace_id=current_trace_id_hex(),
+            details={"enabled": payload.enabled},
+        )
+        return {"success": True, "data": await _view(service), "error": None}
+
+    return router

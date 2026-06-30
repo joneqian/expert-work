@@ -1145,3 +1145,63 @@ def test_resolved_context_window_off_catalog_fallback() -> None:
 
     model = ModelSpec(provider="self-hosted", name="my-private-model")
     assert _resolved_context_window(model) == 200_000
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — tool-output-budget master switch resolution (effective = platform AND
+# agent). A spy on ``build_react_graph`` captures the resolved bool the factory
+# threads into externalization; the platform value also gates the prune build.
+# ---------------------------------------------------------------------------
+
+
+def _spy_budget(monkeypatch: Any, captured: dict[str, Any]) -> None:
+    from orchestrator.agent_factory import build_react_graph as real
+
+    def _spy(**kwargs: Any) -> Any:
+        captured["enabled"] = kwargs.get("tool_output_budget_enabled")
+        return real(**kwargs)
+
+    monkeypatch.setattr("orchestrator.agent_factory.build_react_graph", _spy)
+
+
+async def test_tool_budget_effective_is_platform_and_agent(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _spy_budget(monkeypatch, captured)
+
+    async with make_checkpointer("memory") as cp:
+        await _build(
+            _spec(),
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            platform_tool_budget_enabled=True,
+        )
+        assert captured["enabled"] is True  # platform ∧ agent both on
+
+        await _build(
+            _spec(),
+            secret_store=_secret_store(),
+            checkpointer=cp,
+            platform_tool_budget_enabled=False,
+        )
+        assert captured["enabled"] is False  # platform off = master kill
+
+        spec = _spec()
+        spec.spec.policies.tool_output_budget.enabled = False
+        await _build(
+            spec, secret_store=_secret_store(), checkpointer=cp, platform_tool_budget_enabled=True
+        )
+        assert captured["enabled"] is False  # agent off
+
+
+async def test_tool_budget_platform_none_falls_back_to_env(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _spy_budget(monkeypatch, captured)
+
+    async with make_checkpointer("memory") as cp:
+        monkeypatch.delenv("HELIX_TOOL_OUTPUT_BUDGET", raising=False)
+        await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)  # → env default (on)
+        assert captured["enabled"] is True
+
+        monkeypatch.setenv("HELIX_TOOL_OUTPUT_BUDGET", "0")
+        await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
+        assert captured["enabled"] is False

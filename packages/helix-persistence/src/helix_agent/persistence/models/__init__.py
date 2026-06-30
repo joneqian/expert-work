@@ -49,6 +49,9 @@ from helix_agent.persistence.models.platform_secret import (
     TenantProviderSecretRow,
     TenantToolSecretRow,
 )
+from helix_agent.persistence.models.platform_tool_budget_config import (
+    PlatformToolBudgetConfigRow,
+)
 from helix_agent.persistence.models.role_binding import RoleBindingRow
 from helix_agent.persistence.models.run_event import RunEventRow
 from helix_agent.persistence.models.sandbox_instance import SandboxInstanceRow
@@ -113,6 +116,7 @@ __all__ = [
     "PlatformEmbeddingConfigRow",
     "PlatformJudgeConfigRow",
     "PlatformProviderSecretRow",
+    "PlatformToolBudgetConfigRow",
     "PlatformToolSecretRow",
     "RoleBindingRow",
     "RunEventRow",
