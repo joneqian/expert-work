@@ -158,6 +158,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [eventView, setEventView] = useState<"timeline" | "raw">("timeline");
   const [running, setRunning] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -519,6 +520,47 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       }
     },
     [thread, patchTurn, detectApproval],
+  );
+
+  // Export a turn's full event stream as JSON for offline analysis. Prefer the
+  // authoritative persisted stream (the ``/events`` replay) — the live client
+  // may have missed frames (e.g. a paused run that never delivered ``end``);
+  // fall back to the frames this client received when there is no run_id or the
+  // fetch fails. Either way a file always downloads.
+  const handleExport = useCallback(
+    async (turn: Turn) => {
+      const threadId = thread?.thread_id ?? null;
+      const runId = runIdOf(turn.events);
+      setExportingId(turn.id);
+      let events: SseEvent[] = turn.events;
+      let source: "backend" | "client" = "client";
+      try {
+        if (threadId && runId) {
+          const collected: SseEvent[] = [];
+          for await (const frame of streamRunEvents(threadId, runId)) {
+            collected.push(frame);
+            if (frame.event === "end") break;
+          }
+          if (collected.length > 0) {
+            events = collected;
+            source = "backend";
+          }
+        }
+      } catch {
+        // Best-effort — fall back to the client-side frames already assigned.
+      } finally {
+        setExportingId(null);
+      }
+      downloadJson(`helix-events-${runId ?? turn.id}.json`, {
+        run_id: runId,
+        thread_id: threadId,
+        input: turn.input,
+        source,
+        exported_at: new Date().toISOString(),
+        events,
+      });
+    },
+    [thread],
   );
 
   const loadWorkspace = useCallback(async (threadId: string) => {
@@ -1104,12 +1146,27 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               rate={rate}
               onDecide={handleDecide}
               deciding={running}
+              onExport={handleExport}
+              exporting={exportingId === turn.id}
             />
           ))}
         </div>
       </div>
     </div>
   );
+}
+
+/** Trigger a client-side download of ``data`` as a pretty-printed JSON file. */
+function downloadJson(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function runIdOf(events: readonly SseEvent[]): string | null {
@@ -1236,6 +1293,8 @@ function TurnCard({
   rate,
   onDecide,
   deciding,
+  onExport,
+  exporting,
 }: {
   turn: Turn;
   eventView: "timeline" | "raw";
@@ -1244,6 +1303,8 @@ function TurnCard({
   rate: RateCardRecord | null;
   onDecide: (turnId: string, approval: ApprovalItem, decision: "approve" | "reject") => void;
   deciding: boolean;
+  onExport: (turn: Turn) => void;
+  exporting: boolean;
 }) {
   const { t } = useTranslation();
   const summary = summarizeTurn(turn.events);
@@ -1451,6 +1512,7 @@ function TurnCard({
                 <span
                   onClick={(e) => e.stopPropagation()}
                   role="presentation"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
                 >
                   <Segmented<"timeline" | "raw">
                     size="small"
@@ -1462,6 +1524,17 @@ function TurnCard({
                     ]}
                     data-testid="playground-event-view-toggle"
                   />
+                  <Button
+                    size="small"
+                    icon={<Download size={13} strokeWidth={1.75} />}
+                    loading={exporting}
+                    onClick={() => onExport(turn)}
+                    title={t("playground.export_json_tip")}
+                    aria-label={t("playground.export_json")}
+                    data-testid="playground-export-json"
+                  >
+                    {t("playground.export_json")}
+                  </Button>
                 </span>
               </div>
             ),

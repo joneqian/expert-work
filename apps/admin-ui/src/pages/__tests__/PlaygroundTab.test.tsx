@@ -168,6 +168,52 @@ describe("PlaygroundTab", () => {
     expect(screen.queryByTestId("playground-stop")).not.toBeInTheDocument();
   });
 
+  it("exports the turn's authoritative event stream as JSON", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    streamRunMock.mockReturnValue(
+      makeStream([
+        { id: "1", event: "metadata", data: { run_id: "r-1" }, rawData: "", receivedAt: "t1" },
+        { id: "2", event: "end", data: "ok", rawData: "ok", receivedAt: "t2" },
+      ]),
+    );
+    // The authoritative ``/events`` replay returns the full persisted stream —
+    // including frames the live client may never have received.
+    streamRunEventsMock.mockReturnValue(
+      makeStream([
+        { id: "1", event: "metadata", data: { run_id: "r-1" }, rawData: "", receivedAt: "t1" },
+        {
+          id: "2",
+          event: "updates",
+          data: { tools: { pending_approval: "x" } },
+          rawData: "",
+          receivedAt: "t2",
+        },
+        { id: "3", event: "end", data: "ok", rawData: "ok", receivedAt: "t3" },
+      ]),
+    );
+    const createUrl = vi.fn(() => "blob:mock");
+    (URL as unknown as { createObjectURL: () => string }).createObjectURL = createUrl;
+    (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = vi.fn();
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    renderPg();
+    await screen.findByText(/33333333-3333-3333/);
+    await user.type(screen.getByTestId("playground-input"), "hi");
+    await user.click(screen.getByTestId("playground-run"));
+    await user.click(await screen.findByTestId("playground-export-json"));
+
+    await waitFor(() => expect(streamRunEventsMock).toHaveBeenCalled());
+    // Pulled the authoritative stream for this run, not the client frames.
+    expect(streamRunEventsMock.mock.calls[0][1]).toBe("r-1");
+    // A JSON blob was created + a download triggered.
+    expect(createUrl).toHaveBeenCalledTimes(1);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    clickSpy.mockRestore();
+  });
+
   it("shows a stream-failure alert when streamRun throws", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);

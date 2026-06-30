@@ -538,6 +538,8 @@ export interface TranslationKeys {
     usage_reasoning: string;
     reasoning_label: string;
     events_label: string;
+    export_json: string;
+    export_json_tip: string;
     workspace_label: string;
     workspace_refresh: string;
     workspace_volume: string;
@@ -2591,6 +2593,8 @@ const en: TranslationKeys = {
     usage_reasoning: "reasoning",
     reasoning_label: "Reasoning",
     events_label: "Events",
+    export_json: "Export JSON",
+    export_json_tip: "Export this turn's full event stream (authoritative backend record) as JSON",
     workspace_label: "Workspace",
     workspace_refresh: "Refresh workspace",
     workspace_volume: "Volume",

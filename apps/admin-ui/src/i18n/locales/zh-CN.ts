@@ -580,6 +580,8 @@ const zhCN: TranslationKeys = {
     usage_reasoning: "思考",
     reasoning_label: "思考过程",
     events_label: "事件",
+    export_json: "导出 JSON",
+    export_json_tip: "导出本轮完整事件流(后端权威记录)为 JSON",
     workspace_label: "工作区",
     workspace_refresh: "刷新工作区",
     workspace_volume: "卷",
