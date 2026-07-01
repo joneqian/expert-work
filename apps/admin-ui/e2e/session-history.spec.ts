@@ -121,6 +121,17 @@ test("browse, rename, archive, purge, resume + axe", async ({ page }) => {
   );
   await page.getByTestId("session-history-search").fill("report");
   await listReq;
+  await page.getByTestId("session-history-search").fill("");
+
+  // Status filter → ?status=. Pick "archived" (how soft-deleted threads become
+  // visible again).
+  const statusReq = page.waitForRequest(
+    (r) =>
+      r.url().includes("/v1/sessions") && r.url().includes("status=archived"),
+  );
+  await page.getByTestId("session-history-status-filter").click();
+  await page.getByRole("option", { name: /archived|已归档/i }).click();
+  await statusReq;
 
   // Rename → PATCH with the new title.
   await page.getByTestId(`session-history-rename-${A_ID}`).click();

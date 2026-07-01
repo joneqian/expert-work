@@ -18,6 +18,7 @@ import {
   List,
   Modal,
   Popconfirm,
+  Select,
   Space,
   Tag,
 } from "antd";
@@ -90,6 +91,9 @@ export function SessionHistoryDrawer({
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  // "" = all (excludes archived); a status value narrows to it (incl.
+  // "archived", which is how soft-deleted threads become visible again).
+  const [statusFilter, setStatusFilter] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<ThreadMeta | null>(null);
@@ -112,6 +116,7 @@ export function SessionHistoryDrawer({
         const page = await listSessions({
           agentName,
           q: debouncedQuery || undefined,
+          status: statusFilter || undefined,
           limit: PAGE_SIZE,
           offset,
         });
@@ -124,16 +129,16 @@ export function SessionHistoryDrawer({
         setLoading(false);
       }
     },
-    [agentName, debouncedQuery],
+    [agentName, debouncedQuery, statusFilter],
   );
 
-  // Reload from the top whenever the drawer opens, the search changes, or a
-  // mutation bumps ``reloadTick``.
+  // Reload from the top whenever the drawer opens, the search / status filter
+  // changes, or a mutation bumps ``reloadTick``.
   useEffect(() => {
     if (!open) return;
     offsetRef.current = 0;
     void load(false);
-  }, [open, debouncedQuery, reloadTick, load]);
+  }, [open, debouncedQuery, statusFilter, reloadTick, load]);
 
   const triggerChanged = useCallback(() => {
     setReloadTick((n) => n + 1);
@@ -228,16 +233,43 @@ export function SessionHistoryDrawer({
       }}
       data-testid="session-history-drawer"
     >
-      <Input.Search
-        placeholder={t("session_history.search_placeholder")}
-        aria-label={t("session_history.search_placeholder")}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        allowClear
-        loading={loading}
-        style={{ marginBottom: 12 }}
-        data-testid="session-history-search"
-      />
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <Input.Search
+          placeholder={t("session_history.search_placeholder")}
+          aria-label={t("session_history.search_placeholder")}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          allowClear
+          loading={loading}
+          style={{ flex: 1 }}
+          data-testid="session-history-search"
+        />
+        <Select
+          value={statusFilter}
+          onChange={setStatusFilter}
+          aria-label={t("session_history.filter_status")}
+          style={{ width: 108, flexShrink: 0 }}
+          data-testid="session-history-status-filter"
+          options={[
+            { value: "", label: t("session_history.filter_all") },
+            { value: "active", label: t("session_history.status_active") },
+            { value: "paused", label: t("session_history.status_paused") },
+            {
+              value: "completed",
+              label: t("session_history.status_completed"),
+            },
+            { value: "failed", label: t("session_history.status_failed") },
+            {
+              value: "cancelled",
+              label: t("session_history.status_cancelled"),
+            },
+            {
+              value: "archived",
+              label: t("session_history.status_archived"),
+            },
+          ]}
+        />
+      </div>
       {sessions.length === 0 && !loading ? (
         empty
       ) : (

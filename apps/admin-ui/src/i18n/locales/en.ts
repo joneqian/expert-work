@@ -571,6 +571,8 @@ export interface TranslationKeys {
   session_history: {
     title: string;
     search_placeholder: string;
+    filter_status: string;
+    filter_all: string;
     empty: string;
     empty_search: string;
     load_more: string;
@@ -2673,6 +2675,8 @@ const en: TranslationKeys = {
   session_history: {
     title: "Session history",
     search_placeholder: "Search title…",
+    filter_status: "Filter by status",
+    filter_all: "All",
     empty: "No sessions yet — send a message to start.",
     empty_search: "No matching sessions.",
     load_more: "Load more",

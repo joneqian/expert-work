@@ -107,6 +107,13 @@ describe("SessionHistoryDrawer", () => {
     );
   });
 
+  it("renders the status filter (interaction covered by e2e — antd Select's virtual list does not render options under jsdom)", async () => {
+    renderDrawer();
+    expect(
+      await screen.findByTestId("session-history-status-filter"),
+    ).toBeInTheDocument();
+  });
+
   it("resumes the picked thread and closes", async () => {
     const user = userEvent.setup();
     const { onResume, onClose } = renderDrawer();

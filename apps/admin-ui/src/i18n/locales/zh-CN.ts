@@ -616,6 +616,8 @@ const zhCN: TranslationKeys = {
   session_history: {
     title: "会话历史",
     search_placeholder: "搜索标题…",
+    filter_status: "按状态筛选",
+    filter_all: "全部",
     empty: "暂无会话 —— 发一条消息即开始。",
     empty_search: "没有匹配的会话。",
     load_more: "加载更多",

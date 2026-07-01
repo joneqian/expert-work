@@ -216,6 +216,7 @@ export async function listSessions(
     offset?: number;
     q?: string;
     agentName?: string;
+    status?: string;
     includeArchived?: boolean;
   } = {},
 ): Promise<ThreadMeta[]> {
@@ -225,6 +226,7 @@ export async function listSessions(
   if (params.offset) query.offset = params.offset;
   if (params.q) query.q = params.q;
   if (params.agentName) query.agent_name = params.agentName;
+  if (params.status) query.status = params.status;
   if (params.includeArchived) query.include_archived = true;
   const response = await apiClient.get<ApiEnvelope<{ items: ThreadMeta[] }>>(
     "/v1/sessions",
