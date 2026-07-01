@@ -43,6 +43,7 @@ import {
   ArrowRight,
   Cog,
   Network,
+  LineChart,
   ShieldCheck,
   Store,
   Webhook,
@@ -184,6 +185,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
       { key: "go-api-keys", label: t("cmdk.label_settings_api_keys"), path: "/settings/api-keys", icon: <Key size={16} strokeWidth={1.5} />, sc: [] as string[] },
       { key: "go-egress-audit", label: t("nav.egress_audit"), path: "/settings/egress-audit", icon: <Network size={16} strokeWidth={1.5} />, sc: [] as string[] },
       { key: "go-platform-users", label: t("cmdk.label_settings_platform_users"), path: "/settings/platform-users", icon: <ShieldCheck size={16} strokeWidth={1.5} />, sc: [] as string[] },
+      { key: "go-observability", label: t("nav.observability"), path: "/settings/observability", icon: <LineChart size={16} strokeWidth={1.5} />, sc: [] as string[] },
     ];
     // Same gating as the sidebar (shared ``navModel`` helpers): platform
     // jumps only at the platform level for system_admins, tenant jumps

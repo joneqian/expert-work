@@ -22,6 +22,7 @@ import { Copy, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { buildLangfuseTraceUrl } from "../../config/env";
+import { useAuth } from "../../auth/AuthContext";
 
 const { Text } = Typography;
 
@@ -31,7 +32,12 @@ interface TraceToolbarProps {
 
 export function TraceToolbar({ traceId }: TraceToolbarProps) {
   const { t } = useTranslation();
-  const langfuseUrl = buildLangfuseTraceUrl(traceId);
+  const { identity } = useAuth();
+  // Langfuse has no per-tenant isolation (single ClickHouse, all tenants
+  // mixed), so the deep link is platform-ops only — a tenant user must not
+  // be handed a cross-tenant trace URL. They still get the trace_id + copy.
+  const isSystemAdmin = identity?.isSystemAdmin ?? false;
+  const langfuseUrl = isSystemAdmin ? buildLangfuseTraceUrl(traceId) : null;
 
   const onCopy = async (): Promise<void> => {
     if (traceId === null) return;
@@ -86,13 +92,13 @@ export function TraceToolbar({ traceId }: TraceToolbarProps) {
             >
               {t("trace_toolbar.open_in_langfuse")}
             </Button>
-          ) : (
+          ) : isSystemAdmin ? (
             <Tooltip title={t("trace_toolbar.langfuse_unconfigured_hint")}>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {t("trace_toolbar.open_in_langfuse")}
               </Text>
             </Tooltip>
-          )}
+          ) : null}
         </Space>
       )}
     </Card>

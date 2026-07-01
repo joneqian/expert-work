@@ -1,11 +1,9 @@
 /**
- * TraceToolbar tests — Stream H.3 PR 6.
+ * TraceToolbar tests — Stream H.3 PR 6 + observability gating.
  *
- * Three scenarios:
- *   - No trace_id → muted placeholder, no copy/link controls.
- *   - trace_id present + VITE_LANGFUSE_BASE_URL unset → chip + copy only.
- *   - trace_id present + VITE_LANGFUSE_BASE_URL set → external link
- *     renders + href is the trailing-slash-normalised URL.
+ * The Langfuse deep link is ``system_admin`` only (Langfuse has no per-tenant
+ * isolation), so the render is wrapped in an ``AuthProvider`` fed a JWT whose
+ * roles decide ``isSystemAdmin``.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "antd";
@@ -14,11 +12,24 @@ import userEvent from "@testing-library/user-event";
 import "../../i18n";
 
 import { TraceToolbar } from "../run_detail/TraceToolbar";
+import { AuthProvider } from "../../auth/AuthContext";
+import { setStoredToken } from "../../api/client";
 
-function renderToolbar(traceId: string | null) {
+function jwt(roles: string[]): string {
+  const header = btoa(JSON.stringify({ alg: "none", typ: "JWT" }));
+  const body = btoa(
+    JSON.stringify({ sub: "u", tenant_id: "11111111-1111-1111-1111-111111111111", roles }),
+  );
+  return `${header}.${body}.`;
+}
+
+function renderToolbar(traceId: string | null, { admin = true }: { admin?: boolean } = {}) {
+  setStoredToken(jwt(admin ? ["system_admin"] : ["admin"]));
   return render(
     <App>
-      <TraceToolbar traceId={traceId} />
+      <AuthProvider>
+        <TraceToolbar traceId={traceId} />
+      </AuthProvider>
     </App>,
   );
 }
@@ -29,6 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  setStoredToken(null);
 });
 
 describe("TraceToolbar", () => {
@@ -44,21 +56,24 @@ describe("TraceToolbar", () => {
     renderToolbar("abc123");
     expect(screen.getByTestId("trace-toolbar-id")).toHaveTextContent("abc123");
     expect(screen.getByTestId("trace-toolbar-copy")).toBeInTheDocument();
-    // Without VITE_LANGFUSE_BASE_URL the link is hidden (the tooltip
-    // hint is a plain text node, not the anchor).
     expect(screen.queryByTestId("trace-toolbar-langfuse")).toBeNull();
   });
 
-  it("renders the Langfuse external link when VITE_LANGFUSE_BASE_URL is set", () => {
+  it("renders the Langfuse link for a system_admin when the base URL is set", () => {
     vi.stubEnv("VITE_LANGFUSE_BASE_URL", "https://langfuse.example.com/");
-    renderToolbar("abc123");
+    renderToolbar("abc123", { admin: true });
     const link = screen.getByTestId("trace-toolbar-langfuse");
-    expect(link).toHaveAttribute(
-      "href",
-      "https://langfuse.example.com/trace/abc123",
-    );
+    expect(link).toHaveAttribute("href", "https://langfuse.example.com/trace/abc123");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  it("hides the Langfuse link for a non-system-admin even when the URL is set", () => {
+    vi.stubEnv("VITE_LANGFUSE_BASE_URL", "https://langfuse.example.com/");
+    renderToolbar("abc123", { admin: false });
+    // Still gets the trace_id + copy, but no cross-tenant deep link.
+    expect(screen.getByTestId("trace-toolbar-id")).toBeInTheDocument();
+    expect(screen.queryByTestId("trace-toolbar-langfuse")).toBeNull();
   });
 
   it("copies the trace_id to the clipboard when the copy button is clicked", async () => {

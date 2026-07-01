@@ -36,6 +36,7 @@ import { SettingsPlatformSkillDetail } from "./pages/SettingsPlatformSkillDetail
 import { SettingsRateCard } from "./pages/SettingsRateCard";
 import { SettingsUsage } from "./pages/SettingsUsage";
 import { SettingsBillingChargeback } from "./pages/SettingsBillingChargeback";
+import { SettingsObservability } from "./pages/SettingsObservability";
 import { SkillDetail } from "./pages/SkillDetail";
 import { SkillsList } from "./pages/SkillsList";
 import { TriggersList } from "./pages/TriggersList";
@@ -128,6 +129,7 @@ export function AppRouter() {
         element={<SettingsBillingChargeback />}
       />
       <Route path="/settings/rate-card" element={<SettingsRateCard />} />
+      <Route path="/settings/observability" element={<SettingsObservability />} />
       <Route path="/settings/*" element={<ComingSoon title="Settings" />} />
       <Route path="*" element={<ComingSoon title="404" />} />
     </Routes>

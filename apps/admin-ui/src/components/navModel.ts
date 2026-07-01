@@ -208,6 +208,14 @@ export const PLATFORM_ITEMS: readonly NavEntry[] = [
     path: "/settings/billing-chargeback",
     group: "platform",
   },
+  // Observability hub — platform-ops entry to Langfuse / Grafana / Tempo
+  // (system_admin only; those dashboards have no per-tenant isolation).
+  {
+    key: "settings-observability",
+    labelKey: "nav.observability",
+    path: "/settings/observability",
+    group: "platform",
+  },
   // Read-only cross-tenant overview — reuses the members page under the
   // ``"*"`` scope (already renders read-only there). §2-C / §8 point 2.
   {

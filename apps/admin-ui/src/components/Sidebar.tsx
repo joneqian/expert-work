@@ -17,6 +17,7 @@ import {
   Boxes,
   LayoutTemplate,
   Gauge,
+  LineChart,
   Network,
   Package,
   Plug,
@@ -75,6 +76,7 @@ const ICONS: Record<string, React.ReactNode> = {
   "settings-platform-skills": <Sparkles size={16} strokeWidth={1.5} />,
   "settings-rate-card": <Banknote size={16} strokeWidth={1.5} />,
   "settings-chargeback": <Receipt size={16} strokeWidth={1.5} />,
+  "settings-observability": <LineChart size={16} strokeWidth={1.5} />,
   "platform-members-all": <Users size={16} strokeWidth={1.5} />,
 };
 

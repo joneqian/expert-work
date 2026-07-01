@@ -66,6 +66,22 @@ export interface TranslationKeys {
     usage: string;
     chargeback: string;
     rate_card: string;
+    observability: string;
+  };
+  observability_page: {
+    page_title: string;
+    subtitle: string;
+    not_admin_title: string;
+    not_admin_body: string;
+    tenant_isolation_note: string;
+    open: string;
+    unconfigured: string;
+    langfuse_name: string;
+    langfuse_desc: string;
+    grafana_name: string;
+    grafana_desc: string;
+    tempo_name: string;
+    tempo_desc: string;
   };
   login: {
     title: string;
@@ -2116,6 +2132,24 @@ const en: TranslationKeys = {
     usage: "Usage",
     chargeback: "Chargeback",
     rate_card: "Model Pricing",
+    observability: "Observability",
+  },
+  observability_page: {
+    page_title: "Observability",
+    subtitle: "Platform-operator entry to the self-hosted observability stack.",
+    not_admin_title: "Platform operators only",
+    not_admin_body:
+      "These dashboards hold platform-wide data with no per-tenant isolation, so only system admins can open them.",
+    tenant_isolation_note:
+      "These tools span every tenant's data (no per-tenant isolation) — platform-ops only. Tenant users get the per-run detail inside helix instead.",
+    open: "Open",
+    unconfigured: "Not configured ({{env}})",
+    langfuse_name: "Langfuse",
+    langfuse_desc: "LLM traces — per-call prompts, tokens, cost and latency.",
+    grafana_name: "Grafana",
+    grafana_desc: "Metrics + logs dashboards (SLO, throughput, errors).",
+    tempo_name: "Tempo",
+    tempo_desc: "Distributed traces — cross-service infra spans.",
   },
   login: {
     title: "helix Admin",

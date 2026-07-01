@@ -68,6 +68,23 @@ const zhCN: TranslationKeys = {
     usage: "用量",
     chargeback: "成本分摊",
     rate_card: "模型定价",
+    observability: "可观测性",
+  },
+  observability_page: {
+    page_title: "可观测性",
+    subtitle: "平台运维进入自托管可观测栈的入口。",
+    not_admin_title: "仅平台运维可见",
+    not_admin_body: "这些面板含全平台数据、无 per-tenant 隔离,只有平台管理员能打开。",
+    tenant_isolation_note:
+      "这些工具跨全部租户数据(无 per-tenant 隔离)——仅平台运维可见。租户用户看 helix 内的单次运行详情。",
+    open: "打开",
+    unconfigured: "未配置({{env}})",
+    langfuse_name: "Langfuse",
+    langfuse_desc: "LLM trace —— 每次调用的 prompt、token、成本、延迟。",
+    grafana_name: "Grafana",
+    grafana_desc: "指标 + 日志大盘(SLO、吞吐、错误)。",
+    tempo_name: "Tempo",
+    tempo_desc: "分布式 trace —— 跨服务基础设施 span。",
   },
   login: {
     title: "helix Admin",

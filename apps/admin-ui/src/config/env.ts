@@ -37,3 +37,17 @@ export function buildLangfuseTraceUrl(traceId: string | null | undefined): strin
   if (base === undefined) return null;
   return `${base}/trace/${encodeURIComponent(traceId)}`;
 }
+
+/** Grafana base URL — the self-hosted metrics/log dashboard. Unset → the
+ *  Observability hub shows the card disabled with a "configure" hint. */
+export function readGrafanaBaseUrl(): string | undefined {
+  const raw = readEnv("VITE_GRAFANA_BASE_URL");
+  return raw === undefined ? undefined : raw.replace(/\/+$/, "");
+}
+
+/** Tempo base URL — the self-hosted distributed-trace store (infra spans).
+ *  Unset → the Observability hub shows the card disabled. */
+export function readTempoBaseUrl(): string | undefined {
+  const raw = readEnv("VITE_TEMPO_BASE_URL");
+  return raw === undefined ? undefined : raw.replace(/\/+$/, "");
+}
