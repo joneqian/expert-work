@@ -73,6 +73,18 @@ Playground(调试台)续聊当前是会话头一行里**一个 antd 小号 `<Sel
 - wire `PlaygroundTab`:小 `<Select>` → 「会话历史」按钮开 Drawer;`handleResume` 复用;「新会话」保留。
 - i18n zh-CN + en;Storybook 故事;Playwright(开抽屉 → 搜索 → 续聊 / 改名 / 软删 / 硬删二次确认);vitest;`tsc -b --noEmit` + axe(表单元素 aria-label)。
 
+## 7. 老会话标题懒回填(补丁)
+
+auto-title 只对部署后的新 run 生效 → 已有会话 title=NULL,列表显示 thread_id
+hash(体验差)。补:`GET /v1/sessions`(非跨租户路径)对 title 空的线程读
+checkpoint 首条 user message 生成标题 + 持久化(`_backfill_titles` →
+`_session_title.first_message_title`)。一次性 per 线程(持久化后跳过)、仅当页
+(bounded)、best-effort(读失败留 hash)。`title_from_text` / `message_text`
+从 runs.py 抽到共享 `api/_session_title.py`,auto-title 与回填同源。
+
+**已知限制**:搜索 `q` 服务端按 title 过滤 —— 未回填的线程(title 空)搜不到;
+首次不带 q 的浏览会触发回填,之后搜索即生效。徽章按 owner 决定保留现状。
+
 ## 6. 非目标(记为后续)
 
 - LLM 摘要标题(§3 推迟)。

@@ -23,15 +23,17 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from pydantic import BaseModel, ConfigDict, Field
 
 from control_plane.api._artifact_mime import content_disposition_header, infer_content_type
 from control_plane.api._quota_admission import check_admission
+from control_plane.api._session_title import first_message_title
 from control_plane.api._user_scope import (
     caller_owns_thread,
     get_user_repo,
@@ -152,6 +154,34 @@ def _get_artifact_store(request: Request) -> ArtifactStore:
 
 def _get_supervisor_client(request: Request) -> SupervisorClient | None:
     return request.app.state.supervisor_client  # type: ignore[no-any-return]
+
+
+async def _backfill_titles(
+    items: list[ThreadMeta],
+    *,
+    threads: ThreadMetaStore,
+    checkpointer: BaseCheckpointSaver[Any] | None,
+) -> list[ThreadMeta]:
+    """Fill in a title for any listed thread that has none.
+
+    Threads created before auto-titling carry a NULL title and render as a
+    ``thread_id`` hash. Derive the title from the thread's checkpoint (its first
+    user message) and persist it, so the fix is one-time per thread. Bounded to
+    the listed page. Best-effort — a missing checkpoint / read error leaves the
+    hash fallback. Callers run this inside the tenant scope so the persist
+    respects RLS.
+    """
+    if checkpointer is None:
+        return items
+    out: list[ThreadMeta] = []
+    for m in items:
+        if m.title is None:
+            title = await first_message_title(checkpointer, m.thread_id)
+            if title:
+                await threads.update_title(m.thread_id, title, tenant_id=m.tenant_id)
+                m = m.model_copy(update={"title": title})
+        out.append(m)
+    return out
 
 
 def _safe_workspace_relpath(path: str) -> str | None:
@@ -654,6 +684,7 @@ def build_sessions_router() -> APIRouter:
         threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        runtime: Annotated[AgentRuntime, Depends(_get_agent_runtime)],
         status: ThreadStatus | None = None,
         q: Annotated[str | None, Query(max_length=200)] = None,
         agent_name: Annotated[str | None, Query(max_length=256)] = None,
@@ -702,6 +733,14 @@ def build_sessions_router() -> APIRouter:
                     include_archived=include_archived,
                     limit=limit,
                     offset=offset,
+                )
+                # Lazy backfill — threads created before auto-titling have a
+                # NULL title and show as a thread_id hash. Derive it from the
+                # checkpoint's first user message and persist (one-time per
+                # thread; only the listed page, so bounded). Best-effort: a
+                # read failure just leaves the hash fallback.
+                items = await _backfill_titles(
+                    items, threads=threads, checkpointer=runtime.durable_checkpointer
                 )
         audit_tenant = (
             request.state.principal.tenant_id if isinstance(scope, CrossTenant) else scope.tenant_id

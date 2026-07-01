@@ -37,6 +37,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from control_plane.api._quota_admission import check_admission
+from control_plane.api._session_title import message_text, title_from_text
 from control_plane.api._user_scope import (
     caller_owns_thread,
     ensure_member_active,
@@ -171,16 +172,6 @@ class ResumeRequest(BaseModel):
 def _get_thread_repo(request: Request) -> ThreadMetaStore:
     repo: ThreadMetaStore = request.app.state.thread_meta_repo
     return repo
-
-
-def _title_from_input(text: str, *, limit: int = 80) -> str:
-    """First user message → a compact single-line thread title.
-
-    Collapses all runs of whitespace (incl. newlines) to single spaces, strips,
-    truncates to ``limit`` chars. Feeds the session-history list's auto-title.
-    """
-    single = " ".join(text.split())
-    return single[:limit]
 
 
 def _get_settings(request: Request) -> Settings:
@@ -341,17 +332,6 @@ def _get_agent_repo(request: Request) -> AgentSpecStore:
 
 def _get_agent_runtime(request: Request) -> AgentRuntime:
     return request.app.state.agent_runtime  # type: ignore[no-any-return]
-
-
-def _message_text(content: Any) -> str:
-    """Flatten a LangChain message ``content`` (str or block list) to text."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            b["text"] for b in content if isinstance(b, dict) and isinstance(b.get("text"), str)
-        )
-    return ""
 
 
 def _get_approval_store(request: Request) -> ApprovalStore:
@@ -920,7 +900,7 @@ def build_runs_router() -> APIRouter:
         # Only when unset, so a manual rename (PATCH) is never clobbered by a
         # later run. Best-effort: a title failure must not block the run.
         if getattr(meta, "title", None) is None and payload.input:
-            auto_title = _title_from_input(payload.input)
+            auto_title = title_from_text(payload.input)
             if auto_title:
                 try:
                     await threads.update_title(  # type: ignore[attr-defined]
@@ -1065,7 +1045,7 @@ def build_runs_router() -> APIRouter:
             mtype = getattr(m, "type", None)
             if mtype not in ("human", "ai"):
                 continue
-            text = _message_text(getattr(m, "content", ""))
+            text = message_text(getattr(m, "content", ""))
             if text.strip():
                 out.append({"role": "user" if mtype == "human" else "assistant", "content": text})
         return JSONResponse({"success": True, "data": {"messages": out}})

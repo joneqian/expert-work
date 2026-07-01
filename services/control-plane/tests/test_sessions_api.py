@@ -3,21 +3,48 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Annotated, TypedDict
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from langchain_core.messages import BaseMessage, HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import START, StateGraph
+from langgraph.graph.message import add_messages
 
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.protocol import AuditQuery
+from helix_agent.runtime.runs import InMemoryRunStore
+from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
     build_test_jwt_verifier,
     make_test_jwt,
 )
+
+
+class _SeedState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
+
+
+async def _seed_thread_messages(
+    checkpointer: InMemorySaver, thread_id: str, messages: list[BaseMessage]
+) -> None:
+    """Write one checkpoint holding ``messages`` for ``thread_id`` (mirrors a
+    real run leaving a durable checkpoint the backfill can read)."""
+    graph = StateGraph(_SeedState)
+    graph.add_node("n", lambda _state: {"messages": []})
+    graph.add_edge(START, "n")
+    seeded = graph.compile(checkpointer=checkpointer)
+    await seeded.ainvoke(
+        {"messages": messages},
+        config={"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+    )
+
 
 _DEFAULT_TENANT = DEFAULT_DEV_TENANT_ID
 
@@ -627,6 +654,51 @@ async def test_rename_404_for_unknown(session_client: AsyncClient) -> None:
         "/v1/sessions/00000000-0000-0000-0000-000000000099", json={"title": "x"}
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_backfills_title_from_checkpoint() -> None:
+    # Pre-existing threads (created before auto-titling) have a NULL title; the
+    # list backfills it from the checkpoint's first user message + persists.
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    run_store = InMemoryRunStore()
+    checkpointer = InMemorySaver()
+    runtime = stub_agent_runtime(run_store=run_store)
+    runtime.durable_checkpointer = checkpointer
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+        agent_runtime=runtime,
+        run_repo=run_store,
+    )
+    transport = ASGITransport(app=app)
+    headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=_DEFAULT_TENANT)}"}
+    async with AsyncClient(
+        transport=transport, base_url="http://control-plane.test", headers=headers
+    ) as client:
+        await client.post("/v1/agents", json={"manifest_yaml": _AGENT_YAML})
+        tid = await _create(client)
+        # Freshly created — no title.
+        pre = await client.get(f"/v1/sessions/{tid}")
+        assert pre.json()["data"]["title"] is None
+
+        await _seed_thread_messages(checkpointer, tid, [HumanMessage(content="帮我写季度经营报告")])
+
+        listed = await client.get("/v1/sessions")
+        row = next(m for m in listed.json()["data"]["items"] if m["thread_id"] == tid)
+        assert row["title"] == "帮我写季度经营报告"
+
+        # Persisted — a follow-up single GET now carries the title too.
+        after = await client.get(f"/v1/sessions/{tid}")
+        assert after.json()["data"]["title"] == "帮我写季度经营报告"
 
 
 @pytest.mark.asyncio
