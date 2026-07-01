@@ -690,6 +690,42 @@ async def test_list_runs_enriches_tokens_and_filters_by_q(runs_client: AsyncClie
     assert ids == [str(run_a)]
 
 
+@pytest.mark.asyncio
+async def test_list_runs_filters_by_user_id(runs_client: AsyncClient) -> None:
+    """GET /v1/runs?user_id narrows to one end-user's runs."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+
+    thread_id = await _create_session(runs_client)
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+    now = datetime.now(UTC)
+    user_a = uuid4()
+    run_a = uuid4()
+    for rid, uid in ((run_a, user_a), (uuid4(), uuid4()), (uuid4(), None)):
+        await app.state.run_store.create(
+            RunInfo(
+                run_id=rid,
+                tenant_id=DEFAULT_DEV_TENANT_ID,
+                thread_id=UUID(thread_id),
+                user_id=uid,
+                status=RunStatus.SUCCESS,
+                on_disconnect=DisconnectMode.CANCEL,
+                is_resume=False,
+                error=None,
+                created_at=now,
+                updated_at=now,
+                finished_at=now,
+            )
+        )
+
+    resp = await runs_client.get("/v1/runs", params={"user_id": str(user_a)})
+    assert resp.status_code == 200
+    ids = [i["run_id"] for i in resp.json()["data"]["items"]]
+    assert ids == [str(run_a)]
+
+
 # ---------------------------------------------------------------------------
 # POST resume — Stream J.8-step3b (Mini-ADR J-24)
 # ---------------------------------------------------------------------------

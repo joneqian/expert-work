@@ -1876,9 +1876,12 @@ export interface TranslationKeys {
     column_created: string;
     column_duration: string;
     column_tokens: string;
+    column_user: string;
     tokens_tip: string;
     duration_running: string;
     search_placeholder: string;
+    filter_user_tip: string;
+    filter_user_active: string;
     filter_status: string;
     filter_status_all: string;
     detail_hint: string;
@@ -4143,9 +4146,12 @@ const en: TranslationKeys = {
     column_created: "Created",
     column_duration: "Duration",
     column_tokens: "Tokens",
+    column_user: "User",
     tokens_tip: "{{input}} in / {{output}} out · {{calls}} LLM call(s)",
     duration_running: "running",
     search_placeholder: "Search run / thread id…",
+    filter_user_tip: "Filter runs by this user",
+    filter_user_active: "User: {{user}}…",
     filter_status: "Status filter",
     filter_status_all: "All statuses",
     detail_hint: "Need to start a new run?",

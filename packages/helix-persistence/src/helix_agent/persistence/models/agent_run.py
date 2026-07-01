@@ -87,4 +87,13 @@ class AgentRunRow(Base):
             "created_at",
             postgresql_where=text("status = 'queued'"),
         ),
+        # Runs filter-by-user — GET /v1/runs?user_id serves this + newest-first
+        # order in one scan; partial (skips system / auto-triggered NULL rows).
+        Index(
+            "ix_agent_run_tenant_user_created",
+            "tenant_id",
+            "user_id",
+            text("created_at DESC"),
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
     )

@@ -102,6 +102,7 @@ class RunStore(abc.ABC):
         tenant_id: UUID,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        user_id: UUID | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -122,6 +123,7 @@ class RunStore(abc.ABC):
         *,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        user_id: UUID | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -321,6 +323,7 @@ class InMemoryRunStore(RunStore):
         tenant_id: UUID,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        user_id: UUID | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -328,6 +331,8 @@ class InMemoryRunStore(RunStore):
         rows = [r for r in self._rows.values() if r.tenant_id == tenant_id]
         if status is not None:
             rows = [r for r in rows if r.status is status]
+        if user_id is not None:
+            rows = [r for r in rows if r.user_id == user_id]
         if thread_ids is not None:
             wanted = set(thread_ids)
             rows = [r for r in rows if r.thread_id in wanted]
@@ -345,6 +350,7 @@ class InMemoryRunStore(RunStore):
         *,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        user_id: UUID | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -352,6 +358,8 @@ class InMemoryRunStore(RunStore):
         rows = list(self._rows.values())
         if status is not None:
             rows = [r for r in rows if r.status is status]
+        if user_id is not None:
+            rows = [r for r in rows if r.user_id == user_id]
         if thread_ids is not None:
             wanted = set(thread_ids)
             rows = [r for r in rows if r.thread_id in wanted]
@@ -595,6 +603,7 @@ class SqlRunStore(RunStore):
         tenant_id: UUID,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        user_id: UUID | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -611,6 +620,8 @@ class SqlRunStore(RunStore):
         )
         if status is not None:
             stmt = stmt.where(AgentRunRow.status == status.value)
+        if user_id is not None:
+            stmt = stmt.where(AgentRunRow.user_id == user_id)
         if thread_ids is not None:
             stmt = stmt.where(AgentRunRow.thread_id.in_(list(thread_ids)))
         if q:
@@ -630,6 +641,7 @@ class SqlRunStore(RunStore):
         *,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        user_id: UUID | None = None,
         q: str | None = None,
         limit: int = 100,
         offset: int = 0,
@@ -646,6 +658,8 @@ class SqlRunStore(RunStore):
         )
         if status is not None:
             stmt = stmt.where(AgentRunRow.status == status.value)
+        if user_id is not None:
+            stmt = stmt.where(AgentRunRow.user_id == user_id)
         if thread_ids is not None:
             stmt = stmt.where(AgentRunRow.thread_id.in_(list(thread_ids)))
         if q:

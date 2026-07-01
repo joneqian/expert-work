@@ -149,6 +149,8 @@ export interface ListRunsParams {
   agentVersion?: string;
   /** Free-text filter — substring match on run_id / thread_id. */
   q?: string;
+  /** Narrow to one end-user's runs (member's-runs view). */
+  userId?: string;
   limit?: number;
   offset?: number;
 }
@@ -157,9 +159,17 @@ export interface ListRunsParams {
  *  agents-list shape (``"*"`` for cross-tenant, UUID for explicit, or
  *  ``undefined`` for the caller's home tenant). */
 export async function listRuns(params: ListRunsParams = {}): Promise<RunList> {
-  const { tenantScope, status, agentName, agentVersion, q, limit, offset } = params;
+  const { tenantScope, status, agentName, agentVersion, q, userId, limit, offset } = params;
   const query = withTenantScope(
-    { status, agent_name: agentName, agent_version: agentVersion, q, limit, offset },
+    {
+      status,
+      agent_name: agentName,
+      agent_version: agentVersion,
+      q,
+      user_id: userId,
+      limit,
+      offset,
+    },
     tenantScope,
   );
   return getJson<RunList>("/v1/runs", { params: query });

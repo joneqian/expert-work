@@ -40,9 +40,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderRunsList() {
+function renderRunsList(entry = "/runs") {
   return render(
-    <MemoryRouter initialEntries={["/runs"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <AuthProvider>
         <TenantScopeProvider>
           <RunsList />
@@ -170,6 +170,31 @@ describe("RunsList", () => {
     await user.type(screen.getByRole("textbox"), "abc123");
     await waitFor(() =>
       expect(listRunsMock).toHaveBeenCalledWith(expect.objectContaining({ q: "abc123" })),
+    );
+  });
+
+  it("applies ?user_id from the URL and shows a clearable filter chip", async () => {
+    const uid = "99999999-9999-9999-9999-999999999999";
+    listRunsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderRunsList(`/runs?user_id=${uid}`);
+    await waitFor(() =>
+      expect(listRunsMock).toHaveBeenCalledWith(expect.objectContaining({ userId: uid })),
+    );
+    expect(screen.getByTestId("runs-user-filter-chip")).toBeInTheDocument();
+  });
+
+  it("clicking a run's user filters the list to that user", async () => {
+    const uid = "77777777-7777-7777-7777-777777777777";
+    listRunsMock.mockResolvedValue({
+      items: [{ ...sampleRow, user_id: uid }],
+      total: 1,
+      cross_tenant: false,
+    });
+    const user = userEvent.setup();
+    renderRunsList();
+    await user.click(await screen.findByTestId(`run-user-${uid}`));
+    await waitFor(() =>
+      expect(listRunsMock).toHaveBeenCalledWith(expect.objectContaining({ userId: uid })),
     );
   });
 });

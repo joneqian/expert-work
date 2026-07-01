@@ -26,7 +26,7 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import { Activity, AlertTriangle, Globe2, RefreshCw, Search } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { listRuns, type RunList, type RunListItem, type RunStatus } from "../api/runs";
@@ -89,6 +89,32 @@ export function RunsList() {
   const [statusFilter, setStatusFilter] = useState<RunStatus | undefined>(undefined);
   const [search, setSearch] = useState("");
   const [q, setQ] = useState<string | undefined>(undefined);
+  // ``?user_id=`` drives the "member's runs" filter — URL-owned so a member
+  // page can deep-link into it and the filter survives refresh / share.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const userFilter = searchParams.get("user_id") ?? undefined;
+
+  const setUserFilter = useCallback(
+    (id: string) => {
+      setSearchParams(
+        (prev) => {
+          prev.set("user_id", id);
+          return prev;
+        },
+        { replace: false },
+      );
+    },
+    [setSearchParams],
+  );
+  const clearUserFilter = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        prev.delete("user_id");
+        return prev;
+      },
+      { replace: false },
+    );
+  }, [setSearchParams]);
 
   // Debounce the search box into the server ``q`` param (substring match on
   // run_id / thread_id — server-side so it spans all pages, not just the one
@@ -102,7 +128,12 @@ export function RunsList() {
     setLoading(true);
     setError(null);
     try {
-      const result = await listRuns({ tenantScope: apiTenantScope, status: statusFilter, q });
+      const result = await listRuns({
+        tenantScope: apiTenantScope,
+        status: statusFilter,
+        q,
+        userId: userFilter,
+      });
       setData(result);
     } catch (err) {
       const message =
@@ -115,7 +146,7 @@ export function RunsList() {
     } finally {
       setLoading(false);
     }
-  }, [apiTenantScope, statusFilter, q]);
+  }, [apiTenantScope, statusFilter, q, userFilter]);
 
   useEffect(() => {
     refresh();
@@ -180,6 +211,41 @@ export function RunsList() {
         },
       },
       {
+        title: t("runs_page.column_user"),
+        dataIndex: "user_id",
+        key: "user",
+        width: 130,
+        render: (uid: string | null) => {
+          if (!uid) return <Text type="secondary">—</Text>;
+          // Click filters the list to this user (URL ?user_id=…). stopPropagation
+          // so it doesn't also trigger the row → run-detail navigation.
+          return (
+            <Tooltip title={t("runs_page.filter_user_tip")}>
+              <span
+                role="button"
+                tabIndex={0}
+                data-testid={`run-user-${uid}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setUserFilter(uid);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    setUserFilter(uid);
+                  }
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                <Text code style={{ fontSize: 12, color: "var(--hx-accent-cyan, #13c2c2)" }}>
+                  {uid.slice(0, 8)}…
+                </Text>
+              </span>
+            </Tooltip>
+          );
+        },
+      },
+      {
         title: t("runs_page.column_duration"),
         key: "duration",
         width: 100,
@@ -238,7 +304,7 @@ export function RunsList() {
         ),
       },
     ],
-    [t],
+    [t, setUserFilter],
   );
 
   return (
@@ -255,6 +321,16 @@ export function RunsList() {
                 data-testid="cross-tenant-banner"
               >
                 {t("runs_page.cross_tenant_banner")}
+              </Tag>
+            )}
+            {userFilter && (
+              <Tag
+                closable
+                onClose={clearUserFilter}
+                color="cyan"
+                data-testid="runs-user-filter-chip"
+              >
+                {t("runs_page.filter_user_active", { user: userFilter.slice(0, 8) })}
               </Tag>
             )}
             <Input

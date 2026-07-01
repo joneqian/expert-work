@@ -1348,6 +1348,8 @@ def build_runs_list_router() -> APIRouter:
         agent_version: Annotated[str | None, Query(min_length=1)] = None,
         # Operator free-text filter — substring match on run_id / thread_id.
         q: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        # Narrow to one end-user's runs (AdminUI "member's runs" view).
+        user_id: Annotated[UUID | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=10000)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,
@@ -1398,7 +1400,12 @@ def build_runs_list_router() -> APIRouter:
 
             if isinstance(scope, CrossTenant):
                 items = await runs.list_all_tenants(
-                    status=status, thread_ids=thread_ids, q=q, limit=limit, offset=offset
+                    status=status,
+                    thread_ids=thread_ids,
+                    user_id=user_id,
+                    q=q,
+                    limit=limit,
+                    offset=offset,
                 )
                 tenant_scope_label = "cross"
             else:
@@ -1406,6 +1413,7 @@ def build_runs_list_router() -> APIRouter:
                     tenant_id=scope.tenant_id,
                     status=status,
                     thread_ids=thread_ids,
+                    user_id=user_id,
                     q=q,
                     limit=limit,
                     offset=offset,
