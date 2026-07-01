@@ -27,7 +27,6 @@ import {
   Input,
   Popconfirm,
   Segmented,
-  Select,
   Space,
   Tag,
   Typography,
@@ -70,7 +69,6 @@ import {
   getSessionMessages,
   getSessionWorkspace,
   getSessionWorkspaceFiles,
-  listSessions,
   streamRun,
   type HistoryMessage,
   type RunRequest,
@@ -84,6 +82,7 @@ import { summarizeTurn } from "../../api/turn_summary";
 import { uploadDocument, uploadImage } from "../../api/uploads";
 import { CopyButton } from "../../components/CopyButton";
 import { MarkdownView } from "../../components/MarkdownView";
+import { SessionHistoryDrawer } from "../../components/SessionHistoryDrawer";
 import { ToolTimeline } from "../../components/ToolTimeline";
 import type { AgentDetailResponse } from "../../api/agents";
 import {
@@ -183,7 +182,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   const [busyWorkspaceKey, setBusyWorkspaceKey] = useState<string | null>(null);
   // Playground-Uplift iter2 — #4 cost (agent model's rate), #6 resume history.
   const [rate, setRate] = useState<RateCardRecord | null>(null);
-  const [pastSessions, setPastSessions] = useState<ThreadMeta[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [resumed, setResumed] = useState(false);
   // #6 — prior conversation loaded when resuming an existing thread.
   const [history, setHistory] = useState<HistoryMessage[]>([]);
@@ -234,20 +233,6 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
     };
   }, [r.spec]);
 
-  // #6 resume — the caller's recent threads for THIS agent (newest first).
-  const refreshPastSessions = useCallback(async () => {
-    try {
-      const all = await listSessions({ limit: 100 });
-      setPastSessions(all.filter((s) => s.agent_name === r.name));
-    } catch {
-      // Picker is a convenience.
-    }
-  }, [r.name]);
-
-  useEffect(() => {
-    void refreshPastSessions();
-  }, [refreshPastSessions]);
-
   // Reset to a fresh draft — no backend session is created here. The thread is
   // created lazily on the first real action (see ``ensureThread``), so opening
   // the Playground / switching agent no longer POSTs an empty throwaway session.
@@ -296,9 +281,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
   // backend keeps the context). Past turns aren't replayed in the transcript;
   // a banner makes that explicit.
   const handleResume = useCallback(
-    (threadId: string) => {
-      const picked = pastSessions.find((s) => s.thread_id === threadId);
-      if (!picked) return;
+    (picked: ThreadMeta) => {
       abortRef.current?.abort();
       setTurns([]);
       setAttachments([]);
@@ -316,11 +299,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         setRunAsUser(nextRunAs);
       }
       // Load the thread's prior conversation from the checkpoint.
-      void getSessionMessages(threadId)
+      void getSessionMessages(picked.thread_id)
         .then(setHistory)
         .catch(() => setHistory([]));
     },
-    [pastSessions, runAsUser],
+    [runAsUser],
   );
 
   // Re-bind a fresh thread when the agent or the impersonated user changes —
@@ -730,6 +713,13 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         alignItems: "stretch",
       }}
     >
+      <SessionHistoryDrawer
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        agentName={r.name}
+        currentThreadId={thread?.thread_id ?? null}
+        onResume={handleResume}
+      />
       {/* Left — session + input */}
       <div
         style={{
@@ -753,22 +743,15 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             {t("playground.session_label")}
           </Text>
           <Space size={6}>
-            <Select
+            <Button
               size="small"
-              value={null}
-              placeholder={t("playground.resume_label")}
-              suffixIcon={<History size={12} strokeWidth={1.75} />}
-              disabled={running || pastSessions.length === 0}
-              popupMatchSelectWidth={false}
-              onChange={handleResume}
-              aria-label={t("playground.resume_label")}
-              data-testid="playground-resume-select"
-              options={pastSessions.map((s) => ({
-                value: s.thread_id,
-                label: `${s.thread_id.slice(0, 8)} · ${new Date(s.created_at).toLocaleString()}`,
-              }))}
-              style={{ width: 160 }}
-            />
+              icon={<History size={12} strokeWidth={1.75} />}
+              onClick={() => setHistoryOpen(true)}
+              disabled={running}
+              data-testid="playground-history-open"
+            >
+              {t("playground.history_button")}
+            </Button>
             <Button
               size="small"
               icon={<RotateCcw size={12} strokeWidth={1.75} />}

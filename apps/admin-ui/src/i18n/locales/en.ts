@@ -566,6 +566,37 @@ export interface TranslationKeys {
     approval_approve: string;
     approval_reject: string;
     approval_modify_hint: string;
+    history_button: string;
+  };
+  session_history: {
+    title: string;
+    search_placeholder: string;
+    empty: string;
+    empty_search: string;
+    load_more: string;
+    rename: string;
+    rename_placeholder: string;
+    rename_ok_button: string;
+    rename_ok: string;
+    archive: string;
+    archive_confirm: string;
+    archive_ok: string;
+    purge: string;
+    purge_confirm: string;
+    purge_warning: string;
+    purge_ok: string;
+    cancel: string;
+    action_failed: string;
+    time_now: string;
+    time_minutes: string;
+    time_hours: string;
+    time_days: string;
+    status_active: string;
+    status_paused: string;
+    status_completed: string;
+    status_failed: string;
+    status_cancelled: string;
+    status_archived: string;
   };
   event_stream: {
     title: string;
@@ -2238,7 +2269,8 @@ const en: TranslationKeys = {
     col_updated: "Updated",
     delete_doc_confirm_title: "Delete document {{name}}?",
     field_description: "Description",
-    field_description_placeholder: "What this knowledge base is for (optional).",
+    field_description_placeholder:
+      "What this knowledge base is for (optional).",
     advanced: "Advanced",
     retrieval_defaults: "Retrieval defaults",
     field_top_k: "Results (top-k)",
@@ -2253,7 +2285,8 @@ const en: TranslationKeys = {
     method_keyword: "Keyword",
     method_hybrid: "Hybrid",
     field_rerank: "LLM rerank",
-    field_rerank_hint: "Reorder fused results by an LLM when one is configured.",
+    field_rerank_hint:
+      "Reorder fused results by an LLM when one is configured.",
     col_description: "Description",
     col_documents: "Docs",
     col_chunks_total: "Chunks",
@@ -2276,7 +2309,8 @@ const en: TranslationKeys = {
     reindex_button: "Re-index",
     reindex_started: "Re-indexing started; it runs in the background.",
     upload_dragger_hint: "Click or drag files here to upload",
-    upload_dragger_sub: "PDF, Office, Markdown, HTML, CSV, TXT — multiple files supported.",
+    upload_dragger_sub:
+      "PDF, Office, Markdown, HTML, CSV, TXT — multiple files supported.",
     col_attempts: "Attempts",
     reingest: "Re-ingest",
     reingest_started: "Re-ingestion started.",
@@ -2287,9 +2321,11 @@ const en: TranslationKeys = {
     chunks_empty: "No chunks (the document may still be processing).",
     chunk_label: "Chunk #{{index}}",
     test_title: "Retrieval test",
-    test_query_placeholder: "Enter a query to see which chunks would be retrieved…",
+    test_query_placeholder:
+      "Enter a query to see which chunks would be retrieved…",
     test_run: "Run",
-    test_empty_hint: "Run a query to preview retrieval — ranked chunks with scores and recall path.",
+    test_empty_hint:
+      "Run a query to preview retrieval — ranked chunks with scores and recall path.",
     test_no_results: "No chunks matched this query.",
     test_control_top_k: "Top-k",
     test_control_method: "Method",
@@ -2301,7 +2337,8 @@ const en: TranslationKeys = {
     recall_both: "both",
     settings_title: "Retrieval settings",
     settings_saved: "Settings saved.",
-    settings_rename_note: "Renaming is not supported — agents reference a base by name.",
+    settings_rename_note:
+      "Renaming is not supported — agents reference a base by name.",
     settings_embedding_title: "Embedding",
   },
   rate_card_page: {
@@ -2601,7 +2638,8 @@ const en: TranslationKeys = {
     reasoning_label: "Reasoning",
     events_label: "Events",
     export_json: "Export JSON",
-    export_json_tip: "Export this turn's full event stream (authoritative backend record) as JSON",
+    export_json_tip:
+      "Export this turn's full event stream (authoritative backend record) as JSON",
     workspace_label: "Workspace",
     workspace_refresh: "Refresh workspace",
     workspace_volume: "Volume",
@@ -2613,13 +2651,15 @@ const en: TranslationKeys = {
     workspace_file_download: "Download {{name}}",
     artifact_download: "Download artifact {{name}}",
     artifact_delete: "Delete artifact {{name}}",
-    artifact_delete_confirm: "Delete this artifact? Unregisters it only; the underlying file stays.",
+    artifact_delete_confirm:
+      "Delete this artifact? Unregisters it only; the underlying file stays.",
     file_delete: "Delete file {{name}}",
     file_delete_confirm: "Permanently delete this file? This cannot be undone.",
     delete_ok: "Delete",
     delete_cancel: "Cancel",
     resume_label: "Resume…",
-    resumed_notice: "Continuing an existing thread — prior conversation loaded below.",
+    resumed_notice:
+      "Continuing an existing thread — prior conversation loaded below.",
     history_divider: "— new messages below —",
     meta_steps: "steps",
     meta_latency: "latency",
@@ -2628,6 +2668,37 @@ const en: TranslationKeys = {
     approval_approve: "Approve",
     approval_reject: "Reject",
     approval_modify_hint: "Edit arguments on the run-detail page.",
+    history_button: "History",
+  },
+  session_history: {
+    title: "Session history",
+    search_placeholder: "Search title…",
+    empty: "No sessions yet — send a message to start.",
+    empty_search: "No matching sessions.",
+    load_more: "Load more",
+    rename: "Rename",
+    rename_placeholder: "Session title",
+    rename_ok_button: "Save",
+    rename_ok: "Renamed",
+    archive: "Archive",
+    archive_confirm: "Archive this session? Hidden from the list, reversible.",
+    archive_ok: "Archived",
+    purge: "Delete forever",
+    purge_confirm: "Permanently delete this session?",
+    purge_warning: "Irreversible — the conversation and run records are wiped.",
+    purge_ok: "Deleted",
+    cancel: "Cancel",
+    action_failed: "Action failed",
+    time_now: "just now",
+    time_minutes: "{{n}}m ago",
+    time_hours: "{{n}}h ago",
+    time_days: "{{n}}d ago",
+    status_active: "Active",
+    status_paused: "Paused",
+    status_completed: "Completed",
+    status_failed: "Failed",
+    status_cancelled: "Cancelled",
+    status_archived: "Archived",
   },
   event_stream: {
     title: "Event stream",
