@@ -173,6 +173,16 @@ def _get_thread_repo(request: Request) -> ThreadMetaStore:
     return repo
 
 
+def _title_from_input(text: str, *, limit: int = 80) -> str:
+    """First user message → a compact single-line thread title.
+
+    Collapses all runs of whitespace (incl. newlines) to single spaces, strips,
+    truncates to ``limit`` chars. Feeds the session-history list's auto-title.
+    """
+    single = " ".join(text.split())
+    return single[:limit]
+
+
 def _get_settings(request: Request) -> Settings:
     settings: Settings = request.app.state.settings
     return settings
@@ -905,6 +915,19 @@ def build_runs_router() -> APIRouter:
             raise HTTPException(
                 status_code=422, detail=f"agent manifest cannot be built: {exc}"
             ) from exc
+
+        # Session-history — auto-title the thread from its first user message.
+        # Only when unset, so a manual rename (PATCH) is never clobbered by a
+        # later run. Best-effort: a title failure must not block the run.
+        if getattr(meta, "title", None) is None and payload.input:
+            auto_title = _title_from_input(payload.input)
+            if auto_title:
+                try:
+                    await threads.update_title(  # type: ignore[attr-defined]
+                        thread_id, auto_title, tenant_id=tenant_id
+                    )
+                except Exception:
+                    logger.warning("session.auto_title_failed", exc_info=True)
 
         # Stream Agent-Templates (M1-5b-2) — the spawn / SSE / queue logic is
         # shared with the external per-user run endpoint. A normal session run is

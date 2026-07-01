@@ -1040,3 +1040,60 @@ async def test_run_queue_mode_returns_202(runs_client: AsyncClient) -> None:
     assert "run_id" in body
     # Not an SSE stream — a plain JSON envelope.
     assert response.headers["content-type"].startswith("application/json")
+
+
+# ---------------------------------------------------------------------------
+# Session-history uplift — auto-title + purge
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_first_run_auto_titles_thread(runs_client: AsyncClient) -> None:
+    thread_id = await _create_session(runs_client)
+    # Freshly created — no title yet.
+    before = await runs_client.get(f"/v1/sessions/{thread_id}")
+    assert before.json()["data"]["title"] is None
+
+    await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={"input": "review the PR"})
+    after = await runs_client.get(f"/v1/sessions/{thread_id}")
+    assert after.json()["data"]["title"] == "review the PR"
+
+    # A second run must NOT overwrite the established title.
+    await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={"input": "different follow up"})
+    still = await runs_client.get(f"/v1/sessions/{thread_id}")
+    assert still.json()["data"]["title"] == "review the PR"
+
+
+@pytest.mark.asyncio
+async def test_run_does_not_clobber_manual_title(runs_client: AsyncClient) -> None:
+    thread_id = await _create_session(runs_client)
+    renamed = await runs_client.patch(
+        f"/v1/sessions/{thread_id}", json={"title": "my custom name"}
+    )
+    assert renamed.status_code == 200
+
+    await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={"input": "review the PR"})
+    after = await runs_client.get(f"/v1/sessions/{thread_id}")
+    assert after.json()["data"]["title"] == "my custom name"
+
+
+@pytest.mark.asyncio
+async def test_purge_deletes_thread_and_runs(runs_client: AsyncClient) -> None:
+    thread_id = await _create_session(runs_client)
+    await runs_client.post(f"/v1/sessions/{thread_id}/runs", json={"input": "hi"})
+
+    purge = await runs_client.post(f"/v1/sessions/{thread_id}:purge")
+    assert purge.status_code == 200
+    data = purge.json()["data"]
+    assert data["purged"] == thread_id
+    assert data["runs"] >= 1  # the run row we created was removed
+
+    # The thread is gone — a follow-up read 404s.
+    gone = await runs_client.get(f"/v1/sessions/{thread_id}")
+    assert gone.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_purge_404_for_unknown(runs_client: AsyncClient) -> None:
+    resp = await runs_client.post("/v1/sessions/00000000-0000-0000-0000-000000000099:purge")
+    assert resp.status_code == 404

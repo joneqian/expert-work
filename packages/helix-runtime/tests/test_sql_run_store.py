@@ -175,6 +175,28 @@ async def test_list_by_thread_filters_and_sorts(run_store: SqlRunStore) -> None:
     assert [r.run_id for r in listed] == [older, newer]
 
 
+@pytest.mark.asyncio
+async def test_delete_by_thread_scoped_to_thread_and_tenant(run_store: SqlRunStore) -> None:
+    thread_a, thread_b, tenant, other = uuid4(), uuid4(), uuid4(), uuid4()
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant, thread_id=thread_a))
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant, thread_id=thread_a))
+    keep = uuid4()
+    await run_store.create(_info(run_id=keep, tenant_id=tenant, thread_id=thread_b))
+    cross = uuid4()
+    await run_store.create(_info(run_id=cross, tenant_id=other, thread_id=thread_a))
+
+    removed = await run_store.delete_by_thread(thread_id=thread_a, tenant_id=tenant)
+    assert removed == 2
+    assert await run_store.list_by_thread(thread_id=thread_a, tenant_id=tenant) == []
+    # Other thread + same-thread-different-tenant rows survive.
+    assert [
+        r.run_id for r in await run_store.list_by_thread(thread_id=thread_b, tenant_id=tenant)
+    ] == [keep]
+    assert await run_store.get(run_id=cross, tenant_id=other) is not None
+    # Empty thread → no-op, rowcount 0.
+    assert await run_store.delete_by_thread(thread_id=uuid4(), tenant_id=tenant) == 0
+
+
 # ---------------------------------------------------------------------------
 # Stream H.3 PR 1 — list_for_tenant / list_all_tenants
 # ---------------------------------------------------------------------------

@@ -581,3 +581,123 @@ async def test_machine_principal_session_is_unowned(session_client: AsyncClient)
     # A plain user can still read an unowned thread.
     plain = await session_client.get(f"/v1/sessions/{tid}", headers=_user_headers("user-a"))
     assert plain.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Session-history uplift — rename / search / archive / purge
+# ---------------------------------------------------------------------------
+
+
+async def _create(session_client: AsyncClient) -> str:
+    response = await session_client.post(
+        "/v1/sessions",
+        json={"agent_name": "code-reviewer", "agent_version": "1.0.0"},
+    )
+    assert response.status_code == 201
+    return str(response.json()["data"]["thread_id"])
+
+
+@pytest.mark.asyncio
+async def test_rename_sets_title(
+    session_client: AsyncClient, audit_store: InMemoryAuditLogStore
+) -> None:
+    tid = await _create(session_client)
+    resp = await session_client.patch(f"/v1/sessions/{tid}", json={"title": "  季度报告  "})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["title"] == "季度报告"  # trimmed
+
+    fetched = await session_client.get(f"/v1/sessions/{tid}")
+    assert fetched.json()["data"]["title"] == "季度报告"
+
+    page = await audit_store.query(AuditQuery(tenant_id=_DEFAULT_TENANT))
+    assert any(r.action.value == "session:write" and r.resource_id == tid for r in page.entries)
+
+
+@pytest.mark.asyncio
+async def test_rename_rejects_blank_title(session_client: AsyncClient) -> None:
+    tid = await _create(session_client)
+    # Whitespace-only passes min_length=1 but strips to empty → 422.
+    resp = await session_client.patch(f"/v1/sessions/{tid}", json={"title": "   "})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_rename_404_for_unknown(session_client: AsyncClient) -> None:
+    resp = await session_client.patch(
+        "/v1/sessions/00000000-0000-0000-0000-000000000099", json={"title": "x"}
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_q_filters_by_title(session_client: AsyncClient) -> None:
+    a = await _create(session_client)
+    b = await _create(session_client)
+    await session_client.patch(f"/v1/sessions/{a}", json={"title": "Quarterly Report"})
+    await session_client.patch(f"/v1/sessions/{b}", json={"title": "今天天气"})
+
+    hit = await session_client.get("/v1/sessions?q=report")
+    ids = [m["thread_id"] for m in hit.json()["data"]["items"]]
+    assert ids == [a]
+
+    zh = await session_client.get("/v1/sessions?q=天气")
+    assert [m["thread_id"] for m in zh.json()["data"]["items"]] == [b]
+
+    none = await session_client.get("/v1/sessions?q=zzz")
+    assert none.json()["data"]["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_list_filters_by_agent_name(session_client: AsyncClient) -> None:
+    a = await _create(session_client)
+    matched = await session_client.get("/v1/sessions?agent_name=code-reviewer")
+    assert a in {m["thread_id"] for m in matched.json()["data"]["items"]}
+
+    other = await session_client.get("/v1/sessions?agent_name=nonexistent-agent")
+    assert other.json()["data"]["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_archive_hides_from_list_but_stays_reachable(
+    session_client: AsyncClient, audit_store: InMemoryAuditLogStore
+) -> None:
+    keep = await _create(session_client)
+    drop = await _create(session_client)
+
+    resp = await session_client.delete(f"/v1/sessions/{drop}")
+    assert resp.status_code == 200
+    assert resp.json()["data"]["archived"] == drop
+
+    default = await session_client.get("/v1/sessions")
+    default_ids = {m["thread_id"] for m in default.json()["data"]["items"]}
+    assert keep in default_ids
+    assert drop not in default_ids
+
+    with_archived = await session_client.get("/v1/sessions?include_archived=true")
+    all_ids = {m["thread_id"] for m in with_archived.json()["data"]["items"]}
+    assert {keep, drop} <= all_ids
+
+    # A direct GET still resolves the archived thread (soft, reversible).
+    still = await session_client.get(f"/v1/sessions/{drop}")
+    assert still.status_code == 200
+    assert still.json()["data"]["status"] == "archived"
+
+    page = await audit_store.query(AuditQuery(tenant_id=_DEFAULT_TENANT))
+    assert any(r.action.value == "session:write" and r.resource_id == drop for r in page.entries)
+
+
+@pytest.mark.asyncio
+async def test_archive_404_for_unknown(session_client: AsyncClient) -> None:
+    resp = await session_client.delete("/v1/sessions/00000000-0000-0000-0000-000000000099")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_non_owner_cannot_rename_or_archive(session_client: AsyncClient) -> None:
+    # Owned by user-a; user-b (a different plain user) must get 404 on both.
+    tid = await _create_as(session_client, _user_headers("user-a"))
+    b = _user_headers("user-b")
+    rename = await session_client.patch(f"/v1/sessions/{tid}", json={"title": "x"}, headers=b)
+    assert rename.status_code == 404
+    archive = await session_client.delete(f"/v1/sessions/{tid}", headers=b)
+    assert archive.status_code == 404

@@ -34,11 +34,19 @@ def _row_to_meta(row: ThreadMetaRow) -> ThreadMeta:
         user_id=row.user_id,
         created_by=row.created_by,
         status=ThreadStatus(row.status),
+        title=row.title,
         agent_name=row.agent_name,
         agent_version=row.agent_version,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+def _title_ilike(q: str) -> str:
+    """Escape LIKE wildcards so a search term matches literally (used with
+    ``ilike(..., escape="\\")``)."""
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 class SqlThreadMetaStore(ThreadMetaStore):
@@ -95,12 +103,16 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
         stmt = select(ThreadMetaRow).where(ThreadMetaRow.tenant_id == tenant_id)
         if status is not None:
             stmt = stmt.where(ThreadMetaRow.status == status.value)
+        elif not include_archived:
+            stmt = stmt.where(ThreadMetaRow.status != ThreadStatus.ARCHIVED.value)
         if user_id is not None:
             stmt = stmt.where(ThreadMetaRow.user_id == user_id)
         if agent_name is not None:
@@ -109,6 +121,8 @@ class SqlThreadMetaStore(ThreadMetaStore):
             stmt = stmt.where(ThreadMetaRow.agent_version == agent_version)
         if nonempty:
             stmt = stmt.where(exists().where(AgentRunRow.thread_id == ThreadMetaRow.thread_id))
+        if q:
+            stmt = stmt.where(ThreadMetaRow.title.ilike(_title_ilike(q), escape="\\"))
         stmt = stmt.order_by(ThreadMetaRow.created_at.desc()).limit(limit).offset(offset)
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
@@ -121,6 +135,8 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -128,12 +144,16 @@ class SqlThreadMetaStore(ThreadMetaStore):
         stmt = select(ThreadMetaRow)
         if status is not None:
             stmt = stmt.where(ThreadMetaRow.status == status.value)
+        elif not include_archived:
+            stmt = stmt.where(ThreadMetaRow.status != ThreadStatus.ARCHIVED.value)
         if agent_name is not None:
             stmt = stmt.where(ThreadMetaRow.agent_name == agent_name)
         if agent_version is not None:
             stmt = stmt.where(ThreadMetaRow.agent_version == agent_version)
         if nonempty:
             stmt = stmt.where(exists().where(AgentRunRow.thread_id == ThreadMetaRow.thread_id))
+        if q:
+            stmt = stmt.where(ThreadMetaRow.title.ilike(_title_ilike(q), escape="\\"))
         stmt = stmt.order_by(ThreadMetaRow.created_at.desc()).limit(limit).offset(offset)
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
@@ -153,6 +173,26 @@ class SqlThreadMetaStore(ThreadMetaStore):
                 ThreadMetaRow.tenant_id == tenant_id,
             )
             .values(status=status.value, updated_at=datetime.now(UTC))
+        )
+        async with self._sf() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+            return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def update_title(
+        self,
+        thread_id: UUID,
+        title: str,
+        *,
+        tenant_id: UUID,
+    ) -> bool:
+        stmt = (
+            update(ThreadMetaRow)
+            .where(
+                ThreadMetaRow.thread_id == thread_id,
+                ThreadMetaRow.tenant_id == tenant_id,
+            )
+            .values(title=title, updated_at=datetime.now(UTC))
         )
         async with self._sf() as session:
             result = await session.execute(stmt)

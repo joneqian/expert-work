@@ -251,3 +251,68 @@ async def test_nonempty_filters_threads_without_runs(sql_store: SqlStoreFixture)
         assert [t.thread_id for t in filtered] == [with_run.thread_id]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_update_title_and_tenant_isolation(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        thread_id, owner, other = uuid4(), uuid4(), uuid4()
+        created = await store.create(thread_id=thread_id, tenant_id=owner, created_by="u")
+        assert created.title is None
+
+        other_update = await store.update_title(thread_id, "hijack", tenant_id=other)
+        assert other_update is False
+        owner_update = await store.update_title(thread_id, "季度报告", tenant_id=owner)
+        assert owner_update is True
+
+        fetched = await store.get(thread_id, tenant_id=owner)
+        assert fetched is not None and fetched.title == "季度报告"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_list_q_search_escapes_like_wildcards(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id = uuid4()
+        report = await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")
+        literal = await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")
+        await store.update_title(report.thread_id, "Quarterly Report", tenant_id=tenant_id)
+        await store.update_title(literal.thread_id, "50%_off deal", tenant_id=tenant_id)
+        await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")  # untitled
+
+        by_word = await store.list_by_tenant(tenant_id, q="report")
+        assert [m.thread_id for m in by_word] == [report.thread_id]
+
+        # ``%`` / ``_`` in the term must match literally, not as LIKE wildcards.
+        literal_hit = await store.list_by_tenant(tenant_id, q="50%_off")
+        assert [m.thread_id for m in literal_hit] == [literal.thread_id]
+        assert await store.list_by_tenant(tenant_id, q="zzz") == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_archived_excluded_by_default(sql_store: SqlStoreFixture) -> None:
+    store, engine = sql_store
+    try:
+        tenant_id = uuid4()
+        keep = await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")
+        archived = await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")
+        did_archive = await store.update_status(
+            archived.thread_id, ThreadStatus.ARCHIVED, tenant_id=tenant_id
+        )
+        assert did_archive is True
+
+        default = await store.list_by_tenant(tenant_id)
+        assert [m.thread_id for m in default] == [keep.thread_id]
+
+        with_archived = await store.list_by_tenant(tenant_id, include_archived=True)
+        assert {m.thread_id for m in with_archived} == {keep.thread_id, archived.thread_id}
+
+        only_archived = await store.list_by_tenant(tenant_id, status=ThreadStatus.ARCHIVED)
+        assert [m.thread_id for m in only_archived] == [archived.thread_id]
+    finally:
+        await engine.dispose()

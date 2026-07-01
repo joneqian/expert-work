@@ -73,6 +73,8 @@ class ThreadMetaStore(abc.ABC):
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -87,6 +89,12 @@ class ThreadMetaStore(abc.ABC):
         throwaway sessions eager thread-creation used to leave behind. Applied
         in the query so pagination counts only real threads. (An in-memory
         backend with no run store treats it as a no-op.)
+
+        ``q`` is a case-insensitive substring match on ``title`` (the
+        session-history search box). ``include_archived`` controls the
+        soft-deleted ``ARCHIVED`` threads: when ``False`` (default) they are
+        excluded — UNLESS ``status`` explicitly asks for ``ARCHIVED``, which
+        always wins (an explicit status is an exact filter).
         """
 
     @abc.abstractmethod
@@ -97,6 +105,8 @@ class ThreadMetaStore(abc.ABC):
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -106,7 +116,21 @@ class ThreadMetaStore(abc.ABC):
         filter — the platform admin view aggregates every user's
         sessions across every tenant. Newest first. ``agent_name`` /
         ``agent_version`` as in :meth:`list_by_tenant` (Mini-ADR H-10).
-        ``nonempty`` as in :meth:`list_by_tenant`.
+        ``nonempty`` / ``q`` / ``include_archived`` as in
+        :meth:`list_by_tenant`.
+        """
+
+    @abc.abstractmethod
+    async def update_title(
+        self,
+        thread_id: UUID,
+        title: str,
+        *,
+        tenant_id: UUID,
+    ) -> bool:
+        """Set the human ``title``; returns True if a row matched the tenant.
+
+        Used both for auto-titling (first user message) and manual rename.
         """
 
     @abc.abstractmethod

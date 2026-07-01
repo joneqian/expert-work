@@ -25,7 +25,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models import AgentRunRow
@@ -73,6 +73,15 @@ class RunStore(abc.ABC):
     @abc.abstractmethod
     async def list_by_thread(self, *, thread_id: UUID, tenant_id: UUID) -> list[RunInfo]:
         """Return all runs for ``thread_id`` under ``tenant_id``, oldest first."""
+
+    @abc.abstractmethod
+    async def delete_by_thread(self, *, thread_id: UUID, tenant_id: UUID) -> int:
+        """Hard-delete every run row for ``thread_id`` under ``tenant_id``.
+
+        Session purge (hard delete of a whole conversation). Returns the
+        number of rows removed. Tenant-scoped — never touches another
+        tenant's runs.
+        """
 
     @abc.abstractmethod
     async def list_for_tenant(
@@ -281,6 +290,16 @@ class InMemoryRunStore(RunStore):
         ]
         rows.sort(key=lambda r: r.created_at)
         return rows
+
+    async def delete_by_thread(self, *, thread_id: UUID, tenant_id: UUID) -> int:
+        victims = [
+            rid
+            for rid, r in self._rows.items()
+            if r.thread_id == thread_id and r.tenant_id == tenant_id
+        ]
+        for rid in victims:
+            del self._rows[rid]
+        return len(victims)
 
     async def list_for_tenant(
         self,
@@ -532,6 +551,17 @@ class SqlRunStore(RunStore):
                 .all()
             )
         return [_row_to_dto(r) for r in rows]
+
+    async def delete_by_thread(self, *, thread_id: UUID, tenant_id: UUID) -> int:
+        async with self._sf() as session:
+            result = await session.execute(
+                delete(AgentRunRow).where(
+                    AgentRunRow.thread_id == thread_id,
+                    AgentRunRow.tenant_id == tenant_id,
+                )
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def list_for_tenant(
         self,
