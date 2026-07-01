@@ -1874,10 +1874,25 @@ export interface TranslationKeys {
     column_thread: string;
     column_agent: string;
     column_created: string;
+    column_duration: string;
+    column_tokens: string;
+    tokens_tip: string;
+    duration_running: string;
+    search_placeholder: string;
     filter_status: string;
     filter_status_all: string;
     detail_hint: string;
     detail_hint_link: string;
+    summary_title: string;
+    summary_duration: string;
+    summary_tokens: string;
+    summary_input: string;
+    summary_output: string;
+    summary_cache: string;
+    summary_llm_calls: string;
+    summary_models: string;
+    summary_resume: string;
+    summary_no_tokens: string;
   };
   eval_runs_page: {
     page_title: string;
@@ -4126,10 +4141,25 @@ const en: TranslationKeys = {
     column_thread: "Thread",
     column_agent: "Agent",
     column_created: "Created",
+    column_duration: "Duration",
+    column_tokens: "Tokens",
+    tokens_tip: "{{input}} in / {{output}} out · {{calls}} LLM call(s)",
+    duration_running: "running",
+    search_placeholder: "Search run / thread id…",
     filter_status: "Status filter",
     filter_status_all: "All statuses",
     detail_hint: "Need to start a new run?",
     detail_hint_link: "Open the Playground tab on an agent.",
+    summary_title: "This run",
+    summary_duration: "Duration",
+    summary_tokens: "Tokens",
+    summary_input: "in",
+    summary_output: "out",
+    summary_cache: "cache",
+    summary_llm_calls: "LLM calls",
+    summary_models: "Models",
+    summary_resume: "resumed",
+    summary_no_tokens: "No token usage recorded for this run.",
   },
   eval_runs_page: {
     page_title: "Eval Runs",

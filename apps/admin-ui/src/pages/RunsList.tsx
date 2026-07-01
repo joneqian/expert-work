@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Empty,
+  Input,
   Select,
   Space,
   Table,
@@ -24,7 +25,7 @@ import {
   Typography,
 } from "antd";
 import type { TableColumnsType } from "antd";
-import { Activity, Globe2, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, Globe2, RefreshCw, Search } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -34,6 +35,29 @@ import { useTenantScope } from "../tenant/TenantScopeContext";
 import { PageHeader } from "../components/PageHeader";
 
 const { Text } = Typography;
+
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
+
+/** Compact wall-clock duration from a run's created→finished span. A run
+ *  with no ``finished_at`` is still in flight → localized "running". */
+function formatDuration(t: TFn, createdIso: string, finishedIso: string | null): string {
+  if (!finishedIso) return t("runs_page.duration_running");
+  const seconds = Math.max(
+    0,
+    Math.round((new Date(finishedIso).getTime() - new Date(createdIso).getTime()) / 1000),
+  );
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/** 1234 → "1.2k", 2_000_000 → "2.0M" — keeps the token column narrow. */
+function formatCompact(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
 
 const STATUS_COLOR: Record<string, string> = {
   pending: "default",
@@ -63,12 +87,22 @@ export function RunsList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<RunStatus | undefined>(undefined);
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState<string | undefined>(undefined);
+
+  // Debounce the search box into the server ``q`` param (substring match on
+  // run_id / thread_id — server-side so it spans all pages, not just the one
+  // loaded).
+  useEffect(() => {
+    const handle = setTimeout(() => setQ(search.trim() || undefined), 300);
+    return () => clearTimeout(handle);
+  }, [search]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await listRuns({ tenantScope: apiTenantScope, status: statusFilter });
+      const result = await listRuns({ tenantScope: apiTenantScope, status: statusFilter, q });
       setData(result);
     } catch (err) {
       const message =
@@ -81,7 +115,7 @@ export function RunsList() {
     } finally {
       setLoading(false);
     }
-  }, [apiTenantScope, statusFilter]);
+  }, [apiTenantScope, statusFilter, q]);
 
   useEffect(() => {
     refresh();
@@ -109,10 +143,21 @@ export function RunsList() {
         dataIndex: "status",
         key: "status",
         width: 130,
-        render: (status: string) => (
+        render: (status: string, record) => {
           // Tag colour + literal text so colour is not the only signal (axe).
-          <Tag color={STATUS_COLOR[status] ?? "default"}>{status}</Tag>
-        ),
+          const tag = <Tag color={STATUS_COLOR[status] ?? "default"}>{status}</Tag>;
+          if (!record.error) return tag;
+          // Surface the failure reason inline — the list was previously silent
+          // about *why* a run errored.
+          return (
+            <Tooltip title={record.error}>
+              <Space size={4} data-testid={`run-error-${record.run_id}`}>
+                {tag}
+                <AlertTriangle size={13} strokeWidth={1.5} color="var(--hx-status-error, #f5222d)" />
+              </Space>
+            </Tooltip>
+          );
+        },
       },
       {
         title: t("runs_page.column_agent"),
@@ -131,6 +176,40 @@ export function RunsList() {
                 </Text>
               )}
             </Space>
+          );
+        },
+      },
+      {
+        title: t("runs_page.column_duration"),
+        key: "duration",
+        width: 100,
+        render: (_: unknown, record) => (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {formatDuration(t, record.created_at, record.finished_at)}
+          </Text>
+        ),
+      },
+      {
+        title: t("runs_page.column_tokens"),
+        key: "tokens",
+        width: 100,
+        render: (_: unknown, record) => {
+          const tk = record.tokens;
+          if (!tk || tk.total_tokens === 0) {
+            return <Text type="secondary">—</Text>;
+          }
+          return (
+            <Tooltip
+              title={t("runs_page.tokens_tip", {
+                input: tk.input_tokens,
+                output: tk.output_tokens,
+                calls: tk.llm_calls,
+              })}
+            >
+              <Text style={{ fontSize: 12 }} data-testid={`run-tokens-${record.run_id}`}>
+                {formatCompact(tk.total_tokens)}
+              </Text>
+            </Tooltip>
           );
         },
       },
@@ -178,6 +257,16 @@ export function RunsList() {
                 {t("runs_page.cross_tenant_banner")}
               </Tag>
             )}
+            <Input
+              allowClear
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("runs_page.search_placeholder")}
+              aria-label={t("runs_page.search_placeholder")}
+              prefix={<Search size={14} strokeWidth={1.5} />}
+              style={{ width: 220 }}
+              data-testid="runs-search"
+            />
             <Select<RunStatus | "all">
               value={statusFilter ?? "all"}
               onChange={(v) => setStatusFilter(v === "all" ? undefined : (v as RunStatus))}

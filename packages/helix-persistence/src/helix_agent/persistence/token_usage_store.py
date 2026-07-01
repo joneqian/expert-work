@@ -25,10 +25,32 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models.token_usage import TokenUsageRow
+
+
+@dataclass(frozen=True)
+class TokenTotals:
+    """Aggregated token usage for one trace.
+
+    A ``trace_id`` joins ``agent_run`` ↔ ``token_usage`` (there is no
+    ``run_id`` column), so this is the per-run token summary the Runs
+    list + detail render. ``llm_calls`` is the number of usage rows
+    (≈ LLM calls); ``models`` is the distinct models the run touched.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    llm_calls: int = 0
+    models: tuple[str, ...] = ()
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
 
 @dataclass(frozen=True)
@@ -94,6 +116,17 @@ class TokenUsageStore(abc.ABC):
         context, like :meth:`list_for_tenant`.
         """
 
+    @abc.abstractmethod
+    async def totals_by_trace_ids(self, trace_ids: Sequence[str]) -> dict[str, TokenTotals]:
+        """Sum token usage grouped by ``trace_id`` for the given ids.
+
+        Feeds the Runs list + detail — ``trace_id`` joins ``agent_run`` ↔
+        ``token_usage`` (no ``run_id`` column). Tenant scoping rides on the RLS
+        context, like :meth:`list_for_tenant`. Ids with no recorded usage
+        (legacy / auto-triggered runs) are simply absent from the result; the
+        caller treats a missing id as zero.
+        """
+
 
 class InMemoryTokenUsageStore(TokenUsageStore):
     """In-memory :class:`TokenUsageStore` — dev / unit tests."""
@@ -137,6 +170,36 @@ class InMemoryTokenUsageStore(TokenUsageStore):
             and r.observed_at is not None
             and start <= r.observed_at < end
         ]
+
+    async def totals_by_trace_ids(self, trace_ids: Sequence[str]) -> dict[str, TokenTotals]:
+        wanted = {t for t in trace_ids if t}
+        inputs: dict[str, int] = {}
+        outputs: dict[str, int] = {}
+        cache_create: dict[str, int] = {}
+        cache_read: dict[str, int] = {}
+        calls: dict[str, int] = {}
+        models: dict[str, set[str]] = {}
+        for r in self._rows:
+            tid = r.trace_id
+            if tid is None or tid not in wanted:
+                continue
+            inputs[tid] = inputs.get(tid, 0) + r.input_tokens
+            outputs[tid] = outputs.get(tid, 0) + r.output_tokens
+            cache_create[tid] = cache_create.get(tid, 0) + r.cache_creation_tokens
+            cache_read[tid] = cache_read.get(tid, 0) + r.cache_read_tokens
+            calls[tid] = calls.get(tid, 0) + 1
+            models.setdefault(tid, set()).add(r.model)
+        return {
+            tid: TokenTotals(
+                input_tokens=inputs[tid],
+                output_tokens=outputs[tid],
+                cache_creation_tokens=cache_create[tid],
+                cache_read_tokens=cache_read[tid],
+                llm_calls=calls[tid],
+                models=tuple(sorted(m for m in models[tid] if m)),
+            )
+            for tid in calls
+        }
 
 
 class DbTokenUsageStore(TokenUsageStore):
@@ -232,6 +295,41 @@ class DbTokenUsageStore(TokenUsageStore):
                 if len(rows) < page_size:
                     break
         return out
+
+    async def totals_by_trace_ids(self, trace_ids: Sequence[str]) -> dict[str, TokenTotals]:
+        ids = [t for t in dict.fromkeys(trace_ids) if t]  # dedup, drop empty
+        if not ids:
+            return {}
+        stmt = (
+            select(
+                TokenUsageRow.trace_id,
+                func.coalesce(func.sum(TokenUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(TokenUsageRow.output_tokens), 0),
+                func.coalesce(func.sum(TokenUsageRow.cache_creation_tokens), 0),
+                func.coalesce(func.sum(TokenUsageRow.cache_read_tokens), 0),
+                func.count(),
+                func.array_agg(func.distinct(TokenUsageRow.model)),
+            )
+            # Tenant scoping rides on RLS (the sessionmaker sets the tenant GUC),
+            # so ``trace_id`` collisions across tenants can't leak — a foreign
+            # tenant's rows are invisible to this session.
+            .where(TokenUsageRow.trace_id.in_(ids))
+            .group_by(TokenUsageRow.trace_id)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).all()
+        return {
+            row[0]: TokenTotals(
+                input_tokens=int(row[1]),
+                output_tokens=int(row[2]),
+                cache_creation_tokens=int(row[3]),
+                cache_read_tokens=int(row[4]),
+                llm_calls=int(row[5]),
+                models=tuple(sorted(m for m in (row[6] or []) if m)),
+            )
+            for row in rows
+            if row[0] is not None
+        }
 
 
 def _row_to_record(row: TokenUsageRow) -> TokenUsageRecord:

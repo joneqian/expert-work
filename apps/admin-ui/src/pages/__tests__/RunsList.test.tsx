@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
 
@@ -88,7 +89,8 @@ describe("RunsList", () => {
     });
     renderRunsList();
     await waitFor(() => expect(listRunsMock).toHaveBeenCalled());
-    expect(await screen.findByText("—")).toBeInTheDocument();
+    // Agent + tokens columns both em-dash when empty; assert the fallback renders.
+    expect((await screen.findAllByText("—")).length).toBeGreaterThan(0);
   });
 
   it("shows the cross-tenant banner when the response flag is true", async () => {
@@ -121,5 +123,53 @@ describe("RunsList", () => {
     listRunsMock.mockRejectedValue(new ApiError("DB down", "DB_DOWN", 500));
     renderRunsList();
     expect(await screen.findByTestId("runs-error")).toHaveTextContent("DB_DOWN");
+  });
+
+  it("renders duration and compact token totals", async () => {
+    listRunsMock.mockResolvedValue({
+      items: [
+        {
+          ...sampleRow,
+          tokens: {
+            input_tokens: 1200,
+            output_tokens: 300,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            total_tokens: 1500,
+            llm_calls: 3,
+            models: ["m1"],
+          },
+        },
+      ],
+      total: 1,
+      cross_tenant: false,
+    });
+    renderRunsList();
+    // created 08:00:00 → finished 08:00:32 = 32s.
+    expect(await screen.findByText("32s")).toBeInTheDocument();
+    expect(screen.getByTestId(`run-tokens-${sampleRow.run_id}`)).toHaveTextContent("1.5k");
+  });
+
+  it("surfaces an error indicator for failed runs", async () => {
+    listRunsMock.mockResolvedValue({
+      items: [{ ...sampleRow, status: "error", error: "boom exploded" }],
+      total: 1,
+      cross_tenant: false,
+    });
+    renderRunsList();
+    expect(
+      await screen.findByTestId(`run-error-${sampleRow.run_id}`),
+    ).toBeInTheDocument();
+  });
+
+  it("debounces the search box into the q param", async () => {
+    const user = userEvent.setup();
+    listRunsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderRunsList();
+    await waitFor(() => expect(listRunsMock).toHaveBeenCalled());
+    await user.type(screen.getByRole("textbox"), "abc123");
+    await waitFor(() =>
+      expect(listRunsMock).toHaveBeenCalledWith(expect.objectContaining({ q: "abc123" })),
+    );
   });
 });

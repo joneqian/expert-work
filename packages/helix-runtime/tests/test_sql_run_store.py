@@ -232,6 +232,26 @@ async def test_list_for_tenant_status_filter(run_store: SqlRunStore) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_for_tenant_q_filters_run_and_thread_id(run_store: SqlRunStore) -> None:
+    """``q`` substring-matches run_id / thread_id via CAST … ILIKE (real PG)."""
+    tenant_id = uuid4()
+    run_a = UUID("aaaaaaaa-0000-0000-0000-000000000a01")
+    thread_b = UUID("bbbbbbbb-0000-0000-0000-000000000b02")
+    await run_store.create(_info(run_id=run_a, tenant_id=tenant_id))
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_id, thread_id=thread_b))
+    await run_store.create(_info(run_id=uuid4(), tenant_id=tenant_id))
+
+    by_run = await run_store.list_for_tenant(tenant_id=tenant_id, q="aaaaaaaa")
+    assert [r.run_id for r in by_run] == [run_a]
+    by_thread = await run_store.list_for_tenant(tenant_id=tenant_id, q="bbbbbbbb")
+    assert [r.thread_id for r in by_thread] == [thread_b]
+    # Case-insensitive.
+    assert len(await run_store.list_for_tenant(tenant_id=tenant_id, q="AAAAAAAA")) == 1
+    # A LIKE wildcard is escaped, so it matches literally (UUIDs have no '%').
+    assert await run_store.list_for_tenant(tenant_id=tenant_id, q="%") == []
+
+
+@pytest.mark.asyncio
 async def test_list_for_tenant_offset_limit(run_store: SqlRunStore) -> None:
     tenant_id = uuid4()
     ids = []

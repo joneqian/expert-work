@@ -40,6 +40,20 @@ export interface PendingApproval {
   timeout_at: string;
 }
 
+/** Per-run token usage summary — aggregated from helix's own
+ *  ``token_usage`` (G.9), joined to the run by ``trace_id``. ``null``
+ *  when the run has no trace_id / no recorded usage (legacy or
+ *  auto-triggered runs). Deep per-span traces stay in Langfuse. */
+export interface RunTokens {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens: number;
+  cache_read_tokens: number;
+  total_tokens: number;
+  llm_calls: number;
+  models: string[];
+}
+
 export interface RunDetail {
   run_id: string;
   thread_id: string;
@@ -50,6 +64,12 @@ export interface RunDetail {
    *  the migration or for auto-triggered runs (scheduler / curation
    *  worker that passes ``None``). */
   trace_id?: string | null;
+  /** Runs-enrichment — per-run token summary (``null`` = no usage). */
+  tokens?: RunTokens | null;
+  /** Runs-enrichment — durable-row timestamps (``null`` when the run is
+   *  only in the in-memory RunManager); the summary derives duration. */
+  created_at?: string | null;
+  finished_at?: string | null;
 }
 
 /** Raw (no envelope) fetch — runs.py historically returns the run
@@ -106,6 +126,8 @@ export interface RunListItem {
   finished_at: string | null;
   /** Mini-ADR H-9.5 — see :ref:`RunDetail.trace_id`. */
   trace_id: string | null;
+  /** Runs-enrichment — per-run token summary (``null`` = no usage). */
+  tokens?: RunTokens | null;
 }
 
 export interface RunList {
@@ -125,6 +147,8 @@ export interface ListRunsParams {
    *  ``agentVersion`` requires ``agentName`` (backend 422s otherwise). */
   agentName?: string;
   agentVersion?: string;
+  /** Free-text filter — substring match on run_id / thread_id. */
+  q?: string;
   limit?: number;
   offset?: number;
 }
@@ -133,9 +157,9 @@ export interface ListRunsParams {
  *  agents-list shape (``"*"`` for cross-tenant, UUID for explicit, or
  *  ``undefined`` for the caller's home tenant). */
 export async function listRuns(params: ListRunsParams = {}): Promise<RunList> {
-  const { tenantScope, status, agentName, agentVersion, limit, offset } = params;
+  const { tenantScope, status, agentName, agentVersion, q, limit, offset } = params;
   const query = withTenantScope(
-    { status, agent_name: agentName, agent_version: agentVersion, limit, offset },
+    { status, agent_name: agentName, agent_version: agentVersion, q, limit, offset },
     tenantScope,
   );
   return getJson<RunList>("/v1/runs", { params: query });

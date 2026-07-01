@@ -581,6 +581,115 @@ async def test_get_run_falls_back_to_durable_run_store(runs_client: AsyncClient)
     assert body["pending_approval"] is None
 
 
+@pytest.mark.asyncio
+async def test_get_run_includes_token_summary(runs_client: AsyncClient) -> None:
+    """GET run carries the per-run token summary (joined by trace_id)."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from helix_agent.persistence.token_usage_store import TokenUsageRecord
+    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+
+    thread_id = await _create_session(runs_client)
+    run_id = uuid4()
+    trace = "cafef00dcafef00dcafef00dcafef00d"
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+    now = datetime.now(UTC)
+    await app.state.run_store.create(
+        RunInfo(
+            run_id=run_id,
+            tenant_id=DEFAULT_DEV_TENANT_ID,
+            thread_id=UUID(thread_id),
+            user_id=None,
+            status=RunStatus.SUCCESS,
+            on_disconnect=DisconnectMode.CANCEL,
+            is_resume=False,
+            error=None,
+            created_at=now,
+            updated_at=now,
+            finished_at=now,
+            trace_id=trace,
+        )
+    )
+    for inp, out in ((100, 40), (50, 10)):
+        await app.state.token_usage_store.insert(
+            TokenUsageRecord(
+                tenant_id=DEFAULT_DEV_TENANT_ID,
+                agent_name="code-reviewer",
+                agent_version="1.0.0",
+                model="claude-sonnet-4-6",
+                trace_id=trace,
+                input_tokens=inp,
+                output_tokens=out,
+            )
+        )
+
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}")
+    assert resp.status_code == 200
+    tokens = resp.json()["tokens"]
+    assert tokens["input_tokens"] == 150
+    assert tokens["output_tokens"] == 50
+    assert tokens["total_tokens"] == 200
+    assert tokens["llm_calls"] == 2
+    assert tokens["models"] == ["claude-sonnet-4-6"]
+
+
+@pytest.mark.asyncio
+async def test_list_runs_enriches_tokens_and_filters_by_q(runs_client: AsyncClient) -> None:
+    """GET /v1/runs carries per-run token totals; ``q`` filters by id fragment."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from helix_agent.persistence.token_usage_store import TokenUsageRecord
+    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+
+    thread_id = await _create_session(runs_client)
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+    now = datetime.now(UTC)
+    run_a = UUID("aaaaaaaa-0000-0000-0000-00000000000a")
+    run_b = uuid4()
+    for rid, trace in ((run_a, "traceaaaa"), (run_b, "tracebbbb")):
+        await app.state.run_store.create(
+            RunInfo(
+                run_id=rid,
+                tenant_id=DEFAULT_DEV_TENANT_ID,
+                thread_id=UUID(thread_id),
+                user_id=None,
+                status=RunStatus.SUCCESS,
+                on_disconnect=DisconnectMode.CANCEL,
+                is_resume=False,
+                error=None,
+                created_at=now,
+                updated_at=now,
+                finished_at=now,
+                trace_id=trace,
+            )
+        )
+    # Only run_a has recorded usage.
+    await app.state.token_usage_store.insert(
+        TokenUsageRecord(
+            tenant_id=DEFAULT_DEV_TENANT_ID,
+            agent_name="code-reviewer",
+            agent_version="1.0.0",
+            model="m",
+            trace_id="traceaaaa",
+            input_tokens=7,
+            output_tokens=3,
+        )
+    )
+
+    resp = await runs_client.get("/v1/runs")
+    assert resp.status_code == 200
+    items = {i["run_id"]: i for i in resp.json()["data"]["items"]}
+    assert items[str(run_a)]["tokens"]["total_tokens"] == 10
+    assert items[str(run_b)]["tokens"] is None  # no usage → None, not a crash
+
+    resp2 = await runs_client.get("/v1/runs", params={"q": "aaaaaaaa"})
+    assert resp2.status_code == 200
+    ids = [i["run_id"] for i in resp2.json()["data"]["items"]]
+    assert ids == [str(run_a)]
+
+
 # ---------------------------------------------------------------------------
 # POST resume — Stream J.8-step3b (Mini-ADR J-24)
 # ---------------------------------------------------------------------------

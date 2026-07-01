@@ -31,6 +31,7 @@ import { useStatusPolling } from "../hooks/useStatusPolling";
 import { ApprovalCard } from "./run_detail/ApprovalCard";
 import { EventStreamPanel } from "./run_detail/EventStreamPanel";
 import { PlanPanel } from "./run_detail/PlanPanel";
+import { RunSummaryPanel } from "./run_detail/RunSummaryPanel";
 import { TraceToolbar } from "./run_detail/TraceToolbar";
 
 const { Text } = Typography;
@@ -189,6 +190,8 @@ export function RunDetail() {
           <dd style={{ margin: 0 }}>{run.status}</dd>
         </dl>
       </Card>
+
+      <RunSummaryPanel run={run} />
 
       <PlanPanel threadId={threadId} runStatus={run.status} pollTick={pollTick} />
 

@@ -275,6 +275,26 @@ async def test_list_for_tenant_status_filter() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_for_tenant_q_filters_run_and_thread_id() -> None:
+    store = InMemoryRunStore()
+    tenant_id = uuid4()
+    run_a = UUID("aaaaaaaa-0000-0000-0000-000000000001")
+    thread_b = UUID("bbbbbbbb-0000-0000-0000-000000000002")
+    run_c = UUID("cccccccc-0000-0000-0000-000000000003")
+    await store.create(_info(run_id=run_a, tenant_id=tenant_id))
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant_id, thread_id=thread_b))
+    await store.create(_info(run_id=run_c, tenant_id=tenant_id))
+
+    by_run = await store.list_for_tenant(tenant_id=tenant_id, q="aaaaaaaa")
+    assert [r.run_id for r in by_run] == [run_a]
+    by_thread = await store.list_for_tenant(tenant_id=tenant_id, q="bbbbbbbb")
+    assert [r.thread_id for r in by_thread] == [thread_b]
+    # Case-insensitive substring.
+    assert len(await store.list_for_tenant(tenant_id=tenant_id, q="CCCCCCCC")) == 1
+    assert await store.list_for_tenant(tenant_id=tenant_id, q="zzzz") == []
+
+
+@pytest.mark.asyncio
 async def test_list_for_tenant_pagination_offset_and_limit() -> None:
     store = InMemoryRunStore()
     tenant_id = uuid4()

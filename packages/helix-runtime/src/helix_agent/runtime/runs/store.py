@@ -25,11 +25,23 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import String, cast, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models import AgentRunRow
 from helix_agent.runtime.runs.schemas import DisconnectMode, RunInfo, RunStatus
+
+
+def _like_contains(q: str) -> str:
+    """Escape LIKE wildcards in ``q`` and wrap for an ``ILIKE %q%`` match.
+
+    ``q`` is an operator's free-text filter (typically a copied run_id /
+    thread_id fragment). Escaping ``\\ % _`` keeps a stray wildcard from
+    widening the match; the value still binds as a parameter (no SQL
+    injection surface).
+    """
+    esc = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{esc}%"
 
 
 class RunStore(abc.ABC):
@@ -90,6 +102,7 @@ class RunStore(abc.ABC):
         tenant_id: UUID,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[RunInfo]:
@@ -109,6 +122,7 @@ class RunStore(abc.ABC):
         *,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[RunInfo]:
@@ -307,6 +321,7 @@ class InMemoryRunStore(RunStore):
         tenant_id: UUID,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[RunInfo]:
@@ -316,6 +331,11 @@ class InMemoryRunStore(RunStore):
         if thread_ids is not None:
             wanted = set(thread_ids)
             rows = [r for r in rows if r.thread_id in wanted]
+        if q:
+            ql = q.lower()
+            rows = [
+                r for r in rows if ql in str(r.run_id).lower() or ql in str(r.thread_id).lower()
+            ]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         clamped = _clamp_limit(limit)
         return rows[offset : offset + clamped]
@@ -325,6 +345,7 @@ class InMemoryRunStore(RunStore):
         *,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[RunInfo]:
@@ -334,6 +355,11 @@ class InMemoryRunStore(RunStore):
         if thread_ids is not None:
             wanted = set(thread_ids)
             rows = [r for r in rows if r.thread_id in wanted]
+        if q:
+            ql = q.lower()
+            rows = [
+                r for r in rows if ql in str(r.run_id).lower() or ql in str(r.thread_id).lower()
+            ]
         rows.sort(key=lambda r: r.created_at, reverse=True)
         clamped = _clamp_limit(limit)
         return rows[offset : offset + clamped]
@@ -569,6 +595,7 @@ class SqlRunStore(RunStore):
         tenant_id: UUID,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[RunInfo]:
@@ -586,6 +613,14 @@ class SqlRunStore(RunStore):
             stmt = stmt.where(AgentRunRow.status == status.value)
         if thread_ids is not None:
             stmt = stmt.where(AgentRunRow.thread_id.in_(list(thread_ids)))
+        if q:
+            pat = _like_contains(q)
+            stmt = stmt.where(
+                or_(
+                    cast(AgentRunRow.id, String).ilike(pat, escape="\\"),
+                    cast(AgentRunRow.thread_id, String).ilike(pat, escape="\\"),
+                )
+            )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
@@ -595,6 +630,7 @@ class SqlRunStore(RunStore):
         *,
         status: RunStatus | None = None,
         thread_ids: Collection[UUID] | None = None,
+        q: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[RunInfo]:
@@ -612,6 +648,14 @@ class SqlRunStore(RunStore):
             stmt = stmt.where(AgentRunRow.status == status.value)
         if thread_ids is not None:
             stmt = stmt.where(AgentRunRow.thread_id.in_(list(thread_ids)))
+        if q:
+            pat = _like_contains(q)
+            stmt = stmt.where(
+                or_(
+                    cast(AgentRunRow.id, String).ilike(pat, escape="\\"),
+                    cast(AgentRunRow.thread_id, String).ilike(pat, escape="\\"),
+                )
+            )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]

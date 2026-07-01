@@ -204,3 +204,71 @@ async def test_window_isolates_tenants(store: InMemoryTokenUsageStore) -> None:
     rows = list(await store.list_for_tenant_window(tenant_id=tenant_a, start=start, end=end))
     assert len(rows) == 1
     assert rows[0].tenant_id == tenant_a
+
+
+# ---------------------------------------------------------------------------
+# totals_by_trace_ids — Runs enrichment (per-run token summary, joined by
+# trace_id since token_usage has no run_id column)
+# ---------------------------------------------------------------------------
+
+
+async def _usage(
+    store: InMemoryTokenUsageStore,
+    *,
+    tenant_id: UUID,
+    trace_id: str | None,
+    model: str,
+    inp: int,
+    out: int,
+    cache_read: int = 0,
+) -> None:
+    await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant_id,
+            agent_name="bot",
+            agent_version="1.0.0",
+            model=model,
+            trace_id=trace_id,
+            input_tokens=inp,
+            output_tokens=out,
+            cache_read_tokens=cache_read,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_totals_group_and_sum_by_trace(store: InMemoryTokenUsageStore) -> None:
+    tenant = uuid4()
+    # trace A — two LLM calls, two models.
+    await _usage(store, tenant_id=tenant, trace_id="aaaa", model="m1", inp=10, out=5, cache_read=2)
+    await _usage(store, tenant_id=tenant, trace_id="aaaa", model="m2", inp=20, out=7)
+    # trace B — one call.
+    await _usage(store, tenant_id=tenant, trace_id="bbbb", model="m1", inp=3, out=1)
+
+    totals = await store.totals_by_trace_ids(["aaaa", "bbbb"])
+    a = totals["aaaa"]
+    assert a.input_tokens == 30
+    assert a.output_tokens == 12
+    assert a.cache_read_tokens == 2
+    assert a.total_tokens == 42
+    assert a.llm_calls == 2
+    assert a.models == ("m1", "m2")  # distinct, sorted
+    assert totals["bbbb"].llm_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_totals_skips_null_trace_and_unrequested_ids(
+    store: InMemoryTokenUsageStore,
+) -> None:
+    tenant = uuid4()
+    await _usage(store, tenant_id=tenant, trace_id=None, model="m1", inp=99, out=99)  # legacy row
+    await _usage(store, tenant_id=tenant, trace_id="cccc", model="m1", inp=1, out=1)
+
+    totals = await store.totals_by_trace_ids(["cccc", "missing"])
+    # Null-trace row ignored; a requested id with no usage is simply absent.
+    assert set(totals) == {"cccc"}
+
+
+@pytest.mark.asyncio
+async def test_totals_empty_input_returns_empty(store: InMemoryTokenUsageStore) -> None:
+    assert await store.totals_by_trace_ids([]) == {}

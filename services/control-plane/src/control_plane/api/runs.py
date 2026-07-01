@@ -55,6 +55,7 @@ from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
 from control_plane.tenant_scope import (
     CrossTenant,
+    SingleTenant,
     applied_scope,
     cross_tenant_query_enabled,
     ensure_tenant_scope,
@@ -70,6 +71,7 @@ from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.persistence.thread_meta import ThreadMetaStore
+from helix_agent.persistence.token_usage_store import TokenTotals, TokenUsageStore
 from helix_agent.protocol import (
     AgentSpec,
     ApprovalStatus,
@@ -340,6 +342,10 @@ def _get_approval_store(request: Request) -> ApprovalStore:
 
 def _get_run_store(request: Request) -> RunStore:
     return request.app.state.run_store  # type: ignore[no-any-return]
+
+
+def _get_token_usage_store(request: Request) -> TokenUsageStore:
+    return request.app.state.token_usage_store  # type: ignore[no-any-return]
 
 
 def _get_run_event_store(request: Request) -> RunEventStore | None:
@@ -938,6 +944,7 @@ def build_runs_router() -> APIRouter:
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         approvals: Annotated[ApprovalStore, Depends(_get_approval_store)],
         runs: Annotated[RunStore, Depends(_get_run_store)],
+        token_usage: Annotated[TokenUsageStore, Depends(_get_token_usage_store)],
     ) -> JSONResponse:
         """Stream J.8 — a run's status + any pending approval.
 
@@ -986,6 +993,14 @@ def build_runs_router() -> APIRouter:
         if run_status is None and approval is None:
             raise HTTPException(status_code=404, detail="run not found")
         status = run_status or (approval.status.value if approval is not None else "unknown")
+        # Run summary — token usage joined by trace_id (helix's own token_usage,
+        # no Langfuse round-trip). Scoped to the caller's tenant so RLS applies
+        # (token_usage isolation rides on the tenant GUC, set by applied_scope).
+        tokens: dict[str, Any] | None = None
+        if trace_id is not None:
+            async with applied_scope(SingleTenant(tenant_id=tenant_id)):
+                totals = await token_usage.totals_by_trace_ids([trace_id])
+            tokens = _tokens_to_dict(totals.get(trace_id))
         return JSONResponse(
             content={
                 "run_id": str(run_id),
@@ -993,6 +1008,15 @@ def build_runs_router() -> APIRouter:
                 "status": status,
                 "pending_approval": pending,
                 "trace_id": trace_id,
+                "tokens": tokens,
+                # Timestamps from the durable row (None when the run is only in
+                # the in-memory RunManager) — the detail summary derives duration.
+                "created_at": (persisted.created_at.isoformat() if persisted is not None else None),
+                "finished_at": (
+                    persisted.finished_at.isoformat()
+                    if persisted is not None and persisted.finished_at is not None
+                    else None
+                ),
             }
         )
 
@@ -1250,17 +1274,40 @@ _RUN_LIST_SECONDS = helix_histogram(
 )
 
 
+def _tokens_to_dict(tokens: TokenTotals | None) -> dict[str, Any] | None:
+    """Serialise a run's aggregated token usage (``None`` → no usage recorded).
+
+    The Runs list + detail read this to show "what happened" without a
+    Langfuse round-trip; the numbers come from helix's own ``token_usage``
+    (G.9), joined to the run by ``trace_id``.
+    """
+    if tokens is None:
+        return None
+    return {
+        "input_tokens": tokens.input_tokens,
+        "output_tokens": tokens.output_tokens,
+        "cache_creation_tokens": tokens.cache_creation_tokens,
+        "cache_read_tokens": tokens.cache_read_tokens,
+        "total_tokens": tokens.total_tokens,
+        "llm_calls": tokens.llm_calls,
+        "models": list(tokens.models),
+    }
+
+
 def _run_to_dict(
     info: Any,
     *,
     agent_name: str | None,
     agent_version: str | None,
+    tokens: TokenTotals | None = None,
 ) -> dict[str, Any]:
     """Serialise a :class:`RunInfo` + JOIN'd thread agent fields to JSON.
 
     ``agent_name`` / ``agent_version`` come from a per-row
     ``ThreadMetaStore.get`` (Mini-ADR H-6 § 6.5.5 — N+1 JOIN at M0;
     M1 turns into SQL JOIN). ``None`` when the thread has been deleted.
+    ``tokens`` is the run's aggregated token usage (``None`` when it has no
+    ``trace_id`` or no recorded usage — legacy / auto-triggered runs).
     """
     return {
         "run_id": str(info.run_id),
@@ -1277,6 +1324,7 @@ def _run_to_dict(
         "finished_at": info.finished_at.isoformat() if info.finished_at is not None else None,
         # Mini-ADR H-9.5 — OTel trace id persisted on agent_run.
         "trace_id": info.trace_id,
+        "tokens": _tokens_to_dict(tokens),
     }
 
 
@@ -1293,10 +1341,13 @@ def build_runs_list_router() -> APIRouter:
         request: Request,
         runs: Annotated[RunStore, Depends(_get_run_store)],
         threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        token_usage: Annotated[TokenUsageStore, Depends(_get_token_usage_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         status: Annotated[RunStatus | None, Query()] = None,
         agent_name: Annotated[str | None, Query(min_length=1)] = None,
         agent_version: Annotated[str | None, Query(min_length=1)] = None,
+        # Operator free-text filter — substring match on run_id / thread_id.
+        q: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         limit: Annotated[int, Query(ge=1, le=10000)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,
@@ -1347,7 +1398,7 @@ def build_runs_list_router() -> APIRouter:
 
             if isinstance(scope, CrossTenant):
                 items = await runs.list_all_tenants(
-                    status=status, thread_ids=thread_ids, limit=limit, offset=offset
+                    status=status, thread_ids=thread_ids, q=q, limit=limit, offset=offset
                 )
                 tenant_scope_label = "cross"
             else:
@@ -1355,6 +1406,7 @@ def build_runs_list_router() -> APIRouter:
                     tenant_id=scope.tenant_id,
                     status=status,
                     thread_ids=thread_ids,
+                    q=q,
                     limit=limit,
                     offset=offset,
                 )
@@ -1375,11 +1427,19 @@ def build_runs_list_router() -> APIRouter:
                 else:
                     agents_by_thread[info.thread_id] = (meta.agent_name, meta.agent_version)
 
+            # Per-run token summary — one aggregate over this page's trace_ids
+            # (token_usage joins runs by trace_id; no run_id column). Runs
+            # inside the same scope, so no cross-tenant bleed. A run with no
+            # trace_id / no recorded usage maps to None.
+            trace_ids = [i.trace_id for i in items if i.trace_id]
+            tokens_by_trace = await token_usage.totals_by_trace_ids(trace_ids) if trace_ids else {}
+
         items_json = [
             _run_to_dict(
                 i,
                 agent_name=agents_by_thread[i.thread_id][0],
                 agent_version=agents_by_thread[i.thread_id][1],
+                tokens=tokens_by_trace.get(i.trace_id) if i.trace_id else None,
             )
             for i in items
         ]
