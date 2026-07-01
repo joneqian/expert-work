@@ -145,4 +145,54 @@ describe("ApprovalsList", () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("approvals-error")).toBeInTheDocument());
   });
+
+  it("approve-all decides every pending row on the page in one batch", async () => {
+    const a = item({ run_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" });
+    const b = item({ run_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" });
+    vi.spyOn(approvalsSdk, "listApprovals").mockResolvedValue({
+      items: [a, b],
+      total: 2,
+      limit: 100,
+      offset: 0,
+    });
+    const decideMock = vi.spyOn(approvalsSdk, "decideApprovals").mockResolvedValue({
+      results: [
+        { run_id: a.run_id, ok: true },
+        { run_id: b.run_id, ok: true },
+      ],
+      succeeded: 2,
+    });
+
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("approvals-approve-all")).toBeInTheDocument(),
+    );
+
+    await userEvent.click(screen.getByTestId("approvals-approve-all"));
+    const confirm = await screen.findAllByRole("button", { name: /approve|批准/i });
+    await userEvent.click(confirm[confirm.length - 1]);
+
+    await waitFor(() => expect(decideMock).toHaveBeenCalledTimes(1));
+    const sent = decideMock.mock.calls[0][0];
+    expect(sent).toHaveLength(2);
+    expect(sent.every((d) => d.decision === "approve")).toBe(true);
+  });
+
+  it("flags an approval past its timeout as timing out", async () => {
+    const overdue = item({
+      run_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      timeout_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+    vi.spyOn(approvalsSdk, "listApprovals").mockResolvedValue({
+      items: [overdue],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(/timing out|即将超时/i)).toBeInTheDocument(),
+    );
+  });
 });
