@@ -1855,6 +1855,11 @@ export interface TranslationKeys {
     select_all: string;
     waiting_minutes: string;
     waiting_hours: string;
+    time_left_hours: string;
+    time_left_minutes: string;
+    timed_out: string;
+    approve_all_page: string;
+    confirm_approve_all: string;
     modify_hint: string;
   };
   runs_page: {
@@ -4081,7 +4086,7 @@ const en: TranslationKeys = {
     column_reason: "Reason",
     column_action: "Requested action",
     column_waiting: "Waiting",
-    column_timeout: "Times out",
+    column_timeout: "Time left",
     column_status: "Status",
     column_actions: "Decision",
     approve: "Approve",
@@ -4101,6 +4106,11 @@ const en: TranslationKeys = {
     select_all: "Select all approvals on this page",
     waiting_minutes: "{{count}} min",
     waiting_hours: "{{count}} h",
+    time_left_hours: "{{count}}h left",
+    time_left_minutes: "{{count}}m left",
+    timed_out: "timing out",
+    approve_all_page: "Approve all pending ({{count}})",
+    confirm_approve_all: "Approve all {{count}} pending actions on this page?",
     modify_hint:
       "To approve with edited arguments, open the run and use the approval card there.",
   },

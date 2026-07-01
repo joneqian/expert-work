@@ -73,6 +73,28 @@ function formatWaiting(t: (key: string, opts?: Record<string, unknown>) => strin
   return t("approvals_page.waiting_hours", { count: Math.round(minutes / 60) });
 }
 
+type Urgency = "danger" | "warning" | "secondary";
+
+/**
+ * Time remaining until an approval auto-rejects, with an urgency level so the
+ * queue surfaces what's about to be swept: ``danger`` inside 2h (or already
+ * past ``timeout_at`` — the sweep runs on a ~5m cadence), ``warning`` inside
+ * 6h, otherwise ``secondary``.
+ */
+function formatTimeLeft(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  iso: string,
+): { text: string; level: Urgency } {
+  const minutes = Math.round((new Date(iso).getTime() - Date.now()) / 60_000);
+  if (minutes <= 0) return { text: t("approvals_page.timed_out"), level: "danger" };
+  if (minutes < 120)
+    return { text: t("approvals_page.time_left_minutes", { count: minutes }), level: "danger" };
+  return {
+    text: t("approvals_page.time_left_hours", { count: Math.round(minutes / 60) }),
+    level: minutes < 360 ? "warning" : "secondary",
+  };
+}
+
 export function ApprovalsList() {
   const { t } = useTranslation();
   const { scope, apiTenantScope } = useTenantScope();
@@ -153,6 +175,13 @@ export function ApprovalsList() {
     return (data?.items ?? []).filter((item) => keys.has(item.run_id));
   }, [data, selectedKeys]);
 
+  // Every pending row on the page — one-click "approve all" target. Page size
+  // (20) matches the ``:decide`` batch cap, so one page is one batch call.
+  const pendingItems = useMemo(
+    () => (data?.items ?? []).filter((item) => item.status === "pending"),
+    [data],
+  );
+
   const columns: TableColumnsType<ApprovalItem> = useMemo(
     () => [
       {
@@ -195,12 +224,17 @@ export function ApprovalsList() {
         title: t("approvals_page.column_timeout"),
         dataIndex: "timeout_at",
         key: "timeout_at",
-        width: 180,
-        render: (iso: string) => (
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {new Date(iso).toLocaleString()}
-          </Text>
-        ),
+        width: 130,
+        render: (iso: string) => {
+          const { text, level } = formatTimeLeft(t, iso);
+          return (
+            <Tooltip title={new Date(iso).toLocaleString()}>
+              <Text type={level} style={{ fontSize: 12 }}>
+                {text}
+              </Text>
+            </Tooltip>
+          );
+        },
       },
       {
         title: t("approvals_page.column_status"),
@@ -277,6 +311,24 @@ export function ApprovalsList() {
               >
                 {t("approvals_page.cross_tenant_banner")}
               </Tag>
+            )}
+            {canDecide && pendingItems.length > 0 && (
+              <Popconfirm
+                title={t("approvals_page.confirm_approve_all", { count: pendingItems.length })}
+                onConfirm={() => void decide(pendingItems, "approve")}
+                okText={t("approvals_page.approve")}
+                cancelText={t("common.cancel")}
+              >
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<CheckCircle2 size={13} strokeWidth={1.5} />}
+                  disabled={deciding}
+                  data-testid="approvals-approve-all"
+                >
+                  {t("approvals_page.approve_all_page", { count: pendingItems.length })}
+                </Button>
+              </Popconfirm>
             )}
             <Select<ApprovalStatus>
               value={statusFilter}
