@@ -2,9 +2,10 @@
  * Playground image-upload e2e — Stream P (PR M, Mini-ADR P-16).
  *
  * Drives the multimodal input path end to end against mocked routes:
- * the tab creates a thread on mount, the user attaches an image (mocked
- * ``POST .../uploads`` → ``helix://image/...``), and Run posts the SSE
- * stream with that ref in ``image_refs``. Also runs axe on the tab.
+ * the thread is created lazily on the first action (attaching an image →
+ * mocked ``POST /v1/sessions`` then ``POST .../uploads`` → ``helix://image/
+ * ...``), and Run posts the SSE stream with that ref in ``image_refs``.
+ * Also runs axe on the tab.
  */
 import { test, expect, expectNoA11yViolations, SAMPLE_JWT } from "./fixtures";
 
@@ -43,7 +44,7 @@ const THREAD = {
   error: null,
 };
 
-const SSE_BODY = ['event: end', 'data: "ok"', "", ""].join("\n");
+const SSE_BODY = ["event: end", 'data: "ok"', "", ""].join("\n");
 
 async function login(page: import("@playwright/test").Page): Promise<void> {
   await page.goto("/login");
@@ -61,7 +62,10 @@ test("attach image, run, and send image_refs + pass axe", async ({ page }) => {
     await route.fulfill({ status: 201, json: THREAD });
   });
   await page.route("**/v1/sessions/*/uploads", async (route) => {
-    await route.fulfill({ status: 201, json: { image_ref: "helix://image/demo.png" } });
+    await route.fulfill({
+      status: 201,
+      json: { image_ref: "helix://image/demo.png" },
+    });
   });
 
   let runBody: { input?: string; image_refs?: string[] } | null = null;
@@ -77,16 +81,18 @@ test("attach image, run, and send image_refs + pass axe", async ({ page }) => {
   await login(page);
   await page.goto("/agents/demo-agent/1.0.0/playground");
 
-  // Thread is created on mount.
-  await expect(page.getByText(/33333333-3333-3333/)).toBeVisible();
-
-  // Attach an image — the hidden file input takes the buffer directly.
+  // Lazy — no thread is created on mount. Attaching an image is the first
+  // action, so it creates the thread (uploads are thread-scoped) then uploads.
   await page.getByTestId("playground-file-input").setInputFiles({
     name: "shot.png",
     mimeType: "image/png",
     buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
   });
-  await expect(page.getByTestId("playground-attachment")).toHaveText(/shot\.png/);
+  await expect(page.getByTestId("playground-attachment")).toHaveText(
+    /shot\.png/,
+  );
+  // The lazy createSession fired — the thread id now shows in the header.
+  await expect(page.getByText(/33333333-3333-3333/)).toBeVisible();
 
   await page.getByTestId("playground-input").fill("describe this image");
   await expectNoA11yViolations(page, "/agents/playground");
