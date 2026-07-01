@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { MemoryRouter } from "react-router-dom";
 
-import { RunsTab } from "./RunsTab";
+import { ConversationsTab } from "./ConversationsTab";
 import type { AgentDetailResponse } from "../../api/agents";
 import { apiClient } from "../../api/client";
 import "../../i18n";
@@ -24,50 +24,55 @@ const detail: AgentDetailResponse = {
 
 const items = [
   {
-    run_id: "33333333-3333-3333-3333-333333333333",
-    tenant_id: detail.record.tenant_id,
     thread_id: "44444444-4444-4444-4444-444444444444",
-    user_id: null,
-    status: "success",
-    is_resume: false,
-    error: null,
+    tenant_id: detail.record.tenant_id,
+    user_id: "88888888-8888-8888-8888-888888888888",
     agent_name: "code-reviewer",
     agent_version: "1.0.0",
+    title: "refund question",
+    status: "active",
     created_at: "2026-06-12T01:00:00Z",
-    updated_at: "2026-06-12T01:01:00Z",
-    finished_at: "2026-06-12T01:01:00Z",
-    trace_id: null,
+    updated_at: "2026-06-12T01:05:00Z",
+    run_count: 3,
+    error_count: 1,
+    pending_count: 1,
+    last_run_at: "2026-06-12T01:05:00Z",
+    tokens: {
+      input_tokens: 1200,
+      output_tokens: 340,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 0,
+      total_tokens: 1540,
+      llm_calls: 4,
+      models: ["claude-sonnet-4-5"],
+    },
   },
   {
-    run_id: "33333333-3333-3333-3333-333333333334",
-    tenant_id: detail.record.tenant_id,
     thread_id: "44444444-4444-4444-4444-444444444445",
-    user_id: null,
-    status: "running",
-    is_resume: false,
-    error: null,
+    tenant_id: detail.record.tenant_id,
+    user_id: "99999999-9999-9999-9999-999999999999",
     agent_name: "code-reviewer",
     agent_version: "1.0.0",
+    title: null,
+    status: "completed",
     created_at: "2026-06-12T02:00:00Z",
-    updated_at: "2026-06-12T02:00:00Z",
-    finished_at: null,
-    trace_id: null,
+    updated_at: "2026-06-12T02:03:00Z",
+    run_count: 1,
+    error_count: 0,
+    pending_count: 0,
+    last_run_at: "2026-06-12T02:03:00Z",
+    tokens: null,
   },
 ];
 
-/** ``GET /v1/runs`` is an envelope endpoint — respond ``{success,data}``. */
-function withStubs(capped: boolean) {
+/** ``GET /v1/conversations`` is an envelope endpoint — ``{success,data}``. */
+function withStub() {
   return (Story: ComponentType) => {
     apiClient.defaults.adapter = (config) =>
       Promise.resolve({
         data: {
           success: true,
-          data: {
-            items,
-            total: items.length,
-            cross_tenant: false,
-            thread_window_capped: capped,
-          },
+          data: { items, total: items.length, cross_tenant: false },
           error: null,
         },
         status: 200,
@@ -84,16 +89,13 @@ function withStubs(capped: boolean) {
   };
 }
 
-const meta: Meta<typeof RunsTab> = {
-  title: "AgentDetail/RunsTab",
-  component: RunsTab,
+const meta: Meta<typeof ConversationsTab> = {
+  title: "AgentDetail/ConversationsTab",
+  component: ConversationsTab,
   args: { detail },
 };
 export default meta;
 
-type Story = StoryObj<typeof RunsTab>;
+type Story = StoryObj<typeof ConversationsTab>;
 
-export const Default: Story = { decorators: [withStubs(false)] };
-
-/** The agent has more threads than the server window — warning shown. */
-export const WindowCapped: Story = { decorators: [withStubs(true)] };
+export const Default: Story = { decorators: [withStub()] };

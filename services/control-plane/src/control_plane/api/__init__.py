@@ -8,6 +8,7 @@ from control_plane.api.approvals import build_approvals_router
 from control_plane.api.artifacts import build_artifacts_router
 from control_plane.api.audit import build_audit_router
 from control_plane.api.billing_admin import build_billing_admin_router
+from control_plane.api.conversations import build_conversations_router
 from control_plane.api.curation import build_curation_router, build_eval_dataset_router
 from control_plane.api.eval_runs import build_eval_runs_router
 from control_plane.api.feedback import build_feedback_router
@@ -64,6 +65,7 @@ __all__ = [
     "build_artifacts_router",
     "build_audit_router",
     "build_billing_admin_router",
+    "build_conversations_router",
     "build_curation_router",
     "build_eval_dataset_router",
     "build_eval_runs_router",

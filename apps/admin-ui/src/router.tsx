@@ -3,6 +3,7 @@ import { AgentsList } from "./pages/AgentsList";
 import { ApprovalsList } from "./pages/ApprovalsList";
 import { AgentDetail } from "./pages/AgentDetail";
 import { ArtifactsList } from "./pages/ArtifactsList";
+import { ConversationDetail } from "./pages/ConversationDetail";
 import { Curation } from "./pages/Curation";
 import { EvalRunDetail } from "./pages/EvalRunDetail";
 import { EvalRunsList } from "./pages/EvalRunsList";
@@ -53,6 +54,7 @@ export function AppRouter() {
       <Route path="/runs" element={<RunsList />} />
       <Route path="/approvals" element={<ApprovalsList />} />
       <Route path="/runs/:threadId/:runId" element={<RunDetail />} />
+      <Route path="/conversations/:threadId" element={<ConversationDetail />} />
       <Route path="/curation" element={<Curation />} />
       <Route path="/eval-runs" element={<EvalRunsList />} />
       <Route path="/eval-runs/:runId" element={<EvalRunDetail />} />

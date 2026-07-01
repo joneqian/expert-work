@@ -33,11 +33,11 @@ import { useTranslation } from "react-i18next";
 import { getAgent, type AgentDetailResponse } from "../api/agents";
 import { ApiError } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
+import { ConversationsTab } from "./agent_detail/ConversationsTab";
 import { HistoryTab } from "./agent_detail/HistoryTab";
 import { ManifestTab } from "./agent_detail/ManifestTab";
 import { MemoryTab } from "./agent_detail/MemoryTab";
 import { PlaygroundTab } from "./agent_detail/PlaygroundTab";
-import { RunsTab } from "./agent_detail/RunsTab";
 import { SkillsTab } from "./agent_detail/SkillsTab";
 import { TriggersTab } from "./agent_detail/TriggersTab";
 
@@ -148,7 +148,7 @@ export function AgentDetail() {
           { key: "manifest", label: t("agent_detail.tab_manifest") },
           { key: "history", label: t("agent_detail.tab_history") },
           { key: "playground", label: t("agent_detail.tab_playground") },
-          { key: "runs", label: t("agent_detail.tab_runs") },
+          { key: "conversations", label: t("agent_detail.tab_conversations") },
           { key: "skills", label: t("agent_detail.tab_skills") },
           { key: "triggers", label: t("agent_detail.tab_triggers") },
           { key: "memory", label: t("agent_detail.tab_memory") },
@@ -159,7 +159,7 @@ export function AgentDetail() {
       {activeTab === "manifest" && <ManifestTab detail={detail} onSaved={refresh} />}
       {activeTab === "history" && <HistoryTab detail={detail} onRolledBack={refresh} />}
       {activeTab === "playground" && <PlaygroundTab detail={detail} />}
-      {activeTab === "runs" && <RunsTab detail={detail} />}
+      {activeTab === "conversations" && <ConversationsTab detail={detail} />}
       {activeTab === "skills" && <SkillsTab detail={detail} />}
       {activeTab === "triggers" && <TriggersTab detail={detail} />}
       {activeTab === "memory" && <MemoryTab />}
@@ -168,7 +168,7 @@ export function AgentDetail() {
         "manifest",
         "history",
         "playground",
-        "runs",
+        "conversations",
         "skills",
         "triggers",
         "memory",

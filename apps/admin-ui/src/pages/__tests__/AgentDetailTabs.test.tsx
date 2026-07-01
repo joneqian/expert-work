@@ -10,13 +10,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
 
-import * as runsSdk from "../../api/runs";
+import * as conversationsSdk from "../../api/conversations";
 import * as skillsSdk from "../../api/skills";
 import * as triggersSdk from "../../api/triggers";
 import * as memorySdk from "../../api/memory";
 import type { AgentDetailResponse } from "../../api/agents";
+import { ConversationsTab } from "../agent_detail/ConversationsTab";
 import { MemoryTab } from "../agent_detail/MemoryTab";
-import { RunsTab } from "../agent_detail/RunsTab";
 import { SkillsTab } from "../agent_detail/SkillsTab";
 import { TriggersTab } from "../agent_detail/TriggersTab";
 
@@ -41,68 +41,62 @@ function inRouter(node: React.ReactElement) {
 
 afterEach(() => vi.restoreAllMocks());
 
-describe("RunsTab", () => {
-  it("lists the agent's runs and passes name+version filters", async () => {
-    const spy = vi.spyOn(runsSdk, "listRuns").mockResolvedValue({
+describe("ConversationsTab", () => {
+  it("lists the agent's conversations with rollup and passes name+version filters", async () => {
+    const spy = vi.spyOn(conversationsSdk, "listConversations").mockResolvedValue({
       items: [
         {
-          run_id: "33333333-3333-3333-3333-333333333333",
-          tenant_id: detail.record.tenant_id,
           thread_id: "44444444-4444-4444-4444-444444444444",
-          user_id: null,
-          status: "success",
-          is_resume: false,
-          error: null,
+          tenant_id: detail.record.tenant_id,
+          user_id: "88888888-8888-8888-8888-888888888888",
           agent_name: "code-reviewer",
           agent_version: "1.0.0",
+          title: "refund question",
+          status: "active",
           created_at: "2026-06-12T01:00:00Z",
-          updated_at: "2026-06-12T01:00:00Z",
-          finished_at: "2026-06-12T01:01:00Z",
-          trace_id: null,
+          updated_at: "2026-06-12T01:05:00Z",
+          run_count: 3,
+          error_count: 1,
+          pending_count: 0,
+          last_run_at: "2026-06-12T01:05:00Z",
+          tokens: {
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+            total_tokens: 120,
+            llm_calls: 2,
+            models: ["claude-sonnet-4-5"],
+          },
         },
       ],
       total: 1,
       cross_tenant: false,
-      thread_window_capped: false,
     });
 
-    inRouter(<RunsTab detail={detail} />);
+    inRouter(<ConversationsTab detail={detail} />);
 
-    await waitFor(() => expect(screen.getByText("success")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("refund question")).toBeInTheDocument());
+    // Error rollup surfaces a per-conversation error indicator.
+    expect(
+      screen.getByTestId("conversation-error-44444444-4444-4444-4444-444444444444"),
+    ).toBeInTheDocument();
     expect(spy).toHaveBeenCalledWith(
       expect.objectContaining({ agentName: "code-reviewer", agentVersion: "1.0.0" }),
     );
-    // Cap signal false → no warning.
-    expect(screen.queryByTestId("runs-tab-window-capped")).toBeNull();
   });
 
-  it("surfaces the thread_window_capped warning", async () => {
-    vi.spyOn(runsSdk, "listRuns").mockResolvedValue({
+  it("shows the empty state when the agent has no conversations", async () => {
+    vi.spyOn(conversationsSdk, "listConversations").mockResolvedValue({
       items: [],
       total: 0,
       cross_tenant: false,
-      thread_window_capped: true,
     });
 
-    inRouter(<RunsTab detail={detail} />);
+    inRouter(<ConversationsTab detail={detail} />);
 
     await waitFor(() =>
-      expect(screen.getByTestId("runs-tab-window-capped")).toBeInTheDocument(),
-    );
-  });
-
-  it("shows the empty state when the agent has no runs", async () => {
-    vi.spyOn(runsSdk, "listRuns").mockResolvedValue({
-      items: [],
-      total: 0,
-      cross_tenant: false,
-      thread_window_capped: false,
-    });
-
-    inRouter(<RunsTab detail={detail} />);
-
-    await waitFor(() =>
-      expect(screen.getByText("No runs for this agent yet.")).toBeInTheDocument(),
+      expect(screen.getByText("No conversations for this agent yet.")).toBeInTheDocument(),
     );
   });
 });

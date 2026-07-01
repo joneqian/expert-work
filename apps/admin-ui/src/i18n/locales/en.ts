@@ -139,7 +139,7 @@ export interface TranslationKeys {
     tab_overview: string;
     tab_manifest: string;
     tab_playground: string;
-    tab_runs: string;
+    tab_conversations: string;
     tab_skills: string;
     tab_triggers: string;
     tab_memory: string;
@@ -173,10 +173,38 @@ export interface TranslationKeys {
     diff_label: string;
     diff_loading: string;
   };
-  runs_tab: {
+  conversations_tab: {
     title: string;
-    window_capped: string;
     empty: string;
+  };
+  conversations_page: {
+    page_title: string;
+    subtitle: string;
+    untitled: string;
+    column_conversation: string;
+    column_user: string;
+    column_status: string;
+    column_runs: string;
+    column_tokens: string;
+    column_last_active: string;
+    filter_status: string;
+    filter_status_all: string;
+    error_count: string;
+    pending_count: string;
+    empty_home: string;
+    empty_cross: string;
+  };
+  conversations_detail: {
+    failed_to_load: string;
+    thread_label: string;
+    summary_title: string;
+    user: string;
+    tokens: string;
+    tokens_value: string;
+    models: string;
+    runs_title: string;
+    runs_empty: string;
+    column_started: string;
   };
   skills_tab: {
     title: string;
@@ -2218,11 +2246,11 @@ const en: TranslationKeys = {
     tab_overview: "Overview",
     tab_manifest: "Manifest",
     tab_playground: "Playground",
-    tab_runs: "Runs",
+    tab_conversations: "Conversations",
     tab_skills: "Skills",
     tab_triggers: "Triggers",
     tab_memory: "Memory",
-    tab_history: "History",
+    tab_history: "Config history",
     tab_coming_soon: 'Tab "{{tab}}" lands in Stream H.2.',
     config_summary: "Configuration",
     field_id: "Record ID",
@@ -2253,11 +2281,38 @@ const en: TranslationKeys = {
     diff_label: "Diff: #{{older}} → #{{newer}}",
     diff_loading: "Loading diff…",
   },
-  runs_tab: {
-    title: "Runs of this agent",
-    window_capped:
-      "This agent has more threads than the server window — runs from older threads are not shown.",
-    empty: "No runs for this agent yet.",
+  conversations_tab: {
+    title: "Conversations with this agent",
+    empty: "No conversations for this agent yet.",
+  },
+  conversations_page: {
+    page_title: "Conversations",
+    subtitle: "Every user conversation with this agent, grouped by thread.",
+    untitled: "Untitled conversation",
+    column_conversation: "Conversation",
+    column_user: "User",
+    column_status: "Status",
+    column_runs: "Runs",
+    column_tokens: "Tokens",
+    column_last_active: "Last active",
+    filter_status: "Filter by status",
+    filter_status_all: "All statuses",
+    error_count: "{{count}} failed run(s)",
+    pending_count: "{{count}} awaiting approval",
+    empty_home: "No conversations yet.",
+    empty_cross: "No conversations across tenants.",
+  },
+  conversations_detail: {
+    failed_to_load: "Failed to load conversation",
+    thread_label: "Thread",
+    summary_title: "Conversation summary",
+    user: "User",
+    tokens: "Tokens",
+    tokens_value: "{{total}} ({{input}} in / {{output}} out, {{calls}} calls)",
+    models: "Models",
+    runs_title: "Runs",
+    runs_empty: "No runs in this conversation.",
+    column_started: "Started",
   },
   skills_tab: {
     title: "Skills authored by this agent",

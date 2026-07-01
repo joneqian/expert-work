@@ -716,3 +716,98 @@ async def test_claim_queued_carries_enqueued_input() -> None:
     )
     assert claimed is not None
     assert claimed.enqueued_input == {"input": "hi", "image_refs": []}
+
+
+# --- aggregate_by_threads (conversation-list rollup) -----------------------
+
+
+def _run(
+    *,
+    tenant_id: UUID,
+    thread_id: UUID,
+    status: RunStatus = RunStatus.SUCCESS,
+    created_at: datetime | None = None,
+    trace_id: str | None = None,
+) -> RunInfo:
+    from dataclasses import replace
+
+    return replace(
+        _info(
+            run_id=uuid4(),
+            tenant_id=tenant_id,
+            thread_id=thread_id,
+            status=status,
+            created_at=created_at or _BASE,
+        ),
+        trace_id=trace_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_aggregate_by_threads_empty_ids_short_circuits() -> None:
+    store = InMemoryRunStore()
+    assert await store.aggregate_by_threads(thread_ids=[], tenant_id=uuid4()) == {}
+
+
+@pytest.mark.asyncio
+async def test_aggregate_by_threads_counts_errors_pending_and_traces() -> None:
+    store = InMemoryRunStore()
+    tenant, thread = uuid4(), uuid4()
+    await store.create(
+        _run(tenant_id=tenant, thread_id=thread, status=RunStatus.SUCCESS, trace_id="t1")
+    )
+    await store.create(
+        _run(
+            tenant_id=tenant,
+            thread_id=thread,
+            status=RunStatus.ERROR,
+            trace_id="t2",
+            created_at=_BASE + timedelta(minutes=5),
+        )
+    )
+    await store.create(
+        _run(tenant_id=tenant, thread_id=thread, status=RunStatus.TIMEOUT, trace_id="t2")
+    )
+    await store.create(
+        _run(
+            tenant_id=tenant,
+            thread_id=thread,
+            status=RunStatus.PAUSED,
+            trace_id=None,
+            created_at=_BASE + timedelta(minutes=10),
+        )
+    )
+
+    aggs = await store.aggregate_by_threads(thread_ids=[thread], tenant_id=tenant)
+    agg = aggs[thread]
+    assert agg.run_count == 4
+    assert agg.error_count == 2  # ERROR + TIMEOUT
+    assert agg.pending_count == 1  # PAUSED
+    assert agg.last_run_at == _BASE + timedelta(minutes=10)
+    # Distinct, sorted, NULL trace dropped.
+    assert agg.trace_ids == ("t1", "t2")
+
+
+@pytest.mark.asyncio
+async def test_aggregate_by_threads_omits_threads_without_runs() -> None:
+    store = InMemoryRunStore()
+    tenant, live, empty = uuid4(), uuid4(), uuid4()
+    await store.create(_run(tenant_id=tenant, thread_id=live))
+    aggs = await store.aggregate_by_threads(thread_ids=[live, empty], tenant_id=tenant)
+    assert set(aggs) == {live}
+
+
+@pytest.mark.asyncio
+async def test_aggregate_by_threads_tenant_scopes() -> None:
+    store = InMemoryRunStore()
+    ten_a, ten_b, thread = uuid4(), uuid4(), uuid4()
+    # Same thread id under two tenants (defensive) — tenant filter must split.
+    await store.create(_run(tenant_id=ten_a, thread_id=thread, trace_id="a"))
+    await store.create(_run(tenant_id=ten_b, thread_id=thread, trace_id="b"))
+    scoped = await store.aggregate_by_threads(thread_ids=[thread], tenant_id=ten_a)
+    assert scoped[thread].run_count == 1
+    assert scoped[thread].trace_ids == ("a",)
+    # Cross-tenant (tenant_id=None) folds both.
+    crossed = await store.aggregate_by_threads(thread_ids=[thread], tenant_id=None)
+    assert crossed[thread].run_count == 2
+    assert crossed[thread].trace_ids == ("a", "b")

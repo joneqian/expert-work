@@ -337,6 +337,7 @@ _ENDPOINTS: list[tuple[str, str, int, int]] = [
     ("role_bindings", "/v1/role_bindings", 1, 3),
     ("sessions", "/v1/sessions", 1, 2),
     ("runs", "/v1/runs", 1, 2),  # Stream H.3 PR 1 — Mini-ADR H-6
+    ("conversations", "/v1/conversations", 1, 2),  # conversation-centric IA
     ("memory", "/v1/memory", 0, 2),
     ("artifacts", "/v1/artifacts", 0, 2),
     ("api_keys", "/v1/api_keys", 1, 2),

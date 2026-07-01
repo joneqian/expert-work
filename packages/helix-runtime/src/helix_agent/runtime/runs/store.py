@@ -25,11 +25,19 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import String, cast, delete, or_, select, update
+from sqlalchemy import String, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models import AgentRunRow
-from helix_agent.runtime.runs.schemas import DisconnectMode, RunInfo, RunStatus
+from helix_agent.runtime.runs.schemas import (
+    DisconnectMode,
+    RunInfo,
+    RunStatus,
+    ThreadRunAggregate,
+)
+
+#: Terminal run statuses that count as a conversation-level failure signal.
+_FAILED_RUN_VALUES: frozenset[str] = frozenset({RunStatus.ERROR.value, RunStatus.TIMEOUT.value})
 
 
 def _like_contains(q: str) -> str:
@@ -134,6 +142,23 @@ class RunStore(abc.ABC):
         the SQL backend bypasses tenant RLS. ``limit`` is clamped to
         ``MAX_LIST_LIMIT`` (Mini-ADR H-7 D). ``thread_ids`` as in
         :meth:`list_for_tenant` (Mini-ADR H-10).
+        """
+
+    @abc.abstractmethod
+    async def aggregate_by_threads(
+        self,
+        *,
+        thread_ids: Collection[UUID],
+        tenant_id: UUID | None,
+    ) -> dict[UUID, ThreadRunAggregate]:
+        """Roll up ``agent_run`` rows per thread — the conversation-list feed.
+
+        Returns one :class:`ThreadRunAggregate` per thread that has ≥1 run,
+        keyed by ``thread_id``; threads with no runs are absent. ``tenant_id``
+        scopes the rollup; pass ``None`` for the cross-tenant aggregate, in
+        which case the caller MUST wrap the call in ``bypass_rls_session()``
+        (Stream N contract, same as :meth:`list_all_tenants`). An empty
+        ``thread_ids`` returns ``{}`` without touching the store.
         """
 
     @abc.abstractmethod
@@ -372,6 +397,22 @@ class InMemoryRunStore(RunStore):
         clamped = _clamp_limit(limit)
         return rows[offset : offset + clamped]
 
+    async def aggregate_by_threads(
+        self,
+        *,
+        thread_ids: Collection[UUID],
+        tenant_id: UUID | None,
+    ) -> dict[UUID, ThreadRunAggregate]:
+        wanted = set(thread_ids)
+        if not wanted:
+            return {}
+        rows = [
+            r
+            for r in self._rows.values()
+            if r.thread_id in wanted and (tenant_id is None or r.tenant_id == tenant_id)
+        ]
+        return _aggregate_runs_by_thread(rows)
+
     async def set_trace_id(
         self,
         *,
@@ -477,6 +518,43 @@ class InMemoryRunStore(RunStore):
         )
         self._rows[run_id] = claimed
         return claimed
+
+
+def _aggregate_runs_by_thread(rows: list[RunInfo]) -> dict[UUID, ThreadRunAggregate]:
+    """Fold a flat run list into per-thread :class:`ThreadRunAggregate` rows.
+
+    Used by the in-memory backend; the SQL backend does the equivalent as a
+    ``GROUP BY`` so it never materialises every run.
+    """
+    counts: dict[UUID, int] = {}
+    errors: dict[UUID, int] = {}
+    pending: dict[UUID, int] = {}
+    last_at: dict[UUID, datetime] = {}
+    traces: dict[UUID, list[str]] = {}
+    for r in rows:
+        tid = r.thread_id
+        counts[tid] = counts.get(tid, 0) + 1
+        if r.status.value in _FAILED_RUN_VALUES:
+            errors[tid] = errors.get(tid, 0) + 1
+        if r.status is RunStatus.PAUSED:
+            pending[tid] = pending.get(tid, 0) + 1
+        prev = last_at.get(tid)
+        if prev is None or r.created_at > prev:
+            last_at[tid] = r.created_at
+        if r.trace_id is not None:
+            traces.setdefault(tid, []).append(r.trace_id)
+    return {
+        tid: ThreadRunAggregate(
+            thread_id=tid,
+            run_count=counts[tid],
+            error_count=errors.get(tid, 0),
+            pending_count=pending.get(tid, 0),
+            last_run_at=last_at.get(tid),
+            # Distinct + sorted so the downstream token roll-up is deterministic.
+            trace_ids=tuple(sorted(set(traces.get(tid, [])))),
+        )
+        for tid in counts
+    }
 
 
 def _row_to_dto(row: AgentRunRow) -> RunInfo:
@@ -673,6 +751,50 @@ class SqlRunStore(RunStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
+
+    async def aggregate_by_threads(
+        self,
+        *,
+        thread_ids: Collection[UUID],
+        tenant_id: UUID | None,
+    ) -> dict[UUID, ThreadRunAggregate]:
+        ids = list(thread_ids)
+        if not ids:
+            return {}
+        trace_col = AgentRunRow.trace_id
+        stmt = (
+            select(
+                AgentRunRow.thread_id,
+                func.count().label("run_count"),
+                func.count()
+                .filter(AgentRunRow.status.in_(sorted(_FAILED_RUN_VALUES)))
+                .label("error_count"),
+                func.count()
+                .filter(AgentRunRow.status == RunStatus.PAUSED.value)
+                .label("pending_count"),
+                func.max(AgentRunRow.created_at).label("last_run_at"),
+                # Non-null trace ids only; deduped/sorted in Python below.
+                func.array_agg(trace_col).filter(trace_col.isnot(None)).label("trace_ids"),
+            )
+            .where(AgentRunRow.thread_id.in_(ids))
+            .group_by(AgentRunRow.thread_id)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(AgentRunRow.tenant_id == tenant_id)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).all()
+        result: dict[UUID, ThreadRunAggregate] = {}
+        for row in rows:
+            raw_traces = row.trace_ids or []
+            result[row.thread_id] = ThreadRunAggregate(
+                thread_id=row.thread_id,
+                run_count=int(row.run_count),
+                error_count=int(row.error_count),
+                pending_count=int(row.pending_count),
+                last_run_at=row.last_run_at,
+                trace_ids=tuple(sorted({t for t in raw_traces if t is not None})),
+            )
+        return result
 
     async def set_trace_id(
         self,

@@ -104,3 +104,31 @@ class RunInfo:
     #: ``None`` for synchronous (SSE) runs and after a queued run is claimed
     #: (nulled out — the input then lives in the checkpoint / event log).
     enqueued_input: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadRunAggregate:
+    """Per-thread run rollup — the conversation-list enrichment DTO.
+
+    A conversation is a ``thread_meta`` row (identity + user + agent +
+    title + status); this rolls up the thread's ``agent_run`` rows so the
+    conversation list can show run count, whether anything errored or is
+    awaiting a human, when it was last active, and — via ``trace_ids`` —
+    the token totals joined from ``token_usage`` (which keys on
+    ``trace_id``, not ``run_id``).
+
+    ``run_count == 0`` never appears here: threads with no runs are simply
+    absent from the aggregate map. ``trace_ids`` holds only the non-null
+    trace ids (legacy / auto-triggered runs have none).
+    """
+
+    thread_id: UUID
+    run_count: int
+    #: runs in a failed terminal state (``error`` / ``timeout``).
+    error_count: int
+    #: runs paused at an approval gate — actionable "needs a human" signal.
+    pending_count: int
+    #: newest ``created_at`` across the thread's runs — the "last active" clock.
+    last_run_at: datetime | None
+    #: distinct non-null OTel trace ids, for the ``token_usage`` roll-up.
+    trace_ids: tuple[str, ...]
