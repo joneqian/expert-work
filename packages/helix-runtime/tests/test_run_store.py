@@ -197,6 +197,30 @@ async def test_list_by_thread_filters_and_sorts() -> None:
     assert [r.run_id for r in listed] == [older, newer]
 
 
+@pytest.mark.asyncio
+async def test_delete_by_thread_removes_only_that_thread_and_tenant() -> None:
+    store = InMemoryRunStore()
+    thread_a, thread_b, tenant, other = uuid4(), uuid4(), uuid4(), uuid4()
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant, thread_id=thread_a))
+    await store.create(_info(run_id=uuid4(), tenant_id=tenant, thread_id=thread_a))
+    keep_thread = uuid4()
+    await store.create(_info(run_id=keep_thread, tenant_id=tenant, thread_id=thread_b))
+    # Same thread_id under a different tenant must survive.
+    cross = uuid4()
+    await store.create(_info(run_id=cross, tenant_id=other, thread_id=thread_a))
+
+    removed = await store.delete_by_thread(thread_id=thread_a, tenant_id=tenant)
+    assert removed == 2
+    assert await store.list_by_thread(thread_id=thread_a, tenant_id=tenant) == []
+    # Other thread + cross-tenant run untouched.
+    assert [r.run_id for r in await store.list_by_thread(thread_id=thread_b, tenant_id=tenant)] == [
+        keep_thread
+    ]
+    assert await store.get(run_id=cross, tenant_id=other) is not None
+    # Deleting an empty thread is a no-op returning 0.
+    assert await store.delete_by_thread(thread_id=uuid4(), tenant_id=tenant) == 0
+
+
 # ---------------------------------------------------------------------------
 # Stream H.3 PR 1 — list_for_tenant / list_all_tenants
 # ---------------------------------------------------------------------------

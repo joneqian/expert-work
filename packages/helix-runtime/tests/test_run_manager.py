@@ -53,6 +53,27 @@ async def test_list_by_thread_filters_by_tenant() -> None:
 
 
 @pytest.mark.asyncio
+async def test_delete_by_thread_clears_registry_and_store() -> None:
+    store = InMemoryRunStore()
+    mgr = RunManager(store=store)
+    thread_a, thread_b, tenant = uuid4(), uuid4(), uuid4()
+    a_ids = [uuid4(), uuid4()]
+    for rid in a_ids:
+        await mgr.create(run_id=rid, thread_id=thread_a, tenant_id=tenant)
+    keep = uuid4()
+    await mgr.create(run_id=keep, thread_id=thread_b, tenant_id=tenant)
+
+    removed = await mgr.delete_by_thread(thread_a, tenant_id=tenant)
+    assert removed == 2
+    # In-memory registry cleared for the purged thread…
+    assert await mgr.list_by_thread(thread_a, tenant_id=tenant) == []
+    assert mgr.get(a_ids[0]) is None
+    # …and the durable mirror too, while the other thread survives.
+    assert await store.list_by_thread(thread_id=thread_a, tenant_id=tenant) == []
+    assert await store.get(run_id=keep, tenant_id=tenant) is not None
+
+
+@pytest.mark.asyncio
 async def test_set_status_transitions() -> None:
     mgr = RunManager()
     run_id, thread_id, tenant_id = uuid4(), uuid4(), uuid4()

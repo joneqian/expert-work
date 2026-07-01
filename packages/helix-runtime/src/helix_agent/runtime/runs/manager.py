@@ -244,6 +244,26 @@ class RunManager:
                 if r.thread_id == thread_id and r.tenant_id == tenant_id
             ]
 
+    async def delete_by_thread(self, thread_id: UUID, *, tenant_id: UUID) -> int:
+        """Hard-delete a thread's runs from both the registry and the durable
+        store (session purge). Returns the durable rows removed.
+
+        Drops the in-memory records first so a concurrent lookup can't
+        resurrect a purged run; then deletes the durable rows (the count
+        callers report).
+        """
+        async with self._lock:
+            victims = [
+                rid
+                for rid, r in self._runs.items()
+                if r.thread_id == thread_id and r.tenant_id == tenant_id
+            ]
+            for rid in victims:
+                del self._runs[rid]
+        if self._store is None:
+            return len(victims)
+        return await self._store.delete_by_thread(thread_id=thread_id, tenant_id=tenant_id)
+
     async def set_status(
         self, run_id: UUID, status: RunStatus, *, error: str | None = None
     ) -> bool:

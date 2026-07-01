@@ -41,6 +41,7 @@ from control_plane.api._user_scope import (
 from control_plane.audit import emit
 from control_plane.auth.rbac import is_admin
 from control_plane.quota.base import QuotaService
+from control_plane.runtime import AgentRuntime
 from control_plane.tenant_scope import (
     CrossTenant,
     applied_scope,
@@ -54,7 +55,13 @@ from helix_agent.persistence.tenant_config import TenantConfigStore
 from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.persistence.thread_meta import ThreadMetaStore
 from helix_agent.persistence.workspace import UserWorkspaceStore
-from helix_agent.protocol import AgentSpecStatus, AuditAction, AuditResult, ThreadStatus
+from helix_agent.protocol import (
+    AgentSpecStatus,
+    AuditAction,
+    AuditResult,
+    ThreadMeta,
+    ThreadStatus,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.tools import SandboxSupervisorError, SupervisorClient
 
@@ -98,6 +105,14 @@ class TransitionPayload(BaseModel):
     reason: str | None = Field(default=None, max_length=512)
 
 
+class RenamePayload(BaseModel):
+    """Body for ``PATCH /v1/sessions/{id}`` — rename the session (title)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=200)
+
+
 # ---------------------------------------------------------------------------
 # Dependency providers (pull from request.app.state)
 # ---------------------------------------------------------------------------
@@ -105,6 +120,10 @@ class TransitionPayload(BaseModel):
 
 def _get_thread_repo(request: Request) -> ThreadMetaStore:
     return request.app.state.thread_meta_repo  # type: ignore[no-any-return]
+
+
+def _get_agent_runtime(request: Request) -> AgentRuntime:
+    return request.app.state.agent_runtime  # type: ignore[no-any-return]
 
 
 def _get_agent_repo(request: Request) -> AgentSpecStore:
@@ -636,6 +655,9 @@ def build_sessions_router() -> APIRouter:
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         status: ThreadStatus | None = None,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        agent_name: Annotated[str | None, Query(max_length=256)] = None,
+        include_archived: Annotated[bool, Query()] = False,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
@@ -655,7 +677,13 @@ def build_sessions_router() -> APIRouter:
                 # across every tenant — per-user filter is intentionally
                 # dropped (system_admin sees the whole picture).
                 items = await threads.list_all_tenants(
-                    status=status, nonempty=True, limit=limit, offset=offset
+                    status=status,
+                    agent_name=agent_name,
+                    nonempty=True,
+                    q=q,
+                    include_archived=include_archived,
+                    limit=limit,
+                    offset=offset,
                 )
             else:
                 # Stream J.14 — a plain user lists only their own threads;
@@ -668,7 +696,10 @@ def build_sessions_router() -> APIRouter:
                     scope.tenant_id,
                     status=status,
                     user_id=user_filter,
+                    agent_name=agent_name,
                     nonempty=True,
+                    q=q,
+                    include_archived=include_archived,
                     limit=limit,
                     offset=offset,
                 )
@@ -694,6 +725,140 @@ def build_sessions_router() -> APIRouter:
                 },
             }
         )
+
+    async def _load_owned_session(
+        thread_id: UUID,
+        request: Request,
+        threads: ThreadMetaStore,
+        users: TenantUserStore,
+    ) -> ThreadMeta:
+        """Fetch the thread + enforce the tenant/ownership gate, or raise 404.
+
+        Shared by rename / archive / purge. A plain user may only reach their
+        own thread; an admin reaches the whole tenant. 404 (never 403) hides
+        cross-user / cross-tenant existence.
+        """
+        tenant_id: UUID = request.state.tenant_id
+        meta = await threads.get(thread_id, tenant_id=tenant_id)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        caller_user_id = await resolve_caller_user_id(request, users)
+        if not caller_owns_thread(
+            meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
+        ):
+            raise HTTPException(status_code=404, detail="session not found")
+        return meta
+
+    @router.patch("/{thread_id}")
+    async def rename_session(
+        thread_id: UUID,
+        payload: RenamePayload,
+        request: Request,
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Rename a session — sets ``title`` (overrides the auto-title)."""
+        await _load_owned_session(thread_id, request, threads, users)
+        tenant_id: UUID = request.state.tenant_id
+        title = payload.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="title must not be empty")
+        updated = await threads.update_title(thread_id, title, tenant_id=tenant_id)
+        if not updated:
+            raise HTTPException(status_code=404, detail="session not found")
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=request.state.actor_id,
+            action=AuditAction.SESSION_WRITE,
+            resource_type="session",
+            resource_id=str(thread_id),
+            trace_id=current_trace_id_hex(),
+            details={"op": "rename"},
+        )
+        fresh = await threads.get(thread_id, tenant_id=tenant_id)
+        if fresh is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        return JSONResponse({"success": True, "data": fresh.model_dump(mode="json")})
+
+    @router.delete("/{thread_id}")
+    async def archive_session(
+        thread_id: UUID,
+        request: Request,
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Soft-delete — archive the session (hidden from the default list,
+        reversible). The checkpoint / runs / workspace are untouched; use
+        ``:purge`` for an irreversible hard delete."""
+        await _load_owned_session(thread_id, request, threads, users)
+        tenant_id: UUID = request.state.tenant_id
+        updated = await threads.update_status(thread_id, ThreadStatus.ARCHIVED, tenant_id=tenant_id)
+        if not updated:
+            raise HTTPException(status_code=404, detail="session not found")
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=request.state.actor_id,
+            action=AuditAction.SESSION_WRITE,
+            resource_type="session",
+            resource_id=str(thread_id),
+            trace_id=current_trace_id_hex(),
+            details={"op": "archive"},
+        )
+        return JSONResponse({"success": True, "data": {"archived": str(thread_id)}})
+
+    @router.post("/{thread_id}:purge")
+    async def purge_session(
+        thread_id: UUID,
+        request: Request,
+        threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        runtime: Annotated[AgentRuntime, Depends(_get_agent_runtime)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Hard-delete — irreversibly purge the whole conversation.
+
+        Removes ONLY thread-scoped data (checkpoint messages, run rows, the
+        thread_meta row). The user's persistent workspace + artifacts are
+        keyed by ``user_id`` and SHARED across that user's other threads, so
+        they are intentionally left untouched. Best-effort: a failed step is
+        logged, not fatal, and the thread_meta row is deleted LAST so a partial
+        failure never orphans the metadata.
+        """
+        await _load_owned_session(thread_id, request, threads, users)
+        tenant_id: UUID = request.state.tenant_id
+        deleted: dict[str, object] = {"checkpoint": False, "runs": 0}
+
+        checkpointer = runtime.durable_checkpointer
+        adelete = getattr(checkpointer, "adelete_thread", None)
+        if adelete is not None:
+            try:
+                await adelete(str(thread_id))
+                deleted["checkpoint"] = True
+            except Exception:
+                logger.warning("session_purge.checkpoint_failed", exc_info=True)
+        try:
+            deleted["runs"] = await runtime.run_manager.delete_by_thread(
+                thread_id, tenant_id=tenant_id
+            )
+        except Exception:
+            logger.warning("session_purge.runs_failed", exc_info=True)
+
+        removed = await threads.delete(thread_id, tenant_id=tenant_id)
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=request.state.actor_id,
+            action=AuditAction.SESSION_WRITE,
+            resource_type="session",
+            resource_id=str(thread_id),
+            trace_id=current_trace_id_hex(),
+            details={"op": "purge", "meta_removed": removed, **deleted},
+        )
+        return JSONResponse({"success": True, "data": {"purged": str(thread_id), **deleted}})
 
     async def _transition(
         *,

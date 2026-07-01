@@ -46,6 +46,7 @@ const sampleThread: ThreadMeta = {
   agent_version: "1.0.0",
   user_id: null,
   status: "active",
+  title: null,
   created_by: "u",
   created_at: "2026-05-25T00:00:00Z",
   updated_at: "2026-05-25T00:00:00Z",
@@ -404,12 +405,11 @@ describe("PlaygroundTab", () => {
     // Lazy creation — mount does not POST a session.
     expect(createSessionMock).not.toHaveBeenCalled();
 
-    // Open the resume picker and select the past thread.
-    const resume = within(
-      screen.getByTestId("playground-resume-select"),
-    ).getByRole("combobox");
-    await user.click(resume);
-    await user.click(await screen.findByText(/44444444/));
+    // Open the session-history drawer and pick the past thread.
+    await user.click(screen.getByTestId("playground-history-open"));
+    await user.click(
+      await screen.findByTestId(`session-history-item-${pastThread.thread_id}`),
+    );
 
     // Run-as field auto-filled with the resumed thread's owner.
     const runAs = within(screen.getByTestId("playground-user")).getByRole(
@@ -786,11 +786,10 @@ describe("PlaygroundTab", () => {
     renderPg();
     await screen.findByTestId("playground-input");
 
-    const select = within(
-      await screen.findByTestId("playground-resume-select"),
-    ).getByRole("combobox");
-    await user.click(select);
-    await user.click(await screen.findByText(/99999999/));
+    await user.click(screen.getByTestId("playground-history-open"));
+    await user.click(
+      await screen.findByTestId(`session-history-item-${past.thread_id}`),
+    );
     expect(
       await screen.findByTestId("playground-resumed-notice"),
     ).toBeInTheDocument();

@@ -66,6 +66,8 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -75,12 +77,17 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         rows = [r for r in self._rows.values() if r.tenant_id == tenant_id]
         if status is not None:
             rows = [r for r in rows if r.status == status]
+        elif not include_archived:
+            rows = [r for r in rows if r.status != ThreadStatus.ARCHIVED]
         if user_id is not None:
             rows = [r for r in rows if r.user_id == user_id]
         if agent_name is not None:
             rows = [r for r in rows if r.agent_name == agent_name]
         if agent_version is not None:
             rows = [r for r in rows if r.agent_version == agent_version]
+        if q:
+            needle = q.lower()
+            rows = [r for r in rows if r.title is not None and needle in r.title.lower()]
         rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return rows[offset : offset + limit]
 
@@ -91,6 +98,8 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -98,10 +107,15 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         rows = list(self._rows.values())
         if status is not None:
             rows = [r for r in rows if r.status == status]
+        elif not include_archived:
+            rows = [r for r in rows if r.status != ThreadStatus.ARCHIVED]
         if agent_name is not None:
             rows = [r for r in rows if r.agent_name == agent_name]
         if agent_version is not None:
             rows = [r for r in rows if r.agent_version == agent_version]
+        if q:
+            needle = q.lower()
+            rows = [r for r in rows if r.title is not None and needle in r.title.lower()]
         rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return rows[offset : offset + limit]
 
@@ -117,6 +131,21 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
             return False
         self._rows[thread_id] = row.model_copy(
             update={"status": status, "updated_at": datetime.now(UTC)}
+        )
+        return True
+
+    async def update_title(
+        self,
+        thread_id: UUID,
+        title: str,
+        *,
+        tenant_id: UUID,
+    ) -> bool:
+        row = self._rows.get(thread_id)
+        if row is None or row.tenant_id != tenant_id:
+            return False
+        self._rows[thread_id] = row.model_copy(
+            update={"title": title, "updated_at": datetime.now(UTC)}
         )
         return True
 

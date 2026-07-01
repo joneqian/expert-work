@@ -17,6 +17,9 @@ class ThreadStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    #: Soft-deleted from the session-history list (reversible). Hidden from
+    #: the default listing; the checkpoint/runs/artifacts are untouched.
+    ARCHIVED = "archived"
 
 
 class ThreadMeta(BaseModel):
@@ -36,6 +39,11 @@ class ThreadMeta(BaseModel):
     )
     created_by: str = Field(description="actor_id of session creator (user / sa)")
     status: ThreadStatus = ThreadStatus.ACTIVE
+    title: str | None = Field(
+        default=None,
+        description="human label — auto-set from the first user message, "
+        "manually overridable (session-history list)",
+    )
     agent_name: str | None = Field(default=None, description="manifest name")
     agent_version: str | None = Field(default=None, description="manifest version (semver)")
     created_at: datetime | None = None

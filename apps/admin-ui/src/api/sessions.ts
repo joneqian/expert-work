@@ -26,6 +26,9 @@ export interface ThreadMeta {
   agent_version: string | null;
   user_id: string | null;
   status: string;
+  /** Human label for the session-history list — auto-set from the first user
+   *  message, manually overridable. Null for threads that never ran. */
+  title: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -164,14 +167,23 @@ export async function downloadSessionArtifact(
 }
 
 /** Delete one file from the thread user's workspace volume (hard delete). */
-export async function deleteSessionWorkspaceFile(threadId: string, path: string): Promise<void> {
-  await apiClient.delete(`/v1/sessions/${encodeURIComponent(threadId)}/workspace/file`, {
-    params: { path },
-  });
+export async function deleteSessionWorkspaceFile(
+  threadId: string,
+  path: string,
+): Promise<void> {
+  await apiClient.delete(
+    `/v1/sessions/${encodeURIComponent(threadId)}/workspace/file`,
+    {
+      params: { path },
+    },
+  );
 }
 
 /** Soft-delete one registered artifact (metadata only; the file remains). */
-export async function deleteSessionArtifact(threadId: string, name: string): Promise<void> {
+export async function deleteSessionArtifact(
+  threadId: string,
+  name: string,
+): Promise<void> {
   await apiClient.delete(
     `/v1/sessions/${encodeURIComponent(threadId)}/workspace/artifacts/${encodeURIComponent(name)}`,
   );
@@ -188,22 +200,62 @@ export interface HistoryMessage {
 export async function getSessionMessages(
   threadId: string,
 ): Promise<HistoryMessage[]> {
-  const response = await apiClient.get<ApiEnvelope<{ messages: HistoryMessage[] }>>(
-    `/v1/sessions/${threadId}/messages`,
-  );
+  const response = await apiClient.get<
+    ApiEnvelope<{ messages: HistoryMessage[] }>
+  >(`/v1/sessions/${threadId}/messages`);
   return unwrap(response.data).messages;
 }
 
 /** Playground-Uplift #6 — list the caller's threads (user-scoped server-side),
- *  newest first; the playground filters to the current agent for resume. */
+ *  newest first; the playground filters to the current agent for resume.
+ *  ``q`` searches the title; ``offset`` paginates; ``includeArchived`` also
+ *  returns soft-deleted (archived) threads. */
 export async function listSessions(
-  params: { limit?: number } = {},
+  params: {
+    limit?: number;
+    offset?: number;
+    q?: string;
+    agentName?: string;
+    includeArchived?: boolean;
+  } = {},
 ): Promise<ThreadMeta[]> {
+  const query: Record<string, string | number | boolean> = {
+    limit: params.limit ?? 100,
+  };
+  if (params.offset) query.offset = params.offset;
+  if (params.q) query.q = params.q;
+  if (params.agentName) query.agent_name = params.agentName;
+  if (params.includeArchived) query.include_archived = true;
   const response = await apiClient.get<ApiEnvelope<{ items: ThreadMeta[] }>>(
     "/v1/sessions",
-    { params: { limit: params.limit ?? 100 } },
+    { params: query },
   );
   return unwrap(response.data).items;
+}
+
+/** Rename a session — sets its title (overrides the auto-title). */
+export async function renameSession(
+  threadId: string,
+  title: string,
+): Promise<ThreadMeta> {
+  const response = await apiClient.patch<ApiEnvelope<ThreadMeta>>(
+    `/v1/sessions/${encodeURIComponent(threadId)}`,
+    { title },
+  );
+  return unwrap(response.data);
+}
+
+/** Soft-delete a session — archive it (hidden from the default list,
+ *  reversible; checkpoint/runs/workspace untouched). */
+export async function archiveSession(threadId: string): Promise<void> {
+  await apiClient.delete(`/v1/sessions/${encodeURIComponent(threadId)}`);
+}
+
+/** Hard-delete a session — irreversibly purge the whole conversation
+ *  (checkpoint messages + run rows + the thread). The user's shared
+ *  workspace/artifacts are intentionally left intact. */
+export async function purgeSession(threadId: string): Promise<void> {
+  await apiClient.post(`/v1/sessions/${encodeURIComponent(threadId)}:purge`);
 }
 
 export interface RunRequest {

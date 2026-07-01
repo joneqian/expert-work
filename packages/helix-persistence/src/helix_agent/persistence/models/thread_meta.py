@@ -27,6 +27,9 @@ class ThreadMetaRow(Base):
         nullable=False,
         server_default="active",
     )
+    # Human label for the session-history list — auto-set from the first user
+    # message, manually overridable. Nullable: pre-existing threads have none.
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
