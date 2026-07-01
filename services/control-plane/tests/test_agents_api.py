@@ -333,3 +333,91 @@ async def test_rollback_unknown_revision_404(b5_client: AsyncClient) -> None:
     await b5_client.post("/v1/agents", json={"manifest_yaml": _VALID_YAML})
     response = await b5_client.post("/v1/agents/code-reviewer/1.0.0/revisions/7/rollback")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# runtime build-cache invalidation on write — an in-place config edit (approval
+# gate, tools, model, prompt) must take effect on the next run WITHOUT a
+# control-plane restart. ``AgentRuntime`` caches built agents by
+# ``(tenant, name, version)`` and only consults the spec on a miss, so a
+# same-version spec change is invisible unless the write path invalidates it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def b5_app_client(
+    audit_store: InMemoryAuditLogStore,
+) -> AsyncIterator[tuple[object, AsyncClient]]:
+    """Like ``b5_client`` but also hands back the ``app`` so a test can inspect
+    ``app.state.agent_runtime`` — the write paths must evict its build cache."""
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(audit_store),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    transport = ASGITransport(app=app)
+    headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=_DEFAULT_TENANT)}"}
+    async with AsyncClient(
+        transport=transport, base_url="http://control-plane.test", headers=headers
+    ) as client:
+        yield app, client
+
+
+def _seed_build_cache(app: object) -> tuple[object, str, str]:
+    """Stand a sentinel build in the runtime cache for code-reviewer@1.0.0 so a
+    following write can be shown to evict it. Returns the cache key."""
+    runtime = app.state.agent_runtime  # type: ignore[attr-defined]
+    key = (_DEFAULT_TENANT, "code-reviewer", "1.0.0")
+    runtime._cache[key] = object()  # stand-in for a BuiltAgent
+    return key
+
+
+@pytest.mark.asyncio
+async def test_put_invalidates_runtime_build_cache(
+    b5_app_client: tuple[object, AsyncClient],
+) -> None:
+    app, client = b5_app_client
+    await client.post("/v1/agents", json={"manifest_yaml": _VALID_YAML})
+    key = _seed_build_cache(app)
+
+    updated = _VALID_YAML.replace("you are a reviewer", "you are a strict reviewer")
+    resp = await client.put("/v1/agents/code-reviewer/1.0.0", json={"manifest_yaml": updated})
+    assert resp.status_code == 200
+    # Stale build evicted → the next run rebuilds from the edited spec.
+    assert key not in app.state.agent_runtime._cache  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_rollback_invalidates_runtime_build_cache(
+    b5_app_client: tuple[object, AsyncClient],
+) -> None:
+    app, client = b5_app_client
+    await client.post("/v1/agents", json={"manifest_yaml": _VALID_YAML})
+    await client.put("/v1/agents/code-reviewer/1.0.0", json={"manifest_yaml": _UPDATED_YAML})
+    key = _seed_build_cache(app)
+
+    resp = await client.post("/v1/agents/code-reviewer/1.0.0/revisions/1/rollback")
+    assert resp.status_code == 200
+    assert key not in app.state.agent_runtime._cache  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_delete_invalidates_runtime_build_cache(
+    b5_app_client: tuple[object, AsyncClient],
+) -> None:
+    app, client = b5_app_client
+    await client.post("/v1/agents", json={"manifest_yaml": _VALID_YAML})
+    key = _seed_build_cache(app)
+
+    resp = await client.delete("/v1/agents/code-reviewer/1.0.0")
+    assert resp.status_code == 204
+    # A re-register at the same (name, version) must not reuse the deleted build.
+    assert key not in app.state.agent_runtime._cache  # type: ignore[attr-defined]

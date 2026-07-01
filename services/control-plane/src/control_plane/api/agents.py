@@ -235,6 +235,21 @@ def _get_runtime(request: Request) -> AgentRuntime:
     return request.app.state.agent_runtime  # type: ignore[no-any-return]
 
 
+def _invalidate_agent_build_cache(request: Request, tenant_id: UUID) -> None:
+    """Evict the tenant's built-agent cache after a manifest write.
+
+    :class:`AgentRuntime` keys built agents on ``(tenant, name, version)`` and
+    only consults the spec on a miss, so an in-place edit (same version — an
+    approval-gate / tool / model / prompt change from the form editor) is
+    invisible to new runs until the stale build is dropped. Every manifest
+    write path (PUT / rollback / delete) funnels through here. ``getattr``
+    guards the handful of test setups that build routers without a runtime.
+    """
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime is not None:
+        runtime.invalidate_tenant(tenant_id)
+
+
 def _get_approvals(request: Request) -> ApprovalStore:
     return request.app.state.approval_store  # type: ignore[no-any-return]
 
@@ -964,6 +979,8 @@ def build_agents_router() -> APIRouter:
         )
         if result is None:
             raise HTTPException(status_code=404, detail="agent not found")
+        # The edited spec must reach new runs without a restart.
+        _invalidate_agent_build_cache(request, tenant_id)
         await emit(
             audit,
             tenant_id=tenant_id,
@@ -1071,6 +1088,8 @@ def build_agents_router() -> APIRouter:
         )
         if result is None:
             raise HTTPException(status_code=404, detail="agent not found")
+        # Rolled-back content must reach new runs without a restart.
+        _invalidate_agent_build_cache(request, tenant_id)
         await emit(
             audit,
             tenant_id=tenant_id,
@@ -1121,6 +1140,8 @@ def build_agents_router() -> APIRouter:
         )
         if record is None:
             raise HTTPException(status_code=404, detail="agent not found")
+        # Drop the deleted build so a re-register at the same version rebuilds.
+        _invalidate_agent_build_cache(request, tenant_id)
         await emit(
             audit,
             tenant_id=tenant_id,
