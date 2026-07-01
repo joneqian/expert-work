@@ -130,7 +130,9 @@ test("browse, rename, archive, purge, resume + axe", async ({ page }) => {
       r.url().includes("/v1/sessions") && r.url().includes("status=archived"),
   );
   await page.getByTestId("session-history-status-filter").click();
-  await page.getByRole("option", { name: /archived|已归档/i }).click();
+  await page
+    .locator(".ant-select-item-option-content", { hasText: /archived|已归档/i })
+    .click();
   await statusReq;
 
   // Rename → PATCH with the new title.
