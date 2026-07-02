@@ -201,6 +201,7 @@ from control_plane.tenant_mcp_pool import TenantMcpPoolService
 from control_plane.tenant_scope import bypass_rls_session
 from control_plane.tenant_secret_overlay import TenantOverlayCredentialsResolver
 from control_plane.tenant_status import TenantStatusService
+from control_plane.transcript_mirror_sweep import TranscriptMirrorSweep
 from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolService
 from control_plane.webhook_delivery_worker import WebhookDeliveryWorker
 from control_plane.workspace_lock import PgWorkspaceLock
@@ -374,6 +375,11 @@ from helix_agent.persistence.tenant_user import (
     SqlTenantUserStore,
     TenantUserStore,
 )
+from helix_agent.persistence.thread_message import (
+    InMemoryThreadMessageStore,
+    SqlThreadMessageStore,
+    ThreadMessageStore,
+)
 from helix_agent.persistence.thread_meta import (
     InMemoryThreadMetaStore,
     SqlThreadMetaStore,
@@ -528,6 +534,10 @@ def create_app(
     )
     resolved_threads = thread_meta_repo or (
         sql_stores.thread_meta if sql_stores else InMemoryThreadMetaStore()
+    )
+    # Conversation IA M4 — the transcript mirror behind content search.
+    resolved_thread_messages = (
+        sql_stores.thread_message if sql_stores else InMemoryThreadMessageStore()
     )
     resolved_tenant_users = tenant_user_repo or (
         sql_stores.tenant_user if sql_stores else InMemoryTenantUserStore()
@@ -880,6 +890,20 @@ def create_app(
             batch_size=resolved_settings.approval_timeout_sweep_batch_size,
         )
         if resolved_settings.enable_approval_timeout_sweep
+        else None
+    )
+    # Conversation IA M4 — transcript mirror sweep. Copies user/assistant
+    # turns off the LangGraph checkpoint into ``thread_message`` so the
+    # browser's content search runs as an indexed, RLS-scoped query.
+    # Idempotent ON CONFLICT writes → safe on every instance.
+    transcript_mirror_sweep: TranscriptMirrorSweep | None = (
+        TranscriptMirrorSweep(
+            message_store=resolved_thread_messages,
+            runtime=resolved_agent_runtime,
+            interval_s=resolved_settings.transcript_mirror_sweep_interval_s,
+            batch_size=resolved_settings.transcript_mirror_sweep_batch_size,
+        )
+        if resolved_settings.enable_transcript_mirror_sweep
         else None
     )
     # Capability Uplift Sprint #4 (Mini-ADRs U-26 / U-27) — Curator
@@ -1367,6 +1391,9 @@ def create_app(
             if approval_timeout_sweep is not None:
                 approval_timeout_sweep.start()
                 _app.state.approval_timeout_sweep = approval_timeout_sweep
+            if transcript_mirror_sweep is not None:
+                transcript_mirror_sweep.start()
+                _app.state.transcript_mirror_sweep = transcript_mirror_sweep
             if skill_curator is not None:
                 skill_curator.start()
                 _app.state.skill_curator = skill_curator
@@ -1584,6 +1611,8 @@ def create_app(
                     await run_queue_worker.stop()
                 if approval_timeout_sweep is not None:
                     await approval_timeout_sweep.stop()
+                if transcript_mirror_sweep is not None:
+                    await transcript_mirror_sweep.stop()
                 if skill_curator is not None:
                     await skill_curator.stop()
                 if curation_worker is not None:
@@ -1638,6 +1667,7 @@ def create_app(
     app.state.tenant_rate_limiter = resolved_tenant_limiter
     app.state.agent_spec_repo = resolved_repo
     app.state.thread_meta_repo = resolved_threads
+    app.state.thread_message_store = resolved_thread_messages
     app.state.tenant_user_repo = resolved_tenant_users
     app.state.feedback_store = resolved_feedback
     app.state.token_usage_store = resolved_token_usage
@@ -1880,6 +1910,7 @@ class _SqlStores:
     session_factory: async_sessionmaker[AsyncSession]
     agent_spec: AgentSpecStore
     thread_meta: ThreadMetaStore
+    thread_message: ThreadMessageStore  # Conversation IA M4 — content-search mirror
     tenant_user: TenantUserStore
     memory: MemoryStore
     memory_dlq: MemoryWritebackDLQ  # Stream K.K7
@@ -2095,6 +2126,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         session_factory=session_factory,
         agent_spec=SqlAgentSpecStore(session_factory),
         thread_meta=SqlThreadMetaStore(session_factory),
+        thread_message=SqlThreadMessageStore(session_factory),
         tenant_user=SqlTenantUserStore(session_factory),
         memory=SqlMemoryStore(session_factory),
         memory_dlq=SqlMemoryWritebackDLQ(session_factory),

@@ -81,6 +81,7 @@ class ThreadMetaStore(abc.ABC):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
         order_by: ThreadOrder = "created_at",
@@ -100,7 +101,12 @@ class ThreadMetaStore(abc.ABC):
         backend with no run store treats it as a no-op.)
 
         ``q`` is a case-insensitive substring match on ``title`` (the
-        session-history search box). ``include_archived`` controls the
+        session-history search box); ``q_thread_ids`` widens a ``q`` hit
+        to "title matches OR thread_id in this set" — the conversation
+        browser resolves message-content matches to ids first (IA M4),
+        so one search box spans title and content. Ignored without ``q``.
+
+        ``include_archived`` controls the
         soft-deleted ``ARCHIVED`` threads: when ``False`` (default) they are
         excluded — UNLESS ``status`` explicitly asks for ``ARCHIVED``, which
         always wins (an explicit status is an exact filter).
@@ -128,6 +134,7 @@ class ThreadMetaStore(abc.ABC):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
         order_by: ThreadOrder = "created_at",
@@ -156,6 +163,7 @@ class ThreadMetaStore(abc.ABC):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
     ) -> int:
@@ -176,6 +184,7 @@ class ThreadMetaStore(abc.ABC):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
     ) -> int:

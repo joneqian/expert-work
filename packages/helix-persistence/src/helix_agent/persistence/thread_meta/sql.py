@@ -18,10 +18,11 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, delete, exists, func, select, update
+from sqlalchemy import ColumnElement, delete, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from helix_agent.persistence.like_escape import like_contains
 from helix_agent.persistence.models import ThreadMetaRow
 from helix_agent.persistence.models.agent_run import AgentRunRow
 from helix_agent.persistence.thread_meta.base import ThreadMetaStore, ThreadOrder
@@ -43,13 +44,6 @@ def _row_to_meta(row: ThreadMetaRow) -> ThreadMeta:
     )
 
 
-def _title_ilike(q: str) -> str:
-    """Escape LIKE wildcards so a search term matches literally (used with
-    ``ilike(..., escape="\\")``)."""
-    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
 def _filter_clauses(
     *,
     tenant_id: UUID | None,
@@ -59,6 +53,7 @@ def _filter_clauses(
     agent_version: str | None,
     nonempty: bool,
     q: str | None,
+    q_thread_ids: Collection[UUID] | None,
     include_archived: bool,
     thread_ids: Collection[UUID] | None,
 ) -> list[ColumnElement[bool]]:
@@ -83,7 +78,14 @@ def _filter_clauses(
     if nonempty:
         clauses.append(exists().where(AgentRunRow.thread_id == ThreadMetaRow.thread_id))
     if q:
-        clauses.append(ThreadMetaRow.title.ilike(_title_ilike(q), escape="\\"))
+        title_hit = ThreadMetaRow.title.ilike(like_contains(q), escape="\\")
+        # Content search (IA M4): the API resolves message-content matches
+        # to a thread-id set first; a q hit is "title matches OR content
+        # matched" so one search box spans both.
+        if q_thread_ids:
+            clauses.append(or_(title_hit, ThreadMetaRow.thread_id.in_(list(q_thread_ids))))
+        else:
+            clauses.append(title_hit)
     return clauses
 
 
@@ -142,6 +144,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
         order_by: ThreadOrder = "created_at",
@@ -158,6 +161,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
             agent_version=agent_version,
             nonempty=nonempty,
             q=q,
+            q_thread_ids=q_thread_ids,
             include_archived=include_archived,
             thread_ids=thread_ids,
             order_by=order_by,
@@ -174,6 +178,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
         order_by: ThreadOrder = "created_at",
@@ -191,6 +196,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
             agent_version=agent_version,
             nonempty=nonempty,
             q=q,
+            q_thread_ids=q_thread_ids,
             include_archived=include_archived,
             thread_ids=thread_ids,
             order_by=order_by,
@@ -208,6 +214,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_version: str | None,
         nonempty: bool,
         q: str | None,
+        q_thread_ids: Collection[UUID] | None,
         include_archived: bool,
         thread_ids: Collection[UUID] | None,
         order_by: ThreadOrder,
@@ -223,6 +230,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
                 agent_version=agent_version,
                 nonempty=nonempty,
                 q=q,
+                q_thread_ids=q_thread_ids,
                 include_archived=include_archived,
                 thread_ids=thread_ids,
             )
@@ -258,6 +266,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
     ) -> int:
@@ -271,6 +280,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
             agent_version=agent_version,
             nonempty=nonempty,
             q=q,
+            q_thread_ids=q_thread_ids,
             include_archived=include_archived,
             thread_ids=thread_ids,
         )
@@ -284,6 +294,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
     ) -> int:
@@ -298,6 +309,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
             agent_version=agent_version,
             nonempty=nonempty,
             q=q,
+            q_thread_ids=q_thread_ids,
             include_archived=include_archived,
             thread_ids=thread_ids,
         )
@@ -312,6 +324,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
         agent_version: str | None,
         nonempty: bool,
         q: str | None,
+        q_thread_ids: Collection[UUID] | None,
         include_archived: bool,
         thread_ids: Collection[UUID] | None,
     ) -> int:
@@ -327,6 +340,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
                     agent_version=agent_version,
                     nonempty=nonempty,
                     q=q,
+                    q_thread_ids=q_thread_ids,
                     include_archived=include_archived,
                     thread_ids=thread_ids,
                 )

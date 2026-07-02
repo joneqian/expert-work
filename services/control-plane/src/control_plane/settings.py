@@ -452,6 +452,15 @@ class Settings(BaseSettings):
     #: Max expired approvals auto-rejected per cycle.
     approval_timeout_sweep_batch_size: int = Field(default=100, gt=0)
 
+    #: Conversation IA M4 — master switch for the transcript mirror sweep
+    #: (mirrors checkpoint turns into ``thread_message`` for content search).
+    #: Idempotent ON CONFLICT writes → safe on every instance.
+    enable_transcript_mirror_sweep: bool = Field(default=True)
+    #: Sweep cadence — content search sees a new message within a minute.
+    transcript_mirror_sweep_interval_s: float = Field(default=60.0, gt=0)
+    #: Max threads mirrored per cycle (also paces the initial backfill).
+    transcript_mirror_sweep_batch_size: int = Field(default=200, gt=0)
+
     #: Stream J.10 (Mini-ADR J-26 (2)) — max cron triggers a tenant may
     #: register. Caps the scheduler's per-sweep work + a runaway client.
     max_cron_triggers_per_tenant: int = Field(default=100, gt=0)

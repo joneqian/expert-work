@@ -74,6 +74,10 @@ from helix_agent.persistence.models.tenant_skill_subscription import (
     TenantSkillSubscriptionRow,
 )
 from helix_agent.persistence.models.tenant_user import TenantUserRow
+from helix_agent.persistence.models.thread_message import (
+    ThreadMessageRow,
+    ThreadMessageSyncRow,
+)
 from helix_agent.persistence.models.thread_meta import ThreadMetaRow
 from helix_agent.persistence.models.token_budget_ledger import TokenBudgetLedgerRow
 from helix_agent.persistence.models.token_reservation import TokenReservationRow
@@ -140,6 +144,8 @@ __all__ = [
     "TenantSkillSubscriptionRow",
     "TenantToolSecretRow",
     "TenantUserRow",
+    "ThreadMessageRow",
+    "ThreadMessageSyncRow",
     "ThreadMetaRow",
     "TokenBudgetLedgerRow",
     "TokenReservationRow",

@@ -39,6 +39,7 @@ from control_plane.tenant_scope import (
     ensure_tenant_scope,
 )
 from helix_agent.common.observability import current_trace_id_hex
+from helix_agent.persistence.thread_message import ThreadMessageStore
 from helix_agent.persistence.thread_meta import ThreadMetaStore
 from helix_agent.persistence.token_usage_store import TokenTotals, TokenUsageStore
 from helix_agent.protocol import AuditAction, AuditResult, ThreadStatus
@@ -58,6 +59,10 @@ def _get_run_store(request: Request) -> RunStore:
 
 def _get_token_usage_store(request: Request) -> TokenUsageStore:
     return request.app.state.token_usage_store  # type: ignore[no-any-return]
+
+
+def _get_thread_message_store(request: Request) -> ThreadMessageStore:
+    return request.app.state.thread_message_store  # type: ignore[no-any-return]
 
 
 def _get_audit(request: Request) -> AuditLogger:
@@ -147,6 +152,7 @@ def build_conversations_router() -> APIRouter:
         threads: Annotated[ThreadMetaStore, Depends(_get_thread_repo)],
         runs: Annotated[RunStore, Depends(_get_run_store)],
         token_usage: Annotated[TokenUsageStore, Depends(_get_token_usage_store)],
+        messages: Annotated[ThreadMessageStore, Depends(_get_thread_message_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         agent_name: Annotated[str | None, Query(min_length=1)] = None,
         agent_version: Annotated[str | None, Query(min_length=1)] = None,
@@ -211,6 +217,16 @@ def build_conversations_router() -> APIRouter:
                 ]
                 set_capped = any(len(s) >= 500 for s in id_sets)
                 narrowed_ids = set.intersection(*id_sets)
+
+            # Content search (IA M4): resolve message-content matches from
+            # the transcript mirror; the metadata query then treats a ``q``
+            # hit as "title matches OR content matched" (q_thread_ids), so
+            # one search box spans both.
+            content_hits: set[UUID] | None = None
+            if q:
+                msg_scope = None if isinstance(scope, CrossTenant) else scope.tenant_id
+                content_hits = await messages.search_thread_ids(tenant_id=msg_scope, q=q)
+                set_capped = set_capped or len(content_hits) >= 500
             if isinstance(scope, CrossTenant):
                 metas = await threads.list_all_tenants(
                     agent_name=agent_name,
@@ -219,6 +235,7 @@ def build_conversations_router() -> APIRouter:
                     status=status,
                     nonempty=True,
                     q=q,
+                    q_thread_ids=content_hits,
                     thread_ids=narrowed_ids,
                     order_by="last_activity",
                     limit=clamped,
@@ -231,6 +248,7 @@ def build_conversations_router() -> APIRouter:
                     status=status,
                     nonempty=True,
                     q=q,
+                    q_thread_ids=content_hits,
                     thread_ids=narrowed_ids,
                 )
                 agg_tenant: UUID | None = None
@@ -243,6 +261,7 @@ def build_conversations_router() -> APIRouter:
                     status=status,
                     nonempty=True,
                     q=q,
+                    q_thread_ids=content_hits,
                     thread_ids=narrowed_ids,
                     order_by="last_activity",
                     limit=clamped,
@@ -256,6 +275,7 @@ def build_conversations_router() -> APIRouter:
                     status=status,
                     nonempty=True,
                     q=q,
+                    q_thread_ids=content_hits,
                     thread_ids=narrowed_ids,
                 )
                 agg_tenant = scope.tenant_id
@@ -283,6 +303,7 @@ def build_conversations_router() -> APIRouter:
             details={
                 "view": "conversations",
                 "agent_name": agent_name,
+                "q_content_search": bool(q),
                 "cross_tenant": isinstance(scope, CrossTenant),
                 "count": len(items),
                 "limit": clamped,
