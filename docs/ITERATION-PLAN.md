@@ -1631,8 +1631,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **M1.5 统一消息 transcript**（#883）：盘点修正「无读 API」假设已过期——Playground 的 `GET /v1/sessions/{id}/messages`（checkpoint 最新 tuple + admin 放行）现成 → M1.5 纯前端：对话详情「消息记录」面（user/assistant 轮，失败只隐藏面板；tool/system 轮 by design 留 per-run 事件流）
 - [x] **M2 后端**（#884）：`GET /v1/agents/{name}/{version}/users` per-user rollup（thread 窗口 + aggregate_by_threads fold，token 走 token_usage 三列零 trace join）+ `TokenUsageStore.totals_by_users` + `TenantUserStore.get_many` + memory/artifacts/usage `?user_id=` 治理过滤（非 admin 403）+ migration 0105 thread_meta (tenant, agent, user) 索引
 - [x] **M2 前端**（#885）：agent 详情「用户」tab（rollup 列表）+ 用户详情页四 tab（对话/记忆/产物/用量，每 tab 独立降级）——三层下钻 UI 全通
-- [x] **M3 顶层收口 + H.8-F1**（本 PR）：artifacts download/versions/delete/patch 四端点补 `?user_id=` admin 治理目标（统一 `resolve_target_user_id` 闸；supervisor 读天然按 user 参数化零改动）→ 用户详情产物 tab 升级全动作面 → 顶层 `/artifacts` 删；agent 详情 MemoryTab 删（维度错位,记忆=per-user 跨 agent 资产）；`/memory` 治理页补 user 过滤
-- [x] **fast-follow：messages `tenant_id` + 单用户端点**（本 PR）：`GET /v1/sessions/{id}/messages` 补 `?tenant_id=`（system_admin 跨租户下钻 transcript，显式跨租户读记 SESSION_READ 审计；普通 admin 传外租户 403）+ `GET /v1/users/{user_id}`（用户详情 display_name 直开 URL 可取，self-or-admin 闸）+ `rbac.is_admin` 补 system_admin（对齐 is_allowed 的 tenant-ADMIN 语义，否则 per-user 闸拒掉 system_admin）
+- [x] **M3 顶层收口 + H.8-F1**（#886）：artifacts download/versions/delete/patch 四端点补 `?user_id=` admin 治理目标（统一 `resolve_target_user_id` 闸；supervisor 读天然按 user 参数化零改动）→ 用户详情产物 tab 升级全动作面 → 顶层 `/artifacts` 删；agent 详情 MemoryTab 删（维度错位,记忆=per-user 跨 agent 资产）；`/memory` 治理页补 user 过滤
+- [x] **fast-follow：messages `tenant_id` + 单用户端点**（#887）：`GET /v1/sessions/{id}/messages` 补 `?tenant_id=`（system_admin 跨租户下钻 transcript，显式跨租户读记 SESSION_READ 审计；普通 admin 传外租户 403）+ `GET /v1/users/{user_id}`（用户详情 display_name 直开 URL 可取，self-or-admin 闸）+ `rbac.is_admin` 补 system_admin（对齐 is_allowed 的 tenant-ADMIN 语义，否则 per-user 闸拒掉 system_admin）
+- [x] **对话浏览器运营过滤**（#888）：按智能体过滤（agents 列表喂下拉）+「仅看错误」（`RunStore` 失败线程集 → `thread_ids` 组合过滤，`has_error` ≠ `status=failed` 线程生命周期）
+- [x] **对话浏览器分页真实化 + 时间窗**（本 PR）：`total` 改真实计数（`ThreadMetaStore.count_*` 与 list 共享 WHERE 构建防漂移）+ 前端接 server 分页（offset 翻页 + 过滤变更重置页码 + stale 响应闸）；`since` 活动窗口过滤（`thread_ids_with_runs` 泛化自 error_thread_ids，`since × failed_only` 组合 =「今天坏了什么」；前端 1h/24h/7d 预设）；顺手修 N-4——`list_all_tenants` 补 `user_id` 下推，退场跨租户 Python post-filter
 - [ ] fast-follow：对话/run 成本（人民币）列（现定价是月度 rollup，无干净 per-run cost 函数）
 
 ### 显式不做（理由在册，需求出现随时重议）
