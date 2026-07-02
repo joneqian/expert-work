@@ -25,7 +25,7 @@ import {
 } from "antd";
 import type { TableColumnsType } from "antd";
 import { AlertTriangle, Globe2, MessagesSquare, RefreshCw, Search } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { listAgents } from "../api/agents";
@@ -73,61 +73,91 @@ export function ConversationsList() {
   const { t } = useTranslation();
   const { scope, apiTenantScope } = useTenantScope();
   const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState<ConversationList | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<ConversationStatus | undefined>(undefined);
-  // Cross-agent monitoring filters — narrow to one agent, to
-  // conversations carrying ≥1 failed run ("what broke today"), or to an
-  // activity window ("active in the last N hours").
-  const [agentFilter, setAgentFilter] = useState<string | undefined>(undefined);
-  const [errorsOnly, setErrorsOnly] = useState(false);
-  const [pendingOnly, setPendingOnly] = useState(false);
-  const [windowHours, setWindowHours] = useState<number | undefined>(undefined);
   const [agentOptions, setAgentOptions] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
-  const [q, setQ] = useState<string | undefined>(undefined);
-  const [page, setPage] = useState(1);
+  // Monitoring mode — silently re-poll the list every 30s while enabled.
+  const [autoRefresh, setAutoRefresh] = useState(false);
   // Monotonic request id — a late response from a superseded request
   // (filter/page changed mid-flight) must not overwrite the newer one.
   const requestSeq = useRef(0);
-  // ``?user_id=`` drives the "member's conversations" filter — URL-owned so
-  // a member page can deep-link into it and the filter survives refresh.
+
+  // Every filter is URL-owned, so the browser view is shareable, survives
+  // refresh, and the conversation-detail back link restores it verbatim
+  // (the detail page navigates back to ``location.state.from``).
   const [searchParams, setSearchParams] = useSearchParams();
+  const statusFilter = (searchParams.get("status") as ConversationStatus | null) ?? undefined;
+  const agentFilter = searchParams.get("agent") ?? undefined;
+  const errorsOnly = searchParams.get("errors") === "1";
+  const pendingOnly = searchParams.get("pending") === "1";
+  const windowHours = Number(searchParams.get("window")) || undefined;
+  const q = searchParams.get("q") ?? undefined;
+  const page = Math.max(1, Number(searchParams.get("page")) || 1);
   const userFilter = searchParams.get("user_id") ?? undefined;
 
-  const setUserFilter = useCallback(
-    (id: string) => {
+  // The search box itself is local; it debounces into ``?q=`` below.
+  const [search, setSearch] = useState(q ?? "");
+
+  const setParam = useCallback(
+    (key: string, value: string | undefined, opts?: { push?: boolean }) => {
       setSearchParams(
         (prev) => {
-          prev.set("user_id", id);
+          if (value === undefined) {
+            prev.delete(key);
+          } else {
+            prev.set(key, value);
+          }
+          // Any filter change restarts pagination — page N of the old
+          // filter set is meaningless under the new one.
+          if (key !== "page") {
+            prev.delete("page");
+          }
           return prev;
         },
-        { replace: false },
+        { replace: !opts?.push },
       );
     },
     [setSearchParams],
   );
-  const clearUserFilter = useCallback(() => {
-    setSearchParams(
-      (prev) => {
-        prev.delete("user_id");
-        return prev;
-      },
-      { replace: false },
-    );
-  }, [setSearchParams]);
+
+  // user_id keeps push semantics: it's a row-click drill-down, so browser
+  // back undoes the filter.
+  const setUserFilter = useCallback(
+    (id: string) => setParam("user_id", id, { push: true }),
+    [setParam],
+  );
+  const clearUserFilter = useCallback(
+    () => setParam("user_id", undefined, { push: true }),
+    [setParam],
+  );
 
   // Debounce the search box into the server ``q`` param (substring match on
   // the conversation title — server-side so it spans all pages).
   useEffect(() => {
-    const handle = setTimeout(() => setQ(search.trim() || undefined), 300);
+    const handle = setTimeout(() => {
+      const next = search.trim() || undefined;
+      if (next !== q) setParam("q", next);
+    }, 300);
     return () => clearTimeout(handle);
-  }, [search]);
+  }, [search, q, setParam]);
 
-  const refresh = useCallback(async () => {
+  // A tenant-scope switch invalidates the pager position (different data
+  // set); deep-linked ``?page=`` on first mount stays intact.
+  const scopeRef = useRef(apiTenantScope);
+  useEffect(() => {
+    if (scopeRef.current !== apiTenantScope) {
+      scopeRef.current = apiTenantScope;
+      setParam("page", undefined);
+    }
+  }, [apiTenantScope, setParam]);
+
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     const seq = ++requestSeq.current;
-    setLoading(true);
+    if (!opts?.silent) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const result = await listConversations({
@@ -174,11 +204,15 @@ export function ConversationsList() {
     void refresh();
   }, [refresh]);
 
-  // Any filter change restarts pagination — page N of the old filter set
-  // is meaningless under the new one.
+  // 30s silent poll while auto-refresh is on — the monitoring-wall mode.
+  // ``silent`` keeps the table from flashing its loading state each tick.
   useEffect(() => {
-    setPage(1);
-  }, [statusFilter, agentFilter, errorsOnly, pendingOnly, windowHours, q, userFilter, apiTenantScope]);
+    if (!autoRefresh) return;
+    const id = setInterval(() => {
+      void refresh({ silent: true });
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [autoRefresh, refresh]);
 
   // Agent-filter options — best-effort; a failure just leaves the
   // dropdown empty (the list itself is unaffected).
@@ -376,17 +410,24 @@ export function ConversationsList() {
             )}
             <Checkbox
               checked={errorsOnly}
-              onChange={(e) => setErrorsOnly(e.target.checked)}
+              onChange={(e) => setParam("errors", e.target.checked ? "1" : undefined)}
               data-testid="conversations-errors-only"
             >
               {t("conversations_page.filter_errors_only")}
             </Checkbox>
             <Checkbox
               checked={pendingOnly}
-              onChange={(e) => setPendingOnly(e.target.checked)}
+              onChange={(e) => setParam("pending", e.target.checked ? "1" : undefined)}
               data-testid="conversations-pending-only"
             >
               {t("conversations_page.filter_pending_only")}
+            </Checkbox>
+            <Checkbox
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              data-testid="conversations-auto-refresh"
+            >
+              {t("conversations_page.auto_refresh")}
             </Checkbox>
             <Input
               allowClear
@@ -402,7 +443,7 @@ export function ConversationsList() {
               allowClear
               showSearch
               value={agentFilter}
-              onChange={(v) => setAgentFilter(v || undefined)}
+              onChange={(v) => setParam("agent", v || undefined)}
               placeholder={t("conversations_page.filter_agent")}
               aria-label={t("conversations_page.filter_agent")}
               style={{ width: 190 }}
@@ -411,7 +452,7 @@ export function ConversationsList() {
             />
             <Select<ConversationStatus | "all">
               value={statusFilter ?? "all"}
-              onChange={(v) => setStatusFilter(v === "all" ? undefined : (v as ConversationStatus))}
+              onChange={(v) => setParam("status", v === "all" ? undefined : v)}
               style={{ width: 160 }}
               aria-label={t("conversations_page.filter_status")}
               data-testid="conversations-status-filter"
@@ -422,7 +463,7 @@ export function ConversationsList() {
             />
             <Select<number | "all">
               value={windowHours ?? "all"}
-              onChange={(v) => setWindowHours(v === "all" ? undefined : v)}
+              onChange={(v) => setParam("window", v === "all" ? undefined : String(v))}
               style={{ width: 140 }}
               aria-label={t("conversations_page.filter_window")}
               data-testid="conversations-window-filter"
@@ -433,7 +474,7 @@ export function ConversationsList() {
             />
             <button
               type="button"
-              onClick={refresh}
+              onClick={() => void refresh()}
               disabled={loading}
               aria-label={t("common.refresh")}
               data-testid="conversations-refresh"
@@ -478,11 +519,17 @@ export function ConversationsList() {
           total: data?.total ?? 0,
           showSizeChanger: false,
           pageSize: PAGE_SIZE,
-          onChange: setPage,
+          // Paging pushes history so browser back returns to the prior page.
+          onChange: (p) => setParam("page", p <= 1 ? undefined : String(p), { push: true }),
           showTotal: (n) => t("conversations_page.pager_total", { total: n }),
         }}
         onRow={(record) => ({
-          onClick: () => navigate(`/conversations/${encodeURIComponent(record.thread_id)}`),
+          // ``from`` lets the detail page's back link restore this exact
+          // view — filters and page included (they all live in the URL).
+          onClick: () =>
+            navigate(`/conversations/${encodeURIComponent(record.thread_id)}`, {
+              state: { from: `${location.pathname}${location.search}` },
+            }),
           style: { cursor: "pointer" },
         })}
         locale={{

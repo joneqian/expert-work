@@ -8,7 +8,7 @@
  * from hitting the wire.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
@@ -293,5 +293,40 @@ describe("ConversationsList", () => {
     expect(listConversationsMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ since: undefined }),
     );
+  });
+
+  it("hydrates every filter from a deep-linked URL", async () => {
+    listConversationsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderPage("/conversations?errors=1&pending=1&agent=support-bot&status=active&window=24&page=3");
+    await waitFor(() =>
+      expect(listConversationsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          hasError: true,
+          hasPending: true,
+          agentName: "support-bot",
+          status: "active",
+          offset: 100,
+          since: expect.any(String),
+        }),
+      ),
+    );
+  });
+
+  it("auto-refresh polls silently every 30s while enabled", async () => {
+    listConversationsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderPage();
+    // First load on real timers; only the interval runs on fake ones.
+    await waitFor(() => expect(listConversationsMock).toHaveBeenCalled());
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByTestId("conversations-auto-refresh"));
+      const before = listConversationsMock.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(31_000);
+      });
+      expect(listConversationsMock.mock.calls.length).toBeGreaterThan(before);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

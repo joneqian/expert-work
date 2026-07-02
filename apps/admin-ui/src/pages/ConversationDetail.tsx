@@ -13,8 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Card, Empty, Skeleton, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableColumnsType } from "antd";
-import { useParams } from "react-router-dom";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { ApiError } from "../api/client";
@@ -47,6 +46,7 @@ const STATUS_COLOR: Record<string, string> = {
 export function ConversationDetail() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { threadId } = useParams<{ threadId: string }>();
 
   const [convo, setConvo] = useState<ConversationDetailModel | null>(null);
@@ -173,10 +173,18 @@ export function ConversationDetail() {
   }
 
   const tk = convo.tokens;
-  // Back to the agent's conversations tab when the thread is agent-bound;
-  // the global conversation browser (M1b-2) will deep-link here too.
-  const backTo =
-    convo.agent_name && convo.agent_version
+  // Back link: when the global browser navigated here it passes its exact
+  // URL (filters + page) via ``location.state.from`` — going back restores
+  // that view verbatim. Otherwise fall back to the agent's conversations
+  // tab (agent-bound thread) or the agents index.
+  const stateFrom = (location.state as { from?: unknown } | null)?.from;
+  const fromBrowser =
+    typeof stateFrom === "string" && stateFrom.startsWith("/conversations")
+      ? stateFrom
+      : undefined;
+  const backTo = fromBrowser
+    ? { label: t("nav.conversations"), to: fromBrowser }
+    : convo.agent_name && convo.agent_version
       ? {
           label: convo.agent_name,
           to: `/agents/${encodeURIComponent(convo.agent_name)}/${encodeURIComponent(
