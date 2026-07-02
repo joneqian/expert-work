@@ -24,6 +24,7 @@ Implementations:
 from __future__ import annotations
 
 import abc
+from collections.abc import Collection
 from uuid import UUID
 
 from helix_agent.protocol import ThreadMeta, ThreadStatus
@@ -75,6 +76,7 @@ class ThreadMetaStore(abc.ABC):
         nonempty: bool = False,
         q: str | None = None,
         include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -95,6 +97,11 @@ class ThreadMetaStore(abc.ABC):
         soft-deleted ``ARCHIVED`` threads: when ``False`` (default) they are
         excluded — UNLESS ``status`` explicitly asks for ``ARCHIVED``, which
         always wins (an explicit status is an exact filter).
+
+        ``thread_ids`` narrows to an explicit id set (conversation-centric
+        IA — the browser's has-error filter resolves failing threads from
+        the run store first, then reads their metadata here). ``None``
+        means no narrowing; an empty collection returns ``[]``.
         """
 
     @abc.abstractmethod
@@ -107,6 +114,7 @@ class ThreadMetaStore(abc.ABC):
         nonempty: bool = False,
         q: str | None = None,
         include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -116,8 +124,8 @@ class ThreadMetaStore(abc.ABC):
         filter — the platform admin view aggregates every user's
         sessions across every tenant. Newest first. ``agent_name`` /
         ``agent_version`` as in :meth:`list_by_tenant` (Mini-ADR H-10).
-        ``nonempty`` / ``q`` / ``include_archived`` as in
-        :meth:`list_by_tenant`.
+        ``nonempty`` / ``q`` / ``include_archived`` / ``thread_ids`` as
+        in :meth:`list_by_tenant`.
         """
 
     @abc.abstractmethod

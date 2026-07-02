@@ -152,6 +152,10 @@ def build_conversations_router() -> APIRouter:
         user_id: Annotated[UUID | None, Query()] = None,
         status: Annotated[ThreadStatus | None, Query()] = None,
         q: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        # Operations filter — only conversations with ≥1 failed run
+        # (error / timeout). Distinct from ``status=failed``: that is the
+        # thread's lifecycle state; an *active* thread can carry errored runs.
+        has_error: Annotated[bool, Query()] = False,
         limit: Annotated[int, Query(ge=1, le=10000)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,
@@ -173,7 +177,16 @@ def build_conversations_router() -> APIRouter:
         )
 
         clamped = _clamp_limit(limit)
+        error_capped = False
         async with applied_scope(scope):
+            # has_error resolves the failing thread set from the run store
+            # first, then reads their metadata — each store keeps to its own
+            # table (same composition as the users rollup).
+            failing_ids: set[UUID] | None = None
+            if has_error:
+                agg_scope = None if isinstance(scope, CrossTenant) else scope.tenant_id
+                failing_ids = await runs.error_thread_ids(tenant_id=agg_scope)
+                error_capped = len(failing_ids) >= 500
             if isinstance(scope, CrossTenant):
                 metas = await threads.list_all_tenants(
                     agent_name=agent_name,
@@ -181,6 +194,7 @@ def build_conversations_router() -> APIRouter:
                     status=status,
                     nonempty=True,
                     q=q,
+                    thread_ids=failing_ids,
                     limit=clamped,
                     offset=offset,
                 )
@@ -194,6 +208,7 @@ def build_conversations_router() -> APIRouter:
                     status=status,
                     nonempty=True,
                     q=q,
+                    thread_ids=failing_ids,
                     limit=clamped,
                     offset=offset,
                 )
@@ -235,7 +250,7 @@ def build_conversations_router() -> APIRouter:
             },
         )
 
-        headers = {"X-Limit-Capped": "true"} if limit > MAX_LIST_LIMIT else None
+        headers = {"X-Limit-Capped": "true"} if (limit > MAX_LIST_LIMIT or error_capped) else None
         return JSONResponse(
             content={
                 "success": True,

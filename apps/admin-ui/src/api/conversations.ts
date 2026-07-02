@@ -84,6 +84,10 @@ export interface ListConversationsParams {
   status?: ConversationStatus;
   /** Free-text filter — substring match on the conversation title. */
   q?: string;
+  /** Only conversations with ≥1 failed run (error / timeout) — the
+   *  operations "what broke today" filter. Distinct from
+   *  ``status=failed`` (thread lifecycle). */
+  hasError?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -92,7 +96,8 @@ export interface ListConversationsParams {
 export async function listConversations(
   params: ListConversationsParams = {},
 ): Promise<ConversationList> {
-  const { tenantScope, agentName, agentVersion, userId, status, q, limit, offset } = params;
+  const { tenantScope, agentName, agentVersion, userId, status, q, hasError, limit, offset } =
+    params;
   const query = withTenantScope(
     {
       agent_name: agentName,
@@ -100,6 +105,7 @@ export async function listConversations(
       user_id: userId,
       status,
       q,
+      has_error: hasError ? true : undefined,
       limit,
       offset,
     },

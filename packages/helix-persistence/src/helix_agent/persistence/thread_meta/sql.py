@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -105,10 +106,15 @@ class SqlThreadMetaStore(ThreadMetaStore):
         nonempty: bool = False,
         q: str | None = None,
         include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
+        if thread_ids is not None and not thread_ids:
+            return []
         stmt = select(ThreadMetaRow).where(ThreadMetaRow.tenant_id == tenant_id)
+        if thread_ids is not None:
+            stmt = stmt.where(ThreadMetaRow.thread_id.in_(list(thread_ids)))
         if status is not None:
             stmt = stmt.where(ThreadMetaRow.status == status.value)
         elif not include_archived:
@@ -137,11 +143,16 @@ class SqlThreadMetaStore(ThreadMetaStore):
         nonempty: bool = False,
         q: str | None = None,
         include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
         # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
+        if thread_ids is not None and not thread_ids:
+            return []
         stmt = select(ThreadMetaRow)
+        if thread_ids is not None:
+            stmt = stmt.where(ThreadMetaRow.thread_id.in_(list(thread_ids)))
         if status is not None:
             stmt = stmt.where(ThreadMetaRow.status == status.value)
         elif not include_archived:

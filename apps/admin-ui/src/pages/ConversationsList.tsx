@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Checkbox,
   Empty,
   Input,
   Select,
@@ -27,6 +28,7 @@ import { AlertTriangle, Globe2, MessagesSquare, RefreshCw, Search } from "lucide
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
+import { listAgents } from "../api/agents";
 import {
   listConversations,
   type ConversationList,
@@ -66,6 +68,11 @@ export function ConversationsList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ConversationStatus | undefined>(undefined);
+  // Cross-agent monitoring filters — narrow to one agent, or to
+  // conversations carrying ≥1 failed run ("what broke today").
+  const [agentFilter, setAgentFilter] = useState<string | undefined>(undefined);
+  const [errorsOnly, setErrorsOnly] = useState(false);
+  const [agentOptions, setAgentOptions] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [q, setQ] = useState<string | undefined>(undefined);
   // ``?user_id=`` drives the "member's conversations" filter — URL-owned so
@@ -109,6 +116,8 @@ export function ConversationsList() {
       const result = await listConversations({
         tenantScope: apiTenantScope,
         status: statusFilter,
+        agentName: agentFilter,
+        hasError: errorsOnly,
         q,
         userId: userFilter,
       });
@@ -124,11 +133,26 @@ export function ConversationsList() {
     } finally {
       setLoading(false);
     }
-  }, [apiTenantScope, statusFilter, q, userFilter]);
+  }, [apiTenantScope, statusFilter, agentFilter, errorsOnly, q, userFilter]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Agent-filter options — best-effort; a failure just leaves the
+  // dropdown empty (the list itself is unaffected).
+  useEffect(() => {
+    let cancelled = false;
+    listAgents({ tenantScope: apiTenantScope, limit: 100 })
+      .then((result) => {
+        if (cancelled) return;
+        setAgentOptions([...new Set(result.items.map((a) => a.name))].sort());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [apiTenantScope]);
 
   const isCrossTenant = data?.cross_tenant ?? false;
 
@@ -309,6 +333,13 @@ export function ConversationsList() {
                 {t("conversations_page.filter_user_active", { user: userFilter.slice(0, 8) })}
               </Tag>
             )}
+            <Checkbox
+              checked={errorsOnly}
+              onChange={(e) => setErrorsOnly(e.target.checked)}
+              data-testid="conversations-errors-only"
+            >
+              {t("conversations_page.filter_errors_only")}
+            </Checkbox>
             <Input
               allowClear
               value={search}
@@ -318,6 +349,17 @@ export function ConversationsList() {
               prefix={<Search size={14} strokeWidth={1.5} />}
               style={{ width: 220 }}
               data-testid="conversations-search"
+            />
+            <Select<string>
+              allowClear
+              showSearch
+              value={agentFilter}
+              onChange={(v) => setAgentFilter(v || undefined)}
+              placeholder={t("conversations_page.filter_agent")}
+              aria-label={t("conversations_page.filter_agent")}
+              style={{ width: 190 }}
+              data-testid="conversations-agent-filter"
+              options={agentOptions.map((name) => ({ value: name, label: name }))}
             />
             <Select<ConversationStatus | "all">
               value={statusFilter ?? "all"}

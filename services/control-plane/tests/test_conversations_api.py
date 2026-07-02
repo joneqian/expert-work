@@ -245,3 +245,28 @@ async def test_detail_unknown_thread_is_404(
     client, _ = client_and_threads
     resp = await client.get(f"/v1/conversations/{uuid4()}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_filters_by_has_error(
+    client_and_threads: tuple[AsyncClient, dict[str, UUID]],
+) -> None:
+    """has_error narrows to conversations with ≥1 failed run — distinct
+    from thread status (an active thread can carry errored runs)."""
+    client, ids = client_and_threads
+    resp = await client.get("/v1/conversations", params={"has_error": "true"})
+    assert resp.status_code == 200
+    got = {i["thread_id"] for i in resp.json()["data"]["items"]}
+    # Only "convo" has an ERROR run; the other two threads are all-success.
+    assert got == {str(ids["convo"])}
+
+
+@pytest.mark.asyncio
+async def test_has_error_composes_with_agent_filter(
+    client_and_threads: tuple[AsyncClient, dict[str, UUID]],
+) -> None:
+    client, _ = client_and_threads
+    # "beta" has conversations but none with errors — empty, not an error.
+    resp = await client.get("/v1/conversations", params={"has_error": "true", "agent_name": "beta"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["items"] == []
