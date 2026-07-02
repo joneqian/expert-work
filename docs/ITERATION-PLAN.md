@@ -1616,6 +1616,23 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **持久 workspace 对 user 运行自动开**（#763 B）：文件耐久从 manifest 开关解绑→跟 `ctx.user_id` 绑(有 user 自动挂命名卷,reaper rm 容器不删卷,跨回收还原)；`FilesystemSpec.persistent_workspace` 降级只控 CM-0 计划投影(与耐久解耦,投影每 run 读 PLAN.md 有成本不默认开)。语义：`/workspace`(user)=命名卷还原 / `/tmp`=tmpfs 永清。
 - [x] **live 三件套验证**（CI 绿≠live）：① soffice pptx→pdf ② node ③ 持久还原。`infra/sandbox-image/smoke_test.py` 一把验 soffice+poppler+node+办公库+CJK；`tools/eval/verify_live_persist.py`（#766）驱动 supervisor :8001(无鉴权)验持久(POSITIVE restored / NEGATIVE gone)。本地真栈全过。
 
+### Wave — 2026-06/07 运行可观测富化 + 对话中心化运营 IA
+
+> 起点：用户看 test-agent「运行」列表觉得模块薄，问「直接接 Langfuse 取代？」。评估否决取代
+> （审批/resume/改参是控制操作 Langfuse 只读做不了 + 单实例无 RLS 跨租户红线），拍板富化自有
+> runs 面；继而确认真实运营单位 = (user_id × conversation)，把运营 IA 从扁平 run 列表重组为
+> **用户 → 对话 → run 三层下钻**（设计 [conversation-centric-ia](./design/conversation-centric-ia.md)）。
+
+- [x] **Runs 富化**（#876）：`token_usage` 按 `trace_id` 聚合喂 list/get + `q` 搜索；列表加耗时/token/错误列 + RunSummaryPanel 详情摘要面；深度 LLM trace 继续外链 Langfuse 不重建
+- [x] **运行记录按 user_id 过滤 + 用户列**（#878）：成员运行视图，`?user_id=` URL-owned filter
+- [x] **可观测性 hub 入口**（#879）：Langfuse/Grafana/Tempo 平台运维入口（system_admin 专属，跨租户红线不暴露给租户）
+- [x] **对话中心化 IA M1a+M1b-1**（#880，e2e 修 #881）：设计文档 + 后端 `GET /v1/conversations`（thread_meta + `agent_run` rollup + token totals）/`{thread_id}` 详情 + `ThreadRunAggregate` store 聚合（GROUP BY 非 N+1）+ agent 详情「对话」tab 替换运行 tab + 对话详情页（`/conversations/:threadId` 摘要 + run 列表）+「历史 → 配置历史」改名
+- [x] **对话中心化 IA M1b-2**（本 PR）：顶层 `/runs` → 全局对话浏览器 `/conversations`（thread 分组，agent/user/status/q 过滤，旧路径 redirect 兼容）+ nav「运行记录 → 对话」+ memory label →「记忆治理」+ RunDetail 返回链改指对话 + RunsList/`listRuns` SDK 死代码清退
+- [ ] **M1.5** 统一消息 transcript（跨 run 用户/助手轮存 LangGraph checkpoint，需评估读端点成本）
+- [ ] **M2** 用户层：`GET /v1/agents/{name}/{version}/users` rollup + 用户详情页（对话 + 记忆 + 产物 + 用量 tab 迁入；须核记忆端点 user_id 过滤缺口）
+- [ ] **M3** 顶层收口：`/artifacts` 删（迁用户层）+ `/memory` 语义明确为租户级治理聚合页 + 面包屑统一
+- [ ] fast-follow：对话/run 成本（人民币）列（现定价是月度 rollup，无干净 per-run cost 函数）
+
 ### 显式不做（理由在册，需求出现随时重议）
 
 - 浏览器执行面 / GPU（产品决策，非工程债）；多语言运行时：**node 已纳入单一 full 镜像**（经 `bash` 跑 JS 技能），浏览器自动化（Chromium/Playwright）仍归 MCP 不进镜像
