@@ -943,6 +943,7 @@ const zhCN: TranslationKeys = {
     skill_evolution_enabled: "技能自进化",
     skill_evolution_on: "已开通",
     skill_evolution_off: "未开通",
+    skill_evolution_judge_sample_pct: "隐式候选 judge 抽样率",
     mcp_allowlist: "MCP 白名单",
     http_allowlist: "HTTP 工具白名单",
     updated: "更新",

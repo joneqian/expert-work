@@ -892,6 +892,7 @@ export interface TranslationKeys {
     skill_evolution_enabled: string;
     skill_evolution_on: string;
     skill_evolution_off: string;
+    skill_evolution_judge_sample_pct: string;
     mcp_allowlist: string;
     http_allowlist: string;
     updated: string;
@@ -3100,6 +3101,7 @@ const en: TranslationKeys = {
     skill_evolution_enabled: "Skill self-evolution",
     skill_evolution_on: "Enrolled",
     skill_evolution_off: "Not enrolled",
+    skill_evolution_judge_sample_pct: "Implicit judge sample rate",
     mcp_allowlist: "MCP allowlist",
     http_allowlist: "HTTP tool allowlist",
     updated: "Updated",
