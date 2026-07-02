@@ -152,4 +152,41 @@ describe("ConversationDetail", () => {
     );
     expect(screen.getByText("No messages recorded for this conversation.")).toBeInTheDocument();
   });
+
+  it("back link restores the browser view carried in location.state.from", async () => {
+    vi.spyOn(convoSdk, "getConversation").mockResolvedValue(CONVO);
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: `/conversations/${THREAD_ID}`,
+            state: { from: "/conversations?errors=1&window=24&page=2" },
+          },
+        ]}
+      >
+        <Routes>
+          <Route path="/conversations/:threadId" element={<ConversationDetail />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("conversation-detail-root")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("page-header-back")).toHaveAttribute(
+      "href",
+      "/conversations?errors=1&window=24&page=2",
+    );
+  });
+
+  it("back link falls back to the agent conversations tab without state.from", async () => {
+    vi.spyOn(convoSdk, "getConversation").mockResolvedValue(CONVO);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByTestId("conversation-detail-root")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("page-header-back")).toHaveAttribute(
+      "href",
+      `/agents/${CONVO.agent_name}/${CONVO.agent_version}/conversations`,
+    );
+  });
 });
