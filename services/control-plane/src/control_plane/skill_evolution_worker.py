@@ -46,11 +46,37 @@ EVOLVE_SIGNALS: frozenset[CurationSignal] = frozenset(
 #: SE-16 (SE-A40) — transient failures per candidate before giving up.
 MAX_DISTILL_RETRIES = 3
 
+#: SE-16 (SE-A45) — signals that pass through the sampled quality screen
+#: before distillation. Only the abundant weak-label implicit pool is
+#: screened; explicit 👍 / failed candidates always distil.
+SCREENED_SIGNALS: frozenset[CurationSignal] = frozenset({"implicit_success"})
+
 #: Async gate answering "is skill evolution rolled out to this tenant?"
 #: (SE-A41 — ``tenant_config.skill_evolution_enabled``, ANDed with the
 #: platform master switch by the app assembly). ``None`` → no per-tenant
 #: gating (unit tests / single-tenant deployments).
 TenantGate = Callable[[UUID], Awaitable[bool]]
+
+
+@dataclass(frozen=True)
+class ScreenDecision:
+    """SE-A45 — the sampled quality screen's verdict on one candidate.
+
+    ``proceed=False`` drops the candidate from distillation (it is marked
+    evolved so the sweep never re-screens it). ``reason`` is one of
+    ``not_sampled`` / ``trajectory_missing`` / ``judge_filtered`` /
+    ``judge_passed``; ``score`` is the judge's 1-5 quality score when one
+    was taken (``None`` for pre-judge drops).
+    """
+
+    proceed: bool
+    reason: str
+    score: int | None = None
+
+
+#: Screens one candidate before distillation (SE-A45). A raised transient
+#: fault routes through the same retry budget as the processor (SE-A40).
+CandidateScreener = Callable[[CurationCandidateRecord], Awaitable[ScreenDecision]]
 
 _cycle_errors = helix_counter(
     "helix_control_plane_skill_evolution_cycle_errors_total",
@@ -63,6 +89,10 @@ _grounded = helix_counter(
 _retried = helix_counter(
     "helix_control_plane_skill_evolution_retries_total",
     "Distillation attempts that died on a transient fault and were requeued.",
+)
+_screened_out = helix_counter(
+    "helix_control_plane_skill_evolution_screened_out_total",
+    "Implicit candidates dropped by the SE-A45 sampled quality screen.",
 )
 
 
@@ -125,6 +155,8 @@ class EvolutionTally:
     rejected: int
     exhausted: int
     no_draft: int
+    #: SE-A45 — implicit candidates the sampled quality screen dropped.
+    screened: int = 0
 
 
 class SkillEvolutionWorker:
@@ -138,6 +170,7 @@ class SkillEvolutionWorker:
         interval_s: int,
         batch_size: int = 50,
         tenant_gate: TenantGate | None = None,
+        screener: CandidateScreener | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("interval_s must be positive")
@@ -146,6 +179,9 @@ class SkillEvolutionWorker:
         self._interval_s = interval_s
         self._batch_size = batch_size
         self._tenant_gate = tenant_gate
+        # SE-A45 — sampled quality screen over SCREENED_SIGNALS candidates;
+        # ``None`` disables screening (legacy assemblies / unit tests).
+        self._screener = screener
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -185,6 +221,7 @@ class SkillEvolutionWorker:
 
         counts = {"grounded": 0, "rejected": 0, "exhausted": 0, "no_draft": 0}
         failed = 0
+        screened = 0
         # SE-A41 — per-tenant rollout gate, resolved once per tenant per
         # sweep. An ungated candidate is SKIPPED (not marked evolved) so it
         # distils normally once the tenant is enrolled later.
@@ -200,6 +237,27 @@ class SkillEvolutionWorker:
                     continue
             with _tenant_scope(candidate.tenant_id):
                 try:
+                    # SE-A45 — sampled quality screen: an un-sampled or
+                    # low-scoring implicit candidate is dropped for good
+                    # (marked evolved) before the expensive distil path.
+                    if candidate.signal in SCREENED_SIGNALS and self._screener is not None:
+                        decision = await self._screener(candidate)
+                        if not decision.proceed:
+                            screened += 1
+                            _screened_out.inc()
+                            logger.info(
+                                "skill_evolution.candidate_screened_out "
+                                "candidate_id=%s reason=%s score=%s",
+                                candidate.id,
+                                decision.reason,
+                                decision.score,
+                            )
+                            await self._candidates.mark_evolved(
+                                candidate_id=candidate.id,
+                                tenant_id=candidate.tenant_id,
+                                at=now,
+                            )
+                            continue
                     result = await self._processor(candidate)
                 except Exception as exc:
                     # Isolate a per-candidate failure (e.g. a tenant whose aux
@@ -235,11 +293,12 @@ class SkillEvolutionWorker:
 
         return EvolutionTally(
             scanned=len(candidates),
-            processed=len(todo) - failed,
+            processed=len(todo) - failed - screened,
             grounded=counts["grounded"],
             rejected=counts["rejected"],
             exhausted=counts["exhausted"],
             no_draft=counts["no_draft"],
+            screened=screened,
         )
 
     async def _loop(self) -> None:

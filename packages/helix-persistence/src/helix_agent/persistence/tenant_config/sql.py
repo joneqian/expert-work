@@ -64,6 +64,7 @@ def _row_to_record(row: TenantConfigRow) -> TenantConfigRecord:
         default_agent_name=row.default_agent_name,
         allow_custom_mcp_servers=row.allow_custom_mcp_servers,
         skill_evolution_enabled=row.skill_evolution_enabled,
+        skill_evolution_judge_sample_pct=row.skill_evolution_judge_sample_pct,
         created_at=row.created_at,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
@@ -193,6 +194,10 @@ class SqlTenantConfigStore(TenantConfigStore):
                     values["allow_custom_mcp_servers"] = patch.allow_custom_mcp_servers
                 if patch.skill_evolution_enabled is not None:
                     values["skill_evolution_enabled"] = patch.skill_evolution_enabled
+                if patch.skill_evolution_judge_sample_pct is not None:
+                    values["skill_evolution_judge_sample_pct"] = (
+                        patch.skill_evolution_judge_sample_pct
+                    )
                 stmt = (
                     pg_insert(TenantConfigRow)
                     .values(**values)
@@ -280,6 +285,8 @@ class SqlTenantConfigStore(TenantConfigStore):
                 existing.allow_custom_mcp_servers = patch.allow_custom_mcp_servers
             if patch.skill_evolution_enabled is not None:
                 existing.skill_evolution_enabled = patch.skill_evolution_enabled
+            if patch.skill_evolution_judge_sample_pct is not None:
+                existing.skill_evolution_judge_sample_pct = patch.skill_evolution_judge_sample_pct
             existing.updated_at = _utc_now()
             existing.updated_by = actor_id
             await session.commit()

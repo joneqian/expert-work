@@ -1498,6 +1498,16 @@ def create_app(
                         return False
                     return bool(cfg.skill_evolution_enabled)
 
+                # SE-16 (SE-A45) — implicit-candidate judge sample rate. An
+                # unconfigured tenant resolves to 0 (it cannot pass the gate
+                # above anyway, so the screen never admits its candidates).
+                async def _skill_evolution_judge_sample_pct(tenant_id: UUID) -> int:
+                    try:
+                        cfg = await resolved_tenant_config_service.get(tenant_id=tenant_id)
+                    except TenantConfigNotConfiguredError:
+                        return 0
+                    return int(cfg.skill_evolution_judge_sample_pct)
+
                 skill_evolution_worker = build_evolution_worker(
                     aux_model=make_llm_router_aux_model(
                         resolver=credentials_resolver,
@@ -1507,6 +1517,9 @@ def create_app(
                     ),
                     aux_default_model=resolved_settings.memory_consolidator_default_aux_model,
                     tenant_gate=_skill_evolution_tenant_gate,
+                    # SE-16 (SE-A45) — sampled quality screen over implicit
+                    # candidates (candidate purification, not promotion).
+                    judge_sample_pct=_skill_evolution_judge_sample_pct,
                     # SE-16 (SE-A39) — 👎 trajectories (+ comments) join the
                     # contrastive failure side of distillation.
                     feedback_store=resolved_feedback,

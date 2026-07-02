@@ -31,11 +31,16 @@ from control_plane.skill_evolution import EvolutionConfig, ReplayOutcome
 from control_plane.skill_evolution_assembly import (
     extract_task_prompt,
     first_user_message,
+    is_screen_sampled,
     select_signal_tier,
 )
 from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
 from control_plane.skill_evolution_processor import EvolutionProcessor, SkillEvidence
-from control_plane.skill_evolution_worker import SkillEvolutionWorker, TenantGate
+from control_plane.skill_evolution_worker import (
+    ScreenDecision,
+    SkillEvolutionWorker,
+    TenantGate,
+)
 from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import CurationCandidateStore, SkillStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
@@ -98,6 +103,60 @@ def _parse_score(text: str) -> int:
             if 1 <= value <= 5:
                 return value
     return 0  # unparseable → hard fail (clips below the pass threshold)
+
+
+# --------------------------------------------------------------------------- #
+# SE-A45 — sampled quality screen over implicit-success candidates
+# --------------------------------------------------------------------------- #
+
+#: Minimum 1-5 conversation-quality score for an implicit candidate to
+#: survive the screen. Matches the replay judge's pass bar.
+_SCREEN_PASS_SCORE = 4
+
+_SCREEN_PROMPT = """\
+You are auditing one AI-agent conversation. Rate its quality on a 1-5 scale:
+did the agent truly complete the user's task, and were the answers on-topic
+and correct? 5 = task fully completed with accurate, on-topic answers;
+3 = partially completed or generic; 1 = off-topic, wrong, or unfinished.
+
+Conversation transcript:
+{transcript}
+
+Reply with a single digit from 1 to 5 and nothing else."""
+
+
+@dataclass(frozen=True)
+class _ImplicitScreener:
+    """Screens ``implicit_success`` candidates before distillation (SE-A45).
+
+    Candidate purification, deliberately separate from the promotion gate's
+    calibrated-judge tier: a deterministic per-tenant sample of the abundant
+    implicit pool is scored for conversation quality by the cheap aux model;
+    un-sampled and low-scoring candidates never reach the distiller. Aux
+    transport faults propagate — the worker's transient retry budget
+    (SE-A40) handles them.
+    """
+
+    aux: _AuxText
+    reader: TrajectoryReader
+    sample_pct: Callable[[UUID], Awaitable[int]]
+
+    async def __call__(self, candidate: CurationCandidateRecord) -> ScreenDecision:
+        pct = await self.sample_pct(candidate.tenant_id)
+        if not is_screen_sampled(candidate.trajectory_key, pct):
+            return ScreenDecision(proceed=False, reason="not_sampled")
+        source = await self.reader.read(candidate.trajectory_key)
+        if source is None:
+            # Nothing to distil from either — drop without spending a judge call.
+            return ScreenDecision(proceed=False, reason="trajectory_missing")
+        prompt = _SCREEN_PROMPT.format(transcript=render_trajectory(source.messages))
+        # Real tenant_id — the screen bills to the candidate's own tenant
+        # (SE-A43 alignment), unlike the replay judge's null placeholder.
+        text = await self.aux(prompt=prompt, tenant_id=candidate.tenant_id)
+        score = _parse_score(text)
+        if score >= _SCREEN_PASS_SCORE:
+            return ScreenDecision(proceed=True, reason="judge_passed", score=score)
+        return ScreenDecision(proceed=False, reason="judge_filtered", score=score)
 
 
 # --------------------------------------------------------------------------- #
@@ -371,6 +430,7 @@ def build_evolution_worker(
     breaker: CircuitBreaker | None = None,
     tenant_gate: TenantGate | None = None,
     feedback_store: FeedbackStore | None = None,
+    judge_sample_pct: Callable[[UUID], Awaitable[int]] | None = None,
 ) -> SkillEvolutionWorker:
     """Assemble the production skill-evolution worker (lifespan wiring).
 
@@ -410,10 +470,19 @@ def build_evolution_worker(
         config=EvolutionConfig(max_rounds=max_rounds),
         promotion_gate=gate,
     )
+    # SE-A45 — the sampled quality screen only assembles when the caller can
+    # resolve a per-tenant sample rate (``tenant_config``); otherwise implicit
+    # candidates distil unscreened (legacy single-tenant assemblies).
+    screener = (
+        _ImplicitScreener(aux=aux_text, reader=trajectory_reader, sample_pct=judge_sample_pct)
+        if judge_sample_pct is not None
+        else None
+    )
     return SkillEvolutionWorker(
         candidate_store=candidate_store,
         processor=processor,
         interval_s=interval_s,
         batch_size=batch_size,
         tenant_gate=tenant_gate,
+        screener=screener,
     )

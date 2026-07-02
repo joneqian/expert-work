@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.skill_evolution import EvolutionResult, TransientEvolutionError
-from control_plane.skill_evolution_worker import SkillEvolutionWorker
+from control_plane.skill_evolution_worker import ScreenDecision, SkillEvolutionWorker
 from helix_agent.persistence.curation.memory import InMemoryCurationCandidateStore
 from helix_agent.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
 
@@ -315,3 +315,100 @@ async def test_tenant_gate_skips_unenrolled_without_burning() -> None:
     assert by_tenant[enrolled].evolved_at is not None
     assert by_tenant[unenrolled].evolved_at is None
     assert by_tenant[unenrolled].retry_count == 0
+
+
+# ---------------------------------------------------------------------------
+# SE-16 (SE-A45) — sampled quality screen over implicit candidates
+# ---------------------------------------------------------------------------
+
+
+class RecordingScreener:
+    def __init__(self, decision: ScreenDecision) -> None:
+        self.decision = decision
+        self.seen: list[CurationCandidateRecord] = []
+
+    async def __call__(self, candidate: CurationCandidateRecord) -> ScreenDecision:
+        self.seen.append(candidate)
+        return self.decision
+
+
+async def test_screen_reject_drops_implicit_without_distilling() -> None:
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="implicit_success", tenant=tenant)])
+    proc = RecordingProcessor()
+    screener = RecordingScreener(ScreenDecision(proceed=False, reason="judge_filtered", score=2))
+    worker = SkillEvolutionWorker(
+        candidate_store=store, processor=proc, interval_s=60, screener=screener
+    )
+
+    tally = await worker.run_once()
+
+    assert proc.seen == []  # never reached the distiller
+    assert tally.screened == 1
+    assert tally.processed == 0
+    # Dropped for good — marked evolved so the sweep never re-screens it.
+    row = await _sole_candidate(store)
+    assert row.evolved_at is not None
+
+
+async def test_screen_pass_proceeds_to_distillation() -> None:
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="implicit_success", tenant=tenant)])
+    proc = RecordingProcessor("grounded")
+    screener = RecordingScreener(ScreenDecision(proceed=True, reason="judge_passed", score=5))
+    worker = SkillEvolutionWorker(
+        candidate_store=store, processor=proc, interval_s=60, screener=screener
+    )
+
+    tally = await worker.run_once()
+
+    assert len(proc.seen) == 1
+    assert tally.screened == 0
+    assert tally.grounded == 1
+
+
+async def test_screen_only_applies_to_implicit_signals() -> None:
+    """Explicit 👍 / failed candidates always distil — never screened."""
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(
+        store,
+        [
+            _candidate(signal="positive_feedback", tenant=tenant),
+            _candidate(signal="failed_outcome", tenant=tenant),
+        ],
+    )
+    proc = RecordingProcessor()
+    screener = RecordingScreener(ScreenDecision(proceed=False, reason="judge_filtered", score=1))
+    worker = SkillEvolutionWorker(
+        candidate_store=store, processor=proc, interval_s=60, screener=screener
+    )
+
+    tally = await worker.run_once()
+
+    assert screener.seen == []
+    assert len(proc.seen) == 2
+    assert tally.screened == 0
+
+
+async def test_screen_transient_fault_requeues_instead_of_burning() -> None:
+    """An aux timeout during the screen routes through the SE-A40 retry budget."""
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="implicit_success", tenant=tenant)])
+    proc = RecordingProcessor()
+
+    async def screener(candidate: CurationCandidateRecord) -> ScreenDecision:
+        raise TransientEvolutionError("aux judge timed out")
+
+    worker = SkillEvolutionWorker(
+        candidate_store=store, processor=proc, interval_s=60, screener=screener
+    )
+    await worker.run_once()
+
+    row = await _sole_candidate(store)
+    assert row.evolved_at is None
+    assert row.retry_count == 1
+    assert proc.seen == []

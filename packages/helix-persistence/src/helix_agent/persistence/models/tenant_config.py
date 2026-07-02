@@ -123,6 +123,11 @@ class TenantConfigRow(Base):
     skill_evolution_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )
+    # SE-16 (SE-A45) — implicit-candidate judge sample rate (0-100, CHECK in
+    # migration 0109). Added in migration 0109.
+    skill_evolution_judge_sample_pct: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("5"), default=5
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

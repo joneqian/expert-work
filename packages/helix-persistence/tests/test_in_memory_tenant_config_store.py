@@ -154,3 +154,21 @@ async def test_allow_custom_mcp_servers_set_false_on_first_upsert() -> None:
         actor_id="sys",
     )
     assert record.allow_custom_mcp_servers is False
+
+
+@pytest.mark.asyncio
+async def test_skill_evolution_judge_sample_pct_defaults_and_round_trips() -> None:
+    """SE-16 (SE-A45) — implicit judge sample rate defaults 5, patches through."""
+    store = InMemoryTenantConfigStore()
+    tid = uuid4()
+    created = await store.create(tenant_id=tid, display_name="Acme", actor_id="sys")
+    assert created.skill_evolution_judge_sample_pct == 5
+
+    updated = await store.upsert(
+        tenant_id=tid,
+        patch=TenantConfigPatch(skill_evolution_judge_sample_pct=25),
+        actor_id="ops",
+    )
+    assert updated.skill_evolution_judge_sample_pct == 25
+    got = await store.get(tenant_id=tid)
+    assert got is not None and got.skill_evolution_judge_sample_pct == 25

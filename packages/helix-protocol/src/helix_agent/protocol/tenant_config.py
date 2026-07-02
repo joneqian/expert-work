@@ -200,6 +200,12 @@ class TenantConfigRecord(BaseModel):
     # evolution worker only distils this tenant's candidates when both are
     # on. Default off — production rolls out tenant by tenant.
     skill_evolution_enabled: bool = False
+    # SE-16 (SE-A45) — what fraction of ``implicit_success`` candidates the
+    # evolution worker screens through the cheap aux quality judge before
+    # distilling; un-sampled implicit candidates are dropped (marked evolved,
+    # never distilled). Bounds the flywheel's aux + distillation spend on the
+    # abundant implicit pool. Explicit 👍 / failed candidates are unaffected.
+    skill_evolution_judge_sample_pct: int = Field(default=5, ge=0, le=100)
     created_at: datetime
     updated_at: datetime
     updated_by: str
@@ -283,3 +289,6 @@ class TenantConfigPatch(BaseModel):
     # SE-16 (SE-A41) — per-tenant skill-evolution rollout gate. None = leave
     # unchanged.
     skill_evolution_enabled: bool | None = None
+    # SE-16 (SE-A45) — implicit-candidate judge sample rate. None = leave
+    # unchanged.
+    skill_evolution_judge_sample_pct: int | None = Field(default=None, ge=0, le=100)

@@ -251,3 +251,27 @@ async def test_allow_custom_mcp_servers_default_and_patch(
         assert fetched is not None and fetched.allow_custom_mcp_servers is False
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_skill_evolution_judge_sample_pct_default_and_patch(
+    tenant_config_store: tuple[SqlTenantConfigStore, AsyncEngine],
+) -> None:
+    """SE-16 (SE-A45) — implicit judge sample rate defaults 5 and round-trips."""
+    store, engine = tenant_config_store
+    try:
+        tenant = uuid4()
+        current_tenant_id_var.set(tenant)
+        created = await store.create(tenant_id=tenant, display_name="Acme", actor_id="bootstrap")
+        assert created.skill_evolution_judge_sample_pct == 5
+
+        updated = await store.upsert(
+            tenant_id=tenant,
+            patch=TenantConfigPatch(skill_evolution_judge_sample_pct=50),
+            actor_id="ops",
+        )
+        assert updated.skill_evolution_judge_sample_pct == 50
+        fetched = await store.get(tenant_id=tenant)
+        assert fetched is not None and fetched.skill_evolution_judge_sample_pct == 50
+    finally:
+        await engine.dispose()

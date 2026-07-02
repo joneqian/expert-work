@@ -9,6 +9,7 @@ trajectory — lives here so it is covered in CI.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -18,6 +19,7 @@ __all__ = [
     "SIGNAL_TIER_UNVERIFIED",
     "extract_task_prompt",
     "first_user_message",
+    "is_screen_sampled",
     "select_signal_tier",
 ]
 
@@ -28,6 +30,21 @@ SIGNAL_TIER_CALIBRATED = "calibrated_judge"
 SIGNAL_TIER_UNVERIFIED = "unverified"
 
 _PROMPT_KEYS = ("prompt", "message", "input", "task", "question", "text")
+
+
+def is_screen_sampled(trajectory_key: str, pct: int) -> bool:
+    """SE-A45 — deterministic sampling for the implicit-candidate screen.
+
+    Hash-bucketed on the trajectory key so the same candidate always lands
+    on the same side of the rate: a transient-retry re-sweep (SE-A40)
+    cannot re-roll its way past the sample, and tests are reproducible.
+    """
+    if pct <= 0:
+        return False
+    if pct >= 100:
+        return True
+    digest = hashlib.sha256(trajectory_key.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % 100 < pct
 
 
 def select_signal_tier(*, has_hard_verifier: bool, judge_calibrated: bool) -> str:

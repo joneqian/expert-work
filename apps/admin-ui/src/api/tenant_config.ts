@@ -45,6 +45,10 @@ export interface TenantConfigRecord {
    *  the platform master switch. Default false (rolled out tenant by
    *  tenant). */
   skill_evolution_enabled: boolean;
+  /** SE-16 (SE-A45) — what fraction of implicit-success candidates the
+   *  evolution worker screens through the cheap aux quality judge before
+   *  distilling. Default 5, range [0, 100]. */
+  skill_evolution_judge_sample_pct: number;
   created_at: string;
   updated_at: string;
   updated_by: string;
@@ -66,6 +70,7 @@ export interface TenantConfigPatchBody {
   skill_stale_days?: number;
   skill_archive_days?: number;
   skill_evolution_enabled?: boolean;
+  skill_evolution_judge_sample_pct?: number;
 }
 
 /** Stream O Mini-ADR O-13 — one row of the Credentials panel's provider /

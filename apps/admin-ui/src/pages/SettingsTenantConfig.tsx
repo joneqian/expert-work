@@ -76,6 +76,11 @@ function recordToPatchJson(record: TenantConfigRecord): string {
     // through the same JSON-edit surface as the rest of tenant_config.
     skill_stale_days: record.skill_stale_days,
     skill_archive_days: record.skill_archive_days,
+    // SE-16 (SE-A41/A45) — skill-evolution rollout gate + implicit judge
+    // sample rate, editable through the same JSON surface (PR-4 folds the
+    // sample-rate input into the PR-2 rollout pane).
+    skill_evolution_enabled: record.skill_evolution_enabled,
+    skill_evolution_judge_sample_pct: record.skill_evolution_judge_sample_pct,
   };
   return JSON.stringify(patch, null, 2);
 }
@@ -307,6 +312,13 @@ export function SettingsTenantConfig() {
               {record.skill_evolution_enabled
                 ? t("settings_ops.skill_evolution_on")
                 : t("settings_ops.skill_evolution_off")}
+            </dd>
+            {/* SE-16 (SE-A45) — implicit-candidate judge sample rate. */}
+            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+              {t("settings_ops.skill_evolution_judge_sample_pct")}
+            </dt>
+            <dd style={{ margin: 0 }} data-testid="tenant-config-skill-evolution-judge-sample-pct">
+              {record.skill_evolution_judge_sample_pct}%
             </dd>
             <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.mcp_allowlist")}</dt>
             <dd style={{ margin: 0 }}>

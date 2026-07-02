@@ -130,6 +130,10 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                     row_kwargs["allow_custom_mcp_servers"] = patch.allow_custom_mcp_servers
                 if patch.skill_evolution_enabled is not None:
                     row_kwargs["skill_evolution_enabled"] = patch.skill_evolution_enabled
+                if patch.skill_evolution_judge_sample_pct is not None:
+                    row_kwargs["skill_evolution_judge_sample_pct"] = (
+                        patch.skill_evolution_judge_sample_pct
+                    )
                 row = TenantConfigRecord(**row_kwargs)  # type: ignore[arg-type]
             else:
                 row = existing.model_copy(
@@ -169,6 +173,10 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                             "allow_custom_mcp_servers": patch.allow_custom_mcp_servers,
                             # SE-16 (SE-A41) — skill-evolution rollout gate.
                             "skill_evolution_enabled": patch.skill_evolution_enabled,
+                            # SE-16 (SE-A45) — implicit judge sample rate.
+                            "skill_evolution_judge_sample_pct": (
+                                patch.skill_evolution_judge_sample_pct
+                            ),
                         }.items()
                         if v is not None
                     }
