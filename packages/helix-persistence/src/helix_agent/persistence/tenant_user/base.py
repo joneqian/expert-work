@@ -8,6 +8,7 @@ Implementations:
 from __future__ import annotations
 
 import abc
+from collections.abc import Collection
 from uuid import UUID
 
 from helix_agent.protocol import SubjectType, TenantUser
@@ -44,4 +45,15 @@ class TenantUserStore(abc.ABC):
 
         Returns ``None`` when the row does not exist or belongs to a
         different tenant — never reveals cross-tenant existence.
+        """
+
+    @abc.abstractmethod
+    async def get_many(
+        self, user_ids: Collection[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, TenantUser]:
+        """Batch :meth:`get` — one read for the M2 users rollup.
+
+        Returns a map keyed by ``TenantUser.id``; ids that don't exist or
+        belong to a different tenant are simply absent (same non-disclosure
+        semantics as :meth:`get`). An empty ``user_ids`` returns ``{}``.
         """

@@ -107,13 +107,15 @@ class TokenUsageStore(abc.ABC):
         tenant_id: UUID,
         start: datetime,
         end: datetime,
+        user_id: UUID | None = None,
     ) -> Sequence[TokenUsageRecord]:
         """Return **all** rows with ``start <= observed_at < end`` — Stream Y4.
 
         Half-open window (start inclusive, end exclusive). No row cap: the Y4
         rollup must price every usage row in a month, so this reads the full
         window (the SQL impl pages internally). Tenant scoping rides on the RLS
-        context, like :meth:`list_for_tenant`.
+        context, like :meth:`list_for_tenant`. ``user_id`` narrows to one
+        end-user (conversation-centric IA M2 — the user-detail usage tab).
         """
 
     @abc.abstractmethod
@@ -125,6 +127,25 @@ class TokenUsageStore(abc.ABC):
         context, like :meth:`list_for_tenant`. Ids with no recorded usage
         (legacy / auto-triggered runs) are simply absent from the result; the
         caller treats a missing id as zero.
+        """
+
+    @abc.abstractmethod
+    async def totals_by_users(
+        self,
+        *,
+        agent_name: str,
+        agent_version: str,
+        user_ids: Sequence[UUID],
+    ) -> dict[UUID, TokenTotals]:
+        """Sum token usage per ``user_id`` for one agent version.
+
+        Feeds the conversation-centric M2 users rollup
+        (``docs/design/conversation-centric-ia.md`` §5) — ``token_usage``
+        carries ``agent_name`` / ``agent_version`` / ``user_id`` directly
+        (migration 0096 + M1-5a), so this is a plain GROUP BY with **no
+        trace join**. Tenant scoping rides on the RLS context, like
+        :meth:`list_for_tenant`. Users with no recorded usage are absent
+        from the result; the caller treats a missing id as zero.
         """
 
 
@@ -162,6 +183,7 @@ class InMemoryTokenUsageStore(TokenUsageStore):
         tenant_id: UUID,
         start: datetime,
         end: datetime,
+        user_id: UUID | None = None,
     ) -> Sequence[TokenUsageRecord]:
         return [
             r
@@ -169,6 +191,7 @@ class InMemoryTokenUsageStore(TokenUsageStore):
             if r.tenant_id == tenant_id
             and r.observed_at is not None
             and start <= r.observed_at < end
+            and (user_id is None or r.user_id == user_id)
         ]
 
     async def totals_by_trace_ids(self, trace_ids: Sequence[str]) -> dict[str, TokenTotals]:
@@ -199,6 +222,36 @@ class InMemoryTokenUsageStore(TokenUsageStore):
                 models=tuple(sorted(m for m in models[tid] if m)),
             )
             for tid in calls
+        }
+
+    async def totals_by_users(
+        self,
+        *,
+        agent_name: str,
+        agent_version: str,
+        user_ids: Sequence[UUID],
+    ) -> dict[UUID, TokenTotals]:
+        wanted = set(user_ids)
+        grouped: dict[UUID, list[TokenUsageRecord]] = {}
+        for r in self._rows:
+            if (
+                r.user_id is None
+                or r.user_id not in wanted
+                or r.agent_name != agent_name
+                or r.agent_version != agent_version
+            ):
+                continue
+            grouped.setdefault(r.user_id, []).append(r)
+        return {
+            uid: TokenTotals(
+                input_tokens=sum(r.input_tokens for r in rows),
+                output_tokens=sum(r.output_tokens for r in rows),
+                cache_creation_tokens=sum(r.cache_creation_tokens for r in rows),
+                cache_read_tokens=sum(r.cache_read_tokens for r in rows),
+                llm_calls=len(rows),
+                models=tuple(sorted({r.model for r in rows if r.model})),
+            )
+            for uid, rows in grouped.items()
         }
 
 
@@ -261,6 +314,7 @@ class DbTokenUsageStore(TokenUsageStore):
         tenant_id: UUID,
         start: datetime,
         end: datetime,
+        user_id: UUID | None = None,
     ) -> Sequence[TokenUsageRecord]:
         # Keyset pagination by ascending id: no row cap, bounded memory per
         # page. ``observed_at`` is monotonic with insert but not guaranteed
@@ -287,6 +341,8 @@ class DbTokenUsageStore(TokenUsageStore):
                     .order_by(TokenUsageRow.id.asc())
                     .limit(page_size)
                 )
+                if user_id is not None:
+                    stmt = stmt.where(TokenUsageRow.user_id == user_id)
                 rows = (await session.execute(stmt)).scalars().all()
                 if not rows:
                     break
@@ -315,6 +371,50 @@ class DbTokenUsageStore(TokenUsageStore):
             # tenant's rows are invisible to this session.
             .where(TokenUsageRow.trace_id.in_(ids))
             .group_by(TokenUsageRow.trace_id)
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).all()
+        return {
+            row[0]: TokenTotals(
+                input_tokens=int(row[1]),
+                output_tokens=int(row[2]),
+                cache_creation_tokens=int(row[3]),
+                cache_read_tokens=int(row[4]),
+                llm_calls=int(row[5]),
+                models=tuple(sorted(m for m in (row[6] or []) if m)),
+            )
+            for row in rows
+            if row[0] is not None
+        }
+
+    async def totals_by_users(
+        self,
+        *,
+        agent_name: str,
+        agent_version: str,
+        user_ids: Sequence[UUID],
+    ) -> dict[UUID, TokenTotals]:
+        ids = list(dict.fromkeys(user_ids))
+        if not ids:
+            return {}
+        stmt = (
+            select(
+                TokenUsageRow.user_id,
+                func.coalesce(func.sum(TokenUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(TokenUsageRow.output_tokens), 0),
+                func.coalesce(func.sum(TokenUsageRow.cache_creation_tokens), 0),
+                func.coalesce(func.sum(TokenUsageRow.cache_read_tokens), 0),
+                func.count(),
+                func.array_agg(func.distinct(TokenUsageRow.model)),
+            )
+            # Tenant scoping rides on RLS (the sessionmaker sets the tenant
+            # GUC) — a foreign tenant's rows are invisible to this session.
+            .where(
+                TokenUsageRow.agent_name == agent_name,
+                TokenUsageRow.agent_version == agent_version,
+                TokenUsageRow.user_id.in_(ids),
+            )
+            .group_by(TokenUsageRow.user_id)
         )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).all()

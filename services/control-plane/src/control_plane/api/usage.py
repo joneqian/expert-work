@@ -21,6 +21,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
@@ -169,12 +170,16 @@ def build_usage_router() -> APIRouter:
         principal: Annotated[Principal, Depends(require("billing", "read"))],
         store: Annotated[TokenUsageStore, Depends(_get_token_usage_store)],
         month: Annotated[str | None, Query()] = None,
+        # Conversation-centric IA M2 — narrow to one end-user (the
+        # user-detail usage tab). Endpoint already requires billing:read
+        # (an admin capability), so no extra per-user gate is needed.
+        user_id: Annotated[UUID | None, Query()] = None,
     ) -> dict[str, object]:
         target = _parse_month(month)
         start, end = _month_window(target)
         # Realtime — straight from the meter, no rollup lag. RLS self-isolated.
         rows = await store.list_for_tenant_window(
-            tenant_id=principal.tenant_id, start=start, end=end
+            tenant_id=principal.tenant_id, start=start, end=end, user_id=user_id
         )
 
         total = _token_zero()

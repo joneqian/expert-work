@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -272,3 +272,106 @@ async def test_totals_skips_null_trace_and_unrequested_ids(
 @pytest.mark.asyncio
 async def test_totals_empty_input_returns_empty(store: InMemoryTokenUsageStore) -> None:
     assert await store.totals_by_trace_ids([]) == {}
+
+
+@pytest.mark.asyncio
+async def test_totals_by_users_groups_per_user_for_one_agent(
+    store: InMemoryTokenUsageStore,
+) -> None:
+    """M2 users rollup — GROUP BY user for one (agent, version), no trace join."""
+    tenant = uuid4()
+    alice, bob = uuid4(), uuid4()
+    await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant,
+            agent_name="bot",
+            agent_version="1.0.0",
+            model="m1",
+            user_id=alice,
+            input_tokens=10,
+            output_tokens=5,
+        )
+    )
+    await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant,
+            agent_name="bot",
+            agent_version="1.0.0",
+            model="m2",
+            user_id=alice,
+            input_tokens=20,
+            output_tokens=7,
+        )
+    )
+    await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant,
+            agent_name="bot",
+            agent_version="2.0.0",  # other version — must not count
+            model="m1",
+            user_id=alice,
+            input_tokens=99,
+            output_tokens=99,
+        )
+    )
+    await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant,
+            agent_name="bot",
+            agent_version="1.0.0",
+            model="m1",
+            user_id=bob,
+            input_tokens=3,
+            output_tokens=1,
+        )
+    )
+    # No-user row (system / preview) — never attributed.
+    await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant,
+            agent_name="bot",
+            agent_version="1.0.0",
+            model="m1",
+            input_tokens=50,
+            output_tokens=50,
+        )
+    )
+
+    totals = await store.totals_by_users(
+        agent_name="bot", agent_version="1.0.0", user_ids=[alice, bob]
+    )
+    a = totals[alice]
+    assert a.input_tokens == 30
+    assert a.output_tokens == 12
+    assert a.llm_calls == 2
+    assert a.models == ("m1", "m2")
+    assert totals[bob].total_tokens == 4
+
+
+@pytest.mark.asyncio
+async def test_totals_by_users_empty_input_returns_empty(
+    store: InMemoryTokenUsageStore,
+) -> None:
+    assert await store.totals_by_users(agent_name="bot", agent_version="1.0.0", user_ids=[]) == {}
+
+
+@pytest.mark.asyncio
+async def test_window_filters_by_user(store: InMemoryTokenUsageStore) -> None:
+    """M2 user-detail usage tab — the month window narrowed to one user."""
+    tenant = uuid4()
+    alice, bob = uuid4(), uuid4()
+    for uid, inp in [(alice, 10), (bob, 99)]:
+        await store.insert(
+            TokenUsageRecord(
+                tenant_id=tenant,
+                agent_name="bot",
+                agent_version="1.0.0",
+                model="m1",
+                user_id=uid,
+                input_tokens=inp,
+            )
+        )
+    start = datetime.now(UTC) - timedelta(minutes=1)
+    end = datetime.now(UTC) + timedelta(minutes=1)
+    rows = await store.list_for_tenant_window(tenant_id=tenant, start=start, end=end, user_id=alice)
+    assert [r.input_tokens for r in rows] == [10]

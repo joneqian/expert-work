@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Index, Text, func
+from sqlalchemy import DateTime, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -47,4 +47,13 @@ class ThreadMetaRow(Base):
     __table_args__ = (
         Index("thread_meta_tenant_status_idx", "tenant_id", "status"),
         Index("thread_meta_tenant_user_idx", "tenant_id", "user_id"),
+        # Conversation-centric IA — agent-first thread reads (Conversations
+        # tab / browser filters / M2 users rollup). Migration 0105.
+        Index(
+            "thread_meta_tenant_agent_user_idx",
+            "tenant_id",
+            "agent_name",
+            "user_id",
+            postgresql_where=text("agent_name IS NOT NULL"),
+        ),
     )

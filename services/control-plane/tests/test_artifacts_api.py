@@ -99,6 +99,35 @@ async def test_list_artifacts_isolated_per_user(
 
 
 @pytest.mark.asyncio
+async def test_admin_lists_another_users_artifacts_via_user_id(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    """Conversation-centric IA M2 — ``?user_id=`` is the tenant admin's
+    governance view (the user-detail Artifacts tab). The default JWT
+    carries the admin role, so user-b can read user-a's list."""
+    client, _, user_id = setup
+    resp = await client.get(f"/v1/artifacts?user_id={user_id}", headers=_headers("user-b"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["artifacts"] == [
+        {"name": "report.md", "kind": "document", "latest_version": 1}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_non_admin_user_id_for_someone_else_is_403(
+    setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
+) -> None:
+    client, _, user_id = setup
+    viewer_jwt = make_test_jwt(tenant_id=_TENANT, subject="user-b", roles=("viewer",))
+    resp = await client.get(
+        f"/v1/artifacts?user_id={user_id}",
+        headers={"Authorization": f"Bearer {viewer_jwt}"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
 async def test_download_artifact_returns_content(
     setup: tuple[AsyncClient, InMemoryArtifactStore, UUID],
 ) -> None:

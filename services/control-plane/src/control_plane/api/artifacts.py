@@ -35,6 +35,7 @@ from control_plane.api._artifact_mime import content_disposition_header, infer_c
 from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit as audit_emit
+from control_plane.auth.rbac import is_admin
 from control_plane.quota.base import QuotaService
 from control_plane.tenant_scope import (
     CrossTenant,
@@ -95,6 +96,10 @@ def build_artifacts_router() -> APIRouter:
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
+        # Conversation-centric IA M2 — a tenant admin's governance view of
+        # one member's artifacts (the user-detail Artifacts tab). Non-admins
+        # may only read their own; asking for someone else is a 403.
+        user_id: Annotated[UUID | None, Query()] = None,
     ) -> JSONResponse:
         scope = await ensure_tenant_scope(
             request.state.principal,
@@ -120,14 +125,28 @@ def build_artifacts_router() -> APIRouter:
                 ]
             else:
                 caller_user_id = await resolve_caller_user_id(request, users)
-                # Artifacts are per-user; a machine principal owns none.
-                if caller_user_id is None:
+                target_user_id = caller_user_id
+                if user_id is not None and user_id != caller_user_id:
+                    # Same admin semantics as ``caller_owns_thread`` — a
+                    # tenant admin reads any member, a plain user does not.
+                    if not is_admin(request.state.principal):
+                        raise HTTPException(
+                            status_code=403,
+                            detail={
+                                "code": "USER_SCOPE_FORBIDDEN",
+                                "message": ("only tenant admins may read another user's artifacts"),
+                            },
+                        )
+                    target_user_id = user_id
+                # Artifacts are per-user; a machine principal owns none
+                # (unless an admin machine principal targets a user).
+                if target_user_id is None:
                     return JSONResponse(
                         content={"artifacts": [], "items": [], "cross_tenant": False}
                     )
-                current_user_id_var.set(caller_user_id)
+                current_user_id_var.set(target_user_id)
                 artifacts = await store.list_for_user(
-                    tenant_id=scope.tenant_id, user_id=caller_user_id
+                    tenant_id=scope.tenant_id, user_id=target_user_id
                 )
                 items = [
                     {"name": a.name, "kind": a.kind, "latest_version": a.latest_version}

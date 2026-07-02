@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -79,3 +80,17 @@ class SqlTenantUserStore(TenantUserStore):
             if row is None or row.tenant_id != tenant_id:
                 return None
             return _row_to_user(row)
+
+    async def get_many(
+        self, user_ids: Collection[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, TenantUser]:
+        ids = list(set(user_ids))
+        if not ids:
+            return {}
+        stmt = select(TenantUserRow).where(
+            TenantUserRow.id.in_(ids),
+            TenantUserRow.tenant_id == tenant_id,
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return {row.id: _row_to_user(row) for row in rows}

@@ -2,6 +2,7 @@
 
 from control_plane.api.agent_schema import build_agent_schema_router
 from control_plane.api.agent_templates import build_agent_templates_router
+from control_plane.api.agent_users import build_agent_users_router
 from control_plane.api.agents import build_agents_router
 from control_plane.api.api_keys import build_api_keys_router
 from control_plane.api.approvals import build_approvals_router
@@ -59,6 +60,7 @@ from control_plane.api.webhook_endpoints import build_webhook_endpoints_router
 __all__ = [
     "build_agent_schema_router",
     "build_agent_templates_router",
+    "build_agent_users_router",
     "build_agents_router",
     "build_api_keys_router",
     "build_approvals_router",

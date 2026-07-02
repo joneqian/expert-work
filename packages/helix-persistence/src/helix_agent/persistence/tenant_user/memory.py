@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -55,3 +56,13 @@ class InMemoryTenantUserStore(TenantUserStore):
         if row is None or row.tenant_id != tenant_id:
             return None
         return row
+
+    async def get_many(
+        self, user_ids: Collection[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, TenantUser]:
+        wanted = set(user_ids)
+        return {
+            uid: row
+            for uid, row in self._rows.items()
+            if uid in wanted and row.tenant_id == tenant_id
+        }

@@ -37,6 +37,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from control_plane.api._authz import require
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit
+from control_plane.auth.rbac import is_admin
 from control_plane.tenant_scope import (
     CrossTenant,
     applied_scope,
@@ -183,6 +184,10 @@ def build_memory_router() -> APIRouter:
         kind: Annotated[Literal["fact", "episodic"] | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=_LIST_LIMIT_MAX)] = _LIST_LIMIT_DEFAULT,
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,  # Stream N
+        # Conversation-centric IA M2 — a tenant admin's governance view of
+        # one member's memories (the user-detail Memory tab). Non-admins
+        # may only read their own; asking for someone else is a 403.
+        user_id: Annotated[UUID | None, Query()] = None,
     ) -> dict[str, Any]:
         scope = await ensure_tenant_scope(
             principal,
@@ -200,9 +205,22 @@ def build_memory_router() -> APIRouter:
                 items = await store.list_all_tenants(kind=kind, limit=limit)
             else:
                 # Single-tenant: keep the per-user enforcement.
-                _, user_id = await _require_caller_user(request, users)
+                _, caller_user_id = await _require_caller_user(request, users)
+                target_user_id = caller_user_id
+                if user_id is not None and user_id != caller_user_id:
+                    # Same admin semantics as ``caller_owns_thread`` — a
+                    # tenant admin reads any member, a plain user does not.
+                    if not is_admin(principal):
+                        raise HTTPException(
+                            status_code=403,
+                            detail={
+                                "code": "USER_SCOPE_FORBIDDEN",
+                                "message": "only tenant admins may read another user's memories",
+                            },
+                        )
+                    target_user_id = user_id
                 items = await store.list_for_user(
-                    tenant_id=scope.tenant_id, user_id=user_id, kind=kind, limit=limit
+                    tenant_id=scope.tenant_id, user_id=target_user_id, kind=kind, limit=limit
                 )
         return {
             "success": True,

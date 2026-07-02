@@ -166,6 +166,56 @@ async def test_list_does_not_show_other_users_memory(
 
 
 @pytest.mark.asyncio
+async def test_admin_lists_another_users_memories_via_user_id(
+    setup: tuple[AsyncClient, InMemoryMemoryStore, UUID, UUID, InMemoryAuditLogStore],
+) -> None:
+    """Conversation-centric IA M2 — ``?user_id=`` is the tenant admin's
+    governance view (the user-detail Memory tab)."""
+    client, store, _, _, _ = setup
+    other_user_id = uuid4()
+    await store.write(
+        [
+            MemoryItem(
+                id=uuid4(),
+                tenant_id=_TENANT,
+                user_id=other_user_id,
+                kind="fact",
+                content="bob's fact",
+                embedding=(0.0, 0.0, 0.0),
+            )
+        ]
+    )
+    resp = await client.get(f"/v1/memory?user_id={other_user_id}")
+    assert resp.status_code == 200, resp.text
+    contents = {i["content"] for i in resp.json()["data"]["items"]}
+    assert contents == {"bob's fact"}
+
+
+@pytest.mark.asyncio
+async def test_non_admin_user_id_for_someone_else_is_403() -> None:
+    """A plain member may only read their own memories — asking for
+    another user is a 403, not silent narrowing."""
+    users, store, _, _ = await _seed()
+    app = create_app(
+        settings=_settings(),
+        tenant_user_repo=users,
+        memory_repo=store,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+    )
+    app.state.embedder = _StubEmbedder()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://cp.test",
+        headers=_headers(roles=("viewer",)),  # memory:read but not admin
+    ) as client:
+        resp = await client.get(f"/v1/memory?user_id={uuid4()}")
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"
+
+
+@pytest.mark.asyncio
 async def test_list_for_machine_principal_returns_403() -> None:
     """A JWT carrying a service-account principal has no user binding;
     memory endpoints must refuse — 403, not 200 with someone else's

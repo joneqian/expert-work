@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from control_plane.api import (
     build_agent_schema_router,
     build_agent_templates_router,
+    build_agent_users_router,
     build_agents_router,
     build_api_keys_router,
     build_approvals_router,
@@ -1817,6 +1818,7 @@ def create_app(
     app.include_router(build_plan_router())
     app.include_router(build_runs_list_router())
     app.include_router(build_conversations_router())
+    app.include_router(build_agent_users_router())
     # Stream HX-7 — the cross-run approval queue + batch decide.
     app.include_router(build_approvals_router())
     app.include_router(build_feedback_router())

@@ -79,3 +79,19 @@ async def test_get_filters_by_tenant() -> None:
     assert await store.get(user.id, tenant_id=owner) is not None
     assert await store.get(user.id, tenant_id=other) is None
     assert await store.get(uuid4(), tenant_id=owner) is None
+
+
+@pytest.mark.asyncio
+async def test_get_many_batches_and_filters_by_tenant() -> None:
+    store = InMemoryTenantUserStore()
+    owner, other = uuid4(), uuid4()
+    a = await store.resolve(tenant_id=owner, subject_type="user", subject_id="a")
+    b = await store.resolve(tenant_id=owner, subject_type="user", subject_id="b")
+    foreign = await store.resolve(tenant_id=other, subject_type="user", subject_id="c")
+
+    got = await store.get_many([a.id, b.id, foreign.id, uuid4()], tenant_id=owner)
+    # Foreign-tenant + unknown ids are absent, not errors.
+    assert set(got) == {a.id, b.id}
+    assert got[a.id].subject_id == "a"
+
+    assert await store.get_many([], tenant_id=owner) == {}
