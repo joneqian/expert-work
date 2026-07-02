@@ -72,8 +72,9 @@ Agent 详情
 ### M1 — 对话
 
 - `GET /v1/conversations?agent_name=&agent_version=&user_id=&status=&q=&has_error=&since=&limit=&offset=` —— `agent_run` 按 `thread_id` 分组:`thread_id, user_id, agent_name, agent_version, first_at, last_at, run_count, last_status, has_error, has_pending`。聚合 token 复用 `token_usage.totals_by_trace_ids`(收集该 thread 全 run 的 trace_id)。tenant scope,RLS 天然安全。
-  - **运营过滤**(#888/#889 落地):`has_error`(≥1 失败终态 run,≠ `status=failed` 线程生命周期)与 `since`(活动窗口:≥1 run 在该时刻后创建)由 `RunStore.thread_ids_with_runs(since, failed_only)` 先解出线程集,再作 `thread_ids` 交给 `ThreadMetaStore` —— 各 store 守各表,组合在 API 层(与 users rollup 同型)。
+  - **运营过滤**(#888/#889/#890 落地):`has_error`(≥1 失败终态 run,≠ `status=failed` 线程生命周期)、`has_pending`(≥1 run 停在审批闸,"needs a human")与 `since`(活动窗口:≥1 run 在该时刻后创建)由 `RunStore.thread_ids_with_runs(since, only="failed"|"pending")` 先解出线程集,多过滤各自解集后在 API 层**求交**,再作 `thread_ids` 交给 `ThreadMetaStore` —— 各 store 守各表(与 users rollup 同型)。
   - **分页契约**:`offset` 翻页;响应 `total` 为真实计数(`ThreadMetaStore.count_*` 与 list 共享同一 WHERE 构建,total 不会与页漂移)。cursor 分页当前不需要(运营浏览器深翻页少)。
+  - **排序**:对话浏览器固定「末次活跃」倒序(`order_by="last_activity"`:max(run.created_at) 子查询 outerjoin,run-less 线程 coalesce 回退创建时间)——旧线程刚报错要浮顶,创建时间序会把它沉底。其他 `list_by_tenant` 消费者(会话历史等)默认 `created_at` 不变。
 - `GET /v1/conversations/{thread_id}` —— 该 thread 的 runs[](含状态/时间戳/trace_id)+ 聚合摘要(总 token / llm_calls / 模型 / 成本 fast-follow)。
 - **最大未知**:跨 run 的**统一消息 transcript**(用户/助手轮)存 LangGraph checkpoint(keyed by thread_id),现无读 API。**M1 对话详情先做「摘要 + run 列表」**,每 run 消息仍走现 `RunDetail` 事件流。统一 transcript 标 **M1.5**(需评估 checkpoint 读端点成本)。
 
