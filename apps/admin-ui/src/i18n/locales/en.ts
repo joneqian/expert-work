@@ -222,6 +222,12 @@ export interface TranslationKeys {
     filter_user_active: string;
     filter_agent: string;
     filter_errors_only: string;
+    filter_window: string;
+    window_all: string;
+    window_1h: string;
+    window_24h: string;
+    window_7d: string;
+    pager_total: string;
     search_placeholder: string;
     cross_tenant_banner: string;
     failed_to_load: string;
@@ -2341,6 +2347,12 @@ const en: TranslationKeys = {
     filter_user_active: "User: {{user}}…",
     filter_agent: "Filter by agent",
     filter_errors_only: "Errors only",
+    filter_window: "Time window",
+    window_all: "All time",
+    window_1h: "Last hour",
+    window_24h: "Last 24 hours",
+    window_7d: "Last 7 days",
+    pager_total: "{{total}} conversations",
     search_placeholder: "Search conversation title…",
     cross_tenant_banner: "cross-tenant view",
     failed_to_load: "Failed to load conversations",
