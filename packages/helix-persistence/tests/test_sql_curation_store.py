@@ -307,3 +307,19 @@ async def test_record_retry_atomic_increment_sql(
     assert rec is not None and rec.retry_count == 2 and rec.evolved_at is None
     # Cross-tenant probe: no bump, returns 0.
     assert await candidates.record_retry(candidate_id=cid, tenant_id=uuid4()) == 0
+
+
+@pytest.mark.asyncio
+async def test_implicit_success_signal_round_trips_sql(
+    curation_stores: tuple[SqlEvalDatasetStore, SqlCurationCandidateStore],
+) -> None:
+    """SE-16 (SE-A38) — migration 0108 widens the signal CHECK."""
+    _, candidates = curation_stores
+    cid, tenant = uuid4(), uuid4()
+    await candidates.upsert(
+        _candidate(candidate_id=cid, tenant_id=tenant).model_copy(
+            update={"signal": "implicit_success"}
+        )
+    )
+    rec = await candidates.get(candidate_id=cid, tenant_id=tenant)
+    assert rec is not None and rec.signal == "implicit_success"

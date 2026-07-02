@@ -40,6 +40,7 @@ from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import CurationCandidateStore, SkillStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.curation import EvalDatasetStore
+from helix_agent.persistence.feedback_store import FeedbackStore
 from helix_agent.protocol import AgentSpecStatus, CurationCandidateRecord, EvalDatasetRecord
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.evolution.graph_runner import GraphReplayTaskRunner
@@ -107,6 +108,11 @@ def _parse_score(text: str) -> int:
 @dataclass(frozen=True)
 class _TrajectoryEvidenceProvider:
     reader: TrajectoryReader
+    # SE-16 (SE-A39) — optional stores that let 👎-rated trajectories (with
+    # the user's own comment) join the contrastive failure side. ``None``
+    # keeps the legacy outcome-only sourcing.
+    candidate_store: CurationCandidateStore | None = None
+    feedback_store: FeedbackStore | None = None
 
     async def __call__(self, candidate: CurationCandidateRecord) -> SkillEvidence:
         successes: list[str] = []
@@ -116,7 +122,16 @@ class _TrajectoryEvidenceProvider:
             successes.append(render_trajectory(source.messages))
             allowed |= set(tools_used(source.messages))
 
-        failures = await self._render_some(candidate, outcome="failed", limit=_MAX_FAILURE_EVIDENCE)
+        # SE-A39 — 👎 trajectories first (a 👎 on a *successful* run is a
+        # "false success": the highest-information contrast, invisible to
+        # outcome-based sourcing), then top up with failed outcomes.
+        failures = await self._downvoted_failures(candidate, limit=_MAX_FAILURE_EVIDENCE)
+        if len(failures) < _MAX_FAILURE_EVIDENCE:
+            failures.extend(
+                await self._render_some(
+                    candidate, outcome="failed", limit=_MAX_FAILURE_EVIDENCE - len(failures)
+                )
+            )
         if len(successes) < _MAX_SUCCESS_EVIDENCE:
             successes.extend(
                 await self._render_some(
@@ -131,6 +146,34 @@ class _TrajectoryEvidenceProvider:
             failures=tuple(failures),
             allowed_tools=frozenset(allowed) or None,
         )
+
+    async def _downvoted_failures(
+        self, candidate: CurationCandidateRecord, *, limit: int
+    ) -> list[str]:
+        """Same-agent 👎 trajectories, prefixed with the user's comment —
+        their own words are the best failure label the distiller can get."""
+        if self.candidate_store is None:
+            return []
+        negatives = await self.candidate_store.list_for_review(
+            tenant_id=candidate.tenant_id,
+            agent_name=candidate.agent_name,
+            signal="negative_feedback",
+        )
+        rendered: list[str] = []
+        for neg in negatives:
+            if len(rendered) >= limit:
+                break
+            traj = await self.reader.read(neg.trajectory_key)
+            if traj is None:
+                continue
+            text = render_trajectory(traj.messages)
+            if self.feedback_store is not None:
+                feedback = await self.feedback_store.list_for_thread(thread_id=neg.thread_id)
+                comments = [f.comment for f in feedback if f.rating == "down" and f.comment]
+                if comments:
+                    text = "User feedback (thumbs-down): " + " | ".join(comments) + "\n" + text
+            rendered.append(text)
+        return rendered
 
     async def _render_some(
         self,
@@ -327,6 +370,7 @@ def build_evolution_worker(
     max_promotes_per_hour: int = 5,
     breaker: CircuitBreaker | None = None,
     tenant_gate: TenantGate | None = None,
+    feedback_store: FeedbackStore | None = None,
 ) -> SkillEvolutionWorker:
     """Assemble the production skill-evolution worker (lifespan wiring).
 
@@ -351,7 +395,11 @@ def build_evolution_worker(
         distiller=SkillDistiller(model=aux_text, model_name=aux_default_model),
         attributor=SkillAttributor(model=aux_text, model_name=aux_default_model),
         skill_store=skill_store,
-        evidence_provider=_TrajectoryEvidenceProvider(trajectory_reader),
+        evidence_provider=_TrajectoryEvidenceProvider(
+            trajectory_reader,
+            candidate_store=candidate_store,
+            feedback_store=feedback_store,
+        ),
         held_out_provider=_DualSourceHeldOutProvider(eval_store, trajectory_reader),
         replay_invoker=_GraphReplayInvoker(
             agent_spec_store=agent_spec_store,

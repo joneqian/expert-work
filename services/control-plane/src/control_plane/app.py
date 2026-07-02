@@ -1151,6 +1151,8 @@ def create_app(
                         candidate_store=resolved_curation_candidate_store,
                         thread_store=resolved_threads,
                         feedback_store=resolved_feedback,
+                        # SE-16 (SE-A38) — settled-quietly implicit-positive check.
+                        run_store=resolved_run_store,
                         interval_s=resolved_settings.curation_worker_interval_s,
                         batch_size=resolved_settings.curation_worker_batch_size,
                     )
@@ -1505,6 +1507,9 @@ def create_app(
                     ),
                     aux_default_model=resolved_settings.memory_consolidator_default_aux_model,
                     tenant_gate=_skill_evolution_tenant_gate,
+                    # SE-16 (SE-A39) — 👎 trajectories (+ comments) join the
+                    # contrastive failure side of distillation.
+                    feedback_store=resolved_feedback,
                     candidate_store=resolved_curation_candidate_store,
                     skill_store=resolved_skill_store,
                     eval_store=resolved_eval_dataset_store,

@@ -39,7 +39,15 @@ EvalDatasetSource = Literal["golden", "trajectory", "regression"]
 #: ``negative_feedback`` — a 👎 on the thread. ``failed_outcome`` — the
 #: run ended ``failed`` / ``max_steps``. ``positive_feedback`` — a 👍
 #: (golden material).
-CurationSignal = Literal["negative_feedback", "failed_outcome", "positive_feedback"]
+CurationSignal = Literal[
+    "negative_feedback",
+    "failed_outcome",
+    "positive_feedback",
+    # SE-16 (SE-A38) — implicit positive: an unlabeled success whose thread
+    # settled quietly (no 👎, no failed/pending runs, no follow-up activity).
+    # Weak label — its distillates never auto-promote (SE-A44).
+    "implicit_success",
+]
 
 #: A run's terminal outcome — mirrors the L7 trajectory ObjectStore
 #: ``outcome`` key segment (``orchestrator.trajectory``).

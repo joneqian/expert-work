@@ -12,6 +12,7 @@ from control_plane.curation_worker import CurationWorker
 from helix_agent.persistence import InMemoryCurationCandidateStore, InMemoryThreadMetaStore
 from helix_agent.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
 from helix_agent.protocol import CandidateStatus, TrajectoryOutcome
+from helix_agent.runtime.runs import DisconnectMode, InMemoryRunStore, RunInfo, RunStatus
 from helix_agent.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryReader, TrajectoryRecord, TrajectoryRecorder
 
@@ -21,17 +22,45 @@ _BASE = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
 class _Fixture:
     """A worker wired over in-memory backends, with seed helpers."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, with_run_store: bool = False) -> None:
         self.object_store = InMemoryObjectStore()
         self.candidates = InMemoryCurationCandidateStore()
         self.threads = InMemoryThreadMetaStore()
         self.feedback = InMemoryFeedbackStore()
+        self.runs = InMemoryRunStore() if with_run_store else None
         self.worker = CurationWorker(
             trajectory_reader=TrajectoryReader(object_store=self.object_store),
             candidate_store=self.candidates,
             thread_store=self.threads,
             feedback_store=self.feedback,
+            run_store=self.runs,
             interval_s=60,
+        )
+
+    async def seed_run(
+        self,
+        *,
+        tenant_id: UUID,
+        thread_id: UUID,
+        status: RunStatus = RunStatus.SUCCESS,
+        created_at: datetime = _BASE,
+    ) -> None:
+        assert self.runs is not None
+        await self.runs.create(
+            RunInfo(
+                run_id=uuid4(),
+                tenant_id=tenant_id,
+                thread_id=thread_id,
+                user_id=None,
+                status=status,
+                on_disconnect=DisconnectMode.CANCEL,
+                is_resume=False,
+                error=None,
+                created_at=created_at,
+                updated_at=created_at,
+                finished_at=created_at,
+                trace_id=None,
+            )
         )
 
     async def seed_trajectory(
@@ -194,3 +223,74 @@ async def test_start_stop_lifecycle() -> None:
     assert fx.worker.is_running is True
     await fx.worker.stop()
     assert fx.worker.is_running is False
+
+
+# ---------------------------------------------------------------------------
+# SE-16 (SE-A38) — implicit positive: unlabeled success + settled thread
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_settled_unlabeled_success_becomes_implicit_candidate() -> None:
+    fx = _Fixture(with_run_store=True)
+    tenant, thread = uuid4(), uuid4()
+    await fx.seed_thread(tenant_id=tenant, thread_id=thread)
+    await fx.seed_trajectory(tenant_id=tenant, thread_id=thread, outcome="success")
+    # Last run finished long ago (>> quiet window) and the thread is clean.
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, created_at=_BASE)
+
+    detected = await fx.worker.run_once()
+    assert detected == 1
+    rows = await fx.candidates.list_for_review(tenant_id=tenant, agent_name="reporter")
+    assert [r.signal for r in rows] == ["implicit_success"]
+    assert rows[0].status is CandidateStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_active_thread_is_not_implicit_yet() -> None:
+    fx = _Fixture(with_run_store=True)
+    tenant, thread = uuid4(), uuid4()
+    await fx.seed_thread(tenant_id=tenant, thread_id=thread)
+    await fx.seed_trajectory(tenant_id=tenant, thread_id=thread, outcome="success")
+    # A run just landed — conversation still in flight; not a candidate yet
+    # (the next sweep re-evaluates once the thread settles).
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, created_at=datetime.now(UTC))
+
+    assert await fx.worker.run_once() == 0
+    assert await fx.candidates.list_for_review(tenant_id=tenant, agent_name="reporter") == []
+
+
+@pytest.mark.asyncio
+async def test_thread_with_failed_run_is_not_implicit() -> None:
+    fx = _Fixture(with_run_store=True)
+    tenant, thread = uuid4(), uuid4()
+    await fx.seed_thread(tenant_id=tenant, thread_id=thread)
+    await fx.seed_trajectory(tenant_id=tenant, thread_id=thread, outcome="success")
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, created_at=_BASE)
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, status=RunStatus.ERROR, created_at=_BASE)
+
+    assert await fx.worker.run_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_no_run_store_disables_implicit_detection() -> None:
+    fx = _Fixture(with_run_store=False)
+    tenant, thread = uuid4(), uuid4()
+    await fx.seed_thread(tenant_id=tenant, thread_id=thread)
+    await fx.seed_trajectory(tenant_id=tenant, thread_id=thread, outcome="success")
+
+    assert await fx.worker.run_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_explicit_up_still_outranks_implicit() -> None:
+    fx = _Fixture(with_run_store=True)
+    tenant, thread = uuid4(), uuid4()
+    await fx.seed_thread(tenant_id=tenant, thread_id=thread)
+    await fx.seed_trajectory(tenant_id=tenant, thread_id=thread, outcome="success")
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, created_at=_BASE)
+    await fx.seed_feedback(tenant_id=tenant, thread_id=thread, rating="up")
+
+    await fx.worker.run_once()
+    rows = await fx.candidates.list_for_review(tenant_id=tenant, agent_name="reporter")
+    assert [r.signal for r in rows] == ["positive_feedback"]

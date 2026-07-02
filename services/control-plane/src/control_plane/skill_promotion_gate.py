@@ -19,10 +19,17 @@ from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
 from control_plane.skill_promotion import PromoteDecision, decide_promotion, should_auto_promote
 from helix_agent.persistence.skill.base import SkillStore
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, CurationCandidateRecord
+from helix_agent.protocol.eval_dataset import CurationSignal
 from helix_agent.protocol.skill import SkillStatus
 from helix_agent.runtime.audit.logger import AuditLogger
 
-__all__ = ["PromotionGate"]
+__all__ = ["WEAK_LABEL_SIGNALS", "PromotionGate"]
+
+#: SE-16 (SE-A44) — weak-label candidate origins whose distillates never
+#: auto-promote, however strong the replay evidence: the input labels are
+#: inferred, so human review accumulates trust first. Explicit 👍 stays
+#: auto-eligible (human endorsement + independent replay verification).
+WEAK_LABEL_SIGNALS: frozenset[CurationSignal] = frozenset({"implicit_success"})
 
 
 def _scope_key(tenant_id: UUID, agent_name: str) -> str:
@@ -49,6 +56,10 @@ class PromotionGate:
     ) -> PromoteDecision:
         """Decide + (if AUTO_PROMOTE) flip the DRAFT to ACTIVE. Always grounded."""
         key = _scope_key(candidate.tenant_id, candidate.agent_name)
+        # SE-16 (SE-A44) — a weak-label origin (implicit_success) caps the
+        # path at human review regardless of replay strength.
+        if candidate.signal in WEAK_LABEL_SIGNALS:
+            auto_promote_eligible = False
         # SE-8 (SE-A13c) — persistent manual emergency stop. The worker runs
         # cross-tenant (owner / bypass), so this reads the global NULL-tenant
         # row alongside the candidate's tenant row.
