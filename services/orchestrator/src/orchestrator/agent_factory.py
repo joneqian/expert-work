@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -64,6 +64,7 @@ from helix_agent.protocol import (
     parse_skill_ref,
 )
 from helix_agent.protocol.model_catalog import ModelEntry, catalog_entry
+from helix_agent.protocol.skill import SkillStatus
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
@@ -389,6 +390,41 @@ class _LoadedSkills:
     memory_blocks: list[str] = field(default_factory=list)
 
 
+# SE-16 (SE-A42) — past this many auto-attached evolved skills the summary
+# list itself becomes context burden; the designed evolution is retrieval
+# pre-selection (BM25/embedding, HX-12 precedent). Not built yet — the warn
+# log is the trigger signal.
+_EVOLVED_ATTACH_WARN_THRESHOLD = 20
+
+
+async def _fetch_evolved_skills(
+    skill_store: SkillStore, *, tenant_id: UUID, agent_name: str
+) -> list[tuple[Skill, SkillVersion]]:
+    """SE-A42 — this agent's own ACTIVE distilled skills, latest version each.
+
+    Query shape per the design: same tenant + ``created_by_agent_name`` =
+    this agent + status ACTIVE, kept only when the resolved latest version
+    carries ``evolution_origin == 'distilled'`` (in-session-authored skills
+    are explicit agent work, not flywheel output — they stay manifest-declared).
+    """
+    evolved: list[tuple[Skill, SkillVersion]] = []
+    cursor: UUID | None = None
+    while True:
+        rows, cursor = await skill_store.list_skills(
+            tenant_id=tenant_id,
+            status=SkillStatus.ACTIVE,
+            created_by_agent_name=agent_name,
+            cursor=cursor,
+            limit=100,
+        )
+        for skill in rows:
+            version = await skill_store.resolve_by_name(tenant_id=tenant_id, name=skill.name)
+            if version is not None and version.evolution_origin == "distilled":
+                evolved.append((skill, version))
+        if cursor is None:
+            return evolved
+
+
 def _bound_distilled_skills(
     resolved_versions: dict[str, SkillVersion], *, agent_name: str
 ) -> tuple[BoundDistilledSkill, ...]:
@@ -560,12 +596,25 @@ async def build_agent(
     # tool registry so the sandbox tools can be bound with the skill seed-file
     # set (skill-runtime §5.1 auto-mount). ``_load_skills`` is pure-read and does
     # not touch the registry, so it safely precedes ``build_tool_registry``.
+    # SE-16 (SE-A42) — opt-in auto-attach of this agent's own distilled
+    # skills. Needs the raw store (list + resolve) and a real tenant scope;
+    # absent either, the build proceeds with manifest skills only.
+    evolved_skills: list[tuple[Skill, SkillVersion]] = []
+    if (
+        spec.spec.auto_attach_evolved_skills
+        and skill_store is not None
+        and isinstance(tenant_id, UUID)
+    ):
+        evolved_skills = await _fetch_evolved_skills(
+            skill_store, tenant_id=tenant_id, agent_name=spec.metadata.name
+        )
     loaded_skills = await _load_skills(
         spec=spec,
         skill_resolver=skill_resolver,
         tenant_id=tenant_id,
         registry=None,
         activity_recorder=skill_activity_recorder,
+        evolved=evolved_skills,
     )
     # skill-runtime §5.1 — activated skills' files (SKILL.md + scripts + reference),
     # U-21 drift/threat-filtered, materialized under /workspace/skills/<name>/ on
@@ -890,6 +939,7 @@ async def _load_skills(
     tenant_id: Any,
     registry: Any,
     activity_recorder: SkillActivityRecorder | None = None,
+    evolved: Sequence[tuple[Skill, SkillVersion]] = (),
 ) -> _LoadedSkills:
     """Resolve + merge ``spec.skills`` into prompt fragments + tool set.
 
@@ -909,20 +959,15 @@ async def _load_skills(
     Skill tools are NOT registered here (the function is pure-read);
     the caller wires them after assembling the prompt + computing the
     final tool-name → skill-name map.
-    """
-    if not spec.spec.skills:
-        return _LoadedSkills(prompt_fragments=[], skill_tools={}, activated_skill_names=[])
 
-    if skill_resolver is None:
-        # Skill resolution requires a wired ``SkillStore`` adapter; when
-        # the caller (unit test / Step 1 path) didn't wire one, the
-        # presence of any ``skills:`` entry is a hard failure — silent
-        # skip would let a manifest reference a skill and have it
-        # silently ignored at run time (worse than failing build).
-        raise AgentFactoryError(
-            f"manifest declares {len(spec.spec.skills)} skill(s) but no "
-            f"skill_resolver was wired into build_agent; skills cannot resolve"
-        )
+    ``evolved`` (SE-A42) — pre-fetched auto-attach candidates (this agent's
+    own ACTIVE distilled skills). Appended after the manifest loop with
+    SOFT-fail semantics: a duplicate, model mismatch, tool conflict, or
+    text-class component is skipped with a log, never a build error — an
+    auto-attached skill must not brick an agent whose manifest is valid.
+    """
+    if not spec.spec.skills and not evolved:
+        return _LoadedSkills(prompt_fragments=[], skill_tools={}, activated_skill_names=[])
 
     fragments: list[str] = []
     summaries: list[str] = []
@@ -935,6 +980,16 @@ async def _load_skills(
     agent_model_name = spec.spec.model.name
 
     for raw_ref in spec.spec.skills:
+        if skill_resolver is None:
+            # Skill resolution requires a wired ``SkillStore`` adapter; when
+            # the caller (unit test / Step 1 path) didn't wire one, the
+            # presence of any ``skills:`` entry is a hard failure — silent
+            # skip would let a manifest reference a skill and have it
+            # silently ignored at run time (worse than failing build).
+            raise AgentFactoryError(
+                f"manifest declares {len(spec.spec.skills)} skill(s) but no "
+                f"skill_resolver was wired into build_agent; skills cannot resolve"
+            )
         ref = parse_skill_ref(raw_ref)
         result = await _resolve_one(skill_resolver, tenant_id, ref.name, ref.version)
         version = _unwrap_skill_lookup(result, name=ref.name, pinned=ref.version is not None)
@@ -994,6 +1049,42 @@ async def _load_skills(
         # Capability Uplift Sprint #4 (Mini-ADR U-27) — bump last_used_at
         # so the Curator doesn't auto-stale a freshly-bound skill.
         await _record_skill_activity(activity_recorder, version)
+
+    # SE-16 (SE-A42) — auto-attach the agent's own distilled skills, lazily
+    # (summary only, never an eager fragment) and soft-fail (skip + log).
+    # Joining ``resolved`` is what feeds them into ``bound_distilled_skills``
+    # → skill_run_usage with-rows → rollback monitor / curator liveness.
+    if len(evolved) > _EVOLVED_ATTACH_WARN_THRESHOLD:
+        logger.warning(
+            "auto_attach_evolved_skills: %d skills for agent %r exceeds %d — "
+            "the designed evolution is retrieval pre-selection (SE-A42)",
+            len(evolved),
+            spec.metadata.name,
+            _EVOLVED_ATTACH_WARN_THRESHOLD,
+        )
+    for evolved_skill, evolved_version in evolved:
+        name = evolved_skill.name
+        if name in resolved:
+            continue  # manifest declaration wins
+        if evolved_skill.component_type != "skill":
+            # Text-class components are eager prompt blocks by nature —
+            # against the lazy-attach contract; they stay manifest-declared.
+            logger.info("auto_attach skipped %r: text-class component", name)
+            continue
+        if evolved_version.required_models and agent_model_name not in (
+            evolved_version.required_models
+        ):
+            logger.info("auto_attach skipped %r: model mismatch", name)
+            continue
+        if any(t in skill_tools for t in evolved_version.tool_names):
+            logger.info("auto_attach skipped %r: tool-name conflict", name)
+            continue
+        for tool_name in evolved_version.tool_names:
+            skill_tools[tool_name] = name
+        resolved[name] = evolved_version
+        summaries.append(_render_skill_summary(name=name, version=evolved_version))
+        activated.append(name)
+        await _record_skill_activity(activity_recorder, evolved_version)
 
     return _LoadedSkills(
         prompt_fragments=fragments,

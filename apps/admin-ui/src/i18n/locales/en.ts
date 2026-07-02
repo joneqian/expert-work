@@ -553,6 +553,8 @@ export interface TranslationKeys {
     section_skills: string;
     section_skills_help: string;
     skills_hint: string;
+    auto_attach_evolved: string;
+    auto_attach_evolved_help: string;
     skills_search: string;
     skills_empty: string;
     skills_source_platform: string;
@@ -2743,6 +2745,9 @@ const en: TranslationKeys = {
       "Skill packages (instructions + scripts) attached to the agent.\nPick from your tenant's and the platform's skills.\nExample: pptx-builder, sql-analyst",
     skills_hint:
       "Check the skills to attach to this agent. Platform skills your plan tier cannot use are not selectable.",
+    auto_attach_evolved: "Auto-attach self-evolved skills",
+    auto_attach_evolved_help:
+      "When on, builds automatically attach this agent's own promoted (ACTIVE) distilled skills without editing the manifest.\nAttached lazily: a summary in <available-skills> only, never eager prompt content.\nSkills you check below always take precedence over an auto-attached duplicate.",
     skills_search: "Search skills (name / description / category)",
     skills_empty: "No skills available",
     skills_source_platform: "Platform",

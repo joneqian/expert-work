@@ -841,3 +841,11 @@ def test_invalid_variable_identifier_rejected() -> None:
     }
     with pytest.raises(ValidationError):
         AgentSpec.model_validate(doc)
+
+
+def test_auto_attach_evolved_skills_defaults_off() -> None:
+    """SE-16 (SE-A42) — the evolution auto-attach is an explicit opt-in."""
+    assert AgentSpec.model_validate(_MINIMAL).spec.auto_attach_evolved_skills is False
+    doc = deepcopy(_MINIMAL)
+    doc["spec"]["auto_attach_evolved_skills"] = True
+    assert AgentSpec.model_validate(doc).spec.auto_attach_evolved_skills is True

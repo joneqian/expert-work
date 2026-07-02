@@ -1038,6 +1038,16 @@ class AgentSpecBody(BaseModel):
             "Validated against ``SKILL_REF_PATTERN``."
         ),
     )
+    auto_attach_evolved_skills: bool = Field(
+        default=False,
+        description=(
+            "SE-16 (SE-A42) — when true, build auto-attaches this agent's "
+            "own ACTIVE distilled skills (evolution flywheel output) without "
+            "manifest edits. Attached lazily: summary in <available-skills> "
+            "only, never an eager prompt fragment. Explicit ``skills:`` "
+            "declarations always win over an auto-attached duplicate."
+        ),
+    )
     triggers: list[TriggerSpec] = Field(
         default_factory=list,
         description=(

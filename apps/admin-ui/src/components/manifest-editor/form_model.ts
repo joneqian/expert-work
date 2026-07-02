@@ -89,6 +89,9 @@ export interface AgentManifest {
     knowledge?: { knowledge_base_refs?: string[]; [k: string]: unknown } | null;
     // Attached skills — skill refs (``name`` or ``name@N``) the agent loads.
     skills?: string[];
+    // SE-16 (SE-A42) — opt-in: build auto-attaches this agent's own ACTIVE
+    // distilled skills (lazy, summary only). Absent = off.
+    auto_attach_evolved_skills?: boolean;
     // Static delegation — named sub-agents (agent_ref to a deployed agent)
     // the parent may delegate to via a per-subagent tool.
     subagents?: SubAgentFields[];
@@ -468,6 +471,17 @@ export function setDynamicWorkersOn(m: unknown, on: boolean): AgentManifest {
   return patchSpec(m, {
     dynamic_workers: { ...(specOf(m).dynamic_workers ?? {}), enabled: false },
   });
+}
+
+// ---- evolved-skill auto-attach (SE-16 SE-A42) ----
+// Whether build auto-attaches this agent's own ACTIVE distilled skills
+// (evolution flywheel output). Plain opt-in bool: absent = off, so ``off``
+// drops the key to keep the YAML clean.
+export const readAutoAttachEvolvedSkills = (m: unknown): boolean =>
+  specOf(m).auto_attach_evolved_skills === true;
+
+export function setAutoAttachEvolvedSkills(m: unknown, on: boolean): AgentManifest {
+  return patchSpec(m, { auto_attach_evolved_skills: on ? true : undefined });
 }
 
 // ---- knowledge (RAG knowledge_base_refs) ----
