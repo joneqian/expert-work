@@ -25,9 +25,15 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Collection
+from typing import Literal
 from uuid import UUID
 
 from helix_agent.protocol import ThreadMeta, ThreadStatus
+
+# List ordering — "created_at" is thread creation (session-history default);
+# "last_activity" is the newest run's created_at (conversation-browser
+# monitoring default: an old thread that just errored surfaces on top).
+ThreadOrder = Literal["created_at", "last_activity"]
 
 
 class ThreadMetaStore(abc.ABC):
@@ -77,6 +83,7 @@ class ThreadMetaStore(abc.ABC):
         q: str | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
+        order_by: ThreadOrder = "created_at",
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -102,6 +109,13 @@ class ThreadMetaStore(abc.ABC):
         IA — the browser's has-error filter resolves failing threads from
         the run store first, then reads their metadata here). ``None``
         means no narrowing; an empty collection returns ``[]``.
+
+        ``order_by="last_activity"`` sorts by the newest run's
+        ``created_at`` (falling back to thread creation for run-less
+        threads) — the conversation browser's monitoring order. The
+        in-memory backend has no run store and falls back to
+        ``created_at`` (same caveat as ``nonempty``); the SQL backend
+        does the real sort.
         """
 
     @abc.abstractmethod
@@ -116,6 +130,7 @@ class ThreadMetaStore(abc.ABC):
         q: str | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
+        order_by: ThreadOrder = "created_at",
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -126,8 +141,8 @@ class ThreadMetaStore(abc.ABC):
         globally unique UUIDs, so this is well-defined across tenants —
         the conversation browser's member filter). ``agent_name`` /
         ``agent_version`` as in :meth:`list_by_tenant` (Mini-ADR H-10).
-        ``nonempty`` / ``q`` / ``include_archived`` / ``thread_ids`` as
-        in :meth:`list_by_tenant`.
+        ``nonempty`` / ``q`` / ``include_archived`` / ``thread_ids`` /
+        ``order_by`` as in :meth:`list_by_tenant`.
         """
 
     @abc.abstractmethod

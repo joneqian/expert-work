@@ -22,7 +22,7 @@ import abc
 from collections.abc import Collection
 from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import String, cast, delete, func, or_, select, update
@@ -38,6 +38,14 @@ from helix_agent.runtime.runs.schemas import (
 
 #: Terminal run statuses that count as a conversation-level failure signal.
 _FAILED_RUN_VALUES: frozenset[str] = frozenset({RunStatus.ERROR.value, RunStatus.TIMEOUT.value})
+_PENDING_RUN_VALUES: frozenset[str] = frozenset({RunStatus.PAUSED.value})
+
+
+def _only_status_values(only: Literal["failed", "pending"] | None) -> frozenset[str] | None:
+    """Map a ``thread_ids_with_runs`` ``only`` filter to run-status values."""
+    if only is None:
+        return None
+    return _FAILED_RUN_VALUES if only == "failed" else _PENDING_RUN_VALUES
 
 
 def _like_contains(q: str) -> str:
@@ -150,7 +158,7 @@ class RunStore(abc.ABC):
         *,
         tenant_id: UUID | None,
         since: datetime | None = None,
-        failed_only: bool = False,
+        only: Literal["failed", "pending"] | None = None,
         limit: int = 500,
     ) -> set[UUID]:
         """Distinct ``thread_id``s with ≥1 matching run.
@@ -158,14 +166,16 @@ class RunStore(abc.ABC):
         Feeds the conversation browser's activity filters (conversation-
         centric IA): the endpoint resolves the thread set here first, then
         reads their metadata via ``ThreadMetaStore.list_by_tenant(thread_ids=…)``.
-        ``failed_only`` restricts to failed-terminal runs (error/timeout) —
-        the "what broke" filter; ``since`` restricts to runs created at or
-        after that instant — the "active in the last N hours" window. The
-        two compose ("what broke today"). ``tenant_id=None`` is the
-        cross-tenant aggregate — the caller MUST wrap it in
-        ``bypass_rls_session()`` (Stream N contract). ``limit`` caps the
-        set (a capped read is surfaced by the endpoint via
-        ``X-Limit-Capped``).
+        ``only="failed"`` restricts to failed-terminal runs (error/timeout)
+        — the "what broke" filter; ``only="pending"`` to runs paused at an
+        approval gate — the "needs a human" filter. ``since`` restricts to
+        runs created at or after that instant — the "active in the last N
+        hours" window; it composes with ``only`` ("what broke today"). The
+        endpoint intersects separate calls when several ``only`` filters
+        are active at once. ``tenant_id=None`` is the cross-tenant
+        aggregate — the caller MUST wrap it in ``bypass_rls_session()``
+        (Stream N contract). ``limit`` caps the set (a capped read is
+        surfaced by the endpoint via ``X-Limit-Capped``).
         """
 
     @abc.abstractmethod
@@ -426,14 +436,15 @@ class InMemoryRunStore(RunStore):
         *,
         tenant_id: UUID | None,
         since: datetime | None = None,
-        failed_only: bool = False,
+        only: Literal["failed", "pending"] | None = None,
         limit: int = 500,
     ) -> set[UUID]:
+        wanted = _only_status_values(only)
         out: set[UUID] = set()
         for r in self._rows.values():
             if tenant_id is not None and r.tenant_id != tenant_id:
                 continue
-            if failed_only and r.status.value not in _FAILED_RUN_VALUES:
+            if wanted is not None and r.status.value not in wanted:
                 continue
             if since is not None and r.created_at < since:
                 continue
@@ -802,12 +813,13 @@ class SqlRunStore(RunStore):
         *,
         tenant_id: UUID | None,
         since: datetime | None = None,
-        failed_only: bool = False,
+        only: Literal["failed", "pending"] | None = None,
         limit: int = 500,
     ) -> set[UUID]:
+        wanted = _only_status_values(only)
         stmt = select(AgentRunRow.thread_id).distinct().limit(limit)
-        if failed_only:
-            stmt = stmt.where(AgentRunRow.status.in_(sorted(_FAILED_RUN_VALUES)))
+        if wanted is not None:
+            stmt = stmt.where(AgentRunRow.status.in_(sorted(wanted)))
         if since is not None:
             stmt = stmt.where(AgentRunRow.created_at >= since)
         if tenant_id is not None:

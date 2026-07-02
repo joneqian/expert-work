@@ -157,6 +157,9 @@ def build_conversations_router() -> APIRouter:
         # (error / timeout). Distinct from ``status=failed``: that is the
         # thread's lifecycle state; an *active* thread can carry errored runs.
         has_error: Annotated[bool, Query()] = False,
+        # Only conversations with ≥1 run paused at an approval gate — the
+        # "needs a human" queue, in conversation context.
+        has_pending: Annotated[bool, Query()] = False,
         # Activity window — only conversations with ≥1 run created at or
         # after this instant ("active in the last N hours"). Composes with
         # ``has_error`` ("what broke today"). Naive datetimes are read as UTC.
@@ -187,16 +190,27 @@ def build_conversations_router() -> APIRouter:
         clamped = _clamp_limit(limit)
         set_capped = False
         async with applied_scope(scope):
-            # has_error / since resolve the matching thread set from the run
-            # store first, then read their metadata — each store keeps to its
-            # own table (same composition as the users rollup).
+            # has_error / has_pending / since resolve the matching thread set
+            # from the run store first, then read their metadata — each store
+            # keeps to its own table (same composition as the users rollup).
+            # Several active filters intersect: a thread must satisfy each
+            # one (possibly via different runs).
             narrowed_ids: set[UUID] | None = None
-            if has_error or since is not None:
+            if has_error or has_pending or since is not None:
                 agg_scope = None if isinstance(scope, CrossTenant) else scope.tenant_id
-                narrowed_ids = await runs.thread_ids_with_runs(
-                    tenant_id=agg_scope, since=since, failed_only=has_error
-                )
-                set_capped = len(narrowed_ids) >= 500
+                only_filters: list[Literal["failed", "pending"] | None] = []
+                if has_error:
+                    only_filters.append("failed")
+                if has_pending:
+                    only_filters.append("pending")
+                if not only_filters:
+                    only_filters.append(None)  # bare ``since`` window
+                id_sets = [
+                    await runs.thread_ids_with_runs(tenant_id=agg_scope, since=since, only=f)
+                    for f in only_filters
+                ]
+                set_capped = any(len(s) >= 500 for s in id_sets)
+                narrowed_ids = set.intersection(*id_sets)
             if isinstance(scope, CrossTenant):
                 metas = await threads.list_all_tenants(
                     agent_name=agent_name,
@@ -206,6 +220,7 @@ def build_conversations_router() -> APIRouter:
                     nonempty=True,
                     q=q,
                     thread_ids=narrowed_ids,
+                    order_by="last_activity",
                     limit=clamped,
                     offset=offset,
                 )
@@ -229,6 +244,7 @@ def build_conversations_router() -> APIRouter:
                     nonempty=True,
                     q=q,
                     thread_ids=narrowed_ids,
+                    order_by="last_activity",
                     limit=clamped,
                     offset=offset,
                 )

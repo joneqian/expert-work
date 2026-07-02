@@ -64,7 +64,7 @@ async def client_and_threads() -> AsyncIterator[tuple[AsyncClient, dict[str, UUI
 
     ``convo`` — agent "alpha" / user A: 2 runs (1 success, 1 error), tokens.
     ``other_user`` — agent "alpha" / user B: 1 success run.
-    ``other_agent`` — agent "beta" / user A: 1 success run.
+    ``other_agent`` — agent "beta" / user A: 1 success + 1 paused run.
     """
     settings = Settings(
         env="dev",
@@ -145,6 +145,16 @@ async def client_and_threads() -> AsyncIterator[tuple[AsyncClient, dict[str, UUI
             status=RunStatus.SUCCESS,
             trace_id="tr-4",
             created_at=_NOW,
+        )
+    )
+    # A run paused at an approval gate — feeds the has_pending filter.
+    await runs.create(
+        _run(
+            thread_id=ids["other_agent"],
+            user_id=_USER_A,
+            status=RunStatus.PAUSED,
+            trace_id=None,
+            created_at=_NOW + timedelta(minutes=2),
         )
     )
 
@@ -273,6 +283,27 @@ async def test_has_error_composes_with_agent_filter(
 
 
 @pytest.mark.asyncio
+async def test_list_filters_by_has_pending(
+    client_and_threads: tuple[AsyncClient, dict[str, UUID]],
+) -> None:
+    """has_pending narrows to conversations with ≥1 run paused at an
+    approval gate — the "needs a human" queue in conversation context."""
+    client, ids = client_and_threads
+    resp = await client.get("/v1/conversations", params={"has_pending": "true"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert {i["thread_id"] for i in data["items"]} == {str(ids["other_agent"])}
+    assert data["total"] == 1
+
+    # Error + pending intersect — no thread carries both, so empty.
+    both = await client.get(
+        "/v1/conversations", params={"has_pending": "true", "has_error": "true"}
+    )
+    assert both.json()["data"]["items"] == []
+    assert both.json()["data"]["total"] == 0
+
+
+@pytest.mark.asyncio
 async def test_total_is_true_count_and_offset_pages(
     client_and_threads: tuple[AsyncClient, dict[str, UUID]],
 ) -> None:
@@ -303,13 +334,17 @@ async def test_since_filters_by_run_activity(
     """``since`` keeps only conversations with ≥1 run at/after the instant —
     the "active in the last N hours" monitoring window."""
     client, ids = client_and_threads
-    # Only "convo" has a run after _NOW (its ERROR run at _NOW+3min).
+    # Runs after _NOW+1min: convo's ERROR (+3min) and other_agent's
+    # PAUSED (+2min); other_user's only run is at _NOW.
     cutoff = (_NOW + timedelta(minutes=1)).isoformat()
     resp = await client.get("/v1/conversations", params={"since": cutoff})
     assert resp.status_code == 200
     data = resp.json()["data"]
-    assert {i["thread_id"] for i in data["items"]} == {str(ids["convo"])}
-    assert data["total"] == 1
+    assert {i["thread_id"] for i in data["items"]} == {
+        str(ids["convo"]),
+        str(ids["other_agent"]),
+    }
+    assert data["total"] == 2
 
     # A cutoff before every run matches all three conversations.
     early = await client.get(
