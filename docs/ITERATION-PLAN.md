@@ -1659,7 +1659,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [ ] **PR-6 aux 计量**：distiller/judge/replay token 进 `token_usage`（真 tenant_id + 源 agent），替换 `_NULL_TENANT` 占位，进化成本可 chargeback
 - [ ] **PR-7 入库查重**：蒸馏产物 vs 同 agent 现有 distilled 技能 embedding 相似 → 转修订轮不新建（对标 SkillNet/SkillOS dedup 标配）
 - [ ] **PR-8 promote 事件发射**：`skill_promote.requested` 走 HX-9 webhook（触达渠道与审批通知 backlog 合并另立项）
-- [ ] **收官 = live 试点**：灰度开单租户，Playground 打标+隐式成功驱动跑通 蒸馏→人审→attach→监控 全链（CI 绿≠live 能跑）
+- [ ] **收官 = live 试点全场景**（计划成文于设计 §12.10，14 场景五阶段）：信号→候选（三类信号+改口排除+transient 重试+judge 抽样滤除）→ 蒸馏→验证（👎语料佐证+implicit 禁 auto+查重转修订轮）→ 晋升→生效（人审/auto/限速/kill-switch+**attach 后 skill_run_usage 出 with 行**=断链修复直接证据）→ 回滚+计量对账（造衰退→ARCHIVED+共享熔断；token_usage 无 NULL_TENANT 残留）→ 运营面（审批证据/打标控件/未灰度租户全链静默）；预期逮 3-5 live 坑（9.4/4.4 先例），修完才 ★5
 - 显式不做（对标依据在设计 §12.8）：shadow/champion-challenger 对照、环境信号（缺埋点，backlog）、技能 merge
 
 ### 显式不做（理由在册，需求出现随时重议）
