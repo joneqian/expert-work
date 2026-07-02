@@ -29,7 +29,7 @@ from helix_agent.persistence.base import Base
 
 _SOURCE_VALUES = "('golden', 'trajectory', 'regression')"
 _OUTCOME_VALUES = "('success', 'failed', 'max_steps', 'cancelled')"
-_SIGNAL_VALUES = "('negative_feedback', 'failed_outcome', 'positive_feedback')"
+_SIGNAL_VALUES = "('negative_feedback', 'failed_outcome', 'positive_feedback', 'implicit_success')"
 _RATING_VALUES = "('up', 'down')"
 _STATUS_VALUES = "('pending', 'promoted', 'dismissed')"
 

@@ -29,7 +29,7 @@ import asyncio
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from helix_agent.common.observability import helix_counter
@@ -46,12 +46,18 @@ from helix_agent.protocol import (
     FeedbackRating,
     TrajectoryOutcome,
 )
+from helix_agent.runtime.runs import RunStore
 from orchestrator.trajectory import StoredTrajectory, TrajectoryReader
 
 logger = logging.getLogger("helix.control_plane.curation_worker")
 
 #: Run outcomes that make a trajectory a regression candidate on their own.
 _FAILED_OUTCOMES: frozenset[str] = frozenset({"failed", "max_steps"})
+
+# SE-16 (SE-A38) — how long a thread must sit idle (no new run) after its
+# last success before an unlabeled trajectory counts as implicit positive.
+# Separates "user got the answer and left" from "conversation in flight".
+_IMPLICIT_QUIET_WINDOW = timedelta(minutes=30)
 
 _worker_cycle_errors = helix_counter(
     "helix_control_plane_curation_worker_cycle_errors_total",
@@ -83,7 +89,10 @@ def _classify(
     """Pick the curation signal for a trajectory, or ``(None, None)`` to skip.
 
     Negative signals win over positive — a 👎 is the most actionable
-    material even when the run also drew a 👍 on another turn.
+    material even when the run also drew a 👍 on another turn. An unlabeled
+    success may still become ``implicit_success`` via the settled-quietly
+    check in ``_evaluate`` (SE-A38 — needs an async run-store read, so it
+    lives outside this pure rule).
     """
     if has_down:
         return "negative_feedback", "down"
@@ -132,6 +141,7 @@ class CurationWorker:
         feedback_store: FeedbackStore,
         interval_s: int,
         batch_size: int = 200,
+        run_store: RunStore | None = None,
     ) -> None:
         if interval_s <= 0:
             msg = "interval_s must be positive"
@@ -140,6 +150,9 @@ class CurationWorker:
         self._candidates = candidate_store
         self._threads = thread_store
         self._feedback = feedback_store
+        # SE-16 (SE-A38) — needed for the settled-quietly implicit-positive
+        # check; ``None`` disables implicit detection (legacy assemblies).
+        self._runs = run_store
         self._interval_s = interval_s
         self._batch_size = batch_size
         self._task: asyncio.Task[None] | None = None
@@ -221,6 +234,15 @@ class CurationWorker:
         has_down = any(f.rating == "down" for f in feedback)
         has_up = any(f.rating == "up" for f in feedback)
         signal, rating = _classify(stored.outcome, has_down=has_down, has_up=has_up)
+        # SE-16 (SE-A38) — implicit positive: an unlabeled success whose
+        # thread settled quietly. Design originally proposed a 5-minute
+        # rephrase check, but that would exclude every active multi-turn
+        # conversation (a fast follow-up question is normal use, not a
+        # complaint); a run-level quiet-settlement check separates "user got
+        # the answer and left" from "conversation still in flight" with zero
+        # new dependencies.
+        if signal is None and stored.outcome == "success" and await self._settled_quietly(stored):
+            signal = "implicit_success"
         if signal is None:
             return None
         return CurationCandidateRecord(
@@ -236,6 +258,29 @@ class CurationWorker:
             feedback_rating=rating,
             detected_at=datetime.now(UTC),
         )
+
+    async def _settled_quietly(self, stored: StoredTrajectory) -> bool:
+        """SE-A38 — has this success's conversation wound down cleanly?
+
+        True iff the thread carries no failed/pending runs AND its newest
+        run finished more than :data:`_IMPLICIT_QUIET_WINDOW` ago (the user
+        got an answer and left — no follow-up in flight). A still-active
+        thread simply isn't a candidate *yet*; the next sweep re-evaluates
+        it (the trajectory only enters the dedup index once it becomes a
+        candidate).
+        """
+        if self._runs is None:
+            return False
+        with _tenant_scope(stored.tenant_id):
+            aggs = await self._runs.aggregate_by_threads(
+                thread_ids=[stored.thread_id], tenant_id=stored.tenant_id
+            )
+        agg = aggs.get(stored.thread_id)
+        if agg is None or agg.error_count > 0 or agg.pending_count > 0:
+            return False
+        if agg.last_run_at is None:
+            return False
+        return datetime.now(UTC) - agg.last_run_at >= _IMPLICIT_QUIET_WINDOW
 
     async def _loop(self) -> None:
         while not self._stop.is_set():

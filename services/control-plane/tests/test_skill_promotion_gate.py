@@ -213,3 +213,22 @@ async def test_no_audit_when_not_promoted() -> None:
         now=_NOW,
     )
     assert written == []
+
+
+async def test_weak_label_origin_never_auto_promotes() -> None:
+    """SE-16 (SE-A44) — an implicit_success candidate stays DRAFT for human
+    review even with full replay eligibility."""
+    store = InMemorySkillStore()
+    skill_id = await _draft_skill(store)
+    gate = _gate(store)
+
+    implicit = _candidate().model_copy(update={"signal": "implicit_success"})
+    decision = await gate.maybe_promote(
+        candidate=implicit,
+        skill_id=skill_id,
+        auto_promote_eligible=True,
+        high_risk=False,
+        now=_NOW,
+    )
+    assert decision.action is not PromoteAction.AUTO_PROMOTE
+    assert await _status(store, skill_id) is SkillStatus.DRAFT

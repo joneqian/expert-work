@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 
 # Signals worth distilling a skill from: success patterns, and failures the
 # co-evolve loop may contrast against (SkillGen contrastive induction).
-EVOLVE_SIGNALS: frozenset[CurationSignal] = frozenset({"positive_feedback", "failed_outcome"})
+# ``implicit_success`` (SE-A38) joins as a weak-label success source — its
+# distillates never auto-promote (SE-A44, enforced in the promotion gate).
+EVOLVE_SIGNALS: frozenset[CurationSignal] = frozenset(
+    {"positive_feedback", "failed_outcome", "implicit_success"}
+)
 
 #: SE-16 (SE-A40) — transient failures per candidate before giving up.
 MAX_DISTILL_RETRIES = 3
