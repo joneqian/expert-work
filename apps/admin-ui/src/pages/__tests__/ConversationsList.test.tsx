@@ -216,6 +216,19 @@ describe("ConversationsList", () => {
     );
   });
 
+  it("awaiting-approval checkbox flows into the hasPending param", async () => {
+    const user = userEvent.setup();
+    listConversationsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderPage();
+    await waitFor(() => expect(listConversationsMock).toHaveBeenCalled());
+    await user.click(screen.getByTestId("conversations-pending-only"));
+    await waitFor(() =>
+      expect(listConversationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ hasPending: true }),
+      ),
+    );
+  });
+
   it("renders the agent filter fed from the agents list", async () => {
     listConversationsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
     renderPage();

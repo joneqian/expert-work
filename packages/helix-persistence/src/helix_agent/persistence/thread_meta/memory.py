@@ -16,7 +16,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
-from helix_agent.persistence.thread_meta.base import ThreadMetaStore
+from helix_agent.persistence.thread_meta.base import ThreadMetaStore, ThreadOrder
 from helix_agent.protocol import ThreadMeta, ThreadStatus
 
 
@@ -108,10 +108,13 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         q: str | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
+        order_by: ThreadOrder = "created_at",
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
-        del nonempty
+        # ``order_by="last_activity"`` falls back to created_at here — no
+        # run store to correlate against (same caveat as ``nonempty``).
+        del nonempty, order_by
         rows = self._filtered(
             tenant_id=tenant_id,
             status=status,
@@ -135,10 +138,11 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         q: str | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
+        order_by: ThreadOrder = "created_at",
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
-        del nonempty
+        del nonempty, order_by  # both no-ops in-memory — see ``list_by_tenant``.
         rows = self._filtered(
             tenant_id=None,
             status=status,

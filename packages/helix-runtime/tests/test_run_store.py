@@ -814,7 +814,7 @@ async def test_aggregate_by_threads_tenant_scopes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_thread_ids_with_runs_since_and_failed_only() -> None:
+async def test_thread_ids_with_runs_since_and_only() -> None:
     store = InMemoryRunStore()
     tenant = uuid4()
     old_ok, old_bad, new_ok, new_bad = uuid4(), uuid4(), uuid4(), uuid4()
@@ -830,8 +830,8 @@ async def test_thread_ids_with_runs_since_and_failed_only() -> None:
 
     # No filters — every thread with a run.
     assert await store.thread_ids_with_runs(tenant_id=tenant) == {old_ok, old_bad, new_ok, new_bad}
-    # failed_only — ERROR + TIMEOUT terminal states, any age.
-    assert await store.thread_ids_with_runs(tenant_id=tenant, failed_only=True) == {
+    # only="failed" — ERROR + TIMEOUT terminal states, any age.
+    assert await store.thread_ids_with_runs(tenant_id=tenant, only="failed") == {
         old_bad,
         new_bad,
     }
@@ -839,8 +839,20 @@ async def test_thread_ids_with_runs_since_and_failed_only() -> None:
     cutoff = _BASE + timedelta(hours=1)
     assert await store.thread_ids_with_runs(tenant_id=tenant, since=cutoff) == {new_ok, new_bad}
     # Composed: "what broke today".
-    assert await store.thread_ids_with_runs(tenant_id=tenant, since=cutoff, failed_only=True) == {
+    assert await store.thread_ids_with_runs(tenant_id=tenant, since=cutoff, only="failed") == {
         new_bad
     }
     # Tenant scoping — another tenant sees nothing.
     assert await store.thread_ids_with_runs(tenant_id=uuid4()) == set()
+
+
+@pytest.mark.asyncio
+async def test_thread_ids_with_runs_only_pending() -> None:
+    store = InMemoryRunStore()
+    tenant = uuid4()
+    waiting, done = uuid4(), uuid4()
+    await store.create(_run(tenant_id=tenant, thread_id=waiting, status=RunStatus.PAUSED))
+    await store.create(_run(tenant_id=tenant, thread_id=done, status=RunStatus.SUCCESS))
+
+    # only="pending" — runs paused at an approval gate ("needs a human").
+    assert await store.thread_ids_with_runs(tenant_id=tenant, only="pending") == {waiting}

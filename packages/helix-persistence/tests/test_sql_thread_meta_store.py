@@ -365,3 +365,55 @@ async def test_count_mirrors_list_filters_sql(sql_store: SqlStoreFixture) -> Non
         assert {m.tenant_id for m in cross} == {tenant_id, other_tenant}
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_order_by_last_activity_sql(sql_store: SqlStoreFixture) -> None:
+    """``order_by="last_activity"`` surfaces the thread with the newest run
+    first — an old thread that just ran outranks a newer idle one; a
+    run-less thread falls back to its creation time."""
+    from datetime import UTC, datetime, timedelta
+
+    from helix_agent.persistence.models.agent_run import AgentRunRow
+
+    store, engine = sql_store
+    try:
+        tenant_id = uuid4()
+        # Created in this order: old_thread, then busy default sort puts
+        # newer creations first.
+        old_thread = await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")
+        idle_thread = await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")
+
+        session_factory = create_async_session_factory(engine)
+        now = datetime.now(UTC)
+
+        def _run_row(thread_id: object, at: datetime) -> AgentRunRow:
+            return AgentRunRow(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                thread_id=thread_id,
+                status="success",
+                on_disconnect="cancel",
+                created_at=at,
+                updated_at=at,
+            )
+
+        async with session_factory() as session:
+            # idle_thread ran an hour ago; old_thread just ran.
+            session.add(_run_row(idle_thread.thread_id, now - timedelta(hours=1)))
+            session.add(_run_row(old_thread.thread_id, now))
+            await session.commit()
+
+        by_created = await store.list_by_tenant(tenant_id)
+        assert [m.thread_id for m in by_created] == [idle_thread.thread_id, old_thread.thread_id]
+
+        by_activity = await store.list_by_tenant(tenant_id, order_by="last_activity")
+        assert [m.thread_id for m in by_activity] == [old_thread.thread_id, idle_thread.thread_id]
+
+        # A run-less thread sorts by its creation time (coalesce fallback):
+        # created now, it outranks both earlier-active threads.
+        fresh = await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")
+        with_fresh = await store.list_by_tenant(tenant_id, order_by="last_activity")
+        assert [m.thread_id for m in with_fresh][:1] == [fresh.thread_id]
+    finally:
+        await engine.dispose()

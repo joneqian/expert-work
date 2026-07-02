@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from helix_agent.persistence.models import ThreadMetaRow
 from helix_agent.persistence.models.agent_run import AgentRunRow
-from helix_agent.persistence.thread_meta.base import ThreadMetaStore
+from helix_agent.persistence.thread_meta.base import ThreadMetaStore, ThreadOrder
 from helix_agent.protocol import ThreadMeta, ThreadStatus
 
 
@@ -144,33 +144,26 @@ class SqlThreadMetaStore(ThreadMetaStore):
         q: str | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
+        order_by: ThreadOrder = "created_at",
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
         if thread_ids is not None and not thread_ids:
             return []
-        stmt = (
-            select(ThreadMetaRow)
-            .where(
-                *_filter_clauses(
-                    tenant_id=tenant_id,
-                    status=status,
-                    user_id=user_id,
-                    agent_name=agent_name,
-                    agent_version=agent_version,
-                    nonempty=nonempty,
-                    q=q,
-                    include_archived=include_archived,
-                    thread_ids=thread_ids,
-                )
-            )
-            .order_by(ThreadMetaRow.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+        return await self._list(
+            tenant_id=tenant_id,
+            status=status,
+            user_id=user_id,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            nonempty=nonempty,
+            q=q,
+            include_archived=include_archived,
+            thread_ids=thread_ids,
+            order_by=order_by,
+            limit=limit,
+            offset=offset,
         )
-        async with self._sf() as session:
-            rows = (await session.execute(stmt)).scalars().all()
-        return [_row_to_meta(r) for r in rows]
 
     async def list_all_tenants(
         self,
@@ -183,31 +176,74 @@ class SqlThreadMetaStore(ThreadMetaStore):
         q: str | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
+        order_by: ThreadOrder = "created_at",
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
         # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
         if thread_ids is not None and not thread_ids:
             return []
-        stmt = (
-            select(ThreadMetaRow)
-            .where(
-                *_filter_clauses(
-                    tenant_id=None,
-                    status=status,
-                    user_id=user_id,
-                    agent_name=agent_name,
-                    agent_version=agent_version,
-                    nonempty=nonempty,
-                    q=q,
-                    include_archived=include_archived,
-                    thread_ids=thread_ids,
-                )
-            )
-            .order_by(ThreadMetaRow.created_at.desc())
-            .limit(limit)
-            .offset(offset)
+        return await self._list(
+            tenant_id=None,
+            status=status,
+            user_id=user_id,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            nonempty=nonempty,
+            q=q,
+            include_archived=include_archived,
+            thread_ids=thread_ids,
+            order_by=order_by,
+            limit=limit,
+            offset=offset,
         )
+
+    async def _list(
+        self,
+        *,
+        tenant_id: UUID | None,
+        status: ThreadStatus | None,
+        user_id: UUID | None,
+        agent_name: str | None,
+        agent_version: str | None,
+        nonempty: bool,
+        q: str | None,
+        include_archived: bool,
+        thread_ids: Collection[UUID] | None,
+        order_by: ThreadOrder,
+        limit: int,
+        offset: int,
+    ) -> list[ThreadMeta]:
+        stmt = select(ThreadMetaRow).where(
+            *_filter_clauses(
+                tenant_id=tenant_id,
+                status=status,
+                user_id=user_id,
+                agent_name=agent_name,
+                agent_version=agent_version,
+                nonempty=nonempty,
+                q=q,
+                include_archived=include_archived,
+                thread_ids=thread_ids,
+            )
+        )
+        if order_by == "last_activity":
+            # Newest-run-first: join each thread's max(run.created_at);
+            # run-less threads fall back to their creation time.
+            last_run = (
+                select(
+                    AgentRunRow.thread_id.label("thread_id"),
+                    func.max(AgentRunRow.created_at).label("last_run_at"),
+                )
+                .group_by(AgentRunRow.thread_id)
+                .subquery()
+            )
+            stmt = stmt.outerjoin(
+                last_run, last_run.c.thread_id == ThreadMetaRow.thread_id
+            ).order_by(func.coalesce(last_run.c.last_run_at, ThreadMetaRow.created_at).desc())
+        else:
+            stmt = stmt.order_by(ThreadMetaRow.created_at.desc())
+        stmt = stmt.limit(limit).offset(offset)
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_meta(r) for r in rows]

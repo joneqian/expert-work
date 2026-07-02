@@ -222,6 +222,7 @@ export interface TranslationKeys {
     filter_user_active: string;
     filter_agent: string;
     filter_errors_only: string;
+    filter_pending_only: string;
     filter_window: string;
     window_all: string;
     window_1h: string;
@@ -2347,6 +2348,7 @@ const en: TranslationKeys = {
     filter_user_active: "User: {{user}}…",
     filter_agent: "Filter by agent",
     filter_errors_only: "Errors only",
+    filter_pending_only: "Awaiting approval",
     filter_window: "Time window",
     window_all: "All time",
     window_1h: "Last hour",
