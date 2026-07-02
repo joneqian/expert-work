@@ -20,7 +20,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from helix_agent.persistence.skill.memory import InMemorySkillStore
 from helix_agent.protocol import AgentSpec, SkillVersion
+from helix_agent.protocol.skill import SkillStatus
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.secret_store import LocalDevSecretStore
 from orchestrator.agent_factory import _SkillLookupResult, build_agent
@@ -333,3 +335,145 @@ async def test_build_agent_conflicting_tool_names_raises(
             skill_resolver=resolver,
             tenant_id=uuid4(),
         )
+
+
+# ---------------------------------------------------------------------------
+# SE-16 (SE-A42) — auto_attach_evolved_skills
+# ---------------------------------------------------------------------------
+
+
+def _spec_auto_attach(skills: list[str] | None = None) -> AgentSpec:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["auto_attach_evolved_skills"] = True
+    if skills:
+        doc["spec"]["skills"] = skills
+    return AgentSpec.model_validate(doc)
+
+
+async def _seed_evolved(
+    store: InMemorySkillStore,
+    *,
+    tenant: UUID,
+    name: str = "evolved-reporting",
+    agent_name: str = "test",
+    tool_names: tuple[str, ...] = (),
+    origin: str | None = "distilled",
+    fragment: str = "distilled how-to body",
+) -> None:
+    """An ACTIVE agent-authored skill, latest version carrying ``origin``."""
+    skill = await store.create_skill(
+        skill_id=uuid4(),
+        tenant_id=tenant,
+        name=name,
+        description=f"{name} desc",
+        visibility="agent_private",
+        created_by_agent_name=agent_name,
+    )
+    await store.add_version(
+        version_id=uuid4(),
+        skill_id=skill.id,
+        tenant_id=tenant,
+        prompt_fragment=fragment,
+        tool_names=tool_names,
+        description=f"{name} desc",
+        authored_by="agent",
+        evolution_origin=origin,  # type: ignore[arg-type]
+    )
+    await store.set_status(skill_id=skill.id, tenant_id=tenant, status=SkillStatus.ACTIVE)
+
+
+@pytest.mark.asyncio
+async def test_auto_attach_binds_distilled_skill_lazily(cp: BaseCheckpointSaver[object]) -> None:
+    """Opt-in attaches the agent's own distilled skill: summary + bound for
+    rollback, but never an eager prompt fragment (lazy contract)."""
+    tenant = uuid4()
+    store = InMemorySkillStore()
+    await _seed_evolved(store, tenant=tenant)
+    built = await _build(
+        _spec_auto_attach(),
+        secret_store=_secret_store(),
+        checkpointer=cp,
+        skill_store=store,
+        tenant_id=tenant,
+    )
+    assert 'name="evolved-reporting"' in built.system_prompt  # <available-skills> entry
+    assert "distilled how-to body" not in built.system_prompt  # no eager body
+    assert [b.skill_version for b in built.bound_distilled_skills] == [1]
+
+
+@pytest.mark.asyncio
+async def test_auto_attach_defaults_off(cp: BaseCheckpointSaver[object]) -> None:
+    tenant = uuid4()
+    store = InMemorySkillStore()
+    await _seed_evolved(store, tenant=tenant)
+    built = await _build(
+        AgentSpec.model_validate(_MINIMAL_SPEC),
+        secret_store=_secret_store(),
+        checkpointer=cp,
+        skill_store=store,
+        tenant_id=tenant,
+    )
+    assert "evolved-reporting" not in built.system_prompt
+    assert built.bound_distilled_skills == ()
+
+
+@pytest.mark.asyncio
+async def test_auto_attach_ignores_non_distilled_and_other_agents(
+    cp: BaseCheckpointSaver[object],
+) -> None:
+    """In-session-authored skills and other agents' distillates stay out."""
+    tenant = uuid4()
+    store = InMemorySkillStore()
+    await _seed_evolved(store, tenant=tenant, name="in-session-one", origin="in_session")
+    await _seed_evolved(store, tenant=tenant, name="someone-elses", agent_name="other-agent")
+    built = await _build(
+        _spec_auto_attach(),
+        secret_store=_secret_store(),
+        checkpointer=cp,
+        skill_store=store,
+        tenant_id=tenant,
+    )
+    assert "in-session-one" not in built.system_prompt
+    assert "someone-elses" not in built.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_auto_attach_manifest_declaration_wins(cp: BaseCheckpointSaver[object]) -> None:
+    """The same name declared in ``skills:`` resolves through the manifest
+    path (eager, hard-fail semantics); the auto-attach duplicate is skipped."""
+    tenant = uuid4()
+    store = InMemorySkillStore()
+    await _seed_evolved(store, tenant=tenant, name="foo", fragment="distilled body")
+    manifest_version = _make_version(name="foo", prompt_fragment="manifest body")
+    resolver = _make_resolver({("foo", None): _SkillLookupResult.ok(manifest_version)})
+    built = await _build(
+        _spec_auto_attach(["foo"]),
+        secret_store=_secret_store(),
+        checkpointer=cp,
+        skill_resolver=resolver,
+        skill_store=store,
+        tenant_id=tenant,
+    )
+    assert "manifest body" in built.system_prompt
+    assert "distilled body" not in built.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_auto_attach_tool_conflict_soft_skips(cp: BaseCheckpointSaver[object]) -> None:
+    """A distilled skill colliding on a tool name is skipped with a log —
+    never a build-breaking SkillConflictError."""
+    tenant = uuid4()
+    store = InMemorySkillStore()
+    await _seed_evolved(store, tenant=tenant, name="clashing", tool_names=("shared_tool",))
+    manifest_version = _make_version(name="foo", tool_names=("shared_tool",))
+    resolver = _make_resolver({("foo", None): _SkillLookupResult.ok(manifest_version)})
+    built = await _build(
+        _spec_auto_attach(["foo"]),
+        secret_store=_secret_store(),
+        checkpointer=cp,
+        skill_resolver=resolver,
+        skill_store=store,
+        tenant_id=tenant,
+    )
+    assert 'name="foo"' in built.system_prompt
+    assert "clashing" not in built.system_prompt

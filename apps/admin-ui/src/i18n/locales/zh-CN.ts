@@ -595,6 +595,9 @@ const zhCN: TranslationKeys = {
     section_skills_help:
       "挂给 Agent 的技能包(说明 + 脚本)。\n租户和平台的技能都能选。\n示例:pptx-builder、sql-analyst",
     skills_hint: "勾选挂到本 Agent 的技能。平台技能受套餐等级限制时不可勾选。",
+    auto_attach_evolved: "自动挂载自进化技能",
+    auto_attach_evolved_help:
+      "开启后,构建时自动挂载本 Agent 自己蒸馏晋升(ACTIVE)的技能,无需改 manifest。\n懒加载:仅摘要进 <available-skills>,不吃 eager prompt 预算。\n下方勾选的技能始终优先于同名自动挂载项。",
     skills_search: "搜索技能(名称/描述/分类)",
     skills_empty: "暂无可用技能",
     skills_source_platform: "平台",

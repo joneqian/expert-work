@@ -63,6 +63,8 @@ FIELD_TIERS: dict[str, FieldTier] = {
     # carries the materialized set the tenant edited directly).
     "tools": FieldTier.CAPABILITY,
     "skills": FieldTier.CAPABILITY,
+    # SE-16 (SE-A42) — the evolution auto-attach opt-in rides with ``skills``.
+    "auto_attach_evolved_skills": FieldTier.CAPABILITY,
     "subagents": FieldTier.CAPABILITY,
     "dynamic_workers": FieldTier.CAPABILITY,
     "workflow": FieldTier.CAPABILITY,

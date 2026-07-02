@@ -11,12 +11,17 @@
  * them. Emits the FULL merged manifest via the form_model writers.
  */
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { Checkbox, Empty, Input, Tag, Tooltip, Typography } from "antd";
+import { Checkbox, Empty, Input, Switch, Tag, Tooltip, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import { listSkills, type SkillRecord } from "../../api/skills";
 import { FieldHelp } from "../FieldHelp";
-import { readSkills, setSkills } from "./form_model";
+import {
+  readAutoAttachEvolvedSkills,
+  readSkills,
+  setAutoAttachEvolvedSkills,
+  setSkills,
+} from "./form_model";
 
 const { Text } = Typography;
 
@@ -116,6 +121,25 @@ export function SkillPicker({ formData, onChange }: SkillPickerProps) {
       <Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
         {t("agent_form.skills_hint")}
       </Text>
+
+      {/* SE-16 (SE-A42) — evolution flywheel opt-in: build auto-attaches
+          this agent's own ACTIVE distilled skills (lazy, summary only). */}
+      <label
+        style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}
+        data-testid="af-auto-attach-evolved"
+      >
+        <Switch
+          checked={readAutoAttachEvolvedSkills(formData)}
+          onChange={(on) => onChange(setAutoAttachEvolvedSkills(formData, on))}
+          aria-label={t("agent_form.auto_attach_evolved")}
+          data-testid="af-auto-attach-evolved-switch"
+        />
+        <Text type="secondary">{t("agent_form.auto_attach_evolved")}</Text>
+        <FieldHelp
+          text={t("agent_form.auto_attach_evolved_help")}
+          testId="af-auto-attach-evolved"
+        />
+      </label>
 
       {options.length > 6 && (
         <Input

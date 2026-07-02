@@ -108,4 +108,31 @@ describe("SkillPicker", () => {
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
     expect(last.spec?.skills).toBeUndefined();
   });
+
+  // SE-16 (SE-A42) — evolution auto-attach opt-in
+  it("auto-attach switch is off by default and writes true when toggled", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<SkillPicker formData={SEED} onChange={onChange} />);
+    const toggle = await screen.findByTestId("af-auto-attach-evolved-switch");
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.auto_attach_evolved_skills).toBe(true);
+  });
+
+  it("turning auto-attach off drops the key (clean YAML)", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const seeded: AgentManifest = {
+      ...SEED,
+      spec: { auto_attach_evolved_skills: true },
+    };
+    render(<SkillPicker formData={seeded} onChange={onChange} />);
+    const toggle = await screen.findByTestId("af-auto-attach-evolved-switch");
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
+    expect(last.spec?.auto_attach_evolved_skills).toBeUndefined();
+  });
 });
