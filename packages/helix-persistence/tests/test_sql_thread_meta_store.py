@@ -316,3 +316,52 @@ async def test_archived_excluded_by_default(sql_store: SqlStoreFixture) -> None:
         assert [m.thread_id for m in only_archived] == [archived.thread_id]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_count_mirrors_list_filters_sql(sql_store: SqlStoreFixture) -> None:
+    """count_* shares the list WHERE set (incl. the real ``nonempty``
+    subquery) so the pager's total can never drift from the page."""
+    from datetime import UTC, datetime
+
+    from helix_agent.persistence.models.agent_run import AgentRunRow
+
+    store, engine = sql_store
+    try:
+        tenant_id, user_a = uuid4(), uuid4()
+        with_run = await store.create(
+            thread_id=uuid4(), tenant_id=tenant_id, created_by="u", user_id=user_a
+        )
+        await store.create(thread_id=uuid4(), tenant_id=tenant_id, created_by="u")  # never ran
+        other_tenant = uuid4()
+        await store.create(
+            thread_id=uuid4(), tenant_id=other_tenant, created_by="u", user_id=user_a
+        )
+
+        session_factory = create_async_session_factory(engine)
+        now = datetime.now(UTC)
+        async with session_factory() as session:
+            session.add(
+                AgentRunRow(
+                    id=uuid4(),
+                    tenant_id=tenant_id,
+                    thread_id=with_run.thread_id,
+                    status="success",
+                    on_disconnect="cancel",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await session.commit()
+
+        assert await store.count_by_tenant(tenant_id) == 2
+        assert await store.count_by_tenant(tenant_id, nonempty=True) == 1
+        assert await store.count_by_tenant(tenant_id, user_id=user_a) == 1
+        assert await store.count_by_tenant(tenant_id, thread_ids=set()) == 0
+        # Cross-tenant count + user filter (N-4 fix) span both tenants.
+        assert await store.count_all_tenants(user_id=user_a) == 2
+        # And the cross-tenant list narrows the same way.
+        cross = await store.list_all_tenants(user_id=user_a)
+        assert {m.tenant_id for m in cross} == {tenant_id, other_tenant}
+    finally:
+        await engine.dispose()

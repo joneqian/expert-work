@@ -225,4 +225,60 @@ describe("ConversationsList", () => {
     expect(screen.getByTestId("conversations-agent-filter")).toBeInTheDocument();
     expect(agentsSdk.listAgents).toHaveBeenCalled();
   });
+
+  it("requests page 1 server-side and pages via offset", async () => {
+    const user = userEvent.setup();
+    listConversationsMock.mockResolvedValue({
+      items: [sampleRow],
+      total: 120,
+      cross_tenant: false,
+    });
+    renderPage();
+    await waitFor(() =>
+      expect(listConversationsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ limit: 50, offset: 0 }),
+      ),
+    );
+    // total=120 → 3 pages; clicking page 2 re-fetches with offset 50.
+    await user.click(await screen.findByTitle("2"));
+    await waitFor(() =>
+      expect(listConversationsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ limit: 50, offset: 50 }),
+      ),
+    );
+  });
+
+  it("changing a filter resets pagination to page 1", async () => {
+    const user = userEvent.setup();
+    listConversationsMock.mockResolvedValue({
+      items: [sampleRow],
+      total: 120,
+      cross_tenant: false,
+    });
+    renderPage();
+    await user.click(await screen.findByTitle("2"));
+    await waitFor(() =>
+      expect(listConversationsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ offset: 50 }),
+      ),
+    );
+    await user.click(screen.getByTestId("conversations-errors-only"));
+    await waitFor(() =>
+      expect(listConversationsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hasError: true, offset: 0 }),
+      ),
+    );
+  });
+
+  it("renders the time-window filter and omits since by default", async () => {
+    listConversationsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderPage();
+    await waitFor(() => expect(listConversationsMock).toHaveBeenCalled());
+    // Antd Select portal — assert the control + the default request shape;
+    // window → since wiring is a pure Date computation in refresh().
+    expect(screen.getByTestId("conversations-window-filter")).toBeInTheDocument();
+    expect(listConversationsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ since: undefined }),
+    );
+  });
 });

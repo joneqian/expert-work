@@ -58,25 +58,25 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
             return None
         return row
 
-    async def list_by_tenant(
+    def _filtered(
         self,
-        tenant_id: UUID,
         *,
-        status: ThreadStatus | None = None,
-        user_id: UUID | None = None,
-        agent_name: str | None = None,
-        agent_version: str | None = None,
-        nonempty: bool = False,
-        q: str | None = None,
-        include_archived: bool = False,
-        thread_ids: Collection[UUID] | None = None,
-        limit: int = 100,
-        offset: int = 0,
+        tenant_id: UUID | None,
+        status: ThreadStatus | None,
+        user_id: UUID | None,
+        agent_name: str | None,
+        agent_version: str | None,
+        q: str | None,
+        include_archived: bool,
+        thread_ids: Collection[UUID] | None,
     ) -> list[ThreadMeta]:
-        # ``nonempty`` is a no-op here: the in-memory backend has no run store
-        # to correlate against. The SQL backend does the real filter.
-        del nonempty
-        rows = [r for r in self._rows.values() if r.tenant_id == tenant_id]
+        """The shared filter for list/count — one source so ``total`` can
+        never drift from the page. ``nonempty`` is a no-op in-memory (no
+        run store to correlate against); the SQL backend does the real
+        filter."""
+        rows = list(self._rows.values())
+        if tenant_id is not None:
+            rows = [r for r in rows if r.tenant_id == tenant_id]
         if thread_ids is not None:
             wanted = set(thread_ids)
             rows = [r for r in rows if r.thread_id in wanted]
@@ -94,12 +94,14 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
             needle = q.lower()
             rows = [r for r in rows if r.title is not None and needle in r.title.lower()]
         rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
-        return rows[offset : offset + limit]
+        return rows
 
-    async def list_all_tenants(
+    async def list_by_tenant(
         self,
+        tenant_id: UUID,
         *,
         status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
@@ -109,24 +111,98 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
-        del nonempty  # no-op in-memory (no run store) — see ``list_by_tenant``.
-        rows = list(self._rows.values())
-        if thread_ids is not None:
-            wanted = set(thread_ids)
-            rows = [r for r in rows if r.thread_id in wanted]
-        if status is not None:
-            rows = [r for r in rows if r.status == status]
-        elif not include_archived:
-            rows = [r for r in rows if r.status != ThreadStatus.ARCHIVED]
-        if agent_name is not None:
-            rows = [r for r in rows if r.agent_name == agent_name]
-        if agent_version is not None:
-            rows = [r for r in rows if r.agent_version == agent_version]
-        if q:
-            needle = q.lower()
-            rows = [r for r in rows if r.title is not None and needle in r.title.lower()]
-        rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
+        del nonempty
+        rows = self._filtered(
+            tenant_id=tenant_id,
+            status=status,
+            user_id=user_id,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            q=q,
+            include_archived=include_archived,
+            thread_ids=thread_ids,
+        )
         return rows[offset : offset + limit]
+
+    async def list_all_tenants(
+        self,
+        *,
+        status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
+        agent_name: str | None = None,
+        agent_version: str | None = None,
+        nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[ThreadMeta]:
+        del nonempty
+        rows = self._filtered(
+            tenant_id=None,
+            status=status,
+            user_id=user_id,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            q=q,
+            include_archived=include_archived,
+            thread_ids=thread_ids,
+        )
+        return rows[offset : offset + limit]
+
+    async def count_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
+        agent_name: str | None = None,
+        agent_version: str | None = None,
+        nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
+    ) -> int:
+        del nonempty
+        return len(
+            self._filtered(
+                tenant_id=tenant_id,
+                status=status,
+                user_id=user_id,
+                agent_name=agent_name,
+                agent_version=agent_version,
+                q=q,
+                include_archived=include_archived,
+                thread_ids=thread_ids,
+            )
+        )
+
+    async def count_all_tenants(
+        self,
+        *,
+        status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
+        agent_name: str | None = None,
+        agent_version: str | None = None,
+        nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
+    ) -> int:
+        del nonempty
+        return len(
+            self._filtered(
+                tenant_id=None,
+                status=status,
+                user_id=user_id,
+                agent_name=agent_name,
+                agent_version=agent_version,
+                q=q,
+                include_archived=include_archived,
+                thread_ids=thread_ids,
+            )
+        )
 
     async def update_status(
         self,

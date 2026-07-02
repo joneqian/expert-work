@@ -145,21 +145,27 @@ class RunStore(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def error_thread_ids(
+    async def thread_ids_with_runs(
         self,
         *,
         tenant_id: UUID | None,
+        since: datetime | None = None,
+        failed_only: bool = False,
         limit: int = 500,
     ) -> set[UUID]:
-        """Distinct ``thread_id``s with ≥1 failed-terminal run (error/timeout).
+        """Distinct ``thread_id``s with ≥1 matching run.
 
-        Feeds the conversation browser's has-error filter (conversation-
-        centric IA): the endpoint resolves failing threads here first, then
+        Feeds the conversation browser's activity filters (conversation-
+        centric IA): the endpoint resolves the thread set here first, then
         reads their metadata via ``ThreadMetaStore.list_by_tenant(thread_ids=…)``.
-        ``tenant_id=None`` is the cross-tenant aggregate — the caller MUST
-        wrap it in ``bypass_rls_session()`` (Stream N contract). ``limit``
-        caps the set (failing threads are the minority; a capped read is
-        surfaced by the endpoint via ``X-Limit-Capped``).
+        ``failed_only`` restricts to failed-terminal runs (error/timeout) —
+        the "what broke" filter; ``since`` restricts to runs created at or
+        after that instant — the "active in the last N hours" window. The
+        two compose ("what broke today"). ``tenant_id=None`` is the
+        cross-tenant aggregate — the caller MUST wrap it in
+        ``bypass_rls_session()`` (Stream N contract). ``limit`` caps the
+        set (a capped read is surfaced by the endpoint via
+        ``X-Limit-Capped``).
         """
 
     @abc.abstractmethod
@@ -415,20 +421,25 @@ class InMemoryRunStore(RunStore):
         clamped = _clamp_limit(limit)
         return rows[offset : offset + clamped]
 
-    async def error_thread_ids(
+    async def thread_ids_with_runs(
         self,
         *,
         tenant_id: UUID | None,
+        since: datetime | None = None,
+        failed_only: bool = False,
         limit: int = 500,
     ) -> set[UUID]:
         out: set[UUID] = set()
         for r in self._rows.values():
             if tenant_id is not None and r.tenant_id != tenant_id:
                 continue
-            if r.status.value in _FAILED_RUN_VALUES:
-                out.add(r.thread_id)
-                if len(out) >= limit:
-                    break
+            if failed_only and r.status.value not in _FAILED_RUN_VALUES:
+                continue
+            if since is not None and r.created_at < since:
+                continue
+            out.add(r.thread_id)
+            if len(out) >= limit:
+                break
         return out
 
     async def aggregate_by_threads(
@@ -786,18 +797,19 @@ class SqlRunStore(RunStore):
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
 
-    async def error_thread_ids(
+    async def thread_ids_with_runs(
         self,
         *,
         tenant_id: UUID | None,
+        since: datetime | None = None,
+        failed_only: bool = False,
         limit: int = 500,
     ) -> set[UUID]:
-        stmt = (
-            select(AgentRunRow.thread_id)
-            .where(AgentRunRow.status.in_(sorted(_FAILED_RUN_VALUES)))
-            .distinct()
-            .limit(limit)
-        )
+        stmt = select(AgentRunRow.thread_id).distinct().limit(limit)
+        if failed_only:
+            stmt = stmt.where(AgentRunRow.status.in_(sorted(_FAILED_RUN_VALUES)))
+        if since is not None:
+            stmt = stmt.where(AgentRunRow.created_at >= since)
         if tenant_id is not None:
             stmt = stmt.where(AgentRunRow.tenant_id == tenant_id)
         async with self._sf() as session:

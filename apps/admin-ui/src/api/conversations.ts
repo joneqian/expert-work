@@ -88,6 +88,9 @@ export interface ListConversationsParams {
    *  operations "what broke today" filter. Distinct from
    *  ``status=failed`` (thread lifecycle). */
   hasError?: boolean;
+  /** ISO instant — only conversations with ≥1 run at/after it (the
+   *  "active in the last N hours" window; composes with ``hasError``). */
+  since?: string;
   limit?: number;
   offset?: number;
 }
@@ -96,7 +99,7 @@ export interface ListConversationsParams {
 export async function listConversations(
   params: ListConversationsParams = {},
 ): Promise<ConversationList> {
-  const { tenantScope, agentName, agentVersion, userId, status, q, hasError, limit, offset } =
+  const { tenantScope, agentName, agentVersion, userId, status, q, hasError, since, limit, offset } =
     params;
   const query = withTenantScope(
     {
@@ -106,6 +109,7 @@ export async function listConversations(
       status,
       q,
       has_error: hasError ? true : undefined,
+      since,
       limit,
       offset,
     },

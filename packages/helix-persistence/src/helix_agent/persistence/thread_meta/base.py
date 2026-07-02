@@ -109,6 +109,7 @@ class ThreadMetaStore(abc.ABC):
         self,
         *,
         status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
@@ -120,13 +121,51 @@ class ThreadMetaStore(abc.ABC):
     ) -> list[ThreadMeta]:
         """Cross-tenant thread list — Stream N (Mini-ADR N-4).
 
-        Caller MUST be inside ``bypass_rls_session()``. No ``user_id``
-        filter — the platform admin view aggregates every user's
-        sessions across every tenant. Newest first. ``agent_name`` /
+        Caller MUST be inside ``bypass_rls_session()``. Newest first.
+        ``user_id`` narrows to one end-user's threads (user ids are
+        globally unique UUIDs, so this is well-defined across tenants —
+        the conversation browser's member filter). ``agent_name`` /
         ``agent_version`` as in :meth:`list_by_tenant` (Mini-ADR H-10).
         ``nonempty`` / ``q`` / ``include_archived`` / ``thread_ids`` as
         in :meth:`list_by_tenant`.
         """
+
+    @abc.abstractmethod
+    async def count_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
+        agent_name: str | None = None,
+        agent_version: str | None = None,
+        nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
+    ) -> int:
+        """Count the threads :meth:`list_by_tenant` would return.
+
+        Same filter semantics, no pagination — the true ``total`` for the
+        conversation browser's server-side pager (``len(items)`` of one
+        page is not a total).
+        """
+
+    @abc.abstractmethod
+    async def count_all_tenants(
+        self,
+        *,
+        status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
+        agent_name: str | None = None,
+        agent_version: str | None = None,
+        nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
+    ) -> int:
+        """Cross-tenant :meth:`count_by_tenant` — same
+        ``bypass_rls_session()`` contract as :meth:`list_all_tenants`."""
 
     @abc.abstractmethod
     async def update_title(

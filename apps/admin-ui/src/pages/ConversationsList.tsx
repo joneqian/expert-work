@@ -10,7 +10,7 @@
  * shell (cross-tenant banner, URL-owned ``?user_id=`` filter, debounced
  * search) so the operational UX carries over.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Checkbox,
@@ -60,6 +60,15 @@ const STATUS_OPTIONS: ConversationStatus[] = [
   "archived",
 ];
 
+const PAGE_SIZE = 50;
+
+/** Activity-window presets for the ``since`` filter — hours → i18n key. */
+const TIME_WINDOWS: ReadonlyArray<{ hours: number; labelKey: string }> = [
+  { hours: 1, labelKey: "conversations_page.window_1h" },
+  { hours: 24, labelKey: "conversations_page.window_24h" },
+  { hours: 168, labelKey: "conversations_page.window_7d" },
+];
+
 export function ConversationsList() {
   const { t } = useTranslation();
   const { scope, apiTenantScope } = useTenantScope();
@@ -68,13 +77,19 @@ export function ConversationsList() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ConversationStatus | undefined>(undefined);
-  // Cross-agent monitoring filters — narrow to one agent, or to
-  // conversations carrying ≥1 failed run ("what broke today").
+  // Cross-agent monitoring filters — narrow to one agent, to
+  // conversations carrying ≥1 failed run ("what broke today"), or to an
+  // activity window ("active in the last N hours").
   const [agentFilter, setAgentFilter] = useState<string | undefined>(undefined);
   const [errorsOnly, setErrorsOnly] = useState(false);
+  const [windowHours, setWindowHours] = useState<number | undefined>(undefined);
   const [agentOptions, setAgentOptions] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [q, setQ] = useState<string | undefined>(undefined);
+  const [page, setPage] = useState(1);
+  // Monotonic request id — a late response from a superseded request
+  // (filter/page changed mid-flight) must not overwrite the newer one.
+  const requestSeq = useRef(0);
   // ``?user_id=`` drives the "member's conversations" filter — URL-owned so
   // a member page can deep-link into it and the filter survives refresh.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -110,6 +125,7 @@ export function ConversationsList() {
   }, [search]);
 
   const refresh = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
     setError(null);
     try {
@@ -118,11 +134,18 @@ export function ConversationsList() {
         status: statusFilter,
         agentName: agentFilter,
         hasError: errorsOnly,
+        since: windowHours
+          ? new Date(Date.now() - windowHours * 3_600_000).toISOString()
+          : undefined,
         q,
         userId: userFilter,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
       });
+      if (seq !== requestSeq.current) return;
       setData(result);
     } catch (err) {
+      if (seq !== requestSeq.current) return;
       const message =
         err instanceof ApiError
           ? `${err.code}: ${err.message}`
@@ -131,13 +154,19 @@ export function ConversationsList() {
             : "unknown error";
       setError(message);
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) setLoading(false);
     }
-  }, [apiTenantScope, statusFilter, agentFilter, errorsOnly, q, userFilter]);
+  }, [apiTenantScope, statusFilter, agentFilter, errorsOnly, windowHours, q, userFilter, page]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Any filter change restarts pagination — page N of the old filter set
+  // is meaningless under the new one.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, agentFilter, errorsOnly, windowHours, q, userFilter, apiTenantScope]);
 
   // Agent-filter options — best-effort; a failure just leaves the
   // dropdown empty (the list itself is unaffected).
@@ -372,6 +401,17 @@ export function ConversationsList() {
                 ...STATUS_OPTIONS.map((s) => ({ value: s, label: s })),
               ]}
             />
+            <Select<number | "all">
+              value={windowHours ?? "all"}
+              onChange={(v) => setWindowHours(v === "all" ? undefined : v)}
+              style={{ width: 140 }}
+              aria-label={t("conversations_page.filter_window")}
+              data-testid="conversations-window-filter"
+              options={[
+                { value: "all", label: t("conversations_page.window_all") },
+                ...TIME_WINDOWS.map((w) => ({ value: w.hours, label: t(w.labelKey) })),
+              ]}
+            />
             <button
               type="button"
               onClick={refresh}
@@ -415,9 +455,12 @@ export function ConversationsList() {
         rowKey={(record) => record.thread_id}
         loading={loading}
         pagination={{
+          current: page,
           total: data?.total ?? 0,
           showSizeChanger: false,
-          pageSize: 50,
+          pageSize: PAGE_SIZE,
+          onChange: setPage,
+          showTotal: (n) => t("conversations_page.pager_total", { total: n }),
         }}
         onRow={(record) => ({
           onClick: () => navigate(`/conversations/${encodeURIComponent(record.thread_id)}`),
