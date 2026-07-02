@@ -53,6 +53,30 @@ export async function createSession(
   return unwrap(response.data);
 }
 
+/** G.6 / SE-16 (SE-A46) — a 👍/👎 (+ optional comment) on a session turn.
+ *  Fire-and-forget quality signal feeding the skill-evolution curation
+ *  pipeline (👍 → golden candidate, 👎+comment → failure corpus). */
+export interface SessionFeedback {
+  id: number;
+  thread_id: string;
+  rating: "up" | "down";
+  turn_seq: number | null;
+  trace_id: string | null;
+}
+
+/** POST /v1/sessions/{threadId}/feedback — the endpoint returns a bare JSON
+ *  row (201, no ``{success,data}`` envelope), so no ``unwrap`` here. */
+export async function submitSessionFeedback(
+  threadId: string,
+  payload: { rating: "up" | "down"; comment?: string; turn_seq?: number },
+): Promise<SessionFeedback> {
+  const response = await apiClient.post<SessionFeedback>(
+    `/v1/sessions/${threadId}/feedback`,
+    payload,
+  );
+  return response.data;
+}
+
 /** Playground-Uplift D4 — the thread user's persistent workspace + artifacts.
  *  ``workspace`` is null when no VM has ever started for that user (read-only;
  *  the inspector never provisions one). */

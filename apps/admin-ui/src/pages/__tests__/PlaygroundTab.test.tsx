@@ -1006,4 +1006,82 @@ describe("PlaygroundTab", () => {
       screen.queryByTestId("playground-attachment"),
     ).not.toBeInTheDocument();
   });
+
+  // SE-16 (SE-A46) — per-turn 👍/👎 feeding the skill-evolution pipeline.
+  it("thumbs-up submits feedback for the turn", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    const feedbackMock = vi
+      .spyOn(sessionsSdk, "submitSessionFeedback")
+      .mockResolvedValue({
+        id: 1,
+        thread_id: sampleThread.thread_id,
+        rating: "up",
+        turn_seq: 0,
+        trace_id: null,
+      });
+    renderPg();
+    await screen.findByTestId("playground-input");
+    await establishThread(user);
+
+    await user.click(await screen.findByTestId("playground-feedback-up"));
+    await waitFor(() =>
+      expect(feedbackMock).toHaveBeenCalledWith(sampleThread.thread_id, {
+        rating: "up",
+        comment: undefined,
+        turn_seq: 0,
+      }),
+    );
+    expect(screen.getByText("Thanks for the feedback")).toBeInTheDocument();
+    // One submission per turn — both buttons disable.
+    expect(screen.getByTestId("playground-feedback-down")).toBeDisabled();
+  });
+
+  it("thumbs-down opens a comment popover and submits rating+comment", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    const feedbackMock = vi
+      .spyOn(sessionsSdk, "submitSessionFeedback")
+      .mockResolvedValue({
+        id: 2,
+        thread_id: sampleThread.thread_id,
+        rating: "down",
+        turn_seq: 0,
+        trace_id: null,
+      });
+    renderPg();
+    await screen.findByTestId("playground-input");
+    await establishThread(user);
+
+    await user.click(await screen.findByTestId("playground-feedback-down"));
+    // Popover renders into a body portal.
+    await user.type(
+      await screen.findByTestId("playground-feedback-comment"),
+      "答非所问",
+    );
+    await user.click(screen.getByTestId("playground-feedback-down-submit"));
+    await waitFor(() =>
+      expect(feedbackMock).toHaveBeenCalledWith(sampleThread.thread_id, {
+        rating: "down",
+        comment: "答非所问",
+        turn_seq: 0,
+      }),
+    );
+  });
+
+  it("surfaces an inline error when feedback submission fails", async () => {
+    const user = userEvent.setup();
+    createSessionMock.mockResolvedValue(sampleThread);
+    vi.spyOn(sessionsSdk, "submitSessionFeedback").mockRejectedValue(
+      new Error("boom"),
+    );
+    renderPg();
+    await screen.findByTestId("playground-input");
+    await establishThread(user);
+
+    await user.click(await screen.findByTestId("playground-feedback-up"));
+    await screen.findByTestId("playground-feedback-error");
+    // Not marked submitted — the user can retry.
+    expect(screen.getByTestId("playground-feedback-up")).toBeEnabled();
+  });
 });

@@ -639,6 +639,12 @@ export interface TranslationKeys {
     meta_steps: string;
     meta_latency: string;
     view_run: string;
+    feedback_up: string;
+    feedback_down: string;
+    feedback_comment_placeholder: string;
+    feedback_comment_submit: string;
+    feedback_thanks: string;
+    feedback_failed: string;
     approval_awaiting: string;
     approval_approve: string;
     approval_reject: string;
@@ -2827,6 +2833,12 @@ const en: TranslationKeys = {
     meta_steps: "steps",
     meta_latency: "latency",
     view_run: "View run",
+    feedback_up: "Good answer",
+    feedback_down: "Bad answer",
+    feedback_comment_placeholder: "What went wrong? (optional — helps the agent improve)",
+    feedback_comment_submit: "Submit feedback",
+    feedback_thanks: "Thanks for the feedback",
+    feedback_failed: "Feedback failed",
     approval_awaiting: "awaiting approval",
     approval_approve: "Approve",
     approval_reject: "Reject",
