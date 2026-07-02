@@ -67,6 +67,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         agent_name: str | None,
         agent_version: str | None,
         q: str | None,
+        q_thread_ids: Collection[UUID] | None,
         include_archived: bool,
         thread_ids: Collection[UUID] | None,
     ) -> list[ThreadMeta]:
@@ -92,7 +93,13 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
             rows = [r for r in rows if r.agent_version == agent_version]
         if q:
             needle = q.lower()
-            rows = [r for r in rows if r.title is not None and needle in r.title.lower()]
+            content_hits = set(q_thread_ids) if q_thread_ids else set()
+            rows = [
+                r
+                for r in rows
+                if (r.title is not None and needle in r.title.lower())
+                or r.thread_id in content_hits
+            ]
         rows.sort(key=lambda r: r.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return rows
 
@@ -106,6 +113,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
         order_by: ThreadOrder = "created_at",
@@ -122,6 +130,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
             agent_name=agent_name,
             agent_version=agent_version,
             q=q,
+            q_thread_ids=q_thread_ids,
             include_archived=include_archived,
             thread_ids=thread_ids,
         )
@@ -136,6 +145,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
         order_by: ThreadOrder = "created_at",
@@ -150,6 +160,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
             agent_name=agent_name,
             agent_version=agent_version,
             q=q,
+            q_thread_ids=q_thread_ids,
             include_archived=include_archived,
             thread_ids=thread_ids,
         )
@@ -165,6 +176,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
     ) -> int:
@@ -177,6 +189,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
                 agent_name=agent_name,
                 agent_version=agent_version,
                 q=q,
+                q_thread_ids=q_thread_ids,
                 include_archived=include_archived,
                 thread_ids=thread_ids,
             )
@@ -191,6 +204,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         agent_version: str | None = None,
         nonempty: bool = False,
         q: str | None = None,
+        q_thread_ids: Collection[UUID] | None = None,
         include_archived: bool = False,
         thread_ids: Collection[UUID] | None = None,
     ) -> int:
@@ -203,6 +217,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
                 agent_name=agent_name,
                 agent_version=agent_version,
                 q=q,
+                q_thread_ids=q_thread_ids,
                 include_archived=include_archived,
                 thread_ids=thread_ids,
             )

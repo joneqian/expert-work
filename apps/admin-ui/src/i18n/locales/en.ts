@@ -2357,7 +2357,7 @@ const en: TranslationKeys = {
     window_24h: "Last 24 hours",
     window_7d: "Last 7 days",
     pager_total: "{{total}} conversations",
-    search_placeholder: "Search conversation title…",
+    search_placeholder: "Search title or message content…",
     cross_tenant_banner: "cross-tenant view",
     failed_to_load: "Failed to load conversations",
     error_count: "{{count}} failed run(s)",

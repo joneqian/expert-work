@@ -37,7 +37,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from control_plane.api._quota_admission import check_admission
-from control_plane.api._session_title import message_text, title_from_text
+from control_plane.api._session_title import title_from_text
 from control_plane.api._user_scope import (
     caller_owns_thread,
     ensure_member_active,
@@ -60,6 +60,7 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
+from control_plane.transcript import read_turns
 from helix_agent.common.observability import (
     current_trace_id_hex,
     helix_counter,
@@ -1088,24 +1089,13 @@ def build_runs_router() -> APIRouter:
         if checkpointer is None:
             return empty
         try:
-            config: RunnableConfig = {
-                "configurable": {"thread_id": str(thread_id), "checkpoint_ns": ""}
-            }
-            tup = await checkpointer.aget_tuple(config)
+            # Shared extraction with the transcript mirror sweep (IA M4) —
+            # one definition of "a transcript turn".
+            turns = await read_turns(checkpointer, thread_id)
         except Exception:
             logger.warning("thread_messages.read_failed", exc_info=True)
             return empty
-        if tup is None:
-            return empty
-        raw = (tup.checkpoint.get("channel_values") or {}).get("messages", [])
-        out: list[dict[str, str]] = []
-        for m in raw:
-            mtype = getattr(m, "type", None)
-            if mtype not in ("human", "ai"):
-                continue
-            text = message_text(getattr(m, "content", ""))
-            if text.strip():
-                out.append({"role": "user" if mtype == "human" else "assistant", "content": text})
+        out = [{"role": t.role, "content": t.content} for t in turns]
         return JSONResponse({"success": True, "data": {"messages": out}})
 
     @router.get("/{thread_id}/runs/{run_id}/events", response_model=None)

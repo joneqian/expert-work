@@ -175,6 +175,8 @@ async def client_and_threads() -> AsyncIterator[tuple[AsyncClient, dict[str, UUI
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         jwt = make_test_jwt(tenant_id=_TENANT, subject=str(uuid4()))
         client.headers["Authorization"] = f"Bearer {jwt}"
+        # Content-search tests seed the transcript mirror directly.
+        client.app_state = app.state  # type: ignore[attr-defined]
         yield client, ids
 
 
@@ -301,6 +303,47 @@ async def test_list_filters_by_has_pending(
     )
     assert both.json()["data"]["items"] == []
     assert both.json()["data"]["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_q_matches_title_or_message_content(
+    client_and_threads: tuple[AsyncClient, dict[str, UUID]],
+) -> None:
+    """IA M4 — one search box spans the title AND the mirrored transcript."""
+    from helix_agent.persistence import MessageTurn
+
+    client, ids = client_and_threads
+    # Seed the transcript mirror for a conversation whose TITLE doesn't match.
+    store = client.app_state.thread_message_store  # type: ignore[attr-defined]
+    await store.sync_thread(
+        thread_id=ids["other_agent"],
+        tenant_id=_TENANT,
+        turns=[MessageTurn(seq=0, role="user", content="my invoice was 重复扣费 twice")],
+        synced_at=_NOW,
+    )
+
+    # Content-only hit.
+    resp = await client.get("/v1/conversations", params={"q": "重复扣费"})
+    data = resp.json()["data"]
+    assert {i["thread_id"] for i in data["items"]} == {str(ids["other_agent"])}
+    assert data["total"] == 1
+
+    # Title hit still works ("refund question" on convo) — OR semantics: a
+    # term matching one title and another thread's content returns both.
+    await store.sync_thread(
+        thread_id=ids["other_user"],
+        tenant_id=_TENANT,
+        turns=[MessageTurn(seq=0, role="assistant", content="your refund is on its way")],
+        synced_at=_NOW,
+    )
+    both = await client.get("/v1/conversations", params={"q": "refund"})
+    got = {i["thread_id"] for i in both.json()["data"]["items"]}
+    assert got == {str(ids["convo"]), str(ids["other_user"])}
+    assert both.json()["data"]["total"] == 2
+
+    # Content search composes with the agent filter.
+    scoped = await client.get("/v1/conversations", params={"q": "重复扣费", "agent_name": "alpha"})
+    assert scoped.json()["data"]["items"] == []
 
 
 @pytest.mark.asyncio

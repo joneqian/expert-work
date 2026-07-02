@@ -138,6 +138,44 @@ Agent 详情
 - SDK `api/users.ts` + memory/artifacts SDK 补参数;i18n 双语 / stories /
   Playwright / TenantScope 对账(SE-8 全走)。
 
+### M4 — 对话全文搜索(2026-07-02 立项,用户拍板:浏览器 + agent 详情对话 tab 都要)
+
+**动机**:`q` 只搜标题;运营真实问法是「用户说过 XX 的那个对话在哪」。标题是首条消息
+截断,内容搜索缺位 = 定位链路断头。
+
+**数据源约束(盘点定案)**:消息全历史存 LangGraph `checkpoints` 表(`AsyncPostgresSaver.setup()`
+自建,非 alembic 管),channel_values 是序列化 blob——**SQL 无法对 blob 下推子串匹配/索引**,
+且该表无 tenant_id/RLS。即时解 checkpoint 搜索 = O(threads) 拉 blob 解包,不可分页、不可索引,否决。
+
+**方案:写侧镜像 + trigram 索引**(唯一能让搜索走索引、走 RLS、走既有组合机制的路):
+
+- **`thread_message` 镜像表**(migration 0106):`(thread_id, seq)` PK、`tenant_id` NOT NULL、
+  `role`(user/assistant)、`content` TEXT、`created_at`(镜像时刻;checkpoint 内消息无时间戳)。
+  `thread_id` FK→thread_meta ON DELETE CASCADE(D.3 TTL 删线程自动清)。
+  RLS = ENABLE+FORCE `tenant_isolation`(照 0097/0005 policy)。
+  索引:`GIN (content gin_trgm_ops)`(`CREATE EXTENSION IF NOT EXISTS pg_trgm`,先例 0017 vector)。
+  为什么 trgm 不是 tsvector FTS:PG 默认分词不支持中文;trgm 加速的是 `ILIKE '%q%'` 子串
+  匹配——语义与现有标题搜索完全一致,中英通吃。已知退化:<3 字符查询索引利用率低,
+  正确性不受影响。
+- **`thread_message_sync` 水位表**:`thread_id` PK、`tenant_id`、`synced_at`、`message_count`。
+  per-thread 水位;**回填 = 水位行缺失**,自动收敛,无一次性脚本。
+- **`TranscriptMirrorSweep`**(control-plane,照 `ApprovalTimeoutSweep` 结构,interval loop + batch):
+  每 tick 选「水位缺失 OR ∃ agent_run.updated_at > synced_at」的 thread(batch 限流),
+  `checkpointer.aget_tuple()` 读最新 checkpoint(`durable_checkpointer` 装配点 app.py 已有),
+  human/ai 文本轮(复用 `message_text`,与 `GET /v1/sessions/{id}/messages` 同一提取逻辑,
+  抽共享函数防漂移)→ `INSERT ON CONFLICT (thread_id, seq) DO NOTHING` + 水位 upsert。
+  幂等:add_messages 是 append-only reducer,seq=数组下标稳定。跨租户写走
+  `bypass_rls_session`(sweep 是平台级,Stream N 契约)。**搜索可见延迟 ≤ sweep 间隔**
+  (默认 60s,运营场景可接受)。
+- **搜索接线**:`ThreadMessageStore.search_thread_ids(tenant_id|None, q, limit=500) -> set[UUID]`
+  ——与 `thread_ids_with_runs` 完全同型。endpoint:`q` 给定时先解内容命中集,
+  thread_meta list/count 的 q 条件升级为 `title ILIKE OR thread_id ∈ content_hits`
+  (store 加 `q_thread_ids` 参数,list/count 共享 `_filter_clauses` 防漂移);
+  命中集 ≥500 → `X-Limit-Capped`(既有机制)。**agent 详情对话 tab 走同一 endpoint,
+  天然获得**(前端补搜索框即可)。
+- **安全**:镜像内容与 checkpoint 同库同租户,不扩大暴露面且反而补上 RLS;
+  审计 details 不记 q 原文(log-injection 前科),记 `q_content_search: bool`。
+
 ## 6. 前端(SE-8 接线点全走)
 
 ### M1
@@ -164,7 +202,9 @@ Agent 详情
 | PR-1 | M1.5 消息面(纯前端)+ 本设计文档更新 | 无 | ✅ #883 |
 | PR-2 | M2 后端:两 store 聚合 + users 端点 + memory/artifacts/usage `user_id` 参数 + migration + 测试 | 无 | ✅ #884 |
 | PR-3 | M2 前端:UsersTab + UserDetail 四 tab + SDK + i18n/stories/e2e | PR-2 | ✅ #885 |
-| PR-4 | M3 收口 + **H.8-F1**(实施期发现:artifacts 动作端点全是 caller-only,直接删顶层会砍 download/delete 能力 → 拍板补全再删):四动作端点 `?user_id=` admin 目标(统一 `resolve_target_user_id` 闸,supervisor 读天然按 user 参数化零改动)+ 产物全动作面迁用户详情 + 顶层 artifacts 删 + MemoryTab 删 + MemoryAdmin user 过滤 | PR-3 | 本 PR |
+| PR-4 | M3 收口 + **H.8-F1**(实施期发现:artifacts 动作端点全是 caller-only,直接删顶层会砍 download/delete 能力 → 拍板补全再删):四动作端点 `?user_id=` admin 目标(统一 `resolve_target_user_id` 闸,supervisor 读天然按 user 参数化零改动)+ 产物全动作面迁用户详情 + 顶层 artifacts 删 + MemoryTab 删 + MemoryAdmin user 过滤 | PR-3 | ✅ #886 |
+| PR-5 | 浏览器运营补齐:过滤(#888)→ 真分页 + since(#889)→ 末次活跃排序 + has_pending(#890)→ 过滤 URL 化 + 自动刷新 + 返回链(#891) | PR-4 | ✅ |
+| PR-6 | M4 全套:migration 0106 + `ThreadMessageStore` + `TranscriptMirrorSweep` + `q` 内容搜索接线 + 前端(浏览器 placeholder 升级 + agent 详情对话 tab 搜索框/真分页)+ 测试 | 无 | 本 PR |
 
 ## 7. 非目标(有意不做)
 

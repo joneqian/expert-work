@@ -139,6 +139,8 @@ from helix_agent.persistence.models import SkillVersionRow as SkillVersionRow
 from helix_agent.persistence.models import TenantBillingLedgerRow as TenantBillingLedgerRow
 from helix_agent.persistence.models import TenantMemberRow as TenantMemberRow
 from helix_agent.persistence.models import TenantUserRow as TenantUserRow
+from helix_agent.persistence.models import ThreadMessageRow as ThreadMessageRow
+from helix_agent.persistence.models import ThreadMessageSyncRow as ThreadMessageSyncRow
 from helix_agent.persistence.models import ThreadMetaRow as ThreadMetaRow
 from helix_agent.persistence.models import UserWorkspaceRow as UserWorkspaceRow
 from helix_agent.persistence.platform_agent_template import (
@@ -260,6 +262,18 @@ from helix_agent.persistence.tenant_user import (
     SqlTenantUserStore as SqlTenantUserStore,
 )
 from helix_agent.persistence.tenant_user import TenantUserStore as TenantUserStore
+from helix_agent.persistence.thread_message import (
+    InMemoryThreadMessageStore as InMemoryThreadMessageStore,
+)
+from helix_agent.persistence.thread_message import (
+    MessageTurn as MessageTurn,
+)
+from helix_agent.persistence.thread_message import (
+    SqlThreadMessageStore as SqlThreadMessageStore,
+)
+from helix_agent.persistence.thread_message import (
+    ThreadMessageStore as ThreadMessageStore,
+)
 from helix_agent.persistence.thread_meta import (
     InMemoryThreadMetaStore as InMemoryThreadMetaStore,
 )
@@ -371,6 +385,7 @@ __all__ = [
     "InMemoryTenantQuotaStore",
     "InMemoryTenantSkillSubscriptionStore",
     "InMemoryTenantUserStore",
+    "InMemoryThreadMessageStore",
     "InMemoryThreadMetaStore",
     "InMemoryTokenReservationStore",
     "InMemoryTriggerRunStore",
@@ -393,6 +408,7 @@ __all__ = [
     "McpOAuthConnectionStore",
     "MemoryItemRow",
     "MemoryStore",
+    "MessageTurn",
     "ModelRateCardConflictError",
     "ModelRateCardNotFoundError",
     "ModelRateCardRow",
@@ -420,6 +436,7 @@ __all__ = [
     "SqlTenantQuotaStore",
     "SqlTenantSkillSubscriptionStore",
     "SqlTenantUserStore",
+    "SqlThreadMessageStore",
     "SqlThreadMetaStore",
     "SqlTokenReservationStore",
     "SqlTriggerRunStore",
@@ -441,6 +458,9 @@ __all__ = [
     "TenantSkillSubscriptionStore",
     "TenantUserRow",
     "TenantUserStore",
+    "ThreadMessageRow",
+    "ThreadMessageStore",
+    "ThreadMessageSyncRow",
     "ThreadMetaRow",
     "ThreadMetaStore",
     "TokenReservationStore",

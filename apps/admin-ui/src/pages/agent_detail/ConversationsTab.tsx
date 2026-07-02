@@ -9,9 +9,9 @@
  * conversation detail, which then drills into an individual run.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Card, Empty, Select, Space, Table, Tag, Tooltip, Typography } from "antd";
+import { Alert, Card, Empty, Input, Select, Space, Table, Tag, Tooltip, Typography } from "antd";
 import type { TableColumnsType } from "antd";
-import { AlertTriangle, MessagesSquare } from "lucide-react";
+import { AlertTriangle, MessagesSquare, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -44,6 +44,8 @@ const STATUS_OPTIONS: ConversationStatus[] = [
   "cancelled",
 ];
 
+const PAGE_SIZE = 50;
+
 interface ConversationsTabProps {
   detail: AgentDetailResponse;
 }
@@ -57,6 +59,16 @@ export function ConversationsTab({ detail }: ConversationsTabProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<ConversationStatus | undefined>(undefined);
+  // Full-text search (IA M4) — the server's q spans title AND message
+  // content (transcript mirror), same box as the global browser.
+  const [search, setSearch] = useState("");
+  const [q, setQ] = useState<string | undefined>(undefined);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const handle = setTimeout(() => setQ(search.trim() || undefined), 300);
+    return () => clearTimeout(handle);
+  }, [search]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -66,6 +78,9 @@ export function ConversationsTab({ detail }: ConversationsTabProps) {
         agentName: name,
         agentVersion: version,
         status: statusFilter,
+        q,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
       });
       setData(result);
     } catch (err) {
@@ -73,11 +88,16 @@ export function ConversationsTab({ detail }: ConversationsTabProps) {
     } finally {
       setLoading(false);
     }
-  }, [name, version, statusFilter]);
+  }, [name, version, statusFilter, q, page]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // A filter change restarts pagination.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, q]);
 
   const columns: TableColumnsType<ConversationListItem> = useMemo(
     () => [
@@ -195,18 +215,31 @@ export function ConversationsTab({ detail }: ConversationsTabProps) {
         </Space>
       }
       extra={
-        <Select<ConversationStatus | "all">
-          value={statusFilter ?? "all"}
-          onChange={(v) => setStatusFilter(v === "all" ? undefined : (v as ConversationStatus))}
-          style={{ width: 150 }}
-          size="small"
-          aria-label={t("conversations_page.filter_status")}
-          data-testid="conversations-tab-status-filter"
-          options={[
-            { value: "all", label: t("conversations_page.filter_status_all") },
-            ...STATUS_OPTIONS.map((s) => ({ value: s, label: s })),
-          ]}
-        />
+        <Space size={8}>
+          <Input
+            allowClear
+            size="small"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("conversations_page.search_placeholder")}
+            aria-label={t("conversations_page.search_placeholder")}
+            prefix={<Search size={13} strokeWidth={1.5} />}
+            style={{ width: 220 }}
+            data-testid="conversations-tab-search"
+          />
+          <Select<ConversationStatus | "all">
+            value={statusFilter ?? "all"}
+            onChange={(v) => setStatusFilter(v === "all" ? undefined : (v as ConversationStatus))}
+            style={{ width: 150 }}
+            size="small"
+            aria-label={t("conversations_page.filter_status")}
+            data-testid="conversations-tab-status-filter"
+            options={[
+              { value: "all", label: t("conversations_page.filter_status_all") },
+              ...STATUS_OPTIONS.map((s) => ({ value: s, label: s })),
+            ]}
+          />
+        </Space>
       }
       data-testid="conversations-tab-root"
     >
@@ -225,7 +258,13 @@ export function ConversationsTab({ detail }: ConversationsTabProps) {
         dataSource={data?.items ?? []}
         rowKey={(record) => record.thread_id}
         loading={loading}
-        pagination={{ total: data?.total ?? 0, showSizeChanger: false, pageSize: 50 }}
+        pagination={{
+          current: page,
+          total: data?.total ?? 0,
+          showSizeChanger: false,
+          pageSize: PAGE_SIZE,
+          onChange: setPage,
+        }}
         onRow={(record) => ({
           onClick: () => navigate(`/conversations/${encodeURIComponent(record.thread_id)}`),
           style: { cursor: "pointer" },
