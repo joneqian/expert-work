@@ -1652,12 +1652,12 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 - [x] **设计定稿**（本 PR）：核实结论 + 断点图 + 信号金字塔 + 九决策 + 实施拆分
 - [ ] **PR-1 打标入口**：Playground assistant 轮挂 👍/👎（👎 弹 comment），接现成 `POST /v1/sessions/{id}/feedback`；业务系统代提交写进集成文档——试点信号主力，先行
-- [ ] **PR-2 重试档 + 灰度**：蒸馏 transient 异常不烧候选（`retry_count` 列，≥3 才标 evolved_at）+ `tenant_config.skill_evolution_enabled` per-tenant 白名单（与平台总闸两层与）——解锁 live 试点
+- [ ] **PR-2 重试档 + 灰度**：蒸馏 transient 异常不烧候选（`retry_count` 列，≥3 才标 evolved_at）+ `tenant_config.skill_evolution_enabled` per-tenant 白名单（与平台总闸两层与）+ **admin-ui**：system_admin 租户管理页「技能自进化」开关面（含 PR-4 抽样率输入；不接受只能 SQL 改）——解锁 live 试点
 - [ ] **PR-3 信号扩容**：`IMPLICIT_SUCCESS` 隐式正信号（纯规则：无👎+无 5min 重发+success，数据源 thread_message 镜像）+ 👎 作 failures 语料（带 comment）喂对比蒸馏 + 弱信号来源永不 auto-promote（强制人审；👍 来源维持可 auto）
 - [ ] **PR-4 judge 抽样评分**：隐式候选池抽样（tenant_config 可配默认 5%）便宜模型评质量分做候选提纯；与晋升闸 judge 体系分离；打标用作 judge 校准集
 - [ ] **PR-5 晋升→生效补链**：`AgentSpec.auto_attach_evolved_skills` opt-in——build 时自动附加本 agent 蒸馏出的 ACTIVE 技能（lazy 档=selection-based，>20 技能转 BM25/embedding 检索）；rollback 监控/curator 衰退语义随之恢复
-- [ ] **PR-6 aux 计量**：distiller/judge/replay token 进 `token_usage`（真 tenant_id + 源 agent），替换 `_NULL_TENANT` 占位，进化成本可 chargeback
-- [ ] **PR-7 入库查重**：蒸馏产物 vs 同 agent 现有 distilled 技能 embedding 相似 → 转修订轮不新建（对标 SkillNet/SkillOS dedup 标配）
+- [ ] **PR-6 aux 计量**：distiller/judge/replay token 进 `token_usage`（真 tenant_id + 源 agent + `usage_kind` 区分进化/对话成本，倾向新列案），替换 `_NULL_TENANT` 占位 + **admin-ui**：用量视图 kind 分列/过滤
+- [ ] **PR-7 入库查重**：蒸馏产物 vs 同 agent 现有 distilled 技能 embedding 相似 → 转修订轮不新建（对标 SkillNet/SkillOS dedup 标配）+ **admin-ui**：人审队列区分「新技能 vs 更新既有技能」
 - [ ] **PR-8 promote 事件发射**：`skill_promote.requested` 走 HX-9 webhook（触达渠道与审批通知 backlog 合并另立项）
 - [ ] **收官 = live 试点全场景**（计划成文于设计 §12.10，14 场景五阶段）：信号→候选（三类信号+改口排除+transient 重试+judge 抽样滤除）→ 蒸馏→验证（👎语料佐证+implicit 禁 auto+查重转修订轮）→ 晋升→生效（人审/auto/限速/kill-switch+**attach 后 skill_run_usage 出 with 行**=断链修复直接证据）→ 回滚+计量对账（造衰退→ARCHIVED+共享熔断；token_usage 无 NULL_TENANT 残留）→ 运营面（审批证据/打标控件/未灰度租户全链静默）；预期逮 3-5 live 坑（9.4/4.4 先例），修完才 ★5
 - 显式不做（对标依据在设计 §12.8）：shadow/champion-challenger 对照、环境信号（缺埋点，backlog）、技能 merge
