@@ -80,7 +80,10 @@ jobs:
     # Unit-only path; ``integration`` marker (testcontainers Postgres /
     # MinIO / pgbouncer compose) runs in the separate ``test-integration``
     # job so a slow Docker image pull on the runner never gates the PR.
-    timeout-minutes: 10
+    # 20min: the suite crossed ~9m35s at 5222 tests (2026-07) — with
+    # checkout + uv sync the old 10min ceiling cancelled fully-green runs
+    # at the finish line ("N passed" then conclusion=cancelled).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
