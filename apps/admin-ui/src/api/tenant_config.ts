@@ -41,6 +41,10 @@ export interface TenantConfigRecord {
    *  model_validator). */
   skill_stale_days: number;
   skill_archive_days: number;
+  /** SE-16 (SE-A41) — per-tenant skill-evolution rollout gate; ANDed with
+   *  the platform master switch. Default false (rolled out tenant by
+   *  tenant). */
+  skill_evolution_enabled: boolean;
   created_at: string;
   updated_at: string;
   updated_by: string;
@@ -61,6 +65,7 @@ export interface TenantConfigPatchBody {
   event_log_retention_days?: number;
   skill_stale_days?: number;
   skill_archive_days?: number;
+  skill_evolution_enabled?: boolean;
 }
 
 /** Stream O Mini-ADR O-13 — one row of the Credentials panel's provider /

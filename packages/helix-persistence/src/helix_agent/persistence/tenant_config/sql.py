@@ -63,6 +63,7 @@ def _row_to_record(row: TenantConfigRow) -> TenantConfigRecord:
         mcp_credentials={str(k): str(v) for k, v in row.mcp_credentials.items()},
         default_agent_name=row.default_agent_name,
         allow_custom_mcp_servers=row.allow_custom_mcp_servers,
+        skill_evolution_enabled=row.skill_evolution_enabled,
         created_at=row.created_at,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
@@ -190,6 +191,8 @@ class SqlTenantConfigStore(TenantConfigStore):
                     values["default_agent_name"] = patch.default_agent_name
                 if patch.allow_custom_mcp_servers is not None:
                     values["allow_custom_mcp_servers"] = patch.allow_custom_mcp_servers
+                if patch.skill_evolution_enabled is not None:
+                    values["skill_evolution_enabled"] = patch.skill_evolution_enabled
                 stmt = (
                     pg_insert(TenantConfigRow)
                     .values(**values)
@@ -275,6 +278,8 @@ class SqlTenantConfigStore(TenantConfigStore):
                 existing.default_agent_name = patch.default_agent_name
             if patch.allow_custom_mcp_servers is not None:
                 existing.allow_custom_mcp_servers = patch.allow_custom_mcp_servers
+            if patch.skill_evolution_enabled is not None:
+                existing.skill_evolution_enabled = patch.skill_evolution_enabled
             existing.updated_at = _utc_now()
             existing.updated_by = actor_id
             await session.commit()

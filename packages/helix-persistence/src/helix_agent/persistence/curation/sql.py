@@ -186,6 +186,7 @@ def _candidate_row_to_dto(row: CurationCandidateRow) -> CurationCandidateRecord:
         detected_at=row.detected_at,
         reviewed_at=row.reviewed_at,
         evolved_at=row.evolved_at,
+        retry_count=row.retry_count,
     )
 
 
@@ -287,6 +288,23 @@ class SqlCurationCandidateStore(CurationCandidateStore):
             )
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
+
+    async def record_retry(self, *, candidate_id: UUID, tenant_id: UUID) -> int:
+        # SE-16 (SE-A40) — atomic increment; RETURNING avoids a read race
+        # between concurrent worker instances.
+        async with self._sf() as session:
+            result = await session.execute(
+                sa_update(CurationCandidateRow)
+                .where(
+                    CurationCandidateRow.id == candidate_id,
+                    CurationCandidateRow.tenant_id == tenant_id,
+                )
+                .values(retry_count=CurationCandidateRow.retry_count + 1)
+                .returning(CurationCandidateRow.retry_count)
+            )
+            await session.commit()
+            value = result.scalar_one_or_none()
+        return int(value) if value is not None else 0
 
     async def _list_for_review(
         self,

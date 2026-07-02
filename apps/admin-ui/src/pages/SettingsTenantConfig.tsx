@@ -297,6 +297,17 @@ export function SettingsTenantConfig() {
             <dd style={{ margin: 0 }} data-testid="tenant-config-skill-archive-days">
               {record.skill_archive_days}
             </dd>
+            {/* SE-16 (SE-A41) — skill-evolution rollout gate. Read-only
+                display; flip it through the same JSON editor (rollout is
+                deliberate, not a casual toggle). */}
+            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+              {t("settings_ops.skill_evolution_enabled")}
+            </dt>
+            <dd style={{ margin: 0 }} data-testid="tenant-config-skill-evolution-enabled">
+              {record.skill_evolution_enabled
+                ? t("settings_ops.skill_evolution_on")
+                : t("settings_ops.skill_evolution_off")}
+            </dd>
             <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.mcp_allowlist")}</dt>
             <dd style={{ margin: 0 }}>
               {record.mcp_allowlist.length === 0 ? (

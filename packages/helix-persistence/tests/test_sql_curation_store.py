@@ -289,3 +289,21 @@ async def test_candidate_update_records_promotion(
     assert again is not None
     assert again.status is CandidateStatus.PROMOTED
     assert again.eval_dataset_id is not None
+
+
+@pytest.mark.asyncio
+async def test_record_retry_atomic_increment_sql(
+    curation_stores: tuple[SqlEvalDatasetStore, SqlCurationCandidateStore],
+) -> None:
+    """SE-16 (SE-A40) — retry bump is an atomic UPDATE..RETURNING; the
+    candidate stays unevolved so the next sweep re-picks it."""
+    _, candidates = curation_stores
+    cid, tenant = uuid4(), uuid4()
+    await candidates.upsert(_candidate(candidate_id=cid, tenant_id=tenant))
+
+    assert await candidates.record_retry(candidate_id=cid, tenant_id=tenant) == 1
+    assert await candidates.record_retry(candidate_id=cid, tenant_id=tenant) == 2
+    rec = await candidates.get(candidate_id=cid, tenant_id=tenant)
+    assert rec is not None and rec.retry_count == 2 and rec.evolved_at is None
+    # Cross-tenant probe: no bump, returns 0.
+    assert await candidates.record_retry(candidate_id=cid, tenant_id=uuid4()) == 0

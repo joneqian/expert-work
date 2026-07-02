@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from control_plane.skill_evolution import EvolutionResult
+from control_plane.skill_evolution import EvolutionResult, TransientEvolutionError
 from control_plane.skill_evolution_worker import SkillEvolutionWorker
 from helix_agent.persistence.curation.memory import InMemoryCurationCandidateStore
 from helix_agent.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
@@ -202,3 +202,116 @@ async def test_run_once_marks_evolved_and_does_not_reprocess() -> None:
     assert second.scanned == 0
     assert second.processed == 0
     assert len(proc.seen) == 2  # processor not called again
+
+
+# ---------------------------------------------------------------------------
+# SE-16 — transient retry budget (SE-A40) + per-tenant rollout gate (SE-A41)
+# ---------------------------------------------------------------------------
+
+
+class _ExplodingProcessor:
+    """Fails N times with ``exc``, then succeeds."""
+
+    def __init__(self, exc: Exception, failures: int = 10**9) -> None:
+        self.exc = exc
+        self.failures = failures
+        self.calls = 0
+
+    async def __call__(self, candidate: CurationCandidateRecord) -> EvolutionResult:
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise self.exc
+        return _result("grounded")
+
+
+async def _sole_candidate(store: InMemoryCurationCandidateStore) -> CurationCandidateRecord:
+    rows = await store.list_for_review_all_tenants()
+    assert len(rows) == 1
+    return rows[0]
+
+
+async def test_transient_failure_requeues_instead_of_burning() -> None:
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="positive_feedback", tenant=tenant)])
+    proc = _ExplodingProcessor(TransientEvolutionError("aux rate limited"), failures=1)
+    worker = SkillEvolutionWorker(candidate_store=store, processor=proc, interval_s=60)
+
+    await worker.run_once()
+    row = await _sole_candidate(store)
+    # Requeued: retry bumped, NOT marked evolved.
+    assert row.retry_count == 1
+    assert row.evolved_at is None
+
+    # Next sweep re-picks it and succeeds.
+    await worker.run_once()
+    row = await _sole_candidate(store)
+    assert row.evolved_at is not None
+    assert proc.calls == 2
+
+
+async def test_transient_failures_give_up_at_budget() -> None:
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="positive_feedback", tenant=tenant)])
+    # Wrapped transport fault sniffed through the cause chain.
+    exc = RuntimeError("distill failed")
+    exc.__cause__ = TimeoutError("aux timed out")
+    proc = _ExplodingProcessor(exc)
+    worker = SkillEvolutionWorker(candidate_store=store, processor=proc, interval_s=60)
+
+    await worker.run_once()  # retry 1
+    await worker.run_once()  # retry 2
+    row = await _sole_candidate(store)
+    assert row.retry_count == 2 and row.evolved_at is None
+
+    await worker.run_once()  # retry 3 → budget spent → burned
+    row = await _sole_candidate(store)
+    assert row.retry_count == 3
+    assert row.evolved_at is not None
+
+    await worker.run_once()  # burned candidate is not re-picked
+    assert proc.calls == 3
+
+
+async def test_permanent_failure_burns_immediately() -> None:
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="positive_feedback", tenant=tenant)])
+    proc = _ExplodingProcessor(ValueError("malformed trajectory"))
+    worker = SkillEvolutionWorker(candidate_store=store, processor=proc, interval_s=60)
+
+    await worker.run_once()
+    row = await _sole_candidate(store)
+    assert row.retry_count == 0
+    assert row.evolved_at is not None
+
+
+async def test_tenant_gate_skips_unenrolled_without_burning() -> None:
+    enrolled, unenrolled = uuid4(), uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(
+        store,
+        [
+            _candidate(signal="positive_feedback", tenant=enrolled),
+            _candidate(signal="positive_feedback", tenant=unenrolled),
+        ],
+    )
+    proc = RecordingProcessor()
+
+    async def gate(tenant_id: UUID) -> bool:
+        return tenant_id == enrolled
+
+    worker = SkillEvolutionWorker(
+        candidate_store=store, processor=proc, interval_s=60, tenant_gate=gate
+    )
+    await worker.run_once()
+
+    assert {c.tenant_id for c in proc.seen} == {enrolled}
+    rows = await store.list_for_review_all_tenants()
+    by_tenant = {r.tenant_id: r for r in rows}
+    # Enrolled tenant's candidate is processed + marked; the unenrolled one
+    # stays pristine so it distils normally once the tenant is enrolled.
+    assert by_tenant[enrolled].evolved_at is not None
+    assert by_tenant[unenrolled].evolved_at is None
+    assert by_tenant[unenrolled].retry_count == 0

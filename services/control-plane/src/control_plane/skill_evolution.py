@@ -36,8 +36,17 @@ __all__ = [
     "EvolutionResult",
     "ReplayOutcome",
     "RoundRecord",
+    "TransientEvolutionError",
     "evolve",
 ]
+
+
+class TransientEvolutionError(Exception):
+    """A distillation attempt died on a retryable fault (aux LLM timeout /
+    rate limit / connection). The evolution worker bumps the candidate's
+    ``retry_count`` instead of burning it via ``evolved_at`` (SE-A40).
+    Wiring raises/wraps this where the fault class is known; the worker
+    additionally sniffs common transport exceptions."""
 
 
 @dataclass(frozen=True)

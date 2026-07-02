@@ -889,6 +889,9 @@ export interface TranslationKeys {
     // Sprint #4 (Mini-ADR U-28) — Curator thresholds.
     skill_stale_days: string;
     skill_archive_days: string;
+    skill_evolution_enabled: string;
+    skill_evolution_on: string;
+    skill_evolution_off: string;
     mcp_allowlist: string;
     http_allowlist: string;
     updated: string;
@@ -3094,6 +3097,9 @@ const en: TranslationKeys = {
     rate_limit_default: "Platform default",
     skill_stale_days: "Skill stale threshold (days)",
     skill_archive_days: "Skill archive threshold (days)",
+    skill_evolution_enabled: "Skill self-evolution",
+    skill_evolution_on: "Enrolled",
+    skill_evolution_off: "Not enrolled",
     mcp_allowlist: "MCP allowlist",
     http_allowlist: "HTTP tool allowlist",
     updated: "Updated",

@@ -128,6 +128,8 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                     row_kwargs["default_agent_name"] = patch.default_agent_name
                 if patch.allow_custom_mcp_servers is not None:
                     row_kwargs["allow_custom_mcp_servers"] = patch.allow_custom_mcp_servers
+                if patch.skill_evolution_enabled is not None:
+                    row_kwargs["skill_evolution_enabled"] = patch.skill_evolution_enabled
                 row = TenantConfigRecord(**row_kwargs)  # type: ignore[arg-type]
             else:
                 row = existing.model_copy(
@@ -165,6 +167,8 @@ class InMemoryTenantConfigStore(TenantConfigStore):
                             "default_agent_name": patch.default_agent_name,
                             # Stream W — custom MCP kill-switch.
                             "allow_custom_mcp_servers": patch.allow_custom_mcp_servers,
+                            # SE-16 (SE-A41) — skill-evolution rollout gate.
+                            "skill_evolution_enabled": patch.skill_evolution_enabled,
                         }.items()
                         if v is not None
                     }

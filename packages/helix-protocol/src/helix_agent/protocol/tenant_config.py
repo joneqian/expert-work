@@ -195,6 +195,11 @@ class TenantConfigRecord(BaseModel):
     # rejected. Defaults True to preserve Stream V self-service behavior — a
     # platform admin sets it False per tenant for catalog-only governance.
     allow_custom_mcp_servers: bool = True
+    # SE-16 (SE-A41) — per-tenant skill-evolution rollout gate. ANDed with
+    # the platform master switch (``enable_skill_evolution_worker``): the
+    # evolution worker only distils this tenant's candidates when both are
+    # on. Default off — production rolls out tenant by tenant.
+    skill_evolution_enabled: bool = False
     created_at: datetime
     updated_at: datetime
     updated_by: str
@@ -275,3 +280,6 @@ class TenantConfigPatch(BaseModel):
     default_agent_name: str | None = None
     # Stream W — Mini-ADR W-4. None = leave unchanged.
     allow_custom_mcp_servers: bool | None = None
+    # SE-16 (SE-A41) — per-tenant skill-evolution rollout gate. None = leave
+    # unchanged.
+    skill_evolution_enabled: bool | None = None

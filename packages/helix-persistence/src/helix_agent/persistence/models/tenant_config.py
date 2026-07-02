@@ -118,6 +118,11 @@ class TenantConfigRow(Base):
     allow_custom_mcp_servers: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"), default=True
     )
+    # SE-16 (SE-A41) — per-tenant skill-evolution rollout gate (ANDed with
+    # the platform master switch). Added in migration 0107.
+    skill_evolution_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

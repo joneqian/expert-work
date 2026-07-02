@@ -147,6 +147,14 @@ class InMemoryCurationCandidateStore(CurationCandidateStore):
         self._rows[candidate_id] = existing.model_copy(update={"evolved_at": at})
         return True
 
+    async def record_retry(self, *, candidate_id: UUID, tenant_id: UUID) -> int:
+        existing = self._rows.get(candidate_id)
+        if existing is None or existing.tenant_id != tenant_id:
+            return 0
+        bumped = existing.model_copy(update={"retry_count": existing.retry_count + 1})
+        self._rows[candidate_id] = bumped
+        return bumped.retry_count
+
     async def update(self, record: CurationCandidateRecord) -> bool:
         existing = self._rows.get(record.id)
         if existing is None or existing.tenant_id != record.tenant_id:

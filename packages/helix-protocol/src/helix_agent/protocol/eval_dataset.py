@@ -93,6 +93,11 @@ class CurationCandidateRecord(BaseModel):
     #: human-review verdict). Set once the evolution worker has distilled +
     #: replayed this candidate, so it is not re-processed every interval.
     evolved_at: datetime | None = None
+    #: SE-16 (SE-A40) — transient-failure retries. A distillation attempt
+    #: that died on a retryable fault (aux LLM timeout / rate limit /
+    #: connection) bumps this instead of burning the candidate via
+    #: ``evolved_at``; the worker gives up (marks evolved) at 3.
+    retry_count: int = 0
 
     @model_validator(mode="after")
     def _check_review_state(self) -> CurationCandidateRecord:
