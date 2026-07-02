@@ -220,6 +220,8 @@ export interface TranslationKeys {
     filter_status_all: string;
     filter_user_tip: string;
     filter_user_active: string;
+    filter_agent: string;
+    filter_errors_only: string;
     search_placeholder: string;
     cross_tenant_banner: string;
     failed_to_load: string;
@@ -2337,6 +2339,8 @@ const en: TranslationKeys = {
     filter_status_all: "All statuses",
     filter_user_tip: "Filter conversations by this user",
     filter_user_active: "User: {{user}}…",
+    filter_agent: "Filter by agent",
+    filter_errors_only: "Errors only",
     search_placeholder: "Search conversation title…",
     cross_tenant_banner: "cross-tenant view",
     failed_to_load: "Failed to load conversations",

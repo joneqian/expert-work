@@ -14,6 +14,7 @@ import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
 
 import { ApiError } from "../../api/client";
+import * as agentsSdk from "../../api/agents";
 import * as conversationsSdk from "../../api/conversations";
 import { AuthProvider } from "../../auth/AuthContext";
 import { TenantScopeProvider } from "../../tenant/TenantScopeContext";
@@ -30,6 +31,13 @@ function jwt(payload: Record<string, unknown>): string {
 }
 
 beforeEach(() => {
+  vi.spyOn(agentsSdk, "listAgents").mockResolvedValue({
+    items: [
+      { id: "a1", tenant_id: "t", name: "support-bot", version: "1.0.0", status: "active" } as never,
+    ],
+    total: 1,
+    cross_tenant: false,
+  } as never);
   setStoredToken(
     jwt({ sub: "u", tenant_id: "11111111-1111-1111-1111-111111111111", roles: ["admin"] }),
   );
@@ -193,5 +201,28 @@ describe("ConversationsList", () => {
         expect.objectContaining({ userId: uid }),
       ),
     );
+  });
+
+  it("errors-only checkbox flows into the hasError param", async () => {
+    const user = userEvent.setup();
+    listConversationsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderPage();
+    await waitFor(() => expect(listConversationsMock).toHaveBeenCalled());
+    await user.click(screen.getByTestId("conversations-errors-only"));
+    await waitFor(() =>
+      expect(listConversationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ hasError: true }),
+      ),
+    );
+  });
+
+  it("renders the agent filter fed from the agents list", async () => {
+    listConversationsMock.mockResolvedValue({ items: [], total: 0, cross_tenant: false });
+    renderPage();
+    await waitFor(() => expect(listConversationsMock).toHaveBeenCalled());
+    // Antd Select renders options in a portal jsdom can't click through —
+    // assert the control exists and the options source was fetched.
+    expect(screen.getByTestId("conversations-agent-filter")).toBeInTheDocument();
+    expect(agentsSdk.listAgents).toHaveBeenCalled();
   });
 });

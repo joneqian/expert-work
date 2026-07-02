@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -68,6 +69,7 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         nonempty: bool = False,
         q: str | None = None,
         include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
@@ -75,6 +77,9 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         # to correlate against. The SQL backend does the real filter.
         del nonempty
         rows = [r for r in self._rows.values() if r.tenant_id == tenant_id]
+        if thread_ids is not None:
+            wanted = set(thread_ids)
+            rows = [r for r in rows if r.thread_id in wanted]
         if status is not None:
             rows = [r for r in rows if r.status == status]
         elif not include_archived:
@@ -100,11 +105,15 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
         nonempty: bool = False,
         q: str | None = None,
         include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[ThreadMeta]:
         del nonempty  # no-op in-memory (no run store) — see ``list_by_tenant``.
         rows = list(self._rows.values())
+        if thread_ids is not None:
+            wanted = set(thread_ids)
+            rows = [r for r in rows if r.thread_id in wanted]
         if status is not None:
             rows = [r for r in rows if r.status == status]
         elif not include_archived:

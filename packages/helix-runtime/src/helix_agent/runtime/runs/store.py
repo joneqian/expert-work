@@ -145,6 +145,24 @@ class RunStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def error_thread_ids(
+        self,
+        *,
+        tenant_id: UUID | None,
+        limit: int = 500,
+    ) -> set[UUID]:
+        """Distinct ``thread_id``s with ≥1 failed-terminal run (error/timeout).
+
+        Feeds the conversation browser's has-error filter (conversation-
+        centric IA): the endpoint resolves failing threads here first, then
+        reads their metadata via ``ThreadMetaStore.list_by_tenant(thread_ids=…)``.
+        ``tenant_id=None`` is the cross-tenant aggregate — the caller MUST
+        wrap it in ``bypass_rls_session()`` (Stream N contract). ``limit``
+        caps the set (failing threads are the minority; a capped read is
+        surfaced by the endpoint via ``X-Limit-Capped``).
+        """
+
+    @abc.abstractmethod
     async def aggregate_by_threads(
         self,
         *,
@@ -396,6 +414,22 @@ class InMemoryRunStore(RunStore):
         rows.sort(key=lambda r: r.created_at, reverse=True)
         clamped = _clamp_limit(limit)
         return rows[offset : offset + clamped]
+
+    async def error_thread_ids(
+        self,
+        *,
+        tenant_id: UUID | None,
+        limit: int = 500,
+    ) -> set[UUID]:
+        out: set[UUID] = set()
+        for r in self._rows.values():
+            if tenant_id is not None and r.tenant_id != tenant_id:
+                continue
+            if r.status.value in _FAILED_RUN_VALUES:
+                out.add(r.thread_id)
+                if len(out) >= limit:
+                    break
+        return out
 
     async def aggregate_by_threads(
         self,
@@ -751,6 +785,24 @@ class SqlRunStore(RunStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
+
+    async def error_thread_ids(
+        self,
+        *,
+        tenant_id: UUID | None,
+        limit: int = 500,
+    ) -> set[UUID]:
+        stmt = (
+            select(AgentRunRow.thread_id)
+            .where(AgentRunRow.status.in_(sorted(_FAILED_RUN_VALUES)))
+            .distinct()
+            .limit(limit)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(AgentRunRow.tenant_id == tenant_id)
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return set(rows)
 
     async def aggregate_by_threads(
         self,

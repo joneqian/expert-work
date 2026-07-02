@@ -226,6 +226,8 @@ const zhCN: TranslationKeys = {
     filter_status_all: "全部状态",
     filter_user_tip: "按该用户筛选对话",
     filter_user_active: "用户:{{user}}…",
+    filter_agent: "按智能体筛选",
+    filter_errors_only: "仅看错误",
     search_placeholder: "搜索对话标题…",
     cross_tenant_banner: "跨租户视图",
     failed_to_load: "对话列表加载失败",
