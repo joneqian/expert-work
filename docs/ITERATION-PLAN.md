@@ -1643,17 +1643,24 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 ### Wave — 2026-07 SE-16 进化飞轮可运转性 uplift
 
 > 触发：用户要求评估 skill 进化功能整体设计。全链只读评估结论：**验证-晋升-回滚闭环成熟
-> （晋升闸三层 tier 核实已达标，judge-only 永不 auto），但飞轮不可运转**——输入端信号饥饿、
-> 输出端晋升后无 agent 装配（白蒸馏）、生产端无灰度（默认 False 至今）。
-> 设计：[STREAM-SE-DESIGN § 12 SE-16](./streams/STREAM-SE-DESIGN.md)（Mini-ADR SE-A38~A44）。
+> （晋升闸三层 tier 核实已达标，judge-only 永不 auto），但飞轮不可运转**——输入端信号饥饿
+> （打标端点 G.6 就绪但全仓无调用方，👍/👎 按钮从未落地）、输出端晋升后无 agent 装配（白蒸馏）、
+> 生产端无灰度（默认 False 至今）。业界对标（2026-07-02 二轮调研）：显式打标率 <1% 不能当主粮，
+> 主流=隐式信号+judge 抽样+打标校准三层金字塔；技能库标配 dedup/merge（helix 缺）；
+> 检索式技能消费（lazy 档在小库等价，>20 转检索）。
+> 设计：[STREAM-SE-DESIGN § 12 SE-16](./streams/STREAM-SE-DESIGN.md)（Mini-ADR SE-A38~A47）。
 
-- [x] **设计定稿**（本 PR）：核实结论 + 断点图 + 六决策 + 实施拆分
-- [ ] **PR-1 重试档 + 灰度**：蒸馏 transient 异常不烧候选（`retry_count` 列，≥3 才标 evolved_at）+ `tenant_config.skill_evolution_enabled` per-tenant 白名单（与平台总闸两层与）——先解锁 live 试点
-- [ ] **PR-2 信号扩容**：`IMPLICIT_SUCCESS` 隐式正信号（纯规则：无👎+无 5min 重发+success，数据源 thread_message 镜像）+ 👎 作 failures 语料（带 comment）喂对比蒸馏 + implicit 来源永不 auto-promote（强制人审）
-- [ ] **PR-3 晋升→生效补链**：`AgentSpec.auto_attach_evolved_skills` opt-in——build 时自动附加本 agent 蒸馏出的 ACTIVE 技能（lazy 档）；rollback 监控/curator 衰退语义随之恢复
-- [ ] **PR-4 aux 计量**：distiller/judge/replay token 进 `token_usage`（真 tenant_id + 源 agent），替换 `_NULL_TENANT` 占位，进化成本可 chargeback
-- [ ] **PR-5 promote 事件发射**：`skill_promote.requested` 走 HX-9 webhook（触达渠道与审批通知 backlog 合并另立项）
-- [ ] **收官 = live 试点**：灰度开单租户跑通 蒸馏→人审→attach→监控 全链（CI 绿≠live 能跑）
+- [x] **设计定稿**（本 PR）：核实结论 + 断点图 + 信号金字塔 + 九决策 + 实施拆分
+- [ ] **PR-1 打标入口**：Playground assistant 轮挂 👍/👎（👎 弹 comment），接现成 `POST /v1/sessions/{id}/feedback`；业务系统代提交写进集成文档——试点信号主力，先行
+- [ ] **PR-2 重试档 + 灰度**：蒸馏 transient 异常不烧候选（`retry_count` 列，≥3 才标 evolved_at）+ `tenant_config.skill_evolution_enabled` per-tenant 白名单（与平台总闸两层与）——解锁 live 试点
+- [ ] **PR-3 信号扩容**：`IMPLICIT_SUCCESS` 隐式正信号（纯规则：无👎+无 5min 重发+success，数据源 thread_message 镜像）+ 👎 作 failures 语料（带 comment）喂对比蒸馏 + 弱信号来源永不 auto-promote（强制人审；👍 来源维持可 auto）
+- [ ] **PR-4 judge 抽样评分**：隐式候选池抽样（tenant_config 可配默认 5%）便宜模型评质量分做候选提纯；与晋升闸 judge 体系分离；打标用作 judge 校准集
+- [ ] **PR-5 晋升→生效补链**：`AgentSpec.auto_attach_evolved_skills` opt-in——build 时自动附加本 agent 蒸馏出的 ACTIVE 技能（lazy 档=selection-based，>20 技能转 BM25/embedding 检索）；rollback 监控/curator 衰退语义随之恢复
+- [ ] **PR-6 aux 计量**：distiller/judge/replay token 进 `token_usage`（真 tenant_id + 源 agent），替换 `_NULL_TENANT` 占位，进化成本可 chargeback
+- [ ] **PR-7 入库查重**：蒸馏产物 vs 同 agent 现有 distilled 技能 embedding 相似 → 转修订轮不新建（对标 SkillNet/SkillOS dedup 标配）
+- [ ] **PR-8 promote 事件发射**：`skill_promote.requested` 走 HX-9 webhook（触达渠道与审批通知 backlog 合并另立项）
+- [ ] **收官 = live 试点**：灰度开单租户，Playground 打标+隐式成功驱动跑通 蒸馏→人审→attach→监控 全链（CI 绿≠live 能跑）
+- 显式不做（对标依据在设计 §12.8）：shadow/champion-challenger 对照、环境信号（缺埋点，backlog）、技能 merge
 
 ### 显式不做（理由在册，需求出现随时重议）
 
