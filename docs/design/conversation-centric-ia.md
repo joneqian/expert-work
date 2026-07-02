@@ -204,8 +204,7 @@ Agent 详情
 | PR-3 | M2 前端:UsersTab + UserDetail 四 tab + SDK + i18n/stories/e2e | PR-2 | ✅ #885 |
 | PR-4 | M3 收口 + **H.8-F1**(实施期发现:artifacts 动作端点全是 caller-only,直接删顶层会砍 download/delete 能力 → 拍板补全再删):四动作端点 `?user_id=` admin 目标(统一 `resolve_target_user_id` 闸,supervisor 读天然按 user 参数化零改动)+ 产物全动作面迁用户详情 + 顶层 artifacts 删 + MemoryTab 删 + MemoryAdmin user 过滤 | PR-3 | ✅ #886 |
 | PR-5 | 浏览器运营补齐:过滤(#888)→ 真分页 + since(#889)→ 末次活跃排序 + has_pending(#890)→ 过滤 URL 化 + 自动刷新 + 返回链(#891) | PR-4 | ✅ |
-| PR-6 | M4 后端:migration 0106 + `ThreadMessageStore` + `TranscriptMirrorSweep` + `q` 内容搜索接线 + 测试 | 无 | 本 PR |
-| PR-7 | M4 前端:浏览器搜索 placeholder 升级 + agent 详情对话 tab 搜索框 | PR-6 | 待 |
+| PR-6 | M4 全套:migration 0106 + `ThreadMessageStore` + `TranscriptMirrorSweep` + `q` 内容搜索接线 + 前端(浏览器 placeholder 升级 + agent 详情对话 tab 搜索框/真分页)+ 测试 | 无 | 本 PR |
 
 ## 7. 非目标(有意不做)
 

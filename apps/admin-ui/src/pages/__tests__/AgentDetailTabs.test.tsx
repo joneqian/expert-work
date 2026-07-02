@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import "../../i18n";
 
@@ -95,6 +96,26 @@ describe("ConversationsTab", () => {
 
     await waitFor(() =>
       expect(screen.getByText("No conversations for this agent yet.")).toBeInTheDocument(),
+    );
+  });
+
+  it("debounces the search box into the full-text q param", async () => {
+    const spy = vi.spyOn(conversationsSdk, "listConversations").mockResolvedValue({
+      items: [],
+      total: 0,
+      cross_tenant: false,
+    });
+    const user = userEvent.setup();
+
+    inRouter(<ConversationsTab detail={detail} />);
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    await user.type(screen.getByTestId("conversations-tab-search"), "退款");
+    // q spans title AND mirrored message content server-side (IA M4);
+    // paging is server-side too.
+    await waitFor(() =>
+      expect(spy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ q: "退款", limit: 50, offset: 0 }),
+      ),
     );
   });
 });

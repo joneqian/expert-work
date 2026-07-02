@@ -236,7 +236,7 @@ const zhCN: TranslationKeys = {
     window_24h: "最近 24 小时",
     window_7d: "最近 7 天",
     pager_total: "共 {{total}} 个对话",
-    search_placeholder: "搜索对话标题…",
+    search_placeholder: "搜索标题或消息内容…",
     cross_tenant_banner: "跨租户视图",
     failed_to_load: "对话列表加载失败",
     error_count: "{{count}} 次运行失败",
