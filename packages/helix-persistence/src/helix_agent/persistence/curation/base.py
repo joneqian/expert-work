@@ -133,6 +133,14 @@ class CurationCandidateStore(abc.ABC):
         Orthogonal to ``update`` (which carries the J.12 review verdict)."""
 
     @abc.abstractmethod
+    async def record_retry(self, *, candidate_id: UUID, tenant_id: UUID) -> int:
+        """SE-16 (SE-A40) — atomically bump ``retry_count`` after a transient
+        distillation failure (aux LLM timeout / rate limit / connection) and
+        return the new value. The candidate stays unevolved so the next sweep
+        re-picks it; the worker marks evolved (gives up) once the returned
+        count reaches its budget. Returns 0 when no row matched."""
+
+    @abc.abstractmethod
     async def update(self, record: CurationCandidateRecord) -> bool:
         """Replace a candidate row (matched by ``id`` + ``tenant_id``); return hit.
 

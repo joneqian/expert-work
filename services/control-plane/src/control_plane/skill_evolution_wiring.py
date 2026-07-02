@@ -35,7 +35,7 @@ from control_plane.skill_evolution_assembly import (
 )
 from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
 from control_plane.skill_evolution_processor import EvolutionProcessor, SkillEvidence
-from control_plane.skill_evolution_worker import SkillEvolutionWorker
+from control_plane.skill_evolution_worker import SkillEvolutionWorker, TenantGate
 from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import CurationCandidateStore, SkillStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
@@ -326,6 +326,7 @@ def build_evolution_worker(
     max_rounds: int = 3,
     max_promotes_per_hour: int = 5,
     breaker: CircuitBreaker | None = None,
+    tenant_gate: TenantGate | None = None,
 ) -> SkillEvolutionWorker:
     """Assemble the production skill-evolution worker (lifespan wiring).
 
@@ -366,4 +367,5 @@ def build_evolution_worker(
         processor=processor,
         interval_s=interval_s,
         batch_size=batch_size,
+        tenant_gate=tenant_gate,
     )

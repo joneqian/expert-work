@@ -27,6 +27,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 from fastapi import FastAPI
@@ -196,7 +197,7 @@ from control_plane.skill_evolution_worker import SkillEvolutionWorker
 from control_plane.skill_rollback_monitor import RollbackMonitor
 from control_plane.skill_run_usage_recorder import StoreSkillRunUsageRecorder
 from control_plane.subagent_runtime import make_child_agent_builder, make_worker_build_fn
-from control_plane.tenancy import TenantConfigService
+from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolService
 from control_plane.tenant_scope import bypass_rls_session
 from control_plane.tenant_secret_overlay import TenantOverlayCredentialsResolver
@@ -1483,6 +1484,18 @@ def create_app(
                 # vault, so a deployment that pastes its key in the UI (the
                 # canonical path) never ran the flywheel.
                 se_provider = resolved_settings.memory_consolidator_default_aux_provider
+
+                # SE-16 (SE-A41) — per-tenant rollout gate: the worker only
+                # distils candidates of tenants that opted in via
+                # ``tenant_config.skill_evolution_enabled`` (ANDed with this
+                # platform switch). No config row → not enrolled.
+                async def _skill_evolution_tenant_gate(tenant_id: UUID) -> bool:
+                    try:
+                        cfg = await resolved_tenant_config_service.get(tenant_id=tenant_id)
+                    except TenantConfigNotConfiguredError:
+                        return False
+                    return bool(cfg.skill_evolution_enabled)
+
                 skill_evolution_worker = build_evolution_worker(
                     aux_model=make_llm_router_aux_model(
                         resolver=credentials_resolver,
@@ -1491,6 +1504,7 @@ def create_app(
                         default_model=resolved_settings.memory_consolidator_default_aux_model,
                     ),
                     aux_default_model=resolved_settings.memory_consolidator_default_aux_model,
+                    tenant_gate=_skill_evolution_tenant_gate,
                     candidate_store=resolved_curation_candidate_store,
                     skill_store=resolved_skill_store,
                     eval_store=resolved_eval_dataset_store,

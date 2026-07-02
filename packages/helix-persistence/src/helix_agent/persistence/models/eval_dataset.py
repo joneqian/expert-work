@@ -16,6 +16,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Index,
+    Integer,
     Text,
     UniqueConstraint,
     text,
@@ -91,6 +92,11 @@ class CurationCandidateRow(Base):
     #: this candidate so it isn't re-distilled every interval. NULL = not yet
     #: evolved (the worker's scan filter).
     evolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: SE-16 (SE-A40) — transient-failure retries; the worker gives up
+    #: (marks evolved) at 3. Added in migration 0107.
+    retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"), default=0
+    )
 
     __table_args__ = (
         CheckConstraint(f"outcome IN {_OUTCOME_VALUES}", name="curation_candidate_outcome_valid"),

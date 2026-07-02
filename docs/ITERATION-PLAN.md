@@ -1652,7 +1652,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 - [x] **设计定稿**（本 PR）：核实结论 + 断点图 + 信号金字塔 + 九决策 + 实施拆分
 - [x] **PR-1 打标入口**（本 PR）：Playground assistant 轮挂 👍/👎（👎 弹 comment 框，每轮一次，失败内联可重试），接现成 `POST /v1/sessions/{id}/feedback`（turn_seq=转录序号）；业务系统代提交契约记入设计 §12.3（对外集成文档体系缺失另立项）——试点信号主力
-- [ ] **PR-2 重试档 + 灰度**：蒸馏 transient 异常不烧候选（`retry_count` 列，≥3 才标 evolved_at）+ `tenant_config.skill_evolution_enabled` per-tenant 白名单（与平台总闸两层与）+ **admin-ui**：system_admin 租户管理页「技能自进化」开关面（含 PR-4 抽样率输入；不接受只能 SQL 改）——解锁 live 试点
+- [x] **PR-2 重试档 + 灰度**（本 PR）：蒸馏 transient 异常不烧候选（`TransientEvolutionError` + cause 链嗅探，`retry_count` 列 ≥3 才标 evolved_at；migration 0107）+ `tenant_config.skill_evolution_enabled` per-tenant 白名单（worker per-candidate 查含缓存，未开通候选跳过不烧；无 config 行=未开通）+ **admin-ui**：租户设置页展示「技能自进化」状态（改值走既有 JSON 编辑面——灰度是审慎操作非随手开关；抽样率输入随 PR-4）——解锁 live 试点
 - [ ] **PR-3 信号扩容**：`IMPLICIT_SUCCESS` 隐式正信号（纯规则：无👎+无 5min 重发+success，数据源 thread_message 镜像）+ 👎 作 failures 语料（带 comment）喂对比蒸馏 + 弱信号来源永不 auto-promote（强制人审；👍 来源维持可 auto）
 - [ ] **PR-4 judge 抽样评分**：隐式候选池抽样（tenant_config 可配默认 5%）便宜模型评质量分做候选提纯；与晋升闸 judge 体系分离；打标用作 judge 校准集
 - [ ] **PR-5 晋升→生效补链**：`AgentSpec.auto_attach_evolved_skills` opt-in——build 时自动附加本 agent 蒸馏出的 ACTIVE 技能（lazy 档=selection-based，>20 技能转 BM25/embedding 检索）；rollback 监控/curator 衰退语义随之恢复

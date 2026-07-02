@@ -21,7 +21,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from control_plane.skill_evolution import EvolutionResult
+import httpx
+
+from control_plane.skill_evolution import EvolutionResult, TransientEvolutionError
 from helix_agent.common.observability import helix_counter
 from helix_agent.persistence import CurationCandidateStore
 from helix_agent.persistence.rls import (
@@ -37,6 +39,15 @@ logger = logging.getLogger(__name__)
 # co-evolve loop may contrast against (SkillGen contrastive induction).
 EVOLVE_SIGNALS: frozenset[CurationSignal] = frozenset({"positive_feedback", "failed_outcome"})
 
+#: SE-16 (SE-A40) — transient failures per candidate before giving up.
+MAX_DISTILL_RETRIES = 3
+
+#: Async gate answering "is skill evolution rolled out to this tenant?"
+#: (SE-A41 — ``tenant_config.skill_evolution_enabled``, ANDed with the
+#: platform master switch by the app assembly). ``None`` → no per-tenant
+#: gating (unit tests / single-tenant deployments).
+TenantGate = Callable[[UUID], Awaitable[bool]]
+
 _cycle_errors = helix_counter(
     "helix_control_plane_skill_evolution_cycle_errors_total",
     "Skill-evolution worker cycles that ended in a caught exception.",
@@ -45,6 +56,30 @@ _grounded = helix_counter(
     "helix_control_plane_skill_evolution_grounded_total",
     "Candidates that produced a grounded (replay-verified) DRAFT skill.",
 )
+_retried = helix_counter(
+    "helix_control_plane_skill_evolution_retries_total",
+    "Distillation attempts that died on a transient fault and were requeued.",
+)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Retryable fault sniffing — the explicit wrapper wins; otherwise walk
+    the cause/context chain for transport-class faults (timeout/connection).
+    ``TimeoutError`` covers ``asyncio.TimeoutError`` (alias since 3.11)."""
+    node: BaseException | None = exc
+    while node is not None:
+        if isinstance(
+            node,
+            TransientEvolutionError
+            | httpx.TimeoutException
+            | httpx.TransportError
+            | TimeoutError
+            | ConnectionError,
+        ):
+            return True
+        node = node.__cause__ if node.__cause__ is not None else node.__context__
+    return False
+
 
 #: Processes one candidate end-to-end and reports how the co-evolve loop ended.
 CandidateProcessor = Callable[[CurationCandidateRecord], Awaitable[EvolutionResult]]
@@ -98,6 +133,7 @@ class SkillEvolutionWorker:
         processor: CandidateProcessor,
         interval_s: int,
         batch_size: int = 50,
+        tenant_gate: TenantGate | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("interval_s must be positive")
@@ -105,6 +141,7 @@ class SkillEvolutionWorker:
         self._processor = processor
         self._interval_s = interval_s
         self._batch_size = batch_size
+        self._tenant_gate = tenant_gate
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -144,25 +181,50 @@ class SkillEvolutionWorker:
 
         counts = {"grounded": 0, "rejected": 0, "exhausted": 0, "no_draft": 0}
         failed = 0
+        # SE-A41 — per-tenant rollout gate, resolved once per tenant per
+        # sweep. An ungated candidate is SKIPPED (not marked evolved) so it
+        # distils normally once the tenant is enrolled later.
+        gate_cache: dict[UUID, bool] = {}
         now = datetime.now(UTC)
         for candidate in todo:
+            if self._tenant_gate is not None:
+                enabled = gate_cache.get(candidate.tenant_id)
+                if enabled is None:
+                    enabled = await self._tenant_gate(candidate.tenant_id)
+                    gate_cache[candidate.tenant_id] = enabled
+                if not enabled:
+                    continue
             with _tenant_scope(candidate.tenant_id):
                 try:
                     result = await self._processor(candidate)
-                except Exception:
+                except Exception as exc:
                     # Isolate a per-candidate failure (e.g. a tenant whose aux
                     # credential isn't resolvable) so one bad candidate doesn't
                     # abort the whole batch.
                     failed += 1
+                    # SE-A40 — a transient fault (aux LLM timeout / rate limit /
+                    # connection) requeues the candidate instead of burning it;
+                    # give up (mark evolved) once the retry budget is spent.
+                    if _is_transient(exc):
+                        retries = await self._candidates.record_retry(
+                            candidate_id=candidate.id, tenant_id=candidate.tenant_id
+                        )
+                        if retries < MAX_DISTILL_RETRIES:
+                            _retried.inc()
+                            logger.warning(
+                                "skill_evolution.candidate_requeued candidate_id=%s retries=%s",
+                                candidate.id,
+                                retries,
+                            )
+                            continue
                     logger.warning("skill_evolution.candidate_failed candidate_id=%s", candidate.id)
                 else:
                     counts[result.outcome] += 1
                     if result.outcome == "grounded":
                         _grounded.inc()
-                # Mark evolved regardless of outcome so the candidate is not
-                # re-processed every interval (4.4 #5). A failed candidate is
-                # not retried — a retry policy is a follow-up; stopping the
-                # cost-runaway loop is the fix here.
+                # Mark evolved so the candidate is not re-processed every
+                # interval (4.4 #5) — on success, permanent failure, or a
+                # spent retry budget.
                 await self._candidates.mark_evolved(
                     candidate_id=candidate.id, tenant_id=candidate.tenant_id, at=now
                 )

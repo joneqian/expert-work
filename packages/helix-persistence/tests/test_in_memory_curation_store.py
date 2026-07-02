@@ -314,3 +314,21 @@ async def test_candidate_update_cross_tenant_returns_false() -> None:
     impostor = rec.model_copy(update={"tenant_id": tenant_b})
     updated = await store.update(impostor)
     assert updated is False
+
+
+@pytest.mark.asyncio
+async def test_record_retry_increments_and_scopes_by_tenant() -> None:
+    store = InMemoryCurationCandidateStore()
+    cid, tenant = uuid4(), uuid4()
+    await store.upsert(_candidate(candidate_id=cid, tenant_id=tenant))
+
+    first = await store.record_retry(candidate_id=cid, tenant_id=tenant)
+    second = await store.record_retry(candidate_id=cid, tenant_id=tenant)
+    assert (first, second) == (1, 2)
+    rec = await store.get(candidate_id=cid, tenant_id=tenant)
+    assert rec is not None and rec.retry_count == 2
+    # A retried candidate stays unevolved — the sweep re-picks it.
+    assert rec.evolved_at is None
+
+    # Wrong tenant → no bump, returns 0.
+    assert await store.record_retry(candidate_id=cid, tenant_id=uuid4()) == 0
