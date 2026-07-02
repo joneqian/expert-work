@@ -52,7 +52,6 @@ from helix_agent.common.spotlight import SPOTLIGHT_SYSTEM_CLAUSE
 from helix_agent.persistence import MemoryStore
 from helix_agent.persistence.memory import MemoryWritebackDLQ
 from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.protocol.skill import SkillStatus
 from helix_agent.persistence.tenant_config import TenantConfigStore
 from helix_agent.protocol import (
     AgentSpec,
@@ -65,6 +64,7 @@ from helix_agent.protocol import (
     parse_skill_ref,
 )
 from helix_agent.protocol.model_catalog import ModelEntry, catalog_entry
+from helix_agent.protocol.skill import SkillStatus
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.middleware import MiddlewareChain
 from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
