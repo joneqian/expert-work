@@ -23,6 +23,7 @@ import {
 } from "../api/conversations";
 import { listMemories, type MemoryItem, type MemoryKind } from "../api/memory";
 import { getUsageTokens } from "../api/usage";
+import { getTenantUser } from "../api/users";
 import { PageHeader } from "../components/PageHeader";
 import { ArtifactsPane } from "./user_detail/ArtifactsPane";
 import { formatCompact } from "../utils/runFormat";
@@ -281,10 +282,28 @@ export function UserDetail() {
     version: string;
     userId: string;
   }>();
-  // Display name rides on router state from the Users tab; a refresh
-  // falls back to the raw id (no single-user endpoint yet — M2 scope).
+  // Display name: router state from the Users tab paints instantly; the
+  // registry fetch (fast-follow ``GET /v1/users/{id}``) covers direct URL
+  // opens / refreshes. Best-effort — a 404 (never-registered user) keeps
+  // the id fallback.
   const location = useLocation();
-  const displayName = (location.state as { displayName?: string } | null)?.displayName;
+  const stateName = (location.state as { displayName?: string } | null)?.displayName;
+  const [fetchedName, setFetchedName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    getTenantUser(userId)
+      .then((u) => {
+        if (!cancelled && u.display_name) setFetchedName(u.display_name);
+      })
+      .catch(() => {
+        // 404 / 403 — keep the fallback title.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+  const displayName = stateName ?? fetchedName ?? undefined;
 
   if (!name || !version || !userId) {
     return <Empty description="Missing route params" style={{ marginTop: 80 }} />;

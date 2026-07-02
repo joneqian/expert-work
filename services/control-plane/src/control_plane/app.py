@@ -79,6 +79,7 @@ from control_plane.api import (
     build_skills_router,
     build_tenant_config_router,
     build_tenant_quotas_router,
+    build_tenant_users_router,
     build_tenants_router,
     build_triggers_router,
     build_uploads_router,
@@ -1819,6 +1820,7 @@ def create_app(
     app.include_router(build_runs_list_router())
     app.include_router(build_conversations_router())
     app.include_router(build_agent_users_router())
+    app.include_router(build_tenant_users_router())
     # Stream HX-7 — the cross-run approval queue + batch decide.
     app.include_router(build_approvals_router())
     app.include_router(build_feedback_router())

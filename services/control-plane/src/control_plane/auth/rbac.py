@@ -219,8 +219,15 @@ def is_admin(principal: Principal) -> bool:
 
     Used by Stream J.14 per-user scoping: a tenant admin bypasses the
     per-user thread-ownership check and keeps tenant-wide visibility.
+
+    A platform ``system_admin`` counts too — same rationale as
+    :func:`is_allowed`: when operating within a tenant it acts with
+    tenant-ADMIN authority (the tenant boundary is still enforced
+    downstream by ``tenant_id`` scoping + RLS). Without this the
+    per-user gates (``caller_owns_thread`` / ``resolve_target_user_id``)
+    would deny a system_admin what a plain tenant admin may do.
     """
-    return Role.ADMIN in _collect_roles(principal)
+    return principal.is_system_admin or Role.ADMIN in _collect_roles(principal)
 
 
 def collect_roles_for_audit(principal: Principal) -> Iterable[str]:

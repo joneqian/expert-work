@@ -6,7 +6,7 @@ from uuid import UUID
 
 import pytest
 
-from control_plane.auth.rbac import collect_roles_for_audit, is_allowed
+from control_plane.auth.rbac import collect_roles_for_audit, is_admin, is_allowed
 from helix_agent.protocol import Principal
 
 _TENANT = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
@@ -173,3 +173,17 @@ def test_non_system_admin_with_no_roles_still_denied() -> None:
     p = _user(())
     assert not is_allowed(p, resource="mcp_server", action="read")
     assert not is_allowed(p, resource="user", action="write")
+
+
+# ---------------------------------------------------------------------------
+# is_admin — per-user scope gate (J.14 / conversation-centric IA)
+# ---------------------------------------------------------------------------
+
+
+def test_is_admin_for_tenant_admin_and_system_admin() -> None:
+    assert is_admin(_user(("admin",)))
+    assert not is_admin(_user(("viewer",)))
+    # A platform system_admin acts with tenant-ADMIN authority inside a
+    # tenant (same rationale as is_allowed) — the per-user gates must not
+    # deny it what a plain tenant admin may do.
+    assert is_admin(_system_admin())

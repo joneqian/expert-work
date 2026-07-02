@@ -225,3 +225,45 @@ async def test_cross_tenant_scope_is_rejected(
     # (the handler's own guard covers a system_admin whose scope resolves
     # cross-tenant by other means).
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/users/{user_id} — single registry row (fast-follow)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_user_returns_display_name(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    client, alice_id, _ = client_and_users
+    resp = await client.get(f"/v1/users/{alice_id}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["user_id"] == str(alice_id)
+    assert data["display_name"] == "Alice"
+    assert data["subject_type"] == "user"
+    assert data["last_active_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_get_user_unknown_is_404(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    client, _, bob_id = client_and_users
+    # bob is active on the agent but never registered in tenant_user.
+    resp = await client.get(f"/v1/users/{bob_id}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_user_non_admin_for_someone_else_is_403(
+    client_and_users: tuple[AsyncClient, UUID, UUID],
+) -> None:
+    client, alice_id, _ = client_and_users
+    viewer_jwt = make_test_jwt(tenant_id=_TENANT, subject="viewer-1", roles=("viewer",))
+    resp = await client.get(
+        f"/v1/users/{alice_id}", headers={"Authorization": f"Bearer {viewer_jwt}"}
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "USER_SCOPE_FORBIDDEN"

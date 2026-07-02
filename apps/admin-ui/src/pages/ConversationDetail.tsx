@@ -61,8 +61,10 @@ export function ConversationDetail() {
     if (!threadId) return;
     setLoading(true);
     setError(null);
+    let loaded: ConversationDetailModel | null = null;
     try {
-      setConvo(await getConversation(threadId));
+      loaded = await getConversation(threadId);
+      setConvo(loaded);
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -75,9 +77,11 @@ export function ConversationDetail() {
       setLoading(false);
     }
     // Best-effort, independent of the summary fetch — a transcript
-    // failure must never take down the operational view.
+    // failure must never take down the operational view. The thread's
+    // tenant_id rides along so a system_admin's cross-tenant drill-in
+    // reads the right tenant's checkpoint.
     try {
-      const msgs = await getSessionMessages(threadId);
+      const msgs = await getSessionMessages(threadId, loaded?.tenant_id);
       setMessages(Array.isArray(msgs) ? msgs : null);
     } catch {
       setMessages(null);

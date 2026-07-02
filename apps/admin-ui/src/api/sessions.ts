@@ -199,10 +199,16 @@ export interface HistoryMessage {
 
 export async function getSessionMessages(
   threadId: string,
+  /** The thread's tenant — lets a system_admin read a foreign tenant's
+   *  transcript when drilling in from the cross-tenant browser. A
+   *  caller's own tenant id is a no-op. */
+  tenantId?: string,
 ): Promise<HistoryMessage[]> {
   const response = await apiClient.get<
     ApiEnvelope<{ messages: HistoryMessage[] }>
-  >(`/v1/sessions/${threadId}/messages`);
+  >(`/v1/sessions/${threadId}/messages`, {
+    params: tenantId ? { tenant_id: tenantId } : undefined,
+  });
   return unwrap(response.data).messages;
 }
 

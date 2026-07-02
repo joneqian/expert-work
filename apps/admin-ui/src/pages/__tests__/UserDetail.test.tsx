@@ -15,6 +15,7 @@ import * as convoSdk from "../../api/conversations";
 import * as memorySdk from "../../api/memory";
 import * as artifactsSdk from "../../api/artifacts";
 import * as usageSdk from "../../api/usage";
+import * as usersSdk from "../../api/users";
 import { UserDetail } from "../UserDetail";
 
 const USER_ID = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -30,6 +31,13 @@ function renderPage() {
 }
 
 function stubAll() {
+  vi.spyOn(usersSdk, "getTenantUser").mockResolvedValue({
+    user_id: USER_ID,
+    display_name: "Alice",
+    subject_type: "user",
+    created_at: "2026-06-01T00:00:00Z",
+    last_active_at: "2026-07-01T00:00:00Z",
+  });
   vi.spyOn(convoSdk, "listConversations").mockResolvedValue({
     items: [
       {
@@ -149,5 +157,14 @@ describe("UserDetail", () => {
     const pane = await screen.findByTestId("user-memory-pane");
     expect(pane).toHaveTextContent("403");
     expect(screen.getByTestId("user-detail-root")).toBeInTheDocument();
+  });
+
+  it("resolves the display name from the registry on a direct URL open", async () => {
+    stubAll();
+    // No router state (direct URL / refresh) — the fast-follow
+    // GET /v1/users/{id} supplies the human name for the title.
+    renderPage();
+    expect(await screen.findByText("Alice")).toBeInTheDocument();
+    expect(usersSdk.getTenantUser).toHaveBeenCalledWith(USER_ID);
   });
 });

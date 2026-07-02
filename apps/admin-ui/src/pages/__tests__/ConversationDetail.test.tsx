@@ -111,7 +111,7 @@ describe("ConversationDetail", () => {
 
   it("renders the message transcript (M1.5) when the endpoint returns turns", async () => {
     vi.spyOn(convoSdk, "getConversation").mockResolvedValue(CONVO);
-    vi.spyOn(sessionsSdk, "getSessionMessages").mockResolvedValue([
+    const messagesSpy = vi.spyOn(sessionsSdk, "getSessionMessages").mockResolvedValue([
       { role: "user", content: "I was charged twice" },
       { role: "assistant", content: "Refund case opened" },
     ]);
@@ -124,6 +124,9 @@ describe("ConversationDetail", () => {
     expect(screen.getByText("I was charged twice")).toBeInTheDocument();
     expect(screen.getByText("Refund case opened")).toBeInTheDocument();
     expect(screen.getByTestId("conversation-message-0")).toBeInTheDocument();
+    // The thread's tenant rides along — a system_admin's cross-tenant
+    // drill-in reads the right tenant's checkpoint.
+    expect(messagesSpy).toHaveBeenCalledWith(THREAD_ID, CONVO.tenant_id);
   });
 
   it("hides the transcript panel when the messages endpoint fails", async () => {

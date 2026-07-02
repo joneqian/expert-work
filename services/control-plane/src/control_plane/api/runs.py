@@ -1027,6 +1027,12 @@ def build_runs_router() -> APIRouter:
         threads: Annotated[object, Depends(_get_thread_repo)],
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         runtime: Annotated[AgentRuntime, Depends(_get_agent_runtime)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        # Conversation-centric IA fast-follow — a concrete id lets a
+        # system_admin read a foreign tenant's transcript when drilling in
+        # from the cross-tenant conversation browser; "*" is meaningless
+        # (a thread belongs to one tenant).
+        tenant_id: Annotated[UUID | None, Query()] = None,
     ) -> JSONResponse:
         """Playground resume (#6) — the thread's conversation history.
 
@@ -1039,8 +1045,21 @@ def build_runs_router() -> APIRouter:
         turns; tool/system messages are omitted. Best-effort: any failure
         degrades to an empty list rather than erroring the page.
         """
-        tenant_id: UUID = request.state.tenant_id
-        meta = await threads.get(thread_id, tenant_id=tenant_id)  # type: ignore[attr-defined]
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/sessions/{thread_id}/messages",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
+        )
+        if isinstance(scope, CrossTenant):
+            raise HTTPException(
+                status_code=422,
+                detail="a thread belongs to one tenant; pass a concrete tenant_id",
+            )
+        target_tenant = scope.tenant_id
+        meta = await threads.get(thread_id, tenant_id=target_tenant)  # type: ignore[attr-defined]
         if meta is None:
             raise HTTPException(status_code=404, detail="session not found")
         caller_user_id = await resolve_caller_user_id(request, users)
@@ -1048,6 +1067,21 @@ def build_runs_router() -> APIRouter:
             meta=meta, caller_user_id=caller_user_id, principal=request.state.principal
         ):
             raise HTTPException(status_code=404, detail="session not found")
+        # Reading another tenant's conversation content is sensitive —
+        # leave an audit row for the explicit cross-tenant drill-in (the
+        # Playground's high-frequency self-reads stay unlogged).
+        if target_tenant != request.state.tenant_id:
+            await emit(
+                audit,
+                tenant_id=request.state.tenant_id,
+                actor_id=request.state.actor_id,
+                action=AuditAction.SESSION_READ,
+                resource_type="session",
+                resource_id=str(thread_id),
+                result=AuditResult.SUCCESS,
+                trace_id=current_trace_id_hex(),
+                details={"view": "transcript", "target_tenant_id": str(target_tenant)},
+            )
 
         empty = JSONResponse({"success": True, "data": {"messages": []}})
         checkpointer = runtime.durable_checkpointer

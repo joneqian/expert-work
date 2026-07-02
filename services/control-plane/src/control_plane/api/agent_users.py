@@ -30,7 +30,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from control_plane.api._user_scope import get_user_repo
+from control_plane.api._user_scope import get_user_repo, resolve_target_user_id
 from control_plane.audit import emit
 from control_plane.tenant_scope import (
     CrossTenant,
@@ -230,6 +230,68 @@ def build_agent_users_router() -> APIRouter:
                 "error": None,
             },
             headers=headers,
+        )
+
+    return router
+
+
+def build_tenant_users_router() -> APIRouter:
+    """Mount ``GET /v1/users/{user_id}`` — one registry row.
+
+    Conversation-centric IA fast-follow: the user-detail page needs the
+    member's ``display_name`` on a direct URL open (it previously only
+    rode the Users-tab navigation state). Same per-user gate as the
+    governance filters — the caller reads themself, a tenant admin reads
+    any member (``resolve_target_user_id``).
+    """
+    router = APIRouter(prefix="/v1/users", tags=["users"])
+
+    @router.get("/{user_id}", response_model=None)
+    async def get_tenant_user(
+        user_id: UUID,
+        request: Request,
+        users: Annotated[TenantUserStore, Depends(get_user_repo)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+        # A registry row belongs to one tenant — a concrete id lets a
+        # system_admin drill in; the "*" scope is rejected below.
+        tenant_id: Annotated[UUID | None, Query()] = None,
+    ) -> JSONResponse:
+        scope = await ensure_tenant_scope(
+            request.state.principal,
+            tenant_id,
+            audit,
+            trace_id=current_trace_id_hex(),
+            endpoint="GET /v1/users/{user_id}",
+            cross_tenant_enabled=cross_tenant_query_enabled(request),
+        )
+        if isinstance(scope, CrossTenant):
+            raise HTTPException(
+                status_code=422,
+                detail="a user belongs to one tenant; pass a concrete tenant_id",
+            )
+        target = scope.tenant_id
+
+        # Self-or-admin gate (403 for a plain member asking about someone
+        # else); the actual read hides cross-tenant existence behind 404.
+        await resolve_target_user_id(request, users, requested=user_id)
+        user = await users.get(user_id, tenant_id=target)
+        if user is None:
+            raise HTTPException(status_code=404, detail="user not found")
+
+        return JSONResponse(
+            content={
+                "success": True,
+                "data": {
+                    "user_id": str(user.id),
+                    "display_name": user.display_name,
+                    "subject_type": user.subject_type,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "last_active_at": (
+                        user.last_active_at.isoformat() if user.last_active_at else None
+                    ),
+                },
+                "error": None,
+            }
         )
 
     return router

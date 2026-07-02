@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from typing import Annotated, TypedDict
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -186,6 +186,30 @@ async def test_thread_messages_empty_for_fresh_thread(runs_client: AsyncClient) 
     response = await runs_client.get(f"/v1/sessions/{thread_id}/messages")
     assert response.status_code == 200
     assert response.json()["data"]["messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_thread_messages_explicit_home_tenant_ok(runs_client: AsyncClient) -> None:
+    """Fast-follow — ``?tenant_id=`` with the caller's own tenant is a no-op
+    (the conversation-detail transcript always sends the thread's tenant)."""
+    thread_id = await _create_session(runs_client)
+    response = await runs_client.get(
+        f"/v1/sessions/{thread_id}/messages", params={"tenant_id": str(_DEFAULT_TENANT)}
+    )
+    assert response.status_code == 200
+    assert response.json()["data"]["messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_thread_messages_foreign_tenant_forbidden(runs_client: AsyncClient) -> None:
+    """A plain tenant admin asking for another tenant's transcript is
+    rejected by the scope gate (only a system_admin may cross)."""
+    thread_id = await _create_session(runs_client)
+    response = await runs_client.get(
+        f"/v1/sessions/{thread_id}/messages",
+        params={"tenant_id": str(uuid4())},
+    )
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

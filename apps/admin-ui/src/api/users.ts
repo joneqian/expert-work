@@ -50,3 +50,21 @@ export async function listAgentUsers(
     { params: query },
   );
 }
+
+/** One ``tenant_user`` registry row — the user-detail header. */
+export interface TenantUser {
+  user_id: string;
+  display_name: string | null;
+  subject_type: string;
+  created_at: string | null;
+  last_active_at: string | null;
+}
+
+/** GET /v1/users/{user_id} — one registry row (self-or-admin gated). */
+export async function getTenantUser(
+  userId: string,
+  tenantScope?: TenantScope,
+): Promise<TenantUser> {
+  const query = withTenantScope({}, tenantScope);
+  return getJson<TenantUser>(`/v1/users/${encodeURIComponent(userId)}`, { params: query });
+}
