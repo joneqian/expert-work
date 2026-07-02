@@ -23,6 +23,7 @@ Two endpoints:
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -156,6 +157,10 @@ def build_conversations_router() -> APIRouter:
         # (error / timeout). Distinct from ``status=failed``: that is the
         # thread's lifecycle state; an *active* thread can carry errored runs.
         has_error: Annotated[bool, Query()] = False,
+        # Activity window — only conversations with ≥1 run created at or
+        # after this instant ("active in the last N hours"). Composes with
+        # ``has_error`` ("what broke today"). Naive datetimes are read as UTC.
+        since: Annotated[datetime | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=10000)] = 100,
         offset: Annotated[int, Query(ge=0)] = 0,
         tenant_id: Annotated[UUID | Literal["*"] | None, Query()] = None,
@@ -176,27 +181,42 @@ def build_conversations_router() -> APIRouter:
             cross_tenant_enabled=cross_tenant_query_enabled(request),
         )
 
+        if since is not None and since.tzinfo is None:
+            since = since.replace(tzinfo=UTC)
+
         clamped = _clamp_limit(limit)
-        error_capped = False
+        set_capped = False
         async with applied_scope(scope):
-            # has_error resolves the failing thread set from the run store
-            # first, then reads their metadata — each store keeps to its own
-            # table (same composition as the users rollup).
-            failing_ids: set[UUID] | None = None
-            if has_error:
+            # has_error / since resolve the matching thread set from the run
+            # store first, then read their metadata — each store keeps to its
+            # own table (same composition as the users rollup).
+            narrowed_ids: set[UUID] | None = None
+            if has_error or since is not None:
                 agg_scope = None if isinstance(scope, CrossTenant) else scope.tenant_id
-                failing_ids = await runs.error_thread_ids(tenant_id=agg_scope)
-                error_capped = len(failing_ids) >= 500
+                narrowed_ids = await runs.thread_ids_with_runs(
+                    tenant_id=agg_scope, since=since, failed_only=has_error
+                )
+                set_capped = len(narrowed_ids) >= 500
             if isinstance(scope, CrossTenant):
                 metas = await threads.list_all_tenants(
                     agent_name=agent_name,
                     agent_version=agent_version,
+                    user_id=user_id,
                     status=status,
                     nonempty=True,
                     q=q,
-                    thread_ids=failing_ids,
+                    thread_ids=narrowed_ids,
                     limit=clamped,
                     offset=offset,
+                )
+                total = await threads.count_all_tenants(
+                    agent_name=agent_name,
+                    agent_version=agent_version,
+                    user_id=user_id,
+                    status=status,
+                    nonempty=True,
+                    q=q,
+                    thread_ids=narrowed_ids,
                 )
                 agg_tenant: UUID | None = None
             else:
@@ -208,16 +228,21 @@ def build_conversations_router() -> APIRouter:
                     status=status,
                     nonempty=True,
                     q=q,
-                    thread_ids=failing_ids,
+                    thread_ids=narrowed_ids,
                     limit=clamped,
                     offset=offset,
                 )
+                total = await threads.count_by_tenant(
+                    scope.tenant_id,
+                    agent_name=agent_name,
+                    agent_version=agent_version,
+                    user_id=user_id,
+                    status=status,
+                    nonempty=True,
+                    q=q,
+                    thread_ids=narrowed_ids,
+                )
                 agg_tenant = scope.tenant_id
-
-            # Cross-tenant list_all_tenants has no user_id filter (Mini-ADR N-4);
-            # narrow in Python so the browser's user filter still works there.
-            if isinstance(scope, CrossTenant) and user_id is not None:
-                metas = [m for m in metas if m.user_id == user_id]
 
             thread_ids = [m.thread_id for m in metas]
             aggs = (
@@ -250,13 +275,13 @@ def build_conversations_router() -> APIRouter:
             },
         )
 
-        headers = {"X-Limit-Capped": "true"} if (limit > MAX_LIST_LIMIT or error_capped) else None
+        headers = {"X-Limit-Capped": "true"} if (limit > MAX_LIST_LIMIT or set_capped) else None
         return JSONResponse(
             content={
                 "success": True,
                 "data": {
                     "items": items,
-                    "total": len(items),
+                    "total": total,
                     "cross_tenant": isinstance(scope, CrossTenant),
                 },
                 "error": None,

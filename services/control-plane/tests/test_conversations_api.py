@@ -270,3 +270,70 @@ async def test_has_error_composes_with_agent_filter(
     resp = await client.get("/v1/conversations", params={"has_error": "true", "agent_name": "beta"})
     assert resp.status_code == 200
     assert resp.json()["data"]["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_total_is_true_count_and_offset_pages(
+    client_and_threads: tuple[AsyncClient, dict[str, UUID]],
+) -> None:
+    """``total`` counts every matching conversation, not the page — the
+    server-side pager's contract."""
+    client, _ = client_and_threads
+    resp = await client.get("/v1/conversations", params={"limit": 2})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert len(data["items"]) == 2
+    assert data["total"] == 3
+
+    page2 = await client.get("/v1/conversations", params={"limit": 2, "offset": 2})
+    assert page2.status_code == 200
+    data2 = page2.json()["data"]
+    assert len(data2["items"]) == 1
+    assert data2["total"] == 3
+    # The two pages are disjoint and cover all three conversations.
+    ids1 = {i["thread_id"] for i in data["items"]}
+    ids2 = {i["thread_id"] for i in data2["items"]}
+    assert not (ids1 & ids2) and len(ids1 | ids2) == 3
+
+
+@pytest.mark.asyncio
+async def test_since_filters_by_run_activity(
+    client_and_threads: tuple[AsyncClient, dict[str, UUID]],
+) -> None:
+    """``since`` keeps only conversations with ≥1 run at/after the instant —
+    the "active in the last N hours" monitoring window."""
+    client, ids = client_and_threads
+    # Only "convo" has a run after _NOW (its ERROR run at _NOW+3min).
+    cutoff = (_NOW + timedelta(minutes=1)).isoformat()
+    resp = await client.get("/v1/conversations", params={"since": cutoff})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert {i["thread_id"] for i in data["items"]} == {str(ids["convo"])}
+    assert data["total"] == 1
+
+    # A cutoff before every run matches all three conversations.
+    early = await client.get(
+        "/v1/conversations", params={"since": (_NOW - timedelta(hours=1)).isoformat()}
+    )
+    assert early.json()["data"]["total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_since_composes_with_has_error(
+    client_and_threads: tuple[AsyncClient, dict[str, UUID]],
+) -> None:
+    client, ids = client_and_threads
+    # "What broke today": convo's ERROR run is at _NOW+3min.
+    resp = await client.get(
+        "/v1/conversations",
+        params={"since": (_NOW + timedelta(minutes=1)).isoformat(), "has_error": "true"},
+    )
+    assert {i["thread_id"] for i in resp.json()["data"]["items"]} == {str(ids["convo"])}
+
+    # A window after every failed run matches nothing.
+    late = await client.get(
+        "/v1/conversations",
+        params={"since": (_NOW + timedelta(hours=1)).isoformat(), "has_error": "true"},
+    )
+    assert late.json()["data"]["items"] == []
+    assert late.json()["data"]["total"] == 0

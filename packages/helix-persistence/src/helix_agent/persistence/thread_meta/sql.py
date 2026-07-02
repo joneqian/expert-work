@@ -18,7 +18,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import delete, exists, select, update
+from sqlalchemy import ColumnElement, delete, exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -48,6 +48,43 @@ def _title_ilike(q: str) -> str:
     ``ilike(..., escape="\\")``)."""
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
+
+
+def _filter_clauses(
+    *,
+    tenant_id: UUID | None,
+    status: ThreadStatus | None,
+    user_id: UUID | None,
+    agent_name: str | None,
+    agent_version: str | None,
+    nonempty: bool,
+    q: str | None,
+    include_archived: bool,
+    thread_ids: Collection[UUID] | None,
+) -> list[ColumnElement[bool]]:
+    """The shared WHERE set for list/count — one source so the pager's
+    ``total`` can never drift from the page query. Callers short-circuit
+    an empty ``thread_ids`` before building clauses."""
+    clauses: list[ColumnElement[bool]] = []
+    if tenant_id is not None:
+        clauses.append(ThreadMetaRow.tenant_id == tenant_id)
+    if thread_ids is not None:
+        clauses.append(ThreadMetaRow.thread_id.in_(list(thread_ids)))
+    if status is not None:
+        clauses.append(ThreadMetaRow.status == status.value)
+    elif not include_archived:
+        clauses.append(ThreadMetaRow.status != ThreadStatus.ARCHIVED.value)
+    if user_id is not None:
+        clauses.append(ThreadMetaRow.user_id == user_id)
+    if agent_name is not None:
+        clauses.append(ThreadMetaRow.agent_name == agent_name)
+    if agent_version is not None:
+        clauses.append(ThreadMetaRow.agent_version == agent_version)
+    if nonempty:
+        clauses.append(exists().where(AgentRunRow.thread_id == ThreadMetaRow.thread_id))
+    if q:
+        clauses.append(ThreadMetaRow.title.ilike(_title_ilike(q), escape="\\"))
+    return clauses
 
 
 class SqlThreadMetaStore(ThreadMetaStore):
@@ -112,24 +149,25 @@ class SqlThreadMetaStore(ThreadMetaStore):
     ) -> list[ThreadMeta]:
         if thread_ids is not None and not thread_ids:
             return []
-        stmt = select(ThreadMetaRow).where(ThreadMetaRow.tenant_id == tenant_id)
-        if thread_ids is not None:
-            stmt = stmt.where(ThreadMetaRow.thread_id.in_(list(thread_ids)))
-        if status is not None:
-            stmt = stmt.where(ThreadMetaRow.status == status.value)
-        elif not include_archived:
-            stmt = stmt.where(ThreadMetaRow.status != ThreadStatus.ARCHIVED.value)
-        if user_id is not None:
-            stmt = stmt.where(ThreadMetaRow.user_id == user_id)
-        if agent_name is not None:
-            stmt = stmt.where(ThreadMetaRow.agent_name == agent_name)
-        if agent_version is not None:
-            stmt = stmt.where(ThreadMetaRow.agent_version == agent_version)
-        if nonempty:
-            stmt = stmt.where(exists().where(AgentRunRow.thread_id == ThreadMetaRow.thread_id))
-        if q:
-            stmt = stmt.where(ThreadMetaRow.title.ilike(_title_ilike(q), escape="\\"))
-        stmt = stmt.order_by(ThreadMetaRow.created_at.desc()).limit(limit).offset(offset)
+        stmt = (
+            select(ThreadMetaRow)
+            .where(
+                *_filter_clauses(
+                    tenant_id=tenant_id,
+                    status=status,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                    agent_version=agent_version,
+                    nonempty=nonempty,
+                    q=q,
+                    include_archived=include_archived,
+                    thread_ids=thread_ids,
+                )
+            )
+            .order_by(ThreadMetaRow.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_meta(r) for r in rows]
@@ -138,6 +176,7 @@ class SqlThreadMetaStore(ThreadMetaStore):
         self,
         *,
         status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
         agent_name: str | None = None,
         agent_version: str | None = None,
         nonempty: bool = False,
@@ -150,25 +189,115 @@ class SqlThreadMetaStore(ThreadMetaStore):
         # Stream N — no tenant filter; caller must wrap in bypass_rls_session().
         if thread_ids is not None and not thread_ids:
             return []
-        stmt = select(ThreadMetaRow)
-        if thread_ids is not None:
-            stmt = stmt.where(ThreadMetaRow.thread_id.in_(list(thread_ids)))
-        if status is not None:
-            stmt = stmt.where(ThreadMetaRow.status == status.value)
-        elif not include_archived:
-            stmt = stmt.where(ThreadMetaRow.status != ThreadStatus.ARCHIVED.value)
-        if agent_name is not None:
-            stmt = stmt.where(ThreadMetaRow.agent_name == agent_name)
-        if agent_version is not None:
-            stmt = stmt.where(ThreadMetaRow.agent_version == agent_version)
-        if nonempty:
-            stmt = stmt.where(exists().where(AgentRunRow.thread_id == ThreadMetaRow.thread_id))
-        if q:
-            stmt = stmt.where(ThreadMetaRow.title.ilike(_title_ilike(q), escape="\\"))
-        stmt = stmt.order_by(ThreadMetaRow.created_at.desc()).limit(limit).offset(offset)
+        stmt = (
+            select(ThreadMetaRow)
+            .where(
+                *_filter_clauses(
+                    tenant_id=None,
+                    status=status,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                    agent_version=agent_version,
+                    nonempty=nonempty,
+                    q=q,
+                    include_archived=include_archived,
+                    thread_ids=thread_ids,
+                )
+            )
+            .order_by(ThreadMetaRow.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_meta(r) for r in rows]
+
+    async def count_by_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
+        agent_name: str | None = None,
+        agent_version: str | None = None,
+        nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
+    ) -> int:
+        if thread_ids is not None and not thread_ids:
+            return 0
+        return await self._count(
+            tenant_id=tenant_id,
+            status=status,
+            user_id=user_id,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            nonempty=nonempty,
+            q=q,
+            include_archived=include_archived,
+            thread_ids=thread_ids,
+        )
+
+    async def count_all_tenants(
+        self,
+        *,
+        status: ThreadStatus | None = None,
+        user_id: UUID | None = None,
+        agent_name: str | None = None,
+        agent_version: str | None = None,
+        nonempty: bool = False,
+        q: str | None = None,
+        include_archived: bool = False,
+        thread_ids: Collection[UUID] | None = None,
+    ) -> int:
+        # Stream N — caller must wrap in bypass_rls_session().
+        if thread_ids is not None and not thread_ids:
+            return 0
+        return await self._count(
+            tenant_id=None,
+            status=status,
+            user_id=user_id,
+            agent_name=agent_name,
+            agent_version=agent_version,
+            nonempty=nonempty,
+            q=q,
+            include_archived=include_archived,
+            thread_ids=thread_ids,
+        )
+
+    async def _count(
+        self,
+        *,
+        tenant_id: UUID | None,
+        status: ThreadStatus | None,
+        user_id: UUID | None,
+        agent_name: str | None,
+        agent_version: str | None,
+        nonempty: bool,
+        q: str | None,
+        include_archived: bool,
+        thread_ids: Collection[UUID] | None,
+    ) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(ThreadMetaRow)
+            .where(
+                *_filter_clauses(
+                    tenant_id=tenant_id,
+                    status=status,
+                    user_id=user_id,
+                    agent_name=agent_name,
+                    agent_version=agent_version,
+                    nonempty=nonempty,
+                    q=q,
+                    include_archived=include_archived,
+                    thread_ids=thread_ids,
+                )
+            )
+        )
+        async with self._sf() as session:
+            return int((await session.execute(stmt)).scalar_one())
 
     async def update_status(
         self,

@@ -811,3 +811,36 @@ async def test_aggregate_by_threads_tenant_scopes() -> None:
     crossed = await store.aggregate_by_threads(thread_ids=[thread], tenant_id=None)
     assert crossed[thread].run_count == 2
     assert crossed[thread].trace_ids == ("a", "b")
+
+
+@pytest.mark.asyncio
+async def test_thread_ids_with_runs_since_and_failed_only() -> None:
+    store = InMemoryRunStore()
+    tenant = uuid4()
+    old_ok, old_bad, new_ok, new_bad = uuid4(), uuid4(), uuid4(), uuid4()
+    await store.create(_run(tenant_id=tenant, thread_id=old_ok, status=RunStatus.SUCCESS))
+    await store.create(_run(tenant_id=tenant, thread_id=old_bad, status=RunStatus.ERROR))
+    late = _BASE + timedelta(hours=2)
+    await store.create(
+        _run(tenant_id=tenant, thread_id=new_ok, status=RunStatus.SUCCESS, created_at=late)
+    )
+    await store.create(
+        _run(tenant_id=tenant, thread_id=new_bad, status=RunStatus.TIMEOUT, created_at=late)
+    )
+
+    # No filters — every thread with a run.
+    assert await store.thread_ids_with_runs(tenant_id=tenant) == {old_ok, old_bad, new_ok, new_bad}
+    # failed_only — ERROR + TIMEOUT terminal states, any age.
+    assert await store.thread_ids_with_runs(tenant_id=tenant, failed_only=True) == {
+        old_bad,
+        new_bad,
+    }
+    # since — the activity window.
+    cutoff = _BASE + timedelta(hours=1)
+    assert await store.thread_ids_with_runs(tenant_id=tenant, since=cutoff) == {new_ok, new_bad}
+    # Composed: "what broke today".
+    assert await store.thread_ids_with_runs(tenant_id=tenant, since=cutoff, failed_only=True) == {
+        new_bad
+    }
+    # Tenant scoping — another tenant sees nothing.
+    assert await store.thread_ids_with_runs(tenant_id=uuid4()) == set()

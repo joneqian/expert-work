@@ -246,3 +246,55 @@ async def test_archived_excluded_by_default_but_reachable() -> None:
     assert archived.thread_id not in {m.thread_id for m in cross_default}
     cross_all = await store.list_all_tenants(include_archived=True)
     assert archived.thread_id in {m.thread_id for m in cross_all}
+
+
+# ---------------------------------------------------------------------------
+# Conversation browser pager — count mirrors the list filters
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_count_mirrors_list_filters() -> None:
+    store = InMemoryThreadMetaStore()
+    tenant_id, user_a = uuid4(), uuid4()
+    for i in range(3):
+        await store.create(
+            thread_id=uuid4(),
+            tenant_id=tenant_id,
+            created_by="x",
+            user_id=user_a if i < 2 else None,
+            agent_name="alpha" if i < 2 else "beta",
+        )
+    other_tenant_thread = await store.create(
+        thread_id=uuid4(), tenant_id=uuid4(), created_by="x", agent_name="alpha"
+    )
+
+    assert await store.count_by_tenant(tenant_id) == 3
+    assert await store.count_by_tenant(tenant_id, agent_name="alpha") == 2
+    assert await store.count_by_tenant(tenant_id, user_id=user_a) == 2
+    # Count is unaffected by what a page would slice.
+    page = await store.list_by_tenant(tenant_id, limit=1)
+    assert len(page) == 1
+    assert await store.count_by_tenant(tenant_id) == 3
+
+    # thread_ids narrowing composes; the empty set short-circuits to 0.
+    assert await store.count_by_tenant(tenant_id, thread_ids={page[0].thread_id}) == 1
+    assert await store.count_by_tenant(tenant_id, thread_ids=set()) == 0
+
+    # Cross-tenant count spans tenants and honours the user filter (N-4 fix).
+    assert await store.count_all_tenants() == 4
+    assert await store.count_all_tenants(user_id=user_a) == 2
+    assert other_tenant_thread.tenant_id != tenant_id
+
+
+@pytest.mark.asyncio
+async def test_list_all_tenants_filters_by_user() -> None:
+    """N-4 fix — the cross-tenant list narrows by user_id in the store, so
+    the browser's member filter (and its total) is exact, not a post-filter."""
+    store = InMemoryThreadMetaStore()
+    user = uuid4()
+    mine = await store.create(thread_id=uuid4(), tenant_id=uuid4(), created_by="x", user_id=user)
+    await store.create(thread_id=uuid4(), tenant_id=uuid4(), created_by="x", user_id=uuid4())
+
+    got = await store.list_all_tenants(user_id=user)
+    assert [m.thread_id for m in got] == [mine.thread_id]
