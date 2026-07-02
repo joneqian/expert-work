@@ -82,6 +82,7 @@ export function ConversationsList() {
   // activity window ("active in the last N hours").
   const [agentFilter, setAgentFilter] = useState<string | undefined>(undefined);
   const [errorsOnly, setErrorsOnly] = useState(false);
+  const [pendingOnly, setPendingOnly] = useState(false);
   const [windowHours, setWindowHours] = useState<number | undefined>(undefined);
   const [agentOptions, setAgentOptions] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -134,6 +135,7 @@ export function ConversationsList() {
         status: statusFilter,
         agentName: agentFilter,
         hasError: errorsOnly,
+        hasPending: pendingOnly,
         since: windowHours
           ? new Date(Date.now() - windowHours * 3_600_000).toISOString()
           : undefined,
@@ -156,7 +158,17 @@ export function ConversationsList() {
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
-  }, [apiTenantScope, statusFilter, agentFilter, errorsOnly, windowHours, q, userFilter, page]);
+  }, [
+    apiTenantScope,
+    statusFilter,
+    agentFilter,
+    errorsOnly,
+    pendingOnly,
+    windowHours,
+    q,
+    userFilter,
+    page,
+  ]);
 
   useEffect(() => {
     void refresh();
@@ -166,7 +178,7 @@ export function ConversationsList() {
   // is meaningless under the new one.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, agentFilter, errorsOnly, windowHours, q, userFilter, apiTenantScope]);
+  }, [statusFilter, agentFilter, errorsOnly, pendingOnly, windowHours, q, userFilter, apiTenantScope]);
 
   // Agent-filter options — best-effort; a failure just leaves the
   // dropdown empty (the list itself is unaffected).
@@ -368,6 +380,13 @@ export function ConversationsList() {
               data-testid="conversations-errors-only"
             >
               {t("conversations_page.filter_errors_only")}
+            </Checkbox>
+            <Checkbox
+              checked={pendingOnly}
+              onChange={(e) => setPendingOnly(e.target.checked)}
+              data-testid="conversations-pending-only"
+            >
+              {t("conversations_page.filter_pending_only")}
             </Checkbox>
             <Input
               allowClear
