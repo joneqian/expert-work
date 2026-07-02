@@ -77,7 +77,9 @@ async def test_unsampled_candidate_drops_without_a_judge_call() -> None:
     reader, key, thread = await _seeded(tenant)
     aux = _FakeAux("5")
 
-    decision = await _screener(aux, reader, pct=0)(_candidate(tenant=tenant, thread=thread, key=key))
+    decision = await _screener(aux, reader, pct=0)(
+        _candidate(tenant=tenant, thread=thread, key=key)
+    )
 
     assert decision.proceed is False
     assert decision.reason == "not_sampled"
