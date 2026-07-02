@@ -26,6 +26,7 @@ import {
   Empty,
   Input,
   Popconfirm,
+  Popover,
   Segmented,
   Space,
   Tag,
@@ -45,6 +46,8 @@ import {
   RotateCcw,
   Send,
   Square,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   User,
   X,
@@ -70,6 +73,7 @@ import {
   getSessionWorkspace,
   getSessionWorkspaceFiles,
   streamRun,
+  submitSessionFeedback,
   type HistoryMessage,
   type RunRequest,
   type SessionWorkspace,
@@ -1348,10 +1352,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
               </div>
             </div>
           )}
-          {turns.map((turn) => (
+          {turns.map((turn, turnIndex) => (
             <TurnCard
               key={turn.id}
               turn={turn}
+              turnSeq={turnIndex}
               eventView={eventView}
               onViewChange={setEventView}
               threadId={thread?.thread_id ?? null}
@@ -1365,6 +1370,123 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** SE-16 (SE-A46) — the per-turn 👍/👎 bar. 👍 submits immediately; 👎 opens
+ *  a comment popover (the user's own words are the highest-value failure
+ *  label for the distiller). One submission per turn; errors surface inline
+ *  (fire-and-forget signal — never blocks the conversation). */
+function FeedbackBar({ threadId, turnSeq }: { threadId: string; turnSeq: number }) {
+  const { t } = useTranslation();
+  const [submitted, setSubmitted] = useState<"up" | "down" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [comment, setComment] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useCallback(
+    async (rating: "up" | "down", text?: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await submitSessionFeedback(threadId, {
+          rating,
+          comment: text?.trim() || undefined,
+          turn_seq: turnSeq,
+        });
+        setSubmitted(rating);
+        setCommentOpen(false);
+      } catch (err) {
+        setError(
+          err instanceof ApiError ? `${err.code}: ${err.message}` : String(err),
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [threadId, turnSeq],
+  );
+
+  return (
+    <div
+      style={{ marginTop: 6, display: "flex", gap: 4, alignItems: "center" }}
+      data-testid="playground-turn-feedback"
+    >
+      <Button
+        type="text"
+        size="small"
+        disabled={busy || submitted !== null}
+        onClick={() => void submit("up")}
+        aria-label={t("playground.feedback_up")}
+        data-testid="playground-feedback-up"
+        icon={
+          <ThumbsUp
+            size={13}
+            strokeWidth={1.75}
+            color={submitted === "up" ? "var(--hx-status-success, #52c41a)" : undefined}
+          />
+        }
+      />
+      <Popover
+        open={commentOpen}
+        onOpenChange={(open) => {
+          if (submitted === null && !busy) setCommentOpen(open);
+        }}
+        trigger="click"
+        content={
+          <div style={{ width: 260 }}>
+            <Input.TextArea
+              rows={3}
+              maxLength={4000}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={t("playground.feedback_comment_placeholder")}
+              aria-label={t("playground.feedback_comment_placeholder")}
+              data-testid="playground-feedback-comment"
+            />
+            <div style={{ marginTop: 8, textAlign: "right" }}>
+              <Button
+                type="primary"
+                size="small"
+                loading={busy}
+                onClick={() => void submit("down", comment)}
+                data-testid="playground-feedback-down-submit"
+              >
+                {t("playground.feedback_comment_submit")}
+              </Button>
+            </div>
+          </div>
+        }
+      >
+        <Button
+          type="text"
+          size="small"
+          disabled={busy || submitted !== null}
+          aria-label={t("playground.feedback_down")}
+          data-testid="playground-feedback-down"
+          icon={
+            <ThumbsDown
+              size={13}
+              strokeWidth={1.75}
+              color={
+                submitted === "down" ? "var(--hx-status-error, #f5222d)" : undefined
+              }
+            />
+          }
+        />
+      </Popover>
+      {submitted !== null && (
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {t("playground.feedback_thanks")}
+        </Text>
+      )}
+      {error !== null && (
+        <Text type="danger" style={{ fontSize: 11 }} data-testid="playground-feedback-error">
+          {t("playground.feedback_failed")}: {error}
+        </Text>
+      )}
     </div>
   );
 }
@@ -1520,6 +1642,7 @@ function ApprovalGate({
 
 function TurnCard({
   turn,
+  turnSeq,
   eventView,
   onViewChange,
   threadId,
@@ -1531,6 +1654,8 @@ function TurnCard({
   exporting,
 }: {
   turn: Turn;
+  /** The turn's index in the transcript — sent as feedback ``turn_seq``. */
+  turnSeq: number;
   eventView: "timeline" | "raw";
   onViewChange: (view: "timeline" | "raw") => void;
   threadId: string | null;
@@ -1769,6 +1894,12 @@ function TurnCard({
               </Link>
             )}
           </div>
+        )}
+
+        {/* SE-16 (SE-A46) — per-turn 👍/👎 quality signal feeding the
+            skill-evolution curation pipeline. Settled turns only. */}
+        {turn.status === "done" && threadId && (
+          <FeedbackBar threadId={threadId} turnSeq={turnSeq} />
         )}
       </div>
 
