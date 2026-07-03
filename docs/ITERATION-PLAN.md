@@ -1662,6 +1662,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 - [x] **收官 = live 试点全场景**（计划成文于设计 §12.10，14 场景五阶段）：信号→候选（三类信号+改口排除+transient 重试+judge 抽样滤除）→ 蒸馏→验证（👎语料佐证+implicit 禁 auto+查重转修订轮）→ 晋升→生效（人审/auto/限速/kill-switch+**attach 后 skill_run_usage 出 with 行**=断链修复直接证据）→ 回滚+计量对账（造衰退→ARCHIVED+共享熔断；token_usage 无 NULL_TENANT 残留）→ 运营面（审批证据/打标控件/未灰度租户全链静默）；预期逮 3-5 live 坑（9.4/4.4 先例），修完才 ★5
   - 2026-07-03 live 试点跑完（dev 栈，test 租户/test-agent）：**全飞轮首次 live 闭环**，with 行 + last_used_at 关键断言达成；实逮 9 坑（结果注记见设计 §12.10 末）。修复 PR：replay 计量断链（config 穿 tenant/user）、蒸馏版本 content_hash 缺失+0111 回填（drift 拦加载）、BuiltAgent 缓存吞晋升（四翻转点 invalidate_tenant）、recorder 与 rollback-monitor 解耦、LLM router 故障全族入重试档（含 key/auth，拍板）、implicit 改口 5min 重发排除（拍板）、dedup 阈值 0.9→0.60（真 embedder 校准）。partial：场景 9/10 auto 通道与限速、11 人为衰退、13 浏览器面（逻辑单测厚覆盖，live 需可控 delta/批量失败流量）
 - 显式不做（对标依据在设计 §12.8）：shadow/champion-challenger 对照、环境信号（缺埋点，backlog）、技能 merge
+- [x] **收官后 backlog 三连**（SE-16 使人审队列有真流量后价值上升）：① webhook 渠道格式 `payload_format`（generic/feishu/dingtalk/wecom，migration 0112）——IM 机器人直接收 `approval.requested`/`skill_promote.requested` 文本消息，飞轮人审环节有触达不再积压（HMAC 照签、断路器/重试/dead-letter 全复用；钉钉加签/卡片消息/@人 backlog）；② consolidator aux 计量（`usage_kind='memory_consolidation'`，PR-6 同族 gap 的另一半，chargeback 全覆盖）；③ 人审面冷启动空态文案（「轨迹池不足时蒸馏跳过重放」，live 试点坑 #1）
 
 ### 显式不做（理由在册，需求出现随时重议）
 
