@@ -237,6 +237,10 @@ def test_make_key_schema_fingerprint_covers_name_and_content() -> None:
     assert _with(other_schema) != base
     # Same schema content under a different name → different key.
     assert _with(StructuredOutputSpec(schema=dict(_SPEC.schema), name="other")) != base
+    # RT-1 PR-3 — ``strict`` joins the fingerprint: on the native path it
+    # toggles wire-level enforcement, so responses are not interchangeable.
+    relaxed = StructuredOutputSpec(schema=dict(_SPEC.schema), name="verdict", strict=False)
+    assert _with(relaxed) != base
 
 
 # ---------------------------------------------------------------------------

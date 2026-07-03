@@ -70,6 +70,9 @@ FIELD_TIERS: dict[str, FieldTier] = {
     "workflow": FieldTier.CAPABILITY,
     "reflection": FieldTier.CAPABILITY,
     "routing": FieldTier.CAPABILITY,
+    # RT-1 PR-3 (RT-ADR-4) — the structured final-reply contract is a platform
+    # capability default the tenant may add / remove.
+    "output_schema": FieldTier.CAPABILITY,
     # ③ tenant-owned — tenant replaces.
     "system_prompt": FieldTier.TENANT_OWNED,
     "model": FieldTier.TENANT_OWNED,

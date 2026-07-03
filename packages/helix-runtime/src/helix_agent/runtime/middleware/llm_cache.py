@@ -57,15 +57,14 @@ def _coerce_output_schema(raw: object) -> StructuredOutputSpec | None:
     summary dict on the *around* anchor) is ignored, falling back to
     the unstructured key.
 
-    Activation: as of RT-1 PR-2 no producer sets this payload key —
-    the agent node's before/after payloads carry only messages / tools
-    / tenant_id, and aux structured calls bypass these anchors — so
-    every key derived today is the unstructured one (byte-identical to
-    pre-RT-1; existing entries stay reachable). The fingerprint takes
-    effect when the RT-1 PR-3 agent loop places its
-    :class:`StructuredOutputSpec` instance into
-    ``payload["output_schema"]`` on BOTH anchors (lookup and store must
-    key identically, or structured entries become write-only).
+    Activation: live since RT-1 PR-3 — the agent loop's structured
+    finalization resend places its :class:`StructuredOutputSpec`
+    instance into ``payload["output_schema"]`` on BOTH anchors (lookup
+    and store key identically; either side missing would make
+    structured entries write-only). Unstructured calls still omit the
+    key, so their derivation stays byte-identical to pre-RT-1 and
+    existing entries remain reachable. Aux structured calls bypass
+    these anchors entirely.
     """
     return raw if isinstance(raw, StructuredOutputSpec) else None
 

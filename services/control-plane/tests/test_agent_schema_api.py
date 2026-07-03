@@ -21,3 +21,17 @@ def test_schema_endpoint_returns_agentspec_json_schema() -> None:
     assert "apiVersion" in schema["properties"]
     assert "spec" in schema["properties"]
     assert "kind" in schema["properties"]
+
+
+def test_schema_endpoint_exposes_output_schema_field() -> None:
+    """RT-1 PR-3 — the Tier3 ``output_schema`` field flows into the manifest
+    editor's JSON Schema automatically (Pydantic model_json_schema)."""
+    schema = _client().get("/v1/agents/schema").json()["data"]
+    body = schema["$defs"]["AgentSpecBody"]
+    assert "output_schema" in body["properties"]
+    output_schema_spec = schema["$defs"]["OutputSchemaSpec"]
+    props = output_schema_spec["properties"]
+    assert set(props) == {"name", "json_schema", "strict"}
+    # The Field descriptions ARE the editor-facing copy — they must exist.
+    assert props["json_schema"]["description"]
+    assert "final" in body["properties"]["output_schema"]["description"].lower()

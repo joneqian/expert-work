@@ -625,6 +625,13 @@ const zhCN: TranslationKeys = {
     prompt_var_description: "说明",
     prompt_var_remove: "删除",
     prompt_var_add: "添加变量",
+    section_output_schema: "结构化输出",
+    section_output_schema_help:
+      "可选。强制 Agent 的最终回复是符合 JSON Schema 的 JSON 对象;中间的工具调用轮次不受约束。\n在 YAML 视图里配置 spec.output_schema:{ name, json_schema, strict }。\n示例:json_schema 要求 { \"answer\": string },则每次最终回复都是机器可读的",
+    output_schema_on_hint:
+      "已启用——最终回复必须符合「{{name}}」schema(spec.output_schema,可在 YAML 视图编辑)。",
+    output_schema_off_hint:
+      "未配置——最终回复为自由文本。到 YAML 视图添加 spec.output_schema 可要求机器可读的 JSON 回复。",
   },
   playground: {
     session_label: "会话",

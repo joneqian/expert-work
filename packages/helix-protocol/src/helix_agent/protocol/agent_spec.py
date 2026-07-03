@@ -598,6 +598,69 @@ class CacheSpec(BaseModel):
     )
 
 
+class OutputSchemaSpec(BaseModel):
+    """Stream RT-1 PR-3 (RT-ADR-4) — schema-enforced final reply.
+
+    Declares a JSON Schema the agent's **final** assistant message (the
+    finalization ``AIMessage`` without ``tool_calls``) must validate
+    against. Intermediate ReAct turns — tool-calling rounds — are never
+    constrained. The orchestrator enforces the schema through the RT-1
+    structured-output machinery (native ``response_format`` /
+    forced-tool / prompt path per provider capability, RT-ADR-2) with
+    the RT-ADR-1 bounded validate-and-retry loop.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        default="final_response",
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
+        description=(
+            "Wire label for the schema (an OpenAI json_schema name / an "
+            "Anthropic tool name): 1-64 chars of letters, digits, '_' or '-'."
+        ),
+    )
+    json_schema: dict[str, Any] = Field(
+        description=(
+            "JSON Schema (draft 2020-12) the final assistant reply must "
+            "validate against. The reply is a single JSON object, so the "
+            "top-level type must be 'object' (or omitted). Tool-calling "
+            "turns are not constrained - only the finalization message."
+        ),
+    )
+    strict: bool = Field(
+        default=True,
+        description=(
+            "Maps to OpenAI json_schema.strict on the native path; the "
+            "tool_call and prompt paths always validate locally regardless."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_json_schema_shape(self) -> OutputSchemaSpec:
+        """Fail fast on schemas that could never validate a reply.
+
+        The finalization reply is parsed as a single JSON **object**
+        (``validate_structured_output`` rejects non-dict roots), so a
+        top-level ``type`` other than ``"object"`` is a manifest defect.
+        An empty dict is almost certainly a mistake too — ``{}`` accepts
+        anything; use ``{"type": "object"}`` to mean "any JSON object".
+        Deep JSON-Schema validity is checked at build time (the
+        orchestrator runs ``Draft202012Validator.check_schema``).
+        """
+        if not self.json_schema:
+            msg = "output_schema.json_schema must be a non-empty JSON Schema object"
+            raise ValueError(msg)
+        declared_type = self.json_schema.get("type")
+        if declared_type is not None and declared_type != "object":
+            msg = (
+                "output_schema.json_schema top-level type must be 'object' "
+                f"(the final reply is a single JSON object), got {declared_type!r}"
+            )
+            raise ValueError(msg)
+        return self
+
+
 class ContextCompressionPolicy(BaseModel):
     """Stream L.L2 — per-agent context compression knobs.
 
@@ -1094,6 +1157,15 @@ class AgentSpecBody(BaseModel):
         ),
     )
     workflow: WorkflowSpec = Field(default_factory=WorkflowSpec)
+    output_schema: OutputSchemaSpec | None = Field(
+        default=None,
+        description=(
+            "Stream RT-1 (RT-ADR-4) - when set, the agent's FINAL reply "
+            "(the closing assistant message without tool calls) must be a "
+            "JSON object validating against this schema. Intermediate "
+            "tool-calling turns are unaffected. None (default) = free text."
+        ),
+    )
     cache: CacheSpec = Field(
         default_factory=CacheSpec,
         description=(

@@ -143,10 +143,14 @@ class LLMResponseCache:
         cross-tenant hit).
 
         ``output_schema`` (Stream RT-1 PR-2) joins the key as a
-        fingerprint — name + content digest, never the schema body — so
-        a structured call cannot hit an unstructured entry for the same
-        messages (or one made under a different schema). ``None`` adds
-        nothing to the key material, keeping every pre-RT-1 key
+        fingerprint — name + strict + content digest, never the schema
+        body — so a structured call cannot hit an unstructured entry for
+        the same messages (or one made under a different schema, or the
+        same schema with a different ``strict``: on the native path
+        strict toggles wire-level enforcement, so the responses are not
+        interchangeable; folded in during RT-1 PR-3 while structured
+        entries had zero production data — no migration cost). ``None``
+        adds nothing to the key material, keeping every pre-RT-1 key
         byte-identical: existing cache entries stay reachable.
         """
         key_material: dict[str, Any] = {
@@ -162,6 +166,7 @@ class LLMResponseCache:
             )
             key_material["output_schema"] = {
                 "name": output_schema.name,
+                "strict": output_schema.strict,
                 "schema_sha256": hashlib.sha256(schema_canonical.encode("utf-8")).hexdigest(),
             }
         canonical = json.dumps(key_material, sort_keys=True, separators=(",", ":"))
