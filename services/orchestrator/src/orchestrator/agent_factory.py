@@ -102,6 +102,7 @@ from orchestrator.llm import (
     LLMCaller,
     LLMProvider,
     LLMRouter,
+    OpenAICompatibleProvider,
     OpenAIProvider,
     ProviderHandle,
     RateLimitedProvider,
@@ -2044,9 +2045,12 @@ def _build_provider(
         "qwen": make_qwen_client,
         "doubao": make_doubao_client,
     }
+    # Stream RT-1 (RT-ADR-2, § 7.5) — the compat vendors take the
+    # conservative prompt structured-output path; the subclass is
+    # behaviour-identical whenever no output_schema is requested.
     make_client = openai_compatible.get(provider)
     if make_client is not None:
-        return OpenAIProvider(
+        return OpenAICompatibleProvider(
             client=make_client(api_key=api_key, timeout_s=timeout_eff),
             model=model.name,
             temperature=model.temperature,
@@ -2057,7 +2061,7 @@ def _build_provider(
     if provider == "self-hosted":
         if not model.base_url:
             raise AgentFactoryError(f"self-hosted model {model.name!r} requires a base_url")
-        return OpenAIProvider(
+        return OpenAICompatibleProvider(
             client=make_self_hosted_client(api_key, base_url=model.base_url, timeout_s=timeout_eff),
             model=model.name,
             temperature=model.temperature,
@@ -2071,7 +2075,7 @@ def _build_provider(
                 f"azure model {model.name!r} requires base_url + "
                 f"azure_deployment + azure_api_version"
             )
-        return OpenAIProvider(
+        return OpenAICompatibleProvider(
             client=make_azure_client(
                 api_key,
                 endpoint=model.base_url,

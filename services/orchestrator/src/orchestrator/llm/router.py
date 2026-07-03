@@ -44,15 +44,17 @@ from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from helix_agent.common.observability import helix_counter
+from helix_agent.protocol import StructuredOutputSpec
 from helix_agent.runtime.middleware import (
     CircuitOpenError,
     LLMAuthError,
     LLMClientError,
     LLMError,
     LLMKeyUnavailableError,
+    LLMOutputValidationError,
     LLMRateLimitError,
     LLMStreamStaleError,
     LLMUnauthorizedError,
@@ -60,6 +62,11 @@ from helix_agent.runtime.middleware import (
     MiddlewareContext,
 )
 from orchestrator.llm.oauth_provider import OAuthCapableProvider
+from orchestrator.llm.structured_output import (
+    MAX_VALIDATION_RETRIES,
+    correction_message,
+    validate_structured_output,
+)
 from orchestrator.tools.registry import ToolSpec
 
 logger = logging.getLogger(__name__)
@@ -79,6 +86,22 @@ _llm_auth_refresh_total = helix_counter(
     "helix_llm_auth_refresh_total",
     "Credential refreshes triggered by OAuth-capable provider 401s (Stream L.L8).",
     ("provider_key", "result"),
+)
+
+# Stream RT-1 (RT-ADR-1) — structured-output validation loop observability.
+# Each validation resend multiplies the E.4 in-provider retry budget (see
+# the :meth:`LLMRouter._attempt_call` worst-case note), so retry volume and
+# terminal failures must be visible on dashboards. Labeled by
+# ``provider_key`` only — schema names are caller-defined and unbounded.
+_llm_structured_validation_retry_total = helix_counter(
+    "helix_llm_structured_validation_retry_total",
+    "Structured-output correction resends after an invalid response (Stream RT-1).",
+    ("provider_key",),
+)
+_llm_structured_validation_failure_total = helix_counter(
+    "helix_llm_structured_validation_failure_total",
+    "Structured-output calls that exhausted the validation retries (Stream RT-1).",
+    ("provider_key",),
 )
 
 
@@ -102,6 +125,7 @@ class LLMProvider(Protocol):
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
     ) -> AIMessage:
         """Call the upstream provider and return the LLM's response.
 
@@ -109,6 +133,13 @@ class LLMProvider(Protocol):
         failure (transport, 4xx, 5xx, rate-limit, parse). Letting raw
         :class:`httpx.HTTPError` / :class:`ValueError` propagate would
         defeat the router's fallback classification.
+
+        ``output_schema`` (Stream RT-1, RT-ADR-2) asks the adapter to
+        enforce a JSON Schema on the response via its declared
+        ``structured_output_capability`` path (native / tool_call /
+        prompt). ``None`` — the default and the only value existing
+        callers pass — MUST leave the request wire-identical to the
+        pre-RT-1 behaviour.
         """
 
 
@@ -153,6 +184,25 @@ _KEY_LEVEL_ERRORS: tuple[type[LLMError], ...] = (
     LLMUnauthorizedError,
     CircuitOpenError,
 )
+
+
+def _complete(
+    provider: LLMProvider,
+    *,
+    messages: Sequence[BaseMessage],
+    tools: Sequence[ToolSpec],
+    output_schema: StructuredOutputSpec | None,
+) -> Awaitable[AIMessage]:
+    """Call ``provider.complete``, forwarding ``output_schema`` only when set.
+
+    Stream RT-1 backward-compat: the kwarg is omitted on unstructured
+    calls so pre-RT-1 :class:`LLMProvider` implementations (test doubles,
+    third-party adapters without the parameter) keep working — and the
+    ``None`` path stays call-for-call identical to pre-RT-1 behaviour.
+    """
+    if output_schema is None:
+        return provider.complete(messages=messages, tools=tools)
+    return provider.complete(messages=messages, tools=tools, output_schema=output_schema)
 
 
 def _group_of(handle: ProviderHandle) -> str:
@@ -212,6 +262,7 @@ class LLMRouter:
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
     ) -> AIMessage:
         handles = self.providers
         if not handles:
@@ -233,7 +284,15 @@ class LLMRouter:
         while i < n:
             handle = handles[i]
             try:
-                return await self._call_one(handle, messages=messages, tools=tools)
+                return await self._call_one(
+                    handle, messages=messages, tools=tools, output_schema=output_schema
+                )
+            except LLMOutputValidationError:
+                # Stream RT-1 (RT-ADR-1) — a schema-validation failure is
+                # model behaviour, not a key/provider fault: never rotate
+                # to a sibling key, never fail over. Re-raise so the
+                # caller's defensive degradation path handles it.
+                raise
             except _KEY_LEVEL_ERRORS as exc:
                 last_exc = exc
                 logger.warning(
@@ -272,6 +331,7 @@ class LLMRouter:
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None,
     ) -> AIMessage:
         """Invoke one provider, with the Stream L.L8 OAuth refresh hook.
 
@@ -281,10 +341,16 @@ class LLMRouter:
         before failing. See :meth:`_handle_unauthorized`.
         """
         try:
-            return await self._attempt_call(handle, messages=messages, tools=tools)
+            return await self._attempt_call(
+                handle, messages=messages, tools=tools, output_schema=output_schema
+            )
         except LLMUnauthorizedError as exc:
             return await self._handle_unauthorized(
-                handle, messages=messages, tools=tools, original=exc
+                handle,
+                messages=messages,
+                tools=tools,
+                output_schema=output_schema,
+                original=exc,
             )
 
     async def _attempt_call(
@@ -293,8 +359,79 @@ class LLMRouter:
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None,
     ) -> AIMessage:
-        """One provider attempt, optionally wrapped in the around-LLM chain.
+        """One provider attempt, plus the RT-ADR-1 validation loop.
+
+        Without ``output_schema`` this is a single :meth:`_invoke_once`
+        — bit-for-bit the pre-RT-1 behaviour. With a schema, the
+        response is validated against it; an invalid response is fed
+        back (the raw response + a correction user message) to the SAME
+        handle — same provider, same key — up to
+        :data:`MAX_VALIDATION_RETRIES` resends. Still invalid →
+        :class:`LLMOutputValidationError`, which the outer loop
+        re-raises without key rotation or provider failover.
+
+        Cost worst case: each of the ``1 + MAX_VALIDATION_RETRIES`` (= 3)
+        validation attempts is an independent :meth:`_invoke_once`, and
+        with the E.4 ``LLMErrorHandlingMiddleware`` wrapping the chain
+        each attempt may itself retry transient failures up to its
+        budget (1 + 3) — so one structured call can cost up to
+        ``3 x 4 = 12`` real upstream calls. The
+        ``helix_llm_structured_validation_{retry,failure}_total``
+        counters make that volume observable per provider key.
+        """
+        if output_schema is None:
+            return await self._invoke_once(
+                handle, messages=messages, tools=tools, output_schema=None
+            )
+
+        current: list[BaseMessage] = list(messages)
+        error_summary = ""
+        for attempt in range(1 + MAX_VALIDATION_RETRIES):
+            response = await self._invoke_once(
+                handle, messages=current, tools=tools, output_schema=output_schema
+            )
+            parsed, error_summary_or_none = validate_structured_output(response, output_schema)
+            if error_summary_or_none is None:
+                # Carry the validated dict on the message rather than
+                # mutating the provider's object in place.
+                return response.model_copy(
+                    update={
+                        "additional_kwargs": {**response.additional_kwargs, "parsed": parsed},
+                    }
+                )
+            error_summary = error_summary_or_none
+            logger.warning(
+                "llm_router.structured_output_invalid key=%s attempt=%d schema=%s",
+                handle.key,
+                attempt + 1,
+                output_schema.name,
+            )
+            if attempt == MAX_VALIDATION_RETRIES:
+                break
+            _llm_structured_validation_retry_total.labels(provider_key=handle.key).inc()
+            current = [
+                *current,
+                response,
+                HumanMessage(content=correction_message(error_summary, output_schema)),
+            ]
+
+        _llm_structured_validation_failure_total.labels(provider_key=handle.key).inc()
+        raise LLMOutputValidationError(
+            f"structured output failed validation after {MAX_VALIDATION_RETRIES} retries "
+            f"(schema={output_schema.name!r}): {error_summary}"
+        )
+
+    async def _invoke_once(
+        self,
+        handle: ProviderHandle,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None,
+    ) -> AIMessage:
+        """One provider call, optionally wrapped in the around-LLM chain.
 
         Without ``around_llm_chain`` we just delegate to ``provider.complete``
         — the M0 unit-test path. With the chain set, build a
@@ -306,23 +443,38 @@ class LLMRouter:
         if self.around_llm_chain is None:
             result = await self._invoke_with_deadline(
                 handle,
-                handle.provider.complete(messages=messages, tools=tools),
+                _complete(
+                    handle.provider,
+                    messages=messages,
+                    tools=tools,
+                    output_schema=output_schema,
+                ),
             )
             assert isinstance(result, AIMessage)  # noqa: S101 - provider Protocol contract
             return result
 
-        ctx = MiddlewareContext(
-            payload={
-                "provider_key": handle.key,
-                "messages": list(messages),
-                "tools": list(tools),
+        payload: dict[str, Any] = {
+            "provider_key": handle.key,
+            "messages": list(messages),
+            "tools": list(tools),
+        }
+        if output_schema is not None:
+            # RT-1 — informational for observability middlewares; absent
+            # on unstructured calls so the payload stays byte-identical.
+            # A plain JSON-serializable dict (a middleware may json.dumps
+            # the payload), and no schema body — that can be large.
+            payload["output_schema"] = {
+                "name": output_schema.name,
+                "strict": output_schema.strict,
             }
-        )
+        ctx = MiddlewareContext(payload=payload)
 
         async def terminal(c: MiddlewareContext) -> None:
-            response = await handle.provider.complete(
+            response = await _complete(
+                handle.provider,
                 messages=c.payload["messages"],
                 tools=c.payload["tools"],
+                output_schema=output_schema,
             )
             c.payload["response"] = response
 
@@ -344,6 +496,7 @@ class LLMRouter:
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None,
         original: LLMUnauthorizedError,
     ) -> AIMessage:
         """Stream L.L8 — credential refresh + at-most-one retry.
@@ -395,7 +548,9 @@ class LLMRouter:
         # refreshed credentials are also rejected; treat as a real auth
         # failure on this provider and let the router fall back.
         try:
-            result = await self._attempt_call(handle, messages=messages, tools=tools)
+            result = await self._attempt_call(
+                handle, messages=messages, tools=tools, output_schema=output_schema
+            )
         except LLMUnauthorizedError as retry_exc:
             _llm_auth_refresh_total.labels(provider_key=handle.key, result="fail").inc()
             logger.info("llm_router.refresh_retry_still_401 key=%s", handle.key)
