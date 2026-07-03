@@ -640,13 +640,15 @@ def create_app(
         run_store=resolved_run_store,
         run_event_store=resolved_run_event_store,
     )
-    # SE-7d-3b-ii — wire run-end skill_run_usage emission (feeds the rollback
-    # monitor). Gated with the monitor: one flag controls the whole SE-7d data
-    # path. Cheap — most runs bind zero distilled skills, so the emit is a no-op.
-    if resolved_settings.enable_skill_rollback_monitor:
-        resolved_agent_runtime.skill_run_usage_recorder = StoreSkillRunUsageRecorder(
-            store=resolved_skill_store
-        )
+    # SE-7d-3b-ii — wire run-end skill_run_usage emission. Always on (live
+    # pilot finding #9): gating it behind ``enable_skill_rollback_monitor``
+    # silently starved the rollback monitor AND the curator liveness signal
+    # whenever evolution ran with the monitor off — data must accumulate
+    # regardless of whether the read-side judgement loop is enabled. Cheap:
+    # most runs bind zero distilled skills, so the emit is a no-op.
+    resolved_agent_runtime.skill_run_usage_recorder = StoreSkillRunUsageRecorder(
+        store=resolved_skill_store
+    )
     # Late-bound PII resolver: lets the audit logger reference
     # tenant_config without forcing it to exist yet (D.2 cycle break).
     pii_resolver = TenantConfigPiiResolver()
@@ -1538,6 +1540,10 @@ def create_app(
                     interval_s=resolved_settings.skill_evolution_worker_interval_s,
                     audit_logger=resolved_audit,
                     breaker=skill_evo_breaker,
+                    # Live pilot finding #8 — promotion / dedup-revision flips
+                    # change the auto-attach set without a spec-version bump;
+                    # the BuiltAgent cache must drop the tenant's entries.
+                    cache_invalidator=resolved_agent_runtime.invalidate_tenant,
                 )
                 skill_evolution_worker.start()
                 _app.state.skill_evolution_worker = skill_evolution_worker
@@ -1557,6 +1563,9 @@ def create_app(
                         # Stream HX-2 (Mini-ADR HX-B2) — user 👎 joins the
                         # rollback window as a demoted sample.
                         feedback_store=resolved_feedback,
+                        # Live pilot finding #8 — archive must drop the
+                        # tenant's BuiltAgent cache entries.
+                        cache_invalidator=resolved_agent_runtime.invalidate_tenant,
                     ),
                     config=RollbackMonitorConfig(
                         window=timedelta(days=resolved_settings.skill_rollback_window_days)

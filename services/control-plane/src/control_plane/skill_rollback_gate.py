@@ -21,7 +21,7 @@ run-end emission both live in SE-7d-3b (real path, integration-validated).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -85,6 +85,10 @@ class RollbackGate:
     #: thread demotes that sample to ``failed`` before scoring. ``None``
     #: keeps the machine-outcome-only behaviour.
     feedback_store: FeedbackStore | None = None
+    #: Live pilot finding #8 — archiving changes the agent's auto-attach set
+    #: without a spec-version bump; the BuiltAgent cache must be invalidated
+    #: or runs keep binding the rolled-back skill until a restart.
+    cache_invalidator: Callable[[UUID], None] | None = None
 
     async def maybe_rollback(
         self,
@@ -127,6 +131,8 @@ class RollbackGate:
             )
             self.breaker.record(_scope_key(tenant_id, agent_name), ok=False, now=now)
             await self._audit(tenant_id, skill_id, skill_version, agent_name, decision, disapproved)
+            if self.cache_invalidator is not None:
+                self.cache_invalidator(tenant_id)
         return decision
 
     async def _audit(

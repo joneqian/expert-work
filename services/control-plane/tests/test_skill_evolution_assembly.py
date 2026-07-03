@@ -76,3 +76,59 @@ def test_is_screen_sampled_rate_roughly_holds() -> None:
     subset = [k for k in keys if is_screen_sampled(k, 5)]
     # A 5% sample must be a strict subset of the 50% sample (bucket < pct).
     assert all(is_screen_sampled(k, 50) for k in subset)
+
+
+def test_replay_config_carries_tenant_and_user() -> None:
+    """Live pilot finding #5 — TokenUsageMiddleware reads tenant_id/user_id
+    from ``config.configurable``; a replay config without them silently
+    skips metering for every with/without graph run."""
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from control_plane.skill_evolution_wiring import _make_replay_config_factory
+    from helix_agent.protocol import CurationCandidateRecord
+
+    tenant, user = uuid4(), uuid4()
+    candidate = CurationCandidateRecord(
+        id=uuid4(),
+        tenant_id=tenant,
+        agent_name="assistant",
+        user_id=user,
+        thread_id=uuid4(),
+        trajectory_key=f"k/{uuid4()}",
+        outcome="success",
+        signal="positive_feedback",
+        detected_at=datetime.now(UTC),
+    )
+    factory = _make_replay_config_factory(candidate)
+
+    cfg = factory("case-1", True)
+    configurable: Any = cfg["configurable"]
+    assert configurable["tenant_id"] == str(tenant)
+    assert configurable["user_id"] == str(user)
+    assert configurable["thread_id"].startswith("se-replay-")
+    # Fresh thread id per call — replays never share checkpointer state.
+    assert factory("case-1", False)["configurable"]["thread_id"] != configurable["thread_id"]
+
+
+def test_replay_config_omits_absent_user() -> None:
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from control_plane.skill_evolution_wiring import _make_replay_config_factory
+    from helix_agent.protocol import CurationCandidateRecord
+
+    candidate = CurationCandidateRecord(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        agent_name="assistant",
+        thread_id=uuid4(),
+        trajectory_key=f"k/{uuid4()}",
+        outcome="success",
+        signal="positive_feedback",
+        detected_at=datetime.now(UTC),
+    )
+    cfg = _make_replay_config_factory(candidate)("case-1", True)
+    configurable: Any = cfg["configurable"]
+    assert "user_id" not in configurable
+    assert configurable["tenant_id"] == str(candidate.tenant_id)

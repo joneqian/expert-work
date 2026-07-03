@@ -11,6 +11,7 @@ The clock is injected (``now``) so the guardrail bookkeeping is deterministic.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -44,6 +45,11 @@ class PromotionGate:
     rate_limiter: RateLimiter
     breaker: CircuitBreaker
     audit_logger: AuditLogger | None = None
+    #: Live pilot finding #8 — flipping a skill ACTIVE changes the agent's
+    #: auto-attach set without bumping any spec version, so the BuiltAgent
+    #: cache (keyed on tenant/name/version) must be invalidated or the
+    #: promotion never takes effect until a process restart.
+    cache_invalidator: Callable[[UUID], None] | None = None
 
     async def maybe_promote(
         self,
@@ -78,6 +84,8 @@ class PromotionGate:
             )
             self.rate_limiter.record(key, now)
             await self._audit(candidate, skill_id)
+            if self.cache_invalidator is not None:
+                self.cache_invalidator(candidate.tenant_id)
         return decision
 
     async def _audit(self, candidate: CurationCandidateRecord, skill_id: UUID) -> None:

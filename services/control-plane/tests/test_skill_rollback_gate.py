@@ -273,3 +273,35 @@ async def test_few_disapprovals_within_tolerance_keep() -> None:
     decision = await _rollback(gate, skill_id, version, baseline=0.9)
 
     assert decision.action is RollbackAction.KEEP
+
+
+async def test_rollback_invalidates_agent_cache() -> None:
+    """Live pilot finding #8 — archiving changes the auto-attach set without
+    a spec-version bump; the gate must drop the tenant's BuiltAgent cache."""
+    store = InMemorySkillStore()
+    skill_id, version = await _active_skill(store)
+    await _seed_window(store, skill_id, version, success=0, failed=10)
+    invalidated: list[UUID] = []
+    gate = RollbackGate(
+        skill_store=store,
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
+        cache_invalidator=invalidated.append,
+    )
+
+    await _rollback(gate, skill_id, version, baseline=0.9)
+    assert invalidated == [_TENANT]
+
+
+async def test_kept_version_does_not_invalidate() -> None:
+    store = InMemorySkillStore()
+    skill_id, version = await _active_skill(store)
+    await _seed_window(store, skill_id, version, success=10, failed=0)
+    invalidated: list[UUID] = []
+    gate = RollbackGate(
+        skill_store=store,
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
+        cache_invalidator=invalidated.append,
+    )
+
+    await _rollback(gate, skill_id, version, baseline=0.9)
+    assert invalidated == []

@@ -433,3 +433,49 @@ async def test_processor_runs_inside_metering_scope() -> None:
 
     assert seen == [tenant]
     assert current_metering() is None
+
+
+async def test_llm_router_faults_requeue_instead_of_burning() -> None:
+    """Live pilot finding #2 — the aux path surfaces 429 / 5xx / key faults
+    as ``LLM*`` exceptions with no httpx cause (they wrap normal HTTP
+    responses); each must hit the retry budget, not burn the candidate.
+    Key/auth faults are deliberately retryable: the platform fixing its
+    credential should re-pick the candidate up."""
+    from helix_agent.runtime.middleware.llm_error_handling import (
+        LLMKeyUnavailableError,
+        LLMRateLimitError,
+        LLMServerError,
+        LLMUnauthorizedError,
+    )
+
+    for exc_type in (
+        LLMRateLimitError,
+        LLMKeyUnavailableError,
+        LLMServerError,
+        LLMUnauthorizedError,
+    ):
+        store = InMemoryCurationCandidateStore()
+        await _seed(store, [_candidate(signal="positive_feedback", tenant=uuid4())])
+        proc = _ExplodingProcessor(exc_type("aux fault"), failures=1)
+        worker = SkillEvolutionWorker(candidate_store=store, processor=proc, interval_s=60)
+
+        await worker.run_once()
+        row = await _sole_candidate(store)
+        assert row.evolved_at is None, exc_type.__name__
+        assert row.retry_count == 1, exc_type.__name__
+
+
+async def test_llm_client_error_still_burns() -> None:
+    """A 4xx request fault (bad request / context overflow) is permanent —
+    retrying the identical aux call cannot succeed."""
+    from helix_agent.runtime.middleware.llm_error_handling import LLMClientError
+
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="positive_feedback", tenant=uuid4())])
+    proc = _ExplodingProcessor(LLMClientError("400 context too long"))
+    worker = SkillEvolutionWorker(candidate_store=store, processor=proc, interval_s=60)
+
+    await worker.run_once()
+    row = await _sole_candidate(store)
+    assert row.retry_count == 0
+    assert row.evolved_at is not None

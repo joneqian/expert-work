@@ -44,11 +44,12 @@ class _Fixture:
         thread_id: UUID,
         status: RunStatus = RunStatus.SUCCESS,
         created_at: datetime = _BASE,
+        run_id: UUID | None = None,
     ) -> None:
         assert self.runs is not None
         await self.runs.create(
             RunInfo(
-                run_id=uuid4(),
+                run_id=run_id or uuid4(),
                 tenant_id=tenant_id,
                 thread_id=thread_id,
                 user_id=None,
@@ -70,6 +71,8 @@ class _Fixture:
         thread_id: UUID,
         outcome: TrajectoryOutcome,
         user_id: UUID | None = None,
+        run_id: UUID | None = None,
+        finished_at: datetime = _BASE,
     ) -> None:
         await TrajectoryRecorder(object_store=self.object_store).record(
             TrajectoryRecord(
@@ -78,7 +81,8 @@ class _Fixture:
                 outcome=outcome,
                 messages=[HumanMessage(content="hi"), AIMessage(content="bye")],
                 user_id=user_id,
-                finished_at=_BASE,
+                run_id=run_id,
+                finished_at=finished_at,
             )
         )
 
@@ -294,3 +298,45 @@ async def test_explicit_up_still_outranks_implicit() -> None:
     await fx.worker.run_once()
     rows = await fx.candidates.list_for_review(tenant_id=tenant, agent_name="reporter")
     assert [r.signal for r in rows] == ["positive_feedback"]
+
+
+@pytest.mark.asyncio
+async def test_rephrased_answer_is_not_implicit() -> None:
+    """Live pilot finding #7 — a follow-up run landing within the rephrase
+    window after this trajectory's own run reads as "no, I meant …": the
+    user was not satisfied with THAT answer, so it must not enter the
+    weak-label pool even though the thread later settled quietly."""
+    from datetime import timedelta
+
+    fx = _Fixture(with_run_store=True)
+    tenant, thread, r1 = uuid4(), uuid4(), uuid4()
+    await fx.seed_thread(tenant_id=tenant, thread_id=thread)
+    await fx.seed_trajectory(
+        tenant_id=tenant, thread_id=thread, outcome="success", run_id=r1, finished_at=_BASE
+    )
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, run_id=r1, created_at=_BASE)
+    # Rephrase lands 2 minutes after the first answer; thread then settles.
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, created_at=_BASE + timedelta(minutes=2))
+
+    assert await fx.worker.run_once() == 0
+    assert await fx.candidates.list_for_review(tenant_id=tenant, agent_name="reporter") == []
+
+
+@pytest.mark.asyncio
+async def test_later_followup_does_not_disqualify_implicit() -> None:
+    """A follow-up well past the rephrase window is a new topic, not a
+    correction — the earlier answer keeps its implicit signal."""
+    from datetime import timedelta
+
+    fx = _Fixture(with_run_store=True)
+    tenant, thread, r1 = uuid4(), uuid4(), uuid4()
+    await fx.seed_thread(tenant_id=tenant, thread_id=thread)
+    await fx.seed_trajectory(
+        tenant_id=tenant, thread_id=thread, outcome="success", run_id=r1, finished_at=_BASE
+    )
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, run_id=r1, created_at=_BASE)
+    await fx.seed_run(tenant_id=tenant, thread_id=thread, created_at=_BASE + timedelta(minutes=30))
+
+    assert await fx.worker.run_once() == 1
+    rows = await fx.candidates.list_for_review(tenant_id=tenant, agent_name="reporter")
+    assert [r.signal for r in rows] == ["implicit_success"]

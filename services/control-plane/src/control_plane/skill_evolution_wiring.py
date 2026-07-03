@@ -238,11 +238,18 @@ class _ImplicitScreener:
 # SE-A47 — ingest-time dedup (embedding similarity -> revision, not new entry)
 # --------------------------------------------------------------------------- #
 
-#: Cosine floor for "this distillate duplicates an existing skill". Stricter
-#: than the consolidator's 0.85 synonym floor — a wrong merge buries a
-#: genuinely new capability inside an unrelated skill's history, so we only
-#: fold on high confidence. Tunable after the live pilot.
-_DEDUP_SIMILARITY = 0.9
+#: Cosine floor for "this distillate duplicates an existing skill".
+#: Calibrated on the live pilot (finding #4): with qwen text-embedding-v4
+#: over ``name\ndescription\nprompt_fragment`` texts, genuinely-duplicate
+#: distillates (four near-identical "concise technical QA" skills distilled
+#: from same-topic conversations) score 0.54-0.78 pairwise, while unrelated
+#: skills top out at 0.47 — the original 0.9 floor could never match a real
+#: rewrite pair and every duplicate landed as a new skill. 0.60 folds the
+#: duplicate family (a fresh draft's best match sat at 0.71-0.78) while
+#: keeping a 0.13 margin over the strongest unrelated pair; a wrong merge
+#: buries a new capability in an unrelated skill's history, so we stay above
+#: the observed unrelated band rather than chasing the last 0.54 outlier.
+_DEDUP_SIMILARITY = 0.6
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -540,8 +547,28 @@ class _DualSourceHeldOutProvider:
 # --------------------------------------------------------------------------- #
 
 
-def _replay_config(case_id: str, with_skill: bool) -> RunnableConfig:
-    return {"configurable": {"thread_id": f"se-replay-{uuid4()}"}}
+def _make_replay_config_factory(
+    candidate: CurationCandidateRecord,
+) -> Callable[[str, bool], RunnableConfig]:
+    """Per-candidate replay config (live pilot finding #5).
+
+    ``TokenUsageMiddleware`` reads ``tenant_id`` / ``user_id`` from
+    ``config.configurable`` (graph_builder puts them on the middleware
+    payload); a config without them makes the middleware silently skip the
+    row — the replay graph runs (the flywheel's biggest spend) were never
+    metered despite the build carrying ``token_usage_kind``.
+    """
+
+    def factory(case_id: str, with_skill: bool) -> RunnableConfig:
+        configurable: dict[str, str] = {
+            "thread_id": f"se-replay-{uuid4()}",
+            "tenant_id": str(candidate.tenant_id),
+        }
+        if candidate.user_id is not None:
+            configurable["user_id"] = str(candidate.user_id)
+        return {"configurable": configurable}
+
+    return factory
 
 
 @dataclass(frozen=True)
@@ -581,7 +608,7 @@ class _GraphReplayInvoker:
             skill_name=draft.name,
             skill_version=skill_version,
             agent_builder=build,
-            config_factory=_replay_config,
+            config_factory=_make_replay_config_factory(candidate),
         )
         runner = ReplayRunner(task_runner=task_runner, judge=self.judge, store=self.skill_store)
         request = ReplayRequest(
@@ -640,6 +667,7 @@ def build_evolution_worker(
     judge_sample_pct: Callable[[UUID], Awaitable[int]] | None = None,
     token_usage_store: TokenUsageStore | None = None,
     embedder: ConsolidatorEmbedder | None = None,
+    cache_invalidator: Callable[[UUID], None] | None = None,
 ) -> SkillEvolutionWorker:
     """Assemble the production skill-evolution worker (lifespan wiring).
 
@@ -659,6 +687,7 @@ def build_evolution_worker(
         breaker=breaker
         or CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=24)),
         audit_logger=audit_logger,
+        cache_invalidator=cache_invalidator,
     )
     processor = EvolutionProcessor(
         distiller=SkillDistiller(model=aux_text, model_name=aux_default_model),
@@ -685,6 +714,7 @@ def build_evolution_worker(
             if embedder is not None
             else None
         ),
+        cache_invalidator=cache_invalidator,
     )
     # SE-A45 — the sampled quality screen only assembles when the caller can
     # resolve a per-tenant sample rate (``tenant_config``); otherwise implicit
