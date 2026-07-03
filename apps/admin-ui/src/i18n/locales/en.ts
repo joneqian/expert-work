@@ -1484,6 +1484,13 @@ export interface TranslationKeys {
     events_placeholder: string;
     field_agent_name: string;
     agent_name_hint: string;
+    field_payload_format: string;
+    payload_format_hint: string;
+    col_format: string;
+    format_generic: string;
+    format_feishu: string;
+    format_dingtalk: string;
+    format_wecom: string;
     name_required: string;
     url_required: string;
     events_required: string;
@@ -2029,6 +2036,7 @@ export interface TranslationKeys {
     col_kind: string;
     kind_conversation: string;
     kind_skill_evolution: string;
+    kind_memory_consolidation: string;
     realtime: string;
     realtime_note: string;
     empty: string;
@@ -3787,6 +3795,14 @@ const en: TranslationKeys = {
     field_agent_name: "Agent scope (optional)",
     agent_name_hint:
       "Leave blank to receive events from every agent in the tenant.",
+    field_payload_format: "Delivery format",
+    payload_format_hint:
+      "Generic = the signed helix event JSON; IM formats render the event as a text bot message — use the platform's incoming-webhook robot URL.",
+    col_format: "Format",
+    format_generic: "Generic",
+    format_feishu: "Feishu bot",
+    format_dingtalk: "DingTalk bot",
+    format_wecom: "WeCom bot",
     name_required: "Name is required",
     url_required: "URL is required",
     events_required: "Select at least one event type",
@@ -4380,6 +4396,7 @@ const en: TranslationKeys = {
     col_kind: "Purpose",
     kind_conversation: "Conversation",
     kind_skill_evolution: "Skill evolution",
+    kind_memory_consolidation: "Memory consolidation",
     realtime: "Realtime",
     realtime_note:
       "Live current-month counters; billed cost above lags by up to an hour.",
@@ -4461,7 +4478,8 @@ const en: TranslationKeys = {
     filter_visibility: "Visibility filter",
     filter_visibility_all: "All visibility",
     eval_title: "Replay evidence",
-    eval_empty: "No replay verification yet",
+    eval_empty:
+      "No replay verification yet — with too few tenant trajectories (a cold-start agent) distillation skips replay, so the skill awaits review without evidence rows.",
     eval_n_cases: "{{n}} cases",
     eval_aria: "baseline {{baseline}} vs with-skill {{skill}}",
     eval_baseline: "baseline",

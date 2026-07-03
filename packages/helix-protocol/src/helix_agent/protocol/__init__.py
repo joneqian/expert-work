@@ -252,6 +252,7 @@ from helix_agent.protocol.webhook import (
     WebhookEndpointSource,
     WebhookEndpointSpec,
     WebhookEventType,
+    WebhookPayloadFormat,
 )
 
 __all__ = [
@@ -448,6 +449,7 @@ __all__ = [
     "WebhookEndpointSource",
     "WebhookEndpointSpec",
     "WebhookEventType",
+    "WebhookPayloadFormat",
     "WorkflowSpec",
     "apply_markup",
     "catalog_entry",

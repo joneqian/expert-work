@@ -190,3 +190,47 @@ async def test_delete(client: AsyncClient) -> None:
     assert resp.json() == {"deleted": True}
     again = await client.delete(f"/v1/webhook-endpoints/{created['id']}")
     assert again.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_payload_format_roundtrip(client: AsyncClient) -> None:
+    """Channel formats — create with feishu, read it back, patch to wecom;
+    an unknown format is rejected at validation."""
+    resp = await client.post(
+        "/v1/webhook-endpoints",
+        json={
+            "name": "im-hook",
+            "url": "https://open.feishu.example.com/bot/hook",
+            "event_types": ["approval.requested", "skill_promote.requested"],
+            "payload_format": "feishu",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    created = resp.json()
+    assert created["payload_format"] == "feishu"
+
+    got = await client.get(f"/v1/webhook-endpoints/{created['id']}")
+    assert got.json()["payload_format"] == "feishu"
+
+    patched = await client.patch(
+        f"/v1/webhook-endpoints/{created['id']}", json={"payload_format": "wecom"}
+    )
+    assert patched.status_code == 200
+    assert patched.json()["payload_format"] == "wecom"
+
+    bad = await client.post(
+        "/v1/webhook-endpoints",
+        json={
+            "name": "bad-format",
+            "url": "https://hooks.example.com/x",
+            "event_types": ["run.completed"],
+            "payload_format": "slack",
+        },
+    )
+    assert bad.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_default_payload_format_is_generic(client: AsyncClient) -> None:
+    created = await _create(client, name="default-fmt")
+    assert created["payload_format"] == "generic"

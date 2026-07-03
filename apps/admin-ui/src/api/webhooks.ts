@@ -26,6 +26,16 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   "skill_promote.requested",
 ];
 
+/** Delivery body shape — the signed helix envelope, or an IM bot message. */
+export type WebhookPayloadFormat = "generic" | "feishu" | "dingtalk" | "wecom";
+
+export const WEBHOOK_PAYLOAD_FORMATS: readonly WebhookPayloadFormat[] = [
+  "generic",
+  "feishu",
+  "dingtalk",
+  "wecom",
+];
+
 export interface WebhookEndpoint {
   id: string;
   name: string;
@@ -34,6 +44,7 @@ export interface WebhookEndpoint {
   agent_name: string | null;
   enabled: boolean;
   source: string;
+  payload_format: WebhookPayloadFormat;
   created_at: string;
   updated_at: string;
 }
@@ -77,6 +88,7 @@ export interface CreateWebhookEndpointBody {
   url: string;
   event_types: WebhookEventType[];
   agent_name?: string | null;
+  payload_format?: WebhookPayloadFormat;
 }
 
 export async function createWebhookEndpoint(
@@ -94,6 +106,7 @@ export interface PatchWebhookEndpointBody {
   event_types?: WebhookEventType[];
   agent_name?: string | null;
   enabled?: boolean;
+  payload_format?: WebhookPayloadFormat;
 }
 
 export async function patchWebhookEndpoint(

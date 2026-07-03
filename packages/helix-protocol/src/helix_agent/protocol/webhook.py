@@ -48,6 +48,14 @@ WebhookEventType = Literal[
 #: (Mini-ADR HX-J0); ``manifest`` is reserved for that later bridge.
 WebhookEndpointSource = Literal["manifest", "api"]
 
+#: How the delivery body is shaped for the endpoint. ``generic`` is the
+#: signed helix envelope (the historical shape); the IM formats render the
+#: event as a plain-text bot message for the platform's incoming-webhook
+#: robots (Feishu/Lark, DingTalk, WeCom) so approval / promote events reach
+#: humans without a receiver service. The HMAC signature header is still
+#: sent (IM platforms ignore unknown headers).
+WebhookPayloadFormat = Literal["generic", "feishu", "dingtalk", "wecom"]
+
 
 class WebhookEndpointSpec(BaseModel):
     """The webhook-endpoint CRUD create payload.
@@ -69,6 +77,9 @@ class WebhookEndpointSpec(BaseModel):
         default=None, description="Scope to one agent, or None for all agents in the tenant."
     )
     enabled: bool = True
+    payload_format: WebhookPayloadFormat = Field(
+        default="generic", description="Delivery body shape — helix envelope or an IM bot message."
+    )
 
 
 class WebhookEndpointRecord(BaseModel):
@@ -94,6 +105,7 @@ class WebhookEndpointRecord(BaseModel):
     secret_ref: str | None = None
     enabled: bool = True
     source: WebhookEndpointSource = "api"
+    payload_format: WebhookPayloadFormat = "generic"
     created_at: datetime
     updated_at: datetime
 

@@ -48,6 +48,11 @@ class WebhookEndpointRow(Base):
     secret_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'api'"))
+    #: Delivery body shape (generic envelope vs IM bot message) — see
+    #: ``WebhookPayloadFormat`` in the protocol.
+    payload_format: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'generic'")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
