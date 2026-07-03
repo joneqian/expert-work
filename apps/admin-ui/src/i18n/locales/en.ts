@@ -1511,6 +1511,8 @@ export interface TranslationKeys {
     empty_cross: string;
     col_name: string;
     col_status: string;
+    revision_pending: string;
+    revision_pending_tooltip: string;
     col_category: string;
     col_description: string;
     col_updated: string;
@@ -3814,6 +3816,9 @@ const en: TranslationKeys = {
     empty_home: "No skills in this tenant yet.",
     empty_cross: "No skills across all tenants yet.",
     col_name: "Name",
+    revision_pending: "Revision pending review",
+    revision_pending_tooltip:
+      "This draft is a new revision (v{{version}}) of an existing evolved skill — dedup folded a similar distillate into it instead of creating a new entry.",
     col_status: "Status",
     col_category: "Category",
     col_description: "Description",

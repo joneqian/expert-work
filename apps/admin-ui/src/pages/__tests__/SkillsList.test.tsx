@@ -193,6 +193,27 @@ describe("SkillsList", () => {
     expect(screen.getByText("web")).toBeInTheDocument();
   });
 
+  it("draft at v>1 shows the pending-revision tag (SE-A47); v1 draft does not", async () => {
+    installAdapter([
+      { match: (u) => u === "/v1/me", respond: () => meResponse },
+      {
+        match: (u) => u === "/v1/skills",
+        respond: () => ({
+          items: [
+            { ...skillRow, id: "skR", name: "revised-skill", status: "draft" as const, latest_version: 2 },
+            { ...skillRow, id: "skN", name: "brand-new-skill", status: "draft" as const, latest_version: 1 },
+          ],
+          next_cursor: null,
+          cross_tenant: false,
+        }),
+      },
+    ]);
+    renderSkillsRouter();
+    await waitFor(() => expect(screen.getByText("revised-skill")).toBeInTheDocument());
+    expect(screen.getByTestId("skill-revision-pending-skR")).toBeInTheDocument();
+    expect(screen.queryByTestId("skill-revision-pending-skN")).not.toBeInTheDocument();
+  });
+
   it("shows Load more when next_cursor is non-null", async () => {
     let calls = 0;
     installAdapter([
