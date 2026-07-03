@@ -1588,6 +1588,9 @@ def create_app(
                     approval_store=resolved_approval_store,
                     artifact_store=resolved_artifact_store,
                     thread_meta_store=resolved_threads,
+                    # SE-16 PR-8 — pending skill-promote requests fan out as
+                    # ``skill_promote.requested``.
+                    skill_store=resolved_skill_store,
                     interval_s=resolved_settings.webhook_delivery_interval_s,
                     per_tenant_concurrency=(
                         resolved_settings.webhook_delivery_per_tenant_concurrency

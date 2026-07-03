@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 from datetime import UTC, datetime
 from hashlib import sha256
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -13,6 +13,7 @@ from control_plane.webhook_delivery_worker import WebhookDeliveryWorker
 from helix_agent.persistence import (
     InMemoryApprovalStore,
     InMemoryArtifactStore,
+    InMemorySkillStore,
     InMemoryThreadMetaStore,
     InMemoryWebhookDeliveryStore,
     InMemoryWebhookEndpointStore,
@@ -334,3 +335,86 @@ async def _aiter(store: InMemoryWebhookDeliveryStore):
     """Yield every delivery row in the in-memory store (test helper)."""
     for row in store._rows.values():
         yield row
+
+
+# ---------------------------------------------------------------------------
+# SE-16 PR-8 — skill_promote.requested fan-out
+# ---------------------------------------------------------------------------
+
+
+async def _promote_fixture() -> tuple[WebhookDeliveryWorker, InMemoryWebhookDeliveryStore, UUID]:
+    endpoints = InMemoryWebhookEndpointStore()
+    deliveries = InMemoryWebhookDeliveryStore()
+    secrets_store = _FakeSecretStore()
+    tenant = uuid4()
+    skills = InMemorySkillStore()
+    skill = await skills.create_skill(
+        skill_id=uuid4(),
+        tenant_id=tenant,
+        name="evolved-reporting",
+        visibility="agent_private",
+        created_by_agent_name="reporter",
+    )
+    await skills.add_version(
+        version_id=uuid4(),
+        skill_id=skill.id,
+        tenant_id=tenant,
+        prompt_fragment="how-to",
+        authored_by="agent",
+    )
+    request = await skills.request_skill_promote(
+        request_id=uuid4(),
+        tenant_id=tenant,
+        skill_id=skill.id,
+        skill_version=1,
+        requested_by_agent_name="reporter",
+        reason="replay passed, needs review",
+    )
+    await endpoints.create(
+        WebhookEndpointRecord(
+            id=uuid4(),
+            tenant_id=tenant,
+            name="ops",
+            url="https://hooks.example.com/x",
+            event_types=("skill_promote.requested",),
+            agent_name=None,
+            secret_ref="webhook-endpoint/x",
+            enabled=True,
+            source="api",
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+    )
+    worker = WebhookDeliveryWorker(
+        delivery_store=deliveries,
+        endpoint_store=endpoints,
+        secret_store=secrets_store,
+        run_store=InMemoryRunStore(),
+        approval_store=InMemoryApprovalStore(),
+        artifact_store=InMemoryArtifactStore(),
+        thread_meta_store=InMemoryThreadMetaStore(),
+        skill_store=skills,
+        http_post=_RecordingPost(status=200),
+    )
+    return worker, deliveries, request.id
+
+
+@pytest.mark.asyncio
+async def test_enqueue_pending_promote_request_fans_out_and_is_idempotent() -> None:
+    worker, deliveries, request_id = await _promote_fixture()
+    assert await worker.enqueue_once() == 1
+    rows = [r async for r in _aiter(deliveries)]
+    assert len(rows) == 1
+    assert rows[0].event_type == "skill_promote.requested"
+    assert rows[0].event_id == f"skill_promote:{request_id}"
+    assert rows[0].payload["skill_version"] == 1
+    assert rows[0].payload["requested_by_agent_name"] == "reporter"
+    # Re-scanning the same pending request does not double-enqueue.
+    assert await worker.enqueue_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_no_skill_store_disables_promote_scan() -> None:
+    worker, _deliveries, _request_id = await _promote_fixture()
+    worker._skills = None  # legacy assembly shape
+    assert await worker.enqueue_once() == 0

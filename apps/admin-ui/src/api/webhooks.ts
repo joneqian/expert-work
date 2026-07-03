@@ -15,13 +15,15 @@ export type WebhookEventType =
   | "run.completed"
   | "run.failed"
   | "approval.requested"
-  | "artifact.saved";
+  | "artifact.saved"
+  | "skill_promote.requested";
 
 export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   "run.completed",
   "run.failed",
   "approval.requested",
   "artifact.saved",
+  "skill_promote.requested",
 ];
 
 export interface WebhookEndpoint {

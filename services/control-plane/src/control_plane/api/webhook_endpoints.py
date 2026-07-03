@@ -40,7 +40,13 @@ from helix_agent.runtime.secret_store import SecretStore
 
 #: Allowed subscription event types — must match ``WebhookEventType``.
 _EVENT_TYPES: frozenset[str] = frozenset(
-    ("run.completed", "run.failed", "approval.requested", "artifact.saved")
+    (
+        "run.completed",
+        "run.failed",
+        "approval.requested",
+        "artifact.saved",
+        "skill_promote.requested",
+    )
 )
 
 

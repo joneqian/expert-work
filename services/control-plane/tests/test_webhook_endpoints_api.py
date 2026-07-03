@@ -110,6 +110,21 @@ async def test_create_rejects_unknown_event_type(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_accepts_skill_promote_requested(client: AsyncClient) -> None:
+    """SE-16 PR-8 — the new event type is subscribable."""
+    resp = await client.post(
+        "/v1/webhook-endpoints",
+        json={
+            "name": "skill-reviews",
+            "url": "https://h.example.com/skills",
+            "event_types": ["skill_promote.requested"],
+        },
+    )
+    assert resp.status_code == 201
+    assert resp.json()["event_types"] == ["skill_promote.requested"]
+
+
+@pytest.mark.asyncio
 async def test_duplicate_name_conflicts(client: AsyncClient) -> None:
     await _create(client, name="dup")
     resp = await client.post(
