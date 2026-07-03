@@ -36,6 +36,10 @@ WebhookEventType = Literal[
     "run.failed",
     "approval.requested",
     "artifact.saved",
+    # SE-16 PR-8 — a pending skill visibility-promote request awaits review
+    # (agent_private → tenant). Lets business systems route the approval to
+    # their own channels; the delivery channel backlog is tracked separately.
+    "skill_promote.requested",
 ]
 
 #: Where an endpoint row came from — the CRUD API (default) or, in a

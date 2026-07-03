@@ -42,6 +42,7 @@ from helix_agent.common.observability import helix_counter
 from helix_agent.persistence import (
     ApprovalStore,
     ArtifactStore,
+    SkillStore,
     ThreadMetaStore,
     WebhookDeliveryStore,
     WebhookEndpointStore,
@@ -140,6 +141,7 @@ class WebhookDeliveryWorker:
         approval_store: ApprovalStore,
         artifact_store: ArtifactStore,
         thread_meta_store: ThreadMetaStore,
+        skill_store: SkillStore | None = None,
         interval_s: int = 15,
         batch_size: int = _BATCH_SIZE,
         max_attempts: int = _MAX_ATTEMPTS,
@@ -165,6 +167,9 @@ class WebhookDeliveryWorker:
         self._approvals = approval_store
         self._artifacts = artifact_store
         self._threads = thread_meta_store
+        # SE-16 PR-8 — pending skill-promote requests fan out as
+        # ``skill_promote.requested``; ``None`` disables (legacy assemblies).
+        self._skills = skill_store
         self._scan_limit = scan_limit
         self._interval_s = interval_s
         self._batch_size = batch_size
@@ -289,6 +294,34 @@ class WebhookDeliveryWorker:
                 },
                 now=now,
             )
+
+        # skill_promote.requested — pending visibility-promote requests
+        # awaiting review (SE-16 PR-8). No thread/run context — the request
+        # carries the proposing agent, so per-agent endpoints still match.
+        if self._skills is not None:
+            with _bypass_rls():
+                promotes, _cursor = await self._skills.list_promote_requests_all_tenants(
+                    status="pending", limit=self._scan_limit
+                )
+            for req in promotes:
+                if not by_tenant.get(req.tenant_id):
+                    continue
+                enqueued += await self._fan_out(
+                    by_tenant[req.tenant_id],
+                    tenant_id=req.tenant_id,
+                    event_type="skill_promote.requested",
+                    event_id=f"skill_promote:{req.id}",
+                    run_id=None,
+                    agent_name=req.requested_by_agent_name,
+                    payload={
+                        "request_id": str(req.id),
+                        "skill_id": str(req.skill_id),
+                        "skill_version": req.skill_version,
+                        "requested_by_agent_name": req.requested_by_agent_name,
+                        "reason": req.reason,
+                    },
+                    now=now,
+                )
 
         # artifact.saved — one event per (artifact, latest version). The
         # parent row has no thread, so only all-agents endpoints match.
