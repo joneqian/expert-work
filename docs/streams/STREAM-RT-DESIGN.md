@@ -36,12 +36,13 @@ LLM router 层加 structured output 能力:JSON Schema 声明 → 请求侧按 p
 
 **现状勘误(2026-07-03,实施前核实)**:L2 `ContextCompressor` 已存在(`services/orchestrator/src/orchestrator/context/compressor.py`,PR #206)——preflight 阈值触发、head/tail 保留、中段 LLM 摘要成 `<context-summary>` SystemMessage、max_passes 上限。对标矩阵 2.1 给 helix 1 分**偏低,实为 ~2**(首轮探索漏扫 `orchestrator/context/`);ITERATION-PLAN M2-C 的"summarization 已在 L2 完成"表述**正确,不需修正**。RT-2 范围据此收敛:不是从零建 summarization,而是 **L2 深化 + [deer-flow alignment tracker](../decisions/deer-flow-context-mgmt-alignment.md) M2-C 必锁条款中真缺的部分**。
 
+> **[2026-07-03 PR-0 修正]** 本段为立项时的初版范围,PR-0 取证复核后已被 **§8 整体替代**——ID-swap/异步队列判定为不需要(RT-ADR-8)、skill rescue 三预算被上游 #3887 废弃改引用式(RT-ADR-7)、新增最高优先项 adapter 兼容核证(RT-ADR-5)。**以 §8 为准,本段仅留档**。
+
 真缺清单(对照 7 条必锁):skill rescue 三预算、before_summarization hook(压缩前 memory flush)、ID-swap + `<system-reminder>` HumanMessage 注入(hide_from_ui)、memory 注入 2k 硬上限、memory 异步队列对齐、压缩可观测(COMPACTION 事件类型 + event_store 落账 + 前端渲染)。已有:触发阈值(L2 threshold_pct)、摘要+保留策略(L2 head/tail)。
 
 - 架构决策点(PR-0 拍板):L2 是 graph 内 preflight(agent_node 入口),deer-flow 是 middleware——深化在 L2 原位做,还是迁 `before_llm_call` middleware 链与 13 个既有中间件统一?
 - **PR-0 设计必须先按 deer-flow 新版复核 tracker**(上游 6 月后已修 ID-swap 递归注入 #3746、durable context #3887、SystemMessage 合并 #3711——直接抄坑)+ 顺带在对标报告 2.1 行加勘误脚注
-- PR-1 skill rescue + before_summarization hook → PR-2 ID-swap + system-reminder + 2k 上限 + 异步队列对齐 → PR-3 COMPACTION 事件(EventType + event_store + API)→ PR-4 **前端:`run_detail/EventStreamPanel.tsx` EVENT_COLOR + 摘要卡片、`ToolTimeline.tsx`、hide_from_ui 过滤、i18n** → PR-5 live E2E(★5:长对话真跑,压缩触发→关键事实留存断言,挂 `tools/eval/`)
-- 验证:关键事实留存率断言;prefix cache 命中率不劣化(ID-swap 目的);LoCoMo 段回归不掉分;M2-A"小时级 session 加固"未完成项与本项集成点在 PR-0 说明
+- 验证:关键事实留存率断言;prefix cache 命中率不劣化;LoCoMo 段回归不掉分;M2-A"小时级 session 加固"未完成项与本项集成点在 PR-0 说明
 
 ### RT-3 prompt cache 成本工程(W2)
 
