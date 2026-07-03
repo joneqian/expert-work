@@ -352,3 +352,37 @@ async def test_hx1_drift_counter_failure_never_bubbles() -> None:
     tenant_id = uuid4()
     # Must not raise — same never-fail contract as the G.9 counters.
     await mw(_usage_ctx(tenant_id, prompt=[HumanMessage(content="abcd")]), _noop)
+
+
+@pytest.mark.asyncio
+async def test_usage_kind_defaults_conversation_and_overrides() -> None:
+    """SE-16 (SE-A43) — the persisted row carries the build's usage kind."""
+    store = InMemoryTokenUsageStore()
+    tenant_id = uuid4()
+
+    def _ctx() -> MiddlewareContext:
+        return MiddlewareContext(
+            payload={
+                "tenant_id": tenant_id,
+                "response": AIMessage(
+                    content="ok",
+                    usage_metadata={"input_tokens": 5, "output_tokens": 1, "total_tokens": 6},
+                ),
+            }
+        )
+
+    default_mw = TokenUsageMiddleware(
+        store=store, agent_name="kind-test", agent_version="1", model="m"
+    )
+    await default_mw(_ctx(), _noop)
+    replay_mw = TokenUsageMiddleware(
+        store=store,
+        agent_name="kind-test",
+        agent_version="1",
+        model="m",
+        usage_kind="skill_evolution",
+    )
+    await replay_mw(_ctx(), _noop)
+
+    kinds = [r.usage_kind for r in await store.list_for_tenant(tenant_id=tenant_id)]
+    assert sorted(kinds) == ["conversation", "skill_evolution"]

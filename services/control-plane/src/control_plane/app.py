@@ -1520,6 +1520,9 @@ def create_app(
                     # SE-16 (SE-A45) — sampled quality screen over implicit
                     # candidates (candidate purification, not promotion).
                     judge_sample_pct=_skill_evolution_judge_sample_pct,
+                    # SE-16 (SE-A43) — aux spend (distil/judge/screen) writes
+                    # real token_usage rows (usage_kind='skill_evolution').
+                    token_usage_store=resolved_token_usage,
                     # SE-16 (SE-A39) — 👎 trajectories (+ comments) join the
                     # contrastive failure side of distillation.
                     feedback_store=resolved_feedback,

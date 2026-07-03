@@ -120,10 +120,17 @@ class AgentBuilder(Protocol):
     tenancy still conform."""
 
     async def __call__(
-        self, spec: AgentSpec, *, tenant_id: UUID | None = None, user_id: str | None = None
+        self,
+        spec: AgentSpec,
+        *,
+        tenant_id: UUID | None = None,
+        user_id: str | None = None,
+        token_usage_kind: str = "conversation",  # noqa: S107 — usage label, not a secret
     ) -> BuiltAgent:
         """Build the agent for ``spec``; ``tenant_id`` selects the per-tenant ToolEnv,
-        ``user_id`` (= ``principal.subject_id``) the per-user OAuth MCP pool (OA-3b)."""
+        ``user_id`` (= ``principal.subject_id``) the per-user OAuth MCP pool (OA-3b).
+        ``token_usage_kind`` (SE-A43) labels this build's LLM spend in
+        ``token_usage`` — the evolution replay path passes ``skill_evolution``."""
 
 
 logger = logging.getLogger(__name__)
@@ -568,7 +575,11 @@ def make_agent_builder(
     """
 
     async def _build(
-        spec: AgentSpec, *, tenant_id: UUID | None = None, user_id: str | None = None
+        spec: AgentSpec,
+        *,
+        tenant_id: UUID | None = None,
+        user_id: str | None = None,
+        token_usage_kind: str = "conversation",  # noqa: S107 — usage label, not a secret
     ) -> BuiltAgent:
         # Stream Agent-Templates (M1-3) — resolve template inheritance FIRST so all
         # downstream gates see the merged, floored spec. A fork manifest declares
@@ -687,6 +698,7 @@ def make_agent_builder(
             spec,
             secret_store=secret_store,
             checkpointer=checkpointer,
+            token_usage_kind=token_usage_kind,
             tool_env=build_tool_env,
             middleware_env=middleware_env,
             memory_env=memory_env,

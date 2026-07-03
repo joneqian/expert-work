@@ -60,6 +60,10 @@ const TOKENS: UsageTokens = {
   by_model: [
     { key: "claude-sonnet-4", input_tokens: 1_614_500, output_tokens: 440_100, cache_creation_tokens: 40_000, cache_read_tokens: 980_000 },
   ],
+  by_kind: [
+    { key: "conversation", input_tokens: 1_474_500, output_tokens: 400_100, cache_creation_tokens: 40_000, cache_read_tokens: 980_000 },
+    { key: "skill_evolution", input_tokens: 140_000, output_tokens: 40_000, cache_creation_tokens: 0, cache_read_tokens: 0 },
+  ],
 };
 
 function makeJwt(payload: Record<string, unknown>): string {
@@ -131,7 +135,7 @@ export const Empty: Story = {
   decorators: [
     withFixture(
       { ...COST, total_billed_cost_micros: 0, groups: [] },
-      { ...TOKENS, total: { input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 }, by_agent: [], by_model: [] },
+      { ...TOKENS, total: { input_tokens: 0, output_tokens: 0, cache_creation_tokens: 0, cache_read_tokens: 0 }, by_agent: [], by_model: [], by_kind: [] },
     ),
   ],
 };

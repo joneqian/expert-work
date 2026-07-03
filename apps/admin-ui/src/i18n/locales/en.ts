@@ -2023,6 +2023,10 @@ export interface TranslationKeys {
     col_billed: string;
     unpriced: string;
     tokens_heading: string;
+    kind_heading: string;
+    col_kind: string;
+    kind_conversation: string;
+    kind_skill_evolution: string;
     realtime: string;
     realtime_note: string;
     empty: string;
@@ -4367,6 +4371,10 @@ const en: TranslationKeys = {
     col_billed: "Billed cost",
     unpriced: "Unpriced",
     tokens_heading: "Token usage",
+    kind_heading: "By purpose",
+    col_kind: "Purpose",
+    kind_conversation: "Conversation",
+    kind_skill_evolution: "Skill evolution",
     realtime: "Realtime",
     realtime_note:
       "Live current-month counters; billed cost above lags by up to an hour.",

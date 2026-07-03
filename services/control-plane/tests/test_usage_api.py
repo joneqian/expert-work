@@ -258,3 +258,30 @@ async def test_usage_requires_auth(ctx: _Ctx) -> None:
     assert unauth.status_code in (401, 403)
     unauth_tokens = await ctx.client.get("/v1/usage/tokens")
     assert unauth_tokens.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_tokens_by_kind_split_and_filter(ctx: _Ctx) -> None:
+    """SE-16 (SE-A43) — evolution spend is separable from conversation."""
+    for kind, inp in (("conversation", 10), ("skill_evolution", 40)):
+        await ctx.usage.insert(
+            TokenUsageRecord(
+                tenant_id=ctx.tenant_id,
+                agent_name="a1",
+                agent_version="1",
+                model="m1",
+                usage_kind=kind,
+                input_tokens=inp,
+                output_tokens=1,
+            )
+        )
+    data = (await ctx.client.get("/v1/usage/tokens", headers=ctx.headers)).json()["data"]
+    by_kind = {g["key"]: g for g in data["by_kind"]}
+    assert by_kind["conversation"]["input_tokens"] == 10
+    assert by_kind["skill_evolution"]["input_tokens"] == 40
+
+    filtered = (
+        await ctx.client.get("/v1/usage/tokens?kind=skill_evolution", headers=ctx.headers)
+    ).json()["data"]
+    assert filtered["total"]["input_tokens"] == 40
+    assert {g["key"] for g in filtered["by_kind"]} == {"skill_evolution"}

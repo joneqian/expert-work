@@ -160,6 +160,42 @@ export function SettingsUsage() {
     [t],
   );
 
+  const kindColumns: TableColumnsType<TokenGroup> = useMemo(
+    () => [
+      {
+        title: t("usage.col_kind"),
+        dataIndex: "key",
+        key: "key",
+        render: (key: string) => (
+          <Tag color={key === "skill_evolution" ? "purple" : "default"}>
+            {key === "skill_evolution"
+              ? t("usage.kind_skill_evolution")
+              : key === "conversation"
+                ? t("usage.kind_conversation")
+                : key}
+          </Tag>
+        ),
+      },
+      {
+        title: t("usage.col_input_tokens"),
+        dataIndex: "input_tokens",
+        key: "input_tokens",
+        width: 140,
+        align: "right",
+        render: (v: number) => v.toLocaleString(),
+      },
+      {
+        title: t("usage.col_output_tokens"),
+        dataIndex: "output_tokens",
+        key: "output_tokens",
+        width: 140,
+        align: "right",
+        render: (v: number) => v.toLocaleString(),
+      },
+    ],
+    [t],
+  );
+
   return (
     <div data-testid="usage-root">
       <PageHeader
@@ -289,7 +325,23 @@ export function SettingsUsage() {
             rowKey={(r) => r.key}
             pagination={false}
             locale={{ emptyText: t("usage.empty") }}
+            style={{ marginBottom: 24 }}
             data-testid="usage-token-table"
+          />
+
+          {/* SE-16 (SE-A43) — evolution spend separable from conversation. */}
+          <div style={{ marginBottom: 8 }}>
+            <Text strong style={{ fontSize: 14 }}>
+              {t("usage.kind_heading")}
+            </Text>
+          </div>
+          <Table<TokenGroup>
+            columns={kindColumns}
+            dataSource={tokens?.by_kind ?? []}
+            rowKey={(r) => r.key}
+            pagination={false}
+            locale={{ emptyText: t("usage.empty") }}
+            data-testid="usage-token-kind-table"
           />
         </>
       )}

@@ -16,6 +16,7 @@ test against real Postgres with a stub invoker.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -24,7 +25,7 @@ from uuid import UUID, uuid4
 
 from langchain_core.runnables import RunnableConfig
 
-from control_plane.memory_consolidator import ConsolidatorAuxModel
+from control_plane.memory_consolidator import ConsolidatorAuxModel, ConsolidatorLLMReply
 from control_plane.skill_attribution import FailureSignal, SkillAttributor
 from control_plane.skill_distiller import SkillDistiller, SkillDraft, render_trajectory, tools_used
 from control_plane.skill_evolution import EvolutionConfig, ReplayOutcome
@@ -35,6 +36,10 @@ from control_plane.skill_evolution_assembly import (
     select_signal_tier,
 )
 from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
+from control_plane.skill_evolution_metering import (
+    EVOLUTION_USAGE_KIND,
+    current_metering,
+)
 from control_plane.skill_evolution_processor import EvolutionProcessor, SkillEvidence
 from control_plane.skill_evolution_worker import (
     ScreenDecision,
@@ -46,6 +51,7 @@ from helix_agent.persistence import CurationCandidateStore, SkillStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.curation import EvalDatasetStore
 from helix_agent.persistence.feedback_store import FeedbackStore
+from helix_agent.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
 from helix_agent.protocol import AgentSpecStatus, CurationCandidateRecord, EvalDatasetRecord
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.evolution.graph_runner import GraphReplayTaskRunner
@@ -58,6 +64,8 @@ from orchestrator.trajectory import TrajectoryReader
 
 __all__ = ["build_evolution_worker"]
 
+logger = logging.getLogger("helix.control_plane.skill_evolution_wiring")
+
 # How many trajectories / golden cases to pull into one replay set.
 _MAX_SUCCESS_EVIDENCE = 4
 _MAX_FAILURE_EVIDENCE = 4
@@ -69,30 +77,81 @@ _EXPECTED_KEYS = ("answer", "expected", "output", "result", "text", "content")
 class _AuxText:
     """Adapts a :class:`ConsolidatorAuxModel` to the ``(prompt) -> str`` seam."""
 
-    def __init__(self, aux: ConsolidatorAuxModel, *, default_model: str | None = None) -> None:
+    def __init__(
+        self,
+        aux: ConsolidatorAuxModel,
+        *,
+        default_model: str | None = None,
+        usage_store: TokenUsageStore | None = None,
+    ) -> None:
         self._aux = aux
         self._default_model = default_model
+        self._usage_store = usage_store
 
     async def __call__(self, *, prompt: str, tenant_id: UUID, model: str | None = None) -> str:
         reply = await self._aux(
             prompt=prompt, model=model or self._default_model, tenant_id=tenant_id
         )
+        await _record_aux_usage(self._usage_store, reply)
         return reply.text
 
 
 class _AuxJudge:
     """A pointwise replay judge backed by the aux LLM (control-plane local)."""
 
-    def __init__(self, aux: ConsolidatorAuxModel, *, model: str | None = None) -> None:
+    def __init__(
+        self,
+        aux: ConsolidatorAuxModel,
+        *,
+        model: str | None = None,
+        usage_store: TokenUsageStore | None = None,
+    ) -> None:
         self._aux = aux
         self._model = model
+        self._usage_store = usage_store
 
     async def score(self, *, case_id: str, prompt: str) -> int:
-        reply = await self._aux(prompt=prompt, model=self._model, tenant_id=_NULL_TENANT)
+        # SE-A43 — bill the judge to the candidate under evolution (the
+        # worker's metering scope). The null placeholder survives only for
+        # legacy assemblies that score outside a candidate scope.
+        ctx = current_metering()
+        tenant_id = ctx.tenant_id if ctx is not None else _NULL_TENANT
+        reply = await self._aux(prompt=prompt, model=self._model, tenant_id=tenant_id)
+        await _record_aux_usage(self._usage_store, reply)
         return _parse_score(reply.text)
 
 
 _NULL_TENANT = UUID(int=0)
+
+
+async def _record_aux_usage(store: TokenUsageStore | None, reply: ConsolidatorLLMReply) -> None:
+    """SE-A43 — one ``token_usage`` row per evolution aux call.
+
+    Attribution comes from the worker's per-candidate metering scope; a
+    call outside a scope (or with no store wired) records nothing. Same
+    never-fail contract as the run-path middleware: metering must not
+    break distillation.
+    """
+    if store is None:
+        return
+    ctx = current_metering()
+    if ctx is None:
+        return
+    try:
+        await store.insert(
+            TokenUsageRecord(
+                tenant_id=ctx.tenant_id,
+                agent_name=ctx.agent_name,
+                agent_version=ctx.agent_version,
+                model=reply.model,
+                usage_kind=EVOLUTION_USAGE_KIND,
+                trace_id=ctx.trace_id,
+                input_tokens=reply.input_tokens,
+                output_tokens=reply.output_tokens,
+            )
+        )
+    except Exception:
+        logger.warning("skill_evolution.aux_usage_persist_failed", exc_info=True)
 
 
 def _parse_score(text: str) -> int:
@@ -367,7 +426,14 @@ class _GraphReplayInvoker:
         user = str(candidate.user_id) if candidate.user_id else None
 
         async def build(spec: Any) -> Any:
-            return await self.agent_builder(spec, tenant_id=candidate.tenant_id, user_id=user)
+            # SE-A43 — replay builds label their LLM spend ``skill_evolution``
+            # so with/without replay never pollutes conversation cost.
+            return await self.agent_builder(
+                spec,
+                tenant_id=candidate.tenant_id,
+                user_id=user,
+                token_usage_kind="skill_evolution",  # noqa: S106 — usage label
+            )
 
         task_runner = GraphReplayTaskRunner.from_candidate(
             base,
@@ -431,6 +497,7 @@ def build_evolution_worker(
     tenant_gate: TenantGate | None = None,
     feedback_store: FeedbackStore | None = None,
     judge_sample_pct: Callable[[UUID], Awaitable[int]] | None = None,
+    token_usage_store: TokenUsageStore | None = None,
 ) -> SkillEvolutionWorker:
     """Assemble the production skill-evolution worker (lifespan wiring).
 
@@ -443,7 +510,7 @@ def build_evolution_worker(
     on the same ``{tenant}:{agent}`` scope, tripping the auto-promote channel
     (SE-A12). When ``None`` the worker owns a private breaker.
     """
-    aux_text = _AuxText(aux_model, default_model=aux_default_model)
+    aux_text = _AuxText(aux_model, default_model=aux_default_model, usage_store=token_usage_store)
     gate = PromotionGate(
         skill_store=skill_store,
         rate_limiter=RateLimiter(max_per_window=max_promotes_per_hour, window=timedelta(hours=1)),
@@ -464,7 +531,7 @@ def build_evolution_worker(
         replay_invoker=_GraphReplayInvoker(
             agent_spec_store=agent_spec_store,
             agent_builder=agent_builder,
-            judge=_AuxJudge(aux_model, model=aux_default_model),
+            judge=_AuxJudge(aux_model, model=aux_default_model, usage_store=token_usage_store),
             skill_store=skill_store,
         ),
         config=EvolutionConfig(max_rounds=max_rounds),

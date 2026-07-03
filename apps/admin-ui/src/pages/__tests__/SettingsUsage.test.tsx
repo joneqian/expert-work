@@ -67,6 +67,10 @@ const TOKENS = {
   by_model: [
     { key: "claude-sonnet", input_tokens: 1200, output_tokens: 600, cache_creation_tokens: 10, cache_read_tokens: 20 },
   ],
+  by_kind: [
+    { key: "conversation", input_tokens: 900, output_tokens: 450, cache_creation_tokens: 10, cache_read_tokens: 20 },
+    { key: "skill_evolution", input_tokens: 300, output_tokens: 150, cache_creation_tokens: 0, cache_read_tokens: 0 },
+  ],
 };
 
 interface Captured {
@@ -187,5 +191,16 @@ describe("SettingsUsage page", () => {
       });
     renderUsage();
     await waitFor(() => expect(screen.getByTestId("usage-error")).toBeInTheDocument());
+  });
+});
+
+describe("usage kind split (SE-A43)", () => {
+  it("renders the by-purpose table with evolution spend separable", async () => {
+    installAdapter({});
+    renderUsage();
+    const kindTable = await screen.findByTestId("usage-token-kind-table");
+    expect(within(kindTable).getByText(/技能自进化|Skill evolution/)).toBeInTheDocument();
+    expect(within(kindTable).getByText("300")).toBeInTheDocument();
+    expect(within(kindTable).getByText(/对话|Conversation/)).toBeInTheDocument();
   });
 });

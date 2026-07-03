@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.skill_evolution import EvolutionResult, TransientEvolutionError
+from control_plane.skill_evolution_metering import current_metering
 from control_plane.skill_evolution_worker import ScreenDecision, SkillEvolutionWorker
 from helix_agent.persistence.curation.memory import InMemoryCurationCandidateStore
 from helix_agent.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
@@ -412,3 +413,23 @@ async def test_screen_transient_fault_requeues_instead_of_burning() -> None:
     assert row.evolved_at is None
     assert row.retry_count == 1
     assert proc.seen == []
+
+
+async def test_processor_runs_inside_metering_scope() -> None:
+    """SE-A43 — aux calls made while processing a candidate can attribute
+    their spend: the worker enters the metering scope per candidate."""
+    tenant = uuid4()
+    store = InMemoryCurationCandidateStore()
+    await _seed(store, [_candidate(signal="positive_feedback", tenant=tenant)])
+    seen: list[UUID | None] = []
+
+    async def proc(candidate: CurationCandidateRecord) -> EvolutionResult:
+        ctx = current_metering()
+        seen.append(ctx.tenant_id if ctx is not None else None)
+        return _result("grounded")
+
+    worker = SkillEvolutionWorker(candidate_store=store, processor=proc, interval_s=60)
+    await worker.run_once()
+
+    assert seen == [tenant]
+    assert current_metering() is None
