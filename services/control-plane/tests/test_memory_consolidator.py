@@ -411,3 +411,44 @@ async def test_flagged_noise_item_is_soft_deleted() -> None:
 
     assert summary.purged == 1
     assert store._rows[0].deleted_at is not None
+
+
+@pytest.mark.asyncio
+async def test_aux_calls_write_token_usage_rows() -> None:
+    """Chargeback — every consolidator aux call lands one token_usage row
+    with usage_kind='memory_consolidation' and tenant/user attribution
+    (the other half of the SE-A43 aux-metering gap)."""
+    from helix_agent.persistence.token_usage_store import InMemoryTokenUsageStore
+
+    usage_store = InMemoryTokenUsageStore()
+    store = InMemoryMemoryStore()
+    audit_logger, _ = _build_logger()
+    config_service = TenantConfigService(
+        store=InMemoryTenantConfigStore(),
+        audit_logger=audit_logger,
+    )
+    worker = MemoryConsolidator(
+        memory_store=store,
+        tenant_config_service=config_service,
+        audit_logger=audit_logger,
+        aux_model=_ScriptedAuxModel(
+            ['{"keep": true, "summary": "user prefers dark mode", "reject_reason": null}']
+        ),
+        embedder=_FakeEmbedder(),
+        interval_s=60.0,
+        usage_store=usage_store,
+    )
+    await _seed_tenant_config(config_service)
+    _seed_transient(store, contents=["dark UI", "dark mode preference", "wants dark theme"])
+
+    summary = await worker.run_once()
+    assert summary.consolidated == 1
+
+    rows = usage_store.rows if hasattr(usage_store, "rows") else usage_store._rows
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.usage_kind == "memory_consolidation"
+    assert row.tenant_id == _TENANT
+    assert row.user_id == _USER
+    assert row.agent_name == "memory-consolidator"
+    assert row.input_tokens >= 0

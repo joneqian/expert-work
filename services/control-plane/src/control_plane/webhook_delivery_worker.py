@@ -113,6 +113,52 @@ def _backoff_seconds(next_attempt: int) -> int:
     return _BACKOFF_SCHEDULE[min(next_attempt - 1, len(_BACKOFF_SCHEDULE) - 1)]
 
 
+#: Human-facing titles for the IM bot rendering — one per WebhookEventType.
+#: A type missing here still renders (falls back to the raw event name), so
+#: adding an event type without a title never breaks delivery.
+_EVENT_TITLES: dict[str, str] = {
+    "run.completed": "运行完成",
+    "run.failed": "运行失败",
+    "approval.requested": "审批待处理",
+    "artifact.saved": "产物已保存",
+    "skill_promote.requested": "技能晋升申请待审",
+}
+
+
+def _im_text(row: WebhookDeliveryRecord) -> str:
+    """Render one delivery as a plain-text IM bot message.
+
+    Generic across event types: a Chinese title line (falling back to the
+    raw event type) followed by the payload's scalar fields one per line —
+    good enough for a human to act on, with the delivery id for tracing.
+    """
+    title = _EVENT_TITLES.get(row.event_type, row.event_type)
+    lines = [f"【Helix】{title}"]
+    for key, value in sorted((row.payload or {}).items()):
+        if value is None or isinstance(value, dict | list):
+            continue
+        lines.append(f"{key}: {value}")
+    lines.append(f"event: {row.event_type}")
+    lines.append(f"delivery: {row.id}")
+    return "\n".join(lines)
+
+
+def render_channel_body(payload_format: str, row: WebhookDeliveryRecord, envelope: bytes) -> bytes:
+    """Shape the delivery body for the endpoint's channel.
+
+    ``generic`` returns the signed helix envelope unchanged; the IM formats
+    wrap :func:`_im_text` in each platform's incoming-webhook text-message
+    schema. Unknown formats fall back to ``generic`` (never block delivery).
+    """
+    if payload_format == "feishu":
+        body: dict[str, object] = {"msg_type": "text", "content": {"text": _im_text(row)}}
+    elif payload_format in ("dingtalk", "wecom"):
+        body = {"msgtype": "text", "text": {"content": _im_text(row)}}
+    else:
+        return envelope
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+
+
 @contextlib.contextmanager
 def _bypass_rls() -> Iterator[None]:
     token = bypass_rls_var.set(True)
@@ -467,7 +513,10 @@ class WebhookDeliveryWorker:
                 row, WebhookDeliveryStatus.DEAD_LETTER, now=now, error="signing secret missing"
             )
 
-        body = self._envelope_bytes(row)
+        # Channel formats — an IM endpoint gets a bot message instead of the
+        # envelope. The HMAC signs whatever body is actually sent (IM
+        # platforms ignore the extra headers).
+        body = render_channel_body(endpoint.payload_format, row, self._envelope_bytes(row))
         headers = {
             "Content-Type": "application/json",
             _SIGNATURE_HEADER: "sha256=" + hmac.new(secret.encode(), body, sha256).hexdigest(),

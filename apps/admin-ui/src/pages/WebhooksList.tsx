@@ -31,6 +31,7 @@ import { useTranslation } from "react-i18next";
 
 import {
   WEBHOOK_EVENT_TYPES,
+  WEBHOOK_PAYLOAD_FORMATS,
   createWebhookEndpoint,
   deleteWebhookEndpoint,
   listWebhookEndpoints,
@@ -40,6 +41,7 @@ import {
   type WebhookEndpointCreateResponse,
   type WebhookEndpointList,
   type WebhookEventType,
+  type WebhookPayloadFormat,
 } from "../api/webhooks";
 import { ApiError } from "../api/client";
 import { useTenantScope } from "../tenant/TenantScopeContext";
@@ -52,6 +54,7 @@ interface CreateForm {
   url: string;
   event_types: WebhookEventType[];
   agent_name?: string;
+  payload_format?: WebhookPayloadFormat;
 }
 
 export function WebhooksList() {
@@ -129,6 +132,7 @@ export function WebhooksList() {
       url: values.url,
       event_types: values.event_types,
       agent_name: values.agent_name?.trim() ? values.agent_name.trim() : null,
+      payload_format: values.payload_format ?? "generic",
     };
     setCreateSubmitting(true);
     try {
@@ -198,6 +202,20 @@ export function WebhooksList() {
       width: 140,
       render: (name: string | null) =>
         name ? <Text>{name}</Text> : <Text type="secondary">{t("webhooks.all_agents")}</Text>,
+    },
+    {
+      title: t("webhooks.col_format"),
+      dataIndex: "payload_format",
+      key: "payload_format",
+      width: 110,
+      render: (fmt: WebhookPayloadFormat) =>
+        fmt === "generic" ? (
+          <Text type="secondary">{t("webhooks.format_generic")}</Text>
+        ) : (
+          <Tag color="cyan" style={{ fontSize: 11 }}>
+            {t(`webhooks.format_${fmt}`)}
+          </Tag>
+        ),
     },
     {
       title: t("webhooks.col_enabled"),
@@ -344,6 +362,20 @@ export function WebhooksList() {
             extra={t("webhooks.agent_name_hint")}
           >
             <Input data-testid="webhook-agent-name-input" placeholder={t("webhooks.all_agents")} />
+          </Form.Item>
+          <Form.Item
+            name="payload_format"
+            label={t("webhooks.field_payload_format")}
+            extra={t("webhooks.payload_format_hint")}
+            initialValue="generic"
+          >
+            <Select
+              data-testid="webhook-payload-format-select"
+              options={WEBHOOK_PAYLOAD_FORMATS.map((f) => ({
+                label: t(`webhooks.format_${f}`),
+                value: f,
+              }))}
+            />
           </Form.Item>
         </Form>
       </Drawer>

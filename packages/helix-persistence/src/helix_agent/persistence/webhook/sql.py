@@ -19,6 +19,7 @@ from helix_agent.protocol import (
     WebhookEndpointRecord,
     WebhookEndpointSource,
     WebhookEventType,
+    WebhookPayloadFormat,
 )
 
 
@@ -34,6 +35,7 @@ def _endpoint_row_to_dto(row: WebhookEndpointRow) -> WebhookEndpointRecord:
         secret_ref=row.secret_ref,
         enabled=row.enabled,
         source=cast(WebhookEndpointSource, row.source),
+        payload_format=cast(WebhookPayloadFormat, row.payload_format or "generic"),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
@@ -59,6 +61,7 @@ class SqlWebhookEndpointStore(WebhookEndpointStore):
                     secret_ref=record.secret_ref,
                     enabled=record.enabled,
                     source=record.source,
+                    payload_format=record.payload_format,
                     created_at=record.created_at,
                     updated_at=record.updated_at,
                 )
@@ -136,6 +139,7 @@ class SqlWebhookEndpointStore(WebhookEndpointStore):
                     secret_ref=record.secret_ref,
                     enabled=record.enabled,
                     source=record.source,
+                    payload_format=record.payload_format,
                     updated_at=record.updated_at,
                 )
             )

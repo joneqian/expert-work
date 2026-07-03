@@ -1460,6 +1460,10 @@ def create_app(
                     default_aux_model_name=(
                         resolved_settings.memory_consolidator_default_aux_model
                     ),
+                    # Chargeback — consolidator aux spend lands in token_usage
+                    # (usage_kind='memory_consolidation'), same as SE-A43 did
+                    # for the evolution aux path.
+                    usage_store=resolved_token_usage,
                 )
                 memory_consolidator.start()
                 _app.state.memory_consolidator = memory_consolidator

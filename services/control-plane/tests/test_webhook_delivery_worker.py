@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID, uuid4
@@ -72,6 +73,7 @@ async def _seed(
     endpoint_enabled: bool = True,
     status: WebhookDeliveryStatus = WebhookDeliveryStatus.PENDING,
     attempt: int = 0,
+    payload_format: str = "generic",
 ) -> tuple[
     InMemoryWebhookEndpointStore,
     InMemoryWebhookDeliveryStore,
@@ -96,6 +98,7 @@ async def _seed(
         secret_ref=ref,
         enabled=endpoint_enabled,
         source="api",
+        payload_format=payload_format,  # type: ignore[arg-type]
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -418,3 +421,60 @@ async def test_no_skill_store_disables_promote_scan() -> None:
     worker, _deliveries, _request_id = await _promote_fixture()
     worker._skills = None  # legacy assembly shape
     assert await worker.enqueue_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_feishu_endpoint_gets_bot_message() -> None:
+    """Channel formats — a feishu endpoint receives the platform's text-bot
+    schema (not the helix envelope), and the HMAC signs the actual body."""
+    import hashlib
+    import hmac as hmac_mod
+
+    endpoints, deliveries, secrets_store, _, _ = await _seed(payload_format="feishu")
+    post = _RecordingPost(status=200)
+    worker = _worker(endpoints, deliveries, secrets_store, post)
+
+    await worker.run_once()
+
+    (_, body, headers) = post.calls[0]
+    parsed = json.loads(body)
+    assert parsed["msg_type"] == "text"
+    text = parsed["content"]["text"]
+    assert text.startswith("【Helix】运行完成")
+    assert "run_id: abc" in text
+    expected = "sha256=" + hmac_mod.new(_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    assert headers["X-Helix-Signature-256"] == expected
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_and_wecom_share_msgtype_shape() -> None:
+    for fmt in ("dingtalk", "wecom"):
+        endpoints, deliveries, secrets_store, _, _ = await _seed(payload_format=fmt)
+        post = _RecordingPost(status=200)
+        worker = _worker(endpoints, deliveries, secrets_store, post)
+
+        await worker.run_once()
+
+        parsed = json.loads(post.calls[0][1])
+        assert parsed["msgtype"] == "text", fmt
+        assert "【Helix】" in parsed["text"]["content"], fmt
+
+
+def test_render_channel_body_unknown_format_falls_back_to_envelope() -> None:
+    from control_plane.webhook_delivery_worker import render_channel_body
+
+    row = WebhookDeliveryRecord(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        endpoint_id=uuid4(),
+        event_id="run:x",
+        event_type="run.completed",
+        payload={"a": 1},
+        status=WebhookDeliveryStatus.PENDING,
+        attempt=0,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    envelope = b'{"canonical":true}'
+    assert render_channel_body("someday-slack", row, envelope) == envelope
+    assert render_channel_body("generic", row, envelope) == envelope

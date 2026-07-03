@@ -167,12 +167,18 @@ export function SettingsUsage() {
         dataIndex: "key",
         key: "key",
         render: (key: string) => (
-          <Tag color={key === "skill_evolution" ? "purple" : "default"}>
+          <Tag
+            color={
+              key === "skill_evolution" ? "purple" : key === "memory_consolidation" ? "cyan" : "default"
+            }
+          >
             {key === "skill_evolution"
               ? t("usage.kind_skill_evolution")
-              : key === "conversation"
-                ? t("usage.kind_conversation")
-                : key}
+              : key === "memory_consolidation"
+                ? t("usage.kind_memory_consolidation")
+                : key === "conversation"
+                  ? t("usage.kind_conversation")
+                  : key}
           </Tag>
         ),
       },

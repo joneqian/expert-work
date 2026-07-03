@@ -52,6 +52,7 @@ from helix_agent.common.uplift_metrics import (
     record_memory_purged,
     record_memory_reviewed_durable,
 )
+from helix_agent.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
 from helix_agent.protocol import AuditAction, AuditResult, MemoryItem
 from helix_agent.runtime.audit.logger import AuditLogger
 
@@ -397,6 +398,7 @@ class MemoryConsolidator:
         interval_s: float = _DEFAULT_INTERVAL_S,
         default_aux_model_name: str = "claude-sonnet-4-6",
         actor_id: str = "memory_consolidator",
+        usage_store: TokenUsageStore | None = None,
     ) -> None:
         if interval_s <= 0:
             msg = "interval_s must be positive"
@@ -406,6 +408,10 @@ class MemoryConsolidator:
         self._audit = audit_logger
         self._aux = aux_model
         self._embedder = embedder
+        # Chargeback (same gap as SE-A43's aux metering, other half): every
+        # consolidator aux call writes a token_usage row so per-tenant cost
+        # views include memory-consolidation spend. ``None`` records nothing.
+        self._usage_store = usage_store
         self._interval_s = interval_s
         self._default_model = default_aux_model_name
         self._actor_id = actor_id
@@ -655,6 +661,35 @@ class MemoryConsolidator:
             seen.update(n.id for n in fresh)
         return clusters
 
+    async def _record_aux_usage(
+        self, reply: ConsolidatorLLMReply, *, tenant_id: UUID, user_id: UUID
+    ) -> None:
+        """One ``token_usage`` row per consolidator aux call (never-fail).
+
+        ``usage_kind='memory_consolidation'`` keeps this spend out of every
+        agent's conversation cost while chargeback still sees it. The
+        consolidator serves the tenant, not one agent — the fixed
+        ``agent_name`` makes the rows self-describing in per-kind views.
+        """
+        if self._usage_store is None:
+            return
+        try:
+            await self._usage_store.insert(
+                TokenUsageRecord(
+                    tenant_id=tenant_id,
+                    agent_name="memory-consolidator",
+                    agent_version="-",
+                    model=reply.model or self._default_model,
+                    user_id=user_id,
+                    usage_kind="memory_consolidation",
+                    trace_id=current_trace_id_hex(),
+                    input_tokens=reply.input_tokens,
+                    output_tokens=reply.output_tokens,
+                )
+            )
+        except Exception:
+            logger.warning("memory_consolidator.aux_usage_persist_failed", exc_info=True)
+
     async def _consolidate_or_reject(
         self,
         *,
@@ -670,6 +705,7 @@ class MemoryConsolidator:
             input_tokens=reply.input_tokens,
             output_tokens=reply.output_tokens,
         )
+        await self._record_aux_usage(reply, tenant_id=tenant_id, user_id=user_id)
         verdict = _parse_cluster_reply(reply.text)
         if verdict is None:
             # Malformed reply — treat as false_cluster and skip
@@ -734,6 +770,7 @@ class MemoryConsolidator:
             input_tokens=reply.input_tokens,
             output_tokens=reply.output_tokens,
         )
+        await self._record_aux_usage(reply, tenant_id=tenant_id, user_id=user_id)
         verdict = _parse_single_reply(reply.text)
         if verdict is None:
             # Malformed — treat conservatively as "keep + mark reviewed

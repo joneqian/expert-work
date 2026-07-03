@@ -34,7 +34,12 @@ from control_plane.tenant_scope import (
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
 from helix_agent.persistence import WebhookEndpointStore
-from helix_agent.protocol import AuditAction, WebhookEndpointRecord, WebhookEventType
+from helix_agent.protocol import (
+    AuditAction,
+    WebhookEndpointRecord,
+    WebhookEventType,
+    WebhookPayloadFormat,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.secret_store import SecretStore
 
@@ -66,6 +71,7 @@ def _endpoint_dict(record: WebhookEndpointRecord, *, secret: str | None = None) 
         "agent_name": record.agent_name,
         "enabled": record.enabled,
         "source": record.source,
+        "payload_format": record.payload_format,
         "created_at": record.created_at.isoformat(),
         "updated_at": record.updated_at.isoformat(),
     }
@@ -103,6 +109,7 @@ class _CreateBody(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     event_types: list[str] = Field(min_length=1)
     agent_name: str | None = None
+    payload_format: WebhookPayloadFormat = "generic"
 
 
 class _PatchBody(BaseModel):
@@ -114,6 +121,7 @@ class _PatchBody(BaseModel):
     event_types: list[str] | None = None
     agent_name: str | None = None
     enabled: bool | None = None
+    payload_format: WebhookPayloadFormat | None = None
 
 
 def _get_store(request: Request) -> WebhookEndpointStore:
@@ -180,6 +188,7 @@ def build_webhook_endpoints_router() -> APIRouter:
             secret_ref=secret_ref,
             enabled=True,
             source="api",
+            payload_format=body.payload_format,
             created_at=now,
             updated_at=now,
         )
@@ -272,6 +281,11 @@ def build_webhook_endpoints_router() -> APIRouter:
                 "event_types": new_event_types,
                 "agent_name": body.agent_name if body.agent_name is not None else record.agent_name,
                 "enabled": body.enabled if body.enabled is not None else record.enabled,
+                "payload_format": (
+                    body.payload_format
+                    if body.payload_format is not None
+                    else record.payload_format
+                ),
                 "updated_at": datetime.now(UTC),
             }
         )
