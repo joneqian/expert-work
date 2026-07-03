@@ -130,6 +130,22 @@ class ExtractedMemory:
     confidence: float = 0.5
 
 
+#: Stream RT-2 PR-2 (review HIGH) — ceiling for extraction-scored confidence.
+#: ``confidence == 1.0`` is the M-4 correction API's EXCLUSIVE sentinel
+#: (user-asserted truth — the control-plane correction endpoint is its only
+#: writer), and the injection budget's correction guarantee keys on it
+#: (``builder._render_memory_lines``). The extraction prompt encourages high
+#: confidence and ``_clamp_score`` pins >=1 replies to exactly 1.0, so
+#: without this cap an ordinary extracted memory could impersonate a
+#: correction and eat the guaranteed slice — squeezing a real user
+#: correction out under a tight budget. Historical limitation: rows written
+#: before this cap may already carry an extracted 1.0 that cannot be told
+#: apart from a real M-4 correction (no provenance column); the skew only
+#: matters under tight budgets and decays as new writes land, so no
+#: migration (the source is indistinguishable after the fact).
+_MAX_EXTRACTED_CONFIDENCE = 0.99
+
+
 def _clamp_score(value: object) -> float:
     """Parse a model-supplied score into [0, 1], falling back to 0.5 (neutral)
     on anything non-numeric or out of range-ish."""
@@ -147,7 +163,9 @@ def parse_extracted_memories(text: str) -> list[ExtractedMemory]:
 
     Tolerant — any malformed reply yields ``[]`` (write-back is
     best-effort). Duplicate contents within the batch are dropped. A missing
-    or invalid ``importance`` / ``confidence`` defaults to 0.5 (neutral).
+    or invalid ``importance`` / ``confidence`` defaults to 0.5 (neutral);
+    ``confidence`` is additionally capped at ``_MAX_EXTRACTED_CONFIDENCE``
+    (0.99) — 1.0 is the M-4 correction API's exclusive sentinel.
     """
     raw = _extract_json_object(text)
     if raw is None:
@@ -171,7 +189,9 @@ def parse_extracted_memories(text: str) -> list[ExtractedMemory]:
                     kind=cast(Literal["fact", "episodic"], kind),
                     content=content,
                     importance=_clamp_score(row.get("importance")),
-                    confidence=_clamp_score(row.get("confidence")),
+                    # Capped below the M-4 sentinel — see
+                    # ``_MAX_EXTRACTED_CONFIDENCE`` above.
+                    confidence=min(_MAX_EXTRACTED_CONFIDENCE, _clamp_score(row.get("confidence"))),
                 )
             )
     return out

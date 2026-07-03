@@ -399,6 +399,41 @@ class LongTermMemorySpec(BaseModel):
         default=True,
         description="verify recalled memories against the request before injecting them",
     )
+    # Stream RT-2 PR-2 (RT-ADR-10) — injection token budget. The recall path
+    # caps COUNT only (``retrieve_top_k``), so a single oversized memory could
+    # blow up the injected block (STREAM-RT §8.1). The injection renderer
+    # accumulates items greedily in rank order (post rerank/MMR) and stops at
+    # this budget; the boundary item is truncated with a visible marker.
+    # Default 2000 — ``retrieve_top_k=5`` ordinary memories sit far below it,
+    # so the budget only bites on oversized items.
+    injection_token_budget: int = Field(
+        default=2000,
+        ge=100,
+        le=100_000,
+        description="token budget for the injected recalled-memory block",
+    )
+    # Stream RT-2 PR-2 — guaranteed slice for user-corrected memories.
+    # ``MemoryItem.kind`` has no correction value ({"fact", "episodic"});
+    # CONTRACT: ``confidence == 1.0`` is the M-4 correction API's EXCLUSIVE
+    # sentinel (user-asserted truth) and therefore the correction class here.
+    # The extraction write path caps its LLM-scored confidence at 0.99 so an
+    # ordinary memory can never impersonate a correction — contract sites:
+    # the control-plane correction endpoint (the sentinel's only writer),
+    # ``MemoryStore.update_content`` and orchestrator
+    # ``memory._MAX_EXTRACTED_CONFIDENCE``. Historical limitation: rows
+    # written before that cap may carry an extracted 1.0 indistinguishable
+    # from a real correction (no provenance column) — the skew is confined to
+    # tight-budget injections and decays as new writes land; no migration.
+    # Correction items get first claim on up to this many tokens of the
+    # injection budget so ordinary memories can never squeeze a user's
+    # explicit correction out (deer-flow guaranteed_categories shape).
+    # 0 disables the guarantee.
+    correction_token_budget: int = Field(
+        default=500,
+        ge=0,
+        le=100_000,
+        description="guaranteed token slice for user-corrected (confidence=1.0) memories",
+    )
 
 
 class MemorySpec(BaseModel):

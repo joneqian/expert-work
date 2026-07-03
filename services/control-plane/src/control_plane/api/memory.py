@@ -387,6 +387,11 @@ def build_memory_router() -> APIRouter:
             ) from exc
 
         # A user correction asserts the rewrite as truth → confidence 1.0.
+        # CONTRACT (RT-2 PR-2): 1.0 is this endpoint's EXCLUSIVE sentinel —
+        # the memory injection budget's correction guarantee keys on
+        # ``confidence >= 1.0`` and the extraction write path caps its
+        # LLM-scored confidence at 0.99 (orchestrator
+        # ``memory._MAX_EXTRACTED_CONFIDENCE``); no other caller may write 1.0.
         updated = await store.update_content(
             tenant_id=tenant_id,
             user_id=user_id,

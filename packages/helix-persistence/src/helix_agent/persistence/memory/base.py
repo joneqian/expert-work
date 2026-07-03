@@ -129,7 +129,11 @@ class MemoryStore(abc.ABC):
         soft-deleted.
 
         Stream Memory-Enhance (M-4) — ``confidence`` (when given) overwrites the
-        row's confidence; the user-correction endpoint sets it to 1.0."""
+        row's confidence; the user-correction endpoint sets it to 1.0.
+        CONTRACT (RT-2 PR-2): 1.0 is that endpoint's EXCLUSIVE sentinel — the
+        injection budget's correction guarantee keys on ``confidence >= 1.0``
+        and the extraction write path caps at 0.99 (orchestrator
+        ``memory._MAX_EXTRACTED_CONFIDENCE``); no other caller may write 1.0."""
 
     @abc.abstractmethod
     async def soft_delete(

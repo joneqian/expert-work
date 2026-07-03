@@ -853,6 +853,16 @@ async def build_agent(
     # node itself is absent (the parameter is then inert).
     long_term = spec.spec.memory.long_term if spec.spec.memory is not None else None
     memory_recall_mode = long_term.recall_mode if long_term is not None else "per_session"
+    # Stream RT-2 PR-2 (RT-ADR-10) — injection token budget + correction
+    # guarantee slice. Manifests without ``long_term`` keep the protocol
+    # defaults; the parameters are then inert (no recall node → no
+    # ``recalled_memories`` on state).
+    memory_injection_token_budget = (
+        long_term.injection_token_budget if long_term is not None else 2000
+    )
+    memory_correction_token_budget = (
+        long_term.correction_token_budget if long_term is not None else 500
+    )
 
     # Stream CM-0 — turn-end DB→/workspace state projection. Scoped to the
     # per-user persistent-workspace form (the projection target) with a wired
@@ -895,6 +905,11 @@ async def build_agent(
         approval_required_tools=frozenset(spec.spec.policies.approval_required_tools),
         approval_timeout_s=spec.spec.policies.approval_timeout_s,
         memory_recall_mode=memory_recall_mode,
+        # Stream RT-2 PR-2 (RT-ADR-10) — memory injection budget, riding the
+        # same shared estimator the compressor uses (HX-A1 single truth source).
+        memory_injection_token_budget=memory_injection_token_budget,
+        memory_correction_token_budget=memory_correction_token_budget,
+        token_estimator=estimator,
         spotlight_nonce=spotlight_nonce,
         # Stream PI-2 — output screening backstop for inline injection.
         output_screen=spec.spec.defenses.output_screen == "block",
