@@ -1679,6 +1679,7 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ### Wave 1（并行）
 - [ ] **RT-1 结构化输出强制**（~1 周，4 PR）：router 层 JSON Schema 声明→按 provider 能力选径（response_format/tool-call 强制/prompt+校验）→校验+有界重试；内部链路迁移（judge/consolidator/evolution 删手工 parse）；Tier3 暴露 output_schema + manifest 编辑器提示
+  - [x] **PR-0 细设计定稿**（本 PR，设计 §7）：现状取证（provider 层零 response_format 代码；全仓 9 处手工 JSON parse 点清单）+ RT-ADR-1~4（校验重试独立于 E.4 failover 绝不轮 key/三级降级链能力声明在适配器/迁移不改失败语义/Tier3 仅约束收尾回复）+ PR-1~3 切分
 - [ ] **RT-2 compaction 深水区补齐**（~2 周，6 PR，★5 需 live E2E）：L2 之上补 alignment tracker 真缺条款——skill rescue/before_summarization hook/ID-swap+system-reminder/memory 注入 2k 上限/异步队列对齐/COMPACTION 事件+前端渲染；PR-0 先按 deer-flow 新版复核 tracker（上游已修 #3746/#3887/#3711）
 
 ### Wave 2（并行，W1 收完启动）
