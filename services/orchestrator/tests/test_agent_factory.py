@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from typing import Any
 
@@ -663,6 +664,41 @@ async def test_build_agent_long_term_memory_adds_both_nodes() -> None:
         )
     assert "memory_recall" in built.graph.nodes
     assert "memory_writeback" in built.graph.nodes
+
+
+@pytest.mark.asyncio
+async def test_build_agent_floors_head_keep_when_per_session_memory(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """RT-2 PR-4 (§8.4) — per_session recall + ``head_keep=0`` → the factory
+    floors ``head_keep`` to 1 (with a warning) so the ``messages[1]``
+    cache-anchor block survives compression."""
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["memory"] = {"long_term": {}}  # recall_mode defaults per_session
+    doc["spec"]["policies"] = {"context_compression": {"head_keep": 0}}
+    spec = AgentSpec.model_validate(doc)
+    with caplog.at_level(logging.WARNING, logger="helix.orchestrator.agent_factory"):
+        async with make_checkpointer("memory") as cp:
+            await _build(
+                spec, secret_store=_secret_store(), checkpointer=cp, memory_env=_memory_env()
+            )
+    assert "head_keep_floored" in caplog.text
+    assert "floored=1" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_build_agent_keeps_head_keep_zero_without_per_session_memory(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``head_keep=0`` with no per_session recall is a valid config — not
+    floored, no warning (no anchor present to protect)."""
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["policies"] = {"context_compression": {"head_keep": 0}}
+    spec = AgentSpec.model_validate(doc)
+    with caplog.at_level(logging.WARNING, logger="helix.orchestrator.agent_factory"):
+        async with make_checkpointer("memory") as cp:
+            await _build(spec, secret_store=_secret_store(), checkpointer=cp)
+    assert "head_keep_floored" not in caplog.text
 
 
 @pytest.mark.asyncio

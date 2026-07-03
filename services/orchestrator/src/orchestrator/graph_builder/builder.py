@@ -104,7 +104,9 @@ from helix_agent.runtime.middleware import (
 )
 from helix_agent.runtime.tokens import CharTokenEstimator, TokenEstimator
 from orchestrator.context import (
+    CompactionStats,
     ContextCompressor,
+    OnCompacted,
     PreCompactionHook,
     ProjectionResult,
     ToolResultPruner,
@@ -118,7 +120,11 @@ from orchestrator.graph_builder._approval import (
     build_approval_request,
     find_approval_target,
 )
-from orchestrator.graph_builder._config import audit_logger_from_config, cancellation_token
+from orchestrator.graph_builder._config import (
+    audit_logger_from_config,
+    cancellation_token,
+    compaction_sink_from_config,
+)
 from orchestrator.graph_builder.memory import MemoryNode, PreCompactionFlush
 from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
@@ -640,6 +646,31 @@ def build_react_graph(
                     _cm_precompaction_flush_memories.set(written)
 
                 on_pre_compaction = _on_pre_compaction
+            # RT-2 PR-4 — surface a COMPACTION event when a summary actually
+            # lands. The sink (bridge publish + durable mirror) is injected by
+            # ``sse.run_agent`` via config; the compressor stays SSE-agnostic,
+            # handing back :class:`CompactionStats` through this best-effort
+            # hook. Swallow non-cancel failures here (same contract as the
+            # flush hook) so an observability hiccup never fails the run.
+            on_compacted: OnCompacted | None = None
+            compaction_sink = compaction_sink_from_config(config)
+            if compaction_sink is not None:
+                sink = compaction_sink
+
+                async def _on_compacted(stats: CompactionStats) -> None:
+                    try:
+                        await sink(
+                            {
+                                "passes": stats.passes,
+                                "tokens_before": stats.tokens_before,
+                                "tokens_after": stats.tokens_after,
+                                "summary_chars": stats.summary_chars,
+                            }
+                        )
+                    except Exception:
+                        logger.warning("agent.compaction_event_failed", exc_info=True)
+
+                on_compacted = _on_compacted
             # RT-ADR-6 — scope the consecutive-failure streak to this
             # conversation: the compressor instance is cached per
             # (tenant, agent, version) and shared across every thread /
@@ -648,6 +679,7 @@ def build_react_graph(
             messages = await context_compressor.compress(
                 messages,
                 on_pre_compaction=on_pre_compaction,
+                on_compacted=on_compacted,
                 streak_key=str(compress_thread_id) if compress_thread_id else None,
             )
             # Stream HX-12 (Mini-ADR HX-I5) — promotion demotion rides the
@@ -1515,8 +1547,22 @@ def _build_recovery_advisory(failures: list[ClassifiedToolError]) -> HumanMessag
     blindly. Lives as a HumanMessage (not SystemMessage) so the L1
     prompt-cache prefix invariant — ``system`` is build-once /
     replay-verbatim — stays intact.
+
+    RT-2 PR-4 (RT-ADR-9) — this advisory is orchestrator-authored guidance
+    that IS persisted into ``state["messages"]`` (so the next agent step
+    sees it), unlike the plan / per_session-memory injections which ride
+    the prompt view only. Being a ``type=human`` message in the checkpoint,
+    it would otherwise surface as a spurious USER bubble in the conversation
+    detail (the known CM-1 leak). ``helix_hide_from_ui`` marks it so the UI
+    bubble view (``control_plane.transcript.read_turns`` with
+    ``include_hidden=False``) filters it, while the durable record + the
+    search/audit mirror stay faithful (RT-ADR-9, Option A) and it still
+    reaches the model.
     """
-    return HumanMessage(content=render_recovery_advisory(failures))
+    return HumanMessage(
+        content=render_recovery_advisory(failures),
+        additional_kwargs={"helix_hide_from_ui": True},
+    )
 
 
 def _should_continue(state: AgentState) -> Literal["tools", "__end__"]:

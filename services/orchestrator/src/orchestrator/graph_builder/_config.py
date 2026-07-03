@@ -6,6 +6,8 @@ module so neither node module has to import the other (no import cycle).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
@@ -17,6 +19,16 @@ from helix_agent.runtime.cancellation import CANCELLATION_TOKEN_KEY, Cancellatio
 #: ``config["configurable"]`` (a live object, like the cancellation token —
 #: not checkpoint-serialisable, injected per-invocation by ``sse.run_agent``).
 AUDIT_LOGGER_KEY = "audit_logger"
+
+#: Stream RT-2 PR-4 — key under which the run's COMPACTION event sink travels in
+#: ``config["configurable"]``. A live async callback (like the audit logger)
+#: that publishes + persists a ``"compaction"`` SSE frame; injected per-run by
+#: ``sse.run_agent`` (which owns the bridge / event store), so ``agent_node``
+#: can surface a compaction without importing the SSE layer.
+COMPACTION_SINK_KEY = "compaction_event_sink"
+
+#: The compaction sink's shape — awaited with the event payload dict.
+CompactionEventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 def configurable_uuid(config: RunnableConfig, key: str) -> UUID | None:
@@ -74,4 +86,21 @@ def audit_logger_from_config(config: RunnableConfig) -> AuditLogger | None:
     logger = configurable.get(AUDIT_LOGGER_KEY)
     if isinstance(logger, AuditLogger):
         return logger
+    return None
+
+
+def compaction_sink_from_config(config: RunnableConfig) -> CompactionEventSink | None:
+    """Lift the run's COMPACTION event sink out of ``config`` (RT-2 PR-4).
+
+    Travels via ``config["configurable"]`` like the audit logger — a live
+    async callback injected by ``sse.run_agent``. ``None`` when absent (dev /
+    unit-test path, or a driver that wires no bridge); the caller then simply
+    does not surface a compaction event.
+    """
+    configurable = config.get("configurable") or {}
+    sink = configurable.get(COMPACTION_SINK_KEY)
+    if callable(sink):
+        # ``callable()`` can't narrow to the parametrised Callable alias, so
+        # cast the confirmed-callable sink to its declared shape.
+        return cast(CompactionEventSink, sink)
     return None

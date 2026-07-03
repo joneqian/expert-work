@@ -270,6 +270,75 @@ async def test_thread_messages_reads_durable_checkpoint_directly() -> None:
         ]
 
 
+@pytest.mark.asyncio
+async def test_thread_messages_self_read_hides_scaffolding_but_record_keeps_it() -> None:
+    """RT-2 PR-4 (RT-ADR-9), Option A — the same-tenant UI bubble view drops
+    orchestrator scaffolding tagged ``helix_hide_from_ui`` (the CM-1
+    ``<recovery-advisory>``), so it never renders as a user turn. The durable
+    checkpoint still holds it (the endpoint reads with ``include_hidden=False``
+    only for the bubble view; the search/audit mirror + cross-tenant audit
+    drill-in read faithfully) — verified here by asserting the checkpoint row
+    survives while the rendered transcript omits it."""
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    run_store = InMemoryRunStore()
+    checkpointer = InMemorySaver()
+    runtime = stub_agent_runtime(run_store=run_store)
+    runtime.durable_checkpointer = checkpointer
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        jwt_verifier=build_test_jwt_verifier(),
+        agent_runtime=runtime,
+        run_repo=run_store,
+    )
+    transport = ASGITransport(app=app)
+    headers = {"Authorization": f"Bearer {make_test_jwt(tenant_id=_DEFAULT_TENANT)}"}
+    async with AsyncClient(
+        transport=transport, base_url="http://control-plane.test", headers=headers
+    ) as client:
+        await client.post("/v1/agents", json={"manifest_yaml": _AGENT_YAML})
+        thread_id = await _create_session(client)
+
+        await _seed_thread_messages(
+            checkpointer,
+            thread_id,
+            [
+                HumanMessage(content="今天几号"),
+                HumanMessage(
+                    content="<recovery-advisory>internal</recovery-advisory>",
+                    additional_kwargs={"helix_hide_from_ui": True},
+                ),
+                AIMessage(content="今天是 2026年6月30日"),
+            ],
+        )
+
+        # UI bubble view (same-tenant self-read) omits the scaffolding turn.
+        response = await client.get(f"/v1/sessions/{thread_id}/messages")
+        assert response.status_code == 200
+        assert response.json()["data"]["messages"] == [
+            {"role": "user", "content": "今天几号"},
+            {"role": "assistant", "content": "今天是 2026年6月30日"},
+        ]
+
+        # ...but the faithful record still carries it — the mirror/audit read
+        # (``include_hidden=True``, the default) sees all three turns.
+        from control_plane.transcript import read_turns
+
+        faithful = await read_turns(checkpointer, UUID(thread_id))
+        assert [t.content for t in faithful] == [
+            "今天几号",
+            "<recovery-advisory>internal</recovery-advisory>",
+            "今天是 2026年6月30日",
+        ]
+
+
 # ---------------------------------------------------------------------------
 # happy path
 # ---------------------------------------------------------------------------

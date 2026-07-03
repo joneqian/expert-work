@@ -222,7 +222,7 @@ belt+suspenders:lookup 侧命中先 `validate_structured_output`,不合规忽略
 - **RT-ADR-6 summariser 失败语义修订**:L-2 绝对 fail-hard(摘要 LLM 一次失败 = run 失败)修订为——transient 失败**跳过本轮压缩** + metric + 下轮重试(吸收 #3887);连续 N=3 轮失败或 middle 为空仍超限,保留 ContextOverflowError fail-hard 兜底(保诊断性,不静默丢内容)
 - **RT-ADR-7 skill rescue 走引用+重读,不做三预算**:CM-12 pruner / L2 compressor 处理 `ToolMessage(name="skill_view")` 时,stub 保留 `skill_name + path + "可用 skill_view 重读"`(artifact 字段现成,O(1) token);upstream #3887 已实证三预算全文保留是弃案
 - **RT-ADR-8 不做 ID-swap、不改同步 flush**:helix prompt-view-only(注入不进 checkpoint)无 ID-swap 需求;CM-3 摘要前同步 flush 丢失窗口为零,优于 deer-flow 异步队列,是架构分歧非缺陷。补的是 #3746 揭示的组合风险:**注入块×压缩组合测试**(cache-anchor HumanMessage 依赖 head_keep=4 覆盖——head/tail 参数变更时必须有测试拦截)
-- **RT-ADR-9 hide_from_ui 标记机制**:`additional_kwargs["helix_hide_from_ui"]` + `transcript.py:48` 过滤豁免;顺修 CM-1 recovery-advisory 用户气泡泄漏(现存 bug)
+- **RT-ADR-9 hide_from_ui 标记机制(Option A,deer-flow 验证)**:`additional_kwargs["helix_hide_from_ui"]` 标记 orchestrator 脚手架(CM-1 `<recovery-advisory>`)。**过滤只在 UI 服务边界,记录层永远忠实**——`read_turns(include_hidden=True)` 为安全默认(mirror sweep + 跨租户审计下钻拿完整记录,新持久/审计调用方忘传也不会静默丢审计),仅 UI 气泡视图(同租户自读)传 `include_hidden=False` 过滤。**绝不在 mirror sweep / 搜索层过滤**(那是审计+全文搜索源,#880-892)。参考:deer-flow `thread_runs.py:209-220` 在 gateway router UI 读路径判 `hide_from_ui`,checkpoint 原始读全部忠实;`journal.py:205` 仅语义用途(别把注入 advisory 误当用户首条消息记标题),持久/搜索层零过滤。顺修 CM-1 recovery-advisory 用户气泡泄漏(现存 bug)
 - **RT-ADR-10 摘要 prompt 预算硬化**:`_format_middle_for_summary` 加 per-message 截断 + 总预算硬上限(fresh/update 双模各半分,抄 #3887 `_bound_text` 头 2/3+尾兜底);memory 注入加 token 预算(默认 2000,可配)+ correction 类保底(`MemoryItem.kind` 现成)
 
 ### 8.3 PR 切分(替代 §3 RT-2 原切分,依取证修正)
@@ -238,7 +238,7 @@ belt+suspenders:lookup 侧命中先 `validate_structured_output`,不合规忽略
 
 ID-swap 三元组(无需求,见 RT-ADR-8)、memory 异步队列化(同步 flush 更优)、多触发器 OR(threshold_pct 单触发够用,需求出现再议)、摘要写回 checkpoint(prompt-view-only 是优势)。
 
-> **跟进注记(PR-2 组合测试发现,RT-ADR-8)**:`head_keep=0`(协议 `ge=0` 允许)会把 per_session 注入在 messages[1] 的 cache-anchor 记忆块划进 middle 概括掉——cache anchor 与记忆指导静默全失。现状已由 `test_memory_injection_compression_combo.py` 边界测试锁死(只锁不修);保护方案(per_session recall 激活时 head_keep 下限 1)归 **RT-2 PR-4 或 stream 收尾时拍板**。
+> **跟进注记(PR-2 组合测试发现,RT-ADR-8;PR-4 已落地)**:`head_keep=0`(协议 `ge=0` 允许)会把 per_session 注入在 messages[1] 的 cache-anchor 记忆块划进 middle 概括掉——cache anchor 与记忆指导静默全失。**拍板 = 运行期 floor(不 reject 合法配置)**:`orchestrator.context.floor_head_keep_for_injection` 在 `agent_factory` 构造 compressor 时,当 `memory.long_term` 存在且 `recall_mode=per_session` 且 `head_keep<1` 时把 `head_keep` 抬到 1(warning 日志),否则原样透传(非 memory agent 的 `head_keep=0` 不被 brick)。compressor 本身不知道 anchor,修在构造层。组合测试从「只锁现状」改为「保护生效」(floored 值保 block + 直接 `head_keep=0` 无 floor 仍丢块,证修在构造层)。
 
 ### 8.5 tracker 同步
 

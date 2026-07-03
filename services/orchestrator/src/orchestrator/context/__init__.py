@@ -12,16 +12,25 @@ losing the conversation's salient points. See
 """
 
 from orchestrator.context.compressor import (
+    CompactionStats as CompactionStats,
+)
+from orchestrator.context.compressor import (
     ContextCompressor as ContextCompressor,
 )
 from orchestrator.context.compressor import (
     ContextOverflowError as ContextOverflowError,
 )
 from orchestrator.context.compressor import (
+    OnCompacted as OnCompacted,
+)
+from orchestrator.context.compressor import (
     PreCompactionHook as PreCompactionHook,
 )
 from orchestrator.context.compressor import (
     estimate_tokens as estimate_tokens,
+)
+from orchestrator.context.compressor import (
+    floor_head_keep_for_injection as floor_head_keep_for_injection,
 )
 from orchestrator.context.tool_result_prune import (
     PruneResult as PruneResult,
@@ -70,8 +79,10 @@ from orchestrator.context.workspace_projection import (
 )
 
 __all__ = [
+    "CompactionStats",
     "ContextCompressor",
     "ContextOverflowError",
+    "OnCompacted",
     "PreCompactionHook",
     "ProjectionResult",
     "PruneResult",
@@ -83,6 +94,7 @@ __all__ = [
     "WorkspaceIngester",
     "WorkspaceProjector",
     "estimate_tokens",
+    "floor_head_keep_for_injection",
     "parse_plan_md",
     "prune_old_tool_results",
     "render_memory_md",

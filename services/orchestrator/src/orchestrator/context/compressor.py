@@ -94,12 +94,53 @@ _cm_compressor_skipped_total = helix_counter(
     "helix_cm_compressor_skipped_total",
     "Compression rounds skipped after a transient summariser failure (RT-ADR-6).",
 )
+# Stream RT-2 PR-4 — compaction magnitude. The pass/skip counters say WHEN
+# compaction fires; this counter says HOW MUCH it reclaims (summed estimated
+# tokens the middle-summarisation removed from the prompt), so a dashboard can
+# quantify the context/cost savings across all runs. A histogram would be the
+# natural shape, but ``helix_histogram`` requires the ``_seconds`` suffix
+# (duration-only by contract), so a monotonic counter of tokens saved is the
+# name-rule-compatible choice.
+_cm_compressor_tokens_saved_total = helix_counter(
+    "helix_cm_compressor_tokens_saved_total",
+    "Estimated prompt tokens reclaimed by middle-summarisation (Stream RT-2).",
+)
 
 #: Stream CM-3 — pre-compaction hook. Awaited with the middle slice that is
 #: about to be summarised away, *before* it is discarded, so an upper layer
 #: can flush its salient points to durable storage (long-term memory). The
 #: compressor stays pure — it owns no store/embedder; the hook is injected.
 PreCompactionHook = Callable[[Sequence[BaseMessage]], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class CompactionStats:
+    """Stream RT-2 PR-4 — one compaction's observable summary.
+
+    Handed to the :data:`OnCompacted` hook once per :meth:`compress` call
+    that actually produced a summary (a skip-only round or an
+    already-under-threshold entry emits nothing). ``tokens_before`` /
+    ``tokens_after`` are the compressor's own estimate (chars//4 or the
+    injected tiktoken estimator) at entry and final return, so the
+    reclaimed amount is ``max(0, tokens_before - tokens_after)``.
+    ``passes`` is the number of summarise-the-middle passes that ran;
+    ``summary_chars`` is the length of the final ``<context-summary>``
+    block.
+    """
+
+    passes: int
+    tokens_before: int
+    tokens_after: int
+    summary_chars: int
+
+
+#: Stream RT-2 PR-4 — compaction observability hook. Awaited once per
+#: :meth:`ContextCompressor.compress` call that produced a summary, with the
+#: run's :class:`CompactionStats`. Symmetric to :data:`PreCompactionHook`:
+#: the compressor stays free of any SSE/bridge dependency — the caller
+#: (``agent_node``) injects a hook that publishes the COMPACTION event and
+#: swallows its own non-cancellation failures (best-effort by contract).
+OnCompacted = Callable[["CompactionStats"], Awaitable[None]]
 
 
 #: Stream L.L2 — chars-per-token rule of thumb. The summariser prompt
@@ -369,6 +410,42 @@ def _role_label(msg: BaseMessage) -> str:
     return type(msg).__name__
 
 
+def _summary_chars(messages: Sequence[BaseMessage]) -> int:
+    """Length of the ``<context-summary>`` block in ``messages`` (0 if none).
+
+    Stream RT-2 PR-4 — a compressed message list carries exactly one
+    ``<context-summary>`` SystemMessage (the last pass's running summary);
+    its char length is a cheap proxy for how much the middle was condensed
+    into, surfaced in the COMPACTION event payload.
+    """
+    for msg in reversed(messages):
+        if (
+            isinstance(msg, SystemMessage)
+            and isinstance(msg.content, str)
+            and msg.content.startswith(_SUMMARY_TAG_OPEN)
+        ):
+            return len(msg.content)
+    return 0
+
+
+def floor_head_keep_for_injection(head_keep: int, *, per_session_memory_active: bool) -> int:
+    """Stream RT-2 PR-4 (§8.4) — floor ``head_keep`` to 1 when per_session
+    memory injection is active.
+
+    per_session recall (Mini-ADR U-8) lands the cache-anchor + memory
+    guidance block at ``messages[1]``; ``head_keep=0`` would let
+    :func:`_split` fold that block into the summarised middle, silently
+    dropping both the Anthropic cache anchor and the recalled memories
+    (the risk RT-ADR-8's combo test pinned). ``head_keep=0`` stays legit
+    for agents WITHOUT per_session injection — this only raises the floor
+    when the anchor is actually present, so a valid non-memory config is
+    never bricked.
+    """
+    if per_session_memory_active and head_keep < 1:
+        return 1
+    return head_keep
+
+
 @dataclass
 class _FailureStreaks:
     """RT-ADR-6 — per-conversation consecutive-failure counters.
@@ -456,6 +533,7 @@ class ContextCompressor:
         messages: Sequence[BaseMessage],
         *,
         on_pre_compaction: PreCompactionHook | None = None,
+        on_compacted: OnCompacted | None = None,
         streak_key: str | None = None,
     ) -> list[BaseMessage]:
         """Compress the message list until it fits under the threshold.
@@ -496,8 +574,16 @@ class ContextCompressor:
         is best-effort by contract: the caller must swallow its own
         non-cancellation failures; a :class:`RunCancelledError` raised by
         the hook propagates out and aborts the run.
+
+        Stream RT-2 PR-4 — ``on_compacted`` (when supplied) is awaited ONCE
+        per call that actually produced a summary, with the run's
+        :class:`CompactionStats` (a skip-only round or an entry already
+        under threshold emits nothing). Best-effort by the same contract as
+        ``on_pre_compaction``: the caller swallows its own failures.
         """
         current: list[BaseMessage] = list(messages)
+        tokens_before = self._estimate(current)
+        passes_done = 0
         for pass_idx in range(self.max_passes):
             if self._estimate(current) < self.threshold_tokens:
                 if pass_idx > 0:
@@ -506,7 +592,9 @@ class ContextCompressor:
                         pass_idx,
                         self._estimate(current),
                     )
-                return current
+                return await self._finish_compaction(
+                    current, tokens_before, passes_done, on_compacted
+                )
             try:
                 current = await self._compress_once(current, on_pre_compaction=on_pre_compaction)
             except ContextOverflowError:
@@ -544,17 +632,53 @@ class ContextCompressor:
                     self.threshold_tokens,
                     exc,
                 )
-                return current
+                # A prior pass this call may already have produced a summary
+                # (passes_done > 0) — fire the hook for what did land before
+                # this round's transient skip; passes_done == 0 emits nothing.
+                return await self._finish_compaction(
+                    current, tokens_before, passes_done, on_compacted
+                )
             if streak_key:
                 self._summary_failures.clear(streak_key)
             _cm_compressor_pass_total.inc()
+            passes_done += 1
         if self._estimate(current) >= self.threshold_tokens:
             raise ContextOverflowError(
                 estimated_tokens=self._estimate(current),
                 threshold=self.threshold_tokens,
                 passes=self.max_passes,
             )
-        return current
+        return await self._finish_compaction(current, tokens_before, passes_done, on_compacted)
+
+    async def _finish_compaction(
+        self,
+        result: list[BaseMessage],
+        tokens_before: int,
+        passes_done: int,
+        on_compacted: OnCompacted | None,
+    ) -> list[BaseMessage]:
+        """Stream RT-2 PR-4 — fire the tokens-saved counter + ``on_compacted``
+        hook once, only when at least one pass produced a summary.
+
+        Called from every non-raising exit of :meth:`compress` so the
+        magnitude counter and the COMPACTION event fire exactly once per
+        call (not per pass); ``passes_done == 0`` (skip-only / already under
+        threshold) is a no-op.
+        """
+        if passes_done <= 0:
+            return result
+        tokens_after = self._estimate(result)
+        _cm_compressor_tokens_saved_total.inc(max(0, tokens_before - tokens_after))
+        if on_compacted is not None:
+            await on_compacted(
+                CompactionStats(
+                    passes=passes_done,
+                    tokens_before=tokens_before,
+                    tokens_after=tokens_after,
+                    summary_chars=_summary_chars(result),
+                )
+            )
+        return result
 
     async def _compress_once(
         self,

@@ -60,6 +60,7 @@ from helix_agent.protocol import (
     AuditAction,
     AuditEntry,
     AuditResult,
+    EventType,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.cancellation import (
@@ -80,7 +81,7 @@ from helix_agent.runtime.stream_bridge import (
     StreamBridge,
 )
 from orchestrator.errors import MaxStepsExceededError
-from orchestrator.graph_builder._config import AUDIT_LOGGER_KEY
+from orchestrator.graph_builder._config import AUDIT_LOGGER_KEY, COMPACTION_SINK_KEY
 from orchestrator.run_retry import (
     MAX_RUN_RETRIES,
     is_transient_run_error,
@@ -340,6 +341,31 @@ async def run_agent(
     event_seq = 0
     if event_store is not None and getattr(record, "is_resume", False):
         event_seq = await event_store.next_seq(run_id=run_id)
+
+    # Stream RT-2 PR-4 — COMPACTION event sink. ``agent_node`` fires this when
+    # the context compressor produces a summary; publishing lives here (the
+    # driver owns the bridge + event store), so the graph layer stays
+    # SSE-agnostic. The frame is a free-string ``"compaction"`` event
+    # (``EventType.COMPACTION`` names it in the canonical taxonomy) mirrored to
+    # the durable store on the same monotonic ``event_seq`` as every other
+    # frame; it runs inside the node's turn, before the ``updates`` chunk that
+    # turn yields, so it lands earlier in the stream. Best-effort by contract —
+    # the caller (agent_node) already swallows failures; ``_persist_event``
+    # swallows its own.
+    async def _publish_compaction(payload: Any) -> None:
+        nonlocal event_seq
+        await bridge.publish(run_id, EventType.COMPACTION.value, payload)
+        await _persist_event(
+            event_store,
+            run_id=run_id,
+            seq=event_seq,
+            event_name=EventType.COMPACTION.value,
+            data=payload,
+        )
+        event_seq += 1
+
+    # ``configurable`` was populated in the effective_config literal above.
+    effective_config["configurable"][COMPACTION_SINK_KEY] = _publish_compaction
     # Stream 9.4 (HA failover) — renew the ownership lease while executing so a
     # peer's orphan sweep can tell this live run from a crashed owner's. Spawned
     # after the → RUNNING claim; cancelled in ``finally``.

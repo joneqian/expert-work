@@ -30,12 +30,27 @@ from helix_agent.persistence import MessageTurn
 async def read_turns(
     checkpointer: BaseCheckpointSaver[Any],
     thread_id: UUID,
+    *,
+    include_hidden: bool = True,
 ) -> list[MessageTurn]:
     """Read a thread's user/assistant text turns off its durable checkpoint.
 
     Raises on checkpointer failure — callers pick their own degradation
     (the endpoint returns an empty transcript; the sweep skips the thread
     and retries next cycle).
+
+    ``include_hidden`` (default ``True``) keeps the extraction *faithful*.
+    RT-2 PR-4 (RT-ADR-9) marks orchestrator-authored scaffolding persisted
+    into the checkpoint — e.g. the CM-1 ``<recovery-advisory>`` ``HumanMessage``
+    — with ``helix_hide_from_ui``. That scaffolding must stay in the durable
+    record, the search/audit mirror (``TranscriptMirrorSweep``) and the
+    cross-tenant audit drill-in, so faithful is the *safe default*: a new
+    persistence/audit caller that forgets the flag can never silently drop
+    content from the audited record. Only the UI bubble view opts out
+    (``include_hidden=False``) so scaffolding doesn't render as a turn — the
+    raw record still carries it and the model always sees it in-prompt. This
+    mirrors deer-flow, which reads the checkpoint faithfully and applies the
+    ``hide_from_ui`` visibility filter only at its UI-serving router.
     """
     config: RunnableConfig = {"configurable": {"thread_id": str(thread_id), "checkpoint_ns": ""}}
     tup = await checkpointer.aget_tuple(config)
@@ -47,6 +62,10 @@ async def read_turns(
         mtype = getattr(m, "type", None)
         if mtype not in ("human", "ai"):
             continue
+        if not include_hidden:
+            kwargs = getattr(m, "additional_kwargs", None) or {}
+            if kwargs.get("helix_hide_from_ui"):
+                continue
         text = message_text(getattr(m, "content", ""))
         if text.strip():
             out.append(

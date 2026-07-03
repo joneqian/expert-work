@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -125,3 +126,59 @@ async def test_compaction_without_flush_persists_nothing() -> None:
         tenant_id=tenant, user_id=user, query_embedding=(0.0,) * _DIM, limit=10
     )
     assert stored == []
+
+
+async def _run_with_sink(graph: object, *, sink: object, messages: list[BaseMessage]) -> None:
+    from orchestrator.graph_builder._config import COMPACTION_SINK_KEY
+
+    async with make_checkpointer("memory") as cp:
+        compiled = GraphRunner(checkpointer=cp).compile(graph)  # type: ignore[arg-type]
+        cfg: RunnableConfig = {
+            "configurable": {"thread_id": str(uuid4()), COMPACTION_SINK_KEY: sink}
+        }
+        await compiled.ainvoke({"messages": messages, "step_count": 0, "max_steps": 5}, config=cfg)
+
+
+@pytest.mark.asyncio
+async def test_compaction_fires_event_sink_from_config() -> None:
+    """RT-2 PR-4 — agent_node reads the COMPACTION sink from config and fires
+    it once when the compressor produces a summary, with the pass count +
+    before/after token estimates + summary length."""
+    seen: list[dict[str, Any]] = []
+
+    async def _sink(payload: dict[str, Any]) -> None:
+        seen.append(payload)
+
+    graph = build_react_graph(
+        llm_caller=_FixedLLM(reply=AIMessage(content="done")),
+        tool_registry=ToolRegistry(),
+        context_compressor=_compressor(),
+    )
+
+    await _run_with_sink(graph, sink=_sink, messages=_long_history())
+
+    assert len(seen) == 1
+    payload = seen[0]
+    assert payload["passes"] >= 1
+    assert payload["tokens_before"] > payload["tokens_after"]
+    assert payload["summary_chars"] > 0
+
+
+@pytest.mark.asyncio
+async def test_no_compaction_does_not_fire_event_sink() -> None:
+    """A prompt that stays under threshold never compresses, so the sink is
+    never called."""
+    seen: list[dict[str, Any]] = []
+
+    async def _sink(payload: dict[str, Any]) -> None:
+        seen.append(payload)
+
+    graph = build_react_graph(
+        llm_caller=_FixedLLM(reply=AIMessage(content="done")),
+        tool_registry=ToolRegistry(),
+        context_compressor=_compressor(),
+    )
+
+    await _run_with_sink(graph, sink=_sink, messages=[HumanMessage(content="hi")])
+
+    assert seen == []

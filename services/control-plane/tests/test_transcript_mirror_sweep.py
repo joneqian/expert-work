@@ -90,6 +90,64 @@ async def test_read_turns_filters_to_text_turns_with_stable_seq() -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_turns_keeps_hidden_faithful_by_default() -> None:
+    """RT-2 PR-4 (RT-ADR-9), Option A — the faithful default
+    (``include_hidden=True``) keeps orchestrator scaffolding tagged
+    ``helix_hide_from_ui`` (the CM-1 ``<recovery-advisory>``) in the record,
+    so the search/audit mirror and the cross-tenant audit drill-in see the
+    complete transcript. This is the deer-flow pattern: the durable record
+    stays faithful; visibility is a serve-boundary concern, not extraction."""
+    tid = uuid4()
+    hidden = SimpleNamespace(
+        type="human",
+        content="<recovery-advisory>internal guidance</recovery-advisory>",
+        additional_kwargs={"helix_hide_from_ui": True},
+    )
+    cp = _FakeCheckpointer(
+        {
+            str(tid): [
+                _msg("human", "real question"),
+                hidden,  # index 1 — kept when faithful
+                _msg("ai", "real answer"),
+            ]
+        }
+    )
+    faithful = await read_turns(cp, tid)  # type: ignore[arg-type]
+    assert [(t.seq, t.role, t.content) for t in faithful] == [
+        (0, "user", "real question"),
+        (1, "user", "<recovery-advisory>internal guidance</recovery-advisory>"),
+        (2, "assistant", "real answer"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_turns_filters_hidden_only_for_ui_bubble_view() -> None:
+    """RT-2 PR-4 (RT-ADR-9), Option A — only the UI bubble view opts out
+    (``include_hidden=False``): scaffolding never renders as a user/assistant
+    turn, while the ordinary turns keep their raw channel index as ``seq``."""
+    tid = uuid4()
+    hidden = SimpleNamespace(
+        type="human",
+        content="<recovery-advisory>internal guidance</recovery-advisory>",
+        additional_kwargs={"helix_hide_from_ui": True},
+    )
+    cp = _FakeCheckpointer(
+        {
+            str(tid): [
+                _msg("human", "real question"),
+                hidden,  # index 1 — filtered from the UI view
+                _msg("ai", "real answer"),
+            ]
+        }
+    )
+    ui = await read_turns(cp, tid, include_hidden=False)  # type: ignore[arg-type]
+    assert [(t.seq, t.role, t.content) for t in ui] == [
+        (0, "user", "real question"),
+        (2, "assistant", "real answer"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_once_mirrors_pending_threads() -> None:
     tenant = uuid4()
     ok_thread, broken_thread = uuid4(), uuid4()
