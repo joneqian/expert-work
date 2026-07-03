@@ -31,7 +31,13 @@ from control_plane.memory_consolidator import (
     ConsolidatorLLMReply,
 )
 from control_plane.skill_attribution import FailureSignal, SkillAttributor
-from control_plane.skill_distiller import SkillDistiller, SkillDraft, render_trajectory, tools_used
+from control_plane.skill_distiller import (
+    DistillerReply,
+    SkillDistiller,
+    SkillDraft,
+    render_trajectory,
+    tools_used,
+)
 from control_plane.skill_evolution import EvolutionConfig, ReplayOutcome
 from control_plane.skill_evolution_assembly import (
     extract_task_prompt,
@@ -67,6 +73,7 @@ from helix_agent.protocol import (
     AuditResult,
     CurationCandidateRecord,
     EvalDatasetRecord,
+    StructuredOutputSpec,
 )
 from helix_agent.protocol.skill import Skill, SkillStatus, SkillVersion
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -110,6 +117,45 @@ class _AuxText:
         )
         await _record_aux_usage(self._usage_store, reply)
         return reply.text
+
+
+class _AuxDistillerModel:
+    """Adapts a :class:`ConsolidatorAuxModel` to the ``DistillerModel`` seam.
+
+    Stream RT-1 PR-2 — unlike :class:`_AuxText`, this seam threads
+    ``output_schema`` down to the aux model (and through it to the
+    router's validation loop) and surfaces the validated ``parsed``
+    dict back to the distiller. Same SE-A43 usage metering as
+    :class:`_AuxText`.
+    """
+
+    def __init__(
+        self,
+        aux: ConsolidatorAuxModel,
+        *,
+        default_model: str | None = None,
+        usage_store: TokenUsageStore | None = None,
+    ) -> None:
+        self._aux = aux
+        self._default_model = default_model
+        self._usage_store = usage_store
+
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        tenant_id: UUID,
+        model: str | None = None,
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> DistillerReply:
+        reply = await self._aux(
+            prompt=prompt,
+            model=model or self._default_model,
+            tenant_id=tenant_id,
+            output_schema=output_schema,
+        )
+        await _record_aux_usage(self._usage_store, reply)
+        return DistillerReply(text=reply.text, parsed=reply.parsed)
 
 
 class _AuxJudge:
@@ -690,7 +736,12 @@ def build_evolution_worker(
         cache_invalidator=cache_invalidator,
     )
     processor = EvolutionProcessor(
-        distiller=SkillDistiller(model=aux_text, model_name=aux_default_model),
+        distiller=SkillDistiller(
+            model=_AuxDistillerModel(
+                aux_model, default_model=aux_default_model, usage_store=token_usage_store
+            ),
+            model_name=aux_default_model,
+        ),
         attributor=SkillAttributor(model=aux_text, model_name=aux_default_model),
         skill_store=skill_store,
         evidence_provider=_TrajectoryEvidenceProvider(

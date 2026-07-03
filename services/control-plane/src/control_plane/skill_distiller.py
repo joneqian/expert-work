@@ -25,17 +25,21 @@ model is wired by the SE-6 worker).
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from helix_agent.protocol import StructuredOutputSpec
 from helix_agent.protocol.skill import HIGH_RISK_TOOLS
+from helix_agent.runtime.middleware import LLMOutputValidationError
 
 __all__ = [
     "DistillerModel",
+    "DistillerReply",
     "SkillDistiller",
     "SkillDraft",
     "render_trajectory",
@@ -49,11 +53,36 @@ _LONG_DIGITS_RE = re.compile(r"\d{12,}")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 
 
-class DistillerModel(Protocol):
-    """Returns the model's raw text reply for a distillation prompt."""
+@dataclass(frozen=True)
+class DistillerReply:
+    """One distiller-model reply.
 
-    async def __call__(self, *, prompt: str, tenant_id: UUID, model: str | None = None) -> str:
-        """Run ``prompt`` for ``tenant_id`` and return the raw reply text."""
+    ``parsed`` (Stream RT-1) carries the schema-validated dict when the
+    call was made with ``output_schema`` and the underlying router
+    enforced it; ``None`` for adapters without structured support (the
+    raw ``text`` is validated instead).
+    """
+
+    text: str
+    parsed: dict[str, Any] | None = None
+
+
+class DistillerModel(Protocol):
+    """Returns the model's reply for a distillation prompt."""
+
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        tenant_id: UUID,
+        model: str | None = None,
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> DistillerReply:
+        """Run ``prompt`` for ``tenant_id`` and return the reply.
+
+        ``output_schema`` (Stream RT-1) asks for a schema-enforced JSON
+        reply; router-backed adapters surface the validated dict on
+        :attr:`DistillerReply.parsed`."""
 
 
 @dataclass(frozen=True)
@@ -120,16 +149,32 @@ def _build_prompt(successes: Sequence[str], failures: Sequence[str], hint_text: 
     return "\n".join(parts)
 
 
-def _parse_object(text: str) -> dict[str, Any] | None:
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end <= start:
-        return None
-    try:
-        obj = json.loads(text[start : end + 1])
-    except (ValueError, TypeError):
-        return None
-    return obj if isinstance(obj, dict) else None
+class DistilledSkillDraftModel(BaseModel):
+    """Wire shape demanded by ``_INSTRUCTIONS`` (Stream RT-1 PR-2).
+
+    ``model_json_schema()`` feeds the model seam's ``output_schema`` so
+    a router-backed adapter enforces the shape (with correction
+    retries) before the distiller ever sees the reply. The *semantic*
+    guards (kebab-case name, abstraction guard, allowed-tools cap) stay
+    in :meth:`SkillDistiller.distill` — same None-on-failure degrade.
+
+    Only ``name`` / ``prompt_fragment`` (the draft's substance) are
+    required; the descriptive fields keep their pre-RT-1 ``.get(...)``
+    defaults so a reply that omits them still yields a usable draft.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    prompt_fragment: str
+    tool_names: list[str] = Field(default_factory=list)
+    description: str = ""
+    category: str | None = None
+
+
+_DISTILL_OUTPUT_SPEC = StructuredOutputSpec(
+    schema=DistilledSkillDraftModel.model_json_schema(), name="distilled_skill_draft"
+)
 
 
 def _looks_too_specific(fragment: str) -> bool:
@@ -164,36 +209,45 @@ class SkillDistiller:
             return None
 
         prompt = _build_prompt(successes, failures, hint_text)
-        raw = await self.model(prompt=prompt, tenant_id=tenant_id, model=self.model_name)
-        obj = _parse_object(raw)
-        if obj is None:
+        try:
+            reply = await self.model(
+                prompt=prompt,
+                tenant_id=tenant_id,
+                model=self.model_name,
+                output_schema=_DISTILL_OUTPUT_SPEC,
+            )
+        except LLMOutputValidationError:
+            # RT-ADR-3 — the router exhausted its validation retries;
+            # same failure semantics as an unparseable reply: None →
+            # distillation failed, the SE-6 worker moves on.
+            return None
+        try:
+            if reply.parsed is not None:
+                obj = DistilledSkillDraftModel.model_validate(reply.parsed)
+            else:
+                obj = DistilledSkillDraftModel.model_validate_json(reply.text)
+        except ValidationError:
             return None
 
-        name = obj.get("name")
-        fragment = obj.get("prompt_fragment")
-        if not isinstance(name, str) or not _NAME_RE.match(name):
+        if not _NAME_RE.match(obj.name):
             return None
-        if not isinstance(fragment, str) or not fragment.strip():
+        fragment = obj.prompt_fragment
+        if not fragment.strip():
             return None
         if _looks_too_specific(fragment):
             return None
 
-        raw_tools = obj.get("tool_names") or []
         tool_names = tuple(
             dict.fromkeys(
-                t
-                for t in raw_tools
-                if isinstance(t, str) and t and (allowed_tools is None or t in allowed_tools)
+                t for t in obj.tool_names if t and (allowed_tools is None or t in allowed_tools)
             )
         )
-        description = obj.get("description")
-        category = obj.get("category")
 
         return SkillDraft(
-            name=name,
+            name=obj.name,
             prompt_fragment=fragment.strip(),
             tool_names=tool_names,
-            description=description if isinstance(description, str) else "",
-            category=category if isinstance(category, str) and category else None,
+            description=obj.description,
+            category=obj.category if obj.category else None,
             high_risk=bool(HIGH_RISK_TOOLS & set(tool_names)),
         )

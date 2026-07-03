@@ -69,6 +69,28 @@ async def test_anthropic_haiku_judge_returns_zero_on_5xx() -> None:
     await client.aclose()
 
 
+@pytest.mark.asyncio
+async def test_anthropic_haiku_judge_returns_zero_on_malformed_envelope() -> None:
+    """RT-1 PR-2 — pydantic envelope validation keeps the 0-on-failure
+    semantics: a non-JSON body, a missing content list, and a non-text
+    first block all score 0 (loud threshold trip, never inflation)."""
+    bodies: list[httpx.Response] = [
+        httpx.Response(200, text="not json at all"),
+        httpx.Response(200, json={"content": []}),
+        httpx.Response(200, json={"content": [{"type": "tool_use", "id": "t1"}]}),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return bodies.pop(0)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    judge = AnthropicHaikuJudge(api_key="sk-test", http_client=client)
+    assert await judge.score(case_id="a", prompt="rate this") == 0
+    assert await judge.score(case_id="b", prompt="rate this") == 0
+    assert await judge.score(case_id="c", prompt="rate this") == 0
+    await client.aclose()
+
+
 def test_judge_model_is_haiku_4_5() -> None:
     """Mini-ADR J-39 fixes the judge model id."""
     assert JUDGE_MODEL == "claude-haiku-4-5-20251001"

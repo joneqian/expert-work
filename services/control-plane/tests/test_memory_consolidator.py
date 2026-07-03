@@ -36,11 +36,13 @@ from helix_agent.protocol import (
     AuditAction,
     AuditQuery,
     MemoryItem,
+    StructuredOutputSpec,
     TenantConfigPatch,
 )
 from helix_agent.runtime.audit.fallback import InMemoryAuditFallbackQueue
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.audit.redactor import DefaultSecretRedactor
+from helix_agent.runtime.middleware import LLMOutputValidationError
 
 _TENANT = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
 _USER = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
@@ -65,6 +67,7 @@ class _ScriptedAuxModel:
     def __init__(self, replies: list[str]) -> None:
         self._replies = list(replies)
         self.calls: list[str] = []
+        self.schemas: list[StructuredOutputSpec | None] = []
 
     async def __call__(
         self,
@@ -72,12 +75,28 @@ class _ScriptedAuxModel:
         prompt: str,
         model: str | None,
         tenant_id: UUID,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> ConsolidatorLLMReply:
         self.calls.append(prompt)
+        self.schemas.append(output_schema)
         text = self._replies.pop(0) if self._replies else "{}"
         return ConsolidatorLLMReply(
             text=text, model=model or "fake", input_tokens=10, output_tokens=5
         )
+
+
+class _ValidationExplodingAuxModel:
+    """Simulates the RT-1 router exhausting its schema-validation retries."""
+
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        tenant_id: UUID,
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> ConsolidatorLLMReply:
+        raise LLMOutputValidationError("still invalid after retries")
 
 
 class _FakeEmbedder:
@@ -147,9 +166,13 @@ async def _build_worker(
 # ─── Parser robustness ─────────────────────────────────────────────────
 
 
+def _reply(text: str, parsed: dict[str, object] | None = None) -> ConsolidatorLLMReply:
+    return ConsolidatorLLMReply(text=text, model="fake", parsed=parsed)
+
+
 def test_parse_cluster_reply_keep_true() -> None:
     v = _parse_cluster_reply(
-        '{"keep": true, "summary": "user likes dark mode", "reject_reason": null}'
+        _reply('{"keep": true, "summary": "user likes dark mode", "reject_reason": null}')
     )
     assert v is not None
     assert v.keep is True
@@ -158,7 +181,7 @@ def test_parse_cluster_reply_keep_true() -> None:
 
 def test_parse_cluster_reply_keep_false_anti_mislearn() -> None:
     v = _parse_cluster_reply(
-        '{"keep": false, "summary": null, "reject_reason": "anti_mislearn:env_failure"}'
+        _reply('{"keep": false, "summary": null, "reject_reason": "anti_mislearn:env_failure"}')
     )
     assert v is not None
     assert v.keep is False
@@ -166,32 +189,71 @@ def test_parse_cluster_reply_keep_false_anti_mislearn() -> None:
 
 
 def test_parse_cluster_reply_invalid_reason_rejected() -> None:
-    v = _parse_cluster_reply('{"keep": false, "summary": null, "reject_reason": "made_up"}')
+    v = _parse_cluster_reply(_reply('{"keep": false, "summary": null, "reject_reason": "made_up"}'))
     assert v is None
 
 
 def test_parse_cluster_reply_malformed_json() -> None:
-    assert _parse_cluster_reply("not json") is None
-    assert _parse_cluster_reply("[]") is None
+    assert _parse_cluster_reply(_reply("not json")) is None
+    assert _parse_cluster_reply(_reply("[]")) is None
+
+
+def test_parse_cluster_reply_tolerates_missing_descriptive_fields() -> None:
+    """Pre-RT-1 ``.get(...)`` pin — a keep verdict without reject_reason
+    and a reject verdict without summary both stay valid verdicts."""
+    keep = _parse_cluster_reply(_reply('{"keep": true, "summary": "likes dark mode"}'))
+    assert keep is not None
+    assert keep.keep is True
+    reject = _parse_cluster_reply(_reply('{"keep": false, "reject_reason": "false_cluster"}'))
+    assert reject is not None
+    assert reject.reject_reason == "false_cluster"
+
+
+def test_parse_cluster_reply_prefers_router_parsed_dict() -> None:
+    """RT-1 — the router-validated ``parsed`` dict wins over raw text."""
+    v = _parse_cluster_reply(
+        _reply(
+            "prose the tool_call path never produces",
+            parsed={"keep": True, "summary": "user likes dark mode", "reject_reason": None},
+        )
+    )
+    assert v is not None
+    assert v.keep is True
+    assert v.summary == "user likes dark mode"
+
+
+def test_parse_cluster_reply_semantic_rules_apply_to_parsed_dict() -> None:
+    """Schema-valid but semantically wrong (keep with empty summary) → None."""
+    v = _parse_cluster_reply(
+        _reply("{}", parsed={"keep": True, "summary": "  ", "reject_reason": None})
+    )
+    assert v is None
 
 
 def test_parse_single_reply_durable() -> None:
-    v = _parse_single_reply('{"is_noise": false, "category": "durable"}')
+    v = _parse_single_reply(_reply('{"is_noise": false, "category": "durable"}'))
     assert v is not None
     assert v.is_noise is False
     assert v.category == "durable"
 
 
 def test_parse_single_reply_noise() -> None:
-    v = _parse_single_reply('{"is_noise": true, "category": "env_failure"}')
+    v = _parse_single_reply(_reply('{"is_noise": true, "category": "env_failure"}'))
     assert v is not None
     assert v.is_noise is True
     assert v.category == "env_failure"
 
 
 def test_parse_single_reply_invalid_category() -> None:
-    v = _parse_single_reply('{"is_noise": true, "category": "made_up"}')
+    v = _parse_single_reply(_reply('{"is_noise": true, "category": "made_up"}'))
     assert v is None
+
+
+def test_parse_single_reply_prefers_router_parsed_dict() -> None:
+    v = _parse_single_reply(_reply("garbage", parsed={"is_noise": True, "category": "time_bound"}))
+    assert v is not None
+    assert v.is_noise is True
+    assert v.category == "time_bound"
 
 
 # ─── Null aux model returns valid-shape JSON for both families ────────
@@ -201,7 +263,7 @@ def test_parse_single_reply_invalid_category() -> None:
 async def test_null_aux_model_cluster_path_parses() -> None:
     null = make_null_consolidator_aux_model()
     reply = await null(prompt='{"items":[]}', model=None, tenant_id=_TENANT)
-    verdict = _parse_cluster_reply(reply.text)
+    verdict = _parse_cluster_reply(reply)
     assert verdict is not None
     assert verdict.keep is False
     assert verdict.reject_reason == "false_cluster"
@@ -211,10 +273,21 @@ async def test_null_aux_model_cluster_path_parses() -> None:
 async def test_null_aux_model_single_path_parses() -> None:
     null = make_null_consolidator_aux_model()
     reply = await null(prompt='{"is_noise": true}', model=None, tenant_id=_TENANT)
-    verdict = _parse_single_reply(reply.text)
+    verdict = _parse_single_reply(reply)
     assert verdict is not None
     assert verdict.is_noise is False
     assert verdict.category == "durable"
+
+
+@pytest.mark.asyncio
+async def test_null_aux_model_returns_parsed_for_structured_calls() -> None:
+    """The null double mirrors the RT-1 contract when a schema is asked for."""
+    null = make_null_consolidator_aux_model()
+    spec = StructuredOutputSpec(schema={"type": "object"}, name="memory_cluster_verdict")
+    reply = await null(prompt="cluster prompt", model=None, tenant_id=_TENANT, output_schema=spec)
+    assert reply.parsed == {"keep": False, "summary": None, "reject_reason": "false_cluster"}
+    plain = await null(prompt="cluster prompt", model=None, tenant_id=_TENANT)
+    assert plain.parsed is None
 
 
 # ─── Worker 4 paths ────────────────────────────────────────────────────
@@ -306,6 +379,102 @@ async def test_lone_item_reviewed_durable_stamps_last_reviewed_at() -> None:
     page = await audit_store.query(AuditQuery(tenant_id="*", limit=100))
     actions = {entry.action for entry in page.entries}
     assert AuditAction.MEMORY_REVIEWED_DURABLE in actions
+
+
+# ─── RT-1 PR-2: structured output through the aux model ───────────────
+
+
+@pytest.mark.asyncio
+async def test_cluster_call_carries_output_schema() -> None:
+    worker, store, aux, _audit_store = await _build_worker(
+        aux_replies=['{"keep": true, "summary": "user prefers dark mode", "reject_reason": null}']
+    )
+    _seed_transient(store, contents=["dark UI", "dark mode preference", "wants dark theme"])
+    await worker.run_once()
+    assert len(aux.schemas) == 1
+    spec = aux.schemas[0]
+    assert spec is not None
+    assert spec.name == "memory_cluster_verdict"
+    # Only the decision field is required; summary/reject_reason keep
+    # their pre-RT-1 ``.get(...)`` optionality (model defaults).
+    assert set(spec.schema["required"]) == {"keep"}
+    assert set(spec.schema["properties"]) == {"keep", "summary", "reject_reason"}
+
+
+@pytest.mark.asyncio
+async def test_single_review_call_carries_output_schema() -> None:
+    worker, store, aux, _audit_store = await _build_worker(
+        aux_replies=['{"is_noise": false, "category": "durable"}']
+    )
+    _seed_transient(
+        store,
+        contents=["user works at example.com"],
+        created_at=_NOW - timedelta(days=60),
+    )
+    await worker.run_once()
+    assert len(aux.schemas) == 1
+    spec = aux.schemas[0]
+    assert spec is not None
+    assert spec.name == "memory_review_verdict"
+    assert set(spec.schema["required"]) == {"is_noise", "category"}
+
+
+@pytest.mark.asyncio
+async def test_cluster_validation_exhausted_degrades_to_false_cluster() -> None:
+    """RT-ADR-3 — LLMOutputValidationError == malformed reply: the
+    cluster is skipped as false_cluster, never counted as a worker error."""
+    store = InMemoryMemoryStore()
+    audit_logger, _audit_store = _build_logger()
+    config_service = TenantConfigService(
+        store=InMemoryTenantConfigStore(), audit_logger=audit_logger
+    )
+    worker = MemoryConsolidator(
+        memory_store=store,
+        tenant_config_service=config_service,
+        audit_logger=audit_logger,
+        aux_model=_ValidationExplodingAuxModel(),
+        embedder=_FakeEmbedder(),
+        interval_s=60.0,
+    )
+    await _seed_tenant_config(config_service)
+    _seed_transient(store, contents=["dark UI", "dark mode preference", "wants dark theme"])
+    summary = await worker.run_once()
+    assert summary.consolidated == 0
+    assert summary.cluster_rejected == 1
+    assert summary.errors == 0
+    for row in store._rows:
+        assert row.consolidated_into is None
+
+
+@pytest.mark.asyncio
+async def test_review_validation_exhausted_marks_reviewed_durable() -> None:
+    """RT-ADR-3 — same conservative degrade as a malformed review reply:
+    keep the item, stamp last_reviewed_at so it is not re-reviewed."""
+    store = InMemoryMemoryStore()
+    audit_logger, _audit_store = _build_logger()
+    config_service = TenantConfigService(
+        store=InMemoryTenantConfigStore(), audit_logger=audit_logger
+    )
+    worker = MemoryConsolidator(
+        memory_store=store,
+        tenant_config_service=config_service,
+        audit_logger=audit_logger,
+        aux_model=_ValidationExplodingAuxModel(),
+        embedder=_FakeEmbedder(),
+        interval_s=60.0,
+    )
+    await _seed_tenant_config(config_service)
+    _seed_transient(
+        store,
+        contents=["one-off timeout error from yesterday"],
+        created_at=_NOW - timedelta(days=60),
+    )
+    summary = await worker.run_once()
+    assert summary.purged == 0
+    assert summary.reviewed_durable == 1
+    assert summary.errors == 0
+    assert store._rows[0].deleted_at is None
+    assert store._rows[0].last_reviewed_at is not None
 
 
 # ─── Idempotency ───────────────────────────────────────────────────────

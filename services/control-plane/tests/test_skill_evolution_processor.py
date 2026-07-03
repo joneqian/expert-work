@@ -13,7 +13,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from control_plane.skill_attribution import SkillAttributor
-from control_plane.skill_distiller import SkillDistiller
+from control_plane.skill_distiller import DistillerReply, SkillDistiller
 from control_plane.skill_evolution import ReplayOutcome
 from control_plane.skill_evolution_processor import (
     DedupMatch,
@@ -33,6 +33,23 @@ class FakeModel:
 
     async def __call__(self, *, prompt: str, tenant_id: UUID, model: str | None = None) -> str:
         return self.reply
+
+
+class FakeDistillerModel:
+    """The RT-1 DistillerModel shape — accepts output_schema, returns a reply."""
+
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        tenant_id: UUID,
+        model: str | None = None,
+        output_schema: Any | None = None,
+    ) -> DistillerReply:
+        return DistillerReply(text=self.reply)
 
 
 def _draft_reply(name: str = "summarise-data") -> str:
@@ -71,7 +88,7 @@ async def _held_out(_c: CurationCandidateRecord) -> Any:
 
 def _processor(*, draft_reply: str, invoker: Any) -> EvolutionProcessor:
     return EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(draft_reply)),
+        distiller=SkillDistiller(model=FakeDistillerModel(draft_reply)),
         attributor=SkillAttributor(model=FakeModel("content_error")),
         skill_store=InMemorySkillStore(),
         evidence_provider=_evidence,
@@ -98,7 +115,7 @@ async def test_promotion_gate_activates_eligible_grounded_draft() -> None:
         breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=1)),
     )
     proc = EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        distiller=SkillDistiller(model=FakeDistillerModel(_draft_reply())),
         attributor=SkillAttributor(model=FakeModel("content_error")),
         skill_store=store,
         evidence_provider=_evidence,
@@ -173,7 +190,7 @@ async def test_execution_fail_rejected_keeps_single_version() -> None:
         return ReplayOutcome(verdict="fail", failure_signal=_signal(timed_out=True))
 
     proc = EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        distiller=SkillDistiller(model=FakeDistillerModel(_draft_reply())),
         attributor=SkillAttributor(model=FakeModel("ignored")),  # rule will fire on timeout
         skill_store=InMemorySkillStore(),
         evidence_provider=_evidence,
@@ -230,7 +247,7 @@ async def test_dedup_hit_becomes_revision_of_existing_active_skill() -> None:
         return ReplayOutcome(verdict="inconclusive")
 
     proc = EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(_draft_reply("summarise-data"))),
+        distiller=SkillDistiller(model=FakeDistillerModel(_draft_reply("summarise-data"))),
         attributor=SkillAttributor(model=FakeModel("content_error")),
         skill_store=store,
         evidence_provider=_evidence,
@@ -260,7 +277,7 @@ async def test_dedup_miss_creates_new_skill_as_before() -> None:
         return ReplayOutcome(verdict="inconclusive")
 
     proc = EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        distiller=SkillDistiller(model=FakeDistillerModel(_draft_reply())),
         attributor=SkillAttributor(model=FakeModel("content_error")),
         skill_store=store,
         evidence_provider=_evidence,
@@ -285,7 +302,7 @@ async def test_dedup_hit_on_draft_target_keeps_draft_status() -> None:
         return ReplayOutcome(verdict="inconclusive")
 
     proc = EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        distiller=SkillDistiller(model=FakeDistillerModel(_draft_reply())),
         attributor=SkillAttributor(model=FakeModel("content_error")),
         skill_store=store,
         evidence_provider=_evidence,
@@ -313,7 +330,7 @@ async def test_persisted_version_carries_real_content_hash() -> None:
         return ReplayOutcome(verdict="inconclusive")
 
     proc = EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        distiller=SkillDistiller(model=FakeDistillerModel(_draft_reply())),
         attributor=SkillAttributor(model=FakeModel("content_error")),
         skill_store=store,
         evidence_provider=_evidence,
@@ -346,7 +363,7 @@ async def test_dedup_active_flip_invalidates_agent_cache() -> None:
         return ReplayOutcome(verdict="inconclusive")
 
     proc = EvolutionProcessor(
-        distiller=SkillDistiller(model=FakeModel(_draft_reply("summarise-data"))),
+        distiller=SkillDistiller(model=FakeDistillerModel(_draft_reply("summarise-data"))),
         attributor=SkillAttributor(model=FakeModel("content_error")),
         skill_store=store,
         evidence_provider=_evidence,

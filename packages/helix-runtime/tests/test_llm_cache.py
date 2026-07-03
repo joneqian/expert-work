@@ -9,12 +9,15 @@ cache hit) lives in the orchestrator integration suite.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Sequence
 from uuid import UUID, uuid4
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from helix_agent.protocol import StructuredOutputSpec
 from helix_agent.runtime.llm import (
     InMemoryRedisCache,
     LLMResponseCache,
@@ -148,6 +151,92 @@ def test_make_key_ignores_message_id() -> None:
         tenant_id=_TENANT_A, model=_MODEL, messages=[m2], temperature=0.0, max_tokens=4096
     )
     assert key1 == key2
+
+
+# ---------------------------------------------------------------------------
+# Key derivation with output_schema (Stream RT-1 PR-2)
+# ---------------------------------------------------------------------------
+
+
+_SPEC = StructuredOutputSpec(
+    schema={"type": "object", "properties": {"score": {"type": "integer"}}},
+    name="verdict",
+)
+
+
+def test_make_key_without_schema_is_byte_identical_to_pre_rt1() -> None:
+    """``output_schema=None`` keys must equal the pre-RT-1 derivation.
+
+    The expected key is recomputed here from the original canonical
+    form — if this ever breaks, every existing cache entry silently
+    becomes unreachable (a full cache flush on deploy).
+    """
+    cache = _cache()
+    canonical = json.dumps(
+        {
+            "tenant_id": str(_TENANT_A),
+            "model": _MODEL,
+            "messages": [{"type": "human", "content": "hello"}],
+            "temperature": 0.0,
+            "max_tokens": 4096,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    expected = f"llm:cache:{_TENANT_A}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+    assert _key(cache) == expected
+    assert (
+        cache.make_key(
+            tenant_id=_TENANT_A,
+            model=_MODEL,
+            messages=[HumanMessage(content="hello")],
+            temperature=0.0,
+            max_tokens=4096,
+            output_schema=None,
+        )
+        == expected
+    )
+
+
+def test_make_key_with_schema_differs_from_unstructured() -> None:
+    """A structured call must never hit an unstructured entry for the
+    same prompt (PR-1 known interaction)."""
+    cache = _cache()
+    structured = cache.make_key(
+        tenant_id=_TENANT_A,
+        model=_MODEL,
+        messages=[HumanMessage(content="hello")],
+        temperature=0.0,
+        max_tokens=4096,
+        output_schema=_SPEC,
+    )
+    assert structured != _key(cache)
+
+
+def test_make_key_schema_fingerprint_covers_name_and_content() -> None:
+    cache = _cache()
+
+    def _with(spec: StructuredOutputSpec) -> str:
+        return cache.make_key(
+            tenant_id=_TENANT_A,
+            model=_MODEL,
+            messages=[HumanMessage(content="hello")],
+            temperature=0.0,
+            max_tokens=4096,
+            output_schema=spec,
+        )
+
+    base = _with(_SPEC)
+    # Same name + same schema content → same key (deterministic).
+    assert _with(StructuredOutputSpec(schema=dict(_SPEC.schema), name="verdict")) == base
+    # Different schema content under the same name → different key.
+    other_schema = StructuredOutputSpec(
+        schema={"type": "object", "properties": {"label": {"type": "string"}}},
+        name="verdict",
+    )
+    assert _with(other_schema) != base
+    # Same schema content under a different name → different key.
+    assert _with(StructuredOutputSpec(schema=dict(_SPEC.schema), name="other")) != base
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +494,101 @@ async def test_store_then_lookup_round_trip() -> None:
     hit = ctx.payload.get("llm_cache_hit")
     assert isinstance(hit, AIMessage)
     assert hit.content == "the answer"
+
+
+# ---------------------------------------------------------------------------
+# output_schema keying at the middleware layer (Stream RT-1 PR-2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_structured_lookup_does_not_hit_unstructured_entry() -> None:
+    """Same messages, unstructured entry stored → structured lookup misses."""
+    cache = _cache()
+    messages = [HumanMessage(content="rate this")]
+
+    await _store_mw(cache)(
+        MiddlewareContext(
+            payload={
+                "prompt_messages": messages,
+                "response": AIMessage(content="unstructured answer"),
+                "tenant_id": _TENANT_A,
+                "cache_hit": False,
+            }
+        ),
+        _terminal,
+    )
+
+    ctx = MiddlewareContext(
+        payload={"messages": messages, "tenant_id": _TENANT_A, "output_schema": _SPEC}
+    )
+    await _lookup_mw(cache)(ctx, _terminal)
+    assert "llm_cache_hit" not in ctx.payload
+
+
+@pytest.mark.asyncio
+async def test_structured_store_then_lookup_round_trip() -> None:
+    """Structured store + structured lookup with the same spec → hit;
+    the unstructured lookup for the same messages still misses."""
+    cache = _cache()
+    messages = [HumanMessage(content="rate this")]
+
+    await _store_mw(cache)(
+        MiddlewareContext(
+            payload={
+                "prompt_messages": messages,
+                "response": AIMessage(content='{"score": 5}'),
+                "tenant_id": _TENANT_A,
+                "cache_hit": False,
+                "output_schema": _SPEC,
+            }
+        ),
+        _terminal,
+    )
+
+    structured_ctx = MiddlewareContext(
+        payload={"messages": messages, "tenant_id": _TENANT_A, "output_schema": _SPEC}
+    )
+    await _lookup_mw(cache)(structured_ctx, _terminal)
+    hit = structured_ctx.payload.get("llm_cache_hit")
+    assert isinstance(hit, AIMessage)
+    assert hit.content == '{"score": 5}'
+
+    plain_ctx = MiddlewareContext(payload={"messages": messages, "tenant_id": _TENANT_A})
+    await _lookup_mw(cache)(plain_ctx, _terminal)
+    assert "llm_cache_hit" not in plain_ctx.payload
+
+
+@pytest.mark.asyncio
+async def test_non_spec_output_schema_payload_is_ignored() -> None:
+    """A summary dict (the router's around-payload shape) is NOT a spec —
+    the key must fall back to the unstructured derivation."""
+    cache = _cache()
+    messages = [HumanMessage(content="rate this")]
+
+    await _store_mw(cache)(
+        MiddlewareContext(
+            payload={
+                "prompt_messages": messages,
+                "response": AIMessage(content="plain answer"),
+                "tenant_id": _TENANT_A,
+                "cache_hit": False,
+            }
+        ),
+        _terminal,
+    )
+
+    ctx = MiddlewareContext(
+        payload={
+            "messages": messages,
+            "tenant_id": _TENANT_A,
+            "output_schema": {"name": "verdict", "strict": True},
+        }
+    )
+    await _lookup_mw(cache)(ctx, _terminal)
+    hit = ctx.payload.get("llm_cache_hit")
+    assert isinstance(hit, AIMessage)
+    assert hit.content == "plain answer"
 
 
 # ---------------------------------------------------------------------------

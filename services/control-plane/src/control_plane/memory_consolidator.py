@@ -37,8 +37,10 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from control_plane.audit import emit as audit_emit
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
@@ -53,8 +55,9 @@ from helix_agent.common.uplift_metrics import (
     record_memory_reviewed_durable,
 )
 from helix_agent.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
-from helix_agent.protocol import AuditAction, AuditResult, MemoryItem
+from helix_agent.protocol import AuditAction, AuditResult, MemoryItem, StructuredOutputSpec
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.middleware import LLMOutputValidationError
 
 if TYPE_CHECKING:
     from helix_agent.persistence.memory.base import MemoryStore
@@ -100,12 +103,19 @@ _REJECT_CATEGORIES: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class ConsolidatorLLMReply:
-    """One LLM response from the consolidator aux model."""
+    """One LLM response from the consolidator aux model.
+
+    ``parsed`` (Stream RT-1) carries the schema-validated dict when the
+    call was made with ``output_schema`` and the adapter's underlying
+    router enforced it (``additional_kwargs["parsed"]``); ``None`` for
+    plain-text replies or adapters without structured support.
+    """
 
     text: str
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    parsed: dict[str, Any] | None = None
 
 
 class ConsolidatorAuxModel(Protocol):
@@ -119,6 +129,12 @@ class ConsolidatorAuxModel(Protocol):
     ``tenant_id`` is passed so production adapters can route the call
     through :class:`CredentialsResolver` (Stream O) and pick the right
     credential per-tenant. The null adapter ignores it.
+
+    ``output_schema`` (Stream RT-1) asks for a schema-enforced JSON
+    reply; router-backed adapters thread it to
+    ``LLMRouter(output_schema=...)`` and surface the validated dict on
+    :attr:`ConsolidatorLLMReply.parsed`. Implementations without
+    structured support may ignore it (callers fall back to text).
     """
 
     async def __call__(
@@ -127,6 +143,7 @@ class ConsolidatorAuxModel(Protocol):
         prompt: str,
         model: str | None,
         tenant_id: UUID,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> ConsolidatorLLMReply:
         """Send ``prompt`` to the aux model and return its reply."""
 
@@ -175,19 +192,23 @@ class _NullConsolidatorAuxModel:
         prompt: str,
         model: str | None,
         tenant_id: UUID,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> ConsolidatorLLMReply:
         # Single-item review uses a different shape; we return a "keep"
         # verdict for that path so reviewed_durable counts increment
         # rather than silently dropping the row. Both shapes are
-        # valid for their respective parsers.
+        # valid for their respective parsers. Structured calls (RT-1)
+        # additionally get the dict on ``parsed``, mirroring the router
+        # contract.
+        payload: dict[str, Any]
         if '"is_noise"' in prompt:
-            return ConsolidatorLLMReply(
-                text='{"is_noise": false, "category": "durable"}',
-                model=model or "null",
-            )
+            payload = {"is_noise": False, "category": "durable"}
+        else:
+            payload = {"keep": False, "summary": None, "reject_reason": "false_cluster"}
         return ConsolidatorLLMReply(
-            text='{"keep": false, "summary": null, "reject_reason": "false_cluster"}',
+            text=json.dumps(payload),
             model=model or "null",
+            parsed=payload if output_schema is not None else None,
         )
 
 
@@ -275,8 +296,48 @@ Respond ONLY with JSON of the exact shape:
 
 
 # ---------------------------------------------------------------------------
-# Reply parsing
+# Reply parsing — Stream RT-1 PR-2: pydantic wire models + output_schema.
+# The *shape* is enforced by the models (and, through the specs below, by
+# the router's validation loop before the reply ever gets here); the
+# *semantic* rules (keep=true needs a non-empty summary, the reject_reason
+# / category vocabularies) stay in the parse functions. The Sprint #7
+# semantic rules and failure direction are preserved; shape validation is
+# tighter and every divergence degrades conservatively (RT-ADR-3), and the
+# router's enforce+retry loop makes those divergences near-unreachable.
 # ---------------------------------------------------------------------------
+
+
+class _ClusterReplyModel(BaseModel):
+    """Wire shape demanded by :func:`_build_cluster_prompt`.
+
+    ``summary`` / ``reject_reason`` default to ``None`` like the pre-RT-1
+    ``data.get(...)`` — only the ``keep`` decision is required. A missing
+    descriptive field flows into the same semantic checks as before
+    instead of voiding a verdict the old parser accepted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    keep: bool
+    summary: str | None = None
+    reject_reason: str | None = None
+
+
+class _SingleReviewReplyModel(BaseModel):
+    """Wire shape demanded by :func:`_build_single_review_prompt`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    is_noise: bool
+    category: str
+
+
+_CLUSTER_OUTPUT_SPEC = StructuredOutputSpec(
+    schema=_ClusterReplyModel.model_json_schema(), name="memory_cluster_verdict"
+)
+_SINGLE_REVIEW_OUTPUT_SPEC = StructuredOutputSpec(
+    schema=_SingleReviewReplyModel.model_json_schema(), name="memory_review_verdict"
+)
 
 
 @dataclass(frozen=True)
@@ -296,47 +357,46 @@ class SingleReviewVerdict:
     category: str  # "durable" | one of _REJECT_CATEGORIES
 
 
-def _parse_cluster_reply(text: str) -> ClusterVerdict | None:
-    """Parse the cluster LLM reply; return ``None`` on malformed input.
+def _parse_cluster_reply(reply: ConsolidatorLLMReply) -> ClusterVerdict | None:
+    """Validate the cluster LLM reply; return ``None`` on malformed input.
 
-    A ``None`` return means "treat as false_cluster, skip silently"
+    Prefers the router-validated ``parsed`` dict (RT-1 structured
+    output); plain-text replies validate through the same model. A
+    ``None`` return means "treat as false_cluster, skip silently"
     (defensive — a malformed LLM reply should not crash the worker).
     """
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+        if reply.parsed is not None:
+            data = _ClusterReplyModel.model_validate(reply.parsed)
+        else:
+            data = _ClusterReplyModel.model_validate_json(reply.text)
+    except ValidationError:
         return None
-    if not isinstance(data, dict):
-        return None
-    keep = bool(data.get("keep"))
-    summary = data.get("summary")
-    reject_reason = data.get("reject_reason")
-    if keep:
-        if not isinstance(summary, str) or not summary.strip():
+    if data.keep:
+        if data.summary is None or not data.summary.strip():
             return None
-        return ClusterVerdict(keep=True, summary=summary.strip(), reject_reason=None)
-    if not isinstance(reject_reason, str):
+        return ClusterVerdict(keep=True, summary=data.summary.strip(), reject_reason=None)
+    if data.reject_reason is None:
         return None
-    if reject_reason != "false_cluster" and not reject_reason.startswith("anti_mislearn:"):
+    if data.reject_reason != "false_cluster" and not data.reject_reason.startswith(
+        "anti_mislearn:"
+    ):
         return None
-    return ClusterVerdict(keep=False, summary=None, reject_reason=reject_reason)
+    return ClusterVerdict(keep=False, summary=None, reject_reason=data.reject_reason)
 
 
-def _parse_single_reply(text: str) -> SingleReviewVerdict | None:
-    """Parse the lone-item review LLM reply; ``None`` on malformed."""
+def _parse_single_reply(reply: ConsolidatorLLMReply) -> SingleReviewVerdict | None:
+    """Validate the lone-item review LLM reply; ``None`` on malformed."""
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+        if reply.parsed is not None:
+            data = _SingleReviewReplyModel.model_validate(reply.parsed)
+        else:
+            data = _SingleReviewReplyModel.model_validate_json(reply.text)
+    except ValidationError:
         return None
-    if not isinstance(data, dict):
+    if data.category not in (("durable", *_REJECT_CATEGORIES)):
         return None
-    is_noise = bool(data.get("is_noise"))
-    category = data.get("category")
-    if not isinstance(category, str):
-        return None
-    if category not in (("durable", *_REJECT_CATEGORIES)):
-        return None
-    return SingleReviewVerdict(is_noise=is_noise, category=category)
+    return SingleReviewVerdict(is_noise=data.is_noise, category=data.category)
 
 
 # ---------------------------------------------------------------------------
@@ -699,14 +759,26 @@ class MemoryConsolidator:
         summary: ConsolidatorRunSummary,
     ) -> None:
         prompt = _build_cluster_prompt(cluster)
-        reply = await self._aux(prompt=prompt, model=None, tenant_id=tenant_id)
+        try:
+            reply = await self._aux(
+                prompt=prompt,
+                model=None,
+                tenant_id=tenant_id,
+                output_schema=_CLUSTER_OUTPUT_SPEC,
+            )
+        except LLMOutputValidationError:
+            # RT-ADR-3 — the router exhausted its validation retries;
+            # identical degrade to a malformed reply: false_cluster skip.
+            record_memory_cluster_rejected(reason="false_cluster")
+            summary.cluster_rejected += 1
+            return
         record_consolidator_llm_tokens(
             model=reply.model or self._default_model,
             input_tokens=reply.input_tokens,
             output_tokens=reply.output_tokens,
         )
         await self._record_aux_usage(reply, tenant_id=tenant_id, user_id=user_id)
-        verdict = _parse_cluster_reply(reply.text)
+        verdict = _parse_cluster_reply(reply)
         if verdict is None:
             # Malformed reply — treat as false_cluster and skip
             record_memory_cluster_rejected(reason="false_cluster")
@@ -764,14 +836,29 @@ class MemoryConsolidator:
         summary: ConsolidatorRunSummary,
     ) -> None:
         prompt = _build_single_review_prompt(item)
-        reply = await self._aux(prompt=prompt, model=None, tenant_id=tenant_id)
+        try:
+            reply = await self._aux(
+                prompt=prompt,
+                model=None,
+                tenant_id=tenant_id,
+                output_schema=_SINGLE_REVIEW_OUTPUT_SPEC,
+            )
+        except LLMOutputValidationError:
+            # RT-ADR-3 — validation retries exhausted; same conservative
+            # degrade as a malformed reply: keep + mark reviewed.
+            await self._memory.mark_reviewed(
+                tenant_id=tenant_id, user_id=user_id, memory_id=item.id
+            )
+            record_memory_reviewed_durable()
+            summary.reviewed_durable += 1
+            return
         record_consolidator_llm_tokens(
             model=reply.model or self._default_model,
             input_tokens=reply.input_tokens,
             output_tokens=reply.output_tokens,
         )
         await self._record_aux_usage(reply, tenant_id=tenant_id, user_id=user_id)
-        verdict = _parse_single_reply(reply.text)
+        verdict = _parse_single_reply(reply)
         if verdict is None:
             # Malformed — treat conservatively as "keep + mark reviewed
             # so we don't loop on this item forever".

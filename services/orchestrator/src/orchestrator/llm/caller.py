@@ -14,6 +14,7 @@ from typing import Protocol, runtime_checkable
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from helix_agent.protocol import StructuredOutputSpec
 from orchestrator.tools.registry import ToolSpec
 
 
@@ -31,7 +32,14 @@ class LLMCaller(Protocol):
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
     ) -> AIMessage:
         """Call the LLM with the current message history and tool catalogue;
         return the next ``AIMessage`` (with ``tool_calls`` set if the model
-        wants tools, otherwise text-only)."""
+        wants tools, otherwise text-only).
+
+        ``output_schema`` (Stream RT-1) asks for a schema-enforced JSON
+        response; on success the validated dict rides on
+        ``additional_kwargs["parsed"]``. ``None`` (the default) is the
+        plain unstructured call — implementations without structured
+        support simply ignore the parameter."""
