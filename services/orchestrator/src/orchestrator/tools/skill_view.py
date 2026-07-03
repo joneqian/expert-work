@@ -342,6 +342,11 @@ class SkillViewTool:
             content=rendered,
             meta={
                 "skill_name": skill_name,
+                # RT-2 PR-3 (RT-ADR-7) — source path for the reference stub
+                # the context gates leave when this result is compressed.
+                # Success-only by design: failure branches carry no path so a
+                # blocked read can never be rewritten into a re-read hint.
+                "path": path,
                 "result": "truncated" if truncated else "ok",
                 "truncated": truncated,
             },

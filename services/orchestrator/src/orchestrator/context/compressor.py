@@ -44,6 +44,15 @@ Mini-ADR L-2 highlights:
   summariser call. Truncation keeps the head (2/3) and tail of each
   slice around a visible elision marker (deer-flow #3887
   ``_bound_text`` shape).
+* **Skill reads become references (RT-ADR-7)** — a successful
+  lazy-skill read (``ToolMessage(name="skill_view")``) in the middle
+  enters the summariser transcript as a one-line skill reference
+  (name + source path, no tool-call syntax — the summariser prompt
+  forbids it in the output) instead of its up-to-20k body: the
+  summary keeps the skill NAME while the input budget is spent on
+  the actual conversation; the re-read handle itself is provided by
+  the available-skills list in the system prompt and the CM-12
+  pruner stub.
 * **Rough char-based estimator** — ``estimate_tokens`` returns
   ``total_chars // 4``. Cheaper than tiktoken (no dependency, no
   per-message tokeniser call) and Hermes uses the same rule of
@@ -64,6 +73,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from helix_agent.common.observability import helix_counter
 from helix_agent.runtime.cancellation import RunCancelledError
 from helix_agent.runtime.tokens import TokenEstimator, estimate_messages, flatten_message
+from orchestrator.context.skill_reference import skill_view_reference
 from orchestrator.llm.caller import LLMCaller
 
 logger = logging.getLogger(__name__)
@@ -331,6 +341,16 @@ def _format_middle_for_summary(
     lines: list[str] = []
     for msg in middle:
         role = _role_label(msg)
+        # RT-2 PR-3 (RT-ADR-7) — a successful lazy-skill read is fed to the
+        # summariser as its one-line reference (name + path, no tool-call
+        # syntax), never its body: the summary keeps the skill identity and
+        # the input budget goes to the actual conversation. ``None`` (not a
+        # skill_view message, non-success result, or no skill_name) keeps
+        # the default path byte-identical.
+        reference = skill_view_reference(msg)
+        if reference is not None:
+            lines.append(f"{role}: {reference}")
+            continue
         text = _message_to_text(msg).strip()
         if text:
             lines.append(f"{role}: {_bound_text(text, _SUMMARY_PER_MESSAGE_CHAR_CAP)}")
