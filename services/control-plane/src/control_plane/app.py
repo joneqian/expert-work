@@ -1523,6 +1523,9 @@ def create_app(
                     # SE-16 (SE-A43) — aux spend (distil/judge/screen) writes
                     # real token_usage rows (usage_kind='skill_evolution').
                     token_usage_store=resolved_token_usage,
+                    # SE-16 (SE-A47) — ingest-time dedup: a distillate similar
+                    # to an existing same-agent skill becomes its next revision.
+                    embedder=make_consolidator_embedder(embedder),
                     # SE-16 (SE-A39) — 👎 trajectories (+ comments) join the
                     # contrastive failure side of distillation.
                     feedback_store=resolved_feedback,

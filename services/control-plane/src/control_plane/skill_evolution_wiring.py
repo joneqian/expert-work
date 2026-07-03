@@ -25,7 +25,11 @@ from uuid import UUID, uuid4
 
 from langchain_core.runnables import RunnableConfig
 
-from control_plane.memory_consolidator import ConsolidatorAuxModel, ConsolidatorLLMReply
+from control_plane.memory_consolidator import (
+    ConsolidatorAuxModel,
+    ConsolidatorEmbedder,
+    ConsolidatorLLMReply,
+)
 from control_plane.skill_attribution import FailureSignal, SkillAttributor
 from control_plane.skill_distiller import SkillDistiller, SkillDraft, render_trajectory, tools_used
 from control_plane.skill_evolution import EvolutionConfig, ReplayOutcome
@@ -40,7 +44,11 @@ from control_plane.skill_evolution_metering import (
     EVOLUTION_USAGE_KIND,
     current_metering,
 )
-from control_plane.skill_evolution_processor import EvolutionProcessor, SkillEvidence
+from control_plane.skill_evolution_processor import (
+    DedupMatch,
+    EvolutionProcessor,
+    SkillEvidence,
+)
 from control_plane.skill_evolution_worker import (
     ScreenDecision,
     SkillEvolutionWorker,
@@ -52,7 +60,15 @@ from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.curation import EvalDatasetStore
 from helix_agent.persistence.feedback_store import FeedbackStore
 from helix_agent.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
-from helix_agent.protocol import AgentSpecStatus, CurationCandidateRecord, EvalDatasetRecord
+from helix_agent.protocol import (
+    AgentSpecStatus,
+    AuditAction,
+    AuditEntry,
+    AuditResult,
+    CurationCandidateRecord,
+    EvalDatasetRecord,
+)
+from helix_agent.protocol.skill import Skill, SkillStatus, SkillVersion
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.evolution.graph_runner import GraphReplayTaskRunner
 
@@ -216,6 +232,131 @@ class _ImplicitScreener:
         if score >= _SCREEN_PASS_SCORE:
             return ScreenDecision(proceed=True, reason="judge_passed", score=score)
         return ScreenDecision(proceed=False, reason="judge_filtered", score=score)
+
+
+# --------------------------------------------------------------------------- #
+# SE-A47 — ingest-time dedup (embedding similarity -> revision, not new entry)
+# --------------------------------------------------------------------------- #
+
+#: Cosine floor for "this distillate duplicates an existing skill". Stricter
+#: than the consolidator's 0.85 synonym floor — a wrong merge buries a
+#: genuinely new capability inside an unrelated skill's history, so we only
+#: fold on high confidence. Tunable after the live pilot.
+_DEDUP_SIMILARITY = 0.9
+
+
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _skill_text(name: str, description: str, prompt_fragment: str) -> str:
+    return f"{name}\n{description}\n{prompt_fragment}"
+
+
+@dataclass(frozen=True)
+class _EmbeddingDeduper:
+    """SE-A47 — compares a fresh draft against the same agent's existing
+    distilled skills (DRAFT + ACTIVE, latest version each) by embedding
+    similarity. Best match above the floor -> the draft becomes that
+    skill's next revision. Any fault (embedding unconfigured, transient)
+    degrades to ``None`` — dedup is an optimisation, never a gate."""
+
+    skill_store: SkillStore
+    embedder: ConsolidatorEmbedder
+    audit_logger: AuditLogger | None = None
+    threshold: float = _DEDUP_SIMILARITY
+
+    async def __call__(
+        self, draft: SkillDraft, candidate: CurationCandidateRecord
+    ) -> DedupMatch | None:
+        try:
+            return await self._match(draft, candidate)
+        except Exception:
+            logger.warning("skill_evolution.dedup_degraded", exc_info=True)
+            return None
+
+    async def _match(
+        self, draft: SkillDraft, candidate: CurationCandidateRecord
+    ) -> DedupMatch | None:
+        existing = await self._existing_distilled(candidate)
+        if not existing:
+            return None
+        draft_vec = await self.embedder.embed_one(
+            _skill_text(draft.name, draft.description, draft.prompt_fragment),
+            tenant_id=candidate.tenant_id,
+        )
+        best: DedupMatch | None = None
+        for skill, version in existing:
+            vec = await self.embedder.embed_one(
+                _skill_text(skill.name, version.description, version.prompt_fragment),
+                tenant_id=candidate.tenant_id,
+            )
+            similarity = _cosine(draft_vec, vec)
+            if similarity >= self.threshold and (best is None or similarity > best.similarity):
+                best = DedupMatch(skill_id=skill.id, skill_name=skill.name, similarity=similarity)
+        if best is not None:
+            logger.info(
+                "skill_evolution.dedup_hit skill=%s similarity=%.3f candidate_id=%s",
+                best.skill_name,
+                best.similarity,
+                candidate.id,
+            )
+            await self._audit(best, candidate)
+        return best
+
+    async def _existing_distilled(
+        self, candidate: CurationCandidateRecord
+    ) -> list[tuple[Skill, SkillVersion]]:
+        """Same-agent distilled skills (DRAFT + ACTIVE), latest version each."""
+        out: list[tuple[Skill, SkillVersion]] = []
+        cursor: UUID | None = None
+        while True:
+            rows, cursor = await self.skill_store.list_skills(
+                tenant_id=candidate.tenant_id,
+                created_by_agent_name=candidate.agent_name,
+                cursor=cursor,
+                limit=100,
+            )
+            for skill in rows:
+                if skill.status not in (SkillStatus.DRAFT, SkillStatus.ACTIVE):
+                    continue
+                if skill.latest_version == 0:
+                    continue
+                version = await self.skill_store.get_version_by_number(
+                    skill_id=skill.id,
+                    tenant_id=candidate.tenant_id,
+                    version=skill.latest_version,
+                )
+                if version is not None and version.evolution_origin == "distilled":
+                    out.append((skill, version))
+            if cursor is None:
+                return out
+
+    async def _audit(self, match: DedupMatch, candidate: CurationCandidateRecord) -> None:
+        if self.audit_logger is None:
+            return
+        await self.audit_logger.write(
+            AuditEntry(
+                tenant_id=candidate.tenant_id,
+                actor_type="system",
+                actor_id="skill-evolution-worker",
+                action=AuditAction.SKILL_EVOLUTION_DEDUP_REVISION,
+                resource_type="skill",
+                resource_id=str(match.skill_id),
+                result=AuditResult.SUCCESS,
+                details={
+                    "agent_name": candidate.agent_name,
+                    "candidate_id": str(candidate.id),
+                    "similarity": round(match.similarity, 4),
+                    "skill_name": match.skill_name,
+                },
+            )
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -498,6 +639,7 @@ def build_evolution_worker(
     feedback_store: FeedbackStore | None = None,
     judge_sample_pct: Callable[[UUID], Awaitable[int]] | None = None,
     token_usage_store: TokenUsageStore | None = None,
+    embedder: ConsolidatorEmbedder | None = None,
 ) -> SkillEvolutionWorker:
     """Assemble the production skill-evolution worker (lifespan wiring).
 
@@ -536,6 +678,13 @@ def build_evolution_worker(
         ),
         config=EvolutionConfig(max_rounds=max_rounds),
         promotion_gate=gate,
+        # SE-A47 — ingest-time dedup rides on the platform embedder; without
+        # one every draft creates a new skill (the pre-dedup behavior).
+        deduper=(
+            _EmbeddingDeduper(skill_store=skill_store, embedder=embedder, audit_logger=audit_logger)
+            if embedder is not None
+            else None
+        ),
     )
     # SE-A45 — the sampled quality screen only assembles when the caller can
     # resolve a per-tenant sample rate (``tenant_config``); otherwise implicit

@@ -16,11 +16,13 @@ from control_plane.skill_attribution import SkillAttributor
 from control_plane.skill_distiller import SkillDistiller
 from control_plane.skill_evolution import ReplayOutcome
 from control_plane.skill_evolution_processor import (
+    DedupMatch,
     EvolutionProcessor,
     SkillEvidence,
 )
 from helix_agent.persistence.skill.memory import InMemorySkillStore
 from helix_agent.protocol import CurationCandidateRecord
+from helix_agent.protocol.skill import SkillStatus
 
 _TENANT = UUID("33333333-3333-3333-3333-333333333333")
 
@@ -186,3 +188,113 @@ def _signal(*, timed_out: bool = False):
     from control_plane.skill_attribution import FailureSignal
 
     return FailureSignal(error_text="boom", timed_out=timed_out)
+
+
+# ---------------------------------------------------------------------------
+# SE-16 (SE-A47) — ingest-time dedup: similar draft -> revision, not new entry
+# ---------------------------------------------------------------------------
+
+
+async def _seed_existing(store: InMemorySkillStore, *, name: str, status: SkillStatus) -> UUID:
+    skill = await store.create_skill(
+        skill_id=uuid4(),
+        tenant_id=_TENANT,
+        name=name,
+        description=f"{name} desc",
+        visibility="agent_private",
+        created_by_agent_name="assistant",
+    )
+    await store.add_version(
+        version_id=uuid4(),
+        skill_id=skill.id,
+        tenant_id=_TENANT,
+        prompt_fragment="existing content",
+        description=f"{name} desc",
+        authored_by="agent",
+        evolution_origin="distilled",
+    )
+    await store.set_status(skill_id=skill.id, tenant_id=_TENANT, status=status)
+    return skill.id
+
+
+async def test_dedup_hit_becomes_revision_of_existing_active_skill() -> None:
+    from helix_agent.protocol.skill import SkillStatus
+
+    store = InMemorySkillStore()
+    existing_id = await _seed_existing(store, name="tabular-howto", status=SkillStatus.ACTIVE)
+
+    async def deduper(draft: Any, candidate: CurationCandidateRecord) -> DedupMatch:
+        return DedupMatch(skill_id=existing_id, skill_name="tabular-howto", similarity=0.95)
+
+    async def invoker(**_kw: Any) -> ReplayOutcome:
+        return ReplayOutcome(verdict="inconclusive")
+
+    proc = EvolutionProcessor(
+        distiller=SkillDistiller(model=FakeModel(_draft_reply("summarise-data"))),
+        attributor=SkillAttributor(model=FakeModel("content_error")),
+        skill_store=store,
+        evidence_provider=_evidence,
+        held_out_provider=_held_out,
+        replay_invoker=invoker,
+        deduper=deduper,
+    )
+    await proc(_candidate())
+
+    # No new skill entry — the draft landed as version 2 of the existing one.
+    assert await store.get_skill_by_name(tenant_id=_TENANT, name="summarise-data") is None
+    existing = await store.get_skill(skill_id=existing_id, tenant_id=_TENANT)
+    assert existing is not None
+    assert existing.latest_version == 2
+    # ACTIVE target re-enters review: an unverified revision must not be
+    # served live (add_version bumps what bare-name resolution returns).
+    assert existing.status is SkillStatus.DRAFT
+
+
+async def test_dedup_miss_creates_new_skill_as_before() -> None:
+    store = InMemorySkillStore()
+
+    async def deduper(draft: Any, candidate: CurationCandidateRecord) -> None:
+        return None
+
+    async def invoker(**_kw: Any) -> ReplayOutcome:
+        return ReplayOutcome(verdict="inconclusive")
+
+    proc = EvolutionProcessor(
+        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        attributor=SkillAttributor(model=FakeModel("content_error")),
+        skill_store=store,
+        evidence_provider=_evidence,
+        held_out_provider=_held_out,
+        replay_invoker=invoker,
+        deduper=deduper,
+    )
+    await proc(_candidate())
+    assert await store.get_skill_by_name(tenant_id=_TENANT, name="summarise-data") is not None
+
+
+async def test_dedup_hit_on_draft_target_keeps_draft_status() -> None:
+    from helix_agent.protocol.skill import SkillStatus
+
+    store = InMemorySkillStore()
+    existing_id = await _seed_existing(store, name="tabular-howto", status=SkillStatus.DRAFT)
+
+    async def deduper(draft: Any, candidate: CurationCandidateRecord) -> DedupMatch:
+        return DedupMatch(skill_id=existing_id, skill_name="tabular-howto", similarity=0.92)
+
+    async def invoker(**_kw: Any) -> ReplayOutcome:
+        return ReplayOutcome(verdict="inconclusive")
+
+    proc = EvolutionProcessor(
+        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        attributor=SkillAttributor(model=FakeModel("content_error")),
+        skill_store=store,
+        evidence_provider=_evidence,
+        held_out_provider=_held_out,
+        replay_invoker=invoker,
+        deduper=deduper,
+    )
+    await proc(_candidate())
+    existing = await store.get_skill(skill_id=existing_id, tenant_id=_TENANT)
+    assert existing is not None
+    assert existing.status is SkillStatus.DRAFT
+    assert existing.latest_version == 2

@@ -28,6 +28,7 @@ from control_plane.skill_evolution import EvolutionConfig, EvolutionResult, Repl
 from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import DuplicateSkillError, SkillStore
 from helix_agent.protocol import CurationCandidateRecord
+from helix_agent.protocol.skill import SkillStatus
 
 
 def _utcnow() -> datetime:
@@ -35,10 +36,12 @@ def _utcnow() -> datetime:
 
 
 __all__ = [
+    "DedupMatch",
     "EvidenceProvider",
     "EvolutionProcessor",
     "HeldOutProvider",
     "ReplayInvoker",
+    "SkillDeduper",
     "SkillEvidence",
 ]
 
@@ -55,6 +58,24 @@ class SkillEvidence:
 EvidenceProvider = Callable[[CurationCandidateRecord], Awaitable[SkillEvidence]]
 #: Returns an opaque held-out replay spec consumed only by the ReplayInvoker.
 HeldOutProvider = Callable[[CurationCandidateRecord], Awaitable[Any]]
+
+
+@dataclass(frozen=True)
+class DedupMatch:
+    """SE-16 (SE-A47) — an existing same-agent distilled skill the fresh
+    draft is semantically similar to. The draft becomes that skill's next
+    revision instead of a new entry."""
+
+    skill_id: UUID
+    skill_name: str
+    similarity: float
+
+
+#: SE-A47 — ingest-time dedup seam. Returns the best match above the
+#: similarity threshold, or ``None`` to create a new skill as usual.
+#: Implementations must degrade to ``None`` on any fault (embedding
+#: unconfigured / transient) — dedup is an optimisation, never a gate.
+SkillDeduper = Callable[[SkillDraft, CurationCandidateRecord], Awaitable[DedupMatch | None]]
 
 
 class ReplayInvoker(Protocol):
@@ -103,6 +124,9 @@ class EvolutionProcessor:
     #: auto-promote policy + guardrails (may flip it to ACTIVE). ``None`` leaves
     #: every grounded skill as DRAFT for human review.
     promotion_gate: PromotionGate | None = None
+    #: SE-A47 — ingest-time dedup. ``None`` disables (every draft is a new
+    #: skill, the pre-dedup behavior).
+    deduper: SkillDeduper | None = None
     clock: Callable[[], datetime] = _utcnow
 
     async def __call__(self, candidate: CurationCandidateRecord) -> EvolutionResult:
@@ -185,7 +209,30 @@ class EvolutionProcessor:
         *,
         round_no: int,
     ) -> None:
-        """Create the skill on first draft, then append a DRAFT version each round."""
+        """Create the skill on first draft, then append a DRAFT version each round.
+
+        SE-A47 — before creating, ask the deduper whether an existing
+        same-agent distilled skill already covers this draft. On a hit the
+        draft becomes that skill's next revision (version+1, same replay /
+        promotion path). An ACTIVE target is flipped back to DRAFT first:
+        ``add_version`` bumps ``latest_version``, which bare-name resolution
+        serves immediately — an unverified revision must not go live on an
+        ACTIVE skill; it re-enters review (auto-promote flips it back).
+        """
+        if state.skill_id is None and self.deduper is not None:
+            match = await self.deduper(draft, candidate)
+            if match is not None:
+                existing = await self.skill_store.get_skill(
+                    skill_id=match.skill_id, tenant_id=candidate.tenant_id
+                )
+                if existing is not None:
+                    state.skill_id = existing.id
+                    if existing.status is SkillStatus.ACTIVE:
+                        await self.skill_store.set_status(
+                            skill_id=existing.id,
+                            tenant_id=candidate.tenant_id,
+                            status=SkillStatus.DRAFT,
+                        )
         if state.skill_id is None:
             state.skill_id = await self._ensure_skill(draft, candidate)
         version = await self.skill_store.add_version(

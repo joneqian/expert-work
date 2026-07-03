@@ -278,6 +278,24 @@ export function SkillsList() {
               {staleEtaLabel(record.last_used_at, t)}
             </Text>
           )}
+          {/* SE-16 (SE-A47) — a draft at v>1 is a pending revision of an
+              existing skill (dedup fold-in or a revise round), not a new
+              entry: reviewers should diff against the prior version. */}
+          {s === "draft" && (record.latest_version ?? 0) > 1 && (
+            <Tooltip
+              title={t("skills.revision_pending_tooltip", {
+                version: record.latest_version,
+              })}
+            >
+              <Tag
+                color="geekblue"
+                bordered={false}
+                data-testid={`skill-revision-pending-${record.id}`}
+              >
+                {t("skills.revision_pending")}
+              </Tag>
+            </Tooltip>
+          )}
         </Space>
       ),
     },

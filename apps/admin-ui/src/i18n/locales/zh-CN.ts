@@ -1612,6 +1612,9 @@ const zhCN: TranslationKeys = {
     empty_home: "当前租户还没有技能。",
     empty_cross: "所有租户都还没有技能。",
     col_name: "名称",
+    revision_pending: "修订待审",
+    revision_pending_tooltip:
+      "该草稿是既有自进化技能的新修订版(v{{version}})——查重把相似蒸馏产物并入了它,而非新建条目。",
     col_status: "状态",
     col_category: "分类",
     col_description: "描述",
