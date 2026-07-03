@@ -93,8 +93,29 @@ def test_parse_extracted_memories_defaults_missing_scores() -> None:
     )
     assert out[0].importance == 0.5
     assert out[0].confidence == 0.5
-    # Out-of-range numeric clamps into [0, 1].
-    assert out[1].confidence == 1.0
+    # Out-of-range numeric clamps into [0, 1] — but confidence is capped at
+    # 0.99 (RT-2 PR-2): 1.0 is the M-4 correction API's exclusive sentinel.
+    assert out[1].confidence == 0.99
+
+
+def test_extraction_confidence_capped_below_m4_sentinel() -> None:
+    """RT-2 PR-2 (review HIGH) — ``confidence == 1.0`` is the M-4
+    correction API's EXCLUSIVE sentinel (the injection budget's
+    correction guarantee keys on it). The extraction prompt encourages
+    high confidence, so a model-scored 1.0 (or an out-of-range value the
+    clamp would pin to 1.0) must land at 0.99 — an ordinary extracted
+    memory can never impersonate a user correction. ``importance`` has
+    no sentinel and still clamps to 1.0."""
+    out = parse_extracted_memories(
+        '{"memories": ['
+        '{"kind": "fact", "content": "a", "importance": 1.0, "confidence": 1.0}, '
+        '{"kind": "fact", "content": "b", "confidence": 1.5}, '
+        '{"kind": "fact", "content": "c", "confidence": 0.8}]}'
+    )
+    assert out[0].importance == 1.0
+    assert out[0].confidence == 0.99
+    assert out[1].confidence == 0.99
+    assert out[2].confidence == 0.8
 
 
 def test_parse_extracted_memories_drops_bad_kind_and_dedups() -> None:

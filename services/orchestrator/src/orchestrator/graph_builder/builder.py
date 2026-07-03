@@ -86,6 +86,7 @@ from helix_agent.runtime.middleware import (
     MiddlewareChain,
     MiddlewareContext,
 )
+from helix_agent.runtime.tokens import CharTokenEstimator, TokenEstimator
 from orchestrator.context import (
     ContextCompressor,
     PreCompactionHook,
@@ -270,6 +271,16 @@ _cm_effort_escalation_total = helix_counter(
     "Turns served by the escalated higher-effort caller (Stream CM-9).",
     ("signal",),
 )
+#: Stream RT-2 PR-2 (RT-ADR-10) — recalled-memory items clipped by the
+#: injection token budget. ``truncated`` = the boundary item was cut down to
+#: the remaining budget (visible marker); ``dropped`` = whole items past the
+#: boundary were left out. Incremented per affected item; the default path
+#: (top_k=5 ordinary memories, far under budget) never touches it.
+_memory_injection_truncated_total = helix_counter(
+    "helix_memory_injection_truncated_total",
+    "Recalled memory items clipped by the injection token budget (Stream RT-2).",
+    ("outcome",),
+)
 # Stream PI-2 — model responses blocked by output screening, by the violation
 # category that fired (``secret`` / ``exfil_url`` / ``canary``). A non-zero
 # rate here is the inline-injection backstop catching a leak the model emitted.
@@ -364,6 +375,16 @@ def build_react_graph(
     tool_disclosure: Literal["native_search", "allowed_tools"] | None = None,
     # Capability Uplift Sprint #8 — Mini-ADR U-8.
     memory_recall_mode: Literal["per_session", "per_turn"] = "per_session",
+    # Stream RT-2 PR-2 (RT-ADR-10) — token budget for the injected
+    # recalled-memory block plus the guaranteed slice for user-corrected
+    # (confidence=1.0) items. Threaded from the manifest's
+    # ``memory.long_term.injection_token_budget`` / ``correction_token_budget``;
+    # the defaults mirror the protocol defaults. ``token_estimator`` is the
+    # shared tiktoken-backed estimator (the same instance the compressor
+    # uses); ``None`` falls back to the chars//4 heuristic.
+    memory_injection_token_budget: int = 2000,
+    memory_correction_token_budget: int = 500,
+    token_estimator: TokenEstimator | None = None,
     # Stream PI-1b — when set, untrusted channels (recalled memory, tool
     # results) are spotlighted (datamarked + nonce-fenced) before the model
     # sees them. ``None`` (default) keeps the pre-PI behaviour byte-identical.
@@ -533,7 +554,15 @@ def build_react_graph(
         memories = state.get("recalled_memories")
         if memories:
             messages = _inject_memories(
-                messages, memories, mode=memory_recall_mode, spotlight_nonce=spotlight_nonce
+                messages,
+                memories,
+                mode=memory_recall_mode,
+                spotlight_nonce=spotlight_nonce,
+                # RT-2 PR-2 (RT-ADR-10) — greedy token budget + correction
+                # guarantee; a no-op for the default top_k=5 ordinary recall.
+                token_budget=memory_injection_token_budget,
+                correction_token_budget=memory_correction_token_budget,
+                estimator=token_estimator,
             )
             record_memory_inject_mode(mode=memory_recall_mode)
         # Stream CM-1 (generalising L.L4) — inject a ``<recovery-advisory>``
@@ -1153,12 +1182,122 @@ def _inject_plan(messages: list[BaseMessage], plan: Plan) -> list[BaseMessage]:
     return _append_tail_human_message(messages, rendered)
 
 
+#: RT-2 PR-2 (RT-ADR-10) — visible marker appended when a memory item is cut
+#: at the injection budget boundary, so the model (and a transcript reader)
+#: can see the item is incomplete rather than mistaking the cut for the end.
+_MEMORY_TRUNCATION_MARKER = " [... truncated: memory injection token budget]"
+
+
+def _truncate_to_tokens(text: str, max_tokens: int, count: Callable[[str], int]) -> str:
+    """RT-2 PR-2 — cut ``text`` down to roughly ``max_tokens`` per ``count``.
+
+    Proportional shrink with a bounded refinement loop: the estimator is
+    a heuristic (tiktoken or chars//4), so exact-token precision is not
+    the contract — the budget is approximate by design, and the marker's
+    own few tokens ride on top.
+    """
+    keep = len(text)
+    for _ in range(6):
+        tokens = count(text[:keep])
+        if tokens <= max_tokens:
+            break
+        # Proportional shrink; the min() guarantees progress even when
+        # the estimate barely moves between iterations.
+        keep = min(keep - 1, keep * max_tokens // max(tokens, 1))
+        if keep <= 0:
+            keep = 0
+            break
+    return text[:keep] + _MEMORY_TRUNCATION_MARKER
+
+
+def _render_memory_lines(
+    memories: Sequence[MemoryItem],
+    *,
+    token_budget: int,
+    correction_token_budget: int,
+    count: Callable[[str], int],
+) -> list[str]:
+    """RT-2 PR-2 (RT-ADR-10) — pick the memory item lines that fit the
+    injection token budget.
+
+    Items are considered in their existing order (already rerank/MMR
+    ranked upstream) and rendered in that same order — the budget
+    changes SELECTION, never ordering, so the default path (top_k=5
+    ordinary memories, far under budget) renders byte-identical to the
+    pre-budget logic.
+
+    Two greedy passes (deer-flow guaranteed_categories shape):
+
+    1. correction pass — user-corrected items (``confidence >= 1.0``:
+       the M-4 correction API's EXCLUSIVE sentinel — the extraction
+       write path caps LLM-scored confidence at 0.99
+       (``memory._MAX_EXTRACTED_CONFIDENCE``) and ``MemoryItem.kind``
+       has no correction value) get first claim on up to
+       ``correction_token_budget`` tokens, so ordinary memories can
+       never squeeze a user's explicit correction out of the block.
+       Precise shape of the guarantee: within the reserve, corrections
+       are packed greedily in rank order; one that overflows the
+       REMAINING reserve is skipped — later, smaller corrections still
+       get their guarantee — and falls through to the general pass,
+       where with room left it can still land whole (the reserve is a
+       floor, not a cap);
+    2. general pass — every still-unselected item fills the rest of
+       ``token_budget``: an item that fits is taken whole, the first
+       item that does not fit is truncated to the remaining budget
+       (visible marker) and the pass stops — later items are dropped.
+
+    Truncated / dropped items are counted on
+    ``helix_memory_injection_truncated_total{outcome}``.
+    """
+    lines = [f"- ({item.kind}) {item.content}" for item in memories]
+    costs = [count(line) for line in lines]
+    selected: dict[int, str] = {}
+
+    def _greedy(indices: Sequence[int], budget: int, *, truncate_boundary: bool) -> int:
+        spent = 0
+        for idx in indices:
+            room = budget - spent
+            if room <= 0:
+                break
+            if costs[idx] <= room:
+                selected[idx] = lines[idx]
+                spent += costs[idx]
+            elif truncate_boundary:
+                selected[idx] = _truncate_to_tokens(lines[idx], room, count)
+                _memory_injection_truncated_total.labels(outcome="truncated").inc()
+                spent = budget
+                break
+            # else: guarantee pass — the item overflows the remaining
+            # reserve; skip it (it falls through to the general pass) and
+            # keep going, so later, smaller corrections still get their
+            # guarantee (review MEDIUM-1).
+        return spent
+
+    corrections = [idx for idx, item in enumerate(memories) if item.confidence >= 1.0]
+    spent = _greedy(
+        corrections, min(correction_token_budget, token_budget), truncate_boundary=False
+    )
+    rest = [idx for idx in range(len(memories)) if idx not in selected]
+    _greedy(rest, token_budget - spent, truncate_boundary=True)
+
+    dropped = len(memories) - len(selected)
+    if dropped:
+        _memory_injection_truncated_total.labels(outcome="dropped").inc(dropped)
+    return [selected[idx] for idx in sorted(selected)]
+
+
 def _inject_memories(
     messages: list[BaseMessage],
     memories: list[MemoryItem],
     *,
     mode: Literal["per_session", "per_turn"] = "per_session",
     spotlight_nonce: str | None = None,
+    # RT-2 PR-2 (RT-ADR-10) — defaults mirror ``LongTermMemorySpec``
+    # (``injection_token_budget`` / ``correction_token_budget``); the factory
+    # always passes the manifest-resolved values through the graph builder.
+    token_budget: int = 2000,
+    correction_token_budget: int = 500,
+    estimator: TokenEstimator | None = None,
 ) -> list[BaseMessage]:
     """Render recalled long-term memories (J.3) into the prompt.
 
@@ -1175,12 +1314,28 @@ def _inject_memories(
     ``[system_payload, task, memories]`` is then cached across every
     turn of the session — long sessions stop paying full price for the
     memory block on every step.
+
+    RT-2 PR-2 (RT-ADR-10): the block is bounded by ``token_budget`` —
+    the recall path caps item COUNT only (``retrieve_top_k``), so a
+    single oversized memory could otherwise blow up the block. See
+    :func:`_render_memory_lines` for the selection rules (greedy in
+    rank order, boundary truncation, correction guarantee). The budget
+    is measured on the RAW item lines, before spotlighting — the PI-1b
+    datamarking below inflates the wire size by a bounded constant
+    factor, which the approximate budget deliberately ignores.
     """
     # Stream PI-1b — recalled memory is untrusted (an injection can be written
     # into a memory in an earlier session and recalled here). Spotlight the
     # item block (the helix-owned header stays trusted) so the model treats it
     # as data, not instructions.
-    items = "\n".join(f"- ({item.kind}) {item.content}" for item in memories)
+    items = "\n".join(
+        _render_memory_lines(
+            memories,
+            token_budget=token_budget,
+            correction_token_budget=correction_token_budget,
+            count=(estimator or CharTokenEstimator()).count,
+        )
+    )
     if spotlight_nonce:
         items = spotlight_untrusted(items, nonce=spotlight_nonce)
     body = "## Relevant memories from past sessions\n" + items
