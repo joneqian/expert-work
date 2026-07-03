@@ -162,7 +162,7 @@
 | 1.5 编排广度 | 3 | 2 | 2 | 3 | 1 |
 | 1.6 取消超时 | 3 | 2 | 2 | 2 | 2 |
 | 1.7 分布式队列 | **3** | 1 | 1 | 3* | 2 |
-| 2.1 context 压缩 | **1** | 3 | 3 | 2 | 2 |
+| 2.1 context 压缩 | **1**† | 3 | 3 | 2 | 2 |
 | 2.2 长期记忆检索 | 3 | 1 | 2 | 3 | 1 |
 | 2.3 写入治理 | 3 | 0 | 2 | 2 | 2 |
 | 2.4 跨 session 连续 | 3 | 2 | 2 | 2 | 1 |
@@ -224,6 +224,7 @@
 
 ## 6. 时效与复核备注
 
+- **† 勘误 2026-07-03(Stream RT 启动核实)**:2.1 context 压缩 helix 评 1 分偏低,实为 ~2——L2 ContextCompressor(preflight 摘要压缩:阈值触发/head-tail 保留/中段 LLM 摘要,`services/orchestrator/src/orchestrator/context/compressor.py`,PR #206)已存在,首轮扫描漏扫 `orchestrator/context/` 目录;缺口重定性为深水区条目(skill rescue/ID-swap/memory flush hook/2k 上限/压缩可观测),详见 [STREAM-RT-DESIGN §6](../streams/STREAM-RT-DESIGN.md)。总分相应 109→110/129
 - Hermes 底稿基于 bb4703c76(~5 周旧);进入 skills/记忆方向实施前建议复核上游
 - deer-flow/OpenClaw/OpenHands 均为 2026-07 时点新证(gh API/官方 docs/release notes)
 - `docs/decisions/deer-flow-context-mgmt-alignment.md` tracker 锁的是 6-09 前快照;M2-C 启动前应按 deer-flow 新版源码复核(上游已踩过并修复 ID-swap 递归注入坑 #3746)

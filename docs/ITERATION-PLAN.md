@@ -1672,6 +1672,29 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ---
 
+## Stream RT — Runtime 对标缺口补齐（2026-07-03 起）— 设计 [STREAM-RT-DESIGN](./streams/STREAM-RT-DESIGN.md)
+
+> 触发：五方对标矩阵（[research/2026-07-03-agent-runtime-five-way-benchmark.md](./research/2026-07-03-agent-runtime-five-way-benchmark.md)，PR #904）——helix 84%、9 格独占，4 格被压制、3 格已知弱点。价值导向排 7 项 × 4 Wave（~8-9 周），每项 PR-0 设计先合再编码，每项显式含 admin-ui 前端工作。已拍板：browser 不纳入（归 MCP，见「显式不做」）；企业深水区（KEK rotation/数据驻留/多区域）等客户信号。
+> 勘误注记：对标矩阵 2.1 给 helix 1 分偏低——L2 ContextCompressor（PR #206）已有 preflight 摘要压缩，RT-2 范围据此收敛为深水区补齐（详见设计 §6）。
+
+### Wave 1（并行）
+- [ ] **RT-1 结构化输出强制**（~1 周，4 PR）：router 层 JSON Schema 声明→按 provider 能力选径（response_format/tool-call 强制/prompt+校验）→校验+有界重试；内部链路迁移（judge/consolidator/evolution 删手工 parse）；Tier3 暴露 output_schema + manifest 编辑器提示
+- [ ] **RT-2 compaction 深水区补齐**（~2 周，6 PR，★5 需 live E2E）：L2 之上补 alignment tracker 真缺条款——skill rescue/before_summarization hook/ID-swap+system-reminder/memory 注入 2k 上限/异步队列对齐/COMPACTION 事件+前端渲染；PR-0 先按 deer-flow 新版复核 tracker（上游已修 #3746/#3887/#3711）
+
+### Wave 2（并行，W1 收完启动）
+- [ ] **RT-3 prompt cache 成本工程**（~1 周，3 PR）：cache_control 断点编排（per-provider 矩阵）+ 命中计量透出 + SettingsUsage cache 列与节省估算；keep-warm 多租户成本 PR-0 评估拍板
+- [ ] **RT-4 全局 kill switch**（~1 周，3 PR）：agent 级+租户级紧急停止（拒新 run+终止运行中+queue 拒 claim）+ 审计 + AgentDetail 禁用按钮/租户紧急停止
+
+### Wave 3（并行，依赖 RT-1）
+- [ ] **RT-5 生产质量监控**（~2 周，5 PR，★5 需 live E2E）：真实流量采样→judge 评分（RT-1 结构化输出）→落库→漂移检测→`quality.drift` webhook 告警；aux 计量（usage_kind）；质量看板新页全套挂点
+- [ ] **RT-6 审批工件绑定**（~1 周，3 PR）：approval 绑定 canonical 工件（argv/cwd/env 指纹/脚本 content_hash），执行前漂移即拒+审计；modify 重铸绑定；ApprovalCard 工件展示+IM 卡片字段
+
+### Wave 4
+- [ ] **RT-7 成本感知模型路由**（~1.5 周，4 PR）：任务档位路由（强推理/常规/轻量）+ strict 来源契约（显式指定不降档）+ 沿用 Y-MK failover + PlatformRoutingSection 平台配置；eval 回归护质量
+
+### 收口
+- [ ] **对标矩阵重打分**：每 wave 收口重打对应格；全部完成 helix 预期 109→~122/129（≈95%），压制格清零
+
 ## 计划使用建议
 
 1. **作为活文档维护**：每完成一个 Stream，在对应 checklist 打勾；遇到偏差修订估时与依赖
