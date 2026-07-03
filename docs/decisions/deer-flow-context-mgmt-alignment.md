@@ -82,6 +82,12 @@
 
 **Verification**：M2-C 设计文档启动前 review 本节，逐条落进 `STREAM-M2C-DESIGN.md`；ID-swap 技术尤其要在 LangGraph `add_messages` reducer 行为基础上写清楚 ID 怎么算（deer-flow 用 `{id}__user` 派生），否则前缀缓存击穿不可见。
 
+> **[2026-07-03 上游复核注记]** 本表基于 2026-06-09 快照，Stream RT-2 PR-0 已按 deer-flow 新版（本地 @b3c312b7 + GitHub #3887 @442248dd）逐条复核，三条已过期：
+> ① **Skill rescue 三预算已被上游 #3887 整体废弃**——`preserve_recent_skill_*` 三字段删除，替代 = durable `skill_context` channel 只存引用（name/path/description≤500c，上限 8 条），需要时模型重读文件。**不要按本表实现三预算**，helix 落法见 STREAM-RT-DESIGN RT-ADR-7（引用+重读 stub）。
+> ② **ID-swap 已从 HumanMessage 升级为三元组 SystemMessage 角色分离**（#3630），且 #3746 修了递归注入（`id__user__user…`）与孤儿压缩两坑；helix prompt-view-only 不需要 ID-swap（RT-ADR-8），但要补注入块×压缩组合测试。
+> ③ **Summarization 触发已从"三选一"升级为任意组合 OR**；#3887 摘要不再写回 messages（改 state channel + 请求时投影）——helix prompt-view-only 模式与之同向，不要倒退成写回。
+> 另新增事实：#3711 SystemMessageCoalescing——对话中部 SystemMessage 在严格 OpenAI-compatible 后端 400，**helix `<context-summary>` 正是该形态**（RT-ADR-5 最高优先核证）。Memory injection 2k 上限仍有效但细节已变（贪心逐条预算 + correction 类保底 500t 替代 top-15+截尾标记）。
+
 ---
 
 ## 业务取舍（明确不补 — 防止 M1/M2 重新发明）

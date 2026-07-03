@@ -1680,7 +1680,8 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 ### Wave 1（并行）
 - [ ] **RT-1 结构化输出强制**（~1 周，4 PR）：router 层 JSON Schema 声明→按 provider 能力选径（response_format/tool-call 强制/prompt+校验）→校验+有界重试；内部链路迁移（judge/consolidator/evolution 删手工 parse）；Tier3 暴露 output_schema + manifest 编辑器提示
   - [x] **PR-0 细设计定稿**（本 PR，设计 §7）：现状取证（provider 层零 response_format 代码；全仓 9 处手工 JSON parse 点清单）+ RT-ADR-1~4（校验重试独立于 E.4 failover 绝不轮 key/三级降级链能力声明在适配器/迁移不改失败语义/Tier3 仅约束收尾回复）+ PR-1~3 切分
-- [ ] **RT-2 compaction 深水区补齐**（~2 周，6 PR，★5 需 live E2E）：L2 之上补 alignment tracker 真缺条款——skill rescue/before_summarization hook/ID-swap+system-reminder/memory 注入 2k 上限/异步队列对齐/COMPACTION 事件+前端渲染；PR-0 先按 deer-flow 新版复核 tracker（上游已修 #3746/#3887/#3711）
+- [ ] **RT-2 compaction 深水区补齐**（~2 周，6 PR，★5 需 live E2E）：范围经 PR-0 复核修正（设计 §8 为准）——PR-1 adapter 兼容核证+summariser 失败语义+摘要 prompt 预算硬化+order-pin 测试 / PR-2 memory 注入 2k 预算+correction 保底 / PR-3 skill 引用式 rescue / PR-4 COMPACTION 事件+metrics+hide_from_ui（顺修 CM-1 泄漏）/ PR-5 前端 / PR-6 live E2E（含 qwen 严格后端）；ID-swap 与异步队列判定不做（RT-ADR-8）
+  - [x] **PR-0 细设计定稿**（本 PR，设计 §8）：deer-flow 新版复核颠覆 tracker 三处（skill rescue 三预算被 #3887 废弃改引用+重读/ID-swap 升三元组且 helix 无需求/摘要写回被废弃 helix 模式本就领先）+ 新事实 #3711：**helix `<context-summary>` 中部 SystemMessage 在严格后端疑似 live bug（RT-ADR-5 最高优先核证）** + RT-ADR-5~10 + PR 切分修正（兼容鲁棒/memory 注入硬化/skill 引用 rescue/可观测含 CM-1 泄漏修复/前端/live E2E）；tracker 已同步上游复核注记
 
 ### Wave 2（并行，W1 收完启动）
 - [ ] **RT-3 prompt cache 成本工程**（~1 周，3 PR）：cache_control 断点编排（per-provider 矩阵）+ 命中计量透出 + SettingsUsage cache 列与节省估算；keep-warm 多租户成本 PR-0 评估拍板
