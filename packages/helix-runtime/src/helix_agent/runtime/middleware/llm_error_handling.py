@@ -119,6 +119,20 @@ class LLMStreamStaleError(LLMServerError):
     """
 
 
+class LLMOutputValidationError(LLMError):
+    """Stream RT-1 — structured output still failed schema validation
+    after the correction retries (RT-ADR-1).
+
+    Raised by :class:`~orchestrator.llm.router.LLMRouter` when a call
+    made with ``output_schema`` set keeps producing responses that fail
+    JSON-Schema validation. A validation failure is model behaviour,
+    not a key or provider fault: this error MUST NOT join the router's
+    ``_KEY_LEVEL_ERRORS`` (no key rotation) and MUST NOT trigger
+    provider failover — the router re-raises it unchanged so each
+    caller's existing defensive degradation path applies.
+    """
+
+
 class CircuitOpenError(LLMError):
     """Breaker is OPEN; raised immediately without dispatching the call.
 

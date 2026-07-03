@@ -55,12 +55,35 @@ multi-region deployments (Doubao ``ark.{region}.volces.com``) accept a
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import ClassVar
+
 import httpx
 
 from orchestrator.llm.providers.openai import (
     DEFAULT_CHAT_COMPLETIONS_PATH,
     HTTPOpenAIClient,
+    OpenAIProvider,
 )
+from orchestrator.llm.structured_output import StructuredOutputCapability
+
+
+@dataclass
+class OpenAICompatibleProvider(OpenAIProvider):
+    """:class:`OpenAIProvider` with the conservative structured-output path.
+
+    Stream RT-1 (RT-ADR-2, § 7.5): ``response_format`` behaviour across
+    the OpenAI-compatible vendors is inconsistent (``json_object`` vs
+    ``json_schema`` vs unsupported), so providers built around this
+    module's factory clients take the ``prompt`` path — the schema is
+    injected as a trailing system instruction and the router's
+    validate + retry loop is the enforcement. Everything else is
+    inherited from :class:`OpenAIProvider` unchanged.
+    """
+
+    #: RT-ADR-2 — conservative prompt path for every compat vendor.
+    structured_output_capability: ClassVar[StructuredOutputCapability] = "prompt"
+
 
 # ---------------------------------------------------------------------------
 # Per-vendor URL constants

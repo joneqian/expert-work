@@ -38,10 +38,11 @@ Error mapping per :class:`LLMError` hierarchy (E.4):
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import httpx
 from langchain_core.messages import (
@@ -53,6 +54,7 @@ from langchain_core.messages import (
 )
 
 from helix_agent.common.uplift_metrics import record_anthropic_cache_anchor
+from helix_agent.protocol import StructuredOutputSpec
 from helix_agent.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
@@ -61,6 +63,7 @@ from helix_agent.runtime.middleware import (
 from orchestrator.llm.coalesce import coalesce_system_messages
 from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
+from orchestrator.llm.structured_output import StructuredOutputCapability
 from orchestrator.multimodal import ImageResolver, split_human_content
 from orchestrator.tools.registry import ToolSpec
 
@@ -113,8 +116,12 @@ class AnthropicClient(Protocol):
         thinking: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
         betas: list[str] | None = None,
+        tool_choice: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
-        """POST ``/v1/messages`` and return the parsed JSON body."""
+        """POST ``/v1/messages`` and return the parsed JSON body.
+
+        ``tool_choice`` (Stream RT-1, tool_call path) forces the
+        schema-carrying tool; ``None`` omits the field entirely."""
 
 
 @dataclass
@@ -144,6 +151,7 @@ class HTTPAnthropicClient:
         thinking: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
         betas: list[str] | None = None,
+        tool_choice: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {
             "model": model,
@@ -154,6 +162,9 @@ class HTTPAnthropicClient:
             body["system"] = system
         if tools:
             body["tools"] = tools
+        if tool_choice is not None:
+            # Stream RT-1 — force the schema-carrying tool.
+            body["tool_choice"] = tool_choice
         if temperature is not None:
             body["temperature"] = temperature
         # Stream CM-9 — compute-control fields (both GA, no beta header).
@@ -221,6 +232,7 @@ class RecordingAnthropicClient:
         thinking: dict[str, Any] | None = None,
         output_config: dict[str, Any] | None = None,
         betas: list[str] | None = None,
+        tool_choice: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         self.calls.append(
             {
@@ -233,6 +245,7 @@ class RecordingAnthropicClient:
                 "thinking": thinking,
                 "output_config": output_config,
                 "betas": betas,
+                "tool_choice": tool_choice,
             }
         )
         if self.raise_with is not None:
@@ -250,6 +263,11 @@ class AnthropicProvider:
     :class:`~orchestrator.llm.router.LLMRouter` + E.4 middleware so the
     adapter has a single responsibility and is trivial to swap.
     """
+
+    #: Stream RT-1 (RT-ADR-2) — Anthropic enforces schemas via one
+    #: forced tool call carrying the schema (the stable path; no
+    #: ``response_format`` on the Messages API).
+    structured_output_capability: ClassVar[StructuredOutputCapability] = "tool_call"
 
     client: AnthropicClient
     model: str
@@ -291,6 +309,7 @@ class AnthropicProvider:
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
     ) -> AIMessage:
         # Stream RT-2 (RT-ADR-5) — fold any mid-conversation SystemMessage
         # (the L2 ``<context-summary>`` lands mid-list) into the leading
@@ -302,12 +321,26 @@ class AnthropicProvider:
         # Stream HX-13 — deferred markers ride the specs (agent_node sets
         # them on the native_search tier). Once the beta has been rejected,
         # strip the markers so every later call goes out plain.
-        use_native = any(spec.defer_loading for spec in tools) and not self._native_search_disabled
+        # Stream RT-1 (§ 7.5) — a structured call forces a single tool, so
+        # the tool-search beta / defer markers step aside for this request.
+        use_native = (
+            any(spec.defer_loading for spec in tools)
+            and not self._native_search_disabled
+            and output_schema is None
+        )
         if self._native_search_disabled:
             tools = [
                 replace(spec, defer_loading=False) if spec.defer_loading else spec for spec in tools
             ]
-        tool_payload = [_to_anthropic_tool(spec) for spec in tools] if tools else None
+        tool_choice: dict[str, Any] | None = None
+        if output_schema is not None:
+            # Stream RT-1 (RT-ADR-2 tool_call path) — one forced tool
+            # carries the schema; any regular tools are superseded for
+            # this call (the schema tool is the only valid response).
+            tool_payload: list[dict[str, Any]] | None = [_structured_output_tool(output_schema)]
+            tool_choice = {"type": "tool", "name": output_schema.name}
+        else:
+            tool_payload = [_to_anthropic_tool(spec) for spec in tools] if tools else None
 
         # Stream L.L1 — convert ``system`` from string to block list with
         # cache_control marker, then mark the trailing messages.
@@ -326,10 +359,17 @@ class AnthropicProvider:
         else:
             system_payload = system_text
 
-        if self.thinking_enabled is False:
-            # Stream Thinking-Toggle — explicit off; effort is moot once disabled.
+        if output_schema is not None:
+            # Stream RT-1 — the API rejects a forced ``tool_choice`` when
+            # (extended/adaptive) thinking is active, and 4.6+ models may
+            # think by default when the field is omitted. Pin thinking off
+            # for structured calls; effort is moot once disabled.
             thinking_payload: dict[str, Any] | None = {"type": "disabled"}
             output_config: dict[str, Any] | None = None
+        elif self.thinking_enabled is False:
+            # Stream Thinking-Toggle — explicit off; effort is moot once disabled.
+            thinking_payload = {"type": "disabled"}
+            output_config = None
         else:
             thinking_payload = {"type": "adaptive"} if self.adaptive_thinking else None
             output_config = {"effort": self.effort} if self.effort is not None else None
@@ -344,6 +384,7 @@ class AnthropicProvider:
                 thinking=thinking_payload,
                 output_config=output_config,
                 betas=[_TOOL_SEARCH_BETA] if use_native else None,
+                tool_choice=tool_choice,
             )
         except LLMClientError:
             if not use_native:
@@ -370,7 +411,10 @@ class AnthropicProvider:
                 betas=None,
             )
 
-        return _from_anthropic_response(body)
+        decoded = _from_anthropic_response(body)
+        if output_schema is not None:
+            return _extract_structured_response(decoded, output_schema)
+        return decoded
 
 
 def _truncate(text: str) -> str:
@@ -599,6 +643,37 @@ async def _human_content(
             }
         )
     return blocks
+
+
+def _structured_output_tool(spec: StructuredOutputSpec) -> dict[str, Any]:
+    """Stream RT-1 — the single forced tool that carries the schema."""
+    return {
+        "name": spec.name,
+        "description": "Return the final structured output for this request.",
+        "input_schema": dict(spec.schema),
+    }
+
+
+def _extract_structured_response(message: AIMessage, spec: StructuredOutputSpec) -> AIMessage:
+    """Stream RT-1 (tool_call path) — unwrap the forced tool call.
+
+    The schema-carrying tool call is a wire mechanism, not a real tool
+    invocation: leaking it as ``tool_calls`` would route the ReAct graph
+    to the tools node. Its args are serialised back to JSON text so the
+    router's validation loop sees the same shape as the native / prompt
+    paths. A response without the forced call (a refusal) is returned
+    as-is — its text will fail validation and trigger the correction
+    retry (RT-ADR-1).
+    """
+    for call in message.tool_calls:
+        if call.get("name") == spec.name:
+            return message.model_copy(
+                update={
+                    "content": json.dumps(call.get("args") or {}, ensure_ascii=False),
+                    "tool_calls": [],
+                }
+            )
+    return message
 
 
 def _to_anthropic_tool(spec: ToolSpec) -> dict[str, Any]:

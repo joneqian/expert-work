@@ -41,6 +41,7 @@ from typing import Self
 from aiolimiter import AsyncLimiter
 from langchain_core.messages import AIMessage, BaseMessage
 
+from helix_agent.protocol import StructuredOutputSpec
 from orchestrator.llm.router import LLMProvider
 from orchestrator.tools.registry import ToolSpec
 
@@ -99,6 +100,7 @@ class RateLimitedProvider:
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
     ) -> AIMessage:
         """Acquire a token, then delegate to the wrapped provider.
 
@@ -107,10 +109,18 @@ class RateLimitedProvider:
         keeps the E.4 ``LLMErrorHandlingMiddleware`` classification +
         E.11 ``LLMRouter`` fallback logic intact.
 
+        ``output_schema`` (Stream RT-1) is forwarded only when set so a
+        pre-RT-1 inner provider (without the parameter) keeps working
+        on unstructured calls.
+
         Acquisition is **fair** in the sense that aiolimiter wakes
         waiters in roughly arrival order, but ``aiolimiter`` does not
         guarantee strict FIFO — under high contention the throughput
         property is what we care about, not request order.
         """
         async with self.limiter:
-            return await self.inner.complete(messages=messages, tools=tools)
+            if output_schema is None:
+                return await self.inner.complete(messages=messages, tools=tools)
+            return await self.inner.complete(
+                messages=messages, tools=tools, output_schema=output_schema
+            )

@@ -66,6 +66,9 @@ from orchestrator.llm.providers import (
     OpenAIClient as OpenAIClient,
 )
 from orchestrator.llm.providers import (
+    OpenAICompatibleProvider as OpenAICompatibleProvider,
+)
+from orchestrator.llm.providers import (
     OpenAIProvider as OpenAIProvider,
 )
 from orchestrator.llm.providers import (
@@ -157,6 +160,7 @@ __all__ = [
     "OAuthCapableProvider",
     "OpenAIClient",
     "OpenAICompatibleEmbedder",
+    "OpenAICompatibleProvider",
     "OpenAIProvider",
     "ProviderHandle",
     "RateLimitedProvider",

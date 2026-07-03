@@ -52,6 +52,9 @@ from orchestrator.llm.providers.openai_compatible import (
     QWEN_BASE_URL as QWEN_BASE_URL,
 )
 from orchestrator.llm.providers.openai_compatible import (
+    OpenAICompatibleProvider as OpenAICompatibleProvider,
+)
+from orchestrator.llm.providers.openai_compatible import (
     make_azure_client as make_azure_client,
 )
 from orchestrator.llm.providers.openai_compatible import (
@@ -88,6 +91,7 @@ __all__ = [
     "HTTPAnthropicClient",
     "HTTPOpenAIClient",
     "OpenAIClient",
+    "OpenAICompatibleProvider",
     "OpenAIProvider",
     "RecordingAnthropicClient",
     "RecordingOpenAIClient",

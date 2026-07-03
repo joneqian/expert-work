@@ -45,7 +45,7 @@ import json
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import httpx
 from langchain_core.messages import (
@@ -56,6 +56,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from helix_agent.protocol import StructuredOutputSpec
 from helix_agent.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
@@ -64,6 +65,10 @@ from helix_agent.runtime.middleware import (
 from orchestrator.llm.coalesce import coalesce_system_messages
 from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
+from orchestrator.llm.structured_output import (
+    StructuredOutputCapability,
+    schema_instruction,
+)
 from orchestrator.multimodal import ImageResolver, split_human_content
 from orchestrator.tools.registry import ToolSpec
 
@@ -94,6 +99,7 @@ class OpenAIClient(Protocol):
         temperature: float | None = None,
         extra_body: dict[str, Any] | None = None,
         tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         """POST ``/v1/chat/completions`` and return the parsed JSON body.
 
@@ -101,7 +107,11 @@ class OpenAIClient(Protocol):
         extension fields into the top-level request body — the thinking
         controls of the OpenAI-compatible vendors (``enable_thinking``,
         ``thinking``, ``reasoning_effort``) are all top-level
-        non-standard fields, so one channel covers every vendor."""
+        non-standard fields, so one channel covers every vendor.
+
+        ``response_format`` (Stream RT-1, native path) carries the
+        ``{"type": "json_schema", ...}`` structured-output constraint;
+        ``None`` omits the field entirely."""
 
 
 @dataclass
@@ -141,6 +151,7 @@ class HTTPOpenAIClient:
         temperature: float | None = None,
         extra_body: dict[str, Any] | None = None,
         tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         body: dict[str, Any] = {"model": model, "messages": messages}
         if tools:
@@ -148,6 +159,9 @@ class HTTPOpenAIClient:
         if tool_choice is not None:
             # Stream HX-13 — the allowed_tools subset constraint.
             body["tool_choice"] = tool_choice
+        if response_format is not None:
+            # Stream RT-1 — native structured-output constraint.
+            body["response_format"] = response_format
         if temperature is not None:
             body["temperature"] = temperature
         if extra_body:
@@ -206,6 +220,7 @@ class RecordingOpenAIClient:
         temperature: float | None = None,
         extra_body: dict[str, Any] | None = None,
         tool_choice: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         self.calls.append(
             {
@@ -215,6 +230,7 @@ class RecordingOpenAIClient:
                 "temperature": temperature,
                 "extra_body": extra_body,
                 "tool_choice": tool_choice,
+                "response_format": response_format,
             }
         )
         if self.raise_with is not None:
@@ -230,6 +246,10 @@ class OpenAIProvider:
     (``ModelSpec.temperature``). ``None`` omits it from the request so
     the provider applies its own default.
     """
+
+    #: Stream RT-1 (RT-ADR-2) — stock OpenAI enforces schemas natively
+    #: via ``response_format: {"type": "json_schema"}`` (strict).
+    structured_output_capability: ClassVar[StructuredOutputCapability] = "native"
 
     client: OpenAIClient
     model: str
@@ -251,13 +271,38 @@ class OpenAIProvider:
         *,
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
+        output_schema: StructuredOutputSpec | None = None,
     ) -> AIMessage:
+        # Stream RT-1 (RT-ADR-2 prompt path, § 7.5) — inject the schema
+        # instruction as a trailing SystemMessage BEFORE coalescing:
+        # RT-ADR-5 below folds it into the single leading system block,
+        # where in-order concatenation makes it the FINAL segment.
+        # Injecting after mapping would ship a non-leading wire-level
+        # ``system`` role — exactly the strict-backend 400 that coalescing
+        # exists to prevent, and the prompt-path vendors (qwen / glm /
+        # deepseek / vLLM ...) are that strict population.
+        if output_schema is not None and self.structured_output_capability != "native":
+            messages = [*messages, SystemMessage(content=schema_instruction(output_schema))]
         # Stream RT-2 (RT-ADR-5) — strict OpenAI-compatible backends 400 on
         # a non-leading ``system`` role (the L2 ``<context-summary>`` lands
         # mid-list); fold mid-conversation SystemMessages into the leading
         # system before mapping. Per-request only; input never mutated.
         messages = coalesce_system_messages(messages)
         mapped = await _to_openai_messages(messages, self.image_resolver)
+        # Stream RT-1 (RT-ADR-2 native path) — stock OpenAI enforces the
+        # schema on the wire via response_format json_schema.
+        # output_schema=None keeps the request byte-identical (hard
+        # backward-compat constraint).
+        response_format: dict[str, Any] | None = None
+        if output_schema is not None and self.structured_output_capability == "native":
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": output_schema.name,
+                    "schema": output_schema.schema,
+                    "strict": output_schema.strict,
+                },
+            }
         # Stream HX-13 — defer markers ride the specs (agent_node sets them
         # on the allowed_tools tier): the FULL schema set stays on the wire
         # (prompt-cache friendly) and the marked tools are excluded from
@@ -284,6 +329,7 @@ class OpenAIProvider:
                 temperature=self.temperature,
                 extra_body=self.thinking_payload,
                 tool_choice=tool_choice,
+                response_format=response_format,
             )
         except LLMClientError:
             if not use_allowed:
@@ -301,6 +347,7 @@ class OpenAIProvider:
                 temperature=self.temperature,
                 extra_body=self.thinking_payload,
                 tool_choice=None,
+                response_format=response_format,
             )
 
         return _from_openai_response(body)

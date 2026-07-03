@@ -205,6 +205,7 @@ from helix_agent.protocol.skill import (
     SkillVisibility,
     parse_skill_ref,
 )
+from helix_agent.protocol.structured_output import StructuredOutputSpec
 from helix_agent.protocol.subagent import (
     MAX_RESULT_EXCERPT_CHARS,
     SubAgentInvocation,
@@ -407,6 +408,7 @@ __all__ = [
     "SkillStatus",
     "SkillVersion",
     "SkillVisibility",
+    "StructuredOutputSpec",
     "SubAgentInvocation",
     "SubAgentSpec",
     "SubagentStatus",
