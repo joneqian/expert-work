@@ -573,7 +573,9 @@ class ContextCompressionPolicy(BaseModel):
     non-system messages, summarising everything in between via an LLM
     call. ``max_passes`` caps repeated compression attempts before the
     run aborts with ``ContextOverflowError`` (Mini-ADR L-2 — no
-    silent fallback).
+    silent fallback; RT-ADR-6 softens one case: a transient summariser
+    LLM failure skips compression for the turn and only aborts after
+    three consecutive failed turns).
     """
 
     model_config = ConfigDict(extra="forbid")

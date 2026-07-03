@@ -8,7 +8,11 @@ with ``tool_calls`` populated.
 
 Wire-format mapping (M0 minimal):
 
-- ``SystemMessage`` → ``{"role": "system", "content": <text>}``.
+- ``SystemMessage`` → ``{"role": "system", "content": <text>}``. Stream
+  RT-2 (RT-ADR-5): mid-conversation SystemMessages are coalesced into
+  the leading system entry before mapping — strict OpenAI-compatible
+  backends reject a non-leading ``system`` role with 400. See
+  :mod:`orchestrator.llm.coalesce`.
 - ``HumanMessage`` → ``{"role": "user", "content": <text>}``; when the
   message carries ``image_ref`` blocks (J.6 Path A) ``content`` becomes a
   block list with ``{"type": "image_url", ...}`` entries, the images
@@ -57,6 +61,7 @@ from helix_agent.runtime.middleware import (
     LLMNetworkError,
     LLMServerError,
 )
+from orchestrator.llm.coalesce import coalesce_system_messages
 from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
 from orchestrator.multimodal import ImageResolver, split_human_content
@@ -247,6 +252,11 @@ class OpenAIProvider:
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
     ) -> AIMessage:
+        # Stream RT-2 (RT-ADR-5) — strict OpenAI-compatible backends 400 on
+        # a non-leading ``system`` role (the L2 ``<context-summary>`` lands
+        # mid-list); fold mid-conversation SystemMessages into the leading
+        # system before mapping. Per-request only; input never mutated.
+        messages = coalesce_system_messages(messages)
         mapped = await _to_openai_messages(messages, self.image_resolver)
         # Stream HX-13 — defer markers ride the specs (agent_node sets them
         # on the allowed_tools tier): the FULL schema set stays on the wire

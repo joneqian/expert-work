@@ -16,6 +16,12 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
 from orchestrator.context import ContextCompressor, ContextOverflowError, estimate_tokens
+from orchestrator.context.compressor import (
+    _SUMMARY_INPUT_CHAR_BUDGET,
+    _SUMMARY_PER_MESSAGE_CHAR_CAP,
+    _bound_text,
+    _format_middle_for_summary,
+)
 from orchestrator.tools.registry import ToolSpec
 
 
@@ -328,38 +334,201 @@ async def test_compress_uses_minimum_one_pass() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Defensive: summariser raising → ContextOverflowError
+# RT-ADR-6 — transient summariser failure skips the round; only three
+# consecutive failed rounds escalate to ContextOverflowError
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_compress_propagates_summariser_failure_as_overflow() -> None:
-    """If the summariser itself raises the compressor surfaces a
-    ContextOverflowError so the orchestrator sees the run-failed
-    audit row rather than crashing on a programmer-error stack."""
+@dataclass
+class _FlakySummariser:
+    """Follows ``script`` per call — ``False`` raises, ``True`` returns a
+    summary. Calls beyond the script succeed."""
 
-    @dataclass
-    class _RaisingSummariser:
-        async def __call__(
-            self,
-            *,
-            messages: Sequence[BaseMessage],
-            tools: Sequence[ToolSpec],
-        ) -> AIMessage:
-            del messages, tools
-            msg = "upstream down"
+    script: list[bool] = field(default_factory=list)
+    calls: int = 0
+
+    async def __call__(
+        self,
+        *,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[ToolSpec],
+    ) -> AIMessage:
+        del messages, tools
+        idx = self.calls
+        self.calls += 1
+        if idx < len(self.script) and not self.script[idx]:
+            msg = "summariser upstream down"
             raise RuntimeError(msg)
+        return AIMessage(content="- recovered summary")
 
-    compressor = ContextCompressor(
-        llm_caller=_RaisingSummariser(),
+
+def _flaky_compressor(summariser: _FlakySummariser) -> ContextCompressor:
+    return ContextCompressor(
+        llm_caller=summariser,
         context_window=200,
         threshold_pct=0.5,
         head_keep=1,
         tail_keep=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_transient_summariser_failure_skips_round() -> None:
+    """RT-ADR-6 — one summariser failure no longer fails the run: the
+    round returns the messages uncompressed and the next turn retries."""
+    summariser = _FlakySummariser(script=[False])
+    compressor = _flaky_compressor(summariser)
     msgs = _conversation(head=1, middle=10, tail=1, char_per_msg=80)
+
+    out = await compressor.compress(msgs, streak_key="thread-a")
+
+    assert out == msgs  # unchanged — compression skipped, not failed
+    assert summariser.calls == 1  # no retry within the same round
+
+
+@pytest.mark.asyncio
+async def test_three_consecutive_summariser_failures_raise_overflow() -> None:
+    """RT-ADR-6 — the fail-hard backstop survives: a persistently
+    broken summariser escalates on the third consecutive failed round
+    of the SAME conversation instead of silently ballooning forever."""
+    summariser = _FlakySummariser(script=[False, False, False])
+    compressor = _flaky_compressor(summariser)
+    msgs = _conversation(head=1, middle=10, tail=1, char_per_msg=80)
+
+    # streak 1 / 2 — skipped
+    assert await compressor.compress(msgs, streak_key="thread-a") == msgs
+    assert await compressor.compress(msgs, streak_key="thread-a") == msgs
+    with pytest.raises(ContextOverflowError):  # streak 3 — fail-hard
+        await compressor.compress(msgs, streak_key="thread-a")
+
+
+@pytest.mark.asyncio
+async def test_summariser_success_resets_failure_streak() -> None:
+    """A successful pass between failures resets the conversation's
+    consecutive-failure count — only an unbroken streak escalates."""
+    summariser = _FlakySummariser(script=[False, False, True, False, False])
+    compressor = _flaky_compressor(summariser)
+    msgs = _conversation(head=1, middle=10, tail=1, char_per_msg=80)
+
+    await compressor.compress(msgs, streak_key="thread-a")  # fail — streak 1
+    await compressor.compress(msgs, streak_key="thread-a")  # fail — streak 2
+    await compressor.compress(msgs, streak_key="thread-a")  # success — bucket cleared
+    # Two more failures only rebuild the streak to 2 — no overflow.
+    assert await compressor.compress(msgs, streak_key="thread-a") == msgs
+    assert await compressor.compress(msgs, streak_key="thread-a") == msgs
+
+
+@pytest.mark.asyncio
+async def test_failure_streaks_isolated_per_key() -> None:
+    """The compressor instance is shared per (tenant, agent, version)
+    across conversations — conversation A's two failures must not
+    escalate conversation B's first wobble into a false overflow."""
+    summariser = _FlakySummariser(script=[False, False, False, False])
+    compressor = _flaky_compressor(summariser)
+    msgs = _conversation(head=1, middle=10, tail=1, char_per_msg=80)
+
+    # Conversation A fails twice — streak 2, still skipping.
+    assert await compressor.compress(msgs, streak_key="thread-a") == msgs
+    assert await compressor.compress(msgs, streak_key="thread-a") == msgs
+    # Conversation B's FIRST failure: with a shared counter this would
+    # be the third consecutive failure and raise — it must skip.
+    assert await compressor.compress(msgs, streak_key="thread-b") == msgs
+    # And A's streak is likewise untouched by B: its third failure raises.
     with pytest.raises(ContextOverflowError):
-        await compressor.compress(msgs)
+        await compressor.compress(msgs, streak_key="thread-a")
+
+
+@pytest.mark.asyncio
+async def test_none_streak_key_skips_without_escalation() -> None:
+    """Without a conversation identity the compressor cannot count
+    consecutive failures safely on the shared instance — every
+    transient failure keeps the skip-once semantics and never
+    escalates (empty-middle / max_passes fail-hard still apply)."""
+    summariser = _FlakySummariser(script=[False] * 5)
+    compressor = _flaky_compressor(summariser)
+    msgs = _conversation(head=1, middle=10, tail=1, char_per_msg=80)
+
+    for _ in range(5):
+        assert await compressor.compress(msgs) == msgs
+
+
+def test_failure_streak_map_bounded() -> None:
+    """The per-conversation map is capped — the oldest-inserted entry
+    is evicted once ``_MAX_STREAK_KEYS`` distinct keys accumulate."""
+    from orchestrator.context.compressor import _MAX_STREAK_KEYS, _FailureStreaks
+
+    streaks = _FailureStreaks()
+    for i in range(_MAX_STREAK_KEYS):
+        streaks.bump(f"t-{i}")
+    assert len(streaks.counts) == _MAX_STREAK_KEYS
+
+    streaks.bump("overflow")
+
+    assert len(streaks.counts) == _MAX_STREAK_KEYS
+    assert "t-0" not in streaks.counts  # oldest evicted
+    assert streaks.counts["overflow"] == 1
+
+
+# ---------------------------------------------------------------------------
+# RT-ADR-10 — summariser prompt budget hardening
+# ---------------------------------------------------------------------------
+
+
+def test_bound_text_short_input_unchanged() -> None:
+    assert _bound_text("short", 100) == "short"
+
+
+def test_bound_text_keeps_head_two_thirds_and_tail() -> None:
+    """deer-flow #3887 ``_bound_text`` shape: head gets 2/3 of the
+    budget, the tail the remainder, with a visible elision marker."""
+    text = "H" * 200 + "T" * 100
+    out = _bound_text(text, 30)
+    head = (30 * 2) // 3
+    assert out.startswith("H" * head)
+    assert out.endswith("T" * (30 - head))
+    assert "truncated" in out
+
+
+def test_format_middle_caps_single_oversized_message() -> None:
+    """A single 3x-over-cap tool dump cannot monopolise the transcript."""
+    big = "x" * (_SUMMARY_PER_MESSAGE_CHAR_CAP * 3)
+    out = _format_middle_for_summary([HumanMessage(content=big)])
+    # Small slack for the role prefix + elision marker.
+    assert len(out) <= _SUMMARY_PER_MESSAGE_CHAR_CAP + 100
+    assert "truncated" in out
+
+
+def test_format_middle_enforces_total_budget() -> None:
+    """Many under-cap messages still cannot exceed the total budget."""
+    msgs = [HumanMessage(content=f"m{i}-" + "y" * 1500) for i in range(30)]  # ~45k chars
+    out = _format_middle_for_summary(msgs)
+    assert len(out) <= _SUMMARY_INPUT_CHAR_BUDGET + 100
+    assert "truncated" in out
+
+
+@pytest.mark.asyncio
+async def test_update_mode_splits_budget_between_prior_and_events() -> None:
+    """Update mode halves the input budget: PREVIOUS SUMMARY and NEW
+    EVENTS each get at most half, so neither side can starve the other."""
+    summariser = _RecordingSummariser()
+    half = _SUMMARY_INPUT_CHAR_BUDGET // 2
+    giant_prior = "<context-summary>\n" + "p" * (half * 3) + "\n</context-summary>"
+    msgs: list[BaseMessage] = [
+        HumanMessage(content="head-1"),
+        HumanMessage(content="head-2"),
+        SystemMessage(content=giant_prior),
+        *_conversation(head=0, middle=14, tail=0, char_per_msg=3000),
+        HumanMessage(content="tail-1"),
+        HumanMessage(content="tail-2"),
+    ]
+    await _compressor(summariser).compress(msgs)
+
+    user = str(summariser.prompts[0][1].content)
+    prior_section, events_section = user.split("NEW EVENTS:")
+    assert len(prior_section) <= half + 200
+    assert len(events_section) <= half + 200
+    assert "truncated" in prior_section
+    assert "truncated" in events_section
 
 
 # ---------------------------------------------------------------------------
