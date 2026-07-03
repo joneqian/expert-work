@@ -29,9 +29,10 @@ difference (CM-K6).
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Protocol
+
+from pydantic import BaseModel, ValidationError
 
 # ---------------------------------------------------------------------------
 # LongMemEval — get_anscheck_prompt(), verbatim templates
@@ -155,21 +156,33 @@ def locomo_judge_prompt(*, question: str, gold_answer: str, generated_answer: st
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
 
+class _LocomoLabelModel(BaseModel):
+    """The ``{"label": ...}`` object the LoCoMo prompt demands (RT-1 PR-2).
+
+    A string field only — a non-string label fails validation exactly
+    where the old ``isinstance(label, str)`` check refused it.
+    """
+
+    label: str
+
+
 def parse_locomo_verdict(reply: str) -> bool:
     """Mem0 rule: JSON ``label == "CORRECT"`` — with a substring fallback.
 
     Upstream forces ``response_format=json_object``; the Anthropic judge
     has no such switch, so a reply that drops the JSON wrapper is graded
     by the label word itself (the prompt forbids emitting both labels).
+    The ``{...}`` extraction stays (the prompt asks for a reasoning
+    sentence *before* the JSON); pydantic validates the extracted object.
     """
     match = _JSON_OBJECT.search(reply)
     if match is not None:
         try:
-            label = json.loads(match.group(0)).get("label")
-        except json.JSONDecodeError:
-            label = None  # malformed JSON — grade by the label word below
-        if isinstance(label, str):
-            return label.strip().upper() == "CORRECT"
+            verdict = _LocomoLabelModel.model_validate_json(match.group(0))
+        except ValidationError:
+            verdict = None  # malformed / non-string label — grade by the word below
+        if verdict is not None:
+            return verdict.label.strip().upper() == "CORRECT"
     has_correct = "CORRECT" in reply.upper()
     has_wrong = "WRONG" in reply.upper()
     return has_correct and not has_wrong

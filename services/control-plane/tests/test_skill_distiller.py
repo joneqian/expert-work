@@ -11,22 +11,35 @@ from typing import Any
 from uuid import UUID
 
 from control_plane.skill_distiller import (
+    DistillerReply,
     SkillDistiller,
     render_trajectory,
     tools_used,
 )
+from helix_agent.protocol import StructuredOutputSpec
+from helix_agent.runtime.middleware import LLMOutputValidationError
 
 _TENANT = UUID("33333333-3333-3333-3333-333333333333")
 
 
 class FakeModel:
-    def __init__(self, reply: str) -> None:
+    def __init__(self, reply: str, parsed: dict[str, Any] | None = None) -> None:
         self.reply = reply
+        self.parsed = parsed
         self.prompts: list[str] = []
+        self.schemas: list[StructuredOutputSpec | None] = []
 
-    async def __call__(self, *, prompt: str, tenant_id: UUID, model: str | None = None) -> str:
+    async def __call__(
+        self,
+        *,
+        prompt: str,
+        tenant_id: UUID,
+        model: str | None = None,
+        output_schema: StructuredOutputSpec | None = None,
+    ) -> DistillerReply:
         self.prompts.append(prompt)
-        return self.reply
+        self.schemas.append(output_schema)
+        return DistillerReply(text=self.reply, parsed=self.parsed)
 
 
 def _draft_json(**over: Any) -> str:
@@ -108,6 +121,84 @@ async def test_contrastive_prompt_includes_failures() -> None:
 async def test_empty_fragment_rejected() -> None:
     distiller = SkillDistiller(model=FakeModel(_draft_json(prompt_fragment="  ")))
     assert await distiller.distill(tenant_id=_TENANT, successes=["ok"]) is None
+
+
+# --------------------------------------------------------------------------- #
+# RT-1 PR-2: structured output through the model seam
+# --------------------------------------------------------------------------- #
+
+
+async def test_distill_passes_output_schema() -> None:
+    model = FakeModel(_draft_json())
+    await SkillDistiller(model=model).distill(tenant_id=_TENANT, successes=["ok"])
+    assert len(model.schemas) == 1
+    spec = model.schemas[0]
+    assert spec is not None
+    assert spec.name == "distilled_skill_draft"
+    # The draft's substance is required; the descriptive fields keep
+    # their pre-RT-1 ``.get(...)`` optionality (model defaults).
+    assert set(spec.schema["required"]) == {"name", "prompt_fragment"}
+    assert set(spec.schema["properties"]) == {
+        "name",
+        "prompt_fragment",
+        "tool_names",
+        "description",
+        "category",
+    }
+
+
+async def test_distill_tolerates_missing_descriptive_fields() -> None:
+    """Pre-RT-1 ``.get(...)`` pin — a reply with only the substance
+    fields still yields a usable draft with defaulted extras."""
+    reply = json.dumps(
+        {"name": "summarise-csv", "prompt_fragment": "Read headers first, then aggregate."}
+    )
+    draft = await SkillDistiller(model=FakeModel(reply)).distill(
+        tenant_id=_TENANT, successes=["ok"]
+    )
+    assert draft is not None
+    assert draft.tool_names == ()
+    assert draft.description == ""
+    assert draft.category is None
+
+
+async def test_distill_prefers_router_parsed_dict() -> None:
+    """The validated ``parsed`` dict wins over raw text."""
+    model = FakeModel(
+        "prose that is not JSON",
+        parsed={
+            "name": "summarise-csv",
+            "prompt_fragment": "Read headers first, then aggregate per column.",
+            "tool_names": ["knowledge_search"],
+            "description": "Summarise tabular data",
+            "category": None,
+        },
+    )
+    draft = await SkillDistiller(model=model).distill(tenant_id=_TENANT, successes=["ok"])
+    assert draft is not None
+    assert draft.name == "summarise-csv"
+    assert draft.category is None
+
+
+async def test_distill_validation_exhausted_returns_none() -> None:
+    """RT-ADR-3 — LLMOutputValidationError == unusable reply → None
+    (distillation failed), never a raise up to the SE-6 worker."""
+
+    class _ExplodingModel:
+        async def __call__(
+            self,
+            *,
+            prompt: str,
+            tenant_id: UUID,
+            model: str | None = None,
+            output_schema: StructuredOutputSpec | None = None,
+        ) -> DistillerReply:
+            raise LLMOutputValidationError("still invalid after retries")
+
+    draft = await SkillDistiller(model=_ExplodingModel()).distill(
+        tenant_id=_TENANT, successes=["ok"]
+    )
+    assert draft is None
 
 
 # --------------------------------------------------------------------------- #

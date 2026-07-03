@@ -16,15 +16,16 @@ with no model key. The real LLM-as-judge implementation is PI-2b-2.
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict, ValidationError
 
+from helix_agent.protocol import StructuredOutputSpec
 from orchestrator.llm.caller import LLMCaller
+from orchestrator.llm.structured_output import strip_json_fences
 
 
 @dataclass(frozen=True)
@@ -114,29 +115,65 @@ _JUDGE_SYSTEM = (
     'translation"}'
 )
 
-_JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
+
+class AlignmentVerdictModel(BaseModel):
+    """Wire shape of the output-judge verdict (Stream RT-1 PR-2).
+
+    ``model_json_schema()`` feeds the caller's ``output_schema`` so the
+    router enforces the shape at the provider (RT-ADR-2 three paths) and
+    validates + retries before the judge ever sees the reply.
+
+    ``reason`` defaults to ``""`` like the pre-RT-1 ``data.get("reason",
+    "")`` — a verdict whose booleans say BLOCK must block even when the
+    descriptive field is missing; requiring it would turn that reply
+    into a judge *failure* and fail-open could then ALLOW it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    aligned: bool
+    leak_suspected: bool
+    reason: str = ""
 
 
-def _parse_verdict(text: str) -> OutputJudgeVerdict:
-    """Parse the judge model's reply into a verdict.
+class ActionAlignmentVerdictModel(BaseModel):
+    """Wire shape of the action-judge verdict (Stream RT-1 PR-2)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    aligned: bool
+    reason: str = ""
+
+
+_OUTPUT_JUDGE_SPEC = StructuredOutputSpec(
+    schema=AlignmentVerdictModel.model_json_schema(), name="output_judge_verdict"
+)
+_ACTION_JUDGE_SPEC = StructuredOutputSpec(
+    schema=ActionAlignmentVerdictModel.model_json_schema(), name="action_judge_verdict"
+)
+
+
+def _validated_verdict[VerdictModelT: BaseModel](
+    reply: AIMessage, model_cls: type[VerdictModelT], label: str
+) -> VerdictModelT:
+    """Validate a judge reply into ``model_cls``.
+
+    Prefers the router-validated ``additional_kwargs["parsed"]`` dict
+    (the RT-1 structured-output contract); a caller without structured
+    support falls back to validating the raw text (fences stripped).
 
     Raises :class:`ValueError` on anything unparseable — the caller treats a
     raise as a judge failure and applies the fail-open / fail-closed policy,
     so a garbled judge reply never silently passes a leak.
     """
-    match = _JSON_OBJ.search(text)
-    if match is None:
-        msg = "judge reply had no JSON object"
-        raise ValueError(msg)
-    data = json.loads(match.group(0))
-    if not isinstance(data, dict) or "aligned" not in data or "leak_suspected" not in data:
-        msg = "judge JSON missing required keys"
-        raise ValueError(msg)
-    return OutputJudgeVerdict(
-        aligned=bool(data["aligned"]),
-        leak_suspected=bool(data["leak_suspected"]),
-        reason=str(data.get("reason", ""))[:200],
-    )
+    parsed = reply.additional_kwargs.get("parsed")
+    try:
+        if isinstance(parsed, Mapping):
+            return model_cls.model_validate(dict(parsed))
+        return model_cls.model_validate_json(strip_json_fences(str(reply.content)))
+    except ValidationError as exc:
+        msg = f"{label} reply is not a valid JSON verdict"
+        raise ValueError(msg) from exc
 
 
 @dataclass(frozen=True)
@@ -165,8 +202,14 @@ class LLMOutputJudge:
         reply = await self.caller(
             messages=[SystemMessage(content=_JUDGE_SYSTEM), HumanMessage(content=user)],
             tools=(),
+            output_schema=_OUTPUT_JUDGE_SPEC,
         )
-        return _parse_verdict(str(reply.content))
+        verdict = _validated_verdict(reply, AlignmentVerdictModel, "judge")
+        return OutputJudgeVerdict(
+            aligned=verdict.aligned,
+            leak_suspected=verdict.leak_suspected,
+            reason=verdict.reason[:200],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -251,18 +294,6 @@ _ACTION_JUDGE_SYSTEM = (
 )
 
 
-def _parse_action_verdict(text: str) -> ActionVerdict:
-    match = _JSON_OBJ.search(text)
-    if match is None:
-        msg = "action judge reply had no JSON object"
-        raise ValueError(msg)
-    data = json.loads(match.group(0))
-    if not isinstance(data, dict) or "aligned" not in data:
-        msg = "action judge JSON missing 'aligned'"
-        raise ValueError(msg)
-    return ActionVerdict(aligned=bool(data["aligned"]), reason=str(data.get("reason", ""))[:200])
-
-
 @dataclass(frozen=True)
 class LLMActionJudge:
     """:class:`ActionJudge` backed by an :class:`LLMCaller` (PI-3b)."""
@@ -277,8 +308,10 @@ class LLMActionJudge:
         reply = await self.caller(
             messages=[SystemMessage(content=_ACTION_JUDGE_SYSTEM), HumanMessage(content=user)],
             tools=(),
+            output_schema=_ACTION_JUDGE_SPEC,
         )
-        return _parse_action_verdict(str(reply.content))
+        verdict = _validated_verdict(reply, ActionAlignmentVerdictModel, "action judge")
+        return ActionVerdict(aligned=verdict.aligned, reason=verdict.reason[:200])
 
 
 __all__ = [

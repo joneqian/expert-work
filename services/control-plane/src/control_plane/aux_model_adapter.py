@@ -42,7 +42,7 @@ from helix_agent.common.credentials import (
     CredentialsResolverError,
 )
 from helix_agent.common.uplift_metrics import record_credentials_resolve
-from helix_agent.protocol import ModelSpec, Provider
+from helix_agent.protocol import ModelSpec, Provider, StructuredOutputSpec
 
 if TYPE_CHECKING:
     from helix_agent.runtime.secret_store import SecretStore
@@ -86,6 +86,7 @@ class LLMRouterAuxModelAdapter:
         prompt: str,
         model: str | None,
         tenant_id: UUID,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> ConsolidatorLLMReply:
         # Lazy import — ``orchestrator`` depends on control-plane in
         # some test paths via subagent runtime, and importing
@@ -123,14 +124,21 @@ class LLMRouterAuxModelAdapter:
         )
         router = await build_llm_router(spec, secret_store=self._secret_store)
         message = HumanMessage(content=prompt)
-        response = await router(messages=[message], tools=[])
+        # RT-1 — ``output_schema`` threads straight through to the router's
+        # validation loop; ``None`` keeps the call wire-identical to the
+        # pre-RT-1 behaviour. A validation-exhausted call raises
+        # ``LLMOutputValidationError``, which the consolidator maps onto
+        # its existing malformed-reply degrade (RT-ADR-3).
+        response = await router(messages=[message], tools=[], output_schema=output_schema)
         text = _coerce_text(response.content)
+        parsed_raw = response.additional_kwargs.get("parsed")
         usage: dict[str, int] = dict(response.usage_metadata or {})  # type: ignore[arg-type]
         return ConsolidatorLLMReply(
             text=text,
             model=model_name,
             input_tokens=int(usage.get("input_tokens", 0) or 0),
             output_tokens=int(usage.get("output_tokens", 0) or 0),
+            parsed=parsed_raw if isinstance(parsed_raw, dict) else None,
         )
 
 

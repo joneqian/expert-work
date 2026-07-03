@@ -17,7 +17,7 @@ from control_plane.memory_consolidator import ConsolidatorLLMReply
 from control_plane.skill_evolution_metering import current_metering, metering_scope
 from control_plane.skill_evolution_wiring import _AuxJudge, _AuxText
 from helix_agent.persistence.token_usage_store import InMemoryTokenUsageStore
-from helix_agent.protocol import CurationCandidateRecord
+from helix_agent.protocol import CurationCandidateRecord, StructuredOutputSpec
 
 _NOW = datetime(2026, 7, 3, 9, 0, 0, tzinfo=UTC)
 
@@ -28,7 +28,12 @@ class _FakeAux:
         self.tenants: list[UUID] = []
 
     async def __call__(
-        self, *, prompt: str, model: str | None, tenant_id: UUID
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        tenant_id: UUID,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> ConsolidatorLLMReply:
         self.tenants.append(tenant_id)
         return ConsolidatorLLMReply(text=self.text, model="aux-m", input_tokens=7, output_tokens=3)

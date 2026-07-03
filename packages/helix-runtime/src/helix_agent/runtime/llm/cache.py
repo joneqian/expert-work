@@ -37,6 +37,8 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
+from helix_agent.protocol import StructuredOutputSpec
+
 logger = logging.getLogger(__name__)
 
 #: Calls with ``temperature`` above this are treated as non-deterministic
@@ -131,6 +133,7 @@ class LLMResponseCache:
         messages: Sequence[BaseMessage],
         temperature: float,
         max_tokens: int,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> str:
         """Derive the per-tenant cache key.
 
@@ -138,18 +141,30 @@ class LLMResponseCache:
         isolation / easy ``SCAN`` per tenant) **and** inside the hash
         (defence in depth — a prefix-stripping bug still can't cause a
         cross-tenant hit).
+
+        ``output_schema`` (Stream RT-1 PR-2) joins the key as a
+        fingerprint — name + content digest, never the schema body — so
+        a structured call cannot hit an unstructured entry for the same
+        messages (or one made under a different schema). ``None`` adds
+        nothing to the key material, keeping every pre-RT-1 key
+        byte-identical: existing cache entries stay reachable.
         """
-        canonical = json.dumps(
-            {
-                "tenant_id": str(tenant_id),
-                "model": model,
-                "messages": [_normalize_message(m) for m in messages],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        key_material: dict[str, Any] = {
+            "tenant_id": str(tenant_id),
+            "model": model,
+            "messages": [_normalize_message(m) for m in messages],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if output_schema is not None:
+            schema_canonical = json.dumps(
+                output_schema.schema, sort_keys=True, separators=(",", ":")
+            )
+            key_material["output_schema"] = {
+                "name": output_schema.name,
+                "schema_sha256": hashlib.sha256(schema_canonical.encode("utf-8")).hexdigest(),
+            }
+        canonical = json.dumps(key_material, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         return f"{_KEY_PREFIX}:{tenant_id}:{digest}"
 

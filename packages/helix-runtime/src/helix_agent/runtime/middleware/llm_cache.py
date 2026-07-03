@@ -35,6 +35,7 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from helix_agent.protocol import StructuredOutputSpec
 from helix_agent.runtime.llm.cache import LLMResponseCache, is_cacheable
 from helix_agent.runtime.middleware.base import CallNext, MiddlewareContext
 
@@ -45,6 +46,28 @@ def _coerce_messages(raw: object) -> list[BaseMessage]:
     if isinstance(raw, list):
         return [m for m in raw if isinstance(m, BaseMessage)]
     return []
+
+
+def _coerce_output_schema(raw: object) -> StructuredOutputSpec | None:
+    """The ``output_schema`` payload entry, when it is a real spec.
+
+    Stream RT-1 PR-2 — a structured call must be keyed apart from an
+    unstructured call over the same messages. Anything other than a
+    :class:`StructuredOutputSpec` (e.g. the router's ``{name, strict}``
+    summary dict on the *around* anchor) is ignored, falling back to
+    the unstructured key.
+
+    Activation: as of RT-1 PR-2 no producer sets this payload key —
+    the agent node's before/after payloads carry only messages / tools
+    / tenant_id, and aux structured calls bypass these anchors — so
+    every key derived today is the unstructured one (byte-identical to
+    pre-RT-1; existing entries stay reachable). The fingerprint takes
+    effect when the RT-1 PR-3 agent loop places its
+    :class:`StructuredOutputSpec` instance into
+    ``payload["output_schema"]`` on BOTH anchors (lookup and store must
+    key identically, or structured entries become write-only).
+    """
+    return raw if isinstance(raw, StructuredOutputSpec) else None
 
 
 @dataclass
@@ -58,6 +81,11 @@ class LLMCacheLookupMiddleware:
       ``after`` so it runs last in the anchor).
     - ``tenant_id`` — per-tenant namespace; missing → cache disabled
       for this call (dev / unit-test path that doesn't bind a tenant).
+    - ``output_schema`` — optional :class:`StructuredOutputSpec` for a
+      structured call (Stream RT-1); joins the cache key as a
+      fingerprint so structured and unstructured calls never collide.
+      Set by the RT-1 PR-3 agent-loop wiring; see
+      :func:`_coerce_output_schema` for the activation contract.
 
     ``model`` / ``temperature`` / ``max_tokens`` are per-agent
     constants supplied at construction (from the manifest ``ModelSpec``)
@@ -87,6 +115,7 @@ class LLMCacheLookupMiddleware:
                 messages=messages,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                output_schema=_coerce_output_schema(ctx.payload.get("output_schema")),
             )
             cached = await self.cache.get(key)
             if cached is not None:
@@ -113,6 +142,9 @@ class LLMCacheStoreMiddleware:
     - ``tenant_id`` — per-tenant namespace.
     - ``cache_hit`` — ``True`` when this turn was served from cache;
       storing again would be wasted work, so we skip.
+    - ``output_schema`` — optional :class:`StructuredOutputSpec`; must
+      mirror the lookup middleware's keying exactly, or structured
+      entries would be stored under keys the lookup never derives.
     """
 
     cache: LLMResponseCache
@@ -147,6 +179,7 @@ class LLMCacheStoreMiddleware:
             messages=messages,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            output_schema=_coerce_output_schema(ctx.payload.get("output_schema")),
         )
         await self.cache.put(key, response, self.ttl_s)
         logger.info(

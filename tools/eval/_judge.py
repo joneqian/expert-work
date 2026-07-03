@@ -22,7 +22,6 @@ inflating the baseline.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -30,6 +29,7 @@ from collections.abc import Mapping
 from typing import Protocol
 
 import httpx
+from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -111,28 +111,39 @@ class AnthropicHaikuJudge:
             return 0
 
         try:
-            payload = response.json()
-            text = _extract_text(payload)
-        except (json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
+            text = _AnthropicMessagesReply.model_validate_json(response.text).first_text()
+        except (ValidationError, ValueError) as exc:
             logger.warning("judge.parse_error case=%s err=%s", case_id, type(exc).__name__)
             return 0
         return _parse_score(text)
 
 
-def _extract_text(payload: object) -> str:
-    """Pull the first ``text`` block from an Anthropic Messages response."""
-    if not isinstance(payload, dict):
-        raise TypeError("anthropic payload is not a dict")
-    content = payload.get("content")
-    if not isinstance(content, list) or not content:
-        raise ValueError("anthropic content is not a non-empty list")
-    block = content[0]
-    if not isinstance(block, dict) or block.get("type") != "text":
-        raise ValueError("first block is not a text block")
-    text = block.get("text")
-    if not isinstance(text, str):
-        raise TypeError("text block has no string body")
-    return text
+class _AnthropicContentBlock(BaseModel):
+    """One content block of an Anthropic Messages response."""
+
+    type: str
+    text: str | None = None
+
+
+class _AnthropicMessagesReply(BaseModel):
+    """The slice of an Anthropic Messages response the judge reads.
+
+    RT-1 PR-2 — pydantic envelope validation replacing the manual
+    dict-walk; the failure rule is unchanged: anything that is not a
+    response whose FIRST block is a text block scores ``0``.
+    """
+
+    content: list[_AnthropicContentBlock]
+
+    def first_text(self) -> str:
+        if not self.content:
+            msg = "anthropic content is not a non-empty list"
+            raise ValueError(msg)
+        block = self.content[0]
+        if block.type != "text" or block.text is None:
+            msg = "first block is not a text block"
+            raise ValueError(msg)
+        return block.text
 
 
 _DIGIT_RE = re.compile(r"[1-5]")

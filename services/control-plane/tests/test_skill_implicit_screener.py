@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from control_plane.memory_consolidator import ConsolidatorLLMReply
 from control_plane.skill_evolution_wiring import _AuxText, _ImplicitScreener
-from helix_agent.protocol import CurationCandidateRecord
+from helix_agent.protocol import CurationCandidateRecord, StructuredOutputSpec
 from helix_agent.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryReader, TrajectoryRecord, TrajectoryRecorder
 
@@ -28,7 +28,12 @@ class _FakeAux:
         self.calls = 0
 
     async def __call__(
-        self, *, prompt: str, model: str | None, tenant_id: UUID
+        self,
+        *,
+        prompt: str,
+        model: str | None,
+        tenant_id: UUID,
+        output_schema: StructuredOutputSpec | None = None,
     ) -> ConsolidatorLLMReply:
         self.calls += 1
         return ConsolidatorLLMReply(text=self.text, model="fake")

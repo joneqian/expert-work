@@ -94,6 +94,13 @@ def test_locomo_verdict_substring_fallback() -> None:
     assert parse_locomo_verdict('{"label": broken} CORRECT') is True
 
 
+def test_locomo_verdict_non_string_label_falls_back_to_word() -> None:
+    """RT-1 PR-2 — pydantic keeps the old ``isinstance(label, str)`` rule:
+    a non-string label is not a verdict, so the label word grades."""
+    assert parse_locomo_verdict('{"label": 1} CORRECT') is True
+    assert parse_locomo_verdict('{"label": null}') is False
+
+
 # ---------------------------------------------------------------------------
 # anthropic transport — payload rendering (no network)
 # ---------------------------------------------------------------------------
