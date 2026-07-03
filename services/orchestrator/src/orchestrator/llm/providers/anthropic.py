@@ -58,6 +58,7 @@ from helix_agent.runtime.middleware import (
     LLMNetworkError,
     LLMServerError,
 )
+from orchestrator.llm.coalesce import coalesce_system_messages
 from orchestrator.llm.providers._errors import classify_http_error
 from orchestrator.llm.providers._metrics import disclosure_fallback_total
 from orchestrator.multimodal import ImageResolver, split_human_content
@@ -291,6 +292,10 @@ class AnthropicProvider:
         messages: Sequence[BaseMessage],
         tools: Sequence[ToolSpec],
     ) -> AIMessage:
+        # Stream RT-2 (RT-ADR-5) — fold any mid-conversation SystemMessage
+        # (the L2 ``<context-summary>`` lands mid-list) into the leading
+        # system before mapping. Per-request only; input never mutated.
+        messages = coalesce_system_messages(messages)
         system_text, mapped, anchor_indices = await _to_anthropic_messages(
             messages, self.image_resolver
         )

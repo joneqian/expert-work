@@ -28,6 +28,22 @@ Mini-ADR L-2 highlights:
   silent fallback would let the run keep ballooning until the
   upstream rejects it; the explicit signal lets the orchestrator log
   a clean run-failed audit.
+* **Transient summariser failure skips, not fails (RT-ADR-6)** — a
+  summariser LLM exception no longer fails the run on the spot: the
+  round returns the messages uncompressed (metric + warning log) and
+  the next turn retries. Only ``_MAX_CONSECUTIVE_SUMMARY_FAILURES``
+  consecutive failed rounds of the SAME conversation (the streak is
+  keyed by the caller-supplied ``streak_key`` — thread_id — because a
+  compressor instance is shared across conversations) escalate to
+  :class:`ContextOverflowError`; an empty middle that is still over
+  threshold stays fail-hard (nothing left to summarise).
+* **Summariser prompt budget (RT-ADR-10)** — the transcript handed to
+  the summariser is itself bounded: a per-message char cap plus a
+  total hard budget (halved between PREVIOUS SUMMARY and NEW EVENTS
+  in update mode), so a single oversized tool dump cannot blow up the
+  summariser call. Truncation keeps the head (2/3) and tail of each
+  slice around a visible elision marker (deer-flow #3887
+  ``_bound_text`` shape).
 * **Rough char-based estimator** — ``estimate_tokens`` returns
   ``total_chars // 4``. Cheaper than tiktoken (no dependency, no
   per-message tokeniser call) and Hermes uses the same rule of
@@ -41,14 +57,33 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
+from helix_agent.common.observability import helix_counter
+from helix_agent.runtime.cancellation import RunCancelledError
 from helix_agent.runtime.tokens import TokenEstimator, estimate_messages, flatten_message
 from orchestrator.llm.caller import LLMCaller
 
 logger = logging.getLogger(__name__)
+
+# Stream RT-2 PR-1 — compressor observability: passes completed,
+# summariser failures, and rounds skipped after a transient failure
+# (RT-ADR-6). Full COMPACTION eventing lands in RT-2 PR-4; these
+# counters make the failure semantics observable now.
+_cm_compressor_pass_total = helix_counter(
+    "helix_cm_compressor_pass_total",
+    "Summarise-the-middle compressor passes completed (Stream L.L2 / RT-2).",
+)
+_cm_compressor_summary_failure_total = helix_counter(
+    "helix_cm_compressor_summary_failure_total",
+    "Summariser LLM failures during a compression round (RT-ADR-6).",
+)
+_cm_compressor_skipped_total = helix_counter(
+    "helix_cm_compressor_skipped_total",
+    "Compression rounds skipped after a transient summariser failure (RT-ADR-6).",
+)
 
 #: Stream CM-3 — pre-compaction hook. Awaited with the middle slice that is
 #: about to be summarised away, *before* it is discarded, so an upper layer
@@ -61,6 +96,34 @@ PreCompactionHook = Callable[[Sequence[BaseMessage]], Awaitable[None]]
 #: itself is bounded so a fudge here only affects when compression
 #: triggers, not what it produces.
 _CHARS_PER_TOKEN: int = 4
+
+#: RT-ADR-6 — consecutive failed compression rounds tolerated before the
+#: compressor escalates to :class:`ContextOverflowError`. Below the cap a
+#: summariser failure skips the round (the prompt goes out uncompressed —
+#: the estimate is conservative, the upstream usually still accepts it)
+#: and the next turn retries.
+_MAX_CONSECUTIVE_SUMMARY_FAILURES: int = 3
+
+#: RT-ADR-6 — upper bound on the per-conversation streak map. A
+#: ContextCompressor instance is cached per (tenant, agent, version) and
+#: long-lived, so an unbounded ``dict[streak_key, count]`` would grow
+#: with every conversation that ever saw a summariser failure. 1024
+#: distinct simultaneously-failing conversations per agent is far beyond
+#: any real incident; past it the oldest-inserted entry is evicted
+#: (losing a streak only delays escalation by at most two rounds — the
+#: safe direction).
+_MAX_STREAK_KEYS: int = 1024
+
+#: RT-ADR-10 — per-message char cap inside the summariser transcript. A
+#: single 20k-char tool dump must not monopolise the summariser prompt;
+#: head 2/3 + tail keeps both the call's intent and its outcome visible.
+_SUMMARY_PER_MESSAGE_CHAR_CAP: int = 2_000
+
+#: RT-ADR-10 — hard char budget for the summariser's own input payload
+#: (~6k tokens at the chars//4 heuristic — comfortably inside any
+#: summariser window regardless of the agent's ``context_window``).
+#: Update mode halves it between PREVIOUS SUMMARY and NEW EVENTS.
+_SUMMARY_INPUT_CHAR_BUDGET: int = 24_000
 
 #: Stream L.L2 — wrapping tags on the summary content so the agent can
 #: see at a glance that the middle of its conversation was compressed.
@@ -107,12 +170,17 @@ class ContextOverflowError(Exception):
     """Stream L.L2 — repeated compression could not get the estimated
     prompt size under the configured threshold.
 
-    Raised by :meth:`ContextCompressor.compress` after ``max_passes``
-    attempts. The orchestrator catches it at the
-    :class:`MaxStepsExceededError`-style terminal path so the run
-    fails with a clean ``RUN_FAILED`` audit row instead of letting
-    the upstream provider reject the request with a 422 (Mini-ADR
-    L-2 — no silent fallback that hides the overflow).
+    Raised by :meth:`ContextCompressor.compress` when the middle slice
+    is empty but the estimate still exceeds threshold, after
+    ``max_passes`` successful passes that could not get under
+    threshold, or after ``_MAX_CONSECUTIVE_SUMMARY_FAILURES``
+    consecutive rounds whose summariser call failed (RT-ADR-6 — a
+    single transient failure skips the round instead). The
+    orchestrator catches it at the :class:`MaxStepsExceededError`-style
+    terminal path so the run fails with a clean ``RUN_FAILED`` audit
+    row instead of letting the upstream provider reject the request
+    with a 422 (Mini-ADR L-2 — no silent fallback that hides the
+    overflow).
     """
 
     def __init__(self, estimated_tokens: int, threshold: int, passes: int) -> None:
@@ -228,17 +296,45 @@ def _extract_prior_summary(
     return body, rest
 
 
-def _format_middle_for_summary(middle: Sequence[BaseMessage]) -> str:
+def _bound_text(text: str, max_chars: int) -> str:
+    """RT-ADR-10 — bound ``text`` to roughly ``max_chars`` chars.
+
+    Keeps the head (2/3 of the budget) and the tail (the remainder)
+    around a visible elision marker (deer-flow #3887 ``_bound_text``
+    shape): the head carries the setup / intent, the tail the most
+    recent state. Output may exceed the budget by the marker length
+    only.
+    """
+    if len(text) <= max_chars:
+        return text
+    head = (max_chars * 2) // 3
+    tail = max_chars - head
+    dropped = len(text) - max_chars
+    return f"{text[:head]}\n[... {dropped} chars truncated ...]\n{text[-tail:]}"
+
+
+def _format_middle_for_summary(
+    middle: Sequence[BaseMessage],
+    *,
+    char_budget: int = _SUMMARY_INPUT_CHAR_BUDGET,
+) -> str:
     """Render the middle slice as a flat transcript the summariser
     LLM consumes. The format is intentionally simple — role: text —
-    so the summariser doesn't get sidetracked by JSON wire format."""
+    so the summariser doesn't get sidetracked by JSON wire format.
+
+    RT-ADR-10: each message is bounded to
+    ``_SUMMARY_PER_MESSAGE_CHAR_CAP`` (one oversized tool dump must not
+    monopolise the transcript) and the joined transcript is bounded to
+    ``char_budget`` so the summariser call itself can never overflow
+    the summariser's window.
+    """
     lines: list[str] = []
     for msg in middle:
         role = _role_label(msg)
         text = _message_to_text(msg).strip()
         if text:
-            lines.append(f"{role}: {text}")
-    return "\n\n".join(lines)
+            lines.append(f"{role}: {_bound_text(text, _SUMMARY_PER_MESSAGE_CHAR_CAP)}")
+    return _bound_text("\n\n".join(lines), char_budget)
 
 
 def _role_label(msg: BaseMessage) -> str:
@@ -251,6 +347,41 @@ def _role_label(msg: BaseMessage) -> str:
     if isinstance(msg, ToolMessage):
         return "tool"
     return type(msg).__name__
+
+
+@dataclass
+class _FailureStreaks:
+    """RT-ADR-6 — per-conversation consecutive-failure counters.
+
+    Keyed by the caller-supplied ``streak_key`` (the LangGraph
+    ``thread_id`` in production — see ``builder.agent_node``). The
+    keying matters: a :class:`ContextCompressor` hangs off a BuiltAgent
+    that ``AgentRuntime._cache`` shares per ``(tenant, agent, version)``
+    across every thread / run / user of that agent, so a single shared
+    counter would let conversation A's failures escalate conversation
+    C's first wobble into a false :class:`ContextOverflowError` — and,
+    in the other direction, healthy conversations' resets would mask a
+    genuinely broken summariser.
+
+    Lives in its own mutable object so the frozen
+    :class:`ContextCompressor` (whose configuration stays immutable)
+    can still track cross-round summariser health on the instance.
+    """
+
+    counts: dict[str, int] = field(default_factory=dict)
+
+    def bump(self, key: str) -> int:
+        """Increment and return ``key``'s streak, evicting the
+        oldest-inserted entry when the map is full (see
+        ``_MAX_STREAK_KEYS`` — approximate LRU is good enough here)."""
+        if key not in self.counts and len(self.counts) >= _MAX_STREAK_KEYS:
+            self.counts.pop(next(iter(self.counts)))
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key]
+
+    def clear(self, key: str) -> None:
+        """Drop ``key``'s streak after a successful pass."""
+        self.counts.pop(key, None)
 
 
 @dataclass(frozen=True)
@@ -275,6 +406,15 @@ class ContextCompressor:
     #: unit tests stay network-free); the factory injects the shared
     #: tiktoken-backed estimator.
     estimator: TokenEstimator | None = None
+    #: RT-ADR-6 — per-conversation consecutive-failure streaks, keyed by
+    #: the ``streak_key`` handed to :meth:`compress` (thread_id in
+    #: production; this instance is shared across conversations). A
+    #: key's streak resets on any successful pass; reaching
+    #: ``_MAX_CONSECUTIVE_SUMMARY_FAILURES`` escalates that
+    #: conversation's failure to :class:`ContextOverflowError`.
+    _summary_failures: _FailureStreaks = field(
+        default_factory=_FailureStreaks, init=False, repr=False, compare=False
+    )
 
     @property
     def threshold_tokens(self) -> int:
@@ -296,18 +436,46 @@ class ContextCompressor:
         messages: Sequence[BaseMessage],
         *,
         on_pre_compaction: PreCompactionHook | None = None,
+        streak_key: str | None = None,
     ) -> list[BaseMessage]:
         """Compress the message list until it fits under the threshold.
 
-        Returns a new list — never mutates the input. Raises
-        :class:`ContextOverflowError` if ``max_passes`` attempts
-        cannot bring the estimate below threshold.
+        Returns a new list — never mutates the input.
+
+        Failure semantics (Mini-ADR L-2 as revised by RT-ADR-6):
+
+        - an empty middle that is still over threshold raises
+          :class:`ContextOverflowError` immediately (nothing left to
+          summarise — the only knobs are manifest-level);
+        - ``max_passes`` successful passes that cannot get under
+          threshold raise :class:`ContextOverflowError`;
+        - a transient summariser failure SKIPS compression for this
+          round — the current messages are returned uncompressed
+          (metric + warning log) and the next turn retries. Only
+          ``_MAX_CONSECUTIVE_SUMMARY_FAILURES`` consecutive failed
+          rounds *of the same conversation* escalate to
+          :class:`ContextOverflowError`, so a persistently broken
+          summariser still fails loudly instead of silently ballooning
+          forever.
+
+        ``streak_key`` scopes the consecutive-failure count — pass the
+        conversation identity (the LangGraph ``thread_id``): this
+        compressor instance is shared per (tenant, agent, version)
+        across all conversations, so an unscoped count would mix
+        unrelated runs' failures (see :class:`_FailureStreaks`). With
+        ``streak_key=None`` a transient failure keeps the skip-once
+        semantics but is NOT counted toward escalation — without a
+        conversation identity, counting on the shared instance would
+        reintroduce exactly the cross-conversation false-failure the
+        key exists to prevent. The empty-middle / max_passes fail-hard
+        paths are unaffected by the key.
 
         Stream CM-3 — ``on_pre_compaction`` (when supplied) is awaited with
         the middle slice each pass is about to discard, *before* it is
         summarised away, so the caller can flush it to durable memory. It
         is best-effort by contract: the caller must swallow its own
-        failures (the compressor does not guard the await).
+        non-cancellation failures; a :class:`RunCancelledError` raised by
+        the hook propagates out and aborts the run.
         """
         current: list[BaseMessage] = list(messages)
         for pass_idx in range(self.max_passes):
@@ -323,18 +491,43 @@ class ContextCompressor:
                 current = await self._compress_once(current, on_pre_compaction=on_pre_compaction)
             except ContextOverflowError:
                 raise
-            except Exception as exc:  # pragma: no cover — defensive
-                # The summariser is best-effort; if its own call
-                # blows up the run cannot continue (we'd be stuck in
-                # the same overflow state forever). Re-raise as
-                # ContextOverflowError so the orchestrator surfaces a
-                # clean failure.
-                logger.exception("context_compressor.summariser_failed")
-                raise ContextOverflowError(
-                    estimated_tokens=self._estimate(current),
-                    threshold=self.threshold_tokens,
-                    passes=pass_idx,
-                ) from exc
+            except RunCancelledError:
+                # A cancelled run must abort, never be mistaken for a
+                # transient summariser failure (CM-3 hook contract).
+                raise
+            except Exception as exc:
+                # RT-ADR-6 — transient summariser failure: skip this
+                # round, count it per conversation, retry next turn.
+                # Only an unbroken streak of failed rounds for the SAME
+                # streak_key escalates to fail-hard. Without a key the
+                # failure still skips but is not counted (see the
+                # docstring — counting on the shared instance would mix
+                # unrelated conversations).
+                _cm_compressor_summary_failure_total.inc()
+                streak = self._summary_failures.bump(streak_key) if streak_key else 0
+                if streak >= _MAX_CONSECUTIVE_SUMMARY_FAILURES:
+                    logger.exception(
+                        "context_compressor.summariser_failed_hard consecutive=%d",
+                        streak,
+                    )
+                    raise ContextOverflowError(
+                        estimated_tokens=self._estimate(current),
+                        threshold=self.threshold_tokens,
+                        passes=pass_idx,
+                    ) from exc
+                _cm_compressor_skipped_total.inc()
+                logger.warning(
+                    "context_compressor.summariser_failed_skipping consecutive=%d "
+                    "estimated_tokens=%d threshold=%d error=%s",
+                    streak,
+                    self._estimate(current),
+                    self.threshold_tokens,
+                    exc,
+                )
+                return current
+            if streak_key:
+                self._summary_failures.clear(streak_key)
+            _cm_compressor_pass_total.inc()
         if self._estimate(current) >= self.threshold_tokens:
             raise ContextOverflowError(
                 estimated_tokens=self._estimate(current),
@@ -372,8 +565,14 @@ class ContextCompressor:
         # instead of re-summarising its own output (lossy chain).
         prior, fresh_middle = _extract_prior_summary(split.middle)
         if prior is not None:
+            # RT-ADR-10 — update mode splits the input budget evenly:
+            # PREVIOUS SUMMARY and NEW EVENTS each get half, so neither
+            # side can starve the other out of the summariser prompt.
             summary_text = await self._summarise_update(
-                prior, _format_middle_for_summary(fresh_middle)
+                _bound_text(prior, _SUMMARY_INPUT_CHAR_BUDGET // 2),
+                _format_middle_for_summary(
+                    fresh_middle, char_budget=_SUMMARY_INPUT_CHAR_BUDGET // 2
+                ),
             )
         else:
             summary_text = await self._summarise(_format_middle_for_summary(split.middle))

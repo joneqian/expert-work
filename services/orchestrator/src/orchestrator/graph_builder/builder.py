@@ -554,9 +554,13 @@ def build_react_graph(
         # the prompt would exceed the model's configured threshold the
         # compressor swaps the conversation's middle for a
         # ``<context-summary>`` system message, keeping head + tail
-        # intact. Mini-ADR L-2: a ContextOverflowError here surfaces
-        # as a run failure (no silent fallback) so the orchestrator
-        # can write a clean RUN_FAILED audit row.
+        # intact. Mini-ADR L-2 as revised by RT-ADR-6: a transient
+        # summariser failure skips compression for this turn (the
+        # prompt goes out uncompressed, retried next turn); a
+        # ContextOverflowError still surfaces as a run failure — empty
+        # middle, max_passes exhausted, or three consecutive failed
+        # rounds — so the orchestrator can write a clean RUN_FAILED
+        # audit row.
         demoted_tools: list[str] = []
         if context_compressor is not None and context_compressor.should_compress(messages):
             # Stream CM-3 — bind a config-scoped flush so the compressor can
@@ -575,8 +579,15 @@ def build_react_graph(
                     _cm_precompaction_flush_memories.set(written)
 
                 on_pre_compaction = _on_pre_compaction
+            # RT-ADR-6 — scope the consecutive-failure streak to this
+            # conversation: the compressor instance is cached per
+            # (tenant, agent, version) and shared across every thread /
+            # user of the agent, so the streak must key on thread_id.
+            compress_thread_id = (config.get("configurable") or {}).get("thread_id")
             messages = await context_compressor.compress(
-                messages, on_pre_compaction=on_pre_compaction
+                messages,
+                on_pre_compaction=on_pre_compaction,
+                streak_key=str(compress_thread_id) if compress_thread_id else None,
             )
             # Stream HX-12 (Mini-ADR HX-I5) — promotion demotion rides the
             # same pressure signal: the context is being squeezed, so

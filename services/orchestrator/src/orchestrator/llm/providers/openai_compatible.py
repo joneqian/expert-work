@@ -38,6 +38,15 @@ All five share OpenAI's Chat Completions request / response shape +
 tool-calling format, so :class:`HTTPOpenAIClient` (with overridable
 ``chat_completions_path``) handles them uniformly.
 
+Mid-conversation ``SystemMessage`` handling (Stream RT-2, RT-ADR-5):
+these presets carry no message mapping of their own — every vendor
+rides :meth:`~orchestrator.llm.providers.openai.OpenAIProvider.complete`,
+which coalesces mid-conversation SystemMessages (the L2
+``<context-summary>``) into the leading system entry before mapping.
+Several of these backends (and self-hosted vLLM / SGLang) are strict
+about the ``system`` position and reject non-leading system roles with
+400; see :mod:`orchestrator.llm.coalesce` for the forensics.
+
 Region note: these base URLs target the public production regions
 documented by each vendor as of E.11.5 landing. Vendors that offer
 multi-region deployments (Doubao ``ark.{region}.volces.com``) accept a
