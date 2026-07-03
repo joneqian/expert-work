@@ -9,7 +9,7 @@ import pytest
 from langgraph.graph.state import CompiledStateGraph
 
 from helix_agent.persistence import InMemoryKnowledgeStore, InMemoryMemoryStore
-from helix_agent.protocol import AgentSpec, ModelSpec
+from helix_agent.protocol import AgentSpec, ModelSpec, StructuredOutputSpec
 from helix_agent.runtime.checkpointer import make_checkpointer
 from helix_agent.runtime.middleware import RecordingLangfuseClient
 from helix_agent.runtime.secret_store import LocalDevSecretStore
@@ -1233,3 +1233,88 @@ async def test_tool_budget_platform_none_falls_back_to_env(monkeypatch: Any) -> 
         monkeypatch.setenv("HELIX_TOOL_OUTPUT_BUDGET", "0")
         await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
         assert captured["enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# Stream RT-1 PR-3 (RT-ADR-4) — Tier3 output_schema wiring
+# ---------------------------------------------------------------------------
+
+
+def _output_schema_spec(json_schema: dict[str, Any]) -> AgentSpec:
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["output_schema"] = {"name": "final_report", "json_schema": json_schema}
+    return AgentSpec.model_validate(doc)
+
+
+async def test_output_schema_threads_into_graph_with_fence_nonce(monkeypatch: Any) -> None:
+    """The manifest block becomes a StructuredOutputSpec handed to
+    build_react_graph — tenant-origin, so fence_nonce is always set
+    (design § 7.5), reusing the build's spotlight nonce when present."""
+    captured: dict[str, Any] = {}
+    from orchestrator.agent_factory import build_react_graph as real
+
+    def _spy(**kwargs: Any) -> Any:
+        captured["output_schema"] = kwargs.get("output_schema")
+        captured["spotlight_nonce"] = kwargs.get("spotlight_nonce")
+        return real(**kwargs)
+
+    monkeypatch.setattr("orchestrator.agent_factory.build_react_graph", _spy)
+
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}}}
+    async with make_checkpointer("memory") as cp:
+        built = await _build(
+            _output_schema_spec(schema), secret_store=_secret_store(), checkpointer=cp
+        )
+    assert isinstance(built, BuiltAgent)
+    spec = captured["output_schema"]
+    assert isinstance(spec, StructuredOutputSpec)
+    assert spec.schema == schema
+    assert spec.name == "final_report"
+    assert spec.strict is True
+    # Spotlighting is on by default → the build nonce is reused.
+    assert spec.fence_nonce == captured["spotlight_nonce"]
+    assert spec.fence_nonce
+
+
+async def test_output_schema_fence_nonce_minted_when_spotlight_off(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    from orchestrator.agent_factory import build_react_graph as real
+
+    def _spy(**kwargs: Any) -> Any:
+        captured["output_schema"] = kwargs.get("output_schema")
+        return real(**kwargs)
+
+    monkeypatch.setattr("orchestrator.agent_factory.build_react_graph", _spy)
+
+    doc = deepcopy(_MINIMAL_SPEC)
+    doc["spec"]["output_schema"] = {"json_schema": {"type": "object"}}
+    doc["spec"]["defenses"] = {"prompt_injection": "off"}
+    async with make_checkpointer("memory") as cp:
+        await _build(AgentSpec.model_validate(doc), secret_store=_secret_store(), checkpointer=cp)
+    spec = captured["output_schema"]
+    assert isinstance(spec, StructuredOutputSpec)
+    assert spec.fence_nonce  # minted even without the spotlight defense
+
+
+async def test_output_schema_absent_threads_none(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    from orchestrator.agent_factory import build_react_graph as real
+
+    def _spy(**kwargs: Any) -> Any:
+        captured["output_schema"] = kwargs.get("output_schema")
+        return real(**kwargs)
+
+    monkeypatch.setattr("orchestrator.agent_factory.build_react_graph", _spy)
+
+    async with make_checkpointer("memory") as cp:
+        await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
+    assert captured["output_schema"] is None
+
+
+async def test_output_schema_deep_invalid_schema_fails_the_build() -> None:
+    """The protocol model only shape-checks; a deeply-invalid JSON Schema
+    (bad keyword value) must fail at BUILD time with a clear error."""
+    bad = _output_schema_spec({"type": "object", "properties": {"x": {"type": 123}}})
+    async with make_checkpointer("memory") as cp:
+        with pytest.raises(AgentFactoryError, match="not a valid JSON Schema"):
+            await _build(bad, secret_store=_secret_store(), checkpointer=cp)

@@ -73,6 +73,8 @@ describe("FormView", () => {
 
     renderSection("prompt");
     expect(screen.getByTestId("af-prompt")).toBeInTheDocument();
+    // RT-1 (RT-ADR-4) — the structured-output status block rides the tab.
+    expect(screen.getByTestId("af-output-schema")).toBeInTheDocument();
 
     renderSection("tools");
     expect(screen.getByTestId("af-tools")).toBeInTheDocument();
@@ -248,5 +250,29 @@ describe("FormView", () => {
   it("loads the model catalog", async () => {
     renderSection("model");
     await waitFor(() => expect(catalog.loadModelCatalog).toHaveBeenCalled());
+  });
+
+  // RT-1 (RT-ADR-4) — the structured-output block is YAML-authored; the
+  // prompt tab surfaces its state (configured name vs. not-configured hint).
+  it("shows the not-configured structured-output hint by default", () => {
+    renderSection("prompt");
+    const block = screen.getByTestId("af-output-schema");
+    expect(within(block).getByText(/spec\.output_schema/)).toBeInTheDocument();
+  });
+
+  it("shows the schema name when output_schema is configured", () => {
+    const seeded: AgentManifest = {
+      ...SEED,
+      spec: {
+        ...SEED.spec,
+        output_schema: {
+          name: "review_verdict",
+          json_schema: { type: "object" },
+        },
+      },
+    };
+    renderSection("prompt", seeded);
+    const block = screen.getByTestId("af-output-schema");
+    expect(within(block).getByText(/review_verdict/)).toBeInTheDocument();
   });
 });

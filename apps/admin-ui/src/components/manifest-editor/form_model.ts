@@ -87,6 +87,16 @@ export interface AgentManifest {
     // RAG — tenant knowledge bases this agent may search (activates the
     // knowledge_search tool). Block absent = no knowledge access.
     knowledge?: { knowledge_base_refs?: string[]; [k: string]: unknown } | null;
+    // Stream RT-1 (RT-ADR-4) — structured final reply: a JSON Schema the
+    // agent's FINAL assistant message must validate against (intermediate
+    // tool-calling turns are unaffected). Authored in the YAML view; the
+    // curated form only surfaces whether it is configured.
+    output_schema?: {
+      name?: string;
+      json_schema?: Record<string, unknown>;
+      strict?: boolean;
+      [k: string]: unknown;
+    } | null;
     // Attached skills — skill refs (``name`` or ``name@N``) the agent loads.
     skills?: string[];
     // SE-16 (SE-A42) — opt-in: build auto-attaches this agent's own ACTIVE
@@ -457,6 +467,17 @@ export function setToolBudgetOn(m: unknown, on: boolean): AgentManifest {
 // ceiling). The form surfaces this so the autonomous-worker behaviour is
 // visible + can be opted out per agent: ``off`` writes ``{enabled:false}``;
 // ``on`` drops the block (back to the default-on state, keeping YAML clean).
+// Stream RT-1 (RT-ADR-4) — the structured-output block is YAML-authored; the
+// curated form only shows whether it is configured (and under which name).
+// Returns the effective wire name when configured, ``null`` when absent.
+export const readOutputSchemaName = (m: unknown): string | null => {
+  const block = specOf(m).output_schema;
+  if (!block || typeof block !== "object") return null;
+  return typeof block.name === "string" && block.name
+    ? block.name
+    : "final_response";
+};
+
 export const readDynamicWorkersOn = (m: unknown): boolean =>
   (specOf(m).dynamic_workers?.enabled ?? true) !== false;
 

@@ -579,6 +579,10 @@ export interface TranslationKeys {
     prompt_var_description: string;
     prompt_var_remove: string;
     prompt_var_add: string;
+    section_output_schema: string;
+    section_output_schema_help: string;
+    output_schema_on_hint: string;
+    output_schema_off_hint: string;
   };
   playground: {
     session_label: string;
@@ -2790,6 +2794,13 @@ const en: TranslationKeys = {
     prompt_var_description: "Description",
     prompt_var_remove: "Remove",
     prompt_var_add: "Add variable",
+    section_output_schema: "Structured output",
+    section_output_schema_help:
+      "Optional. Forces the agent's FINAL reply to be a JSON object that validates against a JSON Schema; intermediate tool-calling steps are never constrained.\nAuthored in the YAML view as spec.output_schema: { name, json_schema, strict }.\nExample: a json_schema requiring { \"answer\": string } makes every final reply machine-readable",
+    output_schema_on_hint:
+      "Enforced - final replies must validate against the '{{name}}' schema (spec.output_schema, editable in the YAML view).",
+    output_schema_off_hint:
+      "Not configured - final replies are free text. Add spec.output_schema in the YAML view to require a machine-readable JSON reply.",
   },
   playground: {
     session_label: "Session",

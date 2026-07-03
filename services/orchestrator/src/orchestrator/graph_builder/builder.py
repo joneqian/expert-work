@@ -48,6 +48,14 @@ Stream E.12.5 wires the middleware chain into both nodes. Anchor calls
 - ``before_tool_dispatch`` chain → ``tools_node`` invokes per
   ``tool_call``. ``ctx.payload`` carries ``tool_name`` + ``tool_args``;
   a pre-dispatch middleware may raise to block the dispatch.
+
+Stream RT-1 PR-3 (RT-ADR-4): a terminal turn under a Tier3
+``output_schema`` may issue ONE schema-enforced resend when the free
+candidate does not validate. That resend gets its own before/after
+anchor pass with the :class:`StructuredOutputSpec` instance in
+``payload["output_schema"]`` (design § 7.4 — the E.13 schema
+fingerprint), so on such a turn each anchor fires once per real LLM
+call: primary + resend.
 """
 
 from __future__ import annotations
@@ -58,7 +66,7 @@ import itertools
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -79,10 +87,18 @@ from helix_agent.common.observability import (
 from helix_agent.common.output_screen import REFUSAL_TEXT, screen_output
 from helix_agent.common.spotlight import spotlight_untrusted
 from helix_agent.common.uplift_metrics import record_memory_inject_mode
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, MemoryItem, Plan
+from helix_agent.protocol import (
+    AuditAction,
+    AuditEntry,
+    AuditResult,
+    MemoryItem,
+    Plan,
+    StructuredOutputSpec,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
 from helix_agent.runtime.middleware import (
+    LLMOutputValidationError,
     MiddlewareChain,
     MiddlewareContext,
 )
@@ -107,6 +123,7 @@ from orchestrator.graph_builder.memory import MemoryNode, PreCompactionFlush
 from orchestrator.graph_builder.planner import PlannerNode, render_plan
 from orchestrator.graph_builder.reflect import ReflectNode
 from orchestrator.llm import LLMCaller
+from orchestrator.llm.structured_output import correction_message, validate_structured_output
 from orchestrator.output_judge import ActionJudge, OutputJudge
 from orchestrator.state import AgentState
 from orchestrator.tools.error_classifier import (
@@ -313,6 +330,15 @@ _output_dlp_redacted_total = helix_counter(
     "Outbound DLP redactions on terminal responses, by PII category.",
     ("category",),
 )
+# Stream RT-1 PR-3 (RT-ADR-4) — structured finalization on terminal turns.
+# ``outcome``: ``conform`` = the free candidate already validated (zero extra
+# calls); ``cache_hit`` = the schema-enforced resend was served from the E.13
+# cache; ``resend`` = one extra schema-enforced LLM call was issued.
+_llm_structured_finalize_total = helix_counter(
+    "helix_llm_structured_finalize_total",
+    "Structured finalization outcomes on terminal agent turns (Stream RT-1 PR-3).",
+    ("outcome",),
+)
 
 #: Truncate raw exception strings before they go to the LLM. Avoids
 #: dumping multi-MB tracebacks into messages. Per-tool truncation
@@ -412,6 +438,12 @@ def build_react_graph(
     # redacted in place before the reply leaves. ``False`` (default) keeps the
     # path unchanged. Conditional output: redacts, never blocks.
     output_dlp: bool = False,
+    # Stream RT-1 PR-3 (RT-ADR-4) — Tier3 structured final reply. When set,
+    # the finalization AIMessage (no tool_calls) must validate against the
+    # schema; tool-calling rounds are never constrained. ``None`` (default)
+    # keeps every path byte-identical to pre-PR-3 behaviour. See the
+    # finalization block inside ``agent_node`` for the enforcement mechanism.
+    output_schema: StructuredOutputSpec | None = None,
 ) -> StateGraph[AgentState, None, AgentState, AgentState]:
     """Assemble the ReAct ``StateGraph`` and return it uncompiled.
 
@@ -729,6 +761,62 @@ def build_react_graph(
         if budget_exhausted and _extract_tool_calls(response):
             response = response.model_copy(update={"tool_calls": [], "invalid_tool_calls": []})
 
+        # Stream RT-1 PR-3 (RT-ADR-4) — structured finalization. Only a
+        # terminal candidate (no tool_calls) is constrained; tool-calling
+        # rounds pass through untouched. The mechanism is deliberately
+        # uniform across the three RT-ADR-2 provider paths — two-stage
+        # deferred enforcement:
+        #
+        #  * The primary call above NEVER carries the schema. On the
+        #    tool_call path a schema forces one schema-tool (superseding
+        #    every real tool) and on the prompt path the injected
+        #    instruction demands JSON-only output — both break tool use on
+        #    intermediate rounds; and the router's RT-ADR-1 loop validates
+        #    every structured response, so even the native path (where
+        #    ``response_format`` can ride next to tools) would
+        #    correction-loop on a legitimate tool_calls turn. The fallback
+        #    chain can also mix capabilities (RT-ADR-2 keeps the chosen
+        #    path invisible here), so per-path special-casing has no sound
+        #    input at this layer.
+        #  * A terminal candidate is validated locally first — a conforming
+        #    reply costs zero extra calls.
+        #  * A non-conforming candidate triggers ONE schema-enforced resend
+        #    (candidate + correction appended, ``tools=[]``) where the
+        #    provider adapter enforces via its declared path (native
+        #    ``response_format`` / forced tool / prompt instruction) and
+        #    the router's RT-ADR-1 loop retries residual invalid output.
+        #    Still invalid → LLMOutputValidationError fails the run loudly
+        #    — silently returning schema-violating output would betray the
+        #    Tier3 contract.
+        #
+        # Cache wiring (design § 7.4 hard requirement): the resend runs its
+        # own before-anchor pass with the ``StructuredOutputSpec`` INSTANCE
+        # in ``payload["output_schema"]``, and the bottom after-anchor pass
+        # carries the same instance — so the E.13 schema fingerprint keys
+        # lookup and store identically. The primary call is accounted on
+        # its own after-chain pass inside the helper (one pass per real
+        # upstream call keeps G.9 token metering exactly-once).
+        structured_prompt: list[BaseMessage] | None = None
+        structured_cache_hit = False
+        primary_loop_detected = False
+        if output_schema is not None and not _extract_tool_calls(response):
+            finalize = await _finalize_structured_response(
+                candidate=response,
+                prompt_messages=messages,
+                spec=output_schema,
+                caller=active_caller,
+                token=token,
+                before_llm_chain=before_llm_chain,
+                after_llm_chain=after_llm_chain,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                primary_cache_hit=cache_hit_response is not None,
+            )
+            response = finalize.response
+            structured_prompt = finalize.structured_prompt
+            structured_cache_hit = finalize.structured_cache_hit
+            primary_loop_detected = finalize.primary_loop_detected
+
         # Stream PI-2 — output screening backstop. Catch a credential leak /
         # exfil form the model emitted (e.g. driven by an inline injection
         # spotlighting can't wrap) before it reaches the user or a tool.
@@ -763,6 +851,12 @@ def build_react_graph(
         if output_dlp and not rule_blocked and not _extract_tool_calls(response):
             response, dlp_cats = _dlp_redact_response(response)
             if dlp_cats:
+                # RT-1 PR-3 — the redaction rewrote the reply text; a stale
+                # ``parsed`` would hand consumers the unredacted values.
+                # Re-derive it from the redacted content (drop it when the
+                # redacted reply no longer validates — security wins).
+                if output_schema is not None and "parsed" in response.additional_kwargs:
+                    response = _reconcile_parsed_after_rewrite(response, output_schema)
                 await _emit_output_guard_audit(
                     audit_logger_from_config(config),
                     tenant_id,
@@ -772,17 +866,37 @@ def build_react_graph(
                 )
 
         if after_llm_chain is not None:
-            after_messages: list[BaseMessage] = [*messages, response]
-            ctx = MiddlewareContext(
-                payload={
-                    "messages": after_messages,
-                    "response": response,
-                    "tenant_id": tenant_id,
-                    "user_id": user_id,
-                    "prompt_messages": messages,
-                    "cache_hit": cache_hit_response is not None,
-                }
-            )
+            # RT-1 PR-3 — when a structured resend happened, this pass
+            # accounts THAT call: its exact prompt view + the spec instance
+            # (§ 7.4 store side; the primary call was already accounted
+            # inside ``_finalize_structured_response``). Without a resend
+            # this is byte-identical to the pre-PR-3 payload.
+            prompt_view = structured_prompt if structured_prompt is not None else messages
+            after_messages: list[BaseMessage] = [*prompt_view, response]
+            after_payload: dict[str, Any] = {
+                "messages": after_messages,
+                "response": response,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "prompt_messages": prompt_view,
+                "cache_hit": (
+                    structured_cache_hit
+                    if structured_prompt is not None
+                    else cache_hit_response is not None
+                ),
+            }
+            if structured_prompt is not None and "parsed" in response.additional_kwargs:
+                # Store-side pollution guard (suspenders half; the lookup
+                # self-heal in ``_finalize_structured_response`` is the
+                # belt): a resend rewritten AFTER finalization — PI-2 /
+                # judge refusal, or a DLP redaction that broke a
+                # constrained field (``parsed`` dropped) — must NOT land
+                # under the structured key, or the next identical turn
+                # would hit a non-conforming entry. Without the schema tag
+                # the rewritten response stores under the plain key for
+                # the resend prompt, which no structured lookup derives.
+                after_payload["output_schema"] = output_schema
+            ctx = MiddlewareContext(payload=after_payload)
             await after_llm_chain.invoke(ctx, _noop)
             new_messages = _extract_post_llm_messages(ctx, original=after_messages)
             # Stream CM-1 — persist the advisory into history so the
@@ -800,8 +914,11 @@ def build_react_graph(
                 "tool_failures": [],
                 # CM-9 — arm escalation for the next step when the loop
                 # middleware tripped on THIS response; otherwise reset
-                # the consumed signal.
-                "escalate_next": bool(ctx.payload.get("loop_detected")),
+                # the consumed signal. RT-1 PR-3: a trip on the discarded
+                # primary candidate (accounted inside the finalize helper)
+                # arms it too — the loop signal is about model behaviour,
+                # not about which response was ultimately kept.
+                "escalate_next": bool(ctx.payload.get("loop_detected")) or primary_loop_detected,
                 # CM-11 — rebaseline the goal so a one-off change escalates
                 # exactly one turn (next turn diffs against this value).
                 "last_plan_goal": current_goal,
@@ -1440,6 +1557,162 @@ def _extract_tool_calls(message: BaseMessage) -> list[dict[str, Any]]:
     if not raw:
         return []
     return cast(list[dict[str, Any]], raw)
+
+
+@dataclass(frozen=True)
+class _StructuredFinalize:
+    """Result of the RT-ADR-4 finalization step (see ``agent_node``).
+
+    ``structured_prompt`` is ``None`` when the free candidate already
+    conformed (no resend happened); otherwise it is the exact prompt the
+    schema-enforced resend was issued with — the bottom after-chain pass
+    must account THAT call (prompt view + spec instance, § 7.4 store side).
+    """
+
+    response: AIMessage
+    structured_prompt: list[BaseMessage] | None = None
+    structured_cache_hit: bool = False
+    primary_loop_detected: bool = False
+
+
+def _with_parsed(message: AIMessage, parsed: dict[str, Any]) -> AIMessage:
+    """Attach the validated dict without mutating the provider's message."""
+    if message.additional_kwargs.get("parsed") == parsed:
+        return message
+    return message.model_copy(
+        update={"additional_kwargs": {**message.additional_kwargs, "parsed": parsed}}
+    )
+
+
+def _reconcile_parsed_after_rewrite(response: AIMessage, spec: StructuredOutputSpec) -> AIMessage:
+    """RT-1 PR-3 — re-derive ``parsed`` after a content rewrite (7.4 DLP).
+
+    The redaction rewrote the reply text; a stale ``parsed`` would hand
+    consumers the unredacted values. Re-validate the redacted content:
+    still conforming → attach the redacted dict; no longer conforming (a
+    redaction landed inside a pattern/enum-constrained field) → drop
+    ``parsed`` entirely — the redacted text is authoritative and security
+    wins over the schema contract on this turn.
+    """
+    parsed, _ = validate_structured_output(response, spec)
+    kwargs = {k: v for k, v in response.additional_kwargs.items() if k != "parsed"}
+    if parsed is not None:
+        kwargs["parsed"] = parsed
+    return response.model_copy(update={"additional_kwargs": kwargs})
+
+
+async def _finalize_structured_response(
+    *,
+    candidate: AIMessage,
+    prompt_messages: list[BaseMessage],
+    spec: StructuredOutputSpec,
+    caller: LLMCaller,
+    token: CancellationToken,
+    before_llm_chain: MiddlewareChain | None,
+    after_llm_chain: MiddlewareChain | None,
+    tenant_id: UUID | None,
+    user_id: UUID | None,
+    primary_cache_hit: bool,
+) -> _StructuredFinalize:
+    """RT-ADR-4 two-stage finalization (mechanism: ``agent_node`` comment).
+
+    Stage 1 — validate the free candidate locally; conforming → attach
+    ``parsed``, zero extra calls. Stage 2 — account the primary call on
+    its own after-chain pass, then issue ONE schema-enforced resend
+    (candidate + correction appended, ``tools=[]``) through its own
+    before-anchor pass carrying the spec INSTANCE in
+    ``payload["output_schema"]`` (§ 7.4 lookup side — an E.13 hit skips
+    the LLM call). The resend's response is re-validated here so a cached
+    entry is held to the same contract as a fresh router-validated one;
+    a still-invalid response raises :class:`LLMOutputValidationError`.
+    """
+    parsed, error_summary = validate_structured_output(candidate, spec)
+    if parsed is not None:
+        _llm_structured_finalize_total.labels(outcome="conform").inc()
+        return _StructuredFinalize(response=_with_parsed(candidate, parsed))
+
+    # The bottom after-chain pass will carry the resend, so account the
+    # primary call now — one after_llm_call pass per real upstream call
+    # keeps G.9 token metering exactly-once, and stores the candidate
+    # under the unstructured key its lookup used.
+    primary_loop_detected = False
+    if after_llm_chain is not None:
+        primary_ctx = MiddlewareContext(
+            payload={
+                "messages": [*prompt_messages, candidate],
+                "response": candidate,
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "prompt_messages": prompt_messages,
+                "cache_hit": primary_cache_hit,
+            }
+        )
+        await after_llm_chain.invoke(primary_ctx, _noop)
+        primary_loop_detected = bool(primary_ctx.payload.get("loop_detected"))
+
+    assert error_summary is not None  # noqa: S101 - parsed is None ⇒ summary set
+    finalize_messages: list[BaseMessage] = [
+        *prompt_messages,
+        candidate,
+        HumanMessage(content=correction_message(error_summary, spec)),
+    ]
+    cache_hit: AIMessage | None = None
+    if before_llm_chain is not None:
+        before_ctx = MiddlewareContext(
+            payload={
+                "messages": finalize_messages,
+                "tools": [],
+                "tenant_id": tenant_id,
+                # § 7.4 hard requirement — the spec INSTANCE, so the E.13
+                # lookup keys with the schema fingerprint.
+                "output_schema": spec,
+            }
+        )
+        await before_llm_chain.invoke(before_ctx, _noop)
+        finalize_messages = list(before_ctx.payload.get("messages", finalize_messages))
+        hit = before_ctx.payload.get("llm_cache_hit")
+        if isinstance(hit, AIMessage):
+            # Lookup-side self-heal (belt half of the poisoning defence;
+            # the store guard in ``agent_node`` is the suspenders): a
+            # non-conforming entry under the structured key — however it
+            # got there — must degrade to a real resend, never surface as
+            # a hard LLMOutputValidationError on a turn that would
+            # otherwise succeed. Only a VALIDATED hit takes the cache
+            # branch; ignored hits fall through to the resend below.
+            hit_parsed, _hit_error = validate_structured_output(hit, spec)
+            if hit_parsed is not None:
+                cache_hit = hit
+            else:
+                logger.warning(
+                    "structured_finalize.poisoned_cache_hit_ignored schema=%s", spec.name
+                )
+
+    if cache_hit is not None:
+        # Metric fidelity: ``cache_hit`` counts only a hit that VALIDATED;
+        # the poisoned-hit fallback above lands in ``resend`` below.
+        _llm_structured_finalize_total.labels(outcome="cache_hit").inc()
+        response = cache_hit
+    else:
+        _llm_structured_finalize_total.labels(outcome="resend").inc()
+        # Same span + cancellation discipline as the primary call (E.15 /
+        # 10.1): a cancel mid-resend interrupts the in-flight await.
+        with helix_span(HelixComponent.ORCHESTRATOR, "llm_call"):
+            response = await token.run_cancellable(
+                caller(messages=finalize_messages, tools=[], output_schema=spec)
+            )
+
+    parsed, error_summary = validate_structured_output(response, spec)
+    if parsed is None:
+        raise LLMOutputValidationError(
+            f"structured finalization response failed validation "
+            f"(schema={spec.name!r}): {error_summary}"
+        )
+    return _StructuredFinalize(
+        response=_with_parsed(response, parsed),
+        structured_prompt=finalize_messages,
+        structured_cache_hit=cache_hit is not None,
+        primary_loop_detected=primary_loop_detected,
+    )
 
 
 def _screen_model_response(response: AIMessage) -> tuple[AIMessage, tuple[str, ...]]:

@@ -194,3 +194,8 @@ def test_parse_extends_ref_ok(ref: str, expected: tuple[str, str]) -> None:
 def test_parse_extends_ref_rejects_malformed(bad: str) -> None:
     with pytest.raises(ValueError, match="invalid extends ref"):
         parse_extends_ref(bad)
+
+
+def test_output_schema_is_capability_tier() -> None:
+    """RT-1 PR-3 (RT-ADR-4) — the structured final-reply contract is tier ②."""
+    assert FIELD_TIERS["output_schema"] is FieldTier.CAPABILITY

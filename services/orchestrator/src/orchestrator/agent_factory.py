@@ -43,6 +43,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 if TYPE_CHECKING:
     from orchestrator.tools.skill_view import SkillResolution
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
@@ -60,6 +62,7 @@ from helix_agent.protocol import (
     PromptVariableSpec,
     Skill,
     SkillVersion,
+    StructuredOutputSpec,
     parse_agent_ref,
     parse_skill_ref,
 )
@@ -883,6 +886,27 @@ async def build_agent(
     spotlight_nonce = (
         uuid4().hex[:12] if spec.spec.defenses.prompt_injection == "spotlight" else None
     )
+    # Stream RT-1 PR-3 (RT-ADR-4) — Tier3 structured final reply. Deep
+    # JSON-Schema validity is checked here (the protocol model only shape-
+    # checks) so a malformed schema fails the BUILD with a clear error
+    # instead of blowing up the first finalization turn. The schema is
+    # tenant-origin, so the prompt path fences it (design § 7.5): reuse the
+    # build's spotlight nonce when the defense is on, else mint one — the
+    # fence only needs to be unguessable to the schema's author.
+    output_schema_spec: StructuredOutputSpec | None = None
+    if spec.spec.output_schema is not None:
+        try:
+            Draft202012Validator.check_schema(spec.spec.output_schema.json_schema)
+        except SchemaError as exc:
+            raise AgentFactoryError(
+                f"spec.output_schema.json_schema is not a valid JSON Schema: {exc.message}"
+            ) from exc
+        output_schema_spec = StructuredOutputSpec(
+            schema=spec.spec.output_schema.json_schema,
+            name=spec.spec.output_schema.name,
+            strict=spec.spec.output_schema.strict,
+            fence_nonce=spotlight_nonce or uuid4().hex[:12],
+        )
     graph = build_react_graph(
         llm_caller=routers.default,
         escalated_llm_caller=escalated_llm_caller,  # CM-9 — None → no escalation
@@ -925,6 +949,8 @@ async def build_agent(
         # Stream HX-13 — vendor-native tool-disclosure tier (catalog bit;
         # off-catalog / unannotated models stay on the HX-12 tier).
         tool_disclosure=_resolved_tool_disclosure(spec.spec.model),
+        # Stream RT-1 PR-3 (RT-ADR-4) — Tier3 structured final reply.
+        output_schema=output_schema_spec,
     )
     compiled = GraphRunner(checkpointer=checkpointer).compile(graph)
     base_prompt = spec.spec.system_prompt.template

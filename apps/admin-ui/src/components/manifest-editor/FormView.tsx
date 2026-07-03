@@ -37,6 +37,7 @@ import {
   readMemoryOn,
   readModel,
   readName,
+  readOutputSchemaName,
   readPromptJinja,
   readPromptVariables,
   readApprovalTimeout,
@@ -159,6 +160,7 @@ export function FormView({
   const memoryOn = readMemoryOn(formData);
   const approvalTools = readApprovalTools(formData);
   const dynamicWorkersOn = readDynamicWorkersOn(formData);
+  const outputSchemaName = readOutputSchemaName(formData);
 
   const toggleApproval = (name: string, on: boolean): void => {
     const next = on
@@ -328,6 +330,23 @@ export function FormView({
           </div>
         </section>
         <PromptVariablesEditor formData={formData} onChange={onChange} />
+        {/* Stream RT-1 (RT-ADR-4) — structured final reply. The JSON Schema
+            block is authored in the YAML view (a schema editor is out of the
+            curated form's scope); the form surfaces the state + help copy. */}
+        <section data-testid="af-output-schema" style={SECTION}>
+          <Heading>
+            {t("agent_form.section_output_schema")}
+            <FieldHelp
+              text={t("agent_form.section_output_schema_help")}
+              testId="af-output-schema"
+            />
+          </Heading>
+          <Text type="secondary">
+            {outputSchemaName
+              ? t("agent_form.output_schema_on_hint", { name: outputSchemaName })
+              : t("agent_form.output_schema_off_hint")}
+          </Text>
+        </section>
       </>
     ),
 

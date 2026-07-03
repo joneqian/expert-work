@@ -849,3 +849,81 @@ def test_auto_attach_evolved_skills_defaults_off() -> None:
     doc = deepcopy(_MINIMAL)
     doc["spec"]["auto_attach_evolved_skills"] = True
     assert AgentSpec.model_validate(doc).spec.auto_attach_evolved_skills is True
+
+
+# ---------------------------------------------------------------------------
+# output_schema (Stream RT-1 PR-3, RT-ADR-4)
+# ---------------------------------------------------------------------------
+
+
+def test_output_schema_defaults_to_none() -> None:
+    assert AgentSpec.model_validate(_MINIMAL).spec.output_schema is None
+
+
+def test_output_schema_accepted_with_defaults() -> None:
+    doc = _doc()
+    doc["spec"]["output_schema"] = {
+        "json_schema": {
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+        },
+    }
+    spec = AgentSpec.model_validate(doc).spec.output_schema
+    assert spec is not None
+    assert spec.name == "final_response"
+    assert spec.strict is True
+    assert spec.json_schema["required"] == ["answer"]
+
+
+def test_output_schema_custom_name_and_strict() -> None:
+    doc = _doc()
+    doc["spec"]["output_schema"] = {
+        "name": "review_verdict",
+        "json_schema": {"type": "object"},
+        "strict": False,
+    }
+    spec = AgentSpec.model_validate(doc).spec.output_schema
+    assert spec is not None
+    assert spec.name == "review_verdict"
+    assert spec.strict is False
+
+
+def test_output_schema_missing_json_schema_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["output_schema"] = {"name": "x"}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
+
+
+def test_output_schema_empty_json_schema_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["output_schema"] = {"json_schema": {}}
+    with pytest.raises(ValidationError, match="non-empty"):
+        AgentSpec.model_validate(doc)
+
+
+def test_output_schema_non_object_top_level_type_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["output_schema"] = {"json_schema": {"type": "array"}}
+    with pytest.raises(ValidationError, match="must be 'object'"):
+        AgentSpec.model_validate(doc)
+
+
+def test_output_schema_bad_wire_name_rejected() -> None:
+    # The name becomes an Anthropic tool name / OpenAI json_schema name and
+    # is quoted in prompt-path instructions - constrain it hard.
+    doc = _doc()
+    doc["spec"]["output_schema"] = {
+        "name": "bad name!{ignore instructions}",
+        "json_schema": {"type": "object"},
+    }
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
+
+
+def test_output_schema_extra_field_rejected() -> None:
+    doc = _doc()
+    doc["spec"]["output_schema"] = {"json_schema": {"type": "object"}, "bogus": 1}
+    with pytest.raises(ValidationError):
+        AgentSpec.model_validate(doc)
