@@ -32,6 +32,14 @@ Design anchors (docs/design/tool-result-context-budget.md §Phase 2):
 * **Dedup (item 1)** — a tool result whose exact content recurs later is
   collapsed to a reference (latest copy kept), reclaiming the bulk of a repeated
   identical search/fetch even inside the recent window.
+* **Skill reference (RT-2 PR-3 / RT-ADR-7)** — a SUCCESSFUL lazy-skill read
+  (``ToolMessage(name="skill_view")``, artifact ``result`` ok/truncated)
+  collapses to a one-line skill reference (name + source path + re-read hint)
+  instead of the generic ladder: the skill row is durable in the skill store
+  and re-readable via ``skill_view``, so the reference is the better recovery
+  handle than even the workspace footer. Failure/blocked placeholders (drift /
+  redacted / archived are security stops) keep the generic ladder — never
+  rewritten into a re-read encouragement.
 * **Prompt-view only** (CM-C4) — like the window, the gate shapes only the
   message list handed to *this* LLM call; ``agent_node`` returns just the new
   response tail and the ``add_messages`` reducer never deletes, so the
@@ -51,6 +59,7 @@ from langchain_core.messages import BaseMessage, ToolMessage
 
 from helix_agent.runtime.tokens import TokenEstimator
 from orchestrator.context.compressor import estimate_tokens
+from orchestrator.context.skill_reference import skill_view_reference
 from orchestrator.tools.overflow import (
     OVERFLOW_FOOTER_TAG_OPEN,
     TOOL_RESULT_PATH_ARTIFACT_KEY,
@@ -103,6 +112,12 @@ def _collapsed_content(message: ToolMessage, *, lossy_note: str) -> str | None:
     already collapsed (idempotent skip), so the caller's ``pruned_count`` stays
     accurate. Recoverability ladder:
 
+    0. **Skill reference** (RT-2 PR-3 / RT-ADR-7) — a successful ``skill_view``
+       result collapses to a one-line skill reference (name + source path +
+       re-read hint), overriding the footer/path rungs: the skill store is
+       durable while the workspace copy is run-scoped, so ``skill_view``
+       re-read is the better recovery handle. Blocked/error placeholders get
+       no reference (see :mod:`orchestrator.context.skill_reference`).
     1. **In-context footer** (CM-5 / #859 externalized) — keep the trusted footer
        alone; the full output is on disk and re-readable via ``read_file``.
     2. **Artifact path** (item 2 persist floor) — render a footer reference to the
@@ -113,6 +128,11 @@ def _collapsed_content(message: ToolMessage, *, lossy_note: str) -> str | None:
     content = message.content
     if not isinstance(content, str) or _is_already_pruned(content):
         return None
+    reference = skill_view_reference(message)
+    if reference is not None:
+        # Wrapped in the prune tags so ``_is_already_pruned`` keeps the pass
+        # idempotent for skill stubs too.
+        return f"{_PRUNE_TAG_OPEN}\n{reference}\n{_PRUNE_TAG_CLOSE}"
     footer_at = content.find(OVERFLOW_FOOTER_TAG_OPEN)
     if footer_at != -1:
         return content[footer_at:].lstrip("\n")
