@@ -298,3 +298,63 @@ async def test_dedup_hit_on_draft_target_keeps_draft_status() -> None:
     assert existing is not None
     assert existing.status is SkillStatus.DRAFT
     assert existing.latest_version == 2
+
+
+async def test_persisted_version_carries_real_content_hash() -> None:
+    """Live pilot finding #6 — a distilled version persisted with the empty
+    default hash fails the U-21 drift recompute at load time (skill_seed /
+    skill_view drop it): attached but unusable. The processor must hash the
+    fragment it persists."""
+    from helix_agent.protocol.skill import compute_content_hash
+
+    store = InMemorySkillStore()
+
+    async def invoker(**_kw: Any) -> ReplayOutcome:
+        return ReplayOutcome(verdict="inconclusive")
+
+    proc = EvolutionProcessor(
+        distiller=SkillDistiller(model=FakeModel(_draft_reply())),
+        attributor=SkillAttributor(model=FakeModel("content_error")),
+        skill_store=store,
+        evidence_provider=_evidence,
+        held_out_provider=_held_out,
+        replay_invoker=invoker,
+    )
+    await proc(_candidate())
+
+    skill = await store.get_skill_by_name(tenant_id=_TENANT, name="summarise-data")
+    assert skill is not None
+    version = await store.get_version_by_number(skill_id=skill.id, tenant_id=_TENANT, version=1)
+    assert version is not None
+    assert version.content_hash == compute_content_hash(version.prompt_fragment, {})
+
+
+async def test_dedup_active_flip_invalidates_agent_cache() -> None:
+    """Live pilot finding #8 — flipping an ACTIVE dedup target back to DRAFT
+    changes the auto-attach set without a spec-version bump; the processor
+    must drop the tenant's BuiltAgent cache entries."""
+    from helix_agent.protocol.skill import SkillStatus
+
+    store = InMemorySkillStore()
+    existing_id = await _seed_existing(store, name="tabular-howto", status=SkillStatus.ACTIVE)
+    invalidated: list[UUID] = []
+
+    async def deduper(draft: Any, candidate: CurationCandidateRecord) -> DedupMatch:
+        return DedupMatch(skill_id=existing_id, skill_name="tabular-howto", similarity=0.95)
+
+    async def invoker(**_kw: Any) -> ReplayOutcome:
+        return ReplayOutcome(verdict="inconclusive")
+
+    proc = EvolutionProcessor(
+        distiller=SkillDistiller(model=FakeModel(_draft_reply("summarise-data"))),
+        attributor=SkillAttributor(model=FakeModel("content_error")),
+        skill_store=store,
+        evidence_provider=_evidence,
+        held_out_provider=_held_out,
+        replay_invoker=invoker,
+        deduper=deduper,
+        cache_invalidator=invalidated.append,
+    )
+    await proc(_candidate())
+
+    assert invalidated == [_TENANT]

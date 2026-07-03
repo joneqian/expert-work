@@ -881,6 +881,14 @@ def build_skills_router() -> APIRouter:
                 trace_id=current_trace_id_hex(),
                 details={"from": prior.status.value, "to": updated.status.value},
             )
+            # Live pilot finding #8 — a status flip changes the auto-attach
+            # set (SE-A42) without a spec-version bump, so the BuiltAgent
+            # cache would serve stale builds until a restart. Best-effort:
+            # test apps may not wire a runtime.
+            if updated.status is not prior.status:
+                runtime = getattr(request.app.state, "agent_runtime", None)
+                if runtime is not None:
+                    runtime.invalidate_tenant(tenant_id)
 
         # Sprint #4 (Mini-ADR U-30) — pin / unpin. Distinct audit
         # actions so SecOps can filter on either side.

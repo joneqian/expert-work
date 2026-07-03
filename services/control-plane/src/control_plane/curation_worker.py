@@ -59,6 +59,13 @@ _FAILED_OUTCOMES: frozenset[str] = frozenset({"failed", "max_steps"})
 # Separates "user got the answer and left" from "conversation in flight".
 _IMPLICIT_QUIET_WINDOW = timedelta(minutes=30)
 
+# SE-16 live pilot finding #7 — a follow-up run landing this soon after a
+# trajectory's own run finished reads as a rephrase ("no, I meant …"): the
+# user was not satisfied with THAT answer, so that trajectory must not enter
+# the weak-label implicit pool even once the thread later settles quietly.
+# The thread's final answer stays eligible (the user left satisfied with it).
+_IMPLICIT_REPHRASE_WINDOW = timedelta(minutes=5)
+
 _worker_cycle_errors = helix_counter(
     "helix_control_plane_curation_worker_cycle_errors_total",
     "Curation worker cycles that ended in a caught exception.",
@@ -268,6 +275,11 @@ class CurationWorker:
         thread simply isn't a candidate *yet*; the next sweep re-evaluates
         it (the trajectory only enters the dedup index once it becomes a
         candidate).
+
+        Live pilot finding #7 — additionally, a trajectory whose own run was
+        followed by another run within :data:`_IMPLICIT_REPHRASE_WINDOW` is a
+        rephrased/corrected answer and never counts, even after the thread
+        settles (only the thread's final answer carries the implicit signal).
         """
         if self._runs is None:
             return False
@@ -280,7 +292,27 @@ class CurationWorker:
             return False
         if agg.last_run_at is None:
             return False
-        return datetime.now(UTC) - agg.last_run_at >= _IMPLICIT_QUIET_WINDOW
+        if datetime.now(UTC) - agg.last_run_at < _IMPLICIT_QUIET_WINDOW:
+            return False
+        return not await self._was_rephrased(stored)
+
+    async def _was_rephrased(self, stored: StoredTrajectory) -> bool:
+        """Finding #7 — did a follow-up run land right after this one?"""
+        if stored.run_id is None or stored.finished_at is None:
+            # Legacy trajectory envelope without run linkage — cannot tell,
+            # keep the pre-fix behaviour (quiet thread ⇒ implicit).
+            return False
+        with _tenant_scope(stored.tenant_id):
+            runs = await self._runs.list_by_thread(  # type: ignore[union-attr]
+                thread_id=stored.thread_id, tenant_id=stored.tenant_id
+            )
+        for run in runs:
+            if run.run_id == stored.run_id:
+                continue
+            gap = run.created_at - stored.finished_at
+            if timedelta(0) <= gap < _IMPLICIT_REPHRASE_WINDOW:
+                return True
+        return False
 
     async def _loop(self) -> None:
         while not self._stop.is_set():

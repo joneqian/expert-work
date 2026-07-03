@@ -786,6 +786,42 @@ test-agent 开 `auto_attach_evolved_skills`。
 
 产物:live 记录 + 坑清单落 docs(9.4 先例),全绿后 wave 关账。
 
+> **live 试点结果(2026-07-03,dev 栈,test 租户/test-agent;预期 3-5 坑,实逮 9)**:
+> 全飞轮首次 live 闭环 —— 👍→候选→蒸馏 DRAFT→replay 真跑(`skill_eval_result` n=4/delta=0/
+> inconclusive→留人审,饱和语义正确)→人审 ACTIVE→auto_attach→新会话 bound→
+> **`skill_run_usage` with 行 + `last_used_at` bump**(场景 8 关键断言达成)。
+> kill-switch 全周期(10 后半)、webhook `skill_promote.requested`(14)、aux 计量归属(12)全过。
+>
+> **坑清单(修复同 PR)**:
+> 1. *(观察)* 冷启动租户 replay 池空 → inconclusive 无 eval 行:SE-A0 语义正确,但人审面应显式
+>    「无重放证据:轨迹池不足」而非空白(admin-ui backlog)。
+> 2. *(修)* aux 经 LLM router 的 429/5xx/401/402 均以 `LLM*` 异常浮出(无 httpx cause 链),
+>    transport-only 的 `_is_transient` 全部烧候选 —— 连设计明说的 rate-limit 重试都断;
+>    key/auth 故障按拍板同样纳入重试档(候选是稀缺信号,修好凭证应重拾)。
+> 3. *(文档)* implicit quiet 窗实现为 **30min settled-quietly**(PR-3 有意修正),场景 1 的
+>    「5 分钟」措辞按此更正。
+> 4. *(修)* dedup 0.9 阈值形同虚设:四条近义对话蒸馏出 5 个近义 skill 两两不命中。真 embedder
+>    (qwen text-embedding-v4)校准:重复族 0.54-0.78,无关对 ≤0.47 → 阈值降至 **0.60**
+>    (新 draft 对最像既有命中在 0.71-0.78;误合并代价高于漏合并,不追 0.54 离群)。
+> 5. *(修)* replay 主图 token 计量 0 行:`TokenUsageMiddleware` 读 `configurable["tenant_id"]`,
+>    replay config 只放 thread_id → 静默跳过。修 = per-candidate config factory 带
+>    tenant_id/user_id。CI fake 带 tenant_id 故全绿 —— ★5 教训再现。
+> 6. *(修)* 蒸馏版本落库缺 `content_hash`(默认 `b""`)→ U-21 drift 重算恒不匹配 →
+>    skill_seed/skill_view 双 drop:**附加了但加载不出**(生效链第三断点)。修 = processor
+>    persist 时算 hash + migration 0111 回填旧行。
+> 7. *(修,拍板)* settled-quietly 丢失改口语义:同 thread 快速改口的首答静默后也进弱标签池
+>    (judge 评最终答案质量兜不住)。修 = 补 5min thread 内重发排除(`_IMPLICIT_REPHRASE_WINDOW`,
+>    只排除被改口的那条,thread 终答仍可 implicit)。
+> 8. *(修)* BuiltAgent 缓存键 `(tenant,name,version)` 吞掉晋升生效:skill 状态翻转不 bump spec
+>    version → auto_attach 直到进程重启才拾取(live 实证)。修 = 四个翻转点全部
+>    `invalidate_tenant`:人审 PATCH / auto-promote gate / rollback gate / dedup ACTIVE→DRAFT。
+> 9. *(修)* `skill_run_usage` recorder 装配被 `enable_skill_rollback_monitor` 连坐(默认 false
+>    → with 行永不写,rollback+curator 数据源断供)。修 = recorder 恒装配,monitor 只管读侧。
+>
+> live 未触发(partial,逻辑单测厚覆盖):场景 9 auto promote / 10 限速(需可控正 delta)、
+> 11 人为衰退(需批量 failed 流量)、13 浏览器面。场景 2 pass-by-evidence(检测路径未被本 wave
+> 改动)。场景 3 的故障注入以代码级确证替代(平台凭证受权限保护)。
+
 ## 附:与三篇论文 / 三仓的对应(可追溯性)
 
 | 来源 | 思想 | 本 Stream 落点 |

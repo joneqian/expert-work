@@ -28,7 +28,7 @@ from control_plane.skill_evolution import EvolutionConfig, EvolutionResult, Repl
 from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import DuplicateSkillError, SkillStore
 from helix_agent.protocol import CurationCandidateRecord
-from helix_agent.protocol.skill import SkillStatus
+from helix_agent.protocol.skill import SkillStatus, compute_content_hash
 
 
 def _utcnow() -> datetime:
@@ -127,6 +127,10 @@ class EvolutionProcessor:
     #: SE-A47 — ingest-time dedup. ``None`` disables (every draft is a new
     #: skill, the pre-dedup behavior).
     deduper: SkillDeduper | None = None
+    #: Live pilot finding #8 — a dedup hit on an ACTIVE skill flips it back
+    #: to DRAFT (revision under review), changing the agent's auto-attach set
+    #: without a spec-version bump; the BuiltAgent cache must be invalidated.
+    cache_invalidator: Callable[[UUID], None] | None = None
     clock: Callable[[], datetime] = _utcnow
 
     async def __call__(self, candidate: CurationCandidateRecord) -> EvolutionResult:
@@ -233,6 +237,8 @@ class EvolutionProcessor:
                             tenant_id=candidate.tenant_id,
                             status=SkillStatus.DRAFT,
                         )
+                        if self.cache_invalidator is not None:
+                            self.cache_invalidator(candidate.tenant_id)
         if state.skill_id is None:
             state.skill_id = await self._ensure_skill(draft, candidate)
         version = await self.skill_store.add_version(
@@ -245,6 +251,10 @@ class EvolutionProcessor:
             category=draft.category,
             authored_by="agent",
             high_risk=draft.high_risk,
+            # Live pilot finding #6 — without a real content hash the U-21
+            # drift check (skill_seed / skill_view recompute-and-compare)
+            # drops every distilled skill at load time: attached but unusable.
+            content_hash=compute_content_hash(draft.prompt_fragment, {}),
             evolution_origin="distilled",
             distilled_from_trajectory_key=candidate.trajectory_key,
             distilled_from_candidate_id=candidate.id,

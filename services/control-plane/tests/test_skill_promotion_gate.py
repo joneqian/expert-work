@@ -232,3 +232,48 @@ async def test_weak_label_origin_never_auto_promotes() -> None:
     )
     assert decision.action is not PromoteAction.AUTO_PROMOTE
     assert await _status(store, skill_id) is SkillStatus.DRAFT
+
+
+async def test_auto_promote_invalidates_agent_cache() -> None:
+    """Live pilot finding #8 — flipping ACTIVE changes the auto-attach set
+    without a spec-version bump; the gate must drop the tenant's BuiltAgent
+    cache entries or the promotion is invisible until a restart."""
+    store = InMemorySkillStore()
+    skill_id = await _draft_skill(store)
+    invalidated: list[UUID] = []
+    gate = PromotionGate(
+        skill_store=store,
+        rate_limiter=RateLimiter(max_per_window=5, window=timedelta(hours=1)),
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=1)),
+        cache_invalidator=invalidated.append,
+    )
+
+    await gate.maybe_promote(
+        candidate=_candidate(),
+        skill_id=skill_id,
+        auto_promote_eligible=True,
+        high_risk=False,
+        now=_NOW,
+    )
+    assert invalidated == [_TENANT]
+
+
+async def test_human_review_path_does_not_invalidate() -> None:
+    store = InMemorySkillStore()
+    skill_id = await _draft_skill(store)
+    invalidated: list[UUID] = []
+    gate = PromotionGate(
+        skill_store=store,
+        rate_limiter=RateLimiter(max_per_window=5, window=timedelta(hours=1)),
+        breaker=CircuitBreaker(failure_threshold=0.5, min_samples=5, window=timedelta(hours=1)),
+        cache_invalidator=invalidated.append,
+    )
+
+    await gate.maybe_promote(
+        candidate=_candidate(),
+        skill_id=skill_id,
+        auto_promote_eligible=True,
+        high_risk=True,  # high-risk always lands in human review
+        now=_NOW,
+    )
+    assert invalidated == []

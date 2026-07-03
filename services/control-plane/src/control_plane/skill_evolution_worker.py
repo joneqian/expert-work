@@ -33,6 +33,14 @@ from helix_agent.persistence.rls import (
     current_user_id_var,
 )
 from helix_agent.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
+from helix_agent.runtime.middleware.llm_error_handling import (
+    CircuitOpenError,
+    LLMKeyUnavailableError,
+    LLMNetworkError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMUnauthorizedError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +107,18 @@ _screened_out = helix_counter(
 
 def _is_transient(exc: BaseException) -> bool:
     """Retryable fault sniffing — the explicit wrapper wins; otherwise walk
-    the cause/context chain for transport-class faults (timeout/connection).
-    ``TimeoutError`` covers ``asyncio.TimeoutError`` (alias since 3.11)."""
+    the cause/context chain for transport-class faults (timeout/connection)
+    and router-level recoverable LLM faults. ``TimeoutError`` covers
+    ``asyncio.TimeoutError`` (alias since 3.11).
+
+    Live pilot finding #2 — the aux path goes through the LLM router, which
+    surfaces 429 / 5xx / key faults as ``LLM*`` exceptions carrying no httpx
+    cause (they wrap normal HTTP responses), so the transport-only list burnt
+    candidates on every one of them. Key/auth faults (401/402/quota) are
+    deliberately retryable here: the candidate is a scarce signal and the
+    platform fixing its credential should re-pick it up (SE-A40 budget still
+    caps the attempts).
+    """
     node: BaseException | None = exc
     while node is not None:
         if isinstance(
@@ -109,7 +127,13 @@ def _is_transient(exc: BaseException) -> bool:
             | httpx.TimeoutException
             | httpx.TransportError
             | TimeoutError
-            | ConnectionError,
+            | ConnectionError
+            | LLMServerError
+            | LLMRateLimitError
+            | LLMKeyUnavailableError
+            | LLMUnauthorizedError
+            | LLMNetworkError
+            | CircuitOpenError,
         ):
             return True
         node = node.__cause__ if node.__cause__ is not None else node.__context__
