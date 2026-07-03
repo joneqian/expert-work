@@ -174,6 +174,9 @@ def build_usage_router() -> APIRouter:
         # user-detail usage tab). Endpoint already requires billing:read
         # (an admin capability), so no extra per-user gate is needed.
         user_id: Annotated[UUID | None, Query()] = None,
+        # SE-16 (SE-A43) — narrow to one usage kind ('conversation' |
+        # 'skill_evolution'); None keeps the full month.
+        kind: Annotated[str | None, Query()] = None,
     ) -> dict[str, object]:
         target = _parse_month(month)
         start, end = _month_window(target)
@@ -181,14 +184,18 @@ def build_usage_router() -> APIRouter:
         rows = await store.list_for_tenant_window(
             tenant_id=principal.tenant_id, start=start, end=end, user_id=user_id
         )
+        if kind is not None:
+            rows = [r for r in rows if r.usage_kind == kind]
 
         total = _token_zero()
         by_agent: dict[str, dict[str, int]] = defaultdict(_token_zero)
         by_model: dict[str, dict[str, int]] = defaultdict(_token_zero)
+        by_kind: dict[str, dict[str, int]] = defaultdict(_token_zero)
         for r in rows:
             _token_add(total, r)
             _token_add(by_agent[r.agent_name], r)
             _token_add(by_model[r.model], r)
+            _token_add(by_kind[r.usage_kind], r)
 
         return {
             "success": True,
@@ -199,6 +206,8 @@ def build_usage_router() -> APIRouter:
                 "total": total,
                 "by_agent": [{"key": k, **v} for k, v in by_agent.items()],
                 "by_model": [{"key": k, **v} for k, v in by_model.items()],
+                # SE-16 (SE-A43) — evolution spend separable from conversation.
+                "by_kind": [{"key": k, **v} for k, v in by_kind.items()],
             },
             "error": None,
         }

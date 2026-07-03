@@ -451,6 +451,10 @@ async def build_agent(
     middleware_env: MiddlewareEnv | None = None,
     memory_env: MemoryEnv | None = None,
     subagent_depth: int = 0,
+    # SE-16 (SE-A43) — what this build's LLM calls count as in token_usage.
+    # The evolution replay path passes ``skill_evolution`` so with/without
+    # replay spend is separable from the agent's conversation cost.
+    token_usage_kind: str = "conversation",  # noqa: S107 — usage label, not a secret
     skill_resolver: SkillResolver | None = None,
     tenant_id: Any = None,
     # Stream Q (Mini-ADR Q-5) — resolves a provider's platform-configured key.
@@ -531,6 +535,7 @@ async def build_agent(
         env=middleware_env,
         estimator=estimator,
         context_window=_resolved_context_window(spec.spec.model),
+        token_usage_kind=token_usage_kind,
     )
     # Stream J.11 — resolve the LLM router for each step class; the
     # planner / reflect nodes may route to a different model than the

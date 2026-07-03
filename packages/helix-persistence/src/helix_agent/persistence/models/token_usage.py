@@ -34,6 +34,12 @@ class TokenUsageRow(Base):
     # for per-user cost attribution. NULL for runs with no user context / legacy rows.
     user_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     trace_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # SE-16 (SE-A43) — what spent the tokens: 'conversation' (per-run LLM
+    # calls, the historical shape) vs 'skill_evolution' (flywheel aux +
+    # replay). Added in migration 0110; legacy rows backfill via default.
+    usage_kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'conversation'"), default="conversation"
+    )
     input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
     cache_creation_tokens: Mapped[int] = mapped_column(

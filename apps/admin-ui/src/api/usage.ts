@@ -57,6 +57,9 @@ export interface UsageTokens {
   total: TokenCounts;
   by_agent: TokenGroup[];
   by_model: TokenGroup[];
+  /** SE-16 (SE-A43) — spend split by what spent it: ``conversation`` vs
+   *  ``skill_evolution`` (the evolution flywheel's aux + replay calls). */
+  by_kind: TokenGroup[];
 }
 
 export interface GetUsageCostParams {

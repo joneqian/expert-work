@@ -99,6 +99,10 @@ class TokenUsageMiddleware:
     # Stream Y-3 — the ModelSpec provider, baked in at construction so Y4 can
     # price by ``(provider, model)``. ``None`` when the caller can't supply it.
     provider: str | None = None
+    # SE-16 (SE-A43) — what this build's LLM calls count as. The evolution
+    # replay path builds agents with ``skill_evolution`` so with/without
+    # replay spend never pollutes the agent's conversation cost.
+    usage_kind: str = "conversation"
     # Stream HX-1 (Mini-ADR HX-A6) — when injected, the estimator re-counts
     # the prompt that was actually sent (``payload["prompt_messages"]``) so
     # the drift counter accumulates next to the provider-reported truth.
@@ -204,6 +208,7 @@ class TokenUsageMiddleware:
                     model=self.model,
                     provider=self.provider,
                     user_id=usage_user_id,
+                    usage_kind=self.usage_kind,
                     input_tokens=input_t,
                     output_tokens=output_t,
                     cache_creation_tokens=cache_creation_t,

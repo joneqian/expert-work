@@ -99,6 +99,7 @@ function stubAll() {
         cache_read_tokens: 0,
       },
     ],
+    by_kind: [],
   });
 }
 

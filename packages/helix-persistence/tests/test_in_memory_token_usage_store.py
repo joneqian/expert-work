@@ -375,3 +375,25 @@ async def test_window_filters_by_user(store: InMemoryTokenUsageStore) -> None:
     end = datetime.now(UTC) + timedelta(minutes=1)
     rows = await store.list_for_tenant_window(tenant_id=tenant, start=start, end=end, user_id=alice)
     assert [r.input_tokens for r in rows] == [10]
+
+
+@pytest.mark.asyncio
+async def test_usage_kind_defaults_and_round_trips(store: InMemoryTokenUsageStore) -> None:
+    """SE-16 (SE-A43) — kind defaults 'conversation'; evolution rows round-trip."""
+    tenant = uuid4()
+    legacy = await store.insert(
+        TokenUsageRecord(tenant_id=tenant, agent_name="a", agent_version="1", model="m")
+    )
+    assert legacy.usage_kind == "conversation"
+    evo = await store.insert(
+        TokenUsageRecord(
+            tenant_id=tenant,
+            agent_name="a",
+            agent_version="1",
+            model="m",
+            usage_kind="skill_evolution",
+        )
+    )
+    assert evo.usage_kind == "skill_evolution"
+    kinds = {r.usage_kind for r in await store.list_for_tenant(tenant_id=tenant)}
+    assert kinds == {"conversation", "skill_evolution"}

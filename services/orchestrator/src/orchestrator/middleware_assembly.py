@@ -84,6 +84,7 @@ def build_middleware_chains(
     env: MiddlewareEnv | None = None,
     estimator: TokenEstimator | None = None,
     context_window: int | None = None,
+    token_usage_kind: str = "conversation",  # noqa: S107 — usage label, not a secret
 ) -> MiddlewareChains:
     """Build the anchor chains for ``spec`` (Mini-ADR E-15).
 
@@ -150,6 +151,7 @@ def build_middleware_chains(
                 model=model.name,
                 provider=model.provider,
                 estimator=estimator,
+                usage_kind=token_usage_kind,
             )
         )
 

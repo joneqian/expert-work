@@ -73,6 +73,8 @@ class TokenUsageRecord:
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
     trace_id: str | None = None
+    # SE-16 (SE-A43) — what spent the tokens ('conversation' | 'skill_evolution').
+    usage_kind: str = "conversation"
     id: int | None = None
     observed_at: datetime | None = None
 
@@ -278,6 +280,7 @@ class DbTokenUsageStore(TokenUsageStore):
                 provider=record.provider,
                 user_id=record.user_id,
                 trace_id=record.trace_id,
+                usage_kind=record.usage_kind,
                 input_tokens=record.input_tokens,
                 output_tokens=record.output_tokens,
                 cache_creation_tokens=record.cache_creation_tokens,
@@ -442,6 +445,7 @@ def _row_to_record(row: TokenUsageRow) -> TokenUsageRecord:
         provider=row.provider,
         user_id=row.user_id,
         trace_id=row.trace_id,
+        usage_kind=row.usage_kind,
         input_tokens=row.input_tokens,
         output_tokens=row.output_tokens,
         cache_creation_tokens=row.cache_creation_tokens,

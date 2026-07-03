@@ -24,6 +24,7 @@ from uuid import UUID
 import httpx
 
 from control_plane.skill_evolution import EvolutionResult, TransientEvolutionError
+from control_plane.skill_evolution_metering import metering_scope
 from helix_agent.common.observability import helix_counter
 from helix_agent.persistence import CurationCandidateStore
 from helix_agent.persistence.rls import (
@@ -235,7 +236,9 @@ class SkillEvolutionWorker:
                     gate_cache[candidate.tenant_id] = enabled
                 if not enabled:
                     continue
-            with _tenant_scope(candidate.tenant_id):
+            # SE-A43 — attribute every aux call inside (screen + distil +
+            # judge + replay) to this candidate's tenant/agent/trace.
+            with _tenant_scope(candidate.tenant_id), metering_scope(candidate):
                 try:
                     # SE-A45 — sampled quality screen: an un-sampled or
                     # low-scoring implicit candidate is dropped for good
