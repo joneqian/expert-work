@@ -53,3 +53,33 @@ async def test_contradictory_resolve_case_fails() -> None:
     report = await evaluate_set([case])
     assert report.status == "FAIL"
     assert not report.per_case[0].passed
+
+
+@pytest.mark.asyncio
+async def test_lazy_skill_summary_present_but_body_withheld() -> None:
+    """RT-ADR-12 — a lazy skill contributes only its ``<available-skills>``
+    summary; its body is NOT inlined (it is loaded on demand via skill_view).
+    This is the progressive-disclosure guardrail: the summary must carry enough
+    for the model to decide to load, and the body must not bloat the prompt."""
+    from skill import ScriptedSkillVersion  # type: ignore[import-not-found]
+
+    case = SkillCase(
+        case_id="lazy-progressive-disclosure",
+        scenario="resolve_bare",
+        seed=(
+            ScriptedSkillVersion(
+                name="lazyskill",
+                version=1,
+                prompt_fragment="SECRET-LAZY-BODY-MARKER",
+                lazy_load=True,
+            ),
+        ),
+        skills=("lazyskill",),
+        # Summary (name in the <available-skills> block) present…
+        expected_prompt_contains=('name="lazyskill"',),
+        # …but the eager body must be absent.
+        expected_prompt_absent=("SECRET-LAZY-BODY-MARKER",),
+    )
+    report = await evaluate_set([case])
+    assert report.status == "PASS", report.per_case[0].notes
+    assert report.per_case[0].passed
