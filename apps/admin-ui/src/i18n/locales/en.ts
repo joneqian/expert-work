@@ -454,6 +454,8 @@ export interface TranslationKeys {
     vision_off: string;
     temperature: string;
     advanced: string;
+    context_window: string;
+    context_window_hint: string;
     thinking_label: string;
     thinking_cannot_disable: string;
   };
@@ -2633,6 +2635,9 @@ const en: TranslationKeys = {
     vision_off: "Vision: not supported",
     temperature: "Temperature",
     advanced: "Advanced",
+    context_window: "Context window",
+    context_window_hint:
+      "Tokens; sets the compaction threshold. Empty = the model catalog default.",
     thinking_label: "Thinking mode",
     thinking_cannot_disable:
       "This model can only minimise thinking, not fully disable it.",

@@ -188,6 +188,31 @@ export function ModelSelect({
                     style={{ width: "100%" }}
                   />
                 </label>
+                <label style={{ display: "block", marginBottom: 8 }}>
+                  <span style={{ display: "block", marginBottom: 4 }}>
+                    {t("model_select.context_window")}
+                  </span>
+                  <InputNumber
+                    value={value.context_window}
+                    min={1}
+                    onChange={(v) =>
+                      onChange({ ...value, context_window: v ?? undefined })
+                    }
+                    style={{ width: "100%" }}
+                    aria-label={t("model_select.context_window")}
+                    data-testid="model-select-context-window"
+                  />
+                  <span
+                    style={{
+                      display: "block",
+                      marginTop: 4,
+                      fontSize: 12,
+                      color: "var(--hx-text-muted, #888)",
+                    }}
+                  >
+                    {t("model_select.context_window_hint")}
+                  </span>
+                </label>
               </>
             ),
           },

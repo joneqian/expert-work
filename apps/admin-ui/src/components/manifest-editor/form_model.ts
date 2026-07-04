@@ -5,6 +5,10 @@ export interface ModelFields {
   temperature?: number;
   max_tokens?: number;
   rate_limit_rpm?: number;
+  // Declared context window in tokens; drives the compaction threshold
+  // (context_window * threshold_pct). Undefined = resolve from the model
+  // catalog, falling back to 200k (agent_factory._resolved_context_window).
+  context_window?: number;
   // Thinking-Toggle — tri-state on/off (undefined = inherit vendor default).
   thinking_enabled?: boolean;
   [k: string]: unknown;

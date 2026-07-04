@@ -121,6 +121,15 @@ export async function signIn(returnPath = "/agents"): Promise<void> {
   if (manager === null) {
     throw new Error("OIDC is not configured");
   }
+  // Start the sign-in from a clean slate. A stale OIDC session left in the store
+  // keeps ``automaticSilentRenew`` re-loading an expired user, churning the auth
+  // state; combined with leftover interrupted sign-in state, that is the kind of
+  // thing that used to need a manual "clear site data" before SSO would work.
+  // ``removeUser`` drops the stale session (stopping the renew churn) and
+  // ``clearStaleState`` prunes abandoned sign-in state. Both are best-effort — a
+  // failed purge must not block the redirect.
+  await manager.removeUser().catch(() => {});
+  await manager.clearStaleState().catch(() => {});
   await manager.signinRedirect({ state: { returnPath } });
 }
 

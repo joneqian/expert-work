@@ -466,6 +466,8 @@ const zhCN: TranslationKeys = {
     vision_off: "视觉：不支持",
     temperature: "温度",
     advanced: "高级",
+    context_window: "上下文窗口",
+    context_window_hint: "token 数；决定压缩触发阈值。留空 = 用模型目录默认窗口。",
     thinking_label: "思考模式",
     thinking_cannot_disable: "该模型仅能最小化思考，无法完全关闭。",
   },
