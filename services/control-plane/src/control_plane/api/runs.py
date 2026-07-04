@@ -1090,8 +1090,13 @@ def build_runs_router() -> APIRouter:
             return empty
         try:
             # Shared extraction with the transcript mirror sweep (IA M4) —
-            # one definition of "a transcript turn".
-            turns = await read_turns(checkpointer, thread_id)
+            # one definition of "a transcript turn". RT-ADR-9: the bubble view
+            # hides orchestrator scaffolding (``helix_hide_from_ui``), but the
+            # cross-tenant audit drill-in (``target_tenant`` differs — the same
+            # signal that emits the SESSION_READ audit row above) sees the
+            # faithful transcript. The durable record + search mirror always do.
+            is_cross_tenant_audit = target_tenant != request.state.tenant_id
+            turns = await read_turns(checkpointer, thread_id, include_hidden=is_cross_tenant_audit)
         except Exception:
             logger.warning("thread_messages.read_failed", exc_info=True)
             return empty

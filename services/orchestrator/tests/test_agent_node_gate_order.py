@@ -97,9 +97,10 @@ class _TracingCompressor:
         messages: Sequence[BaseMessage],
         *,
         on_pre_compaction: object = None,
+        on_compacted: object = None,
         streak_key: str | None = None,
     ) -> list[BaseMessage]:
-        del on_pre_compaction, streak_key
+        del on_pre_compaction, on_compacted, streak_key
         self.order.append("compressor")
         self.seen.append(list(messages))
         return [*messages, HumanMessage(content="[compressor-mark]")]

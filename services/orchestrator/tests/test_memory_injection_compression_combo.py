@@ -11,17 +11,17 @@ combined behavior — real ``_inject_memories`` output through a real
 parameter change that would silently summarise the memory block away
 fails loudly here.
 
-The ``head_keep`` boundary cases (0 / 1) pin the CURRENT behavior only
-(this PR changes nothing about it):
+The ``head_keep`` boundary cases (0 / 1):
 
 * ``head_keep=1`` — the block survives, but the user's first task
-  message falls into the summarised middle;
-* ``head_keep=0`` (the protocol allows it: ``ge=0``) — the block itself
-  is summarised away, silently destroying both the cache anchor and the
-  memory guidance. Known risk, not fixed in this PR — tracked in
-  ``docs/streams/STREAM-RT-DESIGN.md`` §8.4 (follow-up note: floor
-  ``head_keep`` at 1 while per_session recall is active; decision owed
-  to RT-2 PR-4 / stream closeout).
+  message falls into the summarised middle (pinned);
+* ``head_keep=0`` (the protocol allows it: ``ge=0``) — RT-2 PR-4 (§8.4)
+  now FLOORS ``head_keep`` to 1 in the factory when per_session recall is
+  active (``floor_head_keep_for_injection``), so the effective compressor
+  keeps the anchor. The direct-``head_keep=0`` compressor still loses the
+  block (nothing in the compressor knows about the anchor — the fix lives
+  one layer up, at construction); the test below drives the floor helper
+  the factory applies and asserts the block survives the floored value.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from langchain_core.messages import (
 )
 
 from helix_agent.protocol import MemoryItem
-from orchestrator.context import ContextCompressor
+from orchestrator.context import ContextCompressor, floor_head_keep_for_injection
 from orchestrator.graph_builder.builder import _inject_memories
 from orchestrator.tools.registry import ToolSpec
 
@@ -141,18 +141,35 @@ async def test_head_keep_one_still_covers_the_injection_block() -> None:
 
 
 @pytest.mark.asyncio
-async def test_head_keep_zero_summarises_the_injection_block_away() -> None:
-    """Boundary ``head_keep=0`` (allowed by the protocol: ``ge=0``):
-    the block lands in the middle and is summarised away — cache anchor
-    AND memory guidance silently destroyed. This test locks the CURRENT
-    behavior so the risk stays visible (RT-ADR-8); the fix (a floor of 1
-    while per_session recall is active) is tracked in
-    ``docs/streams/STREAM-RT-DESIGN.md`` §8.4."""
+async def test_head_keep_zero_floored_to_one_protects_injection_block() -> None:
+    """RT-2 PR-4 (§8.4) — the factory floors ``head_keep`` to 1 while
+    per_session recall is active (``floor_head_keep_for_injection``), so the
+    effective compressor keeps the ``messages[1]`` anchor even though the
+    manifest requested ``head_keep=0``. Compression still fires; the block
+    survives at position 1 with its content + anchor intact."""
+    effective = floor_head_keep_for_injection(0, per_session_memory_active=True)
+    assert effective == 1  # the factory would build the compressor with this
+
+    messages = _injected_conversation()
+    result = await _compressor(head_keep=effective).compress(messages)
+
+    assert _has_summary(result), "compression should still have fired"
+    loc = _find_anchor_block(result)
+    assert loc is not None, "protection failed: memory block lost"
+    idx, block = loc
+    assert idx == 1
+    assert "user prefers concise replies" in str(block.content)
+
+
+@pytest.mark.asyncio
+async def test_head_keep_zero_unprotected_still_loses_block() -> None:
+    """A compressor built directly with ``head_keep=0`` (no factory floor —
+    e.g. a non-memory agent) still summarises the middle away. This pins
+    that the fix lives at construction (the factory floor), not inside the
+    compressor, so ``head_keep=0`` stays a valid config where no per_session
+    anchor is present."""
     messages = _injected_conversation()
     result = await _compressor(head_keep=0).compress(messages)
 
     assert _has_summary(result)
-    anchor = _find_anchor_block(result)
-    assert anchor is None, "current behavior: head_keep=0 loses the memory block"
-    memories_still_present = any("Relevant memories" in str(m.content) for m in result)
-    assert not memories_still_present
+    assert _find_anchor_block(result) is None

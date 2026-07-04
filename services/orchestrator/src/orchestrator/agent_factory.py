@@ -77,6 +77,7 @@ from orchestrator.context import (
     ToolResultPruner,
     WorkingWindow,
     WorkspaceFileWriter,
+    floor_head_keep_for_injection,
 )
 from orchestrator.errors import (
     AgentFactoryError,
@@ -719,11 +720,29 @@ async def build_agent(
     cc_policy = spec.spec.policies.context_compression
     context_compressor: ContextCompressor | None = None
     if cc_policy.enabled:
+        # RT-2 PR-4 (§8.4) — per_session recall injects the cache-anchor +
+        # memory guidance block at ``messages[1]``; ``head_keep=0`` would let
+        # the compressor fold it into the summarised middle, silently dropping
+        # both (RT-ADR-8's combo test pinned the risk). Floor to 1 when that
+        # injection is active — a no-op for head_keep>=1 or non-memory agents,
+        # so a valid head_keep=0 config is never bricked.
+        _long_term = spec.spec.memory.long_term if spec.spec.memory is not None else None
+        per_session_memory = _long_term is not None and _long_term.recall_mode == "per_session"
+        head_keep = floor_head_keep_for_injection(
+            cc_policy.head_keep, per_session_memory_active=per_session_memory
+        )
+        if head_keep != cc_policy.head_keep:
+            logger.warning(
+                "context_compression.head_keep_floored requested=%d floored=%d "
+                "reason=per_session_memory_anchor",
+                cc_policy.head_keep,
+                head_keep,
+            )
         context_compressor = ContextCompressor(
             llm_caller=routers.default,
             context_window=_resolved_context_window(spec.spec.model),
             threshold_pct=cc_policy.threshold_pct,
-            head_keep=cc_policy.head_keep,
+            head_keep=head_keep,
             tail_keep=cc_policy.tail_keep,
             max_passes=cc_policy.max_passes,
             estimator=estimator,

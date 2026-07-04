@@ -95,6 +95,58 @@ async def test_run_agent_mirrors_metadata_and_updates_to_event_store() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_agent_threads_compaction_sink_publishes_and_persists() -> None:
+    """RT-2 PR-4 — run_agent threads a COMPACTION event sink into config; a
+    node that fires it (as ``agent_node`` does after the compressor produces a
+    summary) lands a ``compaction`` frame on the bridge AND in the durable
+    store, on the shared monotonic seq — before the turn's ``updates`` chunk."""
+    from orchestrator.graph_builder._config import COMPACTION_SINK_KEY
+
+    payload = {"passes": 2, "tokens_before": 1000, "tokens_after": 300, "summary_chars": 120}
+
+    @dataclass
+    class _CompactingGraph:
+        async def astream(
+            self, _input: Any, config: Any = None, *, stream_mode: str = "updates"
+        ) -> AsyncIterator[Any]:
+            # Mirror agent_node: read the injected sink and fire it mid-turn,
+            # before the node's own update chunk is yielded.
+            sink = (config.get("configurable") or {})[COMPACTION_SINK_KEY]
+            await sink(payload)
+            yield {"agent": {"step_count": 1}}
+
+        async def aget_state(self, _config: Any) -> Any:
+            from types import SimpleNamespace
+
+            return SimpleNamespace(values={})
+
+    bridge = InMemoryStreamBridge()
+    rm = RunManager()
+    record = await _new_record(rm)
+    store = InMemoryRunEventStore()
+
+    await run_agent(
+        bridge=bridge,
+        run_manager=rm,
+        record=record,
+        graph=_CompactingGraph(),
+        graph_input={"messages": []},
+        config={},
+        event_store=store,
+    )
+
+    events = await _drain(bridge, record.run_id)
+    assert [e.event for e in events] == ["metadata", "compaction", "updates"]
+    compaction = next(e for e in events if e.event == "compaction")
+    assert compaction.data == payload
+
+    listed = await store.list(run_id=record.run_id)
+    assert [r.event_name for r in listed] == ["metadata", "compaction", "updates"]
+    assert [r.seq for r in listed] == [0, 1, 2]  # gap-free monotonic
+    assert next(r for r in listed if r.event_name == "compaction").data == payload
+
+
+@pytest.mark.asyncio
 async def test_paused_run_emits_and_persists_approval_event() -> None:
     """A run pausing at an approval gate emits a dedicated ``approval`` event
     (mirrored to the event store) so a client surfaces the gate deterministically

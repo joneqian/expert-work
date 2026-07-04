@@ -15,7 +15,13 @@ from dataclasses import dataclass, field
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from orchestrator.context import ContextCompressor, ContextOverflowError, estimate_tokens
+from orchestrator.context import (
+    CompactionStats,
+    ContextCompressor,
+    ContextOverflowError,
+    estimate_tokens,
+    floor_head_keep_for_injection,
+)
 from orchestrator.context.compressor import (
     _SUMMARY_INPUT_CHAR_BUDGET,
     _SUMMARY_PER_MESSAGE_CHAR_CAP,
@@ -726,3 +732,118 @@ def test_should_compress_respects_injected_estimator() -> None:
     msgs = [HumanMessage(content="x" * 60)]  # 15 legacy tokens vs 60 injected
     assert legacy.should_compress(msgs) is False
     assert injected.should_compress(msgs) is True
+
+
+# ---------------------------------------------------------------------------
+# RT-2 PR-4 — compaction observability hook + tokens-saved counter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_compacted_fires_once_with_stats() -> None:
+    """A real compression fires ``on_compacted`` exactly once with the
+    pass count, before/after token estimates, and summary length."""
+    summariser = _ScriptedSummariser()
+    compressor = ContextCompressor(
+        llm_caller=summariser,
+        context_window=280,
+        threshold_pct=0.5,
+        head_keep=2,
+        tail_keep=2,
+    )
+    msgs = _conversation(head=2, middle=16, tail=2, char_per_msg=80)
+    before = estimate_tokens(msgs)
+
+    seen: list[CompactionStats] = []
+
+    async def _hook(stats: CompactionStats) -> None:
+        seen.append(stats)
+
+    out = await compressor.compress(msgs, on_compacted=_hook)
+
+    assert len(seen) == 1
+    stats = seen[0]
+    assert stats.passes == 1
+    assert stats.tokens_before == before
+    assert stats.tokens_after == estimate_tokens(out)
+    assert stats.tokens_after < stats.tokens_before
+    assert stats.summary_chars > 0
+
+
+@pytest.mark.asyncio
+async def test_on_compacted_not_fired_below_threshold() -> None:
+    """Input already under threshold: no pass runs, so no event fires."""
+    compressor = ContextCompressor(
+        llm_caller=_ScriptedSummariser(), context_window=1000, threshold_pct=0.9
+    )
+    seen: list[CompactionStats] = []
+
+    async def _hook(stats: CompactionStats) -> None:
+        seen.append(stats)
+
+    await compressor.compress([HumanMessage(content="short")], on_compacted=_hook)
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_on_compacted_not_fired_on_transient_skip() -> None:
+    """A first-pass transient summariser failure skips compression — no
+    summary landed, so the observability hook stays silent."""
+    summariser = _FlakySummariser(script=[False])
+    compressor = _flaky_compressor(summariser)
+    msgs = _conversation(head=1, middle=10, tail=1, char_per_msg=80)
+    seen: list[CompactionStats] = []
+
+    async def _hook(stats: CompactionStats) -> None:
+        seen.append(stats)
+
+    out = await compressor.compress(msgs, on_compacted=_hook)
+    assert out == msgs  # skipped, uncompressed
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_tokens_saved_counter_increments_by_reclaimed_tokens() -> None:
+    """The magnitude counter rises by exactly the estimated tokens the
+    middle-summarisation removed from the prompt."""
+    from prometheus_client import REGISTRY
+
+    metric = "helix_cm_compressor_tokens_saved_total"
+    compressor = ContextCompressor(
+        llm_caller=_ScriptedSummariser(),
+        context_window=280,
+        threshold_pct=0.5,
+        head_keep=2,
+        tail_keep=2,
+    )
+    msgs = _conversation(head=2, middle=16, tail=2, char_per_msg=80)
+
+    before = REGISTRY.get_sample_value(metric) or 0.0
+    out = await compressor.compress(msgs)
+    after = REGISTRY.get_sample_value(metric) or 0.0
+
+    expected = estimate_tokens(msgs) - estimate_tokens(out)
+    assert expected > 0
+    assert after - before == pytest.approx(expected)
+
+
+# ---------------------------------------------------------------------------
+# RT-2 PR-4 (§8.4) — head_keep floor while per_session recall is active
+# ---------------------------------------------------------------------------
+
+
+def test_floor_head_keep_raises_zero_when_per_session_active() -> None:
+    """head_keep=0 + per_session memory → floored to 1 so the messages[1]
+    cache-anchor block survives compression."""
+    assert floor_head_keep_for_injection(0, per_session_memory_active=True) == 1
+
+
+def test_floor_head_keep_preserves_zero_without_per_session() -> None:
+    """head_keep=0 is legit for a non-memory agent — never bricked."""
+    assert floor_head_keep_for_injection(0, per_session_memory_active=False) == 0
+
+
+def test_floor_head_keep_leaves_positive_values_untouched() -> None:
+    assert floor_head_keep_for_injection(1, per_session_memory_active=True) == 1
+    assert floor_head_keep_for_injection(4, per_session_memory_active=True) == 4
+    assert floor_head_keep_for_injection(4, per_session_memory_active=False) == 4

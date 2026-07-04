@@ -252,6 +252,34 @@ async def test_advisory_persists_in_conversation_history() -> None:
 
 
 @pytest.mark.asyncio
+async def test_persisted_advisory_is_marked_hidden_from_ui() -> None:
+    """RT-2 PR-4 (RT-ADR-9), Option A — the persisted advisory carries
+    ``helix_hide_from_ui`` so the UI bubble view (``read_turns`` with
+    ``include_hidden=False``) keeps the CM-1 leak out of the rendered
+    transcript, while the durable record + search/audit mirror stay faithful
+    (the default ``include_hidden=True``) and the model sees it in-prompt."""
+    prompts: list[list[BaseMessage]] = []
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[_tc("save_artifact", {"name": "x.md"}, "tc-1")],
+            ),
+            AIMessage(content="done"),
+        ],
+        seen_prompts=prompts,
+    )
+    registry = ToolRegistry()
+    registry.register(_ScriptedSaveArtifact(fail=True))
+
+    state = await _run(llm, registry)
+
+    advisory = _find_advisory(state["messages"])
+    assert advisory is not None
+    assert advisory.additional_kwargs.get("helix_hide_from_ui") is True
+
+
+@pytest.mark.asyncio
 async def test_advisory_does_not_double_inject_on_followup_turn() -> None:
     """After consumption ``tool_failures`` resets to ``[]``; a follow-up
     agent step (no further failures) must NOT re-inject the same advisory

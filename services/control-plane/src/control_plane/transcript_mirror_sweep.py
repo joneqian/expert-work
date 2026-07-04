@@ -150,7 +150,11 @@ class TranscriptMirrorSweep:
             # re-selects the thread instead of losing the tail.
             mark = datetime.now(UTC)
             try:
-                turns = await read_turns(checkpointer, thread_id)
+                # The mirror feeds content search + audit — it must stay
+                # faithful to the durable transcript. ``include_hidden=True``
+                # keeps orchestrator scaffolding (``helix_hide_from_ui``) in
+                # the record; only the UI bubble view filters it (RT-ADR-9).
+                turns = await read_turns(checkpointer, thread_id, include_hidden=True)
             except Exception:
                 _read_errors.inc()
                 logger.warning(

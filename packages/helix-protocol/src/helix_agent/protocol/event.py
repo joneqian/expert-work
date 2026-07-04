@@ -26,6 +26,11 @@ class EventType(StrEnum):
     STATE = "state"
     ERROR = "error"
     CHECKPOINT = "checkpoint"
+    #: Stream RT-2 PR-4 — context compaction fired during a run. Emitted as a
+    #: free-string ``"compaction"`` SSE frame + durable RunEventStore mirror
+    #: (see ``orchestrator.sse.run_agent``); this taxonomy member keeps the
+    #: canonical event-type name aligned with that wire value.
+    COMPACTION = "compaction"
 
 
 class EventRecord(BaseModel):
