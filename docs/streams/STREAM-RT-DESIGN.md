@@ -243,3 +243,66 @@ ID-swap 三元组(无需求,见 RT-ADR-8)、memory 异步队列化(同步 flush 
 ### 8.5 tracker 同步
 
 `docs/decisions/deer-flow-context-mgmt-alignment.md` M2-C 必锁表按本次复核加注:skill rescue 三预算条目标注 upstream #3887 已废弃(本 PR 同步)。
+
+---
+
+## 9. RT-follow-up:技能渐进式披露默认化(fixed-overhead 调查产物,2026-07-04)
+
+RT-2 ★5 live run 后遗留的"agent ~20-24k 固定开销"backlog 决策。经实测 + deer-flow/Hermes 源码对标收敛。
+
+### 9.1 起因与取证
+
+实测澄清(test-agent@qwen3.7-max,真 dev DB + tiktoken cl100k):
+
+- **压缩估算只数 message 文本**——`orchestrator/context/compressor.py::estimate_tokens` = Σ `flatten_message` chars // 4(`_CHARS_PER_TOKEN=4`),**不含 `bind_tools` 工具 schema**。所以"固定开销"里被压缩看到的部分 = 首条 SystemMessage(系统提示)文本。
+- test-agent 系统提示 ≈ **5.1k tok**,其中 **~92% 是 2 个 eager 技能 body**(pptx 2086 + xlsx 2605 tok,整个 SKILL.md 内联);base 模板 `"You are a helpful assistant."` 仅 7 tok;平台强制子句 ~300 tok(spotlight 144 + `<available-skills>` 头 85 + tool-use enforcement ~60 + current date ~10)。
+- 恒 bound 工具 schema ≈ 3-4k tok(10 base capability + 6 技能创作 + find_tools + web_search + http + skill_view + remember)——**真实 API 成本,但不进压缩估算**;MCP(amap-maps)走 deferred → find_tools,不计。
+- **"20-24k"是 PR-8 harness 的 `_ASSUMED_OVERHEAD_TOKENS=24000` 假设值,虚高**:把 `head_keep(4)+tail_keep(6)=10` 条保留 filler 消息(每条 8000 char ≈ 2000 tok = ~20k)误算进了"固定开销"。真实固定开销 ≈ 5k(系统提示)+ ~3-4k(工具 schema)≈ **9k**;对 qwen3.7-max 1M 窗口 = 0.9%,即便小窗口(64k)也 ~14%,**不紧张**。
+
+**主因 = eager 技能 body 内联**。`SkillVersion.lazy_load` 默认 `False`(Mini-ADR U-15 的保守选择,注释:"preserve existing behavior so deployed agents do not regress"),每个绑定技能把整个 SKILL.md(926 真实技能实测中位 **1894 tok**,p90 4175,max 18465)灌进系统提示。`agent_factory._render_skill_fragment` 内联全 body;`_render_skill_summary` 仅一行 `<skill ... />`。
+
+### 9.2 对标(deer-flow / Hermes 源码复核)
+
+| | deer-flow | Hermes | helix 现状 |
+|---|---|---|---|
+| 技能进系统提示 | `<skill><name><description><location></skill>` | compact index:name+description | **全 SKILL.md body 内联** |
+| body 何时入 context | 模型按 `location` 路径 `read_file` 按需 | `skill_view` 按需 | 恒在(每轮) |
+| 预算紧张 | — | **降级 names-only**(丢 description) | 无 |
+| eager 全文 | 仅 `/slash` 显式激活当轮 | 无 | **默认** |
+| 每技能固定成本 | ~40 tok | ~40 tok(或更低) | **~1.9k tok** |
+
+出处:deer-flow `backend/packages/harness/deerflow/agents/lead_agent/prompt.py`(`get_skills_prompt_section` 渲染 name+description+location tag;系统提示教模型"call `read_file` on the skill's main file using the path attribute";仅 `/slash` 显式激活当轮注入全文);Hermes `agent/prompt_builder.py`(compact skill index,body 走 `skill_view`;`coding_context.py` 预算紧张时"demotes whole categories to a names-only line","only the descriptions are dropped")。
+
+**两参考框架都是纯渐进式披露(= Anthropic skill 模型),从不默认内联 body**。helix `lazy_load=False` 默认与业界共识相反。helix 已建好 lazy 路(RT-ADR-7 skill_view 引用式 rescue,已 live 证),只差翻默认。
+
+### 9.3 决策
+
+**目标**:技能默认渐进式披露,对齐 deer-flow/Hermes/Anthropic,削减系统提示固定开销。
+
+- **翻 authoring 默认 `lazy_load` False→True**——新建技能默认 lazy。
+- **仅翻 curated 平台技能**存量(xlsx/pptx/docx/pdf 等,`tenant_id IS NULL`)到 lazy;**租户自建技能存量不动**(尊重 U-15 不回归)。用户拍板 2026-07-04。
+- eager 保留为 opt-in(作者/导入显式 `lazy_load: false`)——给"单个恒相关"技能用(prompt-cache 稳定前缀 + 省一次 skill_view 往返;代价是每轮扛 body token + 更早触发压缩)。
+
+### 9.4 Mini-ADR
+
+- **RT-ADR-11 默认翻转,存量不回归**:`SkillVersion.lazy_load` 默认 `False→True`,统一改各 authoring 入口默认值(protocol DTO `protocol/skill.py` + DB `server_default` 迁移 + persistence `create_*` 签名 base/sql/memory + `author_skill`/`refine_skill`/`fork_skill` 工具 + GitHub 导入 + 平台技能编辑器默认)。**存量 `skill_version` 行存的是显式布尔值,翻 Python/DB 默认对它们零影响 → 零回归**。仅对 curated 平台技能加**定向 migration**(`UPDATE skill_version SET lazy_load=true WHERE skill_id IN (SELECT id FROM skill WHERE tenant_id IS NULL)`)翻 false→true——它们是渐进式披露样板(大流程体、按需读、跨 agent 共享,createdby 空=平台导入)。租户自建存量一律不碰;作者按需显式翻。
+- **RT-ADR-12 描述质量是 lazy 的成败关键**:lazy 下模型仅凭 `<available-skills>` 摘要(name+description)判断是否 `skill_view` 拉 body。描述薄 → 漏调 → 回归。curated 技能翻 lazy 必须 eval 验证:agent 面对需该技能的任务仍主动 `skill_view` 并正确完成(不因 body 不预载而漏用)。deer-flow/Hermes 同样把 disclosure 成败押在描述质量上。
+
+### 9.5 改动面 / PR 切分
+
+- **PR-0 设计**:本文档 §9 + ITERATION-PLAN 条目(独立设计 PR 先合)
+- **PR-1 后端:默认翻转 + curated 迁移**:protocol/persistence/authoring 各入口默认 False→True + 定向 migration(revision ID ≤32 字符,真 PG 集成测)+ 单测(①新建默认 lazy ②租户存量行不变 ③curated 行翻转)
+- **PR-2 前端 + eval 验证**:平台技能编辑器/skill detail 页 `lazy_load` 开关默认态 + i18n 双语(前端审);eval——curated 技能 lazy 后 agent 仍正确经 skill_view 用 xlsx/pptx(RT-ADR-12 描述护栏)
+
+### 9.6 验证
+
+- test-agent 系统提示 before/after:**~5.1k → ~0.4k tok**(2 技能 body 4.7k 塌成 2 行摘要 ~60 tok + 平台子句 ~300)。
+- `skill_view` 仍能加载 pptx/xlsx body(RT-ADR-7 引用式 rescue 路径)。
+- eval:agent 面对需 xlsx/pptx 的任务仍主动 `skill_view` 拉 body 并正确完成(RT-ADR-12)。
+- 新建技能默认 lazy;**租户存量技能行为字节不变**(显式测试钉死)。
+
+### 9.7 范围外(backlog)
+
+- **Hermes 式自适应分层降级**(body → name+desc → name-only,按预算/相关性)——需相关性信号 + 预算护栏,等技能规模上来再议。
+- **per-binding manifest override**(`skills: list[str]` → 允许 `{name, disclosure}` 让 agent owner 逐绑定选 eager/lazy,不动共享技能版本)——YAGNI,出现"某 agent 要某共享技能 eager"真需求再加。
+- **租户自建存量技能批量迁移**——尊重 U-15 不回归,作者显式翻。
