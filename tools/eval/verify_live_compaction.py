@@ -1,4 +1,4 @@
-"""Live compaction-depth verification — RT-2 PR-6 (★5).
+"""Live compaction-depth verification — RT-2 PR-6 (★5), hardened in PR-7.
 
 Drives a **real** agent on a strict OpenAI-compatible domestic backend
 (qwen / glm / deepseek) over a long conversation until the context
@@ -19,18 +19,45 @@ actually holds live — the half CI can't reach (no model key in CI):
      the compressor's head/tail + summary preserved it.
 
 Keyless by construction: the model key lives in the server's DB and is
-resolved server-side; this script only sends prompts + reads SSE. The API
-token is read from ``HELIX_API_TOKEN`` and never logged. The ``client`` is
-injectable so the harness logic is CI-covered with an ``httpx.MockTransport``
-(see ``test_verify_live_compaction.py``) — the real run is a manual step.
+resolved server-side; this script only sends prompts + reads SSE.
+
+**PR-7 hardening — the two things that make a live run fragile:**
+
+* **Token lifetime.** A dev bearer token can be short-lived (the internal
+  service-account client caps its access token at 300 s), but piling
+  context via real LLM calls easily runs past that. If OIDC client
+  credentials are provided the harness mints its own token and
+  **re-mints on a 401**, so the run outlives any token TTL. Absent those
+  env vars it falls back to a static ``HELIX_API_TOKEN`` (unchanged
+  behaviour). The token is never logged.
+* **Fill sizing.** Compaction triggers at ``context_window *
+  threshold_pct``; a fixed fill size either never reaches it (huge window)
+  or overflows a small one. The harness reads the target agent's
+  ``context_window`` / ``threshold_pct`` from ``/v1/agents`` and sizes each
+  fill turn to cross the threshold in a few turns while keeping every
+  single turn comfortably inside the window. ``--fill-chars`` /
+  ``--max-turns`` still override the auto-sizing.
+
+The ``client`` is injectable so the harness logic is CI-covered with an
+``httpx.MockTransport`` (see ``test_verify_live_compaction.py``) — the real
+run is a manual step.
 
 Usage (bring the dev stack up first — ``make dev-up`` — with a qwen/glm/
-deepseek agent active)::
+deepseek agent active). Either hand it a token::
 
-    export HELIX_API_URL=http://localhost:8080     # your control-plane URL
+    export HELIX_API_URL=http://localhost:8000       # your control-plane URL
     export HELIX_API_TOKEN=<a dev-login bearer token>
-    uv run python tools/eval/verify_live_compaction.py            # auto-pick a strict agent
-    uv run python tools/eval/verify_live_compaction.py --agent my-agent@1.0.0 --max-turns 40
+    uv run python tools/eval/verify_live_compaction.py --agent my-agent@1.0.0
+
+…or let it mint + auto-refresh its own (survives long runs)::
+
+    export HELIX_API_URL=http://localhost:8000
+    export HELIX_OIDC_TOKEN_URL=http://localhost:8080/realms/helix-agent/protocol/openid-connect/token
+    export HELIX_OIDC_CLIENT_ID=helix-agent-api-internal
+    export HELIX_OIDC_CLIENT_SECRET=<the client secret>   # client_credentials
+    # …or username/password for a direct-access-grant client:
+    # export HELIX_OIDC_USERNAME=dev  HELIX_OIDC_PASSWORD=devpass
+    uv run python tools/eval/verify_live_compaction.py --agent my-agent@1.0.0
 
 Exit code is non-zero when the verification did not hold — a live error
 frame (RT-ADR-5 regressed), no compaction ever fired (bump ``--max-turns``
@@ -42,7 +69,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
+import os
 import sys
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -67,6 +97,166 @@ from verify_live import (  # type: ignore[import-not-found]  # noqa: E402
 #: ``system`` message (RT-ADR-5's target). Prefer these when auto-picking so
 #: the run actually exercises the coalescing fix.
 _STRICT_PROVIDERS = frozenset({"qwen", "glm", "deepseek", "self-hosted"})
+
+#: Mirrors the compressor's own heuristics so the auto-sizing lands a
+#: compaction: ``tokens ≈ chars // 4`` (``compressor._CHARS_PER_TOKEN``),
+#: the trigger is ``context_window * threshold_pct``, and both default the
+#: same way the agent factory does when a manifest leaves them unset.
+_CHARS_PER_TOKEN = 4
+_DEFAULT_CONTEXT_WINDOW = 200_000
+_DEFAULT_THRESHOLD_PCT = 0.7
+#: Cap a single fill turn's size so a very large window doesn't produce an
+#: unwieldy request body; the loop just takes a few more turns instead.
+_MAX_FILL_TOKENS_PER_TURN = 40_000
+#: The compressor keeps ``head_keep`` (4) + ``tail_keep`` (6) non-system
+#: messages verbatim and only summarises the *middle*; if the threshold is
+#: crossed before enough messages accumulate, the middle is empty and the
+#: compressor raises ``ContextOverflowError`` instead of emitting a summary
+#: (compressor.py ``_split`` / ``ContextOverflowError``). So the fill must
+#: cross the threshold only after **many** turns — one turn adds a
+#: human+assistant pair — leaving a fat middle to summarise. Aim to cross
+#: around this many fill turns (≫ the ~5 turns held by head+tail).
+_FILL_TURNS_TO_TRIGGER = 15
+
+#: Async callable that returns a fresh bearer token (or ``None`` = no refresh).
+Minter = Callable[[], Awaitable[str]]
+
+
+async def _mint_token(
+    token_url: str,
+    client_id: str,
+    *,
+    client_secret: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    """Fetch an access token from an OIDC token endpoint.
+
+    ``username`` present → password (direct-access) grant; otherwise
+    client-credentials. Uses its own client so it never recurses through the
+    refreshing auth. The token is returned, never logged.
+    """
+    data: dict[str, str] = {"client_id": client_id}
+    if username:
+        data.update({"grant_type": "password", "username": username, "password": password or ""})
+        data["scope"] = "openid"
+    else:
+        data["grant_type"] = "client_credentials"
+    if client_secret:
+        data["client_secret"] = client_secret
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(token_url, data=data)
+        resp.raise_for_status()
+        token = resp.json().get("access_token")
+    if not token:
+        raise SystemExit("token endpoint returned no access_token")
+    return str(token)
+
+
+class _RefreshingAuth(httpx.Auth):
+    """Bearer auth that re-mints on a 401 and retries the request once.
+
+    A live compaction run outlives a short-lived dev token; rather than
+    fail mid-run, mint a fresh one and retry. Only the status code is
+    inspected (no response body), so it is safe on streaming responses.
+    """
+
+    def __init__(self, token: str | None, mint: Minter | None = None) -> None:
+        self._token = token
+        self._mint = mint
+
+    async def async_auth_flow(self, request: httpx.Request) -> AsyncIterator[httpx.Request]:
+        if self._token:
+            request.headers["Authorization"] = f"Bearer {self._token}"
+        response = yield request
+        if response.status_code == 401 and self._mint is not None:
+            self._token = await self._mint()
+            request.headers["Authorization"] = f"Bearer {self._token}"
+            yield request
+
+
+def _build_mint() -> Minter | None:
+    """Build a token minter from the ``HELIX_OIDC_*`` env, or ``None``."""
+    client_id = os.getenv("HELIX_OIDC_CLIENT_ID")
+    if not client_id:
+        return None
+    token_url = os.getenv("HELIX_OIDC_TOKEN_URL")
+    if not token_url:
+        raise SystemExit("HELIX_OIDC_CLIENT_ID is set but HELIX_OIDC_TOKEN_URL is missing")
+    client_secret = os.getenv("HELIX_OIDC_CLIENT_SECRET")
+    username = os.getenv("HELIX_OIDC_USERNAME")
+    password = os.getenv("HELIX_OIDC_PASSWORD")
+
+    async def _mint() -> str:
+        return await _mint_token(
+            token_url,
+            client_id,
+            client_secret=client_secret,
+            username=username,
+            password=password,
+        )
+
+    return _mint
+
+
+def _plan_fill(context_window: int, threshold_pct: float) -> tuple[int, int]:
+    """Size each fill turn so a compaction actually *summarises* (not fail-hards).
+
+    The preflight compresses once estimated prompt tokens (``total_chars //
+    _CHARS_PER_TOKEN``) reach ``context_window * threshold_pct``. Critically,
+    the compressor only summarises the middle — it keeps head+tail (~10
+    messages ≈ 5 turns) verbatim and raises ``ContextOverflowError`` if the
+    middle is empty when the threshold is crossed. So we size each turn to a
+    *small* slice of the threshold — crossing it only after ~``_FILL_TURNS_
+    TO_TRIGGER`` turns — which leaves a fat middle to summarise. Sizing at a
+    large fraction (few turns to cross) would guarantee an empty-middle
+    fail-hard, which the harness would misread as an RT-ADR-5 error frame.
+
+    Returns ``(fill_chars, suggested_max_turns)``.
+    """
+    threshold_tokens = max(1, int(context_window * threshold_pct))
+    # Cross the threshold only after ~_FILL_TURNS_TO_TRIGGER turns so head+tail
+    # hold a small share and the middle is large. Cap per-turn size (huge
+    # windows just take more turns) and floor at 1.
+    per_turn_tokens = max(
+        1, min(threshold_tokens // _FILL_TURNS_TO_TRIGGER, _MAX_FILL_TOKENS_PER_TURN)
+    )
+    fill_chars = per_turn_tokens * _CHARS_PER_TOKEN
+    # Budget enough turns to overshoot the threshold by 30% plus slack for the
+    # head/tail that never counts toward crossing.
+    target_tokens = int(threshold_tokens * 1.3)
+    suggested_max_turns = math.ceil(target_tokens / per_turn_tokens) + 6
+    return fill_chars, suggested_max_turns
+
+
+async def _agent_context(
+    client: httpx.AsyncClient, name: str, version: str
+) -> tuple[int, float, str]:
+    """Read ``(context_window, threshold_pct, provider)`` from ``/v1/agents``.
+
+    A list item is an ``AgentSpecRecord`` whose ``spec`` is a full
+    ``AgentSpec`` (``{metadata, spec: AgentSpecBody}``) — so the model /
+    policies live under a **double** nesting ``rec["spec"]["spec"]…`` (see
+    ``test_agents_api.py`` ``record["spec"]["spec"]["system_prompt"]``). The
+    provider is re-read here rather than trusting the imported ``_pick_agent``,
+    which reads the single-nested (wrong) shape and so always yields ``""``.
+
+    Falls back to the agent-factory defaults when a manifest leaves either
+    unset (``context_window: None`` → catalog/200k; no compression policy →
+    0.7), so auto-sizing always has concrete numbers.
+    """
+    resp = await client.get("/v1/agents", params={"status": "active", "limit": 200})
+    resp.raise_for_status()
+    for rec in _unwrap(resp.json()).get("items", []):
+        if rec.get("name") == name and rec.get("version") == version:
+            body = (rec.get("spec") or {}).get("spec") or {}
+            model = body.get("model") or {}
+            window = model.get("context_window") or _DEFAULT_CONTEXT_WINDOW
+            provider = str(model.get("provider") or "")
+            policy = (body.get("policies") or {}).get("context_compression") or {}
+            threshold = policy.get("threshold_pct") or _DEFAULT_THRESHOLD_PCT
+            return int(window), float(threshold), provider
+    return _DEFAULT_CONTEXT_WINDOW, _DEFAULT_THRESHOLD_PCT, ""
 
 
 @dataclass
@@ -132,21 +322,37 @@ async def run_compaction_check(
     *,
     fact_code: str,
     agent_override: str | None = None,
-    max_fill_turns: int = 30,
-    fill_chars: int = 8000,
+    max_fill_turns: int | None = None,
+    fill_chars: int | None = None,
 ) -> int:
     """Drive a real agent until compaction fires; assert the three properties.
 
-    Returns 0 on PASS, 1 on FAIL. Injectable ``client`` → MockTransport-testable.
+    ``max_fill_turns`` / ``fill_chars`` default to ``None`` → auto-sized from
+    the agent's ``context_window`` / ``threshold_pct``; pass explicit values to
+    override. Returns 0 on PASS, 1 on FAIL. Injectable ``client`` →
+    MockTransport-testable.
     """
-    name, version, provider = await _pick_agent(client, agent_override)
+    name, version, _ = await _pick_agent(client, agent_override)
+    # Re-read the record correctly (``_pick_agent``'s provider is the wrong,
+    # single-nested shape → always ""); this is the honest strict/window read.
+    window, threshold_pct, provider = await _agent_context(client, name, version)
     strict = provider in _STRICT_PROVIDERS
     print(f"agent: {name}@{version}  provider={provider or '?'}  strict_backend={strict}")
-    if not strict and agent_override is None:
+    if not strict:
         print(
-            "  ! WARNING: no strict-backend (qwen/glm/deepseek) agent found — the "
-            "RT-ADR-5 400 path is only truly exercised on a strict backend."
+            "  ! WARNING: target is not a strict-backend (qwen/glm/deepseek) agent — "
+            "the RT-ADR-5 400 path is only truly exercised on a strict backend."
         )
+
+    auto_chars, auto_turns = _plan_fill(window, threshold_pct)
+    if fill_chars is None:
+        fill_chars = auto_chars
+    if max_fill_turns is None:
+        max_fill_turns = auto_turns
+    print(
+        f"context_window={window} threshold_pct={threshold_pct} "
+        f"→ fill_chars={fill_chars} max_turns={max_fill_turns}"
+    )
 
     resp = await client.post("/v1/sessions", json={"agent_name": name, "agent_version": version})
     resp.raise_for_status()
@@ -219,10 +425,14 @@ async def run_compaction_check(
 
 async def _amain(args: argparse.Namespace) -> int:
     base_url = args.base_url or _require_env("HELIX_API_URL")
-    token = _require_env("HELIX_API_TOKEN")  # never logged
+    mint = _build_mint()
+    if mint is not None:
+        token: str | None = os.getenv("HELIX_API_TOKEN") or await mint()
+    else:
+        token = _require_env("HELIX_API_TOKEN")  # never logged
     fact_code = args.fact_code or f"HELIX-{uuid4().hex[:8].upper()}"
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(base_url=base_url, headers=headers, timeout=180.0) as client:
+    auth = _RefreshingAuth(token, mint)
+    async with httpx.AsyncClient(base_url=base_url, auth=auth, timeout=180.0) as client:
         return await run_compaction_check(
             client,
             fact_code=fact_code,
@@ -233,11 +443,23 @@ async def _amain(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Live compaction-depth verification (RT-2 PR-6).")
+    parser = argparse.ArgumentParser(
+        description="Live compaction-depth verification (RT-2 PR-6/7)."
+    )
     parser.add_argument("--base-url", default=None, help="control-plane URL (or $HELIX_API_URL)")
     parser.add_argument("--agent", default=None, help="target agent as name@version (else auto)")
-    parser.add_argument("--max-turns", type=int, default=30, help="max fill turns before giving up")
-    parser.add_argument("--fill-chars", type=int, default=8000, help="chars per fill turn (<=8192)")
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        help="max fill turns before giving up (default: auto from context_window)",
+    )
+    parser.add_argument(
+        "--fill-chars",
+        type=int,
+        default=None,
+        help="chars per fill turn (default: auto from context_window)",
+    )
     parser.add_argument("--fact-code", default=None, help="override the seeded fact (else random)")
     args = parser.parse_args(argv)
     return asyncio.run(_amain(args))

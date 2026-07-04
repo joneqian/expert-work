@@ -1,9 +1,11 @@
-"""Tests for the live compaction-depth harness — RT-2 PR-6.
+"""Tests for the live compaction-depth harness — RT-2 PR-6, hardened PR-7.
 
 The HTTP flow (pick agent → create session → seed → fill until compaction →
 probe) runs against an ``httpx.MockTransport`` — no live stack, no model key —
 so the harness logic is CI-covered. The real run against a strict domestic
-backend is the manual ★5 step (see the module docstring).
+backend is the manual ★5 step (see the module docstring). PR-7 adds coverage
+for the two hardening pieces: fill auto-sizing (``_plan_fill``) and token
+re-mint on 401 (``_RefreshingAuth``).
 """
 
 from __future__ import annotations
@@ -20,7 +22,13 @@ _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
-from verify_live_compaction import run_compaction_check  # noqa: E402
+from verify_live_compaction import (  # noqa: E402
+    _CHARS_PER_TOKEN,
+    _agent_context,
+    _plan_fill,
+    _RefreshingAuth,
+    run_compaction_check,
+)
 
 _FACT = "HELIX-TESTCODE"
 
@@ -51,6 +59,7 @@ class _Scenario:
     error_after_compaction: bool = False
     recall_fact: bool = True
     provider: str = "qwen"
+    context_window: int = 8192
 
 
 def _make_client(sc: _Scenario) -> httpx.AsyncClient:
@@ -69,7 +78,18 @@ def _make_client(sc: _Scenario) -> httpx.AsyncClient:
                             {
                                 "name": "rt",
                                 "version": "1.0.0",
-                                "spec": {"model": {"provider": sc.provider}},
+                                # Real /v1/agents shape: an AgentSpecRecord whose
+                                # ``spec`` is a full AgentSpec = {metadata, spec}.
+                                # The model/policies live under DOUBLE nesting.
+                                "spec": {
+                                    "metadata": {"name": "rt"},
+                                    "spec": {
+                                        "model": {
+                                            "provider": sc.provider,
+                                            "context_window": sc.context_window,
+                                        }
+                                    },
+                                },
                             }
                         ],
                         "total": 1,
@@ -147,3 +167,78 @@ async def test_warns_on_non_strict_backend_but_still_runs(
         rc = await run_compaction_check(client, fact_code=_FACT, max_fill_turns=5)
     assert rc == 0
     assert "strict-backend" in capsys.readouterr().out
+
+
+# --- PR-7 hardening --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "window,threshold_pct",
+    [(8192, 0.7), (32000, 0.7), (128000, 0.7), (200000, 0.7), (1_000_000, 0.8)],
+)
+def test_plan_fill_leaves_a_fat_middle_before_crossing(window: int, threshold_pct: float) -> None:
+    fill_chars, max_turns = _plan_fill(window, threshold_pct)
+    threshold_tokens = int(window * threshold_pct)
+    per_turn_tokens = fill_chars // _CHARS_PER_TOKEN
+    # The retention invariant that CRITICAL 1 violated: the compressor keeps
+    # head_keep(4)+tail_keep(6) messages and fail-hards on an empty middle. The
+    # fill must cross the threshold only after MANY turns (≫ the ~5 held by
+    # head+tail) so a fat middle exists to summarise — not in ~3 turns.
+    turns_to_cross = threshold_tokens / per_turn_tokens
+    assert turns_to_cross >= 10
+    # A single turn still stays well under the threshold (never one giant msg).
+    assert 0 < per_turn_tokens < threshold_tokens
+    # …and the budget is enough to actually reach (and overshoot) the threshold.
+    assert per_turn_tokens * max_turns > threshold_tokens
+
+
+@pytest.mark.asyncio
+async def test_agent_context_reads_double_nested_window_and_provider() -> None:
+    # Guards CRITICAL 2: the model/policies live under rec["spec"]["spec"]…,
+    # not rec["spec"]…. A single-nested read silently falls back to defaults.
+    async with _make_client(_Scenario(provider="qwen", context_window=32000)) as client:
+        window, threshold_pct, provider = await _agent_context(client, "rt", "1.0.0")
+    assert window == 32000  # the configured window, NOT the 200_000 default
+    assert provider == "qwen"  # NOT "" — proves the double-nested provider read
+    assert threshold_pct == 0.7
+
+
+@pytest.mark.asyncio
+async def test_refreshing_auth_remints_on_401() -> None:
+    calls = {"requests": 0, "mints": 0, "last_auth": ""}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["requests"] += 1
+        calls["last_auth"] = request.headers.get("Authorization", "")
+        if calls["requests"] == 1:
+            return httpx.Response(401, json={"error": "token expired"})
+        return httpx.Response(200, json={"ok": True})
+
+    async def mint() -> str:
+        calls["mints"] += 1
+        return "fresh-token"
+
+    auth = _RefreshingAuth("stale-token", mint)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://test", auth=auth
+    ) as client:
+        resp = await client.get("/v1/me")
+
+    assert resp.status_code == 200
+    assert calls["mints"] == 1  # exactly one re-mint
+    assert calls["requests"] == 2  # original + retry
+    assert calls["last_auth"] == "Bearer fresh-token"  # retry carried the new token
+
+
+@pytest.mark.asyncio
+async def test_refreshing_auth_without_minter_passes_401_through() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": "token expired"})
+
+    auth = _RefreshingAuth("static-token", None)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://test", auth=auth
+    ) as client:
+        resp = await client.get("/v1/me")
+
+    assert resp.status_code == 401  # no minter → no retry, surfaces the 401
