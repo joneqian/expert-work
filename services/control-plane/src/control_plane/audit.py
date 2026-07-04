@@ -170,6 +170,9 @@ ResourceType = Literal[
     # Document upload → workspace (read_document base capability). Mirrors the
     # protocol-side ``ResourceType`` Literal per [memory:audit-literal-drift].
     "user_workspace",
+    # Stream RT-4 — agent kill switch (AGENT_DISABLED / AGENT_ENABLED). Mirrors
+    # the protocol-side ``ResourceType`` Literal per [memory:audit-literal-drift].
+    "agent",
 ]
 
 

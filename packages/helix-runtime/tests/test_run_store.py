@@ -94,6 +94,51 @@ async def test_set_status_updates_existing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_request_cancel_interrupts_a_running_run() -> None:
+    # RT-4 (RT-ADR-17) — guarded cross-replica cancel flips a running run to
+    # INTERRUPTED and stamps finished_at.
+    store = InMemoryRunStore()
+    run_id, tenant_id = uuid4(), uuid4()
+    await store.create(_info(run_id=run_id, tenant_id=tenant_id, status=RunStatus.RUNNING))
+
+    hit = await store.request_cancel(
+        run_id=run_id, tenant_id=tenant_id, updated_at=_BASE + timedelta(seconds=9)
+    )
+    assert hit is True
+    fetched = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.status is RunStatus.INTERRUPTED
+    assert fetched.finished_at == _BASE + timedelta(seconds=9)
+
+
+@pytest.mark.asyncio
+async def test_request_cancel_never_clobbers_a_finished_run() -> None:
+    # A run that already reached a terminal status is NOT re-interrupted (guards
+    # the list→cancel race where a run finishes just before the kill-switch).
+    store = InMemoryRunStore()
+    run_id, tenant_id = uuid4(), uuid4()
+    await store.create(_info(run_id=run_id, tenant_id=tenant_id, status=RunStatus.SUCCESS))
+
+    hit = await store.request_cancel(
+        run_id=run_id, tenant_id=tenant_id, updated_at=_BASE + timedelta(seconds=9)
+    )
+    assert hit is False
+    fetched = await store.get(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None and fetched.status is RunStatus.SUCCESS
+
+
+@pytest.mark.asyncio
+async def test_request_cancel_cross_tenant_returns_false() -> None:
+    store = InMemoryRunStore()
+    run_id, tenant_a, tenant_b = uuid4(), uuid4(), uuid4()
+    await store.create(_info(run_id=run_id, tenant_id=tenant_a, status=RunStatus.RUNNING))
+    hit = await store.request_cancel(
+        run_id=run_id, tenant_id=tenant_b, updated_at=_BASE + timedelta(seconds=9)
+    )
+    assert hit is False
+
+
+@pytest.mark.asyncio
 async def test_set_status_unknown_returns_false() -> None:
     store = InMemoryRunStore()
     miss = await store.set_status(

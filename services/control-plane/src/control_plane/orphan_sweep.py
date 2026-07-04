@@ -36,8 +36,11 @@ from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import emit
+from control_plane.kill_switch import run_block_reason
 from control_plane.runtime import AgentRuntime
+from control_plane.tenant_status import TenantStatusService
 from helix_agent.common.observability import current_trace_id_hex, helix_counter
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.rls import (
@@ -108,6 +111,9 @@ class OrphanSweep:
         batch_size: int = 20,
         max_reclaims: int = _DEFAULT_MAX_RECLAIMS,
         auto_reclaim: bool = True,
+        # Stream RT-4 (RT-ADR-16) — kill-switch gate for orphan respawn.
+        agent_disable_service: AgentDisableService | None = None,
+        tenant_status_service: TenantStatusService | None = None,
     ) -> None:
         self._runs = run_store
         self._threads = thread_store
@@ -119,6 +125,8 @@ class OrphanSweep:
         self._batch_size = batch_size
         self._max_reclaims = max_reclaims
         self._auto_reclaim = auto_reclaim
+        self._agent_disable = agent_disable_service
+        self._tenant_status = tenant_status_service
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -209,6 +217,31 @@ class OrphanSweep:
             meta = await self._threads.get(orphan.thread_id, tenant_id=orphan.tenant_id)
             if meta is None or meta.agent_name is None or meta.agent_version is None:
                 await self._fail_orphan(orphan, now=datetime.now(UTC), reason="no_agent")
+                return
+            # Stream RT-4 (RT-ADR-16) — a reclaimed run for a disabled agent /
+            # suspended tenant must not resume. Terminate it (INTERRUPTED, the
+            # kill-switch terminal state) rather than re-run an emergency-stopped
+            # agent — and so it stops looping through the sweep as a fresh orphan.
+            blocked = await run_block_reason(
+                tenant_status=self._tenant_status,
+                agent_disable=self._agent_disable,
+                tenant_id=orphan.tenant_id,
+                agent_name=meta.agent_name,
+            )
+            if blocked is not None:
+                now = datetime.now(UTC)
+                await self._runs.set_status(
+                    run_id=orphan.run_id,
+                    tenant_id=orphan.tenant_id,
+                    status=RunStatus.INTERRUPTED,
+                    updated_at=now,
+                    finished_at=now,
+                )
+                _failed_total.labels(reason=blocked).inc()
+                logger.warning(
+                    "orphan_sweep.kill_switch run_id=%s reason=%s", orphan.run_id, blocked
+                )
+                await self._emit_audit(orphan, result=AuditResult.DENIED, reason=blocked)
                 return
             record = await self._agents.get(
                 tenant_id=orphan.tenant_id, name=meta.agent_name, version=meta.agent_version

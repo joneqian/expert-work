@@ -128,6 +128,42 @@ async def test_sweep_times_out_expired_approval() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sweep_does_not_resume_a_disabled_agent() -> None:
+    # RT-4 (RT-ADR-16) — the timeout sweep is a run-spawn path too; a disabled
+    # agent must not be resumed by it. The approval stays PENDING (reversible).
+    from control_plane.agent_disable_status import AgentDisableService
+    from helix_agent.persistence.agent_disable import InMemoryAgentDisableStore
+
+    approvals = InMemoryApprovalStore()
+    run_id, thread_id = uuid4(), uuid4()
+    past = datetime.now(UTC) - timedelta(minutes=1)
+    await approvals.create(_approval(run_id, thread_id, timeout_at=past))
+
+    disable_store = InMemoryAgentDisableStore()
+    await disable_store.set_disabled(
+        tenant_id=_TENANT, agent_name="agent", disabled=True, reason="stop", disabled_by="op"
+    )
+
+    runtime = _FakeRuntime()
+    sweep = ApprovalTimeoutSweep(
+        approval_store=approvals,
+        thread_store=_FakeThreads(),  # type: ignore[arg-type]
+        agent_spec_store=_FakeAgentRepo(),  # type: ignore[arg-type]
+        runtime=runtime,  # type: ignore[arg-type]
+        audit_logger=build_default_audit_logger(InMemoryAuditLogStore()),
+        interval_s=60,
+        agent_disable_service=AgentDisableService(store=disable_store),
+    )
+    await sweep.run_once()
+
+    # No continuation was spawned, and the approval is left untouched (PENDING)
+    # so re-enabling the agent lets it time out / be decided normally.
+    assert len(runtime.run_manager.created) == 0
+    row = await approvals.get_by_run(run_id=run_id, tenant_id=_TENANT)
+    assert row is not None and row.status is ApprovalStatus.PENDING
+
+
+@pytest.mark.asyncio
 async def test_sweep_skips_not_yet_expired() -> None:
     approvals = InMemoryApprovalStore()
     run_id, thread_id = uuid4(), uuid4()

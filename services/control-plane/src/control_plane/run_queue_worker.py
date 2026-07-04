@@ -31,8 +31,10 @@ from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api.runs import build_run_graph_input
 from control_plane.runtime import AgentRuntime
+from control_plane.tenant_status import TenantStatusService
 from helix_agent.common.observability import helix_counter
 from helix_agent.persistence.agent_spec import AgentSpecStore
 from helix_agent.persistence.rls import (
@@ -98,6 +100,8 @@ class RunQueueWorker:
         approval_store: Any,
         interval_s: float = 2.0,
         batch_size: int = 10,
+        agent_disable_service: AgentDisableService | None = None,
+        tenant_status_service: TenantStatusService | None = None,
     ) -> None:
         self._runs = run_store
         self._threads = thread_store
@@ -107,6 +111,10 @@ class RunQueueWorker:
         self._approvals = approval_store
         self._interval_s = interval_s
         self._batch_size = batch_size
+        # Stream RT-4 — kill-switch gate. ``None`` in test setups that don't
+        # wire them makes the gate a no-op (parity with the runs.py getattr guard).
+        self._agent_disable = agent_disable_service
+        self._tenant_status = tenant_status_service
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -151,7 +159,39 @@ class RunQueueWorker:
                 logger.exception("run_queue_worker.start_failed", extra={"run_id": str(run.run_id)})
         return started
 
+    async def _is_killed(self, run: RunInfo) -> bool:
+        """Stream RT-4 — ``True`` iff the run's tenant is suspended or its agent
+        is disabled, so the worker must NOT claim it (leaving it QUEUED for a
+        later cycle once the operator re-enables). Fail-open: any gate not wired
+        or a lookup that finds no restriction returns ``False``.
+
+        The whole body runs inside ``_tenant_scope`` — the worker loop has no
+        ambient RLS scope, and ``tenant_config`` is FORCE-RLS, so an unscoped
+        ``is_suspended`` read returns zero rows (silently no-op'd gate, and it
+        would poison the shared TTL cache with ``False``). Both service reads +
+        the thread lookup must be scoped to ``run.tenant_id``."""
+        with _tenant_scope(run.tenant_id):
+            if self._tenant_status is not None and await self._tenant_status.is_suspended(
+                run.tenant_id
+            ):
+                _failed_total.labels(reason="tenant_suspended").inc()
+                return True
+            if self._agent_disable is not None:
+                meta = await self._threads.get(run.thread_id, tenant_id=run.tenant_id)
+                if (
+                    meta is not None
+                    and meta.agent_name is not None
+                    and await self._agent_disable.is_disabled(run.tenant_id, meta.agent_name)
+                ):
+                    _failed_total.labels(reason="agent_disabled").inc()
+                    return True
+        return False
+
     async def _claim_and_start(self, run: RunInfo) -> bool:
+        # Stream RT-4 — kill-switch gate: skip (do not claim) a suspended
+        # tenant's / disabled agent's queued run; it stays QUEUED until re-enabled.
+        if await self._is_killed(run):
+            return False
         now = datetime.now(UTC)
         lease_until = now + timedelta(seconds=self._runtime.run_manager.lease_ttl_s)
         with _bypass_rls():

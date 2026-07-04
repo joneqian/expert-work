@@ -1,0 +1,92 @@
+"""Unit tests for :class:`AgentDisableService` — Stream RT-4 (RT-ADR-16).
+
+Mirrors the TTL-cache / invalidate / fail-open contract of
+:class:`~control_plane.tenant_status.TenantStatusService`.
+"""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+import pytest
+
+from control_plane.agent_disable_status import AgentDisableService
+from helix_agent.persistence import InMemoryAgentDisableStore
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+@pytest.mark.asyncio
+async def test_fail_open_when_no_row() -> None:
+    store = InMemoryAgentDisableStore()
+    svc = AgentDisableService(store=store)
+    # No row → not disabled (fail-open; enforcement is a deliberate admin act).
+    assert await svc.is_disabled(uuid4(), "support-bot") is False
+
+
+@pytest.mark.asyncio
+async def test_reads_disabled_flag() -> None:
+    store = InMemoryAgentDisableStore()
+    tenant = uuid4()
+    await store.set_disabled(
+        tenant_id=tenant, agent_name="a", disabled=True, reason=None, disabled_by="admin"
+    )
+    svc = AgentDisableService(store=store)
+    assert await svc.is_disabled(tenant, "a") is True
+
+
+@pytest.mark.asyncio
+async def test_ttl_cache_serves_stale_until_expiry() -> None:
+    store = InMemoryAgentDisableStore()
+    tenant = uuid4()
+    clock = _FakeClock()
+    svc = AgentDisableService(store=store, ttl_seconds=30.0, clock=clock)
+
+    # Cold read: not disabled, cached for 30s.
+    assert await svc.is_disabled(tenant, "a") is False
+    # Now disable in the store; within the TTL the cache still says False.
+    await store.set_disabled(
+        tenant_id=tenant, agent_name="a", disabled=True, reason=None, disabled_by="admin"
+    )
+    clock.t = 29.0
+    assert await svc.is_disabled(tenant, "a") is False
+    # Past the TTL the cache reloads and sees the disable.
+    clock.t = 31.0
+    assert await svc.is_disabled(tenant, "a") is True
+
+
+@pytest.mark.asyncio
+async def test_invalidate_forces_reload() -> None:
+    store = InMemoryAgentDisableStore()
+    tenant = uuid4()
+    clock = _FakeClock()
+    svc = AgentDisableService(store=store, ttl_seconds=30.0, clock=clock)
+
+    assert await svc.is_disabled(tenant, "a") is False
+    await store.set_disabled(
+        tenant_id=tenant, agent_name="a", disabled=True, reason=None, disabled_by="admin"
+    )
+    # Without waiting for the TTL, invalidate → immediate effect.
+    svc.invalidate(tenant, "a")
+    assert await svc.is_disabled(tenant, "a") is True
+
+
+@pytest.mark.asyncio
+async def test_cache_is_keyed_per_tenant_and_agent() -> None:
+    store = InMemoryAgentDisableStore()
+    tenant = uuid4()
+    other_tenant = uuid4()
+    await store.set_disabled(
+        tenant_id=tenant, agent_name="a", disabled=True, reason=None, disabled_by="admin"
+    )
+    svc = AgentDisableService(store=store)
+    assert await svc.is_disabled(tenant, "a") is True
+    # Different agent name / different tenant are independent (not disabled).
+    assert await svc.is_disabled(tenant, "b") is False
+    assert await svc.is_disabled(other_tenant, "a") is False

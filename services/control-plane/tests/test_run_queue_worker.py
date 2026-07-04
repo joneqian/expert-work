@@ -17,8 +17,11 @@ from uuid import uuid4
 import pytest
 
 from control_plane import run_queue_worker as worker_module
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import build_default_audit_logger
 from control_plane.run_queue_worker import RunQueueWorker
+from control_plane.tenant_status import TenantStatusService
+from helix_agent.persistence import InMemoryAgentDisableStore, InMemoryTenantConfigStore
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.runtime.runs import InMemoryRunStore, RunManager, RunStatus
 
@@ -85,6 +88,53 @@ async def _enqueue(mgr: RunManager, *, text: str = "hello") -> tuple:
         enqueued_input={"input": text, "image_refs": [], "untrusted_content": []},
     )
     return run_id, tenant
+
+
+@pytest.mark.asyncio
+async def test_suspended_tenant_queued_run_not_claimed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stream RT-4 — a suspended tenant's queued run is not claimed (the RLS-scope
+    fix keeps the ``is_suspended`` read alive inside the worker's tenant scope)."""
+    spawns: list[dict] = []
+    monkeypatch.setattr(worker_module, "run_agent", lambda **kw: spawns.append(kw))
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _enqueue(runtime.run_manager)
+    tcs = InMemoryTenantConfigStore()
+    await tcs.create(tenant_id=tenant, display_name="t", actor_id="seed")
+    await tcs.set_status(tenant_id=tenant, status="suspended", actor_id="admin")
+    worker = _worker(store, runtime, tenant_status_service=TenantStatusService(store=tcs))
+
+    # Direct gate assertion — the suspend queue-gate would be silently dead
+    # without the tenant-scope wrapper.
+    run_info = await store.get(run_id=run_id, tenant_id=tenant)
+    assert run_info is not None
+    assert await worker._is_killed(run_info) is True
+
+    started = await worker.run_once()
+    assert started == 0
+    assert spawns == []
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.status is RunStatus.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_disabled_agent_queued_run_not_claimed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stream RT-4 — a disabled agent's queued run is not claimed."""
+    spawns: list[dict] = []
+    monkeypatch.setattr(worker_module, "run_agent", lambda **kw: spawns.append(kw))
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _enqueue(runtime.run_manager)
+    disable_store = InMemoryAgentDisableStore()
+    await disable_store.set_disabled(
+        tenant_id=tenant, agent_name="a", disabled=True, reason=None, disabled_by="admin"
+    )
+    worker = _worker(store, runtime, agent_disable_service=AgentDisableService(store=disable_store))
+    started = await worker.run_once()
+    assert started == 0
+    assert spawns == []
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None and row.status is RunStatus.QUEUED
 
 
 @pytest.mark.asyncio

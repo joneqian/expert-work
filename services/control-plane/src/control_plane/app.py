@@ -34,6 +34,7 @@ from fastapi import FastAPI
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api import (
     build_agent_schema_router,
     build_agent_templates_router,
@@ -211,6 +212,11 @@ from helix_agent.common.health import DefaultHealthProvider
 from helix_agent.common.lifecycle import Lifecycle
 from helix_agent.common.observability import current_trace_id_hex, init_logging, init_tracing
 from helix_agent.common.uplift_metrics import record_legacy_credentials_fallback
+from helix_agent.persistence.agent_disable import (
+    AgentDisableStore,
+    InMemoryAgentDisableStore,
+    SqlAgentDisableStore,
+)
 from helix_agent.persistence.agent_instance import (
     AgentInstanceStore,
     InMemoryAgentInstanceStore,
@@ -582,7 +588,9 @@ def create_app(
     # (mirror writes) and read by GET .../runs/{id} as the fallback
     # once the in-memory record has expired.
     resolved_run_store: RunStore = run_repo or (
-        sql_stores.run if sql_stores else InMemoryRunStore()
+        # Stream RT-4 — the in-memory double needs the thread store to resolve a
+        # run → agent for ``list_running_for_agent`` (the SQL store joins).
+        sql_stores.run if sql_stores else InMemoryRunStore(thread_meta_store=resolved_threads)
     )
     # Stream H.3 PR 3 (Mini-ADR H-7) — durable SSE event store.
     resolved_run_event_store: RunEventStore = run_event_repo or (
@@ -691,9 +699,25 @@ def create_app(
     # Stream U (PR E) — per-tenant suspended-status cache. AuthMiddleware reads
     # it on the hot path to 403 a suspended tenant's members; the
     # deactivate/activate endpoints call ``invalidate`` for immediate effect.
+    # Stream RT-4 — this same service is the tenant half of the kill switch
+    # (queue-claim / trigger / resume / orphan gates), so it uses the short
+    # kill-switch TTL: suspend is an emergency stop and must propagate to peer
+    # replicas in seconds, not up to a minute.
     resolved_tenant_status_service = TenantStatusService(
         store=resolved_tenant_config_repo,
-        ttl_seconds=float(resolved_settings.tenant_config_cache_ttl_s),
+        ttl_seconds=float(resolved_settings.kill_switch_cache_ttl_s),
+    )
+    # Stream RT-4 (RT-ADR-16) — agent-level kill switch store + TTL cache. The
+    # admission / session-resolve / queue-claim gates read the cache; the
+    # disable/enable endpoints call ``invalidate`` for immediate effect. Short
+    # TTL (emergency stop) so a disabled agent stops being admitted platform-
+    # wide within seconds even without an explicit per-replica invalidate.
+    resolved_agent_disable_repo: AgentDisableStore = (
+        sql_stores.agent_disable if sql_stores else InMemoryAgentDisableStore()
+    )
+    resolved_agent_disable_service = AgentDisableService(
+        store=resolved_agent_disable_repo,
+        ttl_seconds=float(resolved_settings.kill_switch_cache_ttl_s),
     )
     # Stream R — member roster + Keycloak Admin client. The client is a Fake
     # unless ``keycloak_enabled`` (dev/CI never depend on a live Keycloak).
@@ -840,6 +864,9 @@ def create_app(
             # Capability Uplift Sprint #1 — fire-time scan reads
             # tenant_config.trigger_fire_scan_mode (Mini-ADR U-2 Layer B).
             tenant_config_store=resolved_tenant_config_repo,
+            # Stream RT-4 — kill switch gate for scheduled fires.
+            agent_disable_service=resolved_agent_disable_service,
+            tenant_status_service=resolved_tenant_status_service,
         )
         if enable_scheduler
         else None
@@ -859,6 +886,10 @@ def create_app(
             batch_size=resolved_settings.orphan_sweep_batch_size,
             max_reclaims=resolved_settings.orphan_max_reclaims,
             auto_reclaim=resolved_settings.ha_auto_reclaim,
+            # Stream RT-4 — never respawn a reclaimed run for a disabled agent
+            # or suspended tenant.
+            agent_disable_service=resolved_agent_disable_service,
+            tenant_status_service=resolved_tenant_status_service,
         )
         if resolved_settings.enable_orphan_sweep
         else None
@@ -875,6 +906,10 @@ def create_app(
             approval_store=resolved_approval_store,
             interval_s=resolved_settings.run_queue_interval_s,
             batch_size=resolved_settings.run_queue_batch_size,
+            # Stream RT-4 — the kill-switch gate: never claim a queued run whose
+            # agent is disabled or whose tenant is suspended.
+            agent_disable_service=resolved_agent_disable_service,
+            tenant_status_service=resolved_tenant_status_service,
         )
         if resolved_settings.enable_run_queue_worker
         else None
@@ -891,6 +926,8 @@ def create_app(
             audit_logger=resolved_audit,
             interval_s=resolved_settings.approval_timeout_sweep_interval_s,
             batch_size=resolved_settings.approval_timeout_sweep_batch_size,
+            agent_disable_service=resolved_agent_disable_service,
+            tenant_status_service=resolved_tenant_status_service,
         )
         if resolved_settings.enable_approval_timeout_sweep
         else None
@@ -1784,6 +1821,9 @@ def create_app(
     app.state.tenant_config_repo = resolved_tenant_config_repo
     app.state.tenant_config_service = resolved_tenant_config_service
     app.state.tenant_status_service = resolved_tenant_status_service
+    # Stream RT-4 (RT-ADR-16) — agent kill switch store + TTL cache.
+    app.state.agent_disable_repo = resolved_agent_disable_repo
+    app.state.agent_disable_service = resolved_agent_disable_service
     # Stream R — member onboarding roster + Keycloak Admin client.
     app.state.tenant_member_repo = resolved_tenant_member_repo
     app.state.keycloak_admin_client = resolved_keycloak_admin_client
@@ -1992,6 +2032,7 @@ class _SqlStores:
     tenant_quota: TenantQuotaStore
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
+    agent_disable: AgentDisableStore  # Stream RT-4 (RT-ADR-16) — agent kill switch
     tenant_member: TenantMemberStore  # Stream R
     tenant_mcp_server: TenantMcpServerStore  # Stream V
     tenant_skill_subscription: TenantSkillSubscriptionStore  # Skill Marketplace
@@ -2208,6 +2249,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         platform_tool_budget_config=SqlPlatformToolBudgetConfigStore(session_factory),
         platform_billing_config=SqlPlatformBillingConfigStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
+        agent_disable=SqlAgentDisableStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
         tenant_skill_subscription=SqlTenantSkillSubscriptionStore(session_factory),

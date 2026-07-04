@@ -36,6 +36,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api._quota_admission import check_admission
 from control_plane.api._session_title import title_from_text
 from control_plane.api._user_scope import (
@@ -45,6 +46,7 @@ from control_plane.api._user_scope import (
     resolve_caller_user_id,
 )
 from control_plane.audit import emit
+from control_plane.kill_switch import run_block_reason
 from control_plane.prompt_render import (
     PromptRenderError,
     render_system_prompt,
@@ -60,6 +62,7 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
+from control_plane.tenant_status import TenantStatusService
 from control_plane.transcript import read_turns
 from helix_agent.common.observability import (
     current_trace_id_hex,
@@ -457,6 +460,8 @@ async def apply_approval_decision(
         runtime=runtime,
         approvals=approvals,
         idempotency_key=idempotency_key,
+        agent_disable_service=getattr(request.app.state, "agent_disable_service", None),
+        tenant_status_service=getattr(request.app.state, "tenant_status_service", None),
     )
 
 
@@ -478,6 +483,8 @@ async def resolve_approval_decision(
     runtime: AgentRuntime,
     approvals: ApprovalStore,
     idempotency_key: str | None = None,
+    agent_disable_service: AgentDisableService | None = None,
+    tenant_status_service: TenantStatusService | None = None,
 ) -> tuple[Any, UUID, bool]:
     """Request-free core of a J.8 approval verdict — CAS + checkpoint + spawn.
 
@@ -509,6 +516,23 @@ async def resolve_approval_decision(
             status_code=409,
             detail=f"approval already decided ({approval.status.value})",
         )
+
+    meta = await threads.get(thread_id, tenant_id=tenant_id)
+    if meta is None or meta.agent_name is None or meta.agent_version is None:
+        raise HTTPException(status_code=409, detail="session is not bound to an agent")
+    # Stream RT-4 (RT-ADR-16) — THE spawn choke point for every approval
+    # continuation: HTTP resume, batch decide, AND the timeout sweep all route
+    # here. Gate BEFORE the ``mark_decided`` CAS so a disabled agent / suspended
+    # tenant leaves the approval PENDING (fully reversible) — never consumes the
+    # decision only to 403 the spawn. Callers run in the tenant RLS scope.
+    blocked = await run_block_reason(
+        tenant_status=tenant_status_service,
+        agent_disable=agent_disable_service,
+        tenant_id=tenant_id,
+        agent_name=meta.agent_name,
+    )
+    if blocked is not None:
+        raise HTTPException(status_code=403, detail=blocked.upper())
 
     # Stream 13.2 — generate the continuation id BEFORE the CAS so it is bound
     # atomically to the winning decision; a retry / lost-race caller reads it
@@ -551,9 +575,6 @@ async def resolve_approval_decision(
         },
     )
 
-    meta = await threads.get(thread_id, tenant_id=tenant_id)
-    if meta is None or meta.agent_name is None or meta.agent_version is None:
-        raise HTTPException(status_code=409, detail="session is not bound to an agent")
     spec_record = await agent_repo.get(
         tenant_id=tenant_id, name=meta.agent_name, version=meta.agent_version
     )
@@ -875,6 +896,23 @@ def build_runs_router() -> APIRouter:
             )
         if meta.agent_name is None or meta.agent_version is None:
             raise HTTPException(status_code=409, detail="session is not bound to an agent")
+
+        # Stream RT-4 (RT-ADR-16) — agent kill switch. Reject a new run for a
+        # disabled agent (defense in depth alongside the tenant-suspend gate
+        # above). ``getattr`` guards test setups that don't wire the service.
+        disable_svc = getattr(request.app.state, "agent_disable_service", None)
+        if disable_svc is not None and await disable_svc.is_disabled(tenant_id, meta.agent_name):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "AGENT_DISABLED",
+                        "message": "this agent is disabled",
+                    },
+                },
+            )
 
         # Admission (Stream C.5b): bucket the run against the bound
         # agent. Denial returns 429 + Retry-After and audits — no stream.

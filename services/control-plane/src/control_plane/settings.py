@@ -767,6 +767,14 @@ class Settings(BaseSettings):
     #: by STREAM-C-DESIGN § 2.8 at 60s — keeps the hot path off the
     #: database without making admin edits invisible for too long.
     tenant_config_cache_ttl_s: int = Field(default=60, gt=0)
+    #: Stream RT-4 (RT-ADR-16) — TTL (seconds) for the kill-switch status
+    #: caches (``AgentDisableService`` + the ``TenantStatusService`` the run
+    #: gates consult). Much shorter than ``tenant_config_cache_ttl_s`` because
+    #: this is an EMERGENCY stop: a 60s TTL would let a peer replica keep
+    #: admitting a disabled agent's / suspended tenant's runs for up to a
+    #: minute. 5s bounds cross-replica staleness while keeping the hot path
+    #: off the DB (a single indexed PK lookup on miss).
+    kill_switch_cache_ttl_s: int = Field(default=5, gt=0)
 
     def resolve_jwks_uri(self) -> str:
         """Return the explicit JWKS URI or derive it from the issuer."""
