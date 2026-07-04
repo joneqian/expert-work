@@ -26,11 +26,13 @@ import {
 } from "../oidc";
 
 // Fake UserManager so we can count code exchanges without a real IdP.
-const { signinSpy, clearStaleStateSpy, signinRedirectSpy } = vi.hoisted(() => ({
-  signinSpy: vi.fn(),
-  clearStaleStateSpy: vi.fn().mockResolvedValue(undefined),
-  signinRedirectSpy: vi.fn().mockResolvedValue(undefined),
-}));
+const { signinSpy, removeUserSpy, clearStaleStateSpy, signinRedirectSpy } =
+  vi.hoisted(() => ({
+    signinSpy: vi.fn(),
+    removeUserSpy: vi.fn().mockResolvedValue(undefined),
+    clearStaleStateSpy: vi.fn().mockResolvedValue(undefined),
+    signinRedirectSpy: vi.fn().mockResolvedValue(undefined),
+  }));
 vi.mock("oidc-client-ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("oidc-client-ts")>();
   return {
@@ -38,6 +40,7 @@ vi.mock("oidc-client-ts", async (importOriginal) => {
     UserManager: class {
       constructor(_settings: unknown) {}
       signinRedirectCallback = signinSpy;
+      removeUser = removeUserSpy;
       clearStaleState = clearStaleStateSpy;
       signinRedirect = signinRedirectSpy;
     },
@@ -48,6 +51,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   _resetUserManagerForTests();
   signinSpy.mockReset();
+  removeUserSpy.mockClear();
   clearStaleStateSpy.mockClear();
   signinRedirectSpy.mockClear();
 });
@@ -105,14 +109,19 @@ describe("extractSignInResult", () => {
 });
 
 describe("signIn (configured)", () => {
-  it("clears stale sign-in state BEFORE redirecting to the IdP", async () => {
+  it("purges the stale session + state BEFORE redirecting to the IdP", async () => {
     vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/helix");
     vi.stubEnv("VITE_OIDC_CLIENT_ID", "ui");
     await signIn("/runs/7");
+    expect(removeUserSpy).toHaveBeenCalledTimes(1);
     expect(clearStaleStateSpy).toHaveBeenCalledTimes(1);
     expect(signinRedirectSpy).toHaveBeenCalledTimes(1);
-    // Purge must happen before the redirect, else leftover state can bounce the
-    // user back to /login without ever reaching the IdP (the C1 fix).
+    // Both purges must run before the redirect. removeUser drops the stale
+    // session that automaticSilentRenew would otherwise keep churning (the C1
+    // fix); clearStaleState prunes abandoned sign-in state.
+    expect(removeUserSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      signinRedirectSpy.mock.invocationCallOrder[0],
+    );
     expect(clearStaleStateSpy.mock.invocationCallOrder[0]).toBeLessThan(
       signinRedirectSpy.mock.invocationCallOrder[0],
     );
@@ -121,9 +130,10 @@ describe("signIn (configured)", () => {
     });
   });
 
-  it("still redirects when clearStaleState rejects (best-effort purge)", async () => {
+  it("still redirects when a purge rejects (best-effort)", async () => {
     vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/helix");
     vi.stubEnv("VITE_OIDC_CLIENT_ID", "ui");
+    removeUserSpy.mockRejectedValueOnce(new Error("store unavailable"));
     clearStaleStateSpy.mockRejectedValueOnce(new Error("store unavailable"));
     await signIn();
     expect(signinRedirectSpy).toHaveBeenCalledTimes(1);
