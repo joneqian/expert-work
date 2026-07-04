@@ -425,7 +425,8 @@ async def test_version_dict_exposes_supporting_files_lazy_high_risk(setup: Setup
     for meta in body["supporting_files"].values():
         assert "content" not in meta
 
-    assert body["lazy_load"] is False
+    # RT-ADR-11 — the imported zip omits ``lazy``, so it defaults to lazy.
+    assert body["lazy_load"] is True
     assert body["high_risk"] is False
 
 

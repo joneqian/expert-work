@@ -110,6 +110,10 @@ def _version(prompt: str) -> SkillVersion:
         version=1,
         prompt_fragment=prompt,
         created_at=now,
+        # Eager so the "skill" component renders its ``<skill>`` body fragment
+        # (RT-ADR-11 made lazy the default). Text-class components render by
+        # component_type regardless of this flag.
+        lazy_load=False,
     )
 
 

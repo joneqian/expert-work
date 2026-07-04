@@ -117,6 +117,18 @@ class SkillStatus(StrEnum):
 
 SkillAuthoredBy = Literal["human", "agent"]
 
+#: RT-ADR-11 — default progressive-disclosure mode for a newly authored skill
+#: version. ``True`` = body lazy-loaded via ``skill_view`` (only a one-line
+#: ``<skill .../>`` summary sits in the system prompt); ``False`` = full
+#: SKILL.md body eager-inlined. Flipped from the Mini-ADR U-15 default (eager)
+#: to align with deer-flow / Hermes / Anthropic progressive disclosure and to
+#: cut fixed system-prompt overhead. Every authoring entry point (protocol DTO,
+#: persistence ``add_version`` / ``add_platform_version``, ZIP-import parse, DB
+#: ``server_default``) references this so the policy has a single source of
+#: truth. Existing rows store an explicit value, so flipping the default does
+#: not touch them (STREAM-RT-DESIGN §9).
+DEFAULT_SKILL_LAZY_LOAD: Final[bool] = True
+
 # ── Stream SE — 自我进化 skill ────────────────────────────────────────────
 # ``visibility`` — Mini-ADR SE-A1 (落实 J.7b-1 §15.7). ``agent_private`` =
 # 仅创建它的 agent 实例可见(自著默认);``tenant`` = 租户内共享(需经治理门
@@ -186,9 +198,10 @@ class SkillVersion(BaseModel):
     # ``Mapping`` so Pydantic can construct from raw JSON payloads.
     supporting_files: dict[str, SkillSupportingFile] = Field(default_factory=dict)
     # Mini-ADR U-15: per-skill progressive disclosure flag. False = body
-    # eager-loaded into system prompt (current behavior); True = body
-    # lazy-loaded via ``skill_view`` tool.
-    lazy_load: bool = False
+    # eager-loaded into system prompt; True = body lazy-loaded via
+    # ``skill_view`` tool. RT-ADR-11 flipped the default to lazy (see
+    # ``DEFAULT_SKILL_LAZY_LOAD``).
+    lazy_load: bool = DEFAULT_SKILL_LAZY_LOAD
     # Mini-ADR U-21: blake2b-32 hash of canonicalized content. Recomputed
     # at ``skill_view`` time; mismatch fires SKILL_DRIFT_DETECTED.
     # bytes(b"") on records written before the migration backfill;

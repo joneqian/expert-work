@@ -114,6 +114,35 @@ async def test_refine_own_skill_appends_version() -> None:
 
 
 @pytest.mark.asyncio
+async def test_refine_inherits_prior_disclosure_mode() -> None:
+    # RT-ADR-11 — refining an existing EAGER skill keeps it eager; an existing
+    # skill is never silently flipped to the new lazy default on the next
+    # revision (only genuinely new skills adopt lazy).
+    store = InMemorySkillStore()
+    tid, uid = uuid4(), uuid4()
+    skill = await store.create_skill(
+        skill_id=uuid4(),
+        tenant_id=tid,
+        name="s",
+        created_by_user_id=uid,
+        created_by_agent_name=AGENT,
+    )
+    await store.add_version(
+        version_id=uuid4(),
+        skill_id=skill.id,
+        tenant_id=tid,
+        prompt_fragment="v1",
+        authored_by="agent",
+        lazy_load=False,
+    )
+    refine = RefineSkillTool(store=store, agent_name=AGENT)
+    res = await refine.call({"name": "s", "prompt_fragment": "v2"}, ctx=_ctx(tid, uid))
+    assert res.meta["result"] == "ok"
+    v2 = await store.get_version_by_number(skill_id=skill.id, tenant_id=tid, version=2)
+    assert v2 is not None and v2.lazy_load is False
+
+
+@pytest.mark.asyncio
 async def test_refine_not_owned_is_forbidden() -> None:
     store = InMemorySkillStore()
     tid = uuid4()

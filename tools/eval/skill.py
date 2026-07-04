@@ -80,6 +80,10 @@ class ScriptedSkillVersion:
     tool_names: tuple[str, ...] = ()
     required_models: tuple[str, ...] = ()
     status: SkillStatus = SkillStatus.ACTIVE
+    # These cases assert the skill body appears in the assembled prompt
+    # (``expected_prompt_contains``), i.e. the EAGER injection path. RT-ADR-11
+    # made lazy the default, so pin eager here to keep exercising that path.
+    lazy_load: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,6 +95,10 @@ class SkillCase:
     agent_model_name: str = "claude-sonnet-4-6"
     # Resolve / multi_skill_order:
     expected_prompt_contains: tuple[str, ...] = ()
+    # RT-ADR-12 — strings that must NOT appear in the assembled system prompt.
+    # A lazy skill's body is withheld (only its ``<available-skills>`` summary
+    # is present), so a lazy case asserts the body text is absent here.
+    expected_prompt_absent: tuple[str, ...] = ()
     expected_order: tuple[str, ...] = ()
     # Moderation:
     moderation_text: str = ""
@@ -154,6 +162,7 @@ async def _seed_store(case: SkillCase, tenant_id: UUID) -> InMemorySkillStore:
             prompt_fragment=spec_version.prompt_fragment,
             tool_names=spec_version.tool_names,
             required_models=spec_version.required_models,
+            lazy_load=spec_version.lazy_load,
         )
         if spec_version.status != SkillStatus.DRAFT:
             await store.set_status(
@@ -208,6 +217,9 @@ async def _run_resolve_case(case: SkillCase) -> CapabilityCaseResult:
     for needle in case.expected_prompt_contains:
         if needle not in built.system_prompt:
             notes.append(f"system_prompt missing {needle!r}")
+    for needle in case.expected_prompt_absent:
+        if needle in built.system_prompt:
+            notes.append(f"system_prompt must not contain {needle!r} (lazy body leaked)")
     if case.expected_order:
         positions = [built.system_prompt.find(needle) for needle in case.expected_order]
         if any(p < 0 for p in positions):

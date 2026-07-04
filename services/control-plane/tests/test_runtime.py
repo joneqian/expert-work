@@ -435,7 +435,13 @@ async def _seed_active_tenant_skill(
     skill_id = uuid4()
     await store.create_skill(skill_id=skill_id, tenant_id=tenant_id, name=name)
     await store.add_version(
-        version_id=uuid4(), skill_id=skill_id, tenant_id=tenant_id, prompt_fragment="SKILL-BODY"
+        version_id=uuid4(),
+        skill_id=skill_id,
+        tenant_id=tenant_id,
+        prompt_fragment="SKILL-BODY",
+        # Eager so the body is inlined — this test proves the injection wiring
+        # (RT-ADR-11 made lazy the default, which would withhold the body).
+        lazy_load=False,
     )
     await store.set_status(skill_id=skill_id, tenant_id=tenant_id, status=SkillStatus.ACTIVE)
 

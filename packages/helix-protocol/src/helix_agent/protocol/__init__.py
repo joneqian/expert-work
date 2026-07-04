@@ -185,6 +185,7 @@ from helix_agent.protocol.service_account import (
     ServiceAccount,
 )
 from helix_agent.protocol.skill import (
+    DEFAULT_SKILL_LAZY_LOAD,
     SKILL_REF_PATTERN,
     ComponentType,
     EvalVerdict,
@@ -263,6 +264,7 @@ __all__ = [
     "DEFAULT_CHUNK_MAX_TOKENS",
     "DEFAULT_CHUNK_OVERLAP_TOKENS",
     "DEFAULT_RETRIEVAL_TOP_K",
+    "DEFAULT_SKILL_LAZY_LOAD",
     "FIELD_TIERS",
     "MAX_RESULT_EXCERPT_CHARS",
     "MODEL_CATALOG",

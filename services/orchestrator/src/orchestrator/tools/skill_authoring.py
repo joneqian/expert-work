@@ -45,7 +45,11 @@ from helix_agent.persistence.skill.base import (
     SkillVersionNotFoundError,
 )
 from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
-from helix_agent.protocol.skill import compute_content_hash, is_high_risk_skill_version
+from helix_agent.protocol.skill import (
+    DEFAULT_SKILL_LAZY_LOAD,
+    compute_content_hash,
+    is_high_risk_skill_version,
+)
 from helix_agent.runtime.audit.logger import AuditLogger
 from orchestrator.tools.registry import ToolContext, ToolResult, ToolSpec
 
@@ -302,6 +306,10 @@ class RefineSkillTool:
             return blocked
 
         high_risk = is_high_risk_skill_version(tool_names=tool_names, supporting_file_paths=[])
+        # RT-ADR-11 — refining an existing skill keeps its disclosure mode; only
+        # brand-new skills adopt the lazy default (no prior version → default).
+        prior_versions = await self.store.list_versions(skill_id=skill.id, tenant_id=tenant_id)
+        inherited_lazy = prior_versions[0].lazy_load if prior_versions else DEFAULT_SKILL_LAZY_LOAD
         version = await self.store.add_version(
             version_id=uuid4(),
             skill_id=skill.id,
@@ -310,6 +318,7 @@ class RefineSkillTool:
             tool_names=tool_names,
             description=skill.description,
             authored_by="agent",
+            lazy_load=inherited_lazy,
             content_hash=compute_content_hash(prompt_fragment, None),
             high_risk=high_risk,
             evolution_origin="in_session",

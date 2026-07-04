@@ -89,6 +89,35 @@ async def test_add_version_auto_increments() -> None:
 
 
 @pytest.mark.asyncio
+async def test_add_version_defaults_to_lazy_load() -> None:
+    # RT-ADR-11 — a new version created without an explicit lazy_load defaults
+    # to progressive disclosure (lazy), not eager body inlining.
+    store = InMemorySkillStore()
+    tenant = _t()
+    skill = await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="foo")
+    v = await store.add_version(
+        version_id=uuid4(),
+        skill_id=skill.id,
+        tenant_id=tenant,
+        prompt_fragment="be helpful",
+    )
+    assert v.lazy_load is True
+
+
+@pytest.mark.asyncio
+async def test_add_platform_version_defaults_to_lazy_load() -> None:
+    # RT-ADR-11 — curated platform skills default lazy on creation too.
+    store = InMemorySkillStore()
+    skill = await store.create_platform_skill(skill_id=uuid4(), name="office")
+    v = await store.add_platform_version(
+        version_id=uuid4(),
+        skill_id=skill.id,
+        prompt_fragment="be helpful",
+    )
+    assert v.lazy_load is True
+
+
+@pytest.mark.asyncio
 async def test_add_version_unknown_skill_raises() -> None:
     store = InMemorySkillStore()
     with pytest.raises(SkillNotFoundError):

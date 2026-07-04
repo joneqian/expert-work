@@ -36,6 +36,7 @@ from typing import Final
 import yaml
 
 from helix_agent.protocol.skill import (
+    DEFAULT_SKILL_LAZY_LOAD,
     SkillAuthoredBy,
     SkillPackageLayoutError,
 )
@@ -155,7 +156,10 @@ def parse_skill_md(text: str) -> ParsedSkillMd:
         )
         raise SkillPackageLayoutError(msg)
 
-    helix_lazy = helix_block.get("lazy", False)
+    # RT-ADR-11 — omitted ``lazy`` defaults to progressive disclosure so an
+    # imported skill whose frontmatter never mentions helix-specific keys
+    # (the common GitHub case) lands lazy, not eager.
+    helix_lazy = helix_block.get("lazy", DEFAULT_SKILL_LAZY_LOAD)
     if not isinstance(helix_lazy, bool):
         msg = "SKILL.md 'helix.lazy' must be a boolean when present"
         raise SkillPackageLayoutError(msg)
@@ -190,8 +194,10 @@ def serialize_skill_md(parsed: ParsedSkillMd) -> str:
         helix_block["tool_names"] = list(parsed.helix_tool_names)
     if parsed.helix_authored_by != "human":
         helix_block["authored_by"] = parsed.helix_authored_by
-    if parsed.helix_lazy:
-        helix_block["lazy"] = True
+    # RT-ADR-11 — lazy is the default, so only the non-default (eager) case is
+    # written; an omitted ``lazy`` round-trips back to lazy via the parser.
+    if not parsed.helix_lazy:
+        helix_block["lazy"] = False
 
     frontmatter: dict[str, object] = {
         "name": parsed.name,
