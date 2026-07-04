@@ -80,6 +80,10 @@ class ScriptedSkillVersion:
     tool_names: tuple[str, ...] = ()
     required_models: tuple[str, ...] = ()
     status: SkillStatus = SkillStatus.ACTIVE
+    # These cases assert the skill body appears in the assembled prompt
+    # (``expected_prompt_contains``), i.e. the EAGER injection path. RT-ADR-11
+    # made lazy the default, so pin eager here to keep exercising that path.
+    lazy_load: bool = False
 
 
 @dataclass(frozen=True)
@@ -154,6 +158,7 @@ async def _seed_store(case: SkillCase, tenant_id: UUID) -> InMemorySkillStore:
             prompt_fragment=spec_version.prompt_fragment,
             tool_names=spec_version.tool_names,
             required_models=spec_version.required_models,
+            lazy_load=spec_version.lazy_load,
         )
         if spec_version.status != SkillStatus.DRAFT:
             await store.set_status(
