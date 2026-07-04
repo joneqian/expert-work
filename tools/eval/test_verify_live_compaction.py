@@ -23,7 +23,9 @@ if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
 from verify_live_compaction import (  # noqa: E402
+    _ASSUMED_OVERHEAD_TOKENS,
     _CHARS_PER_TOKEN,
+    _MAX_INPUT_CHARS,
     _agent_context,
     _plan_fill,
     _RefreshingAuth,
@@ -47,6 +49,11 @@ _COMPACTION = "event: compaction\ndata: " + json.dumps(
     {"passes": 1, "tokens_before": 12000, "tokens_after": 3400, "summary_chars": 890}
 )
 _ERROR = 'event: error\ndata: {"message":"System message must be at the beginning"}'
+#: The compressor's empty-middle fail-hard — a config issue, NOT RT-ADR-5.
+_OVERFLOW = (
+    'event: error\ndata: {"message":"context overflow: estimated 25845 tokens > '
+    'threshold 22400 after 0 compression pass(es)","name":"ContextOverflowError"}'
+)
 _META = 'event: metadata\ndata: {"run_id":"r","thread_id":"t-1"}'
 _END = "event: end\ndata: null"
 
@@ -57,6 +64,7 @@ class _Scenario:
 
     fire_compaction_on_fill: int = 2  # which fill turn emits a compaction (0 = never)
     error_after_compaction: bool = False
+    overflow_error: bool = False  # emit a ContextOverflowError frame vs a system-message 400
     recall_fact: bool = True
     provider: str = "qwen"
     context_window: int = 8192
@@ -111,7 +119,7 @@ def _make_client(sc: _Scenario) -> httpx.AsyncClient:
                 if sc.fire_compaction_on_fill and fill_seen == sc.fire_compaction_on_fill:
                     parts = [_META, _COMPACTION]
                     if sc.error_after_compaction:
-                        parts.append(_ERROR)
+                        parts.append(_OVERFLOW if sc.overflow_error else _ERROR)
                     else:
                         parts.append(_ai("ok"))
                     parts.append(_END)
@@ -180,16 +188,39 @@ def test_plan_fill_leaves_a_fat_middle_before_crossing(window: int, threshold_pc
     fill_chars, max_turns = _plan_fill(window, threshold_pct)
     threshold_tokens = int(window * threshold_pct)
     per_turn_tokens = fill_chars // _CHARS_PER_TOKEN
-    # The retention invariant that CRITICAL 1 violated: the compressor keeps
-    # head_keep(4)+tail_keep(6) messages and fail-hards on an empty middle. The
-    # fill must cross the threshold only after MANY turns (≫ the ~5 held by
-    # head+tail) so a fat middle exists to summarise — not in ~3 turns.
-    turns_to_cross = threshold_tokens / per_turn_tokens
+    # PR-8: size against the room (threshold minus the ~24k fixed overhead), and
+    # cross it over many turns so head_keep(4)+tail_keep(6) hold a small share
+    # and a fat middle exists to summarise — not an empty-middle fail-hard.
+    room_tokens = max(threshold_tokens - _ASSUMED_OVERHEAD_TOKENS, threshold_tokens // 4)
+    turns_to_cross = room_tokens / per_turn_tokens
     assert turns_to_cross >= 10
-    # A single turn still stays well under the threshold (never one giant msg).
+    # A single turn stays well under the threshold (never one giant msg).
     assert 0 < per_turn_tokens < threshold_tokens
-    # …and the budget is enough to actually reach (and overshoot) the threshold.
-    assert per_turn_tokens * max_turns > threshold_tokens
+    # …and the budget is enough to climb the room (overshoot).
+    assert per_turn_tokens * max_turns > room_tokens
+
+
+@pytest.mark.parametrize("window", [8192, 32000, 64000, 128000, 200000, 1_000_000, 10_000_000])
+def test_plan_fill_never_exceeds_the_api_input_cap(window: int) -> None:
+    # PR-8 / the 422 bug: a single fill turn must never exceed the server's
+    # RunRequest.input max_length (8192 chars) no matter how large the window.
+    fill_chars, _ = _plan_fill(window, 0.7)
+    assert 0 < fill_chars <= _MAX_INPUT_CHARS
+
+
+@pytest.mark.asyncio
+async def test_context_overflow_reported_as_config_not_rt_adr_5(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # PR-8: an empty-middle ContextOverflowError is a window/overhead config
+    # issue — it must NOT be mislabelled as an RT-ADR-5 coalescing regression.
+    async with _make_client(_Scenario(error_after_compaction=True, overflow_error=True)) as client:
+        rc = await run_compaction_check(client, fact_code=_FACT, max_fill_turns=5)
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "config issue" in out
+    assert "NOT an RT-ADR-5" in out
+    assert "regression):" not in out  # the RT-ADR-5 branch's phrasing must not fire
 
 
 @pytest.mark.asyncio

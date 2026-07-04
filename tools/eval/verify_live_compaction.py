@@ -42,6 +42,20 @@ The ``client`` is injectable so the harness logic is CI-covered with an
 ``httpx.MockTransport`` (see ``test_verify_live_compaction.py``) — the real
 run is a manual step.
 
+**Target-agent requirements (learned the hard way, 2026-07):**
+
+* **A reachable compaction threshold.** Compaction fires at ``context_window *
+  threshold_pct``. A flagship model (e.g. qwen3.7-max resolves to a ~1M
+  catalog window → a 700k-token threshold) is untestable through the 8192-char
+  input cap. Give the agent a small explicit ``context_window`` — ~64k works;
+  32k is too small once the agent's ~20-24k fixed overhead (system prompt +
+  tools + skills + memory) is counted, and the run will report a
+  ContextOverflowError telling you to raise it.
+* **Long-term memory OFF.** The fact-recall assertion seeds a code and checks
+  it survives the summary. With long-term memory on, a code seeded by a
+  *previous* run is injected and answered instead — a false failure. Disable
+  the agent's long-term memory for a clean property-3 test.
+
 Usage (bring the dev stack up first — ``make dev-up`` — with a qwen/glm/
 deepseek agent active). Either hand it a token::
 
@@ -105,18 +119,52 @@ _STRICT_PROVIDERS = frozenset({"qwen", "glm", "deepseek", "self-hosted"})
 _CHARS_PER_TOKEN = 4
 _DEFAULT_CONTEXT_WINDOW = 200_000
 _DEFAULT_THRESHOLD_PCT = 0.7
-#: Cap a single fill turn's size so a very large window doesn't produce an
-#: unwieldy request body; the loop just takes a few more turns instead.
-_MAX_FILL_TOKENS_PER_TURN = 40_000
+#: The server caps a single run's ``input`` at 8192 chars (``RunRequest.input``
+#: ``max_length`` in control-plane ``api/runs.py``); stay under it so a fill
+#: turn is never rejected with a 422. This caps the filler *body*; the ~192-char
+#: headroom below 8192 covers ``_filler``'s ``Context block #N …`` prefix, so
+#: the full ``input`` stays under the server limit — keep the margin if raised.
+_MAX_INPUT_CHARS = 8000
 #: The compressor keeps ``head_keep`` (4) + ``tail_keep`` (6) non-system
 #: messages verbatim and only summarises the *middle*; if the threshold is
-#: crossed before enough messages accumulate, the middle is empty and the
-#: compressor raises ``ContextOverflowError`` instead of emitting a summary
-#: (compressor.py ``_split`` / ``ContextOverflowError``). So the fill must
-#: cross the threshold only after **many** turns — one turn adds a
-#: human+assistant pair — leaving a fat middle to summarise. Aim to cross
-#: around this many fill turns (≫ the ~5 turns held by head+tail).
+#: crossed before enough messages accumulate, the middle is empty and it
+#: raises ``ContextOverflowError`` instead of a summary. So the fill must
+#: cross only after **many** turns, leaving a fat middle. And the agent's
+#: fixed context (system prompt + tool defs + skills list + injected memory)
+#: already sits in the prompt before any conversation — a real qwen agent
+#: measured ~20-24k tokens — so the usable room is ``threshold - overhead``,
+#: not the whole threshold. Size against the room, cross it over ~this many
+#: turns; if ``overhead`` alone exceeds the threshold the run surfaces a clear
+#: ContextOverflowError (raise the agent's ``context_window``).
 _FILL_TURNS_TO_TRIGGER = 15
+_ASSUMED_OVERHEAD_TOKENS = 24_000
+
+#: Resolve a ``None`` manifest ``context_window`` the way the server's agent
+#: factory does — catalog lookup, else the 200k fallback (``agent_factory
+#: ._resolved_context_window``). Guarded: the harness still runs (and the
+#: MockTransport tests still pass) without the ``helix_agent`` package.
+try:
+    from helix_agent.protocol.model_catalog import (  # type: ignore[import-not-found]
+        catalog_entry as _catalog_entry,
+    )
+except Exception:  # pragma: no cover - only when helix_agent isn't importable
+    _catalog_entry = None
+
+
+def _resolve_context_window(provider: str, model_name: str, manifest_window: object) -> int:
+    """Explicit manifest value wins; else the catalog window; else 200k."""
+    if isinstance(manifest_window, int) and manifest_window > 0:
+        return manifest_window
+    if _catalog_entry is not None and provider and model_name:
+        try:
+            entry = _catalog_entry(provider, model_name)
+        except Exception:
+            entry = None
+        window = getattr(entry, "context_window", None) if entry is not None else None
+        if isinstance(window, int) and window > 0:
+            return window
+    return _DEFAULT_CONTEXT_WINDOW
+
 
 #: Async callable that returns a fresh bearer token (or ``None`` = no refresh).
 Minter = Callable[[], Awaitable[str]]
@@ -215,17 +263,20 @@ def _plan_fill(context_window: int, threshold_pct: float) -> tuple[int, int]:
     Returns ``(fill_chars, suggested_max_turns)``.
     """
     threshold_tokens = max(1, int(context_window * threshold_pct))
-    # Cross the threshold only after ~_FILL_TURNS_TO_TRIGGER turns so head+tail
-    # hold a small share and the middle is large. Cap per-turn size (huge
-    # windows just take more turns) and floor at 1.
+    # Usable room = threshold minus the agent's fixed overhead (which already
+    # sits in the prompt). Clamp to a positive floor: if overhead >= threshold
+    # the window is genuinely too small and the run will surface a clear
+    # ContextOverflowError rather than a bogus RT-ADR-5 signal.
+    room_tokens = max(threshold_tokens - _ASSUMED_OVERHEAD_TOKENS, threshold_tokens // 4)
+    # Cross the room only after ~_FILL_TURNS_TO_TRIGGER turns so head+tail hold a
+    # small share and the middle is large — and never exceed the API input cap.
     per_turn_tokens = max(
-        1, min(threshold_tokens // _FILL_TURNS_TO_TRIGGER, _MAX_FILL_TOKENS_PER_TURN)
+        1, min(room_tokens // _FILL_TURNS_TO_TRIGGER, _MAX_INPUT_CHARS // _CHARS_PER_TOKEN)
     )
-    fill_chars = per_turn_tokens * _CHARS_PER_TOKEN
-    # Budget enough turns to overshoot the threshold by 30% plus slack for the
-    # head/tail that never counts toward crossing.
-    target_tokens = int(threshold_tokens * 1.3)
-    suggested_max_turns = math.ceil(target_tokens / per_turn_tokens) + 6
+    fill_chars = min(per_turn_tokens * _CHARS_PER_TOKEN, _MAX_INPUT_CHARS)
+    # Budget enough turns to climb the room (overhead is already the baseline)
+    # by 30% plus slack for the head/tail that never counts toward crossing.
+    suggested_max_turns = math.ceil(room_tokens * 1.3 / per_turn_tokens) + 8
     return fill_chars, suggested_max_turns
 
 
@@ -241,9 +292,11 @@ async def _agent_context(
     provider is re-read here rather than trusting the imported ``_pick_agent``,
     which reads the single-nested (wrong) shape and so always yields ``""``.
 
-    Falls back to the agent-factory defaults when a manifest leaves either
-    unset (``context_window: None`` → catalog/200k; no compression policy →
-    0.7), so auto-sizing always has concrete numbers.
+    Resolves ``context_window`` the way the server does — an explicit manifest
+    value wins, else the model-catalog window for the ``(provider, model)``,
+    else 200k (``_resolve_context_window``). A ``None`` manifest on a large
+    catalog model (e.g. qwen3.7-max → ~1M) would otherwise be mis-sized as
+    200k. Compression policy defaults to 0.7 when unset.
     """
     resp = await client.get("/v1/agents", params={"status": "active", "limit": 200})
     resp.raise_for_status()
@@ -251,8 +304,10 @@ async def _agent_context(
         if rec.get("name") == name and rec.get("version") == version:
             body = (rec.get("spec") or {}).get("spec") or {}
             model = body.get("model") or {}
-            window = model.get("context_window") or _DEFAULT_CONTEXT_WINDOW
             provider = str(model.get("provider") or "")
+            window = _resolve_context_window(
+                provider, str(model.get("name") or ""), model.get("context_window")
+            )
             policy = (body.get("policies") or {}).get("context_compression") or {}
             threshold = policy.get("threshold_pct") or _DEFAULT_THRESHOLD_PCT
             return int(window), float(threshold), provider
@@ -315,6 +370,18 @@ def _filler(index: int, fill_chars: int) -> str:
     turn spends input tokens without generating a long reply."""
     body = ("The quick brown fox jumps over the lazy dog. " * ((fill_chars // 45) + 1))[:fill_chars]
     return f"Context block #{index} (reply only 'ok'):\n\n{body}"
+
+
+def _is_context_overflow(error_text: str) -> bool:
+    """A compressor empty-middle failure, NOT a strict-backend 400.
+
+    The server surfaces ``ContextOverflowError`` when the middle to summarise is
+    empty — the agent's fixed overhead crossed the threshold before enough
+    conversation accumulated. That is a window/overhead config issue, not an
+    RT-ADR-5 coalescing regression, so the harness must not conflate the two.
+    """
+    lowered = error_text.lower()
+    return "contextoverflow" in lowered or "context overflow" in lowered
 
 
 async def run_compaction_check(
@@ -385,14 +452,28 @@ async def run_compaction_check(
             if isinstance(before, int) and isinstance(after, int) and after >= before:
                 print("  ! WARNING: tokens_after >= tokens_before (compression did not shrink)")
         if obs.errored:
-            # RT-ADR-5 — a strict backend 400 on the mid-conversation summary
-            # surfaces as an error frame right after compaction fired.
+            if _is_context_overflow(obs.error_text):
+                # NOT an RT-ADR-5 regression — the compressor hit an empty middle
+                # because the agent's fixed overhead leaves too little room in the
+                # window. A config issue; don't mislabel it as a coalescing bug.
+                print(
+                    "RESULT: FAIL — ContextOverflowError (empty middle): the agent's fixed "
+                    "context overhead (system prompt + tools + skills + memory) leaves too "
+                    "little room in context_window for a summarisable middle. This is a "
+                    "config issue, NOT an RT-ADR-5 regression — raise the agent's "
+                    f"context_window or shrink its system prompt.\n  {obs.error_text[:200]}"
+                )
+                return 1
+            # A genuine error frame right after compaction — on a strict backend
+            # this is the RT-ADR-5 signal (a mid-conversation system message 400).
             print(
-                f"RESULT: FAIL — error frame after compaction (RT-ADR-5?): {obs.error_text[:200]}"
+                "RESULT: FAIL — error frame after compaction (possible RT-ADR-5 "
+                f"regression): {obs.error_text[:200]}"
             )
             return 1
         if compaction_seen:
             break
+        print(f"[fill] turn={i}/{max_fill_turns}  (piling context, no compaction yet)")
 
     if compaction_seen == 0:
         print(
