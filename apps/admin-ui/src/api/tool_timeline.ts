@@ -75,6 +75,47 @@ export function messagesOf(data: unknown): Array<Record<string, unknown>> {
   return out;
 }
 
+/** One COMPACTION event (RT-2 PR-4) — a context-compression pass landed,
+ *  summarising the middle of the transcript. Numeric-only per the backend
+ *  payload (no conversation content). */
+export interface CompactionSummary {
+  /** Client receive order — de-dupes replayed frames, orders the cards. */
+  receivedAt: string;
+  passes: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  summaryChars: number;
+}
+
+function numberField(data: Record<string, unknown>, key: string): number | null {
+  const v = data[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Extract the ordered COMPACTION summaries from a run's SSE frames. A frame is
+ * ``event: "compaction"`` with ``data: {passes, tokens_before, tokens_after,
+ * summary_chars}`` (see ``sse._publish_compaction``). Malformed / partial
+ * frames are skipped rather than rendered half-blank.
+ */
+export function parseCompactionEvents(events: readonly SseEvent[]): CompactionSummary[] {
+  const out: CompactionSummary[] = [];
+  for (const evt of events) {
+    if (evt.event !== "compaction") continue;
+    if (evt.data === null || typeof evt.data !== "object") continue;
+    const data = evt.data as Record<string, unknown>;
+    const passes = numberField(data, "passes");
+    const tokensBefore = numberField(data, "tokens_before");
+    const tokensAfter = numberField(data, "tokens_after");
+    const summaryChars = numberField(data, "summary_chars");
+    if (passes === null || tokensBefore === null || tokensAfter === null || summaryChars === null) {
+      continue;
+    }
+    out.push({ receivedAt: evt.receivedAt, passes, tokensBefore, tokensAfter, summaryChars });
+  }
+  return out;
+}
+
 /**
  * Reconstruct the ordered tool-call timeline from a run's SSE frames.
  *

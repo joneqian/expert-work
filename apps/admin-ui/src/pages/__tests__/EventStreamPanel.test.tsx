@@ -76,6 +76,39 @@ describe("EventStreamPanel", () => {
     expect(screen.getByTestId("event-stream-event-end")).toBeInTheDocument();
   });
 
+  it("renders a compaction summary card in the timeline view", async () => {
+    const user = userEvent.setup();
+    streamMock.mockReturnValue(
+      makeStream([
+        {
+          id: "1",
+          event: "compaction",
+          data: { passes: 1, tokens_before: 12000, tokens_after: 3400, summary_chars: 890 },
+          rawData: "",
+          receivedAt: "2026-05-26T08:00:00Z",
+        },
+        {
+          id: "2",
+          event: "end",
+          data: null,
+          rawData: "null",
+          receivedAt: "2026-05-26T08:00:02Z",
+        },
+      ]),
+    );
+
+    render(<EventStreamPanel threadId="t-1" runId="r-1" />);
+    // Timeline is the default view — no view switch needed.
+    await user.click(screen.getByTestId("event-stream-toggle"));
+
+    const card = await screen.findByTestId("compaction-card");
+    expect(card).toHaveTextContent(i18n.t("event_stream.compaction_label"));
+    expect(card).toHaveTextContent("12,000");
+    expect(card).toHaveTextContent("3,400");
+    // reduction = (12000 - 3400) / 12000 ≈ 71.67% → 72%
+    expect(card).toHaveTextContent("72");
+  });
+
   it("persists the expanded preference via localStorage", async () => {
     const user = userEvent.setup();
     streamMock.mockReturnValue(makeStream([]));

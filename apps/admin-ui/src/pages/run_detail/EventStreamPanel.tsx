@@ -15,13 +15,14 @@
  * open. The toggle persists per-user via ``localStorage`` so a debug-
  * heavy reviewer keeps it open across page loads.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Card, Empty, Segmented, Space, Tag, Typography } from "antd";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { streamRunEvents } from "../../api/runs";
 import type { SseEvent } from "../../api/sessions";
+import { parseCompactionEvents, type CompactionSummary } from "../../api/tool_timeline";
 import { CopyButton } from "../../components/CopyButton";
 import { ToolTimeline } from "../../components/ToolTimeline";
 
@@ -34,6 +35,7 @@ const EVENT_COLOR: Record<string, string> = {
   updates: "geekblue",
   error: "red",
   end: "green",
+  compaction: "purple",
 };
 
 interface EventStreamPanelProps {
@@ -51,6 +53,7 @@ export function EventStreamPanel({ threadId, runId }: EventStreamPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [view, setView] = useState<"timeline" | "raw">("timeline");
+  const compactions = useMemo(() => parseCompactionEvents(events), [events]);
 
   const abortRef = useRef<AbortController | null>(null);
   const eventListRef = useRef<HTMLDivElement>(null);
@@ -176,13 +179,69 @@ export function EventStreamPanel({ threadId, runId }: EventStreamPanelProps) {
             {events.length === 0 && error === null && !connecting && (
               <Empty description={t("event_stream.empty")} />
             )}
-            {events.length > 0 && view === "timeline" && <ToolTimeline events={events} />}
+            {events.length > 0 && view === "timeline" && (
+              <>
+                {compactions.length > 0 && <CompactionSummaryList items={compactions} />}
+                <ToolTimeline events={events} />
+              </>
+            )}
             {view === "raw" &&
               events.map((evt, idx) => <EventCard key={`${evt.receivedAt}-${idx}`} evt={evt} />)}
           </div>
         </div>
       )}
     </Card>
+  );
+}
+
+function CompactionSummaryList({ items }: { items: readonly CompactionSummary[] }) {
+  return (
+    <div
+      data-testid="compaction-summary-list"
+      style={{ display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      {items.map((item, idx) => (
+        <CompactionCard key={`${item.receivedAt}-${idx}`} item={item} />
+      ))}
+    </div>
+  );
+}
+
+function CompactionCard({ item }: { item: CompactionSummary }) {
+  const { t } = useTranslation();
+  const reductionPct =
+    item.tokensBefore > 0
+      ? Math.max(0, Math.round(((item.tokensBefore - item.tokensAfter) / item.tokensBefore) * 100))
+      : 0;
+  return (
+    <div
+      data-testid="compaction-card"
+      style={{
+        border: "1px solid var(--hx-border-subtle)",
+        borderRadius: 6,
+        padding: 10,
+        background: "var(--hx-surface-raised)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Tag color="purple" bordered={false} style={{ margin: 0 }}>
+          {t("event_stream.compaction_label")}
+        </Tag>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {t("event_stream.compaction_passes", { n: item.passes })}
+        </Text>
+        <Text className="mono" style={{ fontSize: 12 }}>
+          {t("event_stream.compaction_reduction", {
+            before: item.tokensBefore.toLocaleString(),
+            after: item.tokensAfter.toLocaleString(),
+            pct: reductionPct,
+          })}
+        </Text>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {t("event_stream.compaction_summary_chars", { n: item.summaryChars.toLocaleString() })}
+        </Text>
+      </div>
+    </div>
   );
 }
 
