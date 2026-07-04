@@ -39,7 +39,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from helix_agent.persistence.skill.base import DuplicateSkillError, SkillStore
-from helix_agent.protocol import Skill
+from helix_agent.protocol import DEFAULT_SKILL_LAZY_LOAD, Skill
 
 __all__ = [
     "DomainResearchConfig",
@@ -241,6 +241,12 @@ class DomainResearcher:
                 skill_id = refetched.id
         else:
             skill_id = existing.id
+        # RT-ADR-11 — refreshing an existing domain-research skill keeps its
+        # disclosure mode; a freshly-created one (no prior version) adopts lazy.
+        prior_versions = await self.skill_store.list_versions(
+            skill_id=skill_id, tenant_id=tenant_id
+        )
+        inherited_lazy = prior_versions[0].lazy_load if prior_versions else DEFAULT_SKILL_LAZY_LOAD
         await self.skill_store.add_version(
             version_id=uuid4(),
             skill_id=skill_id,
@@ -248,6 +254,7 @@ class DomainResearcher:
             prompt_fragment=summary,
             description=f"Domain research prior for {agent_name}",
             authored_by="agent",
+            lazy_load=inherited_lazy,
             evolution_origin="distilled",
         )
         return skill_id

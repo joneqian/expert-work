@@ -1330,6 +1330,10 @@ def build_skills_router() -> APIRouter:
             required_models=version.required_models,
             prompt_fragment=version.prompt_fragment,
             tool_names=version.tool_names,
+            # Round-trip the disclosure mode so an export→re-import keeps the
+            # skill lazy/eager as authored (now that lazy is the default, an
+            # omitted ``lazy`` would silently re-import a lazy skill as eager).
+            lazy=version.lazy_load,
         )
         return Response(
             content=blob,

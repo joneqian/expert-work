@@ -179,9 +179,11 @@ class SkillVersionRow(Base):
     supporting_files: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    # Mini-ADR U-15: progressive disclosure opt-in. Default false keeps
-    # existing eager body injection so deployed agents do not regress.
-    lazy_load: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # Mini-ADR U-15: progressive disclosure opt-in. RT-ADR-11 flipped the
+    # server_default to ``true`` (lazy) so new rows default to progressive
+    # disclosure; migration 0113 flips it + retro-lazies curated platform
+    # skills. Existing rows store an explicit value and are unaffected.
+    lazy_load: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     # Mini-ADR U-21: blake2b-32 of canonicalized (prompt_fragment,
     # supporting_files). Recomputed at skill_view time to catch drift
     # (SQL injection / internal actor writing past the strict scan).

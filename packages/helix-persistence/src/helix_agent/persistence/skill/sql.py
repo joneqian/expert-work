@@ -28,6 +28,7 @@ from helix_agent.persistence.skill.base import (
     SkillStore,
 )
 from helix_agent.protocol import (
+    DEFAULT_SKILL_LAZY_LOAD,
     ComponentType,
     EvolutionOrigin,
     KillSwitch,
@@ -406,7 +407,7 @@ class SqlSkillStore(SkillStore):
         required_models: Sequence[str] = (),
         authored_by: str = "human",
         supporting_files: dict[str, dict[str, Any]] | None = None,
-        lazy_load: bool = False,
+        lazy_load: bool = DEFAULT_SKILL_LAZY_LOAD,
         content_hash: bytes = b"",
         high_risk: bool = False,
         evolution_origin: EvolutionOrigin | None = None,
@@ -1055,7 +1056,7 @@ class SqlSkillStore(SkillStore):
         required_models: Sequence[str] = (),
         authored_by: str = "human",
         supporting_files: dict[str, dict[str, Any]] | None = None,
-        lazy_load: bool = False,
+        lazy_load: bool = DEFAULT_SKILL_LAZY_LOAD,
         content_hash: bytes = b"",
         high_risk: bool = False,
     ) -> SkillVersion:

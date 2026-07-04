@@ -28,7 +28,11 @@ from control_plane.skill_evolution import EvolutionConfig, EvolutionResult, Repl
 from control_plane.skill_promotion_gate import PromotionGate
 from helix_agent.persistence import DuplicateSkillError, SkillStore
 from helix_agent.protocol import CurationCandidateRecord
-from helix_agent.protocol.skill import SkillStatus, compute_content_hash
+from helix_agent.protocol.skill import (
+    DEFAULT_SKILL_LAZY_LOAD,
+    SkillStatus,
+    compute_content_hash,
+)
 
 
 def _utcnow() -> datetime:
@@ -241,6 +245,13 @@ class EvolutionProcessor:
                             self.cache_invalidator(candidate.tenant_id)
         if state.skill_id is None:
             state.skill_id = await self._ensure_skill(draft, candidate)
+        # RT-ADR-11 — a new revision of an existing distilled skill keeps its
+        # disclosure mode; a freshly-created skill (no prior version) adopts the
+        # lazy default.
+        prior_versions = await self.skill_store.list_versions(
+            skill_id=state.skill_id, tenant_id=candidate.tenant_id
+        )
+        inherited_lazy = prior_versions[0].lazy_load if prior_versions else DEFAULT_SKILL_LAZY_LOAD
         version = await self.skill_store.add_version(
             version_id=uuid4(),
             skill_id=state.skill_id,
@@ -250,6 +261,7 @@ class EvolutionProcessor:
             description=draft.description,
             category=draft.category,
             authored_by="agent",
+            lazy_load=inherited_lazy,
             high_risk=draft.high_risk,
             # Live pilot finding #6 — without a real content hash the U-21
             # drift check (skill_seed / skill_view recompute-and-compare)

@@ -51,6 +51,7 @@ from helix_agent.common.uplift_metrics import (
     record_threat_pattern_hits,
 )
 from helix_agent.protocol.skill import (
+    DEFAULT_SKILL_LAZY_LOAD,
     SkillAuthoredBy,
     SkillPackageLayoutError,
     SkillSupportingFile,
@@ -244,7 +245,7 @@ class SkillZipPayload:
     # Sprint #3 additions
     license: str | None = None
     authored_by: SkillAuthoredBy = "human"
-    lazy_load: bool = False
+    lazy_load: bool = DEFAULT_SKILL_LAZY_LOAD
     supporting_files: dict[str, SkillSupportingFile] = field(default_factory=dict)
     content_hash: bytes = b""
     high_risk: bool = False
@@ -607,7 +608,9 @@ def _parse_legacy_format(entries: _ArchiveEntries) -> SkillZipPayload:
         tool_names=tool_names,
         license=None,
         authored_by="human",
-        lazy_load=False,
+        # Legacy layout carries no frontmatter, hence no ``lazy`` hint —
+        # default to progressive disclosure like every other new skill (RT-ADR-11).
+        lazy_load=DEFAULT_SKILL_LAZY_LOAD,
         supporting_files={},
         content_hash=content_hash,
         high_risk=high_risk,

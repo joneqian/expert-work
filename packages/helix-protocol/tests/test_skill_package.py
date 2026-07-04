@@ -166,8 +166,8 @@ content
 
 
 def test_serialize_omits_helix_defaults_for_clean_diff() -> None:
-    """authored_by=human + lazy=false are defaults — should be omitted
-    from output to keep diffs clean when these aren't customized."""
+    """authored_by=human + lazy=true (RT-ADR-11 default) are defaults —
+    should be omitted from output to keep diffs clean when uncustomized."""
     parsed = parse_skill_md(
         """---
 name: x
@@ -181,6 +181,40 @@ body
     out = serialize_skill_md(parsed)
     assert "authored_by" not in out
     assert "lazy" not in out
+
+
+def test_parse_omitted_lazy_defaults_to_progressive_disclosure() -> None:
+    # RT-ADR-11 — frontmatter without a ``helix.lazy`` key (the common GitHub
+    # import case) defaults to lazy, not eager body inlining.
+    parsed = parse_skill_md(
+        """---
+name: x
+description: y
+helix:
+  version: 1
+---
+body
+"""
+    )
+    assert parsed.helix_lazy is True
+
+
+@pytest.mark.parametrize("lazy", [True, False])
+def test_serialize_round_trips_lazy_flag(lazy: bool) -> None:
+    # Eager (non-default) writes ``lazy: false``; lazy (default) omits it.
+    # Either way the round trip preserves the flag.
+    src = (
+        "---\n"
+        "name: x\n"
+        "description: y\n"
+        "helix:\n"
+        "  version: 1\n"
+        f"  lazy: {str(lazy).lower()}\n"
+        "---\n"
+        "body\n"
+    )
+    reparsed = parse_skill_md(serialize_skill_md(parse_skill_md(src)))
+    assert reparsed.helix_lazy is lazy
 
 
 # ─── is_high_risk_skill_version (Mini-ADR U-24) ──────────────────────────

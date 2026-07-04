@@ -97,6 +97,10 @@ def _make_version(
     prompt_fragment: str = "be helpful with X",
     tool_names: tuple[str, ...] = (),
     required_models: tuple[str, ...] = (),
+    # These tests exercise EAGER body injection (the ``<skill>`` fragment
+    # wrapping). RT-ADR-11 made lazy the default, so pin eager here; the lazy
+    # summary path is covered by the skill-reference / compressor tests.
+    lazy_load: bool = False,
 ) -> SkillVersion:
     return SkillVersion(
         id=uuid4(),
@@ -110,6 +114,7 @@ def _make_version(
         required_models=required_models,
         authored_by="human",
         created_at=datetime.now(UTC),
+        lazy_load=lazy_load,
     )
 
 

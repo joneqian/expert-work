@@ -25,6 +25,7 @@ from typing import Any
 from uuid import UUID
 
 from helix_agent.protocol import (
+    DEFAULT_SKILL_LAZY_LOAD,
     ComponentType,
     EvolutionOrigin,
     KillSwitch,
@@ -213,7 +214,7 @@ class SkillStore(abc.ABC):
         # without touching them; the ZIP / supporting-files paths populate
         # all four explicitly.
         supporting_files: dict[str, dict[str, Any]] | None = None,
-        lazy_load: bool = False,
+        lazy_load: bool = DEFAULT_SKILL_LAZY_LOAD,
         content_hash: bytes = b"",
         high_risk: bool = False,
         # Stream SE (Mini-ADR SE-A1). Evolution provenance — default None/0
@@ -641,7 +642,7 @@ class SkillStore(abc.ABC):
         required_models: Sequence[str] = (),
         authored_by: str = "human",
         supporting_files: dict[str, dict[str, Any]] | None = None,
-        lazy_load: bool = False,
+        lazy_load: bool = DEFAULT_SKILL_LAZY_LOAD,
         content_hash: bytes = b"",
         high_risk: bool = False,
     ) -> SkillVersion:
