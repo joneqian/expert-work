@@ -26,7 +26,11 @@ import {
 } from "../oidc";
 
 // Fake UserManager so we can count code exchanges without a real IdP.
-const { signinSpy } = vi.hoisted(() => ({ signinSpy: vi.fn() }));
+const { signinSpy, clearStaleStateSpy, signinRedirectSpy } = vi.hoisted(() => ({
+  signinSpy: vi.fn(),
+  clearStaleStateSpy: vi.fn().mockResolvedValue(undefined),
+  signinRedirectSpy: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("oidc-client-ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("oidc-client-ts")>();
   return {
@@ -34,6 +38,8 @@ vi.mock("oidc-client-ts", async (importOriginal) => {
     UserManager: class {
       constructor(_settings: unknown) {}
       signinRedirectCallback = signinSpy;
+      clearStaleState = clearStaleStateSpy;
+      signinRedirect = signinRedirectSpy;
     },
   };
 });
@@ -42,6 +48,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
   _resetUserManagerForTests();
   signinSpy.mockReset();
+  clearStaleStateSpy.mockClear();
+  signinRedirectSpy.mockClear();
 });
 
 describe("OIDC config detection", () => {
@@ -93,6 +101,32 @@ describe("extractSignInResult", () => {
   it("throws when id_token is missing", () => {
     const user = { state: { returnPath: "/" } } as unknown as User;
     expect(() => extractSignInResult(user)).toThrow(/id_token/);
+  });
+});
+
+describe("signIn (configured)", () => {
+  it("clears stale sign-in state BEFORE redirecting to the IdP", async () => {
+    vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/helix");
+    vi.stubEnv("VITE_OIDC_CLIENT_ID", "ui");
+    await signIn("/runs/7");
+    expect(clearStaleStateSpy).toHaveBeenCalledTimes(1);
+    expect(signinRedirectSpy).toHaveBeenCalledTimes(1);
+    // Purge must happen before the redirect, else leftover state can bounce the
+    // user back to /login without ever reaching the IdP (the C1 fix).
+    expect(clearStaleStateSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      signinRedirectSpy.mock.invocationCallOrder[0],
+    );
+    expect(signinRedirectSpy).toHaveBeenCalledWith({
+      state: { returnPath: "/runs/7" },
+    });
+  });
+
+  it("still redirects when clearStaleState rejects (best-effort purge)", async () => {
+    vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/helix");
+    vi.stubEnv("VITE_OIDC_CLIENT_ID", "ui");
+    clearStaleStateSpy.mockRejectedValueOnce(new Error("store unavailable"));
+    await signIn();
+    expect(signinRedirectSpy).toHaveBeenCalledTimes(1);
   });
 });
 

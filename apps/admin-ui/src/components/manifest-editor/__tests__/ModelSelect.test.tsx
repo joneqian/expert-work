@@ -161,6 +161,26 @@ describe("ModelSelect", () => {
     expect(within(advanced).getByText("rate_limit_rpm")).toBeInTheDocument();
   });
 
+  it("advanced panel exposes a context_window input that writes onChange", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderSelect(
+      { provider: "openai", name: "gpt-5.5", context_window: 64000 },
+      onChange,
+    );
+    await user.click(
+      within(screen.getByTestId("model-select-advanced")).getByText("Advanced"),
+    );
+    // aria-labelled (axe) and shows the current value.
+    const input = screen.getByLabelText("Context window");
+    expect(input).toHaveValue("64000");
+    await user.clear(input);
+    await user.type(input, "32000");
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ context_window: 32000 }),
+    );
+  });
+
   it("renders translated vision label, not the raw i18n key", () => {
     renderSelect({
       provider: "deepseek",

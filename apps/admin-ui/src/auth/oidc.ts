@@ -121,6 +121,12 @@ export async function signIn(returnPath = "/agents"): Promise<void> {
   if (manager === null) {
     throw new Error("OIDC is not configured");
   }
+  // Purge any stale/interrupted sign-in state left in the store by an abandoned
+  // earlier attempt (or an expired session). A leftover entry can otherwise trip
+  // up ``signinRedirect`` and bounce the user back to /login without ever
+  // reaching the IdP — the symptom that used to need a manual "clear site data".
+  // ``clearStaleState`` is a no-op when the store is already clean.
+  await manager.clearStaleState().catch(() => {});
   await manager.signinRedirect({ state: { returnPath } });
 }
 
