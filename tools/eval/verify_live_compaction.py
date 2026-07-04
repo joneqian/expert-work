@@ -46,7 +46,7 @@ run is a manual step.
 
 * **A reachable compaction threshold.** Compaction fires at ``context_window *
   threshold_pct``. A flagship model (e.g. qwen3.7-max resolves to a ~1M
-  catalog window → a 700k-token threshold) is untestable through the 8192-char
+  catalog window → a 700k-token threshold) is untestable through the 65536-char
   input cap. Give the agent a small explicit ``context_window`` — ~64k works;
   32k is too small once the agent's ~20-24k fixed overhead (system prompt +
   tools + skills + memory) is counted, and the run will report a
@@ -119,11 +119,13 @@ _STRICT_PROVIDERS = frozenset({"qwen", "glm", "deepseek", "self-hosted"})
 _CHARS_PER_TOKEN = 4
 _DEFAULT_CONTEXT_WINDOW = 200_000
 _DEFAULT_THRESHOLD_PCT = 0.7
-#: The server caps a single run's ``input`` at 8192 chars (``RunRequest.input``
-#: ``max_length`` in control-plane ``api/runs.py``); stay under it so a fill
-#: turn is never rejected with a 422. This caps the filler *body*; the ~192-char
-#: headroom below 8192 covers ``_filler``'s ``Context block #N …`` prefix, so
-#: the full ``input`` stays under the server limit — keep the margin if raised.
+#: The harness fills with small per-turn bodies (8000 chars) on purpose —
+#: deliberately far under the server's ``RunRequest.input`` cap
+#: (``MAX_RUN_INPUT_CHARS`` = 65536 in control-plane ``api/runs.py``) so a fill
+#: turn is never rejected with a 422, and so it takes *many* turns to cross the
+#: threshold (a fat middle for the compressor — see the next block). This caps
+#: the filler *body*; ``_filler`` prepends a short ``Context block #N …`` marker
+#: that fits inside the budget.
 _MAX_INPUT_CHARS = 8000
 #: The compressor keeps ``head_keep`` (4) + ``tail_keep`` (6) non-system
 #: messages verbatim and only summarises the *middle*; if the threshold is

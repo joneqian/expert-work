@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from control_plane.api._authz import ensure_resource_access, require
 from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo
-from control_plane.api.runs import RunRequest, spawn_run
+from control_plane.api.runs import MAX_RUN_INPUT_CHARS, RunRequest, spawn_run
 from control_plane.audit import emit
 from control_plane.auth.abac import ResourceAttrs
 from control_plane.manifest import (
@@ -344,7 +344,7 @@ class ExternalRunRequest(BaseModel):
 
     user_id: str = Field(min_length=1, max_length=255)
     session_id: UUID | None = None
-    input: str | None = Field(default=None, max_length=8192)
+    input: str | None = Field(default=None, max_length=MAX_RUN_INPUT_CHARS)
     mode: Literal["stream", "queue"] = "stream"
     image_refs: list[str] = Field(default_factory=list, max_length=64)
     untrusted_content: list[str] = Field(default_factory=list, max_length=16)

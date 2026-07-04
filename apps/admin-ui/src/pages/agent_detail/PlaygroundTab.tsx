@@ -119,6 +119,11 @@ interface Turn {
 const { Text } = Typography;
 const { TextArea } = Input;
 
+/** Char cap for the free-text message box — mirrors the server's
+ *  ``RunRequest.input`` ``max_length`` (``MAX_RUN_INPUT_CHARS``). A long
+ *  pasted email/spec fits; a whole book rides the document-upload path. */
+const MAX_INPUT_CHARS = 65536;
+
 interface PlaygroundTabProps {
   detail: AgentDetailResponse;
 }
@@ -879,7 +884,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
           placeholder={t("playground.input_placeholder")}
           autoSize={{ minRows: 6, maxRows: 14 }}
           disabled={running}
-          maxLength={8192}
+          maxLength={MAX_INPUT_CHARS}
           showCount
           data-testid="playground-input"
         />

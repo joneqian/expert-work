@@ -27,7 +27,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -92,6 +92,16 @@ from orchestrator.sse import format_sse
 
 logger = logging.getLogger("helix.control_plane.runs")
 
+#: Char cap for the free-text ``input`` message field (this endpoint and the
+#: external ``ExternalRunRequest``). This is the prompt the user types/pastes —
+#: a long email, spec, or article should fit, so it is far larger than the 8192
+#: cap that still guards the *structured* fields (``untrusted_content`` blocks,
+#: jinja ``inputs`` values). Genuinely large content (a book, a report) rides
+#: the document-upload path (``document_max_bytes``, read on demand in the
+#: sandbox), not this field. Kept as a generous DoS guardrail, not a hard UX
+#: limit — there is no global request-body middleware behind it.
+MAX_RUN_INPUT_CHARS: Final[int] = 65536
+
 
 class RunRequest(BaseModel):
     """POST body. ``input`` is the user's prompt for this run;
@@ -100,7 +110,7 @@ class RunRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    input: str | None = Field(default=None, max_length=8192)
+    input: str | None = Field(default=None, max_length=MAX_RUN_INPUT_CHARS)
     #: Stream 9.5 — execution mode. ``stream`` (default) runs the agent inside
     #: this request and streams the result (SSE) — unchanged behaviour. ``queue``
     #: enqueues the run for the distributed run queue and returns ``202`` with

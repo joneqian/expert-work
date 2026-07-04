@@ -170,3 +170,16 @@ async def test_stream_run_sets_session_header(ctx: _Ctx) -> None:
         assert resp.status_code == 200
         assert "X-Helix-Session-Id" in resp.headers
         await resp.aclose()
+
+
+def test_external_run_request_input_cap_matches_run_request() -> None:
+    # ExternalRunRequest.input shares the same free-text cap as RunRequest.
+    from pydantic import ValidationError
+
+    from control_plane.api.agents import ExternalRunRequest
+    from control_plane.api.runs import MAX_RUN_INPUT_CHARS
+
+    ok = ExternalRunRequest(user_id="u", input="x" * MAX_RUN_INPUT_CHARS)
+    assert ok.input is not None and len(ok.input) == MAX_RUN_INPUT_CHARS
+    with pytest.raises(ValidationError):
+        ExternalRunRequest(user_id="u", input="x" * (MAX_RUN_INPUT_CHARS + 1))

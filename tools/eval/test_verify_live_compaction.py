@@ -203,7 +203,8 @@ def test_plan_fill_leaves_a_fat_middle_before_crossing(window: int, threshold_pc
 @pytest.mark.parametrize("window", [8192, 32000, 64000, 128000, 200000, 1_000_000, 10_000_000])
 def test_plan_fill_never_exceeds_the_api_input_cap(window: int) -> None:
     # PR-8 / the 422 bug: a single fill turn must never exceed the server's
-    # RunRequest.input max_length (8192 chars) no matter how large the window.
+    # RunRequest.input max_length (MAX_RUN_INPUT_CHARS = 65536) no matter how
+    # large the window; the harness stays well under it at _MAX_INPUT_CHARS.
     fill_chars, _ = _plan_fill(window, 0.7)
     assert 0 < fill_chars <= _MAX_INPUT_CHARS
 
