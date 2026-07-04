@@ -697,6 +697,10 @@ export interface TranslationKeys {
     empty: string;
     view_timeline: string;
     view_raw: string;
+    compaction_label: string;
+    compaction_passes: string;
+    compaction_reduction: string;
+    compaction_summary_chars: string;
   };
   tool_timeline: {
     empty: string;
@@ -2919,6 +2923,10 @@ const en: TranslationKeys = {
     empty: "No events yet.",
     view_timeline: "Tool calls",
     view_raw: "Raw events",
+    compaction_label: "Context compacted",
+    compaction_passes: "{{n}} pass(es)",
+    compaction_reduction: "{{before}} → {{after}} tokens (−{{pct}}%)",
+    compaction_summary_chars: "summary {{n}} chars",
   },
   tool_timeline: {
     empty: "No tool calls yet.",

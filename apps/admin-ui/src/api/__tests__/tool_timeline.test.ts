@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { artifactsFromTools, parseToolCalls } from "../tool_timeline";
+import { artifactsFromTools, parseCompactionEvents, parseToolCalls } from "../tool_timeline";
 import type { SseEvent } from "../sessions";
 
 function evt(event: string, data: unknown): SseEvent {
@@ -158,5 +158,34 @@ describe("artifactsFromTools", () => {
       updates("tools", [toolResult("c1", "results")]),
     ];
     expect(artifactsFromTools(events)).toEqual([]);
+  });
+});
+
+describe("parseCompactionEvents", () => {
+  it("extracts numeric compaction summaries in receive order", () => {
+    const events = [
+      updates("agent", [aiCall("c1", "web_search", {})]),
+      { ...evt("compaction", { passes: 1, tokens_before: 12000, tokens_after: 3400, summary_chars: 890 }), receivedAt: "t1" },
+      { ...evt("compaction", { passes: 2, tokens_before: 9000, tokens_after: 2000, summary_chars: 500 }), receivedAt: "t2" },
+    ];
+    const summaries = parseCompactionEvents(events);
+    expect(summaries).toEqual([
+      { receivedAt: "t1", passes: 1, tokensBefore: 12000, tokensAfter: 3400, summaryChars: 890 },
+      { receivedAt: "t2", passes: 2, tokensBefore: 9000, tokensAfter: 2000, summaryChars: 500 },
+    ]);
+  });
+
+  it("ignores non-compaction frames and skips malformed/partial payloads", () => {
+    const events = [
+      evt("updates", { agent: { messages: [] } }),
+      evt("compaction", { passes: 1, tokens_before: 100 }), // missing tokens_after / summary_chars
+      evt("compaction", "not-an-object"),
+      evt("compaction", { passes: "x", tokens_before: 1, tokens_after: 1, summary_chars: 1 }), // non-numeric
+      { ...evt("compaction", { passes: 1, tokens_before: 100, tokens_after: 40, summary_chars: 10 }), receivedAt: "ok" },
+    ];
+    const summaries = parseCompactionEvents(events);
+    expect(summaries).toEqual([
+      { receivedAt: "ok", passes: 1, tokensBefore: 100, tokensAfter: 40, summaryChars: 10 },
+    ]);
   });
 });
