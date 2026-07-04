@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from control_plane.api.runs import (
+    MAX_RUN_INPUT_CHARS,
     RunRequest,
     _build_human_message,
     _validate_image_refs,
@@ -235,6 +236,18 @@ def test_run_request_untrusted_content_too_many_blocks_rejected() -> None:
 
 def test_run_request_untrusted_content_defaults_empty() -> None:
     assert RunRequest(input="hi").untrusted_content == []
+
+
+def test_run_request_input_accepts_up_to_max_chars() -> None:
+    # A long pasted email/spec (well past the old 8192 cap) must go through.
+    body = RunRequest(input="x" * MAX_RUN_INPUT_CHARS)
+    assert body.input is not None
+    assert len(body.input) == MAX_RUN_INPUT_CHARS
+
+
+def test_run_request_input_rejects_over_max_chars() -> None:
+    with pytest.raises(ValidationError):
+        RunRequest(input="x" * (MAX_RUN_INPUT_CHARS + 1))
 
 
 # ---------------------------------------------------------------------------
