@@ -164,9 +164,10 @@ async def _bulk_cancel_tenant_runs(
             capped = True
             break
     if capped:
+        # No request-derived value in the message (CodeQL py/log-injection); the
+        # tenant is already on the enclosing TENANT_DEACTIVATE audit row.
         logger.warning(
-            "tenant_suspend.bulk_cancel_capped tenant_id=%s cap=%d",
-            tenant_id,
+            "tenant_suspend.bulk_cancel_capped: hit the %d-run cap, overflow left running",
             _MAX_BULK_CANCEL_RUNS,
         )
     cancelled = 0
