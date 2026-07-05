@@ -2051,6 +2051,7 @@ export interface TranslationKeys {
     col_output_tokens: string;
     col_cache_creation_tokens: string;
     col_cache_read_tokens: string;
+    col_hit_rate: string;
     col_billed: string;
     unpriced: string;
     tokens_heading: string;
@@ -2078,6 +2079,9 @@ export interface TranslationKeys {
     col_agent: string;
     col_input_tokens: string;
     col_output_tokens: string;
+    col_cache_read_tokens: string;
+    col_cache_creation_tokens: string;
+    col_hit_rate: string;
     col_base: string;
     col_markup: string;
     col_billed: string;
@@ -4438,6 +4442,7 @@ const en: TranslationKeys = {
     col_output_tokens: "Output tokens",
     col_cache_creation_tokens: "Cache write tokens",
     col_cache_read_tokens: "Cache read tokens",
+    col_hit_rate: "Cache hit rate",
     col_billed: "Billed cost",
     unpriced: "Unpriced",
     tokens_heading: "Token usage",
@@ -4468,6 +4473,9 @@ const en: TranslationKeys = {
     col_agent: "Agent",
     col_input_tokens: "Input tokens",
     col_output_tokens: "Output tokens",
+    col_cache_read_tokens: "Cache read tokens",
+    col_cache_creation_tokens: "Cache write tokens",
+    col_hit_rate: "Cache hit rate",
     col_base: "Base cost",
     col_markup: "Markup",
     col_billed: "Billed",
