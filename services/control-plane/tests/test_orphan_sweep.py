@@ -17,8 +17,11 @@ from uuid import uuid4
 import pytest
 
 from control_plane import orphan_sweep as sweep_module
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import build_default_audit_logger
 from control_plane.orphan_sweep import OrphanSweep
+from control_plane.tenant_status import TenantStatusService
+from helix_agent.persistence import InMemoryAgentDisableStore, InMemoryTenantConfigStore
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.runtime.runs import InMemoryRunStore, RunInfo, RunManager, RunStatus
 from helix_agent.runtime.runs.schemas import DisconnectMode
@@ -177,6 +180,48 @@ async def test_conservative_mode_marks_errored(monkeypatch: pytest.MonkeyPatch) 
     assert row is not None
     assert row.status is RunStatus.ERROR
     assert spawns == []  # never respawned in conservative mode
+
+
+@pytest.mark.asyncio
+async def test_skips_respawn_for_disabled_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stream RT-4 — a reclaimed run whose agent was disabled is terminated,
+    not resumed."""
+    spawns: list[object] = []
+    monkeypatch.setattr(sweep_module, "run_agent", lambda **kw: spawns.append(kw))
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _seed_orphan(store, expired=True)
+    disable_store = InMemoryAgentDisableStore()
+    await disable_store.set_disabled(
+        tenant_id=tenant, agent_name="a", disabled=True, reason=None, disabled_by="admin"
+    )
+    sweep = _sweep(store, runtime, agent_disable_service=AgentDisableService(store=disable_store))
+    handled = await sweep.run_once()
+    assert handled == 1  # reclaimed + handled (terminated)
+    assert spawns == []  # NOT respawned
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_skips_respawn_for_suspended_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stream RT-4 — a reclaimed run in a suspended tenant is terminated."""
+    spawns: list[object] = []
+    monkeypatch.setattr(sweep_module, "run_agent", lambda **kw: spawns.append(kw))
+    store = InMemoryRunStore()
+    runtime = _FakeRuntime(store)
+    run_id, tenant = await _seed_orphan(store, expired=True)
+    tcs = InMemoryTenantConfigStore()
+    await tcs.create(tenant_id=tenant, display_name="t", actor_id="seed")
+    await tcs.set_status(tenant_id=tenant, status="suspended", actor_id="admin")
+    sweep = _sweep(store, runtime, tenant_status_service=TenantStatusService(store=tcs))
+    handled = await sweep.run_once()
+    assert handled == 1
+    assert spawns == []
+    row = await store.get(run_id=run_id, tenant_id=tenant)
+    assert row is not None
+    assert row.status is RunStatus.INTERRUPTED
 
 
 @pytest.mark.asyncio

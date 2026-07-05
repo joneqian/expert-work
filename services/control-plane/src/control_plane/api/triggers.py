@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.exc import IntegrityError
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api._user_scope import get_user_repo, resolve_caller_user_id
 from control_plane.audit import emit
 from control_plane.runtime import AgentRuntime
@@ -37,6 +38,7 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
+from control_plane.tenant_status import TenantStatusService
 from control_plane.trigger_firing import fire_trigger
 from control_plane.uplift.threat_metrics import (
     record_threat_pattern_hits,
@@ -239,6 +241,14 @@ def _get_settings(request: Request) -> Settings:
 
 def _get_tenant_config_store(request: Request) -> TenantConfigStore:
     return request.app.state.tenant_config_repo  # type: ignore[no-any-return]
+
+
+def _get_agent_disable_service(request: Request) -> AgentDisableService:
+    return request.app.state.agent_disable_service  # type: ignore[no-any-return]
+
+
+def _get_tenant_status_service(request: Request) -> TenantStatusService:
+    return request.app.state.tenant_status_service  # type: ignore[no-any-return]
 
 
 def build_triggers_router() -> APIRouter:
@@ -461,6 +471,8 @@ def build_webhooks_router() -> APIRouter:
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         approvals: Annotated[ApprovalStore, Depends(_get_approval_store)],
         tenant_configs: Annotated[TenantConfigStore, Depends(_get_tenant_config_store)],
+        disable_service: Annotated[AgentDisableService, Depends(_get_agent_disable_service)],
+        tenant_status: Annotated[TenantStatusService, Depends(_get_tenant_status_service)],
         secret: Annotated[str | None, Header(alias=_WEBHOOK_HEADER_NAME)] = None,
     ) -> JSONResponse:
         """Fire a webhook trigger. Auth = the per-trigger secret token."""
@@ -502,6 +514,8 @@ def build_webhooks_router() -> APIRouter:
                 approval_store=approvals,
                 trigger_store=triggers,
                 tenant_config_store=tenant_configs,
+                agent_disable_service=disable_service,
+                tenant_status_service=tenant_status,
             )
             if run_id is None:
                 raise HTTPException(status_code=503, detail="trigger agent unavailable")

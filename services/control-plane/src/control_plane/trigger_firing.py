@@ -27,8 +27,11 @@ from uuid import UUID, uuid4
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import emit
+from control_plane.kill_switch import run_block_reason
 from control_plane.runtime import AgentRuntime
+from control_plane.tenant_status import TenantStatusService
 from control_plane.uplift.threat_metrics import (
     record_threat_pattern_hits,
     record_threat_scan,
@@ -151,6 +154,8 @@ async def fire_trigger(
     approval_store: ApprovalStore,
     trigger_store: TriggerStore,
     tenant_config_store: TenantConfigStore | None = None,
+    agent_disable_service: AgentDisableService | None = None,
+    tenant_status_service: TenantStatusService | None = None,
     stamp_last_fired: bool = True,
 ) -> UUID | None:
     """Start a run for ``trigger``; return the new ``run_id``, or ``None``.
@@ -174,6 +179,26 @@ async def fire_trigger(
         logger.warning(
             "trigger_firing.agent_unavailable",
             extra={"trigger_id": str(trigger.id), "agent": trigger.agent_name},
+        )
+        return None
+    # Stream RT-4 (RT-ADR-16) — the kill switch also covers auto-firing triggers:
+    # an unattended cron / webhook agent must stop when its agent is disabled or
+    # its tenant suspended. Runs inside the trigger's tenant RLS scope (caller
+    # contract), so the FORCE-RLS ``tenant_config`` suspend read is scoped.
+    kill_reason = await run_block_reason(
+        tenant_status=tenant_status_service,
+        agent_disable=agent_disable_service,
+        tenant_id=trigger.tenant_id,
+        agent_name=trigger.agent_name,
+    )
+    if kill_reason is not None:
+        logger.warning(
+            "trigger_firing.kill_switch",
+            extra={
+                "trigger_id": str(trigger.id),
+                "agent": trigger.agent_name,
+                "reason": kill_reason,
+            },
         )
         return None
     try:

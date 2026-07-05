@@ -348,6 +348,11 @@ class AuditAction(StrEnum):
     AGENT_TEMPLATE_CREATE = "agent_template:create"
     AGENT_TEMPLATE_UPDATE = "agent_template:update"
     AGENT_TEMPLATE_DELETE = "agent_template:delete"
+    # agent kill switch — Stream RT-4 (RT-ADR-18). Tenant-admin engages/releases
+    # the per-agent emergency stop (reject new runs + bulk-cancel in-flight +
+    # queue refuses to claim). Reversible.
+    AGENT_DISABLED = "agent:disabled"
+    AGENT_ENABLED = "agent:enabled"
 
 
 ResourceType = Literal[
@@ -406,6 +411,11 @@ ResourceType = Literal[
     # services/control-plane/src/control_plane/audit.py per
     # [memory:audit-literal-drift] (both must stay in sync).
     "tool",
+    # Stream RT-4 — agent kill switch (AGENT_DISABLED / AGENT_ENABLED). Mirrors
+    # the control-plane ResourceType Literal in
+    # services/control-plane/src/control_plane/audit.py per
+    # [memory:audit-literal-drift] (both must stay in sync).
+    "agent",
 ]
 """Canonical resource type strings used in audit log entries.
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
@@ -22,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api._authz import ensure_resource_access, require
 from control_plane.api._quota_admission import check_admission
 from control_plane.api._user_scope import get_user_repo
@@ -48,6 +50,7 @@ from control_plane.tenant_scope import (
 from helix_agent.common.observability import current_trace_id_hex
 from helix_agent.common.uplift_metrics import record_manifest_provider_rejected
 from helix_agent.persistence import ApprovalStore
+from helix_agent.persistence.agent_disable import AgentDisableStore
 from helix_agent.persistence.agent_instance import AgentInstanceStore
 from helix_agent.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
 from helix_agent.persistence.tenant_user import TenantUserStore
@@ -66,6 +69,7 @@ from helix_agent.protocol import (
     tier_satisfies,
 )
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.runs import RunStore
 from orchestrator import AgentFactoryError
 
 logger = logging.getLogger("helix.control_plane.agents")
@@ -258,6 +262,18 @@ def _get_quota(request: Request) -> QuotaService:
     return request.app.state.quota_service  # type: ignore[no-any-return]
 
 
+def _get_agent_disable_repo(request: Request) -> AgentDisableStore:
+    return request.app.state.agent_disable_repo  # type: ignore[no-any-return]
+
+
+def _get_agent_disable_service(request: Request) -> AgentDisableService:
+    return request.app.state.agent_disable_service  # type: ignore[no-any-return]
+
+
+def _get_run_store(request: Request) -> RunStore:
+    return request.app.state.run_store  # type: ignore[no-any-return]
+
+
 class _SessionError(Exception):
     """Internal control-flow signal for the external session/run helpers; the
     endpoints convert it to an envelope error."""
@@ -280,12 +296,18 @@ async def _resolve_session(
     threads: ThreadMetaStore,
     users: TenantUserStore,
     instances: AgentInstanceStore,
+    disable_service: AgentDisableService,
 ) -> tuple[AgentSpecRecord, UUID, UUID]:
     """Resolve agent_code → active record, mint the end-user, create / continue
     the session thread, and touch the per-user instance binding. Returns
     ``(record, thread_id, end_user_id)``. Raises :class:`_SessionError`.
 
     Shared by the external session-bind and run endpoints (M1-5b)."""
+    # Stream RT-4 (RT-ADR-16) — kill switch gate: a disabled agent accepts no
+    # new sessions / runs. Checked before resolving the record so a disabled
+    # agent is opaque regardless of which version is active.
+    if await disable_service.is_disabled(tenant_id, agent_code):
+        raise _SessionError("AGENT_DISABLED", f"agent {agent_code!r} is disabled", 403)
     active = await repo.list_by_tenant(
         tenant_id=tenant_id, status=AgentSpecStatus.ACTIVE, name=agent_code, limit=1
     )
@@ -348,6 +370,18 @@ class ExternalRunRequest(BaseModel):
     mode: Literal["stream", "queue"] = "stream"
     image_refs: list[str] = Field(default_factory=list, max_length=64)
     untrusted_content: list[str] = Field(default_factory=list, max_length=16)
+
+
+class AgentDisableRequest(BaseModel):
+    """Body for ``POST /v1/agents/{name}/disable|enable`` — Stream RT-4 (RT-ADR-16).
+
+    ``reason`` is an optional free-text note captured on the audit row + the
+    ``agent_disable`` record (shown in the UI). Both endpoints accept it; enable
+    clears the stored reason regardless."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=500)
 
 
 async def _load_manifest(
@@ -704,6 +738,7 @@ def build_agents_router() -> APIRouter:
         users: Annotated[TenantUserStore, Depends(get_user_repo)],
         instances: Annotated[AgentInstanceStore, Depends(_get_instance_store)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
+        disable_service: Annotated[AgentDisableService, Depends(_get_agent_disable_service)],
     ) -> JSONResponse:
         """Bind / continue a per-user session for an external-app end-user (M1-5b).
 
@@ -728,6 +763,7 @@ def build_agents_router() -> APIRouter:
                 threads=threads,
                 users=users,
                 instances=instances,
+                disable_service=disable_service,
             )
         except _SessionError as exc:
             return _envelope_error(exc.code, exc.message, exc.status_code)
@@ -770,6 +806,7 @@ def build_agents_router() -> APIRouter:
         runtime: Annotated[AgentRuntime, Depends(_get_runtime)],
         approvals: Annotated[ApprovalStore, Depends(_get_approvals)],
         quota: Annotated[QuotaService, Depends(_get_quota)],
+        disable_service: Annotated[AgentDisableService, Depends(_get_agent_disable_service)],
     ) -> StreamingResponse | JSONResponse:
         """Run an agent on behalf of an external-app end-user (M1-5b-2).
 
@@ -794,6 +831,7 @@ def build_agents_router() -> APIRouter:
                 threads=threads,
                 users=users,
                 instances=instances,
+                disable_service=disable_service,
             )
         except _SessionError as exc:
             return _envelope_error(exc.code, exc.message, exc.status_code)
@@ -1152,5 +1190,142 @@ def build_agents_router() -> APIRouter:
             trace_id=current_trace_id_hex(),
         )
         return JSONResponse(status_code=204, content=None)
+
+    async def _agent_exists(repo: AgentSpecStore, tenant_id: UUID, name: str) -> bool:
+        """``True`` iff the tenant has any version of ``name`` (any lifecycle status)."""
+        rows = await repo.list_by_tenant(tenant_id=tenant_id, name=name, limit=1)
+        return bool(rows)
+
+    @router.post("/{name}/disable")
+    async def disable_agent(
+        name: str,
+        payload: AgentDisableRequest,
+        request: Request,
+        principal: Annotated[Principal, Depends(require("manifest", "write"))],
+        repo: Annotated[AgentSpecStore, Depends(_get_repo)],
+        disable_repo: Annotated[AgentDisableStore, Depends(_get_agent_disable_repo)],
+        disable_service: Annotated[AgentDisableService, Depends(_get_agent_disable_service)],
+        run_store: Annotated[RunStore, Depends(_get_run_store)],
+        runtime: Annotated[AgentRuntime, Depends(_get_runtime)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Stream RT-4 (RT-ADR-16) — engage the agent kill switch.
+
+        Sets the ``agent_disable`` flag (covers all versions of ``name``),
+        invalidates the TTL cache for immediate effect, then bulk-cancels the
+        agent's in-flight runs (RT-ADR-17: enumerate RUNNING runs → per-run
+        ``RunManager.cancel`` → the abort_event chain terminates them in
+        seconds). New runs / sessions are rejected by the ``_resolve_session``
+        and admission gates; queued runs are refused by the run-queue worker.
+        Reversible via :func:`enable_agent`.
+        """
+        tenant_id = request.state.tenant_id
+        actor_id = request.state.actor_id
+        trace_id = current_trace_id_hex()
+        if not await _agent_exists(repo, tenant_id, name):
+            raise HTTPException(status_code=404, detail="agent not found")
+
+        await disable_repo.set_disabled(
+            tenant_id=tenant_id,
+            agent_name=name,
+            disabled=True,
+            reason=payload.reason,
+            disabled_by=actor_id,
+        )
+        # Immediate effect on this instance; peers pick it up within the TTL.
+        disable_service.invalidate(tenant_id, name)
+
+        # RT-ADR-17 — bulk-cancel the agent's in-flight runs. A run THIS instance
+        # owns aborts immediately (abort_event); a run held by another instance is
+        # guarded-cancelled in the store (running/pending → interrupted), so that
+        # worker's next lease heartbeat CAS fails and it stops within one heartbeat
+        # interval. ``request_cancel`` never clobbers a run that just finished.
+        running = await run_store.list_running_for_agent(tenant_id=tenant_id, agent_name=name)
+        cancelled = 0
+        now = datetime.now(UTC)
+        for run in running:
+            stopped = await runtime.run_manager.cancel(
+                run.run_id
+            ) or await run_store.request_cancel(
+                run_id=run.run_id, tenant_id=tenant_id, updated_at=now
+            )
+            if stopped:
+                cancelled += 1
+                await emit(
+                    audit,
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    action=AuditAction.SESSION_CANCEL,
+                    resource_type="run",
+                    resource_id=str(run.run_id),
+                    trace_id=trace_id,
+                    reason="agent_disabled",
+                )
+
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.AGENT_DISABLED,
+            resource_type="agent",
+            resource_id=name,
+            trace_id=trace_id,
+            details={"reason": payload.reason, "cancelled_runs": cancelled},
+        )
+        return JSONResponse(
+            {
+                "success": True,
+                "data": {"name": name, "disabled": True, "cancelled_runs": cancelled},
+                "error": None,
+            }
+        )
+
+    @router.post("/{name}/enable")
+    async def enable_agent(
+        name: str,
+        payload: AgentDisableRequest,
+        request: Request,
+        principal: Annotated[Principal, Depends(require("manifest", "write"))],
+        repo: Annotated[AgentSpecStore, Depends(_get_repo)],
+        disable_repo: Annotated[AgentDisableStore, Depends(_get_agent_disable_repo)],
+        disable_service: Annotated[AgentDisableService, Depends(_get_agent_disable_service)],
+        audit: Annotated[AuditLogger, Depends(_get_audit)],
+    ) -> JSONResponse:
+        """Stream RT-4 (RT-ADR-16) — release the agent kill switch.
+
+        Clears the ``agent_disable`` flag (and its stored reason) and
+        invalidates the cache. New runs / sessions resume immediately; nothing
+        auto-restarts the runs the disable cancelled."""
+        tenant_id = request.state.tenant_id
+        actor_id = request.state.actor_id
+        trace_id = current_trace_id_hex()
+        if not await _agent_exists(repo, tenant_id, name):
+            raise HTTPException(status_code=404, detail="agent not found")
+
+        await disable_repo.set_disabled(
+            tenant_id=tenant_id,
+            agent_name=name,
+            disabled=False,
+            reason=payload.reason,
+            disabled_by=actor_id,
+        )
+        disable_service.invalidate(tenant_id, name)
+        await emit(
+            audit,
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            action=AuditAction.AGENT_ENABLED,
+            resource_type="agent",
+            resource_id=name,
+            trace_id=trace_id,
+            details={"reason": payload.reason},
+        )
+        return JSONResponse(
+            {
+                "success": True,
+                "data": {"name": name, "disabled": False},
+                "error": None,
+            }
+        )
 
     return router

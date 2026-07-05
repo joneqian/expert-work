@@ -21,9 +21,12 @@ from uuid import uuid4
 
 import pytest
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import build_default_audit_logger
+from control_plane.tenant_status import TenantStatusService
 from control_plane.trigger_firing import fire_trigger
 from helix_agent.persistence import (
+    InMemoryAgentDisableStore,
     InMemoryApprovalStore,
     InMemoryTenantConfigStore,
     InMemoryThreadMetaStore,
@@ -194,6 +197,68 @@ async def test_fire_drift_with_block_returns_none_and_emits_audit() -> None:
     actions = await _audit_actions(ctx)
     assert "trigger:prompt_injection_blocked" in actions
     assert "trigger:fire" not in actions, "fire audit must not appear when blocked"
+
+
+# ---------------------------------------------------------------------------
+# Stream RT-4 — kill switch gates the auto-firing trigger path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fire_disabled_agent_returns_none() -> None:
+    """A disabled agent must not auto-fire — no run, no ``trigger:fire`` audit."""
+    ctx = await _build_ctx()
+    disable_store = InMemoryAgentDisableStore()
+    await disable_store.set_disabled(
+        tenant_id=_TENANT,
+        agent_name="reporter",
+        disabled=True,
+        reason="incident",
+        disabled_by="admin",
+    )
+    run_id = await fire_trigger(
+        _trigger(),
+        now=_NOW,
+        **{k: v for k, v in ctx.items() if k != "audit_store"},
+        agent_disable_service=AgentDisableService(store=disable_store),
+    )
+    assert run_id is None
+    actions = await _audit_actions(ctx)
+    assert "trigger:fire" not in actions
+
+
+@pytest.mark.asyncio
+async def test_fire_suspended_tenant_returns_none() -> None:
+    """A suspended tenant must not auto-fire any of its triggers."""
+    ctx = await _build_ctx()
+    tcs = ctx["tenant_config_store"]
+    await tcs.upsert(tenant_id=_TENANT, patch=TenantConfigPatch(display_name="t"), actor_id="seed")
+    await tcs.set_status(tenant_id=_TENANT, status="suspended", actor_id="admin")
+    run_id = await fire_trigger(
+        _trigger(),
+        now=_NOW,
+        **{k: v for k, v in ctx.items() if k != "audit_store"},
+        tenant_status_service=TenantStatusService(store=tcs),
+    )
+    assert run_id is None
+    actions = await _audit_actions(ctx)
+    assert "trigger:fire" not in actions
+
+
+@pytest.mark.asyncio
+async def test_fire_enabled_agent_still_fires_with_services_wired() -> None:
+    """Services wired but agent enabled / tenant active → still fires (no false block)."""
+    ctx = await _build_ctx()
+    run_id = await fire_trigger(
+        _trigger(seed_input="Summarise last week's open PRs."),
+        now=_NOW,
+        **{k: v for k, v in ctx.items() if k != "audit_store"},
+        agent_disable_service=AgentDisableService(store=InMemoryAgentDisableStore()),
+        tenant_status_service=TenantStatusService(store=ctx["tenant_config_store"]),
+    )
+    assert run_id is not None
+    await _drain(ctx, run_id)
+    assert "trigger:fire" in await _audit_actions(ctx)
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,15 @@
 
 # Explicit `as` re-exports signal intentional public API to static analyzers
 # (mypy --strict, CodeQL py/unused-import).
+from helix_agent.persistence.agent_disable import (
+    AgentDisableStore as AgentDisableStore,
+)
+from helix_agent.persistence.agent_disable import (
+    InMemoryAgentDisableStore as InMemoryAgentDisableStore,
+)
+from helix_agent.persistence.agent_disable import (
+    SqlAgentDisableStore as SqlAgentDisableStore,
+)
 from helix_agent.persistence.approval import ApprovalStore as ApprovalStore
 from helix_agent.persistence.approval import (
     InMemoryApprovalStore as InMemoryApprovalStore,
@@ -345,6 +354,7 @@ __all__ = [
     "WORKSPACE_RESERVED_PREFIXES",
     "WORKSPACE_SKILLS_DIR",
     "WORKSPACE_UPLOADS_DIR",
+    "AgentDisableStore",
     "ApprovalStore",
     "ArtifactRow",
     "ArtifactStore",
@@ -364,6 +374,7 @@ __all__ = [
     "EvalDatasetStore",
     "EvalRunStore",
     "EventLogRow",
+    "InMemoryAgentDisableStore",
     "InMemoryApprovalStore",
     "InMemoryArtifactStore",
     "InMemoryAuditLogStore",
@@ -417,6 +428,7 @@ __all__ = [
     "PlatformAgentTemplateNotFoundError",
     "PlatformAgentTemplateStore",
     "PlatformSecretStore",
+    "SqlAgentDisableStore",
     "SqlApprovalStore",
     "SqlArtifactStore",
     "SqlAuditLogStore",

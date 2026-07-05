@@ -42,7 +42,9 @@ from uuid import UUID, uuid4
 
 from croniter import croniter
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.runtime import AgentRuntime
+from control_plane.tenant_status import TenantStatusService
 from control_plane.trigger_firing import fire_trigger
 from helix_agent.common.observability import helix_counter
 from helix_agent.persistence import (
@@ -155,6 +157,9 @@ class TriggerScheduler:
         batch_size: int = 100,
         # Capability Uplift Sprint #1 — Mini-ADR U-2 Layer B.
         tenant_config_store: TenantConfigStore | None = None,
+        # Stream RT-4 (RT-ADR-16) — kill-switch gate for scheduled fires.
+        agent_disable_service: AgentDisableService | None = None,
+        tenant_status_service: TenantStatusService | None = None,
     ) -> None:
         if interval_s <= 0:
             msg = "interval_s must be positive"
@@ -170,6 +175,8 @@ class TriggerScheduler:
         self._interval_s = interval_s
         self._batch_size = batch_size
         self._tenant_config_store = tenant_config_store
+        self._agent_disable_service = agent_disable_service
+        self._tenant_status_service = tenant_status_service
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -265,6 +272,8 @@ class TriggerScheduler:
             approval_store=self._approvals,
             trigger_store=self._triggers,
             tenant_config_store=self._tenant_config_store,
+            agent_disable_service=self._agent_disable_service,
+            tenant_status_service=self._tenant_status_service,
             stamp_last_fired=stamp_last_fired,
         )
 

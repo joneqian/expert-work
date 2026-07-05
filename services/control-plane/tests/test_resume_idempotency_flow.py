@@ -17,23 +17,39 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api import runs as runs_module
 from control_plane.api.runs import apply_approval_decision
 from control_plane.audit import build_default_audit_logger
-from helix_agent.persistence import InMemoryApprovalStore
+from control_plane.tenant_status import TenantStatusService
+from helix_agent.persistence import InMemoryAgentDisableStore, InMemoryApprovalStore
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
 from helix_agent.protocol import ApprovalRecord, ApprovalStatus, Principal
 
 _TENANT = uuid4()
 
 
-def _request() -> SimpleNamespace:
+def _request(
+    *,
+    tenant_status: TenantStatusService | None = None,
+    agent_disable: AgentDisableService | None = None,
+) -> SimpleNamespace:
     # A service principal owns no per-user instance (resolve_caller_user_id →
     # None) and an unowned thread (meta.user_id=None) passes caller_owns_thread.
+    # ``app.state`` carries the RT-4 kill-switch services the resume gate reads
+    # (both ``None`` here = fail-open, as in an unwired deployment).
     principal = Principal(subject_id=str(uuid4()), subject_type="service", tenant_id=_TENANT)
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            tenant_status_service=tenant_status,
+            agent_disable_service=agent_disable,
+        )
+    )
     return SimpleNamespace(
-        state=SimpleNamespace(tenant_id=_TENANT, actor_id="svc", principal=principal)
+        app=app,
+        state=SimpleNamespace(tenant_id=_TENANT, actor_id="svc", principal=principal),
     )
 
 
@@ -150,3 +166,45 @@ async def test_winner_stores_continuation_then_retry_replays_without_respawn(
     assert record2 is None
     assert continuation2 == continuation
     assert len(spawns) == 1  # still exactly one — replay never re-spawns
+
+
+@pytest.mark.asyncio
+async def test_disabled_agent_resume_is_blocked_and_spawns_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stream RT-4 — resume mints a fresh run id no front-door gate sees; a
+    disabled agent must not resume an approved (possibly dangerous) tool call."""
+    spawns: list[dict[str, object]] = []
+    monkeypatch.setattr(runs_module, "run_agent", lambda **kw: spawns.append(kw))
+
+    approvals = InMemoryApprovalStore()
+    run_id, thread_id = uuid4(), uuid4()
+    await approvals.create(_pending(run_id, thread_id))
+
+    disable_store = InMemoryAgentDisableStore()
+    await disable_store.set_disabled(
+        tenant_id=_TENANT, agent_name="agent", disabled=True, reason=None, disabled_by="admin"
+    )
+
+    common = {
+        "thread_id": thread_id,
+        "run_id": run_id,
+        "decision": "approve",
+        "modified_args": None,
+        "reason": None,
+        "threads": _FakeThreads(),
+        "users": object(),
+        "agent_repo": _FakeAgentRepo(),
+        "runtime": _FakeRuntime(),
+        "approvals": approvals,
+        "audit": build_default_audit_logger(InMemoryAuditLogStore()),
+        "idempotency_key": "flow-key",
+    }
+    with pytest.raises(HTTPException) as exc:
+        await apply_approval_decision(
+            request=_request(agent_disable=AgentDisableService(store=disable_store)),
+            **common,
+        )
+    assert exc.value.status_code == 403
+    await asyncio.sleep(0)
+    assert spawns == []  # no continuation worker spawned

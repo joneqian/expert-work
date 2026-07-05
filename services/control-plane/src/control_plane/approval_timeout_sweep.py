@@ -33,8 +33,10 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
+from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api.runs import resolve_approval_decision
 from control_plane.runtime import AgentRuntime
+from control_plane.tenant_status import TenantStatusService
 from helix_agent.common.observability import helix_counter
 from helix_agent.persistence import ApprovalStore, ThreadMetaStore
 from helix_agent.persistence.agent_spec import AgentSpecStore
@@ -101,6 +103,8 @@ class ApprovalTimeoutSweep:
         audit_logger: AuditLogger,
         interval_s: float = _DEFAULT_INTERVAL_S,
         batch_size: int = 100,
+        agent_disable_service: AgentDisableService | None = None,
+        tenant_status_service: TenantStatusService | None = None,
     ) -> None:
         if interval_s <= 0:
             msg = "interval_s must be positive"
@@ -112,6 +116,10 @@ class ApprovalTimeoutSweep:
         self._audit = audit_logger
         self._interval_s = interval_s
         self._batch_size = batch_size
+        # Stream RT-4 (RT-ADR-16) — an auto-timeout still spawns a continuation;
+        # a disabled agent / suspended tenant must not resume via the sweep either.
+        self._agent_disable_service = agent_disable_service
+        self._tenant_status_service = tenant_status_service
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -192,6 +200,8 @@ class ApprovalTimeoutSweep:
                 agent_repo=self._agents,
                 runtime=self._runtime,
                 approvals=self._approvals,
+                agent_disable_service=self._agent_disable_service,
+                tenant_status_service=self._tenant_status_service,
             )
         except HTTPException as exc:
             # 409 — a peer sweep / a human verdict won the CAS first (the normal

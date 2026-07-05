@@ -1,6 +1,7 @@
 """ORM models for Helix-Agent state layer."""
 
 from helix_agent.persistence.models.agent_approval import AgentApprovalRow
+from helix_agent.persistence.models.agent_disable import AgentDisableRow
 from helix_agent.persistence.models.agent_instance import AgentInstanceRow
 from helix_agent.persistence.models.agent_run import AgentRunRow
 from helix_agent.persistence.models.agent_spec import AgentSpecRevisionRow, AgentSpecRow
@@ -87,6 +88,7 @@ from helix_agent.persistence.models.webhook import WebhookDeliveryRow, WebhookEn
 
 __all__ = [
     "AgentApprovalRow",
+    "AgentDisableRow",
     "AgentInstanceRow",
     "AgentRunRow",
     "AgentSpecRevisionRow",

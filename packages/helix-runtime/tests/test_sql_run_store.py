@@ -480,3 +480,37 @@ async def test_list_queued_round_trips_enqueued_input(run_store: SqlRunStore) ->
     assert any(q.run_id == run_id for q in queued)
     match = next(q for q in queued if q.run_id == run_id)
     assert match.enqueued_input == {"input": "hi", "untrusted_content": ["x"]}
+
+
+@pytest.mark.asyncio
+async def test_list_running_for_agent_joins_thread_meta(run_store: SqlRunStore) -> None:
+    """Stream RT-4 (RT-ADR-17) — the agent bulk-cancel enumeration join."""
+    from helix_agent.persistence.thread_meta import SqlThreadMetaStore
+
+    threads = SqlThreadMetaStore(run_store._sf)  # same engine as the run store
+    tenant = uuid4()
+    t_a1, t_a2, t_b = uuid4(), uuid4(), uuid4()
+    for tid, agent in ((t_a1, "a"), (t_a2, "a"), (t_b, "b")):
+        await threads.create(
+            thread_id=tid,
+            tenant_id=tenant,
+            created_by="seed",
+            agent_name=agent,
+            agent_version="1.0.0",
+        )
+    run_a_running = uuid4()
+    run_a_done = uuid4()
+    run_b_running = uuid4()
+    await run_store.create(
+        _info(run_id=run_a_running, tenant_id=tenant, thread_id=t_a1, status=RunStatus.RUNNING)
+    )
+    await run_store.create(
+        _info(run_id=run_a_done, tenant_id=tenant, thread_id=t_a2, status=RunStatus.SUCCESS)
+    )
+    await run_store.create(
+        _info(run_id=run_b_running, tenant_id=tenant, thread_id=t_b, status=RunStatus.RUNNING)
+    )
+
+    running = await run_store.list_running_for_agent(tenant_id=tenant, agent_name="a")
+    # Only agent a's RUNNING run — not its SUCCESS run, not agent b's run.
+    assert {r.run_id for r in running} == {run_a_running}

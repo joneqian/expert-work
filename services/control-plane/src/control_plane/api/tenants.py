@@ -16,6 +16,7 @@ Listing/reading/configuring an existing tenant lives in ``tenant_config`` /
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, Self
 from uuid import UUID, uuid4
 
@@ -30,6 +31,7 @@ from control_plane.api.first_admin import (
 )
 from control_plane.audit import emit
 from control_plane.keycloak import KeycloakAdminClient
+from control_plane.runtime import AgentRuntime
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
 from control_plane.tenant_status import TenantStatusService
@@ -43,6 +45,7 @@ from helix_agent.persistence.tenant_config.base import (
 from helix_agent.persistence.tenant_member import TenantMemberStore
 from helix_agent.protocol import AuditAction, Principal, TenantPlan
 from helix_agent.runtime.audit.logger import AuditLogger
+from helix_agent.runtime.runs import RunStatus, RunStore
 
 logger = logging.getLogger("helix.control_plane.api.tenants")
 
@@ -98,6 +101,96 @@ def _get_settings(request: Request) -> Settings:
 
 def _get_tenant_status_service(request: Request) -> TenantStatusService:
     return request.app.state.tenant_status_service  # type: ignore[no-any-return]
+
+
+def _get_run_store(request: Request) -> RunStore:
+    return request.app.state.run_store  # type: ignore[no-any-return]
+
+
+def _get_runtime(request: Request) -> AgentRuntime:
+    return request.app.state.agent_runtime  # type: ignore[no-any-return]
+
+
+#: Stream RT-4 — page size + hard cap for the tenant-suspend bulk-cancel scan.
+#: ``list_for_tenant`` clamps ``limit`` to 500 (MAX_LIST_LIMIT), so pages are
+#: 500 rows; the cap bounds a pathological tenant with a huge in-flight set.
+_BULK_CANCEL_PAGE = 500
+_MAX_BULK_CANCEL_RUNS = 5000
+
+
+async def _bulk_cancel_tenant_runs(
+    *,
+    tenant_id: UUID,
+    run_store: RunStore,
+    runtime: AgentRuntime,
+    audit: AuditLogger,
+    actor_id: str,
+    trace_id: str | None,
+) -> int:
+    """Stream RT-4 (RT-ADR-17) — terminate a suspended tenant's in-flight runs.
+
+    Enumerate the tenant's RUNNING *and* PENDING runs (both are in-flight;
+    ``RunManager.cancel`` / ``request_cancel`` guard to those two statuses)
+    across paginated reads, and stop each. A run THIS instance owns aborts
+    immediately (abort_event + status CAS); a run held by another instance is
+    guarded-cancelled in the store (running/pending → interrupted), so that
+    worker's next lease heartbeat CAS fails and it stops within one heartbeat
+    interval — ``request_cancel`` never clobbers a run that just finished. Each
+    cancel emits a ``SESSION_CANCEL`` audit row under the enclosing
+    ``TENANT_DEACTIVATE``. The listing runs inside the caller's
+    ``bypass_rls_session`` (the target tenant is not the system-admin caller's
+    home tenant).
+    """
+    # Gather RUNNING + PENDING ids first (paginated), THEN cancel — cancelling
+    # flips status out of running/pending, which would shift a live offset scan
+    # and skip rows. Bounded by ``_MAX_BULK_CANCEL_RUNS``; hitting the cap is
+    # logged (no silent truncation) so an operator can re-run suspend.
+    run_ids: list[UUID] = []
+    capped = False
+    for status in (RunStatus.RUNNING, RunStatus.PENDING):
+        offset = 0
+        while len(run_ids) < _MAX_BULK_CANCEL_RUNS:
+            page = await run_store.list_for_tenant(
+                tenant_id=tenant_id,
+                status=status,
+                limit=_BULK_CANCEL_PAGE,
+                offset=offset,
+            )
+            run_ids.extend(r.run_id for r in page)
+            if len(page) < _BULK_CANCEL_PAGE:
+                break
+            offset += _BULK_CANCEL_PAGE
+        if len(run_ids) >= _MAX_BULK_CANCEL_RUNS:
+            capped = True
+            break
+    if capped:
+        # No request-derived value in the message (CodeQL py/log-injection); the
+        # tenant is already on the enclosing TENANT_DEACTIVATE audit row.
+        logger.warning(
+            "tenant_suspend.bulk_cancel_capped: hit the %d-run cap, overflow left running",
+            _MAX_BULK_CANCEL_RUNS,
+        )
+    cancelled = 0
+    now = datetime.now(UTC)
+    for run_id in run_ids:
+        # Local run: aborts immediately. Peer-owned run: guarded store CAS
+        # (running/pending → interrupted) so its next heartbeat fails and it stops.
+        stopped = await runtime.run_manager.cancel(run_id) or await run_store.request_cancel(
+            run_id=run_id, tenant_id=tenant_id, updated_at=now
+        )
+        if stopped:
+            cancelled += 1
+            await emit(
+                audit,
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                action=AuditAction.SESSION_CANCEL,
+                resource_type="run",
+                resource_id=str(run_id),
+                trace_id=trace_id,
+                reason="tenant_suspended",
+            )
+    return cancelled
 
 
 def build_tenants_router() -> APIRouter:
@@ -306,9 +399,12 @@ def build_tenants_router() -> APIRouter:
         repo: Annotated[TenantConfigStore, Depends(_get_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
         status_svc: Annotated[TenantStatusService, Depends(_get_tenant_status_service)],
+        run_store: Annotated[RunStore, Depends(_get_run_store)],
+        runtime: Annotated[AgentRuntime, Depends(_get_runtime)],
     ) -> dict[str, object]:
-        """Suspend a tenant — its members are 403'd until reactivated."""
-        return await _set_tenant_status(
+        """Suspend a tenant — its members are 403'd until reactivated, and its
+        in-flight runs are bulk-cancelled (Stream RT-4, RT-ADR-17)."""
+        result = await _set_tenant_status(
             tenant_id,
             "suspended",
             AuditAction.TENANT_DEACTIVATE,
@@ -317,6 +413,20 @@ def build_tenants_router() -> APIRouter:
             audit=audit,
             status_svc=status_svc,
         )
+        # RT-4 backfill — suspend previously only rejected NEW runs; now also
+        # terminate in-flight ones. Same bypass-RLS scope as the status write
+        # (target tenant ≠ the system-admin caller's home tenant). The response
+        # contract is unchanged ({tenant_id, status}); each cancel is audited.
+        async with bypass_rls_session():
+            await _bulk_cancel_tenant_runs(
+                tenant_id=tenant_id,
+                run_store=run_store,
+                runtime=runtime,
+                audit=audit,
+                actor_id=principal.subject_id,
+                trace_id=current_trace_id_hex(),
+            )
+        return result
 
     @router.post("/{tenant_id}/activate")
     async def activate_tenant(

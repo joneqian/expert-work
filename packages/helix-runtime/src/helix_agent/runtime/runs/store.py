@@ -28,7 +28,8 @@ from uuid import UUID
 from sqlalchemy import String, cast, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.persistence.models import AgentRunRow
+from helix_agent.persistence.models import AgentRunRow, ThreadMetaRow
+from helix_agent.persistence.thread_meta.base import ThreadMetaStore
 from helix_agent.runtime.runs.schemas import (
     DisconnectMode,
     RunInfo,
@@ -91,6 +92,23 @@ class RunStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def request_cancel(self, *, run_id: UUID, tenant_id: UUID, updated_at: datetime) -> bool:
+        """Stream RT-4 (RT-ADR-17) — cross-replica cancel: guarded transition of a
+        still-executing run to INTERRUPTED.
+
+        Updates ``status → interrupted`` ONLY when the row is currently
+        ``running`` / ``pending`` (so a run that just finished ``SUCCESS`` is
+        never clobbered). Returns ``True`` iff a row was interrupted.
+
+        This is how a kill-switch stops a run owned by *another* instance: the
+        owning worker's next lease heartbeat CAS (``status='running' AND
+        claimed_by=<owner>``) then fails, which makes ``_renew_lease`` set that
+        worker's ``abort_event`` — the run stops within one heartbeat interval.
+        A local run is stopped immediately via :meth:`RunManager.cancel`; this
+        is the fallback for the runs that manager does not own.
+        """
+
+    @abc.abstractmethod
     async def get(self, *, run_id: UUID, tenant_id: UUID) -> RunInfo | None:
         """Return the run row, or ``None`` when unknown / cross-tenant.
 
@@ -131,6 +149,18 @@ class RunStore(abc.ABC):
         Mini-ADR H-10 — the API layer resolves an agent to its thread
         window via ``ThreadMetaStore`` and passes the ids here; an empty
         collection returns no rows).
+        """
+
+    @abc.abstractmethod
+    async def list_running_for_agent(self, *, tenant_id: UUID, agent_name: str) -> list[RunInfo]:
+        """Return the ``RUNNING`` runs bound to ``agent_name`` under ``tenant_id``.
+
+        Stream RT-4 (RT-ADR-17) — the agent-level kill switch bulk-cancels
+        these. Runs carry no ``agent_name``; the binding lives on
+        ``thread_meta`` (set when the session was created). The SQL backend
+        joins ``agent_run`` ↔ ``thread_meta`` on ``thread_id`` where
+        ``thread_meta.agent_name = agent_name`` and ``agent_run.status =
+        'running'``. Tenant-scoped — never returns another tenant's runs.
         """
 
     @abc.abstractmethod
@@ -321,9 +351,15 @@ def _clamp_limit(limit: int) -> int:
 class InMemoryRunStore(RunStore):
     """In-memory ``RunStore`` for unit tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, thread_meta_store: ThreadMetaStore | None = None) -> None:
         # Keyed by run_id — the primary key.
         self._rows: dict[UUID, RunInfo] = {}
+        # Stream RT-4 — runs carry no agent_name; the binding is on thread_meta.
+        # The SQL backend does a real join; the in-memory double emulates it by
+        # holding the thread store so ``list_running_for_agent`` can resolve a
+        # run's thread → agent. ``None`` when the caller does not wire it —
+        # ``list_running_for_agent`` then returns [] (no join source).
+        self._thread_meta_store = thread_meta_store
 
     async def create(self, info: RunInfo) -> None:
         if info.run_id in self._rows:
@@ -350,6 +386,22 @@ class InMemoryRunStore(RunStore):
             updated_at=updated_at,
             error=error if error is not None else row.error,
             finished_at=finished_at if finished_at is not None else row.finished_at,
+        )
+        return True
+
+    async def request_cancel(self, *, run_id: UUID, tenant_id: UUID, updated_at: datetime) -> bool:
+        row = self._rows.get(run_id)
+        if (
+            row is None
+            or row.tenant_id != tenant_id
+            or row.status not in (RunStatus.RUNNING, RunStatus.PENDING)
+        ):
+            return False
+        self._rows[run_id] = replace(
+            row,
+            status=RunStatus.INTERRUPTED,
+            updated_at=updated_at,
+            finished_at=updated_at,
         )
         return True
 
@@ -403,6 +455,22 @@ class InMemoryRunStore(RunStore):
         rows.sort(key=lambda r: r.created_at, reverse=True)
         clamped = _clamp_limit(limit)
         return rows[offset : offset + clamped]
+
+    async def list_running_for_agent(self, *, tenant_id: UUID, agent_name: str) -> list[RunInfo]:
+        if self._thread_meta_store is None:
+            return []
+        running = [
+            r
+            for r in self._rows.values()
+            if r.tenant_id == tenant_id and r.status is RunStatus.RUNNING
+        ]
+        out: list[RunInfo] = []
+        for r in running:
+            meta = await self._thread_meta_store.get(r.thread_id, tenant_id=tenant_id)
+            if meta is not None and meta.agent_name == agent_name:
+                out.append(r)
+        out.sort(key=lambda r: r.created_at, reverse=True)
+        return out
 
     async def list_all_tenants(
         self,
@@ -690,6 +758,24 @@ class SqlRunStore(RunStore):
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0
 
+    async def request_cancel(self, *, run_id: UUID, tenant_id: UUID, updated_at: datetime) -> bool:
+        async with self._sf() as session:
+            result = await session.execute(
+                update(AgentRunRow)
+                .where(
+                    AgentRunRow.id == run_id,
+                    AgentRunRow.tenant_id == tenant_id,
+                    AgentRunRow.status.in_((RunStatus.RUNNING.value, RunStatus.PENDING.value)),
+                )
+                .values(
+                    status=RunStatus.INTERRUPTED.value,
+                    updated_at=updated_at,
+                    finished_at=updated_at,
+                )
+            )
+            await session.commit()
+        return int(getattr(result, "rowcount", 0) or 0) > 0
+
     async def get(self, *, run_id: UUID, tenant_id: UUID) -> RunInfo | None:
         async with self._sf() as session:
             row = (
@@ -766,6 +852,25 @@ class SqlRunStore(RunStore):
                     cast(AgentRunRow.thread_id, String).ilike(pat, escape="\\"),
                 )
             )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return [_row_to_dto(r) for r in rows]
+
+    async def list_running_for_agent(self, *, tenant_id: UUID, agent_name: str) -> list[RunInfo]:
+        # Stream RT-4 (RT-ADR-17) — join agent_run ↔ thread_meta on thread_id;
+        # the agent binding lives on thread_meta. RLS scopes agent_run to the
+        # tenant; the explicit tenant_id predicate keeps the in-memory double's
+        # semantics aligned.
+        stmt = (
+            select(AgentRunRow)
+            .join(ThreadMetaRow, ThreadMetaRow.thread_id == AgentRunRow.thread_id)
+            .where(
+                AgentRunRow.tenant_id == tenant_id,
+                AgentRunRow.status == RunStatus.RUNNING.value,
+                ThreadMetaRow.agent_name == agent_name,
+            )
+            .order_by(AgentRunRow.created_at.desc())
+        )
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_dto(r) for r in rows]
