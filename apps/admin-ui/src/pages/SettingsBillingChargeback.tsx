@@ -34,10 +34,47 @@ import {
   type ChargebackTenantRow,
 } from "../api/billing-admin";
 import { formatMicros } from "../utils/money";
+import { cacheHitRate, formatHitRate, type CacheTokenCounts } from "../utils/cache";
 
 const { Text } = Typography;
 
 const MONTH_FMT = "YYYY-MM";
+
+/** Stream RT-3 (RT-ADR-14) — cache read/write token columns + client-derived
+ *  hit rate, shared by the tenant table and the per-agent drill-down (both
+ *  rows extend ``TokenCounts``). System_admin already sees the full cost split
+ *  here, so surfacing cache tokens carries no monetization-leak concern. */
+function cacheColumns<T extends CacheTokenCounts>(
+  t: (key: string) => string,
+): TableColumnsType<T> {
+  return [
+    {
+      title: t("chargeback.col_cache_read_tokens"),
+      dataIndex: "cache_read_tokens",
+      key: "cache_read_tokens",
+      width: 140,
+      align: "right",
+      // ``?? 0`` — cache columns (migration 0036) may be absent on older
+      // pre-metering rollup rows; never blank the row on a missing count.
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t("chargeback.col_cache_creation_tokens"),
+      dataIndex: "cache_creation_tokens",
+      key: "cache_creation_tokens",
+      width: 150,
+      align: "right",
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t("chargeback.col_hit_rate"),
+      key: "hit_rate",
+      width: 110,
+      align: "right",
+      render: (_: unknown, row: T) => formatHitRate(cacheHitRate(row)),
+    },
+  ];
+}
 
 function errText(err: unknown): string {
   return err instanceof ApiError
@@ -161,6 +198,7 @@ export function SettingsBillingChargeback() {
         align: "right",
         render: (v: number) => v.toLocaleString(),
       },
+      ...cacheColumns<ChargebackTenantRow>(t),
       {
         title: t("chargeback.col_base"),
         dataIndex: "base_cost_micros",
@@ -230,6 +268,7 @@ export function SettingsBillingChargeback() {
         align: "right",
         render: (v: number) => v.toLocaleString(),
       },
+      ...cacheColumns<ChargebackAgentRow>(t),
       {
         title: t("chargeback.col_base"),
         dataIndex: "base_cost_micros",

@@ -114,6 +114,10 @@ describe("SettingsBillingChargeback page", () => {
     expect(headers).toContain("Markup");
     expect(headers).toContain("Billed");
     expect(headers).toContain("Margin");
+    // RT-3 — cache columns + client-derived hit rate alongside the cost split.
+    expect(headers).toContain("Cache read tokens");
+    expect(headers).toContain("Cache write tokens");
+    expect(headers).toContain("Cache hit rate");
 
     expect(screen.getByText("tenant-acme")).toBeInTheDocument();
     // Summary totals (base $1.0000 / billed $1.5000 / margin $0.5000).

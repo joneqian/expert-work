@@ -167,6 +167,22 @@ describe("SettingsUsage page", () => {
     expect(headers.some((h) => /base|markup|margin/i.test(h ?? ""))).toBe(false);
   });
 
+  it("surfaces cache columns and a client-derived hit rate (RT-3)", async () => {
+    installAdapter({});
+    renderUsage();
+    await waitFor(() => expect(screen.getByTestId("usage-cost-table")).toBeInTheDocument());
+    const table = screen.getByTestId("usage-cost-table");
+    const headers = within(table)
+      .getAllByRole("columnheader")
+      .map((h) => h.textContent);
+    expect(headers).toContain("Cache read tokens");
+    expect(headers).toContain("Cache write tokens");
+    expect(headers).toContain("Cache hit rate");
+    // Token totals: cache_read 20 / (input 1200 + read 20 + write 10) = 1.6%.
+    const totals = screen.getByTestId("usage-token-totals");
+    expect(within(totals).getByText("1.6%")).toBeInTheDocument();
+  });
+
   it("changing month + group_by refetches with new params", async () => {
     const captured: Captured = {};
     installAdapter(captured);

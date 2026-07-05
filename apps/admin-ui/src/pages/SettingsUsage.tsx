@@ -35,6 +35,7 @@ import { PageHeader } from "../components/PageHeader";
 import {
   getUsageCost,
   getUsageTokens,
+  type TokenCounts,
   type TokenGroup,
   type UsageCost,
   type UsageCostGroup,
@@ -42,10 +43,46 @@ import {
   type UsageTokens,
 } from "../api/usage";
 import { formatMicros } from "../utils/money";
+import { cacheHitRate, formatHitRate } from "../utils/cache";
 
 const { Text } = Typography;
 
 const MONTH_FMT = "YYYY-MM";
+
+/** Stream RT-3 (RT-ADR-14) — the cache columns shared by the cost / token /
+ *  kind tables. Every row extends ``TokenCounts``, so one factory types for all
+ *  three. Hit rate is derived client-side (no backend metric). */
+function cacheColumns<T extends TokenCounts>(
+  t: (key: string) => string,
+): TableColumnsType<T> {
+  return [
+    {
+      title: t("usage.col_cache_read_tokens"),
+      dataIndex: "cache_read_tokens",
+      key: "cache_read_tokens",
+      width: 150,
+      align: "right",
+      // ``?? 0`` — cache columns (migration 0036) may be absent on older
+      // pre-metering rollup rows; never blank the row on a missing count.
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t("usage.col_cache_creation_tokens"),
+      dataIndex: "cache_creation_tokens",
+      key: "cache_creation_tokens",
+      width: 160,
+      align: "right",
+      render: (v: number) => (v ?? 0).toLocaleString(),
+    },
+    {
+      title: t("usage.col_hit_rate"),
+      key: "hit_rate",
+      width: 110,
+      align: "right",
+      render: (_: unknown, row: T) => formatHitRate(cacheHitRate(row)),
+    },
+  ];
+}
 
 type CostGroupBy = Extract<UsageGroupBy, "agent" | "model">;
 
@@ -123,6 +160,7 @@ export function SettingsUsage() {
         align: "right",
         render: (v: number) => v.toLocaleString(),
       },
+      ...cacheColumns<UsageCostGroup>(t),
       {
         title: t("usage.col_billed"),
         dataIndex: "billed_cost_micros",
@@ -156,6 +194,7 @@ export function SettingsUsage() {
         align: "right",
         render: (v: number) => v.toLocaleString(),
       },
+      ...cacheColumns<TokenGroup>(t),
     ],
     [t],
   );
@@ -198,6 +237,7 @@ export function SettingsUsage() {
         align: "right",
         render: (v: number) => v.toLocaleString(),
       },
+      ...cacheColumns<TokenGroup>(t),
     ],
     [t],
   );
@@ -320,6 +360,11 @@ export function SettingsUsage() {
             <Statistic
               title={t("usage.col_cache_read_tokens")}
               value={(tokens?.total.cache_read_tokens ?? 0).toLocaleString()}
+            />
+            <Statistic
+              title={t("usage.col_hit_rate")}
+              value={formatHitRate(tokens ? cacheHitRate(tokens.total) : null)}
+              valueStyle={{ color: "var(--hx-accent-cyan, #22d3ee)" }}
             />
           </div>
 
