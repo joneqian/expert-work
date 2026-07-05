@@ -42,12 +42,37 @@ export async function listAgents(params: ListAgentsParams = {}): Promise<AgentLi
   return getJson<AgentList>("/v1/agents", { params: query });
 }
 
+/** Stream RT-4 (RT-ADR-16) — agent-level kill-switch state. Present on the
+ *  detail response only while the agent is disabled (reason / who / when for
+ *  the status tooltip); ``null`` when the agent is enabled. */
+export interface AgentDisableRecord {
+  tenant_id: string;
+  agent_name: string;
+  disabled: boolean;
+  reason: string | null;
+  disabled_by: string | null;
+  disabled_at: string | null;
+  updated_at: string;
+}
+
 export interface AgentDetailResponse {
   record: AgentRecord & {
     /** Full spec — same shape as POST /v1/agents accepts. Used by
      *  the Manifest preview / edit tab in :ref:`AgentDetail`. */
     spec: Record<string, unknown>;
   };
+  /** Stream RT-4 — whether the agent name is currently kill-switched. */
+  disabled?: boolean;
+  /** The kill-switch record when ``disabled`` is true; ``null`` otherwise. */
+  disable?: AgentDisableRecord | null;
+}
+
+/** Result of POST /v1/agents/{name}/disable|enable. ``cancelled_runs`` is the
+ *  count of in-flight runs the disable bulk-cancelled (absent on enable). */
+export interface AgentDisableResult {
+  name: string;
+  disabled: boolean;
+  cancelled_runs?: number;
 }
 
 export async function getAgent(
@@ -90,6 +115,32 @@ export async function createAgent(
   payload: ManifestPayload,
 ): Promise<AgentDetailResponse> {
   return postJson<AgentDetailResponse>("/v1/agents", payload);
+}
+
+/** POST /v1/agents/{name}/disable — Stream RT-4 (RT-ADR-16). Engages the
+ *  agent-level kill switch: rejects new runs/sessions across all versions of
+ *  ``name`` and bulk-cancels its in-flight runs. Requires ``manifest:write``.
+ *  Reversible via {@link enableAgent}. */
+export async function disableAgent(
+  name: string,
+  reason?: string,
+): Promise<AgentDisableResult> {
+  return postJson<AgentDisableResult>(
+    `/v1/agents/${encodeURIComponent(name)}/disable`,
+    { reason: reason ?? null },
+  );
+}
+
+/** POST /v1/agents/{name}/enable — releases the kill switch. New runs resume
+ *  immediately; the runs the disable cancelled are not auto-restarted. */
+export async function enableAgent(
+  name: string,
+  reason?: string,
+): Promise<AgentDisableResult> {
+  return postJson<AgentDisableResult>(
+    `/v1/agents/${encodeURIComponent(name)}/enable`,
+    { reason: reason ?? null },
+  );
 }
 
 /** Stream HX-5 — one revision-history entry (summary; no spec payload).

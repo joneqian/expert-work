@@ -948,6 +948,7 @@ def build_agents_router() -> APIRouter:
         version: str,
         request: Request,
         repo: Annotated[AgentSpecStore, Depends(_get_repo)],
+        disable_repo: Annotated[AgentDisableStore, Depends(_get_agent_disable_repo)],
         audit: Annotated[AuditLogger, Depends(_get_audit)],
     ) -> JSONResponse:
         tenant_id = request.state.tenant_id
@@ -968,9 +969,19 @@ def build_agents_router() -> APIRouter:
             resource_id=f"{name}/{version}",
             trace_id=current_trace_id_hex(),
         )
-        return JSONResponse(
-            {"success": True, "data": AgentDetail(record=record).model_dump(mode="json")}
-        )
+        # Stream RT-4 (RT-ADR-16) — surface the agent-level kill-switch state so
+        # the detail page can render the status tag + disable/enable control. The
+        # flag is per ``name`` (all versions); read it straight from the store
+        # (not the hot-path TTL cache) so the UI always sees the latest write.
+        data = AgentDetail(record=record).model_dump(mode="json")
+        disable_row = await disable_repo.get(tenant_id=tenant_id, agent_name=name)
+        if disable_row is not None and disable_row.disabled:
+            data["disabled"] = True
+            data["disable"] = disable_row.model_dump(mode="json")
+        else:
+            data["disabled"] = False
+            data["disable"] = None
+        return JSONResponse({"success": True, "data": data})
 
     @router.put("/{name}/{version}")
     async def update_agent(
