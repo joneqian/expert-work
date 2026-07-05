@@ -188,6 +188,32 @@ async def test_enable_clears_flag(ctx: _Ctx) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_detail_surfaces_disabled_state(ctx: _Ctx) -> None:
+    # RT-4 PR-2 — the agent detail response carries the kill-switch state so the
+    # UI can render its status tag + disable/enable control without a 2nd call.
+    before = await ctx.client.get("/v1/agents/support-bot/1.0.0")
+    assert before.status_code == 200, before.text
+    assert before.json()["data"]["disabled"] is False
+    assert before.json()["data"]["disable"] is None
+
+    await ctx.client.post("/v1/agents/support-bot/disable", json={"reason": "incident-42"})
+
+    after = await ctx.client.get("/v1/agents/support-bot/1.0.0")
+    data = after.json()["data"]
+    assert data["disabled"] is True
+    assert data["disable"]["disabled"] is True
+    assert data["disable"]["reason"] == "incident-42"
+    # The spec record is unchanged alongside the new fields.
+    assert data["record"]["name"] == "support-bot"
+
+    # Re-enabling drops the flag back off the detail payload.
+    await ctx.client.post("/v1/agents/support-bot/enable", json={})
+    reenabled = await ctx.client.get("/v1/agents/support-bot/1.0.0")
+    assert reenabled.json()["data"]["disabled"] is False
+    assert reenabled.json()["data"]["disable"] is None
+
+
+@pytest.mark.asyncio
 async def test_admission_gate_rejects_new_run_on_disabled_agent(ctx: _Ctx) -> None:
     # Bind a caller-owned session, then disable, then trigger a run on it.
     sess = await ctx.client.post(

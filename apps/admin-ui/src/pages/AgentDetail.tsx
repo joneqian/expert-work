@@ -17,20 +17,25 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
+  App,
+  Button,
   Card,
   Col,
   Empty,
+  Input,
+  Popconfirm,
   Row,
   Skeleton,
   Space,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
-import { Bot, Network, ShieldOff } from "lucide-react";
+import { Ban, Bot, CircleCheck, Network, ShieldOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { getAgent, type AgentDetailResponse } from "../api/agents";
+import { disableAgent, enableAgent, getAgent, type AgentDetailResponse } from "../api/agents";
 import { ApiError } from "../api/client";
 import { PageHeader } from "../components/PageHeader";
 import { ConversationsTab } from "./agent_detail/ConversationsTab";
@@ -49,6 +54,120 @@ const STATUS_COLOR: Record<string, string> = {
   archived: "default",
   deleted: "error",
 };
+
+/** Stream RT-4 (RT-ADR-16) — the agent-level kill switch. Disabling rejects
+ *  new runs/sessions across all versions of ``name`` and bulk-cancels the
+ *  in-flight ones; enabling reverses it. Danger-confirmed (Popconfirm, mirrors
+ *  the tenant suspend control on SettingsTenants), with an optional free-text
+ *  reason captured on the audit row + kill-switch record.
+ *
+ *  The endpoints require ``manifest:write`` (a tenant-admin action); the button
+ *  is shown to anyone who can read the detail page and a read-only member gets a
+ *  handled 403 toast on click. We deliberately don't hide it: gating on
+ *  ``isSystemAdmin`` (the SettingsTenants pattern) would wrongly lock out tenant
+ *  admins, and there's no per-permission helper on the auth identity to gate
+ *  precisely — the server is the authority. */
+function AgentKillSwitch({
+  name,
+  disabled,
+  onChanged,
+}: {
+  name: string;
+  disabled: boolean;
+  onChanged: () => void;
+}) {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const trimmed = reason.trim();
+
+  const runDisable = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result = await disableAgent(name, trimmed === "" ? undefined : trimmed);
+      message.success(
+        t("agent_detail.disable_ok", { cancelled: result.cancelled_runs ?? 0 }),
+      );
+      setReason("");
+      onChanged();
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : t("agent_detail.disable_failed"));
+    } finally {
+      setBusy(false);
+    }
+  }, [name, trimmed, message, t, onChanged]);
+
+  const runEnable = useCallback(async () => {
+    setBusy(true);
+    try {
+      await enableAgent(name);
+      message.success(t("agent_detail.enable_ok"));
+      onChanged();
+    } catch (err) {
+      message.error(err instanceof ApiError ? err.message : t("agent_detail.enable_failed"));
+    } finally {
+      setBusy(false);
+    }
+  }, [name, message, t, onChanged]);
+
+  if (disabled) {
+    return (
+      <Popconfirm
+        title={t("agent_detail.enable_confirm")}
+        onConfirm={runEnable}
+        okText={t("agent_detail.enable")}
+        cancelText={t("common.cancel")}
+      >
+        <Button
+          size="small"
+          loading={busy}
+          icon={<CircleCheck size={14} strokeWidth={1.75} />}
+          data-testid="agent-enable-btn"
+        >
+          {t("agent_detail.enable")}
+        </Button>
+      </Popconfirm>
+    );
+  }
+
+  return (
+    <Popconfirm
+      icon={null}
+      title={t("agent_detail.disable_confirm_title")}
+      description={
+        <div style={{ maxWidth: 280 }}>
+          <div style={{ marginBottom: 8, color: "var(--hx-text-tertiary)", fontSize: 12 }}>
+            {t("agent_detail.disable_confirm_body")}
+          </div>
+          <Input.TextArea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder={t("agent_detail.disable_reason_placeholder")}
+            aria-label={t("agent_detail.disable_reason_placeholder")}
+            maxLength={500}
+            autoSize={{ minRows: 2, maxRows: 4 }}
+          />
+        </div>
+      }
+      onConfirm={runDisable}
+      okButtonProps={{ danger: true }}
+      okText={t("agent_detail.disable")}
+      cancelText={t("common.cancel")}
+    >
+      <Button
+        size="small"
+        danger
+        loading={busy}
+        icon={<Ban size={14} strokeWidth={1.75} />}
+        data-testid="agent-disable-btn"
+      >
+        {t("agent_detail.disable")}
+      </Button>
+    </Popconfirm>
+  );
+}
 
 export function AgentDetail() {
   const { t } = useTranslation();
@@ -123,11 +242,31 @@ export function AgentDetail() {
         title={record.name}
         icon={<Bot size={20} strokeWidth={1.5} />}
         backTo={{ label: t("nav.agents"), to: "/agents" }}
+        actions={
+          <AgentKillSwitch
+            name={record.name}
+            disabled={detail.disabled ?? false}
+            onChanged={refresh}
+          />
+        }
         subtitle={
           <Space size={12} align="center" wrap>
             <Tag color={STATUS_COLOR[record.status] ?? "default"} bordered={false}>
               {t(`agents_page.status_${record.status}`, { defaultValue: record.status })}
             </Tag>
+            {detail.disabled && (
+              <Tooltip
+                title={
+                  detail.disable?.reason
+                    ? t("agent_detail.disabled_reason", { reason: detail.disable.reason })
+                    : undefined
+                }
+              >
+                <Tag color="red" bordered={false} data-testid="agent-disabled-tag">
+                  {t("agent_detail.disabled_tag")}
+                </Tag>
+              </Tooltip>
+            )}
             <Text code style={{ fontSize: 12 }}>
               v{record.version}
             </Text>

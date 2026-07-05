@@ -157,6 +157,18 @@ export interface TranslationKeys {
     egress_isolated: string;
     egress_proxied: string;
     egress_allow_all: string;
+    disabled_tag: string;
+    disabled_reason: string;
+    disable: string;
+    enable: string;
+    disable_confirm_title: string;
+    disable_confirm_body: string;
+    disable_reason_placeholder: string;
+    enable_confirm: string;
+    disable_ok: string;
+    enable_ok: string;
+    disable_failed: string;
+    enable_failed: string;
   };
   history_tab: {
     title: string;
@@ -2317,6 +2329,19 @@ const en: TranslationKeys = {
     egress_isolated: "isolated (no egress)",
     egress_proxied: "proxied (audited)",
     egress_allow_all: "any public host (audited)",
+    disabled_tag: "Disabled",
+    disabled_reason: "Reason: {{reason}}",
+    disable: "Disable",
+    enable: "Enable",
+    disable_confirm_title: "Disable this agent?",
+    disable_confirm_body:
+      "Rejects new runs and sessions across all versions, and cancels its in-flight runs. Reversible.",
+    disable_reason_placeholder: "Reason (optional, shown in audit)",
+    enable_confirm: "Re-enable this agent? New runs resume immediately.",
+    disable_ok: "Agent disabled — {{cancelled}} in-flight run(s) cancelled.",
+    enable_ok: "Agent enabled.",
+    disable_failed: "Failed to disable agent",
+    enable_failed: "Failed to enable agent",
   },
   history_tab: {
     title: "Revision history",
