@@ -66,6 +66,38 @@ export interface TranslationKeys {
     chargeback: string;
     rate_card: string;
     observability: string;
+    quality: string;
+  };
+  quality_page: {
+    page_title: string;
+    subtitle: string;
+    honest_note: string;
+    filter_agent: string;
+    filter_window: string;
+    window_24h: string;
+    window_7d: string;
+    window_30d: string;
+    failed_to_load: string;
+    section_drift: string;
+    section_trend: string;
+    section_low_scores: string;
+    col_agent: string;
+    col_overall: string;
+    col_dimensions: string;
+    col_rationale: string;
+    col_observed_at: string;
+    col_run: string;
+    open_run: string;
+    trend_mean: string;
+    trend_samples: string;
+    trend_empty: string;
+    low_empty: string;
+    drift_empty: string;
+    drift_col_recent: string;
+    drift_col_baseline: string;
+    drift_col_drift_pct: string;
+    drift_col_samples: string;
+    drift_col_detected_at: string;
   };
   observability_page: {
     page_title: string;
@@ -2233,6 +2265,39 @@ const en: TranslationKeys = {
     chargeback: "Chargeback",
     rate_card: "Model Pricing",
     observability: "Observability",
+    quality: "Quality",
+  },
+  quality_page: {
+    page_title: "Quality",
+    subtitle: "Production-quality monitoring — sampled runs, LLM-judged, drift alerts.",
+    honest_note:
+      "Scores are a subjective LLM-judge rubric (1-5), not ground truth — there is no gold label. Use them as a relative signal, not a correctness oracle.",
+    filter_agent: "Filter by agent",
+    filter_window: "Time window",
+    window_24h: "24h",
+    window_7d: "7d",
+    window_30d: "30d",
+    failed_to_load: "Failed to load quality data",
+    section_drift: "Drift alerts",
+    section_trend: "Per-agent trend",
+    section_low_scores: "Lowest-scoring runs",
+    col_agent: "Agent",
+    col_overall: "Score",
+    col_dimensions: "Dimensions",
+    col_rationale: "Rationale",
+    col_observed_at: "Observed at",
+    col_run: "Run",
+    open_run: "Open",
+    trend_mean: "Mean",
+    trend_samples: "Samples",
+    trend_empty: "No sampled scores in this window.",
+    low_empty: "No sampled scores in this window.",
+    drift_empty: "No drift alerts.",
+    drift_col_recent: "Recent mean",
+    drift_col_baseline: "Baseline mean",
+    drift_col_drift_pct: "Drop",
+    drift_col_samples: "Recent / baseline n",
+    drift_col_detected_at: "Detected at",
   },
   observability_page: {
     page_title: "Observability",

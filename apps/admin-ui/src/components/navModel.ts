@@ -157,6 +157,12 @@ export const TENANT_SETTINGS_ITEMS: readonly NavEntry[] = [
     path: "/settings/usage",
     group: "tenant-settings",
   },
+  {
+    key: "settings-quality",
+    labelKey: "nav.quality",
+    path: "/settings/quality",
+    group: "tenant-settings",
+  },
 ];
 
 /** C. Platform governance — system_admin, platform level only. */
