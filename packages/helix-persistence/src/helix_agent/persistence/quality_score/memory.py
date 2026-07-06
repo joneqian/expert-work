@@ -61,5 +61,5 @@ class InMemoryQualityScoreStore(QualityScoreStore):
                 and (agent_name is None or rec.agent_name == agent_name)
                 and (since is None or (rec.observed_at is not None and rec.observed_at >= since))
             ]
-        rows.sort(key=lambda r: (r.observed_at or datetime.min.replace(tzinfo=UTC)), reverse=True)
+        rows.sort(key=lambda r: r.observed_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return rows[:limit]
