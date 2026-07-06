@@ -519,6 +519,25 @@ class Settings(BaseSettings):
     eval_agent_provider: str = Field(default="anthropic")
     eval_agent_model: str = Field(default="claude-sonnet-4-6")
 
+    #: Stream RT-5 (RT-ADR-22) — production quality monitor. Pull worker that
+    #: samples finished runs, LLM-judges them, and persists a per-agent quality
+    #: time-series. Gated OFF: it spends judge tokens per sampled run (aux
+    #: chargeback, usage_kind='quality_sampling') and resolves the judge model's
+    #: *platform* credential, so only deployments that opt in arm the loop.
+    enable_quality_monitor: bool = Field(default=False)
+    quality_monitor_interval_s: int = Field(default=300, gt=0)
+    #: Per-run sampling probability (hash-bucket, deterministic). Primary cost
+    #: knob; low by default. Low-volume agents produce a sparse series.
+    quality_sampling_rate_pct: int = Field(default=5, ge=0, le=100)
+    #: Per-tenant per-day judged-run ceiling (runaway guard, not the main knob).
+    quality_daily_cap: int = Field(default=500, gt=0)
+    #: Candidate rows scanned per drain batch. Raise on a high-run-rate platform
+    #: so the sampler keeps up (it drains multiple batches per cycle regardless).
+    quality_monitor_batch_size: int = Field(default=200, gt=0)
+    #: Judge model + provider (platform-credentialed, Haiku-tier for cost).
+    quality_judge_provider: str = Field(default="anthropic")
+    quality_judge_model: str = Field(default="claude-haiku-4-5-20251001")
+
     #: SE-13 pre-evolution domain research (gated OFF by default). On cold start
     #: of an agent's evolution, research the tenant KB (+ optionally public web)
     #: and persist a DRAFT prior for the skill generator. ``web_search`` is a

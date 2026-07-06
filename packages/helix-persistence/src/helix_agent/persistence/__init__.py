@@ -176,6 +176,27 @@ from helix_agent.persistence.platform_secrets import (
 from helix_agent.persistence.platform_secrets import (
     SqlPlatformSecretStore as SqlPlatformSecretStore,
 )
+from helix_agent.persistence.quality_candidate import (
+    InMemoryQualityCandidateSource as InMemoryQualityCandidateSource,
+)
+from helix_agent.persistence.quality_candidate import (
+    QualityCandidate as QualityCandidate,
+)
+from helix_agent.persistence.quality_candidate import (
+    QualityCandidateSource as QualityCandidateSource,
+)
+from helix_agent.persistence.quality_candidate import (
+    SqlQualityCandidateSource as SqlQualityCandidateSource,
+)
+from helix_agent.persistence.quality_score import (
+    InMemoryQualityScoreStore as InMemoryQualityScoreStore,
+)
+from helix_agent.persistence.quality_score import (
+    QualityScoreStore as QualityScoreStore,
+)
+from helix_agent.persistence.quality_score import (
+    SqlQualityScoreStore as SqlQualityScoreStore,
+)
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore as InMemoryTenantQuotaStore,
 )
@@ -389,6 +410,8 @@ __all__ = [
     "InMemoryModelRateCardStore",
     "InMemoryPlatformAgentTemplateStore",
     "InMemoryPlatformSecretStore",
+    "InMemoryQualityCandidateSource",
+    "InMemoryQualityScoreStore",
     "InMemoryTenantBillingLedgerStore",
     "InMemoryTenantConfigStore",
     "InMemoryTenantMcpServerStore",
@@ -428,6 +451,9 @@ __all__ = [
     "PlatformAgentTemplateNotFoundError",
     "PlatformAgentTemplateStore",
     "PlatformSecretStore",
+    "QualityCandidate",
+    "QualityCandidateSource",
+    "QualityScoreStore",
     "SqlAgentDisableStore",
     "SqlApprovalStore",
     "SqlArtifactStore",
@@ -442,6 +468,8 @@ __all__ = [
     "SqlMemoryStore",
     "SqlPlatformAgentTemplateStore",
     "SqlPlatformSecretStore",
+    "SqlQualityCandidateSource",
+    "SqlQualityScoreStore",
     "SqlTenantConfigStore",
     "SqlTenantMcpServerStore",
     "SqlTenantMemberStore",
