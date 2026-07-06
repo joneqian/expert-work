@@ -64,6 +64,7 @@ import { useAuth } from "../auth/AuthContext";
 import { PlatformBillingSection } from "./settings_platform/PlatformBillingSection";
 import { PlatformEmbeddingSection } from "./settings_platform/PlatformEmbeddingSection";
 import { PlatformJudgeSection } from "./settings_platform/PlatformJudgeSection";
+import { PlatformQualitySection } from "./settings_platform/PlatformQualitySection";
 import { PlatformToolBudgetSection } from "./settings_platform/PlatformToolBudgetSection";
 
 const { Text } = Typography;
@@ -859,6 +860,11 @@ export function SettingsPlatformConfig() {
             {t("settings_platform.tool_budget_heading")}
           </h2>
           <PlatformToolBudgetSection />
+
+          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
+            {t("settings_platform.quality_heading")}
+          </h2>
+          <PlatformQualitySection />
         </>
       )}
 
