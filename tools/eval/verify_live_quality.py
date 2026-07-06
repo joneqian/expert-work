@@ -325,6 +325,7 @@ async def _cleanup(
         try:
             await client.delete(f"/v1/webhook-endpoints/{endpoint_id}")
         except httpx.HTTPError:
+            # Best-effort cleanup — a leftover test webhook is harmless.
             pass
     try:
         import asyncpg
