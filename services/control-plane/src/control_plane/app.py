@@ -160,6 +160,8 @@ from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolService
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.platform_tool_budget_config import PlatformToolBudgetConfigService
+from control_plane.quality_judge import QualityJudge
+from control_plane.quality_monitor_worker import QualityMonitorWorker
 from control_plane.quota import (
     InMemoryQuotaService,
     QuotaService,
@@ -337,6 +339,16 @@ from helix_agent.persistence.platform_tool_budget_config import (
     InMemoryPlatformToolBudgetConfigStore,
     PlatformToolBudgetConfigStore,
     SqlPlatformToolBudgetConfigStore,
+)
+from helix_agent.persistence.quality_candidate import (
+    InMemoryQualityCandidateSource,
+    QualityCandidateSource,
+    SqlQualityCandidateSource,
+)
+from helix_agent.persistence.quality_score import (
+    InMemoryQualityScoreStore,
+    QualityScoreStore,
+    SqlQualityScoreStore,
 )
 from helix_agent.persistence.quota import (
     InMemoryTenantQuotaStore,
@@ -719,6 +731,15 @@ def create_app(
         store=resolved_agent_disable_repo,
         ttl_seconds=float(resolved_settings.kill_switch_cache_ttl_s),
     )
+    # Stream RT-5 (RT-ADR-22/24) — production quality monitor stores. The pull
+    # worker (below, gated) samples finished runs and persists per-agent
+    # verdicts; both fall back to in-memory for single-process / test runs.
+    resolved_quality_score: QualityScoreStore = (
+        sql_stores.quality_score if sql_stores else InMemoryQualityScoreStore()
+    )
+    resolved_quality_candidate: QualityCandidateSource = (
+        sql_stores.quality_candidate if sql_stores else InMemoryQualityCandidateSource()
+    )
     # Stream R — member roster + Keycloak Admin client. The client is a Fake
     # unless ``keycloak_enabled`` (dev/CI never depend on a live Keycloak).
     resolved_tenant_member_repo = tenant_member_repo or (
@@ -1001,6 +1022,7 @@ def create_app(
             feedback_consumer: FeedbackConsumerWorker | None = None
             webhook_delivery_worker: WebhookDeliveryWorker | None = None
             eval_worker: EvalWorker | None = None
+            quality_monitor: QualityMonitorWorker | None = None
             approval_gauge_worker: ApprovalGaugeWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
@@ -1675,6 +1697,30 @@ def create_app(
                 )
                 eval_worker.start()
                 _app.state.eval_worker = eval_worker
+            # Stream RT-5 (RT-ADR-22) — production quality monitor. Pull worker:
+            # samples finished runs, LLM-judges the latest exchange, persists the
+            # per-agent verdict + aux chargeback. Gated OFF (spends judge tokens);
+            # the judge resolves its platform-configured credential per-tenant, so
+            # it starts whenever enabled and skips a tenant with no resolvable key.
+            if resolved_settings.enable_quality_monitor:
+                quality_monitor = QualityMonitorWorker(
+                    candidate_source=resolved_quality_candidate,
+                    score_store=resolved_quality_score,
+                    judge=QualityJudge(
+                        resolver=credentials_resolver,
+                        secret_store=resolved_secret_store,
+                        provider=resolved_settings.quality_judge_provider,
+                        model=resolved_settings.quality_judge_model,
+                    ),
+                    runtime=resolved_agent_runtime,
+                    usage_store=resolved_token_usage,
+                    sampling_rate_pct=resolved_settings.quality_sampling_rate_pct,
+                    daily_cap=resolved_settings.quality_daily_cap,
+                    interval_s=float(resolved_settings.quality_monitor_interval_s),
+                    batch_size=resolved_settings.quality_monitor_batch_size,
+                )
+                quality_monitor.start()
+                _app.state.quality_monitor = quality_monitor
             # Stream HX-4 (Mini-ADR HX-D2) — pending-approvals gauge.
             # Always-on: one COUNT(*) a minute, no settings knob.
             approval_gauge_worker = ApprovalGaugeWorker(approval_store=resolved_approval_store)
@@ -1718,6 +1764,8 @@ def create_app(
                     await webhook_delivery_worker.stop()
                 if eval_worker is not None:
                     await eval_worker.stop()
+                if quality_monitor is not None:
+                    await quality_monitor.stop()
                 if approval_gauge_worker is not None:
                     await approval_gauge_worker.stop()
                 # Stream HX-7 — drain the Langfuse SDK's background queue
@@ -2033,6 +2081,8 @@ class _SqlStores:
     token_reservation: TokenReservationStore
     tenant_config: TenantConfigStore
     agent_disable: AgentDisableStore  # Stream RT-4 (RT-ADR-16) — agent kill switch
+    quality_score: QualityScoreStore  # Stream RT-5 (RT-ADR-24) — quality time-series
+    quality_candidate: QualityCandidateSource  # Stream RT-5 (RT-ADR-22) — sampling feed
     tenant_member: TenantMemberStore  # Stream R
     tenant_mcp_server: TenantMcpServerStore  # Stream V
     tenant_skill_subscription: TenantSkillSubscriptionStore  # Skill Marketplace
@@ -2250,6 +2300,8 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         platform_billing_config=SqlPlatformBillingConfigStore(session_factory),
         tenant_config=SqlTenantConfigStore(session_factory),
         agent_disable=SqlAgentDisableStore(session_factory),
+        quality_score=SqlQualityScoreStore(session_factory),
+        quality_candidate=SqlQualityCandidateSource(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
         tenant_skill_subscription=SqlTenantSkillSubscriptionStore(session_factory),

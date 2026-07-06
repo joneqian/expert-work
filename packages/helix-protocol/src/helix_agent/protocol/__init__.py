@@ -159,6 +159,7 @@ from helix_agent.protocol.provider_catalog import (
     Provider,
     Tool,
 )
+from helix_agent.protocol.quality_score import QualityScoreRecord
 from helix_agent.protocol.quota import (
     CheckRequest,
     CheckResult,
@@ -388,6 +389,7 @@ __all__ = [
     "PromoteRequestStatus",
     "PromptVariableSpec",
     "Provider",
+    "QualityScoreRecord",
     "QuotaDimension",
     "QuotaPurpose",
     "Reflection",
