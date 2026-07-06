@@ -26,7 +26,12 @@ from control_plane.audit import build_default_audit_logger
 from control_plane.tenant_status import TenantStatusService
 from helix_agent.persistence import InMemoryAgentDisableStore, InMemoryApprovalStore
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import ApprovalRecord, ApprovalStatus, Principal
+from helix_agent.protocol import (
+    ApprovalRecord,
+    ApprovalStatus,
+    Principal,
+    canonical_args_digest,
+)
 
 _TENANT = uuid4()
 
@@ -58,6 +63,18 @@ class _FakeGraph:
         return None
 
 
+class _CapturingGraph:
+    """Records the ``approval_resume`` payload written into the checkpoint."""
+
+    def __init__(self) -> None:
+        self.resume_payloads: list[dict[str, object]] = []
+
+    async def aupdate_state(self, _config: object, state: dict[str, object], **_k: object) -> None:
+        resume = state.get("approval_resume")
+        if isinstance(resume, dict):
+            self.resume_payloads.append(resume)
+
+
 class _FakeRunManager:
     def __init__(self) -> None:
         self.created: list[object] = []
@@ -72,15 +89,16 @@ class _FakeRunManager:
 
 
 class _FakeRuntime:
-    def __init__(self) -> None:
+    def __init__(self, graph: object | None = None) -> None:
         self.run_manager = _FakeRunManager()
         self.stream_bridge = object()
         self.run_event_store = None
         self.skill_run_usage_recorder = None
         self.trajectory_recorder = None
+        self._graph = graph if graph is not None else _FakeGraph()
 
     async def get_agent(self, **_kw: object) -> SimpleNamespace:
-        return SimpleNamespace(graph=_FakeGraph(), bound_distilled_skills=(), tool_replay_safe=None)
+        return SimpleNamespace(graph=self._graph, bound_distilled_skills=(), tool_replay_safe=None)
 
     def new_worker_spawn_budget(self) -> None:
         return None
@@ -208,3 +226,95 @@ async def test_disabled_agent_resume_is_blocked_and_spawns_nothing(
     assert exc.value.status_code == 403
     await asyncio.sleep(0)
     assert spawns == []  # no continuation worker spawned
+
+
+@pytest.mark.asyncio
+async def test_approve_threads_mint_digest_into_resume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RT-6 Tier A — approve carries the row's mint digest into approval_resume."""
+
+    async def _noop_run_agent(**_kw: object) -> None:
+        return None
+
+    monkeypatch.setattr(runs_module, "run_agent", _noop_run_agent)
+
+    approvals = InMemoryApprovalStore()
+    run_id, thread_id = uuid4(), uuid4()
+    await approvals.create(
+        _pending(run_id, thread_id).model_copy(update={"binding_digest": "mint-digest"})
+    )
+    graph = _CapturingGraph()
+    runtime = _FakeRuntime(graph=graph)
+
+    await apply_approval_decision(
+        request=_request(),
+        thread_id=thread_id,
+        run_id=run_id,
+        decision="approve",
+        modified_args=None,
+        reason=None,
+        threads=_FakeThreads(),
+        users=object(),
+        agent_repo=_FakeAgentRepo(),
+        runtime=runtime,
+        approvals=approvals,
+        audit=build_default_audit_logger(InMemoryAuditLogStore()),
+        idempotency_key="k-approve",
+    )
+    assert graph.resume_payloads == [
+        {
+            "decision": "approve",
+            "modified_args": None,
+            "reason": None,
+            "binding_digest": "mint-digest",
+        }
+    ]
+    # approve keeps the mint digest (no re-bind).
+    stored = await approvals.get_by_run(run_id=run_id, tenant_id=_TENANT)
+    assert stored is not None
+    assert stored.binding_digest == "mint-digest"
+
+
+@pytest.mark.asyncio
+async def test_modify_rebinds_digest_and_threads_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RT-6 Tier A — modify re-binds to digest(modified_args), stored + threaded."""
+
+    async def _noop_run_agent(**_kw: object) -> None:
+        return None
+
+    monkeypatch.setattr(runs_module, "run_agent", _noop_run_agent)
+
+    approvals = InMemoryApprovalStore()
+    run_id, thread_id = uuid4(), uuid4()
+    await approvals.create(
+        _pending(run_id, thread_id).model_copy(update={"binding_digest": "mint-digest"})
+    )
+    graph = _CapturingGraph()
+    runtime = _FakeRuntime(graph=graph)
+    modified = {"url": "https://safe.example.com", "method": "GET"}
+    expected = canonical_args_digest(modified)
+
+    await apply_approval_decision(
+        request=_request(),
+        thread_id=thread_id,
+        run_id=run_id,
+        decision="modify",
+        modified_args=modified,
+        reason=None,
+        threads=_FakeThreads(),
+        users=object(),
+        agent_repo=_FakeAgentRepo(),
+        runtime=runtime,
+        approvals=approvals,
+        audit=build_default_audit_logger(InMemoryAuditLogStore()),
+        idempotency_key="k-modify",
+    )
+    # Threaded into the resume payload...
+    assert graph.resume_payloads[0]["binding_digest"] == expected
+    # ...and persisted atomically on the row (overwriting the mint digest).
+    stored = await approvals.get_by_run(run_id=run_id, tenant_id=_TENANT)
+    assert stored is not None
+    assert stored.binding_digest == expected

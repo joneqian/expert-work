@@ -53,6 +53,7 @@ from helix_agent.protocol.approval import (
     ApprovalRecord,
     ApprovalRequest,
     ApprovalStatus,
+    canonical_args_digest,
 )
 from helix_agent.protocol.artifact import Artifact, ArtifactKind, ArtifactVersion
 from helix_agent.protocol.audit import (
@@ -460,6 +461,7 @@ __all__ = [
     "WebhookPayloadFormat",
     "WorkflowSpec",
     "apply_markup",
+    "canonical_args_digest",
     "catalog_entry",
     "enforce_security_floor",
     "models_for_provider",

@@ -137,3 +137,37 @@ async def test_idempotency_fields_round_trip(
         assert row.continuation_run_id == continuation
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_binding_digest_round_trip_and_rebind(
+    approval_store: ApprovalStoreFixture,
+) -> None:
+    """RT-6 Tier A — binding_digest persists on create and re-binds on modify."""
+    store, engine = approval_store
+    try:
+        tenant_id, run_id = uuid4(), uuid4()
+        rec = _record(tenant_id=tenant_id, run_id=run_id).model_copy(
+            update={"binding_digest": "mint-digest"}
+        )
+        await store.create(rec)
+        fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+        assert fetched is not None
+        assert fetched.binding_digest == "mint-digest"
+
+        # A modify overwrites the digest atomically with the CAS.
+        hit = await store.mark_decided(
+            run_id=run_id,
+            tenant_id=tenant_id,
+            status=ApprovalStatus.MODIFIED,
+            decided_by="u",
+            decided_at=datetime.now(UTC),
+            modified_args={"url": "https://safe.example.com"},
+            binding_digest="rebound-digest",
+        )
+        assert hit is True
+        row = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+        assert row is not None
+        assert row.binding_digest == "rebound-digest"
+    finally:
+        await engine.dispose()

@@ -28,6 +28,7 @@ def _row_to_dto(row: AgentApprovalRow) -> ApprovalRecord:
         proposed_args=dict(row.proposed_args or {}),
         requested_at=row.requested_at,
         timeout_at=row.timeout_at,
+        binding_digest=row.binding_digest or "",
         status=ApprovalStatus(row.status),
         decided_by=row.decided_by,
         decided_at=row.decided_at,
@@ -59,6 +60,7 @@ class SqlApprovalStore(ApprovalStore):
                     proposed_args=dict(record.proposed_args),
                     requested_at=record.requested_at,
                     timeout_at=record.timeout_at,
+                    binding_digest=record.binding_digest or None,
                     status=record.status.value,
                     decided_by=record.decided_by,
                     decided_at=record.decided_at,
@@ -182,7 +184,22 @@ class SqlApprovalStore(ApprovalStore):
         modified_args: dict[str, object] | None = None,
         idempotency_key: str | None = None,
         continuation_run_id: UUID | None = None,
+        binding_digest: str | None = None,
     ) -> bool:
+        values: dict[str, object | None] = {
+            "status": status.value,
+            "decided_by": decided_by,
+            "decided_at": decided_at,
+            "modified_args": modified_args,
+            # Stream 13.2 — bound atomically to the winning CAS.
+            "idempotency_key": idempotency_key,
+            "continuation_run_id": continuation_run_id,
+        }
+        # RT-6 Tier A (RT-ADR-19) — a modify re-binds to the digest of
+        # modified_args, written atomically with the CAS; approve / reject pass
+        # None and keep the mint-time digest.
+        if binding_digest is not None:
+            values["binding_digest"] = binding_digest
         async with self._sf() as session:
             result = await session.execute(
                 update(AgentApprovalRow)
@@ -191,15 +208,7 @@ class SqlApprovalStore(ApprovalStore):
                     AgentApprovalRow.tenant_id == tenant_id,
                     AgentApprovalRow.status == ApprovalStatus.PENDING.value,
                 )
-                .values(
-                    status=status.value,
-                    decided_by=decided_by,
-                    decided_at=decided_at,
-                    modified_args=modified_args,
-                    # Stream 13.2 — bound atomically to the winning CAS.
-                    idempotency_key=idempotency_key,
-                    continuation_run_id=continuation_run_id,
-                )
+                .values(**values)
             )
             await session.commit()
         return int(getattr(result, "rowcount", 0) or 0) > 0

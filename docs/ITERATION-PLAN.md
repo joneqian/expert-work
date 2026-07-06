@@ -1707,8 +1707,9 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 ### Wave 3（并行，依赖 RT-1）
 - [ ] **RT-5 生产质量监控**（~2 周，5 PR，★5 需 live E2E）：真实流量采样→judge 评分（RT-1 结构化输出）→落库→漂移检测→`quality.drift` webhook 告警；aux 计量（usage_kind）；质量看板新页全套挂点
 - [ ] **RT-6 审批工件绑定**（~1 周，3 PR）（设计 [STREAM-RT-DESIGN](./streams/STREAM-RT-DESIGN.md) §12 / RT-ADR-19~21）：**grounding 核实计划前提部分过期——args 本就被 checkpoint 冻结**（`apply_resume_decision` approve 原样派发 checkpointed tool_calls，exec_python/http 全参内联），无漂移路径；真威胁面 = **bash 引用的 workspace 文件内容可变**（跨 run/副本按 user 共享，并发 run 可 approve-then-swap-script）。决策（用户拍板，约束=不削弱 Agent 能力+不增操作复杂度）：**Tier A args canonical 指纹硬拦**（RT-ADR-19，digest 存审批行=独立完整性域，防 checkpoint 篡改；零假阳故拦得起）+ **Tier B bash workspace 写代际察觉**（RT-ADR-20，审计-only 不拦，闭合问责半，零摩擦）；modify 重铸绑定原子写（RT-ADR-21）。文件层硬拦破约束→per-manifest opt-in backlog（[memory:audit-over-blocking]）。
-  - [x] **PR-0 设计（本次）**：RT-ADR-19~21 落 §12（威胁模型勘误 + Tier A 硬绑规格 + Tier B 审计信号 + modify 重铸 + migration + UI 面）。
-  - [ ] **PR-1 后端**：协议 binding 字段 + canonical 指纹助手 + mint 算指纹 + bash workspace 代际 + exec 前校验硬拒（builder.py:1013 + resume 端点透 digest）+ modify 重铸原子写 + migration（≤32，真 PG）+ 审计 + 单测。
+  - [x] **PR-0 设计（#932 已合）**：RT-ADR-19~21 落 §12（威胁模型勘误 + Tier A 硬绑规格 + Tier B 审计信号 + modify 重铸 + migration + UI 面）。
+  - [x] **PR-1 后端 Tier A（本次）**：canonical 指纹助手落 `helix-protocol`（两服务共享，避跨服务 import）+ `ApprovalRequest/Record.binding_digest` 字段 + mint 算指纹（`build_approval_request`）+ exec 前校验硬拒（`apply_resume_decision` 加 `binding_drift` outcome，`builder.py:1013` 发 `APPROVAL_BINDING_DRIFT` 审计 + terminal veto）+ resume 端点透 digest（`resolve_approval_decision`→`approval_resume`）+ modify 重铸原子写（`mark_decided` 加 `binding_digest` 参数，搭 CAS）+ migration `0115_approval_binding`（nullable，真 PG 验）+ 单测（protocol/gate/store/resume/真 PG round-trip）。**Tier B 拆到 PR-1b**（涉 workspace 写代际=不同子系统+机制待定，避巨 PR 难审）。
+  - [ ] **PR-1b 后端 Tier B**：bash workspace 写代际记录（RT-ADR-20，复用 TE-2 per-tool 审计 COUNT 或新增 per-user 计数器）+ resume 前读代际→审计 `workspace_drift` 标不拦 + `workspace_gen` 字段/列。
   - [ ] **PR-2 前端**：ApprovalCard 展 binding_digest receipt + workspace-drift 徽标 + binding_drift 硬拒态；ApprovalsList 标识；IM webhook 卡片补 binding 摘要；i18n 双语 + 前端审。
 
 ### Wave 4

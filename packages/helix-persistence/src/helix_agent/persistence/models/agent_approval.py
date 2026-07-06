@@ -40,6 +40,10 @@ class AgentApprovalRow(Base):
     )
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     timeout_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # RT-6 Tier A (RT-ADR-19) — canonical args digest bound at mint, re-verified
+    # before dispatch. On modify the mark_decided CAS overwrites it with the
+    # digest of modified_args. NULL for legacy / pre-feature rows (unbound).
+    binding_digest: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
     decided_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

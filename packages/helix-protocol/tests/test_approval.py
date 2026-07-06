@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from helix_agent.protocol import ApprovalDecision, ApprovalRequest
+from helix_agent.protocol import ApprovalDecision, ApprovalRequest, canonical_args_digest
 
 
 def _now() -> datetime:
@@ -102,3 +102,63 @@ def test_approval_decision_timeout_reason() -> None:
     """The timeout job emits a reject with ``decided_by='system'``."""
     dec = ApprovalDecision(decision="reject", decided_by="system", reason="timeout")
     assert dec.reason == "timeout"
+
+
+# ---------------------------------------------------------------------------
+# RT-6 Tier A — canonical_args_digest + binding_digest field (RT-ADR-19)
+# ---------------------------------------------------------------------------
+
+
+def test_canonical_args_digest_is_deterministic() -> None:
+    """Same args → same digest across calls (stable receipt)."""
+    args = {"command": "./deploy.sh prod", "timeout_s": 30}
+    assert canonical_args_digest(args) == canonical_args_digest(dict(args))
+
+
+def test_canonical_args_digest_ignores_key_order() -> None:
+    """Dict insertion order must not change the digest (canonical = sorted)."""
+    a = {"command": "ls", "timeout_s": 5}
+    b = {"timeout_s": 5, "command": "ls"}
+    assert canonical_args_digest(a) == canonical_args_digest(b)
+
+
+def test_canonical_args_digest_detects_value_change() -> None:
+    """A changed argument value flips the digest — the whole point of binding."""
+    approved = canonical_args_digest({"command": "./deploy.sh"})
+    tampered = canonical_args_digest({"command": "rm -rf /"})
+    assert approved != tampered
+
+
+def test_canonical_args_digest_handles_non_json_native_values() -> None:
+    """Non-JSON values (UUID / datetime) fall back to ``str`` without raising."""
+    from uuid import UUID
+
+    digest = canonical_args_digest({"id": UUID("00000000-0000-0000-0000-0000000000ff")})
+    assert isinstance(digest, str) and len(digest) == 64
+
+
+def test_approval_request_binding_digest_defaults_empty() -> None:
+    """Legacy / pre-feature construction leaves ``binding_digest`` empty (unbound)."""
+    req = ApprovalRequest(
+        request_id="abc123",
+        node="tools",
+        reason_kind="policy_gate",
+        action_summary="approval-gated tool 'bash'",
+        requested_at=_now(),
+        timeout_at=_now() + timedelta(hours=24),
+    )
+    assert req.binding_digest == ""
+
+
+def test_approval_request_carries_binding_digest() -> None:
+    req = ApprovalRequest(
+        request_id="abc123",
+        node="tools",
+        reason_kind="policy_gate",
+        action_summary="approval-gated tool 'bash'",
+        proposed_args={"command": "ls"},
+        requested_at=_now(),
+        timeout_at=_now() + timedelta(hours=24),
+        binding_digest=canonical_args_digest({"command": "ls"}),
+    )
+    assert req.binding_digest == canonical_args_digest({"command": "ls"})

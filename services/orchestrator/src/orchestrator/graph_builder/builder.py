@@ -1011,6 +1011,17 @@ def build_react_graph(
             if workspace_ingest_node is not None:
                 ingest_update = await workspace_ingest_node(state, config)
             resume_outcome = apply_resume_decision(tool_calls, _gated_tools, approval_resume)
+            if resume_outcome.binding_drift:
+                # RT-6 Tier A (RT-ADR-19) — the checkpointed tool_call drifted
+                # from what the human approved (tamper / replay / bug). Record
+                # the integrity veto before the terminal reject routes to END.
+                configurable = config.get("configurable") or {}
+                await _emit_binding_drift_audit(
+                    audit_logger_from_config(config),
+                    _parse_uuid(configurable.get("tenant_id")),
+                    run_id=configurable.get("run_id"),
+                    thread_id=configurable.get("thread_id"),
+                )
             if resume_outcome.reject_messages:
                 rejected: dict[str, Any] = {
                     **ingest_update,
@@ -1048,6 +1059,11 @@ def build_react_graph(
                                 ),
                                 thread_id=thread_id,
                                 timeout_s=approval_timeout_s,
+                                # RT-6 Tier A — the action-screen target is chosen
+                                # by the judge, not find_approval_target; the resume
+                                # re-scan cannot reproduce it, so mint unbound to
+                                # avoid verifying the wrong call (RT-ADR-19).
+                                bind=False,
                             )
                         }
                     # block — deny the whole turn (one error ToolMessage per
@@ -2278,6 +2294,44 @@ async def _emit_output_guard_audit(
         )
     except Exception:
         logger.exception("output_guard.audit_failed action=%s", action)
+
+
+async def _emit_binding_drift_audit(
+    audit_logger: AuditLogger | None,
+    tenant_id: UUID | None,
+    *,
+    run_id: object,
+    thread_id: object = None,
+) -> None:
+    """Durable audit row for an RT-6 Tier A binding-drift veto (RT-ADR-19).
+
+    The approved args digest failed re-verification before dispatch — the
+    checkpointed tool_call no longer matches what the human approved. Never
+    records the args themselves (only that drift occurred). ``thread_id`` is
+    carried in details because ``run_id`` here is the *continuation* run, while
+    the approval row + APPROVAL_DECIDED audit key on the original paused run —
+    the thread id is the stable join back to the approval. Best-effort: no
+    logger / no tenant / write failure never breaks the run.
+    """
+    if audit_logger is None or tenant_id is None:
+        return
+    try:
+        details = {"thread_id": str(thread_id)} if thread_id is not None else {}
+        await audit_logger.write(
+            AuditEntry(
+                tenant_id=tenant_id,
+                actor_type="agent",
+                actor_id="agent",
+                action=AuditAction.APPROVAL_BINDING_DRIFT,
+                resource_type="approval",
+                resource_id=str(run_id) if run_id is not None else None,
+                result=AuditResult.DENIED,
+                reason="approved tool arguments changed before execution",
+                details=details,
+            )
+        )
+    except Exception:
+        logger.exception("approval_binding_drift.audit_failed run_id=%s", run_id)
 
 
 async def _emit_state_projected_audit(
