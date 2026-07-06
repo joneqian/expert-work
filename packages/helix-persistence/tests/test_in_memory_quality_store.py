@@ -77,6 +77,45 @@ async def test_count_since_and_list_filters() -> None:
 
 
 @pytest.mark.asyncio
+async def test_window_stats_and_agent_enumeration() -> None:
+    store = InMemoryQualityScoreStore()
+    t1, t2 = uuid4(), uuid4()
+    base = datetime(2026, 7, 6, 12, 0, tzinfo=UTC)
+
+    async def _add(tenant: UUID, agent: str, overall: int, at: datetime) -> None:
+        rec = _record(tenant=tenant, run=uuid4(), agent=agent, overall=overall)
+        await store.insert(rec.model_copy(update={"observed_at": at}))
+
+    await _add(t1, "a", 5, base)
+    await _add(t1, "a", 3, base + timedelta(minutes=10))
+    await _add(t1, "b", 4, base + timedelta(minutes=20))
+    await _add(t2, "a", 2, base + timedelta(minutes=30))
+
+    # window_stats: [since, until) with mean.
+    count, mean = await store.window_stats(
+        tenant_id=t1, agent_name="a", since=base, until=base + timedelta(hours=1)
+    )
+    assert count == 2
+    assert mean == 4.0
+    # Empty window → (0, None).
+    empty_count, empty_mean = await store.window_stats(
+        tenant_id=t1,
+        agent_name="a",
+        since=base + timedelta(hours=2),
+        until=base + timedelta(hours=3),
+    )
+    assert empty_count == 0
+    assert empty_mean is None
+
+    # Cross-tenant distinct (tenant, agent) enumeration.
+    agents = await store.list_agents_with_scores_since(since=base)
+    assert set(agents) == {(t1, "a"), (t1, "b"), (t2, "a")}
+    # Watermark excludes older rows.
+    recent = await store.list_agents_with_scores_since(since=base + timedelta(minutes=25))
+    assert set(recent) == {(t2, "a")}
+
+
+@pytest.mark.asyncio
 async def test_candidate_source_filters_by_watermark_and_orders() -> None:
     base = datetime(2026, 7, 6, 12, 0, tzinfo=UTC)
     tenant = uuid4()

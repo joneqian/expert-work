@@ -160,6 +160,7 @@ from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolService
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.platform_tool_budget_config import PlatformToolBudgetConfigService
+from control_plane.quality_drift_worker import QualityDriftWorker
 from control_plane.quality_judge import QualityJudge
 from control_plane.quality_monitor_worker import QualityMonitorWorker
 from control_plane.quota import (
@@ -344,6 +345,11 @@ from helix_agent.persistence.quality_candidate import (
     InMemoryQualityCandidateSource,
     QualityCandidateSource,
     SqlQualityCandidateSource,
+)
+from helix_agent.persistence.quality_drift_alert import (
+    InMemoryQualityDriftAlertStore,
+    QualityDriftAlertStore,
+    SqlQualityDriftAlertStore,
 )
 from helix_agent.persistence.quality_score import (
     InMemoryQualityScoreStore,
@@ -740,6 +746,9 @@ def create_app(
     resolved_quality_candidate: QualityCandidateSource = (
         sql_stores.quality_candidate if sql_stores else InMemoryQualityCandidateSource()
     )
+    resolved_quality_drift_alert: QualityDriftAlertStore = (
+        sql_stores.quality_drift_alert if sql_stores else InMemoryQualityDriftAlertStore()
+    )
     # Stream R — member roster + Keycloak Admin client. The client is a Fake
     # unless ``keycloak_enabled`` (dev/CI never depend on a live Keycloak).
     resolved_tenant_member_repo = tenant_member_repo or (
@@ -1023,6 +1032,7 @@ def create_app(
             webhook_delivery_worker: WebhookDeliveryWorker | None = None
             eval_worker: EvalWorker | None = None
             quality_monitor: QualityMonitorWorker | None = None
+            quality_drift: QualityDriftWorker | None = None
             approval_gauge_worker: ApprovalGaugeWorker | None = None
             if agent_runtime is None:
                 if resolved_settings.checkpointer_backend == "postgres":
@@ -1721,6 +1731,26 @@ def create_app(
                 )
                 quality_monitor.start()
                 _app.state.quality_monitor = quality_monitor
+                # RT-5 PR-2 (RT-ADR-24/25) — drift detector, started with the
+                # sampler (same feature gate). Reads the quality series, raises a
+                # quality.drift webhook (off the run spine) on a baseline drop.
+                quality_drift = QualityDriftWorker(
+                    score_store=resolved_quality_score,
+                    alert_store=resolved_quality_drift_alert,
+                    endpoint_store=resolved_webhook_endpoint_store,
+                    delivery_store=resolved_webhook_delivery_store,
+                    recent_window_s=resolved_settings.quality_drift_recent_window_h * 3600,
+                    baseline_window_s=resolved_settings.quality_drift_baseline_window_h * 3600,
+                    min_samples=resolved_settings.quality_drift_min_samples,
+                    drift_threshold=resolved_settings.quality_drift_threshold,
+                    cooldown_s=resolved_settings.quality_drift_cooldown_h * 3600,
+                    interval_s=float(resolved_settings.quality_drift_interval_s),
+                    # Single-flight the cycle across replicas (advisory lock);
+                    # None in single-process / test runs needs no lock.
+                    session_factory=sql_stores.session_factory if sql_stores else None,
+                )
+                quality_drift.start()
+                _app.state.quality_drift = quality_drift
             # Stream HX-4 (Mini-ADR HX-D2) — pending-approvals gauge.
             # Always-on: one COUNT(*) a minute, no settings knob.
             approval_gauge_worker = ApprovalGaugeWorker(approval_store=resolved_approval_store)
@@ -1766,6 +1796,8 @@ def create_app(
                     await eval_worker.stop()
                 if quality_monitor is not None:
                     await quality_monitor.stop()
+                if quality_drift is not None:
+                    await quality_drift.stop()
                 if approval_gauge_worker is not None:
                     await approval_gauge_worker.stop()
                 # Stream HX-7 — drain the Langfuse SDK's background queue
@@ -2083,6 +2115,7 @@ class _SqlStores:
     agent_disable: AgentDisableStore  # Stream RT-4 (RT-ADR-16) — agent kill switch
     quality_score: QualityScoreStore  # Stream RT-5 (RT-ADR-24) — quality time-series
     quality_candidate: QualityCandidateSource  # Stream RT-5 (RT-ADR-22) — sampling feed
+    quality_drift_alert: QualityDriftAlertStore  # Stream RT-5 (RT-ADR-24) — drift alerts
     tenant_member: TenantMemberStore  # Stream R
     tenant_mcp_server: TenantMcpServerStore  # Stream V
     tenant_skill_subscription: TenantSkillSubscriptionStore  # Skill Marketplace
@@ -2302,6 +2335,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         agent_disable=SqlAgentDisableStore(session_factory),
         quality_score=SqlQualityScoreStore(session_factory),
         quality_candidate=SqlQualityCandidateSource(session_factory),
+        quality_drift_alert=SqlQualityDriftAlertStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
         tenant_skill_subscription=SqlTenantSkillSubscriptionStore(session_factory),

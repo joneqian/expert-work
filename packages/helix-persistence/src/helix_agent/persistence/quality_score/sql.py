@@ -104,3 +104,26 @@ class SqlQualityScoreStore(QualityScoreStore):
         async with self._sf() as session:
             rows = (await session.execute(stmt)).scalars().all()
         return [_row_to_record(row) for row in rows]
+
+    async def list_agents_with_scores_since(self, *, since: datetime) -> list[tuple[UUID, str]]:
+        stmt = (
+            select(QualityScoreRow.tenant_id, QualityScoreRow.agent_name)
+            .where(QualityScoreRow.observed_at >= since)
+            .distinct()
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).all()
+        return [(row.tenant_id, row.agent_name) for row in rows]
+
+    async def window_stats(
+        self, *, tenant_id: UUID, agent_name: str, since: datetime, until: datetime
+    ) -> tuple[int, float | None]:
+        stmt = select(func.count(), func.avg(QualityScoreRow.overall)).where(
+            QualityScoreRow.tenant_id == tenant_id,
+            QualityScoreRow.agent_name == agent_name,
+            QualityScoreRow.observed_at >= since,
+            QualityScoreRow.observed_at < until,
+        )
+        async with self._sf() as session:
+            count, mean = (await session.execute(stmt)).one()
+        return int(count), (float(mean) if mean is not None else None)

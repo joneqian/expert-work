@@ -16,7 +16,8 @@ export type WebhookEventType =
   | "run.failed"
   | "approval.requested"
   | "artifact.saved"
-  | "skill_promote.requested";
+  | "skill_promote.requested"
+  | "quality.drift";
 
 export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   "run.completed",
@@ -24,6 +25,7 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   "approval.requested",
   "artifact.saved",
   "skill_promote.requested",
+  "quality.drift",
 ];
 
 /** Delivery body shape — the signed helix envelope, or an IM bot message. */

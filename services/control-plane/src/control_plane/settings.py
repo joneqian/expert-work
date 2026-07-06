@@ -537,6 +537,19 @@ class Settings(BaseSettings):
     #: Judge model + provider (platform-credentialed, Haiku-tier for cost).
     quality_judge_provider: str = Field(default="anthropic")
     quality_judge_model: str = Field(default="claude-haiku-4-5-20251001")
+    #: RT-5 PR-2 (RT-ADR-24/25) — quality-drift detector. Started alongside the
+    #: sampler (same ``enable_quality_monitor`` gate): it reads the quality
+    #: series and raises a ``quality.drift`` webhook when an agent's recent mean
+    #: drops below its baseline. Compares the last ``recent_window_h`` against the
+    #: ``baseline_window_h`` before it; needs ``min_samples`` in each window.
+    quality_drift_interval_s: int = Field(default=3600, gt=0)
+    quality_drift_recent_window_h: int = Field(default=24, gt=0)
+    quality_drift_baseline_window_h: int = Field(default=168, gt=0)
+    quality_drift_min_samples: int = Field(default=10, gt=0)
+    #: Relative drop ``(baseline - recent) / baseline`` that raises an alert.
+    quality_drift_threshold: float = Field(default=0.15, gt=0, le=1)
+    #: Per-(tenant, agent) suppression window after an alert (no repeat spam).
+    quality_drift_cooldown_h: int = Field(default=24, gt=0)
 
     #: SE-13 pre-evolution domain research (gated OFF by default). On cold start
     #: of an agent's evolution, research the tenant KB (+ optionally public web)

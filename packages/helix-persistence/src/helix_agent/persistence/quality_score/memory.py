@@ -63,3 +63,28 @@ class InMemoryQualityScoreStore(QualityScoreStore):
             ]
         rows.sort(key=lambda r: r.observed_at or datetime.min.replace(tzinfo=UTC), reverse=True)
         return rows[:limit]
+
+    async def list_agents_with_scores_since(self, *, since: datetime) -> list[tuple[UUID, str]]:
+        async with self._lock:
+            pairs = {
+                (rec.tenant_id, rec.agent_name)
+                for rec in self._by_run.values()
+                if rec.observed_at is not None and rec.observed_at >= since
+            }
+        return sorted(pairs)
+
+    async def window_stats(
+        self, *, tenant_id: UUID, agent_name: str, since: datetime, until: datetime
+    ) -> tuple[int, float | None]:
+        async with self._lock:
+            overalls = [
+                rec.overall
+                for rec in self._by_run.values()
+                if rec.tenant_id == tenant_id
+                and rec.agent_name == agent_name
+                and rec.observed_at is not None
+                and since <= rec.observed_at < until
+            ]
+        if not overalls:
+            return 0, None
+        return len(overalls), sum(overalls) / len(overalls)

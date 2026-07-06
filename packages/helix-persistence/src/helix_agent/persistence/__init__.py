@@ -188,6 +188,15 @@ from helix_agent.persistence.quality_candidate import (
 from helix_agent.persistence.quality_candidate import (
     SqlQualityCandidateSource as SqlQualityCandidateSource,
 )
+from helix_agent.persistence.quality_drift_alert import (
+    InMemoryQualityDriftAlertStore as InMemoryQualityDriftAlertStore,
+)
+from helix_agent.persistence.quality_drift_alert import (
+    QualityDriftAlertStore as QualityDriftAlertStore,
+)
+from helix_agent.persistence.quality_drift_alert import (
+    SqlQualityDriftAlertStore as SqlQualityDriftAlertStore,
+)
 from helix_agent.persistence.quality_score import (
     InMemoryQualityScoreStore as InMemoryQualityScoreStore,
 )
@@ -411,6 +420,7 @@ __all__ = [
     "InMemoryPlatformAgentTemplateStore",
     "InMemoryPlatformSecretStore",
     "InMemoryQualityCandidateSource",
+    "InMemoryQualityDriftAlertStore",
     "InMemoryQualityScoreStore",
     "InMemoryTenantBillingLedgerStore",
     "InMemoryTenantConfigStore",
@@ -453,6 +463,7 @@ __all__ = [
     "PlatformSecretStore",
     "QualityCandidate",
     "QualityCandidateSource",
+    "QualityDriftAlertStore",
     "QualityScoreStore",
     "SqlAgentDisableStore",
     "SqlApprovalStore",
@@ -469,6 +480,7 @@ __all__ = [
     "SqlPlatformAgentTemplateStore",
     "SqlPlatformSecretStore",
     "SqlQualityCandidateSource",
+    "SqlQualityDriftAlertStore",
     "SqlQualityScoreStore",
     "SqlTenantConfigStore",
     "SqlTenantMcpServerStore",
