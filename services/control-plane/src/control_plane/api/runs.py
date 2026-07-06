@@ -469,6 +469,38 @@ async def apply_approval_decision(
     )
 
 
+async def _workspace_drift(
+    workspace_store: UserWorkspaceStore | None,
+    *,
+    tenant_id: UUID,
+    user_id: UUID | None,
+    reason_kind: str,
+    requested_at: datetime,
+) -> bool:
+    """RT-6 Tier B (RT-ADR-20) — did a workspace-write-capable tool run since the
+    approval was requested? (approve-then-swap-script).
+
+    Audit-only / forensic — every failure is swallowed to ``False`` so a purely
+    informational read can never block a resume or a status fetch. Scoped to
+    declarative-gate (``policy_gate``) approvals bound to a user workspace; a
+    ``NullWorkspaceLock`` deployment never bumps ``last_write_at`` so it's False.
+    The signal is a conservative over-approximation — a read-only bash also bumps
+    the lock — so it means "a mutating-capable tool ran", not a proven change.
+    """
+    if workspace_store is None or reason_kind != "policy_gate" or user_id is None:
+        return False
+    try:
+        ws = await workspace_store.get(tenant_id=tenant_id, user_id=user_id)
+        # The comparison stays INSIDE the try: a naive/aware datetime mismatch
+        # raises TypeError, and this read must never 500 a status poll or wedge
+        # a post-CAS resume — swallow everything to False (RT-6 audit-only).
+        return ws is not None and ws.last_write_at is not None and ws.last_write_at > requested_at
+    except Exception:
+        # No request-derived value in the message (CodeQL py/log-injection).
+        logger.warning("approval.workspace_drift_check_failed", exc_info=True)
+        return False
+
+
 async def resolve_approval_decision(
     *,
     tenant_id: UUID,
@@ -578,32 +610,17 @@ async def resolve_approval_decision(
         raise HTTPException(status_code=409, detail="approval already decided")
 
     # RT-6 Tier B (RT-ADR-20) — did a workspace-write-capable tool run between
-    # the approval request and this verdict? (approve-then-swap-script). Audit-
-    # only, never blocks; scoped to declarative-gate (policy_gate) approvals
-    # bound to a user workspace. This runs post-CAS / pre-spawn, where a raising
-    # read would wedge a legitimately-approved run for good (the decision is
-    # already consumed; a retry replays without re-spawning). So every failure —
-    # a transient DB error, an unwired store — is swallowed to False: a forensic
-    # signal must never block the resume. NullWorkspaceLock (single-process)
-    # never bumps last_write_at, so drift is always False there.
-    workspace_drift = False
-    if (
-        workspace_store is not None
-        and approval.reason_kind == "policy_gate"
-        and approval.user_id is not None
-    ):
-        try:
-            ws = await workspace_store.get(tenant_id=tenant_id, user_id=approval.user_id)
-            workspace_drift = (
-                ws is not None
-                and ws.last_write_at is not None
-                and ws.last_write_at > approval.requested_at
-            )
-        except Exception:
-            # No request-derived value in the message (CodeQL py/log-injection);
-            # the run is already on the enclosing APPROVAL_DECIDED audit row.
-            logger.warning("approval.workspace_drift_check_failed", exc_info=True)
-            workspace_drift = False
+    # the approval request and this verdict? Audit-only, never blocks. This runs
+    # post-CAS / pre-spawn, where a raising read would wedge a legitimately-
+    # approved run for good (the decision is already consumed; a retry replays
+    # without re-spawning) — the helper swallows every failure to False.
+    workspace_drift = await _workspace_drift(
+        workspace_store,
+        tenant_id=tenant_id,
+        user_id=approval.user_id,
+        reason_kind=approval.reason_kind,
+        requested_at=approval.requested_at,
+    )
     await emit(
         audit,
         tenant_id=tenant_id,
@@ -1065,6 +1082,16 @@ def build_runs_router() -> APIRouter:
         approval = await approvals.get_by_run(run_id=run_id, tenant_id=tenant_id)
         pending: dict[str, Any] | None = None
         if approval is not None and approval.status is ApprovalStatus.PENDING:
+            # RT-6 Tier B — compute the workspace-drift signal live so the review
+            # card can warn the human *before* they decide (the resume-time audit
+            # is too late for the pending view). Best-effort inside the helper.
+            drift = await _workspace_drift(
+                getattr(request.app.state, "user_workspace_store", None),
+                tenant_id=tenant_id,
+                user_id=approval.user_id,
+                reason_kind=approval.reason_kind,
+                requested_at=approval.requested_at,
+            )
             pending = {
                 "request_id": approval.request_id,
                 "node": approval.node,
@@ -1073,6 +1100,11 @@ def build_runs_router() -> APIRouter:
                 "proposed_args": approval.proposed_args,
                 "requested_at": approval.requested_at.isoformat(),
                 "timeout_at": approval.timeout_at.isoformat(),
+                # RT-6 Tier A — the approved args fingerprint receipt (empty for a
+                # legacy / unbound or action-screen approval).
+                "binding_digest": approval.binding_digest,
+                # RT-6 Tier B — workspace mutated since the request (audit-only).
+                "workspace_drift": drift,
             }
         # Status resolution (Mini-ADR J-41): the in-memory RunManager is
         # authoritative while the run is live, but its record is dropped

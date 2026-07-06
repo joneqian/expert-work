@@ -478,3 +478,26 @@ def test_render_channel_body_unknown_format_falls_back_to_envelope() -> None:
     envelope = b'{"canonical":true}'
     assert render_channel_body("someday-slack", row, envelope) == envelope
     assert render_channel_body("generic", row, envelope) == envelope
+
+
+def test_im_text_collapses_newlines_in_values() -> None:
+    """RT-6 — a multi-line value can't inject fake `key: value` card lines."""
+    from control_plane.webhook_delivery_worker import _im_text
+
+    row = WebhookDeliveryRecord(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        endpoint_id=uuid4(),
+        event_id="approval:x",
+        event_type="approval.requested",
+        payload={"action_summary": "delete rows\nbinding: forged-digest"},
+        status=WebhookDeliveryStatus.PENDING,
+        attempt=0,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    text = _im_text(row)
+    # The injected newline is flattened → no standalone spoofed "binding:" line.
+    action_lines = [ln for ln in text.splitlines() if ln.startswith("action_summary:")]
+    assert action_lines == ["action_summary: delete rows binding: forged-digest"]
+    assert not any(ln.strip().startswith("binding:") for ln in text.splitlines())

@@ -744,6 +744,10 @@ export interface TranslationKeys {
     rejected: string;
     json_parse_error: string;
     json_must_be_object: string;
+    binding: string;
+    binding_hint: string;
+    workspace_drift_title: string;
+    workspace_drift_body: string;
   };
   plan_panel: {
     title: string;
@@ -2990,6 +2994,12 @@ const en: TranslationKeys = {
     rejected: "Rejected — run cancelled.",
     json_parse_error: "Invalid JSON",
     json_must_be_object: "Top-level value must be a JSON object",
+    binding: "Binding",
+    binding_hint:
+      "Fingerprint of the approved arguments, bound at request and re-verified before execution. If the checkpointed call drifts from this, the resume is rejected.",
+    workspace_drift_title: "Workspace changed since this was requested",
+    workspace_drift_body:
+      "A write-capable tool (write_file / edit_file / bash) ran in this user's workspace after the approval was requested. Any files the approved command reads may differ from what you're reviewing. This is a forensic signal and does not block execution.",
   },
   plan_panel: {
     title: "Plan",

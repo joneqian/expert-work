@@ -36,6 +36,14 @@ export interface PendingApproval {
   proposed_args: Record<string, unknown>;
   requested_at: string;
   timeout_at: string;
+  /** RT-6 Tier A (RT-ADR-19) — the approved-args fingerprint bound at mint,
+   *  re-verified before dispatch. Empty for a legacy / unbound or action-screen
+   *  approval. Shown as a short receipt on the review card. */
+  binding_digest?: string;
+  /** RT-6 Tier B (RT-ADR-20) — a workspace-write-capable tool ran since this
+   *  approval was requested (approve-then-swap-script). Audit-only signal, a
+   *  conservative over-approximation — surfaced as a warning, never blocks. */
+  workspace_drift?: boolean;
 }
 
 /** Per-run token usage summary — aggregated from helix's own

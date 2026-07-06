@@ -434,7 +434,7 @@ HITL 的 TOCTOU 弱点,企业安全卖点(approval 移植 OpenClaw approval-time
 
 - **PR-0 设计**(本节 §12 + ITERATION-PLAN;设计先合)
 - **PR-1 后端**:协议 binding 字段(`ApprovalRequest`/`ApprovalRecord` 加 `binding_digest`/`workspace_gen`)+ canonical 指纹助手(`_approval.py`,pure)+ mint 算指纹 + workspace 代际记录(bash,RT-ADR-20 选定机制)+ exec 前校验硬拒(`builder.py:1013` + resume 端点透 digest)+ modify 重铸原子写(`mark_decided` CAS)+ migration(binding 两列,≤32,真 PG)+ 审计(RT-ADR-21)+ 单测(指纹匹配放行/篡改 digest 拒+审计/modify 重铸放行/bash workspace drift 审计标不拦/exec_python·http workspace_gen 为 None 且指纹全程匹配)
-- **PR-2 前端**:`ApprovalCard.tsx` 展 `binding_digest`(短哈希 receipt)+ "审批后 workspace 有改动"徽标(Tier B,bash)+ `binding_drift` 硬拒状态展示;`ApprovalsList.tsx` 列表标识;IM webhook 审批卡片补 binding 摘要字段(payload_format feishu/dingtalk/wecom);i18n 双语 + 前端审(aria-label/axe、`tsc -b --noEmit`、vitest 全量)
+- **PR-2 前端(已交付)**:**后端小补** = GET run-detail pending 面加 `binding_digest`(Tier A receipt)+ `workspace_drift`(Tier B **GET-time 实时算**——resume 审计只在决策时太晚,pending 卡片要即时警示;抽 `_workspace_drift` helper 供 resolve+GET 复用,try/except 永不拦)。`ApprovalCard.tsx` 展 `binding_digest`(短指纹 receipt + Tooltip)+ "审批后 workspace 有改动"警告 Alert(Tier B,决策前警示,文案如实"写工具执行过/可能有改动")。IM webhook `approval.requested` payload 补 `action_summary`/`reason_kind`/`binding`(短指纹)——`_im_text` 通用渲染 scalar 字段自动进 feishu/dingtalk/wecom 卡片,零模板改。i18n 双语 + tsc-b/vitest 全量。**范围收敛(实施拍板)**:①`binding_drift` 硬拒态**不加 ApprovalCard 特殊 UI**——终态 reject message「[approval binding drift]」已在 run 事件流可见,卡片只在 PENDING 显;②`ApprovalsList` drift 标识**砍**——列表 drift 需 per-item N 次 workspace 读,成本/粒度不划算,pending 卡片实时警示已够。
 
 ### 12.5 验证
 

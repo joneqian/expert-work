@@ -65,6 +65,19 @@ function renderCard(onResolved = vi.fn()) {
   );
 }
 
+function renderWith(overrides: Partial<PendingApproval>) {
+  return render(
+    <App>
+      <ApprovalCard
+        threadId="t-1"
+        runId="r-1"
+        approval={{ ...approval, ...overrides }}
+        onResolved={vi.fn()}
+      />
+    </App>,
+  );
+}
+
 describe("ApprovalCard", () => {
   it("renders the proposed_args read-only by default", () => {
     renderCard();
@@ -138,6 +151,28 @@ describe("ApprovalCard", () => {
     fireEvent.change(editor, { target: { value: "{not valid json" } });
     expect(screen.getByTestId("approval-json-error")).toBeInTheDocument();
     expect(screen.getByTestId("approval-approve")).toBeDisabled();
+  });
+
+  // RT-6 Tier A — binding_digest receipt
+  it("shows the binding fingerprint receipt (first 12 chars) when bound", () => {
+    renderWith({ binding_digest: "abcdef0123456789deadbeef" });
+    expect(screen.getByTestId("approval-binding-digest")).toHaveTextContent("abcdef012345");
+  });
+
+  it("shows no binding receipt for an unbound approval", () => {
+    renderWith({ binding_digest: "" });
+    expect(screen.queryByTestId("approval-binding-digest")).not.toBeInTheDocument();
+  });
+
+  // RT-6 Tier B — workspace-drift warning
+  it("warns when the workspace drifted since the request", () => {
+    renderWith({ workspace_drift: true });
+    expect(screen.getByTestId("approval-workspace-drift")).toBeInTheDocument();
+  });
+
+  it("shows no drift warning when the workspace is unchanged", () => {
+    renderWith({ workspace_drift: false });
+    expect(screen.queryByTestId("approval-workspace-drift")).not.toBeInTheDocument();
   });
 
   it("Reject sends decision='reject' regardless of edit state", async () => {

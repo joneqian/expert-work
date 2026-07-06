@@ -137,7 +137,10 @@ def _im_text(row: WebhookDeliveryRecord) -> str:
     for key, value in sorted((row.payload or {}).items()):
         if value is None or isinstance(value, dict | list):
             continue
-        lines.append(f"{key}: {value}")
+        # Collapse line breaks so a multi-line value (e.g. an agent-authored
+        # action_summary) can't inject fake "key: value" lines into the card.
+        flat = " ".join(str(value).splitlines())
+        lines.append(f"{key}: {flat}")
     lines.append(f"event: {row.event_type}")
     lines.append(f"delivery: {row.id}")
     return "\n".join(lines)
@@ -337,6 +340,13 @@ class WebhookDeliveryWorker:
                     "run_id": str(ap.run_id),
                     "thread_id": str(ap.thread_id),
                     "request_id": ap.request_id,
+                    # RT-6 — make the IM card actionable: what's awaiting approval
+                    # plus the Tier A binding receipt (short fingerprint). ``None``
+                    # for an unbound / action-screen approval → the generic
+                    # renderer skips the line rather than printing an empty value.
+                    "action_summary": ap.action_summary,
+                    "reason_kind": ap.reason_kind,
+                    "binding": ap.binding_digest[:12] if ap.binding_digest else None,
                 },
                 now=now,
             )

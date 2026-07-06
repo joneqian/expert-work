@@ -611,6 +611,55 @@ async def test_get_run_surfaces_pending_approval(runs_client: AsyncClient) -> No
     assert pending["reason_kind"] == "policy_gate"
     assert pending["action_summary"] == "approval-gated tool 'send_email'"
     assert pending["proposed_args"] == {"to": "ops@example.com"}
+    # RT-6 — an unbound approval with no workspace writes reports empty/false.
+    assert pending["binding_digest"] == ""
+    assert pending["workspace_drift"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_run_pending_surfaces_binding_and_drift(runs_client: AsyncClient) -> None:
+    """RT-6 — the pending view carries the Tier A receipt + Tier B drift signal."""
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from helix_agent.protocol import ApprovalRecord, UserWorkspace
+
+    thread_id = await _create_session(runs_client)
+    run_id, user_id = uuid4(), uuid4()
+    app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
+    now = datetime.now(UTC)
+    await app.state.approval_store.create(
+        ApprovalRecord(
+            id=uuid4(),
+            tenant_id=DEFAULT_DEV_TENANT_ID,
+            user_id=user_id,
+            run_id=run_id,
+            thread_id=thread_id,  # type: ignore[arg-type]
+            request_id="approval:bind",
+            node="tools",
+            reason_kind="policy_gate",
+            action_summary="approval-gated tool 'bash'",
+            proposed_args={"command": "./deploy.sh"},
+            requested_at=now,
+            timeout_at=now + timedelta(hours=24),
+            binding_digest="deadbeefcafef00d",
+        )
+    )
+    # Seed a workspace whose last write lands AFTER the approval request → drift.
+    ws_store = app.state.user_workspace_store
+    ws_store._rows[(DEFAULT_DEV_TENANT_ID, user_id)] = UserWorkspace(
+        id=uuid4(),
+        tenant_id=DEFAULT_DEV_TENANT_ID,
+        user_id=user_id,
+        volume_name="vol",
+        last_write_at=now + timedelta(minutes=1),
+    )
+
+    resp = await runs_client.get(f"/v1/sessions/{thread_id}/runs/{run_id}")
+    assert resp.status_code == 200
+    pending = resp.json()["pending_approval"]
+    assert pending["binding_digest"] == "deadbeefcafef00d"
+    assert pending["workspace_drift"] is True
 
 
 @pytest.mark.asyncio
