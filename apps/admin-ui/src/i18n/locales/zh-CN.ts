@@ -794,6 +794,12 @@ const zhCN: TranslationKeys = {
     rejected: "已拒绝 — 运行已取消。",
     json_parse_error: "JSON 解析错误",
     json_must_be_object: "顶层必须是 JSON object",
+    binding: "绑定指纹",
+    binding_hint:
+      "审批时对参数计算的指纹，执行前重新校验。若检查点里的调用与此不符，恢复将被拒绝。",
+    workspace_drift_title: "自发起审批以来 workspace 有改动",
+    workspace_drift_body:
+      "审批发起后，该用户 workspace 里有写能力工具（write_file / edit_file / bash）执行过。被批命令读取的文件可能已与你正在审阅的不一致。这是取证信号，不阻断执行。",
   },
   plan_panel: {
     title: "计划",

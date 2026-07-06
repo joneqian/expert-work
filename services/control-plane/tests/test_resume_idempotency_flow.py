@@ -21,7 +21,7 @@ from fastapi import HTTPException
 
 from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api import runs as runs_module
-from control_plane.api.runs import apply_approval_decision
+from control_plane.api.runs import _workspace_drift, apply_approval_decision
 from control_plane.audit import build_default_audit_logger
 from control_plane.tenant_status import TenantStatusService
 from helix_agent.persistence import (
@@ -434,3 +434,26 @@ async def test_workspace_drift_read_failure_never_blocks_resume(
         monkeypatch, user_id=uuid4(), workspace_store=_RaisingWorkspaceStore()
     )
     assert _decided_drift(audit_store) is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_drift_swallows_comparison_error() -> None:
+    """A naive/aware datetime mismatch in the comparison → False, never raised.
+
+    Guards the extraction regression: the `>` must stay inside the try/except so
+    a status poll never 500s and a post-CAS resume never wedges.
+    """
+
+    class _NaiveStore:
+        async def get(self, *, tenant_id: UUID, user_id: UUID) -> object:
+            # tz-naive last_write_at vs an aware requested_at → TypeError on `>`.
+            return SimpleNamespace(last_write_at=datetime(2026, 5, 22, 12, 0, 0))
+
+    drift = await _workspace_drift(
+        _NaiveStore(),
+        tenant_id=uuid4(),
+        user_id=uuid4(),
+        reason_kind="policy_gate",
+        requested_at=datetime.now(UTC),
+    )
+    assert drift is False

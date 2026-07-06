@@ -16,7 +16,7 @@
  * parent can refresh / clear local state.
  */
 import { useCallback, useMemo, useState } from "react";
-import { Alert, App, Button, Card, Space, Typography } from "antd";
+import { Alert, App, Button, Card, Space, Tooltip, Typography } from "antd";
 import Editor from "@monaco-editor/react";
 import { AlertTriangle, Check, Edit3, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -135,6 +135,20 @@ export function ApprovalCard({ threadId, runId, approval, onResolved }: Approval
       <p style={{ margin: "0 0 8px", color: "var(--hx-text-secondary)" }}>
         {approval.action_summary}
       </p>
+
+      {/* RT-6 Tier B — warn the reviewer the workspace changed since this was
+          requested, BEFORE they approve (approve-then-swap-script). */}
+      {approval.workspace_drift ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={t("approval_card.workspace_drift_title")}
+          description={t("approval_card.workspace_drift_body")}
+          data-testid="approval-workspace-drift"
+        />
+      ) : null}
+
       <Space
         size={16}
         wrap
@@ -154,6 +168,17 @@ export function ApprovalCard({ threadId, runId, approval, onResolved }: Approval
           {t("approval_card.timeout_at")}:{" "}
           {new Date(approval.timeout_at).toLocaleString()}
         </span>
+        {/* RT-6 Tier A — the approved-args fingerprint receipt (short prefix). */}
+        {approval.binding_digest ? (
+          <Tooltip title={t("approval_card.binding_hint")}>
+            <span>
+              {t("approval_card.binding")}:{" "}
+              <Text code style={{ fontSize: 11 }} data-testid="approval-binding-digest">
+                {approval.binding_digest.slice(0, 12)}
+              </Text>
+            </span>
+          </Tooltip>
+        ) : null}
       </Space>
 
       <div
