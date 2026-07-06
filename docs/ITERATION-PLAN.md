@@ -1706,7 +1706,10 @@ PR 链（main 上 9 个 squash commits）：#198（设计 L0）→ #199 L3 → #
 
 ### Wave 3（并行，依赖 RT-1）
 - [ ] **RT-5 生产质量监控**（~2 周，5 PR，★5 需 live E2E）：真实流量采样→judge 评分（RT-1 结构化输出）→落库→漂移检测→`quality.drift` webhook 告警；aux 计量（usage_kind）；质量看板新页全套挂点
-- [ ] **RT-6 审批工件绑定**（~1 周，3 PR）：approval 绑定 canonical 工件（argv/cwd/env 指纹/脚本 content_hash），执行前漂移即拒+审计；modify 重铸绑定；ApprovalCard 工件展示+IM 卡片字段
+- [ ] **RT-6 审批工件绑定**（~1 周，3 PR）（设计 [STREAM-RT-DESIGN](./streams/STREAM-RT-DESIGN.md) §12 / RT-ADR-19~21）：**grounding 核实计划前提部分过期——args 本就被 checkpoint 冻结**（`apply_resume_decision` approve 原样派发 checkpointed tool_calls，exec_python/http 全参内联），无漂移路径；真威胁面 = **bash 引用的 workspace 文件内容可变**（跨 run/副本按 user 共享，并发 run 可 approve-then-swap-script）。决策（用户拍板，约束=不削弱 Agent 能力+不增操作复杂度）：**Tier A args canonical 指纹硬拦**（RT-ADR-19，digest 存审批行=独立完整性域，防 checkpoint 篡改；零假阳故拦得起）+ **Tier B bash workspace 写代际察觉**（RT-ADR-20，审计-only 不拦，闭合问责半，零摩擦）；modify 重铸绑定原子写（RT-ADR-21）。文件层硬拦破约束→per-manifest opt-in backlog（[memory:audit-over-blocking]）。
+  - [x] **PR-0 设计（本次）**：RT-ADR-19~21 落 §12（威胁模型勘误 + Tier A 硬绑规格 + Tier B 审计信号 + modify 重铸 + migration + UI 面）。
+  - [ ] **PR-1 后端**：协议 binding 字段 + canonical 指纹助手 + mint 算指纹 + bash workspace 代际 + exec 前校验硬拒（builder.py:1013 + resume 端点透 digest）+ modify 重铸原子写 + migration（≤32，真 PG）+ 审计 + 单测。
+  - [ ] **PR-2 前端**：ApprovalCard 展 binding_digest receipt + workspace-drift 徽标 + binding_drift 硬拒态；ApprovalsList 标识；IM webhook 卡片补 binding 摘要；i18n 双语 + 前端审。
 
 ### Wave 4
 - [ ] **RT-7 成本感知模型路由**（~1.5 周，4 PR）：任务档位路由（强推理/常规/轻量）+ strict 来源契约（显式指定不降档）+ 沿用 Y-MK failover + PlatformRoutingSection 平台配置；eval 回归护质量
