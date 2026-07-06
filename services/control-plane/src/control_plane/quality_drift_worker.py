@@ -31,6 +31,10 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from control_plane.platform_quality_config import (
+    EffectiveQualityConfig,
+    PlatformQualityConfigService,
+)
 from control_plane.webhook_delivery_worker import fan_out_event
 from helix_agent.common.observability import helix_counter
 from helix_agent.persistence import (
@@ -102,28 +106,19 @@ class QualityDriftWorker:
         alert_store: QualityDriftAlertStore,
         endpoint_store: WebhookEndpointStore,
         delivery_store: WebhookDeliveryStore,
-        recent_window_s: float,
-        baseline_window_s: float,
-        min_samples: int,
-        drift_threshold: float,
-        cooldown_s: float,
-        interval_s: float = _DEFAULT_INTERVAL_S,
+        config: PlatformQualityConfigService,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
-        if interval_s <= 0:
-            msg = "interval_s must be positive"
-            raise ValueError(msg)
         self._scores = score_store
         self._alerts = alert_store
         self._endpoints = endpoint_store
         self._deliveries = delivery_store
+        self._config = config
         self._session_factory = session_factory
-        self._recent_window_s = recent_window_s
-        self._baseline_window_s = baseline_window_s
-        self._min_samples = min_samples
-        self._threshold = drift_threshold
-        self._cooldown_s = cooldown_s
-        self._interval_s = interval_s
+        # Cadence + drift windows / thresholds are read live from ``config``
+        # each cycle (RT-5 PR-3b). ``_interval_s`` tracks the last cadence for
+        # the stop() await bound.
+        self._interval_s = _DEFAULT_INTERVAL_S
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
 
@@ -151,6 +146,14 @@ class QualityDriftWorker:
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
+            # Guarded cadence read: a transient config-read (DB) error keeps the
+            # last cadence and retries next cycle rather than killing the task.
+            try:
+                cfg = await self._config.effective()
+                self._interval_s = float(cfg.drift_interval_s)
+            except Exception:
+                _cycle_errors.inc()
+                logger.exception("quality_drift.config_read_failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval_s)
                 return  # stop event fired
@@ -172,8 +175,12 @@ class QualityDriftWorker:
         skips this cycle. Single-process / in-memory runs have no factory and
         need no lock.
         """
+        cfg = await self._config.effective()
+        if not cfg.enabled:
+            # Worker is always running; the UI toggle / deploy gate decides work.
+            return 0
         if self._session_factory is None:
-            return await self._run_cycle()
+            return await self._run_cycle(cfg)
         async with self._session_factory() as lock_session:
             # Long-hold guard: the lock txn stays open for the cycle; keep it off
             # any idle-in-transaction reaper (same posture as PgWorkspaceLock).
@@ -190,17 +197,17 @@ class QualityDriftWorker:
                 await lock_session.rollback()
                 return 0
             try:
-                return await self._run_cycle()
+                return await self._run_cycle(cfg)
             finally:
                 # rollback ends the txn → releases the xact advisory lock.
                 await lock_session.rollback()
 
-    async def _run_cycle(self) -> int:
+    async def _run_cycle(self, cfg: EffectiveQualityConfig) -> int:
         """Check every active agent once; returns alerts raised."""
         now = datetime.now(tz=UTC)
-        recent_start = now - timedelta(seconds=self._recent_window_s)
-        baseline_start = recent_start - timedelta(seconds=self._baseline_window_s)
-        cooldown = timedelta(seconds=self._cooldown_s)
+        recent_start = now - timedelta(hours=cfg.drift_recent_window_h)
+        baseline_start = recent_start - timedelta(hours=cfg.drift_baseline_window_h)
+        cooldown = timedelta(hours=cfg.drift_cooldown_h)
         with _bypass_rls():
             agents = await self._scores.list_agents_with_scores_since(since=recent_start)
             endpoints = await self._endpoints.list_enabled_all_tenants()
@@ -219,6 +226,8 @@ class QualityDriftWorker:
                     recent_start=recent_start,
                     baseline_start=baseline_start,
                     cooldown=cooldown,
+                    min_samples=cfg.drift_min_samples,
+                    threshold=cfg.drift_threshold,
                 )
                 if alert is None:
                     continue
@@ -241,21 +250,23 @@ class QualityDriftWorker:
         recent_start: datetime,
         baseline_start: datetime,
         cooldown: timedelta,
+        min_samples: int,
+        threshold: float,
     ) -> QualityDriftAlertRecord | None:
         with _tenant_scope(tenant_id):
             recent_count, recent_mean = await self._scores.window_stats(
                 tenant_id=tenant_id, agent_name=agent_name, since=recent_start, until=now
             )
-        if recent_count < self._min_samples or recent_mean is None:
+        if recent_count < min_samples or recent_mean is None:
             return None
         with _tenant_scope(tenant_id):
             base_count, base_mean = await self._scores.window_stats(
                 tenant_id=tenant_id, agent_name=agent_name, since=baseline_start, until=recent_start
             )
-        if base_count < self._min_samples or base_mean is None or base_mean <= 0:
+        if base_count < min_samples or base_mean is None or base_mean <= 0:
             return None
         drift_pct = (base_mean - recent_mean) / base_mean
-        if drift_pct < self._threshold:
+        if drift_pct < threshold:
             # Not a significant drop (an improvement gives drift_pct <= 0).
             return None
         with _tenant_scope(tenant_id):

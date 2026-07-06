@@ -37,12 +37,24 @@ def _patch_router(monkeypatch: pytest.MonkeyPatch, response: AIMessage) -> None:
     monkeypatch.setattr("orchestrator.build_llm_router", _fake_build, raising=False)
 
 
+_JUDGE_PROVIDER = "anthropic"
+_JUDGE_MODEL = "claude-haiku-4-5-20251001"
+
+
 def _judge(resolver: _FakeResolver) -> QualityJudge:
     return QualityJudge(
         resolver=resolver,  # type: ignore[arg-type]
         secret_store=object(),  # type: ignore[arg-type]
-        provider="anthropic",
-        model="claude-haiku-4-5-20251001",
+    )
+
+
+async def _score(judge: QualityJudge, *, prompt: str = "q", reply: str = "a"):
+    return await judge.score(
+        tenant_id=uuid4(),
+        prompt=prompt,
+        reply=reply,
+        provider=_JUDGE_PROVIDER,
+        model=_JUDGE_MODEL,
     )
 
 
@@ -64,8 +76,8 @@ async def test_score_returns_structured_verdict_and_tokens(
         usage_metadata={"input_tokens": 120, "output_tokens": 18, "total_tokens": 138},
     )
     _patch_router(monkeypatch, response)
-    result = await _judge(_FakeResolver()).score(
-        tenant_id=uuid4(), prompt="I was charged twice", reply="Refund opened."
+    result = await _score(
+        _judge(_FakeResolver()), prompt="I was charged twice", reply="Refund opened."
     )
     assert result is not None
     assert result.overall == 4
@@ -80,7 +92,7 @@ async def test_score_returns_none_when_verdict_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_router(monkeypatch, AIMessage(content="no structured output"))
-    result = await _judge(_FakeResolver()).score(tenant_id=uuid4(), prompt="q", reply="a")
+    result = await _score(_judge(_FakeResolver()))
     assert result is None
 
 
@@ -102,14 +114,12 @@ async def test_score_returns_none_on_out_of_range_verdict(
         },
     )
     _patch_router(monkeypatch, response)
-    result = await _judge(_FakeResolver()).score(tenant_id=uuid4(), prompt="q", reply="a")
+    result = await _score(_judge(_FakeResolver()))
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_score_never_raises_on_credential_failure() -> None:
     # No router patch needed — the resolver raises before the router is built.
-    result = await _judge(_FakeResolver(raises=True)).score(
-        tenant_id=uuid4(), prompt="q", reply="a"
-    )
+    result = await _score(_judge(_FakeResolver(raises=True)))
     assert result is None

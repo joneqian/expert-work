@@ -30,6 +30,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from uuid import UUID
 
+from control_plane.platform_quality_config import PlatformQualityConfigService
 from control_plane.quality_judge import QualityJudge, QualityJudgeResult
 from control_plane.runtime import AgentRuntime
 from control_plane.transcript import read_turns
@@ -132,23 +133,19 @@ class QualityMonitorWorker:
         judge: QualityJudge,
         runtime: AgentRuntime,
         usage_store: TokenUsageStore | None,
-        sampling_rate_pct: int,
-        daily_cap: int,
-        interval_s: float = _DEFAULT_INTERVAL_S,
-        batch_size: int = 200,
+        config: PlatformQualityConfigService,
     ) -> None:
-        if interval_s <= 0:
-            msg = "interval_s must be positive"
-            raise ValueError(msg)
         self._candidates = candidate_source
         self._scores = score_store
         self._judge = judge
         self._runtime = runtime
         self._usage = usage_store
-        self._rate_pct = sampling_rate_pct
-        self._daily_cap = daily_cap
-        self._interval_s = interval_s
-        self._batch_size = batch_size
+        self._config = config
+        # Loop cadence + sampling rate / cap / batch / judge model are all read
+        # live from ``config`` each cycle (RT-5 PR-3b) — a UI change takes effect
+        # within the config TTL. ``_interval_s`` tracks the last cadence for the
+        # stop() await bound.
+        self._interval_s = _DEFAULT_INTERVAL_S
         self._cursor: datetime | None = None
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
@@ -181,8 +178,16 @@ class QualityMonitorWorker:
 
     async def _loop(self) -> None:
         # Sleep first (the platform likely just restarted). A failed cycle is
-        # logged + counted, never fatal.
+        # logged + counted, never fatal. The cadence is read live from config —
+        # guarded so a transient config-read (DB) error keeps the last cadence
+        # and retries next cycle instead of killing the resident task.
         while not self._stop.is_set():
+            try:
+                cfg = await self._config.effective()
+                self._interval_s = float(cfg.monitor_interval_s)
+            except Exception:
+                _cycle_errors.inc()
+                logger.exception("quality_monitor.config_read_failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval_s)
                 return  # stop event fired
@@ -202,6 +207,10 @@ class QualityMonitorWorker:
         batch); bounded by ``_MAX_DRAIN_BATCHES`` per cycle so one call can never
         run unbounded — any remaining backlog is picked up next cycle.
         """
+        cfg = await self._config.effective()
+        if not cfg.enabled:
+            # Worker is always running; the UI toggle / deploy gate decides work.
+            return 0
         checkpointer = self._runtime.durable_checkpointer
         if checkpointer is None or self._cursor is None:
             return 0
@@ -212,14 +221,14 @@ class QualityMonitorWorker:
             since = self._cursor
             with _bypass_rls():
                 candidates = await self._candidates.list_candidates(
-                    since=since, limit=self._batch_size
+                    since=since, limit=cfg.monitor_batch_size
                 )
             if not candidates:
                 break
             cursor = since
             for cand in candidates:
                 cursor = max(cursor, cand.updated_at)
-                if not _is_sampled(str(cand.run_id), self._rate_pct):
+                if not _is_sampled(str(cand.run_id), cfg.sampling_rate_pct):
                     continue
                 _sampled_total.inc()
                 with _tenant_scope(cand.tenant_id):
@@ -233,9 +242,15 @@ class QualityMonitorWorker:
                         daily[cand.tenant_id] = await self._scores.count_since(
                             tenant_id=cand.tenant_id, since=day_start
                         )
-                if daily[cand.tenant_id] >= self._daily_cap:
+                if daily[cand.tenant_id] >= cfg.daily_cap:
                     continue
-                verdict = await self._judge_run(checkpointer, cand.thread_id, cand.tenant_id)
+                verdict = await self._judge_run(
+                    checkpointer,
+                    cand.thread_id,
+                    cand.tenant_id,
+                    provider=cfg.judge_provider,
+                    model=cfg.judge_model,
+                )
                 if verdict is None:
                     continue
                 record = QualityScoreRecord(
@@ -258,14 +273,20 @@ class QualityMonitorWorker:
             # Feed is strict ``> since`` so cursor advances on any non-empty
             # batch — no spin. A short batch means the backlog is drained.
             self._cursor = cursor
-            if len(candidates) < self._batch_size:
+            if len(candidates) < cfg.monitor_batch_size:
                 break
         if scored:
             logger.info("quality_monitor.scored", extra={"count": scored})
         return scored
 
     async def _judge_run(
-        self, checkpointer: object, thread_id: UUID, tenant_id: UUID
+        self,
+        checkpointer: object,
+        thread_id: UUID,
+        tenant_id: UUID,
+        *,
+        provider: str,
+        model: str,
     ) -> QualityJudgeResult | None:
         # Transcript read is checkpoint-level (no RLS); include_hidden=False so
         # orchestrator scaffolding does not pollute the judged exchange.
@@ -282,7 +303,9 @@ class QualityMonitorWorker:
         prompt, reply = _last_exchange(turns)
         if prompt is None or reply is None:
             return None
-        verdict = await self._judge.score(tenant_id=tenant_id, prompt=prompt, reply=reply)
+        verdict = await self._judge.score(
+            tenant_id=tenant_id, prompt=prompt, reply=reply, provider=provider, model=model
+        )
         if verdict is None:
             _judge_errors.inc()
         return verdict

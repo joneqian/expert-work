@@ -519,12 +519,14 @@ class Settings(BaseSettings):
     eval_agent_provider: str = Field(default="anthropic")
     eval_agent_model: str = Field(default="claude-sonnet-4-6")
 
-    #: Stream RT-5 (RT-ADR-22) — production quality monitor. Pull worker that
-    #: samples finished runs, LLM-judges them, and persists a per-agent quality
-    #: time-series. Gated OFF: it spends judge tokens per sampled run (aux
-    #: chargeback, usage_kind='quality_sampling') and resolves the judge model's
-    #: *platform* credential, so only deployments that opt in arm the loop.
-    enable_quality_monitor: bool = Field(default=False)
+    #: Stream RT-5 — production quality monitor. Since PR-3b (§14) this is a
+    #: **deploy-level hard-off override**, not the day-to-day switch: the workers
+    #: always start, and the effective on/off is ``enable_quality_monitor AND
+    #: platform_quality_config.enabled`` (the UI toggle). Default True (subsystem
+    #: available); set False to force the whole subsystem off regardless of the
+    #: DB config. The UI ``enabled`` defaults off, so a fresh install is still
+    #: OFF until an operator opts in (judge tokens cost money).
+    enable_quality_monitor: bool = Field(default=True)
     quality_monitor_interval_s: int = Field(default=300, gt=0)
     #: Per-run sampling probability (hash-bucket, deterministic). Primary cost
     #: knob; low by default. Low-volume agents produce a sparse series.

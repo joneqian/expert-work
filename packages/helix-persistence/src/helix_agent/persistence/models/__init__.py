@@ -44,6 +44,9 @@ from helix_agent.persistence.models.platform_embedding_config import (
 from helix_agent.persistence.models.platform_judge_config import (
     PlatformJudgeConfigRow,
 )
+from helix_agent.persistence.models.platform_quality_config import (
+    PlatformQualityConfigRow,
+)
 from helix_agent.persistence.models.platform_secret import (
     PlatformProviderSecretRow,
     PlatformToolSecretRow,
@@ -124,6 +127,7 @@ __all__ = [
     "PlatformEmbeddingConfigRow",
     "PlatformJudgeConfigRow",
     "PlatformProviderSecretRow",
+    "PlatformQualityConfigRow",
     "PlatformToolBudgetConfigRow",
     "PlatformToolSecretRow",
     "QualityDriftAlertRow",

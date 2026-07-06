@@ -65,6 +65,7 @@ from control_plane.api import (
     build_platform_config_router,
     build_platform_embedding_config_router,
     build_platform_judge_config_router,
+    build_platform_quality_config_router,
     build_platform_skills_router,
     build_platform_tool_budget_config_router,
     build_quality_router,
@@ -159,6 +160,7 @@ from control_plane.orphan_sweep import OrphanSweep
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_judge_config import PlatformJudgeConfigService
 from control_plane.platform_mcp_pool import PlatformMcpPoolService
+from control_plane.platform_quality_config import PlatformQualityConfigService
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.platform_tool_budget_config import PlatformToolBudgetConfigService
 from control_plane.quality_drift_worker import QualityDriftWorker
@@ -331,6 +333,11 @@ from helix_agent.persistence.platform_judge_config import (
     InMemoryPlatformJudgeConfigStore,
     PlatformJudgeConfigStore,
     SqlPlatformJudgeConfigStore,
+)
+from helix_agent.persistence.platform_quality_config import (
+    InMemoryPlatformQualityConfigStore,
+    PlatformQualityConfigStore,
+    SqlPlatformQualityConfigStore,
 )
 from helix_agent.persistence.platform_secrets import (
     InMemoryPlatformSecretStore,
@@ -749,6 +756,15 @@ def create_app(
     )
     resolved_quality_drift_alert: QualityDriftAlertStore = (
         sql_stores.quality_drift_alert if sql_stores else InMemoryQualityDriftAlertStore()
+    )
+    # RT-5 PR-3b (§14) — platform quality config service (DB-wins, TTL-cached).
+    # The workers read the effective config from it each cycle; the platform API
+    # writes + invalidates it. Always constructed (the workers always start).
+    resolved_quality_config_store: PlatformQualityConfigStore = (
+        sql_stores.platform_quality_config if sql_stores else InMemoryPlatformQualityConfigStore()
+    )
+    quality_config_service = PlatformQualityConfigService(
+        store=resolved_quality_config_store, settings=resolved_settings
     )
     # Stream R — member roster + Keycloak Admin client. The client is a Fake
     # unless ``keycloak_enabled`` (dev/CI never depend on a live Keycloak).
@@ -1708,50 +1724,39 @@ def create_app(
                 )
                 eval_worker.start()
                 _app.state.eval_worker = eval_worker
-            # Stream RT-5 (RT-ADR-22) — production quality monitor. Pull worker:
-            # samples finished runs, LLM-judges the latest exchange, persists the
-            # per-agent verdict + aux chargeback. Gated OFF (spends judge tokens);
-            # the judge resolves its platform-configured credential per-tenant, so
-            # it starts whenever enabled and skips a tenant with no resolvable key.
-            if resolved_settings.enable_quality_monitor:
-                quality_monitor = QualityMonitorWorker(
-                    candidate_source=resolved_quality_candidate,
-                    score_store=resolved_quality_score,
-                    judge=QualityJudge(
-                        resolver=credentials_resolver,
-                        secret_store=resolved_secret_store,
-                        provider=resolved_settings.quality_judge_provider,
-                        model=resolved_settings.quality_judge_model,
-                    ),
-                    runtime=resolved_agent_runtime,
-                    usage_store=resolved_token_usage,
-                    sampling_rate_pct=resolved_settings.quality_sampling_rate_pct,
-                    daily_cap=resolved_settings.quality_daily_cap,
-                    interval_s=float(resolved_settings.quality_monitor_interval_s),
-                    batch_size=resolved_settings.quality_monitor_batch_size,
-                )
-                quality_monitor.start()
-                _app.state.quality_monitor = quality_monitor
-                # RT-5 PR-2 (RT-ADR-24/25) — drift detector, started with the
-                # sampler (same feature gate). Reads the quality series, raises a
-                # quality.drift webhook (off the run spine) on a baseline drop.
-                quality_drift = QualityDriftWorker(
-                    score_store=resolved_quality_score,
-                    alert_store=resolved_quality_drift_alert,
-                    endpoint_store=resolved_webhook_endpoint_store,
-                    delivery_store=resolved_webhook_delivery_store,
-                    recent_window_s=resolved_settings.quality_drift_recent_window_h * 3600,
-                    baseline_window_s=resolved_settings.quality_drift_baseline_window_h * 3600,
-                    min_samples=resolved_settings.quality_drift_min_samples,
-                    drift_threshold=resolved_settings.quality_drift_threshold,
-                    cooldown_s=resolved_settings.quality_drift_cooldown_h * 3600,
-                    interval_s=float(resolved_settings.quality_drift_interval_s),
-                    # Single-flight the cycle across replicas (advisory lock);
-                    # None in single-process / test runs needs no lock.
-                    session_factory=sql_stores.session_factory if sql_stores else None,
-                )
-                quality_drift.start()
-                _app.state.quality_drift = quality_drift
+            # Stream RT-5 — production quality monitor (sampler + drift detector).
+            # PR-3b (§14): the workers ALWAYS start; each cycle reads the effective
+            # config from ``quality_config_service`` and no-ops when disabled
+            # (``enable_quality_monitor`` deploy gate AND the UI ``enabled`` toggle,
+            # default off). The judge resolves its platform credential per-tenant
+            # and skips a tenant with no resolvable key.
+            quality_monitor = QualityMonitorWorker(
+                candidate_source=resolved_quality_candidate,
+                score_store=resolved_quality_score,
+                judge=QualityJudge(
+                    resolver=credentials_resolver,
+                    secret_store=resolved_secret_store,
+                ),
+                runtime=resolved_agent_runtime,
+                usage_store=resolved_token_usage,
+                config=quality_config_service,
+            )
+            quality_monitor.start()
+            _app.state.quality_monitor = quality_monitor
+            # RT-5 PR-2 (RT-ADR-24/25) — drift detector; reads the quality series,
+            # raises a quality.drift webhook (off the run spine) on a baseline drop.
+            quality_drift = QualityDriftWorker(
+                score_store=resolved_quality_score,
+                alert_store=resolved_quality_drift_alert,
+                endpoint_store=resolved_webhook_endpoint_store,
+                delivery_store=resolved_webhook_delivery_store,
+                config=quality_config_service,
+                # Single-flight the cycle across replicas (advisory lock);
+                # None in single-process / test runs needs no lock.
+                session_factory=sql_stores.session_factory if sql_stores else None,
+            )
+            quality_drift.start()
+            _app.state.quality_drift = quality_drift
             # Stream HX-4 (Mini-ADR HX-D2) — pending-approvals gauge.
             # Always-on: one COUNT(*) a minute, no settings knob.
             approval_gauge_worker = ApprovalGaugeWorker(approval_store=resolved_approval_store)
@@ -1860,6 +1865,7 @@ def create_app(
     # scores / drift alerts is decoupled from whether the workers are running.
     app.state.quality_score_store = resolved_quality_score
     app.state.quality_drift_alert_store = resolved_quality_drift_alert
+    app.state.quality_config_service = quality_config_service
     app.state.sandbox_egress_audit_store = resolved_egress_audit_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
@@ -2073,6 +2079,7 @@ def create_app(
     app.include_router(build_eval_dataset_router())
     app.include_router(build_eval_runs_router())
     app.include_router(build_quality_router())
+    app.include_router(build_platform_quality_config_router())
 
     return app
 
@@ -2123,6 +2130,7 @@ class _SqlStores:
     quality_score: QualityScoreStore  # Stream RT-5 (RT-ADR-24) — quality time-series
     quality_candidate: QualityCandidateSource  # Stream RT-5 (RT-ADR-22) — sampling feed
     quality_drift_alert: QualityDriftAlertStore  # Stream RT-5 (RT-ADR-24) — drift alerts
+    platform_quality_config: PlatformQualityConfigStore  # Stream RT-5 (PR-3b) — quality config
     tenant_member: TenantMemberStore  # Stream R
     tenant_mcp_server: TenantMcpServerStore  # Stream V
     tenant_skill_subscription: TenantSkillSubscriptionStore  # Skill Marketplace
@@ -2343,6 +2351,7 @@ def _build_sql_stores(settings: Settings) -> _SqlStores:
         quality_score=SqlQualityScoreStore(session_factory),
         quality_candidate=SqlQualityCandidateSource(session_factory),
         quality_drift_alert=SqlQualityDriftAlertStore(session_factory),
+        platform_quality_config=SqlPlatformQualityConfigStore(session_factory),
         tenant_member=SqlTenantMemberStore(session_factory),
         tenant_mcp_server=SqlTenantMcpServerStore(session_factory),
         tenant_skill_subscription=SqlTenantSkillSubscriptionStore(session_factory),

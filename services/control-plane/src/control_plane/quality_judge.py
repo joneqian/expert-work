@@ -90,32 +90,33 @@ class QualityJudge:
         *,
         resolver: CredentialsResolver,
         secret_store: SecretStore,
-        provider: str,
-        model: str,
     ) -> None:
         self._resolver = resolver
         self._secret_store = secret_store
-        self._provider = provider
-        self._model = model
 
-    async def score(self, *, tenant_id: UUID, prompt: str, reply: str) -> QualityJudgeResult | None:
-        """Judge one exchange. Returns ``None`` on any failure (never raises).
+    async def score(
+        self, *, tenant_id: UUID, prompt: str, reply: str, provider: str, model: str
+    ) -> QualityJudgeResult | None:
+        """Judge one exchange with the given judge ``provider`` / ``model``.
 
-        Best-effort by design (RT-ADR-22): a missing credential, a provider
-        error, or a validation-exhausted structured call all drop the sample
-        rather than fail the sweep.
+        Returns ``None`` on any failure (never raises). Best-effort by design
+        (RT-ADR-22): a missing credential, a provider error, or a
+        validation-exhausted structured call all drop the sample rather than
+        fail the sweep. ``provider`` / ``model`` are read live from the platform
+        quality config each cycle (RT-5 PR-3b), so a UI change takes effect
+        without a restart.
         """
         # Lazy import — mirrors the aux adapter: importing ``build_llm_router``
         # at module load risks an orchestrator<->control-plane import cycle.
         from orchestrator import build_llm_router
 
         try:
-            provider = cast(Provider, self._provider)
+            provider_typed = cast(Provider, provider)
             secret_ref = await self._resolver.resolve_provider(
-                tenant_id=tenant_id, provider=provider
+                tenant_id=tenant_id, provider=provider_typed
             )
             spec = ModelSpec(
-                provider=provider, name=self._model, api_key_ref=secret_ref, fallback=[]
+                provider=provider_typed, name=model, api_key_ref=secret_ref, fallback=[]
             )
             router = await build_llm_router(spec, secret_store=self._secret_store)
             content = f"{_RUBRIC}\n\nUSER REQUEST:\n{prompt}\n\nAGENT REPLY:\n{reply}"
@@ -145,7 +146,7 @@ class QualityJudge:
                 "safety": verdict.safety,
             },
             rationale=verdict.rationale,
-            model=self._model,
+            model=model,
             input_tokens=int(usage.get("input_tokens", 0) or 0),
             output_tokens=int(usage.get("output_tokens", 0) or 0),
         )

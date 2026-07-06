@@ -502,3 +502,31 @@ HITL 的 TOCTOU 弱点,企业安全卖点(approval 移植 OpenClaw approval-time
 - **跨 agent 质量基准/租户排名**——单 agent 时序够,横比待;
 - **judge 模型泛化提取**(consolidator/quality 共用中性 aux caller)——PR-1 走 surgical 独立 caller,DRY 重构留 backlog;
 - **ground-truth 校准**(judge 分 vs 人工标注对齐)——先纯 LLM-judge,校准待。
+
+## 14. RT-5 PR-3b 质量配置 UI 化(2026-07-06,live run 后拆出)
+
+### 14.1 起因
+
+RT-5 PR-1 把质量监控配置(采样率/judge 模型/漂移阈值/日上限等)全走 `Settings` env(`HELIX_AGENT_QUALITY_*`),配置表在 PR-1 延后。PR-3 看板交付时用户拍板**配置 UI 单开本 PR-3b**(前端 PR-3c)。★5 live run 又暴露:①`ENABLE_QUALITY_MONITOR` 是**启动期 env 门控**(改了要重启);②env 需同步补 compose 透传(#941)。用户追问「UI 可配后 ENABLE 能否删」→ 引出 worker 生命周期设计。
+
+### 14.2 决策(用户 2026-07-06 拍板)
+
+- **enable 模型 = worker 常起 + config `enabled` 标志**(非启动期 env 门控):worker 无条件常起(去 app.py env 门控),每周期 `run_once` 开头读 config,`enabled=false` 则廉价 no-op。**有效开关 = `settings.enable_quality_monitor` AND `config.enabled`**——env `ENABLE_QUALITY_MONITOR` 降级为 **deploy 级硬 off 兜底**(默认翻 **true**=子系统可用;显式 false 一票否决),`config.enabled`(DB,UI 控)默认 **false**(耗 judge token 故 opt-in)。→ 新部署 env true∧config false=关;UI 翻 config 即开、**不碰 .env**;deploy 硬关 env=false。
+- **v1 只平台级配置**(租户覆盖/opt-out 留 backlog):质量监控是平台运营的(judge 平台付费+平台凭据),单行平台配置够。
+- **worker 读 live config**:两 worker 从「构造期读 env 参数」改「注入 `load_config` 每周期读 `EffectiveQualityConfig`」;周期节奏即天然刷新(无需额外 TTL 缓存);`_loop` sleep interval 每轮读 config;`QualityJudge` provider/model 改 **per-call**(worker 每周期从 config 取传入 `score()`)。
+- **effective-config 解析**:`resolve_effective_quality_config(settings, row)`——`enabled = settings.enable_quality_monitor AND (row.enabled if row else False)`(**无 row=关**,强制 UI opt-in);其余参数 `row` 值优先、无 row 回落 `settings`(env 仍作参数种子默认,平滑)。
+
+### 14.3 迁移代价(显式)
+
+现有 env `ENABLE_QUALITY_MONITOR=true` 的栈,PR-3b 后**无 config row → `enabled` 默认 false → 质量监控转空转**,须在平台配置 UI 翻一下 `enabled` 恢复(文档标注)。这是 opt-in-via-UI 的 GA 过渡,一次性、可接受。worker 常起但空转成本≈0(单行 config 读 + sleep)。
+
+### 14.4 PR 切分
+
+- **PR-3b 后端**:`platform_quality_config` 单行 singleton 表(tenant-less bypass RLS,照 `platform_judge_config`)+ 三件套 + migration 0119 + `EffectiveQualityConfig` 解析器 + loader + `GET/PUT /v1/platform-quality-config`(system_admin+审计)+ **worker 重构**(常起 + per-cycle config + judge per-call)+ app.py 去门控接线 + env `enable_quality_monitor` 默认翻 true + worker 单测改造 + 真 PG。
+- **PR-3c 前端**:`PlatformQualitySection.tsx`(挂 `SettingsPlatformConfig`,照 `PlatformJudgeSection`)+ `api/platform_quality_config.ts` + i18n 双语 + Storybook + tsc-b/vitest。
+
+### 14.5 范围外(backlog)
+
+- **租户级覆盖/opt-out**(per-tenant config 层 + RLS + 租户 UI + worker 读时合并)——平台级够,租户覆盖待信号;
+- **config 变更审计 diff**(记改了哪个 knob 旧→新)——先记 updated_by,细粒度 diff 待;
+- **worker 热更 interval 的即时性**——本设计下改 interval 下周期生效(当前周期已 sleep),足够。
