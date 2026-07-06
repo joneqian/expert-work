@@ -23,6 +23,9 @@ spec:
     Live quality-monitoring test agent: answers ordinary questions so the
     production-quality sampler can judge + persist a real score series.
 
+  tenant_config:
+    isolation_level: dedicated_sandbox
+
   model:
     provider: deepseek # ← change to your configured provider
     name: deepseek-v4-pro # ← and its model name
@@ -36,3 +39,21 @@ spec:
 
   tools: []
   skills: []
+
+  sandbox:
+    runtime: gvisor
+    resources:
+      cpu: '0.5'
+      memory: 512Mi
+    # No tools -> no code execution or network from the sandbox; keep it sealed.
+    network:
+      egress: none
+      allowlist: []
+    filesystem:
+      readonly_root: true
+      writable:
+        - /tmp
+      persistent_workspace: false
+
+  observability:
+    log_level: info
