@@ -15,14 +15,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from control_plane.platform_quality_config import EffectiveQualityConfig
 from control_plane.quality_drift_worker import QualityDriftWorker
 from helix_agent.persistence import (
     InMemoryQualityDriftAlertStore,
     InMemoryQualityScoreStore,
 )
 from helix_agent.protocol import QualityScoreRecord
-
-_HOUR = 3600.0
 
 
 @dataclass
@@ -94,6 +93,36 @@ async def _seed(
         await scores.insert(_score(tenant, agent, overall, now - timedelta(minutes=70 + i * 5)))
 
 
+def _effective(**over: object) -> EffectiveQualityConfig:
+    # 1h recent + 1h baseline windows (the seed lands scores in minutes-ago
+    # bands); other knobs are defaults. Overridable per test.
+    base: dict[str, object] = {
+        "enabled": True,
+        "sampling_rate_pct": 100,
+        "daily_cap": 500,
+        "monitor_interval_s": 300,
+        "monitor_batch_size": 200,
+        "judge_provider": "fake",
+        "judge_model": "fake",
+        "drift_interval_s": 3600,
+        "drift_recent_window_h": 1,
+        "drift_baseline_window_h": 1,
+        "drift_min_samples": 3,
+        "drift_threshold": 0.15,
+        "drift_cooldown_h": 24,
+    }
+    base.update(over)
+    return EffectiveQualityConfig(**base)  # type: ignore[arg-type]
+
+
+class _StubConfig:
+    def __init__(self, cfg: EffectiveQualityConfig) -> None:
+        self._cfg = cfg
+
+    async def effective(self) -> EffectiveQualityConfig:
+        return self._cfg
+
+
 def _build(
     scores: InMemoryQualityScoreStore,
     *,
@@ -101,7 +130,8 @@ def _build(
     endpoints: list[_Ep] | None = None,
     min_samples: int = 3,
     threshold: float = 0.15,
-    cooldown_s: float = 24 * _HOUR,
+    cooldown_h: int = 24,
+    enabled: bool = True,
 ) -> _Fixture:
     alerts = InMemoryQualityDriftAlertStore()
     deliveries = _FakeDeliveryStore()
@@ -111,11 +141,14 @@ def _build(
         alert_store=alerts,
         endpoint_store=_FakeEndpointStore(eps),  # type: ignore[arg-type]
         delivery_store=deliveries,  # type: ignore[arg-type]
-        recent_window_s=_HOUR,
-        baseline_window_s=_HOUR,
-        min_samples=min_samples,
-        drift_threshold=threshold,
-        cooldown_s=cooldown_s,
+        config=_StubConfig(  # type: ignore[arg-type]
+            _effective(
+                enabled=enabled,
+                drift_min_samples=min_samples,
+                drift_threshold=threshold,
+                drift_cooldown_h=cooldown_h,
+            )
+        ),
     )
     return _Fixture(worker, scores, alerts, deliveries, tenant, eps)
 
@@ -193,11 +226,7 @@ async def test_one_agents_emit_failure_does_not_starve_the_cycle() -> None:
         alert_store=alerts,
         endpoint_store=_FakeEndpointStore([ep1, ep2]),  # type: ignore[arg-type]
         delivery_store=deliveries,  # type: ignore[arg-type]
-        recent_window_s=_HOUR,
-        baseline_window_s=_HOUR,
-        min_samples=3,
-        drift_threshold=0.15,
-        cooldown_s=24 * _HOUR,
+        config=_StubConfig(_effective(drift_min_samples=3)),  # type: ignore[arg-type]
     )
 
     # First agent's emit raises; the second is still processed (isolated).
@@ -231,6 +260,19 @@ async def test_no_alert_when_recent_samples_below_min() -> None:
     await _seed(scores, tenant, agent, recent=[3, 3], baseline=[5, 5, 5, 5], now=now)
     fx = _build(scores, tenant=tenant, min_samples=3)
     assert await fx.worker.run_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_disabled_config_no_ops() -> None:
+    # RT-5 PR-3b: the worker always runs but no-ops when config is disabled,
+    # even with a clear baseline drop that would otherwise alert.
+    tenant, agent = uuid4(), "a"
+    now = datetime.now(tz=UTC)
+    scores = InMemoryQualityScoreStore()
+    await _seed(scores, tenant, agent, recent=[2, 2, 2, 2], baseline=[5, 5, 5, 5], now=now)
+    fx = _build(scores, tenant=tenant, enabled=False)
+    assert await fx.worker.run_once() == 0
+    assert await fx.alerts.list_alerts(tenant_id=tenant) == []
 
 
 @pytest.mark.asyncio

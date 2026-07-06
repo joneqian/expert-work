@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from control_plane.platform_quality_config import EffectiveQualityConfig
 from control_plane.quality_judge import QualityJudgeResult
 from control_plane.quality_monitor_worker import QualityMonitorWorker, _is_sampled
 from helix_agent.persistence import (
@@ -46,9 +47,41 @@ class _FakeJudge:
         self._result = result
         self.calls: list[tuple[str, str]] = []
 
-    async def score(self, *, tenant_id: UUID, prompt: str, reply: str) -> QualityJudgeResult | None:
+    async def score(
+        self, *, tenant_id: UUID, prompt: str, reply: str, provider: str, model: str
+    ) -> QualityJudgeResult | None:
         self.calls.append((prompt, reply))
         return self._result
+
+
+def _effective(**over: Any) -> EffectiveQualityConfig:
+    base: dict[str, Any] = {
+        "enabled": True,
+        "sampling_rate_pct": 100,
+        "daily_cap": 500,
+        "monitor_interval_s": 300,
+        "monitor_batch_size": 200,
+        "judge_provider": "fake",
+        "judge_model": "fake",
+        "drift_interval_s": 3600,
+        "drift_recent_window_h": 24,
+        "drift_baseline_window_h": 168,
+        "drift_min_samples": 10,
+        "drift_threshold": 0.15,
+        "drift_cooldown_h": 24,
+    }
+    base.update(over)
+    return EffectiveQualityConfig(**base)
+
+
+class _StubConfig:
+    """Returns a fixed effective config; the worker reads it each cycle."""
+
+    def __init__(self, cfg: EffectiveQualityConfig) -> None:
+        self._cfg = cfg
+
+    async def effective(self) -> EffectiveQualityConfig:
+        return self._cfg
 
 
 class _FakeUsageStore:
@@ -92,6 +125,7 @@ def _worker(
     rate: int = 100,
     daily_cap: int = 500,
     batch_size: int = 200,
+    enabled: bool = True,
 ) -> QualityMonitorWorker:
     worker = QualityMonitorWorker(
         candidate_source=InMemoryQualityCandidateSource(candidates),
@@ -99,9 +133,14 @@ def _worker(
         judge=judge,  # type: ignore[arg-type]
         runtime=SimpleNamespace(durable_checkpointer=checkpointer),  # type: ignore[arg-type]
         usage_store=usage,  # type: ignore[arg-type]
-        sampling_rate_pct=rate,
-        daily_cap=daily_cap,
-        batch_size=batch_size,
+        config=_StubConfig(  # type: ignore[arg-type]
+            _effective(
+                enabled=enabled,
+                sampling_rate_pct=rate,
+                daily_cap=daily_cap,
+                monitor_batch_size=batch_size,
+            )
+        ),
     )
     # Watermark just before the batch so all candidates are fresh.
     worker._cursor = _BASE
@@ -142,6 +181,21 @@ async def test_run_once_samples_judges_persists_and_meters() -> None:
     assert usage.records[0].usage_kind == "quality_sampling"
     # Watermark advanced to the newest candidate.
     assert worker._cursor == _BASE + timedelta(minutes=2)
+
+
+@pytest.mark.asyncio
+async def test_disabled_config_no_ops() -> None:
+    # RT-5 PR-3b: always running, but no sampling / judging when config disabled.
+    tenant, th1 = uuid4(), uuid4()
+    cands = [_candidate(tenant, 1, thread=th1)]
+    cp = _FakeCheckpointer({str(th1): [_msg("human", "q"), _msg("ai", "a")]})
+    judge, store = _FakeJudge(_verdict()), InMemoryQualityScoreStore()
+    worker = _worker(candidates=cands, checkpointer=cp, judge=judge, store=store, enabled=False)
+
+    scored = await worker.run_once()
+    assert scored == 0
+    assert judge.calls == []
+    assert await store.list_scores(tenant_id=tenant) == []
 
 
 @pytest.mark.asyncio
