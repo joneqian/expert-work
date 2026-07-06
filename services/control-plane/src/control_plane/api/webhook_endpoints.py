@@ -51,6 +51,7 @@ _EVENT_TYPES: frozenset[str] = frozenset(
         "approval.requested",
         "artifact.saved",
         "skill_promote.requested",
+        "quality.drift",
     )
 )
 

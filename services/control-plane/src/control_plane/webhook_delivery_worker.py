@@ -122,6 +122,7 @@ _EVENT_TITLES: dict[str, str] = {
     "approval.requested": "审批待处理",
     "artifact.saved": "产物已保存",
     "skill_promote.requested": "技能晋升申请待审",
+    "quality.drift": "质量漂移告警",
 }
 
 
@@ -169,6 +170,55 @@ def _bypass_rls() -> Iterator[None]:
         yield
     finally:
         bypass_rls_var.reset(token)
+
+
+async def fan_out_event(
+    deliveries: WebhookDeliveryStore,
+    endpoints: list[WebhookEndpointRecord],
+    *,
+    tenant_id: UUID,
+    event_type: WebhookEventType,
+    event_id: str,
+    run_id: UUID | None,
+    agent_name: str | None,
+    payload: dict[str, object],
+    now: datetime,
+) -> int:
+    """Enqueue one event to every matching endpoint of a tenant; return how many.
+
+    Shared fan-out for the run-event spine (the delivery worker) and the
+    off-spine emitters (``quality.drift``, RT-ADR-25): endpoints are filtered by
+    subscription + optional per-agent scope, deduped on ``(endpoint_id,
+    event_id)``, and enqueued PENDING for the delivery loop to POST. ``run_id``
+    is threaded through nullable — an off-spine event passes ``None``.
+    """
+    count = 0
+    for ep in endpoints:
+        if event_type not in ep.event_types:
+            continue
+        if ep.agent_name is not None and ep.agent_name != agent_name:
+            continue
+        with _bypass_rls():
+            if await deliveries.exists_for_event(endpoint_id=ep.id, event_id=event_id):
+                continue
+            await deliveries.create(
+                WebhookDeliveryRecord(
+                    id=uuid4(),
+                    tenant_id=tenant_id,
+                    endpoint_id=ep.id,
+                    event_id=event_id,
+                    event_type=event_type,
+                    run_id=run_id,
+                    payload=payload,
+                    status=WebhookDeliveryStatus.PENDING,
+                    attempt=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        count += 1
+        _enqueued.inc()
+    return count
 
 
 async def _httpx_post(url: str, body: bytes, headers: dict[str, str]) -> int:
@@ -431,33 +481,17 @@ class WebhookDeliveryWorker:
         now: datetime,
     ) -> int:
         """Enqueue one event to every matching endpoint; return how many."""
-        count = 0
-        for ep in endpoints:
-            if event_type not in ep.event_types:
-                continue
-            if ep.agent_name is not None and ep.agent_name != agent_name:
-                continue
-            with _bypass_rls():
-                if await self._deliveries.exists_for_event(endpoint_id=ep.id, event_id=event_id):
-                    continue
-                await self._deliveries.create(
-                    WebhookDeliveryRecord(
-                        id=uuid4(),
-                        tenant_id=tenant_id,
-                        endpoint_id=ep.id,
-                        event_id=event_id,
-                        event_type=event_type,
-                        run_id=run_id,
-                        payload=payload,
-                        status=WebhookDeliveryStatus.PENDING,
-                        attempt=0,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-            count += 1
-            _enqueued.inc()
-        return count
+        return await fan_out_event(
+            self._deliveries,
+            endpoints,
+            tenant_id=tenant_id,
+            event_type=event_type,
+            event_id=event_id,
+            run_id=run_id,
+            agent_name=agent_name,
+            payload=payload,
+            now=now,
+        )
 
     async def run_once(self) -> tuple[int, int, int]:
         """Drain one batch. Returns ``(delivered, retried, dead_lettered)``."""

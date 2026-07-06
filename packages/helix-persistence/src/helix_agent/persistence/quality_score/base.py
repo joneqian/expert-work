@@ -52,3 +52,21 @@ class QualityScoreStore(abc.ABC):
         Serves the drift window (RT-ADR-24) and the dashboard trend
         (RT-ADR-26). ``agent_name`` / ``since`` narrow the series.
         """
+
+    @abc.abstractmethod
+    async def list_agents_with_scores_since(self, *, since: datetime) -> list[tuple[UUID, str]]:
+        """Distinct ``(tenant_id, agent_name)`` with a verdict at/after ``since``.
+
+        Cross-tenant — the drift worker (RT-ADR-24) runs it under the RLS-bypass
+        scope to enumerate the agents worth a drift check this cycle.
+        """
+
+    @abc.abstractmethod
+    async def window_stats(
+        self, *, tenant_id: UUID, agent_name: str, since: datetime, until: datetime
+    ) -> tuple[int, float | None]:
+        """``(count, mean overall)`` for ``observed_at`` in ``[since, until)``.
+
+        SQL aggregate (not a bounded ``list_scores``) so a wide baseline window
+        is never silently truncated. ``mean`` is ``None`` when ``count`` is 0.
+        """

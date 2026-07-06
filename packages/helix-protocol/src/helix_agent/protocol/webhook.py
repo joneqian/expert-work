@@ -40,6 +40,10 @@ WebhookEventType = Literal[
     # (agent_private → tenant). Lets business systems route the approval to
     # their own channels; the delivery channel backlog is tracked separately.
     "skill_promote.requested",
+    # RT-5 PR-2 (RT-ADR-25) — an agent's recent quality mean dropped below its
+    # baseline (production quality monitor). Not a run event: the delivery
+    # carries ``run_id=None`` and a synthesised ``event_id``.
+    "quality.drift",
 ]
 
 #: Where an endpoint row came from — the CRUD API (default) or, in a

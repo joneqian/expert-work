@@ -177,6 +177,43 @@ async def test_exists_tracks_scored_runs(
 
 
 @pytest.mark.asyncio
+async def test_window_stats_tenant_scoped_avg(
+    quality_store: tuple[SqlQualityScoreStore, AsyncEngine],
+) -> None:
+    # window_stats is a tenant-scoped SQL AVG/COUNT (runs under RLS). The
+    # cross-tenant list_agents_with_scores_since (drift worker) relies on the
+    # owner RLS exemption, exactly like the webhook worker's
+    # list_enabled_all_tenants — its semantics are covered by the in-memory +
+    # drift-worker tests.
+    store, engine = quality_store
+    try:
+        tenant = uuid4()
+        current_tenant_id_var.set(tenant)
+        await store.insert(_record(tenant=tenant, run=uuid4(), agent="a", overall=5))
+        await store.insert(_record(tenant=tenant, run=uuid4(), agent="a", overall=3))
+        await store.insert(_record(tenant=tenant, run=uuid4(), agent="b", overall=4))
+
+        since = datetime.now(tz=UTC) - timedelta(hours=1)
+        until = datetime.now(tz=UTC) + timedelta(hours=1)
+        count, mean = await store.window_stats(
+            tenant_id=tenant, agent_name="a", since=since, until=until
+        )
+        assert count == 2
+        assert mean == 4.0
+        # Empty window → (0, None).
+        empty_count, empty_mean = await store.window_stats(
+            tenant_id=tenant,
+            agent_name="a",
+            since=until,
+            until=until + timedelta(hours=1),
+        )
+        assert empty_count == 0
+        assert empty_mean is None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_rls_blocks_cross_tenant_read(
     quality_store: tuple[SqlQualityScoreStore, AsyncEngine],
 ) -> None:
