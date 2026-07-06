@@ -94,6 +94,25 @@ x-control-plane-base: &control-plane-base
     HELIX_AGENT_CURATION_WORKER_INTERVAL_S: ${HELIX_AGENT_CURATION_WORKER_INTERVAL_S:-300}
     HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER: ${HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER:-anthropic}
     HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL: ${HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL:-claude-sonnet-4-6}
+    # Stream RT-5 — production quality monitoring. OFF by default. Set true in
+    # infra/.env to start the sampler + drift worker: they sample finished runs,
+    # LLM-judge them (the judge model must be a provider this tenant has a
+    # platform credential for), persist a per-agent quality series, and raise a
+    # quality.drift webhook on regressions. Sampling rate is a percent (5 =
+    # sample 5% of runs); set 100 + short intervals for a live E2E check.
+    HELIX_AGENT_ENABLE_QUALITY_MONITOR: ${HELIX_AGENT_ENABLE_QUALITY_MONITOR:-false}
+    HELIX_AGENT_QUALITY_MONITOR_INTERVAL_S: ${HELIX_AGENT_QUALITY_MONITOR_INTERVAL_S:-300}
+    HELIX_AGENT_QUALITY_SAMPLING_RATE_PCT: ${HELIX_AGENT_QUALITY_SAMPLING_RATE_PCT:-5}
+    HELIX_AGENT_QUALITY_DAILY_CAP: ${HELIX_AGENT_QUALITY_DAILY_CAP:-500}
+    HELIX_AGENT_QUALITY_MONITOR_BATCH_SIZE: ${HELIX_AGENT_QUALITY_MONITOR_BATCH_SIZE:-200}
+    HELIX_AGENT_QUALITY_JUDGE_PROVIDER: ${HELIX_AGENT_QUALITY_JUDGE_PROVIDER:-anthropic}
+    HELIX_AGENT_QUALITY_JUDGE_MODEL: ${HELIX_AGENT_QUALITY_JUDGE_MODEL:-claude-haiku-4-5-20251001}
+    HELIX_AGENT_QUALITY_DRIFT_INTERVAL_S: ${HELIX_AGENT_QUALITY_DRIFT_INTERVAL_S:-3600}
+    HELIX_AGENT_QUALITY_DRIFT_RECENT_WINDOW_H: ${HELIX_AGENT_QUALITY_DRIFT_RECENT_WINDOW_H:-24}
+    HELIX_AGENT_QUALITY_DRIFT_BASELINE_WINDOW_H: ${HELIX_AGENT_QUALITY_DRIFT_BASELINE_WINDOW_H:-168}
+    HELIX_AGENT_QUALITY_DRIFT_MIN_SAMPLES: ${HELIX_AGENT_QUALITY_DRIFT_MIN_SAMPLES:-10}
+    HELIX_AGENT_QUALITY_DRIFT_THRESHOLD: ${HELIX_AGENT_QUALITY_DRIFT_THRESHOLD:-0.15}
+    HELIX_AGENT_QUALITY_DRIFT_COOLDOWN_H: ${HELIX_AGENT_QUALITY_DRIFT_COOLDOWN_H:-24}
     # Stream MCP-OAUTH — per-user OAuth connectors. The redirect URI must point
     # at the admin-ui (or independent client) callback page, not the backend
     # endpoint; unset → the initiate endpoint returns 503. The catalog seed file
