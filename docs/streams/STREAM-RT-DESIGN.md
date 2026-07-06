@@ -398,3 +398,49 @@ tool-def 断点(RT-ADR-15)、1h 长 TTL / keep-warm(RT-ADR-13)、cache 命中率
 ### 11.6 范围外(backlog)
 
 按 run/session 粒度的选择性 kill(现两级够);disable 定时自动恢复(手动 enable 够);平台级"全租户暂停"总闸(tenant 逐个够,需求出现再议)。
+
+---
+
+## 12. RT-6 审批工件绑定 PR-0 设计(2026-07-06,Wave 3)
+
+### 12.1 起因与取证(现状核实——计划前提部分已过期)
+
+HITL 的 TOCTOU 弱点,企业安全卖点(approval 移植 OpenClaw approval-time binding)。**计划立项时的前提是"审批绑意图、args 会在批准与执行间漂移";实读源码发现 helix 的 args 本就被 checkpoint 冻结,前提部分不成立**——据此收敛真实威胁面。grounding 核实:
+
+- **argv/args 已隐式绑死**:`apply_resume_decision`(`graph_builder/_approval.py:189`,调用点 `graph_builder/builder.py:1013`)approve 时**原样派发 checkpoint 里的 tool_calls**;审批行 `ApprovalRecord.proposed_args`(`protocol/approval.py:139`)与派发源同出一个 checkpointed tool_call。→ "所见即所执行" 对 **args 本身**已隐式成立,正常流不存在漂移路径。
+- **exec_python(`code` 内联,`sandbox.py:681`)/ http(`method/url/headers/body` 内联,`http.py:98`)→ 全参数内联入 args**,无外部可变工件面,args 冻结即完全绑定。
+- **bash(`command` shell 串,`bash.py:120`)= 唯一真漂移面**:命令串本身内联冻结,但它**引用的 workspace 文件内容可变**(`./deploy.sh`)。且 **workspace 跨 run/跨副本按 user 共享**(bash.py:11-15 注释 + TE-8 `WorkspaceLock`,`tools/locks.py`)→ run A 挂起等审批时,同 user 的**并发 run** 可改 deploy.sh = 活 TOCTOU(非纯理论)。任意 shell 引用哪些文件**静态不可判定**。
+- **modify 路径**:reviewer 改 `modified_args`(`ApprovalDecision`,`protocol/approval.py:87`)→ `apply_resume_decision` 用 resume payload 的 modified_args 重写 gated call → 执行的是改后 args。
+- **落库无 binding 列**:`AgentApprovalRow`(`persistence/models/agent_approval.py`,migration 0031+0080)现只存 proposed_args/modified_args,无指纹/代际列;`SqlApprovalStore`(`persistence/approval/sql.py`)create/mark_decided。决策原子写走 Stream 13.2 的 `mark_decided` CAS(idempotency_key/continuation_run_id 已搭同一 UPDATE)。
+- **审计**:`AuditAction` StrEnum(`protocol/audit.py:22`,一处);`ResourceType` 双 Literal(`control-plane/audit.py:111` + protocol,[memory:audit-literal-drift])。
+- **前端**:`run_detail/ApprovalCard.tsx` Monaco 展 proposed_args + modify/approve/reject;`ApprovalsList.tsx` 队列;IM webhook 审批卡片走 payload_format(feishu/dingtalk/wecom)。
+
+### 12.2 决策
+
+**双层绑定:Tier A args 指纹硬拦 + Tier B bash workspace 漂移察觉(审计-only)**(用户拍板 2026-07-06,约束="不削弱 Agent 能力、不增加操作复杂度")。
+
+约束排除了所有会闭合文件层 TOCTOU 的硬办法:声明式 bound_paths(agent/reviewer 补路径=增操作复杂度)、启发式抽取+硬拦(合法文件变动如追加 log 被误杀=spurious reject=削弱 agent)、全树 Merkle 硬拦(并发合法写全触发)。故切成:
+- **Tier A(全 gated 工具,硬拦,零假阳)**:对 canonical args 算指纹,exec 前重算比对,漂移即拒+审计。正常流恒匹配,只在 checkpoint 层被篡改/replay/bug 时触发。价值=密码学"审批啥=执行啥"可证凭据 + checkpoint 层防篡改(隐式保证→显式可审计)。**拦得起是因为零假阳、零 agent/operator 改动**。
+- **Tier B(仅 bash,审计-only,不拦)**:记 workspace 写代际,exec 时若前进→不拦,审计/事件打 `workspace_drift=true`+代际差,UI 徽标。闭合 bash TOCTOU 的**问责半**(永远可事后证明/察觉文件层是否被动过),零假阳、零摩擦。
+- **诚实边界(不伪装,`feedback_no_design_choice_disguise`)**:Tier B **不阻止** approve-then-swap-script,只保证察觉+可证;真硬拦文件层必破上述约束,留 per-manifest opt-in backlog(默认关)。此切法即 [memory:audit-over-blocking]——"怕滥用的硬拦改 allow+全审计",文件层硬拦正是过度拦截,故意不做;args 层可证安全才硬拦。
+
+### 12.3 Mini-ADR
+
+- **RT-ADR-19 Tier A = canonical args 指纹,存**独立完整性域**,硬拦漂移**:mint 时(`build_approval_request`,`_approval.py:124`)对 gated tool_call 的 args 算 `binding_digest`=`sha256(canonical_json(args))`,canonical=`json.dumps(args, sort_keys=True, separators=(",",":"), ensure_ascii=False, default=str)`(确定性序列化,盖 dict 无序 + 嵌套 + 非 JSON 原生值)。**digest 必须存审批行(`agent_approval`,Postgres),绝不只放 checkpoint 的 `ApprovalRequest`**——若 digest 与 tool_calls 同存 checkpoint,攻击者篡改 checkpoint 可连 digest 一起改,防篡改失效;审批行是与 checkpoint **独立的完整性域**。校验挂 `builder.py:1013`(apply_resume_decision 派发前):对将派发的 tool_call args 重算 digest,与**从审批行经 resume 端点透入 `approval_resume` payload 的 `binding_digest`** 比对。不合 → 不派发,回 reject `ToolMessage`(status=error),`terminal=True`(平台完整性 veto,路由 END,区别于 reviewer reject)+ 审计 `approval:binding_drift`。resume 端点(`api/runs.py` 的 `resolve_approval_decision`,~:524)读 `ApprovalRecord.binding_digest` 塞进 `approval_resume`(现载 decision/modified_args/reason,加一字段)。零假阳论证:approve 时 exec 的 args 恒等于 mint 的 proposed_args,digest 必合。
+- **RT-ADR-20 Tier B = bash workspace 写代际,审计-only 不拦**:mint 时仅对 **bash** gated call 记 `workspace_gen_at_mint` 存审批行(exec_python/http 无文件面,不记,列为 None)。exec 前读当前代际;前进 → **不拦**,往审计/COMPACTION-式事件 detail 打 `workspace_drift=true`+`(gen_at_mint, gen_at_exec)`,前端徽标。**代际来源(PR-1 二选一,查审计 schema 后定)**:① 首选**复用 TE-2 per-tool 审计**——mint 记时间戳,resume 时 `COUNT` 该 (tenant,user) 在 mint 后的 write 类工具(write_file/edit_file/bash)审计事件,>0 即 drift,**零新基建**;② 回落新增 per-(tenant,user) 单调计数器(写路径在 `WorkspaceLock.acquire` 下 `UPDATE...gen=gen+1 RETURNING` 原子 bump,跨副本一致)。**诚实**:代际是 workspace 级粗粒度(任何写都算 drift,不精确到被批命令引用的那个文件)→ 因审计-only 不拦,粗粒度零成本(不误杀),UI 文案如实写"审批后 workspace 有改动"而非"被批文件被改"。
+- **RT-ADR-21 binding 字段模型 + modify 重铸 + 落库 + 审计**:`ApprovalRequest`/`ApprovalRecord`(frozen)加 `binding_digest: str` + `workspace_gen: int | None`;`AgentApprovalRow` 加两列 + migration(revision ID ≤32,如 `0120_approval_binding`,真 PG 集成测)。`SqlApprovalStore.create` 写入、`_row_to_dto` 读出。**modify 重铸**:reviewer modify → 执行 modified_args → 决策时**重算 digest 绑 modified_args**,与 `mark_decided` CAS **原子同写**(搭 Stream 13.2 已有的决策 UPDATE,不新开事务);审计记 modify + 新 digest。审计新成员 `approval:binding_verified`(detail 携 workspace_drift)/`approval:binding_drift`(`protocol/audit.py` **一处** StrEnum,不新增 ResourceType——复用现有 approval/run resource,避开双 Literal 漂移)。
+
+### 12.4 PR 切分
+
+- **PR-0 设计**(本节 §12 + ITERATION-PLAN;设计先合)
+- **PR-1 后端**:协议 binding 字段(`ApprovalRequest`/`ApprovalRecord` 加 `binding_digest`/`workspace_gen`)+ canonical 指纹助手(`_approval.py`,pure)+ mint 算指纹 + workspace 代际记录(bash,RT-ADR-20 选定机制)+ exec 前校验硬拒(`builder.py:1013` + resume 端点透 digest)+ modify 重铸原子写(`mark_decided` CAS)+ migration(binding 两列,≤32,真 PG)+ 审计(RT-ADR-21)+ 单测(指纹匹配放行/篡改 digest 拒+审计/modify 重铸放行/bash workspace drift 审计标不拦/exec_python·http workspace_gen 为 None 且指纹全程匹配)
+- **PR-2 前端**:`ApprovalCard.tsx` 展 `binding_digest`(短哈希 receipt)+ "审批后 workspace 有改动"徽标(Tier B,bash)+ `binding_drift` 硬拒状态展示;`ApprovalsList.tsx` 列表标识;IM webhook 审批卡片补 binding 摘要字段(payload_format feishu/dingtalk/wecom);i18n 双语 + 前端审(aria-label/axe、`tsc -b --noEmit`、vitest 全量)
+
+### 12.5 验证
+
+- E2E:① 审批 bash 后**并发改脚本** → exec 察觉 drift 审计标(不拦,Tier B);② **篡改 checkpoint tool_call args** → exec `binding_drift` 硬拒 + 审计(Tier A,terminal);③ modify 路径重铸绑定正常执行;④ exec_python/http 指纹全程匹配放行、workspace_gen 恒 None。
+- 真 PG:binding 两列 migration + 跨副本 resume 校验(digest 从审批行独立域读)。
+
+### 12.6 范围外(backlog)
+
+文件层**硬拦**(声明式 bound_paths / 启发式路径抽取)= per-manifest opt-in,默认关(破"不削弱能力+不增复杂度"约束,需求出现再议);workspace 代际精确到 per-file(现 workspace 级信号够);env/cwd 绑定(cwd 恒 `/workspace`、env 平台控,无 per-call 变量面)。
