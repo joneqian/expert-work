@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -24,12 +24,19 @@ from control_plane.api import runs as runs_module
 from control_plane.api.runs import apply_approval_decision
 from control_plane.audit import build_default_audit_logger
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.persistence import InMemoryAgentDisableStore, InMemoryApprovalStore
+from helix_agent.persistence import (
+    InMemoryAgentDisableStore,
+    InMemoryApprovalStore,
+    InMemoryUserWorkspaceStore,
+)
 from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from helix_agent.persistence.workspace import workspace_volume_name
 from helix_agent.protocol import (
     ApprovalRecord,
     ApprovalStatus,
+    AuditAction,
     Principal,
+    UserWorkspace,
     canonical_args_digest,
 )
 
@@ -40,6 +47,7 @@ def _request(
     *,
     tenant_status: TenantStatusService | None = None,
     agent_disable: AgentDisableService | None = None,
+    workspace_store: object | None = None,
 ) -> SimpleNamespace:
     # A service principal owns no per-user instance (resolve_caller_user_id →
     # None) and an unowned thread (meta.user_id=None) passes caller_owns_thread.
@@ -50,6 +58,7 @@ def _request(
         state=SimpleNamespace(
             tenant_status_service=tenant_status,
             agent_disable_service=agent_disable,
+            user_workspace_store=workspace_store,
         )
     )
     return SimpleNamespace(
@@ -318,3 +327,110 @@ async def test_modify_rebinds_digest_and_threads_it(
     stored = await approvals.get_by_run(run_id=run_id, tenant_id=_TENANT)
     assert stored is not None
     assert stored.binding_digest == expected
+
+
+# ---------------------------------------------------------------------------
+# RT-6 Tier B — workspace-drift signal on the decision audit (RT-ADR-20)
+# ---------------------------------------------------------------------------
+
+
+def _seed_workspace(user_id: UUID, *, last_write_at: datetime | None) -> InMemoryUserWorkspaceStore:
+    store = InMemoryUserWorkspaceStore()
+    store._rows[(_TENANT, user_id)] = UserWorkspace(
+        id=uuid4(),
+        tenant_id=_TENANT,
+        user_id=user_id,
+        volume_name=workspace_volume_name(_TENANT, user_id),
+        last_write_at=last_write_at,
+    )
+    return store
+
+
+def _decided_drift(audit_store: InMemoryAuditLogStore) -> object:
+    for entry in audit_store._rows.values():
+        if entry.action is AuditAction.APPROVAL_DECIDED:
+            return entry.details.get("workspace_drift")
+    raise AssertionError("no APPROVAL_DECIDED audit written")
+
+
+async def _decide_with_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    user_id: UUID,
+    workspace_store: InMemoryUserWorkspaceStore | None,
+) -> InMemoryAuditLogStore:
+    async def _noop_run_agent(**_kw: object) -> None:
+        return None
+
+    monkeypatch.setattr(runs_module, "run_agent", _noop_run_agent)
+
+    approvals = InMemoryApprovalStore()
+    run_id, thread_id = uuid4(), uuid4()
+    # policy_gate + a user binding are the two preconditions for the drift check.
+    await approvals.create(_pending(run_id, thread_id).model_copy(update={"user_id": user_id}))
+    audit_store = InMemoryAuditLogStore()
+    await apply_approval_decision(
+        request=_request(workspace_store=workspace_store),
+        thread_id=thread_id,
+        run_id=run_id,
+        decision="approve",
+        modified_args=None,
+        reason=None,
+        threads=_FakeThreads(),
+        users=object(),
+        agent_repo=_FakeAgentRepo(),
+        runtime=_FakeRuntime(),
+        approvals=approvals,
+        audit=build_default_audit_logger(audit_store),
+        idempotency_key=None,
+    )
+    return audit_store
+
+
+@pytest.mark.asyncio
+async def test_workspace_drift_true_when_write_after_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A workspace write AFTER the approval was requested → drift=True."""
+    user_id = uuid4()
+    store = _seed_workspace(user_id, last_write_at=datetime.now(UTC) + timedelta(minutes=5))
+    audit_store = await _decide_with_workspace(monkeypatch, user_id=user_id, workspace_store=store)
+    assert _decided_drift(audit_store) is True
+
+
+@pytest.mark.asyncio
+async def test_workspace_drift_false_when_write_before_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A workspace last written BEFORE the request (or never) → drift=False."""
+    user_id = uuid4()
+    store = _seed_workspace(user_id, last_write_at=datetime.now(UTC) - timedelta(minutes=5))
+    audit_store = await _decide_with_workspace(monkeypatch, user_id=user_id, workspace_store=store)
+    assert _decided_drift(audit_store) is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_drift_false_without_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unwired workspace store (e.g. NullWorkspaceLock deployment) → drift=False."""
+    audit_store = await _decide_with_workspace(monkeypatch, user_id=uuid4(), workspace_store=None)
+    assert _decided_drift(audit_store) is False
+
+
+@pytest.mark.asyncio
+async def test_workspace_drift_read_failure_never_blocks_resume(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raising drift read (post-CAS/pre-spawn) must NOT wedge the resume."""
+
+    class _RaisingWorkspaceStore(InMemoryUserWorkspaceStore):
+        async def get(self, *, tenant_id: UUID, user_id: UUID) -> UserWorkspace | None:
+            raise RuntimeError("transient DB error")
+
+    # apply_approval_decision must still succeed and record drift=False, or the
+    # already-consumed decision would leave the run permanently un-spawned.
+    audit_store = await _decide_with_workspace(
+        monkeypatch, user_id=uuid4(), workspace_store=_RaisingWorkspaceStore()
+    )
+    assert _decided_drift(audit_store) is False

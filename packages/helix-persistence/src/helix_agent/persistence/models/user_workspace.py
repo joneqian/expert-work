@@ -63,6 +63,12 @@ class UserWorkspaceRow(Base):
     last_accessed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    #: RT-6 Tier B (RT-ADR-20): bumped to now() under the workspace write lock
+    #: whenever a write-capable tool (write_file / edit_file / bash) completes —
+    #: a conservative over-approximation of a mutation (a read-only bash bumps
+    #: too). A paused approval predating it may have drifted. NULL until the
+    #: first such write after the column was added.
+    last_write_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: J.15-补强-1 (Mini-ADR J-36): soft-delete timestamp. NULL ⇒ active.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: J.15-补强-1 (Mini-ADR J-36): ObjectStore key where the archived

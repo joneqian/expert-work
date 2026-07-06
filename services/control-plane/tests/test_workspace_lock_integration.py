@@ -15,13 +15,17 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy.ext.asyncio import AsyncEngine
 from testcontainers.postgres import PostgresContainer
 
 from control_plane.workspace_lock import PgWorkspaceLock
+from helix_agent.persistence import SqlUserWorkspaceStore
 from helix_agent.persistence.database import (
     DatabaseConfig,
     create_async_engine_from_config,
@@ -31,6 +35,15 @@ from helix_agent.persistence.database import (
 pytestmark = pytest.mark.integration
 
 _HOLD_S = 0.3
+
+_ALEMBIC_INI = (
+    Path(__file__).resolve().parents[3] / "packages" / "helix-persistence" / "alembic.ini"
+)
+
+
+def _sync_dsn(container: PostgresContainer) -> str:
+    url = str(container.get_connection_url())
+    return url.replace("+psycopg2", "+psycopg").replace("postgresql://", "postgresql+psycopg://", 1)
 
 
 def _async_dsn(container: PostgresContainer) -> str:
@@ -121,6 +134,37 @@ async def test_lock_contention_no_starvation(engine: AsyncEngine) -> None:
 
     await asyncio.gather(*(worker(i) for i in range(n_workers)))
     assert sorted(completed) == list(range(n_workers))
+
+
+async def test_acquire_bumps_last_write_at(postgres_container: PostgresContainer) -> None:
+    # RT-6 Tier B (RT-ADR-20) — a completed write under the lock records
+    # last_write_at so a paused approval can detect workspace drift. Needs the
+    # schema (the schema-less lock tests above silently no-op the best-effort bump).
+    cfg = Config(str(_ALEMBIC_INI))
+    cfg.set_main_option("sqlalchemy.url", _sync_dsn(postgres_container))
+    command.upgrade(cfg, "head")
+
+    eng = create_async_engine_from_config(
+        DatabaseConfig(dsn=_async_dsn(postgres_container), pgbouncer_mode=False)
+    )
+    try:
+        sf = create_async_session_factory(eng)
+        store = SqlUserWorkspaceStore(sf)
+        lock = PgWorkspaceLock(sf)
+        tenant, user = uuid4(), uuid4()
+
+        # A fresh workspace row starts unbumped.
+        await store.resolve(tenant_id=tenant, user_id=user)
+        before = await store.get(tenant_id=tenant, user_id=user)
+        assert before is not None and before.last_write_at is None
+
+        # A successful write under the lock bumps it.
+        async with lock.acquire(tenant_id=tenant, user_id=user):
+            pass
+        after = await store.get(tenant_id=tenant, user_id=user)
+        assert after is not None and after.last_write_at is not None
+    finally:
+        await eng.dispose()
 
 
 async def test_lock_distinct_workspaces_scale_concurrently(engine: AsyncEngine) -> None:
