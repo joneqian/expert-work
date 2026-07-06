@@ -1334,6 +1334,35 @@ export interface TranslationKeys {
     tool_budget_toggle_label: string;
     tool_budget_saved: string;
     tool_budget_save_failed: string;
+    quality_heading: string;
+    quality_help_title: string;
+    quality_help_body: string;
+    quality_default_note: string;
+    quality_deploy_note: string;
+    quality_section_master: string;
+    quality_enabled_label: string;
+    quality_enabled_hint: string;
+    quality_section_sampling: string;
+    quality_sampling_rate_label: string;
+    quality_daily_cap_label: string;
+    quality_monitor_interval_label: string;
+    quality_batch_size_label: string;
+    quality_section_judge: string;
+    quality_judge_provider_label: string;
+    quality_judge_model_label: string;
+    quality_judge_hint: string;
+    quality_section_drift: string;
+    quality_drift_interval_label: string;
+    quality_recent_window_label: string;
+    quality_baseline_window_label: string;
+    quality_min_samples_label: string;
+    quality_threshold_label: string;
+    quality_cooldown_label: string;
+    quality_save: string;
+    quality_saved: string;
+    quality_save_error: string;
+    quality_err_JUDGE_PROVIDER_KEY_MISSING: string;
+    quality_err_INVALID_JUDGE_MODEL: string;
   };
   settings_iam: {
     sa_page_title: string;
@@ -3689,6 +3718,40 @@ const en: TranslationKeys = {
     tool_budget_toggle_label: "Platform tool-output budget",
     tool_budget_saved: "Tool-output budget setting saved.",
     tool_budget_save_failed: "Failed to save tool-output budget setting",
+    quality_heading: "Quality Monitoring",
+    quality_help_title: "What is quality monitoring?",
+    quality_help_body:
+      "Samples a fraction of finished runs, has an LLM judge score them 1-5, stores a per-agent quality series, and raises a drift alert when scores regress. Enabling it spends judge tokens per sampled run.",
+    quality_default_note:
+      "Not configured yet — the values below are the environment defaults and monitoring is off. Save to enable and take over from the defaults.",
+    quality_deploy_note:
+      "The workers always run; this toggle is the operational switch. The HELIX_AGENT_ENABLE_QUALITY_MONITOR deploy flag can still force the whole subsystem off.",
+    quality_section_master: "Enable",
+    quality_enabled_label: "Quality monitoring enabled",
+    quality_enabled_hint: "Off by default — sampling + judging spends tokens.",
+    quality_section_sampling: "Sampling",
+    quality_sampling_rate_label: "Sampling rate (%)",
+    quality_daily_cap_label: "Per-tenant daily cap",
+    quality_monitor_interval_label: "Sampler interval (s)",
+    quality_batch_size_label: "Sampler batch size",
+    quality_section_judge: "Judge model",
+    quality_judge_provider_label: "Judge provider",
+    quality_judge_model_label: "Judge model",
+    quality_judge_hint:
+      "A provider with a configured platform key + a chat model. The judge scores replies; a cheap fast model is fine.",
+    quality_section_drift: "Drift detection",
+    quality_drift_interval_label: "Drift check interval (s)",
+    quality_recent_window_label: "Recent window (h)",
+    quality_baseline_window_label: "Baseline window (h)",
+    quality_min_samples_label: "Min samples per window",
+    quality_threshold_label: "Drift threshold (0-1)",
+    quality_cooldown_label: "Alert cooldown (h)",
+    quality_save: "Save",
+    quality_saved: "Quality config saved",
+    quality_save_error: "Failed to save quality config",
+    quality_err_JUDGE_PROVIDER_KEY_MISSING:
+      "Configure that provider's key in platform credentials before selecting it as the quality judge.",
+    quality_err_INVALID_JUDGE_MODEL: "That is not a chat model for the selected provider.",
   },
   settings_iam: {
     sa_page_title: "Service Accounts",
