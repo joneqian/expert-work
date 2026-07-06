@@ -76,6 +76,7 @@ from helix_agent.persistence.rls import current_user_id_var
 from helix_agent.persistence.tenant_user import TenantUserStore
 from helix_agent.persistence.thread_meta import ThreadMetaStore
 from helix_agent.persistence.token_usage_store import TokenTotals, TokenUsageStore
+from helix_agent.persistence.workspace import UserWorkspaceStore
 from helix_agent.protocol import (
     AgentSpec,
     ApprovalStatus,
@@ -463,6 +464,8 @@ async def apply_approval_decision(
         idempotency_key=idempotency_key,
         agent_disable_service=getattr(request.app.state, "agent_disable_service", None),
         tenant_status_service=getattr(request.app.state, "tenant_status_service", None),
+        # RT-6 Tier B (RT-ADR-20) — workspace drift signal on the decision audit.
+        workspace_store=getattr(request.app.state, "user_workspace_store", None),
     )
 
 
@@ -486,6 +489,7 @@ async def resolve_approval_decision(
     idempotency_key: str | None = None,
     agent_disable_service: AgentDisableService | None = None,
     tenant_status_service: TenantStatusService | None = None,
+    workspace_store: UserWorkspaceStore | None = None,
 ) -> tuple[Any, UUID, bool]:
     """Request-free core of a J.8 approval verdict — CAS + checkpoint + spawn.
 
@@ -573,6 +577,33 @@ async def resolve_approval_decision(
             return None, replay, True
         raise HTTPException(status_code=409, detail="approval already decided")
 
+    # RT-6 Tier B (RT-ADR-20) — did a workspace-write-capable tool run between
+    # the approval request and this verdict? (approve-then-swap-script). Audit-
+    # only, never blocks; scoped to declarative-gate (policy_gate) approvals
+    # bound to a user workspace. This runs post-CAS / pre-spawn, where a raising
+    # read would wedge a legitimately-approved run for good (the decision is
+    # already consumed; a retry replays without re-spawning). So every failure —
+    # a transient DB error, an unwired store — is swallowed to False: a forensic
+    # signal must never block the resume. NullWorkspaceLock (single-process)
+    # never bumps last_write_at, so drift is always False there.
+    workspace_drift = False
+    if (
+        workspace_store is not None
+        and approval.reason_kind == "policy_gate"
+        and approval.user_id is not None
+    ):
+        try:
+            ws = await workspace_store.get(tenant_id=tenant_id, user_id=approval.user_id)
+            workspace_drift = (
+                ws is not None
+                and ws.last_write_at is not None
+                and ws.last_write_at > approval.requested_at
+            )
+        except Exception:
+            # No request-derived value in the message (CodeQL py/log-injection);
+            # the run is already on the enclosing APPROVAL_DECIDED audit row.
+            logger.warning("approval.workspace_drift_check_failed", exc_info=True)
+            workspace_drift = False
     await emit(
         audit,
         tenant_id=tenant_id,
@@ -586,6 +617,7 @@ async def resolve_approval_decision(
             "decision": graph_decision,
             "status": db_status.value,
             "request_id": approval.request_id,
+            "workspace_drift": workspace_drift,
         },
     )
 

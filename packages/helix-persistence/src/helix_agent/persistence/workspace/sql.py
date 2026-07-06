@@ -28,6 +28,7 @@ def _row_to_workspace(row: UserWorkspaceRow) -> UserWorkspace:
         size_limit_bytes=row.size_limit_bytes,
         created_at=row.created_at,
         last_accessed_at=row.last_accessed_at,
+        last_write_at=row.last_write_at,
         deleted_at=row.deleted_at,
         archived_object_key=row.archived_object_key,
     )

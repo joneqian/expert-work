@@ -46,6 +46,20 @@ class UserWorkspace(BaseModel):
     )
     created_at: datetime | None = None
     last_accessed_at: datetime | None = None
+    last_write_at: datetime | None = Field(
+        default=None,
+        description=(
+            "RT-6 Tier B (RT-ADR-20) — bumped to now() under the workspace write "
+            "lock whenever a write-capable tool (write_file / edit_file / bash) "
+            "completes. A conservative over-approximation of 'the workspace "
+            "changed': a read-only bash (ls / cat) also takes the lock and bumps, "
+            "so it means 'a mutating-capable tool ran', not a proven mutation — "
+            "the safe direction for a forensic signal (never miss a real write). "
+            "A paused approval whose requested_at predates this may have had its "
+            "workspace swapped before execution (approve-then-swap-script); "
+            "surfaced audit-only, never blocks. None ⇒ no such write recorded."
+        ),
+    )
     deleted_at: datetime | None = Field(
         default=None,
         description="soft-delete timestamp; None ⇒ active. Acquire rejects deleted workspaces.",

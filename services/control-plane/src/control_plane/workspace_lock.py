@@ -88,3 +88,39 @@ class PgWorkspaceLock:
                 {"classid": _WORKSPACE_LOCK_CLASSID, "k": key},
             )
             yield
+        # RT-6 Tier B (RT-ADR-20) — a write-capable tool completed under the lock
+        # (a raise would have skipped this and rolled the lock txn back). Record
+        # it so a paused approval whose ``requested_at`` predates it can detect a
+        # possible approve-then-swap-script. This bumps on *any* non-raising
+        # holder — including a read-only bash (ls / cat) — so it over-approximates
+        # a mutation; that's the safe direction for a forensic signal. Done in a
+        # SEPARATE best-effort txn *after* the advisory lock releases, never
+        # inside it: a bump failure (a schema-less deployment, a transient error)
+        # must never poison the lock txn and break the exclusion contract. It is
+        # audit-only — a missed bump is acceptable.
+        await self._record_write(tenant_id, user_id)
+
+    async def _record_write(self, tenant_id: UUID, user_id: UUID) -> None:
+        """Best-effort ``last_write_at = now()`` bump (RT-6 Tier B, RT-ADR-20).
+
+        ``user_workspace`` carries no RLS (migration 0018), so this raw session
+        updates it without a tenant role. A workspace never ``resolve``-d yet
+        (no row) simply matches nothing. Any failure is swallowed — the drift
+        signal is a forensic aid, not a correctness requirement.
+        """
+        try:
+            async with self.session_factory() as session, session.begin():
+                await session.execute(
+                    text(
+                        "UPDATE user_workspace SET last_write_at = now() "
+                        "WHERE tenant_id = :t AND user_id = :u"
+                    ),
+                    {"t": str(tenant_id), "u": str(user_id)},
+                )
+        except Exception:
+            logger.debug(
+                "workspace last_write_at bump skipped (tenant_id=%s user_id=%s)",
+                tenant_id,
+                user_id,
+                exc_info=True,
+            )
