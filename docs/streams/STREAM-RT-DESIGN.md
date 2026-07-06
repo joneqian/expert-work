@@ -444,3 +444,60 @@ HITL 的 TOCTOU 弱点,企业安全卖点(approval 移植 OpenClaw approval-time
 ### 12.6 范围外(backlog)
 
 文件层**硬拦**(声明式 bound_paths / 启发式路径抽取)= per-manifest opt-in,默认关(破"不削弱能力+不增复杂度"约束,需求出现再议);workspace 代际精确到 per-file(现 workspace 级信号够);env/cwd 绑定(cwd 恒 `/workspace`、env 平台控,无 per-call 变量面)。
+
+## 13. RT-5 生产质量监控 PR-0 设计(2026-07-06,Wave 3,★5 需 live E2E)
+
+### 13.1 起因与取证(现状核实——计划三处"复用"假设过期)
+
+商业化卖点:租户可见的 per-agent 生产质量看板 + 质量漂移主动告警。计划立项前提是"复用 `eval_engine_live` 采样管道 + `_judge.py` 经 RT-1 结构化输出判分 + 复用 webhook 事件"。grounding 核实这三处**复用目标都不是计划描述的形态**(产品意图不变,只改"复用谁"):
+
+- **① `eval_engine_live.py` 跑合成数据集 + 确定性判分,非真实流量 LLM 采样**(`control-plane/eval_engine_live.py`):`LiveEvalHarness`(:167)从 YAML 数据集(`tools/eval/datasets/adversarial|trace/m0_baseline.yaml`)取 prompt,in-process `AgentBuilder` 拉一次性无工具 eval agent(`_build_spec` :223)`graph.ainvoke`,判分是**确定性**的——`AdversarialEvalEngine`→`safety_verdict`(:124,canary/refusal 布尔)、`TraceEvalEngine`→`evaluate_trace`(:155,OTel span 结构断言),**不消费 `_judge`、不采真实流量**。可复用的仅**脚手架**:`EvalWorker`/`eval_run`/`eval_case_result` 队列-claim-persist 状态机、`DispatchEvalEngine` 按 suite 路由、in-process 拉 agent 模式。"采样真实流量 → LLM 判分 → 时序落库"链**不存在,需新建**。
+- **② `_judge.py` 绕开 router + 正则抠单 int,未接 RT-1**(`tools/eval/_judge.py`):`JudgeProvider.score(...)->int`(:46,单个 [1,5]);`AnthropicHaikuJudge`(:65)**直连** `httpx.post("https://api.anthropic.com/v1/messages")`(:88)、`_DIGIT_RE=re.compile(r"[1-5]")` 正则抠首个数字(:149-152),仅 `_AnthropicMessagesReply`(:128)pydantic 校验响应外壳,**无 `response_format`/`json_schema`**。RT-1 结构化输出**确已落地但在 orchestrator router 侧**:`llm/router.py:384-424`(`output_schema` 校验重试 + `LLMOutputValidationError`)、`llm/structured_output.py`(`StructuredOutputCapability` native/tool_call/prompt + `validate_structured_output`)、provider 适配(openai native `response_format:{type:"json_schema"}`、anthropic `tool_call` 模拟、openai_compatible `prompt`);消费方=`aux_model_adapter`/`memory_consolidator`/`skill_distiller`,**不含 `_judge`**。→ RT-5 判分**走 RT-1-correct 的 router `output_schema` 路径,不复用 `_judge`**(`_judge` 是离线 eval CI 契约,单 int、绕 router,不适生产结构化质量分)。
+- **③ webhook 全挂 run_event spine,`quality.drift` 无现成非-run 入队路径**(`protocol/webhook.py:32` 注释 "All ride the single `run_event` spine"):现 5 类事件(`run.completed`/`run.failed`/`approval.requested`/`artifact.saved`/`skill_promote.requested`)`event_id`=`{run_id}:{seq}`、从 run 事件帧派生(`webhook_delivery_worker.py:298-392`)。`quality.drift` **非 run 事件**、无 run_id/seq;协议 `run_id` 已 `UUID | None`、payload `dict[str,object]` → 需**新建脱 run_event spine 的 emitter**(run_id=None、自造 `event_id`)。`payload_format`(feishu/dingtalk/wecom)`render_channel_body`(`webhook_delivery_worker.py:149`)与事件类型**正交,可直接复用**。事件类型注册**分散 4 处需同步**:`protocol/webhook.py:34` Literal、`api/webhook_endpoints.py:47` `_EVENT_TYPES` frozenset、`webhook_delivery_worker.py:119` `_EVENT_TITLES`(缺失优雅回退)、`admin-ui/src/api/webhooks.ts:14+21`(union + 数组)。
+- **④ 无现存质量监控脚手架 + 命名撞车**:搜 quality/drift/sampling/score 无生产质量监控/漂移/采样表模型 API(drift 命中全无关);相邻物(**勿混/勿当基座**)=SE-16 技能进化质量信号(`skill_evolution_assembly.py:36` 采样 + 👍👎 curation)、eval 评分(`eval_run`/`eval_case_result.scores` JSONB,suite 维度非 per-agent 连续)、**PI-3-A3 平台防御 judge**(`settings_platform/PlatformJudgeSection.tsx` + `platform_judge_config.py`,配 output_judge 防御模型,**非质量监控**)。**无 per-agent 质量分时序表**(`token_usage` 形状最近但语义=token/成本;`memory_item_scores` 无关)。
+- **⑤ aux 计量惯例可复用**:表 `token_usage`(`persistence/models/token_usage.py:21`,`usage_kind` 于 `0110` 加入、默认 `'conversation'`,per-(tenant,agent_name,model) 时序索引);写账 `TokenUsageStore.insert(TokenUsageRecord)`;范例 `memory_consolidator.py:724 _record_aux_usage`(固定 `agent_name="memory-consolidator"`/`agent_version="-"`/`usage_kind="memory_consolidation"`,try/except never-fail)、`skill_evolution_metering.py:36`。**RT-1-correct 产 token 路径** `aux_model_adapter.py:53 LLMRouterAuxModelAdapter`(`CredentialsResolver`→`build_llm_router`→`router(messages, tools=[], output_schema=...)`→带 `input/output_tokens`)——已直通 RT-1 校验,但类型名 `Consolidator*` 语义耦合(定义在 `memory_consolidator.py`)。migration head=`0116_workspace_last_write`(确认),新表从 0116 起接。
+
+### 13.2 决策
+
+**产品意图不变**(真实流量采样 → LLM 判分 → per-agent 质量时序 → 滑窗漂移 → `quality.drift` 告警 + 质量看板);grounding 只改"复用谁"不改"做什么"。核心决策:
+
+- **采样 = pull 式 worker + 水位,脱离 run 热路径**:新 `QualityMonitorWorker`(仿 `EvalWorker`/orphan_sweep/TranscriptMirrorSweep 的 claim-sweep 模式,advisory-lock/CAS 跨副本安全)按水位扫**已完成 run**,per-tenant **确定性 hash(run_id) vs 采样率** 选样(可复现、免随机、免改 orchestrator run 完成路径)。transcript 源(event_store vs thread_message 镜像)PR-1 落定。**成本护栏**=采样率(默认低,如 5%)+ per-tenant 每日样本上限(硬顶)。
+- **判分 = RT-1 router `output_schema` + 结构化 rubric**(不复用 `_judge`):`QualityScore` schema(`overall: int 1-5` + `dimensions` + `rationale`)。判分 LLM 走 router `output_schema` 路径(credential-resolve→`build_llm_router`→`router(..., output_schema=QualityScore)`);**复用 primitive 不复用 `Consolidator*` 命名**(PR-1 二选一:轻量提取中性 aux caller / 直接用 router primitives 建专用 caller,避免 touch `memory_consolidator`)。rubric=**通用 agent 质量**(是否回应请求 / 连贯性 / 安全),默认 rubric + 后续可调(helix 是通用平台,不绑当前业务域)。
+- **落库 = 新 `quality_score` 表**(per-tenant/per-agent/per-run 时序 + `dimensions` JSONB + `judge_model` + `observed_at` + RLS),`token_usage` 形状参考、语义独立。
+- **aux 计量** `usage_kind="quality_sampling"` + 固定 `agent_name="quality-monitor"`,`TokenUsageStore.insert`,与 memory_consolidation 对称(try/except never-fail)。
+- **漂移 = `QualityDriftWorker` 滑窗基线偏离**(per-agent 近窗均值 vs 基线窗,相对跌幅超阈 ∧ 最小样本量),命中 → `quality.drift` 事件;`quality_drift_alert` 落库做 **cooldown/dedup**(不重复轰炸)。
+- **`quality.drift` webhook = 新 emitter 脱 run_event spine**(run_id=None、自造 event_id),复用 `render_channel_body` payload_format;4 处注册点同步。
+- **质量看板新页**(非复用防御 judge section),全套接线;质量配置(采样率/judge 模型/漂移阈值/日上限)= 平台默认 + 租户覆盖。
+- **诚实边界(`feedback_no_design_choice_disguise`)**:①采样是**抽样非全量**(成本 vs 覆盖权衡,采样率+日上限是唯二旋钮),漏采的 run 无质量分,前端文案须如实(非"全量质检");②判分是 **LLM 主观分非 ground-truth**(rubric 决定语义,无金标),看板呈现"judge 评分"而非"客观质量";③漂移是**统计信号非因果**,告警=人看研判,**不自动处置**(自动降级/切模型耦合 RT-7,不并入);④`quality.drift` 仅在配了 webhook endpoint 的租户送达,未配=仅看板可见。
+
+### 13.3 Mini-ADR
+
+- **RT-ADR-22 采样管道 = pull worker + 水位 + 确定性选样**:新 `QualityMonitorWorker`(control-plane,门控 `enable_quality_monitor`,仿 `EvalWorker` app.py 接线)。跨副本安全靠 advisory-lock/水位 CAS(复用 9.5 队列/sweep 模式),扫"上次水位后已完成的 run",per-run 判 `deterministic_hash(run_id) % 10000 < rate*10000`(可复现;避随机→避副本重复采样),命中且未超**per-tenant 日上限**→取 transcript(user prompt + final agent reply)→ 判分。**不改 orchestrator run 完成路径**(纯消费侧,run 热路径零侵入=成本护栏之一)。transcript 源 PR-1 定(优先 `thread_message` 镜像,已 per-user 落账;event_store 兜底)。范围外:push 式(run 完成即入队,待规模信号)。
+- **RT-ADR-23 判分 = RT-1 router `output_schema`(不碰 `_judge`)**:`QualityScore` = `StructuredOutputSpec`/pydantic:`{overall: int[1..5], dimensions: {addressed_request: int, coherence: int, safety: int}, rationale: str}`。判分 caller 走 `CredentialsResolver`→`build_llm_router`→`router(messages=[rubric_system, transcript], tools=[], output_schema=QualityScore)`→ RT-1 校验重试兜底坏结构。**不引 `ConsolidatorLLMReply/AuxModel` 类型**(语义耦合 memory 域);PR-1 二选一:(a) 从 `aux_model_adapter` 轻量提取中性 `AuxLLMCaller`(consolidator/quality 共用,DRY),(b) 用 router primitives 建独立 `QualityJudge`(surgical、零 touch consolidator)——**推荐 (b)**(surgical-changes 优先,提取重构留 backlog)。判 token 走 `usage_kind="quality_sampling"` aux 计量。rubric=通用 agent 默认(可调),judge 模型走**质量配置**(平台默认+租户覆盖),**与 PI-3-A3 防御 judge 配置分离**(语义不同,不复用同表避混淆)。
+- **RT-ADR-24 落库 `quality_score` + 漂移 `QualityDriftWorker`**:`quality_score`(`tenant_id`/`agent_name`/`agent_version`/`run_id`/`overall`/`dimensions JSONB`/`judge_model`/`observed_at`,RLS per-tenant,索引 `(tenant_id, agent_name, observed_at)`)。漂移 worker(周期,per-agent):近窗均值 `recent` vs 基线窗均值 `baseline`,`(baseline-recent)/baseline > drift_threshold` ∧ `recent_count >= min_samples` → 漂移。`quality_drift_alert`(`tenant_id`/`agent_name`/`detected_at`/`window_stats JSONB`/`state`/`cooldown_until`)做 **cooldown**(同 agent 冷却窗内不重复告警)+ 历史。migration 0117(config+score,PR-1)/0118(drift_alert,PR-2),revision ID ≤32,真 PG 集成测。
+- **RT-ADR-25 `quality.drift` webhook emitter 脱 run_event spine**:`WebhookEventType` 加 `"quality.drift"`——**4 处同步**(`protocol/webhook.py:34` Literal / `api/webhook_endpoints.py:47` `_EVENT_TYPES` frozenset + `_validate_event_types` / `webhook_delivery_worker.py:119` `_EVENT_TITLES` / `admin-ui webhooks.ts:14+21`)。新 emitter 构 `WebhookDeliveryRecord(run_id=None, event_id=f"quality.drift:{agent_name}:{alert_id}", payload={agent_name, overall_recent, overall_baseline, drift_pct, window, detected_at})`,投递复用现有 delivery worker + `render_channel_body`(feishu/dingtalk/wecom,与事件类型正交)。**诚实**:现有 delivery 假设 run_id/seq,emitter 侧需显式构造合成 id(PR-2 核实 delivery/去重路径不隐依赖 run_id 非空)。
+- **RT-ADR-26 前端质量看板新页 + 配置**:新页(路由如 `/observability/quality` 或 `/quality`)=分数趋势图(per-agent 时序)+ 低分 run 下钻(链 `run_detail`)+ 漂移告警列表。**全套接线**(`router.tsx` / `navModel.ts` 三组之一 / `CommandPalette.tsx` / i18n en+zh `nav.*`+页面 key / SDK `api/quality.ts` / `*.stories.tsx` / form aria-label)。质量配置 UI(采样率/judge 模型/漂移阈值/日上限)=平台区块(仿 `SettingsPlatformConfig` 挂 section)+ 租户覆盖。`WebhooksList` event_types 数组加 `quality.drift`。envelope-vs-raw 对账后写 SDK。
+
+### 13.4 PR 切分
+
+- **PR-0 设计**(本节 §13 + ITERATION-PLAN;设计先合)
+- **PR-1 后端 采样+判分+落库+计量**:质量配置(平台默认+租户覆盖,新表/service)+ `QualityMonitorWorker`(pull+水位+确定性采样+日上限护栏,app.py 门控接线)+ `QualityJudge`(RT-1 router `output_schema` + `QualityScore` rubric schema,不碰 `_judge`)+ `quality_score` 表 + migration 0117(config+score,RLS,真 PG)+ aux 计量(`usage_kind="quality_sampling"`)+ 单测(采样确定性/日上限截断/judge 结构化分/坏结构重试/aux 计量/真 PG round-trip + RLS)
+- **PR-2 后端 漂移+告警**:`QualityDriftWorker`(滑窗基线偏离 + min_samples)+ `quality_drift_alert` 落库(cooldown/dedup/历史)+ `quality.drift` webhook 事件(4 同步点 + 新 emitter 脱 spine)+ migration 0118(drift_alert)+ 单测(漂移触发/cooldown 不重复/无样本不误报/payload_format 渲染/真 PG)
+- **PR-3 前端 质量看板**:新页(趋势图/低分下钻链 run_detail/漂移列表)+ 配置 UI(平台+租户)+ `WebhooksList` event_types += `quality.drift` + 全套接线 + i18n 双语 + Storybook + tsc-b/vitest 全量
+- **PR-4 live E2E(★5)**:真流量采样跑通(采样率生效 + 分落库 + aux 成本可见)+ 人工注入劣化对话 → 漂移触发 → IM 告警送达(飞书/钉钉/企微其一)
+
+### 13.5 验证
+
+- PR-1:采样确定性(同 run_id 恒定选样)+ 日上限硬截断 + judge 结构化分落 `quality_score` + 坏 JSON 重试回正 + aux 成本按 `usage_kind` 可见;真 PG round-trip + RLS 跨租户隔离。
+- PR-2:注入劣化分序列 → 漂移触发 `quality.drift` + cooldown 窗内不重复告警 + 无/少样本不误报 + payload_format 三渠道渲染。
+- PR-3:tsc-b/vitest 全绿 + 趋势/下钻/漂移列表渲染 + form aria-label(axe);nav i18n 改动跑全量 vitest。
+- **PR-4 ★5(CI 绿不算完)**:真流量端到端采样判分 + 人为注入劣化 → 漂移告警送达 IM,挂 `tools/eval/` 或 live harness。
+
+### 13.6 范围外(backlog)
+
+- **逐动作评分**(OpenHands critic 风格,动作成功概率)——先 run 级,逐动作待信号;
+- **push 式采样**(run 完成即入队)——pull worker + 水位够,push 待规模;
+- **漂移自动处置**(即降级/切模型)——告警=人研判,自动处置耦合 RT-7,不并入;
+- **跨 agent 质量基准/租户排名**——单 agent 时序够,横比待;
+- **judge 模型泛化提取**(consolidator/quality 共用中性 aux caller)——PR-1 走 surgical 独立 caller,DRY 重构留 backlog;
+- **ground-truth 校准**(judge 分 vs 人工标注对齐)——先纯 LLM-judge,校准待。
