@@ -67,6 +67,7 @@ from control_plane.api import (
     build_platform_judge_config_router,
     build_platform_skills_router,
     build_platform_tool_budget_config_router,
+    build_quality_router,
     build_quota_router,
     build_rate_card_router,
     build_role_bindings_router,
@@ -1854,6 +1855,11 @@ def create_app(
     app.state.curation_candidate_store = resolved_curation_candidate_store
     app.state.eval_dataset_store = resolved_eval_dataset_store
     app.state.eval_run_store = resolved_eval_run_store
+    # Stream RT-5 (RT-ADR-26) — quality dashboard reads. Attached unconditionally
+    # (independent of the ``enable_quality_monitor`` sampler gate): reading stored
+    # scores / drift alerts is decoupled from whether the workers are running.
+    app.state.quality_score_store = resolved_quality_score
+    app.state.quality_drift_alert_store = resolved_quality_drift_alert
     app.state.sandbox_egress_audit_store = resolved_egress_audit_store
     app.state.knowledge_store = resolved_knowledge_store
     app.state.image_upload_store = resolved_image_upload_store
@@ -2066,6 +2072,7 @@ def create_app(
     app.include_router(build_curation_router())
     app.include_router(build_eval_dataset_router())
     app.include_router(build_eval_runs_router())
+    app.include_router(build_quality_router())
 
     return app
 

@@ -483,7 +483,8 @@ HITL 的 TOCTOU 弱点,企业安全卖点(approval 移植 OpenClaw approval-time
 - **PR-0 设计**(本节 §13 + ITERATION-PLAN;设计先合)
 - **PR-1 后端 采样+判分+落库+计量**:质量配置(平台默认+租户覆盖,新表/service)+ `QualityMonitorWorker`(pull+水位+确定性采样+日上限护栏,app.py 门控接线)+ `QualityJudge`(RT-1 router `output_schema` + `QualityScore` rubric schema,不碰 `_judge`)+ `quality_score` 表 + migration 0117(config+score,RLS,真 PG)+ aux 计量(`usage_kind="quality_sampling"`)+ 单测(采样确定性/日上限截断/judge 结构化分/坏结构重试/aux 计量/真 PG round-trip + RLS)
 - **PR-2 后端 漂移+告警**:`QualityDriftWorker`(滑窗基线偏离 + min_samples)+ `quality_drift_alert` 落库(cooldown/dedup/历史)+ `quality.drift` webhook 事件(4 同步点 + 新 emitter 脱 spine)+ migration 0118(drift_alert)+ 单测(漂移触发/cooldown 不重复/无样本不误报/payload_format 渲染/真 PG)
-- **PR-3 前端 质量看板**:新页(趋势图/低分下钻链 run_detail/漂移列表)+ 配置 UI(平台+租户)+ `WebhooksList` event_types += `quality.drift` + 全套接线 + i18n 双语 + Storybook + tsc-b/vitest 全量
+- **PR-3 前端 质量看板**(已交付):后端薄读 API(`/v1/quality/scores`+`/drift-alerts`,home-tenant RLS,raw payload)+ 新页(趋势图=依赖-free SVG sparkline/低分下钻链 run_detail/漂移列表)+ SDK `api/quality.ts` + 全套接线(router/navModel/CommandPalette/i18n 双语)+ Storybook + tsc-b/vitest 全量。`WebhooksList` 的 `quality.drift` 已于 PR-2 加。**配置 UI(平台+租户)拆 PR-3b**——config 表/service 地基在 PR-1 已延后,与 UI 一起单开,不捆入前端 PR(本次用户拍板)。
+- **PR-3b 质量配置 UI**(后续):`quality_config` 表 + service + platform API + 租户覆盖 + 平台/租户配置 UI(采样率/judge 模型/漂移阈值/日上限)。
 - **PR-4 live E2E(★5)**:真流量采样跑通(采样率生效 + 分落库 + aux 成本可见)+ 人工注入劣化对话 → 漂移触发 → IM 告警送达(飞书/钉钉/企微其一)
 
 ### 13.5 验证
