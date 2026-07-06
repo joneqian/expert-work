@@ -1,0 +1,38 @@
+# Live quality-monitoring test agent — Stream RT-5 (RT-ADR-22/26).
+#
+# A plain, helpful chat agent with no tools. tools/eval/verify_live_quality.py
+# drives it with a handful of ordinary questions; the QualityMonitorWorker then
+# samples the finished runs (set sampling to 100% for the live check), the
+# QualityJudge scores them, and the scores land in quality_score — readable via
+# GET /v1/quality/scores. Phase 1 of the harness asserts that chain end to end
+# (sample -> judge -> persist -> aux metering).
+#
+# No sandbox / exec_python: quality sampling is about the conversation itself,
+# so a pure-conversation agent is the cleanest probe.
+#
+# MODEL: edit the model block to whatever provider you pasted a key for in
+# /settings/platform. Keep temperature low so answers are stable across runs.
+apiVersion: helix.io/v1
+kind: Agent
+metadata:
+  name: quality-test
+  version: '1.0.0'
+  tenant: canonical
+spec:
+  description: >-
+    Live quality-monitoring test agent: answers ordinary questions so the
+    production-quality sampler can judge + persist a real score series.
+
+  model:
+    provider: deepseek # ← change to your configured provider
+    name: deepseek-v4-pro # ← and its model name
+    temperature: 0.0
+    max_tokens: 1024
+
+  system_prompt:
+    template: |
+      You are a helpful, concise assistant. Answer the user's question directly
+      and correctly in one or two short sentences.
+
+  tools: []
+  skills: []
