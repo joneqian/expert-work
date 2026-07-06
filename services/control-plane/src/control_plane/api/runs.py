@@ -600,7 +600,9 @@ async def resolve_approval_decision(
                 and ws.last_write_at > approval.requested_at
             )
         except Exception:
-            logger.warning("approval.workspace_drift_check_failed run_id=%s", run_id, exc_info=True)
+            # No request-derived value in the message (CodeQL py/log-injection);
+            # the run is already on the enclosing APPROVAL_DECIDED audit row.
+            logger.warning("approval.workspace_drift_check_failed", exc_info=True)
             workspace_drift = False
     await emit(
         audit,
