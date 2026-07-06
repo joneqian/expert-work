@@ -30,7 +30,7 @@ from typing import Any
 
 from langchain_core.messages import ToolMessage
 
-from helix_agent.protocol import ApprovalReasonKind, ApprovalRequest
+from helix_agent.protocol import ApprovalReasonKind, ApprovalRequest, canonical_args_digest
 from orchestrator.tools.approval import ASK_FOR_APPROVAL_TOOL
 
 __all__ = [
@@ -127,12 +127,23 @@ def build_approval_request(
     thread_id: str,
     timeout_s: int,
     now: datetime | None = None,
+    bind: bool = True,
 ) -> ApprovalRequest:
     """Construct the :class:`ApprovalRequest` for a gated ``tool_call``.
 
     Declarative-gate hits get ``reason_kind="policy_gate"`` and an
     auto-built summary. ``ask_for_approval`` calls carry the agent's own
     ``reason_kind`` / ``action_summary`` / ``proposed_args``.
+
+    RT-6 Tier A (RT-ADR-19) — ``bind`` controls whether the args digest is
+    minted. It must be ``True`` only when the resume path re-finds *this
+    exact* target: the declarative gate re-scans with the same
+    ``find_approval_target(_gated_tools)`` on the same checkpointed
+    ``tool_calls``, so mint target == resume target. The action-screen path
+    (PI-3b) selects its target by a judge verdict the resume re-scan cannot
+    reproduce; it mints ``bind=False`` (unbound) so verification is skipped
+    rather than risk vetoing the wrong call — action-screen overrides are out
+    of RT-6's gated-artifact scope.
     """
     moment = now or datetime.now(UTC)
     call = target.tool_call
@@ -154,6 +165,11 @@ def build_approval_request(
         proposed_args=proposed_args,
         requested_at=moment,
         timeout_at=moment + timedelta(seconds=timeout_s),
+        # RT-6 Tier A (RT-ADR-19) — bind the args at mint (declarative gate);
+        # ``bind=False`` (action-screen) leaves it unbound. Agent-initiated
+        # ``ask_for_approval`` gets a digest but verification skips it (no
+        # downstream execution).
+        binding_digest=canonical_args_digest(proposed_args) if bind else "",
     )
 
 
@@ -170,9 +186,14 @@ class ResumeOutcome:
       for a declarative-gate reject (the platform vetoed the run →
       route to END) and ``False`` for an ``ask_for_approval`` reject
       (the agent just loops back, sees the rejection, re-plans).
+
+    ``binding_drift`` (RT-6 Tier A, RT-ADR-19) marks the reject as an
+    *integrity veto*: the dispatched args no longer match what was
+    approved (checkpoint tamper / replay / bug). It is always terminal
+    and lets the caller emit the ``APPROVAL_BINDING_DRIFT`` audit.
     """
 
-    __slots__ = ("reject_messages", "terminal", "tool_calls")
+    __slots__ = ("binding_drift", "reject_messages", "terminal", "tool_calls")
 
     def __init__(
         self,
@@ -180,10 +201,52 @@ class ResumeOutcome:
         tool_calls: list[dict[str, Any]],
         reject_messages: list[ToolMessage],
         terminal: bool,
+        binding_drift: bool = False,
     ) -> None:
         self.tool_calls = tool_calls
         self.reject_messages = reject_messages
         self.terminal = terminal
+        self.binding_drift = binding_drift
+
+
+def _binding_drift_reject(tool_calls: list[dict[str, Any]]) -> ResumeOutcome:
+    """Build the terminal integrity-veto outcome for a binding-drift hit.
+
+    One rejection ``ToolMessage`` per call (no orphan tool_call left);
+    nothing dispatches; ``terminal`` + ``binding_drift`` set so the caller
+    routes to END and emits ``APPROVAL_BINDING_DRIFT``.
+    """
+    messages = [
+        ToolMessage(
+            content=(
+                "[approval binding drift] the tool arguments changed after "
+                "approval and were not executed"
+            ),
+            tool_call_id=str(call.get("id") or ""),
+            status="error",
+            name=call.get("name"),
+        )
+        for call in tool_calls
+    ]
+    return ResumeOutcome(tool_calls=[], reject_messages=messages, terminal=True, binding_drift=True)
+
+
+def _has_binding_drift(
+    target: ApprovalTarget,
+    dispatched_args: Mapping[str, Any],
+    resume: Mapping[str, Any],
+) -> bool:
+    """True iff the dispatched args diverge from the approved binding (RT-ADR-19).
+
+    Verification applies only to a declarative-gate target (a real gated
+    tool with downstream execution) and only when the resume carries a
+    non-empty ``binding_digest`` — an ``ask_for_approval`` self-pause or a
+    legacy / pre-feature row (empty digest) is left unverified.
+    """
+    expected = str(resume.get("binding_digest") or "")
+    if not expected or target.is_agent_initiated:
+        return False
+    return canonical_args_digest(dispatched_args) != expected
 
 
 def apply_resume_decision(
@@ -191,12 +254,17 @@ def apply_resume_decision(
     approval_required_tools: frozenset[str],
     resume: Mapping[str, Any],
 ) -> ResumeOutcome:
-    """Apply a resume ``{decision, modified_args}`` to a paused turn.
+    """Apply a resume ``{decision, modified_args, binding_digest}`` to a paused turn.
 
     ``approve`` → dispatch every call unchanged. ``modify`` → rewrite
     the gated call's args with ``modified_args``, then dispatch.
     ``reject`` → dispatch nothing; return a rejection ``ToolMessage``
     per call. ``terminal`` is set for a declarative-gate reject.
+
+    RT-6 Tier A (RT-ADR-19) — before an approve / modify dispatches, the
+    gated call's args are re-hashed and matched against the approved
+    ``binding_digest``. A mismatch (the checkpointed tool_call drifted from
+    what was approved) is a terminal integrity veto: nothing runs.
     """
     decision = str(resume.get("decision", "approve"))
     target = find_approval_target(tool_calls, approval_required_tools)
@@ -217,10 +285,19 @@ def apply_resume_decision(
         return ResumeOutcome(tool_calls=[], reject_messages=messages, terminal=terminal)
     if decision == "modify" and target is not None:
         modified = dict(resume.get("modified_args") or {})
+        # The bound reference for a modify is the modified args (the resume
+        # endpoint re-hashes them into ``binding_digest`` atomically with the
+        # decision), so verify the rewritten args against it.
+        if _has_binding_drift(target, modified, resume):
+            return _binding_drift_reject(tool_calls)
         rewritten = [dict(call) for call in tool_calls]
         rewritten[target.index] = {**rewritten[target.index], "args": modified}
         return ResumeOutcome(tool_calls=rewritten, reject_messages=[], terminal=False)
     # approve (or modify with no target — defensive: dispatch unchanged).
+    if target is not None and _has_binding_drift(
+        target, target.tool_call.get("args") or {}, resume
+    ):
+        return _binding_drift_reject(tool_calls)
     return ResumeOutcome(
         tool_calls=[dict(call) for call in tool_calls],
         reject_messages=[],

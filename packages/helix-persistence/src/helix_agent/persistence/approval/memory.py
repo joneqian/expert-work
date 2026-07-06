@@ -78,20 +78,23 @@ class InMemoryApprovalStore(ApprovalStore):
         modified_args: dict[str, object] | None = None,
         idempotency_key: str | None = None,
         continuation_run_id: UUID | None = None,
+        binding_digest: str | None = None,
     ) -> bool:
         # check-then-set with no ``await`` between → atomic under asyncio's
         # cooperative scheduling (mirrors the SQL conditional-UPDATE CAS).
         row = self._rows.get(run_id)
         if row is None or row.tenant_id != tenant_id or row.status != ApprovalStatus.PENDING:
             return False
-        self._rows[run_id] = row.model_copy(
-            update={
-                "status": status,
-                "decided_by": decided_by,
-                "decided_at": decided_at,
-                "modified_args": modified_args,
-                "idempotency_key": idempotency_key,
-                "continuation_run_id": continuation_run_id,
-            }
-        )
+        update: dict[str, object] = {
+            "status": status,
+            "decided_by": decided_by,
+            "decided_at": decided_at,
+            "modified_args": modified_args,
+            "idempotency_key": idempotency_key,
+            "continuation_run_id": continuation_run_id,
+        }
+        # RT-6 Tier A (RT-ADR-19) — modify re-binds; approve/reject keep the mint digest.
+        if binding_digest is not None:
+            update["binding_digest"] = binding_digest
+        self._rows[run_id] = row.model_copy(update=update)
         return True

@@ -11,6 +11,9 @@ control-plane (the resume endpoint takes :class:`ApprovalDecision`).
 
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -24,7 +27,35 @@ __all__ = [
     "ApprovalRecord",
     "ApprovalRequest",
     "ApprovalStatus",
+    "canonical_args_digest",
 ]
+
+
+def canonical_args_digest(args: Mapping[str, object]) -> str:
+    """Stable SHA-256 over a tool call's args — RT-6 Tier A binding (RT-ADR-19).
+
+    Canonical form = sorted keys (all levels), tight separators, non-ASCII
+    preserved, and a ``str`` fallback for anything not JSON-native (UUID /
+    datetime / etc.). So the digest is deterministic across processes /
+    replicas and independent of dict insertion order — two argument dicts
+    that differ only in key order hash identically.
+
+    Bound at approval mint (over ``proposed_args``) and re-computed before
+    dispatch: a mismatch means the checkpointed ``tool_call`` drifted from
+    what the human approved (checkpoint tamper / replay / bug), so the
+    approval-resume path rejects it. Lives in ``helix-protocol`` so both the
+    orchestrator (mint + verify) and control-plane (modify re-bind) import it
+    without a cross-service dependency.
+    """
+    canonical = json.dumps(
+        dict(args),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 
 #: Why a run is paused for approval — borrowed from deer-flow's
 #: ``ask_clarification`` taxonomy (STREAM-J-DESIGN § 14.6). Admin UI
@@ -80,6 +111,15 @@ class ApprovalRequest(BaseModel):
         description=(
             "``requested_at + policies.approval_timeout_s``. The "
             "approval-timeout job auto-rejects requests past this."
+        ),
+    )
+    binding_digest: str = Field(
+        default="",
+        description=(
+            "RT-6 Tier A (RT-ADR-19) — ``canonical_args_digest(proposed_args)`` "
+            "at mint. Re-computed before dispatch to detect checkpoint drift; a "
+            "mismatch rejects the resume. Empty = unbound (legacy / pre-feature "
+            "row), verification skipped."
         ),
     )
 
@@ -161,6 +201,12 @@ class ApprovalRecord(BaseModel):
     proposed_args: dict[str, object] = Field(default_factory=dict)
     requested_at: datetime
     timeout_at: datetime
+    # RT-6 Tier A (RT-ADR-19) — the mint-time args digest, persisted on the
+    # ``agent_approval`` row (an integrity domain independent of the checkpoint,
+    # so tampering the checkpoint's tool_call cannot also forge the digest). On
+    # ``modify`` the resume path rewrites this to ``canonical_args_digest(
+    # modified_args)`` atomically with the ``mark_decided`` CAS. Empty = unbound.
+    binding_digest: str = ""
     status: ApprovalStatus = ApprovalStatus.PENDING
     decided_by: str | None = None
     decided_at: datetime | None = None

@@ -109,6 +109,7 @@ class ApprovalStore(abc.ABC):
         modified_args: dict[str, object] | None = None,
         idempotency_key: str | None = None,
         continuation_run_id: UUID | None = None,
+        binding_digest: str | None = None,
     ) -> bool:
         """Flip a ``pending`` row to a terminal verdict; return ``True`` on hit.
 
@@ -121,4 +122,8 @@ class ApprovalStore(abc.ABC):
         atomically with the same conditional UPDATE, so the CAS winner records
         the continuation it spawned. A later retry / lost-race caller re-reads
         them to replay the same continuation instead of conflicting.
+
+        RT-6 Tier A (RT-ADR-19) — ``binding_digest``, when given, overwrites the
+        mint-time digest atomically with the CAS (a ``modify`` re-binds to the
+        digest of ``modified_args``); ``None`` leaves the mint digest intact.
         """

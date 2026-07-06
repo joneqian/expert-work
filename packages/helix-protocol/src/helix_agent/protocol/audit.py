@@ -208,6 +208,9 @@ class AuditAction(StrEnum):
     # approval / HITL (Stream J.8 — Mini-ADR J-24)
     APPROVAL_REQUESTED = "approval:requested"
     APPROVAL_DECIDED = "approval:decided"
+    # RT-6 Tier A (RT-ADR-19) — the approved args digest failed re-verification
+    # before dispatch: the checkpointed tool_call drifted from what was approved.
+    APPROVAL_BINDING_DRIFT = "approval:binding_drift"
     # triggers (Stream J.10 — Mini-ADR J-26 / J-42)
     TRIGGER_CREATE = "trigger:create"
     TRIGGER_UPDATE = "trigger:update"

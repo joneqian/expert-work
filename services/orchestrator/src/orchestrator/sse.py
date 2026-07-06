@@ -963,6 +963,9 @@ async def _register_pending_approval(
                     proposed_args=request.proposed_args,
                     requested_at=request.requested_at,
                     timeout_at=request.timeout_at,
+                    # RT-6 Tier A (RT-ADR-19) — persist the mint-time args digest
+                    # on the row (integrity domain independent of the checkpoint).
+                    binding_digest=request.binding_digest,
                 )
             )
         except Exception:

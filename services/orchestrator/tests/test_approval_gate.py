@@ -19,6 +19,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
+from helix_agent.protocol import canonical_args_digest
 from helix_agent.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     AgentState,
@@ -30,6 +31,7 @@ from orchestrator import (
     build_react_graph,
 )
 from orchestrator.graph_builder._approval import (
+    apply_resume_decision,
     build_approval_request,
     find_approval_target,
 )
@@ -187,6 +189,21 @@ def test_build_approval_request_policy_gate() -> None:
     assert "send_email" in req.action_summary
     assert (req.timeout_at - req.requested_at).total_seconds() == 3600
     assert req.request_id.startswith("approval:")
+    # RT-6 Tier A (RT-ADR-19) — mint binds the proposed args.
+    assert req.binding_digest == canonical_args_digest({"to": "ops@x.com"})
+
+
+def test_build_approval_request_unbound_when_bind_false() -> None:
+    """RT-6 — the action-screen path mints unbound (bind=False → empty digest).
+
+    Its target is chosen by the judge, not find_approval_target, so the resume
+    re-scan would verify the wrong call; leaving it unbound skips verification.
+    """
+    calls = [_tool_call("send_email", {"to": "ops@x.com"}, "tc-1")]
+    target = find_approval_target(calls, frozenset({"send_email"}))
+    assert target is not None
+    req = build_approval_request(target, thread_id="r-1", timeout_s=60, bind=False)
+    assert req.binding_digest == ""
 
 
 def test_build_approval_request_agent_initiated() -> None:
@@ -225,6 +242,98 @@ def test_request_id_is_stable_for_same_inputs() -> None:
     a = build_approval_request(target, thread_id="r-1", timeout_s=60)
     b = build_approval_request(target, thread_id="r-1", timeout_s=60)
     assert a.request_id == b.request_id
+
+
+# ---------------------------------------------------------------------------
+# RT-6 Tier A — apply_resume_decision binding verification (RT-ADR-19)
+# ---------------------------------------------------------------------------
+
+_GATED = frozenset({"send_email"})
+
+
+def test_resume_approve_matching_digest_dispatches() -> None:
+    """Approve with the mint digest → dispatch the gated call unchanged."""
+    calls = [_tool_call("send_email", {"to": "ops@x.com"}, "tc-1")]
+    digest = canonical_args_digest({"to": "ops@x.com"})
+    outcome = apply_resume_decision(
+        calls, _GATED, {"decision": "approve", "binding_digest": digest}
+    )
+    assert not outcome.binding_drift
+    assert outcome.reject_messages == []
+    assert outcome.tool_calls[0]["args"] == {"to": "ops@x.com"}
+
+
+def test_resume_approve_tampered_args_is_binding_drift() -> None:
+    """Checkpoint tool_call args changed after approval → terminal integrity veto."""
+    # The human approved {"to": "ops@x.com"}, but the checkpointed call now
+    # carries a different recipient (tamper / replay / bug).
+    tampered = [_tool_call("send_email", {"to": "attacker@evil.com"}, "tc-1")]
+    approved_digest = canonical_args_digest({"to": "ops@x.com"})
+    outcome = apply_resume_decision(
+        tampered, _GATED, {"decision": "approve", "binding_digest": approved_digest}
+    )
+    assert outcome.binding_drift is True
+    assert outcome.terminal is True
+    assert outcome.tool_calls == []
+    assert len(outcome.reject_messages) == 1
+    assert "binding drift" in str(outcome.reject_messages[0].content)
+
+
+def test_resume_modify_binds_to_modified_args() -> None:
+    """Modify verifies against the digest of the modified args → dispatches."""
+    calls = [_tool_call("send_email", {"to": "danger@evil.com"}, "tc-1")]
+    modified = {"to": "safe@example.com"}
+    outcome = apply_resume_decision(
+        calls,
+        _GATED,
+        {
+            "decision": "modify",
+            "modified_args": modified,
+            "binding_digest": canonical_args_digest(modified),
+        },
+    )
+    assert not outcome.binding_drift
+    assert outcome.tool_calls[0]["args"] == modified
+
+
+def test_resume_modify_digest_mismatch_is_drift() -> None:
+    """Modify whose args do not match the bound digest → integrity veto."""
+    calls = [_tool_call("send_email", {"to": "x"}, "tc-1")]
+    outcome = apply_resume_decision(
+        calls,
+        _GATED,
+        {
+            "decision": "modify",
+            "modified_args": {"to": "safe@example.com"},
+            "binding_digest": canonical_args_digest({"to": "different@example.com"}),
+        },
+    )
+    assert outcome.binding_drift is True
+    assert outcome.terminal is True
+
+
+def test_resume_empty_digest_skips_verification() -> None:
+    """A legacy / pre-feature row (empty digest) is dispatched unverified."""
+    calls = [_tool_call("send_email", {"to": "whatever"}, "tc-1")]
+    outcome = apply_resume_decision(calls, _GATED, {"decision": "approve", "binding_digest": ""})
+    assert not outcome.binding_drift
+    assert outcome.tool_calls[0]["args"] == {"to": "whatever"}
+
+
+def test_resume_agent_initiated_is_not_verified() -> None:
+    """ask_for_approval has no downstream execution → verification skipped."""
+    calls = [
+        _tool_call(
+            ASK_FOR_APPROVAL_TOOL,
+            {"reason_kind": "approach_choice", "action_summary": "?"},
+            "tc-1",
+        )
+    ]
+    # A mismatched digest must NOT trip drift for the agent-initiated pause.
+    outcome = apply_resume_decision(
+        calls, frozenset(), {"decision": "approve", "binding_digest": "deadbeef"}
+    )
+    assert not outcome.binding_drift
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +586,33 @@ async def test_resume_reject_declarative_gate_terminates_run() -> None:
     rejections = [m for m in state["messages"] if "[approval rejected]" in str(m.content)]
     assert len(rejections) == 1
     # The scripted LLM was only ever called once — the run did not loop.
+    assert llm.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_binding_drift_vetoes_the_tool() -> None:
+    """RT-6 Tier A — a resume whose binding_digest no longer matches the gated
+    call's args is an integrity veto: the tool never runs, the run ends."""
+    llm = _ScriptedLLM(
+        responses=[
+            AIMessage(content="", tool_calls=[_tool_call("send_email", {"to": "x"}, "tc-1")]),
+        ]
+    )
+    registry = ToolRegistry()
+    email_tool = _ScriptedTool(name="send_email")
+    registry.register(email_tool)
+
+    state = await _run_pause_then_resume(
+        llm,
+        registry,
+        approval_required_tools=frozenset({"send_email"}),
+        # A digest that cannot match the real args (as if the checkpoint drifted).
+        resume={"decision": "approve", "modified_args": None, "binding_digest": "tampered"},
+    )
+    assert email_tool.dispatched == 0
+    assert state.get("approval_outcome") == "rejected"
+    drift = [m for m in state["messages"] if "binding drift" in str(m.content)]
+    assert len(drift) == 1
     assert llm.calls == 1
 
 

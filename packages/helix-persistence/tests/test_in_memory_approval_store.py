@@ -208,6 +208,66 @@ async def test_mark_decided_modified_carries_args() -> None:
     assert fetched.modified_args == {"to": "safe@example.com"}
 
 
+@pytest.mark.asyncio
+async def test_binding_digest_round_trips_on_create() -> None:
+    """RT-6 Tier A — the mint digest persists on the row (RT-ADR-19)."""
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    rec = _record(tenant_id=tenant_id, run_id=run_id).model_copy(
+        update={"binding_digest": "abc123"}
+    )
+    await store.create(rec)
+    fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.binding_digest == "abc123"
+
+
+@pytest.mark.asyncio
+async def test_mark_decided_rebinds_digest_on_modify() -> None:
+    """RT-6 Tier A — a modify overwrites the mint digest atomically."""
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(
+        _record(tenant_id=tenant_id, run_id=run_id).model_copy(
+            update={"binding_digest": "mint-digest"}
+        )
+    )
+    await store.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=ApprovalStatus.MODIFIED,
+        decided_by="user-a",
+        decided_at=datetime.now(UTC),
+        modified_args={"to": "safe@example.com"},
+        binding_digest="rebound-digest",
+    )
+    fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.binding_digest == "rebound-digest"
+
+
+@pytest.mark.asyncio
+async def test_mark_decided_keeps_mint_digest_on_approve() -> None:
+    """RT-6 Tier A — approve passes binding_digest=None → mint digest intact."""
+    store = InMemoryApprovalStore()
+    tenant_id, run_id = uuid4(), uuid4()
+    await store.create(
+        _record(tenant_id=tenant_id, run_id=run_id).model_copy(
+            update={"binding_digest": "mint-digest"}
+        )
+    )
+    await store.mark_decided(
+        run_id=run_id,
+        tenant_id=tenant_id,
+        status=ApprovalStatus.APPROVED,
+        decided_by="user-a",
+        decided_at=datetime.now(UTC),
+    )
+    fetched = await store.get_by_run(run_id=run_id, tenant_id=tenant_id)
+    assert fetched is not None
+    assert fetched.binding_digest == "mint-digest"
+
+
 # ---------------------------------------------------------------------------
 # Stream HX-7 — queue listing (list_for_tenant / list_all_tenants)
 # ---------------------------------------------------------------------------

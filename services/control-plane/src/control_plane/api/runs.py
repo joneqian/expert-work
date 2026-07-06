@@ -82,6 +82,7 @@ from helix_agent.protocol import (
     AuditAction,
     AuditResult,
     ThreadStatus,
+    canonical_args_digest,
 )
 from helix_agent.protocol.multimodal import parse_image_ref
 from helix_agent.runtime.audit.logger import AuditLogger
@@ -534,6 +535,18 @@ async def resolve_approval_decision(
     if blocked is not None:
         raise HTTPException(status_code=403, detail=blocked.upper())
 
+    # RT-6 Tier A (RT-ADR-19) — the binding the graph re-verifies before
+    # dispatch. A ``modify`` re-binds to the digest of the modified args (stored
+    # atomically with the CAS below); ``approve`` / ``reject`` keep the mint-time
+    # digest already on the row. Threaded into ``approval_resume`` so the graph
+    # compares it against the about-to-dispatch tool_call.
+    if graph_decision == "modify" and modified_args is not None:
+        expected_digest = canonical_args_digest(modified_args)
+        rebind_digest: str | None = expected_digest
+    else:
+        expected_digest = approval.binding_digest
+        rebind_digest = None
+
     # Stream 13.2 — generate the continuation id BEFORE the CAS so it is bound
     # atomically to the winning decision; a retry / lost-race caller reads it
     # back to replay the same continuation.
@@ -547,6 +560,7 @@ async def resolve_approval_decision(
         modified_args=modified_args,
         idempotency_key=idempotency_key,
         continuation_run_id=continuation_run_id,
+        binding_digest=rebind_digest,
     )
     # ``mark_decided`` returns False on a lost race — another resume, a peer
     # timeout sweep, or the human endpoint decided it between our get + update.
@@ -609,6 +623,9 @@ async def resolve_approval_decision(
                 "decision": graph_decision,
                 "modified_args": modified_args,
                 "reason": reason,
+                # RT-6 Tier A (RT-ADR-19) — the graph re-hashes the dispatched
+                # args and matches them against this; drift → integrity veto.
+                "binding_digest": expected_digest,
             },
         },
         as_node="agent",
