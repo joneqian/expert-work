@@ -1537,6 +1537,22 @@ async def test_batch_clear_category_with_empty_string(ctx: _Ctx) -> None:
 
 
 @pytest.mark.asyncio
+async def test_batch_set_pinned_preserves_category(ctx: _Ctx) -> None:
+    # set_category OMITTED alongside another action — must NOT touch category.
+    a = await _seed_platform_skill(
+        ctx.skill_store, name="cat-f", required_tier=TenantPlan.FREE, category="保留"
+    )
+    resp = await ctx.client.post(
+        "/v1/platform/skills/batch",
+        json={"ids": [str(a)], "set_pinned": True},  # set_category omitted
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 200
+    got = await ctx.client.get(f"/v1/platform/skills/{a}", headers=ctx.admin_headers)
+    assert got.json()["category"] == "保留"
+
+
+@pytest.mark.asyncio
 async def test_batch_category_only_passes_action_guard(ctx: _Ctx) -> None:
     a = await _seed_platform_skill(ctx.skill_store, name="cat-d", required_tier=TenantPlan.FREE)
     resp = await ctx.client.post(

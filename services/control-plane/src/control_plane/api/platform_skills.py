@@ -214,9 +214,10 @@ class _BatchFilter(BaseModel):
 class _BatchPlatformSkillsBody(BaseModel):
     """``POST /v1/platform/skills/batch`` request body.
 
-    The patch (``set_status`` and/or ``set_pinned``) is applied to exactly one
-    selector: ``ids`` (the page's checkbox selection) OR ``filter`` (every
-    NULL-tenant skill matching it). Validated in the handler.
+    The patch (``set_status`` and/or ``set_pinned`` and/or ``set_category``)
+    is applied to exactly one selector: ``ids`` (the page's checkbox
+    selection) OR ``filter`` (every NULL-tenant skill matching it). Validated
+    in the handler.
     """
 
     set_status: SkillStatus | None = None
@@ -988,12 +989,13 @@ def build_platform_skills_router() -> APIRouter:
         body: _BatchPlatformSkillsBody,
         request: Request,
     ) -> JSONResponse:
-        """Bulk lock/unlock/archive/activate platform skills (system_admin).
+        """Bulk lock/unlock/archive/activate/re-label platform skills (system_admin).
 
         Applies the patch to either an explicit ``ids`` list (a page's selection)
         or to every skill matching ``filter`` (the "select all N matching" path).
-        Returns ``{updated}`` — the affected row count — and writes a single
-        audit row (no per-row spam)."""
+        The patch may also carry ``set_category`` to re-label (or, via an empty
+        string, clear) the category. Returns ``{updated}`` — the affected row
+        count — and writes a single audit row (no per-row spam)."""
         principal = _principal(request)
         store = _get_skill_store(request)
         audit = _get_audit(request)
