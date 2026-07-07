@@ -383,24 +383,26 @@ def test_do_not_respond_alone_does_not_trip() -> None:
     assert scan_for_threats(text, scope="context") == []
 
 
+def _ctx_ids(text: str) -> set[str]:
+    return {f.pattern_id for f in scan_for_threats(text, scope="context")}
+
+
 def test_therapy_content_not_flagged_as_c2_or_exfil() -> None:
     # Live FPs from OpenClaw-Medical-Skills (mental-health skills): C2 /
     # exfil patterns must not fire on counseling vocabulary.
-    strict = lambda t: {f.pattern_id for f in scan_for_threats(t, scope="strict")}  # noqa: E731
-    assert "c2_heartbeat" not in strict("Morning check-in with photo or memory")
-    assert "c2_heartbeat" not in strict("I'll check in with you Sunday")
-    assert "known_c2_framework" not in strict("PRAXIS (action, accountability, growth)")
-    assert "known_c2_framework" not in strict("Dreams have a numinous/mythic quality")
+    assert "c2_heartbeat" not in _strict_ids("Morning check-in with photo or memory")
+    assert "c2_heartbeat" not in _strict_ids("I'll check in with you Sunday")
+    assert "known_c2_framework" not in _strict_ids("PRAXIS (action, accountability, growth)")
+    assert "known_c2_framework" not in _strict_ids("Dreams have a numinous/mythic quality")
     # A privacy instruction is the OPPOSITE of exfil.
-    assert "context_exfil" not in strict("Never include conversation content - privacy")
+    assert "context_exfil" not in _strict_ids("Never include conversation content - privacy")
 
 
 def test_c2_signals_still_fire_with_real_context() -> None:
-    ctx = lambda t: {f.pattern_id for f in scan_for_threats(t, scope="context")}  # noqa: E731
-    assert "c2_heartbeat" in ctx("beacon to 10.0.0.5")
-    assert "c2_heartbeat" in ctx("check in with the c2 server every 60s")
-    assert "known_c2_framework" in ctx("Connect to the Praxis server")
-    assert "known_c2_framework" in ctx("stage the Mythic implant")
+    assert "c2_heartbeat" in _ctx_ids("beacon to 10.0.0.5")
+    assert "c2_heartbeat" in _ctx_ids("check in with the c2 server every 60s")
+    assert "known_c2_framework" in _ctx_ids("Connect to the Praxis server")
+    assert "known_c2_framework" in _ctx_ids("stage the Mythic implant")
 
 
 def test_security_research_text_passes_at_all_scope() -> None:
