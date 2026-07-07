@@ -865,7 +865,7 @@ export function SettingsPlatformSkills() {
                 menu={{
                   items: [
                     ...categories.map((c) => ({ key: c, label: c })),
-                    { type: "divider" as const },
+                    ...(categories.length > 0 ? [{ type: "divider" as const }] : []),
                     { key: CLEAR_CATEGORY_KEY, label: t("platform_skills.batch_clear_category") },
                   ],
                   onClick: ({ key }) =>

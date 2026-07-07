@@ -293,9 +293,10 @@ export interface BulkPlatformSkillsFilter {
   q?: string;
 }
 
-/** ``POST /v1/platform/skills/batch`` body — patch (set_status / set_pinned)
- *  over exactly one selector: ``ids`` (page selection) or ``filter`` (all
- *  matching). */
+/** ``POST /v1/platform/skills/batch`` body — patch (set_status / set_pinned /
+ *  set_category) over exactly one selector: ``ids`` (page selection) or
+ *  ``filter`` (all matching). ``set_category``: "" clears, a name sets, omitted
+ *  leaves the category untouched. */
 export interface BulkUpdatePlatformSkillsBody {
   set_status?: PlatformSkillStatus;
   set_pinned?: boolean;
