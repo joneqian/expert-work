@@ -48,9 +48,11 @@ _IO_CONCURRENCY = 32
 class ObjectStore(Protocol):
     """Structural subset of the runtime object store this module needs."""
 
-    async def put(self, key: str, data: bytes, *, content_type: str | None = None) -> None: ...
+    async def put(self, key: str, data: bytes, *, content_type: str | None = None) -> None:
+        """Store ``data`` under ``key`` (overwrite-if-exists)."""
 
-    async def get(self, key: str) -> bytes: ...
+    async def get(self, key: str) -> bytes:
+        """Return the bytes stored under ``key``; raise if absent."""
 
 
 class SkillAssetError(RuntimeError):
