@@ -241,11 +241,14 @@ def test_send_to_url_still_catches_adjacent() -> None:
     assert "send_to_url" in ids
 
 
+def _strict_ids(text: str) -> set[str]:
+    return {f.pattern_id for f in scan_for_threats(text, scope="strict")}
+
+
 def test_ssh_access_write_and_key_intent_caught() -> None:
-    strict = lambda t: {f.pattern_id for f in scan_for_threats(t, scope="strict")}  # noqa: E731
-    assert "ssh_access" in strict("cat ~/.ssh/id_rsa")
-    assert "ssh_access" in strict("cp evil ~/.ssh/")
-    assert "ssh_access" in strict("echo pub >> ~/.ssh/authorized_keys")
+    assert "ssh_access" in _strict_ids("cat ~/.ssh/id_rsa")
+    assert "ssh_access" in _strict_ids("cp evil ~/.ssh/")
+    assert "ssh_access" in _strict_ids("echo pub >> ~/.ssh/authorized_keys")
 
 
 def test_ssh_access_no_fp_on_doc_mention() -> None:
