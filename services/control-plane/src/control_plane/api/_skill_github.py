@@ -180,7 +180,12 @@ async def download_github_archive(
             async for chunk in resp.aiter_bytes():
                 total += len(chunk)
                 if total > _MAX_ARCHIVE_BYTES:
-                    raise GithubImportError("GitHub archive exceeds size limit", status=413)
+                    raise GithubImportError(
+                        "GitHub archive exceeds size limit — the whole-repo "
+                        "download is capped; for very large repos, zip the "
+                        "skill folder and use the direct ZIP upload instead",
+                        status=413,
+                    )
                 chunks.append(chunk)
         return b"".join(chunks)
     except httpx.HTTPError as exc:

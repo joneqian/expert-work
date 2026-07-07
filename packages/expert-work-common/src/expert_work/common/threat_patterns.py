@@ -283,7 +283,19 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
     ),
     # ── Persistence / config tamper (scope=strict) ────────────────────
     (r"authorized_keys", "ssh_backdoor", "persistence", "strict"),
-    (r"\$HOME/\.ssh|\~/\.ssh", "ssh_access", "persistence", "strict"),
+    # ``ssh_access`` fires on WRITE/READ intent toward the ssh dir or a
+    # private key — not a bare ``~/.ssh`` mention. Legit skill docs explain
+    # SSH port-forwarding and reference ``~/.ssh/config`` in prose (live FP:
+    # ppt-master live-preview workflow); the real backdoor signals
+    # (``authorized_keys`` above, a redirect INTO ``~/.ssh``, or touching a
+    # private-key file) still fire. ``\b`` on the redirect keeps it tight.
+    (
+        r"(>>?|tee|cp|mv|cat|install)\s+[^\n]{0,80}[\$~]/?\.?ssh\b"
+        r"|[\$~]/?\.ssh/(id_[a-z0-9]+|.*_key\b)",
+        "ssh_access",
+        "persistence",
+        "strict",
+    ),
     (
         r"\$HOME/\.expert_work/\.env|\~/\.expert_work/\.env",
         "expert_work_env",

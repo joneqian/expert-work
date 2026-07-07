@@ -21,7 +21,6 @@ into the system prompt) so a skill's relative refs resolve on disk.
 
 from __future__ import annotations
 
-import base64
 import binascii
 import logging
 from dataclasses import dataclass
@@ -33,6 +32,11 @@ from expert_work.protocol import AuditAction, AuditResult, SkillVersion
 from expert_work.protocol.audit import AuditEntry
 from expert_work.protocol.skill import compute_content_hash, supporting_files_to_jsonable
 from expert_work.protocol.skill_package import ParsedSkillMd, serialize_skill_md
+from expert_work.runtime.skill_assets import (
+    ObjectStore,
+    SkillAssetIntegrityError,
+    fetch_supporting_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +66,16 @@ class SkillSeedResult:
     drops: tuple[SeedDrop, ...]
 
 
-#: A dropped file maps to the closest existing skill audit action. ``drift`` and
-#: ``bad_base64`` are both content-integrity failures (stored bytes not as
-#: expected) → ``SKILL_DRIFT_DETECTED``; an ``injection`` hit → the dedicated
-#: ``SKILL_PROMPT_INJECTION_BLOCKED``.
+#: A dropped file maps to the closest existing skill audit action. ``drift``,
+#: ``bad_base64`` and ``asset_integrity`` are all content-integrity failures
+#: (stored bytes not as expected) → ``SKILL_DRIFT_DETECTED``; an ``injection``
+#: hit → the dedicated ``SKILL_PROMPT_INJECTION_BLOCKED``.
+#: ``asset_unavailable`` (object-store outage) is an infra failure, not a
+#: security signal — it stays a log line and gets NO audit row (absent here).
 _DROP_ACTION: dict[str, AuditAction] = {
     "drift": AuditAction.SKILL_DRIFT_DETECTED,
     "bad_base64": AuditAction.SKILL_DRIFT_DETECTED,
+    "asset_integrity": AuditAction.SKILL_DRIFT_DETECTED,
     "injection": AuditAction.SKILL_PROMPT_INJECTION_BLOCKED,
 }
 
@@ -76,9 +83,13 @@ _DROP_ACTION: dict[str, AuditAction] = {
 def seed_drop_audit_entries(tenant_id: UUID, drops: tuple[SeedDrop, ...]) -> list[AuditEntry]:
     """Map seed drops to ``audit_log`` rows. Build-time (no run yet) so the
     actor is ``system``. ``details`` carries skill name + path only — no file
-    content (which could be the very injection payload that got it dropped)."""
+    content (which could be the very injection payload that got it dropped).
+    Drops whose reason has no action mapping (infra, e.g. ``asset_unavailable``)
+    are skipped — logged by the seeder, not audited."""
     entries: list[AuditEntry] = []
     for drop in drops:
+        if drop.reason not in _DROP_ACTION:
+            continue
         details: dict[str, object] = {"skill": drop.skill_name, "stage": "skill_seed"}
         if drop.path is not None:
             details["path"] = drop.path
@@ -121,20 +132,28 @@ def _skill_md_with_name(name: str, version: SkillVersion) -> str:
     return serialize_skill_md(parsed)
 
 
-#: Caps mirror the ``.skill`` package limits (and the supervisor's re-check):
-#: 5 MiB total / 256 entries across all activated skills.
-_MAX_SEED_TOTAL_BYTES = 5 * 1024 * 1024
-_MAX_SEED_FILES = 256
+# Aligned with the import caps in ``_skill_zip`` (asset-store tier): a skill
+# that was allowed in must also materialize. The sandbox workspace tmpfs is
+# the real bound.
+_MAX_SEED_TOTAL_BYTES = 64 * 1024 * 1024
+_MAX_SEED_FILES = 16384
 
 
-def build_skill_seed_files(
+async def build_skill_seed_files(
     resolved_versions: dict[str, SkillVersion],
     activated_skill_names: list[str],
+    *,
+    object_store: ObjectStore | None = None,
 ) -> SkillSeedResult:
     """Return the ``(relpath, raw_bytes)`` seed set (anchored under
     ``skills/<name>/``) plus the dropped files. Drift-skipped + threat-filtered
     + capped; each security-relevant drop is recorded in ``.drops`` so the
     caller can audit it.
+
+    Async since skill-asset-store: externalized supporting files are fetched
+    from ``object_store`` (digest-verified); a missing store or a corrupt
+    object drops that file with an audited reason rather than failing the
+    whole agent build.
     """
     out: list[tuple[str, bytes]] = []
     drops: list[SeedDrop] = []
@@ -158,10 +177,23 @@ def build_skill_seed_files(
         ]
         for relpath, entry in sorted(version.supporting_files.items()):
             try:
-                raw = base64.b64decode(entry.content, validate=True)
+                raw = await fetch_supporting_file(entry, object_store=object_store)
             except (ValueError, binascii.Error):
                 logger.warning("skill_seed.bad_base64 skill=%s path=%s", name, relpath)
                 drops.append(SeedDrop(skill_name=name, reason="bad_base64", path=relpath))
+                continue
+            except SkillAssetIntegrityError:
+                logger.warning("skill_seed.asset_integrity skill=%s path=%s", name, relpath)
+                drops.append(SeedDrop(skill_name=name, reason="asset_integrity", path=relpath))
+                continue
+            except Exception as exc:
+                # Object-store outage / missing object: the sandbox is still
+                # useful without this one asset; drop + audit, never fail the
+                # whole build on a storage hiccup.
+                logger.warning(
+                    "skill_seed.asset_unavailable skill=%s path=%s err=%s", name, relpath, exc
+                )
+                drops.append(SeedDrop(skill_name=name, reason="asset_unavailable", path=relpath))
                 continue
             # Re-scan text files (context scope); binary can't carry a prompt.
             try:

@@ -17,10 +17,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
-#: Soft cap on ``prompt_fragment`` size. 64 KiB is generous for human-
-#: authored skill text (typical ~5-20 KiB) but tight against an admin
-#: pasting an entire codebase. M1-K LLM moderation can lift this.
-MAX_PROMPT_FRAGMENT_BYTES: Final[int] = 64 * 1024
+#: Soft cap on ``prompt_fragment`` size. 256 KiB is generous for human-
+#: authored skill text (typical ~5-20 KiB) while still catching an admin
+#: pasting an entire codebase. The original 64 KiB rejected real curated
+#: skills whose SKILL.md is a full playbook (live driver: ppt-master ≈ 77
+#: KiB); progressive disclosure (lazy_load, RT-ADR-11) means the body is
+#: skill_view-fetched on demand, not eagerly injected, so a large SKILL.md
+#: does not bloat every turn's context. M1-K LLM moderation can lift this.
+MAX_PROMPT_FRAGMENT_BYTES: Final[int] = 256 * 1024
 
 #: Max tool names per skill version. > 32 tools in one skill is almost
 #: certainly a mistake (or an attempted denial-of-service against the

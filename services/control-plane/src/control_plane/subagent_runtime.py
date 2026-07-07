@@ -28,6 +28,7 @@ from expert_work.persistence.agent_spec import AgentSpecStore
 from expert_work.persistence.skill import SkillStore
 from expert_work.protocol import AgentSpec, SystemPromptSpec, ToolSpecEntry
 from expert_work.runtime.secret_store import SecretStore
+from expert_work.runtime.skill_assets import ObjectStore as SkillAssetStore
 from orchestrator import BuiltAgent, MemoryEnv, MiddlewareEnv, ToolEnv, build_agent
 from orchestrator.tools import ChildAgentBuilder
 from orchestrator.tools.spawn_worker import WorkerBuildFn
@@ -139,6 +140,8 @@ def make_child_agent_builder(
     platform_mcp_pool_provider: PlatformMcpPoolProvider | None = None,
     user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     skill_store: SkillStore | None = None,
+    # skill-asset-store — dual-read for externalized skill supporting files.
+    skill_asset_store: SkillAssetStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
     register_invalidation: Callable[[Callable[[UUID], None]], None] | None = None,
@@ -228,6 +231,7 @@ def make_child_agent_builder(
             tenant_id=tenant_id,
             provider_key_resolver=provider_key_resolver,
             skill_resolver=skill_resolver,
+            skill_asset_store=skill_asset_store,
             skill_activity_recorder=skill_activity_recorder,
         )
         cache[key] = built
@@ -284,6 +288,8 @@ def make_worker_build_fn(
     platform_mcp_pool_provider: PlatformMcpPoolProvider | None = None,
     user_mcp_oauth_pool_provider: UserMcpOAuthPoolProvider | None = None,
     skill_store: SkillStore | None = None,
+    # skill-asset-store — dual-read for externalized skill supporting files.
+    skill_asset_store: SkillAssetStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
     tenant_config_service: TenantConfigService | None = None,
 ) -> WorkerBuildFn:
@@ -350,6 +356,7 @@ def make_worker_build_fn(
             tenant_id=tenant_id,
             provider_key_resolver=provider_key_resolver,
             skill_resolver=skill_resolver,
+            skill_asset_store=skill_asset_store,
             skill_activity_recorder=skill_activity_recorder,
         )
         logger.info("control_plane.worker.built role=%s depth=%d", role or "general", depth)

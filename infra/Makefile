@@ -111,6 +111,10 @@ dev-keycloak-config: ## 配 realm unmanagedAttributePolicy=ENABLED(Admin API 建
 	  $$K update realms/master -s sslRequired=NONE'
 	@echo "keycloak realm: unmanagedAttributePolicy=ENABLED, sslRequired=NONE, loginTheme=expert-work"
 
+skill-assets-backfill: ## 存量技能支撑文件搬对象存储(幂等;先 dry-run,加 APPLY=1 落库)
+	$(COMPOSE) $(PROFILES) exec -T control-plane-blue \
+	  python -m control_plane.backfill_skill_assets $(if $(APPLY),--apply,)
+
 dev-seed-keycloak: ## seed Keycloak admin client secret 进金库(幂等;/setup + 邀请流需要)
 	$(COMPOSE) $(PROFILES) exec -T control-plane-blue \
 	  python -m control_plane.seed_keycloak_secret --value dev-internal-secret-rotate-me

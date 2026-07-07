@@ -71,6 +71,7 @@ from expert_work.protocol.skill import SkillStatus
 from expert_work.runtime.audit.logger import AuditLogger
 from expert_work.runtime.middleware import MiddlewareChain
 from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.runtime.skill_assets import ObjectStore as SkillAssetStore
 from expert_work.runtime.tokens import default_estimator
 from orchestrator.context import (
     ContextCompressor,
@@ -496,6 +497,10 @@ async def build_agent(
     # control-plane) falls back to the env default. Combined with the per-agent
     # ``policies.tool_output_budget.enabled`` as ``effective = platform AND agent``.
     platform_tool_budget_enabled: bool | None = None,
+    # skill-asset-store — object store backing externalized skill supporting
+    # files (dual-read: inline rows need it never, external rows fetch through
+    # it in skill_seed / skill_view). ``None`` keeps inline-only behavior.
+    skill_asset_store: SkillAssetStore | None = None,
 ) -> BuiltAgent:
     """Assemble a :class:`BuiltAgent` from a validated :class:`AgentSpec`.
 
@@ -629,8 +634,10 @@ async def build_agent(
     # skill-runtime §5.1 — activated skills' files (SKILL.md + scripts + reference),
     # U-21 drift/threat-filtered, materialized under /workspace/skills/<name>/ on
     # every sandbox acquire so bundled scripts run as authored.
-    seed_result = build_skill_seed_files(
-        loaded_skills.resolved_versions, loaded_skills.activated_skill_names
+    seed_result = await build_skill_seed_files(
+        loaded_skills.resolved_versions,
+        loaded_skills.activated_skill_names,
+        object_store=skill_asset_store,
     )
     skill_seed_files = seed_result.files
     # skill-runtime §5.1 — a seeded file dropped for drift/injection/corruption
@@ -808,6 +815,7 @@ async def build_agent(
                 resolver=_SkillResolverShim(callable_=skill_resolver, tenant_id=tenant_id),
                 allowed_skill_names=frozenset(loaded_skills.activated_skill_names),
                 activity_recorder=skill_activity_recorder,
+                skill_asset_store=skill_asset_store,
             )
         )
 

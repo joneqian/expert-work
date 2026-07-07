@@ -34,6 +34,7 @@ recomputed hash.
 
 from __future__ import annotations
 
+import binascii
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -51,12 +52,20 @@ from expert_work.common.uplift_metrics import (
 )
 from expert_work.protocol import Skill, SkillStatus, SkillVersion
 from expert_work.protocol.skill import (
+    SkillSupportingFile,
     compute_content_hash,
     supporting_files_to_jsonable,
 )
 from expert_work.protocol.skill_package import (
     ParsedSkillMd,
     serialize_skill_md,
+)
+from expert_work.runtime.skill_assets import (
+    ObjectStore as SkillAssetObjectStore,
+)
+from expert_work.runtime.skill_assets import (
+    SkillAssetIntegrityError,
+    fetch_supporting_file,
 )
 from orchestrator.tools.registry import (
     ToolBlockedError,
@@ -174,6 +183,9 @@ class SkillViewTool:
     # tool runnable in tests without a Curator stack; production wires
     # a :class:`ThrottledActivityRecorder`.
     activity_recorder: SkillActivityRecorder | None = None
+    # skill-asset-store — object store for externalized supporting files
+    # (dual-read); ``None`` keeps inline-only behavior.
+    skill_asset_store: SkillAssetObjectStore | None = None
 
     @property
     def spec(self) -> ToolSpec:
@@ -313,7 +325,7 @@ class SkillViewTool:
                     content=(f"[NOT FOUND: {path!r} in skill {skill_name!r}]"),
                     meta={"skill_name": skill_name, "result": "not_found"},
                 )
-            content = _decode_supporting_file(file_entry)
+            content = await _decode_supporting_file(file_entry, object_store=self.skill_asset_store)
 
         # ── U-21 step 2: context-scope re-scan ──────────────────────
         findings = scan_for_threats(content, scope="context")
@@ -394,27 +406,41 @@ def _skill_name_for_repack(version: SkillVersion) -> str:
     return version.description.split("\n", 1)[0] or "skill"
 
 
-def _decode_supporting_file(entry: object) -> str:
-    """SupportingFile.content is base64 of raw bytes. Decode + best-effort
+async def _decode_supporting_file(entry: object, *, object_store: object | None) -> str:
+    """Resolve one supporting-file entry to text. Decode + best-effort
     UTF-8 (binary files come back as a [BINARY: ...] marker so the LLM
-    knows not to try parsing them as prose)."""
+    knows not to try parsing them as prose).
+
+    Dual-read (skill-asset-store): typed entries go through
+    :func:`fetch_supporting_file` — inline base64 or object-store fetch
+    with digest verification; raw dict entries (legacy tests) keep the
+    inline-only path."""
     import base64
 
-    if hasattr(entry, "content"):
-        raw_b64 = entry.content
-        mime = getattr(entry, "mime", "") or ""
-        size = getattr(entry, "size", 0)
-    elif isinstance(entry, dict):
-        raw_b64 = entry.get("content", "")
-        mime = entry.get("mime", "") or ""
-        size = entry.get("size", 0)
+    mime = getattr(entry, "mime", "") or ""
+    size = getattr(entry, "size", 0)
+    if isinstance(entry, SkillSupportingFile):
+        try:
+            raw = await fetch_supporting_file(entry, object_store=object_store)  # type: ignore[arg-type]
+        except (ValueError, TypeError, binascii.Error):
+            return f"[BINARY: corrupt content, {size} bytes, mime={mime!r}]"
+        except SkillAssetIntegrityError:
+            return f"[BLOCKED: stored asset failed integrity check, mime={mime!r}]"
+        except Exception:
+            return f"[NOT AVAILABLE: asset store unreachable, {size} bytes, mime={mime!r}]"
     else:
-        return "[BINARY: unknown entry format]"
-
-    try:
-        raw = base64.b64decode(raw_b64, validate=True)
-    except (ValueError, TypeError):
-        return f"[BINARY: corrupt content, {size} bytes, mime={mime!r}]"
+        if isinstance(entry, dict):
+            raw_b64 = entry.get("content", "")
+            mime = entry.get("mime", "") or ""
+            size = entry.get("size", 0)
+        elif hasattr(entry, "content"):
+            raw_b64 = entry.content
+        else:
+            return "[BINARY: unknown entry format]"
+        try:
+            raw = base64.b64decode(raw_b64, validate=True)
+        except (ValueError, TypeError):
+            return f"[BINARY: corrupt content, {size} bytes, mime={mime!r}]"
     try:
         return raw.decode("utf-8")
     except UnicodeDecodeError:

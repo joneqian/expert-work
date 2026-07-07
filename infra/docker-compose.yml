@@ -54,6 +54,18 @@ x-control-plane-base: &control-plane-base
     # ignored). Missing file → empty store → agent build fails loud only when
     # a key is actually requested. See infra/dev-keys/dev-llm-keys.example.
     EXPERT_WORK_SECRET_STORE_ENV_FILE: /run/dev-keys/dev-llm-keys.local
+    # skill-asset-store — durable object store for skill supporting files.
+    # Default ``memory`` keeps zero-config dev-up working (imports stay inline,
+    # tighter caps). To enable asset-tier imports (large skills like
+    # ppt-master), set in infra/.env:
+    #   EXPERT_WORK_OBJECT_STORE_BACKEND=s3-compatible
+    # and add the two minio entries to infra/dev-keys/dev-llm-keys.local
+    # (see dev-llm-keys.example). Bucket is created by minio-init below.
+    EXPERT_WORK_OBJECT_STORE_BACKEND: ${EXPERT_WORK_OBJECT_STORE_BACKEND:-memory}
+    EXPERT_WORK_OBJECT_STORE_ENDPOINT_URL: ${EXPERT_WORK_OBJECT_STORE_ENDPOINT_URL:-http://minio:9000}
+    EXPERT_WORK_OBJECT_STORE_BUCKET: ${EXPERT_WORK_OBJECT_STORE_BUCKET:-expert-work}
+    EXPERT_WORK_OBJECT_STORE_ACCESS_KEY_REF: ${EXPERT_WORK_OBJECT_STORE_ACCESS_KEY_REF:-secret://expert-work/dev/minio/access-key}
+    EXPERT_WORK_OBJECT_STORE_SECRET_KEY_REF: ${EXPERT_WORK_OBJECT_STORE_SECRET_KEY_REF:-secret://expert-work/dev/minio/secret-key}
     # Stream Q — encrypted-vault backend. Default keeps the file-backed local_dev
     # store; set these to paste keys in the web UI (encrypted at rest). The KEK
     # is env-passthrough (never committed): export a 32-byte base64 key locally.
@@ -387,6 +399,24 @@ services:
       interval: 5s
       timeout: 4s
       retries: 30
+
+  minio-init:
+    # One-shot: ensure the ``expert-work`` bucket exists (skill-asset-store +
+    # J.6 image uploads land here when the s3-compatible backend is enabled).
+    profiles: ["full"]
+    image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    container_name: expert-work-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - >
+        mc alias set m http://minio:9000
+        ${EXPERT_WORK_MINIO_ROOT_USER:-expert_work} ${EXPERT_WORK_MINIO_ROOT_PASSWORD:-expert_work_dev_minio} &&
+        mc mb --ignore-existing m/${EXPERT_WORK_OBJECT_STORE_BUCKET:-expert-work} && echo "expert-work bucket ready"
+    restart: "no"
 
   credential-proxy:
     # Expert Work Credential Proxy — Stream F.5 service, containerised in F.10.

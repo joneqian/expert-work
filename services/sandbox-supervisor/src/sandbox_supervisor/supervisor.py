@@ -95,11 +95,13 @@ _container_name = container_name
 #: in-memory buffer against a pathological file.
 _MAX_ARTIFACT_BYTES = 10 * 1024 * 1024
 
-#: skill-runtime §5.1 — caps on ``seed_files`` (mirror the .skill package caps:
-#: 5 MiB total / 256 entries). The orchestrator already bounds this, but the
-#: supervisor re-checks at its trust boundary (the request round-trips untrusted).
-_MAX_SEED_TOTAL_BYTES = 5 * 1024 * 1024
-_MAX_SEED_FILES = 256
+#: skill-runtime §5.1 — caps on ``seed_files`` (mirror the .skill package caps,
+#: asset-store tier: 64 MiB total / 16384 entries — asset-library skills like
+#: ppt-master materialize thousands of small template files). The orchestrator
+#: already bounds this, but the supervisor re-checks at its trust boundary
+#: (the request round-trips untrusted).
+_MAX_SEED_TOTAL_BYTES = 64 * 1024 * 1024
+_MAX_SEED_FILES = 16384
 
 #: Document-upload write cap. A user uploads a PDF / office doc into their
 #: workspace; the supervisor re-checks the size at its trust boundary (the
