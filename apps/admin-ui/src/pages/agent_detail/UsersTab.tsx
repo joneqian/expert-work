@@ -86,7 +86,7 @@ export function UsersTab({ detail }: UsersTabProps) {
                   <AlertTriangle
                     size={13}
                     strokeWidth={1.5}
-                    color="var(--hx-status-error, #f5222d)"
+                    color="var(--ew-status-error, #f5222d)"
                   />
                 </Space>
               </Tooltip>

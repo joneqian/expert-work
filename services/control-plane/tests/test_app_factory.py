@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from control_plane.app import create_app
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
+from expert_work.common.lifecycle import Lifecycle
 from tests.auth_fixtures import build_test_jwt_verifier
 
 
@@ -16,7 +16,7 @@ def test_create_app_returns_fastapi_instance() -> None:
         jwt_verifier=build_test_jwt_verifier(),
     )
     assert isinstance(app, FastAPI)
-    assert app.title == "Helix-Agent Control Plane"
+    assert app.title == "Expert Work Control Plane"
 
 
 def test_create_app_attaches_settings_and_lifecycle() -> None:

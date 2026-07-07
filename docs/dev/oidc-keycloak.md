@@ -31,9 +31,9 @@ external DB + TLS; the dev image above is single-node in-memory.)
 In the admin console:
 
 1. **Create a realm** — top-left dropdown → "Create Realm" → name it
-   `helix`.
+   `Expert Work`.
 2. **Create a client** under that realm → "Clients" → "Create client":
-   - Client ID: `helix-admin-ui`
+   - Client ID: `expert-work-admin-ui`
    - Client type: **OpenID Connect**
    - Click "Next".
 3. **Capability config**:
@@ -59,7 +59,7 @@ In the admin console:
    "Temporary"). This user can now log in to the realm.
 
 The user gets default OIDC claims (`sub`, `email`, `preferred_username`).
-For helix you'll want a `tenant_id` claim — wire it via Keycloak's
+For Expert Work you'll want a `tenant_id` claim — wire it via Keycloak's
 "Client scopes" → "user-attribute mapper" once you're past initial
 verification.
 
@@ -68,8 +68,8 @@ verification.
 Copy `.env.example` to `.env.local` in `apps/admin-ui/` and set:
 
 ```env
-VITE_OIDC_ISSUER=http://localhost:8080/realms/helix
-VITE_OIDC_CLIENT_ID=helix-admin-ui
+VITE_OIDC_ISSUER=http://localhost:8080/realms/Expert Work
+VITE_OIDC_CLIENT_ID=expert-work-admin-ui
 # Audience — Keycloak defaults audience to client_id, so we leave this
 # unset. If your tenant has a separate API audience claim, set it here.
 VITE_OIDC_AUDIENCE=
@@ -94,15 +94,15 @@ The control-plane already verifies inbound JWTs via OIDC discovery
 (`JWTVerifier`). For the local Keycloak setup, set:
 
 ```env
-HELIX_OIDC_ISSUER=http://localhost:8080/realms/helix
-HELIX_OIDC_AUDIENCE=helix-admin-ui
+EXPERT_WORK_OIDC_ISSUER=http://localhost:8080/realms/Expert Work
+EXPERT_WORK_OIDC_AUDIENCE=expert-work-admin-ui
 ```
 
 JWKS is fetched automatically from
-`http://localhost:8080/realms/helix/protocol/openid-connect/certs`.
+`http://localhost:8080/realms/Expert Work/protocol/openid-connect/certs`.
 
 If you see `AUTH_INVALID_AUDIENCE` from the backend, double-check that
-the JWT's `aud` claim matches `HELIX_OIDC_AUDIENCE`. Keycloak v25+
+the JWT's `aud` claim matches `EXPERT_WORK_OIDC_AUDIENCE`. Keycloak v25+
 puts `account` in the audience by default — add a "audience" mapper
 under the client's "Client scopes" → "dedicated" scope to inject the
 expected value.

@@ -15,7 +15,7 @@ not bake in a significance threshold to declare a winner.
 Variants are manifest YAML files (an operator exports a revision
 snapshot via ``GET /v1/agents/{name}/{version}/revisions/{n}`` or the
 History tab). Real-LLM runs are manual (``--provider env`` reads
-``HELIX_EVAL_LLM_*``, the run_longmem convention); CI exercises the
+``EXPERT_WORK_EVAL_LLM_*``, the run_longmem convention); CI exercises the
 harness itself through the deterministic mock provider only.
 
 Run::
@@ -43,7 +43,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:  # script-style execution from repo root
     sys.path.insert(0, str(_HERE))
 
-from helix_eval import (  # type: ignore[import-not-found]  # noqa: E402
+from expert_work_eval import (  # type: ignore[import-not-found]  # noqa: E402
     CompletionFn,
     EvalReport,
     EvalSet,
@@ -167,17 +167,17 @@ async def run_ab(
 
 
 def _env_provider_factory(model: str, max_tokens: int) -> Any:
-    """Real-LLM factory from ``HELIX_EVAL_LLM_*`` env (run_longmem convention)."""
-    api_key = os.environ.get("HELIX_EVAL_LLM_API_KEY")
+    """Real-LLM factory from ``EXPERT_WORK_EVAL_LLM_*`` env (run_longmem convention)."""
+    api_key = os.environ.get("EXPERT_WORK_EVAL_LLM_API_KEY")
     if not api_key:
-        raise SystemExit("--provider env needs HELIX_EVAL_LLM_API_KEY")
+        raise SystemExit("--provider env needs EXPERT_WORK_EVAL_LLM_API_KEY")
     from langchain_core.messages import HumanMessage, SystemMessage
     from longmem.openai_client import (  # type: ignore[import-not-found]
         DASHSCOPE_COMPAT_BASE_URL,
         OpenAICompatCaller,
     )
 
-    base_url = os.environ.get("HELIX_EVAL_LLM_BASE_URL", DASHSCOPE_COMPAT_BASE_URL)
+    base_url = os.environ.get("EXPERT_WORK_EVAL_LLM_BASE_URL", DASHSCOPE_COMPAT_BASE_URL)
     caller = OpenAICompatCaller(
         api_key=api_key, model=model, base_url=base_url, max_tokens=max_tokens
     )

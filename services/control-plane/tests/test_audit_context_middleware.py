@@ -1,7 +1,7 @@
 """Tests for :class:`control_plane.middleware.AuditContextMiddleware`.
 
 After Stream C.1 :class:`AuditContextMiddleware` no longer reads
-``X-Helix-*`` headers — it projects ``request.state.principal`` (set by
+``X-Expert-Work-*`` headers — it projects ``request.state.principal`` (set by
 :class:`AuthMiddleware`) into both the legacy ``request.state.tenant_id``
 alias and the structured-log ctxvar. Tests fabricate a probe app where a
 small middleware ahead of ``AuditContextMiddleware`` simulates a
@@ -20,8 +20,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
 from control_plane.middleware import AuditContextMiddleware
-from helix_agent.common.context import get_current_tenant
-from helix_agent.protocol import Principal
+from expert_work.common.context import get_current_tenant
+from expert_work.protocol import Principal
 
 _DEFAULT_TENANT = UUID("00000000-0000-0000-0000-000000000000")
 _REAL_TENANT = UUID("22222222-2222-2222-2222-222222222222")
@@ -98,13 +98,13 @@ async def test_projects_principal_into_state_and_ctxvar() -> None:
 
 
 @pytest.mark.asyncio
-async def test_legacy_x_helix_tenant_header_no_longer_honoured() -> None:
+async def test_legacy_x_expert_work_tenant_header_no_longer_honoured() -> None:
     """Regression guard: the old dev-mode header trust path is gone."""
     app = _build_probe_app(principal=None)
     transport = ASGITransport(app=app)
     bogus_tenant = "11111111-1111-1111-1111-111111111111"
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/probe", headers={"X-Helix-Tenant": bogus_tenant})
+        response = await client.get("/probe", headers={"X-Expert-Work-Tenant": bogus_tenant})
     body = response.json()
     # The header is silently ignored — defaults still win.
     assert body["tenant_id"] == str(_DEFAULT_TENANT)

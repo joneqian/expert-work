@@ -29,5 +29,5 @@ month; finalize once after month end.
 
 ```bash
 uv run python -m billing_rollup_job          # default = current month
-HELIX_BILLING_ROLLUP_TARGET_MONTH=2026-05 uv run python -m billing_rollup_job
+EXPERT_WORK_BILLING_ROLLUP_TARGET_MONTH=2026-05 uv run python -m billing_rollup_job
 ```

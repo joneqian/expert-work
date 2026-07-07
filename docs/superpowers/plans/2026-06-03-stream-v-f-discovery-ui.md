@@ -22,7 +22,7 @@
 **Key facts (verified 2026-06-03):**
 - Router + DI + `_public`: `services/control-plane/src/control_plane/api/mcp_servers.py` (router `build_mcp_servers_router()`, `_get_store`/`_get_secret_store`, `_public` strips `token_secret_ref`, `require("mcp_server", "read"|"write")`, `probe_remote_mcp`/`McpProbeError` imported).
 - Probe-only: `probe_remote_mcp(*, name, transport, url, bearer_token, timeout_s)` → `Sequence[MCPToolDef]` or raises `McpProbeError(code,message)`.
-- Token resolve: `from helix_agent.runtime.secret_store import parse_secret_ref` (the path mcp_servers.py already uses) + `secret_store.get(parse_secret_ref(ref))`.
+- Token resolve: `from expert_work.runtime.secret_store import parse_secret_ref` (the path mcp_servers.py already uses) + `secret_store.get(parse_secret_ref(ref))`.
 - Tenant allowlist: `TenantConfigService.get(tenant_id=...).mcp_allowlist`. The service is on `app.state` (grep `tenant_config` in app.py for the exact attribute — likely `app.state.tenant_config_service`); if not exposed, read via the existing `_get_*` pattern or the tenant_config store.
 - Frontend mirrors: `apps/admin-ui/src/pages/SettingsTenants.tsx`, `apps/admin-ui/src/components/CreateTenantDrawer.tsx`, `apps/admin-ui/src/api/tenants.ts` + `client.ts` (`getJson`/`postJson`/`apiClient`/`ApiError`), `apps/admin-ui/src/router.tsx`, `apps/admin-ui/src/components/Sidebar.tsx`, `apps/admin-ui/src/i18n/locales/{en,zh-CN}.ts` (`TranslationKeys`), `apps/admin-ui/src/pages/SettingsOps.stories.tsx`, `apps/admin-ui/e2e/tenants.spec.ts` (+ `e2e/fixtures`).
 - admin-ui CI jobs: typecheck+test+build, storybook build, Playwright+axe — all must pass.
@@ -130,7 +130,7 @@ async def test_server_tools_unknown_404(monkeypatch) -> None:
 
 (Ensure `_fake_probe_ok` returns `[MCPToolDef(name="create_issue", ...)]`. The `available` test's platform-allowlist seeding may need the tenant_config store — adapt to how the in-memory app exposes it; if setting the allowlist is awkward in the test harness, assert only the tenant-server half and note the platform half is covered by a unit test.)
 
-- [ ] **Step 3: Run → fail.** `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_mcp_servers_api.py -q -k "test_connection or available or server_tools"` → 404s / missing routes.
+- [ ] **Step 3: Run → fail.** `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_mcp_servers_api.py -q -k "test_connection or available or server_tools"` → 404s / missing routes.
 
 - [ ] **Step 4: Implement the three endpoints** in `build_mcp_servers_router()`:
 
@@ -216,7 +216,7 @@ async def list_mcp_server_tools(
     }
 ```
 
-Add imports as needed (`Path` from fastapi, `parse_secret_ref` from `helix_agent.runtime.secret_store`, `SecretStr` already imported). **Route ordering**: register `/test` and `/available` BEFORE `/{name}` PATCH/DELETE? FastAPI matches `/test` and `/available` as literal paths fine even with `/{name}` present, but `/{name}/tools` is a distinct path so no conflict. Verify no path shadows the existing `PATCH/DELETE /{name}`.
+Add imports as needed (`Path` from fastapi, `parse_secret_ref` from `expert_work.runtime.secret_store`, `SecretStr` already imported). **Route ordering**: register `/test` and `/available` BEFORE `/{name}` PATCH/DELETE? FastAPI matches `/test` and `/available` as literal paths fine even with `/{name}` present, but `/{name}/tools` is a distinct path so no conflict. Verify no path shadows the existing `PATCH/DELETE /{name}`.
 
 - [ ] **Step 5: Run → pass + lint.** Tests green; `uv run ruff check services/control-plane && uv run ruff format --check services/control-plane`. Drop unused `# noqa` (BLE001 not enabled).
 

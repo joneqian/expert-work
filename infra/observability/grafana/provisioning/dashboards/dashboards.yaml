@@ -6,7 +6,7 @@
 apiVersion: 1
 
 providers:
-  - name: helix
+  - name: expert_work
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30

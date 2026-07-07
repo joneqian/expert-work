@@ -142,7 +142,7 @@ worker 内建一个固定 **eval harness AgentSpec**，不依赖租户配过 age
    故 `_UNHOSTABLE_ADVERSARIAL_CASES` **显式跳过+log**（非静默砍）。tool 维度 = 后续件（eval agent 长出确定性工具后重纳）。
 2. **trace 抓取不用 `capture_spans`**：该函数调 `init_tracing` 且退出不还原。实测 `init_tracing` 对
    已有 SDK provider 是 **additive**（`add_span_processor`，不替换），但 `capture_spans` 每次调用都加一个
-   processor（泄漏）。改为 harness init **挂一个** InMemory exporter + 每次 trace eval 包 `helix.eval.run`
+   processor（泄漏）。改为 harness init **挂一个** InMemory exporter + 每次 trace eval 包 `expert_work.eval.run`
    根 span 按 trace_id 过滤（隔离并发真 run，真导出无损）。
 3. **worker summary 不改**：worker `_execute` 硬编码 `{"pass_count","total"}`，不取 engine 的 aggregate。
    保持零 worker 改动；safe_rate = pass_count/total 可派生，每 case `scores.safe`/`violations` 落库。

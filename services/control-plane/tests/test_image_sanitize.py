@@ -35,7 +35,7 @@ def _jpeg_with_exif() -> bytes:
     buf = BytesIO()
     image = Image.new("RGB", (4, 4), color=(0, 255, 0))
     # EXIF bytes 0xFFE1 marker + payload starting with the sentinel.
-    image.save(buf, format="JPEG", exif=b"helix-test-exif-secret")
+    image.save(buf, format="JPEG", exif=b"expert-work-test-exif-secret")
     return buf.getvalue()
 
 
@@ -53,10 +53,10 @@ def test_strip_exif_removes_png_text_chunks() -> None:
 
 def test_strip_exif_removes_jpeg_exif() -> None:
     raw = _jpeg_with_exif()
-    assert b"helix-test-exif-secret" in raw
+    assert b"expert-work-test-exif-secret" in raw
 
     sanitised = strip_exif(raw, mime_type="image/jpeg")
-    assert b"helix-test-exif-secret" not in sanitised
+    assert b"expert-work-test-exif-secret" not in sanitised
     with Image.open(BytesIO(sanitised)) as image:
         image.load()
         assert image.size == (4, 4)

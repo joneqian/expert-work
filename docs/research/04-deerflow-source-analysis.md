@@ -146,7 +146,7 @@ async def put(self, *, thread_id, run_id, event_type, category, content="", ...)
         return self._row_to_dict(row)
 ```
 
-**对 Helix 借鉴**：直接 vendor，改造点：
+**对 Expert Work 借鉴**：直接 vendor，改造点：
 - `user_id` contextvar → `tenant_id`
 - 添加 `pipeline_id` 字段（追踪 Agent 执行链）
 - 扩展 `event_type` enum（task_start, brain_invoke, hands_execute, checkpoint, audit）
@@ -181,7 +181,7 @@ class ThreadMetaRepository(ThreadMetaStore):
 - `resolve_user_id()` 三态：`AUTO`（contextvar）/ 显式 `str` / 显式 `None`（绕过）
 - `check_access(require_existing)` 双模式（读容错 vs 删严格）
 
-**对 Helix 借鉴**：
+**对 Expert Work 借鉴**：
 - `user_id` → `tenant_id` + 增加 `org_id`
 - `metadata` JSONB 字段（agent_version, config_hash）
 - 实现 PG `@>` 操作符的 JSON 查询
@@ -222,7 +222,7 @@ def checkpointer_context() -> Iterator[Checkpointer]:
         yield saver
 ```
 
-**对 Helix 借鉴**：直接用，单例 + ctx manager 双 API 兼顾生产单例和测试隔离。
+**对 Expert Work 借鉴**：直接用，单例 + ctx manager 双 API 兼顾生产单例和测试隔离。
 
 ---
 
@@ -261,7 +261,7 @@ class StreamBridge(abc.ABC):
     async def cleanup(self, run_id: str, *, delay: float = 0) -> None: ...
 ```
 
-**对 Helix 借鉴**：直接用，Last-Event-ID 自动重连 + 心跳 + 清理延迟模式很完整。
+**对 Expert Work 借鉴**：直接用，Last-Event-ID 自动重连 + 心跳 + 清理延迟模式很完整。
 
 ---
 
@@ -303,8 +303,8 @@ class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         ...
 ```
 
-**对 Helix 借鉴**：
-- 抽 `AgentMiddleware` 基类放进 `helix-sdk`，**去 langchain.agents.middleware 依赖**
+**对 Expert Work 借鉴**：
+- 抽 `AgentMiddleware` 基类放进 `expert-work-sdk`，**去 langchain.agents.middleware 依赖**
 - 直接采纳 5 个通用中间件：`tool_error_handling`、`memory`、`token_usage`、`loop_detection`、`dangling_tool_call`
 - 不采纳：`thread_data` / `uploads` / `sandbox` / `summarization` / `todo` / `title` / `view_image` / `deferred_tool_filter` / `subagent_limit`（DeerFlow 特化或与我们模型不兼容）
 
@@ -361,7 +361,7 @@ def get_subagent_config(name: str, *, app_config: AppConfig | None = None) -> Su
     return config
 ```
 
-**对 Helix 借鉴**：
+**对 Expert Work 借鉴**：
 - 抄 6 状态机 + 后台线程池 + trace_id 父子链接
 - 扩展 per-tenant quota 替代 SubagentLimitMiddleware 硬编码 MAX=3
 
@@ -486,12 +486,12 @@ class AioSandbox(Sandbox):
 
 ### 第一组：Event Log（最优先）
 
-| 源路径（绝对）| 目标路径（Helix）|
+| 源路径（绝对）| 目标路径（Expert Work）|
 |---------------|---------------------|
-| `/Users/mac/src/github/deer-flow/backend/packages/harness/deerflow/runtime/events/store/base.py` | `helix/packages/helix-runtime/src/helix/runtime/event_log/base.py` |
+| `/Users/mac/src/github/deer-flow/backend/packages/harness/deerflow/runtime/events/store/base.py` | `Expert Work/packages/expert-work-runtime/src/Expert Work/runtime/event_log/base.py` |
 | `.../runtime/events/store/db.py` | `.../event_log/db.py` |
 | `.../runtime/events/store/memory.py` | `.../event_log/memory.py` |
-| `.../persistence/models/run_event.py` | `helix/packages/helix-persistence/src/helix/persistence/models/run_event.py` |
+| `.../persistence/models/run_event.py` | `Expert Work/packages/expert-work-persistence/src/Expert Work/persistence/models/run_event.py` |
 
 ### 第二组：权限 + 元数据
 
@@ -503,7 +503,7 @@ class AioSandbox(Sandbox):
 | `.../persistence/run/{model,sql}.py` | `.../persistence/{models/run.py, run/sql.py}` |
 | `.../persistence/{base,engine}.py` | `.../persistence/{base,engine}.py` |
 | `.../persistence/user/model.py` | `.../persistence/models/user.py` |
-| `.../runtime/user_context.py` | `helix/packages/helix-runtime/src/helix/runtime/context.py`（改 tenant）|
+| `.../runtime/user_context.py` | `Expert Work/packages/expert-work-runtime/src/Expert Work/runtime/context.py`（改 tenant）|
 
 ### 第三组：工厂模式
 
@@ -523,7 +523,7 @@ class AioSandbox(Sandbox):
 
 | 源 | 目标 |
 |----|------|
-| `.../agents/middlewares/tool_error_handling_middleware.py` | `helix/services/orchestrator/src/orchestrator/middleware/error_handling.py` |
+| `.../agents/middlewares/tool_error_handling_middleware.py` | `Expert Work/services/orchestrator/src/orchestrator/middleware/error_handling.py` |
 | `.../agents/middlewares/memory_middleware.py` | `.../middleware/memory.py` |
 | `.../agents/middlewares/token_usage_middleware.py` | `.../middleware/token_usage.py` |
 | `.../agents/middlewares/loop_detection_middleware.py` | `.../middleware/loop_detection.py` |
@@ -533,10 +533,10 @@ class AioSandbox(Sandbox):
 
 | 源 | 目标 | 改造成本 |
 |----|------|----------|
-| `.../agents/memory/storage.py` | `helix/services/orchestrator/.../memory/storage.py` | 大改（换 Postgres）|
-| `.../subagents/executor.py` | `helix/services/orchestrator/.../subagent/executor.py` | 中（适配 gVisor + tenant quota）|
-| `.../guardrails/{builtin,provider}.py` | `helix/services/orchestrator/.../guardrails/` | 小 |
-| `.../mcp/client.py` | `helix/services/mcp-gateway/src/mcp_gateway/client.py` | 小 |
+| `.../agents/memory/storage.py` | `Expert Work/services/orchestrator/.../memory/storage.py` | 大改（换 Postgres）|
+| `.../subagents/executor.py` | `Expert Work/services/orchestrator/.../subagent/executor.py` | 中（适配 gVisor + tenant quota）|
+| `.../guardrails/{builtin,provider}.py` | `Expert Work/services/orchestrator/.../guardrails/` | 小 |
+| `.../mcp/client.py` | `Expert Work/services/mcp-gateway/src/mcp_gateway/client.py` | 小 |
 
 ---
 
@@ -585,7 +585,7 @@ class AioSandbox(Sandbox):
 ## 7. 总结
 
 **DeerFlow harness SDK 的核心价值在于**：
-1. **Append-only Event Log** — 直接用于 Helix 的审计日志
+1. **Append-only Event Log** — 直接用于 Expert Work 的审计日志
 2. **多租户权限模型** — SQL 查询 + contextvar 标准组合
 3. **中间件链架构** — composable + chainable + 同步异步双支持
 4. **工厂模式** — 后端无关、配置驱动

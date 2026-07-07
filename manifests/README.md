@@ -1,7 +1,7 @@
 # Agent manifests
 
 Checked-in `AgentSpec` manifests (YAML). Authored against the live schema in
-`packages/helix-protocol/src/helix_agent/protocol/agent_spec.py` and loaded by
+`packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py` and loaded by
 `services/control-plane/src/control_plane/manifest/loader.py`.
 
 ## canonical-agent

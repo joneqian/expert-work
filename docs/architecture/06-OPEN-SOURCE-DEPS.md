@@ -47,10 +47,10 @@
 
 | DeerFlow 源码路径 | 我们存放路径 | 改造点 |
 |------|----------|--------|
-| `runtime/events/store/base.py` | `packages/helix-runtime/src/helix_agent/runtime/event_log/base.py` | 🆕 **2026-05-11 修正**：原计划"接口原样保留"，但 [ADR-0002](../adr/0002-state-layer-schema.md) schema 已定（`thread_id` + `tenant_id` UUID + `payload` + `trace_id`，无 `run_id`/`category`/`content`/`event_metadata`/`user_id`）。改为**借鉴算法，自有接口**：保留 FOR UPDATE seq 分配、批量写、内容截断三大算法，接口对齐 ADR-0002。Vendor 头声明 "Algorithm-vendored, schema-our-own"。 |
-| `runtime/events/store/db.py` | `.../event_log/db.py` | 同上；保留 FOR UPDATE 串行化 + 批量分配 seq + content_truncate；接口签名按 EventRecord（helix-agent-protocol） |
+| `runtime/events/store/base.py` | `packages/expert-work-runtime/src/expert_work/runtime/event_log/base.py` | 🆕 **2026-05-11 修正**：原计划"接口原样保留"，但 [ADR-0002](../adr/0002-state-layer-schema.md) schema 已定（`thread_id` + `tenant_id` UUID + `payload` + `trace_id`，无 `run_id`/`category`/`content`/`event_metadata`/`user_id`）。改为**借鉴算法，自有接口**：保留 FOR UPDATE seq 分配、批量写、内容截断三大算法，接口对齐 ADR-0002。Vendor 头声明 "Algorithm-vendored, schema-our-own"。 |
+| `runtime/events/store/db.py` | `.../event_log/db.py` | 同上；保留 FOR UPDATE 串行化 + 批量分配 seq + content_truncate；接口签名按 EventRecord（expert-work-protocol） |
 | `runtime/events/store/memory.py` | `.../event_log/memory.py` | 同上；仅测试用 |
-| `persistence/models/run_event.py` | `packages/helix-persistence/src/helix/persistence/models/run_event.py` | 加 `tenant` 字段 + 索引 |
+| `persistence/models/run_event.py` | `packages/expert-work-persistence/src/Expert Work/persistence/models/run_event.py` | 加 `tenant` 字段 + 索引 |
 | `persistence/thread_meta/base.py` | `.../persistence/thread_meta/base.py` | 接口扩展 tenant |
 | `persistence/thread_meta/sql.py` | `.../persistence/thread_meta/sql.py` | `resolve_user_id` → `resolve_tenant_id` |
 | `persistence/thread_meta/memory.py` | `.../persistence/thread_meta/memory.py` | 测试用 |
@@ -69,7 +69,7 @@
 | `runtime/stream_bridge/base.py` | `.../runtime/stream/base.py` | 直接用 |
 | `runtime/runs/manager.py` | `.../runtime/runs/manager.py` | 加 tenant；注意：运行状态机与 checkpoint 是**正交维度**，分开实现 |
 | **🆕 P0 新增（生产必备）— 6 个中间件 + 锚点系统** | | |
-| `agents/factory.py:289-379`（@Next/@Prev 锚点算法 + 装饰器）| `packages/helix-sdk/.../middleware/anchor.py` | 把 _insert_extra 算法 + Next/Prev 装饰器抽出独立 SDK；让外部 middleware 可干净插入 |
+| `agents/factory.py:289-379`（@Next/@Prev 锚点算法 + 装饰器）| `packages/expert-work-sdk/.../middleware/anchor.py` | 把 _insert_extra 算法 + Next/Prev 装饰器抽出独立 SDK；让外部 middleware 可干净插入 |
 | `agents/middlewares/dynamic_context_middleware.py` (193 行) | `services/orchestrator/.../middleware/dynamic_context.py` | **🔴 关键**：保持 system_prompt 静态最大化 prefix cache 命中（API 成本影响 ~10x）；午夜穿越检测；消息 ID swap 技术 |
 | `agents/middlewares/llm_error_handling_middleware.py` (368 行) | `.../middleware/llm_error_handling.py` | **🔴 关键**：自动重试 + 错误分类 + 断路器（按 provider+key 维度），多租户级联故障防护 |
 | `agents/middlewares/sandbox_audit_middleware.py` (363 行) | `.../middleware/sandbox_audit.py` | **🔴 关键**：LLM 生成命令的安全网（gVisor 之前的逻辑层防护），15 条高风险规则 + 5 条中风险规则 + quote-aware 命令拆分 |
@@ -94,14 +94,14 @@
 | `mcp/client.py` | `services/mcp-gateway/src/mcp_gateway/client.py` | 借鉴连接池/认证刷新 |
 | `guardrails/builtin.py` | `services/orchestrator/.../guardrails/builtin.py` | 直接用 |
 | `guardrails/provider.py` | `.../guardrails/provider.py` | 直接用 |
-| `tracing/factory.py` | `packages/helix-common/src/helix/common/tracing.py` | 借鉴 provider 切换，主用 OpenTelemetry |
-| **AgentMiddleware 基类** | `packages/helix-sdk/src/helix/sdk/middleware/base.py` | 抄 `wrap_tool_call` / `awrap_tool_call` 双 API 设计；不依赖 langchain，自建 |
+| `tracing/factory.py` | `packages/expert-work-common/src/Expert Work/common/tracing.py` | 借鉴 provider 切换，主用 OpenTelemetry |
+| **AgentMiddleware 基类** | `packages/expert-work-sdk/src/Expert Work/sdk/middleware/base.py` | 抄 `wrap_tool_call` / `awrap_tool_call` 双 API 设计；不依赖 langchain，自建 |
 | **🆕 P1 新增（M1 vendor）** | | |
 | `agents/middlewares/thread_data_middleware.py` (118 行) | `services/orchestrator/.../middleware/thread_data.py` | **底层基础**：thread/tenant 元数据从 RunnableConfig 注入到 state，必须放 chain 最前（其他 middleware 都依赖它）|
 | `agents/middlewares/uploads_middleware.py` (295 行) | `services/orchestrator/.../middleware/uploads.py` | 文件上传 + 大纲提取（heading + line numbers），LLM 可精准定位文件内容；适配我们的对象存储 |
 | `agents/middlewares/deferred_tool_filter_middleware.py` (107 行) | `services/orchestrator/.../middleware/deferred_tool_filter.py` | 配合 tool_search 解决"工具数量爆炸"（MCP 多 server 场景，50+ 工具不能全塞 prompt）|
 | `agents/middlewares/token_usage_middleware.py` (303 行) | `services/orchestrator/.../middleware/token_usage.py` | 步骤归因（按 todo/subagent 维度追踪 input/output/cache_creation/cache_read），dogfood 阶段成本分析必需 |
-| `reflection/resolvers.py` (98 行) | `packages/helix-common/.../reflection.py` | `resolve_class()`/`resolve_variable()` — manifest 中字符串路径（如 `agents.foo.tools:bar`）的运行时解析 |
+| `reflection/resolvers.py` (98 行) | `packages/expert-work-common/.../reflection.py` | `resolve_class()`/`resolve_variable()` — manifest 中字符串路径（如 `agents.foo.tools:bar`）的运行时解析 |
 
 ---
 
@@ -141,7 +141,7 @@
 ### 1. 初次拷贝（M0 启动时）
 
 ```bash
-# 在 helix 仓库中
+# 在 Expert Work 仓库中
 git submodule add https://github.com/bytedance/deer-flow.git vendor/deer-flow
 cd vendor/deer-flow && git checkout <stable_commit_sha>
 cd ../..
@@ -184,7 +184,7 @@ python tools/vendor_sync.py --check-upstream-changes \
 - 我们的 license 选择：建议 **Apache 2.0**（兼容 MIT vendor + 给商业使用更明确的专利授权）
 - `LICENSE` 文件并列声明：
   ```
-  Helix — Apache License 2.0
+  Expert Work — Apache License 2.0
   Includes code adapted from:
   - bytedance/deer-flow (MIT) — see vendor/deer-flow/LICENSE
   - 其他第三方依赖见 NOTICE

@@ -21,15 +21,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Audit — helix Admin</title>
+  <title>Audit — Expert Work Admin</title>
   <link rel="stylesheet" href="./shared/tokens.css" />
   <link rel="stylesheet" href="./shared/shell.css" />
   <style>
-    .filter-chips { display: flex; gap: var(--hx-space-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--hx-space-3); padding: var(--hx-space-3); background: var(--hx-surface-base); border: 1px solid var(--hx-border-subtle); border-radius: var(--hx-radius-sm); }
-    .filter-chip { display: flex; align-items: center; gap: 6px; background: var(--hx-surface-raised); padding: 4px 8px; border-radius: var(--hx-radius-xs); font-size: var(--hx-font-size-xs); }
-    .filter-chip__label { color: var(--hx-text-tertiary); }
-    .filter-chip__remove { cursor: pointer; color: var(--hx-text-tertiary); }
-    .filter-chip__remove:hover { color: var(--hx-text-primary); }
+    .filter-chips { display: flex; gap: var(--ew-space-2); flex-wrap: wrap; align-items: center; margin-bottom: var(--ew-space-3); padding: var(--ew-space-3); background: var(--ew-surface-base); border: 1px solid var(--ew-border-subtle); border-radius: var(--ew-radius-sm); }
+    .filter-chip { display: flex; align-items: center; gap: 6px; background: var(--ew-surface-raised); padding: 4px 8px; border-radius: var(--ew-radius-xs); font-size: var(--ew-font-size-xs); }
+    .filter-chip__label { color: var(--ew-text-tertiary); }
+    .filter-chip__remove { cursor: pointer; color: var(--ew-text-tertiary); }
+    .filter-chip__remove:hover { color: var(--ew-text-primary); }
 
     .timeline { list-style: none; padding: 0; margin: 0; position: relative; }
     .timeline::before {
@@ -37,141 +37,141 @@
       position: absolute;
       left: 8px; top: 0; bottom: 0;
       width: 2px;
-      background: var(--hx-border-subtle);
+      background: var(--ew-border-subtle);
     }
-    .timeline__item { padding: var(--hx-space-3) var(--hx-space-3) var(--hx-space-3) var(--hx-space-5); position: relative; cursor: pointer; border-radius: var(--hx-radius-sm); }
-    .timeline__item:hover { background: var(--hx-surface-hover); }
+    .timeline__item { padding: var(--ew-space-3) var(--ew-space-3) var(--ew-space-3) var(--ew-space-5); position: relative; cursor: pointer; border-radius: var(--ew-radius-sm); }
+    .timeline__item:hover { background: var(--ew-surface-hover); }
     .timeline__dot {
       position: absolute;
       left: 4px;
-      top: var(--hx-space-3);
+      top: var(--ew-space-3);
       width: 10px; height: 10px;
       border-radius: 50%;
-      border: 2px solid var(--hx-surface-bg);
-      background: var(--hx-status-success-fg);
+      border: 2px solid var(--ew-surface-bg);
+      background: var(--ew-status-success-fg);
     }
-    .timeline__dot--deny { background: var(--hx-status-warning-fg); }
-    .timeline__dot--failure { background: var(--hx-status-danger-fg); }
-    .timeline__time { font-size: var(--hx-font-size-xs); color: var(--hx-text-tertiary); }
-    .timeline__action { font-family: var(--hx-font-mono); font-size: var(--hx-font-size-sm); color: var(--hx-text-primary); margin: 2px 0; }
-    .timeline__meta { font-size: var(--hx-font-size-xs); color: var(--hx-text-secondary); display: flex; gap: 12px; }
+    .timeline__dot--deny { background: var(--ew-status-warning-fg); }
+    .timeline__dot--failure { background: var(--ew-status-danger-fg); }
+    .timeline__time { font-size: var(--ew-font-size-xs); color: var(--ew-text-tertiary); }
+    .timeline__action { font-family: var(--ew-font-mono); font-size: var(--ew-font-size-sm); color: var(--ew-text-primary); margin: 2px 0; }
+    .timeline__meta { font-size: var(--ew-font-size-xs); color: var(--ew-text-secondary); display: flex; gap: 12px; }
 
-    .load-more { display: flex; justify-content: center; margin-top: var(--hx-space-4); }
+    .load-more { display: flex; justify-content: center; margin-top: var(--ew-space-4); }
 
     .drawer {
       position: fixed; top: 0; right: 0; bottom: 0; width: 540px;
-      background: var(--hx-surface-base);
-      border-left: 1px solid var(--hx-border-subtle);
-      box-shadow: var(--hx-shadow-lg);
-      padding: var(--hx-space-4);
+      background: var(--ew-surface-base);
+      border-left: 1px solid var(--ew-border-subtle);
+      box-shadow: var(--ew-shadow-lg);
+      padding: var(--ew-space-4);
       overflow-y: auto;
     }
-    .drawer h3 { margin: 0 0 var(--hx-space-3); }
-    .audit-detail__row { display: grid; grid-template-columns: 140px 1fr; gap: var(--hx-space-3); padding: var(--hx-space-2) 0; border-bottom: 1px solid var(--hx-border-subtle); font-size: var(--hx-font-size-sm); }
-    .audit-detail__label { color: var(--hx-text-tertiary); }
+    .drawer h3 { margin: 0 0 var(--ew-space-3); }
+    .audit-detail__row { display: grid; grid-template-columns: 140px 1fr; gap: var(--ew-space-3); padding: var(--ew-space-2) 0; border-bottom: 1px solid var(--ew-border-subtle); font-size: var(--ew-font-size-sm); }
+    .audit-detail__label { color: var(--ew-text-tertiary); }
     .audit-detail__json {
-      background: var(--hx-surface-bg);
-      border: 1px solid var(--hx-border-subtle);
-      border-radius: var(--hx-radius-xs);
-      padding: var(--hx-space-3);
-      font-family: var(--hx-font-mono);
-      font-size: var(--hx-font-size-xs);
-      color: var(--hx-text-secondary);
+      background: var(--ew-surface-bg);
+      border: 1px solid var(--ew-border-subtle);
+      border-radius: var(--ew-radius-xs);
+      padding: var(--ew-space-3);
+      font-family: var(--ew-font-mono);
+      font-size: var(--ew-font-size-xs);
+      color: var(--ew-text-secondary);
       white-space: pre;
       overflow-x: auto;
-      margin-top: var(--hx-space-2);
+      margin-top: var(--ew-space-2);
     }
-    .redacted { background: var(--hx-status-warning-bg); color: var(--hx-status-warning-fg); padding: 0 4px; border-radius: 2px; }
+    .redacted { background: var(--ew-status-warning-bg); color: var(--ew-status-warning-fg); padding: 0 4px; border-radius: 2px; }
 
     .demo-toggle { position: fixed; bottom: 24px; right: 24px; z-index: 100; }
   </style>
 </head>
 <body>
-  <div class="hx-app">
-    <aside class="hx-sidebar">
-      <div class="hx-sidebar__brand"><span class="hx-sidebar__glyph">⟁</span><span>helix</span></div>
-      <nav class="hx-sidebar__nav">
-        <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
-        <a class="hx-sidebar__item" href="./09-runs-list.html">Runs</a>
-        <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
-        <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
-        <a class="hx-sidebar__item" href="./10-skills.html">Skills</a>
-        <a class="hx-sidebar__item" href="./11-triggers.html">Triggers</a>
-        <a class="hx-sidebar__item" href="./12-audit.html" aria-current="page">Audit</a>
+  <div class="ew-app">
+    <aside class="ew-sidebar">
+      <div class="ew-sidebar__brand"><span class="ew-sidebar__glyph">⟁</span><span>Expert Work</span></div>
+      <nav class="ew-sidebar__nav">
+        <a class="ew-sidebar__item" href="./01-agents-list.html">Agents</a>
+        <a class="ew-sidebar__item" href="./09-runs-list.html">Runs</a>
+        <a class="ew-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+        <a class="ew-sidebar__item" href="./06-memory-admin.html">Memory</a>
+        <a class="ew-sidebar__item" href="./10-skills.html">Skills</a>
+        <a class="ew-sidebar__item" href="./11-triggers.html">Triggers</a>
+        <a class="ew-sidebar__item" href="./12-audit.html" aria-current="page">Audit</a>
       </nav>
     </aside>
 
-    <header class="hx-topbar">
-      <button class="hx-topbar__tenant"><span>All tenants (system_admin)</span></button>
-      <button class="hx-topbar__cmdk"><span>Search or jump</span><span class="hx-kbd">⌘K</span></button>
-      <div class="hx-topbar__spacer"></div>
+    <header class="ew-topbar">
+      <button class="ew-topbar__tenant"><span>All tenants (system_admin)</span></button>
+      <button class="ew-topbar__cmdk"><span>Search or jump</span><span class="ew-kbd">⌘K</span></button>
+      <div class="ew-topbar__spacer"></div>
     </header>
 
-    <main class="hx-main">
-      <div class="hx-main__container">
-        <div class="hx-page-header">
+    <main class="ew-main">
+      <div class="ew-main__container">
+        <div class="ew-page-header">
           <div>
-            <h1 class="hx-heading-1">Audit</h1>
-            <p class="hx-text-secondary hx-text-sm">合规审计 — 所有 mutating 操作的不可变日志。Cross-tenant 视图需 system_admin。</p>
+            <h1 class="ew-heading-1">Audit</h1>
+            <p class="ew-text-secondary ew-text-sm">合规审计 — 所有 mutating 操作的不可变日志。Cross-tenant 视图需 system_admin。</p>
           </div>
         </div>
 
         <div class="filter-chips">
-          <span class="hx-text-tertiary hx-text-sm">筛选:</span>
+          <span class="ew-text-tertiary ew-text-sm">筛选:</span>
           <div class="filter-chip"><span class="filter-chip__label">action:</span> <span>memory:update, role_binding:create</span> <span class="filter-chip__remove">✕</span></div>
           <div class="filter-chip"><span class="filter-chip__label">result:</span> <span>FAILURE</span> <span class="filter-chip__remove">✕</span></div>
           <div class="filter-chip"><span class="filter-chip__label">from:</span> <span>2026-05-26 00:00</span> <span class="filter-chip__remove">✕</span></div>
-          <button class="hx-btn hx-btn--ghost hx-btn--sm">+ 添加筛选</button>
+          <button class="ew-btn ew-btn--ghost ew-btn--sm">+ 添加筛选</button>
           <span style="flex: 1;"></span>
-          <span class="hx-text-tertiary hx-text-xs">共 47 条匹配</span>
+          <span class="ew-text-tertiary ew-text-xs">共 47 条匹配</span>
         </div>
 
         <ul class="timeline">
           <li class="timeline__item">
             <span class="timeline__dot timeline__dot--failure"></span>
             <div class="timeline__time">2026-05-26 14:23:18 UTC</div>
-            <div class="timeline__action">role_binding:create <span class="hx-badge hx-badge--danger">FAILURE</span></div>
+            <div class="timeline__action">role_binding:create <span class="ew-badge ew-badge--danger">FAILURE</span></div>
             <div class="timeline__meta">
-              <span>actor: <code class="hx-text-mono">user_jane.doe@globex</code></span>
-              <span>resource: <code class="hx-text-mono">subject_id=user_jane.doe</code></span>
+              <span>actor: <code class="ew-text-mono">user_jane.doe@globex</code></span>
+              <span>resource: <code class="ew-text-mono">subject_id=user_jane.doe</code></span>
               <span>tenant: globex</span>
             </div>
           </li>
           <li class="timeline__item">
             <span class="timeline__dot timeline__dot--deny"></span>
             <div class="timeline__time">2026-05-26 14:18:02 UTC</div>
-            <div class="timeline__action">memory:update <span class="hx-badge hx-badge--warning">DENY</span></div>
+            <div class="timeline__action">memory:update <span class="ew-badge ew-badge--warning">DENY</span></div>
             <div class="timeline__meta">
-              <span>actor: <code class="hx-text-mono">sa_data_pipeline@acme</code></span>
-              <span>resource: <code class="hx-text-mono">memory/9f8b2a...</code></span>
+              <span>actor: <code class="ew-text-mono">sa_data_pipeline@acme</code></span>
+              <span>resource: <code class="ew-text-mono">memory/9f8b2a...</code></span>
               <span>tenant: acme</span>
             </div>
           </li>
           <li class="timeline__item">
             <span class="timeline__dot"></span>
             <div class="timeline__time">2026-05-26 13:45:10 UTC</div>
-            <div class="timeline__action">trigger:create <span class="hx-badge hx-badge--success">SUCCESS</span></div>
+            <div class="timeline__action">trigger:create <span class="ew-badge ew-badge--success">SUCCESS</span></div>
             <div class="timeline__meta">
-              <span>actor: <code class="hx-text-mono">user_alice@acme</code></span>
-              <span>resource: <code class="hx-text-mono">trigger/daily_summary</code></span>
+              <span>actor: <code class="ew-text-mono">user_alice@acme</code></span>
+              <span>resource: <code class="ew-text-mono">trigger/daily_summary</code></span>
               <span>tenant: acme</span>
             </div>
           </li>
           <li class="timeline__item">
             <span class="timeline__dot"></span>
             <div class="timeline__time">2026-05-26 13:12:33 UTC</div>
-            <div class="timeline__action">curation_candidate:promote <span class="hx-badge hx-badge--success">SUCCESS</span></div>
+            <div class="timeline__action">curation_candidate:promote <span class="ew-badge ew-badge--success">SUCCESS</span></div>
             <div class="timeline__meta">
-              <span>actor: <code class="hx-text-mono">user_bob@globex</code></span>
-              <span>resource: <code class="hx-text-mono">candidate/5b7d...</code> → <code class="hx-text-mono">eval_dataset/golden_v2</code></span>
+              <span>actor: <code class="ew-text-mono">user_bob@globex</code></span>
+              <span>resource: <code class="ew-text-mono">candidate/5b7d...</code> → <code class="ew-text-mono">eval_dataset/golden_v2</code></span>
               <span>tenant: globex</span>
             </div>
           </li>
         </ul>
 
         <div class="load-more">
-          <button class="hx-btn hx-btn--secondary">加载更多 (cursor)</button>
-          <span style="margin-left: 12px; align-self: center;" class="hx-text-tertiary hx-text-xs">已显示 4 / 47</span>
+          <button class="ew-btn ew-btn--secondary">加载更多 (cursor)</button>
+          <span style="margin-left: 12px; align-self: center;" class="ew-text-tertiary ew-text-xs">已显示 4 / 47</span>
         </div>
       </div>
     </main>
@@ -179,18 +179,18 @@
 
   <!-- Drawer: Entry detail with redacted -->
   <aside class="drawer" data-state="open">
-    <h3 class="hx-heading-3">Audit Entry 详情</h3>
+    <h3 class="ew-heading-3">Audit Entry 详情</h3>
 
-    <div class="audit-detail__row"><div class="audit-detail__label">ID</div><div><code class="hx-text-mono">audit_01HZX4K9...</code></div></div>
+    <div class="audit-detail__row"><div class="audit-detail__label">ID</div><div><code class="ew-text-mono">audit_01HZX4K9...</code></div></div>
     <div class="audit-detail__row"><div class="audit-detail__label">Timestamp</div><div>2026-05-26 14:23:18.421 UTC</div></div>
-    <div class="audit-detail__row"><div class="audit-detail__label">Actor</div><div><code class="hx-text-mono">user_jane.doe@globex</code></div></div>
-    <div class="audit-detail__row"><div class="audit-detail__label">Action</div><div><code class="hx-text-mono">role_binding:create</code></div></div>
-    <div class="audit-detail__row"><div class="audit-detail__label">Resource</div><div><code class="hx-text-mono">subject_id=user_jane.doe</code></div></div>
-    <div class="audit-detail__row"><div class="audit-detail__label">Result</div><div><span class="hx-badge hx-badge--danger">FAILURE</span></div></div>
+    <div class="audit-detail__row"><div class="audit-detail__label">Actor</div><div><code class="ew-text-mono">user_jane.doe@globex</code></div></div>
+    <div class="audit-detail__row"><div class="audit-detail__label">Action</div><div><code class="ew-text-mono">role_binding:create</code></div></div>
+    <div class="audit-detail__row"><div class="audit-detail__label">Resource</div><div><code class="ew-text-mono">subject_id=user_jane.doe</code></div></div>
+    <div class="audit-detail__row"><div class="audit-detail__label">Result</div><div><span class="ew-badge ew-badge--danger">FAILURE</span></div></div>
     <div class="audit-detail__row"><div class="audit-detail__label">Tenant</div><div>globex</div></div>
     <div class="audit-detail__row"><div class="audit-detail__label">IP</div><div>10.42.7.91</div></div>
 
-    <h4 class="hx-heading-4" style="margin-top: var(--hx-space-4);">Payload (redacted)</h4>
+    <h4 class="ew-heading-4" style="margin-top: var(--ew-space-4);">Payload (redacted)</h4>
     <div class="audit-detail__json">{
   "subject_type": "user",
   "subject_id": "user_jane.doe",
@@ -201,13 +201,13 @@
   "error": "self-elevation denied — caller is not system_admin"
 }</div>
 
-    <div style="margin-top: var(--hx-space-3); padding: var(--hx-space-2); background: var(--hx-status-info-bg); border-radius: var(--hx-radius-xs); font-size: var(--hx-font-size-xs); color: var(--hx-status-info-fg);">
+    <div style="margin-top: var(--ew-space-3); padding: var(--ew-space-2); background: var(--ew-status-info-bg); border-radius: var(--ew-radius-xs); font-size: var(--ew-font-size-xs); color: var(--ew-status-info-fg);">
       <strong>redacted_keys:</strong> api_key, secret_token
     </div>
   </aside>
 
   <div class="demo-toggle">
-    <button class="hx-btn hx-btn--ghost hx-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
+    <button class="ew-btn ew-btn--ghost ew-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
   </div>
 </body>
 </html>

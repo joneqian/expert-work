@@ -183,9 +183,9 @@ GET  /v1/hitl/{request_id}/by_token?token=<one_time_token>
 ### 4.4 Slack bot
 
 ```
-/helix approve <request_id>           # slash command
-/helix reject <request_id> reason="..."
-/helix list                           # 当前 oncall 待办
+/Expert Work approve <request_id>           # slash command
+/Expert Work reject <request_id> reason="..."
+/Expert Work list                           # 当前 oncall 待办
 ```
 
 bot 内部调相同 HTTP API；Slack user → tenant user 映射来自 [15 AuthN/AuthZ](./15-authn-authz.md) 的 `external_identity` 表。
@@ -257,7 +257,7 @@ RETURNING id, session_id, state;
 邮件 / Slack 链接含一次性 token：
 
 ```
-https://app.helix.io/hitl/{request_id}?token={one_time_token}
+https://app.expert_work.io/hitl/{request_id}?token={one_time_token}
 ```
 
 token：UUID7 + HMAC（key 来自 [11 Credential Proxy](./11-credential-proxy.md) 的 `hitl_signing_key`）；落地后访问 `/by_token` → 引导 SSO 登录 → 完成绑定 → 写 `token_consumed_at`，token 失效。
@@ -301,14 +301,14 @@ child 触发 HITL → child PENDING + PAUSED；lead 收到 `SubagentResult(state
 ### 7.1 Metric
 
 ```
-helix_hitl_pending_total{tenant,agent}                          gauge
-helix_hitl_decision_total{tenant,agent,decision,channel}        counter
+expert_work_hitl_pending_total{tenant,agent}                          gauge
+expert_work_hitl_decision_total{tenant,agent,decision,channel}        counter
    # decision = approve | reject | timeout | bypass
    # channel  = web | slack | email | force | timeout
-helix_hitl_decision_duration_seconds{tenant,agent}              histogram
-helix_hitl_timeout_total{tenant,timeout_action}                 counter
-helix_hitl_force_resume_total{tenant,actor_id}                  counter
-helix_hitl_escalation_total{tenant,from_role,to_role}           counter
+expert_work_hitl_decision_duration_seconds{tenant,agent}              histogram
+expert_work_hitl_timeout_total{tenant,timeout_action}                 counter
+expert_work_hitl_force_resume_total{tenant,actor_id}                  counter
+expert_work_hitl_escalation_total{tenant,from_role,to_role}           counter
 ```
 
 **关键 SLO（M2 目标）**：
@@ -317,10 +317,10 @@ helix_hitl_escalation_total{tenant,from_role,to_role}           counter
 
 ### 7.2 OTel span
 
-- `helix.hitl.interrupt`（attrs：rule, action_summary）
-- `helix.hitl.decision`（attrs：decision, channel, approver_id, duration_s）
-- `helix.hitl.timeout`（attrs：timeout_action）
-- `helix.hitl.force_resume`（attrs：actor_id, reason）
+- `expert_work.hitl.interrupt`（attrs：rule, action_summary）
+- `expert_work.hitl.decision`（attrs：decision, channel, approver_id, duration_s）
+- `expert_work.hitl.timeout`（attrs：timeout_action）
+- `expert_work.hitl.force_resume`（attrs：actor_id, reason）
 
 ### 7.3 关键日志
 

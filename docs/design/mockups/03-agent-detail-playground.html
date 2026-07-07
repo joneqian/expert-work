@@ -7,16 +7,16 @@
   不是独立产品面。布局 = 左 input + manifest snippet,右 SSE 消息流 + trace timeline。
 
   Tokens used:
-    --hx-color-accent-500 (user message bubble)
-    --hx-color-brand-500 (assistant streaming cursor)
-    --hx-font-mono (system / tool calls)
+    --ew-color-accent-500 (user message bubble)
+    --ew-color-brand-500 (assistant streaming cursor)
+    --ew-font-mono (system / tool calls)
 
   Antd 5 components:
     Monaco editor wrapper → .pg-manifest-snippet (本 mockup 用 <pre> 简化)
     <Input.TextArea>      → .pg-input
-    <Button>              → .hx-btn--primary (运行)
+    <Button>              → .ew-btn--primary (运行)
     Custom MessageBubble  → .pg-msg
-    Custom TraceTimeline  → .hx-trace (右侧 panel)
+    Custom TraceTimeline  → .ew-trace (右侧 panel)
     Custom SSELiveLog     → .pg-tool-call
 
   键盘:
@@ -34,23 +34,23 @@
   <link rel="stylesheet" href="./shared/tokens.css" />
   <link rel="stylesheet" href="./shared/shell.css" />
   <style>
-    .hx-main { padding: 0; }
+    .ew-main { padding: 0; }
     .pg-shell {
-      height: calc(100vh - var(--hx-topbar-height));
+      height: calc(100vh - var(--ew-topbar-height));
       display: grid;
       grid-template-rows: auto 1fr;
     }
     .pg-header {
-      display: flex; align-items: center; gap: var(--hx-space-3);
-      padding: var(--hx-space-3) var(--hx-space-6);
-      border-bottom: 1px solid var(--hx-border-subtle);
-      background: var(--hx-surface-base);
+      display: flex; align-items: center; gap: var(--ew-space-3);
+      padding: var(--ew-space-3) var(--ew-space-6);
+      border-bottom: 1px solid var(--ew-border-subtle);
+      background: var(--ew-surface-base);
     }
     .pg-header__title {
-      font-weight: var(--hx-font-weight-semibold);
-      font-size: var(--hx-font-size-md);
+      font-weight: var(--ew-font-weight-semibold);
+      font-size: var(--ew-font-size-md);
     }
-    .pg-header__meta { color: var(--hx-text-tertiary); font-size: var(--hx-font-size-sm); }
+    .pg-header__meta { color: var(--ew-text-tertiary); font-size: var(--ew-font-size-sm); }
     .pg-header__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 
     .pg-grid {
@@ -61,101 +61,101 @@
 
     /* 左:input + manifest snippet */
     .pg-left {
-      border-right: 1px solid var(--hx-border-subtle);
+      border-right: 1px solid var(--ew-border-subtle);
       display: flex; flex-direction: column;
-      background: var(--hx-surface-base);
+      background: var(--ew-surface-base);
       min-height: 0;
     }
     .pg-section {
-      padding: var(--hx-space-4);
-      border-bottom: 1px solid var(--hx-border-subtle);
+      padding: var(--ew-space-4);
+      border-bottom: 1px solid var(--ew-border-subtle);
     }
     .pg-section__label {
-      font-size: var(--hx-font-size-xs);
-      font-weight: var(--hx-font-weight-medium);
+      font-size: var(--ew-font-size-xs);
+      font-weight: var(--ew-font-weight-medium);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: var(--hx-text-tertiary);
-      margin: 0 0 var(--hx-space-2);
+      color: var(--ew-text-tertiary);
+      margin: 0 0 var(--ew-space-2);
     }
     .pg-input {
       width: 100%;
       min-height: 96px;
       resize: vertical;
-      padding: var(--hx-space-3);
-      border-radius: var(--hx-radius-sm);
-      border: 1px solid var(--hx-border-default);
-      background: var(--hx-surface-base);
-      color: var(--hx-text-primary);
-      font-family: var(--hx-font-sans);
-      font-size: var(--hx-font-size-sm);
-      line-height: var(--hx-line-height-normal);
+      padding: var(--ew-space-3);
+      border-radius: var(--ew-radius-sm);
+      border: 1px solid var(--ew-border-default);
+      background: var(--ew-surface-base);
+      color: var(--ew-text-primary);
+      font-family: var(--ew-font-sans);
+      font-size: var(--ew-font-size-sm);
+      line-height: var(--ew-line-height-normal);
     }
-    .pg-input:focus { outline: none; border-color: var(--hx-border-focus); box-shadow: 0 0 0 1px var(--hx-border-focus); }
+    .pg-input:focus { outline: none; border-color: var(--ew-border-focus); box-shadow: 0 0 0 1px var(--ew-border-focus); }
 
     .pg-manifest-snippet {
       flex: 1;
       overflow: auto;
-      padding: var(--hx-space-3);
-      background: var(--hx-color-neutral-950);
-      border-top: 1px solid var(--hx-border-subtle);
-      font-family: var(--hx-font-mono);
-      font-size: var(--hx-font-size-xs);
-      line-height: var(--hx-line-height-snug);
-      color: var(--hx-text-secondary);
+      padding: var(--ew-space-3);
+      background: var(--ew-color-neutral-950);
+      border-top: 1px solid var(--ew-border-subtle);
+      font-family: var(--ew-font-mono);
+      font-size: var(--ew-font-size-xs);
+      line-height: var(--ew-line-height-snug);
+      color: var(--ew-text-secondary);
       margin: 0;
     }
-    .pg-manifest-snippet .k { color: var(--hx-color-brand-400); }
-    .pg-manifest-snippet .v { color: var(--hx-color-accent-400); }
-    .pg-manifest-snippet .c { color: var(--hx-text-tertiary); font-style: italic; }
+    .pg-manifest-snippet .k { color: var(--ew-color-brand-400); }
+    .pg-manifest-snippet .v { color: var(--ew-color-accent-400); }
+    .pg-manifest-snippet .c { color: var(--ew-text-tertiary); font-style: italic; }
 
     /* 中:消息流 */
     .pg-center {
       display: flex; flex-direction: column;
       min-height: 0;
-      background: var(--hx-surface-bg);
+      background: var(--ew-surface-bg);
     }
     .pg-messages {
       flex: 1;
       overflow-y: auto;
-      padding: var(--hx-space-6);
-      display: flex; flex-direction: column; gap: var(--hx-space-4);
+      padding: var(--ew-space-6);
+      display: flex; flex-direction: column; gap: var(--ew-space-4);
     }
     .pg-msg {
-      display: flex; gap: var(--hx-space-3);
+      display: flex; gap: var(--ew-space-3);
       max-width: 720px;
       width: 100%;
     }
     .pg-msg__avatar {
       width: 28px; height: 28px;
       flex-shrink: 0;
-      border-radius: var(--hx-radius-full);
+      border-radius: var(--ew-radius-full);
       display: flex; align-items: center; justify-content: center;
-      font-size: var(--hx-font-size-xs);
-      font-weight: var(--hx-font-weight-semibold);
+      font-size: var(--ew-font-size-xs);
+      font-weight: var(--ew-font-weight-semibold);
     }
     .pg-msg--user { align-self: flex-end; flex-direction: row-reverse; }
-    .pg-msg--user .pg-msg__avatar { background: var(--hx-color-accent-500); color: var(--hx-color-neutral-0); }
+    .pg-msg--user .pg-msg__avatar { background: var(--ew-color-accent-500); color: var(--ew-color-neutral-0); }
     .pg-msg--user .pg-msg__body {
-      background: var(--hx-color-accent-500);
-      color: var(--hx-color-neutral-0);
-      border-radius: var(--hx-radius-md);
-      padding: var(--hx-space-3) var(--hx-space-4);
-      font-size: var(--hx-font-size-sm);
+      background: var(--ew-color-accent-500);
+      color: var(--ew-color-neutral-0);
+      border-radius: var(--ew-radius-md);
+      padding: var(--ew-space-3) var(--ew-space-4);
+      font-size: var(--ew-font-size-sm);
     }
-    .pg-msg--assistant .pg-msg__avatar { background: var(--hx-surface-selected); color: var(--hx-color-brand-400); }
+    .pg-msg--assistant .pg-msg__avatar { background: var(--ew-surface-selected); color: var(--ew-color-brand-400); }
     .pg-msg--assistant .pg-msg__body {
-      background: var(--hx-surface-base);
-      border: 1px solid var(--hx-border-subtle);
-      border-radius: var(--hx-radius-md);
-      padding: var(--hx-space-3) var(--hx-space-4);
-      font-size: var(--hx-font-size-sm);
-      line-height: var(--hx-line-height-normal);
+      background: var(--ew-surface-base);
+      border: 1px solid var(--ew-border-subtle);
+      border-radius: var(--ew-radius-md);
+      padding: var(--ew-space-3) var(--ew-space-4);
+      font-size: var(--ew-font-size-sm);
+      line-height: var(--ew-line-height-normal);
     }
     .pg-msg__cursor {
       display: inline-block;
       width: 6px; height: 14px;
-      background: var(--hx-color-brand-500);
+      background: var(--ew-color-brand-500);
       margin-left: 2px;
       vertical-align: -2px;
       animation: pg-blink 1s steps(2) infinite;
@@ -168,105 +168,105 @@
       max-width: 720px;
       width: 100%;
       margin-left: 40px;
-      background: var(--hx-surface-raised);
-      border: 1px solid var(--hx-border-subtle);
-      border-radius: var(--hx-radius-sm);
-      padding: var(--hx-space-2) var(--hx-space-3);
-      font-family: var(--hx-font-mono);
-      font-size: var(--hx-font-size-xs);
+      background: var(--ew-surface-raised);
+      border: 1px solid var(--ew-border-subtle);
+      border-radius: var(--ew-radius-sm);
+      padding: var(--ew-space-2) var(--ew-space-3);
+      font-family: var(--ew-font-mono);
+      font-size: var(--ew-font-size-xs);
     }
     .pg-tool-call__head {
-      display: flex; align-items: center; gap: var(--hx-space-2);
-      color: var(--hx-text-secondary);
+      display: flex; align-items: center; gap: var(--ew-space-2);
+      color: var(--ew-text-secondary);
     }
     .pg-tool-call__name {
-      font-weight: var(--hx-font-weight-medium);
-      color: var(--hx-color-accent-400);
+      font-weight: var(--ew-font-weight-medium);
+      color: var(--ew-color-accent-400);
     }
     .pg-tool-call__args {
-      margin-top: var(--hx-space-2);
-      padding: var(--hx-space-2);
-      background: var(--hx-color-neutral-950);
-      border-radius: var(--hx-radius-xs);
-      color: var(--hx-text-tertiary);
+      margin-top: var(--ew-space-2);
+      padding: var(--ew-space-2);
+      background: var(--ew-color-neutral-950);
+      border-radius: var(--ew-radius-xs);
+      color: var(--ew-text-tertiary);
       overflow-x: auto;
     }
 
     /* Input area at bottom of center */
     .pg-bottom {
-      padding: var(--hx-space-3) var(--hx-space-6);
-      border-top: 1px solid var(--hx-border-subtle);
-      background: var(--hx-surface-base);
-      display: flex; gap: var(--hx-space-2); align-items: flex-end;
+      padding: var(--ew-space-3) var(--ew-space-6);
+      border-top: 1px solid var(--ew-border-subtle);
+      background: var(--ew-surface-base);
+      display: flex; gap: var(--ew-space-2); align-items: flex-end;
     }
     .pg-bottom .pg-input { flex: 1; min-height: 56px; }
 
     /* 右:trace timeline + step inspector */
     .pg-right {
-      border-left: 1px solid var(--hx-border-subtle);
+      border-left: 1px solid var(--ew-border-subtle);
       display: flex; flex-direction: column;
-      background: var(--hx-surface-base);
+      background: var(--ew-surface-base);
       min-height: 0;
     }
-    .pg-right__section { padding: var(--hx-space-4); border-bottom: 1px solid var(--hx-border-subtle); }
+    .pg-right__section { padding: var(--ew-space-4); border-bottom: 1px solid var(--ew-border-subtle); }
     .pg-right__section:last-child { flex: 1; overflow-y: auto; }
 
     .pg-step-detail {
-      padding: var(--hx-space-3);
-      background: var(--hx-color-neutral-950);
-      border: 1px solid var(--hx-border-subtle);
-      border-radius: var(--hx-radius-sm);
-      font-family: var(--hx-font-mono);
-      font-size: var(--hx-font-size-xs);
-      color: var(--hx-text-secondary);
-      line-height: var(--hx-line-height-normal);
+      padding: var(--ew-space-3);
+      background: var(--ew-color-neutral-950);
+      border: 1px solid var(--ew-border-subtle);
+      border-radius: var(--ew-radius-sm);
+      font-family: var(--ew-font-mono);
+      font-size: var(--ew-font-size-xs);
+      color: var(--ew-text-secondary);
+      line-height: var(--ew-line-height-normal);
       white-space: pre-wrap;
     }
   </style>
 </head>
 <body>
 
-<div class="hx-app">
-  <aside class="hx-sidebar">
-    <div class="hx-sidebar__brand">
-      <svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg>
-      <span>helix</span>
+<div class="ew-app">
+  <aside class="ew-sidebar">
+    <div class="ew-sidebar__brand">
+      <svg class="ew-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--ew-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg>
+      <span>Expert Work</span>
     </div>
-    <nav class="hx-sidebar__nav">
-      <a class="hx-sidebar__item" href="./01-agents-list.html" aria-current="page">Agents</a>
-      <a class="hx-sidebar__item" href="./04-run-trace.html">Runs</a>
-      <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
-      <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
-      <a class="hx-sidebar__item" href="#">Skills</a>
-      <a class="hx-sidebar__item" href="#">Triggers</a>
-      <div class="hx-sidebar__group-label">Settings</div>
-      <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+    <nav class="ew-sidebar__nav">
+      <a class="ew-sidebar__item" href="./01-agents-list.html" aria-current="page">Agents</a>
+      <a class="ew-sidebar__item" href="./04-run-trace.html">Runs</a>
+      <a class="ew-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+      <a class="ew-sidebar__item" href="./06-memory-admin.html">Memory</a>
+      <a class="ew-sidebar__item" href="#">Skills</a>
+      <a class="ew-sidebar__item" href="#">Triggers</a>
+      <div class="ew-sidebar__group-label">Settings</div>
+      <a class="ew-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
     </nav>
   </aside>
 
-  <header class="hx-topbar">
-    <div class="hx-topbar__tenant"><strong>acme-corp</strong><span class="hx-text-tertiary">/ leyi@acme</span></div>
-    <div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div>
-    <div class="hx-topbar__spacer"></div>
+  <header class="ew-topbar">
+    <div class="ew-topbar__tenant"><strong>acme-corp</strong><span class="ew-text-tertiary">/ leyi@acme</span></div>
+    <div class="ew-topbar__cmdk"><span>搜索或跳转</span><span class="ew-topbar__spacer"></span><span class="ew-kbd">⌘K</span></div>
+    <div class="ew-topbar__spacer"></div>
   </header>
 
-  <main class="hx-main">
+  <main class="ew-main">
     <div class="pg-shell">
 
       <!-- pg header -->
       <div class="pg-header">
-        <nav class="hx-breadcrumb" style="margin: 0;">
+        <nav class="ew-breadcrumb" style="margin: 0;">
           <a href="./01-agents-list.html">Agents</a>
-          <span class="hx-breadcrumb__sep">/</span>
+          <span class="ew-breadcrumb__sep">/</span>
           <a href="./02-agent-detail-overview.html">customer-support-bot</a>
-          <span class="hx-breadcrumb__sep">/</span>
-          <span class="pg-header__title hx-text-primary">Playground</span>
+          <span class="ew-breadcrumb__sep">/</span>
+          <span class="pg-header__title ew-text-primary">Playground</span>
         </nav>
-        <div class="hx-text-tertiary hx-text-sm" style="margin-left: 16px;">debug session · thread_id <span class="hx-text-mono">th_5a3c…</span></div>
+        <div class="ew-text-tertiary ew-text-sm" style="margin-left: 16px;">debug session · thread_id <span class="ew-text-mono">th_5a3c…</span></div>
         <div class="pg-header__actions">
-          <span class="hx-badge hx-badge--info"><span class="hx-badge__dot"></span>streaming</span>
-          <button class="hx-btn hx-btn--secondary hx-btn--sm">清空会话</button>
-          <button class="hx-btn hx-btn--danger hx-btn--sm">停止 <span class="hx-kbd">Esc</span></button>
+          <span class="ew-badge ew-badge--info"><span class="ew-badge__dot"></span>streaming</span>
+          <button class="ew-btn ew-btn--secondary ew-btn--sm">清空会话</button>
+          <button class="ew-btn ew-btn--danger ew-btn--sm">停止 <span class="ew-kbd">Esc</span></button>
         </div>
       </div>
 
@@ -281,7 +281,7 @@
           </div>
           <div class="pg-section" style="border-bottom: none;">
             <p class="pg-section__label">附加上下文(可选)</p>
-            <input class="hx-input" placeholder="user_id / thread_id / 自定义字段" style="width: 100%;" />
+            <input class="ew-input" placeholder="user_id / thread_id / 自定义字段" style="width: 100%;" />
           </div>
           <pre class="pg-manifest-snippet"><span class="c"># manifest snippet (可改可重跑)</span>
 <span class="k">name:</span> customer-support-bot
@@ -316,7 +316,7 @@
               <div class="pg-tool-call__head">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
                 <span class="pg-tool-call__name">rag.knowledge</span>
-                <span style="margin-left: auto;" class="hx-text-tertiary">312ms · 4 docs</span>
+                <span style="margin-left: auto;" class="ew-text-tertiary">312ms · 4 docs</span>
               </div>
               <pre class="pg-tool-call__args">query: "订单 已签收 客户未收到 理赔流程"
 top_k: 5
@@ -328,7 +328,7 @@ filter: { collection: "logistics-policy" }</pre>
               <div class="pg-tool-call__head">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
                 <span class="pg-tool-call__name">logistics.lookup</span>
-                <span style="margin-left: auto;" class="hx-text-tertiary">186ms</span>
+                <span style="margin-left: auto;" class="ew-text-tertiary">186ms</span>
               </div>
               <pre class="pg-tool-call__args">order_id: "88234"
 status: "delivered"
@@ -355,7 +355,7 @@ photo_url: "https://…/proof.jpg"</pre>
           <!-- Bottom input(在 streaming 期间 disabled) -->
           <div class="pg-bottom">
             <textarea class="pg-input" placeholder="继续对话(Cmd+Enter 发送)..." disabled aria-label="对话输入"></textarea>
-            <button class="hx-btn hx-btn--primary" disabled>发送 <span class="hx-kbd">⌘↵</span></button>
+            <button class="ew-btn ew-btn--primary" disabled>发送 <span class="ew-kbd">⌘↵</span></button>
           </div>
         </section>
 
@@ -363,31 +363,31 @@ photo_url: "https://…/proof.jpg"</pre>
         <aside class="pg-right">
           <div class="pg-right__section">
             <p class="pg-section__label">Trace · step 3/N · 1.42s</p>
-            <div class="hx-trace">
-              <div class="hx-trace__span">
+            <div class="ew-trace">
+              <div class="ew-trace__span">
                 <span>step.plan</span>
-                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 22%;"></div>
-                <span class="hx-trace__duration">142ms</span>
+                <div class="ew-trace__bar ew-trace__bar--ok" style="width: 22%;"></div>
+                <span class="ew-trace__duration">142ms</span>
               </div>
-              <div class="hx-trace__span">
+              <div class="ew-trace__span">
                 <span>llm.call (sonnet)</span>
-                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 60%; margin-left: 6%;"></div>
-                <span class="hx-trace__duration">386ms</span>
+                <div class="ew-trace__bar ew-trace__bar--ok" style="width: 60%; margin-left: 6%;"></div>
+                <span class="ew-trace__duration">386ms</span>
               </div>
-              <div class="hx-trace__span">
+              <div class="ew-trace__span">
                 <span>tool.rag.knowledge</span>
-                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 28%; margin-left: 22%;"></div>
-                <span class="hx-trace__duration">312ms</span>
+                <div class="ew-trace__bar ew-trace__bar--ok" style="width: 28%; margin-left: 22%;"></div>
+                <span class="ew-trace__duration">312ms</span>
               </div>
-              <div class="hx-trace__span">
+              <div class="ew-trace__span">
                 <span>tool.logistics.lookup</span>
-                <div class="hx-trace__bar hx-trace__bar--ok" style="width: 16%; margin-left: 48%;"></div>
-                <span class="hx-trace__duration">186ms</span>
+                <div class="ew-trace__bar ew-trace__bar--ok" style="width: 16%; margin-left: 48%;"></div>
+                <span class="ew-trace__duration">186ms</span>
               </div>
-              <div class="hx-trace__span">
+              <div class="ew-trace__span">
                 <span>llm.call (sonnet streaming)</span>
-                <div class="hx-trace__bar hx-trace__bar--slow" style="width: 30%; margin-left: 66%;"></div>
-                <span class="hx-trace__duration">… stream</span>
+                <div class="ew-trace__bar ew-trace__bar--slow" style="width: 30%; margin-left: 66%;"></div>
+                <span class="ew-trace__duration">… stream</span>
               </div>
             </div>
           </div>
@@ -410,7 +410,7 @@ photo_url: "https://…/proof.jpg"</pre>
   </main>
 </div>
 
-<div class="hx-theme-toggle"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div>
+<div class="ew-theme-toggle"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div>
 <script>
   document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
     document.documentElement.setAttribute('data-theme', btn.dataset.theme);

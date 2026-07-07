@@ -112,7 +112,7 @@ describe("WebhooksList", () => {
       },
       {
         match: (u, m) => u === "/v1/webhook-endpoints" && m === "post",
-        respond: () => ({ ...endpointRow, name: "my-hook", secret: "hx_whsec_abc123" }),
+        respond: () => ({ ...endpointRow, name: "my-hook", secret: "ew_whsec_abc123" }),
         status: 201,
       },
     ]);
@@ -133,7 +133,7 @@ describe("WebhooksList", () => {
     await waitFor(() =>
       expect(screen.getByTestId("webhook-secret-value")).toBeInTheDocument(),
     );
-    expect(screen.getByTestId("webhook-secret-value").textContent).toBe("hx_whsec_abc123");
+    expect(screen.getByTestId("webhook-secret-value").textContent).toBe("ew_whsec_abc123");
   });
 
   it("enabled toggle PATCHes the endpoint", async () => {

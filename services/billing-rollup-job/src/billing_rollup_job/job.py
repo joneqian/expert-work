@@ -40,43 +40,43 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
-from helix_agent.common.observability import helix_counter, helix_gauge
-from helix_agent.persistence import (
+from expert_work.common.observability import expert_work_counter, expert_work_gauge
+from expert_work.persistence import (
     ModelRateCardStore,
     TenantBillingLedgerStore,
     TenantConfigStore,
 )
-from helix_agent.persistence.rls import (
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.persistence.token_usage_store import TokenUsageStore
-from helix_agent.protocol import (
+from expert_work.persistence.token_usage_store import TokenUsageStore
+from expert_work.protocol import (
     TenantBillingLedgerRecord,
     TenantPlan,
     apply_markup,
     provider_for_model,
 )
 
-logger = logging.getLogger("helix.billing_rollup_job")
+logger = logging.getLogger("expert_work.billing_rollup_job")
 
 #: Provider key for usage rows whose provider could not be derived or priced.
 UNKNOWN_PROVIDER = "unknown"
 
-_unpriced_rows = helix_counter(
-    "helix_billing_rollup_unpriced_rows_total",
+_unpriced_rows = expert_work_counter(
+    "expert_work_billing_rollup_unpriced_rows_total",
     "token_usage rows the rollup could not price (no provider or no rate).",
 )
-_unpriced_buckets = helix_counter(
-    "helix_billing_rollup_unpriced_buckets_total",
+_unpriced_buckets = expert_work_counter(
+    "expert_work_billing_rollup_unpriced_buckets_total",
     "Ledger buckets written with priced=false.",
 )
 #: Stream Z-2 — rollup-computed billed cost (micro-元) per (tenant, model) for
 #: the processed month. A gauge (SET each run) not a counter: the rollup
 #: recomputes the whole month, so set-overwrite is idempotent across re-runs.
-_billed_cost = helix_gauge(
-    "helix_llm_billed_cost_micros",
+_billed_cost = expert_work_gauge(
+    "expert_work_llm_billed_cost_micros",
     "Rollup-computed billed LLM cost (micro-元) per tenant+model for the month.",
     ("tenant", "model"),
 )

@@ -40,14 +40,14 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence import ApprovalStore
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import ApprovalRecord, ApprovalStatus
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence import ApprovalStore
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.protocol import ApprovalRecord, ApprovalStatus
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.approvals")
+logger = logging.getLogger("expert_work.control_plane.approvals")
 
 #: Batch ceiling — every ``approve`` spawns one LLM continuation run,
 #: so the batch size must be bounded (Mini-ADR HX-G4).

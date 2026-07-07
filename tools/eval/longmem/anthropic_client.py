@@ -26,7 +26,7 @@ from typing import Any
 import httpx
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
-from helix_agent.protocol import catalog_entry
+from expert_work.protocol import catalog_entry
 from longmem.transient import with_retries
 
 _ANTHROPIC_API = "https://api.anthropic.com/v1/messages"

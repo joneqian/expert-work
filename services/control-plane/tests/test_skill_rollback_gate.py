@@ -16,10 +16,10 @@ from uuid import UUID, uuid4
 from control_plane.skill_evolution_limits import CircuitBreaker
 from control_plane.skill_rollback import RollbackAction
 from control_plane.skill_rollback_gate import RollbackGate
-from helix_agent.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import SkillRunUsage, TrajectoryOutcome
-from helix_agent.protocol.skill import SkillStatus
+from expert_work.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import SkillRunUsage, TrajectoryOutcome
+from expert_work.protocol.skill import SkillStatus
 
 _TENANT = UUID("44444444-4444-4444-4444-444444444444")
 _NOW = datetime(2026, 6, 8, 12, 0, tzinfo=UTC)

@@ -40,21 +40,21 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
-from helix_agent.common.skill_activity import SkillActivityRecorder
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.skill_activity import SkillActivityRecorder
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.common.uplift_metrics import (
     record_skill_drift,
     record_skill_redacted,
     record_skill_view,
     record_skill_view_archived_blocked,
     record_threat_pattern_hits,
 )
-from helix_agent.protocol import Skill, SkillStatus, SkillVersion
-from helix_agent.protocol.skill import (
+from expert_work.protocol import Skill, SkillStatus, SkillVersion
+from expert_work.protocol.skill import (
     compute_content_hash,
     supporting_files_to_jsonable,
 )
-from helix_agent.protocol.skill_package import (
+from expert_work.protocol.skill_package import (
     ParsedSkillMd,
     serialize_skill_md,
 )
@@ -367,12 +367,12 @@ def _repack_skill_md(version: SkillVersion) -> str:
         name=_skill_name_for_repack(version),
         description=version.description or _skill_name_for_repack(version),
         license=None,
-        helix_version=version.version,
-        helix_category=version.category,
-        helix_required_models=version.required_models,
-        helix_tool_names=version.tool_names,
-        helix_authored_by=version.authored_by,
-        helix_lazy=version.lazy_load,
+        expert_work_version=version.version,
+        expert_work_category=version.category,
+        expert_work_required_models=version.required_models,
+        expert_work_tool_names=version.tool_names,
+        expert_work_authored_by=version.authored_by,
+        expert_work_lazy=version.lazy_load,
         body=version.prompt_fragment,
     )
     return serialize_skill_md(parsed)

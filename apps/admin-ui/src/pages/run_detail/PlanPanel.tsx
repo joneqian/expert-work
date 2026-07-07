@@ -28,9 +28,9 @@ import {
 const { Text } = Typography;
 
 const STATUS_ICON: Record<PlanStepStatus, ReactElement> = {
-  pending: <CircleDashed size={14} strokeWidth={1.75} color="var(--hx-text-tertiary)" />,
-  in_progress: <LoaderCircle size={14} strokeWidth={1.75} color="var(--hx-color-brand-500)" />,
-  completed: <Check size={14} strokeWidth={1.75} color="var(--hx-color-success-500)" />,
+  pending: <CircleDashed size={14} strokeWidth={1.75} color="var(--ew-text-tertiary)" />,
+  in_progress: <LoaderCircle size={14} strokeWidth={1.75} color="var(--ew-color-brand-500)" />,
+  completed: <Check size={14} strokeWidth={1.75} color="var(--ew-color-success-500)" />,
 };
 
 interface PlanPanelProps {
@@ -264,7 +264,7 @@ export function PlanPanel({
         />
       ) : (
         <div data-testid="plan-read-view">
-          <p style={{ margin: "0 0 10px", color: "var(--hx-text-secondary)" }}>{plan.goal}</p>
+          <p style={{ margin: "0 0 10px", color: "var(--ew-text-secondary)" }}>{plan.goal}</p>
           <ol style={{ margin: 0, paddingLeft: 0, listStyle: "none" }}>
             {plan.steps.map((step) => (
               <li
@@ -276,8 +276,8 @@ export function PlanPanel({
                   style={{
                     color:
                       step.status === "completed"
-                        ? "var(--hx-text-tertiary)"
-                        : "var(--hx-text-primary)",
+                        ? "var(--ew-text-tertiary)"
+                        : "var(--ew-text-primary)",
                     textDecoration: step.status === "completed" ? "line-through" : "none",
                     fontSize: 13,
                   }}

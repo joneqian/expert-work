@@ -310,7 +310,7 @@ export function EvalDatasetsPanel() {
           <Space direction="vertical" style={{ width: "100%" }} size={16}>
             <div>
               <Text type="secondary">{t("eval_datasets.edit_input_label")}</Text>
-              <div style={{ border: "1px solid var(--hx-border-default)", borderRadius: 4, marginTop: 4 }}>
+              <div style={{ border: "1px solid var(--ew-border-default)", borderRadius: 4, marginTop: 4 }}>
                 <Editor
                   height="220px"
                   defaultLanguage="json"
@@ -326,7 +326,7 @@ export function EvalDatasetsPanel() {
             </div>
             <div>
               <Text type="secondary">{t("eval_datasets.edit_expected_label")}</Text>
-              <div style={{ border: "1px solid var(--hx-border-default)", borderRadius: 4, marginTop: 4 }}>
+              <div style={{ border: "1px solid var(--ew-border-default)", borderRadius: 4, marginTop: 4 }}>
                 <Editor
                   height="220px"
                   defaultLanguage="json"

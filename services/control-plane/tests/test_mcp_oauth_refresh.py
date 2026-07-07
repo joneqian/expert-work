@@ -14,17 +14,17 @@ import pytest
 
 from control_plane.mcp_oauth_refresh import McpOAuthRefresher
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryMcpConnectorCatalogStore,
     InMemoryMcpOAuthConnectionStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     McpConnectorAuthSchema,
     McpConnectorCatalogUpsert,
     McpOAuthConnectionPatch,
     McpOAuthConnectionRecord,
 )
-from helix_agent.testing import InMemorySecretStore
+from expert_work.testing import InMemorySecretStore
 
 _NOW = datetime(2026, 6, 6, 12, 0, tzinfo=UTC)
 _MCP_URL = "https://mcp.linear.app/sse"
@@ -100,11 +100,11 @@ async def _seed_connection(
         oauth_state="st",
         pkce_verifier="pv",
     )
-    access_ref = f"secret://helix-agent/tenant/{tenant_id}/mcp-oauth/{rec.id}/access"
+    access_ref = f"secret://expert-work/tenant/{tenant_id}/mcp-oauth/{rec.id}/access"
     await secret_store.put(access_ref.removeprefix("secret://"), "AT1")
     refresh_ref: str | None = None
     if with_refresh:
-        refresh_ref = f"secret://helix-agent/tenant/{tenant_id}/mcp-oauth/{rec.id}/refresh"
+        refresh_ref = f"secret://expert-work/tenant/{tenant_id}/mcp-oauth/{rec.id}/refresh"
         await secret_store.put(refresh_ref.removeprefix("secret://"), "RT1")
     return await oauth_store.update(
         connection_id=rec.id,

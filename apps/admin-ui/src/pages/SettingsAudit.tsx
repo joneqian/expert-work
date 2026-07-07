@@ -225,9 +225,9 @@ export function SettingsAudit() {
           gap: 8,
           marginBottom: 16,
           padding: 12,
-          background: "var(--hx-surface-raised)",
+          background: "var(--ew-surface-raised)",
           borderRadius: 6,
-          border: "1px solid var(--hx-border-subtle)",
+          border: "1px solid var(--ew-border-subtle)",
         }}
         data-testid="audit-filters"
       >
@@ -290,7 +290,7 @@ export function SettingsAudit() {
       ) : entries.length === 0 ? (
         <Empty description={t("audit.empty")} />
       ) : (
-        <div className="hx-audit-timeline" data-testid="audit-timeline">
+        <div className="ew-audit-timeline" data-testid="audit-timeline">
           {entries.map((entry, idx) => (
             <div
               key={`${entry.id ?? "no-id"}-${idx}`}
@@ -302,7 +302,7 @@ export function SettingsAudit() {
                 gap: 12,
                 alignItems: "center",
                 padding: "8px 12px",
-                borderBottom: "1px solid var(--hx-border-subtle)",
+                borderBottom: "1px solid var(--ew-border-subtle)",
                 cursor: "pointer",
                 fontSize: 13,
               }}
@@ -398,7 +398,7 @@ export function SettingsAudit() {
               <pre
                 data-testid="audit-detail-payload"
                 style={{
-                  background: "var(--hx-surface-raised)",
+                  background: "var(--ew-surface-raised)",
                   padding: 12,
                   borderRadius: 4,
                   fontSize: 11,
@@ -430,7 +430,7 @@ function DetailRow({ label, value, mono = false }: DetailRowProps) {
   return (
     <div>
       <Text type="secondary" style={{ fontSize: 12 }}>{label}</Text>
-      <div style={{ fontFamily: mono ? "var(--hx-font-mono)" : undefined, fontSize: 12, marginTop: 2 }}>
+      <div style={{ fontFamily: mono ? "var(--ew-font-mono)" : undefined, fontSize: 12, marginTop: 2 }}>
         {value}
       </div>
     </div>

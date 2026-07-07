@@ -24,7 +24,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
 from control_plane.api._session_title import message_text
-from helix_agent.persistence import MessageTurn
+from expert_work.persistence import MessageTurn
 
 
 async def read_turns(
@@ -42,7 +42,7 @@ async def read_turns(
     ``include_hidden`` (default ``True``) keeps the extraction *faithful*.
     RT-2 PR-4 (RT-ADR-9) marks orchestrator-authored scaffolding persisted
     into the checkpoint — e.g. the CM-1 ``<recovery-advisory>`` ``HumanMessage``
-    — with ``helix_hide_from_ui``. That scaffolding must stay in the durable
+    — with ``expert_work_hide_from_ui``. That scaffolding must stay in the durable
     record, the search/audit mirror (``TranscriptMirrorSweep``) and the
     cross-tenant audit drill-in, so faithful is the *safe default*: a new
     persistence/audit caller that forgets the flag can never silently drop
@@ -64,7 +64,7 @@ async def read_turns(
             continue
         if not include_hidden:
             kwargs = getattr(m, "additional_kwargs", None) or {}
-            if kwargs.get("helix_hide_from_ui"):
+            if kwargs.get("expert_work_hide_from_ui"):
                 continue
         text = message_text(getattr(m, "content", ""))
         if text.strip():

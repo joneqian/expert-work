@@ -1,4 +1,4 @@
-"""Benchmark instance -> helix retrieval shape — Stream CM-N5.
+"""Benchmark instance -> expert_work retrieval shape — Stream CM-N5.
 
 Maps both benchmarks onto one neutral schema (:class:`RetrievalInstance`)
 so the P0 harness is benchmark-agnostic:

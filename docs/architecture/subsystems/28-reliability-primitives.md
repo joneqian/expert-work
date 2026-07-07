@@ -1,6 +1,6 @@
 # 28 Reliability Primitives — 全链路 TLS / Health Probes / Graceful Shutdown / Timeout Hierarchy
 
-> 4 个产品级横切关注点的统一规范。任何 Helix-Agent 服务（Control Plane / Orchestrator / Sandbox Supervisor / Credential Proxy / MCP Gateway / Admin UI）**首次创建**时即按本文档落地这 4 项基础设施，**不留后补**。
+> 4 个产品级横切关注点的统一规范。任何 Expert Work 服务（Control Plane / Orchestrator / Sandbox Supervisor / Credential Proxy / MCP Gateway / Admin UI）**首次创建**时即按本文档落地这 4 项基础设施，**不留后补**。
 
 ---
 
@@ -41,7 +41,7 @@
 ### 3.1 HealthStatus enum
 
 ```python
-# packages/helix-agent-common/src/helix_agent/common/health.py
+# packages/expert-work-common/src/expert_work/common/health.py
 from enum import StrEnum
 from dataclasses import dataclass
 
@@ -109,7 +109,7 @@ class DeadlineContext:
 ### 4.1 Health endpoints（每服务统一）
 
 ```python
-# packages/helix-agent-common/src/helix_agent/common/health_endpoints.py
+# packages/expert-work-common/src/expert_work/common/health_endpoints.py
 from fastapi import APIRouter, status
 
 def make_health_router(service: HealthReportProvider) -> APIRouter:
@@ -157,7 +157,7 @@ class HealthReportProvider(Protocol):
 ### 4.2 Graceful Shutdown Hook
 
 ```python
-# packages/helix-agent-common/src/helix_agent/common/lifecycle.py
+# packages/expert-work-common/src/expert_work/common/lifecycle.py
 @dataclass
 class Lifecycle:
     """每个服务的生命周期管理器；FastAPI startup/shutdown event 自动接入。"""
@@ -198,7 +198,7 @@ class Lifecycle:
 ### 4.3 Timeout 嵌套 API
 
 ```python
-# packages/helix-agent-common/src/helix_agent/common/deadline.py
+# packages/expert-work-common/src/expert_work/common/deadline.py
 @asynccontextmanager
 async def with_deadline(layer: str, max_ms: float) -> AsyncIterator[DeadlineContext]:
     """派生子层 deadline；如果父层已有 deadline，自动剪裁。"""
@@ -355,13 +355,13 @@ SIGTERM 收到
 
 ```
 HTTP request:
-  X-Helix-Deadline-Ms: 1714915380123  ← 绝对 unix ms
-  X-Helix-Cancel-Token: <uuid>        ← 取消时 PATCH 此 token
+  X-Expert-Work-Deadline-Ms: 1714915380123  ← 绝对 unix ms
+  X-Expert-Work-Cancel-Token: <uuid>        ← 取消时 PATCH 此 token
   traceparent: 00-<trace>-<span>-01    ← W3C
 ```
 
 接收方：
-- 解析 `X-Helix-Deadline-Ms` → 创建 root DeadlineContext
+- 解析 `X-Expert-Work-Deadline-Ms` → 创建 root DeadlineContext
 - 如果本地处理预计超过 deadline → 立即返回 408 + log `deadline.preempted`
 
 ---
@@ -390,24 +390,24 @@ HTTP request:
 ### 7.1 Metrics
 
 ```
-helix_health_status{service,probe,result}                          counter
-helix_health_check_duration_seconds{service,probe,dep}             histogram
-helix_lifecycle_state{service,state}                               gauge      # state=starting/running/draining/stopping
-helix_drain_duration_seconds{service,outcome}                      histogram  # outcome=clean/timeout
-helix_inflight_requests{service}                                   gauge
-helix_deadline_exceeded_total{layer}                               counter
-helix_deadline_preempted_total{layer,upstream}                     counter    # 收到上游过期 deadline
-helix_cancel_propagation_total{layer,sink}                         counter    # sink=sandbox|llm|tool|other
-helix_tls_handshake_failure_total{peer,reason}                     counter
-helix_tls_cert_expiry_seconds{peer}                                gauge      # 负值即过期
+expert_work_health_status{service,probe,result}                          counter
+expert_work_health_check_duration_seconds{service,probe,dep}             histogram
+expert_work_lifecycle_state{service,state}                               gauge      # state=starting/running/draining/stopping
+expert_work_drain_duration_seconds{service,outcome}                      histogram  # outcome=clean/timeout
+expert_work_inflight_requests{service}                                   gauge
+expert_work_deadline_exceeded_total{layer}                               counter
+expert_work_deadline_preempted_total{layer,upstream}                     counter    # 收到上游过期 deadline
+expert_work_cancel_propagation_total{layer,sink}                         counter    # sink=sandbox|llm|tool|other
+expert_work_tls_handshake_failure_total{peer,reason}                     counter
+expert_work_tls_cert_expiry_seconds{peer}                                gauge      # 负值即过期
 ```
 
 ### 7.2 Spans
 
-- `helix.lifecycle.startup` — startup hook 总耗时
-- `helix.lifecycle.shutdown` — graceful shutdown 总耗时；attrs 含 `drain_duration_ms`, `cleanup_duration_ms`, `force_killed=bool`
-- `helix.deadline.preempted` — deadline 提前到期，attrs 含 `layer`, `remaining_at_preempt_ms`
-- `helix.tls.handshake_fail` — TLS 握手失败，attrs 含 `peer`, `cert_subject`, `reason`
+- `expert_work.lifecycle.startup` — startup hook 总耗时
+- `expert_work.lifecycle.shutdown` — graceful shutdown 总耗时；attrs 含 `drain_duration_ms`, `cleanup_duration_ms`, `force_killed=bool`
+- `expert_work.deadline.preempted` — deadline 提前到期，attrs 含 `layer`, `remaining_at_preempt_ms`
+- `expert_work.tls.handshake_fail` — TLS 握手失败，attrs 含 `peer`, `cert_subject`, `reason`
 
 ### 7.3 Logs（事件 ID）
 
@@ -426,10 +426,10 @@ tls.handshake_failed (peer=keycloak, reason=cert_expired, ...)
 
 | 告警 | 触发条件 | 级别 |
 |------|---------|------|
-| `LifecycleDrainTimeout` | `helix_drain_duration_seconds{outcome="timeout"}` >= 1 / 10min | P1 |
+| `LifecycleDrainTimeout` | `expert_work_drain_duration_seconds{outcome="timeout"}` >= 1 / 10min | P1 |
 | `HealthCheckFlapping` | `/healthz/ready` 1 分钟内 5 次状态切换 | P2 |
-| `TLSCertExpiringSoon` | `helix_tls_cert_expiry_seconds < 86400 * 2` | P1（2 天）/ P0（< 6h） |
-| `DeadlineExceededHighRate` | `rate(helix_deadline_exceeded_total[5m]) > 0.05 * rate(helix_inflight_requests)` | P1 |
+| `TLSCertExpiringSoon` | `expert_work_tls_cert_expiry_seconds < 86400 * 2` | P1（2 天）/ P0（< 6h） |
+| `DeadlineExceededHighRate` | `rate(expert_work_deadline_exceeded_total[5m]) > 0.05 * rate(expert_work_inflight_requests)` | P1 |
 
 ---
 
@@ -450,11 +450,11 @@ tls.handshake_failed (peer=keycloak, reason=cert_expired, ...)
 
 ### M0（Stream A 内）
 
-- [ ] `helix_agent.common.health` + 3 个 endpoint，每个服务挂上
-- [ ] `helix_agent.common.lifecycle` + drain/cleanup hooks
-- [ ] `helix_agent.common.deadline` + DeadlineContext + with_deadline + deadline_check
+- [ ] `expert_work.common.health` + 3 个 endpoint，每个服务挂上
+- [ ] `expert_work.common.lifecycle` + drain/cleanup hooks
+- [ ] `expert_work.common.deadline` + DeadlineContext + with_deadline + deadline_check
 - [ ] FastAPI middleware 自动注入 root DeadlineContext + in-flight counter
-- [ ] HTTP client 自动透传 `X-Helix-Deadline-Ms`、`X-Helix-Cancel-Token`
+- [ ] HTTP client 自动透传 `X-Expert-Work-Deadline-Ms`、`X-Expert-Work-Cancel-Token`
 - [ ] TLS 静态证书：脚本 `tools/tls/gen-mtls-bundle.sh` 生成 7d CA + service certs
 - [ ] CI lint：live handler 不能引依赖；ruff 自定义规则
 - [ ] 单元测试：lifecycle 状态机、deadline 嵌套剪裁、cancel 传播

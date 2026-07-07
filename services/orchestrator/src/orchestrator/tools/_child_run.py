@@ -31,8 +31,8 @@ from uuid import UUID, uuid4
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import MAX_RESULT_EXCERPT_CHARS, SubAgentInvocation, SubagentStatus
-from helix_agent.runtime.cancellation import (
+from expert_work.protocol import MAX_RESULT_EXCERPT_CHARS, SubAgentInvocation, SubagentStatus
+from expert_work.runtime.cancellation import (
     CANCELLATION_TOKEN_KEY,
     CancellationToken,
     RunCancelledError,

@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
+from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
 from orchestrator.agent_factory import BuiltAgent
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.tools import ToolBlockedError, ToolContext
@@ -217,14 +217,14 @@ def test_worker_agent_builder_protocol_accepts_conforming() -> None:
 
 # --- registration gating (build_tool_registry) -------------------------------
 
-from helix_agent.protocol import AgentSpec  # noqa: E402
+from expert_work.protocol import AgentSpec  # noqa: E402
 from orchestrator.tools import ToolEnv  # noqa: E402
 from orchestrator.tools.assembly import build_tool_registry  # noqa: E402
 from orchestrator.tools.subagent import MAX_SUBAGENT_DEPTH  # noqa: E402
 
 _PARENT = AgentSpec.model_validate(
     {
-        "apiVersion": "helix.io/v1",
+        "apiVersion": "expert_work.io/v1",
         "kind": "Agent",
         "metadata": {"name": "boss", "version": "1.0.0", "tenant": "t"},
         "spec": {

@@ -26,9 +26,9 @@ from pydantic import BaseModel, Field
 
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
 from control_plane.knowledge.parsing import SUPPORTED_EXTENSIONS
-from helix_agent.persistence import KnowledgeStore
-from helix_agent.persistence.knowledge import UNSET, DuplicateKnowledgeBaseError
-from helix_agent.protocol import (
+from expert_work.persistence import KnowledgeStore
+from expert_work.persistence.knowledge import UNSET, DuplicateKnowledgeBaseError
+from expert_work.protocol import (
     DEFAULT_CHUNK_MAX_TOKENS,
     DEFAULT_CHUNK_OVERLAP_TOKENS,
     DEFAULT_RETRIEVAL_TOP_K,
@@ -42,7 +42,7 @@ from helix_agent.protocol import (
 # retrieval-test endpoint depends on the object duck-typed (``Any``); it is
 # the same instance the lifespan builds and stashes on ``app.state``.
 
-logger = logging.getLogger("helix.control_plane.knowledge")
+logger = logging.getLogger("expert_work.control_plane.knowledge")
 
 
 class _CreateBaseBody(BaseModel):

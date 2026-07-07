@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from helix_agent.common.observability import helix_counter
+from expert_work.common.observability import expert_work_counter
 
 #: Stream HX-13 (Mini-ADR HX-J4) — vendor-native tool-disclosure tier
 #: rejected by the API; the provider instance fell back to the HX-12
 #: application tier for its remaining lifetime.
-disclosure_fallback_total = helix_counter(
-    "helix_llm_tool_disclosure_fallback_total",
+disclosure_fallback_total = expert_work_counter(
+    "expert_work_llm_tool_disclosure_fallback_total",
     "Vendor-native tool-disclosure tier rejections (fell back to the HX-12 tier).",
     ("provider",),
 )

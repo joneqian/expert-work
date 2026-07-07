@@ -15,18 +15,18 @@
 
 - 新增**平台管理员** ✅ 通(`POST /v1/role_bindings` platform_scope + `SettingsRoleBindings.tsx`);bootstrap 解首个鸡生蛋。
 - 租户**新增成员** ⚠️ 半通:员工登录后 JIT 建 `tenant_user` 行 + admin 手工赋 role 能走,但
-  **Keycloak `registrationAllowed:false`,新人账号从哪来无解** —— helix 无邀请流程 / 无 Keycloak Admin API 集成 / 无成员 UI。
+  **Keycloak `registrationAllowed:false`,新人账号从哪来无解** —— Expert Work 无邀请流程 / 无 Keycloak Admin API 集成 / 无成员 UI。
 
 这与目标产品形态(per-user 持久 agent;租户=公司,用户=公司的人)直接冲突 —— 没有成员
 onboarding,公司无法 onboard 员工。当初推迟它的 STREAM-H-DESIGN §0"Business 系统通过 API
-消费 agent,helix 不做用户面"是**过期断言**,本 Stream 作废之。
+消费 agent,Expert Work 不做用户面"是**过期断言**,本 Stream 作废之。
 
 ### 0.2 目标链路
 
 ```
 system_admin 建公司(租户)+ 首个 admin 一步到位
   → admin 邀请员工
-  → helix 调 Keycloak Admin API 自动开账号
+  → Expert Work 调 Keycloak Admin API 自动开账号
   → 员工登录(Keycloak JWT 带 tenant_id 属性)
   → 员工首个 run 时惰性初始化专属 agent 实例(thread+checkpoint+memory+workspace 数据对象)
 ```
@@ -34,8 +34,8 @@ system_admin 建公司(租户)+ 首个 admin 一步到位
 ### 0.3 四个已定决策(用户拍板,锁定)
 
 1. **邀请态建表**:`tenant_member` 表,状态机(`invited→active→suspended/revoked`)+ 审计 + list。不复用 `tenant_user`(后者是登录后 JIT 注册表,无状态字段)。
-2. **删装饰性 Keycloak realm role `admin`**:Keycloak 只管认证 + `tenant_id` 属性;细粒度授权全走 helix `role_binding` 表。已审计确认 `Principal` 不读 `roles` claim 做授权。
-3. **Keycloak Admin 凭据走 Stream Q 加密金库**(`SqlEncryptedSecretStore`);service account 用现有 `helix-agent-api-internal`(已 `serviceAccountsEnabled:true`)配最小 `realm-management` 角色 `manage-users`。
+2. **删装饰性 Keycloak realm role `admin`**:Keycloak 只管认证 + `tenant_id` 属性;细粒度授权全走 Expert Work `role_binding` 表。已审计确认 `Principal` 不读 `roles` claim 做授权。
+3. **Keycloak Admin 凭据走 Stream Q 加密金库**(`SqlEncryptedSecretStore`);service account 用现有 `expert-work-api-internal`(已 `serviceAccountsEnabled:true`)配最小 `realm-management` 角色 `manage-users`。
 4. **per-user agent 惰性初始化**:首个 run 时,非首登同步。
 
 ### 0.4 范围(2026-06-01 纲要拍板)
@@ -59,9 +59,9 @@ member 角色变更端点(本版只 invite/list/resend/revoke + W3 自动 activa
 - `services/control-plane/src/control_plane/api/tenants.py:39` `CreateTenantRequest(tenant_id?, display_name, plan?)`;建租户走 `bypass_rls_session()`;仅 `is_system_admin`。
 - `services/control-plane/src/control_plane/api/role_bindings.py:78` 创建 tenant-scope 绑定写死 `tenant_id=principal.tenant_id` —— 给别租户写**必须新路径**。但底层 `RoleBindingStore.create(*, tenant_id, subject_id: UUID, ...)`(`auth/base.py:218`)**接受显式 `tenant_id`**,新路径只需在 `bypass_rls_session()` 内传目标 `tenant_id`,不改 store。
 - ⚠️ `RoleBindingStore.create` 的 `subject_id` 是 **`UUID`**;Keycloak user id 是 UUID 格式字符串 → `UUID(kc_user_id)` 可直接转。`Principal.subject_id` / `tenant_user.subject_id` 是 `str`。
-- `packages/helix-persistence/.../tenant_user/{base,sql}.py` `resolve()` 幂等 upsert `(tenant_id, subject_type, subject_id)`,bump `last_active_at`;**无状态字段**。
+- `packages/expert-work-persistence/.../tenant_user/{base,sql}.py` `resolve()` 幂等 upsert `(tenant_id, subject_type, subject_id)`,bump `last_active_at`;**无状态字段**。
 - `services/control-plane/.../auth/middleware.py:107` `Principal.from_jwt_claims`,`tenant_id` 来自 claim;`:109` `resolve_system_admin` 查 platform_scope binding。`roles` claim 仅透传到 `Principal.roles`,**RBAC 不读它**(grep 确认)。
-- `infra/keycloak/realm-helix-agent.json`:`helix-agent-api-internal` `serviceAccountsEnabled:true`/`publicClient:false`;`registrationAllowed:false`;`duplicateEmailsAllowed:false`;dev 用户有 `tenant_id` 属性 + 装饰性 `realmRoles:["admin"]`(待删)。
+- `infra/keycloak/realm-expert-work.json`:`expert-work-api-internal` `serviceAccountsEnabled:true`/`publicClient:false`;`registrationAllowed:false`;`duplicateEmailsAllowed:false`;dev 用户有 `tenant_id` 属性 + 装饰性 `realmRoles:["admin"]`(待删)。
 - `auth/rbac.py:63` `ADMIN` 对 `manifest/session/sandbox/secret/quota/tenant_config/user/role_binding/service_account/api_key/memory` 有 write。
 - Stream Q `SqlEncryptedSecretStore`(`control_plane/encrypted_secret_store.py`):`get(name,*,version=None)` / `put(name, value)`,平台行 `tenant_id IS NULL` 走 `bypass_rls_session()`。backend `sql_encrypted`。
 - `services/control-plane/.../api/runs.py` `trigger_run`:`resolve_caller_user_id`(走 `tenant_user.resolve`)→ `run_manager.create(user_id=...)` → `current_user_id_var.set`。**当前无 workspace ensure** —— per-user 数据对象初始化是 gap。
@@ -75,22 +75,22 @@ member 角色变更端点(本版只 invite/list/resend/revoke + W3 自动 activa
 
 ## 2. Mini-ADRs(统一 R- 前缀)
 
-- **R-1** Keycloak Admin client 封装放**新 module** `services/control-plane/src/control_plane/keycloak/`(`admin_client.py` + `token.py` + `errors.py`),不放 helix-common(它依赖金库 glue + httpx,helix-common 不应反依赖 control-plane)。Protocol `KeycloakAdminClient` + `HttpKeycloakAdminClient` 实现 + `FakeKeycloakAdminClient` 单测替身。
-- **R-2** Admin token 走 service-account `client_credentials` grant 打 `/realms/helix-agent/protocol/openid-connect/token`;进程内缓存到 `exp-30s` 重取。client_secret 从金库 `helix-agent/platform/keycloak/admin-client-secret` 取。
-- **R-3** **建号 = Keycloak 原生流**:`POST /admin/realms/{realm}/users` → `PUT .../execute-actions-email`(actions `["UPDATE_PASSWORD","VERIFY_EMAIL"]`)。helix **不自管邀请 token / 不自建邮件**;Keycloak 发设密码邮件,链接有效期由 `lifespan` 控制。零 token 存储面 = 零泄露面。
+- **R-1** Keycloak Admin client 封装放**新 module** `services/control-plane/src/control_plane/keycloak/`(`admin_client.py` + `token.py` + `errors.py`),不放 expert-work-common(它依赖金库 glue + httpx,expert-work-common 不应反依赖 control-plane)。Protocol `KeycloakAdminClient` + `HttpKeycloakAdminClient` 实现 + `FakeKeycloakAdminClient` 单测替身。
+- **R-2** Admin token 走 service-account `client_credentials` grant 打 `/realms/expert-work/protocol/openid-connect/token`;进程内缓存到 `exp-30s` 重取。client_secret 从金库 `expert-work/platform/keycloak/admin-client-secret` 取。
+- **R-3** **建号 = Keycloak 原生流**:`POST /admin/realms/{realm}/users` → `PUT .../execute-actions-email`(actions `["UPDATE_PASSWORD","VERIFY_EMAIL"]`)。Expert Work **不自管邀请 token / 不自建邮件**;Keycloak 发设密码邮件,链接有效期由 `lifespan` 控制。零 token 存储面 = 零泄露面。
 - **R-4** **跨系统无分布式事务,用 DB-first + 幂等补偿**:先写本地 DB(member `invited` / 建租户),再调 Keycloak(外部、可重试);Keycloak 成功回填 `keycloak_user_id` + 审计;失败留本地一致态,`resend` 端点幂等补偿。**绝不**先建 Keycloak 再写 DB。
 - **R-5** W1 建租户 first_admin 用**新 cross-tenant role_binding 写路径**:`tenants.py` 内 `bypass_rls_session()` 直接 `role_binding_repo.create(tenant_id=<new>, subject_id=UUID(kc_user_id), role=ADMIN, ...)`,不复用 `role_bindings.py:78`。不新增 store 方法。
 - **R-6** `tenant_member` = 邀请态名册(control-plane 事实源);`tenant_user` = 登录后 JIT 运行态注册表。不合并、无 FK。对齐:员工首登 `tenant_user.resolve` 后,W3 编排经 `keycloak_user_id` 把 member 推 `invited→active`(回填 `subject_id = tenant_user.id` + `activated_at`)。
-- **R-7** ⚠️ **实施期纠正(PR #351)**:原设计断言"删装饰 realm role 安全,helix 不读 `roles` 做授权" —— **错的**。`rbac.py` 的 `is_allowed`/`is_admin` **正是**读 `principal.roles`(来自 JWT `roles` claim);只有 `system_admin`(平台级)走 `role_binding` 表,**租户级角色没接授权层**。所以删 realm role 会断 dev 租户权,且邀请来的员工(角色写在 `role_binding`)会无权限。**改为**:新增 `resolve_tenant_roles`,middleware 让 JWT 用户也从 `role_binding` enrich 租户角色进 `principal.roles`(接上 rbac 标的 "future enrichment");**保留** realm role(dev 租户权唯一来源)。这才是"应用自管授权"真正成立的前提。
+- **R-7** ⚠️ **实施期纠正(PR #351)**:原设计断言"删装饰 realm role 安全,Expert Work 不读 `roles` 做授权" —— **错的**。`rbac.py` 的 `is_allowed`/`is_admin` **正是**读 `principal.roles`(来自 JWT `roles` claim);只有 `system_admin`(平台级)走 `role_binding` 表,**租户级角色没接授权层**。所以删 realm role 会断 dev 租户权,且邀请来的员工(角色写在 `role_binding`)会无权限。**改为**:新增 `resolve_tenant_roles`,middleware 让 JWT 用户也从 `role_binding` enrich 租户角色进 `principal.roles`(接上 rbac 标的 "future enrichment");**保留** realm role(dev 租户权唯一来源)。这才是"应用自管授权"真正成立的前提。
 - **R-8** ⚠️ **实施期纠正(PR #353)**:原设计要 `trigger_run` 调 `UserWorkspaceStore.resolve` 建 workspace 行 —— **砍掉**。`UserWorkspaceStore` 是 **sandbox-supervisor 域、无 RLS**,且 supervisor **已在员工首次 exec 工具时惰性建行**(`supervisor.py:158` "resolve creating on first use");control-plane 再 resolve = 重复 + 跨服务边界拉不属于它的 store。**改为** `ensure_member_active`:`trigger_run` 首 run hook(`resolve_caller_user_id` 后)经 `get_by_keycloak_user_id` 反查,member 仍 `invited` 则 `transition(active)` 回填 `subject_id`(R-6)。workspace 由 supervisor 就近惰性建;memory namespace 由 `current_user_id_var` + user-level RLS 隐式建立,无需建表。
 - **R-9** **租户默认 agent**(W3 保留):`tenant_config` 加 `default_agent_name TEXT NULL`(独立 migration `0052`,属 W3 可独立回滚)。员工建 thread 未指定 agent 时:租户默认非 NULL → 用之,否则平台 fallback `canonical-agent`。**不给每员工存模板**。
 - **R-10** member 邀请幂等键 = `(tenant_id, lower(email))` partial unique `WHERE status != 'revoked'`:同 email 同租户不能两条活跃邀请;revoke 后可重邀。`resend` 不新建行。
-- **R-11** Keycloak `409 User exists` → helix `409 MEMBER_KEYCLOAK_CONFLICT`,member 留 `invited`/`keycloak_user_id=NULL`。**不跨租户自动复用** Keycloak 账号(一邮箱一租户;`duplicateEmailsAllowed:false` 已锁)。
+- **R-11** Keycloak `409 User exists` → Expert Work `409 MEMBER_KEYCLOAK_CONFLICT`,member 留 `invited`/`keycloak_user_id=NULL`。**不跨租户自动复用** Keycloak 账号(一邮箱一租户;`duplicateEmailsAllowed:false` 已锁)。
 - **R-12** email 字段用普通 `str` + 校验函数(非空、含 `@`、长度上限、`lower()` normalize),**不引入 `email-validator`/`pydantic[email]`**(simplicity first;引依赖单独决策)。
 
 ### W4 追加(2026-06-01,实跑 E2E 前置收尾;纯环境接线,零 product 代码改动)
 
-- **R-13** dev Keycloak 启用 = compose 加 `HELIX_AGENT_KEYCLOAK_ENABLED: ${...:-false}`(默认 false→`full`-only 栈 / CI integration 无 `auth` profile 时仍用进程内 Fake;dev 在 `infra/.env` 开 true)。realm `helix-agent-admin-ui` 的 `rootUrl`/`redirectUris`/`webOrigins` `:3000`→`:5173`(对齐 vite 真实端口,否则浏览器登录 redirect_uri mismatch)。
+- **R-13** dev Keycloak 启用 = compose 加 `EXPERT_WORK_KEYCLOAK_ENABLED: ${...:-false}`(默认 false→`full`-only 栈 / CI integration 无 `auth` profile 时仍用进程内 Fake;dev 在 `infra/.env` 开 true)。realm `expert-work-admin-ui` 的 `rootUrl`/`redirectUris`/`webOrigins` `:3000`→`:5173`(对齐 vite 真实端口,否则浏览器登录 redirect_uri mismatch)。
 - **R-14** Keycloak admin client secret 种入 = 新 CLI `control_plane.seed_keycloak_secret`(镜像 `bootstrap_admin`:建同款 `SqlEncryptedSecretStore` → `put(keycloak_admin_secret_name, value)`,幂等写新版本)。value 走 `--value`/env,**绝不进容器运行时 env**(运行时只从金库取,settings 无该字段)。`sql_encrypted` 后端专用;`local_dev` 走 dev-keys 文件。
 - **R-15** first_admin 全程 web = `SettingsCreateTenant` 暴露 `first_admin_email` + `first_admin_display_name` 字段,成功回显 first_admin(email/status,提示去 Keycloak 控制台设密码);`api/tenants.ts` 加 `CreatedTenant`(record + 可选 `first_admin`)+ i18n(en/zh-CN)+ e2e。补 W1 API 能力的 UI 缺口。
 - **R-16** 无 SMTP 设密码路径 = 两条 provision 路径(`invite_member`/`provision_first_admin`)已先写账号+role binding、再 best-effort 发邮件且容错失败(代码既有,无需改)→ dev 无 SMTP 时仍 201,管理员在 Keycloak 控制台手设密码。subject-id 改用服务账号 Admin API 查(绕开 admin-ui 已禁的 password grant);文档 exec 目标 `control-plane`→`control-plane-blue`(蓝绿对真实服务名)。
@@ -175,9 +175,9 @@ services/control-plane/tests/keycloak/fake_admin_client.py   # 单测替身
 
 ```python
 keycloak_base_url: str = "http://localhost:8080"
-keycloak_realm: str = "helix-agent"
-keycloak_admin_client_id: str = "helix-agent-api-internal"
-keycloak_admin_secret_name: str = "helix-agent/platform/keycloak/admin-client-secret"  # 金库取
+keycloak_realm: str = "expert-work"
+keycloak_admin_client_id: str = "expert-work-api-internal"
+keycloak_admin_secret_name: str = "expert-work/platform/keycloak/admin-client-secret"  # 金库取
 keycloak_email_action_lifespan_s: int = 86400
 keycloak_enabled: bool = False   # dev/CI 默认关 → 注入 Fake;integration/prod 开 → Http
 ```
@@ -221,7 +221,7 @@ httpx timeout 10s connect / 30s read;**不重试 create**(避免重复建号);`s
 
 ### 4.5 realm json 改动(W1 一并)
 
-给 `helix-agent-api-internal` service account 加 `realm-management` client role **仅 `manage-users`**
+给 `expert-work-api-internal` service account 加 `realm-management` client role **仅 `manage-users`**
 (不给 `realm-admin`)。dev `keycloak_enabled=False` 注入 `FakeKeycloakAdminClient`(内存 dict,建号
 返回伪 UUID),W1/W2 CI 不依赖真 Keycloak。
 
@@ -263,7 +263,7 @@ req: { display_name, plan?, tenant_id?, first_admin_email?, first_admin_display_
 
 ### W2 — 成员 onboarding:member 表 + 邀请流程
 
-**5.W2.1 Store**(`packages/helix-persistence/.../tenant_member/{base,sql,memory}.py`):
+**5.W2.1 Store**(`packages/expert-work-persistence/.../tenant_member/{base,sql,memory}.py`):
 `create`(invited,partial-unique 冲突 → `DuplicateMemberError`)、`get`、`get_by_keycloak_user_id`
 (W3 反查)、`list_for_tenant(status?, limit, offset)`、`set_keycloak_user_id`、
 `transition(member_id, tenant_id, to, subject_id?, now)`(乐观 WHERE 合法前驱,返回 False = 非法/竞态)。
@@ -344,7 +344,7 @@ async def ensure_user_instance(request, *, tenant_id, user_id, principal):
 |---|------|------|
 | 1 | **Keycloak Admin 凭据泄露**(realm 全用户管理权)| 金库加密存(非 settings 明文 / 非 realm json prod);最小角色 `manage-users`;token 进程内缓存不落盘;审计/日志绝不含 secret;prod 轮换。 |
 | 2 | **跨系统事务一致性** | DB-first + 幂等补偿(R-4):本地原子;Keycloak 失败落可恢复态;`resend` 统一补偿;绝不先建 Keycloak。 |
-| 3 | **邀请邮件/链接安全** | 不自管 token(R-3)—— Keycloak 原生 `execute-actions-email`,`lifespan` 控期 + `VERIFY_EMAIL`;helix 零 token 存储面。 |
+| 3 | **邀请邮件/链接安全** | 不自管 token(R-3)—— Keycloak 原生 `execute-actions-email`,`lifespan` 控期 + `VERIFY_EMAIL`;Expert Work 零 token 存储面。 |
 | 4 | **删 realm role 回归** | 已审计 `principal.roles` 不参与授权;R-2 独立小 PR + 回归断言;易回滚。 |
 | 5 | **per-user 编排开销** | `ensure_user_instance` 2 次轻量 upsert;workspace `resolve` 只写注册表行(物理 volume 由 supervisor 惰性建);首版不优化。 |
 | 6 | **email 跨租户冲突** | `duplicateEmailsAllowed:false`(realm 已锁)+ Keycloak 409 → `MEMBER_KEYCLOAK_CONFLICT`(R-11);不跨租户复用。 |

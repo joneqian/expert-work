@@ -45,7 +45,7 @@ In PR C the Form tab uses RJSF's **default** widgets for every field (including 
 - **i18n:** `const { t } = useTranslation()`; keys live in `TranslationKeys` (interface in `en.ts`) and must be added to BOTH `en.ts` and `zh-CN.ts`. Glossary: 配置清单=manifest contexts, 表单=form, 提供方=provider, 智能体=agent. Keep `YAML`/`JSON`/`Monaco` as tokens.
 - **Monaco testid gotcha:** `@monaco-editor/react`'s `<Editor>` does NOT forward `data-testid` to a queryable DOM node in real browsers. Put the testid on a **wrapper `div`**, not on `<Editor>`. Unit tests mock Monaco to a `<textarea>` (see existing mock below).
 - **Props:** named `interface XxxProps`, no `React.FC`. Explicit types on exports. No `any` — use `unknown` + narrowing. No `console.log`.
-- **Styling:** inline `style={{ … }}` with `var(--hx-*)` tokens, and `.hx-*` classes from `theme/global.css`. Antd components inherit the ConfigProvider theme.
+- **Styling:** inline `style={{ … }}` with `var(--ew-*)` tokens, and `.ew-*` classes from `theme/global.css`. Antd components inherit the ConfigProvider theme.
 - **Vitest:** test files under a `__tests__/` dir, `*.test.tsx`; import `"../../../i18n"` to init translations; mock SDK with `vi.spyOn`; the global `src/test/setup.ts` stubs axios so no network happens.
 - **Run commands** (from `apps/admin-ui/`):
   - Unit tests: `npm run test -- <path>` (vitest; adjust verb to the PM). One file: `npx vitest run src/components/manifest-editor/__tests__/yaml.test.tsx`.
@@ -400,7 +400,7 @@ export function YamlView({ value, onChange }: YamlViewProps) {
         height="calc(100vh - 300px)"
         options={{
           minimap: { enabled: false },
-          fontFamily: "var(--hx-font-mono)",
+          fontFamily: "var(--ew-font-mono)",
           fontSize: 12,
           tabSize: 2,
           scrollBeyondLastLine: false,

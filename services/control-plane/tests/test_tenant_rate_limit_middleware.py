@@ -11,8 +11,8 @@ from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.ratelimit import InProcessTokenBucketLimiter, RateLimiter
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditAction, AuditQuery
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditAction, AuditQuery
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt
 
 _TENANT = DEFAULT_DEV_TENANT_ID
@@ -185,8 +185,8 @@ async def test_tenant_override_tightens_limit(audit_store: InMemoryAuditLogStore
     Default tenant tier is wide (10k), but the seeded tenant config overrides to
     burst=1, so the second request in quick succession is 429'd.
     """
-    from helix_agent.persistence.tenant_config import InMemoryTenantConfigStore
-    from helix_agent.protocol.tenant_config import TenantConfigPatch
+    from expert_work.persistence.tenant_config import InMemoryTenantConfigStore
+    from expert_work.protocol.tenant_config import TenantConfigPatch
 
     repo = InMemoryTenantConfigStore()
     await repo.upsert(

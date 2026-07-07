@@ -14,8 +14,8 @@ from uuid import uuid4
 import pytest
 
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.protocol import DocumentStatus
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.protocol import DocumentStatus
 from orchestrator.llm import FakeEmbedder
 from orchestrator.tools import KnowledgeRetriever, KnowledgeSearchTool, ToolContext
 

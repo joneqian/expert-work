@@ -19,17 +19,17 @@ from langgraph.checkpoint.memory import InMemorySaver
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.runtime import make_agent_builder
 from control_plane.settings import Settings
-from helix_agent.persistence.platform_embedding_config import (
+from expert_work.persistence.platform_embedding_config import (
     InMemoryPlatformEmbeddingConfigStore,
 )
-from helix_agent.protocol import AgentSpec
-from helix_agent.runtime.secret_store import LocalDevSecretStore
+from expert_work.protocol import AgentSpec
+from expert_work.runtime.secret_store import LocalDevSecretStore
 from orchestrator.errors import AgentFactoryError
 
 _ANTHROPIC_KEY_NAME = "anthropic-api-key"
 
 _LONG_TERM_SPEC: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "mem-agent", "version": "1.0.0", "tenant": "platform-eng"},
     "spec": {

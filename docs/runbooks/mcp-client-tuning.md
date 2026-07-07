@@ -1,12 +1,12 @@
 # MCP Client Tuning & Triage
 
 Runbook for the Capability Uplift Sprint #5 MCP client HTTP/SSE transport.
-Used by operators when alerts fire on `helix:uplift:mcp_*` rules or when
+Used by operators when alerts fire on `Expert Work:uplift:mcp_*` rules or when
 an agent reports a missing / failing `mcp:<server>.<tool>` call.
 
-> **Scope**:helix is **MCP client only** (Mini-ADR永久 — see
+> **Scope**:Expert Work is **MCP client only** (Mini-ADR永久 — see
 > [memory:mcp-direction-client-only]). This runbook covers consuming
-> external MCP servers; helix does not expose an MCP server endpoint.
+> external MCP servers; Expert Work does not expose an MCP server endpoint.
 
 ## § 1 Transport selection guide
 
@@ -24,12 +24,12 @@ injected exfiltration targets.
 
 ## § 2 Failure-mode triage
 
-Alert `HelixUpliftMCPCallFailureRateSpike` fires → check the per-server
+Alert `ExpertWorkUpliftMCPCallFailureRateSpike` fires → check the per-server
 breakdown:
 
 ```promql
 sum by (transport, server, result) (
-  rate(helix_uplift_mcp_call_total[15m])
+  rate(expert_work_uplift_mcp_call_total[15m])
 )
 ```
 
@@ -67,7 +67,7 @@ Common roots:
 }
 ```
 
-The `token_ref` value points at the helix secret store (Mini-ADR U-11);
+The `token_ref` value points at the Expert Work secret store (Mini-ADR U-11);
 the actual token never appears in:
 
 - the config file (which sits in git)
@@ -83,7 +83,7 @@ To rotate:
 ```
 
 To verify a token resolves correctly at boot, watch the control-plane
-log for `helix_uplift_mcp_call_total{result="ok"}` activity on the
+log for `expert_work_uplift_mcp_call_total{result="ok"}` activity on the
 target server within the first minute after startup; absence + alerts
 on `transport_err` typically means a stale or wrong-scope token.
 
@@ -119,10 +119,10 @@ Check current state via the transition counter:
 
 ```promql
 # How many servers have been open in the last 30m?
-helix:uplift:mcp_circuit_open_total
+Expert Work:uplift:mcp_circuit_open_total
 
 # Transition timeline for a specific server
-helix_uplift_mcp_circuit_state_total{server="github"}
+expert_work_uplift_mcp_circuit_state_total{server="github"}
 ```
 
 **Manual reset** is not exposed via API in this sprint (intentional —
@@ -154,7 +154,7 @@ investigate:
 5. **Restart control-plane** — startup either succeeds (server appears
    in tool registry) or fails fast with a clear error.
 6. **Verify** by watching the first 5 minutes of
-   `rate(helix_uplift_mcp_call_total[5m])` on the new server name.
+   `rate(expert_work_uplift_mcp_call_total[5m])` on the new server name.
 
 `max_servers=5` per pool is the platform cap (Stream E.9 § 6) — coordinate
 with the platform team before adding the 6th MCP server.

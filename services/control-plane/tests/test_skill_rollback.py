@@ -20,7 +20,7 @@ from control_plane.skill_rollback import (
     binomial_cdf,
     decide_rollback,
 )
-from helix_agent.protocol import TrajectoryOutcome
+from expert_work.protocol import TrajectoryOutcome
 
 
 def _window(*, success: int, failed: int, cancelled: int = 0) -> list[TrajectoryOutcome]:

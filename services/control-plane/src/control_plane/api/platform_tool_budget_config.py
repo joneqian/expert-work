@@ -3,7 +3,7 @@
 system_admin-only view + write of the EFFECTIVE platform on/off for the
 tool-output-budget feature (generalized externalization + persist floor + CM-12
 prune). Unset is a valid state — the service then falls back to the
-``HELIX_TOOL_OUTPUT_BUDGET`` env default.
+``EXPERT_WORK_TOOL_OUTPUT_BUDGET`` env default.
 
 Gating mirrors :mod:`control_plane.api.platform_judge_config`: ``principal``
 arrives via the shared ``_principal`` dependency, handlers gate on
@@ -20,9 +20,9 @@ from pydantic import BaseModel, ConfigDict
 from control_plane.api._authz import _principal
 from control_plane.audit import emit
 from control_plane.platform_tool_budget_config import PlatformToolBudgetConfigService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.protocol import AuditAction, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.protocol import AuditAction, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
 
 class PlatformToolBudgetConfigWrite(BaseModel):

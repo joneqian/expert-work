@@ -86,7 +86,7 @@ def test_replay_config_carries_tenant_and_user() -> None:
     from uuid import uuid4
 
     from control_plane.skill_evolution_wiring import _make_replay_config_factory
-    from helix_agent.protocol import CurationCandidateRecord
+    from expert_work.protocol import CurationCandidateRecord
 
     tenant, user = uuid4(), uuid4()
     candidate = CurationCandidateRecord(
@@ -116,7 +116,7 @@ def test_replay_config_omits_absent_user() -> None:
     from uuid import uuid4
 
     from control_plane.skill_evolution_wiring import _make_replay_config_factory
-    from helix_agent.protocol import CurationCandidateRecord
+    from expert_work.protocol import CurationCandidateRecord
 
     candidate = CurationCandidateRecord(
         id=uuid4(),

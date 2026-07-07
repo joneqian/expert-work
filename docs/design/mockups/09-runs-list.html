@@ -6,9 +6,9 @@
   补 H.3 留账(per § 6.5.14)。设计基线对齐 H.3 PR 1 已实施的 RunsList.tsx。
 
   Tokens used:
-    --hx-surface-base / --hx-text-primary / --hx-text-tertiary
-    --hx-status-{success,warning,danger}-{bg,fg}
-    --hx-color-brand-500
+    --ew-surface-base / --ew-text-primary / --ew-text-tertiary
+    --ew-status-{success,warning,danger}-{bg,fg}
+    --ew-color-brand-500
 
   Antd 5(H.3 PR 1 实施):
     <Table>            → 表格(分页 50 条/页)
@@ -27,43 +27,43 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Runs — helix Admin</title>
+  <title>Runs — Expert Work Admin</title>
   <link rel="stylesheet" href="./shared/tokens.css" />
   <link rel="stylesheet" href="./shared/shell.css" />
   <style>
     .runs-toolbar {
       display: flex;
       align-items: center;
-      gap: var(--hx-space-3);
-      margin-bottom: var(--hx-space-4);
+      gap: var(--ew-space-3);
+      margin-bottom: var(--ew-space-4);
     }
     .runs-toolbar__filters {
       display: flex;
-      gap: var(--hx-space-2);
+      gap: var(--ew-space-2);
       flex: 1;
     }
     .cross-banner {
-      background: var(--hx-status-info-bg);
-      color: var(--hx-status-info-fg);
-      border: 1px solid var(--hx-status-info-fg);
-      border-radius: var(--hx-radius-sm);
-      padding: var(--hx-space-2) var(--hx-space-3);
-      margin-bottom: var(--hx-space-3);
+      background: var(--ew-status-info-bg);
+      color: var(--ew-status-info-fg);
+      border: 1px solid var(--ew-status-info-fg);
+      border-radius: var(--ew-radius-sm);
+      padding: var(--ew-space-2) var(--ew-space-3);
+      margin-bottom: var(--ew-space-3);
       display: flex;
       align-items: center;
-      gap: var(--hx-space-2);
-      font-size: var(--hx-font-size-sm);
+      gap: var(--ew-space-2);
+      font-size: var(--ew-font-size-sm);
     }
     .runs-table .runid {
-      font-family: var(--hx-font-mono);
-      font-size: var(--hx-font-size-xs);
-      color: var(--hx-text-tertiary);
+      font-family: var(--ew-font-mono);
+      font-size: var(--ew-font-size-xs);
+      color: var(--ew-text-tertiary);
     }
     .runs-table tbody tr {
       cursor: pointer;
     }
     .runs-table tbody tr:hover {
-      background: var(--hx-surface-hover);
+      background: var(--ew-surface-hover);
     }
     .demo-toggle {
       position: fixed;
@@ -76,49 +76,49 @@
   </style>
 </head>
 <body>
-  <div class="hx-app">
-    <aside class="hx-sidebar">
-      <div class="hx-sidebar__brand">
-        <span class="hx-sidebar__glyph">⟁</span>
-        <span>helix</span>
+  <div class="ew-app">
+    <aside class="ew-sidebar">
+      <div class="ew-sidebar__brand">
+        <span class="ew-sidebar__glyph">⟁</span>
+        <span>Expert Work</span>
       </div>
-      <nav class="hx-sidebar__nav">
-        <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
-        <a class="hx-sidebar__item" href="./09-runs-list.html" aria-current="page">Runs</a>
-        <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
-        <a class="hx-sidebar__item" href="./06-memory-admin.html">Memory</a>
-        <a class="hx-sidebar__item" href="./10-skills.html">Skills</a>
-        <a class="hx-sidebar__item" href="./11-triggers.html">Triggers</a>
-        <a class="hx-sidebar__item" href="./12-audit.html">Audit</a>
-        <div class="hx-sidebar__group-label">Settings</div>
-        <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
-        <a class="hx-sidebar__item" href="./13-settings-iam.html">Service Accounts</a>
-        <a class="hx-sidebar__item" href="./13-settings-iam.html">Role Bindings</a>
-        <a class="hx-sidebar__item" href="./14-settings-ops.html">Tenant Quotas</a>
-        <a class="hx-sidebar__item" href="./14-settings-ops.html">Tenant Config</a>
+      <nav class="ew-sidebar__nav">
+        <a class="ew-sidebar__item" href="./01-agents-list.html">Agents</a>
+        <a class="ew-sidebar__item" href="./09-runs-list.html" aria-current="page">Runs</a>
+        <a class="ew-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+        <a class="ew-sidebar__item" href="./06-memory-admin.html">Memory</a>
+        <a class="ew-sidebar__item" href="./10-skills.html">Skills</a>
+        <a class="ew-sidebar__item" href="./11-triggers.html">Triggers</a>
+        <a class="ew-sidebar__item" href="./12-audit.html">Audit</a>
+        <div class="ew-sidebar__group-label">Settings</div>
+        <a class="ew-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+        <a class="ew-sidebar__item" href="./13-settings-iam.html">Service Accounts</a>
+        <a class="ew-sidebar__item" href="./13-settings-iam.html">Role Bindings</a>
+        <a class="ew-sidebar__item" href="./14-settings-ops.html">Tenant Quotas</a>
+        <a class="ew-sidebar__item" href="./14-settings-ops.html">Tenant Config</a>
       </nav>
     </aside>
 
-    <header class="hx-topbar">
-      <button class="hx-topbar__tenant">
+    <header class="ew-topbar">
+      <button class="ew-topbar__tenant">
         <span>Tenant: acme</span>
-        <span class="hx-text-tertiary">▾</span>
+        <span class="ew-text-tertiary">▾</span>
       </button>
-      <button class="hx-topbar__cmdk">
+      <button class="ew-topbar__cmdk">
         <span>Search or jump</span>
-        <span class="hx-kbd">⌘K</span>
+        <span class="ew-kbd">⌘K</span>
       </button>
-      <div class="hx-topbar__spacer"></div>
-      <button class="hx-btn-icon" aria-label="通知">🔔</button>
-      <button class="hx-btn-icon" aria-label="用户">👤</button>
+      <div class="ew-topbar__spacer"></div>
+      <button class="ew-btn-icon" aria-label="通知">🔔</button>
+      <button class="ew-btn-icon" aria-label="用户">👤</button>
     </header>
 
-    <main class="hx-main">
-      <div class="hx-main__container">
-        <div class="hx-page-header">
+    <main class="ew-main">
+      <div class="ew-main__container">
+        <div class="ew-page-header">
           <div>
-            <h1 class="hx-heading-1">Runs</h1>
-            <p class="hx-text-secondary hx-text-sm">所有 Agent run 的跨 thread 总览。</p>
+            <h1 class="ew-heading-1">Runs</h1>
+            <p class="ew-text-secondary ew-text-sm">所有 Agent run 的跨 thread 总览。</p>
           </div>
         </div>
 
@@ -129,7 +129,7 @@
 
         <div class="runs-toolbar">
           <div class="runs-toolbar__filters">
-            <select class="hx-select" style="min-width: 140px;">
+            <select class="ew-select" style="min-width: 140px;">
               <option>全部状态</option>
               <option>running</option>
               <option>paused (等待审批)</option>
@@ -138,10 +138,10 @@
               <option>cancelled</option>
             </select>
           </div>
-          <span class="hx-text-tertiary hx-text-xs">共 247 条</span>
+          <span class="ew-text-tertiary ew-text-xs">共 247 条</span>
         </div>
 
-        <table class="hx-table runs-table">
+        <table class="ew-table runs-table">
           <thead>
             <tr>
               <th>Run ID</th>
@@ -155,7 +155,7 @@
           <tbody>
             <tr>
               <td><span class="runid">9f8b2a3c-4d5e-…</span></td>
-              <td><span class="hx-badge hx-badge--warning">paused</span></td>
+              <td><span class="ew-badge ew-badge--warning">paused</span></td>
               <td><span class="runid">t-acme-001</span></td>
               <td>customer-support@v3.2</td>
               <td>acme</td>
@@ -163,7 +163,7 @@
             </tr>
             <tr>
               <td><span class="runid">5b7d1a8e-2c4f-…</span></td>
-              <td><span class="hx-badge hx-badge--success">success</span></td>
+              <td><span class="ew-badge ew-badge--success">success</span></td>
               <td><span class="runid">t-acme-014</span></td>
               <td>data-pipeline@v1.0</td>
               <td>acme</td>
@@ -171,7 +171,7 @@
             </tr>
             <tr>
               <td><span class="runid">3a2f9d6c-7b1e-…</span></td>
-              <td><span class="hx-badge hx-badge--danger">error</span></td>
+              <td><span class="ew-badge ew-badge--danger">error</span></td>
               <td><span class="runid">t-globex-007</span></td>
               <td>research-agent@v2.1</td>
               <td>globex</td>
@@ -179,7 +179,7 @@
             </tr>
             <tr>
               <td><span class="runid">7c4d8b2a-9f5e-…</span></td>
-              <td><span class="hx-badge hx-badge--info">running</span></td>
+              <td><span class="ew-badge ew-badge--info">running</span></td>
               <td><span class="runid">t-acme-098</span></td>
               <td>customer-support@v3.2</td>
               <td>acme</td>
@@ -187,7 +187,7 @@
             </tr>
             <tr>
               <td><span class="runid">2e6f3a8b-1c9d-…</span></td>
-              <td><span class="hx-badge">cancelled</span></td>
+              <td><span class="ew-badge">cancelled</span></td>
               <td><span class="runid">t-acme-076</span></td>
               <td>research-agent@v2.1</td>
               <td>acme</td>
@@ -196,17 +196,17 @@
           </tbody>
         </table>
 
-        <div style="margin-top: var(--hx-space-4); display: flex; justify-content: flex-end; gap: var(--hx-space-2); align-items: center;">
-          <span class="hx-text-tertiary hx-text-xs">第 1 页 / 共 5 页</span>
-          <button class="hx-btn hx-btn--secondary hx-btn--sm" disabled>« 上页</button>
-          <button class="hx-btn hx-btn--secondary hx-btn--sm">下页 »</button>
+        <div style="margin-top: var(--ew-space-4); display: flex; justify-content: flex-end; gap: var(--ew-space-2); align-items: center;">
+          <span class="ew-text-tertiary ew-text-xs">第 1 页 / 共 5 页</span>
+          <button class="ew-btn ew-btn--secondary ew-btn--sm" disabled>« 上页</button>
+          <button class="ew-btn ew-btn--secondary ew-btn--sm">下页 »</button>
         </div>
       </div>
     </main>
   </div>
 
   <div class="demo-toggle">
-    <button class="hx-btn hx-btn--ghost hx-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
+    <button class="ew-btn ew-btn--ghost ew-btn--sm" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark')">切换 dark/light</button>
   </div>
 </body>
 </html>

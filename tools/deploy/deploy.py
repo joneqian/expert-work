@@ -160,7 +160,7 @@ def _compose(
     """Run ``docker compose`` against the infra compose file."""
     env = dict(os.environ)
     if tag is not None:
-        env["HELIX_CONTROL_PLANE_TAG"] = tag
+        env["EXPERT_WORK_CONTROL_PLANE_TAG"] = tag
     return _run(
         ["docker", "compose", "-f", str(COMPOSE_FILE), *args],
         env=env,
@@ -283,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--tag",
         default="dev",
-        help="control-plane image tag to deploy (HELIX_CONTROL_PLANE_TAG). Default: dev.",
+        help="control-plane image tag to deploy (EXPERT_WORK_CONTROL_PLANE_TAG). Default: dev.",
     )
     parser.add_argument(
         "--canary",

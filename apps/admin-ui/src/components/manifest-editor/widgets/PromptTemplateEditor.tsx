@@ -142,7 +142,7 @@ export function PromptTemplateEditor({
         onChange={(v) => onChange(v ?? "")}
         options={{
           minimap: { enabled: false },
-          fontFamily: "var(--hx-font-mono)",
+          fontFamily: "var(--ew-font-mono)",
           fontSize: 13,
           lineNumbers: "on",
           scrollBeyondLastLine: false,

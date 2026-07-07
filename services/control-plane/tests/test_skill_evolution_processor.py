@@ -20,9 +20,9 @@ from control_plane.skill_evolution_processor import (
     EvolutionProcessor,
     SkillEvidence,
 )
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import CurationCandidateRecord
-from helix_agent.protocol.skill import SkillStatus
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import CurationCandidateRecord
+from expert_work.protocol.skill import SkillStatus
 
 _TENANT = UUID("33333333-3333-3333-3333-333333333333")
 
@@ -102,7 +102,7 @@ async def test_promotion_gate_activates_eligible_grounded_draft() -> None:
 
     from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
     from control_plane.skill_promotion_gate import PromotionGate
-    from helix_agent.protocol.skill import SkillStatus
+    from expert_work.protocol.skill import SkillStatus
 
     store = InMemorySkillStore()
 
@@ -235,7 +235,7 @@ async def _seed_existing(store: InMemorySkillStore, *, name: str, status: SkillS
 
 
 async def test_dedup_hit_becomes_revision_of_existing_active_skill() -> None:
-    from helix_agent.protocol.skill import SkillStatus
+    from expert_work.protocol.skill import SkillStatus
 
     store = InMemorySkillStore()
     existing_id = await _seed_existing(store, name="tabular-howto", status=SkillStatus.ACTIVE)
@@ -290,7 +290,7 @@ async def test_dedup_miss_creates_new_skill_as_before() -> None:
 
 
 async def test_dedup_hit_on_draft_target_keeps_draft_status() -> None:
-    from helix_agent.protocol.skill import SkillStatus
+    from expert_work.protocol.skill import SkillStatus
 
     store = InMemorySkillStore()
     existing_id = await _seed_existing(store, name="tabular-howto", status=SkillStatus.DRAFT)
@@ -322,7 +322,7 @@ async def test_persisted_version_carries_real_content_hash() -> None:
     default hash fails the U-21 drift recompute at load time (skill_seed /
     skill_view drop it): attached but unusable. The processor must hash the
     fragment it persists."""
-    from helix_agent.protocol.skill import compute_content_hash
+    from expert_work.protocol.skill import compute_content_hash
 
     store = InMemorySkillStore()
 
@@ -350,7 +350,7 @@ async def test_dedup_active_flip_invalidates_agent_cache() -> None:
     """Live pilot finding #8 — flipping an ACTIVE dedup target back to DRAFT
     changes the auto-attach set without a spec-version bump; the processor
     must drop the tenant's BuiltAgent cache entries."""
-    from helix_agent.protocol.skill import SkillStatus
+    from expert_work.protocol.skill import SkillStatus
 
     store = InMemorySkillStore()
     existing_id = await _seed_existing(store, name="tabular-howto", status=SkillStatus.ACTIVE)

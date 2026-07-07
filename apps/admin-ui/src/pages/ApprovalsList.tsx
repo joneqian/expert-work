@@ -349,10 +349,10 @@ export function ApprovalsList() {
                 alignItems: "center",
                 gap: 6,
                 padding: "4px 10px",
-                border: "1px solid var(--hx-border-default)",
+                border: "1px solid var(--ew-border-default)",
                 borderRadius: 6,
-                background: "var(--hx-surface-raised)",
-                color: "var(--hx-text-primary)",
+                background: "var(--ew-surface-raised)",
+                color: "var(--ew-text-primary)",
                 fontSize: 13,
                 cursor: loading ? "wait" : "pointer",
               }}
@@ -444,7 +444,7 @@ export function ApprovalsList() {
         data-testid="approvals-table"
       />
 
-      <p style={{ marginTop: 16, fontSize: 12, color: "var(--hx-text-tertiary)" }}>
+      <p style={{ marginTop: 16, fontSize: 12, color: "var(--ew-text-tertiary)" }}>
         {t("approvals_page.modify_hint")}
       </p>
     </div>

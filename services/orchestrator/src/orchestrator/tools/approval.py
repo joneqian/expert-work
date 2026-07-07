@@ -8,7 +8,7 @@ when it hits a run-time decision point it is unsure about, it calls
 
 The tool is **not dispatched like a normal tool**: ``tools_node``
 special-cases a call to it (by name) *before* the parallel staging,
-turning it into an :class:`~helix_agent.protocol.approval.ApprovalRequest`
+turning it into an :class:`~expert_work.protocol.approval.ApprovalRequest`
 and pausing the run (see ``graph_builder/_approval.py``). This class
 exists purely so the LLM sees ``ask_for_approval`` in its tool list;
 :meth:`call` is a defensive guard that should never run.

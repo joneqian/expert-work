@@ -121,7 +121,7 @@
 - **iron-proxy**（开源）：MITM egress proxy **自带 DNS server**（另一条路：proxy 自己解析不依赖 docker DNS）。
 - **E2B**：self-hosted IP tunneling through a **gateway VM**。
 
-**落点（方案=`/etc/hosts` 固定 IP）**：短期 `--add-host` 固定 IP = gVisor FAQ「use IPs」官方解（`--network=host` 破隔离 / `--link` 破 egress 管控均否决，无更好短期解）；proxy 静态 IP = egress 网关行业常态（Blaxel 产品化同款）；长期 K8s CoreDNS = 规模化真答案、亦我们 M1 既定方向。接缝 #592 已交付（`runtime_provider.extra_hosts`→`--add-host`→`/etc/hosts` + `HELIX_SANDBOX_EXTRA_HOSTS` fail-closed + supervisor 接线）；本轮（#待填）CI 在真 runc+runsc 端到端验证该路径（egress 网络固定 subnet + proxy 静态 IP + 沙箱经 `credential-proxy.internal` 主机名打 proxy），gate_49 由 xfail 转正；compose 落静态 IP 默认（`172.30.0.10`）。生产剩纯运维：选不撞的私网段 + 配 `HELIX_SANDBOX_EXTRA_HOSTS`。
+**落点（方案=`/etc/hosts` 固定 IP）**：短期 `--add-host` 固定 IP = gVisor FAQ「use IPs」官方解（`--network=host` 破隔离 / `--link` 破 egress 管控均否决，无更好短期解）；proxy 静态 IP = egress 网关行业常态（Blaxel 产品化同款）；长期 K8s CoreDNS = 规模化真答案、亦我们 M1 既定方向。接缝 #592 已交付（`runtime_provider.extra_hosts`→`--add-host`→`/etc/hosts` + `EXPERT_WORK_SANDBOX_EXTRA_HOSTS` fail-closed + supervisor 接线）；本轮（#待填）CI 在真 runc+runsc 端到端验证该路径（egress 网络固定 subnet + proxy 静态 IP + 沙箱经 `credential-proxy.internal` 主机名打 proxy），gate_49 由 xfail 转正；compose 落静态 IP 默认（`172.30.0.10`）。生产剩纯运维：选不撞的私网段 + 配 `EXPERT_WORK_SANDBOX_EXTRA_HOSTS`。
 
 ## Sources
 

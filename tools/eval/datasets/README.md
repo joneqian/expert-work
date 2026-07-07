@@ -24,7 +24,7 @@ datasets/
 
 ## Eval-set format
 
-See [`../helix_eval.py`](../helix_eval.py) and [`../README.md`](../README.md)
+See [`../expert_work_eval.py`](../expert_work_eval.py) and [`../README.md`](../README.md)
 for the full schema. In short — a `name` + a list of `cases`, each a
 `prompt` + machine-checkable `assertions`
 (`contains` / `not_contains` / `regex` / `equals`) + a `mock_response`
@@ -33,7 +33,7 @@ for the full schema. In short — a `name` + a list of `cases`, each a
 ## Running
 
 ```bash
-python tools/eval/helix_eval.py tools/eval/datasets/golden/<set>.yaml
+python tools/eval/expert_work_eval.py tools/eval/datasets/golden/<set>.yaml
 ```
 
 ## Versioning conventions

@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -59,7 +59,7 @@ async def test_valid_xfcc_authenticates_service(mtls_client: AsyncClient) -> Non
     response = await mtls_client.get(
         "/v1/agents",
         headers={
-            "X-Forwarded-Client-Cert": 'Subject="CN=orchestrator,O=helix";Hash=abc',
+            "X-Forwarded-Client-Cert": 'Subject="CN=orchestrator,O=expert_work";Hash=abc',
         },
     )
     assert response.status_code == 200
@@ -74,7 +74,7 @@ async def test_valid_xfcc_authenticates_service(mtls_client: AsyncClient) -> Non
 async def test_unknown_service_subject_returns_401(mtls_client: AsyncClient) -> None:
     response = await mtls_client.get(
         "/v1/agents",
-        headers={"X-Forwarded-Client-Cert": 'Subject="CN=evil,O=helix"'},
+        headers={"X-Forwarded-Client-Cert": 'Subject="CN=evil,O=expert_work"'},
     )
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "AUTH_INVALID_TOKEN"
@@ -163,7 +163,7 @@ async def test_xfcc_principal_carries_system_tenant(mtls_client: AsyncClient) ->
     response = await mtls_client.get(
         "/v1/agents",
         headers={
-            "X-Forwarded-Client-Cert": 'Subject="CN=sandbox-supervisor,O=helix"',
+            "X-Forwarded-Client-Cert": 'Subject="CN=sandbox-supervisor,O=expert_work"',
         },
     )
     assert response.status_code == 200

@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import Response
 
-from helix_agent.common.observability import metrics_text
+from expert_work.common.observability import metrics_text
 
 
 def build_metrics_router() -> APIRouter:

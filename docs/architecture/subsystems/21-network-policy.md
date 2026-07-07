@@ -203,9 +203,9 @@ class DenialReporter:
 **M0：显式代理（与 [11 Credential Proxy § 4.1 / § 9](./11-credential-proxy.md) 一致）**
 
 - iptables 规则：sandbox 出站**仅放行**到 `credential-proxy.internal:443`，其余出站默认 DROP
-- sandbox 内业务代码必须**显式 POST `/forward`** 给 Credential Proxy（含 `X-Helix-Upstream` 头声明上游），不再做透明 REDIRECT
+- sandbox 内业务代码必须**显式 POST `/forward`** 给 Credential Proxy（含 `X-Expert-Work-Upstream` 头声明上游），不再做透明 REDIRECT
 - proxy 再做：
-  - host header 校验（与 `X-Helix-Upstream` 比对）
+  - host header 校验（与 `X-Expert-Work-Upstream` 比对）
   - URL 解析后的 IP 二次校验（防 DNS rebinding）
   - 凭证注入
 - sandbox 内 `curl https://api.anthropic.com` 不会"自动被代理"——必须由 SDK / 业务代码主动走 proxy；不过 proxy 的请求一律 fail-closed
@@ -231,7 +231,7 @@ echo "nameserver 8.8.8.8" > /etc/resolv.conf            # 改 DNS（应失败：
 
 # 正向：仅显式 POST /forward 到 Credential Proxy 应通过
 curl -m 5 -X POST https://credential-proxy.internal/forward \
-     -H "X-Helix-Upstream: api.anthropic.com" \
+     -H "X-Expert-Work-Upstream: api.anthropic.com" \
      -H "Content-Type: application/json" -d '{...}'     # 必须 200
 ```
 
@@ -259,16 +259,16 @@ curl -m 5 -X POST https://credential-proxy.internal/forward \
 > 命名规范、日志必填字段、span attrs 强制约定遵循 [20 Observability § 5.1 / § 5.3](./20-observability.md)；
 > 本节只列本子系统特有的 metric / span / 日志事件。
 
-**Metrics**（OTel；强制 `helix_*` 前缀）：
-- `helix_network_egress_total{tenant, agent, decision}` — decision ∈ {allowed, denied}
-- `helix_network_egress_denied_total{reason}` — reason ∈ {blacklist, not_allowlist, protocol, dns_invalid}
-- `helix_network_egress_meta_attempt_total{tenant}` — 尝试访问元数据服务（**任意 > 0 都是 P0 告警**；与 [20 § 5.2](./20-observability.md) 一致）
-- `helix_network_dns_query_total{result}` — 受控 DNS 查询计数
-- `helix_network_dns_response_filtered_total{reason}` — 被过滤的 DNS 响应（rebinding / metadata IP）
-- `helix_network_egress_proxy_bypass_attempt_total` — 试图绕过 Credential Proxy（应恒为 0）
+**Metrics**（OTel；强制 `expert_work_*` 前缀）：
+- `expert_work_network_egress_total{tenant, agent, decision}` — decision ∈ {allowed, denied}
+- `expert_work_network_egress_denied_total{reason}` — reason ∈ {blacklist, not_allowlist, protocol, dns_invalid}
+- `expert_work_network_egress_meta_attempt_total{tenant}` — 尝试访问元数据服务（**任意 > 0 都是 P0 告警**；与 [20 § 5.2](./20-observability.md) 一致）
+- `expert_work_network_dns_query_total{result}` — 受控 DNS 查询计数
+- `expert_work_network_dns_response_filtered_total{reason}` — 被过滤的 DNS 响应（rebinding / metadata IP）
+- `expert_work_network_egress_proxy_bypass_attempt_total` — 试图绕过 Credential Proxy（应恒为 0）
 
-**Spans**（强制 `helix.network_policy.*` 前缀）：
-- `helix.network_policy.apply`、`helix.network_policy.dns_resolve`、`helix.network_policy.egress_connect`
+**Spans**（强制 `expert_work.network_policy.*` 前缀）：
+- `expert_work.network_policy.apply`、`expert_work.network_policy.dns_resolve`、`expert_work.network_policy.egress_connect`
 - 必填 attrs（遵循 [20 § 5.1](./20-observability.md)）：`tenant`, `agent`, `agent_version`, `session_id`
 - **注**：本子系统部分 network 操作（如 `apply` / `dns_resolve` 启动期）可能在 agent 上下文外发生；该场景下 `agent` / `agent_version` / `session_id` 可为 null，需在日志显式标注 `agent_context_absent=true`
 
@@ -279,8 +279,8 @@ curl -m 5 -X POST https://credential-proxy.internal/forward \
 - 「Top denied targets by tenant」「Metadata access attempts (24h)」「Egress allowed by allowlist hit rate」
 
 **告警**（P0/P1）：
-- P0：`helix_network_egress_meta_attempt_total > 0` 任意时间窗
-- P0：`helix_network_egress_proxy_bypass_attempt_total > 0`
+- P0：`expert_work_network_egress_meta_attempt_total > 0` 任意时间窗
+- P0：`expert_work_network_egress_proxy_bypass_attempt_total > 0`
 - P1：单 tenant 1 分钟 denied > 100（可能是 LLM 在试错或注入）
 
 ---

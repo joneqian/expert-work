@@ -198,7 +198,7 @@ export function SettingsServiceAccounts() {
           </>
         }
       />
-      <p style={{ fontSize: 12, color: "var(--hx-text-tertiary)", margin: "0 0 12px" }}>
+      <p style={{ fontSize: 12, color: "var(--ew-text-tertiary)", margin: "0 0 12px" }}>
         <Space size={6}>
           <KeyRound size={12} strokeWidth={1.75} />
           {t("settings_iam.sa_api_keys_hint")}

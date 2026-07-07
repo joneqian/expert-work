@@ -11,8 +11,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditAction, AuditQuery
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditAction, AuditQuery
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -24,7 +24,7 @@ _TENANT = DEFAULT_DEV_TENANT_ID
 _NIL_TENANT = UUID("00000000-0000-0000-0000-000000000000")
 
 _AGENT_YAML = """\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: alpha
@@ -128,12 +128,12 @@ async def test_metrics_endpoint_is_exempt(auth_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_x_helix_tenant_header_can_no_longer_impersonate(
+async def test_x_expert_work_tenant_header_can_no_longer_impersonate(
     auth_client: AsyncClient,
 ) -> None:
     """Regression: dev-mode header trust was retired in C.1."""
     bogus_tenant = "11111111-1111-1111-1111-111111111111"
-    response = await auth_client.get("/v1/agents", headers={"X-Helix-Tenant": bogus_tenant})
+    response = await auth_client.get("/v1/agents", headers={"X-Expert-Work-Tenant": bogus_tenant})
     assert response.status_code == 401
 
 

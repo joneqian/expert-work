@@ -13,8 +13,8 @@ from uuid import uuid4
 import pytest
 
 from control_plane.knowledge.recovery import KnowledgeIngestRecoveryWorker
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.protocol import DocumentStatus
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.protocol import DocumentStatus
 from orchestrator.llm import FakeEmbedder
 
 _DOC = b"# Handbook\n\nThe deductible is 500 dollars per year."

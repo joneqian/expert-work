@@ -31,9 +31,9 @@ from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import SkillStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditAction, AuditQuery, Role, SkillStatus, TenantPlan
+from expert_work.persistence import SkillStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditAction, AuditQuery, Role, SkillStatus, TenantPlan
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -567,11 +567,11 @@ async def test_platform_import_bad_zip_surfaces_reason(ctx: _Ctx) -> None:
 
 @pytest.mark.asyncio
 async def test_platform_import_external_format_skill_succeeds(ctx: _Ctx) -> None:
-    """A standard external SKILL.md (name + description only, NO helix:
+    """A standard external SKILL.md (name + description only, NO expert_work:
     namespace — the Anthropic/Vercel format the GitHub import targets) imports
-    cleanly. Regression: ``helix.version`` used to be mandatory, which made
+    cleanly. Regression: ``expert_work.version`` used to be mandatory, which made
     every external skill fail with ``invalid_frontmatter``."""
-    blob = _new_format_zip()  # name + description only, no helix block
+    blob = _new_format_zip()  # name + description only, no expert_work block
     resp = await ctx.client.post(
         "/v1/platform/skills/import",
         files={"file": ("foo.skill", blob, "application/zip")},

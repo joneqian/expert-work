@@ -28,13 +28,13 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from control_plane.uplift.threat_metrics import record_memory_blocked
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence.memory import MemoryStore, MemoryWritebackDLQ
-from helix_agent.persistence.memory.base import MemoryInjectionBlockedError
-from helix_agent.protocol import MemoryItem
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence.memory import MemoryStore, MemoryWritebackDLQ
+from expert_work.persistence.memory.base import MemoryInjectionBlockedError
+from expert_work.protocol import MemoryItem
 from orchestrator.llm import Embedder
 
-logger = logging.getLogger("helix.control_plane.memory.dlq_worker")
+logger = logging.getLogger("expert_work.control_plane.memory.dlq_worker")
 
 #: Each cycle drains up to this many rows. Bounded so the loop tail
 #: latency stays predictable.
@@ -51,16 +51,16 @@ _MAX_ATTEMPTS: int = 5
 _BACKOFF_SCHEDULE: tuple[int, ...] = (60, 5 * 60, 30 * 60, 2 * 3600, 6 * 3600)
 
 
-_cycle_errors = helix_counter(
-    "helix_control_plane_memory_dlq_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_memory_dlq_cycle_errors_total",
     "Memory DLQ worker cycles that ended in a caught exception.",
 )
-_dead_letters = helix_counter(
-    "helix_control_plane_memory_dlq_dead_letters_total",
+_dead_letters = expert_work_counter(
+    "expert_work_control_plane_memory_dlq_dead_letters_total",
     "DLQ rows abandoned because they exceeded the max retry attempts.",
 )
-_retries_succeeded = helix_counter(
-    "helix_control_plane_memory_dlq_retries_succeeded_total",
+_retries_succeeded = expert_work_counter(
+    "expert_work_control_plane_memory_dlq_retries_succeeded_total",
     "DLQ rows successfully retried and removed from the queue.",
 )
 
@@ -244,12 +244,12 @@ def _build_memory_items(row: DLQRowLike, vectors: Sequence[Sequence[float]]) -> 
     ]
 
 
-# ``DLQRow`` lives in helix-persistence; importing it here would create
+# ``DLQRow`` lives in expert-work-persistence; importing it here would create
 # a fragile cycle through the control-plane → persistence → control-plane
 # chain that runs at module load. The worker only ever consumes the
 # fields below, so a lightweight structural alias is enough.
 class DLQRowLike:  # pragma: no cover - protocol-only
-    """Structural duck-type for :class:`helix_agent.persistence.memory.DLQRow`."""
+    """Structural duck-type for :class:`expert_work.persistence.memory.DLQRow`."""
 
     id: object
     tenant_id: UUID

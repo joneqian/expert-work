@@ -22,8 +22,8 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import MemoryItem
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.protocol import MemoryItem
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import GraphRunner, ToolRegistry, build_react_graph
 from orchestrator.context import PruneResult, TrimResult
 from orchestrator.tools.registry import ToolSpec

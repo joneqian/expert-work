@@ -37,8 +37,8 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.protocol.skill import ReplaySource, SkillEvalResult
+from expert_work.persistence.skill.base import SkillStore
+from expert_work.protocol.skill import ReplaySource, SkillEvalResult
 from orchestrator.evolution.grounding import (
     CaseOutcome,
     GroundingConfig,

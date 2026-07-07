@@ -1,4 +1,4 @@
-# helix Harness Compliance (Stream SE — SE-15)
+# Expert Work Harness Compliance (Stream SE — SE-15)
 
 > Status: active · Owner: Stream SE · Lint: `tools/harness/check_harness_compliance.py`
 
@@ -12,10 +12,10 @@ that surround the model. The external research project
 **seven orthogonal, version-controlled components** and shows that
 evolving them (model frozen) is what moves benchmark pass rate.
 
-helix already decomposes a harness into those same seven components —
+Expert Work already decomposes a harness into those same seven components —
 but as a **declarative manifest** (`AgentSpec`) assembled into a
 `BuiltAgent` at runtime, not as a workspace file tree. This document is
-the helix-native restatement of that harness contract, plus the
+the expert-work-native restatement of that harness contract, plus the
 machine-checkable rules that keep manifests honest.
 
 This is a *spec + linter*, not a new subsystem. It does not change how
@@ -23,7 +23,7 @@ agents run; it raises the floor on how they are declared.
 
 ## The seven components ↔ `AgentSpec`
 
-| Harness component (external HARNESS.md v1.0) | helix `AgentSpec` location |
+| Harness component (external HARNESS.md v1.0) | Expert Work `AgentSpec` location |
 |---|---|
 | System Rules | `spec.system_prompt.template` + `spec.dynamic_context` |
 | Tool Descriptions | `spec.tools[]` (builtin / http / mcp) + builtin registry |
@@ -33,7 +33,7 @@ agents run; it raises the floor on how they are declared.
 | Sub-Agents | `spec.subagents[]` (`SubAgentSpec`) |
 | Long-Term Memory | `spec.memory.long_term` (`LongTermMemorySpec`) |
 
-The mapping is deliberate: helix does **not** copy the external
+The mapping is deliberate: Expert Work does **not** copy the external
 directory layout (AGENTS.md / `tools/*.yaml` / …). A declarative
 manifest is a different form factor; the *components* map, the file tree
 does not (Mini-ADR SE-A34).
@@ -85,13 +85,13 @@ workspace synced, so it runs there (Mini-ADR SE-A36).
 
 ## Profiles
 
-`tools/harness/helix_profile.yaml` adapts the lint to an agent *form
+`tools/harness/expert_work_profile.yaml` adapts the lint to an agent *form
 factor* — the same idea as the external `hermes.yaml` / `codex.yaml` /
 `openclaw.yaml` profiles (different forms require different components).
-helix has one form factor today (the declarative AgentSpec agent); the
+Expert Work has one form factor today (the declarative AgentSpec agent); the
 profile's `recommend` list drives the advisory R-prof warning. The
 external `validate_harness.py` (a file-tree auditor) is **not** wired
-into helix CI — it does not match the manifest form factor (Mini-ADR
+into Expert Work CI — it does not match the manifest form factor (Mini-ADR
 SE-A37).
 
 ## See also

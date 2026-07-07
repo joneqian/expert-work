@@ -13,7 +13,7 @@ Covers the path :class:`~orchestrator.llm.router.LLMRouter._handle_unauthorized`
 * Non-OAuth provider 401 → original :class:`LLMUnauthorizedError`
   re-raised (no refresh, no fallback — preserves the existing
   4xx semantics for static API-key providers)
-* ``helix_llm_auth_refresh_total{provider_key, result}`` counter
+* ``expert_work_llm_auth_refresh_total{provider_key, result}`` counter
   emits the correct ``success`` / ``fail`` label
 
 See [STREAM-L-DESIGN § 3.L8](../../../../docs/streams/STREAM-L-DESIGN.md)
@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from helix_agent.runtime.middleware import (
+from expert_work.runtime.middleware import (
     LLMAuthError,
     LLMClientError,
     LLMUnauthorizedError,
@@ -306,11 +306,11 @@ def test_unauthorized_error_is_client_error_subclass() -> None:
 
 @pytest.mark.asyncio
 async def test_refresh_success_counter_increments() -> None:
-    """``helix_llm_auth_refresh_total{provider_key=..., result=success}``
+    """``expert_work_llm_auth_refresh_total{provider_key=..., result=success}``
     increments on the refresh + retry success path."""
     from prometheus_client import REGISTRY
 
-    metric = "helix_llm_auth_refresh_total"
+    metric = "expert_work_llm_auth_refresh_total"
     labels = {"provider_key": "oauth:counter-success", "result": "success"}
     before = REGISTRY.get_sample_value(metric, labels=labels) or 0.0
 
@@ -328,12 +328,12 @@ async def test_refresh_success_counter_increments() -> None:
 
 @pytest.mark.asyncio
 async def test_refresh_failure_counter_increments() -> None:
-    """``helix_llm_auth_refresh_total{provider_key=..., result=fail}``
+    """``expert_work_llm_auth_refresh_total{provider_key=..., result=fail}``
     increments on both the refresh-returns-False path and the
     retry-still-401 path."""
     from prometheus_client import REGISTRY
 
-    metric = "helix_llm_auth_refresh_total"
+    metric = "expert_work_llm_auth_refresh_total"
     labels = {"provider_key": "oauth:counter-fail", "result": "fail"}
     before = REGISTRY.get_sample_value(metric, labels=labels) or 0.0
 

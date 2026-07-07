@@ -13,7 +13,7 @@ Wiring (in :func:`control_plane.app.create_app`):
 * Stopped via :meth:`stop` from the ``finally`` branch.
 * Per-cycle errors are caught and logged — the reaper never crashes
   the process — and increment the
-  ``helix_control_plane_quota_reaper_cycle_errors_total`` counter so
+  ``expert_work_control_plane_quota_reaper_cycle_errors_total`` counter so
   alerting fires on a sustained failure rate.
 """
 
@@ -23,17 +23,17 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence.quota import TokenReservationStore
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.protocol import TokenReservationRecord
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence.quota import TokenReservationStore
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.protocol import TokenReservationRecord
 
-logger = logging.getLogger("helix.control_plane.quota.reaper")
+logger = logging.getLogger("expert_work.control_plane.quota.reaper")
 
 # Periodic-loop failures. Monotonic — alerting keys off ``rate(...)`` to
 # distinguish a one-off blip from a reaper that is wedged every cycle.
-_reaper_cycle_errors = helix_counter(
-    "helix_control_plane_quota_reaper_cycle_errors_total",
+_reaper_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_quota_reaper_cycle_errors_total",
     "Reservation reaper cycles that ended in a caught exception.",
 )
 

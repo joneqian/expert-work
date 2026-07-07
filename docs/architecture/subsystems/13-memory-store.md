@@ -128,7 +128,7 @@ CREATE INDEX memory_write_queue_dispatch ON memory_write_queue (status, next_att
 ### 3.2 Pydantic Schema
 
 ```python
-# packages/helix-protocol/src/helix/protocol/memory.py
+# packages/expert-work-protocol/src/Expert Work/protocol/memory.py
 from pydantic import BaseModel, Field
 from typing import Literal, Any
 from datetime import datetime
@@ -201,11 +201,11 @@ class SearchQuery(BaseModel):
 
 ### 4.1 Python SDK（业务侧使用）
 
-> **M0 网络路径**：`MemoryClient` 在 sandbox 内不直连 DB / [10 LLM Gateway]；所有方法实际通过 sandbox supervisor 暴露的 unix domain socket（路径如 `/run/helix/memory.sock`）转发到 orchestrator 进程，由 orchestrator 端的 MemoryService 完成 PII redact + embed + insert/search。这一约束由 [21 网络策略](./21-network-policy.md) 强制（sandbox egress 不放行 DB / LLM Gateway 直连）。
+> **M0 网络路径**：`MemoryClient` 在 sandbox 内不直连 DB / [10 LLM Gateway]；所有方法实际通过 sandbox supervisor 暴露的 unix domain socket（路径如 `/run/Expert Work/memory.sock`）转发到 orchestrator 进程，由 orchestrator 端的 MemoryService 完成 PII redact + embed + insert/search。这一约束由 [21 网络策略](./21-network-policy.md) 强制（sandbox egress 不放行 DB / LLM Gateway 直连）。
 
 ```python
-# packages/helix-sdk/src/helix/sdk/memory.py
-from helix.protocol.memory import MemoryItem, SearchQuery, MemoryItemRecord, Layer
+# packages/expert-work-sdk/src/Expert Work/sdk/memory.py
+from expert_work.protocol.memory import MemoryItem, SearchQuery, MemoryItemRecord, Layer
 
 class MemoryClient:
     async def put(
@@ -242,7 +242,7 @@ class MemoryClient:
 业务侧**无需调用**，由 GraphBuilder 注入 PostgresSaver；运行时自动持久化每个 node 的 state。
 
 ```python
-# packages/helix-runtime/src/helix/runtime/checkpointer/factory.py
+# packages/expert-work-runtime/src/Expert Work/runtime/checkpointer/factory.py
 from langgraph.checkpoint.postgres import PostgresSaver
 
 def build_checkpointer(spec: AgentSpec) -> PostgresSaver:
@@ -389,34 +389,34 @@ async with db.connect() as conn:
 ## 7. 可观测性
 
 > 日志完整字段遵循 [20 § 5.3](./20-observability.md)，此处仅展示子系统专属字段。
-> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `helix_*` 前缀（snake_case），span 统一 `helix.{component}.{action}`。
+> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `expert_work_*` 前缀（snake_case），span 统一 `expert_work.{component}.{action}`。
 
 ### Prometheus metrics
 
 ```
-helix_memory_put_total{tenant,agent,layer,status}
-helix_memory_search_total{tenant,agent,layer,status}
-helix_memory_search_duration_seconds{tenant,agent}                       histogram
-helix_memory_search_score_distribution{tenant,agent}                     histogram (0~1)
-helix_memory_write_queue_depth{tenant}                                   gauge
-helix_memory_write_queue_failures_total{tenant,reason}
-helix_memory_embed_calls_total{model,status}
-helix_memory_items_total{tenant,agent,layer}                             gauge (定时刷新)
-helix_memory_storage_bytes{tenant}                                       gauge
-helix_memory_reembed_progress{tenant,model_from,model_to}                gauge 0~1
+expert_work_memory_put_total{tenant,agent,layer,status}
+expert_work_memory_search_total{tenant,agent,layer,status}
+expert_work_memory_search_duration_seconds{tenant,agent}                       histogram
+expert_work_memory_search_score_distribution{tenant,agent}                     histogram (0~1)
+expert_work_memory_write_queue_depth{tenant}                                   gauge
+expert_work_memory_write_queue_failures_total{tenant,reason}
+expert_work_memory_embed_calls_total{model,status}
+expert_work_memory_items_total{tenant,agent,layer}                             gauge (定时刷新)
+expert_work_memory_storage_bytes{tenant}                                       gauge
+expert_work_memory_reembed_progress{tenant,model_from,model_to}                gauge 0~1
 ```
 
 ### OTel spans
 
 ```
-helix.memory.put              attrs: tenant, agent, layer, key, session_scope
-helix.memory.search           attrs: tenant, agent, layer, top_k, hits
-├── span: helix.memory.embed  → helix.llm_gateway.embed
-└── span: helix.memory.db_query  attrs: rows_returned, query_duration_seconds
+expert_work.memory.put              attrs: tenant, agent, layer, key, session_scope
+expert_work.memory.search           attrs: tenant, agent, layer, top_k, hits
+├── span: expert_work.memory.embed  → expert_work.llm_gateway.embed
+└── span: expert_work.memory.db_query  attrs: rows_returned, query_duration_seconds
 
-helix.memory.flush_buffer     attrs: bucket_size
-└── span: helix.memory.batch_embed
-└── span: helix.memory.batch_insert
+expert_work.memory.flush_buffer     attrs: bucket_size
+└── span: expert_work.memory.batch_embed
+└── span: expert_work.memory.batch_insert
 ```
 
 ### 关键告警

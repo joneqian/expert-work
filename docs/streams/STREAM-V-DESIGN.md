@@ -1,6 +1,6 @@
 # Stream V — MCP Server 管理（租户自助注册远程 server + agent 表单按 server 选择）设计先行
 
-> MCP 方向见 [memory:project_mcp_direction_client_only]:helix 是 **MCP client**,消费外部 MCP 生态(GitHub / Postgres / Linear / Notion),不自建 server。本 Stream 补齐"运行时齐全、管理面全缺"的能力缺口——从"配置一个 MCP server"到"在 agent 里勾选它"这条链路,目前**一格 UI 都没有**。
+> MCP 方向见 [memory:project_mcp_direction_client_only]:Expert Work 是 **MCP client**,消费外部 MCP 生态(GitHub / Postgres / Linear / Notion),不自建 server。本 Stream 补齐"运行时齐全、管理面全缺"的能力缺口——从"配置一个 MCP server"到"在 agent 里勾选它"这条链路,目前**一格 UI 都没有**。
 
 ## 0. 背景 / 缺口（dogfood 实测发现 2026-06-03）
 
@@ -27,7 +27,7 @@
 
 - **V-1 租户 MCP server 注册表(新表 `tenant_mcp_server`)**:tenant-scoped + RLS。列 `id` UUID PK / `tenant_id` UUID(RLS)/ `name`(租户内唯一,= manifest 引用的 server 名)/ `transport`(`sse`|`streamable_http`,**拒 stdio**——stdio 起子进程是 RCE,只能 ops 配)/ `url` / `auth_type`(`none`|`bearer`)/ `token_secret_ref`(`secret://...`,bearer 时必填)/ `timeout_s`(默认 30)/ `enabled` Bool / `created_at` / `created_by`。**token 明文绝不进此表**——走 encrypted secret store(Stream T 已落地),表里只存 ref。persistence store `base/sql/memory` 三件套,镜像 `SqlPlatformSecretStore` 模式。
 
-- **V-2 token 走 encrypted secret store**:注册/换 token 时 body `token: SecretStr` → `secret_store.put("helix-agent/tenant/<tid>/mcp/<name>", value)` → 表里存返回的 `secret://` ref([memory:project_web_paste_key_direction] 同款路径,与 LLM key web 粘贴一致)。换 token = secret 新版本,ref 字符串不变。运行时 `secret_store.get(parse_secret_ref(ref))` 解析,注入 bearer header(沿用既有 `_RemoteMCPClientBase.resolved_headers`,U-11 token 不进 dataclass repr)。
+- **V-2 token 走 encrypted secret store**:注册/换 token 时 body `token: SecretStr` → `secret_store.put("expert-work/tenant/<tid>/mcp/<name>", value)` → 表里存返回的 `secret://` ref([memory:project_web_paste_key_direction] 同款路径,与 LLM key web 粘贴一致)。换 token = secret 新版本,ref 字符串不变。运行时 `secret_store.get(parse_secret_ref(ref))` 解析,注入 bearer header(沿用既有 `_RemoteMCPClientBase.resolved_headers`,U-11 token 不进 dataclass repr)。
 
 - **V-3 manifest `MCPToolSpec.servers` 字段**:
   ```python
@@ -42,7 +42,7 @@
   - **平台 stdio pool**(ops JSON):进程级共享不变,按 `mcp_allowlist` 过滤。
   - **租户远程 pool(新)**:agent build 时从 `tenant_mcp_server` 注册表读本租户 `enabled` 远程 server → 解析 `token_secret_ref` 注入 header → 建/缓存该租户 `MCPClient`(沿用 `MCPServerPool`,N=5 cap,U-13 熔断)。
   - 取并集后按 agent `MCPToolSpec.servers`(空=全部)过滤 server,再按 `allow_tools` 过滤工具名。
-  - 跨界解耦:沿用 `mcp_allowlist_provider` 闭包先例(orchestrator **不** import helix-common);新增 `tenant_mcp_servers_provider: Callable[[str], Awaitable[Sequence[ResolvedMCPServer]]]`,control-plane 侧绑定 registry + secret_store 解析成已注入 header 的配置。
+  - 跨界解耦:沿用 `mcp_allowlist_provider` 闭包先例(orchestrator **不** import expert-work-common);新增 `tenant_mcp_servers_provider: Callable[[str], Awaitable[Sequence[ResolvedMCPServer]]]`,control-plane 侧绑定 registry + secret_store 解析成已注入 header 的配置。
 
 - **V-5 注册 API + 同步探测**:`POST /v1/mcp-servers`(tenant admin,`require("...","write")`)收 `{name, transport, url, auth_type, token?}` → put token → **注册时同步探测**:连一次 + `list_tools`,失败返 422 带原因(**不写库**),成功才落表(避免存进一堆连不上的死 server)。`GET`(列表,不返 token)/ `PATCH`(改 url/token/enabled)/ `DELETE`(删,**先查 agent manifest 引用**,有则 409 列出引用者)。
 
@@ -96,7 +96,7 @@
 8. **协议签名 sweep 扫 tools/eval**([memory:reference_protocol_sweep_includes_tools_eval]):`MCPToolSpec` 改字段、provider 闭包改签名,doubles/fixtures 全仓 grep 旧形态应为空。
 9. **harness 拒 credentials/secrets 路径**([memory:harness-denies-credentials-paths]):新文件别用 "credentials"/"secrets" 命名(否则 Read/Edit/grep 受限);token util 命名避开。
 
-## 5. Verification（本 Stream 完成 = 租户在 helix 后台自助接入远程 MCP，agent 表单按 server 勾选）
+## 5. Verification（本 Stream 完成 = 租户在 Expert Work 后台自助接入远程 MCP，agent 表单按 server 勾选）
 
 1. **V-B**:`tenant_mcp_server` CRUD round-trip;RLS 跨租户不可见;SSRF util 拒 `http://169.254.169.254`/`http://localhost`/RFC1918。
 2. **V-C**:`POST /v1/mcp-servers {name,url,auth_type:bearer,token}` → 探测成功落表、DB 只有 `secret://` ref(无明文)、审计无 token;探测失败 → 422 不落库;非 admin 403;删被 agent 引用 → 409 列引用者;token 不在日志出现。

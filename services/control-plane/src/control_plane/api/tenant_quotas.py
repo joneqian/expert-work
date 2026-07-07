@@ -15,12 +15,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from control_plane.api._authz import require
 from control_plane.audit import emit
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.quota import TenantQuotaStore
-from helix_agent.protocol import AuditAction, Principal, TenantQuotaPatch
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.quota import TenantQuotaStore
+from expert_work.protocol import AuditAction, Principal, TenantQuotaPatch
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.api.tenant_quotas")
+logger = logging.getLogger("expert_work.control_plane.api.tenant_quotas")
 
 
 def _get_repo(request: Request) -> TenantQuotaStore:

@@ -1,4 +1,4 @@
-# Helix-Agent local dev / dogfood stack (Stream A.3).
+# Expert Work local dev / dogfood stack (Stream A.3).
 #
 # Brings up Postgres 16 with pgvector + pg_stat_statements behind PgBouncer
 # in transaction-pooling mode (per subsystems/23-postgres-scalability § 9 M0).
@@ -16,12 +16,12 @@
 # and flips the nginx upstream (infra/nginx/conf.d/control-plane-upstream.conf).
 x-control-plane-base: &control-plane-base
   profiles: ["full"]
-  image: helix-control-plane:${HELIX_CONTROL_PLANE_TAG:-dev}
+  image: expert-work-control-plane:${EXPERT_WORK_CONTROL_PLANE_TAG:-dev}
   environment:
-    HELIX_AGENT_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@pgbouncer:6432/${HELIX_DB_NAME:-helix_agent_dev}
+    EXPERT_WORK_DB_DSN: postgresql+asyncpg://${EXPERT_WORK_DB_USER:-expert_work}:${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}@pgbouncer:6432/${EXPERT_WORK_DB_NAME:-expert_work_dev}
     # ADR B-6: durable Postgres stores. The ``migrate`` one-shot service
     # runs the Alembic migrations first (depends_on below).
-    HELIX_AGENT_STORE_BACKEND: sql
+    EXPERT_WORK_STORE_BACKEND: sql
     # LangGraph conversation checkpointer. Default postgres so the per-user
     # persistent agent (conversation + memory + workspace) keeps its history
     # across restarts — the in-memory saver loses every thread on restart,
@@ -29,104 +29,104 @@ x-control-plane-base: &control-plane-base
     # self-creates its tables (saver.setup()); it connects DIRECT to postgres:5432
     # (NOT pgbouncer — transaction pooling breaks LangGraph's prepared statements).
     # Override to ``memory`` in infra/.env for a throwaway single-process stack.
-    HELIX_AGENT_CHECKPOINTER_BACKEND: ${HELIX_AGENT_CHECKPOINTER_BACKEND:-postgres}
-    HELIX_AGENT_CHECKPOINTER_DSN: postgresql://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+    EXPERT_WORK_CHECKPOINTER_BACKEND: ${EXPERT_WORK_CHECKPOINTER_BACKEND:-postgres}
+    EXPERT_WORK_CHECKPOINTER_DSN: postgresql://${EXPERT_WORK_DB_USER:-expert_work}:${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}@postgres:5432/${EXPERT_WORK_DB_NAME:-expert_work_dev}
     # Tool-output-budget kill switch (#859/#860/#861) — default on. Set
-    # HELIX_TOOL_OUTPUT_BUDGET=0 in infra/.env to revert the whole feature
+    # EXPERT_WORK_TOOL_OUTPUT_BUDGET=0 in infra/.env to revert the whole feature
     # (generalized externalization + persist floor + CM-12 prune) platform-wide.
-    HELIX_TOOL_OUTPUT_BUDGET: ${HELIX_TOOL_OUTPUT_BUDGET:-1}
-    HELIX_AGENT_QUOTA_REDIS_URL: redis://redis:6379/0
-    HELIX_AGENT_SANDBOX_SUPERVISOR_URL: http://sandbox-supervisor:8000
+    EXPERT_WORK_TOOL_OUTPUT_BUDGET: ${EXPERT_WORK_TOOL_OUTPUT_BUDGET:-1}
+    EXPERT_WORK_QUOTA_REDIS_URL: redis://redis:6379/0
+    EXPERT_WORK_SANDBOX_SUPERVISOR_URL: http://sandbox-supervisor:8000
     # Trace export (A.8) — reached only when the observability profile
     # is also up; the SDK buffers + drops gracefully when it is not.
-    HELIX_AGENT_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+    EXPERT_WORK_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
     # Mini-ADR OBS-L1 — Langfuse agent traces. Empty by default → the
     # control plane keeps the M0 recording stub (no push). Set all three in
     # infra/.env to activate; langfuse-web is reachable in-compose by name.
     # PII masking defaults on (fail-safe); set false only to debug raw prompts.
-    HELIX_AGENT_LANGFUSE_HOST: ${HELIX_AGENT_LANGFUSE_HOST:-}
-    HELIX_AGENT_LANGFUSE_PUBLIC_KEY: ${HELIX_AGENT_LANGFUSE_PUBLIC_KEY:-}
-    HELIX_AGENT_LANGFUSE_SECRET_KEY: ${HELIX_AGENT_LANGFUSE_SECRET_KEY:-}
-    HELIX_AGENT_LANGFUSE_PII_MASKING_ENABLED: ${HELIX_AGENT_LANGFUSE_PII_MASKING_ENABLED:-true}
+    EXPERT_WORK_LANGFUSE_HOST: ${EXPERT_WORK_LANGFUSE_HOST:-}
+    EXPERT_WORK_LANGFUSE_PUBLIC_KEY: ${EXPERT_WORK_LANGFUSE_PUBLIC_KEY:-}
+    EXPERT_WORK_LANGFUSE_SECRET_KEY: ${EXPERT_WORK_LANGFUSE_SECRET_KEY:-}
+    EXPERT_WORK_LANGFUSE_PII_MASKING_ENABLED: ${EXPERT_WORK_LANGFUSE_PII_MASKING_ENABLED:-true}
     # Stream P (Mini-ADR P-13) — local_dev SecretStore seed. Resolves the
-    # canonical agent's `secret://helix-agent/dev/llm/...` api_key_ref to the
+    # canonical agent's `secret://expert-work/dev/llm/...` api_key_ref to the
     # real key a dev pastes into infra/dev-keys/dev-llm-keys.local (git-
     # ignored). Missing file → empty store → agent build fails loud only when
     # a key is actually requested. See infra/dev-keys/dev-llm-keys.example.
-    HELIX_AGENT_SECRET_STORE_ENV_FILE: /run/dev-keys/dev-llm-keys.local
+    EXPERT_WORK_SECRET_STORE_ENV_FILE: /run/dev-keys/dev-llm-keys.local
     # Stream Q — encrypted-vault backend. Default keeps the file-backed local_dev
     # store; set these to paste keys in the web UI (encrypted at rest). The KEK
     # is env-passthrough (never committed): export a 32-byte base64 key locally.
-    HELIX_AGENT_SECRET_STORE_BACKEND: ${HELIX_AGENT_SECRET_STORE_BACKEND:-local_dev}
-    HELIX_AGENT_SECRET_ENCRYPTION_KEY: ${HELIX_AGENT_SECRET_ENCRYPTION_KEY:-}
+    EXPERT_WORK_SECRET_STORE_BACKEND: ${EXPERT_WORK_SECRET_STORE_BACKEND:-local_dev}
+    EXPERT_WORK_SECRET_ENCRYPTION_KEY: ${EXPERT_WORK_SECRET_ENCRYPTION_KEY:-}
     # Stream R W4 — member onboarding via the live Keycloak Admin API. Default
     # OFF so the `full`-only stack (and CI integration without the `auth`
     # profile) keeps the in-process fake client. Set true in infra/.env to
     # provision real accounts; the admin client secret is NOT passed here — it
     # is loaded from the encrypted vault, seeded once via
     # `python -m control_plane.seed_keycloak_secret`. See getting-started.md.
-    HELIX_AGENT_KEYCLOAK_ENABLED: ${HELIX_AGENT_KEYCLOAK_ENABLED:-false}
+    EXPERT_WORK_KEYCLOAK_ENABLED: ${EXPERT_WORK_KEYCLOAK_ENABLED:-false}
     # Stream ACCT — first-run setup wizard (POST /v1/setup) + email-first-login.
     # dev parity with prod: no auto-bootstrap; the first system_admin is created
     # via the /setup wizard. The token gates that unauthenticated endpoint — dev
     # ships a known fallback so `make dev-up` → /setup works zero-config; override
     # in infra/.env for a real one. BOOTSTRAP_ADMIN_EMAIL is the alt path
     # (email-first-login auto-promote); empty = off.
-    HELIX_AGENT_SETUP_TOKEN: ${HELIX_AGENT_SETUP_TOKEN:-dev-setup-token}
-    HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL: ${HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL:-}
+    EXPERT_WORK_SETUP_TOKEN: ${EXPERT_WORK_SETUP_TOKEN:-dev-setup-token}
+    EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL: ${EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL:-}
     # 11.4/11.5 — live eval worker. OFF by default (the enqueue API still
     # queues runs; nothing drains them). Set true in infra/.env to drain the
     # adversarial / trace_eval suites against a real eval agent. The eval
     # model must be a provider this tenant has a platform credential for
     # (else the build fails → job ERROR). Interval is short here for E2E.
-    HELIX_AGENT_ENABLE_EVAL_WORKER: ${HELIX_AGENT_ENABLE_EVAL_WORKER:-false}
-    HELIX_AGENT_EVAL_WORKER_INTERVAL_S: ${HELIX_AGENT_EVAL_WORKER_INTERVAL_S:-300}
-    HELIX_AGENT_EVAL_AGENT_PROVIDER: ${HELIX_AGENT_EVAL_AGENT_PROVIDER:-anthropic}
-    HELIX_AGENT_EVAL_AGENT_MODEL: ${HELIX_AGENT_EVAL_AGENT_MODEL:-claude-sonnet-4-6}
+    EXPERT_WORK_ENABLE_EVAL_WORKER: ${EXPERT_WORK_ENABLE_EVAL_WORKER:-false}
+    EXPERT_WORK_EVAL_WORKER_INTERVAL_S: ${EXPERT_WORK_EVAL_WORKER_INTERVAL_S:-300}
+    EXPERT_WORK_EVAL_AGENT_PROVIDER: ${EXPERT_WORK_EVAL_AGENT_PROVIDER:-anthropic}
+    EXPERT_WORK_EVAL_AGENT_MODEL: ${EXPERT_WORK_EVAL_AGENT_MODEL:-claude-sonnet-4-6}
     # 4.4 — Layer B skill-evolution flywheel. OFF by default. Set true in
     # infra/.env to drain curation candidates: distil a DRAFT skill (aux LLM)
     # → real graph replay baseline-vs-treatment → grounded verdict → promote.
     # The aux provider must be one this tenant has a platform credential for.
     # Intervals are short here for E2E (curation feeds the evolution worker).
-    HELIX_AGENT_ENABLE_SKILL_EVOLUTION_WORKER: ${HELIX_AGENT_ENABLE_SKILL_EVOLUTION_WORKER:-false}
-    HELIX_AGENT_ENABLE_SKILL_ROLLBACK_MONITOR: ${HELIX_AGENT_ENABLE_SKILL_ROLLBACK_MONITOR:-false}
-    HELIX_AGENT_SKILL_EVOLUTION_WORKER_INTERVAL_S: ${HELIX_AGENT_SKILL_EVOLUTION_WORKER_INTERVAL_S:-600}
-    HELIX_AGENT_CURATION_WORKER_INTERVAL_S: ${HELIX_AGENT_CURATION_WORKER_INTERVAL_S:-300}
-    HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER: ${HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER:-anthropic}
-    HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL: ${HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL:-claude-sonnet-4-6}
+    EXPERT_WORK_ENABLE_SKILL_EVOLUTION_WORKER: ${EXPERT_WORK_ENABLE_SKILL_EVOLUTION_WORKER:-false}
+    EXPERT_WORK_ENABLE_SKILL_ROLLBACK_MONITOR: ${EXPERT_WORK_ENABLE_SKILL_ROLLBACK_MONITOR:-false}
+    EXPERT_WORK_SKILL_EVOLUTION_WORKER_INTERVAL_S: ${EXPERT_WORK_SKILL_EVOLUTION_WORKER_INTERVAL_S:-600}
+    EXPERT_WORK_CURATION_WORKER_INTERVAL_S: ${EXPERT_WORK_CURATION_WORKER_INTERVAL_S:-300}
+    EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER: ${EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER:-anthropic}
+    EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL: ${EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL:-claude-sonnet-4-6}
     # Stream RT-5 — production quality monitoring. OFF by default. Set true in
     # infra/.env to start the sampler + drift worker: they sample finished runs,
     # LLM-judge them (the judge model must be a provider this tenant has a
     # platform credential for), persist a per-agent quality series, and raise a
     # quality.drift webhook on regressions. Sampling rate is a percent (5 =
     # sample 5% of runs); set 100 + short intervals for a live E2E check.
-    HELIX_AGENT_ENABLE_QUALITY_MONITOR: ${HELIX_AGENT_ENABLE_QUALITY_MONITOR:-false}
-    HELIX_AGENT_QUALITY_MONITOR_INTERVAL_S: ${HELIX_AGENT_QUALITY_MONITOR_INTERVAL_S:-300}
-    HELIX_AGENT_QUALITY_SAMPLING_RATE_PCT: ${HELIX_AGENT_QUALITY_SAMPLING_RATE_PCT:-5}
-    HELIX_AGENT_QUALITY_DAILY_CAP: ${HELIX_AGENT_QUALITY_DAILY_CAP:-500}
-    HELIX_AGENT_QUALITY_MONITOR_BATCH_SIZE: ${HELIX_AGENT_QUALITY_MONITOR_BATCH_SIZE:-200}
-    HELIX_AGENT_QUALITY_JUDGE_PROVIDER: ${HELIX_AGENT_QUALITY_JUDGE_PROVIDER:-anthropic}
-    HELIX_AGENT_QUALITY_JUDGE_MODEL: ${HELIX_AGENT_QUALITY_JUDGE_MODEL:-claude-haiku-4-5-20251001}
-    HELIX_AGENT_QUALITY_DRIFT_INTERVAL_S: ${HELIX_AGENT_QUALITY_DRIFT_INTERVAL_S:-3600}
-    HELIX_AGENT_QUALITY_DRIFT_RECENT_WINDOW_H: ${HELIX_AGENT_QUALITY_DRIFT_RECENT_WINDOW_H:-24}
-    HELIX_AGENT_QUALITY_DRIFT_BASELINE_WINDOW_H: ${HELIX_AGENT_QUALITY_DRIFT_BASELINE_WINDOW_H:-168}
-    HELIX_AGENT_QUALITY_DRIFT_MIN_SAMPLES: ${HELIX_AGENT_QUALITY_DRIFT_MIN_SAMPLES:-10}
-    HELIX_AGENT_QUALITY_DRIFT_THRESHOLD: ${HELIX_AGENT_QUALITY_DRIFT_THRESHOLD:-0.15}
-    HELIX_AGENT_QUALITY_DRIFT_COOLDOWN_H: ${HELIX_AGENT_QUALITY_DRIFT_COOLDOWN_H:-24}
+    EXPERT_WORK_ENABLE_QUALITY_MONITOR: ${EXPERT_WORK_ENABLE_QUALITY_MONITOR:-false}
+    EXPERT_WORK_QUALITY_MONITOR_INTERVAL_S: ${EXPERT_WORK_QUALITY_MONITOR_INTERVAL_S:-300}
+    EXPERT_WORK_QUALITY_SAMPLING_RATE_PCT: ${EXPERT_WORK_QUALITY_SAMPLING_RATE_PCT:-5}
+    EXPERT_WORK_QUALITY_DAILY_CAP: ${EXPERT_WORK_QUALITY_DAILY_CAP:-500}
+    EXPERT_WORK_QUALITY_MONITOR_BATCH_SIZE: ${EXPERT_WORK_QUALITY_MONITOR_BATCH_SIZE:-200}
+    EXPERT_WORK_QUALITY_JUDGE_PROVIDER: ${EXPERT_WORK_QUALITY_JUDGE_PROVIDER:-anthropic}
+    EXPERT_WORK_QUALITY_JUDGE_MODEL: ${EXPERT_WORK_QUALITY_JUDGE_MODEL:-claude-haiku-4-5-20251001}
+    EXPERT_WORK_QUALITY_DRIFT_INTERVAL_S: ${EXPERT_WORK_QUALITY_DRIFT_INTERVAL_S:-3600}
+    EXPERT_WORK_QUALITY_DRIFT_RECENT_WINDOW_H: ${EXPERT_WORK_QUALITY_DRIFT_RECENT_WINDOW_H:-24}
+    EXPERT_WORK_QUALITY_DRIFT_BASELINE_WINDOW_H: ${EXPERT_WORK_QUALITY_DRIFT_BASELINE_WINDOW_H:-168}
+    EXPERT_WORK_QUALITY_DRIFT_MIN_SAMPLES: ${EXPERT_WORK_QUALITY_DRIFT_MIN_SAMPLES:-10}
+    EXPERT_WORK_QUALITY_DRIFT_THRESHOLD: ${EXPERT_WORK_QUALITY_DRIFT_THRESHOLD:-0.15}
+    EXPERT_WORK_QUALITY_DRIFT_COOLDOWN_H: ${EXPERT_WORK_QUALITY_DRIFT_COOLDOWN_H:-24}
     # Stream MCP-OAUTH — per-user OAuth connectors. The redirect URI must point
     # at the admin-ui (or independent client) callback page, not the backend
     # endpoint; unset → the initiate endpoint returns 503. The catalog seed file
     # (shipped in the image at /app/configs) env-templates oauth2 connector
     # client IDs; unset → no seeding. The allowlist is a JSON array for
     # independent (non-loopback) clients; loopback redirects are allowed by
-    # default. The MCP_OAUTH_*_CLIENT_ID vars (no HELIX_AGENT_ prefix) resolve
+    # default. The MCP_OAUTH_*_CLIENT_ID vars (no EXPERT_WORK_ prefix) resolve
     # the seed file's ${...} placeholders — set per connector in infra/.env.
     # The allowlist is a JSON array (pydantic decodes list[str] env as JSON, as
     # with OIDC_AUDIENCE); the ``[]`` default is the empty array — an empty
     # string would fail JSON decode and crash startup.
-    HELIX_AGENT_MCP_OAUTH_REDIRECT_URI: ${HELIX_AGENT_MCP_OAUTH_REDIRECT_URI:-}
-    HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST: ${HELIX_AGENT_MCP_OAUTH_REDIRECT_ALLOWLIST:-[]}
-    HELIX_AGENT_MCP_CATALOG_SEED_FILE: ${HELIX_AGENT_MCP_CATALOG_SEED_FILE:-}
+    EXPERT_WORK_MCP_OAUTH_REDIRECT_URI: ${EXPERT_WORK_MCP_OAUTH_REDIRECT_URI:-}
+    EXPERT_WORK_MCP_OAUTH_REDIRECT_ALLOWLIST: ${EXPERT_WORK_MCP_OAUTH_REDIRECT_ALLOWLIST:-[]}
+    EXPERT_WORK_MCP_CATALOG_SEED_FILE: ${EXPERT_WORK_MCP_CATALOG_SEED_FILE:-}
     MCP_OAUTH_GITHUB_CLIENT_ID: ${MCP_OAUTH_GITHUB_CLIENT_ID:-}
     # Premium web search via Tavily's official remote MCP server is registered
     # through the admin-UI MCP catalog (Settings → MCP catalog → new connector:
@@ -135,7 +135,7 @@ x-control-plane-base: &control-plane-base
     # web_search builtin backend — free self-hosted SearXNG (no API key).
     # Defaults to the in-compose searxng service so web_search works OOTB;
     # unset (or point elsewhere) to disable / use an external instance.
-    HELIX_AGENT_WEB_SEARCH_SEARXNG_BASE_URL: ${HELIX_AGENT_WEB_SEARCH_SEARXNG_BASE_URL:-http://searxng:8080}
+    EXPERT_WORK_WEB_SEARCH_SEARXNG_BASE_URL: ${EXPERT_WORK_WEB_SEARCH_SEARXNG_BASE_URL:-http://searxng:8080}
   volumes:
     # The directory always exists (committed .example); the .local inside it
     # is git-ignored, so this bind mount never breaks `up` when a dev hasn't
@@ -165,11 +165,11 @@ x-control-plane-base: &control-plane-base
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: helix-postgres
+    container_name: expert-work-postgres
     environment:
-      POSTGRES_USER: ${HELIX_DB_USER:-helix_agent}
-      POSTGRES_PASSWORD: ${HELIX_DB_PASSWORD:-helix_agent_dev}
-      POSTGRES_DB: ${HELIX_DB_NAME:-helix_agent_dev}
+      POSTGRES_USER: ${EXPERT_WORK_DB_USER:-expert_work}
+      POSTGRES_PASSWORD: ${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}
+      POSTGRES_DB: ${EXPERT_WORK_DB_NAME:-expert_work_dev}
     command:
       - "postgres"
       - "-c"
@@ -196,21 +196,21 @@ services:
       - ./.data/postgres:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${HELIX_DB_USER:-helix_agent} -d ${HELIX_DB_NAME:-helix_agent_dev}"]
+      test: ["CMD-SHELL", "pg_isready -U ${EXPERT_WORK_DB_USER:-expert_work} -d ${EXPERT_WORK_DB_NAME:-expert_work_dev}"]
       interval: 2s
       timeout: 3s
       retries: 15
 
   pgbouncer:
     image: edoburu/pgbouncer:v1.24.1-p1
-    container_name: helix-pgbouncer
+    container_name: expert-work-pgbouncer
     environment:
       # edoburu/pgbouncer generates pgbouncer.ini from these env vars.
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_USER: ${HELIX_DB_USER:-helix_agent}
-      DB_PASSWORD: ${HELIX_DB_PASSWORD:-helix_agent_dev}
-      DB_NAME: ${HELIX_DB_NAME:-helix_agent_dev}
+      DB_USER: ${EXPERT_WORK_DB_USER:-expert_work}
+      DB_PASSWORD: ${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}
+      DB_NAME: ${EXPERT_WORK_DB_NAME:-expert_work_dev}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "1000"
       DEFAULT_POOL_SIZE: "50"
@@ -242,7 +242,7 @@ services:
     # tight; budget keys are short-lived (per month) so eviction is a
     # non-issue.
     image: redis:7-alpine
-    container_name: helix-redis
+    container_name: expert-work-redis
     command:
       - "redis-server"
       - "--appendonly"
@@ -271,7 +271,7 @@ services:
     # reaches it in-compose at http://searxng:8080.
     profiles: ["full"]
     image: searxng/searxng:latest
-    container_name: helix-searxng
+    container_name: expert-work-searxng
     environment:
       SEARXNG_BASE_URL: http://searxng:8080/
     volumes:
@@ -287,18 +287,18 @@ services:
     # Local dev stand-in for Aliyun OSS — same protocol, zero code changes
     # between environments.
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: helix-minio
+    container_name: expert-work-minio
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: ${HELIX_MINIO_ROOT_USER:-helix_agent}
-      MINIO_ROOT_PASSWORD: ${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio}
-      # D.4 SSE-KMS. Set ``HELIX_MINIO_KMS_SECRET_KEY`` (format:
+      MINIO_ROOT_USER: ${EXPERT_WORK_MINIO_ROOT_USER:-expert_work}
+      MINIO_ROOT_PASSWORD: ${EXPERT_WORK_MINIO_ROOT_PASSWORD:-expert_work_dev_minio}
+      # D.4 SSE-KMS. Set ``EXPERT_WORK_MINIO_KMS_SECRET_KEY`` (format:
       # ``key-name:base64-32-byte-key``) to activate MinIO's inline
       # KMS provider — bucket-level SSE-KMS works without spinning
       # up KES. Empty / unset → encryption off (default dev path).
       # See [ADR-0008](../docs/adr/0008-data-at-rest-encryption.md)
       # for the prod path (OSS SSE-KMS via Aliyun KMS).
-      MINIO_KMS_SECRET_KEY: ${HELIX_MINIO_KMS_SECRET_KEY:-}
+      MINIO_KMS_SECRET_KEY: ${EXPERT_WORK_MINIO_KMS_SECRET_KEY:-}
     ports:
       - "9000:9000"  # S3 API
       - "9001:9001"  # Web console
@@ -325,7 +325,7 @@ services:
     # ``depends_on`` below.
     profiles: ["proxy"]
     image: nginx:1.27-alpine
-    container_name: helix-nginx
+    container_name: expert-work-nginx
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       # Blue/green upstream (Stream I.2) — tools/deploy/deploy.py rewrites
@@ -361,13 +361,13 @@ services:
     # Enable with ``docker compose --profile auth up`` for OIDC dev.
     profiles: ["auth"]
     image: quay.io/keycloak/keycloak:25.0
-    container_name: helix-keycloak
+    container_name: expert-work-keycloak
     command: ["start-dev", "--import-realm"]
     environment:
-      KEYCLOAK_ADMIN: ${HELIX_KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${HELIX_KEYCLOAK_ADMIN_PASSWORD:-admin_dev}
+      KEYCLOAK_ADMIN: ${EXPERT_WORK_KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${EXPERT_WORK_KEYCLOAK_ADMIN_PASSWORD:-admin_dev}
       # Hostname matches the issuer the control plane validates against
-      # (``HELIX_AGENT_OIDC_ISSUER`` in ``environments/dev.yaml``).
+      # (``EXPERT_WORK_OIDC_ISSUER`` in ``environments/dev.yaml``).
       KC_HOSTNAME_STRICT: "false"
       KC_HEALTH_ENABLED: "true"
     volumes:
@@ -377,9 +377,9 @@ services:
       # realm-import bind below nests on top of this mount fine; `--import-realm`
       # is a no-op once the realm already exists in H2.
       - ./.data/keycloak:/opt/keycloak/data
-      - ./keycloak/realm-helix-agent.json:/opt/keycloak/data/import/realm-helix-agent.json:ro
+      - ./keycloak/realm-expert-work.json:/opt/keycloak/data/import/realm-expert-work.json:ro
       # Stream ACCT — 品牌登录主题(白标)。start-dev 关主题缓存,改 CSS 即热加载。
-      - ./keycloak/themes/helix:/opt/keycloak/themes/helix:ro
+      - ./keycloak/themes/expert_work:/opt/keycloak/themes/expert_work:ro
     ports:
       - "8080:8080"
     healthcheck:
@@ -389,8 +389,8 @@ services:
       retries: 30
 
   credential-proxy:
-    # Helix Credential Proxy — Stream F.5 service, containerised in F.10.
-    # Dual-homed (Mini-ADR F-2 / F-14): on ``helix-sandbox-egress``
+    # Expert Work Credential Proxy — Stream F.5 service, containerised in F.10.
+    # Dual-homed (Mini-ADR F-2 / F-14): on ``expert-work-sandbox-egress``
     # (--internal, sandbox-facing) so sandboxes can reach it, and on the
     # default network for outbound egress to real upstreams + Postgres.
     #
@@ -400,20 +400,20 @@ services:
     build:
       context: ..
       dockerfile: services/credential-proxy/Dockerfile
-    container_name: helix-credential-proxy
+    container_name: expert-work-credential-proxy
     environment:
-      HELIX_CRED_PROXY_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
-      HELIX_CRED_PROXY_SECRET_STORE_BACKEND: local_dev
+      EXPERT_WORK_CRED_PROXY_DB_DSN: postgresql+asyncpg://${EXPERT_WORK_DB_USER:-expert_work}:${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}@postgres:5432/${EXPERT_WORK_DB_NAME:-expert_work_dev}
+      EXPERT_WORK_CRED_PROXY_SECRET_STORE_BACKEND: local_dev
       # Dev fixture secrets for the local_dev SecretStore (Stream I.1b) —
       # the #60 egress e2e resolves ``e2e-upstream-token`` from this file.
-      HELIX_CRED_PROXY_SECRET_STORE_ENV_FILE: /run/secrets/proxy-secrets.env
+      EXPERT_WORK_CRED_PROXY_SECRET_STORE_ENV_FILE: /run/secrets/proxy-secrets.env
       # sandbox-egress §3.1/§3.2 — the transparent egress proxy listens here
       # (reached by sandboxes at credential-proxy.internal:8081 on the egress
       # net). The token secret MUST match the supervisor's
-      # HELIX_SANDBOX_EGRESS_TOKEN_SECRET (the supervisor mints, the proxy
+      # EXPERT_WORK_SANDBOX_EGRESS_TOKEN_SECRET (the supervisor mints, the proxy
       # verifies). Dev default; set a real shared value in deploy.
-      HELIX_CRED_PROXY_EGRESS_PORT: "8081"
-      HELIX_CRED_PROXY_EGRESS_TOKEN_SECRET: ${HELIX_EGRESS_TOKEN_SECRET:-dev-egress-token-secret-rotate-me}
+      EXPERT_WORK_CRED_PROXY_EGRESS_PORT: "8081"
+      EXPERT_WORK_CRED_PROXY_EGRESS_TOKEN_SECRET: ${EXPERT_WORK_EGRESS_TOKEN_SECRET:-dev-egress-token-secret-rotate-me}
     volumes:
       - ./credential-proxy/secrets.env:/run/secrets/proxy-secrets.env:ro
     depends_on:
@@ -422,9 +422,9 @@ services:
     networks:
       # HX-10-F1: pin a static IP on the sandbox-facing network so a runsc
       # sandbox can resolve the proxy from /etc/hosts (set
-      # HELIX_SANDBOX_EXTRA_HOSTS=credential-proxy.internal=172.30.0.10 on
+      # EXPERT_WORK_SANDBOX_EXTRA_HOSTS=credential-proxy.internal=172.30.0.10 on
       # the supervisor). On the default network the IP stays dynamic.
-      helix-sandbox-egress:
+      expert-work-sandbox-egress:
         ipv4_address: 172.30.0.10
       default: {}
     healthcheck:
@@ -434,7 +434,7 @@ services:
       retries: 20
 
   # ----------------------------------------------------------------------
-  # M0 helix application stack — Stream I.1 (Mini-ADR I-1/I-2/I-3).
+  # M0 expert_work application stack — Stream I.1 (Mini-ADR I-1/I-2/I-3).
   #
   # All three services below + credential-proxy are in the ``full`` profile.
   # ``docker compose --profile full up`` brings up the complete M0 stack
@@ -452,7 +452,7 @@ services:
   # Prerequisite for ``exec_python`` to work end-to-end: the sandbox
   # execution image must be pre-built on the host daemon (it is launched
   # by sandbox-supervisor at runtime, not a compose service):
-  #   docker build -f infra/sandbox-image/Dockerfile -t helix-sandbox:dev infra/sandbox-image
+  #   docker build -f infra/sandbox-image/Dockerfile -t expert-work-sandbox:dev infra/sandbox-image
   # ----------------------------------------------------------------------
 
   migrate:
@@ -462,22 +462,22 @@ services:
     # this completing so no service ever sees a half-built schema.
     #
     # No ``build:`` here on purpose — ``control-plane-blue`` is the sole
-    # builder of the ``helix-control-plane`` tag; a second build of the
+    # builder of the ``expert-work-control-plane`` tag; a second build of the
     # same tag races on image export. ``migrate`` just consumes it.
     profiles: ["full"]
-    image: helix-control-plane:${HELIX_CONTROL_PLANE_TAG:-dev}
-    container_name: helix-migrate
+    image: expert-work-control-plane:${EXPERT_WORK_CONTROL_PLANE_TAG:-dev}
+    container_name: expert-work-migrate
     restart: "no"
     # Direct Postgres (5432), not PgBouncer — DDL wants a direct connection.
     entrypoint: ["alembic", "-c", "/app/alembic/alembic.ini", "upgrade", "head"]
     environment:
-      HELIX_AGENT_DB_URL: postgresql+psycopg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+      EXPERT_WORK_DB_URL: postgresql+psycopg://${EXPERT_WORK_DB_USER:-expert_work}:${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}@postgres:5432/${EXPERT_WORK_DB_NAME:-expert_work_dev}
     depends_on:
       postgres:
         condition: service_healthy
 
   control-plane-blue:
-    # Helix Control Plane — Stream B FastAPI surface; runs the orchestrator
+    # Expert Work Control Plane — Stream B FastAPI surface; runs the orchestrator
     # in-process as a library (STREAM-E-DESIGN § 2.6 / Mini-ADR I-1).
     #
     # Blue/green pair (Stream I.2 / Mini-ADR I-4): both colours run under
@@ -486,7 +486,7 @@ services:
     # lives only on blue — green and ``migrate`` reuse the same tag
     # (avoids a double-build race, as Mini-ADR I-3 does for migrate).
     <<: *control-plane-base
-    container_name: helix-control-plane-blue
+    container_name: expert-work-control-plane-blue
     build:
       context: ..
       dockerfile: services/control-plane/Dockerfile
@@ -496,12 +496,12 @@ services:
   control-plane-green:
     # Idle/standby colour by default — see control-plane-blue above.
     <<: *control-plane-base
-    container_name: helix-control-plane-green
+    container_name: expert-work-control-plane-green
     ports:
       - "8001:8000"
 
   sandbox-supervisor:
-    # Helix Sandbox Supervisor — Stream F.1 service. Docker-out-of-docker
+    # Expert Work Sandbox Supervisor — Stream F.1 service. Docker-out-of-docker
     # (Mini-ADR I-2): the mounted host docker.sock lets it launch sandbox
     # sibling containers on the host daemon. Runs as root for socket
     # access — the socket mount is the real trust boundary.
@@ -509,8 +509,8 @@ services:
     build:
       context: ..
       dockerfile: services/sandbox-supervisor/Dockerfile
-    image: helix-sandbox-supervisor
-    container_name: helix-sandbox-supervisor
+    image: expert-work-sandbox-supervisor
+    container_name: expert-work-sandbox-supervisor
     user: root
     # Host port for dev introspection + the #60 e2e (driver runs on the host).
     ports:
@@ -518,17 +518,17 @@ services:
     environment:
       # Direct Postgres (5432) — the supervisor issues plain inserts /
       # updates with no need for the PgBouncer pool.
-      HELIX_SANDBOX_DB_DSN: postgresql+asyncpg://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+      EXPERT_WORK_SANDBOX_DB_DSN: postgresql+asyncpg://${EXPERT_WORK_DB_USER:-expert_work}:${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}@postgres:5432/${EXPERT_WORK_DB_NAME:-expert_work_dev}
       # The single sandbox image (sandbox-image-consolidation): python +
       # office/data/media libs + soffice/poppler/ffmpeg/node + CJK. Set
-      # HELIX_SANDBOX_IMAGE in infra/.env to the pushed registry path, e.g.
-      # <acr-host>/<namespace>/helix-sandbox:latest. The host docker daemon
+      # EXPERT_WORK_SANDBOX_IMAGE in infra/.env to the pushed registry path, e.g.
+      # <acr-host>/<namespace>/expert-work-sandbox:latest. The host docker daemon
       # (sandboxes launch via the mounted socket) must be able to pull it —
       # `docker login` to the registry or pre-pull the image.
-      HELIX_SANDBOX_SANDBOX_IMAGE: ${HELIX_SANDBOX_IMAGE:-helix-sandbox:dev}
+      EXPERT_WORK_SANDBOX_SANDBOX_IMAGE: ${EXPERT_WORK_SANDBOX_IMAGE:-expert-work-sandbox:dev}
       # Stream HX-10 — OCI runtime. Unset = runc (settings default; required
       # on macOS dev — gVisor is Linux-only). A multi-tenant production host
-      # sets HELIX_SANDBOX_OCI_RUNTIME=runsc (gVisor) to close the shared-kernel
+      # sets EXPERT_WORK_SANDBOX_OCI_RUNTIME=runsc (gVisor) to close the shared-kernel
       # cross-tenant escape residual; the sandbox-gvisor CI workflow runs the
       # acceptance suite under runsc so that switch stays verified.
       # Stream HX-10 — pinned seccomp profile. Unset here: dev rides the host
@@ -537,15 +537,15 @@ services:
       # into THIS container at the SAME path (docker-out-of-docker: the host
       # daemon resolves the --security-opt seccomp= path, while startup
       # validates the same path inside this container — they must match), and
-      # set HELIX_SANDBOX_SECCOMP_PROFILE_PATH to it. A configured-but-missing
+      # set EXPERT_WORK_SANDBOX_SECCOMP_PROFILE_PATH to it. A configured-but-missing
       # profile fails startup closed (HX-K2).
       #
       # HX-10-F1 (gVisor prod prerequisite): runsc's netstack has no Docker
       # embedded DNS (google/gvisor#7469), so under runsc the sandbox cannot
       # resolve the credential proxy by container name. The proxy is pinned
-      # to 172.30.0.10 on helix-sandbox-egress (see networks: below); under
+      # to 172.30.0.10 on expert-work-sandbox-egress (see networks: below); under
       # runsc set
-      #   HELIX_SANDBOX_EXTRA_HOSTS=credential-proxy.internal=172.30.0.10
+      #   EXPERT_WORK_SANDBOX_EXTRA_HOSTS=credential-proxy.internal=172.30.0.10
       # (comma-separated for more entries). dockerd writes /etc/hosts before
       # start — a gofer file read gVisor handles natively. Malformed values
       # fail startup closed. Dev/runc leaves this unset (embedded DNS works);
@@ -554,12 +554,12 @@ services:
       #
       # sandbox-egress §3.3 — the supervisor mints the per-sandbox egress token
       # and injects HTTPS_PROXY pointing at the egress proxy. The token secret
-      # MUST match the credential-proxy's HELIX_CRED_PROXY_EGRESS_TOKEN_SECRET.
+      # MUST match the credential-proxy's EXPERT_WORK_CRED_PROXY_EGRESS_TOKEN_SECRET.
       # Point sandboxes at the proxy by its pinned egress-net IP (172.30.0.10):
       # it resolves under BOTH runc (dev, embedded DNS) and runsc (prod, no DNS
       # — would otherwise need the credential-proxy.internal add-host).
-      HELIX_SANDBOX_EGRESS_PROXY_HOST: "172.30.0.10"
-      HELIX_SANDBOX_EGRESS_TOKEN_SECRET: ${HELIX_EGRESS_TOKEN_SECRET:-dev-egress-token-secret-rotate-me}
+      EXPERT_WORK_SANDBOX_EGRESS_PROXY_HOST: "172.30.0.10"
+      EXPERT_WORK_SANDBOX_EGRESS_TOKEN_SECRET: ${EXPERT_WORK_EGRESS_TOKEN_SECRET:-dev-egress-token-secret-rotate-me}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -577,12 +577,12 @@ services:
     # Mock upstream for the #60 full-stack egress e2e (Stream I.1b).
     # A stdlib HTTP echo server — the credential-proxy forwards requests
     # here and the echoed response proves the secret was injected. On the
-    # default network only (not helix-sandbox-egress): a sandbox must not
+    # default network only (not expert-work-sandbox-egress): a sandbox must not
     # reach it directly, only via the proxy. ``e2e`` profile — started
     # only when the e2e test explicitly names it.
     profiles: ["e2e"]
     image: python:3.12-alpine
-    container_name: helix-mock-upstream
+    container_name: expert-work-mock-upstream
     command: ["python", "/app/echo_server.py"]
     volumes:
       - ./mock-upstream/echo_server.py:/app/echo_server.py:ro
@@ -599,15 +599,15 @@ services:
   # Grafana + Alertmanager. Behind the ``observability`` profile — the
   # default ``up`` and the app profiles don't pull it. Enable with
   # ``docker compose --profile observability up``; add ``--profile full``
-  # to also run the helix services it observes.
+  # to also run the expert_work services it observes.
   # ----------------------------------------------------------------------
 
   otel-collector:
-    # Receives OTLP from the helix services (A.8) → forwards traces to Tempo.
+    # Receives OTLP from the expert_work services (A.8) → forwards traces to Tempo.
     # Core distro is enough — the pipeline uses only otlp receiver/exporter.
     profiles: ["observability"]
     image: otel/opentelemetry-collector:0.119.0
-    container_name: helix-otel-collector
+    container_name: expert-work-otel-collector
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
       - ./observability/otel-collector-config.yaml:/etc/otel/config.yaml:ro
@@ -615,11 +615,11 @@ services:
       - tempo
 
   prometheus:
-    # Scrapes the helix services' /metrics; evaluates rules from
+    # Scrapes the expert_work services' /metrics; evaluates rules from
     # tools/observability/rules/ (filled by G.1 / G.2).
     profiles: ["observability"]
     image: prom/prometheus:v3.1.0
-    container_name: helix-prometheus
+    container_name: expert-work-prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -635,7 +635,7 @@ services:
     # can write the named volume (fresh volume is root-owned).
     profiles: ["observability"]
     image: grafana/tempo:2.7.0
-    container_name: helix-tempo
+    container_name: expert-work-tempo
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     user: root
     volumes:
@@ -643,10 +643,10 @@ services:
       - tempo-data:/var/tempo
 
   loki:
-    # Log store — receives the helix services' stdout JSON from Promtail.
+    # Log store — receives the expert_work services' stdout JSON from Promtail.
     profiles: ["observability"]
     image: grafana/loki:3.3.0
-    container_name: helix-loki
+    container_name: expert-work-loki
     command: ["-config.file=/etc/loki/loki.yaml"]
     user: root
     volumes:
@@ -657,7 +657,7 @@ services:
     # Loki's log agent — discovers containers via the Docker socket.
     profiles: ["observability"]
     image: grafana/promtail:3.3.0
-    container_name: helix-promtail
+    container_name: expert-work-promtail
     command: ["-config.file=/etc/promtail/promtail.yaml"]
     volumes:
       - ./observability/promtail-config.yaml:/etc/promtail/promtail.yaml:ro
@@ -669,9 +669,9 @@ services:
     # Unified view — Prometheus / Tempo / Loki datasources auto-provisioned.
     profiles: ["observability"]
     image: grafana/grafana:11.4.0
-    container_name: helix-grafana
+    container_name: expert-work-grafana
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${HELIX_GRAFANA_ADMIN_PASSWORD:-helix_agent_dev}
+      GF_SECURITY_ADMIN_PASSWORD: ${EXPERT_WORK_GRAFANA_ADMIN_PASSWORD:-expert_work_dev}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_ANALYTICS_REPORTING_ENABLED: "false"
@@ -690,7 +690,7 @@ services:
     # Alert routing — minimal config in G.0; P0/P1/P2 routing lands in G.2.
     profiles: ["observability"]
     image: prom/alertmanager:v0.28.0
-    container_name: helix-alertmanager
+    container_name: expert-work-alertmanager
     command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
     volumes:
       - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
@@ -713,15 +713,15 @@ services:
   langfuse-postgres:
     profiles: ["observability"]
     image: postgres:16-alpine
-    container_name: helix-langfuse-postgres
+    container_name: expert-work-langfuse-postgres
     environment:
-      POSTGRES_USER: ${HELIX_LANGFUSE_DB_USER:-langfuse}
-      POSTGRES_PASSWORD: ${HELIX_LANGFUSE_DB_PASSWORD:-langfuse_dev}
-      POSTGRES_DB: ${HELIX_LANGFUSE_DB_NAME:-langfuse}
+      POSTGRES_USER: ${EXPERT_WORK_LANGFUSE_DB_USER:-langfuse}
+      POSTGRES_PASSWORD: ${EXPERT_WORK_LANGFUSE_DB_PASSWORD:-langfuse_dev}
+      POSTGRES_DB: ${EXPERT_WORK_LANGFUSE_DB_NAME:-langfuse}
     volumes:
       - langfuse-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${HELIX_LANGFUSE_DB_USER:-langfuse}"]
+      test: ["CMD-SHELL", "pg_isready -U ${EXPERT_WORK_LANGFUSE_DB_USER:-langfuse}"]
       interval: 3s
       timeout: 3s
       retries: 15
@@ -729,11 +729,11 @@ services:
   langfuse-clickhouse:
     profiles: ["observability"]
     image: clickhouse/clickhouse-server:24.12-alpine
-    container_name: helix-langfuse-clickhouse
+    container_name: expert-work-langfuse-clickhouse
     environment:
       CLICKHOUSE_DB: default
-      CLICKHOUSE_USER: ${HELIX_LANGFUSE_CLICKHOUSE_USER:-clickhouse}
-      CLICKHOUSE_PASSWORD: ${HELIX_LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse_dev}
+      CLICKHOUSE_USER: ${EXPERT_WORK_LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${EXPERT_WORK_LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse_dev}
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     volumes:
@@ -755,7 +755,7 @@ services:
     # queued events would silently lose traces), incompatible with the
     # quota Redis's ``allkeys-lru``.
     image: redis:7-alpine
-    container_name: helix-langfuse-redis
+    container_name: expert-work-langfuse-redis
     command: ["redis-server", "--maxmemory-policy", "noeviction"]
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
@@ -767,7 +767,7 @@ services:
     profiles: ["observability"]
     # One-shot: ensure the ``langfuse`` bucket exists in the shared MinIO.
     image: minio/mc:RELEASE.2025-04-08T15-39-49Z
-    container_name: helix-langfuse-minio-init
+    container_name: expert-work-langfuse-minio-init
     depends_on:
       minio:
         condition: service_healthy
@@ -776,58 +776,58 @@ services:
       - "-c"
       - >
         mc alias set m http://minio:9000
-        ${HELIX_MINIO_ROOT_USER:-helix_agent} ${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio} &&
+        ${EXPERT_WORK_MINIO_ROOT_USER:-expert_work} ${EXPERT_WORK_MINIO_ROOT_PASSWORD:-expert_work_dev_minio} &&
         mc mb --ignore-existing m/langfuse && echo "langfuse bucket ready"
     restart: "no"
 
   langfuse-worker:
     profiles: ["observability"]
     image: langfuse/langfuse-worker:3
-    container_name: helix-langfuse-worker
+    container_name: expert-work-langfuse-worker
     depends_on:
       langfuse-postgres: { condition: service_healthy }
       langfuse-clickhouse: { condition: service_healthy }
       langfuse-redis: { condition: service_healthy }
     environment: &langfuse-backend-env
-      DATABASE_URL: postgresql://${HELIX_LANGFUSE_DB_USER:-langfuse}:${HELIX_LANGFUSE_DB_PASSWORD:-langfuse_dev}@langfuse-postgres:5432/${HELIX_LANGFUSE_DB_NAME:-langfuse}
-      SALT: ${HELIX_LANGFUSE_SALT:-helix_langfuse_dev_salt}
-      ENCRYPTION_KEY: ${HELIX_LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      DATABASE_URL: postgresql://${EXPERT_WORK_LANGFUSE_DB_USER:-langfuse}:${EXPERT_WORK_LANGFUSE_DB_PASSWORD:-langfuse_dev}@langfuse-postgres:5432/${EXPERT_WORK_LANGFUSE_DB_NAME:-langfuse}
+      SALT: ${EXPERT_WORK_LANGFUSE_SALT:-expert_work_langfuse_dev_salt}
+      ENCRYPTION_KEY: ${EXPERT_WORK_LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
       CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
       CLICKHOUSE_URL: http://langfuse-clickhouse:8123
-      CLICKHOUSE_USER: ${HELIX_LANGFUSE_CLICKHOUSE_USER:-clickhouse}
-      CLICKHOUSE_PASSWORD: ${HELIX_LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse_dev}
+      CLICKHOUSE_USER: ${EXPERT_WORK_LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${EXPERT_WORK_LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse_dev}
       CLICKHOUSE_CLUSTER_ENABLED: "false"
       REDIS_CONNECTION_STRING: redis://langfuse-redis:6379
       LANGFUSE_S3_EVENT_UPLOAD_ENABLED: "true"
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
       LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
       LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
-      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${HELIX_MINIO_ROOT_USER:-helix_agent}
-      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio}
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${EXPERT_WORK_MINIO_ROOT_USER:-expert_work}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${EXPERT_WORK_MINIO_ROOT_PASSWORD:-expert_work_dev_minio}
       LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
       TELEMETRY_ENABLED: "false"
 
   langfuse-web:
     profiles: ["observability"]
     image: langfuse/langfuse:3
-    container_name: helix-langfuse-web
+    container_name: expert-work-langfuse-web
     depends_on:
       langfuse-worker: { condition: service_started }
       langfuse-minio-init: { condition: service_completed_successfully }
     environment:
       <<: *langfuse-backend-env
-      NEXTAUTH_SECRET: ${HELIX_LANGFUSE_NEXTAUTH_SECRET:-helix_langfuse_dev_nextauth}
+      NEXTAUTH_SECRET: ${EXPERT_WORK_LANGFUSE_NEXTAUTH_SECRET:-expert_work_langfuse_dev_nextauth}
       NEXTAUTH_URL: http://localhost:3001
       # Turnkey dev: auto-provision an org + project + fixed API keys so the
       # control plane can point at them without clicking through the UI.
       # Override the keys in any shared environment.
-      LANGFUSE_INIT_ORG_ID: helix
-      LANGFUSE_INIT_PROJECT_ID: helix
-      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${HELIX_LANGFUSE_PUBLIC_KEY:-pk-lf-helix-dev}
-      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${HELIX_LANGFUSE_SECRET_KEY:-sk-lf-helix-dev}
-      LANGFUSE_INIT_USER_EMAIL: ${HELIX_LANGFUSE_INIT_EMAIL:-dev@helix.local}
-      LANGFUSE_INIT_USER_PASSWORD: ${HELIX_LANGFUSE_INIT_PASSWORD:-helix_langfuse_dev}
-      LANGFUSE_INIT_USER_NAME: helix
+      LANGFUSE_INIT_ORG_ID: expert_work
+      LANGFUSE_INIT_PROJECT_ID: expert_work
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${EXPERT_WORK_LANGFUSE_PUBLIC_KEY:-pk-lf-expert-work-dev}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${EXPERT_WORK_LANGFUSE_SECRET_KEY:-sk-lf-expert-work-dev}
+      LANGFUSE_INIT_USER_EMAIL: ${EXPERT_WORK_LANGFUSE_INIT_EMAIL:-dev@expert_work.local}
+      LANGFUSE_INIT_USER_PASSWORD: ${EXPERT_WORK_LANGFUSE_INIT_PASSWORD:-expert_work_langfuse_dev}
+      LANGFUSE_INIT_USER_NAME: expert_work
     ports:
       - "3001:3000"
 
@@ -851,10 +851,10 @@ networks:
   # HX-10-F1: a fixed subnet lets the credential-proxy hold a static IP
   # (172.30.0.10 below), so under gVisor — whose netstack has no docker
   # embedded DNS (google/gvisor#7469) — the sandbox can still reach the
-  # proxy via an /etc/hosts entry (HELIX_SANDBOX_EXTRA_HOSTS). ``172.30``
+  # proxy via an /etc/hosts entry (EXPERT_WORK_SANDBOX_EXTRA_HOSTS). ``172.30``
   # avoids docker's default 172.17-29 pools.
-  helix-sandbox-egress:
-    name: helix-sandbox-egress
+  expert-work-sandbox-egress:
+    name: expert-work-sandbox-egress
     internal: true
     ipam:
       config:

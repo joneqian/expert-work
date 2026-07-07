@@ -16,9 +16,9 @@ from uuid import UUID, uuid4
 from control_plane.skill_evolution_limits import CircuitBreaker
 from control_plane.skill_rollback_gate import RollbackGate
 from control_plane.skill_rollback_monitor import RollbackMonitor, RollbackMonitorConfig
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import SkillEvalResult, SkillRunUsage, TrajectoryOutcome
-from helix_agent.protocol.skill import SkillStatus
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import SkillEvalResult, SkillRunUsage, TrajectoryOutcome
+from expert_work.protocol.skill import SkillStatus
 
 _NOW = datetime(2026, 6, 8, 12, 0, tzinfo=UTC)
 

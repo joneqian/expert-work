@@ -40,7 +40,7 @@ mod = _load()
 def _base_manifest() -> dict[str, Any]:
     """A minimal valid AgentSpec mapping."""
     return {
-        "apiVersion": "helix.io/v1",
+        "apiVersion": "expert_work.io/v1",
         "kind": "Agent",
         "metadata": {"name": "demo-agent", "version": "1.0.0", "tenant": "acme"},
         "spec": {

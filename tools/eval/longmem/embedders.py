@@ -4,7 +4,7 @@
 keyword-bucket mechanism as ``run_baseline._FakeKeywordEmbedder`` — a
 local copy by the same precedent that keeps run_baseline independent of
 test code). Real runs build the orchestrator's OpenAI-compatible
-embedder from ``HELIX_EVAL_EMBED_*`` env, mirroring how the platform
+embedder from ``EXPERT_WORK_EVAL_EMBED_*`` env, mirroring how the platform
 itself talks to the embedding endpoint — so baseline numbers measure
 the production embedding space.
 
@@ -146,14 +146,14 @@ class CachedEmbedder:
         self._db.close()
 
 
-_EMBED_ENV = ("HELIX_EVAL_EMBED_API_KEY", "HELIX_EVAL_EMBED_MODEL")
+_EMBED_ENV = ("EXPERT_WORK_EVAL_EMBED_API_KEY", "EXPERT_WORK_EVAL_EMBED_MODEL")
 
 
 def build_real_embedder(*, cache_db: Path | None = None, concurrency: int = 4) -> object:
-    """OpenAI-compatible embedder from ``HELIX_EVAL_EMBED_*`` env.
+    """OpenAI-compatible embedder from ``EXPERT_WORK_EVAL_EMBED_*`` env.
 
-    Required: ``HELIX_EVAL_EMBED_API_KEY`` + ``HELIX_EVAL_EMBED_MODEL``;
-    optional ``HELIX_EVAL_EMBED_BASE_URL`` (defaults to the orchestrator
+    Required: ``EXPERT_WORK_EVAL_EMBED_API_KEY`` + ``EXPERT_WORK_EVAL_EMBED_MODEL``;
+    optional ``EXPERT_WORK_EVAL_EMBED_BASE_URL`` (defaults to the orchestrator
     default endpoint). Imported lazily so the fake arm never pays the
     orchestrator import. With ``cache_db`` set the backend is wrapped in
     :class:`CachedEmbedder` (multi-arm runs embed each corpus once).
@@ -162,17 +162,17 @@ def build_real_embedder(*, cache_db: Path | None = None, concurrency: int = 4) -
     if missing:
         raise SystemExit(
             f"--embedder real requires env {', '.join(missing)} "
-            "(plus optional HELIX_EVAL_EMBED_BASE_URL)"
+            "(plus optional EXPERT_WORK_EVAL_EMBED_BASE_URL)"
         )
     from orchestrator.llm.embedder import HTTPEmbeddingClient, OpenAICompatibleEmbedder
 
-    base_url = os.environ.get("HELIX_EVAL_EMBED_BASE_URL")
+    base_url = os.environ.get("EXPERT_WORK_EVAL_EMBED_BASE_URL")
     client = (
-        HTTPEmbeddingClient(api_key=os.environ["HELIX_EVAL_EMBED_API_KEY"], base_url=base_url)
+        HTTPEmbeddingClient(api_key=os.environ["EXPERT_WORK_EVAL_EMBED_API_KEY"], base_url=base_url)
         if base_url
-        else HTTPEmbeddingClient(api_key=os.environ["HELIX_EVAL_EMBED_API_KEY"])
+        else HTTPEmbeddingClient(api_key=os.environ["EXPERT_WORK_EVAL_EMBED_API_KEY"])
     )
-    model = os.environ["HELIX_EVAL_EMBED_MODEL"]
+    model = os.environ["EXPERT_WORK_EVAL_EMBED_MODEL"]
     backend = OpenAICompatibleEmbedder(client=client, model=model)
     if cache_db is None:
         return backend

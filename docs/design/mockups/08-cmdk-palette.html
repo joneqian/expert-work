@@ -6,9 +6,9 @@
   全局浮层(顶层 modal,overlay 居中);分三组:跳转 / 动作 / 资源搜索。
 
   Tokens used:
-    --hx-z-modal / --hx-z-overlay
-    --hx-elevation-3 (浮层阴影)
-    --hx-color-brand-500 (active item highlight)
+    --ew-z-modal / --ew-z-overlay
+    --ew-elevation-3 (浮层阴影)
+    --ew-color-brand-500 (active item highlight)
 
   Antd 5:
     无直接对等;用 `kbar` 或自研。本 mockup 是 kbar 风格的等价 HTML 静态版。
@@ -22,7 +22,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cmd+K — helix Admin</title>
+  <title>Cmd+K — Expert Work Admin</title>
   <link rel="stylesheet" href="./shared/tokens.css" />
   <link rel="stylesheet" href="./shared/shell.css" />
   <style>
@@ -35,7 +35,7 @@
     .cmdk-overlay {
       position: fixed; inset: 0;
       background: rgba(0, 0, 0, 0.6);
-      z-index: var(--hx-z-overlay);
+      z-index: var(--ew-z-overlay);
       display: flex;
       align-items: flex-start;
       justify-content: center;
@@ -46,55 +46,55 @@
     .cmdk {
       width: 100%;
       max-width: 640px;
-      background: var(--hx-surface-base);
-      border: 1px solid var(--hx-border-default);
-      border-radius: var(--hx-radius-md);
-      box-shadow: var(--hx-elevation-3);
+      background: var(--ew-surface-base);
+      border: 1px solid var(--ew-border-default);
+      border-radius: var(--ew-radius-md);
+      box-shadow: var(--ew-elevation-3);
       overflow: hidden;
-      z-index: var(--hx-z-modal);
+      z-index: var(--ew-z-modal);
     }
     .cmdk__input {
       width: 100%;
-      padding: var(--hx-space-4);
+      padding: var(--ew-space-4);
       border: none;
       background: transparent;
-      color: var(--hx-text-primary);
-      font-family: var(--hx-font-sans);
-      font-size: var(--hx-font-size-md);
+      color: var(--ew-text-primary);
+      font-family: var(--ew-font-sans);
+      font-size: var(--ew-font-size-md);
       outline: none;
-      border-bottom: 1px solid var(--hx-border-subtle);
+      border-bottom: 1px solid var(--ew-border-subtle);
     }
-    .cmdk__input::placeholder { color: var(--hx-text-tertiary); }
-    .cmdk__list { max-height: 420px; overflow-y: auto; padding: var(--hx-space-2) 0; }
+    .cmdk__input::placeholder { color: var(--ew-text-tertiary); }
+    .cmdk__list { max-height: 420px; overflow-y: auto; padding: var(--ew-space-2) 0; }
     .cmdk__group-label {
-      padding: var(--hx-space-2) var(--hx-space-4);
-      font-size: var(--hx-font-size-xs);
-      font-weight: var(--hx-font-weight-medium);
+      padding: var(--ew-space-2) var(--ew-space-4);
+      font-size: var(--ew-font-size-xs);
+      font-weight: var(--ew-font-weight-medium);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: var(--hx-text-tertiary);
+      color: var(--ew-text-tertiary);
     }
     .cmdk__item {
-      display: flex; align-items: center; gap: var(--hx-space-3);
-      padding: var(--hx-space-2) var(--hx-space-4);
+      display: flex; align-items: center; gap: var(--ew-space-3);
+      padding: var(--ew-space-2) var(--ew-space-4);
       cursor: pointer;
-      font-size: var(--hx-font-size-sm);
+      font-size: var(--ew-font-size-sm);
       border-left: 2px solid transparent;
     }
-    .cmdk__item:hover { background: var(--hx-surface-hover); }
+    .cmdk__item:hover { background: var(--ew-surface-hover); }
     .cmdk__item[aria-selected="true"] {
-      background: var(--hx-surface-selected);
-      border-left-color: var(--hx-color-brand-500);
+      background: var(--ew-surface-selected);
+      border-left-color: var(--ew-color-brand-500);
     }
     .cmdk__icon {
       width: 16px; height: 16px;
       flex-shrink: 0;
-      color: var(--hx-text-secondary);
+      color: var(--ew-text-secondary);
     }
     .cmdk__title { flex: 1; }
     .cmdk__subtitle {
-      font-size: var(--hx-font-size-xs);
-      color: var(--hx-text-tertiary);
+      font-size: var(--ew-font-size-xs);
+      color: var(--ew-text-tertiary);
       margin-left: auto;
       margin-right: 8px;
     }
@@ -103,35 +103,35 @@
     }
 
     .cmdk__footer {
-      padding: var(--hx-space-2) var(--hx-space-4);
-      border-top: 1px solid var(--hx-border-subtle);
-      display: flex; gap: var(--hx-space-3);
-      font-size: var(--hx-font-size-xs);
-      color: var(--hx-text-tertiary);
+      padding: var(--ew-space-2) var(--ew-space-4);
+      border-top: 1px solid var(--ew-border-subtle);
+      display: flex; gap: var(--ew-space-3);
+      font-size: var(--ew-font-size-xs);
+      color: var(--ew-text-tertiary);
     }
     .cmdk__footer-hint { display: flex; gap: 4px; align-items: center; }
 
     /* Highlight matched substring */
-    .cmdk__match { color: var(--hx-color-brand-400); font-weight: var(--hx-font-weight-semibold); }
+    .cmdk__match { color: var(--ew-color-brand-400); font-weight: var(--ew-font-weight-semibold); }
   </style>
 </head>
 <body>
 
 <!-- 背景 = Agents list(模糊) -->
-<div class="hx-app cmdk-bg" aria-hidden="true">
-  <aside class="hx-sidebar">
-    <div class="hx-sidebar__brand"><svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg><span>helix</span></div>
-    <nav class="hx-sidebar__nav">
-      <a class="hx-sidebar__item" aria-current="page">Agents</a>
-      <a class="hx-sidebar__item">Runs</a>
-      <a class="hx-sidebar__item">Curation+Eval</a>
-      <a class="hx-sidebar__item">Memory</a>
-      <a class="hx-sidebar__item">Skills</a>
-      <a class="hx-sidebar__item">Triggers</a>
+<div class="ew-app cmdk-bg" aria-hidden="true">
+  <aside class="ew-sidebar">
+    <div class="ew-sidebar__brand"><svg class="ew-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--ew-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg><span>Expert Work</span></div>
+    <nav class="ew-sidebar__nav">
+      <a class="ew-sidebar__item" aria-current="page">Agents</a>
+      <a class="ew-sidebar__item">Runs</a>
+      <a class="ew-sidebar__item">Curation+Eval</a>
+      <a class="ew-sidebar__item">Memory</a>
+      <a class="ew-sidebar__item">Skills</a>
+      <a class="ew-sidebar__item">Triggers</a>
     </nav>
   </aside>
-  <header class="hx-topbar"><div class="hx-topbar__tenant"><strong>acme-corp</strong></div><div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div><div class="hx-topbar__spacer"></div></header>
-  <main class="hx-main"><div class="hx-main__container"><h1 class="hx-heading-2">Agents</h1></div></main>
+  <header class="ew-topbar"><div class="ew-topbar__tenant"><strong>acme-corp</strong></div><div class="ew-topbar__cmdk"><span>搜索或跳转</span><span class="ew-topbar__spacer"></span><span class="ew-kbd">⌘K</span></div><div class="ew-topbar__spacer"></div></header>
+  <main class="ew-main"><div class="ew-main__container"><h1 class="ew-heading-2">Agents</h1></div></main>
 </div>
 
 <!-- Cmd+K overlay -->
@@ -150,7 +150,7 @@
       </div>
       <div class="cmdk__item" role="option" aria-selected="false">
         <svg class="cmdk__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 1 0-14 0 7 7 0 0 0 14 0Z"/></svg>
-        <span class="cmdk__title">marketing-content-writer <span class="hx-text-tertiary">(<span class="cmdk__match">cust</span>om brand voice)</span></span>
+        <span class="cmdk__title">marketing-content-writer <span class="ew-text-tertiary">(<span class="cmdk__match">cust</span>om brand voice)</span></span>
         <span class="cmdk__subtitle">v2.0.1 · archived</span>
       </div>
 
@@ -158,7 +158,7 @@
       <div class="cmdk__item" role="option" aria-selected="false">
         <svg class="cmdk__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         <span class="cmdk__title">创建新 Agent…</span>
-        <span class="cmdk__shortcut"><span class="hx-kbd">N</span></span>
+        <span class="cmdk__shortcut"><span class="ew-kbd">N</span></span>
       </div>
       <div class="cmdk__item" role="option" aria-selected="false">
         <svg class="cmdk__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -167,41 +167,41 @@
       <div class="cmdk__item" role="option" aria-selected="false">
         <svg class="cmdk__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         <span class="cmdk__title">跳到 <span class="cmdk__match">cust</span>omer-support-bot · Playground</span>
-        <span class="cmdk__shortcut"><span class="hx-kbd">g</span><span class="hx-kbd">p</span></span>
+        <span class="cmdk__shortcut"><span class="ew-kbd">g</span><span class="ew-kbd">p</span></span>
       </div>
 
       <div class="cmdk__group-label">跳转 · 顶级页面</div>
       <div class="cmdk__item" role="option" aria-selected="false">
         <svg class="cmdk__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
         <span class="cmdk__title">Runs(跨 agent)</span>
-        <span class="cmdk__shortcut"><span class="hx-kbd">g</span><span class="hx-kbd">r</span></span>
+        <span class="cmdk__shortcut"><span class="ew-kbd">g</span><span class="ew-kbd">r</span></span>
       </div>
       <div class="cmdk__item" role="option" aria-selected="false">
         <svg class="cmdk__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         <span class="cmdk__title">Curation 候选评审</span>
-        <span class="cmdk__shortcut"><span class="hx-kbd">g</span><span class="hx-kbd">c</span></span>
+        <span class="cmdk__shortcut"><span class="ew-kbd">g</span><span class="ew-kbd">c</span></span>
       </div>
 
       <div class="cmdk__group-label">最近</div>
       <div class="cmdk__item" role="option" aria-selected="false">
         <svg class="cmdk__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
-        <span class="cmdk__title hx-text-mono">run_4c9b8e21f60d</span>
+        <span class="cmdk__title ew-text-mono">run_4c9b8e21f60d</span>
         <span class="cmdk__subtitle">approval pending</span>
       </div>
 
     </div>
 
     <div class="cmdk__footer">
-      <div class="cmdk__footer-hint"><span class="hx-kbd">↑↓</span> 选择</div>
-      <div class="cmdk__footer-hint"><span class="hx-kbd">↵</span> 跳转 / 执行</div>
-      <div class="cmdk__footer-hint"><span class="hx-kbd">Esc</span> 关闭</div>
-      <div style="margin-left: auto;">输入 <span class="hx-kbd">?</span> 查看所有快捷键</div>
+      <div class="cmdk__footer-hint"><span class="ew-kbd">↑↓</span> 选择</div>
+      <div class="cmdk__footer-hint"><span class="ew-kbd">↵</span> 跳转 / 执行</div>
+      <div class="cmdk__footer-hint"><span class="ew-kbd">Esc</span> 关闭</div>
+      <div style="margin-left: auto;">输入 <span class="ew-kbd">?</span> 查看所有快捷键</div>
     </div>
 
   </div>
 </div>
 
-<div class="hx-theme-toggle"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div>
+<div class="ew-theme-toggle"><button data-theme="dark" aria-pressed="true">Dark</button><button data-theme="light" aria-pressed="false">Light</button></div>
 <script>
   document.querySelectorAll('[data-theme]').forEach(btn => btn.addEventListener('click', () => {
     document.documentElement.setAttribute('data-theme', btn.dataset.theme);

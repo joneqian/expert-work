@@ -17,7 +17,7 @@ class SandboxSupervisorSettings(BaseSettings):
     """Resolved runtime settings; cheap to construct in tests."""
 
     model_config = SettingsConfigDict(
-        env_prefix="HELIX_SANDBOX_",
+        env_prefix="EXPERT_WORK_SANDBOX_",
         case_sensitive=False,
         extra="ignore",
     )
@@ -26,7 +26,7 @@ class SandboxSupervisorSettings(BaseSettings):
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------ db
-    db_dsn: str = "postgresql+asyncpg://helix_agent:helix_agent_dev@localhost:5432/helix_agent_dev"
+    db_dsn: str = "postgresql+asyncpg://expert_work:expert_work_dev@localhost:5432/expert_work_dev"
     db_echo: bool = False
 
     # -------------------------------------------------------------- sandbox
@@ -34,7 +34,7 @@ class SandboxSupervisorSettings(BaseSettings):
     #: office/data/media libs + soffice/poppler/ffmpeg/node + CJK fonts. The
     #: former ``minimal``/``office`` variant split was collapsed into this one
     #: image (sandbox-image-consolidation).
-    sandbox_image: str = "helix-sandbox:dev"
+    sandbox_image: str = "expert-work-sandbox:dev"
     #: OCI runtime — `runc` for dev / macOS, `runsc` (gVisor) for Linux prod.
     oci_runtime: Literal["runc", "runsc"] = "runc"
     #: Stream HX-10 — host-visible path to a pinned seccomp profile JSON
@@ -81,7 +81,7 @@ class SandboxSupervisorSettings(BaseSettings):
             hostname, ip = hostname.strip(), ip.strip()
             if not sep or not hostname or not ip:
                 msg = (
-                    f"malformed HELIX_SANDBOX_EXTRA_HOSTS entry {entry!r} "
+                    f"malformed EXPERT_WORK_SANDBOX_EXTRA_HOSTS entry {entry!r} "
                     "(expected 'hostname=ip[,hostname2=ip2…]')"
                 )
                 raise ValueError(msg)
@@ -169,7 +169,7 @@ class SandboxSupervisorSettings(BaseSettings):
     object_store_backend: Literal["memory", "s3-compatible"] = "memory"
     object_store_endpoint_url: str = ""
     object_store_region: str = "cn-hangzhou"
-    object_store_bucket: str = "helix-agent-volume-backups"
+    object_store_bucket: str = "expert-work-volume-backups"
     object_store_access_key: str = ""
     object_store_secret_key: str = ""
     object_store_use_path_style: bool = True

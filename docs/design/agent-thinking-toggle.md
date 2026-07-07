@@ -2,7 +2,7 @@
 
 ## 背景
 
-Agent 配置界面无思考模式控件。当前 helix 默认**不发**任何思考控制字段
+Agent 配置界面无思考模式控件。当前 Expert Work 默认**不发**任何思考控制字段
 (`_thinking_payload` 在 `effort=None && adaptive_thinking=False` 时返 `None`)→ 走
 各厂商自身默认(Claude/doubao-seed/qwen3/glm 多数默认开,Haiku 不思考,
 deepseek-reasoner/kimi-k2-thinking 恒思考)。`ModelSpec` 只有 `effort`

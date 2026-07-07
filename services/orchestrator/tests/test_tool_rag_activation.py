@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from helix_agent.protocol import BuiltinToolSpec, MCPToolSpec
+from expert_work.protocol import BuiltinToolSpec, MCPToolSpec
 from orchestrator.tools import (
     MCPServerPool,
     MCPToolDef,

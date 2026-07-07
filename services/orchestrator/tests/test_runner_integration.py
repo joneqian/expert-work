@@ -14,7 +14,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from testcontainers.postgres import PostgresContainer
 
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import AgentState, GraphRunner
 
 pytestmark = pytest.mark.integration

@@ -1,6 +1,6 @@
-"""CI lint: enforce helix harness compliance on agent manifests.
+"""CI lint: enforce expert_work harness compliance on agent manifests.
 
-Stream SE (SE-15 / Mini-ADR SE-A34..A37). helix is a *declarative*
+Stream SE (SE-15 / Mini-ADR SE-A34..A37). expert_work is a *declarative*
 harness — an agent's seven orthogonal components (system rules / tool
 descriptions / tool implementations / middleware / skills / sub-agents /
 long-term memory) are declared in an ``AgentSpec`` manifest and assembled
@@ -49,13 +49,13 @@ from typing import Any, Final
 
 import yaml
 
-# helix-protocol is pure-pydantic and always importable in the lint env.
-from helix_agent.protocol.agent_spec import (
+# expert-work-protocol is pure-pydantic and always importable in the lint env.
+from expert_work.protocol.agent_spec import (
     AgentSpec,
     BuiltinToolSpec,
     HTTPToolSpec,
 )
-from helix_agent.protocol.skill import HIGH_RISK_TOOLS
+from expert_work.protocol.skill import HIGH_RISK_TOOLS
 
 #: Lowercase-kebab identifier — the convention agent ``metadata.name``
 #: follows (e.g. ``canonical-agent``). Distinct from the snake_case
@@ -67,7 +67,7 @@ _AGENT_NAME_PATTERN: Final[str] = r"^[a-z][a-z0-9-]*$"
 #: CI self-check proves every committed manifest is compliant.
 _DEFAULT_ROOT: Final[str] = "manifests"
 
-_PROFILE_PATH: Final[str] = "tools/harness/helix_profile.yaml"
+_PROFILE_PATH: Final[str] = "tools/harness/expert_work_profile.yaml"
 
 
 def _repo_root() -> Path:

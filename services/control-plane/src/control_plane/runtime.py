@@ -32,14 +32,14 @@ from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigSe
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
 from control_plane.tenant_scope import bypass_rls_session
 from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolProvider
-from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
-from helix_agent.common.skill_activity import SkillActivityRecorder
-from helix_agent.common.skill_run_usage import SkillRunUsageRecorder
-from helix_agent.common.url_validation import validate_remote_url
-from helix_agent.persistence import ArtifactStore, KnowledgeStore
-from helix_agent.persistence.skill import SkillStore
-from helix_agent.persistence.token_usage_store import TokenUsageStore
-from helix_agent.protocol import (
+from expert_work.common.credentials import CredentialsResolver, CredentialsResolverError
+from expert_work.common.skill_activity import SkillActivityRecorder
+from expert_work.common.skill_run_usage import SkillRunUsageRecorder
+from expert_work.common.url_validation import validate_remote_url
+from expert_work.persistence import ArtifactStore, KnowledgeStore
+from expert_work.persistence.skill import SkillStore
+from expert_work.persistence.token_usage_store import TokenUsageStore
+from expert_work.protocol import (
     AgentSpec,
     ModelSpec,
     Provider,
@@ -48,14 +48,14 @@ from helix_agent.protocol import (
     resolve_extends,
     tier_satisfies,
 )
-from helix_agent.runtime.audit import DefaultSecretRedactor
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
-from helix_agent.runtime.middleware import LangfuseClient, RecordingLangfuseClient
-from helix_agent.runtime.runs import RunEventStore, RunManager, RunStore
-from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
-from helix_agent.runtime.storage import ObjectStore, ObjectStoreBackend, S3CompatibleConfig
-from helix_agent.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
+from expert_work.runtime.audit import DefaultSecretRedactor
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.llm import InMemoryRedisCache, LLMResponseCache
+from expert_work.runtime.middleware import LangfuseClient, RecordingLangfuseClient
+from expert_work.runtime.runs import RunEventStore, RunManager, RunStore
+from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.runtime.storage import ObjectStore, ObjectStoreBackend, S3CompatibleConfig
+from expert_work.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
 from orchestrator import (
     ActionJudge,
     BuiltAgent,
@@ -326,7 +326,7 @@ def make_provider_key_resolver(
 
     Translates :class:`CredentialsResolverError` into
     :class:`AgentFactoryError` here (control-plane) so the orchestrator's
-    ``build_llm_router`` stays free of any ``helix-common.credentials`` import.
+    ``build_llm_router`` stays free of any ``expert-work-common.credentials`` import.
     """
 
     async def _resolve(provider: str) -> list[str]:
@@ -687,7 +687,7 @@ def make_agent_builder(
             else None
         )
         # Phase 3 — resolve the platform tool-output-budget master switch
-        # (DB-wins over the HELIX_TOOL_OUTPUT_BUDGET env default). ``None`` lets
+        # (DB-wins over the EXPERT_WORK_TOOL_OUTPUT_BUDGET env default). ``None`` lets
         # build_agent fall back to the env default.
         platform_tool_budget_enabled = (
             await platform_tool_budget_config_service.effective_enabled()
@@ -729,7 +729,7 @@ def make_agent_builder(
 # build the concrete client. Resolution runs once per ``embed`` batch / once
 # per rerank / once per search — frequency is low, so no caching is needed.
 # The wrappers live here (control-plane glue) so the orchestrator package
-# never imports helix-common.credentials; they implement the orchestrator
+# never imports expert-work-common.credentials; they implement the orchestrator
 # protocols structurally.
 # ---------------------------------------------------------------------------
 

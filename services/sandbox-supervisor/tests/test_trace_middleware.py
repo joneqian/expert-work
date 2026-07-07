@@ -16,10 +16,10 @@ from fastapi import FastAPI
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from helix_agent.common.observability import (
-    HelixComponent,
+from expert_work.common.observability import (
+    ExpertWorkComponent,
     current_trace_id_hex,
-    helix_span,
+    expert_work_span,
     init_tracing,
     inject_context,
 )
@@ -59,7 +59,7 @@ def _client(app: FastAPI) -> httpx.AsyncClient:
 
 async def test_incoming_traceparent_continues_trace(tracing_setup: None) -> None:
     # Craft a real incoming traceparent the way the orchestrator would emit it.
-    with helix_span(HelixComponent.ORCHESTRATOR, "outbound"):
+    with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "outbound"):
         upstream_trace_id = current_trace_id_hex()
         headers: dict[str, str] = {}
         inject_context(headers)

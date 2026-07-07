@@ -1,7 +1,7 @@
 """CI lint: every ``environments/*.yaml`` must declare ``tls.min_version >= 1.2``.
 
 Per subsystems/28-reliability-primitives § 5.1 + § 8: TLS 1.0 / 1.1 must
-never reach a Helix-Agent service. The lint catches a stray ``tls.min_version: "1.0"``
+never reach a Expert Work service. The lint catches a stray ``tls.min_version: "1.0"``
 in a config that ships to prod before nginx / the application code does.
 
 Run via ``python tools/tls/check_tls_config.py`` from the repo root, or

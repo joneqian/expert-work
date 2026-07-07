@@ -15,8 +15,8 @@ from control_plane.domain_research import (
     needs_research,
     research_skill_name,
 )
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import SkillStatus
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import SkillStatus
 
 _NOW = datetime(2026, 6, 9, 12, 0, tzinfo=UTC)
 

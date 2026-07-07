@@ -17,7 +17,7 @@ import asyncio
 import time
 from collections.abc import Callable
 
-from helix_agent.persistence.platform_judge_config.base import (
+from expert_work.persistence.platform_judge_config.base import (
     PlatformJudgeConfigStore,
 )
 

@@ -1,7 +1,7 @@
 [project]
-name = "helix-agent-orchestrator"
+name = "expert-work-orchestrator"
 version = "0.0.0"
-description = "Helix-Agent orchestrator — LangGraph execution surface (Stream E)."
+description = "Expert Work orchestrator — LangGraph execution surface (Stream E)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -9,13 +9,13 @@ authors = [
     { name = "joneqian", email = "qian.qing0926@gmail.com" },
 ]
 dependencies = [
-    "helix-agent-common",
-    "helix-agent-persistence",
-    "helix-agent-protocol",
-    "helix-agent-runtime",
+    "expert-work-common",
+    "expert-work-persistence",
+    "expert-work-protocol",
+    "expert-work-runtime",
     # Pin past CVE-2026-28277 (langgraph) + CVE-2025-64439 / 2026-27794 / 2026-48775
     # (langgraph-checkpoint) + CVE-2026-48776 (langgraph-sdk, transitive).
-    # Mirrors helix-runtime; pinned directly so pip-audit catches regression.
+    # Mirrors expert-work-runtime; pinned directly so pip-audit catches regression.
     "langgraph>=1.0.10",
     "langgraph-checkpoint>=4.1.1",
     # E.7 web_search Tavily HTTP client (also reused by future E.8 HTTP tool).
@@ -28,7 +28,7 @@ dependencies = [
     "aiolimiter>=1.1,<2",
     # HX-12 ranked deferred-tool retrieval (Mini-ADR HX-I1): BM25 over the
     # deferred pool + CJK-aware tokenization (jieba precedent: J.5 keyword
-    # search in helix-persistence).
+    # search in expert-work-persistence).
     "rank-bm25>=0.2,<1",
     "jieba>=0.42,<1",
     # 2.2 — runtime validation of tool_call args against ToolSpec.parameters

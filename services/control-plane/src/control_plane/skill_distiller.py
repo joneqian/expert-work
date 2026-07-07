@@ -33,9 +33,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.protocol.skill import HIGH_RISK_TOOLS
-from helix_agent.runtime.middleware import LLMOutputValidationError
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.protocol.skill import HIGH_RISK_TOOLS
+from expert_work.runtime.middleware import LLMOutputValidationError
 
 __all__ = [
     "DistillerModel",

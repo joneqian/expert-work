@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.webhook_delivery_worker import WebhookDeliveryWorker
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryApprovalStore,
     InMemoryArtifactStore,
     InMemorySkillStore,
@@ -19,13 +19,13 @@ from helix_agent.persistence import (
     InMemoryWebhookDeliveryStore,
     InMemoryWebhookEndpointStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     WebhookDeliveryRecord,
     WebhookDeliveryStatus,
     WebhookEndpointRecord,
 )
-from helix_agent.runtime.runs import InMemoryRunStore, RunInfo, RunStatus
-from helix_agent.runtime.runs.schemas import DisconnectMode
+from expert_work.runtime.runs import InMemoryRunStore, RunInfo, RunStatus
+from expert_work.runtime.runs.schemas import DisconnectMode
 
 _NOW = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
 _SECRET = "topsecret-value"
@@ -39,7 +39,7 @@ class _FakeSecretStore:
 
     async def get(self, name: str, *, version: str | None = None) -> str:
         if name not in self._d:
-            from helix_agent.runtime.secret_store import SecretNotFoundError
+            from expert_work.runtime.secret_store import SecretNotFoundError
 
             raise SecretNotFoundError(name)
         return self._d[name]
@@ -151,8 +151,8 @@ async def test_2xx_marks_delivered_and_signs_body() -> None:
     url, body, headers = post.calls[0]
     assert url == "https://hooks.example.com/ingest"
     expected = "sha256=" + hmac.new(_SECRET.encode(), body, sha256).hexdigest()
-    assert headers["X-Helix-Signature-256"] == expected
-    assert headers["X-Helix-Event"] == "run.completed"
+    assert headers["X-Expert-Work-Signature-256"] == expected
+    assert headers["X-Expert-Work-Event"] == "run.completed"
 
 
 @pytest.mark.asyncio
@@ -426,7 +426,7 @@ async def test_no_skill_store_disables_promote_scan() -> None:
 @pytest.mark.asyncio
 async def test_feishu_endpoint_gets_bot_message() -> None:
     """Channel formats — a feishu endpoint receives the platform's text-bot
-    schema (not the helix envelope), and the HMAC signs the actual body."""
+    schema (not the expert_work envelope), and the HMAC signs the actual body."""
     import hashlib
     import hmac as hmac_mod
 
@@ -440,10 +440,10 @@ async def test_feishu_endpoint_gets_bot_message() -> None:
     parsed = json.loads(body)
     assert parsed["msg_type"] == "text"
     text = parsed["content"]["text"]
-    assert text.startswith("【Helix】运行完成")
+    assert text.startswith("【Expert Work】运行完成")
     assert "run_id: abc" in text
     expected = "sha256=" + hmac_mod.new(_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    assert headers["X-Helix-Signature-256"] == expected
+    assert headers["X-Expert-Work-Signature-256"] == expected
 
 
 @pytest.mark.asyncio
@@ -457,7 +457,7 @@ async def test_dingtalk_and_wecom_share_msgtype_shape() -> None:
 
         parsed = json.loads(post.calls[0][1])
         assert parsed["msgtype"] == "text", fmt
-        assert "【Helix】" in parsed["text"]["content"], fmt
+        assert "【Expert Work】" in parsed["text"]["content"], fmt
 
 
 def test_render_channel_body_unknown_format_falls_back_to_envelope() -> None:

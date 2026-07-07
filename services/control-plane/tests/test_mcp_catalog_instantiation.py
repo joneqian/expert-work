@@ -24,9 +24,9 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.persistence import InMemoryMcpConnectorCatalogStore
-from helix_agent.protocol import (
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.persistence import InMemoryMcpConnectorCatalogStore
+from expert_work.protocol import (
     McpConnectorAuthField,
     McpConnectorAuthSchema,
     McpConnectorCatalogRecord,

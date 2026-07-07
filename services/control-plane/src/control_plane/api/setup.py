@@ -37,13 +37,13 @@ from control_plane.keycloak import KeycloakAdminClient, KeycloakUnavailableError
 from control_plane.keycloak.errors import KeycloakUserExistsError
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence.auth import RoleBindingStore
-from helix_agent.persistence.tenant_config.base import TenantConfigStore
-from helix_agent.protocol import AuditAction
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store.base import SecretNotFoundError
+from expert_work.persistence.auth import RoleBindingStore
+from expert_work.persistence.tenant_config.base import TenantConfigStore
+from expert_work.protocol import AuditAction
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.secret_store.base import SecretNotFoundError
 
-logger = logging.getLogger("helix.control_plane.setup")
+logger = logging.getLogger("expert_work.control_plane.setup")
 
 _ACTOR = "setup-wizard"
 
@@ -115,7 +115,7 @@ def build_setup_router() -> APIRouter:
                 status_code=403,
                 detail={
                     "code": "SETUP_NOT_CONFIGURED",
-                    "message": "HELIX_AGENT_SETUP_TOKEN is not set; setup is disabled",
+                    "message": "EXPERT_WORK_SETUP_TOKEN is not set; setup is disabled",
                 },
             )
         if x_setup_token is None or not hmac.compare_digest(x_setup_token, settings.setup_token):
@@ -210,7 +210,7 @@ async def provision_platform_admin(
                 "code": "KEYCLOAK_ADMIN_SECRET_MISSING",
                 "message": (
                     "the Keycloak admin client secret is not provisioned in the secret "
-                    "store (helix-agent/platform/keycloak/admin-client-secret); seed it "
+                    "store (expert-work/platform/keycloak/admin-client-secret); seed it "
                     "before running setup"
                 ),
             },

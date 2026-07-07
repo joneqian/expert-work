@@ -2,7 +2,7 @@
 
 All-in-memory: the worker is exercised against InMemory stores; the
 cross-tenant SET-ROLE mechanics of the SQL path are integration-tested
-in ``packages/helix-persistence/tests/test_rls_integration.py``.
+in ``packages/expert-work-persistence/tests/test_rls_integration.py``.
 """
 
 from __future__ import annotations
@@ -12,10 +12,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.feedback_consumer import FeedbackConsumerWorker
-from helix_agent.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
-from helix_agent.persistence.memory.memory import InMemoryMemoryStore
-from helix_agent.persistence.thread_meta import InMemoryThreadMetaStore
-from helix_agent.protocol import MemoryItem
+from expert_work.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
+from expert_work.persistence.memory.memory import InMemoryMemoryStore
+from expert_work.persistence.thread_meta import InMemoryThreadMetaStore
+from expert_work.protocol import MemoryItem
 
 _TENANT = UUID("55555555-5555-5555-5555-555555555555")
 _USER = UUID("66666666-6666-6666-6666-666666666666")

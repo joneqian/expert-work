@@ -1,6 +1,6 @@
-# helix-agent-audit-backup-worker
+# expert-work-audit-backup-worker
 
-Helix-Agent **audit WORM backup worker** — streams unacked `audit_log` rows
+Expert Work **audit WORM backup worker** — streams unacked `audit_log` rows
 into an Object-Lock-enabled S3-compatible bucket and flips
 `backup_acked = true`. Lands through [Stream D.1c](../../docs/streams/STREAM-D-DESIGN.md).
 
@@ -32,4 +32,4 @@ into an Object-Lock-enabled S3-compatible bucket and flips
 uv run python -m audit_backup_worker
 ```
 
-Settings: `HELIX_AUDIT_BACKUP_*` env (see `settings.py`).
+Settings: `EXPERT_WORK_AUDIT_BACKUP_*` env (see `settings.py`).

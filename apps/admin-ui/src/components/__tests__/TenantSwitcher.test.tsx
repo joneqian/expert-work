@@ -191,7 +191,7 @@ describe("TenantSwitcher — Stream N integration", () => {
         el.textContent?.includes("乐毅大公司") === true,
     );
     await user.click(item);
-    expect(window.sessionStorage.getItem("helix.admin.tenantScope")).toBe(tenantId);
+    expect(window.sessionStorage.getItem("expert_work.admin.tenantScope")).toBe(tenantId);
   });
 });
 

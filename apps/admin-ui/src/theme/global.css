@@ -1,4 +1,4 @@
-/* helix Admin UI demo — 全局基础样式 (Antd 不覆盖的部分) */
+/* Expert Work Admin UI demo — 全局基础样式 (Antd 不覆盖的部分) */
 
 *,
 *::before,
@@ -18,11 +18,11 @@ html {
 }
 
 body {
-  font-family: var(--hx-font-sans);
-  font-size: var(--hx-font-size-base);
-  line-height: var(--hx-line-height-snug);
-  color: var(--hx-text-primary);
-  background: var(--hx-surface-bg);
+  font-family: var(--ew-font-sans);
+  font-size: var(--ew-font-size-base);
+  line-height: var(--ew-line-height-snug);
+  color: var(--ew-text-primary);
+  background: var(--ew-surface-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -30,65 +30,65 @@ body {
 code,
 kbd,
 pre {
-  font-family: var(--hx-font-mono);
+  font-family: var(--ew-font-mono);
 }
 
 a {
-  color: var(--hx-text-link);
+  color: var(--ew-text-link);
   text-decoration: none;
 }
 a:hover {
-  color: var(--hx-text-link-hover);
+  color: var(--ew-text-link-hover);
 }
 
 :focus-visible {
-  outline: var(--hx-focus-ring-width) solid var(--hx-border-focus);
-  outline-offset: var(--hx-focus-ring-offset);
+  outline: var(--ew-focus-ring-width) solid var(--ew-border-focus);
+  outline-offset: var(--ew-focus-ring-offset);
 }
 
-/* helix kbd badge */
-.hx-kbd {
+/* Expert Work kbd badge */
+.ew-kbd {
   display: inline-block;
   padding: 1px 6px;
-  border: 1px solid var(--hx-border-default);
-  border-radius: var(--hx-radius-xs);
-  background: var(--hx-surface-overlay);
-  font-family: var(--hx-font-mono);
+  border: 1px solid var(--ew-border-default);
+  border-radius: var(--ew-radius-xs);
+  background: var(--ew-surface-overlay);
+  font-family: var(--ew-font-mono);
   font-size: 0.7rem;
-  color: var(--hx-text-secondary);
+  color: var(--ew-text-secondary);
   line-height: 1;
 }
 
 /* Antd 一些细微 override —— 大部分通过 ConfigProvider theme token 覆盖,
    这里仅补 ConfigProvider 接触不到的细节 */
 
-/* sidebar 选中态用 helix surface-selected,而不是 Antd 默认 */
-.hx-sidebar-menu .ant-menu-item-selected {
-  background: var(--hx-surface-selected) !important;
-  color: var(--hx-text-primary) !important;
+/* sidebar 选中态用 Expert Work surface-selected,而不是 Antd 默认 */
+.ew-sidebar-menu .ant-menu-item-selected {
+  background: var(--ew-surface-selected) !important;
+  color: var(--ew-text-primary) !important;
 }
-.hx-sidebar-menu .ant-menu-item:hover {
-  color: var(--hx-text-primary) !important;
+.ew-sidebar-menu .ant-menu-item:hover {
+  color: var(--ew-text-primary) !important;
 }
 
 /* 表格行高 36px、表头 uppercase xs — Antd density "small" 接近但不到位 */
-.hx-table .ant-table-thead > tr > th {
-  background: var(--hx-surface-raised) !important;
-  font-size: var(--hx-font-size-xs);
-  font-weight: var(--hx-font-weight-medium);
+.ew-table .ant-table-thead > tr > th {
+  background: var(--ew-surface-raised) !important;
+  font-size: var(--ew-font-size-xs);
+  font-weight: var(--ew-font-weight-medium);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--hx-text-tertiary);
-  border-bottom: 1px solid var(--hx-border-subtle) !important;
+  color: var(--ew-text-tertiary);
+  border-bottom: 1px solid var(--ew-border-subtle) !important;
 }
-.hx-table .ant-table-tbody > tr > td {
+.ew-table .ant-table-tbody > tr > td {
   padding-top: 8px;
   padding-bottom: 8px;
 }
 
 /* 数字单元格 mono + 右对齐 */
-.hx-num {
-  font-family: var(--hx-font-mono);
+.ew-num {
+  font-family: var(--ew-font-mono);
   text-align: right;
 }
 
@@ -96,65 +96,65 @@ a:hover {
    the shared <PageHeader> component: optional "‹ back" link → title row (icon +
    title left, actions right) → optional subtitle. Lives under a divider that
    separates the header from page content. */
-.hx-page-header {
+.ew-page-header {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--hx-border-subtle);
+  border-bottom: 1px solid var(--ew-border-subtle);
 }
-.hx-page-header-back {
+.ew-page-header-back {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: var(--hx-font-size-sm);
-  color: var(--hx-text-tertiary);
+  font-size: var(--ew-font-size-sm);
+  color: var(--ew-text-tertiary);
   width: fit-content;
 }
-.hx-page-header-back:hover {
-  color: var(--hx-text-secondary);
+.ew-page-header-back:hover {
+  color: var(--ew-text-secondary);
 }
-.hx-page-header-row {
+.ew-page-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
-.hx-page-header-title {
+.ew-page-header-title {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-.hx-page-header-title h1 {
-  font-size: var(--hx-font-size-lg);
-  font-weight: var(--hx-font-weight-semibold);
-  line-height: var(--hx-line-height-tight);
+.ew-page-header-title h1 {
+  font-size: var(--ew-font-size-lg);
+  font-weight: var(--ew-font-weight-semibold);
+  line-height: var(--ew-line-height-tight);
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.hx-page-header-title svg {
-  color: var(--hx-text-secondary);
+.ew-page-header-title svg {
+  color: var(--ew-text-secondary);
   flex-shrink: 0;
 }
-.hx-page-header-actions {
+.ew-page-header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
-.hx-page-header-subtitle {
-  font-size: var(--hx-font-size-sm);
-  color: var(--hx-text-secondary);
+.ew-page-header-subtitle {
+  font-size: var(--ew-font-size-sm);
+  color: var(--ew-text-secondary);
   margin: 0;
 }
 
 /* mono utility */
 .mono {
-  font-family: var(--hx-font-mono);
+  font-family: var(--ew-font-mono);
 }
 
 /* Skill file tree (skill_detail/FileTree) — GitHub-like compact tree:
@@ -180,122 +180,122 @@ a:hover {
 
 /* Rendered markdown (Playground answers / resumed history). Compact chat-bubble
    register: tight vertical rhythm, theme-token colors, wrapped code. */
-.hx-markdown {
+.ew-markdown {
   font-size: 13px;
   line-height: 1.6;
-  color: var(--hx-text-primary);
+  color: var(--ew-text-primary);
   word-break: break-word;
 }
-.hx-markdown > :first-child {
+.ew-markdown > :first-child {
   margin-top: 0;
 }
-.hx-markdown > :last-child {
+.ew-markdown > :last-child {
   margin-bottom: 0;
 }
-.hx-markdown p {
+.ew-markdown p {
   margin: 0 0 8px;
 }
-.hx-markdown h1,
-.hx-markdown h2,
-.hx-markdown h3,
-.hx-markdown h4,
-.hx-markdown h5,
-.hx-markdown h6 {
+.ew-markdown h1,
+.ew-markdown h2,
+.ew-markdown h3,
+.ew-markdown h4,
+.ew-markdown h5,
+.ew-markdown h6 {
   margin: 14px 0 6px;
   font-weight: 600;
   line-height: 1.35;
-  color: var(--hx-text-primary);
+  color: var(--ew-text-primary);
 }
-.hx-markdown h1 {
+.ew-markdown h1 {
   font-size: 18px;
 }
-.hx-markdown h2 {
+.ew-markdown h2 {
   font-size: 16px;
 }
-.hx-markdown h3 {
+.ew-markdown h3 {
   font-size: 14px;
 }
-.hx-markdown h4,
-.hx-markdown h5,
-.hx-markdown h6 {
+.ew-markdown h4,
+.ew-markdown h5,
+.ew-markdown h6 {
   font-size: 13px;
 }
-.hx-markdown ul,
-.hx-markdown ol {
+.ew-markdown ul,
+.ew-markdown ol {
   margin: 0 0 8px;
   padding-left: 20px;
 }
-.hx-markdown li {
+.ew-markdown li {
   margin: 2px 0;
 }
-.hx-markdown li > ul,
-.hx-markdown li > ol {
+.ew-markdown li > ul,
+.ew-markdown li > ol {
   margin: 2px 0;
 }
-.hx-markdown a {
-  color: var(--hx-text-link);
+.ew-markdown a {
+  color: var(--ew-text-link);
   text-decoration: none;
 }
-.hx-markdown a:hover {
-  color: var(--hx-text-link-hover);
+.ew-markdown a:hover {
+  color: var(--ew-text-link-hover);
   text-decoration: underline;
 }
-.hx-markdown strong {
+.ew-markdown strong {
   font-weight: 600;
-  color: var(--hx-text-primary);
+  color: var(--ew-text-primary);
 }
-.hx-markdown code {
-  font-family: var(--hx-font-mono);
+.ew-markdown code {
+  font-family: var(--ew-font-mono);
   font-size: 0.9em;
   padding: 1px 5px;
-  border-radius: var(--hx-radius-xs);
-  background: var(--hx-surface-raised);
-  border: 1px solid var(--hx-border-subtle);
+  border-radius: var(--ew-radius-xs);
+  background: var(--ew-surface-raised);
+  border: 1px solid var(--ew-border-subtle);
 }
-.hx-markdown pre {
+.ew-markdown pre {
   margin: 0 0 8px;
   padding: 10px 12px;
-  border-radius: var(--hx-radius-sm);
-  background: var(--hx-surface-raised);
-  border: 1px solid var(--hx-border-subtle);
+  border-radius: var(--ew-radius-sm);
+  background: var(--ew-surface-raised);
+  border: 1px solid var(--ew-border-subtle);
   overflow-x: auto;
 }
-.hx-markdown pre code {
+.ew-markdown pre code {
   padding: 0;
   border: none;
   background: transparent;
   font-size: 12px;
   line-height: 1.5;
 }
-.hx-markdown blockquote {
+.ew-markdown blockquote {
   margin: 0 0 8px;
   padding: 2px 12px;
-  border-left: 3px solid var(--hx-border-default);
-  color: var(--hx-text-secondary);
+  border-left: 3px solid var(--ew-border-default);
+  color: var(--ew-text-secondary);
 }
-.hx-markdown hr {
+.ew-markdown hr {
   border: none;
-  border-top: 1px solid var(--hx-border-subtle);
+  border-top: 1px solid var(--ew-border-subtle);
   margin: 12px 0;
 }
-.hx-markdown table {
+.ew-markdown table {
   border-collapse: collapse;
   margin: 0 0 8px;
   font-size: 12px;
   display: block;
   overflow-x: auto;
 }
-.hx-markdown th,
-.hx-markdown td {
-  border: 1px solid var(--hx-border-subtle);
+.ew-markdown th,
+.ew-markdown td {
+  border: 1px solid var(--ew-border-subtle);
   padding: 4px 8px;
   text-align: left;
 }
-.hx-markdown th {
-  background: var(--hx-surface-raised);
+.ew-markdown th {
+  background: var(--ew-surface-raised);
   font-weight: 600;
 }
-.hx-markdown img {
+.ew-markdown img {
   max-width: 100%;
-  border-radius: var(--hx-radius-sm);
+  border-radius: var(--ew-radius-sm);
 }

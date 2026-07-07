@@ -28,21 +28,21 @@ from control_plane.memory_consolidator import (
     make_null_consolidator_aux_model,
 )
 from control_plane.tenancy import TenantConfigService
-from helix_agent.persistence import InMemoryMemoryStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.memory.hash import hash_content
-from helix_agent.persistence.tenant_config import InMemoryTenantConfigStore
-from helix_agent.protocol import (
+from expert_work.persistence import InMemoryMemoryStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.memory.hash import hash_content
+from expert_work.persistence.tenant_config import InMemoryTenantConfigStore
+from expert_work.protocol import (
     AuditAction,
     AuditQuery,
     MemoryItem,
     StructuredOutputSpec,
     TenantConfigPatch,
 )
-from helix_agent.runtime.audit.fallback import InMemoryAuditFallbackQueue
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.audit.redactor import DefaultSecretRedactor
-from helix_agent.runtime.middleware import LLMOutputValidationError
+from expert_work.runtime.audit.fallback import InMemoryAuditFallbackQueue
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.redactor import DefaultSecretRedactor
+from expert_work.runtime.middleware import LLMOutputValidationError
 
 _TENANT = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
 _USER = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
@@ -587,7 +587,7 @@ async def test_aux_calls_write_token_usage_rows() -> None:
     """Chargeback — every consolidator aux call lands one token_usage row
     with usage_kind='memory_consolidation' and tenant/user attribution
     (the other half of the SE-A43 aux-metering gap)."""
-    from helix_agent.persistence.token_usage_store import InMemoryTokenUsageStore
+    from expert_work.persistence.token_usage_store import InMemoryTokenUsageStore
 
     usage_store = InMemoryTokenUsageStore()
     store = InMemoryMemoryStore()

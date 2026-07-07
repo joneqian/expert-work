@@ -24,7 +24,7 @@ the next run — rows are never lost.
 
 ## Configuration
 
-Env prefix `HELIX_EVENT_LOG_ARCHIVE_` — see `settings.py`. Key knobs:
+Env prefix `EXPERT_WORK_EVENT_LOG_ARCHIVE_` — see `settings.py`. Key knobs:
 `db_dsn`, `archive_age_days` (default 180), `object_store_backend`
 (`s3-compatible` / `memory`), `s3_*`, `batch_size`.
 

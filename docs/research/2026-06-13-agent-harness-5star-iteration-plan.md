@@ -1,4 +1,4 @@
-# Helix Harness 满分化迭代计划（价值优先排序）
+# Expert Work Harness 满分化迭代计划（价值优先排序）
 
 > ⚠️ **已被 [`2026-06-15-5star-iteration-plan-v2.md`](./2026-06-15-5star-iteration-plan-v2.md) 取代**
 > （基于 06-15 能力重核重排：eval 平台已交付、沙箱安全已自愈、新增 T0 廉价收割层）。本文留作历史。
@@ -10,7 +10,7 @@
 
 评估报告给出 86 项、均分 4.37/5（含 W0 修订）。目标：**23 个非满分项全部拉到 5★**。
 本计划按 **ROI = 商业价值 + agent 能力提升** 降序排，**不**按实现成本/时间排。
-多项与 helix 既有 M1 backlog 重叠，尽量复用既有 Stream ID 不另起炉灶。
+多项与 Expert Work 既有 M1 backlog 重叠，尽量复用既有 Stream ID 不另起炉灶。
 
 **23 个待提升项**（现分→目标 5）：
 1.3(3) 3.3(3) 4.1(3) 4.4(3) 7.2(2) 7.3(2) 7.4(3) 7.6(2) 8.5(3) 9.4(2) 9.5(2)
@@ -21,7 +21,7 @@
 ## 排序口径
 
 **ROI = 商业价值 + agent 能力提升**，工作量仅作排期参考列，不参与优先级排序。
-商业价值锚点 = helix 产品形态：**per-user 持久 agent**（长程自主 + 长期记忆 + 持久工作区）
+商业价值锚点 = Expert Work 产品形态：**per-user 持久 agent**（长程自主 + 长期记忆 + 持久工作区）
 + 平台中心化治理/变现。据此商业价值四驱动：
 ① agent 自主能力（自改进/长程）= 产品护城河 ② 企业信任（安全/治理）= 销售门槛
 ③ 变现（计量/计费）= 收入 ④ 规模可靠性（HA）= 让①在规模下成立。
@@ -121,7 +121,7 @@
   （`test_concurrent_two_threads_no_state_bleed` + `test_concurrent_long_sessions_no_pollution`），
   5 passed。坐实 5★。
 - **10.1 连接式 trace ❌ 下调 4→2，移出 W0**：核实发现 W3C 传播层（`propagation.py`）真落地，
-  但 `run_agent()` 无 `helix.session.run` 根 span、Span Link 零实现、LLM/tool 业务 span 缺——
+  但 `run_agent()` 无 `expert_work.session.run` 根 span、Span Link 零实现、LLM/tool 业务 span 缺——
   连接式 trace 核心未实装（~25-30h L 工作量，非数天验证）。**重归类至 P1**：它是 11.4
   trace-based eval 的前置（没有真 span 树就无法做 trace eval），与 eval 飞轮同批做。
 
@@ -130,8 +130,8 @@
 为什么第一：自改进 = 产品护城河。eval 平台是飞轮（测得准才改得动），evaluator-optimizer +
 自写 skill 让 agent 自我提升。7 项共享 eval/trace 基础设施，一并起。
 
-- **10.1 连接式 trace 实装（飞轮地基 / 11.4 前置）**：`run_agent()` 包 `helix.session.run`
-  根 span；agent_node/tools_node 加 LLM/tool child span；`helix_span()` 扩 `links=`，
+- **10.1 连接式 trace 实装（飞轮地基 / 11.4 前置）**：`run_agent()` 包 `expert_work.session.run`
+  根 span；agent_node/tools_node 加 LLM/tool child span；`expert_work_span()` 扩 `links=`，
   subagent/durable-resume 接 Span Link。补完整 run trace 集成测试。2→5。
 - **11.6 生产 eval worker** ✅ **(2→5, #618/#620/#622 + FE #623)**：`eval_run`/`eval_case_result` 表 + 常驻 `EvalWorker`（lifespan 门控）+ enqueue/read API + admin-ui Eval 页。端到端。
 - **11.3 会话级结果指标** ✅ **(1→5, #624)**：`session_metrics_from_cases` 出 `goal_completion`，端到端 plumb 引擎→worker→API→FE；escalation 仅信号时出不零填。

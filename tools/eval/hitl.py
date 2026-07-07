@@ -34,8 +34,8 @@ from uuid import uuid4
 import yaml
 from pydantic import ValidationError
 
-from helix_agent.persistence import InMemoryApprovalStore
-from helix_agent.protocol import ApprovalDecision, ApprovalRecord, ApprovalStatus
+from expert_work.persistence import InMemoryApprovalStore
+from expert_work.protocol import ApprovalDecision, ApprovalRecord, ApprovalStatus
 from orchestrator.graph_builder._approval import (
     apply_resume_decision,
     build_approval_request,

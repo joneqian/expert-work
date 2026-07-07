@@ -138,7 +138,7 @@ class AuditLogger:
 
 ```
 GET  /v1/audit?actor_id=&action=&resource_type=&from=&to=&limit=&cursor=
-                                              → AuditPage（X-Helix-Tenant 必填）
+                                              → AuditPage（X-Expert-Work-Tenant 必填）
 GET  /v1/audit/{id}                           → AuditEntry（detail）
 POST /v1/audit/exports                        → 202 + export_job_id（admin only, M2）
 GET  /v1/audit/exports/{id}                   → ExportJob（含下载链接）
@@ -279,14 +279,14 @@ admin 查 audit 自身也写一条 `action='audit:read'`，避免"管理员悄�
 ### 7.1 Prometheus metric
 
 ```
-helix_audit_write_total{tenant, action, result}                     counter
-helix_event_log_append_duration_seconds                             histogram   # 与 20 § 5.2 对齐（统一 *_duration_seconds 命名）
-helix_audit_redact_hit_total{pattern}                               counter
-helix_audit_fallback_queue_depth                                    gauge
-helix_audit_query_total{tenant_scope="self|cross", result}          counter
-helix_audit_query_duration_seconds                                  histogram   # 命名对齐 *_duration_seconds
-helix_audit_hash_chain_break_total{tenant}                          counter     # M2，应永远 0
-helix_audit_archive_lag_seconds{tenant}                             gauge
+expert_work_audit_write_total{tenant, action, result}                     counter
+expert_work_event_log_append_duration_seconds                             histogram   # 与 20 § 5.2 对齐（统一 *_duration_seconds 命名）
+expert_work_audit_redact_hit_total{pattern}                               counter
+expert_work_audit_fallback_queue_depth                                    gauge
+expert_work_audit_query_total{tenant_scope="self|cross", result}          counter
+expert_work_audit_query_duration_seconds                                  histogram   # 命名对齐 *_duration_seconds
+expert_work_audit_hash_chain_break_total{tenant}                          counter     # M2，应永远 0
+expert_work_audit_archive_lag_seconds{tenant}                             gauge
 ```
 
 ### 7.2 OTel span

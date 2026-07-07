@@ -20,13 +20,13 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryUserWorkspaceStore,
     InMemoryVolumeBackupDLQ,
 )
-from helix_agent.protocol import AuditEntry, UserWorkspace
-from helix_agent.protocol.audit import AuditAction
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.protocol import AuditEntry, UserWorkspace
+from expert_work.protocol.audit import AuditAction
+from expert_work.runtime.storage import InMemoryObjectStore
 from sandbox_supervisor.docker_client import DockerError
 from sandbox_supervisor.lifecycle import (
     _BACKOFF_SECONDS,
@@ -149,7 +149,7 @@ async def test_archive_pending_uploads_and_marks_archived() -> None:
     result = await manager.archive_pending()
 
     assert result == LifecycleResult(succeeded=1, failed=0)
-    assert docker.archive_calls == [(workspace.volume_name, "helix-sandbox:dev")]
+    assert docker.archive_calls == [(workspace.volume_name, "expert-work-sandbox:dev")]
     assert workspace.volume_name in docker.removed
 
     expected_key = _archive_key("volume-archive", workspace)
@@ -187,7 +187,7 @@ async def test_archive_pending_dlq_on_object_store_error(monkeypatch) -> None:
     manager, dlq, object_store, _audit = _manager(store=store, docker=docker)
 
     async def _put_failing(*_args, **_kwargs) -> None:
-        from helix_agent.runtime.storage.base import ObjectStoreError
+        from expert_work.runtime.storage.base import ObjectStoreError
 
         msg = "503"
         raise ObjectStoreError(msg)

@@ -41,7 +41,7 @@ from typing import Self
 from aiolimiter import AsyncLimiter
 from langchain_core.messages import AIMessage, BaseMessage
 
-from helix_agent.protocol import StructuredOutputSpec
+from expert_work.protocol import StructuredOutputSpec
 from orchestrator.llm.router import LLMProvider
 from orchestrator.tools.registry import ToolSpec
 

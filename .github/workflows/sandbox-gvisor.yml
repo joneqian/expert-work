@@ -19,14 +19,14 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/helix-runtime/src/helix_agent/runtime/sandbox/**"
+      - "packages/expert-work-runtime/src/expert_work/runtime/sandbox/**"
       - "services/sandbox-supervisor/**"
       - "infra/sandbox-image/**"
       - ".github/workflows/sandbox-gvisor.yml"
   pull_request:
     branches: [main]
     paths:
-      - "packages/helix-runtime/src/helix_agent/runtime/sandbox/**"
+      - "packages/expert-work-runtime/src/expert_work/runtime/sandbox/**"
       - "services/sandbox-supervisor/**"
       - "infra/sandbox-image/**"
       - ".github/workflows/sandbox-gvisor.yml"
@@ -95,7 +95,7 @@ jobs:
 
       - name: Run sandbox acceptance suite under gVisor
         env:
-          HELIX_TEST_SANDBOX_RUNTIME: runsc
+          EXPERT_WORK_TEST_SANDBOX_RUNTIME: runsc
         run: >-
           uv run pytest -v -m integration
           services/sandbox-supervisor/tests/test_supervisor_integration.py

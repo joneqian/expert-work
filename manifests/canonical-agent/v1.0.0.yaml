@@ -2,7 +2,7 @@
 #
 # This is the agent the canonical-agent-e2e-test.md SOP registers and runs
 # through Phases 1-6. It is authored against the live `AgentSpec` schema
-# (packages/helix-protocol/.../agent_spec.py) and is kept loadable by
+# (packages/expert-work-protocol/.../agent_spec.py) and is kept loadable by
 # services/control-plane/tests/test_canonical_manifest.py — that test is the
 # CI guard that this file never drifts out of validity.
 #
@@ -20,7 +20,7 @@
 # An admin pastes the key once in /settings/platform; it is encrypted at rest
 # and every agent on that provider uses it. The manifest never embeds a key,
 # and may optionally pin `api_key_ref: secret://...` to override per-agent.
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: canonical-agent
@@ -57,7 +57,7 @@ spec:
 
   system_prompt:
     template: |
-      You are the canonical Helix reference agent. Be concise and helpful.
+      You are the canonical Expert Work reference agent. Be concise and helpful.
       You have web_search and an HTTP tool. Use long-term memory to recall
       facts the user told you in earlier sessions. When you need to call the
       HTTP tool, expect a human to approve the call first.

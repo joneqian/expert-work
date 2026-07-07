@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from helix_agent.protocol.skill import EvolutionOrigin, SkillVersion
+from expert_work.protocol.skill import EvolutionOrigin, SkillVersion
 from orchestrator.agent_factory import _bound_distilled_skills
 
 _TENANT = UUID("55555555-5555-5555-5555-555555555555")

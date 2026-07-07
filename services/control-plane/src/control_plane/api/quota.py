@@ -24,9 +24,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from control_plane.api._authz import require
 from control_plane.audit import emit
 from control_plane.quota.base import QuotaService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.quota import ReservationNotFoundError
-from helix_agent.protocol import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.quota import ReservationNotFoundError
+from expert_work.protocol import (
     AuditAction,
     AuditResult,
     CheckRequest,
@@ -36,9 +36,9 @@ from helix_agent.protocol import (
     ReserveRequest,
     ReserveResult,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.api.quota")
+logger = logging.getLogger("expert_work.control_plane.api.quota")
 
 
 def _get_quota(request: Request) -> QuotaService:

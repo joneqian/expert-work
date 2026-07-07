@@ -15,11 +15,11 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
-from helix_agent.persistence.audit_log import AuditLogStore, InMemoryAuditLogStore
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
-from helix_agent.runtime.audit.fallback import InMemoryAuditFallbackQueue
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.audit.redactor import (
+from expert_work.persistence.audit_log import AuditLogStore, InMemoryAuditLogStore
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult
+from expert_work.runtime.audit.fallback import InMemoryAuditFallbackQueue
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.redactor import (
     AuditRedactor,
     DefaultSecretRedactor,
     PiiFieldsResolver,
@@ -146,7 +146,7 @@ ResourceType = Literal[
     "platform_credential",  # Stream P — Mini-ADR P-11 (/v1/platform/credentials)
     # Capability Uplift Sprint #7 (Mini-ADR U-42) — MemoryConsolidator.
     # Mirrors the protocol-side ``resource_type`` Literal in
-    # packages/helix-protocol/src/helix_agent/protocol/audit.py per
+    # packages/expert-work-protocol/src/expert_work/protocol/audit.py per
     # [memory:audit-literal-drift] (both must stay in sync).
     "memory_item",
     "tenant_member",  # Stream R — Mini-ADR R-3 (member onboarding)
@@ -154,7 +154,7 @@ ResourceType = Literal[
     "tenant_mcp_server",  # Stream V — tenant remote MCP server registry
     # Stream W — platform MCP connector catalog. Mirrors the protocol-side
     # ``ResourceType`` Literal in
-    # packages/helix-protocol/src/helix_agent/protocol/audit.py per
+    # packages/expert-work-protocol/src/expert_work/protocol/audit.py per
     # [memory:audit-literal-drift] (both must stay in sync).
     "mcp_connector_catalog",
     # Stream Y — platform model rate card (Y-3). Mirrors the protocol-side

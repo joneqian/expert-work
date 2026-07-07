@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any
 
-from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
+from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
 
 #: Max bytes a single ``str`` leaf may have before strict scanning rejects it.
 MAX_FIELD_BYTES = 10 * 1024

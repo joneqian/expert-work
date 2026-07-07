@@ -32,7 +32,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
 
-from helix_agent.common.observability import helix_counter
+from expert_work.common.observability import expert_work_counter
 from orchestrator.llm.router import AllProvidersExhaustedError
 
 logger = logging.getLogger(__name__)
@@ -49,8 +49,8 @@ TRANSIENT_RUN_ERRORS: tuple[type[BaseException], ...] = (AllProvidersExhaustedEr
 #: policy would be a separate feature surface.
 MAX_RUN_RETRIES = 1
 
-_ENABLED_ENV = "HELIX_RUN_TRANSIENT_RETRY"
-_BACKOFF_ENV = "HELIX_RUN_RETRY_BACKOFF_S"
+_ENABLED_ENV = "EXPERT_WORK_RUN_TRANSIENT_RETRY"
+_BACKOFF_ENV = "EXPERT_WORK_RUN_RETRY_BACKOFF_S"
 _DEFAULT_BACKOFF_S = 10.0
 _BACKOFF_MIN_S = 1.0
 _BACKOFF_MAX_S = 120.0
@@ -60,15 +60,15 @@ _FALSEY = frozenset({"0", "false", "no", "off"})
 #: ``failed_again`` — the second attempt also died (any failure class).
 #: A guard rejection emits no sample: the run takes the unchanged ERROR
 #: path, already observable via ``agent_run.error``.
-run_retry_total = helix_counter(
-    "helix_orchestrator_run_retry_total",
+run_retry_total = expert_work_counter(
+    "expert_work_orchestrator_run_retry_total",
     "Run-level transient retries by final outcome (Stream HX-3).",
     ("outcome",),
 )
 
 
 def retry_enabled() -> bool:
-    """``HELIX_RUN_TRANSIENT_RETRY`` — default on; explicit falsey disables."""
+    """``EXPERT_WORK_RUN_TRANSIENT_RETRY`` — default on; explicit falsey disables."""
     raw = os.environ.get(_ENABLED_ENV)
     if raw is None:
         return True
@@ -76,7 +76,7 @@ def retry_enabled() -> bool:
 
 
 def retry_backoff_s() -> float:
-    """``HELIX_RUN_RETRY_BACKOFF_S`` clamped to [1, 120]; bad parse → default."""
+    """``EXPERT_WORK_RUN_RETRY_BACKOFF_S`` clamped to [1, 120]; bad parse → default."""
     raw = os.environ.get(_BACKOFF_ENV)
     if raw is None:
         return _DEFAULT_BACKOFF_S

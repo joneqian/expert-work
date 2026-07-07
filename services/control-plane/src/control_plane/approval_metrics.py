@@ -2,7 +2,7 @@
 
 A run paused for human approval sits in ``agent_approval`` until a
 verdict or the 24h timeout sweep. This single-replica lifespan task
-refreshes ``helix_control_plane_approvals_pending`` every cycle so a
+refreshes ``expert_work_control_plane_approvals_pending`` every cycle so a
 growing queue (approvals nobody is answering) is visible and alertable
 — the skill-curator gauge precedent.
 
@@ -21,18 +21,18 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from helix_agent.common.observability import helix_counter, helix_gauge
-from helix_agent.persistence import ApprovalStore
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.common.observability import expert_work_counter, expert_work_gauge
+from expert_work.persistence import ApprovalStore
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
 
 logger = logging.getLogger(__name__)
 
-_approvals_pending = helix_gauge(
-    "helix_control_plane_approvals_pending",
+_approvals_pending = expert_work_gauge(
+    "expert_work_control_plane_approvals_pending",
     "Approval rows currently pending a human verdict, platform-wide (Stream HX-4).",
 )
-_cycle_errors = helix_counter(
-    "helix_control_plane_approval_gauge_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_approval_gauge_cycle_errors_total",
     "ApprovalGaugeWorker cycles that ended in a caught exception.",
 )
 

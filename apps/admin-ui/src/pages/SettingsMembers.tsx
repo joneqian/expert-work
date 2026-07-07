@@ -525,7 +525,7 @@ export function SettingsMembers() {
       >
         <p
           style={{
-            color: "var(--hx-text-secondary)",
+            color: "var(--ew-text-secondary)",
             fontSize: 13,
             margin: "0 0 12px",
           }}

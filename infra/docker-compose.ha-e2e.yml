@@ -26,8 +26,8 @@
 #       --profile full up -d --no-deps control-plane-blue control-plane-green
 #   uv run python tools/ha/verify_failover.py
 x-ha-env: &ha-env
-  HELIX_AGENT_CHECKPOINTER_BACKEND: postgres
-  HELIX_AGENT_CHECKPOINTER_DSN: postgresql://${HELIX_DB_USER:-helix_agent}:${HELIX_DB_PASSWORD:-helix_agent_dev}@postgres:5432/${HELIX_DB_NAME:-helix_agent_dev}
+  EXPERT_WORK_CHECKPOINTER_BACKEND: postgres
+  EXPERT_WORK_CHECKPOINTER_DSN: postgresql://${EXPERT_WORK_DB_USER:-expert_work}:${EXPERT_WORK_DB_PASSWORD:-expert_work_dev}@postgres:5432/${EXPERT_WORK_DB_NAME:-expert_work_dev}
   # Dev OIDC config (docs/runbooks/getting-started.md). The control-plane reads
   # OIDC settings from env only; ``make dev-up`` injects these via the operator's
   # infra/.env, but bringing a colour up directly with this overlay does not
@@ -36,9 +36,9 @@ x-ha-env: &ha-env
   # ``iss``; JWKS is fetched from Keycloak over the internal compose hostname
   # (the localhost issuer is not reachable inside the container); both dev client
   # audiences are accepted.
-  HELIX_AGENT_OIDC_ISSUER: http://localhost:8080/realms/helix-agent
-  HELIX_AGENT_OIDC_JWKS_URI: http://keycloak:8080/realms/helix-agent/protocol/openid-connect/certs
-  HELIX_AGENT_OIDC_AUDIENCE: '["helix-agent-api-internal","helix-agent-admin-ui"]'
+  EXPERT_WORK_OIDC_ISSUER: http://localhost:8080/realms/expert-work
+  EXPERT_WORK_OIDC_JWKS_URI: http://keycloak:8080/realms/expert-work/protocol/openid-connect/certs
+  EXPERT_WORK_OIDC_AUDIENCE: '["expert-work-api-internal","expert-work-admin-ui"]'
 
 services:
   control-plane-blue:

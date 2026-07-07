@@ -7,7 +7,7 @@
 ## 1. 职责 & 边界
 
 ### ✅ 做
-- **secret 注入**：sandbox / orchestrator 发出的 outbound HTTP 请求带 `X-Helix-Secret-Ref: <ref>`，proxy 解析后替换为真实 `Authorization: Bearer <token>`（或其他 header / query 参数）
+- **secret 注入**：sandbox / orchestrator 发出的 outbound HTTP 请求带 `X-Expert-Work-Secret-Ref: <ref>`，proxy 解析后替换为真实 `Authorization: Bearer <token>`（或其他 header / query 参数）
 - **secret allow-list**：每个 manifest 在加载时声明能引用的 secret refs，proxy 强制核对；越权引用 → 403
 - **进程内 LRU 缓存**：减少 Vault 压力，TTL 取自 secret 元数据（静态 secret 长 TTL，dynamic 短 TTL）
 - **Vault 集成**：M0 静态 KV，M1 dynamic（DB credential / 短 TTL token）
@@ -28,7 +28,7 @@
 ```
        sandbox / orchestrator
                 │
-                │ outbound HTTP (header: X-Helix-Secret-Ref: <ref>)
+                │ outbound HTTP (header: X-Expert-Work-Secret-Ref: <ref>)
                 ▼
         ┌───────────────────────┐
         │  Credential Proxy     │
@@ -94,7 +94,7 @@ CREATE INDEX credential_proxy_audit_session ON credential_proxy_audit (session_i
 ### 3.2 Pydantic Schema — secret 元数据与注入规则
 
 ```python
-# packages/helix-protocol/src/helix/protocol/credential.py
+# packages/expert-work-protocol/src/Expert Work/protocol/credential.py
 from pydantic import BaseModel, Field
 from typing import Literal
 
@@ -125,7 +125,7 @@ class ProxyRouteConfig(BaseModel):
 
 ```
 [req in]
-   │ 1. 解析 X-Helix-Secret-Ref
+   │ 1. 解析 X-Expert-Work-Secret-Ref
    ▼
 [parse_ref] ─ missing ─► 透传（无敏感注入），仅记 audit
    │ ok
@@ -147,7 +147,7 @@ class ProxyRouteConfig(BaseModel):
    ▼
 [audit] write credential_proxy_audit
    ▼
-[resp out]   header X-Helix-Secret-Ref 必须从响应中**剥离**
+[resp out]   header X-Expert-Work-Secret-Ref 必须从响应中**剥离**
 ```
 
 ---
@@ -156,18 +156,18 @@ class ProxyRouteConfig(BaseModel):
 
 ### 4.1 调用方契约（sandbox / orchestrator / 控制面服务视角）
 
-**M0 工作模式 = 显式代理**：所有调用方（sandbox、orchestrator、MCP Gateway 等控制面服务）必须**显式**地把 outbound 请求发到 `credential-proxy.internal:443/forward`，并通过 `X-Helix-Upstream` header 声明真实上游目标，通过 `X-Helix-Secret-Ref` header 声明要注入的 secret 引用。proxy 解析后注入真实 `Authorization` 头并转发到上游。
+**M0 工作模式 = 显式代理**：所有调用方（sandbox、orchestrator、MCP Gateway 等控制面服务）必须**显式**地把 outbound 请求发到 `credential-proxy.internal:443/forward`，并通过 `X-Expert-Work-Upstream` header 声明真实上游目标，通过 `X-Expert-Work-Secret-Ref` header 声明要注入的 secret 引用。proxy 解析后注入真实 `Authorization` 头并转发到上游。
 
 ```http
 POST https://credential-proxy.internal:443/forward
 Host: credential-proxy.internal
-X-Helix-Tenant: tenant-x
-X-Helix-Agent: code-reviewer-agent
-X-Helix-Agent-Version: 1.4.2
-X-Helix-Session: <uuid>
-X-Helix-Sandbox: <sandbox_id>           # 由 sandbox supervisor 注入
-X-Helix-Secret-Ref: anthropic/api-key
-X-Helix-Upstream: https://api.anthropic.com/v1/messages
+X-Expert-Work-Tenant: tenant-x
+X-Expert-Work-Agent: code-reviewer-agent
+X-Expert-Work-Agent-Version: 1.4.2
+X-Expert-Work-Session: <uuid>
+X-Expert-Work-Sandbox: <sandbox_id>           # 由 sandbox supervisor 注入
+X-Expert-Work-Secret-Ref: anthropic/api-key
+X-Expert-Work-Upstream: https://api.anthropic.com/v1/messages
 Content-Type: application/json
 
 {...原始请求体...}
@@ -183,8 +183,8 @@ Content-Type: application/json
 ### 4.2 SDK helper（业务代码不直接拼 header）
 
 ```python
-# packages/helix-sdk/src/helix/sdk/secret.py
-from helix.sdk import AgentContext
+# packages/expert-work-sdk/src/Expert Work/sdk/secret.py
+from expert_work.sdk import AgentContext
 
 async def fetch_with_secret(
     ctx: AgentContext,
@@ -236,13 +236,13 @@ class SecretCache:
 
 ### 5.2 sandbox 流量强制经过 proxy（**关键决策：显式代理**）
 
-**M0 显式代理模式**：sandbox 内业务代码必须显式 POST 到 `https://credential-proxy.internal:443/forward`，并带 `X-Helix-Upstream` + `X-Helix-Secret-Ref` header；不存在透明拦截，任何直连真实 host 的尝试都会失败。
+**M0 显式代理模式**：sandbox 内业务代码必须显式 POST 到 `https://credential-proxy.internal:443/forward`，并带 `X-Expert-Work-Upstream` + `X-Expert-Work-Secret-Ref` header；不存在透明拦截，任何直连真实 host 的尝试都会失败。
 
 由 [21 Network Policy](./21-network-policy.md) 配合：sandbox 出站 iptables 仅放行目标 = `credential-proxy.internal:443`；任何尝试直连外部 IP 的流量会被 DROP（不是 REDIRECT，是 DROP，因此调用方必须显式地把请求送到 proxy）。
 
 **测试用例**（M0 必跑）：
 1. sandbox 内 `curl https://api.anthropic.com/v1/messages` → **必须 connection refused**（绕过 proxy 直连被 DROP）
-2. sandbox 内 `curl -H "X-Helix-Secret-Ref: anthropic/api-key" -H "X-Helix-Upstream: https://api.anthropic.com/..." https://credential-proxy.internal:443/forward` → 200
+2. sandbox 内 `curl -H "X-Expert-Work-Secret-Ref: anthropic/api-key" -H "X-Expert-Work-Upstream: https://api.anthropic.com/..." https://credential-proxy.internal:443/forward` → 200
 3. sandbox 内 `cat /run/secrets/* 2>&1` → 全为空
 4. sandbox 内 `env | grep -i token` → 无敏感 env
 
@@ -293,31 +293,31 @@ tools:
 ## 7. 可观测性
 
 > 日志完整字段遵循 [20 § 5.3](./20-observability.md)，此处仅展示子系统专属字段。
-> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `helix_*` 前缀（snake_case），span 统一 `helix.{component}.{action}`。
+> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `expert_work_*` 前缀（snake_case），span 统一 `expert_work.{component}.{action}`。
 
 ### Prometheus metrics
 
 ```
-helix_credential_proxy_requests_total{tenant,agent,upstream_host,status}
-helix_credential_proxy_inject_total{tenant,secret_ref,inject_kind,status}
-helix_credential_proxy_cache_hits_total{tenant,secret_kind}
-helix_credential_proxy_cache_misses_total{tenant,secret_kind}
-helix_credential_proxy_vault_duration_seconds{operation}                 histogram
-helix_credential_proxy_upstream_duration_seconds{upstream_host}          histogram
-helix_credential_proxy_upstream_401_total{tenant,secret_ref}             counter（异常告警）
-helix_credential_proxy_denied_total{tenant,reason}                       counter
+expert_work_credential_proxy_requests_total{tenant,agent,upstream_host,status}
+expert_work_credential_proxy_inject_total{tenant,secret_ref,inject_kind,status}
+expert_work_credential_proxy_cache_hits_total{tenant,secret_kind}
+expert_work_credential_proxy_cache_misses_total{tenant,secret_kind}
+expert_work_credential_proxy_vault_duration_seconds{operation}                 histogram
+expert_work_credential_proxy_upstream_duration_seconds{upstream_host}          histogram
+expert_work_credential_proxy_upstream_401_total{tenant,secret_ref}             counter（异常告警）
+expert_work_credential_proxy_denied_total{tenant,reason}                       counter
 ```
 
 ### OTel spans
 
 ```
-helix.credential_proxy.forward
+expert_work.credential_proxy.forward
 ├── attrs: tenant, agent, secret_ref, upstream_host, inject_kind, status
-├── span: helix.credential_proxy.allowlist_check
-├── span: helix.credential_proxy.cache_lookup
-├── span: helix.credential_proxy.vault_fetch (仅 cache miss)
-├── span: helix.credential_proxy.inject
-└── span: helix.credential_proxy.upstream  → upstream HTTP span (如目标支持 W3C Trace Context)
+├── span: expert_work.credential_proxy.allowlist_check
+├── span: expert_work.credential_proxy.cache_lookup
+├── span: expert_work.credential_proxy.vault_fetch (仅 cache miss)
+├── span: expert_work.credential_proxy.inject
+└── span: expert_work.credential_proxy.upstream  → upstream HTTP span (如目标支持 W3C Trace Context)
 ```
 
 ### 关键告警
@@ -335,7 +335,7 @@ helix.credential_proxy.forward
 
 | 攻击面 | 防御 |
 |---|---|
-| sandbox 抓 header | sandbox **永远拿不到 token**：proxy 注入在 outbound 链路；sandbox 只能见到自己写的 `X-Helix-Secret-Ref` |
+| sandbox 抓 header | sandbox **永远拿不到 token**：proxy 注入在 outbound 链路；sandbox 只能见到自己写的 `X-Expert-Work-Secret-Ref` |
 | sandbox 提权读 proxy 内存 | gVisor 用户态隔离 + proxy 与 sandbox 在不同 PID/network namespace |
 | 跨租户 secret 引用 | allowlist 强校验 (`tenant, agent, version, ref`) 四元组 |
 | log 泄漏 | 全链路日志 redactor 强制屏蔽 `Authorization`、`X-Api-Key`、`token=...` 等模式（参见 [17 Audit Log] PII 字段） |
@@ -354,7 +354,7 @@ helix.credential_proxy.forward
 - Vault KV v2（静态 secret）
 - 进程内 LRU（容量 1万，TTL 60s）
 - allowlist 表 + manifest lint 校验
-- 显式 `X-Helix-Upstream` header 路由
+- 显式 `X-Expert-Work-Upstream` header 路由
 - 审计写 Postgres
 - mTLS（自签 CA，control plane 签发）
 

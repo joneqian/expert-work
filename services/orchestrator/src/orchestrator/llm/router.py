@@ -17,7 +17,7 @@ Fallback semantics — straight from
   the last attempt's exception for diagnostic context.
 
 The router **does not** retry within a single provider — that's
-:class:`~helix_agent.runtime.middleware.LLMErrorHandlingMiddleware`'s
+:class:`~expert_work.runtime.middleware.LLMErrorHandlingMiddleware`'s
 job (E.4 ``around_llm_call``). E.12.5 wires the middleware chain in:
 
 ::
@@ -46,9 +46,9 @@ from typing import Any, Protocol, runtime_checkable
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.runtime.middleware import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.runtime.middleware import (
     CircuitOpenError,
     LLMAuthError,
     LLMClientError,
@@ -73,8 +73,8 @@ logger = logging.getLogger(__name__)
 
 # Stream L.L3 — counter for provider-level stream stale timeouts. Labeled by
 # ``provider_key`` so dashboards can show which upstream is hanging.
-_llm_stream_stale_total = helix_counter(
-    "helix_llm_stream_stale_total",
+_llm_stream_stale_total = expert_work_counter(
+    "expert_work_llm_stream_stale_total",
     "Provider calls that exceeded LLMRouter.stream_deadline_s (Stream L.L3).",
     ("provider_key",),
 )
@@ -82,8 +82,8 @@ _llm_stream_stale_total = helix_counter(
 # Stream L.L8 — counter for OAuth credential refresh attempts and outcomes.
 # ``result`` is ``success`` when the second attempt returns a response, or
 # ``fail`` when refresh itself returned False / the retry hit another 401.
-_llm_auth_refresh_total = helix_counter(
-    "helix_llm_auth_refresh_total",
+_llm_auth_refresh_total = expert_work_counter(
+    "expert_work_llm_auth_refresh_total",
     "Credential refreshes triggered by OAuth-capable provider 401s (Stream L.L8).",
     ("provider_key", "result"),
 )
@@ -93,13 +93,13 @@ _llm_auth_refresh_total = helix_counter(
 # the :meth:`LLMRouter._attempt_call` worst-case note), so retry volume and
 # terminal failures must be visible on dashboards. Labeled by
 # ``provider_key`` only — schema names are caller-defined and unbounded.
-_llm_structured_validation_retry_total = helix_counter(
-    "helix_llm_structured_validation_retry_total",
+_llm_structured_validation_retry_total = expert_work_counter(
+    "expert_work_llm_structured_validation_retry_total",
     "Structured-output correction resends after an invalid response (Stream RT-1).",
     ("provider_key",),
 )
-_llm_structured_validation_failure_total = helix_counter(
-    "helix_llm_structured_validation_failure_total",
+_llm_structured_validation_failure_total = expert_work_counter(
+    "expert_work_llm_structured_validation_failure_total",
     "Structured-output calls that exhausted the validation retries (Stream RT-1).",
     ("provider_key",),
 )
@@ -151,7 +151,7 @@ class ProviderHandle:
     ``"<provider>:<model>#<key_id>"`` (e.g. ``"anthropic:claude#1"``,
     ``"anthropic:claude#2"``). It is passed downstream as the
     ``provider_key`` payload field so E.4's
-    :class:`~helix_agent.runtime.middleware.BreakerRegistry` builds
+    :class:`~expert_work.runtime.middleware.BreakerRegistry` builds
     per-key circuit breakers (Mini-ADR E-4: breakers are per upstream
     key, not per provider, because one tenant can hold multiple keys
     for the same vendor and they must fail in isolation).
@@ -378,7 +378,7 @@ class LLMRouter:
         each attempt may itself retry transient failures up to its
         budget (1 + 3) — so one structured call can cost up to
         ``3 x 4 = 12`` real upstream calls. The
-        ``helix_llm_structured_validation_{retry,failure}_total``
+        ``expert_work_llm_structured_validation_{retry,failure}_total``
         counters make that volume observable per provider key.
         """
         if output_schema is None:

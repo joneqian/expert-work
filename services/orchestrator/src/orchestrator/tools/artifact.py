@@ -22,8 +22,8 @@ from pathlib import PurePosixPath
 from typing import Any, get_args
 from uuid import UUID
 
-from helix_agent.persistence import ArtifactStore
-from helix_agent.protocol import ArtifactKind
+from expert_work.persistence import ArtifactStore
+from expert_work.protocol import ArtifactKind
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
 
 logger = logging.getLogger(__name__)

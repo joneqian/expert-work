@@ -15,7 +15,7 @@ RT-5 chain (PRs #937/#938/#939) against a running dev stack. Two phases:
   Drift is a *temporal* signal: a recent window's mean must drop below an older
   baseline. There is no way to create aged history through the API, so this
   phase seeds the ``quality_score`` series directly in Postgres (needs
-  ``HELIX_DB_DSN``): a dense baseline of high scores backdated into the baseline
+  ``EXPERT_WORK_DB_DSN``): a dense baseline of high scores backdated into the baseline
   window + a dense recent window of low scores, for a synthetic agent. It then
   registers a ``quality.drift`` webhook (pointed at your IM bot) and waits for
   the ``QualityDriftWorker`` to detect the drop, raise a ``quality_drift_alert``,
@@ -31,24 +31,24 @@ RT-5 chain (PRs #937/#938/#939) against a running dev stack. Two phases:
 
 Keyless: the model key is resolved server-side; this script only sends prompts.
 The API token (a **system_admin** dev-login bearer) is read from
-``HELIX_API_TOKEN`` and never logged.
+``EXPERT_WORK_API_TOKEN`` and never logged.
 
 Prereqs — bring up the dev stack with quality monitoring ON and FAST::
 
     # In infra/.env (or the control-plane environment), before ``make dev-up``:
-    HELIX_AGENT_ENABLE_QUALITY_MONITOR=true
-    HELIX_AGENT_QUALITY_SAMPLING_RATE_PCT=100      # sample every finished run
-    HELIX_AGENT_QUALITY_MONITOR_INTERVAL_S=15      # sample promptly
-    HELIX_AGENT_QUALITY_DRIFT_INTERVAL_S=20        # detect drift promptly
-    HELIX_AGENT_QUALITY_DRIFT_MIN_SAMPLES=10       # matches the seed density
+    EXPERT_WORK_ENABLE_QUALITY_MONITOR=true
+    EXPERT_WORK_QUALITY_SAMPLING_RATE_PCT=100      # sample every finished run
+    EXPERT_WORK_QUALITY_MONITOR_INTERVAL_S=15      # sample promptly
+    EXPERT_WORK_QUALITY_DRIFT_INTERVAL_S=20        # detect drift promptly
+    EXPERT_WORK_QUALITY_DRIFT_MIN_SAMPLES=10       # matches the seed density
 
 Then::
 
-    export HELIX_API_URL=http://localhost:8000     # control-plane (8080 is Keycloak)
-    export HELIX_API_TOKEN=<system_admin dev bearer token>
-    export HELIX_DB_DSN=postgresql://helix:helix@localhost:5432/helix   # Phase 2 seed
-    export HELIX_IM_WEBHOOK_URL=<your feishu/dingtalk/wecom bot webhook>  # optional
-    export HELIX_IM_PAYLOAD_FORMAT=feishu           # generic|feishu|dingtalk|wecom
+    export EXPERT_WORK_API_URL=http://localhost:8000     # control-plane (8080 is Keycloak)
+    export EXPERT_WORK_API_TOKEN=<system_admin dev bearer token>
+    export EXPERT_WORK_DB_DSN=postgresql://expert_work:expert_work@localhost:5432/expert_work
+    export EXPERT_WORK_IM_WEBHOOK_URL=<your feishu/dingtalk/wecom bot webhook>  # optional
+    export EXPERT_WORK_IM_PAYLOAD_FORMAT=feishu           # generic|feishu|dingtalk|wecom
     # EDIT manifests/quality-test/v1.0.0.yaml model block to your provider first.
     uv run python tools/eval/verify_live_quality.py
 
@@ -124,7 +124,7 @@ async def _run_to_completion(client: httpx.AsyncClient, thread_id: str, prompt: 
         "POST", f"/v1/sessions/{thread_id}/runs", json={"input": prompt}
     ) as resp:
         resp.raise_for_status()
-        run_id = resp.headers.get("X-Helix-Run-Id")
+        run_id = resp.headers.get("X-Expert-Work-Run-Id")
         # Drain the stream so the run finishes server-side (status -> success).
         async for _line in resp.aiter_lines():
             pass
@@ -347,9 +347,11 @@ async def _cleanup(
 
 async def phase_drift(client: httpx.AsyncClient, *, count: int) -> bool:
     print("\n[phase 2] injected degradation -> drift detection -> IM alert")
-    dsn = _require_env("HELIX_DB_DSN")
-    im_url = os.environ.get("HELIX_IM_WEBHOOK_URL", "https://example.invalid/no-bot-configured")
-    payload_format = os.environ.get("HELIX_IM_PAYLOAD_FORMAT", "generic")
+    dsn = _require_env("EXPERT_WORK_DB_DSN")
+    im_url = os.environ.get(
+        "EXPERT_WORK_IM_WEBHOOK_URL", "https://example.invalid/no-bot-configured"
+    )
+    payload_format = os.environ.get("EXPERT_WORK_IM_PAYLOAD_FORMAT", "generic")
 
     tenant_id = await _me_tenant(client)
     await _seed_series(dsn, tenant_id, count=count)
@@ -365,7 +367,9 @@ async def phase_drift(client: httpx.AsyncClient, *, count: int) -> bool:
             f"(n={alert.get('recent_count')}/{alert.get('baseline_count')})."
         )
         if im_url.endswith("no-bot-configured"):
-            print("  NOTE: no HELIX_IM_WEBHOOK_URL set — set one + re-run to verify IM delivery.")
+            print(
+                "  NOTE: no EXPERT_WORK_IM_WEBHOOK_URL set — set one + re-run to verify delivery."
+            )
         else:
             print(f"  NOTE: confirm the '{payload_format}' bot received the drift message by eye.")
     else:
@@ -385,8 +389,8 @@ _DEFAULT_MANIFEST = (
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    base_url = args.base_url or _require_env("HELIX_API_URL")
-    token = _require_env("HELIX_API_TOKEN")  # never logged
+    base_url = args.base_url or _require_env("EXPERT_WORK_API_URL")
+    token = _require_env("EXPERT_WORK_API_TOKEN")  # never logged
     headers = {"Authorization": f"Bearer {token}"}
 
     ok = True
@@ -405,7 +409,9 @@ async def _amain(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live RT-5 quality-monitoring verification.")
-    parser.add_argument("--base-url", default=None, help="control-plane URL (or $HELIX_API_URL)")
+    parser.add_argument(
+        "--base-url", default=None, help="control-plane URL (or $EXPERT_WORK_API_URL)"
+    )
     parser.add_argument(
         "--manifest", default=str(_DEFAULT_MANIFEST), help="quality-test agent manifest"
     )

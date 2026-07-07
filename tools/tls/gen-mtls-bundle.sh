@@ -64,14 +64,14 @@ if [[ ! -f "${OUT_DIR}/ca.key" ]]; then
     openssl ecparam -name prime256v1 -genkey -noout -out "${OUT_DIR}/ca.key"
     openssl req -new -x509 -days "${CERT_DAYS}" -key "${OUT_DIR}/ca.key" \
         -out "${OUT_DIR}/ca.crt" \
-        -subj "/CN=Helix-Agent Dev CA/O=Helix-Agent/OU=DevOps" \
+        -subj "/CN=Expert Work Dev CA/O=Expert Work/OU=DevOps" \
         -extensions v3_ca \
         -config <(cat <<'EOF'
 [ req ]
 distinguished_name = dn
 prompt = no
 [ dn ]
-CN = Helix-Agent Dev CA
+CN = Expert Work Dev CA
 [ v3_ca ]
 basicConstraints = critical,CA:TRUE
 keyUsage = critical,keyCertSign,cRLSign
@@ -90,7 +90,7 @@ for svc in "${services[@]}"; do
 
     openssl req -new -key "${OUT_DIR}/${svc}.key" \
         -out "${OUT_DIR}/${svc}.csr" \
-        -subj "/CN=${svc}.helix.local/O=Helix-Agent"
+        -subj "/CN=${svc}.expert_work.local/O=Expert Work"
 
     # SAN includes both the service DNS name and localhost so dev runs
     # behind a local reverse proxy still verify.
@@ -98,7 +98,7 @@ for svc in "${services[@]}"; do
         -CA "${OUT_DIR}/ca.crt" -CAkey "${OUT_DIR}/ca.key" -CAcreateserial \
         -out "${OUT_DIR}/${svc}.crt" \
         -extfile <(cat <<EOF
-subjectAltName = DNS:${svc}.helix.local,DNS:localhost,IP:127.0.0.1
+subjectAltName = DNS:${svc}.expert_work.local,DNS:localhost,IP:127.0.0.1
 extendedKeyUsage = serverAuth,clientAuth
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature,keyEncipherment

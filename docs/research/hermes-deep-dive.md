@@ -1,8 +1,8 @@
 # Hermes Agent 源码深度分析（15 维度）
 
-> **目的**：基于 Hermes 真实源码，把外部对 Hermes 流传的"15 维度能力表"逐项落到代码上，给后续 helix-agent 的能力升级提供事实底稿。
+> **目的**：基于 Hermes 真实源码，把外部对 Hermes 流传的"15 维度能力表"逐项落到代码上，给后续 expert-work 的能力升级提供事实底稿。
 >
-> **范围声明**：本报告**只描述 Hermes 怎么做**，**不**做与 helix 的差距分析、不做与其他 agent 框架（LangGraph/AutoGen/CrewAI…）的横向对比、不给"helix 应该学什么"的建议。这些是另一份文档的工作。
+> **范围声明**：本报告**只描述 Hermes 怎么做**，**不**做与 Expert Work 的差距分析、不做与其他 agent 框架（LangGraph/AutoGen/CrewAI…）的横向对比、不给"Expert Work 应该学什么"的建议。这些是另一份文档的工作。
 >
 > **源码版本**：`hermes-agent` @ `bb4703c761ea6687b6399aa2e61e0a08fabd3ca3`（HEAD on 2026-05-26）
 > **报告生成日期**：2026-05-27

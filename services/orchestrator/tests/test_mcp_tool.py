@@ -167,7 +167,7 @@ def test_server_config_oauth2_accepts_with_client_id_and_scope() -> None:
         transport="streamable_http",
         url="https://mcp.linear.app/",
         auth_type="oauth2",
-        auth_config={"client_id": "helix-agent", "scope": "read"},
+        auth_config={"client_id": "expert-work", "scope": "read"},
     )
     assert cfg.auth_type == "oauth2"
 

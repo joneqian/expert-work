@@ -1,6 +1,6 @@
 # Admin UI 设计哲学
 
-> 本文档是 helix-agent Admin UI(Stream H)**任何一行 React 代码落地之前**必须先确立的设计基线之一,另一篇是 [admin-ui-language.md](./admin-ui-language.md)。两者关系:**哲学定义"为谁、为什么、什么原则"**;**语言定义"用什么 token / 字号 / 组件去表达"**。Mockup 在 `mockups/` 目录给出 7-8 张关键页面的可视化形态。
+> 本文档是 expert-work Admin UI(Stream H)**任何一行 React 代码落地之前**必须先确立的设计基线之一,另一篇是 [admin-ui-language.md](./admin-ui-language.md)。两者关系:**哲学定义"为谁、为什么、什么原则"**;**语言定义"用什么 token / 字号 / 组件去表达"**。Mockup 在 `mockups/` 目录给出 7-8 张关键页面的可视化形态。
 
 ---
 
@@ -20,7 +20,7 @@
 
 ## 2. 核心人群与场景
 
-> **关键澄清(2026-05-25 用户确认)**:business 系统通过 API 消费 helix 的 per-user 持久 agent 能力。**末端用户(agent 的真正消费方)永远不会看到 helix 自身的 UI** —— 他们通过 business 系统自己的 UI 与 agent 对话。helix 的 Admin UI 仅服务 **操作人群**。
+> **关键澄清(2026-05-25 用户确认)**:business 系统通过 API 消费 Expert Work 的 per-user 持久 agent 能力。**末端用户(agent 的真正消费方)永远不会看到 Expert Work 自身的 UI** —— 他们通过 business 系统自己的 UI 与 agent 对话。Expert Work 的 Admin UI 仅服务 **操作人群**。
 
 ### 人群
 
@@ -34,7 +34,7 @@
 
 ### 不是 Admin UI 的事
 
-- **末端用户对话** — 由 business 系统的 UI 自行处理,通过 helix API 拉 SSE 流即可
+- **末端用户对话** — 由 business 系统的 UI 自行处理,通过 Expert Work API 拉 SSE 流即可
 - **登录注册 / 选购套餐 / billing** — 不在 M0 范围(后续若有营销站,独立产品)
 - **跨租户的 SaaS 营销页 / 文档站** — 这是另一类资产
 
@@ -96,7 +96,7 @@ LLM ops 的日志、trace、code、JSON 都是长文本 —— dark 主题对眼
 
 ## 4. IA 心智模型 —— Agent 是中心实体
 
-helix 的世界观里,**Agent 是一切的中心实体**:
+Expert Work 的世界观里,**Agent 是一切的中心实体**:
 
 - 一个 agent 有自己的 **manifest**(YAML 定义)
 - 一个 agent 派发 **runs**(每次执行)

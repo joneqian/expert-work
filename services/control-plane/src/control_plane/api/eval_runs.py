@@ -18,15 +18,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from helix_agent.persistence.eval import EvalRunStore
-from helix_agent.protocol import (
+from expert_work.persistence.eval import EvalRunStore
+from expert_work.protocol import (
     EvalCaseResultRecord,
     EvalRunRecord,
     EvalRunStatus,
     EvalTriggeredBy,
 )
 
-logger = logging.getLogger("helix.control_plane.eval_runs")
+logger = logging.getLogger("expert_work.control_plane.eval_runs")
 
 #: Suites an operator may enqueue. Kept to a fixed set so a typo can't
 #: queue a run the worker will only ever fail.

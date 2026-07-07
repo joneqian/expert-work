@@ -1,7 +1,7 @@
 """Binary QA judges — Stream CM-N5 P1 tier (Mini-ADR CM-K6).
 
 Both benchmark protocols are transplanted **verbatim** from the
-upstream evaluation code (fetched 2026-06-10) so helix numbers are
+upstream evaluation code (fetched 2026-06-10) so expert_work numbers are
 produced under the published grading rules:
 
 - **LongMemEval** (``src/evaluation/evaluate_qa.py``,
@@ -17,7 +17,7 @@ produced under the published grading rules:
   CORRECT/WRONG JSON label, temperature 0.
 
 The only deliberate divergence is the judge **model**: upstream uses
-gpt-4o(-mini); helix uses the repo's fixed Anthropic Haiku judge
+gpt-4o(-mini); expert_work uses the repo's fixed Anthropic Haiku judge
 (Mini-ADR J-39 precedent). Stated on every report — numbers are for
 self-regression first; cross-vendor comparisons must note the judge
 difference (CM-K6).

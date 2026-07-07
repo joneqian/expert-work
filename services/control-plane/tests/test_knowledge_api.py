@@ -12,8 +12,8 @@ from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
 from orchestrator.llm import FakeEmbedder
 from orchestrator.tools import KnowledgeRetriever
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt

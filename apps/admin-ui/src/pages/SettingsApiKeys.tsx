@@ -11,9 +11,9 @@
  *     show-once for the new plaintext
  *   - revoke (DELETE) with an explicit confirm dialog
  *
- * Scopes are READ / WRITE / ADMIN (helix's API-key scope alphabet —
+ * Scopes are READ / WRITE / ADMIN (expert_work's API-key scope alphabet —
  * narrower than the per-resource RBAC matrix; see
- * ``ApiKeyScope`` in ``helix_agent.protocol.service_account``).
+ * ``ApiKeyScope`` in ``expert_work.protocol.service_account``).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -360,7 +360,7 @@ export function SettingsApiKeys() {
           )}
 
           <Table<ApiKeyRecord>
-            className="hx-table"
+            className="ew-table"
             rowKey="id"
             columns={columns}
             dataSource={keys}
@@ -436,7 +436,7 @@ export function SettingsApiKeys() {
         open={showOnce !== null}
         onCancel={() => setShowOnce(null)}
         title={
-          <span style={{ color: "var(--hx-color-brand-400)" }}>
+          <span style={{ color: "var(--ew-color-brand-400)" }}>
             <Key
               size={16}
               strokeWidth={1.5}
@@ -458,11 +458,11 @@ export function SettingsApiKeys() {
             </p>
             <div
               style={{
-                fontFamily: "var(--hx-font-mono)",
+                fontFamily: "var(--ew-font-mono)",
                 fontSize: 14,
                 padding: 12,
-                background: "var(--hx-color-neutral-950, #0a0a0a)",
-                border: "1px solid var(--hx-border-default)",
+                background: "var(--ew-color-neutral-950, #0a0a0a)",
+                border: "1px solid var(--ew-border-default)",
                 borderRadius: 6,
                 display: "flex",
                 gap: 12,
@@ -481,7 +481,7 @@ export function SettingsApiKeys() {
                 {t("api_keys.copy")}
               </Button>
             </div>
-            <p style={{ color: "var(--hx-text-secondary)", fontSize: 13, margin: 0 }}>
+            <p style={{ color: "var(--ew-text-secondary)", fontSize: 13, margin: 0 }}>
               {t("api_keys.show_once_prefix_note")}{" "}
               <Text code>{showOnce.api_key.prefix}</Text>
             </p>

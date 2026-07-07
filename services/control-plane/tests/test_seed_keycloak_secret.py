@@ -17,17 +17,17 @@ from control_plane.seed_keycloak_secret import (
 
 
 def test_resolve_prefers_arg_over_env() -> None:
-    got = resolve_secret_value("from-arg", env={"HELIX_AGENT_KEYCLOAK_ADMIN_CLIENT_SECRET": "env"})
+    got = resolve_secret_value("from-arg", env={"EXPERT_WORK_KEYCLOAK_ADMIN_CLIENT_SECRET": "env"})
     assert got == "from-arg"
 
 
 def test_resolve_falls_back_to_env() -> None:
-    got = resolve_secret_value(None, env={"HELIX_AGENT_KEYCLOAK_ADMIN_CLIENT_SECRET": "env-secret"})
+    got = resolve_secret_value(None, env={"EXPERT_WORK_KEYCLOAK_ADMIN_CLIENT_SECRET": "env-secret"})
     assert got == "env-secret"
 
 
 def test_resolve_treats_empty_arg_as_absent() -> None:
-    got = resolve_secret_value("", env={"HELIX_AGENT_KEYCLOAK_ADMIN_CLIENT_SECRET": "env-secret"})
+    got = resolve_secret_value("", env={"EXPERT_WORK_KEYCLOAK_ADMIN_CLIENT_SECRET": "env-secret"})
     assert got == "env-secret"
 
 
@@ -51,7 +51,7 @@ async def test_seed_writes_under_configured_name() -> None:
     store = _FakeStore()
     await seed_keycloak_admin_secret(
         store,  # type: ignore[arg-type]
-        name="helix-agent/platform/keycloak/admin-client-secret",
+        name="expert-work/platform/keycloak/admin-client-secret",
         value="sekret",
     )
-    assert store.puts == [("helix-agent/platform/keycloak/admin-client-secret", "sekret")]
+    assert store.puts == [("expert-work/platform/keycloak/admin-client-secret", "sekret")]

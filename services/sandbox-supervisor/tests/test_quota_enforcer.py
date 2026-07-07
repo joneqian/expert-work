@@ -20,9 +20,9 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence import InMemoryUserWorkspaceStore, WorkspaceNotFoundError
-from helix_agent.protocol import AuditEntry, UserWorkspace
-from helix_agent.protocol.audit import AuditAction, AuditResult
+from expert_work.persistence import InMemoryUserWorkspaceStore, WorkspaceNotFoundError
+from expert_work.protocol import AuditEntry, UserWorkspace
+from expert_work.protocol.audit import AuditAction, AuditResult
 from sandbox_supervisor.docker_client import DockerError
 from sandbox_supervisor.domain import (
     WorkspaceDeletedError,
@@ -94,7 +94,7 @@ def _enforcer(
             workspace_store=store,
             audit=audit,
             docker=docker,
-            measure_image="helix-sandbox:dev",
+            measure_image="expert-work-sandbox:dev",
             service_name="sandbox_supervisor",
         ),
         audit,
@@ -183,7 +183,7 @@ async def test_refresh_size_writes_measure_to_store() -> None:
 
     refreshed = await store.resolve(tenant_id=workspace.tenant_id, user_id=workspace.user_id)
     assert refreshed.size_bytes == 4096
-    assert docker.measure_calls == [(workspace.volume_name, "helix-sandbox:dev")]
+    assert docker.measure_calls == [(workspace.volume_name, "expert-work-sandbox:dev")]
 
 
 @pytest.mark.asyncio

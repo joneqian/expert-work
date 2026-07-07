@@ -18,7 +18,7 @@ Two failure modes this script catches:
     with a name other than ``app.tenant_id``. Reverse of the above —
     application writes the right value, but the policy never sees it.
 
-The lint inspects ``packages/helix-persistence/migrations/`` plus all
+The lint inspects ``packages/expert-work-persistence/migrations/`` plus all
 ``*.py`` under ``packages`` and ``services`` for the strings
 ``current_setting``, ``set_config(``, and ``SET LOCAL`` (case-insensitive
 on the SQL keywords). For each match it extracts the variable name and

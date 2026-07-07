@@ -23,7 +23,7 @@ from typing import Any, Literal
 from jsonschema import Draft202012Validator
 from langchain_core.messages import AIMessage
 
-from helix_agent.protocol import StructuredOutputSpec
+from expert_work.protocol import StructuredOutputSpec
 
 #: RT-ADR-2 — which degradation path an adapter uses to enforce a schema:
 #: ``native`` = wire-level ``response_format`` json_schema (OpenAI);
@@ -186,7 +186,7 @@ def correction_message(error_summary: str, spec: StructuredOutputSpec) -> str:
 def _fence(text: str, nonce: str) -> str:
     """Delimit tenant-origin ``text`` in the PI-1 spotlight markers.
 
-    Delimiting only — deliberately NOT :func:`~helix_agent.common.spotlight.
+    Delimiting only — deliberately NOT :func:`~expert_work.common.spotlight.
     spotlight_untrusted`, whose datamarking interleaves ``▁`` into
     whitespace: schema property names / enum values must be reproduced
     **byte-exact** by the model, and datamarked keys would guarantee

@@ -3,7 +3,7 @@
 Exercises both ``_inject_memories`` modes through the full ReAct graph:
 
 - ``per_session`` (default): memory block lands at ``messages[1]`` with
-  ``additional_kwargs["helix_cache_anchor"] = True`` and stays at that
+  ``additional_kwargs["expert_work_cache_anchor"] = True`` and stays at that
   position across every turn — the prefix
   ``[system, task, memories]`` is cacheable by the Anthropic adapter.
 - ``per_turn`` (legacy): memory block lands at the tail every turn
@@ -26,8 +26,8 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import MemoryItem
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.protocol import MemoryItem
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     GraphRunner,
     ToolContext,
@@ -103,7 +103,7 @@ def test_inject_per_session_lands_at_position_one_with_anchor() -> None:
     assert isinstance(out[0], SystemMessage)
     assert isinstance(out[1], HumanMessage)
     assert "Relevant memories" in str(out[1].content)
-    assert out[1].additional_kwargs.get("helix_cache_anchor") is True
+    assert out[1].additional_kwargs.get("expert_work_cache_anchor") is True
     # The original user task slides to position 2.
     assert isinstance(out[2], HumanMessage)
     assert out[2].content == "task"
@@ -120,7 +120,7 @@ def test_inject_per_turn_lands_at_tail_without_anchor() -> None:
     assert isinstance(out[-1], HumanMessage)
     assert "Relevant memories" in str(out[-1].content)
     # Legacy mode: no cache anchor.
-    assert out[-1].additional_kwargs.get("helix_cache_anchor") is None
+    assert out[-1].additional_kwargs.get("expert_work_cache_anchor") is None
 
 
 def test_inject_default_mode_is_per_session() -> None:
@@ -130,14 +130,14 @@ def test_inject_default_mode_is_per_session() -> None:
         HumanMessage(content="task"),
     ]
     out = _inject_memories(messages, [_memory("x")])  # no mode= → default
-    assert out[1].additional_kwargs.get("helix_cache_anchor") is True
+    assert out[1].additional_kwargs.get("expert_work_cache_anchor") is True
 
 
 def test_inject_empty_messages_returns_block_only() -> None:
     out = _inject_memories([], [_memory("x")], mode="per_session")
     assert len(out) == 1
     assert isinstance(out[0], HumanMessage)
-    assert out[0].additional_kwargs.get("helix_cache_anchor") is True
+    assert out[0].additional_kwargs.get("expert_work_cache_anchor") is True
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +191,7 @@ async def test_per_session_memory_position_stable_across_turns() -> None:
         assert loc is not None, f"memory missing on turn {turn}"
         idx, block = loc
         assert idx == 1, f"per_session memory drifted to index {idx} on turn {turn}"
-        assert block.additional_kwargs.get("helix_cache_anchor") is True
+        assert block.additional_kwargs.get("expert_work_cache_anchor") is True
 
 
 @pytest.mark.asyncio
@@ -241,7 +241,7 @@ async def test_per_turn_memory_position_drifts_across_turns() -> None:
         idx, block = loc
         positions.append(idx)
         # Legacy mode never sets the anchor flag.
-        assert block.additional_kwargs.get("helix_cache_anchor") is None
+        assert block.additional_kwargs.get("expert_work_cache_anchor") is None
     # Turn 1 had [system, start, memories]; turn 2 has [system, start,
     # AI, ToolMessage, memories] — different absolute indices.
     assert positions[0] != positions[1], f"per_turn should drift across turns; got {positions}"

@@ -43,7 +43,7 @@ interface CreateTenantDrawerProps {
 - Use an Antd `Drawer` (title `t("settings_create_tenant.page_title")`, width ~520, `destroyOnHidden`). Footer: Cancel (`ct-cancel`) + Create primary (`ct-submit`, loading while submitting).
 - Body = the SAME `Form` as the page (KEEP every `Form.Item` incl. the `tenant_id` `UUID_RE` validator rule verbatim — copy `UUID_RE` const + the validator). Keep the success `Alert` block (created_id `ct-created-id` copyable + first-admin `ct-first-admin`) rendered above the form when `createdId !== null`.
 - `onCreate`: identical to the page's (try/catch `form.validateFields()`; build `CreateTenantBody`; `await createTenant(body)`; on success `setCreatedId(record.tenant_id)`, `setFirstAdmin(record.first_admin ?? null)`, `message.success`, `form.resetFields()`, **and `onCreated(record)`** so the parent reloads; on error `message.error`).
-- Drop the page-level breadcrumb/`hx-page-header` and the `not-admin` gate (the drawer is only opened from the already-system-admin-gated tenants page).
+- Drop the page-level breadcrumb/`ew-page-header` and the `not-admin` gate (the drawer is only opened from the already-system-admin-gated tenants page).
 - Reset state on close (mirror CreateAgentDrawer's reset): clear createdId/firstAdmin/error + `form.resetFields()`.
 - Keep `data-testid="create-tenant-drawer"` on the Drawer. Reuse the existing `ct-*` testids where present (`ct-display-name`, `ct-plan`, `ct-tenant-id`, `ct-first-admin-email`, `ct-first-admin-name`, `ct-created-id`, `ct-first-admin`). Submit button testid: `ct-submit`.
 

@@ -31,13 +31,13 @@ from control_plane.audit import emit
 from control_plane.keycloak import KeycloakAdminClient, KeycloakUnavailableError
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.auth import RoleBindingStore
-from helix_agent.persistence.tenant_member import TenantMemberStore
-from helix_agent.protocol import AuditAction, MemberRole, MemberStatus, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.auth import RoleBindingStore
+from expert_work.persistence.tenant_member import TenantMemberStore
+from expert_work.protocol import AuditAction, MemberRole, MemberStatus, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.api.members")
+logger = logging.getLogger("expert_work.control_plane.api.members")
 
 _MAX_BATCH = 50
 

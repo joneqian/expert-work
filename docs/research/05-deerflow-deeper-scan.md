@@ -49,10 +49,10 @@ def _insert_extra(chain, extras):
 
 **为什么我之前漏了**：第二次扫描我说"借鉴中间件链模式"但没看 `_insert_extra` 的具体实现，以为是简单的 list append。实际上它是个**生产级的依赖图解析器**，支持 cross-external anchoring（外部 middleware A 锚定外部 middleware B）和循环依赖检测。
 
-**对 Helix 的影响**：
+**对 Expert Work 的影响**：
 我们的 YAML manifest `hooks` 字段（pre_llm / post_tool / on_error）实际上是简化版本。如果想让用户/团队成员用 Python 插槽包扩展中间件，必须有这套锚点机制。否则要么硬编码顺序，要么靠用户阅读源码理解依赖。
 
-**应放进**：`packages/helix-sdk/src/helix/sdk/middleware/anchor.py`（@Next/@Prev 装饰器 + `_insert_extra` 算法）
+**应放进**：`packages/expert-work-sdk/src/Expert Work/sdk/middleware/anchor.py`（@Next/@Prev 装饰器 + `_insert_extra` 算法）
 
 ---
 
@@ -89,7 +89,7 @@ def _insert_extra(chain, extras):
 
 **为什么我之前漏了**：第二次扫描只把 `MemoryMiddleware` 列入 P1 vendor，没看到其实 memory 注入的关键不在 storage，而在**怎么注入到 prompt 而不破坏缓存**。这套机制需要单独 vendor。
 
-**对 Helix 的影响**：
+**对 Expert Work 的影响**：
 - 必须把 system_prompt 设计为静态（YAML manifest 里 `system_prompt.template` 不应直接 `{{ context.patient.summary }}`，那样会破坏缓存）
 - patient context、当前日期等动态内容必须走 `<system-reminder>` HumanMessage 注入
 - 需要在 manifest 加一个 `dynamic_context` 字段声明哪些值要走 reminder 注入
@@ -113,7 +113,7 @@ def _insert_extra(chain, extras):
 - `tool_error_handling`：工具抛异常 → 转成 error ToolMessage（让 LLM 看到错误并重试不同方法）
 - `llm_error_handling`：LLM API 调用失败 → 重试/降级/熔断（基础设施层）
 
-**对 Helix 的影响**：
+**对 Expert Work 的影响**：
 - 多租户场景：一个用户 hit rate limit 不应影响其他用户（断路器要按 provider+key 维度）
 - 我们的 `model.fallback` 字段需要配合这个中间件才能真正生效
 - M0 必须有，否则 dogfood 阶段第一次 Anthropic 抖动就炸全部 sessions
@@ -135,7 +135,7 @@ def _insert_extra(chain, extras):
 - `guardrails/` = LLM 输出层（jailbreak、内容审查、工具白名单）
 - `sandbox_audit_middleware.py` = 工具调用层（LLM 已经决定要执行哪条 bash 命令，在送进 sandbox 前的最后一道审查）
 
-**对 Helix 的影响**：
+**对 Expert Work 的影响**：
 - 我们的方案有 gVisor 强隔离（防逃逸），但 gVisor 不能阻止 LLM 决定执行 `rm -rf /workspace/*` 把同租户的工作目录清空
 - 这个 middleware 是 sandbox 之前的**逻辑安全网**，不可省略
 - 多租户场景下尤其重要（一个 Agent 的危险命令应该在它的 sandbox 内被拦截，而不是依赖文件系统隔离来收尾）
@@ -157,7 +157,7 @@ def _insert_extra(chain, extras):
 
 **为什么我之前漏了**：第二次扫描我说"uploads 不复用，与我们模型不兼容"——错。实际上文件上传是企业 Agent 必备能力（任何业务线都可能要上传 PRD/合同/工单附件/规范文档/数据报表），这套大纲提取机制让 LLM 能精准定位文件内容（line number 引用），比直接塞全文进 prompt 节省 token。
 
-**对 Helix 的影响**：
+**对 Expert Work 的影响**：
 - 多业务线 dogfood 场景：研发团队上传 PR/PRD、客服上传工单截图、HR 上传简历——附件 + 大纲是通用能力
 - 这个 middleware 应该升级为通用"附件 + 大纲"机制
 - 与 sandbox 的 `/workspace` 挂载点协同（上传文件落到 sandbox 内供工具读）
@@ -173,7 +173,7 @@ def _insert_extra(chain, extras):
 
 **为什么我之前漏了**：第二次扫描我没意识到这是底层基础。其他几乎所有 middleware 都依赖它注入的 thread context。
 
-**对 Helix 的影响**：tenant_id / org_id 的传播必须靠它，必须放在 chain 最前面。
+**对 Expert Work 的影响**：tenant_id / org_id 的传播必须靠它，必须放在 chain 最前面。
 
 **应放进**：`services/orchestrator/src/orchestrator/middleware/thread_data.py`
 
@@ -184,7 +184,7 @@ def _insert_extra(chain, extras):
 **位置**：`agents/middlewares/deferred_tool_filter_middleware.py`（107 行）
 **功能**：与 `tool_search` 工具配对——LLM 默认只看到少数核心工具，需要时通过 `tool_search` 搜索发现更多工具，filter middleware 在发现后延迟加入 chain
 
-**对 Helix 的影响**：解决"工具数量爆炸导致 prompt 膨胀"问题。当一个 agent 有 50+ 工具时（MCP 接入很多 server 时常见），不可能一次性全塞进 system prompt。
+**对 Expert Work 的影响**：解决"工具数量爆炸导致 prompt 膨胀"问题。当一个 agent 有 50+ 工具时（MCP 接入很多 server 时常见），不可能一次性全塞进 system prompt。
 
 **应放进**：`services/orchestrator/src/orchestrator/middleware/deferred_tool_filter.py`
 
@@ -196,7 +196,7 @@ def _insert_extra(chain, extras):
 **位置**：`reflection/resolvers.py`
 **功能**：`resolve_class(class_path, base_class)` / `resolve_variable(variable_path)`，从字符串路径动态加载，含包缺失提示和类型校验
 
-**对 Helix 的影响**：YAML manifest 里 `code.entrypoint: "agents.clinical_triage.tools:parse_fhir_bundle"` 这种字符串引用的解析必须有这层。
+**对 Expert Work 的影响**：YAML manifest 里 `code.entrypoint: "agents.clinical_triage.tools:parse_fhir_bundle"` 这种字符串引用的解析必须有这层。
 
 ---
 
@@ -210,7 +210,7 @@ def _insert_extra(chain, extras):
 4. Runtime config injection via `RunnableConfig.configurable`
 
 **为什么我之前误判**：第二次扫描我说"不复用 config，配置模型不同"。实际上**4 层覆盖的设计**值得借鉴，与我们的 manifest 完全兼容：
-- Manifest 层 = Helix YAML（对应 DeerFlow 的 agents_config）
+- Manifest 层 = Expert Work YAML（对应 DeerFlow 的 agents_config）
 - Model 层 = 同一 agent 的多个 model variant（A/B 测试）
 - Runtime 层 = `RunnableConfig.configurable`（保持一致以便兼容 LangGraph 标准）
 
@@ -226,7 +226,7 @@ def _insert_extra(chain, extras):
 - 与 todo 关联，精准计算每个 todo item 的成本
 - 元数据结构化（`used_by: "lead_agent" / "middleware:summarize" / "subagent:{name}"`）
 
-**对 Helix 的影响**：dogfood 阶段成本分析必须有；后期租户级 billing 也依赖。
+**对 Expert Work 的影响**：dogfood 阶段成本分析必须有；后期租户级 billing 也依赖。
 
 **应放进**：M1 阶段 vendor。
 

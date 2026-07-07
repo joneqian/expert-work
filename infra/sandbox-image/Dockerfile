@@ -1,4 +1,4 @@
-# Helix sandbox image — the single full toolchain for the `exec_python` / `bash`
+# Expert Work sandbox image — the single full toolchain for the `exec_python` / `bash`
 # / `file_ops` tools: Python 3.12 + data/office/media libraries + the system
 # binaries skills shell out to (LibreOffice headless / poppler / ffmpeg) + Node.js
 # + CJK fonts & locale. (sandbox-image-consolidation: one image, no variants.)
@@ -17,7 +17,7 @@
 # Stream HX-10: the pinned seccomp profile lives beside this Dockerfile as
 # `seccomp-profile.json` — NOT baked in (docker-out-of-docker means the host
 # daemon launches the sandbox), passed to `docker run` via `--security-opt
-# seccomp=`. Prod pre-places it + sets HELIX_SANDBOX_SECCOMP_PROFILE_PATH; dev
+# seccomp=`. Prod pre-places it + sets EXPERT_WORK_SANDBOX_SECCOMP_PROFILE_PATH; dev
 # leaves it unset (host default).
 FROM python:3.12-slim
 
@@ -113,7 +113,7 @@ COPY runner.py /opt/runner.py
 # Egress urllib shim (sandbox-egress §3.5): placed in the GLOBAL site-packages
 # so Python auto-imports it at startup — including under the runner's
 # `python -I -c` (isolated mode still runs `site`). No-op unless the supervisor
-# injects HELIX_EGRESS_PROXY_AUTH (egress on). Makes stdlib urllib send the
+# injects EXPERT_WORK_EGRESS_PROXY_AUTH (egress on). Makes stdlib urllib send the
 # proxy token on CONNECT like requests/httpx already do.
 COPY sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
 

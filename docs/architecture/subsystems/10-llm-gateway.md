@@ -47,7 +47,7 @@
         └────────────────────────────┘
 ```
 
-调用时机：仅由 **orchestrator 内部**调用；**业务代码（manifest 的 python 插槽）禁止**直接 import provider SDK——通过 `helix.sdk.llm` 客户端走 gateway。
+调用时机：仅由 **orchestrator 内部**调用；**业务代码（manifest 的 python 插槽）禁止**直接 import provider SDK——通过 `expert_work.sdk.llm` 客户端走 gateway。
 
 ---
 
@@ -95,7 +95,7 @@ CREATE TABLE llm_circuit_state (
 ### 3.2 Pydantic Schema — 请求/响应契约
 
 ```python
-# packages/helix-protocol/src/helix/protocol/llm.py
+# packages/expert-work-protocol/src/Expert Work/protocol/llm.py
 from pydantic import BaseModel, Field
 from typing import Literal, Any
 
@@ -171,8 +171,8 @@ class LLMResponse(BaseModel):
 ### 4.1 Python SDK（orchestrator 调用方）
 
 ```python
-# packages/helix-sdk/src/helix/sdk/llm.py
-from helix.protocol.llm import LLMRequest, LLMResponse
+# packages/expert-work-sdk/src/Expert Work/sdk/llm.py
+from expert_work.protocol.llm import LLMRequest, LLMResponse
 
 class LLMGatewayClient:
     async def chat(self, req: LLMRequest) -> LLMResponse: ...
@@ -295,7 +295,7 @@ API 名称以 [16 Quota](./16-quota-rate-limit.md) 为权威：`reserve_tokens` 
      )
      - 口径固定：actual_tokens = input_tokens + output_tokens
      - cache_read_input_tokens / cache_creation_input_tokens 单独走 metric
-       （helix_llm_gateway_tokens_total{kind=cache_read|cache_creation}），
+       （expert_work_llm_gateway_tokens_total{kind=cache_read|cache_creation}），
        不参与 budget commit（避免在缓存命中时多扣业务侧预算）
      - 若 actual > est：补扣差额
      - 若 actual < est：返还差额
@@ -359,34 +359,34 @@ def assert_static_prefix(req: LLMRequest) -> None:
 ## 7. 可观测性
 
 > 日志完整字段遵循 [20 § 5.3](./20-observability.md)，此处仅展示子系统专属字段。
-> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `helix_*` 前缀（snake_case），span 统一 `helix.{component}.{action}`。
+> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `expert_work_*` 前缀（snake_case），span 统一 `expert_work.{component}.{action}`。
 
 ### Prometheus metrics
 
 ```
-helix_llm_gateway_requests_total{tenant,agent,provider,model,role,status}
-helix_llm_gateway_request_duration_seconds{tenant,agent,provider,model,role}    histogram
-helix_llm_gateway_tokens_total{tenant,agent,provider,model,kind}
+expert_work_llm_gateway_requests_total{tenant,agent,provider,model,role,status}
+expert_work_llm_gateway_request_duration_seconds{tenant,agent,provider,model,role}    histogram
+expert_work_llm_gateway_tokens_total{tenant,agent,provider,model,kind}
   # kind ∈ input/output/cache_read/cache_creation
-helix_llm_gateway_retries_total{provider,error_class}
-helix_llm_gateway_fallback_used_total{tenant,agent,from_provider,to_provider}
-helix_llm_gateway_circuit_state{provider,key_ref}                       gauge 0/1/2
-helix_llm_gateway_cache_unstable_total{tenant,agent}                    counter
-helix_llm_provider_circuit_state{provider,state}                         gauge
+expert_work_llm_gateway_retries_total{provider,error_class}
+expert_work_llm_gateway_fallback_used_total{tenant,agent,from_provider,to_provider}
+expert_work_llm_gateway_circuit_state{provider,key_ref}                       gauge 0/1/2
+expert_work_llm_gateway_cache_unstable_total{tenant,agent}                    counter
+expert_work_llm_provider_circuit_state{provider,state}                         gauge
   # state ∈ closed/open/half_open；与 model 级断路器独立
-helix_quota_exceeded_total{tenant,agent,reason}                          counter
+expert_work_quota_exceeded_total{tenant,agent,reason}                          counter
   # 与 [20 § 5] 共享命名；reason ∈ over_budget/over_rate/...（与 16 一致）
 ```
 
 ### OTel spans
 
 ```
-helix.llm_gateway.chat
+expert_work.llm_gateway.chat
 ├── attrs: tenant, agent, agent_version, model, role, stream, msg_count
-├── span: helix.llm_gateway.cache_check
-├── span: helix.credential_proxy.fetch (link to [11])
-├── span: helix.llm_provider.chat (provider span)
-└── span: helix.quota.commit (link to [16])
+├── span: expert_work.llm_gateway.cache_check
+├── span: expert_work.credential_proxy.fetch (link to [11])
+├── span: expert_work.llm_provider.chat (provider span)
+└── span: expert_work.quota.commit (link to [16])
 ```
 
 ### 日志字段（结构化 JSON，敏感值已 redact；通用字段见 [20 § 5.3]）

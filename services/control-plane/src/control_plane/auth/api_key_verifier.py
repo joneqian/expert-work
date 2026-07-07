@@ -33,15 +33,15 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from control_plane.auth.errors import InvalidTokenError, TokenExpiredError
-from helix_agent.persistence.auth import ApiKeyStore
-from helix_agent.protocol import (
+from expert_work.persistence.auth import ApiKeyStore
+from expert_work.protocol import (
     API_KEY_STORED_PREFIX_LEN,
     ApiKey,
     ApiKeyScope,
     Principal,
 )
 
-logger = logging.getLogger("helix.control_plane.auth.api_key")
+logger = logging.getLogger("expert_work.control_plane.auth.api_key")
 
 #: Bearer sentinel — also a feature-flag of sorts: anything that does
 #: not start with this is **not** an API key and the verifier returns
@@ -49,7 +49,7 @@ logger = logging.getLogger("helix.control_plane.auth.api_key")
 API_KEY_SENTINEL: str = "aforge_pat_"
 
 #: Length of the stored ``prefix`` column. Keep in sync with
-#: :data:`helix_agent.protocol.API_KEY_STORED_PREFIX_LEN`.
+#: :data:`expert_work.protocol.API_KEY_STORED_PREFIX_LEN`.
 #: ``aforge_pat_<5hex>_<8 random hex>`` = 25 chars (Stream K.K1 widened the
 #: prefix to fold 8 random hex into it, so two keys in the same tenant no
 #: longer collide on the ``UNIQUE`` constraint).

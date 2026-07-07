@@ -15,7 +15,7 @@ from control_plane.manifest import (
 )
 
 _MINIMAL_TEMPLATE = """\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: "{{ name }}"
@@ -86,7 +86,7 @@ def test_undefined_template_var_raises() -> None:
 
 def test_broken_yaml_raises_syntax() -> None:
     with pytest.raises(ManifestSyntaxError):
-        load_manifest("apiVersion: helix.io/v1\nkind: Agent\nthis: is: broken: yaml")
+        load_manifest("apiVersion: expert_work.io/v1\nkind: Agent\nthis: is: broken: yaml")
 
 
 def test_non_mapping_root_raises_syntax() -> None:

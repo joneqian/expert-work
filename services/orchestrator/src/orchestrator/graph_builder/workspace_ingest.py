@@ -16,10 +16,10 @@ from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, Plan
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import expert_work_counter
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult, Plan
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator.context import WorkspaceIngester
 from orchestrator.graph_builder._config import (
     audit_logger_from_config,
@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 
 #: Stream CM-0 — file→DB ingests at run start, by outcome
 #: (applied = plan replaced / rejected = injection scan blocked).
-_cm_ingest_total = helix_counter(
-    "helix_cm_ingest_total",
+_cm_ingest_total = expert_work_counter(
+    "expert_work_cm_ingest_total",
     "Workspace state ingests at run start (Stream CM-0).",
     ("outcome",),
 )

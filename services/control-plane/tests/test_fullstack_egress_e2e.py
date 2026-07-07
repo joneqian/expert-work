@@ -13,7 +13,7 @@ injected the secret and audited the call without leaking the value.
 
 The fixture is *module*-scoped (not session): it tears the stack down
 before the F.8 ``test_supervisor_integration`` module runs, so the two
-do not both hold the ``helix-sandbox-egress`` network at once.
+do not both hold the ``expert-work-sandbox-egress`` network at once.
 
 Skips when Docker / compose is unavailable, so the unit ``pytest`` job
 (``-m "not integration"``) never touches Docker.
@@ -39,7 +39,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.e2e]
 _INFRA = Path(__file__).resolve().parents[3] / "infra"
 _COMPOSE_FILE = _INFRA / "docker-compose.yml"
 #: The composed supervisor launches sandboxes from this tag (its default).
-_SANDBOX_IMAGE = "helix-sandbox:dev"
+_SANDBOX_IMAGE = "expert-work-sandbox:dev"
 #: Service images the sub-stack consumes — ``migrate`` reuses the
 #: control-plane image, hence ``control-plane-blue`` (its sole builder,
 #: Stream I.2) is built even though control-plane is not in the #60 chain.
@@ -55,7 +55,7 @@ _STACK_SERVICES = (
 #: sandbox-supervisor's host-mapped port (docker-compose.yml).
 _SUPERVISOR_URL = "http://localhost:8001"
 #: Host-mapped Postgres — seed the allowlist / read the audit table.
-_DB_DSN = "postgresql://helix_agent:helix_agent_dev@localhost:5432/helix_agent_dev"
+_DB_DSN = "postgresql://expert_work:expert_work_dev@localhost:5432/expert_work_dev"
 
 #: Must match infra/credential-proxy/secrets.env.
 _SECRET_REF = "e2e-upstream-token"
@@ -75,11 +75,11 @@ req = urllib.request.Request(
     method="POST",
     data=b'{"probe": "i1b-e2e"}',
     headers={
-        "X-Helix-Tenant": "__TENANT_ID__",
-        "X-Helix-Agent": "e2e-agent",
-        "X-Helix-Agent-Version": "1",
-        "X-Helix-Secret-Ref": "e2e-upstream-token",
-        "X-Helix-Upstream": "http://mock-upstream:9100/echo",
+        "X-Expert-Work-Tenant": "__TENANT_ID__",
+        "X-Expert-Work-Agent": "e2e-agent",
+        "X-Expert-Work-Agent-Version": "1",
+        "X-Expert-Work-Secret-Ref": "e2e-upstream-token",
+        "X-Expert-Work-Upstream": "http://mock-upstream:9100/echo",
         "Content-Type": "application/json",
     },
 )
@@ -119,7 +119,7 @@ def _compose_down() -> None:
 def _egress_stack() -> Iterator[None]:
     """Build images + bring up the #60 egress sub-stack.
 
-    Module-scoped so the stack — and the ``helix-sandbox-egress``
+    Module-scoped so the stack — and the ``expert-work-sandbox-egress``
     network — is gone before the F.8 integration module runs.
     """
     probe = _docker("version", "--format", "{{.Server.Version}}")

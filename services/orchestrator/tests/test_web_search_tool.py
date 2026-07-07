@@ -38,7 +38,7 @@ async def test_basic_search_returns_formatted_results() -> None:
     client = _client(
         [
             _result(
-                title="Helix on GitHub",
+                title="Expert Work on GitHub",
                 url="https://github.com/x",
                 content="An agent runtime",
             ),
@@ -46,13 +46,13 @@ async def test_basic_search_returns_formatted_results() -> None:
         ]
     )
     tool = WebSearchTool(client=client)
-    result = await tool.call({"query": "helix-agent"}, ctx=_CTX)
+    result = await tool.call({"query": "expert-work"}, ctx=_CTX)
 
     assert result.meta == {"truncated": False, "n_results": 2}
-    assert "Helix on GitHub" in result.content
+    assert "Expert Work on GitHub" in result.content
     assert "https://github.com/x" in result.content
     assert "An agent runtime" in result.content
-    assert client.last_query == "helix-agent"
+    assert client.last_query == "expert-work"
     assert client.last_max_results == DEFAULT_MAX_RESULTS
 
 

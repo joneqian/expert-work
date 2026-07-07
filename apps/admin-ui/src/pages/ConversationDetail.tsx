@@ -230,17 +230,17 @@ export function ConversationDetail() {
             fontSize: 13,
           }}
         >
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("conversations_detail.user")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("conversations_detail.user")}</dt>
           <dd className="mono" style={{ margin: 0 }}>
             {convo.user_id ?? "—"}
           </dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("conversations_page.column_runs")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("conversations_page.column_runs")}</dt>
           <dd style={{ margin: 0 }}>
             {convo.run_count}
             {convo.error_count > 0 &&
               ` · ${t("conversations_page.error_count", { count: convo.error_count })}`}
           </dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>
             {t("conversations_detail.tokens")}
           </dt>
           <dd style={{ margin: 0 }}>
@@ -257,13 +257,13 @@ export function ConversationDetail() {
               "—"
             )}
           </dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>
             {t("conversations_detail.models")}
           </dt>
           <dd style={{ margin: 0 }}>
             {tk && tk.models.length > 0 ? tk.models.join(", ") : "—"}
           </dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>
             {t("conversations_page.column_last_active")}
           </dt>
           <dd style={{ margin: 0 }}>
@@ -292,7 +292,7 @@ export function ConversationDetail() {
                     gridTemplateColumns: "72px 1fr",
                     columnGap: 12,
                     padding: "8px 0",
-                    borderTop: i === 0 ? "none" : "1px solid var(--hx-border-default)",
+                    borderTop: i === 0 ? "none" : "1px solid var(--ew-border-default)",
                     fontSize: 13,
                   }}
                 >

@@ -48,14 +48,14 @@ from jsonschema.exceptions import SchemaError
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
-from helix_agent.common.skill_activity import SkillActivityRecorder
-from helix_agent.common.skill_run_usage import BoundDistilledSkill
-from helix_agent.common.spotlight import SPOTLIGHT_SYSTEM_CLAUSE
-from helix_agent.persistence import MemoryStore
-from helix_agent.persistence.memory import MemoryWritebackDLQ
-from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.persistence.tenant_config import TenantConfigStore
-from helix_agent.protocol import (
+from expert_work.common.skill_activity import SkillActivityRecorder
+from expert_work.common.skill_run_usage import BoundDistilledSkill
+from expert_work.common.spotlight import SPOTLIGHT_SYSTEM_CLAUSE
+from expert_work.persistence import MemoryStore
+from expert_work.persistence.memory import MemoryWritebackDLQ
+from expert_work.persistence.skill.base import SkillStore
+from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.protocol import (
     AgentSpec,
     BuiltinToolSpec,
     ModelSpec,
@@ -66,12 +66,12 @@ from helix_agent.protocol import (
     parse_agent_ref,
     parse_skill_ref,
 )
-from helix_agent.protocol.model_catalog import ModelEntry, catalog_entry
-from helix_agent.protocol.skill import SkillStatus
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.middleware import MiddlewareChain
-from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
-from helix_agent.runtime.tokens import default_estimator
+from expert_work.protocol.model_catalog import ModelEntry, catalog_entry
+from expert_work.protocol.skill import SkillStatus
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.middleware import MiddlewareChain
+from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.runtime.tokens import default_estimator
 from orchestrator.context import (
     ContextCompressor,
     ToolResultPruner,
@@ -135,7 +135,7 @@ from orchestrator.tools.skill_authoring import (
 from orchestrator.tools.skill_seed import build_skill_seed_files, seed_drop_audit_entries
 from orchestrator.tools.update_plan import UpdatePlanTool
 
-logger = logging.getLogger("helix.orchestrator.agent_factory")
+logger = logging.getLogger("expert_work.orchestrator.agent_factory")
 
 #: Floor for the VL (``ask_image``) router's wall-clock deadline. Reasoning
 #: vision models (e.g. doubao-seed VL) are far slower than chat — a detailed
@@ -492,7 +492,7 @@ async def build_agent(
     action_judge: ActionJudge | None = None,
     # Phase 3 — platform master switch for the tool-output-budget feature,
     # resolved by the control-plane (``PlatformToolBudgetConfigService``: DB-wins
-    # over the ``HELIX_TOOL_OUTPUT_BUDGET`` env default). ``None`` (tests / no
+    # over the ``EXPERT_WORK_TOOL_OUTPUT_BUDGET`` env default). ``None`` (tests / no
     # control-plane) falls back to the env default. Combined with the per-agent
     # ``policies.tool_output_budget.enabled`` as ``effective = platform AND agent``.
     platform_tool_budget_enabled: bool | None = None,
@@ -763,7 +763,7 @@ async def build_agent(
         )
     # Phase 3 — resolve the tool-output-budget master switch:
     # effective = platform AND agent. Platform = the control-plane-resolved value
-    # (DB-wins over the HELIX_TOOL_OUTPUT_BUDGET env default); ``None`` (tests /
+    # (DB-wins over the EXPERT_WORK_TOOL_OUTPUT_BUDGET env default); ``None`` (tests /
     # no control-plane) falls back to the env default. Agent = the per-agent
     # policy flag. ``tool_budget_enabled`` gates the externalization + persist
     # (threaded into build_react_graph) AND the prune gate below.
@@ -1282,7 +1282,7 @@ def _render_skill_summary(*, name: str, version: SkillVersion) -> str:
 #: Agent wall-clock timezone for the injected "current date" line. The injected
 #: value is day-granular (see ``_current_date_block``) so the system prompt stays
 #: byte-stable across every run within one calendar day, keeping the prompt-cache
-#: prefix warm. ``HELIX_AGENT_TIMEZONE`` overrides the default (zh-CN deployment →
+#: prefix warm. ``EXPERT_WORK_TIMEZONE`` overrides the default (zh-CN deployment →
 #: Asia/Shanghai) so "今天几号" answers in the user's local day, not the server's
 #: UTC day.
 _DEFAULT_AGENT_TIMEZONE = "Asia/Shanghai"
@@ -1301,15 +1301,15 @@ _WEEKDAYS_EN = (
 def _resolve_agent_timezone() -> ZoneInfo:
     """Resolve the agent wall-clock timezone, falling back to UTC.
 
-    Reads ``HELIX_AGENT_TIMEZONE`` (default ``Asia/Shanghai``). An invalid zone
+    Reads ``EXPERT_WORK_TIMEZONE`` (default ``Asia/Shanghai``). An invalid zone
     name degrades to UTC rather than failing the build — a stale tz label is
     recoverable, a crashed build is not.
     """
-    name = os.environ.get("HELIX_AGENT_TIMEZONE", _DEFAULT_AGENT_TIMEZONE)
+    name = os.environ.get("EXPERT_WORK_TIMEZONE", _DEFAULT_AGENT_TIMEZONE)
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
-        logger.warning("invalid HELIX_AGENT_TIMEZONE %r; falling back to UTC", name)
+        logger.warning("invalid EXPERT_WORK_TIMEZONE %r; falling back to UTC", name)
         return ZoneInfo("UTC")
 
 
@@ -1553,7 +1553,7 @@ def detect_subagent_cycle(
 #: Resolve a provider name → a ``secret://`` ref for its platform-configured
 #: key (Stream Q, Mini-ADR Q-5). The control-plane binds this to a
 #: ``CredentialsResolver`` + the run's tenant_id and passes it in, so the
-#: orchestrator never imports helix-common.credentials (same decoupling as
+#: orchestrator never imports expert-work-common.credentials (same decoupling as
 #: ``mcp_allowlist_provider``). Raising surfaces as ``AgentFactoryError`` —
 #: the control-plane closure translates ``CredentialsResolverError``.
 # Stream Y-MK — resolves a provider to its ORDERED list of secret_refs

@@ -14,10 +14,10 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from control_plane.skill_evolution_wiring import _TrajectoryEvidenceProvider
-from helix_agent.persistence import InMemoryCurationCandidateStore
-from helix_agent.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
-from helix_agent.protocol import CurationCandidateRecord, CurationSignal, TrajectoryOutcome
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.persistence import InMemoryCurationCandidateStore
+from expert_work.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
+from expert_work.protocol import CurationCandidateRecord, CurationSignal, TrajectoryOutcome
+from expert_work.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryReader, TrajectoryRecord, TrajectoryRecorder
 
 _NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)

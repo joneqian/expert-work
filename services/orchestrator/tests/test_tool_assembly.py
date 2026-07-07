@@ -9,8 +9,8 @@ from uuid import UUID
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from helix_agent.persistence import InMemoryArtifactStore, InMemoryKnowledgeStore
-from helix_agent.protocol import (
+from expert_work.persistence import InMemoryArtifactStore, InMemoryKnowledgeStore
+from expert_work.protocol import (
     BuiltinToolSpec,
     HTTPToolSpec,
     KnowledgeSpec,

@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 
 from control_plane.agent_disable_status import AgentDisableService
-from helix_agent.persistence import InMemoryAgentDisableStore
+from expert_work.persistence import InMemoryAgentDisableStore
 
 
 class _FakeClock:

@@ -2,7 +2,7 @@
 
 Returns the EFFECTIVE platform on/off for the tool-output-budget feature
 (generalized externalization + persist floor + CM-12 prune): the runtime DB row
-wins; absent a row, the ``HELIX_TOOL_OUTPUT_BUDGET`` env default
+wins; absent a row, the ``EXPERT_WORK_TOOL_OUTPUT_BUDGET`` env default
 (:func:`orchestrator.tools.overflow.tool_output_budget_enabled`). So the env
 stays the bootstrap default / ops hard-revert until an admin flips it in the UI,
 after which the DB value wins.
@@ -18,7 +18,7 @@ import asyncio
 import time
 from collections.abc import Callable
 
-from helix_agent.persistence.platform_tool_budget_config.base import (
+from expert_work.persistence.platform_tool_budget_config.base import (
     PlatformToolBudgetConfigStore,
 )
 from orchestrator.tools.overflow import tool_output_budget_enabled

@@ -147,7 +147,7 @@ async def test_endtoend_concurrency_matches_sequential() -> None:
 
     instances = load_longmemeval(FIXTURES / "longmemeval_mini.json")
     judge = ScriptedTextJudge(
-        {"The user visited Kyoto.": "yes", "Their favorite editor is helix.": "yes"}
+        {"The user visited Kyoto.": "yes", "Their favorite editor is expert_work.": "yes"}
     )
     sequential = await run_end_to_end(
         instances,

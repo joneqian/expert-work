@@ -14,11 +14,8 @@ export function BrandGlyph({ size = 20, ...rest }: SVGProps<SVGSVGElement> & { s
       aria-hidden="true"
       {...rest}
     >
-      <path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21" />
-      <path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21" />
-      <line x1="9" y1="7" x2="15" y2="7" opacity="0.5" />
-      <line x1="9" y1="12" x2="15" y2="12" opacity="0.5" />
-      <line x1="9" y1="17" x2="15" y2="17" opacity="0.5" />
+      <path d="M12 3 L20 6 V11.5 C20 16.5 16.4 19.6 12 21 C7.6 19.6 4 16.5 4 11.5 V6 Z" />
+      <path d="M8.5 12 L11 14.5 L15.5 9.5" />
     </svg>
   );
 }

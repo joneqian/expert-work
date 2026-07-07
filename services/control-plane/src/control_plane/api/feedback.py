@@ -20,10 +20,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from control_plane.audit import emit
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.feedback_store import FeedbackRecord, FeedbackStore
-from helix_agent.protocol import AuditAction
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.feedback_store import FeedbackRecord, FeedbackStore
+from expert_work.protocol import AuditAction
+from expert_work.runtime.audit.logger import AuditLogger
 
 
 class FeedbackRequest(BaseModel):

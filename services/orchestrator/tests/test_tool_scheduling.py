@@ -2,7 +2,7 @@
 
 Covers the conflict rules in :func:`conflicts` and the greedy stage
 planner :func:`plan_stages`. The end-to-end ``tools_node`` integration
-(parallel dispatch + ``helix_tools_batch_concurrency``) lives in
+(parallel dispatch + ``expert_work_tools_batch_concurrency``) lives in
 :mod:`test_react_graph_parallel`.
 """
 

@@ -35,26 +35,26 @@ from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api.runs import build_run_graph_input
 from control_plane.runtime import AgentRuntime
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.rls import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.persistence.thread_meta import ThreadMetaStore
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunInfo, RunStatus, RunStore
+from expert_work.persistence.thread_meta import ThreadMetaStore
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunInfo, RunStatus, RunStore
 from orchestrator import AgentFactoryError, run_agent
 
-logger = logging.getLogger("helix.control_plane.run_queue_worker")
+logger = logging.getLogger("expert_work.control_plane.run_queue_worker")
 
-_dequeued_total = helix_counter(
-    "helix_run_queue_dequeued_total",
+_dequeued_total = expert_work_counter(
+    "expert_work_run_queue_dequeued_total",
     "Queued runs the run-queue worker claimed + started executing.",
 )
-_failed_total = helix_counter(
-    "helix_run_queue_failed_total",
+_failed_total = expert_work_counter(
+    "expert_work_run_queue_failed_total",
     "Queued runs the run-queue worker could not start, by reason.",
     ("reason",),
 )

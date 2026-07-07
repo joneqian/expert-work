@@ -47,7 +47,7 @@ const TEMPLATE = {
   tenant_id: null,
   name: "support-bot",
   version: "1.0.0",
-  spec: { apiVersion: "helix.io/v1", kind: "Agent", metadata: {}, spec: {} },
+  spec: { apiVersion: "expert_work.io/v1", kind: "Agent", metadata: {}, spec: {} },
   spec_sha256: "a".repeat(64),
   display_name: "Support Bot",
   description: "Customer support",

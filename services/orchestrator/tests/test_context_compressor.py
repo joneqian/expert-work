@@ -808,7 +808,7 @@ async def test_tokens_saved_counter_increments_by_reclaimed_tokens() -> None:
     middle-summarisation removed from the prompt."""
     from prometheus_client import REGISTRY
 
-    metric = "helix_cm_compressor_tokens_saved_total"
+    metric = "expert_work_cm_compressor_tokens_saved_total"
     compressor = ContextCompressor(
         llm_caller=_ScriptedSummariser(),
         context_window=280,

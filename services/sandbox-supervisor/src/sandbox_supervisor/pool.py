@@ -23,8 +23,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from helix_agent.common.observability import helix_counter, helix_gauge
-from helix_agent.runtime.sandbox import SandboxRuntimeProvider
+from expert_work.common.observability import expert_work_counter, expert_work_gauge
+from expert_work.runtime.sandbox import SandboxRuntimeProvider
 from sandbox_supervisor.docker_client import DockerClient, DockerError
 from sandbox_supervisor.domain import SandboxRecord, SandboxState, container_name
 from sandbox_supervisor.runner_link import RunnerLink, RunnerLinkError
@@ -55,8 +55,8 @@ DESTROY_REASON_POOL_CLAIM_FAILED = "pool_claim_failed"
 # claim whose limit pairing failed (fail-closed → cold start);
 # ``claim_raced`` is the defensive CAS-lost branch; ``prepull`` /
 # ``prepull_failed`` are the startup image prefetch (PR2).
-_pool_events = helix_counter(
-    "helix_sandbox_pool_total",
+_pool_events = expert_work_counter(
+    "expert_work_sandbox_pool_total",
     "Warm sandbox pool flow events (Stream HX-6).",
     ("event",),
 )
@@ -71,8 +71,8 @@ def observe_pool_event(event: str) -> None:
 # label values (minimal / office), re-set by the replenisher every tick
 # (the ApprovalGaugeWorker periodic-set precedent); SLO #4's M1
 # acceptance reads hit ratio + this gauge together.
-_pool_ready = helix_gauge(
-    "helix_sandbox_pool_ready",
+_pool_ready = expert_work_gauge(
+    "expert_work_sandbox_pool_ready",
     "READY warm-pool containers currently held, per image variant.",
     ("variant",),
 )

@@ -1,6 +1,6 @@
 # 本地部署上手指南(dev / dogfood)
 
-> 面向**第一次**把 helix-agent 在本机跑起来、并跑通"一家公司从零用起来"完整闭环的人:
+> 面向**第一次**把 expert-work 在本机跑起来、并跑通"一家公司从零用起来"完整闭环的人:
 > 建公司 → 配 LLM key → 建首位管理员 → 管理员邀员工 → 员工登录用上 agent —— **全程网页操作**。
 >
 > **范围**:仅本地 dev / dogfood(macOS + Docker)。staging / prod 的发布、蓝绿、
@@ -28,8 +28,8 @@
 ## 1. 拉代码 + 配 `infra/.env`
 
 ```sh
-git clone <repo-url> helix-agent      # 已克隆则跳过
-cd helix-agent
+git clone <repo-url> expert-work      # 已克隆则跳过
+cd expert-work
 git checkout main && git pull --ff-only
 ```
 
@@ -45,31 +45,31 @@ cp .env.example .env
 
 ```ini
 # —— 密钥金库:全程网页粘贴 LLM key,加密落库(Stream Q)——
-HELIX_AGENT_SECRET_STORE_BACKEND=sql_encrypted
-HELIX_AGENT_SECRET_ENCRYPTION_KEY=<下方命令的输出,base64 32 字节 KEK>
+EXPERT_WORK_SECRET_STORE_BACKEND=sql_encrypted
+EXPERT_WORK_SECRET_ENCRYPTION_KEY=<下方命令的输出,base64 32 字节 KEK>
 
 # —— 成员 onboarding:用真 Keycloak 建真账号(Stream R)——
-HELIX_AGENT_KEYCLOAK_ENABLED=true
+EXPERT_WORK_KEYCLOAK_ENABLED=true
 
 # —— 11.4/11.5 live eval worker:对真 agent 跑 adversarial/trace 评测(可选,E2E 用)——
 # 默认全 OFF(enqueue API 仍能排队,只是没人 drain)。要在 /eval-runs 跑
 # adversarial / trace_eval suite 时才开。EVAL_AGENT_PROVIDER 必须是本租户
 # 平台配了凭证的 provider(走 resolve_provider 取 key),否则 build 失败→job ERROR。
 # interval 设短(15s)是为 E2E 快排空;生产用默认 300。
-HELIX_AGENT_ENABLE_EVAL_WORKER=true
-HELIX_AGENT_EVAL_WORKER_INTERVAL_S=15
-HELIX_AGENT_EVAL_AGENT_PROVIDER=deepseek
-HELIX_AGENT_EVAL_AGENT_MODEL=<该 provider 的模型名>
+EXPERT_WORK_ENABLE_EVAL_WORKER=true
+EXPERT_WORK_EVAL_WORKER_INTERVAL_S=15
+EXPERT_WORK_EVAL_AGENT_PROVIDER=deepseek
+EXPERT_WORK_EVAL_AGENT_MODEL=<该 provider 的模型名>
 
 # —— 4.4 skill-evolution 飞轮:从真实轨迹+反馈自动蒸馏/验证/升级 skill(可选,E2E 用)——
 # 默认 OFF。开后 SkillEvolutionWorker 排空 curation candidate:aux LLM 蒸 DRAFT
 # skill → 真 graph replay(有 skill vs 无 skill)→ grounding 判决 → 自动升级/留审。
 # AUX_PROVIDER 必须是本租户平台配了凭证的 provider。interval 设短为 E2E 快跑。
-HELIX_AGENT_ENABLE_SKILL_EVOLUTION_WORKER=true
-HELIX_AGENT_SKILL_EVOLUTION_WORKER_INTERVAL_S=15
-HELIX_AGENT_CURATION_WORKER_INTERVAL_S=15
-HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER=deepseek
-HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL=<该 provider 的模型名>
+EXPERT_WORK_ENABLE_SKILL_EVOLUTION_WORKER=true
+EXPERT_WORK_SKILL_EVOLUTION_WORKER_INTERVAL_S=15
+EXPERT_WORK_CURATION_WORKER_INTERVAL_S=15
+EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER=deepseek
+EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL=<该 provider 的模型名>
 ```
 
 生成 KEK:
@@ -81,7 +81,7 @@ openssl rand -base64 32
 > ⚠️ **KEK 一旦丢失或更改,数据库里所有加密过的 key(含下面要种的 Keycloak admin secret)永久解不开**。
 > dev 阶段丢了大不了重粘;但同一轮测试中途别换它,否则会突然"拿不到 key"。
 
-> `HELIX_AGENT_KEYCLOAK_ENABLED` 默认 `false`(用进程内 Fake 客户端,不建真账号)。
+> `EXPERT_WORK_KEYCLOAK_ENABLED` 默认 `false`(用进程内 Fake 客户端,不建真账号)。
 > 设 `true` 后,建租户 / 邀员工会真的调 Keycloak Admin API 建账号——这是"员工能登录"的前提。
 
 ---
@@ -116,7 +116,7 @@ curl -sS http://localhost:8000/healthz/ready | python3 -m json.tool
 ```yaml
 # infra/docker-compose.override.yml —— 本机专用,git 忽略,docker compose 自动加载。
 services:
-  # 1) 本机已有宿主 redis 占着 6379;helix 走 compose 网络(redis://redis:6379)通信,
+  # 1) 本机已有宿主 redis 占着 6379;Expert Work 走 compose 网络(redis://redis:6379)通信,
   #    宿主端口映射纯属 dev 便利,丢掉它避免 bind 冲突。!override 替换(而非拼接)base 的 ports。
   redis:
     ports: !override []
@@ -127,17 +127,17 @@ services:
   #    所以 audience 要同时接受两者(service-account audience 留给 M2M 调用)。
   control-plane-blue:
     environment:
-      HELIX_AGENT_OIDC_ISSUER: http://localhost:8080/realms/helix-agent
-      HELIX_AGENT_OIDC_JWKS_URI: http://keycloak:8080/realms/helix-agent/protocol/openid-connect/certs
-      HELIX_AGENT_OIDC_AUDIENCE: '["helix-agent-api-internal","helix-agent-admin-ui"]'
+      EXPERT_WORK_OIDC_ISSUER: http://localhost:8080/realms/expert-work
+      EXPERT_WORK_OIDC_JWKS_URI: http://keycloak:8080/realms/expert-work/protocol/openid-connect/certs
+      EXPERT_WORK_OIDC_AUDIENCE: '["expert-work-api-internal","expert-work-admin-ui"]'
 ```
 
 admin-ui(Vite dev server,如果你单独跑前端)也要知道 OIDC 端点 —— 建
 `apps/admin-ui/.env.development.local`(同样 git 忽略):
 
 ```sh
-VITE_OIDC_ISSUER=http://localhost:8080/realms/helix-agent
-VITE_OIDC_CLIENT_ID=helix-agent-admin-ui
+VITE_OIDC_ISSUER=http://localhost:8080/realms/expert-work
+VITE_OIDC_CLIENT_ID=expert-work-admin-ui
 ```
 
 > 没有 ①,起栈会因 6379 端口冲突起不来(或你本机 redis 没占 6379 就不用)。
@@ -147,19 +147,19 @@ VITE_OIDC_CLIENT_ID=helix-agent-admin-ui
 
 ## 3. 种入 Keycloak Admin secret(Stream R)
 
-`keycloak_enabled=true` 时,control-plane 通过服务账号 `helix-agent-api-internal` 调 Keycloak
-Admin API,其 client secret 从加密金库按名 `helix-agent/platform/keycloak/admin-client-secret` 取。
+`keycloak_enabled=true` 时,control-plane 通过服务账号 `expert-work-api-internal` 调 Keycloak
+Admin API,其 client secret 从加密金库按名 `expert-work/platform/keycloak/admin-client-secret` 取。
 `sql_encrypted` 后端下没有别处写这个 key,所以**起栈后种一次**:
 
 ```sh
 cd infra
 docker compose exec control-plane-blue \
   python -m control_plane.seed_keycloak_secret --value dev-internal-secret-rotate-me
-# 期望:OK: seeded keycloak admin secret under 'helix-agent/platform/keycloak/admin-client-secret'
+# 期望:OK: seeded keycloak admin secret under 'expert-work/platform/keycloak/admin-client-secret'
 ```
 
 > `dev-internal-secret-rotate-me` 是 dev realm 里预置的 client secret
-> (`infra/keycloak/realm-helix-agent.json`,非真密钥,prod 务必轮换)。
+> (`infra/keycloak/realm-expert-work.json`,非真密钥,prod 务必轮换)。
 > 命令幂等:每跑一次写一个新版本,轮换 client secret 后重跑即更新。
 
 **【实跑回填】** —— seed 真实输出。
@@ -175,15 +175,15 @@ docker compose exec control-plane-blue \
 
 1. host 起前端(`cd apps/admin-ui && pnpm dev`)→ 开 `http://localhost:5173`。
 2. 未初始化会自动跳 `/setup`。填:平台名 / 管理员邮箱 / 密码 / Setup Token。
-   - **Setup Token** = `infra/.env` 的 `HELIX_AGENT_SETUP_TOKEN`(dev 默认 `dev-setup-token`)。
-   - 邮箱**用新地址**(如 `founder@corp.com`),别用 `dev@helix.local`(Keycloak 已占 → 409)。
+   - **Setup Token** = `infra/.env` 的 `EXPERT_WORK_SETUP_TOKEN`(dev 默认 `dev-setup-token`)。
+   - 邮箱**用新地址**(如 `founder@corp.com`),别用 `dev@expert_work.local`(Keycloak 已占 → 409)。
 3. 提交 → 后端建平台租户 + Keycloak 账号(已验证 + 该密码)+ `system_admin` → 跳登录,用刚设的邮箱密码登入。
 
 > 安全:`/v1/setup` 无需登录,靠 Setup Token + 零-admin 不变量双重门控,建好后自动失效。
 
 ### 路径 B — CLI 快路径(跳向导 / break-glass)
 
-直接提权预置的 `dev` 用户。`helix-agent-admin-ui` 是 PKCE 公有客户端(禁了 password
+直接提权预置的 `dev` 用户。`expert-work-admin-ui` 是 PKCE 公有客户端(禁了 password
 grant),所以用**服务账号 Admin API** 查 dev 用户 subject id:
 
 ```sh
@@ -194,13 +194,13 @@ cd infra && make dev-bootstrap-admin   # 封装了下面三步,幂等
 
 ```sh
 # 1. 服务账号 token(client_credentials,带 manage-users)
-SA_TOKEN=$(curl -sS -X POST http://localhost:8080/realms/helix-agent/protocol/openid-connect/token \
+SA_TOKEN=$(curl -sS -X POST http://localhost:8080/realms/expert-work/protocol/openid-connect/token \
   -d grant_type=client_credentials \
-  -d client_id=helix-agent-api-internal \
+  -d client_id=expert-work-api-internal \
   -d client_secret=dev-internal-secret-rotate-me | jq -r .access_token)
 
 # 2. 查 dev 用户 UUID(浏览器登录时 token 的 sub)
-SUB=$(curl -sS "http://localhost:8080/admin/realms/helix-agent/users?username=dev&exact=true" \
+SUB=$(curl -sS "http://localhost:8080/admin/realms/expert-work/users?username=dev&exact=true" \
   -H "Authorization: Bearer ${SA_TOKEN}" | jq -r '.[0].id')
 echo "dev subject-id=$SUB"
 
@@ -260,7 +260,7 @@ cd apps/admin-ui && pnpm install && pnpm dev      # 起在 http://localhost:5173
 ### 6.1 在 Keycloak 控制台给首管设密码(dev 无 SMTP 路径)
 
 浏览器开 Keycloak 管理控制台 http://localhost:8080(**admin / admin_dev**)→ 选 realm
-`helix-agent` → Users → 找到首管邮箱 → **Credentials** → Set password
+`expert-work` → Users → 找到首管邮箱 → **Credentials** → Set password
 (关掉 Temporary)→ 保存。
 
 ### 6.2 首管登录

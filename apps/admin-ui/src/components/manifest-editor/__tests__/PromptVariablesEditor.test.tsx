@@ -7,7 +7,7 @@ import { PromptVariablesEditor } from "../PromptVariablesEditor";
 import type { AgentManifest, PromptVariableFields } from "../form_model";
 
 const SEED: AgentManifest = {
-  apiVersion: "helix/v1",
+  apiVersion: "expert_work/v1",
   kind: "Agent",
   metadata: { name: "bot" },
   spec: { system_prompt: { template: "hi {{ persona }}" } },

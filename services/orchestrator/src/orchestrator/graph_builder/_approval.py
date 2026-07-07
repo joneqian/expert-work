@@ -1,6 +1,6 @@
 """Approval-gate helpers for ``tools_node`` — Stream J.8 (Mini-ADR J-24).
 
-helix's ``tools_node`` dispatches a turn's ``tool_calls`` in parallel
+expert_work's ``tools_node`` dispatches a turn's ``tool_calls`` in parallel
 stages (Stream L.L6 — ``plan_stages`` + ``asyncio.gather``). LangGraph's
 native ``interrupt()`` re-runs the whole node on resume, which does not
 compose cleanly with an in-flight ``gather``. After comparing with
@@ -30,7 +30,7 @@ from typing import Any
 
 from langchain_core.messages import ToolMessage
 
-from helix_agent.protocol import ApprovalReasonKind, ApprovalRequest, canonical_args_digest
+from expert_work.protocol import ApprovalReasonKind, ApprovalRequest, canonical_args_digest
 from orchestrator.tools.approval import ASK_FOR_APPROVAL_TOOL
 
 __all__ = [

@@ -2,7 +2,7 @@
 
 Reads :attr:`request.state.principal` (populated by
 :class:`control_plane.auth.AuthMiddleware`) and copies the tenant id
-into :data:`helix_agent.persistence.rls.current_tenant_id_var` for the
+into :data:`expert_work.persistence.rls.current_tenant_id_var` for the
 lifetime of the request. The persistence-layer RLS sessionmaker reads
 that ContextVar on every transaction begin and emits ``SET LOCAL
 app.tenant_id`` so Postgres' policies isolate the response set.
@@ -23,10 +23,10 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from helix_agent.persistence.rls import current_tenant_id_var
-from helix_agent.protocol import Principal
+from expert_work.persistence.rls import current_tenant_id_var
+from expert_work.protocol import Principal
 
-logger = logging.getLogger("helix.control_plane.rls_context")
+logger = logging.getLogger("expert_work.control_plane.rls_context")
 
 
 class RLSContextMiddleware(BaseHTTPMiddleware):

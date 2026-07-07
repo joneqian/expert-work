@@ -1,7 +1,7 @@
 import pytest
 
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
-from helix_agent.persistence.platform_embedding_config.memory import (
+from expert_work.persistence.platform_embedding_config.memory import (
     InMemoryPlatformEmbeddingConfigStore,
 )
 

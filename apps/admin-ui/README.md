@@ -1,6 +1,6 @@
-# helix Admin UI
+# Expert Work Admin UI
 
-Production scaffold for the operator-facing helix admin SPA. Tracks
+Production scaffold for the operator-facing Expert Work admin SPA. Tracks
 **Stream H.1b** in `docs/streams/STREAM-H-DESIGN.md`. The visual-baseline
 sibling (`apps/admin-ui-demo/`) was removed after H.1b PR 2b — this
 workspace is now the canonical visual + functional reference.
@@ -9,12 +9,12 @@ workspace is now the canonical visual + functional reference.
 
 ```sh
 pnpm install
-HELIX_CONTROL_PLANE_URL=http://localhost:8000 pnpm dev
+EXPERT_WORK_CONTROL_PLANE_URL=http://localhost:8000 pnpm dev
 # → http://localhost:5173
 ```
 
-The Vite dev server proxies `/v1/*` to `HELIX_CONTROL_PLANE_URL` so the
-SPA can talk to a local `helix.control_plane.main` without any CORS
+The Vite dev server proxies `/v1/*` to `EXPERT_WORK_CONTROL_PLANE_URL` so the
+SPA can talk to a local `expert_work.control_plane.main` without any CORS
 fiddling.
 
 ## Scripts
@@ -61,7 +61,7 @@ downstream will reuse.
 
 The CSS tokens and shell layout match `docs/design/mockups/shared/`
 verbatim. Antd is themed in `src/theme/antdTheme.ts` so all primitives
-inherit the helix palette (cyan brand, violet accent, dark-first).
+inherit the Expert Work palette (cyan brand, violet accent, dark-first).
 
 See [admin-ui-design-baseline](../../docs/streams/STREAM-H-DESIGN.md)
 and `docs/design/admin-ui-language.md` for the rationale.

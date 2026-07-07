@@ -46,7 +46,7 @@ def _build_seed_tar(files: list[tuple[str, bytes]]) -> bytes:
 _READ_LIMIT = 4 * 1024 * 1024
 
 #: ``docker run`` argv prefix used to find leftover sandboxes on boot.
-_ORPHAN_NAME_PREFIX = "helix-sb-"
+_ORPHAN_NAME_PREFIX = "expert-work-sb-"
 
 
 class DockerError(RuntimeError):
@@ -66,7 +66,7 @@ class DockerClient(Protocol):
         """Return whether the Docker daemon is reachable."""
 
     async def sweep_orphans(self) -> int:
-        """Remove leftover ``helix-sb-*`` containers; return the count."""
+        """Remove leftover ``expert-work-sb-*`` containers; return the count."""
 
     async def read_volume_file(
         self, *, volume: str, path: str, image: str, max_bytes: int

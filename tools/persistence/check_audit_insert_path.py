@@ -2,7 +2,7 @@
 
 Per STREAM-D-DESIGN § 6 (risk row "应用代码忘了 SET ROLE audit_writer"):
 the only code path that may emit an INSERT into ``audit_log`` is
-:mod:`helix_agent.persistence.audit_log.sql`, because that path runs
+:mod:`expert_work.persistence.audit_log.sql`, because that path runs
 ``SET LOCAL ROLE audit_writer`` first. Any other call site:
 
 * Will hit a "permission denied" from the DB at runtime when running
@@ -31,11 +31,11 @@ from typing import Final
 # Files allowed to mention ``INSERT INTO audit_log`` literally.
 _ALLOWLIST_SUFFIXES: Final[tuple[str, ...]] = (
     # The canonical writer.
-    "packages/helix-persistence/src/helix_agent/persistence/audit_log/sql.py",
+    "packages/expert-work-persistence/src/expert_work/persistence/audit_log/sql.py",
     # The lint script itself (mentions the string in its docstring).
     "tools/persistence/check_audit_insert_path.py",
     # Tests that probe the REVOKE / write-via-SET-ROLE behavior with raw SQL.
-    "packages/helix-persistence/tests/test_audit_writer_role_integration.py",
+    "packages/expert-work-persistence/tests/test_audit_writer_role_integration.py",
 )
 
 _ROOTS: Final[tuple[str, ...]] = (

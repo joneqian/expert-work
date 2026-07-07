@@ -4,7 +4,7 @@
 
 **Goal:** Add a tenant-scoped `tenant_mcp_server` registry (protocol record + ORM model + Alembic migration + base/sql/memory store triple) plus a reusable SSRF URL-validation utility — the persistence foundation for Stream V (tenant self-service remote MCP servers).
 
-**Architecture:** Mirror the existing `tenant_config` store triple exactly. The new table stores **only** remote (`sse`/`streamable_http`) MCP server records; the bearer token lives in the encrypted secret store (Stream T) and the table holds only its `secret://` ref. Row-Level Security isolates rows per tenant, identical to `tenant_member`. The SSRF guard is a pure function in `helix-common` consumed later by V-C (registration/probe) and V-D (runtime connect).
+**Architecture:** Mirror the existing `tenant_config` store triple exactly. The new table stores **only** remote (`sse`/`streamable_http`) MCP server records; the bearer token lives in the encrypted secret store (Stream T) and the table holds only its `secret://` ref. Row-Level Security isolates rows per tenant, identical to `tenant_member`. The SSRF guard is a pure function in `expert-work-common` consumed later by V-C (registration/probe) and V-D (runtime connect).
 
 **Tech Stack:** Python 3.12, SQLAlchemy 2.0 async, Alembic, Pydantic v2, pytest (+ pytest-asyncio, testcontainers for RLS integration).
 
@@ -13,13 +13,13 @@
 **Branch:** `stream-v/b-registry` (off `main`).
 
 **Key facts (verified 2026-06-03):**
-- Persistence package root: `helix_agent.persistence` (`packages/helix-persistence/src/helix_agent/persistence/`).
-- Protocol package root: `helix_agent.protocol` (`packages/helix-protocol/src/helix_agent/protocol/`).
-- Common package root: `helix_agent.common` (`packages/helix-common/src/helix_agent/common/`).
-- Declarative `Base`: `from helix_agent.persistence.base import Base`.
+- Persistence package root: `expert_work.persistence` (`packages/expert-work-persistence/src/expert_work/persistence/`).
+- Protocol package root: `expert_work.protocol` (`packages/expert-work-protocol/src/expert_work/protocol/`).
+- Common package root: `expert_work.common` (`packages/expert-work-common/src/expert_work/common/`).
+- Declarative `Base`: `from expert_work.persistence.base import Base`.
 - **Current Alembic head: `0053_tenant_status`** → new migration `down_revision = "0053_tenant_status"`.
 - RLS GUC pattern: `tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid`.
-- Migrations dir: `packages/helix-persistence/migrations/versions/`.
+- Migrations dir: `packages/expert-work-persistence/migrations/versions/`.
 - CI scopes ([memory:reference_ci_lint_type_test_scopes]): `uv run python -m pytest -m "not integration"` from repo root for unit; mypy excludes control-plane/src; RLS tests are `@pytest.mark.integration` (need Postgres, run separately).
 
 ---
@@ -27,37 +27,37 @@
 ## File Structure
 
 **Create:**
-- `packages/helix-common/src/helix_agent/common/url_validation.py` — `RemoteURLError`, `validate_remote_url()` (SSRF guard).
-- `packages/helix-common/tests/test_url_validation.py` — unit tests.
-- `packages/helix-protocol/src/helix_agent/protocol/tenant_mcp_server.py` — `McpServerTransport`, `McpServerAuthType`, `TenantMcpServerRecord`, `TenantMcpServerPatch`.
-- `packages/helix-protocol/tests/test_tenant_mcp_server.py` — record/validator unit tests.
-- `packages/helix-persistence/src/helix_agent/persistence/models/tenant_mcp_server.py` — `TenantMcpServerRow` ORM model.
-- `packages/helix-persistence/migrations/versions/0054_tenant_mcp_server.py` — table + RLS migration.
-- `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/__init__.py` — package exports.
-- `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/base.py` — `TenantMcpServerStore` ABC + exceptions.
-- `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/memory.py` — `InMemoryTenantMcpServerStore`.
-- `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/sql.py` — `SqlTenantMcpServerStore`.
-- `packages/helix-persistence/tests/test_in_memory_tenant_mcp_server_store.py` — unit tests.
-- `packages/helix-persistence/tests/test_sql_tenant_mcp_server_store.py` — integration (RLS) tests.
+- `packages/expert-work-common/src/expert_work/common/url_validation.py` — `RemoteURLError`, `validate_remote_url()` (SSRF guard).
+- `packages/expert-work-common/tests/test_url_validation.py` — unit tests.
+- `packages/expert-work-protocol/src/expert_work/protocol/tenant_mcp_server.py` — `McpServerTransport`, `McpServerAuthType`, `TenantMcpServerRecord`, `TenantMcpServerPatch`.
+- `packages/expert-work-protocol/tests/test_tenant_mcp_server.py` — record/validator unit tests.
+- `packages/expert-work-persistence/src/expert_work/persistence/models/tenant_mcp_server.py` — `TenantMcpServerRow` ORM model.
+- `packages/expert-work-persistence/migrations/versions/0054_tenant_mcp_server.py` — table + RLS migration.
+- `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/__init__.py` — package exports.
+- `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/base.py` — `TenantMcpServerStore` ABC + exceptions.
+- `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/memory.py` — `InMemoryTenantMcpServerStore`.
+- `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/sql.py` — `SqlTenantMcpServerStore`.
+- `packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py` — unit tests.
+- `packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py` — integration (RLS) tests.
 
 **Modify:**
-- `packages/helix-common/src/helix_agent/common/__init__.py` — export `validate_remote_url`, `RemoteURLError`.
-- `packages/helix-protocol/src/helix_agent/protocol/__init__.py` — export new protocol symbols.
-- `packages/helix-persistence/src/helix_agent/persistence/models/__init__.py` — export `TenantMcpServerRow`.
-- `packages/helix-persistence/src/helix_agent/persistence/__init__.py` — export store classes + exceptions.
+- `packages/expert-work-common/src/expert_work/common/__init__.py` — export `validate_remote_url`, `RemoteURLError`.
+- `packages/expert-work-protocol/src/expert_work/protocol/__init__.py` — export new protocol symbols.
+- `packages/expert-work-persistence/src/expert_work/persistence/models/__init__.py` — export `TenantMcpServerRow`.
+- `packages/expert-work-persistence/src/expert_work/persistence/__init__.py` — export store classes + exceptions.
 
 ---
 
-## Task 1: SSRF URL-validation utility (helix-common)
+## Task 1: SSRF URL-validation utility (expert-work-common)
 
 **Files:**
-- Create: `packages/helix-common/src/helix_agent/common/url_validation.py`
-- Create: `packages/helix-common/tests/test_url_validation.py`
-- Modify: `packages/helix-common/src/helix_agent/common/__init__.py`
+- Create: `packages/expert-work-common/src/expert_work/common/url_validation.py`
+- Create: `packages/expert-work-common/tests/test_url_validation.py`
+- Modify: `packages/expert-work-common/src/expert_work/common/__init__.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/helix-common/tests/test_url_validation.py`:
+Create `packages/expert-work-common/tests/test_url_validation.py`:
 
 ```python
 """Unit tests for the remote-URL SSRF guard."""
@@ -66,7 +66,7 @@ from __future__ import annotations
 
 import pytest
 
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
 
 
 @pytest.mark.parametrize(
@@ -125,12 +125,12 @@ def test_https_only_mode_rejects_http() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest packages/helix-common/tests/test_url_validation.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'helix_agent.common.url_validation'`.
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest packages/expert-work-common/tests/test_url_validation.py -q`
+Expected: FAIL — `ModuleNotFoundError: No module named 'expert_work.common.url_validation'`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `packages/helix-common/src/helix_agent/common/url_validation.py`:
+Create `packages/expert-work-common/src/expert_work/common/url_validation.py`:
 
 ```python
 """Remote-URL validation — SSRF guard for tenant-supplied MCP server URLs.
@@ -215,25 +215,25 @@ def validate_remote_url(
 
 - [ ] **Step 4: Export from the package**
 
-In `packages/helix-common/src/helix_agent/common/__init__.py`, add the import near the other imports and add both names to `__all__` (keep `__all__` sorted if it already is):
+In `packages/expert-work-common/src/expert_work/common/__init__.py`, add the import near the other imports and add both names to `__all__` (keep `__all__` sorted if it already is):
 
 ```python
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
 ```
 
 Add `"RemoteURLError"` and `"validate_remote_url"` to the `__all__` list. If `__init__.py` has no `__all__`, just add the import line.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest packages/helix-common/tests/test_url_validation.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest packages/expert-work-common/tests/test_url_validation.py -q`
 Expected: PASS (all parametrized cases green).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/helix-common/src/helix_agent/common/url_validation.py \
-        packages/helix-common/src/helix_agent/common/__init__.py \
-        packages/helix-common/tests/test_url_validation.py
+git add packages/expert-work-common/src/expert_work/common/url_validation.py \
+        packages/expert-work-common/src/expert_work/common/__init__.py \
+        packages/expert-work-common/tests/test_url_validation.py
 git commit -m "feat(stream-v): SSRF guard validate_remote_url (V-B)"
 ```
 
@@ -242,13 +242,13 @@ git commit -m "feat(stream-v): SSRF guard validate_remote_url (V-B)"
 ## Task 2: Protocol record + literals + patch
 
 **Files:**
-- Create: `packages/helix-protocol/src/helix_agent/protocol/tenant_mcp_server.py`
-- Create: `packages/helix-protocol/tests/test_tenant_mcp_server.py`
-- Modify: `packages/helix-protocol/src/helix_agent/protocol/__init__.py`
+- Create: `packages/expert-work-protocol/src/expert_work/protocol/tenant_mcp_server.py`
+- Create: `packages/expert-work-protocol/tests/test_tenant_mcp_server.py`
+- Modify: `packages/expert-work-protocol/src/expert_work/protocol/__init__.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create `packages/helix-protocol/tests/test_tenant_mcp_server.py`:
+Create `packages/expert-work-protocol/tests/test_tenant_mcp_server.py`:
 
 ```python
 """Unit tests for TenantMcpServerRecord validation."""
@@ -260,7 +260,7 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.protocol import TenantMcpServerRecord
+from expert_work.protocol import TenantMcpServerRecord
 
 
 def _record(**overrides: object) -> TenantMcpServerRecord:
@@ -289,7 +289,7 @@ def test_valid_none_auth_record() -> None:
 
 
 def test_valid_bearer_record_with_token_ref() -> None:
-    rec = _record(auth_type="bearer", token_secret_ref="secret://helix-agent/t/mcp/github/token")
+    rec = _record(auth_type="bearer", token_secret_ref="secret://expert-work/t/mcp/github/token")
     assert rec.auth_type == "bearer"
 
 
@@ -322,12 +322,12 @@ def test_frozen() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest packages/helix-protocol/tests/test_tenant_mcp_server.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest packages/expert-work-protocol/tests/test_tenant_mcp_server.py -q`
 Expected: FAIL — `ImportError: cannot import name 'TenantMcpServerRecord'`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `packages/helix-protocol/src/helix_agent/protocol/tenant_mcp_server.py`:
+Create `packages/expert-work-protocol/src/expert_work/protocol/tenant_mcp_server.py`:
 
 ```python
 """``tenant_mcp_server`` registry record — Stream V.
@@ -405,19 +405,19 @@ class TenantMcpServerPatch(BaseModel):
 
 - [ ] **Step 4: Export from the package**
 
-In `packages/helix-protocol/src/helix_agent/protocol/__init__.py`, mirror the `tenant_config` export style. Add imports:
+In `packages/expert-work-protocol/src/expert_work/protocol/__init__.py`, mirror the `tenant_config` export style. Add imports:
 
 ```python
-from helix_agent.protocol.tenant_mcp_server import (
+from expert_work.protocol.tenant_mcp_server import (
     McpServerAuthType as McpServerAuthType,
 )
-from helix_agent.protocol.tenant_mcp_server import (
+from expert_work.protocol.tenant_mcp_server import (
     McpServerTransport as McpServerTransport,
 )
-from helix_agent.protocol.tenant_mcp_server import (
+from expert_work.protocol.tenant_mcp_server import (
     TenantMcpServerPatch as TenantMcpServerPatch,
 )
-from helix_agent.protocol.tenant_mcp_server import (
+from expert_work.protocol.tenant_mcp_server import (
     TenantMcpServerRecord as TenantMcpServerRecord,
 )
 ```
@@ -426,15 +426,15 @@ If the file has an `__all__`, add `"McpServerAuthType"`, `"McpServerTransport"`,
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest packages/helix-protocol/tests/test_tenant_mcp_server.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest packages/expert-work-protocol/tests/test_tenant_mcp_server.py -q`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/helix-protocol/src/helix_agent/protocol/tenant_mcp_server.py \
-        packages/helix-protocol/src/helix_agent/protocol/__init__.py \
-        packages/helix-protocol/tests/test_tenant_mcp_server.py
+git add packages/expert-work-protocol/src/expert_work/protocol/tenant_mcp_server.py \
+        packages/expert-work-protocol/src/expert_work/protocol/__init__.py \
+        packages/expert-work-protocol/tests/test_tenant_mcp_server.py
 git commit -m "feat(stream-v): TenantMcpServerRecord + Patch protocol types (V-B)"
 ```
 
@@ -443,19 +443,19 @@ git commit -m "feat(stream-v): TenantMcpServerRecord + Patch protocol types (V-B
 ## Task 3: ORM model
 
 **Files:**
-- Create: `packages/helix-persistence/src/helix_agent/persistence/models/tenant_mcp_server.py`
-- Modify: `packages/helix-persistence/src/helix_agent/persistence/models/__init__.py`
+- Create: `packages/expert-work-persistence/src/expert_work/persistence/models/tenant_mcp_server.py`
+- Modify: `packages/expert-work-persistence/src/expert_work/persistence/models/__init__.py`
 
 - [ ] **Step 1: Write the failing test**
 
-Create a temporary import check (will be deleted — the real coverage is the store tests). Add to `packages/helix-persistence/tests/test_in_memory_tenant_mcp_server_store.py` later; for now write a one-off:
+Create a temporary import check (will be deleted — the real coverage is the store tests). Add to `packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py` later; for now write a one-off:
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -c "from helix_agent.persistence.models import TenantMcpServerRow; print(TenantMcpServerRow.__tablename__)"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -c "from expert_work.persistence.models import TenantMcpServerRow; print(TenantMcpServerRow.__tablename__)"`
 Expected: FAIL — `ImportError: cannot import name 'TenantMcpServerRow'`.
 
 - [ ] **Step 2: Write the implementation**
 
-Create `packages/helix-persistence/src/helix_agent/persistence/models/tenant_mcp_server.py`:
+Create `packages/expert-work-persistence/src/expert_work/persistence/models/tenant_mcp_server.py`:
 
 ```python
 """``tenant_mcp_server`` ORM model — Stream V.
@@ -474,7 +474,7 @@ from sqlalchemy import Boolean, DateTime, Float, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from helix_agent.persistence.base import Base
+from expert_work.persistence.base import Base
 
 
 class TenantMcpServerRow(Base):
@@ -512,24 +512,24 @@ class TenantMcpServerRow(Base):
 
 - [ ] **Step 3: Export the model**
 
-In `packages/helix-persistence/src/helix_agent/persistence/models/__init__.py`, add (alphabetically near the other `tenant_*` imports):
+In `packages/expert-work-persistence/src/expert_work/persistence/models/__init__.py`, add (alphabetically near the other `tenant_*` imports):
 
 ```python
-from helix_agent.persistence.models.tenant_mcp_server import TenantMcpServerRow
+from expert_work.persistence.models.tenant_mcp_server import TenantMcpServerRow
 ```
 
 If the file has an `__all__`, add `"TenantMcpServerRow"`.
 
 - [ ] **Step 4: Run the import check to verify it passes**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -c "from helix_agent.persistence.models import TenantMcpServerRow; print(TenantMcpServerRow.__tablename__)"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -c "from expert_work.persistence.models import TenantMcpServerRow; print(TenantMcpServerRow.__tablename__)"`
 Expected: prints `tenant_mcp_server`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/helix-persistence/src/helix_agent/persistence/models/tenant_mcp_server.py \
-        packages/helix-persistence/src/helix_agent/persistence/models/__init__.py
+git add packages/expert-work-persistence/src/expert_work/persistence/models/tenant_mcp_server.py \
+        packages/expert-work-persistence/src/expert_work/persistence/models/__init__.py
 git commit -m "feat(stream-v): tenant_mcp_server ORM model (V-B)"
 ```
 
@@ -538,16 +538,16 @@ git commit -m "feat(stream-v): tenant_mcp_server ORM model (V-B)"
 ## Task 4: Alembic migration (table + RLS)
 
 **Files:**
-- Create: `packages/helix-persistence/migrations/versions/0054_tenant_mcp_server.py`
+- Create: `packages/expert-work-persistence/migrations/versions/0054_tenant_mcp_server.py`
 
 - [ ] **Step 1: Confirm the current head**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && ls packages/helix-persistence/migrations/versions/ | sort | tail -5`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && ls packages/expert-work-persistence/migrations/versions/ | sort | tail -5`
 Expected: `0053_tenant_status.py` is the latest numbered revision. Confirm no revision lists `0053_tenant_status` as its `down_revision` (i.e. it is the head). If a newer head exists, set `down_revision` to that instead and rename the file's numeric prefix accordingly.
 
 - [ ] **Step 2: Write the migration**
 
-Create `packages/helix-persistence/migrations/versions/0054_tenant_mcp_server.py`:
+Create `packages/expert-work-persistence/migrations/versions/0054_tenant_mcp_server.py`:
 
 ```python
 """tenant_mcp_server registry table + RLS — Stream V-B.
@@ -645,7 +645,7 @@ def downgrade() -> None:
 
 - [ ] **Step 3: Verify the revision id length and chain**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && python -c "print(len('0054_tenant_mcp_server'))"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && python -c "print(len('0054_tenant_mcp_server'))"`
 Expected: `22` (≤ 32 — [memory:alembic-revision-id-32-chars]).
 
 The migration is exercised by the integration tests in Task 7 (`command.upgrade(cfg, "head")`). No standalone run here.
@@ -653,7 +653,7 @@ The migration is exercised by the integration tests in Task 7 (`command.upgrade(
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/helix-persistence/migrations/versions/0054_tenant_mcp_server.py
+git add packages/expert-work-persistence/migrations/versions/0054_tenant_mcp_server.py
 git commit -m "feat(stream-v): 0054 tenant_mcp_server migration + RLS (V-B)"
 ```
 
@@ -662,12 +662,12 @@ git commit -m "feat(stream-v): 0054 tenant_mcp_server migration + RLS (V-B)"
 ## Task 5: Store base ABC + exceptions
 
 **Files:**
-- Create: `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/__init__.py` (minimal for now; finalized in Task 8)
-- Create: `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/base.py`
+- Create: `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/__init__.py` (minimal for now; finalized in Task 8)
+- Create: `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/base.py`
 
 - [ ] **Step 1: Write the base module**
 
-Create `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/base.py`:
+Create `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/base.py`:
 
 ```python
 """Persistence Protocol for the tenant MCP server registry — Stream V."""
@@ -677,7 +677,7 @@ from __future__ import annotations
 import abc
 from uuid import UUID
 
-from helix_agent.protocol import (
+from expert_work.protocol import (
     McpServerAuthType,
     McpServerTransport,
     TenantMcpServerPatch,
@@ -747,12 +747,12 @@ class TenantMcpServerStore(abc.ABC):
 
 - [ ] **Step 2: Create a minimal package `__init__.py`** (finalized in Task 8)
 
-Create `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/__init__.py`:
+Create `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/__init__.py`:
 
 ```python
 """Tenant MCP server registry persistence — Stream V."""
 
-from helix_agent.persistence.tenant_mcp_server.base import (
+from expert_work.persistence.tenant_mcp_server.base import (
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
     TenantMcpServerStore,
@@ -767,13 +767,13 @@ __all__ = [
 
 - [ ] **Step 3: Verify import**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -c "from helix_agent.persistence.tenant_mcp_server import TenantMcpServerStore; print('ok')"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -c "from expert_work.persistence.tenant_mcp_server import TenantMcpServerStore; print('ok')"`
 Expected: prints `ok`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/
+git add packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/
 git commit -m "feat(stream-v): TenantMcpServerStore ABC + exceptions (V-B)"
 ```
 
@@ -782,12 +782,12 @@ git commit -m "feat(stream-v): TenantMcpServerStore ABC + exceptions (V-B)"
 ## Task 6: In-memory store + unit tests
 
 **Files:**
-- Create: `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/memory.py`
-- Create: `packages/helix-persistence/tests/test_in_memory_tenant_mcp_server_store.py`
+- Create: `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/memory.py`
+- Create: `packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py`
 
 - [ ] **Step 1: Write the failing tests**
 
-Create `packages/helix-persistence/tests/test_in_memory_tenant_mcp_server_store.py`:
+Create `packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py`:
 
 ```python
 """Unit tests for the in-memory tenant MCP server store."""
@@ -798,12 +798,12 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     InMemoryTenantMcpServerStore,
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
 )
-from helix_agent.protocol import TenantMcpServerPatch
+from expert_work.protocol import TenantMcpServerPatch
 
 
 async def _make(store: InMemoryTenantMcpServerStore, tenant_id, **over):
@@ -911,12 +911,12 @@ async def test_delete_absent_raises() -> None:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest packages/helix-persistence/tests/test_in_memory_tenant_mcp_server_store.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py -q`
 Expected: FAIL — `ImportError: cannot import name 'InMemoryTenantMcpServerStore'`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/memory.py`:
+Create `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/memory.py`:
 
 ```python
 """In-memory :class:`TenantMcpServerStore` — Stream V."""
@@ -927,14 +927,14 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from helix_agent.protocol import (
+from expert_work.protocol import (
     McpServerAuthType,
     McpServerTransport,
     TenantMcpServerPatch,
     TenantMcpServerRecord,
 )
 
-from helix_agent.persistence.tenant_mcp_server.base import (
+from expert_work.persistence.tenant_mcp_server.base import (
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
     TenantMcpServerStore,
@@ -1026,10 +1026,10 @@ class InMemoryTenantMcpServerStore(TenantMcpServerStore):
 
 - [ ] **Step 4: Wire into the package `__init__.py`**
 
-Edit `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/__init__.py` to add the memory store import and `__all__` entry:
+Edit `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/__init__.py` to add the memory store import and `__all__` entry:
 
 ```python
-from helix_agent.persistence.tenant_mcp_server.memory import (
+from expert_work.persistence.tenant_mcp_server.memory import (
     InMemoryTenantMcpServerStore,
 )
 ```
@@ -1038,15 +1038,15 @@ Add `"InMemoryTenantMcpServerStore"` to `__all__`.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest packages/helix-persistence/tests/test_in_memory_tenant_mcp_server_store.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py -q`
 Expected: PASS (all 9 tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/memory.py \
-        packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/__init__.py \
-        packages/helix-persistence/tests/test_in_memory_tenant_mcp_server_store.py
+git add packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/memory.py \
+        packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/__init__.py \
+        packages/expert-work-persistence/tests/test_in_memory_tenant_mcp_server_store.py
 git commit -m "feat(stream-v): in-memory tenant MCP server store + unit tests (V-B)"
 ```
 
@@ -1055,12 +1055,12 @@ git commit -m "feat(stream-v): in-memory tenant MCP server store + unit tests (V
 ## Task 7: SQL store + RLS integration tests
 
 **Files:**
-- Create: `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/sql.py`
-- Create: `packages/helix-persistence/tests/test_sql_tenant_mcp_server_store.py`
+- Create: `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/sql.py`
+- Create: `packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py`
 
 - [ ] **Step 1: Write the SQL store**
 
-Create `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/sql.py`:
+Create `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/sql.py`:
 
 ```python
 """Postgres-backed :class:`TenantMcpServerStore` — Stream V."""
@@ -1076,15 +1076,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.protocol import (
+from expert_work.protocol import (
     McpServerAuthType,
     McpServerTransport,
     TenantMcpServerPatch,
     TenantMcpServerRecord,
 )
 
-from helix_agent.persistence.models import TenantMcpServerRow
-from helix_agent.persistence.tenant_mcp_server.base import (
+from expert_work.persistence.models import TenantMcpServerRow
+from expert_work.persistence.tenant_mcp_server.base import (
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
     TenantMcpServerStore,
@@ -1221,17 +1221,17 @@ class SqlTenantMcpServerStore(TenantMcpServerStore):
 
 - [ ] **Step 2: Wire into the package `__init__.py`**
 
-Edit `packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/__init__.py` to add:
+Edit `packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/__init__.py` to add:
 
 ```python
-from helix_agent.persistence.tenant_mcp_server.sql import SqlTenantMcpServerStore
+from expert_work.persistence.tenant_mcp_server.sql import SqlTenantMcpServerStore
 ```
 
 Add `"SqlTenantMcpServerStore"` to `__all__`.
 
 - [ ] **Step 3: Write the RLS integration tests**
 
-Create `packages/helix-persistence/tests/test_sql_tenant_mcp_server_store.py`. **Mirror the fixture setup in `packages/helix-persistence/tests/test_sql_tenant_config_store.py`** (the `postgres_container` fixture, `_provision_app_role`, `build_rls_sessionmaker`, `create_async_engine_from_config`, and the `reset_rls` autouse fixture + `current_tenant_id_var` import). Reuse any shared `conftest.py` fixtures rather than duplicating. The test body:
+Create `packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py`. **Mirror the fixture setup in `packages/expert-work-persistence/tests/test_sql_tenant_config_store.py`** (the `postgres_container` fixture, `_provision_app_role`, `build_rls_sessionmaker`, `create_async_engine_from_config`, and the `reset_rls` autouse fixture + `current_tenant_id_var` import). Reuse any shared `conftest.py` fixtures rather than duplicating. The test body:
 
 ```python
 """Integration (RLS) tests for the SQL tenant MCP server store.
@@ -1247,14 +1247,14 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     SqlTenantMcpServerStore,
     TenantMcpServerAlreadyExistsError,
 )
-from helix_agent.protocol import TenantMcpServerPatch
+from expert_work.protocol import TenantMcpServerPatch
 
 # Import the RLS context var the same way test_sql_tenant_config_store.py does:
-from helix_agent.persistence.tenant_scope import current_tenant_id_var  # adjust if path differs
+from expert_work.persistence.tenant_scope import current_tenant_id_var  # adjust if path differs
 
 pytestmark = pytest.mark.integration
 
@@ -1276,7 +1276,7 @@ async def test_create_get_round_trip(tenant_mcp_server_store) -> None:
             transport="streamable_http",
             url="https://mcp.example.com/mcp",
             auth_type="bearer",
-            token_secret_ref="secret://helix-agent/t/mcp/github/token",
+            token_secret_ref="secret://expert-work/t/mcp/github/token",
             timeout_s=30.0,
             created_by="admin@acme",
         )
@@ -1354,15 +1354,15 @@ async def test_update_and_delete(tenant_mcp_server_store) -> None:
 
 - [ ] **Step 4: Run the integration tests**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest packages/helix-persistence/tests/test_sql_tenant_mcp_server_store.py -q`
-Expected: PASS (requires Docker for testcontainers). If Docker is unavailable locally, note that CI's `Test (integration)` job runs these; verify the fixture wiring compiles by running `uv run python -m pytest packages/helix-persistence/tests/test_sql_tenant_mcp_server_store.py --collect-only -q` (collection must succeed).
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py -q`
+Expected: PASS (requires Docker for testcontainers). If Docker is unavailable locally, note that CI's `Test (integration)` job runs these; verify the fixture wiring compiles by running `uv run python -m pytest packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py --collect-only -q` (collection must succeed).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/sql.py \
-        packages/helix-persistence/src/helix_agent/persistence/tenant_mcp_server/__init__.py \
-        packages/helix-persistence/tests/test_sql_tenant_mcp_server_store.py
+git add packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/sql.py \
+        packages/expert-work-persistence/src/expert_work/persistence/tenant_mcp_server/__init__.py \
+        packages/expert-work-persistence/tests/test_sql_tenant_mcp_server_store.py
 git commit -m "feat(stream-v): SQL tenant MCP server store + RLS integration tests (V-B)"
 ```
 
@@ -1371,26 +1371,26 @@ git commit -m "feat(stream-v): SQL tenant MCP server store + RLS integration tes
 ## Task 8: Top-level persistence package exports
 
 **Files:**
-- Modify: `packages/helix-persistence/src/helix_agent/persistence/__init__.py`
+- Modify: `packages/expert-work-persistence/src/expert_work/persistence/__init__.py`
 
 - [ ] **Step 1: Add the store exports**
 
-In `packages/helix-persistence/src/helix_agent/persistence/__init__.py`, mirror the `tenant_config` export block (around line 124). Add:
+In `packages/expert-work-persistence/src/expert_work/persistence/__init__.py`, mirror the `tenant_config` export block (around line 124). Add:
 
 ```python
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     InMemoryTenantMcpServerStore as InMemoryTenantMcpServerStore,
 )
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     SqlTenantMcpServerStore as SqlTenantMcpServerStore,
 )
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     TenantMcpServerAlreadyExistsError as TenantMcpServerAlreadyExistsError,
 )
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     TenantMcpServerNotFoundError as TenantMcpServerNotFoundError,
 )
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     TenantMcpServerStore as TenantMcpServerStore,
 )
 ```
@@ -1399,13 +1399,13 @@ Add these five names to the `__all__` list (keep alphabetical grouping consisten
 
 - [ ] **Step 2: Verify top-level imports**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -c "from helix_agent.persistence import SqlTenantMcpServerStore, InMemoryTenantMcpServerStore, TenantMcpServerStore; print('ok')"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -c "from expert_work.persistence import SqlTenantMcpServerStore, InMemoryTenantMcpServerStore, TenantMcpServerStore; print('ok')"`
 Expected: prints `ok`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add packages/helix-persistence/src/helix_agent/persistence/__init__.py
+git add packages/expert-work-persistence/src/expert_work/persistence/__init__.py
 git commit -m "feat(stream-v): export tenant MCP server store from persistence package (V-B)"
 ```
 
@@ -1415,27 +1415,27 @@ git commit -m "feat(stream-v): export tenant MCP server store from persistence p
 
 - [ ] **Step 1: Run the full unit test scope**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest -m "not integration" packages/helix-common packages/helix-protocol packages/helix-persistence -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest -m "not integration" packages/expert-work-common packages/expert-work-protocol packages/expert-work-persistence -q`
 Expected: PASS (new unit tests green; no regressions).
 
 - [ ] **Step 2: Lint + type preflight** ([memory:feedback_ruff_strict_lint_traps], [memory:feedback_uv_lock_and_precommit_ruff])
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run ruff check packages/helix-common packages/helix-protocol packages/helix-persistence && uv run ruff format --check packages/helix-common packages/helix-protocol packages/helix-persistence`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run ruff check packages/expert-work-common packages/expert-work-protocol packages/expert-work-persistence && uv run ruff format --check packages/expert-work-common packages/expert-work-protocol packages/expert-work-persistence`
 Expected: no violations. Fix any (common traps: UP038 PEP-604 unions, RUF002 Chinese punctuation in docstrings, unused `type: ignore`).
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run mypy packages/helix-common/src packages/helix-protocol/src packages/helix-persistence/src`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run mypy packages/expert-work-common/src packages/expert-work-protocol/src packages/expert-work-persistence/src`
 Expected: clean (note: mypy may flag the `# type: ignore[arg-type]` on `transport=`/`auth_type=` in `_row_to_record` — those are intentional Literal narrowings; keep only if mypy actually requires them, else remove to avoid the unused-ignore error).
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && pre-commit run --all-files` (catches the lint config the local commands may miss; if not installed, skip).
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && pre-commit run --all-files` (catches the lint config the local commands may miss; if not installed, skip).
 
 - [ ] **Step 3: Confirm no uv.lock drift**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && git status --short` — expect no `uv.lock` change (this PR adds no dependencies). If `uv.lock` changed, investigate before pushing.
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && git status --short` — expect no `uv.lock` change (this PR adds no dependencies). If `uv.lock` changed, investigate before pushing.
 
 - [ ] **Step 4: Push and open the PR**
 
 ```bash
-cd /Users/mac/src/github/jone_qian/helix-agent
+cd /Users/mac/src/github/jone_qian/expert-work
 git push -u origin stream-v/b-registry
 gh pr create --base main --head stream-v/b-registry \
   --title "feat(stream-v): PR B — Tenant MCP Server Registry (persistence + SSRF guard)" \
@@ -1445,7 +1445,7 @@ gh pr create --base main --head stream-v/b-registry \
 - \`tenant_mcp_server\` table (RLS) + ORM model + migration 0054
 - base/sql/memory store triple (CRUD)
 - \`TenantMcpServerRecord\`/\`TenantMcpServerPatch\` protocol types
-- \`validate_remote_url\` SSRF guard in helix-common (rejects private/loopback/link-local/metadata IPs + non-http(s) schemes)
+- \`validate_remote_url\` SSRF guard in expert-work-common (rejects private/loopback/link-local/metadata IPs + non-http(s) schemes)
 
 ## Scope
 Persistence + util only. API (V-C), runtime (V-D), schema (V-E), UI (V-F/G) are separate PRs.

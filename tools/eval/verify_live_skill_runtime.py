@@ -15,12 +15,12 @@ Closes the "code green ≠ it actually runs" gap for skill-runtime §5.1/§5.2
 
 Keyless: the model key is resolved server-side; this script only sends prompts.
 The API token (a **system_admin** dev-login bearer) is read from
-``HELIX_API_TOKEN`` and never logged.
+``EXPERT_WORK_API_TOKEN`` and never logged.
 
 Usage (bring the dev stack up first — ``make dev-up``)::
 
-    export HELIX_API_URL=http://localhost:8000    # control-plane (8080 is Keycloak)
-    export HELIX_API_TOKEN=<system_admin dev bearer token>
+    export EXPERT_WORK_API_URL=http://localhost:8000    # control-plane (8080 is Keycloak)
+    export EXPERT_WORK_API_TOKEN=<system_admin dev bearer token>
 
     # Phase 1 only (no agent needed):
     uv run python tools/eval/verify_live_skill_runtime.py --import-only
@@ -225,7 +225,7 @@ async def _consume_sse(resp: httpx.Response, tr: _RunTrace) -> None:
 async def _run_collect(
     client: httpx.AsyncClient, thread_id: str, prompt: str
 ) -> tuple[str | None, _RunTrace]:
-    """Run the prompt; collect the trace + the run_id (from ``X-Helix-Run-Id``).
+    """Run the prompt; collect the trace + the run_id (from ``X-Expert-Work-Run-Id``).
 
     The run_id matters for approval-gated runs: the SSE stream carries NO
     approval event — it just ends — so the caller polls the run by id to find
@@ -235,7 +235,7 @@ async def _run_collect(
         "POST", f"/v1/sessions/{thread_id}/runs", json={"input": prompt}
     ) as resp:
         resp.raise_for_status()
-        run_id = resp.headers.get("X-Helix-Run-Id")
+        run_id = resp.headers.get("X-Expert-Work-Run-Id")
         await _consume_sse(resp, tr)
     return run_id, tr
 
@@ -369,7 +369,7 @@ async def phase_generate(client: httpx.AsyncClient, *, agent: str) -> bool:
     )
     run_id, _tr = await _run_collect(client, thread_id, prompt)
     if not run_id:
-        print("  FAIL — no X-Helix-Run-Id header on the run (cannot track approval).")
+        print("  FAIL — no X-Expert-Work-Run-Id header on the run (cannot track approval).")
         return False
     print(f"  run: {run_id} (streamed to end; approval is out-of-band)")
 
@@ -424,8 +424,8 @@ _DEFAULT_GEN_MANIFEST = _MANIFEST_DIR / "pptx-office-gen-test" / "v1.0.0.yaml"
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    base_url = args.base_url or _require_env("HELIX_API_URL")
-    token = _require_env("HELIX_API_TOKEN")  # never logged
+    base_url = args.base_url or _require_env("EXPERT_WORK_API_URL")
+    token = _require_env("EXPERT_WORK_API_TOKEN")  # never logged
     headers = {"Authorization": f"Bearer {token}"}
 
     async with httpx.AsyncClient(base_url=base_url, headers=headers, timeout=180.0) as client:
@@ -478,7 +478,9 @@ async def _run_import_phases(client: httpx.AsyncClient, args: argparse.Namespace
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live skill runtime auto-mount verification.")
-    parser.add_argument("--base-url", default=None, help="control-plane URL (or $HELIX_API_URL)")
+    parser.add_argument(
+        "--base-url", default=None, help="control-plane URL (or $EXPERT_WORK_API_URL)"
+    )
     parser.add_argument("--source", default="anthropics/skills", help="GitHub source (owner/repo)")
     parser.add_argument("--skill", default="skills/pptx", help="skill folder path in the repo")
     parser.add_argument("--agent", default=None, help="agent name@version for phase 2")

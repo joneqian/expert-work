@@ -207,7 +207,7 @@ export function ModelSelect({
                       display: "block",
                       marginTop: 4,
                       fontSize: 12,
-                      color: "var(--hx-text-muted, #888)",
+                      color: "var(--ew-text-muted, #888)",
                     }}
                   >
                     {t("model_select.context_window_hint")}

@@ -14,7 +14,7 @@ Components:
   adapter around the SDK's ``stdio_client`` + ``ClientSession``
   context managers.
 
-- :class:`MCPTool` — one **Helix** :class:`Tool` per MCP-exposed tool,
+- :class:`MCPTool` — one **Expert Work** :class:`Tool` per MCP-exposed tool,
   namespaced as ``mcp:<server>.<tool>`` so the LLM sees them as
   first-class entries in the spec list.
 
@@ -46,7 +46,7 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.uplift_metrics import (
     record_mcp_call,
     record_mcp_circuit_state,
 )
@@ -595,15 +595,15 @@ def _render_content_blocks(blocks: Sequence[Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Helix Tool wrapper
+# Expert Work Tool wrapper
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class MCPTool:
-    """Helix :class:`Tool` wrapping one MCP-exposed tool.
+    """Expert Work :class:`Tool` wrapping one MCP-exposed tool.
 
-    The Helix-side name is namespaced ``mcp:<server>.<tool>`` so the
+    The Expert Work-side name is namespaced ``mcp:<server>.<tool>`` so the
     LLM (and the audit log) can tell which MCP server a call routed
     to. ``call`` ignores ``ctx`` in M0 — per-tenant MCP server
     selection happens at registration time (the orchestrator binds a
@@ -758,14 +758,14 @@ async def register_mcp_tools(
     for tool_def in tools:
         if allow_tools is not None and tool_def.name not in allow_tools:
             continue
-        helix_tool = MCPTool(
+        expert_work_tool = MCPTool(
             client=client,
             tool_def=tool_def,
             server_name=server_name,
             content_char_cap=content_char_cap,
         )
-        registry.register(helix_tool, deferred=deferred, source=f"mcp:{server_name}")
-        registered.append(helix_tool.spec.name)
+        registry.register(expert_work_tool, deferred=deferred, source=f"mcp:{server_name}")
+        registered.append(expert_work_tool.spec.name)
     logger.info("mcp.registered server=%s tools=%s", server_name, registered)
     return registered
 

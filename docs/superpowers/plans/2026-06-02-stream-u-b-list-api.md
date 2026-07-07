@@ -12,10 +12,10 @@
 
 ## File Structure
 
-- `packages/helix-persistence/src/helix_agent/persistence/tenant_config/base.py` — add abstract `list_all`.
+- `packages/expert-work-persistence/src/expert_work/persistence/tenant_config/base.py` — add abstract `list_all`.
 - `.../tenant_config/sql.py` — SQL impl.
 - `.../tenant_config/memory.py` — memory impl.
-- `packages/helix-persistence/tests/test_tenant_config_store.py` (existing or new) — store tests.
+- `packages/expert-work-persistence/tests/test_tenant_config_store.py` (existing or new) — store tests.
 - `services/control-plane/src/control_plane/api/tenants.py` — add `GET ""` handler.
 - `services/control-plane/tests/test_tenants_api.py` (existing or new) — API tests.
 - `apps/admin-ui/src/api/tenants.ts` — add `listTenants()` + `TenantSummary`.
@@ -26,14 +26,14 @@
 ## Task 1: `TenantConfigStore.list_all` (protocol + SQL + memory)
 
 **Files:**
-- Modify: `packages/helix-persistence/src/helix_agent/persistence/tenant_config/{base,sql,memory}.py`
-- Test: `packages/helix-persistence/tests/test_tenant_config_store.py` (create if absent; otherwise extend)
+- Modify: `packages/expert-work-persistence/src/expert_work/persistence/tenant_config/{base,sql,memory}.py`
+- Test: `packages/expert-work-persistence/tests/test_tenant_config_store.py` (create if absent; otherwise extend)
 
 > Method named `list_all` (NOT `list`) to avoid ruff flake8-builtins A003 (builtin shadowing) on a class attribute.
 
 - [ ] **Step 1: Write failing tests**
 
-First READ `packages/helix-persistence/tests/` for the existing tenant_config store test (how it builds `InMemoryTenantConfigStore`, and whether SQL store is integration-marked). Mirror that. Add memory-store tests (unit; the SQL path is covered by the existing integration suite — add a SQL test only if the file already exercises SQL non-integration):
+First READ `packages/expert-work-persistence/tests/` for the existing tenant_config store test (how it builds `InMemoryTenantConfigStore`, and whether SQL store is integration-marked). Mirror that. Add memory-store tests (unit; the SQL path is covered by the existing integration suite — add a SQL test only if the file already exercises SQL non-integration):
 
 ```python
 @pytest.mark.asyncio
@@ -65,7 +65,7 @@ async def test_list_all_paginates() -> None:
 
 - [ ] **Step 2: Run red**
 
-Run: `cd packages/helix-persistence && uv run python -m pytest tests/test_tenant_config_store.py -k list_all -v`
+Run: `cd packages/expert-work-persistence && uv run python -m pytest tests/test_tenant_config_store.py -k list_all -v`
 Expected: FAIL (no `list_all`).
 
 - [ ] **Step 3: Add abstract method to base.py**
@@ -115,14 +115,14 @@ Add on `InMemoryTenantConfigStore`:
 
 - [ ] **Step 6: Run green**
 
-Run: `cd packages/helix-persistence && uv run python -m pytest tests/test_tenant_config_store.py -k list_all -v` → PASS.
+Run: `cd packages/expert-work-persistence && uv run python -m pytest tests/test_tenant_config_store.py -k list_all -v` → PASS.
 Run full file: `uv run python -m pytest tests/test_tenant_config_store.py -v` → all pass.
 
 - [ ] **Step 7: pre-commit + commit**
 
-Run: `uv run pre-commit run --files packages/helix-persistence/src/helix_agent/persistence/tenant_config/base.py packages/helix-persistence/src/helix_agent/persistence/tenant_config/sql.py packages/helix-persistence/src/helix_agent/persistence/tenant_config/memory.py packages/helix-persistence/tests/test_tenant_config_store.py`
+Run: `uv run pre-commit run --files packages/expert-work-persistence/src/expert_work/persistence/tenant_config/base.py packages/expert-work-persistence/src/expert_work/persistence/tenant_config/sql.py packages/expert-work-persistence/src/expert_work/persistence/tenant_config/memory.py packages/expert-work-persistence/tests/test_tenant_config_store.py`
 ```bash
-git add packages/helix-persistence/src/helix_agent/persistence/tenant_config packages/helix-persistence/tests/test_tenant_config_store.py
+git add packages/expert-work-persistence/src/expert_work/persistence/tenant_config packages/expert-work-persistence/tests/test_tenant_config_store.py
 git commit -m "feat(stream-u): PR B — TenantConfigStore.list_all (protocol + sql + memory)"
 ```
 

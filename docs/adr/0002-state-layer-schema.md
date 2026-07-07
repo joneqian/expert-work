@@ -67,7 +67,7 @@ CREATE POLICY event_log_tenant_isolation ON event_log
   USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
 ```
 
-补充 vendor DeerFlow 既有字段：参考 `packages/helix-runtime/src/helix_agent/runtime/event_log/` 实现时按需扩展。
+补充 vendor DeerFlow 既有字段：参考 `packages/expert-work-runtime/src/expert_work/runtime/event_log/` 实现时按需扩展。
 
 ### audit_log（位于 Stream A.4）
 
@@ -124,7 +124,7 @@ vendor 自 DeerFlow，包含 `thread_id / session_id / tenant_id / created_by / 
 
 ### 负向 / 风险
 
-- **应用代码需要分别写两张表**：通过 helix-runtime + helix-persistence 提供统一封装减轻
+- **应用代码需要分别写两张表**：通过 expert-work-runtime + expert-work-persistence 提供统一封装减轻
 - **跨表关联查询稍贵**：但实际很少需要（trace_id 提供软关联即可）
 - **schema migration 翻倍**：Alembic 处理；M1-H zero-downtime migration 规范覆盖
 
@@ -149,8 +149,8 @@ vendor 自 DeerFlow，包含 `thread_id / session_id / tenant_id / created_by / 
 
 ## 5. 落地引用
 
-- **Stream A.1** event_log + thread_meta + checkpoint schema 实现位置：`packages/helix-persistence/src/helix_agent/persistence/`
+- **Stream A.1** event_log + thread_meta + checkpoint schema 实现位置：`packages/expert-work-persistence/src/expert_work/persistence/`
 - **Stream A.4** audit_log schema + 应用层封装：同上
-- **Stream D.1** audit_log WORM 备份到 OSS Object Lock 桶：`packages/helix-runtime/...` 或独立 archival job
+- **Stream D.1** audit_log WORM 备份到 OSS Object Lock 桶：`packages/expert-work-runtime/...` 或独立 archival job
 - **Stream H.8（新 G.8）** event_log 冷归档 pipeline：独立 archival job
 - **Stream C.4** Postgres RLS 策略下放 event_log + audit_log 的租户隔离

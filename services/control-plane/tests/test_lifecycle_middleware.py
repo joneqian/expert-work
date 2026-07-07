@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.responses import JSONResponse
 
 from control_plane.middleware import InFlightMiddleware
-from helix_agent.common.lifecycle import Lifecycle
+from expert_work.common.lifecycle import Lifecycle
 
 
 @pytest.mark.asyncio

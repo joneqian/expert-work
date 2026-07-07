@@ -15,9 +15,9 @@ from langgraph.graph.message import add_messages
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditQuery
-from helix_agent.runtime.runs import InMemoryRunStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditQuery
+from expert_work.runtime.runs import InMemoryRunStore
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -49,7 +49,7 @@ async def _seed_thread_messages(
 _DEFAULT_TENANT = DEFAULT_DEV_TENANT_ID
 
 _AGENT_YAML = """\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: code-reviewer

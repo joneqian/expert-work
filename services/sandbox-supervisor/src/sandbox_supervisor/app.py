@@ -19,8 +19,8 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 
-from helix_agent.common.observability import metrics_text
-from helix_agent.persistence import (
+from expert_work.common.observability import metrics_text
+from expert_work.persistence import (
     DatabaseConfig,
     SqlAuditLogStore,
     SqlUserWorkspaceStore,
@@ -28,11 +28,11 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.runtime.audit.fallback import InMemoryAuditFallbackQueue
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.audit.redactor import DefaultSecretRedactor
-from helix_agent.runtime.sandbox import make_sandbox_runtime_provider
-from helix_agent.runtime.storage import ObjectStore, S3CompatibleConfig, make_object_store
+from expert_work.runtime.audit.fallback import InMemoryAuditFallbackQueue
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.redactor import DefaultSecretRedactor
+from expert_work.runtime.sandbox import make_sandbox_runtime_provider
+from expert_work.runtime.storage import ObjectStore, S3CompatibleConfig, make_object_store
 from sandbox_supervisor.docker_client import CliDockerClient
 from sandbox_supervisor.domain import (
     InvalidSeedFilesError,
@@ -221,7 +221,7 @@ def create_app(
                 await engine.dispose()
                 logger.info("sandbox_supervisor.stop")
 
-    app = FastAPI(title="Helix Sandbox Supervisor", lifespan=lifespan)
+    app = FastAPI(title="Expert Work Sandbox Supervisor", lifespan=lifespan)
     app.add_middleware(TraceContextMiddleware)
     _register_routes(app)
     _register_exception_handlers(app)
@@ -363,7 +363,7 @@ def _register_routes(app: FastAPI) -> None:
         return HealthResponse(status="ok" if docker_ok else "degraded", docker_ok=docker_ok)
 
     # Stream P (Mini-ADR P-15) — Prometheus scrape target. The supervisor is a
-    # standalone service, so its in-process metrics (helix_sandbox_cold_start_*
+    # standalone service, so its in-process metrics (expert_work_sandbox_cold_start_*
     # etc.) need their own /metrics endpoint; the control-plane scrape can't see
     # them. Same shared registry helper the control-plane uses.
     @app.get("/metrics", include_in_schema=False)

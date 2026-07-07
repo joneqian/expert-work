@@ -63,13 +63,13 @@ describe("OIDC config detection", () => {
   });
 
   it("requires both issuer and client_id to declare configured", () => {
-    vi.stubEnv("VITE_OIDC_ISSUER", "https://keycloak.example/realms/helix");
+    vi.stubEnv("VITE_OIDC_ISSUER", "https://keycloak.example/realms/expert_work");
     expect(isOidcConfigured()).toBe(false);
-    vi.stubEnv("VITE_OIDC_CLIENT_ID", "helix-admin-ui");
+    vi.stubEnv("VITE_OIDC_CLIENT_ID", "expert-work-admin-ui");
     expect(isOidcConfigured()).toBe(true);
     const config = readOidcConfig();
-    expect(config?.issuer).toBe("https://keycloak.example/realms/helix");
-    expect(config?.clientId).toBe("helix-admin-ui");
+    expect(config?.issuer).toBe("https://keycloak.example/realms/expert_work");
+    expect(config?.clientId).toBe("expert-work-admin-ui");
     expect(config?.scopes).toBe("openid profile email");
   });
 
@@ -110,7 +110,7 @@ describe("extractSignInResult", () => {
 
 describe("signIn (configured)", () => {
   it("purges the stale session + state BEFORE redirecting to the IdP", async () => {
-    vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/helix");
+    vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/expert_work");
     vi.stubEnv("VITE_OIDC_CLIENT_ID", "ui");
     await signIn("/runs/7");
     expect(removeUserSpy).toHaveBeenCalledTimes(1);
@@ -131,7 +131,7 @@ describe("signIn (configured)", () => {
   });
 
   it("still redirects when a purge rejects (best-effort)", async () => {
-    vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/helix");
+    vi.stubEnv("VITE_OIDC_ISSUER", "https://idp.example/realms/expert_work");
     vi.stubEnv("VITE_OIDC_CLIENT_ID", "ui");
     removeUserSpy.mockRejectedValueOnce(new Error("store unavailable"));
     clearStaleStateSpy.mockRejectedValueOnce(new Error("store unavailable"));

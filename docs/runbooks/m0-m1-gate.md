@@ -1,7 +1,7 @@
 # M0 → M1 Gate runbook (Stream M)
 
 > Operator-facing protocol for the 30-day Gate window that decides
-> whether helix promotes from M0 to M1 production. Replaces the original
+> whether Expert Work promotes from M0 to M1 production. Replaces the original
 > "相对 Dify" framework — see
 > [`docs/streams/STREAM-M-DESIGN.md`](../streams/STREAM-M-DESIGN.md)
 > for the design and [`docs/ITERATION-PLAN.md`](../ITERATION-PLAN.md)
@@ -32,7 +32,7 @@ starts the day **all** these are checked — not before.
 
 ```
 Gate opened: 2026-MM-DD
-helix_commit: <sha>
+expert_work_commit: <sha>
 opened_by: <operator name>
 canonical_agent_manifest: <manifest_name>:<version>
 ```
@@ -59,22 +59,22 @@ canonical_agent_manifest: <manifest_name>:<version>
 
 ```sh
 # 可用性 ratio (5xx 错误率) - 5 分钟窗口
-curl -s 'http://localhost:9090/api/v1/query?query=helix:sli:control_plane_availability:ratio5m'
+curl -s 'http://localhost:9090/api/v1/query?query=Expert Work:sli:control_plane_availability:ratio5m'
 
 # TTFT P95 - 1 小时窗口
-curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(helix_session_ttft_seconds_bucket[1h])))'
+curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(expert_work_session_ttft_seconds_bucket[1h])))'
 
 # Sandbox 冷启动 P95 - 1 小时
-curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(helix_sandbox_cold_start_seconds_bucket[1h])))'
+curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(expert_work_sandbox_cold_start_seconds_bucket[1h])))'
 
 # Durable resume P95 - 1 小时
-curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(helix_durable_resume_seconds_bucket[1h])))'
+curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(expert_work_durable_resume_seconds_bucket[1h])))'
 
 # End-to-end session P95 (outcome=success only) - 1 小时
-curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(helix_session_duration_seconds_bucket{outcome="success"}[1h])))'
+curl -s 'http://localhost:9090/api/v1/query?query=histogram_quantile(0.95, sum by (le)(rate(expert_work_session_duration_seconds_bucket{outcome="success"}[1h])))'
 
 # SSE stream stale 率 - 1 小时
-curl -s 'http://localhost:9090/api/v1/query?query=sum(rate(helix_llm_stream_stale_total[1h])) / sum(rate(helix_llm_tokens_total[1h]))'
+curl -s 'http://localhost:9090/api/v1/query?query=sum(rate(expert_work_llm_stream_stale_total[1h])) / sum(rate(expert_work_llm_tokens_total[1h]))'
 ```
 
 ### 1.3 Weekly eval baseline drift
@@ -102,12 +102,12 @@ diff <(yq '.capabilities' tools/eval/baselines/m0_gate_baseline.yaml) \
 
 | SLO | Gate 阈值 | Prometheus query 核心部分 |
 |-----|----------|--------------------------|
-| 可用性 (control-plane 5xx) | < 0.1% in 30d | `helix:sli:control_plane_availability:ratio5m` (>= 0.999) |
-| TTFT P95 | < 2.0s | `helix_session_ttft_seconds_bucket` |
-| End-to-end P95 (canonical agent run) | < 30s | `helix_session_duration_seconds{outcome="success"}_bucket` (recording rule `helix:sli:session_duration:p95_5m`) |
-| SSE 流断裂率 | < 0.05% in 30d | `helix_llm_stream_stale_total / helix_llm_tokens_total` |
-| Sandbox 冷启动 P95 | < 5s | `helix_sandbox_cold_start_seconds_bucket` |
-| Durable resume P95 | < 1.0s | `helix_durable_resume_seconds_bucket` |
+| 可用性 (control-plane 5xx) | < 0.1% in 30d | `Expert Work:sli:control_plane_availability:ratio5m` (>= 0.999) |
+| TTFT P95 | < 2.0s | `expert_work_session_ttft_seconds_bucket` |
+| End-to-end P95 (canonical agent run) | < 30s | `expert_work_session_duration_seconds{outcome="success"}_bucket` (recording rule `Expert Work:sli:session_duration:p95_5m`) |
+| SSE 流断裂率 | < 0.05% in 30d | `expert_work_llm_stream_stale_total / expert_work_llm_tokens_total` |
+| Sandbox 冷启动 P95 | < 5s | `expert_work_sandbox_cold_start_seconds_bucket` |
+| Durable resume P95 | < 1.0s | `expert_work_durable_resume_seconds_bucket` |
 | Memory recall@5 | ≥ 0.7 | `tools/eval/memory_recall.py` against real embedder |
 | P0 事故数 | = 0 in 30d | manual incident log + § 1.5 reset rule |
 
@@ -152,7 +152,7 @@ cd services/sandbox-supervisor
 
 ```sh
 .venv/bin/pytest services/control-plane/tests/test_sse_cross_tenant.py \
-                packages/helix-persistence/tests/test_memory_recall_cross_tenant.py \
+                packages/expert-work-persistence/tests/test_memory_recall_cross_tenant.py \
                 services/control-plane/tests/test_artifact_cross_tenant.py -v
 ```
 

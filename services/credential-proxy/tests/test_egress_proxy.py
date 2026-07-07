@@ -11,8 +11,8 @@ import base64
 
 from credential_proxy.domain import EgressAuditEntry
 from credential_proxy.egress_proxy import EgressProxyServer
-from helix_agent.common.egress_token import mint_egress_token
-from helix_agent.common.url_validation import RemoteURLError
+from expert_work.common.egress_token import mint_egress_token
+from expert_work.common.url_validation import RemoteURLError
 
 _SECRET = "egress-test-secret"
 _NOW = 500.0

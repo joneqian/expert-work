@@ -1,6 +1,6 @@
 # Runbook — TLS / mTLS 证书（Stream A.10 / C.2）
 
-> 全链路 TLS 的证书运维预案。helix 的服务间流量经 **nginx 8443 mTLS** 终止；
+> 全链路 TLS 的证书运维预案。Expert Work 的服务间流量经 **nginx 8443 mTLS** 终止；
 > nginx 校验客户端证书后注入 `X-Forwarded-Client-Cert`（XFCC），应用层
 > `MTLSVerifier`（control-plane）据 Subject 比对 `mtls_allowed_service_subjects`。
 > 证书过期 / 缺失 = 服务间调用握手失败（TLS handshake / 400 XFCC 校验失败）。
@@ -53,13 +53,13 @@ docker compose restart nginx              # 让 nginx 重读挂载的新证书
    ```
    `notAfter` 已过 → 重生成（见上）。
 2. **挂载在位**：`docker compose exec nginx ls /etc/nginx/certs`（应见 `server.crt`/`server.key`/`ca.crt`）。
-3. **白名单**：客户端证书 Subject CN（如 `orchestrator.helix.local`）须在 `mtls_allowed_service_subjects`。
+3. **白名单**：客户端证书 Subject CN（如 `orchestrator.expert_work.local`）须在 `mtls_allowed_service_subjects`。
 4. **nginx config**：`docker compose exec nginx nginx -t`。
 
 ## 轮换 / 到期
 
 - **dev**：server / client 证书 1 年期，CA 5 年。到期前重跑 `generate.py` + `restart nginx`。**新增服务**进 `mtls_allowed_service_subjects` 时也重跑（补客户端证书）。
-- **到期监控（M1 缺口）**：当前无证书到期 metric。M1 补 `helix_tls_cert_expiry_seconds{cert}` gauge + 30 天告警（同 `helix_dr_backup_age_seconds` 形态，见 20-observability §5.2.2）。在此之前靠本 runbook 的 `openssl enddate` 人工核 + 部署日历提醒。
+- **到期监控（M1 缺口）**：当前无证书到期 metric。M1 补 `expert_work_tls_cert_expiry_seconds{cert}` gauge + 30 天告警（同 `expert_work_dr_backup_age_seconds` 形态，见 20-observability §5.2.2）。在此之前靠本 runbook 的 `openssl enddate` 人工核 + 部署日历提醒。
 - **prod（非本仓 dev PKI）**：用真 CA（内部 PKI / cert-manager + Let's Encrypt）签发，私钥经 secret manager 注入，不用 `generate.py`；轮换走 cert-manager 自动续期或 KMS。
 
 ## 关联

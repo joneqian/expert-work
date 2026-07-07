@@ -9,7 +9,7 @@
 > [ADR-0003 Authentication](../adr/0003-authentication.md) 的 Keycloak + RS256 JWT 决策、
 > [ADR-0007 Secret Store](../adr/0007-secret-store.md) 的 SecretStore 抽象。
 
-设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)）：
+设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)）：
 所有架构 / 接口 / mini-ADR 必须在编码前就锁定，C.1-C.7 PR 仅执行本文档。
 
 ---
@@ -102,11 +102,11 @@ services/control-plane/src/control_plane/
     ├── redis_impl.py                  ← C.6 新增（同 B.2 Protocol）
     └── ...                            # B.2 已有
 
-packages/helix-protocol/src/helix_agent/protocol/
+packages/expert-work-protocol/src/expert_work/protocol/
 ├── auth.py                            ← C.1：Principal / JWTClaims / Role / Scope
 └── quota.py                           ← C.5：CheckRequest/Result / ReserveRequest/Result
 
-packages/helix-persistence/src/helix_agent/persistence/
+packages/expert-work-persistence/src/expert_work/persistence/
 ├── auth/                              ← C.1-C.3 持久化
 │   ├── app_user.py
 │   ├── service_account.py
@@ -123,7 +123,7 @@ packages/helix-persistence/src/helix_agent/persistence/
     ├── store.py
     └── base.py
 
-packages/helix-persistence/migrations/versions/
+packages/expert-work-persistence/migrations/versions/
 ├── 0004_rls_baseline.py               ← C.4
 ├── 0005_authn_authz_tables.py         ← C.1/C.2/C.3
 ├── 0006_quota_tables.py               ← C.5
@@ -132,7 +132,7 @@ packages/helix-persistence/migrations/versions/
 infra/
 ├── docker-compose.yml                 ← C.1 / C.5：加 keycloak + redis service
 ├── keycloak/
-│   ├── realm-helix-agent.json         # 预导入 realm（dev only）
+│   ├── realm-expert-work.json         # 预导入 realm（dev only）
 │   └── README.md
 └── redis/
     └── redis.conf                     # AOF + maxmemory-policy
@@ -251,12 +251,12 @@ keycloak:
   environment:
     KC_DB: postgres
     KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
-    KC_DB_USERNAME: helix_agent
-    KC_DB_PASSWORD: helix_agent_dev
+    KC_DB_USERNAME: expert_work
+    KC_DB_PASSWORD: expert_work_dev
     KEYCLOAK_ADMIN: admin
     KEYCLOAK_ADMIN_PASSWORD: admin_dev   # dev only
   volumes:
-    - ./keycloak/realm-helix-agent.json:/opt/keycloak/data/import/realm.json:ro
+    - ./keycloak/realm-expert-work.json:/opt/keycloak/data/import/realm.json:ro
   ports:
     - "8080:8080"
   depends_on:
@@ -264,11 +264,11 @@ keycloak:
       condition: service_healthy
 ```
 
-`realm-helix-agent.json`（预导入；dev fixtures）：
-- realm = `helix-agent`
-- clients：`helix-agent-admin-ui`（Public + PKCE）、`helix-agent-api-internal`（Confidential, Service Account）
+`realm-expert-work.json`（预导入；dev fixtures）：
+- realm = `expert-work`
+- clients：`expert-work-admin-ui`（Public + PKCE）、`expert-work-api-internal`（Confidential, Service Account）
 - realm roles：`admin` / `operator` / `viewer`
-- 一个 dev 用户：`dev@helix.local`（password=`devpass`, role=admin, tenant=`00000000-0000-0000-0000-000000000000`）
+- 一个 dev 用户：`dev@expert_work.local`（password=`devpass`, role=admin, tenant=`00000000-0000-0000-0000-000000000000`）
 - 自定义 JWT claim mapper：`tenant_id` ← user attribute、`roles` ← realm roles
 
 settings 新增：
@@ -276,8 +276,8 @@ settings 新增：
 ```python
 class Settings(BaseSettings):
     # ... 现有字段 ...
-    oidc_issuer: str = "http://keycloak:8080/realms/helix-agent"
-    oidc_audience: list[str] = Field(default_factory=lambda: ["helix-agent-api-internal"])
+    oidc_issuer: str = "http://keycloak:8080/realms/expert-work"
+    oidc_audience: list[str] = Field(default_factory=lambda: ["expert-work-api-internal"])
     oidc_jwks_cache_ttl_s: int = Field(default=300, gt=0)
     auth_mode: Literal["dev", "prod"] = "dev"      # 现有；C.1 后 prod 生效
     auth_allow_unauthenticated: bool = False       # C.1：仅 /healthz/* /metrics 豁免
@@ -290,9 +290,9 @@ class Settings(BaseSettings):
 > 新形态：
 >
 > ```python
-> # packages/helix-persistence/src/helix_agent/persistence/rls.py
-> current_tenant_id_var: ContextVar[UUID | None] = ContextVar("helix.rls.tenant_id", default=None)
-> bypass_rls_var: ContextVar[bool] = ContextVar("helix.rls.bypass", default=False)
+> # packages/expert-work-persistence/src/expert_work/persistence/rls.py
+> current_tenant_id_var: ContextVar[UUID | None] = ContextVar("expert_work.rls.tenant_id", default=None)
+> bypass_rls_var: ContextVar[bool] = ContextVar("expert_work.rls.bypass", default=False)
 >
 > def _rls_after_begin(session, transaction, connection):
 >     if bypass_rls_var.get():
@@ -478,7 +478,7 @@ else:
     limiter = RedisTokenBucketLimiter(redis=..., key_prefix="gw")
 ```
 
-prod 部署文档强制 `HELIX_AGENT_SINGLE_INSTANCE=false`，启动时若 single_instance=True 但容器副本 > 1 直接告警（在 K8s readiness probe 通过 env 探测）。
+prod 部署文档强制 `EXPERT_WORK_SINGLE_INSTANCE=false`，启动时若 single_instance=True 但容器副本 > 1 直接告警（在 K8s readiness probe 通过 env 探测）。
 
 **Why**：不强迫单人 dev 跑 Redis；prod 路径强制 distributed。
 
@@ -537,7 +537,7 @@ prod 部署文档强制 `HELIX_AGENT_SINGLE_INSTANCE=false`，启动时若 singl
 
 ### 4.2 新增 AuditAction 枚举值
 
-`packages/helix-protocol/src/helix_agent/protocol/audit.py` 扩展：
+`packages/expert-work-protocol/src/expert_work/protocol/audit.py` 扩展：
 
 ```python
 class AuditAction(StrEnum):
@@ -597,25 +597,25 @@ class AuditAction(StrEnum):
 | 风险 | 影响 | 缓解 |
 |------|------|------|
 | Keycloak 容器在 CI 慢启动（30s+）拖测试时间 | CI 慢 | C.1 提供两套测试：单测 mock JWKS；集成测试用 testcontainers 但放在独立 CI job（不阻断主流程） |
-| Redis 不可达 → 业务层 quota fail-closed → 全租户 500 | 大面积事故 | 加 `HELIX_AGENT_QUOTA_BREAK_GLASS` env 旁路（仅 prod incident），oncall runbook 注明；同时埋 `helix_quota_redis_unavailable_total` metric + 紧急告警 |
+| Redis 不可达 → 业务层 quota fail-closed → 全租户 500 | 大面积事故 | 加 `EXPERT_WORK_QUOTA_BREAK_GLASS` env 旁路（仅 prod incident），oncall runbook 注明；同时埋 `expert_work_quota_redis_unavailable_total` metric + 紧急告警 |
 | RLS policy 漏配某张租户表 → 数据泄漏 | 严重 | C.4 落地 CI lint：扫 `tenant_id` 列存在但缺 `CREATE POLICY` 的表 → CI 阻断（与 subsystem 23 § 8 一致） |
 | PgBouncer transaction pooling 与 `SET` 串扰（用错关键字 `SET` 不是 `SET LOCAL`） | 跨租户数据 | C.4 中所有 RLS-aware session bootstrap 强制 `SET LOCAL`；review 时禁 grep 出 `SET app.tenant_id` 不带 LOCAL 的代码 |
 | JWT signing key 泄漏 / Keycloak DB 漏 | 任意身份伪造 | dev only 暴露 8080；prod 部署文档要求 Keycloak 走独立 namespace + KMS 后端 + 公网仅 HTTPS 暴露 issuer 端点 |
 | argon2id 参数过强 → API Key 验证 > 100ms | 高 RPS 时性能瓶颈 | 选 m=64MB, t=2, p=1（OWASP 推荐）；命中后 LRU(10000) cache 5min（subsystem 15 § 5.4 已规范） |
-| Reservation 泄漏 → budget_ledger 持续 reserved | 超额拒绝 | 30min reaper 兜底；告警 `helix_token_reservation_active{tenant}` > 阈值 |
+| Reservation 泄漏 → budget_ledger 持续 reserved | 超额拒绝 | 30min reaper 兜底；告警 `expert_work_token_reservation_active{tenant}` > 阈值 |
 | dev_mode header trust 已删除 → 旧测试 / 旧 curl 调用 401 | 摩擦 | C.1 PR 同步更新所有现存 B.x 集成测试 fixture（runs_client fixture 加 JWT 注入 helper） |
-| Keycloak realm 配置漂移（dev 与 prod 不一致） | 行为差异 | realm-helix-agent.json 是 IaC，prod realm 同 JSON 通过 admin CLI 导入；diff 在 CI 比对 |
+| Keycloak realm 配置漂移（dev 与 prod 不一致） | 行为差异 | realm-expert-work.json 是 IaC，prod realm 同 JSON 通过 admin CLI 导入；diff 在 CI 比对 |
 
 ---
 
 ## 7. 里程碑 / PR 切分
 
-每个 C.x 一 PR；每个 PR 自给自足、可独立合入 main 且 CI 绿；每 PR 收尾必须满足[零技术债规则](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_zero_tech_debt.md)。
+每个 C.x 一 PR；每个 PR 自给自足、可独立合入 main 且 CI 绿；每 PR 收尾必须满足[零技术债规则](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_zero_tech_debt.md)。
 
 ```
 C.1  Keycloak compose + JWT verifier + AuthMiddleware 骨架（JWT 路径） + 移除 ProdAuthModeNotReadyError
      - infra/docker-compose 加 keycloak service
-     - infra/keycloak/realm-helix-agent.json
+     - infra/keycloak/realm-expert-work.json
      - control_plane/auth/{principal,jwt_verifier,middleware}.py
      - 现有 B 测试 fixture 升级带 JWT 注入
      - 5 个 audit_log action 新增

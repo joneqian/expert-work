@@ -120,7 +120,7 @@ export function TenantSwitcher() {
               </Tag>
             )}
             {o.hint && (
-              <span style={{ color: "var(--hx-text-tertiary)", fontSize: 11 }}>
+              <span style={{ color: "var(--ew-text-tertiary)", fontSize: 11 }}>
                 {o.hint}
               </span>
             )}

@@ -21,10 +21,10 @@ from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.mcp_probe import McpProbeError
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.persistence import McpConnectorCatalogInUseError
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditQuery, Role
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.persistence import McpConnectorCatalogInUseError
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditQuery, Role
 from orchestrator.tools.mcp import MCPToolDef
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -535,7 +535,7 @@ async def test_create_platform_bearer_stores_token_as_ref(ctx: _Ctx) -> None:
     # The token landed in the SecretStore under the platform path; only the ref
     # is persisted on the row.
     stored = await ctx.app.state.secret_store.get(  # type: ignore[attr-defined]
-        "helix-agent/platform/mcp/sharedbearer/token"
+        "expert-work/platform/mcp/sharedbearer/token"
     )
     assert stored == "platform-secret-token"
     # A subsequent GET still reports the flag (ref persisted).
@@ -558,7 +558,7 @@ async def test_repaste_platform_bearer_via_patch(ctx: _Ctx) -> None:
     assert patch.status_code == 200, patch.text
     assert patch.json()["data"]["has_bearer_token"] is True
     stored = await ctx.app.state.secret_store.get(  # type: ignore[attr-defined]
-        "helix-agent/platform/mcp/sharedbearer/token"
+        "expert-work/platform/mcp/sharedbearer/token"
     )
     assert stored == "rotated-token"
 

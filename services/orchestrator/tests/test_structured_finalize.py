@@ -30,16 +30,16 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.runtime.checkpointer import make_checkpointer
-from helix_agent.runtime.llm.cache import InMemoryRedisCache, LLMResponseCache
-from helix_agent.runtime.middleware import (
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.llm.cache import InMemoryRedisCache, LLMResponseCache
+from expert_work.runtime.middleware import (
     CallNext,
     LLMOutputValidationError,
     MiddlewareChain,
     MiddlewareContext,
 )
-from helix_agent.runtime.middleware.llm_cache import (
+from expert_work.runtime.middleware.llm_cache import (
     LLMCacheLookupMiddleware,
     LLMCacheStoreMiddleware,
 )

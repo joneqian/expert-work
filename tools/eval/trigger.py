@@ -31,8 +31,8 @@ from pydantic import ValidationError
 
 from control_plane.api.triggers import _hash_secret
 from control_plane.scheduler import _backoff_for, _is_cron_due, _next_fire
-from helix_agent.persistence import InMemoryTriggerRunStore, InMemoryTriggerStore
-from helix_agent.protocol import (
+from expert_work.persistence import InMemoryTriggerRunStore, InMemoryTriggerStore
+from expert_work.protocol import (
     TriggerRecord,
     TriggerRunRecord,
     TriggerRunStatus,

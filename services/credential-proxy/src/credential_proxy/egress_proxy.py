@@ -35,13 +35,13 @@ from uuid import UUID
 
 from credential_proxy.audit import EgressAuditStore
 from credential_proxy.domain import EgressAuditEntry, EgressVerdict
-from helix_agent.common.egress_token import (
+from expert_work.common.egress_token import (
     EgressIdentity,
     host_in_allowlist,
     host_in_denylist,
     verify_egress_token,
 )
-from helix_agent.common.url_validation import RemoteURLError, resolve_and_pin_host
+from expert_work.common.url_validation import RemoteURLError, resolve_and_pin_host
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ class EgressProxyServer:
                 writer,
                 407,
                 "Proxy Authentication Required",
-                extra=('Proxy-Authenticate: Basic realm="helix-egress"',),
+                extra=('Proxy-Authenticate: Basic realm="expert-work-egress"',),
             )
             return None
 

@@ -8,7 +8,7 @@ from ipaddress import IPv4Address
 from uuid import UUID
 
 from audit_backup_worker.serialization import object_key_for, serialize_row
-from helix_agent.persistence.models import AuditLogRow
+from expert_work.persistence.models import AuditLogRow
 
 
 def _row(**overrides: object) -> AuditLogRow:

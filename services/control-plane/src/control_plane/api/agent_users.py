@@ -39,14 +39,14 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.tenant_user.base import TenantUserStore
-from helix_agent.persistence.thread_meta import ThreadMetaStore
-from helix_agent.persistence.token_usage_store import TokenTotals, TokenUsageStore
-from helix_agent.protocol import AuditAction, AuditResult, TenantUser
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunStore
-from helix_agent.runtime.runs.store import MAX_LIST_LIMIT
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.tenant_user.base import TenantUserStore
+from expert_work.persistence.thread_meta import ThreadMetaStore
+from expert_work.persistence.token_usage_store import TokenTotals, TokenUsageStore
+from expert_work.protocol import AuditAction, AuditResult, TenantUser
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunStore
+from expert_work.runtime.runs.store import MAX_LIST_LIMIT
 
 
 def _get_thread_repo(request: Request) -> ThreadMetaStore:

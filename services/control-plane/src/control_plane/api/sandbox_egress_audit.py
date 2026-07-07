@@ -23,14 +23,14 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.sandbox_egress_audit import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.sandbox_egress_audit import (
     EgressAuditQuery,
     EgressAuditRecord,
     SandboxEgressAuditStore,
 )
-from helix_agent.protocol import Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.protocol import Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
 _MAX_LIMIT = 500
 _DEFAULT_LIMIT = 100

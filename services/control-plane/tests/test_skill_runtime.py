@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from control_plane.api._skill_runtime import classify_skill_runtime
 from control_plane.api._skill_zip import SkillZipPayload
-from helix_agent.protocol.skill import SkillSupportingFile
+from expert_work.protocol.skill import SkillSupportingFile
 
 
 def _payload(*, body: str = "do the thing", files: list[str] | None = None) -> SkillZipPayload:

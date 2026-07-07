@@ -25,7 +25,7 @@ abrupt `docker kill` mid-run.
    checkpoint via `run_agent(graph_input=None)`.
 4. The run reaches `success` under a **different** owner with `reclaim_count >= 1`,
    a `run:failover` audit row exists, and green's
-   `helix_run_orphan_reclaimed_total` metric incremented.
+   `expert_work_run_orphan_reclaimed_total` metric incremented.
 
 ## Prerequisites
 
@@ -46,14 +46,14 @@ abrupt `docker kill` mid-run.
 ## Run
 
 ```bash
-export HELIX_API_TOKEN=<a dev-login bearer token>   # never logged
+export EXPERT_WORK_API_TOKEN=<a dev-login bearer token>   # never logged
 uv run python tools/ha/verify_failover.py            # auto-picks a domestic agent
 uv run python tools/ha/verify_failover.py --agent my-agent@1.0.0
 ```
 
 Exit code is non-zero if failover did not complete cleanly. Lease fields
 (`claimed_by` / `reclaim_count`) aren't on the run API, so they're read straight
-from Postgres via `docker exec helix-postgres psql` (the dev superuser bypasses
+from Postgres via `docker exec expert-work-postgres psql` (the dev superuser bypasses
 RLS); green's metrics are scraped over its container loopback via `docker exec`,
 so green needs no reachable host port.
 
@@ -77,7 +77,7 @@ tests monkeypatch `run_agent` and run a single in-memory store.
    from the persisted `enqueued_input`.
 4. The run reaches `success` owned by **green** with `reclaim_count == 0` (a
    queue claim, not a failover reclaim), and green's
-   `helix_run_queue_dequeued_total` metric incremented.
+   `expert_work_run_queue_dequeued_total` metric incremented.
 
 ### Prerequisites
 
@@ -96,7 +96,7 @@ tests monkeypatch `run_agent` and run a single in-memory store.
 ### Run
 
 ```bash
-export HELIX_API_TOKEN=<a dev-login bearer token>   # never logged
+export EXPERT_WORK_API_TOKEN=<a dev-login bearer token>   # never logged
 uv run python tools/ha/verify_queue.py               # auto-picks a domestic agent
 uv run python tools/ha/verify_queue.py --agent my-agent@1.0.0
 ```

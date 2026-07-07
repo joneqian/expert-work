@@ -37,7 +37,7 @@ import {
 const TIERS: TemplateTier[] = ["free", "pro", "enterprise"];
 const STATUSES: TemplateStatus[] = ["draft", "published"];
 
-const _STARTER_MANIFEST = `apiVersion: helix.io/v1
+const _STARTER_MANIFEST = `apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: my-template

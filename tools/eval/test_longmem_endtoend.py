@@ -61,8 +61,8 @@ class _ScriptedCaller:
                 ]
             elif "carbonara" in body:
                 memories = [{"kind": "fact", "content": "User cooks pasta carbonara"}]
-            elif "helix" in body:
-                memories = [{"kind": "fact", "content": "User's favorite editor is helix"}]
+            elif "expert_work" in body:
+                memories = [{"kind": "fact", "content": "User's favorite editor is expert_work"}]
             elif "vim" in body:
                 memories = [{"kind": "fact", "content": "User's favorite editor was vim"}]
             else:
@@ -73,7 +73,7 @@ class _ScriptedCaller:
             if "What city" in body:
                 return AIMessage(content="The user visited Kyoto.")
             if "favorite editor" in body:
-                return AIMessage(content="Their favorite editor is helix.")
+                return AIMessage(content="Their favorite editor is expert_work.")
             return AIMessage(content="The information is not available.")
         # Reconcile (or any other) call — deliberately unparseable so the
         # CM-7 degrade-to-direct-ADD path is what gets exercised.
@@ -85,7 +85,7 @@ async def test_end_to_end_fixture_pipeline() -> None:
     instances = load_longmemeval(FIXTURES / "longmemeval_mini.json")
     caller = _ScriptedCaller()
     judge = ScriptedTextJudge(
-        {"The user visited Kyoto.": "yes", "Their favorite editor is helix.": "yes"}
+        {"The user visited Kyoto.": "yes", "Their favorite editor is expert_work.": "yes"}
     )
     report = await run_end_to_end(
         instances,
@@ -119,7 +119,7 @@ async def test_end_to_end_reconcile_degrades_to_add() -> None:
         benchmark="longmemeval",
         embedder=KeywordEmbedder(),
         llm_caller=caller,
-        judge=ScriptedTextJudge({"helix": "yes"}),
+        judge=ScriptedTextJudge({"expert_work": "yes"}),
         config=EndToEndConfig(reconcile=True),
     )
     assert report.memories_written == 2

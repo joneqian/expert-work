@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 
 #: Cache directory override — points the harness at an existing mirror.
-_CACHE_ENV = "HELIX_LONGMEM_CACHE"
+_CACHE_ENV = "EXPERT_WORK_LONGMEM_CACHE"
 
 _DEFAULT_CACHE = Path(__file__).resolve().parent.parent / "datasets" / ".longmem_cache"
 

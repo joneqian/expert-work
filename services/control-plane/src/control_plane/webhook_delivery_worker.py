@@ -38,8 +38,8 @@ from uuid import UUID, uuid4
 
 import httpx
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import (
     ApprovalStore,
     ArtifactStore,
     SkillStore,
@@ -47,19 +47,19 @@ from helix_agent.persistence import (
     WebhookDeliveryStore,
     WebhookEndpointStore,
 )
-from helix_agent.persistence.rls import bypass_rls_var
-from helix_agent.protocol import (
+from expert_work.persistence.rls import bypass_rls_var
+from expert_work.protocol import (
     ApprovalStatus,
     WebhookDeliveryRecord,
     WebhookDeliveryStatus,
     WebhookEndpointRecord,
     WebhookEventType,
 )
-from helix_agent.runtime.runs import RunStatus, RunStore
-from helix_agent.runtime.runs.schemas import TERMINAL_RUN_STATUSES
-from helix_agent.runtime.secret_store import SecretNotFoundError, SecretStore
+from expert_work.runtime.runs import RunStatus, RunStore
+from expert_work.runtime.runs.schemas import TERMINAL_RUN_STATUSES
+from expert_work.runtime.secret_store import SecretNotFoundError, SecretStore
 
-logger = logging.getLogger("helix.control_plane.webhook_delivery_worker")
+logger = logging.getLogger("expert_work.control_plane.webhook_delivery_worker")
 
 _BATCH_SIZE: int = 100
 _MAX_ATTEMPTS: int = 5
@@ -74,35 +74,35 @@ _BREAKER_COOLDOWN_S: int = 300
 #: row beyond the window was already enqueued in an earlier cycle.
 _SCAN_LIMIT: int = 500
 #: HMAC signature header (mirrors GitHub's ``X-Hub-Signature-256``).
-_SIGNATURE_HEADER = "X-Helix-Signature-256"
+_SIGNATURE_HEADER = "X-Expert-Work-Signature-256"
 
 #: A pluggable POST: ``(url, body, headers) -> status_code``. The default is
 #: httpx; tests inject a stub so no real network is touched. Raising signals
 #: a transport failure (treated as retryable, like a 5xx).
 HttpPost = Callable[[str, bytes, dict[str, str]], Awaitable[int]]
 
-_delivered = helix_counter(
-    "helix_webhook_deliveries_succeeded_total",
+_delivered = expert_work_counter(
+    "expert_work_webhook_deliveries_succeeded_total",
     "Webhook deliveries that received a 2xx.",
 )
-_dead_letters = helix_counter(
-    "helix_webhook_deliveries_dead_lettered_total",
+_dead_letters = expert_work_counter(
+    "expert_work_webhook_deliveries_dead_lettered_total",
     "Webhook deliveries abandoned (4xx config error or retry budget spent).",
 )
-_retries = helix_counter(
-    "helix_webhook_deliveries_retried_total",
+_retries = expert_work_counter(
+    "expert_work_webhook_deliveries_retried_total",
     "Webhook deliveries scheduled for a backoff retry.",
 )
-_breaker_skips = helix_counter(
-    "helix_webhook_breaker_skips_total",
+_breaker_skips = expert_work_counter(
+    "expert_work_webhook_breaker_skips_total",
     "Deliveries skipped because the endpoint's circuit breaker was open.",
 )
-_cycle_errors = helix_counter(
-    "helix_webhook_delivery_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_webhook_delivery_cycle_errors_total",
     "Delivery worker cycles that ended in a caught exception.",
 )
-_enqueued = helix_counter(
-    "helix_webhook_deliveries_enqueued_total",
+_enqueued = expert_work_counter(
+    "expert_work_webhook_deliveries_enqueued_total",
     "Webhook deliveries enqueued from the 3 source tables (run / approval / artifact).",
 )
 
@@ -134,7 +134,7 @@ def _im_text(row: WebhookDeliveryRecord) -> str:
     good enough for a human to act on, with the delivery id for tracing.
     """
     title = _EVENT_TITLES.get(row.event_type, row.event_type)
-    lines = [f"【Helix】{title}"]
+    lines = [f"【Expert Work】{title}"]
     for key, value in sorted((row.payload or {}).items()):
         if value is None or isinstance(value, dict | list):
             continue
@@ -150,7 +150,7 @@ def _im_text(row: WebhookDeliveryRecord) -> str:
 def render_channel_body(payload_format: str, row: WebhookDeliveryRecord, envelope: bytes) -> bytes:
     """Shape the delivery body for the endpoint's channel.
 
-    ``generic`` returns the signed helix envelope unchanged; the IM formats
+    ``generic`` returns the signed expert_work envelope unchanged; the IM formats
     wrap :func:`_im_text` in each platform's incoming-webhook text-message
     schema. Unknown formats fall back to ``generic`` (never block delivery).
     """
@@ -564,8 +564,8 @@ class WebhookDeliveryWorker:
         headers = {
             "Content-Type": "application/json",
             _SIGNATURE_HEADER: "sha256=" + hmac.new(secret.encode(), body, sha256).hexdigest(),
-            "X-Helix-Event": row.event_type,
-            "X-Helix-Delivery": str(row.id),
+            "X-Expert-Work-Event": row.event_type,
+            "X-Expert-Work-Delivery": str(row.id),
         }
         try:
             status = await self._post(endpoint.url, body, headers)

@@ -5,7 +5,7 @@ Drives a **real** agent on a strict OpenAI-compatible domestic backend
 compressor fires, then asserts the RT-2 compaction depth work (PR-1..PR-5)
 actually holds live — the half CI can't reach (no model key in CI):
 
-  1. **No 400 when a compaction lands.** helix wraps the summary as a
+  1. **No 400 when a compaction lands.** expert_work wraps the summary as a
      mid-conversation ``<context-summary>`` SystemMessage; strict backends
      (vLLM / qwen / glm) reject a non-leading ``system`` role. RT-ADR-5's
      adapter-level ``coalesce_system_messages`` must fold it into the
@@ -28,7 +28,7 @@ resolved server-side; this script only sends prompts + reads SSE.
   context via real LLM calls easily runs past that. If OIDC client
   credentials are provided the harness mints its own token and
   **re-mints on a 401**, so the run outlives any token TTL. Absent those
-  env vars it falls back to a static ``HELIX_API_TOKEN`` (unchanged
+  env vars it falls back to a static ``EXPERT_WORK_API_TOKEN`` (unchanged
   behaviour). The token is never logged.
 * **Fill sizing.** Compaction triggers at ``context_window *
   threshold_pct``; a fixed fill size either never reaches it (huge window)
@@ -59,18 +59,18 @@ run is a manual step.
 Usage (bring the dev stack up first — ``make dev-up`` — with a qwen/glm/
 deepseek agent active). Either hand it a token::
 
-    export HELIX_API_URL=http://localhost:8000       # your control-plane URL
-    export HELIX_API_TOKEN=<a dev-login bearer token>
+    export EXPERT_WORK_API_URL=http://localhost:8000       # your control-plane URL
+    export EXPERT_WORK_API_TOKEN=<a dev-login bearer token>
     uv run python tools/eval/verify_live_compaction.py --agent my-agent@1.0.0
 
 …or let it mint + auto-refresh its own (survives long runs)::
 
-    export HELIX_API_URL=http://localhost:8000
-    export HELIX_OIDC_TOKEN_URL=http://localhost:8080/realms/helix-agent/protocol/openid-connect/token
-    export HELIX_OIDC_CLIENT_ID=helix-agent-api-internal
-    export HELIX_OIDC_CLIENT_SECRET=<the client secret>   # client_credentials
+    export EXPERT_WORK_API_URL=http://localhost:8000
+    export EXPERT_WORK_OIDC_TOKEN_URL=http://localhost:8080/realms/expert-work/protocol/openid-connect/token
+    export EXPERT_WORK_OIDC_CLIENT_ID=expert-work-api-internal
+    export EXPERT_WORK_OIDC_CLIENT_SECRET=<the client secret>   # client_credentials
     # …or username/password for a direct-access-grant client:
-    # export HELIX_OIDC_USERNAME=dev  HELIX_OIDC_PASSWORD=devpass
+    # export EXPERT_WORK_OIDC_USERNAME=dev  EXPERT_WORK_OIDC_PASSWORD=devpass
     uv run python tools/eval/verify_live_compaction.py --agent my-agent@1.0.0
 
 Exit code is non-zero when the verification did not hold — a live error
@@ -144,12 +144,12 @@ _ASSUMED_OVERHEAD_TOKENS = 24_000
 #: Resolve a ``None`` manifest ``context_window`` the way the server's agent
 #: factory does — catalog lookup, else the 200k fallback (``agent_factory
 #: ._resolved_context_window``). Guarded: the harness still runs (and the
-#: MockTransport tests still pass) without the ``helix_agent`` package.
+#: MockTransport tests still pass) without the ``expert_work`` package.
 try:
-    from helix_agent.protocol.model_catalog import (  # type: ignore[import-not-found]
+    from expert_work.protocol.model_catalog import (  # type: ignore[import-not-found]
         catalog_entry as _catalog_entry,
     )
-except Exception:  # pragma: no cover - only when helix_agent isn't importable
+except Exception:  # pragma: no cover - only when expert_work isn't importable
     _catalog_entry = None
 
 
@@ -226,16 +226,18 @@ class _RefreshingAuth(httpx.Auth):
 
 
 def _build_mint() -> Minter | None:
-    """Build a token minter from the ``HELIX_OIDC_*`` env, or ``None``."""
-    client_id = os.getenv("HELIX_OIDC_CLIENT_ID")
+    """Build a token minter from the ``EXPERT_WORK_OIDC_*`` env, or ``None``."""
+    client_id = os.getenv("EXPERT_WORK_OIDC_CLIENT_ID")
     if not client_id:
         return None
-    token_url = os.getenv("HELIX_OIDC_TOKEN_URL")
+    token_url = os.getenv("EXPERT_WORK_OIDC_TOKEN_URL")
     if not token_url:
-        raise SystemExit("HELIX_OIDC_CLIENT_ID is set but HELIX_OIDC_TOKEN_URL is missing")
-    client_secret = os.getenv("HELIX_OIDC_CLIENT_SECRET")
-    username = os.getenv("HELIX_OIDC_USERNAME")
-    password = os.getenv("HELIX_OIDC_PASSWORD")
+        raise SystemExit(
+            "EXPERT_WORK_OIDC_CLIENT_ID is set but EXPERT_WORK_OIDC_TOKEN_URL is missing"
+        )
+    client_secret = os.getenv("EXPERT_WORK_OIDC_CLIENT_SECRET")
+    username = os.getenv("EXPERT_WORK_OIDC_USERNAME")
+    password = os.getenv("EXPERT_WORK_OIDC_PASSWORD")
 
     async def _mint() -> str:
         return await _mint_token(
@@ -507,13 +509,13 @@ async def run_compaction_check(
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    base_url = args.base_url or _require_env("HELIX_API_URL")
+    base_url = args.base_url or _require_env("EXPERT_WORK_API_URL")
     mint = _build_mint()
     if mint is not None:
-        token: str | None = os.getenv("HELIX_API_TOKEN") or await mint()
+        token: str | None = os.getenv("EXPERT_WORK_API_TOKEN") or await mint()
     else:
-        token = _require_env("HELIX_API_TOKEN")  # never logged
-    fact_code = args.fact_code or f"HELIX-{uuid4().hex[:8].upper()}"
+        token = _require_env("EXPERT_WORK_API_TOKEN")  # never logged
+    fact_code = args.fact_code or f"EXPERT_WORK-{uuid4().hex[:8].upper()}"
     auth = _RefreshingAuth(token, mint)
     async with httpx.AsyncClient(base_url=base_url, auth=auth, timeout=180.0) as client:
         return await run_compaction_check(
@@ -529,7 +531,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Live compaction-depth verification (RT-2 PR-6/7)."
     )
-    parser.add_argument("--base-url", default=None, help="control-plane URL (or $HELIX_API_URL)")
+    parser.add_argument(
+        "--base-url", default=None, help="control-plane URL (or $EXPERT_WORK_API_URL)"
+    )
     parser.add_argument("--agent", default=None, help="target agent as name@version (else auto)")
     parser.add_argument(
         "--max-turns",

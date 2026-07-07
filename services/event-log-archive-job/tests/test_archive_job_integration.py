@@ -22,16 +22,16 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from testcontainers.postgres import PostgresContainer
 
 from event_log_archive_job.job import EventLogArchiveJob
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.runtime.storage.memory import InMemoryObjectStore
+from expert_work.runtime.storage.memory import InMemoryObjectStore
 
 pytestmark = pytest.mark.integration
 
-ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/helix-persistence/alembic.ini"
+ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/expert-work-persistence/alembic.ini"
 
 
 def _sync_dsn(container: PostgresContainer) -> str:

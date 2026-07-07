@@ -609,7 +609,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       } finally {
         setExportingId(null);
       }
-      downloadJson(`helix-events-${runId ?? turn.id}.json`, {
+      downloadJson(`expert-work-events-${runId ?? turn.id}.json`, {
         run_id: runId,
         thread_id: threadId,
         input: turn.input,
@@ -732,7 +732,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       {/* Left — session + input */}
       <div
         style={{
-          border: "1px solid var(--hx-border-subtle)",
+          border: "1px solid var(--ew-border-subtle)",
           borderRadius: 6,
           padding: 12,
           display: "flex",
@@ -1012,7 +1012,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
             data-testid="playground-workspace"
             style={{
               marginTop: "auto",
-              borderTop: "1px solid var(--hx-border-subtle)",
+              borderTop: "1px solid var(--ew-border-subtle)",
               paddingTop: 8,
             }}
           >
@@ -1249,7 +1249,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
       {/* Right — conversation transcript */}
       <div
         style={{
-          border: "1px solid var(--hx-border-subtle)",
+          border: "1px solid var(--ew-border-subtle)",
           borderRadius: 6,
           padding: 0,
           display: "flex",
@@ -1264,7 +1264,7 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
         <div
           style={{
             padding: "8px 12px",
-            borderBottom: "1px solid var(--hx-border-subtle)",
+            borderBottom: "1px solid var(--ew-border-subtle)",
             display: "flex",
             alignItems: "center",
             gap: 8,
@@ -1327,11 +1327,11 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                     whiteSpace: "pre-wrap",
                     background:
                       m.role === "user"
-                        ? "var(--hx-surface-raised)"
+                        ? "var(--ew-surface-raised)"
                         : "transparent",
                     border:
                       m.role === "user"
-                        ? "1px solid var(--hx-border-subtle)"
+                        ? "1px solid var(--ew-border-subtle)"
                         : "none",
                     opacity: 0.75,
                   }}
@@ -1347,8 +1347,8 @@ export function PlaygroundTab({ detail }: PlaygroundTabProps) {
                 style={{
                   textAlign: "center",
                   fontSize: 11,
-                  color: "var(--hx-text-tertiary)",
-                  borderTop: "1px dashed var(--hx-border-subtle)",
+                  color: "var(--ew-text-tertiary)",
+                  borderTop: "1px dashed var(--ew-border-subtle)",
                   paddingTop: 6,
                   marginTop: 2,
                 }}
@@ -1430,7 +1430,7 @@ function FeedbackBar({ threadId, turnSeq }: { threadId: string; turnSeq: number 
           <ThumbsUp
             size={13}
             strokeWidth={1.75}
-            color={submitted === "up" ? "var(--hx-status-success, #52c41a)" : undefined}
+            color={submitted === "up" ? "var(--ew-status-success, #52c41a)" : undefined}
           />
         }
       />
@@ -1476,7 +1476,7 @@ function FeedbackBar({ threadId, turnSeq }: { threadId: string; turnSeq: number 
               size={13}
               strokeWidth={1.75}
               color={
-                submitted === "down" ? "var(--hx-status-error, #f5222d)" : undefined
+                submitted === "down" ? "var(--ew-status-error, #f5222d)" : undefined
               }
             />
           }
@@ -1578,11 +1578,11 @@ function ApprovalGate({
     <div
       data-testid="playground-approval"
       style={{
-        border: "1px solid var(--hx-color-warning, #d4a017)",
+        border: "1px solid var(--ew-color-warning, #d4a017)",
         borderRadius: 6,
         padding: 10,
         marginTop: 8,
-        background: "var(--hx-surface-raised)",
+        background: "var(--ew-surface-raised)",
       }}
     >
       <div
@@ -1605,8 +1605,8 @@ function ApprovalGate({
         style={{
           margin: 0,
           fontSize: 11,
-          fontFamily: "var(--hx-font-mono)",
-          color: "var(--hx-text-secondary)",
+          fontFamily: "var(--ew-font-mono)",
+          color: "var(--ew-text-secondary)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
           maxHeight: 160,
@@ -1721,7 +1721,7 @@ function TurnCard({
     <div
       data-testid="playground-turn"
       style={{
-        border: "1px solid var(--hx-border-subtle)",
+        border: "1px solid var(--ew-border-subtle)",
         borderRadius: 6,
         overflow: "hidden",
         // The transcript is a flex column — without this the (single) turn
@@ -1734,8 +1734,8 @@ function TurnCard({
       <div
         style={{
           padding: "8px 12px",
-          background: "var(--hx-surface-raised)",
-          borderBottom: "1px solid var(--hx-border-subtle)",
+          background: "var(--ew-surface-raised)",
+          borderBottom: "1px solid var(--ew-border-subtle)",
         }}
       >
         <Text style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>
@@ -1925,8 +1925,8 @@ function TurnCard({
                       style={{
                         margin: 0,
                         fontSize: 11,
-                        fontFamily: "var(--hx-font-mono)",
-                        color: "var(--hx-text-secondary)",
+                        fontFamily: "var(--ew-font-mono)",
+                        color: "var(--ew-text-secondary)",
                         whiteSpace: "pre-wrap",
                         wordBreak: "break-word",
                         maxHeight: 240,
@@ -2022,10 +2022,10 @@ function EventCard({ evt }: { evt: SseEvent }) {
   return (
     <div
       style={{
-        border: "1px solid var(--hx-border-subtle)",
+        border: "1px solid var(--ew-border-subtle)",
         borderRadius: 4,
         padding: 8,
-        background: "var(--hx-surface-raised)",
+        background: "var(--ew-surface-raised)",
       }}
       data-testid={`playground-event-${evt.event}`}
     >
@@ -2052,8 +2052,8 @@ function EventCard({ evt }: { evt: SseEvent }) {
         style={{
           margin: 0,
           fontSize: 11,
-          fontFamily: "var(--hx-font-mono)",
-          color: "var(--hx-text-secondary)",
+          fontFamily: "var(--ew-font-mono)",
+          color: "var(--ew-text-secondary)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
           maxHeight: 280,

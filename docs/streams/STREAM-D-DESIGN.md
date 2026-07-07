@@ -9,7 +9,7 @@
 > 本 Stream **不**重做 audit_log 表（A.4 已建）、不重做 ObjectStore Protocol
 > （A.5 已建），只在它们之上做产品级数据保护。
 
-设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)）：
+设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)）：
 所有架构 / 接口 / mini-ADR 必须在编码前就锁定，D.1 - D.4 PR 仅执行本文档。
 
 ---
@@ -22,8 +22,8 @@
 |------|---------|-----------|
 | **D.1a audit 写者降权** | migration 0008：新 `audit_writer` NOLOGIN 角色；`REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM PUBLIC / app_user`；应用写路径 `SET ROLE audit_writer`。**写入仍走应用层 redactor**，但 DB 层兜底防"操作人改 audit 抹痕"。 | 17 § 8 / 9-M1 |
 | **D.1b ObjectStore Object Lock 语义** | `ObjectStore.put` 增加 `retain_until: datetime \| None` + `lock_mode: Literal["governance","compliance"] \| None` 形参；S3 实现走 `ObjectLockRetainUntilDate`/`ObjectLockMode` 头；MinIO 集成测试启用 Object Lock 桶；in-memory 实现走"软"语义（记录元信息，不真锁）。 | ADR-0004 / 17 § 9-M1 |
-| **D.1c audit WORM 备份 worker** | migration 0009：`audit_backup_worker` 角色 + 列级 `GRANT UPDATE (backup_acked, backup_acked_at)`（保持 0008 整表 REVOKE 不变）；新增 `services/audit-backup-worker/`：cursor-poll 未备份行 → 写 `{audit_bucket}/{tenant}/{YYYY}/{MM}/{DD}/{id}.json`（compliance 模式锁 N 天）→ `UPDATE backup_acked = true`；失败重试 + 指数退避；指标 `helix_audit_archive_lag_seconds{tenant}`。 | 17 § 5.6 / 7.1 |
-| **D.2 TenantAwareRedactor** | 扩展 `helix-runtime/audit/redactor.py`：在现有全局 secret pattern 之上加 **per-tenant `pii_fields` 递归 key-name 掩码**；从 `TenantConfigService` 拉 `pii_fields`；`AuditLogger` 注入工厂；`tenant_config` 缓存命中即 0 额外开销。 | 17 § 5.2 |
+| **D.1c audit WORM 备份 worker** | migration 0009：`audit_backup_worker` 角色 + 列级 `GRANT UPDATE (backup_acked, backup_acked_at)`（保持 0008 整表 REVOKE 不变）；新增 `services/audit-backup-worker/`：cursor-poll 未备份行 → 写 `{audit_bucket}/{tenant}/{YYYY}/{MM}/{DD}/{id}.json`（compliance 模式锁 N 天）→ `UPDATE backup_acked = true`；失败重试 + 指数退避；指标 `expert_work_audit_archive_lag_seconds{tenant}`。 | 17 § 5.6 / 7.1 |
+| **D.2 TenantAwareRedactor** | 扩展 `expert-work-runtime/audit/redactor.py`：在现有全局 secret pattern 之上加 **per-tenant `pii_fields` 递归 key-name 掩码**；从 `TenantConfigService` 拉 `pii_fields`；`AuditLogger` 注入工厂；`tenant_config` 缓存命中即 0 额外开销。 | 17 § 5.2 |
 | **D.3 retention TTL + 配置** | migration 0009：`tenant_config` 加 `audit_retention_days` / `event_log_retention_days` （默认 90 / 30，HIPAA pack 调到 2555）；`services/retention-cleanup-job/`：每 tenant 一轮 `DELETE FROM audit_log WHERE tenant_id=? AND occurred_at < ? AND backup_acked=true LIMIT 10000`（事务批处理）；同样清 `event_log`、过期 `token_reservation`、过期 `jwt_blacklist`；保留 SLA 决策文档 [decisions/data-retention.md](../decisions/data-retention.md)。 | 17 § 5.3 / 9-M1；GAPS § 3 #8、§ 6 #19 |
 | **D.4 at-rest 加密 + ADR** | `infra/docker-compose` Postgres / MinIO 卷挂到 LUKS 容器（dev fixture）；`infra/minio` 切 SSE-KMS 启用；ADR-0008：**M0 走 OS/卷层 + 云厂托管 RDS encryption（生产）**，不引入 `pg_tde`；密钥管理与 ADR-0007 SecretStore 对齐（dev 走 minio 自带 KES，prod 走云 KMS）。 | GAPS § 4 #9 |
 
@@ -43,11 +43,11 @@
 
 ### 1.3 验收门（来自 ITERATION-PLAN § Stream D Verification）
 
-1. **插入含 PII 数据走 audit 写路径** — `details` 中含 tenant 配置的 `pii_fields` key（如 `patient_id_card`）→ 写入 DB 后该字段被 `***REDACTED***` 替换；`helix_audit_redact_hit_total{pattern="pii_field"}` +1。
+1. **插入含 PII 数据走 audit 写路径** — `details` 中含 tenant 配置的 `pii_fields` key（如 `patient_id_card`）→ 写入 DB 后该字段被 `***REDACTED***` 替换；`expert_work_audit_redact_hit_total{pattern="pii_field"}` +1。
 2. **DB 直连尝试 `UPDATE audit_log SET ... WHERE id = X` 被拒** — `audit_writer` 角色不持有 UPDATE / DELETE 权限；普通 `app_user` 角色亦无；只有 superuser 例外（不暴露给应用）。
 3. **WORM 桶禁止 overwrite** — backup worker 落盘后，对同一 key 再次 `put` 在 compliance 模式下返回 5xx；本地 MinIO 集成测试覆盖。
 4. **TDE / SSE-KMS 启用后磁盘文件不可明文读取** — dev fixture：在 LUKS 卷未解锁时直接读 `pgdata/` 二进制；MinIO 落盘的对象在 KMS 加密下 `mc cat` 直接读裸文件不可读。
-5. **retention job 不会误删未备份数据** — 测试：行 `backup_acked=false` 且超 retention 期，job 跳过该行 + 发 `helix_retention_skip_total` 计数（不报错、不阻塞）；只有 `backup_acked=true` 的行才能被删。
+5. **retention job 不会误删未备份数据** — 测试：行 `backup_acked=false` 且超 retention 期，job 跳过该行 + 发 `expert_work_retention_skip_total` 计数（不报错、不阻塞）；只有 `backup_acked=true` 的行才能被删。
 
 ---
 
@@ -179,7 +179,7 @@ op.create_check_constraint(
 新增形参，**不破坏现有调用**（旧调用 `put(key, data)` 不传 lock 参数 → 行为不变）：
 
 ```python
-# helix_agent/runtime/storage/base.py
+# expert_work/runtime/storage/base.py
 class ObjectStore(Protocol):
     async def put(
         self,
@@ -233,8 +233,8 @@ loop forever:
 **幂等性**：同 id 写两次 → S3 创建第二个版本（compliance 拦的是 delete，不拦 put）；唯一一致性源是 DB 侧 `backup_acked` 列。worker 在写之前先 SELECT `backup_acked`；写完 UPDATE。失败重启场景：上一轮 put 成功 + UPDATE 没成功 → 这一轮发现 backup_acked=false → put 再写一遍（新版本无害）+ UPDATE。多版本本身不计入合规可疑（每个版本都受 retention 保护）。
 
 **指标**：
-- `helix_audit_backup_processed_total{tenant,result}` counter
-- `helix_audit_archive_lag_seconds{tenant}` gauge（最新未备份行的 `occurred_at` 距 now 的差）
+- `expert_work_audit_backup_processed_total{tenant,result}` counter
+- `expert_work_audit_archive_lag_seconds{tenant}` gauge（最新未备份行的 `occurred_at` 距 now 的差）
 
 ### 2.5 TenantAwareRedactor 行为
 
@@ -289,8 +289,8 @@ loop nightly (cron / interval):
 **测试矩阵覆盖**："unacked row 不被删" 是核心断言。
 
 **指标**：
-- `helix_retention_deleted_total{table,tenant}` counter
-- `helix_retention_skipped_unacked_total{table,tenant}` counter（应该 ≈ 0；持续 > 0 = backup worker 拖延）
+- `expert_work_retention_deleted_total{table,tenant}` counter
+- `expert_work_retention_skipped_unacked_total{table,tenant}` counter（应该 ≈ 0；持续 > 0 = backup worker 拖延）
 
 ### 2.7 at-rest 加密层（D.4）
 
@@ -439,7 +439,7 @@ class AuditAction(StrEnum):
 
 | 风险 | 影响 | 缓解 |
 |------|------|------|
-| backup worker 长期挂掉，audit_log 堆积无法清理 | 磁盘满 + 合规丢档 | `helix_audit_archive_lag_seconds` 告警 P1（lag > 1h）；retention job 跳过未备份并发 `skipped_unacked` 告警 P1（>0 即报） |
+| backup worker 长期挂掉，audit_log 堆积无法清理 | 磁盘满 + 合规丢档 | `expert_work_audit_archive_lag_seconds` 告警 P1（lag > 1h）；retention job 跳过未备份并发 `skipped_unacked` 告警 P1（>0 即报） |
 | 应用代码忘了 `SET ROLE audit_writer` → 用 app_user 写入失败 | audit 写丢 | AuditLogger 内部统一 `with set_role("audit_writer"):` 上下文管理器；CI lint 禁止跨过 AuditLogger 直接 `INSERT INTO audit_log`（grep pattern） |
 | Object Lock compliance 模式锁错保留期 | 数据永远删不掉 / 合规违规 | retain_until 由 tenant_config.audit_retention_days 计算；compliance 模式下任何后续 retain_until 变短都会被 S3 拒绝（这是 by design）；测试矩阵覆盖"配置中途变短"的 case |
 | pii_fields 配错 mask 了正常字段 | 用户调试看不到 details | tenant cfg 改动有 audit 行（已落 C.7）；redact_hit 指标按 pattern 拆 + 异常激增告警；docs 给 pii_fields 配置示例 |
@@ -455,7 +455,7 @@ class AuditAction(StrEnum):
 ## 7. 里程碑 / PR 切分
 
 每个 D.x 一 PR；每个 PR 自给自足、可独立合入 main 且 CI 绿；每 PR 收尾必须满足
-[零技术债规则](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_zero_tech_debt.md)。
+[零技术债规则](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_zero_tech_debt.md)。
 
 ```
 D.0  docs(stream-d): 本设计文档（即将 PR）

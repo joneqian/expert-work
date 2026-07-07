@@ -36,21 +36,21 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
-from helix_agent.common.threat_patterns import first_threat_message
-from helix_agent.persistence.skill.base import (
+from expert_work.common.threat_patterns import first_threat_message
+from expert_work.persistence.skill.base import (
     DuplicatePromoteRequestError,
     DuplicateSkillError,
     SkillNotFoundError,
     SkillStore,
     SkillVersionNotFoundError,
 )
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
-from helix_agent.protocol.skill import (
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult
+from expert_work.protocol.skill import (
     DEFAULT_SKILL_LAZY_LOAD,
     compute_content_hash,
     is_high_risk_skill_version,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator.tools.registry import ToolContext, ToolResult, ToolSpec
 
 #: Skill name slug (mirrors ``SKILL_REF_PATTERN`` minus the ``@version`` part).

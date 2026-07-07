@@ -21,7 +21,7 @@ from control_plane.keycloak import (
 )
 
 _BASE = "http://kc:8080"
-_REALM = "helix-agent"
+_REALM = "expert-work"
 
 
 def _token_handler(calls: list[str]) -> httpx.MockTransport:
@@ -42,7 +42,7 @@ async def test_token_cache_reuses_until_expiry() -> None:
         provider = ServiceAccountTokenProvider(
             base_url=_BASE,
             realm=_REALM,
-            client_id="helix-agent-api-internal",
+            client_id="expert-work-api-internal",
             secret_loader=_const_secret("sek"),
             http=http,
             now=lambda: fake_clock[0],
@@ -188,7 +188,7 @@ def _http_client(
     provider = ServiceAccountTokenProvider(
         base_url=_BASE,
         realm=_REALM,
-        client_id="helix-agent-api-internal",
+        client_id="expert-work-api-internal",
         secret_loader=_const_secret("sek"),
         http=http,
     )

@@ -56,8 +56,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.runtime.middleware import (
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
     LLMServerError,

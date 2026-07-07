@@ -1,8 +1,8 @@
 # Runbook — Control Plane
 
-> Stream G.3 故障预案。适用告警：`HelixControlPlaneDown`（P0）、
-> `HelixControlPlaneHigh5xxRate`（P1）、`HelixControlPlaneHighLatency`（P2）、
-> `HelixQuotaReaperErrors`（P2）—— 见 [`tools/observability/rules/alerts.yml`](../../tools/observability/rules/alerts.yml)。
+> Stream G.3 故障预案。适用告警：`ExpertWorkControlPlaneDown`（P0）、
+> `ExpertWorkControlPlaneHigh5xxRate`（P1）、`ExpertWorkControlPlaneHighLatency`（P2）、
+> `ExpertWorkQuotaReaperErrors`（P2）—— 见 [`tools/observability/rules/alerts.yml`](../../tools/observability/rules/alerts.yml)。
 
 ## 适用范围
 
@@ -13,10 +13,10 @@ control-plane 是 M0 的 API 入口 + in-process orchestrator 宿主（STREAM-E 
 
 | 告警 | 现象 |
 |------|------|
-| `HelixControlPlaneDown` | Prometheus 2m 抓不到 `helix-control-plane` target；API 不可达 |
-| `HelixControlPlaneHigh5xxRate` | 5m 成功率 < 95%；客户端大量 5xx |
-| `HelixControlPlaneHighLatency` | P99 > 0.5s（SLO < 0.2s）|
-| `HelixQuotaReaperErrors` | quota reaper 后台循环报错（reservation 可能泄漏）|
+| `ExpertWorkControlPlaneDown` | Prometheus 2m 抓不到 `expert-work-control-plane` target；API 不可达 |
+| `ExpertWorkControlPlaneHigh5xxRate` | 5m 成功率 < 95%；客户端大量 5xx |
+| `ExpertWorkControlPlaneHighLatency` | P99 > 0.5s（SLO < 0.2s）|
+| `ExpertWorkQuotaReaperErrors` | quota reaper 后台循环报错（reservation 可能泄漏）|
 
 ## 诊断
 
@@ -27,8 +27,8 @@ control-plane 是 M0 的 API 入口 + in-process orchestrator 宿主（STREAM-E 
 4. **依赖**：
    - Postgres / PgBouncer：见 [postgres.md](./postgres.md)。
    - Redis（quota 后端）：`docker compose ps redis`。
-5. **延迟/5xx**：Grafana `Helix — Overview` 大盘 + Tempo 查慢 trace
-   （`helix.control_plane.http_request` span）。
+5. **延迟/5xx**：Grafana `Expert Work — Overview` 大盘 + Tempo 查慢 trace
+   （`expert_work.control_plane.http_request` span）。
 6. **reaper 报错**：日志查 `quota.reaper`；通常是 DB 连接抖动。
 
 ## 处置

@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from helix_agent.protocol import BuiltinToolSpec
+from expert_work.protocol import BuiltinToolSpec
 from orchestrator.errors import AgentFactoryError
 from orchestrator.tools import (
     BashTool,

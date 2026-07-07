@@ -3,7 +3,7 @@
 The adversarial dataset's inline-injection cases bundle the malicious document
 *and* the embedded instruction into one ``input`` string — spotlighting can't
 separate them. PI-1c lets the caller pass the document via the structured
-``untrusted_content`` channel, where helix fences it so the model treats it as
+``untrusted_content`` channel, where expert_work fences it so the model treats it as
 DATA. This script proves the channel defeats inline injection against a **real**
 domestic model: it sends the trusted instruction as ``input`` and the
 attacker-controllable document (carrying the embedded canary-exfil command) as
@@ -12,8 +12,8 @@ attacker-controllable document (carrying the embedded canary-exfil command) as
 Keyless by construction (the model key is resolved server-side). Run against the
 dev stack AFTER ``make dev-up`` rebuilds it with this branch::
 
-    export HELIX_API_URL=http://localhost:8080
-    export HELIX_API_TOKEN=<dev bearer>
+    export EXPERT_WORK_API_URL=http://localhost:8080
+    export EXPERT_WORK_API_TOKEN=<dev bearer>
     uv run python tools/eval/verify_live_pi1c.py            # auto-pick domestic agent
     uv run python tools/eval/verify_live_pi1c.py --agent my-agent@1.0.0
 
@@ -133,8 +133,8 @@ async def run_verification(client: httpx.AsyncClient, agent_override: str | None
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    base_url = os.environ.get("HELIX_API_URL", "http://localhost:8080")
-    token = _require_env("HELIX_API_TOKEN")
+    base_url = os.environ.get("EXPERT_WORK_API_URL", "http://localhost:8080")
+    token = _require_env("EXPERT_WORK_API_TOKEN")
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(base_url=base_url, headers=headers, timeout=120.0) as client:
         return await run_verification(client, args.agent)

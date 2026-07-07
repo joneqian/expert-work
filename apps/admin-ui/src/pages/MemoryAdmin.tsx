@@ -370,7 +370,7 @@ export function MemoryAdmin() {
             </div>
             <div>
               <Text type="secondary">{t("memory.edit_content_label")}</Text>
-              <div style={{ border: "1px solid var(--hx-border-default)", borderRadius: 4, marginTop: 4 }}>
+              <div style={{ border: "1px solid var(--ew-border-default)", borderRadius: 4, marginTop: 4 }}>
                 <Editor
                   height="320px"
                   defaultLanguage="markdown"

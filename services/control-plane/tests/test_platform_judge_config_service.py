@@ -1,7 +1,7 @@
 import pytest
 
 from control_plane.platform_judge_config import PlatformJudgeConfigService
-from helix_agent.persistence.platform_judge_config.memory import (
+from expert_work.persistence.platform_judge_config.memory import (
     InMemoryPlatformJudgeConfigStore,
 )
 

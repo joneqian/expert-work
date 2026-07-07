@@ -11,11 +11,11 @@ The skill subsystem lives across three packages:
 
 | Component | Path |
 |-----------|------|
-| SKILL.md parser / serializer | `packages/helix-protocol/src/helix_agent/protocol/skill_package.py` |
-| SkillVersion model + content_hash + high_risk | `packages/helix-persistence/src/helix_agent/persistence/models/skill.py` |
+| SKILL.md parser / serializer | `packages/expert-work-protocol/src/expert_work/protocol/skill_package.py` |
+| SkillVersion model + content_hash + high_risk | `packages/expert-work-persistence/src/expert_work/persistence/models/skill.py` |
 | ZIP import + Admin UI mutation API | `services/control-plane/src/control_plane/api/skills.py` |
 | skill_view tool (runtime drift / redact) | `services/orchestrator/src/orchestrator/tools/skill_view.py` |
-| Threat patterns (incl. cn_*, obfuscation) | `packages/helix-common/src/helix_agent/common/threat_patterns.py` |
+| Threat patterns (incl. cn_*, obfuscation) | `packages/expert-work-common/src/expert_work/common/threat_patterns.py` |
 
 Two audit columns carry the forensics:
 
@@ -42,16 +42,16 @@ Standard fields (also read by other Claude clients):
 | `description` | str | yes | One-line natural-language summary — agent uses this to decide if the skill is relevant |
 | `license` | str | no | SPDX identifier (e.g. `MIT`, `Apache-2.0`); free text accepted |
 
-`helix:` namespace extensions (helix-only — other clients ignore):
+`Expert Work:` namespace extensions (expert-work-only — other clients ignore):
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
-| `helix.version` | str | required | Semver of the skill, NOT the SkillVersion DB row id |
-| `helix.category` | str | `general` | Free-form tag — surfaced in Admin UI grouping |
-| `helix.required_models` | list[str] | `[]` | Capability hint (e.g. `["vision"]`) — agent build fails if no model matches |
-| `helix.tool_names` | list[str] | `[]` | Tools this skill expects; feeds U-24 high-risk classification |
-| `helix.authored_by` | str | empty | Free-form attribution; for M1-K J.7b-1 agent-authored skills will be `agent:<name>` |
-| `helix.lazy` | bool | `false` | Progressive disclosure — see § 5 |
+| `expert_work.version` | str | required | Semver of the skill, NOT the SkillVersion DB row id |
+| `expert_work.category` | str | `general` | Free-form tag — surfaced in Admin UI grouping |
+| `expert_work.required_models` | list[str] | `[]` | Capability hint (e.g. `["vision"]`) — agent build fails if no model matches |
+| `expert_work.tool_names` | list[str] | `[]` | Tools this skill expects; feeds U-24 high-risk classification |
+| `expert_work.authored_by` | str | empty | Free-form attribution; for M1-K J.7b-1 agent-authored skills will be `agent:<name>` |
+| `expert_work.lazy` | bool | `false` | Progressive disclosure — see § 5 |
 
 Example:
 
@@ -60,12 +60,12 @@ Example:
 name: incident_triage
 description: Walk an on-call engineer through a P0 incident — paging, mitigation, postmortem.
 license: MIT
-helix:
+Expert Work:
   version: "1.2.0"
   category: oncall
   required_models: []
   tool_names: ["http", "slack_post"]
-  authored_by: oncall-rotation@helix
+  authored_by: oncall-rotation@Expert Work
   lazy: false
 ---
 
@@ -88,12 +88,12 @@ Common conventions you'll see in the wild, all optional:
 - `reference/` or `references/` — fact-style documents the agent reads
   on demand (`skill_view path="reference/sql_dialects.md"`).
 - `scripts/` — runnable helpers the agent calls via `exec_python` or
-  shells out to. The presence of `scripts/*.py` plus a `helix.tool_names`
+  shells out to. The presence of `scripts/*.py` plus a `expert_work.tool_names`
   entry that includes `exec_python` is the U-24 high-risk trigger
   (§ 11).
 - `templates/` — boilerplate fragments the agent stitches together
   (e.g. PR template, postmortem template).
-- `prompts/` — secondary prompt snippets when `helix.lazy: true` and
+- `prompts/` — secondary prompt snippets when `expert_work.lazy: true` and
   the agent only loads them on demand (§ 5).
 
 When debugging "agent can't find file X" — first `skill_view path=""`
@@ -145,10 +145,10 @@ importer **still accepts these** — when it sees them at the ZIP root
 and no `SKILL.md`, it transparently maps:
 
 - `skill.yaml.name` / `description` / `license` → frontmatter standard fields
-- `skill.yaml.version` → `helix.version`
-- `skill.yaml.category` → `helix.category`
+- `skill.yaml.version` → `expert_work.version`
+- `skill.yaml.category` → `expert_work.category`
 - `prompt.md` body → Markdown body of the new `SKILL.md`
-- `tools.txt` lines → `helix.tool_names`
+- `tools.txt` lines → `expert_work.tool_names`
 
 The audit log records a structured warning
 (`reject_reason: legacy_format` — present in the metric but the import
@@ -160,14 +160,14 @@ re-export by hitting the Admin UI **Export ZIP** button, which round-
 trips through the SKILL.md serializer. After re-export the warning
 goes away.
 
-## § 5 Progressive disclosure (`helix.lazy`)
+## § 5 Progressive disclosure (`expert_work.lazy`)
 
-The default is `helix.lazy: false`: the entire SKILL.md body is
+The default is `expert_work.lazy: false`: the entire SKILL.md body is
 injected into the agent's system prompt at build time. This is the
 fast path — no extra tool calls, the agent has the skill in context
 from turn 1.
 
-Setting `helix.lazy: true` flips the model: at build time only the
+Setting `expert_work.lazy: true` flips the model: at build time only the
 frontmatter `name` + `description` are injected. To read the body or
 any supporting file, the agent must call `skill_view(skill="X",
 path="")`. This is the right choice for skills whose body is large
@@ -180,7 +180,7 @@ to call `skill_view`, but if it doesn't, two common causes:
    skill is relevant. Fix by rewriting the description with a concrete
    trigger ("Use when the user asks about X, Y, or Z").
 2. The lazy skill is being shadowed by an eager skill with overlapping
-   description. Check `helix_uplift_skill_view_rate:5m{result="ok"}`
+   description. Check `expert_work_uplift_skill_view_rate:5m{result="ok"}`
    for the lazy skill — if it's zero across the whole tenant, the
    agent is never trying.
 
@@ -243,7 +243,7 @@ text supporting file. The full finding list is in the audit row's
    only escape is to re-author the skill content to avoid the
    matching substring (or wait for the pattern PR).
 
-4. Watch `helix:uplift:skill_blocked_rate:5m{phase="zip_import"}` for
+4. Watch `Expert Work:uplift:skill_blocked_rate:5m{phase="zip_import"}` for
    24 h after any pattern PR lands; spike with no corresponding deploy
    = real attack signal, spike right after deploy = noisy pattern.
 
@@ -314,7 +314,7 @@ When a tenant reports a benign skill blocked and the audit row's
 1. Confirm which variant fired:
 
    ```promql
-   sum by (variant) (rate(helix:uplift:threat_scan_variant_rate:1h[1h]))
+   sum by (variant) (rate(Expert Work:uplift:threat_scan_variant_rate:1h[1h]))
    ```
 
    A high `nfkc` rate often means a CJK-heavy tenant (NFKC folds full-
@@ -354,7 +354,7 @@ removal, counterfactual framing, authority impersonation. Suspect a
 The test corpus lives at:
 
 ```
-packages/helix-common/tests/test_threat_patterns_chinese.py
+packages/expert-work-common/tests/test_threat_patterns_chinese.py
 ```
 
 50 attack cases (must all stay blocked) + 50 legitimate cases (must
@@ -363,7 +363,7 @@ all stay allowed). To PR a tuning fix:
 1. Reproduce the FP locally:
 
    ```python
-   from helix_agent.common.threat_patterns import scan_for_threats
+   from expert_work.common.threat_patterns import scan_for_threats
    scan_for_threats("<the matched substring>", scope="strict")
    ```
 
@@ -377,9 +377,9 @@ all stay allowed). To PR a tuning fix:
 4. Run the full Sprint #3 test matrix:
 
    ```sh
-   uv run pytest packages/helix-common/tests/test_threat_patterns_chinese.py \
-                 packages/helix-common/tests/test_threat_patterns_obfuscation.py \
-                 packages/helix-common/tests/test_threat_patterns.py
+   uv run pytest packages/expert-work-common/tests/test_threat_patterns_chinese.py \
+                 packages/expert-work-common/tests/test_threat_patterns_obfuscation.py \
+                 packages/expert-work-common/tests/test_threat_patterns.py
    ```
 
 5. PR label `security`, SecOps reviewer, 24 h SLA per
@@ -390,7 +390,7 @@ shrink the pattern first; the corpus is the safety net, not the fix.
 
 ## § 11 High-risk publish approval (U-24)
 
-The U-24 gate: when a SkillVersion's `helix.tool_names` intersects
+The U-24 gate: when a SkillVersion's `expert_work.tool_names` intersects
 `HIGH_RISK_TOOLS = {exec_python, http, shell, sql}` OR the supporting
 tree contains executable scripts under `scripts/`, the row's `high_risk`
 column is set `true` at write time. Status transitions DRAFT → ACTIVE
@@ -427,9 +427,9 @@ M0 are admin-driven — every active skill is authored by a tenant_admin
 who can approve their own publish. The gate exists for **M1-K J.7b-1**
 where agents will be able to author their own skills; at that point
 `audited_by != tenant_admin` and the gate becomes the actual control
-point. The metric `helix:uplift:skill_high_risk_event_rate:1h{event="activation_blocked"}`
+point. The metric `Expert Work:uplift:skill_high_risk_event_rate:1h{event="activation_blocked"}`
 will be ~0 in M0 and grow once agent self-authored skills ship. The
-`HelixUpliftSkillHighRiskActivationSurge` alert threshold (> 30 / hr)
+`ExpertWorkUpliftSkillHighRiskActivationSurge` alert threshold (> 30 / hr)
 is calibrated for the M1 traffic baseline; if M0 traffic ever trips
 it, that itself is a P2 — something is calling the API as a non-admin
 service account when it shouldn't be.

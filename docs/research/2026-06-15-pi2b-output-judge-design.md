@@ -29,7 +29,7 @@
 judge 调用藏在 protocol 后，CI 用 fake judge 确定性测（**无 model key**，沿用全仓「设计藏接缝」惯例）。
 
 ```python
-# helix-protocol
+# expert-work-protocol
 class OutputJudgeVerdict(BaseModel):
     aligned: bool                      # 响应是否对齐用户原始请求(未被注入带偏)
     leak_suspected: bool               # 是否疑似泄漏机密/越权
@@ -71,8 +71,8 @@ judge 是 LLM 调用 → 会超时 / 限流 / 不可用。两种失败语义：
 
 ## 6. 可观测
 
-- `helix_output_judge_total{verdict}`（aligned/misaligned/leak/error）—— 计数 + 失败率。
-- `helix_output_judge_latency_seconds` —— judge 调用延迟（成本/延迟 SLO）。
+- `expert_work_output_judge_total{verdict}`（aligned/misaligned/leak/error）—— 计数 + 失败率。
+- `expert_work_output_judge_latency_seconds` —— judge 调用延迟（成本/延迟 SLO）。
 - 拦截走 PI-2 既有 `_output_screen_blocked_total{category="judge"}` 复用，或单列。
 - 日志只记 verdict + reason 类别，**绝不回填响应密文 / canary**。
 

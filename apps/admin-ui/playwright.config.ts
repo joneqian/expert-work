@@ -5,7 +5,7 @@
  * (the dev server's vite proxy forwards /v1/* to the backend). For CI
  * the workflow injects a stubbed control-plane via E2E_CONTROL_PLANE
  * pointing at a wiremock-style fixture; locally you can run against
- * a real helix.control_plane.main on localhost:8000.
+ * a real expert_work.control_plane.main on localhost:8000.
  */
 import { defineConfig, devices } from "@playwright/test";
 

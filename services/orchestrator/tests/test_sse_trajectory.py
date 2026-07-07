@@ -17,9 +17,9 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from helix_agent.runtime.runs import DisconnectMode, RunManager, RunRecord
-from helix_agent.runtime.storage import InMemoryObjectStore
-from helix_agent.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
+from expert_work.runtime.runs import DisconnectMode, RunManager, RunRecord
+from expert_work.runtime.storage import InMemoryObjectStore
+from expert_work.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.sse import run_agent
 from orchestrator.trajectory import TrajectoryRecorder

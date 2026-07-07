@@ -23,8 +23,8 @@ from dataclasses import dataclass, field
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.runtime.middleware import LLMOutputValidationError
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.runtime.middleware import LLMOutputValidationError
 from orchestrator.llm import (
     AnthropicProvider,
     LLMRouter,
@@ -324,8 +324,8 @@ async def test_validation_retry_and_failure_emit_counters() -> None:
     per provider key."""
     from prometheus_client import REGISTRY
 
-    retry_metric = "helix_llm_structured_validation_retry_total"
-    failure_metric = "helix_llm_structured_validation_failure_total"
+    retry_metric = "expert_work_llm_structured_validation_retry_total"
+    failure_metric = "expert_work_llm_structured_validation_failure_total"
     labels = {"provider_key": "structured-counter-test"}
     retry_before = REGISTRY.get_sample_value(retry_metric, labels=labels) or 0.0
     failure_before = REGISTRY.get_sample_value(failure_metric, labels=labels) or 0.0
@@ -345,7 +345,7 @@ async def test_validation_retry_and_failure_emit_counters() -> None:
 async def test_chain_payload_output_schema_is_json_serializable() -> None:
     """The middleware payload carries a plain summary dict (no dataclass,
     no schema body) so observability middlewares can json.dumps it."""
-    from helix_agent.runtime.middleware import MiddlewareChain, MiddlewareContext
+    from expert_work.runtime.middleware import MiddlewareChain, MiddlewareContext
 
     seen: list[dict[str, object]] = []
 

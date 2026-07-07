@@ -1,8 +1,8 @@
 """Deadline-propagation middleware — Stream B.3.
 
-Honors an inbound absolute deadline carried in the ``X-Helix-Deadline-Ms``
+Honors an inbound absolute deadline carried in the ``X-Expert-Work-Deadline-Ms``
 header. The value is parsed as a unix-epoch millisecond integer and fed
-into :func:`helix_agent.common.deadline.with_deadline` so every handler
+into :func:`expert_work.common.deadline.with_deadline` so every handler
 running inside the request sees it via ``get_current_deadline()``.
 
 The :class:`CancelToken` produced by :class:`CancellationMiddleware`
@@ -30,11 +30,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
-from helix_agent.common.deadline import CancelToken, with_deadline
+from expert_work.common.deadline import CancelToken, with_deadline
 
-DEADLINE_HEADER = "X-Helix-Deadline-Ms"
+DEADLINE_HEADER = "X-Expert-Work-Deadline-Ms"
 
-logger = logging.getLogger("helix.control_plane.deadline")
+logger = logging.getLogger("expert_work.control_plane.deadline")
 
 
 def _parse_deadline_ms(raw: str) -> int | None:
@@ -57,7 +57,7 @@ def _deadline_exceeded_response() -> JSONResponse:
             "data": None,
             "error": {
                 "code": "DEADLINE_EXCEEDED",
-                "message": "X-Helix-Deadline-Ms has already passed.",
+                "message": "X-Expert-Work-Deadline-Ms has already passed.",
             },
         },
     )

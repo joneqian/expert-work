@@ -462,7 +462,7 @@ describe("PlaygroundTab", () => {
   it("uploads an attached image and sends its ref with the run", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);
-    uploadImageMock.mockResolvedValue("helix://image/img-1.png");
+    uploadImageMock.mockResolvedValue("expert_work://image/img-1.png");
     streamRunMock.mockReturnValue(
       makeStream([
         {
@@ -493,7 +493,7 @@ describe("PlaygroundTab", () => {
 
     expect(streamRunMock).toHaveBeenCalledWith(
       sampleThread.thread_id,
-      { input: "describe this", image_refs: ["helix://image/img-1.png"] },
+      { input: "describe this", image_refs: ["expert_work://image/img-1.png"] },
       expect.objectContaining({ signal: expect.anything() }),
     );
     // The turn consumed the attachment — chip is cleared afterward.
@@ -808,7 +808,7 @@ describe("PlaygroundTab", () => {
         id: "w1",
         tenant_id: sampleThread.tenant_id,
         user_id: "u-1",
-        volume_name: "helix-ws-t-u",
+        volume_name: "expert-work-ws-t-u",
         size_bytes: 2048,
         size_limit_bytes: 1000000,
         created_at: null,
@@ -829,7 +829,7 @@ describe("PlaygroundTab", () => {
     renderPg();
     await establishThread(user);
     const panel = await screen.findByTestId("playground-workspace");
-    expect(panel).toHaveTextContent("helix-ws-t-u");
+    expect(panel).toHaveTextContent("expert-work-ws-t-u");
     expect(panel).toHaveTextContent("2.0 KB");
     expect(panel).toHaveTextContent("report.md");
   });
@@ -993,7 +993,7 @@ describe("PlaygroundTab", () => {
   it("removes an attachment when its tag is closed", async () => {
     const user = userEvent.setup();
     createSessionMock.mockResolvedValue(sampleThread);
-    uploadImageMock.mockResolvedValue("helix://image/img-2.png");
+    uploadImageMock.mockResolvedValue("expert_work://image/img-2.png");
     renderPg();
     await screen.findByTestId("playground-input");
 

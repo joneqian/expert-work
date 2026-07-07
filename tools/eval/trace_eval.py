@@ -19,7 +19,7 @@ Two layers, kept separate so the engine stays dependency-light:
   finished spans to :func:`evaluate_trace`.
 
 Span-name matching is by suffix (``*.llm_call`` / ``*.tool_call`` /
-``*.run``) so the engine is agnostic to which :class:`HelixComponent`
+``*.run``) so the engine is agnostic to which :class:`ExpertWorkComponent`
 prefix produced the span.
 """
 
@@ -39,7 +39,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from helix_agent.common.observability import init_tracing
+from expert_work.common.observability import init_tracing
 
 _LLM_SUFFIX = ".llm_call"
 _TOOL_SUFFIX = ".tool_call"

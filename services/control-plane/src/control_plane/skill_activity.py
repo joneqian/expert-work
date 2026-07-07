@@ -27,12 +27,12 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from helix_agent.common.uplift_metrics import record_curator_transition
+from expert_work.common.uplift_metrics import record_curator_transition
 
 if TYPE_CHECKING:
-    from helix_agent.persistence import SkillStore
+    from expert_work.persistence import SkillStore
 
-logger = logging.getLogger("helix.control_plane.skill_activity")
+logger = logging.getLogger("expert_work.control_plane.skill_activity")
 
 # Cap the LRU at 10k entries — bounded memory even if a tenant has
 # thousands of skills churning through agent builds. Eviction is a
@@ -49,7 +49,7 @@ _DEFAULT_TTL_SECONDS: int = 3600
 class ThrottledActivityRecorder:
     """In-process per-skill throttle around ``SkillStore.bump_last_used_at``.
 
-    Implements :class:`helix_agent.common.skill_activity.SkillActivityRecorder`
+    Implements :class:`expert_work.common.skill_activity.SkillActivityRecorder`
     via ``record``; ``maybe_record`` exposes the same logic with a
     boolean return for tests that want to assert whether a SQL UPDATE
     actually fired.

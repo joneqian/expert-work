@@ -34,16 +34,16 @@ from control_plane.skill_rollback import (
     decide_rollback,
     should_rollback,
 )
-from helix_agent.persistence.feedback_store import FeedbackStore
-from helix_agent.persistence.rls import (
+from expert_work.persistence.feedback_store import FeedbackStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, TrajectoryOutcome
-from helix_agent.protocol.skill import SkillStatus
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.persistence.skill.base import SkillStore
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult, TrajectoryOutcome
+from expert_work.protocol.skill import SkillStatus
+from expert_work.runtime.audit.logger import AuditLogger
 
 __all__ = ["RollbackGate"]
 

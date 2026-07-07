@@ -22,10 +22,10 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from helix_agent.persistence.auth import RoleBindingStore
-from helix_agent.protocol import Principal
+from expert_work.persistence.auth import RoleBindingStore
+from expert_work.protocol import Principal
 
-logger = logging.getLogger("helix.control_plane.auth.system_admin")
+logger = logging.getLogger("expert_work.control_plane.auth.system_admin")
 
 
 async def resolve_system_admin(
@@ -89,7 +89,7 @@ async def maybe_bootstrap_system_admin(
     """First-login auto-grant of the first platform ``system_admin`` — Stream ACCT.
 
     Removes the need to run ``python -m control_plane.bootstrap_admin`` on a
-    fresh deployment: the operator instead sets ``HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL``
+    fresh deployment: the operator instead sets ``EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL``
     and the matching user becomes ``system_admin`` the first time they log in.
 
     The grant is gated by **every** of the following — any miss returns the

@@ -13,7 +13,7 @@ makes a real ``CONNECT``.
 
 What it does
 ------------
-When the supervisor-injected ``HELIX_EGRESS_PROXY_AUTH`` env is present (the
+When the supervisor-injected ``EXPERT_WORK_EGRESS_PROXY_AUTH`` env is present (the
 base64 of ``"<token>:"`` — exactly what a ``Basic`` proxy-auth header carries),
 patch ``http.client.HTTPConnection.set_tunnel`` to add ``Proxy-Authorization``
 to every ``CONNECT`` that does not already set it. urllib routes proxied HTTPS
@@ -27,7 +27,7 @@ The sandbox runner runs submitted code via ``python -I -c`` (isolated mode):
 ``-I`` is ``-E -s`` — it ignores ``PYTHON*`` env and the *user* site dir, but it
 is **not** ``-S``, so the ``site`` module still initializes and still imports this
 module from the global site-packages. ``-E`` only suppresses ``PYTHON*`` config
-env, so ``HELIX_EGRESS_PROXY_AUTH`` is still readable.
+env, so ``EXPERT_WORK_EGRESS_PROXY_AUTH`` is still readable.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from __future__ import annotations
 import http.client
 import os
 
-_AUTH = os.environ.get("HELIX_EGRESS_PROXY_AUTH")
+_AUTH = os.environ.get("EXPERT_WORK_EGRESS_PROXY_AUTH")
 
 if _AUTH:
     _PROXY_AUTH_HEADER = f"Basic {_AUTH}"

@@ -27,12 +27,12 @@ import logging
 from dataclasses import dataclass
 from uuid import UUID
 
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.persistence import WORKSPACE_SKILLS_DIR
-from helix_agent.protocol import AuditAction, AuditResult, SkillVersion
-from helix_agent.protocol.audit import AuditEntry
-from helix_agent.protocol.skill import compute_content_hash, supporting_files_to_jsonable
-from helix_agent.protocol.skill_package import ParsedSkillMd, serialize_skill_md
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.persistence import WORKSPACE_SKILLS_DIR
+from expert_work.protocol import AuditAction, AuditResult, SkillVersion
+from expert_work.protocol.audit import AuditEntry
+from expert_work.protocol.skill import compute_content_hash, supporting_files_to_jsonable
+from expert_work.protocol.skill_package import ParsedSkillMd, serialize_skill_md
 
 logger = logging.getLogger(__name__)
 
@@ -110,12 +110,12 @@ def _skill_md_with_name(name: str, version: SkillVersion) -> str:
         name=name,
         description=version.description or name,
         license=None,
-        helix_version=version.version,
-        helix_category=version.category,
-        helix_required_models=version.required_models,
-        helix_tool_names=version.tool_names,
-        helix_authored_by=version.authored_by,
-        helix_lazy=version.lazy_load,
+        expert_work_version=version.version,
+        expert_work_category=version.category,
+        expert_work_required_models=version.required_models,
+        expert_work_tool_names=version.tool_names,
+        expert_work_authored_by=version.authored_by,
+        expert_work_lazy=version.lazy_load,
         body=version.prompt_fragment,
     )
     return serialize_skill_md(parsed)

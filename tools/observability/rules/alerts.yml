@@ -1,59 +1,59 @@
-# Helix Prometheus alert rules — Stream G.2.
+# Expert Work Prometheus alert rules — Stream G.2.
 #
 # M0 alerts on the metrics actually emitted today (control-plane only).
 # Each carries a `severity` label (P0/P1/P2) that Alertmanager routes on
 # (infra/observability/alertmanager.yml) and a runbook_url annotation.
 #
 # Pending — metric not emitted in M0, alert lands with the metric:
-#   * Postgres connection-pool exhaustion (helix_pg_connection_pool_in_use)
-#   * sandbox egress metadata-probe (helix_network_egress_meta_attempt_total)
+#   * Postgres connection-pool exhaustion (expert_work_pg_connection_pool_in_use)
+#   * sandbox egress metadata-probe (expert_work_network_egress_meta_attempt_total)
 
 groups:
-  - name: helix_alerts
+  - name: expert_work_alerts
     rules:
       # P0 — the control-plane is unreachable to Prometheus.
-      - alert: HelixControlPlaneDown
-        expr: up{job="helix-control-plane"} == 0
+      - alert: ExpertWorkControlPlaneDown
+        expr: up{job="expert-work-control-plane"} == 0
         for: 2m
         labels:
           severity: P0
         annotations:
           summary: "Control-plane is down"
-          description: "Prometheus has failed to scrape helix-control-plane for 2m."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/control-plane.md"
+          description: "Prometheus has failed to scrape expert-work-control-plane for 2m."
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/control-plane.md"
 
       # P1 — availability SLI (G.1 recording rule) below 95% over 5m.
-      - alert: HelixControlPlaneHigh5xxRate
-        expr: helix:sli:control_plane_availability:ratio5m < 0.95
+      - alert: ExpertWorkControlPlaneHigh5xxRate
+        expr: expert_work:sli:control_plane_availability:ratio5m < 0.95
         for: 5m
         labels:
           severity: P1
         annotations:
           summary: "Control-plane 5xx rate elevated"
           description: "5m success ratio is {{ $value | humanizePercentage }} (SLO target 99.9%)."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/control-plane.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/control-plane.md"
 
       # P2 — P99 latency SLI (G.1 recording rule) far above the 200ms SLO.
-      - alert: HelixControlPlaneHighLatency
-        expr: helix:sli:control_plane_http_latency:p99_5m > 0.5
+      - alert: ExpertWorkControlPlaneHighLatency
+        expr: expert_work:sli:control_plane_http_latency:p99_5m > 0.5
         for: 10m
         labels:
           severity: P2
         annotations:
           summary: "Control-plane P99 latency degraded"
           description: "P99 request latency is {{ $value }}s (SLO target < 0.2s)."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/control-plane.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/control-plane.md"
 
       # P2 — the quota reaper background loop is erroring.
-      - alert: HelixQuotaReaperErrors
-        expr: increase(helix_control_plane_quota_reaper_cycle_errors_total[15m]) > 0
+      - alert: ExpertWorkQuotaReaperErrors
+        expr: increase(expert_work_control_plane_quota_reaper_cycle_errors_total[15m]) > 0
         for: 0m
         labels:
           severity: P2
         annotations:
           summary: "Quota reaper cycle errors"
           description: "The quota reaper logged {{ $value }} cycle error(s) in the last 15m."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/control-plane.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/control-plane.md"
 
   # Stream M — M0→M1 Gate-watch group.
   #
@@ -68,25 +68,25 @@ groups:
   # don't trip a Gate-watch — only sustained breaches matter for the
   # 30-day decision. The Gate runbook (docs/runbooks/m0-m1-gate.md § 1.4)
   # describes the daily SLO-check workflow that consumes these alerts.
-  - name: helix_gate_watch
+  - name: expert_work_gate_watch
     rules:
-      # Tighter than HelixControlPlaneHigh5xxRate (0.95): Gate target is
+      # Tighter than ExpertWorkControlPlaneHigh5xxRate (0.95): Gate target is
       # 99.9% success ratio (= < 0.1% 5xx) in 30d.
-      - alert: HelixGateAvailabilityTight
-        expr: helix:sli:control_plane_availability:ratio5m < 0.999
+      - alert: ExpertWorkGateAvailabilityTight
+        expr: expert_work:sli:control_plane_availability:ratio5m < 0.999
         for: 30m
         labels:
           severity: gate-watch
         annotations:
           summary: "Control-plane success ratio below Gate target"
           description: "5m success ratio is {{ $value | humanizePercentage }} — Gate target 99.9%."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/m0-m1-gate.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/m0-m1-gate.md"
 
-      - alert: HelixGateTTFTOverBudget
+      - alert: ExpertWorkGateTTFTOverBudget
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_session_ttft_seconds_bucket[1h]))
+            sum by (le) (rate(expert_work_session_ttft_seconds_bucket[1h]))
           ) > 2.0
         for: 30m
         labels:
@@ -94,13 +94,13 @@ groups:
         annotations:
           summary: "Session TTFT P95 above Gate budget (2.0s)"
           description: "1h P95 TTFT is {{ $value }}s — Gate budget 2.0s."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/m0-m1-gate.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/m0-m1-gate.md"
 
-      - alert: HelixGateSandboxColdStartOverBudget
+      - alert: ExpertWorkGateSandboxColdStartOverBudget
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_sandbox_cold_start_seconds_bucket[1h]))
+            sum by (le) (rate(expert_work_sandbox_cold_start_seconds_bucket[1h]))
           ) > 5.0
         for: 30m
         labels:
@@ -108,13 +108,13 @@ groups:
         annotations:
           summary: "Sandbox cold-start P95 above Gate budget (5.0s)"
           description: "1h P95 cold-start is {{ $value }}s — Gate budget 5.0s."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/m0-m1-gate.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/m0-m1-gate.md"
 
-      - alert: HelixGateDurableResumeOverBudget
+      - alert: ExpertWorkGateDurableResumeOverBudget
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_durable_resume_seconds_bucket[1h]))
+            sum by (le) (rate(expert_work_durable_resume_seconds_bucket[1h]))
           ) > 1.0
         for: 30m
         labels:
@@ -122,16 +122,16 @@ groups:
         annotations:
           summary: "Durable resume P95 above Gate budget (1.0s)"
           description: "1h P95 durable resume is {{ $value }}s — Gate budget 1.0s."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/m0-m1-gate.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/m0-m1-gate.md"
 
       # End-to-end P95 for successful runs — Gate target < 30s. Filtered
       # to outcome="success" so user-facing latency isn't biased by
       # error / max_steps / cancelled tails.
-      - alert: HelixGateEndToEndOverBudget
+      - alert: ExpertWorkGateEndToEndOverBudget
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_session_duration_seconds_bucket{outcome="success"}[1h]))
+            sum by (le) (rate(expert_work_session_duration_seconds_bucket{outcome="success"}[1h]))
           ) > 30
         for: 30m
         labels:
@@ -139,17 +139,17 @@ groups:
         annotations:
           summary: "End-to-end session P95 above Gate budget (30s)"
           description: "1h P95 successful session duration is {{ $value }}s — Gate budget 30s."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/m0-m1-gate.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/m0-m1-gate.md"
 
       # Stream-stale spike — Gate target is < 0.05% in 30d. The denominator
-      # uses helix_llm_tokens_total as a proxy for active LLM streaming
+      # uses expert_work_llm_tokens_total as a proxy for active LLM streaming
       # traffic; switch to the canonical SSE-events counter once it lands.
-      - alert: HelixGateSSEStreamStaleSpike
+      - alert: ExpertWorkGateSSEStreamStaleSpike
         expr: |
           (
-            sum(rate(helix_llm_stream_stale_total[1h]))
+            sum(rate(expert_work_llm_stream_stale_total[1h]))
             /
-            clamp_min(sum(rate(helix_llm_tokens_total[1h])), 1)
+            clamp_min(sum(rate(expert_work_llm_tokens_total[1h])), 1)
           ) > 0.0005
         for: 1h
         labels:
@@ -157,4 +157,4 @@ groups:
         annotations:
           summary: "LLM stream stale rate above Gate target (0.05%)"
           description: "1h stream-stale ratio is {{ $value | humanizePercentage }} — Gate target 0.05%."
-          runbook_url: "https://github.com/joneqian/helix-agent/blob/main/docs/runbooks/m0-m1-gate.md"
+          runbook_url: "https://github.com/joneqian/expert-work/blob/main/docs/runbooks/m0-m1-gate.md"

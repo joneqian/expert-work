@@ -16,10 +16,10 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from helix_agent.persistence import InMemoryMemoryStore
-from helix_agent.persistence.memory import InMemoryMemoryWritebackDLQ
-from helix_agent.persistence.memory.base import MemoryInjectionBlockedError
-from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
+from expert_work.persistence import InMemoryMemoryStore
+from expert_work.persistence.memory import InMemoryMemoryWritebackDLQ
+from expert_work.persistence.memory.base import MemoryInjectionBlockedError
+from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
 from orchestrator.context import ContextCompressor
 from orchestrator.graph_builder.memory import flush_messages_to_memory
 from orchestrator.llm import FakeEmbedder

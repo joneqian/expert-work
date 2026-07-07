@@ -27,7 +27,7 @@
 
 ## 1. 关键事实(已审计,file:line)
 
-- `AgentSpec` 及其子模型全是 Pydantic `BaseModel`(`packages/helix-protocol/src/helix_agent/protocol/agent_spec.py`:`ModelSpec`:74 / `SandboxSpec`:233 / `MemorySpec`:279 / `RoutingSpec`:301 / `KnowledgeSpec`:313 / `VisionSpec`:343 / `CacheSpec`:381 …)→ `AgentSpec.model_json_schema()` 可导出完整 JSON Schema。
+- `AgentSpec` 及其子模型全是 Pydantic `BaseModel`(`packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py`:`ModelSpec`:74 / `SandboxSpec`:233 / `MemorySpec`:279 / `RoutingSpec`:301 / `KnowledgeSpec`:313 / `VisionSpec`:343 / `CacheSpec`:381 …)→ `AgentSpec.model_json_schema()` 可导出完整 JSON Schema。
 - MCP 在 manifest 中:`MCPToolSpec`(agent_spec.py:574,`type:"mcp"` + `allow_tools` 过滤);tools 为 `BuiltinToolSpec | HTTPToolSpec | MCPToolSpec` 联合(:590)。MCP server 本身租户级(`tenant_config.mcp_servers`)。
 - provider 全集 `PROVIDER_CATALOG`(`protocol/provider_catalog.py`):anthropic/openai/azure/self-hosted/kimi/glm/deepseek/qwen/doubao。
 - 平台凭证视图 `GET /v1/platform/credentials`(`api/platform_config.py`:159)列每 provider 的 source(env/db/unset)+ enabled —— 模型下拉据此求"已配 key 且启用"的交集。

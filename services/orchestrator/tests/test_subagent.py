@@ -11,8 +11,8 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from helix_agent.protocol import SubAgentSpec
-from helix_agent.runtime.cancellation import (
+from expert_work.protocol import SubAgentSpec
+from expert_work.runtime.cancellation import (
     CANCELLATION_TOKEN_KEY,
     CancellationToken,
     RunCancelledError,
@@ -595,7 +595,7 @@ async def test_call_partial_fetch_handles_missing_aget_state() -> None:
 @pytest.mark.asyncio
 async def test_call_emits_invocation_on_success() -> None:
     """Mini-ADR J-40 — success path emits SubAgentInvocation with status=COMPLETED."""
-    from helix_agent.protocol import SubagentStatus
+    from expert_work.protocol import SubagentStatus
 
     graph = _FakeGraph(
         result={
@@ -633,7 +633,7 @@ async def test_call_emits_invocation_on_success() -> None:
 @pytest.mark.asyncio
 async def test_call_emits_invocation_on_max_steps() -> None:
     """Mini-ADR J-40 — max_steps path emits SubAgentInvocation with status=FAILED + error."""
-    from helix_agent.protocol import SubagentStatus
+    from expert_work.protocol import SubagentStatus
 
     graph = _StatefulGraph(
         raises=MaxStepsExceededError(step_count=5, max_steps=5),
@@ -663,7 +663,7 @@ async def test_call_emits_invocation_on_max_steps() -> None:
 @pytest.mark.asyncio
 async def test_call_emits_invocation_on_empty_answer() -> None:
     """Status=COMPLETED with empty result_excerpt when child produced no AIMessage."""
-    from helix_agent.protocol import SubagentStatus
+    from expert_work.protocol import SubagentStatus
 
     graph = _FakeGraph(result={"messages": [HumanMessage(content="task")], "step_count": 1})
     tool = SubAgentTool(
@@ -845,11 +845,11 @@ async def test_child_config_omits_deadline_when_parent_has_none() -> None:
 
 def _make_spec_with_subagents(name: str, *children: str) -> Any:
     """Build a minimal ``AgentSpec`` referencing the given child names."""
-    from helix_agent.protocol import AgentSpec
+    from expert_work.protocol import AgentSpec
 
     return AgentSpec.model_validate(
         {
-            "apiVersion": "helix.io/v1",
+            "apiVersion": "expert_work.io/v1",
             "kind": "Agent",
             "metadata": {"name": name, "version": "1.0.0", "tenant": "test-tenant"},
             "spec": {

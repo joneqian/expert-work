@@ -16,8 +16,8 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.runtime import AgentRuntime
-from helix_agent.runtime.runs import RunEventStore, RunManager, RunStore
-from helix_agent.runtime.stream_bridge import InMemoryStreamBridge
+from expert_work.runtime.runs import RunEventStore, RunManager, RunStore
+from expert_work.runtime.stream_bridge import InMemoryStreamBridge
 from orchestrator import (
     BuiltAgent,
     GraphRunner,

@@ -29,8 +29,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
-from helix_agent.protocol import Plan, PlanStep
-from helix_agent.protocol.plan import PlanStepStatus
+from expert_work.protocol import Plan, PlanStep
+from expert_work.protocol.plan import PlanStepStatus
 from orchestrator.tools.registry import ToolContext, ToolResult, ToolSpec
 
 logger = logging.getLogger(__name__)

@@ -108,7 +108,7 @@ test("system_admin adds a key — PUT to the key endpoint carries value + priori
           success: true,
           data: {
             key_id: "acct-2",
-            secret_ref: "secret://helix-agent/platform/llm/anthropic/acct-2",
+            secret_ref: "secret://expert-work/platform/llm/anthropic/acct-2",
             enabled: true,
             priority: 100,
           },

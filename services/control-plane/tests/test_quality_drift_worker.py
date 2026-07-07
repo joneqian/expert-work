@@ -17,11 +17,11 @@ import pytest
 
 from control_plane.platform_quality_config import EffectiveQualityConfig
 from control_plane.quality_drift_worker import QualityDriftWorker
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryQualityDriftAlertStore,
     InMemoryQualityScoreStore,
 )
-from helix_agent.protocol import QualityScoreRecord
+from expert_work.protocol import QualityScoreRecord
 
 
 @dataclass

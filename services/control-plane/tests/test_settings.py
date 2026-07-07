@@ -23,11 +23,11 @@ def test_default_values() -> None:
 
 
 def test_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HELIX_AGENT_SERVICE_NAME", "control_plane_alt")
-    monkeypatch.setenv("HELIX_AGENT_ENV", "staging")
-    monkeypatch.setenv("HELIX_AGENT_AUTH_MODE", "dev")
+    monkeypatch.setenv("EXPERT_WORK_SERVICE_NAME", "control_plane_alt")
+    monkeypatch.setenv("EXPERT_WORK_ENV", "staging")
+    monkeypatch.setenv("EXPERT_WORK_AUTH_MODE", "dev")
     monkeypatch.setenv(
-        "HELIX_AGENT_DEFAULT_DEV_TENANT_ID",
+        "EXPERT_WORK_DEFAULT_DEV_TENANT_ID",
         "11111111-1111-1111-1111-111111111111",
     )
 
@@ -38,7 +38,7 @@ def test_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_invalid_auth_mode_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HELIX_AGENT_AUTH_MODE", "wat")
+    monkeypatch.setenv("EXPERT_WORK_AUTH_MODE", "wat")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)  # type: ignore[call-arg]
 

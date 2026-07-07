@@ -6,7 +6,7 @@
 
 [STREAM-E-DESIGN](../streams/STREAM-E-DESIGN.md) 已经把 M0 范围内能做的全做了（dynamic_context / loop_detection / tool truncation / tool error wrapper / dangling sanitize），但 deer-flow 其余 5 类机制和若干 middleware 是 **M1/M2 才有 use case**（依赖 memory / sub-agent / 长会话 等底层能力）。
 
-本文档是一份 **living tracker**，目的是 **后续 Stream 启动前不忘对接 deer-flow 已验证的具体技术细节**。每个 M1/M2 Stream 的设计文档启动前必须 review 本表对应行，把这里列的"待锁条款"显式落进新 Stream 的设计文档（按 [设计先行规则](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md) 的口径，"先锁设计、再写代码"）。
+本文档是一份 **living tracker**，目的是 **后续 Stream 启动前不忘对接 deer-flow 已验证的具体技术细节**。每个 M1/M2 Stream 的设计文档启动前必须 review 本表对应行，把这里列的"待锁条款"显式落进新 Stream 的设计文档（按 [设计先行规则](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md) 的口径，"先锁设计、再写代码"）。
 
 ---
 
@@ -26,7 +26,7 @@
 | 8 | ToolErrorHandling | E.6 内置 | ✅ M0 已接 | 不上独立 middleware，ReAct tools 节点 dispatch 统一 try/except → ToolMessage(error) |
 | 9 | DynamicContext | E.3 | ✅ 已合（PR #61） | 朴素 last-N + token budget，无 ID-swap（M2-C 加） |
 | 10 | Summarization + skill rescue | M2-C | 🕒 待，细节见下 | 需要 ID-swap + 多个 hook |
-| 11 | TodoList | — | 🚫 业务取舍 | helix 平台不内置，agent 用 Python slot (M1-F) 自实现 |
+| 11 | TodoList | — | 🚫 业务取舍 | Expert Work 平台不内置，agent 用 Python slot (M1-F) 自实现 |
 | 12 | TokenUsage | M1-D | 🕒 待 | vendor P1，仅 step-level 归因；M0 Langfuse token 数据已可用 |
 | 13 | Title | — | 🚫 业务取舍 | session 标题让 admin UI 后处理调 LLM 做，不必中间件 |
 | 14 | Memory | M2-C | 🕒 待，细节见下 | 需要 2k cap + ID-swap |
@@ -83,10 +83,10 @@
 **Verification**：M2-C 设计文档启动前 review 本节，逐条落进 `STREAM-M2C-DESIGN.md`；ID-swap 技术尤其要在 LangGraph `add_messages` reducer 行为基础上写清楚 ID 怎么算（deer-flow 用 `{id}__user` 派生），否则前缀缓存击穿不可见。
 
 > **[2026-07-03 上游复核注记]** 本表基于 2026-06-09 快照，Stream RT-2 PR-0 已按 deer-flow 新版（本地 @b3c312b7 + GitHub #3887 @442248dd）逐条复核，三条已过期：
-> ① **Skill rescue 三预算已被上游 #3887 整体废弃**——`preserve_recent_skill_*` 三字段删除，替代 = durable `skill_context` channel 只存引用（name/path/description≤500c，上限 8 条），需要时模型重读文件。**不要按本表实现三预算**，helix 落法见 STREAM-RT-DESIGN RT-ADR-7（引用+重读 stub）。
-> ② **ID-swap 已从 HumanMessage 升级为三元组 SystemMessage 角色分离**（#3630），且 #3746 修了递归注入（`id__user__user…`）与孤儿压缩两坑；helix prompt-view-only 不需要 ID-swap（RT-ADR-8），但要补注入块×压缩组合测试。
-> ③ **Summarization 触发已从"三选一"升级为任意组合 OR**；#3887 摘要不再写回 messages（改 state channel + 请求时投影）——helix prompt-view-only 模式与之同向，不要倒退成写回。
-> 另新增事实：#3711 SystemMessageCoalescing——对话中部 SystemMessage 在严格 OpenAI-compatible 后端 400，**helix `<context-summary>` 正是该形态**（RT-ADR-5 最高优先核证）。Memory injection 2k 上限仍有效但细节已变（贪心逐条预算 + correction 类保底 500t 替代 top-15+截尾标记）。
+> ① **Skill rescue 三预算已被上游 #3887 整体废弃**——`preserve_recent_skill_*` 三字段删除，替代 = durable `skill_context` channel 只存引用（name/path/description≤500c，上限 8 条），需要时模型重读文件。**不要按本表实现三预算**，Expert Work 落法见 STREAM-RT-DESIGN RT-ADR-7（引用+重读 stub）。
+> ② **ID-swap 已从 HumanMessage 升级为三元组 SystemMessage 角色分离**（#3630），且 #3746 修了递归注入（`id__user__user…`）与孤儿压缩两坑；Expert Work prompt-view-only 不需要 ID-swap（RT-ADR-8），但要补注入块×压缩组合测试。
+> ③ **Summarization 触发已从"三选一"升级为任意组合 OR**；#3887 摘要不再写回 messages（改 state channel + 请求时投影）——Expert Work prompt-view-only 模式与之同向，不要倒退成写回。
+> 另新增事实：#3711 SystemMessageCoalescing——对话中部 SystemMessage 在严格 OpenAI-compatible 后端 400，**Expert Work `<context-summary>` 正是该形态**（RT-ADR-5 最高优先核证）。Memory injection 2k 上限仍有效但细节已变（贪心逐条预算 + correction 类保底 500t 替代 top-15+截尾标记）。
 
 ---
 
@@ -94,7 +94,7 @@
 
 | 项 | 不补理由 |
 |---|---|
-| **TodoList middleware** | deer-flow agent 业务特性（用户期待"todo 进度展示"）；helix 平台无 opinion，agent 业务侧用 Python slot (M1-F) 自实现，不强加给所有 agent |
+| **TodoList middleware** | deer-flow agent 业务特性（用户期待"todo 进度展示"）；Expert Work 平台无 opinion，agent 业务侧用 Python slot (M1-F) 自实现，不强加给所有 agent |
 | **Title middleware**（session 自动起标题）| 是 admin UI 用户体验事，不是 LLM 调用主路径；admin UI 后处理调 LLM 做即可，不上中间件减少链复杂度 |
 | **Clarification middleware**（缺信息时反问用户）| 是 prompt 工程层面的事 — 在 system_prompt 写 `"如果用户需求模糊，反问"` 让 agent 自己处理；上中间件会跟"agent 自主性"打架 |
 
@@ -118,4 +118,4 @@
 - 总分析：[`~/.claude/plans/deer-flow-zippy-karp.md`](../../.claude/plans/deer-flow-zippy-karp.md)
 - Stream E 设计：[STREAM-E-DESIGN.md](../streams/STREAM-E-DESIGN.md)
 - ITERATION-PLAN（M1/M2 时间表）：[ITERATION-PLAN.md](../ITERATION-PLAN.md)
-- 设计先行规则：[feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)
+- 设计先行规则：[feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)

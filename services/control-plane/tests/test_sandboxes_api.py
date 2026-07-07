@@ -11,8 +11,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.auth import JWTVerifier
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.protocol import Role
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.protocol import Role
 from orchestrator.tools.sandbox import RecordingSupervisorClient
 from tests.auth_fixtures import make_test_jwt
 

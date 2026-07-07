@@ -1,4 +1,4 @@
-"""Helix-Agent Control Plane service (Stream B)."""
+"""Expert Work Control Plane service (Stream B)."""
 
 from control_plane.app import create_app
 

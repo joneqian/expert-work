@@ -21,7 +21,7 @@ the run is polled by id to find the pause).
 
 Keyless: the model key is resolved server-side; this script only sends prompts.
 The API token (a **system_admin** dev-login bearer) is read from
-``HELIX_API_TOKEN`` and never logged.
+``EXPERT_WORK_API_TOKEN`` and never logged.
 
 Prereqs — bring the dev stack up with the egress code built::
 
@@ -34,8 +34,8 @@ Prereqs — bring the dev stack up with the egress code built::
 
 Then::
 
-    export HELIX_API_URL=http://localhost:8000   # control-plane (8080 is Keycloak)
-    export HELIX_API_TOKEN=<system_admin dev bearer token>
+    export EXPERT_WORK_API_URL=http://localhost:8000   # control-plane (8080 is Keycloak)
+    export EXPERT_WORK_API_TOKEN=<system_admin dev bearer token>
     # EDIT manifests/egress-test/v1.0.0.yaml model block to your provider first.
     uv run python tools/eval/verify_live_egress.py
 
@@ -171,7 +171,7 @@ async def _run_collect(
         "POST", f"/v1/sessions/{thread_id}/runs", json={"input": prompt}
     ) as resp:
         resp.raise_for_status()
-        run_id = resp.headers.get("X-Helix-Run-Id")
+        run_id = resp.headers.get("X-Expert-Work-Run-Id")
         await _consume_sse(resp, tr)
     return run_id, tr
 
@@ -214,7 +214,7 @@ async def _gated_exec(
     thread_id = await _create_session(client, name, version)
     run_id, _tr = await _run_collect(client, thread_id, prompt)
     if not run_id:
-        print(f"  FAIL [{label}] — no X-Helix-Run-Id header (cannot track approval).")
+        print(f"  FAIL [{label}] — no X-Expert-Work-Run-Id header (cannot track approval).")
         return None
     detail = await _wait_paused(client, thread_id, run_id)
     if detail.get("status") != "paused" or not detail.get("pending_approval"):
@@ -280,7 +280,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 opener = urllib.request.build_opener(_NoRedirect)
 try:
-    req = urllib.request.Request(url, headers={"User-Agent": "helix-egress-verify"})
+    req = urllib.request.Request(url, headers={"User-Agent": "expert-work-egress-verify"})
     with opener.open(req, timeout=25) as r:
         body = r.read(200)
         print("EGRESS_RESULT", {"ok": True, "status": r.status, "bytes": len(body)})
@@ -379,8 +379,8 @@ _DEFAULT_MANIFEST = (
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    base_url = args.base_url or _require_env("HELIX_API_URL")
-    token = _require_env("HELIX_API_TOKEN")  # never logged
+    base_url = args.base_url or _require_env("EXPERT_WORK_API_URL")
+    token = _require_env("EXPERT_WORK_API_TOKEN")  # never logged
     headers = {"Authorization": f"Bearer {token}"}
 
     async with httpx.AsyncClient(base_url=base_url, headers=headers, timeout=180.0) as client:
@@ -400,7 +400,9 @@ async def _amain(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live per-agent egress + audit verification.")
-    parser.add_argument("--base-url", default=None, help="control-plane URL (or $HELIX_API_URL)")
+    parser.add_argument(
+        "--base-url", default=None, help="control-plane URL (or $EXPERT_WORK_API_URL)"
+    )
     parser.add_argument(
         "--manifest",
         default=str(_DEFAULT_MANIFEST),

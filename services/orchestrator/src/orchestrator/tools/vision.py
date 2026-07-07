@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from helix_agent.protocol.multimodal import parse_image_ref
+from expert_work.protocol.multimodal import parse_image_ref
 from orchestrator.multimodal import ImageResolver, image_ref_block
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
 
@@ -62,7 +62,7 @@ class AskImageTool:
             name="ask_image",
             description=(
                 "Look at an uploaded image and answer a specific question about "
-                "it. ``image_ref`` must be a ``helix://image/...`` reference the "
+                "it. ``image_ref`` must be a ``expert_work://image/...`` reference the "
                 "user message attached. Ask narrow, specific questions; call "
                 "ask_image repeatedly with sharper follow-ups if the first "
                 "answer is too vague — the image stays accessible."
@@ -73,7 +73,7 @@ class AskImageTool:
                     "image_ref": {
                         "type": "string",
                         "description": (
-                            "A ``helix://image/...`` reference attached to the user message."
+                            "A ``expert_work://image/...`` reference attached to the user message."
                         ),
                     },
                     "question": {

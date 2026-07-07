@@ -19,9 +19,9 @@ from control_plane.app import create_app
 from control_plane.mcp_probe import McpProbeError
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.protocol import McpConnectorCatalogUpsert, TenantConfigPatch
-from helix_agent.runtime.secret_store import parse_secret_ref
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.protocol import McpConnectorCatalogUpsert, TenantConfigPatch
+from expert_work.runtime.secret_store import parse_secret_ref
 from orchestrator.tools.mcp import MCPToolDef
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -123,7 +123,7 @@ async def test_post_probes_persists_and_encrypts_token(monkeypatch: pytest.Monke
         # token_secret_ref is stripped from the public payload
         assert "token_secret_ref" not in body["data"]
         # The raw token IS resolvable from the secret store under the tenant path
-        ref_name = f"helix-agent/tenant/{tenant_id}/mcp/github/token"
+        ref_name = f"expert-work/tenant/{tenant_id}/mcp/github/token"
         resolved = await app.state.secret_store.get(ref_name)  # type: ignore[attr-defined]
         assert resolved == "ghp_REALTOKEN"
 
@@ -533,7 +533,7 @@ async def test_server_tools_platform_oauth2_409(monkeypatch: pytest.MonkeyPatch)
             transport="sse",
             url_template="https://mcp.linear.app/sse",
             auth_type="oauth2",
-            oauth_client_id="helix-linear",
+            oauth_client_id="expert-work-linear",
             oauth_scopes="read",
         ),
     )
@@ -774,7 +774,7 @@ async def test_post_custom_headers_encrypted_and_names_returned(
         # probe received the unwrapped headers
         assert captured["custom_headers"] == {"X-API-Key": "SECRET-KEY", "X-Org": "acme"}
         # blob resolvable, contains the values
-        ref_name = f"helix-agent/tenant/{tenant_id}/mcp/svc/headers"
+        ref_name = f"expert-work/tenant/{tenant_id}/mcp/svc/headers"
         import json as _json
 
         blob = await app.state.secret_store.get(ref_name)  # type: ignore[attr-defined]
@@ -907,8 +907,8 @@ async def test_enable_unknown_catalog_404() -> None:
 @pytest.mark.asyncio
 async def test_enable_disable_emit_audit() -> None:
     from control_plane.audit import build_default_audit_logger
-    from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-    from helix_agent.protocol import AuditQuery
+    from expert_work.persistence.audit_log import InMemoryAuditLogStore
+    from expert_work.protocol import AuditQuery
 
     lifecycle = Lifecycle()
     lifecycle.mark_ready()

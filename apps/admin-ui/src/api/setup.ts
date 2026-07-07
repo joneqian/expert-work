@@ -4,7 +4,7 @@
  * Both calls are **pre-authentication**: they run before any platform
  * system_admin exists, so no Bearer token is attached. The status probe
  * is unauthenticated; the bootstrap POST is gated by a one-time
- * ``X-Setup-Token`` header (the ``HELIX_AGENT_SETUP_TOKEN`` the operator
+ * ``X-Setup-Token`` header (the ``EXPERT_WORK_SETUP_TOKEN`` the operator
  * set at deploy), not by a session.
  *
  * The shared ``apiClient`` only *attaches* a Bearer when one is stored,
@@ -22,7 +22,7 @@ export interface SetupStatus {
   initialized: boolean;
   /** ``false`` means the deploy did not configure a setup token, so the
    *  wizard cannot complete (operator must set
-   *  ``HELIX_AGENT_SETUP_TOKEN``). */
+   *  ``EXPERT_WORK_SETUP_TOKEN``). */
   setup_enabled: boolean;
 }
 

@@ -5,7 +5,7 @@
  * and shows a toggle for the resolved on/off. Off ⇒ the whole tool-output-budget
  * feature (generalized externalization + persist floor + CM-12 prune) is reverted
  * platform-wide on the next agent build — no redeploy, overriding the
- * ``HELIX_TOOL_OUTPUT_BUDGET`` env default. ``effective = platform AND agent``,
+ * ``EXPERT_WORK_TOOL_OUTPUT_BUDGET`` env default. ``effective = platform AND agent``,
  * so this is a master kill: per-agent flags can only narrow it further.
  * system_admin-only at the route level; surfaces backend errors.
  */

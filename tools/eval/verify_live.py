@@ -8,12 +8,12 @@ but never run against a real agent" gap.
 
 Keyless by construction: the model key lives in the server's DB and is
 resolved server-side; this script only sends prompts + reads replies. The
-API token is read from ``HELIX_API_TOKEN`` and never logged.
+API token is read from ``EXPERT_WORK_API_TOKEN`` and never logged.
 
 Usage (bring the dev stack up first — ``make dev-up``)::
 
-    export HELIX_API_URL=http://localhost:8080     # your control-plane URL
-    export HELIX_API_TOKEN=<a dev-login bearer token>
+    export EXPERT_WORK_API_URL=http://localhost:8080     # your control-plane URL
+    export EXPERT_WORK_API_TOKEN=<a dev-login bearer token>
     uv run python tools/eval/verify_live.py            # auto-pick a domestic agent
     uv run python tools/eval/verify_live.py --agent my-agent@1.0.0
 
@@ -33,7 +33,7 @@ from typing import Any
 
 import httpx
 
-from helix_agent.common.output_screen import REFUSAL_TEXT
+from expert_work.common.output_screen import REFUSAL_TEXT
 
 _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
@@ -224,8 +224,8 @@ async def run_verification(
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    base_url = args.base_url or _require_env("HELIX_API_URL")
-    token = _require_env("HELIX_API_TOKEN")  # never logged
+    base_url = args.base_url or _require_env("EXPERT_WORK_API_URL")
+    token = _require_env("EXPERT_WORK_API_TOKEN")  # never logged
     cases = load_cases(Path(args.dataset))
     if args.limit:
         cases = cases[: args.limit]
@@ -238,7 +238,9 @@ async def _amain(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live adversarial red-team verification.")
-    parser.add_argument("--base-url", default=None, help="control-plane URL (or $HELIX_API_URL)")
+    parser.add_argument(
+        "--base-url", default=None, help="control-plane URL (or $EXPERT_WORK_API_URL)"
+    )
     parser.add_argument("--agent", default=None, help="target agent as name@version (else auto)")
     parser.add_argument("--dataset", default=str(_DEFAULT_DATASET), help="adversarial dataset path")
     parser.add_argument("--limit", type=int, default=0, help="cap number of cases (0 = all)")

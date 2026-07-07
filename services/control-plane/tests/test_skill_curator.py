@@ -26,18 +26,18 @@ from control_plane.skill_curator import (
     SkillCurator,
 )
 from control_plane.tenancy import TenantConfigService
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.skill import InMemorySkillStore
-from helix_agent.persistence.tenant_config import InMemoryTenantConfigStore
-from helix_agent.protocol import (
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.skill import InMemorySkillStore
+from expert_work.persistence.tenant_config import InMemoryTenantConfigStore
+from expert_work.protocol import (
     AuditAction,
     AuditQuery,
     SkillStatus,
     TenantConfigPatch,
 )
-from helix_agent.runtime.audit.fallback import InMemoryAuditFallbackQueue
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.audit.redactor import DefaultSecretRedactor
+from expert_work.runtime.audit.fallback import InMemoryAuditFallbackQueue
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.redactor import DefaultSecretRedactor
 
 _TENANT_A = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 _TENANT_B = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

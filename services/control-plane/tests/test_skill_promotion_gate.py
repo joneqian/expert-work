@@ -8,9 +8,9 @@ from uuid import UUID, uuid4
 from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
 from control_plane.skill_promotion import PromoteAction
 from control_plane.skill_promotion_gate import PromotionGate
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import CurationCandidateRecord
-from helix_agent.protocol.skill import SkillStatus
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import CurationCandidateRecord
+from expert_work.protocol.skill import SkillStatus
 
 _TENANT = UUID("33333333-3333-3333-3333-333333333333")
 _NOW = datetime(2026, 6, 8, tzinfo=UTC)

@@ -27,9 +27,9 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
-from helix_agent.persistence import UserWorkspaceStore, WorkspaceNotFoundError
-from helix_agent.protocol import AuditEntry, UserWorkspace
-from helix_agent.protocol.audit import AuditAction, AuditResult
+from expert_work.persistence import UserWorkspaceStore, WorkspaceNotFoundError
+from expert_work.protocol import AuditEntry, UserWorkspace
+from expert_work.protocol.audit import AuditAction, AuditResult
 from sandbox_supervisor.docker_client import DockerClient, DockerError
 from sandbox_supervisor.domain import (
     WorkspaceDeletedError,

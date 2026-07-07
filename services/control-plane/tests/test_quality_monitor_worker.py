@@ -17,12 +17,12 @@ import pytest
 from control_plane.platform_quality_config import EffectiveQualityConfig
 from control_plane.quality_judge import QualityJudgeResult
 from control_plane.quality_monitor_worker import QualityMonitorWorker, _is_sampled
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryQualityCandidateSource,
     InMemoryQualityScoreStore,
     QualityCandidate,
 )
-from helix_agent.protocol import QualityScoreRecord
+from expert_work.protocol import QualityScoreRecord
 
 _BASE = datetime(2026, 7, 6, 12, 0, tzinfo=UTC)
 

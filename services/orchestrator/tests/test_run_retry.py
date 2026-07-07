@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from helix_agent.runtime.middleware import LLMClientError
+from expert_work.runtime.middleware import LLMClientError
 from orchestrator.errors import MaxStepsExceededError
 from orchestrator.llm.router import AllProvidersExhaustedError
 from orchestrator.run_retry import (
@@ -51,35 +51,35 @@ def test_other_errors_are_permanent(exc: BaseException) -> None:
 
 
 def test_retry_enabled_defaults_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HELIX_RUN_TRANSIENT_RETRY", raising=False)
+    monkeypatch.delenv("EXPERT_WORK_RUN_TRANSIENT_RETRY", raising=False)
     assert retry_enabled()
 
 
 @pytest.mark.parametrize("value", ["0", "false", "OFF", " no "])
 def test_retry_enabled_explicit_falsey(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    monkeypatch.setenv("HELIX_RUN_TRANSIENT_RETRY", value)
+    monkeypatch.setenv("EXPERT_WORK_RUN_TRANSIENT_RETRY", value)
     assert not retry_enabled()
 
 
 def test_retry_enabled_garbage_stays_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HELIX_RUN_TRANSIENT_RETRY", "banana")
+    monkeypatch.setenv("EXPERT_WORK_RUN_TRANSIENT_RETRY", "banana")
     assert retry_enabled()
 
 
 def test_backoff_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HELIX_RUN_RETRY_BACKOFF_S", raising=False)
+    monkeypatch.delenv("EXPERT_WORK_RUN_RETRY_BACKOFF_S", raising=False)
     assert retry_backoff_s() == 10.0
 
 
 def test_backoff_clamped(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HELIX_RUN_RETRY_BACKOFF_S", "9999")
+    monkeypatch.setenv("EXPERT_WORK_RUN_RETRY_BACKOFF_S", "9999")
     assert retry_backoff_s() == 120.0
-    monkeypatch.setenv("HELIX_RUN_RETRY_BACKOFF_S", "0")
+    monkeypatch.setenv("EXPERT_WORK_RUN_RETRY_BACKOFF_S", "0")
     assert retry_backoff_s() == 1.0
 
 
 def test_backoff_bad_parse_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HELIX_RUN_RETRY_BACKOFF_S", "ten seconds")
+    monkeypatch.setenv("EXPERT_WORK_RUN_RETRY_BACKOFF_S", "ten seconds")
     assert retry_backoff_s() == 10.0
 
 

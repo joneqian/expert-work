@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from control_plane.skill_run_usage_recorder import StoreSkillRunUsageRecorder
-from helix_agent.common.skill_run_usage import SkillRunUsageRecorder
-from helix_agent.persistence.skill.memory import InMemorySkillStore
+from expert_work.common.skill_run_usage import SkillRunUsageRecorder
+from expert_work.persistence.skill.memory import InMemorySkillStore
 
 _TENANT = UUID("66666666-6666-6666-6666-666666666666")
 _NOW = datetime(2026, 6, 8, 12, 0, tzinfo=UTC)

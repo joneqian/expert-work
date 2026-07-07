@@ -22,8 +22,8 @@ import pytest
 
 from control_plane.runtime import make_skill_resolver
 from control_plane.tenancy import TenantConfigNotConfiguredError
-from helix_agent.persistence.skill import InMemorySkillStore
-from helix_agent.protocol import SkillStatus, TenantConfigRecord, TenantPlan
+from expert_work.persistence.skill import InMemorySkillStore
+from expert_work.protocol import SkillStatus, TenantConfigRecord, TenantPlan
 
 
 class _StubTenantConfigService:

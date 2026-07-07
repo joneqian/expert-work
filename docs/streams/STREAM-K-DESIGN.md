@@ -1,12 +1,12 @@
 # Stream K — Capability Hardening Sprint（设计先行）
 
-> 临时 sprint，**先于 Stream J 剩余子项**。落实 [memory:complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md) + [memory:no-design-choice-disguise](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_no_design_choice_disguise.md)。
+> 临时 sprint，**先于 Stream J 剩余子项**。落实 [memory:complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_complete_not_minimal.md) + [memory:no-design-choice-disguise](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_no_design_choice_disguise.md)。
 >
 > **背景**：2026-05-20 用户用"功能可少，能力不可弱"原则审已交付功能（截至 HEAD=fed5640），发现 13 条 (c) 类弱版 —— 已声明 `[x]` 完成的功能在失败模式、可观测、运维路径、正确性某一维上未达生产强度。本 Stream 把这 13 条统一补到生产级，**之后才进** Stream J 剩余子项（J.4 / J.5 / J.7 / J.8 / J.9 / J.10 / J.12 / J.13 / J.15）。
 >
-> **设计先行规则**（[memory:design-first-iteration](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)）：所有总体架构 / 跨切面接口 / Mini-ADR 在本文件锁定；每条 gap PR 在本文件对应章节基础上做局部细化。
+> **设计先行规则**（[memory:design-first-iteration](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)）：所有总体架构 / 跨切面接口 / Mini-ADR 在本文件锁定；每条 gap PR 在本文件对应章节基础上做局部细化。
 >
-> **零债收尾规则**（[memory:zero-tech-debt](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_zero_tech_debt.md)）：本 Stream 收尾必须 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
+> **零债收尾规则**（[memory:zero-tech-debt](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_zero_tech_debt.md)）：本 Stream 收尾必须 6 条全过 —— 无 TODO / 测试达标 / 文档同步 / 可观测齐全 / CI 全绿 / bug 不遗留。
 
 ---
 
@@ -37,7 +37,7 @@
 | 误判 | 实际情况 | 证据 |
 |------|---------|------|
 | ❌ "C.3 API Key 完全缺失" | C.3 已有 POST/GET/DELETE 三端点 + Service Account 关联 | `services/control-plane/src/control_plane/api/api_keys.py:46-148` —— 仅 K1 补 rotation |
-| ❌ "F.6 AliyunKms 仍是 NotImplementedError" | F.6 已实装 store + factory + 单测 | `packages/helix-runtime/src/helix_agent/runtime/secret_store/aliyun_kms.py` —— 仅 K13 补轮换演练 |
+| ❌ "F.6 AliyunKms 仍是 NotImplementedError" | F.6 已实装 store + factory + 单测 | `packages/expert-work-runtime/src/expert_work/runtime/secret_store/aliyun_kms.py` —— 仅 K13 补轮换演练 |
 | ❌ "J.11 路由规则不生效" | J.11 是**编译期**绑定，`build_step_routers(spec, ...)` 给每节点直接 inject 对应 router | `services/orchestrator/src/orchestrator/agent_factory.py:166-216, 277` —— **不在 Stream K 范围**，已能力达标 |
 
 ### 1.3 Out-of-scope（明确推迟，不进本 Stream）
@@ -85,7 +85,7 @@
 | 项 | 阻塞关系 |
 |----|---------|
 | **K1 / K2 / K3 / K4 / K5** | 阻塞 M0→M1 Gate 入口（P0） |
-| **K6 / K7 / K8 / K9** | 阻塞 Stream J 剩余子项（违则违反 [memory:target-product-form](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_target_product_form.md) 产品形态承诺） |
+| **K6 / K7 / K8 / K9** | 阻塞 Stream J 剩余子项（违则违反 [memory:target-product-form](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/project_target_product_form.md) 产品形态承诺） |
 | **K10 / K11** | 阻塞 M0→M1 Gate 第一次真生产 release |
 | **K12 / K13 / K14 / K15** | 阻塞 M1-A/B/C 入口 |
 
@@ -100,7 +100,7 @@
 **Audit**：`AuditAction.api_key_rotate`，details 含 `{old_key_id, new_key_id, grace_period_s}`。
 **数据模型**：`api_key` 表加 `rotated_at TIMESTAMPTZ NULL` + `rotated_from UUID NULL`（自引用）。迁移 0020。
 **验收**：`test_api_key_rotation_double_active_then_old_expires` —— 旧 key 在 grace 内仍能 auth、过 grace 后 401；audit 行落地。
-**关键文件**：`services/control-plane/src/control_plane/api/api_keys.py`、`packages/helix-persistence/src/helix_agent/persistence/auth/api_key.py`、`packages/helix-persistence/migrations/versions/0020_api_key_rotation.py`。
+**关键文件**：`services/control-plane/src/control_plane/api/api_keys.py`、`packages/expert-work-persistence/src/expert_work/persistence/auth/api_key.py`、`packages/expert-work-persistence/migrations/versions/0020_api_key_rotation.py`。
 
 ### K2. SSE 跨租户隔离（仅补测试 + ADR 锁 invariant）
 
@@ -111,14 +111,14 @@
 
 ### K3. retention-cleanup-job CI xfail 收尾
 
-**调查路径**：在 CI testcontainers Postgres 上 `DELETE FROM event_log` 报 `permission denied for table event_log`，但本地通过；`audit_log` 同 role/grant 模式正常。怀疑 `helix-persistence` 的 `build_rls_sessionmaker` 在 `SET LOCAL ROLE` 时盖掉了 superuser 连接的有效 role。
+**调查路径**：在 CI testcontainers Postgres 上 `DELETE FROM event_log` 报 `permission denied for table event_log`，但本地通过；`audit_log` 同 role/grant 模式正常。怀疑 `expert-work-persistence` 的 `build_rls_sessionmaker` 在 `SET LOCAL ROLE` 时盖掉了 superuser 连接的有效 role。
 **修复路径**：
 1. 在 CI 上跑两条测试 + `SET log_statement = 'all'` 看实际 SQL；
 2. 若是 RLS role 切换问题 → job 用专属 role（`retention_runner`）+ 显式 GRANT DELETE；
 3. 若是迁移漏 GRANT → 迁移补 GRANT；
 4. 不允许保留 xfail —— 二选一：测试 XPASS（移除 marker）或证伪原假设（重写测试）。
 **验收**：`pytest services/retention-cleanup-job/tests/test_job_integration.py::test_event_log_retention_deletes_old_rows -v` + `::test_jwt_blacklist_expired_rows_deleted` 在 CI 上绿；xfail marker 移除。
-**关键文件**：`services/retention-cleanup-job/tests/test_job_integration.py:323-396`、`services/retention-cleanup-job/src/...job.py`、`packages/helix-persistence/migrations/versions/`（如需补 GRANT）。
+**关键文件**：`services/retention-cleanup-job/tests/test_job_integration.py:323-396`、`services/retention-cleanup-job/src/...job.py`、`packages/expert-work-persistence/migrations/versions/`（如需补 GRANT）。
 
 ### K4. LLM cache 正确性（manifest skip 入口）
 
@@ -137,7 +137,7 @@ spec:
 ```
 **中间件行为**（Mini-ADR K-3）：`LLMResponseCache` middleware 在 `before_llm_chain` 锚点检查 `MiddlewareContext.spec.cache?.enabled`；`False` 时直接 short-circuit 不查 cache、不 store。**不引入 runtime payload `skip_cache` 入口**（保持 manifest 单一来源）。
 **验收**：`test_cache_skipped_when_manifest_disables` —— manifest `cache.enabled=false` 时同样 prompt 跑两次都打到 LLM provider（mock 计数 == 2）。
-**关键文件**：`packages/helix-protocol/src/helix_agent/protocol/agent_spec.py`、`services/orchestrator/src/orchestrator/middleware/llm_response_cache.py`、`services/orchestrator/tests/test_llm_cache_integration.py`。
+**关键文件**：`packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py`、`services/orchestrator/src/orchestrator/middleware/llm_response_cache.py`、`services/orchestrator/tests/test_llm_cache_integration.py`。
 
 ### K5. gVisor Gate Exit Criteria
 
@@ -156,7 +156,7 @@ spec:
 **数据模型**（Mini-ADR K-4）：迁移 0021 加 `deleted_at TIMESTAMPTZ NULL`；不加 RLS policy（已有 `(tenant_id, user_id)` 复合隔离 + 应用层校验）；按 `(user_id, deleted_at)` 索引保证 list 性能。
 **为什么 soft-delete**：用户可"撤销 forget"；硬删用 retention-cleanup-job 在 `deleted_at + 30d` 后清。
 **验收**：`test_memory_crud_per_user_isolation` —— user A 删/改 user B 的记忆 404；retrieve 不返软删项；retention 跑后硬删。
-**关键文件**：`services/control-plane/src/control_plane/api/memory.py`（新建）、`services/control-plane/src/control_plane/app.py`（挂路由）、`packages/helix-persistence/src/helix_agent/persistence/memory.py`、`packages/helix-persistence/migrations/versions/0021_memory_soft_delete.py`。
+**关键文件**：`services/control-plane/src/control_plane/api/memory.py`（新建）、`services/control-plane/src/control_plane/app.py`（挂路由）、`packages/expert-work-persistence/src/expert_work/persistence/memory.py`、`packages/expert-work-persistence/migrations/versions/0021_memory_soft_delete.py`。
 
 ### K7. memory writeback 重试 + dedup
 
@@ -172,7 +172,7 @@ spec:
 - `test_memory_writeback_dedup` —— 同 run 跑两次同输入，DB 行数不变
 - `test_memory_writeback_db_failure_enters_dlq_and_retries` —— mock DB 第一次失败、第二次成功，DLQ 行 attempts=1 → 最终成功 DLQ 行被清
 - `test_memory_writeback_max_attempts_dead_letter` —— 5 次都失败，metric 计数 + DLQ 行保留
-**关键文件**：`packages/helix-persistence/migrations/versions/0022_memory_dedup_and_dlq.py`、`services/orchestrator/src/orchestrator/graph_builder/memory.py`、`services/retention-cleanup-job/src/...retry_memory_writeback.py`。
+**关键文件**：`packages/expert-work-persistence/migrations/versions/0022_memory_dedup_and_dlq.py`、`services/orchestrator/src/orchestrator/graph_builder/memory.py`、`services/retention-cleanup-job/src/...retry_memory_writeback.py`。
 
 ### K8. `update_plan` 工具（J.1 闭环）
 
@@ -193,14 +193,14 @@ async def update_plan(steps: list[PlanStep], reason: str) -> dict:
 **改动**：`reflect_node`（`services/orchestrator/src/orchestrator/graph_builder/reflect.py`）外套 `asyncio.wait_for(_invoke_reflect(...), timeout=deadline_s)`；超时降级为 `Verdict.ACCEPT` + log + emit metric `reflect.timeout`。
 **预算 schema**：`ReflectionSpec` 加 `deadline_s: int = 30`（默认 30s 单次 reflect LLM 调用）。
 **验收**：`test_reflect_wallclock_timeout_falls_back_to_accept` —— mock LLM hang 31s，reflect_node 返回 accept verdict 且 `reflect.timeout` metric 增 1。
-**关键文件**：`services/orchestrator/src/orchestrator/graph_builder/reflect.py`、`packages/helix-protocol/src/helix_agent/protocol/agent_spec.py`（`ReflectionSpec.deadline_s`）。
+**关键文件**：`services/orchestrator/src/orchestrator/graph_builder/reflect.py`、`packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py`（`ReflectionSpec.deadline_s`）。
 
 ### K10. G.7 大盘真闭环
 
 **emit 三个 histogram**（Prom client）：
-- `helix_session_ttft_seconds`（orchestrator）—— 首 token 延迟，buckets `0.1, 0.25, 0.5, 1, 2, 5, 10`
-- `helix_sandbox_cold_start_seconds`（sandbox-supervisor）—— 沙盒启动到 ready，buckets `0.05, 0.1, 0.25, 0.5, 1, 2, 5`
-- `helix_durable_resume_seconds`（control-plane）—— checkpoint 加载到首事件，buckets 同 TTFT
+- `expert_work_session_ttft_seconds`（orchestrator）—— 首 token 延迟，buckets `0.1, 0.25, 0.5, 1, 2, 5, 10`
+- `expert_work_sandbox_cold_start_seconds`（sandbox-supervisor）—— 沙盒启动到 ready，buckets `0.05, 0.1, 0.25, 0.5, 1, 2, 5`
+- `expert_work_durable_resume_seconds`（control-plane）—— checkpoint 加载到首事件，buckets 同 TTFT
 **Recording rule**（`tools/observability/rules/sli.yml` 补 3 条）：每个对应一个 `..._p95_5m` 和 `..._p99_5m`
 **Grafana panel**（`tools/observability/dashboards/02-orchestrator.json` / `03-sandbox.json`）：把现有 "No data" panel 的 expr 改成新的 `..._p95_5m`，并删 "Scaffold" 标记
 **验收**：
@@ -228,7 +228,7 @@ async def update_plan(steps: list[PlanStep], reason: str) -> dict:
 
 ### K13. KMS rotation 集成测试
 
-**Fake KMS endpoint**：在 `packages/helix-runtime/tests/conftest.py` 加 `fake_aliyun_kms` fixture（启 aiohttp test server 模拟 KMS GetSecretValue，第一次返 v1、被 `rotate()` 调用后返 v2）
+**Fake KMS endpoint**：在 `packages/expert-work-runtime/tests/conftest.py` 加 `fake_aliyun_kms` fixture（启 aiohttp test server 模拟 KMS GetSecretValue，第一次返 v1、被 `rotate()` 调用后返 v2）
 **测试**：`test_aliyun_kms_rotation_invalidates_cache_within_ttl`
 1. AliyunKmsSecretStore TTL = 60s
 2. `await store.get("secret-name")` → "v1"，cache 写入
@@ -236,7 +236,7 @@ async def update_plan(steps: list[PlanStep], reason: str) -> dict:
 4. `await asyncio.sleep(61)` → cache 过期
 5. `await store.get("secret-name")` → "v2"
 **配合**：加 `invalidate_now(name)` API 让真生产可强制刷新（不进默认路径）
-**关键文件**：`packages/helix-runtime/src/helix_agent/runtime/secret_store/aliyun_kms.py`、`packages/helix-runtime/tests/test_aliyun_kms_secret_store.py`
+**关键文件**：`packages/expert-work-runtime/src/expert_work/runtime/secret_store/aliyun_kms.py`、`packages/expert-work-runtime/tests/test_aliyun_kms_secret_store.py`
 
 ### K14. WORM 恢复演练
 
@@ -269,7 +269,7 @@ async def update_plan(steps: list[PlanStep], reason: str) -> dict:
 SSE 仅由 `POST /v1/sessions/{thread_id}/runs` 入口；该路由已在创建时 `threads.get(thread_id, tenant_id=jwt_tenant)` 强制校验 thread 归属当前租户，跨租户 thread_id 返回 404。`run_id` server-generated `uuid4()`，无 `GET /v1/runs/{run_id}/stream` reconnect 端点，`bridge.subscribe` in-process 无跨服务路径。结论：**不加 SSE 层重复 guard**（DRY），但**补 `test_runs_cross_tenant_sse_rejected` 锁住 invariant**。未来若加 reconnect 端点必须重新评估并加 guard。
 
 ### Mini-ADR K-3：cache skip 走 manifest，不走 runtime payload
-LLM cache 的 skip 入口放 `AgentSpecBody.cache.enabled`（manifest 级），不放 `RunRequest.skip_cache` 或 prompt-level marker。理由：manifest 是 agent 的能力声明面，是否缓存属于 agent 行为定义；运行时 payload 加 skip 会让同一 agent 在不同请求下行为不一致，违反 [memory:complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md) "能力清晰"。若未来发现需 per-call skip，再走 manifest 加 per-tool overrides，而非 RunRequest 旁路。
+LLM cache 的 skip 入口放 `AgentSpecBody.cache.enabled`（manifest 级），不放 `RunRequest.skip_cache` 或 prompt-level marker。理由：manifest 是 agent 的能力声明面，是否缓存属于 agent 行为定义；运行时 payload 加 skip 会让同一 agent 在不同请求下行为不一致，违反 [memory:complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_complete_not_minimal.md) "能力清晰"。若未来发现需 per-call skip，再走 manifest 加 per-tool overrides，而非 RunRequest 旁路。
 
 ### Mini-ADR K-4：memory 用 soft-delete，不用硬删 + audit
 soft-delete（`deleted_at`）允许用户撤销 forget；硬删走 `retention-cleanup-job` 在 `deleted_at + 30d` 后清。不引入 audit 表追踪 forget —— `audit_log` 已记 `DELETE /v1/memory/{id}` 调用足够；memory 本身就是用户可控数据，多一层审计冗余。

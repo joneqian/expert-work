@@ -29,8 +29,8 @@ from typing import Final
 from uuid import UUID
 
 from control_plane.quota.base import QuotaService
-from helix_agent.persistence.quota import TenantQuotaStore, TokenReservationStore
-from helix_agent.protocol import (
+from expert_work.persistence.quota import TenantQuotaStore, TokenReservationStore
+from expert_work.protocol import (
     CheckRequest,
     CheckResult,
     CommitRequest,

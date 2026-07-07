@@ -92,8 +92,8 @@ export function EvalEvidencePanel({ skillId }: EvalEvidencePanelProps) {
                     style={{
                       fontSize: 12,
                       color: deltaPositive
-                        ? "var(--hx-color-accent-500)"
-                        : "var(--hx-status-danger-fg)",
+                        ? "var(--ew-color-accent-500)"
+                        : "var(--ew-status-danger-fg)",
                     }}
                   >
                     {deltaPositive ? "+" : ""}
@@ -113,14 +113,14 @@ export function EvalEvidencePanel({ skillId }: EvalEvidencePanelProps) {
                     skill: skill.toFixed(2),
                   })}
                 >
-                  <rect x={0} y={0} width={BAR_W} height={BAR_H} rx={2} fill="var(--hx-fill-subtle, #2a2a2a)" />
+                  <rect x={0} y={0} width={BAR_W} height={BAR_H} rx={2} fill="var(--ew-fill-subtle, #2a2a2a)" />
                   <rect
                     x={0}
                     y={0}
                     width={Math.round(base * BAR_W)}
                     height={BAR_H}
                     rx={2}
-                    fill="var(--hx-text-tertiary, #888)"
+                    fill="var(--ew-text-tertiary, #888)"
                   />
                   <rect
                     x={0}
@@ -128,7 +128,7 @@ export function EvalEvidencePanel({ skillId }: EvalEvidencePanelProps) {
                     width={BAR_W}
                     height={BAR_H}
                     rx={2}
-                    fill="var(--hx-fill-subtle, #2a2a2a)"
+                    fill="var(--ew-fill-subtle, #2a2a2a)"
                   />
                   <rect
                     x={0}
@@ -136,14 +136,14 @@ export function EvalEvidencePanel({ skillId }: EvalEvidencePanelProps) {
                     width={Math.round(skill * BAR_W)}
                     height={BAR_H}
                     rx={2}
-                    fill="var(--hx-color-brand-500, #06b6d4)"
+                    fill="var(--ew-color-brand-500, #06b6d4)"
                   />
                 </svg>
                 <div style={{ display: "flex", gap: 12 }}>
                   <Text type="secondary" style={{ fontSize: 11 }}>
                     {t("skill_evolution.eval_baseline")}: {base.toFixed(2)}
                   </Text>
-                  <Text style={{ fontSize: 11, color: "var(--hx-color-brand-500)" }}>
+                  <Text style={{ fontSize: 11, color: "var(--ew-color-brand-500)" }}>
                     {t("skill_evolution.eval_with_skill")}: {skill.toFixed(2)}
                   </Text>
                 </div>

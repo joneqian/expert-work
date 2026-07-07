@@ -9,7 +9,7 @@
  * an existing grant.
  *
  * This is the smooth bootstrap path: the very first admin is created by
- * the backend on first login of ``HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL``;
+ * the backend on first login of ``EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL``;
  * from there admins self-serve more admins here, no script needed.
  */
 import { useCallback, useEffect, useState } from "react";

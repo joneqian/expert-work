@@ -173,7 +173,7 @@ describe("TriggersList", () => {
         respond: () => ({
           ...webhookRow,
           name: "my_hook",
-          webhook_secret: "hx_whk_abc123def456",
+          webhook_secret: "ew_whk_abc123def456",
         }),
         status: 201,
       },
@@ -192,7 +192,7 @@ describe("TriggersList", () => {
       expect(screen.getByTestId("trigger-secret-value")).toBeInTheDocument(),
     );
     expect(screen.getByTestId("trigger-secret-value").textContent).toBe(
-      "hx_whk_abc123def456",
+      "ew_whk_abc123def456",
     );
   });
 

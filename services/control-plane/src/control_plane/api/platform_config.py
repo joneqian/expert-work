@@ -36,9 +36,9 @@ from control_plane.audit import emit
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.tenancy import TenantConfigNotConfiguredError
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence import PlatformSecretStore
-from helix_agent.protocol import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence import PlatformSecretStore
+from expert_work.protocol import (
     PROVIDER_CATALOG,
     TOOL_CATALOG,
     AuditAction,
@@ -48,8 +48,8 @@ from helix_agent.protocol import (
     Tool,
     validate_secret_ref,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store import SecretStore
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.secret_store import SecretStore
 
 
 class PlatformSecretWrite(BaseModel):
@@ -270,7 +270,7 @@ def build_platform_config_router() -> APIRouter:
             )
         # Stream Y-MK — multiple keys share one secret name slot per key_id so
         # rotated/extra keys never collide with the default one.
-        name = f"helix-agent/platform/llm/{provider}"
+        name = f"expert-work/platform/llm/{provider}"
         if key_id != "default":
             name = f"{name}/{key_id}"
         secret_ref = await _resolve_write_ref(payload, secret_store, name=name)
@@ -360,7 +360,7 @@ def build_platform_config_router() -> APIRouter:
                 detail={"code": "UNKNOWN_TOOL", "message": f"tool {tool!r} not in catalog"},
             )
         secret_ref = await _resolve_write_ref(
-            payload, secret_store, name=f"helix-agent/platform/tool/{tool}"
+            payload, secret_store, name=f"expert-work/platform/tool/{tool}"
         )
         async with bypass_rls_session():
             row = await store.upsert_tool(
@@ -620,7 +620,7 @@ def build_platform_config_router() -> APIRouter:
             )
         await _require_tenant(request, tenant_id)
         secret_ref = await _resolve_write_ref(
-            payload, secret_store, name=f"helix-agent/platform/tenant/{tenant_id}/llm/{provider}"
+            payload, secret_store, name=f"expert-work/platform/tenant/{tenant_id}/llm/{provider}"
         )
         async with bypass_rls_session():
             row = await store.upsert_tenant_provider(
@@ -664,7 +664,7 @@ def build_platform_config_router() -> APIRouter:
             )
         await _require_tenant(request, tenant_id)
         secret_ref = await _resolve_write_ref(
-            payload, secret_store, name=f"helix-agent/platform/tenant/{tenant_id}/tool/{tool}"
+            payload, secret_store, name=f"expert-work/platform/tenant/{tenant_id}/tool/{tool}"
         )
         async with bypass_rls_session():
             row = await store.upsert_tenant_tool(

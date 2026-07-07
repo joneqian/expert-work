@@ -15,7 +15,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from helix_agent.common.lifecycle import Lifecycle
+from expert_work.common.lifecycle import Lifecycle
 
 
 class InFlightMiddleware(BaseHTTPMiddleware):

@@ -171,7 +171,7 @@ export function SkillPicker({ formData, onChange }: SkillPickerProps) {
                   alignItems: "flex-start",
                   gap: 10,
                   padding: "8px 0",
-                  borderBottom: "1px solid var(--hx-border, rgba(255,255,255,0.06))",
+                  borderBottom: "1px solid var(--ew-border, rgba(255,255,255,0.06))",
                   opacity: o.locked ? 0.55 : 1,
                 }}
               >

@@ -73,7 +73,7 @@ _DEFAULT_OUT = _EVAL_DIR / "baselines" / "m0_gate_baseline.yaml"
 _JUDGE_MODEL = "claude-haiku-4-5-20251001"
 _JUDGE_TEMPERATURE = 0.0
 _RERUN_COUNT = 3
-_EMBEDDER_TAG = "helix-fake-keyword-embedder-v1"
+_EMBEDDER_TAG = "expert-work-fake-keyword-embedder-v1"
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +381,7 @@ def _render_yaml(reports: Mapping[str, CapabilityReport]) -> str:
     """Render the baseline file — deterministic key order matching :data:`_RUNNERS`."""
     metadata = {
         "generated_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
-        "helix_commit": _git_head(),
+        "expert_work_commit": _git_head(),
         "judge_model": _JUDGE_MODEL,
         "judge_temperature": _JUDGE_TEMPERATURE,
         "rerun_count": _RERUN_COUNT,

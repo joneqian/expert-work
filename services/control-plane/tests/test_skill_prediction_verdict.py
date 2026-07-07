@@ -17,8 +17,8 @@ from control_plane.skill_prediction_verdict import (
 )
 from control_plane.skill_rollback_gate import RollbackGate
 from control_plane.skill_rollback_monitor import RollbackMonitor, RollbackMonitorConfig
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import SkillEvalResult, SkillRunUsage, SkillStatus, TrajectoryOutcome
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import SkillEvalResult, SkillRunUsage, SkillStatus, TrajectoryOutcome
 
 _NOW = datetime(2026, 6, 9, 12, 0, tzinfo=UTC)
 

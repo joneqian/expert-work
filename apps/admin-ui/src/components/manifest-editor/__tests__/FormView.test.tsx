@@ -35,7 +35,7 @@ vi.spyOn(catalog, "loadModelCatalog").mockResolvedValue({
 });
 
 const SEED: AgentManifest = {
-  apiVersion: "helix/v1",
+  apiVersion: "expert_work/v1",
   kind: "Agent",
   metadata: { name: "bot" },
   spec: {
@@ -209,7 +209,7 @@ describe("FormView", () => {
     await user.type(input, "X");
     const last = onChange.mock.calls.at(-1)?.[0] as AgentManifest;
     expect(last.metadata?.name).toBe("botX");
-    expect(last.apiVersion).toBe("helix/v1");
+    expect(last.apiVersion).toBe("expert_work/v1");
     expect(last.spec?.sandbox).toEqual({ kind: "none" });
   });
 

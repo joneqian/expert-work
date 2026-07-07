@@ -243,7 +243,7 @@ export function CatalogToolsTab({
                 aria-label={t("mcp_catalog.tool_enable_aria", { name: tool.name })}
                 data-testid={`ct-toggle-${tool.name}`}
               />
-              <Text strong style={{ fontFamily: "var(--hx-font-mono, monospace)" }}>
+              <Text strong style={{ fontFamily: "var(--ew-font-mono, monospace)" }}>
                 {tool.name}
               </Text>
               {tool.description && (

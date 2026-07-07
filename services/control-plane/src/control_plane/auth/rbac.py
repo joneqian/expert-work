@@ -12,7 +12,7 @@ Design notes
   over internal resources (``quota``); they cannot touch admin resources
   (``user`` / ``role_binding``).
 * API-key service-account principals carry their assigned role via
-  :class:`helix_agent.persistence.auth.RoleBindingStore` (resolved
+  :class:`expert_work.persistence.auth.RoleBindingStore` (resolved
   lazily — pulled in C.3 follow-ups). For this PR, scopes from the key
   itself stand in for roles in :func:`_collect_roles`.
 * :func:`authorize` is a **pure** function (no IO, no audit) so it can
@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Literal
 
-from helix_agent.protocol import Principal, Role
+from expert_work.protocol import Principal, Role
 
 Resource = Literal[
     "manifest",

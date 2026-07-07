@@ -38,11 +38,11 @@ from control_plane.mcp_oauth import (
     refresh_token as oauth_refresh_token,
 )
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import McpConnectorCatalogStore, McpOAuthConnectionStore
-from helix_agent.protocol import McpOAuthConnectionPatch, McpOAuthConnectionRecord
-from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.persistence import McpConnectorCatalogStore, McpOAuthConnectionStore
+from expert_work.protocol import McpOAuthConnectionPatch, McpOAuthConnectionRecord
+from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
 
-logger = logging.getLogger("helix.control_plane.mcp_oauth_refresh")
+logger = logging.getLogger("expert_work.control_plane.mcp_oauth_refresh")
 
 Clock = Callable[[], datetime]
 HttpClientFactory = Callable[[], httpx.AsyncClient]

@@ -15,7 +15,7 @@ runs two passes:
 
 * **SUB-PASS 1 (cluster → consolidate)** — embedding pre-filter finds
   groups of similar transient items; one LLM call per cluster verifies
-  + summarises + applies the Hermes 4 + helix 2 anti-mislearn rules in
+  + summarises + applies the Hermes 4 + Expert Work 2 anti-mislearn rules in
   a single three-in-one prompt. On `keep=true` the consolidator writes
   a new `status='consolidated'` row with `consolidated_from=<source
   ids>` and links the sources back via `consolidated_into=<new id>`
@@ -46,8 +46,8 @@ Defaults:
 | `memory_purge_min_age_days` | 30 | 7..365 | 30 d = safety margin for fact-of-the-day to be retrieved at least once |
 
 Worker cadence is process-wide:
-`HELIX_AGENT_MEMORY_CONSOLIDATOR_INTERVAL_S` (default 14400 = 4 h).
-Default aux model: `HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL`
+`EXPERT_WORK_MEMORY_CONSOLIDATOR_INTERVAL_S` (default 14400 = 4 h).
+Default aux model: `EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_MODEL`
 (default `claude-sonnet-4-6`).
 
 ## 3. Aux-model wiring (Sprint #7 ships a no-op default)
@@ -68,13 +68,13 @@ When wiring a real aux model:
    `ConsolidatorLLMReply(text, model, input_tokens, output_tokens)`.
 2. Replace `make_null_consolidator_aux_model()` in
    `control_plane.app.create_app` with your factory.
-3. Confirm `HelixUpliftConsolidatorIdle` alert clears within 3 days
+3. Confirm `ExpertWorkUpliftConsolidatorIdle` alert clears within 3 days
    of deploy (the consolidator should start producing non-zero
    consolidations).
 
-## 4. Diagnostic: `HelixUpliftConsolidatorIdle`
+## 4. Diagnostic: `ExpertWorkUpliftConsolidatorIdle`
 
-**Trigger**: `helix:uplift:memory_consolidated_rate:1d == 0` for 3
+**Trigger**: `Expert Work:uplift:memory_consolidated_rate:1d == 0` for 3
 consecutive days.
 
 **Most likely causes** (in order):
@@ -91,20 +91,20 @@ consecutive days.
    WHERE status='transient'` per tenant. If zero, suppress the alert
    for that tenant.
 5. **All clusters fail anti-mislearn** — check
-   `helix:uplift:memory_cluster_rejection_rate:1d{reason}`. If
+   `Expert Work:uplift:memory_cluster_rejection_rate:1d{reason}`. If
    dominated by `anti_mislearn:*`, the prompt may be over-rejecting
    (regression — see § 6).
 
-## 5. Diagnostic: `HelixUpliftConsolidatorPurgeSurge`
+## 5. Diagnostic: `ExpertWorkUpliftConsolidatorPurgeSurge`
 
-**Trigger**: `sum(helix:uplift:memory_purged_rate:1d) > 100` for 1 day.
+**Trigger**: `sum(Expert Work:uplift:memory_purged_rate:1d) > 100` for 1 day.
 
 **Most likely causes**:
 
 1. **`memory_writeback_node` regression** — upstream is leaking
    environment failures / one-off narratives into long-term memory at
    a higher rate than before. Cross-reference
-   `helix:uplift:memory_purged_rate:1d{category}` — if dominated by
+   `Expert Work:uplift:memory_purged_rate:1d{category}` — if dominated by
    `env_failure` or `transient_error`, root cause is upstream. Good
    catch by the consolidator, but file an issue against the writeback
    prompt.
@@ -129,7 +129,7 @@ WHERE action = 'memory:purged_as_noise'
 UPDATE memory_item SET deleted_at = NULL WHERE id = '<mid>';
 ```
 
-## 6. Diagnostic: `HelixUpliftConsolidatorRejectionDominant`
+## 6. Diagnostic: `ExpertWorkUpliftConsolidatorRejectionDominant`
 
 **Trigger**: anti-mislearn rejection ratio (excluding `false_cluster`)
 exceeds 50 % of cluster decisions for 1 day.

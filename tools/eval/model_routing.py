@@ -29,7 +29,7 @@ from typing import Any, Literal, cast
 import yaml
 from langchain_core.messages import AIMessage, BaseMessage
 
-from helix_agent.runtime.middleware import (
+from expert_work.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
     LLMRateLimitError,

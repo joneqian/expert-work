@@ -11,13 +11,13 @@ const MD_OPTIONS = {
   },
 } as const;
 
-/** Render assistant/message text as markdown inside the ``.hx-markdown`` scope
+/** Render assistant/message text as markdown inside the ``.ew-markdown`` scope
  *  (see ``theme/global.css``). Used for Playground live answers and resumed
  *  history so ``##``/``**``/lists/tables/code render instead of showing raw
  *  source. */
 export function MarkdownView({ children }: { children: string }) {
   return (
-    <div className="hx-markdown">
+    <div className="ew-markdown">
       <Markdown options={MD_OPTIONS}>{children}</Markdown>
     </div>
   );

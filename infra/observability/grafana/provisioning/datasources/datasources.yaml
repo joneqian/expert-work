@@ -8,19 +8,19 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
-    uid: helix-prometheus
+    uid: expert-work-prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
 
   - name: Tempo
     type: tempo
-    uid: helix-tempo
+    uid: expert-work-tempo
     access: proxy
     url: http://tempo:3200
 
   - name: Loki
     type: loki
-    uid: helix-loki
+    uid: expert-work-loki
     access: proxy
     url: http://loki:3100

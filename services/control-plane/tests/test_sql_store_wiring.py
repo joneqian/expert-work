@@ -1,7 +1,7 @@
 """Unit tests for the ADR B-6 SQL store cutover wiring.
 
 The ``Sql*Store`` classes are integration-tested against a real Postgres
-in ``packages/helix-persistence/tests/test_sql_*.py``. Here we cover the
+in ``packages/expert-work-persistence/tests/test_sql_*.py``. Here we cover the
 control-plane side: the ``store_backend`` setting and the ``create_app``
 branch that swaps every store to its Postgres-backed implementation off
 one RLS-wrapped sessionmaker. ``create_async_engine`` is lazy, so these
@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from control_plane.app import create_app
 from control_plane.settings import Settings
-from helix_agent.persistence.agent_spec import InMemoryAgentSpecStore, SqlAgentSpecStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore, SqlAuditLogStore
-from helix_agent.persistence.auth import (
+from expert_work.persistence.agent_spec import InMemoryAgentSpecStore, SqlAgentSpecStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore, SqlAuditLogStore
+from expert_work.persistence.auth import (
     InMemoryApiKeyStore,
     InMemoryRoleBindingStore,
     InMemoryServiceAccountStore,
@@ -25,18 +25,18 @@ from helix_agent.persistence.auth import (
     SqlRoleBindingStore,
     SqlServiceAccountStore,
 )
-from helix_agent.persistence.feedback_store import DbFeedbackStore, InMemoryFeedbackStore
-from helix_agent.persistence.quota import (
+from expert_work.persistence.feedback_store import DbFeedbackStore, InMemoryFeedbackStore
+from expert_work.persistence.quota import (
     InMemoryTenantQuotaStore,
     InMemoryTokenReservationStore,
     SqlTenantQuotaStore,
     SqlTokenReservationStore,
 )
-from helix_agent.persistence.tenant_config import (
+from expert_work.persistence.tenant_config import (
     InMemoryTenantConfigStore,
     SqlTenantConfigStore,
 )
-from helix_agent.persistence.thread_meta import InMemoryThreadMetaStore, SqlThreadMetaStore
+from expert_work.persistence.thread_meta import InMemoryThreadMetaStore, SqlThreadMetaStore
 from tests.auth_fixtures import build_test_jwt_verifier
 
 
@@ -45,7 +45,7 @@ def _sql_settings() -> Settings:
     ``create_async_engine`` opens no socket until first use."""
     return Settings(
         store_backend="sql",
-        db_dsn="postgresql+asyncpg://helix@localhost:6432/helix",
+        db_dsn="postgresql+asyncpg://expert_work@localhost:6432/expert_work",
     )
 
 

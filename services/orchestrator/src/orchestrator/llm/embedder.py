@@ -2,11 +2,11 @@
 
 Turns text into vectors for long-term memory recall + write-back.
 Targets the OpenAI-compatible ``/v1/embeddings`` endpoint, so the
-domestic vendors helix already speaks (qwen DashScope compatible-mode,
+domestic vendors expert_work already speaks (qwen DashScope compatible-mode,
 …) work uniformly — same pattern as the chat providers (E.11.5).
 
 The output dimension is whatever the embedding model returns; the
-deployment must set ``HELIX_AGENT_EMBEDDING_DIM`` to match it (the
+deployment must set ``EXPERT_WORK_EMBEDDING_DIM`` to match it (the
 ``memory_item.embedding`` column is fixed at that width).
 
 :class:`FakeEmbedder` is a deterministic test double — same text always

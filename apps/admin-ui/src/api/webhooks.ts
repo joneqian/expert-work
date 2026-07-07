@@ -28,7 +28,7 @@ export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = [
   "quality.drift",
 ];
 
-/** Delivery body shape — the signed helix envelope, or an IM bot message. */
+/** Delivery body shape — the signed expert_work envelope, or an IM bot message. */
 export type WebhookPayloadFormat = "generic" | "feishu" | "dingtalk" | "wecom";
 
 export const WEBHOOK_PAYLOAD_FORMATS: readonly WebhookPayloadFormat[] = [

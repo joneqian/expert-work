@@ -8,8 +8,8 @@ from dataclasses import dataclass
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.runtime.middleware import LLMOutputValidationError
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.runtime.middleware import LLMOutputValidationError
 from orchestrator.output_judge import (
     ActionVerdict,
     FakeActionJudge,

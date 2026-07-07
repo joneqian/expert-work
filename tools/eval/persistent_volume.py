@@ -30,8 +30,8 @@ from uuid import UUID
 
 import yaml
 
-from helix_agent.persistence.workspace.memory import InMemoryUserWorkspaceStore
-from helix_agent.protocol import UserWorkspace
+from expert_work.persistence.workspace.memory import InMemoryUserWorkspaceStore
+from expert_work.protocol import UserWorkspace
 from sandbox_supervisor.domain import (
     WorkspaceDeletedError,
     WorkspaceQuotaExceededError,

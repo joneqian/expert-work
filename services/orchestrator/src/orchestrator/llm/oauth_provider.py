@@ -58,5 +58,5 @@ class OAuthCapableProvider(Protocol):
         Returns ``True`` if a subsequent call is likely to succeed,
         ``False`` otherwise. The router invokes this exactly once per
         ``_call_one`` invocation after observing
-        :class:`~helix_agent.runtime.middleware.LLMUnauthorizedError`.
+        :class:`~expert_work.runtime.middleware.LLMUnauthorizedError`.
         """

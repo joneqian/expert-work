@@ -21,11 +21,11 @@ from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.run_queue_worker import RunQueueWorker
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.thread_meta import InMemoryThreadMetaStore
-from helix_agent.protocol import AuditAction, AuditQuery, Role
-from helix_agent.runtime.runs import (
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.thread_meta import InMemoryThreadMetaStore
+from expert_work.protocol import AuditAction, AuditQuery, Role
+from expert_work.runtime.runs import (
     DisconnectMode,
     InMemoryRunEventStore,
     InMemoryRunStore,
@@ -41,7 +41,7 @@ from tests.auth_fixtures import (
 )
 
 _AGENT_YAML = """\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: support-bot

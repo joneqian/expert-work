@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 
 _AGENT_SPEC_SCHEMA: dict[str, Any] = AgentSpec.model_json_schema(by_alias=True)
 

@@ -30,10 +30,10 @@ from uuid import UUID, uuid4
 
 import yaml
 
-from helix_agent.persistence import InMemorySkillStore
-from helix_agent.protocol import AgentSpec, SkillStatus
-from helix_agent.runtime.checkpointer import make_checkpointer
-from helix_agent.runtime.secret_store import LocalDevSecretStore
+from expert_work.persistence import InMemorySkillStore
+from expert_work.protocol import AgentSpec, SkillStatus
+from expert_work.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.secret_store import LocalDevSecretStore
 
 _EVAL_DIR = _Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in _sys.path:
@@ -125,7 +125,7 @@ async def _platform_resolver(provider: str) -> list[str]:
 def _spec_with_skills(skills: tuple[str, ...], model_name: str) -> AgentSpec:
     return AgentSpec.model_validate(
         {
-            "apiVersion": "helix.io/v1",
+            "apiVersion": "expert_work.io/v1",
             "kind": "Agent",
             "metadata": {"name": "test", "version": "1.0.0", "tenant": "test-tenant"},
             "spec": {

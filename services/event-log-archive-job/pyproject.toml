@@ -1,7 +1,7 @@
 [project]
-name = "helix-agent-event-log-archive-job"
+name = "expert-work-event-log-archive-job"
 version = "0.0.0"
-description = "Helix-Agent event_log cold-archival job (Stream G.8)."
+description = "Expert Work event_log cold-archival job (Stream G.8)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -9,10 +9,10 @@ authors = [
     { name = "joneqian", email = "qian.qing0926@gmail.com" },
 ]
 dependencies = [
-    "helix-agent-common",
-    "helix-agent-persistence",
-    "helix-agent-protocol",
-    "helix-agent-runtime",
+    "expert-work-common",
+    "expert-work-persistence",
+    "expert-work-protocol",
+    "expert-work-runtime",
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.5,<3",
     "sqlalchemy[asyncio]>=2.0.30,<3",

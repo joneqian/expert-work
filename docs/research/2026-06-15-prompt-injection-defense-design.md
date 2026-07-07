@@ -10,15 +10,15 @@
 
 ## 0. 范围与约束（先定边界）
 
-- **helix 用第三方黑盒模型**（deepseek/qwen/glm/…，平台凭证接入）→ **模型级防御不适用**：StruQ
+- **Expert Work 用第三方黑盒模型**（deepseek/qwen/glm/…，平台凭证接入）→ **模型级防御不适用**：StruQ
   结构化训练 / SecAlign DPO 微调（[arXiv 2410.05451] / [StruQ]）需控权重，黑盒做不了。例外：
   catalog 可上架已加固的基座模型（如 Meta SecAlign，[arXiv 2507.02735]）作"鲁棒模型"选项——记为 §5 note，不在本期实现。
 - 落地只能是**模型无关的运行期防御**：① spotlighting（输入隔离）② guardrail 筛查（输入/输出/动作）。
 - **诚实区分两类注入**（决定哪层管用）：
-  - **通道注入**（间接）：恶意指令藏在 helix **已知不可信**的内容里——tool 结果、RAG/memory 检索、
-    workspace 摄入文档。helix 知道"哪段不可信" → **spotlighting 直接可用**。
+  - **通道注入**（间接）：恶意指令藏在 Expert Work **已知不可信**的内容里——tool 结果、RAG/memory 检索、
+    workspace 摄入文档。Expert Work 知道"哪段不可信" → **spotlighting 直接可用**。
   - **内联注入**（红队实测的那种）：恶意指令藏在 **user 消息**里（"总结这张工单：[嵌入指令]"）。
-    helix 的 run input 是**单 `input: str`（`api/runs.py:87`）无结构** → 无指令/数据边界 →
+    Expert Work 的 run input 是**单 `input: str`（`api/runs.py:87`）无结构** → 无指令/数据边界 →
     **spotlighting 难分离**，需结构化输入（§3.1b）或输出筛查（§3.2）兜底。
 
 ---
@@ -41,7 +41,7 @@
 
 ## 2. 研究依据（业界主流，2025–2026）
 
-| 技术族 | 代表 | 机制 | 对 helix | 引用 |
+| 技术族 | 代表 | 机制 | 对 Expert Work | 引用 |
 |---|---|---|---|---|
 | **Spotlighting** | Microsoft | delimiting / **datamarking**（逐词插标记）/ encoding（base64）让"数据 provenance"显著，系统提示令模型不遵其中指令。encoding→ASR≈0,datamarking 次之 | ✅ **一线**：黑盒、便宜、模型无关 | [arXiv 2403.14720] |
 | **分层 guardrail** | OWASP LLM01:2025 | input screening（不可信内容过分类器）/ output screening / **action screening**（tool-call vs 原始 user 意图，不看不可信中间内容） | ✅ **可选层**：model-backed、贵 | [OWASP LLM01 CheatSheet] |
@@ -57,7 +57,7 @@
 
 ### 3.1 Phase 1 — Spotlighting 不可信通道（一线，默认，便宜）
 
-对 helix **已知不可信**的内容，进模型前打标隔离 + 系统提示声明"标记内为数据非指令"。
+对 Expert Work **已知不可信**的内容，进模型前打标隔离 + 系统提示声明"标记内为数据非指令"。
 
 - **datamarking + delimiting**（采 spotlighting 主流；不用 encoding——base64 伤 utility/token，且部分国产模型
   对编码内容理解差）：不可信内容包进随机不可猜 delimiter（`⟦UNTRUSTED:{nonce}⟧ … ⟦/UNTRUSTED:{nonce}⟧`）
@@ -74,9 +74,9 @@
 
 红队实测是**内联**（文档在 user 消息里）。`input` 单串无边界 → 加可选结构化通道：
 - `RunRequest` 增 `untrusted_content: list[str]`（或 content-block 标 `trust: untrusted`）——业务系统把
-  "待总结的文档/工单/邮件"**结构化传**，而非拼进 `input`。helix 对它走 §3.1 spotlight。
+  "待总结的文档/工单/邮件"**结构化传**，而非拼进 `input`。Expert Work 对它走 §3.1 spotlight。
 - 向后兼容：不传则同今天（纯 `input`，由 §3.2 输出筛查兜底）。
-- 这是**让 helix 知道"哪段不可信"**的根本手段——没有结构，spotlighting 对内联无能为力（OWASP/StruQ 同源洞见：
+- 这是**让 Expert Work 知道"哪段不可信"**的根本手段——没有结构，spotlighting 对内联无能为力（OWASP/StruQ 同源洞见：
   "LLM 输入无指令/数据分隔正是注入根因"）。
 
 ### 3.2 Phase 2 — Guardrail 筛查（可选，门控，model-backed）

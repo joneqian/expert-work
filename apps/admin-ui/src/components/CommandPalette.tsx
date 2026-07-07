@@ -293,8 +293,8 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
         closable={false}
         width={640}
         styles={{
-          body: { padding: 0, background: "var(--hx-surface-base)" },
-          content: { padding: 0, background: "var(--hx-surface-base)" },
+          body: { padding: 0, background: "var(--ew-surface-base)" },
+          content: { padding: 0, background: "var(--ew-surface-base)" },
           mask: { backdropFilter: "blur(4px)" },
         }}
         destroyOnHidden
@@ -308,13 +308,13 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
           onKeyDown={onKeyDown}
           placeholder={t("cmdk.placeholder")}
           variant="borderless"
-          style={{ fontSize: 16, padding: "16px 20px", borderBottom: "1px solid var(--hx-border-subtle)" }}
+          style={{ fontSize: 16, padding: "16px 20px", borderBottom: "1px solid var(--ew-border-subtle)" }}
           aria-label={t("cmdk.aria_label")}
           data-testid="cmdk-input"
         />
         <div style={{ maxHeight: 420, overflowY: "auto", padding: "8px 0" }} role="listbox">
           {filtered.length === 0 && (
-            <div style={{ padding: 24, textAlign: "center", color: "var(--hx-text-tertiary)" }}>
+            <div style={{ padding: 24, textAlign: "center", color: "var(--ew-text-tertiary)" }}>
               {t("cmdk.no_matches")}
             </div>
           )}
@@ -327,7 +327,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
                   fontWeight: 500,
                   textTransform: "uppercase",
                   letterSpacing: "0.05em",
-                  color: "var(--hx-text-tertiary)",
+                  color: "var(--ew-text-tertiary)",
                 }}
               >
                 {groupName}
@@ -349,19 +349,19 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
                       padding: "8px 20px",
                       cursor: "pointer",
                       fontSize: 13,
-                      borderLeft: active ? "2px solid var(--hx-color-brand-500)" : "2px solid transparent",
-                      background: active ? "var(--hx-surface-selected)" : "transparent",
+                      borderLeft: active ? "2px solid var(--ew-color-brand-500)" : "2px solid transparent",
+                      background: active ? "var(--ew-surface-selected)" : "transparent",
                     }}
                   >
-                    {item.icon && <span style={{ color: "var(--hx-text-secondary)" }}>{item.icon}</span>}
+                    {item.icon && <span style={{ color: "var(--ew-text-secondary)" }}>{item.icon}</span>}
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {item.subtitle && (
-                      <span style={{ fontSize: 11, color: "var(--hx-text-tertiary)" }}>{item.subtitle}</span>
+                      <span style={{ fontSize: 11, color: "var(--ew-text-tertiary)" }}>{item.subtitle}</span>
                     )}
                     {item.shortcut && item.shortcut.length > 0 && (
                       <span style={{ display: "flex", gap: 2 }}>
                         {item.shortcut.map((s) => (
-                          <span key={s} className="hx-kbd">
+                          <span key={s} className="ew-kbd">
                             {s}
                           </span>
                         ))}
@@ -378,14 +378,14 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
             display: "flex",
             gap: 12,
             padding: "8px 20px",
-            borderTop: "1px solid var(--hx-border-subtle)",
+            borderTop: "1px solid var(--ew-border-subtle)",
             fontSize: 11,
-            color: "var(--hx-text-tertiary)",
+            color: "var(--ew-text-tertiary)",
           }}
         >
-          <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span className="hx-kbd">↑↓</span> {t("cmdk.hint_select")}</span>
-          <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span className="hx-kbd">↵</span> {t("cmdk.hint_jump")}</span>
-          <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span className="hx-kbd">Esc</span> {t("cmdk.hint_close")}</span>
+          <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span className="ew-kbd">↑↓</span> {t("cmdk.hint_select")}</span>
+          <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span className="ew-kbd">↵</span> {t("cmdk.hint_jump")}</span>
+          <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span className="ew-kbd">Esc</span> {t("cmdk.hint_close")}</span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
             <ArrowRight size={10} strokeWidth={1.5} /> {t("cmdk.hint_shortcuts")}
           </span>

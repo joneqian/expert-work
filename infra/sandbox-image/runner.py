@@ -1,4 +1,4 @@
-"""Helix sandbox runner — PID 1 inside the ``exec_python`` sandbox container.
+"""Expert Work sandbox runner — PID 1 inside the ``exec_python`` sandbox container.
 
 Protocol (STREAM-F-DESIGN § 4.2): line-delimited JSON over stdin / stdout.
 The Sandbox Supervisor (Stream F.1) attaches to the container's stdio,

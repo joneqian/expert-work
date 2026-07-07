@@ -1,7 +1,7 @@
 [project]
-name = "helix-agent-control-plane"
+name = "expert-work-control-plane"
 version = "0.0.0"
-description = "Helix-Agent Control Plane — FastAPI API surface (Stream B)."
+description = "Expert Work Control Plane — FastAPI API surface (Stream B)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -9,14 +9,14 @@ authors = [
     { name = "joneqian", email = "qian.qing0926@gmail.com" },
 ]
 dependencies = [
-    "helix-agent-common",
-    "helix-agent-persistence",
-    "helix-agent-protocol",
-    "helix-agent-runtime",
+    "expert-work-common",
+    "expert-work-persistence",
+    "expert-work-protocol",
+    "expert-work-runtime",
     # In-process monolith (STREAM-E-DESIGN § 2.6): the control-plane runs
     # the orchestrator as a library — agent graphs execute as background
     # asyncio tasks in this process, not a separate service.
-    "helix-agent-orchestrator",
+    "expert-work-orchestrator",
     # Stream B.1 — FastAPI + Pydantic v2 + uvicorn.
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",

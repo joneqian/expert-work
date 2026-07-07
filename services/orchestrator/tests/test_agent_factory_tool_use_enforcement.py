@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from helix_agent.protocol import ModelSpec
+from expert_work.protocol import ModelSpec
 from orchestrator.agent_factory import (
     _TOOL_USE_ENFORCEMENT_BLOCK,
     _assemble_system_prompt,

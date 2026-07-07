@@ -21,31 +21,31 @@ import logging
 from datetime import UTC, datetime
 
 from control_plane.knowledge.ingestion import ingest_document_bytes
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import KnowledgeStore
-from helix_agent.persistence.knowledge.base import ClaimedIngestion
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.protocol import DocumentStatus
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import KnowledgeStore
+from expert_work.persistence.knowledge.base import ClaimedIngestion
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.protocol import DocumentStatus
 from orchestrator.llm import Embedder
 
-logger = logging.getLogger("helix.control_plane.knowledge.recovery")
+logger = logging.getLogger("expert_work.control_plane.knowledge.recovery")
 
 _ERROR_CAP = 500
 
-_claimed = helix_counter(
-    "helix_knowledge_ingest_claimed_total",
+_claimed = expert_work_counter(
+    "expert_work_knowledge_ingest_claimed_total",
     "Documents claimed by the knowledge ingestion recovery worker.",
 )
-_recovered = helix_counter(
-    "helix_knowledge_ingest_recovered_total",
+_recovered = expert_work_counter(
+    "expert_work_knowledge_ingest_recovered_total",
     "Stuck documents re-driven to ready by the recovery worker.",
 )
-_failed_terminal = helix_counter(
-    "helix_knowledge_ingest_failed_terminal_total",
+_failed_terminal = expert_work_counter(
+    "expert_work_knowledge_ingest_failed_terminal_total",
     "Documents marked terminally failed by the recovery worker (retries exhausted).",
 )
-_cycle_errors = helix_counter(
-    "helix_knowledge_ingest_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_knowledge_ingest_cycle_errors_total",
     "Recovery worker cycles that ended in a caught exception.",
 )
 

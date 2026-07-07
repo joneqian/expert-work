@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 
 from control_plane.settings import Settings
-from helix_agent.persistence.platform_embedding_config.base import (
+from expert_work.persistence.platform_embedding_config.base import (
     PlatformEmbeddingConfigStore,
 )
 

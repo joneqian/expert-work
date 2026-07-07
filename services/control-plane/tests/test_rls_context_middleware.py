@@ -2,7 +2,7 @@
 
 The middleware reads ``request.state.principal`` (populated by
 :class:`AuthMiddleware`) and projects ``principal.tenant_id`` into the
-:data:`helix_agent.persistence.rls.current_tenant_id_var` ContextVar
+:data:`expert_work.persistence.rls.current_tenant_id_var` ContextVar
 for the lifetime of the request.
 
 These tests exercise the project-and-clean-up contract at the HTTP
@@ -22,8 +22,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.rls import current_tenant_id_var
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.rls import current_tenant_id_var
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt
 
 _TENANT = DEFAULT_DEV_TENANT_ID

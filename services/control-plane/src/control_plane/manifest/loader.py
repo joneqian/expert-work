@@ -32,7 +32,7 @@ from control_plane.manifest.errors import (
     ManifestTemplateError,
     ManifestValidationError,
 )
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 
 #: Default cap mirrors STREAM-B-DESIGN § 6 (DoS guard).
 DEFAULT_MAX_SIZE_BYTES = 64 * 1024

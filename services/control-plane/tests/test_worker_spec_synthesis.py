@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from control_plane.subagent_runtime import synthesize_worker_spec
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 
 _SANDBOX = {
     "resources": {"cpu": "1.0", "memory": "1Gi"},
@@ -26,7 +26,7 @@ def _parent(**spec_overrides: object) -> AgentSpec:
     }
     return AgentSpec.model_validate(
         {
-            "apiVersion": "helix.io/v1",
+            "apiVersion": "expert_work.io/v1",
             "kind": "Agent",
             "metadata": {"name": "boss", "version": "1.0.0", "tenant": "t"},
             "spec": spec,

@@ -3,7 +3,7 @@
 The inject half of the cross-service propagation contract (subsystems/20
 § 5.8). The matching extract half lives in the sandbox-supervisor suite
 (``test_trace_middleware.py``); the two meet at the ``traceparent`` wire
-format, which helix-common's propagation tests validate independently.
+format, which expert-work-common's propagation tests validate independently.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ import pytest
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from helix_agent.common.observability import (
+from expert_work.common.observability import (
     TRACEPARENT_HEADER,
-    HelixComponent,
+    ExpertWorkComponent,
     current_trace_id_hex,
-    helix_span,
+    expert_work_span,
     init_tracing,
 )
 from orchestrator.tools.sandbox import HTTPSupervisorClient
@@ -55,7 +55,7 @@ async def test_post_injects_traceparent_matching_active_span(tracing_setup: None
     seen: dict[str, httpx.Headers] = {}
     client = _capturing_client(seen)
 
-    with helix_span(HelixComponent.ORCHESTRATOR, "tool_call"):
+    with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "tool_call"):
         active_trace_id = current_trace_id_hex()
         await client.acquire(tenant_id=uuid4(), thread_id="t")
 
@@ -76,7 +76,7 @@ async def test_workspace_get_injects_traceparent(tracing_setup: None) -> None:
     client = HTTPSupervisorClient(
         base_url="http://supervisor", transport=httpx.MockTransport(handler)
     )
-    with helix_span(HelixComponent.ORCHESTRATOR, "tool_call"):
+    with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "tool_call"):
         active_trace_id = current_trace_id_hex()
         await client.read_workspace_file(tenant_id=uuid4(), user_id=uuid4(), path="a.txt")
 
@@ -97,7 +97,7 @@ async def test_workspace_put_sends_bytes_and_path(tracing_setup: None) -> None:
     client = HTTPSupervisorClient(
         base_url="http://supervisor", transport=httpx.MockTransport(handler)
     )
-    with helix_span(HelixComponent.ORCHESTRATOR, "tool_call"):
+    with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "tool_call"):
         active_trace_id = current_trace_id_hex()
         await client.write_workspace_file(
             tenant_id=uuid4(), user_id=uuid4(), path="uploads/x.pdf", data=b"PDF"
@@ -147,7 +147,7 @@ async def test_exec_aligns_timeout_and_passes_it(tracing_setup: None) -> None:
     client = HTTPSupervisorClient(
         base_url="http://supervisor", transport=httpx.MockTransport(handler)
     )
-    with helix_span(HelixComponent.ORCHESTRATOR, "tool_call"):
+    with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "tool_call"):
         active_trace_id = current_trace_id_hex()
         outcome = await client.exec(sandbox_id=uuid4(), code="pip install fpdf2", timeout_s=300)
 
@@ -175,7 +175,7 @@ async def test_workspace_list_parses_files_and_traces(tracing_setup: None) -> No
     client = HTTPSupervisorClient(
         base_url="http://supervisor", transport=httpx.MockTransport(handler)
     )
-    with helix_span(HelixComponent.ORCHESTRATOR, "tool_call"):
+    with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "tool_call"):
         active_trace_id = current_trace_id_hex()
         entries = await client.list_workspace_files(tenant_id=uuid4(), user_id=uuid4())
 

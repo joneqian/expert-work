@@ -15,7 +15,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from helix_agent.runtime.middleware import (
+from expert_work.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
     LLMRateLimitError,
@@ -448,7 +448,7 @@ async def test_http_200_non_object_body_raises_server_error() -> None:
 
 @pytest.mark.asyncio
 async def test_human_image_ref_emits_image_url_block() -> None:
-    uri = "helix://image/demo.png"
+    uri = "expert_work://image/demo.png"
     resolver = InMemoryImageResolver(
         images={uri: ResolvedImage(media_type="image/png", data=b"PNGBYTES")}
     )
@@ -470,7 +470,7 @@ async def test_human_image_ref_emits_image_url_block() -> None:
 
 @pytest.mark.asyncio
 async def test_human_image_ref_dropped_without_resolver() -> None:
-    uri = "helix://image/demo.png"
+    uri = "expert_work://image/demo.png"
     client = RecordingOpenAIClient(response={"choices": [{"message": {"content": "ok"}}]})
     provider = OpenAIProvider(client=client, model="gpt-4o")  # no image_resolver
 

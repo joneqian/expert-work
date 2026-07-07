@@ -60,7 +60,7 @@
 - [ ] **Credential Proxy** 升级 Envoy + Lua + Vault dynamic
 - [ ] **灰度发布**、版本回滚、A/B 流量切分
 - [ ] **完整可观测性**：OpenTelemetry / Prometheus / Grafana / Loki
-- [ ] **CLI**：`helix lint`、`helix run`（本地跑 manifest）
+- [ ] **CLI**：`Expert Work lint`、`Expert Work run`（本地跑 manifest）
 - [ ] **Admin UI** 升级：版本对比、灰度面板、secret 管理（写 Vault）
 - [ ] **vendor P1 核心中间件**（subagent executor、guardrails、5 个核心 middleware）
 - [ ] **🆕 vendor P1 增补**（来自第三次源码扫描）：
@@ -156,15 +156,15 @@
 
 ### Dogfood 计划
 
-> **业务选型原则**：Helix 是业务无关的多业务线引擎，dogfood 优先沿用现有 Dify 已上线业务做平迁对比（验证范式 + token/延迟/质量对比），不预设具体业务领域。
+> **业务选型原则**：Expert Work 是业务无关的多业务线引擎，dogfood 优先沿用现有 Dify 已上线业务做平迁对比（验证范式 + token/延迟/质量对比），不预设具体业务领域。
 
 1. **第 1 业务（M0 末）**：**沿用现有 Dify 上线业务迁移**（业务待用户告知）
-   - 平行运行 30 天（Dify + Helix 都接同一流量，对比答案/成本/延迟）
+   - 平行运行 30 天（Dify + Expert Work 都接同一流量，对比答案/成本/延迟）
    - 切流量比例：1% → 10% → 50% → 100%
    - **优先选**：流量适中（1k-10k req/天）+ 工具调用简单（builtin/http/mcp）+ 合规简单
 2. **第 2 业务（M1 中）**：选一个**带 Python 插槽需求**的 Dify 应用迁移（自定义 tool / custom workflow / hooks 完整链路）
    - 如该业务带合规要求（医疗/HR/金融），同步验证 `tenant_config.compliance_pack` 可插拔合规
-3. **内部工具**（M1 末）：用 Helix 自身写 1 个内部研发工具（如 code-reviewer-agent / docs-summarizer / oncall-assistant），验证开发体验和 SDK 完整度
+3. **内部工具**（M1 末）：用 Expert Work 自身写 1 个内部研发工具（如 code-reviewer-agent / docs-summarizer / oncall-assistant），验证开发体验和 SDK 完整度
 
 ---
 

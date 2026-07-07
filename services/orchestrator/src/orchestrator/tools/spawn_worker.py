@@ -34,8 +34,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import UUID
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.runtime.cancellation import RunCancelledError
+from expert_work.common.observability import expert_work_counter
+from expert_work.runtime.cancellation import RunCancelledError
 from orchestrator.tools._budget import WorkerSpawnBudget
 from orchestrator.tools._child_run import run_child_to_result
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
@@ -51,15 +51,15 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from helix_agent.protocol import AgentSpec
+    from expert_work.protocol import AgentSpec
     from orchestrator.agent_factory import BuiltAgent
 
-_workers_spawned = helix_counter(
-    "helix_dynamic_worker_spawned_total",
+_workers_spawned = expert_work_counter(
+    "expert_work_dynamic_worker_spawned_total",
     "Dynamic workers spawned via the spawn_worker tool.",
 )
-_workers_blocked = helix_counter(
-    "helix_dynamic_worker_blocked_total",
+_workers_blocked = expert_work_counter(
+    "expert_work_dynamic_worker_blocked_total",
     "spawn_worker calls refused (per-run budget exhausted).",
 )
 

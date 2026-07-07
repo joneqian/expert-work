@@ -9,9 +9,9 @@ import pytest
 
 from control_plane.audit import build_default_audit_logger
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.tenant_config import InMemoryTenantConfigStore
-from helix_agent.protocol import AuditAction, AuditQuery, TenantConfigPatch, TenantPlan
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.tenant_config import InMemoryTenantConfigStore
+from expert_work.protocol import AuditAction, AuditQuery, TenantConfigPatch, TenantPlan
 
 
 @pytest.fixture

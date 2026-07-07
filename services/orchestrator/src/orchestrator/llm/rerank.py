@@ -1,6 +1,6 @@
 """DashScope native rerank — for dedicated rerank models.
 
-helix's default reranker (:class:`orchestrator.tools.knowledge.LLMReranker`)
+expert_work's default reranker (:class:`orchestrator.tools.knowledge.LLMReranker`)
 prompts a **chat** model to rank candidates. DashScope's dedicated rerank
 models (``qwen3-vl-rerank``, ``gte-rerank``, ``text-rerank-*``) are NOT served
 over the OpenAI-compatible chat endpoint — calling them there returns

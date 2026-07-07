@@ -40,7 +40,7 @@ export function FieldHelp({ text, testId }: FieldHelpProps) {
           border: "none",
           background: "none",
           cursor: "help",
-          color: "var(--hx-text-tertiary, #888)",
+          color: "var(--ew-text-tertiary, #888)",
           verticalAlign: "middle",
         }}
       >

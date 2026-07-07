@@ -1,7 +1,7 @@
 """Audit-context middleware — Stream B.1 (retired by Stream C.1).
 
 Originally this middleware *resolved* the per-request tenant from
-``X-Helix-Tenant`` / ``X-Helix-Actor`` headers under ``auth_mode=dev``.
+``X-Expert-Work-Tenant`` / ``X-Expert-Work-Actor`` headers under ``auth_mode=dev``.
 Stream C.1 deprecated that header-trust path: :class:`AuthMiddleware`
 now populates ``request.state.principal`` from a verified JWT and the
 job here shrinks to **projecting** that principal into the ctxvar
@@ -24,10 +24,10 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from helix_agent.common.context import reset_current_tenant, set_current_tenant
-from helix_agent.protocol import Principal
+from expert_work.common.context import reset_current_tenant, set_current_tenant
+from expert_work.protocol import Principal
 
-logger = logging.getLogger("helix.control_plane.audit_context")
+logger = logging.getLogger("expert_work.control_plane.audit_context")
 
 
 class AuditContextMiddleware(BaseHTTPMiddleware):

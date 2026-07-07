@@ -22,7 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from control_plane.settings import Settings
-from helix_agent.persistence.platform_quality_config.base import (
+from expert_work.persistence.platform_quality_config.base import (
     PlatformQualityConfigRow,
     PlatformQualityConfigStore,
 )

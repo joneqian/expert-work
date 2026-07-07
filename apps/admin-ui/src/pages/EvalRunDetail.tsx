@@ -186,21 +186,21 @@ export function EvalRunDetail() {
             fontSize: 13,
           }}
         >
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("eval_run_detail.run_id")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("eval_run_detail.run_id")}</dt>
           <dd className="mono" style={{ margin: 0 }}>
             {run.id}
           </dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("eval_run_detail.suite")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("eval_run_detail.suite")}</dt>
           <dd style={{ margin: 0 }}>{run.suite}</dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("eval_run_detail.status")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("eval_run_detail.status")}</dt>
           <dd style={{ margin: 0 }}>{run.status}</dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("eval_run_detail.triggered_by")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("eval_run_detail.triggered_by")}</dt>
           <dd style={{ margin: 0 }}>{run.triggered_by}</dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("eval_run_detail.created_at")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("eval_run_detail.created_at")}</dt>
           <dd style={{ margin: 0 }}>{new Date(run.created_at).toLocaleString()}</dd>
           {summary !== null && (
             <>
-              <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("eval_run_detail.summary")}</dt>
+              <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("eval_run_detail.summary")}</dt>
               <dd style={{ margin: 0 }}>{summary}</dd>
             </>
           )}

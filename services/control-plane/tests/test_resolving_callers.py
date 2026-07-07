@@ -18,10 +18,10 @@ from control_plane.runtime import (
     ResolvingEmbedder,
     ResolvingReranker,
 )
-from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
-from helix_agent.protocol import TenantConfigRecord, TenantPlan
-from helix_agent.runtime.secret_store import parse_secret_ref
-from helix_agent.testing import InMemorySecretStore
+from expert_work.common.credentials import CredentialsResolver, CredentialsResolverError
+from expert_work.protocol import TenantConfigRecord, TenantPlan
+from expert_work.runtime.secret_store import parse_secret_ref
+from expert_work.testing import InMemorySecretStore
 
 _NOW_DISPLAY = "Acme"
 

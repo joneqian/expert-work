@@ -277,7 +277,7 @@ lead_session.token_used += child.tokens_total
 |------|------|------|
 | `token_reservation.thread_id` | **child 的 thread_id** | 每个 child session 自己 reserve / commit；child 终态前不动 lead 的 ledger |
 | `token_budget_ledger` 累加 | **commit 时 server 端按 `parent_thread_id` 自动级联**累加到 lead 的 ledger | child commit_tokens() 触发 server 端 trigger / 应用层级联写；防止"子树合计超 lead 预算"被绕过 |
-| agent 维度 metric | `child_agent` 名独立桶（与 lead 不混） | `helix_quota_*{agent="security-auditor"}` 与 `agent="lead-agent"` 各自计；rate-limit QPS 独立计 |
+| agent 维度 metric | `child_agent` 名独立桶（与 lead 不混） | `expert_work_quota_*{agent="security-auditor"}` 与 `agent="lead-agent"` 各自计；rate-limit QPS 独立计 |
 | failure 时 release | 按 [16 § 5](./16-quota-rate-limit.md) `release_tokens(thread_id=child)` 标准流程 | child timeout / FAILED / sandbox 崩溃 都触发；避免预留 token 永久占用 |
 | 子树总和强约束 | spawn 时 `allocated ≤ lead.remaining`（见上文 Python 片段） | 配 commit 时级联累加，双保险防爆 |
 
@@ -354,21 +354,21 @@ subagent 相关事件按"agent 行为" vs "控制层事件"严格分流：
 ### 7.1 Metric
 
 ```
-helix_subagent_total{tenant,parent_agent,child_agent,state}                 counter
-helix_subagent_duration_seconds{tenant,child_agent,state}                    histogram
-helix_subagent_depth{tenant,parent_agent}                                    histogram
-helix_subagent_concurrent{tenant,parent_agent}                               gauge
-helix_subagent_token_usage{tenant,parent_agent,child_agent,direction}        counter
-helix_subagent_quota_exceeded_total{tenant,reason}                           counter
+expert_work_subagent_total{tenant,parent_agent,child_agent,state}                 counter
+expert_work_subagent_duration_seconds{tenant,child_agent,state}                    histogram
+expert_work_subagent_depth{tenant,parent_agent}                                    histogram
+expert_work_subagent_concurrent{tenant,parent_agent}                               gauge
+expert_work_subagent_token_usage{tenant,parent_agent,child_agent,direction}        counter
+expert_work_subagent_quota_exceeded_total{tenant,reason}                           counter
    # reason = depth | tree_size | concurrent | tokens
 ```
 
 ### 7.2 OTel span
 
-- `helix.subagent.spawn`（attrs：parent_session_id, parent_agent, parent_agent_version, child_agent, child_agent_version, depth, timeout_s）
-- `helix.subagent.execute`（child trace 入口；与 parent 通过 Link 关联；attrs：child_agent, child_agent_version）
-- `helix.subagent.cancel`（attrs：reason, child_agent_version）
-- `helix.subagent.timeout`（attrs：elapsed_s, child_state_at_timeout, child_agent_version）
+- `expert_work.subagent.spawn`（attrs：parent_session_id, parent_agent, parent_agent_version, child_agent, child_agent_version, depth, timeout_s）
+- `expert_work.subagent.execute`（child trace 入口；与 parent 通过 Link 关联；attrs：child_agent, child_agent_version）
+- `expert_work.subagent.cancel`（attrs：reason, child_agent_version）
+- `expert_work.subagent.timeout`（attrs：elapsed_s, child_state_at_timeout, child_agent_version）
 
 所有 span 必带 `agent_version`（[C8](./REVIEW-NOTES.md) 规范）；child span 的 `agent_version` 指 child 的，parent attrs 用 `parent_agent_version` 区分。
 

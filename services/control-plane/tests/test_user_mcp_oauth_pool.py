@@ -9,11 +9,11 @@ import pytest
 
 from control_plane.tenant_scope import bypass_rls_session
 from control_plane.user_mcp_oauth_pool import McpClientFactory, UserMcpOAuthPoolService
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryMcpConnectorCatalogStore,
     InMemoryMcpOAuthConnectionStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     McpConnectorAuthSchema,
     McpConnectorCatalogUpsert,
     McpOAuthConnectionPatch,
@@ -75,7 +75,7 @@ async def _seed_connection(
             user_id=user_id,
             patch=McpOAuthConnectionPatch(
                 status="connected",
-                access_token_ref=f"secret://helix-agent/tenant/{tenant_id}/mcp-oauth/{rec.id}/access",
+                access_token_ref=f"secret://expert-work/tenant/{tenant_id}/mcp-oauth/{rec.id}/access",
                 token_expires_at=expires_at,
                 clear_flow_state=True,
             ),
@@ -198,7 +198,7 @@ async def test_refresher_renews_near_expiry_and_attaches() -> None:
     import httpx
 
     from control_plane.mcp_oauth_refresh import McpOAuthRefresher
-    from helix_agent.testing import InMemorySecretStore
+    from expert_work.testing import InMemorySecretStore
 
     cat_store = InMemoryMcpConnectorCatalogStore()
     oauth_store = InMemoryMcpOAuthConnectionStore()
@@ -214,8 +214,8 @@ async def test_refresher_renews_near_expiry_and_attaches() -> None:
         oauth_state="st",
         pkce_verifier="pv",
     )
-    access_ref = f"secret://helix-agent/tenant/{tid}/mcp-oauth/{rec.id}/access"
-    refresh_ref = f"secret://helix-agent/tenant/{tid}/mcp-oauth/{rec.id}/refresh"
+    access_ref = f"secret://expert-work/tenant/{tid}/mcp-oauth/{rec.id}/access"
+    refresh_ref = f"secret://expert-work/tenant/{tid}/mcp-oauth/{rec.id}/refresh"
     await sec.put(access_ref.removeprefix("secret://"), "AT1")
     await sec.put(refresh_ref.removeprefix("secret://"), "RT1")
     await oauth_store.update(

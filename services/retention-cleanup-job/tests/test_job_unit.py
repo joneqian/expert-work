@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence import InMemoryArtifactStore, InMemoryImageUploadStore
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.persistence import InMemoryArtifactStore, InMemoryImageUploadStore
+from expert_work.runtime.storage import InMemoryObjectStore
 from retention_cleanup_job.job import CleanupReport, RetentionCleanupJob
 
 
@@ -120,7 +120,7 @@ async def test_delete_expired_images_purges_old_rows_and_object_keys() -> None:
     assert rows == 1
     assert keys_ok == 1
     assert keys_failed == 0
-    from helix_agent.runtime.storage.base import ObjectNotFoundError
+    from expert_work.runtime.storage.base import ObjectNotFoundError
 
     # Old row + key gone.
     assert await images.get(image_id=old_id, tenant_id=tenant) is None
@@ -320,8 +320,8 @@ async def test_sweep_approval_timeouts_noop_without_store() -> None:
 @pytest.mark.asyncio
 async def test_sweep_approval_timeouts_auto_rejects_expired_pending() -> None:
     """Pending rows past ``timeout_at`` flip to TIMEOUT; fresh ones survive."""
-    from helix_agent.persistence import InMemoryApprovalStore
-    from helix_agent.protocol import ApprovalRecord, ApprovalStatus
+    from expert_work.persistence import InMemoryApprovalStore
+    from expert_work.protocol import ApprovalRecord, ApprovalStatus
 
     approvals = InMemoryApprovalStore()
     now = datetime.now(UTC)

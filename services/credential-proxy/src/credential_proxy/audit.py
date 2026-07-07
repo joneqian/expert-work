@@ -13,7 +13,7 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from credential_proxy.domain import EgressAuditEntry, ProxyAuditEntry
-from helix_agent.persistence.models import CredentialProxyAuditRow, SandboxEgressAuditRow
+from expert_work.persistence.models import CredentialProxyAuditRow, SandboxEgressAuditRow
 
 logger = logging.getLogger(__name__)
 

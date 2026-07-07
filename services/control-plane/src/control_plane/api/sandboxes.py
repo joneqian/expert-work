@@ -15,9 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from control_plane.api._authz import _principal
 from control_plane.audit import emit
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.protocol import AuditAction, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.protocol import AuditAction, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator.tools.sandbox import SupervisorClient
 
 

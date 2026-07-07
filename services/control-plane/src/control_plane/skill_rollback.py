@@ -30,7 +30,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from helix_agent.protocol import TrajectoryOutcome
+from expert_work.protocol import TrajectoryOutcome
 
 __all__ = [
     "RollbackAction",

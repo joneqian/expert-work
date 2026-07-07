@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from helix_agent.runtime.middleware import LLMServerError
+from expert_work.runtime.middleware import LLMServerError
 from orchestrator.llm import (
     DEFAULT_TIME_PERIOD_S,
     LLMProvider,

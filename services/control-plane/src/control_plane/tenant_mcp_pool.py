@@ -17,9 +17,9 @@ import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
-from helix_agent.persistence import TenantMcpServerStore
-from helix_agent.protocol import TenantMcpServerRecord
-from helix_agent.runtime.secret_store import SecretStore
+from expert_work.persistence import TenantMcpServerStore
+from expert_work.protocol import TenantMcpServerRecord
+from expert_work.runtime.secret_store import SecretStore
 from orchestrator.tools.mcp import (
     MCPClient,
     MCPServerConfig,
@@ -27,7 +27,7 @@ from orchestrator.tools.mcp import (
     MCPServerPoolLimitError,
 )
 
-logger = logging.getLogger("helix.control_plane.tenant_mcp_pool")
+logger = logging.getLogger("expert_work.control_plane.tenant_mcp_pool")
 
 # Bounded rebuild attempts when invalidation keeps landing mid-build (audit #2).
 _MAX_BUILD_ATTEMPTS = 5

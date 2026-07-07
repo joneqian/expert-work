@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 
 from control_plane.middleware import ObservabilityMiddleware
 from control_plane.middleware.observability import TRACE_ID_HEADER
-from helix_agent.common.observability import init_tracing
+from expert_work.common.observability import init_tracing
 
 
 @pytest.fixture(scope="module")
@@ -75,8 +75,8 @@ async def test_span_records_status_code(tracer_provider: TracerProvider) -> None
         await client.get("/ping")
 
     spans = exporter.get_finished_spans()
-    http_spans = [s for s in spans if s.name == "helix.control_plane.http_request"]
-    assert http_spans, "expected at least one helix.control_plane.http_request span"
+    http_spans = [s for s in spans if s.name == "expert_work.control_plane.http_request"]
+    assert http_spans, "expected at least one expert_work.control_plane.http_request span"
     last = http_spans[-1]
     assert last.attributes is not None
     assert last.attributes.get("http.method") == "GET"

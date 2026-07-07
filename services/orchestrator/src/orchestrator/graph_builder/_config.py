@@ -12,8 +12,8 @@ from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
 
 #: Stream TE-2 — key under which the run's :class:`AuditLogger` travels in
 #: ``config["configurable"]`` (a live object, like the cancellation token —

@@ -9,7 +9,7 @@ from control_plane.platform_quality_config import (
     resolve_effective_quality_config,
 )
 from control_plane.settings import Settings
-from helix_agent.persistence.platform_quality_config import (
+from expert_work.persistence.platform_quality_config import (
     InMemoryPlatformQualityConfigStore,
     PlatformQualityConfigRow,
 )

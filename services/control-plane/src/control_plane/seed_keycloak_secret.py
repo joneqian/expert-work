@@ -17,7 +17,7 @@ This one-shot CLI breaks that bootstrap gap, mirroring
     docker compose exec control-plane \\
       python -m control_plane.seed_keycloak_secret --value dev-internal-secret-rotate-me
 
-The value may also be supplied via ``HELIX_AGENT_KEYCLOAK_ADMIN_CLIENT_SECRET``.
+The value may also be supplied via ``EXPERT_WORK_KEYCLOAK_ADMIN_CLIENT_SECRET``.
 ``put`` writes a new current version each run, so re-running after a Keycloak
 client-secret rotation is the supported update path (idempotent in effect).
 See ``docs/runbooks/getting-started.md`` for the end-to-end local recipe.
@@ -35,17 +35,17 @@ from control_plane.encrypted_secret_store import (
     build_kek_from_b64,
 )
 from control_plane.settings import Settings
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     build_rls_sessionmaker,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.runtime.secret_store import SecretStore
+from expert_work.runtime.secret_store import SecretStore
 
-logger = logging.getLogger("helix.control_plane.seed_keycloak_secret")
+logger = logging.getLogger("expert_work.control_plane.seed_keycloak_secret")
 
-_ENV_VAR = "HELIX_AGENT_KEYCLOAK_ADMIN_CLIENT_SECRET"
+_ENV_VAR = "EXPERT_WORK_KEYCLOAK_ADMIN_CLIENT_SECRET"
 
 
 class SeedValueMissingError(ValueError):
@@ -84,7 +84,7 @@ async def _amain(args: argparse.Namespace) -> int:
         )
         return 2
     if settings.secret_encryption_key is None:
-        print("ERROR: HELIX_AGENT_SECRET_ENCRYPTION_KEY (base64 32-byte KEK) is required")
+        print("ERROR: EXPERT_WORK_SECRET_ENCRYPTION_KEY (base64 32-byte KEK) is required")
         return 2
 
     try:
@@ -125,7 +125,7 @@ def main() -> None:
     parser.add_argument(
         "--dsn",
         default=None,
-        help="Override the DB DSN (default: Settings.db_dsn / HELIX_AGENT_DB_DSN).",
+        help="Override the DB DSN (default: Settings.db_dsn / EXPERT_WORK_DB_DSN).",
     )
     args = parser.parse_args()
     raise SystemExit(asyncio.run(_amain(args)))

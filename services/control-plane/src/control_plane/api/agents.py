@@ -47,15 +47,15 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.uplift_metrics import record_manifest_provider_rejected
-from helix_agent.persistence import ApprovalStore
-from helix_agent.persistence.agent_disable import AgentDisableStore
-from helix_agent.persistence.agent_instance import AgentInstanceStore
-from helix_agent.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.persistence.thread_meta import ThreadMetaStore
-from helix_agent.protocol import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.uplift_metrics import record_manifest_provider_rejected
+from expert_work.persistence import ApprovalStore
+from expert_work.persistence.agent_disable import AgentDisableStore
+from expert_work.persistence.agent_instance import AgentInstanceStore
+from expert_work.persistence.agent_spec import AgentSpecStore, DuplicateAgentSpecError
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.persistence.thread_meta import ThreadMetaStore
+from expert_work.protocol import (
     AgentSpec,
     AgentSpecRecord,
     AgentSpecRevisionRecord,
@@ -68,11 +68,11 @@ from helix_agent.protocol import (
     TenantPlan,
     tier_satisfies,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunStore
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunStore
 from orchestrator import AgentFactoryError
 
-logger = logging.getLogger("helix.control_plane.agents")
+logger = logging.getLogger("expert_work.control_plane.agents")
 
 
 class ManifestPayload(BaseModel):
@@ -499,7 +499,7 @@ def build_agents_router() -> APIRouter:
         # Empty ``supported_providers`` = deployment hasn't opted into
         # Stream O yet (legacy / dev mode); the gate is a no-op so
         # existing manifests keep working. Operators opt in by setting
-        # ``HELIX_AGENT_SUPPORTED_PROVIDERS`` env, which activates the
+        # ``EXPERT_WORK_SUPPORTED_PROVIDERS`` env, which activates the
         # whitelist enforcement.
         settings = request.app.state.settings
         supported = set(settings.supported_providers)
@@ -813,7 +813,7 @@ def build_agents_router() -> APIRouter:
         One call: mints the end-user, resolves ``agent_code``, binds / continues a
         session, then spawns the run **scoped to the end-user** — long-term memory,
         the workspace volume, and per-user token cost all key on the minted user, not
-        the API-key caller. Returns the SSE stream (``X-Helix-Session-Id`` header) or
+        the API-key caller. Returns the SSE stream (``X-Expert-Work-Session-Id`` header) or
         202 for queue mode. The agent definition is shared across the tenant's users;
         per-user isolation is the user-scoped state.
         """
@@ -883,7 +883,7 @@ def build_agents_router() -> APIRouter:
             oauth_subject=str(end_user_id),
             payload=run_payload,
             trace_id=trace_id,
-            extra_headers={"X-Helix-Session-Id": str(thread_id)},
+            extra_headers={"X-Expert-Work-Session-Id": str(thread_id)},
             on_behalf_of=str(end_user_id),
         )
 

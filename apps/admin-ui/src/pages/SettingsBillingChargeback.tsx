@@ -163,7 +163,7 @@ export function SettingsBillingChargeback() {
 
   const moneyCol = useCallback(
     (v: number) => (
-      <Text style={{ fontFamily: "var(--hx-font-mono)" }}>
+      <Text style={{ fontFamily: "var(--ew-font-mono)" }}>
         {formatMicros(v)}
       </Text>
     ),
@@ -388,8 +388,8 @@ export function SettingsBillingChargeback() {
                   flexWrap: "wrap",
                   padding: 16,
                   marginBottom: 16,
-                  background: "var(--hx-surface-raised)",
-                  border: "1px solid var(--hx-border-subtle)",
+                  background: "var(--ew-surface-raised)",
+                  border: "1px solid var(--ew-border-subtle)",
                   borderRadius: 6,
                 }}
                 data-testid="chargeback-summary"
@@ -397,17 +397,17 @@ export function SettingsBillingChargeback() {
                 <Statistic
                   title={t("chargeback.total_base")}
                   value={formatMicros(data?.total_base_cost_micros ?? 0)}
-                  valueStyle={{ fontFamily: "var(--hx-font-mono)" }}
+                  valueStyle={{ fontFamily: "var(--ew-font-mono)" }}
                 />
                 <Statistic
                   title={t("chargeback.total_billed")}
                   value={formatMicros(data?.total_billed_cost_micros ?? 0)}
-                  valueStyle={{ fontFamily: "var(--hx-font-mono)" }}
+                  valueStyle={{ fontFamily: "var(--ew-font-mono)" }}
                 />
                 <Statistic
                   title={t("chargeback.total_margin")}
                   value={formatMicros(data?.total_margin_micros ?? 0)}
-                  valueStyle={{ fontFamily: "var(--hx-font-mono)" }}
+                  valueStyle={{ fontFamily: "var(--ew-font-mono)" }}
                 />
                 {data?.as_of != null && (
                   <Statistic

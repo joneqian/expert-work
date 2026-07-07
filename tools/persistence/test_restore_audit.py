@@ -33,8 +33,8 @@ if str(_TOOLS / "persistence") not in sys.path:
 from restore_audit import restore_audit_rows  # noqa: E402
 
 from audit_backup_worker.serialization import object_key_for, serialize_row  # noqa: E402
-from helix_agent.persistence.models import AuditLogRow  # noqa: E402
-from helix_agent.runtime.storage.memory import InMemoryObjectStore  # noqa: E402
+from expert_work.persistence.models import AuditLogRow  # noqa: E402
+from expert_work.runtime.storage.memory import InMemoryObjectStore  # noqa: E402
 
 
 def _row(tenant: object, action: str = "session:write") -> AuditLogRow:

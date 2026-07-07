@@ -34,12 +34,12 @@ from control_plane.api._skill_zip import (
     SkillPackageError,
     parse_skill_zip,
 )
-from helix_agent.protocol.skill import SkillPackageLayoutError
+from expert_work.protocol.skill import SkillPackageLayoutError
 
 
 def _build_skill_md(body: str, *, name: str = "foo") -> bytes:
     fm = yaml.safe_dump(
-        {"name": name, "description": "ok", "helix": {"version": 1}},
+        {"name": name, "description": "ok", "expert_work": {"version": 1}},
         sort_keys=False,
         allow_unicode=True,
     )
@@ -58,7 +58,7 @@ def _blocked_count() -> float:
     """Read the live counter sample. Tests are not strict on absolute
     values (other tests in the suite bump it) — they assert deltas."""
     value = REGISTRY.get_sample_value(
-        "helix_uplift_skill_blocked_total",
+        "expert_work_uplift_skill_blocked_total",
         {"phase": "zip_import"},
     )
     return float(value) if value is not None else 0.0

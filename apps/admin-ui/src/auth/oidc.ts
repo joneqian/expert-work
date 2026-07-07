@@ -25,7 +25,7 @@ import { UserManager, WebStorageStateStore, type User, type UserManagerSettings 
 export interface OidcConfig {
   issuer: string;
   clientId: string;
-  /** API audience the IdP should put in the ``aud`` claim. Helix's
+  /** API audience the IdP should put in the ``aud`` claim. Expert Work's
    *  JWTVerifier checks this against the configured backend audience.
    *  When unset, oidc-client-ts uses ``client_id`` (default per OIDC
    *  spec). */
@@ -102,7 +102,7 @@ export function getUserManager(): UserManager | null {
     // separate windows doesn't accidentally cross identities.
     userStore: new WebStorageStateStore({
       store: typeof window === "undefined" ? undefined : window.sessionStorage,
-      prefix: "helix.admin.oidc.",
+      prefix: "expert_work.admin.oidc.",
     }),
     extraQueryParams,
   };
@@ -134,7 +134,7 @@ export async function signIn(returnPath = "/agents"): Promise<void> {
 }
 
 export interface SignInResult {
-  /** id_token used as the bearer the helix backend verifies. */
+  /** id_token used as the bearer the expert_work backend verifies. */
   idToken: string;
   /** ``state.returnPath`` from :func:`signIn`, or ``"/agents"`` default. */
   returnPath: string;

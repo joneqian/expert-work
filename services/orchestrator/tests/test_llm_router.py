@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from helix_agent.runtime.middleware import (
+from expert_work.runtime.middleware import (
     CircuitOpenError,
     LLMClientError,
     LLMKeyUnavailableError,
@@ -400,10 +400,10 @@ async def test_fast_provider_under_deadline_succeeds() -> None:
 @pytest.mark.asyncio
 async def test_stream_stale_emits_counter() -> None:
     """L3 verification — a stale event increments
-    ``helix_llm_stream_stale_total{provider_key=...}``."""
+    ``expert_work_llm_stream_stale_total{provider_key=...}``."""
     from prometheus_client import REGISTRY
 
-    metric = "helix_llm_stream_stale_total"
+    metric = "expert_work_llm_stream_stale_total"
     labels = {"provider_key": "counter-test"}
     before = REGISTRY.get_sample_value(metric, labels=labels) or 0.0
 

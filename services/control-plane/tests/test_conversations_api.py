@@ -18,9 +18,9 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.token_usage_store import TokenUsageRecord
-from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.token_usage_store import TokenUsageRecord
+from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -310,7 +310,7 @@ async def test_q_matches_title_or_message_content(
     client_and_threads: tuple[AsyncClient, dict[str, UUID]],
 ) -> None:
     """IA M4 — one search box spans the title AND the mirrored transcript."""
-    from helix_agent.persistence import MessageTurn
+    from expert_work.persistence import MessageTurn
 
     client, ids = client_and_threads
     # Seed the transcript mirror for a conversation whose TITLE doesn't match.

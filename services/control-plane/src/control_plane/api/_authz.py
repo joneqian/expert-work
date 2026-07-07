@@ -17,12 +17,12 @@ from fastapi import Depends, HTTPException, Request
 from control_plane.audit import emit
 from control_plane.auth.abac import ResourceAttrs, authorize_resource
 from control_plane.auth.rbac import Action, Resource, collect_roles_for_audit, is_allowed
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.auth import RoleBindingStore
-from helix_agent.protocol import AuditAction, AuditResult, Principal, RoleBinding
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.auth import RoleBindingStore
+from expert_work.protocol import AuditAction, AuditResult, Principal, RoleBinding
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.api.authz")
+logger = logging.getLogger("expert_work.control_plane.api.authz")
 
 
 def _get_audit(request: Request) -> AuditLogger:

@@ -32,7 +32,7 @@ from uuid import UUID
 
 import httpx
 
-from helix_agent.common.observability import inject_context
+from expert_work.common.observability import inject_context
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
 
 logger = logging.getLogger(__name__)

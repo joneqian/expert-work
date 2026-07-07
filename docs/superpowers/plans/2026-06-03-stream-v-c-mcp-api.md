@@ -15,9 +15,9 @@
 **Key facts (verified 2026-06-03):**
 - Endpoint auth: `from control_plane.api._authz import require` → `Depends(require(resource, action))`; principal via the same dep. `principal.tenant_id` (UUID), `principal.subject_id` (str).
 - RBAC matrix: `services/control-plane/src/control_plane/auth/rbac.py` — `Resource`/`Action` Literals + `_grants(role)` per-role dict. **No `mcp_server` resource exists yet.**
-- Audit: `await emit(audit, tenant_id=, actor_id=, action=AuditAction.X, resource_type="...", resource_id=, trace_id=current_trace_id_hex(), details={...})` from `control_plane.audit`. `AuditAction` is a **single StrEnum** in `packages/helix-protocol/src/helix_agent/protocol/audit.py`. `ResourceType` is a Literal duplicated in BOTH `services/control-plane/src/control_plane/audit.py` AND `packages/helix-protocol/src/helix_agent/protocol/audit.py` — [memory:project_audit_literal_drift] both must change together.
-- Secret store dep pattern (Stream Q): `services/control-plane/src/control_plane/api/platform_config.py` — `await secret_store.put(name, value.get_secret_value())` then store `f"secret://{name}"`. Retrieve: `await secret_store.get(parse_secret_ref(ref))` (`from helix_agent.runtime.secret_store.refs import parse_secret_ref`).
-- Remote MCP client: `from orchestrator.tools.mcp import SseMCPClient, StreamableHttpMCPClient, MCPServerConfig, MCPToolDef` — lifecycle `await client.start()` → `await client.list_tools()` → `await client.close()`. Bearer header injected via `resolved_headers={"Authorization": f"Bearer {token}"}` passed to the client constructor. control-plane already depends on `helix-agent-orchestrator`.
+- Audit: `await emit(audit, tenant_id=, actor_id=, action=AuditAction.X, resource_type="...", resource_id=, trace_id=current_trace_id_hex(), details={...})` from `control_plane.audit`. `AuditAction` is a **single StrEnum** in `packages/expert-work-protocol/src/expert_work/protocol/audit.py`. `ResourceType` is a Literal duplicated in BOTH `services/control-plane/src/control_plane/audit.py` AND `packages/expert-work-protocol/src/expert_work/protocol/audit.py` — [memory:project_audit_literal_drift] both must change together.
+- Secret store dep pattern (Stream Q): `services/control-plane/src/control_plane/api/platform_config.py` — `await secret_store.put(name, value.get_secret_value())` then store `f"secret://{name}"`. Retrieve: `await secret_store.get(parse_secret_ref(ref))` (`from expert_work.runtime.secret_store.refs import parse_secret_ref`).
+- Remote MCP client: `from orchestrator.tools.mcp import SseMCPClient, StreamableHttpMCPClient, MCPServerConfig, MCPToolDef` — lifecycle `await client.start()` → `await client.list_tools()` → `await client.close()`. Bearer header injected via `resolved_headers={"Authorization": f"Bearer {token}"}` passed to the client constructor. control-plane already depends on `expert-work-orchestrator`.
 - Agent spec store: `request.app.state` has the agent spec store; `list_by_tenant(*, tenant_id, status=None, limit, offset)` → records with `.spec_json` (dict). (Confirm the exact app.state attribute name + store type by grepping `agent_spec` in `app.py`.)
 - Response envelope: success `{"success": True, "data": <obj>, "error": None}`; error `HTTPException(status_code, detail={"code": "...", "message": "..."})`.
 - Mirror router for structure/DI/tests: `services/control-plane/src/control_plane/api/service_accounts.py` + `services/control-plane/tests/` (service-account / platform-config API tests).
@@ -35,7 +35,7 @@
 
 **Modify:**
 - `services/control-plane/src/control_plane/auth/rbac.py` — add `"mcp_server"` to `Resource`; grant it in `_grants` for ADMIN/OPERATOR/VIEWER.
-- `packages/helix-protocol/src/helix_agent/protocol/audit.py` — add `MCP_SERVER_CREATE/UPDATE/DELETE` to `AuditAction`; add `"tenant_mcp_server"` to the `ResourceType` Literal.
+- `packages/expert-work-protocol/src/expert_work/protocol/audit.py` — add `MCP_SERVER_CREATE/UPDATE/DELETE` to `AuditAction`; add `"tenant_mcp_server"` to the `ResourceType` Literal.
 - `services/control-plane/src/control_plane/audit.py` — add `"tenant_mcp_server"` to its `ResourceType` Literal.
 - `services/control-plane/src/control_plane/app.py` — construct `SqlTenantMcpServerStore` into the store bundle, attach to `app.state`, include the new router.
 
@@ -59,7 +59,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from control_plane.auth.rbac import is_allowed
-from helix_agent.protocol import Principal, Role
+from expert_work.protocol import Principal, Role
 
 
 def _principal(role: Role) -> Principal:
@@ -96,7 +96,7 @@ def test_viewer_read_only_mcp_server() -> None:
 
 - [ ] **Step 2: Run it to confirm it fails**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_rbac_mcp_server.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_rbac_mcp_server.py -q`
 Expected: FAIL — `mcp_server` is not a valid `Resource` literal / not granted (mypy/type or assertion failure).
 
 - [ ] **Step 3: Add the resource + grants**
@@ -111,7 +111,7 @@ Add a short comment on each like `# Stream V — tenant remote MCP server regist
 
 - [ ] **Step 4: Run tests to confirm pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_rbac_mcp_server.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_rbac_mcp_server.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -126,7 +126,7 @@ git commit -m "feat(stream-v): RBAC mcp_server resource (V-C)"
 ## Task 2: Audit — new actions + resource type (both Literals)
 
 **Files:**
-- Modify: `packages/helix-protocol/src/helix_agent/protocol/audit.py`
+- Modify: `packages/expert-work-protocol/src/expert_work/protocol/audit.py`
 - Modify: `services/control-plane/src/control_plane/audit.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -138,7 +138,7 @@ Add `services/control-plane/tests/test_audit_mcp_server_types.py`:
 
 from __future__ import annotations
 
-from helix_agent.protocol import AuditAction
+from expert_work.protocol import AuditAction
 
 
 def test_mcp_server_audit_actions_exist() -> None:
@@ -152,7 +152,7 @@ def test_resource_type_literal_includes_tenant_mcp_server() -> None:
     from typing import get_args
 
     from control_plane.audit import ResourceType as CpResourceType
-    from helix_agent.protocol.audit import ResourceType as ProtoResourceType
+    from expert_work.protocol.audit import ResourceType as ProtoResourceType
 
     assert "tenant_mcp_server" in get_args(CpResourceType)
     assert "tenant_mcp_server" in get_args(ProtoResourceType)
@@ -160,12 +160,12 @@ def test_resource_type_literal_includes_tenant_mcp_server() -> None:
 
 - [ ] **Step 2: Run to confirm fail**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_audit_mcp_server_types.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_audit_mcp_server_types.py -q`
 Expected: FAIL (`AttributeError: MCP_SERVER_CREATE` / assertion on missing literal member).
 
 - [ ] **Step 3: Add the enum members + literal members**
 
-In `packages/helix-protocol/src/helix_agent/protocol/audit.py`:
+In `packages/expert-work-protocol/src/expert_work/protocol/audit.py`:
 1. Add to the `AuditAction` StrEnum (match the existing `resource:verb` value convention, e.g. near other resource actions):
    ```python
    MCP_SERVER_CREATE = "mcp_server:create"
@@ -179,13 +179,13 @@ In `services/control-plane/src/control_plane/audit.py`:
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_audit_mcp_server_types.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_audit_mcp_server_types.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/helix-protocol/src/helix_agent/protocol/audit.py services/control-plane/src/control_plane/audit.py services/control-plane/tests/test_audit_mcp_server_types.py
+git add packages/expert-work-protocol/src/expert_work/protocol/audit.py services/control-plane/src/control_plane/audit.py services/control-plane/tests/test_audit_mcp_server_types.py
 git commit -m "feat(stream-v): MCP_SERVER audit actions + tenant_mcp_server resource type (V-C)"
 ```
 
@@ -311,7 +311,7 @@ async def test_probe_always_closes_client() -> None:
 
 - [ ] **Step 2: Run to confirm fail**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_mcp_probe.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_mcp_probe.py -q`
 Expected: FAIL — `ModuleNotFoundError: control_plane.mcp_probe`.
 
 - [ ] **Step 3: Implement the probe**
@@ -341,9 +341,9 @@ from orchestrator.tools.mcp import (
     StreamableHttpMCPClient,
 )
 
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
 
-logger = logging.getLogger("helix.control_plane.mcp_probe")
+logger = logging.getLogger("expert_work.control_plane.mcp_probe")
 
 # A factory so tests can inject a fake client. Production builds the real
 # transport client from config + already-resolved headers.
@@ -425,12 +425,12 @@ Note on the `MCPServerConfig` construction: bearer auth requires `auth_config["t
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_mcp_probe.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_mcp_probe.py -q`
 Expected: PASS (5 tests). If the `noqa: BLE001`/broad-except trips ruff, narrow per Step 6.
 
 - [ ] **Step 5: Lint/type**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run ruff check services/control-plane/src/control_plane/mcp_probe.py services/control-plane/tests/test_mcp_probe.py && uv run mypy services/control-plane/src/control_plane/mcp_probe.py`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run ruff check services/control-plane/src/control_plane/mcp_probe.py services/control-plane/tests/test_mcp_probe.py && uv run mypy services/control-plane/src/control_plane/mcp_probe.py`
 Expected: clean. (Note: catching `(TimeoutError, Exception)` is redundant since `Exception` covers it; if ruff/mypy complains, use just `except Exception` with a `# noqa: BLE001` and rely on it also catching asyncio timeout — `asyncio.TimeoutError` is `TimeoutError` which is an `Exception`.)
 
 - [ ] **Step 6: Commit**
@@ -490,7 +490,7 @@ def test_handles_missing_or_malformed_tools() -> None:
 
 - [ ] **Step 2: Run to confirm fail**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_mcp_server_reference_check.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_mcp_server_reference_check.py -q`
 Expected: FAIL — module/function does not exist.
 
 - [ ] **Step 3: Implement the helper**
@@ -530,7 +530,7 @@ def manifest_references_server(spec_json: Mapping[str, Any], server_name: str) -
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_mcp_server_reference_check.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_mcp_server_reference_check.py -q`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
@@ -566,24 +566,24 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from control_plane.api._authz import require
 from control_plane.audit import emit
 from control_plane.mcp_probe import McpProbeError, probe_remote_mcp
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
-from helix_agent.persistence import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.persistence import (
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
     TenantMcpServerStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     McpServerAuthType,
     McpServerTransport,
     Principal,
     TenantMcpServerPatch,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store.base import SecretStore
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.secret_store.base import SecretStore
 
-logger = logging.getLogger("helix.control_plane.api.mcp_servers")
+logger = logging.getLogger("expert_work.control_plane.api.mcp_servers")
 
 _DEFAULT_TIMEOUT_S = 30.0
 
@@ -624,7 +624,7 @@ def _get_agent_spec_store(request: Request):  # type: ignore[no-untyped-def]
 
 
 def _token_secret_name(tenant_id: UUID, name: str) -> str:
-    return f"helix-agent/tenant/{tenant_id}/mcp/{name}/token"
+    return f"expert-work/tenant/{tenant_id}/mcp/{name}/token"
 
 
 def _public(record: object) -> dict[str, object]:
@@ -763,7 +763,7 @@ def build_mcp_servers_router() -> APIRouter:
             if payload.token is not None:
                 raw_token = payload.token.get_secret_value()
             elif existing.token_secret_ref is not None:
-                from helix_agent.runtime.secret_store.refs import parse_secret_ref
+                from expert_work.runtime.secret_store.refs import parse_secret_ref
 
                 raw_token = await secret_store.get(parse_secret_ref(existing.token_secret_ref))
             else:
@@ -842,7 +842,7 @@ Adjust any import path that doesn't resolve (e.g. `SecretStore` location, `Audit
 
 - [ ] **Step 4: Type/lint check**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run ruff check services/control-plane/src/control_plane/api/mcp_servers.py && uv run mypy services/control-plane/src/control_plane/api/mcp_servers.py`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run ruff check services/control-plane/src/control_plane/api/mcp_servers.py && uv run mypy services/control-plane/src/control_plane/api/mcp_servers.py`
 Expected: clean (control-plane/src is NOT in the CI mypy gate per [memory:reference_ci_lint_type_test_scopes], but run it anyway to catch obvious bugs).
 
 - [ ] **Step 5: Commit**
@@ -862,7 +862,7 @@ git commit -m "feat(stream-v): /v1/mcp-servers CRUD router with connect-probe (V
 - [ ] **Step 1: Wire the store exactly like an existing tenant-scoped store**
 
 In `app.py`, grep for `service_account` (or `tenant_config`) to find every wiring site, and add a parallel `tenant_mcp_server` entry at each:
-1. Import: `from helix_agent.persistence import SqlTenantMcpServerStore, InMemoryTenantMcpServerStore, TenantMcpServerStore` (match the existing import grouping).
+1. Import: `from expert_work.persistence import SqlTenantMcpServerStore, InMemoryTenantMcpServerStore, TenantMcpServerStore` (match the existing import grouping).
 2. `_SqlStores` dataclass: add field `tenant_mcp_server: TenantMcpServerStore`.
 3. `_build_sql_stores(...)`: add `tenant_mcp_server=SqlTenantMcpServerStore(session_factory),`.
 4. In `create_app` where stores are resolved (sql vs in-memory fallback), add:
@@ -880,7 +880,7 @@ app.include_router(build_mcp_servers_router())
 
 - [ ] **Step 3: Smoke-check the app imports + routes**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -c "
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -c "
 from control_plane.app import create_app
 " 2>&1 | tail -5` (or the project's app-construction smoke test). Confirm no import error. Then run any existing app/route smoke test: `uv run python -m pytest services/control-plane/tests -k "app or routes or openapi" -q` if present.
 
@@ -952,7 +952,7 @@ async def test_post_probes_persists_and_encrypts_token(monkeypatch) -> None:
         assert "ghp_REALTOKEN" not in resp.text
         assert "token_secret_ref" not in body["data"]
         # the raw token IS resolvable from the secret store under the tenant path
-        ref_name = f"helix-agent/tenant/{tenant_id}/mcp/github/token"
+        ref_name = f"expert-work/tenant/{tenant_id}/mcp/github/token"
         assert await app.state.secret_store.get(ref_name) == "ghp_REALTOKEN"
 
 
@@ -1038,7 +1038,7 @@ Implement the `_make_app_with_admin()` / `_seed_viewer_headers()` helpers by mir
 
 - [ ] **Step 3: Run the API tests**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_mcp_servers_api.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_mcp_servers_api.py -q`
 Expected: PASS. Debug fixture wiring against the sibling test until green.
 
 - [ ] **Step 4: Commit**
@@ -1054,19 +1054,19 @@ git commit -m "test(stream-v): /v1/mcp-servers API tests (probe, encryption, RBA
 
 - [ ] **Step 1: Run the affected test scope**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest -m "not integration" services/control-plane packages/helix-protocol -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest -m "not integration" services/control-plane packages/expert-work-protocol -q`
 Expected: PASS, no regressions.
 
 - [ ] **Step 2: Lint + type (CI scope)**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run ruff check . && uv run ruff format --check .`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run ruff check . && uv run ruff format --check .`
 Expected: clean. Fix RUF/UP/B traps ([memory:feedback_ruff_strict_lint_traps]).
 
 Run the CI mypy command exactly ([memory:reference_ci_lint_type_test_scopes] — note it covers `packages` + several `services/*/src` but NOT `control-plane/src`):
-`cd /Users/mac/src/github/jone_qian/helix-agent && uv run mypy packages services/audit-backup-worker/src services/event-log-archive-job/src services/orchestrator/src services/retention-cleanup-job/src`
+`cd /Users/mac/src/github/jone_qian/expert-work && uv run mypy packages services/audit-backup-worker/src services/event-log-archive-job/src services/orchestrator/src services/retention-cleanup-job/src`
 Expected: clean (the protocol audit.py change is in-scope here).
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && pre-commit run --all-files` (if installed).
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && pre-commit run --all-files` (if installed).
 
 - [ ] **Step 3: Confirm no uv.lock drift**
 
@@ -1075,7 +1075,7 @@ Run: `git status --short uv.lock` — expect empty.
 - [ ] **Step 4: Push + PR**
 
 ```bash
-cd /Users/mac/src/github/jone_qian/helix-agent
+cd /Users/mac/src/github/jone_qian/expert-work
 git push -u origin stream-v/c-api
 gh pr create --base main --head stream-v/c-api \
   --title "feat(stream-v): PR C — MCP Server Registration API (CRUD + connect-probe)" \

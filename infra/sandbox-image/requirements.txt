@@ -1,4 +1,4 @@
-# Helix "office" sandbox image — Python office libraries (OFFICE-ADR-1).
+# Expert Work "office" sandbox image — Python office libraries (OFFICE-ADR-1).
 #
 # Top-level pins only; transitive deps (numpy, pdfminer.six, lxml, …) are
 # resolved by pip from manylinux wheels — no compiler in the image. Keep

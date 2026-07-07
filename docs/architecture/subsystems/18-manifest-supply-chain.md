@@ -119,7 +119,7 @@ CREATE TABLE signature_policy (
 [revoked]                      ← 写 revoked_at；旧 session 跑完即停
 ```
 
-**关键约束**：未到 `signed` 不能进入 prod；prod 环境 `HELIX_REQUIRE_SIGNATURE=true` 强制开启。
+**关键约束**：未到 `signed` 不能进入 prod；prod 环境 `EXPERT_WORK_REQUIRE_SIGNATURE=true` 强制开启。
 
 ---
 
@@ -260,22 +260,22 @@ PR 修改 agents/*/manifest.yaml
 
 > 日志完整字段遵循 [20 § 5.3](./20-observability.md)。
 
-**Metrics**（OTel，统一 `helix_*` 前缀，与 20 命名规范对齐）：
-- `helix_manifest_sign_total{tenant, signer_id, result}` — 签名调用计数
-- `helix_manifest_verify_total{tenant, env, result}` — 验签调用计数
-- `helix_manifest_verify_duration_seconds` — 验签延迟（影响 hot reload P95）
-- `helix_manifest_signature_age_seconds{tenant, manifest_id}` — 当前 active manifest 签名距今秒数（监控陈旧）
-- `helix_image_attestation_verify_total{tenant, result}` — 镜像验签
-- `helix_manifest_revoked_total{tenant, reason}` — 撤销计数
+**Metrics**（OTel，统一 `expert_work_*` 前缀，与 20 命名规范对齐）：
+- `expert_work_manifest_sign_total{tenant, signer_id, result}` — 签名调用计数
+- `expert_work_manifest_verify_total{tenant, env, result}` — 验签调用计数
+- `expert_work_manifest_verify_duration_seconds` — 验签延迟（影响 hot reload P95）
+- `expert_work_manifest_signature_age_seconds{tenant, manifest_id}` — 当前 active manifest 签名距今秒数（监控陈旧）
+- `expert_work_image_attestation_verify_total{tenant, result}` — 镜像验签
+- `expert_work_manifest_revoked_total{tenant, reason}` — 撤销计数
 
-**Spans**（统一 `helix.*` 前缀）：
-- `helix.manifest.canonicalize`、`helix.manifest.sign`、`helix.manifest.verify`、`helix.image.verify`
+**Spans**（统一 `expert_work.*` 前缀）：
+- `expert_work.manifest.canonicalize`、`expert_work.manifest.sign`、`expert_work.manifest.verify`、`expert_work.image.verify`
 
 **Span attrs**（C8 一致性，含 `agent_version`）：
-- `helix.manifest.canonicalize`：tenant, manifest_id, agent_name, agent_version, hash
-- `helix.manifest.sign`：tenant, manifest_id, agent_name, agent_version, signer_id, signer_role
-- `helix.manifest.verify`：tenant, manifest_id, agent_name, agent_version, env, result, reason
-- `helix.image.verify`：tenant, image_ref, agent_name, agent_version, slsa_level, result
+- `expert_work.manifest.canonicalize`：tenant, manifest_id, agent_name, agent_version, hash
+- `expert_work.manifest.sign`：tenant, manifest_id, agent_name, agent_version, signer_id, signer_role
+- `expert_work.manifest.verify`：tenant, manifest_id, agent_name, agent_version, env, result, reason
+- `expert_work.image.verify`：tenant, image_ref, agent_name, agent_version, slsa_level, result
 
 > **早绑定例外**：当 manifest 操作发生在 agent 上下文外（如 admin 在 Admin UI 直接签名 / Control Plane 启动期 verify），无 `agent_name / agent_version`，这两个 attr 可缺省；其他 attrs 仍必填。
 
@@ -284,8 +284,8 @@ PR 修改 agents/*/manifest.yaml
 - 每次签名 → 同步写 `audit_log`（actor=signer_id, action='manifest:sign', resource_type='manifest', resource_id=manifest_id）
 
 **告警**（P0）：
-- `helix_manifest_verify_total{result="fail"}` > 0 in 5min → 立即 P0
-- `helix_manifest_signature_age_seconds` > 90 days → P2 提醒
+- `expert_work_manifest_verify_total{result="fail"}` > 0 in 5min → 立即 P0
+- `expert_work_manifest_signature_age_seconds` > 90 days → P2 提醒
 
 ---
 
@@ -323,7 +323,7 @@ PR 修改 agents/*/manifest.yaml
 - CI lint：schema / secret-ref / quota / subagent 循环（4 项）
 - CODEOWNERS + PR diff bot
 - 2 人 reviewer 强制（GitHub branch protection）
-- `HELIX_REQUIRE_SIGNATURE=false`（dev/staging）
+- `EXPERT_WORK_REQUIRE_SIGNATURE=false`（dev/staging）
 
 **不做**：cosign、镜像签名、SLSA、双签
 
@@ -334,7 +334,7 @@ PR 修改 agents/*/manifest.yaml
 - 签名服务（FastAPI 端点：`POST /v1/manifests/{id}/sign`）
 - Admin UI「签名」按钮 + 二次校验
 - Control Plane 加载时 verify 签名
-- prod 环境 `HELIX_REQUIRE_SIGNATURE=true`
+- prod 环境 `EXPERT_WORK_REQUIRE_SIGNATURE=true`
 - sandbox base image cosign 签名
 - 镜像扫描（Trivy）CI gate（CRITICAL 阻断）
 

@@ -118,7 +118,7 @@ function ConversationsPane({
             <Text>{record.run_count}</Text>
             {record.error_count > 0 && (
               <Tooltip title={t("conversations_page.error_count", { count: record.error_count })}>
-                <AlertTriangle size={13} strokeWidth={1.5} color="var(--hx-status-error, #f5222d)" />
+                <AlertTriangle size={13} strokeWidth={1.5} color="var(--ew-status-error, #f5222d)" />
               </Tooltip>
             )}
           </Space>
@@ -253,15 +253,15 @@ function UsagePane({ userId }: { userId: string }) {
             fontSize: 13,
           }}
         >
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("user_detail.usage_total")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("user_detail.usage_total")}</dt>
           <dd style={{ margin: 0 }} data-testid="user-usage-total">
             {formatCompact(totalTokens)}
           </dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("user_detail.usage_in_out")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("user_detail.usage_in_out")}</dt>
           <dd style={{ margin: 0 }}>
             {formatCompact(total.input_tokens)} / {formatCompact(total.output_tokens)}
           </dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("user_detail.usage_by_model")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("user_detail.usage_by_model")}</dt>
           <dd style={{ margin: 0 }}>
             {data.by_model.length > 0
               ? data.by_model

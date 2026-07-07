@@ -10,7 +10,7 @@
 ## TL;DR
 
 - **M0**：用 **阿里云 KMS Secrets Manager**（托管 secret 服务）作为应用 secret 后端
-- **抽象层**：所有应用代码通过 `helix_agent.runtime.secrets.SecretStore` 接口访问，**不直接绑 阿里云 SDK**；切换后端零代码改动
+- **抽象层**：所有应用代码通过 `expert_work.runtime.secrets.SecretStore` 接口访问，**不直接绑 阿里云 SDK**；切换后端零代码改动
 - **M1 触发条件 重新评估 Vault 自托管**：
   - 动态数据库凭证需求（短 TTL 自动轮换）
   - 跨云 / 离线部署需求
@@ -59,14 +59,14 @@
 **用法**：
 - 应用启动时 `actiontrail-aliyun-secrets:GetSecretValue` 读取
 - TTL cache（短 TTL，比如 1 小时）避免频繁查
-- secret 命名约定：`helix-agent/{env}/{service}/{key}`
+- secret 命名约定：`expert-work/{env}/{service}/{key}`
 
 **引用 URI（F.6 落地时定稿）**：manifest / tenant_config 不嵌 secret 值,只嵌**引用** —— 规范 scheme 是 `secret://<name>`,`<name>` 即上面的命名约定路径,由 `SecretStore.get(name)` 解析。`secret://` 刻意**后端无关**(manifest 不该知道后端是 KMS / Vault / dev .env)。Stream C 设计文里写的 `kms://` 泄漏了后端,F.6 的 `parse_secret_ref` 把它作为**兼容别名**接受(解析到同一 name),但 `secret://` 是规范形式,`kms://` 应迁移。
 
 ### 2.2 抽象层接口
 
 ```python
-# packages/helix-runtime/src/helix_agent/runtime/secret_store/base.py
+# packages/expert-work-runtime/src/expert_work/runtime/secret_store/base.py
 from typing import Protocol
 
 class SecretStore(Protocol):
@@ -121,7 +121,7 @@ class SecretStore(Protocol):
 
 ### 验证手段
 
-- [ ] 启动时从 KMS Secrets Manager 拿到 `/helix-agent/dev/llm/anthropic-api-key`
+- [ ] 启动时从 KMS Secrets Manager 拿到 `/expert-work/dev/llm/anthropic-api-key`
 - [ ] RAM Role 限定后无关 service 拿不到（403）
 - [ ] secret 旋转后 cache 在 1 小时内刷新
 - [ ] dev 模式从 `.env` 拿值，不接阿里云
@@ -141,7 +141,7 @@ class SecretStore(Protocol):
 
 ## 5. 落地引用
 
-- **Stream F.6（已落地）** SecretStore 抽象 + `LocalDevSecretStore` + `parse_secret_ref` + `make_secret_store` 工厂：`packages/helix-runtime/src/helix_agent/runtime/secret_store/`。`AliyunKmsSecretStore` 为 follow-up（见 § 2.2）。
+- **Stream F.6（已落地）** SecretStore 抽象 + `LocalDevSecretStore` + `parse_secret_ref` + `make_secret_store` 工厂：`packages/expert-work-runtime/src/expert_work/runtime/secret_store/`。`AliyunKmsSecretStore` 为 follow-up（见 § 2.2）。
 - **Stream F.5** Credential Proxy aiohttp 版从本抽象读后端 secret，再注入到沙盒外调
 - **agent factory（Stream E follow-up）** 从 manifest `secret://` 引用经本抽象解析出 provider API key，装配 `LLMRouter`
 - **environments/{env}.yaml** 已声明 `secrets.backend: tbd` 字段 → 实施时改为 `aliyun-kms-secrets`（prod/staging）或 `local-env`（dev）

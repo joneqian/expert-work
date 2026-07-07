@@ -37,20 +37,20 @@ from control_plane.uplift.threat_metrics import (
     record_threat_scan,
     record_trigger_blocked,
 )
-from helix_agent.common.observability import current_trace_id_hex, helix_counter
-from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
-from helix_agent.persistence import ApprovalStore, ThreadMetaStore, TriggerStore
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.tenant_config import TenantConfigStore
-from helix_agent.protocol import AgentSpecStatus, AuditAction, TriggerRecord
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex, expert_work_counter
+from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
+from expert_work.persistence import ApprovalStore, ThreadMetaStore, TriggerStore
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.protocol import AgentSpecStatus, AuditAction, TriggerRecord
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator import AgentFactoryError, run_agent
 
-logger = logging.getLogger("helix.control_plane.trigger_firing")
+logger = logging.getLogger("expert_work.control_plane.trigger_firing")
 
 #: Triggers fired into a run — cron + webhook share this counter.
-_triggers_fired = helix_counter(
-    "helix_control_plane_triggers_fired_total",
+_triggers_fired = expert_work_counter(
+    "expert_work_control_plane_triggers_fired_total",
     "Triggers that started an agent run.",
 )
 

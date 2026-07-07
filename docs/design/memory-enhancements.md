@@ -17,8 +17,8 @@
 
 | 关注点 | 位置 |
 |---|---|
-| 协议记录 `MemoryItem` | `packages/helix-protocol/.../protocol/memory_item.py:28`(无 importance/confidence) |
-| ORM 行 `MemoryItemRow` | `packages/helix-persistence/.../models/memory_item.py:23` |
+| 协议记录 `MemoryItem` | `packages/expert-work-protocol/.../protocol/memory_item.py:28`(无 importance/confidence) |
+| ORM 行 `MemoryItemRow` | `packages/expert-work-persistence/.../models/memory_item.py:23` |
 | 最新 migration | `migrations/versions/0098_memory_item_agent_name.py`(新从 **0099** 起;revision id ≤ 32 字符) |
 | 抽取提示 `_EXTRACT_SYSTEM` | `services/orchestrator/.../graph_builder/memory.py:70`;`parse_extracted_memories`:113 |
 | 写入核心 `flush_messages_to_memory` | `graph_builder/memory.py:536`(抽取→embed→build→reconcile→`store.write`) |

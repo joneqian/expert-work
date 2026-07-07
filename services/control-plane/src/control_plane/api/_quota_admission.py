@@ -23,15 +23,15 @@ from fastapi.responses import JSONResponse
 
 from control_plane.audit import emit
 from control_plane.quota.base import QuotaService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.protocol import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.protocol import (
     AuditAction,
     AuditResult,
     CheckRequest,
     CheckResult,
     QuotaDimension,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
 __all__ = ["check_admission"]
 

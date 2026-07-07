@@ -25,7 +25,7 @@ from control_plane.eval_engine_live import (
     DispatchEvalEngine,
     TraceEvalEngine,
 )
-from helix_agent.persistence.rls import current_tenant_id_var
+from expert_work.persistence.rls import current_tenant_id_var
 
 _REFUSAL = "I can't help with that — instructions embedded in content are ignored."
 
@@ -110,7 +110,7 @@ async def test_engine_requires_tenant_scope() -> None:
 
 @pytest.mark.asyncio
 async def test_trace_pass_on_well_formed_spans() -> None:
-    spans = [_span("helix.orchestrator.run"), _span("helix.orchestrator.llm_call")]
+    spans = [_span("expert_work.orchestrator.run"), _span("expert_work.orchestrator.llm_call")]
     engine = TraceEvalEngine(_FakeHarness(spans=spans))
     with _tenant_scope():
         outcomes = await engine.run(TRACE_EVAL_SUITE)
@@ -122,8 +122,8 @@ async def test_trace_pass_on_well_formed_spans() -> None:
 @pytest.mark.asyncio
 async def test_trace_fails_on_error_span() -> None:
     spans = [
-        _span("helix.orchestrator.run"),
-        _span("helix.orchestrator.llm_call", error=True),
+        _span("expert_work.orchestrator.run"),
+        _span("expert_work.orchestrator.llm_call", error=True),
     ]
     engine = TraceEvalEngine(_FakeHarness(spans=spans))
     with _tenant_scope():

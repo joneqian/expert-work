@@ -45,16 +45,16 @@ from uuid import UUID, uuid4
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.common.context import reset_current_run_id, set_current_run_id
-from helix_agent.common.observability import (
-    HelixComponent,
-    helix_counter,
-    helix_histogram,
-    helix_span,
+from expert_work.common.context import reset_current_run_id, set_current_run_id
+from expert_work.common.observability import (
+    ExpertWorkComponent,
+    expert_work_counter,
+    expert_work_histogram,
+    expert_work_span,
 )
-from helix_agent.common.skill_run_usage import SkillRunUsageRecorder
-from helix_agent.persistence import ApprovalStore
-from helix_agent.protocol import (
+from expert_work.common.skill_run_usage import SkillRunUsageRecorder
+from expert_work.persistence import ApprovalStore
+from expert_work.protocol import (
     ApprovalRecord,
     ApprovalRequest,
     AuditAction,
@@ -62,20 +62,20 @@ from helix_agent.protocol import (
     AuditResult,
     EventType,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.cancellation import (
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.cancellation import (
     CANCELLATION_TOKEN_KEY,
     CancellationToken,
     RunCancelledError,
 )
-from helix_agent.runtime.runs import (
+from expert_work.runtime.runs import (
     RunEventStore,
     RunManager,
     RunRecord,
     RunStatus,
     make_event_record,
 )
-from helix_agent.runtime.stream_bridge import (
+from expert_work.runtime.stream_bridge import (
     END_SENTINEL,
     HEARTBEAT_SENTINEL,
     StreamBridge,
@@ -106,8 +106,8 @@ logger = logging.getLogger(__name__)
 # publish synchronously beforehand isn't counted — TTFT tracks how long
 # the user waits for actual agent work to start. SLO #3 (slo.md):
 # P95 < 1.5s @ 30d.
-_session_ttft_seconds = helix_histogram(
-    "helix_session_ttft_seconds",
+_session_ttft_seconds = expert_work_histogram(
+    "expert_work_session_ttft_seconds",
     "Seconds from RUNNING to first agent update chunk.",
     buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
 )
@@ -118,8 +118,8 @@ _session_ttft_seconds = helix_histogram(
 # pre-existing state (see ``runs.py``) and passes it via the
 # ``RunRecord``. SLO #5 reformulated to seconds-of-resume + a success
 # counter (resume failures are run failures → already counted).
-_durable_resume_seconds = helix_histogram(
-    "helix_durable_resume_seconds",
+_durable_resume_seconds = expert_work_histogram(
+    "expert_work_durable_resume_seconds",
     "Seconds from RUNNING to first chunk on a resumed (non-empty checkpoint) run.",
     buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
 )
@@ -130,8 +130,8 @@ _durable_resume_seconds = helix_histogram(
 # so Gate dashboards can query successful-run P95 separately from
 # error / max_steps / cancelled tails — Stream M Exit Criteria
 # (STREAM-M-DESIGN § 2.1) targets the user-facing successful-run latency.
-_session_duration_seconds = helix_histogram(
-    "helix_session_duration_seconds",
+_session_duration_seconds = expert_work_histogram(
+    "expert_work_session_duration_seconds",
     "Seconds from RUNNING to terminal status; labelled by run outcome.",
     ("outcome",),
     buckets=(0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
@@ -141,13 +141,13 @@ _session_duration_seconds = helix_histogram(
 # A failure to mirror a frame is logged + counted; the SSE stream is
 # NOT blocked (graceful degradation — better miss-an-event than fail the
 # user-visible run).
-_run_event_persist_errors = helix_counter(
-    "helix_run_event_persist_errors_total",
+_run_event_persist_errors = expert_work_counter(
+    "expert_work_run_event_persist_errors_total",
     "RunEventStore.append failures during run_agent dual-write.",
     ("event_name",),
 )
-_run_event_persist_total = helix_counter(
-    "helix_run_event_persist_total",
+_run_event_persist_total = expert_work_counter(
+    "expert_work_run_event_persist_total",
     "RunEventStore.append successes during run_agent dual-write.",
     ("event_name",),
 )
@@ -206,7 +206,7 @@ async def _persist_event(
 ) -> None:
     """Mirror one SSE frame to the durable :class:`RunEventStore`.
 
-    Failure → log warning + counter ``helix_run_event_persist_errors_total``;
+    Failure → log warning + counter ``expert_work_run_event_persist_errors_total``;
     the caller's ``bridge.publish`` is not blocked (Mini-ADR H-7 — better
     miss a frame in replay than fail the live SSE stream).
     """
@@ -397,12 +397,12 @@ async def run_agent(
         # resumes from the committed checkpoint (``graph_input=None`` —
         # the J-24 continuation semantics) after the replay-safety guard
         # inspects the checkpoint tail.
-        # Stream A.8 / 10.1 — the session root span. One ``helix.session.run``
+        # Stream A.8 / 10.1 — the session root span. One ``expert_work.session.run``
         # per run wraps the whole streaming loop (retries included), so every
         # LLM / tool / subagent child span created inside ``graph.astream``
         # attaches under it and a run becomes one connected trace.
-        with helix_span(
-            HelixComponent.SESSION,
+        with expert_work_span(
+            ExpertWorkComponent.SESSION,
             "run",
             attributes={
                 "run_id": str(run_id),
@@ -1044,7 +1044,7 @@ async def sse_consumer(
 
             yield format_sse(entry.event, entry.data, event_id=entry.id or None)
     finally:
-        from helix_agent.runtime.runs import DisconnectMode
+        from expert_work.runtime.runs import DisconnectMode
 
         if (
             record.status in (RunStatus.PENDING, RunStatus.RUNNING)

@@ -7,7 +7,7 @@
 > **先于 Stream H.1b 的任何业务 UI**:H.1b 实施期需要 tenant switcher 在系统管理员视角下出现 "All tenants",
 > 这一能力依赖本 Stream 落地。两条 stream 可并行开工,但 H.1b 上线需等本 stream 合入。
 
-设计先行规则([memory:feedback_design_first_iteration](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)):
+设计先行规则([memory:feedback_design_first_iteration](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)):
 **任何一行 backend 代码落地之前**,先完成本设计文档 + Mini-ADR 锁定。
 
 ---
@@ -104,7 +104,7 @@ CHECK (
 ### 2.2 Principal 扩展
 
 ```python
-# packages/helix-protocol/src/helix_agent/protocol/auth.py(已有 Principal)
+# packages/expert-work-protocol/src/expert_work/protocol/auth.py(已有 Principal)
 @dataclass(frozen=True)
 class Principal:
     user_id: UUID
@@ -281,17 +281,17 @@ def downgrade() -> None:
 
 ## 6. 关键文件 / 复用点
 
-- **现有 `Principal` + AuthMiddleware** — `services/control-plane/src/control_plane/auth/middleware.py`(L117-127)、`packages/helix-protocol/src/helix_agent/protocol/auth.py`(Principal 定义)
+- **现有 `Principal` + AuthMiddleware** — `services/control-plane/src/control_plane/auth/middleware.py`(L117-127)、`packages/expert-work-protocol/src/expert_work/protocol/auth.py`(Principal 定义)
 - **现有 `allowed_tenants` mTLS 范式** — `services/control-plane/src/control_plane/auth/mtls.py`(`system_tenant_id` 设置)
-- **现有跨租户 API 范式** — `packages/helix-protocol/src/helix_agent/protocol/audit.py`(L183 `tenant_id: UUID | Literal["*"]`)+ `packages/helix-runtime/src/helix_agent/runtime/audit/logger.py`(L110-111)
-- **现有 RLS bypass** — `packages/helix-persistence/src/helix_agent/persistence/rls.py`(`bypass_rls_var` ContextVar)
+- **现有跨租户 API 范式** — `packages/expert-work-protocol/src/expert_work/protocol/audit.py`(L183 `tenant_id: UUID | Literal["*"]`)+ `packages/expert-work-runtime/src/expert_work/runtime/audit/logger.py`(L110-111)
+- **现有 RLS bypass** — `packages/expert-work-persistence/src/expert_work/persistence/rls.py`(`bypass_rls_var` ContextVar)
 - **现有后台 worker bypass 范式** — `services/control-plane/src/control_plane/scheduler.py` / `curation_worker.py` / `quota/reaper.py`(`_bypass_rls()` 上下文)
 - **现有 list endpoint** — 14 个 router 在 `services/control-plane/src/control_plane/api/*.py`(每个 ~半天改造)
 - **memory 引用** —
-  - [target-product-form](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_target_product_form.md)
-  - [admin-ui-design-baseline](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_admin_ui_design_baseline.md)
-  - [complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_complete_not_minimal.md)
-  - [no-design-choice-disguise](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_no_design_choice_disguise.md)
+  - [target-product-form](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/project_target_product_form.md)
+  - [admin-ui-design-baseline](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/project_admin_ui_design_baseline.md)
+  - [complete-not-minimal](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_complete_not_minimal.md)
+  - [no-design-choice-disguise](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_no_design_choice_disguise.md)
 
 ---
 

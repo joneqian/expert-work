@@ -2,7 +2,7 @@
 
 - **状态**：✅ 已决策
 - **日期**：2026-05-11
-- **决策依据**：Helix-Agent 是多业务线引擎（医疗 / HR / 客服 / R&D），不同业务合规要求不同；引擎必须**业务无关**，合规通过**租户级配置**驱动而非硬编码
+- **决策依据**：Expert Work 是多业务线引擎（医疗 / HR / 客服 / R&D），不同业务合规要求不同；引擎必须**业务无关**，合规通过**租户级配置**驱动而非硬编码
 - **背景**：M0 Stream C.7（租户级配置隔离）+ D.2（PII redactor）+ D.3（retention TTL）+ Stream F（沙盒隔离级别）都需要按租户驱动
 
 ---
@@ -71,7 +71,7 @@ custom_overrides:                  # 可选；hipaa 默认值之上的覆盖
 加载 manifest + tenant_config 时：
 
 ```python
-# pseudo code, lands in packages/helix-runtime/src/helix_agent/runtime/compliance/
+# pseudo code, lands in packages/expert-work-runtime/src/expert_work/runtime/compliance/
 def resolve_runtime_config(manifest, tenant_config) -> RuntimeConfig:
     pack = COMPLIANCE_PACKS[tenant_config.compliance_pack]
     config = pack.defaults()
@@ -90,7 +90,7 @@ def resolve_runtime_config(manifest, tenant_config) -> RuntimeConfig:
 
 ### 2.3 Pack 注册表
 
-`packages/helix-runtime/src/helix_agent/runtime/compliance/packs/`：
+`packages/expert-work-runtime/src/expert_work/runtime/compliance/packs/`：
 - `none.py`、`hipaa.py`、`gdpr.py`、`sox.py` 各自一个文件，导出 `Pack` 实例
 - 注册中心 `__init__.py` 暴露 `COMPLIANCE_PACKS` dict
 - 新增 pack：加一个文件 + register；零引擎核心改动

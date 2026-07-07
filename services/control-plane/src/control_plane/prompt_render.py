@@ -19,7 +19,7 @@ from typing import Any
 from jinja2 import TemplateError
 
 from control_plane.manifest.loader import build_sandboxed_environment
-from helix_agent.common.spotlight import spotlight_untrusted
+from expert_work.common.spotlight import spotlight_untrusted
 
 # ``built`` is the orchestrator ``BuiltAgent`` (typed ``Any`` here, matching
 # ``build_run_graph_input``); the renderer reads ``system_prompt``,

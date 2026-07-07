@@ -6,7 +6,7 @@ Two routers:
   ``agent_trigger`` table (``/v1/triggers``).
 * :func:`build_webhooks_router` — the inbound webhook endpoint
   (``/v1/webhooks/{trigger_id}``). Exempt from ``AuthMiddleware`` — an
-  external caller has no helix principal — and authenticated instead by
+  external caller has no expert_work principal — and authenticated instead by
   a per-trigger secret token (Mini-ADR J-42). A leaked secret can fire
   only its own trigger.
 """
@@ -46,23 +46,23 @@ from control_plane.uplift.threat_metrics import (
     record_trigger_blocked,
 )
 from control_plane.uplift.threat_scan import FieldTooLargeError, scan_payload_strict
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.threat_patterns import ThreatFinding
-from helix_agent.persistence import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.threat_patterns import ThreatFinding
+from expert_work.persistence import (
     ApprovalStore,
     ThreadMetaStore,
     TriggerRunStore,
     TriggerStore,
 )
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.rls import (
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.persistence.tenant_config import TenantConfigStore
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import (
+from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.protocol import (
     AuditAction,
     TriggerKind,
     TriggerRecord,
@@ -70,11 +70,11 @@ from helix_agent.protocol import (
     TriggerRunStatus,
     TriggerSpec,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.triggers")
+logger = logging.getLogger("expert_work.control_plane.triggers")
 
-_WEBHOOK_HEADER_NAME = "X-Helix-Webhook-Secret"
+_WEBHOOK_HEADER_NAME = "X-Expert-Work-Webhook-Secret"
 
 
 def _hash_secret(secret: str) -> str:

@@ -262,7 +262,7 @@ export function FileEditor({
             alignItems: "center",
             justifyContent: "center",
             gap: 8,
-            color: "var(--hx-text-tertiary)",
+            color: "var(--ew-text-tertiary)",
             fontSize: 13,
           }}
         >
@@ -286,7 +286,7 @@ export function FileEditor({
           marginBottom: 8,
         }}
       >
-        <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 13 }} strong>
+        <Text style={{ fontFamily: "var(--ew-font-mono)", fontSize: 13 }} strong>
           {selectedPath}
         </Text>
         {loaded !== null && (
@@ -374,7 +374,7 @@ export function FileEditor({
                 renderSideBySide: true,
                 originalEditable: false,
                 minimap: { enabled: false },
-                fontFamily: "var(--hx-font-mono)",
+                fontFamily: "var(--ew-font-mono)",
                 fontSize: 12,
                 scrollBeyondLastLine: false,
               }}
@@ -389,7 +389,7 @@ export function FileEditor({
               options={{
                 readOnly: mode === "view" || loading,
                 minimap: { enabled: false },
-                fontFamily: "var(--hx-font-mono)",
+                fontFamily: "var(--ew-font-mono)",
                 fontSize: 12,
                 tabSize: 2,
                 scrollBeyondLastLine: false,

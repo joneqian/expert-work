@@ -19,8 +19,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from helix_agent.protocol import SkillVersion
-from helix_agent.protocol.skill import (
+from expert_work.protocol import SkillVersion
+from expert_work.protocol.skill import (
     SkillSupportingFile,
     compute_content_hash,
     supporting_files_to_jsonable,

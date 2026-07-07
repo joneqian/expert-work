@@ -19,7 +19,7 @@
 #
 # MODEL: defaults to deepseek. EDIT the model block to whatever provider you
 # pasted a key for in /settings/platform and set the matching allowlist host.
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: egress-test

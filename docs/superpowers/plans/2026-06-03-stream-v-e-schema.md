@@ -15,7 +15,7 @@
 **CodeQL guardrails:** no `Protocol`/ABC standalone `...` bodies; no tenant-derived values in `logger.*` calls.
 
 **Key facts (verified 2026-06-03, file:line):**
-- `MCPToolSpec` — `packages/helix-protocol/src/helix_agent/protocol/agent_spec.py:574`: `model_config = ConfigDict(extra="forbid")`, fields `type: Literal["mcp"] = "mcp"`, `allow_tools: list[str] = Field(default_factory=list)`.
+- `MCPToolSpec` — `packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py:574`: `model_config = ConfigDict(extra="forbid")`, fields `type: Literal["mcp"] = "mcp"`, `allow_tools: list[str] = Field(default_factory=list)`.
 - `_register_mcp(registry, entry, env)` — `services/orchestrator/src/orchestrator/tools/assembly.py:320`: computes `allow = set(entry.allow_tools) or None`, iterates platform pool (gated by `set(env.mcp_allowlist) or None`) then tenant pool (collision-skip via `registered_servers`), calling `register_mcp_tools(server_name=, client=, registry=, allow_tools=allow)`.
 - Orchestrator MCP assembly tests: `services/orchestrator/tests/test_tool_assembly.py` (`MCPServerPool` / `RecordingMCPClient` / `MCPToolDef` / `build_tool_registry` / `ToolEnv` / `MCPToolSpec` fixtures).
 - Canonical manifest test: `services/control-plane/tests/test_canonical_manifest.py`.
@@ -25,8 +25,8 @@
 
 ## File Structure
 **Modify:**
-- `packages/helix-protocol/src/helix_agent/protocol/agent_spec.py` — add `servers` to `MCPToolSpec`.
-- `packages/helix-protocol/tests/` (the agent_spec test file — grep `MCPToolSpec`) — field + backward-compat tests.
+- `packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py` — add `servers` to `MCPToolSpec`.
+- `packages/expert-work-protocol/tests/` (the agent_spec test file — grep `MCPToolSpec`) — field + backward-compat tests.
 - `services/orchestrator/src/orchestrator/tools/assembly.py` — `_register_mcp` server filter.
 - `services/orchestrator/tests/test_tool_assembly.py` — server-filter tests.
 
@@ -35,15 +35,15 @@
 ## Task 1: Add `MCPToolSpec.servers`
 
 **Files:**
-- Modify: `packages/helix-protocol/src/helix_agent/protocol/agent_spec.py`
-- Modify/Create test: the protocol test that covers `MCPToolSpec` (grep `grep -rln "MCPToolSpec" packages/helix-protocol/tests/`; if none, create `packages/helix-protocol/tests/test_mcp_tool_spec.py`)
+- Modify: `packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py`
+- Modify/Create test: the protocol test that covers `MCPToolSpec` (grep `grep -rln "MCPToolSpec" packages/expert-work-protocol/tests/`; if none, create `packages/expert-work-protocol/tests/test_mcp_tool_spec.py`)
 
 - [ ] **Step 1: Write the failing test**
 
 Add (to the located test file, or a new `test_mcp_tool_spec.py`):
 
 ```python
-from helix_agent.protocol.agent_spec import MCPToolSpec
+from expert_work.protocol.agent_spec import MCPToolSpec
 
 
 def test_mcp_tool_spec_defaults_empty_servers() -> None:
@@ -74,12 +74,12 @@ def test_mcp_tool_spec_still_forbids_extra() -> None:
 
 - [ ] **Step 2: Run → fail**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest <test file> -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest <test file> -q`
 Expected: FAIL — `MCPToolSpec` has no `servers` attribute.
 
 - [ ] **Step 3: Add the field**
 
-In `packages/helix-protocol/src/helix_agent/protocol/agent_spec.py`, edit `MCPToolSpec` (insert `servers` before `allow_tools`) and update the docstring:
+In `packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py`, edit `MCPToolSpec` (insert `servers` before `allow_tools`) and update the docstring:
 
 ```python
 class MCPToolSpec(BaseModel):
@@ -100,16 +100,16 @@ class MCPToolSpec(BaseModel):
 
 - [ ] **Step 4: Run → pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest <test file> -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest <test file> -q`
 Expected: PASS.
 
 - [ ] **Step 5: Lint/type + commit**
 
-Run: `uv run ruff check packages/helix-protocol && uv run ruff format --check packages/helix-protocol && uv run mypy packages`
+Run: `uv run ruff check packages/expert-work-protocol && uv run ruff format --check packages/expert-work-protocol && uv run mypy packages`
 Expected: clean.
 
 ```bash
-git add packages/helix-protocol/src/helix_agent/protocol/agent_spec.py packages/helix-protocol/tests/
+git add packages/expert-work-protocol/src/expert_work/protocol/agent_spec.py packages/expert-work-protocol/tests/
 git commit -m "feat(stream-v): MCPToolSpec.servers field (per-agent server selection) (V-E)"
 ```
 
@@ -177,7 +177,7 @@ async def test_servers_filter_composes_with_platform_and_tenant() -> None:
 
 - [ ] **Step 2: Run → fail**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q -k "servers_filter or empty_servers_means_all"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q -k "servers_filter or empty_servers_means_all"`
 Expected: FAIL (the `servers` field isn't consulted yet → linear/postgres/ops still registered).
 
 - [ ] **Step 3: Add the filter**
@@ -199,7 +199,7 @@ And in the TENANT loop, after the `registered_servers` collision-skip and before
 
 - [ ] **Step 4: Run → pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q`
 Expected: PASS (new + all existing MCP tests).
 
 - [ ] **Step 5: Lint/type + commit**
@@ -221,15 +221,15 @@ git commit -m "feat(stream-v): _register_mcp filters by MCPToolSpec.servers (V-E
 
 - [ ] **Step 1: Sweep for MCPToolSpec construction in doubles/fixtures**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && grep -rn "MCPToolSpec(" --include=*.py | grep -v "tests/test_tool_assembly.py" | grep -v "agent_spec.py"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && grep -rn "MCPToolSpec(" --include=*.py | grep -v "tests/test_tool_assembly.py" | grep -v "agent_spec.py"`
 The `servers` field has a default, so existing constructions stay valid — but confirm none passes positional args that would now misalign (they don't; the model is keyword-only / Pydantic). If anything constructs it positionally or asserts its field set, fix it. Report what you found.
 
 - [ ] **Step 2: Run the canonical manifest + full protocol/orchestrator unit suites**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_canonical_manifest.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_canonical_manifest.py -q`
 Expected: PASS (canonical manifest still validates; the new optional field doesn't break it).
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest -m "not integration" packages/helix-protocol services/orchestrator -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest -m "not integration" packages/expert-work-protocol services/orchestrator -q`
 Expected: PASS, no regressions.
 
 - [ ] **Step 3: Commit (only if Step 1 required a fix; otherwise skip)**
@@ -245,7 +245,7 @@ git commit -m "test(stream-v): fix MCPToolSpec construction fallout from servers
 
 - [ ] **Step 1: Full affected scope**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest -m "not integration" packages/helix-protocol services/orchestrator services/control-plane -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest -m "not integration" packages/expert-work-protocol services/orchestrator services/control-plane -q`
 Expected: PASS.
 
 - [ ] **Step 2: Lint + CI mypy scope**

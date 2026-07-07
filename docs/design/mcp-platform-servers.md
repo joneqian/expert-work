@@ -64,7 +64,7 @@ MCP server
 - `auth_schema` 列**保留可空、停用**(不删列避免破坏性迁移;protocol/UI/实例化全部移除引用),后续可单独清。
 
 ### D2. 平台共享 token(A)= 平台级 SecretStore secret
-- 平台填 bearer token → 写 `SecretStore`,key 形如 `helix-agent/platform/mcp/{catalog_name}/token`(平台命名空间,非 tenant);catalog 行只存 `bearer_token_ref`。
+- 平台填 bearer token → 写 `SecretStore`,key 形如 `expert-work/platform/mcp/{catalog_name}/token`(平台命名空间,非 tenant);catalog 行只存 `bearer_token_ref`。
 - 复用现有 `_build_mcp_client` 的 `token_ref`→`secret_store.get` 注入路径(平台池建客户端时解析)。**写穿不进 DB 明文**,沿用 bearer write-only / blank-to-keep 编辑范式。
 - **安全:共享身份显式告警**。A 类所有启用租户/用户共用一份凭证 → 同一份数据。UI 在选 Bearart(共享)时明确提示「不适合按用户/租户隔离数据的服务(如 GitHub、业务系统),那些请用 OAuth」。平台 admin 自担选择。
 

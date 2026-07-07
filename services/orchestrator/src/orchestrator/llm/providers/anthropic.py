@@ -53,9 +53,9 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from helix_agent.common.uplift_metrics import record_anthropic_cache_anchor
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.runtime.middleware import (
+from expert_work.common.uplift_metrics import record_anthropic_cache_anchor
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
     LLMServerError,
@@ -345,7 +345,7 @@ class AnthropicProvider:
         # Stream L.L1 — convert ``system`` from string to block list with
         # cache_control marker, then mark the trailing messages.
         # Capability Uplift Sprint #8 (Mini-ADR U-7) — also mark any
-        # messages flagged with ``helix_cache_anchor`` (currently only
+        # messages flagged with ``expert_work_cache_anchor`` (currently only
         # the per_session memory block) so the cache covers the prefix
         # ``[system, task, memories]`` across all turns.
         # When ``cache_enabled`` is False the adapter emits the original
@@ -471,7 +471,7 @@ def _apply_cache_control(
         if 0 <= idx < len(mapped):
             indices_to_mark.add(idx)
             # Track anchor application separately from the tail so the
-            # uplift metric reflects helix-injected breakpoints only.
+            # uplift metric reflects expert-work-injected breakpoints only.
             if idx < tail_start:
                 record_anthropic_cache_anchor()
 
@@ -518,7 +518,7 @@ async def _to_anthropic_messages(
 
     Capability Uplift Sprint #8 (Mini-ADR U-7): tracks the indices
     (in the mapped list) of messages whose ``additional_kwargs`` carry
-    ``"helix_cache_anchor": True`` so :func:`_apply_cache_control` can
+    ``"expert_work_cache_anchor": True`` so :func:`_apply_cache_control` can
     mark them with ``cache_control`` for prompt-cache prefix coverage.
     Returned as a side channel rather than baked into the mapped dicts
     so the wire payload stays Anthropic-clean.
@@ -549,7 +549,7 @@ async def _to_anthropic_messages(
         # Sprint #8 — note cache anchors AFTER the mapped append so the
         # index points at the freshly-added dict.
         extra = getattr(msg, "additional_kwargs", None)
-        if isinstance(extra, dict) and extra.get("helix_cache_anchor"):
+        if isinstance(extra, dict) and extra.get("expert_work_cache_anchor"):
             cache_anchor_indices.append(len(mapped) - 1)
 
     system = "\n\n".join(p for p in system_parts if p) or None

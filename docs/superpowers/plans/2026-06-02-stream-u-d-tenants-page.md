@@ -97,7 +97,7 @@ it("Manage sets tenant scope and navigates to tenant-config", async () => {
   (await screen.findByTestId("st-manage-11111111-1111-1111-1111-111111111111")).click();
   expect(mockNavigate).toHaveBeenCalledWith("/settings/tenant-config");
   // scope persisted to the specific tenant
-  expect(window.sessionStorage.getItem("helix.admin.tenantScope")).toBe("11111111-1111-1111-1111-111111111111");
+  expect(window.sessionStorage.getItem("expert_work.admin.tenantScope")).toBe("11111111-1111-1111-1111-111111111111");
 });
 
 it("non-admin sees the not-admin alert and does not fetch", async () => {
@@ -162,7 +162,7 @@ export function SettingsTenants() {
   // error → <Alert type="error" data-testid="st-error" message={t("settings_tenants.failed_to_load")} description={error}/>
 }
 ```
-Root `<div data-testid="st-root">`. Keep it focused (<150 lines). Use the repo's existing page-header classes (`hx-page-header`) as in SettingsCreateTenant.
+Root `<div data-testid="st-root">`. Keep it focused (<150 lines). Use the repo's existing page-header classes (`ew-page-header`) as in SettingsCreateTenant.
 
 - [ ] **Step 5: Run green + typecheck**
 

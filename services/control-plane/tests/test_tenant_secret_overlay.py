@@ -8,8 +8,8 @@ from uuid import UUID
 import pytest
 
 from control_plane.tenant_secret_overlay import TenantOverlayCredentialsResolver
-from helix_agent.common.credentials import CredentialsResolverError
-from helix_agent.protocol import Provider, TenantConfigRecord, TenantPlan, Tool
+from expert_work.common.credentials import CredentialsResolverError
+from expert_work.protocol import Provider, TenantConfigRecord, TenantPlan, Tool
 
 _NOW = datetime.now(UTC)
 _TENANT = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")

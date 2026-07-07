@@ -43,7 +43,7 @@ reproducible deploys or pre-provisioning a connector before its OAuth app exists
 2. **Register an OAuth app** in the connector's developer console. Use the
    `mcp_oauth_redirect_uri` value above as the app's redirect/callback URL
    (add it to the app's allowlist). The MCP authorization spec requires
-   OAuth 2.1 + PKCE (S256) — pick that flow; no client secret is stored by helix.
+   OAuth 2.1 + PKCE (S256) — pick that flow; no client secret is stored by expert_work.
 3. **Set the client ID env var.** For `name: "linear"` that is
    `MCP_OAUTH_LINEAR_CLIENT_ID=<client id from step 2>`. Env var names follow
    `MCP_OAUTH_<NAME>_CLIENT_ID`, upper-cased from the entry's `name`. (The OAuth

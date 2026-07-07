@@ -16,18 +16,18 @@ from uuid import UUID, uuid4
 
 import pytest
 
-import helix_agent.protocol.billing as billing_mod
+import expert_work.protocol.billing as billing_mod
 from billing_rollup_job.job import UNKNOWN_PROVIDER, BillingRollupJob, month_bounds
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryModelRateCardStore,
     InMemoryTenantBillingLedgerStore,
 )
-from helix_agent.persistence.tenant_config.memory import InMemoryTenantConfigStore
-from helix_agent.persistence.token_usage_store import (
+from expert_work.persistence.tenant_config.memory import InMemoryTenantConfigStore
+from expert_work.persistence.token_usage_store import (
     InMemoryTokenUsageStore,
     TokenUsageRecord,
 )
-from helix_agent.protocol import ModelRateCardUpsert, TenantPlan
+from expert_work.protocol import ModelRateCardUpsert, TenantPlan
 
 MONTH = date(2026, 6, 1)
 

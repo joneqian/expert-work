@@ -11,7 +11,7 @@
 
 - **人类用户**：OIDC + 自建 Keycloak 作为 IdP；前端走 Authorization Code + PKCE 拿 access_token（JWT）
 - **服务间**：mTLS（基于 cert-manager 签发 SPIFFE-like SVID，M0 静态证书，M1+ 自动轮换）
-- **外部业务系统调用 Helix-Agent**：API Key（Keycloak Service Account → 派生 JWT），按 key 限流 / 计费
+- **外部业务系统调用 Expert Work**：API Key（Keycloak Service Account → 派生 JWT），按 key 限流 / 计费
 
 ---
 
@@ -43,8 +43,8 @@
 |------|------|
 | 部署 | Keycloak Operator on Kubernetes（M3）或单机 Docker（M0）|
 | 后端 | 阿里云 RDS PostgreSQL（共用集群，隔离 schema）|
-| Realm | `helix-agent`（所有租户都在此 realm；多租户由 tenant_id claim 标识）|
-| 客户端类型 | `helix-agent-admin-ui`（Public, PKCE）/ `helix-agent-api`（Confidential, Service Account 给外部业务）|
+| Realm | `expert-work`（所有租户都在此 realm；多租户由 tenant_id claim 标识）|
+| 客户端类型 | `expert-work-admin-ui`（Public, PKCE）/ `expert-work-api`（Confidential, Service Account 给外部业务）|
 | 用户存储 | 内置 + 后续可接 LDAP（M1+ 看公司需求）|
 
 ### 2.2 协议 — OIDC + JWT
@@ -56,7 +56,7 @@
 
 ```json
 {
-  "iss": "https://keycloak.helix-agent.internal/realms/helix-agent",
+  "iss": "https://keycloak.expert-work.internal/realms/expert-work",
   "sub": "user-uuid",
   "tenant_id": "tenant-uuid",       // 多租户 RLS 关键
   "roles": ["admin", "developer"],   // RBAC
@@ -77,7 +77,7 @@
 1. 在 Keycloak 注册 service account 客户端（per 业务系统 / per 集成）
 2. 业务系统持有 `client_id + client_secret`
 3. Client credentials grant → 换取 JWT access_token（5 min TTL）
-4. JWT 作为 bearer 调 Helix-Agent API
+4. JWT 作为 bearer 调 Expert Work API
 
 好处：API Key 失效 / 轮换 / 限流 全部由 Keycloak 管理；不需要自建 API Key 表。
 

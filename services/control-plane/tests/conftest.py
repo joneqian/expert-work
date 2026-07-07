@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.auth import JWTVerifier
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.common.lifecycle import Lifecycle
+from expert_work.common.lifecycle import Lifecycle
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,

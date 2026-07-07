@@ -34,17 +34,17 @@ from control_plane.platform_quality_config import PlatformQualityConfigService
 from control_plane.quality_judge import QualityJudge, QualityJudgeResult
 from control_plane.runtime import AgentRuntime
 from control_plane.transcript import read_turns
-from helix_agent.common.observability import current_trace_id_hex, helix_counter
-from helix_agent.persistence import (
+from expert_work.common.observability import current_trace_id_hex, expert_work_counter
+from expert_work.persistence import (
     MessageTurn,
     QualityCandidateSource,
     QualityScoreStore,
 )
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
-from helix_agent.protocol import QualityScoreRecord
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
+from expert_work.protocol import QualityScoreRecord
 
-logger = logging.getLogger("helix.control_plane.quality_monitor")
+logger = logging.getLogger("expert_work.control_plane.quality_monitor")
 
 #: Default cadence — a completed run is judged within a few minutes.
 _DEFAULT_INTERVAL_S = 300.0
@@ -58,20 +58,20 @@ _MAX_DRAIN_BATCHES = 50
 _USAGE_KIND = "quality_sampling"
 _USAGE_AGENT_NAME = "quality-monitor"
 
-_sampled_total = helix_counter(
-    "helix_control_plane_quality_sampled_total",
+_sampled_total = expert_work_counter(
+    "expert_work_control_plane_quality_sampled_total",
     "Finished runs selected by the deterministic quality sampler.",
 )
-_scored_total = helix_counter(
-    "helix_control_plane_quality_scored_total",
+_scored_total = expert_work_counter(
+    "expert_work_control_plane_quality_scored_total",
     "Sampled runs judged and persisted to the quality time-series.",
 )
-_judge_errors = helix_counter(
-    "helix_control_plane_quality_judge_errors_total",
+_judge_errors = expert_work_counter(
+    "expert_work_control_plane_quality_judge_errors_total",
     "Sampled runs the judge could not score (dropped).",
 )
-_cycle_errors = helix_counter(
-    "helix_control_plane_quality_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_quality_cycle_errors_total",
     "Quality monitor sweep cycles that ended in a caught exception.",
 )
 

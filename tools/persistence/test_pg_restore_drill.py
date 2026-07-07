@@ -155,7 +155,7 @@ def test_pg_restore_round_trip_recovers_seeded_rows(restore_target: str) -> None
 
 def _container_id_from_dsn(dsn: str) -> str:
     """Find the testcontainers-managed Postgres container by the port
-    embedded in the DSN. The default helix testcontainers image is
+    embedded in the DSN. The default expert_work testcontainers image is
     ``pgvector/pgvector:pg16`` (see root conftest); we filter for that
     so an unrelated Postgres on the host doesn't get picked up."""
     # DSN shape: postgresql+psycopg://test:test@localhost:PORT/test

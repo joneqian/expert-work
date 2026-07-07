@@ -189,7 +189,7 @@ def test_verify_rejects_tampered_file(tmp_path: Path) -> None:
 
 
 def test_cache_dir_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HELIX_LONGMEM_CACHE", str(tmp_path / "mirror"))
+    monkeypatch.setenv("EXPERT_WORK_LONGMEM_CACHE", str(tmp_path / "mirror"))
     assert cache_dir() == tmp_path / "mirror"
-    monkeypatch.delenv("HELIX_LONGMEM_CACHE")
+    monkeypatch.delenv("EXPERT_WORK_LONGMEM_CACHE")
     assert cache_dir().name == ".longmem_cache"

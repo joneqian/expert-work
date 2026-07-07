@@ -17,7 +17,7 @@ class EventLogArchiveSettings(BaseSettings):
     """Resolved runtime settings."""
 
     model_config = SettingsConfigDict(
-        env_prefix="HELIX_EVENT_LOG_ARCHIVE_",
+        env_prefix="EXPERT_WORK_EVENT_LOG_ARCHIVE_",
         case_sensitive=False,
         extra="ignore",
     )
@@ -26,16 +26,16 @@ class EventLogArchiveSettings(BaseSettings):
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------ db
-    db_dsn: str = "postgresql+asyncpg://helix_agent:helix_agent_dev@localhost:5432/helix_agent_dev"
+    db_dsn: str = "postgresql+asyncpg://expert_work:expert_work_dev@localhost:5432/expert_work_dev"
     db_echo: bool = False
 
     # -------------------------------------------------------- object store
     object_store_backend: Literal["memory", "s3-compatible"] = "s3-compatible"
     s3_endpoint_url: str = "http://localhost:9000"
     s3_region: str = "us-east-1"
-    s3_bucket: str = "helix-agent-event-log-archive"
-    s3_access_key: str = "helix_agent"
-    s3_secret_key: str = "helix_agent_dev_minio"  # noqa: S105 — dev placeholder
+    s3_bucket: str = "expert-work-event-log-archive"
+    s3_access_key: str = "expert_work"
+    s3_secret_key: str = "expert_work_dev_minio"  # noqa: S105 — dev placeholder
     s3_use_path_style: bool = True
 
     # ------------------------------------------------------------------ tuning

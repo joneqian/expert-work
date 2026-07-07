@@ -16,7 +16,7 @@ from control_plane.app import create_app
 from control_plane.auth import JWTVerifier
 from control_plane.keycloak import FakeKeycloakAdminClient
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
+from expert_work.common.lifecycle import Lifecycle
 
 SETUP_TOKEN = "s3cret-deploy-token"
 
@@ -137,11 +137,11 @@ async def test_keycloak_admin_secret_missing_returns_clean_502(
     settings: Settings, lifecycle: Lifecycle, jwt_verifier: JWTVerifier
 ) -> None:
     """Missing KC admin secret (deploy prerequisite) → 502, not a bare 500."""
-    from helix_agent.runtime.secret_store.base import SecretNotFoundError
+    from expert_work.runtime.secret_store.base import SecretNotFoundError
 
     class _NoSecretKeycloak(FakeKeycloakAdminClient):
         async def create_user(self, **_kwargs: object) -> object:  # type: ignore[override]
-            raise SecretNotFoundError("helix-agent/platform/keycloak/admin-client-secret")
+            raise SecretNotFoundError("expert-work/platform/keycloak/admin-client-secret")
 
     kc = _NoSecretKeycloak()
     app = create_app(

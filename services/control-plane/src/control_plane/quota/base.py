@@ -15,7 +15,7 @@ land alongside:
 
 Both implementations consume the same :class:`TenantQuotaStore` /
 :class:`TokenReservationStore` Protocols from
-:mod:`helix_agent.persistence.quota`.
+:mod:`expert_work.persistence.quota`.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from helix_agent.protocol import (
+from expert_work.protocol import (
     CheckRequest,
     CheckResult,
     CommitRequest,

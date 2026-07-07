@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from helix_agent.runtime.runs import (
+from expert_work.runtime.runs import (
     DisconnectMode,
     InMemoryRunEventStore,
     RunEventRecord,
@@ -23,7 +23,7 @@ from helix_agent.runtime.runs import (
     RunManager,
     RunRecord,
 )
-from helix_agent.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
+from expert_work.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
 from orchestrator.sse import run_agent
 
 
@@ -153,8 +153,8 @@ async def test_paused_run_emits_and_persists_approval_event() -> None:
     — no need to infer the pause by polling after the terminal ``end`` frame."""
     from datetime import UTC, datetime, timedelta
 
-    from helix_agent.persistence import InMemoryApprovalStore
-    from helix_agent.protocol import ApprovalRequest
+    from expert_work.persistence import InMemoryApprovalStore
+    from expert_work.protocol import ApprovalRequest
 
     bridge = InMemoryStreamBridge()
     rm = RunManager()

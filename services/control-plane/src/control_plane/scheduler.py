@@ -46,25 +46,25 @@ from control_plane.agent_disable_status import AgentDisableService
 from control_plane.runtime import AgentRuntime
 from control_plane.tenant_status import TenantStatusService
 from control_plane.trigger_firing import fire_trigger
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import (
     ApprovalStore,
     ThreadMetaStore,
     TriggerRunStore,
     TriggerStore,
 )
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.rls import (
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.persistence.tenant_config import TenantConfigStore
-from helix_agent.protocol import TriggerRecord, TriggerRunRecord, TriggerRunStatus
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunStatus, RunStore
+from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.protocol import TriggerRecord, TriggerRunRecord, TriggerRunStatus
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunStatus, RunStore
 
-logger = logging.getLogger("helix.control_plane.scheduler")
+logger = logging.getLogger("expert_work.control_plane.scheduler")
 
 #: DLQ retry budget — after this many failed firings a trigger_run is
 #: dead-lettered (K.K7 pattern, Mini-ADR J-26 (1)).
@@ -76,12 +76,12 @@ _BACKOFF_SECONDS: tuple[int, ...] = (60, 5 * 60, 30 * 60, 2 * 3600, 6 * 3600)
 #: agent_run statuses that count as a failed firing (→ DLQ retry).
 _FAILED_RUN_STATUSES = frozenset({RunStatus.ERROR, RunStatus.TIMEOUT})
 
-_scheduler_cycle_errors = helix_counter(
-    "helix_control_plane_trigger_scheduler_cycle_errors_total",
+_scheduler_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_trigger_scheduler_cycle_errors_total",
     "Trigger scheduler cycles that ended in a caught exception.",
 )
-_dead_letters = helix_counter(
-    "helix_control_plane_trigger_dead_letters_total",
+_dead_letters = expert_work_counter(
+    "expert_work_control_plane_trigger_dead_letters_total",
     "Trigger firings that exhausted the retry budget and were dead-lettered.",
 )
 

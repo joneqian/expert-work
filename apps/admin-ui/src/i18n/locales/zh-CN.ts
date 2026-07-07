@@ -5,7 +5,7 @@
  * 配置清单 / 记忆 / 评审 / 评测 / 租户 / API 密钥 / 审计 / 沙箱 /
  * 服务账号 / 调试台 / 配额 / 存储卷 等)。仅 Trace / Span 以及纯技术
  * 标识(Token / JWT / SSE / KMS / URI / OIDC 等)保留英文,让操作人员
- * 在 helix 文档和 UI 之间使用同一套规范名词。
+ * 在 Expert Work 文档和 UI 之间使用同一套规范名词。
  */
 import type { TranslationKeys } from "./en";
 
@@ -108,7 +108,7 @@ const zhCN: TranslationKeys = {
     not_admin_title: "仅平台运维可见",
     not_admin_body: "这些面板含全平台数据、无 per-tenant 隔离,只有平台管理员能打开。",
     tenant_isolation_note:
-      "这些工具跨全部租户数据(无 per-tenant 隔离)——仅平台运维可见。租户用户看 helix 内的单次运行详情。",
+      "这些工具跨全部租户数据(无 per-tenant 隔离)——仅平台运维可见。租户用户看 Expert Work 内的单次运行详情。",
     open: "打开",
     unconfigured: "未配置({{env}})",
     langfuse_name: "Langfuse",
@@ -119,11 +119,11 @@ const zhCN: TranslationKeys = {
     tempo_desc: "分布式 trace —— 跨服务基础设施 span。",
   },
   login: {
-    title: "helix Admin",
+    title: "Expert Work Admin",
     paragraph:
-      "粘贴你的 OIDC JWT 或 helix API Key 登录。两种凭据都仅保存在本地浏览器,control-plane 会在每个请求重新校验。",
+      "粘贴你的 OIDC JWT 或 Expert Work API Key 登录。两种凭据都仅保存在本地浏览器,control-plane 会在每个请求重新校验。",
     token_label: "Token",
-    token_placeholder: "eyJ… (JWT)   或   aforge_pat_… (helix API Key)",
+    token_placeholder: "eyJ… (JWT)   或   aforge_pat_… (Expert Work API Key)",
     token_required: "Token 必填",
     token_empty: "Token 不能为空",
     pr2_hint: "OIDC code-flow 登录会在 H.1b PR 2 落地,详见",
@@ -139,9 +139,9 @@ const zhCN: TranslationKeys = {
     failed: "登录失败",
   },
   setup: {
-    title: "初始化 helix",
+    title: "初始化 Expert Work",
     paragraph:
-      "平台还没有任何管理员。创建第一个 system admin 以完成 helix 安装。",
+      "平台还没有任何管理员。创建第一个 system admin 以完成 Expert Work 安装。",
     platform_name_label: "平台名称",
     admin_email_label: "管理员邮箱",
     admin_email_required: "邮箱必填",
@@ -154,13 +154,13 @@ const zhCN: TranslationKeys = {
     admin_password_mismatch: "两次输入的密码不一致",
     admin_display_name_label: "显示名(可选)",
     setup_token_label: "Setup Token",
-    setup_token_hint: "部署时配置的 HELIX_AGENT_SETUP_TOKEN 的值。",
+    setup_token_hint: "部署时配置的 EXPERT_WORK_SETUP_TOKEN 的值。",
     setup_token_required: "Setup Token 必填",
     notice: "本向导仅用于创建第一个平台 system admin,初始化完成后即自动停用。",
     submit: "创建管理员",
     success_toast: "平台管理员已创建",
     done_title: "平台管理员已创建",
-    done_subtitle: "helix 已初始化。请用刚创建的管理员账号登录。",
+    done_subtitle: "Expert Work 已初始化。请用刚创建的管理员账号登录。",
     go_to_login: "前往登录",
     already_initialized_title: "已初始化",
     already_initialized_subtitle: "平台管理员已存在,请直接登录。",
@@ -1433,7 +1433,7 @@ const zhCN: TranslationKeys = {
     quality_default_note:
       "尚未配置——下方是环境默认值，监控处于关闭。保存即启用并接管默认值。",
     quality_deploy_note:
-      "worker 始终常驻运行，此开关是日常操作开关。部署级 HELIX_AGENT_ENABLE_QUALITY_MONITOR 仍可强制整个子系统关闭。",
+      "worker 始终常驻运行，此开关是日常操作开关。部署级 EXPERT_WORK_ENABLE_QUALITY_MONITOR 仍可强制整个子系统关闭。",
     quality_section_master: "启用",
     quality_enabled_label: "启用质量监控",
     quality_enabled_hint: "默认关闭——采样+判分会消耗 token。",
@@ -1684,7 +1684,7 @@ const zhCN: TranslationKeys = {
     agent_name_hint: "留空则接收租户内全部 agent 的事件。",
     field_payload_format: "投递格式",
     payload_format_hint:
-      "通用 = 带签名的 helix 事件 JSON；IM 格式将事件渲染为文本消息，URL 填对应平台的自定义机器人 webhook 地址。",
+      "通用 = 带签名的 Expert Work 事件 JSON；IM 格式将事件渲染为文本消息，URL 填对应平台的自定义机器人 webhook 地址。",
     col_format: "格式",
     format_generic: "通用",
     format_feishu: "飞书机器人",
@@ -1696,7 +1696,7 @@ const zhCN: TranslationKeys = {
     secret_drawer_title: "签名密钥——仅显示一次",
     secret_warn_title: "立即复制此密钥",
     secret_warn_body:
-      "此 HMAC 签名密钥仅显示一次，之后不再展示。用它验证 X-Helix-Signature-256 头。轮换 = 删除后重建。",
+      "此 HMAC 签名密钥仅显示一次，之后不再展示。用它验证 X-Expert-Work-Signature-256 头。轮换 = 删除后重建。",
     secret_endpoint_name: "端点",
     secret_label: "签名密钥",
     secret_copy: "复制",
@@ -2042,7 +2042,7 @@ const zhCN: TranslationKeys = {
     save_dirty: "保存(已修改)",
     embedder_note: "PATCH 会重算 embedding,保持向量 recall 与新内容一致。",
     embedder_unconfigured:
-      "后端未配 embedder — 记忆 PATCH 被拒(需 HELIX_AGENT_EMBEDDING_API_KEY_REF + MODEL)。",
+      "后端未配 embedder — 记忆 PATCH 被拒(需 EXPERT_WORK_EMBEDDING_API_KEY_REF + MODEL)。",
     empty_content: "内容不能为空。",
     updated: "记忆已保存。",
     deleted: "记忆已删除。",

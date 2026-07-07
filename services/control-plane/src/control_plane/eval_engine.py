@@ -77,6 +77,6 @@ class RunBaselineEvalEngine:
 
         # ``run_baseline`` always writes its YAML; redirect it to a scratch
         # file (we consume the returned reports, not the file).
-        out_path = Path(tempfile.gettempdir()) / "helix_eval_worker_baseline.yaml"
+        out_path = Path(tempfile.gettempdir()) / "expert_work_eval_worker_baseline.yaml"
         reports = await run_baseline(out_path=out_path)
         return reports_to_outcomes(reports)

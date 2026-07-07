@@ -38,11 +38,11 @@ from uuid import UUID
 from fastapi import HTTPException, Request
 
 from control_plane.audit import emit
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.protocol import AuditAction, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.protocol import AuditAction, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.tenant_scope")
+logger = logging.getLogger("expert_work.control_plane.tenant_scope")
 
 
 def cross_tenant_query_enabled(request: Request) -> bool:

@@ -12,7 +12,7 @@
 - ledger store(`persistence/billing/ledger.py`)只有 `list_for_tenant(*, tenant_id, month)`(租户自隔离)+ `delete_month`;**无跨租户读** → Z2 需加 `list_for_month_all_tenants`(bypass)。
 - `token_usage` store 有 `list_for_tenant_window(*, tenant_id, start, end)`(Y4 加,无 cap)→ Z1 当月实时 token 直读它(rollup 前)。
 - RBAC `billing` 资源(Y3 加):SYSTEM_ADMIN/ADMIN `{read,write,delete}`,租户角色 `{read}` → Z 的租户读用 `billing:read`,已就位。
-- Prometheus `helix_counter`(`helix_agent.common.observability`);rollup job 已发 `helix_billing_rollup_*`。
+- Prometheus `expert_work_counter`(`expert_work.common.observability`);rollup job 已发 `expert_work_billing_rollup_*`。
 - 迁移头 `0060`(Z2 跨租户读不改 schema,**无新迁移**)。
 
 ## 0.1 已锁业务决策(沿用 Y0,2026-06-04)
@@ -29,7 +29,7 @@
 ### Z-2 admin chargeback API + 成本指标(system_admin,bypass)
 - `GET /v1/admin/billing/chargeback?month=&tenant_id=`(可选 tenant_id 过滤):**跨租户**(`bypass_rls_session()` + `_require_system_admin`),返回每租户 `{tenant_id, base_cost_micros, markup_cost_micros, billed_cost_micros, margin_micros=markup, tokens...}`(显**全拆分**=admin 视角)。需 ledger store 加 `list_for_month_all_tenants(month)`(bypass,无 tenant 过滤,仿 `list_skills_all_tenants` 模式)。
 - 路由 `api/billing_admin.py`(或并入 `api/rate_card.py` 同 `billing` 资源域),`Depends(require("billing","read"))` + 内联 `_require_system_admin`(平台面纵深防御,同 mcp_catalog)。
-- **成本 Prometheus 指标**:`billing-rollup-job` 自增 `helix_llm_cost_micros_total{tenant,model}`(billed)——在 Y4 rollup 写 bucket 处加(小幅跨 stream 触碰已落地 job);label **不含 base/markup**(指标对运维可见,但保守只发 billed)。基数控制:label 只 `tenant`+`model`(不含 agent_name,避免高基数)。
+- **成本 Prometheus 指标**:`billing-rollup-job` 自增 `expert_work_llm_cost_micros_total{tenant,model}`(billed)——在 Y4 rollup 写 bucket 处加(小幅跨 stream 触碰已落地 job);label **不含 base/markup**(指标对运维可见,但保守只发 billed)。基数控制:label 只 `tenant`+`model`(不含 agent_name,避免高基数)。
 
 ### Z-3 看板 UI(前端,Z 给契约本 PR 不实现 UI 逻辑深做)
 - 租户用量页:月选择器、总 billed 成本、按 agent/model 拆分(消费 Z-1)、token 计数(消费 Z-1 tokens)、环比(可选)。
@@ -51,10 +51,10 @@
 
 - **Z0 设计先行**(本 PR):`STREAM-Z-DESIGN.md` + `ITERATION-PLAN.md` Z backlog。
 - **Z1 租户用量/成本 API**:`api/usage.py`(`/v1/usage/cost` + `/v1/usage/tokens`,`billing:read`,只暴露 billed)+ 响应模型 + 测试(自隔离 / 键集不含 base-markup / group_by / unpriced / 当月实时 tokens)。
-- **Z2 admin chargeback API + 指标**:ledger store `list_for_month_all_tenants`(bypass)+ `api/billing_admin.py`(system_admin,跨租户,全拆分)+ `helix_llm_cost_micros_total` 指标(rollup 自增)+ 测试(非 admin 403 / 跨租户聚合 / margin 正确)。
+- **Z2 admin chargeback API + 指标**:ledger store `list_for_month_all_tenants`(bypass)+ `api/billing_admin.py`(system_admin,跨租户,全拆分)+ `expert_work_llm_cost_micros_total` 指标(rollup 自增)+ 测试(非 admin 403 / 跨租户聚合 / margin 正确)。
 - **Z3 看板 UI**(前端):租户用量页 + admin chargeback 页 + i18n + vitest/storybook/Playwright/axe。
 
-**关键路径** Z0→Z1→Z2→Z3。**完成 = 路线图收官**:平台供给可治理(W/X)、用量可计量可加价(Y)、成本可看可分账(Z)——helix 从"自助工具"成为"可变现的多租户 PaaS"。
+**关键路径** Z0→Z1→Z2→Z3。**完成 = 路线图收官**:平台供给可治理(W/X)、用量可计量可加价(Y)、成本可看可分账(Z)——Expert Work 从"自助工具"成为"可变现的多租户 PaaS"。
 
 ## 4. Verification
 
@@ -62,7 +62,7 @@
 2. **group_by**:`agent`/`model`/`none` 聚合数与 ledger bucket 对得上;`total_billed` = 各组之和;`unpriced` bucket 单列、billed=0。
 3. **当月实时 tokens**:产 `token_usage` 行 → `GET /v1/usage/tokens` 即时反映(不等 rollup);cost 端在 rollup 后才出 billed。
 4. **admin chargeback**:system_admin 跨租户聚合、显 base/markup/billed/margin;非 admin → 403;`bypass` 下能读 NULL... (ledger 非 NULL-tenant,是 bypass 读全租户)。
-5. **指标**:rollup 后 `helix_llm_cost_micros_total{tenant,model}` 增量 = billed 总和;label 无高基数 agent_name。
+5. **指标**:rollup 后 `expert_work_llm_cost_micros_total{tenant,model}` 增量 = billed 总和;label 无高基数 agent_name。
 6. **通用**:`pre-commit`、`pytest -m "not integration"`、mypy 全 CI 范围(见 [[reference_ci_lint_type_test_scopes]]);前端 typecheck/test/build/playwright;CodeQL 不放 assert 内副作用 / 不 log 租户派生值进 `extra=`;`billing` 资源已存无需双 Literal 新增(审计若记 chargeback 查询用现有 action 或不记读)。
 
 ## 5. 复用锚点（exact files）
@@ -76,7 +76,7 @@
 | 平台 admin API 范式(bypass+system_admin) | `rate_card.py` / `mcp_catalog.py` | `api/rate_card.py` |
 | RBAC `billing` | `Resource` Literal | `auth/rbac.py` |
 | bypass | `bypass_rls_session` | `tenant_scope.py` |
-| Prometheus | `helix_counter` | `common/observability/__init__.py` |
+| Prometheus | `expert_work_counter` | `common/observability/__init__.py` |
 | 信封 | `{success,data,error}` | `api/rate_card.py` |
 
 ## 6. Out of scope / follow-ups

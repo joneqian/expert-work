@@ -26,7 +26,7 @@ substrings — conservative but covering the common vendor phrasings (OpenAI
 
 from __future__ import annotations
 
-from helix_agent.runtime.middleware import (
+from expert_work.runtime.middleware import (
     LLMClientError,
     LLMError,
     LLMKeyUnavailableError,

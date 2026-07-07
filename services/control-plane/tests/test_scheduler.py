@@ -12,28 +12,28 @@ import pytest
 from control_plane.audit import build_default_audit_logger
 from control_plane.runtime import AgentRuntime
 from control_plane.scheduler import TriggerScheduler, _is_cron_due, _next_fire
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryApprovalStore,
     InMemoryThreadMetaStore,
     InMemoryTriggerRunStore,
     InMemoryTriggerStore,
 )
-from helix_agent.persistence.agent_spec import InMemoryAgentSpecStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import (
+from expert_work.persistence.agent_spec import InMemoryAgentSpecStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import (
     AgentSpec,
     TriggerRecord,
     TriggerRunRecord,
     TriggerRunStatus,
 )
-from helix_agent.runtime.runs import DisconnectMode, InMemoryRunStore, RunInfo, RunStatus
+from expert_work.runtime.runs import DisconnectMode, InMemoryRunStore, RunInfo, RunStatus
 from tests.agent_fixtures import stub_agent_runtime
 
 _BASE = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)
 _TENANT = uuid4()
 
 _MANIFEST: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "reporter", "version": "1.0.0", "tenant": "platform-eng"},
     "spec": {

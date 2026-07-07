@@ -12,8 +12,8 @@ from uuid import uuid4
 import pytest
 
 from control_plane.api._user_scope import ensure_member_active
-from helix_agent.persistence import InMemoryTenantMemberStore
-from helix_agent.protocol import Principal
+from expert_work.persistence import InMemoryTenantMemberStore
+from expert_work.protocol import Principal
 
 
 def _request(*, subject_id: str, member_repo: object | None) -> object:

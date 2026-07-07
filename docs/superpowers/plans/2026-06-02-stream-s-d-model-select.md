@@ -18,7 +18,7 @@
 
 ---
 
-## ModelSpec facts (from `packages/helix-protocol/.../agent_spec.py:74`)
+## ModelSpec facts (from `packages/expert-work-protocol/.../agent_spec.py:74`)
 
 Fields: `provider` (Literal: anthropic/openai/azure/self-hosted/kimi/glm/deepseek/qwen/doubao), `name` (string), `temperature`, `max_tokens`, `rate_limit_rpm`, `api_key_ref` (str|null), `base_url` (str|null), `azure_deployment`, `azure_api_version`, `fallback` (list[ModelSpec], recursive), `supports_vision` (bool), + cache opt-out. In JSON Schema this is `#/$defs/ModelSpec` (self-referential via `fallback`). The custom field handles `provider`/`name`/`supports_vision`; everything else delegates to RJSF defaults.
 
@@ -273,7 +273,7 @@ describe("buildDefaultManifest", () => {
 import { parseYaml } from "./yaml";
 import type { CatalogModel, ModelCatalog } from "../../api/model_catalog";
 
-export const BASE_MANIFEST_YAML = `apiVersion: helix.io/v1
+export const BASE_MANIFEST_YAML = `apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: my-agent

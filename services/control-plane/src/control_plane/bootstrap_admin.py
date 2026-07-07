@@ -8,7 +8,7 @@ the first admin over the API.
 
 This module is the **only** code path that breaks that loop. It writes one
 platform-scope binding directly to the database, gated by infra-level access
-(it needs ``HELIX_AGENT_DB_DSN`` to resolve to a writable DB — there is no
+(it needs ``EXPERT_WORK_DB_DSN`` to resolve to a writable DB — there is no
 HTTP/JWT surface). Run it once per deployment from a controlled ops host:
 
 .. code:: sh
@@ -33,16 +33,16 @@ from uuid import UUID
 
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     build_rls_sessionmaker,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.persistence.auth import RoleBindingStore, SqlRoleBindingStore
-from helix_agent.protocol import Role, RoleBinding
+from expert_work.persistence.auth import RoleBindingStore, SqlRoleBindingStore
+from expert_work.protocol import Role, RoleBinding
 
-logger = logging.getLogger("helix.control_plane.bootstrap_admin")
+logger = logging.getLogger("expert_work.control_plane.bootstrap_admin")
 
 _GRANTED_BY = "bootstrap"
 
@@ -149,7 +149,7 @@ def main() -> None:
     parser.add_argument(
         "--dsn",
         default=None,
-        help="Override the DB DSN (default: Settings.db_dsn / HELIX_AGENT_DB_DSN).",
+        help="Override the DB DSN (default: Settings.db_dsn / EXPERT_WORK_DB_DSN).",
     )
     args = parser.parse_args()
     raise SystemExit(asyncio.run(_amain(args)))

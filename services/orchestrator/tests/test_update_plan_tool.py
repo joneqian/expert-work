@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from helix_agent.protocol import Plan, PlanStep
+from expert_work.protocol import Plan, PlanStep
 from orchestrator.tools.registry import ToolContext
 from orchestrator.tools.update_plan import UpdatePlanTool
 

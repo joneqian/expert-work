@@ -27,8 +27,8 @@ from jwt import PyJWK
 
 from control_plane.auth import JWTVerifier, StaticJWKSProvider
 
-TEST_ISSUER = "http://keycloak.test/realms/helix-agent"
-TEST_AUDIENCE = "helix-agent-api-internal"
+TEST_ISSUER = "http://keycloak.test/realms/expert-work"
+TEST_AUDIENCE = "expert-work-api-internal"
 TEST_KID = "test-kid-1"
 
 

@@ -20,11 +20,11 @@ from starlette.requests import Request
 
 from control_plane.auth.rbac import is_admin
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence.tenant_member import TenantMemberStore
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import Principal, ThreadMeta
+from expert_work.persistence.tenant_member import TenantMemberStore
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.protocol import Principal, ThreadMeta
 
-logger = logging.getLogger("helix.control_plane.api.user_scope")
+logger = logging.getLogger("expert_work.control_plane.api.user_scope")
 
 
 def get_user_repo(request: Request) -> TenantUserStore:

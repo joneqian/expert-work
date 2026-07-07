@@ -25,8 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from testcontainers.postgres import PostgresContainer
 
 from control_plane.workspace_lock import PgWorkspaceLock
-from helix_agent.persistence import SqlUserWorkspaceStore
-from helix_agent.persistence.database import (
+from expert_work.persistence import SqlUserWorkspaceStore
+from expert_work.persistence.database import (
     DatabaseConfig,
     create_async_engine_from_config,
     create_async_session_factory,
@@ -37,7 +37,7 @@ pytestmark = pytest.mark.integration
 _HOLD_S = 0.3
 
 _ALEMBIC_INI = (
-    Path(__file__).resolve().parents[3] / "packages" / "helix-persistence" / "alembic.ini"
+    Path(__file__).resolve().parents[3] / "packages" / "expert-work-persistence" / "alembic.ini"
 )
 
 

@@ -16,8 +16,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.auth import JWTVerifier
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.protocol import Role
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.protocol import Role
 from tests.auth_fixtures import make_test_jwt
 
 
@@ -46,7 +46,7 @@ async def admin_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncIterator[tuple[AsyncClient, UUID]]:
     # Pin the env default ON so an unconfigured platform reads effective=True.
-    monkeypatch.delenv("HELIX_TOOL_OUTPUT_BUDGET", raising=False)
+    monkeypatch.delenv("EXPERT_WORK_TOOL_OUTPUT_BUDGET", raising=False)
     app = create_app(settings=settings, lifecycle=lifecycle, jwt_verifier=jwt_verifier)
     sys_admin_id = await _seed_admin(app)
     transport = ASGITransport(app=app)

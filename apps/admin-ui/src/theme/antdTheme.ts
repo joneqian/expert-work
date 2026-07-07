@@ -1,5 +1,5 @@
 /**
- * helix Admin tokens → Antd 5 ConfigProvider theme 映射
+ * expert_work Admin tokens → Antd 5 ConfigProvider theme 映射
  *
  * 思路:CSS custom properties 仍是 source of truth(`tokens.css`);
  * Antd 内部不读 CSS variable,所以这里给 Antd 一份硬编码 token 值。
@@ -8,7 +8,7 @@
 import { theme as antdTheme, type ThemeConfig } from "antd";
 
 // 与 tokens.css 1:1 对齐(brand / accent / semantic)
-export const HELIX_COLORS = {
+export const EXPERT_WORK_COLORS = {
   brand: {
     50: "#ecfeff",
     400: "#22d3ee",
@@ -27,11 +27,11 @@ export const HELIX_COLORS = {
 } as const;
 
 const BASE_TOKEN = {
-  colorPrimary: HELIX_COLORS.brand[500],
-  colorSuccess: HELIX_COLORS.success[500],
-  colorWarning: HELIX_COLORS.warning[500],
-  colorError: HELIX_COLORS.danger[500],
-  colorInfo: HELIX_COLORS.brand[500],
+  colorPrimary: EXPERT_WORK_COLORS.brand[500],
+  colorSuccess: EXPERT_WORK_COLORS.success[500],
+  colorWarning: EXPERT_WORK_COLORS.warning[500],
+  colorError: EXPERT_WORK_COLORS.danger[500],
+  colorInfo: EXPERT_WORK_COLORS.brand[500],
 
   borderRadius: 6,
   borderRadiusSM: 4,
@@ -59,18 +59,18 @@ export const darkTheme: ThemeConfig = {
   algorithm: antdTheme.darkAlgorithm,
   token: {
     ...BASE_TOKEN,
-    colorBgBase: "#0a0b0f", // tokens.css --hx-surface-bg
-    colorBgContainer: "#161921", // --hx-surface-base
-    colorBgElevated: "#232730", // --hx-surface-raised
+    colorBgBase: "#0a0b0f", // tokens.css --ew-surface-bg
+    colorBgContainer: "#161921", // --ew-surface-base
+    colorBgElevated: "#232730", // --ew-surface-raised
     colorBgLayout: "#0a0b0f",
-    colorBorder: "#3f4452", // --hx-border-default
-    colorBorderSecondary: "#232730", // --hx-border-subtle
+    colorBorder: "#3f4452", // --ew-border-default
+    colorBorderSecondary: "#232730", // --ew-border-subtle
     colorText: "#f4f5f7",
     colorTextSecondary: "#a0a4ae",
     colorTextTertiary: "#74798a",
     colorTextQuaternary: "#5a5f70",
-    colorLink: HELIX_COLORS.brand[400],
-    colorLinkHover: HELIX_COLORS.brand[400],
+    colorLink: EXPERT_WORK_COLORS.brand[400],
+    colorLinkHover: EXPERT_WORK_COLORS.brand[400],
   },
   components: {
     Layout: {
@@ -94,7 +94,7 @@ export const darkTheme: ThemeConfig = {
     },
     Tabs: {
       itemSelectedColor: "#f4f5f7",
-      inkBarColor: HELIX_COLORS.brand[500],
+      inkBarColor: EXPERT_WORK_COLORS.brand[500],
     },
     Button: {
       fontWeight: 500,
@@ -109,7 +109,7 @@ export const lightTheme: ThemeConfig = {
   algorithm: antdTheme.defaultAlgorithm,
   token: {
     ...BASE_TOKEN,
-    colorPrimary: HELIX_COLORS.brand[600],
+    colorPrimary: EXPERT_WORK_COLORS.brand[600],
     colorBgBase: "#fafbfc",
     colorBgContainer: "#ffffff",
     colorBgElevated: "#ffffff",
@@ -120,8 +120,8 @@ export const lightTheme: ThemeConfig = {
     colorTextSecondary: "#5a5f70",
     colorTextTertiary: "#74798a",
     colorTextQuaternary: "#a0a4ae",
-    colorLink: HELIX_COLORS.brand[700],
-    colorLinkHover: HELIX_COLORS.brand[600],
+    colorLink: EXPERT_WORK_COLORS.brand[700],
+    colorLinkHover: EXPERT_WORK_COLORS.brand[600],
   },
   components: {
     Layout: {
@@ -145,7 +145,7 @@ export const lightTheme: ThemeConfig = {
     },
     Tabs: {
       itemSelectedColor: "#161921",
-      inkBarColor: HELIX_COLORS.brand[600],
+      inkBarColor: EXPERT_WORK_COLORS.brand[600],
     },
     Button: {
       fontWeight: 500,

@@ -34,11 +34,11 @@ from control_plane.skill_prediction_verdict import (
 )
 from control_plane.skill_rollback import RollbackAction
 from control_plane.skill_rollback_gate import RollbackGate
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.protocol import SkillEvalResult, SkillPredictionVerdict
-from helix_agent.protocol.skill import SkillStatus
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.persistence.skill.base import SkillStore
+from expert_work.protocol import SkillEvalResult, SkillPredictionVerdict
+from expert_work.protocol.skill import SkillStatus
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +47,12 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-_rolled_back = helix_counter(
-    "helix_control_plane_skill_rollback_total",
+_rolled_back = expert_work_counter(
+    "expert_work_control_plane_skill_rollback_total",
     "ACTIVE distilled skill versions auto-archived by the rollback monitor.",
 )
-_cycle_errors = helix_counter(
-    "helix_control_plane_skill_rollback_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_skill_rollback_cycle_errors_total",
     "Rollback monitor cycles that ended in a caught exception.",
 )
 

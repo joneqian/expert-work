@@ -7,8 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.protocol.multimodal import ImageRef
-from helix_agent.runtime.storage import InMemoryObjectStore, ObjectNotFoundError
+from expert_work.protocol.multimodal import ImageRef
+from expert_work.runtime.storage import InMemoryObjectStore, ObjectNotFoundError
 from orchestrator.multimodal import (
     IMAGE_REF_BLOCK_TYPE,
     ImageResolver,
@@ -23,8 +23,8 @@ _DATA = b"\x89PNG\r\n\x1a\nfake-image-bytes"
 
 
 def test_image_ref_block_shape() -> None:
-    block = image_ref_block("helix://image/abc")
-    assert block == {"type": IMAGE_REF_BLOCK_TYPE, "ref": "helix://image/abc"}
+    block = image_ref_block("expert_work://image/abc")
+    assert block == {"type": IMAGE_REF_BLOCK_TYPE, "ref": "expert_work://image/abc"}
 
 
 def test_split_human_content_plain_string() -> None:
@@ -39,12 +39,12 @@ def test_split_human_content_text_blocks_only() -> None:
 def test_split_human_content_collects_image_refs() -> None:
     content = [
         {"type": "text", "text": "look:"},
-        image_ref_block("helix://image/one"),
-        image_ref_block("helix://image/two"),
+        image_ref_block("expert_work://image/one"),
+        image_ref_block("expert_work://image/two"),
     ]
     text, refs = split_human_content(content)
     assert text == "look:"
-    assert refs == ["helix://image/one", "helix://image/two"]
+    assert refs == ["expert_work://image/one", "expert_work://image/two"]
 
 
 def test_split_human_content_accepts_bare_string_blocks() -> None:
@@ -69,15 +69,15 @@ def test_resolved_image_data_uri() -> None:
 @pytest.mark.asyncio
 async def test_in_memory_resolver_resolves_known_ref() -> None:
     img = ResolvedImage(media_type="image/webp", data=_DATA)
-    resolver = InMemoryImageResolver(images={"helix://image/x": img})
-    assert await resolver.resolve("helix://image/x") is img
+    resolver = InMemoryImageResolver(images={"expert_work://image/x": img})
+    assert await resolver.resolve("expert_work://image/x") is img
 
 
 @pytest.mark.asyncio
 async def test_in_memory_resolver_raises_on_missing_ref() -> None:
     resolver = InMemoryImageResolver()
     with pytest.raises(KeyError, match="no image for ref"):
-        await resolver.resolve("helix://image/missing")
+        await resolver.resolve("expert_work://image/missing")
 
 
 def test_in_memory_resolver_satisfies_protocol() -> None:
@@ -134,7 +134,7 @@ async def test_object_store_resolver_rejects_unsupported_extension() -> None:
 async def test_object_store_resolver_rejects_malformed_ref() -> None:
     resolver = ObjectStoreImageResolver(store=InMemoryObjectStore())
     with pytest.raises(ValueError, match="image ref"):
-        await resolver.resolve("not-a-helix-image-ref")
+        await resolver.resolve("not-a-expert-work-image-ref")
 
 
 def test_object_store_resolver_satisfies_protocol() -> None:

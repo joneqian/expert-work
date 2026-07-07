@@ -26,13 +26,13 @@ from uuid import UUID
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, ConfigDict, Field
 
-from helix_agent.common.credentials import CredentialsResolver
-from helix_agent.protocol import ModelSpec, Provider, StructuredOutputSpec
+from expert_work.common.credentials import CredentialsResolver
+from expert_work.protocol import ModelSpec, Provider, StructuredOutputSpec
 
 if TYPE_CHECKING:
-    from helix_agent.runtime.secret_store import SecretStore
+    from expert_work.runtime.secret_store import SecretStore
 
-logger = logging.getLogger("helix.control_plane.quality_judge")
+logger = logging.getLogger("expert_work.control_plane.quality_judge")
 
 #: Dimension keys persisted in ``QualityScoreRecord.dimensions``.
 DIMENSION_KEYS = ("addressed_request", "coherence", "safety")

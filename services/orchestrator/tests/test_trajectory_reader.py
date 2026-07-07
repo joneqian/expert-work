@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryReader, TrajectoryRecord, TrajectoryRecorder
 
 _BASE = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)

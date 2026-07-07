@@ -3,7 +3,7 @@
 
 stdlib ``urllib`` does not send the proxy token on an HTTPS ``CONNECT``; the
 shim patches ``http.client.HTTPConnection.set_tunnel`` to add it from the
-supervisor-injected ``HELIX_EGRESS_PROXY_AUTH`` env. These tests load the shim
+supervisor-injected ``EXPERT_WORK_EGRESS_PROXY_AUTH`` env. These tests load the shim
 file directly (it lives in the image build context, not an importable package)
 and verify the three behaviors: add when env is set, no-op without it, and never
 override a client's own auth. Each test saves/restores the global
@@ -25,9 +25,9 @@ def _load_shim(monkeypatch: pytest.MonkeyPatch, auth: str | None) -> None:
     """Exec the shim file with the env set as given. It patches the global
     ``http.client.HTTPConnection.set_tunnel`` at import time iff ``auth`` set."""
     if auth is None:
-        monkeypatch.delenv("HELIX_EGRESS_PROXY_AUTH", raising=False)
+        monkeypatch.delenv("EXPERT_WORK_EGRESS_PROXY_AUTH", raising=False)
     else:
-        monkeypatch.setenv("HELIX_EGRESS_PROXY_AUTH", auth)
+        monkeypatch.setenv("EXPERT_WORK_EGRESS_PROXY_AUTH", auth)
     spec = importlib.util.spec_from_file_location("_egress_shim_under_test", _SHIM)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

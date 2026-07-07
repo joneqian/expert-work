@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from control_plane.platform_mcp_pool import McpClientFactory, PlatformMcpPoolService
-from helix_agent.persistence import InMemoryMcpConnectorCatalogStore
-from helix_agent.protocol import (
+from expert_work.persistence import InMemoryMcpConnectorCatalogStore
+from expert_work.protocol import (
     McpConnectorAuthField,
     McpConnectorAuthSchema,
     McpConnectorCatalogUpsert,
@@ -107,7 +107,7 @@ async def test_builds_pool_from_none_and_platform_bearer() -> None:
         store,
         name="search",
         auth_type="bearer",
-        bearer_token_ref="secret://helix-agent/platform/mcp/search/token",
+        bearer_token_ref="secret://expert-work/platform/mcp/search/token",
     )
     configs: list[MCPServerConfig] = []
     svc = PlatformMcpPoolService(store=store, client_factory=_factory_spy(configs))

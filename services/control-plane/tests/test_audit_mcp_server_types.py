@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from helix_agent.protocol import AuditAction
+from expert_work.protocol import AuditAction
 
 
 def test_mcp_server_audit_actions_exist() -> None:
@@ -16,7 +16,7 @@ def test_resource_type_literal_includes_tenant_mcp_server() -> None:
     from typing import get_args
 
     from control_plane.audit import ResourceType as CpResourceType
-    from helix_agent.protocol.audit import ResourceType as ProtoResourceType
+    from expert_work.protocol.audit import ResourceType as ProtoResourceType
 
     assert "tenant_mcp_server" in get_args(CpResourceType)
     assert "tenant_mcp_server" in get_args(ProtoResourceType)

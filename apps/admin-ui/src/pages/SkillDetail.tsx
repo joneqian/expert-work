@@ -363,7 +363,7 @@ export function SkillDetail({
                     <Pin
                       size={13}
                       strokeWidth={2}
-                      style={{ color: "var(--hx-color-brand-500)" }}
+                      style={{ color: "var(--ew-color-brand-500)" }}
                     />
                   ) : (
                     <PinOff size={13} strokeWidth={1.75} />
@@ -393,7 +393,7 @@ export function SkillDetail({
                   value: s,
                   label: isActiveBlocked ? (
                     <Tooltip title={t("skills.detail_admin_required_tooltip")}>
-                      <span style={{ color: "var(--hx-text-tertiary)" }}>
+                      <span style={{ color: "var(--ew-text-tertiary)" }}>
                         {label} 🔒
                       </span>
                     </Tooltip>
@@ -466,14 +466,14 @@ export function SkillDetail({
                     <Sparkles
                       size={11}
                       strokeWidth={1.75}
-                      style={{ color: "var(--hx-color-brand-500)" }}
+                      style={{ color: "var(--ew-color-brand-500)" }}
                     />
                   )}
                   {v.high_risk && (
                     <ShieldAlert
                       size={11}
                       strokeWidth={1.75}
-                      style={{ color: "var(--hx-status-danger-fg)" }}
+                      style={{ color: "var(--ew-status-danger-fg)" }}
                     />
                   )}
                 </span>

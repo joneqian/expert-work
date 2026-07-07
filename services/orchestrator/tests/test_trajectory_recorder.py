@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from helix_agent.runtime.storage import InMemoryObjectStore, ObjectStoreError
+from expert_work.runtime.storage import InMemoryObjectStore, ObjectStoreError
 from orchestrator.trajectory import (
     TrajectoryRecord,
     TrajectoryRecorder,
@@ -322,11 +322,11 @@ async def test_record_with_invalid_outcome_logs_and_returns() -> None:
 
 @pytest.mark.asyncio
 async def test_recorded_counter_increments_on_success_write() -> None:
-    """``helix_trajectory_recorded_total{outcome=...}`` increments on a
+    """``expert_work_trajectory_recorded_total{outcome=...}`` increments on a
     successful write."""
     from prometheus_client import REGISTRY
 
-    metric = "helix_trajectory_recorded_total"
+    metric = "expert_work_trajectory_recorded_total"
     labels = {"outcome": "success"}
     before = REGISTRY.get_sample_value(metric, labels=labels) or 0.0
 
@@ -339,12 +339,12 @@ async def test_recorded_counter_increments_on_success_write() -> None:
 
 @pytest.mark.asyncio
 async def test_record_error_counter_increments_on_store_failure() -> None:
-    """``helix_trajectory_record_errors_total{outcome, reason}`` records
+    """``expert_work_trajectory_record_errors_total{outcome, reason}`` records
     the failure mode so dashboards can distinguish config errors from
     actual ObjectStore outages."""
     from prometheus_client import REGISTRY
 
-    metric = "helix_trajectory_record_errors_total"
+    metric = "expert_work_trajectory_record_errors_total"
     labels = {"outcome": "failed", "reason": "store_error"}
     before = REGISTRY.get_sample_value(metric, labels=labels) or 0.0
 

@@ -197,9 +197,9 @@ export function SettingsEgressAudit() {
           gap: 8,
           marginBottom: 16,
           padding: 12,
-          background: "var(--hx-surface-raised)",
+          background: "var(--ew-surface-raised)",
           borderRadius: 6,
-          border: "1px solid var(--hx-border-subtle)",
+          border: "1px solid var(--ew-border-subtle)",
         }}
         data-testid="egress-audit-filters"
       >
@@ -264,14 +264,14 @@ export function SettingsEgressAudit() {
                 textAlign: "left",
                 padding: "10px 12px",
                 marginBottom: 6,
-                background: "var(--hx-surface-raised)",
-                border: "1px solid var(--hx-border-subtle)",
+                background: "var(--ew-surface-raised)",
+                border: "1px solid var(--ew-border-subtle)",
                 borderRadius: 6,
                 cursor: "pointer",
               }}
             >
               <VerdictTag verdict={entry.verdict} />
-              <Text strong style={{ fontFamily: "var(--hx-font-mono)" }}>
+              <Text strong style={{ fontFamily: "var(--ew-font-mono)" }}>
                 {entry.target_host}:{entry.target_port}
               </Text>
               <Text type="secondary">{entry.agent_name ?? "—"}</Text>
@@ -329,7 +329,7 @@ export function SettingsEgressAudit() {
               {selected.duration_ms !== null ? `${selected.duration_ms} ms` : "—"}
             </Descriptions.Item>
             <Descriptions.Item label={t("egress_audit.col_sandbox")}>
-              <Text style={{ fontFamily: "var(--hx-font-mono)" }}>
+              <Text style={{ fontFamily: "var(--ew-font-mono)" }}>
                 {selected.sandbox_id ?? "—"}
               </Text>
             </Descriptions.Item>

@@ -18,16 +18,16 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditAction, AuditQuery
-from helix_agent.runtime.runs import InMemoryRunStore, RunInfo, RunStatus
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditAction, AuditQuery
+from expert_work.runtime.runs import InMemoryRunStore, RunInfo, RunStatus
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt
 
 _DEFAULT_TENANT = DEFAULT_DEV_TENANT_ID
 
 _AGENT_YAML = """\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: code-reviewer

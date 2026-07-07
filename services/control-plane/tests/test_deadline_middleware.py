@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 
 from control_plane.middleware import CancellationMiddleware, DeadlineMiddleware
 from control_plane.middleware.deadline import DEADLINE_HEADER
-from helix_agent.common.deadline import CancelToken, get_current_deadline
+from expert_work.common.deadline import CancelToken, get_current_deadline
 
 
 def _build_probe_app() -> FastAPI:

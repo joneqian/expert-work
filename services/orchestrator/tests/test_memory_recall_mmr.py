@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from helix_agent.protocol import MemoryItem
+from expert_work.protocol import MemoryItem
 from orchestrator.graph_builder.memory import make_memory_recall_node
 
 _QUERY = (1.0, 0.0, 0.0)

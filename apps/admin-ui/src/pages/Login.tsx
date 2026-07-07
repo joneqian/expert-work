@@ -73,7 +73,7 @@ export function Login() {
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
-        background: "var(--hx-surface-base)",
+        background: "var(--ew-surface-base)",
       }}
     >
       <Card
@@ -156,7 +156,7 @@ export function Login() {
                 autoComplete="off"
                 spellCheck={false}
                 data-testid="login-token"
-                style={{ fontFamily: "var(--hx-font-mono, ui-monospace)" }}
+                style={{ fontFamily: "var(--ew-font-mono, ui-monospace)" }}
               />
             </Form.Item>
             <Button

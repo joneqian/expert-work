@@ -39,7 +39,7 @@ function withStubs(Story: ComponentType) {
               id: "w1",
               tenant_id: "22222222-2222-2222-2222-222222222222",
               user_id: "u-1",
-              volume_name: "helix-ws-demo",
+              volume_name: "expert-work-ws-demo",
               size_bytes: 1048576,
               size_limit_bytes: 10737418240,
               created_at: "2026-05-25T00:00:00Z",
@@ -100,7 +100,7 @@ function withStubs(Story: ComponentType) {
     }
     if (url.endsWith("/uploads")) {
       return Promise.resolve({
-        data: { image_ref: "helix://image/demo.png" },
+        data: { image_ref: "expert_work://image/demo.png" },
         status: 201,
         statusText: "Created",
         headers: {},

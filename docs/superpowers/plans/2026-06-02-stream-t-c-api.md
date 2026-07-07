@@ -12,8 +12,8 @@
 
 ## Conventions (verified, mirror these)
 - `api/platform_config.py`: `_require_system_admin(principal)` (403 `PLATFORM_SCOPE_FORBIDDEN`); `_principal` dep; `_get_audit`; `service.invalidate()` after writes; `_emit_platform_audit(audit, ...)` (read its real signature at the credentials PUT, ~line 243, and reuse it or the same `emit`/`AuditLogger` pattern); envelope `{ "success": True, "data": ..., "error": None }`; 422 with `{"code","message"}` detail on validation failure.
-- `AuditAction` is a single `StrEnum` in `packages/helix-protocol/src/helix_agent/protocol/audit.py` (imported everywhere — NOT a double Literal; still `grep -rn "PLATFORM_SECRET" ` to confirm there's no second copy before adding).
-- Catalog: `from helix_agent.protocol import models_for_provider, PROVIDER_CATALOG`; an entry is embedding-capable iff `.embeddings`, rerank-capable iff `.rerank` (PR B). `models_for_provider(p)` returns non-deprecated entries.
+- `AuditAction` is a single `StrEnum` in `packages/expert-work-protocol/src/expert_work/protocol/audit.py` (imported everywhere — NOT a double Literal; still `grep -rn "PLATFORM_SECRET" ` to confirm there's no second copy before adding).
+- Catalog: `from expert_work.protocol import models_for_provider, PROVIDER_CATALOG`; an entry is embedding-capable iff `.embeddings`, rerank-capable iff `.rerank` (PR B). `models_for_provider(p)` returns non-deprecated entries.
 - App wiring: `app.state.platform_embedding_config_service` (PR B), `app.state.platform_secrets_service`, `app.state.audit_logger`, `app.state.settings` already set. The router is registered next to `build_platform_config_router()` in `app.py` (grep `build_platform_config_router` for the include site).
 - **Run `uv run pre-commit run --files <changed>` (NOT just `ruff check`) before every commit** — pre-commit also runs `ruff-format`; CI fails if formatting differs. Tests: `uv run python -m pytest <path> -q -m "not integration"` from repo root.
 
@@ -22,7 +22,7 @@
 ### Task 1: `PLATFORM_EMBEDDING_CONFIG_UPDATED` audit action + `PlatformEmbeddingConfigService.put()`
 
 **Files:**
-- Modify: `packages/helix-protocol/src/helix_agent/protocol/audit.py` (add enum member)
+- Modify: `packages/expert-work-protocol/src/expert_work/protocol/audit.py` (add enum member)
 - Modify: `services/control-plane/src/control_plane/platform_embedding_config.py` (add `put`)
 - Test: extend `services/control-plane/tests/test_platform_embedding_config_service.py`
 
@@ -58,7 +58,7 @@ async def test_put_writes_and_invalidates() -> None:
 
 - [ ] **Step 6: pre-commit + commit**
 ```bash
-uv run pre-commit run --files packages/helix-protocol/src/helix_agent/protocol/audit.py services/control-plane/src/control_plane/platform_embedding_config.py services/control-plane/tests/test_platform_embedding_config_service.py
+uv run pre-commit run --files packages/expert-work-protocol/src/expert_work/protocol/audit.py services/control-plane/src/control_plane/platform_embedding_config.py services/control-plane/tests/test_platform_embedding_config_service.py
 git add -A && git commit -m "feat(stream-t): embedding-config audit action + service.put (PR C)"
 ```
 

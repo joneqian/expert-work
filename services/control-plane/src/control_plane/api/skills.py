@@ -56,21 +56,21 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.common.uplift_metrics import (
     record_skill_blocked,
     record_skill_high_risk_event,
     record_threat_pattern_hits,
 )
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DuplicateSkillError,
     SkillNotFoundError,
     SkillStore,
     TenantSkillSubscriptionNotFoundError,
     TenantSkillSubscriptionStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     SKILL_REF_PATTERN,
     AuditAction,
     AuditResult,
@@ -83,15 +83,15 @@ from helix_agent.protocol import (
     TenantSkillSubscriptionRecord,
     tier_satisfies,
 )
-from helix_agent.protocol.skill import (
+from expert_work.protocol.skill import (
     SkillPackageLayoutError,
     compute_content_hash,
     is_high_risk_skill_version,
     supporting_files_to_jsonable,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.skills")
+logger = logging.getLogger("expert_work.control_plane.skills")
 
 
 class _CreateSkillBody(BaseModel):

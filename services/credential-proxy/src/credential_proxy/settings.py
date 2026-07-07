@@ -10,7 +10,7 @@ class CredentialProxySettings(BaseSettings):
     """Resolved runtime settings; cheap to construct in tests."""
 
     model_config = SettingsConfigDict(
-        env_prefix="HELIX_CRED_PROXY_",
+        env_prefix="EXPERT_WORK_CRED_PROXY_",
         case_sensitive=False,
         extra="ignore",
     )
@@ -23,7 +23,7 @@ class CredentialProxySettings(BaseSettings):
     port: int = Field(default=8080, gt=0, le=65535)
 
     # ------------------------------------------------------------------ db
-    db_dsn: str = "postgresql+asyncpg://helix_agent:helix_agent_dev@localhost:5432/helix_agent_dev"
+    db_dsn: str = "postgresql+asyncpg://expert_work:expert_work_dev@localhost:5432/expert_work_dev"
     db_echo: bool = False
 
     # -------------------------------------------------------- secret store

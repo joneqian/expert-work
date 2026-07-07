@@ -16,8 +16,8 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.persistence.models import SandboxInstanceRow, TenantQuotaRow
-from helix_agent.protocol.quota import QuotaDimension
+from expert_work.persistence.models import SandboxInstanceRow, TenantQuotaRow
+from expert_work.protocol.quota import QuotaDimension
 from sandbox_supervisor.domain import SandboxRecord, SandboxState
 
 #: ``sandbox_instance`` states that count against a tenant's quota.

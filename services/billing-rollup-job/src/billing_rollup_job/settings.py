@@ -23,7 +23,7 @@ class BillingRollupSettings(BaseSettings):
     """Resolved runtime settings."""
 
     model_config = SettingsConfigDict(
-        env_prefix="HELIX_BILLING_ROLLUP_",
+        env_prefix="EXPERT_WORK_BILLING_ROLLUP_",
         case_sensitive=False,
         extra="ignore",
     )
@@ -32,7 +32,7 @@ class BillingRollupSettings(BaseSettings):
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------ db
-    db_dsn: str = "postgresql+asyncpg://helix_agent:helix_agent_dev@localhost:5432/helix_agent_dev"
+    db_dsn: str = "postgresql+asyncpg://expert_work:expert_work_dev@localhost:5432/expert_work_dev"
     db_echo: bool = False
 
     # --------------------------------------------------------------- target

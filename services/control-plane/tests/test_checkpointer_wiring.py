@@ -1,7 +1,7 @@
 """Tests for the E.1 checkpointer wiring — settings + lifespan swap.
 
 The Postgres checkpointer itself is integration-tested by
-``test_checkpointer_factory.py`` in helix-runtime. Here we cover the
+``test_checkpointer_factory.py`` in expert-work-runtime. Here we cover the
 control-plane wiring: settings defaults, the ``make_agent_builder``
 seam, and the lifespan branch that swaps in the durable checkpointer.
 """
@@ -31,9 +31,9 @@ from control_plane.runtime import (
 )
 from control_plane.settings import Settings
 from control_plane.tenancy import TenantConfigNotConfiguredError
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.runtime.secret_store import LocalDevSecretStore
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.runtime.secret_store import LocalDevSecretStore
+from expert_work.runtime.storage import InMemoryObjectStore
 from orchestrator.llm import FakeEmbedder
 from orchestrator.multimodal import ObjectStoreImageResolver
 from orchestrator.tools import (
@@ -309,12 +309,12 @@ async def test_agent_builder_sets_tenant_mcp_pool_from_provider(
     async def _provider(tid: object) -> MCPServerPool:
         return tenant_pool
 
-    from helix_agent.protocol import AgentSpec
+    from expert_work.protocol import AgentSpec
 
     spec = AgentSpec.model_validate(
         deepcopy(
             {
-                "apiVersion": "helix.io/v1",
+                "apiVersion": "expert_work.io/v1",
                 "kind": "Agent",
                 "metadata": {"name": "test-agent", "version": "1.0.0", "tenant": "t"},
                 "spec": {
@@ -368,12 +368,12 @@ async def test_agent_builder_skips_empty_tenant_pool(
     async def _provider(tid: object) -> MCPServerPool:
         return empty_pool
 
-    from helix_agent.protocol import AgentSpec
+    from expert_work.protocol import AgentSpec
 
     spec = AgentSpec.model_validate(
         deepcopy(
             {
-                "apiVersion": "helix.io/v1",
+                "apiVersion": "expert_work.io/v1",
                 "kind": "Agent",
                 "metadata": {"name": "test-agent", "version": "1.0.0", "tenant": "t"},
                 "spec": {

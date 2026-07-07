@@ -15,8 +15,8 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import Plan, PlanStep
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.protocol import Plan, PlanStep
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     AgentState,
     GraphRunner,

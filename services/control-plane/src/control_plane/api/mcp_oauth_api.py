@@ -39,13 +39,13 @@ from control_plane.mcp_oauth import (
 )
 from control_plane.tenancy import TenantConfigNotConfiguredError
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence import (
     McpConnectorCatalogStore,
     McpOAuthConnectionAlreadyExistsError,
     McpOAuthConnectionStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     AuditResult,
     McpOAuthConnectionPatch,
@@ -53,11 +53,11 @@ from helix_agent.protocol import (
     TenantPlan,
     tier_satisfies,
 )
-from helix_agent.protocol.mcp_oauth_connection import McpOAuthConnectionRecord
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.protocol.mcp_oauth_connection import McpOAuthConnectionRecord
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
 
-logger = logging.getLogger("helix.control_plane.mcp_oauth_api")
+logger = logging.getLogger("expert_work.control_plane.mcp_oauth_api")
 
 
 def _catalog_store(request: Request) -> McpConnectorCatalogStore:
@@ -148,7 +148,7 @@ async def _tenant_enabled(request: Request, tenant_id: UUID, name: str) -> bool:
 
 def _secret_name(tenant_id: UUID, connection_id: UUID, kind: str) -> str:
     # connection_id (a UUID) keeps the path injection-safe — user_id is opaque.
-    return f"helix-agent/tenant/{tenant_id}/mcp-oauth/{connection_id}/{kind}"
+    return f"expert-work/tenant/{tenant_id}/mcp-oauth/{connection_id}/{kind}"
 
 
 # Fields safe to expose: never the token refs or the short-lived flow secrets.

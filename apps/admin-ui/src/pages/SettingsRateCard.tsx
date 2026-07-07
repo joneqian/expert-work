@@ -459,11 +459,11 @@ export function SettingsRateCard() {
                 marginBottom: 16,
               }}
             >
-              <dt style={{ color: "var(--hx-text-tertiary)" }}>
+              <dt style={{ color: "var(--ew-text-tertiary)" }}>
                 {t("rate_card_page.field_provider")}
               </dt>
               <dd style={{ margin: 0 }}>{editing.provider}</dd>
-              <dt style={{ color: "var(--hx-text-tertiary)" }}>
+              <dt style={{ color: "var(--ew-text-tertiary)" }}>
                 {t("rate_card_page.field_model")}
               </dt>
               <dd style={{ margin: 0 }} className="mono">

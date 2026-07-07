@@ -10,18 +10,18 @@ Related: [skill-github-import.md](./skill-github-import.md),
 
 Once GitHub import (#726/#734) made it trivial to pull arbitrary public skills
 (e.g. `skills.sh`), the obvious next question is: **does an imported skill
-actually run in helix?** Spot-checking two Vercel skills —
+actually run in Expert Work?** Spot-checking two Vercel skills —
 `vercel-labs/skills/find-skills` (a `npx skills` meta/installer) and
 `vercel-labs/agent-browser` (Node + Playwright + Chromium) — both do **not**
 run. That raises a fair concern: *if a large fraction of public skills are like
 these, is the whole Skill module low-value?*
 
-This doc answers that honestly: it pins down **what helix can and cannot run
+This doc answers that honestly: it pins down **what Expert Work can and cannot run
 today**, corrects the sampling bias in "most skills are like those two", and
 specifies the changes that widen the valuable lane without breaking the security
 model.
 
-## 2. How helix runs a skill today (as-built)
+## 2. How Expert Work runs a skill today (as-built)
 
 - **Instructions.** A skill's `SKILL.md` body is injected into the agent system
   prompt — eagerly (`lazy_load=false`) or on demand via the `skill_view`
@@ -31,7 +31,7 @@ model.
   bundled file (`reference/*.md`, `scripts/*.py`, …) as **text** to the model.
   Supporting files live in the DB (base64), gated by the U-21 drift + context
   re-scan. **They are never placed on a filesystem.**
-- **Execution substrate.** helix has `exec_python` and `bash` tools that run in a
+- **Execution substrate.** Expert Work has `exec_python` and `bash` tools that run in a
   gVisor sandbox via the Sandbox Supervisor (`acquire → exec(code) → release`,
   per call). The sandbox images are:
   - `infra/sandbox-image` — **Python 3.12 alpine, pure stdlib**, pip removed.
@@ -57,14 +57,14 @@ unstated — most skills assume their files are on disk.
 
 ## 3. Capability taxonomy — what runs
 
-| Skill class | Example | Runs in helix? |
+| Skill class | Example | Runs in Expert Work? |
 | --- | --- | --- |
 | **Instruction / knowledge** (SKILL.md + reference docs, no execution) | SOPs, API conventions, writing/brand rules, workflows | ✅ Fully. The primary design intent of Agent Skills. |
 | **Python compute, stdlib** | data munging, text processing | ⚠️ Works via `exec_python`/`bash`, but scripts aren't on disk → friction (read→write→run). |
 | **Python compute, needs libs** | Anthropic `pptx`/`docx`/`xlsx`/`pdf` (pandas/Pillow/…) | ⚠️ Libs only if in the `office` image; **and** the scripts shell out to system binaries (`soffice`/poppler) the image lacks (§5.4). |
 | **Node / other-runtime** | `agent-browser`, anything `npx`/Node | ❌ No runtime; can't install (network=none, no npm). |
 | **Network-dependent** | browser automation, scraping, arbitrary API calls | ❌ `network=none` + egress allowlist. |
-| **Env-specific tooling** | `find-skills` (`npx skills` installer) | ❌ No local skills dir / npx substrate; its job (discover+install) is already helix's platform import. |
+| **Env-specific tooling** | `find-skills` (`npx skills` installer) | ❌ No local skills dir / npx substrate; its job (discover+install) is already Expert Work's platform import. |
 
 ### The sampling-bias correction
 
@@ -73,7 +73,7 @@ CLI-ecosystem** skills (Node-flavored because Vercel's `skills` tooling is Node)
 The **canonical Agent Skills catalog (Anthropic's own)** — `pptx`, `docx`,
 `xlsx`, `pdf`, plus many pure-knowledge skills — is **Python + instructions**.
 The Agent Skills spec frames skills as *procedural knowledge with optional
-helper scripts*, not as runtime plugins. So helix's lane (instructions + Python
+helper scripts*, not as runtime plugins. So Expert Work's lane (instructions + Python
 compute) already covers the **bulk** of the canonical catalog — just not "any
 `skills.sh` entry verbatim".
 
@@ -111,7 +111,7 @@ Three counter-intuitive findings drove the next decision:
 
 ## 4. Architectural division: Skill vs MCP
 
-helix is **MCP-client** by direction. The clean split:
+Expert Work is **MCP-client** by direction. The clean split:
 
 - **Skill = knowledge + in-sandbox computation.** Portable content, no external
   state, no network. Lives in the DB, surfaced via `skill_view` and (proposed)
@@ -124,7 +124,7 @@ Under this split, **`agent-browser` as a skill is a category error.** Browser
 automation belongs to a **browser MCP server** (consumed like the GitHub/
 Postgres MCPs), not a Node skill shoved into a Python, network-less sandbox.
 Vercel blends the two because Claude Code treats everything as a local skill in
-a Node env; helix need not copy that. "helix can't run a browser skill" is not a
+a Node env; Expert Work need not copy that. "Expert Work can't run a browser skill" is not a
 weakness — it's the boundary doing its job.
 
 ## 5. Changes (widen the lane without breaking the model)
@@ -171,7 +171,7 @@ package and attach a non-blocking signal:
   `http` to arbitrary hosts in SKILL.md, `requirements` on networked libs.
 - Surface a `runtime: { kind: "python" | "node" | "browser" | "unknown",
   runnable: bool, hint }` in the import response. The admin UI shows it:
-  *"This skill needs Node/a browser — helix runs Python-only sandboxes; consider
+  *"This skill needs Node/a browser — Expert Work runs Python-only sandboxes; consider
   a browser/Node MCP server instead."*
 - **Non-blocking** — knowledge value may still exist (the instructions are
   readable even if scripts won't run). Just set expectations.
@@ -232,7 +232,7 @@ wired end-to-end from OFFICE-1a). Pure Dockerfile + requirements + build/CI/docs
 
 **Build / ops:**
 - Add `make build-sandbox-office` (host `docker build`, context `infra/`, tag
-  `helix-sandbox-office:dev`). Keep it out of `dev-up`; document that office
+  `expert-work-sandbox-office:dev`). Keep it out of `dev-up`; document that office
   agents need it built once on the host (the daemon the supervisor drives).
 - The office-image CI workflow already builds `:ci` — extend its smoke step to
   assert `soffice`/`ffmpeg`/`pdftoppm` are present **and** do one real

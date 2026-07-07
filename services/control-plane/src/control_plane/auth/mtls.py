@@ -11,7 +11,7 @@ separated elements, each a ``;``-separated key=value list:
 
 .. code:: text
 
-   X-Forwarded-Client-Cert: By=spiffe://...;Hash=abc123;Subject="CN=foo,O=helix";URI=spiffe://foo
+   X-Forwarded-Client-Cert: By=spiffe://...;Hash=abc123;Subject="CN=foo,O=expert_work";URI=spiffe://foo
 
 We only need ``Subject`` (DN) and ``Hash`` (sha256 hex) — the rest is
 informational.
@@ -34,9 +34,9 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from control_plane.auth.errors import InvalidTokenError
-from helix_agent.protocol import Principal
+from expert_work.protocol import Principal
 
-logger = logging.getLogger("helix.control_plane.auth.mtls")
+logger = logging.getLogger("expert_work.control_plane.auth.mtls")
 
 # Pattern that matches one XFCC key=value pair where the value is either a
 # quoted string (allowing internal ``,`` and ``;``) or a bare token.

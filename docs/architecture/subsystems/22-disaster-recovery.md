@@ -2,7 +2,7 @@
 
 ## 1. 职责 & 边界
 
-**是什么**：定义并执行 Helix 的备份、恢复、跨区域复制、PITR（Point-In-Time Recovery）策略，确保符合分阶段的 **RPO/RTO 目标**，并通过演练保证可用性。
+**是什么**：定义并执行 Expert Work 的备份、恢复、跨区域复制、PITR（Point-In-Time Recovery）策略，确保符合分阶段的 **RPO/RTO 目标**，并通过演练保证可用性。
 
 **不是什么**：
 - 不负责运行时高可用（HA：主从切换、负载均衡）→ [14 Sandbox Pool](./14-sandbox-pool.md) / 部署架构
@@ -156,7 +156,7 @@ class RestoreCommand:
   - `target`：恢复目标（target_db / target_region / staging-dr cluster name）
   - `scope`：覆盖租户列表 / 时间窗口 / RPO 目标
   - `result`：`success` / `failed`（含 error message）
-  - `correlation_id`：trace_id（与 OTel span `helix.dr.*` 关联）
+  - `correlation_id`：trace_id（与 OTel span `expert_work.dr.*` 关联）
 - **审计写入失败 → 操作必须 abort**（fail-closed），避免无痕高敏感动作
 
 ### 4.3 演练执行（每季度强制）
@@ -254,18 +254,18 @@ class DrillRunner:
 > 命名规范、日志必填字段、span attrs 强制约定遵循 [20 Observability § 5.1 / § 5.3](./20-observability.md)；
 > 本节只列本子系统特有的 metric / span / 日志事件。
 
-**Metrics**（强制 `helix_dr_*` 前缀）：
-- `helix_dr_backup_success_total{asset_type, region}` — 备份成功计数
-- `helix_dr_backup_failure_total{asset_type, reason}` — 失败计数
-- `helix_dr_backup_age_seconds{asset_type}` — 距上一次成功备份秒数（**核心 RPO SLI**；与 [20 § 5.2](./20-observability.md) 一致）
-- `helix_dr_backup_size_bytes{asset_type}` — 监控膨胀
-- `helix_dr_wal_replication_lag_seconds{region}` — 跨 region 延迟
-- `helix_dr_drill_pass_total` / `helix_dr_drill_fail_total` — 演练统计
-- `helix_dr_rpo_actual_seconds{drill_id}` / `helix_dr_rto_actual_seconds{drill_id}` — 实测对比目标
+**Metrics**（强制 `expert_work_dr_*` 前缀）：
+- `expert_work_dr_backup_success_total{asset_type, region}` — 备份成功计数
+- `expert_work_dr_backup_failure_total{asset_type, reason}` — 失败计数
+- `expert_work_dr_backup_age_seconds{asset_type}` — 距上一次成功备份秒数（**核心 RPO SLI**；与 [20 § 5.2](./20-observability.md) 一致）
+- `expert_work_dr_backup_size_bytes{asset_type}` — 监控膨胀
+- `expert_work_dr_wal_replication_lag_seconds{region}` — 跨 region 延迟
+- `expert_work_dr_drill_pass_total` / `expert_work_dr_drill_fail_total` — 演练统计
+- `expert_work_dr_rpo_actual_seconds{drill_id}` / `expert_work_dr_rto_actual_seconds{drill_id}` — 实测对比目标
 
-**Spans**（强制 `helix.dr.*` 前缀）：
-- `helix.dr.backup_run`、`helix.dr.backup_verify`、`helix.dr.restore_run`、`helix.dr.drill_run`
-- 必填 attrs（遵循 [20 § 5.1](./20-observability.md)）：`actor_id`, `asset_type`, `region`, `tier`；高敏感动作（restore / failover / drill）attrs 含 `helix.critical=true`（参 [20 § 5.5](./20-observability.md)）
+**Spans**（强制 `expert_work.dr.*` 前缀）：
+- `expert_work.dr.backup_run`、`expert_work.dr.backup_verify`、`expert_work.dr.restore_run`、`expert_work.dr.drill_run`
+- 必填 attrs（遵循 [20 § 5.1](./20-observability.md)）：`actor_id`, `asset_type`, `region`, `tier`；高敏感动作（restore / failover / drill）attrs 含 `expert_work.critical=true`（参 [20 § 5.5](./20-observability.md)）
 - **注**：本子系统操作大多由控制面 worker 触发（无 agent 上下文），span attrs 中 `agent` / `agent_version` / `session_id` 可缺省；以 `actor_id` 作为主要主体
 
 **Logs**（遵循 [20 § 5.3](./20-observability.md) 必填字段）：
@@ -277,11 +277,11 @@ class DrillRunner:
 - 「Replication Lag」: 跨 region WAL lag 时序
 
 **告警**（P0/P1）：
-- P0：`helix_dr_backup_age_seconds > RPO_target * 2`
-- P0：`helix_dr_wal_replication_lag_seconds > 60` 持续 5 min（M2）
+- P0：`expert_work_dr_backup_age_seconds > RPO_target * 2`
+- P0：`expert_work_dr_wal_replication_lag_seconds > 60` 持续 5 min（M2）
 - P1：连续 2 次备份失败
 - P1：上次演练 > 100 天（季度演练超期）
-- P1：`helix_dr_drill_fail_total` 任意
+- P1：`expert_work_dr_drill_fail_total` 任意
 
 ---
 
@@ -301,7 +301,7 @@ class DrillRunner:
 
 **密钥管理**：
 - KMS key 用 **multi-region key**（M2）
-- KMS key alias 命名清晰：`helix/backup/postgres-prod`
+- KMS key alias 命名清晰：`Expert Work/backup/postgres-prod`
 - 密钥轮换：年度；旧 key 保留 3 年用于历史备份解密
 
 **合规**：

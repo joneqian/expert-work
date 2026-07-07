@@ -29,7 +29,7 @@ from control_plane.skill_attribution import (
     should_feed_back,
 )
 from control_plane.skill_distiller import SkillDraft
-from helix_agent.protocol.skill import EvalVerdict
+from expert_work.protocol.skill import EvalVerdict
 
 __all__ = [
     "EvolutionConfig",

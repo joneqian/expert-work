@@ -14,8 +14,8 @@ from control_plane.app import create_app
 from control_plane.mcp_oauth import OAuthServerMetadata, TokenResponse
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.protocol import (
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.protocol import (
     McpConnectorAuthSchema,
     McpConnectorCatalogUpsert,
     TenantConfigPatch,
@@ -88,7 +88,7 @@ async def _seed_oauth2_entry(
         url_template="https://mcp.linear.app/sse",
         auth_type="oauth2",
         auth_schema=McpConnectorAuthSchema(),
-        oauth_client_id="helix-linear-app",
+        oauth_client_id="expert-work-linear-app",
         oauth_scopes="read",
     )
     async with bypass_rls_session():
@@ -137,7 +137,7 @@ async def test_initiate_returns_authorize_url(monkeypatch: pytest.MonkeyPatch) -
     body = resp.json()
     assert body["status"] == "pending"
     assert body["authorize_url"].startswith("https://auth.linear.test/authorize?")
-    assert "client_id=helix-linear-app" in body["authorize_url"]
+    assert "client_id=expert-work-linear-app" in body["authorize_url"]
     # A pending connection now exists for this user+connector.
     conn = await app.state.mcp_oauth_connection_store.get_for_connector(  # type: ignore[attr-defined]
         tenant_id=tenant_id, user_id=user_id, catalog_id=cat_id

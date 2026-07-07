@@ -23,18 +23,18 @@ What it does:
    rebuilds the agent (cache hit), and executes it from the persisted
    ``enqueued_input``.
 5. Assert the run reaches ``success`` owned by **green**, that green's
-   ``helix_run_queue_dequeued_total`` metric incremented, and that exactly one
+   ``expert_work_run_queue_dequeued_total`` metric incremented, and that exactly one
    instance ever claimed it (``claimed_by`` set once, no double execution).
 
 Lease fields (``claimed_by``) aren't on the run API, so they are read straight
 from Postgres via ``docker exec ... psql`` (the dev superuser bypasses RLS). The
-API token is read from ``HELIX_API_TOKEN`` and never logged.
+API token is read from ``EXPERT_WORK_API_TOKEN`` and never logged.
 
 Usage (bring the full dev stack up first — ``make dev-up`` — then the overlay)::
 
     docker compose -f infra/docker-compose.yml -f infra/docker-compose.queue-e2e.yml \
         --profile full up -d --no-deps control-plane-blue control-plane-green
-    export HELIX_API_TOKEN=<a dev-login bearer token>
+    export EXPERT_WORK_API_TOKEN=<a dev-login bearer token>
     uv run python tools/ha/verify_queue.py
     uv run python tools/ha/verify_queue.py --agent my-agent@1.0.0
 
@@ -80,8 +80,8 @@ def _unwrap(data: dict[str, Any]) -> dict[str, Any]:
 
 def _psql(pg_container: str, sql: str) -> str:
     """Run a one-shot read-only query as the dev superuser (bypasses RLS)."""
-    db_user = os.environ.get("HELIX_DB_USER", "helix_agent")
-    db_name = os.environ.get("HELIX_DB_NAME", "helix_agent_dev")
+    db_user = os.environ.get("EXPERT_WORK_DB_USER", "expert_work")
+    db_name = os.environ.get("EXPERT_WORK_DB_NAME", "expert_work_dev")
     proc = subprocess.run(
         ["docker", "exec", pg_container, "psql", "-U", db_user, "-d", db_name, "-tAc", sql],
         capture_output=True,
@@ -201,13 +201,13 @@ def _metric_dequeued(green_container: str) -> float:
     except subprocess.CalledProcessError:
         return 0.0
     for line in out.splitlines():
-        if line.startswith("helix_run_queue_dequeued_total"):
+        if line.startswith("expert_work_run_queue_dequeued_total"):
             return float(line.rsplit(" ", 1)[-1])
     return 0.0
 
 
 async def _amain(args: argparse.Namespace) -> int:
-    token = _require_env("HELIX_API_TOKEN")  # never logged
+    token = _require_env("EXPERT_WORK_API_TOKEN")  # never logged
     headers = {"Authorization": f"Bearer {token}"}
 
     # --- enqueue on blue ------------------------------------------------
@@ -270,14 +270,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--agent", default=None, help="target agent as name@version (else auto)")
     parser.add_argument(
-        "--blue-container", default="helix-control-plane-blue", help="blue container to kill"
+        "--blue-container", default="expert-work-control-plane-blue", help="blue container to kill"
     )
     parser.add_argument(
         "--green-container",
-        default="helix-control-plane-green",
+        default="expert-work-control-plane-green",
         help="green container (drains the queue; metrics scraped via docker exec)",
     )
-    parser.add_argument("--pg-container", default="helix-postgres", help="Postgres container")
+    parser.add_argument("--pg-container", default="expert-work-postgres", help="Postgres container")
     parser.add_argument(
         "--timeout", type=float, default=180.0, help="seconds to wait for green to drain the run"
     )

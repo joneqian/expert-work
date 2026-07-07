@@ -186,11 +186,11 @@ export function RunDetail() {
             fontSize: 13,
           }}
         >
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("run_detail.run_id")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("run_detail.run_id")}</dt>
           <dd className="mono" style={{ margin: 0 }}>{run.run_id}</dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("run_detail.thread_id")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("run_detail.thread_id")}</dt>
           <dd className="mono" style={{ margin: 0 }}>{run.thread_id}</dd>
-          <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("run_detail.status")}</dt>
+          <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("run_detail.status")}</dt>
           <dd style={{ margin: 0 }}>{run.status}</dd>
         </dl>
       </Card>

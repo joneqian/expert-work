@@ -1,4 +1,4 @@
-# Helix SLI recording rules — Stream G.1.
+# Expert Work SLI recording rules — Stream G.1.
 #
 # Pre-aggregates the SLIs for the SLOs defined in docs/runbooks/slo.md.
 # Loaded by Prometheus from /etc/prometheus/rules/ (G.0 mount).
@@ -9,65 +9,65 @@
 # (multi-window) live in burn_rate.yml (Stream 10.5).
 
 groups:
-  - name: helix_sli
+  - name: expert_work_sli
     interval: 30s
     rules:
       # SLO 1 — control-plane API availability: 5m non-5xx success ratio.
       # 0/0 (no traffic) records as NaN — acceptable for M0.
-      - record: helix:sli:control_plane_availability:ratio5m
+      - record: expert_work:sli:control_plane_availability:ratio5m
         expr: |
-          sum(rate(helix_control_plane_http_requests_total{status_code!~"5.."}[5m]))
+          sum(rate(expert_work_control_plane_http_requests_total{status_code!~"5.."}[5m]))
           /
-          sum(rate(helix_control_plane_http_requests_total[5m]))
+          sum(rate(expert_work_control_plane_http_requests_total[5m]))
 
       # SLO 2 — control-plane API P99 latency (seconds; target < 0.2).
-      - record: helix:sli:control_plane_http_latency:p99_5m
+      - record: expert_work:sli:control_plane_http_latency:p99_5m
         expr: |
           histogram_quantile(
             0.99,
-            sum by (le) (rate(helix_control_plane_http_request_duration_seconds_bucket[5m]))
+            sum by (le) (rate(expert_work_control_plane_http_request_duration_seconds_bucket[5m]))
           )
 
       # SLO 3 — Session TTFT P95 (seconds; target < 1.5). Stream K.K10
       # added the histogram in the orchestrator SSE worker — observed
       # at the first agent ``updates`` chunk after ``RUNNING``.
-      - record: helix:sli:session_ttft:p95_5m
+      - record: expert_work:sli:session_ttft:p95_5m
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_session_ttft_seconds_bucket[5m]))
+            sum by (le) (rate(expert_work_session_ttft_seconds_bucket[5m]))
           )
 
       # SLO 4 — Sandbox cold-start P95 (seconds; target < 3 in M0, < 0.5 in M1).
       # Stream K.K10 added the histogram in sandbox-supervisor.acquire,
       # observed only on the cold-launch path (warm-session reuse skips it).
-      - record: helix:sli:sandbox_cold_start:p95_5m
+      - record: expert_work:sli:sandbox_cold_start:p95_5m
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_sandbox_cold_start_seconds_bucket[5m]))
+            sum by (le) (rate(expert_work_sandbox_cold_start_seconds_bucket[5m]))
           )
 
       # SLO 5 — Durable resume P95 (seconds). Stream K.K10 added the
       # histogram, observed at the first chunk of a run that resumed an
       # existing checkpointed thread (control-plane sets
       # ``RunRecord.is_resume`` from prior-runs lookup).
-      - record: helix:sli:durable_resume:p95_5m
+      - record: expert_work:sli:durable_resume:p95_5m
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_durable_resume_seconds_bucket[5m]))
+            sum by (le) (rate(expert_work_durable_resume_seconds_bucket[5m]))
           )
 
       # SLO 7 — Session end-to-end P95 for successful runs (seconds;
       # Stream M Gate target < 30). Filtered to outcome="success" so
       # error / max_steps / cancelled tails do not bias the user-facing
       # latency view (the labelled histogram in orchestrator.sse).
-      - record: helix:sli:session_duration:p95_5m
+      - record: expert_work:sli:session_duration:p95_5m
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(helix_session_duration_seconds_bucket{outcome="success"}[5m]))
+            sum by (le) (rate(expert_work_session_duration_seconds_bucket{outcome="success"}[5m]))
           )
 
       # --- Stream HX-4 — query-layer rules over already-emitted metrics ---
@@ -76,51 +76,51 @@ groups:
       # histogram's _count is the per-terminal run counter — no separate
       # counter exists by design. interrupted/cancelled excluded from the
       # denominator: a user abort is not a platform failure.
-      - record: helix:sli:run_success:ratio1h
+      - record: expert_work:sli:run_success:ratio1h
         expr: |
-          sum(rate(helix_session_duration_seconds_count{outcome="success"}[1h]))
+          sum(rate(expert_work_session_duration_seconds_count{outcome="success"}[1h]))
           /
-          sum(rate(helix_session_duration_seconds_count{outcome=~"success|error|max_steps"}[1h]))
+          sum(rate(expert_work_session_duration_seconds_count{outcome=~"success|error|max_steps"}[1h]))
 
       # Run transient-retry recovery ratio (Stream HX-3): of runs that
       # took the in-worker retry, how many recovered. NaN when no retries
       # fired in the window — acceptable (no-data beats a fake 100%).
-      - record: helix:sli:run_retry_recovery:ratio1h
+      - record: expert_work:sli:run_retry_recovery:ratio1h
         expr: |
-          sum(rate(helix_orchestrator_run_retry_total{outcome="recovered"}[1h]))
+          sum(rate(expert_work_orchestrator_run_retry_total{outcome="recovered"}[1h]))
           /
-          sum(rate(helix_orchestrator_run_retry_total[1h]))
+          sum(rate(expert_work_orchestrator_run_retry_total[1h]))
 
       # Token-estimate drift ratio (Stream HX-1): tiktoken estimate vs
       # provider-reported prompt tokens. Healthy ~1.0; chars//4 fallback
       # shows ~0.3-0.4 on CJK-heavy traffic.
-      - record: helix:sli:token_estimate_drift:ratio1h
+      - record: expert_work:sli:token_estimate_drift:ratio1h
         expr: |
-          sum(rate(helix_hx_token_estimated_total[1h]))
+          sum(rate(expert_work_ew_token_estimated_total[1h]))
           /
-          sum(rate(helix_llm_token_usage_total{type=~"input|cache_creation|cache_read"}[1h]))
+          sum(rate(expert_work_llm_token_usage_total{type=~"input|cache_creation|cache_read"}[1h]))
 
       # Checkpoint IO P95 (Stream HX-4): per-step persistence latency by
       # operation (aput / aput_writes / aget_tuple).
-      - record: helix:sli:checkpoint_op:p95_5m
+      - record: expert_work:sli:checkpoint_op:p95_5m
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le, op) (rate(helix_checkpoint_op_seconds_bucket[5m]))
+            sum by (le, op) (rate(expert_work_checkpoint_op_seconds_bucket[5m]))
           )
 
       # Pending approvals (Stream HX-4): instant gauge, re-recorded for
-      # uniform helix:sli:* dashboards; alert on sustained growth.
-      - record: helix:sli:approvals_pending:current
-        expr: helix_control_plane_approvals_pending
+      # uniform expert_work:sli:* dashboards; alert on sustained growth.
+      - record: expert_work:sli:approvals_pending:current
+        expr: expert_work_control_plane_approvals_pending
 
       # Sandbox warm-pool hit ratio (Stream HX-6, SLO #13): of ephemeral
       # acquires that consulted the pool, how many claimed a READY
       # container. NaN when the pool saw no traffic in the window.
       # SLO #4's M1 acceptance reads this together with
-      # helix_sandbox_pool_ready and the cold-start P95.
-      - record: helix:sli:sandbox_pool_hit:ratio1h
+      # expert_work_sandbox_pool_ready and the cold-start P95.
+      - record: expert_work:sli:sandbox_pool_hit:ratio1h
         expr: |
-          sum(rate(helix_sandbox_pool_total{event="hit"}[1h]))
+          sum(rate(expert_work_sandbox_pool_total{event="hit"}[1h]))
           /
-          sum(rate(helix_sandbox_pool_total{event=~"hit|miss"}[1h]))
+          sum(rate(expert_work_sandbox_pool_total{event=~"hit|miss"}[1h]))

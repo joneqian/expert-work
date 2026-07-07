@@ -15,7 +15,7 @@ from uuid import UUID
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-logger = logging.getLogger("helix.control_plane.session_title")
+logger = logging.getLogger("expert_work.control_plane.session_title")
 
 
 def title_from_text(text: str, *, limit: int = 80) -> str:

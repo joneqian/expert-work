@@ -5,7 +5,7 @@ into ``consolidated`` summaries via a two-pass periodic sweep:
 
 * **SUB-PASS 1 (cluster → consolidate)** — embedding pre-filter finds
   candidate clusters of similar transient items; one LLM call per
-  cluster verifies + summarises + applies the Hermes 4 + helix 2
+  cluster verifies + summarises + applies the Hermes 4 + expert_work 2
   anti-mislearn rules in a single three-in-one prompt (Mini-ADR U-35).
 
 * **SUB-PASS 2 (lone-item noise purge)** — sweeps aged transient items
@@ -44,8 +44,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from control_plane.audit import emit as audit_emit
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.uplift_metrics import (
     record_consolidator_llm_tokens,
     record_consolidator_run,
     record_memory_cluster_candidates,
@@ -54,15 +54,15 @@ from helix_agent.common.uplift_metrics import (
     record_memory_purged,
     record_memory_reviewed_durable,
 )
-from helix_agent.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
-from helix_agent.protocol import AuditAction, AuditResult, MemoryItem, StructuredOutputSpec
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.middleware import LLMOutputValidationError
+from expert_work.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
+from expert_work.protocol import AuditAction, AuditResult, MemoryItem, StructuredOutputSpec
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.middleware import LLMOutputValidationError
 
 if TYPE_CHECKING:
-    from helix_agent.persistence.memory.base import MemoryStore
+    from expert_work.persistence.memory.base import MemoryStore
 
-logger = logging.getLogger("helix.control_plane.memory_consolidator")
+logger = logging.getLogger("expert_work.control_plane.memory_consolidator")
 
 # Default cadence — one sweep per 4 hours. Configurable via constructor
 # so tests drive a fast loop and operators dial it.
@@ -83,7 +83,7 @@ _MAX_TRANSIENT_SCAN_PER_USER: int = 500
 # eventually claim them).
 _TRANSIENT_SCAN_AGE_DAYS: int = 30
 
-# Default anti-mislearn categories (Mini-ADR U-36 — Hermes 4 + helix 2).
+# Default anti-mislearn categories (Mini-ADR U-36 — Hermes 4 + expert_work 2).
 _REJECT_CATEGORIES: tuple[str, ...] = (
     "env_failure",
     "negative_tool",
@@ -237,11 +237,11 @@ represents any of:
    "user asked me to refactor X" / "fixed bug in Y" - task-scoped, not
    user-scoped; expires when the task ends.
 
-5. (helix extension) Time-bound state
+5. (expert_work extension) Time-bound state
    current model availability / current quota / today's date /
    "the API returned 503 today" - bound to wall-clock time, not durable.
 
-6. (helix extension) Credential-shaped content
+6. (expert_work extension) Credential-shaped content
    anything looking like a token / key / password / connection string -
    never long-term, always purge to audit.
 """

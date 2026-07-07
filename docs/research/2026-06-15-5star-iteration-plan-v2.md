@@ -1,4 +1,4 @@
-# Helix 满分化迭代计划 v2（2026-06-15 重排）
+# Expert Work 满分化迭代计划 v2（2026-06-15 重排）
 
 > 取代 `2026-06-13-agent-harness-5star-iteration-plan.md`。依据 `2026-06-15-capability-reassessment.md`
 > （重核后均分 4.51→4.59，395/430）重排。**排序口径不变**：ROI = 商业价值(BV) + agent 能力(CAP)，
@@ -79,7 +79,7 @@
 
 | 项 | 现 | 内容 |
 |---|---|---|
-| ~~7.3 输入校验~~ | ✅★5 | **已交付+live 实证（#669）**：PI-1c 结构化 `untrusted_content` 通道——业务系统结构化传待处理数据，helix 用 build nonce spotlight 包裹治内联注入根。live：通道把 001/003 内联注入从 LEAK 翻 SAFE，负对照排除假阳性 |
+| ~~7.3 输入校验~~ | ✅★5 | **已交付+live 实证（#669）**：PI-1c 结构化 `untrusted_content` 通道——业务系统结构化传待处理数据，Expert Work 用 build nonce spotlight 包裹治内联注入根。live：通道把 001/003 内联注入从 LEAK 翻 SAFE，负对照排除假阳性 |
 | ~~7.4 DLP 输出~~ | ✅★5 | **已交付（#669）**：出站 DLP 条件输出——`common/dlp.py:scan_and_redact` 分类+脱敏 model 响应 PII（email/手机/身份证/卡号），`DefenseSpec.output_dlp` 开关 opt-in，确定性单测+装配测+指标 |
 | 7.2 gVisor | ★3 | 生产强制 + `isolation_level` 真实现（运维 + 代码） |
 | ~~8.5 RBAC-ABAC~~ | ✅★5 | **已交付+集成实证（#671）**：RoleBinding `conditions`（resource_ids URI 级 / labels 属性 / owner_only 归属）+ `authorize_resource` 加性语义 + agents 路由实例级采用 + IAM 页条件编辑器；关键修正=有条件 binding 不并入 `principal.roles` 防绕过；none_as_null JSONB 修 platform CHECK |
@@ -107,7 +107,7 @@
 | ~~15.3 跨递归 cancel 测试~~ | ✅★5 | **测试债清（#681）**：`sanitize_dangling_tool_calls` 此前无直接单测,补纯函数边缘 9 例（含跨递归多 AIMessage 位置——cancel 深陷 subagent 递归→多处悬挂全修）+ `GraphRunner.sanitize_thread` fake-graph 3 例。subagent cancel 传播已由 `test_subagent` 覆盖（「跨递归 cancel 薄」部分过期）。★5 维持不改分 |
 | 16.4 基础设施自愈 | ★3 | k8s HPA/failover（基础设施层） |
 | ~~16.3 应用层 backpressure~~ | ✅★5 | **已交付+单测+全 app 集成（#679）**：`BackpressureMiddleware` 过载守卫——in-flight 深度（复用 `Lifecycle.in_flight`）超阈值 503+Retry-After fast-fail,置 Observability 内/Auth 外（shed 被 trace 但不进 JWT/DB）,免 health/metrics,默认开 cap 512。区别于 per-tenant rate-limit（429 公平）——这是全局过载（503 服务端）。补足「无应用层 backpressure/fast-fail 代码」gap |
-| ~~10.5 SLO burn-rate~~ | ✅★5 | **已交付+promtool 双验（#680）**：`burn_rate.yml` Google SRE 多窗多烧录率——record `helix_slo_burn_rate{slo,window}`（可用性 SLO,5m/30m/1h/2h/6h/24h）+ 长窗确认/短窗加速告警（1h&5m>14.4 P0 / 6h&30m>6 P1 / 24h&2h>3 P2,`and ignoring(window)`）;`promtool check rules`+`test rules` 双 SUCCESS。关掉 sli.yml「Burn-rate rules are M1」deferral |
+| ~~10.5 SLO burn-rate~~ | ✅★5 | **已交付+promtool 双验（#680）**：`burn_rate.yml` Google SRE 多窗多烧录率——record `expert_work_slo_burn_rate{slo,window}`（可用性 SLO,5m/30m/1h/2h/6h/24h）+ 长窗确认/短窗加速告警（1h&5m>14.4 P0 / 6h&30m>6 P1 / 24h&2h>3 P2,`and ignoring(window)`）;`promtool check rules`+`test rules` 双 SUCCESS。关掉 sli.yml「Burn-rate rules are M1」deferral |
 | 12.4 chargeback 计费 | ★3→★4 | **平台用量视图已交付（#690/#691）**：核代码发现计费链路（计量 G.9 → 定价 Y3 → rollup Y4 → ledger → 暴露 Z）已建，assessment「定价引擎/发票」中定价引擎早做完。用户拍板范围=平台 system_admin 看**每租户 + 每 agent** 的 token + 成本 + rollup enable 配置入口：Part A 扩 chargeback per-agent 钻取（ledger 已含 agent 分桶，零新计算）；Part B `platform_billing_config` 单行表 + admin-ui 开关 + 离线 rollup job 跑前读（cron 调度归 k8s）。**剩 ★5 gap=发票/月结对账单 + 支付（Stripe）**——用户明确排除（M2/外部），非静默缺失。设计见 `2026-06-17-12.4-platform-usage-view-design.md` |
 
 ## 与 v1 的关键差异

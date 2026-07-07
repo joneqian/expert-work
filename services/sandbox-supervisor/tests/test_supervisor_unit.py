@@ -22,10 +22,10 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from helix_agent.common.egress_token import verify_egress_token
-from helix_agent.persistence import InMemoryUserWorkspaceStore, workspace_volume_name
-from helix_agent.protocol.audit import AuditAction, AuditResult
-from helix_agent.runtime.sandbox import SandboxRuntimeProvider
+from expert_work.common.egress_token import verify_egress_token
+from expert_work.persistence import InMemoryUserWorkspaceStore, workspace_volume_name
+from expert_work.protocol.audit import AuditAction, AuditResult
+from expert_work.runtime.sandbox import SandboxRuntimeProvider
 from sandbox_supervisor.app import create_app
 from sandbox_supervisor.docker_client import DockerError
 from sandbox_supervisor.domain import (
@@ -345,9 +345,9 @@ def _running_record(tenant_id: UUID, *, acquired_at: datetime) -> SandboxRecord:
     return SandboxRecord(
         id=sandbox_id,
         tenant_id=tenant_id,
-        image_ref="helix-sandbox:dev",
+        image_ref="expert-work-sandbox:dev",
         node="local",
-        container_id=f"helix-sb-{sandbox_id}",
+        container_id=f"expert-work-sb-{sandbox_id}",
         state=SandboxState.IN_USE,
         thread_id="t-1",
         cpu_quota=1.0,
@@ -383,12 +383,12 @@ async def test_acquire_launches_container_and_marks_in_use() -> None:
     h = _harness()
     response = await h.supervisor.acquire(_acquire_request())
 
-    assert response.container_id == f"helix-sb-{response.sandbox_id}"
+    assert response.container_id == f"expert-work-sb-{response.sandbox_id}"
     assert response.cold_start is True
     assert len(h.docker.launches) == 1
     row = h.store.rows[response.sandbox_id]
     assert row.state is SandboxState.IN_USE
-    assert row.container_id == f"helix-sb-{response.sandbox_id}"
+    assert row.container_id == f"expert-work-sb-{response.sandbox_id}"
     assert row.acquired_at is not None
 
 
@@ -510,7 +510,7 @@ async def test_release_removes_container_and_marks_destroyed() -> None:
     response = await h.supervisor.acquire(_acquire_request())
     await h.supervisor.release(response.sandbox_id)
 
-    assert h.docker.removed == [f"helix-sb-{response.sandbox_id}"]
+    assert h.docker.removed == [f"expert-work-sb-{response.sandbox_id}"]
     assert h.docker.links[0].closed is True
     row = h.store.rows[response.sandbox_id]
     assert row.state is SandboxState.DESTROYED
@@ -558,7 +558,7 @@ async def test_destroy_is_idempotent() -> None:
     # A second destroy is a no-op — no extra docker.remove call.
     await h.supervisor.destroy(response.sandbox_id, reason="cancelled")
 
-    assert h.docker.removed == [f"helix-sb-{response.sandbox_id}"]
+    assert h.docker.removed == [f"expert-work-sb-{response.sandbox_id}"]
 
 
 @pytest.mark.asyncio
@@ -1100,7 +1100,7 @@ def test_metrics_route_exposes_prometheus_text() -> None:
     assert "text/plain" in resp.headers["content-type"]
     # The cold-start histogram is module-level in supervisor.py, registered at
     # import, so it appears in the exposition even before any observation.
-    assert "helix_sandbox_cold_start_seconds" in resp.text
+    assert "expert_work_sandbox_cold_start_seconds" in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -1242,7 +1242,7 @@ async def test_reaper_destroys_orphaned_sandbox() -> None:
     assert reaped == 1
     assert h.store.rows[orphan.id].state is SandboxState.DESTROYED
     assert h.store.rows[orphan.id].destroy_reason == DESTROY_REASON_IDLE_TIMEOUT
-    assert f"helix-sb-{orphan.id}" in h.docker.removed
+    assert f"expert-work-sb-{orphan.id}" in h.docker.removed
 
 
 @pytest.mark.asyncio
@@ -1271,7 +1271,7 @@ def test_acquire_route_returns_response() -> None:
             json={"tenant_id": str(uuid4()), "thread_id": "t-1"},
         )
     assert resp.status_code == 200
-    assert resp.json()["container_id"].startswith("helix-sb-")
+    assert resp.json()["container_id"].startswith("expert-work-sb-")
 
 
 def test_exec_route_returns_runner_output() -> None:
@@ -1358,10 +1358,10 @@ async def test_acquire_always_selects_single_image() -> None:
     # The image variant split was collapsed into one image — acquire always
     # uses settings.sandbox_image regardless of the (deprecated, ignored)
     # request field.
-    settings = SandboxSupervisorSettings(sandbox_image="helix-sandbox:test")
+    settings = SandboxSupervisorSettings(sandbox_image="expert-work-sandbox:test")
     h = _harness(settings=settings)
     resp = await h.supervisor.acquire(_acquire_request())
-    assert h.store.rows[resp.sandbox_id].image_ref == "helix-sandbox:test"
+    assert h.store.rows[resp.sandbox_id].image_ref == "expert-work-sandbox:test"
 
 
 # ---------------------------------------------------------------------------
@@ -1460,7 +1460,7 @@ async def test_acquire_claims_pooled_container() -> None:
     settings = SandboxSupervisorSettings()
     assert pool.size(settings.sandbox_image) == 0
     # The request's limits were paired onto the claimed container.
-    assert h.docker.limit_updates == [(f"helix-sb-{response.sandbox_id}", 2.0, 1024, 256)]
+    assert h.docker.limit_updates == [(f"expert-work-sb-{response.sandbox_id}", 2.0, 1024, 256)]
     # The row was rebound: tenant + IN_USE + per-acquire limits.
     row = h.store.rows[response.sandbox_id]
     assert row.state is SandboxState.IN_USE
@@ -1623,11 +1623,11 @@ async def test_released_pooled_claim_is_destroyed_like_any_ephemeral() -> None:
 @pytest.mark.asyncio
 async def test_prefetch_pulls_missing_images() -> None:
     docker = RecordingDockerClient()
-    settings = SandboxSupervisorSettings(sandbox_image="helix-sandbox:dev")
+    settings = SandboxSupervisorSettings(sandbox_image="expert-work-sandbox:dev")
 
     await prefetch_images(docker, settings)
 
-    assert docker.pulled == ["helix-sandbox:dev"]
+    assert docker.pulled == ["expert-work-sandbox:dev"]
 
 
 @pytest.mark.asyncio
@@ -1721,7 +1721,9 @@ async def test_acquire_with_egress_injects_proxy_env_and_signed_token() -> None:
     # §3.5 — the urllib CONNECT shim auth: base64("<token>:"), the exact bytes a
     # Basic proxy-auth header carries. The sitecustomize shim baked into the image
     # adds this to urllib's CONNECT (which otherwise drops the proxy userinfo).
-    assert envs["HELIX_EGRESS_PROXY_AUTH"] == base64.b64encode(f"{token}:".encode()).decode("ascii")
+    assert envs["EXPERT_WORK_EGRESS_PROXY_AUTH"] == base64.b64encode(f"{token}:".encode()).decode(
+        "ascii"
+    )
 
 
 @pytest.mark.asyncio

@@ -45,7 +45,7 @@ provider 适配器现状(`openai.py:174-179` / `anthropic.py:189-194`):
 
 ## 3. 设计(6 层,blast radius 最小化)
 
-### 3.1 错误分类(helix-runtime)
+### 3.1 错误分类(expert-work-runtime)
 `llm_error_handling.py` 新增:
 ```python
 class LLMKeyUnavailableError(LLMError):
@@ -94,7 +94,7 @@ while i < len(handles):
 `LLMUnauthorizedError` 归入 key 级。`_handle_unauthorized` 刷新失败抛的 `LLMAuthError`
 (LLMServerError 子类)= provider 级 → 跳下个 provider(保持现语义)。
 
-### 3.4 存储 1:1 → 1:N(helix-persistence)
+### 3.4 存储 1:1 → 1:N(expert-work-persistence)
 迁移 `0084_provider_secret_multikey`(down_revision `0083_platform_billing_config`):
 - `platform_provider_secret`: 加列 `key_id TEXT NOT NULL DEFAULT 'default'`、`priority INT NOT NULL DEFAULT 100`。
 - 主键 `(provider)` → `(provider, key_id)`。
@@ -109,7 +109,7 @@ ORM `PlatformProviderSecretRow` + 协议 `PlatformProviderSecretRecord` 加 `key
 - `PlatformSecretsService`: 新增 `effective_provider_secret_refs() -> dict[Provider, list[str]]`
   (env seed 作 1 元列表;DB enabled 行按 priority 聚合;disabled 行剔除;全 disabled → 该 provider 不出现)。
   保留旧 `effective_provider_credentials()`(取每 provider 列表首项)以兼容非 router 调用方(embed/rerank)。
-- helix-common `CredentialsResolver` **禁改**(harness)。照 HX-8 先例,在 control-plane 加
+- expert-work-common `CredentialsResolver` **禁改**(harness)。照 HX-8 先例,在 control-plane 加
   **plural resolver**:`ProviderKeysResolver = Callable[[str], Awaitable[list[str]]]`,
   读新 service 视图;租户有单 override → 返该 ref 的 1 元列表(HX-8 语义保留),否则返平台列表。
 - `agent_factory.build_llm_router`:`provider_key_resolver` 升级为返回 list;每个 model entry
@@ -131,7 +131,7 @@ ORM `PlatformProviderSecretRow` + 协议 `PlatformProviderSecretRecord` 加 `key
 - **欠费不 retry**:backoff 对"已欠费"无意义,直接跳兄弟 key 抢时延。
 - **请求坏跳 provider 而非全停**:各家校验/上下文上限不同,400 在另一家可能成功;符合用户语义。
   但 400 在所有 provider 都失败时多耗一轮调用 —— 可接受(可用性 > 极限省成本)。
-- **helix-common 不动**:沿用 HX-8 在 control-plane 包装的成熟先例。
+- **expert-work-common 不动**:沿用 HX-8 在 control-plane 包装的成熟先例。
 
 ## 5. 测试矩阵(TDD)
 
@@ -164,7 +164,7 @@ ORM `PlatformProviderSecretRow` + 协议 `PlatformProviderSecretRecord` 加 `key
 - [x] CLAUDE 内存: 多 key failover 两级语义 + 错误轴 落档。
 
 ## 7. 已交付实现索引(commit)
-- L1 错误类 `LLMKeyUnavailableError` — `helix-runtime/.../llm_error_handling.py`
+- L1 错误类 `LLMKeyUnavailableError` — `expert-work-runtime/.../llm_error_handling.py`
 - L2 router 两级链 + `ProviderHandle.group` — `orchestrator/llm/router.py`
 - L3 status 分类器 — `orchestrator/llm/providers/_errors.py`(openai/anthropic 接入)
 - L4 存储 1:N + migration `0084_provider_secret_multikey`

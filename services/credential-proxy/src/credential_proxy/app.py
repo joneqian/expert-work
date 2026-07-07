@@ -28,12 +28,12 @@ from credential_proxy.egress_proxy import EgressProxyServer
 from credential_proxy.forwarder import AiohttpForwarder
 from credential_proxy.proxy import CredentialProxy
 from credential_proxy.settings import CredentialProxySettings
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.runtime.secret_store import make_secret_store
+from expert_work.runtime.secret_store import make_secret_store
 
 logger = logging.getLogger(__name__)
 
@@ -166,25 +166,25 @@ async def _forward(request: web.Request) -> web.Response:
 
 async def _parse_forward_request(request: web.Request) -> ForwardRequest:
     headers = request.headers
-    tenant_raw = _require_header(headers, "X-Helix-Tenant")
+    tenant_raw = _require_header(headers, "X-Expert-Work-Tenant")
     try:
         tenant_id = UUID(tenant_raw)
     except ValueError as exc:
-        msg = f"X-Helix-Tenant is not a valid UUID: {tenant_raw!r}"
+        msg = f"X-Expert-Work-Tenant is not a valid UUID: {tenant_raw!r}"
         raise BadForwardRequestError(msg) from exc
 
-    session_raw = headers.get("X-Helix-Session")
+    session_raw = headers.get("X-Expert-Work-Session")
     return ForwardRequest(
         tenant_id=tenant_id,
-        agent_name=_require_header(headers, "X-Helix-Agent"),
-        agent_version=_require_header(headers, "X-Helix-Agent-Version"),
-        secret_ref=_require_header(headers, "X-Helix-Secret-Ref"),
-        upstream_url=_require_header(headers, "X-Helix-Upstream"),
+        agent_name=_require_header(headers, "X-Expert-Work-Agent"),
+        agent_version=_require_header(headers, "X-Expert-Work-Agent-Version"),
+        secret_ref=_require_header(headers, "X-Expert-Work-Secret-Ref"),
+        upstream_url=_require_header(headers, "X-Expert-Work-Upstream"),
         method=request.method,
         headers=dict(headers),
         body=await request.read(),
         session_id=UUID(session_raw) if session_raw else None,
-        sandbox_id=headers.get("X-Helix-Sandbox"),
+        sandbox_id=headers.get("X-Expert-Work-Sandbox"),
     )
 
 

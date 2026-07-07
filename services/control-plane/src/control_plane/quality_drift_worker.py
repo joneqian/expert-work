@@ -36,17 +36,17 @@ from control_plane.platform_quality_config import (
     PlatformQualityConfigService,
 )
 from control_plane.webhook_delivery_worker import fan_out_event
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import (
     QualityDriftAlertStore,
     QualityScoreStore,
     WebhookDeliveryStore,
     WebhookEndpointStore,
 )
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.protocol import QualityDriftAlertRecord, WebhookEndpointRecord
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.protocol import QualityDriftAlertRecord, WebhookEndpointRecord
 
-logger = logging.getLogger("helix.control_plane.quality_drift")
+logger = logging.getLogger("expert_work.control_plane.quality_drift")
 
 #: Default cadence — drift is a slow signal; an hourly check is ample.
 _DEFAULT_INTERVAL_S = 3600.0
@@ -58,16 +58,16 @@ _DRIFT_LOCK_CLASSID = 8615
 #: The lock txn is held open for the whole cycle; keep it off any idle reaper.
 _LOCK_TXN_TIMEOUT_MS = 5 * 60 * 1000
 
-_drift_total = helix_counter(
-    "helix_control_plane_quality_drift_alerts_total",
+_drift_total = expert_work_counter(
+    "expert_work_control_plane_quality_drift_alerts_total",
     "Quality-drift alerts raised (recent mean dropped below baseline).",
 )
-_agent_errors = helix_counter(
-    "helix_control_plane_quality_drift_agent_errors_total",
+_agent_errors = expert_work_counter(
+    "expert_work_control_plane_quality_drift_agent_errors_total",
     "Per-agent drift checks that raised (isolated; cycle continues).",
 )
-_cycle_errors = helix_counter(
-    "helix_control_plane_quality_drift_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_quality_drift_cycle_errors_total",
     "Quality-drift worker cycles that ended in a caught exception.",
 )
 

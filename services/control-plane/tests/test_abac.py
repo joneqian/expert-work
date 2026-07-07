@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from control_plane.auth.abac import ResourceAttrs, authorize_resource, conditions_match
-from helix_agent.protocol import BindingConditions, Role, RoleBinding
+from expert_work.protocol import BindingConditions, Role, RoleBinding
 
 _SUBJECT = uuid4()
 _TENANT = uuid4()

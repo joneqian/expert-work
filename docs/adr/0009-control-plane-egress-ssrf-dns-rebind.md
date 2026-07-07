@@ -2,7 +2,7 @@
 
 - **状态**：✅ 已决策（Stream MCP-OAUTH；MCP 基建加固 follow-up #3）
 - **日期**：2026-06-06
-- **决策依据**：MCP 基建加固审计 follow-up #3；[`url_validation.py`](../../packages/helix-common/src/helix_agent/common/url_validation.py) 现有静态 SSRF guard；[ADR-0008 数据 at-rest 加密](./0008-data-at-rest-encryption.md)（同样"M0 用基础设施层能力，不在应用栈引入额外依赖"的取向）；F.9 沙箱 egress 隔离（`helix-sandbox-egress` `--internal` 网络）
+- **决策依据**：MCP 基建加固审计 follow-up #3；[`url_validation.py`](../../packages/expert-work-common/src/expert_work/common/url_validation.py) 现有静态 SSRF guard；[ADR-0008 数据 at-rest 加密](./0008-data-at-rest-encryption.md)（同样"M0 用基础设施层能力，不在应用栈引入额外依赖"的取向）；F.9 沙箱 egress 隔离（`expert-work-sandbox-egress` `--internal` 网络）
 - **背景**：control-plane 会 connect-out 到**租户/平台提供的 URL**（远程 MCP server、OAuth 授权服务器）。这是一个 SSRF 暴露面。应用层已有静态 URL 校验，但它**挡不住 DNS-rebind**。本 ADR 记录"DNS-rebind 防御放在哪一层"的决议，以免后人误以为还需在应用层补一个 resolve-then-pin 半成品。
 
 ---
@@ -12,7 +12,7 @@
 - **DNS-rebind 防御不在应用层做**：应用层做 resolve-then-pin（解析后钉住 IP 再连）在异步 HTTP 栈里脆弱、易错、维护成本高，且仍有 TOCTOU 残窗。
 - **依赖基础设施 egress 策略**：部署须限制 control-plane 的出方向网络，禁止其连 RFC1918 私网 / loopback / 链路本地（含云元数据 `169.254.169.254`）。网络层钉死"能连哪"，**天然免疫 DNS-rebind**（域名无论解析到什么，私网目的地直接被网络拒绝）。
 - **保留应用层静态检查**：`validate_remote_url` 作纵深防御第一层（快速拒明显坏 URL、省一次出站、给出清晰报错）。
-- **沙箱 egress 隔离（F.9）不覆盖本路径**：`helix-sandbox-egress` 只隔离**沙箱内**出站；control-plane 进程自身的 connect-out 是另一条路径，需要独立的 egress 控制。
+- **沙箱 egress 隔离（F.9）不覆盖本路径**：`expert-work-sandbox-egress` 只隔离**沙箱内**出站；control-plane 进程自身的 connect-out 是另一条路径，需要独立的 egress 控制。
 
 ---
 
@@ -38,13 +38,13 @@ URL 的 host 部分**来自外部输入**（租户填、或平台 catalog 填）
 
 ### 1.3 现有缓解
 
-**应用层 — `validate_remote_url`**（`helix-common`，每个 connect-out 站点调用）：
+**应用层 — `validate_remote_url`**（`expert-work-common`，每个 connect-out 站点调用）：
 - 拒非 `http(s)` scheme、无 host、localhost 名；
 - 拒 IP 字面量为 private / loopback / link-local（含 `169.254.0.0/16` 元数据）/ reserved / multicast / unspecified；
 - 拒非规范 IP 字面量（十进制/十六进制/短点分）。
 - **不解析 DNS** —— 故**挡不住 DNS-rebind**，也挡不住"域名解析到私网"。这一限制本就写在该模块 docstring 里。
 
-**基础设施 — 沙箱 egress 隔离（F.9）**：`helix-sandbox-egress` 为 `--internal` Docker 网络（无 NAT/默认路由），沙箱只能连同网 peer（credential-proxy），实测拒 `169.254.169.254`。**但它只保护沙箱内出站**；control-plane 自身的 connect-out 不在该网络里。
+**基础设施 — 沙箱 egress 隔离（F.9）**：`expert-work-sandbox-egress` 为 `--internal` Docker 网络（无 NAT/默认路由），沙箱只能连同网 peer（credential-proxy），实测拒 `169.254.169.254`。**但它只保护沙箱内出站**；control-plane 自身的 connect-out 不在该网络里。
 
 ---
 
@@ -65,7 +65,7 @@ URL 的 host 部分**来自外部输入**（租户填、或平台 catalog 填）
 
 ### 2.3 部署要求（egress 策略）
 
-部署 helix 时**必须**对 control-plane（及任何代其 connect-out 的组件）施加出方向网络限制，至少禁止连：
+部署 Expert Work 时**必须**对 control-plane（及任何代其 connect-out 的组件）施加出方向网络限制，至少禁止连：
 
 - RFC1918 私网：`10/8`、`172.16/12`、`192.168/16`；
 - loopback `127/8`、`::1`；
@@ -78,7 +78,7 @@ URL 的 host 部分**来自外部输入**（租户填、或平台 catalog 填）
 - **Kubernetes**：`NetworkPolicy` egress 规则（`ipBlock` 排除上述私网段）或 Cilium/Calico 等价策略；
 - **出站代理**：强制 control-plane 出站经 egress proxy，proxy 侧按 allowlist 放行已知 MCP/OAuth 域。
 
-> 类比：沙箱已用 `helix-sandbox-egress`（`--internal`）把出站锁死到 credential-proxy（F.9）。control-plane 因需连真实公网 MCP/OAuth 服务，不能用 `--internal`，但应用**等价的出方向私网拒绝策略**达到同一目的。
+> 类比：沙箱已用 `expert-work-sandbox-egress`（`--internal`）把出站锁死到 credential-proxy（F.9）。control-plane 因需连真实公网 MCP/OAuth 服务，不能用 `--internal`，但应用**等价的出方向私网拒绝策略**达到同一目的。
 
 ---
 

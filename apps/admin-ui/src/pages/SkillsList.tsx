@@ -202,7 +202,7 @@ export function SkillsList() {
                 <Pin
                   size={12}
                   strokeWidth={2}
-                  style={{ color: "var(--hx-color-brand-500)" }}
+                  style={{ color: "var(--ew-color-brand-500)" }}
                   data-testid={`skill-pin-icon-${record.id}`}
                 />
               </Tooltip>

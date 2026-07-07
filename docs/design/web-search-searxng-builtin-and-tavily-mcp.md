@@ -34,7 +34,7 @@ Tavily client is configured (ToolEnv.web_search_client)
 
 ### 2.2 平台 MCP 目录(Tavily-MCP 落点)
 - 平台 MCP server:`mcp_connector_catalog`(NULL-tenant 平台行)+ 运行期平台池(`build_mcp_pool`),支持 `transport: streamable_http | sse`、`auth_type: none|bearer|oauth2`、bearer 走 `auth_config.token_ref`→`SecretStore`,per-tenant `mcp_allowlist`(名字)过滤可见性。详见 [[mcp-platform-servers]]。
-- **Tavily 官方远程 MCP**:`https://mcp.tavily.com/mcp/`,认证:API key(bearer / `?tavilyApiKey=`)**或** OAuth。→ **API key = type A 共享 bearer;OAuth = type B per-user**。两种都已被现有目录支持,**Tavily 侧零 helix 代码**。
+- **Tavily 官方远程 MCP**:`https://mcp.tavily.com/mcp/`,认证:API key(bearer / `?tavilyApiKey=`)**或** OAuth。→ **API key = type A 共享 bearer;OAuth = type B per-user**。两种都已被现有目录支持,**Tavily 侧零 Expert Work 代码**。
 
 ## 3. 关键架构决策
 
@@ -46,7 +46,7 @@ Tavily client is configured (ToolEnv.web_search_client)
    - **M1**:builtin 后端**可插拔且并存**——`web_search_searxng_base_url` 配了用 `SearXNGClient`(新免费默认,**优先**),否则回落已有 Tavily builtin(`ResolvingTavilyClient`)。`web_search` supported = SearXNG 配了 **或** Tavily key 配了。降一次性爆破面。
    - **M2**:Tavily 走 MCP 后,删 `HTTPTavilyClient`/`ResolvingTavilyClient`/`resolve_web_search_client` 的 Tavily 分支 + `tavily_api_key_ref`(本就 deprecated)+ `platform_tool_credentials["web_search"]` 的 gap-fill。builtin 后端唯一 = SearXNG。**back-compat**:见 §5。
 
-4. **SearXNG 网络隔离**(安全)。SearXNG JSON API 是**免费上游代理**,公网暴露=被当爬虫农场白嫖。**只在 compose 内网暴露**(helix 服务网段),不发布 host 端口;`settings.yml` 开 `search.formats:[json]` + 限 `server.bind_address` 内网 + 带 Redis 限流。SearXNG 的出网走它自己(查上游引擎),**不经 helix per-agent egress 代理**(它是平台基础设施,非 agent 沙箱)。
+4. **SearXNG 网络隔离**(安全)。SearXNG JSON API 是**免费上游代理**,公网暴露=被当爬虫农场白嫖。**只在 compose 内网暴露**(Expert Work 服务网段),不发布 host 端口;`settings.yml` 开 `search.formats:[json]` + 限 `server.bind_address` 内网 + 带 Redis 限流。SearXNG 的出网走它自己(查上游引擎),**不经 Expert Work per-agent egress 代理**(它是平台基础设施,非 agent 沙箱)。
 
 5. **Tavily-MCP 用 type A(共享 bearer)做默认登记**。一把平台 Tavily key(`secret://`)共享给 opt-in 租户;B 档 per-user OAuth 留作后续(Tavily MCP 支持,但 per-user key 治理更重)。登记走现有目录流程,**非本设计新代码**——本设计只产出「登记说明 + 删 Tavily builtin」。
 

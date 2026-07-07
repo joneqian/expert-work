@@ -17,7 +17,7 @@ name: Sandbox Image
 # Registry wiring mirrors the office image (repo Settings → Secrets/variables):
 #   vars.ALIYUN_ACR_REGISTRY / vars.ALIYUN_ACR_NAMESPACE
 #   secrets.ALIYUN_ACR_USERNAME / secrets.ALIYUN_ACR_PASSWORD
-# Then: HELIX_SANDBOX_SANDBOX_IMAGE=<registry>/<namespace>/helix-sandbox:latest
+# Then: EXPERT_WORK_SANDBOX_SANDBOX_IMAGE=<registry>/<namespace>/expert-work-sandbox:latest
 
 on:
   push:
@@ -80,12 +80,12 @@ jobs:
           context: infra/sandbox-image
           file: infra/sandbox-image/Dockerfile
           load: true
-          tags: helix-sandbox:ci
+          tags: expert-work-sandbox:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Smoke test (stdlib runner)
-        run: python infra/sandbox-image/smoke_test.py helix-sandbox:ci
+        run: python infra/sandbox-image/smoke_test.py expert-work-sandbox:ci
 
       # Two Trivy steps, not one: with `format: sarif` the trivy-action emits
       # an ALL-severity SARIF and its `severity` input does NOT constrain the
@@ -97,7 +97,7 @@ jobs:
       - name: Trivy report (SARIF, all severities)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: helix-sandbox:ci
+          image-ref: expert-work-sandbox:ci
           format: sarif
           output: trivy-sandbox.sarif
           ignore-unfixed: true
@@ -113,7 +113,7 @@ jobs:
       - name: Trivy gate (CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: helix-sandbox:ci
+          image-ref: expert-work-sandbox:ci
           format: table
           severity: CRITICAL
           ignore-unfixed: true
@@ -142,7 +142,7 @@ jobs:
           # yields a manifest list covering both.
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ vars.ALIYUN_ACR_REGISTRY }}/${{ vars.ALIYUN_ACR_NAMESPACE }}/helix-sandbox:${{ github.sha }}
-            ${{ vars.ALIYUN_ACR_REGISTRY }}/${{ vars.ALIYUN_ACR_NAMESPACE }}/helix-sandbox:latest
+            ${{ vars.ALIYUN_ACR_REGISTRY }}/${{ vars.ALIYUN_ACR_NAMESPACE }}/expert-work-sandbox:${{ github.sha }}
+            ${{ vars.ALIYUN_ACR_REGISTRY }}/${{ vars.ALIYUN_ACR_NAMESPACE }}/expert-work-sandbox:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max

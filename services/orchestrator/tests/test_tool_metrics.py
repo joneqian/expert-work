@@ -1,7 +1,7 @@
 """Unit tests for per-tool Prometheus metrics (Stream TE-3).
 
-``_dispatch_tool`` increments ``helix_tool_call_total{tool,outcome}`` and
-observes ``helix_tool_latency_seconds{tool}`` on every dispatch, with
+``_dispatch_tool`` increments ``expert_work_tool_call_total{tool,outcome}`` and
+observes ``expert_work_tool_latency_seconds{tool}`` on every dispatch, with
 ``outcome`` in {ok, error, blocked}. Metrics are unconditional (no tenant
 needed). Each test uses a unique tool name so the global REGISTRY counters
 don't collide across tests.
@@ -64,7 +64,7 @@ def _call(name: str) -> dict[str, Any]:
 def _calls(tool: str, outcome: str) -> float:
     return (
         REGISTRY.get_sample_value(
-            "helix_tool_call_total", labels={"tool": tool, "outcome": outcome}
+            "expert_work_tool_call_total", labels={"tool": tool, "outcome": outcome}
         )
         or 0.0
     )
@@ -72,7 +72,8 @@ def _calls(tool: str, outcome: str) -> float:
 
 def _latency_count(tool: str) -> float:
     return (
-        REGISTRY.get_sample_value("helix_tool_latency_seconds_count", labels={"tool": tool}) or 0.0
+        REGISTRY.get_sample_value("expert_work_tool_latency_seconds_count", labels={"tool": tool})
+        or 0.0
     )
 
 

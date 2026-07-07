@@ -13,7 +13,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 from orchestrator.agent_factory import BuiltAgent
 from orchestrator.evolution.graph_runner import (
     GraphReplayTaskRunner,
@@ -22,7 +22,7 @@ from orchestrator.evolution.graph_runner import (
 )
 
 _MINIMAL_SPEC: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "test", "version": "1.0.0", "tenant": "test-tenant"},
     "spec": {

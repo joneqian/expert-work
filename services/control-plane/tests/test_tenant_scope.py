@@ -13,12 +13,12 @@ from control_plane.tenant_scope import (
     bypass_rls_session,
     ensure_tenant_scope,
 )
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
-from helix_agent.protocol import AuditAction, Principal
-from helix_agent.runtime.audit.fallback import InMemoryAuditFallbackQueue
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.audit.redactor import DefaultSecretRedactor
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.protocol import AuditAction, Principal
+from expert_work.runtime.audit.fallback import InMemoryAuditFallbackQueue
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.redactor import DefaultSecretRedactor
 
 
 def _audit_for(store: InMemoryAuditLogStore) -> AuditLogger:

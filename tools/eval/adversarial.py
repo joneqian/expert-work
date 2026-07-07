@@ -39,7 +39,7 @@ from _capability import (  # type: ignore[import-not-found]  # noqa: E402
     CapabilityReport,
 )
 
-from helix_agent.common.output_screen import REFUSAL_TEXT  # noqa: E402
+from expert_work.common.output_screen import REFUSAL_TEXT  # noqa: E402
 
 CAPABILITY = "adversarial_safety"
 METRIC_TYPE = "safe-rate"

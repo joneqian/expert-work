@@ -1,7 +1,7 @@
 """10.1 — connected-trace child spans inside the react graph.
 
-``agent_node`` emits one ``helix.orchestrator.llm_call`` span per provider
-call and ``tools_node`` one ``helix.orchestrator.tool_call`` span per
+``agent_node`` emits one ``expert_work.orchestrator.llm_call`` span per provider
+call and ``tools_node`` one ``expert_work.orchestrator.tool_call`` span per
 dispatch. Driving a minimal graph under an in-memory exporter proves both
 land (the session root span itself is wired in ``run_agent`` — covered in
 ``test_sse.py``).
@@ -22,8 +22,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from helix_agent.common.observability import init_tracing
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.common.observability import init_tracing
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     AgentState,
     GraphRunner,
@@ -106,11 +106,11 @@ async def test_llm_and_tool_calls_emit_child_spans(exporter: InMemorySpanExporte
 
     names = [s.name for s in exporter.get_finished_spans()]
     # Two agent_node turns → two llm_call spans; one dispatch → one tool_call.
-    assert names.count("helix.orchestrator.llm_call") == 2
-    assert names.count("helix.orchestrator.tool_call") == 1
+    assert names.count("expert_work.orchestrator.llm_call") == 2
+    assert names.count("expert_work.orchestrator.tool_call") == 1
 
     tool_span = next(
-        s for s in exporter.get_finished_spans() if s.name == "helix.orchestrator.tool_call"
+        s for s in exporter.get_finished_spans() if s.name == "expert_work.orchestrator.tool_call"
     )
     assert tool_span.attributes is not None
     assert tool_span.attributes["tool"] == "echo"

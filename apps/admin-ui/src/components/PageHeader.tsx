@@ -13,21 +13,21 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, icon, subtitle, actions, backTo }: PageHeaderProps) {
   return (
-    <div className="hx-page-header" data-testid="page-header">
+    <div className="ew-page-header" data-testid="page-header">
       {backTo && (
-        <Link to={backTo.to} className="hx-page-header-back" data-testid="page-header-back">
+        <Link to={backTo.to} className="ew-page-header-back" data-testid="page-header-back">
           <ChevronLeft size={14} strokeWidth={1.75} />
           <span>{backTo.label}</span>
         </Link>
       )}
-      <div className="hx-page-header-row">
-        <div className="hx-page-header-title">
+      <div className="ew-page-header-row">
+        <div className="ew-page-header-title">
           {icon}
           <h1>{title}</h1>
         </div>
-        {actions && <div className="hx-page-header-actions">{actions}</div>}
+        {actions && <div className="ew-page-header-actions">{actions}</div>}
       </div>
-      {subtitle && <p className="hx-page-header-subtitle">{subtitle}</p>}
+      {subtitle && <p className="ew-page-header-subtitle">{subtitle}</p>}
     </div>
   );
 }

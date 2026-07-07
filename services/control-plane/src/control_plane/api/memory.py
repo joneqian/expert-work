@@ -48,15 +48,15 @@ from control_plane.uplift.threat_metrics import (
     record_threat_pattern_hits,
     record_threat_scan,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
-from helix_agent.persistence.memory import MemoryStore
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import AuditAction, MemoryItem, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
+from expert_work.persistence.memory import MemoryStore
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.protocol import AuditAction, MemoryItem, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator import AgentFactoryError
 
-logger = logging.getLogger("helix.control_plane.api.memory")
+logger = logging.getLogger("expert_work.control_plane.api.memory")
 
 
 _LIST_LIMIT_MAX: int = 200
@@ -268,8 +268,8 @@ def build_memory_router() -> APIRouter:
                     "code": "EMBEDDER_UNCONFIGURED",
                     "message": (
                         "memory PATCH requires an embedder — set "
-                        "HELIX_AGENT_EMBEDDING_API_KEY_REF + "
-                        "HELIX_AGENT_EMBEDDING_MODEL"
+                        "EXPERT_WORK_EMBEDDING_API_KEY_REF + "
+                        "EXPERT_WORK_EMBEDDING_MODEL"
                     ),
                 },
             ) from exc
@@ -381,7 +381,7 @@ def build_memory_router() -> APIRouter:
                     "code": "EMBEDDER_UNCONFIGURED",
                     "message": (
                         "memory correction requires an embedder — set "
-                        "HELIX_AGENT_EMBEDDING_API_KEY_REF + HELIX_AGENT_EMBEDDING_MODEL"
+                        "EXPERT_WORK_EMBEDDING_API_KEY_REF + EXPERT_WORK_EMBEDDING_MODEL"
                     ),
                 },
             ) from exc
