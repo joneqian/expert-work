@@ -221,6 +221,7 @@ class _BatchPlatformSkillsBody(BaseModel):
 
     set_status: SkillStatus | None = None
     set_pinned: bool | None = None
+    set_category: str | None = Field(default=None, max_length=64)
     ids: list[UUID] | None = Field(default=None, max_length=_MAX_BATCH_SKILLS)
     filter: _BatchFilter | None = None
 
@@ -996,10 +997,10 @@ def build_platform_skills_router() -> APIRouter:
         principal = _principal(request)
         store = _get_skill_store(request)
         audit = _get_audit(request)
-        if body.set_status is None and body.set_pinned is None:
+        if body.set_status is None and body.set_pinned is None and body.set_category is None:
             raise HTTPException(
                 status_code=422,
-                detail="batch body must set at least one of: set_status, set_pinned",
+                detail="batch body must set at least one of: set_status, set_pinned, set_category",
             )
         has_ids = body.ids is not None
         has_filter = body.filter is not None
@@ -1007,6 +1008,10 @@ def build_platform_skills_router() -> APIRouter:
             raise HTTPException(
                 status_code=422, detail="batch body requires exactly one of: ids, filter"
             )
+        update_category = body.set_category is not None
+        new_category = (
+            (body.set_category.strip() or None) if body.set_category is not None else None
+        )
         async with bypass_rls_session():
             updated = await store.bulk_update_platform_skills(
                 ids=body.ids,
@@ -1015,6 +1020,8 @@ def build_platform_skills_router() -> APIRouter:
                 filter_q=body.filter.q if body.filter else None,
                 set_status=body.set_status,
                 set_pinned=body.set_pinned,
+                update_category=update_category,
+                new_category=new_category,
             )
         await audit_emit(
             audit,
@@ -1031,6 +1038,7 @@ def build_platform_skills_router() -> APIRouter:
                 "updated": updated,
                 "set_status": body.set_status.value if body.set_status else None,
                 "set_pinned": body.set_pinned,
+                "set_category": new_category if update_category else None,
             },
         )
         return JSONResponse(status_code=200, content={"updated": updated})
