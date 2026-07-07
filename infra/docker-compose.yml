@@ -379,7 +379,7 @@ services:
       - ./.data/keycloak:/opt/keycloak/data
       - ./keycloak/realm-expert-work.json:/opt/keycloak/data/import/realm-expert-work.json:ro
       # Stream ACCT — 品牌登录主题(白标)。start-dev 关主题缓存,改 CSS 即热加载。
-      - ./keycloak/themes/expert_work:/opt/keycloak/themes/expert_work:ro
+      - ./keycloak/themes/expert-work:/opt/keycloak/themes/expert-work:ro
     ports:
       - "8080:8080"
     healthcheck:
@@ -825,7 +825,7 @@ services:
       LANGFUSE_INIT_PROJECT_ID: expert_work
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${EXPERT_WORK_LANGFUSE_PUBLIC_KEY:-pk-lf-expert-work-dev}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${EXPERT_WORK_LANGFUSE_SECRET_KEY:-sk-lf-expert-work-dev}
-      LANGFUSE_INIT_USER_EMAIL: ${EXPERT_WORK_LANGFUSE_INIT_EMAIL:-dev@expert_work.local}
+      LANGFUSE_INIT_USER_EMAIL: ${EXPERT_WORK_LANGFUSE_INIT_EMAIL:-dev@expert-work.local}
       LANGFUSE_INIT_USER_PASSWORD: ${EXPERT_WORK_LANGFUSE_INIT_PASSWORD:-expert_work_langfuse_dev}
       LANGFUSE_INIT_USER_NAME: expert_work
     ports:

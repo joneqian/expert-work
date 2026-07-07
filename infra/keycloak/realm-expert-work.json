@@ -1,9 +1,9 @@
 {
   "realm": "expert-work",
   "displayName": "Expert Work",
-  "loginTheme": "expert_work",
+  "loginTheme": "expert-work",
   "enabled": true,
-  "sslRequired": "external",
+  "sslRequired": "none",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -107,7 +107,7 @@
   "users": [
     {
       "username": "dev",
-      "email": "dev@expert_work.local",
+      "email": "dev@expert-work.local",
       "firstName": "Dev",
       "lastName": "User",
       "enabled": true,

@@ -16,7 +16,7 @@ development.
     integration tests)
   - User attribute mapper that copies `tenant_id` into the access token's
     top-level claims
-  - Dev user `dev@expert_work.local` (password `devpass`, role `admin`, tenant
+  - Dev user `dev@expert-work.local` (password `devpass`, role `admin`, tenant
     `00000000-0000-0000-0000-000000000000`)
 
 ## Boot
