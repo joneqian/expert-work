@@ -202,8 +202,15 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
     (r"\bname\s+yourself\s+\w+", "identity_override", "role_hijack", "context"),
     # ── C2 / Brainworm-style promptware (scope=context) ───────────────
     (r"register\s+(as\s+)?a?\s*node", "c2_node_registration", "c2", "context"),
+    # ``beacon``/``heartbeat to|with`` are strong C2 tells on their own.
+    # ``check-in with`` is NOT — wellness / therapy / standup content is full
+    # of "morning check-in with a photo", "check in with you Sunday" (live FP:
+    # grief-companion, jungian-psychologist). Fire ``check-in`` only when a
+    # network target follows.
+    (r"(heartbeat|beacon)\s+(to|with)\s+", "c2_heartbeat", "c2", "context"),
     (
-        r"(heartbeat|beacon|check[\s\-]?in)\s+(to|with)\s+",
+        r"check[\s\-]?in\s+(to|with)\s+[^\n]{0,30}"
+        r"(c2\b|server|host\b|node\b|endpoint|controller|https?://|\d+\.\d+\.\d+\.\d+)",
         "c2_heartbeat",
         "c2",
         "context",
@@ -229,8 +236,23 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
         "c2",
         "context",
     ),
+    # Unambiguous C2/attack tool names — fire standalone.
     (
-        r"\b(?:praxis|cobalt\s*strike|sliver|havoc|mythic|metasploit|brainworm)\b",
+        r"\b(?:cobalt\s*strike|metasploit|brainworm)\b",
+        "known_c2_framework",
+        "c2",
+        "context",
+    ),
+    # ``praxis`` (philosophy/therapy), ``sliver`` / ``havoc`` (common words),
+    # ``mythic`` (Jungian vocabulary — live FP: jungian-psychologist's "mythic
+    # quality", "PRAXIS (action, accountability, growth)") are ALSO real C2
+    # framework names. Fire only with a C2/attack context word nearby so
+    # therapy prose passes while "connect to the Praxis server" still trips.
+    (
+        r"\b(?:praxis|sliver|havoc|mythic)\b[^\n]{0,40}"
+        r"\b(?:c2|server|beacon|payload|implant|framework|node|shellcode|red[\s-]?team|exploit)\b"
+        r"|\b(?:c2|server|beacon|payload|implant|framework|node|shellcode|red[\s-]?team|exploit)\b"
+        r"[^\n]{0,40}\b(?:praxis|sliver|havoc|mythic)\b",
         "known_c2_framework",
         "c2",
         "context",
@@ -275,6 +297,11 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
         "strict",
     ),
     (
+        # Negation guard: "Never include conversation content" is a PRIVACY
+        # instruction, the opposite of exfil (live FP: crisis-response-protocol
+        # "Never include conversation content - privacy"). Fixed-width
+        # lookbehinds skip a negated verb.
+        r"(?<!never )(?<!not )(?<!n't )(?<!avoid )(?<!without )"
         r"(include|output|print|share)\s+(?:\w+\s+)*"
         r"(conversation|chat\s+history|previous\s+messages|full\s+context|entire\s+context)",
         "context_exfil",
