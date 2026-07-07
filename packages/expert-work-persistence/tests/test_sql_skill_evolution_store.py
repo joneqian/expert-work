@@ -387,3 +387,38 @@ async def test_kill_switch_round_trip_and_halt_real_pg(
     # under tenant scope the IS-NOT-DISTINCT-FROM policy hides NULL rows. The
     # in-process + SQL parity for the global OR tenant logic is covered by the
     # in-memory suite; here we assert the tenant-scoped path end-to-end.
+
+
+# ── Batch category assignment (bulk_update_platform_skills) ───────────────
+
+
+@pytest.mark.asyncio
+async def test_bulk_set_and_clear_category_real_pg(
+    skill_store: tuple[SqlSkillStore, AsyncEngine],
+) -> None:
+    # Platform (NULL-tenant) rows — visible/writable under the unscoped
+    # session that ``reset_rls`` (autouse, above) already puts every test
+    # in this file into, same as the sibling
+    # test_sql_mcp_connector_catalog_store.py platform-table suite.
+    store, engine = skill_store
+    try:
+        a = await store.create_platform_skill(skill_id=uuid4(), name=f"a-{uuid4().hex[:8]}")
+        b = await store.create_platform_skill(
+            skill_id=uuid4(), name=f"b-{uuid4().hex[:8]}", category="old"
+        )
+        # set on ids
+        n = await store.bulk_update_platform_skills(
+            ids=[a.id], update_category=True, new_category="研发"
+        )
+        assert n == 1
+        # clear
+        m = await store.bulk_update_platform_skills(
+            ids=[b.id], update_category=True, new_category=None
+        )
+        assert m == 1
+        got_a = await store.get_platform_skill(skill_id=a.id)
+        got_b = await store.get_platform_skill(skill_id=b.id)
+        assert got_a is not None and got_a.category == "研发"
+        assert got_b is not None and got_b.category is None
+    finally:
+        await engine.dispose()

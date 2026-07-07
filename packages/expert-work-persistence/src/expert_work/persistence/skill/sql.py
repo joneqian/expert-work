@@ -1016,11 +1016,15 @@ class SqlSkillStore(SkillStore):
         filter_q: str | None = None,
         set_status: SkillStatus | None = None,
         set_pinned: bool | None = None,
+        update_category: bool = False,
+        new_category: str | None = None,
     ) -> int:
         if ids is None and filter_status is None and filter_category is None and filter_q is None:
             raise ValueError("bulk_update_platform_skills requires ids or a filter")
-        if set_status is None and set_pinned is None:
-            raise ValueError("bulk_update_platform_skills requires set_status or set_pinned")
+        if set_status is None and set_pinned is None and not update_category:
+            raise ValueError(
+                "bulk_update_platform_skills requires set_status, set_pinned, or update_category"
+            )
 
         now = datetime.now(UTC)
         values: dict[str, Any] = {"updated_at": now}
@@ -1029,6 +1033,8 @@ class SqlSkillStore(SkillStore):
             values["state_changed_at"] = now
         if set_pinned is not None:
             values["pinned"] = set_pinned
+        if update_category:
+            values["category"] = new_category
 
         if ids is not None:
             id_list = list(ids)
