@@ -9,8 +9,8 @@
  * friendly explanation + a cost note (judge tokens). system_admin-only at the
  * route level; surfaces backend error codes.
  */
-import { useCallback, useEffect, useState, type ReactElement } from "react";
-import { Alert, App, Button, Form, Input, InputNumber, Spin, Switch, Typography } from "antd";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { Alert, App, Button, Form, InputNumber, Select, Spin, Switch, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -18,6 +18,7 @@ import {
   putPlatformQualityConfig,
   type QualityConfig,
 } from "../../api/platform_quality_config";
+import { getPlatformJudgeConfig, type ProviderModel } from "../../api/platform_judge_config";
 import { ApiError } from "../../api/client";
 
 const { Paragraph } = Typography;
@@ -52,14 +53,22 @@ export function PlatformQualitySection(): ReactElement {
   const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [available, setAvailable] = useState<ProviderModel[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const view = await getPlatformQualityConfig();
+      // The judge-config endpoint carries ``available`` (provider/model pairs
+      // with a platform key) — reuse it to feed the judge dropdowns. Its
+      // failure must not brick the quality form: fall back to empty options.
+      const [view, judgeView] = await Promise.all([
+        getPlatformQualityConfig(),
+        getPlatformJudgeConfig().catch(() => null),
+      ]);
       form.setFieldsValue(view.config);
       setIsDefault(view.is_default);
+      setAvailable(judgeView?.available ?? []);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "unknown error");
     } finally {
@@ -70,6 +79,23 @@ export function PlatformQualitySection(): ReactElement {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const judgeProvider = Form.useWatch("judge_provider", form);
+  const providers = useMemo(() => [...new Set(available.map((m) => m.provider))], [available]);
+  const judgeModels = useMemo(
+    () => available.filter((m) => m.provider === judgeProvider).map((m) => m.model),
+    [available, judgeProvider],
+  );
+
+  // The loaded config may carry a judge (e.g. the env default) whose provider
+  // has no platform key — surface that as a field error right away instead of
+  // letting the save round-trip to a 422. Skip when ``available`` is empty
+  // (judge-config fetch failed): no options to validate against.
+  useEffect(() => {
+    if (!loading && available.length > 0) {
+      void form.validateFields(["judge_provider", "judge_model"]).catch(() => {});
+    }
+  }, [loading, available, form]);
 
   const errMessage = useCallback(
     (err: ApiError): string => {
@@ -179,21 +205,51 @@ export function PlatformQualitySection(): ReactElement {
           name="judge_provider"
           label={t("settings_platform.quality_judge_provider_label")}
           extra={t("settings_platform.quality_judge_hint")}
-          rules={[{ required: true }]}
+          rules={[
+            { required: true },
+            {
+              validator: (_r, v: string) =>
+                !v || available.length === 0 || providers.includes(v)
+                  ? Promise.resolve()
+                  : Promise.reject(
+                      new Error(
+                        t("settings_platform.quality_err_JUDGE_PROVIDER_KEY_MISSING"),
+                      ),
+                    ),
+            },
+          ]}
         >
-          <Input
+          <Select
             style={{ width: 260 }}
+            showSearch
+            options={providers.map((p) => ({ label: p, value: p }))}
+            onChange={() => form.setFieldValue("judge_model", undefined)}
             aria-label={t("settings_platform.quality_judge_provider_label")}
+            data-testid="pq-judge-provider"
           />
         </Form.Item>
         <Form.Item
           name="judge_model"
           label={t("settings_platform.quality_judge_model_label")}
-          rules={[{ required: true }]}
+          dependencies={["judge_provider"]}
+          rules={[
+            { required: true },
+            {
+              validator: (_r, v: string) =>
+                !v || available.length === 0 || judgeModels.includes(v)
+                  ? Promise.resolve()
+                  : Promise.reject(
+                      new Error(t("settings_platform.quality_err_INVALID_JUDGE_MODEL")),
+                    ),
+            },
+          ]}
         >
-          <Input
+          <Select
             style={{ width: 260 }}
+            showSearch
+            options={judgeModels.map((m) => ({ label: m, value: m }))}
             aria-label={t("settings_platform.quality_judge_model_label")}
+            data-testid="pq-judge-model"
           />
         </Form.Item>
 

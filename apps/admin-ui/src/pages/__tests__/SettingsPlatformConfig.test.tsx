@@ -157,26 +157,38 @@ describe("SettingsPlatformConfig — tenant overrides (HX-8)", () => {
     ).toBeInTheDocument();
   });
 
-  it("creates an override through the tenant API", async () => {
+  it("edits an override through the tenant API", async () => {
     const user = userEvent.setup();
     const upsert = vi
-      .spyOn(sdk, "upsertTenantToolOverride")
+      .spyOn(sdk, "upsertTenantProviderOverride")
       .mockResolvedValue(TENANT_VIEW.providers[0].override!);
     renderPage();
     await screen.findByTestId("pc-providers-table");
     await openDrawerAndPickTenant(user);
-    await screen.findByTestId("pc-tenant-tools-table");
-    await user.click(screen.getByTestId("pc-tenant-edit-web_search"));
+    await screen.findByTestId("pc-tenant-providers-table");
+    await user.click(screen.getByTestId("pc-tenant-edit-anthropic"));
     await screen.findByTestId("pc-edit-modal");
-    await user.type(screen.getByTestId("pc-edit-value"), "tvly-REAL-KEY");
+    await user.type(screen.getByTestId("pc-edit-value"), "sk-ant-REAL-KEY");
     await user.click(screen.getByText("Save"));
     await waitFor(() =>
       expect(upsert).toHaveBeenCalledWith(
         TENANT,
-        "web_search",
-        expect.objectContaining({ value: "tvly-REAL-KEY" }),
+        "anthropic",
+        expect.objectContaining({ value: "sk-ant-REAL-KEY" }),
       ),
     );
+  });
+
+  it("does not render the tool credential tables (keyless web_search)", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByTestId("pc-providers-table");
+    expect(screen.queryByTestId("pc-tools-table")).not.toBeInTheDocument();
+    await openDrawerAndPickTenant(user);
+    await screen.findByTestId("pc-tenant-providers-table");
+    expect(
+      screen.queryByTestId("pc-tenant-tools-table"),
+    ).not.toBeInTheDocument();
   });
 
   it("deletes an override back to fallback", async () => {

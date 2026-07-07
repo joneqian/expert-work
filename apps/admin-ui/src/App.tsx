@@ -1,4 +1,7 @@
 import { ConfigProvider, App as AntApp } from "antd";
+import antdEn from "antd/locale/en_US";
+import antdZhCN from "antd/locale/zh_CN";
+import { useTranslation } from "react-i18next";
 import { Route, Routes } from "react-router-dom";
 
 import { useTheme } from "./theme/ThemeContext";
@@ -16,9 +19,13 @@ import { SetupWizard } from "./pages/SetupWizard";
 export default function App() {
   const { mode } = useTheme();
   const themeConfig = mode === "dark" ? darkTheme : lightTheme;
+  // antd's built-in strings (pagination "50 / page", empty states, modal
+  // buttons…) follow the i18n language — useTranslation re-renders on switch.
+  const { i18n } = useTranslation();
+  const antdLocale = i18n.language === "en" ? antdEn : antdZhCN;
 
   return (
-    <ConfigProvider theme={themeConfig} componentSize="middle">
+    <ConfigProvider theme={themeConfig} componentSize="middle" locale={antdLocale}>
       <AntApp>
         {/* SetupGate probes /v1/setup/status and steers an
             un-initialized platform to /setup *before* ProtectedRoute can

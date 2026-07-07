@@ -1314,6 +1314,10 @@ const zhCN: TranslationKeys = {
     not_admin_body:
       "平台凭证由系统管理员管理。请联系系统管理员配置提供方 / 工具。",
     failed_to_load: "加载平台凭证失败。",
+    tab_credentials: "凭证",
+    tab_models: "模型服务",
+    tab_cost: "成本",
+    tab_quality: "质量监控",
     providers_heading: "模型提供方",
     tools_heading: "工具",
     col_name: "名称",
@@ -1429,24 +1433,24 @@ const zhCN: TranslationKeys = {
     quality_heading: "质量监控",
     quality_help_title: "什么是质量监控？",
     quality_help_body:
-      "抽样一部分已完成的 run，由 LLM 判官打 1-5 分，落每 agent 质量时序，分数回落时发漂移告警。开启后每个采样 run 都会消耗 judge token。",
+      "抽样一部分已完成的 run，由 Judge 模型打 1-5 分，落每 agent 质量时序，分数回落时发漂移告警。开启后每个采样 run 都会消耗 judge token。",
     quality_default_note:
       "尚未配置——下方是环境默认值，监控处于关闭。保存即启用并接管默认值。",
     quality_deploy_note:
       "worker 始终常驻运行，此开关是日常操作开关。部署级 EXPERT_WORK_ENABLE_QUALITY_MONITOR 仍可强制整个子系统关闭。",
     quality_section_master: "启用",
     quality_enabled_label: "启用质量监控",
-    quality_enabled_hint: "默认关闭——采样+判分会消耗 token。",
+    quality_enabled_hint: "默认关闭——采样+打分会消耗 token。",
     quality_section_sampling: "采样",
     quality_sampling_rate_label: "采样率（%）",
     quality_daily_cap_label: "每租户日上限",
     quality_monitor_interval_label: "采样器周期（秒）",
     quality_batch_size_label: "采样器批大小",
-    quality_section_judge: "判官模型",
-    quality_judge_provider_label: "判官 provider",
-    quality_judge_model_label: "判官 model",
+    quality_section_judge: "Judge 模型",
+    quality_judge_provider_label: "Judge 提供方",
+    quality_judge_model_label: "Judge 模型",
     quality_judge_hint:
-      "需已配平台 key 的 provider + 一个 chat 模型。判官只给回复打分，选便宜快的模型即可。",
+      "下拉只列已配平台 key 的提供方及其 chat 模型。Judge 只给回复打分，选便宜快的模型即可。",
     quality_section_drift: "漂移检测",
     quality_drift_interval_label: "漂移检查周期（秒）",
     quality_recent_window_label: "近窗（小时）",
@@ -1458,7 +1462,7 @@ const zhCN: TranslationKeys = {
     quality_saved: "质量配置已保存",
     quality_save_error: "保存质量配置失败",
     quality_err_JUDGE_PROVIDER_KEY_MISSING:
-      "选为质量判官前，请先在平台凭据里配置该 provider 的 key。",
+      "选为质量 Judge 前，请先在平台凭据里配置该提供方的 key。",
     quality_err_INVALID_JUDGE_MODEL: "该模型不是所选 provider 的 chat 模型。",
   },
   settings_iam: {
