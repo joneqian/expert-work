@@ -21,6 +21,7 @@ import {
   App,
   Button,
   Checkbox,
+  Dropdown,
   Input,
   Modal,
   Select,
@@ -75,6 +76,12 @@ const GH_RESULT_COLOR: Record<BatchImportResult["status"], string> = {
   exists: "default",
   failed: "error",
 };
+
+/** Sentinel menu key for the batch "set category" dropdown's clear item —
+ *  distinguishes "clear the category" (posts ``set_category: ""``) from any
+ *  real category name (which may itself be an empty-looking string in
+ *  theory, so a dedicated key avoids ambiguity). */
+const CLEAR_CATEGORY_KEY = "__ps_clear_category__";
 
 export function SettingsPlatformSkills() {
   const { t } = useTranslation();
@@ -391,7 +398,9 @@ export function SettingsPlatformSkills() {
   const scopeIsAll = canApplyToAll && applyToAllMatching;
 
   const runBatch = useCallback(
-    async (patch: Pick<BulkUpdatePlatformSkillsBody, "set_status" | "set_pinned">) => {
+    async (
+      patch: Pick<BulkUpdatePlatformSkillsBody, "set_status" | "set_pinned" | "set_category">,
+    ) => {
       const ids = selectedRowKeys.map(String);
       const useFilter = canApplyToAll && applyToAllMatching;
       if (!useFilter && ids.length === 0) return;
@@ -850,6 +859,23 @@ export function SettingsPlatformSkills() {
               >
                 {t("platform_skills.batch_activate")}
               </Button>
+              <Dropdown
+                trigger={["click"]}
+                disabled={batchBusy}
+                menu={{
+                  items: [
+                    ...categories.map((c) => ({ key: c, label: c })),
+                    { type: "divider" as const },
+                    { key: CLEAR_CATEGORY_KEY, label: t("platform_skills.batch_clear_category") },
+                  ],
+                  onClick: ({ key }) =>
+                    void runBatch({ set_category: key === CLEAR_CATEGORY_KEY ? "" : key }),
+                }}
+              >
+                <Button size="small" loading={batchBusy} data-testid="ps-batch-set-category">
+                  {t("platform_skills.batch_set_category")}
+                </Button>
+              </Dropdown>
               {canApplyToAll && (
                 <Checkbox
                   checked={applyToAllMatching}

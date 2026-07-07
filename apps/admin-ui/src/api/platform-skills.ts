@@ -299,6 +299,7 @@ export interface BulkPlatformSkillsFilter {
 export interface BulkUpdatePlatformSkillsBody {
   set_status?: PlatformSkillStatus;
   set_pinned?: boolean;
+  set_category?: string;
   ids?: string[];
   filter?: BulkPlatformSkillsFilter;
 }

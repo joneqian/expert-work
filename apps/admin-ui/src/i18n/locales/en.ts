@@ -1828,6 +1828,8 @@ export interface TranslationKeys {
     batch_partial: string;
     batch_all_matching: string;
     batch_scope_all: string;
+    batch_set_category: string;
+    batch_clear_category: string;
     search_ph: string;
     search_aria: string;
     status_filter_aria: string;
@@ -4290,6 +4292,8 @@ const en: TranslationKeys = {
     batch_partial: "Done: {{ok}} updated, {{failed}} failed",
     batch_all_matching: "Apply to all {{count}} matching",
     batch_scope_all: "All {{count}} matching",
+    batch_set_category: "Set category",
+    batch_clear_category: "Clear category",
     search_ph: "Search name or description",
     search_aria: "Search platform skills",
     status_filter_aria: "Filter by status",
