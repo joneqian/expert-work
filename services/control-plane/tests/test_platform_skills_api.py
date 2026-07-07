@@ -27,6 +27,7 @@ from httpx import ASGITransport, AsyncClient
 
 from control_plane.api import _skill_github
 from control_plane.api._skill_zip import build_skill_zip, parse_skill_zip
+from control_plane.api.platform_skills import SEED_PLATFORM_CATEGORIES
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
@@ -333,6 +334,33 @@ async def test_patch_category_and_categories_endpoint(ctx: _Ctx) -> None:
     )
     assert cleared.status_code == 200
     assert cleared.json()["category"] is None
+
+
+@pytest.mark.asyncio
+async def test_categories_endpoint_seeds_taxonomy(ctx: _Ctx) -> None:
+    seed = list(SEED_PLATFORM_CATEGORIES)
+
+    # Cold start: nothing labelled yet, but the seed taxonomy is offered so the
+    # picker is never empty and the first skill can be filed without inventing a
+    # taxonomy from scratch.
+    empty = await ctx.client.get("/v1/platform/skills/categories", headers=ctx.admin_headers)
+    assert empty.status_code == 200
+    assert empty.json()["categories"][: len(seed)] == seed
+
+    # A free-typed category outside the seed set is appended; seeds stay first
+    # and there is no duplication.
+    created = await ctx.client.post(
+        "/v1/platform/skills",
+        json={"name": "foo", "category": "自定义领域"},
+        headers=ctx.admin_headers,
+    )
+    assert created.status_code in (200, 201), created.text
+    merged = (
+        await ctx.client.get("/v1/platform/skills/categories", headers=ctx.admin_headers)
+    ).json()["categories"]
+    assert merged[: len(seed)] == seed
+    assert "自定义领域" in merged
+    assert len(merged) == len(set(merged))
 
 
 @pytest.mark.asyncio

@@ -103,6 +103,22 @@ from expert_work.runtime.skill_assets import (
 #: write fan-out; a repo with more skills than this is imported in chunks.
 _MAX_BATCH_SKILLS = 100
 
+#: Pre-seeded platform-skill categories. The ``/categories`` endpoint offers
+#: these before any skill is labelled so the picker is never empty on a fresh
+#: install; operators may still free-type new categories. Stored verbatim (the
+#: value is a cross-tenant operational label, not translated UI copy), so seeds
+#: and hand-typed values are the same kind of string and never split a bucket.
+SEED_PLATFORM_CATEGORIES: tuple[str, ...] = (
+    "研发",
+    "设计",
+    "写作",
+    "数据",
+    "办公",
+    "医疗",
+    "效率",
+    "通用",
+)
+
 
 class _CreatePlatformSkillBody(BaseModel):
     """``POST /v1/platform/skills`` request body."""
@@ -935,12 +951,15 @@ def build_platform_skills_router() -> APIRouter:
 
     @router.get("/categories", response_model=None)
     async def list_platform_skill_categories(request: Request) -> JSONResponse:
-        """Distinct non-empty categories across the platform library — feeds the
-        admin list's category filter + the detail page's category picker."""
+        """Categories offered to the admin list filter + detail picker: the seed
+        taxonomy first (stable order, so the picker is never empty on a fresh
+        install), then any hand-typed categories not already in the seed set."""
         _principal(request)
         store = _get_skill_store(request)
         async with bypass_rls_session():
-            categories = await store.list_platform_categories()
+            existing = await store.list_platform_categories()
+        seed = set(SEED_PLATFORM_CATEGORIES)
+        categories = [*SEED_PLATFORM_CATEGORIES, *(c for c in existing if c not in seed)]
         return JSONResponse(status_code=200, content={"categories": categories})
 
     @router.get("", response_model=None)
