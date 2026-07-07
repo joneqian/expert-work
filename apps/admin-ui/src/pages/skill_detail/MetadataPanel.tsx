@@ -6,7 +6,8 @@
  * U-15 (``lazy_load``) and U-24 (``high_risk``). Mutation lives in the
  * sibling editor; this panel never writes.
  */
-import { Alert, Card, Space, Tag, Tooltip, Typography } from "antd";
+import { useState } from "react";
+import { Alert, AutoComplete, Button, Card, Space, Tag, Tooltip, Typography } from "antd";
 import { ShieldAlert, Sparkles, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -17,10 +18,33 @@ const { Text } = Typography;
 interface MetadataPanelProps {
   skill: SkillRecord;
   version: SkillVersion;
+  /** When set, the category row becomes an editable AutoComplete (platform
+   *  library only — the tenant SDK has no category patch). */
+  categoryOptions?: string[];
+  onSaveCategory?: (category: string) => Promise<void>;
 }
 
-export function MetadataPanel({ skill, version }: MetadataPanelProps) {
+export function MetadataPanel({
+  skill,
+  version,
+  categoryOptions,
+  onSaveCategory,
+}: MetadataPanelProps) {
   const { t } = useTranslation();
+  const editableCategory = onSaveCategory !== undefined;
+  const [categoryDraft, setCategoryDraft] = useState(skill.category ?? "");
+  const [savingCategory, setSavingCategory] = useState(false);
+  const categoryDirty = categoryDraft.trim() !== (skill.category ?? "").trim();
+
+  const saveCategory = async () => {
+    if (!onSaveCategory || !categoryDirty) return;
+    setSavingCategory(true);
+    try {
+      await onSaveCategory(categoryDraft.trim());
+    } finally {
+      setSavingCategory(false);
+    }
+  };
 
   return (
     <Card
@@ -51,7 +75,41 @@ export function MetadataPanel({ skill, version }: MetadataPanelProps) {
         }}
       >
         <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("skills.col_category")}</dt>
-        <dd style={{ margin: 0 }}>{skill.category}</dd>
+        <dd style={{ margin: 0 }}>
+          {editableCategory ? (
+            <Space.Compact style={{ width: "100%", maxWidth: 360 }}>
+              <AutoComplete
+                value={categoryDraft}
+                onChange={setCategoryDraft}
+                options={(categoryOptions ?? []).map((c) => ({ value: c }))}
+                placeholder={t("platform_skills.detail_category_placeholder")}
+                style={{ width: "100%" }}
+                filterOption={(input, option) =>
+                  (option?.value ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+                }
+                aria-label={t("platform_skills.detail_category_label")}
+                data-testid="skill-category-input"
+              />
+              <Button
+                type="primary"
+                loading={savingCategory}
+                disabled={!categoryDirty || savingCategory}
+                onClick={() => void saveCategory()}
+                data-testid="skill-category-save"
+              >
+                {t("platform_skills.detail_category_save")}
+              </Button>
+            </Space.Compact>
+          ) : skill.category ? (
+            skill.category
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              —
+            </Text>
+          )}
+        </dd>
 
         <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("skills.col_description")}</dt>
         <dd style={{ margin: 0 }}>{skill.description}</dd>

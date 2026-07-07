@@ -176,13 +176,14 @@ class _BatchImportFromGithubBody(BaseModel):
 class _PatchPlatformSkillBody(BaseModel):
     """``PATCH /v1/platform/skills/{id}`` request body.
 
-    X4 supports ``status`` + ``pinned`` only; ``required_tier`` is set at
-    create time (mutating it later is a follow-up — this API-only PR adds
-    no new store method).
+    ``status`` / ``pinned`` are lifecycle controls; ``category`` is the
+    organizing label (empty string clears it). ``required_tier`` is still
+    create-time only.
     """
 
     status: SkillStatus | None = None
     pinned: bool | None = None
+    category: str | None = Field(default=None, max_length=64)
 
 
 class _BatchFilter(BaseModel):
@@ -850,10 +851,10 @@ def build_platform_skills_router() -> APIRouter:
         principal = _principal(request)
         store = _get_skill_store(request)
         audit = _get_audit(request)
-        if body.status is None and body.pinned is None:
+        if body.status is None and body.pinned is None and body.category is None:
             raise HTTPException(
                 status_code=422,
-                detail="patch body must set at least one of: status, pinned",
+                detail="patch body must set at least one of: status, pinned, category",
             )
 
         async with bypass_rls_session():
@@ -902,7 +903,45 @@ def build_platform_skills_router() -> APIRouter:
                 details={"scope": "platform", "pinned": body.pinned},
             )
 
+        # ``category`` present (incl. "" to clear) → re-label. Store normalizes
+        # a blank to NULL, so the effective new value may be None.
+        if body.category is not None:
+            new_category = body.category.strip() or None
+            if new_category != prior.category:
+                try:
+                    async with bypass_rls_session():
+                        updated = await store.set_platform_category(
+                            skill_id=skill_id, category=new_category
+                        )
+                except SkillNotFoundError as exc:
+                    raise HTTPException(status_code=404, detail="skill not found") from exc
+                await audit_emit(
+                    audit,
+                    tenant_id=principal.tenant_id,
+                    actor_id=principal.subject_id,
+                    action=AuditAction.SKILL_CATEGORY_CHANGED,
+                    resource_type="skill",
+                    resource_id=str(skill_id),
+                    result=AuditResult.SUCCESS,
+                    trace_id=current_trace_id_hex(),
+                    details={
+                        "scope": "platform",
+                        "from": prior.category,
+                        "to": new_category,
+                    },
+                )
+
         return JSONResponse(status_code=200, content=_skill_dict(updated))
+
+    @router.get("/categories", response_model=None)
+    async def list_platform_skill_categories(request: Request) -> JSONResponse:
+        """Distinct non-empty categories across the platform library — feeds the
+        admin list's category filter + the detail page's category picker."""
+        _principal(request)
+        store = _get_skill_store(request)
+        async with bypass_rls_session():
+            categories = await store.list_platform_categories()
+        return JSONResponse(status_code=200, content={"categories": categories})
 
     @router.get("", response_model=None)
     async def list_platform_skills(

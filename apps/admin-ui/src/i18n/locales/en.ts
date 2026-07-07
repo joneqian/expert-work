@@ -1837,10 +1837,15 @@ export interface TranslationKeys {
     failed_to_load: string;
     col_name: string;
     col_category: string;
+    col_description: string;
     col_tier: string;
     col_status: string;
     col_version: string;
     col_actions: string;
+    no_description: string;
+    category_filter_all: string;
+    category_filter_aria: string;
+    category_uncategorized: string;
     empty_title: string;
     empty_hint: string;
     tier_free: string;
@@ -1849,6 +1854,11 @@ export interface TranslationKeys {
     status_draft: string;
     status_active: string;
     status_archived: string;
+    detail_category_label: string;
+    detail_category_placeholder: string;
+    detail_category_save: string;
+    detail_category_saved: string;
+    detail_category_help: string;
     create_title: string;
     create_submit: string;
     field_name: string;
@@ -4290,10 +4300,15 @@ const en: TranslationKeys = {
     failed_to_load: "Failed to load platform skills",
     col_name: "Name",
     col_category: "Category",
+    col_description: "Description",
     col_tier: "Required plan",
     col_status: "Status",
     col_version: "Version",
     col_actions: "Actions",
+    no_description: "No description",
+    category_filter_all: "All categories",
+    category_filter_aria: "Filter by category",
+    category_uncategorized: "Uncategorized",
     empty_title: "No platform skills yet",
     empty_hint:
       "Add curated skills so every tenant can bind battle-tested capabilities without reinventing them.",
@@ -4303,6 +4318,12 @@ const en: TranslationKeys = {
     status_draft: "Draft",
     status_active: "Active",
     status_archived: "Archived",
+    detail_category_label: "Category",
+    detail_category_placeholder: "e.g. mental-health, data, writing",
+    detail_category_save: "Save category",
+    detail_category_saved: "Category updated",
+    detail_category_help:
+      "The organizing label shown in the skill list. Pick an existing category or type a new one; leave empty to clear.",
     create_title: "New platform skill",
     create_submit: "Create",
     field_name: "Name (slug)",

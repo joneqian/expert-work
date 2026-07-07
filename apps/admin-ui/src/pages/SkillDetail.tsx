@@ -124,6 +124,9 @@ export function SkillDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusSubmitting, setStatusSubmitting] = useState(false);
+  // Category editor (platform library only — the tenant SDK has no
+  // patchCategory). Options feed the AutoComplete picker.
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [renamePath, setRenamePath] = useState<string | null>(null);
@@ -170,6 +173,39 @@ export function SkillDetail({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Category picker options (platform only). Best-effort — a failure just
+  // leaves the AutoComplete free-text.
+  useEffect(() => {
+    if (!api.listCategories) return;
+    void api
+      .listCategories()
+      .then(setCategoryOptions)
+      .catch(() => setCategoryOptions([]));
+  }, [api]);
+
+  const onSaveCategory = useCallback(
+    async (category: string) => {
+      if (skill === null || !api.patchCategory) return;
+      try {
+        const updated = await api.patchCategory(skill.id, category);
+        setSkill(updated);
+        message.success(t("platform_skills.detail_category_saved"));
+        if (api.listCategories) {
+          api.listCategories().then(setCategoryOptions).catch(() => {});
+        }
+      } catch (err) {
+        const msg =
+          err instanceof ApiError
+            ? `${err.code}: ${err.message}`
+            : err instanceof Error
+              ? err.message
+              : "failed";
+        message.error(msg);
+      }
+    },
+    [skill, api, message, t],
+  );
 
   const selectedVersion = useMemo(
     () => versions.find((v) => v.version === selectedVersionNumber) ?? null,
@@ -409,7 +445,12 @@ export function SkillDetail({
       />
 
       {selectedVersion !== null && (
-        <MetadataPanel skill={skill} version={selectedVersion} />
+        <MetadataPanel
+          skill={skill}
+          version={selectedVersion}
+          categoryOptions={api.patchCategory ? categoryOptions : undefined}
+          onSaveCategory={api.patchCategory ? onSaveCategory : undefined}
+        />
       )}
 
       {/* Tenant-flywheel panels — platform skills are human-curated, not

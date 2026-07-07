@@ -395,6 +395,24 @@ async def test_platform_versions_listing_and_pin() -> None:
     assert pinned.pinned is True
 
 
+@pytest.mark.asyncio
+async def test_platform_category_set_clear_and_distinct_list() -> None:
+    store = InMemorySkillStore()
+    a = await store.create_platform_skill(skill_id=uuid4(), name="a", category="data")
+    b = await store.create_platform_skill(skill_id=uuid4(), name="b", category="writing")
+    await store.create_platform_skill(skill_id=uuid4(), name="c")  # uncategorized
+
+    assert await store.list_platform_categories() == ["data", "writing"]
+
+    # Re-label + blank-clears-to-None.
+    relabeled = await store.set_platform_category(skill_id=a.id, category="mental-health")
+    assert relabeled.category == "mental-health"
+    cleared = await store.set_platform_category(skill_id=b.id, category="  ")
+    assert cleared.category is None
+
+    assert await store.list_platform_categories() == ["mental-health"]
+
+
 # ---------------------------------------------------------------------------
 # Stream X — curator excludes platform (NULL-tenant) skills
 # ---------------------------------------------------------------------------

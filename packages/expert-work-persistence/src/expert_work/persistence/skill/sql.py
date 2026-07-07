@@ -1175,6 +1175,33 @@ class SqlSkillStore(SkillStore):
             await session.commit()
         return _skill_row_to_dto(row)
 
+    async def set_platform_category(self, *, skill_id: UUID, category: str | None) -> Skill:
+        # Empty string normalizes to NULL so "cleared" and "never set" are one
+        # state (the filter + distinct list treat NULL as uncategorized).
+        normalized = category.strip() if category else None
+        async with self._sf() as session:
+            result = await session.execute(
+                update(SkillRow)
+                .where(SkillRow.id == skill_id, SkillRow.tenant_id.is_(None))
+                .values(category=normalized or None, updated_at=datetime.now(UTC))
+                .returning(SkillRow)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                raise SkillNotFoundError(str(skill_id))
+            await session.commit()
+        return _skill_row_to_dto(row)
+
+    async def list_platform_categories(self) -> list[str]:
+        async with self._sf() as session:
+            result = await session.execute(
+                select(SkillRow.category)
+                .where(SkillRow.tenant_id.is_(None), SkillRow.category.isnot(None))
+                .distinct()
+                .order_by(SkillRow.category)
+            )
+            return [c for c in result.scalars().all() if c]
+
     async def resolve_platform_by_name(self, *, name: str) -> SkillVersion | None:
         skill = await self.get_platform_skill_by_name(name=name)
         if skill is None or skill.status != SkillStatus.ACTIVE or skill.latest_version == 0:

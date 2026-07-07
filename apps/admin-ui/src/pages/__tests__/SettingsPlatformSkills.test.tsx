@@ -391,4 +391,51 @@ describe("SettingsPlatformSkills page", () => {
       ),
     );
   });
+
+  it("shows the skill description in the list", async () => {
+    installAdapter([
+      {
+        match: (u, m) => u.endsWith("/platform/skills") && m === "get",
+        respond: () => raw({ items: [SKILL], total: 1 }),
+      },
+      {
+        match: (u) => u.endsWith("/platform/skills/categories"),
+        respond: () => raw({ categories: ["web"] }),
+      },
+    ]);
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+    expect(
+      screen.getByText("Search the web and return top N results."),
+    ).toBeInTheDocument();
+  });
+
+  it("category filter refetches with the category param", async () => {
+    const calls: Array<Record<string, unknown> | undefined> = [];
+    installAdapter([
+      {
+        match: (u, m) => u.endsWith("/platform/skills") && m === "get",
+        respond: ({ params }) => {
+          calls.push(params);
+          return raw({ items: [SKILL], total: 1 });
+        },
+      },
+      {
+        match: (u) => u.endsWith("/platform/skills/categories"),
+        respond: () => raw({ categories: ["web", "data"] }),
+      },
+    ]);
+    const user = userEvent.setup();
+    renderPage(["system_admin"]);
+    await waitFor(() => expect(screen.getByTestId("ps-table")).toBeInTheDocument());
+
+    // Open the category filter and pick "data".
+    const filter = screen.getByTestId("ps-category-filter");
+    await user.click(filter.querySelector(".ant-select-selector")!);
+    await user.click(await screen.findByTitle("data"));
+
+    await waitFor(() =>
+      expect(calls.some((p) => p?.category === "data")).toBe(true),
+    );
+  });
 });
