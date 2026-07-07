@@ -92,6 +92,8 @@ export interface AddPlatformSkillVersionBody {
 export interface PatchPlatformSkillBody {
   status?: PlatformSkillStatus;
   pinned?: boolean;
+  /** New category label; empty string clears it. */
+  category?: string;
 }
 
 export interface PlatformSkillVersionList {
@@ -263,7 +265,7 @@ export async function importPlatformSkillsFromGithubBatch(
   return response.data;
 }
 
-/** ``PATCH /v1/platform/skills/{id}`` — set status and/or pinned. */
+/** ``PATCH /v1/platform/skills/{id}`` — set status, pinned, and/or category. */
 export async function patchPlatformSkill(
   id: string,
   body: PatchPlatformSkillBody,
@@ -273,6 +275,15 @@ export async function patchPlatformSkill(
     body,
   );
   return response.data;
+}
+
+/** ``GET /v1/platform/skills/categories`` — distinct categories for the filter
+ *  dropdown + the detail-page category picker. */
+export async function listPlatformSkillCategories(): Promise<string[]> {
+  const response = await apiClient.get<{ categories: string[] }>(
+    "/v1/platform/skills/categories",
+  );
+  return response.data.categories;
 }
 
 /** Selector for the "apply to ALL matching" bulk path (across pages). */

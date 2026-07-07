@@ -44,6 +44,7 @@ import {
   importPlatformSkillsFromGithubBatch,
   listGithubSkills,
   listPlatformSkills,
+  listPlatformSkillCategories,
   patchPlatformSkill,
   type BatchImportResult,
   type BulkUpdatePlatformSkillsBody,
@@ -98,17 +99,19 @@ export function SettingsPlatformSkills() {
   const [statusFilter, setStatusFilter] = useState<PlatformSkillStatus | undefined>(
     undefined,
   );
+  const [categoryFilter, setCategoryFilter] = useState<string | undefined>(undefined);
+  const [categories, setCategories] = useState<string[]>([]);
 
   useEffect(() => {
     const handle = setTimeout(() => setQDebounced(q), 300);
     return () => clearTimeout(handle);
   }, [q]);
 
-  // Changing the search text or status filter resets to page 1 (the old offset
+  // Changing the search text or a filter resets to page 1 (the old offset
   // would otherwise overshoot the narrowed result set).
   useEffect(() => {
     setPage(1);
-  }, [qDebounced, statusFilter]);
+  }, [qDebounced, statusFilter, categoryFilter]);
 
   // GitHub import modal (方案 A).
   const [ghOpen, setGhOpen] = useState(false);
@@ -145,6 +148,7 @@ export function SettingsPlatformSkills() {
       const result = await listPlatformSkills({
         q: qDebounced || undefined,
         status: statusFilter,
+        category: categoryFilter,
         offset: (page - 1) * pageSize,
         limit: pageSize,
       });
@@ -155,13 +159,29 @@ export function SettingsPlatformSkills() {
     } finally {
       setLoading(false);
     }
-  }, [qDebounced, statusFilter, page, pageSize]);
+  }, [qDebounced, statusFilter, categoryFilter, page, pageSize]);
 
   useEffect(() => {
     if (isSystemAdmin) {
       void refresh();
     }
   }, [isSystemAdmin, refresh]);
+
+  // Load the distinct category list once (admin only) to feed the filter
+  // dropdown; refreshed after any import so a newly-seen category shows up.
+  const loadCategories = useCallback(async () => {
+    try {
+      setCategories(await listPlatformSkillCategories());
+    } catch {
+      setCategories([]); // non-fatal — the filter just shows "All".
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSystemAdmin) {
+      void loadCategories();
+    }
+  }, [isSystemAdmin, loadCategories]);
 
   // skill-runtime §5.2 — a node/browser skill still imports, but its bundled
   // scripts won't run in the Python-only sandbox; warn (longer duration) so the
@@ -427,6 +447,24 @@ export function SettingsPlatformSkills() {
             <Text strong>{row.name}</Text>
           </Space>
         ),
+      },
+      {
+        title: t("platform_skills.col_description"),
+        dataIndex: "description",
+        key: "description",
+        ellipsis: true,
+        render: (description: string) =>
+          description ? (
+            <Tooltip title={description} styles={{ root: { maxWidth: 420 } }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                {description}
+              </Text>
+            </Tooltip>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12, opacity: 0.6 }}>
+              {t("platform_skills.no_description")}
+            </Text>
+          ),
       },
       {
         title: t("platform_skills.col_category"),
@@ -753,6 +791,18 @@ export function SettingsPlatformSkills() {
                 { label: t("platform_skills.status_draft"), value: "draft" },
                 { label: t("platform_skills.status_active"), value: "active" },
                 { label: t("platform_skills.status_archived"), value: "archived" },
+              ]}
+            />
+            <Select<string>
+              value={categoryFilter ?? "__all__"}
+              onChange={(v) => setCategoryFilter(v === "__all__" ? undefined : v)}
+              aria-label={t("platform_skills.category_filter_aria")}
+              style={{ width: 200 }}
+              showSearch
+              data-testid="ps-category-filter"
+              options={[
+                { label: t("platform_skills.category_filter_all"), value: "__all__" },
+                ...categories.map((c) => ({ label: c, value: c })),
               ]}
             />
           </Space>

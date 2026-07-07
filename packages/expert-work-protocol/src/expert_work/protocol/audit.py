@@ -158,6 +158,7 @@ class AuditAction(StrEnum):
     SKILL_VIEW_BLOCKED_ARCHIVED = "skill:view_blocked_archived"
     SKILL_PINNED = "skill:pinned"
     SKILL_UNPINNED = "skill:unpinned"
+    SKILL_CATEGORY_CHANGED = "skill:category_changed"
     # skill — Stream SE (SE-3b) in-session agent self-authoring (Layer A).
     # Emitted by the author_skill / refine_skill / fork_skill builtins when
     # an agent creates / refines / forks a skill in a run. All produce

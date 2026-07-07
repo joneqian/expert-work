@@ -39,6 +39,7 @@ import {
 import {
   getPlatformSkill,
   listPlatformSkillVersions,
+  listPlatformSkillCategories,
   patchPlatformSkill,
   exportPlatformSkillVersion,
   getPlatformSupportingFile,
@@ -81,6 +82,11 @@ export interface SkillApi {
     version: number,
     promptFragment: string,
   ): Promise<SkillVersion>;
+  /** Re-label the skill's category (platform library only; empty clears it).
+   *  Undefined on the tenant SDK — the detail page hides the editor then. */
+  patchCategory?(id: string, category: string): Promise<SkillRecord>;
+  /** Distinct categories for the editor's picker (platform only). */
+  listCategories?(): Promise<string[]>;
 }
 
 /** Tenant ``/v1/skills`` — thin pass-through. */
@@ -117,4 +123,6 @@ export const platformSkillApi: SkillApi = {
     return deletePlatformSupportingFile(id, afterPut.version, oldPath);
   },
   putPrompt: putPlatformSkillPrompt,
+  patchCategory: (id, category) => patchPlatformSkill(id, { category }),
+  listCategories: listPlatformSkillCategories,
 };

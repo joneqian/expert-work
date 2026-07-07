@@ -60,12 +60,21 @@ const VERSION = {
   created_at: "2026-05-20T10:00:00Z",
 };
 
+const patchCalls: Array<Record<string, unknown>> = [];
+
 function installAdapter() {
+  patchCalls.length = 0;
   apiClient.defaults.adapter = (config) => {
     const url = config.url ?? "";
+    const method = (config.method ?? "get").toLowerCase();
     let data: unknown = {};
-    if (url.endsWith("/platform/skills/psk-1/versions")) data = { items: [VERSION] };
-    else if (url.endsWith("/platform/skills/psk-1")) data = SKILL;
+    if (url.endsWith("/platform/skills/categories")) data = { categories: ["web", "data"] };
+    else if (url.endsWith("/platform/skills/psk-1/versions")) data = { items: [VERSION] };
+    else if (url.endsWith("/platform/skills/psk-1") && method === "patch") {
+      const body = JSON.parse(config.data as string) as Record<string, unknown>;
+      patchCalls.push(body);
+      data = { ...SKILL, category: (body.category as string) || null };
+    } else if (url.endsWith("/platform/skills/psk-1")) data = SKILL;
     return Promise.resolve({
       data,
       status: 200,
@@ -118,5 +127,26 @@ describe("SettingsPlatformSkillDetail (platform variant)", () => {
     // platform_skills.tier_pro — zh "专业版" / en "Pro" depending on the
     // detected test locale.
     expect(screen.getByText(/^(专业版|Pro)$/)).toBeInTheDocument();
+  });
+
+  it("edits the category via the metadata panel (platform only)", async () => {
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId("skill-metadata-panel")).toBeInTheDocument());
+
+    // The testid is on the AutoComplete wrapper; the editable element is the
+    // inner combobox input.
+    const input = screen
+      .getByTestId("skill-category-input")
+      .querySelector("input") as HTMLInputElement;
+    await user.click(input);
+    await user.clear(input);
+    await user.type(input, "mental-health");
+    await user.click(screen.getByTestId("skill-category-save"));
+
+    await waitFor(() =>
+      expect(patchCalls.some((b) => b.category === "mental-health")).toBe(true),
+    );
   });
 });

@@ -691,6 +691,20 @@ class SkillStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def set_platform_category(self, *, skill_id: UUID, category: str | None) -> Skill:
+        """Set (or clear, with ``None``) a platform skill's category. Raises
+        :class:`SkillNotFoundError` if unknown. Caller MUST be inside
+        ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
+    async def list_platform_categories(self) -> list[str]:
+        """Distinct non-empty categories across NULL-tenant skills, sorted.
+        Feeds the admin list's category filter. Caller MUST be inside
+        ``bypass_rls_session()``.
+        """
+
+    @abc.abstractmethod
     async def resolve_platform_by_name(self, *, name: str) -> SkillVersion | None:
         """Bare-name resolution of a platform skill — current
         ``latest_version`` of an ``ACTIVE`` platform skill, else ``None``.

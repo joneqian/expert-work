@@ -827,6 +827,21 @@ class InMemorySkillStore(SkillStore):
         self._skills[skill_id] = updated
         return updated
 
+    async def set_platform_category(self, *, skill_id: UUID, category: str | None) -> Skill:
+        row = await self.get_platform_skill(skill_id=skill_id)
+        if row is None:
+            raise SkillNotFoundError(str(skill_id))
+        normalized = category.strip() if category else None
+        updated = row.model_copy(
+            update={"category": normalized or None, "updated_at": datetime.now(UTC)}
+        )
+        self._skills[skill_id] = updated
+        return updated
+
+    async def list_platform_categories(self) -> list[str]:
+        cats = {s.category for s in self._skills.values() if s.tenant_id is None and s.category}
+        return sorted(cats)
+
     async def resolve_platform_by_name(self, *, name: str) -> SkillVersion | None:
         skill = await self.get_platform_skill_by_name(name=name)
         if skill is None or skill.status != SkillStatus.ACTIVE or skill.latest_version == 0:

@@ -294,6 +294,64 @@ async def test_patch_status_and_pinned(ctx: _Ctx) -> None:
 
 
 @pytest.mark.asyncio
+async def test_patch_category_and_categories_endpoint(ctx: _Ctx) -> None:
+    create = await ctx.client.post(
+        "/v1/platform/skills",
+        json={"name": "foo", "category": "data"},
+        headers=ctx.admin_headers,
+    )
+    skill_id = create.json()["id"]
+
+    # Re-label → category updated + audited.
+    patched = await ctx.client.patch(
+        f"/v1/platform/skills/{skill_id}",
+        json={"category": "mental-health"},
+        headers=ctx.admin_headers,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["category"] == "mental-health"
+
+    page = await ctx.audit_store.query(AuditQuery(tenant_id=ctx.admin_tenant, limit=50))
+    cat_rows = [r for r in page.entries if r.action == AuditAction.SKILL_CATEGORY_CHANGED]
+    assert len(cat_rows) == 1
+    assert cat_rows[0].details == {
+        "scope": "platform",
+        "from": "data",
+        "to": "mental-health",
+    }
+
+    # The distinct-categories endpoint reflects it.
+    cats = await ctx.client.get("/v1/platform/skills/categories", headers=ctx.admin_headers)
+    assert cats.status_code == 200
+    assert "mental-health" in cats.json()["categories"]
+
+    # Empty string clears the category (→ null).
+    cleared = await ctx.client.patch(
+        f"/v1/platform/skills/{skill_id}",
+        json={"category": ""},
+        headers=ctx.admin_headers,
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["category"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_filters_by_category(ctx: _Ctx) -> None:
+    for name, cat in [("alpha", "data"), ("beta", "writing"), ("gamma", "data")]:
+        await ctx.client.post(
+            "/v1/platform/skills",
+            json={"name": name, "category": cat},
+            headers=ctx.admin_headers,
+        )
+    resp = await ctx.client.get(
+        "/v1/platform/skills", params={"category": "data"}, headers=ctx.admin_headers
+    )
+    assert resp.status_code == 200
+    names = {item["name"] for item in resp.json()["items"]}
+    assert names == {"alpha", "gamma"}
+
+
+@pytest.mark.asyncio
 async def test_patch_empty_body_422(ctx: _Ctx) -> None:
     create = await ctx.client.post(
         "/v1/platform/skills", json={"name": "foo"}, headers=ctx.admin_headers
