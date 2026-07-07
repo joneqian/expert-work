@@ -66,7 +66,9 @@ describe("KnowledgeDetail", () => {
     renderDetail();
 
     await waitFor(() => expect(screen.getByTestId("knowledge-detail-root")).toBeInTheDocument());
-    expect(screen.getByText("faq.pdf")).toBeInTheDocument();
+    // findBy: the documents table lands one async hop after the shell
+    // (getBase → listDocuments) — a sync getBy races it on slow runners.
+    expect(await screen.findByText("faq.pdf")).toBeInTheDocument();
     // localized status (not the raw "ready").
     expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.queryByText("ready")).toBeNull();
