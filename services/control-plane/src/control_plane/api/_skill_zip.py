@@ -389,11 +389,7 @@ def _is_zip_junk(name: str) -> bool:
     suffix — it would otherwise trip ``binary_in_text_file``."""
     segments = name.split("/")
     basename = segments[-1]
-    return (
-        segments[0] == "__MACOSX"
-        or basename == ".DS_Store"
-        or basename.startswith("._")
-    )
+    return segments[0] == "__MACOSX" or basename == ".DS_Store" or basename.startswith("._")
 
 
 def _common_root_prefix(names: list[str]) -> str:
@@ -417,9 +413,7 @@ def _collect_entries(archive: zipfile.ZipFile) -> _ArchiveEntries:
     """
     infolist = archive.infolist()
     file_infos = [
-        info
-        for info in infolist
-        if not info.is_dir() and not _is_zip_junk(info.filename)
+        info for info in infolist if not info.is_dir() and not _is_zip_junk(info.filename)
     ]
     if len(file_infos) == 0:
         _reject(reason="missing_skill_md", internal="ZIP is empty")

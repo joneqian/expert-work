@@ -624,9 +624,7 @@ async def test_platform_import_disallowed_extension_surfaces_reason(ctx: _Ctx) -
 async def test_platform_import_lists_all_blocked_extensions(ctx: _Ctx) -> None:
     """The extension reject is collective: every distinct offending type is
     named in one response, not one per retry."""
-    blob = _new_format_zip(
-        extra={"data.bin": b"\x00", "tool.exe": b"\x00", "more.bin": b"\x00"}
-    )
+    blob = _new_format_zip(extra={"data.bin": b"\x00", "tool.exe": b"\x00", "more.bin": b"\x00"})
     resp = await ctx.client.post(
         "/v1/platform/skills/import",
         files={"file": ("foo.skill", blob, "application/zip")},

@@ -208,7 +208,11 @@ def test_read_dotenv() -> None:
 def test_read_secrets_no_fp_on_identifier_tail() -> None:
     # Live FP (ui-ux-pro-max import): ``ui_cat = …`` plus a far-away
     # "credentials" in prose must NOT pair up across the collapsed view.
-    text = 'ui_cat = rule.get("UI_Category", "").lower()\n' + ("filler words " * 40) + "credentials matter in UX"
+    text = (
+        'ui_cat = rule.get("UI_Category", "").lower()\n'
+        + ("filler words " * 40)
+        + "credentials matter in UX"
+    )
     ids = {f.pattern_id for f in scan_for_threats(text, scope="all")}
     assert "read_secrets" not in ids
 
@@ -222,7 +226,9 @@ def test_exfil_gap_is_bounded() -> None:
 
 
 def test_send_to_url_no_fp_across_prose() -> None:
-    text = "send feedback via the form. " + ("more words " * 30) + "docs live at https://example.com"
+    text = (
+        "send feedback via the form. " + ("more words " * 30) + "docs live at https://example.com"
+    )
     ids = {f.pattern_id for f in scan_for_threats(text, scope="strict")}
     assert "send_to_url" not in ids
 
