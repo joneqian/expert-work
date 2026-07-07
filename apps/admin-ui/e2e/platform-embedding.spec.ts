@@ -91,7 +91,7 @@ test.beforeEach(async ({ page }) => {
 
 test("system_admin views + saves the platform embedding config", async ({ page }) => {
   await login(page);
-  await page.goto("/settings/platform");
+  await page.goto("/settings/platform?tab=models");
 
   // Section loads (pe-loading first, then pe-root) and shows the current model.
   await expect(page.getByTestId("pe-root")).toBeVisible();
@@ -123,7 +123,7 @@ test("system_admin views + saves the platform embedding config", async ({ page }
 
 test("settings/platform with the embedding section passes axe", async ({ page }) => {
   await login(page);
-  await page.goto("/settings/platform");
+  await page.goto("/settings/platform?tab=models");
 
   await expect(page.getByTestId("pe-root")).toBeVisible();
   await expectNoA11yViolations(page, "settings-platform");
