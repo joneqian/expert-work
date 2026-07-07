@@ -7,10 +7,10 @@ Stream ACCT — 让 Keycloak 登录/邮件页长得像 Expert Work 产品,用户
 ```
 Expert Work/login/
   theme.properties          # parent=keycloak,叠加品牌 CSS
-  resources/css/expert_work.css   # 深色 + cyan/violet,对齐 admin-ui 设计基线
+  resources/css/expert-work.css   # 深色 + cyan/violet,对齐 admin-ui 设计基线
 ```
 
-`theme.properties` 只覆盖 `styles`(追加 `expert_work.css`)。PatternFly 基础样式来自父主题的
+`theme.properties` 只覆盖 `styles`(追加 `expert-work.css`)。PatternFly 基础样式来自父主题的
 `stylesCommon`(**未覆盖,继承保留**),所以布局不会因覆盖而崩。纯 CSS,不改 FreeMarker
 模板 —— 升级 Keycloak 不易碎。
 
@@ -28,7 +28,7 @@ Expert Work/login/
 ## 换 Logo
 
 页面 header 现在渲染 realm `displayName`(=`Expert Work`)作文字 wordmark(cyan→violet 渐变)。
-要用图片 logo:把文件放 `login/resources/img/logo.svg`,在 `expert_work.css` 的
+要用图片 logo:把文件放 `login/resources/img/logo.svg`,在 `expert-work.css` 的
 `#kc-header-wrapper` 用 `background-image: url(../img/logo.svg)` + 隐藏文字。
 
 ## 本地 vs 生产

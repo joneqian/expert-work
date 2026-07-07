@@ -146,13 +146,16 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
         "all",
     ),
     (
-        r"<\s*div\s+style\s*=\s*[\"\'][\s\S]*?display\s*:\s*none",
+        # Bounded: an inline ``style`` attr is short; an unbounded lazy gap
+        # would bridge a ``<div style="…"`` to a ``display:none`` anywhere
+        # later in the document (same U-22 collapsed-view hazard as below).
+        r"<\s*div\s+style\s*=\s*[\"\'][\s\S]{0,200}?display\s*:\s*none",
         "hidden_div",
         "injection",
         "all",
     ),
     (
-        r"translate\s+.*\s+into\s+.*\s+and\s+(execute|run|eval)",
+        r"\btranslate\s+[^\n]{0,120}\s+into\s+[^\n]{0,120}\s+and\s+(execute|run|eval)",
         "translate_execute",
         "injection",
         "all",
@@ -240,26 +243,33 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
     ),
     (r"\bcommand\s+and\s+control\b", "c2_explicit_long", "c2", "context"),
     # ── Exfiltration ──────────────────────────────────────────────────
+    # NOTE on gaps (applies to the whole exfil/persistence family): the
+    # whitespace-collapsed scan view (U-22) removes newlines, so an unbounded
+    # ``[^\n]*`` / ``.*`` gap silently becomes "anywhere later in the file"
+    # and pairs unrelated words thousands of chars apart (live FP:
+    # ui-ux-pro-max import). All gaps are bounded to {0,120} ≈ one long
+    # shell command, and command words carry ``\b`` so identifier tails
+    # (``ui_cat``, ``libcurl``) don't match.
     (
-        r"curl\s+[^\n]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)",
+        r"\bcurl\s+[^\n]{0,120}\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)",
         "exfil_curl",
         "exfil",
         "all",
     ),
     (
-        r"wget\s+[^\n]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)",
+        r"\bwget\s+[^\n]{0,120}\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)",
         "exfil_wget",
         "exfil",
         "all",
     ),
     (
-        r"cat\s+[^\n]*(\.env|credentials|\.netrc|\.pgpass|\.npmrc|\.pypirc)",
+        r"\bcat\s+[^\n]{0,120}(\.env\b|credentials|\.netrc|\.pgpass|\.npmrc|\.pypirc)",
         "read_secrets",
         "exfil",
         "all",
     ),
     (
-        r"(send|post|upload|transmit)\s+.*\s+(to|at)\s+https?://",
+        r"\b(send|post|upload|transmit)\s+[^\n]{0,120}\s(to|at)\s+https?://",
         "send_to_url",
         "exfil",
         "strict",
@@ -281,14 +291,14 @@ _PATTERNS: Final[list[tuple[str, str, ThreatCategory, ScanScope]]] = [
         "strict",
     ),
     (
-        r"(update|modify|edit|write|change|append|add\s+to)\s+.*"
+        r"\b(update|modify|edit|write|change|append|add\s+to)\s+[^\n]{0,120}"
         r"(?:AGENTS\.md|CLAUDE\.md|\.cursorrules|\.clinerules)",
         "agent_config_mod",
         "persistence",
         "strict",
     ),
     (
-        r"(update|modify|edit|write|change|append|add\s+to)\s+.*"
+        r"\b(update|modify|edit|write|change|append|add\s+to)\s+[^\n]{0,120}"
         r"\.expert_work/(config\.yaml|SOUL\.md|manifest\.yaml)",
         "expert_work_config_mod",
         "persistence",

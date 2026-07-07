@@ -87,7 +87,9 @@ test("system_admin sees platform credential tables + passes axe", async ({
 
   await expect(page.getByTestId("pc-providers-table")).toBeVisible();
   await expect(page.getByText("anthropic", { exact: true })).toBeVisible();
-  await expect(page.getByTestId("pc-tools-table")).toBeVisible();
+  // The per-tool credential table is gone — keyless SearXNG web_search made
+  // it dead config (see SettingsPlatformConfig).
+  await expect(page.getByTestId("pc-tools-table")).not.toBeVisible();
   await expectNoA11yViolations(page, "/settings/platform");
 });
 

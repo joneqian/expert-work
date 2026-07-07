@@ -81,11 +81,15 @@ logger = logging.getLogger("expert_work.control_plane.skill_zip")
 
 #: Per-file uncompressed size cap.
 MAX_FILE_BYTES: Final[int] = 1 * 1024 * 1024  # 1 MiB
-#: Total uncompressed size across all entries.
-MAX_TOTAL_BYTES: Final[int] = 5 * 1024 * 1024  # 5 MiB
+#: Total uncompressed size across all entries. anthropics/skills
+#: ``canvas-design`` totals ~5.6 MiB (54 bundled fonts); 8 MiB adds headroom.
+MAX_TOTAL_BYTES: Final[int] = 8 * 1024 * 1024  # 8 MiB
 #: Max number of entries (excluding pure-directory entries). Real skills bundle
-#: script trees + schema sets (anthropics/skills pptx = 59), so 64 was too tight.
-MAX_ENTRIES: Final[int] = 256
+#: script trees + schema sets (anthropics/skills pptx = 59) and data-table
+#: skills ship hundreds of small CSVs, so 64 and then 256 both proved too
+#: tight in live imports. The size caps above are the actual resource bound;
+#: this is a secondary parse-cost guard.
+MAX_ENTRIES: Final[int] = 1024
 #: Max characters in a relative path.
 MAX_PATH_LENGTH: Final[int] = 256
 #: Max subdirectory nesting under the root. anthropics/skills pptx nests 5 deep
@@ -96,7 +100,13 @@ MAX_PATH_DEPTH: Final[int] = 6
 #: ``.xsd`` / ``.xml`` / ``.csv`` / ``.tsv`` / ``.ini`` / ``.cfg`` / ``.rst``
 #: cover real skill content (OOXML schemas, data tables, config, docs). All are
 #: text, so they also join ``TEXT_EXTENSIONS`` below and get threat-scanned —
-#: no new binary attack surface.
+#: no new binary attack surface. ``.ttf`` / ``.otf`` are font assets (Anthropic's
+#: ``canvas-design`` reference skill ships 54 ``.ttf`` files) — binary like
+#: ``.png``, consumed only inside the sandbox, skipped by the text scan.
+#: ``.ps1`` covers cross-platform skills that pair every ``.sh`` with a
+#: PowerShell twin — text like ``.sh``, threat-scanned; the Linux sandbox has
+#: no pwsh so they never execute here. ``.cjs`` / ``.mjs`` are the CommonJS /
+#: ESM spellings of ``.js`` — same family, same text scan.
 ALLOWED_EXTENSIONS: Final[frozenset[str]] = frozenset(
     {
         ".md",
@@ -106,8 +116,11 @@ ALLOWED_EXTENSIONS: Final[frozenset[str]] = frozenset(
         ".json",
         ".py",
         ".js",
+        ".cjs",
+        ".mjs",
         ".ts",
         ".sh",
+        ".ps1",
         ".toml",
         ".html",
         ".css",
@@ -118,14 +131,18 @@ ALLOWED_EXTENSIONS: Final[frozenset[str]] = frozenset(
         ".ini",
         ".cfg",
         ".rst",
+        ".dot",
         ".png",
         ".jpg",
         ".svg",
+        ".ttf",
+        ".otf",
     }
 )
 
 #: Extensions treated as text for the U-21 strict scan. Binary types
-#: (.png / .jpg / .svg) are skipped — they cannot encode an LLM prompt.
+#: (.png / .jpg / .svg / .ttf / .otf) are skipped — they cannot encode an
+#: LLM prompt.
 TEXT_EXTENSIONS: Final[frozenset[str]] = frozenset(
     {
         ".md",
@@ -135,8 +152,11 @@ TEXT_EXTENSIONS: Final[frozenset[str]] = frozenset(
         ".json",
         ".py",
         ".js",
+        ".cjs",
+        ".mjs",
         ".ts",
         ".sh",
+        ".ps1",
         ".toml",
         ".html",
         ".css",
@@ -147,6 +167,7 @@ TEXT_EXTENSIONS: Final[frozenset[str]] = frozenset(
         ".ini",
         ".cfg",
         ".rst",
+        ".dot",
     }
 )
 
@@ -212,11 +233,16 @@ class SkillPackageError(SkillPackageLayoutError):
         reason: _ZipRejectReason,
         internal_message: str | None = None,
         findings: tuple[ThreatFinding, ...] = (),
+        blocked_extensions: tuple[str, ...] = (),
     ) -> None:
         super().__init__(public_message)
         self.reason: _ZipRejectReason = reason
         self.internal_message: str = internal_message or public_message
         self.findings: tuple[ThreatFinding, ...] = findings
+        #: Distinct offending extensions for ``extension_not_allowed`` — the
+        #: one internal detail that IS safe to surface (extension only, never
+        #: a path), so the admin-facing hint can name what to remove.
+        self.blocked_extensions: tuple[str, ...] = blocked_extensions
 
 
 #: Backward-compat alias: callers that used to catch ``SkillZipError``
@@ -356,6 +382,29 @@ def _open_archive(blob: bytes) -> zipfile.ZipFile:
         _reject(reason="bad_zip", internal=f"not a valid ZIP: {exc}")
 
 
+def _is_zip_junk(name: str) -> bool:
+    """macOS packaging junk: Finder's "Compress" injects a ``__MACOSX/``
+    resource tree, AppleDouble ``._*`` shadows and ``.DS_Store`` files. None
+    of it is skill content, and ``._SKILL.md`` is BINARY despite its ``.md``
+    suffix — it would otherwise trip ``binary_in_text_file``."""
+    segments = name.split("/")
+    basename = segments[-1]
+    return segments[0] == "__MACOSX" or basename == ".DS_Store" or basename.startswith("._")
+
+
+def _common_root_prefix(names: list[str]) -> str:
+    """Single shared top-level folder (``"humanizer-zh/"``) or ``""``.
+
+    Finder's "Compress" and GitHub's "Download ZIP" both wrap content in one
+    root folder, so ``SKILL.md`` lands one level deep. Stripping the wrapper
+    when EVERY file sits under the same single folder makes those zips import
+    as-is; anything root-anchored already returns ``""`` unchanged."""
+    roots = {n.split("/", 1)[0] for n in names}
+    if len(roots) == 1 and all("/" in n for n in names):
+        return next(iter(roots)) + "/"
+    return ""
+
+
 def _collect_entries(archive: zipfile.ZipFile) -> _ArchiveEntries:
     """Pull every entry's bytes + run the per-entry path/size guards.
 
@@ -363,7 +412,9 @@ def _collect_entries(archive: zipfile.ZipFile) -> _ArchiveEntries:
     from the same defense set without re-implementing.
     """
     infolist = archive.infolist()
-    file_infos = [info for info in infolist if not info.is_dir()]
+    file_infos = [
+        info for info in infolist if not info.is_dir() and not _is_zip_junk(info.filename)
+    ]
     if len(file_infos) == 0:
         _reject(reason="missing_skill_md", internal="ZIP is empty")
     if len(file_infos) > MAX_ENTRIES:
@@ -371,13 +422,16 @@ def _collect_entries(archive: zipfile.ZipFile) -> _ArchiveEntries:
             reason="too_many_entries",
             internal=f"ZIP has {len(file_infos)} entries > {MAX_ENTRIES} cap",
         )
+    wrapper = _common_root_prefix([info.filename for info in file_infos])
 
     total = 0
     data: dict[str, bytes] = {}
     for info in file_infos:
-        name = info.filename
+        name = info.filename[len(wrapper) :]
         _validate_path(name)
         _validate_not_symlink(info)
+        # (extension allowlist is checked collectively after this loop so the
+        # reject can name ALL offending types in one pass — see below)
         if info.file_size > MAX_FILE_BYTES:
             _reject(
                 reason="file_too_large",
@@ -391,6 +445,18 @@ def _collect_entries(archive: zipfile.ZipFile) -> _ArchiveEntries:
             )
         # Read once; cap CPU/RAM by the per-entry size guard above.
         data[name] = archive.read(info)
+
+    # Extension allowlist — collective (post path/size guards, which stay
+    # fail-fast and take precedence). Scanning every name before rejecting
+    # lets the error carry ALL distinct offending types, so an operator fixes
+    # a package in one round instead of one extension per retry.
+    blocked = sorted({_extension(n) for n in data} - ALLOWED_EXTENSIONS)
+    if blocked:
+        raise SkillPackageError(
+            reason="extension_not_allowed",
+            internal_message=f"disallowed extensions: {', '.join(e or '(none)' for e in blocked)}",
+            blocked_extensions=tuple(e or "(no extension)" for e in blocked),
+        )
 
     return _ArchiveEntries(names=frozenset(data.keys()), data=data)
 
@@ -432,14 +498,9 @@ def _validate_path(name: str) -> None:
                 reason="invalid_chars",
                 internal=f"segment {seg!r} in {name!r} fails ^[a-zA-Z0-9_.\\-]+$",
             )
-    # Extension allowlist — applies to every file (SKILL.md is .md so it
-    # passes naturally; the must-exist-at-root check is handled elsewhere).
-    ext = _extension(name)
-    if ext not in ALLOWED_EXTENSIONS:
-        _reject(
-            reason="extension_not_allowed",
-            internal=f"extension {ext!r} of {name!r} not in allowlist",
-        )
+    # NOTE: the extension allowlist is enforced collectively in
+    # ``_collect_entries`` (post-loop) so the reject names every offending
+    # type at once; path/size guards here stay per-entry fail-fast.
 
 
 def _validate_not_symlink(info: zipfile.ZipInfo) -> None:

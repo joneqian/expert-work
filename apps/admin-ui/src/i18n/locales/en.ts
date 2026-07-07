@@ -1233,6 +1233,10 @@ export interface TranslationKeys {
     not_admin_title: string;
     not_admin_body: string;
     failed_to_load: string;
+    tab_credentials: string;
+    tab_models: string;
+    tab_cost: string;
+    tab_quality: string;
     providers_heading: string;
     tools_heading: string;
     col_name: string;
@@ -3596,6 +3600,10 @@ const en: TranslationKeys = {
     not_admin_body:
       "Platform credentials are managed by system admins. Ask one to configure providers/tools.",
     failed_to_load: "Failed to load platform credentials.",
+    tab_credentials: "Credentials",
+    tab_models: "Model services",
+    tab_cost: "Cost",
+    tab_quality: "Quality",
     providers_heading: "Providers",
     tools_heading: "Tools",
     col_name: "Name",

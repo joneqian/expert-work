@@ -46,11 +46,18 @@ _REF_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _SKILL_RE = re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
 _DEFAULT_REF = "HEAD"  # codeload resolves HEAD → the repo's default branch
 
-# Download / extraction safety caps.
-_MAX_ARCHIVE_BYTES = 20 * 1024 * 1024  # 20 MB compressed archive
+# Download / extraction safety caps. The archive cap bounds the WHOLE repo
+# zipball (we always download the full repo, then extract one skill folder),
+# so it must fit real-world monorepos that vendor skills next to other
+# content — 20 MB proved too tight in live imports. 100 MB is a transient
+# in-memory buffer on a system_admin-only endpoint; the per-skill caps
+# (repack below + the strict zip validator) stay much tighter.
+_MAX_ARCHIVE_BYTES = 100 * 1024 * 1024  # 100 MB compressed archive
 _MAX_UNCOMPRESSED_BYTES = 80 * 1024 * 1024  # 80 MB inflated (zip-bomb guard)
 _MAX_ENTRIES = 5000
-_FETCH_TIMEOUT_S = 15.0
+# Connect/read timeout per chunk — a 100 MB zipball at modest bandwidth
+# needs headroom beyond the old 15 s.
+_FETCH_TIMEOUT_S = 60.0
 
 
 class GithubImportError(Exception):
@@ -254,9 +261,12 @@ def select_skill_zip(archive_bytes: bytes, *, skill: str | None) -> bytes:
                 )
             prefix = entries[0].prefix
         else:
+            # A repo-root skill lists as ``"."`` (see list_skill_candidates)
+            # but carries ``relpath == ""`` — accept both spellings.
+            want = "" if skill == "." else skill
             # Exact path match wins; otherwise fall back to basename.
-            exact = [e for e in entries if e.relpath == skill]
-            matches = exact or [e for e in entries if e.basename == skill]
+            exact = [e for e in entries if e.relpath == want]
+            matches = exact or [e for e in entries if e.basename == want]
             if not matches:
                 raise GithubImportError(
                     f"skill {skill!r} not found in the repository.",
@@ -275,9 +285,31 @@ def select_skill_zip(archive_bytes: bytes, *, skill: str | None) -> bytes:
         return _repack_subtree(archive, prefix)
 
 
+#: Repo housekeeping that is not skill content. Trimmed during the GitHub
+#: repack so a root-layout single-skill repo (SKILL.md next to LICENSE /
+#: .gitignore — e.g. op7418/humanizer-zh) survives the strict extension
+#: allowlist. Direct ``.skill`` zip uploads are NOT filtered — authors control
+#: those bytes, so strictness stays. ``LICENSE.txt``-style names keep their
+#: allowed extension and pass through untouched.
+_HOUSEKEEPING_BASENAMES = frozenset(
+    {
+        ".gitignore",
+        ".gitattributes",
+        ".gitmodules",
+        ".DS_Store",
+        "LICENSE",
+        "LICENCE",
+        "NOTICE",
+        "COPYING",
+    }
+)
+_HOUSEKEEPING_DIRS = frozenset({".git", ".github"})
+
+
 def _repack_subtree(archive: zipfile.ZipFile, prefix: str) -> bytes:
     """Repack everything under ``prefix`` into a fresh zip, stripping the prefix
-    so ``SKILL.md`` sits at the root. zip-slip + size/count guards applied."""
+    so ``SKILL.md`` sits at the root. zip-slip + size/count guards applied;
+    repo housekeeping files are trimmed (not skill content)."""
     out = io.BytesIO()
     total = 0
     entries = 0
@@ -288,6 +320,11 @@ def _repack_subtree(archive: zipfile.ZipFile, prefix: str) -> bytes:
             rel = info.filename[len(prefix) :]
             if not rel or rel.startswith("/") or ".." in rel.split("/"):
                 continue  # zip-slip / stray entry — skip
+            segments = rel.split("/")
+            if segments[-1] in _HOUSEKEEPING_BASENAMES or any(
+                seg in _HOUSEKEEPING_DIRS for seg in segments[:-1]
+            ):
+                continue  # repo housekeeping — not skill content
             entries += 1
             if entries > _MAX_ENTRIES:
                 raise GithubImportError("skill has too many files", status=413)

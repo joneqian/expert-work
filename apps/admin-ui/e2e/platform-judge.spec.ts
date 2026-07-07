@@ -94,7 +94,7 @@ test.beforeEach(async ({ page }) => {
 
 test("system_admin views + saves the platform judge config", async ({ page }) => {
   await login(page);
-  await page.goto("/settings/platform");
+  await page.goto("/settings/platform?tab=models");
 
   await expect(page.getByTestId("pj-root")).toBeVisible();
   // friendly help always present
@@ -119,7 +119,7 @@ test("system_admin views + saves the platform judge config", async ({ page }) =>
 
 test("settings/platform with the judge section passes axe", async ({ page }) => {
   await login(page);
-  await page.goto("/settings/platform");
+  await page.goto("/settings/platform?tab=models");
 
   await expect(page.getByTestId("pj-root")).toBeVisible();
   await expectNoA11yViolations(page, "settings-platform");

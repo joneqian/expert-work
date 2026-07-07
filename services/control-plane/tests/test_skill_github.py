@@ -144,6 +144,40 @@ def test_select_single_skill_without_selector() -> None:
     assert payload.name == "my-skill"
 
 
+def test_select_root_skill_by_dot() -> None:
+    """A repo-root skill lists as ``"."`` — selecting that spelling must work
+    (regression: the UI picker showed ``.`` but selecting it 404'd)."""
+    archive = _github_archive("repo", "main", {"SKILL.md": _skill_md("root-skill")})
+    payload = parse_skill_zip(select_skill_zip(archive, skill="."))
+    assert payload.name == "root-skill"
+
+
+def test_repack_trims_repo_housekeeping() -> None:
+    """Root-layout repos ship LICENSE / .gitignore next to SKILL.md (e.g.
+    op7418/humanizer-zh) — those are repo housekeeping, not skill content,
+    and would otherwise trip the strict extension allowlist."""
+    archive = _github_archive(
+        "repo",
+        "main",
+        {
+            "SKILL.md": _skill_md("root-skill"),
+            "README.md": "docs",
+            "LICENSE": "MIT",
+            ".gitignore": "*.pyc",
+            ".github/workflows/ci.yml": "on: push",
+        },
+    )
+    blob = select_skill_zip(archive, skill=None)
+    payload = parse_skill_zip(blob)  # passes the strict allowlist
+    assert payload.name == "root-skill"
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        names = set(z.namelist())
+    assert "README.md" in names  # real content kept
+    assert "LICENSE" not in names
+    assert ".gitignore" not in names
+    assert not any(n.startswith(".github/") for n in names)
+
+
 def test_select_multi_skill_without_selector_errors_with_candidates() -> None:
     archive = _github_archive(
         "repo",

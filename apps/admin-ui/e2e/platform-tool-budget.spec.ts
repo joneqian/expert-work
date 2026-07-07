@@ -75,7 +75,7 @@ test("system_admin views + toggles the platform tool-output budget", async ({
   page,
 }) => {
   await login(page);
-  await page.goto("/settings/platform");
+  await page.goto("/settings/platform?tab=cost");
 
   await expect(page.getByTestId("ptb-root")).toBeVisible();
   await expect(page.getByTestId("ptb-help")).toBeVisible();
@@ -98,7 +98,7 @@ test("settings/platform with the tool-budget section passes axe", async ({
   page,
 }) => {
   await login(page);
-  await page.goto("/settings/platform");
+  await page.goto("/settings/platform?tab=cost");
 
   await expect(page.getByTestId("ptb-root")).toBeVisible();
   await expectNoA11yViolations(page, "settings-platform");

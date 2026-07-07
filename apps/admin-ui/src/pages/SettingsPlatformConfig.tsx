@@ -14,6 +14,7 @@ import {
   Alert,
   App,
   Button,
+  Card,
   Drawer,
   Form,
   Input,
@@ -25,19 +26,19 @@ import {
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
 } from "antd";
 import type { TableColumnsType } from "antd";
 import { Building2, KeyRound, RefreshCw } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { PageHeader } from "../components/PageHeader";
 import {
-  deletePlatformProvider,
   deletePlatformProviderKey,
-  deletePlatformTool,
   deleteTenantProviderOverride,
   deleteTenantToolOverride,
   getPlatformCredentials,
@@ -52,7 +53,6 @@ import {
   type PlatformProviderRow,
   type PlatformSecretSource,
   type PlatformSecretUpsertBody,
-  type PlatformToolRow,
   type TenantCredentialsView,
   type TenantEffectiveSource,
   type TenantProviderEntry,
@@ -85,6 +85,15 @@ interface EditTarget {
   isNewKey?: boolean;
 }
 
+// Key-format placeholder per credential row — the old hardcoded "sk-ant-…"
+// (Anthropic's format) misled every non-Anthropic entry.
+const KEY_PLACEHOLDERS: Record<string, string> = {
+  anthropic: "sk-ant-…",
+  openai: "sk-…",
+  deepseek: "sk-…",
+  qwen: "sk-…",
+};
+
 function sourceTag(source: PlatformSecretSource, t: (k: string) => string) {
   const color =
     source === "db" ? "cyan" : source === "env" ? "default" : undefined;
@@ -96,6 +105,12 @@ export function SettingsPlatformConfig() {
   const { message } = App.useApp();
   const auth = useAuth();
   const isSystemAdmin = auth.identity?.isSystemAdmin ?? false;
+
+  // Active domain tab, kept in the URL (?tab=) so refresh / deep links land
+  // on the same tab. Inactive panes render lazily (antd default), so the
+  // section components only fetch when their tab is first opened.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") ?? "credentials";
 
   const [view, setView] = useState<PlatformCredentialsView | null>(null);
   const [loading, setLoading] = useState(false);
@@ -216,45 +231,6 @@ export function SettingsPlatformConfig() {
     [errText, message, refresh, refreshTenantView, t],
   );
 
-  const onToggle = useCallback(
-    async (
-      kind: Kind,
-      key: string,
-      secret_ref: string | null,
-      enabled: boolean,
-    ) => {
-      if (secret_ref === null) {
-        return;
-      }
-      try {
-        // Flipping enabled re-upserts the existing ref (never a raw value).
-        await doUpsert(kind, key, { secret_ref, enabled });
-        message.success(t("settings_platform.saved"));
-        refresh();
-      } catch (err) {
-        message.error(errText(err));
-      }
-    },
-    [doUpsert, errText, message, refresh, t],
-  );
-
-  const onDelete = useCallback(
-    async (kind: Kind, key: string) => {
-      try {
-        if (kind === "provider") {
-          await deletePlatformProvider(key);
-        } else {
-          await deletePlatformTool(key);
-        }
-        message.success(t("settings_platform.deleted"));
-        refresh();
-      } catch (err) {
-        message.error(errText(err));
-      }
-    },
-    [errText, message, refresh, t],
-  );
-
   // Stream Y-MK — toggle one provider key's enabled flag (re-upsert its ref).
   const onToggleKey = useCallback(
     async (provider: string, key: PlatformProviderKey, enabled: boolean) => {
@@ -335,119 +311,6 @@ export function SettingsPlatformConfig() {
     refreshTenantView,
     t,
   ]);
-
-  const makeColumns = useCallback(
-    (kind: Kind): TableColumnsType<PlatformProviderRow | PlatformToolRow> => [
-      {
-        title: t("settings_platform.col_name"),
-        key: "name",
-        render: (_v, row) => (
-          <Text strong>
-            {"provider" in row ? row.provider : (row as PlatformToolRow).tool}
-          </Text>
-        ),
-      },
-      {
-        title: t("settings_platform.col_source"),
-        dataIndex: "source",
-        key: "source",
-        width: 110,
-        render: (s: PlatformSecretSource) => sourceTag(s, t),
-      },
-      {
-        title: t("settings_platform.col_secret_ref"),
-        dataIndex: "secret_ref",
-        key: "secret_ref",
-        render: (ref: string | null) =>
-          ref ? (
-            <Tooltip title={ref}>
-              <Text code style={{ fontSize: 11 }}>
-                {ref}
-              </Text>
-            </Tooltip>
-          ) : (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {t("settings_platform.unset_ref")}
-            </Text>
-          ),
-      },
-      {
-        title: t("settings_platform.col_enabled"),
-        dataIndex: "enabled",
-        key: "enabled",
-        width: 100,
-        render: (enabled: boolean, row) => {
-          const key =
-            "provider" in row ? row.provider : (row as PlatformToolRow).tool;
-          return (
-            <Switch
-              size="small"
-              checked={enabled}
-              disabled={row.secret_ref === null}
-              onChange={(checked) =>
-                onToggle(kind, key, row.secret_ref, checked)
-              }
-              aria-label={`${key} ${t("settings_platform.col_enabled")}`}
-              data-testid={`pc-toggle-${key}`}
-            />
-          );
-        },
-      },
-      {
-        title: t("settings_platform.col_used_by"),
-        dataIndex: "used_by_agents",
-        key: "used_by_agents",
-        width: 110,
-        render: (n: number) => <Text>{n}</Text>,
-      },
-      {
-        title: t("settings_platform.col_tenant_overrides"),
-        dataIndex: "tenant_override_count",
-        key: "tenant_override_count",
-        width: 130,
-        render: (n: number | undefined) =>
-          n ? <Tag color="purple">{n}</Tag> : <Text type="secondary">0</Text>,
-      },
-      {
-        title: t("settings_platform.col_actions"),
-        key: "actions",
-        width: 180,
-        render: (_v, row) => {
-          const key =
-            "provider" in row ? row.provider : (row as PlatformToolRow).tool;
-          return (
-            <Space size={6}>
-              <Button
-                size="small"
-                onClick={() =>
-                  setEdit({ kind, key, secret_ref: row.secret_ref ?? "" })
-                }
-                data-testid={`pc-edit-${key}`}
-              >
-                {t("settings_platform.edit_btn")}
-              </Button>
-              {row.source === "db" && (
-                <Popconfirm
-                  title={t("settings_platform.delete_confirm")}
-                  okType="danger"
-                  okText={t("common.delete")}
-                  cancelText={t("common.cancel")}
-                  onConfirm={() => onDelete(kind, key)}
-                >
-                  <Button size="small" danger data-testid={`pc-delete-${key}`}>
-                    {t("common.delete")}
-                  </Button>
-                </Popconfirm>
-              )}
-            </Space>
-          );
-        },
-      },
-    ],
-    [t, onToggle, onDelete],
-  );
-
-  const toolColumns = useMemo(() => makeColumns("tool"), [makeColumns]);
 
   // Stream Y-MK — nested per-key table shown when a provider row is expanded.
   const keyColumns = useCallback(
@@ -736,10 +599,6 @@ export function SettingsPlatformConfig() {
     () => makeOverrideColumns("provider"),
     [makeOverrideColumns],
   );
-  const overrideToolColumns = useMemo(
-    () => makeOverrideColumns("tool"),
-    [makeOverrideColumns],
-  );
 
   useEffect(() => {
     if (edit !== null) {
@@ -803,68 +662,104 @@ export function SettingsPlatformConfig() {
               data-testid="pc-error"
             />
           )}
-          <h2 style={{ fontSize: 15, margin: "8px 0" }}>
-            {t("settings_platform.providers_heading")}
-          </h2>
-          <Table<PlatformProviderRow>
-            columns={providerColumns}
-            dataSource={view?.providers ?? []}
-            rowKey={(r) => r.provider}
-            loading={loading}
-            pagination={false}
-            size="small"
-            expandable={{
-              rowExpandable: (r) => r.keys.length > 0,
-              expandedRowRender: (r) => (
-                <Table<PlatformProviderKey>
-                  columns={keyColumns(r.provider)}
-                  dataSource={r.keys}
-                  rowKey={(k) => k.key_id}
-                  pagination={false}
-                  size="small"
-                  data-testid={`pc-keys-table-${r.provider}`}
-                />
-              ),
-            }}
-            data-testid="pc-providers-table"
+          <Tabs
+            activeKey={activeTab}
+            onChange={(k) => setSearchParams({ tab: k }, { replace: true })}
+            items={[
+              {
+                key: "credentials",
+                label: t("settings_platform.tab_credentials"),
+                children: (
+                  <Space direction="vertical" size={16} style={{ display: "flex" }}>
+                    <Card
+                      size="small"
+                      title={t("settings_platform.providers_heading")}
+                    >
+                      <Table<PlatformProviderRow>
+                        columns={providerColumns}
+                        dataSource={view?.providers ?? []}
+                        rowKey={(r) => r.provider}
+                        loading={loading}
+                        pagination={false}
+                        size="small"
+                        expandable={{
+                          rowExpandable: (r) => r.keys.length > 0,
+                          expandedRowRender: (r) => (
+                            <Table<PlatformProviderKey>
+                              columns={keyColumns(r.provider)}
+                              dataSource={r.keys}
+                              rowKey={(k) => k.key_id}
+                              pagination={false}
+                              size="small"
+                              data-testid={`pc-keys-table-${r.provider}`}
+                            />
+                          ),
+                        }}
+                        data-testid="pc-providers-table"
+                      />
+                    </Card>
+                    {/* NOTE: the per-tool credential table was removed from the
+                        UI — the only catalog tool (web_search) runs on keyless
+                        SearXNG and nothing consumes tool keys at runtime. The
+                        backend slot stays; re-add a Card here if a keyed tool
+                        ever lands. */}
+                  </Space>
+                ),
+              },
+              {
+                key: "models",
+                label: t("settings_platform.tab_models"),
+                children: (
+                  <Space direction="vertical" size={16} style={{ display: "flex" }}>
+                    <Card
+                      size="small"
+                      title={t("settings_platform.embedding_heading")}
+                    >
+                      <PlatformEmbeddingSection />
+                    </Card>
+                    <Card
+                      size="small"
+                      title={t("settings_platform.judge_heading")}
+                    >
+                      <PlatformJudgeSection />
+                    </Card>
+                  </Space>
+                ),
+              },
+              {
+                key: "cost",
+                label: t("settings_platform.tab_cost"),
+                children: (
+                  <Space direction="vertical" size={16} style={{ display: "flex" }}>
+                    <Card
+                      size="small"
+                      title={t("settings_platform.billing_heading")}
+                    >
+                      <PlatformBillingSection />
+                    </Card>
+                    <Card
+                      size="small"
+                      title={t("settings_platform.tool_budget_heading")}
+                    >
+                      <PlatformToolBudgetSection />
+                    </Card>
+                  </Space>
+                ),
+              },
+              {
+                key: "quality",
+                label: t("settings_platform.tab_quality"),
+                children: (
+                  <Card
+                    size="small"
+                    title={t("settings_platform.quality_heading")}
+                  >
+                    <PlatformQualitySection />
+                  </Card>
+                ),
+              },
+            ]}
           />
-          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
-            {t("settings_platform.tools_heading")}
-          </h2>
-          <Table<PlatformToolRow>
-            columns={toolColumns as TableColumnsType<PlatformToolRow>}
-            dataSource={view?.tools ?? []}
-            rowKey={(r) => r.tool}
-            loading={loading}
-            pagination={false}
-            size="small"
-            data-testid="pc-tools-table"
-          />
-
-          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
-            {t("settings_platform.embedding_heading")}
-          </h2>
-          <PlatformEmbeddingSection />
-
-          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
-            {t("settings_platform.judge_heading")}
-          </h2>
-          <PlatformJudgeSection />
-
-          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
-            {t("settings_platform.billing_heading")}
-          </h2>
-          <PlatformBillingSection />
-
-          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
-            {t("settings_platform.tool_budget_heading")}
-          </h2>
-          <PlatformToolBudgetSection />
-
-          <h2 style={{ fontSize: 15, margin: "20px 0 8px" }}>
-            {t("settings_platform.quality_heading")}
-          </h2>
-          <PlatformQualitySection />
         </>
       )}
 
@@ -912,18 +807,8 @@ export function SettingsPlatformConfig() {
               size="small"
               data-testid="pc-tenant-providers-table"
             />
-            <h3 style={{ fontSize: 14, margin: "16px 0 8px" }}>
-              {t("settings_platform.tools_heading")}
-            </h3>
-            <Table<TenantToolEntry>
-              columns={overrideToolColumns as TableColumnsType<TenantToolEntry>}
-              dataSource={tenantView?.tools ?? []}
-              rowKey={(r) => r.tool}
-              loading={tenantLoading}
-              pagination={false}
-              size="small"
-              data-testid="pc-tenant-tools-table"
-            />
+            {/* Tool overrides hidden with the platform tool table (see the
+                credentials tab note) — the backend override API remains. */}
           </>
         )}
       </Drawer>
@@ -980,7 +865,7 @@ export function SettingsPlatformConfig() {
               ]}
             >
               <Input.Password
-                placeholder="sk-ant-…"
+                placeholder={KEY_PLACEHOLDERS[edit?.key ?? ""] ?? "API key"}
                 autoComplete="off"
                 data-testid="pc-edit-value"
               />

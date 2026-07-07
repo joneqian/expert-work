@@ -1,13 +1,16 @@
 """Classify an imported skill's runtime needs (skill-runtime §5.2).
 
 A non-blocking signal attached to the platform import response so an operator
-learns *at import time* whether a skill can actually run in expert_work's sandbox
-(Python-only, ``network=none``) — instead of discovering it fails at runtime.
+learns *at import time* how a skill will run in expert_work's sandbox — instead
+of discovering it fails at runtime.
 
-expert_work runs **knowledge** + **Python compute** skills; **Node / browser /
-network** skills belong to an MCP server (skill-runtime §4). This is advisory
-only: the skill still imports (its instructions are readable even if bundled
-scripts won't run), the UI just sets expectations.
+The sandbox image bakes Python AND Node.js + npm (see
+``infra/sandbox-image/Dockerfile``; the smoke test asserts ``node -e`` runs),
+and runtime installs (pip / npm) flow through the audited per-agent egress
+proxy (sandbox-egress §3.5). So **knowledge**, **Python** and **Node** skills
+all run here; only **browser** skills don't (no browser binary in the image —
+they belong to a browser MCP server, skill-runtime §4). This is advisory only:
+the skill imports either way, the UI just sets expectations.
 """
 
 from __future__ import annotations
@@ -55,22 +58,22 @@ def classify_skill_runtime(payload: SkillZipPayload) -> SkillRuntime:
             kind="browser",
             runnable=False,
             hint=(
-                "This skill drives a browser — expert_work sandboxes are Python-only with "
-                "no network. Use a browser MCP server instead of importing it as a skill."
+                "This skill drives a browser — the expert_work sandbox has no browser "
+                "binary. Use a browser MCP server instead of importing it as a skill."
             ),
         )
 
     has_py = ".py" in exts
     has_node_files = any(n in _NODE_MANIFESTS for n in names) or bool(exts & _NODE_EXTS)
     node_hint = (
-        "This skill needs a Node.js runtime, which the expert_work sandbox doesn't "
-        "provide (Python-only, no runtime install). Its instructions are still "
-        "usable, but bundled Node scripts won't run."
+        "Node.js skill — the sandbox bakes Node.js + npm, so bundled scripts run "
+        "via the bash tool. Package installs (npm/npx) go through the audited "
+        "egress proxy and may be limited by its policy."
     )
 
     # A real Node project (package.json / .js / .ts) with no Python fallback.
     if has_node_files and not has_py:
-        return SkillRuntime(kind="node", runnable=False, hint=node_hint)
+        return SkillRuntime(kind="node", runnable=True, hint=node_hint)
 
     # Python wins over a *mention* of Node: skills like Anthropic's ``pptx``
     # bundle ``.py`` scripts AND describe an optional PptxGenJS/``npx`` path in
@@ -85,9 +88,10 @@ def classify_skill_runtime(payload: SkillZipPayload) -> SkillRuntime:
         )
 
     # Node only in prose (``npx``/``npm``) with no Python scripts — e.g. the
-    # ``npx skills`` installer skills, which have no expert_work substrate.
+    # ``npx skills`` installer skills. Node itself is baked; whether the
+    # registry fetch succeeds depends on the egress policy (same as pip).
     if _NODE_BODY_RE.search(body) is not None:
-        return SkillRuntime(kind="node", runnable=False, hint=node_hint)
+        return SkillRuntime(kind="node", runnable=True, hint=node_hint)
 
     if not payload.supporting_files:
         return SkillRuntime(

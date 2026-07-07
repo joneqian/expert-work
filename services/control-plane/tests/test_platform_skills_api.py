@@ -586,19 +586,19 @@ async def test_platform_import_external_format_skill_succeeds(ctx: _Ctx) -> None
 
 
 @pytest.mark.asyncio
-async def test_platform_import_flags_node_skill_not_runnable(ctx: _Ctx) -> None:
-    """skill-runtime §5.2 — a Node skill imports (non-blocking) but the response
-    flags ``runnable=false`` so the UI can steer the operator to MCP."""
+async def test_platform_import_flags_node_skill_runnable(ctx: _Ctx) -> None:
+    """skill-runtime §5.2 — a Node skill imports and is flagged runnable: the
+    sandbox image bakes Node.js + npm, so bundled scripts run via the bash tool."""
     blob = _new_format_zip(extra={"index.js": b"console.log('hi')"})
     resp = await ctx.client.post(
         "/v1/platform/skills/import",
         files={"file": ("foo.skill", blob, "application/zip")},
         headers=ctx.admin_headers,
     )
-    assert resp.status_code == 201, resp.text  # still imports — advisory only
+    assert resp.status_code == 201, resp.text
     runtime = resp.json()["runtime"]
     assert runtime["kind"] == "node"
-    assert runtime["runnable"] is False
+    assert runtime["runnable"] is True
     assert runtime["hint"]
 
 
@@ -616,6 +616,25 @@ async def test_platform_import_disallowed_extension_surfaces_reason(ctx: _Ctx) -
     detail = resp.json()["detail"]
     assert detail["code"] == "SKILL_PACKAGE_INVALID"
     assert detail["reason"] == "extension_not_allowed"
+    # The message names the offending type so the operator can act on it.
+    assert ".bin" in detail["message"]
+
+
+@pytest.mark.asyncio
+async def test_platform_import_lists_all_blocked_extensions(ctx: _Ctx) -> None:
+    """The extension reject is collective: every distinct offending type is
+    named in one response, not one per retry."""
+    blob = _new_format_zip(extra={"data.bin": b"\x00", "tool.exe": b"\x00", "more.bin": b"\x00"})
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import",
+        files={"file": ("foo.skill", blob, "application/zip")},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert detail["reason"] == "extension_not_allowed"
+    assert ".bin" in detail["message"]
+    assert ".exe" in detail["message"]
 
 
 # ---------------------------------------------------------------------------

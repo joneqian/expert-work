@@ -5,6 +5,7 @@ import { App } from "antd";
 import "../../../i18n";
 import * as sdk from "../../../api/platform_quality_config";
 import type { PlatformQualityConfigView, QualityConfig } from "../../../api/platform_quality_config";
+import * as judgeSdk from "../../../api/platform_judge_config";
 import { ApiError } from "../../../api/client";
 import { PlatformQualitySection } from "../PlatformQualitySection";
 
@@ -36,7 +37,17 @@ function renderSection() {
   );
 }
 
-beforeEach(() => vi.spyOn(sdk, "getPlatformQualityConfig").mockResolvedValue(view()));
+beforeEach(() => {
+  vi.spyOn(sdk, "getPlatformQualityConfig").mockResolvedValue(view());
+  vi.spyOn(judgeSdk, "getPlatformJudgeConfig").mockResolvedValue({
+    judge: null,
+    available: [
+      { provider: "anthropic", model: "claude-haiku-4-5-20251001" },
+      { provider: "anthropic", model: "claude-sonnet-4-6" },
+      { provider: "openai", model: "gpt-4o-mini" },
+    ],
+  });
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("PlatformQualitySection", () => {
@@ -66,6 +77,49 @@ describe("PlatformQualitySection", () => {
     await user.click(screen.getByTestId("pq-save"));
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     expect(put).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, judge_provider: "anthropic" }));
+  });
+
+  it("offers judge provider/model as dropdowns and resets model on provider change", async () => {
+    const user = userEvent.setup();
+    renderSection();
+    await screen.findByTestId("pq-root");
+
+    // Provider options come from the judge-config ``available`` list.
+    await user.click(
+      screen.getByTestId("pq-judge-provider").querySelector(".ant-select-selector")!,
+    );
+    await user.click(await screen.findByTitle("openai"));
+
+    // Switching provider clears the previously loaded model…
+    expect(
+      screen.getByTestId("pq-judge-model").textContent,
+    ).not.toContain("claude-haiku-4-5-20251001");
+
+    // …and the model dropdown now lists only that provider's models.
+    await user.click(
+      screen.getByTestId("pq-judge-model").querySelector(".ant-select-selector")!,
+    );
+    expect(await screen.findByTitle("gpt-4o-mini")).toBeInTheDocument();
+    expect(screen.queryByTitle("claude-sonnet-4-6")).not.toBeInTheDocument();
+  });
+
+  it("flags a prefilled judge whose provider has no platform key and blocks save", async () => {
+    vi.spyOn(judgeSdk, "getPlatformJudgeConfig").mockResolvedValue({
+      judge: null,
+      available: [{ provider: "qwen", model: "qwen3.6-plus" }],
+    });
+    const put = vi.spyOn(sdk, "putPlatformQualityConfig").mockResolvedValue({ config: CONFIG });
+    const user = userEvent.setup();
+    renderSection();
+    await screen.findByTestId("pq-root");
+    // Prefilled anthropic has no key → the field errors without user input…
+    expect(
+      await screen.findByText(/platform credentials|平台凭据/i),
+    ).toBeInTheDocument();
+    // …and client-side validation blocks the PUT.
+    await user.click(screen.getByTestId("pq-save"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(put).not.toHaveBeenCalled();
   });
 
   it("surfaces a 422 error code as a message", async () => {

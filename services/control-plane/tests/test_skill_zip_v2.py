@@ -217,6 +217,35 @@ def test_legacy_format_rejects_extra_entry() -> None:
 # ─── Structural rejects ─────────────────────────────────────────────────
 
 
+def test_single_root_wrapper_folder_is_stripped() -> None:
+    """Finder "Compress" / GitHub "Download ZIP" wrap everything in one root
+    folder — SKILL.md one level deep must still import (live report:
+    humanizer-zh.zip)."""
+    skill_md = _build_skill_md(name="wrapped", body="hello")
+    files = {
+        "humanizer-zh/SKILL.md": skill_md.encode("utf-8"),
+        "humanizer-zh/reference/notes.md": b"# notes",
+    }
+    payload = parse_skill_zip(_zip_with(files))
+    assert payload.name == "wrapped"
+    assert "reference/notes.md" in payload.supporting_files
+
+
+def test_macos_zip_junk_is_ignored() -> None:
+    """``__MACOSX/`` trees, AppleDouble ``._*`` shadows and ``.DS_Store`` are
+    packaging junk — ``._SKILL.md`` is binary despite its .md suffix and must
+    not trip the binary-in-text scan (nor break wrapper detection)."""
+    skill_md = _build_skill_md(name="maczip", body="hello")
+    files = {
+        "humanizer-zh/SKILL.md": skill_md.encode("utf-8"),
+        "humanizer-zh/.DS_Store": b"\x00\x01",
+        "__MACOSX/humanizer-zh/._SKILL.md": b"\x00\x05\x16\x07",
+    }
+    payload = parse_skill_zip(_zip_with(files))
+    assert payload.name == "maczip"
+    assert payload.supporting_files == {}
+
+
 def test_missing_skill_md_rejects() -> None:
     """No SKILL.md and not a legacy 3-file layout → reject."""
     files = {"reference/codes.md": b"not enough"}
