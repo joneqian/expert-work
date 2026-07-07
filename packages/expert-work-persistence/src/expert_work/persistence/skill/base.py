@@ -619,14 +619,19 @@ class SkillStore(abc.ABC):
         filter_q: str | None = None,
         set_status: SkillStatus | None = None,
         set_pinned: bool | None = None,
+        update_category: bool = False,
+        new_category: str | None = None,
     ) -> int:
         """Atomically patch many platform skills; returns the affected count.
 
         Exactly one selector: ``ids`` (an explicit list) OR the
         ``filter_*`` predicate (every NULL-tenant skill matching it — the
-        "select all N matching" path). At least one of ``set_status`` /
-        ``set_pinned`` must be given. ``state_changed_at`` is bumped only when
-        ``set_status`` is provided. Caller MUST be inside ``bypass_rls_session()``.
+        "select all N matching" path). At least one action of ``set_status`` /
+        ``set_pinned`` / ``update_category`` must be given. ``state_changed_at``
+        is bumped only when ``set_status`` is provided. When ``update_category``
+        is True the category column is written to ``new_category`` (``None``
+        clears it); only the parent ``skill`` row is touched, never
+        ``skill_version``. Caller MUST be inside ``bypass_rls_session()``.
         """
 
     @abc.abstractmethod

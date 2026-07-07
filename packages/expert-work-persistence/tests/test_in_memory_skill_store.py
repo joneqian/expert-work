@@ -540,3 +540,46 @@ async def test_bulk_update_requires_selector_and_patch() -> None:
         await store.bulk_update_platform_skills(set_pinned=True)  # no selector
     with pytest.raises(ValueError):
         await store.bulk_update_platform_skills(ids=[uuid4()])  # no patch
+
+
+@pytest.mark.asyncio
+async def test_bulk_set_category_by_ids() -> None:
+    store = InMemorySkillStore()
+    a = await _seed_platform(store, "a")
+    b = await _seed_platform(store, "b")
+    c = await _seed_platform(store, "c", category="old")
+    n = await store.bulk_update_platform_skills(
+        ids=[a, b], update_category=True, new_category="研发"
+    )
+    assert n == 2
+    rows, _ = await store.list_platform_skills()
+    by_id = {s.id: s.category for s in rows}
+    assert by_id[a] == "研发" and by_id[b] == "研发"
+    assert by_id[c] == "old"  # untouched
+
+
+@pytest.mark.asyncio
+async def test_bulk_clear_category_writes_none() -> None:
+    store = InMemorySkillStore()
+    a = await _seed_platform(store, "a", category="研发")
+    n = await store.bulk_update_platform_skills(ids=[a], update_category=True, new_category=None)
+    assert n == 1
+    rows, _ = await store.list_platform_skills()
+    assert rows[0].category is None
+
+
+@pytest.mark.asyncio
+async def test_bulk_category_only_needs_no_status_or_pinned() -> None:
+    # update_category alone satisfies the "at least one action" guard.
+    store = InMemorySkillStore()
+    a = await _seed_platform(store, "a")
+    n = await store.bulk_update_platform_skills(ids=[a], update_category=True, new_category="设计")
+    assert n == 1
+
+
+@pytest.mark.asyncio
+async def test_bulk_no_action_raises() -> None:
+    store = InMemorySkillStore()
+    a = await _seed_platform(store, "a")
+    with pytest.raises(ValueError):
+        await store.bulk_update_platform_skills(ids=[a])  # no set_* and update_category=False
