@@ -620,6 +620,70 @@ async def test_platform_import_disallowed_extension_surfaces_reason(ctx: _Ctx) -
     assert ".bin" in detail["message"]
 
 
+class _FakeAssetStore:
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    async def put(self, key: str, data: bytes, *, content_type: str | None = None) -> None:
+        self.objects[key] = data
+
+    async def get(self, key: str) -> bytes:
+        return self.objects[key]
+
+
+@pytest.mark.asyncio
+async def test_platform_import_externalizes_supporting_files(ctx: _Ctx) -> None:
+    """skill-asset-store: with a durable store wired, supporting-file bytes
+    land in the object store and the row carries only the manifest; the
+    idempotency probe still recognizes a re-import (hash over the persist
+    shape)."""
+    fake_store = _FakeAssetStore()
+    ctx.client._transport.app.state.skill_asset_store = fake_store  # type: ignore[attr-defined]
+    blob = _new_format_zip(extra={"reference/notes.md": b"# helpful notes"})
+
+    resp = await ctx.client.post(
+        "/v1/platform/skills/import",
+        files={"file": ("foo.skill", blob, "application/zip")},
+        headers=ctx.admin_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    assert fake_store.objects, "bytes must land in the object store"
+
+    assert b"# helpful notes" in fake_store.objects.values()
+
+    # The stored row carries the manifest (external shape), not the bytes.
+    body = resp.json()
+    skill_id = UUID(body["skill"]["id"])
+    version_no = body["version"]["version"]
+    async with bypass_rls_session():
+        row = await ctx.skill_store.get_platform_version_by_number(
+            skill_id=skill_id, version=version_no
+        )
+    assert row is not None
+    entry = row.supporting_files["reference/notes.md"]
+    assert entry.is_external
+    assert entry.content == ""
+    assert entry.storage_key in fake_store.objects
+
+    # The single-file GET endpoint dual-reads: external bytes come back as
+    # base64 exactly like an inline row would.
+    got = await ctx.client.get(
+        f"/v1/platform/skills/{skill_id}/versions/{version_no}/supporting-files/reference/notes.md",
+        headers=ctx.admin_headers,
+    )
+    assert got.status_code == 200, got.text
+    assert base64.b64decode(got.json()["content"]) == b"# helpful notes"
+
+    # Idempotent re-import: same content → 200 + created=false, no new version.
+    again = await ctx.client.post(
+        "/v1/platform/skills/import",
+        files={"file": ("foo.skill", blob, "application/zip")},
+        headers=ctx.admin_headers,
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["created"] is False
+
+
 @pytest.mark.asyncio
 async def test_platform_import_lists_all_blocked_extensions(ctx: _Ctx) -> None:
     """The extension reject is collective: every distinct offending type is

@@ -206,7 +206,9 @@ async def test_add_version_rejects_oversize_prompt_fragment(setup: Setup) -> Non
     client, _ = setup
     skill_resp = await client.post("/v1/skills", json={"name": "foo"})
     skill_id = skill_resp.json()["id"]
-    huge = "x" * (64 * 1024 + 1)
+    # One byte over MAX_PROMPT_FRAGMENT_BYTES (256 KiB — raised from 64 KiB
+    # for curated playbook skills; see _skill_moderation).
+    huge = "x" * (256 * 1024 + 1)
     response = await client.post(
         f"/v1/skills/{skill_id}/versions",
         json={"prompt_fragment": huge},

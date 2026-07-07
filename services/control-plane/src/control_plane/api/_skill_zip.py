@@ -79,17 +79,27 @@ logger = logging.getLogger("expert_work.control_plane.skill_zip")
 # values give real skills headroom while the per-file / total-size caps remain
 # the actual resource bound.
 
+#: Two cap tiers (skill-asset-store). The INLINE tier bounds what may live
+#: base64-encoded inside the ``skill_version.supporting_files`` JSONB row
+#: (DB check constraint = 12 MiB of text ≈ 8 MiB raw). The ASSET tier
+#: applies when supporting-file bytes are externalized to the object store —
+#: the row only carries a manifest, so the caps become policy numbers sized
+#: for real asset-library skills (live driver: hugohe3/ppt-master — 12k
+#: files / ~61 MB, mostly icon SVGs + Office templates).
 #: Per-file uncompressed size cap.
-MAX_FILE_BYTES: Final[int] = 1 * 1024 * 1024  # 1 MiB
+MAX_FILE_BYTES: Final[int] = 1 * 1024 * 1024  # 1 MiB (inline tier)
+MAX_FILE_BYTES_ASSET: Final[int] = 8 * 1024 * 1024  # 8 MiB
 #: Total uncompressed size across all entries. anthropics/skills
 #: ``canvas-design`` totals ~5.6 MiB (54 bundled fonts); 8 MiB adds headroom.
-MAX_TOTAL_BYTES: Final[int] = 8 * 1024 * 1024  # 8 MiB
+MAX_TOTAL_BYTES: Final[int] = 8 * 1024 * 1024  # 8 MiB (inline tier)
+MAX_TOTAL_BYTES_ASSET: Final[int] = 64 * 1024 * 1024  # 64 MiB
 #: Max number of entries (excluding pure-directory entries). Real skills bundle
 #: script trees + schema sets (anthropics/skills pptx = 59) and data-table
 #: skills ship hundreds of small CSVs, so 64 and then 256 both proved too
 #: tight in live imports. The size caps above are the actual resource bound;
 #: this is a secondary parse-cost guard.
-MAX_ENTRIES: Final[int] = 1024
+MAX_ENTRIES: Final[int] = 1024  # inline tier
+MAX_ENTRIES_ASSET: Final[int] = 16384
 #: Max characters in a relative path.
 MAX_PATH_LENGTH: Final[int] = 256
 #: Max subdirectory nesting under the root. anthropics/skills pptx nests 5 deep
@@ -107,6 +117,9 @@ MAX_PATH_DEPTH: Final[int] = 6
 #: PowerShell twin — text like ``.sh``, threat-scanned; the Linux sandbox has
 #: no pwsh so they never execute here. ``.cjs`` / ``.mjs`` are the CommonJS /
 #: ESM spellings of ``.js`` — same family, same text scan.
+#: ``.pptx`` / ``.docx`` / ``.xlsx`` are Office template assets (ppt-master
+#: bundles deck/brand templates) — binary like fonts: sandbox-consumed,
+#: skipped by the text scan, bounded by the size caps.
 ALLOWED_EXTENSIONS: Final[frozenset[str]] = frozenset(
     {
         ".md",
@@ -132,11 +145,15 @@ ALLOWED_EXTENSIONS: Final[frozenset[str]] = frozenset(
         ".cfg",
         ".rst",
         ".dot",
+        ".example",
         ".png",
         ".jpg",
         ".svg",
         ".ttf",
         ".otf",
+        ".pptx",
+        ".docx",
+        ".xlsx",
     }
 )
 
@@ -168,11 +185,19 @@ TEXT_EXTENSIONS: Final[frozenset[str]] = frozenset(
         ".cfg",
         ".rst",
         ".dot",
+        ".example",
     }
 )
 
-#: Per-segment filename regex (Mini-ADR U-18 table row "字符").
-_SEGMENT_RE: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9_.\-]+$")
+#: Per-segment filename regex (Mini-ADR U-18 table row "字符"). ``\w`` is
+#: Unicode-aware: CJK filenames are legitimate skill content on a
+#: Chinese-market platform (live driver: ppt-master's 品牌 template dirs).
+#: Spaces and full-width parentheses are allowed inside a segment; the
+#: traversal / control-character / separator defenses live in the explicit
+#: checks around this regex, not in the charset.
+_SEGMENT_RE: Final[re.Pattern[str]] = re.compile(
+    "^[\\w.\\- ()（）]+$"  # noqa: RUF001 — full-width parens are intentional (CJK names)
+)
 
 #: Symlink mode bits in ZIP ``external_attr`` (upper 16 bits = POSIX mode).
 _SYMLINK_MODE: Final[int] = 0o120000
@@ -281,7 +306,7 @@ class SkillZipPayload:
 # ─── Public API ──────────────────────────────────────────────────────────
 
 
-def parse_skill_zip(blob: bytes) -> SkillZipPayload:
+def parse_skill_zip(blob: bytes, *, asset_tier: bool = False) -> SkillZipPayload:
     """Validate + parse a ``.skill`` ZIP into a :class:`SkillZipPayload`.
 
     Raises :class:`SkillPackageLayoutError` on any structural / safety /
@@ -289,12 +314,16 @@ def parse_skill_zip(blob: bytes) -> SkillZipPayload:
     the caller (Oracle defense, Mini-ADR U-18 / U-21) — it should catch
     :class:`SkillPackageLayoutError`, log the full ``SkillPackageError``
     detail to audit (if available), and return a fixed 400.
+
+    ``asset_tier=True`` (a durable object store is configured — the caller
+    will externalize supporting-file bytes) applies the ASSET cap tier;
+    the default keeps the tighter inline caps that the JSONB row bounds.
     """
     # Pre-flight: opening the ZIP itself can fail (truncated upload,
     # not-a-zip bytes). Both paths bubble the same generic reject.
     archive = _open_archive(blob)
     try:
-        entries = _collect_entries(archive)
+        entries = _collect_entries(archive, asset_tier=asset_tier)
 
         # Layout detection (Mini-ADR U-19).
         if _NEW_SKILL_MD in entries.names:
@@ -405,7 +434,27 @@ def _common_root_prefix(names: list[str]) -> str:
     return ""
 
 
-def _collect_entries(archive: zipfile.ZipFile) -> _ArchiveEntries:
+_ZIP_UTF8_FLAG = 0x800
+
+
+def _fix_zip_name(info: zipfile.ZipInfo) -> str:
+    """Undo cp437 mojibake in entry names.
+
+    Zips written without the UTF-8 flag (bit 11) get their names decoded as
+    cp437 by ``zipfile`` even when the bytes are UTF-8 (macOS ``zip`` with
+    CJK names — live driver: ppt-master's 品牌 template dirs). If the name
+    round-trips cp437 → UTF-8, take the repaired spelling; otherwise it
+    really was cp437, keep it.
+    """
+    if info.flag_bits & _ZIP_UTF8_FLAG:
+        return info.filename
+    try:
+        return info.filename.encode("cp437").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return info.filename
+
+
+def _collect_entries(archive: zipfile.ZipFile, *, asset_tier: bool = False) -> _ArchiveEntries:
     """Pull every entry's bytes + run the per-entry path/size guards.
 
     Centralised so the new-format and legacy-format parsers both benefit
@@ -413,35 +462,38 @@ def _collect_entries(archive: zipfile.ZipFile) -> _ArchiveEntries:
     """
     infolist = archive.infolist()
     file_infos = [
-        info for info in infolist if not info.is_dir() and not _is_zip_junk(info.filename)
+        info for info in infolist if not info.is_dir() and not _is_zip_junk(_fix_zip_name(info))
     ]
     if len(file_infos) == 0:
         _reject(reason="missing_skill_md", internal="ZIP is empty")
-    if len(file_infos) > MAX_ENTRIES:
+    max_entries = MAX_ENTRIES_ASSET if asset_tier else MAX_ENTRIES
+    max_file_bytes = MAX_FILE_BYTES_ASSET if asset_tier else MAX_FILE_BYTES
+    max_total_bytes = MAX_TOTAL_BYTES_ASSET if asset_tier else MAX_TOTAL_BYTES
+    if len(file_infos) > max_entries:
         _reject(
             reason="too_many_entries",
-            internal=f"ZIP has {len(file_infos)} entries > {MAX_ENTRIES} cap",
+            internal=f"ZIP has {len(file_infos)} entries > {max_entries} cap",
         )
-    wrapper = _common_root_prefix([info.filename for info in file_infos])
+    wrapper = _common_root_prefix([_fix_zip_name(info) for info in file_infos])
 
     total = 0
     data: dict[str, bytes] = {}
     for info in file_infos:
-        name = info.filename[len(wrapper) :]
+        name = _fix_zip_name(info)[len(wrapper) :]
         _validate_path(name)
         _validate_not_symlink(info)
         # (extension allowlist is checked collectively after this loop so the
         # reject can name ALL offending types in one pass — see below)
-        if info.file_size > MAX_FILE_BYTES:
+        if info.file_size > max_file_bytes:
             _reject(
                 reason="file_too_large",
-                internal=f"entry {name!r} size {info.file_size} > {MAX_FILE_BYTES}",
+                internal=f"entry {name!r} size {info.file_size} > {max_file_bytes}",
             )
         total += info.file_size
-        if total > MAX_TOTAL_BYTES:
+        if total > max_total_bytes:
             _reject(
                 reason="total_too_large",
-                internal=f"total uncompressed > {MAX_TOTAL_BYTES} byte cap",
+                internal=f"total uncompressed > {max_total_bytes} byte cap",
             )
         # Read once; cap CPU/RAM by the per-entry size guard above.
         data[name] = archive.read(info)

@@ -227,18 +227,39 @@ class SkillSupportingFile(BaseModel):
     """One entry in :attr:`SkillVersion.supporting_files`.
 
     Stored in Postgres as a JSONB object under the file's relative path.
-    ``content`` is base64-encoded raw bytes so the JSONB blob is text-safe
-    even for binary file types (PNG / SVG); the size cap (1 MB per file,
-    5 MB per skill total) is enforced at the API layer.
+    Two storage shapes coexist (skill-asset-store):
+
+    * **inline** (legacy + small-package fallback): ``content`` carries the
+      base64-encoded raw bytes; ``storage_key`` is ``None``.
+    * **external**: bytes live in the object store under ``storage_key``
+      (``skill-assets/…``); ``content`` is empty and ``sha256`` carries the
+      hex digest of the raw bytes for integrity checks on fetch.
+
+    Readers must go through :attr:`is_external` and fetch external bytes
+    from the object store, verifying them against ``sha256``. The content
+    hash (Mini-ADR U-21) is computed over the PERSIST shape: an external
+    entry contributes its ``storage_key``/``sha256`` instead of raw bytes,
+    so drift detection covers the manifest while per-fetch digest checks
+    cover the bytes. A backfill that externalizes existing rows therefore
+    also rewrites the stored ``content_hash`` in the same transaction.
 
     See Mini-ADR U-16 in ``docs/streams/STREAM-UPLIFT-DESIGN.md`` § 4.3.4.
     """
 
     model_config = ConfigDict(frozen=True)
 
-    content: str  # base64 of raw bytes
+    content: str = ""  # base64 of raw bytes; empty when external
     size: int = Field(ge=0)  # raw byte length (for cap checks + UI display)
     mime: str = ""
+    #: Object-store key when the bytes are externalized; ``None`` = inline.
+    storage_key: str | None = None
+    #: Hex blake2b-256 of the raw bytes — set for external entries so a
+    #: fetched object can be integrity-checked before use.
+    sha256: str = ""
+
+    @property
+    def is_external(self) -> bool:
+        return self.storage_key is not None
 
 
 class Skill(BaseModel):
@@ -586,17 +607,26 @@ def compute_content_hash(
 def supporting_files_to_jsonable(
     supporting_files: Mapping[str, SkillSupportingFile],
 ) -> dict[str, dict[str, object]]:
-    """Typed DTO → plain JSON shape for hashing / DB persist.
+    """Typed DTO → plain JSON shape for hashing AND DB persist.
 
     Keys sorted so JSON serialization is deterministic across Python
     dict ordering; matches what :func:`canonicalize_skill_content`
-    expects.
+    expects. Inline entries serialize exactly like the legacy shape
+    (``content,size,mime``) so every pre-asset-store row keeps its
+    original content hash; external entries additionally carry
+    ``storage_key`` + ``sha256`` (with empty ``content``), making the
+    hash cover the manifest while per-fetch digest checks cover the
+    bytes.
     """
-    return {
-        path: {
+    out: dict[str, dict[str, object]] = {}
+    for path, sf in sorted(supporting_files.items()):
+        entry: dict[str, object] = {
             "content": sf.content,
             "size": sf.size,
             "mime": sf.mime,
         }
-        for path, sf in sorted(supporting_files.items())
-    }
+        if sf.storage_key is not None:
+            entry["storage_key"] = sf.storage_key
+            entry["sha256"] = sf.sha256
+        out[path] = entry
+    return out

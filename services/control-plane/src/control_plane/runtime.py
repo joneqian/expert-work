@@ -54,6 +54,7 @@ from expert_work.runtime.llm import InMemoryRedisCache, LLMResponseCache
 from expert_work.runtime.middleware import LangfuseClient, RecordingLangfuseClient
 from expert_work.runtime.runs import RunEventStore, RunManager, RunStore
 from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.runtime.skill_assets import ObjectStore as SkillAssetStore
 from expert_work.runtime.storage import ObjectStore, ObjectStoreBackend, S3CompatibleConfig
 from expert_work.runtime.stream_bridge import InMemoryStreamBridge, StreamBridge
 from orchestrator import (
@@ -540,6 +541,8 @@ def make_agent_builder(
     platform_tool_budget_config_service: PlatformToolBudgetConfigService | None = None,
     skill_store: SkillStore | None = None,
     skill_activity_recorder: SkillActivityRecorder | None = None,
+    # skill-asset-store — object store for externalized skill supporting files.
+    skill_asset_store: SkillAssetStore | None = None,
     tenant_config_service: TenantConfigService | None = None,
     # Stream SE (SE-3b) — backs the in-session skill-authoring builtins'
     # audit emit (SKILL_AUTHORED_BY_AGENT etc.). ``None`` → tools still work,
@@ -715,6 +718,8 @@ def make_agent_builder(
             action_judge=action_judge,
             # Phase 3 — platform master switch (effective = platform AND agent).
             platform_tool_budget_enabled=platform_tool_budget_enabled,
+            # skill-asset-store — dual-read for externalized supporting files.
+            skill_asset_store=skill_asset_store,
         )
 
     return _build

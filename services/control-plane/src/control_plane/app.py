@@ -1207,6 +1207,14 @@ def create_app(
                     )
                 )
                 _app.state.object_store = object_store
+                # skill-asset-store — only a DURABLE backend may hold skill
+                # supporting-file bytes (memory loses them on restart).
+                skill_asset_store = (
+                    object_store
+                    if resolved_settings.object_store_backend == "s3-compatible"
+                    else None
+                )
+                _app.state.skill_asset_store = skill_asset_store
                 # Stream L.L7 — record each finished run's trajectory to the
                 # ObjectStore now that it is open. This is the source the
                 # curation worker scans (→ the skill-evolution flywheel) and the
@@ -1348,6 +1356,7 @@ def create_app(
                     skill_store=resolved_skill_store,
                     skill_activity_recorder=skill_activity_recorder,
                     tenant_config_service=resolved_tenant_config_service,
+                    skill_asset_store=skill_asset_store,
                     # Stream V-D (audit #1) — evict cached sub-agents when a
                     # tenant's MCP registry changes, like the top-level cache.
                     register_invalidation=resolved_agent_runtime.register_invalidation_hook,
@@ -1376,6 +1385,7 @@ def create_app(
                         skill_store=resolved_skill_store,
                         skill_activity_recorder=skill_activity_recorder,
                         tenant_config_service=resolved_tenant_config_service,
+                        skill_asset_store=skill_asset_store,
                     )
                     if resolved_settings.enable_dynamic_workers
                     else None
@@ -1427,6 +1437,8 @@ def create_app(
                     tenant_config_service=resolved_tenant_config_service,
                     # Stream SE (SE-3b) — audit for in-session skill authoring.
                     audit_logger=resolved_audit,
+                    # skill-asset-store — dual-read for externalized skill files.
+                    skill_asset_store=skill_asset_store,
                 )
                 # Stream MCP-OAUTH (OA-3b) — let get_agent decide per-user builds.
                 resolved_agent_runtime.user_oauth_pool_provider = _user_mcp_oauth_pool_provider

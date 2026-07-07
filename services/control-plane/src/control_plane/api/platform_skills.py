@@ -41,8 +41,11 @@ from control_plane.api._skill_runtime import classify_skill_runtime
 from control_plane.api._skill_zip import (
     ALLOWED_EXTENSIONS,
     MAX_ENTRIES,
+    MAX_ENTRIES_ASSET,
     MAX_FILE_BYTES,
+    MAX_FILE_BYTES_ASSET,
     MAX_TOTAL_BYTES,
+    MAX_TOTAL_BYTES_ASSET,
     SkillPackageError,
     SkillZipError,
     build_skill_zip,
@@ -80,11 +83,21 @@ from expert_work.protocol import (
 )
 from expert_work.protocol.skill import (
     SkillPackageLayoutError,
+    SkillSupportingFile,
     compute_content_hash,
     is_high_risk_skill_version,
     supporting_files_to_jsonable,
 )
 from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.skill_assets import (
+    ObjectStore as SkillAssetObjectStore,
+)
+from expert_work.runtime.skill_assets import (
+    SkillAssetError,
+    externalize_supporting_files,
+    fetch_supporting_file,
+    fetch_supporting_files,
+)
 
 #: Hard cap on skills imported in one batch request. Bounds the per-request DB
 #: write fan-out; a repo with more skills than this is imported in chunks.
@@ -240,11 +253,18 @@ _SKILL_REJECT_HINT: dict[str, str] = {
         # what the validator actually enforces.
         f"package has a disallowed file type (allowed: {' '.join(sorted(ALLOWED_EXTENSIONS))})"
     ),
-    "file_too_large": f"a single file exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
-    "total_too_large": (
-        f"the package exceeds the {MAX_TOTAL_BYTES // (1024 * 1024)} MiB total limit"
+    "file_too_large": (
+        f"a single file exceeds the size limit ({MAX_FILE_BYTES // (1024 * 1024)} MiB inline; "
+        f"{MAX_FILE_BYTES_ASSET // (1024 * 1024)} MiB with the asset store)"
     ),
-    "too_many_entries": f"the package has more than {MAX_ENTRIES} files",
+    "total_too_large": (
+        f"the package exceeds the total size limit ({MAX_TOTAL_BYTES // (1024 * 1024)} MiB "
+        f"inline; {MAX_TOTAL_BYTES_ASSET // (1024 * 1024)} MiB with the asset store)"
+    ),
+    "too_many_entries": (
+        f"the package has too many files (limit {MAX_ENTRIES} inline; "
+        f"{MAX_ENTRIES_ASSET} with the asset store)"
+    ),
     "prompt_injection": "skill content tripped the prompt-injection scanner",
     "legacy_format": "legacy skill layout is not supported",
     "bad_zip": "the downloaded content is not a valid zip",
@@ -260,6 +280,7 @@ async def _ingest_platform_skill_payload(
     principal: Principal,
     source: str,
     origin: str | None = None,
+    object_store: SkillAssetObjectStore | None = None,
 ) -> tuple[dict[str, object], int]:
     """Core platform-import pipeline: parse a ``.skill`` zip → name check →
     moderation → Mini-ADR U-21 strict threat scan → idempotent create/version
@@ -269,7 +290,7 @@ async def _ingest_platform_skill_payload(
     catches the ``HTTPException`` per skill to keep going (partial success).
     """
     try:
-        payload = parse_skill_zip(blob)
+        payload = parse_skill_zip(blob, asset_tier=object_store is not None)
     except SkillZipError as exc:
         # ``reason`` is the path-free reject enum; ``internal_message`` carries
         # the offending path and stays server-side (audit only). For a bare
@@ -354,6 +375,17 @@ async def _ingest_platform_skill_payload(
         )
         raise HTTPException(status_code=400, detail="invalid skill content")
 
+    # skill-asset-store: externalize supporting-file bytes AFTER the gates
+    # (never upload rejected content) and BEFORE hashing/idempotency — the
+    # content hash must cover the exact shape that gets persisted, and the
+    # idempotency probe must compare like with like. Content-addressed keys
+    # make a redundant upload on an idempotent re-import a harmless no-op.
+    supporting_files = await externalize_supporting_files(
+        payload.supporting_files, object_store=object_store
+    )
+    files_jsonable = supporting_files_to_jsonable(supporting_files)
+    content_hash = compute_content_hash(payload.prompt_fragment, files_jsonable)
+
     created_skill = False
     async with bypass_rls_session():
         existing = await store.get_platform_skill_by_name(name=payload.name)
@@ -365,7 +397,7 @@ async def _ingest_platform_skill_payload(
             latest = await store.get_platform_version_by_number(
                 skill_id=existing.id, version=existing.latest_version
             )
-            if latest is not None and latest.content_hash == payload.content_hash:
+            if latest is not None and latest.content_hash == content_hash:
                 return {
                     "skill": _skill_dict(existing),
                     "version": _version_dict(latest),
@@ -397,9 +429,9 @@ async def _ingest_platform_skill_payload(
             category=payload.category,
             required_models=payload.required_models,
             authored_by="human",
-            supporting_files=supporting_files_to_jsonable(payload.supporting_files),
+            supporting_files=files_jsonable,
             lazy_load=payload.lazy_load,
-            content_hash=payload.content_hash,
+            content_hash=content_hash,
             high_risk=payload.high_risk,
         )
 
@@ -454,6 +486,7 @@ async def _ingest_platform_skill_blob(
     principal: Principal,
     source: str,
     origin: str | None = None,
+    object_store: SkillAssetObjectStore | None = None,
 ) -> JSONResponse:
     """Single-import wrapper around :func:`_ingest_platform_skill_payload` —
     used by the ZIP upload and single GitHub import."""
@@ -464,8 +497,20 @@ async def _ingest_platform_skill_blob(
         principal=principal,
         source=source,
         origin=origin,
+        object_store=object_store,
     )
     return JSONResponse(status_code=status, content=content)
+
+
+def _get_object_store(request: Request) -> SkillAssetObjectStore | None:
+    """The DURABLE object store for skill assets, or ``None``.
+
+    The lifespan sets ``app.state.skill_asset_store`` only when the object
+    store backend is s3-compatible — the in-memory backend loses objects on
+    restart, so externalizing skill bytes to it would corrupt skills. With
+    ``None`` imports stay inline (tighter caps) and reads degrade cleanly.
+    """
+    return getattr(request.app.state, "skill_asset_store", None)
 
 
 def _http_detail_message(detail: object) -> str:
@@ -647,6 +692,7 @@ def build_platform_skills_router() -> APIRouter:
             audit=audit,
             principal=principal,
             source="zip_import",
+            object_store=_get_object_store(request),
         )
 
     @router.post("/import-from-github", response_model=None)
@@ -690,6 +736,7 @@ def build_platform_skills_router() -> APIRouter:
             principal=principal,
             source="github_import",
             origin=origin,
+            object_store=_get_object_store(request),
         )
 
     @router.post("/list-github-skills", response_model=None)
@@ -771,6 +818,7 @@ def build_platform_skills_router() -> APIRouter:
                     principal=principal,
                     source="github_batch_import",
                     origin=origin,
+                    object_store=_get_object_store(request),
                 )
             except HTTPException as exc:
                 results.append(
@@ -1006,9 +1054,20 @@ def build_platform_skills_router() -> APIRouter:
         entry = row.supporting_files.get(file_path)
         if entry is None:
             raise HTTPException(status_code=404, detail="supporting file not found")
+        # Dual-read (skill-asset-store): inline rows return their stored
+        # base64 verbatim; external rows fetch + digest-verify the object.
+        content_b64 = entry.content
+        if entry.is_external:
+            try:
+                raw = await fetch_supporting_file(entry, object_store=_get_object_store(request))
+            except SkillAssetError as exc:
+                raise HTTPException(
+                    status_code=502, detail="supporting file asset unavailable"
+                ) from exc
+            content_b64 = base64.b64encode(raw).decode("ascii")
         return JSONResponse(
             status_code=200,
-            content={"content": entry.content, "size": entry.size, "mime": entry.mime},
+            content={"content": content_b64, "size": entry.size, "mime": entry.mime},
         )
 
     @router.put(
@@ -1224,6 +1283,27 @@ def build_platform_skills_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="skill version not found")
         if skill is None:
             raise HTTPException(status_code=404, detail="skill not found")
+        # Dual-read (skill-asset-store): inflate external entries back to the
+        # inline shape so the exported ZIP carries real bytes — a round-trip
+        # (export → import) stays lossless either way.
+        supporting_files = version.supporting_files
+        if any(sf.is_external for sf in supporting_files.values()):
+            try:
+                raw_map = await fetch_supporting_files(
+                    supporting_files, object_store=_get_object_store(request)
+                )
+            except SkillAssetError as exc:
+                raise HTTPException(
+                    status_code=502, detail="supporting file assets unavailable"
+                ) from exc
+            supporting_files = {
+                path: SkillSupportingFile(
+                    content=base64.b64encode(raw_map[path]).decode("ascii"),
+                    size=sf.size,
+                    mime=sf.mime,
+                )
+                for path, sf in supporting_files.items()
+            }
         blob = build_skill_zip(
             name=skill.name,
             description=version.description,
@@ -1231,7 +1311,7 @@ def build_platform_skills_router() -> APIRouter:
             required_models=version.required_models,
             prompt_fragment=version.prompt_fragment,
             tool_names=version.tool_names,
-            supporting_files=version.supporting_files,
+            supporting_files=supporting_files,
             lazy=version.lazy_load,
             version=version.version,
         )

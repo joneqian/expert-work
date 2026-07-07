@@ -21,3 +21,9 @@ expert-work/dev/llm/anthropic-api-key=sk-ant-REPLACE-WITH-YOUR-KEY
 # Tavily key backing the built-in web_search tool (optional — web_search
 # returns an error without it, the rest of the agent still runs).
 # expert-work/dev/tools/tavily-api-key=tvly-REPLACE-WITH-YOUR-KEY
+
+# skill-asset-store — MinIO creds for the s3-compatible object store backend
+# (EXPERT_WORK_OBJECT_STORE_BACKEND=s3-compatible in infra/.env). Values must
+# match the compose MinIO root user/password (defaults below).
+expert-work/dev/minio/access-key=expert_work
+expert-work/dev/minio/secret-key=expert_work_dev_minio
