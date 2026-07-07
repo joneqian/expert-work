@@ -23,8 +23,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import (
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import (
     AgentMetadata,
     AgentSpec,
     AgentSpecBody,
@@ -57,7 +57,7 @@ _TENANT_B = uuid4()
 
 def _make_agent_spec(name: str) -> AgentSpec:
     return AgentSpec(
-        apiVersion="helix.io/v1",
+        apiVersion="expert_work.io/v1",
         kind="Agent",
         metadata=AgentMetadata(name=name, version="1.0.0", tenant="t"),
         spec=AgentSpecBody(
@@ -192,7 +192,7 @@ async def app_state() -> AsyncIterator[tuple[AsyncClient, UUID]]:
         )
 
     # ── Stream H.3 PR 1: seed one run row per tenant so /v1/runs has rows ──
-    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+    from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 
     run_store = app.state.run_store
     for tenant in (_TENANT_A, _TENANT_B):

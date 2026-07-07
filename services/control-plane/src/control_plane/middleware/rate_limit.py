@@ -31,14 +31,14 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
 from control_plane.ratelimit import RateLimiter
-from helix_agent.common.observability import helix_counter
+from expert_work.common.observability import expert_work_counter
 
 API_KEY_HEADER = "X-API-Key"
 
-logger = logging.getLogger("helix.control_plane.rate_limit")
+logger = logging.getLogger("expert_work.control_plane.rate_limit")
 
-_rate_limit_decisions = helix_counter(
-    "helix_control_plane_rate_limit_decisions_total",
+_rate_limit_decisions = expert_work_counter(
+    "expert_work_control_plane_rate_limit_decisions_total",
     "Gateway rate-limit decisions by dimension and outcome.",
     ("dimension", "decision"),
 )

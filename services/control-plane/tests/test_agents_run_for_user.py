@@ -18,10 +18,10 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AgentSpec, Role
-from helix_agent.runtime.runs import InMemoryRunEventStore, InMemoryRunStore
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AgentSpec, Role
+from expert_work.runtime.runs import InMemoryRunEventStore, InMemoryRunStore
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -31,7 +31,7 @@ from tests.auth_fixtures import (
 )
 
 _SPEC: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "support-bot", "version": "1.0.0", "tenant": "acme"},
     "spec": {
@@ -168,7 +168,7 @@ async def test_stream_run_sets_session_header(ctx: _Ctx) -> None:
         headers=ctx.headers,
     ) as resp:
         assert resp.status_code == 200
-        assert "X-Helix-Session-Id" in resp.headers
+        assert "X-Expert-Work-Session-Id" in resp.headers
         await resp.aclose()
 
 

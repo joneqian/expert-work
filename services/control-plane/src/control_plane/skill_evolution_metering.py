@@ -22,7 +22,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from uuid import UUID
 
-from helix_agent.protocol import CurationCandidateRecord
+from expert_work.protocol import CurationCandidateRecord
 
 __all__ = [
     "EVOLUTION_USAGE_KIND",

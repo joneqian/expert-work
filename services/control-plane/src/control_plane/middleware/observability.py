@@ -3,13 +3,13 @@
 Per [STREAM-B-DESIGN § 2.2](../../../../docs/streams/STREAM-B-DESIGN.md):
 
 * extract incoming W3C trace context (``traceparent`` / ``tracestate``)
-* open a ``helix.control_plane.http_request`` span (subsystems/20 § 5.1
+* open a ``expert_work.control_plane.http_request`` span (subsystems/20 § 5.1
   naming) covering ``call_next``
-* bind ``trace_id`` into :mod:`helix_agent.common.context` so structured
+* bind ``trace_id`` into :mod:`expert_work.common.context` so structured
   logging picks it up
 * record per-request count + duration via the Prometheus registry from
   Stream A.9
-* echo the trace id back in ``X-Helix-Trace-Id`` so clients can
+* echo the trace id back in ``X-Expert-Work-Trace-Id`` so clients can
   correlate without parsing ``traceparent``
 """
 
@@ -24,30 +24,30 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from helix_agent.common.context import reset_current_trace_id, set_current_trace_id
-from helix_agent.common.observability import (
-    HelixComponent,
+from expert_work.common.context import reset_current_trace_id, set_current_trace_id
+from expert_work.common.observability import (
+    ExpertWorkComponent,
     current_trace_id_hex,
+    expert_work_counter,
+    expert_work_histogram,
+    expert_work_span,
     extract_context,
-    helix_counter,
-    helix_histogram,
-    helix_span,
 )
 
-TRACE_ID_HEADER = "X-Helix-Trace-Id"
+TRACE_ID_HEADER = "X-Expert-Work-Trace-Id"
 
 # ---------------------------------------------------------------------------
 # Metrics — registered exactly once at import time (Stream A.9 helpers handle
 # duplicate registration by raising, which is fine: each control_plane process
 # imports this module once).
 # ---------------------------------------------------------------------------
-_request_total = helix_counter(
-    "helix_control_plane_http_requests_total",
+_request_total = expert_work_counter(
+    "expert_work_control_plane_http_requests_total",
     "Control Plane HTTP requests, partitioned by method/route/status_code.",
     ("method", "route", "status_code"),
 )
-_request_duration = helix_histogram(
-    "helix_control_plane_http_request_duration_seconds",
+_request_duration = expert_work_histogram(
+    "expert_work_control_plane_http_request_duration_seconds",
     "Control Plane HTTP request handler wall-clock duration.",
     ("method", "route", "status_code"),
 )
@@ -81,8 +81,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         status_code = 500  # default if call_next blows up before producing a response
 
         try:
-            with helix_span(
-                HelixComponent.CONTROL_PLANE,
+            with expert_work_span(
+                ExpertWorkComponent.CONTROL_PLANE,
                 "http_request",
                 attributes={
                     "http.method": method,

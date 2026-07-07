@@ -1,6 +1,6 @@
-# helix Admin UI — Mockups
+# Expert Work Admin UI — Mockups
 
-14 张 helix Admin UI 关键页面的**可视化 mockup**(H.1a 初版 8 张 + H.4 PR 0 补 6 张),作为 [admin-ui-philosophy.md](../admin-ui-philosophy.md) + [admin-ui-language.md](../admin-ui-language.md) + [STREAM-H-DESIGN.md](../../streams/STREAM-H-DESIGN.md) 的视觉锚点。
+14 张 Expert Work Admin UI 关键页面的**可视化 mockup**(H.1a 初版 8 张 + H.4 PR 0 补 6 张),作为 [admin-ui-philosophy.md](../admin-ui-philosophy.md) + [admin-ui-language.md](../admin-ui-language.md) + [STREAM-H-DESIGN.md](../../streams/STREAM-H-DESIGN.md) 的视觉锚点。
 
 H.1b 实施时,**临摹这些 mockup 作为视觉基线**;`shared/tokens.css` 可直接移植进 Vite 工程,所有 token 已固化。
 
@@ -85,11 +85,11 @@ Antd 5 components:  实施时映射的 Antd 组件 + override 要点
 8 张 mockup 都应该:
 - [ ] 双主题(dark / light)切换不破坏布局
 - [ ] sidebar 都是 220px,topbar 都是 48px
-- [ ] brand glyph 颜色 = `--hx-color-brand-500`(cyan)
-- [ ] 主操作 button(创建 / 批准 / promote / 删除)都用 `.hx-btn--primary` 或 `.hx-btn--danger`
-- [ ] 表格行高 36-40px,padding `--hx-space-2/3`
-- [ ] 所有 mono 字段(id / version / model name)用 `font-family: var(--hx-font-mono)`
-- [ ] 状态 badge 用 `.hx-badge--{success,warning,danger,info,neutral}`
+- [ ] brand glyph 颜色 = `--ew-color-brand-500`(cyan)
+- [ ] 主操作 button(创建 / 批准 / promote / 删除)都用 `.ew-btn--primary` 或 `.ew-btn--danger`
+- [ ] 表格行高 36-40px,padding `--ew-space-2/3`
+- [ ] 所有 mono 字段(id / version / model name)用 `font-family: var(--ew-font-mono)`
+- [ ] 状态 badge 用 `.ew-badge--{success,warning,danger,info,neutral}`
 - [ ] 顶部 Cmd+K 占位永远显示
 
 如果发现 mockup 之间不一致,**先改 `shared/*.css`**(token / shell)— 因为不一致大概率是 token 用错,而不是 mockup 自己有问题。
@@ -109,7 +109,7 @@ Antd 5 components:  实施时映射的 Antd 组件 + override 要点
 
 1. **移植 `shared/tokens.css`** → `apps/admin-ui/src/theme/tokens.css`(直接 copy,无改动)
 2. **`shared/shell.css` 部分迁移**:Antd 能覆盖的部分用 ConfigProvider 实现;不能覆盖的(如 Shell grid 布局 / mockup-only theme toggle)迁移进 `apps/admin-ui/src/theme/shell.css`
-3. **mockup HTML 不直接复用**:作为视觉参考,React 组件按 [language.md § 3](../admin-ui-language.md#3-核心组件-inventory-antd-5-映射--override-要点) 用 Antd 5 + helix override 重新实现
+3. **mockup HTML 不直接复用**:作为视觉参考,React 组件按 [language.md § 3](../admin-ui-language.md#3-核心组件-inventory-antd-5-映射--override-要点) 用 Antd 5 + Expert Work override 重新实现
 
 ---
 
@@ -128,4 +128,4 @@ Antd 5 components:  实施时映射的 Antd 组件 + override 要点
 | 日期 | 版本 | 说明 |
 |---|---|---|
 | 2026-05-25 | v1.0 | 初版:8 张 mockup + shared/{tokens, shell}.css + brand-glyph.svg;对齐 [admin-ui-design-baseline] 10 条决策 |
-| 2026-05-26 | v1.1 | H.4 PR 0 设计基线:补 6 张 mockup(09 Runs 补 H.3 留账 + 10 Skills + 11 Triggers + 12 Audit + 13 Settings IAM + 14 Settings Ops)。覆盖 H.4 PR 5/6/3+4/7/8 共 6 子面。每张延续 H.1a 视觉规则(220px sidebar / 48px topbar / cyan brand 500 / mono for ID/secret/JSON / 36-40px table row / `.hx-badge--*` 状态色)。新增 mockup-only 样式有:Webhook secret show-once Card(triggers)/ Quotas 进度条阈值上色(settings-ops)/ ETag conflict banner(settings-ops)/ Audit timeline dot 颜色编码 |
+| 2026-05-26 | v1.1 | H.4 PR 0 设计基线:补 6 张 mockup(09 Runs 补 H.3 留账 + 10 Skills + 11 Triggers + 12 Audit + 13 Settings IAM + 14 Settings Ops)。覆盖 H.4 PR 5/6/3+4/7/8 共 6 子面。每张延续 H.1a 视觉规则(220px sidebar / 48px topbar / cyan brand 500 / mono for ID/secret/JSON / 36-40px table row / `.ew-badge--*` 状态色)。新增 mockup-only 样式有:Webhook secret show-once Card(triggers)/ Quotas 进度条阈值上色(settings-ops)/ ETag conflict banner(settings-ops)/ Audit timeline dot 颜色编码 |

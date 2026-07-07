@@ -45,7 +45,7 @@ describe("TenantScopeContext — platform-homed promotion", () => {
     await waitFor(() => {
       expect(screen.getByTestId("scope").textContent).toBe(SCOPE_ALL);
     });
-    expect(window.sessionStorage.getItem("helix.admin.tenantScope")).toBe(SCOPE_ALL);
+    expect(window.sessionStorage.getItem("expert_work.admin.tenantScope")).toBe(SCOPE_ALL);
   });
 
   it("leaves a dual-role admin (real home) on the home scope", async () => {

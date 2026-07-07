@@ -26,7 +26,7 @@ class KeycloakUserExistsError(KeycloakError):
     """``create_user`` got a 409 — the email/username already exists in the realm.
 
     ``duplicateEmailsAllowed`` is false, so one email maps to at most one
-    account realm-wide; helix never auto-reuses it across tenants (Mini-ADR
+    account realm-wide; expert_work never auto-reuses it across tenants (Mini-ADR
     R-11). Maps to 409 ``MEMBER_KEYCLOAK_CONFLICT``.
     """
 

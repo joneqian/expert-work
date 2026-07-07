@@ -3,7 +3,7 @@
 BM25 over a small in-memory corpus (one document per deferred tool: the
 name split into words + the description + top-level parameter names),
 tokenized with jieba so Chinese queries and descriptions segment
-correctly (the J.5 keyword-search precedent in helix-persistence).
+correctly (the J.5 keyword-search precedent in expert-work-persistence).
 
 The public surface is :func:`rank_tools` — its signature carries no BM25
 concept (Mini-ADR HX-I2: the vector-retrieval seam is a function swap,

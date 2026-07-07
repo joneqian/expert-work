@@ -5,7 +5,7 @@
 ```
    ┌─────────────────┐  ┌──────────────────┐  ┌────────────────┐
    │  Admin UI       │  │ Developer CLI    │  │  External Apps │
-   │ React 19+Antd   │  │ helix-cli   │  │ (业务系统)      │
+   │ React 19+Antd   │  │ expert-work-cli   │  │ (业务系统)      │
    └────────┬────────┘  └─────────┬────────┘  └────────┬───────┘
             └─────────────┬───────┴──────────────────────┘
                           ▼ HTTPS
@@ -200,4 +200,4 @@ volumes:
 2. **gVisor 平台限制**：不支持 macOS prod 环境；dev 用 OrbStack/Lima/Linux VM；prod 必须 Linux
 3. **Sandbox 单机水位**：单机 100-200 sandbox 后 docker daemon 成瓶颈，70% 水位告警
 4. **Manifest 签名**：生产 manifest 强制 admin 签名（cosign）+ CI 校验，防误改全租户故障
-5. **Event log append-only 强制**：DB 角色 `helix_app` 禁 UPDATE/DELETE on event_log 表
+5. **Event log append-only 强制**：DB 角色 `expert_work_app` 禁 UPDATE/DELETE on event_log 表

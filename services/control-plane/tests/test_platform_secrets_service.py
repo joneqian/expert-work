@@ -12,7 +12,7 @@ import pytest
 
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.settings import Settings
-from helix_agent.persistence.platform_secrets import InMemoryPlatformSecretStore
+from expert_work.persistence.platform_secrets import InMemoryPlatformSecretStore
 
 _TENANT_A = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 _TENANT_B = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

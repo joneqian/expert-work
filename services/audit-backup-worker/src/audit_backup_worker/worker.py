@@ -32,8 +32,8 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from audit_backup_worker.serialization import object_key_for, serialize_row
-from helix_agent.persistence.models import AuditLogRow
-from helix_agent.runtime.storage import ObjectStore
+from expert_work.persistence.models import AuditLogRow
+from expert_work.runtime.storage import ObjectStore
 
 logger = logging.getLogger(__name__)
 

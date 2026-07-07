@@ -87,7 +87,7 @@ async def test_baseline_yaml_layout_is_stable(tmp_path: Path) -> None:
     assert meta["judge_model"] == "claude-haiku-4-5-20251001"
     assert meta["judge_temperature"] == 0.0
     assert meta["rerun_count"] == 3
-    assert meta["embedder"] == "helix-fake-keyword-embedder-v1"
+    assert meta["embedder"] == "expert-work-fake-keyword-embedder-v1"
 
     j3 = payload["capabilities"]["J.3_memory_recall"]
     assert j3["status"] == "PASS"

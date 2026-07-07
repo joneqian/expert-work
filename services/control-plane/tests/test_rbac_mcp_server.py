@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from control_plane.auth.rbac import is_allowed
-from helix_agent.protocol import Principal, Role
+from expert_work.protocol import Principal, Role
 
 _TENANT = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 

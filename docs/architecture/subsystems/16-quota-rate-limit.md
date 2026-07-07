@@ -132,7 +132,7 @@ class ReserveRequest(BaseModel):
     model: str | None = None                 # M0 仅记录（写入 token_reservation 便于审计/对账），不参与限流；M1 起加入维度（与 5.6 三层限流的 model 维度联动）
     purpose: Literal["production", "summarization", "eval", "judge"] = "production"
     # M0 仅记录到 metric label，不参与限流；M2 起 eval/judge 走独立 bucket
-    # metric label 规范同步：helix_quota_* 系列加可选 purpose label（默认 production）
+    # metric label 规范同步：expert_work_quota_* 系列加可选 purpose label（默认 production）
 
 class ReserveResult(BaseModel):
     reservation_id: UUID
@@ -182,7 +182,7 @@ DELETE /v1/quotas/{id}
   "tenant": "medical-saas",
   "agent": "triage-agent",
   "retry_after_s": 3672,
-  "doc": "https://docs.helix.io/errors/rate_limit"
+  "doc": "https://docs.expert_work.io/errors/rate_limit"
 }
 ```
 
@@ -267,7 +267,7 @@ LLM 调用后（失败 / 取消）：
   QuotaService.release_tokens(reserve_id)
 ```
 
-**`actual_tokens` 口径**（与 10 § 5.3 对齐）：`actual_tokens = input_tokens + output_tokens`。`cache_read_input_tokens` 和 `cache_creation_input_tokens` **不计入** budget commit（已在 provider 端享受折扣，重复扣会双重计费），但单独通过 metric `helix_llm_cache_read_tokens_total` / `helix_llm_cache_creation_tokens_total` 上报供成本分析（与 20 命名规范一致）。
+**`actual_tokens` 口径**（与 10 § 5.3 对齐）：`actual_tokens = input_tokens + output_tokens`。`cache_read_input_tokens` 和 `cache_creation_input_tokens` **不计入** budget commit（已在 provider 端享受折扣，重复扣会双重计费），但单独通过 metric `expert_work_llm_cache_read_tokens_total` / `expert_work_llm_cache_creation_tokens_total` 上报供成本分析（与 20 命名规范一致）。
 
 **算法**：
 
@@ -290,7 +290,7 @@ reservation 30min 未 commit/release 自动 release（reaper job）。
 child commit(reserve_id, actual):
   1. token_reservation[reserve_id].state = COMMITTED, actual=actual
   2. budget_ledger[(tenant, lead_agent, month)].used_total += actual   # 二次累加
-  3. metric helix_subagent_token_total{tenant, lead, child, model} += actual
+  3. metric expert_work_subagent_token_total{tenant, lead, child, model} += actual
 ```
 
 防爆边界：lead 维度独立设 `monthly_token_budget`；子树整体超限时拒绝在 child reserve 层（`if lead.used_total + child.estimated > lead.budget: deny`）。agent 维度 metric 仍按 child 独立计（observability 可见每个 child 的成本贡献）。
@@ -326,7 +326,7 @@ smooth_factor = 1.5  # 允许某天突破到 1.5× 平均
 | Reservation 泄漏（commit/release 都没调）| budget 永远不归还 | 30min reaper 强制 release + 告警 |
 | 月度预算重置错过 | tenant 跨月仍按上月限制 | reset job + 兜底：check 时 lazy 创建当月 ledger |
 | 配额被绕过（未过本子系统） | 业务无控制 | 强制 API gateway 全量经过；CI 检查所有 API 路由都带 quota middleware |
-| 桶 capacity 配置错误（太小） | 误拒大量请求 | admin 改配置后 `helix_quota_exceeded_total` rate 监控 + 自动告警 |
+| 桶 capacity 配置错误（太小） | 误拒大量请求 | admin 改配置后 `expert_work_quota_exceeded_total` rate 监控 + 自动告警 |
 | Redis cluster 跨 slot 失败 | 多维度合并失败 | 桶 key 用 `{tenant}` hashtag 强制同 slot；M2 跨集群另议 |
 
 ---
@@ -338,14 +338,14 @@ smooth_factor = 1.5  # 允许某天突破到 1.5× 平均
 ### 7.1 Prometheus metric
 
 ```
-helix_quota_check_total{tenant, dimension, result="allow|deny"}     counter
-helix_quota_check_latency_seconds                                   histogram
-helix_quota_bucket_remaining_ratio{tenant, dimension}               gauge
-helix_quota_exceeded_total{tenant, dimension, reason}               counter   # 与 20 § 5.2 命名对齐；保留 reason label
-helix_token_reservation_active{tenant}                              gauge
-helix_token_reservation_expired_total                               counter
-helix_token_budget_used_ratio{tenant}                               gauge   # used/budget
-helix_token_budget_overshoot_total{tenant}                          counter
+expert_work_quota_check_total{tenant, dimension, result="allow|deny"}     counter
+expert_work_quota_check_latency_seconds                                   histogram
+expert_work_quota_bucket_remaining_ratio{tenant, dimension}               gauge
+expert_work_quota_exceeded_total{tenant, dimension, reason}               counter   # 与 20 § 5.2 命名对齐；保留 reason label
+expert_work_token_reservation_active{tenant}                              gauge
+expert_work_token_reservation_expired_total                               counter
+expert_work_token_budget_used_ratio{tenant}                               gauge   # used/budget
+expert_work_token_budget_overshoot_total{tenant}                          counter
 ```
 
 ### 7.2 OTel span
@@ -354,13 +354,13 @@ helix_token_budget_overshoot_total{tenant}                          counter
 - `quota.reserve`（attrs：tenant, agent, estimated, granted）
 - `quota.commit`（attrs：reservation_id, actual, delta）
 
-**告警示例**：`helix_token_budget_used_ratio > 0.8` 持续 10min → tenant admin 通知；`> 1.0` 紧急告警。
+**告警示例**：`expert_work_token_budget_used_ratio > 0.8` 持续 10min → tenant admin 通知；`> 1.0` 紧急告警。
 
 ---
 
 ## 8. 安全考虑
 
-- **配额绕过攻击**：必须先过 [15 AuthN](./15-authn-authz.md)，JWT 与 X-Helix-Tenant 一致才进入 quota check
+- **配额绕过攻击**：必须先过 [15 AuthN](./15-authn-authz.md)，JWT 与 X-Expert-Work-Tenant 一致才进入 quota check
 - **Redis 命令注入**：所有维度名 / 值走 strict whitelist + KEY 拼接前 sanitize（避免 `qb:tenant:foo\nflushall`）
 - **配额信息泄漏**：429 响应不能暴露其他 tenant 的 quota 数值；retry_after_s 是粗粒度时间，不暴露当前 token 数
 - **管理员误改配额（DoS 自己）**：所有 quota 写操作走 [17 Audit Log](./17-audit-log.md) + 24h 内可一键回滚（保留 history 表）

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from helix_agent.common.skill_run_usage import BoundDistilledSkill
-from helix_agent.runtime.runs import RunRecord, RunStatus
+from expert_work.common.skill_run_usage import BoundDistilledSkill
+from expert_work.runtime.runs import RunRecord, RunStatus
 from orchestrator.sse import _dispatch_skill_run_usage, _record_skill_run_usage_safe
 
 _TENANT = UUID("77777777-7777-7777-7777-777777777777")

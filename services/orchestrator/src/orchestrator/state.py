@@ -24,7 +24,7 @@ from typing import Annotated, Any, NotRequired, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
-from helix_agent.protocol import (
+from expert_work.protocol import (
     ApprovalRequest,
     MemoryItem,
     Plan,
@@ -133,7 +133,7 @@ class AgentState(TypedDict):
 
     ``subagent_invocations`` (Stream J.4-补强-2 / Mini-ADR J-40)
     accumulates one
-    :class:`~helix_agent.protocol.subagent.SubAgentInvocation` per
+    :class:`~expert_work.protocol.subagent.SubAgentInvocation` per
     SubAgentTool delegation — every outcome path (success / max_steps /
     cancelled / future timed_out) appends a terminal-state row via the
     ``operator.add`` reducer. Lets the parent's LangGraph checkpoint
@@ -143,7 +143,7 @@ class AgentState(TypedDict):
     declares ``subagents``.
 
     ``pending_approval`` (Stream J.8 / Mini-ADR J-24) carries the
-    :class:`~helix_agent.protocol.approval.ApprovalRequest` a run is
+    :class:`~expert_work.protocol.approval.ApprovalRequest` a run is
     paused on — ``tools_node`` writes it before the run routes to END
     (RunStatus.PAUSED). The overwrite reducer applies: a resume clears
     it back to ``None``. Absent on a run that has never paused.

@@ -28,7 +28,7 @@ import { ToolTimeline } from "../../components/ToolTimeline";
 
 const { Text } = Typography;
 
-const LOCAL_STORAGE_KEY = "helix.runDetail.eventStream.expanded";
+const LOCAL_STORAGE_KEY = "expert_work.runDetail.eventStream.expanded";
 
 const EVENT_COLOR: Record<string, string> = {
   metadata: "blue",
@@ -217,10 +217,10 @@ function CompactionCard({ item }: { item: CompactionSummary }) {
     <div
       data-testid="compaction-card"
       style={{
-        border: "1px solid var(--hx-border-subtle)",
+        border: "1px solid var(--ew-border-subtle)",
         borderRadius: 6,
         padding: 10,
-        background: "var(--hx-surface-raised)",
+        background: "var(--ew-surface-raised)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -251,10 +251,10 @@ function EventCard({ evt }: { evt: SseEvent }) {
   return (
     <div
       style={{
-        border: "1px solid var(--hx-border-subtle)",
+        border: "1px solid var(--ew-border-subtle)",
         borderRadius: 4,
         padding: 8,
-        background: "var(--hx-surface-raised)",
+        background: "var(--ew-surface-raised)",
       }}
       data-testid={`event-stream-event-${evt.event}`}
     >
@@ -283,8 +283,8 @@ function EventCard({ evt }: { evt: SseEvent }) {
         style={{
           margin: 0,
           fontSize: 11,
-          fontFamily: "var(--hx-font-mono)",
-          color: "var(--hx-text-secondary)",
+          fontFamily: "var(--ew-font-mono)",
+          color: "var(--ew-text-secondary)",
           whiteSpace: "pre-wrap",
           wordBreak: "break-all",
           maxHeight: 240,

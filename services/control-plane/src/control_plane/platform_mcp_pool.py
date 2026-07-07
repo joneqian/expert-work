@@ -28,8 +28,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import McpConnectorCatalogStore
-from helix_agent.protocol import McpConnectorCatalogRecord
+from expert_work.persistence import McpConnectorCatalogStore
+from expert_work.protocol import McpConnectorCatalogRecord
 from orchestrator.tools.mcp import (
     MCPCallResult,
     MCPClient,
@@ -39,7 +39,7 @@ from orchestrator.tools.mcp import (
     MCPToolDef,
 )
 
-logger = logging.getLogger("helix.control_plane.platform_mcp_pool")
+logger = logging.getLogger("expert_work.control_plane.platform_mcp_pool")
 
 # Bounded rebuild attempts when invalidation keeps landing mid-build.
 _MAX_BUILD_ATTEMPTS = 5

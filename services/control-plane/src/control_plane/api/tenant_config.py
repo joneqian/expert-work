@@ -23,8 +23,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from control_plane.api._authz import require
 from control_plane.ratelimit import parse_rate_limit_override
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.protocol import (
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.protocol import (
     AgentSpecRecord,
     Principal,
     Provider,
@@ -32,7 +32,7 @@ from helix_agent.protocol import (
     Tool,
 )
 
-logger = logging.getLogger("helix.control_plane.api.tenant_config")
+logger = logging.getLogger("expert_work.control_plane.api.tenant_config")
 
 
 def _get_service(request: Request) -> TenantConfigService:

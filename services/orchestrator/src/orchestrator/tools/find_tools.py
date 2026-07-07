@@ -22,14 +22,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from helix_agent.common.observability import helix_counter
+from expert_work.common.observability import expert_work_counter
 from orchestrator.tools.registry import ToolContext, ToolRegistry, ToolResult, ToolSpec
 
 #: Stream HX-12 — promotion-domain events. ``miss`` = a find_tools query
 #: that matched nothing (a governance signal: the model wanted a
 #: capability the deferred pool doesn't cover, or phrased it badly).
-promotion_events = helix_counter(
-    "helix_tool_promotion_total",
+promotion_events = expert_work_counter(
+    "expert_work_tool_promotion_total",
     "Deferred-tool promotion lifecycle events (Stream HX-12).",
     ("event",),
 )

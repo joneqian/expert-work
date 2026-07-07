@@ -2,7 +2,7 @@
 
 > 起因:Agent 详情的**配置**面是 agent 级(对),但**运营/数据**面把真实运营单位 (user_id × conversation) 拍平成了 agent 级或租户级**扁平列表**,且「一次对话」本身**没有页面**。运营者答不了头号问题:「用户 X 昨天那次对话到底发生了啥」——只能在扁平 run 列表里翻,拼不出线程,也找不到某用户的历史。
 >
-> 本稿把运营 IA 从「扁平 run 列表 + 孤立 memory/artifacts tab」重组为 **用户 → 对话 → run 三层下钻**,数据全来自 helix 自有 `agent_run` / `token_usage`(租户 RLS 天然安全),深度 LLM trace 继续外链 Langfuse(system_admin,跨租户红线见 [ADR-0005](../adr/0005-observability-stack.md))。延伸 [admin-ui-nav-ia](./admin-ui-nav-ia.md)。
+> 本稿把运营 IA 从「扁平 run 列表 + 孤立 memory/artifacts tab」重组为 **用户 → 对话 → run 三层下钻**,数据全来自 Expert Work 自有 `agent_run` / `token_usage`(租户 RLS 天然安全),深度 LLM trace 继续外链 Langfuse(system_admin,跨租户红线见 [ADR-0005](../adr/0005-observability-stack.md))。延伸 [admin-ui-nav-ia](./admin-ui-nav-ia.md)。
 
 ## 1. 数据模型:三层(已核实)
 
@@ -208,7 +208,7 @@ Agent 详情
 
 ## 7. 非目标(有意不做)
 
-- Langfuse 不取代深度 LLM trace(只读观测 + 单实例无 RLS 跨租户红线);不在 helix 重建 trace 树。
+- Langfuse 不取代深度 LLM trace(只读观测 + 单实例无 RLS 跨租户红线);不在 Expert Work 重建 trace 树。
 - 不把 Langfuse 暴露给租户用户。
 - 成本(人民币)列 → fast-follow(现定价是月度 rollup,无干净 per-run cost 函数)。
 - 工具精确调用计数 → 先用 `llm_calls` 代理(未单独存)。

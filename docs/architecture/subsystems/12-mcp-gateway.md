@@ -1,6 +1,6 @@
 # 12 MCP Gateway
 
-> 多租户 **MCP server 连接池** + **allow_tools 过滤** + **OAuth 刷新**。MCP 工具是 Helix 主要的能力扩展机制；本子系统是其稳定性与隔离性兜底。
+> 多租户 **MCP server 连接池** + **allow_tools 过滤** + **OAuth 刷新**。MCP 工具是 Expert Work 主要的能力扩展机制；本子系统是其稳定性与隔离性兜底。
 >
 > **M0 调用方拓扑**：MCP Gateway 由 **orchestrator 进程**调用（不是 sandbox 内业务代码直接访问）；这影响 [21 网络策略](./21-network-policy.md) allowlist —— sandbox 不需要直达 MCP Gateway 的网络放行。
 
@@ -108,7 +108,7 @@ CREATE INDEX mcp_tool_call_tenant_time ON mcp_tool_call (tenant_id, started_at D
 ### 3.2 Pydantic Schema — 内部模型
 
 ```python
-# packages/helix-protocol/src/helix/protocol/mcp.py
+# packages/expert-work-protocol/src/Expert Work/protocol/mcp.py
 from pydantic import BaseModel
 from typing import Literal
 
@@ -172,7 +172,7 @@ class ToolReply(BaseModel):
 ```python
 # services/mcp-gateway/src/mcp_gateway/tool_node.py
 from langgraph.prebuilt import ToolNode
-from helix.protocol.mcp import MCPToolDescriptor
+from expert_work.protocol.mcp import MCPToolDescriptor
 
 class MCPToolNode(ToolNode):
     """把一组 MCP 工具暴露为 LangGraph ToolNode."""
@@ -311,30 +311,30 @@ JSON-RPC payload  ──►    inject Authorization (per secret_ref) ──►  
 ## 7. 可观测性
 
 > 日志完整字段遵循 [20 § 5.3](./20-observability.md)，此处仅展示子系统专属字段。
-> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `helix_*` 前缀（snake_case），span 统一 `helix.{component}.{action}`。
+> Metric / span 命名遵循 [20 § 5.x 命名规范](./20-observability.md)：metric 统一 `expert_work_*` 前缀（snake_case），span 统一 `expert_work.{component}.{action}`。
 
 ### Prometheus metrics
 
 ```
-helix_mcp_gateway_connections{tenant,server,state}                       gauge
-helix_mcp_gateway_invoke_total{tenant,agent,server,tool,status}
-helix_mcp_gateway_invoke_duration_seconds{tenant,server,tool}            histogram
-helix_mcp_gateway_health_check_total{tenant,server,status}
-helix_mcp_gateway_reconnects_total{tenant,server,reason}
-helix_mcp_gateway_tools_filtered_total{tenant,agent,reason}              counter
+expert_work_mcp_gateway_connections{tenant,server,state}                       gauge
+expert_work_mcp_gateway_invoke_total{tenant,agent,server,tool,status}
+expert_work_mcp_gateway_invoke_duration_seconds{tenant,server,tool}            histogram
+expert_work_mcp_gateway_health_check_total{tenant,server,status}
+expert_work_mcp_gateway_reconnects_total{tenant,server,reason}
+expert_work_mcp_gateway_tools_filtered_total{tenant,agent,reason}              counter
   # reason ∈ allowlist_miss / server_removed / disabled
-helix_mcp_gateway_response_truncated_total{tenant,server,tool}           counter
+expert_work_mcp_gateway_response_truncated_total{tenant,server,tool}           counter
 ```
 
 ### OTel spans
 
 ```
-helix.mcp_gateway.invoke
+expert_work.mcp_gateway.invoke
 ├── attrs: tenant, agent, server, tool, status, duration_seconds
-├── span: helix.mcp_gateway.allowlist_check
-├── span: helix.mcp_gateway.connection_acquire
-├── span: helix.mcp_gateway.jsonrpc_call (传 W3C Trace Context 给 server)
-└── span: helix.audit.write
+├── span: expert_work.mcp_gateway.allowlist_check
+├── span: expert_work.mcp_gateway.connection_acquire
+├── span: expert_work.mcp_gateway.jsonrpc_call (传 W3C Trace Context 给 server)
+└── span: expert_work.audit.write
 ```
 
 ### 日志（每条 invoke 对应 1 条结构化 log）
@@ -355,7 +355,7 @@ helix.mcp_gateway.invoke
 | 攻击面 | 防御 |
 |---|---|
 | 跨租户连接复用 | per-(tenant, server) 池；启动期 invariant 测试 |
-| MCP server 拿到错误租户的请求 | 请求带 `X-Helix-Tenant` header；server 侧用此做二次校验（manifest 强制） |
+| MCP server 拿到错误租户的请求 | 请求带 `X-Expert-Work-Tenant` header；server 侧用此做二次校验（manifest 强制） |
 | 恶意 server 注入 prompt | server 返回的 content 经 [orchestrator output filter middleware] 处理；gateway 仅截断不解析语义 |
 | 工具偷换（server 把 read_file 替换成 write_file） | allowlist 是 (server, tool_name)；语义偷换属于 server 上游攻击，由 [18 Manifest 供应链] cosign 签名约束 |
 | stdio MCP 命令注入 | M0 不支持 stdio；M1 支持时仅允许 manifest 声明的 path，不允许 shell 字符串 |

@@ -76,18 +76,18 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 
-from helix_agent.common.dlp import scan_and_redact
-from helix_agent.common.observability import (
-    HelixComponent,
-    helix_counter,
-    helix_gauge,
-    helix_histogram,
-    helix_span,
+from expert_work.common.dlp import scan_and_redact
+from expert_work.common.observability import (
+    ExpertWorkComponent,
+    expert_work_counter,
+    expert_work_gauge,
+    expert_work_histogram,
+    expert_work_span,
 )
-from helix_agent.common.output_screen import REFUSAL_TEXT, screen_output
-from helix_agent.common.spotlight import spotlight_untrusted
-from helix_agent.common.uplift_metrics import record_memory_inject_mode
-from helix_agent.protocol import (
+from expert_work.common.output_screen import REFUSAL_TEXT, screen_output
+from expert_work.common.spotlight import spotlight_untrusted
+from expert_work.common.uplift_metrics import record_memory_inject_mode
+from expert_work.protocol import (
     AuditAction,
     AuditEntry,
     AuditResult,
@@ -95,14 +95,14 @@ from helix_agent.protocol import (
     Plan,
     StructuredOutputSpec,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
-from helix_agent.runtime.middleware import (
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
+from expert_work.runtime.middleware import (
     LLMOutputValidationError,
     MiddlewareChain,
     MiddlewareContext,
 )
-from helix_agent.runtime.tokens import CharTokenEstimator, TokenEstimator
+from expert_work.runtime.tokens import CharTokenEstimator, TokenEstimator
 from orchestrator.context import (
     CompactionStats,
     ContextCompressor,
@@ -186,12 +186,12 @@ _MAX_STEPS_WRAPUP_INSTRUCTION = (
 # concurrency (1.0 == fully sequential, MAX_TOOL_WORKERS == max parallel).
 # Two counters instead of a histogram because validate_metric_name reserves
 # histograms for duration-shaped ``_seconds`` metrics.
-_tools_stages_total = helix_counter(
-    "helix_tools_stages_total",
+_tools_stages_total = expert_work_counter(
+    "expert_work_tools_stages_total",
     "Tool-call stages executed (Stream L.L6).",
 )
-_tools_dispatched_total = helix_counter(
-    "helix_tools_dispatched_total",
+_tools_dispatched_total = expert_work_counter(
+    "expert_work_tools_dispatched_total",
     (
         "Individual tool calls dispatched within L6 stages — divide by "
         "stages to get average concurrency."
@@ -201,96 +201,96 @@ _tools_dispatched_total = helix_counter(
 # Stream TE-3 — per-tool observability. ``outcome`` is one of ``ok`` (tool
 # returned a non-error result), ``error`` (tool raised / returned an error /
 # unknown tool), or ``blocked`` (a pre-dispatch middleware refused the call).
-# A separate ``helix_tool_error_total`` would be redundant: errors are exactly
-# ``helix_tool_call_total{outcome="error"}`` + ``{outcome="blocked"}``.
+# A separate ``expert_work_tool_error_total`` would be redundant: errors are exactly
+# ``expert_work_tool_call_total{outcome="error"}`` + ``{outcome="blocked"}``.
 # Cardinality: ``outcome`` is a fixed 3-value set; the ``tool`` label is
 # normalised by ``_metric_tool_label`` so externally-defined MCP tool names
 # (``mcp:<server>.<tool>`` — a single server can expose dozens) collapse to
 # ``mcp:<server>`` and never blow up the series count. tenant / call_id are
 # deliberately omitted — those unbounded identifiers live in the TE-2 audit row.
-_tool_call_total = helix_counter(
-    "helix_tool_call_total",
+_tool_call_total = expert_work_counter(
+    "expert_work_tool_call_total",
     "Tool dispatches by tool name and outcome (ok / error / blocked).",
     ("tool", "outcome"),
 )
-_tool_latency_seconds = helix_histogram(
-    "helix_tool_latency_seconds",
+_tool_latency_seconds = expert_work_histogram(
+    "expert_work_tool_latency_seconds",
     "Wall-clock seconds per tool dispatch, labelled by tool name.",
     ("tool",),
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
 )
 #: Stream CM-0 — DB→/workspace projections per turn, by outcome
 #: (projected = files written / skipped = unchanged / error = best-effort fail).
-_cm_projection_total = helix_counter(
-    "helix_cm_projection_total",
+_cm_projection_total = expert_work_counter(
+    "expert_work_cm_projection_total",
     "Workspace state projections at the turn boundary (Stream CM-0).",
     ("outcome",),
 )
 #: Stream CM-0 (N1) — size (chars) of the most recent plan recitation injected
 #: into the prompt tail. Watches for plan-recitation bloat in long runs.
-_cm_recitation_chars = helix_gauge(
-    "helix_cm_recitation_chars",
+_cm_recitation_chars = expert_work_gauge(
+    "expert_work_cm_recitation_chars",
     "Characters of the plan recitation injected into the prompt tail (Stream CM-0 N1).",
 )
 #: Stream CM-1 — failed tool calls by error class and tool name, fed into
 #: the ``<recovery-advisory>`` channel. Raw success/error counts stay on
-#: ``helix_tool_call_total{outcome}``; this adds the recovery taxonomy.
-_cm_tool_error_total = helix_counter(
-    "helix_cm_tool_error_total",
+#: ``expert_work_tool_call_total{outcome}``; this adds the recovery taxonomy.
+_cm_tool_error_total = expert_work_counter(
+    "expert_work_cm_tool_error_total",
     "Classified tool failures routed into the recovery advisory (Stream CM-1).",
     ("error_class", "tool"),
 )
 #: Stream CM-1 — size (chars) of the most recent recovery advisory
 #: injected into the prompt tail. Watches for advisory bloat.
-_cm_recovery_advisory_chars = helix_gauge(
-    "helix_cm_recovery_advisory_chars",
+_cm_recovery_advisory_chars = expert_work_gauge(
+    "expert_work_cm_recovery_advisory_chars",
     "Characters of the recovery advisory injected into the prompt tail (Stream CM-1).",
 )
 #: Stream CM-2 — working-memory sliding window passes by outcome. A high
 #: ``trimmed`` rate vs ``noop`` shows how many compressor (LLM) calls the
 #: cheap gate spared. ``noop`` covers under-threshold + nothing-to-cut.
-_cm_working_window_total = helix_counter(
-    "helix_cm_working_window_trim_total",
+_cm_working_window_total = expert_work_counter(
+    "expert_work_cm_working_window_trim_total",
     "Working-memory sliding-window passes at the agent_node entry (Stream CM-2).",
     ("outcome",),
 )
 #: Stream CM-2 — user turns dropped by the most recent window trim (0 when
 #: the pass was a no-op). Watches trim depth on long conversations.
-_cm_working_window_dropped_turns = helix_gauge(
-    "helix_cm_working_window_dropped_turns",
+_cm_working_window_dropped_turns = expert_work_gauge(
+    "expert_work_cm_working_window_dropped_turns",
     "User turns dropped by the most recent working-memory window trim (Stream CM-2).",
 )
 #: Stream CM-3 — pre-compaction flush passes by outcome. ``flushed`` =
 #: memories written from the discarded middle; ``empty`` = nothing
 #: extracted (or a swallowed best-effort failure — see memory.flush logs).
-_cm_precompaction_flush_total = helix_counter(
-    "helix_cm_precompaction_flush_total",
+_cm_precompaction_flush_total = expert_work_counter(
+    "expert_work_cm_precompaction_flush_total",
     "Pre-compaction memory flushes before a compressor pass (Stream CM-3).",
     ("outcome",),
 )
 #: Stream CM-3 — memories written by the most recent pre-compaction flush.
-_cm_precompaction_flush_memories = helix_gauge(
-    "helix_cm_precompaction_flush_memories",
+_cm_precompaction_flush_memories = expert_work_gauge(
+    "expert_work_cm_precompaction_flush_memories",
     "Memories written by the most recent pre-compaction flush (Stream CM-3).",
 )
 #: Stream CM-5 — oversized tool results externalized to the workspace
 #: (externalized = full output saved + reference footer appended /
 #: degraded = write failed, the truncated content stands alone).
-_cm_tool_overflow_total = helix_counter(
-    "helix_cm_tool_overflow_total",
+_cm_tool_overflow_total = expert_work_counter(
+    "expert_work_cm_tool_overflow_total",
     "Tool-result overflow externalizations (Stream CM-5).",
     ("outcome", "tool"),
 )
 #: Stream CM-5 — size (chars) of the most recent externalized overflow.
-_cm_tool_overflow_chars = helix_gauge(
-    "helix_cm_tool_overflow_chars",
+_cm_tool_overflow_chars = expert_work_gauge(
+    "expert_work_cm_tool_overflow_chars",
     "Characters of the most recent externalized tool-result overflow (Stream CM-5).",
 )
 #: Stream CM-9 — limit-hit effort escalations by signal (loop = the
 #: loop-detection middleware tripped last turn; budget = step_count
 #: crossed 75% of max_steps).
-_cm_effort_escalation_total = helix_counter(
-    "helix_cm_effort_escalation_total",
+_cm_effort_escalation_total = expert_work_counter(
+    "expert_work_cm_effort_escalation_total",
     "Turns served by the escalated higher-effort caller (Stream CM-9).",
     ("signal",),
 )
@@ -299,40 +299,40 @@ _cm_effort_escalation_total = helix_counter(
 #: the remaining budget (visible marker); ``dropped`` = whole items past the
 #: boundary were left out. Incremented per affected item; the default path
 #: (top_k=5 ordinary memories, far under budget) never touches it.
-_memory_injection_truncated_total = helix_counter(
-    "helix_memory_injection_truncated_total",
+_memory_injection_truncated_total = expert_work_counter(
+    "expert_work_memory_injection_truncated_total",
     "Recalled memory items clipped by the injection token budget (Stream RT-2).",
     ("outcome",),
 )
 # Stream PI-2 — model responses blocked by output screening, by the violation
 # category that fired (``secret`` / ``exfil_url`` / ``canary``). A non-zero
 # rate here is the inline-injection backstop catching a leak the model emitted.
-_output_screen_blocked_total = helix_counter(
-    "helix_output_screen_blocked_total",
+_output_screen_blocked_total = expert_work_counter(
+    "expert_work_output_screen_blocked_total",
     "Model responses blocked by PI-2 output screening, by violation category.",
     ("category",),
 )
 # Stream PI-2b — output-judge rulings by verdict (``aligned`` / ``misaligned``
 # / ``leak`` / ``error``). ``misaligned`` + ``leak`` are blocks; ``error`` is a
 # judge failure routed through the configured fail-open / fail-closed policy.
-_output_judge_total = helix_counter(
-    "helix_output_judge_total",
+_output_judge_total = expert_work_counter(
+    "expert_work_output_judge_total",
     "PI-2b output-judge rulings by verdict (aligned/misaligned/leak/error).",
     ("verdict",),
 )
 # Stream PI-3b — action-judge rulings on proposed tool calls
 # (``aligned`` / ``misaligned`` / ``error``). A misaligned call is denied
 # (block mode) or routed to the approval gate (approval mode).
-_action_screen_total = helix_counter(
-    "helix_action_screen_total",
+_action_screen_total = expert_work_counter(
+    "expert_work_action_screen_total",
     "PI-3b action-judge rulings on tool calls (aligned/misaligned/error).",
     ("verdict",),
 )
 # Stream 7.4 — outbound DLP redactions on terminal responses, by PII category
 # (``email`` / ``phone_cn`` / ``id_card_cn`` / ``credit_card``). Conditional
 # output: the reply is redacted in place, not blocked.
-_output_dlp_redacted_total = helix_counter(
-    "helix_output_dlp_redacted_total",
+_output_dlp_redacted_total = expert_work_counter(
+    "expert_work_output_dlp_redacted_total",
     "Outbound DLP redactions on terminal responses, by PII category.",
     ("category",),
 )
@@ -340,8 +340,8 @@ _output_dlp_redacted_total = helix_counter(
 # ``outcome``: ``conform`` = the free candidate already validated (zero extra
 # calls); ``cache_hit`` = the schema-enforced resend was served from the E.13
 # cache; ``resend`` = one extra schema-enforced LLM call was issued.
-_llm_structured_finalize_total = helix_counter(
-    "helix_llm_structured_finalize_total",
+_llm_structured_finalize_total = expert_work_counter(
+    "expert_work_llm_structured_finalize_total",
     "Structured finalization outcomes on terminal agent turns (Stream RT-1 PR-3).",
     ("outcome",),
 )
@@ -779,9 +779,9 @@ def build_react_graph(
         else:
             # Wrap the LLM call so a cancel mid-call interrupts the
             # in-flight await rather than waiting it out (E.15).
-            # 10.1 — one ``helix.orchestrator.llm_call`` child span per
+            # 10.1 — one ``expert_work.orchestrator.llm_call`` child span per
             # provider call, attached under the session root span.
-            with helix_span(HelixComponent.ORCHESTRATOR, "llm_call"):
+            with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "llm_call"):
                 response = await token.run_cancellable(
                     active_caller(messages=messages, tools=tools)
                 )
@@ -1412,7 +1412,7 @@ def _render_memory_lines(
        (visible marker) and the pass stops — later items are dropped.
 
     Truncated / dropped items are counted on
-    ``helix_memory_injection_truncated_total{outcome}``.
+    ``expert_work_memory_injection_truncated_total{outcome}``.
     """
     lines = [f"- ({item.kind}) {item.content}" for item in memories]
     costs = [count(line) for line in lines]
@@ -1473,7 +1473,7 @@ def _inject_memories(
 
     ``mode='per_session'`` (Sprint #8 default, Mini-ADR U-8): insert
     the memory block once at messages position 1 (right after the
-    user's task) with ``additional_kwargs["helix_cache_anchor"] = True``
+    user's task) with ``additional_kwargs["expert_work_cache_anchor"] = True``
     so the Anthropic adapter (Mini-ADR U-7) marks it with
     ``cache_control: ephemeral``. The prefix
     ``[system_payload, task, memories]`` is then cached across every
@@ -1491,7 +1491,7 @@ def _inject_memories(
     """
     # Stream PI-1b — recalled memory is untrusted (an injection can be written
     # into a memory in an earlier session and recalled here). Spotlight the
-    # item block (the helix-owned header stays trusted) so the model treats it
+    # item block (the expert-work-owned header stays trusted) so the model treats it
     # as data, not instructions.
     items = "\n".join(
         _render_memory_lines(
@@ -1516,7 +1516,7 @@ def _inject_memories(
     # first non-system slot for downstream content).
     block = HumanMessage(
         content=body,
-        additional_kwargs={"helix_cache_anchor": True},
+        additional_kwargs={"expert_work_cache_anchor": True},
     )
     if not messages:
         return [block]
@@ -1569,7 +1569,7 @@ def _build_recovery_advisory(failures: list[ClassifiedToolError]) -> HumanMessag
     sees it), unlike the plan / per_session-memory injections which ride
     the prompt view only. Being a ``type=human`` message in the checkpoint,
     it would otherwise surface as a spurious USER bubble in the conversation
-    detail (the known CM-1 leak). ``helix_hide_from_ui`` marks it so the UI
+    detail (the known CM-1 leak). ``expert_work_hide_from_ui`` marks it so the UI
     bubble view (``control_plane.transcript.read_turns`` with
     ``include_hidden=False``) filters it, while the durable record + the
     search/audit mirror stay faithful (RT-ADR-9, Option A) and it still
@@ -1577,7 +1577,7 @@ def _build_recovery_advisory(failures: list[ClassifiedToolError]) -> HumanMessag
     """
     return HumanMessage(
         content=render_recovery_advisory(failures),
-        additional_kwargs={"helix_hide_from_ui": True},
+        additional_kwargs={"expert_work_hide_from_ui": True},
     )
 
 
@@ -1758,7 +1758,7 @@ async def _finalize_structured_response(
         _llm_structured_finalize_total.labels(outcome="resend").inc()
         # Same span + cancellation discipline as the primary call (E.15 /
         # 10.1): a cancel mid-resend interrupts the in-flight await.
-        with helix_span(HelixComponent.ORCHESTRATOR, "llm_call"):
+        with expert_work_span(ExpertWorkComponent.ORCHESTRATOR, "llm_call"):
             response = await token.run_cancellable(
                 caller(messages=finalize_messages, tools=[], output_schema=spec)
             )
@@ -1973,9 +1973,11 @@ async def _dispatch_tool(
             args = mw_ctx.payload.get("tool_args", args) or {}
 
         tool = registry.get_required(name)
-        # 10.1 — one ``helix.orchestrator.tool_call`` child span per tool
+        # 10.1 — one ``expert_work.orchestrator.tool_call`` child span per tool
         # dispatch, attached under the session root span.
-        with helix_span(HelixComponent.ORCHESTRATOR, "tool_call", attributes={"tool": name}):
+        with expert_work_span(
+            ExpertWorkComponent.ORCHESTRATOR, "tool_call", attributes={"tool": name}
+        ):
             outcome = await _invoke_tool(
                 tool,
                 args,
@@ -2126,8 +2128,8 @@ def _record_tool_metrics(name: str, started: float, outcome: str) -> None:
     """Emit per-tool Prometheus metrics for one dispatch (Stream TE-3).
 
     Unconditional (unlike the audit emit, which needs a tenant): every
-    dispatch increments ``helix_tool_call_total{tool,outcome}`` and
-    observes ``helix_tool_latency_seconds{tool}``. ``outcome`` is one of
+    dispatch increments ``expert_work_tool_call_total{tool,outcome}`` and
+    observes ``expert_work_tool_latency_seconds{tool}``. ``outcome`` is one of
     ``ok`` / ``error`` / ``blocked``; ``tool`` is normalised for cardinality
     via :func:`_metric_tool_label`.
     """
@@ -2532,7 +2534,7 @@ async def _invoke_tool(
     body = replacement_body if replacement_body is not None else result.content
     # Stream PI-1b — a tool's output is untrusted (web pages, MCP servers, files
     # an attacker can control = the classic indirect-injection vector). Spotlight
-    # it so embedded instructions read as data. The helix-owned overflow footer
+    # it so embedded instructions read as data. The expert-work-owned overflow footer
     # stays trusted (outside the fence).
     tool_content = spotlight_untrusted(body, nonce=spotlight_nonce) if spotlight_nonce else body
     content = tool_content + footer if footer is not None else tool_content

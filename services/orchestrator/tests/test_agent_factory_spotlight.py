@@ -7,7 +7,7 @@ Channel content-wrapping (memory/RAG, tool results) is PI-1b.
 
 from __future__ import annotations
 
-from helix_agent.common.spotlight import SPOTLIGHT_SYSTEM_CLAUSE
+from expert_work.common.spotlight import SPOTLIGHT_SYSTEM_CLAUSE
 from orchestrator.agent_factory import _assemble_system_prompt
 
 

@@ -3,7 +3,7 @@
 Two operator-driven simplifications to the sandbox runtime:
 
 1. **Collapse the two image variants (`minimal` + `office`) into one image**
-   (`helix-sandbox`) that carries the full toolchain — Python + data/office/media
+   (`expert-work-sandbox`) that carries the full toolchain — Python + data/office/media
    libraries + the system binaries (`soffice`/`poppler`/`ffmpeg`) **+ Node.js**.
    Removes the `image_variant` field and all variant-selection machinery.
 2. **Persistent workspace becomes automatic for any user-scoped run** — driven by
@@ -99,7 +99,7 @@ libraries on top and `COPY`d those same assets from here. So:
 - **Makefile**: `build-sandbox-office` removed; `build-sandbox` builds the one
   image; `rebuild-sandbox` simplified.
 - **Config**: `infra/docker-compose.yml`, `infra/README.md`,
-  `infra/.env.example` (`HELIX_SANDBOX_SANDBOX_IMAGE_OFFICE` dropped — committed via
+  `infra/.env.example` (`EXPERT_WORK_SANDBOX_SANDBOX_IMAGE_OFFICE` dropped — committed via
   git add, harness can't edit it directly).
 
 ### 1.3 Migration / compatibility

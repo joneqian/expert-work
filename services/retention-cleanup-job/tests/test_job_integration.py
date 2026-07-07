@@ -29,13 +29,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from testcontainers.postgres import PostgresContainer
 
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     SqlAuditLogStore,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     AuditEntry,
     AuditResult,
@@ -44,10 +44,10 @@ from retention_cleanup_job.job import RetentionCleanupJob
 
 pytestmark = pytest.mark.integration
 
-ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/helix-persistence/alembic.ini"
+ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/expert-work-persistence/alembic.ini"
 
-APP_ROLE = "helix_app_d3_retention"
-APP_PASSWORD = "helix_app_d3_retention_pw"  # test-only fixture password
+APP_ROLE = "expert_work_app_d3_retention"
+APP_PASSWORD = "expert_work_app_d3_retention_pw"  # test-only fixture password
 
 
 def _sync_dsn(container: PostgresContainer) -> str:
@@ -110,7 +110,7 @@ def db_fixture(
 ) -> Iterator[tuple[AsyncEngine, AsyncEngine, str]]:
     """Yield ``(app_engine, worker_engine, sync_admin_dsn)``.
 
-    * ``app_engine`` — connects as ``helix_app_d3_retention``. Used by
+    * ``app_engine`` — connects as ``expert_work_app_d3_retention``. Used by
       ``SqlAuditLogStore`` to seed audit_log rows the way production
       code does.
     * ``worker_engine`` — connects directly as ``retention_cleanup_worker``.
@@ -358,7 +358,7 @@ async def test_event_log_retention_deletes_old_rows(
         report = await job.run_once()
         assert report.event_deleted == 1
 
-        # The assertion SELECT runs as the app role (helix_app_d3_retention).
+        # The assertion SELECT runs as the app role (expert_work_app_d3_retention).
         # event_log has FORCE ROW LEVEL SECURITY with a policy keyed on the
         # ``app.tenant_id`` GUC (migration 0005); without setting it, every
         # row is filtered out. The original test set ``ROLE audit_writer``

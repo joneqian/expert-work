@@ -83,7 +83,7 @@ const DETAIL_ENVELOPE = {
       created_at: "2026-04-12T09:00:00Z",
       updated_at: "2026-05-25T07:00:00Z",
       spec: {
-        apiVersion: "helix/v1",
+        apiVersion: "expert_work/v1",
         kind: "Agent",
         metadata: { name: AGENT_NAME, version: AGENT_VERSION },
         spec: {

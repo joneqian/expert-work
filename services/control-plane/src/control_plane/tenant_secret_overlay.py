@@ -9,9 +9,9 @@ so every resolve call keeps its exact platform-mode error contract.
 
 Design note (revises §9.2.3 of STREAM-HX-DESIGN): the design sketched new
 optional getter kwargs on ``CredentialsResolver`` itself, but the
-``helix-common/credentials`` path is harness-blocked for edits. A subclass
+``expert-work-common/credentials`` path is harness-blocked for edits. A subclass
 in control-plane is semantically equivalent — the merge logic still lives
-in the service layer and helix-common stays untouched (arguably a closer
+in the service layer and expert-work-common stays untouched (arguably a closer
 fit to HX-H3's "resolver stays a pure resolver").
 """
 
@@ -21,8 +21,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
-from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
-from helix_agent.protocol import Provider, Tool
+from expert_work.common.credentials import CredentialsResolver, CredentialsResolverError
+from expert_work.protocol import Provider, Tool
 
 TenantProviderViewGetter = Callable[[UUID], Awaitable[dict[Provider, str]]]
 TenantToolViewGetter = Callable[[UUID], Awaitable[dict[Tool, str]]]

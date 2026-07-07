@@ -24,7 +24,7 @@ from control_plane.runtime import (
     _load_mcp_server_configs,
     build_mcp_pool,
 )
-from helix_agent.testing import InMemorySecretStore
+from expert_work.testing import InMemorySecretStore
 from orchestrator.tools import (
     MCPClient,
     MCPServerConfig,
@@ -100,7 +100,7 @@ def test_load_oauth2_with_client_id_and_scope(tmp_path: Path) -> None:
                 "transport": "streamable_http",
                 "url": "https://mcp.linear.app/",
                 "auth_type": "oauth2",
-                "auth_config": {"client_id": "helix-agent", "scope": "read"},
+                "auth_config": {"client_id": "expert-work", "scope": "read"},
             }
         ],
     )
@@ -126,7 +126,7 @@ async def test_build_client_revalidates_url_at_runtime() -> None:
     """Audit #4: the runtime connect-out re-validates the URL so a private /
     metadata target (or any row that reached the DB unvalidated) cannot be
     dialed — registration, probe, and runtime share one gate."""
-    from helix_agent.common.url_validation import RemoteURLError
+    from expert_work.common.url_validation import RemoteURLError
 
     cfg = MCPServerConfig(
         name="internal",

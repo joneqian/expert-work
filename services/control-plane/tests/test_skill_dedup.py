@@ -15,9 +15,9 @@ import pytest
 
 from control_plane.skill_distiller import SkillDraft
 from control_plane.skill_evolution_wiring import _EmbeddingDeduper
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import CurationCandidateRecord
-from helix_agent.protocol.skill import SkillStatus
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import CurationCandidateRecord
+from expert_work.protocol.skill import SkillStatus
 
 _TENANT = UUID("44444444-4444-4444-4444-444444444444")
 

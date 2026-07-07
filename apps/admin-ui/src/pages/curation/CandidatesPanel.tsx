@@ -293,7 +293,7 @@ export function CandidatesPanel() {
                 <pre
                   data-testid="curation-trajectory-body"
                   style={{
-                    background: "var(--hx-surface-raised)",
+                    background: "var(--ew-surface-raised)",
                     padding: 12,
                     borderRadius: 4,
                     fontSize: 11,

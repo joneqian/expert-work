@@ -1,8 +1,8 @@
 {
-  "uid": "helix-orchestrator",
-  "title": "Helix \u2014 Orchestrator",
+  "uid": "expert-work-orchestrator",
+  "title": "Expert Work \u2014 Orchestrator",
   "tags": [
-    "helix",
+    "expert_work",
     "g.7"
   ],
   "timezone": "browser",
@@ -38,7 +38,7 @@
       "title": "LLM tokens / s (by direction)",
       "datasource": {
         "type": "prometheus",
-        "uid": "helix-prometheus"
+        "uid": "expert-work-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -58,9 +58,9 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "helix-prometheus"
+            "uid": "expert-work-prometheus"
           },
-          "expr": "sum by (direction) (rate(helix_llm_tokens_total[5m]))",
+          "expr": "sum by (direction) (rate(expert_work_llm_tokens_total[5m]))",
           "legendFormat": "{{direction}}"
         }
       ]
@@ -71,7 +71,7 @@
       "title": "Session TTFT P95",
       "datasource": {
         "type": "prometheus",
-        "uid": "helix-prometheus"
+        "uid": "expert-work-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -91,9 +91,9 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "helix-prometheus"
+            "uid": "expert-work-prometheus"
           },
-          "expr": "helix:sli:session_ttft:p95_5m",
+          "expr": "expert_work:sli:session_ttft:p95_5m",
           "legendFormat": "p95"
         }
       ]
@@ -104,7 +104,7 @@
       "title": "Tool-call duration P95 (by tool_type)",
       "datasource": {
         "type": "prometheus",
-        "uid": "helix-prometheus"
+        "uid": "expert-work-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -124,9 +124,9 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "helix-prometheus"
+            "uid": "expert-work-prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, tool_type) (rate(helix_tool_call_duration_seconds_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le, tool_type) (rate(expert_work_tool_call_duration_seconds_bucket[5m])))",
           "legendFormat": "{{tool_type}}"
         }
       ]
@@ -137,7 +137,7 @@
       "title": "Durable resume P95 (SLI, 5m)",
       "datasource": {
         "type": "prometheus",
-        "uid": "helix-prometheus"
+        "uid": "expert-work-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -157,9 +157,9 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "helix-prometheus"
+            "uid": "expert-work-prometheus"
           },
-          "expr": "helix:sli:durable_resume:p95_5m",
+          "expr": "expert_work:sli:durable_resume:p95_5m",
           "legendFormat": "p95"
         }
       ]
@@ -170,7 +170,7 @@
       "title": "Session end-to-end P95 (SLI, 5m, outcome=success)",
       "datasource": {
         "type": "prometheus",
-        "uid": "helix-prometheus"
+        "uid": "expert-work-prometheus"
       },
       "gridPos": {
         "h": 8,
@@ -190,9 +190,9 @@
           "refId": "A",
           "datasource": {
             "type": "prometheus",
-            "uid": "helix-prometheus"
+            "uid": "expert-work-prometheus"
           },
-          "expr": "helix:sli:session_duration:p95_5m",
+          "expr": "expert_work:sli:session_duration:p95_5m",
           "legendFormat": "p95"
         }
       ]

@@ -60,46 +60,46 @@ cases:
     path: path_b
 
   # ---------- ask_image keyword recall (6 Path B) ----------
-  # image_ref format: helix://image/{tenant}/{thread}/{image}
+  # image_ref format: expert_work://image/{tenant}/{thread}/{image}
 
   - id: ask-image-001-color
     scenario: ask_image
-    image_ref: "helix://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c1"
+    image_ref: "expert_work://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c1"
     question: What color is the dominant background?
     mock_vl_reply: The dominant background colour is a deep navy blue.
     expected_keyword: blue
 
   - id: ask-image-002-count-people
     scenario: ask_image
-    image_ref: "helix://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c2"
+    image_ref: "expert_work://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c2"
     question: How many people appear in the image?
     mock_vl_reply: I count three people in the foreground.
     expected_keyword: three
 
   - id: ask-image-003-text-extraction
     scenario: ask_image
-    image_ref: "helix://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c3"
+    image_ref: "expert_work://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c3"
     question: What does the sign say?
-    mock_vl_reply: The sign reads "Welcome to Helix" in white letters.
+    mock_vl_reply: The sign reads "Welcome to Expert Work" in white letters.
     expected_keyword: Welcome
 
   - id: ask-image-004-object-identification
     scenario: ask_image
-    image_ref: "helix://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c4"
+    image_ref: "expert_work://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c4"
     question: What animal is in the image?
     mock_vl_reply: A tabby cat sitting on a bookshelf.
     expected_keyword: cat
 
   - id: ask-image-005-scene-description
     scenario: ask_image
-    image_ref: "helix://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c5"
+    image_ref: "expert_work://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c5"
     question: Describe the scene briefly.
     mock_vl_reply: An outdoor cafe with several round tables and a striped awning.
     expected_keyword: cafe
 
   - id: ask-image-006-chart-reading
     scenario: ask_image
-    image_ref: "helix://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c6"
+    image_ref: "expert_work://image/00000000-0000-0000-0000-0000000000aa/00000000-0000-0000-0000-0000000000bb/00000000-0000-0000-0000-0000000000c6"
     question: Which bar is tallest in the chart?
     mock_vl_reply: The rightmost bar labelled "Q4" is the tallest, around 85 units.
     expected_keyword: Q4

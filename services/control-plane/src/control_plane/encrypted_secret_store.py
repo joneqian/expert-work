@@ -1,15 +1,15 @@
 """Encrypted-secret vault — Stream Q (Mini-ADR Q-1/Q-2/Q-7).
 
-A :class:`~helix_agent.runtime.secret_store.base.SecretStore` backend that
+A :class:`~expert_work.runtime.secret_store.base.SecretStore` backend that
 stores secret **values** AES-256-GCM-encrypted at rest in the
 ``encrypted_secret`` table, so a platform admin can paste a raw provider key in
 the web UI and have it usable by agents without ever writing plaintext to the
 DB or a file.
 
-The class lives in control-plane (not helix-persistence) because it needs
+The class lives in control-plane (not expert-work-persistence) because it needs
 ``cryptography`` + the RLS ``bypass_rls_session`` glue — the same reasoning that
 keeps the ``Resolving*`` credential wrappers here (see ``runtime.py``). The ORM
-row + migration live in helix-persistence.
+row + migration live in expert-work-persistence.
 
 Security (Mini-ADR Q-7): values are handled as :class:`pydantic.SecretStr` at
 the API boundary and passed to :meth:`put` as plain ``str`` only at the encrypt
@@ -31,8 +31,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence.models import EncryptedSecretRow
-from helix_agent.runtime.secret_store.base import SecretNotFoundError, SecretStoreError
+from expert_work.persistence.models import EncryptedSecretRow
+from expert_work.runtime.secret_store.base import SecretNotFoundError, SecretStoreError
 
 #: The single env-sourced KEK version tag stamped on rows it encrypts. A real
 #: KMS-wrapped KEK (prod follow-up) bumps this so the decrypt path can dispatch
@@ -52,7 +52,7 @@ def build_kek_from_b64(value: str) -> bytes:
     try:
         kek = base64.b64decode(value, validate=True)
     except (ValueError, binascii.Error) as exc:
-        msg = "HELIX_AGENT_SECRET_ENCRYPTION_KEY is not valid base64"
+        msg = "EXPERT_WORK_SECRET_ENCRYPTION_KEY is not valid base64"
         raise ValueError(msg) from exc
     if len(kek) != _KEK_BYTES:
         msg = f"secret encryption KEK must be {_KEK_BYTES} bytes (got {len(kek)})"

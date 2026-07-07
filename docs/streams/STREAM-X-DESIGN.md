@@ -4,7 +4,7 @@
 
 ## 0. 背景 / 缺口
 
-**产品定位**:helix 服务**企业员工(非程序员)**。对员工最直接的价值是"开箱即用的预制能力"(会议纪要、邮件起草、周报、文档摘要、合同要点),一键开启、无需配置。平台精选 skill 库正是这个载体;租户仍可自建专属 skill。
+**产品定位**:Expert Work 服务**企业员工(非程序员)**。对员工最直接的价值是"开箱即用的预制能力"(会议纪要、邮件起草、周报、文档摘要、合同要点),一键开启、无需配置。平台精选 skill 库正是这个载体;租户仍可自建专属 skill。
 
 **两个核实出的关键现状(file:line):**
 
@@ -37,13 +37,13 @@
 
 ## 1.5 跨项目调研结论(deer-flow / OpenClaw / Hermes —— 取精华去糟粕)
 
-调研三个 agent 项目的 skill 加载机制,**三者一致收敛到"渐进式披露"**:system prompt 只注入 skill **name+description(+location)**,模型按描述自选,再用 read/`skill_view` 工具按需加载**全文**。这正是 helix 已有的原语(`lazy_load` 标志 + `skill_view` 工具,Stream U)。结论落到 X 的细化:
+调研三个 agent 项目的 skill 加载机制,**三者一致收敛到"渐进式披露"**:system prompt 只注入 skill **name+description(+location)**,模型按描述自选,再用 read/`skill_view` 工具按需加载**全文**。这正是 Expert Work 已有的原语(`lazy_load` 标志 + `skill_view` 工具,Stream U)。结论落到 X 的细化:
 
-- **R1 渐进式披露是默认(精华,全员一致)**:**平台 skill 默认 `lazy_load=true`** —— 大库下只把 name+description 进 prompt(helix 的 `skill_summaries`),全文经 `skill_view` 按需取。**关键**:X-4 接线必须让 `skill_view` 运行时工具的 `_SkillResolverShim` **同样做 tenant-first→platform-fallback 双查**(不只 build 期的 `_load_skills`),否则模型选了平台 skill 却 view 不到。
+- **R1 渐进式披露是默认(精华,全员一致)**:**平台 skill 默认 `lazy_load=true`** —— 大库下只把 name+description 进 prompt(Expert Work 的 `skill_summaries`),全文经 `skill_view` 按需取。**关键**:X-4 接线必须让 `skill_view` 运行时工具的 `_SkillResolverShim` **同样做 tenant-first→platform-fallback 双查**(不只 build 期的 `_load_skills`),否则模型选了平台 skill 却 view 不到。
 - **R2 名字遮蔽,租户优先(Hermes "local>external,按名跳重"验证 X-4/X-6)**:resolve **和** 合并列表 **和** `skill_view` allowlist 三处都按 name 去重、**租户同名遮蔽平台**,语义一致。
 - **R3 档位门控 = 资格过滤(对齐 OpenClaw OS/bin、Hermes requires_toolsets 的 eligibility 模式)**:租户**不 entitled 的平台 skill 不进 `<available_skills>` 摘要**(模型看不到也就选不了),列表里给"锁"标记。`required_models` 不匹配同理过滤(已有)。
 - **R4 描述质量驱动选择(三者皆 model-driven,非规则)**:平台 skill 必须写强"何时用"描述 —— 选择全靠模型读 description。X-5 平台 skill 编辑器对 description 给"何时使用"引导。
-- **R5 helix 已领先三者的点,务必保留**:① **版本化 + pin(`name@N`)** —— 三者全无版本/pin,helix 有,平台 skill 也能 pin;② **per-skill `tool_names` + 工具冲突检测** —— 比三者"skill 拿到 agent 全部工具"更细;③ **high-risk 门控 + moderation** —— 对应 Hermes 的 trust 分级,平台 skill 由 system_admin 审(最高信任档)但仍过威胁扫描(纵深防御)。
+- **R5 Expert Work 已领先三者的点,务必保留**:① **版本化 + pin(`name@N`)** —— 三者全无版本/pin,Expert Work 有,平台 skill 也能 pin;② **per-skill `tool_names` + 工具冲突检测** —— 比三者"skill 拿到 agent 全部工具"更细;③ **high-risk 门控 + moderation** —— 对应 Hermes 的 trust 分级,平台 skill 由 system_admin 审(最高信任档)但仍过威胁扫描(纵深防御)。
 - **R6 follow-up(本 Stream 不做)**:平台 skill resolve 缓存(仿 deer-flow 后台缓存 / Hermes 两层缓存,现按需查 DB 即可,skill 量小);库变大后的语义/embedding 路由(deer-flow 指出 100+ skill 时纯描述选择会漏)。
 
 ## 2. 迁移与风险

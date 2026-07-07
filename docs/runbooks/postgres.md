@@ -16,12 +16,12 @@
 
 ## 诊断
 
-1. **存活**：`docker compose exec postgres pg_isready -U helix_agent`。
+1. **存活**：`docker compose exec postgres pg_isready -U expert_work`。
 2. **连接数**：
-   `docker compose exec postgres psql -U helix_agent -d helix_agent_dev -c "SELECT count(*), state FROM pg_stat_activity GROUP BY state;"`
+   `docker compose exec postgres psql -U expert_work -d expert_work_dev -c "SELECT count(*), state FROM pg_stat_activity GROUP BY state;"`
    —— 接近 `max_connections`（100）= 连接耗尽。
 3. **PgBouncer**：`docker compose ps pgbouncer`；
-   `psql -h localhost -p 6432 -U helix_agent pgbouncer -c "SHOW POOLS;"` 看池水位。
+   `psql -h localhost -p 6432 -U expert_work pgbouncer -c "SHOW POOLS;"` 看池水位。
 4. **慢查询 / 锁**：
    `SELECT * FROM pg_stat_activity WHERE state != 'idle' ORDER BY query_start;`
    查长事务；`pg_locks` 查锁等待。

@@ -1,6 +1,6 @@
 """Control Plane settings — Stream B.1.
 
-Pydantic v2 ``BaseSettings`` with ``HELIX_AGENT_`` env prefix. The default
+Pydantic v2 ``BaseSettings`` with ``EXPERT_WORK_`` env prefix. The default
 values point at the local ``infra/docker-compose.yml`` PgBouncer so a
 fresh checkout boots without env tweaks.
 
@@ -17,13 +17,13 @@ from uuid import UUID
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from helix_agent.protocol import PROVIDER_CATALOG, Provider, Tool
+from expert_work.protocol import PROVIDER_CATALOG, Provider, Tool
 
 #: Default tenant UUID assigned to header-less dev requests. ``00...00`` is
 #: deliberately the nil UUID so it sticks out in audit_log dumps.
 DEFAULT_DEV_TENANT_ID: UUID = UUID("00000000-0000-0000-0000-000000000000")
 
-#: Default actor id for dev requests with no ``X-Helix-Actor`` header.
+#: Default actor id for dev requests with no ``X-Expert-Work-Actor`` header.
 DEFAULT_DEV_ACTOR_ID: str = "anonymous"
 
 
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     """Resolved runtime settings; cheap to construct in tests."""
 
     model_config = SettingsConfigDict(
-        env_prefix="HELIX_AGENT_",
+        env_prefix="EXPERT_WORK_",
         case_sensitive=False,
         # Service file overrides come from environments/<env>.yaml; this
         # only honours real env vars. Keep it strict so typos surface.
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     default_dev_actor_id: str = DEFAULT_DEV_ACTOR_ID
 
     # ------------------------------------------------------------------ database
-    db_dsn: str = "postgresql+asyncpg://helix_agent:helix_agent_dev@localhost:6432/helix_agent_dev"
+    db_dsn: str = "postgresql+asyncpg://expert_work:expert_work_dev@localhost:6432/expert_work_dev"
     db_pgbouncer_mode: bool = True
     db_echo: bool = False
 
@@ -69,8 +69,8 @@ class Settings(BaseSettings):
     #: Self-hosted Langfuse instance for agent-level traces (ADR-0005).
     #: All three present -> the SDK-backed client; anything missing keeps
     #: the M0 RecordingLangfuseClient (Mini-ADR HX-G3 fail-open). Injected
-    #: via env using this class's ``HELIX_AGENT_`` prefix --
-    #: HELIX_AGENT_LANGFUSE_{HOST,PUBLIC_KEY,SECRET_KEY} -- never committed
+    #: via env using this class's ``EXPERT_WORK_`` prefix --
+    #: EXPERT_WORK_LANGFUSE_{HOST,PUBLIC_KEY,SECRET_KEY} -- never committed
     #: to compose files or code (compose only passes the ${...} through).
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None
@@ -178,7 +178,7 @@ class Settings(BaseSettings):
 
     #: Embedding model name for long-term memory (Stream J.3). The default
     #: is qwen DashScope's ``text-embedding-v4`` (1024-dim — matches
-    #: ``HELIX_AGENT_EMBEDDING_DIM``).
+    #: ``EXPERT_WORK_EMBEDDING_DIM``).
     embedding_model: str = "text-embedding-v4"
 
     #: Stream O (Mini-ADR O-9) — the catalog provider whose credential the
@@ -209,7 +209,7 @@ class Settings(BaseSettings):
     object_store_backend: Literal["memory", "s3-compatible"] = "memory"
     object_store_endpoint_url: str | None = None
     object_store_region: str = "us-east-1"
-    object_store_bucket: str = "helix-agent"
+    object_store_bucket: str = "expert-work"
     #: ``secret://`` references to the S3 access / secret keys — required
     #: when ``object_store_backend`` is ``"s3-compatible"``.
     object_store_access_key_ref: str | None = None
@@ -247,11 +247,11 @@ class Settings(BaseSettings):
     # OIDC issuer used to validate the ``iss`` JWT claim and to derive
     # the JWKS endpoint when ``oidc_jwks_uri`` is not set. The default
     # points at the Keycloak service in ``infra/docker-compose.yml``.
-    oidc_issuer: str = "http://keycloak:8080/realms/helix-agent"
+    oidc_issuer: str = "http://keycloak:8080/realms/expert-work"
 
     #: Accepted JWT ``aud`` values. Anthropic / Keycloak service-account
     #: tokens typically carry the client id here.
-    oidc_audience: list[str] = Field(default_factory=lambda: ["helix-agent-api-internal"])
+    oidc_audience: list[str] = Field(default_factory=lambda: ["expert-work-api-internal"])
 
     #: Optional explicit JWKS URI. ``None`` → derived from ``oidc_issuer``
     #: + Keycloak's well-known ``/protocol/openid-connect/certs`` path.
@@ -275,16 +275,16 @@ class Settings(BaseSettings):
     keycloak_base_url: str = "http://keycloak:8080"
 
     #: Realm the Admin client manages (member accounts live here).
-    keycloak_realm: str = "helix-agent"
+    keycloak_realm: str = "expert-work"
 
     #: Confidential client whose service account holds ``manage-users`` and
-    #: drives the Admin API (``helix-agent-api-internal`` already has
+    #: drives the Admin API (``expert-work-api-internal`` already has
     #: ``serviceAccountsEnabled``).
-    keycloak_admin_client_id: str = "helix-agent-api-internal"
+    keycloak_admin_client_id: str = "expert-work-api-internal"
 
     #: Vault name of the service-account client secret (Stream Q
     #: ``SqlEncryptedSecretStore``). The secret value never lives in settings.
-    keycloak_admin_secret_name: str = "helix-agent/platform/keycloak/admin-client-secret"  # noqa: S105 — vault key NAME, not a secret value
+    keycloak_admin_secret_name: str = "expert-work/platform/keycloak/admin-client-secret"  # noqa: S105 — vault key NAME, not a secret value
 
     #: Lifespan (seconds) of the Keycloak ``execute-actions-email`` set-password
     #: link sent on member invite. Default 24h.
@@ -315,7 +315,7 @@ class Settings(BaseSettings):
 
     #: Path-prefix exemption list. Health + metrics are always allowed
     #: through; ``/v1/webhooks`` is exempt because an external webhook
-    #: caller has no helix principal — that endpoint authenticates with
+    #: caller has no expert_work principal — that endpoint authenticates with
     #: a per-trigger secret instead (Stream J.10 / Mini-ADR J-42);
     #: ``/v1/setup`` is the unauthenticated first-run wizard (gated by the
     #: setup token + the zero-admin invariant). Any other path requires a
@@ -592,7 +592,7 @@ class Settings(BaseSettings):
     #: cost grow ~linearly with diminishing returns.
     dynamic_worker_max_concurrent: int = Field(default=3, gt=0, le=16)
     #: Cumulative worker spawns allowed across one parent run (all turns).
-    #: References bound by depth+concurrency only; helix is a billed
+    #: References bound by depth+concurrency only; expert_work is a billed
     #: multi-tenant backend so this is an explicit runaway safety net.
     dynamic_worker_max_per_run: int = Field(default=16, gt=0, le=256)
     #: Per-worker ReAct iteration cap (worker workflow.max_iterations is
@@ -635,7 +635,7 @@ class Settings(BaseSettings):
     #: O-4) and cannot be configured by tenants in ``tenant`` mode.
     #: Default is the empty list — every deployment must explicitly
     #: enable providers via env (e.g.
-    #: ``HELIX_AGENT_SUPPORTED_PROVIDERS=anthropic,openai,qwen``) along
+    #: ``EXPERT_WORK_SUPPORTED_PROVIDERS=anthropic,openai,qwen``) along
     #: with a matching ``platform_provider_credentials`` entry. The
     #: startup validator (Mini-ADR O-1) refuses to boot if the two
     #: don't match.

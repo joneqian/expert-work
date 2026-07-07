@@ -17,7 +17,7 @@ from types import ModuleType
 
 def _load_runner() -> ModuleType:
     path = Path(__file__).resolve().parents[1] / "infra" / "sandbox-image" / "runner.py"
-    spec = importlib.util.spec_from_file_location("helix_sandbox_runner", path)
+    spec = importlib.util.spec_from_file_location("expert_work_sandbox_runner", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

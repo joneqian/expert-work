@@ -148,7 +148,7 @@ GET  /v1/pool/{layer_key}/state                                → PoolState
 POST /v1/images:build             Body: ImageBuildSpec        → 202 + build_id
 ```
 
-所有调用都要带 `X-Helix-Tenant` header，由 [15 AuthN/AuthZ](./15-authn-authz.md) 验证后才到本服务。
+所有调用都要带 `X-Expert-Work-Tenant` header，由 [15 AuthN/AuthZ](./15-authn-authz.md) 验证后才到本服务。
 
 ---
 
@@ -252,17 +252,17 @@ sandbox:
 ### 7.1 Prometheus metric
 
 ```
-helix_sandbox_pool_size{tenant,layer_key,state="ready"}              gauge
-helix_sandbox_pool_size{tenant,layer_key,state="in_use"}             gauge
-helix_sandbox_acquire_total{tenant,layer_key,result="cache_hit|cold_start|reject"}  counter
-helix_sandbox_acquire_latency_seconds{tenant,result}                 histogram
-helix_sandbox_lifetime_seconds{tenant,layer_key}                     histogram
-helix_sandbox_evict_total{tenant,reason}                             counter
-helix_image_build_total{result="hit|build_ok|build_fail"}            counter
-helix_image_build_duration_seconds                                   histogram
+expert_work_sandbox_pool_size{tenant,layer_key,state="ready"}              gauge
+expert_work_sandbox_pool_size{tenant,layer_key,state="in_use"}             gauge
+expert_work_sandbox_acquire_total{tenant,layer_key,result="cache_hit|cold_start|reject"}  counter
+expert_work_sandbox_acquire_latency_seconds{tenant,result}                 histogram
+expert_work_sandbox_lifetime_seconds{tenant,layer_key}                     histogram
+expert_work_sandbox_evict_total{tenant,reason}                             counter
+expert_work_image_build_total{result="hit|build_ok|build_fail"}            counter
+expert_work_image_build_duration_seconds                                   histogram
 ```
 
-**SLO（M1 目标）**：`acquire_latency_seconds{result="cache_hit"}` P95 < 500ms；`acquire_latency_seconds{result="cold_start"}` P95 < 3s；`helix_sandbox_acquire_total{result="reject"}` rate < 0.1%。
+**SLO（M1 目标）**：`acquire_latency_seconds{result="cache_hit"}` P95 < 500ms；`acquire_latency_seconds{result="cold_start"}` P95 < 3s；`expert_work_sandbox_acquire_total{result="reject"}` rate < 0.1%。
 
 ### 7.2 OTel span
 
@@ -285,7 +285,7 @@ helix_image_build_duration_seconds                                   histogram
 | 配额绕过（伪造 tenant header）| AuthN 阶段强制对齐 JWT tenant 与 X-Tenant header |
 | Reaper 误杀 IN_USE | reaper 只看 state=READY 且 idle 超阈值；IN_USE 走独立 TTL |
 
-**关键决策**：`isolation_level=dedicated_node` 时强制独占节点，节点上不调度其他 tenant 的 sandbox；通过节点 label `helix.io/tenant=<id>` + scheduler taint 实现。
+**关键决策**：`isolation_level=dedicated_node` 时强制独占节点，节点上不调度其他 tenant 的 sandbox；通过节点 label `expert_work.io/tenant=<id>` + scheduler taint 实现。
 
 ---
 

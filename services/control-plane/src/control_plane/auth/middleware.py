@@ -35,12 +35,12 @@ from control_plane.auth.mtls import MTLSVerifier
 from control_plane.auth.system_admin import maybe_bootstrap_system_admin, resolve_system_admin
 from control_plane.auth.tenant_roles import resolve_tenant_roles
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.auth import RoleBindingStore
-from helix_agent.protocol import AuditAction, AuditResult, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.auth import RoleBindingStore
+from expert_work.protocol import AuditAction, AuditResult, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.auth")
+logger = logging.getLogger("expert_work.control_plane.auth")
 
 _BEARER_PREFIX = "bearer "
 _DEFAULT_XFCC_HEADER = "x-forwarded-client-cert"
@@ -216,7 +216,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "data": None,
                 "error": {"code": error.code, "message": error.public_message},
             },
-            headers={"WWW-Authenticate": 'Bearer realm="helix-agent"'},
+            headers={"WWW-Authenticate": 'Bearer realm="expert-work"'},
         )
 
 

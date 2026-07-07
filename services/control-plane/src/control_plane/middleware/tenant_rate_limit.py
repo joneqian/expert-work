@@ -40,16 +40,16 @@ from starlette.types import ASGIApp
 
 from control_plane.audit import emit
 from control_plane.ratelimit import RateLimiter, RateLimitOverride, parse_rate_limit_override
-from helix_agent.common.observability import current_trace_id_hex, helix_counter
-from helix_agent.persistence.rls import current_tenant_id_var
-from helix_agent.persistence.tenant_config import TenantConfigStore
-from helix_agent.protocol import AuditAction, AuditResult, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex, expert_work_counter
+from expert_work.persistence.rls import current_tenant_id_var
+from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.protocol import AuditAction, AuditResult, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.tenant_rate_limit")
+logger = logging.getLogger("expert_work.control_plane.tenant_rate_limit")
 
-_decisions = helix_counter(
-    "helix_control_plane_tenant_rate_limit_decisions_total",
+_decisions = expert_work_counter(
+    "expert_work_control_plane_tenant_rate_limit_decisions_total",
     "Tenant-tier rate-limit decisions by outcome.",
     ("decision",),
 )

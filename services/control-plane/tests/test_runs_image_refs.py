@@ -18,7 +18,7 @@ from control_plane.api.runs import (
     _build_human_message,
     _validate_image_refs,
 )
-from helix_agent.protocol.multimodal import ImageRef
+from expert_work.protocol.multimodal import ImageRef
 
 _TENANT = UUID("11111111-1111-1111-1111-111111111111")
 _THREAD = UUID("22222222-2222-2222-2222-222222222222")
@@ -44,7 +44,7 @@ def test_run_request_accepts_valid_image_refs() -> None:
 
 def test_run_request_rejects_malformed_image_ref() -> None:
     with pytest.raises(ValidationError) as exc:
-        RunRequest(image_refs=["not-a-helix-ref"])
+        RunRequest(image_refs=["not-a-expert-work-ref"])
     assert "image ref" in str(exc.value)
 
 
@@ -257,7 +257,7 @@ def test_run_request_input_rejects_over_max_chars() -> None:
 from types import SimpleNamespace  # noqa: E402
 
 from control_plane.api.runs import build_run_graph_input  # noqa: E402
-from helix_agent.protocol import PromptVariableSpec  # noqa: E402
+from expert_work.protocol import PromptVariableSpec  # noqa: E402
 
 
 def test_run_request_inputs_defaults_empty() -> None:

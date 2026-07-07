@@ -4,7 +4,7 @@
 
 **Goal:** Add two read-only control-plane endpoints the visual manifest editor needs — `GET /v1/agents/schema` (the full `AgentSpec` JSON Schema) and `GET /v1/model-catalog` (per-provider model list + capabilities, filtered to providers that have a configured + enabled platform credential).
 
-**Architecture:** A new `MODEL_CATALOG` constant in helix-protocol (provider → models + vision/embeddings flags), mirroring the existing `PROVIDER_CATALOG`. Two new FastAPI routers in control-plane following the established `build_*_router()` + `app.include_router(...)` pattern. The schema endpoint serializes `AgentSpec.model_json_schema(by_alias=True)`. The model-catalog endpoint intersects `MODEL_CATALOG` with the configured-and-enabled providers, reusing the same per-provider source view the existing `/v1/platform/credentials` endpoint builds.
+**Architecture:** A new `MODEL_CATALOG` constant in expert-work-protocol (provider → models + vision/embeddings flags), mirroring the existing `PROVIDER_CATALOG`. Two new FastAPI routers in control-plane following the established `build_*_router()` + `app.include_router(...)` pattern. The schema endpoint serializes `AgentSpec.model_json_schema(by_alias=True)`. The model-catalog endpoint intersects `MODEL_CATALOG` with the configured-and-enabled providers, reusing the same per-provider source view the existing `/v1/platform/credentials` endpoint builds.
 
 **Tech Stack:** Python 3.12, Pydantic v2, FastAPI, pytest. Reference: `STREAM-S-DESIGN.md` Mini-ADRs S-1, S-4.
 
@@ -12,36 +12,36 @@
 
 ## File Structure
 
-- **Create** `packages/helix-protocol/src/helix_agent/protocol/model_catalog.py` — `ModelEntry` dataclass-ish model + `MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]]` + `models_for_provider()`.
-- **Modify** `packages/helix-protocol/src/helix_agent/protocol/__init__.py` — export the new names.
+- **Create** `packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py` — `ModelEntry` dataclass-ish model + `MODEL_CATALOG: dict[Provider, tuple[ModelEntry, ...]]` + `models_for_provider()`.
+- **Modify** `packages/expert-work-protocol/src/expert_work/protocol/__init__.py` — export the new names.
 - **Create** `services/control-plane/src/control_plane/api/agent_schema.py` — `build_agent_schema_router()` → `GET /v1/agents/schema`.
 - **Create** `services/control-plane/src/control_plane/api/model_catalog.py` — `build_model_catalog_router()` → `GET /v1/model-catalog`.
 - **Modify** `services/control-plane/src/control_plane/app.py` — `include_router` both new routers (near line 984, by the other `build_*_router()` calls).
-- **Create** `packages/helix-protocol/tests/test_model_catalog.py` — catalog shape + `models_for_provider`.
+- **Create** `packages/expert-work-protocol/tests/test_model_catalog.py` — catalog shape + `models_for_provider`.
 - **Create** `services/control-plane/tests/test_agent_schema_api.py` — schema endpoint.
 - **Create** `services/control-plane/tests/test_model_catalog_api.py` — catalog endpoint + provider intersection.
 
 ---
 
-### Task 1: Model-catalog data (helix-protocol)
+### Task 1: Model-catalog data (expert-work-protocol)
 
 **Files:**
-- Create: `packages/helix-protocol/src/helix_agent/protocol/model_catalog.py`
-- Modify: `packages/helix-protocol/src/helix_agent/protocol/__init__.py`
-- Test: `packages/helix-protocol/tests/test_model_catalog.py`
+- Create: `packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py`
+- Modify: `packages/expert-work-protocol/src/expert_work/protocol/__init__.py`
+- Test: `packages/expert-work-protocol/tests/test_model_catalog.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# packages/helix-protocol/tests/test_model_catalog.py
+# packages/expert-work-protocol/tests/test_model_catalog.py
 """MODEL_CATALOG shape + lookup — Stream S PR B (Mini-ADR S-4)."""
 
-from helix_agent.protocol import (
+from expert_work.protocol import (
     MODEL_CATALOG,
     ModelEntry,
     models_for_provider,
 )
-from helix_agent.protocol.provider_catalog import PROVIDER_CATALOG
+from expert_work.protocol.provider_catalog import PROVIDER_CATALOG
 
 
 def test_catalog_keys_are_known_providers() -> None:
@@ -75,13 +75,13 @@ def test_models_for_unknown_provider_is_empty() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run python -m pytest packages/helix-protocol/tests/test_model_catalog.py -q`
+Run: `uv run python -m pytest packages/expert-work-protocol/tests/test_model_catalog.py -q`
 Expected: FAIL — `ImportError: cannot import name 'MODEL_CATALOG'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```python
-# packages/helix-protocol/src/helix_agent/protocol/model_catalog.py
+# packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py
 """Per-provider model catalog — Stream S PR B (Mini-ADR S-4).
 
 Drives the visual manifest editor's model dropdown: provider → selectable
@@ -99,7 +99,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from helix_agent.protocol.provider_catalog import PROVIDER_CATALOG, Provider
+from expert_work.protocol.provider_catalog import PROVIDER_CATALOG, Provider
 
 
 class ModelEntry(BaseModel):
@@ -159,16 +159,16 @@ def models_for_provider(provider: str) -> tuple[ModelEntry, ...]:
     return tuple(e for e in entries if not e.deprecated)
 ```
 
-Then add to `packages/helix-protocol/src/helix_agent/protocol/__init__.py`: import `MODEL_CATALOG, ModelEntry, models_for_provider` from `.model_catalog` and add all three to `__all__` (mirror how `provider_catalog` names are exported).
+Then add to `packages/expert-work-protocol/src/expert_work/protocol/__init__.py`: import `MODEL_CATALOG, ModelEntry, models_for_provider` from `.model_catalog` and add all three to `__all__` (mirror how `provider_catalog` names are exported).
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run python -m pytest packages/helix-protocol/tests/test_model_catalog.py -q`
+Run: `uv run python -m pytest packages/expert-work-protocol/tests/test_model_catalog.py -q`
 Expected: PASS (5 passed).
 
 - [ ] **Step 5: Lint/type**
 
-Run: `uv run ruff check packages/helix-protocol/src/helix_agent/protocol/model_catalog.py && uv run mypy packages/helix-protocol/src/helix_agent/protocol/model_catalog.py`
+Run: `uv run ruff check packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py && uv run mypy packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py`
 Expected: clean.
 
 - [ ] **Step 6: Verify catalog currency (user-authorized web check)**
@@ -178,9 +178,9 @@ For each provider (anthropic, openai, deepseek, kimi/moonshot, glm/zhipu, qwen, 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/helix-protocol/src/helix_agent/protocol/model_catalog.py \
-        packages/helix-protocol/src/helix_agent/protocol/__init__.py \
-        packages/helix-protocol/tests/test_model_catalog.py
+git add packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py \
+        packages/expert-work-protocol/src/expert_work/protocol/__init__.py \
+        packages/expert-work-protocol/tests/test_model_catalog.py
 git commit -m "feat(stream-s): MODEL_CATALOG — per-provider models + capabilities (S-4)"
 ```
 
@@ -247,7 +247,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 
 _AGENT_SPEC_SCHEMA: dict[str, Any] = AgentSpec.model_json_schema(by_alias=True)
 
@@ -371,8 +371,8 @@ from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, Request
 
-from helix_agent.protocol import models_for_provider
-from helix_agent.protocol.provider_catalog import PROVIDER_CATALOG
+from expert_work.protocol import models_for_provider
+from expert_work.protocol.provider_catalog import PROVIDER_CATALOG
 
 
 class ConfiguredProviders(Protocol):
@@ -462,8 +462,8 @@ Expected: PASS.
 
 Run:
 ```bash
-uv run ruff check packages/helix-protocol services/control-plane/src/control_plane/api/agent_schema.py services/control-plane/src/control_plane/api/model_catalog.py
-uv run python -m pytest packages/helix-protocol/tests/test_model_catalog.py services/control-plane/tests/test_agent_schema_api.py services/control-plane/tests/test_model_catalog_api.py services/control-plane/tests/test_stream_s_endpoints_smoke.py -q
+uv run ruff check packages/expert-work-protocol services/control-plane/src/control_plane/api/agent_schema.py services/control-plane/src/control_plane/api/model_catalog.py
+uv run python -m pytest packages/expert-work-protocol/tests/test_model_catalog.py services/control-plane/tests/test_agent_schema_api.py services/control-plane/tests/test_model_catalog_api.py services/control-plane/tests/test_stream_s_endpoints_smoke.py -q
 uv run mypy packages
 ```
 Expected: all clean/green. (Note: CI `mypy packages` includes tests — keep test helper signatures annotated.)

@@ -295,7 +295,7 @@ export function ConversationsList() {
                 }}
                 style={{ cursor: "pointer" }}
               >
-                <Text code style={{ fontSize: 12, color: "var(--hx-accent-cyan, #13c2c2)" }}>
+                <Text code style={{ fontSize: 12, color: "var(--ew-accent-cyan, #13c2c2)" }}>
                   {uid.slice(0, 8)}…
                 </Text>
               </span>
@@ -325,7 +325,7 @@ export function ConversationsList() {
                   <AlertTriangle
                     size={13}
                     strokeWidth={1.5}
-                    color="var(--hx-status-error, #f5222d)"
+                    color="var(--ew-status-error, #f5222d)"
                   />
                 </Space>
               </Tooltip>
@@ -483,10 +483,10 @@ export function ConversationsList() {
                 alignItems: "center",
                 gap: 6,
                 padding: "4px 10px",
-                border: "1px solid var(--hx-border-default)",
+                border: "1px solid var(--ew-border-default)",
                 borderRadius: 6,
-                background: "var(--hx-surface-raised)",
-                color: "var(--hx-text-primary)",
+                background: "var(--ew-surface-raised)",
+                color: "var(--ew-text-primary)",
                 fontSize: 13,
                 cursor: loading ? "wait" : "pointer",
               }}

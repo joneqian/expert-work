@@ -6,8 +6,8 @@ import base64
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from helix_agent.protocol import AuditAction, AuditResult, SkillVersion
-from helix_agent.protocol.skill import (
+from expert_work.protocol import AuditAction, AuditResult, SkillVersion
+from expert_work.protocol.skill import (
     SkillSupportingFile,
     compute_content_hash,
     supporting_files_to_jsonable,

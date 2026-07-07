@@ -2,7 +2,7 @@
 
 The RBAC matrix (:mod:`control_plane.auth.rbac`) decides ``(role, resource_type,
 action)`` at the **type** level. ABAC narrows a grant to specific resource
-**instances** via :class:`helix_agent.protocol.BindingConditions` carried on a
+**instances** via :class:`expert_work.protocol.BindingConditions` carried on a
 tenant-scope role binding.
 
 Decision model (additive / most-permissive — see design doc §1.3):
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from control_plane.auth.rbac import Action, Resource, grants_for
-from helix_agent.protocol import BindingConditions, RoleBinding
+from expert_work.protocol import BindingConditions, RoleBinding
 
 
 @dataclass(frozen=True)

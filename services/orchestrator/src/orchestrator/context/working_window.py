@@ -42,7 +42,7 @@ from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from helix_agent.runtime.tokens import TokenEstimator
+from expert_work.runtime.tokens import TokenEstimator
 from orchestrator.context.compressor import estimate_tokens
 
 

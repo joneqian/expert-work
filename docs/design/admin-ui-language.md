@@ -2,7 +2,7 @@
 
 > 配套阅读:[admin-ui-philosophy.md](./admin-ui-philosophy.md)(为什么/为谁/什么原则)、[mockups/](./mockups/)(关键页面可视化)。本文档定义**用什么 token、字号、间距、组件去表达哲学**;所有 token 已落地为 [mockups/shared/tokens.css](./mockups/shared/tokens.css),mockup 共用样式落地为 [mockups/shared/shell.css](./mockups/shared/shell.css)。
 >
-> H.1b 实施(React + Vite + Antd 5)时,把 `tokens.css` 直接 `import` 进工程,Antd 通过 ConfigProvider 把 `--hx-*` CSS variable 映射进 design token,本文档列的 override 是关键映射点。
+> H.1b 实施(React + Vite + Antd 5)时,把 `tokens.css` 直接 `import` 进工程,Antd 通过 ConfigProvider 把 `--ew-*` CSS variable 映射进 design token,本文档列的 override 是关键映射点。
 
 ---
 
@@ -34,38 +34,38 @@
 
 | 色族 | 阶数 | 用途 | 例 |
 |---|---|---|---|
-| `neutral` | 13 阶(0/50/100/200/300/400/500/600/700/800/900/950/1000) | 文本、背景、border、表面 | `--hx-color-neutral-100` = `#f4f5f7` |
-| `brand`(cyan) | 12 阶(50~950) | primary CTA、链接、selected、focus ring | `--hx-color-brand-500` = `#06b6d4` |
-| `accent`(violet) | 12 阶(50~950) | 强调元素、progress bar、可视化第二色 | `--hx-color-accent-500` = `#a855f7` |
-| `success` | 5 阶(100/300/500/700/900) | 状态-成功 | `--hx-color-success-500` = `#22c55e` |
-| `warning` | 5 阶 | 状态-警告 | `--hx-color-warning-500` = `#f59e0b` |
-| `danger` | 5 阶 | 状态-危险 / 错误 | `--hx-color-danger-500` = `#ef4444` |
-| `info` | 5 阶 | 状态-信息(= brand 同色族,避免引入第 5 色相) | `--hx-color-info-500` = `var(--hx-color-brand-500)` |
+| `neutral` | 13 阶(0/50/100/200/300/400/500/600/700/800/900/950/1000) | 文本、背景、border、表面 | `--ew-color-neutral-100` = `#f4f5f7` |
+| `brand`(cyan) | 12 阶(50~950) | primary CTA、链接、selected、focus ring | `--ew-color-brand-500` = `#06b6d4` |
+| `accent`(violet) | 12 阶(50~950) | 强调元素、progress bar、可视化第二色 | `--ew-color-accent-500` = `#a855f7` |
+| `success` | 5 阶(100/300/500/700/900) | 状态-成功 | `--ew-color-success-500` = `#22c55e` |
+| `warning` | 5 阶 | 状态-警告 | `--ew-color-warning-500` = `#f59e0b` |
+| `danger` | 5 阶 | 状态-危险 / 错误 | `--ew-color-danger-500` = `#ef4444` |
+| `info` | 5 阶 | 状态-信息(= brand 同色族,避免引入第 5 色相) | `--ew-color-info-500` = `var(--ew-color-brand-500)` |
 
 #### 语义层(theme-dependent — 跟 `html[data-theme]` 切换)
 
 | Token | dark 值 | light 值 | 用途 |
 |---|---|---|---|
-| `--hx-surface-bg` | `neutral-950` | `neutral-50` | 整页背景 |
-| `--hx-surface-base` | `neutral-900` | `neutral-0` | 主内容容器 / sidebar / topbar |
-| `--hx-surface-raised` | `neutral-800` | `neutral-0`+shadow | 卡片头 / 表头 / 标签 |
-| `--hx-surface-overlay` | `neutral-700` | `neutral-0`+strong shadow | 下拉 / popover |
-| `--hx-surface-hover` | rgba(white, 0.04) | rgba(black, 0.04) | hover 态 |
-| `--hx-surface-active` | rgba(white, 0.08) | rgba(black, 0.08) | active / pressed |
-| `--hx-surface-selected` | rgba(brand-500, 0.12) | rgba(brand-500, 0.08) | 列表选中 |
-| `--hx-border-subtle` | `neutral-800` | `neutral-200` | 分隔线 |
-| `--hx-border-default` | `neutral-700` | `neutral-300` | 控件 border |
-| `--hx-border-strong` | `neutral-600` | `neutral-400` | hover 后控件 border |
-| `--hx-border-focus` | `brand-500` | `brand-600` | focus ring(键盘) |
-| `--hx-text-primary` | `neutral-100` | `neutral-900` | 主文 |
-| `--hx-text-secondary` | `neutral-400` | `neutral-600` | 副文 |
-| `--hx-text-tertiary` | `neutral-500` | `neutral-500` | 占位 / 弱提示 |
-| `--hx-text-disabled` | `neutral-700` | `neutral-300` | 禁用 |
-| `--hx-text-link` | `brand-400` | `brand-700` | 链接 |
-| `--hx-action-primary-{bg, fg, bg-hover}` | brand-500/950/400 | brand-600/0/700 | primary 按钮 |
-| `--hx-action-danger-{...}` | danger-500/0/700 | 同左 | 危险按钮 |
-| `--hx-status-{success/warning/danger/info}-{bg, fg}` | alpha 12% / brand-300 调 | semantic-100 / semantic-700 | badge / banner |
-| `--hx-elevation-{1, 2, 3}` | border tint(无 shadow) | 真实 shadow | 卡片 / modal |
+| `--ew-surface-bg` | `neutral-950` | `neutral-50` | 整页背景 |
+| `--ew-surface-base` | `neutral-900` | `neutral-0` | 主内容容器 / sidebar / topbar |
+| `--ew-surface-raised` | `neutral-800` | `neutral-0`+shadow | 卡片头 / 表头 / 标签 |
+| `--ew-surface-overlay` | `neutral-700` | `neutral-0`+strong shadow | 下拉 / popover |
+| `--ew-surface-hover` | rgba(white, 0.04) | rgba(black, 0.04) | hover 态 |
+| `--ew-surface-active` | rgba(white, 0.08) | rgba(black, 0.08) | active / pressed |
+| `--ew-surface-selected` | rgba(brand-500, 0.12) | rgba(brand-500, 0.08) | 列表选中 |
+| `--ew-border-subtle` | `neutral-800` | `neutral-200` | 分隔线 |
+| `--ew-border-default` | `neutral-700` | `neutral-300` | 控件 border |
+| `--ew-border-strong` | `neutral-600` | `neutral-400` | hover 后控件 border |
+| `--ew-border-focus` | `brand-500` | `brand-600` | focus ring(键盘) |
+| `--ew-text-primary` | `neutral-100` | `neutral-900` | 主文 |
+| `--ew-text-secondary` | `neutral-400` | `neutral-600` | 副文 |
+| `--ew-text-tertiary` | `neutral-500` | `neutral-500` | 占位 / 弱提示 |
+| `--ew-text-disabled` | `neutral-700` | `neutral-300` | 禁用 |
+| `--ew-text-link` | `brand-400` | `brand-700` | 链接 |
+| `--ew-action-primary-{bg, fg, bg-hover}` | brand-500/950/400 | brand-600/0/700 | primary 按钮 |
+| `--ew-action-danger-{...}` | danger-500/0/700 | 同左 | 危险按钮 |
+| `--ew-status-{success/warning/danger/info}-{bg, fg}` | alpha 12% / brand-300 调 | semantic-100 / semantic-700 | badge / banner |
+| `--ew-elevation-{1, 2, 3}` | border tint(无 shadow) | 真实 shadow | 卡片 / modal |
 
 > **dark 模式特殊处理**:不依赖 box-shadow 区分层级(暗色下 shadow 不显眼),用 1px border 高光 + 不同 surface 色阶区分。
 
@@ -86,73 +86,73 @@
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--hx-font-sans` | `Inter, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', ...` | 默认 UI 字体 |
-| `--hx-font-mono` | `'JetBrains Mono', 'SF Mono', Consolas, ...` | code / JSON / SSE log / number cell |
+| `--ew-font-sans` | `Inter, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', ...` | 默认 UI 字体 |
+| `--ew-font-mono` | `'JetBrains Mono', 'SF Mono', Consolas, ...` | code / JSON / SSE log / number cell |
 
 字号(rem-based,1rem = 16px):
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--hx-font-size-xs`   | `0.75rem`   = 12px | caption / tag / kbd / table 表头标签 |
-| `--hx-font-size-sm`   | `0.8125rem` = 13px | table cell / form field / button(default) |
-| `--hx-font-size-base` | `0.875rem`  = 14px | body text(UI 默认) |
-| `--hx-font-size-md`   | `1rem`      = 16px | emphasized body / card title |
-| `--hx-font-size-lg`   | `1.25rem`   = 20px | section heading(h3) |
-| `--hx-font-size-xl`   | `1.5rem`    = 24px | page heading(h2) |
-| `--hx-font-size-2xl`  | `2rem`      = 32px | hero / display(h1) |
+| `--ew-font-size-xs`   | `0.75rem`   = 12px | caption / tag / kbd / table 表头标签 |
+| `--ew-font-size-sm`   | `0.8125rem` = 13px | table cell / form field / button(default) |
+| `--ew-font-size-base` | `0.875rem`  = 14px | body text(UI 默认) |
+| `--ew-font-size-md`   | `1rem`      = 16px | emphasized body / card title |
+| `--ew-font-size-lg`   | `1.25rem`   = 20px | section heading(h3) |
+| `--ew-font-size-xl`   | `1.5rem`    = 24px | page heading(h2) |
+| `--ew-font-size-2xl`  | `2rem`      = 32px | hero / display(h1) |
 
 行高 / 字重:
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--hx-line-height-tight`   | 1.2 | heading |
-| `--hx-line-height-snug`    | 1.4 | UI / table cell |
-| `--hx-line-height-normal`  | 1.5 | body |
-| `--hx-line-height-relaxed` | 1.7 | long-form prose(philosophy.md 渲染场景) |
-| `--hx-font-weight-regular`  | 400 | 正文 |
-| `--hx-font-weight-medium`   | 500 | UI 标签 / 链接 / 按钮 / 强调 |
-| `--hx-font-weight-semibold` | 600 | heading / page title |
+| `--ew-line-height-tight`   | 1.2 | heading |
+| `--ew-line-height-snug`    | 1.4 | UI / table cell |
+| `--ew-line-height-normal`  | 1.5 | body |
+| `--ew-line-height-relaxed` | 1.7 | long-form prose(philosophy.md 渲染场景) |
+| `--ew-font-weight-regular`  | 400 | 正文 |
+| `--ew-font-weight-medium`   | 500 | UI 标签 / 链接 / 按钮 / 强调 |
+| `--ew-font-weight-semibold` | 600 | heading / page title |
 
 ### 1.3 间距(4px base)
 
-`--hx-space-{1, 2, 3, 4, 6, 8, 12, 16}` = 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px。
+`--ew-space-{1, 2, 3, 4, 6, 8, 12, 16}` = 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px。
 
 **典型用法**:
-- 控件内 padding 横向 = `--hx-space-3`(12px)
-- 控件间隙 = `--hx-space-2`(8px)
-- 卡片 padding = `--hx-space-4`(16px)
-- 段落间距 / section 间距 = `--hx-space-6`(24px)
-- 页面 main padding = `--hx-space-6`
-- 大区块分隔 = `--hx-space-8`(32px)
+- 控件内 padding 横向 = `--ew-space-3`(12px)
+- 控件间隙 = `--ew-space-2`(8px)
+- 卡片 padding = `--ew-space-4`(16px)
+- 段落间距 / section 间距 = `--ew-space-6`(24px)
+- 页面 main padding = `--ew-space-6`
+- 大区块分隔 = `--ew-space-8`(32px)
 
 ### 1.4 圆角
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--hx-radius-xs`   | 2px  | badge / tag / kbd |
-| `--hx-radius-sm`   | 6px  | button / input / select / card |
-| `--hx-radius-md`   | 8px  | modal / drawer |
-| `--hx-radius-lg`   | 12px | hero card / 头像组 |
-| `--hx-radius-full` | 9999px | 圆形 avatar / pill |
+| `--ew-radius-xs`   | 2px  | badge / tag / kbd |
+| `--ew-radius-sm`   | 6px  | button / input / select / card |
+| `--ew-radius-md`   | 8px  | modal / drawer |
+| `--ew-radius-lg`   | 12px | hero card / 头像组 |
+| `--ew-radius-full` | 9999px | 圆形 avatar / pill |
 
 ### 1.5 阴影 / 立体
 
 | Token | dark | light | 用途 |
 |---|---|---|---|
-| `--hx-elevation-1` | 1px border tint | 1px / 2px subtle | 卡片(默认) |
-| `--hx-elevation-2` | 4px shadow + border | 2px / 6px medium | dropdown / popover |
-| `--hx-elevation-3` | 16px shadow + strong border | 8px / 24px strong | modal / drawer |
+| `--ew-elevation-1` | 1px border tint | 1px / 2px subtle | 卡片(默认) |
+| `--ew-elevation-2` | 4px shadow + border | 2px / 6px medium | dropdown / popover |
+| `--ew-elevation-3` | 16px shadow + strong border | 8px / 24px strong | modal / drawer |
 
 ### 1.6 动效
 
 | Token | 值 | 用途 |
 |---|---|---|
-| `--hx-duration-fast` | 100ms | hover / focus 反馈 |
-| `--hx-duration-base` | 150ms | 默认过渡 |
-| `--hx-duration-slow` | 200ms | dropdown 出场 / dialog 出场 |
-| `--hx-ease-standard` | `cubic-bezier(0.2, 0, 0.2, 1)` ≈ ease-out | 默认 |
-| `--hx-ease-emphasized` | `cubic-bezier(0.3, 0, 0, 1)` | 强调出场 |
-| `--hx-ease-linear` | linear | progress bar / skeleton pulse |
+| `--ew-duration-fast` | 100ms | hover / focus 反馈 |
+| `--ew-duration-base` | 150ms | 默认过渡 |
+| `--ew-duration-slow` | 200ms | dropdown 出场 / dialog 出场 |
+| `--ew-ease-standard` | `cubic-bezier(0.2, 0, 0.2, 1)` ≈ ease-out | 默认 |
+| `--ew-ease-emphasized` | `cubic-bezier(0.3, 0, 0, 1)` | 强调出场 |
+| `--ew-ease-linear` | linear | progress bar / skeleton pulse |
 
 `prefers-reduced-motion: reduce` 时所有 duration 归 0(已在 tokens.css 实现)。
 
@@ -160,24 +160,24 @@
 
 | Token | 值 |
 |---|---|
-| `--hx-z-base` | 0 |
-| `--hx-z-sticky` | 10 |
-| `--hx-z-dropdown` | 100 |
-| `--hx-z-overlay`(modal backdrop) | 900 |
-| `--hx-z-modal` | 1000 |
-| `--hx-z-toast` | 10000 |
-| `--hx-z-tooltip` | 20000 |
+| `--ew-z-base` | 0 |
+| `--ew-z-sticky` | 10 |
+| `--ew-z-dropdown` | 100 |
+| `--ew-z-overlay`(modal backdrop) | 900 |
+| `--ew-z-modal` | 1000 |
+| `--ew-z-toast` | 10000 |
+| `--ew-z-tooltip` | 20000 |
 
 ---
 
 ## 2. 品牌与 wordmark
 
-### 2.1 wordmark "helix"
+### 2.1 wordmark "Expert Work"
 
-- 全小写:**helix**
+- 全小写:**Expert Work**
 - 字体:Inter Semibold(600)
 - 字间距:`letter-spacing: -0.02em`(略紧凑)
-- 颜色:dark = `--hx-text-primary`(neutral-100);light = `--hx-text-primary`(neutral-900);可选 brand 色版本用于 splash / 加载页
+- 颜色:dark = `--ew-text-primary`(neutral-100);light = `--ew-text-primary`(neutral-900);可选 brand 色版本用于 splash / 加载页
 
 ### 2.2 DNA glyph(favicon + sidebar 左上角)
 
@@ -199,7 +199,7 @@
 
 ## 3. 核心组件 inventory(+ Antd 5 映射 + override 要点)
 
-> H.1b 实施时,**所有组件 = Antd 5 基础组件 + helix theme override**。本节列每个组件需 override 哪些 Antd token / className。
+> H.1b 实施时,**所有组件 = Antd 5 基础组件 + Expert Work theme override**。本节列每个组件需 override 哪些 Antd token / className。
 >
 > 表格 "shell.css 类名" 列指向 mockup 阶段的 CSS class(无 Antd 依赖,直接渲染),H.1b 转 Antd 时取代。
 
@@ -207,63 +207,63 @@
 
 | 组件 | Antd 5 | shell.css 类 | 关键 override |
 |---|---|---|---|
-| Button | `<Button>` | `.hx-btn` + `.hx-btn--{primary,secondary,ghost,danger}` | `colorPrimary` → brand-500;`borderRadius` → 6;`controlHeight` → 32;`fontWeight` → 500 |
-| Input | `<Input>` | `.hx-input` | `colorBgContainer` → surface-base;`colorBorder` → border-default;`controlOutline` → border-focus |
-| Select | `<Select>` | `.hx-select` | 同 Input;dropdown surface = surface-overlay |
+| Button | `<Button>` | `.ew-btn` + `.ew-btn--{primary,secondary,ghost,danger}` | `colorPrimary` → brand-500;`borderRadius` → 6;`controlHeight` → 32;`fontWeight` → 500 |
+| Input | `<Input>` | `.ew-input` | `colorBgContainer` → surface-base;`colorBorder` → border-default;`controlOutline` → border-focus |
+| Select | `<Select>` | `.ew-select` | 同 Input;dropdown surface = surface-overlay |
 | Checkbox | `<Checkbox>` | — | `colorPrimary` → brand-500 |
 | Radio | `<Radio>` | — | 同 Checkbox |
 | Switch | `<Switch>` | — | track on = brand-500,off = neutral-700 |
 | Slider | `<Slider>` | — | track = brand-500;handle 圆形 |
 | DatePicker | `<DatePicker>` | — | 调整为 dark/light theme adapter |
 | Upload | `<Upload>` | — | 拖拽区 border-dashed border-default |
-| Form | `<Form>` | — | label 字号 `--hx-font-size-sm`;requireMark 用 brand-500 |
+| Form | `<Form>` | — | label 字号 `--ew-font-size-sm`;requireMark 用 brand-500 |
 
 ### 3.2 容器
 
 | 组件 | Antd 5 | shell.css | 关键 override |
 |---|---|---|---|
-| Card | `<Card>` | `.hx-card` | 默认 border + radius-sm;`hoverable` 仅在显式需要时启用 |
-| Modal | `<Modal>` | `.hx-modal` | radius-md;width 默认 520;header/footer padding 16 |
+| Card | `<Card>` | `.ew-card` | 默认 border + radius-sm;`hoverable` 仅在显式需要时启用 |
+| Modal | `<Modal>` | `.ew-modal` | radius-md;width 默认 520;header/footer padding 16 |
 | Drawer | `<Drawer>` | — | radius-md(左 0);width 480 / 640 |
 | Popover | `<Popover>` | — | surface-overlay + elevation-2 |
 | Tooltip | `<Tooltip>` | — | surface-overlay text-primary;最小 padding |
-| Tabs | `<Tabs>` | `.hx-tabs` + `.hx-tab` | border-bottom 单线;active 用 brand-500 underline + text-primary |
+| Tabs | `<Tabs>` | `.ew-tabs` + `.ew-tab` | border-bottom 单线;active 用 brand-500 underline + text-primary |
 | Collapse | `<Collapse>` | — | bordered=false;箭头 lucide chevron |
 
 ### 3.3 数据
 
 | 组件 | Antd 5 | shell.css | 关键 override |
 |---|---|---|---|
-| Table | `<Table>` | `.hx-table` | 表头 surface-raised + uppercase xs;行高 36-40px;hover surface-hover;斑马纹 = none(干净 ops 风) |
+| Table | `<Table>` | `.ew-table` | 表头 surface-raised + uppercase xs;行高 36-40px;hover surface-hover;斑马纹 = none(干净 ops 风) |
 | List | `<List>` | — | 同 Table 风格,适合长 feed |
 | Tree | `<Tree>` | — | 树线 border-subtle;节点 hover surface-hover |
-| Badge | `<Badge>` + `<Tag>` | `.hx-badge--{...}` | bg 12% alpha + fg 浅色阶;含 dot variant |
-| Tag | `<Tag>` | `.hx-badge--neutral` | bordered=false |
+| Badge | `<Badge>` + `<Tag>` | `.ew-badge--{...}` | bg 12% alpha + fg 浅色阶;含 dot variant |
+| Tag | `<Tag>` | `.ew-badge--neutral` | bordered=false |
 | Avatar | `<Avatar>` | — | 圆形(`radius-full`);默认色根据 user_id hash 选 |
-| Statistic | `<Statistic>` | `.hx-stat` | 数值用 mono 字体;label uppercase xs;delta 用 success/danger 色 |
+| Statistic | `<Statistic>` | `.ew-stat` | 数值用 mono 字体;label uppercase xs;delta 用 success/danger 色 |
 
 ### 3.4 反馈
 
 | 组件 | Antd 5 | shell.css | 关键 override |
 |---|---|---|---|
-| Alert(内联) | `<Alert>` | `.hx-banner--{...}` | banner 形态(无关闭按钮 / 占整行) |
-| Banner(顶部 system) | 自研 wrapper of `<Alert banner>` | `.hx-banner` | sticky top,跨页面 |
+| Alert(内联) | `<Alert>` | `.ew-banner--{...}` | banner 形态(无关闭按钮 / 占整行) |
+| Banner(顶部 system) | 自研 wrapper of `<Alert banner>` | `.ew-banner` | sticky top,跨页面 |
 | Toast | `<message>` / `<notification>` | — | top-right;auto-dismiss 3-5s;非 destructive 操作用 toast |
-| Skeleton | `<Skeleton>` | `.hx-skeleton` | 用于 loading;respects reduced-motion |
+| Skeleton | `<Skeleton>` | `.ew-skeleton` | 用于 loading;respects reduced-motion |
 | Spin | `<Spin>` | — | 仅在 >800ms 不确定耗时场景 |
 | Progress | `<Progress>` | — | track = brand-500;height 6;不带百分比文字时仅 bar |
-| Result(空 / 错误页) | `<Result>` | `.hx-empty` | icon + 1 title + 1 desc + 1 主 CTA |
+| Result(空 / 错误页) | `<Result>` | `.ew-empty` | icon + 1 title + 1 desc + 1 主 CTA |
 
 ### 3.5 导航
 
 | 组件 | Antd 5 | shell.css | 关键 override |
 |---|---|---|---|
-| Menu(sidebar) | `<Menu mode="inline">` | `.hx-sidebar__item` | 无图标边框;active 用 surface-selected + brand 色文字 |
-| Breadcrumb | `<Breadcrumb>` | `.hx-breadcrumb` | 分隔符 `chevron-right` lucide;颜色 text-tertiary |
+| Menu(sidebar) | `<Menu mode="inline">` | `.ew-sidebar__item` | 无图标边框;active 用 surface-selected + brand 色文字 |
+| Breadcrumb | `<Breadcrumb>` | `.ew-breadcrumb` | 分隔符 `chevron-right` lucide;颜色 text-tertiary |
 | Pagination | `<Pagination>` | — | cursor-based;隐藏快速跳页(用 Cmd+K) |
 | Steps | `<Steps>` | — | dot 模式;active dot = brand-500 |
 
-### 3.6 特化组件(helix 自研,无 Antd 直接对等)
+### 3.6 特化组件(Expert Work 自研,无 Antd 直接对等)
 
 | 组件 | 用途 | 实现要点 |
 |---|---|---|
@@ -281,9 +281,9 @@
 
 ## 4. 布局 / 栅格
 
-- 顶 bar 高:**48px**(`--hx-topbar-height`)
-- Sidebar 宽:**220px**(`--hx-sidebar-width`)
-- 主内容 padding:**24px**(`--hx-content-padding`)
+- 顶 bar 高:**48px**(`--ew-topbar-height`)
+- Sidebar 宽:**220px**(`--ew-sidebar-width`)
+- 主内容 padding:**24px**(`--ew-content-padding`)
 - 主内容 max-width:**1280px**(超过居中)
 - 12 列栅格,gutter 16px(用 CSS Grid 实现)
 - 响应式:**M0 仅支持 ≥1280px desktop**;< 1280 显示 banner 提示用 desktop。tablet/mobile 推 M1(运营人群不在手机上做 ops)
@@ -408,7 +408,7 @@ html[data-theme="light"] { ... light tokens ... }
 JS 切换:
 ```js
 document.documentElement.setAttribute('data-theme', userTheme);
-localStorage.setItem('hx-theme', userTheme);
+localStorage.setItem('ew-theme', userTheme);
 ```
 
 **不依赖 `prefers-color-scheme`**(避免用户显式选择与系统设置冲突)。但 **首次访问**:若 user setting 无,读 `prefers-color-scheme` 作为初始默认,之后用户选择 override。
@@ -421,7 +421,7 @@ localStorage.setItem('hx-theme', userTheme);
 
 | en | zh-CN | 说明 |
 |---|---|---|
-| Agent | Agent(不译) | 一个 helix 智能体,有 manifest / runs / skills / triggers / memory |
+| Agent | Agent(不译) | 一个 Expert Work 智能体,有 manifest / runs / skills / triggers / memory |
 | Manifest | Manifest(不译) | Agent 的 YAML 定义 |
 | Run | Run(不译) | Agent 的一次执行 |
 | Thread | Thread / 会话(上下文) | 一组连续 runs 的共享上下文 |

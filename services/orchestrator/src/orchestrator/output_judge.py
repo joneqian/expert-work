@@ -23,7 +23,7 @@ from typing import Any, Protocol, runtime_checkable
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from helix_agent.protocol import StructuredOutputSpec
+from expert_work.protocol import StructuredOutputSpec
 from orchestrator.llm.caller import LLMCaller
 from orchestrator.llm.structured_output import strip_json_fences
 

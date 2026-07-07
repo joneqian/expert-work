@@ -1,8 +1,8 @@
-# Helix Agent Harness 能力评估报告
+# Expert Work Harness 能力评估报告
 
 > 日期：2026-06-13
 > 方法：以业界优秀 agent harness 框架的 16 域能力清单为标尺（来源见文末），
-> 对 helix-agent 代码库逐项实地核查打分。证据由并行代码勘探得出，逐项给 file path。
+> 对 expert-work 代码库逐项实地核查打分。证据由并行代码勘探得出，逐项给 file path。
 
 **评分标准（5 分制）**
 
@@ -26,7 +26,7 @@
 
 > **2026-06-13 W0 核实修订**：实地核查代码后两项纠正——
 > **10.1 连接式 trace 由 4★ 下调至 2★**：W3C 传播层（`propagation.py`）真落地，但
-> `helix.session.run` 根 span 未创建、Span Link 零实现、LLM/tool 业务 span 缺，连接式 trace
+> `expert_work.session.run` 根 span 未创建、Span Link 零实现、LLM/tool 业务 span 缺，连接式 trace
 > 核心未实装（原评分被设计文档误导，高估 2 档）。
 > **13.1 会话隔离由 4★ 升至 5★**：核心 thread_id namespace 隔离已落地且测试覆盖，W0 补
 > 两条并发隔离测试（`test_runner_unit.py`）后坐实。
@@ -40,7 +40,7 @@
 > 因深核的 4/4 项全评错，做了全量逐项重核（6 agent 读码）。**重核暴露了更深的问题：静态读码评分
 > 本身不可靠。** 三轮静态评分（初版 / 重核 agent A / 重核 agent B）互相矛盾：一组把域 3/5/6/15 几乎
 > 全升 ★5（过度慷慨），另一组把 Langfuse/token-metric/多维配额/chargeback 误判为缺失（漏找实现，
-> 经我**手动读码逐一推翻**：`langfuse_sdk.py`、`token_usage.py:helix_llm_token_usage_total`、
+> 经我**手动读码逐一推翻**：`langfuse_sdk.py`、`token_usage.py:expert_work_llm_token_usage_total`、
 > `redis_quota.py:_scope_matches(agent,user)`、`billing-rollup-job/` 均真实存在）。
 > **教训**：「capability 是否真接线 / metric 是否真 emit」这类，光读代码看不准，必须**跑起来**
 > （起栈、scrape /metrics、看真 trace）才有 ground truth。
@@ -152,8 +152,8 @@
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
 | 10.1 连接式 trace | ★★☆☆☆ | `observability/propagation.py` W3C 真落地；`run_agent()` 无 root span | **W0 核实下调**：传播层在，但根 span/Span Link/业务 span 全缺，连接式 trace 核心未实装 |
-| 10.2 每步 timing/token/cost | ★★★★★ | `middleware/token_usage.py`、102 项 helix_* 指标 | TTFT/tool_latency/token histogram |
-| 10.3 Metrics 多维 | ★★★★★ | `observability/metrics.py` label 管控、`helix_llm_token_usage_total{tenant,agent,model}` | 102 指标，禁高基数 label |
+| 10.2 每步 timing/token/cost | ★★★★★ | `middleware/token_usage.py`、102 项 expert_work_* 指标 | TTFT/tool_latency/token histogram |
+| 10.3 Metrics 多维 | ★★★★★ | `observability/metrics.py` label 管控、`expert_work_llm_token_usage_total{tenant,agent,model}` | 102 指标，禁高基数 label |
 | 10.4 低侵入埋点 | ★★★★★ | middleware+contextvar+`@with_agent_span` | 业务码无需显式 OTel |
 | 10.5 趋势监控/SLO | ★★★☆☆ ⚠️ | `subsystems/20 §5.4 SLO`、§5.6 dashboard | 设计全，**M0 仅 3 dashboard，burn rate recording rule 未在 infra/ 落地** |
 | 10.6 OTel/Langfuse | ★★★★★ | ADR-0005、`langfuse_middleware.py`、OBS-L1 PII mask | Langfuse v3+OTel三件套，trace_id 共享跳转 |
@@ -169,7 +169,7 @@
 
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
-| 11.1 确定性 eval | ★★★★★ | **运行确认**：`run_baseline.py` 15 cap 全 PASS；`helix_eval.py` mock_provider | 无 LLM CI 真跑通 |
+| 11.1 确定性 eval | ★★★★★ | **运行确认**：`run_baseline.py` 15 cap 全 PASS；`expert_work_eval.py` mock_provider | 无 LLM CI 真跑通 |
 | 11.2 LLM-judge | ★★★★★ | **运行确认**：`_judge.py:ScriptedJudge`(CI)+`AnthropicHaikuJudge`(周跑) | baseline judge_mean 出数 |
 | 11.3 会话级指标 | ★★★★★ | **已交付**（S2.2 #624）：`session_metrics_from_cases` 出 `goal_completion`，端到端 plumb 引擎→worker→API→FE 详情页显示 | 端到端生效；escalation 仅信号时出不零填 |
 | 11.4 Trace-based eval | ★★★★☆ | **已交付**（S2.4 #625）：`trace_eval.py` 纯断言引擎 + capture harness，断言调用链；脚本图 CI 实跑 7 测 | 模块+测试齐，**未接 worker suite**（差 production 接线 → ★4） |
@@ -181,10 +181,10 @@
 
 | 项 | 评分 | 证据 | 依据 / Gap |
 |---|---|---|---|
-| 12.1 token+cost 追踪 | ★★★★★ | `token_usage_store.py`、migration 0036、`helix_llm_billed_cost_micros` | per-call 一行，cache token 单记 (L.L1) |
+| 12.1 token+cost 追踪 | ★★★★★ | `token_usage_store.py`、migration 0036、`expert_work_llm_billed_cost_micros` | per-call 一行，cache token 单记 (L.L1) |
 | 12.2 配额门控 | ★★★★★ | `subsystems/16`、`quota/redis_quota.py` Lua 令牌桶、`reserve/commit/release` | 三层限流+四维令牌桶+429 Retry-After |
 | 12.3 多维计量 | ★★★★★ | quota CheckRequest (tenant/agent/user/model)、token_usage 明细 | AND 逻辑多维 |
-| 12.4 chargeback 计费 | ★★★☆☆ | `helix_billing_rollup_*` 指标、`api/billing/` 路由 | token 计量真，**rate card/定价/发票属业务层未实装** |
+| 12.4 chargeback 计费 | ★★★☆☆ | `expert_work_billing_rollup_*` 指标、`api/billing/` 路由 | token 计量真，**rate card/定价/发票属业务层未实装** |
 
 ## 域 13. 多租户 / 认证 / 隔离 — 均分 4.60
 
@@ -263,7 +263,7 @@
 4. **输出 DLP（7.4 ★3）** — 有 PII redaction，无内容分类驱动的条件输出。
 5. **trace/对抗接 worker suite（11.4/11.5 ★4）** — 模块+测试已交付，未接生产 worker（需 model-backed responder，CI 无 key）。
 
-## helix 的相对强项（满分域）
+## Expert Work 的相对强项（满分域）
 
 - **工具系统 / 模型抽象 / 多 Agent / 流式中断（均 ★★★★★ 5.00）** — 生产级。
 - **记忆系统（4.43）** — pgvector 混合检索 + 三层巩固管线 + DLQ，超出多数开源框架。
@@ -273,7 +273,7 @@
 
 ## 一句话评价
 
-helix 是**设计扎实、诚实标注 gap 的企业级 agent platform**，均分 4.51/5。核心 agent 循环 /
+Expert Work 是**设计扎实、诚实标注 gap 的企业级 agent platform**，均分 4.51/5。核心 agent 循环 /
 工具 / 记忆 / 多租户 / 可观测性 / **Eval 闭环（S2 交付后 4.71）** 已生产级。最低分集中在
 **沙箱隔离强度（3.63）/ 运行时分布式化（HA）**——已明确论证并排期 M1，是"M0 优先度 > 该
 能力强度"的诚实取舍，而非能力缺失伪装成设计选择。

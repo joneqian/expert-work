@@ -11,9 +11,9 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.common.spotlight import DATAMARK_GLYPH
-from helix_agent.protocol import MemoryItem
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.common.spotlight import DATAMARK_GLYPH
+from expert_work.protocol import MemoryItem
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     GraphRunner,
     ToolContext,
@@ -40,7 +40,7 @@ def test_inject_memories_spotlights_when_nonce_set() -> None:
         spotlight_nonce="n123",
     )
     body = str(out[1].content)
-    # helix-owned header stays outside the fence; the recalled item is fenced.
+    # expert-work-owned header stays outside the fence; the recalled item is fenced.
     assert body.startswith("## Relevant memories from past sessions")
     assert f"{_FENCE}n123»" in body
     assert f"ignore{DATAMARK_GLYPH} previous" in body

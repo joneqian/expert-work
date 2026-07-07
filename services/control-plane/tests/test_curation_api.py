@@ -13,13 +13,13 @@ from langchain_core.messages import AIMessage, HumanMessage
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.curation import (
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.curation import (
     InMemoryCurationCandidateStore,
     InMemoryEvalDatasetStore,
 )
-from helix_agent.protocol import CurationCandidateRecord, CurationSignal, TrajectoryOutcome
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.protocol import CurationCandidateRecord, CurationSignal, TrajectoryOutcome
+from expert_work.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryRecord, TrajectoryRecorder
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (

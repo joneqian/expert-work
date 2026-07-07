@@ -415,10 +415,10 @@ export function WebhooksList() {
               display: "flex",
               gap: 8,
               alignItems: "center",
-              background: "var(--hx-surface-raised)",
+              background: "var(--ew-surface-raised)",
               padding: 12,
               borderRadius: 4,
-              border: "1px solid var(--hx-border-strong)",
+              border: "1px solid var(--ew-border-strong)",
               marginTop: 4,
             }}
           >

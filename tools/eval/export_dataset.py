@@ -27,14 +27,14 @@ from uuid import UUID
 
 import yaml
 
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     SqlEvalDatasetStore,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.persistence.rls import build_rls_sessionmaker, current_tenant_id_var
-from helix_agent.protocol import EvalDatasetRecord
+from expert_work.persistence.rls import build_rls_sessionmaker, current_tenant_id_var
+from expert_work.protocol import EvalDatasetRecord
 
 
 def render_dataset_yaml(records: Iterable[EvalDatasetRecord]) -> str:

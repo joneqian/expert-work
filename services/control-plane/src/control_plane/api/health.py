@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from helix_agent.common.health import HealthReport, HealthReportProvider, HealthStatus
+from expert_work.common.health import HealthReport, HealthReportProvider, HealthStatus
 
 ProbeFn = Callable[[], Awaitable[HealthReport]]
 

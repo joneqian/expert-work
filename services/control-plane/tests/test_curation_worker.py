@@ -9,11 +9,11 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from control_plane.curation_worker import CurationWorker
-from helix_agent.persistence import InMemoryCurationCandidateStore, InMemoryThreadMetaStore
-from helix_agent.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
-from helix_agent.protocol import CandidateStatus, TrajectoryOutcome
-from helix_agent.runtime.runs import DisconnectMode, InMemoryRunStore, RunInfo, RunStatus
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.persistence import InMemoryCurationCandidateStore, InMemoryThreadMetaStore
+from expert_work.persistence.feedback_store import FeedbackRecord, InMemoryFeedbackStore
+from expert_work.protocol import CandidateStatus, TrajectoryOutcome
+from expert_work.runtime.runs import DisconnectMode, InMemoryRunStore, RunInfo, RunStatus
+from expert_work.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryReader, TrajectoryRecord, TrajectoryRecorder
 
 _BASE = datetime(2026, 5, 22, 12, 0, 0, tzinfo=UTC)

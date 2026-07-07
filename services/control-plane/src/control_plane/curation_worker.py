@@ -32,24 +32,24 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import CurationCandidateStore, ThreadMetaStore
-from helix_agent.persistence.feedback_store import FeedbackStore
-from helix_agent.persistence.rls import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import CurationCandidateStore, ThreadMetaStore
+from expert_work.persistence.feedback_store import FeedbackStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     CurationCandidateRecord,
     CurationSignal,
     FeedbackRating,
     TrajectoryOutcome,
 )
-from helix_agent.runtime.runs import RunStore
+from expert_work.runtime.runs import RunStore
 from orchestrator.trajectory import StoredTrajectory, TrajectoryReader
 
-logger = logging.getLogger("helix.control_plane.curation_worker")
+logger = logging.getLogger("expert_work.control_plane.curation_worker")
 
 #: Run outcomes that make a trajectory a regression candidate on their own.
 _FAILED_OUTCOMES: frozenset[str] = frozenset({"failed", "max_steps"})
@@ -66,12 +66,12 @@ _IMPLICIT_QUIET_WINDOW = timedelta(minutes=30)
 # The thread's final answer stays eligible (the user left satisfied with it).
 _IMPLICIT_REPHRASE_WINDOW = timedelta(minutes=5)
 
-_worker_cycle_errors = helix_counter(
-    "helix_control_plane_curation_worker_cycle_errors_total",
+_worker_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_curation_worker_cycle_errors_total",
     "Curation worker cycles that ended in a caught exception.",
 )
-_candidates_detected = helix_counter(
-    "helix_control_plane_curation_candidates_detected_total",
+_candidates_detected = expert_work_counter(
+    "expert_work_control_plane_curation_candidates_detected_total",
     "Trajectories newly flagged as curation candidates.",
 )
 

@@ -1,7 +1,7 @@
 """Image content blocks and resolution for multimodal input — Stream J.6.
 
 A run message carries an uploaded image as an ``image_ref`` content
-block — ``{"type": "image_ref", "ref": "helix://image/..."}`` — instead
+block — ``{"type": "image_ref", "ref": "expert_work://image/..."}`` — instead
 of inline base64, which would bloat every checkpoint snapshot. The
 provider adapters resolve the reference to bytes through an
 :class:`ImageResolver` only at the moment they build the wire payload.
@@ -20,8 +20,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Final, Protocol, runtime_checkable
 
-from helix_agent.protocol.multimodal import parse_image_ref
-from helix_agent.runtime.storage.base import ObjectStore
+from expert_work.protocol.multimodal import parse_image_ref
+from expert_work.runtime.storage.base import ObjectStore
 
 #: ``content`` block discriminator for an uploaded-image reference.
 IMAGE_REF_BLOCK_TYPE: Final = "image_ref"
@@ -39,7 +39,7 @@ _MEDIA_TYPE_BY_EXT: Final[dict[str, str]] = {
 
 
 def image_ref_block(uri: str) -> dict[str, str]:
-    """Build the ``image_ref`` content block for a ``helix://image/...`` URI."""
+    """Build the ``image_ref`` content block for a ``expert_work://image/...`` URI."""
     return {"type": IMAGE_REF_BLOCK_TYPE, "ref": uri}
 
 
@@ -88,7 +88,7 @@ class ResolvedImage:
 
 @runtime_checkable
 class ImageResolver(Protocol):
-    """Resolves a ``helix://image/...`` reference to image bytes."""
+    """Resolves a ``expert_work://image/...`` reference to image bytes."""
 
     async def resolve(self, ref: str) -> ResolvedImage:
         """Fetch the referenced image.

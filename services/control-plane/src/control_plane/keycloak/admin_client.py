@@ -1,6 +1,6 @@
 """Keycloak Admin REST client — Stream R (Mini-ADR R-1/R-3).
 
-helix provisions member accounts directly in Keycloak (the single IdP) rather
+expert_work provisions member accounts directly in Keycloak (the single IdP) rather
 than self-managing passwords: ``create_user`` + a native
 ``execute-actions-email`` set-password link. The ``Protocol`` keeps the
 orchestration testable against a fake; ``HttpKeycloakAdminClient`` is the live
@@ -24,7 +24,7 @@ from control_plane.keycloak.token import ServiceAccountTokenProvider
 
 @dataclass(frozen=True)
 class KeycloakUser:
-    """A provisioned Keycloak account (the bits helix needs back)."""
+    """A provisioned Keycloak account (the bits expert_work needs back)."""
 
     id: str
     username: str

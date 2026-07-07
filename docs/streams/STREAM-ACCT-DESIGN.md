@@ -1,7 +1,7 @@
 # Stream ACCT — 账号自助化(bootstrap 平滑 + 平台账号管理 UI)
 
 > 延伸 Stream P(bootstrap admin)、Stream N(跨租户 system_admin)、Stream R(成员 onboarding)。
-> 起因:评估认为 SSO 架构本身不过度(Keycloak OIDC 单 IdP + helix `role_binding` 双层权限是标准多租户形态),
+> 起因:评估认为 SSO 架构本身不过度(Keycloak OIDC 单 IdP + Expert Work `role_binding` 双层权限是标准多租户形态),
 > 但暴露两处运维摩擦——①生产无平台管理账号,要手跑脚本;②平台级账号/角色管理无 UI,只能脚本/直连 Keycloak。
 > 本 Stream 消除这两处摩擦,不改 IdP 架构。
 
@@ -13,7 +13,7 @@
 | **P2** 平台管理员管理页 | 前端 | ②平台角色管理无 UI |
 | **P3** 跨租户成员视图 | 后端+前端 | system_admin 无法跨租户查成员 |
 
-**不做**:替换 Keycloak;在 helix 内自管密码/身份库(那是重建认证,倒退);service_account 平台管理员(沿用 N 的 M1 推迟)。
+**不做**:替换 Keycloak;在 Expert Work 内自管密码/身份库(那是重建认证,倒退);service_account 平台管理员(沿用 N 的 M1 推迟)。
 
 ## 2. P1 — 邮箱首登自动升 system_admin
 
@@ -21,7 +21,7 @@
 `POST /v1/role_bindings` 需 `is_system_admin`,而 `is_system_admin` 要查 `role_binding` 表 → 空表时无人能授第一个 admin。现状唯一出路 = 手跑 `python -m control_plane.bootstrap_admin`(Mini-ADR P-6)。
 
 ### 方案(Mini-ADR ACCT-1)
-operator 在部署时配 env `HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL`。当满足**全部**条件时,首次带该邮箱的已验证 JWT 登录即自动获 platform `system_admin` 绑定:
+operator 在部署时配 env `EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL`。当满足**全部**条件时,首次带该邮箱的已验证 JWT 登录即自动获 platform `system_admin` 绑定:
 
 1. `settings.bootstrap_admin_email` 已配(未配则整条逻辑不跑,零开销路径);
 2. 当前 principal 经 `resolve_system_admin` 后仍**非** system_admin;

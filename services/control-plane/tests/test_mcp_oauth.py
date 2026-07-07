@@ -66,7 +66,7 @@ def test_build_authorize_url_has_pkce_and_resource() -> None:
     url = build_authorize_url(
         metadata=_META,
         client_id="cid",
-        redirect_uri="https://helix.test/cb",
+        redirect_uri="https://expert_work.test/cb",
         scopes="read write",
         state="st-1",
         pkce_challenge="chal",
@@ -170,7 +170,7 @@ async def test_exchange_code_parses_tokens() -> None:
             client_id="cid",
             code="authcode",
             code_verifier="verifier",
-            redirect_uri="https://helix.test/cb",
+            redirect_uri="https://expert_work.test/cb",
             http=http,
         )
     assert tok.access_token == "AT"
@@ -188,7 +188,7 @@ async def test_exchange_code_error_status_raises() -> None:
                 client_id="cid",
                 code="bad",
                 code_verifier="v",
-                redirect_uri="https://helix.test/cb",
+                redirect_uri="https://expert_work.test/cb",
                 http=http,
             )
     assert exc.value.code == "MCP_OAUTH_TOKEN_FAILED"
@@ -203,7 +203,7 @@ async def test_exchange_code_missing_access_token_raises() -> None:
                 client_id="cid",
                 code="c",
                 code_verifier="v",
-                redirect_uri="https://helix.test/cb",
+                redirect_uri="https://expert_work.test/cb",
                 http=http,
             )
 
@@ -242,7 +242,7 @@ async def test_access_token_not_in_repr() -> None:
             client_id="cid",
             code="c",
             code_verifier="v",
-            redirect_uri="https://helix.test/cb",
+            redirect_uri="https://expert_work.test/cb",
             http=http,
         )
     assert "AT" not in repr(tok)

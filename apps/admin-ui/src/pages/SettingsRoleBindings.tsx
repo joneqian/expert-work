@@ -458,7 +458,7 @@ export function SettingsRoleBindings() {
               >
                 <Input
                   placeholder={CONFIRM_PHRASE}
-                  style={{ fontFamily: "var(--hx-font-mono)" }}
+                  style={{ fontFamily: "var(--ew-font-mono)" }}
                   data-testid="rb-confirm-input"
                 />
               </Form.Item>

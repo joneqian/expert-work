@@ -5,7 +5,7 @@
 # | equals). `mock_response` is the deterministic stand-in output the
 # mock provider returns — so this set runs end to end with no LLM.
 #
-# Run:  python tools/eval/helix_eval.py tools/eval/datasets/example.yaml
+# Run:  python tools/eval/expert_work_eval.py tools/eval/datasets/example.yaml
 
 name: example-smoke
 

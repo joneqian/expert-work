@@ -30,7 +30,7 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     AgentState,
     GraphRunner,
@@ -254,7 +254,7 @@ async def test_advisory_persists_in_conversation_history() -> None:
 @pytest.mark.asyncio
 async def test_persisted_advisory_is_marked_hidden_from_ui() -> None:
     """RT-2 PR-4 (RT-ADR-9), Option A — the persisted advisory carries
-    ``helix_hide_from_ui`` so the UI bubble view (``read_turns`` with
+    ``expert_work_hide_from_ui`` so the UI bubble view (``read_turns`` with
     ``include_hidden=False``) keeps the CM-1 leak out of the rendered
     transcript, while the durable record + search/audit mirror stay faithful
     (the default ``include_hidden=True``) and the model sees it in-prompt."""
@@ -276,7 +276,7 @@ async def test_persisted_advisory_is_marked_hidden_from_ui() -> None:
 
     advisory = _find_advisory(state["messages"])
     assert advisory is not None
-    assert advisory.additional_kwargs.get("helix_hide_from_ui") is True
+    assert advisory.additional_kwargs.get("expert_work_hide_from_ui") is True
 
 
 @pytest.mark.asyncio

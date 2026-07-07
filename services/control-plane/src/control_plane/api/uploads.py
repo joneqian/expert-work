@@ -2,7 +2,7 @@
 
 Multipart entry point for the multimodal input path: the user uploads an
 image alongside a session, the bytes land in the object store, and the
-endpoint returns the ``helix://image/...`` reference the run request's
+endpoint returns the ``expert_work://image/...`` reference the run request's
 ``image_refs`` field carries.
 
 Image references — not inline base64 — ride in the run message so each
@@ -35,14 +35,14 @@ from control_plane.api._user_scope import (
 from control_plane.audit import emit as audit_emit
 from control_plane.quota.base import QuotaService
 from control_plane.settings import Settings
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence import WORKSPACE_UPLOADS_DIR
-from helix_agent.persistence.image_upload import ImageUploadStore
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import AuditAction, AuditResult, QuotaDimension
-from helix_agent.protocol.multimodal import ImageRef
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.storage import ObjectStore
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence import WORKSPACE_UPLOADS_DIR
+from expert_work.persistence.image_upload import ImageUploadStore
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.protocol import AuditAction, AuditResult, QuotaDimension
+from expert_work.protocol.multimodal import ImageRef
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.storage import ObjectStore
 from orchestrator.tools import SandboxSupervisorError, SupervisorClient
 
 #: File extension per accepted image content type. The reverse direction
@@ -75,7 +75,7 @@ _MAX_ZIP_UNCOMPRESSED_BYTES: Final[int] = 200 * 1024 * 1024
 #: Workspace subdirectory uploaded documents land in (namespaced away from
 #: agent-written files so an upload can't clobber the agent's own output, and
 #: hidden from the "agent products" browse — shared source of truth in
-#: :mod:`helix_agent.persistence.workspace.layout`).
+#: :mod:`expert_work.persistence.workspace.layout`).
 _UPLOAD_DIR: Final[str] = WORKSPACE_UPLOADS_DIR
 _SAFE_STEM_RE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
 

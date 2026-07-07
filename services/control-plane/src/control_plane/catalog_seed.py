@@ -26,13 +26,13 @@ from collections.abc import Mapping
 from pydantic import ValidationError
 
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import (
+from expert_work.persistence import (
     McpConnectorCatalogAlreadyExistsError,
     McpConnectorCatalogStore,
 )
-from helix_agent.protocol import McpConnectorCatalogUpsert
+from expert_work.protocol import McpConnectorCatalogUpsert
 
-logger = logging.getLogger("helix.control_plane.catalog_seed")
+logger = logging.getLogger("expert_work.control_plane.catalog_seed")
 
 _SEED_ACTOR = "catalog-seed"
 # ``${VAR}`` placeholder — upper-snake env var names only.

@@ -14,19 +14,19 @@ tests:
   - interval: 1m
     name: fast burn fires P0 at 5% error rate
     input_series:
-      - series: 'helix_control_plane_http_requests_total{status_code="200"}'
+      - series: 'expert_work_control_plane_http_requests_total{status_code="200"}'
         values: "0+95x90"
-      - series: 'helix_control_plane_http_requests_total{status_code="500"}'
+      - series: 'expert_work_control_plane_http_requests_total{status_code="500"}'
         values: "0+5x90"
     promql_expr_test:
-      - expr: helix_slo_burn_rate{slo="control_plane_availability",window="1h"}
+      - expr: expert_work_slo_burn_rate{slo="control_plane_availability",window="1h"}
         eval_time: 70m
         exp_samples:
-          - labels: 'helix_slo_burn_rate{slo="control_plane_availability",window="1h"}'
+          - labels: 'expert_work_slo_burn_rate{slo="control_plane_availability",window="1h"}'
             value: 50
     alert_rule_test:
       - eval_time: 70m
-        alertname: HelixSLOAvailabilityFastBurn
+        alertname: ExpertWorkSLOAvailabilityFastBurn
         exp_alerts:
           - exp_labels:
               severity: P0
@@ -45,13 +45,13 @@ tests:
   - interval: 1m
     name: healthy traffic raises no burn alert
     input_series:
-      - series: 'helix_control_plane_http_requests_total{status_code="200"}'
+      - series: 'expert_work_control_plane_http_requests_total{status_code="200"}'
         values: "0+100x90"
     promql_expr_test:
-      - expr: helix_slo_burn_rate{slo="control_plane_availability",window="1h"}
+      - expr: expert_work_slo_burn_rate{slo="control_plane_availability",window="1h"}
         eval_time: 70m
         exp_samples: []
     alert_rule_test:
       - eval_time: 70m
-        alertname: HelixSLOAvailabilityFastBurn
+        alertname: ExpertWorkSLOAvailabilityFastBurn
         exp_alerts: []

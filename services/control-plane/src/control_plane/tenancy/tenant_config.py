@@ -28,16 +28,16 @@ from typing import Final
 from uuid import UUID
 
 from control_plane.audit import emit
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.tenant_config import TenantConfigStore
-from helix_agent.protocol import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.protocol import (
     AuditAction,
     TenantConfigPatch,
     TenantConfigRecord,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.tenant_config")
+logger = logging.getLogger("expert_work.control_plane.tenant_config")
 
 _DEFAULT_TTL_S: Final[float] = 60.0
 

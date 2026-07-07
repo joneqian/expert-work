@@ -12,7 +12,7 @@ from PIL import Image
 
 from control_plane.app import create_app
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.runtime.storage import InMemoryObjectStore
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -89,7 +89,7 @@ async def test_upload_image_returns_image_ref_and_persists_bytes(setup: Setup) -
 
     assert response.status_code == 201
     image_ref = response.json()["image_ref"]
-    assert image_ref.startswith(f"helix://image/{_TENANT}/{thread_id}/")
+    assert image_ref.startswith(f"expert_work://image/{_TENANT}/{thread_id}/")
     assert image_ref.endswith(".png")
 
     # The bytes landed under the ADR-0004 prefix. Mini-ADR J-34 round-trips
@@ -309,7 +309,7 @@ async def _seed_quota_row(
     burst: int | None = None,
 ) -> None:
     """Insert one quota row for the default dev tenant."""
-    from helix_agent.protocol import TenantQuotaPatch
+    from expert_work.protocol import TenantQuotaPatch
 
     patch = TenantQuotaPatch(
         dimension=dimension,  # type: ignore[arg-type]
@@ -326,7 +326,7 @@ async def _seed_quota_row(
 async def test_upload_429_when_image_count_quota_exhausted(setup: Setup) -> None:
     """After ``IMAGE_UPLOAD_COUNT_30D`` capacity is consumed the next
     upload returns 429 with the dimension surfaced."""
-    from helix_agent.protocol import QuotaDimension
+    from expert_work.protocol import QuotaDimension
 
     client, thread_id, _ = setup
     await _seed_quota_row(
@@ -358,7 +358,7 @@ async def test_upload_429_when_image_count_quota_exhausted(setup: Setup) -> None
 async def test_upload_429_when_image_storage_bytes_exhausted(setup: Setup) -> None:
     """``IMAGE_STORAGE_BYTES`` ceiling is enforced — the upload's
     ``len(raw)`` overrides the default ``cost=1``."""
-    from helix_agent.protocol import QuotaDimension
+    from expert_work.protocol import QuotaDimension
 
     client, thread_id, _ = setup
     # 1x1 PNG round-tripped through Pillow lands around 70 bytes; a
@@ -388,7 +388,7 @@ async def test_upload_429_when_image_storage_bytes_exhausted(setup: Setup) -> No
 # ---------------------------------------------------------------------------
 
 
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore  # noqa: E402
+from expert_work.persistence.audit_log import InMemoryAuditLogStore  # noqa: E402
 
 AuditSetup = tuple[AsyncClient, UUID, InMemoryAuditLogStore, InMemoryObjectStore]
 
@@ -431,7 +431,7 @@ async def test_upload_emits_image_upload_audit_row(audit_setup: AuditSetup) -> N
     """Successful upload writes a dedicated ``image:upload`` audit row
     with the full byte-trace metadata (size / mime / object_key / sha256)
     that the SESSION_WRITE row does not carry."""
-    from helix_agent.protocol import AuditAction
+    from expert_work.protocol import AuditAction
 
     client, thread_id, audit_store, object_store = audit_setup
     raw = _png_bytes()
@@ -448,7 +448,7 @@ async def test_upload_emits_image_upload_audit_row(audit_setup: AuditSetup) -> N
     stored = await object_store.get(keys[0])
     import hashlib
 
-    from helix_agent.protocol import AuditQuery
+    from expert_work.protocol import AuditQuery
 
     page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
     image_upload_rows = [r for r in page.entries if r.action == AuditAction.IMAGE_UPLOAD]
@@ -475,7 +475,7 @@ async def test_quota_denial_does_not_emit_image_upload_audit(
     """A 429 from quota admission must NOT emit ``IMAGE_UPLOAD`` (the
     upload didn't happen). The 429 path already emits its own
     ``QUOTA_RATE_LIMIT_DENIED`` row via ``check_admission``."""
-    from helix_agent.protocol import AuditAction, QuotaDimension
+    from expert_work.protocol import AuditAction, QuotaDimension
 
     client, thread_id, audit_store, _ = audit_setup
     await _seed_quota_row(
@@ -495,7 +495,7 @@ async def test_quota_denial_does_not_emit_image_upload_audit(
     )
     assert second.status_code == 429
 
-    from helix_agent.protocol import AuditQuery
+    from expert_work.protocol import AuditQuery
 
     page = await audit_store.query(AuditQuery(tenant_id=_TENANT, limit=50))
     image_upload_rows = [r for r in page.entries if r.action == AuditAction.IMAGE_UPLOAD]
@@ -535,7 +535,7 @@ async def test_upload_registers_row_in_image_upload_store(audit_setup: AuditSetu
 async def test_delete_image_soft_deletes_row_and_emits_audit(audit_setup: AuditSetup) -> None:
     """``DELETE /v1/uploads/{id}`` flips ``deleted_at``, returns 204, and
     writes an ``image:upload`` audit row tagged ``operation=soft_delete``."""
-    from helix_agent.protocol import AuditAction, AuditQuery
+    from expert_work.protocol import AuditAction, AuditQuery
 
     client, thread_id, audit_store, _ = audit_setup
     upload = await client.post(
@@ -577,7 +577,7 @@ async def test_multi_image_upload_round_trips_three_images(audit_setup: AuditSet
     """Mini-ADR J-34 — three uploads in a single thread land EXIF-stripped
     + each gets its own registry row + audit row. Verifies the upload
     pipeline scales beyond a single-image sweet spot."""
-    from helix_agent.protocol import AuditAction, AuditQuery
+    from expert_work.protocol import AuditAction, AuditQuery
 
     client, thread_id, audit_store, object_store = audit_setup
 

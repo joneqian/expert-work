@@ -48,7 +48,7 @@ export function AuthCallback() {
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
-        background: "var(--hx-surface-base)",
+        background: "var(--ew-surface-base)",
       }}
     >
       <Card

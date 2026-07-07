@@ -5,12 +5,12 @@
  *
  *   - ``mockControlPlane`` — wires ``page.route`` to intercept
  *     ``/v1/*`` and return stable fixture responses. CI can't reach a
- *     real helix.control_plane.main, so every E2E that doesn't
+ *     real expert_work.control_plane.main, so every E2E that doesn't
  *     explicitly opt out goes through this stub.
  *   - ``a11y`` — runs ``@axe-core/playwright`` against the current
  *     page and fails on serious + critical violations. Skipping
  *     ``color-contrast`` would be tempting against Antd defaults, but
- *     the helix tokens were tuned for WCAG AA, so we keep it on.
+ *     the expert_work tokens were tuned for WCAG AA, so we keep it on.
  */
 import { test as base, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
@@ -260,7 +260,7 @@ export const test = base.extend<{
 export { expect };
 
 /** Rules left off the failure budget for PR 4. ``color-contrast``
- *  catches Antd default ``type="secondary"`` colours against the helix
+ *  catches Antd default ``type="secondary"`` colours against the expert_work
  *  surface tokens — a real signal, but one that needs a token audit
  *  pass before we can fail CI on it. Tracked as a follow-up. */
 const A11Y_PR4_WAIVERS = new Set(["color-contrast"]);

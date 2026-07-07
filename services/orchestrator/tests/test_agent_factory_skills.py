@@ -20,11 +20,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from helix_agent.persistence.skill.memory import InMemorySkillStore
-from helix_agent.protocol import AgentSpec, SkillVersion
-from helix_agent.protocol.skill import SkillStatus
-from helix_agent.runtime.checkpointer import make_checkpointer
-from helix_agent.runtime.secret_store import LocalDevSecretStore
+from expert_work.persistence.skill.memory import InMemorySkillStore
+from expert_work.protocol import AgentSpec, SkillVersion
+from expert_work.protocol.skill import SkillStatus
+from expert_work.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.secret_store import LocalDevSecretStore
 from orchestrator.agent_factory import _SkillLookupResult, build_agent
 from orchestrator.errors import (
     AgentFactoryError,
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 _ANTHROPIC_KEY_NAME = "anthropic-test"
 _MINIMAL_SPEC: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "test", "version": "1.0.0", "tenant": "test-tenant"},
     "spec": {

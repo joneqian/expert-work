@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from helix_agent.testing import FakeCompletion, InMemorySecretStore, MockLLM
+from expert_work.testing import FakeCompletion, InMemorySecretStore, MockLLM
 
 # ---------------------------------------------------------------------------
 # mock_llm
@@ -24,7 +24,7 @@ async def test_mock_llm_prefix_expectation(mock_llm: MockLLM) -> None:
     """expect(prefix, response) routes matching prompts."""
     mock_llm.expect("summarize:", FakeCompletion(content="<summary>", tokens_used=12))
 
-    result = await mock_llm.complete("summarize: helix-agent docs")
+    result = await mock_llm.complete("summarize: expert-work docs")
     assert result.content == "<summary>"
     assert result.tokens_used == 12
 
@@ -49,8 +49,8 @@ async def test_mock_llm_records_all_calls(mock_llm: MockLLM) -> None:
 @pytest.mark.asyncio
 async def test_mock_secret_store_put_get(mock_secret_store: InMemorySecretStore) -> None:
     """put() then get() returns the stored value."""
-    await mock_secret_store.put("/helix-agent/test/db-password", "s3cret")
-    value = await mock_secret_store.get("/helix-agent/test/db-password")
+    await mock_secret_store.put("/expert-work/test/db-password", "s3cret")
+    value = await mock_secret_store.get("/expert-work/test/db-password")
     assert value == "s3cret"
 
 
@@ -58,4 +58,4 @@ async def test_mock_secret_store_put_get(mock_secret_store: InMemorySecretStore)
 async def test_mock_secret_store_missing_raises(mock_secret_store: InMemorySecretStore) -> None:
     """Reading an unset key raises KeyError."""
     with pytest.raises(KeyError, match="secret not found"):
-        await mock_secret_store.get("/helix-agent/test/missing")
+        await mock_secret_store.get("/expert-work/test/missing")

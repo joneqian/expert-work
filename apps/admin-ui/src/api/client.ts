@@ -16,7 +16,7 @@
  */
 import axios, { type AxiosInstance, type AxiosRequestConfig } from "axios";
 
-const TOKEN_STORAGE_KEY = "helix.admin.token";
+const TOKEN_STORAGE_KEY = "expert_work.admin.token";
 
 /** UUID string for a specific tenant, ``"*"`` for cross-tenant, or
  *  ``undefined`` to fall through to the caller's home tenant.

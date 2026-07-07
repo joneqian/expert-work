@@ -13,7 +13,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from control_plane.middleware import CancellationMiddleware
 from control_plane.middleware.cancellation import CLIENT_DISCONNECTED
-from helix_agent.common.deadline import CancelToken
+from expert_work.common.deadline import CancelToken
 
 # ---------------------------------------------------------------------------
 # Happy-path: a normal request leaves CancelToken intact + uncancelled.

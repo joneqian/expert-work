@@ -5,18 +5,18 @@ development.
 
 ## What's here
 
-- `realm-helix-agent.json` — single-realm export imported on Keycloak
+- `realm-expert-work.json` — single-realm export imported on Keycloak
   startup (`docker-compose up keycloak`). Contains:
-  - Realm `helix-agent`
+  - Realm `expert-work`
   - Realm roles: `admin` / `operator` / `viewer`
-  - Public client `helix-agent-admin-ui` (Authorization Code + PKCE, for
+  - Public client `expert-work-admin-ui` (Authorization Code + PKCE, for
     the future M0 admin UI)
-  - Confidential client `helix-agent-api-internal` with Service Account
+  - Confidential client `expert-work-api-internal` with Service Account
     enabled (for Stream C.2 / C.3 internal service-to-service calls and
     integration tests)
   - User attribute mapper that copies `tenant_id` into the access token's
     top-level claims
-  - Dev user `dev@helix.local` (password `devpass`, role `admin`, tenant
+  - Dev user `dev@expert_work.local` (password `devpass`, role `admin`, tenant
     `00000000-0000-0000-0000-000000000000`)
 
 ## Boot
@@ -34,13 +34,13 @@ Admin console: <http://localhost:8080/> (login `admin` / `admin_dev`).
 `environments/dev.yaml` will set:
 
 ```yaml
-HELIX_AGENT_OIDC_ISSUER: "http://keycloak:8080/realms/helix-agent"
-HELIX_AGENT_OIDC_AUDIENCE: ["helix-agent-api-internal"]
+EXPERT_WORK_OIDC_ISSUER: "http://keycloak:8080/realms/expert-work"
+EXPERT_WORK_OIDC_AUDIENCE: ["expert-work-api-internal"]
 ```
 
 The control plane fetches JWKS from
 `{issuer}/protocol/openid-connect/certs` and caches it for
-`HELIX_AGENT_OIDC_JWKS_CACHE_TTL_S` seconds (default 300).
+`EXPERT_WORK_OIDC_JWKS_CACHE_TTL_S` seconds (default 300).
 
 ## Why a single dev user is enough for C.1
 

@@ -42,7 +42,7 @@
 
 `GET https://codeload.github.com/<owner>/<repo>/zip/<ref>` → zip 字节(用 zip 不用 tar,留在 `zipfile` 内,复用 zip-slip 心智)。
 
-- **host 钉死**:URL 由我们用校验过的片段拼,host 恒为 `codeload.github.com`;再过 `validate_remote_url`(挡私网,见 [helix_agent.common.url_validation])兜底。即"allowlist 单域名 + 私网兜底"双保险。
+- **host 钉死**:URL 由我们用校验过的片段拼,host 恒为 `codeload.github.com`;再过 `validate_remote_url`(挡私网,见 [expert_work.common.url_validation])兜底。即"allowlist 单域名 + 私网兜底"双保险。
 - **下载体积上限**:复用现有 skill zip size cap(`_MAX_*`),流式读到上限即断(防 zip 炸弹/超大仓)。
 - **超时**:固定短超时(如 15s)。
 - 404 / 非 200 → 404「repo/ref/skill 未找到」。

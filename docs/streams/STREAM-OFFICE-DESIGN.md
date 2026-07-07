@@ -11,7 +11,7 @@
 
 ## 0.1 现状（已 file:line 核实，2026-06-05）
 - 沙箱镜像 `infra/sandbox-image/Dockerfile` = `python:3.12-alpine`（~50MB）+ 纯 stdlib，**运行时卸载 pip**（安全 F-2/F-13）；无办公库、无中文字体、无 locale。
-- 镜像名 supervisor **硬编码** `settings.sandbox_image`（`settings.py:34`，env `HELIX_SANDBOX_SANDBOX_IMAGE`）；`AcquireRequest`（`schemas.py:16`）无 image 字段；一个 supervisor 实例当前无法按请求选镜像。
+- 镜像名 supervisor **硬编码** `settings.sandbox_image`（`settings.py:34`，env `EXPERT_WORK_SANDBOX_SANDBOX_IMAGE`）；`AcquireRequest`（`schemas.py:16`）无 image 字段；一个 supervisor 实例当前无法按请求选镜像。
 - `SandboxSpec`（`agent_spec.py:225`）**已有未使用的 `image` / `image_build` 字段**；无 `image_variant`。
 - `persistent_workspace`（J.15）是 manifest→supervisor 传递的**完美模板**：manifest → `agent_factory.build_tool_registry` → 沙箱工具字段 → `run_in_sandbox` → `acquire`。
 - MCP catalog（Stream W）**只收 remote**（`sse`/`streamable_http`，`mcp_connector_catalog.py:37`），不收 stdio；钉钉/企微/飞书要进 catalog 必须有 HTTP MCP endpoint。
@@ -40,10 +40,10 @@
 - **实现要点（OFFICE-1b 落地实证）**：① Debian `fonts-noto-cjk` 装的是 `.ttc` 集合，fontconfig 能看到 SC/TC/JP 全部子面，但 **matplotlib 只注册第 0 面**（家族名 `Noto Sans CJK JP`）；该面属统一 Noto Sans CJK,含全部简体汉字,渲染中文不豆腐。② build 期 `mpl_cjk_rc.py` 把 `font.sans-serif: Noto Sans CJK JP, …` 烤进 matplotlib **系统级 matplotlibrc**(只读 rootfs 下也生效,因 /workspace tmpfs 每会话清空,用户级 rc 不持久),agent 画图开箱即用,无需自配字体;只写 `key: value`(注释行会触发 rc parser 告警污染 stderr)。③ build 期 `fc-cache -f` 预热字体缓存进只读层。
 
 ### OFFICE-ADR-4 国内连接器暂缓（不破 client-only）
-- **决策**：钉钉/企微/飞书连接器**本轮不做**。国内官方 remote MCP server 生态薄，catalog 只收 remote；强上要么破 client-only 自搭 wrapper、要么仅单租户 on-prem stdio off-catalog。记 backlog，待生态成熟或单租户场景再开。helix 本就 backend-only、不内置末端 adapter。
+- **决策**：钉钉/企微/飞书连接器**本轮不做**。国内官方 remote MCP server 生态薄，catalog 只收 remote；强上要么破 client-only 自搭 wrapper、要么仅单租户 on-prem stdio off-catalog。记 backlog，待生态成熟或单租户场景再开。Expert Work 本就 backend-only、不内置末端 adapter。
 
 ### OFFICE-ADR-5 办公 Skill = 平台导入端点（不自写，2026-06-05 改定）
-- **背景（实证后改向）**：调研 ClawHub / anthropics/skills，办公 skill 的"现成轮子"没有能无脑直接搬的——Anthropic 官方 docx/xlsx/pptx/pdf 是 **Proprietary 明文禁移植**；ClawHub 第三方多**无 LICENSE**（版权全保留）+ 质量/安全参差。**故 helix 不自写、也不批量移植办公 skill**。
+- **背景（实证后改向）**：调研 ClawHub / anthropics/skills，办公 skill 的"现成轮子"没有能无脑直接搬的——Anthropic 官方 docx/xlsx/pptx/pdf 是 **Proprietary 明文禁移植**；ClawHub 第三方多**无 LICENSE**（版权全保留）+ 质量/安全参差。**故 Expert Work 不自写、也不批量移植办公 skill**。
 - **决策**：补一个**平台级 skill 导入端点** `POST /v1/platform/skills/import`（system_admin + `bypass_rls`，multipart `.skill` ZIP，复用租户侧 `_skill_zip` 解析 + 威胁扫描），让平台管理员把 `.skill` 包导入成**平台级 skill**（NULL-tenant），租户经 X-6 merged view + X-4 resolver 自动可见 + `required_tier` 门控。**包来源由管理员定**（自打 / 挑 license 干净的现成包），平台不预置内容。
 - **content_hash 幂等（租户+平台统一）**：导入同名 skill 时，与 **latest 版本 content_hash 相同则跳过**（不产生冗余版本），不同则 `add_version` 生成新版本。租户现有 `POST /v1/skills/import` **每次都加版本**，本轮一并补幂等，两边语义一致。
 - store 接口齐全无需新方法：`get_skill_by_name`/`get_platform_skill_by_name` + `get_version_by_number`/`get_platform_version_by_number`（取 latest content_hash）+ `add_version`/`add_platform_version`/`create_*`。

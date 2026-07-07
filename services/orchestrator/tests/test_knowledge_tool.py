@@ -9,9 +9,9 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage
 
-from helix_agent.common.search.rrf import rrf_fuse as _rrf_fuse
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.protocol import KnowledgeChunk, RetrievalMethod
+from expert_work.common.search.rrf import rrf_fuse as _rrf_fuse
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.protocol import KnowledgeChunk, RetrievalMethod
 from orchestrator.tools import (
     KnowledgeRetriever,
     KnowledgeSearchTool,

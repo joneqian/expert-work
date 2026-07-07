@@ -24,9 +24,9 @@ that is M1-A. The state machine is `CREATING → IN_USE → DESTROYED`
 uvicorn sandbox_supervisor.main:app
 ```
 
-Settings come from `HELIX_SANDBOX_*` env vars (see `settings.py`):
-`HELIX_SANDBOX_OCI_RUNTIME` (`runc` dev / `runsc` prod),
-`HELIX_SANDBOX_SANDBOX_IMAGE`, `HELIX_SANDBOX_DB_DSN`, reaper tuning.
+Settings come from `EXPERT_WORK_SANDBOX_*` env vars (see `settings.py`):
+`EXPERT_WORK_SANDBOX_OCI_RUNTIME` (`runc` dev / `runsc` prod),
+`EXPERT_WORK_SANDBOX_SANDBOX_IMAGE`, `EXPERT_WORK_SANDBOX_DB_DSN`, reaper tuning.
 
 ## TTL reaper
 

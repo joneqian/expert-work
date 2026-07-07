@@ -5,18 +5,18 @@
 > Authoritative source for: Curator state machine (active / stale /
 > archived / pinned), per-tenant threshold tuning, auto-revive
 > behaviour, archived-skill read response, and the two Curator alerts
-> (`HelixUpliftCuratorStaleSurge`, `HelixUpliftSkillArchivedAccessAttempts`).
+> (`ExpertWorkUpliftCuratorStaleSurge`, `ExpertWorkUpliftSkillArchivedAccessAttempts`).
 
 The Curator lives across these components:
 
 | Component | Path |
 |-----------|------|
-| State columns (`pinned`, `last_used_at`, `state_changed_at`) | `packages/helix-persistence/src/helix_agent/persistence/models/skill.py` |
-| Threshold columns (`skill_stale_days`, `skill_archive_days`) | `packages/helix-persistence/src/helix_agent/persistence/models/tenant_config.py` |
+| State columns (`pinned`, `last_used_at`, `state_changed_at`) | `packages/expert-work-persistence/src/expert_work/persistence/models/skill.py` |
+| Threshold columns (`skill_stale_days`, `skill_archive_days`) | `packages/expert-work-persistence/src/expert_work/persistence/models/tenant_config.py` |
 | Worker (daily sweep) | `services/control-plane/src/control_plane/skill_curator.py` |
 | Throttled activity recorder | `services/control-plane/src/control_plane/skill_activity.py` |
 | Admin PATCH for pin / unpin | `services/control-plane/src/control_plane/api/skills.py` (`PATCH /v1/skills/{id}`) |
-| Metrics / alerts | `tools/observability/rules/uplift.yml` (`helix_uplift_skill_curator` group) |
+| Metrics / alerts | `tools/observability/rules/uplift.yml` (`expert_work_uplift_skill_curator` group) |
 
 Five new audit actions track every operator-visible state change:
 
@@ -41,7 +41,7 @@ authored skills) is when the real distribution lands; **plan to revisit
 To re-tune for a single tenant:
 
 ```bash
-curl -X PUT https://helix/v1/tenants/<TID>/config \
+curl -X PUT https://Expert Work/v1/tenants/<TID>/config \
     -H "Authorization: Bearer <admin-jwt>" \
     -H "Content-Type: application/json" \
     -d '{"skill_stale_days": 7, "skill_archive_days": 30}'
@@ -76,12 +76,12 @@ Pin = "do not Curator-touch — forever, until I un-pin". Use cases:
 
 ```bash
 # Pin
-curl -X PATCH https://helix/v1/skills/<SID> \
+curl -X PATCH https://Expert Work/v1/skills/<SID> \
     -H "Authorization: Bearer <admin-jwt>" \
     -d '{"pinned": true}'
 
 # Unpin
-curl -X PATCH https://helix/v1/skills/<SID> \
+curl -X PATCH https://Expert Work/v1/skills/<SID> \
     -d '{"pinned": false}'
 ```
 
@@ -97,7 +97,7 @@ forces operator review.
 
 ---
 
-## Section 3 — `HelixUpliftCuratorStaleSurge` triage
+## Section 3 — `ExpertWorkUpliftCuratorStaleSurge` triage
 
 **Alert fires when**: > 50 `active → stale` transitions in 24h
 (sustained). Background is a slow trickle (low single-digits per
@@ -151,7 +151,7 @@ WHERE status = 'stale'
 
 ---
 
-## Section 4 — `HelixUpliftSkillArchivedAccessAttempts` triage
+## Section 4 — `ExpertWorkUpliftSkillArchivedAccessAttempts` triage
 
 **Alert fires when**: an agent's `skill_view` hit an archived skill
 > 6 times / hour sustained 30 minutes. Cold path: expected to be
@@ -181,7 +181,7 @@ just sees the blocked message; no hard failure).
    - If the agent is still actively used → **unarchive** by setting
      status back to `active`:
      ```bash
-     curl -X PATCH https://helix/v1/skills/<SID> \
+     curl -X PATCH https://Expert Work/v1/skills/<SID> \
          -d '{"status": "active"}'
      ```
      This bumps `state_changed_at` and the Curator restarts the
@@ -253,8 +253,8 @@ Per `[memory:zero-tech-debt]`, Sprint #4 close-out checks:
       activity
 - [ ] All 5 new audit actions written into protocol's `AuditAction`
       StrEnum
-- [ ] `helix_uplift_curator_transition_total{from_state, to_state}`
-      counter + `helix_uplift_skill_view_archived_blocked_total`
+- [ ] `expert_work_uplift_curator_transition_total{from_state, to_state}`
+      counter + `expert_work_uplift_skill_view_archived_blocked_total`
       counter wired
 - [ ] 4 recording rules + 2 alerts in `tools/observability/rules/uplift.yml`
 - [ ] Admin UI: 📌 pin button + status filter + ETA hint

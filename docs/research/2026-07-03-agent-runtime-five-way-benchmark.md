@@ -1,15 +1,15 @@
 # Agent Runtime 八域理论基线 + 五方对标矩阵(2026-07-03)
 
 > 类型:能力对标报告(理论基线 + 源码/文档取证级)
-> 范围:产品级 Agent Runtime 八大能力域 43 探针;helix vs OpenHands / deer-flow / OpenClaw / hermes-agent 五方对标
-> 方法:①业界理论综述(AWS AgentCore / 12-Factor Agents / durable execution 收敛 / OWASP Agentic Top 10 2026 / OTel GenAI);②helix 三路并行源码扫描(file:line 级)+ 5 处误报核实纠正;③竞品四路取证——Hermes 复用存量 754 行 file:line 底稿、deer-flow 存量+本地源码+gh API、OpenClaw 官方 repo docs+CHANGELOG、OpenHands SDK docs+arXiv 论文
+> 范围:产品级 Agent Runtime 八大能力域 43 探针;Expert Work vs OpenHands / deer-flow / OpenClaw / hermes-agent 五方对标
+> 方法:①业界理论综述(AWS AgentCore / 12-Factor Agents / durable execution 收敛 / OWASP Agentic Top 10 2026 / OTel GenAI);②Expert Work 三路并行源码扫描(file:line 级)+ 5 处误报核实纠正;③竞品四路取证——Hermes 复用存量 754 行 file:line 底稿、deer-flow 存量+本地源码+gh API、OpenClaw 官方 repo docs+CHANGELOG、OpenHands SDK docs+arXiv 论文
 > 纪律:每个分数带证据;竞品"定位不做"记 N/A 不记 0,避免自嗨;未自测的质量数字不声称;存量底稿时效如实标注
 
 ---
 
 ## 0. 执行摘要
 
-**helix 总分 109/129 ≈ 84%(43 探针,0-3 分制)。商业化平台面(域5 安全隔离/域7 可靠性/域8 治理商业化)全场碾压且 9 格独占;肉搏区(域1 执行内核/域3 工具/域6 可观测)与 OpenHands 互有胜负;4 格被明显压制:context compaction(1 vs 3)、browser(1 vs 3)、prompt cache 成本工程(2 vs 3)、结构化输出(0,全场最低并列)。**
+**Expert Work 总分 109/129 ≈ 84%(43 探针,0-3 分制)。商业化平台面(域5 安全隔离/域7 可靠性/域8 治理商业化)全场碾压且 9 格独占;肉搏区(域1 执行内核/域3 工具/域6 可观测)与 OpenHands 互有胜负;4 格被明显压制:context compaction(1 vs 3)、browser(1 vs 3)、prompt cache 成本工程(2 vs 3)、结构化输出(0,全场最低并列)。**
 
 对标修正后的缺口排序(替代此前仅基于理论框架的排序):
 
@@ -56,11 +56,11 @@
 
 ---
 
-## 2. helix 八域评分(源码取证,main@274f492b)
+## 2. Expert Work 八域评分(源码取证,main@274f492b)
 
 ### 域1 执行内核 ~92%
 - ✅ LangGraph ReAct loop + supervisor/pipeline/动态 spawn(`services/orchestrator/src/orchestrator/sse.py:257-678`)
-- ✅ AsyncPostgresSaver checkpoint + resume(`packages/helix-runtime/src/helix_agent/runtime/checkpointer/factory.py:87-130`、`orchestrator/resume.py`);approval idempotency_key + continuation_run_id 防重放(migration 0080)
+- ✅ AsyncPostgresSaver checkpoint + resume(`packages/expert-work-runtime/src/expert_work/runtime/checkpointer/factory.py:87-130`、`orchestrator/resume.py`);approval idempotency_key + continuation_run_id 防重放(migration 0080)
 - ✅ HITL:ask_for_approval → PAUSED → resume,24h timeout(`orchestrator/tools/approval.py`)
 - ✅ SSE token 流 + Last-Event-ID 续传 + event_store 重放(`stream_bridge/base.py`)
 - ✅ CancellationToken 协作取消全链穿透、心跳租约(`runtime/cancellation.py`)
@@ -141,7 +141,7 @@
 
 ### hermes-agent(@bb4703c76,存量底稿 ~5 周旧)
 
-定位 = Python 单用户 agent harness(4306 行自研 ReAct loop)。证据:存量 `helix-vs-hermes-gap.md`(754 行 15 维 file:line)+ `hermes-deep-dive.md` + 4 份专项分析,本轮未重新取证。
+定位 = Python 单用户 agent harness(4306 行自研 ReAct loop)。证据:存量 `expert-work-vs-hermes-gap.md`(754 行 15 维 file:line)+ `hermes-deep-dive.md` + 4 份专项分析,本轮未重新取证。
 
 - **标杆项**:skills 生命周期 L3-L4(6 action + 后台 fork review + curator 7 天自动状态机 + pinned 保护);error-as-guidance(5 类重试矩阵 + recovery 注入同轮自纠);30+ provider
 - **短板**:无 checkpoint(SQLite 存历史非状态恢复);无 HITL 审批;无 eval/replay/tracing 纵深;单用户定位大量 N/A
@@ -151,9 +151,9 @@
 
 ## 4. 五方对标矩阵(43 探针,0-3 分;N/A=定位不做)
 
-评估基线:helix@main 274f492b | OpenHands SDK v1.31.0 | deer-flow@b3c312b7 | OpenClaw@main 2026-07-03 | hermes-agent@bb4703c76
+评估基线:Expert Work@main 274f492b | OpenHands SDK v1.31.0 | deer-flow@b3c312b7 | OpenClaw@main 2026-07-03 | hermes-agent@bb4703c76
 
-| 探针 | helix | OpenHands | deer-flow | OpenClaw | Hermes |
+| 探针 | Expert Work | OpenHands | deer-flow | OpenClaw | Hermes |
 |---|---|---|---|---|---|
 | 1.1 checkpoint 粒度/后端 | 3 | 3 | 2 | 2 | N/A |
 | 1.2 crash resume 防重放 | 2 | 2 | 1 | 2 | 2 |
@@ -201,20 +201,20 @@
 
 \* OpenClaw 1.7 = 单机 lane-aware 队列一线(steer/followup/collect/interrupt 四模式 + 溢出压缩注入),非分布式。
 
-### helix 独占格(护城河)
+### Expert Work 独占格(护城河)
 
 多租户三层隔离、计费 chargeback、配额矩阵、租约 HA + orphan sweep、分布式队列加固、egress 管控、审计纵深、skills 效用验证(SPARK 式后验蒸馏,四竞品集体缺)、记忆效果实证(dense recall@5=0.906,CM-N5)。
 
 ### 与 OpenHands 的肉搏区判读
 
-它赢:replay/fork、公开 eval Index、provider 覆盖、browser、凭证代管细节(热轮换)。helix 赢:分布式队列/HA、egress、审计、failover 层级、长期记忆全线。双方 checkpoint/HITL/MCP/skills/tracing/计量持平于一线。
+它赢:replay/fork、公开 eval Index、provider 覆盖、browser、凭证代管细节(热轮换)。Expert Work 赢:分布式队列/HA、egress、审计、failover 层级、长期记忆全线。双方 checkpoint/HITL/MCP/skills/tracing/计量持平于一线。
 
 ---
 
 ## 5. 可直接移植的 6 个竞品设计
 
-1. **deer-flow subagent delegation ledger**(#3877)——系统台账防 lead agent 重复委派同一子任务;helix 动态 worker spawn 编排已知痛点
-2. **deer-flow goal continuations**(#3858)——线程级目标状态 + `/goal` 管理 + worker 侧目标评估续跑;与 helix per-user 持久 agent 产品形态同构
+1. **deer-flow subagent delegation ledger**(#3877)——系统台账防 lead agent 重复委派同一子任务;Expert Work 动态 worker spawn 编排已知痛点
+2. **deer-flow goal continuations**(#3858)——线程级目标状态 + `/goal` 管理 + worker 侧目标评估续跑;与 Expert Work per-user 持久 agent 产品形态同构
 3. **OpenClaw 审批工件绑定**——批准"确切工件"而非"意图"(canonical cwd + argv + env + 钉住可执行路径 + 脚本文件绑定,执行前漂移即拒;绑定不唯一时拒绝铸造审批);可移植到 exec_python/沙箱命令审批
 4. **OpenClaw failover 来源契约**——用户显式选型 = strict 如实报错;平台默认 = 允许降级链 + 会话内可见通知 + 定期探活自动回切;Y-MK 两级 key 切换缺这层 UX 契约
 5. **OpenHands event-sourcing `fork()`**——保留审计轨的对话分叉,A/B 调试
@@ -224,8 +224,8 @@
 
 ## 6. 时效与复核备注
 
-- **† 勘误 2026-07-03(Stream RT 启动核实)**:2.1 context 压缩 helix 评 1 分偏低,实为 ~2——L2 ContextCompressor(preflight 摘要压缩:阈值触发/head-tail 保留/中段 LLM 摘要,`services/orchestrator/src/orchestrator/context/compressor.py`,PR #206)已存在,首轮扫描漏扫 `orchestrator/context/` 目录;缺口重定性为深水区条目(skill rescue/ID-swap/memory flush hook/2k 上限/压缩可观测),详见 [STREAM-RT-DESIGN §6](../streams/STREAM-RT-DESIGN.md)。总分相应 109→110/129
+- **† 勘误 2026-07-03(Stream RT 启动核实)**:2.1 context 压缩 Expert Work 评 1 分偏低,实为 ~2——L2 ContextCompressor(preflight 摘要压缩:阈值触发/head-tail 保留/中段 LLM 摘要,`services/orchestrator/src/orchestrator/context/compressor.py`,PR #206)已存在,首轮扫描漏扫 `orchestrator/context/` 目录;缺口重定性为深水区条目(skill rescue/ID-swap/memory flush hook/2k 上限/压缩可观测),详见 [STREAM-RT-DESIGN §6](../streams/STREAM-RT-DESIGN.md)。总分相应 109→110/129
 - Hermes 底稿基于 bb4703c76(~5 周旧);进入 skills/记忆方向实施前建议复核上游
 - deer-flow/OpenClaw/OpenHands 均为 2026-07 时点新证(gh API/官方 docs/release notes)
 - `docs/decisions/deer-flow-context-mgmt-alignment.md` tracker 锁的是 6-09 前快照;M2-C 启动前应按 deer-flow 新版源码复核(上游已踩过并修复 ID-swap 递归注入坑 #3746)
-- 本报告纸面对标;矩阵中 helix「深度不足」格若进入实施,按 ★5 标准补 live E2E 实证
+- 本报告纸面对标;矩阵中 Expert Work「深度不足」格若进入实施,按 ★5 标准补 live E2E 实证

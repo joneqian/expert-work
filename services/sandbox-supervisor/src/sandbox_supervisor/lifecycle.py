@@ -30,15 +30,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 
-from helix_agent.persistence import (
+from expert_work.persistence import (
     UserWorkspaceStore,
     VolumeBackupDLQ,
     VolumeDLQRow,
     WorkspaceNotFoundError,
 )
-from helix_agent.protocol import AuditEntry, UserWorkspace
-from helix_agent.protocol.audit import AuditAction, AuditResult
-from helix_agent.runtime.storage import ObjectStore, ObjectStoreError
+from expert_work.protocol import AuditEntry, UserWorkspace
+from expert_work.protocol.audit import AuditAction, AuditResult
+from expert_work.runtime.storage import ObjectStore, ObjectStoreError
 from sandbox_supervisor.docker_client import DockerClient, DockerError
 from sandbox_supervisor.settings import SandboxSupervisorSettings
 

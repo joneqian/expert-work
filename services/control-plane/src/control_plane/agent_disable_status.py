@@ -20,7 +20,7 @@ import time
 from collections.abc import Callable
 from uuid import UUID
 
-from helix_agent.persistence.agent_disable.base import AgentDisableStore
+from expert_work.persistence.agent_disable.base import AgentDisableStore
 
 
 class AgentDisableService:

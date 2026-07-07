@@ -9,10 +9,10 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from helix_agent.persistence import InMemoryMemoryStore
-from helix_agent.protocol import MemoryItem
-from helix_agent.runtime.cancellation import CancellationToken
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.persistence import InMemoryMemoryStore
+from expert_work.protocol import MemoryItem
+from expert_work.runtime.cancellation import CancellationToken
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     GraphRunner,
     ToolRegistry,
@@ -364,7 +364,7 @@ async def test_writeback_drops_batch_when_llm_extracts_injection() -> None:
     injection payload (e.g. poisoned tool output convinced it), the
     write must be blocked AND not enqueued to the DLQ (deterministic
     failure — retrying won't change the content)."""
-    from helix_agent.persistence.memory import InMemoryMemoryWritebackDLQ
+    from expert_work.persistence.memory import InMemoryMemoryWritebackDLQ
 
     store = InMemoryMemoryStore()
     dlq = InMemoryMemoryWritebackDLQ()
@@ -453,8 +453,8 @@ async def test_recall_default_no_tenant_config_uses_hybrid() -> None:
 async def test_recall_vector_mode_omits_query_text() -> None:
     """A tenant configured to ``vector`` mode bypasses the hybrid
     path — query_text is not forwarded to retrieve."""
-    from helix_agent.persistence import InMemoryTenantConfigStore
-    from helix_agent.protocol import TenantConfigPatch
+    from expert_work.persistence import InMemoryTenantConfigStore
+    from expert_work.protocol import TenantConfigPatch
 
     tcs = InMemoryTenantConfigStore()
     tenant, user = uuid4(), uuid4()
@@ -481,8 +481,8 @@ async def test_recall_vector_mode_omits_query_text() -> None:
 @pytest.mark.asyncio
 async def test_recall_hybrid_mode_explicit() -> None:
     """A tenant explicitly configured to ``hybrid`` forwards query_text."""
-    from helix_agent.persistence import InMemoryTenantConfigStore
-    from helix_agent.protocol import TenantConfigPatch
+    from expert_work.persistence import InMemoryTenantConfigStore
+    from expert_work.protocol import TenantConfigPatch
 
     tcs = InMemoryTenantConfigStore()
     tenant, user = uuid4(), uuid4()
@@ -629,7 +629,7 @@ async def test_memory_writeback_node_enqueues_dlq_on_embed_failure() -> None:
     """Stream K.K7 — after extraction succeeds, an embed / store failure
     must hand the work to the DLQ so the worker can retry it. Without a
     DLQ the prior log-and-drop behaviour stands (other tests cover that)."""
-    from helix_agent.persistence.memory import InMemoryMemoryWritebackDLQ
+    from expert_work.persistence.memory import InMemoryMemoryWritebackDLQ
 
     store = InMemoryMemoryStore()
     dlq = InMemoryMemoryWritebackDLQ()
@@ -714,7 +714,7 @@ async def test_memory_graph_recalls_and_writes_back() -> None:
     # Anthropic prompt caching (pre-L1 the memories were concatenated
     # into system). Capability Uplift Sprint #8 (Mini-ADR U-8) — the
     # platform default is now ``recall_mode='per_session'``, so
-    # memories land at messages[1] with a ``helix_cache_anchor``
+    # memories land at messages[1] with a ``expert_work_cache_anchor``
     # marker instead of the legacy tail position.
     agent_prompt = llm.calls[0]
     assert isinstance(agent_prompt[0], SystemMessage)
@@ -725,7 +725,7 @@ async def test_memory_graph_recalls_and_writes_back() -> None:
     assert "Relevant memories" in memory_text
     assert "user is a botanist" in memory_text
     # Sprint #8 cache anchor flag rides the per_session memory block.
-    assert memory_msg.additional_kwargs.get("helix_cache_anchor") is True
+    assert memory_msg.additional_kwargs.get("expert_work_cache_anchor") is True
 
     # Write-back persisted a new memory for the user.
     stored = await store.retrieve(

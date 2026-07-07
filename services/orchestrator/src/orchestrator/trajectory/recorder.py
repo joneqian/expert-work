@@ -1,7 +1,7 @@
 """Stream L.L7 — trajectory recording for J.13 eval gate.
 
 Completed agent runs are serialised to an
-:class:`~helix_agent.runtime.storage.ObjectStore` as
+:class:`~expert_work.runtime.storage.ObjectStore` as
 ShareGPT-flavoured JSONL (one line, one record), keyed under
 
 ::
@@ -45,27 +45,27 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.runtime.storage import ObjectStore, ObjectStoreError
+from expert_work.common.observability import expert_work_counter
+from expert_work.runtime.storage import ObjectStore, ObjectStoreError
 
 logger = logging.getLogger(__name__)
 
 #: Default key prefix; can be overridden per-recorder. Bucket
-#: configuration lives in :class:`helix_agent.runtime.storage.S3CompatibleConfig`.
+#: configuration lives in :class:`expert_work.runtime.storage.S3CompatibleConfig`.
 DEFAULT_PREFIX: str = "trajectories"
 
 TrajectoryOutcome = Literal["success", "failed", "max_steps", "cancelled"]
 
 _VALID_OUTCOMES: frozenset[str] = frozenset({"success", "failed", "max_steps", "cancelled"})
 
-_trajectory_recorded_total = helix_counter(
-    "helix_trajectory_recorded_total",
+_trajectory_recorded_total = expert_work_counter(
+    "expert_work_trajectory_recorded_total",
     "Trajectories successfully written to ObjectStore (Stream L.L7).",
     ("outcome",),
 )
 
-_trajectory_record_errors_total = helix_counter(
-    "helix_trajectory_record_errors_total",
+_trajectory_record_errors_total = expert_work_counter(
+    "expert_work_trajectory_record_errors_total",
     "Trajectory write failures swallowed so the run's terminal path stays clean.",
     ("outcome", "reason"),
 )

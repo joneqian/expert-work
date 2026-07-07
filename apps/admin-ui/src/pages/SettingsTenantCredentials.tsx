@@ -167,7 +167,7 @@ export function SettingsTenantCredentials() {
             </Space>
             <p
               style={{
-                color: "var(--hx-text-secondary)",
+                color: "var(--ew-text-secondary)",
                 fontSize: 12,
                 margin: "8px 0 0",
               }}

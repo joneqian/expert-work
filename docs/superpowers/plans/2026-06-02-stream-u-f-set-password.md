@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development. Steps use checkbox (`- [ ]`).
 
-**Goal:** A tenant admin (or system_admin switched into the tenant) can set a member's password directly from the helix admin UI — no Keycloak console detour. Admin types a temporary password (forced change on first login). This unblocks dev onboarding where no SMTP exists.
+**Goal:** A tenant admin (or system_admin switched into the tenant) can set a member's password directly from the Expert Work admin UI — no Keycloak console detour. Admin types a temporary password (forced change on first login). This unblocks dev onboarding where no SMTP exists.
 
 **Architecture:** Add `reset_password(*, user_id, password, temporary)` to the Keycloak admin client (`PUT /users/{id}/reset-password`). New `POST /v1/members/{member_id}/reset-password` (`require("user","write")`, body `{password: SecretStr}`, backend forces `temporary=True`, audits `member:password_reset` with NO value). Frontend: a "Set password" action on the members page opening a modal with a masked password input.
 
@@ -15,7 +15,7 @@
 **Files:**
 - `services/control-plane/src/control_plane/keycloak/admin_client.py` (Protocol + Http impl)
 - `services/control-plane/src/control_plane/api/members.py` (endpoint)
-- `packages/helix-protocol/src/helix_agent/protocol/audit.py` (1 enum value)
+- `packages/expert-work-protocol/src/expert_work/protocol/audit.py` (1 enum value)
 - Tests: `services/control-plane/tests/test_members_api.py` (or wherever members API is tested) + the fake Keycloak client used in tests (`services/control-plane/tests/test_tenants_first_admin.py` defines one — find the shared fake; if it's a local class, the members test likely has its own fake — add `reset_password` to whichever the members API test uses)
 
 - [ ] **Step 1: AuditAction**
@@ -121,8 +121,8 @@ Run: `cd services/control-plane && uv run python -m pytest tests/test_members_ap
 - [ ] **Step 5: pre-commit + commit**
 
 ```bash
-uv run pre-commit run --files services/control-plane/src/control_plane/keycloak/admin_client.py services/control-plane/src/control_plane/api/members.py packages/helix-protocol/src/helix_agent/protocol/audit.py services/control-plane/tests/test_members_api.py
-git add services/control-plane packages/helix-protocol/src/helix_agent/protocol/audit.py
+uv run pre-commit run --files services/control-plane/src/control_plane/keycloak/admin_client.py services/control-plane/src/control_plane/api/members.py packages/expert-work-protocol/src/expert_work/protocol/audit.py services/control-plane/tests/test_members_api.py
+git add services/control-plane packages/expert-work-protocol/src/expert_work/protocol/audit.py
 git commit -m "feat(stream-u): PR F — keycloak reset_password + POST /v1/members/{id}/reset-password"
 ```
 

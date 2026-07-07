@@ -139,23 +139,23 @@ export function Sidebar() {
           alignItems: "center",
           gap: 8,
           padding: "0 16px",
-          borderBottom: "1px solid var(--hx-border-subtle)",
+          borderBottom: "1px solid var(--ew-border-subtle)",
           fontWeight: 600,
           fontSize: 16,
           letterSpacing: "-0.02em",
         }}
       >
-        <BrandGlyph size={20} style={{ color: "var(--hx-color-brand-500)" }} />
-        <span>helix</span>
+        <BrandGlyph size={20} style={{ color: "var(--ew-color-brand-500)" }} />
+        <span>Expert Work</span>
         <span
-          className="hx-kbd"
+          className="ew-kbd"
           style={{ marginLeft: "auto", fontSize: 10, padding: "1px 4px" }}
         >
           demo
         </span>
       </div>
       <Menu
-        className="hx-sidebar-menu"
+        className="ew-sidebar-menu"
         mode="inline"
         selectedKeys={[selectedKey]}
         onClick={({ key }) => {

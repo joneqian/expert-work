@@ -212,8 +212,8 @@ export function ManifestEditor({
           flex: "0 0 auto",
           whiteSpace: "nowrap",
           padding: "4px 16px",
-          border: "1px solid var(--hx-border, #303030)",
-          background: active ? "var(--hx-brand, #13c2c2)" : "transparent",
+          border: "1px solid var(--ew-border, #303030)",
+          background: active ? "var(--ew-brand, #13c2c2)" : "transparent",
           color: active ? "#fff" : "inherit",
           cursor: "pointer",
         }}

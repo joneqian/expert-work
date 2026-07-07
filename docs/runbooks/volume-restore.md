@@ -6,7 +6,7 @@
 > pipelines (`services/sandbox-supervisor/src/sandbox_supervisor/lifecycle.py`)
 > drop the source artifacts into ObjectStore for this script to pull.
 >
-> Drill: see `packages/helix-persistence/tests/test_volume_restore_drill.py`
+> Drill: see `packages/expert-work-persistence/tests/test_volume_restore_drill.py`
 > for the testcontainers integration test that exercises the same
 > library calls end-to-end.
 
@@ -30,7 +30,7 @@ The supervisor stores artifacts in two prefixes:
 ## Pre-flight
 
 1. Confirm operator has access to the ObjectStore credentials used by
-   the supervisor (the `HELIX_SANDBOX_OBJECT_STORE_*` env vars).
+   the supervisor (the `EXPERT_WORK_SANDBOX_OBJECT_STORE_*` env vars).
 2. Confirm docker is reachable on the target host (`docker info`).
 3. Confirm the target Postgres is reachable (for the post-restore
    `UPDATE user_workspace SET volume_name = ...`).
@@ -45,10 +45,10 @@ The supervisor stores artifacts in two prefixes:
 
 ```sh
 # List archive for this user (J-36; usually just one if a soft-delete ran):
-aws s3 ls "s3://helix-agent-volume-backups/volume-archive/$TENANT/$USER/"
+aws s3 ls "s3://expert-work-volume-backups/volume-archive/$TENANT/$USER/"
 
 # Or list daily backups (J-29 第 2 项):
-aws s3 ls --recursive "s3://helix-agent-volume-backups/volume-backups/$TENANT/$USER/"
+aws s3 ls --recursive "s3://expert-work-volume-backups/volume-backups/$TENANT/$USER/"
 ```
 
 For MinIO / Aliyun OSS replace with the matching CLI; the keys are
@@ -91,7 +91,7 @@ The script:
 docker run --rm \
     --read-only \
     -v "${RESTORED_VOLUME}:/ws:ro" \
-    helix-sandbox:dev \
+    expert-work-sandbox:dev \
     ls -la /ws
 ```
 
@@ -140,7 +140,7 @@ incident, log it in the DR drill tracker (`backup_record` row +
 | `no archive or backup found ...` | The artifact never landed (DLQ failure) | Check `volume_backup_dlq` table; manual replay if needed |
 | `subprocess.CalledProcessError ... docker volume create` | Name collision | Pass a unique `--suffix` |
 | `subprocess.CalledProcessError ... tar -xzf` | Source archive corrupted | Try the prior day's J-29 backup |
-| `ObjectStoreError` on pull | Credentials / endpoint mismatch | Re-check `HELIX_SANDBOX_OBJECT_STORE_*` env |
+| `ObjectStoreError` on pull | Credentials / endpoint mismatch | Re-check `EXPERT_WORK_SANDBOX_OBJECT_STORE_*` env |
 
 ## Related
 

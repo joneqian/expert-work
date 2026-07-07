@@ -35,8 +35,8 @@ from redis.exceptions import NoScriptError
 
 from control_plane.quota.base import QuotaService
 from control_plane.quota.in_memory import _bucket_key, _scope_matches
-from helix_agent.persistence.quota import TenantQuotaStore, TokenReservationStore
-from helix_agent.protocol import (
+from expert_work.persistence.quota import TenantQuotaStore, TokenReservationStore
+from expert_work.protocol import (
     CheckRequest,
     CheckResult,
     CommitRequest,
@@ -55,7 +55,7 @@ _BUCKET_TTL_MS: Final[int] = 30 * 86_400 * 1_000
 # KEYS[1] = bucket key
 # ARGV: 1=capacity 2=refill_per_s*1000 3=now_ms 4=cost 5=ttl_ms
 _LUA_BUCKET_SOURCE = """\
--- helix-agent quota bucket (subsystems/16 § 5.1)
+-- expert-work quota bucket (subsystems/16 § 5.1)
 local b = redis.call('HMGET', KEYS[1], 'tokens', 'last_ms')
 local cap = tonumber(ARGV[1])
 local rate_milli = tonumber(ARGV[2])

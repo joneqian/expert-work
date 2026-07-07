@@ -10,7 +10,7 @@
 > Prometheus metric 注册表（A.9）、health 探针（A.11）、Langfuse 中间件（E.5）在 Stream A/E 已建好。
 > G 在它们之上拼出"可运维 + 可评测 + 可收集反馈"的产品级骨架。
 
-设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)）：
+设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)）：
 所有架构 / 接口 / Mini-ADR 必须在编码前锁定，G.0 – G.8 的 PR 仅执行本文档。
 
 ---
@@ -30,9 +30,9 @@
 
 | 子项 | M0 实现内容 | 推 M1 的部分 | 关联 |
 |------|------------|-------------|------|
-| **G.0 可观测后端栈** | `infra/docker-compose.yml` 加 `observability` profile：OTel Collector + Prometheus + Tempo + Loki + Grafana + Alertmanager 自托管；Prometheus scrape config（抓 helix 服务 `/metrics`）；Grafana datasource 自动注入（Prometheus/Tempo/Loki）。 | 生产部署（K8s）、HA、远端存储 | subsystem 20 § 2；Mini-ADR G-2 |
+| **G.0 可观测后端栈** | `infra/docker-compose.yml` 加 `observability` profile：OTel Collector + Prometheus + Tempo + Loki + Grafana + Alertmanager 自托管；Prometheus scrape config（抓 Expert Work 服务 `/metrics`）；Grafana datasource 自动注入（Prometheus/Tempo/Loki）。 | 生产部署（K8s）、HA、远端存储 | subsystem 20 § 2；Mini-ADR G-2 |
 | **G.1 SLO/SLI 定义** | `docs/architecture/subsystems/20` § 5.4 SLO 表落成 `docs/runbooks/slo.md`（5 条 M0 SLO + 测量 PromQL）；Prometheus recording rule（`tools/observability/rules/sli.yml`）预聚合 SLI。 | `slo_definition` 入库、burn-rate 自动算、错误预算耗尽自动冻结发布 | P0 #13；subsystem 20 § 5.4 |
-| **G.2 告警体系** | Prometheus alert rule（`tools/observability/rules/alerts.yml`）：5xx 率、Postgres 连接耗尽、`helix_network_egress_meta_attempt_total > 0` 等 M0 关键条件；Alertmanager config P0/P1/P2 分级路由骨架（webhook receiver 占位，飞书/PagerDuty URL 由 env 注入）。 | PagerDuty 实接、飞书实接、错误预算 burn-rate 告警、告警风暴抑制调优 | P0 #14；subsystem 20 § 5.7 |
+| **G.2 告警体系** | Prometheus alert rule（`tools/observability/rules/alerts.yml`）：5xx 率、Postgres 连接耗尽、`expert_work_network_egress_meta_attempt_total > 0` 等 M0 关键条件；Alertmanager config P0/P1/P2 分级路由骨架（webhook receiver 占位，飞书/PagerDuty URL 由 env 注入）。 | PagerDuty 实接、飞书实接、错误预算 burn-rate 告警、告警风暴抑制调优 | P0 #14；subsystem 20 § 5.7 |
 | **G.3 故障预案 runbook** | `docs/runbooks/`：control-plane / postgres / anthropic（LLM provider）/ sandbox / credential-proxy 各 1 篇（故障现象、诊断、处置、回滚）。control-plane 一篇因 G.2 的告警 `runbook_url` 均指向它而补入（原草图列 4 篇，实为 5）。 | 每个告警 1 篇 SOP 全覆盖（M1-H） | P0 #26 |
 | **G.4 Eval 框架** | Python-native 轻量 eval harness（Mini-ADR G-3）：`tools/eval/` —— YAML eval-set 格式 + `run_eval` runner（可插拔 `complete` provider）+ 1 个示例 eval set；harness 单测在 gating `Test (pytest)` job 跑（mock provider，确定性）。 | LLM-as-judge、真 LLM provider、regression 阻断 gate、A/B | P0 #36；subsystem 26 |
 | **G.5 Eval 数据集管理** | `tools/eval/datasets/`：golden / regression set 目录结构 + YAML 格式约定 + README；git 版本化。 | 数据集自动晋升、从反馈回流 candidate case | P0 #38；subsystem 26 |
@@ -56,7 +56,7 @@
 
 ### 1.3 验收（G Exit）
 
-1. `docker compose --profile observability up` 拉起后端栈；Prometheus 抓到 helix 服务 metric、Tempo 收到 span、Loki 收到日志、Grafana 三份大盘有数据。
+1. `docker compose --profile observability up` 拉起后端栈；Prometheus 抓到 Expert Work 服务 metric、Tempo 收到 span、Loki 收到日志、Grafana 三份大盘有数据。
 2. `promtool check rules` 校验 SLI recording rule + alert rule 通过；`amtool check-config` 校验 Alertmanager config 通过。
 3. `feedback` API：提交 👍/👎 + 文本 → 落 `feedback` 表、关联 trace_id、写 audit；跨租户隔离（RLS）。
 4. `event-log-archive-job` 把超龄行写 S3 并删表行，集成测试覆盖。
@@ -71,10 +71,10 @@
 ### 2.1 可观测数据流（G.0 落地）
 
 ```
-helix 服务（control-plane / orchestrator(库) / sandbox-supervisor / credential-proxy）
+Expert Work 服务（control-plane / orchestrator(库) / sandbox-supervisor / credential-proxy）
   │  metric: prometheus_client → /metrics                       （A.9 已建）
   │  trace : OTel SDK → OTLP                                     （A.8 已建）
-  │  log   : stdout JSON（HelixJsonFormatter）                   （A.7 已建）
+  │  log   : stdout JSON（ExpertWorkJsonFormatter）                   （A.7 已建）
   ▼
 OTel Collector ──▶ Tempo（trace）
 Prometheus ──scrape /metrics──▶ Prometheus TSDB
@@ -152,7 +152,7 @@ CREATE TABLE feedback (
 
 ### Mini-ADR G-2：可观测后端栈用 compose `observability` profile 自托管
 
-- **背景**：A.7/A.8/A.9 让 helix 服务已 emit log/trace/metric，但 compose 里没有"收的人"（Explore 确认 compose 仅数据层 + helix 服务）。
+- **背景**：A.7/A.8/A.9 让 Expert Work 服务已 emit log/trace/metric，但 compose 里没有"收的人"（Explore 确认 compose 仅数据层 + Expert Work 服务）。
 - **决策**：`infra/docker-compose.yml` 加 `observability` profile：OTel Collector + Prometheus + Tempo + Loki + Grafana + Alertmanager（均自托管社区镜像，不自建）。与现有 `proxy`/`auth`/`sandbox`/`full`/`e2e` profile 模式一致 —— 默认 `up` 不拉、`--profile observability up` 才拉。
 - **理由**：(1) 自托管符合 ADR-0005（国内 LangSmith 不可用）。(2) profile 隔离 —— 数据层集成测试默认 `up` 不受可观测栈拖慢。(3) 全部社区官方镜像，无供应链新增面。
 - **代价**：6 个新容器，本地 dev 资源占用上升 —— 故独立 profile，按需启。生产部署（K8s/HA/远端存储）推 M1。
@@ -198,7 +198,7 @@ CREATE TABLE feedback (
 
 | # | 用例 | 子项 | 层级 | 说明 |
 |---|------|------|------|------|
-| 61 | 可观测后端栈拉起 | G.0 | integration/smoke | `--profile observability up` → Prometheus 抓到 ≥1 helix target、Grafana datasource 健康 |
+| 61 | 可观测后端栈拉起 | G.0 | integration/smoke | `--profile observability up` → Prometheus 抓到 ≥1 Expert Work target、Grafana datasource 健康 |
 | 62 | SLI/alert 规则合法 | G.1/G.2 | unit | `promtool check rules` + `amtool check-config` 通过 |
 | 63 | 反馈落表 + 关联 | G.6 | integration | `POST /feedback` 👍/👎+文本 → `feedback` 行含 trace_id/turn_seq；写 audit |
 | 64 | 反馈跨租户隔离 | G.6 | integration | 租户 A 的反馈对租户 B 不可见（RLS）|

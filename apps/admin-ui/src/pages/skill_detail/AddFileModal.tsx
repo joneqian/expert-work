@@ -190,7 +190,7 @@ export function AddFileModal({
               rows={6}
               placeholder="..."
               data-testid="skill-add-file-content"
-              style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}
+              style={{ fontFamily: "var(--ew-font-mono)", fontSize: 12 }}
             />
           </Form.Item>
         ) : null}

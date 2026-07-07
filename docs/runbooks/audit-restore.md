@@ -19,7 +19,7 @@
 ## Pre-flight checks
 
 1. **Confirm the WORM bucket is reachable** —
-   `aws s3 ls s3://$HELIX_AUDIT_BUCKET --recursive | head` (the
+   `aws s3 ls s3://$EXPERT_WORK_AUDIT_BUCKET --recursive | head` (the
    compliance-locked objects still list normally; only `delete` /
    `put` of an existing key are rejected).
 2. **Confirm the migration story** — `audit_log` migrations 0001 /
@@ -55,13 +55,13 @@ production binding is an INSERT against `audit_log_restored`:
 
 ```python
 # Sketch — adapt to your env vars / DSN handling.
-from helix_agent.runtime.storage.s3_compatible import S3CompatibleObjectStore
+from expert_work.runtime.storage.s3_compatible import S3CompatibleObjectStore
 from tools.persistence.restore_audit import restore_audit_rows
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
 store = S3CompatibleObjectStore(...)  # production env wiring
-engine = create_async_engine(os.environ["HELIX_PG_DSN_RESTORE_ADMIN"])
+engine = create_async_engine(os.environ["EXPERT_WORK_PG_DSN_RESTORE_ADMIN"])
 
 INSERT_SQL = text(
     "INSERT INTO audit_log_restored ("

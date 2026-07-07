@@ -21,7 +21,7 @@ export function YamlView({ value, onChange }: YamlViewProps) {
         height="calc(100vh - 300px)"
         options={{
           minimap: { enabled: false },
-          fontFamily: "var(--hx-font-mono)",
+          fontFamily: "var(--ew-font-mono)",
           fontSize: 12,
           tabSize: 2,
           scrollBeyondLastLine: false,

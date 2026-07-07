@@ -20,13 +20,13 @@ from control_plane.keycloak import (
     KeycloakUnavailableError,
     KeycloakUserExistsError,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.auth import DuplicateRoleBindingError, RoleBindingStore
-from helix_agent.persistence.tenant_member import DuplicateMemberError, TenantMemberStore
-from helix_agent.protocol import AuditAction, MemberRole, Role, TenantMember
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.auth import DuplicateRoleBindingError, RoleBindingStore
+from expert_work.persistence.tenant_member import DuplicateMemberError, TenantMemberStore
+from expert_work.protocol import AuditAction, MemberRole, Role, TenantMember
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.api.member_ops")
+logger = logging.getLogger("expert_work.control_plane.api.member_ops")
 
 _ROLE_BY_NAME: dict[MemberRole, Role] = {
     "admin": Role.ADMIN,

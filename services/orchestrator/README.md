@@ -1,6 +1,6 @@
 # orchestrator
 
-Helix-Agent orchestrator service. Owns the LangGraph execution surface — compiles
+Expert Work orchestrator service. Owns the LangGraph execution surface — compiles
 agent state graphs against a shared checkpointer so that runs are durable across
 process restarts.
 
@@ -33,5 +33,5 @@ uv run pytest services/orchestrator/tests/ -m integration   # requires Docker
 ## Design references
 
 - [docs/streams/STREAM-E-DESIGN.md](../../docs/streams/STREAM-E-DESIGN.md)
-- [packages/helix-runtime/src/helix_agent/runtime/checkpointer/factory.py](../../packages/helix-runtime/src/helix_agent/runtime/checkpointer/factory.py) — A.2 saver factory wrapped by `GraphRunner`
+- [packages/expert-work-runtime/src/expert_work/runtime/checkpointer/factory.py](../../packages/expert-work-runtime/src/expert_work/runtime/checkpointer/factory.py) — A.2 saver factory wrapped by `GraphRunner`
 - [ADR-0002 — state-layer schema](../../docs/adr/0002-state-layer-schema.md)

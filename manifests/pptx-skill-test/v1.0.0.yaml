@@ -10,7 +10,7 @@
 # MODEL: defaults to anthropic. EDIT the model block to whatever provider you
 # pasted a key for in /settings/platform (deepseek / qwen / glm …) and set the
 # matching `sandbox.network.allowlist` host.
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: pptx-skill-test

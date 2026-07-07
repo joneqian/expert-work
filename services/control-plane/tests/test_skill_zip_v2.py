@@ -25,7 +25,7 @@ from control_plane.api._skill_zip import (
     build_skill_zip,
     parse_skill_zip,
 )
-from helix_agent.protocol.skill import (
+from expert_work.protocol.skill import (
     SkillPackageLayoutError,
     compute_content_hash,
     supporting_files_to_jsonable,
@@ -39,13 +39,13 @@ def _build_skill_md(
     name: str = "foo",
     description: str = "imported skill",
     body: str = _MIN_BODY,
-    helix_version: int = 1,
-    helix_category: str | None = None,
-    helix_tool_names: list[str] | None = None,
-    helix_required_models: list[str] | None = None,
-    helix_authored_by: str | None = None,
-    helix_lazy: bool | None = None,
-    helix_version_override: str | None = None,
+    expert_work_version: int = 1,
+    expert_work_category: str | None = None,
+    expert_work_tool_names: list[str] | None = None,
+    expert_work_required_models: list[str] | None = None,
+    expert_work_authored_by: str | None = None,
+    expert_work_lazy: bool | None = None,
+    expert_work_version_override: str | None = None,
     license_str: str | None = None,
 ) -> str:
     """Build a minimal-valid SKILL.md text body. ``*_override`` lets callers
@@ -53,22 +53,22 @@ def _build_skill_md(
     fm: dict[str, object] = {"name": name, "description": description}
     if license_str is not None:
         fm["license"] = license_str
-    helix: dict[str, object] = {}
-    if helix_version_override is not None:
-        helix["version"] = helix_version_override
+    expert_work: dict[str, object] = {}
+    if expert_work_version_override is not None:
+        expert_work["version"] = expert_work_version_override
     else:
-        helix["version"] = helix_version
-    if helix_category is not None:
-        helix["category"] = helix_category
-    if helix_tool_names is not None:
-        helix["tool_names"] = helix_tool_names
-    if helix_required_models is not None:
-        helix["required_models"] = helix_required_models
-    if helix_authored_by is not None:
-        helix["authored_by"] = helix_authored_by
-    if helix_lazy is not None:
-        helix["lazy"] = helix_lazy
-    fm["helix"] = helix
+        expert_work["version"] = expert_work_version
+    if expert_work_category is not None:
+        expert_work["category"] = expert_work_category
+    if expert_work_tool_names is not None:
+        expert_work["tool_names"] = expert_work_tool_names
+    if expert_work_required_models is not None:
+        expert_work["required_models"] = expert_work_required_models
+    if expert_work_authored_by is not None:
+        expert_work["authored_by"] = expert_work_authored_by
+    if expert_work_lazy is not None:
+        expert_work["lazy"] = expert_work_lazy
+    fm["expert_work"] = expert_work
     rendered = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)
     return f"---\n{rendered}---\n\n{body}"
 
@@ -148,14 +148,14 @@ def test_content_hash_matches_standalone() -> None:
 
 def test_high_risk_set_by_tool_names() -> None:
     """tool_names ∩ HIGH_RISK_TOOLS triggers ``high_risk = True``."""
-    skill_md = _build_skill_md(helix_tool_names=["exec_python"])
+    skill_md = _build_skill_md(expert_work_tool_names=["exec_python"])
     payload = parse_skill_zip(_zip_with({"SKILL.md": skill_md.encode("utf-8")}))
     assert payload.high_risk is True
 
 
 def test_high_risk_set_by_scripts_path() -> None:
     """A supporting file under ``scripts/`` flips ``high_risk = True``."""
-    skill_md = _build_skill_md(helix_tool_names=["web_search"])
+    skill_md = _build_skill_md(expert_work_tool_names=["web_search"])
     files = {
         "SKILL.md": skill_md.encode("utf-8"),
         "scripts/diagnose.py": b"print('hello')\n",
@@ -166,7 +166,7 @@ def test_high_risk_set_by_scripts_path() -> None:
 
 def test_low_risk_when_no_dangerous_inputs() -> None:
     """Sanity: a vanilla skill is low-risk."""
-    skill_md = _build_skill_md(helix_tool_names=["web_search"])
+    skill_md = _build_skill_md(expert_work_tool_names=["web_search"])
     payload = parse_skill_zip(_zip_with({"SKILL.md": skill_md.encode("utf-8")}))
     assert payload.high_risk is False
 
@@ -192,7 +192,7 @@ def _legacy_zip(
 def test_legacy_format_parses_and_warns(caplog: pytest.LogCaptureFixture) -> None:
     """Old skill.yaml + prompt.md + tools.txt layout still imports + logs a
     deprecation warning (Mini-ADR U-19)."""
-    with caplog.at_level(logging.WARNING, logger="helix.control_plane.skill_zip"):
+    with caplog.at_level(logging.WARNING, logger="expert_work.control_plane.skill_zip"):
         payload = parse_skill_zip(_legacy_zip())
     assert payload.name == "foo"
     assert payload.prompt_fragment == _MIN_BODY
@@ -243,8 +243,8 @@ def test_not_a_zip_rejects() -> None:
 
 
 def test_frontmatter_wrong_type_rejects() -> None:
-    """A frontmatter where ``helix.version`` is a string fails layout parse."""
-    skill_md = _build_skill_md(helix_version_override="two")
+    """A frontmatter where ``expert_work.version`` is a string fails layout parse."""
+    skill_md = _build_skill_md(expert_work_version_override="two")
     with pytest.raises(SkillPackageLayoutError) as exc_info:
         parse_skill_zip(_zip_with({"SKILL.md": skill_md.encode("utf-8")}))
     assert isinstance(exc_info.value, SkillPackageError)
@@ -253,7 +253,7 @@ def test_frontmatter_wrong_type_rejects() -> None:
 
 def test_frontmatter_missing_name_rejects() -> None:
     """Frontmatter without ``name`` is structurally invalid."""
-    skill_md = "---\ndescription: hi\nhelix:\n  version: 1\n---\n\nhello"
+    skill_md = "---\ndescription: hi\nexpert_work:\n  version: 1\n---\n\nhello"
     with pytest.raises(SkillPackageLayoutError) as exc_info:
         parse_skill_zip(_zip_with({"SKILL.md": skill_md.encode("utf-8")}))
     assert exc_info.value.reason == "invalid_frontmatter"  # type: ignore[attr-defined]

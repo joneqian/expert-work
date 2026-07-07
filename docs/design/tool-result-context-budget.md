@@ -20,24 +20,24 @@ The bloat is two-dimensional:
 
 ## Prior art
 
-| | Hermes | deer-flow | helix (today) |
+| | Hermes | deer-flow | Expert Work (today) |
 |---|---|---|---|
 | Oversized single result | not pre-capped; **old** results pruned to 1-liners on a threshold-triggered compaction pass (lazy) | **per-result, eager**: `> externalize_min_chars` (12k) → full to disk + head/tail preview + file ref (`tool_output_budget_middleware`) | **CM-5 externalization exists** but only fires when a tool sets `ToolResult.full_content` (bash / exec_python / http / mcp). `web_search` never sets it → not externalized |
 | Heavy research isolation | inline search; `delegate_task` only for short subtasks | lead-agent + subagents that **return summaries** (Task tool) | `spawn_worker` exists but optional (prompt-decided) |
 | Conversation-level | `context_compressor`: token-budget tail protection + prune-old-tool-results + LLM summary | `summarization_hook` | **two gates already exist** — CM-2 `WorkingWindow` (cheap, drops whole old turns) + L.L2 `ContextCompressor` (LLM summarise-the-middle, head/tail keep, CM-7 running summary, CM-3 pre-compaction memory flush). Missing: the cheap **mechanical tool-result prune** in between |
 
-**Key finding (per-result):** helix already has deer-flow's externalization primitive
+**Key finding (per-result):** Expert Work already has deer-flow's externalization primitive
 (CM-5, `tools/overflow.py` + `builder._externalize_tool_overflow`) — it is just
 **opt-in per tool**. Generalizing it to a size threshold over *all* tool results is a
 small, surgical change that directly kills the search-bloat case.
 
 **Key finding (conversation-level) — corrects an earlier premise:** the
-conversation-level layer is **not absent**. helix already ships a layered cascade in
+conversation-level layer is **not absent**. Expert Work already ships a layered cascade in
 `agent_node`: CM-2 `WorkingWindow` (LLM-free, token-gated, drops whole old turns) →
 L.L2 `ContextCompressor` (LLM summarise-the-middle, head/tail keep, CM-7 running
 summary, CM-3 flushes the discarded middle to long-term memory). Hermes' "tail
 protection" and "LLM summary" rungs therefore **already exist**. The one genuinely
-missing rung is the cheap, surgical **prune-old-tool-results** middle gate: helix
+missing rung is the cheap, surgical **prune-old-tool-results** middle gate: Expert Work
 jumps straight from *drop-whole-turn* (coarse — also loses the assistant's reasoning)
 to *LLM-summary* (an extra model call), with nothing in between that collapses only
 the bulky **tool outputs** while keeping the full turn/reasoning structure intact.
@@ -98,7 +98,7 @@ Secondary (same phase, optional): have `web_search` set `full_content` to the
 per-result-4096-capped rendering. Low-risk, makes the saved file authoritative.
 
 **Spotlight (PI-1b) interaction:** the head+tail preview is still untrusted tool
-output → it must stay inside the spotlight fence; the helix-owned overflow footer
+output → it must stay inside the spotlight fence; the expert-work-owned overflow footer
 stays trusted (outside), exactly as today. The generalization must preserve this
 ordering (`spotlight_untrusted(preview) + footer`).
 
@@ -199,7 +199,7 @@ switch:
    (best-effort async, gated by the kill switch). Results below 4k stay lossy stubs
    (too small to be worth a file).
 
-3. **Kill switch (item 3)** — `HELIX_TOOL_OUTPUT_BUDGET` env (default on; falsey
+3. **Kill switch (item 3)** — `EXPERT_WORK_TOOL_OUTPUT_BUDGET` env (default on; falsey
    reverts), mirroring `run_retry`'s flag. Off ⇒ the factory builds no pruner **and**
    `_externalize_tool_overflow` skips the generalized (#859) + persist (item 2)
    branches. The older CM-5 `full_content` externalization is **not** gated (separate,
@@ -215,7 +215,7 @@ feature** (externalization + persist + prune):
 * **Platform toggle** — DB-backed, mirrors `PlatformJudgeConfigService` ("DB-wins
   effective config, TTL-cached"). A single-row `platform_tool_budget_config` table
   (`enabled BOOL`). `effective_enabled()` = the DB row if set, else the
-  `HELIX_TOOL_OUTPUT_BUDGET` env default (so the env stays the bootstrap default and
+  `EXPERT_WORK_TOOL_OUTPUT_BUDGET` env default (so the env stays the bootstrap default and
   the ops hard-revert when no DB row exists; once an admin flips it in the UI, the DB
   value wins). Surfaced read/write via a platform API (system_admin scope) and a
   `Switch` on `SettingsPlatformConfig`. Flipping it takes effect on the next agent
@@ -316,5 +316,5 @@ stories + e2e/axe.
 2. Ship + live-verify the research task.
 3. Phase 2 = CM-12 mechanical prune gate (`policies.tool_result_prune`, default on,
    token-gated). Per-agent `enabled: false` reverts. ✅ #860
-4. Phase 2.1 = dedup + persist floor + `HELIX_TOOL_OUTPUT_BUDGET` kill switch (one
+4. Phase 2.1 = dedup + persist floor + `EXPERT_WORK_TOOL_OUTPUT_BUDGET` kill switch (one
    env flip reverts the whole tool-output-budget feature platform-wide).

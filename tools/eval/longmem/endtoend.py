@@ -12,7 +12,7 @@ fingerprint):
 - **Single memory user per corpus.** Mem0's LoCoMo protocol builds one
   store per speaker and searches both; both stores are fed the same
   transcript, so with extraction-based ingestion the contents converge
-  and the split only doubles LLM cost. helix's product shape is one
+  and the split only doubles LLM cost. expert_work's product shape is one
   per-user agent memory — one store is the faithful mapping.
 - **Ingestion timestamps**: ``flush_messages_to_memory`` stamps items
   "now", so CM-6 decay is neutral inside this tier (the whole corpus is
@@ -36,9 +36,9 @@ from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from helix_agent.common.search.mmr import mmr_select
-from helix_agent.persistence import InMemoryMemoryStore
-from helix_agent.runtime.cancellation import CancellationToken
+from expert_work.common.search.mmr import mmr_select
+from expert_work.persistence import InMemoryMemoryStore
+from expert_work.runtime.cancellation import CancellationToken
 from longmem.adapter import MemoryDoc, RetrievalInstance
 from longmem.judge import (
     TextJudge,

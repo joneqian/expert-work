@@ -5,7 +5,7 @@ handler must, in one logical step: create the tenant, provision a Keycloak
 account for that admin, write a tenant-scope ``ADMIN`` role binding, and send
 the set-password email.
 
-There is no distributed transaction across helix's DB and Keycloak, so this
+There is no distributed transaction across expert_work's DB and Keycloak, so this
 uses **DB-first + idempotent compensation** (Mini-ADR R-4):
 
 1. the tenant row + the ``tenant_member`` roster row (``invited``) are written
@@ -34,13 +34,13 @@ from control_plane.keycloak import (
     KeycloakUnavailableError,
     KeycloakUserExistsError,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.auth import RoleBindingStore
-from helix_agent.persistence.tenant_member import DuplicateMemberError, TenantMemberStore
-from helix_agent.protocol import AuditAction, Role, TenantMember
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.auth import RoleBindingStore
+from expert_work.persistence.tenant_member import DuplicateMemberError, TenantMemberStore
+from expert_work.protocol import AuditAction, Role, TenantMember
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.api.first_admin")
+logger = logging.getLogger("expert_work.control_plane.api.first_admin")
 
 
 class FirstAdminConflictError(Exception):

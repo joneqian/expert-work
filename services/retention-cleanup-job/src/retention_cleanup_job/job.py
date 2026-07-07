@@ -29,11 +29,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from helix_agent.persistence.approval import ApprovalStore
-from helix_agent.persistence.artifact import ArtifactStore
-from helix_agent.persistence.image_upload import ImageUploadStore
-from helix_agent.protocol import ApprovalStatus
-from helix_agent.runtime.storage import ObjectStore
+from expert_work.persistence.approval import ApprovalStore
+from expert_work.persistence.artifact import ArtifactStore
+from expert_work.persistence.image_upload import ImageUploadStore
+from expert_work.protocol import ApprovalStatus
+from expert_work.runtime.storage import ObjectStore
 
 logger = logging.getLogger(__name__)
 

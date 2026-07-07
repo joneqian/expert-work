@@ -24,15 +24,15 @@ from testcontainers.postgres import PostgresContainer
 
 from control_plane.app import create_app
 from control_plane.settings import Settings
-from helix_agent.persistence.rls import current_tenant_id_var
-from helix_agent.persistence.thread_meta import SqlThreadMetaStore
-from helix_agent.protocol import ThreadStatus
+from expert_work.persistence.rls import current_tenant_id_var
+from expert_work.persistence.thread_meta import SqlThreadMetaStore
+from expert_work.protocol import ThreadStatus
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier
 
 pytestmark = pytest.mark.integration
 
-# Migrations live in the helix-persistence package, not control-plane.
-_ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/helix-persistence/alembic.ini"
+# Migrations live in the expert-work-persistence package, not control-plane.
+_ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/expert-work-persistence/alembic.ini"
 
 
 def _sync_dsn(container: PostgresContainer) -> str:

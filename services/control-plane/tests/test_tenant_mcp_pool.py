@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from control_plane.tenant_mcp_pool import McpClientFactory, TenantMcpPoolService
-from helix_agent.persistence import InMemoryTenantMcpServerStore
+from expert_work.persistence import InMemoryTenantMcpServerStore
 from orchestrator.tools.mcp import MCPServerConfig, MCPToolDef, RecordingMCPClient
 
 
@@ -31,7 +31,7 @@ async def _seed(store: InMemoryTenantMcpServerStore, tenant_id, name="github", e
         created_by="a@x",
     )
     if not enabled:
-        from helix_agent.protocol import TenantMcpServerPatch
+        from expert_work.protocol import TenantMcpServerPatch
 
         await store.update(
             tenant_id=tenant_id,

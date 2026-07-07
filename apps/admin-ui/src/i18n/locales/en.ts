@@ -4,7 +4,7 @@
  * Glossary terms (Agent / Run / Skill / Trigger / Manifest / Memory /
  * Curation / Eval / Tenant / API Key / Audit / Sandbox / Service
  * Account / Playground / Trace / Span / Quota / Volume) are intentionally
- * kept un-translated in both locales — operators reading helix docs +
+ * kept un-translated in both locales — operators reading Expert Work docs +
  * runtime UI in two languages benefit from a single canonical noun.
  */
 export interface TranslationKeys {
@@ -2335,7 +2335,7 @@ const en: TranslationKeys = {
     not_admin_body:
       "These dashboards hold platform-wide data with no per-tenant isolation, so only system admins can open them.",
     tenant_isolation_note:
-      "These tools span every tenant's data (no per-tenant isolation) — platform-ops only. Tenant users get the per-run detail inside helix instead.",
+      "These tools span every tenant's data (no per-tenant isolation) — platform-ops only. Tenant users get the per-run detail inside Expert Work instead.",
     open: "Open",
     unconfigured: "Not configured ({{env}})",
     langfuse_name: "Langfuse",
@@ -2346,11 +2346,11 @@ const en: TranslationKeys = {
     tempo_desc: "Distributed traces — cross-service infra spans.",
   },
   login: {
-    title: "helix Admin",
+    title: "Expert Work Admin",
     paragraph:
-      "Paste your OIDC JWT or helix API key to sign in. Both are stored in this browser only; the control-plane re-verifies on every request.",
+      "Paste your OIDC JWT or Expert Work API key to sign in. Both are stored in this browser only; the control-plane re-verifies on every request.",
     token_label: "Token",
-    token_placeholder: "eyJ… (JWT)   or   aforge_pat_… (helix API key)",
+    token_placeholder: "eyJ… (JWT)   or   aforge_pat_… (Expert Work API key)",
     token_required: "Token is required",
     token_empty: "Token cannot be empty",
     pr2_hint: "OIDC code-flow login lands in H.1b PR 2 — see",
@@ -2368,9 +2368,9 @@ const en: TranslationKeys = {
     failed: "Sign-in failed",
   },
   setup: {
-    title: "Set up helix",
+    title: "Set up Expert Work",
     paragraph:
-      "No platform administrator exists yet. Create the first system admin to finish installing helix.",
+      "No platform administrator exists yet. Create the first system admin to finish installing expert_work.",
     platform_name_label: "Platform name",
     admin_email_label: "Administrator email",
     admin_email_required: "Email is required",
@@ -2384,7 +2384,7 @@ const en: TranslationKeys = {
     admin_display_name_label: "Display name (optional)",
     setup_token_label: "Setup token",
     setup_token_hint:
-      "The HELIX_AGENT_SETUP_TOKEN value configured at deploy time.",
+      "The EXPERT_WORK_SETUP_TOKEN value configured at deploy time.",
     setup_token_required: "Setup token is required",
     notice:
       "This one-time wizard creates the first platform system administrator. It is disabled once setup completes.",
@@ -2392,7 +2392,7 @@ const en: TranslationKeys = {
     success_toast: "Platform administrator created",
     done_title: "Platform administrator created",
     done_subtitle:
-      "helix is initialized. Sign in with the administrator account you just created.",
+      "Expert Work is initialized. Sign in with the administrator account you just created.",
     go_to_login: "Go to sign in",
     already_initialized_title: "Already initialized",
     already_initialized_subtitle:
@@ -3725,7 +3725,7 @@ const en: TranslationKeys = {
     quality_default_note:
       "Not configured yet — the values below are the environment defaults and monitoring is off. Save to enable and take over from the defaults.",
     quality_deploy_note:
-      "The workers always run; this toggle is the operational switch. The HELIX_AGENT_ENABLE_QUALITY_MONITOR deploy flag can still force the whole subsystem off.",
+      "The workers always run; this toggle is the operational switch. The EXPERT_WORK_ENABLE_QUALITY_MONITOR deploy flag can still force the whole subsystem off.",
     quality_section_master: "Enable",
     quality_enabled_label: "Quality monitoring enabled",
     quality_enabled_hint: "Off by default — sampling + judging spends tokens.",
@@ -3988,7 +3988,7 @@ const en: TranslationKeys = {
       "Leave blank to receive events from every agent in the tenant.",
     field_payload_format: "Delivery format",
     payload_format_hint:
-      "Generic = the signed helix event JSON; IM formats render the event as a text bot message — use the platform's incoming-webhook robot URL.",
+      "Generic = the signed Expert Work event JSON; IM formats render the event as a text bot message — use the platform's incoming-webhook robot URL.",
     col_format: "Format",
     format_generic: "Generic",
     format_feishu: "Feishu bot",
@@ -4000,7 +4000,7 @@ const en: TranslationKeys = {
     secret_drawer_title: "Signing secret — shown once",
     secret_warn_title: "Copy this secret now",
     secret_warn_body:
-      "This HMAC signing secret is shown only once and never again. Verify the X-Helix-Signature-256 header with it. Rotation = delete + re-create.",
+      "This HMAC signing secret is shown only once and never again. Verify the X-Expert-Work-Signature-256 header with it. Rotation = delete + re-create.",
     secret_endpoint_name: "Endpoint",
     secret_label: "Signing secret",
     secret_copy: "Copy",
@@ -4361,7 +4361,7 @@ const en: TranslationKeys = {
     embedder_note:
       "PATCH re-computes the embedding so vector recall stays consistent with the new content.",
     embedder_unconfigured:
-      "Backend has no embedder configured — memory PATCH refused (HELIX_AGENT_EMBEDDING_API_KEY_REF + MODEL required).",
+      "Backend has no embedder configured — memory PATCH refused (EXPERT_WORK_EMBEDDING_API_KEY_REF + MODEL required).",
     empty_content: "Content cannot be empty.",
     updated: "Memory updated.",
     deleted: "Memory deleted.",

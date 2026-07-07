@@ -18,7 +18,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from helix_agent.runtime.middleware import (
+from expert_work.runtime.middleware import (
     LLMClientError,
     LLMNetworkError,
     LLMRateLimitError,
@@ -462,7 +462,7 @@ def test_recording_response_default_is_empty_dict() -> None:
 
 @pytest.mark.asyncio
 async def test_human_image_ref_emits_base64_image_block() -> None:
-    uri = "helix://image/demo.png"
+    uri = "expert_work://image/demo.png"
     resolver = InMemoryImageResolver(
         images={uri: ResolvedImage(media_type="image/png", data=b"PNGBYTES")}
     )
@@ -486,7 +486,7 @@ async def test_human_image_ref_emits_base64_image_block() -> None:
 
 @pytest.mark.asyncio
 async def test_human_image_ref_dropped_without_resolver() -> None:
-    uri = "helix://image/demo.png"
+    uri = "expert_work://image/demo.png"
     client = RecordingAnthropicClient(response={"content": [{"type": "text", "text": "ok"}]})
     # cache_enabled=False so the assertion checks the raw mapped
     # content (caching wraps strings in block lists with cache_control).
@@ -666,9 +666,9 @@ def _count_cache_markers(call: dict[str, Any]) -> int:
 
 
 @pytest.mark.asyncio
-async def test_cache_anchor_marks_helix_cache_anchor_message() -> None:
+async def test_cache_anchor_marks_expert_work_cache_anchor_message() -> None:
     """Sprint #8 Mini-ADR U-7: a message whose ``additional_kwargs``
-    carry ``helix_cache_anchor: True`` gets a ``cache_control`` marker
+    carry ``expert_work_cache_anchor: True`` gets a ``cache_control`` marker
     on its terminal content block — even if it sits well outside the
     trailing tail window."""
     client = RecordingAnthropicClient(
@@ -678,7 +678,7 @@ async def test_cache_anchor_marks_helix_cache_anchor_message() -> None:
 
     memory_block = HumanMessage(
         content="user prefers concise replies",
-        additional_kwargs={"helix_cache_anchor": True},
+        additional_kwargs={"expert_work_cache_anchor": True},
     )
 
     await provider.complete(
@@ -712,7 +712,7 @@ async def test_cache_anchor_total_markers_within_anthropic_cap() -> None:
 
     memory_block = HumanMessage(
         content="memory",
-        additional_kwargs={"helix_cache_anchor": True},
+        additional_kwargs={"expert_work_cache_anchor": True},
     )
 
     await provider.complete(
@@ -742,7 +742,7 @@ async def test_cache_anchor_inside_tail_window_does_not_double_mark() -> None:
 
     short_session = HumanMessage(
         content="memory",
-        additional_kwargs={"helix_cache_anchor": True},
+        additional_kwargs={"expert_work_cache_anchor": True},
     )
 
     await provider.complete(
@@ -772,7 +772,7 @@ async def test_cache_anchor_skipped_when_caching_disabled() -> None:
 
     memory_block = HumanMessage(
         content="memory",
-        additional_kwargs={"helix_cache_anchor": True},
+        additional_kwargs={"expert_work_cache_anchor": True},
     )
 
     await provider.complete(

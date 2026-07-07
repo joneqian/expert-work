@@ -11,8 +11,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.auth import JWTVerifier
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.protocol import Role
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.protocol import Role
 from tests.auth_fixtures import make_test_jwt
 
 
@@ -131,11 +131,11 @@ async def test_paste_raw_value_encrypts_and_stores_ref(
         assert put.status_code == 200, put.text
         ref = put.json()["data"]["secret_ref"]
         # Catalog holds a generated ref, not the value.
-        assert ref == "secret://helix-agent/platform/llm/anthropic"
+        assert ref == "secret://expert-work/platform/llm/anthropic"
         assert "sk-ant-REAL-KEY" not in put.text
 
         # The value is resolvable through the SecretStore the app wired.
-        resolved = await app.state.secret_store.get("helix-agent/platform/llm/anthropic")  # type: ignore[attr-defined]
+        resolved = await app.state.secret_store.get("expert-work/platform/llm/anthropic")  # type: ignore[attr-defined]
         assert resolved == "sk-ant-REAL-KEY"
 
 
@@ -232,7 +232,7 @@ async def test_tenant_override_put_get_delete_round_trip(
         )
         assert put.status_code == 200, put.text
         ref = put.json()["data"]["secret_ref"]
-        assert ref == f"secret://helix-agent/platform/tenant/{tenant_id}/llm/anthropic"
+        assert ref == f"secret://expert-work/platform/tenant/{tenant_id}/llm/anthropic"
         assert "sk-ant-TENANT-KEY" not in put.text
 
         # Tenant view: override row present, effective source = tenant.

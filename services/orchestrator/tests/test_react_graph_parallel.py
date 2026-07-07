@@ -20,7 +20,7 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     AgentState,
     GraphRunner,
@@ -300,13 +300,13 @@ async def test_tool_messages_preserve_original_call_order() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatched_and_stages_counters_emit() -> None:
-    """``helix_tools_dispatched_total`` and ``helix_tools_stages_total``
+    """``expert_work_tools_dispatched_total`` and ``expert_work_tools_stages_total``
     track the scheduler's batch shape — dividing one by the other gives
     the dashboard's average concurrency."""
     from prometheus_client import REGISTRY
 
-    before_dispatched = REGISTRY.get_sample_value("helix_tools_dispatched_total") or 0.0
-    before_stages = REGISTRY.get_sample_value("helix_tools_stages_total") or 0.0
+    before_dispatched = REGISTRY.get_sample_value("expert_work_tools_dispatched_total") or 0.0
+    before_stages = REGISTRY.get_sample_value("expert_work_tools_stages_total") or 0.0
 
     llm = _ScriptedLLM(
         responses=[
@@ -326,8 +326,8 @@ async def test_dispatched_and_stages_counters_emit() -> None:
 
     await _run(llm, registry)
 
-    after_dispatched = REGISTRY.get_sample_value("helix_tools_dispatched_total") or 0.0
-    after_stages = REGISTRY.get_sample_value("helix_tools_stages_total") or 0.0
+    after_dispatched = REGISTRY.get_sample_value("expert_work_tools_dispatched_total") or 0.0
+    after_stages = REGISTRY.get_sample_value("expert_work_tools_stages_total") or 0.0
 
     # 3 dispatches in 1 stage → 3 dispatched, 1 stage.
     assert after_dispatched == before_dispatched + 3

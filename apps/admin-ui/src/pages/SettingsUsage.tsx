@@ -168,7 +168,7 @@ export function SettingsUsage() {
         width: 140,
         align: "right",
         render: (v: number) => (
-          <Text style={{ fontFamily: "var(--hx-font-mono)" }}>{formatMicros(v)}</Text>
+          <Text style={{ fontFamily: "var(--ew-font-mono)" }}>{formatMicros(v)}</Text>
         ),
       },
     ],
@@ -289,8 +289,8 @@ export function SettingsUsage() {
             style={{
               padding: 16,
               marginBottom: 16,
-              background: "var(--hx-surface-raised)",
-              border: "1px solid var(--hx-border-subtle)",
+              background: "var(--ew-surface-raised)",
+              border: "1px solid var(--ew-border-subtle)",
               borderRadius: 6,
             }}
             data-testid="usage-summary"
@@ -298,7 +298,7 @@ export function SettingsUsage() {
             <Statistic
               title={t("usage.total_billed")}
               value={formatMicros(cost?.total_billed_cost_micros ?? 0)}
-              valueStyle={{ fontFamily: "var(--hx-font-mono)" }}
+              valueStyle={{ fontFamily: "var(--ew-font-mono)" }}
             />
             {cost?.as_of != null && (
               <Text type="secondary" style={{ fontSize: 12 }} data-testid="usage-as-of">
@@ -339,8 +339,8 @@ export function SettingsUsage() {
               flexWrap: "wrap",
               padding: 16,
               marginBottom: 16,
-              background: "var(--hx-surface-raised)",
-              border: "1px solid var(--hx-border-subtle)",
+              background: "var(--ew-surface-raised)",
+              border: "1px solid var(--ew-border-subtle)",
               borderRadius: 6,
             }}
             data-testid="usage-token-totals"
@@ -364,7 +364,7 @@ export function SettingsUsage() {
             <Statistic
               title={t("usage.col_hit_rate")}
               value={formatHitRate(tokens ? cacheHitRate(tokens.total) : null)}
-              valueStyle={{ color: "var(--hx-accent-cyan, #22d3ee)" }}
+              valueStyle={{ color: "var(--ew-accent-cyan, #22d3ee)" }}
             />
           </div>
 

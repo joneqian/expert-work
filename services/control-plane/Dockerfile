@@ -1,4 +1,4 @@
-# Helix control-plane image — Stream I.1.
+# Expert Work control-plane image — Stream I.1.
 #
 # Reuses the multi-stage uv build pattern established by the
 # credential-proxy pilot (Mini-ADR F-15 / I-1). The control-plane runs
@@ -11,7 +11,7 @@
 # package ``src/`` tree, so the ``--no-editable`` wheel doesn't carry them.
 #
 # Build from the repo root:
-#   docker build -f services/control-plane/Dockerfile -t helix-control-plane .
+#   docker build -f services/control-plane/Dockerfile -t expert-work-control-plane .
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
@@ -22,7 +22,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages/ packages/
 COPY services/ services/
-RUN uv sync --frozen --no-dev --no-editable --package helix-agent-control-plane
+RUN uv sync --frozen --no-dev --no-editable --package expert-work-control-plane
 
 
 FROM python:3.12-slim-bookworm
@@ -34,31 +34,31 @@ WORKDIR /app
 
 # Non-root service account — parity with the sandbox / credential-proxy
 # image hardening.
-RUN useradd --uid 10002 --no-create-home --shell /usr/sbin/nologin helix
+RUN useradd --uid 10002 --no-create-home --shell /usr/sbin/nologin expert_work
 
-COPY --from=builder --chown=helix:helix /app/.venv /app/.venv
+COPY --from=builder --chown=expert_work:expert_work /app/.venv /app/.venv
 
 # Alembic assets for the compose ``migrate`` service. ``alembic.ini`` has
 # ``script_location = %(here)s/migrations``, so this layout resolves to
 # /app/alembic/migrations. The migrate service overrides ``entrypoint``
 # to ``alembic -c /app/alembic/alembic.ini upgrade head``.
-COPY --chown=helix:helix packages/helix-persistence/alembic.ini /app/alembic/alembic.ini
-COPY --chown=helix:helix packages/helix-persistence/migrations /app/alembic/migrations
+COPY --chown=expert_work:expert_work packages/expert-work-persistence/alembic.ini /app/alembic/alembic.ini
+COPY --chown=expert_work:expert_work packages/expert-work-persistence/migrations /app/alembic/migrations
 
 # Eval harness (``tools/eval``) for the optional eval worker — the M0
 # baseline suite + the 11.4/11.5 live adversarial/trace suites. It lives
 # outside the package ``src/`` tree (the ``--no-editable`` wheel doesn't
 # carry it), so ship it onto PYTHONPATH; the worker's lazy
 # ``from tools.eval...`` imports + dataset loads then resolve in-container.
-COPY --chown=helix:helix tools/eval /app/tools/eval
+COPY --chown=expert_work:expert_work tools/eval /app/tools/eval
 ENV PYTHONPATH=/app
 
 # MCP connector catalog seed template (Stream MCP-OAUTH OA-5). Lives outside
 # the package ``src/`` tree, so the ``--no-editable`` wheel doesn't carry it.
 # Ship it so ``mcp_catalog_seed_file=configs/mcp-catalog-seed.json`` (relative
 # to WORKDIR /app) resolves at startup; unset → seeding is a no-op.
-COPY --chown=helix:helix configs /app/configs
+COPY --chown=expert_work:expert_work configs /app/configs
 
-USER helix
+USER expert_work
 EXPOSE 8000
 ENTRYPOINT ["uvicorn", "control_plane.main:app", "--host", "0.0.0.0", "--port", "8000"]

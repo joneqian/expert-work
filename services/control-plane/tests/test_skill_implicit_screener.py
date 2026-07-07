@@ -15,8 +15,8 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from control_plane.memory_consolidator import ConsolidatorLLMReply
 from control_plane.skill_evolution_wiring import _AuxText, _ImplicitScreener
-from helix_agent.protocol import CurationCandidateRecord, StructuredOutputSpec
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.protocol import CurationCandidateRecord, StructuredOutputSpec
+from expert_work.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryReader, TrajectoryRecord, TrajectoryRecorder
 
 _NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)

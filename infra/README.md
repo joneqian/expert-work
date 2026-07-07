@@ -1,4 +1,4 @@
-# Helix-Agent Infra (local dev / dogfood)
+# Expert Work Infra (local dev / dogfood)
 
 Local stack for the data + object-storage layer:
 **Postgres 16** + **PgBouncer** (Stream A.3 — subsystems/23 § 9 M0) and
@@ -29,13 +29,13 @@ exits immediately. Use either path once after the stack is up:
 ```bash
 # Path 1 — web console
 open http://localhost:9001   # log in with the dev credentials below;
-                              # click "Create Bucket" → helix-agent-dev
+                              # click "Create Bucket" → expert-work-dev
 
 # Path 2 — mc CLI
 docker run --rm --network infra_default \
     minio/mc:RELEASE.2025-08-13T08-35-41Z \
-    sh -c "mc alias set local http://minio:9000 helix_agent helix_agent_dev_minio \
-           && mc mb --ignore-existing local/helix-agent-dev"
+    sh -c "mc alias set local http://minio:9000 expert_work expert_work_dev_minio \
+           && mc mb --ignore-existing local/expert-work-dev"
 ```
 
 Integration tests create the bucket via the S3 API automatically — no
@@ -47,7 +47,7 @@ transaction mode does not preserve session state across statements.
 
 ## Full M0 app stack (`full` profile)
 
-The default `up` brings only the data layer. The helix services are
+The default `up` brings only the data layer. The Expert Work services are
 gated behind compose profiles (Stream I.1 — [STREAM-I-DESIGN](../docs/streams/STREAM-I-DESIGN.md)):
 
 | Profile     | Adds                                                          |
@@ -68,7 +68,7 @@ Langfuse (agent trace 调试) 起停 + 接线 + PII 脱敏自检见
 
 ```bash
 # Pre-build the sandbox execution image first (see "Sandbox image" below).
-docker build -f infra/sandbox-image/Dockerfile -t helix-sandbox:dev infra/sandbox-image
+docker build -f infra/sandbox-image/Dockerfile -t expert-work-sandbox:dev infra/sandbox-image
 
 cd infra
 docker compose --profile full up -d
@@ -84,19 +84,19 @@ containers.
 ## Credentials
 
 Defaults (placeholder, dev only):
-- user: `helix_agent`
-- password: `helix_agent_dev`
-- database: `helix_agent_dev`
+- user: `expert_work`
+- password: `expert_work_dev`
+- database: `expert_work_dev`
 
 Override via `.env` or your shell:
 
 ```bash
-export HELIX_DB_USER=…
-export HELIX_DB_PASSWORD=…
-export HELIX_DB_NAME=…
-export HELIX_MINIO_ROOT_USER=…
-export HELIX_MINIO_ROOT_PASSWORD=…
-export HELIX_MINIO_BUCKET=…
+export EXPERT_WORK_DB_USER=…
+export EXPERT_WORK_DB_PASSWORD=…
+export EXPERT_WORK_DB_NAME=…
+export EXPERT_WORK_MINIO_ROOT_USER=…
+export EXPERT_WORK_MINIO_ROOT_PASSWORD=…
+export EXPERT_WORK_MINIO_BUCKET=…
 ```
 
 ## Why PgBouncer transaction mode
@@ -112,13 +112,13 @@ Per [subsystems/23 § 5.1](../docs/architecture/subsystems/23-postgres-scalabili
   `pg_advisory_xact_lock` instead — already in `DbEventStore`).
 - ❌ No `LISTEN`/`NOTIFY` (migrate to Redis pub/sub if needed).
 - ⚠️ Prepared statements need PgBouncer ≥ 1.21 (this stack ships 1.24.1).
-  Helix uses **asyncpg with `statement_cache_size=0`** to sidestep the
+  Expert Work uses **asyncpg with `statement_cache_size=0`** to sidestep the
   client-side prepared cache entirely — see
-  `packages/helix-persistence/src/helix_agent/persistence/database.py`.
+  `packages/expert-work-persistence/src/expert_work/persistence/database.py`.
 
 ## Postgres tuning applied
 
-Database-wide defaults (set by `postgres/init/00-helix-init.sql` on first
+Database-wide defaults (set by `postgres/init/00-expert-work-init.sql` on first
 boot — production RDS must apply these manually):
 
 - `statement_timeout = 30s`
@@ -162,24 +162,24 @@ path or run a security-review pass.
 
 ```bash
 # 1. Generate a 32-byte master key; the value is base64 of raw bytes.
-export HELIX_MINIO_KMS_SECRET_KEY="helix-master:$(openssl rand -base64 32)"
+export EXPERT_WORK_MINIO_KMS_SECRET_KEY="expert-work-master:$(openssl rand -base64 32)"
 
 # 2. Restart MinIO with the key in env.
 docker compose up -d --force-recreate minio
 
 # 3. Mark a bucket SSE-KMS-default (one-off via mc).
 docker run --rm --network infra_default \
-    -e MC_HOST_local="http://${HELIX_MINIO_ROOT_USER:-helix_agent}:${HELIX_MINIO_ROOT_PASSWORD:-helix_agent_dev_minio}@minio:9000" \
+    -e MC_HOST_local="http://${EXPERT_WORK_MINIO_ROOT_USER:-expert_work}:${EXPERT_WORK_MINIO_ROOT_PASSWORD:-expert_work_dev_minio}@minio:9000" \
     minio/mc:RELEASE.2025-08-13T08-35-41Z \
-    mc encrypt set sse-kms helix-master local/helix-agent-dev
+    mc encrypt set sse-kms expert-work-master local/expert-work-dev
 
 # 4. Verify: write an object + inspect the on-disk file inside the
 #    container. Object body should be ciphertext.
-docker exec helix-minio sh -c 'head -c 64 /data/helix-agent-dev/<key>/xl.meta'
+docker exec expert-work-minio sh -c 'head -c 64 /data/expert-work-dev/<key>/xl.meta'
 ```
 
 The same `mc encrypt set` line applied to the audit-WORM bucket
-(`helix-agent-audit-worm`, D.1c) gives SSE-KMS + Object Lock together.
+(`expert-work-audit-worm`, D.1c) gives SSE-KMS + Object Lock together.
 
 For a KES-backed dev setup (closer to prod), spin up KES manually next
 to this compose; ADR-0008 keeps that pathway optional.
@@ -203,7 +203,7 @@ catalog runs whole and JS-bundled skills run via `bash`. LibreOffice makes it
 
 ```bash
 make -C infra build-sandbox
-# or: docker build -t helix-sandbox:dev infra/sandbox-image
+# or: docker build -t expert-work-sandbox:dev infra/sandbox-image
 ```
 
 `runner.py` is the container's PID 1 — it reads line-delimited JSON
@@ -223,20 +223,20 @@ are applied by the F.3 `SandboxRuntimeProvider`, not baked into the image.
 
   ```bash
   # As root, one-shot:
-  sudo dd if=/dev/zero of=/var/lib/helix/pgdata.luks bs=1G count=10
-  sudo cryptsetup luksFormat /var/lib/helix/pgdata.luks
-  sudo cryptsetup luksOpen /var/lib/helix/pgdata.luks helix-pgdata
-  sudo mkfs.ext4 /dev/mapper/helix-pgdata
-  sudo mkdir -p /mnt/helix-pgdata
-  sudo mount /dev/mapper/helix-pgdata /mnt/helix-pgdata
+  sudo dd if=/dev/zero of=/var/lib/Expert Work/pgdata.luks bs=1G count=10
+  sudo cryptsetup luksFormat /var/lib/Expert Work/pgdata.luks
+  sudo cryptsetup luksOpen /var/lib/Expert Work/pgdata.luks expert-work-pgdata
+  sudo mkfs.ext4 /dev/mapper/expert-work-pgdata
+  sudo mkdir -p /mnt/expert-work-pgdata
+  sudo mount /dev/mapper/expert-work-pgdata /mnt/expert-work-pgdata
 
   # Each boot, before ``docker compose up``:
-  sudo cryptsetup luksOpen /var/lib/helix/pgdata.luks helix-pgdata
-  sudo mount /dev/mapper/helix-pgdata /mnt/helix-pgdata
+  sudo cryptsetup luksOpen /var/lib/Expert Work/pgdata.luks expert-work-pgdata
+  sudo mount /dev/mapper/expert-work-pgdata /mnt/expert-work-pgdata
   ```
 
   Then edit the `postgres` service's `volumes:` in `docker-compose.yml`
-  to bind-mount `/mnt/helix-pgdata:/var/lib/postgresql/data`. Locked
+  to bind-mount `/mnt/expert-work-pgdata:/var/lib/postgresql/data`. Locked
   state → raw `pgdata/*` is ciphertext (verification gate per
   [STREAM-D-DESIGN § 5 #4](../docs/streams/STREAM-D-DESIGN.md)).
 

@@ -28,9 +28,9 @@ from uuid import UUID
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from helix_agent.common.search.rrf import rrf_fuse_scored
-from helix_agent.persistence import KnowledgeStore
-from helix_agent.protocol import KnowledgeBase, KnowledgeChunk, RetrievalMethod
+from expert_work.common.search.rrf import rrf_fuse_scored
+from expert_work.persistence import KnowledgeStore
+from expert_work.protocol import KnowledgeBase, KnowledgeChunk, RetrievalMethod
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
 
 if TYPE_CHECKING:

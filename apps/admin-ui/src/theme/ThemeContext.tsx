@@ -10,7 +10,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-const STORAGE_KEY = "hx-theme";
+const STORAGE_KEY = "ew-theme";
 
 function readStoredMode(): ThemeMode {
   if (typeof window === "undefined") return "dark";

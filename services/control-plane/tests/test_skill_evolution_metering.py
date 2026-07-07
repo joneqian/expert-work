@@ -16,8 +16,8 @@ import pytest
 from control_plane.memory_consolidator import ConsolidatorLLMReply
 from control_plane.skill_evolution_metering import current_metering, metering_scope
 from control_plane.skill_evolution_wiring import _AuxJudge, _AuxText
-from helix_agent.persistence.token_usage_store import InMemoryTokenUsageStore
-from helix_agent.protocol import CurationCandidateRecord, StructuredOutputSpec
+from expert_work.persistence.token_usage_store import InMemoryTokenUsageStore
+from expert_work.protocol import CurationCandidateRecord, StructuredOutputSpec
 
 _NOW = datetime(2026, 7, 3, 9, 0, 0, tzinfo=UTC)
 

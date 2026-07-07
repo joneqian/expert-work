@@ -36,8 +36,8 @@ import yaml
 
 from control_plane.skill_promotion import PromoteAction, decide_promotion
 from control_plane.skill_rollback import RollbackAction, decide_rollback
-from helix_agent.persistence import InMemorySkillStore
-from helix_agent.protocol import TrajectoryOutcome
+from expert_work.persistence import InMemorySkillStore
+from expert_work.protocol import TrajectoryOutcome
 from orchestrator.evolution.grounding import SignalTier
 from orchestrator.evolution.replay import (
     ReplayRequest,

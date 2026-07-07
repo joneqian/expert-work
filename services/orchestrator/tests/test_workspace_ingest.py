@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.protocol import Plan, PlanStep
+from expert_work.protocol import Plan, PlanStep
 from orchestrator.context import (
     WorkspaceIngester,
     parse_plan_md,

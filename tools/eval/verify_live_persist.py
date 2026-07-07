@@ -13,7 +13,7 @@ sandbox-image-consolidation work:
   some daemon-side cache, doing the restoring.
 
 Prereq: the stack is up (`make -C infra dev-up`) so sandbox-supervisor (:8001) +
-postgres are running, and `helix-sandbox:dev` is built (`make -C infra
+postgres are running, and `expert-work-sandbox:dev` is built (`make -C infra
 build-sandbox`).
 
     uv run python tools/eval/verify_live_persist.py

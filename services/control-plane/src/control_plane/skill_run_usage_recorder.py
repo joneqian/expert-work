@@ -18,8 +18,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.protocol import SkillRunUsage
+from expert_work.persistence.skill.base import SkillStore
+from expert_work.protocol import SkillRunUsage
 
 logger = logging.getLogger(__name__)
 

@@ -25,7 +25,7 @@
 - `make_child_agent_builder`: `services/control-plane/src/control_plane/subagent_runtime.py:45` — second build site (also needs the tenant pool).
 - `AgentRuntime`: `runtime.py:~110-135` — `_cache: dict[(tenant_id, name, version) → BuiltAgent]`, `get_agent(...)` builds on miss. **No invalidate method yet — add one.**
 - Platform pool construction: `build_mcp_pool(config_file, *, secret_store, client_factory=None)` ctx mgr `runtime.py:607`; wired in `app.py:662` inside the lifespan `AsyncExitStack`.
-- `TenantMcpServerStore.list_for_tenant(*, tenant_id) -> list[TenantMcpServerRecord]`; record fields name/transport/url/auth_type/token_secret_ref/timeout_s/enabled. `from helix_agent.persistence import TenantMcpServerStore`.
+- `TenantMcpServerStore.list_for_tenant(*, tenant_id) -> list[TenantMcpServerRecord]`; record fields name/transport/url/auth_type/token_secret_ref/timeout_s/enabled. `from expert_work.persistence import TenantMcpServerStore`.
 - `MCPServerConfig` (orchestrator): `name/transport/url/headers/auth_type/auth_config/timeout_s`; bearer requires `auth_config["token_ref"]`.
 - V-C router: `services/control-plane/src/control_plane/api/mcp_servers.py` — POST/PATCH/DELETE handlers (the invalidation hook sites).
 - Tests to mirror: `services/orchestrator/tests/test_tool_assembly.py` (`MCPServerPool`/`RecordingMCPClient`/`build_tool_registry`/`ToolEnv` fixtures), control-plane runtime tests.
@@ -154,7 +154,7 @@ Note: the last test replaces/duplicates the existing `test_mcp_missing_pool_rais
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q -k "tenant_pool or allow_tools_filters_tenant or name_collision or no_pools"`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q -k "tenant_pool or allow_tools_filters_tenant or name_collision or no_pools"`
 Expected: FAIL — `ToolEnv` has no `tenant_mcp_pool` (TypeError on unexpected kwarg).
 
 - [ ] **Step 3: Add the field + union logic**
@@ -216,12 +216,12 @@ async def _register_mcp(registry: ToolRegistry, entry: MCPToolSpec, env: ToolEnv
 
 - [ ] **Step 4: Run to confirm pass**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/orchestrator/tests/test_tool_assembly.py -q`
 Expected: PASS (new + existing MCP tests).
 
 - [ ] **Step 5: Lint/type + commit**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run ruff check services/orchestrator && uv run ruff format --check services/orchestrator && uv run mypy services/orchestrator/src`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run ruff check services/orchestrator && uv run ruff format --check services/orchestrator && uv run mypy services/orchestrator/src`
 Expected: clean.
 
 ```bash
@@ -252,7 +252,7 @@ from uuid import uuid4
 import pytest
 
 from control_plane.tenant_mcp_pool import TenantMcpPoolService
-from helix_agent.persistence import InMemoryTenantMcpServerStore
+from expert_work.persistence import InMemoryTenantMcpServerStore
 from orchestrator.tools.mcp import MCPServerConfig, MCPToolDef, RecordingMCPClient
 
 
@@ -273,7 +273,7 @@ async def _seed(store: InMemoryTenantMcpServerStore, tenant_id, name="github", e
         token_secret_ref=None, timeout_s=30.0, created_by="a@x",
     )
     if not enabled:
-        from helix_agent.protocol import TenantMcpServerPatch
+        from expert_work.protocol import TenantMcpServerPatch
         await store.update(tenant_id=tenant_id, name=name, patch=TenantMcpServerPatch(enabled=False))
     return rec
 
@@ -350,7 +350,7 @@ async def test_close_all_clears_cache() -> None:
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_tenant_mcp_pool.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_tenant_mcp_pool.py -q`
 Expected: FAIL — `ModuleNotFoundError: control_plane.tenant_mcp_pool`.
 
 - [ ] **Step 3: Implement the service**
@@ -379,11 +379,11 @@ from uuid import UUID
 
 from orchestrator.tools.mcp import MCPClient, MCPServerConfig, MCPServerPool
 
-from helix_agent.persistence import TenantMcpServerStore
-from helix_agent.protocol import TenantMcpServerRecord
-from helix_agent.runtime.secret_store import SecretStore
+from expert_work.persistence import TenantMcpServerStore
+from expert_work.protocol import TenantMcpServerRecord
+from expert_work.runtime.secret_store import SecretStore
 
-logger = logging.getLogger("helix.control_plane.tenant_mcp_pool")
+logger = logging.getLogger("expert_work.control_plane.tenant_mcp_pool")
 
 # Provider handed to the agent builder: tenant_id -> that tenant's remote pool.
 TenantMcpPoolProvider = Callable[[UUID], Awaitable[MCPServerPool]]
@@ -472,11 +472,11 @@ class TenantMcpPoolService:
                 logger.warning("tenant_mcp_pool.close_all_failed")
 ```
 
-NOTE: confirm `RecordingMCPClient`, `MCPClient`, `MCPServerConfig`, `MCPServerPool` are exported from `orchestrator.tools.mcp` (they are). Confirm `SecretStore` import path is `helix_agent.runtime.secret_store` (V-C used this). If `BLE001` isn't enabled in ruff, drop the `# noqa` (V-C's probe found BLE001 not enabled — verify and remove unused noqa to avoid RUF100).
+NOTE: confirm `RecordingMCPClient`, `MCPClient`, `MCPServerConfig`, `MCPServerPool` are exported from `orchestrator.tools.mcp` (they are). Confirm `SecretStore` import path is `expert_work.runtime.secret_store` (V-C used this). If `BLE001` isn't enabled in ruff, drop the `# noqa` (V-C's probe found BLE001 not enabled — verify and remove unused noqa to avoid RUF100).
 
 - [ ] **Step 4: Run to confirm pass + lint**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest services/control-plane/tests/test_tenant_mcp_pool.py -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest services/control-plane/tests/test_tenant_mcp_pool.py -q`
 Expected: PASS (6 tests).
 Run: `uv run ruff check services/control-plane/src/control_plane/tenant_mcp_pool.py services/control-plane/tests/test_tenant_mcp_pool.py && uv run ruff format --check ... && uv run mypy services/control-plane/src/control_plane/tenant_mcp_pool.py`
 Expected: clean (remove any unused `# noqa`).
@@ -666,7 +666,7 @@ Add `app.state.tenant_mcp_pool_service = tenant_mcp_pool_service`. Register shut
 
 - [ ] **Step 4: Verify app boots + routes intact**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -c "import control_plane.app"` and an existing app smoke test if present. `uv run ruff check services/control-plane/src/control_plane/app.py && uv run ruff format --check ...`.
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -c "import control_plane.app"` and an existing app smoke test if present. `uv run ruff check services/control-plane/src/control_plane/app.py && uv run ruff format --check ...`.
 
 - [ ] **Step 5: Commit**
 
@@ -749,7 +749,7 @@ git commit -m "feat(stream-v): invalidate tenant MCP pool + agent cache on regis
 
 - [ ] **Step 1: Affected test scope**
 
-Run: `cd /Users/mac/src/github/jone_qian/helix-agent && uv run python -m pytest -m "not integration" services/control-plane services/orchestrator packages/helix-protocol -q`
+Run: `cd /Users/mac/src/github/jone_qian/expert-work && uv run python -m pytest -m "not integration" services/control-plane services/orchestrator packages/expert-work-protocol -q`
 Expected: PASS, no regressions.
 
 - [ ] **Step 2: Lint + CI mypy scope**

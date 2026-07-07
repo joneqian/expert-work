@@ -23,8 +23,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from control_plane.auth.middleware import AuthMiddleware
-from helix_agent.persistence.auth import InMemoryRoleBindingStore
-from helix_agent.protocol import Role
+from expert_work.persistence.auth import InMemoryRoleBindingStore
+from expert_work.protocol import Role
 from tests.auth_fixtures import build_test_jwt_verifier, make_test_jwt
 
 

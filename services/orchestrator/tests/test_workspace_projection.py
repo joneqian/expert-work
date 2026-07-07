@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.protocol import MemoryItem, Plan, PlanStep
+from expert_work.protocol import MemoryItem, Plan, PlanStep
 from orchestrator.context import (
     WorkspaceProjector,
     render_memory_md,

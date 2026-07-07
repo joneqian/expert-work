@@ -8,11 +8,11 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.quota import InMemoryQuotaService
-from helix_agent.persistence.quota import (
+from expert_work.persistence.quota import (
     InMemoryTenantQuotaStore,
     InMemoryTokenReservationStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     CheckRequest,
     CommitRequest,
     QuotaDimension,
@@ -309,7 +309,7 @@ async def test_reaper_invokes_on_expire_per_row() -> None:
     from datetime import timedelta
 
     from control_plane.quota import ReservationReaper
-    from helix_agent.protocol import TokenReservationRecord
+    from expert_work.protocol import TokenReservationRecord
 
     tenant = _tenant()
     store = InMemoryTokenReservationStore()
@@ -388,7 +388,7 @@ async def test_reaper_skips_hook_when_peer_won() -> None:
     from datetime import timedelta
 
     from control_plane.quota import ReservationReaper
-    from helix_agent.protocol import TokenReservationRecord
+    from expert_work.protocol import TokenReservationRecord
 
     tenant = _tenant()
     real = InMemoryTokenReservationStore()
@@ -425,14 +425,14 @@ async def test_reaper_skips_hook_when_peer_won() -> None:
 
 @pytest.mark.asyncio
 async def test_reaper_cycle_error_increments_metric() -> None:
-    """A failing cycle bumps ``helix_control_plane_quota_reaper_cycle_errors_total``."""
+    """A failing cycle bumps ``expert_work_control_plane_quota_reaper_cycle_errors_total``."""
     import asyncio
 
     from prometheus_client import REGISTRY
 
     from control_plane.quota import ReservationReaper
 
-    metric = "helix_control_plane_quota_reaper_cycle_errors_total"
+    metric = "expert_work_control_plane_quota_reaper_cycle_errors_total"
 
     class _RaisingStore:
         async def list_expired(self, **_kwargs: object) -> list[object]:

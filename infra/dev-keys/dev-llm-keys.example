@@ -1,6 +1,6 @@
 # Dev secret-store seed — Stream P (Mini-ADR P-13).
 #
-# The local_dev SecretStore (HELIX_AGENT_SECRET_STORE_ENV_FILE) reads this
+# The local_dev SecretStore (EXPERT_WORK_SECRET_STORE_ENV_FILE) reads this
 # `name=value` file and resolves `secret://<name>` refs from agent manifests.
 # This is how a dev injects a REAL LLM provider key so Phase 2/4/5 of the
 # canonical-agent E2E can run a real turn (the platform does NOT ship a
@@ -9,15 +9,15 @@
 #   1. cp infra/dev-keys/dev-llm-keys.example infra/dev-keys/dev-llm-keys.local
 #   2. paste your real key into dev-llm-keys.local
 #   3. docker compose --profile full up -d   (the compose mounts it +
-#      sets HELIX_AGENT_SECRET_STORE_ENV_FILE, see infra/docker-compose.yml)
+#      sets EXPERT_WORK_SECRET_STORE_ENV_FILE, see infra/docker-compose.yml)
 #
 # dev-llm-keys.local is git-ignored (*.local). NEVER commit a real key.
 #
 # The name on the left MUST match the manifest's `api_key_ref` minus the
 # `secret://` scheme. The canonical manifest references:
-#     model.api_key_ref: secret://helix-agent/dev/llm/anthropic-api-key
-helix-agent/dev/llm/anthropic-api-key=sk-ant-REPLACE-WITH-YOUR-KEY
+#     model.api_key_ref: secret://expert-work/dev/llm/anthropic-api-key
+expert-work/dev/llm/anthropic-api-key=sk-ant-REPLACE-WITH-YOUR-KEY
 
 # Tavily key backing the built-in web_search tool (optional — web_search
 # returns an error without it, the rest of the agent still runs).
-# helix-agent/dev/tools/tavily-api-key=tvly-REPLACE-WITH-YOUR-KEY
+# expert-work/dev/tools/tavily-api-key=tvly-REPLACE-WITH-YOUR-KEY

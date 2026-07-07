@@ -10,7 +10,7 @@
 >
 > **本次范围(用户拍板)**:dev 跑通 **Phase 0–6**;**Phase 7**(staging Linux 安全/数据保护)单列后续。
 
-设计先行规则([memory:design-first-iteration](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)):
+设计先行规则([memory:design-first-iteration](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)):
 **任何一行代码落地之前**,先完成本设计文档 + Mini-ADR 锁定。
 
 ---
@@ -192,9 +192,9 @@ POST /v1/tenants  body: { tenant_id?, display_name(必填), plan? }
 - **reap**:`services/sandbox-supervisor/.../reaper.py:run_once()`;control→supervisor 经 SupervisorClient
 - **可观测**:control-plane `/metrics` `api/metrics.py:build_metrics_router`;sandbox cold_start `supervisor.py:55`;scrape `infra/observability/prometheus.yml`;dashboard `tools/observability/dashboards/01-overview.json`(参照 02/03)
 - **Playground 传图**:`PlaygroundTab.tsx`;`api/uploads.py`(返 `image_ref`);content-block `orchestrator/multimodal.py`
-- **canonical manifest**:AgentSpec `packages/helix-protocol/.../agent_spec.py`(`supports_vision` / `policies.approval_required_tools`)
+- **canonical manifest**:AgentSpec `packages/expert-work-protocol/.../agent_spec.py`(`supports_vision` / `policies.approval_required_tools`)
 - **eval**:`tools/eval/run_baseline.py`(无 `--warmup`)、`baselines/m0_gate_baseline.yaml`(14 cap)、`memory_recall.py` + `datasets/memory_recall/zh_en_seed.yaml`
-- Keycloak dev:`infra/keycloak/realm-helix-agent.json`(`dev/devpass`,sub=UUID)
+- Keycloak dev:`infra/keycloak/realm-expert-work.json`(`dev/devpass`,sub=UUID)
 
 ---
 
@@ -204,9 +204,9 @@ POST /v1/tenants  body: { tenant_id?, display_name(必填), plan? }
 
 **风险**:
 1. **audit 双 Literal 漂移**:`TENANT_CREATE`/`PLATFORM_*` 必须 protocol + control-plane 同 PR 改全([memory:audit-literal-drift])。
-2. **resolver getter 触及 helix-common**(Read 受限)——保持 additive,验旧 dict 快照测试不变([memory:harness-denies-credentials-paths]:从测试读契约)。
+2. **resolver getter 触及 expert-work-common**(Read 受限)——保持 additive,验旧 dict 快照测试不变([memory:harness-denies-credentials-paths]:从测试读契约)。
 3. **audit 写在 bypass 内**:建租户/平台写的 audit_log 若 FORCE-RLS keyed on tenant_id,emit 要在 bypass 块内——落地前验。
-4. **Phase 6 orchestrator 指标假设**:PR L 必须先实测 `helix_session_ttft_seconds` 是否已在 control-plane `/metrics`,否则补接线;并确认 sandbox-supervisor `/metrics` 是否已暴露。
+4. **Phase 6 orchestrator 指标假设**:PR L 必须先实测 `expert_work_session_ttft_seconds` 是否已在 control-plane `/metrics`,否则补接线;并确认 sandbox-supervisor `/metrics` 是否已暴露。
 5. **缓存跨副本 staleness**:M0 单实例可接受,文档标注,不做跨副本失效。
 6. **dev 真 key 不入仓**:env passthrough + `.env.example` 占位。
 7. **真实 turn 依赖**:Phase 2/4/5 真实回话/推理依赖真 key,无 key 只验 API/结构层——SOP 分层标注。

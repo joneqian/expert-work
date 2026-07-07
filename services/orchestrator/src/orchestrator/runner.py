@@ -31,7 +31,7 @@ class GraphRunner:
 
     Constructed once per service process (or per FastAPI lifespan) with
     a saver produced by
-    :func:`helix_agent.runtime.checkpointer.make_checkpointer`. Every
+    :func:`expert_work.runtime.checkpointer.make_checkpointer`. Every
     ``compile`` call attaches the same saver so all graph runs in the
     service share one durable checkpoint store.
     """

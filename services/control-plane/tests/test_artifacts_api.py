@@ -12,8 +12,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence import InMemoryArtifactStore, InMemoryTenantUserStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence import InMemoryArtifactStore, InMemoryTenantUserStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
 from orchestrator.tools import RecordingSupervisorClient
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -234,7 +234,7 @@ async def test_download_429_when_download_count_quota_exhausted(
 ) -> None:
     """After ``ARTIFACT_DOWNLOAD_COUNT_30D`` is consumed the next
     download returns 429 with the dimension surfaced — Mini-ADR J-25."""
-    from helix_agent.protocol import QuotaDimension, TenantQuotaPatch
+    from expert_work.protocol import QuotaDimension, TenantQuotaPatch
 
     client, _, _ = setup
     # Seed a 2-burst capacity bucket.

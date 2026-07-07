@@ -134,7 +134,7 @@ describe("SettingsTenants", () => {
     );
 
     expect(mockNavigate).toHaveBeenCalledWith("/settings/tenant-config");
-    expect(window.sessionStorage.getItem("helix.admin.tenantScope")).toBe(
+    expect(window.sessionStorage.getItem("expert_work.admin.tenantScope")).toBe(
       "11111111-1111-1111-1111-111111111111",
     );
   });

@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from helix_agent.protocol.multimodal import ImageRef
+from expert_work.protocol.multimodal import ImageRef
 from orchestrator.multimodal import IMAGE_REF_BLOCK_TYPE, InMemoryImageResolver, ResolvedImage
 from orchestrator.tools.registry import ToolBlockedError, ToolContext
 from orchestrator.tools.vision import AskImageTool
@@ -128,7 +128,7 @@ async def test_ask_image_rejects_missing_image_ref() -> None:
 async def test_ask_image_rejects_malformed_image_ref() -> None:
     tool = AskImageTool(vl_caller=_FakeVLCaller(), image_resolver=_resolver())
     with pytest.raises(ValueError, match="image ref"):
-        await tool.call({"image_ref": "not-a-helix-ref", "question": "q"}, ctx=_ctx())
+        await tool.call({"image_ref": "not-a-expert-work-ref", "question": "q"}, ctx=_ctx())
 
 
 def test_ask_image_spec_shape() -> None:

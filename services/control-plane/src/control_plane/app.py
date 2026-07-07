@@ -213,38 +213,38 @@ from control_plane.transcript_mirror_sweep import TranscriptMirrorSweep
 from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolService
 from control_plane.webhook_delivery_worker import WebhookDeliveryWorker
 from control_plane.workspace_lock import PgWorkspaceLock
-from helix_agent.common.credentials import CredentialsResolver
-from helix_agent.common.health import DefaultHealthProvider
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.common.observability import current_trace_id_hex, init_logging, init_tracing
-from helix_agent.common.uplift_metrics import record_legacy_credentials_fallback
-from helix_agent.persistence.agent_disable import (
+from expert_work.common.credentials import CredentialsResolver
+from expert_work.common.health import DefaultHealthProvider
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.common.observability import current_trace_id_hex, init_logging, init_tracing
+from expert_work.common.uplift_metrics import record_legacy_credentials_fallback
+from expert_work.persistence.agent_disable import (
     AgentDisableStore,
     InMemoryAgentDisableStore,
     SqlAgentDisableStore,
 )
-from helix_agent.persistence.agent_instance import (
+from expert_work.persistence.agent_instance import (
     AgentInstanceStore,
     InMemoryAgentInstanceStore,
     SqlAgentInstanceStore,
 )
-from helix_agent.persistence.agent_spec import (
+from expert_work.persistence.agent_spec import (
     AgentSpecStore,
     InMemoryAgentSpecStore,
     SqlAgentSpecStore,
 )
-from helix_agent.persistence.approval import (
+from expert_work.persistence.approval import (
     ApprovalStore,
     InMemoryApprovalStore,
     SqlApprovalStore,
 )
-from helix_agent.persistence.artifact import (
+from expert_work.persistence.artifact import (
     ArtifactStore,
     InMemoryArtifactStore,
     SqlArtifactStore,
 )
-from helix_agent.persistence.audit_log import AuditLogStore, SqlAuditLogStore
-from helix_agent.persistence.auth import (
+from expert_work.persistence.audit_log import AuditLogStore, SqlAuditLogStore
+from expert_work.persistence.auth import (
     ApiKeyStore,
     InMemoryApiKeyStore,
     InMemoryRoleBindingStore,
@@ -255,7 +255,7 @@ from helix_agent.persistence.auth import (
     SqlRoleBindingStore,
     SqlServiceAccountStore,
 )
-from helix_agent.persistence.billing import (
+from expert_work.persistence.billing import (
     DbModelRateCardStore,
     DbTenantBillingLedgerStore,
     InMemoryModelRateCardStore,
@@ -263,7 +263,7 @@ from helix_agent.persistence.billing import (
     ModelRateCardStore,
     TenantBillingLedgerStore,
 )
-from helix_agent.persistence.curation import (
+from expert_work.persistence.curation import (
     CurationCandidateStore,
     EvalDatasetStore,
     InMemoryCurationCandidateStore,
@@ -271,42 +271,42 @@ from helix_agent.persistence.curation import (
     SqlCurationCandidateStore,
     SqlEvalDatasetStore,
 )
-from helix_agent.persistence.database import (
+from expert_work.persistence.database import (
     DatabaseConfig,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.persistence.eval import (
+from expert_work.persistence.eval import (
     EvalRunStore,
     InMemoryEvalRunStore,
     SqlEvalRunStore,
 )
-from helix_agent.persistence.feedback_store import (
+from expert_work.persistence.feedback_store import (
     DbFeedbackStore,
     FeedbackStore,
     InMemoryFeedbackStore,
 )
-from helix_agent.persistence.image_upload import (
+from expert_work.persistence.image_upload import (
     ImageUploadStore,
     InMemoryImageUploadStore,
     SqlImageUploadStore,
 )
-from helix_agent.persistence.knowledge import (
+from expert_work.persistence.knowledge import (
     InMemoryKnowledgeStore,
     KnowledgeStore,
     SqlKnowledgeStore,
 )
-from helix_agent.persistence.mcp_connector_catalog import (
+from expert_work.persistence.mcp_connector_catalog import (
     InMemoryMcpConnectorCatalogStore,
     McpConnectorCatalogStore,
     SqlMcpConnectorCatalogStore,
 )
-from helix_agent.persistence.mcp_oauth_connection import (
+from expert_work.persistence.mcp_oauth_connection import (
     InMemoryMcpOAuthConnectionStore,
     McpOAuthConnectionStore,
     SqlMcpOAuthConnectionStore,
 )
-from helix_agent.persistence.memory import (
+from expert_work.persistence.memory import (
     InMemoryMemoryStore,
     InMemoryMemoryWritebackDLQ,
     MemoryStore,
@@ -314,57 +314,57 @@ from helix_agent.persistence.memory import (
     SqlMemoryStore,
     SqlMemoryWritebackDLQ,
 )
-from helix_agent.persistence.platform_agent_template import (
+from expert_work.persistence.platform_agent_template import (
     InMemoryPlatformAgentTemplateStore,
     PlatformAgentTemplateStore,
     SqlPlatformAgentTemplateStore,
 )
-from helix_agent.persistence.platform_billing_config import (
+from expert_work.persistence.platform_billing_config import (
     InMemoryPlatformBillingConfigStore,
     PlatformBillingConfigStore,
     SqlPlatformBillingConfigStore,
 )
-from helix_agent.persistence.platform_embedding_config import (
+from expert_work.persistence.platform_embedding_config import (
     InMemoryPlatformEmbeddingConfigStore,
     PlatformEmbeddingConfigStore,
     SqlPlatformEmbeddingConfigStore,
 )
-from helix_agent.persistence.platform_judge_config import (
+from expert_work.persistence.platform_judge_config import (
     InMemoryPlatformJudgeConfigStore,
     PlatformJudgeConfigStore,
     SqlPlatformJudgeConfigStore,
 )
-from helix_agent.persistence.platform_quality_config import (
+from expert_work.persistence.platform_quality_config import (
     InMemoryPlatformQualityConfigStore,
     PlatformQualityConfigStore,
     SqlPlatformQualityConfigStore,
 )
-from helix_agent.persistence.platform_secrets import (
+from expert_work.persistence.platform_secrets import (
     InMemoryPlatformSecretStore,
     PlatformSecretStore,
     SqlPlatformSecretStore,
 )
-from helix_agent.persistence.platform_tool_budget_config import (
+from expert_work.persistence.platform_tool_budget_config import (
     InMemoryPlatformToolBudgetConfigStore,
     PlatformToolBudgetConfigStore,
     SqlPlatformToolBudgetConfigStore,
 )
-from helix_agent.persistence.quality_candidate import (
+from expert_work.persistence.quality_candidate import (
     InMemoryQualityCandidateSource,
     QualityCandidateSource,
     SqlQualityCandidateSource,
 )
-from helix_agent.persistence.quality_drift_alert import (
+from expert_work.persistence.quality_drift_alert import (
     InMemoryQualityDriftAlertStore,
     QualityDriftAlertStore,
     SqlQualityDriftAlertStore,
 )
-from helix_agent.persistence.quality_score import (
+from expert_work.persistence.quality_score import (
     InMemoryQualityScoreStore,
     QualityScoreStore,
     SqlQualityScoreStore,
 )
-from helix_agent.persistence.quota import (
+from expert_work.persistence.quota import (
     InMemoryTenantQuotaStore,
     InMemoryTokenReservationStore,
     SqlTenantQuotaStore,
@@ -372,58 +372,58 @@ from helix_agent.persistence.quota import (
     TenantQuotaStore,
     TokenReservationStore,
 )
-from helix_agent.persistence.rls import build_rls_sessionmaker
-from helix_agent.persistence.sandbox_egress_audit import (
+from expert_work.persistence.rls import build_rls_sessionmaker
+from expert_work.persistence.sandbox_egress_audit import (
     InMemorySandboxEgressAuditStore,
     SandboxEgressAuditStore,
     SqlSandboxEgressAuditStore,
 )
-from helix_agent.persistence.skill import (
+from expert_work.persistence.skill import (
     InMemorySkillStore,
     SkillStore,
     SqlSkillStore,
 )
-from helix_agent.persistence.tenant_config import (
+from expert_work.persistence.tenant_config import (
     InMemoryTenantConfigStore,
     SqlTenantConfigStore,
     TenantConfigStore,
 )
-from helix_agent.persistence.tenant_mcp_server import (
+from expert_work.persistence.tenant_mcp_server import (
     InMemoryTenantMcpServerStore,
     SqlTenantMcpServerStore,
     TenantMcpServerStore,
 )
-from helix_agent.persistence.tenant_member import (
+from expert_work.persistence.tenant_member import (
     InMemoryTenantMemberStore,
     SqlTenantMemberStore,
     TenantMemberStore,
 )
-from helix_agent.persistence.tenant_skill_subscription import (
+from expert_work.persistence.tenant_skill_subscription import (
     InMemoryTenantSkillSubscriptionStore,
     SqlTenantSkillSubscriptionStore,
     TenantSkillSubscriptionStore,
 )
-from helix_agent.persistence.tenant_user import (
+from expert_work.persistence.tenant_user import (
     InMemoryTenantUserStore,
     SqlTenantUserStore,
     TenantUserStore,
 )
-from helix_agent.persistence.thread_message import (
+from expert_work.persistence.thread_message import (
     InMemoryThreadMessageStore,
     SqlThreadMessageStore,
     ThreadMessageStore,
 )
-from helix_agent.persistence.thread_meta import (
+from expert_work.persistence.thread_meta import (
     InMemoryThreadMetaStore,
     SqlThreadMetaStore,
     ThreadMetaStore,
 )
-from helix_agent.persistence.token_usage_store import (
+from expert_work.persistence.token_usage_store import (
     DbTokenUsageStore,
     InMemoryTokenUsageStore,
     TokenUsageStore,
 )
-from helix_agent.persistence.trigger import (
+from expert_work.persistence.trigger import (
     InMemoryTriggerRunStore,
     InMemoryTriggerStore,
     SqlTriggerRunStore,
@@ -431,7 +431,7 @@ from helix_agent.persistence.trigger import (
     TriggerRunStore,
     TriggerStore,
 )
-from helix_agent.persistence.webhook import (
+from expert_work.persistence.webhook import (
     InMemoryWebhookDeliveryStore,
     InMemoryWebhookEndpointStore,
     SqlWebhookDeliveryStore,
@@ -439,12 +439,12 @@ from helix_agent.persistence.webhook import (
     WebhookDeliveryStore,
     WebhookEndpointStore,
 )
-from helix_agent.persistence.workspace import (
+from expert_work.persistence.workspace import (
     InMemoryUserWorkspaceStore,
     SqlUserWorkspaceStore,
     UserWorkspaceStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     PROVIDER_CATALOG,
     AgentSpec,
     AuditAction,
@@ -452,10 +452,10 @@ from helix_agent.protocol import (
     PlatformAgentTemplateStatus,
     TokenReservationRecord,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.checkpointer import make_checkpointer
-from helix_agent.runtime.middleware import make_langfuse_client
-from helix_agent.runtime.runs import (
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.middleware import make_langfuse_client
+from expert_work.runtime.runs import (
     InMemoryRunEventStore,
     InMemoryRunStore,
     RunEventStore,
@@ -463,14 +463,14 @@ from helix_agent.runtime.runs import (
     SqlRunEventStore,
     SqlRunStore,
 )
-from helix_agent.runtime.secret_store import SecretStore, make_secret_store
-from helix_agent.runtime.storage import make_object_store
+from expert_work.runtime.secret_store import SecretStore, make_secret_store
+from expert_work.runtime.storage import make_object_store
 from orchestrator import MemoryEnv
 from orchestrator.trajectory import TrajectoryReader
 
 __all__ = ["create_app"]
 
-logger = logging.getLogger("helix.control_plane")
+logger = logging.getLogger("expert_work.control_plane")
 
 _VERSION = "0.0.0"
 
@@ -1830,7 +1830,7 @@ def create_app(
                 logger.info("control_plane.lifespan.stopped")
 
     app = FastAPI(
-        title="Helix-Agent Control Plane",
+        title="Expert Work Control Plane",
         version=_VERSION,
         lifespan=lifespan,
     )
@@ -2258,7 +2258,7 @@ def _build_secret_store(settings: Settings, sql_stores: _SqlStores | None) -> Se
         if settings.secret_encryption_key is None:
             msg = (
                 "secret_store_backend='sql_encrypted' requires "
-                "HELIX_AGENT_SECRET_ENCRYPTION_KEY (base64 32-byte KEK)"
+                "EXPERT_WORK_SECRET_ENCRYPTION_KEY (base64 32-byte KEK)"
             )
             raise RuntimeError(msg)
         kek = build_kek_from_b64(settings.secret_encryption_key.get_secret_value())
@@ -2476,7 +2476,7 @@ def _build_default_quota_service(
     """Pick the quota implementation based on Settings.quota_redis_url.
 
     Tests + dev (no redis URL) get the InMemoryQuotaService. Prod
-    points ``HELIX_AGENT_QUOTA_REDIS_URL`` at the deployed Redis and
+    points ``EXPERT_WORK_QUOTA_REDIS_URL`` at the deployed Redis and
     we wire the Lua-backed implementation.
     """
     if settings.quota_redis_url:

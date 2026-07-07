@@ -13,11 +13,11 @@ from typing import Any
 import pytest
 
 from control_plane.runtime import _resolve_template_extends
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 from orchestrator.errors import AgentFactoryError
 
 _BASE_DOC: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "support-bot", "version": "1.0.0", "tenant": "platform-eng"},
     "spec": {

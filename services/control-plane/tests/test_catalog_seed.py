@@ -11,7 +11,7 @@ from control_plane.app import _seed_mcp_catalog
 from control_plane.catalog_seed import CatalogSeedError, load_catalog_seed, seed_catalog
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import InMemoryMcpConnectorCatalogStore
+from expert_work.persistence import InMemoryMcpConnectorCatalogStore
 
 _ENTRY = {
     "name": "linear",

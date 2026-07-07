@@ -12,7 +12,7 @@ lock (auto-released at commit/rollback) — never the session-scoped variant,
 which leaks under PgBouncer transaction mode (``infra/README.md`` § Postgres).
 
 It borrows the xact-lock + ``hashtextextended`` technique from
-:func:`helix_agent.runtime.event_log.db._acquire_thread_lock`, but with two
+:func:`expert_work.runtime.event_log.db._acquire_thread_lock`, but with two
 deliberate differences the technique alone doesn't cover:
 
 - **The lock is held across a long external exec** (the sandbox write, up to

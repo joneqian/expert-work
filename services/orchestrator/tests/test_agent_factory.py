@@ -9,11 +9,11 @@ from typing import Any
 import pytest
 from langgraph.graph.state import CompiledStateGraph
 
-from helix_agent.persistence import InMemoryKnowledgeStore, InMemoryMemoryStore
-from helix_agent.protocol import AgentSpec, ModelSpec, StructuredOutputSpec
-from helix_agent.runtime.checkpointer import make_checkpointer
-from helix_agent.runtime.middleware import RecordingLangfuseClient
-from helix_agent.runtime.secret_store import LocalDevSecretStore
+from expert_work.persistence import InMemoryKnowledgeStore, InMemoryMemoryStore
+from expert_work.protocol import AgentSpec, ModelSpec, StructuredOutputSpec
+from expert_work.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.middleware import RecordingLangfuseClient
+from expert_work.runtime.secret_store import LocalDevSecretStore
 from orchestrator import (
     AgentFactoryError,
     AnthropicProvider,
@@ -35,12 +35,12 @@ from orchestrator.tools import KnowledgeRetriever, RecordingTavilyClient
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_ANTHROPIC_KEY_NAME = "helix-agent/dev/llm/anthropic"
-_OPENAI_KEY_NAME = "helix-agent/dev/llm/openai"
-_KIMI_KEY_NAME = "helix-agent/dev/llm/kimi"
+_ANTHROPIC_KEY_NAME = "expert-work/dev/llm/anthropic"
+_OPENAI_KEY_NAME = "expert-work/dev/llm/openai"
+_KIMI_KEY_NAME = "expert-work/dev/llm/kimi"
 
 _MINIMAL_SPEC: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "test-agent", "version": "1.0.0", "tenant": "platform-eng"},
     "spec": {
@@ -677,7 +677,7 @@ async def test_build_agent_floors_head_keep_when_per_session_memory(
     doc["spec"]["memory"] = {"long_term": {}}  # recall_mode defaults per_session
     doc["spec"]["policies"] = {"context_compression": {"head_keep": 0}}
     spec = AgentSpec.model_validate(doc)
-    with caplog.at_level(logging.WARNING, logger="helix.orchestrator.agent_factory"):
+    with caplog.at_level(logging.WARNING, logger="expert_work.orchestrator.agent_factory"):
         async with make_checkpointer("memory") as cp:
             await _build(
                 spec, secret_store=_secret_store(), checkpointer=cp, memory_env=_memory_env()
@@ -695,7 +695,7 @@ async def test_build_agent_keeps_head_keep_zero_without_per_session_memory(
     doc = deepcopy(_MINIMAL_SPEC)
     doc["spec"]["policies"] = {"context_compression": {"head_keep": 0}}
     spec = AgentSpec.model_validate(doc)
-    with caplog.at_level(logging.WARNING, logger="helix.orchestrator.agent_factory"):
+    with caplog.at_level(logging.WARNING, logger="expert_work.orchestrator.agent_factory"):
         async with make_checkpointer("memory") as cp:
             await _build(spec, secret_store=_secret_store(), checkpointer=cp)
     assert "head_keep_floored" not in caplog.text
@@ -734,7 +734,7 @@ async def test_build_memory_nodes_passes_reranker_to_recall() -> None:
 
     from langchain_core.messages import HumanMessage
 
-    from helix_agent.protocol import MemoryItem
+    from expert_work.protocol import MemoryItem
     from orchestrator.agent_factory import _build_memory_nodes
 
     tenant, user = uuid4(), uuid4()
@@ -855,7 +855,7 @@ async def test_build_agent_ignores_manifest_api_key_ref_for_resolver(
         seen.append(provider)
         return [f"secret://{_OPENAI_KEY_NAME}"]
 
-    with caplog.at_level("WARNING", logger="helix.orchestrator.agent_factory"):
+    with caplog.at_level("WARNING", logger="expert_work.orchestrator.agent_factory"):
         async with make_checkpointer("memory") as cp:
             built = await build_agent(
                 _spec(),
@@ -1133,7 +1133,7 @@ async def test_build_agent_resolves_shared_token_estimator(
     tiktoken-backed estimator (threaded into the context gates + the
     drift counter); the patch proves the seam is exercised without
     loading a real BPE vocabulary in unit tests."""
-    from helix_agent.runtime.tokens import CharTokenEstimator
+    from expert_work.runtime.tokens import CharTokenEstimator
 
     calls: list[int] = []
     fake = CharTokenEstimator()
@@ -1262,11 +1262,11 @@ async def test_tool_budget_platform_none_falls_back_to_env(monkeypatch: Any) -> 
     _spy_budget(monkeypatch, captured)
 
     async with make_checkpointer("memory") as cp:
-        monkeypatch.delenv("HELIX_TOOL_OUTPUT_BUDGET", raising=False)
+        monkeypatch.delenv("EXPERT_WORK_TOOL_OUTPUT_BUDGET", raising=False)
         await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)  # → env default (on)
         assert captured["enabled"] is True
 
-        monkeypatch.setenv("HELIX_TOOL_OUTPUT_BUDGET", "0")
+        monkeypatch.setenv("EXPERT_WORK_TOOL_OUTPUT_BUDGET", "0")
         await _build(_spec(), secret_store=_secret_store(), checkpointer=cp)
         assert captured["enabled"] is False
 

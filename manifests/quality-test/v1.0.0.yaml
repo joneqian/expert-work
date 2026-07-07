@@ -12,7 +12,7 @@
 #
 # MODEL: edit the model block to whatever provider you pasted a key for in
 # /settings/platform. Keep temperature low so answers are stable across runs.
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: quality-test

@@ -28,8 +28,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from helix_agent.protocol import MemoryItem, Plan, PlanStep
-from helix_agent.protocol.plan import PlanStepStatus
+from expert_work.protocol import MemoryItem, Plan, PlanStep
+from expert_work.protocol.plan import PlanStepStatus
 
 logger = logging.getLogger(__name__)
 

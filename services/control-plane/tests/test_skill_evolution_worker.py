@@ -15,8 +15,8 @@ import pytest
 from control_plane.skill_evolution import EvolutionResult, TransientEvolutionError
 from control_plane.skill_evolution_metering import current_metering
 from control_plane.skill_evolution_worker import ScreenDecision, SkillEvolutionWorker
-from helix_agent.persistence.curation.memory import InMemoryCurationCandidateStore
-from helix_agent.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
+from expert_work.persistence.curation.memory import InMemoryCurationCandidateStore
+from expert_work.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
 
 
 def _candidate(
@@ -441,7 +441,7 @@ async def test_llm_router_faults_requeue_instead_of_burning() -> None:
     responses); each must hit the retry budget, not burn the candidate.
     Key/auth faults are deliberately retryable: the platform fixing its
     credential should re-pick the candidate up."""
-    from helix_agent.runtime.middleware.llm_error_handling import (
+    from expert_work.runtime.middleware.llm_error_handling import (
         LLMKeyUnavailableError,
         LLMRateLimitError,
         LLMServerError,
@@ -468,7 +468,7 @@ async def test_llm_router_faults_requeue_instead_of_burning() -> None:
 async def test_llm_client_error_still_burns() -> None:
     """A 4xx request fault (bad request / context overflow) is permanent —
     retrying the identical aux call cannot succeed."""
-    from helix_agent.runtime.middleware.llm_error_handling import LLMClientError
+    from expert_work.runtime.middleware.llm_error_handling import LLMClientError
 
     store = InMemoryCurationCandidateStore()
     await _seed(store, [_candidate(signal="positive_feedback", tenant=uuid4())])

@@ -19,9 +19,9 @@ import pytest
 from control_plane.api import runs as runs_module
 from control_plane.approval_timeout_sweep import ApprovalTimeoutSweep
 from control_plane.audit import build_default_audit_logger
-from helix_agent.persistence import InMemoryApprovalStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import ApprovalRecord, ApprovalStatus
+from expert_work.persistence import InMemoryApprovalStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import ApprovalRecord, ApprovalStatus
 
 _TENANT = uuid4()
 
@@ -132,7 +132,7 @@ async def test_sweep_does_not_resume_a_disabled_agent() -> None:
     # RT-4 (RT-ADR-16) — the timeout sweep is a run-spawn path too; a disabled
     # agent must not be resumed by it. The approval stays PENDING (reversible).
     from control_plane.agent_disable_status import AgentDisableService
-    from helix_agent.persistence.agent_disable import InMemoryAgentDisableStore
+    from expert_work.persistence.agent_disable import InMemoryAgentDisableStore
 
     approvals = InMemoryApprovalStore()
     run_id, thread_id = uuid4(), uuid4()

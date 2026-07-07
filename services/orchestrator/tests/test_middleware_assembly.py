@@ -6,15 +6,15 @@ from copy import deepcopy
 from typing import Any
 from uuid import UUID
 
-from helix_agent.persistence.token_usage_store import InMemoryTokenUsageStore
-from helix_agent.protocol import AgentSpec
-from helix_agent.runtime.llm import InMemoryRedisCache, LLMResponseCache
-from helix_agent.runtime.middleware import RecordingLangfuseClient, TokenUsageMiddleware
+from expert_work.persistence.token_usage_store import InMemoryTokenUsageStore
+from expert_work.protocol import AgentSpec
+from expert_work.runtime.llm import InMemoryRedisCache, LLMResponseCache
+from expert_work.runtime.middleware import RecordingLangfuseClient, TokenUsageMiddleware
 from orchestrator import MiddlewareEnv, build_middleware_chains
 from orchestrator.middleware_assembly import _dynamic_context
 
 _MINIMAL: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "mw-agent", "version": "1.0.0", "tenant": "platform-eng"},
     "spec": {

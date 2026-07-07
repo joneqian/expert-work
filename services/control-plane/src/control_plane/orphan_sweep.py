@@ -41,27 +41,27 @@ from control_plane.audit import emit
 from control_plane.kill_switch import run_block_reason
 from control_plane.runtime import AgentRuntime
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.common.observability import current_trace_id_hex, helix_counter
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.rls import (
+from expert_work.common.observability import current_trace_id_hex, expert_work_counter
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.persistence.thread_meta import ThreadMetaStore
-from helix_agent.protocol import AuditAction, AuditResult
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunInfo, RunStatus, RunStore
+from expert_work.persistence.thread_meta import ThreadMetaStore
+from expert_work.protocol import AuditAction, AuditResult
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunInfo, RunStatus, RunStore
 from orchestrator import AgentFactoryError, run_agent
 
-logger = logging.getLogger("helix.control_plane.orphan_sweep")
+logger = logging.getLogger("expert_work.control_plane.orphan_sweep")
 
-_reclaimed_total = helix_counter(
-    "helix_run_orphan_reclaimed_total",
+_reclaimed_total = expert_work_counter(
+    "expert_work_run_orphan_reclaimed_total",
     "Orphaned runs the failover sweep reclaimed + resumed from checkpoint.",
 )
-_failed_total = helix_counter(
-    "helix_run_orphan_failed_total",
+_failed_total = expert_work_counter(
+    "expert_work_run_orphan_failed_total",
     "Orphaned runs the failover sweep marked errored, by reason.",
     ("reason",),
 )

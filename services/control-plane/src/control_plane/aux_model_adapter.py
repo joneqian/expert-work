@@ -37,17 +37,17 @@ from control_plane.memory_consolidator import (
     ConsolidatorAuxModel,
     ConsolidatorLLMReply,
 )
-from helix_agent.common.credentials import (
+from expert_work.common.credentials import (
     CredentialsResolver,
     CredentialsResolverError,
 )
-from helix_agent.common.uplift_metrics import record_credentials_resolve
-from helix_agent.protocol import ModelSpec, Provider, StructuredOutputSpec
+from expert_work.common.uplift_metrics import record_credentials_resolve
+from expert_work.protocol import ModelSpec, Provider, StructuredOutputSpec
 
 if TYPE_CHECKING:
-    from helix_agent.runtime.secret_store import SecretStore
+    from expert_work.runtime.secret_store import SecretStore
 
-logger = logging.getLogger("helix.control_plane.credentials_aux_adapter")
+logger = logging.getLogger("expert_work.control_plane.credentials_aux_adapter")
 
 
 class LLMRouterAuxModelAdapter:

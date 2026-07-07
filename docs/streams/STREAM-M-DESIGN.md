@@ -1,6 +1,6 @@
 # Stream M — M0→M1 Gate 重构（设计先行）
 
-> 2026-05-20 未交付项审计开出。文档勾选时 ITERATION-PLAN.md § M0→M1 Gate 自己已标 "退出标准待重构"（line 462），按 [[complete-not-minimal]] + [[general-platform-positioning]] 是软推迟弱版口子 —— helix 已经定位通用 agent 平台、不绑用户的 Dify 业务，但 Gate Exit Criteria 仍写着"token 消耗与 Dify 偏差 < ±10%"等绑定 Dify 的判定。本 Stream 把 Gate 从"相对 Dify"框架改为"绝对数值化 + canonical agent 端到端 + eval-set 驱动"。
+> 2026-05-20 未交付项审计开出。文档勾选时 ITERATION-PLAN.md § M0→M1 Gate 自己已标 "退出标准待重构"（line 462），按 [[complete-not-minimal]] + [[general-platform-positioning]] 是软推迟弱版口子 —— Expert Work 已经定位通用 agent 平台、不绑用户的 Dify 业务，但 Gate Exit Criteria 仍写着"token 消耗与 Dify 偏差 < ±10%"等绑定 Dify 的判定。本 Stream 把 Gate 从"相对 Dify"框架改为"绝对数值化 + canonical agent 端到端 + eval-set 驱动"。
 
 ## 1. 范围 & 边界
 
@@ -38,17 +38,17 @@
 | SLO | M0 Gate 阈值 | 数据源 |
 |-----|------------|-------|
 | **可用性**（control-plane 5xx 错误率）| < 0.1% in 30d | A.9 Prometheus + G.2 告警 |
-| **TTFT P95**（首字节延迟）| < 2.0s | K10 `helix_session_ttft_seconds` |
+| **TTFT P95**（首字节延迟）| < 2.0s | K10 `expert_work_session_ttft_seconds` |
 | **End-to-end P95**（run 完成）| < 30s for 95% of canonical agent runs | E.14 SSE 端到端 + run_manager 状态 |
-| **SSE 流断裂率**（mid-stream 中断后未恢复）| < 0.05% in 30d | L3 `helix_llm_stream_stale_total` + stream_bridge 重连数据 |
-| **Sandbox 冷启动 P95** | < 5s（M0 范围）| K10 `helix_sandbox_cold_start_seconds` |
-| **Durable resume P95**（checkpointer 恢复）| < 1.0s | K10 `helix_durable_resume_seconds` |
+| **SSE 流断裂率**（mid-stream 中断后未恢复）| < 0.05% in 30d | L3 `expert_work_llm_stream_stale_total` + stream_bridge 重连数据 |
+| **Sandbox 冷启动 P95** | < 5s（M0 范围）| K10 `expert_work_sandbox_cold_start_seconds` |
+| **Durable resume P95**（checkpointer 恢复）| < 1.0s | K10 `expert_work_durable_resume_seconds` |
 | **Memory recall@5**（中 / 英文混合 seed set）| ≥ 0.7 against real embedder | K12 `tools/eval/memory_recall.py` |
 | **P0 事故数**（30 天观察期）| = 0 | G.2 告警 + 事故 retro 文档 |
 
 ### 2.2 Canonical Agent 端到端验收（per-user 持久 agent 形态）
 
-参见 [memory:target-product-form](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/project_target_product_form.md)。Gate Exit Criteria 锁定 canonical agent 必须端到端跑通：
+参见 [memory:target-product-form](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/project_target_product_form.md)。Gate Exit Criteria 锁定 canonical agent 必须端到端跑通：
 
 - [ ] **多轮对话跨会话保持记忆**：J.3 long-term memory 跨 thread 召回，K6/K7 CRUD/DLQ 闭环
 - [ ] **持久工作区跨 run 留存**：J.15 docker named volume 在 TTL reaper 回收后仍可 restore，文件不丢
@@ -95,16 +95,16 @@ Gate 期满满足全部 § 2.1-§ 2.5 → 进 M1
 - 删除"token 消耗与 Dify 偏差 < ±10%" → § 2.1 已用绝对值替代
 - 删除"p95 延迟 < Dify 的 1.2 倍" → § 2.1 TTFT / E2E P95 已用绝对值替代
 - 删除"回答质量人工评估不劣于 Dify" → § 2.3 eval baseline 替代
-- 删除"每日 Dify vs Helix 对比报表" → § 3.1 dogfood sanity check 可选
+- 删除"每日 Dify vs Expert Work 对比报表" → § 3.1 dogfood sanity check 可选
 
 ---
 
 ## 4. Mini-ADR 汇总
 
 ### M-1｜Gate Exit Criteria 改绝对值，不绑 Dify
-- **背景**：helix 已定位通用 agent 平台（[[general-platform-positioning]]），dogfood 用 canonical agent，与具体 Dify 业务解耦
+- **背景**：Expert Work 已定位通用 agent 平台（[[general-platform-positioning]]），dogfood 用 canonical agent，与具体 Dify 业务解耦
 - **备选**：(a) 保留"相对 Dify"作主 baseline；(b) 双 baseline（Dify 对比 + 绝对值）；(c) 完全切到绝对值 + canonical agent + eval baseline
-- **取舍**：选 (c) —— (a) 把 helix 上限锁死在 Dify；(b) 维护两套 baseline 是浪费
+- **取舍**：选 (c) —— (a) 把 Expert Work 上限锁死在 Dify；(b) 维护两套 baseline 是浪费
 
 ### M-2｜Eval baseline 不是 LLM-as-judge 的"分数"，是逐能力测试集
 - **背景**：J.13b 在线采样 + LLM-as-judge 在 M0 不交付（推 M1 早期），但 Gate 需要 baseline

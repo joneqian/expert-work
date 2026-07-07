@@ -14,8 +14,8 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, Request
 
 from control_plane.platform_secrets import PlatformSecretsService
-from helix_agent.protocol import models_for_provider
-from helix_agent.protocol.provider_catalog import PROVIDER_CATALOG
+from expert_work.protocol import models_for_provider
+from expert_work.protocol.provider_catalog import PROVIDER_CATALOG
 
 
 class ConfiguredProviders(Protocol):

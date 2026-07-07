@@ -1,6 +1,6 @@
-# helix-agent-retention-cleanup-job
+# expert-work-retention-cleanup-job
 
-Helix-Agent **retention cleanup job** — deletes expired rows from
+Expert Work **retention cleanup job** — deletes expired rows from
 `audit_log` / `event_log` / `jwt_blacklist` according to per-tenant
 retention configured in `tenant_config`. Stream D.3.
 
@@ -29,5 +29,5 @@ uv run python -m retention_cleanup_job
 ```
 
 Default mode runs one sweep and exits — meant to be wired into cron
-or a Kubernetes CronJob. Settings via `HELIX_RETENTION_*` env (see
+or a Kubernetes CronJob. Settings via `EXPERT_WORK_RETENTION_*` env (see
 `settings.py`).

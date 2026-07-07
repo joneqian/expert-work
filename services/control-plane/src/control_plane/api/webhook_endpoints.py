@@ -31,17 +31,17 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
-from helix_agent.persistence import WebhookEndpointStore
-from helix_agent.protocol import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.persistence import WebhookEndpointStore
+from expert_work.protocol import (
     AuditAction,
     WebhookEndpointRecord,
     WebhookEventType,
     WebhookPayloadFormat,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store import SecretStore
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.secret_store import SecretStore
 
 #: Allowed subscription event types — must match ``WebhookEventType``.
 _EVENT_TYPES: frozenset[str] = frozenset(

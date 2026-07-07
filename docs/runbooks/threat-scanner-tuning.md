@@ -5,7 +5,7 @@
 > Authoritative source for: pattern-set update process, false-positive
 > triage, SecOps alert response, and per-tenant `block` mode opt-in.
 
-The scanner lives in `packages/helix-common/src/helix_agent/common/threat_patterns.py`.
+The scanner lives in `packages/expert-work-common/src/expert_work/common/threat_patterns.py`.
 It runs in two phases (Mini-ADR U-2):
 
 | Phase | Scope | On match | Where |
@@ -35,26 +35,26 @@ The pattern set is a registry inside the threat module. A pattern is:
 **Before opening a PR**:
 
 1. Add the pattern with a clear `pattern_id` (lowercase snake_case).
-2. Add ≥ 2 positive cases in `packages/helix-common/tests/test_threat_patterns.py`.
+2. Add ≥ 2 positive cases in `packages/expert-work-common/tests/test_threat_patterns.py`.
 3. Add ≥ 2 negative (false-positive guard) cases pinning examples we
    would NOT want to match.
 4. Run the 10-seed false-positive matrix
    (`test_legitimate_prompt_examples_pass_at_all`). If any new pattern
    trips on those legitimate seeds, **narrow the pattern** before
    committing — never widen the seed allowlist.
-5. Run `uv run pytest packages/helix-common/tests/test_threat_patterns.py`.
+5. Run `uv run pytest packages/expert-work-common/tests/test_threat_patterns.py`.
 
 **PR requirements**:
 
 - Label: `security`
 - Required reviewer: someone from the SecOps rotation
-- Merge SLA: 24 hours (per [memory:zero-tech-debt](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_zero_tech_debt.md) —
+- Merge SLA: 24 hours (per [memory:zero-tech-debt](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_zero_tech_debt.md) —
   pattern drift windows are an attack surface; don't let PRs rot)
 
 **Post-merge dogfood**:
 
-- Watch `helix:uplift:threat_block_rate:5m` for 24h after deploy.
-- If `> 0.5 blocks/sec` for 15min: `HelixUpliftThreatBlockRateSpike`
+- Watch `Expert Work:uplift:threat_block_rate:5m` for 24h after deploy.
+- If `> 0.5 blocks/sec` for 15min: `ExpertWorkUpliftThreatBlockRateSpike`
   fires; treat as "did the new pattern catch real attacks, or did we
   add a noisy pattern" — see § 3.
 
@@ -85,9 +85,9 @@ When a tenant reports "my legitimate prompt got blocked":
 
 ## 3 — SecOps alert response
 
-### `HelixUpliftThreatBlockRateSpike`
+### `ExpertWorkUpliftThreatBlockRateSpike`
 
-`helix:uplift:threat_block_rate:5m > 0.5` sustained 15 min.
+`Expert Work:uplift:threat_block_rate:5m > 0.5` sustained 15 min.
 
 1. Group recent blocks by tenant + actor_id:
 
@@ -103,9 +103,9 @@ When a tenant reports "my legitimate prompt got blocked":
    `threat_patterns.py` for the past 24h, identify the new pattern, run
    § 2 triage.
 
-### `HelixUpliftFireTimeWarn`
+### `ExpertWorkUpliftFireTimeWarn`
 
-`helix:uplift:trigger_fire_warn_rate:1h > 0` sustained 15 min.
+`Expert Work:uplift:trigger_fire_warn_rate:1h > 0` sustained 15 min.
 
 This is **always** worth a look — fire-time matches mean either:
 
@@ -213,9 +213,9 @@ always update both atomically via `MemoryStore.write()` /
 signal — SQL injection, an internal actor with DB access, or a
 restored-from-backup row that wasn't re-hashed.
 
-### `HelixUpliftMemoryDriftDetected` alert (P0)
+### `ExpertWorkUpliftMemoryDriftDetected` alert (P0)
 
-Fires when `helix:uplift:memory_drift_rate:1h > 0` sustained 15 min.
+Fires when `Expert Work:uplift:memory_drift_rate:1h > 0` sustained 15 min.
 
 1. **Pull the audit history for drifted rows** (drift detection itself
    does not emit audit yet — see the M1 follow-up below; rely on the
@@ -266,14 +266,14 @@ psql -c "UPDATE memory_item
          WHERE id = ANY('{<id1>,<id2>,...}'::uuid[])"
 ```
 
-### 8.2 `HelixUpliftMemoryRedactSpike` alert (P1)
+### 8.2 `ExpertWorkUpliftMemoryRedactSpike` alert (P1)
 
-Fires when `helix:uplift:memory_redact_rate:1h > 1` sustained 30 min.
+Fires when `Expert Work:uplift:memory_redact_rate:1h > 1` sustained 30 min.
 
 Two possible causes:
 
 - **Pattern-set update is catching pre-existing memories.** Check
-  `git log` on `packages/helix-common/src/helix_agent/common/threat_patterns.py`
+  `git log` on `packages/expert-work-common/src/expert_work/common/threat_patterns.py`
   for the past 24 h. If a new pattern landed: pull a sample of the
   matched memories' audit details (`category` field), validate they're
   genuinely suspicious or genuinely false-positives. If false-positive:
@@ -310,7 +310,7 @@ Sprint #6 added hybrid memory recall (vector + Postgres full-text + RRF
 k=60). Default mode is `hybrid` for every tenant; per-tenant
 `memory_recall_mode` is the opt-out to the pre-Sprint-#6 pure-vector
 path. The signal that something has gone wrong is the K.K12 baseline
-regressing OR the `helix:uplift:memory_retrieval_hit_ratio:1h` for
+regressing OR the `Expert Work:uplift:memory_retrieval_hit_ratio:1h` for
 `mode="hybrid"` dropping below the `mode="vector"` ratio.
 
 ### 9.1 When to suspect hybrid degraded
@@ -318,7 +318,7 @@ regressing OR the `helix:uplift:memory_retrieval_hit_ratio:1h` for
 - K.K12 eval baseline (`tools/eval/test_memory_recall.py`) reports
   `hybrid` recall@5 worse than `vector` recall@5 (test
   `test_hybrid_recall_does_not_regress_against_vector` catches it in CI).
-- `helix:uplift:memory_hybrid_adoption_ratio:1h` is 1.0 (every tenant
+- `Expert Work:uplift:memory_hybrid_adoption_ratio:1h` is 1.0 (every tenant
   on hybrid) but the corresponding hit ratio drops by more than
   a few percent vs the historical vector-only baseline.
 - A tenant reports "my agent's memory feels worse than last week" right
@@ -344,7 +344,7 @@ regressing OR the `helix:uplift:memory_retrieval_hit_ratio:1h` for
 
 2. **Is jieba tokenizing the query?** For CJK queries: print
    `tokenize_for_search(query)` (the helper in
-   `packages/helix-persistence/src/helix_agent/persistence/knowledge/text_search.py`).
+   `packages/expert-work-persistence/src/expert_work/persistence/knowledge/text_search.py`).
    If the tokenizer returns the whole sentence as one token, jieba's
    dictionary is missing or stale.
 
@@ -405,14 +405,14 @@ After the Sprint #8 deploy, the following metrics should move:
 ```promql
 # Should climb toward 1.0 — every active recall picks per_session
 # unless the manifest explicitly opts out.
-helix:uplift:memory_per_session_adoption_ratio:1h
+Expert Work:uplift:memory_per_session_adoption_ratio:1h
 
 # Should be > 0 once any per_session session runs against Anthropic.
-helix:uplift:anthropic_cache_anchor_rate:5m
+Expert Work:uplift:anthropic_cache_anchor_rate:5m
 
 # Pre-Sprint-#8 baseline + the climb after deploy is the headline
 # metric (L.L1 already wired it).
-helix:llm:anthropic_cache_read_ratio:5m
+Expert Work:llm:anthropic_cache_read_ratio:5m
 ```
 
 A flat ``anthropic_cache_anchor_rate`` after deploy is the red flag
@@ -460,7 +460,7 @@ Walk the propagation path top-down:
 
 3. **Did the anchor flag survive into the message?** Add a one-shot
    log in ``_inject_memories`` to confirm
-   ``additional_kwargs["helix_cache_anchor"] = True`` ends up on the
+   ``additional_kwargs["expert_work_cache_anchor"] = True`` ends up on the
    built block.
 
 4. **Did the Anthropic adapter see the flag?** Add a one-shot log in
@@ -487,7 +487,7 @@ Anthropic caps ``cache_control`` markers at **4 per request**.
 Sprint #8 layout: system (1) + tail-2 (2) + memory anchor (≤ 1) ≤ 4.
 A future feature that wants its own anchor will need either:
 
-- to share the existing ``helix_cache_anchor`` marker slot (only one
+- to share the existing ``expert_work_cache_anchor`` marker slot (only one
   feature can use it at a time), OR
 - to land alongside another tail-count reduction (e.g.
   ``_CACHE_CONTROL_TAIL_COUNT`` from 2 to 1) to free a slot.

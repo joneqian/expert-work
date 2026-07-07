@@ -92,7 +92,7 @@ function Sparkline({ series }: { series: number[] }) {
   const h = 28;
   const pad = 2;
   if (series.length === 0)
-    return <span style={{ color: "var(--hx-text-subtle)" }}>—</span>;
+    return <span style={{ color: "var(--ew-text-subtle)" }}>—</span>;
   // Map a clamped 1..5 score to bottom..top (clamp guards the viewport if the
   // rubric range ever changes; ``overall`` is 1-5 today).
   const yFor = (v: number) => {
@@ -119,7 +119,7 @@ function Sparkline({ series }: { series: number[] }) {
       <polyline
         points={points}
         fill="none"
-        stroke="var(--hx-accent-cyan, #22d3ee)"
+        stroke="var(--ew-accent-cyan, #22d3ee)"
         strokeWidth={1.5}
         strokeLinejoin="round"
         strokeLinecap="round"
@@ -129,7 +129,7 @@ function Sparkline({ series }: { series: number[] }) {
           cx={w / 2}
           cy={yFor(last)}
           r={2}
-          fill="var(--hx-accent-cyan, #22d3ee)"
+          fill="var(--ew-accent-cyan, #22d3ee)"
         />
       )}
     </svg>
@@ -331,9 +331,9 @@ export function SettingsQuality() {
           gap: 8,
           marginBottom: 16,
           padding: 12,
-          background: "var(--hx-surface-raised)",
+          background: "var(--ew-surface-raised)",
           borderRadius: 6,
-          border: "1px solid var(--hx-border-subtle)",
+          border: "1px solid var(--ew-border-subtle)",
         }}
         data-testid="quality-filters"
       >
@@ -441,7 +441,7 @@ function SectionTitle({ children }: { children: ReactNode }) {
         display: "block",
         fontSize: 13,
         margin: "8px 0",
-        color: "var(--hx-text-strong)",
+        color: "var(--ew-text-strong)",
       }}
     >
       {children}

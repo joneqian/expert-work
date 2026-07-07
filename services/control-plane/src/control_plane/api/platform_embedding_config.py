@@ -24,14 +24,14 @@ from control_plane.api._authz import _principal
 from control_plane.audit import emit
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 from control_plane.platform_secrets import PlatformSecretsService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.protocol import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.protocol import (
     PROVIDER_CATALOG,
     AuditAction,
     Principal,
     models_for_provider,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
 
 class PlatformEmbeddingConfigWrite(BaseModel):

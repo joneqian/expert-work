@@ -108,7 +108,7 @@
 ## M3 — 文档上传(扩展现有端点)
 
 ### 设计决策(核完优化)
-- **上传不解析**:`POST /v1/sessions/{thread_id}/uploads` 当前图片专用(校验 mime → strip EXIF → 落存 → 返 `helix://image/...`)。扩展为**也接文档 mime**:校验 + 落原件进工作区 + 返 `helix://file/...` ref。**不在 control-plane 解析** —— 把恶意 doc 攻击面挡在控制面外。
+- **上传不解析**:`POST /v1/sessions/{thread_id}/uploads` 当前图片专用(校验 mime → strip EXIF → 落存 → 返 `Expert Work://image/...`)。扩展为**也接文档 mime**:校验 + 落原件进工作区 + 返 `Expert Work://file/...` ref。**不在 control-plane 解析** —— 把恶意 doc 攻击面挡在控制面外。
 - **解析在 agent 侧按需**:agent 用 Tier 1 的 `read_document`(沙箱内)解析。单一解析路径 = 沙箱。
 - 图片路径(strip EXIF + VL)不变。
 

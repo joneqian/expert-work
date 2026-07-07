@@ -29,7 +29,7 @@ from credential_proxy.domain import (
 )
 from credential_proxy.proxy import CredentialProxy
 from credential_proxy.settings import CredentialProxySettings
-from helix_agent.runtime.secret_store import SecretNotFoundError
+from expert_work.runtime.secret_store import SecretNotFoundError
 
 _SECRET_REF = "anthropic/api-key"
 _SECRET_VALUE = "sk-super-secret-value"
@@ -151,7 +151,7 @@ def _request(tenant: UUID, *, secret_ref: str = _SECRET_REF) -> ForwardRequest:
         secret_ref=secret_ref,
         upstream_url="https://api.anthropic.com/v1/messages",
         method="POST",
-        headers={"X-Helix-Secret-Ref": secret_ref, "Content-Type": "application/json"},
+        headers={"X-Expert-Work-Secret-Ref": secret_ref, "Content-Type": "application/json"},
         body=b'{"q": 1}',
     )
 
@@ -194,8 +194,8 @@ async def test_forward_strips_control_headers_before_upstream() -> None:
     await proxy.forward(_request(tenant))
 
     sent: dict[str, str] = forwarder.calls[0]["headers"]  # type: ignore[assignment]
-    # The X-Helix-* routing headers must never reach the real upstream.
-    assert not any(k.lower().startswith("x-helix-") for k in sent)
+    # The X-Expert-Work-* routing headers must never reach the real upstream.
+    assert not any(k.lower().startswith("x-expert-work-") for k in sent)
 
 
 @pytest.mark.asyncio
@@ -330,11 +330,11 @@ async def test_forward_route_returns_upstream_response() -> None:
         resp = await client.post(
             "/forward",
             headers={
-                "X-Helix-Tenant": str(tenant),
-                "X-Helix-Agent": "code-reviewer",
-                "X-Helix-Agent-Version": "1.0.0",
-                "X-Helix-Secret-Ref": _SECRET_REF,
-                "X-Helix-Upstream": "https://api.anthropic.com/v1/messages",
+                "X-Expert-Work-Tenant": str(tenant),
+                "X-Expert-Work-Agent": "code-reviewer",
+                "X-Expert-Work-Agent-Version": "1.0.0",
+                "X-Expert-Work-Secret-Ref": _SECRET_REF,
+                "X-Expert-Work-Upstream": "https://api.anthropic.com/v1/messages",
             },
             data=b"{}",
         )
@@ -351,7 +351,7 @@ async def test_forward_route_missing_header_is_400() -> None:
     async with TestClient(TestServer(app)) as client:
         resp = await client.post(
             "/forward",
-            headers={"X-Helix-Tenant": str(tenant)},  # missing the rest
+            headers={"X-Expert-Work-Tenant": str(tenant)},  # missing the rest
             data=b"{}",
         )
         assert resp.status == 400
@@ -367,11 +367,11 @@ async def test_forward_route_denied_is_403() -> None:
         resp = await client.post(
             "/forward",
             headers={
-                "X-Helix-Tenant": str(tenant),
-                "X-Helix-Agent": "code-reviewer",
-                "X-Helix-Agent-Version": "1.0.0",
-                "X-Helix-Secret-Ref": _SECRET_REF,
-                "X-Helix-Upstream": "https://api.anthropic.com/v1/messages",
+                "X-Expert-Work-Tenant": str(tenant),
+                "X-Expert-Work-Agent": "code-reviewer",
+                "X-Expert-Work-Agent-Version": "1.0.0",
+                "X-Expert-Work-Secret-Ref": _SECRET_REF,
+                "X-Expert-Work-Upstream": "https://api.anthropic.com/v1/messages",
             },
             data=b"{}",
         )

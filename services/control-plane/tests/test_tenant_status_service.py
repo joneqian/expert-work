@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.persistence.tenant_config import InMemoryTenantConfigStore
+from expert_work.persistence.tenant_config import InMemoryTenantConfigStore
 
 
 @pytest.mark.asyncio

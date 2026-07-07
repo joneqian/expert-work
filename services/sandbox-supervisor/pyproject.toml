@@ -1,7 +1,7 @@
 [project]
-name = "helix-agent-sandbox-supervisor"
+name = "expert-work-sandbox-supervisor"
 version = "0.0.0"
-description = "Helix-Agent Sandbox Supervisor — gVisor sandbox lifecycle service (Stream F.1)."
+description = "Expert Work Sandbox Supervisor — gVisor sandbox lifecycle service (Stream F.1)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -9,11 +9,11 @@ authors = [
     { name = "joneqian", email = "qian.qing0926@gmail.com" },
 ]
 dependencies = [
-    "helix-agent-common",
-    "helix-agent-persistence",
-    "helix-agent-protocol",
-    # SandboxRuntimeProvider (F.3) + AuditLogger live in helix-runtime.
-    "helix-agent-runtime",
+    "expert-work-common",
+    "expert-work-persistence",
+    "expert-work-protocol",
+    # SandboxRuntimeProvider (F.3) + AuditLogger live in expert-work-runtime.
+    "expert-work-runtime",
     # Internal HTTP API — FastAPI + Pydantic v2 + uvicorn, as the control-plane.
     "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.32,<1",

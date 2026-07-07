@@ -1,7 +1,7 @@
 {
-  "uid": "helix-overview",
-  "title": "Helix — Overview",
-  "tags": ["helix", "g.7"],
+  "uid": "expert-work-overview",
+  "title": "Expert Work — Overview",
+  "tags": ["expert_work", "g.7"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 2,
@@ -13,7 +13,7 @@
       "id": 1,
       "type": "stat",
       "title": "Control-plane availability (SLI, 5m)",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "fieldConfig": {
         "defaults": {
@@ -35,8 +35,8 @@
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "helix:sli:control_plane_availability:ratio5m"
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "expert_work:sli:control_plane_availability:ratio5m"
         }
       ]
     },
@@ -44,15 +44,15 @@
       "id": 2,
       "type": "timeseries",
       "title": "Request rate (QPS)",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "options": {},
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "sum(rate(helix_control_plane_http_requests_total[5m]))",
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "sum(rate(expert_work_control_plane_http_requests_total[5m]))",
           "legendFormat": "total"
         }
       ]
@@ -61,15 +61,15 @@
       "id": 3,
       "type": "timeseries",
       "title": "5xx error rate",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "options": {},
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "sum(rate(helix_control_plane_http_requests_total{status_code=~\"5..\"}[5m]))",
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "sum(rate(expert_work_control_plane_http_requests_total{status_code=~\"5..\"}[5m]))",
           "legendFormat": "5xx"
         }
       ]
@@ -78,15 +78,15 @@
       "id": 4,
       "type": "timeseries",
       "title": "Request latency P99 (SLI, 5m)",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": {},
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "helix:sli:control_plane_http_latency:p99_5m",
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "expert_work:sli:control_plane_http_latency:p99_5m",
           "legendFormat": "p99"
         }
       ]
@@ -95,15 +95,15 @@
       "id": 5,
       "type": "timeseries",
       "title": "Session TTFT P95 (SLI, 5m)",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": {},
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "helix:sli:session_ttft:p95_5m",
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "expert_work:sli:session_ttft:p95_5m",
           "legendFormat": "p95"
         }
       ]
@@ -112,15 +112,15 @@
       "id": 6,
       "type": "timeseries",
       "title": "Session end-to-end P95 (SLI, 5m)",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": {},
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "helix:sli:session_duration:p95_5m",
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "expert_work:sli:session_duration:p95_5m",
           "legendFormat": "p95"
         }
       ]
@@ -129,15 +129,15 @@
       "id": 7,
       "type": "timeseries",
       "title": "SSE stream-stale rate",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
       "options": {},
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "sum(rate(helix_llm_stream_stale_total[5m])) / clamp_min(sum(rate(helix_llm_tokens_total[5m])), 1)",
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "sum(rate(expert_work_llm_stream_stale_total[5m])) / clamp_min(sum(rate(expert_work_llm_tokens_total[5m])), 1)",
           "legendFormat": "stale ratio"
         }
       ]
@@ -146,15 +146,15 @@
       "id": 8,
       "type": "timeseries",
       "title": "Sandbox cold-start P95 (SLI, 5m)",
-      "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
+      "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": {},
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "prometheus", "uid": "helix-prometheus" },
-          "expr": "helix:sli:sandbox_cold_start:p95_5m",
+          "datasource": { "type": "prometheus", "uid": "expert-work-prometheus" },
+          "expr": "expert_work:sli:sandbox_cold_start:p95_5m",
           "legendFormat": "p95"
         }
       ]

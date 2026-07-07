@@ -30,9 +30,9 @@ import logging
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from helix_agent.common.deadline import CancelToken
+from expert_work.common.deadline import CancelToken
 
-logger = logging.getLogger("helix.control_plane.cancellation")
+logger = logging.getLogger("expert_work.control_plane.cancellation")
 
 #: Cancellation reason published on ``request.state.cancel_reason`` when
 #: the receive wrapper observes ``http.disconnect``.

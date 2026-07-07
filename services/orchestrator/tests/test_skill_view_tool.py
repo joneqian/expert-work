@@ -19,8 +19,8 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.protocol import SkillVersion
-from helix_agent.protocol.skill import (
+from expert_work.protocol import SkillVersion
+from expert_work.protocol.skill import (
     SkillSupportingFile,
     compute_content_hash,
     supporting_files_to_jsonable,
@@ -254,7 +254,7 @@ async def test_short_content_is_not_truncated() -> None:
 @pytest.mark.asyncio
 async def test_archived_skill_returns_blocked_and_records_metric() -> None:
     """An archived skill is cold storage — admin must unarchive."""
-    from helix_agent.protocol import Skill, SkillStatus
+    from expert_work.protocol import Skill, SkillStatus
 
     version = _make_version()
     skill_row = Skill(
@@ -286,7 +286,7 @@ async def test_archived_skill_returns_blocked_and_records_metric() -> None:
 @pytest.mark.asyncio
 async def test_draft_skill_returns_not_found() -> None:
     """Draft skills are invisible to the agent runtime — same as missing."""
-    from helix_agent.protocol import Skill, SkillStatus
+    from expert_work.protocol import Skill, SkillStatus
 
     version = _make_version()
     skill_row = Skill(
@@ -343,7 +343,7 @@ async def test_activity_recorder_not_invoked_on_archived() -> None:
     """Archived skill is a hard stop — don't even bump activity."""
     from uuid import UUID
 
-    from helix_agent.protocol import Skill, SkillStatus
+    from expert_work.protocol import Skill, SkillStatus
 
     version = _make_version()
     skill_row = Skill(

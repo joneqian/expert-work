@@ -126,7 +126,7 @@ test("/settings/members cross-tenant view is read-only + passes axe", async ({
   // Pre-set the tenant scope to the cross-tenant aggregate (string init
   // script avoids needing the DOM lib in the e2e tsconfig).
   await page.addInitScript(
-    "window.sessionStorage.setItem('helix.admin.tenantScope', '*')",
+    "window.sessionStorage.setItem('expert_work.admin.tenantScope', '*')",
   );
   await page.goto("/settings/members");
   await expect(page.getByTestId("members-cross-banner")).toBeVisible();

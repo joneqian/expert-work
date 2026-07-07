@@ -10,8 +10,8 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.common.dlp import DLP_REPLACEMENT
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.common.dlp import DLP_REPLACEMENT
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import GraphRunner, ToolRegistry, build_react_graph
 
 

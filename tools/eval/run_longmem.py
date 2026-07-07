@@ -6,7 +6,7 @@ Usage (from the repo root, ``.venv`` active or via ``uv run``)::
     # P0 retrieval tier — fake embedder smoke over the fixtures
     python tools/eval/run_longmem.py --benchmark fixture_longmemeval --tier retrieval --arms all
 
-    # P0 full baseline — real embedder (HELIX_EVAL_EMBED_* env), full set
+    # P0 full baseline — real embedder (EXPERT_WORK_EVAL_EMBED_* env), full set
     python tools/eval/run_longmem.py --benchmark longmemeval_s --tier retrieval \
         --arms all --embedder real --update-baseline
 
@@ -115,16 +115,16 @@ def _build_embedder(args: argparse.Namespace) -> object:
 def _build_llm(args: argparse.Namespace) -> tuple[Any, Any]:
     """Returns ``(llm_caller, judge)`` for the selected provider."""
     if args.llm_provider == "openai-compat":
-        api_key = os.environ.get("HELIX_EVAL_LLM_API_KEY")
+        api_key = os.environ.get("EXPERT_WORK_EVAL_LLM_API_KEY")
         if not api_key:
-            raise SystemExit("--llm-provider openai-compat needs HELIX_EVAL_LLM_API_KEY")
+            raise SystemExit("--llm-provider openai-compat needs EXPERT_WORK_EVAL_LLM_API_KEY")
         from longmem.openai_client import (
             DASHSCOPE_COMPAT_BASE_URL,
             OpenAICompatCaller,
             OpenAICompatTextJudge,
         )
 
-        base_url = os.environ.get("HELIX_EVAL_LLM_BASE_URL", DASHSCOPE_COMPAT_BASE_URL)
+        base_url = os.environ.get("EXPERT_WORK_EVAL_LLM_BASE_URL", DASHSCOPE_COMPAT_BASE_URL)
         return (
             OpenAICompatCaller(api_key=api_key, model=args.llm_model, base_url=base_url),
             OpenAICompatTextJudge(api_key=api_key, model=args.judge_model, base_url=base_url),
@@ -180,7 +180,7 @@ async def _run_retrieval(args: argparse.Namespace) -> None:
             fingerprint={
                 "embedder": args.embedder
                 if args.embedder == "fake"
-                else os.environ.get("HELIX_EVAL_EMBED_MODEL", "real"),
+                else os.environ.get("EXPERT_WORK_EVAL_EMBED_MODEL", "real"),
                 "dataset_sha256": dataset_sha,
                 "commit": _git_commit(),
                 "limit": args.limit,
@@ -232,7 +232,7 @@ async def _run_endtoend(args: argparse.Namespace) -> None:
             fingerprint={
                 "embedder": args.embedder
                 if args.embedder == "fake"
-                else os.environ.get("HELIX_EVAL_EMBED_MODEL", "real"),
+                else os.environ.get("EXPERT_WORK_EVAL_EMBED_MODEL", "real"),
                 "llm_provider": args.llm_provider,
                 "llm_model": args.llm_model,
                 "judge_model": args.judge_model,
@@ -269,13 +269,13 @@ def main() -> None:
         "--llm-provider",
         default="openai-compat",
         choices=("openai-compat", "anthropic"),
-        help="openai-compat = HELIX_EVAL_LLM_* env (DashScope/Qwen default); "
+        help="openai-compat = EXPERT_WORK_EVAL_LLM_* env (DashScope/Qwen default); "
         "anthropic = ANTHROPIC_API_KEY",
     )
     parser.add_argument(
         "--llm-model",
         default=None,
-        help="defaults: HELIX_EVAL_LLM_MODEL (openai-compat) / repo haiku pin (anthropic)",
+        help="defaults: EXPERT_WORK_EVAL_LLM_MODEL (openai-compat) / repo haiku pin (anthropic)",
     )
     parser.add_argument("--judge-model", default=None, help="defaults to --llm-model")
     parser.add_argument(
@@ -287,9 +287,9 @@ def main() -> None:
 
     if args.llm_model is None:
         if args.llm_provider == "openai-compat":
-            args.llm_model = os.environ.get("HELIX_EVAL_LLM_MODEL")
+            args.llm_model = os.environ.get("EXPERT_WORK_EVAL_LLM_MODEL")
             if not args.llm_model and args.tier == "endtoend":
-                raise SystemExit("set HELIX_EVAL_LLM_MODEL or pass --llm-model")
+                raise SystemExit("set EXPERT_WORK_EVAL_LLM_MODEL or pass --llm-model")
         else:
             from longmem.anthropic_client import DEFAULT_EVAL_MODEL
 

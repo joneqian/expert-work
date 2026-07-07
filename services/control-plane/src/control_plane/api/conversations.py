@@ -11,7 +11,7 @@ This is an **operations** surface, not a per-user one: like ``GET
 user's conversations in the tenant, so an operator can answer "what
 happened in user X's conversation" without owning the thread. Deep
 per-LLM-call traces stay in Langfuse (system_admin only, cross-tenant
-red line — see ADR-0005); this reads helix's own tenant-isolated tables.
+red line — see ADR-0005); this reads expert_work's own tenant-isolated tables.
 
 Two endpoints:
   - ``GET /v1/conversations`` — the list (agent / user / status / q filters),
@@ -38,15 +38,15 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.thread_message import ThreadMessageStore
-from helix_agent.persistence.thread_meta import ThreadMetaStore
-from helix_agent.persistence.token_usage_store import TokenTotals, TokenUsageStore
-from helix_agent.protocol import AuditAction, AuditResult, ThreadStatus
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunStore
-from helix_agent.runtime.runs.schemas import RunInfo, ThreadRunAggregate
-from helix_agent.runtime.runs.store import MAX_LIST_LIMIT, _clamp_limit
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.thread_message import ThreadMessageStore
+from expert_work.persistence.thread_meta import ThreadMetaStore
+from expert_work.persistence.token_usage_store import TokenTotals, TokenUsageStore
+from expert_work.protocol import AuditAction, AuditResult, ThreadStatus
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunStore
+from expert_work.runtime.runs.schemas import RunInfo, ThreadRunAggregate
+from expert_work.runtime.runs.store import MAX_LIST_LIMIT, _clamp_limit
 
 
 def _get_thread_repo(request: Request) -> ThreadMetaStore:

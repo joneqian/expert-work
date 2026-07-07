@@ -37,29 +37,29 @@ from control_plane.agent_disable_status import AgentDisableService
 from control_plane.api.runs import resolve_approval_decision
 from control_plane.runtime import AgentRuntime
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import ApprovalStore, ThreadMetaStore
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.rls import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import ApprovalStore, ThreadMetaStore
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.protocol import ApprovalStatus
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.protocol import ApprovalStatus
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.approval_timeout_sweep")
+logger = logging.getLogger("expert_work.control_plane.approval_timeout_sweep")
 
 #: Default cadence — one sweep per 5 minutes. Approvals time out on a 24h
 #: horizon, so a few minutes of detection lag is immaterial.
 _DEFAULT_INTERVAL_S = 300.0
 
-_timed_out_total = helix_counter(
-    "helix_control_plane_approval_timeouts_total",
+_timed_out_total = expert_work_counter(
+    "expert_work_control_plane_approval_timeouts_total",
     "Pending approvals auto-rejected by the timeout sweep (past timeout_at).",
 )
-_cycle_errors = helix_counter(
-    "helix_control_plane_approval_timeout_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_approval_timeout_cycle_errors_total",
     "Approval timeout sweep cycles that ended in a caught exception.",
 )
 

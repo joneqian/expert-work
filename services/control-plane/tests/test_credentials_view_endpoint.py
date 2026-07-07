@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 
 from control_plane.app import create_app
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt
 
 _TENANT = DEFAULT_DEV_TENANT_ID
@@ -75,7 +75,7 @@ def _agent_spec(*, model_provider: str, long_term: bool = False) -> AgentSpec:
         body["memory"] = {"long_term": {}}
     return AgentSpec.model_validate(
         {
-            "apiVersion": "helix.io/v1",
+            "apiVersion": "expert_work.io/v1",
             "kind": "Agent",
             "metadata": {"name": "a", "version": "1.0.0", "tenant": "t"},
             "spec": body,

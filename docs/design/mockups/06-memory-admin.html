@@ -6,8 +6,8 @@
   双栏:左 per-user memory 树 + 右 memory item 编辑器(JSON/Markdown)
 
   Tokens used:
-    --hx-color-danger-500 (destructive delete)
-    --hx-font-mono (JSON editor)
+    --ew-color-danger-500 (destructive delete)
+    --ew-font-mono (JSON editor)
 
   Antd 5:
     <Tree>             → user tree
@@ -17,98 +17,98 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Memory — helix Admin</title>
+  <title>Memory — Expert Work Admin</title>
   <link rel="stylesheet" href="./shared/tokens.css" />
   <link rel="stylesheet" href="./shared/shell.css" />
   <style>
     .mem-grid {
       display: grid;
       grid-template-columns: 320px 1fr;
-      gap: var(--hx-space-4);
+      gap: var(--ew-space-4);
     }
     .mem-tree {
-      background: var(--hx-surface-base);
-      border: 1px solid var(--hx-border-subtle);
-      border-radius: var(--hx-radius-sm);
-      padding: var(--hx-space-2);
+      background: var(--ew-surface-base);
+      border: 1px solid var(--ew-border-subtle);
+      border-radius: var(--ew-radius-sm);
+      padding: var(--ew-space-2);
       max-height: 70vh;
       overflow-y: auto;
-      font-size: var(--hx-font-size-sm);
+      font-size: var(--ew-font-size-sm);
     }
     .mem-tree__user {
-      padding: var(--hx-space-2) var(--hx-space-3);
-      border-radius: var(--hx-radius-sm);
+      padding: var(--ew-space-2) var(--ew-space-3);
+      border-radius: var(--ew-radius-sm);
       display: flex; align-items: center; gap: 8px;
       cursor: pointer;
     }
-    .mem-tree__user:hover { background: var(--hx-surface-hover); }
-    .mem-tree__user[aria-expanded="true"] { background: var(--hx-surface-selected); color: var(--hx-text-primary); }
+    .mem-tree__user:hover { background: var(--ew-surface-hover); }
+    .mem-tree__user[aria-expanded="true"] { background: var(--ew-surface-selected); color: var(--ew-text-primary); }
     .mem-tree__user-count {
       margin-left: auto;
-      font-size: var(--hx-font-size-xs);
-      color: var(--hx-text-tertiary);
-      background: var(--hx-surface-raised);
+      font-size: var(--ew-font-size-xs);
+      color: var(--ew-text-tertiary);
+      background: var(--ew-surface-raised);
       padding: 1px 6px;
-      border-radius: var(--hx-radius-xs);
+      border-radius: var(--ew-radius-xs);
     }
     .mem-tree__items { list-style: none; padding: 0 0 0 24px; margin: 4px 0; }
     .mem-tree__item {
       padding: 4px 8px;
       cursor: pointer;
-      border-radius: var(--hx-radius-xs);
-      font-size: var(--hx-font-size-xs);
-      color: var(--hx-text-secondary);
+      border-radius: var(--ew-radius-xs);
+      font-size: var(--ew-font-size-xs);
+      color: var(--ew-text-secondary);
       display: flex;
       align-items: center;
       gap: 6px;
     }
-    .mem-tree__item:hover { background: var(--hx-surface-hover); color: var(--hx-text-primary); }
+    .mem-tree__item:hover { background: var(--ew-surface-hover); color: var(--ew-text-primary); }
     .mem-tree__item[aria-selected="true"] {
-      background: var(--hx-surface-selected);
-      color: var(--hx-text-primary);
-      border-left: 2px solid var(--hx-color-brand-500);
+      background: var(--ew-surface-selected);
+      color: var(--ew-text-primary);
+      border-left: 2px solid var(--ew-color-brand-500);
       padding-left: 6px;
     }
-    .mem-tree__item-key { font-family: var(--hx-font-mono); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mem-tree__item-key { font-family: var(--ew-font-mono); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     .mem-editor {
-      background: var(--hx-surface-base);
-      border: 1px solid var(--hx-border-subtle);
-      border-radius: var(--hx-radius-sm);
+      background: var(--ew-surface-base);
+      border: 1px solid var(--ew-border-subtle);
+      border-radius: var(--ew-radius-sm);
       overflow: hidden;
     }
     .mem-editor__head {
-      padding: var(--hx-space-3) var(--hx-space-4);
-      border-bottom: 1px solid var(--hx-border-subtle);
+      padding: var(--ew-space-3) var(--ew-space-4);
+      border-bottom: 1px solid var(--ew-border-subtle);
       display: flex; align-items: center; gap: 12px;
     }
-    .mem-editor__title { font-family: var(--hx-font-mono); font-weight: var(--hx-font-weight-semibold); }
+    .mem-editor__title { font-family: var(--ew-font-mono); font-weight: var(--ew-font-weight-semibold); }
     .mem-editor__actions { margin-left: auto; display: flex; gap: 8px; }
     .mem-editor__meta {
-      padding: var(--hx-space-3) var(--hx-space-4);
-      border-bottom: 1px solid var(--hx-border-subtle);
+      padding: var(--ew-space-3) var(--ew-space-4);
+      border-bottom: 1px solid var(--ew-border-subtle);
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: var(--hx-space-3);
-      font-size: var(--hx-font-size-xs);
+      gap: var(--ew-space-3);
+      font-size: var(--ew-font-size-xs);
     }
-    .mem-editor__meta-label { color: var(--hx-text-tertiary); display: block; margin-bottom: 2px; }
-    .mem-editor__meta-value { color: var(--hx-text-primary); font-family: var(--hx-font-mono); }
+    .mem-editor__meta-label { color: var(--ew-text-tertiary); display: block; margin-bottom: 2px; }
+    .mem-editor__meta-value { color: var(--ew-text-primary); font-family: var(--ew-font-mono); }
 
-    .mem-editor__tabs { display: flex; padding: 0 var(--hx-space-4); border-bottom: 1px solid var(--hx-border-subtle); }
+    .mem-editor__tabs { display: flex; padding: 0 var(--ew-space-4); border-bottom: 1px solid var(--ew-border-subtle); }
     .mem-editor__body {
-      padding: var(--hx-space-4);
-      font-family: var(--hx-font-mono);
-      font-size: var(--hx-font-size-sm);
-      color: var(--hx-text-primary);
-      background: var(--hx-color-neutral-950);
+      padding: var(--ew-space-4);
+      font-family: var(--ew-font-mono);
+      font-size: var(--ew-font-size-sm);
+      color: var(--ew-text-primary);
+      background: var(--ew-color-neutral-950);
       min-height: 320px;
-      line-height: var(--hx-line-height-normal);
+      line-height: var(--ew-line-height-normal);
       white-space: pre-wrap;
     }
-    .mem-editor__body .k { color: var(--hx-color-brand-400); }
-    .mem-editor__body .v-str { color: var(--hx-color-accent-300); }
-    .mem-editor__body .v-num { color: var(--hx-color-warning-300); }
+    .mem-editor__body .k { color: var(--ew-color-brand-400); }
+    .mem-editor__body .v-str { color: var(--ew-color-accent-300); }
+    .mem-editor__body .v-num { color: var(--ew-color-warning-300); }
 
     /* ConfirmDialog overlay (visible by default for mockup) */
     .confirm-overlay { display: none; }
@@ -118,40 +118,40 @@
 </head>
 <body data-state="default">
 
-<div class="hx-app">
-  <aside class="hx-sidebar">
-    <div class="hx-sidebar__brand"><svg class="hx-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--hx-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg><span>helix</span></div>
-    <nav class="hx-sidebar__nav">
-      <a class="hx-sidebar__item" href="./01-agents-list.html">Agents</a>
-      <a class="hx-sidebar__item" href="./04-run-trace.html">Runs</a>
-      <a class="hx-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
-      <a class="hx-sidebar__item" href="./06-memory-admin.html" aria-current="page">Memory</a>
-      <a class="hx-sidebar__item" href="#">Skills</a>
-      <a class="hx-sidebar__item" href="#">Triggers</a>
-      <div class="hx-sidebar__group-label">Settings</div>
-      <a class="hx-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
+<div class="ew-app">
+  <aside class="ew-sidebar">
+    <div class="ew-sidebar__brand"><svg class="ew-sidebar__glyph" viewBox="0 0 24 24" fill="none" stroke="var(--ew-color-brand-500)" stroke-width="2"><path d="M7 3 C 15 7, 15 11, 7 12 C 15 14, 15 17, 7 21"/><path d="M17 3 C 9 7, 9 11, 17 12 C 9 14, 9 17, 17 21"/></svg><span>Expert Work</span></div>
+    <nav class="ew-sidebar__nav">
+      <a class="ew-sidebar__item" href="./01-agents-list.html">Agents</a>
+      <a class="ew-sidebar__item" href="./04-run-trace.html">Runs</a>
+      <a class="ew-sidebar__item" href="./05-curation-review.html">Curation+Eval</a>
+      <a class="ew-sidebar__item" href="./06-memory-admin.html" aria-current="page">Memory</a>
+      <a class="ew-sidebar__item" href="#">Skills</a>
+      <a class="ew-sidebar__item" href="#">Triggers</a>
+      <div class="ew-sidebar__group-label">Settings</div>
+      <a class="ew-sidebar__item" href="./07-settings-api-keys.html">API Keys</a>
     </nav>
   </aside>
 
-  <header class="hx-topbar">
-    <div class="hx-topbar__tenant"><strong>acme-corp</strong></div>
-    <div class="hx-topbar__cmdk"><span>搜索或跳转</span><span class="hx-topbar__spacer"></span><span class="hx-kbd">⌘K</span></div>
-    <div class="hx-topbar__spacer"></div>
+  <header class="ew-topbar">
+    <div class="ew-topbar__tenant"><strong>acme-corp</strong></div>
+    <div class="ew-topbar__cmdk"><span>搜索或跳转</span><span class="ew-topbar__spacer"></span><span class="ew-kbd">⌘K</span></div>
+    <div class="ew-topbar__spacer"></div>
   </header>
 
-  <main class="hx-main">
-    <div class="hx-main__container">
+  <main class="ew-main">
+    <div class="ew-main__container">
 
-      <nav class="hx-breadcrumb"><a href="#">acme-corp</a><span class="hx-breadcrumb__sep">/</span><span class="hx-text-primary">Memory</span></nav>
+      <nav class="ew-breadcrumb"><a href="#">acme-corp</a><span class="ew-breadcrumb__sep">/</span><span class="ew-text-primary">Memory</span></nav>
 
-      <div class="hx-page-header">
+      <div class="ew-page-header">
         <div>
-          <h1 class="hx-heading-2">Memory(治理视角)</h1>
-          <p class="hx-text-secondary" style="margin: 8px 0 0;">跨 user / 跨 agent 的长期记忆条目;支持查询、编辑、删除(soft delete + audit)。末端用户对话面记忆在 business 系统侧管理。</p>
+          <h1 class="ew-heading-2">Memory(治理视角)</h1>
+          <p class="ew-text-secondary" style="margin: 8px 0 0;">跨 user / 跨 agent 的长期记忆条目;支持查询、编辑、删除(soft delete + audit)。末端用户对话面记忆在 business 系统侧管理。</p>
         </div>
         <div style="display: flex; gap: 8px;">
-          <select class="hx-select"><option>所有 agents</option><option>customer-support-bot</option></select>
-          <button class="hx-btn hx-btn--secondary">导出 CSV</button>
+          <select class="ew-select"><option>所有 agents</option><option>customer-support-bot</option></select>
+          <button class="ew-btn ew-btn--secondary">导出 CSV</button>
         </div>
       </div>
 
@@ -159,40 +159,40 @@
 
         <!-- 左:user tree -->
         <div class="mem-tree" role="tree" aria-label="memory by user">
-          <input class="hx-input" placeholder="搜 user_id / 内容" style="width: 100%; margin-bottom: 8px;" />
+          <input class="ew-input" placeholder="搜 user_id / 内容" style="width: 100%; margin-bottom: 8px;" />
 
           <div class="mem-tree__user" aria-expanded="true">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="6 9 12 15 18 9"/></svg>
-            <span class="hx-text-mono">u_88234</span>
-            <span class="hx-text-tertiary" style="font-size: 11px;">(zhang.san@cust)</span>
+            <span class="ew-text-mono">u_88234</span>
+            <span class="ew-text-tertiary" style="font-size: 11px;">(zhang.san@cust)</span>
             <span class="mem-tree__user-count">12</span>
           </div>
           <ul class="mem-tree__items">
-            <li class="mem-tree__item" aria-selected="true"><span class="hx-badge__dot" style="background: var(--hx-color-brand-500);"></span><span class="mem-tree__item-key">profile.preferred_language</span></li>
-            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-brand-500);"></span><span class="mem-tree__item-key">profile.timezone</span></li>
-            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-success-500);"></span><span class="mem-tree__item-key">order.history.summary</span></li>
-            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-success-500);"></span><span class="mem-tree__item-key">support.previous_tickets</span></li>
-            <li class="mem-tree__item"><span class="hx-badge__dot" style="background: var(--hx-color-accent-500);"></span><span class="mem-tree__item-key">vector.recall.top_5</span></li>
+            <li class="mem-tree__item" aria-selected="true"><span class="ew-badge__dot" style="background: var(--ew-color-brand-500);"></span><span class="mem-tree__item-key">profile.preferred_language</span></li>
+            <li class="mem-tree__item"><span class="ew-badge__dot" style="background: var(--ew-color-brand-500);"></span><span class="mem-tree__item-key">profile.timezone</span></li>
+            <li class="mem-tree__item"><span class="ew-badge__dot" style="background: var(--ew-color-success-500);"></span><span class="mem-tree__item-key">order.history.summary</span></li>
+            <li class="mem-tree__item"><span class="ew-badge__dot" style="background: var(--ew-color-success-500);"></span><span class="mem-tree__item-key">support.previous_tickets</span></li>
+            <li class="mem-tree__item"><span class="ew-badge__dot" style="background: var(--ew-color-accent-500);"></span><span class="mem-tree__item-key">vector.recall.top_5</span></li>
           </ul>
 
           <div class="mem-tree__user">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
-            <span class="hx-text-mono">u_92810</span>
-            <span class="hx-text-tertiary" style="font-size: 11px;">(li.si@cust)</span>
+            <span class="ew-text-mono">u_92810</span>
+            <span class="ew-text-tertiary" style="font-size: 11px;">(li.si@cust)</span>
             <span class="mem-tree__user-count">8</span>
           </div>
 
           <div class="mem-tree__user">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
-            <span class="hx-text-mono">u_77103</span>
-            <span class="hx-text-tertiary" style="font-size: 11px;">(wang.wu@cust)</span>
+            <span class="ew-text-mono">u_77103</span>
+            <span class="ew-text-tertiary" style="font-size: 11px;">(wang.wu@cust)</span>
             <span class="mem-tree__user-count">21</span>
           </div>
 
           <div class="mem-tree__user">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="9 18 15 12 9 6"/></svg>
-            <span class="hx-text-mono">u_55409</span>
-            <span class="hx-text-tertiary" style="font-size: 11px;">(zhao.liu@cust)</span>
+            <span class="ew-text-mono">u_55409</span>
+            <span class="ew-text-tertiary" style="font-size: 11px;">(zhao.liu@cust)</span>
             <span class="mem-tree__user-count">5</span>
           </div>
         </div>
@@ -201,11 +201,11 @@
         <div class="mem-editor">
           <div class="mem-editor__head">
             <span class="mem-editor__title">u_88234 / profile.preferred_language</span>
-            <span class="hx-badge hx-badge--info"><span class="hx-badge__dot"></span>vector + summary</span>
+            <span class="ew-badge ew-badge--info"><span class="ew-badge__dot"></span>vector + summary</span>
             <div class="mem-editor__actions">
-              <button class="hx-btn hx-btn--secondary hx-btn--sm">复制 ID</button>
-              <button class="hx-btn hx-btn--secondary hx-btn--sm">保存</button>
-              <button class="hx-btn hx-btn--danger hx-btn--sm" id="delete-btn">删除</button>
+              <button class="ew-btn ew-btn--secondary ew-btn--sm">复制 ID</button>
+              <button class="ew-btn ew-btn--secondary ew-btn--sm">保存</button>
+              <button class="ew-btn ew-btn--danger ew-btn--sm" id="delete-btn">删除</button>
             </div>
           </div>
           <div class="mem-editor__meta">
@@ -215,10 +215,10 @@
             <div><span class="mem-editor__meta-label">TTL 到期</span><span class="mem-editor__meta-value">2026-07-11</span></div>
           </div>
           <div class="mem-editor__tabs">
-            <button class="hx-tab" aria-selected="true">JSON</button>
-            <button class="hx-tab" aria-selected="false">Markdown</button>
-            <button class="hx-tab" aria-selected="false">Vector embedding</button>
-            <button class="hx-tab" aria-selected="false">History (3)</button>
+            <button class="ew-tab" aria-selected="true">JSON</button>
+            <button class="ew-tab" aria-selected="false">Markdown</button>
+            <button class="ew-tab" aria-selected="false">Vector embedding</button>
+            <button class="ew-tab" aria-selected="false">History (3)</button>
           </div>
           <pre class="mem-editor__body">{
   <span class="k">"id"</span>: <span class="v-str">"mem_8a2c3f12d801"</span>,
@@ -246,28 +246,28 @@
 </div>
 
 <!-- Confirm dialog (按"删除"出现) -->
-<div class="hx-modal-backdrop confirm-overlay">
-  <div class="hx-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-    <div class="hx-modal__header">
-      <h3 class="hx-card__title" id="confirm-title" style="color: var(--hx-color-danger-500);">删除 memory 条目</h3>
+<div class="ew-modal-backdrop confirm-overlay">
+  <div class="ew-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="ew-modal__header">
+      <h3 class="ew-card__title" id="confirm-title" style="color: var(--ew-color-danger-500);">删除 memory 条目</h3>
     </div>
-    <div class="hx-modal__body">
+    <div class="ew-modal__body">
       <p>此操作会软删除该 memory 条目(可在 30 天内恢复),并在 audit log 记录。</p>
-      <p class="hx-text-secondary hx-text-sm">受影响:user <code class="hx-text-mono">u_88234</code> · key <code class="hx-text-mono">profile.preferred_language</code></p>
-      <p style="margin-top: 16px;">输入 <strong class="hx-text-mono">profile.preferred_language</strong> 确认删除:</p>
-      <input class="hx-input" style="width: 100%; margin-top: 8px;" placeholder="输入完整 key 名" />
+      <p class="ew-text-secondary ew-text-sm">受影响:user <code class="ew-text-mono">u_88234</code> · key <code class="ew-text-mono">profile.preferred_language</code></p>
+      <p style="margin-top: 16px;">输入 <strong class="ew-text-mono">profile.preferred_language</strong> 确认删除:</p>
+      <input class="ew-input" style="width: 100%; margin-top: 8px;" placeholder="输入完整 key 名" />
     </div>
-    <div class="hx-modal__footer">
-      <button class="hx-btn hx-btn--secondary" id="cancel-btn">取消</button>
-      <button class="hx-btn hx-btn--danger" disabled>删除</button>
+    <div class="ew-modal__footer">
+      <button class="ew-btn ew-btn--secondary" id="cancel-btn">取消</button>
+      <button class="ew-btn ew-btn--danger" disabled>删除</button>
     </div>
   </div>
 </div>
 
-<div class="hx-theme-toggle">
+<div class="ew-theme-toggle">
   <button data-theme="dark" aria-pressed="true">Dark</button>
   <button data-theme="light" aria-pressed="false">Light</button>
-  <span style="width: 1px; background: var(--hx-border-subtle); margin: 0 4px;"></span>
+  <span style="width: 1px; background: var(--ew-border-subtle); margin: 0 4px;"></span>
   <button data-state="default" aria-pressed="true">默认</button>
   <button data-state="confirm" aria-pressed="false">确认弹窗</button>
 </div>

@@ -49,7 +49,7 @@ function withStubs(Story: ComponentType) {
           actor_id: revision === 1 ? "bob" : "alice",
           created_at: "2026-06-11T00:00:00Z",
           spec: {
-            apiVersion: "helix.io/v1",
+            apiVersion: "expert_work.io/v1",
             kind: "Agent",
             spec: {
               system_prompt: {

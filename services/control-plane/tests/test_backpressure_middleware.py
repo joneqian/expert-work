@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from starlette.responses import JSONResponse
 
 from control_plane.middleware import BackpressureMiddleware, InFlightMiddleware
-from helix_agent.common.lifecycle import Lifecycle
+from expert_work.common.lifecycle import Lifecycle
 
 
 def _app(*, max_in_flight: int, lc: Lifecycle) -> FastAPI:

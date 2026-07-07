@@ -8,7 +8,7 @@ factory front-loads the ReAct loop with a ``planner`` node:
     START → planner → agent ⇄ tools → END
 
 The planner makes one LLM call that decomposes the user's task into an
-ordered :class:`~helix_agent.protocol.Plan`, stores it on
+ordered :class:`~expert_work.protocol.Plan`, stores it on
 ``AgentState.plan``, and the agent node renders it into its system
 context every step (see :func:`render_plan` /
 ``orchestrator.graph_builder.builder``).
@@ -33,7 +33,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import Plan, PlanStep
+from expert_work.protocol import Plan, PlanStep
 from orchestrator.graph_builder._config import cancellation_token
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState

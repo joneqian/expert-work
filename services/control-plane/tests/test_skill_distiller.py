@@ -16,8 +16,8 @@ from control_plane.skill_distiller import (
     render_trajectory,
     tools_used,
 )
-from helix_agent.protocol import StructuredOutputSpec
-from helix_agent.runtime.middleware import LLMOutputValidationError
+from expert_work.protocol import StructuredOutputSpec
+from expert_work.runtime.middleware import LLMOutputValidationError
 
 _TENANT = UUID("33333333-3333-3333-3333-333333333333")
 

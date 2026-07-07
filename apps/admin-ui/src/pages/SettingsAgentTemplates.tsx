@@ -184,7 +184,7 @@ export function SettingsAgentTemplates() {
     <div style={{ textAlign: "center", padding: "32px 0" }} data-testid="at-empty">
       <Bot size={32} strokeWidth={1.25} style={{ opacity: 0.35, marginBottom: 8 }} />
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{t("agent_templates.empty_title")}</div>
-      <div style={{ color: "var(--hx-text-tertiary, #666)", maxWidth: 360, margin: "0 auto 16px" }}>
+      <div style={{ color: "var(--ew-text-tertiary, #666)", maxWidth: 360, margin: "0 auto 16px" }}>
         {t("agent_templates.empty_hint")}
       </div>
       <Button type="primary" onClick={() => setCreateOpen(true)}>

@@ -58,7 +58,7 @@ import {
 } from "../form_model";
 
 const seed = {
-  apiVersion: "helix.io/v1",
+  apiVersion: "expert_work.io/v1",
   kind: "Agent",
   metadata: { name: "my-agent", version: "1.0.0", tenant: "my-tenant" },
   spec: {
@@ -100,7 +100,7 @@ describe("form_model writers preserve siblings", () => {
   it("setName updates name and preserves apiVersion + sandbox", () => {
     const next = setName(seed, "x");
     expect(next.metadata?.name).toBe("x");
-    expect(next.apiVersion).toBe("helix.io/v1");
+    expect(next.apiVersion).toBe("expert_work.io/v1");
     expect(next.spec?.sandbox).toEqual(seed.spec.sandbox);
   });
 

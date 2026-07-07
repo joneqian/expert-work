@@ -39,18 +39,18 @@ from uuid import UUID
 
 from control_plane.audit import emit as audit_emit
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.uplift_metrics import (
     record_curator_transition,
     set_curator_pinned_skills,
 )
-from helix_agent.protocol import AuditAction, AuditResult, TenantConfigRecord
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.protocol import AuditAction, AuditResult, TenantConfigRecord
+from expert_work.runtime.audit.logger import AuditLogger
 
 if TYPE_CHECKING:
-    from helix_agent.persistence import SkillStore
+    from expert_work.persistence import SkillStore
 
-logger = logging.getLogger("helix.control_plane.skill_curator")
+logger = logging.getLogger("expert_work.control_plane.skill_curator")
 
 # Default cadence — one sweep per day. Configurable via the constructor
 # so tests can drive a fast loop and platform operators can dial it.

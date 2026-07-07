@@ -273,17 +273,17 @@ export function SettingsTenantConfig() {
               fontSize: 13,
             }}
           >
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.display_name")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.display_name")}</dt>
             <dd style={{ margin: 0 }}>{record.display_name}</dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.plan")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.plan")}</dt>
             <dd style={{ margin: 0 }}><Tag color="blue">{record.plan}</Tag></dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.audit_retention_days")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.audit_retention_days")}</dt>
             <dd style={{ margin: 0 }}>{record.audit_retention_days}</dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.event_log_retention_days")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.event_log_retention_days")}</dt>
             <dd style={{ margin: 0 }}>{record.event_log_retention_days}</dd>
             {/* Stream C.6 — per-tenant rate limit. Read-only here; edit via the
                 JSON editor: "rate_limit_override": {"requests_per_minute": N}. */}
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.rate_limit_override")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.rate_limit_override")}</dt>
             <dd style={{ margin: 0 }} data-testid="tenant-config-rate-limit-override">
               {record.rate_limit_override && Object.keys(record.rate_limit_override).length > 0
                 ? formatRateLimitOverride(record.rate_limit_override)
@@ -294,18 +294,18 @@ export function SettingsTenantConfig() {
                 editor as the rest of tenant_config (we deliberately
                 don't split out per-field forms — the JSON model keeps
                 the surface flat). */}
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.skill_stale_days")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.skill_stale_days")}</dt>
             <dd style={{ margin: 0 }} data-testid="tenant-config-skill-stale-days">
               {record.skill_stale_days}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.skill_archive_days")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.skill_archive_days")}</dt>
             <dd style={{ margin: 0 }} data-testid="tenant-config-skill-archive-days">
               {record.skill_archive_days}
             </dd>
             {/* SE-16 (SE-A41) — skill-evolution rollout gate. Read-only
                 display; flip it through the same JSON editor (rollout is
                 deliberate, not a casual toggle). */}
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>
               {t("settings_ops.skill_evolution_enabled")}
             </dt>
             <dd style={{ margin: 0 }} data-testid="tenant-config-skill-evolution-enabled">
@@ -314,13 +314,13 @@ export function SettingsTenantConfig() {
                 : t("settings_ops.skill_evolution_off")}
             </dd>
             {/* SE-16 (SE-A45) — implicit-candidate judge sample rate. */}
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>
               {t("settings_ops.skill_evolution_judge_sample_pct")}
             </dt>
             <dd style={{ margin: 0 }} data-testid="tenant-config-skill-evolution-judge-sample-pct">
               {record.skill_evolution_judge_sample_pct}%
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.mcp_allowlist")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.mcp_allowlist")}</dt>
             <dd style={{ margin: 0 }}>
               {record.mcp_allowlist.length === 0 ? (
                 <Text type="secondary">—</Text>
@@ -332,7 +332,7 @@ export function SettingsTenantConfig() {
                 </Space>
               )}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.http_allowlist")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.http_allowlist")}</dt>
             <dd style={{ margin: 0 }}>
               {record.http_tool_allowlist.length === 0 ? (
                 <Text type="secondary">—</Text>
@@ -344,7 +344,7 @@ export function SettingsTenantConfig() {
                 </Space>
               )}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("settings_ops.updated")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("settings_ops.updated")}</dt>
             <dd style={{ margin: 0 }}>{new Date(record.updated_at).toLocaleString()} ({record.updated_by})</dd>
           </dl>
         </Card>
@@ -363,7 +363,7 @@ export function SettingsTenantConfig() {
             description={t("settings_ops.config_etag_hint_body")}
             style={{ marginBottom: 12 }}
           />
-          <div style={{ border: "1px solid var(--hx-border-default)", borderRadius: 4 }}>
+          <div style={{ border: "1px solid var(--ew-border-default)", borderRadius: 4 }}>
             <Editor
               height="480px"
               defaultLanguage="json"

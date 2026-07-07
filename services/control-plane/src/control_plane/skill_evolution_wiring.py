@@ -61,12 +61,12 @@ from control_plane.skill_evolution_worker import (
     TenantGate,
 )
 from control_plane.skill_promotion_gate import PromotionGate
-from helix_agent.persistence import CurationCandidateStore, SkillStore
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.curation import EvalDatasetStore
-from helix_agent.persistence.feedback_store import FeedbackStore
-from helix_agent.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
-from helix_agent.protocol import (
+from expert_work.persistence import CurationCandidateStore, SkillStore
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.curation import EvalDatasetStore
+from expert_work.persistence.feedback_store import FeedbackStore
+from expert_work.persistence.token_usage_store import TokenUsageRecord, TokenUsageStore
+from expert_work.protocol import (
     AgentSpecStatus,
     AuditAction,
     AuditEntry,
@@ -75,8 +75,8 @@ from helix_agent.protocol import (
     EvalDatasetRecord,
     StructuredOutputSpec,
 )
-from helix_agent.protocol.skill import Skill, SkillStatus, SkillVersion
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.protocol.skill import Skill, SkillStatus, SkillVersion
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator.evolution.graph_runner import GraphReplayTaskRunner
 
 # Orchestrator imports — heavy (pull agent_factory); safe here because this
@@ -87,7 +87,7 @@ from orchestrator.trajectory import TrajectoryReader
 
 __all__ = ["build_evolution_worker"]
 
-logger = logging.getLogger("helix.control_plane.skill_evolution_wiring")
+logger = logging.getLogger("expert_work.control_plane.skill_evolution_wiring")
 
 # How many trajectories / golden cases to pull into one replay set.
 _MAX_SUCCESS_EVIDENCE = 4

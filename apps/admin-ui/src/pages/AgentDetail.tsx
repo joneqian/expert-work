@@ -138,7 +138,7 @@ function AgentKillSwitch({
       title={t("agent_detail.disable_confirm_title")}
       description={
         <div style={{ maxWidth: 280 }}>
-          <div style={{ marginBottom: 8, color: "var(--hx-text-tertiary)", fontSize: 12 }}>
+          <div style={{ marginBottom: 8, color: "var(--ew-text-tertiary)", fontSize: 12 }}>
             {t("agent_detail.disable_confirm_body")}
           </div>
           <Input.TextArea
@@ -357,27 +357,27 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
               fontSize: 13,
             }}
           >
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_id")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("agent_detail.field_id")}</dt>
             <dd style={{ margin: 0 }} className="mono">
               {r.id}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_tenant")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("agent_detail.field_tenant")}</dt>
             <dd style={{ margin: 0 }} className="mono">
               {r.tenant_id}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_spec_sha")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("agent_detail.field_spec_sha")}</dt>
             <dd style={{ margin: 0 }} className="mono">
               {r.spec_sha256}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_status")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("agent_detail.field_status")}</dt>
             <dd style={{ margin: 0 }}>
               {t(`agents_page.status_${r.status}`, { defaultValue: r.status })}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_created")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("agent_detail.field_created")}</dt>
             <dd style={{ margin: 0 }}>
               {new Date(r.created_at).toLocaleString()} · {r.created_by}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("agent_detail.field_updated")}</dt>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("agent_detail.field_updated")}</dt>
             <dd style={{ margin: 0 }}>{new Date(r.updated_at).toLocaleString()}</dd>
           </dl>
         </Card>
@@ -394,7 +394,7 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
               fontSize: 13,
             }}
           >
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>
               {t("agent_detail.egress_policy")}
             </dt>
             <dd style={{ margin: 0 }}>
@@ -408,14 +408,14 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
                 </Tag>
               )}
             </dd>
-            <dt style={{ color: "var(--hx-text-tertiary)" }}>
+            <dt style={{ color: "var(--ew-text-tertiary)" }}>
               {t("agent_detail.egress_allowlist")}
             </dt>
             <dd style={{ margin: 0 }}>
               {egress.egress === "none" ? (
-                <span style={{ color: "var(--hx-text-tertiary)" }}>—</span>
+                <span style={{ color: "var(--ew-text-tertiary)" }}>—</span>
               ) : egress.allowlist.length === 0 ? (
-                <span style={{ color: "var(--hx-text-tertiary)" }}>
+                <span style={{ color: "var(--ew-text-tertiary)" }}>
                   {t("agent_detail.egress_allow_all")}
                 </span>
               ) : (

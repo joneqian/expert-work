@@ -31,7 +31,7 @@ import { getMe, ALL_TENANTS, type MeResponse } from "../api/me";
 import { registerEvents, signOut as oidcSignOut } from "./oidc";
 
 export interface AuthIdentity {
-  /** ``"jwt"`` for OIDC tokens, ``"api_key"`` for helix bearer keys,
+  /** ``"jwt"`` for OIDC tokens, ``"api_key"`` for expert_work bearer keys,
    *  ``"mtls"`` for internal service-to-service callers. */
   kind: "jwt" | "api_key" | "mtls";
   /** Subject id (UUID for users / service accounts; opaque for keys
@@ -103,7 +103,7 @@ function isSubjectType(value: string | null): value is AuthIdentity["subjectType
 
 /** Optimistic identity from local decode — replaced by :func:`getMe`. */
 function optimisticIdentityFromToken(token: string): AuthIdentity {
-  if (token.startsWith("aforge_pat_") || token.startsWith("helix_")) {
+  if (token.startsWith("aforge_pat_") || token.startsWith("expert_work_")) {
     return {
       kind: "api_key",
       subject: token.slice(0, 16),
@@ -156,7 +156,7 @@ function optimisticIdentityFromToken(token: string): AuthIdentity {
 /** Identity built from the server's ``/v1/me`` response — the
  *  authoritative version. */
 function identityFromMe(me: MeResponse, token: string): AuthIdentity {
-  const isApiKey = token.startsWith("aforge_pat_") || token.startsWith("helix_");
+  const isApiKey = token.startsWith("aforge_pat_") || token.startsWith("expert_work_");
   const kind: AuthIdentity["kind"] = isApiKey
     ? "api_key"
     : me.auth_method === "mtls"

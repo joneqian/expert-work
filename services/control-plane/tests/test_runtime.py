@@ -22,21 +22,21 @@ from control_plane.runtime import (
     resolve_object_store_config,
     resolve_reranker,
 )
-from helix_agent.common.credentials import CredentialsResolver, CredentialsResolverError
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.persistence.skill import InMemorySkillStore
-from helix_agent.protocol import AgentSpec, SkillStatus, TenantConfigRecord, TenantPlan
-from helix_agent.runtime.runs import RunManager
-from helix_agent.runtime.secret_store import LocalDevSecretStore, parse_secret_ref
-from helix_agent.runtime.storage import InMemoryObjectStore
-from helix_agent.runtime.stream_bridge import InMemoryStreamBridge
-from helix_agent.testing import InMemorySecretStore
+from expert_work.common.credentials import CredentialsResolver, CredentialsResolverError
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.persistence.skill import InMemorySkillStore
+from expert_work.protocol import AgentSpec, SkillStatus, TenantConfigRecord, TenantPlan
+from expert_work.runtime.runs import RunManager
+from expert_work.runtime.secret_store import LocalDevSecretStore, parse_secret_ref
+from expert_work.runtime.storage import InMemoryObjectStore
+from expert_work.runtime.stream_bridge import InMemoryStreamBridge
+from expert_work.testing import InMemorySecretStore
 from orchestrator.llm import FakeEmbedder
 from orchestrator.multimodal import ObjectStoreImageResolver
 from orchestrator.tools import KnowledgeRetriever
 
 _MINIMAL_MANIFEST: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "x", "version": "1", "tenant": "test-tenant"},
     "spec": {
@@ -155,7 +155,7 @@ async def test_resolve_object_store_config_memory_returns_none() -> None:
         backend="memory",
         endpoint_url=None,
         region="us-east-1",
-        bucket="helix-agent",
+        bucket="expert-work",
         access_key_ref=None,
         secret_key_ref=None,
         secret_store=InMemorySecretStore(),
@@ -170,7 +170,7 @@ async def test_resolve_object_store_config_s3_without_endpoint_raises() -> None:
             backend="s3-compatible",
             endpoint_url=None,
             region="us-east-1",
-            bucket="helix-agent",
+            bucket="expert-work",
             access_key_ref=None,
             secret_key_ref=None,
             secret_store=InMemorySecretStore(),
@@ -180,16 +180,16 @@ async def test_resolve_object_store_config_s3_without_endpoint_raises() -> None:
 @pytest.mark.asyncio
 async def test_resolve_object_store_config_s3_resolves_keys() -> None:
     store = InMemorySecretStore()
-    await store.put(parse_secret_ref("secret://helix-agent/dev/s3-access"), "AKID")
-    await store.put(parse_secret_ref("secret://helix-agent/dev/s3-secret"), "SKEY")
+    await store.put(parse_secret_ref("secret://expert-work/dev/s3-access"), "AKID")
+    await store.put(parse_secret_ref("secret://expert-work/dev/s3-secret"), "SKEY")
 
     config = await resolve_object_store_config(
         backend="s3-compatible",
         endpoint_url="http://minio:9000",
         region="us-east-1",
-        bucket="helix-agent",
-        access_key_ref="secret://helix-agent/dev/s3-access",
-        secret_key_ref="secret://helix-agent/dev/s3-secret",
+        bucket="expert-work",
+        access_key_ref="secret://expert-work/dev/s3-access",
+        secret_key_ref="secret://expert-work/dev/s3-secret",
         secret_store=store,
     )
     assert config is not None

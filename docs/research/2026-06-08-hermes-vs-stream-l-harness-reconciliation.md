@@ -7,9 +7,9 @@
 The external `agentic-harness-engineering` repo ships a reusable skill
 whose `profiles/hermes.yaml` describes the Hermes harness as seven
 weighted components. Stream L ("Hermes-derived sprint") already lifted
-Hermes's single-turn mature capabilities into helix. This table
+Hermes's single-turn mature capabilities into expert_work. This table
 reconciles **hermes.yaml's component profile + Stream L's eight items**
-against helix's actual implementation, to (a) prove Stream L closed the
+against Expert Work's actual implementation, to (a) prove Stream L closed the
 Hermes gap and (b) isolate what is genuinely missing.
 
 Source read: `agentic-harness-engineering/skills/agentic-harness-engineering/profiles/hermes.yaml`
@@ -17,7 +17,7 @@ and `references/HARNESS.md`.
 
 ## Reconciliation
 
-| Hermes capability (profile component / Stream L item) | helix implementation | Status |
+| Hermes capability (profile component / Stream L item) | Expert Work implementation | Status |
 |---|---|---|
 | System Rules / Tool Desc / Tool Impl / Middleware / Skills / Sub-Agents / Long-Term Memory (7 components) | `AgentSpec` fields + assembly (declarative vs file tree) | ✅ all present (Skills exceeds: self-evolution) |
 | L1 Prompt caching | `ModelSpec.cache_enabled` + `_apply_cache_control` | ✅ |
@@ -38,7 +38,7 @@ and `references/HARNESS.md`.
 
 The Hermes 7-component profile + Stream L's 8 single-turn capabilities +
 the HARNESS.md Change-Manifest loop are **all already implemented or
-exceeded** in helix. The HARNESS.md Change Manifest (predicted-impact
+exceeded** in expert_work. The HARNESS.md Change Manifest (predicted-impact
 assertions, falsified next iteration) is covered by Stream SE in a
 *stronger* form — `skill_eval_result` + the SE-4 replay gate carry
 statistical-pairing evidence rather than self-asserted predictions, so

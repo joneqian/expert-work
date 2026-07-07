@@ -2,7 +2,7 @@
 
 The P1 tier originally shipped Anthropic-only; real baseline runs use
 the user's Qwen stack end to end (extraction, reading, judge), which is
-both cheaper and closer to how their tenants actually deploy helix.
+both cheaper and closer to how their tenants actually deploy expert_work.
 Same two adapter shapes as ``anthropic_client``:
 
 - :class:`OpenAICompatCaller` — the ``LLMCaller`` shape.
@@ -13,7 +13,7 @@ already a stated CM-K6 caveat for the Anthropic judge; a Qwen judge is
 the same situation and lands in the baseline fingerprint the same way.
 
 Endpoint defaults to DashScope's compatible-mode URL; override with
-``HELIX_EVAL_LLM_BASE_URL`` for any other OpenAI-compatible gateway.
+``EXPERT_WORK_EVAL_LLM_BASE_URL`` for any other OpenAI-compatible gateway.
 ``temperature=0`` always (these gateways accept it).
 """
 

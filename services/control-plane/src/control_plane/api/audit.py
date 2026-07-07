@@ -38,20 +38,20 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import (
+from expert_work.common.observability import (
     current_trace_id_hex,
-    helix_counter,
-    helix_histogram,
+    expert_work_counter,
+    expert_work_histogram,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     AuditEntry,
     AuditQuery,
     AuditResult,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.audit")
+logger = logging.getLogger("expert_work.control_plane.audit")
 
 # Hard cap on ``limit`` — same shape as Mini-ADR H-7 (D). The AuditQuery
 # model itself enforces ``limit <= 1000`` so the cap is informational
@@ -59,13 +59,13 @@ logger = logging.getLogger("helix.control_plane.audit")
 _MAX_AUDIT_LIMIT = 500
 _DEFAULT_AUDIT_LIMIT = 100
 
-_audit_query_total = helix_counter(
-    "helix_control_plane_audit_query_total",
+_audit_query_total = expert_work_counter(
+    "expert_work_control_plane_audit_query_total",
     "GET /v1/audit invocations partitioned by tenant scope + result.",
     label_names=("tenant_scope", "result"),
 )
-_audit_query_seconds = helix_histogram(
-    "helix_control_plane_audit_query_seconds",
+_audit_query_seconds = expert_work_histogram(
+    "expert_work_control_plane_audit_query_seconds",
     "GET /v1/audit wall time, including AuditLogger self-audit emit.",
     label_names=("tenant_scope",),
 )

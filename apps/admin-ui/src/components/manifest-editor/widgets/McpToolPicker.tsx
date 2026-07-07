@@ -236,7 +236,7 @@ export function McpToolPicker({
       <div
         data-testid="af-mcp-empty"
         style={{
-          color: "var(--hx-text-tertiary, #666)",
+          color: "var(--ew-text-tertiary, #666)",
           fontSize: 13,
           padding: "4px 0",
         }}

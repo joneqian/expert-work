@@ -12,8 +12,8 @@ from uuid import uuid4
 import pytest
 
 from control_plane.auth.tenant_roles import resolve_tenant_roles
-from helix_agent.persistence.auth import InMemoryRoleBindingStore
-from helix_agent.protocol import Principal, Role
+from expert_work.persistence.auth import InMemoryRoleBindingStore
+from expert_work.protocol import Principal, Role
 
 
 def _user(*, subject_id: str | None = None, tenant_id=None, roles=()) -> Principal:

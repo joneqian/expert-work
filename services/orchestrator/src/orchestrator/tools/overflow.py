@@ -19,15 +19,15 @@ import os
 import re
 from uuid import UUID
 
-#: ``HELIX_TOOL_OUTPUT_BUDGET`` falsey values (mirrors ``run_retry._FALSEY``).
-_BUDGET_ENV = "HELIX_TOOL_OUTPUT_BUDGET"
+#: ``EXPERT_WORK_TOOL_OUTPUT_BUDGET`` falsey values (mirrors ``run_retry._FALSEY``).
+_BUDGET_ENV = "EXPERT_WORK_TOOL_OUTPUT_BUDGET"
 _FALSEY = frozenset({"0", "false", "no", "off"})
 
 
 def tool_output_budget_enabled() -> bool:
     """Platform kill switch for the tool-output-budget feature.
 
-    ``HELIX_TOOL_OUTPUT_BUDGET`` — default ON; an explicit falsey value
+    ``EXPERT_WORK_TOOL_OUTPUT_BUDGET`` — default ON; an explicit falsey value
     (``0`` / ``false`` / ``no`` / ``off``) reverts the whole feature in one
     place: the generalized size externalization (#859), the persist floor
     (item 2), and the CM-12 prune gate (the factory reads this too). The
@@ -46,7 +46,7 @@ def tool_output_budget_enabled() -> bool:
 #: backup / 90-day archive) — no bespoke cleanup (Mini-ADR CM-F6).
 OVERFLOW_DIR = ".tool_results"
 
-#: Opening tag of the helix-owned reference footer appended after an
+#: Opening tag of the expert-work-owned reference footer appended after an
 #: externalized result (see :func:`render_overflow_footer`). The footer is
 #: appended last and stays trusted (outside the spotlight fence). Exported as
 #: a named constant so the CM-12 prune gate

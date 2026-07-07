@@ -45,7 +45,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Sider
         width={220}
         style={{
-          borderRight: "1px solid var(--hx-border-subtle)",
+          borderRight: "1px solid var(--ew-border-subtle)",
         }}
       >
         <Sidebar />
@@ -53,7 +53,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <Layout>
         <Header
           style={{
-            borderBottom: "1px solid var(--hx-border-subtle)",
+            borderBottom: "1px solid var(--ew-border-subtle)",
             display: "flex",
             alignItems: "center",
             gap: 16,

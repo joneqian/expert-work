@@ -26,10 +26,10 @@ export function Topbar() {
           alignItems: "center",
           gap: 8,
           padding: "4px 12px",
-          border: "1px solid var(--hx-border-subtle)",
+          border: "1px solid var(--ew-border-subtle)",
           borderRadius: 6,
-          background: "var(--hx-surface-raised)",
-          color: "var(--hx-text-tertiary)",
+          background: "var(--ew-surface-raised)",
+          color: "var(--ew-text-tertiary)",
           fontSize: 13,
           minWidth: 240,
           maxWidth: 320,
@@ -39,7 +39,7 @@ export function Topbar() {
         <Search size={14} strokeWidth={1.5} />
         <span>{t("common.search_or_jump")}</span>
         <span style={{ flex: 1 }} />
-        <span className="hx-kbd">⌘K</span>
+        <span className="ew-kbd">⌘K</span>
       </button>
 
       <div style={{ flex: 1 }} />
@@ -63,14 +63,14 @@ export function Topbar() {
               key: "identity",
               disabled: true,
               label: (
-                <span style={{ fontSize: 12, color: "var(--hx-text-tertiary)" }}>
+                <span style={{ fontSize: 12, color: "var(--ew-text-tertiary)" }}>
                   {identity?.displayName ?? t("common.anonymous")}
                   {identity?.isSystemAdmin && (
                     <span
                       style={{
                         marginLeft: 8,
                         padding: "1px 6px",
-                        background: "var(--hx-accent-violet, #a855f7)",
+                        background: "var(--ew-accent-violet, #a855f7)",
                         color: "white",
                         borderRadius: 4,
                         fontSize: 10,

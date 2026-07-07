@@ -11,7 +11,7 @@
 
 - **生产 / staging**：阿里云 OSS（S3 兼容协议）
 - **本地 dev**：MinIO（S3 兼容协议，docker-compose 单容器）
-- **应用层抽象**：所有代码通过 `helix_agent.runtime.storage` 接口调用，**底层用 S3 兼容 SDK**（如 `aiobotocore`），不直接依赖阿里云专有 SDK；切换后端零代码改动
+- **应用层抽象**：所有代码通过 `expert_work.runtime.storage` 接口调用，**底层用 S3 兼容 SDK**（如 `aiobotocore`），不直接依赖阿里云专有 SDK；切换后端零代码改动
 
 ---
 
@@ -48,15 +48,15 @@
 | 环境 | 实现 |
 |------|------|
 | **dev**（本地 docker-compose） | MinIO 单容器（S3 协议端口 9000）|
-| **staging** | 阿里云 OSS bucket `helix-agent-staging`，cn-hangzhou region |
-| **prod** | 阿里云 OSS bucket `helix-agent-prod`，cn-hangzhou region，SSE-KMS 加密 |
+| **staging** | 阿里云 OSS bucket `expert-work-staging`，cn-hangzhou region |
+| **prod** | 阿里云 OSS bucket `expert-work-prod`，cn-hangzhou region，SSE-KMS 加密 |
 
 ### 2.2 抽象层
 
 所有应用代码通过统一接口操作对象存储：
 
 ```python
-# packages/helix-runtime/src/helix_agent/runtime/storage/base.py
+# packages/expert-work-runtime/src/expert_work/runtime/storage/base.py
 
 from typing import Protocol
 
@@ -74,9 +74,9 @@ class ObjectStore(Protocol):
 
 | Bucket 用途 | Bucket 名 | Object Lock |
 |-------------|----------|-------------|
-| 应用数据（uploads / snapshots / artifacts） | `helix-agent-{env}` | 关闭，依靠 lifecycle |
-| audit_log WORM 备份 | `helix-agent-{env}-audit-worm` | **启用**，governance 模式，7 年 |
-| event_log 冷归档 | `helix-agent-{env}-archive` | 关闭，但 lifecycle 归档到低频访问 |
+| 应用数据（uploads / snapshots / artifacts） | `expert-work-{env}` | 关闭，依靠 lifecycle |
+| audit_log WORM 备份 | `expert-work-{env}-audit-worm` | **启用**，governance 模式，7 年 |
+| event_log 冷归档 | `expert-work-{env}-archive` | 关闭，但 lifecycle 归档到低频访问 |
 
 Key 命名约定（多租户隔离）：
 
@@ -131,7 +131,7 @@ archive/event_log/{year}/{month}/{tenant_id}/{batch_id}.parquet
 
 ## 5. 落地引用
 
-- **Stream A.5** 对象存储抽象接口 + S3 兼容实现：`packages/helix-runtime/src/helix_agent/runtime/storage/`
+- **Stream A.5** 对象存储抽象接口 + S3 兼容实现：`packages/expert-work-runtime/src/expert_work/runtime/storage/`
 - **Stream A.6** Postgres 备份用 OSS 而非阿里云 RDS 自带：复用同抽象
 - **Stream D.1** audit WORM bucket 配置：staging/prod yaml 中声明 worm bucket 名 + Object Lock 保留期
 - **Stream G'.8** event_log 冷归档 pipeline：`tools/` 下独立 job，定期跑

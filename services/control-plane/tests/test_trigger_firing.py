@@ -25,16 +25,16 @@ from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import build_default_audit_logger
 from control_plane.tenant_status import TenantStatusService
 from control_plane.trigger_firing import fire_trigger
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryAgentDisableStore,
     InMemoryApprovalStore,
     InMemoryTenantConfigStore,
     InMemoryThreadMetaStore,
     InMemoryTriggerStore,
 )
-from helix_agent.persistence.agent_spec import InMemoryAgentSpecStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import (
+from expert_work.persistence.agent_spec import InMemoryAgentSpecStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import (
     AgentSpec,
     AuditQuery,
     TenantConfigPatch,
@@ -46,7 +46,7 @@ _TENANT = uuid4()
 _NOW = datetime(2026, 5, 27, 12, 0, tzinfo=UTC)
 
 _MANIFEST: dict[str, Any] = {
-    "apiVersion": "helix.io/v1",
+    "apiVersion": "expert_work.io/v1",
     "kind": "Agent",
     "metadata": {"name": "reporter", "version": "1.0.0", "tenant": "platform-eng"},
     "spec": {

@@ -13,7 +13,7 @@
 
 Anthropic Agent Skill 官方结构:一个 kebab-case 文件夹,内含必需的 `SKILL.md`(YAML frontmatter: `name`≤64 / `description`≤1024 + markdown 正文)+ 可选 `scripts/`(可执行)/ `references/`(按需文档)/ `assets/`(模板)。核心机制是**渐进披露**三级(metadata → 正文 → 按需加载的 bundle 文件)。复杂能力靠 bundle 的脚本/参考文件撑起,简单 `SKILL.md` 撑不起。
 
-helix `SkillVersion` 已对上:`prompt_fragment`≈正文、`tool_names`≈allowed-tools、`supporting_files`≈scripts/references/assets、`lazy_load`≈渐进披露、`.skill` ZIP≈文件夹打包。
+Expert Work `SkillVersion` 已对上:`prompt_fragment`≈正文、`tool_names`≈allowed-tools、`supporting_files`≈scripts/references/assets、`lazy_load`≈渐进披露、`.skill` ZIP≈文件夹打包。
 
 ### 1.2 现状缺陷(评估结论,带证据)
 

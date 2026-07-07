@@ -383,7 +383,7 @@ export function TriggersList() {
               <Input
                 data-testid="trigger-cron-expr-input"
                 placeholder="0 9 * * *"
-                style={{ fontFamily: "var(--hx-font-mono)" }}
+                style={{ fontFamily: "var(--ew-font-mono)" }}
               />
             </Form.Item>
           )}
@@ -427,10 +427,10 @@ export function TriggersList() {
               display: "flex",
               gap: 8,
               alignItems: "center",
-              background: "var(--hx-surface-raised)",
+              background: "var(--ew-surface-raised)",
               padding: 12,
               borderRadius: 4,
-              border: "1px solid var(--hx-border-strong)",
+              border: "1px solid var(--ew-border-strong)",
               marginTop: 4,
             }}
           >

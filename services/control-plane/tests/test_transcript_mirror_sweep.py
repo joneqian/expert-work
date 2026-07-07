@@ -17,7 +17,7 @@ import pytest
 
 from control_plane.transcript import read_turns
 from control_plane.transcript_mirror_sweep import TranscriptMirrorSweep
-from helix_agent.persistence import InMemoryThreadMessageStore
+from expert_work.persistence import InMemoryThreadMessageStore
 
 
 def _msg(mtype: str, content: Any) -> SimpleNamespace:
@@ -93,7 +93,7 @@ async def test_read_turns_filters_to_text_turns_with_stable_seq() -> None:
 async def test_read_turns_keeps_hidden_faithful_by_default() -> None:
     """RT-2 PR-4 (RT-ADR-9), Option A — the faithful default
     (``include_hidden=True``) keeps orchestrator scaffolding tagged
-    ``helix_hide_from_ui`` (the CM-1 ``<recovery-advisory>``) in the record,
+    ``expert_work_hide_from_ui`` (the CM-1 ``<recovery-advisory>``) in the record,
     so the search/audit mirror and the cross-tenant audit drill-in see the
     complete transcript. This is the deer-flow pattern: the durable record
     stays faithful; visibility is a serve-boundary concern, not extraction."""
@@ -101,7 +101,7 @@ async def test_read_turns_keeps_hidden_faithful_by_default() -> None:
     hidden = SimpleNamespace(
         type="human",
         content="<recovery-advisory>internal guidance</recovery-advisory>",
-        additional_kwargs={"helix_hide_from_ui": True},
+        additional_kwargs={"expert_work_hide_from_ui": True},
     )
     cp = _FakeCheckpointer(
         {
@@ -129,7 +129,7 @@ async def test_read_turns_filters_hidden_only_for_ui_bubble_view() -> None:
     hidden = SimpleNamespace(
         type="human",
         content="<recovery-advisory>internal guidance</recovery-advisory>",
-        additional_kwargs={"helix_hide_from_ui": True},
+        additional_kwargs={"expert_work_hide_from_ui": True},
     )
     cp = _FakeCheckpointer(
         {

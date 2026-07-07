@@ -44,13 +44,13 @@ import zipfile
 from dataclasses import dataclass, field
 from typing import Final, Literal, NoReturn
 
-from helix_agent.common.threat_patterns import ThreatFinding, scan_for_threats
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.threat_patterns import ThreatFinding, scan_for_threats
+from expert_work.common.uplift_metrics import (
     record_skill_blocked,
     record_skill_zip_reject,
     record_threat_pattern_hits,
 )
-from helix_agent.protocol.skill import (
+from expert_work.protocol.skill import (
     DEFAULT_SKILL_LAZY_LOAD,
     SkillAuthoredBy,
     SkillPackageLayoutError,
@@ -59,13 +59,13 @@ from helix_agent.protocol.skill import (
     is_high_risk_skill_version,
     supporting_files_to_jsonable,
 )
-from helix_agent.protocol.skill_package import (
+from expert_work.protocol.skill_package import (
     ParsedSkillMd,
     parse_skill_md,
     serialize_skill_md,
 )
 
-logger = logging.getLogger("helix.control_plane.skill_zip")
+logger = logging.getLogger("expert_work.control_plane.skill_zip")
 
 
 # ─── Limits (Mini-ADR U-16 / U-18) ───────────────────────────────────────
@@ -74,7 +74,7 @@ logger = logging.getLogger("helix.control_plane.skill_zip")
 # targets — Anthropic's own ``anthropics/skills`` repo. Their ``pptx`` skill
 # bundles 59 files nested 5 dirs deep (``scripts/office/schemas/.../*.xsd``)
 # totalling ~1.1 MiB, with a tree of ``.xsd`` XML schemas. The original limits
-# (depth 3, 64 entries, no ``.xsd``) were tuned for tiny hand-authored helix
+# (depth 3, 64 entries, no ``.xsd``) were tuned for tiny hand-authored expert_work
 # skills and rejected Anthropic's reference skill on three axes at once. These
 # values give real skills headroom while the per-file / total-size caps remain
 # the actual resource bound.
@@ -305,7 +305,7 @@ def build_skill_zip(
     only** (Mini-ADR U-19); export always upgrades to canonical.
 
     Claude Code's SKILL.md standard requires ``description`` to be a
-    non-empty string. Existing helix skill rows may legitimately carry an
+    non-empty string. Existing expert_work skill rows may legitimately carry an
     empty description (the M0 API made it optional); in that case we
     write a synthetic placeholder so the exported ZIP round-trips
     through :func:`parse_skill_zip`.
@@ -315,12 +315,12 @@ def build_skill_zip(
         name=name,
         description=effective_description,
         license=license,
-        helix_version=version,
-        helix_category=category,
-        helix_required_models=required_models,
-        helix_tool_names=tool_names,
-        helix_authored_by=authored_by,
-        helix_lazy=lazy,
+        expert_work_version=version,
+        expert_work_category=category,
+        expert_work_required_models=required_models,
+        expert_work_tool_names=tool_names,
+        expert_work_authored_by=authored_by,
+        expert_work_lazy=lazy,
         body=prompt_fragment,
     )
     skill_md = serialize_skill_md(parsed)
@@ -490,20 +490,20 @@ def _parse_new_format(entries: _ArchiveEntries) -> SkillZipPayload:
     jsonable = supporting_files_to_jsonable(supporting_files)
     content_hash = compute_content_hash(parsed.body, jsonable)
     high_risk = is_high_risk_skill_version(
-        tool_names=parsed.helix_tool_names,
+        tool_names=parsed.expert_work_tool_names,
         supporting_file_paths=supporting_files.keys(),
     )
 
     return SkillZipPayload(
         name=parsed.name,
         description=parsed.description,
-        category=parsed.helix_category,
-        required_models=parsed.helix_required_models,
+        category=parsed.expert_work_category,
+        required_models=parsed.expert_work_required_models,
         prompt_fragment=parsed.body,
-        tool_names=parsed.helix_tool_names,
+        tool_names=parsed.expert_work_tool_names,
         license=parsed.license,
-        authored_by=parsed.helix_authored_by,
-        lazy_load=parsed.helix_lazy,
+        authored_by=parsed.expert_work_authored_by,
+        lazy_load=parsed.expert_work_lazy,
         supporting_files=supporting_files,
         content_hash=content_hash,
         high_risk=high_risk,

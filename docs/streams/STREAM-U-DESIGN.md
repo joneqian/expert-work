@@ -9,7 +9,7 @@
 1. **无 `GET /v1/tenants`**:列不出所有租户(后端无端点、前端无列表页、SDK 无 `listTenants`)。
 2. **切不进具体租户**:`TenantSwitcher` 对 system_admin 只给「主租户 / 全部租户(聚合)」;聚合模式下配置/配额/凭证页显示"请选具体租户"横幅、**不让编辑**。于是刚建的租户在 UI 上**管不了**(`TenantSwitcher.tsx` 注释自承认 "PR 2b wires a server-side tenant list … 'Switch to specific tenant'" 当初计划、没做)。
 3. **无停用能力**:`tenant_config` 无 status 字段;无 deactivate/suspend 逻辑;被停用租户无 enforcement 卡口。
-4. **设密码要去 Keycloak 控制台**:dev 无 SMTP → 邀请邮件发不出 → 首管/成员密码只能去 Keycloak admin console 手设。helix 后台不能设(Keycloak client 无 `reset_password`,members API 无设密码动作)。
+4. **设密码要去 Keycloak 控制台**:dev 无 SMTP → 邀请邮件发不出 → 首管/成员密码只能去 Keycloak admin console 手设。Expert Work 后台不能设(Keycloak client 无 `reset_password`,members API 无设密码动作)。
 
 **用户拍板(2026-06-02)**:① 列表 + 切进去都做;② 改 display_name/plan 复用现有租户配置页(不重复);③ **停用要做**(删除 = follow-up);④ 后台设密码做成"**管理员输临时密码**(temporary=true,首登强改)"。
 
@@ -55,7 +55,7 @@
 6. **bypass RLS 写审计**:`deactivate`/列表走 bypass_rls,审计行也在 bypass 内(同 `POST /v1/tenants` 既有做法,Mini-ADR P-1)。
 7. **切换器空态**:租户多时分页;0 个其它租户时只显示主租户(不报错)。
 
-## 5. Verification(本 Stream 完成 = system_admin 全程在 helix 后台管租户)
+## 5. Verification(本 Stream 完成 = system_admin 全程在 Expert Work 后台管租户)
 
 1. U-B:`GET /v1/tenants` system_admin 200 列出含「乐毅大公司」;非 admin 403;分页正确。
 2. U-C:切换器选「乐毅大公司」→ 配置/配额/凭证/成员页对该租户生效(非聚合横幅)。

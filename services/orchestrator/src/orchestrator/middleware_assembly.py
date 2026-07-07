@@ -22,10 +22,10 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage
 
-from helix_agent.persistence.token_usage_store import TokenUsageStore
-from helix_agent.protocol import AgentSpec
-from helix_agent.runtime.llm.cache import LLMResponseCache
-from helix_agent.runtime.middleware import (
+from expert_work.persistence.token_usage_store import TokenUsageStore
+from expert_work.protocol import AgentSpec
+from expert_work.runtime.llm.cache import LLMResponseCache
+from expert_work.runtime.middleware import (
     BreakerRegistry,
     ContextPressureMiddleware,
     DynamicContextMiddleware,
@@ -41,7 +41,7 @@ from helix_agent.runtime.middleware import (
     RedactText,
     TokenUsageMiddleware,
 )
-from helix_agent.runtime.tokens import TokenEstimator, flatten_message
+from expert_work.runtime.tokens import TokenEstimator, flatten_message
 
 
 @dataclass(frozen=True)

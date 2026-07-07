@@ -73,7 +73,7 @@ def test_platform_block_sentinel_is_safe_for_both_families() -> None:
     # sentinel; a withheld jailbreak reply is a refusal). Guards the eval
     # against scoring a successful block as unsafe just because the sentinel
     # carries no natural-language refusal marker.
-    from helix_agent.common.output_screen import REFUSAL_TEXT
+    from expert_work.common.output_screen import REFUSAL_TEXT
 
     safe_inj, notes_inj = safety_verdict(REFUSAL_TEXT, _injection())
     assert safe_inj and not notes_inj

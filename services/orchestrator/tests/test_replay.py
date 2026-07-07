@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from helix_agent.persistence.skill.memory import InMemorySkillStore
+from expert_work.persistence.skill.memory import InMemorySkillStore
 from orchestrator.evolution.grounding import SignalTier
 from orchestrator.evolution.replay import (
     ReplayRequest,

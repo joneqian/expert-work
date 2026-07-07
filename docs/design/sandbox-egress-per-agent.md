@@ -13,13 +13,13 @@
 `network=none` forbids. That was inaccurate on two counts:
 
 1. The sandbox is **not** `network=none`. It runs on the `internal: true`
-   `helix-sandbox-egress` network (`infra/docker-compose.yml:757`) with a
+   `expert-work-sandbox-egress` network (`infra/docker-compose.yml:757`) with a
    `credential-proxy` at a static IP. Sandbox code reaches the outside **only**
    through that proxy's explicit `POST /forward` API (`credential-proxy/app.py:114`),
    which injects a configured secret and forwards to a single upstream
    (`proxy.py:65,146`). It is a **credential injector**, keyed by `secret_ref`,
    not a general egress path — and skill code would have to be rewritten to its
-   header convention (`X-Helix-Upstream` / `X-Helix-Secret-Ref`) to use it.
+   header convention (`X-Expert-Work-Upstream` / `X-Expert-Work-Secret-Ref`) to use it.
 2. The manifest **already declares** a per-agent network config —
    `SandboxSpec.network` = `NetworkSpec{egress: none|direct|proxy, allowlist:
    [host]}` (`agent_spec.py:213-229,268`) — but it is **dead**: read nowhere
@@ -56,7 +56,7 @@ For `requests.get("https://api.example.com")` inside `exec_python` to just work:
   also closes the DNS-rebind gap `url_validation.py` deliberately punts to the
   infra layer, ADR-0009).
 - **Identity** the proxy can trust for audit + optional allowlist. The current
-  `/forward` trusts sandbox-**self-reported** `X-Helix-*` headers
+  `/forward` trusts sandbox-**self-reported** `X-Expert-Work-*` headers
   (`app.py:142`) — fine behind the internal net, but not trustworthy enough to
   attribute or scope per-agent. We inject identity from **outside** the sandbox.
 
@@ -69,7 +69,7 @@ Add a forward proxy that speaks standard `HTTP_PROXY`/`HTTPS_PROXY` semantics:
 - **`CONNECT host:port`** for HTTPS (tunnel; proxy never decrypts) and plain
   HTTP forwarding for `http://`.
 - On each connection: resolve host → check every resolved IP with the existing
-  `validate_remote_url` block logic (`helix-common/url_validation.py:33-41`:
+  `validate_remote_url` block logic (`expert-work-common/url_validation.py:33-41`:
   private, loopback, link-local incl. `169.254.169.254`, reserved, multicast,
   unspecified, plus non-canonical IP literals) → **connect to the pinned IP** (no
   re-resolution → no rebind).
@@ -179,12 +179,12 @@ returns `407` → egress silently fails. CI could never catch this — only a re
 
 Fix, transparent to skill code (capability must not weaken):
 
-1. The supervisor also injects `HELIX_EGRESS_PROXY_AUTH = base64("<token>:")`
+1. The supervisor also injects `EXPERT_WORK_EGRESS_PROXY_AUTH = base64("<token>:")`
    (the exact bytes a `Basic` proxy-auth header would carry) alongside
    `HTTPS_PROXY`.
 2. A `sitecustomize.py` baked into the sandbox images monkeypatches
    `http.client.HTTPConnection.set_tunnel` to add `Proxy-Authorization: Basic
-   <HELIX_EGRESS_PROXY_AUTH>` to every `CONNECT` when that env is present. Python
+   <EXPERT_WORK_EGRESS_PROXY_AUTH>` to every `CONNECT` when that env is present. Python
    auto-imports `sitecustomize` from the **global** site-packages at interpreter
    startup — and crucially this still fires under the runner's `python -I -c`
    (isolated mode is `-E -s`, *not* `-S`, so `site` still runs; `-E` ignores only

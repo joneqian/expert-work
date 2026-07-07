@@ -31,19 +31,19 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from helix_agent.common.search.mmr import mmr_select
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.persistence import InMemoryMemoryStore
-from helix_agent.persistence.memory.base import MemoryStore
-from helix_agent.protocol import MemoryItem
+from expert_work.common.search.mmr import mmr_select
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.persistence import InMemoryMemoryStore
+from expert_work.persistence.memory.base import MemoryStore
+from expert_work.protocol import MemoryItem
 from longmem.adapter import MemoryDoc, RetrievalInstance
 from longmem.metrics import mrr_at_k, ndcg_at_k, ordered_unique, recall_at_k
 
 logger = logging.getLogger(__name__)
 
 #: Fixed identities — the benchmark replay is single-tenant by nature.
-EVAL_TENANT_ID = uuid5(NAMESPACE_URL, "helix-eval://longmem/tenant")
-EVAL_USER_ID = uuid5(NAMESPACE_URL, "helix-eval://longmem/user")
+EVAL_TENANT_ID = uuid5(NAMESPACE_URL, "expert-work-eval://longmem/tenant")
+EVAL_USER_ID = uuid5(NAMESPACE_URL, "expert-work-eval://longmem/user")
 
 #: Embedding batch size — keeps real-embedder requests reasonably sized.
 _EMBED_BATCH = 64
@@ -110,7 +110,7 @@ class RetrievalReport:
 
 
 def _doc_uuid(doc_id: str) -> UUID:
-    return uuid5(NAMESPACE_URL, f"helix-eval://longmem/doc/{doc_id}")
+    return uuid5(NAMESPACE_URL, f"expert-work-eval://longmem/doc/{doc_id}")
 
 
 async def _build_store(

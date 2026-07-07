@@ -1,0 +1,59 @@
+"""Abstract ``AuditLogStore`` repository.
+
+Design: [subsystems/17-audit-log § 4.1](../../../../docs/architecture/subsystems/17-audit-log.md).
+
+Implementations:
+
+- :class:`expert_work.persistence.audit_log.memory.InMemoryAuditLogStore`
+- :class:`expert_work.persistence.audit_log.sql.SqlAuditLogStore`
+
+This is the data-layer Repository. The higher-level ``AuditLogger`` service
+(Stream A.4 batch 2) wraps a store with PII redaction, fallback queue, and
+self-audit on read.
+"""
+
+from __future__ import annotations
+
+import abc
+from uuid import UUID
+
+from expert_work.protocol import AuditEntry, AuditPage, AuditQuery
+
+
+class AuditLogStore(abc.ABC):
+    """Append-only audit log repository.
+
+    The store **does not** enforce who may write or query; that is the job
+    of :class:`AuditLogger` (Stream A.4 batch 2). The store assumes its
+    caller has already done tenant + role checks.
+
+    Append-only: there is no ``update`` / ``delete`` method. M1 layers a DB
+    role with ``REVOKE UPDATE, DELETE`` on top to enforce this at the
+    database level (per subsystems/17 § 9 M1).
+    """
+
+    @abc.abstractmethod
+    async def append(self, entry: AuditEntry) -> AuditEntry:
+        """Insert one row and return the entry with ``id`` + ``occurred_at`` set.
+
+        Pre-conditions:
+        - Caller has already redacted PII / secrets from ``entry.details``.
+        - ``entry.action`` is in :class:`AuditAction` (Pydantic guarantees this).
+        """
+
+    @abc.abstractmethod
+    async def get_by_id(self, audit_id: int, *, tenant_id: UUID) -> AuditEntry | None:
+        """Read one row by id, filtered to ``tenant_id``.
+
+        Returns ``None`` when the row does not exist or belongs to a
+        different tenant — never reveals cross-tenant existence.
+        """
+
+    @abc.abstractmethod
+    async def query(self, query: AuditQuery) -> AuditPage:
+        """Paginated query, newest-first.
+
+        ``query.tenant_id='*'`` returns rows across every tenant; the
+        caller (``AuditLogger.query``) is responsible for verifying the
+        principal holds the admin role *before* invoking this code path.
+        """

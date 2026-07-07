@@ -33,7 +33,7 @@ from uuid import UUID
 import yaml
 
 from control_plane.api._artifact_mime import infer_content_type
-from helix_agent.persistence import InMemoryArtifactStore
+from expert_work.persistence import InMemoryArtifactStore
 
 _EVAL_DIR = _Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in _sys.path:

@@ -18,7 +18,7 @@ from control_plane.app import create_app
 from control_plane.auth import JWTVerifier
 from control_plane.keycloak import FakeKeycloakAdminClient
 from control_plane.settings import Settings
-from helix_agent.common.lifecycle import Lifecycle
+from expert_work.common.lifecycle import Lifecycle
 from tests.auth_fixtures import make_test_jwt
 
 
@@ -315,7 +315,7 @@ async def test_cross_tenant_list_requires_system_admin(
 async def test_cross_tenant_list_aggregates_for_system_admin(
     admin_app: tuple[AsyncClient, UUID, object, FakeKeycloakAdminClient],
 ) -> None:
-    from helix_agent.protocol import Role
+    from expert_work.protocol import Role
 
     client, tenant_a, app, _kc = admin_app
     tenant_b = uuid4()

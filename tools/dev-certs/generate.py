@@ -37,7 +37,7 @@ from cryptography.x509.oid import NameOID
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_OUTPUT_DIR = _REPO_ROOT / "infra" / "dev-certs"
 
-_ORG = "Helix-Agent (dev)"
+_ORG = "Expert Work (dev)"
 _CA_VALIDITY_DAYS = 1825
 _LEAF_VALIDITY_DAYS = 365
 
@@ -60,7 +60,7 @@ def _build_ca() -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
     subject = issuer = x509.Name(
         [
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, _ORG),
-            x509.NameAttribute(NameOID.COMMON_NAME, "helix-dev-ca"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "expert-work-dev-ca"),
         ]
     )
     cert = (
@@ -176,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     print("  ca.crt / ca.key")
 
     server_key, server_cert = _build_leaf(
-        common_name="control-plane.helix.local",
+        common_name="control-plane.expert_work.local",
         ca_key=ca_key,
         ca_cert=ca_cert,
         is_server=True,

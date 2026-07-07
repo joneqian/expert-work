@@ -23,8 +23,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 
-from helix_agent.persistence import QualityDriftAlertStore, QualityScoreStore
-from helix_agent.protocol import QualityDriftAlertRecord, QualityScoreRecord
+from expert_work.persistence import QualityDriftAlertStore, QualityScoreStore
+from expert_work.protocol import QualityDriftAlertRecord, QualityScoreRecord
 
 
 def _score_dict(record: QualityScoreRecord) -> dict[str, Any]:

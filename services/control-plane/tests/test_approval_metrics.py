@@ -8,8 +8,8 @@ from uuid import uuid4
 import pytest
 
 from control_plane.approval_metrics import ApprovalGaugeWorker, _approvals_pending
-from helix_agent.persistence import InMemoryApprovalStore
-from helix_agent.protocol import ApprovalRecord, ApprovalStatus
+from expert_work.persistence import InMemoryApprovalStore
+from expert_work.protocol import ApprovalRecord, ApprovalStatus
 
 
 def _record(status: ApprovalStatus = ApprovalStatus.PENDING) -> ApprovalRecord:

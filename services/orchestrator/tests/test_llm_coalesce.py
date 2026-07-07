@@ -52,7 +52,7 @@ def test_mid_conversation_systems_merge_into_first() -> None:
 def test_merged_kwargs_union_first_wins() -> None:
     """The leading system message is authoritative — a later (injected)
     system message contributes new keys only and can never override the
-    head's (e.g. a ``helix_cache_anchor`` already set there)."""
+    head's (e.g. a ``expert_work_cache_anchor`` already set there)."""
     sys_a = SystemMessage(content="a", additional_kwargs={"keep": 1, "clash": "first"})
     sys_b = SystemMessage(content="b", additional_kwargs={"clash": "second", "extra": True})
 

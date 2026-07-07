@@ -33,13 +33,13 @@ from langchain_core.messages import HumanMessage
 from pydantic import ValidationError
 
 from control_plane.curation_worker import _classify, _tenant_from_key
-from helix_agent.persistence import InMemoryCurationCandidateStore, InMemoryEvalDatasetStore
-from helix_agent.protocol import (
+from expert_work.persistence import InMemoryCurationCandidateStore, InMemoryEvalDatasetStore
+from expert_work.protocol import (
     CandidateStatus,
     CurationCandidateRecord,
     EvalDatasetRecord,
 )
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.runtime.storage import InMemoryObjectStore
 from orchestrator.trajectory import TrajectoryReader, TrajectoryRecord, TrajectoryRecorder
 
 _EVAL_DIR = Path(__file__).resolve().parent

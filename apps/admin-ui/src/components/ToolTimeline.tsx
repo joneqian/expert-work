@@ -69,7 +69,7 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
       key: "args",
       label: t("tool_timeline.args_label"),
       children: (
-        <pre style={{ margin: 0, fontSize: 11, fontFamily: "var(--hx-font-mono)" }}>
+        <pre style={{ margin: 0, fontSize: 11, fontFamily: "var(--ew-font-mono)" }}>
           {pretty(entry.args)}
         </pre>
       ),
@@ -84,7 +84,7 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
           style={{
             margin: 0,
             fontSize: 11,
-            fontFamily: "var(--hx-font-mono)",
+            fontFamily: "var(--ew-font-mono)",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             maxHeight: 240,
@@ -101,10 +101,10 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
     <div
       data-testid="tool-call-card"
       style={{
-        border: "1px solid var(--hx-border-subtle)",
+        border: "1px solid var(--ew-border-subtle)",
         borderRadius: 6,
         padding: 10,
-        background: "var(--hx-surface-raised)",
+        background: "var(--ew-surface-raised)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

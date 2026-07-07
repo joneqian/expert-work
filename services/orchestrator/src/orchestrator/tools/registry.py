@@ -21,8 +21,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
-from helix_agent.protocol import Plan
-from helix_agent.runtime.cancellation import CancellationToken
+from expert_work.protocol import Plan
+from expert_work.runtime.cancellation import CancellationToken
 from orchestrator.tools._budget import WorkerSpawnBudget
 from orchestrator.tools.ranking import build_document, rank_tools
 
@@ -106,8 +106,8 @@ class ToolSpec:
     #: Stream J.7a (Mini-ADR J-23) — name of the skill that contributed
     #: this tool to the agent's registry, or ``None`` when the tool is
     #: declared directly in the manifest's ``tools:`` block. The dispatch
-    #: path uses this to label the ``helix_skill_call_total`` /
-    #: ``helix_skill_call_errors_total`` metrics so per-skill usage can
+    #: path uses this to label the ``expert_work_skill_call_total`` /
+    #: ``expert_work_skill_call_errors_total`` metrics so per-skill usage can
     #: be observed (Mini-ADR J-23 § 15.4 telemetry 双 counter).
     from_skill: str | None = None
     #: Stream TE-1 — explicit side-effect classification. ``None`` means

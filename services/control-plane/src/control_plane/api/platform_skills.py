@@ -56,31 +56,31 @@ from control_plane.api.skills import (
 )
 from control_plane.audit import emit as audit_emit
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.common.uplift_metrics import (
     record_skill_blocked,
     record_threat_pattern_hits,
 )
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DuplicateSkillError,
     SkillNotFoundError,
     SkillStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     AuditResult,
     Principal,
     SkillStatus,
     TenantPlan,
 )
-from helix_agent.protocol.skill import (
+from expert_work.protocol.skill import (
     SkillPackageLayoutError,
     compute_content_hash,
     is_high_risk_skill_version,
     supporting_files_to_jsonable,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
 #: Hard cap on skills imported in one batch request. Bounds the per-request DB
 #: write fan-out; a repo with more skills than this is imported in chunks.

@@ -13,7 +13,7 @@
 import { parseYaml } from "./yaml";
 import type { CatalogModel, ModelCatalog } from "../../api/model_catalog";
 
-export const BASE_MANIFEST_YAML = `apiVersion: helix.io/v1
+export const BASE_MANIFEST_YAML = `apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: my-agent

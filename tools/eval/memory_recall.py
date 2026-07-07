@@ -202,9 +202,9 @@ async def evaluate_case(
     when a caller wants the older comparison point).
     """
     # Import inside the function so this module's import surface stays
-    # narrow — the runner is the only path that touches helix-persistence.
-    from helix_agent.persistence import InMemoryMemoryStore
-    from helix_agent.protocol import MemoryItem
+    # narrow — the runner is the only path that touches expert-work-persistence.
+    from expert_work.persistence import InMemoryMemoryStore
+    from expert_work.protocol import MemoryItem
 
     tenant_id = uuid4()
     user_id = uuid4()

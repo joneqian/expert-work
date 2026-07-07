@@ -55,7 +55,7 @@ from typing import Any
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
-from helix_agent.runtime.tokens import flatten_message
+from expert_work.runtime.tokens import flatten_message
 
 __all__ = ["coalesce_system_messages"]
 
@@ -74,7 +74,7 @@ def coalesce_system_messages(messages: Sequence[BaseMessage]) -> Sequence[BaseMe
       FIRST occurrence of a key winning — the leading system message is
       the authoritative one, so a later (injected) system message can
       only contribute NEW keys, never override e.g. a
-      ``helix_cache_anchor`` already set on the head,
+      ``expert_work_cache_anchor`` already set on the head,
     - when the list has no leading system message the merged message is
       promoted to position 0 (strict backends require it there),
     - every non-system message keeps its original relative order.

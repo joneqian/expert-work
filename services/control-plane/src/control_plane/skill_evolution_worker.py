@@ -25,15 +25,15 @@ import httpx
 
 from control_plane.skill_evolution import EvolutionResult, TransientEvolutionError
 from control_plane.skill_evolution_metering import metering_scope
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import CurationCandidateStore
-from helix_agent.persistence.rls import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import CurationCandidateStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
-from helix_agent.runtime.middleware.llm_error_handling import (
+from expert_work.protocol import CandidateStatus, CurationCandidateRecord, CurationSignal
+from expert_work.runtime.middleware.llm_error_handling import (
     CircuitOpenError,
     LLMKeyUnavailableError,
     LLMNetworkError,
@@ -87,20 +87,20 @@ class ScreenDecision:
 #: fault routes through the same retry budget as the processor (SE-A40).
 CandidateScreener = Callable[[CurationCandidateRecord], Awaitable[ScreenDecision]]
 
-_cycle_errors = helix_counter(
-    "helix_control_plane_skill_evolution_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_skill_evolution_cycle_errors_total",
     "Skill-evolution worker cycles that ended in a caught exception.",
 )
-_grounded = helix_counter(
-    "helix_control_plane_skill_evolution_grounded_total",
+_grounded = expert_work_counter(
+    "expert_work_control_plane_skill_evolution_grounded_total",
     "Candidates that produced a grounded (replay-verified) DRAFT skill.",
 )
-_retried = helix_counter(
-    "helix_control_plane_skill_evolution_retries_total",
+_retried = expert_work_counter(
+    "expert_work_control_plane_skill_evolution_retries_total",
     "Distillation attempts that died on a transient fault and were requeued.",
 )
-_screened_out = helix_counter(
-    "helix_control_plane_skill_evolution_screened_out_total",
+_screened_out = expert_work_counter(
+    "expert_work_control_plane_skill_evolution_screened_out_total",
     "Implicit candidates dropped by the SE-A45 sampled quality screen.",
 )
 

@@ -35,7 +35,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from helix_agent.protocol.skill import EvalVerdict, ReplaySource, SkillEvalResult
+from expert_work.protocol.skill import EvalVerdict, ReplaySource, SkillEvalResult
 
 __all__ = [
     "CaseOutcome",

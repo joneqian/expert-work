@@ -24,15 +24,15 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from helix_agent.common.context import reset_current_trace_id, set_current_trace_id
-from helix_agent.common.observability import (
-    HelixComponent,
+from expert_work.common.context import reset_current_trace_id, set_current_trace_id
+from expert_work.common.observability import (
+    ExpertWorkComponent,
     current_trace_id_hex,
+    expert_work_span,
     extract_context,
-    helix_span,
 )
 
-TRACE_ID_HEADER = "X-Helix-Trace-Id"
+TRACE_ID_HEADER = "X-Expert-Work-Trace-Id"
 
 
 class TraceContextMiddleware(BaseHTTPMiddleware):
@@ -49,8 +49,8 @@ class TraceContextMiddleware(BaseHTTPMiddleware):
         parent_ctx = extract_context(dict(request.headers))
         ctx_token = otel_context.attach(parent_ctx)
         try:
-            with helix_span(
-                HelixComponent.SANDBOX,
+            with expert_work_span(
+                ExpertWorkComponent.SANDBOX,
                 "http_request",
                 attributes={
                     "http.method": request.method,

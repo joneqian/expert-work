@@ -1,7 +1,7 @@
 /**
  * Run summary panel — the "what happened this run" glance.
  *
- * Renders duration + token usage (from helix's own ``token_usage``, joined by
+ * Renders duration + token usage (from expert_work's own ``token_usage``, joined by
  * trace_id — NOT a Langfuse round-trip) so the run detail answers "how long,
  * how many tokens, which models" without leaving the tenant-isolated
  * control-plane UI. Deep per-span traces stay delegated to Langfuse via the
@@ -35,7 +35,7 @@ function formatDuration(t: TFn, createdIso?: string | null, finishedIso?: string
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-const LABEL_STYLE = { color: "var(--hx-text-tertiary)", fontSize: 12, marginBottom: 2 };
+const LABEL_STYLE = { color: "var(--ew-text-tertiary)", fontSize: 12, marginBottom: 2 };
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -45,7 +45,7 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
         {value}
       </Text>
       {hint && (
-        <div style={{ color: "var(--hx-text-tertiary)", fontSize: 11 }}>{hint}</div>
+        <div style={{ color: "var(--ew-text-tertiary)", fontSize: 11 }}>{hint}</div>
       )}
     </div>
   );

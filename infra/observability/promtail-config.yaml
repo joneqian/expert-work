@@ -1,7 +1,7 @@
 # Promtail config — Stream G.0.
 #
 # Loki's log agent: discovers the running containers via the Docker
-# socket and ships their stdout to Loki. The helix services log JSON
+# socket and ships their stdout to Loki. The expert_work services log JSON
 # (A.7), so the raw line is the structured record.
 
 server:

@@ -12,7 +12,7 @@ import logging
 
 from billing_rollup_job.job import BillingRollupJob
 from billing_rollup_job.settings import BillingRollupSettings
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     DbModelRateCardStore,
     DbTenantBillingLedgerStore,
@@ -20,11 +20,11 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.persistence.platform_billing_config import (
+from expert_work.persistence.platform_billing_config import (
     SqlPlatformBillingConfigStore,
 )
-from helix_agent.persistence.rls import build_rls_sessionmaker
-from helix_agent.persistence.token_usage_store import DbTokenUsageStore
+from expert_work.persistence.rls import build_rls_sessionmaker
+from expert_work.persistence.token_usage_store import DbTokenUsageStore
 
 logger = logging.getLogger(__name__)
 

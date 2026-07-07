@@ -18,8 +18,8 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, Role
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult, Role
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -149,7 +149,7 @@ async def test_list_audit_emits_self_audit_row(ctx: _Ctx) -> None:
     """Every read writes a ``audit:read`` row (AuditLogger.query invariant)."""
     before = await ctx.store.query(
         # cast to AuditQuery via the model so we get the same code path
-        _make_q := __import__("helix_agent.protocol", fromlist=["AuditQuery"]).AuditQuery(
+        _make_q := __import__("expert_work.protocol", fromlist=["AuditQuery"]).AuditQuery(
             tenant_id=_TENANT
         )
     )

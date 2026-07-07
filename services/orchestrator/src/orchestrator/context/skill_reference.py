@@ -11,7 +11,7 @@ time, so the cheapest recoverable replacement is a one-line REFERENCE:
 skill name + source path + the re-read hint. O(1) tokens; the model keeps
 both the skill's existence and its retrieval handle. Upstream deer-flow
 #3887 dropped the full-content preservation budgets for exactly this shape
-(reference + re-read); helix follows suit (STREAM-RT-DESIGN §8, RT-ADR-7).
+(reference + re-read); expert_work follows suit (STREAM-RT-DESIGN §8, RT-ADR-7).
 
 Only a SUCCESSFUL read (``result`` in ``ok`` / ``truncated``) gets a
 reference: every ``skill_view`` failure branch also stamps ``skill_name``

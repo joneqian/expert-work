@@ -6,7 +6,7 @@
 
 ## 故障现象
 
-- agent run 大量失败，错误指向 LLM 调用（`helix.llm_gateway.provider_request` span ERROR）。
+- agent run 大量失败，错误指向 LLM 调用（`expert_work.llm_gateway.provider_request` span ERROR）。
 - 日志可见断路器打开：`llm_error_handling` 中间件 `circuit open`。
 - TTFT 飙升或 run 超时。
 
@@ -20,7 +20,7 @@
 4. **fallback 是否生效**：fallback chain 应在主 provider open 后切到下一个；
    若全链路 provider 都 open → 全部不可用。
 5. **凭据**：LLM key 经 SecretStore 解析（ADR-0007 KMS）；
-   key 失效查 `helix.credential` 相关日志。
+   key 失效查 `expert_work.credential` 相关日志。
 
 ## 处置
 

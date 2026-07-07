@@ -1,10 +1,10 @@
 """Classify an imported skill's runtime needs (skill-runtime §5.2).
 
 A non-blocking signal attached to the platform import response so an operator
-learns *at import time* whether a skill can actually run in helix's sandbox
+learns *at import time* whether a skill can actually run in expert_work's sandbox
 (Python-only, ``network=none``) — instead of discovering it fails at runtime.
 
-helix runs **knowledge** + **Python compute** skills; **Node / browser /
+expert_work runs **knowledge** + **Python compute** skills; **Node / browser /
 network** skills belong to an MCP server (skill-runtime §4). This is advisory
 only: the skill still imports (its instructions are readable even if bundled
 scripts won't run), the UI just sets expectations.
@@ -32,7 +32,7 @@ class SkillRuntime:
     """Advisory runtime classification of an imported skill."""
 
     kind: str  # "knowledge" | "python" | "node" | "browser" | "unknown"
-    runnable: bool  # False → bundled scripts won't run in helix's sandbox
+    runnable: bool  # False → bundled scripts won't run in expert_work's sandbox
     hint: str
 
     def as_dict(self) -> dict[str, object]:
@@ -55,7 +55,7 @@ def classify_skill_runtime(payload: SkillZipPayload) -> SkillRuntime:
             kind="browser",
             runnable=False,
             hint=(
-                "This skill drives a browser — helix sandboxes are Python-only with "
+                "This skill drives a browser — expert_work sandboxes are Python-only with "
                 "no network. Use a browser MCP server instead of importing it as a skill."
             ),
         )
@@ -63,7 +63,7 @@ def classify_skill_runtime(payload: SkillZipPayload) -> SkillRuntime:
     has_py = ".py" in exts
     has_node_files = any(n in _NODE_MANIFESTS for n in names) or bool(exts & _NODE_EXTS)
     node_hint = (
-        "This skill needs a Node.js runtime, which the helix sandbox doesn't "
+        "This skill needs a Node.js runtime, which the expert_work sandbox doesn't "
         "provide (Python-only, no runtime install). Its instructions are still "
         "usable, but bundled Node scripts won't run."
     )
@@ -85,7 +85,7 @@ def classify_skill_runtime(payload: SkillZipPayload) -> SkillRuntime:
         )
 
     # Node only in prose (``npx``/``npm``) with no Python scripts — e.g. the
-    # ``npx skills`` installer skills, which have no helix substrate.
+    # ``npx skills`` installer skills, which have no expert_work substrate.
     if _NODE_BODY_RE.search(body) is not None:
         return SkillRuntime(kind="node", runnable=False, hint=node_hint)
 

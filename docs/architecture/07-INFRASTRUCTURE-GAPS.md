@@ -1,6 +1,6 @@
 # 07 基础设施 Gap Analysis — 产品级清单审视
 
-> 本文档系统盘点：要把 Helix 做成"产品级 Agent 工作引擎"（不只是"能跑通的引擎"），现有方案还有哪些基础设施层面的设计缺失。
+> 本文档系统盘点：要把 Expert Work 做成"产品级 Agent 工作引擎"（不只是"能跑通的引擎"），现有方案还有哪些基础设施层面的设计缺失。
 >
 > **结论先行**：核心运行时层（编排/沙盒/事件日志/中间件）已扎实，但**横切关注点（认证/审计/PII/SRE/DX/合规）的设计深度不足**——这些是 Dify、DeerFlow 这类"半成品"产品级演进时最容易翻船的地方。
 
@@ -42,7 +42,7 @@
 |-----|--------|------|
 | **用户认证方式选型** | 🔴 P0 | OAuth2 / OIDC / SSO（企业 SSO 集成）/ 自建 JWT，哪个？多种并存？ |
 | **服务间认证** | 🔴 P0 | Control Plane ↔ Orchestrator ↔ Sandbox-Supervisor 之间是否要 mTLS？SPIFFE/SPIRE？ |
-| **API Key 管理**（外部业务系统调用 Helix）| 🔴 P0 | 创建/吊销/轮换/限流，按 key 维度计费 |
+| **API Key 管理**（外部业务系统调用 Expert Work）| 🔴 P0 | 创建/吊销/轮换/限流，按 key 维度计费 |
 | **Agent 身份**（每个 Agent 实例自己的 workload identity）| 🟠 P1 | 用 Agent 调外部 API 时谁在调用——Agent 自己还是用户？这影响审计 |
 | **细粒度权限模型** | 🟠 P1 | RBAC vs ABAC？资源粒度（agent/session/tool/secret）×操作粒度（create/read/update/delete/run）的权限矩阵 |
 | **会话授权**（用户 A 能不能看用户 B 的 session）| 🔴 P0 | 多租户基础（部分被 thread_meta 的 check_access 覆盖，但不完整） |
@@ -276,7 +276,7 @@
 ## 11. 开发者体验 (DX) 🟡 CLI 起步
 
 ### 现状
-- helix-cli（lint / run）✅
+- expert-work-cli（lint / run）✅
 
 ### 缺失项
 

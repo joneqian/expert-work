@@ -31,7 +31,7 @@ def _free_port() -> int:
 
 
 def _build_test_server() -> FastMCP:
-    server = FastMCP(name="helix-e2e")
+    server = FastMCP(name="expert-work-e2e")
 
     @server.tool()
     def echo(text: str) -> str:
@@ -144,7 +144,7 @@ async def test_streamable_http_client_roundtrip_against_fastmcp() -> None:
 async def test_remote_client_timeout_raises_mcp_call_timeout_error() -> None:
     """Mini-ADR U-13: long-running tool exceeding ``timeout_s`` surfaces
     as :class:`MCPCallTimeoutError`, not a generic asyncio error."""
-    server = FastMCP(name="helix-e2e-slow")
+    server = FastMCP(name="expert-work-e2e-slow")
 
     @server.tool()
     async def slow() -> str:

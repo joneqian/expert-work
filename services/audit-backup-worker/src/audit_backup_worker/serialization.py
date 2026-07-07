@@ -14,7 +14,7 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Any
 from uuid import UUID
 
-from helix_agent.persistence.models import AuditLogRow
+from expert_work.persistence.models import AuditLogRow
 
 
 def _jsonable(value: Any) -> Any:

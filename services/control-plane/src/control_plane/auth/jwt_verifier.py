@@ -42,9 +42,9 @@ from control_plane.auth.errors import (
     InvalidTokenError,
     TokenExpiredError,
 )
-from helix_agent.protocol.auth import JWTClaims, SubjectType
+from expert_work.protocol.auth import JWTClaims, SubjectType
 
-logger = logging.getLogger("helix.control_plane.auth.jwt")
+logger = logging.getLogger("expert_work.control_plane.auth.jwt")
 
 
 class JWKSProvider(Protocol):

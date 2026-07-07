@@ -5,7 +5,7 @@ a SKILL.md body:
 
 1. base64-encoded ``ignore all previous instructions``
 2. (Letter-spacing is a documented U-22 limitation - covered in
-   helix-common; this file does NOT test letter-spacing.)
+   expert-work-common; this file does NOT test letter-spacing.)
 3. Mathematical bold Latin characters - normalized via NFKC
 4. Full-width Latin characters - normalized via NFKC
 
@@ -31,12 +31,12 @@ from control_plane.api._skill_zip import (
     SkillPackageError,
     parse_skill_zip,
 )
-from helix_agent.protocol.skill import SkillPackageLayoutError
+from expert_work.protocol.skill import SkillPackageLayoutError
 
 
 def _build_skill_md(body: str, *, name: str = "foo") -> bytes:
     fm = yaml.safe_dump(
-        {"name": name, "description": "ok", "helix": {"version": 1}},
+        {"name": name, "description": "ok", "expert_work": {"version": 1}},
         sort_keys=False,
         allow_unicode=True,
     )

@@ -24,15 +24,15 @@ from control_plane.encrypted_secret_store import (
     SqlEncryptedSecretStore,
     build_kek_from_b64,
 )
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     build_rls_sessionmaker,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.runtime.secret_store.base import SecretNotFoundError, SecretStoreError
+from expert_work.runtime.secret_store.base import SecretNotFoundError, SecretStoreError
 
-_NAME = "helix-agent/platform/llm/anthropic"
+_NAME = "expert-work/platform/llm/anthropic"
 
 
 # --------------------------------------------------------------------- cipher
@@ -79,7 +79,7 @@ def test_build_kek_validation() -> None:
 def test_build_secret_store_local_dev_default() -> None:
     from control_plane.app import _build_secret_store
     from control_plane.settings import Settings
-    from helix_agent.runtime.secret_store.local_dev import LocalDevSecretStore
+    from expert_work.runtime.secret_store.local_dev import LocalDevSecretStore
 
     store = _build_secret_store(Settings(secret_store_backend="local_dev"), None)
     assert isinstance(store, LocalDevSecretStore)
@@ -108,7 +108,9 @@ def test_build_secret_store_sql_encrypted_requires_kek() -> None:
 
 # ----------------------------------------------------------------- store (PG)
 
-ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages" / "helix-persistence" / "alembic.ini"
+ALEMBIC_INI = (
+    Path(__file__).resolve().parents[3] / "packages" / "expert-work-persistence" / "alembic.ini"
+)
 
 
 def _sync_dsn(c: PostgresContainer) -> str:
@@ -141,7 +143,7 @@ async def test_put_get_round_trip_and_ciphertext_at_rest(
     store, engine = vault
     # Distinct name per integration test — the postgres_container fixture is
     # shared, so rows persist across tests in the suite.
-    name = "helix-agent/platform/llm/roundtrip"
+    name = "expert-work/platform/llm/roundtrip"
     try:
         await store.put(name, "sk-ant-REAL")
         assert await store.get(name) == "sk-ant-REAL"
@@ -162,7 +164,7 @@ async def test_repaste_versions_and_current(
     vault: tuple[SqlEncryptedSecretStore, AsyncEngine],
 ) -> None:
     store, engine = vault
-    name = "helix-agent/platform/llm/repaste"  # distinct — shared container
+    name = "expert-work/platform/llm/repaste"  # distinct — shared container
     try:
         await store.put(name, "key-v1")
         await store.put(name, "key-v2")
@@ -185,8 +187,8 @@ async def test_missing_secret_raises(
     store, engine = vault
     try:
         with pytest.raises(SecretNotFoundError):
-            await store.get("helix-agent/platform/llm/nope")
+            await store.get("expert-work/platform/llm/nope")
         with pytest.raises(SecretNotFoundError):
-            await store.list_versions("helix-agent/platform/llm/nope")
+            await store.list_versions("expert-work/platform/llm/nope")
     finally:
         await engine.dispose()

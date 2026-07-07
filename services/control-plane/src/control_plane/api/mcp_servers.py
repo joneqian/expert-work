@@ -19,15 +19,15 @@ from control_plane.audit import emit
 from control_plane.mcp_probe import McpProbeError, probe_remote_mcp
 from control_plane.tenancy.tenant_config import TenantConfigNotConfiguredError
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
-from helix_agent.persistence import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.persistence import (
     McpConnectorCatalogStore,
     TenantMcpServerAlreadyExistsError,
     TenantMcpServerNotFoundError,
     TenantMcpServerStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     McpServerAuthType,
     McpServerProbeStatus,
@@ -39,10 +39,10 @@ from helix_agent.protocol import (
     TenantPlan,
     tier_satisfies,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
 
-logger = logging.getLogger("helix.control_plane.api.mcp_servers")
+logger = logging.getLogger("expert_work.control_plane.api.mcp_servers")
 
 _DEFAULT_TIMEOUT_S = 30.0
 
@@ -200,11 +200,11 @@ async def _invalidate_tenant_mcp(
 
 
 def _token_secret_name(tenant_id: UUID, name: str) -> str:
-    return f"helix-agent/tenant/{tenant_id}/mcp/{name}/token"
+    return f"expert-work/tenant/{tenant_id}/mcp/{name}/token"
 
 
 def _headers_secret_name(tenant_id: UUID, name: str) -> str:
-    return f"helix-agent/tenant/{tenant_id}/mcp/{name}/headers"
+    return f"expert-work/tenant/{tenant_id}/mcp/{name}/headers"
 
 
 # HTTP header field-name: a conservative token (letters/digits/hyphen). Blocks

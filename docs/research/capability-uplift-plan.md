@@ -1,6 +1,6 @@
-# helix 能力提升迭代计划（8 项，最大化提前）
+# Expert Work 能力提升迭代计划（8 项，最大化提前）
 
-> **任务来源**：`helix-vs-hermes-gap.md` 5 条 + Memory 系统讨论 3 条新增 = **8 项**。
+> **任务来源**：`expert-work-vs-hermes-gap.md` 5 条 + Memory 系统讨论 3 条新增 = **8 项**。
 >
 > **约束（用户已确认 + 修正）**：
 > 1. **不重开 M0 阶段标签**
@@ -9,7 +9,7 @@
 >
 > **重要修正**（vs 上一版）：上一版按"实施成本 ≤ 1 周"筛只塞了 1 项，是误读约束。本版按"真正硬依赖"重排，**6 项进 Gate sprint，2 项拆基础设施提前 + 启用等节奏**。
 >
-> **2026-05-27 复审修正**：原 #5 "MCP Server"（让 IDE 通过 MCP 调用 helix）被复审推翻 — gap doc 论据(企业开发者 / backend platform compatible / 实施成本中等 / Hermes-equivalent operator experience) 逐条不立。helix 是 server-side 多租户 backend 平台，不是 local-CLI，MCP server wrapper 没有真用户群体支撑；且 gap doc 列的工具集(conversations_list / messages_send / channels_list ...)是 Hermes 消息平台子系统术语，graft 过来违反 [memory:general-platform-positioning]。**#5 重定义为 "MCP Client HTTP/SSE transport"** — agent 平台的真正价值是消费外部 MCP 生态(GitHub / Postgres / Linear / Notion / filesystem 等)，不是反过来包装自己。详见 [memory:mcp-direction-client-only]。
+> **2026-05-27 复审修正**：原 #5 "MCP Server"（让 IDE 通过 MCP 调用 Expert Work）被复审推翻 — gap doc 论据(企业开发者 / backend platform compatible / 实施成本中等 / Hermes-equivalent operator experience) 逐条不立。Expert Work 是 server-side 多租户 backend 平台，不是 local-CLI，MCP server wrapper 没有真用户群体支撑；且 gap doc 列的工具集(conversations_list / messages_send / channels_list ...)是 Hermes 消息平台子系统术语，graft 过来违反 [memory:general-platform-positioning]。**#5 重定义为 "MCP Client HTTP/SSE transport"** — agent 平台的真正价值是消费外部 MCP 生态(GitHub / Postgres / Linear / Notion / filesystem 等)，不是反过来包装自己。详见 [memory:mcp-direction-client-only]。
 
 ---
 
@@ -46,7 +46,7 @@
 
 ### 软依赖可解（1 项）
 
-- **#2 Memory 投毒防御**：依赖威胁模式库 → 如果 #1 先做，把模式库抽到 `helix-common` 包，#2 直接复用。**就是 #1 → #2 的顺序而已，不是"等"**。
+- **#2 Memory 投毒防御**：依赖威胁模式库 → 如果 #1 先做，把模式库抽到 `expert-work-common` 包，#2 直接复用。**就是 #1 → #2 的顺序而已，不是"等"**。
 
 ### 真硬依赖只有 2 项（拆 "基础设施 + 启用"）
 
@@ -68,7 +68,7 @@
 Week 1                  Week 2                  Week 3
 ─────────────────────────────────────────────────────
 #1 Cron 注入扫描 ████
-                ↓ 抽威胁模式库到 helix-common
+                ↓ 抽威胁模式库到 expert-work-common
 #2 Memory 投毒防御              ████████
 
 Week 4                  Week 5                  Week 6
@@ -107,7 +107,7 @@ Week 11                 Week 12                 Week 13
 ### Week 1 — #1 Cron prompt 注入扫描
 
 **实施面**：
-- 新建 `helix-common/src/helix_common/threat_patterns.py`（威胁模式 regex + 隐形 Unicode 表，参考 Hermes `tools/cronjob_tools.py:68-200`）
+- 新建 `expert-work-common/src/expert_work_common/threat_patterns.py`（威胁模式 regex + 隐形 Unicode 表，参考 Hermes `tools/cronjob_tools.py:68-200`）
 - `services/control-plane/api/triggers.py` create/update 路径加严扫
 - `services/control-plane/trigger_firing.py` 拼完 skill 后加宽扫
 - 新 audit action `TRIGGER_PROMPT_INJECTION_BLOCKED`
@@ -126,12 +126,12 @@ Week 11                 Week 12                 Week 13
 
 ### Week 4-5 — #5 MCP Client HTTP/SSE transport
 
-> **2026-05-27 复审**：原 framing "MCP Server 暴露 helix 给 IDE" 已推翻(见文档头复审修正)。本节是 reframe 后的 scope。
+> **2026-05-27 复审**：原 framing "MCP Server 暴露 Expert Work 给 IDE" 已推翻(见文档头复审修正)。本节是 reframe 后的 scope。
 
 **实施面**：
 - 扩 MCP client transport：现 stdio only → 增 HTTP + SSE + StreamableHTTP 三种(对齐 Hermes / 公开 MCP server 标准形态)
 - per-tenant manifest `mcp_servers[].transport`：`stdio | http | sse | streamable_http`，对应 config 字段(url / headers / etc)
-- per-tenant secret 隔离：MCP server 的 auth header / token 走 helix secret store(复用 J.4 secret resolver)
+- per-tenant secret 隔离：MCP server 的 auth header / token 走 Expert Work secret store(复用 J.4 secret resolver)
 - OAuth 配置层(只存配置不实现 flow)：`mcp_servers[].auth_type: none | bearer | oauth2` + OAuth client_id/scope 配置存储，OAuth refresh flow 留 Mini-ADR L.L8-MCP 后续
 - 单元 + 集成测试：mock HTTP/SSE server 验协议合规，e2e 跑一个公开 MCP server(如 `mcp-server-time`)
 
@@ -165,7 +165,7 @@ Week 11                 Week 12                 Week 13
 > 详见 [STREAM-UPLIFT-DESIGN.md § 4](../streams/STREAM-UPLIFT-DESIGN.md)。
 
 **实施面**:
-- 对齐 Claude Code 标准:ZIP 用 `SKILL.md`(YAML frontmatter + body)+ 任意子目录;helix 字段放 `helix:` 命名空间
+- 对齐 Claude Code 标准:ZIP 用 `SKILL.md`(YAML frontmatter + body)+ 任意子目录;Expert Work 字段放 `Expert Work:` 命名空间
 - `skill_version` 加 `supporting_files: JSONB` + `lazy_load: BOOL` + `content_hash: BYTEA`(迁移 0042);5MB cap;ObjectStore 不做(JSONB 够)
 - 新 `skill_view(skill_name, path)` 工具:`SKILL.md` 跟 supporting files 对称访问;**读时 drift 检测 + context-scope re-scan + redact**
 - agent_factory:**progressive disclosure 默认架构** —— system prompt 只注 skill summary;per-skill `lazy: false` 默认保留现有 eager 行为
@@ -173,14 +173,14 @@ Week 11                 Week 12                 Week 13
 - ZIP backward compat 双读:老 ZIP(skill.yaml + prompt.md + tools.txt)能 import + warn
 - Path 校验:字符 + 扩展名 + 大小 allowlist;子目录命名自由(对齐 Claude 标准);Oracle defense(整 ZIP reject 不暴露细节)
 - **U-21 写时威胁扫描**:ZIP import + 单文件 mutation 都走 Sprint #1 strict scan(基础设施 100% 复用);finding → reject + audit `SKILL_PROMPT_INJECTION_BLOCKED`
-- **U-21 P0 alert**:`HelixUpliftSkillDriftDetected`(drift 几乎必是 SQL 注入或内部 actor,跟 memory drift 同级)
+- **U-21 P0 alert**:`ExpertWorkUpliftSkillDriftDetected`(drift 几乎必是 SQL 注入或内部 actor,跟 memory drift 同级)
 - **U-22 混淆攻击防御**(C 方案):`scan_for_threats` 内部加 base64 解码 + NFKC Unicode 归一 + 空格 collapse pre-processing — 跨 trigger / memory / skill 三子系统升级;K.K12 baseline 回归保护无误报
 - **U-23 中文 prompt injection patterns**(C 方案):pattern 库追加 ~12 个中文模式(5 大类:直接 / 系统提示泄露 / 角色劫持 / 限制解除 / 反事实 / 权威伪装)
 - **U-24 高危 publish gate**(C 方案):skill 含 `exec_python` / `http` / `exec_shell` 或 `scripts/*` → `high_risk: true`;PATCH status=active 时,高危 + 非 admin → 403 + audit `SKILL_HIGH_RISK_ACTIVATION_BLOCKED`;M0 透明(全 admin actor),**M1-K J.7b-1 上线 agent self-authored skill 自动启用**
 
 **借鉴源**:
 - Claude Code 标准 SKILL.md(`~/.claude/skills/` 实测)— 单文件 + 任意子目录
-- Hermes 维度 14 — supporting files 思路(但 helix 子目录命名跟 Claude Code 对齐,不照搬 Hermes 强制 references/templates/scripts)
+- Hermes 维度 14 — supporting files 思路(但 Expert Work 子目录命名跟 Claude Code 对齐,不照搬 Hermes 强制 references/templates/scripts)
 - Sprint #1 + #2 防线 — 威胁扫描 + drift 检测基础设施全复用,trigger / memory / skill 三条"内容进库"路径对称防御
 
 ### Week 11-12 — #4 Curator 自动状态机（基础设施完整）

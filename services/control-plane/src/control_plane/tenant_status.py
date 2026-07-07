@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable
 from uuid import UUID
 
-from helix_agent.persistence.tenant_config.base import TenantConfigStore
+from expert_work.persistence.tenant_config.base import TenantConfigStore
 
 
 class TenantStatusService:

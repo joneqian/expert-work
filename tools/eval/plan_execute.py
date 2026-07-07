@@ -6,7 +6,7 @@ Two metric axes per Mini-ADR J-37 (the only capability where LLM-judge
 is in scope):
 
 * ``pass_rate`` — structural validity. A case passes when
-  :class:`~helix_agent.protocol.Plan.goal` contains every keyword the
+  :class:`~expert_work.protocol.Plan.goal` contains every keyword the
   case lists *and* :class:`Plan.steps` has at least ``min_steps``
   entries. Both the well-formed cases and the fallback cases must
   satisfy this — the planner's "any malformed reply degrades to a

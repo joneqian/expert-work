@@ -6,7 +6,7 @@
 > **网关层（第 1 层）** + [subsystems/28 Reliability Primitives § 4](../architecture/subsystems/28-reliability-primitives.md)
 > 的中间件接线。
 
-设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_design_first_iteration.md)）：
+设计先行规则（[memory:feedback_design_first_iteration.md](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_design_first_iteration.md)）：
 所有架构 / 接口 / mini-ADR 必须在编码前就锁定，B.1-B.7 PR 仅执行本文档。
 
 ---
@@ -19,17 +19,17 @@
 |------|---------|-----------|
 | **B.1 FastAPI 骨架** | `services/control-plane`：FastAPI app factory、Pydantic v2 BaseSettings、SQLAlchemy 2.0 async session、A.7 / A.8 / A.9 / A.11 / A.12 / A.13 中间件接线 | 03 monorepo, 28 § 4 |
 | **B.2 网关层限流 middleware** | per-IP + per-API-key token bucket；M0 in-process 实现，`RateLimiter` Protocol 已分层为 Redis 实现预留 | 16 § 3.2 + § 5.1（仅第 1 层） |
-| **B.3 取消信号链 — API 层** | `request.is_disconnected()` 轮询 → CancelToken 触发；`X-Helix-Deadline-Ms` header → 请求级 DeadlineContext | 28 § 4 (DeadlineContext) |
-| **B.4 Manifest 加载与 Pydantic 校验** | `helix-protocol/agent_spec.py` 扩展为完整 `AgentSpec` Pydantic v2 schema；`manifest/loader.py` 提供 YAML → AgentSpec、Jinja2 渲染、最小 lint（M0 子集） | 02 AGENT-MANIFEST § AgentSpec |
+| **B.3 取消信号链 — API 层** | `request.is_disconnected()` 轮询 → CancelToken 触发；`X-Expert-Work-Deadline-Ms` header → 请求级 DeadlineContext | 28 § 4 (DeadlineContext) |
+| **B.4 Manifest 加载与 Pydantic 校验** | `expert-work-protocol/agent_spec.py` 扩展为完整 `AgentSpec` Pydantic v2 schema；`manifest/loader.py` 提供 YAML → AgentSpec、Jinja2 渲染、最小 lint（M0 子集） | 02 AGENT-MANIFEST § AgentSpec |
 | **B.5 Agent CRUD API** | `POST/GET/LIST/PUT/DELETE /v1/agents`；persistence 落 `agent_spec` 表；每次 mutation 写 audit_log (A.4) | 02, 17 |
 | **B.6 Session CRUD API** | `POST/GET/LIST /v1/sessions`、`:pause`、`:resume`、`:cancel`；走 A.7 `thread_meta` Repository | 19 § 4.2 |
-| **B.7 Run trigger API + 假 SSE** | `POST /v1/sessions/{id}/runs` 返回 `text/event-stream`；M0 emit fake event token，Stream E 接 LangGraph 真流后无缝替换 | 19, 20 § 5 (helix.session.run.*) |
+| **B.7 Run trigger API + 假 SSE** | `POST /v1/sessions/{id}/runs` 返回 `text/event-stream`；M0 emit fake event token，Stream E 接 LangGraph 真流后无缝替换 | 19, 20 § 5 (expert_work.session.run.*) |
 
 ### 1.2 Out-of-scope（明确推迟）
 
 | 推迟项 | 落地 Stream | 备注 |
 |-------|------------|------|
-| OIDC/JWT 验证、租户解析、RLS | C.1, C.4 | B.5/B.6 actor/tenant 从 header `X-Helix-Actor` / `X-Helix-Tenant` **dev-only** 读，prod env 强制拒绝 |
+| OIDC/JWT 验证、租户解析、RLS | C.1, C.4 | B.5/B.6 actor/tenant 从 header `X-Expert-Work-Actor` / `X-Expert-Work-Tenant` **dev-only** 读，prod env 强制拒绝 |
 | mTLS 服务间认证 | C.2 | A.10 已铺 TLS 静态证书；B 启 HTTPS 由 reverse proxy（nginx）接 |
 | 业务层（per-tenant）+ provider 层限流 | C.6 + E.6 | B.2 仅做网关层 |
 | 真 LLM 调用 / LangGraph runtime | E.1+ | B.7 fake SSE |
@@ -52,15 +52,15 @@
 ```
 services/
 └── control-plane/
-    ├── pyproject.toml                      # 依赖 fastapi、uvicorn、helix-* workspace
+    ├── pyproject.toml                      # 依赖 fastapi、uvicorn、expert-work-* workspace
     ├── src/control_plane/
     │   ├── __init__.py                     # __version__
     │   ├── app.py                          # create_app() — 单一入口
-    │   ├── settings.py                     # Pydantic BaseSettings：HELIX_AGENT_*
+    │   ├── settings.py                     # Pydantic BaseSettings：EXPERT_WORK_*
     │   ├── deps.py                         # DI: db_session, lifecycle, rate_limiter, audit_logger
     │   ├── middleware/
     │   │   ├── observability.py            # log/trace/metrics 接线（A.4/A.5/A.8/A.9）
-    │   │   ├── deadline.py                 # B.3：X-Helix-Deadline-Ms → DeadlineContext
+    │   │   ├── deadline.py                 # B.3：X-Expert-Work-Deadline-Ms → DeadlineContext
     │   │   ├── cancellation.py             # B.3：is_disconnected 轮询 → CancelToken
     │   │   ├── rate_limit.py               # B.2：网关层
     │   │   └── audit_context.py            # 提取 actor / tenant 注入 ctxvar
@@ -97,7 +97,7 @@ HTTP request
   ↓
 [outer]   ObservabilityMiddleware       — log + trace + metrics 头（A.4/A.5/A.8/A.9）
 [outer]   AuditContextMiddleware        — 注入 actor / tenant ctxvar
-[outer]   DeadlineMiddleware            — X-Helix-Deadline-Ms → request.state.deadline_ctx
+[outer]   DeadlineMiddleware            — X-Expert-Work-Deadline-Ms → request.state.deadline_ctx
 [outer]   CancellationMiddleware        — 起 is_disconnected poll task；提供 request.state.cancel
 [outer]   RateLimitMiddleware           — 网关层桶；超额返 429 + Retry-After + audit(QUOTA_RATE_LIMIT_DENIED)
   ↓
@@ -209,14 +209,14 @@ event: error         data: {"message": "...", "name": "..."}       # 失败
 **问题**：B 没有真 auth，但 audit_log / rate-limit 都要 tenant_id。
 
 **决策**：`AuditContextMiddleware` 两段式逻辑：
-- 环境 `HELIX_AGENT_AUTH_MODE=dev`（默认）：从 `X-Helix-Actor` / `X-Helix-Tenant` header 读，明文 trust；header 缺失 → fallback `actor=anonymous`、`tenant=public`
-- 环境 `HELIX_AGENT_AUTH_MODE=prod`：拒绝；C.1 OIDC middleware 上线后切换
+- 环境 `EXPERT_WORK_AUTH_MODE=dev`（默认）：从 `X-Expert-Work-Actor` / `X-Expert-Work-Tenant` header 读，明文 trust；header 缺失 → fallback `actor=anonymous`、`tenant=public`
+- 环境 `EXPERT_WORK_AUTH_MODE=prod`：拒绝；C.1 OIDC middleware 上线后切换
 
 prod 模式启动校验：`auth_mode == "prod"` 时 fail-fast 拒绝启动（C.1 未到位）。Stream C.1 落地时移除这个守卫。
 
 ### ADR B-6 — control-plane 状态持久化：store backend 由 settings flag 选
 
-**问题**：M0 收尾前 `create_app` 的全部 store（`agent_spec` / `thread_meta` / `audit` / `api_key` / `role_binding` / `service_account` / `tenant_quota` / `token_reservation` / `tenant_config` / `feedback`）默认 `InMemory*` —— control-plane 整个跑在进程内存，重启即丢状态。`Sql*Store` / `DbFeedbackStore` 早已落地并各自集成测试（`packages/helix-persistence/tests/test_sql_*.py`）。缺口是接线：engine 接在哪、谁负责 `dispose()`？
+**问题**：M0 收尾前 `create_app` 的全部 store（`agent_spec` / `thread_meta` / `audit` / `api_key` / `role_binding` / `service_account` / `tenant_quota` / `token_reservation` / `tenant_config` / `feedback`）默认 `InMemory*` —— control-plane 整个跑在进程内存，重启即丢状态。`Sql*Store` / `DbFeedbackStore` 早已落地并各自集成测试（`packages/expert-work-persistence/tests/test_sql_*.py`）。缺口是接线：engine 接在哪、谁负责 `dispose()`？
 
 **选项**：
 - (A) 在 `main.py` 构造 engine + SQL store 传给 `create_app` —— 但 `AsyncEngine` 必须在 lifespan `finally` 里 `await engine.dispose()`，`main.py` 拿不到 lifespan，要么泄漏 engine，要么给 `create_app` 再加一个纯为 dispose 服务的 `db_engine` 参数。
@@ -229,7 +229,7 @@ prod 模式启动校验：`auth_mode == "prod"` 时 fail-fast 拒绝启动（C.1
 
 **RLS**：全部 SQL store 共用一个 `build_rls_sessionmaker` 包装的 sessionmaker —— 每事务自动 `SET LOCAL app.tenant_id`（C.4 / ADR-0002）。租户隔离对 store 层透明。
 
-**生产开启**：`infra/docker-compose.yml` 的 `control-plane` 服务设 `HELIX_AGENT_STORE_BACKEND=sql`；`migrate` 一次性服务先跑 alembic，`depends_on: service_completed_successfully` 保证 schema 就位。
+**生产开启**：`infra/docker-compose.yml` 的 `control-plane` 服务设 `EXPERT_WORK_STORE_BACKEND=sql`；`migrate` 一次性服务先跑 alembic，`depends_on: service_completed_successfully` 保证 schema 就位。
 
 **已知项（不在本次范围）**：`/v1/quota/*` 经 mTLS 调用时 principal 是 system tenant（`ffff…ffff`），而 quota 表是 `FORCE` RLS。若该端点对*目标*租户做写入，GUC 与行 `tenant_id` 不一致会被 `WITH CHECK` 拒。M0 是进程内单体，orchestrator 直接调 quota service、不 HTTP 打 `/v1/quota`，该路径暂处休眠。在它被端到端走通前（Stream C 深化 / M1 拆服务），需让该 handler 用 `bypass_rls_var` 或显式切目标租户 GUC。本 PR 仅做接线，不改 quota handler。
 
@@ -288,7 +288,7 @@ prod 模式启动校验：`auth_mode == "prod"` 时 fail-fast 拒绝启动（C.1
 | In-process token bucket 单实例假设破裂（部署成 2 个 control-plane） | 限流失效 | settings 加 `single_instance` 守卫，多副本部署时 startup 拒绝（提示升级到 C.6 Redis impl）|
 | YAML loader DoS（巨大 anchor 展开） | OOM | `yaml.safe_load` + 文件大小上限 64 KiB（B.4 settings） |
 | SSE keep-alive 与代理超时不匹配 | 客户端在中间被 nginx 切断 | 固定 15s heartbeat；TLS-RUNBOOK 注明 nginx `proxy_read_timeout 60s` |
-| `X-Helix-Tenant` header 伪造（dev mode） | dev 环境跨租户 | dev mode 仅本地 dev / staging；prod 启动守卫拒绝 |
+| `X-Expert-Work-Tenant` header 伪造（dev mode） | dev 环境跨租户 | dev mode 仅本地 dev / staging；prod 启动守卫拒绝 |
 
 ---
 
@@ -299,14 +299,14 @@ prod 模式启动校验：`auth_mode == "prod"` 时 fail-fast 拒绝启动（C.1
 ```
 B.1   FastAPI 骨架 + Lifecycle/health 接线 + Settings + Dockerfile + alembic 0003 (agent_spec)
 B.2   网关层 RateLimit middleware（in-process）
-B.3   Deadline + Cancellation middleware（X-Helix-Deadline-Ms + is_disconnected）
-B.4   helix-protocol AgentSpec 全字段 + manifest/loader（Jinja2 + 4 条 lint）
+B.3   Deadline + Cancellation middleware（X-Expert-Work-Deadline-Ms + is_disconnected）
+B.4   expert-work-protocol AgentSpec 全字段 + manifest/loader（Jinja2 + 4 条 lint）
 B.5   Agent CRUD API + audit 接线
 B.6   Session CRUD API + pause/resume/cancel（thread_meta 上）
 B.7   Run trigger API + fake SSE + 整 Stream B 验收门
 ```
 
-每 PR 收尾必须满足[零技术债规则](../../.claude/projects/-Users-mac-src-github-jone-qian-helix-agent/memory/feedback_zero_tech_debt.md)。
+每 PR 收尾必须满足[零技术债规则](../../.claude/projects/-Users-mac-src-github-jone-qian-expert-work/memory/feedback_zero_tech_debt.md)。
 
 ---
 
@@ -314,9 +314,9 @@ B.7   Run trigger API + fake SSE + 整 Stream B 验收门
 
 | Stream B 使用的下层能力 | 来源 | 状态 |
 |------|------|------|
-| 结构化日志 helix.audit/* | A.4 | ✅ |
+| 结构化日志 expert_work.audit/* | A.4 | ✅ |
 | W3C trace context 注入 | A.5 / A.8 | ✅ |
-| Prometheus helix_http_* metrics | A.9 | ✅ |
+| Prometheus expert_work_http_* metrics | A.9 | ✅ |
 | Lifecycle / Health | A.11 / A.12 | ✅ |
 | DeadlineContext / CancelToken | A.13 | ✅ |
 | audit_log table + Repository | A.4 + A.7 | ✅ |

@@ -1,7 +1,7 @@
 """Assemble a :class:`ToolRegistry` from a manifest's ``tools:`` block.
 
 STREAM-E-DESIGN Mini-ADR E-14: the manifest declares tools as a
-``type``-discriminated union (:data:`helix_agent.protocol.ToolSpecEntry`).
+``type``-discriminated union (:data:`expert_work.protocol.ToolSpecEntry`).
 :func:`build_tool_registry` maps each declaration to a concrete adapter
 and registers it.
 
@@ -21,8 +21,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from helix_agent.persistence import ArtifactStore
-from helix_agent.protocol import (
+from expert_work.persistence import ArtifactStore
+from expert_work.protocol import (
     AgentSpec,
     BuiltinToolSpec,
     DynamicWorkersSpec,
@@ -33,7 +33,7 @@ from helix_agent.protocol import (
     ToolSpecEntry,
     VisionSpec,
 )
-from helix_agent.runtime.tokens import default_estimator
+from expert_work.runtime.tokens import default_estimator
 from orchestrator.errors import AgentFactoryError
 from orchestrator.multimodal import ImageResolver
 from orchestrator.tools.approval import AskForApprovalTool

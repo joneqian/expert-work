@@ -1,10 +1,10 @@
-# Hermes Tool Search 源码级分析 — 渐进式工具披露与 helix TE-6 对照
+# Hermes Tool Search 源码级分析 — 渐进式工具披露与 Expert Work TE-6 对照
 
 > 日期：2026-06-11
 > 分析对象：`hermes-agent` 本地源码（`tools/tool_search.py` @ `7427b9d58`）
 > 关联 PR：hermes #34493（`369075dc9` feature + `7427b9d58` scope 修复）
-> 对照系统：helix Stream TE-6 / TE-6b（`orchestrator/tools/find_tools.py`、`tools/assembly.py`、`tools/registry.py`）
-> 性质：纯研究文档，无代码改动。结论部分含对 helix 的可吸收点评估。
+> 对照系统：Expert Work Stream TE-6 / TE-6b（`orchestrator/tools/find_tools.py`、`tools/assembly.py`、`tools/registry.py`）
+> 性质：纯研究文档，无代码改动。结论部分含对 Expert Work 的可吸收点评估。
 
 ---
 
@@ -12,7 +12,7 @@
 
 Agent 每轮请求要把所有注册工具的完整 JSON schema 发给模型。MCP 生态下工具数从个位数涨到几十上百个，schema 占用变成"上下文税"：Hermes 社区实测一个 session 的工具定义占用从 ~100k tokens 降到 ~19k（启用 Tool Search 前后）。Hermes 的回应是 **渐进式工具披露（progressive tool disclosure）**：超过阈值时把 MCP/插件工具从模型可见列表撤下，换成三个桥接工具按需搜索、按需加载、按需调用。
 
-helix 在 Stream TE-6/TE-6b 已实现同类机制（`find_tools` 元工具 + MCP 永远延迟注册），但披露模型不同（见 §8）。本报告先把 Hermes 实现拆到源码层，再做两系统对照。
+Expert Work 在 Stream TE-6/TE-6b 已实现同类机制（`find_tools` 元工具 + MCP 永远延迟注册），但披露模型不同（见 §8）。本报告先把 Hermes 实现拆到源码层，再做两系统对照。
 
 ## 2. 架构总览
 
@@ -65,7 +65,7 @@ agent/tool_executor.py                    执行层：并发路径独立 unwrap 
 - `auto`（默认）→ 可延迟 schema 估算 tokens ≥ `context_length × threshold_pct(10%)` 才激活
 - **拿不到 context length 时退化为固定 20k tokens 截断**——注释称这是 "Anthropic 和 OpenAI 都观察到质量下降的悬崖位置"
 
-token 估算 = `len(json.dumps(td)) / 4`（`CHARS_PER_TOKEN = 4.0`，`tool_search.py:51-55`）。注释对方向性有明确论证：低估→该开没开（漏激活），高估→不该开开了（多余间接层）；4.0 偏向低估 = 更安全的默认。**门控只需要数量级精度，不需要真 tokenizer**——这个论证对 helix HX-1 的适用范围判断有参考价值（见 §8.3）。
+token 估算 = `len(json.dumps(td)) / 4`（`CHARS_PER_TOKEN = 4.0`，`tool_search.py:51-55`）。注释对方向性有明确论证：低估→该开没开（漏激活），高估→不该开开了（多余间接层）；4.0 偏向低估 = 更安全的默认。**门控只需要数量级精度，不需要真 tokenizer**——这个论证对 Expert Work HX-1 的适用范围判断有参考价值（见 §8.3）。
 
 门控是**双向自适应**的：每次 assembly 重新评估，MCP server 断开导致可延迟集缩水到阈值下，下次重建自动退出折叠模式。
 
@@ -152,15 +152,15 @@ catalog（`build_catalog`，`tool_search.py:321-344`）不跨 turn、不跨 asse
 5. **describe 结果进对话历史拿不到 prompt cache prefix 优化**（官方自列）；动态目录与历史中旧 schema 的一致性风险（MCP server 中途更新定义）。
 6. catalog 每次 dispatch 重建 + 逐工具查 registry：一致性换 CPU，有界但非零。
 
-## 6. helix 现状对照（含一处文档过期修正）
+## 6. Expert Work 现状对照（含一处文档过期修正）
 
-helix 在 Stream TE-6/TE-6b 已 ship 等价机制，但**披露模型不同**：
+Expert Work 在 Stream TE-6/TE-6b 已 ship 等价机制，但**披露模型不同**：
 
 > **修正**：`find_tools.py` 模块 docstring 写"this module is the dormant mechanism only: no tool is deferred by default... Auto-deferral is Stream TE-6b"——**已过期**。`assembly.py:213-220` 显示 TE-6b 已实现为 **always-defer-MCP** 策略（deer-flow 同款）：平台/租户/用户 OAuth 三个 MCP 池注册全部 `deferred=True`（`assembly.py:489/517/539`），有延迟工具时自动挂 `find_tools`，无 MCP 的 agent 工具集与 pre-TE-6 字节一致。
 
 ### 两种披露模型
 
-| 维度 | Hermes（describe 模型） | helix TE-6（promotion 模型） |
+| 维度 | Hermes（describe 模型） | Expert Work TE-6（promotion 模型） |
 |---|---|---|
 | schema 去向 | `tool_describe` 结果进对话历史 | `find_tools` 写 `promoted_tools` state channel，**下一 turn 进 tools bind** |
 | 调用方式 | 永远经 `tool_call` 桥接 + unwrap | promotion 后直接调用，无桥接层 |
@@ -172,20 +172,20 @@ helix 在 Stream TE-6/TE-6b 已 ship 等价机制，但**披露模型不同**：
 | 核心保护 | `_HERMES_CORE_TOOLS` 白名单 | 等价达成：builtin/subagent/knowledge 从不延迟，只 MCP 延迟 |
 | 故障模式 | fail-open（故障→不折叠） | 注册期决定，无运行期折叠故障面 |
 
-**结构性结论**：helix 的 promotion 模型在治理面和隔离性上天然优于 Hermes（Hermes 用 ~200 行 unwrap + 双重 gate 才补回 helix 免费拿到的性质）；Hermes 在门控自适应和检索质量上领先。两边的弱点恰好互补。
+**结构性结论**：Expert Work 的 promotion 模型在治理面和隔离性上天然优于 Hermes（Hermes 用 ~200 行 unwrap + 双重 gate 才补回 Expert Work 免费拿到的性质）；Hermes 在门控自适应和检索质量上领先。两边的弱点恰好互补。
 
-### helix 的真实差距（按价值排序）
+### Expert Work 的真实差距（按价值排序）
 
-1. **检索质量**（影响最大）：`find_tools` 的 query 语法是给"知道自己找什么"的调用方设计的（`select:`/`+`/regex），模型用自然语言描述能力（"create a github issue"）时命中靠运气。Hermes 验证了 name 拆词 + description + 参数名的 BM25 足够好；helix 还可以直接复用自家 embedder/pgvector 做语义检索——顺带解决 Hermes 的中文盲区（jieba+向量都现成）。
-2. **无门控的反向代价**：always-defer 意味着小 MCP 目录（2-3 个工具，schema 远低于任何阈值）也付 find_tools 间接层（多一次模型交互 + 工具不在 bind 里模型可能根本想不到去搜）。Hermes 的 `auto` 阈值方向相反：小目录直通，大目录才折叠。**helix 缺的是"低于阈值直接全量暴露"的逃生门**。
+1. **检索质量**（影响最大）：`find_tools` 的 query 语法是给"知道自己找什么"的调用方设计的（`select:`/`+`/regex），模型用自然语言描述能力（"create a github issue"）时命中靠运气。Hermes 验证了 name 拆词 + description + 参数名的 BM25 足够好；Expert Work 还可以直接复用自家 embedder/pgvector 做语义检索——顺带解决 Hermes 的中文盲区（jieba+向量都现成）。
+2. **无门控的反向代价**：always-defer 意味着小 MCP 目录（2-3 个工具，schema 远低于任何阈值）也付 find_tools 间接层（多一次模型交互 + 工具不在 bind 里模型可能根本想不到去搜）。Hermes 的 `auto` 阈值方向相反：小目录直通，大目录才折叠。**Expert Work 缺的是"低于阈值直接全量暴露"的逃生门**。
 3. **promotion 后 bind 漂移 vs cache**：每次 promotion 改 tools bind 破 prompt cache prefix。目录大时单次 promotion 仍远优于全量常驻，但与 Hermes "tools 数组恒定 + schema 进历史"的形态相比，cache 经济性逐 turn 劣化。量化对比需要 token 计量数据（G.9 已有管道）。
 
 ## 7. 可吸收点评估（候选，未立项）
 
 | 候选 | 内容 | 依赖 | 评估 |
 |---|---|---|---|
-| TE-6c-a 阈值逃生门 | MCP schema 估算总量低于阈值（如上下文 10% 或 20k 兜底）时**不延迟**，直接全量进 bind；超阈值维持现状 | 无硬依赖；chars/4 即可（门控只需数量级，Hermes 已论证），HX-1 真 tokenizer 落地后换用更准 | **高价值低成本**。helix 当前对小目录的体验/成功率损失是真实的 |
-| TE-6c-b 检索升级 | `registry.search` 增加自然语言 ranked 模式：名字拆词 + description 的 BM25，或复用平台 embedder 做语义检索 | embedder 路径需平台凭证；BM25 路径零依赖 | **高价值**。BM25 版可先行（中文用 jieba 分词，helix 已有依赖）；语义版作二期 |
+| TE-6c-a 阈值逃生门 | MCP schema 估算总量低于阈值（如上下文 10% 或 20k 兜底）时**不延迟**，直接全量进 bind；超阈值维持现状 | 无硬依赖；chars/4 即可（门控只需数量级，Hermes 已论证），HX-1 真 tokenizer 落地后换用更准 | **高价值低成本**。Expert Work 当前对小目录的体验/成功率损失是真实的 |
+| TE-6c-b 检索升级 | `registry.search` 增加自然语言 ranked 模式：名字拆词 + description 的 BM25，或复用平台 embedder 做语义检索 | embedder 路径需平台凭证；BM25 路径零依赖 | **高价值**。BM25 版可先行（中文用 jieba 分词，Expert Work 已有依赖）；语义版作二期 |
 | TE-6c-c describe 中间态 | search 结果只给 name+description，加 `describe` 一步再 promotion | — | **不建议**。promotion 模型一步到位是优点；目录截断（Hermes 的 400 chars）值得抄，分步披露不值得 |
 | 文档修正 | `find_tools.py` docstring 与 assembly 现实对齐 | — | 顺手修，任何后续 PR 带上 |
 
@@ -193,8 +193,8 @@ Hermes 侧可直接搬运的设计资产：`should_activate` 的三态+兜底形
 
 ## 8. 结论
 
-1. Hermes Tool Search 是一份**工程质量很高的参考实现**：无状态 catalog（一致性优先）、双重 scope gate（纵深防御）、unwrap 透明性（transcript 与治理面各看各的真相）、处处 fail-open、39 测试随修复合入。其复杂度的一半（unwrap + scope）源于它的 describe 模型在全局 registry 上运行——这是 helix 的 promotion 模型 + per-run registry 天然不需要付的成本。
-2. helix 的 TE-6b（always-defer-MCP）方向正确但**缺两块**：低于阈值的直通逃生门（小目录付了不必要的间接层）、自然语言 ranked 检索（现有 query 语法对模型不友好）。两者都有 Hermes 验证过的成熟形态可参照，且 helix 的向量栈能做得比 BM25 更好。
+1. Hermes Tool Search 是一份**工程质量很高的参考实现**：无状态 catalog（一致性优先）、双重 scope gate（纵深防御）、unwrap 透明性（transcript 与治理面各看各的真相）、处处 fail-open、39 测试随修复合入。其复杂度的一半（unwrap + scope）源于它的 describe 模型在全局 registry 上运行——这是 Expert Work 的 promotion 模型 + per-run registry 天然不需要付的成本。
+2. Expert Work 的 TE-6b（always-defer-MCP）方向正确但**缺两块**：低于阈值的直通逃生门（小目录付了不必要的间接层）、自然语言 ranked 检索（现有 query 语法对模型不友好）。两者都有 Hermes 验证过的成熟形态可参照，且 Expert Work 的向量栈能做得比 BM25 更好。
 3. 建议处置：TE-6c-a/b 进 Stream HX backlog（与 HX-1 弱耦合，chars/4 版本可先行）；TE-6c-c 不做；`find_tools.py` docstring 过期问题顺手修。
 
 ---
@@ -218,9 +218,9 @@ Hermes 侧可直接搬运的设计资产：`should_activate` 的三态+兜底形
 
 1. **"cache 稳定 vs 治理干净"二选一（§6 对照表第 4 行）在 anthropic/openai 上是伪命题**——Anthropic append 语义、OpenAI allowed_tools 元数据各自同时给出两者。该 trade-off 仅在无原生支持的 provider 上存在（兜底档维持 promotion + 批量 + 压缩降级缓解）。
 2. **"薄存根全量可见"方案被否决**：曾考虑延迟工具以 ~20 token 存根常驻 bind（cache 稳 + 零跳发现）。RAG-MCP 的 13.6% 基线证明可见工具一多**选择准确率本身崩塌**——存根省 token 不省辨别负担。可见集必须小，发现靠检索。
-3. **"主力厂商是 Qwen 所以原生档可延期"被用户澄清纠正**：helix 目录 9 个 provider，平台定位不预设租户模型构成（通用平台原则）——原生档是目录级能力（CM-10 同例），不设观望条件。
+3. **"主力厂商是 Qwen 所以原生档可延期"被用户澄清纠正**：Expert Work 目录 9 个 provider，平台定位不预设租户模型构成（通用平台原则）——原生档是目录级能力（CM-10 同例），不设观望条件。
 
-**为何不照搬 Hermes 桥接结构**（讨论中明确）：桥接是它"无 dispatch 自主权、无 server 端支持、单机浅治理链"三约束下的被迫解。helix 照搬要付五笔账——治理面 unwrap 安全债（helix 6+ 层治理链 vs Hermes 3 层都出过洞）、最复杂调用协议给最弱模型（嵌套 arguments 高频出错）、跳数倒退（3 跳 vs call-through 后 1 跳）、cache 优势已被 API 原生方案取代、transcript 桥接调用污染长 thread 历史。借策略件（门控/检索/公理/防呆），不借结构件（桥接/unwrap/双重 gate）。
+**为何不照搬 Hermes 桥接结构**（讨论中明确）：桥接是它"无 dispatch 自主权、无 server 端支持、单机浅治理链"三约束下的被迫解。Expert Work 照搬要付五笔账——治理面 unwrap 安全债（Expert Work 6+ 层治理链 vs Hermes 3 层都出过洞）、最复杂调用协议给最弱模型（嵌套 arguments 高频出错）、跳数倒退（3 跳 vs call-through 后 1 跳）、cache 优势已被 API 原生方案取代、transcript 桥接调用污染长 thread 历史。借策略件（门控/检索/公理/防呆），不借结构件（桥接/unwrap/双重 gate）。
 
 ## 11. 最终拍板（2026-06-11，用户确认）
 

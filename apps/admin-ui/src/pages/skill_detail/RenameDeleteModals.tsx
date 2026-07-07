@@ -257,7 +257,7 @@ export function DeleteConfirmModal({
         onChange={(e) => setTyped(e.target.value)}
         placeholder={path}
         data-testid="skill-delete-confirm-input"
-        style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}
+        style={{ fontFamily: "var(--ew-font-mono)", fontSize: 12 }}
       />
     </Modal>
   );

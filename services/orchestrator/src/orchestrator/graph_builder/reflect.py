@@ -35,7 +35,7 @@ from typing import Any, Literal, cast
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import Plan, PlanStep, Reflection
+from expert_work.protocol import Plan, PlanStep, Reflection
 from orchestrator.graph_builder._config import cancellation_token, current_run_id
 from orchestrator.llm import LLMCaller
 from orchestrator.state import AgentState

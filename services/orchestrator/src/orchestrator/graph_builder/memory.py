@@ -32,9 +32,9 @@ from uuid import UUID, uuid4
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.common.search import mmr_select
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.common.uplift_metrics import (
+from expert_work.common.search import mmr_select
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.common.uplift_metrics import (
     record_memory_drift,
     record_memory_mmr,
     record_memory_reconcile,
@@ -43,12 +43,12 @@ from helix_agent.common.uplift_metrics import (
     record_memory_retrieval,
     record_memory_verify,
 )
-from helix_agent.persistence import MemoryStore
-from helix_agent.persistence.memory import MemoryWritebackDLQ
-from helix_agent.persistence.memory.base import MemoryInjectionBlockedError
-from helix_agent.persistence.tenant_config import TenantConfigStore
-from helix_agent.protocol import MemoryItem, MemoryRecallMode
-from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
+from expert_work.persistence import MemoryStore
+from expert_work.persistence.memory import MemoryWritebackDLQ
+from expert_work.persistence.memory.base import MemoryInjectionBlockedError
+from expert_work.persistence.tenant_config import TenantConfigStore
+from expert_work.protocol import MemoryItem, MemoryRecallMode
+from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
 from orchestrator.graph_builder._config import cancellation_token, configurable_uuid
 from orchestrator.llm import Embedder, LLMCaller
 from orchestrator.state import AgentState

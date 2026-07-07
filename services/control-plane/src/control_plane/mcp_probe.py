@@ -14,7 +14,7 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
 from orchestrator.tools.mcp import (
     MCPServerConfig,
     MCPToolDef,
@@ -22,7 +22,7 @@ from orchestrator.tools.mcp import (
     StreamableHttpMCPClient,
 )
 
-logger = logging.getLogger("helix.control_plane.mcp_probe")
+logger = logging.getLogger("expert_work.control_plane.mcp_probe")
 
 
 @runtime_checkable

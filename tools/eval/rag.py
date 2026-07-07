@@ -26,8 +26,8 @@ from uuid import UUID, uuid4
 
 import yaml
 
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.protocol import KnowledgeChunk
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.protocol import KnowledgeChunk
 
 _EVAL_DIR = _Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in _sys.path:

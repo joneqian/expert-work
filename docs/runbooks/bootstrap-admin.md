@@ -1,7 +1,7 @@
 # Bootstrap 第一个平台管理员(system_admin)
 
 > **生产推荐:邮箱首登自动升(Stream ACCT)。** 部署时设 env
-> `HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL=<运维负责人邮箱>`。该邮箱用户**首次**用
+> `EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL=<运维负责人邮箱>`。该邮箱用户**首次**用
 > 已验证(`email_verified=true`)的 Keycloak JWT 登录、且系统**当前零 platform admin**
 > 时,自动获 `system_admin` 绑定 —— 无需跑下文脚本。**安全闸**:一旦系统存在任一
 > platform admin(脚本或 API 授的),此自动升永久不再触发,不能用于事后提权。
@@ -47,23 +47,23 @@ curl -sS http://localhost:8000/healthz/ready | python3 -m json.tool   # status: 
 `bootstrap_admin` 要的 `--subject-id` 必须等于 Keycloak 用户的 JWT `sub` claim
 (`resolve_system_admin` 用 `UUID(principal.subject_id)` 匹配;填 email 会被静默跳过)。
 
-dev realm(`infra/keycloak/realm-helix-agent.json`)预置用户 `dev` / 密码 `devpass`,
+dev realm(`infra/keycloak/realm-expert-work.json`)预置用户 `dev` / 密码 `devpass`,
 但其 `id` 由 Keycloak 导入时生成,需查一次:
 
 **方式 A — Keycloak Admin Console(推荐,可靠)**
-1. 开 `http://localhost:8080`,用 `admin` / `admin_dev` 登录(compose env `HELIX_KEYCLOAK_ADMIN(_PASSWORD)`)。
-2. 左上 realm 切到 `helix-agent` → Users → 点 `dev`。
+1. 开 `http://localhost:8080`,用 `admin` / `admin_dev` 登录(compose env `EXPERT_WORK_KEYCLOAK_ADMIN(_PASSWORD)`)。
+2. 左上 realm 切到 `expert-work` → Users → 点 `dev`。
 3. 复制 **ID** 字段(形如 `3f8c…` 的 UUID)—— 这就是 `sub`。
 
 **方式 B — 服务账号 Admin API(可脚本化)**
 ```sh
 # admin-ui 是 PKCE 公有客户端,已禁用 password grant。改用服务账号
-# helix-agent-api-internal(client_credentials + manage-users)查用户 id:
+# expert-work-api-internal(client_credentials + manage-users)查用户 id:
 SA_TOKEN=$(curl -sS -X POST \
-  http://localhost:8080/realms/helix-agent/protocol/openid-connect/token \
-  -d grant_type=client_credentials -d client_id=helix-agent-api-internal \
+  http://localhost:8080/realms/expert-work/protocol/openid-connect/token \
+  -d grant_type=client_credentials -d client_id=expert-work-api-internal \
   -d client_secret=dev-internal-secret-rotate-me | jq -r .access_token)
-curl -sS "http://localhost:8080/admin/realms/helix-agent/users?username=dev&exact=true" \
+curl -sS "http://localhost:8080/admin/realms/expert-work/users?username=dev&exact=true" \
   -H "Authorization: Bearer ${SA_TOKEN}" | jq -r '.[0].id'
 ```
 
@@ -72,9 +72,9 @@ curl -sS "http://localhost:8080/admin/realms/helix-agent/users?username=dev&exac
 ## 2. 跑 bootstrap
 
 ```sh
-cd /Users/mac/src/github/jone_qian/helix-agent
-# DSN 默认取 Settings.db_dsn(本地 postgresql+asyncpg://…@localhost:6432/helix_agent_dev);
-# 也可 --dsn 覆盖或 export HELIX_AGENT_DB_DSN=…
+cd /Users/mac/src/github/jone_qian/expert-work
+# DSN 默认取 Settings.db_dsn(本地 postgresql+asyncpg://…@localhost:6432/expert_work_dev);
+# 也可 --dsn 覆盖或 export EXPERT_WORK_DB_DSN=…
 uv run python -m control_plane.bootstrap_admin --subject-id <上一步的 UUID>
 ```
 
@@ -105,12 +105,12 @@ curl -sS http://localhost:8000/v1/me -H "Authorization: Bearer <token>" | jq '{i
 ## 4. 登录 admin-ui(本地)
 
 - admin-ui dev server 默认端口 **5173**(`apps/admin-ui/vite.config.ts`)。
-- dev realm 的 `helix-agent-admin-ui` client `redirectUris` / `webOrigins` 已对齐到
+- dev realm 的 `expert-work-admin-ui` client `redirectUris` / `webOrigins` 已对齐到
   `http://localhost:5173/*`(Stream R W4),5173 起前端直接走 OIDC 授权码流即可。
 - 配 OIDC env(`apps/admin-ui/.env.development.local`):
   ```
-  VITE_OIDC_ISSUER=http://localhost:8080/realms/helix-agent
-  VITE_OIDC_CLIENT_ID=helix-agent-admin-ui
+  VITE_OIDC_ISSUER=http://localhost:8080/realms/expert-work
+  VITE_OIDC_CLIENT_ID=expert-work-admin-ui
   ```
 - 登录后 `/v1/me` 返回服务端真实 `is_system_admin`(本地解码的 roles 不可信)。
 
@@ -122,12 +122,12 @@ curl -sS http://localhost:8000/v1/me -H "Authorization: Bearer <token>" | jq '{i
 agent 回话需要一个真 provider key。
 
 **key 值只活在 SecretStore 里,绝不入仓、绝不靠进程 env。** 关键机制:dev 用
-`local_dev` SecretStore,它**只读一个 `name=value` 文件**(`HELIX_AGENT_SECRET_STORE_ENV_FILE`),
+`local_dev` SecretStore,它**只读一个 `name=value` 文件**(`EXPERT_WORK_SECRET_STORE_ENV_FILE`),
 **不读 `ANTHROPIC_API_KEY` 这类进程环境变量**。所有 key 最终都经
 `secret_store.get(<name>)` 取值,其中:
 
 - **agent 主对话模型** ← manifest 的 `model.api_key_ref`(canonical manifest 写的是
-  `secret://helix-agent/dev/llm/anthropic-api-key`)直接走 SecretStore。
+  `secret://expert-work/dev/llm/anthropic-api-key`)直接走 SecretStore。
 - **embedder(Phase 2 长记忆)/ reranker / web_search** ← 平台/租户凭证
   `resolve_provider`/`resolve_tool` 返回一个 `secret://…` ref,**同样**再过一次 SecretStore 取值。
 
@@ -137,11 +137,11 @@ agent 回话需要一个真 provider key。
 # 1. 拷模板 → 填真 key(.local 已被 *.local gitignore,绝不提交)
 cp infra/dev-keys/dev-llm-keys.example infra/dev-keys/dev-llm-keys.local
 $EDITOR infra/dev-keys/dev-llm-keys.local
-#   helix-agent/dev/llm/anthropic-api-key=sk-ant-<真key>      # ← 主对话模型(必填)
+#   expert-work/dev/llm/anthropic-api-key=sk-ant-<真key>      # ← 主对话模型(必填)
 #   # 跑 Phase 2 记忆 / web_search 时,再把 embedder / tavily 的 ref 名也填进来
 
 # 2. 起栈:compose 已把 infra/dev-keys 挂进 control-plane 并设好
-#    HELIX_AGENT_SECRET_STORE_ENV_FILE(见 infra/docker-compose.yml)
+#    EXPERT_WORK_SECRET_STORE_ENV_FILE(见 infra/docker-compose.yml)
 cd infra && docker compose --profile full up -d
 ```
 
@@ -154,6 +154,6 @@ cd infra && docker compose --profile full up -d
 
 ## 6. 安全
 
-- 脚本只在 `HELIX_AGENT_DB_DSN` 指向可写 DB 时能跑 —— 受网络 + DB 凭证(ops 掌握)天然门控,无 HTTP 暴露。
+- 脚本只在 `EXPERT_WORK_DB_DSN` 指向可写 DB 时能跑 —— 受网络 + DB 凭证(ops 掌握)天然门控,无 HTTP 暴露。
 - 它只写 **一行** binding,不删、不提权既有行。
 - 这是**唯一**绕过"is_system_admin 才能授 is_system_admin"的代码路径,且需 infra 级访问。生产:从受控 ops 主机/跳板跑一次,用后收紧 DB 凭证;之后授权全走审计化 API。

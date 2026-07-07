@@ -32,7 +32,7 @@ from verify_live_compaction import (  # noqa: E402
     run_compaction_check,
 )
 
-_FACT = "HELIX-TESTCODE"
+_FACT = "EXPERT_WORK-TESTCODE"
 
 
 def _frames(*frames: str) -> bytes:

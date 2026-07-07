@@ -25,9 +25,9 @@
 #       --profile full up -d --no-deps control-plane-blue control-plane-green
 #   uv run python tools/ha/verify_queue.py
 x-queue-oidc: &queue-oidc
-  HELIX_AGENT_OIDC_ISSUER: http://localhost:8080/realms/helix-agent
-  HELIX_AGENT_OIDC_JWKS_URI: http://keycloak:8080/realms/helix-agent/protocol/openid-connect/certs
-  HELIX_AGENT_OIDC_AUDIENCE: '["helix-agent-api-internal","helix-agent-admin-ui"]'
+  EXPERT_WORK_OIDC_ISSUER: http://localhost:8080/realms/expert-work
+  EXPERT_WORK_OIDC_JWKS_URI: http://keycloak:8080/realms/expert-work/protocol/openid-connect/certs
+  EXPERT_WORK_OIDC_AUDIENCE: '["expert-work-api-internal","expert-work-admin-ui"]'
 
 services:
   control-plane-blue:
@@ -35,7 +35,7 @@ services:
       <<: *queue-oidc
       # Blue only enqueues — its queue worker is OFF so the run stays
       # ``queued`` until GREEN (a different instance) claims it.
-      HELIX_AGENT_ENABLE_RUN_QUEUE_WORKER: "false"
+      EXPERT_WORK_ENABLE_RUN_QUEUE_WORKER: "false"
 
   control-plane-green:
     ports: !override

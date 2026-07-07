@@ -24,7 +24,7 @@ from langchain_core.runnables import RunnableConfig
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import (
     GraphRunner,
     ToolContext,
@@ -168,8 +168,8 @@ def _spans(*spans: _FakeSpan) -> Sequence[ReadableSpan]:
 
 def test_error_span_fails() -> None:
     spans = _spans(
-        _FakeSpan("helix.orchestrator.tool_call", {"tool": "echo"}),
-        _FakeSpan("helix.orchestrator.llm_call", status=_Status(StatusCode.ERROR)),
+        _FakeSpan("expert_work.orchestrator.tool_call", {"tool": "echo"}),
+        _FakeSpan("expert_work.orchestrator.llm_call", status=_Status(StatusCode.ERROR)),
     )
     result = evaluate_trace(spans, TraceExpectation(), case_id="err")
     assert not result.passed
@@ -177,7 +177,7 @@ def test_error_span_fails() -> None:
 
 
 def test_require_suffix_missing_fails() -> None:
-    spans = _spans(_FakeSpan("helix.orchestrator.llm_call"))
+    spans = _spans(_FakeSpan("expert_work.orchestrator.llm_call"))
     result = evaluate_trace(
         spans,
         TraceExpectation(require_span_suffixes=frozenset({".run"})),

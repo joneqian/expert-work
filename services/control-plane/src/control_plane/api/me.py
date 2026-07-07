@@ -2,7 +2,7 @@
 
 Stream H.1b PR 2a. The Admin UI used to decode the JWT in-browser to
 discover ``tenant_id`` / ``is_system_admin`` / ``subject_type``. That
-worked for OIDC tokens but produced no information for opaque helix
+worked for OIDC tokens but produced no information for opaque expert_work
 API keys (the UI saw only the bearer prefix). Stream N also adds a
 server-side ``is_system_admin`` augmentation that the JWT itself does
 not carry — so the JWT-local decode is no longer authoritative.
@@ -46,14 +46,14 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict
 
 from control_plane.settings import Settings
-from helix_agent.protocol import Principal
+from expert_work.protocol import Principal
 
 
 def _get_settings(request: Request) -> Settings:
     return request.app.state.settings  # type: ignore[no-any-return]
 
 
-logger = logging.getLogger("helix.control_plane.api.me")
+logger = logging.getLogger("expert_work.control_plane.api.me")
 
 
 class MeResponse(BaseModel):

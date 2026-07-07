@@ -64,20 +64,20 @@ from control_plane.tenant_scope import (
 )
 from control_plane.tenant_status import TenantStatusService
 from control_plane.transcript import read_turns
-from helix_agent.common.observability import (
+from expert_work.common.observability import (
     current_trace_id_hex,
-    helix_counter,
-    helix_histogram,
+    expert_work_counter,
+    expert_work_histogram,
 )
-from helix_agent.common.spotlight import spotlight_untrusted
-from helix_agent.persistence import ApprovalStore
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.rls import current_user_id_var
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.persistence.thread_meta import ThreadMetaStore
-from helix_agent.persistence.token_usage_store import TokenTotals, TokenUsageStore
-from helix_agent.persistence.workspace import UserWorkspaceStore
-from helix_agent.protocol import (
+from expert_work.common.spotlight import spotlight_untrusted
+from expert_work.persistence import ApprovalStore
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.rls import current_user_id_var
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.persistence.thread_meta import ThreadMetaStore
+from expert_work.persistence.token_usage_store import TokenTotals, TokenUsageStore
+from expert_work.persistence.workspace import UserWorkspaceStore
+from expert_work.protocol import (
     AgentSpec,
     ApprovalStatus,
     AuditAction,
@@ -85,17 +85,17 @@ from helix_agent.protocol import (
     ThreadStatus,
     canonical_args_digest,
 )
-from helix_agent.protocol.multimodal import parse_image_ref
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunEventStore, RunStore
-from helix_agent.runtime.runs.schemas import TERMINAL_RUN_STATUSES, RunStatus
-from helix_agent.runtime.runs.store import MAX_LIST_LIMIT, _clamp_limit
-from helix_agent.runtime.stream_bridge import END_SENTINEL, HEARTBEAT_SENTINEL
+from expert_work.protocol.multimodal import parse_image_ref
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunEventStore, RunStore
+from expert_work.runtime.runs.schemas import TERMINAL_RUN_STATUSES, RunStatus
+from expert_work.runtime.runs.store import MAX_LIST_LIMIT, _clamp_limit
+from expert_work.runtime.stream_bridge import END_SENTINEL, HEARTBEAT_SENTINEL
 from orchestrator import AgentFactoryError, BuiltAgent, run_agent, sse_consumer
 from orchestrator.multimodal import image_ref_block
 from orchestrator.sse import format_sse
 
-logger = logging.getLogger("helix.control_plane.runs")
+logger = logging.getLogger("expert_work.control_plane.runs")
 
 #: Char cap for the free-text ``input`` message field (this endpoint and the
 #: external ``ExternalRunRequest``). This is the prompt the user types/pastes —
@@ -110,7 +110,7 @@ MAX_RUN_INPUT_CHARS: Final[int] = 65536
 
 class RunRequest(BaseModel):
     """POST body. ``input`` is the user's prompt for this run;
-    ``image_refs`` is the list of J.6 ``helix://image/...`` references
+    ``image_refs`` is the list of J.6 ``expert_work://image/...`` references
     uploaded via ``POST /v1/sessions/{thread_id}/uploads``."""
 
     model_config = ConfigDict(extra="forbid")
@@ -125,7 +125,7 @@ class RunRequest(BaseModel):
     image_refs: list[str] = Field(default_factory=list, max_length=64)
     #: Stream PI-1c — structured untrusted input. A business system passes
     #: the data to act on (a ticket / email / document) here instead of
-    #: concatenating it into ``input``, so helix knows which span is
+    #: concatenating it into ``input``, so expert_work knows which span is
     #: attacker-controllable and fences it with spotlighting before the
     #: model sees it. The matching system-prompt clause tells the model to
     #: treat fenced content as DATA, never instructions — the root fix for
@@ -267,7 +267,7 @@ def _build_human_message(
     provider adapter resolves them to native multimodal payloads.
 
     Path B (``supports_vision=False`` with images) — emit plain text
-    with each ref mentioned as ``[image attached: helix://...]``. The
+    with each ref mentioned as ``[image attached: expert_work://...]``. The
     agent has the ``ask_image`` tool in its catalogue and uses these
     refs to call it.
 
@@ -881,7 +881,7 @@ async def spawn_run(
     headers = {
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
-        "X-Helix-Run-Id": str(run_id),
+        "X-Expert-Work-Run-Id": str(run_id),
     }
     if extra_headers:
         headers.update(extra_headers)
@@ -1123,7 +1123,7 @@ def build_runs_router() -> APIRouter:
         if run_status is None and approval is None:
             raise HTTPException(status_code=404, detail="run not found")
         status = run_status or (approval.status.value if approval is not None else "unknown")
-        # Run summary — token usage joined by trace_id (helix's own token_usage,
+        # Run summary — token usage joined by trace_id (expert_work's own token_usage,
         # no Langfuse round-trip). Scoped to the caller's tenant so RLS applies
         # (token_usage isolation rides on the tenant GUC, set by applied_scope).
         tokens: dict[str, Any] | None = None
@@ -1220,7 +1220,7 @@ def build_runs_router() -> APIRouter:
         try:
             # Shared extraction with the transcript mirror sweep (IA M4) —
             # one definition of "a transcript turn". RT-ADR-9: the bubble view
-            # hides orchestrator scaffolding (``helix_hide_from_ui``), but the
+            # hides orchestrator scaffolding (``expert_work_hide_from_ui``), but the
             # cross-tenant audit drill-in (``target_tenant`` differs — the same
             # signal that emits the SESSION_READ audit row above) sees the
             # faithful transcript. The durable record + search mirror always do.
@@ -1319,8 +1319,8 @@ def build_runs_router() -> APIRouter:
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
-                "X-Helix-Run-Id": str(run_id),
-                "X-Helix-Stream-Mode": "replay" if is_terminal else "live",
+                "X-Expert-Work-Run-Id": str(run_id),
+                "X-Expert-Work-Stream-Mode": "replay" if is_terminal else "live",
             },
         )
 
@@ -1368,7 +1368,7 @@ def build_runs_router() -> APIRouter:
         # Stream 13.2 — idempotent replay: the continuation already exists (it
         # may have finished), so there is no live worker to stream. Return its
         # id; the client re-attaches via GET .../runs/{id}/events (H.3 durable
-        # mirror). Keep ``X-Helix-Run-Id`` so both paths surface it uniformly.
+        # mirror). Keep ``X-Expert-Work-Run-Id`` so both paths surface it uniformly.
         if replayed:
             return JSONResponse(
                 {
@@ -1376,7 +1376,7 @@ def build_runs_router() -> APIRouter:
                     "data": {"run_id": str(continuation_run_id), "idempotent_replay": True},
                     "error": None,
                 },
-                headers={"X-Helix-Run-Id": str(continuation_run_id)},
+                headers={"X-Expert-Work-Run-Id": str(continuation_run_id)},
             )
         return StreamingResponse(
             sse_consumer(
@@ -1390,7 +1390,7 @@ def build_runs_router() -> APIRouter:
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
-                "X-Helix-Run-Id": str(continuation_run_id),
+                "X-Expert-Work-Run-Id": str(continuation_run_id),
             },
         )
 
@@ -1421,13 +1421,13 @@ def runtime_run_status(request: Request, run_id: UUID) -> str | None:
 
 # Prometheus signals — declared at module import (idempotent collector
 # registry handles double-import in tests).
-_RUN_LIST_TOTAL = helix_counter(
-    "helix_control_plane_run_list_total",
+_RUN_LIST_TOTAL = expert_work_counter(
+    "expert_work_control_plane_run_list_total",
     "GET /v1/runs invocations by tenant scope.",
     ("tenant_scope",),
 )
-_RUN_LIST_SECONDS = helix_histogram(
-    "helix_control_plane_run_list_seconds",
+_RUN_LIST_SECONDS = expert_work_histogram(
+    "expert_work_control_plane_run_list_seconds",
     "GET /v1/runs latency in seconds.",
 )
 
@@ -1436,7 +1436,7 @@ def _tokens_to_dict(tokens: TokenTotals | None) -> dict[str, Any] | None:
     """Serialise a run's aggregated token usage (``None`` → no usage recorded).
 
     The Runs list + detail read this to show "what happened" without a
-    Langfuse round-trip; the numbers come from helix's own ``token_usage``
+    Langfuse round-trip; the numbers come from expert_work's own ``token_usage``
     (G.9), joined to the run by ``trace_id``.
     """
     if tokens is None:

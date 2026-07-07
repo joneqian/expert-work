@@ -220,7 +220,7 @@ export function SetupWizard() {
               <Input.Password
                 autoComplete="off"
                 data-testid="setup-token"
-                style={{ fontFamily: "var(--hx-font-mono, ui-monospace)" }}
+                style={{ fontFamily: "var(--ew-font-mono, ui-monospace)" }}
               />
             </Form.Item>
 
@@ -282,7 +282,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         alignItems: "center",
         justifyContent: "center",
         padding: 24,
-        background: "var(--hx-surface-base)",
+        background: "var(--ew-surface-base)",
       }}
     >
       <Card

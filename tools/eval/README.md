@@ -7,11 +7,11 @@ regression guard. No promptfoo, no Node (Mini-ADR G-3 in
 ## Run
 
 ```bash
-python tools/eval/helix_eval.py tools/eval/datasets/example.yaml
+python tools/eval/expert_work_eval.py tools/eval/datasets/example.yaml
 ```
 
 Exits 0 when every case passes, 1 otherwise. The harness is also
-exercised by `tools/eval/test_helix_eval.py` in the gating `Test
+exercised by `tools/eval/test_expert_work_eval.py` in the gating `Test
 (pytest)` CI job.
 
 ## Eval-set format
@@ -89,7 +89,7 @@ discordant counts, no built-in winner threshold):
 python tools/eval/prompt_ab.py \
   --eval-set tools/eval/datasets/example.yaml \
   --spec-a variant_a.yaml --spec-b variant_b.yaml \
-  --provider env --llm-model qwen3.5-plus   # HELIX_EVAL_LLM_API_KEY / _BASE_URL
+  --provider env --llm-model qwen3.5-plus   # EXPERT_WORK_EVAL_LLM_API_KEY / _BASE_URL
 ```
 
 Variants are manifest YAML files — export a revision snapshot via

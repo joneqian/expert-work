@@ -29,7 +29,7 @@
 - **修订**：以 16 为准；10 § 5.3 改名；16 § 3.3 加可选 `model` 字段；明确 `actual_tokens = input + output`，cache_read/creation 单独走 metric
 
 #### A2. M0 sandbox 出站走 Credential Proxy 工作模式（透明 vs 显式）矛盾
-- **位置**：`11-credential-proxy.md` § 4.1（显式 `X-Helix-Upstream`）/ `21-network-policy.md` § 5.4（iptables REDIRECT 透明）
+- **位置**：`11-credential-proxy.md` § 4.1（显式 `X-Expert-Work-Upstream`）/ `21-network-policy.md` § 5.4（iptables REDIRECT 透明）
 - **冲突**：M0 描述完全相反；21 § 5.5 验收用例与 11 § 5.2 互斥
 - **修订**：M0 选**显式代理**；改 21 § 5.4 为"iptables 仅放行 credential-proxy.internal:443"；21 § 5.5 验收第 1 条改"必须 connection refused"；M1 升级 Envoy 后再切透明
 
@@ -63,18 +63,18 @@
 
 ### 可观测性类
 
-#### C1. **批量重命名** — 7 篇 metric/span 缺 `helix_` / `helix.*` 前缀
+#### C1. **批量重命名** — 7 篇 metric/span 缺 `expert_work_` / `expert_work.*` 前缀
 - **位置**：`10/11/12/13/18/21/22` § 7（共约 50+ 个 metric）
-- **修订**：批量加前缀 `helix_*`（snake_case）/ `helix.{component}.{action}`；可机械替换
+- **修订**：批量加前缀 `expert_work_*`（snake_case）/ `expert_work.{component}.{action}`；可机械替换
 
 #### C2. 23 `pgvector_search_latency_ms` 单位错误
 - **位置**：`23-postgres-scalability.md` § 7
-- **修订**：histogram 必须 `_seconds`，改 `helix_pgvector_search_latency_seconds`
+- **修订**：histogram 必须 `_seconds`，改 `expert_work_pgvector_search_latency_seconds`
 
 ### 安全/多租户类
 
 #### D1. **RLS session 变量名三处不一致**（最危险，RLS 静默失效）
-- **位置**：`13` 用 `app.current_tenant`、`15` § 4.3 用 `helix.tenant`、`23` § 8 用 `app.tenant_id`
+- **位置**：`13` 用 `app.current_tenant`、`15` § 4.3 用 `expert_work.tenant`、`23` § 8 用 `app.tenant_id`
 - **修订**：统一为 `app.tenant_id`（与 `tenant_id` 列名匹配）；CI 加 lint 校验所有 RLS policy 引用一致
 
 #### D2. `manifest_signature` 主键缺 tenant — 跨租户签名复用漏洞
@@ -105,7 +105,7 @@
   5. 摘要 LLM 选型：用更便宜的模型（如 Haiku）+ 独立 quota bucket
   6. prefix cache 协同：摘要点必须稳定（同一 session 多次压缩用同一前缀）→ 否则 cache 全 miss、成本爆 10×
   7. 失败模式：摘要 LLM 也失败 → 退化为简单截断（保留最近 K 轮）
-  8. 观测：emit `helix_context_compression_total{trigger,outcome}` / `helix_context_size_tokens` 直方图
+  8. 观测：emit `expert_work_context_compression_total{trigger,outcome}` / `expert_work_context_size_tokens` 直方图
   - 同时修订 13/19/10 三处引用，统一指向 27 doc 的接口
 - **优先级**：**P0**（M0 上线后第一周必踩 context 爆问题；架构债）
 
@@ -127,9 +127,9 @@
 
 ### 可观测性类
 
-- **C3**：`helix_quota_reject_total` (16) vs `helix_quota_exceeded_total` (20) 同义重复 → 统一 `_exceeded_total`，但保留 16 的 `reason` label
-- **C4**：`helix_audit_write_latency_seconds` (17) vs `helix_event_log_append_duration_seconds` (20) 措辞分歧 → 统一 `_duration_seconds`
-- **C5**：`pg_connections_active` (23) vs `helix_pg_connection_pool_in_use` (20) → 统一为后者
+- **C3**：`expert_work_quota_reject_total` (16) vs `expert_work_quota_exceeded_total` (20) 同义重复 → 统一 `_exceeded_total`，但保留 16 的 `reason` label
+- **C4**：`expert_work_audit_write_latency_seconds` (17) vs `expert_work_event_log_append_duration_seconds` (20) 措辞分歧 → 统一 `_duration_seconds`
+- **C5**：`pg_connections_active` (23) vs `expert_work_pg_connection_pool_in_use` (20) → 统一为后者
 - **C6**：补充 20 关键 metric 清单（吸纳 14 sandbox_pool_size、19 resume_total、21 egress_meta_attempt_total、22 backup_age_seconds、24 subagent_total/depth、25 hitl_pending_total、26 eval_gate_decision_total）
 
 ### 安全/多租户类
@@ -161,9 +161,9 @@
 
 #### E3. 完整 lifecycle 追踪端到端设计缺失 ⚠️ 用户追加
 - **位置**：`20-observability.md`（命名规范、metric、cardinality 都有）
-- **现状**：span 命名 `helix.{component}.{action}` + trace_id W3C 传递 + 关键 attrs（tenant/agent/agent_version/session_id）
+- **现状**：span 命名 `expert_work.{component}.{action}` + trace_id W3C 传递 + 关键 attrs（tenant/agent/agent_version/session_id）
 - **缺口**：未定义"从 session 创建到完成的完整生命周期 trace 设计"
-  - **session root span**：`helix.session.run` 是根 span？所有 LLM/tool/sandbox 子 span 挂它下面？未明示
+  - **session root span**：`expert_work.session.run` 是根 span？所有 LLM/tool/sandbox 子 span 挂它下面？未明示
   - **subagent trace 关系**：`24-subagent-execution.md` § 7 选了"child 用新 trace + Link 关联 parent"，但 20 doc 没把这定为统一规则；其他子 trace（HITL pause、durable resume）该不该新 trace？
   - **长会话 trace 持久化**：HITL pause 数小时 → OTel span 默认 in-memory，会被 OTLP exporter flush 后丢；resume 时如何"接续"原 trace（同一 session 的 trace 应该可拼接）
   - **replay 时 trace 处理**：副作用工具命中 idempotency_key 不重 execute 时，是否 emit 新 span？trace 标记 `replayed=true`？
@@ -172,7 +172,7 @@
     - 按 `session_id` 拉完整 trace tree（所有 span + 父子关系 + 关键 attrs + log）
     - 按 `agent_name + version + 时间窗口` 列出最近 N 个 session 的 trace 概要
     - 按 `error class` 反查涉及的 session
-  - **关键事件标注**：哪些 span 设 `helix.critical=true`（决策点、HITL 触发、降级触发、quota 拒绝）方便 dashboard 高亮
+  - **关键事件标注**：哪些 span 设 `expert_work.critical=true`（决策点、HITL 触发、降级触发、quota 拒绝）方便 dashboard 高亮
 - **修订**：在 20 doc 增加新章节 `§ 5.X Agent 生命周期完整追踪`，明确：
   1. session root span 规范（必填 attrs、最长 7 天 TTL、跨 trace 拼接 ID `session_trace_group_id`）
   2. 子 trace 拆分规则（subagent 新 trace + Link；HITL/Durable resume 也用新 trace + Link，原因：长 pause 期间 OTel TTL 限制）
@@ -197,7 +197,7 @@
 ### 可观测性
 - **C7**：12 篇子系统 § 7 未引用 20 号 log 必填字段约定 → 加一句"完整字段遵循 [20 § 5.3]"
 - **C8**：14/15/17/18/22/23 span attrs 列表缺 `agent_version`（15 `auth.login` early-bind 可豁免）
-- **C9**：补 13 memory + 16 quota 调 redis 时 emit `helix_redis_command_duration_seconds`
+- **C9**：补 13 memory + 16 quota 调 redis 时 emit `expert_work_redis_command_duration_seconds`
 
 ### 安全
 - **D14**：21 补一句"HITL 回调走 control plane 入站，不影响 21"
@@ -212,7 +212,7 @@
 ### Phase 1：批量机械修订（半天）
 > 适合一个开发者集中处理；可逐一 commit
 
-1. **C1 批量加前缀**：sed-style 替换 7 篇 doc § 7 的 metric/span（`s/^llm_gateway_/helix_llm_gateway_/` 等）
+1. **C1 批量加前缀**：sed-style 替换 7 篇 doc § 7 的 metric/span（`s/^llm_gateway_/expert_work_llm_gateway_/` 等）
 2. **B2 列名统一**：DDL 全 `tenant_id`；Pydantic 全 `tenant`
 3. **B1 / B3 / B4**：单点修订
 4. **C2** 单位修订
@@ -244,7 +244,7 @@
 | M0 出站代理模式 | 显式 vs 透明 | 显式（与 11 § 9 一致）|
 | MCP gateway 取 secret 方式 | (a) 走 11 forward / (b) 加 admin secret API | (a) |
 | memory client 网络拓扑 | sandbox 内直连 / orchestrator 转发 | orchestrator 转发 |
-| RLS session 变量名 | `app.tenant_id` / `app.current_tenant` / `helix.tenant` | `app.tenant_id` |
+| RLS session 变量名 | `app.tenant_id` / `app.current_tenant` / `expert_work.tenant` | `app.tenant_id` |
 | `actor_id` 类型 | TEXT / UUID | TEXT（兼容 service_account 字符串）|
 | subagent quota 计费 | child 层 reservation + lead 累加 / lead 层独占 | child 层 + lead 累加（防爆+独立计）|
 | **上下文压缩落点** | 新建 27-context-compression.md / 集中到 13 § 5 | **新建 27**（横切机制属 middleware 层，不是 memory store 内部细节）|

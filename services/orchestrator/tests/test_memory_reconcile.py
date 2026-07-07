@@ -16,9 +16,9 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from helix_agent.persistence import InMemoryMemoryStore
-from helix_agent.protocol import MemoryItem
-from helix_agent.runtime.cancellation import CancellationToken
+from expert_work.persistence import InMemoryMemoryStore
+from expert_work.protocol import MemoryItem
+from expert_work.runtime.cancellation import CancellationToken
 from orchestrator.graph_builder.memory import flush_messages_to_memory
 from orchestrator.tools.registry import ToolSpec
 

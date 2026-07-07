@@ -1,6 +1,6 @@
 """Keycloak Admin integration — Stream R (member account provisioning).
 
-helix is the orchestrator; Keycloak is the single IdP. This package provisions
+expert_work is the orchestrator; Keycloak is the single IdP. This package provisions
 member accounts (``create_user`` + native set-password email) so a tenant admin
 can invite employees without anyone touching the Keycloak console. See
 ``docs/streams/STREAM-R-DESIGN.md`` § 4.

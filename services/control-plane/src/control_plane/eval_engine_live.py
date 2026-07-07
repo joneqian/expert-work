@@ -39,7 +39,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from control_plane.eval_worker import EvalCaseOutcome, EvalEngine
-from helix_agent.persistence.rls import current_tenant_id_var
+from expert_work.persistence.rls import current_tenant_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,7 @@ class LiveEvalHarness:
     Trace capture is **additive**: a private in-memory exporter is attached
     to the process's existing tracer provider (never replacing it, so real
     span export is untouched), and each traced run is isolated to its own
-    ``helix.eval.run`` trace id — concurrent real runs in the same process
+    ``expert_work.eval.run`` trace id — concurrent real runs in the same process
     can't pollute the captured spans.
     """
 
@@ -221,14 +221,14 @@ class LiveEvalHarness:
         return exporter
 
     def _build_spec(self) -> object:
-        from helix_agent.protocol import AgentSpec
+        from expert_work.protocol import AgentSpec
 
         return AgentSpec.model_validate(
             {
-                "apiVersion": "helix.io/v1",
+                "apiVersion": "expert_work.io/v1",
                 "kind": "Agent",
                 "metadata": {
-                    "name": "helix-eval-harness",
+                    "name": "expert-work-eval-harness",
                     "version": "1.0.0",
                     "tenant": "eval",
                 },
@@ -284,10 +284,10 @@ class LiveEvalHarness:
     async def respond_traced(self, prompt: str, *, tenant_id: UUID) -> Sequence[object]:
         if self._exporter is None:
             return []
-        from helix_agent.common.observability import HelixComponent, helix_span
+        from expert_work.common.observability import ExpertWorkComponent, expert_work_span
 
         self._exporter.clear()  # type: ignore[attr-defined]
-        with helix_span(HelixComponent.EVAL, "run") as root:
+        with expert_work_span(ExpertWorkComponent.EVAL, "run") as root:
             trace_id = root.get_span_context().trace_id
             await self._run(prompt, tenant_id=tenant_id)
         spans = [

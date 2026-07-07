@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
+from expert_work.runtime.cancellation import CANCELLATION_TOKEN_KEY, CancellationToken
 from orchestrator.graph_builder.builder import _build_tool_context
 
 

@@ -8,20 +8,20 @@
 
 **Tech Stack:** Alembic/SQLAlchemy, FastAPI, pytest; React/Antd/Vitest/Playwright.
 
-**Audit note:** `AuditAction` is a SINGLE `StrEnum` in `packages/helix-protocol/src/helix_agent/protocol/audit.py` — add `TENANT_DEACTIVATE`/`TENANT_ACTIVATE` in ONE place (the "double Literal" in the design doc was over-cautious; only `ResourceType` is duplicated, and we reuse the existing `"tenant"` resource_type, so no ResourceType change).
+**Audit note:** `AuditAction` is a SINGLE `StrEnum` in `packages/expert-work-protocol/src/expert_work/protocol/audit.py` — add `TENANT_DEACTIVATE`/`TENANT_ACTIVATE` in ONE place (the "double Literal" in the design doc was over-cautious; only `ResourceType` is duplicated, and we reuse the existing `"tenant"` resource_type, so no ResourceType change).
 
 ---
 
 ## Task 1: `status` column + protocol + store + list summary
 
 **Files:**
-- `packages/helix-persistence/migrations/versions/0053_tenant_status.py` (create)
-- `packages/helix-persistence/src/helix_agent/persistence/models/tenant_config.py` (add column)
-- `packages/helix-protocol/src/helix_agent/protocol/tenant_config.py` (add `TenantStatus` + `status` field)
-- `packages/helix-protocol/src/helix_agent/protocol/__init__.py` (export `TenantStatus` if siblings are exported)
+- `packages/expert-work-persistence/migrations/versions/0053_tenant_status.py` (create)
+- `packages/expert-work-persistence/src/expert_work/persistence/models/tenant_config.py` (add column)
+- `packages/expert-work-protocol/src/expert_work/protocol/tenant_config.py` (add `TenantStatus` + `status` field)
+- `packages/expert-work-protocol/src/expert_work/protocol/__init__.py` (export `TenantStatus` if siblings are exported)
 - `.../persistence/tenant_config/{base,sql,memory}.py` (add `set_status` + map status in `_row_to_record` + memory create default)
 - `services/control-plane/src/control_plane/api/tenants.py` (GET summary includes `status`)
-- Tests: `packages/helix-persistence/tests/test_in_memory_tenant_config_store.py`, `services/control-plane/tests/test_tenants_api.py`
+- Tests: `packages/expert-work-persistence/tests/test_in_memory_tenant_config_store.py`, `services/control-plane/tests/test_tenants_api.py`
 
 - [ ] **Step 1: Migration**
 
@@ -46,7 +46,7 @@ op.create_check_constraint(
 
 - [ ] **Step 2: Verify single alembic head**
 
-Run: `cd packages/helix-persistence && uv run alembic heads 2>&1 | tail` → expect single head `0053_tenant_status`. (revision id "0053_tenant_status" = 18 chars ≤ 32.)
+Run: `cd packages/expert-work-persistence && uv run alembic heads 2>&1 | tail` → expect single head `0053_tenant_status`. (revision id "0053_tenant_status" = 18 chars ≤ 32.)
 
 - [ ] **Step 3: Protocol — TenantStatus + status field**
 
@@ -88,14 +88,14 @@ In `api/tenants.py` `list_tenants`, add `"status": r.status,` to each summary di
 
 - [ ] **Step 7: Tests (RED→GREEN)**
 
-Persistence (`test_in_memory_tenant_config_store.py`): created tenant has `status == "active"`; `set_status(..., status="suspended")` then `get` reflects it; `set_status` on unknown tenant raises `TenantConfigNotFoundError`. Run: `cd packages/helix-persistence && uv run python -m pytest tests/test_in_memory_tenant_config_store.py -v`.
+Persistence (`test_in_memory_tenant_config_store.py`): created tenant has `status == "active"`; `set_status(..., status="suspended")` then `get` reflects it; `set_status` on unknown tenant raises `TenantConfigNotFoundError`. Run: `cd packages/expert-work-persistence && uv run python -m pytest tests/test_in_memory_tenant_config_store.py -v`.
 Control-plane (`test_tenants_api.py`): the list summary item now includes `status` key == "active". Update the existing `test_list_tenants_system_admin_lists_all` key-set assertion to `{"tenant_id","display_name","plan","status","created_at"}`. Run: `cd services/control-plane && uv run python -m pytest tests/test_tenants_api.py -v`.
 
 - [ ] **Step 8: pre-commit + commit**
 
 Run pre-commit on all changed files (`uv run pre-commit run --files ...`).
 ```bash
-git add packages/helix-persistence services/control-plane/src/control_plane/api/tenants.py services/control-plane/tests/test_tenants_api.py packages/helix-protocol
+git add packages/expert-work-persistence services/control-plane/src/control_plane/api/tenants.py services/control-plane/tests/test_tenants_api.py packages/expert-work-protocol
 git commit -m "feat(stream-u): PR E — tenant status column + set_status store + list summary"
 ```
 
@@ -104,7 +104,7 @@ git commit -m "feat(stream-u): PR E — tenant status column + set_status store 
 ## Task 2: deactivate/activate endpoints + middleware enforcement
 
 **Files:**
-- `packages/helix-protocol/src/helix_agent/protocol/audit.py` (2 enum values)
+- `packages/expert-work-protocol/src/expert_work/protocol/audit.py` (2 enum values)
 - `services/control-plane/src/control_plane/tenant_status.py` (create — `TenantStatusService`)
 - `services/control-plane/src/control_plane/api/tenants.py` (deactivate/activate handlers)
 - `services/control-plane/src/control_plane/auth/middleware.py` (enforcement)
@@ -201,7 +201,7 @@ Run: `cd services/control-plane && uv run python -m pytest tests/test_tenants_ap
 - [ ] **Step 8: pre-commit + commit**
 
 ```bash
-git add packages/helix-protocol/src/helix_agent/protocol/audit.py services/control-plane
+git add packages/expert-work-protocol/src/expert_work/protocol/audit.py services/control-plane
 git commit -m "feat(stream-u): PR E — deactivate/activate endpoints + suspended-tenant 403 enforcement"
 ```
 

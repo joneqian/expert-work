@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from helix_agent.protocol import MemoryItem
+from expert_work.protocol import MemoryItem
 from orchestrator.graph_builder.memory import _MEMORY_RECALL_WIDE_LIMIT, make_memory_recall_node
 from orchestrator.llm import FakeEmbedder
 

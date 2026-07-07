@@ -31,25 +31,25 @@ from uuid import UUID
 
 from control_plane.runtime import AgentRuntime
 from control_plane.transcript import read_turns
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence import ThreadMessageStore
-from helix_agent.persistence.rls import bypass_rls_var, current_tenant_id_var
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence import ThreadMessageStore
+from expert_work.persistence.rls import bypass_rls_var, current_tenant_id_var
 
-logger = logging.getLogger("helix.control_plane.transcript_mirror_sweep")
+logger = logging.getLogger("expert_work.control_plane.transcript_mirror_sweep")
 
 #: Default cadence — content search sees a new message within a minute.
 _DEFAULT_INTERVAL_S = 60.0
 
-_synced_total = helix_counter(
-    "helix_control_plane_transcript_mirror_synced_total",
+_synced_total = expert_work_counter(
+    "expert_work_control_plane_transcript_mirror_synced_total",
     "Threads whose transcript mirror was refreshed by the sweep.",
 )
-_read_errors = helix_counter(
-    "helix_control_plane_transcript_mirror_read_errors_total",
+_read_errors = expert_work_counter(
+    "expert_work_control_plane_transcript_mirror_read_errors_total",
     "Checkpoint reads that failed during a transcript mirror sweep.",
 )
-_cycle_errors = helix_counter(
-    "helix_control_plane_transcript_mirror_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_transcript_mirror_cycle_errors_total",
     "Transcript mirror sweep cycles that ended in a caught exception.",
 )
 
@@ -152,7 +152,7 @@ class TranscriptMirrorSweep:
             try:
                 # The mirror feeds content search + audit — it must stay
                 # faithful to the durable transcript. ``include_hidden=True``
-                # keeps orchestrator scaffolding (``helix_hide_from_ui``) in
+                # keeps orchestrator scaffolding (``expert_work_hide_from_ui``) in
                 # the record; only the UI bubble view filters it (RT-ADR-9).
                 turns = await read_turns(checkpointer, thread_id, include_hidden=True)
             except Exception:

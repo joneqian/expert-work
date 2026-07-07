@@ -33,8 +33,8 @@ from control_plane.tenant_scope import (
     SingleTenant,
     ensure_tenant_scope,
 )
-from helix_agent.protocol import Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.protocol import Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
 _EVAL_DIR = _Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in _sys.path:

@@ -38,8 +38,8 @@ from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
 
-from helix_agent.persistence.skill.base import DuplicateSkillError, SkillStore
-from helix_agent.protocol import DEFAULT_SKILL_LAZY_LOAD, Skill
+from expert_work.persistence.skill.base import DuplicateSkillError, SkillStore
+from expert_work.protocol import DEFAULT_SKILL_LAZY_LOAD, Skill
 
 __all__ = [
     "DomainResearchConfig",

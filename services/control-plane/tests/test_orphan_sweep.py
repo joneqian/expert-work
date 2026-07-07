@@ -21,10 +21,10 @@ from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import build_default_audit_logger
 from control_plane.orphan_sweep import OrphanSweep
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.persistence import InMemoryAgentDisableStore, InMemoryTenantConfigStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.runtime.runs import InMemoryRunStore, RunInfo, RunManager, RunStatus
-from helix_agent.runtime.runs.schemas import DisconnectMode
+from expert_work.persistence import InMemoryAgentDisableStore, InMemoryTenantConfigStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.runtime.runs import InMemoryRunStore, RunInfo, RunManager, RunStatus
+from expert_work.runtime.runs.schemas import DisconnectMode
 
 
 def _run_info(*, run_id, tenant, thread, status=RunStatus.RUNNING) -> RunInfo:

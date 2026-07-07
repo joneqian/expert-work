@@ -32,9 +32,9 @@ from langgraph.graph.message import add_messages
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.protocol import AuditQuery
-from helix_agent.runtime.runs import InMemoryRunEventStore, InMemoryRunStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.protocol import AuditQuery
+from expert_work.runtime.runs import InMemoryRunEventStore, InMemoryRunStore
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -46,7 +46,7 @@ from tests.auth_fixtures import (
 _DEFAULT_TENANT = DEFAULT_DEV_TENANT_ID
 
 _AGENT_YAML = """\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: code-reviewer
@@ -273,7 +273,7 @@ async def test_thread_messages_reads_durable_checkpoint_directly() -> None:
 @pytest.mark.asyncio
 async def test_thread_messages_self_read_hides_scaffolding_but_record_keeps_it() -> None:
     """RT-2 PR-4 (RT-ADR-9), Option A — the same-tenant UI bubble view drops
-    orchestrator scaffolding tagged ``helix_hide_from_ui`` (the CM-1
+    orchestrator scaffolding tagged ``expert_work_hide_from_ui`` (the CM-1
     ``<recovery-advisory>``), so it never renders as a user turn. The durable
     checkpoint still holds it (the endpoint reads with ``include_hidden=False``
     only for the bubble view; the search/audit mirror + cross-tenant audit
@@ -313,7 +313,7 @@ async def test_thread_messages_self_read_hides_scaffolding_but_record_keeps_it()
                 HumanMessage(content="今天几号"),
                 HumanMessage(
                     content="<recovery-advisory>internal</recovery-advisory>",
-                    additional_kwargs={"helix_hide_from_ui": True},
+                    additional_kwargs={"expert_work_hide_from_ui": True},
                 ),
                 AIMessage(content="今天是 2026年6月30日"),
             ],
@@ -352,7 +352,7 @@ async def test_run_emits_metadata_updates_end(runs_client: AsyncClient) -> None:
     )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.headers["x-helix-run-id"]
+    assert response.headers["x-expert-work-run-id"]
 
     events = _parse_sse(response.text)
     types = [e[0] for e in events]
@@ -364,7 +364,7 @@ async def test_run_emits_metadata_updates_end(runs_client: AsyncClient) -> None:
     metadata = events[0][1]
     assert isinstance(metadata, dict)
     assert metadata["thread_id"] == thread_id
-    assert metadata["run_id"] == response.headers["x-helix-run-id"]
+    assert metadata["run_id"] == response.headers["x-expert-work-run-id"]
 
 
 @pytest.mark.asyncio
@@ -415,7 +415,7 @@ async def test_run_emits_run_completed_audit(
     entry = completed[0]
     assert entry.resource_id == thread_id
     assert entry.details["status"] == "success"
-    assert entry.details["run_id"] == response.headers["x-helix-run-id"]
+    assert entry.details["run_id"] == response.headers["x-expert-work-run-id"]
 
 
 # ---------------------------------------------------------------------------
@@ -579,7 +579,7 @@ async def test_get_run_surfaces_pending_approval(runs_client: AsyncClient) -> No
     from datetime import UTC, datetime, timedelta
     from uuid import uuid4
 
-    from helix_agent.protocol import ApprovalRecord
+    from expert_work.protocol import ApprovalRecord
 
     thread_id = await _create_session(runs_client)
     run_id = uuid4()
@@ -622,7 +622,7 @@ async def test_get_run_pending_surfaces_binding_and_drift(runs_client: AsyncClie
     from datetime import UTC, datetime, timedelta
     from uuid import uuid4
 
-    from helix_agent.protocol import ApprovalRecord, UserWorkspace
+    from expert_work.protocol import ApprovalRecord, UserWorkspace
 
     thread_id = await _create_session(runs_client)
     run_id, user_id = uuid4(), uuid4()
@@ -692,7 +692,7 @@ async def test_get_run_falls_back_to_durable_run_store(runs_client: AsyncClient)
     from datetime import UTC, datetime
     from uuid import uuid4
 
-    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+    from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 
     thread_id = await _create_session(runs_client)
     run_id = uuid4()
@@ -729,8 +729,8 @@ async def test_get_run_includes_token_summary(runs_client: AsyncClient) -> None:
     from datetime import UTC, datetime
     from uuid import uuid4
 
-    from helix_agent.persistence.token_usage_store import TokenUsageRecord
-    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+    from expert_work.persistence.token_usage_store import TokenUsageRecord
+    from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 
     thread_id = await _create_session(runs_client)
     run_id = uuid4()
@@ -782,8 +782,8 @@ async def test_list_runs_enriches_tokens_and_filters_by_q(runs_client: AsyncClie
     from datetime import UTC, datetime
     from uuid import uuid4
 
-    from helix_agent.persistence.token_usage_store import TokenUsageRecord
-    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+    from expert_work.persistence.token_usage_store import TokenUsageRecord
+    from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 
     thread_id = await _create_session(runs_client)
     app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
@@ -838,7 +838,7 @@ async def test_list_runs_filters_by_user_id(runs_client: AsyncClient) -> None:
     from datetime import UTC, datetime
     from uuid import uuid4
 
-    from helix_agent.runtime.runs import DisconnectMode, RunInfo, RunStatus
+    from expert_work.runtime.runs import DisconnectMode, RunInfo, RunStatus
 
     thread_id = await _create_session(runs_client)
     app = runs_client._transport.app  # type: ignore[attr-defined,union-attr]
@@ -885,7 +885,7 @@ async def _seed_pending_approval(
     from datetime import UTC, datetime, timedelta
     from uuid import uuid4
 
-    from helix_agent.protocol import ApprovalRecord, ApprovalStatus
+    from expert_work.protocol import ApprovalRecord, ApprovalStatus
 
     run_id = uuid4()
     app = client._transport.app  # type: ignore[attr-defined,union-attr]
@@ -956,7 +956,7 @@ async def test_resume_idempotent_replay_returns_continuation(runs_client: AsyncC
     body = resp.json()
     assert body["data"]["run_id"] == str(continuation)
     assert body["data"]["idempotent_replay"] is True
-    assert resp.headers["X-Helix-Run-Id"] == str(continuation)
+    assert resp.headers["X-Expert-Work-Run-Id"] == str(continuation)
 
 
 @pytest.mark.asyncio
@@ -1127,7 +1127,7 @@ async def test_list_runs_includes_trace_id_field(runs_client: AsyncClient) -> No
     assert "trace_id" in items[0]
     # Round-trip via RunStore — write a synthetic trace_id and confirm
     # it surfaces unchanged on the next list call.
-    from helix_agent.runtime.runs import RunStatus
+    from expert_work.runtime.runs import RunStatus
 
     run_store = runs_client._transport.app.state.run_store  # type: ignore[attr-defined]
     persisted = await run_store.list_for_tenant(tenant_id=_DEFAULT_TENANT)
@@ -1183,8 +1183,8 @@ async def test_events_endpoint_replays_terminal_run_from_store(
         "GET", f"/v1/sessions/{thread_id}/runs/{run_id}/events"
     ) as response:
         assert response.status_code == 200
-        assert response.headers["x-helix-stream-mode"] == "replay"
-        assert response.headers["x-helix-run-id"] == run_id
+        assert response.headers["x-expert-work-stream-mode"] == "replay"
+        assert response.headers["x-expert-work-run-id"] == run_id
         body = await response.aread()
 
     events = _parse_sse(body.decode())

@@ -22,12 +22,12 @@ from control_plane.runtime import make_provider_key_resolver, make_skill_resolve
 from control_plane.tenancy import TenantConfigService
 from control_plane.tenant_mcp_pool import TenantMcpPoolProvider
 from control_plane.user_mcp_oauth_pool import UserMcpOAuthPoolProvider
-from helix_agent.common.credentials import CredentialsResolver
-from helix_agent.common.skill_activity import SkillActivityRecorder
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.skill import SkillStore
-from helix_agent.protocol import AgentSpec, SystemPromptSpec, ToolSpecEntry
-from helix_agent.runtime.secret_store import SecretStore
+from expert_work.common.credentials import CredentialsResolver
+from expert_work.common.skill_activity import SkillActivityRecorder
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.skill import SkillStore
+from expert_work.protocol import AgentSpec, SystemPromptSpec, ToolSpecEntry
+from expert_work.runtime.secret_store import SecretStore
 from orchestrator import BuiltAgent, MemoryEnv, MiddlewareEnv, ToolEnv, build_agent
 from orchestrator.tools import ChildAgentBuilder
 from orchestrator.tools.spawn_worker import WorkerBuildFn

@@ -238,7 +238,7 @@ spec:
 3. **不稳定的截断点（反例）**："每次按 token 数从后往前截断"——同 session 不同时刻 token 数不同，截断点漂移，prefix cache 全 miss。
 4. **跨 model 切换的限制**：同 session 中途从 sonnet 切换到 haiku（不同 tokenizer + 不同 cache 池），prefix cache 必失效；27 不解决，由 [10] 监控该场景告警，业务侧避免中途换 model。
 
-监控指标 `helix_llm_cache_hit_ratio` 急降 → 告警 + 怀疑截断点不稳定。
+监控指标 `expert_work_llm_cache_hit_ratio` 急降 → 告警 + 怀疑截断点不稳定。
 
 ### 5.4 摘要 LLM 选型 + 独立 quota
 
@@ -261,15 +261,15 @@ spec:
 
 | 故障 | 影响 | 缓解 | 检测 |
 |------|------|------|------|
-| 摘要 LLM 失败（超时 / 5xx / quota 耗尽） | 主对话也无法继续（context 已超） | 退化为简单截断（保留 system_prompt + 最近 K 轮，丢弃中间），仍可推进；标记 `state=FAILED_FALLBACK` 写 event_log | `helix_context_compression_total{outcome="failed_fallback"}` 告警 |
+| 摘要 LLM 失败（超时 / 5xx / quota 耗尽） | 主对话也无法继续（context 已超） | 退化为简单截断（保留 system_prompt + 最近 K 轮，丢弃中间），仍可推进；标记 `state=FAILED_FALLBACK` 写 event_log | `expert_work_context_compression_total{outcome="failed_fallback"}` 告警 |
 | 摘要质量差（信息丢失） | 后续工具调用错乱 / 答非所问 | M2 加入摘要质量 LLM-as-judge 评分（接 [26 Eval](./26-eval-framework.md)）+ 业务侧 thumbs_down 闭环；M0/M1 不防 | offline eval set 跑回归 |
-| prefix cache miss（截断点不稳定） | 成本爆 10×；用户感知不明显但账单震惊 | 截断点强制写 `session_meta.last_compression_anchor` + CI lint 防"按 token 倒数截断"反模式 | `helix_llm_cache_hit_ratio` 急降 P1 告警 |
-| 触发太晚（已被 provider 400） | 整次 LLM 调用失败 + 用户感知 | provider 返回 `context_length_exceeded` → [10] catch + 调 27.force_compress + 重试一次（与 [10 § 5.4](./10-llm-gateway.md) 协议对齐） | `helix_context_overflow_total` 计数 |
-| 触发太早（无谓压缩 + 摘要 token 浪费） | 成本上升 | 0.8 阈值保守但不过激；observability 看实际触发率（按 session 频次）调优；manifest 可调高到 0.9 | `helix_context_compression_total{trigger=token_threshold}` 与 session 长度回归看 |
+| prefix cache miss（截断点不稳定） | 成本爆 10×；用户感知不明显但账单震惊 | 截断点强制写 `session_meta.last_compression_anchor` + CI lint 防"按 token 倒数截断"反模式 | `expert_work_llm_cache_hit_ratio` 急降 P1 告警 |
+| 触发太晚（已被 provider 400） | 整次 LLM 调用失败 + 用户感知 | provider 返回 `context_length_exceeded` → [10] catch + 调 27.force_compress + 重试一次（与 [10 § 5.4](./10-llm-gateway.md) 协议对齐） | `expert_work_context_overflow_total` 计数 |
+| 触发太早（无谓压缩 + 摘要 token 浪费） | 成本上升 | 0.8 阈值保守但不过激；observability 看实际触发率（按 session 频次）调优；manifest 可调高到 0.9 | `expert_work_context_compression_total{trigger=token_threshold}` 与 session 长度回归看 |
 | 摘要 LLM 自身上下文也爆 | 无限递归压缩 | 输入 > summary_model_limit × 0.7 → 分段摘要再合并；超过 3 段 FAILED_HARD | `error_code='summary_input_too_large'` |
-| 摘要内容含新引入 PII（LLM 幻觉） | 合规违规 | 摘要输出过同一 redactor；命中即 FAILED_HARD + audit | `helix_redactor_hits_total{stage="summary_output"}` |
-| 多 worker 并发改 messages | state corruption | thread 级 advisory lock（[19 § 4.1](./19-durable-execution.md)）；27 不重发明 | `helix_resume_total{outcome=conflict}` |
-| 摘要 LLM 也被 quota cap | 主对话能跑摘要不能 | summarization bucket 独立配额（§ 5.4）；耗尽 → FAILED_FALLBACK | `helix_quota_exceeded_total{purpose=summarization}` |
+| 摘要内容含新引入 PII（LLM 幻觉） | 合规违规 | 摘要输出过同一 redactor；命中即 FAILED_HARD + audit | `expert_work_redactor_hits_total{stage="summary_output"}` |
+| 多 worker 并发改 messages | state corruption | thread 级 advisory lock（[19 § 4.1](./19-durable-execution.md)）；27 不重发明 | `expert_work_resume_total{outcome=conflict}` |
+| 摘要 LLM 也被 quota cap | 主对话能跑摘要不能 | summarization bucket 独立配额（§ 5.4）；耗尽 → FAILED_FALLBACK | `expert_work_quota_exceeded_total{purpose=summarization}` |
 | pin_tools 列表写错（永不能压缩） | 压缩无效最终 provider 400 | manifest lint：pinned 累计 token > 30% context 警告；运行时仍尊重 pin | `before_tokens / after_tokens` 比例不收敛 |
 
 ---
@@ -281,27 +281,27 @@ spec:
 ### 7.1 Metric
 
 ```
-helix_context_compression_total{tenant,agent,trigger,outcome}      counter
+expert_work_context_compression_total{tenant,agent,trigger,outcome}      counter
    # trigger = token_threshold | message_count | provider_overflow | manual
    # outcome = completed | failed_fallback | failed_hard
 
-helix_context_size_tokens{tenant,agent,phase}                       histogram
+expert_work_context_size_tokens{tenant,agent,phase}                       histogram
    # phase = before | after；可对比压缩比
 
-helix_context_compression_duration_seconds{tenant,agent}            histogram
+expert_work_context_compression_duration_seconds{tenant,agent}            histogram
 
-helix_summarization_tokens_total{tenant,agent,direction}            counter
+expert_work_summarization_tokens_total{tenant,agent,direction}            counter
    # direction = input | output；与主对话 token 分开统计
 
-helix_compression_anchor_drift_total{tenant,agent}                  counter
+expert_work_compression_anchor_drift_total{tenant,agent}                  counter
    # 截断点漂移检测；不该 > 0
 ```
 
 ### 7.2 OTel span
 
-- `helix.context_compression.run`（attrs：`trigger`, `before_tokens`, `after_tokens`, `summary_model`, `agent_version`, `outcome`, `keep_recent_turns`）
-- `helix.context_compression.summarize`（attrs：`summary_model`, `input_tokens`, `output_tokens`, `agent_version`，子 span 同 trace）
-- `helix.context_compression.fallback`（attrs：`fallback_reason`, `agent_version`）
+- `expert_work.context_compression.run`（attrs：`trigger`, `before_tokens`, `after_tokens`, `summary_model`, `agent_version`, `outcome`, `keep_recent_turns`）
+- `expert_work.context_compression.summarize`（attrs：`summary_model`, `input_tokens`, `output_tokens`, `agent_version`，子 span 同 trace）
+- `expert_work.context_compression.fallback`（attrs：`fallback_reason`, `agent_version`）
 
 所有 span 必带 `agent_version`（[C8](./REVIEW-NOTES.md) 规范）。
 
@@ -333,7 +333,7 @@ Dashboard 关键面板：触发率（按 trigger 维度）、压缩比分布（b
 
 ### M0 —— 简单截断兜底（约 2 周）
 - **不调摘要 LLM**；仅在 provider 返回 `context_length_exceeded` 时触发简单截断（保留 system_prompt + 最近 K=10 轮，丢弃中间）
-- 写 `compression_event` 表 + 基础 metric（`helix_context_compression_total{outcome=failed_fallback}`）
+- 写 `compression_event` 表 + 基础 metric（`expert_work_context_compression_total{outcome=failed_fallback}`）
 - 目的：**先保证不爆**，质量牺牲一点可接受；为 M1 完整算法铺路（表结构 + 中间件挂载点已在）；prefix cache 协同推迟到 M1
 
 ### M1（6-8 周）—— 完整三层 + prefix cache 协同

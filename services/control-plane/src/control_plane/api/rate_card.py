@@ -23,20 +23,20 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from control_plane.api._authz import require
 from control_plane.audit import emit
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence import (
     ModelRateCardConflictError,
     ModelRateCardNotFoundError,
     ModelRateCardStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     ModelRateCardPatch,
     ModelRateCardRecord,
     ModelRateCardUpsert,
     Principal,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.runtime.audit.logger import AuditLogger
 
 
 def _get_rate_card_store(request: Request) -> ModelRateCardStore:

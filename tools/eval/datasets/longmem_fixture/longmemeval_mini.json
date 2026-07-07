@@ -25,7 +25,7 @@
     "question_id": "fixture-editor-2",
     "question_type": "knowledge-update",
     "question": "What is the user's favorite editor?",
-    "answer": "helix",
+    "answer": "expert_work",
     "question_date": "2023/04/20 (Thu) 12:00",
     "haystack_session_ids": ["sess-old-editor", "sess-new-editor"],
     "haystack_dates": ["2023/01/10 (Tue) 09:00", "2023/04/01 (Sat) 09:00"],
@@ -34,7 +34,7 @@
         {"role": "user", "content": "my favorite editor is vim these days"}
       ],
       [
-        {"role": "user", "content": "my favorite editor is helix these days", "has_answer": true}
+        {"role": "user", "content": "my favorite editor is expert_work these days", "has_answer": true}
       ]
     ],
     "answer_session_ids": ["sess-new-editor"]

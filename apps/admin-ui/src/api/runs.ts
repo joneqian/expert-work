@@ -9,7 +9,7 @@
 import { apiClient } from "./client";
 
 export type RunStatus =
-  // Server-side ``RunStatus`` enum (helix_agent.runtime.runs.RunStatus).
+  // Server-side ``RunStatus`` enum (expert_work.runtime.runs.RunStatus).
   // ``pending`` / ``running`` / ``success`` / ``error`` / ``timeout`` /
   // ``interrupted`` / ``paused`` are the canonical values.
   | "pending"
@@ -46,7 +46,7 @@ export interface PendingApproval {
   workspace_drift?: boolean;
 }
 
-/** Per-run token usage summary — aggregated from helix's own
+/** Per-run token usage summary — aggregated from expert_work's own
  *  ``token_usage`` (G.9), joined to the run by ``trace_id``. ``null``
  *  when the run has no trace_id / no recorded usage (legacy or
  *  auto-triggered runs). Deep per-span traces stay in Langfuse. */

@@ -15,8 +15,8 @@ from uuid import uuid4
 import pytest
 
 from control_plane.eval_worker import EvalCaseOutcome, EvalWorker
-from helix_agent.persistence import InMemoryEvalRunStore
-from helix_agent.protocol import EvalRunRecord, EvalRunStatus, EvalTriggeredBy
+from expert_work.persistence import InMemoryEvalRunStore
+from expert_work.protocol import EvalRunRecord, EvalRunStatus, EvalTriggeredBy
 
 
 @dataclass

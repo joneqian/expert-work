@@ -96,7 +96,7 @@ const sampleDetail: AgentDetailResponse = {
     created_at: "2026-05-25T00:00:00Z",
     updated_at: "2026-05-25T00:00:00Z",
     spec: {
-      apiVersion: "helix.io/v1",
+      apiVersion: "expert_work.io/v1",
       kind: "Agent",
       metadata: { name: "demo-agent", version: "1.0.0" },
       spec: { model: { provider: "anthropic", name: "claude-sonnet-4-6" } },
@@ -206,7 +206,7 @@ describe("ManifestTab", () => {
           options={{
             readOnly: true,
             minimap: { enabled: false },
-            fontFamily: "var(--hx-font-mono)",
+            fontFamily: "var(--ew-font-mono)",
             fontSize: 12,
             tabSize: 2,
             scrollBeyondLastLine: false,

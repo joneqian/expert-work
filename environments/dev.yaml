@@ -1,4 +1,4 @@
-# Helix-Agent dev environment config (Phase 0.2 placeholder).
+# Expert Work dev environment config (Phase 0.2 placeholder).
 # staging.yaml / prod.yaml will be added once 阿里云 ECS / RDS / KMS / OSS
 # infrastructure is provisioned (per docs/decisions/phase-0-launch.md decision 2 & 3).
 
@@ -8,9 +8,9 @@ environment: dev
 database:
   host: localhost
   port: 5432
-  name: helix_agent_dev
-  user: helix_agent
-  # password injected via env var HELIX_AGENT_DB_PASSWORD
+  name: expert_work_dev
+  user: expert_work
+  # password injected via env var EXPERT_WORK_DB_PASSWORD
 
 # Object storage — local dev uses MinIO (S3-compatible)
 # Prod will use 阿里云 OSS (ADR-0004)
@@ -18,7 +18,7 @@ object_storage:
   backend: s3-compatible
   endpoint: http://localhost:9000
   region: us-east-1
-  bucket: helix-agent-dev
+  bucket: expert-work-dev
   use_path_style: true
 
 # Secret store — ADR-0007: 阿里云 KMS Secrets Manager (staging/prod);
@@ -40,7 +40,7 @@ observability:
 # Auth — local Keycloak (ADR-0003)
 auth:
   oidc:
-    issuer: http://localhost:8080/realms/helix-agent
+    issuer: http://localhost:8080/realms/expert-work
 
 # TLS minima per subsystems/28-reliability-primitives § 5.1.
 # Dev uses self-signed certs from tools/tls/gen-mtls-bundle.sh.

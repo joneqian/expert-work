@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from helix_agent.common.output_screen import REFUSAL_TEXT, screen_output
+from expert_work.common.output_screen import REFUSAL_TEXT, screen_output
 
 _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:

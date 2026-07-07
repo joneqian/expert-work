@@ -7,8 +7,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.knowledge.ingestion import KnowledgeIngestionRunner
-from helix_agent.persistence import InMemoryKnowledgeStore
-from helix_agent.protocol import DocumentStatus, KnowledgeBase, KnowledgeDocument
+from expert_work.persistence import InMemoryKnowledgeStore
+from expert_work.protocol import DocumentStatus, KnowledgeBase, KnowledgeDocument
 from orchestrator.llm import FakeEmbedder
 
 

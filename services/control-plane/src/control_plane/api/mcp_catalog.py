@@ -26,22 +26,22 @@ from control_plane.api._authz import require
 from control_plane.audit import emit
 from control_plane.mcp_probe import McpProbeError, probe_remote_mcp
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence import (
     McpConnectorCatalogAlreadyExistsError,
     McpConnectorCatalogInUseError,
     McpConnectorCatalogNotFoundError,
     McpConnectorCatalogStore,
 )
-from helix_agent.protocol import (
+from expert_work.protocol import (
     AuditAction,
     McpConnectorCatalogPatch,
     McpConnectorCatalogRecord,
     McpConnectorCatalogUpsert,
     Principal,
 )
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.secret_store import SecretStore, parse_secret_ref
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.secret_store import SecretStore, parse_secret_ref
 from orchestrator.tools.mcp import MCPToolDef
 
 _DEFAULT_PROBE_TIMEOUT_S = 30.0
@@ -83,7 +83,7 @@ async def _invalidate_platform_mcp(pool_service: object, agent_runtime: object) 
 
 def _bearer_secret_name(name: str) -> str:
     """SecretStore key for a platform connector's shared bearer token (slug=name)."""
-    return f"helix-agent/platform/mcp/{name}/token"
+    return f"expert-work/platform/mcp/{name}/token"
 
 
 async def _probe_catalog_server(

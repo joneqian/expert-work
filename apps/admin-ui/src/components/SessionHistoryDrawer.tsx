@@ -289,7 +289,7 @@ export function SessionHistoryDrawer({
                   borderRadius: 6,
                   cursor: "pointer",
                   background: isCurrent
-                    ? "var(--hx-surface-selected)"
+                    ? "var(--ew-surface-selected)"
                     : undefined,
                 }}
                 onClick={() => handleResume(s)}
@@ -367,13 +367,13 @@ export function SessionHistoryDrawer({
                           defaultValue: s.status,
                         })}
                       </Tag>
-                      <span style={{ color: "var(--hx-text-tertiary)" }}>
+                      <span style={{ color: "var(--ew-text-tertiary)" }}>
                         {relativeTime(s.updated_at, t)}
                       </span>
                       {s.user_id && (
                         <span
                           className="mono"
-                          style={{ color: "var(--hx-text-tertiary)" }}
+                          style={{ color: "var(--ew-text-tertiary)" }}
                         >
                           {s.user_id.slice(0, 8)}
                         </span>

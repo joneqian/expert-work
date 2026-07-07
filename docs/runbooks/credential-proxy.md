@@ -19,9 +19,9 @@
 3. **allowlist**：`secret_allowlist` 表是否有对应
    `(tenant, agent, version, secret_ref)` 行 —— 缺行则 proxy 拒绝注入。
 4. **SecretStore**：M0 `local_dev` 后端读 env 文件
-   （`HELIX_CRED_PROXY_SECRET_STORE_ENV_FILE`）；prod 走阿里云 KMS（ADR-0007）。
+   （`EXPERT_WORK_CRED_PROXY_SECRET_STORE_ENV_FILE`）；prod 走阿里云 KMS（ADR-0007）。
    `secret_miss` 查该后端是否有对应 ref。
-5. **网络**：proxy 双归属 `helix-sandbox-egress`（沙盒侧）+ `default`（出网侧）；
+5. **网络**：proxy 双归属 `expert-work-sandbox-egress`（沙盒侧）+ `default`（出网侧）；
    出网失败查 `default` 网到 upstream 的连通性。
 6. **DB**：proxy 读 `secret_allowlist` + 写 `credential_proxy_audit` —— DB 故障
    见 [postgres.md](./postgres.md)。

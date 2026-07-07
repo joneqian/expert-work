@@ -1,16 +1,16 @@
 /*
- * helix Admin UI — Design Tokens
+ * Expert Work Admin UI — Design Tokens
  *
  * 所有 design token 集中此文件,以 CSS custom properties 落地。
  * H.1 实施时可直接 `import './tokens.css'` 进 Vite 工程,无 SCSS / 无构建依赖。
  *
  * 命名约定:
- *   --hx-{category}-{semantic}-{step}
+ *   --ew-{category}-{semantic}-{step}
  *   category: color | font | space | radius | shadow | duration | ease | z
  *   semantic: neutral | brand | accent | success | warning | danger | info | surface | text | border
  *
  * 双主题:`html[data-theme="dark"]` 和 `html[data-theme="light"]` 切换语义层;
- * 原色阶不变(neutral-100 始终是 #F4F5F7),变的是 semantic 层(--hx-text-primary 等)。
+ * 原色阶不变(neutral-100 始终是 #F4F5F7),变的是 semantic 层(--ew-text-primary 等)。
  */
 
 /* ============================================================
@@ -19,179 +19,179 @@
 
 :root {
   /* Neutral 13 阶(从浅到深) */
-  --hx-color-neutral-0:    #ffffff;
-  --hx-color-neutral-50:   #fafbfc;
-  --hx-color-neutral-100:  #f4f5f7;
-  --hx-color-neutral-200:  #e5e7eb;
-  --hx-color-neutral-300:  #cacdd4;
-  --hx-color-neutral-400:  #a0a4ae;
-  --hx-color-neutral-500:  #74798a;
-  --hx-color-neutral-600:  #5a5f70;
-  --hx-color-neutral-700:  #3f4452;
-  --hx-color-neutral-800:  #232730;
-  --hx-color-neutral-900:  #161921;
-  --hx-color-neutral-950:  #0a0b0f;
-  --hx-color-neutral-1000: #000000;
+  --ew-color-neutral-0:    #ffffff;
+  --ew-color-neutral-50:   #fafbfc;
+  --ew-color-neutral-100:  #f4f5f7;
+  --ew-color-neutral-200:  #e5e7eb;
+  --ew-color-neutral-300:  #cacdd4;
+  --ew-color-neutral-400:  #a0a4ae;
+  --ew-color-neutral-500:  #74798a;
+  --ew-color-neutral-600:  #5a5f70;
+  --ew-color-neutral-700:  #3f4452;
+  --ew-color-neutral-800:  #232730;
+  --ew-color-neutral-900:  #161921;
+  --ew-color-neutral-950:  #0a0b0f;
+  --ew-color-neutral-1000: #000000;
 
   /* Brand cyan(primary brand,12 阶) */
-  --hx-color-brand-50:  #ecfeff;
-  --hx-color-brand-100: #cffafe;
-  --hx-color-brand-200: #a5f3fc;
-  --hx-color-brand-300: #67e8f9;
-  --hx-color-brand-400: #22d3ee;
-  --hx-color-brand-500: #06b6d4; /* primary */
-  --hx-color-brand-600: #0891b2;
-  --hx-color-brand-700: #0e7490;
-  --hx-color-brand-800: #155e75;
-  --hx-color-brand-900: #164e63;
-  --hx-color-brand-950: #0e2e3a;
+  --ew-color-brand-50:  #ecfeff;
+  --ew-color-brand-100: #cffafe;
+  --ew-color-brand-200: #a5f3fc;
+  --ew-color-brand-300: #67e8f9;
+  --ew-color-brand-400: #22d3ee;
+  --ew-color-brand-500: #06b6d4; /* primary */
+  --ew-color-brand-600: #0891b2;
+  --ew-color-brand-700: #0e7490;
+  --ew-color-brand-800: #155e75;
+  --ew-color-brand-900: #164e63;
+  --ew-color-brand-950: #0e2e3a;
 
   /* Accent violet(secondary brand,12 阶 — 用于强调 / hover / progress) */
-  --hx-color-accent-50:  #faf5ff;
-  --hx-color-accent-100: #f3e8ff;
-  --hx-color-accent-200: #e9d5ff;
-  --hx-color-accent-300: #d8b4fe;
-  --hx-color-accent-400: #c084fc;
-  --hx-color-accent-500: #a855f7; /* accent */
-  --hx-color-accent-600: #9333ea;
-  --hx-color-accent-700: #7e22ce;
-  --hx-color-accent-800: #6b21a8;
-  --hx-color-accent-900: #581c87;
-  --hx-color-accent-950: #3b0764;
+  --ew-color-accent-50:  #faf5ff;
+  --ew-color-accent-100: #f3e8ff;
+  --ew-color-accent-200: #e9d5ff;
+  --ew-color-accent-300: #d8b4fe;
+  --ew-color-accent-400: #c084fc;
+  --ew-color-accent-500: #a855f7; /* accent */
+  --ew-color-accent-600: #9333ea;
+  --ew-color-accent-700: #7e22ce;
+  --ew-color-accent-800: #6b21a8;
+  --ew-color-accent-900: #581c87;
+  --ew-color-accent-950: #3b0764;
 
   /* Semantic — success / warning / danger / info(各 5 阶) */
-  --hx-color-success-100: #dcfce7;
-  --hx-color-success-300: #86efac;
-  --hx-color-success-500: #22c55e;
-  --hx-color-success-700: #15803d;
-  --hx-color-success-900: #14532d;
+  --ew-color-success-100: #dcfce7;
+  --ew-color-success-300: #86efac;
+  --ew-color-success-500: #22c55e;
+  --ew-color-success-700: #15803d;
+  --ew-color-success-900: #14532d;
 
-  --hx-color-warning-100: #fef3c7;
-  --hx-color-warning-300: #fcd34d;
-  --hx-color-warning-500: #f59e0b;
-  --hx-color-warning-700: #b45309;
-  --hx-color-warning-900: #78350f;
+  --ew-color-warning-100: #fef3c7;
+  --ew-color-warning-300: #fcd34d;
+  --ew-color-warning-500: #f59e0b;
+  --ew-color-warning-700: #b45309;
+  --ew-color-warning-900: #78350f;
 
-  --hx-color-danger-100: #fee2e2;
-  --hx-color-danger-300: #fca5a5;
-  --hx-color-danger-500: #ef4444;
-  --hx-color-danger-700: #b91c1c;
-  --hx-color-danger-900: #7f1d1d;
+  --ew-color-danger-100: #fee2e2;
+  --ew-color-danger-300: #fca5a5;
+  --ew-color-danger-500: #ef4444;
+  --ew-color-danger-700: #b91c1c;
+  --ew-color-danger-900: #7f1d1d;
 
   /* Info = brand-500 同色族(避免引入第 5 个色相) */
-  --hx-color-info-100: var(--hx-color-brand-100);
-  --hx-color-info-300: var(--hx-color-brand-300);
-  --hx-color-info-500: var(--hx-color-brand-500);
-  --hx-color-info-700: var(--hx-color-brand-700);
-  --hx-color-info-900: var(--hx-color-brand-900);
+  --ew-color-info-100: var(--ew-color-brand-100);
+  --ew-color-info-300: var(--ew-color-brand-300);
+  --ew-color-info-500: var(--ew-color-brand-500);
+  --ew-color-info-700: var(--ew-color-brand-700);
+  --ew-color-info-900: var(--ew-color-brand-900);
 
   /* ============================================================
    * 2. 字体
    * ============================================================ */
 
-  --hx-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+  --ew-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
                   'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC',
                   Helvetica, Arial, sans-serif;
-  --hx-font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code',
+  --ew-font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code',
                   Consolas, 'Liberation Mono', monospace;
 
   /* 字号(rem-based,respects 用户浏览器字号设置;假设 1rem = 16px) */
-  --hx-font-size-xs:   0.75rem;   /* 12px — caption / tag */
-  --hx-font-size-sm:   0.8125rem; /* 13px — table / form */
-  --hx-font-size-base: 0.875rem;  /* 14px — body / UI default */
-  --hx-font-size-md:   1rem;      /* 16px — emphasized body */
-  --hx-font-size-lg:   1.25rem;   /* 20px — section heading */
-  --hx-font-size-xl:   1.5rem;    /* 24px — page heading */
-  --hx-font-size-2xl:  2rem;      /* 32px — hero / display */
+  --ew-font-size-xs:   0.75rem;   /* 12px — caption / tag */
+  --ew-font-size-sm:   0.8125rem; /* 13px — table / form */
+  --ew-font-size-base: 0.875rem;  /* 14px — body / UI default */
+  --ew-font-size-md:   1rem;      /* 16px — emphasized body */
+  --ew-font-size-lg:   1.25rem;   /* 20px — section heading */
+  --ew-font-size-xl:   1.5rem;    /* 24px — page heading */
+  --ew-font-size-2xl:  2rem;      /* 32px — hero / display */
 
   /* 行高 */
-  --hx-line-height-tight:   1.2;  /* heading */
-  --hx-line-height-snug:    1.4;  /* UI / table cell */
-  --hx-line-height-normal:  1.5;  /* body */
-  --hx-line-height-relaxed: 1.7;  /* long-form prose */
+  --ew-line-height-tight:   1.2;  /* heading */
+  --ew-line-height-snug:    1.4;  /* UI / table cell */
+  --ew-line-height-normal:  1.5;  /* body */
+  --ew-line-height-relaxed: 1.7;  /* long-form prose */
 
   /* 字重 */
-  --hx-font-weight-regular:  400;
-  --hx-font-weight-medium:   500;
-  --hx-font-weight-semibold: 600;
+  --ew-font-weight-regular:  400;
+  --ew-font-weight-medium:   500;
+  --ew-font-weight-semibold: 600;
 
   /* ============================================================
    * 3. 间距(4px base grid)
    * ============================================================ */
 
-  --hx-space-1:  4px;
-  --hx-space-2:  8px;
-  --hx-space-3:  12px;
-  --hx-space-4:  16px;
-  --hx-space-6:  24px;
-  --hx-space-8:  32px;
-  --hx-space-12: 48px;
-  --hx-space-16: 64px;
+  --ew-space-1:  4px;
+  --ew-space-2:  8px;
+  --ew-space-3:  12px;
+  --ew-space-4:  16px;
+  --ew-space-6:  24px;
+  --ew-space-8:  32px;
+  --ew-space-12: 48px;
+  --ew-space-16: 64px;
 
   /* ============================================================
    * 4. 圆角
    * ============================================================ */
 
-  --hx-radius-xs:   2px;   /* badge / tag */
-  --hx-radius-sm:   6px;   /* button / input / card */
-  --hx-radius-md:   8px;   /* modal / drawer */
-  --hx-radius-lg:   12px;  /* large card / hero */
-  --hx-radius-full: 9999px;
+  --ew-radius-xs:   2px;   /* badge / tag */
+  --ew-radius-sm:   6px;   /* button / input / card */
+  --ew-radius-md:   8px;   /* modal / drawer */
+  --ew-radius-lg:   12px;  /* large card / hero */
+  --ew-radius-full: 9999px;
 
   /* ============================================================
    * 5. 阴影(elevation)— 主要给 light 模式;dark 用 border 替代
    * ============================================================ */
 
-  --hx-shadow-0: none;
-  --hx-shadow-1: 0 1px 2px 0 rgba(0, 0, 0, 0.04),
+  --ew-shadow-0: none;
+  --ew-shadow-1: 0 1px 2px 0 rgba(0, 0, 0, 0.04),
                  0 1px 3px 0 rgba(0, 0, 0, 0.06);
-  --hx-shadow-2: 0 2px 6px -1px rgba(0, 0, 0, 0.08),
+  --ew-shadow-2: 0 2px 6px -1px rgba(0, 0, 0, 0.08),
                  0 4px 8px -2px rgba(0, 0, 0, 0.04);
-  --hx-shadow-3: 0 8px 24px -4px rgba(0, 0, 0, 0.12),
+  --ew-shadow-3: 0 8px 24px -4px rgba(0, 0, 0, 0.12),
                  0 4px 16px -2px rgba(0, 0, 0, 0.08);
 
   /* ============================================================
    * 6. 动效
    * ============================================================ */
 
-  --hx-duration-fast: 100ms;
-  --hx-duration-base: 150ms;
-  --hx-duration-slow: 200ms;
+  --ew-duration-fast: 100ms;
+  --ew-duration-base: 150ms;
+  --ew-duration-slow: 200ms;
 
-  --hx-ease-standard: cubic-bezier(0.2, 0, 0.2, 1);    /* ease-out */
-  --hx-ease-emphasized: cubic-bezier(0.3, 0, 0, 1);    /* 强调出场 */
-  --hx-ease-linear: linear;                            /* progress bar */
+  --ew-ease-standard: cubic-bezier(0.2, 0, 0.2, 1);    /* ease-out */
+  --ew-ease-emphasized: cubic-bezier(0.3, 0, 0, 1);    /* 强调出场 */
+  --ew-ease-linear: linear;                            /* progress bar */
 
   /* ============================================================
    * 7. z-index
    * ============================================================ */
 
-  --hx-z-base:     0;
-  --hx-z-sticky:   10;
-  --hx-z-dropdown: 100;
-  --hx-z-overlay:  900;     /* modal backdrop */
-  --hx-z-modal:    1000;
-  --hx-z-toast:    10000;
-  --hx-z-tooltip:  20000;
+  --ew-z-base:     0;
+  --ew-z-sticky:   10;
+  --ew-z-dropdown: 100;
+  --ew-z-overlay:  900;     /* modal backdrop */
+  --ew-z-modal:    1000;
+  --ew-z-toast:    10000;
+  --ew-z-tooltip:  20000;
 
   /* ============================================================
    * 8. 布局 / 尺寸
    * ============================================================ */
 
-  --hx-sidebar-width:       220px;
-  --hx-topbar-height:       48px;
-  --hx-content-max-width:   1280px;
-  --hx-content-padding:     var(--hx-space-6);
+  --ew-sidebar-width:       220px;
+  --ew-topbar-height:       48px;
+  --ew-content-max-width:   1280px;
+  --ew-content-padding:     var(--ew-space-6);
 
   /* 控件高度(中等密度) */
-  --hx-control-height-sm: 28px;
-  --hx-control-height-md: 32px;  /* default */
-  --hx-control-height-lg: 40px;
+  --ew-control-height-sm: 28px;
+  --ew-control-height-md: 32px;  /* default */
+  --ew-control-height-lg: 40px;
 
-  --hx-row-height: 36px;          /* table / list */
+  --ew-row-height: 36px;          /* table / list */
 
-  --hx-focus-ring-width: 1px;
-  --hx-focus-ring-offset: 1px;
+  --ew-focus-ring-width: 1px;
+  --ew-focus-ring-offset: 1px;
 }
 
 /* ============================================================
@@ -201,105 +201,105 @@
 /* Dark theme(default) */
 :root,
 html[data-theme="dark"] {
-  --hx-surface-bg:        var(--hx-color-neutral-950);  /* page background */
-  --hx-surface-base:      var(--hx-color-neutral-900);  /* main content surface */
-  --hx-surface-raised:    var(--hx-color-neutral-800);  /* card / table header */
-  --hx-surface-overlay:   var(--hx-color-neutral-700);  /* dropdown / popover */
-  --hx-surface-hover:     rgba(255, 255, 255, 0.04);
-  --hx-surface-active:    rgba(255, 255, 255, 0.08);
-  --hx-surface-selected:  rgba(6, 182, 212, 0.12);      /* brand-500 alpha */
+  --ew-surface-bg:        var(--ew-color-neutral-950);  /* page background */
+  --ew-surface-base:      var(--ew-color-neutral-900);  /* main content surface */
+  --ew-surface-raised:    var(--ew-color-neutral-800);  /* card / table header */
+  --ew-surface-overlay:   var(--ew-color-neutral-700);  /* dropdown / popover */
+  --ew-surface-hover:     rgba(255, 255, 255, 0.04);
+  --ew-surface-active:    rgba(255, 255, 255, 0.08);
+  --ew-surface-selected:  rgba(6, 182, 212, 0.12);      /* brand-500 alpha */
 
-  --hx-border-subtle:  var(--hx-color-neutral-800);
-  --hx-border-default: var(--hx-color-neutral-700);
-  --hx-border-strong:  var(--hx-color-neutral-600);
-  --hx-border-focus:   var(--hx-color-brand-500);
+  --ew-border-subtle:  var(--ew-color-neutral-800);
+  --ew-border-default: var(--ew-color-neutral-700);
+  --ew-border-strong:  var(--ew-color-neutral-600);
+  --ew-border-focus:   var(--ew-color-brand-500);
 
-  --hx-text-primary:   var(--hx-color-neutral-100);
-  --hx-text-secondary: var(--hx-color-neutral-400);
-  --hx-text-tertiary:  var(--hx-color-neutral-500);
-  --hx-text-disabled:  var(--hx-color-neutral-700);
-  --hx-text-inverse:   var(--hx-color-neutral-900);
-  --hx-text-link:      var(--hx-color-brand-400);
-  --hx-text-link-hover: var(--hx-color-brand-300);
+  --ew-text-primary:   var(--ew-color-neutral-100);
+  --ew-text-secondary: var(--ew-color-neutral-400);
+  --ew-text-tertiary:  var(--ew-color-neutral-500);
+  --ew-text-disabled:  var(--ew-color-neutral-700);
+  --ew-text-inverse:   var(--ew-color-neutral-900);
+  --ew-text-link:      var(--ew-color-brand-400);
+  --ew-text-link-hover: var(--ew-color-brand-300);
 
-  --hx-action-primary-bg:       var(--hx-color-brand-500);
-  --hx-action-primary-bg-hover: var(--hx-color-brand-400);
-  --hx-action-primary-fg:       var(--hx-color-neutral-950);
+  --ew-action-primary-bg:       var(--ew-color-brand-500);
+  --ew-action-primary-bg-hover: var(--ew-color-brand-400);
+  --ew-action-primary-fg:       var(--ew-color-neutral-950);
 
-  --hx-action-secondary-bg:       transparent;
-  --hx-action-secondary-bg-hover: var(--hx-surface-hover);
-  --hx-action-secondary-border:   var(--hx-color-neutral-700);
-  --hx-action-secondary-fg:       var(--hx-color-neutral-100);
+  --ew-action-secondary-bg:       transparent;
+  --ew-action-secondary-bg-hover: var(--ew-surface-hover);
+  --ew-action-secondary-border:   var(--ew-color-neutral-700);
+  --ew-action-secondary-fg:       var(--ew-color-neutral-100);
 
-  --hx-action-danger-bg:       var(--hx-color-danger-500);
-  --hx-action-danger-bg-hover: var(--hx-color-danger-700);
-  --hx-action-danger-fg:       var(--hx-color-neutral-0);
+  --ew-action-danger-bg:       var(--ew-color-danger-500);
+  --ew-action-danger-bg-hover: var(--ew-color-danger-700);
+  --ew-action-danger-fg:       var(--ew-color-neutral-0);
 
-  --hx-status-success-bg:   rgba(34, 197, 94, 0.12);
-  --hx-status-success-fg:   var(--hx-color-success-300);
-  --hx-status-warning-bg:   rgba(245, 158, 11, 0.12);
-  --hx-status-warning-fg:   var(--hx-color-warning-300);
-  --hx-status-danger-bg:    rgba(239, 68, 68, 0.12);
-  --hx-status-danger-fg:    var(--hx-color-danger-300);
-  --hx-status-info-bg:      rgba(6, 182, 212, 0.12);
-  --hx-status-info-fg:      var(--hx-color-info-300);
+  --ew-status-success-bg:   rgba(34, 197, 94, 0.12);
+  --ew-status-success-fg:   var(--ew-color-success-300);
+  --ew-status-warning-bg:   rgba(245, 158, 11, 0.12);
+  --ew-status-warning-fg:   var(--ew-color-warning-300);
+  --ew-status-danger-bg:    rgba(239, 68, 68, 0.12);
+  --ew-status-danger-fg:    var(--ew-color-danger-300);
+  --ew-status-info-bg:      rgba(6, 182, 212, 0.12);
+  --ew-status-info-fg:      var(--ew-color-info-300);
 
   /* dark 下阴影弱化,以 border 替代立体感 */
-  --hx-elevation-1: 0 0 0 1px var(--hx-border-default);
-  --hx-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4),
-                    0 0 0 1px var(--hx-border-default);
-  --hx-elevation-3: 0 16px 40px rgba(0, 0, 0, 0.6),
-                    0 0 0 1px var(--hx-border-strong);
+  --ew-elevation-1: 0 0 0 1px var(--ew-border-default);
+  --ew-elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4),
+                    0 0 0 1px var(--ew-border-default);
+  --ew-elevation-3: 0 16px 40px rgba(0, 0, 0, 0.6),
+                    0 0 0 1px var(--ew-border-strong);
 }
 
 /* Light theme */
 html[data-theme="light"] {
-  --hx-surface-bg:        var(--hx-color-neutral-50);
-  --hx-surface-base:      var(--hx-color-neutral-0);
-  --hx-surface-raised:    var(--hx-color-neutral-0);
-  --hx-surface-overlay:   var(--hx-color-neutral-0);
-  --hx-surface-hover:     rgba(0, 0, 0, 0.04);
-  --hx-surface-active:    rgba(0, 0, 0, 0.08);
-  --hx-surface-selected:  rgba(6, 182, 212, 0.08);
+  --ew-surface-bg:        var(--ew-color-neutral-50);
+  --ew-surface-base:      var(--ew-color-neutral-0);
+  --ew-surface-raised:    var(--ew-color-neutral-0);
+  --ew-surface-overlay:   var(--ew-color-neutral-0);
+  --ew-surface-hover:     rgba(0, 0, 0, 0.04);
+  --ew-surface-active:    rgba(0, 0, 0, 0.08);
+  --ew-surface-selected:  rgba(6, 182, 212, 0.08);
 
-  --hx-border-subtle:  var(--hx-color-neutral-200);
-  --hx-border-default: var(--hx-color-neutral-300);
-  --hx-border-strong:  var(--hx-color-neutral-400);
-  --hx-border-focus:   var(--hx-color-brand-600);
+  --ew-border-subtle:  var(--ew-color-neutral-200);
+  --ew-border-default: var(--ew-color-neutral-300);
+  --ew-border-strong:  var(--ew-color-neutral-400);
+  --ew-border-focus:   var(--ew-color-brand-600);
 
-  --hx-text-primary:   var(--hx-color-neutral-900);
-  --hx-text-secondary: var(--hx-color-neutral-600);
-  --hx-text-tertiary:  var(--hx-color-neutral-500);
-  --hx-text-disabled:  var(--hx-color-neutral-300);
-  --hx-text-inverse:   var(--hx-color-neutral-0);
-  --hx-text-link:      var(--hx-color-brand-700);
-  --hx-text-link-hover: var(--hx-color-brand-600);
+  --ew-text-primary:   var(--ew-color-neutral-900);
+  --ew-text-secondary: var(--ew-color-neutral-600);
+  --ew-text-tertiary:  var(--ew-color-neutral-500);
+  --ew-text-disabled:  var(--ew-color-neutral-300);
+  --ew-text-inverse:   var(--ew-color-neutral-0);
+  --ew-text-link:      var(--ew-color-brand-700);
+  --ew-text-link-hover: var(--ew-color-brand-600);
 
-  --hx-action-primary-bg:       var(--hx-color-brand-600);
-  --hx-action-primary-bg-hover: var(--hx-color-brand-700);
-  --hx-action-primary-fg:       var(--hx-color-neutral-0);
+  --ew-action-primary-bg:       var(--ew-color-brand-600);
+  --ew-action-primary-bg-hover: var(--ew-color-brand-700);
+  --ew-action-primary-fg:       var(--ew-color-neutral-0);
 
-  --hx-action-secondary-bg:       var(--hx-color-neutral-0);
-  --hx-action-secondary-bg-hover: var(--hx-color-neutral-100);
-  --hx-action-secondary-border:   var(--hx-color-neutral-300);
-  --hx-action-secondary-fg:       var(--hx-color-neutral-900);
+  --ew-action-secondary-bg:       var(--ew-color-neutral-0);
+  --ew-action-secondary-bg-hover: var(--ew-color-neutral-100);
+  --ew-action-secondary-border:   var(--ew-color-neutral-300);
+  --ew-action-secondary-fg:       var(--ew-color-neutral-900);
 
-  --hx-action-danger-bg:       var(--hx-color-danger-500);
-  --hx-action-danger-bg-hover: var(--hx-color-danger-700);
-  --hx-action-danger-fg:       var(--hx-color-neutral-0);
+  --ew-action-danger-bg:       var(--ew-color-danger-500);
+  --ew-action-danger-bg-hover: var(--ew-color-danger-700);
+  --ew-action-danger-fg:       var(--ew-color-neutral-0);
 
-  --hx-status-success-bg:   var(--hx-color-success-100);
-  --hx-status-success-fg:   var(--hx-color-success-700);
-  --hx-status-warning-bg:   var(--hx-color-warning-100);
-  --hx-status-warning-fg:   var(--hx-color-warning-700);
-  --hx-status-danger-bg:    var(--hx-color-danger-100);
-  --hx-status-danger-fg:    var(--hx-color-danger-700);
-  --hx-status-info-bg:      var(--hx-color-info-100);
-  --hx-status-info-fg:      var(--hx-color-info-700);
+  --ew-status-success-bg:   var(--ew-color-success-100);
+  --ew-status-success-fg:   var(--ew-color-success-700);
+  --ew-status-warning-bg:   var(--ew-color-warning-100);
+  --ew-status-warning-fg:   var(--ew-color-warning-700);
+  --ew-status-danger-bg:    var(--ew-color-danger-100);
+  --ew-status-danger-fg:    var(--ew-color-danger-700);
+  --ew-status-info-bg:      var(--ew-color-info-100);
+  --ew-status-info-fg:      var(--ew-color-info-700);
 
-  --hx-elevation-1: var(--hx-shadow-1);
-  --hx-elevation-2: var(--hx-shadow-2);
-  --hx-elevation-3: var(--hx-shadow-3);
+  --ew-elevation-1: var(--ew-shadow-1);
+  --ew-elevation-2: var(--ew-shadow-2);
+  --ew-elevation-3: var(--ew-shadow-3);
 }
 
 /* ============================================================
@@ -308,8 +308,8 @@ html[data-theme="light"] {
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --hx-duration-fast: 0ms;
-    --hx-duration-base: 0ms;
-    --hx-duration-slow: 0ms;
+    --ew-duration-fast: 0ms;
+    --ew-duration-base: 0ms;
+    --ew-duration-slow: 0ms;
   }
 }

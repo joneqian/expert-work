@@ -11,7 +11,7 @@
 use_default_settings: true
 
 server:
-  secret_key: "helix-dev-searxng-not-a-real-secret"
+  secret_key: "expert-work-dev-searxng-not-a-real-secret"
   # Internal-only instance → the bot limiter would just block our own
   # service-to-service calls. Disable it; lockdown is by network, not by rate.
   limiter: false

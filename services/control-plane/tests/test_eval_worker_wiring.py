@@ -17,7 +17,7 @@ import pytest
 from control_plane.app import create_app
 from control_plane.eval_worker import EvalWorker
 from control_plane.settings import Settings
-from helix_agent.persistence import InMemoryEvalRunStore
+from expert_work.persistence import InMemoryEvalRunStore
 from tests.auth_fixtures import build_test_jwt_verifier
 
 

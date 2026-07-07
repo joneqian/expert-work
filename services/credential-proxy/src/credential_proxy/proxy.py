@@ -26,7 +26,7 @@ from credential_proxy.domain import (
     SecretMissingError,
 )
 from credential_proxy.forwarder import Forwarder
-from helix_agent.runtime.secret_store import SecretNotFoundError, SecretStore
+from expert_work.runtime.secret_store import SecretNotFoundError, SecretStore
 
 logger = logging.getLogger(__name__)
 
@@ -146,21 +146,23 @@ class CredentialProxy:
 def _inject(headers: dict[str, str], secret_value: str) -> dict[str, str]:
     """Return request headers with the secret injected.
 
-    The ``X-Helix-*`` control headers and ``Host`` are dropped so they
+    The ``X-Expert-Work-*`` control headers and ``Host`` are dropped so they
     never reach the real upstream; ``Authorization`` carries the secret.
     """
     clean = {
         k: v
         for k, v in headers.items()
-        if not k.lower().startswith("x-helix-") and k.lower() != "host"
+        if not k.lower().startswith("x-expert-work-") and k.lower() != "host"
     }
     clean[_INJECT_HEADER] = f"Bearer {secret_value}"
     return clean
 
 
 def _strip_control_headers(result: ForwardResult) -> ForwardResult:
-    """Strip ``X-Helix-*`` headers from the upstream response (§ 3.3)."""
-    cleaned = {k: v for k, v in result.headers.items() if not k.lower().startswith("x-helix-")}
+    """Strip ``X-Expert-Work-*`` headers from the upstream response (§ 3.3)."""
+    cleaned = {
+        k: v for k, v in result.headers.items() if not k.lower().startswith("x-expert-work-")
+    }
     if cleaned == result.headers:
         return result
     return ForwardResult(status=result.status, headers=cleaned, body=result.body)

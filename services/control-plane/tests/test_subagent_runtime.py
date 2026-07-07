@@ -9,9 +9,9 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from control_plane.subagent_runtime import SubAgentNotFoundError, make_child_agent_builder
-from helix_agent.persistence.agent_spec import InMemoryAgentSpecStore
-from helix_agent.protocol import AgentSpec, AgentSpecStatus
-from helix_agent.testing import InMemorySecretStore
+from expert_work.persistence.agent_spec import InMemoryAgentSpecStore
+from expert_work.protocol import AgentSpec, AgentSpecStatus
+from expert_work.testing import InMemorySecretStore
 from orchestrator import BuiltAgent, ToolEnv
 
 _SHA = "a" * 64
@@ -20,7 +20,7 @@ _SHA = "a" * 64
 def _spec(name: str, version: str = "1.0.0") -> AgentSpec:
     return AgentSpec.model_validate(
         {
-            "apiVersion": "helix.io/v1",
+            "apiVersion": "expert_work.io/v1",
             "kind": "Agent",
             "metadata": {"name": name, "version": version, "tenant": "t"},
             "spec": {

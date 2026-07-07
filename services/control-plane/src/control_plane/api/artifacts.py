@@ -42,15 +42,15 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence import ArtifactStore
-from helix_agent.persistence.rls import current_user_id_var
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import ArtifactKind, AuditAction, AuditResult
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence import ArtifactStore
+from expert_work.persistence.rls import current_user_id_var
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.protocol import ArtifactKind, AuditAction, AuditResult
+from expert_work.runtime.audit.logger import AuditLogger
 from orchestrator.tools import SandboxSupervisorError, SupervisorClient
 
-logger = logging.getLogger("helix.control_plane.artifacts")
+logger = logging.getLogger("expert_work.control_plane.artifacts")
 
 #: Allowed values for ``PATCH``'s ``kind`` field — kept narrow on purpose.
 _ARTIFACT_KINDS: frozenset[str] = frozenset({"document", "code", "data", "other"})

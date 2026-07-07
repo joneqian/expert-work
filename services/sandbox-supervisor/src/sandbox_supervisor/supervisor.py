@@ -22,16 +22,16 @@ from pathlib import PurePosixPath
 from typing import Literal, Protocol
 from uuid import UUID, uuid4
 
-from helix_agent.common.egress_token import mint_egress_token
-from helix_agent.common.observability import helix_histogram
-from helix_agent.persistence import (
+from expert_work.common.egress_token import mint_egress_token
+from expert_work.common.observability import expert_work_histogram
+from expert_work.persistence import (
     UserWorkspaceStore,
     is_reserved_workspace_path,
     workspace_volume_name,
 )
-from helix_agent.protocol import AuditEntry, UserWorkspace
-from helix_agent.protocol.audit import AuditAction, AuditResult
-from helix_agent.runtime.sandbox import SandboxResourceLimits, SandboxRuntimeProvider
+from expert_work.protocol import AuditEntry, UserWorkspace
+from expert_work.protocol.audit import AuditAction, AuditResult
+from expert_work.runtime.sandbox import SandboxResourceLimits, SandboxRuntimeProvider
 from sandbox_supervisor.docker_client import DockerClient, DockerError
 from sandbox_supervisor.domain import (
     DESTROY_REASON_RELEASE,
@@ -71,8 +71,8 @@ logger = logging.getLogger(__name__)
 # the moment ``wait_ready`` returns. Warm-session reuse (Stream J.15
 # warm path) does not observe — those acquires never run docker. SLO #4
 # (slo.md): P95 < 3s (M0) / < 500ms (M1 with a warm pool).
-_sandbox_cold_start_seconds = helix_histogram(
-    "helix_sandbox_cold_start_seconds",
+_sandbox_cold_start_seconds = expert_work_histogram(
+    "expert_work_sandbox_cold_start_seconds",
     "Seconds from launch decision to ``wait_ready`` success.",
     buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0),
 )
@@ -816,7 +816,7 @@ class SandboxSupervisor:
             ("http_proxy", proxy_url),
             ("NO_PROXY", no_proxy),
             ("no_proxy", no_proxy),
-            ("HELIX_EGRESS_PROXY_AUTH", proxy_auth),
+            ("EXPERT_WORK_EGRESS_PROXY_AUTH", proxy_auth),
         )
 
     async def _emit_audit(

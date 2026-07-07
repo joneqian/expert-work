@@ -70,9 +70,9 @@ from dataclasses import dataclass, field
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.runtime.cancellation import RunCancelledError
-from helix_agent.runtime.tokens import TokenEstimator, estimate_messages, flatten_message
+from expert_work.common.observability import expert_work_counter
+from expert_work.runtime.cancellation import RunCancelledError
+from expert_work.runtime.tokens import TokenEstimator, estimate_messages, flatten_message
 from orchestrator.context.skill_reference import skill_view_reference
 from orchestrator.llm.caller import LLMCaller
 
@@ -82,27 +82,27 @@ logger = logging.getLogger(__name__)
 # summariser failures, and rounds skipped after a transient failure
 # (RT-ADR-6). Full COMPACTION eventing lands in RT-2 PR-4; these
 # counters make the failure semantics observable now.
-_cm_compressor_pass_total = helix_counter(
-    "helix_cm_compressor_pass_total",
+_cm_compressor_pass_total = expert_work_counter(
+    "expert_work_cm_compressor_pass_total",
     "Summarise-the-middle compressor passes completed (Stream L.L2 / RT-2).",
 )
-_cm_compressor_summary_failure_total = helix_counter(
-    "helix_cm_compressor_summary_failure_total",
+_cm_compressor_summary_failure_total = expert_work_counter(
+    "expert_work_cm_compressor_summary_failure_total",
     "Summariser LLM failures during a compression round (RT-ADR-6).",
 )
-_cm_compressor_skipped_total = helix_counter(
-    "helix_cm_compressor_skipped_total",
+_cm_compressor_skipped_total = expert_work_counter(
+    "expert_work_cm_compressor_skipped_total",
     "Compression rounds skipped after a transient summariser failure (RT-ADR-6).",
 )
 # Stream RT-2 PR-4 — compaction magnitude. The pass/skip counters say WHEN
 # compaction fires; this counter says HOW MUCH it reclaims (summed estimated
 # tokens the middle-summarisation removed from the prompt), so a dashboard can
 # quantify the context/cost savings across all runs. A histogram would be the
-# natural shape, but ``helix_histogram`` requires the ``_seconds`` suffix
+# natural shape, but ``expert_work_histogram`` requires the ``_seconds`` suffix
 # (duration-only by contract), so a monotonic counter of tokens saved is the
 # name-rule-compatible choice.
-_cm_compressor_tokens_saved_total = helix_counter(
-    "helix_cm_compressor_tokens_saved_total",
+_cm_compressor_tokens_saved_total = expert_work_counter(
+    "expert_work_cm_compressor_tokens_saved_total",
     "Estimated prompt tokens reclaimed by middle-summarisation (Stream RT-2).",
 )
 
@@ -255,7 +255,7 @@ def estimate_tokens(
     ``total_chars // 4`` (matches Hermes ``estimate_request_tokens_rough``;
     cheap, no dependency, a heavy underestimate for CJK). With one
     (Stream HX-1 — the factory injects the tiktoken-backed
-    :func:`~helix_agent.runtime.tokens.default_estimator`) it is a
+    :func:`~expert_work.runtime.tokens.default_estimator`) it is a
     per-message real count. Upstream stays authoritative on the actual
     number either way.
     """
@@ -267,7 +267,7 @@ def estimate_tokens(
     return total // _CHARS_PER_TOKEN
 
 
-#: Stream HX-1 — the flattening moved to ``helix_agent.runtime.tokens``
+#: Stream HX-1 — the flattening moved to ``expert_work.runtime.tokens``
 #: (shared with the middleware layer); the local name stays because the
 #: summary formatting below uses it too.
 _message_to_text = flatten_message

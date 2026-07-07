@@ -3,7 +3,7 @@
 > Stream O — Credentials & Provider Catalog (PR B).
 > Design: [`docs/streams/STREAM-O-DESIGN.md`](../streams/STREAM-O-DESIGN.md).
 > Implementation:
-> [`packages/helix-common/src/helix_agent/common/credentials/resolver.py`](../../packages/helix-common/src/helix_agent/common/credentials/resolver.py)
+> [`packages/expert-work-common/src/expert_work/common/credentials/resolver.py`](../../packages/expert-work-common/src/expert_work/common/credentials/resolver.py)
 > + control-plane gates in
 > [`api/tenant_config.py`](../../services/control-plane/src/control_plane/api/tenant_config.py)
 > and [`api/agents.py`](../../services/control-plane/src/control_plane/api/agents.py).
@@ -39,18 +39,18 @@ In each deployment environment (dev / staging / prod):
 
 1. **Pick supported providers.** Default ships with
    `["anthropic", "openai", "qwen"]`. Add more by setting
-   `HELIX_AGENT_SUPPORTED_PROVIDERS=anthropic,openai,qwen,deepseek`
+   `EXPERT_WORK_SUPPORTED_PROVIDERS=anthropic,openai,qwen,deepseek`
    (comma-separated env var, parsed as JSON-compatible list).
 2. **Pick supported tools.** Default ships with `["web_search"]`.
 3. **Configure platform credentials** for every supported provider
    and tool:
    ```bash
-   export HELIX_AGENT_PLATFORM_PROVIDER_CREDENTIALS='{
+   export EXPERT_WORK_PLATFORM_PROVIDER_CREDENTIALS='{
      "anthropic": "kms://platform/llm/anthropic-key",
      "openai":    "kms://platform/llm/openai-key",
      "qwen":      "kms://platform/llm/qwen-key"
    }'
-   export HELIX_AGENT_PLATFORM_TOOL_CREDENTIALS='{
+   export EXPERT_WORK_PLATFORM_TOOL_CREDENTIALS='{
      "web_search": "kms://platform/tools/tavily-key"
    }'
    ```
@@ -58,9 +58,9 @@ In each deployment environment (dev / staging / prod):
    fast if any opted-in entry has no credential, or if any credential
    entry is for a non-opted provider/tool.
 
-## 3. Diagnostic: `HelixUpliftCredentialsResolveFailureSpike`
+## 3. Diagnostic: `ExpertWorkUpliftCredentialsResolveFailureSpike`
 
-**Trigger**: `helix:uplift:credentials_resolve_failure_rate:5m > 0.1`
+**Trigger**: `Expert Work:uplift:credentials_resolve_failure_rate:5m > 0.1`
 for 10m for some `(role, key, mode)` combination.
 
 The alert label tells you which mode is failing:
@@ -85,9 +85,9 @@ The `CREDENTIALS_RESOLVE_FAILED` audit row carries `mode + role + key`
 in `details` so you can trace the failed lookup back to the originating
 caller (agent run, consolidator tick, etc.).
 
-## 4. Diagnostic: `HelixUpliftLegacyCredentialsFallbackPresent`
+## 4. Diagnostic: `ExpertWorkUpliftLegacyCredentialsFallbackPresent`
 
-**Trigger**: `helix:uplift:legacy_credentials_fallback_rate:1d > 0`
+**Trigger**: `Expert Work:uplift:legacy_credentials_fallback_rate:1d > 0`
 for 1d for some `role`.
 
 Stream O PR B keeps the legacy settings fields

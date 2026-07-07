@@ -1,7 +1,7 @@
 """Stream RT-2 PR-2 (RT-ADR-8) — memory injection x compression combo.
 
 deer-flow #3746 showed injection and compression mechanisms blowing up
-at their COMBINATION point, not in either unit. helix's per_session
+at their COMBINATION point, not in either unit. expert_work's per_session
 memory block lands at ``messages[1]`` (the cache-anchor HumanMessage —
 Mini-ADR U-8) and survives L2 compression only because it is the first
 non-system message and ``head_keep >= 1`` keeps it in the head slice.
@@ -38,7 +38,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
-from helix_agent.protocol import MemoryItem
+from expert_work.protocol import MemoryItem
 from orchestrator.context import ContextCompressor, floor_head_keep_for_injection
 from orchestrator.graph_builder.builder import _inject_memories
 from orchestrator.tools.registry import ToolSpec
@@ -92,7 +92,7 @@ def _compressor(*, head_keep: int) -> ContextCompressor:
 
 def _find_anchor_block(messages: Sequence[BaseMessage]) -> tuple[int, BaseMessage] | None:
     for idx, msg in enumerate(messages):
-        if msg.additional_kwargs.get("helix_cache_anchor") is True:
+        if msg.additional_kwargs.get("expert_work_cache_anchor") is True:
             return idx, msg
     return None
 

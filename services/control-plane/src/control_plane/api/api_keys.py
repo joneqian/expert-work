@@ -23,16 +23,16 @@ from control_plane.tenant_scope import (
     cross_tenant_query_enabled,
     ensure_tenant_scope,
 )
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.auth import (
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.auth import (
     ApiKeyStore,
     DuplicateApiKeyPrefixError,
     ServiceAccountStore,
 )
-from helix_agent.protocol import ApiKey, ApiKeyCreated, ApiKeyScope, AuditAction, Principal
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.protocol import ApiKey, ApiKeyCreated, ApiKeyScope, AuditAction, Principal
+from expert_work.runtime.audit.logger import AuditLogger
 
-logger = logging.getLogger("helix.control_plane.api.api_keys")
+logger = logging.getLogger("expert_work.control_plane.api.api_keys")
 
 # Stream K.K1 (Mini-ADR K-1) — double-active rotation grace bounds.
 _DEFAULT_GRACE_PERIOD_S: int = 300

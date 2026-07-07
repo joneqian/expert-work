@@ -3,7 +3,7 @@
 The download endpoint (``GET /v1/artifacts/download``) used to return
 ``application/octet-stream`` for every artifact regardless of kind /
 extension. That was safe by accident — clients always saved to disk —
-but failed three real requirements the 2026-05-21 helix-vs-deer-flow
+but failed three real requirements the 2026-05-21 expert-work-vs-deer-flow
 review surfaced (STREAM-J-DESIGN § 10.5, Mini-ADR J-25 第 (4) 项):
 
 1. **XSS — (c) red line.** A user can save an HTML / SVG / XHTML
@@ -35,7 +35,7 @@ from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import Literal
 
-from helix_agent.protocol import ArtifactKind
+from expert_work.protocol import ArtifactKind
 
 __all__ = [
     "ContentDisposition",

@@ -2,7 +2,7 @@
  * i18n bootstrap — Stream H.1b PR 2a.
  *
  * Two locales: ``zh-CN`` (default for unrecognized languages) and
- * ``en``. The detector reads from ``localStorage["helix.admin.lang"]``
+ * ``en``. The detector reads from ``localStorage["expert_work.admin.lang"]``
  * first so explicit user choice survives reloads; otherwise it falls
  * back to ``navigator.language``. Both locale modules export the same
  * key tree, so adding a key in one but not the other is a typecheck
@@ -17,7 +17,7 @@ import zhCN from "./locales/zh-CN";
 
 export const SUPPORTED_LANGS = ["zh-CN", "en"] as const;
 export type SupportedLang = (typeof SUPPORTED_LANGS)[number];
-export const LANG_STORAGE_KEY = "helix.admin.lang";
+export const LANG_STORAGE_KEY = "expert_work.admin.lang";
 
 void i18n
   .use(LanguageDetector)

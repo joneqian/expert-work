@@ -1,8 +1,8 @@
 # Credential Proxy (Stream F.5)
 
 Outbound secret injection. A sandbox / caller sends an HTTP request to
-the proxy with two headers — `X-Helix-Upstream` (the real target) and
-`X-Helix-Secret-Ref` (the secret to inject) — and the proxy resolves the
+the proxy with two headers — `X-Expert-Work-Upstream` (the real target) and
+`X-Expert-Work-Secret-Ref` (the secret to inject) — and the proxy resolves the
 ref, injects the real credential, and forwards upstream. The sandbox
 **never sees the secret value**. STREAM-F-DESIGN § 2.5 / subsystems/11.
 
@@ -14,15 +14,15 @@ in dev, Aliyun KMS in production.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/forward` | Inject the secret + forward to `X-Helix-Upstream` |
+| POST | `/forward` | Inject the secret + forward to `X-Expert-Work-Upstream` |
 | POST | `/admin/allowlist` | Register a `(tenant, agent, version, ref)` four-tuple |
 | DELETE | `/admin/allowlist/{tenant}/{agent}/{version}` | Revoke an agent version's refs |
 | POST | `/admin/cache/invalidate` | Drop the in-process secret cache |
 | GET | `/admin/health` | Liveness |
 
-`/forward` request headers: `X-Helix-Tenant`, `X-Helix-Agent`,
-`X-Helix-Agent-Version`, `X-Helix-Session`, `X-Helix-Sandbox`,
-`X-Helix-Secret-Ref`, `X-Helix-Upstream`.
+`/forward` request headers: `X-Expert-Work-Tenant`, `X-Expert-Work-Agent`,
+`X-Expert-Work-Agent-Version`, `X-Expert-Work-Session`, `X-Expert-Work-Sandbox`,
+`X-Expert-Work-Secret-Ref`, `X-Expert-Work-Upstream`.
 
 ## Safety
 
@@ -39,4 +39,4 @@ in dev, Aliyun KMS in production.
 uvicorn-style entrypoint:  python -m credential_proxy
 ```
 
-Settings come from `HELIX_CRED_PROXY_*` env vars (see `settings.py`).
+Settings come from `EXPERT_WORK_CRED_PROXY_*` env vars (see `settings.py`).

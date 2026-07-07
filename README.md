@@ -1,6 +1,6 @@
 <div align="center">
 
-# Helix-Agent
+# Expert Work
 
 **A business-agnostic, multi-tenant platform for per-user persistent AI agents.**
 
@@ -20,9 +20,9 @@ paradigm: a stateless harness loop (LangGraph), an isolated execution sandbox
 
 ---
 
-## Why Helix
+## Why Expert Work
 
-Most agent stacks are bound to one product. Helix keeps the **engine generic** and
+Most agent stacks are bound to one product. Expert Work keeps the **engine generic** and
 pushes everything domain-specific — compliance posture, PII fields, prompts/tools,
 isolation strength — to the **tenant** layer. The result is one platform that any
 team can run multi-tenant, where each person has a real, stateful agent rather than a
@@ -38,7 +38,7 @@ stateless chat box.
 > **Status** — M0 (product-grade MVP) closeout complete; hardening toward M1.
 > Live milestone status in [docs/ITERATION-PLAN.md](docs/ITERATION-PLAN.md);
 > design in [docs/architecture/00-OVERVIEW.md](docs/architecture/00-OVERVIEW.md).
-> (Helix began as a replacement for a Dify deployment, then generalized into a
+> (Expert Work began as a replacement for a Dify deployment, then generalized into a
 > standalone platform.)
 
 ## ✨ Capabilities
@@ -49,7 +49,7 @@ stateless chat box.
 | **Multi-tier memory** | Working window + plan state + episodic + long-term; hybrid retrieval (pgvector + BM25 fused via RRF, temporal decay, MMR, optional cross-encoder rerank) + background consolidator. |
 | **Context engineering** | LLM-free working window, summarize-the-middle compressor, recoverable tool-output overflow, error-as-guidance recovery, event-driven effort escalation. |
 | **Agent Skills** | Anthropic Agent Skills spec (SKILL.md + frontmatter); platform catalog, lazy progressive disclosure, threat scanning. |
-| **MCP client** | Consumes external MCP servers (GitHub / Postgres / Linear / …) via a platform catalog + per-tenant instantiation. Helix is a client, not a server. |
+| **MCP client** | Consumes external MCP servers (GitHub / Postgres / Linear / …) via a platform catalog + per-tenant instantiation. Expert Work is a client, not a server. |
 | **Sandbox isolation** | Per-session Docker / gVisor sandbox; filesystem, network, and subprocess isolation via a sandbox supervisor. |
 | **Multi-tenant governance** | Postgres RLS, OIDC/JWT via Keycloak, RBAC + ABAC, audit log, platform-centralized LLM/embedding config, metering & billing rollups. |
 | **Account & onboarding** | White-labeled login theme, in-app first-run setup wizard, member invites, cross-tenant platform admin — all without touching the IdP console. |
@@ -106,7 +106,7 @@ MinIO `:9001`, Grafana `:3000`. See [infra/README.md](infra/README.md).
 
 ## 📦 Deployment
 
-**The single source for deploying Helix is the
+**The single source for deploying Expert Work is the
 [Deployment Manual](docs/runbooks/deployment.md)** — it covers, end to end:
 
 - Architecture & topology, prerequisites, config sources, key env vars
@@ -124,12 +124,12 @@ Deep dives it links to: [Postgres](docs/runbooks/postgres.md),
 ## 🗂 Repository layout
 
 ```
-helix-agent/
+expert-work/
 ├── apps/            # frontends (admin-ui — React/TS console)
 ├── services/        # deployable services (control-plane, sandbox-supervisor,
 │                    #   credential-proxy, orchestrator, + workers/jobs)
-├── packages/        # reusable libs (helix-protocol / -persistence / -runtime /
-│                    #   -common, under the helix_agent.* namespace)
+├── packages/        # reusable libs (expert-work-protocol / -persistence / -runtime /
+│                    #   -common, under the expert_work.* namespace)
 ├── infra/           # local dev stack (compose), Makefile, env template
 ├── environments/    # per-env structured config (dev / staging / prod .yaml)
 ├── manifests/       # declarative agent manifests (YAML)
@@ -171,5 +171,5 @@ for workspace conventions.
 ## License
 
 [GNU AGPL-3.0](LICENSE) — copyleft with a network clause: if you run a modified
-Helix as a network service, you must offer users that service's source under the
+Expert Work as a network service, you must offer users that service's source under the
 same license.

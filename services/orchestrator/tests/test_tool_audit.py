@@ -269,10 +269,10 @@ async def test_audit_logger_from_config_returns_none_when_absent() -> None:
 
 
 async def test_audit_logger_from_config_returns_real_logger() -> None:
-    from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-    from helix_agent.runtime.audit.fallback import InMemoryAuditFallbackQueue
-    from helix_agent.runtime.audit.logger import AuditLogger
-    from helix_agent.runtime.audit.redactor import DefaultSecretRedactor
+    from expert_work.persistence.audit_log import InMemoryAuditLogStore
+    from expert_work.runtime.audit.fallback import InMemoryAuditFallbackQueue
+    from expert_work.runtime.audit.logger import AuditLogger
+    from expert_work.runtime.audit.redactor import DefaultSecretRedactor
 
     real = AuditLogger(
         InMemoryAuditLogStore(),

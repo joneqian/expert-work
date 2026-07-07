@@ -30,13 +30,13 @@ from control_plane.api._user_scope import (
     resolve_caller_user_id,
 )
 from control_plane.audit import emit
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.common.threat_patterns import scan_for_threats
-from helix_agent.persistence.agent_spec import AgentSpecStore
-from helix_agent.persistence.tenant_user import TenantUserStore
-from helix_agent.protocol import AuditAction, Plan
-from helix_agent.runtime.audit.logger import AuditLogger
-from helix_agent.runtime.runs import RunStatus, RunStore
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.threat_patterns import scan_for_threats
+from expert_work.persistence.agent_spec import AgentSpecStore
+from expert_work.persistence.tenant_user import TenantUserStore
+from expert_work.protocol import AuditAction, Plan
+from expert_work.runtime.audit.logger import AuditLogger
+from expert_work.runtime.runs import RunStatus, RunStore
 
 logger = logging.getLogger(__name__)
 

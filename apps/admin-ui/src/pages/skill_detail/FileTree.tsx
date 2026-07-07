@@ -4,7 +4,7 @@
  * Left pane of the SkillDetail editor view. Renders:
  *
  *   - ``SKILL.md`` always pinned at the top (the canonical view of the
- *     version's prompt fragment + helix-namespaced frontmatter).
+ *     version's prompt fragment + expert-work-namespaced frontmatter).
  *   - Supporting files grouped by their top-level directory segment
  *     (``reference/``, ``scripts/``, ``templates/``, …) so the tree
  *     mirrors what an operator would see if they unzipped the export.
@@ -53,7 +53,7 @@ function TreeRow({
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          fontFamily: "var(--hx-font-mono)",
+          fontFamily: "var(--ew-font-mono)",
           fontSize: 12,
           color,
         }}
@@ -149,7 +149,7 @@ function buildTree(paths: readonly string[], t: (k: string) => string): DataNode
           display: "inline-flex",
           alignItems: "center",
           gap: 6,
-          color: "var(--hx-text-tertiary)",
+          color: "var(--ew-text-tertiary)",
           fontSize: 12,
         }}
       >

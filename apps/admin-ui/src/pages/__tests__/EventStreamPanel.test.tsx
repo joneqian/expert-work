@@ -115,7 +115,7 @@ describe("EventStreamPanel", () => {
     render(<EventStreamPanel threadId="t-1" runId="r-1" />);
     await user.click(screen.getByTestId("event-stream-toggle"));
     await waitFor(() => {
-      expect(window.localStorage.getItem("helix.runDetail.eventStream.expanded")).toBe("1");
+      expect(window.localStorage.getItem("expert_work.runDetail.eventStream.expanded")).toBe("1");
     });
   });
 

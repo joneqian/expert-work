@@ -1,0 +1,260 @@
+"""``after_llm_call`` token-usage observability — Stream G.9.
+
+For every LLM call we:
+
+1. Increment a Prometheus counter
+   ``expert_work_llm_token_usage_total{tenant_id, agent_name, model, type}`` so
+   dashboards (Grafana / per-tenant per-agent token spend) and alerts
+   see usage in real time.
+2. Persist one row in the ``token_usage`` table (via
+   :class:`TokenUsageStore`) so the M0→M1 Gate can compute per-agent
+   cost over an arbitrary time window, irrespective of metric
+   retention.
+
+The middleware reads :attr:`MiddlewareContext.payload`:
+
+* ``response`` — the :class:`AIMessage` the LLM returned; its
+  ``usage_metadata`` carries ``input_tokens`` / ``output_tokens`` /
+  optional ``input_token_details.{cache_creation, cache_read}``
+  (Stream L.L1's cache-aware shape — Anthropic only; other providers
+  leave cache details unset).
+* ``tenant_id`` — UUID; gates both the counter label and the RLS
+  context for the DB insert. A response without one is silently
+  dropped (the middleware before the LLM call also requires it).
+* ``cache_hit`` — when the LLM cache served the response (Stream E.5),
+  no new tokens were spent upstream. We still record a row with the
+  cached counts (0 by default) so downstream queries can distinguish
+  cached calls from no-call.
+
+Agent identity (``agent_name`` / ``agent_version`` / ``model``) is
+baked into the middleware instance at construction by
+:func:`build_middleware_chains` — same pattern as
+:class:`LLMCacheStoreMiddleware`.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Any
+from uuid import UUID
+
+from langchain_core.messages import AIMessage
+
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.common.observability.metrics import expert_work_counter
+from expert_work.persistence.token_usage_store import (
+    TokenUsageRecord,
+    TokenUsageStore,
+)
+from expert_work.runtime.middleware.base import CallNext, MiddlewareContext
+from expert_work.runtime.tokens import TokenEstimator, estimate_messages
+
+logger = logging.getLogger(__name__)
+
+#: ``type`` label values for the counter. The order mirrors the
+#: ``TokenUsageRecord`` field order so dashboards group by type
+#: predictably. ``noqa: S105`` — these are metric label values, not
+#: hardcoded secrets (ruff's S105 trips on the ``TOKEN_TYPE_`` prefix).
+_TOKEN_TYPE_INPUT = "input"  # noqa: S105
+_TOKEN_TYPE_OUTPUT = "output"  # noqa: S105
+_TOKEN_TYPE_CACHE_CREATION = "cache_creation"  # noqa: S105
+_TOKEN_TYPE_CACHE_READ = "cache_read"  # noqa: S105
+
+_llm_token_usage_total = expert_work_counter(
+    "expert_work_llm_token_usage_total",
+    "Tokens consumed per LLM call, split by type (Stream G.9).",
+    ("tenant_id", "agent_name", "model", "type"),
+)
+
+#: Stream HX-1 (Mini-ADR HX-A6) — estimated prompt tokens, accumulated
+#: alongside the actual counts above so dashboards can derive the
+#: estimator drift ratio in PromQL:
+#: ``rate(expert_work_ew_token_estimated_total) /
+#: rate(expert_work_llm_token_usage_total{type=~"input|cache_.*"})``.
+#: A counter pair instead of a ratio histogram because the repo metric
+#: convention reserves histograms for durations (``_seconds``).
+_ew_token_estimated_total = expert_work_counter(
+    "expert_work_ew_token_estimated_total",
+    "Estimated prompt tokens per LLM call (Stream HX-1 drift numerator).",
+    ("tenant_id", "agent_name", "model"),
+)
+
+
+@dataclass
+class TokenUsageMiddleware:
+    """``after_llm_call`` — emit counter + persist one row per LLM call.
+
+    Errors in the metrics counter or DB insert are logged at ``warning``
+    and swallowed: token-usage observability is **never** allowed to
+    fail the LLM call. The persistence write happens inside the same
+    request as the rest of the after-call chain; the store
+    implementation is responsible for its own RLS handling.
+    """
+
+    store: TokenUsageStore
+    agent_name: str
+    agent_version: str
+    model: str
+    # Stream Y-3 — the ModelSpec provider, baked in at construction so Y4 can
+    # price by ``(provider, model)``. ``None`` when the caller can't supply it.
+    provider: str | None = None
+    # SE-16 (SE-A43) — what this build's LLM calls count as. The evolution
+    # replay path builds agents with ``skill_evolution`` so with/without
+    # replay spend never pollutes the agent's conversation cost.
+    usage_kind: str = "conversation"
+    # Stream HX-1 (Mini-ADR HX-A6) — when injected, the estimator re-counts
+    # the prompt that was actually sent (``payload["prompt_messages"]``) so
+    # the drift counter accumulates next to the provider-reported truth.
+    estimator: TokenEstimator | None = None
+
+    name: str = "token_usage"
+    anchor: str = "after_llm_call"
+    after: tuple[str, ...] = field(default_factory=tuple)
+    before: tuple[str, ...] = field(default_factory=tuple)
+
+    async def __call__(self, ctx: MiddlewareContext, call_next: CallNext) -> None:
+        # Run downstream first so middlewares that depend on the
+        # response (cache store, langfuse) finish before we account
+        # the call — this keeps the persisted timestamp closer to
+        # "observed by the chain" than "received from the LLM".
+        await call_next(ctx)
+
+        tenant_id = ctx.payload.get("tenant_id")
+        response = ctx.payload.get("response")
+        if not isinstance(tenant_id, UUID) or not isinstance(response, AIMessage):
+            return
+
+        counts = _extract_token_counts(response.usage_metadata)
+        if counts is None:
+            return
+        input_t, output_t, cache_creation_t, cache_read_t = counts
+
+        # Counter — even when cache_hit=True we increment so dashboards
+        # show the fact that a call landed; counts may legitimately be
+        # zero (cache served, no upstream tokens spent).
+        tenant_label = str(tenant_id)
+        try:
+            _llm_token_usage_total.labels(
+                tenant_id=tenant_label,
+                agent_name=self.agent_name,
+                model=self.model,
+                type=_TOKEN_TYPE_INPUT,
+            ).inc(input_t)
+            _llm_token_usage_total.labels(
+                tenant_id=tenant_label,
+                agent_name=self.agent_name,
+                model=self.model,
+                type=_TOKEN_TYPE_OUTPUT,
+            ).inc(output_t)
+            if cache_creation_t > 0:
+                _llm_token_usage_total.labels(
+                    tenant_id=tenant_label,
+                    agent_name=self.agent_name,
+                    model=self.model,
+                    type=_TOKEN_TYPE_CACHE_CREATION,
+                ).inc(cache_creation_t)
+            if cache_read_t > 0:
+                _llm_token_usage_total.labels(
+                    tenant_id=tenant_label,
+                    agent_name=self.agent_name,
+                    model=self.model,
+                    type=_TOKEN_TYPE_CACHE_READ,
+                ).inc(cache_read_t)
+        except Exception:
+            logger.warning(
+                "token_usage.counter_failed tenant=%s agent=%s model=%s",
+                tenant_label,
+                self.agent_name,
+                self.model,
+                exc_info=True,
+            )
+
+        # Stream HX-1 — drift numerator. Skipped on local-cache hits
+        # (no upstream tokens were spent, the denominator stays 0) and
+        # when the prompt view is unavailable. Same never-fail contract
+        # as the counters above.
+        if self.estimator is not None and not ctx.payload.get("cache_hit"):
+            prompt = ctx.payload.get("prompt_messages")
+            if isinstance(prompt, list) and prompt:
+                try:
+                    estimated = estimate_messages(prompt, self.estimator)
+                    _ew_token_estimated_total.labels(
+                        tenant_id=tenant_label,
+                        agent_name=self.agent_name,
+                        model=self.model,
+                    ).inc(estimated)
+                except Exception:
+                    logger.warning(
+                        "token_usage.estimate_failed tenant=%s agent=%s model=%s",
+                        tenant_label,
+                        self.agent_name,
+                        self.model,
+                        exc_info=True,
+                    )
+
+        # Stream Agent-Templates (M1-5a) — per-user cost attribution. The run
+        # worker threads the end-user (tenant_user.id) through configurable →
+        # payload; absent / non-UUID (system / preview builds) → NULL.
+        usage_user_id = ctx.payload.get("user_id")
+        if not isinstance(usage_user_id, UUID):
+            usage_user_id = None
+        try:
+            await self.store.insert(
+                TokenUsageRecord(
+                    tenant_id=tenant_id,
+                    agent_name=self.agent_name,
+                    agent_version=self.agent_version,
+                    model=self.model,
+                    provider=self.provider,
+                    user_id=usage_user_id,
+                    usage_kind=self.usage_kind,
+                    input_tokens=input_t,
+                    output_tokens=output_t,
+                    cache_creation_tokens=cache_creation_t,
+                    cache_read_tokens=cache_read_t,
+                    trace_id=current_trace_id_hex(),
+                )
+            )
+        except Exception:
+            logger.warning(
+                "token_usage.persist_failed tenant=%s agent=%s model=%s",
+                tenant_label,
+                self.agent_name,
+                self.model,
+                exc_info=True,
+            )
+
+
+def _extract_token_counts(
+    usage_metadata: Any,
+) -> tuple[int, int, int, int] | None:
+    """Pull (input, output, cache_creation, cache_read) out of LangChain's
+    ``usage_metadata`` shape.
+
+    Returns ``None`` when nothing useful is present (eg. provider didn't
+    populate usage) — the middleware then no-ops. The cache counters
+    live in ``usage_metadata['input_token_details']`` per LangChain's
+    convention (see Stream L.L1).
+    """
+    if not isinstance(usage_metadata, dict):
+        return None
+    input_t = _coerce_int(usage_metadata.get("input_tokens"))
+    output_t = _coerce_int(usage_metadata.get("output_tokens"))
+    details = usage_metadata.get("input_token_details")
+    cache_creation_t = 0
+    cache_read_t = 0
+    if isinstance(details, dict):
+        cache_creation_t = _coerce_int(details.get("cache_creation")) or 0
+        cache_read_t = _coerce_int(details.get("cache_read")) or 0
+    if input_t is None and output_t is None and cache_creation_t == 0 and cache_read_t == 0:
+        return None
+    return (input_t or 0, output_t or 0, cache_creation_t, cache_read_t)
+
+
+def _coerce_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None

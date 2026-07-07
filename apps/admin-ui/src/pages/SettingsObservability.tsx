@@ -7,7 +7,7 @@
  * (PII-masked) LLM traces, Grafana/Tempo span all tenants. Exposing them to a
  * tenant user would leak cross-tenant data (ADR-0005 § observability), so this
  * lives in the platform nav group and self-guards on ``isSystemAdmin``. Tenant
- * users get helix's own tenant-isolated Run detail instead (token summary +
+ * users get expert_work's own tenant-isolated Run detail instead (token summary +
  * event stream + control actions).
  *
  * Each card external-links to the tool's base URL (build-time env); an unset

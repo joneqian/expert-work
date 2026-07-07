@@ -17,7 +17,7 @@ from audit_backup_worker.worker import (
     AuditWormBackupWorker,
     static_retention_resolver,
 )
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.runtime.storage import InMemoryObjectStore
 
 
 @pytest.mark.asyncio

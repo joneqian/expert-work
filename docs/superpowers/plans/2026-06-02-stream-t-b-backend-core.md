@@ -15,14 +15,14 @@
 ## File Structure
 
 **New**
-- `packages/helix-persistence/migrations/versions/00XX_platform_embedding_config.py` — single-row table (pick the next free revision id; ≤32 chars, e.g. `0051_platform_embed_config`).
-- `packages/helix-persistence/src/helix_agent/persistence/models/platform_embedding_config.py` — SQLAlchemy model.
-- `packages/helix-persistence/src/helix_agent/persistence/platform_embedding_config/{base,sql,memory}.py` — store protocol + SQL + in-memory impls (mirror an existing platform store).
+- `packages/expert-work-persistence/migrations/versions/00XX_platform_embedding_config.py` — single-row table (pick the next free revision id; ≤32 chars, e.g. `0051_platform_embed_config`).
+- `packages/expert-work-persistence/src/expert_work/persistence/models/platform_embedding_config.py` — SQLAlchemy model.
+- `packages/expert-work-persistence/src/expert_work/persistence/platform_embedding_config/{base,sql,memory}.py` — store protocol + SQL + in-memory impls (mirror an existing platform store).
 - `services/control-plane/src/control_plane/platform_embedding_config.py` — `PlatformEmbeddingConfigService` (DB-wins/env-fallback/TTL).
-- Tests: `packages/helix-protocol/tests/test_model_catalog.py` (extend), `services/control-plane/tests/test_platform_embedding_config_service.py`, `services/control-plane/tests/test_dynamic_resolver.py`.
+- Tests: `packages/expert-work-protocol/tests/test_model_catalog.py` (extend), `services/control-plane/tests/test_platform_embedding_config_service.py`, `services/control-plane/tests/test_dynamic_resolver.py`.
 
 **Modified**
-- `packages/helix-protocol/src/helix_agent/protocol/model_catalog.py` — add `rerank: bool` to `ModelEntry`; add the 3 required models.
+- `packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py` — add `rerank: bool` to `ModelEntry`; add the 3 required models.
 - `services/control-plane/src/control_plane/runtime.py` — `DynamicResolvingEmbedder`, `DynamicResolvingReranker`; `make_agent_builder` build-time embedding gate.
 - `services/control-plane/src/control_plane/app.py` — construct the config service + dynamic embedder/reranker; swap into the existing wiring.
 - `services/control-plane/src/control_plane/settings.py` — keep env fields as the fallback (no change needed beyond confirming they're read by the service).
@@ -31,7 +31,7 @@
 
 ## Conventions (verified)
 - CI: `mypy` does NOT cover control-plane/src (local-only there); `pytest -m "not integration"`; run from repo root `uv run python -m pytest <path>`. Protocol signature changes must be swept across tools/eval doubles (memory `reference_protocol_sweep_includes_tools_eval`).
-- Alembic revision id ≤ 32 chars (memory `feedback_alembic_revision_id_32_chars`); set `down_revision` to the current head (find via `ls packages/helix-persistence/migrations/versions/ | sort | tail`).
+- Alembic revision id ≤ 32 chars (memory `feedback_alembic_revision_id_32_chars`); set `down_revision` to the current head (find via `ls packages/expert-work-persistence/migrations/versions/ | sort | tail`).
 - Platform tables are tenant-less + bypass-RLS for writes — mirror `platform_provider_secret` (migration `0049_platform_secrets.py`) and `SqlPlatformSecretStore`.
 - TTL-cache pattern: mirror `PlatformSecretsService` (`platform_secrets.py:38-58`) — 30s TTL, invalidate on write.
 - No side effects in asserts (memory `feedback_no_side_effect_in_assert`); no print/log of secret-named vars (memory `feedback_codeql_clear_text_logging_secret_name`); no module-level unused names (memory `feedback_codeql_unused_global`).
@@ -41,8 +41,8 @@
 ### Task 1: Catalog — add `rerank` flag + the required embedding/rerank models
 
 **Files:**
-- Modify: `packages/helix-protocol/src/helix_agent/protocol/model_catalog.py`
-- Test: `packages/helix-protocol/tests/test_model_catalog.py`
+- Modify: `packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py`
+- Test: `packages/expert-work-protocol/tests/test_model_catalog.py`
 
 - [ ] **Step 1: Write failing tests** — append to `test_model_catalog.py`:
 ```python
@@ -59,7 +59,7 @@ def test_model_entry_has_rerank_flag_defaulting_false() -> None:
     assert e.rerank is False
 ```
 
-- [ ] **Step 2: Run — confirm FAIL.** `uv run python -m pytest packages/helix-protocol/tests/test_model_catalog.py -q`
+- [ ] **Step 2: Run — confirm FAIL.** `uv run python -m pytest packages/expert-work-protocol/tests/test_model_catalog.py -q`
 
 - [ ] **Step 3: Add the `rerank` field to `ModelEntry`** (after `embeddings`):
 ```python
@@ -79,11 +79,11 @@ In the `"qwen"` tuple add:
 ```
 Add an inline comment on each noting it's the platform embedding/rerank model (Stream T, user-specified). Keep `text-embedding-3-large` under openai.
 
-- [ ] **Step 5: Run — confirm PASS** (new + existing catalog tests). Also run the model-catalog API tests to confirm `model_dump` still serialises (the new field flows through): `uv run python -m pytest packages/helix-protocol/tests/test_model_catalog.py services/control-plane/tests/test_model_catalog_api.py -q`
+- [ ] **Step 5: Run — confirm PASS** (new + existing catalog tests). Also run the model-catalog API tests to confirm `model_dump` still serialises (the new field flows through): `uv run python -m pytest packages/expert-work-protocol/tests/test_model_catalog.py services/control-plane/tests/test_model_catalog_api.py -q`
 
 - [ ] **Step 6: Commit**
 ```bash
-git add packages/helix-protocol/src/helix_agent/protocol/model_catalog.py packages/helix-protocol/tests/test_model_catalog.py
+git add packages/expert-work-protocol/src/expert_work/protocol/model_catalog.py packages/expert-work-protocol/tests/test_model_catalog.py
 git commit -m "feat(stream-t): catalog rerank flag + embedding-3/text-embedding-v4/qwen3-vl-rerank (PR B)"
 ```
 
@@ -93,16 +93,16 @@ git commit -m "feat(stream-t): catalog rerank flag + embedding-3/text-embedding-
 
 **Files:**
 - Create: migration `00XX_platform_embed_config.py`, `models/platform_embedding_config.py`, `platform_embedding_config/{base,sql,memory}.py`
-- Test: `packages/helix-persistence/tests/test_platform_embedding_config_store.py`
+- Test: `packages/expert-work-persistence/tests/test_platform_embedding_config_store.py`
 
 **Schema (single-row singleton):** columns `id` (TEXT PK, constant `"singleton"`), `embedding_provider` (TEXT, nullable), `embedding_model` (TEXT, nullable), `rerank_provider` (TEXT, nullable), `rerank_model` (TEXT, nullable), `updated_at` (timestamptz), `updated_by` (TEXT, nullable). Tenant-less, no RLS. A NULL/absent row means "not configured (fall back to env)".
 
-- [ ] **Step 1: Read an existing platform store to mirror.** Read `packages/helix-persistence/.../models/` for the `platform_provider_secret` model and its store (`SqlPlatformSecretStore`) + the `0049_platform_secrets.py` migration. Match table-definition style, the `bypass_rls`/tenant-less convention, and the store protocol+sql+memory split.
+- [ ] **Step 1: Read an existing platform store to mirror.** Read `packages/expert-work-persistence/.../models/` for the `platform_provider_secret` model and its store (`SqlPlatformSecretStore`) + the `0049_platform_secrets.py` migration. Match table-definition style, the `bypass_rls`/tenant-less convention, and the store protocol+sql+memory split.
 
-- [ ] **Step 2: Write the failing store test** `packages/helix-persistence/tests/test_platform_embedding_config_store.py` (use the in-memory store):
+- [ ] **Step 2: Write the failing store test** `packages/expert-work-persistence/tests/test_platform_embedding_config_store.py` (use the in-memory store):
 ```python
 import pytest
-from helix_agent.persistence.platform_embedding_config.memory import InMemoryPlatformEmbeddingConfigStore
+from expert_work.persistence.platform_embedding_config.memory import InMemoryPlatformEmbeddingConfigStore
 
 @pytest.mark.asyncio
 async def test_get_returns_none_when_unset() -> None:
@@ -132,7 +132,7 @@ async def test_put_is_idempotent_singleton() -> None:
     assert row is not None and row.embedding_provider == "qwen"  # last write wins, one row
 ```
 
-- [ ] **Step 3: Run — confirm FAIL.** `uv run python -m pytest packages/helix-persistence/tests/test_platform_embedding_config_store.py -q`
+- [ ] **Step 3: Run — confirm FAIL.** `uv run python -m pytest packages/expert-work-persistence/tests/test_platform_embedding_config_store.py -q`
 
 - [ ] **Step 4: Implement** the protocol (`base.py` — `get() -> Row | None`, `put(*, embedding_provider, embedding_model, rerank_provider, rerank_model, updated_by) -> None`, a frozen `PlatformEmbeddingConfigRow` dataclass), the in-memory store (`memory.py`), the SQLAlchemy model (`models/platform_embedding_config.py`), the SQL store (`sql.py`, upsert-on-singleton via `bypass_rls_session`), and the migration (`00XX`, `down_revision` = current head). Follow the `platform_provider_secret` patterns from Step 1.
 
@@ -140,7 +140,7 @@ async def test_put_is_idempotent_singleton() -> None:
 
 - [ ] **Step 6: Commit**
 ```bash
-git add packages/helix-persistence/migrations/versions/00XX_platform_embed_config.py packages/helix-persistence/src/helix_agent/persistence/models/platform_embedding_config.py packages/helix-persistence/src/helix_agent/persistence/platform_embedding_config/ packages/helix-persistence/tests/test_platform_embedding_config_store.py
+git add packages/expert-work-persistence/migrations/versions/00XX_platform_embed_config.py packages/expert-work-persistence/src/expert_work/persistence/models/platform_embedding_config.py packages/expert-work-persistence/src/expert_work/persistence/platform_embedding_config/ packages/expert-work-persistence/tests/test_platform_embedding_config_store.py
 git commit -m "feat(stream-t): platform_embedding_config table + store (PR B)"
 ```
 
@@ -168,7 +168,7 @@ class PlatformEmbeddingConfigService:
 - [ ] **Step 2: Write the failing test** `test_platform_embedding_config_service.py`:
 ```python
 import pytest
-from helix_agent.persistence.platform_embedding_config.memory import InMemoryPlatformEmbeddingConfigStore
+from expert_work.persistence.platform_embedding_config.memory import InMemoryPlatformEmbeddingConfigStore
 from control_plane.platform_embedding_config import PlatformEmbeddingConfigService
 
 class _Settings:
@@ -290,7 +290,7 @@ git commit -m "feat(stream-t): wire dynamic embedder/reranker + build-time embed
 ---
 
 ## Final verification (before opening the PR)
-- [ ] `uv run python -m pytest packages/helix-protocol/tests/test_model_catalog.py packages/helix-persistence/tests/test_platform_embedding_config_store.py services/control-plane/tests -q -m "not integration"` — green.
+- [ ] `uv run python -m pytest packages/expert-work-protocol/tests/test_model_catalog.py packages/expert-work-persistence/tests/test_platform_embedding_config_store.py services/control-plane/tests -q -m "not integration"` — green.
 - [ ] Protocol sweep: grep the repo (incl. `tools/`, `eval/`) for any `ResolvingEmbedder(`/`resolve_embedder(` call sites this PR orphaned; none should remain broken.
 - [ ] `uv run ruff check <changed dirs>` clean; `uv run pre-commit run --files <changed>` clean.
 - [ ] Confirm the migration applies on a fresh DB (in-memory/sqlite path used by the suite) and the revision id is ≤32 chars with `down_revision` = prior head.

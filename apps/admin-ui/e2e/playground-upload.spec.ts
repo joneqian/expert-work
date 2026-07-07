@@ -3,7 +3,7 @@
  *
  * Drives the multimodal input path end to end against mocked routes:
  * the thread is created lazily on the first action (attaching an image →
- * mocked ``POST /v1/sessions`` then ``POST .../uploads`` → ``helix://image/
+ * mocked ``POST /v1/sessions`` then ``POST .../uploads`` → ``expert_work://image/
  * ...``), and Run posts the SSE stream with that ref in ``image_refs``.
  * Also runs axe on the tab.
  */
@@ -64,7 +64,7 @@ test("attach image, run, and send image_refs + pass axe", async ({ page }) => {
   await page.route("**/v1/sessions/*/uploads", async (route) => {
     await route.fulfill({
       status: 201,
-      json: { image_ref: "helix://image/demo.png" },
+      json: { image_ref: "expert_work://image/demo.png" },
     });
   });
 
@@ -108,7 +108,7 @@ test("attach image, run, and send image_refs + pass axe", async ({ page }) => {
 
   expect(runBody).toEqual({
     input: "describe this image",
-    image_refs: ["helix://image/demo.png"],
+    image_refs: ["expert_work://image/demo.png"],
   });
   // Attachment chip cleared after the turn consumed it.
   await expect(page.getByTestId("playground-attachment")).toHaveCount(0);

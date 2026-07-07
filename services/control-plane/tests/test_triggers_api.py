@@ -11,7 +11,7 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
 from tests.agent_fixtures import stub_agent_runtime
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
@@ -23,7 +23,7 @@ from tests.auth_fixtures import (
 _DEFAULT_TENANT = DEFAULT_DEV_TENANT_ID
 
 _REPORTER_YAML = """\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: reporter
@@ -212,7 +212,7 @@ async def test_webhook_fires_run_without_jwt(triggers_client: AsyncClient) -> No
     async with _bare_client(triggers_client) as bare:
         resp = await bare.post(
             f"/v1/webhooks/{trigger_id}",
-            headers={"X-Helix-Webhook-Secret": secret},
+            headers={"X-Expert-Work-Webhook-Secret": secret},
         )
     assert resp.status_code == 202
 
@@ -242,7 +242,7 @@ async def test_webhook_rejects_bad_secret(triggers_client: AsyncClient) -> None:
     trigger_id = created.json()["id"]
     resp = await triggers_client.post(
         f"/v1/webhooks/{trigger_id}",
-        headers={"X-Helix-Webhook-Secret": "wrong-secret"},
+        headers={"X-Expert-Work-Webhook-Secret": "wrong-secret"},
     )
     assert resp.status_code == 403
 
@@ -268,7 +268,7 @@ async def test_webhook_rejects_missing_secret(triggers_client: AsyncClient) -> N
 async def test_webhook_unknown_trigger_404(triggers_client: AsyncClient) -> None:
     resp = await triggers_client.post(
         f"/v1/webhooks/{uuid4()}",
-        headers={"X-Helix-Webhook-Secret": "anything"},
+        headers={"X-Expert-Work-Webhook-Secret": "anything"},
     )
     assert resp.status_code == 404
 
@@ -296,7 +296,7 @@ async def test_cron_trigger_quota_returns_429(triggers_client: AsyncClient) -> N
 
 
 async def _query_audit(audit_store: InMemoryAuditLogStore) -> list[object]:
-    from helix_agent.protocol import AuditQuery
+    from expert_work.protocol import AuditQuery
 
     page = await audit_store.query(AuditQuery(tenant_id=_DEFAULT_TENANT))
     return list(page.entries)

@@ -39,8 +39,8 @@ from uuid import UUID, uuid4
 import yaml
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
-from helix_agent.protocol import SubAgentSpec
-from helix_agent.runtime.cancellation import CancellationToken, RunCancelledError
+from expert_work.protocol import SubAgentSpec
+from expert_work.runtime.cancellation import CancellationToken, RunCancelledError
 from orchestrator.agent_factory import BuiltAgent, detect_subagent_cycle
 from orchestrator.errors import AgentFactoryError, MaxStepsExceededError
 from orchestrator.tools.registry import ToolContext
@@ -397,11 +397,11 @@ def _make_eval_spec_with_subagents(name: str, *children: str) -> Any:
     — kept local to the eval module so eval cases don't depend on
     orchestrator test fixtures.
     """
-    from helix_agent.protocol import AgentSpec
+    from expert_work.protocol import AgentSpec
 
     return AgentSpec.model_validate(
         {
-            "apiVersion": "helix.io/v1",
+            "apiVersion": "expert_work.io/v1",
             "kind": "Agent",
             "metadata": {"name": name, "version": "1.0.0", "tenant": "test-tenant"},
             "spec": {

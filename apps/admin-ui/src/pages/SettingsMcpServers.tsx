@@ -252,7 +252,7 @@ export function SettingsMcpServers() {
         if (probe_state?.kind === "connected") {
           return <span>{probe_state.count}</span>;
         }
-        return <span style={{ color: "var(--hx-text-tertiary, #666)" }}>—</span>;
+        return <span style={{ color: "var(--ew-text-tertiary, #666)" }}>—</span>;
       },
     },
     {
@@ -326,7 +326,7 @@ export function SettingsMcpServers() {
       if (tools.length === 0) {
         return (
           <div
-            style={{ padding: "8px 0", color: "var(--hx-text-tertiary, #666)" }}
+            style={{ padding: "8px 0", color: "var(--ew-text-tertiary, #666)" }}
             data-testid={`ms-tools-${row.name}`}
           >
             {t("mcp_servers.no_tools")}
@@ -361,7 +361,7 @@ export function SettingsMcpServers() {
       </div>
       <div
         style={{
-          color: "var(--hx-text-tertiary, #666)",
+          color: "var(--ew-text-tertiary, #666)",
           marginBottom: 16,
           maxWidth: 360,
           margin: "0 auto 16px",

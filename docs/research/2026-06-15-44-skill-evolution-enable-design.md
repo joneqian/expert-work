@@ -24,10 +24,10 @@
 ## 2. ★5 范围（B 路径式）
 
 1. **Ungate（compose 透传，同 #650）**：现 compose 对这些全无透传，加：
-   - `HELIX_AGENT_ENABLE_SKILL_EVOLUTION_WORKER`（默认 false）
-   - `HELIX_AGENT_SKILL_EVOLUTION_WORKER_INTERVAL_S` / `HELIX_AGENT_CURATION_WORKER_INTERVAL_S`（E2E 调低）
-   - `HELIX_AGENT_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER` / `_AUX_MODEL`（dev 设 deepseek，须有平台凭证）
-   - `HELIX_AGENT_ENABLE_SKILL_ROLLBACK_MONITOR`（可选）
+   - `EXPERT_WORK_ENABLE_SKILL_EVOLUTION_WORKER`（默认 false）
+   - `EXPERT_WORK_SKILL_EVOLUTION_WORKER_INTERVAL_S` / `EXPERT_WORK_CURATION_WORKER_INTERVAL_S`（E2E 调低）
+   - `EXPERT_WORK_MEMORY_CONSOLIDATOR_DEFAULT_AUX_PROVIDER` / `_AUX_MODEL`（dev 设 deepseek，须有平台凭证）
+   - `EXPERT_WORK_ENABLE_SKILL_ROLLBACK_MONITOR`（可选）
 2. **真模型 E2E 证飞轮**（驱动全链，seeding 重叠故顺带证 curation）：
    - 跑真 agent N 次产 success trajectory（自然 seeding）+ `POST /v1/sessions/{id}/feedback` 给 up → positive_feedback 信号
    - CurationWorker（低 interval）→ PENDING candidate

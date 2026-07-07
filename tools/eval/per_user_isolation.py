@@ -23,7 +23,7 @@ from uuid import UUID
 import yaml
 
 from control_plane.api._user_scope import caller_owns_thread
-from helix_agent.protocol import Principal, ThreadMeta
+from expert_work.protocol import Principal, ThreadMeta
 
 _EVAL_DIR = _Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in _sys.path:

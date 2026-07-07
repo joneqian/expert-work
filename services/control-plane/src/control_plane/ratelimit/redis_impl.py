@@ -47,7 +47,7 @@ _BUCKET_TTL_MS = 30 * 86_400 * 1_000
 # ARGV: 1=capacity_x1000, 2=refill_per_s_x1000, 3=now_ms, 4=cost_x1000, 5=ttl_ms
 # Returns {allowed(0/1), retry_after_ms, remaining_tokens_x1000}
 _LUA_ACQUIRE_SOURCE = """\
--- helix-agent ratelimit bucket
+-- expert-work ratelimit bucket
 local b = redis.call('HMGET', KEYS[1], 'tokens', 'last_ms')
 local cap_milli = tonumber(ARGV[1])
 local rate_milli = tonumber(ARGV[2])

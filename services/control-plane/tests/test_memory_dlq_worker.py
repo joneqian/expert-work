@@ -18,8 +18,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from control_plane.memory import MemoryDLQWorker
-from helix_agent.persistence import InMemoryMemoryStore
-from helix_agent.persistence.memory import InMemoryMemoryWritebackDLQ
+from expert_work.persistence import InMemoryMemoryStore
+from expert_work.persistence.memory import InMemoryMemoryWritebackDLQ
 
 _TENANT = uuid4()
 _USER = uuid4()
@@ -192,7 +192,7 @@ async def test_dedup_skips_duplicate_writeback_via_on_conflict() -> None:
     """Stream K.K7 dedup — writing the same content twice yields one
     row, not two. (Mirrors what the SQL UNIQUE + ON CONFLICT does.)"""
     store = InMemoryMemoryStore()
-    from helix_agent.protocol import MemoryItem
+    from expert_work.protocol import MemoryItem
 
     same_text = "Loves espresso"
     items = [

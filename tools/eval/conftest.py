@@ -1,4 +1,4 @@
-"""Put this directory on ``sys.path`` so the tests can ``import helix_eval``.
+"""Put this directory on ``sys.path`` so the tests can ``import expert_work_eval``.
 
 ``tools/eval`` is a dev tool, not an installed workspace package — the
 harness module lives next to its tests.

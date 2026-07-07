@@ -10,7 +10,7 @@ S2 启动前真跑了现有 eval（践行「先验证后建」），ground-truth
 
 - **capability eval 引擎 = 强，别重建**：`tools/eval/run_baseline.py` 真跑通，15 capability 全 PASS，
   出 pass_rate/judge_mean/recall@5/mrr@5；longmem + harness 31 单测过。`_capability`/`_judge`/
-  `helix_eval` 全 functional。→ 11.1 ★5、11.2 ★5、11.7 ★5 **运行期确认**。
+  `expert_work_eval` 全 functional。→ 11.1 ★5、11.2 ★5、11.7 ★5 **运行期确认**。
 - **eval 平台/ops 层 = 真缺**（S2 建这层）：
   - 11.6 生产 worker：`run_baseline` 是本地 CLI，**无常驻 scheduler**；`eval_run`/`eval_case_result`
     表**不存在**（仅 `0034_eval_dataset`）。
@@ -92,7 +92,7 @@ failed/error。lifespan 接线进 `control-plane/app.py`（仿 memory_consolidat
 新 `tools/eval/trace_eval.py`：纯断言引擎 + 捕获 harness，断言调用链而非仅终态。
 - `TraceExpectation`（expected_tools / forbidden_tools / max_llm_calls / require_span_suffixes /
   forbid_error_spans）+ `evaluate_trace(spans, expectation) -> TraceCaseResult`（纯，仅依赖 otel，
-  span 名按后缀 `.llm_call`/`.tool_call`/`.run` 匹配，与 HelixComponent 前缀无关）。
+  span 名按后缀 `.llm_call`/`.tool_call`/`.run` 匹配，与 ExpertWorkComponent 前缀无关）。
 - `capture_spans()` 上下文管理器（`InMemorySpanExporter` + `SimpleSpanProcessor`，同
   `test_react_graph_tracing` 范式）。
 - `report_from_cases()` 聚合成 `CapabilityReport`，slot 进既有 eval 协议。

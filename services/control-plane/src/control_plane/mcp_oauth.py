@@ -29,7 +29,7 @@ from urllib.parse import ParseResult, urlencode, urlparse
 
 import httpx
 
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
 
 # Defensive cap on discovery / token JSON bodies (audit #5 spirit): a hostile or
 # buggy authorization server must not stream an unbounded body in-process.

@@ -1,6 +1,6 @@
 # 15 AuthN / AuthZ — 身份认证、RBAC 与 Tenant Scoping
 
-> 所有 Helix API 入口的"门口大爷"：先验明身份（AuthN），再判断权限（AuthZ），所有决策落审计。M0 本地账号 + JWT，M1 SSO/OIDC + 服务账号 API key，全程 tenant scoping。
+> 所有 Expert Work API 入口的"门口大爷"：先验明身份（AuthN），再判断权限（AuthZ），所有决策落审计。M0 本地账号 + JWT，M1 SSO/OIDC + 服务账号 API key，全程 tenant scoping。
 
 ---
 
@@ -46,7 +46,7 @@
 ```sql
 -- 用户身份：见 tenant_user(Stream J.14 —— per-user 注册表,从认证后的
 -- Principal 解析 (tenant_id, subject_type, subject_id))。原计划的
--- app_user 占位表从未实现,已于 migration 0016 删除;helix 作为 IdP
+-- app_user 占位表从未实现,已于 migration 0016 删除;Expert Work 作为 IdP
 -- 联邦平台不自持本地密码库。
 
 -- 服务账号（CLI / CI 用）
@@ -99,7 +99,7 @@ CREATE TABLE jwt_blacklist (
 
 ```python
 class JWTClaims(BaseModel):
-    iss: str = "helix"
+    iss: str = "Expert Work"
     sub: str                               # user_id 或 service_account_id
     sub_type: Literal["user", "service_account"]
     tenant: str                            # 当前请求的 tenant scope
@@ -168,7 +168,7 @@ async def authorize(
 async def get_session(
     id: str,
     principal: Principal = Depends(authenticate),
-    tenant: str = Depends(extract_tenant),     # X-Helix-Tenant
+    tenant: str = Depends(extract_tenant),     # X-Expert-Work-Tenant
 ):
     await authorize(principal, resource="session", action="read", tenant=tenant)
     ...
@@ -178,7 +178,7 @@ async def get_session(
 
 每个 API 调用必须：
 
-1. 带 `X-Helix-Tenant: <tenant_id>` header
+1. 带 `X-Expert-Work-Tenant: <tenant_id>` header
 2. JWT.allowed_tenants 包含该 tenant
 3. JWT.roles[tenant] 中查 RBAC
 
@@ -272,12 +272,12 @@ aforge_pat_<tenant_short>_<32 字符随机>
 ### 7.1 Prometheus metric
 
 ```
-helix_auth_login_total{method="password|oidc|api_key", result="success|fail"}        counter
-helix_auth_login_fail_reason_total{reason="bad_password|locked|inactive|unknown"}    counter
-helix_authz_decision_total{resource, action, result="allow|deny"}                    counter
-helix_authz_decision_latency_seconds                                                 histogram
-helix_jwt_blacklist_size                                                             gauge
-helix_api_key_active{tenant}                                                         gauge
+expert_work_auth_login_total{method="password|oidc|api_key", result="success|fail"}        counter
+expert_work_auth_login_fail_reason_total{reason="bad_password|locked|inactive|unknown"}    counter
+expert_work_authz_decision_total{resource, action, result="allow|deny"}                    counter
+expert_work_authz_decision_latency_seconds                                                 histogram
+expert_work_jwt_blacklist_size                                                             gauge
+expert_work_api_key_active{tenant}                                                         gauge
 ```
 
 ### 7.2 OTel span

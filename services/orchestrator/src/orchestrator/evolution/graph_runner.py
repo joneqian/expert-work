@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import AgentSpec
+from expert_work.protocol import AgentSpec
 from orchestrator.agent_factory import BuiltAgent
 
 __all__ = [

@@ -50,13 +50,13 @@ export function MetadataPanel({ skill, version }: MetadataPanelProps) {
           fontSize: 13,
         }}
       >
-        <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("skills.col_category")}</dt>
+        <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("skills.col_category")}</dt>
         <dd style={{ margin: 0 }}>{skill.category}</dd>
 
-        <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("skills.col_description")}</dt>
+        <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("skills.col_description")}</dt>
         <dd style={{ margin: 0 }}>{skill.description}</dd>
 
-        <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("skills.col_tools")}</dt>
+        <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("skills.col_tools")}</dt>
         <dd style={{ margin: 0 }}>
           {version.tool_names.length === 0 ? (
             <Text type="secondary" style={{ fontSize: 12 }}>
@@ -73,10 +73,10 @@ export function MetadataPanel({ skill, version }: MetadataPanelProps) {
           )}
         </dd>
 
-        <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("skills.col_authored_by")}</dt>
+        <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("skills.col_authored_by")}</dt>
         <dd style={{ margin: 0 }}>{version.authored_by}</dd>
 
-        <dt style={{ color: "var(--hx-text-tertiary)" }}>
+        <dt style={{ color: "var(--ew-text-tertiary)" }}>
           {t("skills.detail_version_picker_label")}
         </dt>
         <dd style={{ margin: 0 }}>
@@ -125,7 +125,7 @@ export function MetadataPanel({ skill, version }: MetadataPanelProps) {
           </Space>
         </dd>
 
-        <dt style={{ color: "var(--hx-text-tertiary)" }}>{t("skills.col_created")}</dt>
+        <dt style={{ color: "var(--ew-text-tertiary)" }}>{t("skills.col_created")}</dt>
         <dd style={{ margin: 0 }}>{new Date(version.created_at).toLocaleString()}</dd>
       </dl>
     </Card>

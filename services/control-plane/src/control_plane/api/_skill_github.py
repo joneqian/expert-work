@@ -25,7 +25,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from helix_agent.common.url_validation import RemoteURLError, validate_remote_url
+from expert_work.common.url_validation import RemoteURLError, validate_remote_url
 
 __all__ = [
     "GithubImportError",

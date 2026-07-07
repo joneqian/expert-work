@@ -25,10 +25,10 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from helix_agent.persistence.auth import RoleBindingStore
-from helix_agent.protocol import Principal
+from expert_work.persistence.auth import RoleBindingStore
+from expert_work.protocol import Principal
 
-logger = logging.getLogger("helix.control_plane.auth.tenant_roles")
+logger = logging.getLogger("expert_work.control_plane.auth.tenant_roles")
 
 
 async def resolve_tenant_roles(

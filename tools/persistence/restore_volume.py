@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import UUID
 
-from helix_agent.runtime.storage.base import ObjectStore, ObjectStoreError
+from expert_work.runtime.storage.base import ObjectStore, ObjectStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -242,8 +242,8 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--image",
-        default="helix-sandbox:dev",
-        help="container image used to hydrate the new volume (default: helix-sandbox:dev)",
+        default="expert-work-sandbox:dev",
+        help="container image used to hydrate the new volume (default: expert-work-sandbox:dev)",
     )
     parser.add_argument(
         "--suffix",
@@ -256,7 +256,7 @@ def _parse_argv(argv: list[str]) -> argparse.Namespace:
 async def _main(argv: list[str]) -> int:
     args = _parse_argv(argv)
     # The CLI requires real S3 creds — we let the caller export
-    # HELIX_SANDBOX_OBJECT_STORE_* env vars and build settings the
+    # EXPERT_WORK_SANDBOX_OBJECT_STORE_* env vars and build settings the
     # same way the supervisor does. Keeping this stub thin so the
     # runbook + the library are the source of truth.
     from sandbox_supervisor.app import _build_object_store

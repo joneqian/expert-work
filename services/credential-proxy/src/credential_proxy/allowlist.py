@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from credential_proxy.domain import AllowlistKey
-from helix_agent.persistence.models import SecretAllowlistRow
+from expert_work.persistence.models import SecretAllowlistRow
 
 
 class AllowlistStore(Protocol):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-from helix_agent.common.lifecycle import Lifecycle, ShutdownState
+from expert_work.common.lifecycle import Lifecycle, ShutdownState
 
 
 @pytest.mark.asyncio

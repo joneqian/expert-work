@@ -1,7 +1,7 @@
 # Grafana Loki config — Stream G.0.
 #
-# Single-binary dev Loki with filesystem storage. Receives the helix
-# services' stdout JSON logs (A.7 HelixJsonFormatter) shipped by Promtail.
+# Single-binary dev Loki with filesystem storage. Receives the expert_work
+# services' stdout JSON logs (A.7 ExpertWorkJsonFormatter) shipped by Promtail.
 
 auth_enabled: false
 

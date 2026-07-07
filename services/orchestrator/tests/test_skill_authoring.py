@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence.skill import InMemorySkillStore
-from helix_agent.protocol import SkillStatus
+from expert_work.persistence.skill import InMemorySkillStore
+from expert_work.protocol import SkillStatus
 from orchestrator.tools.registry import ToolContext
 from orchestrator.tools.skill_authoring import (
     AuthorSkillTool,

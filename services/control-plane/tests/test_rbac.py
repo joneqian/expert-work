@@ -7,7 +7,7 @@ from uuid import UUID
 import pytest
 
 from control_plane.auth.rbac import collect_roles_for_audit, is_admin, is_allowed
-from helix_agent.protocol import Principal
+from expert_work.protocol import Principal
 
 _TENANT = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 

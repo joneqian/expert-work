@@ -27,13 +27,13 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
-from helix_agent.persistence.eval import EvalRunStore
-from helix_agent.persistence.rls import (
+from expert_work.persistence.eval import EvalRunStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.protocol import EvalCaseResultRecord, EvalRunRecord, EvalRunStatus
+from expert_work.protocol import EvalCaseResultRecord, EvalRunRecord, EvalRunStatus
 
 logger = logging.getLogger(__name__)
 

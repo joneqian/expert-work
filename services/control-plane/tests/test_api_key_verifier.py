@@ -17,8 +17,8 @@ from control_plane.auth import (
     is_api_key_bearer,
     mint_api_key,
 )
-from helix_agent.persistence.auth import InMemoryApiKeyStore
-from helix_agent.protocol import ApiKeyScope
+from expert_work.persistence.auth import InMemoryApiKeyStore
+from expert_work.protocol import ApiKeyScope
 
 _TENANT = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 _SA_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")

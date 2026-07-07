@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 from uuid import UUID
 
-from helix_agent.protocol import SubAgentSpec, parse_agent_ref
-from helix_agent.runtime.cancellation import RunCancelledError
+from expert_work.protocol import SubAgentSpec, parse_agent_ref
+from expert_work.runtime.cancellation import RunCancelledError
 from orchestrator.tools._child_run import run_child_to_result
 from orchestrator.tools.registry import ToolBlockedError, ToolContext, ToolResult, ToolSpec
 from orchestrator.trajectory import TrajectoryRecorder
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 #: depth + 1. An agent built at this depth gets **no** delegation tools
 #: (``SubAgentTool`` / ``spawn_worker``) registered — structural recursion
 #: termination, so a cross-manifest cycle (A->B->A) can never run away
-#: (Mini-ADR J-12). This replaces a token-budget guard: helix has no
+#: (Mini-ADR J-12). This replaces a token-budget guard: expert_work has no
 #: runtime token budget, so cost is bounded structurally by depth times
 #: each agent's ``max_iterations``.
 MAX_SUBAGENT_DEPTH: Final = 3

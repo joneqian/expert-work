@@ -1,4 +1,4 @@
-# Helix-Agent 部署手册
+# Expert Work 部署手册
 
 > 单一权威的部署入口:从零起本地栈、首次上线 staging / prod、滚动更新、回滚、验证、运维。
 > 深度专题(蓝绿脚本、Postgres、TLS、备份)在对应 runbook,本手册串起全程并链接它们。
@@ -73,26 +73,26 @@
 三处配置源,由结构化到敏感:
 
 1. **`environments/<env>.yaml`** —— 结构化非密配置(DB host、OSS endpoint、observability、TLS 路径、`secrets.backend` 选型)。声明式,由 TLS 校验器与 SecretStore 工厂消费。
-2. **`HELIX_AGENT_*` 环境变量** —— control-plane 的 pydantic `Settings` **只**读真实环境变量(不读 yaml)。compose / 部署脚本注入。
+2. **`EXPERT_WORK_*` 环境变量** —— control-plane 的 pydantic `Settings` **只**读真实环境变量(不读 yaml)。compose / 部署脚本注入。
 3. **阿里云 KMS Secrets Manager** —— 运行期密钥(模型 key、DB 密码、上游凭据),staging/prod 经 SecretStore(ADR-0007)拉取,永不落盘。dev 用 `local_dev` 占位 / `infra/.env`。
 
-> **环境隔离(P0)**:三环境 DB / 密钥 / bucket 完全分离,命名带环境后缀(`helix_agent_dev` / `_staging` / `_prod`)防误连;prod 凭据只存 KMS。
+> **环境隔离(P0)**:三环境 DB / 密钥 / bucket 完全分离,命名带环境后缀(`expert_work_dev` / `_staging` / `_prod`)防误连;prod 凭据只存 KMS。
 
 ## 4. 关键环境变量
 
-完整模板见 [`infra/.env.example`](../../infra/.env.example);权威定义见 `services/control-plane/src/control_plane/settings.py`(`HELIX_AGENT_` 前缀)。部署关键项:
+完整模板见 [`infra/.env.example`](../../infra/.env.example);权威定义见 `services/control-plane/src/control_plane/settings.py`(`EXPERT_WORK_` 前缀)。部署关键项:
 
 | 变量 | 说明 | dev | staging / prod |
 |------|------|-----|----------------|
-| `HELIX_AGENT_DB_DSN` | Postgres DSN | pgbouncer 容器 | RDS endpoint |
-| `HELIX_AGENT_STORE_BACKEND` | 存储后端 | `sql` | `sql` |
-| `HELIX_AGENT_SINGLE_INSTANCE` | 是否单实例(关蓝绿多进程协调) | `true` | `false` |
-| `HELIX_AGENT_QUOTA_REDIS_URL` | 多实例限流的 Redis | — | 必填(蓝绿) |
-| `HELIX_AGENT_OIDC_ISSUER` | Keycloak realm issuer | localhost realm | 真 issuer |
-| `HELIX_AGENT_KEYCLOAK_ENABLED` | 真 Keycloak Admin API | `true` | `true` |
-| `HELIX_AGENT_SECRET_ENCRYPTION_KEY` | 平台密钥库 KEK | 固定占位 | KMS(换 KEK 旧密文永久不可解) |
-| `HELIX_AGENT_SETUP_TOKEN` | **首装向导一次性 token**(见 §7) | 可选 | **必填**,首跑后清除 |
-| `HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL` | 邮箱首登自动升 system_admin(可选替代向导) | — | 可选 |
+| `EXPERT_WORK_DB_DSN` | Postgres DSN | pgbouncer 容器 | RDS endpoint |
+| `EXPERT_WORK_STORE_BACKEND` | 存储后端 | `sql` | `sql` |
+| `EXPERT_WORK_SINGLE_INSTANCE` | 是否单实例(关蓝绿多进程协调) | `true` | `false` |
+| `EXPERT_WORK_QUOTA_REDIS_URL` | 多实例限流的 Redis | — | 必填(蓝绿) |
+| `EXPERT_WORK_OIDC_ISSUER` | Keycloak realm issuer | localhost realm | 真 issuer |
+| `EXPERT_WORK_KEYCLOAK_ENABLED` | 真 Keycloak Admin API | `true` | `true` |
+| `EXPERT_WORK_SECRET_ENCRYPTION_KEY` | 平台密钥库 KEK | 固定占位 | KMS(换 KEK 旧密文永久不可解) |
+| `EXPERT_WORK_SETUP_TOKEN` | **首装向导一次性 token**(见 §7) | 可选 | **必填**,首跑后清除 |
+| `EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL` | 邮箱首登自动升 system_admin(可选替代向导) | — | 可选 |
 
 ## 5. 首次部署 — 本地 dev / dogfood
 
@@ -117,17 +117,17 @@ cd ../apps/admin-ui && pnpm install && pnpm dev   # http://localhost:5173
 
 ## 6. 首次部署 — staging / prod
 
-1. 备好 `environments/<env>.yaml` + 注入 `HELIX_AGENT_*` 环境变量(DSN 指向 RDS;`STORE_BACKEND=sql`;`SINGLE_INSTANCE=false` + `QUOTA_REDIS_URL`;`SETUP_TOKEN`)。
-2. 从阿里云 ACR 拉 `helix-control-plane` / `helix-sandbox-supervisor` / `helix-credential-proxy` 镜像;预构建沙箱镜像。
+1. 备好 `environments/<env>.yaml` + 注入 `EXPERT_WORK_*` 环境变量(DSN 指向 RDS;`STORE_BACKEND=sql`;`SINGLE_INSTANCE=false` + `QUOTA_REDIS_URL`;`SETUP_TOKEN`)。
+2. 从阿里云 ACR 拉 `expert-work-control-plane` / `expert-work-sandbox-supervisor` / `expert-work-credential-proxy` 镜像;预构建沙箱镜像。
 3. 起数据层:staging/prod 的 Postgres 是 RDS(**不**起 compose 的 `postgres` / `pgbouncer`);redis 仍由 compose 起。
 4. 跑迁移:`docker compose run --rm migrate`(= `alembic upgrade head`,纯 expand,见 §10)。
 5. 蓝绿起 control-plane:首次直接 `docker compose --profile full --profile proxy up -d control-plane-blue nginx`;之后版本走 `deploy.py`(§8)。
 6. 起 `sandbox-supervisor` / `credential-proxy`。
 7. **Keycloak realm 前置**(两项,漏了首装向导会失败):
-   - **provision admin client secret**:首装向导/邀请流建真账号时,后端要从密钥库取该 secret 才能调 KC Admin API。**漏 → /setup 502 `KEYCLOAK_ADMIN_SECRET_MISSING`**。prod 把真实 KC confidential-client secret 放进 KMS,名 `helix-agent/platform/keycloak/admin-client-secret`(对应 `settings.keycloak_admin_secret_name`);也可 `python -m control_plane.seed_keycloak_secret --value <secret>` 写入当前金库。
+   - **provision admin client secret**:首装向导/邀请流建真账号时,后端要从密钥库取该 secret 才能调 KC Admin API。**漏 → /setup 502 `KEYCLOAK_ADMIN_SECRET_MISSING`**。prod 把真实 KC confidential-client secret 放进 KMS,名 `expert-work/platform/keycloak/admin-client-secret`(对应 `settings.keycloak_admin_secret_name`);也可 `python -m control_plane.seed_keycloak_secret --value <secret>` 写入当前金库。
    - **开 realm `unmanagedAttributePolicy=ENABLED`**:否则 KC 25 默认丢弃 Admin API 建用户的自定义属性 `tenant_id` → 该用户 JWT 缺 tenant_id → **登录后 /v1/me 401、前端跳回 /login**。realm import **不**还原 user-profile,须用 kcadm 后置设(dev `make dev-keycloak-config` 已封装):
      ```sh
-     kcadm.sh update users/profile -r helix-agent -s unmanagedAttributePolicy=ENABLED
+     kcadm.sh update users/profile -r expert-work -s unmanagedAttributePolicy=ENABLED
      ```
 8. **创建第一个平台管理员**:见 §7。
 9. 验证:见 §11。
@@ -140,7 +140,7 @@ cd ../apps/admin-ui && pnpm install && pnpm dev   # http://localhost:5173
 
 ### 路径 A — 首装向导(推荐,Stream ACCT)
 
-1. 部署时设 env `HELIX_AGENT_SETUP_TOKEN=<随机串>`。生成:
+1. 部署时设 env `EXPERT_WORK_SETUP_TOKEN=<随机串>`。生成:
    ```sh
    python3 -c "import secrets; print(secrets.token_urlsafe(32))"   # 或 openssl rand -base64 32
    ```
@@ -153,7 +153,7 @@ cd ../apps/admin-ui && pnpm install && pnpm dev   # http://localhost:5173
 
 ### 路径 B — 邮箱首登自动升
 
-设 `HELIX_AGENT_BOOTSTRAP_ADMIN_EMAIL=<运维邮箱>`(前提:该邮箱用户已在 Keycloak 存在且 email 已验证)。其首次登录、系统零 admin 时自动升 `system_admin`。
+设 `EXPERT_WORK_BOOTSTRAP_ADMIN_EMAIL=<运维邮箱>`(前提:该邮箱用户已在 Keycloak 存在且 email 已验证)。其首次登录、系统零 admin 时自动升 `system_admin`。
 
 ### 路径 C — break-glass CLI
 
@@ -240,7 +240,7 @@ python tools/deploy/rollback.py --to-tag v1.2.2  # 兜底路径
 
 ## 15. 常见坑
 
-- **dev redis 占宿主 6379** —— 宿主已跑 redis 时集成测试用 `HELIX_TEST_COMPOSE_OVERRIDE` 指向 `redis: {ports: !reset []}` override。
+- **dev redis 占宿主 6379** —— 宿主已跑 redis 时集成测试用 `EXPERT_WORK_TEST_COMPOSE_OVERRIDE` 指向 `redis: {ports: !reset []}` override。
 - **staging/prod 必须 `SINGLE_INSTANCE=false` + `QUOTA_REDIS_URL`** —— 否则蓝绿窗口内两色各算一份限流。
 - **green 与 sandbox-supervisor 都占 8001** —— 预存 latent 冲突;`make dev-up` 排除 green。full profile 同起需改端口(并同步断言测试)。
 - **改了 realm 的 loginTheme 不生效** —— `--import-realm` 仅首 boot 导入;重建 keycloak 容器才重导(改 CSS 则 start-dev 热加载)。

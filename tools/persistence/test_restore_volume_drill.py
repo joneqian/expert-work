@@ -19,13 +19,13 @@ from tools.persistence.restore_volume import (
     restore_volume_from_object,
 )
 
-from helix_agent.runtime.storage import InMemoryObjectStore
+from expert_work.runtime.storage import InMemoryObjectStore
 
 
 @pytest.mark.asyncio
 async def test_restore_volume_from_object_pulls_bytes_to_writer() -> None:
     store = InMemoryObjectStore()
-    key = "volume-archive/abc/def/helix-ws-x.tar.gz"
+    key = "volume-archive/abc/def/expert-work-ws-x.tar.gz"
     payload = b"FAKE-TAR-GZ-12345"
     await store.put(key, payload, content_type="application/gzip")
 
@@ -37,14 +37,14 @@ async def test_restore_volume_from_object_pulls_bytes_to_writer() -> None:
     report = await restore_volume_from_object(
         object_store=store,
         object_key=key,
-        new_volume_name="helix-ws-x_restored_drill",
+        new_volume_name="expert-work-ws-x_restored_drill",
         writer=_writer,
     )
 
     assert report.object_key == key
-    assert report.new_volume_name == "helix-ws-x_restored_drill"
+    assert report.new_volume_name == "expert-work-ws-x_restored_drill"
     assert report.size_bytes == len(payload)
-    assert captured["helix-ws-x_restored_drill"] == payload
+    assert captured["expert-work-ws-x_restored_drill"] == payload
 
 
 @pytest.mark.asyncio
@@ -114,7 +114,9 @@ async def test_select_latest_archive_returns_none_when_empty() -> None:
 
 
 def test_format_new_volume_name_is_deterministic() -> None:
-    assert _format_new_volume_name("helix-ws-x", suffix="manual") == ("helix-ws-x_restored_manual")
+    assert _format_new_volume_name("expert-work-ws-x", suffix="manual") == (
+        "expert-work-ws-x_restored_manual"
+    )
     assert _format_new_volume_name("v", suffix="2026-05-21") == "v_restored_2026-05-21"
 
 
@@ -128,5 +130,5 @@ async def test_restore_latest_archive_raises_when_no_artifact() -> None:
             user_id=uuid4(),
             archive_prefix="volume-archive",
             backup_prefix="volume-backups",
-            image="helix-sandbox:dev",
+            image="expert-work-sandbox:dev",
         )

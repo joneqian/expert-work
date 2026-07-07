@@ -30,9 +30,9 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.common.spotlight import spotlight_untrusted
-from helix_agent.protocol import MemoryItem
-from helix_agent.runtime.checkpointer import make_checkpointer
+from expert_work.common.spotlight import spotlight_untrusted
+from expert_work.protocol import MemoryItem
+from expert_work.runtime.checkpointer import make_checkpointer
 from orchestrator import GraphRunner, ToolRegistry, build_react_graph
 from orchestrator.graph_builder.builder import (
     _MEMORY_TRUNCATION_MARKER,

@@ -29,13 +29,13 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp
 
-from helix_agent.common.lifecycle import Lifecycle
-from helix_agent.common.observability import helix_counter
+from expert_work.common.lifecycle import Lifecycle
+from expert_work.common.observability import expert_work_counter
 
-logger = logging.getLogger("helix.control_plane.backpressure")
+logger = logging.getLogger("expert_work.control_plane.backpressure")
 
-_backpressure_shed = helix_counter(
-    "helix_control_plane_backpressure_shed_total",
+_backpressure_shed = expert_work_counter(
+    "expert_work_control_plane_backpressure_shed_total",
     "Requests shed by the control-plane overload guard (in-flight depth cap).",
 )
 

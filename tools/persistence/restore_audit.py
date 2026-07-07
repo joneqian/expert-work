@@ -33,7 +33,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from helix_agent.runtime.storage.base import ObjectStore
+from expert_work.runtime.storage.base import ObjectStore
 
 logger = logging.getLogger(__name__)
 

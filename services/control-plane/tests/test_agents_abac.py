@@ -17,7 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
 from tests.auth_fixtures import (
     TEST_AUDIENCE,
     TEST_ISSUER,
@@ -31,7 +31,7 @@ _TENANT = DEFAULT_DEV_TENANT_ID
 def _agent_yaml(name: str, *, team: str | None = None) -> str:
     labels = f"\n  labels:\n    team: {team}" if team else ""
     return f"""\
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: Agent
 metadata:
   name: {name}

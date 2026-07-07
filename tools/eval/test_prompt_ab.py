@@ -16,7 +16,11 @@ _EVAL_DIR = Path(__file__).resolve().parent
 if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
-from helix_eval import Assertion, EvalCase, EvalSet  # type: ignore[import-not-found]  # noqa: E402
+from expert_work_eval import (  # type: ignore[import-not-found]  # noqa: E402
+    Assertion,
+    EvalCase,
+    EvalSet,
+)
 from prompt_ab import (  # type: ignore[import-not-found]  # noqa: E402
     Variant,
     load_variant,
@@ -79,7 +83,7 @@ async def test_run_ab_pairs_verdicts_and_counts_discordants() -> None:
 def test_load_variant_accepts_manifest_and_rejects_missing_prompt(tmp_path: Path) -> None:
     manifest = tmp_path / "variant_a.yaml"
     manifest.write_text(
-        "apiVersion: helix.io/v1\nspec:\n  system_prompt:\n    template: 'be kind'\n",
+        "apiVersion: expert_work.io/v1\nspec:\n  system_prompt:\n    template: 'be kind'\n",
         encoding="utf-8",
     )
     variant = load_variant(manifest)

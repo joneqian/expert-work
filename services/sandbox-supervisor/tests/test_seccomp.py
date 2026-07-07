@@ -132,7 +132,7 @@ def test_pinned_profile_allows_core_runtime_syscalls() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Stream HX-10-F1 — HELIX_SANDBOX_EXTRA_HOSTS parsing (same fail-closed
+# Stream HX-10-F1 — EXPERT_WORK_SANDBOX_EXTRA_HOSTS parsing (same fail-closed
 # misconfig discipline as the seccomp path, hence this module).
 # ---------------------------------------------------------------------------
 
@@ -165,5 +165,5 @@ def test_extra_hosts_parses_single_and_multiple_entries() -> None:
 )
 def test_extra_hosts_malformed_entry_raises(raw: str) -> None:
     settings = SandboxSupervisorSettings(extra_hosts=raw)
-    with pytest.raises(ValueError, match="malformed HELIX_SANDBOX_EXTRA_HOSTS"):
+    with pytest.raises(ValueError, match="malformed EXPERT_WORK_SANDBOX_EXTRA_HOSTS"):
         _ = settings.parsed_extra_hosts

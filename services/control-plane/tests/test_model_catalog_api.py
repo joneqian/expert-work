@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from control_plane.api.model_catalog import build_model_catalog_router
 from control_plane.platform_secrets import PlatformSecretsService
 from control_plane.settings import Settings
-from helix_agent.persistence.platform_secrets import InMemoryPlatformSecretStore
+from expert_work.persistence.platform_secrets import InMemoryPlatformSecretStore
 
 
 class _FakeProviders:

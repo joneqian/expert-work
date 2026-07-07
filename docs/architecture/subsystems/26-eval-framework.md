@@ -45,7 +45,7 @@
 ### 3.1 EvalSet 声明（YAML）
 
 ```yaml
-apiVersion: helix.io/v1
+apiVersion: expert_work.io/v1
 kind: EvalSet
 metadata:
   name: ticket-classifier-baseline
@@ -251,9 +251,9 @@ POST /v1/eval-feedback/{id}:admit                     # reviewer 同意进 golde
 ### 4.3 CLI
 
 ```
-helix eval run --set ticket-classifier-baseline --candidate ./manifest.yaml
-helix eval gate --run <run_id>                  # 退出码 0=pass, 1=fail
-helix eval list --agent ticket-classifier
+Expert Work eval run --set ticket-classifier-baseline --candidate ./manifest.yaml
+Expert Work eval gate --run <run_id>                  # 退出码 0=pass, 1=fail
+Expert Work eval list --agent ticket-classifier
 ```
 
 ---
@@ -307,7 +307,7 @@ def gate(run, baseline):
 
 ### 5.4 CI 集成
 
-PR merge 前 GitHub Action：异步触发 `helix eval run` 拿 `run_id` → 等待 30min 内 → `helix eval report --format md` 输出到 PR comment。
+PR merge 前 GitHub Action：异步触发 `Expert Work eval run` 拿 `run_id` → 等待 30min 内 → `Expert Work eval report --format md` 输出到 PR comment。
 
 **关键决策**：**CI 不阻塞 merge**——eval 慢（百级 case × LLM 调用），阻塞会拖慢迭代；merge 时 PR 看到 fail comment 即可 review；真正的阻塞在 promote-to-production 步骤。
 
@@ -369,24 +369,24 @@ reject → 仅记录原因
 ### 7.1 Metric
 
 ```
-helix_eval_run_total{tenant,agent,state}                       counter
-helix_eval_run_duration_seconds{tenant,agent}                  histogram
-helix_eval_score{tenant,agent,version,metric}                  gauge
+expert_work_eval_run_total{tenant,agent,state}                       counter
+expert_work_eval_run_duration_seconds{tenant,agent}                  histogram
+expert_work_eval_score{tenant,agent,version,metric}                  gauge
    # metric = accuracy | cost | latency_p95 | safety_violations
-helix_eval_regression_total{tenant,agent}                      counter
-helix_eval_gate_decision_total{tenant,agent,decision}          counter
+expert_work_eval_regression_total{tenant,agent}                      counter
+expert_work_eval_gate_decision_total{tenant,agent,decision}          counter
    # decision = pass | fail | force_pass
-helix_eval_force_promote_total{tenant,actor_id}                counter
-helix_eval_feedback_total{tenant,agent,state}                  counter
+expert_work_eval_force_promote_total{tenant,actor_id}                counter
+expert_work_eval_feedback_total{tenant,agent,state}                  counter
    # state = pending | admitted | rejected
 ```
 
 ### 7.2 OTel span
 
-- `helix.eval.run`（attrs：set_name, set_version, candidate_version, agent_version, baseline_version, case_count）
-- `helix.eval.case`（attrs：case_id, difficulty, passed, agent_version）
-- `helix.eval.judge`（attrs：judge_model, latency_ms, agent_version）
-- `helix.eval.gate`（attrs：decision, fail_reason, agent_version）
+- `expert_work.eval.run`（attrs：set_name, set_version, candidate_version, agent_version, baseline_version, case_count）
+- `expert_work.eval.case`（attrs：case_id, difficulty, passed, agent_version）
+- `expert_work.eval.judge`（attrs：judge_model, latency_ms, agent_version）
+- `expert_work.eval.gate`（attrs：decision, fail_reason, agent_version）
 
 所有 span 必带 `agent_version`（candidate manifest version；judge 模型本身的 version 用 `judge_model` 字段区分）。
 

@@ -65,15 +65,15 @@ def test_assemble_without_current_date_leaves_base_unchanged() -> None:
 
 
 def test_resolve_timezone_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HELIX_AGENT_TIMEZONE", raising=False)
+    monkeypatch.delenv("EXPERT_WORK_TIMEZONE", raising=False)
     assert _resolve_agent_timezone().key == "Asia/Shanghai"
 
 
 def test_resolve_timezone_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HELIX_AGENT_TIMEZONE", "America/New_York")
+    monkeypatch.setenv("EXPERT_WORK_TIMEZONE", "America/New_York")
     assert _resolve_agent_timezone().key == "America/New_York"
 
 
 def test_resolve_timezone_invalid_falls_back_to_utc(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("HELIX_AGENT_TIMEZONE", "Not/AZone")
+    monkeypatch.setenv("EXPERT_WORK_TIMEZONE", "Not/AZone")
     assert _resolve_agent_timezone().key == "UTC"

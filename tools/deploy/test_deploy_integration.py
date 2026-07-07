@@ -62,10 +62,10 @@ def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 def _compose_files() -> list[str]:
     """``-f`` arguments — the infra compose file, plus an optional local
-    override from ``HELIX_TEST_COMPOSE_OVERRIDE`` for dev hosts where a
+    override from ``EXPERT_WORK_TEST_COMPOSE_OVERRIDE`` for dev hosts where a
     stack port (e.g. redis 6379) is already taken. CI leaves it unset."""
     files = ["-f", str(_COMPOSE_FILE)]
-    override = os.environ.get("HELIX_TEST_COMPOSE_OVERRIDE")
+    override = os.environ.get("EXPERT_WORK_TEST_COMPOSE_OVERRIDE")
     if override:
         files += ["-f", override]
     return files
@@ -150,7 +150,7 @@ def test_gate_69_blue_green_deploy(deploy_stack: None) -> None:
     assert _http_status("http://localhost:8080/healthz/live") == 200
 
     # A genuine new-tag deploy — re-tag the built image.
-    _docker("tag", "helix-control-plane:dev", f"helix-control-plane:{_DEPLOY_TAG}")
+    _docker("tag", "expert-work-control-plane:dev", f"expert-work-control-plane:{_DEPLOY_TAG}")
 
     result = subprocess.run(  # noqa: S603
         [
@@ -174,13 +174,13 @@ def test_gate_69_blue_green_deploy(deploy_stack: None) -> None:
 
     # Green runs the freshly deployed tag.
     green_image = _docker(
-        "inspect", "-f", "{{.Config.Image}}", "helix-control-plane-green"
+        "inspect", "-f", "{{.Config.Image}}", "expert-work-control-plane-green"
     ).stdout.strip()
-    assert green_image == f"helix-control-plane:{_DEPLOY_TAG}"
+    assert green_image == f"expert-work-control-plane:{_DEPLOY_TAG}"
 
     # Green up, blue drained + stopped (kept for rollback).
-    assert _container_state("helix-control-plane-green") == "running"
-    assert _container_state("helix-control-plane-blue") == "exited"
+    assert _container_state("expert-work-control-plane-green") == "running"
+    assert _container_state("expert-work-control-plane-blue") == "exited"
 
     # Traffic still served through nginx (now routed to green); the
     # per-colour host ports confirm which colour is up. Blue's port no
@@ -220,8 +220,8 @@ def test_gate_70_rollback(deploy_stack: None) -> None:
     assert parse_live_color(_UPSTREAM_CONF.read_text()) == "blue"
 
     # Blue restarted + serving, green drained + stopped.
-    assert _container_state("helix-control-plane-blue") == "running"
-    assert _container_state("helix-control-plane-green") == "exited"
+    assert _container_state("expert-work-control-plane-blue") == "running"
+    assert _container_state("expert-work-control-plane-green") == "exited"
 
     assert _http_status("http://localhost:8080/healthz/live") == 200
     assert _http_status("http://localhost:8000/healthz/live") == 200  # blue

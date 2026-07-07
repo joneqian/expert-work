@@ -1,4 +1,4 @@
-"""Helix-Agent orchestrator service.
+"""Expert Work orchestrator service.
 
 Stream E entry point. See ``orchestrator.runner.GraphRunner`` for the
 LangGraph execution surface and ``orchestrator.state.AgentState`` for

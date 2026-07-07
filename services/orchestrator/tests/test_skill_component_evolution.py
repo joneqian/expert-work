@@ -13,8 +13,8 @@ from uuid import uuid4
 
 import pytest
 
-from helix_agent.persistence.skill import InMemorySkillStore
-from helix_agent.protocol import Skill, SkillStatus, SkillVersion
+from expert_work.persistence.skill import InMemorySkillStore
+from expert_work.protocol import Skill, SkillStatus, SkillVersion
 from orchestrator.agent_factory import (
     _assemble_system_prompt,
     _load_skills,
@@ -133,11 +133,11 @@ def _skill(component_type: str, target: str | None = None) -> Skill:
 
 
 def _make_spec(skill_names: list[str]):
-    from helix_agent.protocol.agent_spec import AgentSpec
+    from expert_work.protocol.agent_spec import AgentSpec
 
     return AgentSpec.model_validate(
         {
-            "apiVersion": "helix.io/v1",
+            "apiVersion": "expert_work.io/v1",
             "kind": "Agent",
             "metadata": {"name": "a", "version": "1", "tenant": "t"},
             "spec": {

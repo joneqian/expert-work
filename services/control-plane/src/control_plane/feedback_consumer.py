@@ -39,27 +39,27 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
 
-from helix_agent.common.observability import helix_counter
-from helix_agent.persistence.feedback_store import FeedbackRecord, FeedbackStore
-from helix_agent.persistence.memory.base import MemoryStore
-from helix_agent.persistence.rls import (
+from expert_work.common.observability import expert_work_counter
+from expert_work.persistence.feedback_store import FeedbackRecord, FeedbackStore
+from expert_work.persistence.memory.base import MemoryStore
+from expert_work.persistence.rls import (
     bypass_rls_var,
     current_tenant_id_var,
     current_user_id_var,
 )
-from helix_agent.persistence.thread_meta.base import ThreadMetaStore
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.persistence.thread_meta.base import ThreadMetaStore
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult
+from expert_work.runtime.audit.logger import AuditLogger
 
 logger = logging.getLogger(__name__)
 
-_feedback_consumed_total = helix_counter(
-    "helix_control_plane_feedback_consumed_total",
+_feedback_consumed_total = expert_work_counter(
+    "expert_work_control_plane_feedback_consumed_total",
     "User 👎 rows consumed by the learning loop, by action taken (Stream HX-2).",
     ("action",),
 )
-_cycle_errors = helix_counter(
-    "helix_control_plane_feedback_consumer_cycle_errors_total",
+_cycle_errors = expert_work_counter(
+    "expert_work_control_plane_feedback_consumer_cycle_errors_total",
     "FeedbackConsumerWorker cycles that ended in a caught exception.",
 )
 

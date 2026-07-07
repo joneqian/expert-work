@@ -16,5 +16,5 @@ async def test_metrics_endpoint_returns_prometheus_text(client: AsyncClient) -> 
     # Prometheus text content-type per OpenMetrics spec.
     assert "text/plain" in response.headers["content-type"]
     body = response.text
-    assert "helix_control_plane_http_requests_total" in body
-    assert "helix_control_plane_http_request_duration_seconds" in body
+    assert "expert_work_control_plane_http_requests_total" in body
+    assert "expert_work_control_plane_http_request_duration_seconds" in body

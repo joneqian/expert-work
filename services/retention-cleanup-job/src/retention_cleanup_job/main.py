@@ -11,7 +11,7 @@ import asyncio
 import contextlib
 import logging
 
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     SqlApprovalStore,
     SqlArtifactStore,
@@ -19,8 +19,8 @@ from helix_agent.persistence import (
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.runtime.storage import make_object_store
-from helix_agent.runtime.storage.factory import S3CompatibleConfig
+from expert_work.runtime.storage import make_object_store
+from expert_work.runtime.storage.factory import S3CompatibleConfig
 from retention_cleanup_job.job import RetentionCleanupJob
 from retention_cleanup_job.settings import RetentionCleanupSettings
 

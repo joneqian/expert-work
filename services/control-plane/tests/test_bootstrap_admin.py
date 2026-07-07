@@ -7,8 +7,8 @@ from uuid import uuid4
 import pytest
 
 from control_plane.bootstrap_admin import bootstrap_system_admin
-from helix_agent.persistence.auth import InMemoryRoleBindingStore
-from helix_agent.protocol import Role
+from expert_work.persistence.auth import InMemoryRoleBindingStore
+from expert_work.protocol import Role
 
 
 @pytest.mark.asyncio

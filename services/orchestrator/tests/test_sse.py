@@ -22,10 +22,10 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from helix_agent.common.observability import init_tracing
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
-from helix_agent.runtime.runs import DisconnectMode, RunManager, RunRecord, RunStatus
-from helix_agent.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
+from expert_work.common.observability import init_tracing
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult
+from expert_work.runtime.runs import DisconnectMode, RunManager, RunRecord, RunStatus
+from expert_work.runtime.stream_bridge import END_SENTINEL, InMemoryStreamBridge
 from orchestrator.sse import (
     format_sse,
     run_agent,
@@ -219,8 +219,8 @@ async def test_paused_run_registers_approval_row_and_audits() -> None:
     PAUSED, writes an ``agent_approval`` row, and emits APPROVAL_REQUESTED."""
     from datetime import UTC, datetime, timedelta
 
-    from helix_agent.persistence import InMemoryApprovalStore
-    from helix_agent.protocol import ApprovalRequest
+    from expert_work.persistence import InMemoryApprovalStore
+    from expert_work.protocol import ApprovalRequest
 
     bridge = InMemoryStreamBridge()
     rm = RunManager()
@@ -487,7 +487,7 @@ async def test_run_agent_over_real_react_graph() -> None:
 
     from langchain_core.messages import BaseMessage, HumanMessage
 
-    from helix_agent.runtime.checkpointer import make_checkpointer
+    from expert_work.runtime.checkpointer import make_checkpointer
     from orchestrator import (
         GraphRunner,
         ToolRegistry,
@@ -661,7 +661,7 @@ async def test_run_agent_observes_session_ttft_histogram() -> None:
 
 @pytest.mark.asyncio
 async def test_run_agent_observes_durable_resume_only_when_is_resume() -> None:
-    """``helix_durable_resume_seconds`` is gated on ``record.is_resume``.
+    """``expert_work_durable_resume_seconds`` is gated on ``record.is_resume``.
 
     A first run on a fresh thread (``is_resume=False``) must NOT touch
     the resume histogram; only a run that the caller flagged as
@@ -705,7 +705,7 @@ async def test_run_agent_observes_durable_resume_only_when_is_resume() -> None:
 
 
 def _session_duration_sum(outcome: str) -> float:
-    """Read the labelled ``_sum`` child of helix_session_duration_seconds."""
+    """Read the labelled ``_sum`` child of expert_work_session_duration_seconds."""
     from orchestrator.sse import _session_duration_seconds
 
     child = _session_duration_seconds.labels(outcome=outcome)
@@ -934,7 +934,7 @@ async def test_run_agent_second_failure_lands_error(fast_backoff: None) -> None:
 
 @pytest.mark.asyncio
 async def test_run_agent_permanent_error_is_not_retried(fast_backoff: None) -> None:
-    from helix_agent.runtime.middleware import LLMClientError
+    from expert_work.runtime.middleware import LLMClientError
 
     bridge = InMemoryStreamBridge()
     rm = RunManager()
@@ -960,7 +960,7 @@ async def test_run_agent_permanent_error_is_not_retried(fast_backoff: None) -> N
 async def test_run_agent_retry_disabled_via_env(
     fast_backoff: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("HELIX_RUN_TRANSIENT_RETRY", "0")
+    monkeypatch.setenv("EXPERT_WORK_RUN_TRANSIENT_RETRY", "0")
     bridge = InMemoryStreamBridge()
     rm = RunManager()
     record = await _new_record(rm)
@@ -1044,7 +1044,7 @@ async def test_run_agent_guard_allows_safe_dangling_batch(fast_backoff: None) ->
 async def test_run_agent_binds_run_id_contextvar(fast_backoff: None) -> None:
     """Stream HX-4 — the worker binds ``current_run_id`` for its whole
     body (log formatter scope) and resets it on exit."""
-    from helix_agent.common.context import get_current_run_id
+    from expert_work.common.context import get_current_run_id
 
     seen: list[Any] = []
 
@@ -1079,7 +1079,7 @@ async def test_run_agent_binds_run_id_contextvar(fast_backoff: None) -> None:
 
 @pytest.mark.asyncio
 async def test_run_agent_emits_session_root_span() -> None:
-    """10.1 — one ``helix.session.run`` root span wraps the whole run,
+    """10.1 — one ``expert_work.session.run`` root span wraps the whole run,
     carrying ``run_id`` / ``thread_id`` so a run becomes one connected trace."""
     exporter = InMemorySpanExporter()
     init_tracing(
@@ -1103,7 +1103,7 @@ async def test_run_agent_emits_session_root_span() -> None:
         config={},
     )
 
-    roots = [s for s in exporter.get_finished_spans() if s.name == "helix.session.run"]
+    roots = [s for s in exporter.get_finished_spans() if s.name == "expert_work.session.run"]
     assert len(roots) == 1
     assert roots[0].attributes is not None
     assert roots[0].attributes["run_id"] == str(record.run_id)

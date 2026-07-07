@@ -5,9 +5,9 @@ Per subsystems/20-observability § 6:
     "高基数 label 爆 Prometheus → label cardinality 检查 CI gate
     (regex 检查 metric definition)"
 
-The :mod:`helix_agent.common.observability.metrics` module already does
+The :mod:`expert_work.common.observability.metrics` module already does
 the validation at construction time, but only **if** call sites import
-``helix_counter`` etc. This lint catches the path where someone reaches
+``expert_work_counter`` etc. This lint catches the path where someone reaches
 past the wrapper and imports ``Counter`` directly from ``prometheus_client``,
 which would silently bypass the naming + label rules.
 
@@ -23,13 +23,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 _BANNED_NAMES = frozenset({"Counter", "Histogram", "Gauge", "Summary"})
-_WRAPPER_MODULE = "helix_agent.common.observability.metrics"
+_WRAPPER_MODULE = "expert_work.common.observability.metrics"
 
 # Files allowed to import the raw prometheus_client constructors — the
 # wrapper module itself and its tests need to reach the real class.
 _ALLOWLIST_SUFFIXES = (
-    "/helix-common/src/helix_agent/common/observability/metrics.py",
-    "/helix-common/tests/test_observability_metrics.py",
+    "/expert-work-common/src/expert_work/common/observability/metrics.py",
+    "/expert-work-common/tests/test_observability_metrics.py",
     "/tools/observability/check_metric_names.py",
 )
 
@@ -61,7 +61,8 @@ def _find_violations(path: Path) -> list[str]:
                 if alias.name in _BANNED_NAMES:
                     violations.append(
                         f"{path}:{node.lineno}: imports prometheus_client.{alias.name} "
-                        f"directly; use helix_counter / helix_histogram / helix_gauge "
+                        f"directly; use expert_work_counter / "
+                        f"expert_work_histogram / expert_work_gauge "
                         f"from {_WRAPPER_MODULE} instead."
                     )
     return violations

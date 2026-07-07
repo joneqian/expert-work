@@ -2,7 +2,7 @@
  * Image uploads SDK — Stream P (PR M, Mini-ADR P-16).
  *
  * ``POST /v1/sessions/{thread_id}/uploads`` takes a multipart ``file``
- * field and returns the ``helix://image/...`` reference the run request's
+ * field and returns the ``expert_work://image/...`` reference the run request's
  * ``image_refs`` field carries — the Playground attaches that ref to the
  * next turn so the multimodal input path resolves bytes at LLM-call time.
  *
@@ -22,7 +22,7 @@ interface DocumentUploadResponse {
   kind: string;
 }
 
-/** Upload one image to a thread; returns its ``helix://image/...`` ref. */
+/** Upload one image to a thread; returns its ``expert_work://image/...`` ref. */
 export async function uploadImage(threadId: string, file: File): Promise<string> {
   const form = new FormData();
   form.append("file", file);

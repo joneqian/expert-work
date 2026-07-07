@@ -18,9 +18,9 @@ from uuid import UUID, uuid4
 
 from control_plane.knowledge.chunking import chunk_markdown_semantic
 from control_plane.knowledge.parsing import parse_document
-from helix_agent.persistence import KnowledgeStore
-from helix_agent.persistence.rls import current_tenant_id_var
-from helix_agent.protocol import DocumentStatus, KnowledgeChunk
+from expert_work.persistence import KnowledgeStore
+from expert_work.persistence.rls import current_tenant_id_var
+from expert_work.protocol import DocumentStatus, KnowledgeChunk
 from orchestrator.llm import Embedder
 
 logger = logging.getLogger(__name__)

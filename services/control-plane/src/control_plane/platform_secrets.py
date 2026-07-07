@@ -30,12 +30,12 @@ from uuid import UUID
 
 from control_plane.settings import Settings
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.common.observability import helix_gauge
-from helix_agent.persistence import PlatformSecretStore
-from helix_agent.protocol import PlatformProviderSecretRecord, Provider, Tool
+from expert_work.common.observability import expert_work_gauge
+from expert_work.persistence import PlatformSecretStore
+from expert_work.protocol import PlatformProviderSecretRecord, Provider, Tool
 
-_tenant_overrides_gauge = helix_gauge(
-    "helix_platform_credentials_tenant_overrides",
+_tenant_overrides_gauge = expert_work_gauge(
+    "expert_work_platform_credentials_tenant_overrides",
     "Per-tenant provider/tool credential override rows currently configured (Stream HX-8).",
 )
 

@@ -41,7 +41,7 @@ def container_name(sandbox_id: UUID) -> str:
     Lives here (not ``supervisor.py``) so the HX-6 pool replenisher can
     name its pre-launched containers without importing the supervisor.
     """
-    return f"helix-sb-{sandbox_id}"
+    return f"expert-work-sb-{sandbox_id}"
 
 
 @dataclass(frozen=True)

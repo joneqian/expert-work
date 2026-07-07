@@ -26,9 +26,9 @@ from control_plane.skill_attribution import AttributionVerdict, FailureSignal, S
 from control_plane.skill_distiller import SkillDistiller, SkillDraft
 from control_plane.skill_evolution import EvolutionConfig, EvolutionResult, ReplayOutcome, evolve
 from control_plane.skill_promotion_gate import PromotionGate
-from helix_agent.persistence import DuplicateSkillError, SkillStore
-from helix_agent.protocol import CurationCandidateRecord
-from helix_agent.protocol.skill import (
+from expert_work.persistence import DuplicateSkillError, SkillStore
+from expert_work.protocol import CurationCandidateRecord
+from expert_work.protocol.skill import (
     DEFAULT_SKILL_LAZY_LOAD,
     SkillStatus,
     compute_content_hash,

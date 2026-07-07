@@ -37,7 +37,7 @@ interface TenantScopeContextValue {
 
 const TenantScopeContext = createContext<TenantScopeContextValue | null>(null);
 
-const STORAGE_KEY = "helix.admin.tenantScope";
+const STORAGE_KEY = "expert_work.admin.tenantScope";
 
 function readStored(): TenantScopeValue | null {
   if (typeof window === "undefined") return null;

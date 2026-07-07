@@ -3,7 +3,7 @@
  * (Phase 3). system_admin-only, platform-level. One flag: the master on/off for
  * the tool-output-budget feature (generalized externalization + persist floor +
  * CM-12 prune). ``enabled`` is the explicit platform override (``null`` ⇒ unset,
- * using the ``HELIX_TOOL_OUTPUT_BUDGET`` env default); ``effective`` is the
+ * using the ``EXPERT_WORK_TOOL_OUTPUT_BUDGET`` env default); ``effective`` is the
  * resolved on/off the agent build reads.
  */
 import { getJson, putJson } from "./client";

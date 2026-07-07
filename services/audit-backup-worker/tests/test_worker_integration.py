@@ -37,14 +37,14 @@ from audit_backup_worker.worker import (
     AuditWormBackupWorker,
     static_retention_resolver,
 )
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     SqlAuditLogStore,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult
-from helix_agent.runtime.storage import (
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult
+from expert_work.runtime.storage import (
     ObjectStore,
     S3CompatibleConfig,
     make_object_store,
@@ -52,11 +52,11 @@ from helix_agent.runtime.storage import (
 
 pytestmark = pytest.mark.integration
 
-ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/helix-persistence/alembic.ini"
+ALEMBIC_INI = Path(__file__).resolve().parents[3] / "packages/expert-work-persistence/alembic.ini"
 _INFRA_DIR = Path(__file__).resolve().parents[3] / "infra"
 
-APP_ROLE = "helix_app_d1c_worker"
-APP_PASSWORD = "helix_app_d1c_worker_pw"  # test-only fixture password
+APP_ROLE = "expert_work_app_d1c_worker"
+APP_PASSWORD = "expert_work_app_d1c_worker_pw"  # test-only fixture password
 
 
 # ---------------------------------------------------------------------------
@@ -144,9 +144,9 @@ async def _ensure_worm_bucket(store: ObjectStore, bucket: str) -> None:
 @pytest.fixture
 async def worm_store(compose_stack: DockerCompose) -> AsyncIterator[ObjectStore]:
     host, port_str = compose_stack.get_service_host_and_port("minio", 9000)
-    user = os.environ.get("HELIX_MINIO_ROOT_USER", "helix_agent")
-    password = os.environ.get("HELIX_MINIO_ROOT_PASSWORD", "helix_agent_dev_minio")
-    bucket = os.environ.get("HELIX_AUDIT_BACKUP_S3_BUCKET", "helix-agent-audit-worm")
+    user = os.environ.get("EXPERT_WORK_MINIO_ROOT_USER", "expert_work")
+    password = os.environ.get("EXPERT_WORK_MINIO_ROOT_PASSWORD", "expert_work_dev_minio")
+    bucket = os.environ.get("EXPERT_WORK_AUDIT_BACKUP_S3_BUCKET", "expert-work-audit-worm")
     config = S3CompatibleConfig(
         endpoint_url=f"http://{host}:{port_str}",
         region="us-east-1",

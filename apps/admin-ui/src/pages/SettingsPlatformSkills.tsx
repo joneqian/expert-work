@@ -419,7 +419,7 @@ export function SettingsPlatformSkills() {
                 <Pin
                   size={12}
                   strokeWidth={2}
-                  style={{ color: "var(--hx-color-brand-500)" }}
+                  style={{ color: "var(--ew-color-brand-500)" }}
                   data-testid={`ps-pin-icon-${row.id}`}
                 />
               </Tooltip>
@@ -495,7 +495,7 @@ export function SettingsPlatformSkills() {
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{t("platform_skills.empty_title")}</div>
       <div
         style={{
-          color: "var(--hx-text-tertiary, #666)",
+          color: "var(--ew-text-tertiary, #666)",
           maxWidth: 360,
           margin: "0 auto 16px",
         }}
@@ -661,7 +661,7 @@ export function SettingsPlatformSkills() {
                       <Tag color={GH_RESULT_COLOR[r.status]}>
                         {t(`platform_skills.github_result_${r.status}`)}
                       </Tag>
-                      <Text style={{ fontFamily: "var(--hx-font-mono)", fontSize: 12 }}>
+                      <Text style={{ fontFamily: "var(--ew-font-mono)", fontSize: 12 }}>
                         {r.skill}
                       </Text>
                       {r.reason && (

@@ -1,0 +1,68 @@
+"""In-memory ``TenantUserStore`` for unit tests."""
+
+from __future__ import annotations
+
+from collections.abc import Collection
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+from expert_work.persistence.tenant_user.base import TenantUserStore
+from expert_work.protocol import SubjectType, TenantUser
+
+
+class InMemoryTenantUserStore(TenantUserStore):
+    def __init__(self) -> None:
+        self._rows: dict[UUID, TenantUser] = {}
+
+    async def resolve(
+        self,
+        *,
+        tenant_id: UUID,
+        subject_type: SubjectType,
+        subject_id: str,
+        display_name: str | None = None,
+    ) -> TenantUser:
+        now = datetime.now(UTC)
+        for uid, row in self._rows.items():
+            if (
+                row.tenant_id == tenant_id
+                and row.subject_type == subject_type
+                and row.subject_id == subject_id
+            ):
+                updated = row.model_copy(
+                    update={
+                        "last_active_at": now,
+                        "display_name": (
+                            display_name if display_name is not None else row.display_name
+                        ),
+                    }
+                )
+                self._rows[uid] = updated
+                return updated
+        user = TenantUser(
+            id=uuid4(),
+            tenant_id=tenant_id,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            display_name=display_name,
+            created_at=now,
+            last_active_at=now,
+        )
+        self._rows[user.id] = user
+        return user
+
+    async def get(self, user_id: UUID, *, tenant_id: UUID) -> TenantUser | None:
+        row = self._rows.get(user_id)
+        if row is None or row.tenant_id != tenant_id:
+            return None
+        return row
+
+    async def get_many(
+        self, user_ids: Collection[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, TenantUser]:
+        wanted = set(user_ids)
+        return {
+            uid: row
+            for uid, row in self._rows.items()
+            if uid in wanted and row.tenant_id == tenant_id
+        }

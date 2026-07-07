@@ -67,22 +67,22 @@
 
 ---
 
-## 决策 4：项目命名 — ✅ Helix-Agent
+## 决策 4：项目命名 — ✅ Expert Work
 
-**结论**：项目最终命名为 **Helix-Agent**。
+**结论**：项目最终命名为 **Expert Work**。
 
 **与现状对齐**：
 | 名称位置 | 现状 | 处理 |
 |---------|------|------|
-| GitHub repo | `joneqian/helix-agent` | ✅ 已对齐 |
-| Python 包 | `helix_agent`（`src/helix_agent/__init__.py`） | ✅ 已对齐 |
-| docs/README.md 标题 | "Helix — 自研..." | 🔄 后续 docs/branding-cleanup PR 统一为 "Helix-Agent" |
-| 各 docs 内提及 | "Helix" | 🔄 同上 |
+| GitHub repo | `joneqian/expert-work` | ✅ 已对齐 |
+| Python 包 | `expert_work`（`src/expert_work/__init__.py`） | ✅ 已对齐 |
+| docs/README.md 标题 | "Expert Work — 自研..." | 🔄 后续 docs/branding-cleanup PR 统一为 "Expert Work" |
+| 各 docs 内提及 | "Expert Work" | 🔄 同上 |
 
 **影响范围**：仅文档措辞，零代码层影响。
 
 **操作清单**：
-- [ ] 单独 PR `docs/branding-cleanup`：把 `docs/` 下"Helix"的项目级提及统一为"Helix-Agent"（不动 `helix_agent` Python 包名）
+- [ ] 单独 PR `docs/branding-cleanup`：把 `docs/` 下"Expert Work"的项目级提及统一为"Expert Work"（不动 `expert_work` Python 包名）
 
 ---
 

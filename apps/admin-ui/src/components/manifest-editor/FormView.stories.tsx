@@ -167,7 +167,7 @@ function withMcpFixture(Story: ComponentType) {
 // ── Seed manifest helpers ─────────────────────────────────────────────────
 
 const BLANK_MANIFEST: AgentManifest = {
-  apiVersion: "helix/v1",
+  apiVersion: "expert_work/v1",
   kind: "Agent",
   metadata: { name: "" },
   spec: {},

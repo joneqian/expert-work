@@ -4,7 +4,7 @@ import { EventStreamPanel } from "./EventStreamPanel";
 import { apiClient } from "../../api/client";
 import "../../i18n";
 
-const LOCAL_STORAGE_KEY = "helix.runDetail.eventStream.expanded";
+const LOCAL_STORAGE_KEY = "expert_work.runDetail.eventStream.expanded";
 
 function setExpanded(expanded: boolean) {
   if (typeof window !== "undefined") {

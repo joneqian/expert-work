@@ -13,7 +13,7 @@
 - 记忆是 **多层体系**（Working / State / Episodic / Long-term）+ Hybrid（向量+BM25）检索；
 - 错误处理要做成 **「行动指南」**（error-as-guidance），而非裸 Error Log。
 
-本报告把这套框架当成评测维度，对 `src/github` 下三个真实开源 Agent 做了源码级取证，看它们各自如何落地、印证了文章哪些观点、又在哪里偏离。**本报告只研究这三个外部项目，不涉及 helix-agent 自身实现**（末尾仅附一节简短启示）。
+本报告把这套框架当成评测维度，对 `src/github` 下三个真实开源 Agent 做了源码级取证，看它们各自如何落地、印证了文章哪些观点、又在哪里偏离。**本报告只研究这三个外部项目，不涉及 expert-work 自身实现**（末尾仅附一节简短启示）。
 
 ### 三个项目的定位差异（决定了它们的架构取向）
 
@@ -261,11 +261,11 @@
 
 ---
 
-## 对 helix-agent 的简短启示（仅供参考，非本报告主体）
+## 对 expert-work 的简短启示（仅供参考，非本报告主体）
 
-- helix-agent 的长期记忆（embedder 平台级 + Hybrid 检索方向）与 **OpenClaw memory-search 的 0.7/0.3 + MMR + 时间衰减**最可借鉴。
-- helix-agent 已有 Stream SE（带源失败报告/进化），其 **error-as-guidance** 可参考 **Hermes ClassifiedError + recovery tool results 注入**模式。
-- 若 helix-agent 走"状态外部化"，**OpenClaw bootstrap 扫描 + Hermes 多生态上下文文件发现链**是成熟范式；若走"状态内化"，**deer-flow ThreadState + checkpointer**是参照，但要补可视化以避免黑盒。
+- expert-work 的长期记忆（embedder 平台级 + Hybrid 检索方向）与 **OpenClaw memory-search 的 0.7/0.3 + MMR + 时间衰减**最可借鉴。
+- expert-work 已有 Stream SE（带源失败报告/进化），其 **error-as-guidance** 可参考 **Hermes ClassifiedError + recovery tool results 注入**模式。
+- 若 expert-work 走"状态外部化"，**OpenClaw bootstrap 扫描 + Hermes 多生态上下文文件发现链**是成熟范式；若走"状态内化"，**deer-flow ThreadState + checkpointer**是参照，但要补可视化以避免黑盒。
 
 ---
 

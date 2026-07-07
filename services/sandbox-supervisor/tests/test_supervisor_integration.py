@@ -2,7 +2,7 @@
 
 These exercise the *real* ``CliDockerClient`` against the configured OCI
 runtime — ``runc`` by default (local / the existing CI integration job),
-or ``runsc`` when ``HELIX_TEST_SANDBOX_RUNTIME=runsc`` (the Stream HX-10
+or ``runsc`` when ``EXPERT_WORK_TEST_SANDBOX_RUNTIME=runsc`` (the Stream HX-10
 gVisor CI workflow runs this same acceptance suite under gVisor). It covers
 STREAM-F-DESIGN § 1.3 acceptance gates:
 
@@ -53,8 +53,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from helix_agent.persistence import InMemoryUserWorkspaceStore
-from helix_agent.runtime.sandbox import SandboxRuntimeProvider
+from expert_work.persistence import InMemoryUserWorkspaceStore
+from expert_work.runtime.sandbox import SandboxRuntimeProvider
 from sandbox_supervisor.docker_client import CliDockerClient
 from sandbox_supervisor.domain import SandboxRecord, SandboxState, SupervisorError
 from sandbox_supervisor.pool import PoolReplenisher, SandboxPool
@@ -66,23 +66,23 @@ pytestmark = pytest.mark.integration
 
 #: Stream HX-10 — the OCI runtime under test. Defaults to ``runc`` (local /
 #: the existing CI integration job); the gVisor CI workflow sets
-#: ``HELIX_TEST_SANDBOX_RUNTIME=runsc`` so this same acceptance suite runs
+#: ``EXPERT_WORK_TEST_SANDBOX_RUNTIME=runsc`` so this same acceptance suite runs
 #: under gVisor (test matrix #43 extended to the prod runtime).
 _OCI_RUNTIME = cast(
     Literal["runc", "runsc"],
-    os.environ.get("HELIX_TEST_SANDBOX_RUNTIME", "runc"),
+    os.environ.get("EXPERT_WORK_TEST_SANDBOX_RUNTIME", "runc"),
 )
 #: Skip gVisor-specific invariants when the suite runs under runc.
 _gvisor_only = pytest.mark.skipif(
     _OCI_RUNTIME != "runsc",
-    reason="gVisor-specific invariant (set HELIX_TEST_SANDBOX_RUNTIME=runsc)",
+    reason="gVisor-specific invariant (set EXPERT_WORK_TEST_SANDBOX_RUNTIME=runsc)",
 )
 
 #: Image tag built for the test run; kept distinct from the dev tag.
-_IMAGE = "helix-sandbox:itest"
+_IMAGE = "expert-work-sandbox:itest"
 #: Egress network — created ``--internal`` (no NAT / default route) so a
 #: sandbox on it can reach only same-network peers (Mini-ADR F-14).
-_NETWORK = "helix-sandbox-egress"
+_NETWORK = "expert-work-sandbox-egress"
 #: Stream HX-10-F1 — the egress network is created with a fixed subnet and
 #: the stub proxy pinned to a static IP, so the sandbox can reach it via an
 #: ``/etc/hosts`` entry (``--add-host``) rather than docker embedded DNS.
@@ -100,7 +100,7 @@ _PROXY_IP = "172.30.0.10"
 _PROXY_HOSTNAME = "credential-proxy.internal"
 #: Stub HTTP listener standing in for the credential-proxy — the one
 #: endpoint a sandbox IS allowed to reach (the real proxy lands in F.10).
-_STUB_PROXY = "helix-test-proxy"
+_STUB_PROXY = "expert-work-test-proxy"
 #: Base image for the stub proxy — already local after the sandbox build.
 _STUB_IMAGE = "python:3.12-alpine"
 #: ``infra/sandbox-image/`` — the Dockerfile's build context.
@@ -123,19 +123,19 @@ def _docker(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]
 
 
 def _sweep_sandbox_containers() -> None:
-    """Force-remove any leftover ``helix-sb-*`` sandbox container."""
-    leftover = _docker("ps", "--all", "--quiet", "--filter", "name=helix-sb-")
+    """Force-remove any leftover ``expert-work-sb-*`` sandbox container."""
+    leftover = _docker("ps", "--all", "--quiet", "--filter", "name=expert-work-sb-")
     for container_id in leftover.stdout.split():
         _docker("rm", "--force", container_id)
 
 
 def _sweep_workspace_volumes() -> None:
-    """Remove any leftover ``helix-ws-*`` per-user workspace volume (J.15).
+    """Remove any leftover ``expert-work-ws-*`` per-user workspace volume (J.15).
 
     Run *after* the containers are swept — docker refuses to remove a
     volume still mounted by a live container.
     """
-    leftover = _docker("volume", "ls", "--quiet", "--filter", "name=helix-ws-")
+    leftover = _docker("volume", "ls", "--quiet", "--filter", "name=expert-work-ws-")
     for volume_name in leftover.stdout.split():
         _docker("volume", "rm", "--force", volume_name)
 
@@ -194,7 +194,8 @@ def _docker_env() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _sweep_containers() -> Iterator[None]:
-    """Remove leftover ``helix-sb-*`` containers + ``helix-ws-*`` volumes after each test."""
+    """Remove leftover ``expert-work-sb-*`` containers +
+    ``expert-work-ws-*`` volumes after each test."""
     yield
     _sweep_sandbox_containers()
     _sweep_workspace_volumes()
@@ -248,7 +249,7 @@ class _Harness:
 
 
 @pytest.fixture
-def helix() -> _Harness:
+def expert_work() -> _Harness:
     store = _InMemoryStore()
     supervisor = SandboxSupervisor(
         store=store,  # type: ignore[arg-type]  # structural SandboxStore
@@ -278,10 +279,10 @@ def _acquire_request(thread_id: str) -> AcquireRequest:
 
 
 @pytest.mark.asyncio
-async def test_gate_45_exec_python_runs_code(helix: _Harness) -> None:
-    acquired = await helix.supervisor.acquire(_acquire_request("t-45"))
-    result = await helix.supervisor.exec(acquired.sandbox_id, code="print(6 * 7)")
-    await helix.supervisor.release(acquired.sandbox_id)
+async def test_gate_45_exec_python_runs_code(expert_work: _Harness) -> None:
+    acquired = await expert_work.supervisor.acquire(_acquire_request("t-45"))
+    result = await expert_work.supervisor.exec(acquired.sandbox_id, code="print(6 * 7)")
+    await expert_work.supervisor.release(acquired.sandbox_id)
 
     assert result.exit_code == 0
     assert result.timed_out is False
@@ -294,77 +295,77 @@ async def test_gate_45_exec_python_runs_code(helix: _Harness) -> None:
 
 
 @pytest.mark.asyncio
-async def test_persistent_workspace_survives_across_containers(helix: _Harness) -> None:
+async def test_persistent_workspace_survives_across_containers(expert_work: _Harness) -> None:
     # A user-scoped acquire mounts a docker named volume at /workspace.
     # Files written in one container outlive it and reappear in the next
     # — STREAM-J-DESIGN § 9 ("临时容器 + 持久卷"). This also proves a
     # fresh volume is writable by the image's non-root ``agent`` user.
     tenant, user = uuid4(), uuid4()
 
-    box_a = await helix.supervisor.acquire(
+    box_a = await expert_work.supervisor.acquire(
         AcquireRequest(tenant_id=tenant, thread_id="t-ws-a", user_id=user)
     )
-    written = await helix.supervisor.exec(
+    written = await expert_work.supervisor.exec(
         box_a.sandbox_id,
         code="open('/workspace/note.txt', 'w').write('persisted')",
     )
-    await helix.supervisor.release(box_a.sandbox_id)
+    await expert_work.supervisor.release(box_a.sandbox_id)
     assert written.exit_code == 0, written.stderr
 
     # A brand-new container for the same (tenant, user) re-mounts the
     # same volume — box A's file is still there.
-    box_b = await helix.supervisor.acquire(
+    box_b = await expert_work.supervisor.acquire(
         AcquireRequest(tenant_id=tenant, thread_id="t-ws-b", user_id=user)
     )
-    seen = await helix.supervisor.exec(
+    seen = await expert_work.supervisor.exec(
         box_b.sandbox_id,
         code="print(open('/workspace/note.txt').read())",
     )
-    await helix.supervisor.release(box_b.sandbox_id)
+    await expert_work.supervisor.release(box_b.sandbox_id)
     assert seen.exit_code == 0, seen.stderr
     assert "persisted" in seen.stdout
 
 
 @pytest.mark.asyncio
-async def test_read_workspace_file_reads_persisted_content(helix: _Harness) -> None:
+async def test_read_workspace_file_reads_persisted_content(expert_work: _Harness) -> None:
     # J.9 — the supervisor reads an artifact's bytes out of the user's
     # volume via a throwaway read-only container, with no sandbox running.
     tenant, user = uuid4(), uuid4()
-    box = await helix.supervisor.acquire(
+    box = await expert_work.supervisor.acquire(
         AcquireRequest(tenant_id=tenant, thread_id="t-rd", user_id=user)
     )
-    written = await helix.supervisor.exec(
+    written = await expert_work.supervisor.exec(
         box.sandbox_id,
         code="open('/workspace/artifact.txt', 'w').write('artifact body')",
     )
-    await helix.supervisor.release(box.sandbox_id)
+    await expert_work.supervisor.release(box.sandbox_id)
     assert written.exit_code == 0, written.stderr
 
-    data = await helix.supervisor.read_workspace_file(
+    data = await expert_work.supervisor.read_workspace_file(
         tenant_id=tenant, user_id=user, path="artifact.txt"
     )
     assert data == b"artifact body"
 
 
 @pytest.mark.asyncio
-async def test_warm_session_reused_across_acquires(helix: _Harness) -> None:
+async def test_warm_session_reused_across_acquires(expert_work: _Harness) -> None:
     # J.15 — a user-scoped acquire reuses the live warm sandbox: the
     # second acquire does no docker run, and the held runner link still
     # serves exec on the reused container.
     tenant, user = uuid4(), uuid4()
-    first = await helix.supervisor.acquire(
+    first = await expert_work.supervisor.acquire(
         AcquireRequest(tenant_id=tenant, thread_id="t-warm-1", user_id=user)
     )
-    await helix.supervisor.exec(first.sandbox_id, code="print('first')")
+    await expert_work.supervisor.exec(first.sandbox_id, code="print('first')")
 
-    second = await helix.supervisor.acquire(
+    second = await expert_work.supervisor.acquire(
         AcquireRequest(tenant_id=tenant, thread_id="t-warm-2", user_id=user)
     )
     assert second.sandbox_id == first.sandbox_id
     assert second.cold_start is False
 
-    result = await helix.supervisor.exec(second.sandbox_id, code="print(6 * 7)")
-    await helix.supervisor.destroy(first.sandbox_id, reason="cancelled")
+    result = await expert_work.supervisor.exec(second.sandbox_id, code="print(6 * 7)")
+    await expert_work.supervisor.destroy(first.sandbox_id, reason="cancelled")
     assert result.exit_code == 0
     assert "42" in result.stdout
 
@@ -375,20 +376,20 @@ async def test_warm_session_reused_across_acquires(helix: _Harness) -> None:
 
 
 @pytest.mark.asyncio
-async def test_gate_48_filesystem_and_process_isolation(helix: _Harness) -> None:
+async def test_gate_48_filesystem_and_process_isolation(expert_work: _Harness) -> None:
     # Sandbox A writes into /workspace, then is released.
-    box_a = await helix.supervisor.acquire(_acquire_request("t-48a"))
-    written = await helix.supervisor.exec(
+    box_a = await expert_work.supervisor.acquire(_acquire_request("t-48a"))
+    written = await expert_work.supervisor.exec(
         box_a.sandbox_id,
         code="open('/workspace/leak.txt', 'w').write('from-A')",
     )
     assert written.exit_code == 0
-    await helix.supervisor.release(box_a.sandbox_id)
+    await expert_work.supervisor.release(box_a.sandbox_id)
 
     # Sandbox B is a brand-new container (per-acquire docker run + tmpfs):
     # A's file is gone — no cross-sandbox filesystem leak.
-    box_b = await helix.supervisor.acquire(_acquire_request("t-48b"))
-    seen = await helix.supervisor.exec(
+    box_b = await expert_work.supervisor.acquire(_acquire_request("t-48b"))
+    seen = await expert_work.supervisor.exec(
         box_b.sandbox_id,
         code="import os; print(os.path.exists('/workspace/leak.txt'))",
     )
@@ -396,11 +397,11 @@ async def test_gate_48_filesystem_and_process_isolation(helix: _Harness) -> None
 
     # B has its own PID namespace — it sees only a few low PIDs, never the
     # host's hundreds (process isolation, gate #2).
-    pids = await helix.supervisor.exec(
+    pids = await expert_work.supervisor.exec(
         box_b.sandbox_id,
         code="import os; print(max(int(p) for p in os.listdir('/proc') if p.isdigit()))",
     )
-    await helix.supervisor.release(box_b.sandbox_id)
+    await expert_work.supervisor.release(box_b.sandbox_id)
     assert int(pids.stdout.strip()) < 100
 
 
@@ -429,15 +430,15 @@ _EGRESS_PROBE = (
 
 
 @pytest.mark.asyncio
-async def test_gate_49_network_egress_isolation(helix: _Harness) -> None:
+async def test_gate_49_network_egress_isolation(expert_work: _Harness) -> None:
     # HX-10-F1: the probe reaches the proxy by hostname resolved from
     # /etc/hosts (a --add-host fixed-IP entry), not docker embedded DNS.
     # This is the production addressing path and works under both runc and
     # runsc — gVisor's netstack has no embedded DNS (google/gvisor#7469), so
     # the earlier container-name probe was runc-only and xfail'd under runsc.
-    box = await helix.supervisor.acquire(_acquire_request("t-49"))
-    result = await helix.supervisor.exec(box.sandbox_id, code=_EGRESS_PROBE)
-    await helix.supervisor.release(box.sandbox_id)
+    box = await expert_work.supervisor.acquire(_acquire_request("t-49"))
+    result = await expert_work.supervisor.exec(box.sandbox_id, code=_EGRESS_PROBE)
+    await expert_work.supervisor.release(box.sandbox_id)
 
     assert result.exit_code == 0, result.stderr
     # On the --internal network the sandbox reaches its same-network peer
@@ -454,9 +455,9 @@ async def test_gate_49_network_egress_isolation(helix: _Harness) -> None:
 
 
 @pytest.mark.asyncio
-async def test_gate_50_no_credentials_in_sandbox(helix: _Harness) -> None:
-    box = await helix.supervisor.acquire(_acquire_request("t-50"))
-    probe = await helix.supervisor.exec(
+async def test_gate_50_no_credentials_in_sandbox(expert_work: _Harness) -> None:
+    box = await expert_work.supervisor.acquire(_acquire_request("t-50"))
+    probe = await expert_work.supervisor.exec(
         box.sandbox_id,
         code=(
             "import os\n"
@@ -465,7 +466,7 @@ async def test_gate_50_no_credentials_in_sandbox(helix: _Harness) -> None:
             "print('RUN_SECRETS ' + str(os.path.isdir('/run/secrets')))\n"
         ),
     )
-    await helix.supervisor.release(box.sandbox_id)
+    await expert_work.supervisor.release(box.sandbox_id)
 
     assert probe.exit_code == 0
     # The F.3 docker-run argv injects no -e/--env; credentials only ever
@@ -475,7 +476,7 @@ async def test_gate_50_no_credentials_in_sandbox(helix: _Harness) -> None:
         for line in probe.stdout.splitlines()
         if line.startswith("ENVVAR ")
     ]
-    banned = ("secret", "token", "password", "credential", "helix", "dsn")
+    banned = ("secret", "token", "password", "credential", "expert_work", "dsn")
     for name in env_names:
         assert not any(needle in name for needle in banned), f"leaked env var: {name}"
     assert "RUN_SECRETS False" in probe.stdout
@@ -514,10 +515,10 @@ _FORK_BOMB = (
     ),
 )
 @pytest.mark.asyncio
-async def test_gate_56_fork_bomb_contained_by_pids_limit(helix: _Harness) -> None:
-    box = await helix.supervisor.acquire(_acquire_request("t-56"))
-    result = await helix.supervisor.exec(box.sandbox_id, code=_FORK_BOMB)
-    await helix.supervisor.release(box.sandbox_id)
+async def test_gate_56_fork_bomb_contained_by_pids_limit(expert_work: _Harness) -> None:
+    box = await expert_work.supervisor.acquire(_acquire_request("t-56"))
+    result = await expert_work.supervisor.exec(box.sandbox_id, code=_FORK_BOMB)
+    await expert_work.supervisor.release(box.sandbox_id)
 
     # The fork bomb hit the cgroup pids cap and the snippet exited cleanly —
     # the host and the test suite are unaffected.
@@ -530,7 +531,7 @@ async def test_gate_56_fork_bomb_contained_by_pids_limit(helix: _Harness) -> Non
 
 @_gvisor_only
 @pytest.mark.asyncio
-async def test_gate_56_fork_bomb_sandbox_death_then_rebuild(helix: _Harness) -> None:
+async def test_gate_56_fork_bomb_sandbox_death_then_rebuild(expert_work: _Harness) -> None:
     """HX-10-F2 method A: under gVisor a fork bomb kills the sandbox, not the host.
 
     gVisor's ``--pids-limit`` caps the sentry's HOST threads, not guest
@@ -545,22 +546,22 @@ async def test_gate_56_fork_bomb_sandbox_death_then_rebuild(helix: _Harness) -> 
     volume is unaffected (covered by the J.15 persistence test), so a real
     user loses only the in-flight exec, not their data.
     """
-    box = await helix.supervisor.acquire(_acquire_request("t-56"))
+    box = await expert_work.supervisor.acquire(_acquire_request("t-56"))
     # The panicked sentry breaks the runner link, surfacing as a
     # SupervisorError (or a non-clean result if the panic races the read);
     # either way the runc "fork-limit-hit" path is gone by design.
     with contextlib.suppress(SupervisorError):
-        await helix.supervisor.exec(box.sandbox_id, code=_FORK_BOMB)
+        await expert_work.supervisor.exec(box.sandbox_id, code=_FORK_BOMB)
     # The dead container may already be gone; releasing it is best-effort
     # (the autouse sweep force-removes any leftover regardless).
     with contextlib.suppress(SupervisorError):
-        await helix.supervisor.release(box.sandbox_id)
+        await expert_work.supervisor.release(box.sandbox_id)
 
     # Blast radius contained: the supervisor is alive and a fresh sandbox
     # rebuilds and executes — the host + supervisor are unaffected.
-    fresh = await helix.supervisor.acquire(_acquire_request("t-56b"))
-    result = await helix.supervisor.exec(fresh.sandbox_id, code="print('rebuilt')")
-    await helix.supervisor.release(fresh.sandbox_id)
+    fresh = await expert_work.supervisor.acquire(_acquire_request("t-56b"))
+    result = await expert_work.supervisor.exec(fresh.sandbox_id, code="print('rebuilt')")
+    await expert_work.supervisor.release(fresh.sandbox_id)
 
     assert result.exit_code == 0
     assert result.timed_out is False
@@ -573,17 +574,17 @@ async def test_gate_56_fork_bomb_sandbox_death_then_rebuild(helix: _Harness) -> 
 
 
 @pytest.mark.asyncio
-async def test_gate_57_cancellation_kills_sandbox_within_1s(helix: _Harness) -> None:
-    box = await helix.supervisor.acquire(_acquire_request("t-57"))
+async def test_gate_57_cancellation_kills_sandbox_within_1s(expert_work: _Harness) -> None:
+    box = await expert_work.supervisor.acquire(_acquire_request("t-57"))
 
     # Start a long-running exec, then destroy the sandbox mid-flight.
     runaway = asyncio.ensure_future(
-        helix.supervisor.exec(box.sandbox_id, code="while True: pass", timeout_s=300)
+        expert_work.supervisor.exec(box.sandbox_id, code="while True: pass", timeout_s=300)
     )
     await asyncio.sleep(0.5)  # let the runner enter the loop
 
     start = time.monotonic()
-    await helix.supervisor.destroy(box.sandbox_id, reason="cancelled")
+    await expert_work.supervisor.destroy(box.sandbox_id, reason="cancelled")
     elapsed = time.monotonic() - start
 
     runaway.cancel()
@@ -592,12 +593,14 @@ async def test_gate_57_cancellation_kills_sandbox_within_1s(helix: _Harness) -> 
     # Gate #8: the forced destroy SIGKILLs the busy container in ≤1s — it
     # must not wait on the graceful stdin-EOF close grace (Mini-ADR F-8).
     assert elapsed < 1.0
-    row = await helix.store.get(box.sandbox_id)
+    row = await expert_work.store.get(box.sandbox_id)
     assert row is not None
     assert row.state is SandboxState.DESTROYED
     assert row.destroy_reason == "cancelled"
     # The container is really gone.
-    remaining = _docker("ps", "--all", "--quiet", "--filter", f"name=helix-sb-{box.sandbox_id}")
+    remaining = _docker(
+        "ps", "--all", "--quiet", "--filter", f"name=expert-work-sb-{box.sandbox_id}"
+    )
     assert remaining.stdout.strip() == ""
 
 
@@ -614,10 +617,10 @@ _STDLIB_PROBE = (
 
 
 @pytest.mark.asyncio
-async def test_gate_59_stdlib_c_extensions_importable(helix: _Harness) -> None:
-    box = await helix.supervisor.acquire(_acquire_request("t-59"))
-    result = await helix.supervisor.exec(box.sandbox_id, code=_STDLIB_PROBE)
-    await helix.supervisor.release(box.sandbox_id)
+async def test_gate_59_stdlib_c_extensions_importable(expert_work: _Harness) -> None:
+    box = await expert_work.supervisor.acquire(_acquire_request("t-59"))
+    result = await expert_work.supervisor.exec(box.sandbox_id, code=_STDLIB_PROBE)
+    await expert_work.supervisor.release(box.sandbox_id)
 
     assert result.exit_code == 0, result.stderr
     assert "stdlib-ok" in result.stdout
@@ -682,12 +685,12 @@ async def test_warm_pool_claim_exec_release() -> None:
 
 
 @pytest.mark.asyncio
-async def test_container_runs_under_expected_runtime(helix: _Harness) -> None:
+async def test_container_runs_under_expected_runtime(expert_work: _Harness) -> None:
     # Guards against a silent fall-back to runc: if the gVisor CI workflow
     # fails to register runsc with the daemon, docker silently uses the
     # default runtime and the "gVisor verification" would be a no-op. Assert
     # the live container's runtime matches what the provider asked for.
-    acquired = await helix.supervisor.acquire(_acquire_request("t-runtime"))
+    acquired = await expert_work.supervisor.acquire(_acquire_request("t-runtime"))
     try:
         inspect = _docker(
             "inspect", _container_name(acquired.sandbox_id), "--format", "{{.HostConfig.Runtime}}"
@@ -695,18 +698,18 @@ async def test_container_runs_under_expected_runtime(helix: _Harness) -> None:
         assert inspect.returncode == 0, inspect.stderr
         assert inspect.stdout.strip() == _OCI_RUNTIME
     finally:
-        await helix.supervisor.release(acquired.sandbox_id)
+        await expert_work.supervisor.release(acquired.sandbox_id)
 
 
 @_gvisor_only
 @pytest.mark.asyncio
-async def test_gvisor_io_uring_is_unavailable(helix: _Harness) -> None:
+async def test_gvisor_io_uring_is_unavailable(expert_work: _Harness) -> None:
     # gVisor does not implement io_uring (a recurring container-escape
     # surface): the syscall returns ENOSYS. This is the compatibility/escape
     # invariant the research flagged (Claude Code #27230) — under gVisor a
     # script reaching for io_uring gets -1/ENOSYS rather than a live ring.
     # ``425`` is the io_uring_setup syscall number on the linux/amd64 CI runner.
-    acquired = await helix.supervisor.acquire(_acquire_request("t-iouring"))
+    acquired = await expert_work.supervisor.acquire(_acquire_request("t-iouring"))
     code = (
         "import ctypes, os\n"
         "libc = ctypes.CDLL(None, use_errno=True)\n"
@@ -714,9 +717,9 @@ async def test_gvisor_io_uring_is_unavailable(helix: _Harness) -> None:
         "print(rc, os.strerror(ctypes.get_errno()) if rc < 0 else 'ring')\n"
     )
     try:
-        result = await helix.supervisor.exec(acquired.sandbox_id, code=code)
+        result = await expert_work.supervisor.exec(acquired.sandbox_id, code=code)
         assert result.exit_code == 0, result.stderr
         # -1 return → io_uring rejected by gVisor (ENOSYS / EPERM family).
         assert result.stdout.strip().startswith("-1"), result.stdout
     finally:
-        await helix.supervisor.release(acquired.sandbox_id)
+        await expert_work.supervisor.release(acquired.sandbox_id)

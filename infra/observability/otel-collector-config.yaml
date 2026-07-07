@@ -1,6 +1,6 @@
 # OpenTelemetry Collector config — Stream G.0.
 #
-# Receives OTLP from the helix services (A.8 OTel SDK) and forwards
+# Receives OTLP from the expert_work services (A.8 OTel SDK) and forwards
 # traces to Tempo. Metrics are scraped by Prometheus directly off the
 # services' /metrics endpoints, so the collector handles traces only;
 # logs reach Loki via Promtail.

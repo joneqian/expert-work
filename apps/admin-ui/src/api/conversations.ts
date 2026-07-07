@@ -14,7 +14,7 @@
 import { getJson, withTenantScope, type TenantScope } from "./client";
 import type { RunStatus, RunTokens } from "./runs";
 
-/** Thread lifecycle — server ``ThreadStatus`` (helix_agent.protocol). */
+/** Thread lifecycle — server ``ThreadStatus`` (expert_work.protocol). */
 export type ConversationStatus =
   | "active"
   | "paused"

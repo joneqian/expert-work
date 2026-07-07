@@ -27,10 +27,10 @@ from control_plane.platform_quality_config import (
     PlatformQualityConfigService,
 )
 from control_plane.platform_secrets import PlatformSecretsService
-from helix_agent.common.observability import current_trace_id_hex
-from helix_agent.persistence.platform_quality_config import PlatformQualityConfigRow
-from helix_agent.protocol import AuditAction, Principal, models_for_provider
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.common.observability import current_trace_id_hex
+from expert_work.persistence.platform_quality_config import PlatformQualityConfigRow
+from expert_work.protocol import AuditAction, Principal, models_for_provider
+from expert_work.runtime.audit.logger import AuditLogger
 
 
 class PlatformQualityConfigWrite(BaseModel):

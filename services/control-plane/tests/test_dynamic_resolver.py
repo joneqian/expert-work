@@ -11,7 +11,7 @@ from control_plane.runtime import (
     DynamicResolvingReranker,
     _is_dashscope_rerank_model,
 )
-from helix_agent.common.credentials import CredentialsResolverError
+from expert_work.common.credentials import CredentialsResolverError
 from orchestrator.errors import AgentFactoryError
 
 

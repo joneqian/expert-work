@@ -18,11 +18,11 @@ from uuid import UUID
 
 from control_plane.skill_evolution_limits import CircuitBreaker, RateLimiter
 from control_plane.skill_promotion import PromoteDecision, decide_promotion, should_auto_promote
-from helix_agent.persistence.skill.base import SkillStore
-from helix_agent.protocol import AuditAction, AuditEntry, AuditResult, CurationCandidateRecord
-from helix_agent.protocol.eval_dataset import CurationSignal
-from helix_agent.protocol.skill import SkillStatus
-from helix_agent.runtime.audit.logger import AuditLogger
+from expert_work.persistence.skill.base import SkillStore
+from expert_work.protocol import AuditAction, AuditEntry, AuditResult, CurationCandidateRecord
+from expert_work.protocol.eval_dataset import CurationSignal
+from expert_work.protocol.skill import SkillStatus
+from expert_work.runtime.audit.logger import AuditLogger
 
 __all__ = ["WEAK_LABEL_SIGNALS", "PromotionGate"]
 

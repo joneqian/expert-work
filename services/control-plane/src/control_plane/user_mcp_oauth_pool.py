@@ -29,8 +29,8 @@ from uuid import UUID
 
 from control_plane.mcp_oauth_refresh import McpOAuthRefresher
 from control_plane.tenant_scope import bypass_rls_session
-from helix_agent.persistence import McpConnectorCatalogStore, McpOAuthConnectionStore
-from helix_agent.protocol import McpOAuthConnectionRecord
+from expert_work.persistence import McpConnectorCatalogStore, McpOAuthConnectionStore
+from expert_work.protocol import McpOAuthConnectionRecord
 from orchestrator.tools.mcp import (
     MCPClient,
     MCPServerConfig,
@@ -38,7 +38,7 @@ from orchestrator.tools.mcp import (
     MCPServerPoolLimitError,
 )
 
-logger = logging.getLogger("helix.control_plane.user_mcp_oauth_pool")
+logger = logging.getLogger("expert_work.control_plane.user_mcp_oauth_pool")
 
 # (tenant_id, user_id) -> that user's connected-OAuth pool.
 UserMcpOAuthPoolProvider = Callable[[UUID, str], Awaitable[MCPServerPool]]

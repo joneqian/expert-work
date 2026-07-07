@@ -221,7 +221,7 @@ export function SettingsMcpCatalog() {
       <div style={{ fontWeight: 600, marginBottom: 4 }}>{t("mcp_catalog.empty_title")}</div>
       <div
         style={{
-          color: "var(--hx-text-tertiary, #666)",
+          color: "var(--ew-text-tertiary, #666)",
           maxWidth: 360,
           margin: "0 auto 16px",
         }}

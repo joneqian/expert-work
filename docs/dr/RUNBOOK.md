@@ -1,6 +1,6 @@
 # Postgres Restore Runbook (M0)
 
-Operator-facing procedure for restoring Helix-Agent's Postgres from a
+Operator-facing procedure for restoring Expert Work's Postgres from a
 ``PostgresFullBackup`` artifact. Implements the recovery side of
 [subsystems/22 § 4.2](../architecture/subsystems/22-disaster-recovery.md#42-恢复执行命令行--runbook).
 
@@ -32,7 +32,7 @@ prefer rolling back the migration over restoring from backup.
 2. **Verify the artifact exists** in object storage. For MinIO local dev:
 
    ```bash
-   mc ls local/helix-agent-dev/backups/postgres/ | head
+   mc ls local/expert-work-dev/backups/postgres/ | head
    ```
 
    For Aliyun OSS prod, use the console or ``ossutil``.
@@ -40,7 +40,7 @@ prefer rolling back the migration over restoring from backup.
 3. **Verify SHA-256** matches the ``backup_record`` row before trusting the artifact:
 
    ```bash
-   mc cp local/helix-agent-dev/<asset_ref> /tmp/restore.dump
+   mc cp local/expert-work-dev/<asset_ref> /tmp/restore.dump
    sha256sum /tmp/restore.dump
    # compare against backup_record.sha256
    ```
@@ -63,27 +63,27 @@ docker compose stop      # if everything is in compose
 # OR: revoke connect permissions on the target DB.
 
 # 2. Recreate the target database empty.
-docker exec -it helix-postgres psql -U helix_agent -d postgres \
-    -c "DROP DATABASE IF EXISTS helix_agent_dev;"
-docker exec -it helix-postgres psql -U helix_agent -d postgres \
-    -c "CREATE DATABASE helix_agent_dev OWNER helix_agent;"
+docker exec -it expert-work-postgres psql -U expert_work -d postgres \
+    -c "DROP DATABASE IF EXISTS expert_work_dev;"
+docker exec -it expert-work-postgres psql -U expert_work -d postgres \
+    -c "CREATE DATABASE expert_work_dev OWNER expert_work;"
 
 # 3. Re-run the bootstrap init script (creates extensions + sets timeouts).
-docker exec -it helix-postgres psql -U helix_agent -d helix_agent_dev \
-    -f /docker-entrypoint-initdb.d/00-helix-init.sql
+docker exec -it expert-work-postgres psql -U expert_work -d expert_work_dev \
+    -f /docker-entrypoint-initdb.d/00-expert-work-init.sql
 
 # 4. Restore the dump. -Fc is the format pg_dump used; pg_restore reads it
 #    streaming, no need to load the file into Postgres memory.
-docker cp /tmp/restore.dump helix-postgres:/tmp/restore.dump
-docker exec -it helix-postgres pg_restore \
-    -U helix_agent \
-    -d helix_agent_dev \
+docker cp /tmp/restore.dump expert-work-postgres:/tmp/restore.dump
+docker exec -it expert-work-postgres pg_restore \
+    -U expert_work \
+    -d expert_work_dev \
     --no-owner --no-privileges \
     --exit-on-error \
     /tmp/restore.dump
 
 # 5. Smoke check (subsystems/22 § 5.3 verification list — minimal subset):
-docker exec -it helix-postgres psql -U helix_agent -d helix_agent_dev -c "
+docker exec -it expert-work-postgres psql -U expert_work -d expert_work_dev -c "
     SELECT
       (SELECT count(*) FROM event_log)   AS events,
       (SELECT count(*) FROM thread_meta) AS threads,
@@ -98,7 +98,7 @@ against the Aliyun RDS endpoint. The flow is identical:
 
 1. Block writes (revoke ``CONNECT`` or stop app workers).
 2. Recreate the DB empty.
-3. Re-apply ``00-helix-init.sql`` (extensions + timeouts — RDS doesn't run init scripts).
+3. Re-apply ``00-expert-work-init.sql`` (extensions + timeouts — RDS doesn't run init scripts).
 4. ``pg_restore --no-owner --no-privileges --exit-on-error``.
 5. Smoke check + reconcile ``backup_record`` (insert a row noting the restore source).
 
@@ -132,7 +132,7 @@ INSERT INTO audit_log (
     '<backup_record.asset_ref>',
     'success',
     jsonb_build_object(
-        'restore_target', 'helix_agent_dev',
+        'restore_target', 'expert_work_dev',
         'source_asset_ref', '<asset_ref>',
         'source_sha256', '<sha>',
         'duration_s', <seconds>

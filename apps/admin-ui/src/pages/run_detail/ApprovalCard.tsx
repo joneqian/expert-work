@@ -132,7 +132,7 @@ export function ApprovalCard({ threadId, runId, approval, onResolved }: Approval
         </Space>
       }
     >
-      <p style={{ margin: "0 0 8px", color: "var(--hx-text-secondary)" }}>
+      <p style={{ margin: "0 0 8px", color: "var(--ew-text-secondary)" }}>
         {approval.action_summary}
       </p>
 
@@ -152,7 +152,7 @@ export function ApprovalCard({ threadId, runId, approval, onResolved }: Approval
       <Space
         size={16}
         wrap
-        style={{ marginBottom: 12, fontSize: 12, color: "var(--hx-text-tertiary)" }}
+        style={{ marginBottom: 12, fontSize: 12, color: "var(--ew-text-tertiary)" }}
       >
         <span>
           {t("approval_card.reason_kind")}:{" "}
@@ -225,7 +225,7 @@ export function ApprovalCard({ threadId, runId, approval, onResolved }: Approval
         options={{
           readOnly: !editing,
           minimap: { enabled: false },
-          fontFamily: "var(--hx-font-mono)",
+          fontFamily: "var(--ew-font-mono)",
           fontSize: 12,
           tabSize: 2,
           scrollBeyondLastLine: false,

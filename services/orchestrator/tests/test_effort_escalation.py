@@ -17,9 +17,9 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
-from helix_agent.protocol import ModelSpec, Plan
-from helix_agent.runtime.checkpointer import make_checkpointer
-from helix_agent.runtime.middleware import LoopDetectionMiddleware, MiddlewareChain
+from expert_work.protocol import ModelSpec, Plan
+from expert_work.runtime.checkpointer import make_checkpointer
+from expert_work.runtime.middleware import LoopDetectionMiddleware, MiddlewareChain
 from orchestrator import AgentState, GraphRunner, ToolRegistry, build_react_graph
 from orchestrator.agent_factory import _escalated_model
 from orchestrator.tools.error_classifier import ClassifiedToolError

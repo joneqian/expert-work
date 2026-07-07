@@ -24,7 +24,7 @@ from testcontainers.postgres import PostgresContainer
 
 from control_plane.mcp_oauth_refresh_lock import PgMcpOAuthRefreshLock
 from control_plane.workspace_lock import PgWorkspaceLock
-from helix_agent.persistence.database import (
+from expert_work.persistence.database import (
     DatabaseConfig,
     create_async_engine_from_config,
     create_async_session_factory,

@@ -21,9 +21,9 @@ from control_plane.agent_disable_status import AgentDisableService
 from control_plane.audit import build_default_audit_logger
 from control_plane.run_queue_worker import RunQueueWorker
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.persistence import InMemoryAgentDisableStore, InMemoryTenantConfigStore
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.runtime.runs import InMemoryRunStore, RunManager, RunStatus
+from expert_work.persistence import InMemoryAgentDisableStore, InMemoryTenantConfigStore
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.runtime.runs import InMemoryRunStore, RunManager, RunStatus
 
 
 class _FakeThreads:

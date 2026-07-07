@@ -12,12 +12,12 @@ import logging
 
 from event_log_archive_job.job import EventLogArchiveJob
 from event_log_archive_job.settings import EventLogArchiveSettings
-from helix_agent.persistence import (
+from expert_work.persistence import (
     DatabaseConfig,
     create_async_engine_from_config,
     create_async_session_factory,
 )
-from helix_agent.runtime.storage.factory import S3CompatibleConfig, make_object_store
+from expert_work.runtime.storage.factory import S3CompatibleConfig, make_object_store
 
 logger = logging.getLogger(__name__)
 

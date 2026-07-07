@@ -1,6 +1,6 @@
-# Helix credential-proxy image — Stream F.10.
+# Expert Work credential-proxy image — Stream F.10.
 #
-# Multi-stage uv build. This is the pilot that establishes the "helix
+# Multi-stage uv build. This is the pilot that establishes the "expert_work
 # service containerization" pattern (Mini-ADR F-15); the other three
 # services reuse it under ITERATION-PLAN I.1.
 #
@@ -10,7 +10,7 @@
 # Runtime: carries only that ``.venv`` on a slim glibc Python base.
 #
 # Build from the repo root:
-#   docker build -f services/credential-proxy/Dockerfile -t helix-credential-proxy .
+#   docker build -f services/credential-proxy/Dockerfile -t expert-work-credential-proxy .
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
@@ -21,7 +21,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages/ packages/
 COPY services/ services/
-RUN uv sync --frozen --no-dev --no-editable --package helix-agent-credential-proxy
+RUN uv sync --frozen --no-dev --no-editable --package expert-work-credential-proxy
 
 
 FROM python:3.12-slim-bookworm
@@ -32,11 +32,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Non-root service account — parity with the sandbox image hardening.
-# (``proxy`` is a pre-existing Debian system user, hence ``helix``.)
-RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin helix
+# (``proxy`` is a pre-existing Debian system user, hence ``expert_work``.)
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin expert_work
 
-COPY --from=builder --chown=helix:helix /app/.venv /app/.venv
+COPY --from=builder --chown=expert_work:expert_work /app/.venv /app/.venv
 
-USER helix
+USER expert_work
 EXPOSE 8080
 ENTRYPOINT ["python", "-m", "credential_proxy.main"]

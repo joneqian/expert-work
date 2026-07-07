@@ -1,7 +1,7 @@
 [project]
-name = "helix-agent-billing-rollup-job"
+name = "expert-work-billing-rollup-job"
 version = "0.0.0"
-description = "Helix-Agent cost rollup → tenant_billing_ledger derivation job (Stream Y.4)."
+description = "Expert Work cost rollup → tenant_billing_ledger derivation job (Stream Y.4)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -9,9 +9,9 @@ authors = [
     { name = "joneqian", email = "qian.qing0926@gmail.com" },
 ]
 dependencies = [
-    "helix-agent-common",
-    "helix-agent-persistence",
-    "helix-agent-protocol",
+    "expert-work-common",
+    "expert-work-persistence",
+    "expert-work-protocol",
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.5,<3",
     "sqlalchemy[asyncio]>=2.0.30,<3",

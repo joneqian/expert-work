@@ -16,7 +16,7 @@ class RetentionCleanupSettings(BaseSettings):
     """Resolved runtime settings."""
 
     model_config = SettingsConfigDict(
-        env_prefix="HELIX_RETENTION_",
+        env_prefix="EXPERT_WORK_RETENTION_",
         case_sensitive=False,
         extra="ignore",
     )
@@ -25,7 +25,7 @@ class RetentionCleanupSettings(BaseSettings):
     log_level: str = "INFO"
 
     # ------------------------------------------------------------------ db
-    db_dsn: str = "postgresql+asyncpg://helix_agent:helix_agent_dev@localhost:5432/helix_agent_dev"
+    db_dsn: str = "postgresql+asyncpg://expert_work:expert_work_dev@localhost:5432/expert_work_dev"
     db_echo: bool = False
 
     # ------------------------------------------------------------------ tuning
@@ -58,6 +58,6 @@ class RetentionCleanupSettings(BaseSettings):
     object_store_backend: Literal["memory", "s3-compatible"] = "memory"
     object_store_endpoint_url: str | None = None
     object_store_region: str = "us-east-1"
-    object_store_bucket: str = "helix-agent"
+    object_store_bucket: str = "expert-work"
     object_store_access_key: str | None = None
     object_store_secret_key: str | None = None

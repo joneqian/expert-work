@@ -24,14 +24,14 @@ from control_plane.api import runs as runs_module
 from control_plane.api.runs import _workspace_drift, apply_approval_decision
 from control_plane.audit import build_default_audit_logger
 from control_plane.tenant_status import TenantStatusService
-from helix_agent.persistence import (
+from expert_work.persistence import (
     InMemoryAgentDisableStore,
     InMemoryApprovalStore,
     InMemoryUserWorkspaceStore,
 )
-from helix_agent.persistence.audit_log import InMemoryAuditLogStore
-from helix_agent.persistence.workspace import workspace_volume_name
-from helix_agent.protocol import (
+from expert_work.persistence.audit_log import InMemoryAuditLogStore
+from expert_work.persistence.workspace import workspace_volume_name
+from expert_work.protocol import (
     ApprovalRecord,
     ApprovalStatus,
     AuditAction,

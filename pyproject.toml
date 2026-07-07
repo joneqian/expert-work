@@ -1,7 +1,7 @@
 [project]
-name = "helix-agent"
+name = "expert-work"
 version = "0.0.0"
-description = "Helix-Agent — multi-tenant enterprise Agent execution engine (workspace root)"
+description = "Expert Work — multi-tenant enterprise Agent execution engine (workspace root)"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "AGPL-3.0-only"
@@ -9,18 +9,18 @@ authors = [
     { name = "joneqian", email = "qian.qing0926@gmail.com" },
 ]
 dependencies = [
-    "helix-agent-common",
-    "helix-agent-persistence",
-    "helix-agent-protocol",
-    "helix-agent-runtime",
-    "helix-agent-audit-backup-worker",
-    "helix-agent-billing-rollup-job",
-    "helix-agent-control-plane",
-    "helix-agent-credential-proxy",
-    "helix-agent-event-log-archive-job",
-    "helix-agent-orchestrator",
-    "helix-agent-retention-cleanup-job",
-    "helix-agent-sandbox-supervisor",
+    "expert-work-common",
+    "expert-work-persistence",
+    "expert-work-protocol",
+    "expert-work-runtime",
+    "expert-work-audit-backup-worker",
+    "expert-work-billing-rollup-job",
+    "expert-work-control-plane",
+    "expert-work-credential-proxy",
+    "expert-work-event-log-archive-job",
+    "expert-work-orchestrator",
+    "expert-work-retention-cleanup-job",
+    "expert-work-sandbox-supervisor",
 ]
 
 [tool.uv]
@@ -48,10 +48,10 @@ dev = [
 
 [tool.uv.workspace]
 members = [
-    "packages/helix-common",
-    "packages/helix-persistence",
-    "packages/helix-protocol",
-    "packages/helix-runtime",
+    "packages/expert-work-common",
+    "packages/expert-work-persistence",
+    "packages/expert-work-protocol",
+    "packages/expert-work-runtime",
     "services/audit-backup-worker",
     "services/billing-rollup-job",
     "services/control-plane",
@@ -63,18 +63,18 @@ members = [
 ]
 
 [tool.uv.sources]
-helix-agent-common = { workspace = true }
-helix-agent-persistence = { workspace = true }
-helix-agent-protocol = { workspace = true }
-helix-agent-runtime = { workspace = true }
-helix-agent-audit-backup-worker = { workspace = true }
-helix-agent-billing-rollup-job = { workspace = true }
-helix-agent-control-plane = { workspace = true }
-helix-agent-credential-proxy = { workspace = true }
-helix-agent-event-log-archive-job = { workspace = true }
-helix-agent-orchestrator = { workspace = true }
-helix-agent-retention-cleanup-job = { workspace = true }
-helix-agent-sandbox-supervisor = { workspace = true }
+expert-work-common = { workspace = true }
+expert-work-persistence = { workspace = true }
+expert-work-protocol = { workspace = true }
+expert-work-runtime = { workspace = true }
+expert-work-audit-backup-worker = { workspace = true }
+expert-work-billing-rollup-job = { workspace = true }
+expert-work-control-plane = { workspace = true }
+expert-work-credential-proxy = { workspace = true }
+expert-work-event-log-archive-job = { workspace = true }
+expert-work-orchestrator = { workspace = true }
+expert-work-retention-cleanup-job = { workspace = true }
+expert-work-sandbox-supervisor = { workspace = true }
 
 [tool.ruff]
 line-length = 100
@@ -104,7 +104,7 @@ ignore = []
 "**/conftest.py" = ["S101"]
 # Audit action enum values legitimately contain words like "secret"/"token";
 # they are public identifiers, not actual credentials.
-"packages/helix-protocol/src/helix_agent/protocol/audit.py" = ["S105"]
+"packages/expert-work-protocol/src/expert_work/protocol/audit.py" = ["S105"]
 # BaseHTTPRequestHandler's dispatch methods (do_GET / do_POST) are a stdlib
 # API contract — the uppercase names are required, not a style choice.
 "infra/mock-upstream/echo_server.py" = ["N802"]
@@ -140,7 +140,7 @@ disallow_incomplete_defs = true
 check_untyped_defs = true
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/helix-common/src:$MYPY_CONFIG_FILE_DIR/packages/helix-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/helix-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/helix-runtime/src:$MYPY_CONFIG_FILE_DIR/services/audit-backup-worker/src:$MYPY_CONFIG_FILE_DIR/services/billing-rollup-job/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src:$MYPY_CONFIG_FILE_DIR/services/credential-proxy/src:$MYPY_CONFIG_FILE_DIR/services/orchestrator/src:$MYPY_CONFIG_FILE_DIR/services/retention-cleanup-job/src:$MYPY_CONFIG_FILE_DIR/services/sandbox-supervisor/src"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/packages/expert-work-common/src:$MYPY_CONFIG_FILE_DIR/packages/expert-work-persistence/src:$MYPY_CONFIG_FILE_DIR/packages/expert-work-protocol/src:$MYPY_CONFIG_FILE_DIR/packages/expert-work-runtime/src:$MYPY_CONFIG_FILE_DIR/services/audit-backup-worker/src:$MYPY_CONFIG_FILE_DIR/services/billing-rollup-job/src:$MYPY_CONFIG_FILE_DIR/services/control-plane/src:$MYPY_CONFIG_FILE_DIR/services/credential-proxy/src:$MYPY_CONFIG_FILE_DIR/services/orchestrator/src:$MYPY_CONFIG_FILE_DIR/services/retention-cleanup-job/src:$MYPY_CONFIG_FILE_DIR/services/sandbox-supervisor/src"
 
 [[tool.mypy.overrides]]
 module = "testcontainers.*"
