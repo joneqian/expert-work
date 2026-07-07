@@ -39,6 +39,10 @@ from control_plane.api._skill_moderation import (
 )
 from control_plane.api._skill_runtime import classify_skill_runtime
 from control_plane.api._skill_zip import (
+    ALLOWED_EXTENSIONS,
+    MAX_ENTRIES,
+    MAX_FILE_BYTES,
+    MAX_TOTAL_BYTES,
     SkillPackageError,
     SkillZipError,
     build_skill_zip,
@@ -232,13 +236,15 @@ _SKILL_REJECT_HINT: dict[str, str] = {
     "invalid_chars": "a file name has illegal characters/length (only a-z A-Z 0-9 . _ -)",
     "depth_exceeded": "folder nesting is deeper than 6 levels",
     "extension_not_allowed": (
-        "package has a disallowed file type (allowed: .md .txt .yaml .yml .json "
-        ".py .js .ts .sh .toml .html .css .xsd .xml .csv .tsv .ini .cfg .rst "
-        ".png .jpg .svg)"
+        # Derived from the live allowlist so the hint can never drift from
+        # what the validator actually enforces.
+        f"package has a disallowed file type (allowed: {' '.join(sorted(ALLOWED_EXTENSIONS))})"
     ),
-    "file_too_large": "a single file exceeds the 1 MiB limit",
-    "total_too_large": "the package exceeds the 5 MiB total limit",
-    "too_many_entries": "the package has more than 256 files",
+    "file_too_large": f"a single file exceeds the {MAX_FILE_BYTES // (1024 * 1024)} MiB limit",
+    "total_too_large": (
+        f"the package exceeds the {MAX_TOTAL_BYTES // (1024 * 1024)} MiB total limit"
+    ),
+    "too_many_entries": f"the package has more than {MAX_ENTRIES} files",
     "prompt_injection": "skill content tripped the prompt-injection scanner",
     "legacy_format": "legacy skill layout is not supported",
     "bad_zip": "the downloaded content is not a valid zip",
@@ -288,12 +294,18 @@ async def _ingest_platform_skill_payload(
             },
         )
         if reason is not None:
+            message = _SKILL_REJECT_HINT.get(reason, "invalid skill package")
+            # Extensions (never paths) are safe to surface — name exactly what
+            # got blocked so the operator can fix the package in one round.
+            blocked = getattr(exc, "blocked_extensions", ())
+            if blocked:
+                message += f" — blocked: {' '.join(blocked)}"
             raise HTTPException(
                 status_code=400,
                 detail={
                     "code": "SKILL_PACKAGE_INVALID",
                     "reason": reason,
-                    "message": _SKILL_REJECT_HINT.get(reason, "invalid skill package"),
+                    "message": message,
                 },
             ) from exc
         raise HTTPException(status_code=400, detail="invalid skill package") from exc

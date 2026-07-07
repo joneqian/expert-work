@@ -218,7 +218,9 @@ class SkillVersionRow(Base):
             "authored_by IN ('human', 'agent')", name="skill_version_authored_by_check"
         ),
         CheckConstraint(
-            "octet_length(supporting_files::text) <= 5242880",
+            # 12 MiB — must hold a base64-encoded MAX_TOTAL_BYTES (8 MiB) zip
+            # payload (~4/3 inflation + JSON envelope). Migration 0120.
+            "octet_length(supporting_files::text) <= 12582912",
             name="skill_version_supporting_files_size_ck",
         ),
         CheckConstraint(

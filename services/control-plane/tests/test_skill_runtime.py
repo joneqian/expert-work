@@ -34,16 +34,18 @@ def test_python_scripts_runnable() -> None:
     assert rt.runnable is True
 
 
-def test_node_files_not_runnable() -> None:
+def test_node_files_runnable() -> None:
+    # The sandbox image bakes Node.js + npm (smoke-tested), so bundled Node
+    # scripts run via the bash tool.
     rt = classify_skill_runtime(_payload(files=["package.json", "index.js"]))
     assert rt.kind == "node"
-    assert rt.runnable is False
+    assert rt.runnable is True
 
 
-def test_node_body_marker_not_runnable() -> None:
+def test_node_body_marker_runnable() -> None:
     rt = classify_skill_runtime(_payload(body="Run `npx skills add ...` then continue."))
     assert rt.kind == "node"
-    assert rt.runnable is False
+    assert rt.runnable is True
 
 
 def test_python_wins_over_node_mention_in_body() -> None:
