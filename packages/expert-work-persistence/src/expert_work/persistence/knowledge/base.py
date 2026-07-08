@@ -183,6 +183,14 @@ class KnowledgeStore(abc.ABC):
         """Fetch a document by id, or ``None``."""
 
     @abc.abstractmethod
+    async def get_documents(
+        self, *, tenant_id: UUID, document_ids: Sequence[UUID]
+    ) -> dict[UUID, KnowledgeDocument]:
+        """Batch :meth:`get_document` — one round trip for many ids, keyed by
+        id (missing / cross-tenant ids absent). Replaces a per-id ``get_document``
+        loop (e.g. retrieval attribution — an N+1 over the result's documents)."""
+
+    @abc.abstractmethod
     async def get_document_content(self, *, tenant_id: UUID, document_id: UUID) -> bytes | None:
         """The document's retained original bytes, or ``None`` (legacy rows /
         unknown id)."""
