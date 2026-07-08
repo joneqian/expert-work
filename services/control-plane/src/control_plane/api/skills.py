@@ -1010,12 +1010,15 @@ def build_skills_router() -> APIRouter:
                     p_rows, _ = await store.list_platform_skills(
                         status=SkillStatus.ACTIVE, limit=200
                     )
+                # Name-shadowing (R2): a tenant skill of the same name hides the
+                # platform one. One batch lookup in tenant scope (outside the
+                # bypass block above) — the platform library can be large, so a
+                # per-row ``get_skill_by_name`` would be an N+1.
+                shadowed = await store.shadowed_skill_names(
+                    tenant_id=scope.tenant_id, names=[p.name for p in p_rows]
+                )
                 for p in p_rows:
-                    # Name-shadowing (R2): a tenant skill of the same name
-                    # hides the platform one. Check in tenant scope, outside
-                    # the bypass block above.
-                    shadow = await store.get_skill_by_name(tenant_id=scope.tenant_id, name=p.name)
-                    if shadow is not None:
+                    if p.name in shadowed:
                         continue
                     entry = _skill_dict(p)
                     entry["source"] = "platform"

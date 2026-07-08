@@ -59,6 +59,49 @@ async def test_get_skill_cross_tenant_returns_none() -> None:
 
 
 # ---------------------------------------------------------------------------
+# shadowed_skill_names — batch name-shadow lookup. Replaces a per-skill
+# get_skill_by_name loop in the merged-view endpoint (avoids an N+1 over the
+# platform library).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_shadowed_skill_names_returns_owned_subset() -> None:
+    store = InMemorySkillStore()
+    tenant = _t()
+    await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="foo")
+    await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="bar")
+    got = await store.shadowed_skill_names(tenant_id=tenant, names=["foo", "baz", "bar"])
+    assert got == {"foo", "bar"}
+
+
+@pytest.mark.asyncio
+async def test_shadowed_skill_names_is_tenant_scoped() -> None:
+    store = InMemorySkillStore()
+    mine, other = _t(), _t()
+    await store.create_skill(skill_id=uuid4(), tenant_id=other, name="foo")
+    # ``foo`` belongs to another tenant — not shadowed for ``mine``.
+    assert await store.shadowed_skill_names(tenant_id=mine, names=["foo"]) == set()
+
+
+@pytest.mark.asyncio
+async def test_shadowed_skill_names_empty_input_returns_empty() -> None:
+    store = InMemorySkillStore()
+    assert await store.shadowed_skill_names(tenant_id=_t(), names=[]) == set()
+
+
+@pytest.mark.asyncio
+async def test_shadowed_skill_names_counts_any_status() -> None:
+    """A tenant name shadows regardless of status (a DRAFT shadows too) —
+    matches ``get_skill_by_name``, which does not filter on status."""
+    store = InMemorySkillStore()
+    tenant = _t()
+    # A freshly created skill is DRAFT.
+    await store.create_skill(skill_id=uuid4(), tenant_id=tenant, name="foo")
+    assert await store.shadowed_skill_names(tenant_id=tenant, names=["foo"]) == {"foo"}
+
+
+# ---------------------------------------------------------------------------
 # add_version + resolve
 # ---------------------------------------------------------------------------
 
