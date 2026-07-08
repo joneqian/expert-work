@@ -715,3 +715,25 @@ async def test_list_chunks_is_tenant_scoped() -> None:
     )
     page, total = await store.list_chunks(tenant_id=other, document_id=doc)
     assert (page, total) == ([], 0)
+
+
+@pytest.mark.asyncio
+async def test_get_documents_batches_and_scopes() -> None:
+    store = InMemoryKnowledgeStore()
+    tenant, other = uuid4(), uuid4()
+    base = await store.create_base(tenant_id=tenant, name="kb")
+    d1 = await store.upsert_document(tenant_id=tenant, kb_id=base.id, filename="a.pdf")
+    d2 = await store.upsert_document(tenant_id=tenant, kb_id=base.id, filename="b.pdf")
+    other_base = await store.create_base(tenant_id=other, name="kb")
+    d3 = await store.upsert_document(tenant_id=other, kb_id=other_base.id, filename="c.pdf")
+    missing = uuid4()
+    got = await store.get_documents(tenant_id=tenant, document_ids=[d1.id, d2.id, d3.id, missing])
+    # d3 (other tenant) + the missing id are absent; never reveals cross-tenant.
+    assert set(got) == {d1.id, d2.id}
+    assert got[d1.id].filename == "a.pdf"
+
+
+@pytest.mark.asyncio
+async def test_get_documents_empty_input_returns_empty() -> None:
+    store = InMemoryKnowledgeStore()
+    assert await store.get_documents(tenant_id=uuid4(), document_ids=[]) == {}

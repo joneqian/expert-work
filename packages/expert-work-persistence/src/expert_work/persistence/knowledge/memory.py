@@ -239,6 +239,12 @@ class InMemoryKnowledgeStore(KnowledgeStore):
             None,
         )
 
+    async def get_documents(
+        self, *, tenant_id: UUID, document_ids: Sequence[UUID]
+    ) -> dict[UUID, KnowledgeDocument]:
+        wanted = set(document_ids)
+        return {d.id: d for d in self._documents if d.tenant_id == tenant_id and d.id in wanted}
+
     async def get_document_content(self, *, tenant_id: UUID, document_id: UUID) -> bytes | None:
         doc = await self.get_document(tenant_id=tenant_id, document_id=document_id)
         return self._content.get(document_id) if doc is not None else None

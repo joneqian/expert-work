@@ -386,6 +386,20 @@ class SqlKnowledgeStore(KnowledgeStore):
             row = (await session.execute(stmt)).scalar_one_or_none()
         return _to_document(row) if row is not None else None
 
+    async def get_documents(
+        self, *, tenant_id: UUID, document_ids: Sequence[UUID]
+    ) -> dict[UUID, KnowledgeDocument]:
+        ids = list(dict.fromkeys(document_ids))
+        if not ids:
+            return {}
+        stmt = select(KnowledgeDocumentRow).where(
+            KnowledgeDocumentRow.tenant_id == tenant_id,
+            KnowledgeDocumentRow.id.in_(ids),
+        )
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return {row.id: _to_document(row) for row in rows}
+
     async def get_document_content(self, *, tenant_id: UUID, document_id: UUID) -> bytes | None:
         stmt = select(KnowledgeDocumentRow.content).where(
             KnowledgeDocumentRow.tenant_id == tenant_id,

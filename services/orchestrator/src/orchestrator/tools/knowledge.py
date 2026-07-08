@@ -217,12 +217,11 @@ class KnowledgeRetriever:
     async def _resolve_bases(
         self, tenant_id: UUID, base_names: Sequence[str]
     ) -> list[KnowledgeBase]:
-        bases: list[KnowledgeBase] = []
-        for name in base_names:
-            base = await self.store.get_base(tenant_id=tenant_id, name=name)
-            if base is not None:
-                bases.append(base)
-        return bases
+        # One list_bases read + in-memory match instead of a get_base per name
+        # (an N+1 over the manifest's knowledge_base_refs). Order + skip-missing
+        # semantics preserved. Bases per tenant are few, so the full read is cheap.
+        by_name = {b.name: b for b in await self.store.list_bases(tenant_id=tenant_id)}
+        return [by_name[name] for name in base_names if name in by_name]
 
     async def _rerank(
         self,
@@ -251,10 +250,13 @@ class KnowledgeRetriever:
         vector_score: Mapping[UUID, float],
         sources: Mapping[UUID, set[str]],
     ) -> list[RetrievedChunk]:
-        filenames: dict[UUID, str] = {}
-        for document_id in {chunk.document_id for chunk in chunks}:
-            document = await self.store.get_document(tenant_id=tenant_id, document_id=document_id)
-            filenames[document_id] = document.filename if document else "(unknown)"
+        # One batched lookup for every source document instead of a per-document
+        # get_document (an N+1 over the result set — up to _MAX_LIMIT docs).
+        doc_ids = {chunk.document_id for chunk in chunks}
+        docs = await self.store.get_documents(tenant_id=tenant_id, document_ids=list(doc_ids))
+        filenames: dict[UUID, str] = {
+            doc_id: (docs[doc_id].filename if doc_id in docs else "(unknown)") for doc_id in doc_ids
+        }
         return [
             RetrievedChunk(
                 content=chunk.content,
