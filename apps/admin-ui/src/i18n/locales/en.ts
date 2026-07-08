@@ -66,6 +66,7 @@ export interface TranslationKeys {
     chargeback: string;
     rate_card: string;
     observability: string;
+    keycloak: string;
     quality: string;
   };
   quality_page: {
@@ -113,6 +114,16 @@ export interface TranslationKeys {
     grafana_desc: string;
     tempo_name: string;
     tempo_desc: string;
+  };
+  keycloak_page: {
+    page_title: string;
+    subtitle: string;
+    not_admin_title: string;
+    not_admin_body: string;
+    console_name: string;
+    console_desc: string;
+    open: string;
+    unconfigured: string;
   };
   login: {
     title: string;
@@ -2310,6 +2321,7 @@ const en: TranslationKeys = {
     chargeback: "Chargeback",
     rate_card: "Model Pricing",
     observability: "Observability",
+    keycloak: "Keycloak",
     quality: "Quality",
   },
   quality_page: {
@@ -2360,6 +2372,18 @@ const en: TranslationKeys = {
     grafana_desc: "Metrics + logs dashboards (SLO, throughput, errors).",
     tempo_name: "Tempo",
     tempo_desc: "Distributed traces — cross-service infra spans.",
+  },
+  keycloak_page: {
+    page_title: "Keycloak",
+    subtitle: "Platform-operator entry to the self-hosted Keycloak admin console (IAM).",
+    not_admin_title: "Platform operators only",
+    not_admin_body:
+      "Keycloak manages every tenant's users with no per-tenant isolation, so only system admins can open it.",
+    console_name: "Keycloak admin console",
+    console_desc:
+      "Manage realm users; reset a member / first-admin password (realm expert-work → Users → Credentials).",
+    open: "Open",
+    unconfigured: "Not configured ({{env}})",
   },
   login: {
     title: "Expert Work Admin",

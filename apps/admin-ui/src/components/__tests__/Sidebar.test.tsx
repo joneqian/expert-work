@@ -74,6 +74,7 @@ describe("Sidebar — scope-driven groups", () => {
     expect(screen.getByText("Tenants")).toBeInTheDocument();
     expect(screen.getByText("Model Pricing")).toBeInTheDocument();
     expect(screen.getByText("Members (all tenants)")).toBeInTheDocument();
+    expect(screen.getByText("Keycloak")).toBeInTheDocument();
     // No workspace item leaks in.
     expect(screen.queryByText("Agents")).toBeNull();
   });

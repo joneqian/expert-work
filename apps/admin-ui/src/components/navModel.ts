@@ -223,6 +223,14 @@ export const PLATFORM_ITEMS: readonly NavEntry[] = [
     path: "/settings/observability",
     group: "platform",
   },
+  // Keycloak console — platform-ops entry to the self-hosted IAM admin console
+  // (system_admin only; Keycloak manages every tenant's users, no isolation).
+  {
+    key: "settings-keycloak",
+    labelKey: "nav.keycloak",
+    path: "/settings/keycloak",
+    group: "platform",
+  },
   // Read-only cross-tenant overview — reuses the members page under the
   // ``"*"`` scope (already renders read-only there). §2-C / §8 point 2.
   {

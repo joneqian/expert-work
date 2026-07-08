@@ -37,6 +37,7 @@ import { SettingsRateCard } from "./pages/SettingsRateCard";
 import { SettingsUsage } from "./pages/SettingsUsage";
 import { SettingsBillingChargeback } from "./pages/SettingsBillingChargeback";
 import { SettingsObservability } from "./pages/SettingsObservability";
+import { SettingsKeycloak } from "./pages/SettingsKeycloak";
 import { SettingsQuality } from "./pages/SettingsQuality";
 import { SkillDetail } from "./pages/SkillDetail";
 import { UserDetail } from "./pages/UserDetail";
@@ -138,6 +139,7 @@ export function AppRouter() {
       />
       <Route path="/settings/rate-card" element={<SettingsRateCard />} />
       <Route path="/settings/observability" element={<SettingsObservability />} />
+      <Route path="/settings/keycloak" element={<SettingsKeycloak />} />
       <Route path="/settings/quality" element={<SettingsQuality />} />
       <Route path="/settings/*" element={<ComingSoon title="Settings" />} />
       <Route path="*" element={<ComingSoon title="404" />} />
