@@ -83,7 +83,7 @@ async def test_transition_invited_to_active_backfills() -> None:
     store = InMemoryTenantMemberStore()
     tenant = uuid4()
     m = await _invite(store, tenant=tenant)
-    await store.set_keycloak_user_id(member_id=m.id, keycloak_user_id="kc-1")
+    await store.set_keycloak_user_id(member_id=m.id, tenant_id=tenant, keycloak_user_id="kc-1")
     user_id = uuid4()
     now = datetime.now(UTC)
     assert await store.transition(
@@ -114,7 +114,7 @@ async def test_transition_idempotent_second_call_false() -> None:
     store = InMemoryTenantMemberStore()
     tenant = uuid4()
     m = await _invite(store, tenant=tenant)
-    await store.set_keycloak_user_id(member_id=m.id, keycloak_user_id="kc-1")
+    await store.set_keycloak_user_id(member_id=m.id, tenant_id=tenant, keycloak_user_id="kc-1")
     now = datetime.now(UTC)
     assert await store.transition(
         member_id=m.id, tenant_id=tenant, to="active", now=now, subject_id=uuid4()
@@ -130,7 +130,7 @@ async def test_active_then_suspended() -> None:
     store = InMemoryTenantMemberStore()
     tenant = uuid4()
     m = await _invite(store, tenant=tenant)
-    await store.set_keycloak_user_id(member_id=m.id, keycloak_user_id="kc-1")
+    await store.set_keycloak_user_id(member_id=m.id, tenant_id=tenant, keycloak_user_id="kc-1")
     now = datetime.now(UTC)
     await store.transition(
         member_id=m.id, tenant_id=tenant, to="active", now=now, subject_id=uuid4()
@@ -145,10 +145,27 @@ async def test_get_by_keycloak_user_id_crosses_tenants() -> None:
     store = InMemoryTenantMemberStore()
     tenant = uuid4()
     m = await _invite(store, tenant=tenant)
-    await store.set_keycloak_user_id(member_id=m.id, keycloak_user_id="kc-xyz")
+    await store.set_keycloak_user_id(member_id=m.id, tenant_id=tenant, keycloak_user_id="kc-xyz")
     found = await store.get_by_keycloak_user_id(keycloak_user_id="kc-xyz")
     assert found is not None and found.id == m.id
     assert await store.get_by_keycloak_user_id(keycloak_user_id="nope") is None
+
+
+@pytest.mark.asyncio
+async def test_set_keycloak_user_id_is_tenant_scoped() -> None:
+    """A wrong ``tenant_id`` must not back-fill the member — RLS is bypassed at
+    runtime, so the tenant predicate is the only cross-tenant guard."""
+    store = InMemoryTenantMemberStore()
+    tenant, other = uuid4(), uuid4()
+    m = await _invite(store, tenant=tenant)
+    # Wrong tenant → no-op; the row stays un-backfilled.
+    await store.set_keycloak_user_id(member_id=m.id, tenant_id=other, keycloak_user_id="kc-wrong")
+    got = await store.get(tenant_id=tenant, member_id=m.id)
+    assert got is not None and got.keycloak_user_id is None
+    # Correct tenant → back-filled.
+    await store.set_keycloak_user_id(member_id=m.id, tenant_id=tenant, keycloak_user_id="kc-ok")
+    got = await store.get(tenant_id=tenant, member_id=m.id)
+    assert got is not None and got.keycloak_user_id == "kc-ok"
 
 
 @pytest.mark.asyncio
@@ -158,7 +175,7 @@ async def test_list_for_tenant_filters_and_scopes() -> None:
     a = await _invite(store, tenant=t1, email="a@co.com")
     await _invite(store, tenant=t1, email="b@co.com")
     await _invite(store, tenant=t2, email="c@co.com")
-    await store.set_keycloak_user_id(member_id=a.id, keycloak_user_id="kc-a")
+    await store.set_keycloak_user_id(member_id=a.id, tenant_id=t1, keycloak_user_id="kc-a")
     await store.transition(
         member_id=a.id, tenant_id=t1, to="active", now=datetime.now(UTC), subject_id=uuid4()
     )
