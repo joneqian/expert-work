@@ -27,7 +27,7 @@ def _sync_dsn(c: PostgresContainer) -> str:
 # Tables with a ``tenant_id`` column that currently carry no RLS policy.
 #
 # These are KNOWN PRE-EXISTING GAPS — tenant tables that shipped without an RLS
-# policy (migrations 0012–0087, predating this guard). They are tracked for
+# policy (migrations 0012-0087, predating this guard). They are tracked for
 # RLS-policy remediation as a dedicated task in the RLS-enforcement project;
 # each needs the same detect→verify→enforce care (e.g. ``user_workspace`` also
 # has a ``user_id`` axis). Allowlisted so the guard still catches *new* tables —
