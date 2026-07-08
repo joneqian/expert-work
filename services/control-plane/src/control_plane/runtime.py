@@ -43,6 +43,7 @@ from expert_work.protocol import (
     AgentSpec,
     ModelSpec,
     Provider,
+    SkillStatus,
     TenantPlan,
     parse_extends_ref,
     resolve_extends,
@@ -376,12 +377,24 @@ def make_skill_resolver(
         # platform library, draft / archived included → no fallback.
         tskill = await store.get_skill_by_name(tenant_id=tenant_id, name=name)
         if tskill is not None:
+            # Reuse the already-fetched ``tskill`` for the version lookup.
+            # ``resolve_by_name`` / ``resolve_pinned`` would each re-run
+            # ``get_skill_by_name`` internally — a redundant refetch per
+            # manifest skill (an N+1 across the manifest's ``skills:``).
             if version is not None:
-                pinned = await store.resolve_pinned(tenant_id=tenant_id, name=name, version=version)
+                pinned = await store.get_version_by_number(
+                    skill_id=tskill.id, tenant_id=tenant_id, version=version
+                )
                 if pinned is not None:
                     return _SkillLookupResult.ok(pinned, skill=tskill)
                 return _SkillLookupResult.version_not_found()
-            active = await store.resolve_by_name(tenant_id=tenant_id, name=name)
+            active = (
+                await store.get_version_by_number(
+                    skill_id=tskill.id, tenant_id=tenant_id, version=tskill.latest_version
+                )
+                if tskill.status == SkillStatus.ACTIVE and tskill.latest_version != 0
+                else None
+            )
             if active is not None:
                 return _SkillLookupResult.ok(active, skill=tskill)
             return _SkillLookupResult.not_active(skill=tskill)
@@ -401,12 +414,22 @@ def make_skill_resolver(
             # distinct build-time error so the loader can name the plan.
             if not tier_satisfies(plan, pskill.required_tier):
                 return _SkillLookupResult.not_entitled(required_tier=pskill.required_tier.value)
+            # Reuse ``pskill`` — the platform ``resolve_*`` helpers would each
+            # re-run ``get_platform_skill_by_name`` (same redundant refetch).
             if version is not None:
-                pinned = await store.resolve_platform_pinned(name=name, version=version)
+                pinned = await store.get_platform_version_by_number(
+                    skill_id=pskill.id, version=version
+                )
                 if pinned is not None:
                     return _SkillLookupResult.ok(pinned, skill=pskill)
                 return _SkillLookupResult.version_not_found()
-            active = await store.resolve_platform_by_name(name=name)
+            active = (
+                await store.get_platform_version_by_number(
+                    skill_id=pskill.id, version=pskill.latest_version
+                )
+                if pskill.status == SkillStatus.ACTIVE and pskill.latest_version != 0
+                else None
+            )
             if active is not None:
                 return _SkillLookupResult.ok(active, skill=pskill)
             return _SkillLookupResult.not_active(skill=pskill)

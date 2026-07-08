@@ -95,6 +95,35 @@ async def test_tenant_active_skill_resolves_ok() -> None:
     assert result.version.prompt_fragment == "tenant body"
 
 
+class _CountingSkillStore(InMemorySkillStore):
+    """Counts ``get_skill_by_name`` calls — to lock the no-redundant-refetch
+    property (``resolve_by_name`` used to re-run it, an N+1 over the manifest)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.get_by_name_calls = 0
+
+    async def get_skill_by_name(self, *, tenant_id: UUID, name: str):  # type: ignore[no-untyped-def]
+        self.get_by_name_calls += 1
+        return await super().get_skill_by_name(tenant_id=tenant_id, name=name)
+
+
+@pytest.mark.asyncio
+async def test_tenant_resolve_fetches_skill_row_once() -> None:
+    """The tenant-active path reads the skill row exactly once — reusing it for
+    the version lookup instead of the old resolve_by_name refetch."""
+    store = _CountingSkillStore()
+    tenant_id = uuid4()
+    await _seed_tenant_skill(store, tenant_id=tenant_id, name="foo", status=SkillStatus.ACTIVE)
+    store.get_by_name_calls = 0  # ignore the seeding call
+    resolve = make_skill_resolver(
+        store=store, tenant_config_service=_StubTenantConfigService(plan=TenantPlan.FREE)
+    )
+    result = await resolve(tenant_id, "foo", None)
+    assert result.version is not None
+    assert store.get_by_name_calls == 1  # was 2 (resolve_by_name refetched)
+
+
 @pytest.mark.asyncio
 async def test_tenant_draft_skill_shadows_platform_returns_not_active() -> None:
     """R2 — a tenant-owned name shadows the platform library even when the
