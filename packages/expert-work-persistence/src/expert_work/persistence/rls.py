@@ -131,7 +131,12 @@ def _rls_after_begin(
         # fail-closes (zero rows). Phase-1 Detect signal — surfaces every path
         # that is neither tenant-scoped nor explicit-bypass so it can be fixed
         # BEFORE enforcement lands. No behavior change here.
-        logger.warning("rls.would_fail_closed")
+        # stack_info=True attaches the call stack so each occurrence is
+        # attributable to its call site — every occurrence otherwise logs the
+        # byte-identical message, making the Phase-1 enumeration (Spec §6.3)
+        # impossible to attribute. Log-volume sampling for high-traffic
+        # fail-closed paths is a deferred follow-up, not needed for correctness.
+        logger.warning("rls.would_fail_closed", stack_info=True)
     if tenant_id is not None:
         _emit_set_config(connection, RLS_GUC_NAME, str(tenant_id))
     user_id = current_user_id_var.get()
