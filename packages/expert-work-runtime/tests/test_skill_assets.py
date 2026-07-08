@@ -15,6 +15,7 @@ from expert_work.runtime.skill_assets import (
     externalize_supporting_files,
     fetch_supporting_file,
     fetch_supporting_files,
+    fetch_supporting_files_settled,
 )
 
 
@@ -110,3 +111,22 @@ async def test_fetch_batch_mixed_shapes() -> None:
     files = {"small.md": _inline(b"# hi"), **external}
     raw = await fetch_supporting_files(files, object_store=store)
     assert raw == {"small.md": b"# hi", "big.bin": b"\x00" * 64}
+
+
+@pytest.mark.asyncio
+async def test_fetch_settled_isolates_per_file_failure() -> None:
+    """One entry's failure becomes that entry's value, not a whole-batch raise —
+    so a caller can drop-and-audit the bad file and keep the good ones."""
+    store = _FakeStore()
+    external = await externalize_supporting_files({"good.txt": _inline(b"ok")}, object_store=store)
+    good = external["good.txt"]
+    # An external entry whose object was never stored → get() KeyError →
+    # SkillAssetUnavailableError inside fetch_supporting_file.
+    missing = SkillSupportingFile(
+        content="", size=1, mime="text/plain", storage_key=f"{ASSET_KEY_PREFIX}dead", sha256="dead"
+    )
+    settled = await fetch_supporting_files_settled(
+        {"good.txt": good, "missing.txt": missing}, object_store=store
+    )
+    assert settled["good.txt"] == b"ok"
+    assert isinstance(settled["missing.txt"], SkillAssetUnavailableError)

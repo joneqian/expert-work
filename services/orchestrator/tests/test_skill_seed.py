@@ -102,6 +102,34 @@ def test_threat_in_text_file_dropped_but_skill_md_kept() -> None:
     )
 
 
+def test_missing_external_asset_dropped_but_others_kept() -> None:
+    """A single missing/corrupt asset drops only itself (audited) — the skill's
+    other files still seed. Locks the per-file isolation the batch fetch must
+    preserve."""
+    good = _version(name="ext", supporting={"scripts/ok.py": b"ok"})
+    # An external entry with no object store configured → fetch raises
+    # SkillAssetUnavailableError → asset_unavailable drop.
+    missing = SkillSupportingFile(
+        content="", size=1, mime="text/plain", storage_key="skill-assets/dead", sha256="dead"
+    )
+    files = {**good.supporting_files, "scripts/gone.bin": missing}
+    jsonable = supporting_files_to_jsonable(files)
+    v = good.model_copy(
+        update={
+            "supporting_files": files,
+            "content_hash": compute_content_hash(good.prompt_fragment, jsonable),
+        }
+    )
+    result = asyncio.run(build_skill_seed_files({"ext": v}, ["ext"]))
+    seed = dict(result.files)
+    assert "skills/ext/scripts/ok.py" in seed  # the good file still seeds
+    assert "skills/ext/scripts/gone.bin" not in seed  # the missing one is dropped
+    assert (
+        SeedDrop(skill_name="ext", reason="asset_unavailable", path="scripts/gone.bin")
+        in result.drops
+    )
+
+
 def test_unactivated_skill_not_seeded() -> None:
     v = _version(name="present")
     # resolved_versions has it, but it's not in the activated list.
