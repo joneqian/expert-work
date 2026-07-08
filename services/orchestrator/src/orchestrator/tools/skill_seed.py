@@ -184,7 +184,7 @@ async def build_skill_seed_files(
         )
         for relpath in sorted(version.supporting_files):
             raw_or_err = settled[relpath]
-            if isinstance(raw_or_err, (ValueError, binascii.Error)):
+            if isinstance(raw_or_err, ValueError | binascii.Error):
                 logger.warning("skill_seed.bad_base64 skill=%s path=%s", name, relpath)
                 drops.append(SeedDrop(skill_name=name, reason="bad_base64", path=relpath))
                 continue
