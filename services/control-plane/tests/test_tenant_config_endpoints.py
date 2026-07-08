@@ -12,7 +12,7 @@ from control_plane.app import create_app
 from control_plane.audit import build_default_audit_logger
 from control_plane.settings import DEFAULT_DEV_TENANT_ID, Settings
 from expert_work.persistence.audit_log import InMemoryAuditLogStore
-from expert_work.protocol import AuditAction, AuditQuery, TenantConfigPatch, TenantPlan
+from expert_work.protocol import AuditAction, AuditQuery, Role, TenantConfigPatch, TenantPlan
 from tests.auth_fixtures import TEST_AUDIENCE, TEST_ISSUER, build_test_jwt_verifier, make_test_jwt
 
 _TENANT = DEFAULT_DEV_TENANT_ID
@@ -44,6 +44,42 @@ async def tc_client(audit_store: InMemoryAuditLogStore) -> AsyncIterator[AsyncCl
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://control-plane.test") as c:
         yield c
+
+
+@pytest.fixture
+async def tc_sysadmin(
+    audit_store: InMemoryAuditLogStore,
+) -> AsyncIterator[tuple[AsyncClient, UUID]]:
+    """Client whose subject holds a platform-scope binding → resolved to a
+    system_admin (``allowed_tenants == "*"``). Yields ``(client, subject_id)``."""
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        tenant_rate_limit_capacity=10_000,
+        tenant_rate_limit_refill_per_sec=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(audit_store),
+        jwt_verifier=build_test_jwt_verifier(),
+        enable_reaper=False,
+    )
+    sys_admin_id = uuid4()
+    await app.state.role_binding_repo.create(
+        subject_type="user",
+        subject_id=sys_admin_id,
+        tenant_id=None,
+        role=Role.SYSTEM_ADMIN,
+        platform_scope=True,
+        granted_by="seed",
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as c:
+        yield c, sys_admin_id
 
 
 def _admin_token(tenant: UUID = _TENANT) -> str:
@@ -214,6 +250,26 @@ async def test_cross_tenant_edit_rejected(tc_client: AsyncClient) -> None:
     )
     assert resp.status_code == 403
     assert resp.json()["detail"]["code"] == "TENANT_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_system_admin_reads_other_tenant_config(
+    tc_sysadmin: tuple[AsyncClient, UUID],
+) -> None:
+    """Regression: a system_admin (``allowed_tenants == "*"``) reading another
+    tenant's config must not 500 in ``_ensure_tenant_match`` — ``UUID in "*"``
+    raised ``TypeError``. The cross-tenant guard now passes on the sentinel; an
+    unseeded target tenant then surfaces the normal 404 (not 500, not 403)."""
+    client, sys_admin_id = tc_sysadmin
+    other_tenant = uuid4()
+    resp = await client.get(
+        f"/v1/tenants/{other_tenant}/config",
+        headers={
+            "Authorization": f"Bearer {make_test_jwt(tenant_id=uuid4(), subject=str(sys_admin_id))}"
+        },
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "TENANT_CONFIG_NOT_FOUND"
 
 
 # ---------------------------------------------------------------------------

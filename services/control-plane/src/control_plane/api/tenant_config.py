@@ -25,6 +25,7 @@ from control_plane.ratelimit import parse_rate_limit_override
 from control_plane.tenancy import TenantConfigNotConfiguredError, TenantConfigService
 from expert_work.persistence.agent_spec import AgentSpecStore
 from expert_work.protocol import (
+    ALL_TENANTS,
     AgentSpecRecord,
     Principal,
     Provider,
@@ -268,6 +269,12 @@ def build_tenant_config_router() -> APIRouter:
 def _ensure_tenant_match(principal: Principal, tenant_id: UUID) -> None:
     """Block cross-tenant edits (same rule as ``/v1/tenants/{t}/quotas``)."""
     if principal.tenant_id == tenant_id:
+        return
+    # A principal authorized for every tenant carries the ``ALL_TENANTS`` ("*")
+    # sentinel — system_admin (Stream N) and certain mTLS service principals.
+    # Guard it before the ``in`` test: ``UUID in "*"`` raises TypeError, not a
+    # membership check (mirrors control_plane.tenant_scope's ``!= "*"`` guard).
+    if principal.allowed_tenants == ALL_TENANTS:
         return
     if tenant_id in principal.allowed_tenants:
         return

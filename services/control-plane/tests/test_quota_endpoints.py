@@ -16,6 +16,7 @@ from expert_work.protocol import (
     AuditAction,
     AuditQuery,
     QuotaDimension,
+    Role,
     TenantQuotaPatch,
 )
 from tests.auth_fixtures import (
@@ -68,9 +69,63 @@ def _viewer_token(tenant: UUID = _TENANT) -> str:
     return make_test_jwt(tenant_id=tenant, subject="viewer-user", roles=("viewer",))
 
 
+@pytest.fixture
+async def quota_sysadmin(
+    audit_store: InMemoryAuditLogStore,
+) -> AsyncIterator[tuple[AsyncClient, UUID]]:
+    """Client whose subject holds a platform-scope binding → resolved to a
+    system_admin (``allowed_tenants == "*"``). Yields ``(client, subject_id)``."""
+    settings = Settings(
+        env="dev",
+        auth_mode="dev",
+        rate_limit_burst=10_000,
+        rate_limit_per_second=10_000.0,
+        oidc_issuer=TEST_ISSUER,
+        oidc_audience=[TEST_AUDIENCE],
+    )
+    app = create_app(
+        settings=settings,
+        audit_logger=build_default_audit_logger(audit_store),
+        jwt_verifier=build_test_jwt_verifier(),
+        enable_reaper=False,
+    )
+    sys_admin_id = uuid4()
+    await app.state.role_binding_repo.create(
+        subject_type="user",
+        subject_id=sys_admin_id,
+        tenant_id=None,
+        role=Role.SYSTEM_ADMIN,
+        platform_scope=True,
+        granted_by="seed",
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://control-plane.test") as c:
+        yield c, sys_admin_id
+
+
 # ---------------------------------------------------------------------------
 # admin endpoints — tenant_quotas
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_system_admin_lists_other_tenant_quotas(
+    quota_sysadmin: tuple[AsyncClient, UUID],
+) -> None:
+    """Regression: a system_admin (``allowed_tenants == "*"``) listing another
+    tenant's quotas must not 500 in ``_ensure_tenant_match`` — ``UUID in "*"``
+    raised ``TypeError``. The cross-tenant guard now passes on the sentinel; an
+    unseeded target tenant returns an empty list (not 500, not 403)."""
+    client, sys_admin_id = quota_sysadmin
+    other_tenant = uuid4()
+    resp = await client.get(
+        f"/v1/tenants/{other_tenant}/quotas",
+        headers={
+            "Authorization": f"Bearer {make_test_jwt(tenant_id=uuid4(), subject=str(sys_admin_id))}"
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"] == []
 
 
 @pytest.mark.asyncio

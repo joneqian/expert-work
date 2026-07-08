@@ -17,7 +17,7 @@ from control_plane.api._authz import require
 from control_plane.audit import emit
 from expert_work.common.observability import current_trace_id_hex
 from expert_work.persistence.quota import TenantQuotaStore
-from expert_work.protocol import AuditAction, Principal, TenantQuotaPatch
+from expert_work.protocol import ALL_TENANTS, AuditAction, Principal, TenantQuotaPatch
 from expert_work.runtime.audit.logger import AuditLogger
 
 logger = logging.getLogger("expert_work.control_plane.api.tenant_quotas")
@@ -130,6 +130,12 @@ def _ensure_tenant_match(principal: Principal, tenant_id: UUID) -> None:
     documents this exact rule for cross-tenant guard.
     """
     if principal.tenant_id == tenant_id:
+        return
+    # A principal authorized for every tenant carries the ``ALL_TENANTS`` ("*")
+    # sentinel — system_admin (Stream N) and certain mTLS service principals.
+    # Guard it before the ``in`` test: ``UUID in "*"`` raises TypeError, not a
+    # membership check (mirrors control_plane.tenant_scope's ``!= "*"`` guard).
+    if principal.allowed_tenants == ALL_TENANTS:
         return
     if tenant_id in principal.allowed_tenants:
         return
