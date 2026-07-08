@@ -110,8 +110,18 @@ export function TenantScopeProvider({ children }: { children: ReactNode }) {
 
   const apiTenantScope = useMemo<undefined | string>(() => {
     if (scope === SCOPE_HOME) return undefined;
+    // A non-home scope ("*" cross-tenant, or a specific tenant UUID) is
+    // system_admin-only: the control-plane 403s any non-home scope for a
+    // non-admin (CROSS_TENANT_FORBIDDEN / TENANT_NOT_ALLOWED). Only put it on
+    // the wire once /v1/me has CONFIRMED the caller is a system_admin —
+    // otherwise a stale scope left in sessionStorage by a prior admin session
+    // races ahead of identity resolution and fires e.g. ?tenant_id=* → a
+    // transient 403. (The demotion effect above corrects the persisted scope a
+    // beat later, which is why a refresh "fixes" it.) A confirmed admin's page
+    // fetches key on apiTenantScope, so they re-fetch when it flips to "*".
+    if (!(identity?.serverResolved && identity.isSystemAdmin)) return undefined;
     return scope;
-  }, [scope]);
+  }, [scope, identity]);
 
   const value = useMemo<TenantScopeContextValue>(
     () => ({ scope, setScope, apiTenantScope }),
