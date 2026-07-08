@@ -71,6 +71,15 @@ class ThreadMetaStore(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def get_many(
+        self, thread_ids: Collection[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, ThreadMeta]:
+        """Batch :meth:`get` — read many threads filtered to ``tenant_id`` in
+        one round trip. Returns a ``{thread_id: ThreadMeta}`` map holding only
+        rows that exist and belong to ``tenant_id`` (missing / cross-tenant ids
+        are absent). Replaces a per-id ``get`` loop (avoids an N+1)."""
+
+    @abc.abstractmethod
     async def list_by_tenant(
         self,
         tenant_id: UUID,

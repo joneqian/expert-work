@@ -58,6 +58,16 @@ class InMemoryThreadMetaStore(ThreadMetaStore):
             return None
         return row
 
+    async def get_many(
+        self, thread_ids: Collection[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, ThreadMeta]:
+        out: dict[UUID, ThreadMeta] = {}
+        for thread_id in thread_ids:
+            row = self._rows.get(thread_id)
+            if row is not None and row.tenant_id == tenant_id:
+                out[thread_id] = row
+        return out
+
     def _filtered(
         self,
         *,
