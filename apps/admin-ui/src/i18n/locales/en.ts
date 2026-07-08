@@ -4658,7 +4658,7 @@ const en: TranslationKeys = {
   },
   coming_soon: {
     title_prefix: "This page is being implemented",
-    body: "Demo only shows the 4 core pages: Agents list / Agent detail (with Playground) / Run+Approval / Settings API Keys.",
+    body: "Only the 4 core pages are available for now: Agents list / Agent detail (with Playground) / Run+Approval / Settings API Keys.",
     other_pages_prefix: "Other pages",
     other_pages_suffix: "will land in Stream H.",
   },

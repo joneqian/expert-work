@@ -147,12 +147,6 @@ export function Sidebar() {
       >
         <BrandGlyph size={20} style={{ color: "var(--ew-color-brand-500)" }} />
         <span>Expert Work</span>
-        <span
-          className="ew-kbd"
-          style={{ marginLeft: "auto", fontSize: 10, padding: "1px 4px" }}
-        >
-          demo
-        </span>
       </div>
       <Menu
         className="ew-sidebar-menu"

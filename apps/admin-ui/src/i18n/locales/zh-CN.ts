@@ -2316,7 +2316,7 @@ const zhCN: TranslationKeys = {
   },
   coming_soon: {
     title_prefix: "此页面在 H.1b 正式实施中",
-    body: "demo 仅演示 4 个核心页面:智能体列表 / 智能体详情(含调试台)/ 运行+审批 / 设置 API 密钥。",
+    body: "目前仅提供 4 个核心页面:智能体列表 / 智能体详情(含调试台)/ 运行+审批 / 设置 API 密钥。",
     other_pages_prefix: "其他页面",
     other_pages_suffix: "将在 Stream H 全面落地。",
   },
