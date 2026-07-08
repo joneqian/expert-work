@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -66,6 +67,13 @@ class InMemoryMcpConnectorCatalogStore(McpConnectorCatalogStore):
     async def get_by_id(self, catalog_id: UUID) -> McpConnectorCatalogRecord | None:
         async with self._lock:
             return self._rows.get(catalog_id)
+
+    async def get_by_ids(
+        self, catalog_ids: Sequence[UUID]
+    ) -> dict[UUID, McpConnectorCatalogRecord]:
+        wanted = set(catalog_ids)
+        async with self._lock:
+            return {cid: self._rows[cid] for cid in wanted if cid in self._rows}
 
     async def get_by_name(self, name: str) -> McpConnectorCatalogRecord | None:
         async with self._lock:

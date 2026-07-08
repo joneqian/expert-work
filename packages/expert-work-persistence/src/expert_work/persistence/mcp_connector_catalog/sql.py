@@ -6,6 +6,7 @@ inside ``bypass_rls_session()`` (parity with :class:`SqlPlatformSecretStore`).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -113,6 +114,17 @@ class SqlMcpConnectorCatalogStore(McpConnectorCatalogStore):
         async with self._sf() as session:
             row = await session.get(McpConnectorCatalogRow, catalog_id)
         return _row_to_record(row) if row is not None else None
+
+    async def get_by_ids(
+        self, catalog_ids: Sequence[UUID]
+    ) -> dict[UUID, McpConnectorCatalogRecord]:
+        ids = list(dict.fromkeys(catalog_ids))
+        if not ids:
+            return {}
+        stmt = select(McpConnectorCatalogRow).where(McpConnectorCatalogRow.id.in_(ids))
+        async with self._sf() as session:
+            rows = (await session.execute(stmt)).scalars().all()
+        return {row.id: _row_to_record(row) for row in rows}
 
     async def get_by_name(self, name: str) -> McpConnectorCatalogRecord | None:
         stmt = select(McpConnectorCatalogRow).where(McpConnectorCatalogRow.name == name)

@@ -239,3 +239,20 @@ async def test_platform_bearer_token_ref_round_trips() -> None:
     )
     assert updated.bearer_token_ref is not None
     assert updated.bearer_token_ref.endswith("token-v2")
+
+
+@pytest.mark.asyncio
+async def test_get_by_ids_batches_and_skips_missing() -> None:
+    store = InMemoryMcpConnectorCatalogStore()
+    a = await _make(store, name="a")
+    b = await _make(store, name="b")
+    missing = uuid4()
+    got = await store.get_by_ids([a.id, b.id, missing])
+    assert set(got) == {a.id, b.id}  # missing id absent
+    assert got[a.id].name == "a"
+
+
+@pytest.mark.asyncio
+async def test_get_by_ids_empty_input_returns_empty() -> None:
+    store = InMemoryMcpConnectorCatalogStore()
+    assert await store.get_by_ids([]) == {}
