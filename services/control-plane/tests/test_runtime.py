@@ -32,7 +32,7 @@ from expert_work.runtime.storage import InMemoryObjectStore
 from expert_work.runtime.stream_bridge import InMemoryStreamBridge
 from expert_work.testing import InMemorySecretStore
 from orchestrator.llm import FakeEmbedder
-from orchestrator.multimodal import ObjectStoreImageResolver
+from orchestrator.multimodal import CachingImageResolver, ObjectStoreImageResolver
 from orchestrator.tools import KnowledgeRetriever
 
 _MINIMAL_MANIFEST: dict[str, Any] = {
@@ -145,7 +145,10 @@ def test_make_knowledge_retriever_builds_with_embedder() -> None:
 
 def test_make_image_resolver_builds_object_store_resolver() -> None:
     resolver = make_image_resolver(InMemoryObjectStore())
-    assert isinstance(resolver, ObjectStoreImageResolver)
+    # Wrapped in the bounded-LRU caching layer over the object-store resolver
+    # (stops every LLM turn re-fetching the same image).
+    assert isinstance(resolver, CachingImageResolver)
+    assert isinstance(resolver.inner, ObjectStoreImageResolver)
 
 
 @pytest.mark.asyncio
