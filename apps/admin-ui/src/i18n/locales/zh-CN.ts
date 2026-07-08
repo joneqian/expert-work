@@ -68,6 +68,7 @@ const zhCN: TranslationKeys = {
     chargeback: "成本分摊",
     rate_card: "模型定价",
     observability: "可观测性",
+    keycloak: "Keycloak",
     quality: "质量",
   },
   quality_page: {
@@ -117,6 +118,16 @@ const zhCN: TranslationKeys = {
     grafana_desc: "指标 + 日志大盘(SLO、吞吐、错误)。",
     tempo_name: "Tempo",
     tempo_desc: "分布式 trace —— 跨服务基础设施 span。",
+  },
+  keycloak_page: {
+    page_title: "Keycloak",
+    subtitle: "平台运维进入自托管 Keycloak 管理控制台(IAM)的入口。",
+    not_admin_title: "仅平台运维可见",
+    not_admin_body: "Keycloak 管理全部租户的用户、无 per-tenant 隔离,只有平台管理员能打开。",
+    console_name: "Keycloak 管理控制台",
+    console_desc: "管理 realm 用户、重置成员/首位管理员密码(realm expert-work → Users → Credentials)。",
+    open: "打开",
+    unconfigured: "未配置({{env}})",
   },
   login: {
     title: "Expert Work Admin",

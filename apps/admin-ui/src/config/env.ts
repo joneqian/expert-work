@@ -51,3 +51,13 @@ export function readTempoBaseUrl(): string | undefined {
   const raw = readEnv("VITE_TEMPO_BASE_URL");
   return raw === undefined ? undefined : raw.replace(/\/+$/, "");
 }
+
+/** Keycloak base URL — the self-hosted IAM admin-console origin (e.g.
+ *  ``http://localhost:8080``). The platform Keycloak page external-links to
+ *  ``${base}/admin/`` so operators can manage realm users / set member +
+ *  first-admin passwords. Unset → the page shows a "configure" hint naming the
+ *  env var rather than a dead link. */
+export function readKeycloakBaseUrl(): string | undefined {
+  const raw = readEnv("VITE_KEYCLOAK_BASE_URL");
+  return raw === undefined ? undefined : raw.replace(/\/+$/, "");
+}

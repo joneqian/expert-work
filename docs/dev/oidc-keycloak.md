@@ -74,6 +74,10 @@ VITE_OIDC_CLIENT_ID=expert-work-admin-ui
 # unset. If your tenant has a separate API audience claim, set it here.
 VITE_OIDC_AUDIENCE=
 VITE_OIDC_SCOPES=openid profile email
+# Optional — the Platform nav "Keycloak" quick-link. Set to the
+# browser-reachable Keycloak origin; the page's Open button targets
+# ${VITE_KEYCLOAK_BASE_URL}/admin/. Unset → the page shows a "configure" hint.
+VITE_KEYCLOAK_BASE_URL=http://localhost:8080
 ```
 
 Then:
