@@ -43,6 +43,7 @@ PgBouncer compatibility:
 
 from __future__ import annotations
 
+import logging
 from contextvars import ContextVar
 from typing import Final
 from uuid import UUID
@@ -51,6 +52,8 @@ from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Session, SessionTransaction
+
+logger = logging.getLogger("expert_work.persistence.rls")
 
 __all__ = [
     "RLS_GUC_NAME",
@@ -123,6 +126,12 @@ def _rls_after_begin(
     if bypass_rls_var.get():
         return
     tenant_id = current_tenant_id_var.get()
+    if tenant_id is None:
+        # Non-bypass session with no tenant context: under RLS enforcement this
+        # fail-closes (zero rows). Phase-1 Detect signal — surfaces every path
+        # that is neither tenant-scoped nor explicit-bypass so it can be fixed
+        # BEFORE enforcement lands. No behavior change here.
+        logger.warning("rls.would_fail_closed")
     if tenant_id is not None:
         _emit_set_config(connection, RLS_GUC_NAME, str(tenant_id))
     user_id = current_user_id_var.get()
